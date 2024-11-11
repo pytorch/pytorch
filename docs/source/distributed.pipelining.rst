@@ -414,7 +414,7 @@ You can implement your own pipeline schedule by extending one of the following t
 ``PipelineScheduleMulti`` is for schedules that assigns multiple stages per rank.
 
 For example, ``ScheduleGPipe`` and ``Schedule1F1B`` are subclasses of ``PipelineScheduleSingle``.
-Whereas, ``ScheduleFlexibleInterleaved1F1B``, ``ScheduleInterleaved1F1B`` and ``ScheduleLoopedBFS``
+Whereas, ``ScheduleInterleaved1F1B``, ``ScheduleLoopedBFS``, and ``ScheduleInterleavedZeroBubble``
 are subclasses of ``PipelineScheduleMulti``.
 
 
@@ -482,8 +482,6 @@ Pipeline Schedules
 .. autoclass:: ScheduleGPipe
 
 .. autoclass:: Schedule1F1B
-
-.. autoclass:: ScheduleFlexibleInterleaved1F1B
 
 .. autoclass:: ScheduleInterleaved1F1B
 

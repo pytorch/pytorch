@@ -189,8 +189,10 @@ manual_torch_name_rule_map = {
     "torch.sym_min": TorchInGraphFunctionVariable,
     "torch.sym_sqrt": TorchInGraphFunctionVariable,
     "torch.sym_ite": TorchInGraphFunctionVariable,
+    "torch.sym_sum": TorchInGraphFunctionVariable,
     "torch.Tensor#_make_wrapper_subclass": SkipFunctionVariable,
     "torch.Tensor#__init__": SkipFunctionVariable,
+    "torch.Tensor#split": TorchInGraphFunctionVariable,
     "torch.cuda.set_device": SkipFunctionVariable,
     "torch.cuda.current_device": TorchInGraphFunctionVariable,
     "torch._C.autocast_decrement_nesting": SkipFunctionVariable,
@@ -420,6 +422,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._cpu._is_avx512_vnni_supported",
         "torch._C._cpu._is_avx512_bf16_supported",
         "torch._C._cpu._is_amx_tile_supported",
+        "torch._C._cpu._is_amx_fp16_supported",
         "torch._C._cpu._init_amx",
         "torch._C._cpu._is_arm_sve_supported",
         "torch._C._crash_if_aten_asan",
@@ -2339,6 +2342,8 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch._register_device_module",
         "torch._running_with_deploy",
         "torch._utils._dummy_type",
+        "torch._utils._flatten_dense_tensors",
+        "torch._utils._unflatten_dense_tensors",
         "torch._weights_only_unpickler._get_allowed_globals",
         "torch._weights_only_unpickler.load",
         "torch.align_tensors",
@@ -2445,6 +2450,7 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._cpu._is_avx512_vnni_supported",
         "torch._C._cpu._is_avx512_bf16_supported",
         "torch._C._cpu._is_amx_tile_supported",
+        "torch._C._cpu._is_amx_fp16_supported",
         "torch.cpu._init_amx",
         "torch._C._cpu._is_arm_sve_supported",
         "torch.cpu.current_device",
@@ -3023,16 +3029,35 @@ def _polyfilled_function_ids() -> Set[int]:
 
 @FunctionIdSet
 def _numpy_function_ids() -> Dict[int, str]:
+    unsupported_funcs = {
+        "seed",
+        "ranf",
+        "get_bit_generator",
+        "RandomState",
+        "set_bit_generator",
+        "sample",
+    }
+
+    def is_supported(k, v, mod):
+        if not callable(v):
+            return False
+        if not getattr(v, "__module__", None):
+            return True
+        if v.__module__ == mod.__name__:
+            return True
+        if (
+            v.__module__ == "numpy.random.mtrand"
+            and mod.__name__ == "numpy.random"
+            and k not in unsupported_funcs
+        ):
+            return True
+        return False
+
     rv = {}
     for mod in NP_SUPPORTED_MODULES:
-        rv.update(
-            {
-                id(v): f"{mod.__name__}.{k}"
-                for k, v in mod.__dict__.items()
-                if callable(v)
-                and (getattr(v, "__module__", None) or mod.__name__) == mod.__name__
-            }
-        )
+        for k, v in mod.__dict__.items():
+            if is_supported(k, v, mod):
+                rv[id(v)] = f"{mod.__name__}.{k}"
     return rv
 
 
@@ -3159,7 +3184,6 @@ THIRDPARTY_SKIPLIST = (
     "hypothesis",
     "networkx",
     "numpy",
-    "omegaconf",
     "onnx",
     "onnxruntime",
     "onnx_tf",
@@ -3211,6 +3235,7 @@ LEGACY_MOD_INLINELIST = {
     "torch._higher_order_ops.while_loop",
     "torch._higher_order_ops.associative_scan",
     "torch._higher_order_ops.scan",
+    "torch._higher_order_ops.utils",
     "torch.nn.attention.flex_attention",
     "torch.ao.quantization.pt2e.export_utils",
     "torch.ao.quantization.pt2e.qat_utils",
@@ -3251,6 +3276,7 @@ MOD_INLINELIST = [
     "torch._functorch.functional_call",
     "torch._functorch.vmap",
     "torch._higher_order_ops.associative_scan",
+    "torch._higher_order_ops.invoke_subgraph",
     "torch._higher_order_ops.scan",
     "torch._higher_order_ops.strict_mode",
     "torch._higher_order_ops.while_loop",

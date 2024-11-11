@@ -9,6 +9,7 @@ import ast
 import sys
 from typing import Any, Dict, List, Set, Tuple  # type: ignore[attr-defined]
 
+from tools.flight_recorder.components.fr_logger import FlightRecorderLogger
 from tools.flight_recorder.components.types import (
     Collective,
     Database,
@@ -33,10 +34,14 @@ from tools.flight_recorder.components.utils import (
 )
 
 
+# Set up logging
+logger: FlightRecorderLogger = FlightRecorderLogger()
+
+
 try:
     from tabulate import tabulate
 except ModuleNotFoundError:
-    print("tabulate is not installed. Proceeding without it.")
+    logger.warning("tabulate is not installed. Proceeding without it.")
 
     # Define a no-op tabulate function
     def tabulate(data: Any, headers: Any = None) -> Any:  # type: ignore[misc]
@@ -311,13 +316,20 @@ def build_collectives(
             # case one: not every rank join the collective or in the flight recorder.
             if (candidate_ranks | found_ranks) != expected_ranks:
                 mismatch[pg_name] += 1
-                print(
-                    f"Not all ranks joining collective {collective_seq_id} at entry {record_id}",
-                    f" for group {pg_desc} collective {profiling_name} ",
-                    f"Missing ranks are {expected_ranks - (candidate_ranks | found_ranks)} ",
-                    f"{input_sizes} {output_sizes} {len(expected_ranks)} {collective_state} ",
-                    f"\nCollective stack traces: \n{collective_frames}",
+                logger.info(
+                    "Not all ranks joining collective %s at entry %s",
+                    collective_seq_id,
+                    record_id,
                 )
+                logger.info("group info: %s", pg_desc)
+                logger.info("collective: %s", profiling_name)
+                missing_ranks = expected_ranks - (candidate_ranks | found_ranks)
+                logger.info("missing ranks: %s", missing_ranks)
+                logger.info("input sizes: %s", input_sizes)
+                logger.info("output sizes: %s", output_sizes)
+                logger.info("expected ranks: %d", len(expected_ranks))
+                logger.info("collective state: %s", collective_state)
+                logger.info("collective stack trace: \n %s", collective_frames)
                 candidate_ranks.update(found_ranks)
                 candidate_idx.update(found_idx)
                 found_idx.clear()
@@ -338,13 +350,18 @@ def build_collectives(
                     if fail_check:
                         # When we see errors in all_to_all, it's hard to tell which rank is the source of the error.
                         mismatch[pg_name] += 1
-                        print(
-                            f"Input/output mismatch in the collective {collective_seq_id} ",
-                            f"at entry {record_id} for group {pg_desc} collective {profiling_name} ",
-                            f"input_numel {input_numel} output_numel {output_numel} ",
-                            f"{input_sizes} {output_sizes} {len(expected_ranks)} {collective_state} ",
-                            f"\nCollective stack traces: \n{collective_frames}",
+                        logger.info(
+                            "Input/output mismatch in the collective %s at entry %s",
+                            collective_seq_id,
+                            record_id,
                         )
+                        logger.info("group info: %s", pg_desc)
+                        logger.info("collective: %s", profiling_name)
+                        logger.info("input sizes: %s", input_sizes)
+                        logger.info("output sizes: %s", output_sizes)
+                        logger.info("expected ranks: %d", len(expected_ranks))
+                        logger.info("collective state: %s", collective_state)
+                        logger.info("collective stack trace: \n%s", collective_frames)
                         candidate_ranks.update(found_ranks)
                         candidate_idx.update(found_idx)
                         found_idx.clear()
@@ -366,13 +383,17 @@ def build_collectives(
                 error_msg = ", ".join(
                     f"Culprit rank {error[0]}; {str(error[1])}" for error in errors
                 )
-                print(
-                    f"Collective {collective_seq_id} at entry {record_id} errors",
-                    f" for group {pg_desc} collective {profiling_name} ",
-                    f"{input_sizes} {output_sizes} {len(expected_ranks)} {collective_state} ",
-                    f"\nFound errors: {error_msg}.\n",
-                    f"\nCollective stack traces: \n{collective_frames} ",
+                logger.info(
+                    "Collective %s at entry %s errors", collective_seq_id, record_id
                 )
+                logger.info("group info: %s", pg_desc)
+                logger.info("collective: %s", profiling_name)
+                logger.info("input sizes: %s", input_sizes)
+                logger.info("output sizes: %s", output_sizes)
+                logger.info("expected ranks: %d", len(expected_ranks))
+                logger.info("collective state: %s", collective_state)
+                logger.info("error message: %s", error_msg)
+                logger.info("collective stack trace: \n%s", collective_frames)
                 candidate_ranks.update(found_ranks)
                 candidate_idx.update(found_idx)
                 found_idx.clear()
@@ -402,7 +423,7 @@ def build_collectives(
             #  -> since its not a complete collective, no entry goes into collectives but we still record a nccl call
             #     TODO should there be a way to mark 'mismatches'?
             else:
-                print("appending a non-matching collective")
+                logger.debug("appending a non-matching collective")
                 # TODO: figure out a better for mismatch.
                 # Also, shall we add seq Id as well?
                 for r in candidate_ranks:
@@ -418,7 +439,9 @@ def build_collectives(
                     )
 
         if mismatch[pg_name] > MISMATCH_TAIL:
-            print(f"Too many mismatches for process_group {pg_name}:{desc}, aborting")
+            logger.error(
+                "Too many mismatches for process_group %s: %s aborting", pg_name, desc
+            )
             sys.exit(-1)
 
     return tracebacks, collectives, nccl_calls
@@ -445,23 +468,27 @@ def build_db(
     groups, _groups, memberships, _memberships, _pg_guids = build_groups_memberships(
         pg_config
     )
-    print("built groups, memberships")
-
-    check_no_missing_dump_files(entries, memberships)
+    logger.debug("built groups, memberships")
 
     if args.just_print_entries:
         just_print_entries(entries, _groups, _memberships, _pg_guids, args)
         sys.exit(0)
 
+    check_no_missing_dump_files(entries, memberships)
+
     tracebacks, collectives, nccl_calls = build_collectives(
         entries, _groups, _memberships, _pg_guids, version
     )
-    print("built collectives, nccl_calls")
+    logger.debug("built collectives, nccl_calls")
     if args.verbose:
-        print("Groups\n", tabulate(groups, headers=Group._fields))
-        print("Memberships\n", tabulate(memberships, headers=Membership._fields))
-        print("Collectives\n", tabulate(collectives, headers=Collective._fields))
-        print("NCCLCalls\n", tabulate(nccl_calls, headers=NCCLCall._fields))
+        logger.debug("Groups")
+        logger.debug(tabulate(groups, headers=Group._fields))
+        logger.debug("Memberships")
+        logger.debug(tabulate(memberships, headers=Membership._fields))
+        logger.debug("Collectives")
+        logger.debug(tabulate(collectives, headers=Collective._fields))
+        logger.debug("NCCLCalls")
+        logger.debug(tabulate(nccl_calls, headers=NCCLCall._fields))
     db = Database(
         tracebacks=tracebacks,
         collectives=collectives,
