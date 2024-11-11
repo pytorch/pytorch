@@ -79,33 +79,34 @@ def rocm_get_per_process_gpu_info(handle: Any) -> list[dict[str, Any]]:
         per_process_info.append(info)
     return per_process_info
 
-
-if __name__ == "__main__":
-    nvml_handle = None
-    amdsmi_handle = None
-
+def get_nvml_handle():
     try:
-        import pynvml  # type: ignore[import]
-
+        import pynvml # type: ignore[import]
         try:
             pynvml.nvmlInit()
-            nvml_handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+            handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+            return handle
         except pynvml.NVMLError:
             pass
     except ModuleNotFoundError:
-        # no pynvml avaliable, probably because not cuda
         pass
+
+def get_amdsmi_handle():
     try:
         import amdsmi  # type: ignore[import]
-
         try:
             amdsmi.amdsmi_init()
-            amdsmi_handle = amdsmi.amdsmi_get_processor_handles()[0]
+            handle = amdsmi.amdsmi_get_processor_handles()[0]
+            return handle
         except amdsmi.AmdSmiException:
             pass
     except ModuleNotFoundError:
         # no amdsmi is available
         pass
+
+if __name__ == "__main__":
+    nvml_handle = get_nvml_handle()
+    amdsmi_handle = get_amdsmi_handle()
 
     kill_now = False
 
