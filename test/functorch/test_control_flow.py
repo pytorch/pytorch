@@ -1273,16 +1273,1113 @@ def forward(self, pred_1, x_1):
         fake_outs = fwbw(_fake_map, f, x, y)
         self.assertEqual(true_outs, fake_outs)
 
-    def test_scan_y_less_ndim_then_dim(self):
+
+class AssociativeScanModels:
+    @staticmethod
+    def get_scan_fct(compile_mode, combine_mode):
+        # Compile the associative_scan according to the provided compile_mode
+        if compile_mode != "fake":
+            assoc_scan_comp = compile_mode_helper(associative_scan, compile_mode)
+
+            def scan_fct(combine_fn, xs, dim, reverse):
+                return assoc_scan_comp(combine_fn, xs, dim, reverse, combine_mode)
+
+        else:
+            scan_fct = _fake_associative_scan
+        return scan_fct
+
+    class CombineFn(torch.nn.Module):
+        def __init__(self, combine_fn, dim, reverse, combine_mode, compile_mode):
+            super().__init__()
+
+            self.scan_fct = AssociativeScanModels.get_scan_fct(
+                compile_mode, combine_mode
+            )
+            self.combine_fn = combine_fn
+            self.dim = dim
+            self.reverse = reverse
+
+        def forward(self, inputs):
+            results = self.scan_fct(self.combine_fn, inputs, self.dim, self.reverse)
+            return results
+
+    class Simple(torch.nn.Module):
+        def __init__(self, dim, reverse, combine_mode, compile_mode):
+            super().__init__()
+
+            kwargs = {
+                "dim": dim,
+                "reverse": reverse,
+                "combine_mode": combine_mode,
+                "compile_mode": compile_mode,
+            }
+            self.combine_fns = [
+                AssociativeScanModels.CombineFn(
+                    get_scan_combine_fn("add", True), **kwargs
+                ),
+                AssociativeScanModels.CombineFn(
+                    get_scan_combine_fn("mul", True), **kwargs
+                ),
+            ]
+
+        def forward(self, inputs):
+            results = []
+            for combine_fn in self.combine_fns:
+                results.append(combine_fn(inputs))
+            return results
+
+    class ChainFn(torch.nn.Module):
+        def __init__(self, combine_fn, dim, reverse, combine_mode, compile_mode):
+            super().__init__()
+
+            chain_len = len(combine_fn)
+            kwargs = {
+                "combine_fn": combine_fn,
+                "dim": dim,
+                "reverse": reverse,
+                "combine_mode": combine_mode,
+            }
+
+            # Prepare the kwargs as a list.
+            self.nested_tuple = []
+            for ind in range(chain_len):
+                kwargs_el = {}
+                for key, val in kwargs.items():
+                    # Check if val is a list and if it has the same length as combine_fn
+                    # If so, then use the individual elements.
+                    # If not, duplicate the first element.
+                    if type(val) == list and len(val) == chain_len:
+                        kwargs_el[key] = val[ind]
+                    else:
+                        kwargs_el[key] = val
+
+                scan_fct = AssociativeScanModels.get_scan_fct(
+                    compile_mode, kwargs_el["combine_mode"]
+                )
+                combine_fn = kwargs_el["combine_fn"]
+                del kwargs_el["combine_fn"]
+                del kwargs_el["combine_mode"]
+                self.nested_tuple.append((combine_fn, scan_fct, kwargs_el))
+
+        def forward(self, inputs):
+            results = inputs
+            for combine_fn, scan_fct, kwargs in self.nested_tuple:
+                results = combine_fn(scan_fct, results, **kwargs)
+            return results
+
+    class NestedFn(torch.nn.Module):
+        def __init__(self, combine_fn):
+            super().__init__()
+            self.combine_fn = combine_fn
+
+        def forward(self, inputs):
+            results = self.combine_fn(inputs)
+            return results
+
+
+@unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
+@skipIfNoDynamoSupport
+class AssociativeScanTests(TestCase):
+    def setUp(self):
+        torch._dynamo.reset()
+        super().setUp()
+
+    def _prepare_fake_kwargs(self, original_kwargs):
+        kwargs_fake = original_kwargs.copy()
+        kwargs_fake["compile_mode"] = "fake"
+        return kwargs_fake
+
+    def _run_test(self, model, model_fake, inputs):
+        result = model(inputs)
+        result_exp = model_fake(inputs)
+        self.assertEqual(result, result_exp)
+
+        return result, result_exp
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    @parametrize("reverse", [False, True])
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("combine_mode", ["pointwise", "generic"])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    # Skipping the combination of combine_mode=pointwise and device=cpu
+    # as the current implementation of pointwise does only support CUDA device
+    @decorateIf(
+        unittest.skip,
+        lambda params: (
+            params["combine_mode"] == "pointwise"
+            and (params["device"] == torch.device("cpu") or torch.version.hip)
+        ),
+    )
+    # TODO: compile_mode "compile_dynamic_shape" is not working
+    # because of not yet implemented lifted arguments; skipping
+    @decorateIf(
+        unittest.skip,
+        lambda params: (params["compile_mode"] == "compile_dynamic_shape"),
+    )
+    def test_associative_scan_compile(
+        self, combine_mode, reverse, compile_mode, device
+    ):
+        x = torch.randn(3, 10, 2, device=device)
+        kwargs = {
+            "dim": 0,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_mode": combine_mode,
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        result, _ = self._run_test(
+            model=AssociativeScanModels.Simple(**kwargs),
+            model_fake=AssociativeScanModels.Simple(**kwargs_fake),
+            inputs=x,
+        )
+
+        if not reverse:
+            results_torch = []
+            for op_pt in [torch.cumsum, torch.cumprod]:
+                results_torch.append(op_pt(x, 0))
+            self.assertEqual(result, results_torch)
+
+        # Jax Examples
+        x = torch.arange(0, 4, device=device)
+        kwargs = {
+            "dim": 0,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": get_scan_combine_fn("add", True),
+            "combine_mode": combine_mode,
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        result, _ = self._run_test(
+            model=AssociativeScanModels.CombineFn(**kwargs),
+            model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
+            inputs=x,
+        )
+
+        if not reverse:
+            results_torch = torch.tensor([0.0, 1.0, 3.0, 6.0], dtype=torch.int64)
+        else:
+            results_torch = torch.tensor([6.0, 6.0, 5.0, 3.0], dtype=torch.int64)
+
+        self.assertEqual(result, results_torch)
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    @parametrize("reverse", [False, True])
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("combine_mode", ["pointwise", "generic"])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    # Skipping the combination of combine_mode=pointwise and device=cpu
+    # as the current implementation of pointwise does only support CUDA device
+    @decorateIf(
+        unittest.skip,
+        lambda params: (
+            params["combine_mode"] == "pointwise"
+            and (params["device"] == torch.device("cpu") or torch.version.hip)
+        ),
+    )
+    # TODO: compile_mode "compile_dynamic_shape" is not working
+    # because of not yet implemented lifted arguments; skipping
+    @decorateIf(
+        unittest.skip,
+        lambda params: (params["compile_mode"] == "compile_dynamic_shape"),
+    )
+    def test_associative_scan_dim(self, combine_mode, compile_mode, reverse, device):
+        import random
+
+        random.seed(1234)
+
+        num_dims = [random.randint(2, 5) for _ in range(4)]
+        for num_dim in num_dims:
+            # To avoid triggering automatic dynamic shape
+            torch._dynamo.reset()
+            shapes = [random.randint(1, 9) for _ in range(num_dim)]
+            rnd_scan_dim = random.randint(0, num_dim - 1)
+            x = torch.randn(*shapes, device=device)
+
+            kwargs = {
+                "dim": rnd_scan_dim,
+                "reverse": reverse,
+                "compile_mode": compile_mode,
+                "combine_mode": combine_mode,
+            }
+            kwargs_fake = self._prepare_fake_kwargs(kwargs)
+            result, _ = self._run_test(
+                model=AssociativeScanModels.Simple(**kwargs),
+                model_fake=AssociativeScanModels.Simple(**kwargs_fake),
+                inputs=x,
+            )
+
+            if not reverse:
+                results_torch = []
+                for op_pt in [torch.cumsum, torch.cumprod]:
+                    results_torch.append(op_pt(x, 0))
+                self.assertEqual(result, results_torch)
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    # This test is expected to fail, as there may be an issue with the underlying triton implementation
+    # See https://github.com/pytorch/pytorch/issues/137943
+    @unittest.expectedFailure
+    def test_associative_scan_dim_shape_failure(self):
+        num_dims = [2]
+        for num_dim in num_dims:
+            shapes = [9 for _ in range(num_dim)]
+            rnd_scan_dim = 0
+            x = torch.randn(*shapes, device=torch.device("cuda"))
+
+            kwargs = {
+                "dim": rnd_scan_dim,
+                "reverse": True,
+                "compile_mode": "none",
+                "combine_mode": "generic",
+            }
+            kwargs_fake = self._prepare_fake_kwargs(kwargs)
+            self._run_test(
+                model=AssociativeScanModels.Simple(**kwargs),
+                model_fake=AssociativeScanModels.Simple(**kwargs_fake),
+                inputs=x,
+            )
+
+    @skipIfRocm(msg="Unsupported on ROCM yet")
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("combine_mode", ["pointwise", "generic"])
+    @parametrize("reverse", [False, True])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    # Skipping the combination of combine_mode=pointwise and device=cpu
+    # as the current implementation of pointwise does only support CUDA device
+    @decorateIf(
+        unittest.skip,
+        lambda params: (
+            params["combine_mode"] == "pointwise"
+            and (params["device"] == torch.device("cpu") or torch.version.hip)
+        ),
+    )
+    # TODO: compile_mode "compile_dynamic_shape" is not working
+    # because of not yet implemented lifted arguments; skipping
+    @decorateIf(
+        unittest.skip,
+        lambda params: (params["compile_mode"] == "compile_dynamic_shape"),
+    )
+    def test_associative_scan_tuple(self, compile_mode, combine_mode, reverse, device):
+        x = torch.randn(3, 2, 2, device=device)
+        y = torch.randn(3, 2, 2, device=device)
+        inp = (x, y)
+
+        kwargs = {
+            "dim": 0,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": get_scan_combine_fn("tuple_fct", True),
+            "combine_mode": combine_mode,
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        self._run_test(
+            model=AssociativeScanModels.CombineFn(**kwargs),
+            model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
+            inputs=inp,
+        )
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("combine_mode", ["pointwise", "generic"])
+    @parametrize("reverse", [False, True])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    def test_associative_scan_expand_in_combine_fn(
+        self, compile_mode, combine_mode, reverse, device
+    ):
+        x = torch.randn(3, 2, 2, device=device)
+
+        def combine_fn(x, y):
+            return x * torch.sum(y, -1).expand(x.shape)
+
+        kwargs = {
+            "dim": 0,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": combine_fn,
+            "combine_mode": "generic",
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        self._run_test(
+            model=AssociativeScanModels.CombineFn(**kwargs),
+            model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
+            inputs=x,
+        )
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("reverse", [False, True])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    def test_associative_scan_non_contiguous_tensor(
+        self, compile_mode, reverse, device
+    ):
+        x = torch.arange(30, device=device).view(10, 3).t()
+        assert not x.is_contiguous()
+
+        kwargs = {
+            "dim": 0,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": get_scan_combine_fn("add", True),
+            "combine_mode": "generic",
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        self._run_test(
+            model=AssociativeScanModels.CombineFn(**kwargs),
+            model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
+            inputs=x,
+        )
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("combine_mode", ["pointwise", "generic"])
+    @parametrize("reverse", [False, True])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    # Skipping the combination of combine_mode=pointwise and device=cpu
+    # as the current implementation of pointwise does only support CUDA device
+    @decorateIf(
+        unittest.skip,
+        lambda params: (
+            params["combine_mode"] == "pointwise"
+            and (params["device"] == torch.device("cpu") or torch.version.hip)
+        ),
+    )
+    # TODO: compile_mode "compile_dynamic_shape" is not working
+    # because of not yet implemented lifted arguments; skipping
+    @decorateIf(
+        unittest.skip,
+        lambda params: (params["compile_mode"] == "compile_dynamic_shape"),
+    )
+    def test_associative_scan_complex_pytree(
+        self, compile_mode, combine_mode, reverse, device
+    ):
+        x = torch.randn(3, 2, 2, device=device)
+        y = torch.randn(3, 2, 2, device=device)
+        z = torch.randn(3, 2, 2, device=device)
+        inp = {"i": x, "j": ([y], [{"o": z}])}
+
+        kwargs = {
+            "dim": 0,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": get_scan_combine_fn("complex_pointwise", True),
+            "combine_mode": combine_mode,
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        self._run_test(
+            model=AssociativeScanModels.CombineFn(**kwargs),
+            model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
+            inputs=inp,
+        )
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    @parametrize("combine_mode", ["pointwise", "generic"])
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("reverse", [False, True])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    # Skipping the combination of combine_mode=pointwise and device=cpu
+    # as the current implementation of pointwise does only support CUDA device
+    @decorateIf(
+        unittest.skip,
+        lambda params: (
+            params["combine_mode"] == "pointwise"
+            and (params["device"] == torch.device("cpu") or torch.version.hip)
+        ),
+    )
+    # TODO: compile_mode "compile_dynamic_shape" is not working
+    # because of not yet implemented lifted arguments; skipping
+    @decorateIf(
+        unittest.skip,
+        lambda params: (params["compile_mode"] == "compile_dynamic_shape"),
+    )
+    def test_associative_scan_downstream_scan_matmul(
+        self, combine_mode, compile_mode, reverse, device
+    ):
+        def first_chain_fct(scan_fct, inp, **kwargs):
+            o = scan_fct(get_scan_combine_fn("add", True), inp, **kwargs)
+            return o
+
+        def second_chain_fct(scan_fct, inp, **kwargs):
+            W = torch.ones(2, 5, device=device)
+            return inp @ W
+
+        inp = torch.randn(3, 10, 2, device=device)
+        kwargs = {
+            "dim": 1,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": [first_chain_fct, second_chain_fct],
+            "combine_mode": combine_mode,
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        self._run_test(
+            model=AssociativeScanModels.ChainFn(**kwargs),
+            model_fake=AssociativeScanModels.ChainFn(**kwargs_fake),
+            inputs=inp,
+        )
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    @parametrize("combine_mode", ["pointwise", "generic"])
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("reverse", [False, True])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    # Skipping the combination of combine_mode=pointwise and device=cpu
+    # as the current implementation of pointwise does only support CUDA device
+    @decorateIf(
+        unittest.skip,
+        lambda params: (
+            params["combine_mode"] == "pointwise"
+            and (params["device"] == torch.device("cpu") or torch.version.hip)
+        ),
+    )
+    # TODO: compile_mode "compile_dynamic_shape" is not working
+    # because of not yet implemented lifted arguments; skipping
+    @decorateIf(
+        unittest.skip,
+        lambda params: (params["compile_mode"] == "compile_dynamic_shape"),
+    )
+    def test_associative_scan_downstream_scan_scan(
+        self, combine_mode, compile_mode, reverse, device
+    ):
+        def first_chain_fct(scan_fct, inp, **kwargs):
+            o1 = scan_fct(get_scan_combine_fn("add", True), inp, **kwargs)
+            return o1
+
+        def second_chain_fct(scan_fct, inp, **kwargs):
+            o2 = scan_fct(get_scan_combine_fn("add", True), inp, **kwargs)
+            return o2
+
+        inp = torch.randn(3, 10, 2, device=device)
+
+        kwargs = {
+            "dim": 1,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": [first_chain_fct, second_chain_fct],
+            "combine_mode": combine_mode,
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        self._run_test(
+            model=AssociativeScanModels.ChainFn(**kwargs),
+            model_fake=AssociativeScanModels.ChainFn(**kwargs_fake),
+            inputs=inp,
+        )
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    @parametrize("combine_mode", ["pointwise", "generic"])
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("reverse_first", [False, True])
+    @parametrize("same_direction", [False, True])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    # Skipping the combination of combine_mode=pointwise and device=cpu
+    # as the current implementation of pointwise does only support CUDA device
+    @decorateIf(
+        unittest.skip,
+        lambda params: (
+            params["combine_mode"] == "pointwise"
+            and (params["device"] == torch.device("cpu") or torch.version.hip)
+        ),
+    )
+    # TODO: compile_mode "compile_dynamic_shape" is not working
+    # because of not yet implemented lifted arguments; skipping
+    @decorateIf(
+        unittest.skip,
+        lambda params: (params["compile_mode"] == "compile_dynamic_shape"),
+    )
+    def test_associative_scan_downstream_scan_scan_different_dim(
+        self, combine_mode, compile_mode, reverse_first, same_direction, device
+    ):
+        reverse_second = reverse_first if same_direction else not reverse_first
+
+        def first_chain_fct(scan_fct, inp, **kwargs):
+            o1 = scan_fct(get_scan_combine_fn("add", True), inp, **kwargs)
+            return o1
+
+        def second_chain_fct(scan_fct, inp, **kwargs):
+            o2 = scan_fct(get_scan_combine_fn("add", True), inp, **kwargs)
+            return o2
+
+        inp = torch.randn(3, 10, 2, device=device)
+
+        kwargs = {
+            "dim": [1, 0],
+            "reverse": [reverse_first, reverse_second],
+            "compile_mode": compile_mode,
+            "combine_fn": [first_chain_fct, second_chain_fct],
+            "combine_mode": [combine_mode, combine_mode],
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        self._run_test(
+            model=AssociativeScanModels.ChainFn(**kwargs),
+            model_fake=AssociativeScanModels.ChainFn(**kwargs_fake),
+            inputs=inp,
+        )
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    @parametrize("combine_mode", ["generic"])
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("reverse_first", [False, True])
+    @parametrize("same_direction", [False, True])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    def test_associative_scan_nested(
+        self, combine_mode, compile_mode, reverse_first, same_direction, device
+    ):
+        reverse_second = reverse_first if same_direction else not reverse_first
+
+        def first_nested_fct(x):
+            y_first = associative_scan(
+                second_nested_fct,
+                x,
+                0,
+                reverse=reverse_first,
+                combine_mode=combine_mode,
+            )
+            return y_first
+
+        def first_nested_fct_fake(x):
+            y_first = _fake_associative_scan(
+                second_nested_fct_fake, x, 0, reverse=reverse_first
+            )
+            return y_first
+
+        def second_nested_fct(*x):
+            y_second = associative_scan(
+                get_scan_combine_fn("mul", True),
+                x[0],
+                0,
+                reverse=reverse_second,
+                combine_mode=combine_mode,
+            )
+            return y_second
+
+        def second_nested_fct_fake(*x):
+            y_second = _fake_associative_scan(
+                get_scan_combine_fn("mul", True),
+                x[0],
+                0,
+                reverse=reverse_second,
+            )
+            return y_second
+
+        inp = torch.randn(3, 10, 2, device=device)
+
+        kwargs = {
+            "combine_fn": first_nested_fct,
+        }
+        kwargs_fake = {
+            "combine_fn": first_nested_fct_fake,
+        }
+        self._run_test(
+            model=AssociativeScanModels.NestedFn(**kwargs),
+            model_fake=AssociativeScanModels.NestedFn(**kwargs_fake),
+            inputs=inp,
+        )
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("loop_type", ["for"])
+    @parametrize("reverse", [False, True])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    def test_associative_scan_loop_in_combine_fn(
+        self, compile_mode, loop_type, reverse, device
+    ):
+        def combine_fn(x, y):
+            cnt = torch.zeros_like(y[0, :])
+            if loop_type == "while":
+
+                def cond_fn(ind, loop_val):
+                    return (loop_val < 5)[0]
+
+                def body_fn(ind, loop_val):
+                    return ind + 1, loop_val + torch.abs(ind)
+
+                new_ind, cnt = torch.while_loop(
+                    cond_fn=cond_fn,
+                    body_fn=body_fn,
+                    carried_inputs=(
+                        torch.zeros(1, dtype=torch.int32, device=cnt.device),
+                        cnt,
+                    ),
+                )
+            else:
+                for ind in range(10):
+                    cnt += torch.abs(y[ind])
+            return x * cnt
+
+        inp = torch.randn(3, 10, 1, device=device) * 2
+
+        kwargs = {
+            "dim": 0,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": combine_fn,
+            "combine_mode": "generic",
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        self._run_test(
+            model=AssociativeScanModels.CombineFn(**kwargs),
+            model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
+            inputs=inp,
+        )
+
+    # TODO: Does not work because of the usage of vmap within associative_scan
+    # TODO: Re-enable additional parameters again once this issues has been resolved
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    @unittest.expectedFailure
+    def test_associative_scan_loop_in_combine_fn_failure(self):
+        compile_mode = "none"
+        loop_type = "while"
+        reverse = False
+        device = torch.device("cuda")
+
+        def combine_fn(x, y):
+            cnt = torch.zeros_like(y[0, :])
+            if loop_type == "while":
+
+                def cond_fn(ind, loop_val):
+                    return (loop_val < 5)[0]
+
+                def body_fn(ind, loop_val):
+                    return ind + 1, loop_val + torch.abs(ind)
+
+                new_ind, cnt = torch.while_loop(
+                    cond_fn=cond_fn,
+                    body_fn=body_fn,
+                    carried_inputs=(
+                        torch.zeros(1, dtype=torch.int32, device=cnt.device),
+                        cnt,
+                    ),
+                )
+                return x + torch.sum(cnt)
+
+        inp = torch.randn(3, 10, 1, device=device) * 2
+
+        kwargs = {
+            "dim": 0,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": combine_fn,
+            "combine_mode": "generic",
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        self._run_test(
+            model=AssociativeScanModels.CombineFn(**kwargs),
+            model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
+            inputs=inp,
+        )
+
+    # TODO: Does not work because of the usage of vmap within associative_scan
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    @unittest.expectedFailure
+    def test_associative_scan_cond_in_combine_fn(self, compile_mode, reverse, device):
+        compile_mode = "compile"
+        reverse = False
+        device = torch.device("cuda")
+
+        def combine_fn(x, y):
+            val = cond(torch.sum(y) > 0.0, lambda y: y + 0.0, lambda y: 1.0 - y, (y,))
+            return x * val
+
+        inp = torch.randn(3, 10, 1, device=device)
+
+        kwargs = {
+            "dim": 0,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": combine_fn,
+            "combine_mode": "generic",
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        self._run_test(
+            model=AssociativeScanModels.CombineFn(**kwargs),
+            model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
+            inputs=inp,
+        )
+
+    # TODO: Does not work because of the usage of vmap within associative_scan
+    # TODO: Re-enable additional parameters again once this issues has been resolved
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    @unittest.expectedFailure
+    def test_associative_scan_map_in_combine_fn(self):
+        compile_mode = "none"
+        reverse = False
+        device = torch.device("cuda")
+
+        def combine_fn(x, y):
+            def body(x, y):
+                return x + y
+
+            y_init = y[0]
+            y_new = control_flow.map(body, y, y_init)
+            return x * y_new
+
+        inp = torch.randn(3, 10, 1, device=device)
+
+        kwargs = {
+            "dim": 0,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": combine_fn,
+            "combine_mode": "generic",
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        self._run_test(
+            model=AssociativeScanModels.CombineFn(**kwargs),
+            model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
+            inputs=inp,
+        )
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("reverse", [False, True])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    def test_associative_scan_vmap_in_combine_fn(self, compile_mode, reverse, device):
+        def combine_fn(x, y):
+            def body(x):
+                return x**2
+
+            mapped_body = torch.vmap(body, 0, 0)
+            y_new = mapped_body(y)
+            return x + y_new
+
+        inp = torch.randn(3, 10, 2, device=device)
+
+        kwargs = {
+            "dim": 0,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": combine_fn,
+            "combine_mode": "generic",
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        self._run_test(
+            model=AssociativeScanModels.CombineFn(**kwargs),
+            model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
+            inputs=inp,
+        )
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    @parametrize("reverse", [False, True])
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    # Skipping the combination of associative_scan and device=cpu
+    # as the current implementation of pointwise does only support CUDA device
+    @decorateIf(
+        unittest.skip,
+        lambda params: (params["device"] == torch.device("cpu")),
+    )
+    def test_associative_scan_non_pointwise_generic(
+        self, reverse, compile_mode, device
+    ):
+        x = torch.randn(3, 10, 2, device=device)
+
+        kwargs = {
+            "dim": 0,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": get_scan_combine_fn("non_pointwise", True),
+            "combine_mode": "generic",
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        self._run_test(
+            model=AssociativeScanModels.CombineFn(**kwargs),
+            model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
+            inputs=x,
+        )
+
+    @skipIfRocm(msg="Unsupported on ROCM yet")
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("combine_mode", ["pointwise", "generic"])
+    @parametrize("reverse", [False, True])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    # Skipping the combination of combine_mode=pointwise and device=cpu
+    # as the current implementation of pointwise does only support CUDA device
+    @decorateIf(
+        unittest.skip,
+        lambda params: (
+            params["combine_mode"] == "pointwise"
+            and (params["device"] == torch.device("cpu") or torch.version.hip)
+        ),
+    )
+    # TODO: compile_mode "compile_dynamic_shape" is not working
+    # because of not yet implemented lifted arguments; skipping
+    @decorateIf(
+        unittest.skip,
+        lambda params: (params["compile_mode"] == "compile_dynamic_shape"),
+    )
+    def test_associative_scan_binary_operator(
+        self, compile_mode, combine_mode, reverse, device
+    ):
+        state_dim = 20
+        timesteps = 10
+        projected_inputs = torch.randn(
+            timesteps, state_dim, requires_grad=True, device=device
+        )
+        A = torch.randn(state_dim, requires_grad=True, device=device)
+        elements = (A.repeat((timesteps, 1)), projected_inputs)
+
+        kwargs = {
+            "dim": 0,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": get_scan_combine_fn("s5_operator", True),
+            "combine_mode": combine_mode,
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        self._run_test(
+            model=AssociativeScanModels.CombineFn(**kwargs),
+            model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
+            inputs=elements,
+        )
+
+    ######################
+    # Negative testcases #
+    ######################
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    def test_associative_scan_sparse_tensor(self):
+        x = torch.tensor(
+            [[[0.0, 0], [1.0, 2.0]], [[0.0, 0], [3.0, 4.0]], [[0.0, 0], [5.0, 6.0]]]
+        ).to_sparse()
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "torch.compile does not support sparse Tensors",
+        ):
+            result = associative_scan(
+                get_scan_combine_fn("add", True),
+                x,
+                0,
+            )
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    def test_associative_scan_combine_fn_wrong_meta_in_combine_fn(self):
+        device = torch.device("cuda")
+        B, N, C, H, W = 3, 3, 2, 3, 3
+        x = torch.randn(B, N, C, H, W, device=device)
+
+        def fct_wrong_dtype(x, y):
+            return (x + y).to(torch.int64)
+
+        def fct_wrong_device(x, y):
+            return (x + y).to(
+                torch.device("cpu") if device.type == "cuda" else torch.device("cuda")
+            )
+
+        def fct_wrong_stride(x, y):
+            return (x + y).to(memory_format=torch.channels_last)
+
+        for fct in [fct_wrong_dtype, fct_wrong_device, fct_wrong_stride]:
+            with self.assertRaisesRegex(
+                # Should be: RuntimeError,
+                # "The pytree of the output of the operator needs to match the xs pytree"
+                torch._dynamo.exc.Unsupported,
+                "Observed exception.*",
+            ):
+                result = associative_scan(fct, x, 0)
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    def test_associative_scan_wrong_pytree(self):
+        def fct_wrong_pytree(x, y):
+            return {
+                "i": x["i"] * y["j"][0][0],
+                "k": 0.0,
+                "j": ([x["j"][1][0]["o"]], [{"o": torch.sin(x["i"])}]),
+            }
+
+        x = torch.randn(3, 2, 2)
+        y = torch.randn(3, 2, 2)
+        z = torch.randn(3, 2, 2)
+        inp = {"i": x, "j": ([y], [{"o": z}])}
+
+        with self.assertRaisesRegex(
+            # Should be: RuntimeError,
+            # r"The number of leaves of the pytree of the output of the operator
+            # needs to match the lenght of the pytree of the input",
+            torch._dynamo.exc.Unsupported,
+            "Observed exception.*",
+        ):
+            result = associative_scan(fct_wrong_pytree, inp, 0, combine_mode="generic")
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    def test_associative_scan_non_pointwise(self):
+        x = torch.randn(3, 10, 2, device=torch.device("cuda"))
+        # Expected to fail, as the pointwise combine_mode does not allow non-pointwise operations
+        with self.assertRaisesRegex(
+            Exception,
+            "For combine_mode='pointwise', the combine_fn needs to be pointwise",
+        ):
+            out = associative_scan(
+                get_scan_combine_fn("non_pointwise", True),
+                x,
+                0,
+                combine_mode="pointwise",
+            )
+
+
+class ScanModels:
+    @staticmethod
+    def get_scan_fct(compile_mode):
+        # Compile the associative_scan according to the provided compile_mode
+        if compile_mode != "fake":
+            return compile_mode_helper(scan, compile_mode)
+        else:
+            scan_fct = _fake_scan
+        return scan_fct
+
+    class CombineFn(torch.nn.Module):
+        def __init__(self, combine_fn, dim, reverse, compile_mode):
+            super().__init__()
+
+            self.scan_fct = ScanModels.get_scan_fct(compile_mode)
+            self.combine_fn = combine_fn
+            self.dim = dim
+            self.reverse = reverse
+
+        def forward(self, init, xs):
+            results = self.scan_fct(
+                self.combine_fn, init, xs, dim=self.dim, reverse=self.reverse
+            )
+            return results
+
+    class Simple(torch.nn.Module):
+        def __init__(self, dim, reverse, compile_mode):
+            super().__init__()
+
+            kwargs = {
+                "dim": dim,
+                "reverse": reverse,
+                "compile_mode": compile_mode,
+            }
+            self.combine_fns = [
+                ScanModels.CombineFn(get_scan_combine_fn("add", False), **kwargs),
+                ScanModels.CombineFn(get_scan_combine_fn("mul", False), **kwargs),
+            ]
+
+        def forward(self, init, xs):
+            results = []
+            for fct_id, combine_fn in enumerate(self.combine_fns):
+                results.append(combine_fn(init[fct_id], xs))
+            return results
+
+    class ChainFn(torch.nn.Module):
+        def __init__(self, combine_fn, dim, reverse, compile_mode):
+            super().__init__()
+
+            chain_len = len(combine_fn)
+            kwargs = {
+                "combine_fn": combine_fn,
+                "dim": dim,
+                "reverse": reverse,
+            }
+
+            # Prepare the kwargs as a list.
+            self.nested_tuple = []
+            for ind in range(chain_len):
+                kwargs_el = {}
+                for key, val in kwargs.items():
+                    # Check if val is a list and if it has the same length as combine_fn
+                    # If so, then use the individual elements.
+                    # If not, duplicate the first element.
+                    if type(val) == list and len(val) == chain_len:
+                        kwargs_el[key] = val[ind]
+                    else:
+                        kwargs_el[key] = val
+
+                scan_fct = ScanModels.get_scan_fct(compile_mode)
+                combine_fn = kwargs_el["combine_fn"]
+                del kwargs_el["combine_fn"]
+                self.nested_tuple.append((combine_fn, scan_fct, kwargs_el))
+
+        def forward(self, init, xs):
+            if type(init) == list and type(xs) != list:
+                list_init_mode = True
+                results = (init[0], xs)
+            else:
+                list_init_mode = False
+                results = (init, xs)
+
+            for ind, (combine_fn, scan_fct, kwargs) in enumerate(self.nested_tuple):
+                results = combine_fn(scan_fct, *results, **kwargs)
+                if list_init_mode and ind < (len(self.nested_tuple) - 1):
+                    results = (init[ind + 1], results[1])
+            return results
+
+    class NestedFn(torch.nn.Module):
+        def __init__(self, combine_fn):
+            super().__init__()
+            self.combine_fn = combine_fn
+
+        def forward(self, init, xs):
+            results = self.combine_fn(init, xs)
+            return results
+
+
+@unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
+@skipIfNoDynamoSupport
+class ScanTests(TestCase):
+    def setUp(self):
+        torch._dynamo.reset()
+        super().setUp()
+
+    def _prepare_fake_kwargs(self, original_kwargs):
+        kwargs_fake = original_kwargs.copy()
+        kwargs_fake["compile_mode"] = "fake"
+        return kwargs_fake
+
+    def _run_test(self, model, model_fake, init, xs):
+        result = model(init, xs)
+        result_exp = model_fake(init, xs)
+        self.assertEqual(result, result_exp)
+
+        return result, result_exp
+
+    @requires_cuda
+    @parametrize("reverse", [False, True])
+    @parametrize("compile_mode", ["none", "eager"])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    def test_scan_y_less_ndim_then_dim(self, reverse, compile_mode, device):
         def combine_fn(carry, x):
             return carry @ x, (carry @ x).sum()
 
-        init = torch.randn(4, 3)
-        xs = torch.randn(3, 3, 2)
-        dim = 2
-        out = scan(combine_fn, init, xs, dim=dim)
-        exp_out = _fake_scan(combine_fn, init, xs, dim=dim)
-        self.assertEqual(out, exp_out)
+        init = torch.randn(4, 3, device=device)
+        xs = torch.randn(3, 3, 2, device=device)
+
+        kwargs = {
+            "dim": 2,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": combine_fn,
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        self._run_test(
+            model=ScanModels.CombineFn(**kwargs),
+            model_fake=ScanModels.CombineFn(**kwargs_fake),
+            init=init,
+            xs=xs,
+        )
 
     # TODO: provide an implementation for all compile modes and re-enable all test
     @requires_cuda
@@ -1290,68 +2387,80 @@ def forward(self, pred_1, x_1):
     @parametrize("compile_mode", ["none", "eager"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     def test_scan_compile(self, reverse, compile_mode, device):
+        xs = torch.randn(3, 10, 2, device=device)
+        init = [torch.zeros(10, 2, device=device), torch.ones(10, 2, device=device)]
+
+        kwargs = {
+            "dim": 0,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        result, _ = self._run_test(
+            model=ScanModels.Simple(**kwargs),
+            model_fake=ScanModels.Simple(**kwargs_fake),
+            init=init,
+            xs=xs,
+        )
+
+        if not reverse:
+            results_torch = []
+            for op_pt in [torch.cumsum, torch.cumprod]:
+                results_torch.append(op_pt(xs, 0))
+            self.assertEqual([r[1] for r in result], results_torch)
+
+        # Jax Examples
+        xs = torch.arange(0, 4, device=device, dtype=torch.int64)
+        init = torch.zeros(1, device=device, dtype=torch.int64)
+
+        kwargs = {
+            "dim": 0,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": get_scan_combine_fn("add", False),
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        result, _ = self._run_test(
+            model=ScanModels.CombineFn(**kwargs),
+            model_fake=ScanModels.CombineFn(**kwargs_fake),
+            init=init,
+            xs=xs,
+        )
+
+        if not reverse:
+            self.assertEqual(
+                result[1],
+                torch.tensor([[0.0], [1.0], [3.0], [6.0]], dtype=torch.int64),
+            )
+            self.assertEqual(result[0], torch.tensor([6.0], dtype=torch.int64))
+        else:
+            self.assertEqual(
+                result[1],
+                torch.tensor([[6.0], [6.0], [5.0], [3.0]], dtype=torch.int64),
+            )
+            self.assertEqual(result[0], torch.tensor([6.0], dtype=torch.int64))
+
+        # Different carry computation as output computation
         def add2(x: torch.Tensor, y: torch.Tensor):
             return x * y, x + y
 
-        x = torch.randn(3, 10, 2, device=device)
-
-        scan_fct = compile_mode_helper(scan, compile_mode)
-
-        for op, op_pt, init in [
-            (
-                get_scan_combine_fn("add", False),
-                torch.cumsum,
-                torch.zeros(10, 2, device=device),
-            ),
-            (
-                get_scan_combine_fn("mul", False),
-                torch.cumprod,
-                torch.ones(10, 2, device=device),
-            ),
-        ]:
-            result = scan_fct(op, init, x, dim=0, reverse=reverse)
-            result_exp = _fake_scan(op, init=init, xs=x, dim=0, reverse=reverse)
-            self.assertEqual(result, result_exp)
-            if not reverse:
-                result_exp_PT = op_pt(x, 0)
-                self.assertEqual(result[1], result_exp_PT)
-
-        # Jax Examples
-        x = torch.arange(0, 4, device=device, dtype=torch.int64)
-        init = torch.zeros(1, device=device, dtype=torch.int64)
-        cumsum1 = scan_fct(
-            get_scan_combine_fn("add", False),
-            init,
-            x,
-            dim=0,
-            reverse=reverse,
-        )
-        cumsum_exp = _fake_scan(
-            get_scan_combine_fn("add", False),
-            init=init,
-            xs=x,
-            dim=0,
-            reverse=reverse,
-        )
-        if not reverse:
-            self.assertEqual(
-                cumsum1[1],
-                torch.tensor([[0.0], [1.0], [3.0], [6.0]], dtype=torch.int64),
-            )
-            self.assertEqual(cumsum1[0], torch.tensor([6.0], dtype=torch.int64))
-        else:
-            self.assertEqual(
-                cumsum1[1],
-                torch.tensor([[6.0], [6.0], [5.0], [3.0]], dtype=torch.int64),
-            )
-            self.assertEqual(cumsum1[0], torch.tensor([6.0], dtype=torch.int64))
-        self.assertEqual(cumsum1, cumsum_exp)
-
-        # Different carry computation as output computation
-        x = torch.arange(1, 5, device=device, dtype=torch.int64)
+        xs = torch.arange(1, 5, device=device, dtype=torch.int64)
         init = torch.ones(1, device=device, dtype=torch.int64)
-        result = scan_fct(add2, init, x, dim=0, reverse=reverse)
-        result_exp = _fake_scan(add2, init=init, xs=x, dim=0, reverse=reverse)
+
+        kwargs = {
+            "dim": 0,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": add2,
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        result, _ = self._run_test(
+            model=ScanModels.CombineFn(**kwargs),
+            model_fake=ScanModels.CombineFn(**kwargs_fake),
+            init=init,
+            xs=xs,
+        )
+
         if not reverse:
             self.assertEqual(
                 result[1],
@@ -1364,26 +2473,24 @@ def forward(self, pred_1, x_1):
                 torch.tensor([[25.0], [14.0], [7.0], [5.0]], dtype=torch.int64),
             )
             self.assertEqual(result[0], torch.tensor([24.0], dtype=torch.int64))
-        self.assertEqual(result, result_exp)
 
         # Non associative operation
-        x = torch.arange(0, 5, device=device, dtype=torch.float32)
+        xs = torch.arange(0, 5, device=device, dtype=torch.float32)
         init = torch.ones(1, device=device, dtype=torch.float32)
-        result = scan_fct(
-            get_scan_combine_fn("div", False),
-            init,
-            x,
-            dim=0,
-            reverse=reverse,
-        )
-        result_exp = _fake_scan(
-            get_scan_combine_fn("div", False),
+
+        kwargs = {
+            "dim": 0,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": get_scan_combine_fn("div", False),
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        self._run_test(
+            model=ScanModels.CombineFn(**kwargs),
+            model_fake=ScanModels.CombineFn(**kwargs_fake),
             init=init,
-            xs=x,
-            dim=0,
-            reverse=reverse,
+            xs=xs,
         )
-        self.assertEqual(result, result_exp)
 
     # TODO: provide an implementation for all compile modes and re-enable all test
     @requires_cuda
@@ -1404,33 +2511,58 @@ def forward(self, pred_1, x_1):
         scan_fct = compile_mode_helper(scan, compile_mode)
 
         # Check all outputs and carries on the correct device and with torch.float32
-        x = torch.randn(3, 10, 2, device=device).to(dtype=dtype)
+        xs = torch.randn(3, 10, 2, device=device).to(dtype=dtype)
         op, init = (
             get_scan_combine_fn("adds"),
             torch.zeros(10, 2, device=device, dtype=dtype),
         )
-        result = scan_fct(op, init, x, dim=0, reverse=reverse)
-        result_exp = _fake_scan(op, init=init, xs=x, dim=0, reverse=reverse)
-        self.assertEqual(result, result_exp)
+
+        kwargs = {
+            "dim": 0,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": op,
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        result, result_exp = self._run_test(
+            model=ScanModels.CombineFn(**kwargs),
+            model_fake=ScanModels.CombineFn(**kwargs_fake),
+            init=init,
+            xs=xs,
+        )
+
         self.assertEqual(
             [[r.device.type for r in res] for res in result],
-            [[device.type for _ in res] for res in result],
+            [[device.type for _ in res] for res in result_exp],
         )
         self.assertEqual(
             [[r.dtype for r in res] for res in result],
-            [[dtype for _ in res] for res in result],
+            [[dtype for _ in res] for res in result_exp],
         )
 
         # Check all outputs and carries on the correct device and
         # carry.dtype torch.float32 and output.dtype torch.float16
-        x = torch.randn(3, 10, 2, device=device).to(dtype=dtype)
+        xs = torch.randn(3, 10, 2, device=device).to(dtype=dtype)
         op, init = (
             get_scan_combine_fn("adds"),
             torch.zeros(10, 2, device=device, dtype=torch.float32),
         )
-        result = scan_fct(op, init, x, dim=0, reverse=reverse)
-        result_exp = _fake_scan(op, init=init, xs=x, dim=0, reverse=reverse)
-        self.assertEqual(result, result_exp)
+        # result = scan_fct(op, init, x, dim=0, reverse=reverse)
+        # result_exp = _fake_scan(op, init=init, xs=x, dim=0, reverse=reverse)
+        # self.assertEqual(result, result_exp)
+        kwargs = {
+            "dim": 0,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": op,
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        result, _ = self._run_test(
+            model=ScanModels.CombineFn(**kwargs),
+            model_fake=ScanModels.CombineFn(**kwargs_fake),
+            init=init,
+            xs=xs,
+        )
         self.assertEqual(
             [[r.dtype for r in res] for res in result],
             [
@@ -1441,14 +2573,27 @@ def forward(self, pred_1, x_1):
 
         # Check all outputs and carries on the correct device and
         # carry.dtype torch.int64 and output.dtype torch.float32
-        x = torch.randn(3, 10, 2, device=device)
+        xs = torch.randn(3, 10, 2, device=device)
         op, init = (
             get_scan_combine_fn("adds"),
             torch.zeros(10, 2, device=device, dtype=dtype),
         )
-        result = scan_fct(op, init, x, dim=0, reverse=reverse)
-        result_exp = _fake_scan(op, init=init, xs=x, dim=0, reverse=reverse)
-        self.assertEqual(result, result_exp)
+        # result = scan_fct(op, init, x, dim=0, reverse=reverse)
+        # result_exp = _fake_scan(op, init=init, xs=x, dim=0, reverse=reverse)
+        # self.assertEqual(result, result_exp)
+        kwargs = {
+            "dim": 0,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": op,
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        result, _ = self._run_test(
+            model=ScanModels.CombineFn(**kwargs),
+            model_fake=ScanModels.CombineFn(**kwargs_fake),
+            init=init,
+            xs=xs,
+        )
         self.assertEqual(
             [[r.dtype for r in res] for res in result],
             [
@@ -1457,57 +2602,62 @@ def forward(self, pred_1, x_1):
             ],
         )
 
+    # TODO: provide an implementation for all compile modes and re-enable all test
     @requires_cuda
     @parametrize("reverse", [False, True])
+    @parametrize("compile_mode", ["none", "eager"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    def test_scan_dim(self, reverse, device):
+    def test_scan_dim(self, reverse, compile_mode, device):
         import random
 
-        num_dims = [random.randint(2, 5) for _ in range(10)]
+        num_dims = [random.randint(2, 5) for _ in range(5)]
         for num_dim in num_dims:
             shapes = [random.randint(1, 10) for _ in range(num_dim)]
             rnd_scan_dim = random.randint(0, num_dim - 1)
-            x = torch.randn(*shapes, device=device)
+            xs = torch.randn(*shapes, device=device)
             init_shapes = shapes[:rnd_scan_dim] + shapes[rnd_scan_dim + 1 :]
+            init = [
+                torch.zeros(*init_shapes, device=device),
+                torch.ones(*init_shapes, device=device),
+            ]
 
-            for op, op_pt, init in [
-                (
-                    get_scan_combine_fn("add", False),
-                    torch.cumsum,
-                    torch.zeros(*init_shapes, device=device),
-                ),
-                (
-                    get_scan_combine_fn("mul", False),
-                    torch.cumprod,
-                    torch.ones(*init_shapes, device=device),
-                ),
-            ]:
-                result = scan(op, init, x, dim=rnd_scan_dim, reverse=reverse)
-                result_exp = _fake_scan(
-                    op, init=init, xs=x, dim=rnd_scan_dim, reverse=reverse
-                )
-                self.assertEqual(result, result_exp)
-                if not reverse:
-                    result_exp_PT = op_pt(x, rnd_scan_dim)
-                    res_list = list(result)
-                    res_list[1] = res_list[1].movedim(0, rnd_scan_dim)
-                    self.assertEqual(res_list[1], result_exp_PT)
+            kwargs = {
+                "dim": rnd_scan_dim,
+                "reverse": reverse,
+                "compile_mode": compile_mode,
+            }
+            kwargs_fake = self._prepare_fake_kwargs(kwargs)
+            result, _ = self._run_test(
+                model=ScanModels.Simple(**kwargs),
+                model_fake=ScanModels.Simple(**kwargs_fake),
+                init=init,
+                xs=xs,
+            )
 
+            if not reverse:
+                results_torch = []
+                for op_pt in [torch.cumsum, torch.cumprod]:
+                    results_torch.append(op_pt(xs, rnd_scan_dim))
+                result = [r[1].movedim(0, rnd_scan_dim) for r in result]
+                self.assertEqual(result, results_torch)
+
+    # TODO: provide an implementation for all compile modes and re-enable all test
     @requires_cuda
     @parametrize("reverse", [False, True])
+    @parametrize("compile_mode", ["none", "eager"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    def test_scan_binary_operator(self, reverse, device):
+    def test_scan_binary_operator(self, reverse, compile_mode, device):
         state_dim = 20
         timesteps = 10
         projected_inputs = torch.randn(
             timesteps, state_dim, requires_grad=True, device=device
         )
         A = torch.randn(state_dim, requires_grad=True, device=device)
-        elements = (A.repeat((timesteps, 1)), projected_inputs)
+        xs = (A.repeat((timesteps, 1)), projected_inputs)
         init = tuple(
             [
                 torch.ones_like(
-                    torch._ops.ops.aten.slice(elements[0], 0, 0, 1, 1),
+                    torch._ops.ops.aten.slice(xs[0], 0, 0, 1, 1),
                     requires_grad=True,
                 )
             ]
@@ -1519,169 +2669,97 @@ def forward(self, pred_1, x_1):
             ]
         )
 
-        result = scan(
-            get_scan_combine_fn("s5_operator", False),
-            init,
-            elements,
-            dim=0,
-            reverse=reverse,
-        )
-        expected_result = _fake_scan(
-            get_scan_combine_fn("s5_operator", False),
+        kwargs = {
+            "dim": 0,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": get_scan_combine_fn("s5_operator", False),
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        self._run_test(
+            model=ScanModels.CombineFn(**kwargs),
+            model_fake=ScanModels.CombineFn(**kwargs_fake),
             init=init,
-            xs=elements,
-            dim=0,
-            reverse=reverse,
+            xs=xs,
         )
-        self.assertEqual(result, expected_result)
 
+    # TODO: provide an implementation for all compile modes and re-enable all test
     @skipIfRocm(msg="Unsupported on ROCM yet")
     @requires_cuda
     @parametrize("reverse", [False, True])
+    @parametrize("compile_mode", ["none", "eager"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    def test_scan_tuple(self, reverse, device):
+    def test_scan_tuple(self, reverse, compile_mode, device):
         x = torch.randn(3, 2, 2, device=device)
         y = torch.randn(3, 2, 2, device=device)
-        inp = (x, y)
-        init = tuple(torch._ops.ops.aten.slice(e, 0, 0, 1, 1) for e in inp)
+        xs = (x, y)
+        init = tuple(torch._ops.ops.aten.slice(e, 0, 0, 1, 1) for e in xs)
 
-        result_same = scan(
-            get_scan_combine_fn("tuple_fct", False),
-            init,
-            inp,
-            dim=0,
-            reverse=reverse,
-        )
-        expected_result = _fake_scan(
-            get_scan_combine_fn("tuple_fct", False),
+        kwargs = {
+            "dim": 0,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": get_scan_combine_fn("tuple_fct", False),
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        result_same, _ = self._run_test(
+            model=ScanModels.CombineFn(**kwargs),
+            model_fake=ScanModels.CombineFn(**kwargs_fake),
             init=init,
-            xs=inp,
-            dim=0,
-            reverse=reverse,
+            xs=xs,
         )
-        self.assertEqual(result_same, expected_result)
 
         def fct_different_output_tuple(x, y):
             return ((x[0] + y[0], x[1] * y[1]), (x[1] * y[1]))
 
-        inp = (x, y)
-        init = tuple(torch._ops.ops.aten.slice(e, 0, 0, 1, 1) for e in inp)
+        xs = (x, y)
+        init = tuple(torch._ops.ops.aten.slice(e, 0, 0, 1, 1) for e in xs)
 
-        result_diff = scan(
-            fct_different_output_tuple, init, inp, dim=0, reverse=reverse
+        kwargs = {
+            "dim": 0,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": fct_different_output_tuple,
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        result_diff, _ = self._run_test(
+            model=ScanModels.CombineFn(**kwargs),
+            model_fake=ScanModels.CombineFn(**kwargs_fake),
+            init=init,
+            xs=xs,
         )
-        expected_result = _fake_scan(
-            fct_different_output_tuple, init=init, xs=inp, dim=0, reverse=reverse
-        )
-        self.assertEqual(result_diff, expected_result)
+
         self.assertEqual(result_diff[1], result_same[1][1])
 
-    @requires_cuda
-    def test_scan_wrong_pytree(self):
-        # Init and input have same pytree
-        def fct_wrong_pytree(x, y):
-            return (
-                {
-                    "i": x["i"] * y["j"][0][0],
-                    "k": 0.0,
-                    "j": ([x["j"][1][0]["o"]], [{"o": torch.sin(x["i"])}]),
-                },
-                {
-                    "i": x["i"] * y["j"][0][0],
-                    "k": 0.0,
-                    "j": ([x["j"][1][0]["o"]], [{"o": torch.sin(x["i"])}]),
-                },
-            )
-
-        x = torch.randn(3, 2, 2)
-        y = torch.randn(3, 2, 2)
-        z = torch.randn(3, 2, 2)
-        inp = {"i": x, "j": ([y], [{"o": z}])}
-        inp_flat, inp_spec = pytree.tree_flatten(inp)
-        init_flat = [torch._ops.ops.aten.slice(e, 0, 0, 1, 1) for e in inp_flat]
-        init = pytree.tree_unflatten(init_flat, inp_spec)
-
-        with self.assertRaisesRegex(
-            # Should be: RuntimeError,
-            # r"The number of leaves of the pytree of the new carry produced by
-            # the operator needs to match the length of the pytree of the init",
-            RuntimeError,
-            "The number of leaves of the pytree of the new carry",
-        ):
-            result = scan(fct_wrong_pytree, init, inp, dim=0)
-
+    # TODO: provide an implementation for all compile modes and re-enable all test
     @requires_cuda
     @parametrize("reverse", [False, True])
+    @parametrize("compile_mode", ["none", "eager"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    def test_scan_complex_pytree(self, reverse, device):
+    def test_scan_complex_pytree(self, reverse, compile_mode, device):
         # Init and input have same pytree
 
         x = torch.randn(3, 2, 2, device=device)
         y = torch.randn(3, 2, 2, device=device)
         z = torch.randn(3, 2, 2, device=device)
-        inp = {"i": x, "j": ([y], [{"o": z}])}
-        inp_flat, inp_spec = pytree.tree_flatten(inp)
+        xs = {"i": x, "j": ([y], [{"o": z}])}
+        inp_flat, inp_spec = pytree.tree_flatten(xs)
         init_flat = [torch._ops.ops.aten.slice(e, 0, 0, 1, 1) for e in inp_flat]
         init = pytree.tree_unflatten(init_flat, inp_spec)
 
-        result = scan(
-            get_scan_combine_fn("complex_pointwise", False),
-            init,
-            inp,
-            dim=0,
-            reverse=reverse,
-        )
-        expected_result = _fake_scan(
-            get_scan_combine_fn("complex_pointwise", False),
+        kwargs = {
+            "dim": 0,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": get_scan_combine_fn("complex_pointwise", False),
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        self._run_test(
+            model=ScanModels.CombineFn(**kwargs),
+            model_fake=ScanModels.CombineFn(**kwargs_fake),
             init=init,
-            xs=inp,
-            dim=0,
-            reverse=reverse,
+            xs=xs,
         )
-        self.assertEqual(result, expected_result)
-
-    # TODO: Does not work because of the usage of vmap witin associative_scan
-    # The paT206899919 rameterization is commented out for the moment and the test is marked with expected fail
-    # Fails with: AssertionError: scan is not an OpOverload
-    @skipIfRocm(msg="Unsupported on ROCM yet")
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
-    @unittest.expectedFailure
-    def test_scan_associative_scan(self):
-        combine_mode = "generic"
-        compile_mode_scan = "compile"
-        compile_mode_associative_scan = "none"
-        reverse = True
-        reverse_associative_scan = True
-        device = torch.device("cuda")
-
-        scan_fct = compile_mode_helper(scan, compile_mode_scan)
-        associative_scan_fct = compile_mode_helper(
-            associative_scan, compile_mode_associative_scan
-        )
-        init = torch.randn(10, 5, device=device)
-        inp = torch.randn(3, 10, 5, device=device)
-
-        def body(x, y):
-            val = associative_scan_fct(
-                get_scan_combine_fn("add", True),
-                y,
-                0,
-                reverse=reverse_associative_scan,
-                combine_mode=combine_mode,
-            )
-            return x + y, x + val
-
-        result = scan_fct(body, init, inp, dim=0, reverse=reverse)
-        expected_result = _fake_scan(
-            body,
-            init,
-            inp,
-            0,
-            reverse=reverse,
-        )
-
-        self.assertEqual(result, expected_result)
 
     # TODO: provide an implementation for all compile modes and re-enable all test
     @requires_cuda
@@ -1689,106 +2767,437 @@ def forward(self, pred_1, x_1):
     @parametrize("reverse", [False, True])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     def test_scan_downstream_scan_matmul(self, compile_mode, reverse, device):
-        inp = torch.randn(3, 10, 2, device=device)
+        xs = torch.randn(3, 10, 2, device=device)
         init = torch.randn(3, 2, device=device)
 
         for ind in range(2):
-            # Chain with matmul
-            def chain_fct(inp):
-                W = torch.ones(2, 5, device=device)
-                o = scan(
+
+            def first_chain_fct(scan_fct, init, xs, **kwargs):
+                o = scan_fct(
                     get_scan_combine_fn("add", False),
                     init,
-                    inp,
-                    dim=1,
-                    reverse=reverse,
+                    xs,
+                    dim=kwargs["dim"],
+                    reverse=kwargs["reverse"],
                 )
-                return o[ind] @ W
+                return o
 
-            fct_cmp = compile_mode_helper(chain_fct, compile_mode)
+            def second_chain_fct(scan_fct, init, xs, **kwargs):
+                W = torch.ones(2, 5, device=device)
+                if ind == 0:
+                    return init @ W
+                else:
+                    return xs @ W
 
-            expected_result = _fake_scan(
-                get_scan_combine_fn("add", False),
+            kwargs = {
+                "dim": 1,
+                "reverse": reverse,
+                "compile_mode": compile_mode,
+                "combine_fn": [first_chain_fct, second_chain_fct],
+            }
+            kwargs_fake = self._prepare_fake_kwargs(kwargs)
+            self._run_test(
+                model=ScanModels.ChainFn(**kwargs),
+                model_fake=ScanModels.ChainFn(**kwargs_fake),
                 init=init,
-                xs=inp,
-                dim=1,
-                reverse=reverse,
-            )[ind] @ torch.ones(2, 5, device=device)
-            result = fct_cmp(inp)
-            self.assertEqual(result, expected_result)
+                xs=xs,
+            )
 
     # TODO: provide an implementation for all compile modes and re-enable all test
     @requires_cuda
+    @parametrize("reverse_first", [False, True])
+    @parametrize("reverse_second", [False, True])
     @parametrize("compile_mode", ["none", "eager"])
-    @parametrize("reverse", [False, True])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    def test_scan_downstream_scan_scan_dim(self, compile_mode, reverse, device):
-        inp = torch.randn(3, 10, 2, device=device)
+    def test_scan_downstream_scan_scan_dim(
+        self, reverse_first, reverse_second, compile_mode, device
+    ):
+        xs = torch.randn(3, 10, 2, device=device)
         init = torch.randn(3, 2, device=device)
-
-        # Chain with scan on different dim
         init2 = torch.randn(1, 10, 2, device=device)
 
-        def chain_fct_different_dim(inp):
-            o1 = scan(
+        def first_chain_fct(scan_fct, init, xs, **kwargs):
+            o1 = scan_fct(
                 get_scan_combine_fn("add", False),
                 init,
-                inp,
-                dim=1,
-                reverse=reverse,
+                xs,
+                dim=kwargs["dim"],
+                reverse=kwargs["reverse"],
             )
             o1 = pytree.tree_map(lambda t: t.movedim(0, 1), o1)
-            o2 = scan(
+            return o1
+
+        def second_chain_fct(scan_fct, init, xs, **kwargs):
+            o2 = scan_fct(
                 get_scan_combine_fn("add", False),
-                init2,
-                o1[1],
-                dim=0,
-                reverse=reverse,
+                init,
+                xs,
+                dim=kwargs["dim"],
+                reverse=kwargs["reverse"],
             )
             return o2
 
-        fct_cmp = compile_mode_helper(chain_fct_different_dim, compile_mode)
-
-        xs = _fake_scan(
-            get_scan_combine_fn("add", False),
-            init=init,
-            xs=inp,
-            dim=1,
-            reverse=reverse,
-        )[1]
-        xs = pytree.tree_map(lambda t: t.movedim(0, 1), xs)
-        expected_result = _fake_scan(
-            get_scan_combine_fn("add", False),
-            init=init2,
+        kwargs = {
+            "dim": [1, 0],
+            "reverse": [reverse_first, reverse_second],
+            "compile_mode": compile_mode,
+            "combine_fn": [first_chain_fct, second_chain_fct],
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        self._run_test(
+            model=ScanModels.ChainFn(**kwargs),
+            model_fake=ScanModels.ChainFn(**kwargs_fake),
+            init=[init, init2],
             xs=xs,
-            dim=0,
-            reverse=reverse,
         )
-        result = fct_cmp(inp)
-        self.assertEqual(result, expected_result)
 
+    # TODO: provide an implementation for all compile modes and re-enable all test
     @requires_cuda
     @parametrize("reverse", [False, True])
+    @parametrize("compile_mode", ["none", "eager"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    def test_scan_non_pointwise(self, reverse, device):
-        x = torch.randn(3, 10, 2, device=device)
+    def test_scan_non_pointwise(self, reverse, compile_mode, device):
+        xs = torch.randn(3, 10, 2, device=device)
         init = torch.randn(10, 2, device=device)
-        result_expected = _fake_scan(
-            get_scan_combine_fn("non_pointwise", False),
+
+        kwargs = {
+            "dim": 0,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": get_scan_combine_fn("non_pointwise", False),
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        self._run_test(
+            model=ScanModels.CombineFn(**kwargs),
+            model_fake=ScanModels.CombineFn(**kwargs_fake),
             init=init,
-            xs=x,
-            dim=0,
-            reverse=reverse,
+            xs=xs,
         )
 
-        out = scan(
-            get_scan_combine_fn("non_pointwise", False),
-            init,
-            x,
-            dim=0,
-            reverse=reverse,
+    # TODO: provide an implementation for all compile modes and re-enable all test
+    @requires_cuda
+    @parametrize("reverse", [False, True])
+    @parametrize("compile_mode", ["none", "eager"])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    def test_scan_init(self, reverse, compile_mode, device):
+        # scan_fct = compile_mode_helper(scan, compile_mode)
+
+        # Only init and no input
+        xs = torch.randn(3, 1, 2, device=device)
+        init = torch.randn(3, 1, 2, device=device)
+        dim = 1
+        op, op_pt = (get_scan_combine_fn("add", False), torch.cumsum)
+
+        # Only init given
+        init = torch._ops.ops.aten.slice(xs, dim, 0, 1, 1)
+
+        kwargs = {
+            "dim": dim,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": op,
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        self._run_test(
+            model=ScanModels.CombineFn(**kwargs),
+            model_fake=ScanModels.CombineFn(**kwargs_fake),
+            init=init,
+            xs=[],
         )
-        self.assertEqual(out, result_expected)
+
+        x = torch.randn(3, 5, 2, device=device)
+        init = torch.randn(3, 5, 2, device=device)
+        dim = 0
+
+        op, op_pt = (get_scan_combine_fn("add", False), torch.cumsum)
+        xs = torch._ops.ops.aten.slice(x, dim, 1, None, 1)
+
+        # Init tensor scalar
+        init = torch.ones(1, device=device)
+
+        def add_scalar_carry(x: torch.Tensor, y: torch.Tensor):
+            return x + 1.0, x + y
+
+        kwargs = {
+            "dim": dim,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": add_scalar_carry,
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        result, _ = self._run_test(
+            model=ScanModels.CombineFn(**kwargs),
+            model_fake=ScanModels.CombineFn(**kwargs_fake),
+            init=init,
+            xs=xs,
+        )
+
+        self.assertEqual(result[0], torch.tensor([3.0], device=device))
+
+        # Init tensor entirely different shape than inp
+        init = torch.randn(7, 8, device=device)
+
+        def add_scalar_carry2(x: torch.Tensor, y: torch.Tensor):
+            return x + 1.0, x[: y.shape[0], : y.shape[1]] + y
+
+        kwargs = {
+            "dim": dim,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": add_scalar_carry2,
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        self._run_test(
+            model=ScanModels.CombineFn(**kwargs),
+            model_fake=ScanModels.CombineFn(**kwargs_fake),
+            init=init,
+            xs=xs,
+        )
+
+        # Init with two timestep on dim axis. Should work as y has always 1 on dim axis and
+        # hence automatic broadcasting should work
+        # I.e., the input shape is 2x5x2, but the carry at each iteration is 2x5x2,
+        # thus the output of each iteration is 2x5x2, which results in the total output
+        # to be 4x5x2
+        init = torch._ops.ops.aten.slice(x, dim, 0, 2, 1)
+        kwargs = {
+            "dim": dim,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": op,
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        result, _ = self._run_test(
+            model=ScanModels.CombineFn(**kwargs),
+            model_fake=ScanModels.CombineFn(**kwargs_fake),
+            init=init,
+            xs=xs,
+        )
+
+        self.assertEqual(result[0].shape, torch.Size([2, 5, 2]))
+
+        init = torch.tile(init, (1, 2, 1))
+
+        def add_scalar_carry_sliced_out(x: torch.Tensor, y: torch.Tensor):
+            return x + 1.0, x[:, :1, :] + y
+
+        kwargs = {
+            "dim": dim,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": add_scalar_carry_sliced_out,
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        result, _ = self._run_test(
+            model=ScanModels.CombineFn(**kwargs),
+            model_fake=ScanModels.CombineFn(**kwargs_fake),
+            init=init,
+            xs=xs,
+        )
+
+        self.assertEqual(result[0].shape, torch.Size([2, 10, 2]))
+        self.assertEqual(result[1].shape, torch.Size([2, 2, 5, 2]))
+
+        # Correct case
+        op, op_pt = (get_scan_combine_fn("add", False), torch.cumsum)
+        xs = torch.randn(3, 2, 2, device=device)
+        dim = 1
+
+        if reverse:
+            init = torch.zeros_like(torch.select_copy(xs, -1, 0))
+        else:
+            init = torch.zeros_like(torch.select_copy(xs, 1, 0))
+
+        kwargs = {
+            "dim": dim,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": op,
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        result, _ = self._run_test(
+            model=ScanModels.CombineFn(**kwargs),
+            model_fake=ScanModels.CombineFn(**kwargs_fake),
+            init=init,
+            xs=xs,
+        )
+
+        if not reverse:
+            result_exp_PT = op_pt(xs, dim)
+            result = list(result)
+            result[1] = pytree.tree_map(lambda t: t.movedim(0, dim), result[1])
+            self.assertEqual(result[1], result_exp_PT)
+
+    # TODO: provide an implementation for all compile modes and re-enable all test
+    @requires_cuda
+    @parametrize("reverse", [False, True])
+    @parametrize("compile_mode", ["none", "eager"])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    def test_scan_init_pytree_complex(self, reverse, compile_mode, device):
+        def fct_pointwise_different_output(x, y):
+            return (
+                {
+                    "i": x["i"] * y["i"],
+                    "j": (
+                        [x["j"][0][0] * y["j"][0][0]],
+                        [{"o": x["j"][1][0]["o"] + y["j"][1][0]["o"]}],
+                    ),
+                },
+                (
+                    y["i"],
+                    {
+                        "o": x["i"] * y["i"],
+                        "j": (
+                            [x["j"][0][0] * y["j"][0][0]],
+                            [{"o": x["j"][1][0]["o"] + y["j"][1][0]["o"]}],
+                        ),
+                    },
+                ),
+            )
+
+        def fct_pointwise_different_carry(x, y):
+            return (
+                {
+                    "i": x["i"] * y["i"],
+                    "j": (
+                        x["i"],
+                        [x["j"][1][0] * y["j"][0][0]],
+                        [{"o": x["j"][2][0]["o"] + y["j"][1][0]["o"]}],
+                    ),
+                },
+                (
+                    y["i"],
+                    {
+                        "o": x["i"] * y["i"] + x["j"][0][0],
+                        "j": (
+                            [x["j"][1][0] * y["j"][0][0]],
+                            [{"o": x["j"][2][0]["o"] + y["j"][1][0]["o"]}],
+                        ),
+                    },
+                ),
+            )
+
+        x = torch.randn(3, 2, 2, device=device)
+        y = torch.randn(3, 2, 2, device=device)
+        z = torch.randn(3, 2, 2, device=device)
+
+        if reverse:
+            init_start, init_end = -1, None
+            inp_start, inp_end = 0, -1
+        else:
+            init_start, init_end = 0, 1
+            inp_start, inp_end = 1, None
+
+        # Regular case
+        init = {
+            "i": torch._ops.ops.aten.slice(x, 0, init_start, init_end, 1),
+            "j": (
+                [torch._ops.ops.aten.slice(y, 0, init_start, init_end, 1)],
+                [{"o": torch._ops.ops.aten.slice(z, 0, init_start, init_end, 1)}],
+            ),
+        }
+        xs = {
+            "i": torch._ops.ops.aten.slice(x, 0, inp_start, inp_end, 1),
+            "j": (
+                [torch._ops.ops.aten.slice(y, 0, inp_start, inp_end, 1)],
+                [{"o": torch._ops.ops.aten.slice(z, 0, inp_start, inp_end, 1)}],
+            ),
+        }
+
+        kwargs = {
+            "dim": 0,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": get_scan_combine_fn("complex_pointwise", False),
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        self._run_test(
+            model=ScanModels.CombineFn(**kwargs),
+            model_fake=ScanModels.CombineFn(**kwargs_fake),
+            init=init,
+            xs=xs,
+        )
+
+        kwargs = {
+            "dim": 0,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": fct_pointwise_different_output,
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        self._run_test(
+            model=ScanModels.CombineFn(**kwargs),
+            model_fake=ScanModels.CombineFn(**kwargs_fake),
+            init=init,
+            xs=xs,
+        )
+
+        # Pytree of carry is different
+        init = {
+            "i": torch._ops.ops.aten.slice(x, 0, init_start, init_end, 1),
+            "j": (
+                torch._ops.ops.aten.slice(x, 0, init_start, init_end, 1),
+                [torch._ops.ops.aten.slice(y, 0, init_start, init_end, 1)],
+                [{"o": torch._ops.ops.aten.slice(z, 0, init_start, init_end, 1)}],
+            ),
+        }
+        xs = {
+            "i": torch._ops.ops.aten.slice(x, 0, inp_start, inp_end, 1),
+            "j": (
+                [torch._ops.ops.aten.slice(y, 0, inp_start, inp_end, 1)],
+                [{"o": torch._ops.ops.aten.slice(z, 0, inp_start, inp_end, 1)}],
+            ),
+        }
+        kwargs = {
+            "dim": 0,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": fct_pointwise_different_carry,
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        self._run_test(
+            model=ScanModels.CombineFn(**kwargs),
+            model_fake=ScanModels.CombineFn(**kwargs_fake),
+            init=init,
+            xs=xs,
+        )
+
+    def test_scan_RNN(self):
+        dim = 1
+        device = torch.device("cpu")
+
+        rnn = torch.nn.RNN(
+            input_size=5,
+            hidden_size=7,
+        )
+        rnn = rnn.to(device=device)
+        x = torch.randn(1, 2, 5, device=device)
+        h = torch.randn(1, 2, 7, device=device)
+
+        new_state_dict = {
+            "weight_ih_l0": torch.ones_like(rnn.weight_ih_l0),
+            "bias_ih_l0": torch.ones_like(rnn.bias_ih_l0),
+            "weight_hh_l0": torch.ones_like(rnn.weight_hh_l0),
+            "bias_hh_l0": torch.ones_like(rnn.bias_hh_l0),
+        }
+        rnn.load_state_dict(new_state_dict)
+
+        def RNN(x: torch.Tensor, y: torch.Tensor):
+            W_ih = torch.ones((5, 7), device=device)
+            b_ih = torch.ones((7), device=device)
+            W_hh = torch.ones((7, 7), device=device)
+            b_hh = torch.ones((7), device=device)
+            c_new = y @ W_ih + b_ih
+            h_new = torch.tanh(c_new + x @ W_hh + b_hh)
+            return h_new, h_new
+
+        expected_result = rnn(
+            torch.permute(x, (1, 0, 2)), torch.unsqueeze(h[:, 0, :], 0)
+        )
+        expected_result_state = torch.permute(expected_result[1], (1, 0, 2))
+        result = scan(RNN, init=torch.select_copy(h, dim, 0), xs=x, dim=dim)
+        self.assertEqual(result[0].unsqueeze(0), expected_result_state)
+        self.assertEqual(result[1], expected_result[0])
 
     @requires_cuda
     @parametrize("reverse", [False, True])
@@ -1920,6 +3329,396 @@ def forward(self, pred_1, x_1):
                 reverse=reverse,
             )
             self.assertEqual(cnt.frame_count, 6)
+
+    # TODO: Does not work because of the usage of vmap within associative_scan
+    # Fails with: AssertionError: scan is not an OpOverload
+    @skipIfRocm(msg="Unsupported on ROCM yet")
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    @unittest.expectedFailure
+    def test_scan_associative_scan(self):
+        combine_mode = "generic"
+        compile_mode_scan = "compile"
+        compile_mode_associative_scan = "none"
+        reverse_first = True
+        reverse_second = True
+        device = torch.device("cuda")
+
+        scan_fct = compile_mode_helper(scan, compile_mode_scan)
+        associative_scan_fct = compile_mode_helper(
+            associative_scan, compile_mode_associative_scan
+        )
+        init = torch.randn(10, 5, device=device)
+        xs = torch.randn(3, 10, 5, device=device)
+
+        def first_nested_fct(init, xs):
+            y_first = scan_fct(
+                second_nested_fct,
+                init,
+                xs,
+                dim=0,
+                reverse=reverse_first,
+            )
+            return y_first
+
+        def first_nested_fct_fake(init, xs):
+            y_first = _fake_scan(
+                second_nested_fct_fake, init, xs, dim=0, reverse=reverse_first
+            )
+            return y_first
+
+        def second_nested_fct(init, xs):
+            y_second = associative_scan_fct(
+                get_scan_combine_fn("add", True),
+                xs,
+                0,
+                reverse=reverse_second,
+                combine_mode=combine_mode,
+            )
+            return init + 42.0, y_second
+
+        def second_nested_fct_fake(init, xs):
+            y_second = _fake_associative_scan(
+                get_scan_combine_fn("add", True),
+                xs,
+                0,
+                reverse=reverse_second,
+                combine_mode=combine_mode,
+            )
+            return init + 42.0, y_second
+
+        xs = torch.randn(3, 10, 2, device=device)
+        init = torch.randn(10, 2, device=device)
+
+        kwargs = {
+            "combine_fn": first_nested_fct,
+        }
+        kwargs_fake = {
+            "combine_fn": first_nested_fct_fake,
+        }
+        self._run_test(
+            model=ScanModels.NestedFn(**kwargs),
+            model_fake=ScanModels.NestedFn(**kwargs_fake),
+            init=init,
+            xs=xs,
+        )
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    @parametrize("reverse_first", [False, True])
+    @parametrize("reverse_second", [False, True])
+    @parametrize("compile_mode", ["none", "eager"])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    def test_scan_nested(self, reverse_first, reverse_second, compile_mode, device):
+        scan_fct = compile_mode_helper(scan, compile_mode)
+
+        def first_nested_fct(init, xs):
+            y_first = scan_fct(
+                second_nested_fct,
+                init,
+                xs,
+                dim=1,
+                reverse=reverse_first,
+            )
+            return y_first
+
+        def first_nested_fct_fake(init, xs):
+            y_first = _fake_scan(
+                second_nested_fct_fake, init, xs, dim=1, reverse=reverse_first
+            )
+            return y_first
+
+        def second_nested_fct(init, xs):
+            y_second = scan_fct(
+                get_scan_combine_fn("mul", False),
+                init,
+                xs,
+                dim=0,
+                reverse=reverse_second,
+            )
+            return y_second
+
+        def second_nested_fct_fake(init, xs):
+            y_second = _fake_scan(
+                get_scan_combine_fn("mul", False),
+                init,
+                xs,
+                dim=0,
+                reverse=reverse_second,
+            )
+            return y_second
+
+        xs = torch.randn(3, 10, 2, device=device)
+        init = torch.randn(10, 2, device=device)
+
+        kwargs = {
+            "combine_fn": first_nested_fct,
+        }
+        kwargs_fake = {
+            "combine_fn": first_nested_fct_fake,
+        }
+        self._run_test(
+            model=ScanModels.NestedFn(**kwargs),
+            model_fake=ScanModels.NestedFn(**kwargs_fake),
+            init=init,
+            xs=xs,
+        )
+
+    # TODO: Does not work in compile_modes "compile" and "compile_dynamic_shape"
+    # Fails with: AssertionError: scan is not an OpOverload
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    @unittest.expectedFailure
+    def test_scan_loop_in_combine_fn(self):
+        compile_mode = "compile"
+        loop_type = "for"
+        reverse = False
+        device = torch.device("cuda")
+
+        def combine_fn(init, xs):
+            cnt = torch.zeros_like(xs[0, :])
+            if loop_type == "while":
+
+                def cond_fn(ind, loop_val):
+                    return (loop_val < 5)[0]
+
+                def body_fn(ind, loop_val):
+                    return ind + 1, loop_val + torch.abs(ind)
+
+                new_ind, cnt = torch.while_loop(
+                    cond_fn=cond_fn,
+                    body_fn=body_fn,
+                    carried_inputs=(
+                        torch.zeros(1, dtype=torch.int32, device=cnt.device),
+                        cnt,
+                    ),
+                )
+            else:
+                for ind in range(10):
+                    cnt += torch.abs(xs[ind])
+            return init + torch.sum(cnt), init * cnt
+
+        init = torch.randn(10, 1, device=device)
+        xs = torch.randn(3, 10, 1, device=device) * 2
+
+        kwargs = {
+            "dim": 0,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": combine_fn,
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        self._run_test(
+            model=ScanModels.CombineFn(**kwargs),
+            model_fake=ScanModels.CombineFn(**kwargs_fake),
+            init=init,
+            xs=xs,
+        )
+
+    # TODO: Does not work in compile_modes "compile" and "compile_dynamic_shape"
+    # Fails with: AssertionError: scan is not an OpOverload
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    @unittest.expectedFailure
+    def test_scan_cond_in_combine_fn(self, compile_mode, reverse, device):
+        compile_mode = "compile"
+        reverse = False
+        device = torch.device("cuda")
+
+        def combine_fn(init, xs):
+            val_xs = cond(
+                torch.sum(xs) > 0.0, lambda xs: xs + 0.0, lambda xs: 1.0 - xs, (xs,)
+            )
+            val_init = cond(
+                torch.sum(init) < 0.0,
+                lambda init: torch.sum(init + 0.42),
+                lambda init: torch.sum(0.42 - init),
+                (init,),
+            )
+            return init * val_init, xs * val_xs + val_init
+
+        init = torch.randn(10, 1, device=device)
+        xs = torch.randn(3, 10, 1, device=device)
+
+        kwargs = {
+            "dim": 0,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": combine_fn,
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        self._run_test(
+            model=ScanModels.CombineFn(**kwargs),
+            model_fake=ScanModels.CombineFn(**kwargs_fake),
+            init=init,
+            xs=xs,
+        )
+
+    # TODO: Does not work in compile_modes "compile" and "compile_dynamic_shape"
+    # Fails with: AssertionError: scan is not an OpOverload
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    @unittest.expectedFailure
+    def test_scan_map_in_combine_fn(self):
+        compile_mode = "compile"
+        reverse = False
+        device = torch.device("cuda")
+
+        def combine_fn(init, xs):
+            def body(x, y):
+                return x + y
+
+            y_init = xs[0]
+            y_new = control_flow.map(body, xs, y_init)
+            return init * y_new, y_new
+
+        init = torch.randn(10, 1, device=device)
+        xs = torch.randn(3, 10, 1, device=device)
+
+        kwargs = {
+            "dim": 0,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": combine_fn,
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        self._run_test(
+            model=ScanModels.CombineFn(**kwargs),
+            model_fake=ScanModels.CombineFn(**kwargs_fake),
+            init=init,
+            xs=xs,
+        )
+
+    # TODO: Does not work in compile_modes "compile" and "compile_dynamic_shape"
+    # Fails with: AssertionError: scan is not an OpOverload
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    @unittest.expectedFailure
+    def test_scan_vmap_in_combine_fn(self, compile_mode, reverse, device):
+        compile_mode = "compile"
+        reverse = False
+        device = torch.device("cuda")
+
+        def combine_fn(init, xs):
+            def body(x):
+                return x**2
+
+            mapped_body = torch.vmap(body, 0, 0)
+            y_new = mapped_body(xs)
+            return init + y_new, y_new
+
+        init = torch.randn(10, 2, device=device)
+        xs = torch.randn(3, 10, 2, device=device)
+
+        kwargs = {
+            "dim": 0,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": combine_fn,
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        self._run_test(
+            model=ScanModels.CombineFn(**kwargs),
+            model_fake=ScanModels.CombineFn(**kwargs_fake),
+            init=init,
+            xs=xs,
+        )
+
+    @skipIfNoDynamoSupport
+    @skipIfCrossRef  # Arg order changes with crossref
+    def test_scan_simple_graph(self):
+        from torch._dynamo.testing import EagerAndRecordGraphs
+
+        x = torch.randn(3, 10, 2, device=torch.device("cpu"))
+        init = torch.randn(1, 10, 2, device=torch.device("cpu"))
+
+        def f(fct, init, xs):
+            return scan(fct, init, xs, dim=0, reverse=True)
+
+        # Correct case
+        gm = make_fx(f, tracing_mode="symbolic")(
+            get_scan_combine_fn("add", False), init, x
+        )
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, fct_1, init_1, xs_1):
+    select = torch.ops.aten.select.int(xs_1, 0, 0)
+    add = torch.ops.aten.add.Tensor(init_1, select);  add = None
+    add_1 = torch.ops.aten.add.Tensor(init_1, select);  select = add_1 = None
+    sym_size_int_1 = torch.ops.aten.sym_size.int(init_1, 1)
+    sym_size_int_2 = torch.ops.aten.sym_size.int(init_1, 2)
+    clone = torch.ops.aten.clone.default(init_1);  clone = None
+    select_copy = torch.ops.aten.select_copy.int(xs_1, 0, 0);  select_copy = None
+    sym_size_int_3 = torch.ops.aten.sym_size.int(xs_1, 1)
+    sym_size_int_4 = torch.ops.aten.sym_size.int(xs_1, 2)
+    scan_combine_graph_0 = self.scan_combine_graph_0
+    scan = torch.ops.higher_order.scan(scan_combine_graph_0, [init_1], [xs_1], 0, True, [sym_size_int_1, sym_size_int_2, sym_size_int_3, sym_size_int_4]);  scan_combine_graph_0 = init_1 = xs_1 = sym_size_int_1 = sym_size_int_2 = sym_size_int_3 = sym_size_int_4 = None
+    getitem = scan[0]
+    getitem_1 = scan[1];  scan = None
+    return (getitem, getitem_1)""",  # noqa: B950
+        )
+
+        # Check graph
+        backend = EagerAndRecordGraphs()
+        torch.compile(f, backend=backend)(get_scan_combine_fn("add", False), init, x)
+        gm = backend.graphs[0]
+
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
+    l_init_ = L_init_
+    l_xs_ = L_xs_
+    select = l_xs_.select(0, 0)
+    new_carry = l_init_ + select;  new_carry = None
+    add_1 = l_init_ + select;  select = add_1 = None
+    child = l_init_.clone();  child = None
+    child_1 = torch.select_copy(l_xs_, 0, 0);  child_1 = None
+    scan_combine_fn_0 = self.scan_combine_fn_0
+    scan = torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_], [l_xs_], 0, True, []);  scan_combine_fn_0 = l_init_ = l_xs_ = None
+    getitem = scan[0]
+    getitem_1 = scan[1];  scan = None
+    return (getitem, getitem_1)""",  # noqa: B950
+        )
+
+    ######################
+    # Negative testcases #
+    ######################
+
+    @requires_cuda
+    def test_scan_wrong_pytree(self):
+        # Init and input have same pytree
+        def fct_wrong_pytree(x, y):
+            return (
+                {
+                    "i": x["i"] * y["j"][0][0],
+                    "k": 0.0,
+                    "j": ([x["j"][1][0]["o"]], [{"o": torch.sin(x["i"])}]),
+                },
+                {
+                    "i": x["i"] * y["j"][0][0],
+                    "k": 0.0,
+                    "j": ([x["j"][1][0]["o"]], [{"o": torch.sin(x["i"])}]),
+                },
+            )
+
+        x = torch.randn(3, 2, 2)
+        y = torch.randn(3, 2, 2)
+        z = torch.randn(3, 2, 2)
+        inp = {"i": x, "j": ([y], [{"o": z}])}
+        inp_flat, inp_spec = pytree.tree_flatten(inp)
+        init_flat = [torch._ops.ops.aten.slice(e, 0, 0, 1, 1) for e in inp_flat]
+        init = pytree.tree_unflatten(init_flat, inp_spec)
+
+        with self.assertRaisesRegex(
+            # Should be: RuntimeError,
+            # r"The number of leaves of the pytree of the new carry produced by
+            # the operator needs to match the length of the pytree of the init",
+            RuntimeError,
+            "The number of leaves of the pytree of the new carry",
+        ):
+            result = scan(fct_wrong_pytree, init, inp, dim=0)
 
     @requires_cuda
     @parametrize("compile_mode", ["none", "eager"])
@@ -2054,108 +3853,6 @@ def forward(self, pred_1, x_1):
 
     @requires_cuda
     @parametrize("reverse", [False, True])
-    @parametrize("compile_mode", ["none", "eager"])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    def test_scan_init(self, reverse, compile_mode, device):
-        scan_fct = compile_mode_helper(scan, compile_mode)
-
-        # Only init and no input
-        x = torch.randn(3, 1, 2, device=device)
-        init = torch.randn(3, 1, 2, device=device)
-        dim = 1
-        op, op_pt = (get_scan_combine_fn("add", False), torch.cumsum)
-
-        # Only init given
-        init = torch._ops.ops.aten.slice(x, dim, 0, 1, 1)
-        result = scan_fct(op, init, [], dim=dim, reverse=reverse)
-        result_exp = _fake_scan(op, init=init, xs=[], dim=dim, reverse=reverse)
-        result_init = scan_fct(op, init, [], dim=dim, reverse=reverse)
-        self.assertEqual(result, result_exp)
-        self.assertEqual(result_init, result_exp)
-        self.assertEqual(result_init[0], init)
-
-        x = torch.randn(3, 5, 2, device=device)
-        init = torch.randn(3, 5, 2, device=device)
-        dim = 0
-
-        op, op_pt = (get_scan_combine_fn("add", False), torch.cumsum)
-        inp = torch._ops.ops.aten.slice(x, dim, 1, None, 1)
-
-        # Init tensor scalar
-        init = torch.ones(1, device=device)
-
-        def add_scalar_carry(x: torch.Tensor, y: torch.Tensor):
-            return x + 1.0, x + y
-
-        result_init = scan_fct(add_scalar_carry, init, inp, dim=dim, reverse=reverse)
-        result_exp = _fake_scan(
-            add_scalar_carry, init=init, xs=inp, dim=dim, reverse=reverse
-        )
-        self.assertEqual(result_init, result_exp)
-        self.assertEqual(result_init[0], torch.tensor([3.0], device=device))
-
-        # Init tensor entirely different shape than inp
-        init = torch.randn(7, 8, device=device)
-
-        def add_scalar_carry2(x: torch.Tensor, y: torch.Tensor):
-            return x + 1.0, x[: y.shape[0], : y.shape[1]] + y
-
-        result_init = scan_fct(add_scalar_carry2, init, inp, dim=dim, reverse=reverse)
-        result_exp = _fake_scan(
-            add_scalar_carry2, init=init, xs=inp, dim=dim, reverse=reverse
-        )
-        self.assertEqual(result_init, result_exp)
-
-        # Init with two timestep on dim axis. Should work as y has always 1 on dim axis and
-        # hence automatic broadcasting should work
-        # I.e., the input shape is 2x5x2, but the carry at each iteration is 2x5x2,
-        # thus the output of each iteration is 2x5x2, which results in the total output
-        # to be 4x5x2
-        init = torch._ops.ops.aten.slice(x, dim, 0, 2, 1)
-        result_init = scan_fct(op, init, inp, dim=dim, reverse=reverse)
-        result_exp = _fake_scan(op, init=init, xs=inp, dim=dim, reverse=reverse)
-        self.assertEqual(result_init, result_exp)
-        self.assertEqual(result_init[0].shape, torch.Size([2, 5, 2]))
-
-        init = torch.tile(init, (1, 2, 1))
-
-        def add_scalar_carry_sliced_out(x: torch.Tensor, y: torch.Tensor):
-            return x + 1.0, x[:, :1, :] + y
-
-        result_init = scan_fct(
-            add_scalar_carry_sliced_out, init, inp, dim=dim, reverse=reverse
-        )
-        result_exp = _fake_scan(
-            add_scalar_carry_sliced_out, init=init, xs=inp, dim=dim, reverse=reverse
-        )
-        self.assertEqual(result_init, result_exp)
-        self.assertEqual(result_init[0].shape, torch.Size([2, 10, 2]))
-        self.assertEqual(result_init[1].shape, torch.Size([2, 2, 5, 2]))
-
-        # Correct case
-        op, op_pt = (get_scan_combine_fn("add", False), torch.cumsum)
-        x = torch.randn(3, 2, 2, device=device)
-        dim = 1
-
-        if reverse:
-            init = torch.zeros_like(torch.select_copy(x, -1, 0))
-            inp = torch._ops.ops.aten.slice(x, dim, 0, -1, 1)
-        else:
-            init = torch.zeros_like(torch.select_copy(x, 1, 0))
-            inp = torch._ops.ops.aten.slice(x, dim, 1, None, 1)
-
-        result = scan_fct(op, init, x, dim=dim, reverse=reverse)
-        result_exp = _fake_scan(op, init=init, xs=x, dim=dim, reverse=reverse)
-
-        self.assertEqual(result, result_exp)
-        if not reverse:
-            result_exp_PT = op_pt(x, dim)
-            result = list(result)
-            result[1] = pytree.tree_map(lambda t: t.movedim(0, dim), result[1])
-            self.assertEqual(result[1], result_exp_PT)
-
-    @requires_cuda
-    @parametrize("reverse", [False, True])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     def test_scan_init_wrong_pytree_complex(self, reverse, device):
         x = torch.randn(3, 2, 2, device=device)
@@ -2190,161 +3887,6 @@ def forward(self, pred_1, x_1):
                 reverse=reverse,
             )
 
-    @requires_cuda
-    @parametrize("reverse", [False, True])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    def test_scan_init_pytree_complex(self, reverse, device):
-        def fct_pointwise_different_output(x, y):
-            return (
-                {
-                    "i": x["i"] * y["i"],
-                    "j": (
-                        [x["j"][0][0] * y["j"][0][0]],
-                        [{"o": x["j"][1][0]["o"] + y["j"][1][0]["o"]}],
-                    ),
-                },
-                (
-                    y["i"],
-                    {
-                        "o": x["i"] * y["i"],
-                        "j": (
-                            [x["j"][0][0] * y["j"][0][0]],
-                            [{"o": x["j"][1][0]["o"] + y["j"][1][0]["o"]}],
-                        ),
-                    },
-                ),
-            )
-
-        def fct_pointwise_different_carry(x, y):
-            return (
-                {
-                    "i": x["i"] * y["i"],
-                    "j": (
-                        x["i"],
-                        [x["j"][1][0] * y["j"][0][0]],
-                        [{"o": x["j"][2][0]["o"] + y["j"][1][0]["o"]}],
-                    ),
-                },
-                (
-                    y["i"],
-                    {
-                        "o": x["i"] * y["i"] + x["j"][0][0],
-                        "j": (
-                            [x["j"][1][0] * y["j"][0][0]],
-                            [{"o": x["j"][2][0]["o"] + y["j"][1][0]["o"]}],
-                        ),
-                    },
-                ),
-            )
-
-        x = torch.randn(3, 2, 2, device=device)
-        y = torch.randn(3, 2, 2, device=device)
-        z = torch.randn(3, 2, 2, device=device)
-
-        if reverse:
-            init_start, init_end = -1, None
-            inp_start, inp_end = 0, -1
-        else:
-            init_start, init_end = 0, 1
-            inp_start, inp_end = 1, None
-
-        # Regular case
-        init = {
-            "i": torch._ops.ops.aten.slice(x, 0, init_start, init_end, 1),
-            "j": (
-                [torch._ops.ops.aten.slice(y, 0, init_start, init_end, 1)],
-                [{"o": torch._ops.ops.aten.slice(z, 0, init_start, init_end, 1)}],
-            ),
-        }
-        inp = {
-            "i": torch._ops.ops.aten.slice(x, 0, inp_start, inp_end, 1),
-            "j": (
-                [torch._ops.ops.aten.slice(y, 0, inp_start, inp_end, 1)],
-                [{"o": torch._ops.ops.aten.slice(z, 0, inp_start, inp_end, 1)}],
-            ),
-        }
-        result = scan(
-            get_scan_combine_fn("complex_pointwise", False),
-            init,
-            inp,
-            dim=0,
-            reverse=reverse,
-        )
-        expected_result = _fake_scan(
-            get_scan_combine_fn("complex_pointwise", False),
-            init,
-            inp,
-            dim=0,
-            reverse=reverse,
-        )
-        self.assertEqual(result, expected_result)
-
-        # Pytree of output is different
-        result = scan(fct_pointwise_different_output, init, inp, dim=0, reverse=reverse)
-        expected_result = _fake_scan(
-            fct_pointwise_different_output, init=init, xs=inp, dim=0, reverse=reverse
-        )
-        self.assertEqual(result, expected_result)
-
-        # Pytree of carry is different
-        init = {
-            "i": torch._ops.ops.aten.slice(x, 0, init_start, init_end, 1),
-            "j": (
-                torch._ops.ops.aten.slice(x, 0, init_start, init_end, 1),
-                [torch._ops.ops.aten.slice(y, 0, init_start, init_end, 1)],
-                [{"o": torch._ops.ops.aten.slice(z, 0, init_start, init_end, 1)}],
-            ),
-        }
-        inp = {
-            "i": torch._ops.ops.aten.slice(x, 0, inp_start, inp_end, 1),
-            "j": (
-                [torch._ops.ops.aten.slice(y, 0, inp_start, inp_end, 1)],
-                [{"o": torch._ops.ops.aten.slice(z, 0, inp_start, inp_end, 1)}],
-            ),
-        }
-        result = scan(fct_pointwise_different_carry, init, inp, dim=0, reverse=reverse)
-        expected_result = _fake_scan(
-            fct_pointwise_different_carry, init=init, xs=inp, dim=0, reverse=reverse
-        )
-        self.assertEqual(result, expected_result)
-
-    def test_scan_RNN(self):
-        dim = 1
-        device = torch.device("cpu")
-
-        rnn = torch.nn.RNN(
-            input_size=5,
-            hidden_size=7,
-        )
-        rnn = rnn.to(device=device)
-        x = torch.randn(1, 2, 5, device=device)
-        h = torch.randn(1, 2, 7, device=device)
-
-        new_state_dict = {
-            "weight_ih_l0": torch.ones_like(rnn.weight_ih_l0),
-            "bias_ih_l0": torch.ones_like(rnn.bias_ih_l0),
-            "weight_hh_l0": torch.ones_like(rnn.weight_hh_l0),
-            "bias_hh_l0": torch.ones_like(rnn.bias_hh_l0),
-        }
-        rnn.load_state_dict(new_state_dict)
-
-        def RNN(x: torch.Tensor, y: torch.Tensor):
-            W_ih = torch.ones((5, 7), device=device)
-            b_ih = torch.ones((7), device=device)
-            W_hh = torch.ones((7, 7), device=device)
-            b_hh = torch.ones((7), device=device)
-            c_new = y @ W_ih + b_ih
-            h_new = torch.tanh(c_new + x @ W_hh + b_hh)
-            return h_new, h_new
-
-        expected_result = rnn(
-            torch.permute(x, (1, 0, 2)), torch.unsqueeze(h[:, 0, :], 0)
-        )
-        expected_result_state = torch.permute(expected_result[1], (1, 0, 2))
-        result = scan(RNN, init=torch.select_copy(h, dim, 0), xs=x, dim=dim)
-        self.assertEqual(result[0].unsqueeze(0), expected_result_state)
-        self.assertEqual(result[1], expected_result[0])
-
     @skipIfNoDynamoSupport
     def test_scan_simple_graph_wrong_dtype(self):
         def add_wrong_dtype(x: torch.Tensor, y: torch.Tensor):
@@ -2365,957 +3907,6 @@ def forward(self, pred_1, x_1):
             "The dtype of the new_carry",
         ):
             f(add_wrong_dtype, init, x)
-
-    @skipIfNoDynamoSupport
-    @skipIfCrossRef  # Arg order changes with crossref
-    def test_scan_simple_graph(self):
-        from torch._dynamo.testing import EagerAndRecordGraphs
-
-        x = torch.randn(3, 10, 2, device=torch.device("cpu"))
-        init = torch.randn(1, 10, 2, device=torch.device("cpu"))
-
-        def f(fct, init, xs):
-            return scan(fct, init, xs, dim=0, reverse=True)
-
-        # Correct case
-        gm = make_fx(f, tracing_mode="symbolic")(
-            get_scan_combine_fn("add", False), init, x
-        )
-        self.assertExpectedInline(
-            gm.code.strip(),
-            """\
-def forward(self, fct_1, init_1, xs_1):
-    select = torch.ops.aten.select.int(xs_1, 0, 0)
-    add = torch.ops.aten.add.Tensor(init_1, select);  add = None
-    add_1 = torch.ops.aten.add.Tensor(init_1, select);  select = add_1 = None
-    sym_size_int_1 = torch.ops.aten.sym_size.int(init_1, 1)
-    sym_size_int_2 = torch.ops.aten.sym_size.int(init_1, 2)
-    clone = torch.ops.aten.clone.default(init_1);  clone = None
-    select_copy = torch.ops.aten.select_copy.int(xs_1, 0, 0);  select_copy = None
-    sym_size_int_3 = torch.ops.aten.sym_size.int(xs_1, 1)
-    sym_size_int_4 = torch.ops.aten.sym_size.int(xs_1, 2)
-    scan_combine_graph_0 = self.scan_combine_graph_0
-    scan = torch.ops.higher_order.scan(scan_combine_graph_0, [init_1], [xs_1], 0, True, [sym_size_int_1, sym_size_int_2, sym_size_int_3, sym_size_int_4]);  scan_combine_graph_0 = init_1 = xs_1 = sym_size_int_1 = sym_size_int_2 = sym_size_int_3 = sym_size_int_4 = None
-    getitem = scan[0]
-    getitem_1 = scan[1];  scan = None
-    return (getitem, getitem_1)""",  # noqa: B950
-        )
-
-        # Check graph
-        backend = EagerAndRecordGraphs()
-        torch.compile(f, backend=backend)(get_scan_combine_fn("add", False), init, x)
-        gm = backend.graphs[0]
-
-        self.assertExpectedInline(
-            gm.code.strip(),
-            """\
-def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
-    l_init_ = L_init_
-    l_xs_ = L_xs_
-    select = l_xs_.select(0, 0)
-    new_carry = l_init_ + select;  new_carry = None
-    add_1 = l_init_ + select;  select = add_1 = None
-    child = l_init_.clone();  child = None
-    child_1 = torch.select_copy(l_xs_, 0, 0);  child_1 = None
-    scan_combine_fn_0 = self.scan_combine_fn_0
-    scan = torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_], [l_xs_], 0, True, []);  scan_combine_fn_0 = l_init_ = l_xs_ = None
-    getitem = scan[0]
-    getitem_1 = scan[1];  scan = None
-    return (getitem, getitem_1)""",  # noqa: B950
-        )
-
-
-class AssociativeScanModels:
-    @staticmethod
-    def get_scan_fct(compile_mode, combine_mode):
-        # Compile the associative_scan according to the provided compile_mode
-        if compile_mode != "fake":
-            compile_mode = "none"
-            assoc_scan_comp = compile_mode_helper(associative_scan, compile_mode)
-
-            def scan_fct(combine_fn, xs, dim, reverse):
-                return assoc_scan_comp(combine_fn, xs, dim, reverse, combine_mode)
-
-        else:
-            scan_fct = _fake_associative_scan
-        return scan_fct
-
-    class CombineFn(torch.nn.Module):
-        def __init__(self, combine_fn, dim, reverse, combine_mode, compile_mode):
-            super().__init__()
-
-            self.scan_fct = AssociativeScanModels.get_scan_fct(
-                compile_mode, combine_mode
-            )
-            self.combine_fn = combine_fn
-            self.dim = dim
-            self.reverse = reverse
-
-        def forward(self, inputs):
-            results = self.scan_fct(self.combine_fn, inputs, self.dim, self.reverse)
-            return results
-
-    class Simple(torch.nn.Module):
-        def __init__(self, dim, reverse, combine_mode, compile_mode):
-            super().__init__()
-
-            kwargs = {
-                "dim": dim,
-                "reverse": reverse,
-                "combine_mode": combine_mode,
-                "compile_mode": compile_mode,
-            }
-            self.combine_fns = [
-                AssociativeScanModels.CombineFn(
-                    get_scan_combine_fn("add", True), **kwargs
-                ),
-                AssociativeScanModels.CombineFn(
-                    get_scan_combine_fn("mul", True), **kwargs
-                ),
-            ]
-
-        def forward(self, inputs):
-            results = []
-            for combine_fn in self.combine_fns:
-                results.append(combine_fn(inputs))
-            return results
-
-    class ChainFn(torch.nn.Module):
-        def __init__(self, combine_fn, dim, reverse, combine_mode, compile_mode):
-            super().__init__()
-
-            chain_len = len(combine_fn)
-            kwargs = {
-                "combine_fn": combine_fn,
-                "dim": dim,
-                "reverse": reverse,
-                "combine_mode": combine_mode,
-            }
-
-            # Prepare the kwargs as a list.
-            self.nested_tuple = []
-            for ind in range(chain_len):
-                kwargs_el = {}
-                for key, val in kwargs.items():
-                    # Check if val is a list and if it has the same length as combine_fn
-                    # If so, then use the individual elements.
-                    # If not, duplicate the first element.
-                    if type(val) == list and len(val) == chain_len:
-                        kwargs_el[key] = val[ind]
-                    else:
-                        kwargs_el[key] = val
-
-                scan_fct = AssociativeScanModels.get_scan_fct(
-                    compile_mode, kwargs_el["combine_mode"]
-                )
-                combine_fn = kwargs_el["combine_fn"]
-                del kwargs_el["combine_fn"]
-                del kwargs_el["combine_mode"]
-                self.nested_tuple.append((combine_fn, scan_fct, kwargs_el))
-
-        def forward(self, inputs):
-            results = inputs
-            for combine_fn, scan_fct, kwargs in self.nested_tuple:
-                results = combine_fn(scan_fct, results, **kwargs)
-            return results
-
-    class NestedFn(torch.nn.Module):
-        def forward(self, scan_fct, inputs, **kwargs):
-            combine_fn = kwargs["combine_fn"]
-
-            # Remove combine_fn from kwargs
-            del kwargs["combine_fn"]
-
-            results = scan_fct(combine_fn, inputs, **kwargs)
-
-            return results
-
-
-@unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
-@skipIfNoDynamoSupport
-class AssociativeScanTests(TestCase):
-    def setUp(self):
-        torch._dynamo.reset()
-        super().setUp()
-
-    def _run_test(self, model, model_fake, inputs):
-        result = model(inputs)
-        result_exp = model_fake(inputs)
-        self.assertEqual(result, result_exp)
-
-        # Return the result of the functions under test for further investigations
-        return result
-
-    def _prepare_fake_kwargs(self, original_kwargs):
-        kwargs_fake = original_kwargs.copy()
-        kwargs_fake["compile_mode"] = "fake"
-        return kwargs_fake
-
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
-    @parametrize("reverse", [False, True])
-    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
-    @parametrize("combine_mode", ["pointwise", "generic"])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    # Skipping the combination of combine_mode=pointwise and device=cpu
-    # as the current implementation of pointwise does only support CUDA device
-    @decorateIf(
-        unittest.skip,
-        lambda params: (
-            params["combine_mode"] == "pointwise"
-            and (params["device"] == torch.device("cpu") or torch.version.hip)
-        ),
-    )
-    def test_associative_scan_compile(
-        self, combine_mode, reverse, compile_mode, device
-    ):
-        x = torch.randn(3, 10, 2, device=device)
-        kwargs = {
-            "dim": 0,
-            "reverse": reverse,
-            "compile_mode": compile_mode,
-            "combine_mode": combine_mode,
-        }
-        kwargs_fake = self._prepare_fake_kwargs(kwargs)
-        results = self._run_test(
-            model=AssociativeScanModels.Simple(**kwargs),
-            model_fake=AssociativeScanModels.Simple(**kwargs_fake),
-            inputs=x,
-        )
-
-        if not reverse:
-            results_torch = []
-            for op_pt in [torch.cumsum, torch.cumprod]:
-                results_torch.append(op_pt(x, 0))
-            self.assertEqual(results, results_torch)
-
-        # Jax Examples
-        x = torch.arange(0, 4, device=device)
-        kwargs = {
-            "dim": 0,
-            "reverse": reverse,
-            "compile_mode": compile_mode,
-            "combine_fn": get_scan_combine_fn("add", True),
-            "combine_mode": combine_mode,
-        }
-        kwargs_fake = self._prepare_fake_kwargs(kwargs)
-        result = self._run_test(
-            model=AssociativeScanModels.CombineFn(**kwargs),
-            model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
-            inputs=x,
-        )
-
-        if not reverse:
-            results_torch = torch.tensor([0.0, 1.0, 3.0, 6.0], dtype=torch.int64)
-        else:
-            results_torch = torch.tensor([6.0, 6.0, 5.0, 3.0], dtype=torch.int64)
-
-        self.assertEqual(result, results_torch)
-
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
-    @parametrize("reverse", [False, True])
-    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
-    @parametrize("combine_mode", ["pointwise", "generic"])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    # Skipping the combination of combine_mode=pointwise and device=cpu
-    # as the current implementation of pointwise does only support CUDA device
-    @decorateIf(
-        unittest.skip,
-        lambda params: (
-            params["combine_mode"] == "pointwise"
-            and (params["device"] == torch.device("cpu") or torch.version.hip)
-        ),
-    )
-    def test_associative_scan_dim(self, combine_mode, compile_mode, reverse, device):
-        import random
-
-        random.seed(1234)
-
-        num_dims = [random.randint(2, 5) for _ in range(4)]
-        for num_dim in num_dims:
-            # To avoid triggering automatic dynamic shape
-            torch._dynamo.reset()
-            shapes = [random.randint(1, 9) for _ in range(num_dim)]
-            rnd_scan_dim = random.randint(0, num_dim - 1)
-            x = torch.randn(*shapes, device=device)
-
-            kwargs = {
-                "dim": rnd_scan_dim,
-                "reverse": reverse,
-                "compile_mode": compile_mode,
-                "combine_mode": combine_mode,
-            }
-            kwargs_fake = self._prepare_fake_kwargs(kwargs)
-            results = self._run_test(
-                model=AssociativeScanModels.Simple(**kwargs),
-                model_fake=AssociativeScanModels.Simple(**kwargs_fake),
-                inputs=x,
-            )
-
-            if not reverse:
-                results_torch = []
-                for op_pt in [torch.cumsum, torch.cumprod]:
-                    results_torch.append(op_pt(x, 0))
-                self.assertEqual(results, results_torch)
-
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
-    # This test is expected to fail, as there may be an issue with the underlying triton implementation
-    # See https://github.com/pytorch/pytorch/issues/137943
-    @unittest.expectedFailure
-    def test_associative_scan_dim_shape_failure(self):
-        num_dims = [2]
-        for num_dim in num_dims:
-            shapes = [9 for _ in range(num_dim)]
-            rnd_scan_dim = 0
-            x = torch.randn(*shapes, device=torch.device("cuda"))
-
-            kwargs = {
-                "dim": rnd_scan_dim,
-                "reverse": True,
-                "compile_mode": "none",
-                "combine_mode": "generic",
-            }
-            kwargs_fake = self._prepare_fake_kwargs(kwargs)
-            self._run_test(
-                model=AssociativeScanModels.Simple(**kwargs),
-                model_fake=AssociativeScanModels.Simple(**kwargs_fake),
-                inputs=x,
-            )
-
-    @skipIfRocm(msg="Unsupported on ROCM yet")
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
-    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
-    @parametrize("combine_mode", ["pointwise", "generic"])
-    @parametrize("reverse", [False, True])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    # Skipping the combination of combine_mode=pointwise and device=cpu
-    # as the current implementation of pointwise does only support CUDA device
-    @decorateIf(
-        unittest.skip,
-        lambda params: (
-            params["combine_mode"] == "pointwise"
-            and (params["device"] == torch.device("cpu") or torch.version.hip)
-        ),
-    )
-    def test_associative_scan_tuple(self, compile_mode, combine_mode, reverse, device):
-        x = torch.randn(3, 2, 2, device=device)
-        y = torch.randn(3, 2, 2, device=device)
-        inp = (x, y)
-
-        kwargs = {
-            "dim": 0,
-            "reverse": reverse,
-            "compile_mode": compile_mode,
-            "combine_fn": get_scan_combine_fn("tuple_fct", True),
-            "combine_mode": combine_mode,
-        }
-        kwargs_fake = self._prepare_fake_kwargs(kwargs)
-        self._run_test(
-            model=AssociativeScanModels.CombineFn(**kwargs),
-            model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
-            inputs=inp,
-        )
-
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
-    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
-    @parametrize("combine_mode", ["pointwise", "generic"])
-    @parametrize("reverse", [False, True])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    def test_associative_scan_expand_in_combine_fn(
-        self, compile_mode, combine_mode, reverse, device
-    ):
-        x = torch.randn(3, 2, 2, device=device)
-
-        def combine_fn(x, y):
-            return x * torch.sum(y, -1).expand(x.shape)
-
-        kwargs = {
-            "dim": 0,
-            "reverse": reverse,
-            "compile_mode": compile_mode,
-            "combine_fn": combine_fn,
-            "combine_mode": "generic",
-        }
-        kwargs_fake = self._prepare_fake_kwargs(kwargs)
-        self._run_test(
-            model=AssociativeScanModels.CombineFn(**kwargs),
-            model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
-            inputs=x,
-        )
-
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
-    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
-    @parametrize("reverse", [False, True])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    def test_associative_scan_non_contiguous_tensor(
-        self, compile_mode, reverse, device
-    ):
-        x = torch.arange(30, device=device).view(10, 3).t()
-        assert not x.is_contiguous()
-
-        kwargs = {
-            "dim": 0,
-            "reverse": reverse,
-            "compile_mode": compile_mode,
-            "combine_fn": get_scan_combine_fn("add", True),
-            "combine_mode": "generic",
-        }
-        kwargs_fake = self._prepare_fake_kwargs(kwargs)
-        self._run_test(
-            model=AssociativeScanModels.CombineFn(**kwargs),
-            model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
-            inputs=x,
-        )
-
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
-    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
-    @parametrize("combine_mode", ["pointwise", "generic"])
-    @parametrize("reverse", [False, True])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    # Skipping the combination of combine_mode=pointwise and device=cpu
-    # as the current implementation of pointwise does only support CUDA device
-    @decorateIf(
-        unittest.skip,
-        lambda params: (
-            params["combine_mode"] == "pointwise"
-            and (params["device"] == torch.device("cpu") or torch.version.hip)
-        ),
-    )
-    def test_associative_scan_complex_pytree(
-        self, compile_mode, combine_mode, reverse, device
-    ):
-        x = torch.randn(3, 2, 2, device=device)
-        y = torch.randn(3, 2, 2, device=device)
-        z = torch.randn(3, 2, 2, device=device)
-        inp = {"i": x, "j": ([y], [{"o": z}])}
-
-        kwargs = {
-            "dim": 0,
-            "reverse": reverse,
-            "compile_mode": compile_mode,
-            "combine_fn": get_scan_combine_fn("complex_pointwise", True),
-            "combine_mode": combine_mode,
-        }
-        kwargs_fake = self._prepare_fake_kwargs(kwargs)
-        self._run_test(
-            model=AssociativeScanModels.CombineFn(**kwargs),
-            model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
-            inputs=inp,
-        )
-
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
-    @parametrize("combine_mode", ["pointwise", "generic"])
-    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
-    @parametrize("reverse", [False, True])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    # Skipping the combination of combine_mode=pointwise and device=cpu
-    # as the current implementation of pointwise does only support CUDA device
-    @decorateIf(
-        unittest.skip,
-        lambda params: (
-            params["combine_mode"] == "pointwise"
-            and (params["device"] == torch.device("cpu") or torch.version.hip)
-        ),
-    )
-    def test_associative_scan_downstream_scan_matmul(
-        self, combine_mode, compile_mode, reverse, device
-    ):
-        def first_chain_fct(scan_fct, inp, **kwargs):
-            o = scan_fct(get_scan_combine_fn("add", True), inp, **kwargs)
-            return o
-
-        def second_chain_fct(scan_fct, inp, **kwargs):
-            W = torch.ones(2, 5, device=device)
-            return inp @ W
-
-        inp = torch.randn(3, 10, 2, device=device)
-        kwargs = {
-            "dim": 1,
-            "reverse": reverse,
-            "compile_mode": compile_mode,
-            "combine_fn": [first_chain_fct, second_chain_fct],
-            "combine_mode": combine_mode,
-        }
-        kwargs_fake = self._prepare_fake_kwargs(kwargs)
-        self._run_test(
-            model=AssociativeScanModels.ChainFn(**kwargs),
-            model_fake=AssociativeScanModels.ChainFn(**kwargs_fake),
-            inputs=inp,
-        )
-
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
-    @parametrize("combine_mode", ["pointwise", "generic"])
-    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
-    @parametrize("reverse", [False, True])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    # Skipping the combination of combine_mode=pointwise and device=cpu
-    # as the current implementation of pointwise does only support CUDA device
-    @decorateIf(
-        unittest.skip,
-        lambda params: (
-            params["combine_mode"] == "pointwise"
-            and (params["device"] == torch.device("cpu") or torch.version.hip)
-        ),
-    )
-    def test_associative_scan_downstream_scan_scan(
-        self, combine_mode, compile_mode, reverse, device
-    ):
-        def first_chain_fct(scan_fct, inp, **kwargs):
-            o1 = scan_fct(get_scan_combine_fn("add", True), inp, **kwargs)
-            return o1
-
-        def second_chain_fct(scan_fct, inp, **kwargs):
-            o2 = scan_fct(get_scan_combine_fn("add", True), inp, **kwargs)
-            return o2
-
-        inp = torch.randn(3, 10, 2, device=device)
-
-        kwargs = {
-            "dim": 1,
-            "reverse": reverse,
-            "compile_mode": compile_mode,
-            "combine_fn": [first_chain_fct, second_chain_fct],
-            "combine_mode": combine_mode,
-        }
-        kwargs_fake = self._prepare_fake_kwargs(kwargs)
-        self._run_test(
-            model=AssociativeScanModels.ChainFn(**kwargs),
-            model_fake=AssociativeScanModels.ChainFn(**kwargs_fake),
-            inputs=inp,
-        )
-
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
-    @parametrize("combine_mode", ["pointwise", "generic"])
-    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
-    @parametrize("reverse_first", [False, True])
-    @parametrize("same_direction", [False, True])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    # Skipping the combination of combine_mode=pointwise and device=cpu
-    # as the current implementation of pointwise does only support CUDA device
-    @decorateIf(
-        unittest.skip,
-        lambda params: (
-            params["combine_mode"] == "pointwise"
-            and (params["device"] == torch.device("cpu") or torch.version.hip)
-        ),
-    )
-    def test_associative_scan_downstream_scan_scan_different_dim(
-        self, combine_mode, compile_mode, reverse_first, same_direction, device
-    ):
-        reverse_second = reverse_first if same_direction else not reverse_first
-
-        def first_chain_fct(scan_fct, inp, **kwargs):
-            o1 = scan_fct(get_scan_combine_fn("add", True), inp, **kwargs)
-            return o1
-
-        def second_chain_fct(scan_fct, inp, **kwargs):
-            o2 = scan_fct(get_scan_combine_fn("add", True), inp, **kwargs)
-            return o2
-
-        inp = torch.randn(3, 10, 2, device=device)
-
-        kwargs = {
-            "dim": [1, 0],
-            "reverse": [reverse_first, reverse_second],
-            "compile_mode": compile_mode,
-            "combine_fn": [first_chain_fct, second_chain_fct],
-            "combine_mode": [combine_mode, combine_mode],
-        }
-        kwargs_fake = self._prepare_fake_kwargs(kwargs)
-        self._run_test(
-            model=AssociativeScanModels.ChainFn(**kwargs),
-            model_fake=AssociativeScanModels.ChainFn(**kwargs_fake),
-            inputs=inp,
-        )
-
-    # TODO: Does not work because of the usage of vmap witin associative_scan
-    # TODO: Re-enable additional parameters again once this issues has been resolved
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
-    @unittest.expectedFailure
-    def test_associative_scan_nested(self):
-        combine_mode = "pointwise"
-        compile_mode = "eager"
-        reverse_first = False
-        same_direction = False
-        device = torch.device("cuda")
-
-        reverse_second = reverse_first if same_direction else not reverse_first
-
-        def first_nested_fct(x, y):
-            y_new = associative_scan(
-                second_nested_fct,
-                y,
-                0,
-                reverse=reverse_second,
-                combine_mode=combine_mode,
-            )
-            return x + y_new
-
-        def first_nested_fct_fake(x, y):
-            y_new = _fake_associative_scan(
-                second_nested_fct, y, 0, reverse=reverse_second
-            )
-            return x + y_new
-
-        def second_nested_fct(x, y):
-            return x * y
-
-        inp = torch.randn(3, 10, 2, device=device)
-
-        kwargs = {
-            "dim": 0,
-            "reverse": reverse_first,
-            "compile_mode": compile_mode,
-            "combine_fn": first_nested_fct,
-            "combine_mode": combine_mode,
-        }
-        kwargs_fake = self._prepare_fake_kwargs(kwargs)
-        kwargs_fake["combine_fn"] = first_nested_fct_fake
-        self._run_test(
-            model=AssociativeScanModels.NestedFn(**kwargs),
-            model_fake=AssociativeScanModels.NestedFn(**kwargs_fake),
-            inputs=inp,
-        )
-
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
-    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
-    @parametrize("loop_type", ["for"])
-    @parametrize("reverse", [False, True])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    def test_associative_scan_loop_in_combine_fn(
-        self, compile_mode, loop_type, reverse, device
-    ):
-        def combine_fn(x, y):
-            cnt = torch.zeros_like(y[0, :])
-            if loop_type == "while":
-
-                def cond_fn(ind, loop_val):
-                    return (loop_val < 5)[0]
-
-                def body_fn(ind, loop_val):
-                    return ind + 1, loop_val + torch.abs(ind)
-
-                new_ind, cnt = torch.while_loop(
-                    cond_fn=cond_fn,
-                    body_fn=body_fn,
-                    carried_inputs=(
-                        torch.zeros(1, dtype=torch.int32, device=cnt.device),
-                        cnt,
-                    ),
-                )
-            else:
-                for ind in range(10):
-                    cnt += torch.abs(y[ind])
-            return x * cnt
-
-        inp = torch.randn(3, 10, 1, device=device) * 2
-
-        kwargs = {
-            "dim": 0,
-            "reverse": reverse,
-            "compile_mode": compile_mode,
-            "combine_fn": combine_fn,
-            "combine_mode": "generic",
-        }
-        kwargs_fake = self._prepare_fake_kwargs(kwargs)
-        self._run_test(
-            model=AssociativeScanModels.CombineFn(**kwargs),
-            model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
-            inputs=inp,
-        )
-
-    # TODO: Does not work because of the usage of vmap witin associative_scan
-    # TODO: Re-enable additional parameters again once this issues has been resolved
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
-    @unittest.expectedFailure
-    def test_associative_scan_loop_in_combine_fn_failure(self):
-        compile_mode = "none"
-        loop_type = "while"
-        reverse = False
-        device = torch.device("cuda")
-
-        def combine_fn(x, y):
-            cnt = torch.zeros_like(y[0, :])
-            if loop_type == "while":
-
-                def cond_fn(ind, loop_val):
-                    return (loop_val < 5)[0]
-
-                def body_fn(ind, loop_val):
-                    return ind + 1, loop_val + torch.abs(ind)
-
-        inp = torch.randn(3, 10, 1, device=device) * 2
-
-        kwargs = {
-            "dim": 0,
-            "reverse": reverse,
-            "compile_mode": compile_mode,
-            "combine_fn": combine_fn,
-            "combine_mode": "generic",
-        }
-        kwargs_fake = self._prepare_fake_kwargs(kwargs)
-        self._run_test(
-            model=AssociativeScanModels.CombineFn(**kwargs),
-            model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
-            inputs=inp,
-        )
-
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
-    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
-    @parametrize("reverse", [False, True])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    def test_associative_scan_cond_in_combine_fn(self, compile_mode, reverse, device):
-        def combine_fn(x, y):
-            val = cond(torch.sum(y) > 0.0, lambda y: y + 0.0, lambda y: 1.0 - y, (y,))
-            return x * val
-
-        inp = torch.randn(3, 10, 1, device=device)
-
-        kwargs = {
-            "dim": 0,
-            "reverse": reverse,
-            "compile_mode": compile_mode,
-            "combine_fn": combine_fn,
-            "combine_mode": "generic",
-        }
-        kwargs_fake = self._prepare_fake_kwargs(kwargs)
-        self._run_test(
-            model=AssociativeScanModels.CombineFn(**kwargs),
-            model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
-            inputs=inp,
-        )
-
-    # TODO: Does not work because of the usage of vmap witin associative_scan
-    # TODO: Re-enable additional parameters again once this issues has been resolved
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
-    @unittest.expectedFailure
-    def test_associative_scan_map_in_combine_fn(self):
-        compile_mode = "none"
-        reverse = False
-        device = torch.device("cuda")
-
-        def combine_fn(x, y):
-            def body(x, y):
-                return x + y
-
-            y_init = y[0]
-            y_new = control_flow.map(body, y, y_init)
-            return x * y_new
-
-        inp = torch.randn(3, 10, 1, device=device)
-
-        kwargs = {
-            "dim": 0,
-            "reverse": reverse,
-            "compile_mode": compile_mode,
-            "combine_fn": combine_fn,
-            "combine_mode": "generic",
-        }
-        kwargs_fake = self._prepare_fake_kwargs(kwargs)
-        self._run_test(
-            model=AssociativeScanModels.CombineFn(**kwargs),
-            model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
-            inputs=inp,
-        )
-
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
-    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
-    @parametrize("reverse", [False, True])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    def test_associative_scan_vmap_in_combine_fn(self, compile_mode, reverse, device):
-        def combine_fn(x, y):
-            def body(x):
-                return x**2
-
-            mapped_body = torch.vmap(body, 0, 0)
-            y_new = mapped_body(y)
-            return x + y_new
-
-        inp = torch.randn(3, 10, 2, device=device)
-
-        kwargs = {
-            "dim": 0,
-            "reverse": reverse,
-            "compile_mode": compile_mode,
-            "combine_fn": combine_fn,
-            "combine_mode": "generic",
-        }
-        kwargs_fake = self._prepare_fake_kwargs(kwargs)
-        self._run_test(
-            model=AssociativeScanModels.CombineFn(**kwargs),
-            model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
-            inputs=inp,
-        )
-
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
-    @parametrize("reverse", [False, True])
-    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    # Skipping the combination of associative_scan and device=cpu
-    # as the current implementation of pointwise does only support CUDA device
-    @decorateIf(
-        unittest.skip,
-        lambda params: (params["device"] == torch.device("cpu")),
-    )
-    def test_associative_scan_non_pointwise_generic(
-        self, reverse, compile_mode, device
-    ):
-        x = torch.randn(3, 10, 2, device=device)
-
-        kwargs = {
-            "dim": 0,
-            "reverse": reverse,
-            "compile_mode": compile_mode,
-            "combine_fn": get_scan_combine_fn("non_pointwise", True),
-            "combine_mode": "generic",
-        }
-        kwargs_fake = self._prepare_fake_kwargs(kwargs)
-        self._run_test(
-            model=AssociativeScanModels.CombineFn(**kwargs),
-            model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
-            inputs=x,
-        )
-
-    @skipIfRocm(msg="Unsupported on ROCM yet")
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
-    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
-    @parametrize("combine_mode", ["pointwise", "generic"])
-    @parametrize("reverse", [False, True])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    # Skipping the combination of combine_mode=pointwise and device=cpu
-    # as the current implementation of pointwise does only support CUDA device
-    @decorateIf(
-        unittest.skip,
-        lambda params: (
-            params["combine_mode"] == "pointwise"
-            and (params["device"] == torch.device("cpu") or torch.version.hip)
-        ),
-    )
-    def test_associative_scan_binary_operator(
-        self, compile_mode, combine_mode, reverse, device
-    ):
-        state_dim = 20
-        timesteps = 10
-        projected_inputs = torch.randn(
-            timesteps, state_dim, requires_grad=True, device=device
-        )
-        A = torch.randn(state_dim, requires_grad=True, device=device)
-        elements = (A.repeat((timesteps, 1)), projected_inputs)
-
-        kwargs = {
-            "dim": 0,
-            "reverse": reverse,
-            "compile_mode": compile_mode,
-            "combine_fn": get_scan_combine_fn("s5_operator", True),
-            "combine_mode": combine_mode,
-        }
-        kwargs_fake = self._prepare_fake_kwargs(kwargs)
-        self._run_test(
-            model=AssociativeScanModels.CombineFn(**kwargs),
-            model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
-            inputs=elements,
-        )
-
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
-    def test_associative_scan_sparse_tensor(self):
-        x = torch.tensor(
-            [[[0.0, 0], [1.0, 2.0]], [[0.0, 0], [3.0, 4.0]], [[0.0, 0], [5.0, 6.0]]]
-        ).to_sparse()
-
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "torch.compile does not support sparse Tensors",
-        ):
-            result = associative_scan(
-                get_scan_combine_fn("add", True),
-                x,
-                0,
-            )
-
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
-    def test_associative_scan_combine_fn_wrong_meta_in_combine_fn(self):
-        device = torch.device("cuda")
-        B, N, C, H, W = 3, 3, 2, 3, 3
-        x = torch.randn(B, N, C, H, W, device=device)
-
-        def fct_wrong_dtype(x, y):
-            return (x + y).to(torch.int64)
-
-        def fct_wrong_device(x, y):
-            return (x + y).to(
-                torch.device("cpu") if device.type == "cuda" else torch.device("cuda")
-            )
-
-        def fct_wrong_stride(x, y):
-            return (x + y).to(memory_format=torch.channels_last)
-
-        for fct in [fct_wrong_dtype, fct_wrong_device, fct_wrong_stride]:
-            with self.assertRaisesRegex(
-                # Should be: RuntimeError,
-                # "The pytree of the output of the operator needs to match the xs pytree"
-                torch._dynamo.exc.Unsupported,
-                "Observed exception.*",
-            ):
-                result = associative_scan(fct, x, 0)
-
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
-    def test_associative_scan_wrong_pytree(self):
-        def fct_wrong_pytree(x, y):
-            return {
-                "i": x["i"] * y["j"][0][0],
-                "k": 0.0,
-                "j": ([x["j"][1][0]["o"]], [{"o": torch.sin(x["i"])}]),
-            }
-
-        x = torch.randn(3, 2, 2)
-        y = torch.randn(3, 2, 2)
-        z = torch.randn(3, 2, 2)
-        inp = {"i": x, "j": ([y], [{"o": z}])}
-
-        with self.assertRaisesRegex(
-            # Should be: RuntimeError,
-            # r"The number of leaves of the pytree of the output of the operator
-            # needs to match the lenght of the pytree of the input",
-            torch._dynamo.exc.Unsupported,
-            "Observed exception.*",
-        ):
-            result = associative_scan(fct_wrong_pytree, inp, 0, combine_mode="generic")
-
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
-    def test_associative_scan_non_pointwise(self):
-        x = torch.randn(3, 10, 2, device=torch.device("cuda"))
-        # Expected to fail, as the pointwise combine_mode does not allow non-pointwise operations
-        with self.assertRaisesRegex(
-            Exception,
-            "For combine_mode='pointwise', the combine_fn needs to be pointwise",
-        ):
-            out = associative_scan(
-                get_scan_combine_fn("non_pointwise", True),
-                x,
-                0,
-                combine_mode="pointwise",
-            )
 
 
 @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
@@ -6089,6 +6680,7 @@ instantiate_parametrized_tests(TestControlFlowTraced)
 
 instantiate_parametrized_tests(TestControlFlow)
 instantiate_parametrized_tests(AssociativeScanTests)
+instantiate_parametrized_tests(ScanTests)
 
 if __name__ == "__main__":
     run_tests()
