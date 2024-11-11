@@ -586,6 +586,10 @@ class CompiledNodeArgs {
         _specialization_key(
             // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
             (uint8_t*)std::malloc(_specialization_key_storage)) {}
+  CompiledNodeArgs(const CompiledNodeArgs&) = delete;
+  CompiledNodeArgs(CompiledNodeArgs&&) = delete;
+  CompiledNodeArgs& operator=(const CompiledNodeArgs&) = delete;
+  CompiledNodeArgs& operator=(CompiledNodeArgs&&) = delete;
   ~CompiledNodeArgs() {
     // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
     std::free(_specialization_key);
