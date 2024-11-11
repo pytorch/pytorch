@@ -122,9 +122,9 @@ class C10_API Scalar {
     } else if (Tag::HAS_z == tag) {                                   \
       return checked_convert<type, c10::complex<double>>(v.z, #type); \
     } else if (Tag::HAS_sd == tag) {                                  \
-      return checked_convert<type, double>(                          \
+      return checked_convert<type, double>(                           \
           toSymFloat().guard_float(__FILE__, __LINE__), #type);       \
-    }                                                            \
+    }                                                                 \
     if (Tag::HAS_b == tag) {                                          \
       return checked_convert<type, bool>(v.i, #type);                 \
     } else if (Tag::HAS_i == tag) {                                   \
