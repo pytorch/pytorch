@@ -168,7 +168,7 @@ struct TORCH_XPU_API XPUEvent {
       event_ = std::make_unique<sycl::event>(
           sycl::ext::oneapi::experimental::submit_profiling_tag(queue));
     } else {
-      event_ = std::make_unique<sycl::event>(queue.ext_oneapi_get_last_event());
+      event_ = std::make_unique<sycl::event>(queue.ext_oneapi_submit_barrier());
     }
 #else
     event_ = std::make_unique<sycl::event>(queue.ext_oneapi_submit_barrier());
