@@ -158,7 +158,8 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     uint64_t end_time_ns = xpu_event2->get_profiling_info<command_end>();
     uint64_t start_time_ns = xpu_event1->get_profiling_info<command_end>();
     // Return the eplased time in milliseconds.
-    return static_cast<double>(end_time_ns - start_time_ns) * 1e-6;
+    return 1e-6 *
+        (static_cast<double>(end_time_ns) - static_cast<double>(start_time_ns));
   }
 
   // Stream-related functions
