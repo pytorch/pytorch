@@ -325,6 +325,6 @@ void copy_kernel(TensorIterator& iter, bool /*non_blocking*/) {
 
 } // namespace CPU_CAPABILITY
 
-REGISTER_DISPATCH(copy_stub, &copy_kernel);
+REGISTER_DISPATCH(copy_stub, &copy_kernel)
 
 } // namespace at::native
