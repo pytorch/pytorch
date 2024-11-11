@@ -450,7 +450,6 @@ Tensor& tensordot_out(
 }
 
 TORCH_LIBRARY_IMPL(aten, XPU, m) {
-  m.impl("addmv.out", TORCH_FN(addmv_out));
   m.impl("tensordot.out", TORCH_FN(tensordot_out));
 }
 } // namespace xpu
