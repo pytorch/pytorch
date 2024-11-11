@@ -6,7 +6,7 @@
 namespace torch::jit {
 
 struct ChunkOutput {
-  ChunkOutput(Value* v, size_t o) : val(v), offset(o){};
+  ChunkOutput(Value* v, size_t o) : val(v), offset(o) {}
   Value* val;
   size_t offset;
 };
