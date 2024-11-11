@@ -235,7 +235,7 @@ std::tuple<Tensor, std::optional<int64_t>> index_batch_rule(
   bool advanced_indices_are_adjacent = are_advanced_indices_adjacent(indices);
 
   // Step 1
-  const auto batched_indices = batchIndices(indices, indices_bdims, self_.size(0), self_bdim);
+  const auto batched_indices = batchIndices(indices, indices_bdims, self_.sym_size(0), self_bdim);
   auto num_leading_nones = get_num_leading_nones(indices);
   auto max_index_dim = get_max_index_logical_dim(indices, indices_bdims);
 
@@ -427,7 +427,7 @@ namespace {
     // shape of `values` is (N, 2, 3), then following block
     // will reshape `values` to (N, 1, 1, 2, 3).
     if ( (int64_t) indexed_shape.size() > values_.dim()) {
-      auto values_sizes = values_.sizes();
+      auto values_sizes = values_.sym_sizes();
 
       // number of unit dims (for broadcasting value to indexed_shape)
       auto n_unit_dims = indexed_shape.size() - values_sizes.size();
@@ -841,26 +841,26 @@ std::tuple<Tensor, std::optional<int64_t>> gather_batch_rule(
   return std::make_tuple(result, 0);
 }
 
-Tensor get_expanded_index(const Tensor& index, IntArrayRef self_size, int64_t dim) {
+Tensor get_expanded_index(const Tensor& index, SymIntArrayRef self_size, int64_t dim) {
   if (index.dim() == 0) {
-    return index.expand(self_size);
+    return index.expand_symint(self_size);
   }
   dim = maybe_wrap_dim(dim, static_cast<int64_t>(self_size.size()));
 
   // setup new_index_shape as [BS, 1, ..., idx_size, ..., 1]
   // to reshape index_
-  auto idx_size = index.size(0);  // get non-batch size of index tensor
+  auto idx_size = index.sym_size(0);  // get non-batch size of index tensor
   Tensor index_;
   {
-    VmapDimVector new_index_shape(self_size.size(), 1);
+    VmapSymDimVector new_index_shape(self_size.size(), 1);
     new_index_shape[dim] = idx_size;
-    index_ = index.view(new_index_shape);
+    index_ = index.view_symint(new_index_shape);
   }
   // Now apply expand to index_
   {
-    VmapDimVector new_index_shape = {self_size.begin(), self_size.end()};
+    VmapSymDimVector new_index_shape = {self_size.begin(), self_size.end()};
     new_index_shape[dim] = idx_size;
-    index_ = index_.expand(new_index_shape);
+    index_ = index_.expand_symint(new_index_shape);
   }
   return index_;
 }
@@ -869,7 +869,7 @@ Tensor index_select_decomp(const Tensor &self, int64_t dim, const Tensor &index)
 {
   Tensor index_ = index;
   if (self.dim() > index.dim()) {
-    index_ = get_expanded_index(index, self.sizes(), dim);
+    index_ = get_expanded_index(index, self.sym_sizes(), dim);
   }
 
   auto result = at::gather(self, dim, index_);
@@ -893,7 +893,7 @@ Tensor index_copy_decomp(
 {
   Tensor index_ = index;
   if (self.dim() > index.dim()) {
-    index_ = get_expanded_index(index, self.sizes(), dim);
+    index_ = get_expanded_index(index, self.sym_sizes(), dim);
   }
 
   return at::scatter(self, dim, index_, source);  ;
@@ -909,7 +909,7 @@ Tensor slice_scatter_decomp(const Tensor &self, const Tensor &src,
                             std::optional<int64_t> end, int64_t step)
 {
   auto idx = at::arange(start.value_or(0), end.value_or(self.size(dim)), step, self.options().dtype(kLong));
-  idx = get_expanded_index(idx, self.sizes(), dim);
+  idx = get_expanded_index(idx, self.sym_sizes(), dim);
   return at::scatter(self, dim, idx, src);
 }
 

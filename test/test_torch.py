@@ -237,7 +237,7 @@ class TestTorchDeviceType(TestCase):
         s[2:7] = 1
         self.assertEqual(s, storage_type(l))
 
-    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1991")
+    @xfailIfTorchDynamo
     @onlyNativeDeviceTypes
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_tensor_storage_type(self, device, dtype):
@@ -1740,33 +1740,11 @@ else:
             'embedding_bag_backward_cuda_max',
             torch.device(device).type == 'cuda')
 
-    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
-    @onlyCUDA
-    def test_deterministic_cumsum(self, device):
-        test_cases = [
-            # size, dim
-            [(2, 3, 4), 0],
-            [(2, 3, 4), 1],
-            [(2, 3, 4), 2],
-            [(1000, 10, 2), 0],
-        ]
-        for size, dim in test_cases:
-            input = 100 * torch.randn(*size, device=device)
-            with DeterministicGuard(True):
-                res0 = input.cumsum(dim)
-                for _ in range(3):
-                    res1 = input.cumsum(dim)
-                    self.assertEqual(res0, res1, atol=0, rtol=0)
-
-            res_cpu = input.cpu().cumsum(dim)
-            self.assertEqual(res0, res_cpu, atol=1e-3, rtol=1e-2)
-
-
     @dtypes(*all_types_and_complex_and(torch.bool))
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_cumsum(self, device, dtype):
         input = make_tensor((10,), dtype=dtype, device=device, low=-9, high=9)
-        should_alert = False
+        should_alert = torch.device(device).type == 'cuda' and (dtype.is_floating_point or dtype.is_complex)
 
         for op_call in [torch.Tensor.cumsum, torch.cumsum]:
             self.check_nondeterministic_alert(
@@ -2914,7 +2892,7 @@ else:
 
     # if the given input arg is not a list, it returns a list of single element: [arg]
     def _wrap_to_list(self, input_array):
-        return input_array if isinstance(input_array, list) else [input_array]
+        return list(input_array) if isinstance(input_array, (list, tuple)) else [input_array]
 
     # To ensure inf, -inf, and nan values do not cause divergence between Numpy and PyTorch.
     # There are two types of possible divergence:
@@ -3052,7 +3030,7 @@ else:
                     # Result is given just as real number and all the imaginary parts to be equal to zero.
                     self.assertEqual(expected[i].imag, torch.zeros(actual[i].shape), exact_dtype=False)
             else:
-                actual, expected = self._inf_nan_preprocess(list(actual), expected)
+                actual, expected = self._inf_nan_preprocess(list(actual), list(expected))
                 self.assertEqual(actual, expected, equal_nan=True, exact_dtype=False)
 
     @onlyNativeDeviceTypes
@@ -3160,27 +3138,6 @@ else:
         x[0] = False
         x[1] = True
         self.assertEqual(x, torch.tensor([False, True], dtype=torch.bool, device=device))
-
-    # FIXME: move to shape ops test suite
-    def test_unfold_all_devices_and_dtypes(self, device):
-        for dt in all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16):
-
-            if dt == torch.bool:
-                x = torch.empty((0, 1, 3, 0), dtype=dt, device=device)
-                self.assertEqual((0, 1, 1, 0, 3), x.unfold(2, 3, 2).shape)
-            else:
-                x = torch.empty((0, 1, 3, 0), dtype=dt, device=device)
-                self.assertEqual((0, 1, 1, 0, 3), x.unfold(2, 3, 2).shape)
-
-    # FIXME: move to shape ops test suite
-    def test_unfold_scalars(self, device):
-        x = torch.tensor(0.5, device=device)
-        # unfold on a 0-dimensional tensor should always return a 1-d dimensional
-        # tensor of shape [size] (i.e., the second parameter to unfold)
-
-        self.assertEqual(torch.empty(0, device=device), x.unfold(0, 0, 1))
-        self.assertEqual(torch.empty(0, device=device), x.unfold(0, 0, 2))
-        self.assertEqual(torch.tensor([0.5], device=device), x.unfold(0, 1, 1))
 
     # FIXME: move to data movement test suite
     def test_copy_all_dtypes_and_devices(self, device):
@@ -5109,10 +5066,20 @@ else:
 
     @deviceCountAtLeast(1)
     @onlyCUDA
-    def test_storage_all_devices(self, devices):
+    @parametrize("non_blocking", (True, False))
+    def test_storage_all_devices(self, devices, non_blocking):
         for device in devices:
-            t = torch.tensor((), device=device)
+            t = torch.randn(6, device=device)
             self.assertEqual(t.dtype, t.storage().dtype)
+            s = t.untyped_storage()
+            s_cpu = s.to(device='cpu', non_blocking=non_blocking)
+            if non_blocking:
+                torch.cuda.synchronize()
+                self.assertTrue(s_cpu.is_pinned())
+            else:
+                self.assertFalse(s_cpu.is_pinned())
+            t_cpu = torch.empty(()).set_(s_cpu)
+            self.assertEqual(t.cpu(), t_cpu)
 
     # Note [lazy_clone_ tests with inductor enabled]
     # These `lazy_clone_` tests are written in a way that makes them pass in
@@ -7582,10 +7549,10 @@ class TestTorch(TestCase):
             torch.mean(sample, dim=0), torch.full((d,), 0.5), atol=2, rtol=2
         )
         torch.testing.assert_close(
-            np.percentile(sample, 25, axis=0), np.repeat(0.25, d), atol=2, rtol=2
+            np.percentile(sample, 25, axis=0).astype(np.float64), np.repeat(0.25, d), atol=2, rtol=2
         )
         torch.testing.assert_close(
-            np.percentile(sample, 75, axis=0), np.repeat(0.75, d), atol=2, rtol=2
+            np.percentile(sample, 75, axis=0).astype(np.float64), np.repeat(0.75, d), atol=2, rtol=2
         )
 
     @skipIfTorchDynamo("np.float64 restored as float32 after graph break.")

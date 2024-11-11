@@ -829,8 +829,7 @@ struct GraphFuser {
     }
 
     bchunk->removeInput(producer_index);
-    for (const auto i : c10::irange(nchunks)) {
-      (void)i; // Suppress unused variable warning
+    for ([[maybe_unused]] const auto i : c10::irange(nchunks)) {
       bchunk->eraseOutput(nchunks * producer_index);
     }
 

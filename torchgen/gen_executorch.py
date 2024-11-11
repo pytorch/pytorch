@@ -295,7 +295,7 @@ def gen_unboxing(
 ) -> None:
     # Iterable type for write_sharded is a Tuple of (native_function, (kernel_key, metadata))
     def key_func(
-        item: tuple[NativeFunction, tuple[ETKernelKey, BackendMetadata]]
+        item: tuple[NativeFunction, tuple[ETKernelKey, BackendMetadata]],
     ) -> str:
         return item[0].root_name + ":" + item[1][0].to_native_string()
 
@@ -739,7 +739,7 @@ def parse_yaml(
 
         # (2) Return BackendIndices if kernel index is absent
         def map_index(
-            m: dict[OperatorName, BackendMetadata]
+            m: dict[OperatorName, BackendMetadata],
         ) -> dict[OperatorName, BackendMetadata]:
             return {op: m[op] for op in m if op in op_names}
 

@@ -10,8 +10,9 @@ from functools import partial
 import torch._inductor.decomposition
 import torch.autograd
 from torch import Tensor
-from torch._decomp import _is_cia_op, core_aten_decompositions, decomposition_table
+from torch._decomp import core_aten_decompositions, decomposition_table
 from torch._dispatch.python import enable_python_dispatcher
+from torch._export.utils import _is_cia_op
 from torch._ops import DispatchKey
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import tf32_off
@@ -544,7 +545,6 @@ class TestDecomp(TestCase):
     # NB: This actually overlaps with test_comprehensive, but it only
     # runs on things that are definitely decomposed so it's a lot faster
     # to run
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyNativeDeviceTypes
     @skipIfCrossRef
     @suppress_warnings
@@ -552,7 +552,6 @@ class TestDecomp(TestCase):
     def test_quick(self, device, dtype, op):
         self.do_cross_ref(device, dtype, op, run_all=False)
 
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @skipOps("TestDecomp", "test_quick_core_backward", core_backward_failures)
     @onlyNativeDeviceTypes
     @skipIfCrossRef
@@ -662,7 +661,6 @@ class TestDecomp(TestCase):
         self.assertEqual(ref, res)
         self.assertEqual(noise_ref, noise_res)
 
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @suppress_warnings
     @tf32_off()
     # only tests RNNs since we have py dispsatcher decomps for them
@@ -1037,7 +1035,6 @@ instantiate_device_type_tests(TestDecomp, globals())
 
 
 class DecompOneOffTests(TestCase):
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyNativeDeviceTypes
     @skipIfCrossRef
     def test_contiguous_softmax(self, device):
@@ -1052,7 +1049,6 @@ class DecompOneOffTests(TestCase):
         res = torch._decomp.decompositions._softmax(x, -1, False)
         self.assertEqual(ref.stride(), res.stride())
 
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyNativeDeviceTypes
     @skipIfCrossRef
     def test_contiguous_log_softmax(self, device):
@@ -1118,7 +1114,6 @@ class DecompOneOffTests(TestCase):
             self.assertEqual(a.stride(), b.stride())
             self.assertEqual(a.dtype, b.dtype)
 
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyNativeDeviceTypes
     @skipIfCrossRef
     def test_elu_backward(self, device):
@@ -1131,7 +1126,6 @@ class DecompOneOffTests(TestCase):
         res = torch._decomp.decompositions.elu_backward(grad_out, 1.0, 1, 1, True, out)
         self.assertEqual(ref, res)
 
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyNativeDeviceTypes
     @skipIfCrossRef
     def test_threshold_backward_dtype(self, device):
@@ -1142,7 +1136,6 @@ class DecompOneOffTests(TestCase):
         res = torch._decomp.decompositions.threshold_backward(grad, input_tensor, 1)
         self.assertEqual(ref.dtype, res.dtype)
 
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyNativeDeviceTypes
     @skipIfCrossRef
     def test_weight_norm_interface(self, device):
@@ -1162,7 +1155,6 @@ class DecompOneOffTests(TestCase):
             torch._decomp.decompositions._weight_norm_interface(inp, inp2),
         )
 
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyCPU
     @skipIfCrossRef
     @skipOps(
@@ -1230,9 +1222,7 @@ class HasDecompTest(TestCase):
 
         try:
             # CompositeImplicitAutograd ops are transparent to the tracer, so don't need decompositions
-            return not op.has_kernel_for_dispatch_key(
-                DispatchKey.CompositeImplicitAutograd
-            )
+            return not _is_cia_op(op)
         except RuntimeError as e:
             # has_key fails for some jit-registered ops, which shouldn't be
             # relevant here anyway

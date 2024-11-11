@@ -4,6 +4,7 @@ import glob
 import importlib
 import importlib.abc
 import os
+import platform
 import re
 import shlex
 import shutil
@@ -994,7 +995,7 @@ def CppExtension(name, sources, *args, **kwargs):
     libraries.append('torch')
     libraries.append('torch_cpu')
     libraries.append('torch_python')
-    if IS_WINDOWS:
+    if IS_WINDOWS and platform.machine().lower() != "arm64":
         libraries.append("sleef")
 
     kwargs['libraries'] = libraries
@@ -1400,10 +1401,10 @@ def check_compiler_is_gcc(compiler):
     env['LC_ALL'] = 'C'  # Don't localize output
     try:
         version_string = subprocess.check_output([compiler, '-v'], stderr=subprocess.STDOUT, env=env).decode(*SUBPROCESS_DECODE_ARGS)
-    except Exception as e:
+    except Exception:
         try:
             version_string = subprocess.check_output([compiler, '--version'], stderr=subprocess.STDOUT, env=env).decode(*SUBPROCESS_DECODE_ARGS)
-        except Exception as e:
+        except Exception:
             return False
     # Check for 'gcc' or 'g++' for sccache wrapper
     pattern = re.compile("^COLLECT_GCC=(.*)$", re.MULTILINE)
