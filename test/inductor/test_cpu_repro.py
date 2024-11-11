@@ -36,6 +36,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     slowTest,
     TEST_MKL,
+    xfailIfS390X,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
 
@@ -3036,6 +3037,7 @@ class CPUReproTests(TestCase):
                 kernel_profile_events.append(e.name)
         assert len(kernel_profile_events) > 0
 
+    @xfailIfS390X
     @requires_vectorization
     def test_channel_shuffle_cl_output(self):
         """code and shape extracted from shufflenet_v2_x1_0"""
@@ -3817,6 +3819,7 @@ class CPUReproTests(TestCase):
         self.assertTrue("cvt_lowp_fp_to_fp32" not in code)
         self.assertTrue("cvt_fp32_to_lowp_fp" not in code)
 
+    @xfailIfS390X
     def test_concat_inner_vec(self):
         def fn(x, y):
             return F.relu(torch.cat([x, y], dim=1))
