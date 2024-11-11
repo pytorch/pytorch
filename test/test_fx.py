@@ -2847,7 +2847,7 @@ class TestFX(JitTestCase):
     def test_no_mutation(self):
         from torch.fx.immutable_collections import immutable_list
         x = immutable_list([3, 4])
-        with self.assertRaisesRegex(NotImplementedError, "new_args"):
+        with self.assertRaisesRegex(TypeError, "new_args"):
             x[0] = 4
 
     def test_partial_trace(self):
