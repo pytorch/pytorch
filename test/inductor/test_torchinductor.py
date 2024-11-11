@@ -713,10 +713,6 @@ def assertGeneratedKernelCountEqual(self: TestCase, expected: int):
         # and non-persistent reduction kernels for the same node schedule.
         # That will mess up with the kernel count. Just don't check it.
         return
-    if config.cpp_wrapper and self.device != "cpu":
-        # FIXME: cpp wrapper codegen for cuda is done in two passes. Update
-        # this once we move to the new one-pass solution.
-        expected *= 2
     self.assertEqual(torch._inductor.metrics.generated_kernel_count, expected)
 
 
@@ -1446,7 +1442,6 @@ class CommonTemplate:
 
     @config.patch({"fx_graph_cache": False})
     @skipIfWindows(msg="torch._dynamo.exc.Unsupported")
-    @skip_if_cpp_wrapper
     def test_forced_buffer_realize(self):
         # Test torch._test_inductor_realize forces a buffer to be realized
         def fn(a):
@@ -1458,7 +1453,6 @@ class CommonTemplate:
 
     @config.patch({"fx_graph_cache": False})
     @skipIfWindows(msg="torch._dynamo.exc.Unsupported")
-    @skip_if_cpp_wrapper
     def test_scheduler_vertical_fusion1(self):
         realize = test_operators.realize
 
