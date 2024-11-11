@@ -43,7 +43,7 @@ jobs:
   libtorch-cpu-shared-with-deps-debug-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows-11-arm64"
+    runs-on: "windows-11-arm64"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
