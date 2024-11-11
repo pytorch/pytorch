@@ -247,7 +247,7 @@ class GuardManagerWrapper:
         def filter_fn(node_mgr):
             return node_mgr.get_source() in chosen_sources
 
-        return self.root.clone(filter_fn)
+        return self.root.clone_manager(filter_fn)
 
     def get_guard_lines(self, guard):
         guard_name = guard.__class__.__name__
@@ -1966,7 +1966,10 @@ class GuardBuilder(GuardBuilderBase):
 
                 # We consider TENSOR_MATCH guard to be important enough to be
                 # included in diff guard manager by default.
-                self.check_fn_manager.guard_manager.diff_guard_sources.add(guard.name)
+                if not isinstance(value, torch.nn.Parameter):
+                    self.check_fn_manager.guard_manager.diff_guard_sources.add(
+                        guard.name
+                    )
 
             # A frame is valid for reuse with dynamic dimensions if the new
             # (user-requested) dynamic dimensions are a subset of the old
@@ -2203,7 +2206,9 @@ class CheckFunctionManager:
         guards = output_graph.guards if output_graph else None
         self._weakrefs: Dict[int, ReferenceType[object]] = {}
 
-        existing_diff_guard_sources = update_diff_guard_managers_for_existing_cache_entries(cache_entry)
+        existing_diff_guard_sources = (
+            update_diff_guard_managers_for_existing_cache_entries(cache_entry)
+        )
         self.guard_manager = GuardManagerWrapper()
         self.guard_manager.diff_guard_sources = existing_diff_guard_sources
         self.output_graph = output_graph
@@ -2749,6 +2754,7 @@ def get_and_maybe_log_recompilation_reason(
 
     return reasons
 
+
 def update_diff_guard_managers_for_existing_cache_entries(cache_entry):
     first_cache_entry = cache_entry
 
@@ -2757,7 +2763,9 @@ def update_diff_guard_managers_for_existing_cache_entries(cache_entry):
     # So, we collect all of them first.
     acc_diff_guard_sources = set()
     while cache_entry is not None:
-        acc_diff_guard_sources.update(cache_entry.guard_manager.collect_diff_guard_sources())
+        acc_diff_guard_sources.update(
+            cache_entry.guard_manager.collect_diff_guard_sources()
+        )
         cache_entry = cache_entry.next
 
     # On the second pass, set the diff_guard_sources for each cache line to the
@@ -2768,7 +2776,7 @@ def update_diff_guard_managers_for_existing_cache_entries(cache_entry):
         cache_entry.guard_manager.populate_diff_guard_manager()
         cache_entry = cache_entry.next
 
-    # rethrn the accumulated sources to set up the new cache line.
+    # return the accumulated sources to set up the new cache line.
     return acc_diff_guard_sources
 
 
