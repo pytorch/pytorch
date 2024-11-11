@@ -11,8 +11,7 @@
 #include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 void fuseFrozenConvAddReluImpl(std::shared_ptr<Graph>& graph) {
@@ -131,5 +130,4 @@ auto dummyInitializer = []() {
 
 } // namespace
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

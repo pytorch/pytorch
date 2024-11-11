@@ -120,8 +120,6 @@ def skip_helper_for_fft(device, dtype):
 
     if device_type == 'cpu':
         raise unittest.SkipTest("half and complex32 are not supported on CPU")
-    if TEST_WITH_ROCM:
-        raise unittest.SkipTest("half and complex32 are not supported on ROCM")
     if not SM53OrLater:
         raise unittest.SkipTest("half and complex32 are only supported on CUDA device with SM>53")
 
@@ -1594,7 +1592,7 @@ class FFTDocTestFinder:
     '''The default doctest finder doesn't like that function.__module__ doesn't
     match torch.fft. It assumes the functions are leaked imports.
     '''
-    def __init__(self):
+    def __init__(self) -> None:
         self.parser = doctest.DocTestParser()
 
     def find(self, obj, name=None, module=None, globs=None, extraglobs=None):

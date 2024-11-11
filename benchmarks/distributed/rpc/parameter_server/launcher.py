@@ -3,18 +3,10 @@ import json
 import os
 from pathlib import Path
 
-import torch
-import torch.distributed as c10d
-import torch.distributed.rpc as rpc
-import torch.multiprocessing as mp
-
 from data import data_map
 from metrics.ProcessedMetricsPrinter import ProcessedMetricsPrinter
 from models import model_map
 from server import server_map
-from torch.distributed.rpc import TensorPipeRpcBackendOptions
-from torch.futures import wait_all
-from torch.utils.data import DataLoader
 from trainer import (
     criterion_map,
     ddp_hook_map,
@@ -24,6 +16,14 @@ from trainer import (
     preprocess_data_map,
     trainer_map,
 )
+
+import torch
+import torch.distributed as c10d
+import torch.distributed.rpc as rpc
+import torch.multiprocessing as mp
+from torch.distributed.rpc import TensorPipeRpcBackendOptions
+from torch.futures import wait_all
+from torch.utils.data import DataLoader
 
 
 def get_name(rank, args):

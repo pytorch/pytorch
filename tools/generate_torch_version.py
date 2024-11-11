@@ -1,9 +1,10 @@
+from __future__ import annotations
+
 import argparse
 import os
 import re
 import subprocess
 from pathlib import Path
-from typing import Optional, Union
 
 from setuptools import distutils  # type: ignore[import]
 
@@ -12,18 +13,25 @@ UNKNOWN = "Unknown"
 RELEASE_PATTERN = re.compile(r"/v[0-9]+(\.[0-9]+)*(-rc[0-9]+)?/")
 
 
-def get_sha(pytorch_root: Union[str, Path]) -> str:
+def get_sha(pytorch_root: str | Path) -> str:
     try:
-        return (
-            subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=pytorch_root)
-            .decode("ascii")
-            .strip()
-        )
+        rev = None
+        if os.path.exists(os.path.join(pytorch_root, ".git")):
+            rev = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=pytorch_root
+            )
+        elif os.path.exists(os.path.join(pytorch_root, ".hg")):
+            rev = subprocess.check_output(
+                ["hg", "identify", "-r", "."], cwd=pytorch_root
+            )
+        if rev:
+            return rev.decode("ascii").strip()
     except Exception:
-        return UNKNOWN
+        pass
+    return UNKNOWN
 
 
-def get_tag(pytorch_root: Union[str, Path]) -> str:
+def get_tag(pytorch_root: str | Path) -> str:
     try:
         tag = subprocess.run(
             ["git", "describe", "--tags", "--exact"],
@@ -39,8 +47,8 @@ def get_tag(pytorch_root: Union[str, Path]) -> str:
         return UNKNOWN
 
 
-def get_torch_version(sha: Optional[str] = None) -> str:
-    pytorch_root = Path(__file__).parent.parent
+def get_torch_version(sha: str | None = None) -> str:
+    pytorch_root = Path(__file__).absolute().parent.parent
     version = open(pytorch_root / "version.txt").read().strip()
 
     if os.getenv("PYTORCH_BUILD_VERSION"):
@@ -68,12 +76,14 @@ if __name__ == "__main__":
     )
     parser.add_argument("--cuda-version", "--cuda_version", type=str)
     parser.add_argument("--hip-version", "--hip_version", type=str)
+    parser.add_argument("--xpu-version", "--xpu_version", type=str)
 
     args = parser.parse_args()
 
     assert args.is_debug is not None
     args.cuda_version = None if args.cuda_version == "" else args.cuda_version
     args.hip_version = None if args.hip_version == "" else args.hip_version
+    args.xpu_version = None if args.xpu_version == "" else args.xpu_version
 
     pytorch_root = Path(__file__).parent.parent
     version_path = pytorch_root / "torch" / "version.py"
@@ -96,3 +106,4 @@ if __name__ == "__main__":
         f.write(f"cuda: Optional[str] = {repr(args.cuda_version)}\n")
         f.write(f"git_version = {repr(sha)}\n")
         f.write(f"hip: Optional[str] = {repr(args.hip_version)}\n")
+        f.write(f"xpu: Optional[str] = {repr(args.xpu_version)}\n")

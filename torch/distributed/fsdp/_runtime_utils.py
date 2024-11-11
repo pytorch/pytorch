@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import functools
 import logging
 from enum import auto, Enum
@@ -38,7 +39,8 @@ from torch.distributed.utils import (
 )
 from torch.utils import _pytree as pytree
 
-log = logging.getLogger(__name__)
+
+logger = logging.getLogger(__name__)
 
 # Do not include "process_group" to enable hybrid shard and MoE cases
 HOMOGENEOUS_ATTR_NAMES = (
@@ -102,38 +104,6 @@ def _is_fsdp_root(state: _FSDPState, module: nn.Module) -> bool:
     _lazy_init(state, module)
     assert state._is_root is not None  # mypy
     return state._is_root
-
-
-@no_type_check
-def _validate_and_get_hybrid_shard_state(root_module: nn.Module) -> None:
-    """
-    Precondition: ``root_module`` is a ``FullyShardedDataParallel`` instance.
-
-    This checks that all instances using a hybrid sharding strategy have the
-    same intra- and inter-node process groups.
-    """
-    intra_node_pgs: Set[dist.ProcessGroup] = set()
-    inter_node_pgs: Set[dist.ProcessGroup] = set()
-    for fsdp_state in traversal_utils._get_fsdp_states(root_module):
-        # TODO: Change this to handle's sharding strategy if we deprecate
-        # `ShardingStrategy` internally.
-        # https://github.com/pytorch/pytorch/issues/90857
-        if fsdp_state.sharding_strategy in HYBRID_SHARDING_STRATEGIES:
-            intra_node_pgs.add(fsdp_state.process_group)
-            inter_node_pgs.add(fsdp_state._inter_node_pg)
-    if len(intra_node_pgs) == 0 and len(inter_node_pgs) == 0:
-        # No instances use a hybrid sharding strategy
-        return
-    error_prefix = "At least one instance uses a hybrid sharding strategy but has no "
-    if len(intra_node_pgs) > 0 and len(inter_node_pgs) == 0:
-        raise AssertionError(error_prefix + "inter-node process group set")
-    if len(intra_node_pgs) == 0 and len(inter_node_pgs) > 0:
-        raise AssertionError(error_prefix + "intra-node process group set")
-    error_prefix = "Some instances use a hybrid sharding strategy, but "
-    if len(intra_node_pgs) != 1:
-        raise ValueError(error_prefix + "intra-node process groups do not match")
-    if len(inter_node_pgs) != 1:
-        raise ValueError(error_prefix + "inter-node process groups do not match")
 
 
 @no_type_check
@@ -208,7 +178,6 @@ def _share_state_and_init_handle_attrs(
     handle = root_state._handle
     if handle:
         handle.init_flat_param_attributes()
-    _validate_and_get_hybrid_shard_state(root_module)
     attr_name_to_values: Dict[str, Set[Any]] = {}
     for attr_name in HOMOGENEOUS_ATTR_NAMES:
         attr_name_to_values[attr_name] = set()
@@ -420,7 +389,7 @@ def _pre_forward(
         if handle and handle._offload_params and handle.flat_param._cpu_grad is None:
             handle.flat_param._cpu_grad = torch.zeros_like(
                 handle.flat_param._local_shard, device=torch.device("cpu")
-            ).pin_memory()
+            ).pin_memory(device=state.compute_device)
 
         should_cast_forward_inputs = (
             state._handle and not state._handle._force_full_precision
@@ -449,7 +418,12 @@ def _pre_forward_unshard(
     handle._needs_pre_forward_unshard = False
     # Don't wait during trace
     if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
-        state._device_handle.current_stream().wait_stream(state._unshard_stream)
+        current_stream = state._device_handle.current_stream()
+        if state._unshard_event is not None:
+            current_stream.wait_event(state._unshard_event)
+            state._unshard_event = None
+        else:
+            current_stream.wait_stream(state._unshard_stream)
     with torch.profiler.record_function(
         "FullyShardedDataParallel._pre_forward_prefetch"
     ):
@@ -663,7 +637,6 @@ def _pre_backward_hook(
         and hasattr(handle, "_ran_pre_backward_hook")
         and handle._ran_pre_backward_hook
     ):
-        log.debug("%s %s", id(state), "Not Running pre backward! Already Ran!")
         return grad
 
     with torch.profiler.record_function("FullyShardedDataParallel._pre_backward_hook"):
@@ -732,7 +705,7 @@ def _post_backward_hook(
     - Otherwise, the ``_saved_grad_shard`` attribute is the reduced sharded
     gradient (accumulating with any existing gradient).
     """
-    _log_post_backward_hook(state, handle, log)
+    _log_post_backward_hook(state, handle, logger)
     flat_param = handle.flat_param
     flat_param._post_backward_called = True
     with torch.autograd.profiler.record_function(
@@ -788,6 +761,22 @@ def _post_backward_hook(
             _no_dispatch_record_stream(
                 autograd_computed_grad, state._post_backward_stream
             )
+
+
+def _post_backward_reshard_only_hook(
+    state: _FSDPState,
+    handle: FlatParamHandle,
+    *unused: Any,
+) -> None:
+    with torch.profiler.record_function(
+        "FullyShardedDataParallel._post_backward_hook_reshard_only"
+    ):
+        # `_pre_backward_hook` may not get executed
+        # if forward output does not require grad
+        # overwrite IDLE state for post-backward prefetching
+        state.training_state = TrainingState.FORWARD_BACKWARD
+        handle._training_state = HandleTrainingState.BACKWARD_POST
+        _post_backward_reshard(state, handle)
 
 
 def _post_backward_reshard(
@@ -1402,7 +1391,9 @@ def _register_pre_backward_hooks(
     def _register_hook(t: torch.Tensor) -> torch.Tensor:
         if t.requires_grad:
             t.register_hook(
-                functools.partial(_pre_backward_hook, state, module, handle)
+                torch.utils.hooks.unserializable_hook(
+                    functools.partial(_pre_backward_hook, state, module, handle)
+                )
             )
             if handle:
                 handle._needs_pre_backward_unshard = True
@@ -1504,7 +1495,7 @@ def _register_post_backward_reshard_only_hook(
         ]
     assert inp_tensors is not None  # mypy
     hook_handle = register_multi_grad_hook(
-        inp_tensors, functools.partial(_post_backward_reshard, state, handle)
+        inp_tensors, functools.partial(_post_backward_reshard_only_hook, state, handle)
     )
     if torch.distributed._functional_collectives.is_torchdynamo_compiling():
         flat_param._post_backward_hook_handle = hook_handle  # type: ignore[attr-defined, assignment]

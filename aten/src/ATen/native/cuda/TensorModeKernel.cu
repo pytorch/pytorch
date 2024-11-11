@@ -156,9 +156,7 @@ void calculate_mode(
   scalar_t* iter_begin = data;
   scalar_t* iter_end = data + n_element;
 
-  scalar_t mode;
-  int64_t index;
-  std::tie(mode, index) = ModeImpl<scalar_t>{}(iter_begin, iter_end);
+  auto [mode, index] = ModeImpl<scalar_t>{}(iter_begin, iter_end);
 
   // Place mode, index in output
   scalar_t* values_data = values.mutable_data_ptr<scalar_t>();

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import time
 from collections import defaultdict
 from functools import partial
@@ -36,7 +37,7 @@ def visualize(graph, name_prefix='', pb_graph=None, executors_it=None):
         return pb_graph
 
     # Set up an input node
-    input_node = pb_graph.node.add(op='input', name=name_prefix + 'input')
+    pb_graph.node.add(op='input', name=name_prefix + 'input')
     for i, value in enumerate(graph.param_node().outputs()):
         value_map[value.unique()] = name_prefix + 'input:' + str(i)
 

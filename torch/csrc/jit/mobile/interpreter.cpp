@@ -15,8 +15,7 @@
 #include <torch/csrc/jit/runtime/jit_exception.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 char const* toString(OpCode op);
 std::ostream& operator<<(std::ostream& out, Instruction inst);
 namespace mobile {
@@ -358,13 +357,12 @@ bool InterpreterState::run(Stack& stack) {
           // when STRIP_ERROR_MESSAGES is defined (which happens for production
           // mobile builds). This will cause the stack to be in an inconsistent
           // state. It has previously resulted in a SEV (S22350).
-          const auto& sref = stack.back().toStringRef();
-          TORCH_WARN(sref);
+          TORCH_WARN(stack.back().toStringRef());
           stack.pop_back();
           frame.step();
         } break;
         default:
-          AT_ERROR(toString(inst.op), " is invalid.");
+          TORCH_CHECK(false, toString(inst.op), " is invalid.");
       }
 
       if (!prev_value) {
@@ -395,9 +393,10 @@ bool InterpreterState::run(Stack& stack) {
 }
 
 IValue& InterpreterState::reg(size_t reg) {
+  TORCH_CHECK(
+      reg > 0 && reg <= registers_.size(), "Invalid register index: ", reg);
   return *(registers_.end() - reg);
 }
 
 } // namespace mobile
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

@@ -4,9 +4,7 @@
 
 #include <utility>
 
-namespace torch {
-namespace profiler {
-namespace impl {
+namespace torch::profiler::impl {
 
 using GlobalManager = GlobalStateManager<ProfilerStateBase>;
 
@@ -19,12 +17,14 @@ ExperimentalConfig::ExperimentalConfig(
     bool verbose,
     std::vector<std::string> performance_events,
     bool enable_cuda_sync_events,
+    bool adjust_profiler_step,
     bool adjust_timestamps)
     : profiler_metrics{std::move(profiler_metrics)},
       profiler_measure_per_kernel{profiler_measure_per_kernel},
       verbose{verbose},
       performance_events(std::move(performance_events)),
       enable_cuda_sync_events{enable_cuda_sync_events},
+      adjust_profiler_step{adjust_profiler_step},
       adjust_timestamps{adjust_timestamps} {}
 
 /*explicit*/ ExperimentalConfig::operator bool() const {
@@ -38,14 +38,16 @@ ProfilerConfig::ProfilerConfig(
     bool with_stack,
     bool with_flops,
     bool with_modules,
-    ExperimentalConfig experimental_config)
+    ExperimentalConfig experimental_config,
+    std::string trace_id)
     : state{state},
       experimental_config{std::move(experimental_config)},
       report_input_shapes{report_input_shapes},
       profile_memory{profile_memory},
       with_stack{with_stack},
       with_flops{with_flops},
-      with_modules{with_modules} {}
+      with_modules{with_modules},
+      trace_id{std::move(trace_id)} {}
 
 bool ProfilerConfig::disabled() const {
   return state == torch::profiler::impl::ProfilerState::Disabled;
@@ -182,6 +184,4 @@ torch::profiler::impl::ProfilerConfig getProfilerConfig() {
   return state_ptr->config();
 }
 
-} // namespace impl
-} // namespace profiler
-} // namespace torch
+} // namespace torch::profiler::impl

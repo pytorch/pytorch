@@ -1,7 +1,7 @@
 # Owner(s): ["module: unknown"]
 
 import torch
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 class LoggingTest(TestCase):
@@ -14,9 +14,11 @@ class LoggingTest(TestCase):
         s = TestCase.runWithPytorchAPIUsageStderr("import torch")
         self.assertRegex(s, "PYTORCH_API_USAGE.*import")
         # import the shared library directly - it triggers static init but doesn't call anything
-        s = TestCase.runWithPytorchAPIUsageStderr(f"from ctypes import CDLL; CDLL('{torch._C.__file__}')")
+        s = TestCase.runWithPytorchAPIUsageStderr(
+            f"from ctypes import CDLL; CDLL('{torch._C.__file__}')"
+        )
         self.assertNotRegex(s, "PYTORCH_API_USAGE")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     run_tests()

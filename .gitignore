@@ -15,10 +15,10 @@ coverage.xml
 .hypothesis
 .mypy_cache
 .additional_ci_files
+.lintrunner.private.toml
 /.extracted_scripts/
 **/.pytorch_specified_test_cases.csv
 **/.pytorch-disabled-tests.json
-**/.pytorch-slow-tests.json
 */*.pyc
 */*.so*
 */**/__pycache__
@@ -54,6 +54,7 @@ test/.coverage
 test/.hypothesis/
 test/cpp/api/mnist
 test/custom_operator/model.pt
+test/debug/
 test/jit_hooks/*.pt
 test/data/legacy_modules.t7
 test/data/*.pt
@@ -86,6 +87,8 @@ torch/csrc/api/include/torch/version.h
 torch/csrc/cudnn/cuDNN.cpp
 torch/csrc/generated
 torch/csrc/generic/TensorMethods.cpp
+torch/csrc/inductor/aoti_torch/generated/*.cpp
+torch/csrc/inductor/aoti_torch/generated/extend/*
 torch/csrc/jit/generated/*
 torch/csrc/jit/fuser/config.h
 torch/csrc/nn/THCUNN.cpp
@@ -126,6 +129,8 @@ env
 .circleci/scripts/COMMIT_MSG
 scripts/release_notes/*.json
 sccache-stats*.json
+lint.json
+merge_record.json
 
 # These files get copied over on invoking setup.py
 torchgen/packaged/*

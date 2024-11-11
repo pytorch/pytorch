@@ -667,13 +667,18 @@ void triangular_solve_out_sparse_csr(
         scalar_t alpha = 1;
 
         if (B.size(-1) == 1) {
-          at::mkl::sparse::trsv<scalar_t>(
+          sparse_status_t status = at::mkl::sparse::trsv<scalar_t>(
               opA,
               alpha,
               mkl_sparse_mat.descriptor(),
               descrA,
               B_->data_ptr<scalar_t>(),
               X_->data_ptr<scalar_t>());
+          // Emulate behavior of old MKL version that would set all elements of output array to -NaN
+          // in case of invalid input matrices.
+          if (status == SPARSE_STATUS_INVALID_VALUE) {
+            X_->fill_(-std::numeric_limits<scalar_t>::quiet_NaN());
+          }
         } else {
           IntArrayRef B_strides = B_->strides();
           bool is_B_row_major = (B_strides[ndim - 1] == 1);
@@ -683,7 +688,7 @@ void triangular_solve_out_sparse_csr(
           auto nrhs = mkl_int_cast(B.size(-1), "nrhs");
           auto ldx = is_X_row_major ? X_strides[ndim - 2] : X_strides[ndim - 1];
           auto ldb = is_B_row_major ? B_strides[ndim - 2] : B_strides[ndim - 1];
-          at::mkl::sparse::trsm<scalar_t>(
+          sparse_status_t status = at::mkl::sparse::trsm<scalar_t>(
               opA,
               alpha,
               mkl_sparse_mat.descriptor(),
@@ -694,6 +699,11 @@ void triangular_solve_out_sparse_csr(
               ldb,
               X_->data_ptr<scalar_t>(),
               ldx);
+          // Emulate behavior of old MKL version that would set all elements of output array to -NaN
+          // in case of invalid input matrices.
+          if (status == SPARSE_STATUS_INVALID_VALUE) {
+            X_->fill_(-std::numeric_limits<scalar_t>::quiet_NaN());
+          }
         }
       });
 

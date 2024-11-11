@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 """Wrapper to mimic (parts of) np.random API surface.
 
 NumPy has strict guarantees on reproducibility etc; here we don't give any.

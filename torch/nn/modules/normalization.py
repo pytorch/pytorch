@@ -1,15 +1,18 @@
-import torch
+# mypy: allow-untyped-defs
 import numbers
+from typing import List, Optional, Tuple, Union
+
+import torch
+from torch import Size, Tensor
+from torch.nn import functional as F, init
 from torch.nn.parameter import Parameter
-from .module import Module
+
 from ._functions import CrossMapLRN2d as _cross_map_lrn2d
-from .. import functional as F
-from .. import init
+from .module import Module
 
-from torch import Tensor, Size
-from typing import Union, List, Tuple
 
-__all__ = ['LocalResponseNorm', 'CrossMapLRN2d', 'LayerNorm', 'GroupNorm']
+__all__ = ["LocalResponseNorm", "CrossMapLRN2d", "LayerNorm", "GroupNorm", "RMSNorm"]
+
 
 class LocalResponseNorm(Module):
     r"""Applies local response normalization over an input signal.
@@ -41,13 +44,15 @@ class LocalResponseNorm(Module):
 
     """
 
-    __constants__ = ['size', 'alpha', 'beta', 'k']
+    __constants__ = ["size", "alpha", "beta", "k"]
     size: int
     alpha: float
     beta: float
     k: float
 
-    def __init__(self, size: int, alpha: float = 1e-4, beta: float = 0.75, k: float = 1.) -> None:
+    def __init__(
+        self, size: int, alpha: float = 1e-4, beta: float = 0.75, k: float = 1.0
+    ) -> None:
         super().__init__()
         self.size = size
         self.alpha = alpha
@@ -55,11 +60,10 @@ class LocalResponseNorm(Module):
         self.k = k
 
     def forward(self, input: Tensor) -> Tensor:
-        return F.local_response_norm(input, self.size, self.alpha, self.beta,
-                                     self.k)
+        return F.local_response_norm(input, self.size, self.alpha, self.beta, self.k)
 
     def extra_repr(self):
-        return '{size}, alpha={alpha}, beta={beta}, k={k}'.format(**self.__dict__)
+        return "{size}, alpha={alpha}, beta={beta}, k={k}".format(**self.__dict__)
 
 
 class CrossMapLRN2d(Module):
@@ -68,7 +72,9 @@ class CrossMapLRN2d(Module):
     beta: float
     k: float
 
-    def __init__(self, size: int, alpha: float = 1e-4, beta: float = 0.75, k: float = 1) -> None:
+    def __init__(
+        self, size: int, alpha: float = 1e-4, beta: float = 0.75, k: float = 1
+    ) -> None:
         super().__init__()
         self.size = size
         self.alpha = alpha
@@ -76,11 +82,10 @@ class CrossMapLRN2d(Module):
         self.k = k
 
     def forward(self, input: Tensor) -> Tensor:
-        return _cross_map_lrn2d.apply(input, self.size, self.alpha, self.beta,
-                                      self.k)
+        return _cross_map_lrn2d.apply(input, self.size, self.alpha, self.beta, self.k)
 
     def extra_repr(self) -> str:
-        return '{size}, alpha={alpha}, beta={beta}, k={k}'.format(**self.__dict__)
+        return "{size}, alpha={alpha}, beta={beta}, k={k}".format(**self.__dict__)
 
 
 _shape_t = Union[int, List[int], Size]
@@ -164,14 +169,21 @@ class LayerNorm(Module):
 
     """
 
-    __constants__ = ['normalized_shape', 'eps', 'elementwise_affine']
+    __constants__ = ["normalized_shape", "eps", "elementwise_affine"]
     normalized_shape: Tuple[int, ...]
     eps: float
     elementwise_affine: bool
 
-    def __init__(self, normalized_shape: _shape_t, eps: float = 1e-5, elementwise_affine: bool = True,
-                 bias: bool = True, device=None, dtype=None) -> None:
-        factory_kwargs = {'device': device, 'dtype': dtype}
+    def __init__(
+        self,
+        normalized_shape: _shape_t,
+        eps: float = 1e-5,
+        elementwise_affine: bool = True,
+        bias: bool = True,
+        device=None,
+        dtype=None,
+    ) -> None:
+        factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
         if isinstance(normalized_shape, numbers.Integral):
             # mypy error: incompatible types in assignment
@@ -180,14 +192,18 @@ class LayerNorm(Module):
         self.eps = eps
         self.elementwise_affine = elementwise_affine
         if self.elementwise_affine:
-            self.weight = Parameter(torch.empty(self.normalized_shape, **factory_kwargs))
+            self.weight = Parameter(
+                torch.empty(self.normalized_shape, **factory_kwargs)
+            )
             if bias:
-                self.bias = Parameter(torch.empty(self.normalized_shape, **factory_kwargs))
+                self.bias = Parameter(
+                    torch.empty(self.normalized_shape, **factory_kwargs)
+                )
             else:
-                self.register_parameter('bias', None)
+                self.register_parameter("bias", None)
         else:
-            self.register_parameter('weight', None)
-            self.register_parameter('bias', None)
+            self.register_parameter("weight", None)
+            self.register_parameter("bias", None)
 
         self.reset_parameters()
 
@@ -199,11 +215,14 @@ class LayerNorm(Module):
 
     def forward(self, input: Tensor) -> Tensor:
         return F.layer_norm(
-            input, self.normalized_shape, self.weight, self.bias, self.eps)
+            input, self.normalized_shape, self.weight, self.bias, self.eps
+        )
 
     def extra_repr(self) -> str:
-        return '{normalized_shape}, eps={eps}, ' \
-            'elementwise_affine={elementwise_affine}'.format(**self.__dict__)
+        return (
+            "{normalized_shape}, eps={eps}, "
+            "elementwise_affine={elementwise_affine}".format(**self.__dict__)
+        )
 
 
 class GroupNorm(Module):
@@ -252,18 +271,25 @@ class GroupNorm(Module):
         >>> output = m(input)
     """
 
-    __constants__ = ['num_groups', 'num_channels', 'eps', 'affine']
+    __constants__ = ["num_groups", "num_channels", "eps", "affine"]
     num_groups: int
     num_channels: int
     eps: float
     affine: bool
 
-    def __init__(self, num_groups: int, num_channels: int, eps: float = 1e-5, affine: bool = True,
-                 device=None, dtype=None) -> None:
-        factory_kwargs = {'device': device, 'dtype': dtype}
+    def __init__(
+        self,
+        num_groups: int,
+        num_channels: int,
+        eps: float = 1e-5,
+        affine: bool = True,
+        device=None,
+        dtype=None,
+    ) -> None:
+        factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
         if num_channels % num_groups != 0:
-            raise ValueError('num_channels must be divisible by num_groups')
+            raise ValueError("num_channels must be divisible by num_groups")
 
         self.num_groups = num_groups
         self.num_channels = num_channels
@@ -273,8 +299,8 @@ class GroupNorm(Module):
             self.weight = Parameter(torch.empty(num_channels, **factory_kwargs))
             self.bias = Parameter(torch.empty(num_channels, **factory_kwargs))
         else:
-            self.register_parameter('weight', None)
-            self.register_parameter('bias', None)
+            self.register_parameter("weight", None)
+            self.register_parameter("bias", None)
 
         self.reset_parameters()
 
@@ -284,12 +310,104 @@ class GroupNorm(Module):
             init.zeros_(self.bias)
 
     def forward(self, input: Tensor) -> Tensor:
-        return F.group_norm(
-            input, self.num_groups, self.weight, self.bias, self.eps)
+        return F.group_norm(input, self.num_groups, self.weight, self.bias, self.eps)
 
     def extra_repr(self) -> str:
-        return '{num_groups}, {num_channels}, eps={eps}, ' \
-            'affine={affine}'.format(**self.__dict__)
+        return "{num_groups}, {num_channels}, eps={eps}, " "affine={affine}".format(
+            **self.__dict__
+        )
+
+
+class RMSNorm(Module):
+    r"""Applies Root Mean Square Layer Normalization over a mini-batch of inputs.
+
+    This layer implements the operation as described in
+    the paper `Root Mean Square Layer Normalization <https://arxiv.org/pdf/1910.07467.pdf>`__
+
+    .. math::
+        y = \frac{x}{\mathrm{RMS}[x]} * \gamma \quad
+        \text{where} \quad \text{RMS}(x) = \sqrt{\epsilon + \frac{1}{n} \sum_{i=1}^{n} x_i^2}
+
+    The RMS is taken over the last ``D`` dimensions, where ``D``
+    is the dimension of :attr:`normalized_shape`. For example, if :attr:`normalized_shape`
+    is ``(3, 5)`` (a 2-dimensional shape), the RMS is computed over
+    the last 2 dimensions of the input.
+
+    Args:
+        normalized_shape (int or list or torch.Size): input shape from an expected input
+            of size
+
+            .. math::
+                [* \times \text{normalized\_shape}[0] \times \text{normalized\_shape}[1]
+                    \times \ldots \times \text{normalized\_shape}[-1]]
+
+            If a single integer is used, it is treated as a singleton list, and this module will
+            normalize over the last dimension which is expected to be of that specific size.
+        eps: a value added to the denominator for numerical stability. Default: :func:`torch.finfo(x.dtype).eps`
+        elementwise_affine: a boolean value that when set to ``True``, this module
+            has learnable per-element affine parameters initialized to ones (for weights). Default: ``True``.
+
+    Shape:
+        - Input: :math:`(N, *)`
+        - Output: :math:`(N, *)` (same shape as input)
+
+    Examples::
+
+        >>> rms_norm = nn.RMSNorm([2, 3])
+        >>> input = torch.randn(2, 2, 3)
+        >>> rms_norm(input)
+
+    """
+    __constants__ = ["normalized_shape", "eps", "elementwise_affine"]
+    normalized_shape: Tuple[int, ...]
+    eps: Optional[float]
+    elementwise_affine: bool
+
+    def __init__(
+        self,
+        normalized_shape: _shape_t,
+        eps: Optional[float] = None,
+        elementwise_affine: bool = True,
+        device=None,
+        dtype=None,
+    ) -> None:
+        factory_kwargs = {"device": device, "dtype": dtype}
+        super().__init__()
+        if isinstance(normalized_shape, numbers.Integral):
+            # mypy error: incompatible types in assignment
+            normalized_shape = (normalized_shape,)  # type: ignore[assignment]
+        self.normalized_shape = tuple(normalized_shape)  # type: ignore[arg-type]
+        self.eps = eps
+        self.elementwise_affine = elementwise_affine
+        if self.elementwise_affine:
+            self.weight = Parameter(
+                torch.empty(self.normalized_shape, **factory_kwargs)
+            )
+        else:
+            self.register_parameter("weight", None)
+        self.reset_parameters()
+
+    def reset_parameters(self) -> None:
+        """
+        Resets parameters based on their initialization used in __init__.
+        """
+        if self.elementwise_affine:
+            init.ones_(self.weight)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Runs forward pass.
+        """
+        return F.rms_norm(x, self.normalized_shape, self.weight, self.eps)
+
+    def extra_repr(self) -> str:
+        """
+        Extra information about the module.
+        """
+        return (
+            "{normalized_shape}, eps={eps}, "
+            "elementwise_affine={elementwise_affine}".format(**self.__dict__)
+        )
 
 
 # TODO: ContrastiveNorm2d

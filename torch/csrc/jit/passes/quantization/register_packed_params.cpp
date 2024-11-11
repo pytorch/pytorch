@@ -7,8 +7,7 @@
 #include <torch/csrc/jit/passes/quantization/helper.h>
 #include <torch/csrc/jit/passes/quantization/register_packed_params.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 bool isPrepackNode(Node* n) {
@@ -59,7 +58,6 @@ std::unordered_set<std::string> RegisterPrePackParams(
   int64_t uid = 0; // int + method name gives unique identifier
   auto graph = m.get_method(method_name).graph();
   std::stack<Block*> blocks_to_visit;
-  std::unordered_set<Node*> nodes_to_delete;
   blocks_to_visit.push(graph->block());
   std::string attr_name_base =
       attr_prefix + "_" + method_name + "_ondevice_ptq_packed_weight_";
@@ -73,13 +71,13 @@ std::unordered_set<std::string> RegisterPrePackParams(
         WithInsertPoint ins(n->next());
         Value* packed_param_value = n->output(0);
         TORCH_CHECK(n->outputs().size() == 1, "Prepack ops have single output");
-        auto attr_name = attr_name_base + c10::to_string(uid++);
+        auto attr_name = attr_name_base + std::to_string(uid++);
         TORCH_CHECK(
             packed_param_value->uses().size() == 1,
             "Packed param must be used by exactly one op.");
         auto use = packed_param_value->uses()[0];
         while (m.hasattr(attr_name)) {
-          attr_name = attr_name_base + "_" + c10::to_string(uid++);
+          attr_name = attr_name_base + "_" + std::to_string(uid++);
         }
         // Now register attribute for this packed param but dont set it to any
         // value. No value because we dont know what the value is at this point.
@@ -145,5 +143,4 @@ std::unordered_set<std::string> RegisterPrePackParams(
   return packed_param_names;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

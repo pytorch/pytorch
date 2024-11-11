@@ -294,7 +294,8 @@ static PyObject* THPStorage_shareCuda(PyObject* self, PyObject* noargs) {
   c10::StorageImpl* storage_impl = storage.unsafeGetStorageImpl();
 
   if (storage_impl->received_cuda()) {
-    AT_ERROR(
+    TORCH_CHECK(
+        false,
         "Attempted to send CUDA tensor received from another process; this is not currently supported. Consider cloning before sending.");
   }
 
@@ -313,18 +314,11 @@ static PyObject* THPStorage_shareCuda(PyObject* self, PyObject* noargs) {
   THPObjectPtr _event_sync_required(Py_None);
   Py_INCREF(Py_None);
   if (storage.data()) {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    size_t base_size;
-    void* base_ptr = c10::cuda::CUDACachingAllocator::getBaseAllocation(
-        storage.mutable_data(), &base_size);
-    ptrdiff_t offset_bytes = (char*)storage.data() - (char*)base_ptr;
-
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    cudaIpcMemHandle_t handle;
-    C10_CUDA_CHECK(cudaIpcGetMemHandle(&handle, base_ptr));
-
-    _handle = PyBytes_FromStringAndSize((char*)&handle, CUDA_IPC_HANDLE_SIZE);
-    _offset_bytes = PyLong_FromSsize_t((Py_ssize_t)offset_bytes);
+    auto shandle =
+        c10::cuda::CUDACachingAllocator::shareIpcHandle(storage.mutable_data());
+    _handle = PyBytes_FromStringAndSize(
+        shandle.handle.c_str(), (Py_ssize_t)shandle.handle.size());
+    _offset_bytes = PyLong_FromSsize_t((Py_ssize_t)shandle.offset);
 
     // Put Storage Data behind new ref counting context
     // See Note [CUDA IPC Refcounting implementation explained]
@@ -427,7 +421,6 @@ static std::string THPStorage_bytesAsHandleString(PyObject* handle) {
   if (PyBytes_AsStringAndSize(handle, &buffer, &handle_size) == -1) {
     TORCH_CHECK(handle_size == CUDA_IPC_HANDLE_SIZE, "incorrect handle");
   }
-  TORCH_CHECK(handle_size == CUDA_IPC_HANDLE_SIZE, "incorrect handle size");
   return std::string(buffer, handle_size);
   END_HANDLE_TH_ERRORS_RET("")
 }
@@ -477,8 +470,7 @@ static PyObject* THPStorage_newSharedCuda(PyObject* _unused, PyObject* args) {
     }
     auto ipc_event_handle = reinterpret_cast<const cudaIpcEventHandle_t*>(
         s_ipc_event_handle.c_str());
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    cudaEvent_t event;
+    cudaEvent_t event = nullptr;
     cudaIpcOpenEventHandle(&event, *ipc_event_handle);
     C10_CUDA_CHECK(
         cudaStreamWaitEvent(c10::cuda::getCurrentCUDAStream(device), event, 0));
@@ -588,7 +580,7 @@ static PyObject* THPStorage_weakRef(PyObject* self, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPStorage_newWithWeakPtr(PyObject* _unused, PyObject* arg) {
+static PyObject* THPStorage_newWithWeakPtr(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
       THPUtils_checkLong(arg), "_new_with_weak_ptr(): arg must be an 'int'");
@@ -601,7 +593,7 @@ PyObject* THPStorage_newWithWeakPtr(PyObject* _unused, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPStorage_freeWeakRef(PyObject* _unused, PyObject* arg) {
+static PyObject* THPStorage_freeWeakRef(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   if (arg == Py_None) {
     Py_RETURN_NONE;
@@ -615,7 +607,7 @@ PyObject* THPStorage_freeWeakRef(PyObject* _unused, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPStorage_expired(PyObject* _unused, PyObject* arg) {
+static PyObject* THPStorage_expired(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(THPUtils_checkLong(arg), "_expired(): arg must be an 'int'");
   c10::StorageImpl* weak_storage = (c10::StorageImpl*)PyLong_AsVoidPtr(arg);
@@ -624,7 +616,7 @@ PyObject* THPStorage_expired(PyObject* _unused, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPStorage_sharedFd(PyObject* self, PyObject* noargs) {
+static PyObject* THPStorage_sharedFd(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   THPStorage_assertNotNull(self);
   at::MapAllocator* ctx = nullptr;
@@ -638,7 +630,7 @@ PyObject* THPStorage_sharedFd(PyObject* self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPStorage_isShared(PyObject* self, PyObject* noargs) {
+static PyObject* THPStorage_isShared(PyObject* self, PyObject* noargs) {
   const auto& storage = THPStorage_Unpack(self);
   if (storage.device_type() == at::kCUDA) {
     Py_RETURN_TRUE;

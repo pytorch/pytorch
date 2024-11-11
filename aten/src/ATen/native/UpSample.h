@@ -55,18 +55,18 @@ namespace upsample {
 TORCH_API c10::SmallVector<int64_t, 3> compute_output_size(
     c10::IntArrayRef input_size,  // Full input tensor size.
     at::OptionalIntArrayRef output_size,
-    c10::optional<c10::ArrayRef<double>> scale_factors);
+    std::optional<c10::ArrayRef<double>> scale_factors);
 
-inline c10::optional<double> get_scale_value(c10::optional<c10::ArrayRef<double>> scales, int idx) {
+inline std::optional<double> get_scale_value(std::optional<c10::ArrayRef<double>> scales, int idx) {
   if (!scales) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   return scales->at(idx);
 }
 
 } // namespace upsample
 
-using scale_t = c10::optional<double>;
+using scale_t = std::optional<double>;
 using upsampling_nearest1d = void(*)(const Tensor& output, const Tensor& input, scale_t scales_w);
 using _upsampling_nearest_exact1d = void(*)(const Tensor& output, const Tensor& input, scale_t scales_w);
 using upsampling_nearest2d = void(*)(const Tensor& output, const Tensor& input, scale_t scales_h, scale_t scales_w);
@@ -79,31 +79,33 @@ using _upsampling_bilinear2d_aa = void(*)(const Tensor& output, const Tensor& in
 using upsampling_trilinear3d = void(*)(const Tensor& output, const Tensor& input, bool align_corners, scale_t scales_d, scale_t scales_h, scale_t scales_w);
 using upsampling_bicubic2d = void(*)(const Tensor& output, const Tensor& input, bool align_corners, scale_t scales_h, scale_t scales_w);
 using _upsampling_bicubic2d_aa = void(*)(const Tensor& output, const Tensor& input, bool align_corners, scale_t scales_h, scale_t scales_w);
-DECLARE_DISPATCH(upsampling_nearest1d, upsample_nearest1d_kernel);
-DECLARE_DISPATCH(_upsampling_nearest_exact1d, _upsample_nearest_exact1d_kernel);
-DECLARE_DISPATCH(upsampling_nearest2d, upsample_nearest2d_kernel);
-DECLARE_DISPATCH(_upsampling_nearest_exact2d, _upsample_nearest_exact2d_kernel);
-DECLARE_DISPATCH(upsampling_nearest3d, upsample_nearest3d_kernel);
-DECLARE_DISPATCH(_upsampling_nearest_exact3d, _upsample_nearest_exact3d_kernel);
-DECLARE_DISPATCH(upsampling_nearest1d, upsample_nearest1d_backward_kernel);
-DECLARE_DISPATCH(_upsampling_nearest_exact1d, _upsample_nearest_exact1d_backward_kernel);
-DECLARE_DISPATCH(upsampling_nearest2d, upsample_nearest2d_backward_kernel);
-DECLARE_DISPATCH(_upsampling_nearest_exact2d, _upsample_nearest_exact2d_backward_kernel);
-DECLARE_DISPATCH(upsampling_nearest3d, upsample_nearest3d_backward_kernel);
-DECLARE_DISPATCH(_upsampling_nearest_exact3d, _upsample_nearest_exact3d_backward_kernel);
-DECLARE_DISPATCH(upsampling_linear1d, upsample_linear1d_kernel);
-DECLARE_DISPATCH(upsampling_bilinear2d, upsample_bilinear2d_kernel);
-DECLARE_DISPATCH(_upsampling_bilinear2d_aa, _upsample_bilinear2d_aa_kernel);
-DECLARE_DISPATCH(upsampling_trilinear3d, upsample_trilinear3d_kernel);
-DECLARE_DISPATCH(upsampling_linear1d, upsample_linear1d_backward_kernel);
-DECLARE_DISPATCH(upsampling_bilinear2d, upsample_bilinear2d_backward_kernel);
-DECLARE_DISPATCH(_upsampling_bilinear2d_aa, _upsample_bilinear2d_aa_backward_kernel);
-DECLARE_DISPATCH(upsampling_trilinear3d, upsample_trilinear3d_backward_kernel);
-DECLARE_DISPATCH(upsampling_bicubic2d, upsample_bicubic2d_kernel);
-DECLARE_DISPATCH(_upsampling_bicubic2d_aa, _upsample_bicubic2d_aa_kernel);
-DECLARE_DISPATCH(_upsampling_bicubic2d_aa, _upsample_bicubic2d_aa_backward_kernel);
+DECLARE_DISPATCH(upsampling_nearest1d, upsample_nearest1d_kernel)
+DECLARE_DISPATCH(_upsampling_nearest_exact1d, _upsample_nearest_exact1d_kernel)
+DECLARE_DISPATCH(upsampling_nearest2d, upsample_nearest2d_kernel)
+DECLARE_DISPATCH(_upsampling_nearest_exact2d, _upsample_nearest_exact2d_kernel)
+DECLARE_DISPATCH(upsampling_nearest3d, upsample_nearest3d_kernel)
+DECLARE_DISPATCH(_upsampling_nearest_exact3d, _upsample_nearest_exact3d_kernel)
+DECLARE_DISPATCH(upsampling_nearest1d, upsample_nearest1d_backward_kernel)
+DECLARE_DISPATCH(_upsampling_nearest_exact1d, _upsample_nearest_exact1d_backward_kernel)
+DECLARE_DISPATCH(upsampling_nearest2d, upsample_nearest2d_backward_kernel)
+DECLARE_DISPATCH(_upsampling_nearest_exact2d, _upsample_nearest_exact2d_backward_kernel)
+DECLARE_DISPATCH(upsampling_nearest3d, upsample_nearest3d_backward_kernel)
+DECLARE_DISPATCH(_upsampling_nearest_exact3d, _upsample_nearest_exact3d_backward_kernel)
+DECLARE_DISPATCH(upsampling_linear1d, upsample_linear1d_kernel)
+DECLARE_DISPATCH(upsampling_bilinear2d, upsample_bilinear2d_kernel)
+DECLARE_DISPATCH(_upsampling_bilinear2d_aa, _upsample_bilinear2d_aa_kernel)
+DECLARE_DISPATCH(upsampling_trilinear3d, upsample_trilinear3d_kernel)
+DECLARE_DISPATCH(upsampling_linear1d, upsample_linear1d_backward_kernel)
+DECLARE_DISPATCH(upsampling_bilinear2d, upsample_bilinear2d_backward_kernel)
+DECLARE_DISPATCH(_upsampling_bilinear2d_aa, _upsample_bilinear2d_aa_backward_kernel)
+DECLARE_DISPATCH(upsampling_trilinear3d, upsample_trilinear3d_backward_kernel)
+DECLARE_DISPATCH(upsampling_bicubic2d, upsample_bicubic2d_kernel)
+DECLARE_DISPATCH(_upsampling_bicubic2d_aa, _upsample_bicubic2d_aa_kernel)
+DECLARE_DISPATCH(_upsampling_bicubic2d_aa, _upsample_bicubic2d_aa_backward_kernel)
 
-static C10_UNUSED std::array<int64_t, 3> upsample_1d_common_check(IntArrayRef input_size, IntArrayRef output_size) {
+[[maybe_unused]] inline std::array<int64_t, 3> upsample_1d_common_check(
+    IntArrayRef input_size,
+    IntArrayRef output_size) {
   TORCH_CHECK(
       output_size.size() == 1,
       "It is expected output_size equals to 1, but got size ",
@@ -131,7 +133,9 @@ static C10_UNUSED std::array<int64_t, 3> upsample_1d_common_check(IntArrayRef in
   return {nbatch, channels, output_width};
 }
 
-static C10_UNUSED std::array<int64_t, 4> upsample_2d_common_check(IntArrayRef input_size, IntArrayRef output_size) {
+[[maybe_unused]] inline std::array<int64_t, 4> upsample_2d_common_check(
+    IntArrayRef input_size,
+    IntArrayRef output_size) {
   TORCH_CHECK(
       output_size.size() == 2,
       "It is expected output_size equals to 2, but got size ",
@@ -167,8 +171,9 @@ static C10_UNUSED std::array<int64_t, 4> upsample_2d_common_check(IntArrayRef in
   return {nbatch, channels, output_height, output_width};
 }
 
-static C10_UNUSED
-std::array<int64_t, 5> upsample_3d_common_check(IntArrayRef input_size, IntArrayRef output_size) {
+[[maybe_unused]] inline std::array<int64_t, 5> upsample_3d_common_check(
+    IntArrayRef input_size,
+    IntArrayRef output_size) {
   TORCH_CHECK(
       output_size.size() == 3,
       "It is expected output_size equals to 3, but got size ",
@@ -210,7 +215,7 @@ std::array<int64_t, 5> upsample_3d_common_check(IntArrayRef input_size, IntArray
   return {nbatch, channels, output_depth, output_height, output_width};
 }
 
-static inline void upsample_2d_shape_check(
+inline void upsample_2d_shape_check(
     const Tensor& input,
     const Tensor& grad_output,
     int64_t nbatch,
@@ -251,8 +256,8 @@ static inline void upsample_2d_shape_check(
 }
 
 template <typename scalar_t>
-static inline scalar_t compute_scales_value(
-    const c10::optional<double> scale,
+inline scalar_t compute_scales_value(
+    const std::optional<double> scale,
     int64_t input_size,
     int64_t output_size) {
       // see Note [compute_scales_value]
@@ -263,11 +268,11 @@ static inline scalar_t compute_scales_value(
 }
 
 template <typename scalar_t>
-static inline scalar_t area_pixel_compute_scale(
+inline scalar_t area_pixel_compute_scale(
     int64_t input_size,
     int64_t output_size,
     bool align_corners,
-    const c10::optional<double> scale) {
+    const std::optional<double> scale) {
   // see Note [area_pixel_compute_scale]
   if(align_corners) {
     if(output_size > 1) {
@@ -281,7 +286,7 @@ static inline scalar_t area_pixel_compute_scale(
 }
 
 template <typename scalar_t>
-static inline scalar_t area_pixel_compute_source_index(
+inline scalar_t area_pixel_compute_source_index(
     scalar_t scale,
     int64_t dst_index,
     bool align_corners,
@@ -308,7 +313,7 @@ static inline scalar_t area_pixel_compute_source_index(
   }
 }
 
-static inline int64_t nearest_neighbor_compute_source_index(
+inline int64_t nearest_neighbor_compute_source_index(
     const float scale,
     int64_t dst_index,
     int64_t input_size) {
@@ -319,7 +324,7 @@ static inline int64_t nearest_neighbor_compute_source_index(
   return src_index;
 }
 
-static inline int64_t nearest_neighbor_exact_compute_source_index(
+inline int64_t nearest_neighbor_exact_compute_source_index(
     const float scale,
     int64_t dst_index,
     int64_t input_size) {
@@ -331,11 +336,11 @@ static inline int64_t nearest_neighbor_exact_compute_source_index(
   return src_index;
 }
 
-static inline int64_t nearest_idx(
+inline int64_t nearest_idx(
     int64_t output_index,
     int64_t input_size,
     int64_t output_size,
-    c10::optional<double> scales) {
+    std::optional<double> scales) {
   // This method specificly treats cases: output_size == input_size or
   // output_size == 2 * input_size, that we would like to get rid of
   // We keep this method for BC and consider as deprecated.
@@ -352,20 +357,20 @@ static inline int64_t nearest_idx(
   }
 }
 
-static inline int64_t nearest_exact_idx(
+inline int64_t nearest_exact_idx(
     int64_t output_index,
     int64_t input_size,
     int64_t output_size,
-    c10::optional<double> scales) {
+    std::optional<double> scales) {
   float scale = compute_scales_value<float>(scales, input_size, output_size);
     return nearest_neighbor_exact_compute_source_index(scale, output_index, input_size);
 }
 
 // Define a typedef to dispatch to nearest_idx or nearest_exact_idx
-typedef int64_t (*nearest_idx_fn_t)(int64_t, int64_t, int64_t, c10::optional<double>);
+typedef int64_t (*nearest_idx_fn_t)(int64_t, int64_t, int64_t, std::optional<double>);
 
 template <typename scalar_t>
-static scalar_t upsample_get_value_bounded(
+scalar_t upsample_get_value_bounded(
     scalar_t* data,
     int64_t width,
     int64_t height,
@@ -377,7 +382,7 @@ static scalar_t upsample_get_value_bounded(
 }
 
 template <typename scalar_t>
-static void upsample_increment_value_bounded(
+void upsample_increment_value_bounded(
     scalar_t* data,
     int64_t width,
     int64_t height,
@@ -392,17 +397,17 @@ static void upsample_increment_value_bounded(
 // Based on
 // https://en.wikipedia.org/wiki/Bicubic_interpolation#Bicubic_convolution_algorithm
 template <typename scalar_t>
-static inline scalar_t cubic_convolution1(scalar_t x, scalar_t A) {
+scalar_t cubic_convolution1(scalar_t x, scalar_t A) {
   return ((A + 2) * x - (A + 3)) * x * x + 1;
 }
 
 template <typename scalar_t>
-static inline scalar_t cubic_convolution2(scalar_t x, scalar_t A) {
+scalar_t cubic_convolution2(scalar_t x, scalar_t A) {
   return ((A * x - 5 * A) * x + 8 * A) * x - 4 * A;
 }
 
 template <typename scalar_t>
-static inline void get_cubic_upsample_coefficients(
+void get_cubic_upsample_coefficients(
     scalar_t coeffs[4],
     scalar_t t) {
   scalar_t A = -0.75;
@@ -418,7 +423,7 @@ static inline void get_cubic_upsample_coefficients(
 }
 
 template <typename scalar_t>
-static inline scalar_t cubic_interp1d(
+inline scalar_t cubic_interp1d(
     scalar_t x0,
     scalar_t x1,
     scalar_t x2,
@@ -434,7 +439,7 @@ static inline scalar_t cubic_interp1d(
 // type can accurately represent, the type casting to `int64_t` might exceed
 // `input_size`, causing overflow. So we guard it with `std::min` below.
 template<typename scalar_t, typename opmath_t>
-static inline void guard_index_and_lambda(const opmath_t& real_input_index, const int64_t& input_size, int64_t& input_index, scalar_t& lambda) {
+inline void guard_index_and_lambda(const opmath_t& real_input_index, const int64_t& input_size, int64_t& input_index, scalar_t& lambda) {
   input_index = std::min(static_cast<int64_t>(floorf(real_input_index)), input_size - 1);
   lambda = std::min(
       std::max(real_input_index - input_index, static_cast<opmath_t>(0)),
@@ -443,7 +448,7 @@ static inline void guard_index_and_lambda(const opmath_t& real_input_index, cons
 }
 
 template<typename scalar_t, typename opmath_t>
-static inline void compute_source_index_and_lambda(
+inline void compute_source_index_and_lambda(
     int64_t& input_index0,
     int64_t& input_index1,
     scalar_t& lambda0,
@@ -472,25 +477,24 @@ static inline void compute_source_index_and_lambda(
 
 // It will not be used by data types other than BFloat16 and Half.
 template <typename scalar_in, typename scalar_out,
-          typename std::enable_if_t<!is_reduced_floating_point_v<scalar_out> || !std::is_same<scalar_in, float>::value, int> = 0>
+          typename std::enable_if_t<!is_reduced_floating_point_v<scalar_out> || !std::is_same_v<scalar_in, float>, int> = 0>
 void inline apply_grad_input(scalar_in* buffer_ptr, scalar_out* gin, int64_t size) {
   TORCH_CHECK((is_reduced_floating_point_v<scalar_out>),
-              "Upsample backward only support BFloat16 and Half in the lower percision data types on CPU.")
-  TORCH_CHECK((std::is_same<scalar_in, float>::value),
+              "Upsample backward only support BFloat16 and Half in the lower precision data types on CPU.")
+  TORCH_CHECK((std::is_same_v<scalar_in, float>),
               "Upsample backward should use float as acc buffer for BFloat16 and Half grad input on CPU.")
   return;
 }
 
 template <typename scalar_in, typename scalar_out,
-          typename std::enable_if_t<is_reduced_floating_point_v<scalar_out> && std::is_same<scalar_in, float>::value, int> = 0>
+          typename std::enable_if_t<is_reduced_floating_point_v<scalar_out> && std::is_same_v<scalar_in, float>, int> = 0>
 void inline apply_grad_input(scalar_in* buffer_ptr, scalar_out* gin, int64_t size) {
   using bVec = Vectorized<scalar_out>;
   using fVec = Vectorized<float>;
   int64_t d = 0;
   for (; d < size - (size % bVec::size()); d += bVec::size()) {
     bVec gin_bvec = bVec::loadu(gin + d);
-    fVec gin_fvec0, gin_fvec1;
-    std::tie(gin_fvec0, gin_fvec1) = convert_to_float<scalar_out>(gin_bvec);
+    auto [gin_fvec0, gin_fvec1] = convert_to_float<scalar_out>(gin_bvec);
     gin_fvec0 += fVec::loadu(buffer_ptr + d);
     gin_fvec1 += fVec::loadu(buffer_ptr + d + fVec::size());
     fVec(0).store(buffer_ptr + d);

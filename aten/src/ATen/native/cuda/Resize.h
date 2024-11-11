@@ -29,18 +29,10 @@ static inline void maybe_resize_storage_cuda(TensorImpl* self, size_t new_size_b
 inline TensorImpl* resize_impl_cuda_(
     TensorImpl* self,
     IntArrayRef size,
-    at::OptionalIntArrayRef stride,
-    bool device_guard = true) {
+    at::OptionalIntArrayRef stride) {
   if (self->sizes() == size && (!stride || self->strides() == stride)) {
     return self;
   }
-
-  // NB: We don't need to hold the device guard when calling from TH
-  cuda::OptionalCUDAGuard guard;
-  if (device_guard) {
-    guard.set_index(self->storage().device().index());
-  }
-
   const auto itemsize = self->dtype().itemsize();
   const auto storage_offset = self->storage_offset();
   size_t storage_size = 1;

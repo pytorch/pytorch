@@ -3,7 +3,7 @@
 #include <ATen/native/SobolEngineOpsUtils.h>
 
 /*
-The direction nubmers in this file  were generated using the
+The direction numbers in this file  were generated using the
 python script below (thius this assumes that the file
 https://web.maths.unsw.edu.au/~fkuo/sobol/new-joe-kuo-6.21201
 is present in the working directory). For additional details see [1].

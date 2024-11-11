@@ -17,8 +17,7 @@
 #include <cstddef>
 #include <vector>
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 /// Base class for all (dimension-specialized) convolution modules.
 template <size_t D, typename Derived>
@@ -107,9 +106,7 @@ class ConvNdImpl : public torch::nn::Cloneable<Derived> {
         /*a=*/std::sqrt(5)); // NOLINT(cppcoreguidelines-avoid-magic-numbers)
 
     if (bias.defined()) {
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      int64_t fan_in, fan_out;
-      std::tie(fan_in, fan_out) = init::_calculate_fan_in_and_fan_out(weight);
+      auto [fan_in, fan_out] = init::_calculate_fan_in_and_fan_out(weight);
       auto bound = 1 / std::sqrt(fan_in);
       init::uniform_(bias, -bound, bound);
     }
@@ -170,7 +167,7 @@ class ConvNdImpl : public torch::nn::Cloneable<Derived> {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Conv1d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies convolution over a 1-D input.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.Conv1d to learn about
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.Conv1d to learn about
 /// the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::Conv1dOptions` class to learn what
@@ -202,7 +199,7 @@ TORCH_MODULE(Conv1d);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Conv2d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies convolution over a 2-D input.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.Conv2d to learn about
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.Conv2d to learn about
 /// the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::Conv2dOptions` class to learn what
@@ -237,7 +234,7 @@ TORCH_MODULE(Conv2d);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Conv3d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies convolution over a 3-D input.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.Conv3d to learn about
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.Conv3d to learn about
 /// the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::Conv3dOptions` class to learn what
@@ -317,7 +314,7 @@ class ConvTransposeNdImpl : public ConvNdImpl<D, Derived> {
 
   std::vector<int64_t> _output_padding(
       const Tensor& input,
-      const c10::optional<at::IntArrayRef>& output_size,
+      const std::optional<at::IntArrayRef>& output_size,
       const ExpandingArray<D>& stride,
       const ExpandingArray<D>& padding,
       const ExpandingArray<D>& kernel_size);
@@ -327,7 +324,7 @@ class ConvTransposeNdImpl : public ConvNdImpl<D, Derived> {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies the ConvTranspose1d function.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.ConvTranspose1d to
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.ConvTranspose1d to
 /// learn about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::ConvTranspose1dOptions` class to learn
@@ -352,10 +349,10 @@ class TORCH_API ConvTranspose1dImpl
   explicit ConvTranspose1dImpl(ConvTranspose1dOptions options_);
   Tensor forward(
       const Tensor& input,
-      const c10::optional<at::IntArrayRef>& output_size = c10::nullopt);
+      const std::optional<at::IntArrayRef>& output_size = std::nullopt);
 
  protected:
-  FORWARD_HAS_DEFAULT_ARGS({1, AnyValue(c10::optional<at::IntArrayRef>())})
+  FORWARD_HAS_DEFAULT_ARGS({1, AnyValue(std::optional<at::IntArrayRef>())})
 };
 
 /// A `ModuleHolder` subclass for `ConvTranspose1dImpl`.
@@ -369,7 +366,7 @@ TORCH_MODULE(ConvTranspose1d);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies the ConvTranspose2d function.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.ConvTranspose2d to
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.ConvTranspose2d to
 /// learn about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::ConvTranspose2dOptions` class to learn
@@ -394,10 +391,10 @@ class TORCH_API ConvTranspose2dImpl
   explicit ConvTranspose2dImpl(ConvTranspose2dOptions options_);
   Tensor forward(
       const Tensor& input,
-      const c10::optional<at::IntArrayRef>& output_size = c10::nullopt);
+      const std::optional<at::IntArrayRef>& output_size = std::nullopt);
 
  protected:
-  FORWARD_HAS_DEFAULT_ARGS({1, AnyValue(c10::optional<at::IntArrayRef>())})
+  FORWARD_HAS_DEFAULT_ARGS({1, AnyValue(std::optional<at::IntArrayRef>())})
 };
 
 /// A `ModuleHolder` subclass for `ConvTranspose2dImpl`.
@@ -411,7 +408,7 @@ TORCH_MODULE(ConvTranspose2d);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies the ConvTranspose3d function.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.ConvTranspose3d to
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.ConvTranspose3d to
 /// learn about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::ConvTranspose3dOptions` class to learn
@@ -436,10 +433,10 @@ class TORCH_API ConvTranspose3dImpl
   explicit ConvTranspose3dImpl(ConvTranspose3dOptions options_);
   Tensor forward(
       const Tensor& input,
-      const c10::optional<at::IntArrayRef>& output_size = c10::nullopt);
+      const std::optional<at::IntArrayRef>& output_size = std::nullopt);
 
  protected:
-  FORWARD_HAS_DEFAULT_ARGS({1, AnyValue(c10::optional<at::IntArrayRef>())})
+  FORWARD_HAS_DEFAULT_ARGS({1, AnyValue(std::optional<at::IntArrayRef>())})
 };
 
 /// A `ModuleHolder` subclass for `ConvTranspose3dImpl`.
@@ -449,5 +446,4 @@ class TORCH_API ConvTranspose3dImpl
 /// `ModuleHolder` to learn about PyTorch's module storage semantics.
 TORCH_MODULE(ConvTranspose3d);
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

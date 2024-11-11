@@ -63,7 +63,7 @@ inline int64_t get_tril_size(int64_t row, int64_t col, int64_t offset) {
 }
 
 inline void check_args(
-    int64_t row, int64_t col, c10::optional<Layout> layout_opt) {
+    int64_t row, int64_t col, std::optional<Layout> layout_opt) {
   TORCH_CHECK(row >= 0, "row must be non-negative, got", row);
   TORCH_CHECK(col >= 0, "col must be non-negative, got", col);
   if (layout_opt.has_value()) {
@@ -103,10 +103,10 @@ inline void check_supported_max_int_with_precision(int64_t n, const Tensor& tens
 // with max value if it is integer type
 inline Tensor& fill_empty_deterministic_(Tensor& tensor) {
   if (tensor.is_floating_point() || tensor.is_complex()) {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
-      kBFloat16, kHalf, tensor.scalar_type(), "fill_empty_deterministic_", [&]() {
+    AT_DISPATCH_V2(
+      tensor.scalar_type(), "fill_empty_deterministic_", AT_WRAP([&]() {
         tensor.fill_(std::numeric_limits<scalar_t>::quiet_NaN());
-    });
+    }), AT_EXPAND(AT_FLOATING_TYPES), AT_EXPAND(AT_COMPLEX_TYPES), AT_EXPAND(AT_FLOAT8_TYPES), kBFloat16, kHalf, kComplexHalf);
   } else {
     AT_DISPATCH_V2(
       tensor.scalar_type(), "fill_empty_deterministic_", AT_WRAP([&]() {
@@ -119,24 +119,24 @@ inline Tensor& fill_empty_deterministic_(Tensor& tensor) {
 // The ZeroTensor allocator ignores whatever allocation is requested and always
 // gives you nullptr
 struct ZeroTensorAllocator final : public at::Allocator {
-  ZeroTensorAllocator(at::Device device) : device_(device) {};
+  ZeroTensorAllocator(at::Device device) : device_(device) {}
   ~ZeroTensorAllocator() override = default;
   static void deleter(void* const pointer) {
     TORCH_INTERNAL_ASSERT(!pointer);
   }
-  DataPtr allocate(const size_t /*nbytes*/) const override {
+  DataPtr allocate(const size_t /*nbytes*/) override {
     return {nullptr, nullptr, &deleter, device_};
   }
   DeleterFnPtr raw_deleter() const override {
     return deleter;
   }
-  void copy_data(void* dest, const void* src, std::size_t count) const final {}
+  void copy_data(void* dest [[maybe_unused]], const void* src [[maybe_unused]], std::size_t count [[maybe_unused]]) const final {}
   at::Device device_;
 };
 
 using binary_fn = void (*)(TensorIterator&);
 
-DECLARE_DISPATCH(binary_fn, complex_stub);
-DECLARE_DISPATCH(binary_fn, polar_stub);
+DECLARE_DISPATCH(binary_fn, complex_stub)
+DECLARE_DISPATCH(binary_fn, polar_stub)
 
 } // namespace at::native

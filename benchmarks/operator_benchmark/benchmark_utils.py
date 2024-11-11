@@ -319,14 +319,6 @@ def op_list(**configs):
     return generated_configs
 
 
-def is_caffe2_enabled(framework_arg):
-    return "Caffe2" in framework_arg
-
-
-def is_pytorch_enabled(framework_arg):
-    return "PyTorch" in framework_arg
-
-
 def get_operator_range(chars_range):
     """Generates the characters from chars_range inclusive."""
     if chars_range == "None" or chars_range is None:
@@ -345,8 +337,9 @@ def get_operator_range(chars_range):
             ops_start_chars_set.add(item.lower())
             continue
         start, end = item.split("-")
-        for c in range(ord(start), ord(end) + 1):
-            ops_start_chars_set.add(chr(c).lower())
+        ops_start_chars_set.update(
+            chr(c).lower() for c in range(ord(start), ord(end) + 1)
+        )
     return ops_start_chars_set
 
 

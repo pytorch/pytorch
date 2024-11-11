@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 # Torch
 import torch
 import torch.cuda

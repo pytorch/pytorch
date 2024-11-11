@@ -44,10 +44,10 @@ PhysicalDevice::PhysicalDevice(VkPhysicalDevice physical_device_handle)
       handle, &queue_family_count, queue_families.data());
 
   // Find the total number of compute queues
-  for (const VkQueueFamilyProperties& properties : queue_families) {
+  for (const VkQueueFamilyProperties& p : queue_families) {
     // Check if this family has compute capability
-    if (properties.queueFlags & VK_QUEUE_COMPUTE_BIT) {
-      num_compute_queues += properties.queueCount;
+    if (p.queueFlags & VK_QUEUE_COMPUTE_BIT) {
+      num_compute_queues += p.queueCount;
     }
   }
 }

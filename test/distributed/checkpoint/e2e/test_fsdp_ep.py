@@ -17,11 +17,11 @@ from torch.testing._internal.distributed.common_state_dict import VerifyStateDic
 
 
 class Dummymodel(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
 
     def forward(self, x):
-        raise NotImplementedError()
+        raise NotImplementedError
 
 
 class EPModel(nn.Module):
@@ -31,7 +31,7 @@ class EPModel(nn.Module):
         self.net2 = nn.Sequential(nn.Linear(16, 16), nn.ReLU())
 
     def forward(self, x):
-        raise NotImplementedError()
+        raise NotImplementedError
 
 
 class SecondTier(nn.Module):
@@ -43,7 +43,7 @@ class SecondTier(nn.Module):
         self.net = nn.Sequential(nn.Linear(16, 16), nn.ReLU())
 
     def forward(self, x):
-        raise NotImplementedError()
+        raise NotImplementedError
 
 
 class TopModel(nn.Module):
@@ -55,7 +55,7 @@ class TopModel(nn.Module):
         self.net = nn.Sequential(nn.Linear(16, 16), nn.ReLU())
 
     def forward(self, x):
-        raise NotImplementedError()
+        raise NotImplementedError
 
 
 class TestFSDPWithEP(DTensorTestBase, VerifyStateDictMixin):
@@ -73,7 +73,7 @@ class TestFSDPWithEP(DTensorTestBase, VerifyStateDictMixin):
             self.device_type, (2, 4), mesh_dim_names=("dp", "tp")
         )
         # TODO: we are using an internal API atm. Change to a publich API once it is ready.
-        mesh_fsdp_ep = _mesh_resources.create_child_mesh(mesh_fsdp_tp, 0, "dp")
+        mesh_fsdp_ep = _mesh_resources.create_child_mesh(mesh_fsdp_tp, ("dp",))
         del _mesh_resources.child_to_parent_mapping[mesh_fsdp_ep]
 
         mesh_fsdp = init_device_mesh(self.device_type, (8,))

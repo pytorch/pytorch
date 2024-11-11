@@ -110,7 +110,7 @@ static Tensor affine_grid_generator_4D_backward(
   AT_ASSERT(grad_grid.sizes() == IntArrayRef({N, H, W, 2}));
   auto grad_theta = base_grid.view({N, H * W, 3})
                         .transpose(1, 2)
-                        .bmm(grad_grid.view({N, H * W, 2}));
+                        .bmm(grad_grid.reshape({N, H * W, 2}));
   return grad_theta.transpose(1, 2);
 }
 
@@ -126,7 +126,7 @@ static Tensor affine_grid_generator_5D_backward(
   AT_ASSERT(grad_grid.sizes() == IntArrayRef({N, D, H, W, 3}));
   auto grad_theta = base_grid.view({N, D * H * W, 4})
                         .transpose(1, 2)
-                        .bmm(grad_grid.view({N, D * H * W, 3}));
+                        .bmm(grad_grid.reshape({N, D * H * W, 3}));
   return grad_theta.transpose(1, 2);
 }
 

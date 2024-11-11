@@ -11,11 +11,28 @@ on:
         required: true
         type: string
         description: The build environment
+      runner_prefix:
+        required: false
+        default: ""
+        type: string
+        description: prefix for runner label
       runs_on:
-          required: false
-          default: linux.12xlarge
-          type: string
-          description: Hardware to run this "build"job on, linux.12xlarge or linux.arm64.2xlarge.
+        required: false
+        default: linux.12xlarge.ephemeral
+        type: string
+        description: Hardware to run this "build" job on, linux.12xlarge or linux.arm64.2xlarge.
+      timeout-minutes:
+        required: false
+        default: 210
+        type: number
+        description: timeout for the job
+      use_split_build:
+        description: |
+          [Experimental] Build a libtorch only wheel and build pytorch such that
+          are built from the libtorch wheel.
+        required: false
+        type: boolean
+        default: false
       ALPINE_IMAGE:
         required: false
         type: string
@@ -77,8 +94,8 @@ on:
 
 jobs:
   build:
-    runs-on: ${{ inputs.runs_on }}
-    timeout-minutes: 180
+    runs-on: ${{ inputs.runner_prefix}}${{ inputs.runs_on }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
     env:
       PYTORCH_ROOT: ${{ inputs.PYTORCH_ROOT }}
       BUILDER_ROOT: ${{ inputs.BUILDER_ROOT }}
@@ -105,6 +122,7 @@ jobs:
       PR_NUMBER: ${{ github.event.pull_request.number }}
       PYTORCH_FINAL_PACKAGE_DIR: /artifacts
       SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+      USE_SPLIT_BUILD: ${{ inputs.use_split_build }}
     steps:
       - name: Make the env permanent during this workflow (but not the secrets)
         shell: bash
@@ -132,6 +150,7 @@ jobs:
             echo "PR_NUMBER=${{ env.PR_NUMBER }}"
             echo "PYTORCH_FINAL_PACKAGE_DIR=${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
             echo "SHA1=${{ env.SHA1 }}"
+            echo "USE_SPLIT_BUILD=${{ env.use_split_build }}"
           } >> "${GITHUB_ENV} }}"
 
       - name: List the env
@@ -139,6 +158,7 @@ jobs:
         run: env
 
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        if: inputs.build_environment != 'linux-s390x-binary-manywheel'
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
         continue-on-error: true
         with:
@@ -147,12 +167,14 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
-          no-sudo: ${{ inputs.build_environment == 'linux-aarch64-binary-manywheel' }}
+          no-sudo: ${{ inputs.build_environment == 'linux-aarch64-binary-manywheel' || inputs.build_environment == 'linux-s390x-binary-manywheel' }}
 
       - name: Setup Linux
+        if: inputs.build_environment != 'linux-s390x-binary-manywheel'
         uses: ./.github/actions/setup-linux
 
       - name: Chown workspace
+        if: inputs.build_environment != 'linux-s390x-binary-manywheel'
         uses: ./.github/actions/chown-workspace
         with:
           ALPINE_IMAGE: ${{ inputs.ALPINE_IMAGE }}
@@ -165,7 +187,7 @@ jobs:
           rm -rf "${GITHUB_WORKSPACE}"
           mkdir "${GITHUB_WORKSPACE}"
 
-          if [[ ${{ inputs.build_environment }} == 'linux-aarch64-binary-manywheel' ]]; then
+          if [[ ${{ inputs.build_environment }} == 'linux-aarch64-binary-manywheel' ]] || [[ ${{ inputs.build_environment }} == 'linux-s390x-binary-manywheel' ]] ; then
             rm -rf "${RUNNER_TEMP}/artifacts"
             mkdir "${RUNNER_TEMP}/artifacts"
           fi
@@ -212,7 +234,7 @@ jobs:
             ]}
 
       - name: Pull Docker image
-        if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' }}
+        if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' && inputs.build_environment != 'linux-s390x-binary-manywheel' }}
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ inputs.DOCKER_IMAGE }}
@@ -238,6 +260,7 @@ jobs:
             -e PYTORCH_ROOT \
             -e SKIP_ALL_TESTS \
             -e PYTORCH_EXTRA_INSTALL_REQUIREMENTS \
+            -e USE_SPLIT_BUILD \
             --tty \
             --detach \
             -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
@@ -248,19 +271,21 @@ jobs:
           )
           docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
           if [[ ${BUILD_ENVIRONMENT} == *"aarch64"* ]]; then
-            docker exec -t "${container_name}" bash -c "bash /builder/aarch64_linux/aarch64_ci_build.sh"
+            docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /pytorch/.ci/aarch64_linux/aarch64_ci_build.sh"
+          elif [[ ${{ inputs.PACKAGE_TYPE }} == "manywheel" || ${{ inputs.PACKAGE_TYPE }} == "libtorch" ]]; then
+            docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /pytorch/.ci/${{ inputs.PACKAGE_TYPE }}/build.sh"
           else
             docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/${{ inputs.PACKAGE_TYPE }}/build.sh"
           fi
 
       - name: Chown artifacts
-        if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' }}
+        if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' && inputs.build_environment != 'linux-s390x-binary-manywheel' }}
         shell: bash
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
 
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4.4.0
         if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' }}
         with:
           name: ${{ inputs.build_name }}
@@ -269,11 +294,20 @@ jobs:
             ${{ runner.temp }}/artifacts/*
 
       - name: Teardown Linux
-        if: always()
+        if: always() && inputs.build_environment != 'linux-s390x-binary-manywheel'
         uses: pytorch/test-infra/.github/actions/teardown-linux@main
 
       - name: Chown workspace
-        if: always()
+        if: always() && inputs.build_environment != 'linux-s390x-binary-manywheel'
         uses: ./pytorch/.github/actions/chown-workspace
         with:
           ALPINE_IMAGE: ${{ inputs.ALPINE_IMAGE }}
+
+      - name: Cleanup docker
+        if: always() && inputs.build_environment == 'linux-s390x-binary-manywheel'
+        shell: bash
+        run: |
+          # on s390x stop the container for clean worker stop
+          # ignore expansion of "docker ps -q" since it could be empty
+          # shellcheck disable=SC2046
+          docker stop $(docker ps -q) || true

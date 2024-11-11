@@ -7,20 +7,23 @@ import torch._dynamo.config as dynamo_config
 import torch._inductor.config as inductor_config
 import torch._inductor.select_algorithm as select_algorithm
 import torch.nn.functional as F
-from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import expectedFailureDynamicWrapper
 from torch._dynamo.utils import counters
 from torch._inductor.autotune_process import TritonBenchmarkRequest
-
+from torch._inductor.test_case import run_tests, TestCase
+from torch._inductor.utils import is_big_gpu
 from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm
 from torch.testing._internal.inductor_utils import HAS_CUDA
+
 
 aten = torch.ops.aten
 
 
 def patches(fn):
-    def skip_cache(self, choices, name, key, generate):
-        return generate(choices)
+    def skip_cache(self, choices, name, key, benchmark):
+        if benchmark is None:
+            return {}
+        return benchmark(choices)
 
     for patcher in [
         dynamo_config.patch(verbose=True),
@@ -44,7 +47,11 @@ def patches(fn):
 
 
 class TestSelectAlgorithm(TestCase):
-    @expectedFailureDynamicWrapper
+    def setUp(self):
+        super().setUp()
+        if not is_big_gpu(0):
+            return self.skipTest("Need a big GPU to run max_autotune=True")
+
     @patches
     def test_linear_relu_cuda(self):
         @torch.compile
@@ -61,7 +68,6 @@ class TestSelectAlgorithm(TestCase):
         # It would be nice to assert this got fused into a single kernel, but that
         # only happens if we select a triton template (and not aten).
 
-    @expectedFailureDynamicWrapper
     @patches
     def test_addmm_cuda(self):
         @torch.compile
@@ -94,7 +100,6 @@ class TestSelectAlgorithm(TestCase):
         # Autotuning checks correctness of each version
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
-    @skipIfRocm
     @patches
     def test_mm(self):
         @torch.compile
@@ -107,6 +112,8 @@ class TestSelectAlgorithm(TestCase):
         )
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
+    # FIXME: Investigate why _int_mm_out_cuda is not compiled on ROCm
+    @skipIfRocm
     @patches
     def test__int_mm(self):
         @torch.compile
@@ -201,6 +208,22 @@ class TestSelectAlgorithm(TestCase):
         # Autotuning checks correctness of each version
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
+    @expectedFailureDynamicWrapper
+    @patches
+    def test_mm_plus_mm3_cuda(self):
+        @torch.compile
+        def foo(a, b, c, d):
+            return (a @ b) + (c @ d)
+
+        foo(
+            torch.randn(512, 32, device="cuda"),
+            torch.randn(32, 8, device="cuda"),
+            torch.randn(512, 32, device="cuda"),
+            torch.randn(32, 8, device="cuda"),
+        )
+        # Autotuning checks correctness of each version
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
     @patches
     def test_mm_dup_args(self):
         @torch.compile
@@ -221,7 +244,6 @@ class TestSelectAlgorithm(TestCase):
         foo(torch.randn(64, 64, device="cuda"))
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
-    @skipIfRocm
     @expectedFailureDynamicWrapper
     @patches
     def test_convolution1(self):
@@ -339,7 +361,5 @@ class TestSelectAlgorithm(TestCase):
 
 
 if __name__ == "__main__":
-    from torch._inductor.utils import is_big_gpu
-
     if IS_LINUX and HAS_CUDA and is_big_gpu(0):
         run_tests()

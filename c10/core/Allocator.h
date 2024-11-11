@@ -103,7 +103,7 @@ class C10_API DataPtr {
    * be; be sure to read the source code of the Allocator
    * in question to confirm this.
    */
-  C10_NODISCARD bool compare_exchange_deleter(
+  [[nodiscard]] bool compare_exchange_deleter(
       DeleterFnPtr expected_deleter,
       DeleterFnPtr new_deleter) {
     return ptr_.compare_exchange_deleter(expected_deleter, new_deleter);
@@ -157,10 +157,11 @@ inline bool operator!=(std::nullptr_t, const DataPtr& dp) noexcept {
 // possible, or the raw interface will incorrectly reported as unsupported,
 // when it is actually possible.
 
+// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
 struct C10_API Allocator {
   virtual ~Allocator() = default;
 
-  virtual DataPtr allocate(size_t n) const = 0;
+  virtual DataPtr allocate(size_t n) = 0;
 
   // Clones an allocation that came from this allocator.
   //
@@ -171,7 +172,7 @@ struct C10_API Allocator {
   // attached to the input data.
   //
   // Requires: input data was allocated by the same allocator.
-  DataPtr clone(const void* data, std::size_t n) const;
+  DataPtr clone(const void* data, std::size_t n);
 
   // Checks if DataPtr has a simple context, not wrapped with any out of the
   // ordinary contexts.
@@ -223,13 +224,32 @@ struct C10_API Allocator {
 // allocation InefficientStdFunctionContext, on top of the dynamic
 // allocation which is implied by std::function itself.
 struct C10_API InefficientStdFunctionContext {
-  std::unique_ptr<void, std::function<void(void*)>> ptr_;
-  InefficientStdFunctionContext(
-      std::unique_ptr<void, std::function<void(void*)>>&& ptr)
-      : ptr_(std::move(ptr)) {}
+  void* ptr_{nullptr};
+  std::function<void(void*)> deleter_;
+  InefficientStdFunctionContext(void* ptr, std::function<void(void*)> deleter)
+      : ptr_(ptr), deleter_(std::move(deleter)) {}
+  InefficientStdFunctionContext(const InefficientStdFunctionContext&) = delete;
+  InefficientStdFunctionContext(InefficientStdFunctionContext&& rhs) noexcept
+      : ptr_(std::exchange(rhs.ptr_, nullptr)),
+        deleter_(std::move(rhs.deleter_)) {}
+  InefficientStdFunctionContext& operator=(
+      const InefficientStdFunctionContext&) = delete;
+  // NOLINTNEXTLINE(*-noexcept-move-*)
+  InefficientStdFunctionContext& operator=(
+      InefficientStdFunctionContext&& rhs) {
+    this->~InefficientStdFunctionContext();
+    ptr_ = std::exchange(rhs.ptr_, nullptr);
+    deleter_ = std::move(rhs.deleter_);
+    return *this;
+  }
+  ~InefficientStdFunctionContext() {
+    if (deleter_) {
+      deleter_(ptr_);
+    }
+  }
   static DataPtr makeDataPtr(
       void* ptr,
-      const std::function<void(void*)>& deleter,
+      std::function<void(void*)> deleter,
       Device device);
 };
 
@@ -265,9 +285,6 @@ struct AllocatorRegisterer {
 // An interface for reporting thread local memory usage
 // per device
 struct C10_API MemoryReportingInfoBase : public c10::DebugInfoBase {
-  MemoryReportingInfoBase();
-  ~MemoryReportingInfoBase() override = default;
-
   /**
    * alloc_size corresponds to the size of the ptr.
    *
@@ -307,6 +324,7 @@ C10_API void reportOutOfMemoryToProfiler(
     Device device);
 
 // used to hold traceback information in allocators
+// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
 struct GatheredContext {
   virtual ~GatheredContext() = default;
 };

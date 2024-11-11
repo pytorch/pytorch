@@ -4,6 +4,7 @@ from torchgen.executorch.api.types import ExecutorchCppSignature
 from torchgen.local import parametrize
 from torchgen.model import Location, NativeFunction
 
+
 DEFAULT_NATIVE_FUNCTION, _ = NativeFunction.from_yaml(
     {"func": "foo.out(Tensor input, *, Tensor(a!) out) -> Tensor(a!)"},
     loc=Location(__file__, 1),

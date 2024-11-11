@@ -82,7 +82,7 @@ static TensorAssign tensor_assign;
 // of the same size.
 template <int N> struct alignas(N) OpaqueType { char data[N]; };
 
-// essentialy rewritten related to legacy::launch_kernel parts
+// essentially rewritten related to legacy::launch_kernel parts
 template <int nt, int vt, typename func_t>
 C10_LAUNCH_BOUNDS_2(nt, vt)
 __global__ void _scatter_gather_elementwise_kernel(int N, func_t f) {
@@ -188,8 +188,8 @@ struct cuda_scatter_gather_base_kernel {
       .check_all_same_dtype(false)
       .resize_outputs(false)
       .add_output(self_restrided)
-      .add_input(src_restrided)
-      .add_input(index)
+      .add_const_input(src_restrided)
+      .add_const_input(index)
       .build();
 
     auto self_dim_stride = ensure_nonempty_stride(self, dim);
@@ -246,8 +246,8 @@ struct cuda_scatter_gather_base_kernel {
       .check_all_same_dtype(false)
       .resize_outputs(false)
       .add_output(self_restrided)
-      .add_input(src_restrided)
-      .add_input(index)
+      .add_const_input(src_restrided)
+      .add_const_input(index)
       .build();
 
     auto self_dim_stride = ensure_nonempty_stride(self, dim);
@@ -305,8 +305,8 @@ struct cuda_scatter_gather_base_kernel {
       .check_all_same_dtype(false)
       .resize_outputs(false)
       .add_output(self_restrided)
-      .add_input(src_restrided)
-      .add_input(index)
+      .add_const_input(src_restrided)
+      .add_const_input(index)
       .build();
 
     auto self_dim_stride = ensure_nonempty_stride(self, dim);
@@ -401,7 +401,7 @@ struct cuda_scatter_fill_base_kernel {
       .check_all_same_dtype(false)
       .resize_outputs(false)
       .add_output(self_restrided)
-      .add_input(index)
+      .add_const_input(index)
       .build();
 
     auto index_size = ensure_nonempty_size(self, dim);
@@ -444,7 +444,7 @@ struct cuda_scatter_fill_base_kernel {
       .check_all_same_dtype(false)
       .resize_outputs(false)
       .add_output(self_restrided)
-      .add_input(index)
+      .add_const_input(index)
       .build();
 
     auto index_size = ensure_nonempty_size(self, dim);
@@ -562,12 +562,12 @@ void scatter_scalar_reduce_cuda_kernel(const Tensor& self, const int64_t dim, co
 }
 
 
-REGISTER_DISPATCH(gather_stub, &gather_cuda_kernel);
-REGISTER_DISPATCH(scatter_stub, &scatter_cuda_kernel);
-REGISTER_DISPATCH(scatter_fill_stub, &scatter_fill_cuda_kernel);
-REGISTER_DISPATCH(scatter_add_stub, &scatter_add_cuda_kernel);
-REGISTER_DISPATCH(scatter_reduce_stub, &scatter_reduce_cuda_kernel);
-REGISTER_DISPATCH(scatter_scalar_reduce_stub, &scatter_scalar_reduce_cuda_kernel);
-REGISTER_DISPATCH(scatter_reduce_two_stub, &scatter_reduce_two_cuda_kernel);
+REGISTER_DISPATCH(gather_stub, &gather_cuda_kernel)
+REGISTER_DISPATCH(scatter_stub, &scatter_cuda_kernel)
+REGISTER_DISPATCH(scatter_fill_stub, &scatter_fill_cuda_kernel)
+REGISTER_DISPATCH(scatter_add_stub, &scatter_add_cuda_kernel)
+REGISTER_DISPATCH(scatter_reduce_stub, &scatter_reduce_cuda_kernel)
+REGISTER_DISPATCH(scatter_scalar_reduce_stub, &scatter_scalar_reduce_cuda_kernel)
+REGISTER_DISPATCH(scatter_reduce_two_stub, &scatter_reduce_two_cuda_kernel)
 
 } // namespace at::native

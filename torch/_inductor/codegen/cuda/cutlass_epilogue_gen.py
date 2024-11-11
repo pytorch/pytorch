@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from typing import Dict, List
 from unittest.mock import patch
 
@@ -15,7 +16,7 @@ _MAGIC_SYMPY_ERROR_STRING = "[!sympy: unsupported expr!]"
 
 def _arg_str(a):
     if isinstance(a, sympy.Expr):
-        # If this return value containting the _MAGIC_SYMPY_ERROR_STRING
+        # If this return value containing the _MAGIC_SYMPY_ERROR_STRING
         # is used as part of the final generated C++ code,
         # a CUTLASSEVTOpNotImplementedError is raised to indicate that
         # the op could not be converted to a valid EVT expression.
@@ -60,7 +61,7 @@ class CutlassEVTEpilogueTypeFormatter:
         self.output = IndentedBuffer(0)
         self.var_counter = 0
         self.evt_type_name = evt_type_name
-        self.aliases = dict()
+        self.aliases = {}
 
     @staticmethod
     def ir_to_evt_string(
@@ -99,7 +100,7 @@ class CutlassEVTEpilogueTypeFormatter:
                 result = pnode.inner_fn(index)
                 # each epilogue node results in a single "using" statement and may refer to the previous steps by name
                 formatter.aliases[node.name] = result
-            res = formatter.getvalue(result)
+            res = formatter.getvalue(result)  # type: ignore[possibly-undefined]
             if _MAGIC_SYMPY_ERROR_STRING in res:
                 raise CUTLASSEVTOpNotImplementedError(
                     "sympy / indexing expressions not yet supported in EVT fusion"
@@ -197,7 +198,7 @@ class CutlassEVTEpilogueTypeFormatter:
         return f"cutlass::epilogue::fusion::Sm90EVT<cutlass::epilogue::fusion::Sm90Compute<cutlass::maximum, ElementAcc, ElementAcc, RoundStyle>,{a}, {const_zero}>"  # noqa: B950
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
-        raise CUTLASSEVTOpNotImplementedError()
+        raise CUTLASSEVTOpNotImplementedError
 
     # Add more ops here...
     def getvalue(self, result) -> str:
@@ -242,7 +243,7 @@ class CutlassEVTEpilogueArgumentFormatter:
         self.var_counter: int = (
             0  # used to generate variable names, incremented for each new variable
         )
-        self.aliases: Dict[str, str] = dict()  # Aliases for subexpression functors
+        self.aliases: Dict[str, str] = {}  # Aliases for subexpression functors
 
     @staticmethod
     def ir_to_evt_argument_string(
@@ -264,9 +265,9 @@ class CutlassEVTEpilogueArgumentFormatter:
                 result = pnode.inner_fn(index)
                 # each epilogue node results in a single "using" statement and may refer to the previous steps by name
                 if node.name is not None:
-                    formatter.aliases[node.name] = result
+                    formatter.aliases[node.name] = result  # type: ignore[assignment]
 
-            res: str = formatter.getvalue(result)
+            res: str = formatter.getvalue(result)  # type: ignore[possibly-undefined]
             if _MAGIC_SYMPY_ERROR_STRING in res:
                 raise CUTLASSEVTOpNotImplementedError(
                     "sympy / indexing expressions not yet supported in EVT fusion"
@@ -354,7 +355,7 @@ class CutlassEVTEpilogueArgumentFormatter:
         return a
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
-        raise CUTLASSEVTOpNotImplementedError()
+        raise CUTLASSEVTOpNotImplementedError
 
     def getvalue(self, result) -> str:
         return "{" + str(result) + "}"

@@ -99,7 +99,7 @@ from torch.ao.pruning._experimental.pruner import SaliencyPruner
 
 # Define model
 class Model(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.seq = nn.Sequential(
             nn.Linear(700, 500, bias=True),

@@ -6,10 +6,8 @@
 #include <torch/csrc/autograd/variable.h>
 
 #include <sstream>
-#include <vector>
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 variable_list wrap_outputs(
     const variable_list& inputs,
@@ -66,5 +64,4 @@ void check_input_variables(
     }
   }
 }
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

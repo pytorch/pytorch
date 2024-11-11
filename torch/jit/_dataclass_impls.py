@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # Functions for synthesizing magic methods for JIT-compiled dataclasses
 import ast
 import dataclasses

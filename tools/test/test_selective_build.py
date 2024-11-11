@@ -1,7 +1,7 @@
 import unittest
 
-from torchgen.selective_build.operator import *  # noqa: F403
 from torchgen.model import Location, NativeFunction
+from torchgen.selective_build.operator import *  # noqa: F403
 from torchgen.selective_build.selector import (
     combine_selective_builders,
     SelectiveBuilder,
@@ -9,7 +9,7 @@ from torchgen.selective_build.selector import (
 
 
 class TestSelectiveBuild(unittest.TestCase):
-    def test_selective_build_operator(self):
+    def test_selective_build_operator(self) -> None:
         op = SelectiveBuildOperator(
             "aten::add.int",
             is_root_operator=True,
@@ -21,7 +21,7 @@ class TestSelectiveBuild(unittest.TestCase):
         self.assertFalse(op.is_used_for_training)
         self.assertFalse(op.include_all_overloads)
 
-    def test_selector_factory(self):
+    def test_selector_factory(self) -> None:
         yaml_config_v1 = """
 debug_info:
   - model1@v100
@@ -132,7 +132,7 @@ operators:
             selector_legacy_v1.is_operator_selected_for_training("aten::add.float")
         )
 
-    def test_operator_combine(self):
+    def test_operator_combine(self) -> None:
         op1 = SelectiveBuildOperator(
             "aten::add.int",
             is_root_operator=True,
@@ -177,7 +177,7 @@ operators:
 
         self.assertRaises(Exception, gen_new_op)
 
-    def test_training_op_fetch(self):
+    def test_training_op_fetch(self) -> None:
         yaml_config = """
 operators:
   aten::add.int:
@@ -194,7 +194,7 @@ operators:
         self.assertTrue(selector.is_operator_selected_for_training("aten::add.int"))
         self.assertTrue(selector.is_operator_selected_for_training("aten::add"))
 
-    def test_kernel_dtypes(self):
+    def test_kernel_dtypes(self) -> None:
         yaml_config = """
 kernel_metadata:
   add_kernel:
@@ -221,7 +221,7 @@ kernel_metadata:
         self.assertFalse(selector.is_kernel_dtype_selected("add/sub_kernel", "int16"))
         self.assertFalse(selector.is_kernel_dtype_selected("add/sub_kernel", "int32"))
 
-    def test_merge_kernel_dtypes(self):
+    def test_merge_kernel_dtypes(self) -> None:
         yaml_config1 = """
 kernel_metadata:
   add_kernel:
@@ -266,7 +266,7 @@ kernel_metadata:
         self.assertTrue(selector.is_kernel_dtype_selected("mul_kernel", "int8"))
         self.assertFalse(selector.is_kernel_dtype_selected("mul_kernel", "int32"))
 
-    def test_all_kernel_dtypes_selected(self):
+    def test_all_kernel_dtypes_selected(self) -> None:
         yaml_config = """
 include_all_non_op_selectives: True
 """
@@ -279,7 +279,7 @@ include_all_non_op_selectives: True
         self.assertTrue(selector.is_kernel_dtype_selected("add1_kernel", "int32"))
         self.assertTrue(selector.is_kernel_dtype_selected("add_kernel", "float"))
 
-    def test_custom_namespace_selected_correctly(self):
+    def test_custom_namespace_selected_correctly(self) -> None:
         yaml_config = """
 operators:
   aten::add.int:
@@ -301,7 +301,7 @@ operators:
 
 
 class TestExecuTorchSelectiveBuild(unittest.TestCase):
-    def test_et_kernel_selected(self):
+    def test_et_kernel_selected(self) -> None:
         yaml_config = """
 et_kernel_metadata:
   aten::add.out:

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 #
 # This file is execfile()d with the current directory set to its
 # containing dir.
@@ -17,18 +16,18 @@ import os
 
 import functorch
 
+
 # import sys
 
 # source code directory, relative to this file, for sphinx-autobuild
 # sys.path.insert(0, os.path.abspath('../..'))
 
-import torch
 
 RELEASE = os.environ.get("RELEASE", False)
 
-import sys
 
 import pytorch_sphinx_theme
+
 
 # -- General configuration ------------------------------------------------
 
@@ -277,10 +276,10 @@ import sphinx.ext.doctest
 
 # -- A patch that prevents Sphinx from cross-referencing ivar tags -------
 # See http://stackoverflow.com/a/41184353/3343043
-
 from docutils import nodes
 from sphinx import addnodes
 from sphinx.util.docfields import TypedField
+
 
 # Without this, doctest adds any example with a `>>>` as a test
 doctest_test_doctest_blocks = ""

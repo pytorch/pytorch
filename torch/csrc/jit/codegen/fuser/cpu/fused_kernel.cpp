@@ -3,18 +3,15 @@
 #include <ATen/DynamicLibrary.h>
 #include <ATen/code_template.h>
 #include <c10/util/Exception.h>
-#include <c10/util/Optional.h>
 #include <torch/csrc/jit/codegen/fuser/compiler.h>
 #include <torch/csrc/jit/codegen/fuser/cpu/temp_file.h>
+#include <optional>
 
 #include <cstdlib>
 #include <iostream>
 #include <string>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cpu {
+namespace torch::jit::fuser::cpu {
 
 #ifdef _MSC_VER
 static const std::string getTempPath() {
@@ -59,13 +56,13 @@ static bool programExists(const std::string& program) {
 }
 
 #ifdef _MSC_VER
-c10::optional<std::wstring> exec(const std::wstring& cmd) {
+std::optional<std::wstring> exec(const std::wstring& cmd) {
   std::array<wchar_t, 128> buffer;
   std::wstring result;
   std::unique_ptr<FILE, decltype(&_pclose)> pipe(
       _wpopen(cmd.c_str(), L"r"), _pclose);
   if (!pipe) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   while (fgetws(buffer.data(), static_cast<int>(buffer.size()), pipe.get()) !=
          nullptr) {
@@ -82,7 +79,7 @@ inline std::wstring& rtrim(std::wstring& s, const wchar_t* t = L" \t\n\r\f\v") {
 void activate() {
   wchar_t* root = nullptr;
   std::wstring cmd;
-  c10::optional<std::wstring> exec_out;
+  std::optional<std::wstring> exec_out;
   std::wstring path;
   std::wstring vcruntime_plat;
   std::wstring envvars;
@@ -357,7 +354,4 @@ static std::shared_ptr<FusedKernel> createFusionKernel(
 }
 
 RegisterFusionBackend reg(DeviceType::CPU, createFusionKernel);
-} // namespace cpu
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::fuser::cpu

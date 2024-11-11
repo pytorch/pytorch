@@ -1,8 +1,8 @@
+# mypy: allow-untyped-defs
 import abc
 import cmath
 import collections.abc
 import contextlib
-import warnings
 from typing import (
     Any,
     Callable,
@@ -16,15 +16,18 @@ from typing import (
     Type,
     Union,
 )
+from typing_extensions import deprecated
 
 import torch
+
 
 try:
     import numpy as np
 
-    NUMPY_AVAILABLE = True
+    HAS_NUMPY = True
 except ModuleNotFoundError:
-    NUMPY_AVAILABLE = False
+    HAS_NUMPY = False
+    np = None  # type: ignore[assignment]
 
 
 class ErrorMeta(Exception):
@@ -36,7 +39,7 @@ class ErrorMeta(Exception):
         super().__init__(
             "If you are a user and see this message during normal operation "
             "please file an issue at https://github.com/pytorch/pytorch/issues. "
-            "If you are a developer and working on the comparison functions, please `raise ErrorMeta().to_error()` "
+            "If you are a developer and working on the comparison functions, please `raise ErrorMeta.to_error()` "
             "for user facing errors."
         )
         self.type = type
@@ -71,16 +74,10 @@ _DTYPE_PRECISIONS = {
 # The default tolerances of torch.float32 are used for quantized dtypes, because quantized tensors are compared in
 # their dequantized and floating point representation. For more details see `TensorLikePair._compare_quantized_values`
 _DTYPE_PRECISIONS.update(
-    {
-        dtype: _DTYPE_PRECISIONS[torch.float32]
-        for dtype in (
-            torch.quint8,
-            torch.quint2x4,
-            torch.quint4x2,
-            torch.qint8,
-            torch.qint32,
-        )
-    }
+    dict.fromkeys(
+        (torch.quint8, torch.quint2x4, torch.quint4x2, torch.qint8, torch.qint32),
+        _DTYPE_PRECISIONS[torch.float32],
+    )
 )
 
 
@@ -342,7 +339,7 @@ class Pair(abc.ABC):
 
     @staticmethod
     def _inputs_not_supported() -> NoReturn:
-        raise UnsupportedInputs()
+        raise UnsupportedInputs
 
     @staticmethod
     def _check_inputs_isinstance(*inputs: Any, cls: Union[Type, Tuple[Type, ...]]):
@@ -457,7 +454,7 @@ class BooleanPair(Pair):
     @property
     def _supported_types(self) -> Tuple[Type, ...]:
         cls: List[Type] = [bool]
-        if NUMPY_AVAILABLE:
+        if HAS_NUMPY:
             cls.append(np.bool_)
         return tuple(cls)
 
@@ -551,7 +548,7 @@ class NumberPair(Pair):
     @property
     def _supported_types(self) -> Tuple[Type, ...]:
         cls = list(self._NUMBER_TYPES)
-        if NUMPY_AVAILABLE:
+        if HAS_NUMPY:
             cls.append(np.number)
         return tuple(cls)
 
@@ -567,7 +564,7 @@ class NumberPair(Pair):
     def _to_number(
         self, number_like: Any, *, id: Tuple[Any, ...]
     ) -> Union[int, float, complex]:
-        if NUMPY_AVAILABLE and isinstance(number_like, np.number):
+        if HAS_NUMPY and isinstance(number_like, np.number):
             return number_like.item()
         elif isinstance(number_like, self._NUMBER_TYPES):
             return number_like  # type: ignore[return-value]
@@ -692,6 +689,7 @@ class TensorLikePair(Pair):
     def _check_supported(self, tensor: torch.Tensor, *, id: Tuple[Any, ...]) -> None:
         if tensor.layout not in {
             torch.strided,
+            torch.jagged,
             torch.sparse_coo,
             torch.sparse_csr,
             torch.sparse_csc,
@@ -834,6 +832,9 @@ class TensorLikePair(Pair):
             torch.sparse_bsc,
         }:
             compare_fn = self._compare_sparse_compressed_values
+        elif actual.layout == torch.jagged:
+            actual, expected = actual.values(), expected.values()
+            compare_fn = self._compare_regular_values_close
         else:
             compare_fn = self._compare_regular_values_close
 
@@ -1223,7 +1224,7 @@ def not_close_error_metas(
         )
     except ErrorMeta as error_meta:
         # Explicitly raising from None to hide the internal traceback
-        raise error_meta.to_error() from None
+        raise error_meta.to_error() from None  # noqa: RSE102
 
     error_metas: List[ErrorMeta] = []
     for pair in pairs:
@@ -1529,6 +1530,12 @@ def assert_close(
         raise error_metas[0].to_error(msg)
 
 
+@deprecated(
+    "`torch.testing.assert_allclose()` is deprecated since 1.12 and will be removed in a future release. "
+    "Please use `torch.testing.assert_close()` instead. "
+    "You can find detailed upgrade instructions in https://github.com/pytorch/pytorch/issues/61844.",
+    category=FutureWarning,
+)
 def assert_allclose(
     actual: Any,
     expected: Any,
@@ -1544,14 +1551,6 @@ def assert_allclose(
        Please use :func:`torch.testing.assert_close` instead. You can find detailed upgrade instructions
        `here <https://github.com/pytorch/pytorch/issues/61844>`_.
     """
-    warnings.warn(
-        "`torch.testing.assert_allclose()` is deprecated since 1.12 and will be removed in a future release. "
-        "Please use `torch.testing.assert_close()` instead. "
-        "You can find detailed upgrade instructions in https://github.com/pytorch/pytorch/issues/61844.",
-        FutureWarning,
-        stacklevel=2,
-    )
-
     if not isinstance(actual, torch.Tensor):
         actual = torch.tensor(actual)
     if not isinstance(expected, torch.Tensor):

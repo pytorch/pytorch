@@ -14,10 +14,6 @@ Background_Matting,pass_due_to_skip,0
 
 
 
-DALLE2_pytorch,pass,11
-
-
-
 LearningToPaint,pass,0
 
 
@@ -86,6 +82,10 @@ detectron2_fasterrcnn_r_50_fpn,eager_fail_to_run,0
 
 
 
+detectron2_fcos_r_50_fpn,pass,22
+
+
+
 detectron2_maskrcnn_r_101_c4,eager_fail_to_run,0
 
 
@@ -138,6 +138,14 @@ hf_Bart,pass,0
 
 
 
+hf_Bert,pass,0
+
+
+
+hf_Bert_large,pass,0
+
+
+
 hf_BigBird,fail_to_run,0
 
 
@@ -166,7 +174,7 @@ hf_T5_base,eager_fail_to_run,0
 
 
 
-hf_T5_generate,fail_to_run,5
+hf_T5_generate,pass,5
 
 
 
@@ -175,10 +183,6 @@ hf_T5_large,pass_due_to_skip,0
 
 
 hf_Whisper,pass,0
-
-
-
-hf_clip,eager_fail_to_run,0
 
 
 
@@ -195,6 +199,14 @@ llama,pass,0
 
 
 llama_v2_7b_16h,model_fail_to_load,0
+
+
+
+llava,model_fail_to_load,0
+
+
+
+maml,pass_due_to_skip,0
 
 
 
@@ -218,7 +230,11 @@ mobilenet_v3_large,pass,0
 
 
 
-moco,pass,11
+moco,pass,5
+
+
+
+moondream,model_fail_to_load,0
 
 
 
@@ -247,6 +263,10 @@ pyhpc_equation_of_state,pass,0
 
 
 pyhpc_isoneutral_mixing,pass,0
+
+
+
+pyhpc_turbulent_kinetic_energy,pass,0
 
 
 
@@ -346,8 +366,8 @@ vgg16,pass,0
 
 
 
-vision_maskrcnn,pass,16
+vision_maskrcnn,pass,18
 
 
 
-yolov3,pass,2
+yolov3,pass,0

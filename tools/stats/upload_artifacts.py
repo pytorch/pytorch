@@ -5,6 +5,7 @@ from tempfile import TemporaryDirectory
 
 from tools.stats.upload_stats_lib import download_gha_artifacts, upload_file_to_s3
 
+
 ARTIFACTS = [
     "sccache-stats",
     "test-jsons",

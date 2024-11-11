@@ -12,29 +12,39 @@ using namespace torch;
 using namespace at;
 using namespace c10;
 
+namespace torch::detail {
+
 namespace {
 
 // NB: This is a macro and not a template function (like it was before)
 // because passing in constexpr char* as template argument breaks some
 // versions of MSVC that are being used internally at Meta.
 // MSVC 14.16.27023 (vs2017_15.9)
-#define CONCRETE_TRACE_CUDA(func_name, ...)                           \
-  at::impl::MaybeSetTLSOnEntryGuard guard;                            \
-  if (Py_IsInitialized()) {                                           \
-    pybind11::gil_scoped_acquire gil;                                 \
-    try {                                                             \
-      py::module mod = py::module::import("torch.utils._cuda_trace"); \
-      py::object hook = mod.attr(func_name).attr("fire_callbacks");   \
-      hook(__VA_ARGS__);                                              \
-    } catch (const std::exception& e) {                               \
-      LOG(ERROR) << "CUDA trace hook execution failed: " << e.what(); \
-    }                                                                 \
+#define CONCRETE_GPU_TRACE(device_type, func_name, ...)                       \
+  at::impl::MaybeSetTLSOnEntryGuard guard;                                    \
+  if (Py_IsInitialized()) {                                                   \
+    pybind11::gil_scoped_acquire gil;                                         \
+    try {                                                                     \
+      /* Masquerade hip as cuda because hip uses `torch.cuda` module. */      \
+      if (device_type == at::kHIP) {                                          \
+        device_type = at::kCUDA;                                              \
+      }                                                                       \
+      std::string module_name = "torch." + DeviceTypeName(device_type, true); \
+      py::module mod = py::module::import(module_name.c_str());               \
+      py::object hook =                                                       \
+          mod.attr("_gpu_trace").attr(func_name).attr("fire_callbacks");      \
+      hook(__VA_ARGS__);                                                      \
+    } catch (const std::exception& e) {                                       \
+      LOG(ERROR) << device_type                                               \
+                 << " trace hook execution failed: " << e.what();             \
+    }                                                                         \
   }
 
 struct ConcretePyInterpreterVTable final
     : public c10::impl::PyInterpreterVTable {
   std::string name() const override;
 
+  void incref(PyObject* pyobj) const override;
   void decref(PyObject* pyobj, bool has_pyobj_slot) const override;
 
   // TODO: Need to make this work for StorageImpl too. I imagine I'll want to
@@ -53,9 +63,12 @@ struct ConcretePyInterpreterVTable final
   void python_op_registration_trampoline(
       const c10::OperatorHandle& op,
       c10::DispatchKey key,
-      torch::jit::Stack* stack) const override {
+      c10::DispatchKeySet keyset,
+      torch::jit::Stack* stack,
+      bool with_keyset,
+      bool with_op) const override {
     torch::impl::dispatch::python_op_registration_trampoline_impl(
-        op, key, stack);
+        op, key, keyset, stack, with_keyset, with_op);
   }
   void throw_abstract_impl_not_imported_error(
       std::string opname,
@@ -83,36 +96,51 @@ struct ConcretePyInterpreterVTable final
   c10::SymIntArrayRef sym_strides(const c10::TensorImpl* self) const override;
   c10::SymInt sym_storage_offset(const c10::TensorImpl* self) const override;
 
-  void trace_gpu_event_creation(uintptr_t event) const override {
-    CONCRETE_TRACE_CUDA("CUDAEventCreationCallbacks", event);
-  }
-  void trace_gpu_event_deletion(uintptr_t event) const override {
-    CONCRETE_TRACE_CUDA("CUDAEventDeletionCallbacks", event);
-  }
-  void trace_gpu_event_record(uintptr_t event, uintptr_t stream)
+  void trace_gpu_event_creation(at::DeviceType device_type, uintptr_t event)
       const override {
-    CONCRETE_TRACE_CUDA("CUDAEventRecordCallbacks", event, stream);
+    CONCRETE_GPU_TRACE(device_type, "EventCreationCallbacks", event);
   }
-  void trace_gpu_event_wait(uintptr_t event, uintptr_t stream) const override {
-    CONCRETE_TRACE_CUDA("CUDAEventWaitCallbacks", event, stream);
+  void trace_gpu_event_deletion(at::DeviceType device_type, uintptr_t event)
+      const override {
+    CONCRETE_GPU_TRACE(device_type, "EventDeletionCallbacks", event);
   }
-  void trace_gpu_memory_allocation(uintptr_t ptr) const override {
-    CONCRETE_TRACE_CUDA("CUDAMemoryAllocationCallbacks", ptr);
+  void trace_gpu_event_record(
+      at::DeviceType device_type,
+      uintptr_t event,
+      uintptr_t stream) const override {
+    CONCRETE_GPU_TRACE(device_type, "EventRecordCallbacks", event, stream);
   }
-  void trace_gpu_memory_deallocation(uintptr_t ptr) const override {
-    CONCRETE_TRACE_CUDA("CUDAMemoryDeallocationCallbacks", ptr);
+  void trace_gpu_event_wait(
+      at::DeviceType device_type,
+      uintptr_t event,
+      uintptr_t stream) const override {
+    CONCRETE_GPU_TRACE(device_type, "EventWaitCallbacks", event, stream);
   }
-  void trace_gpu_stream_creation(uintptr_t stream) const override {
-    CONCRETE_TRACE_CUDA("CUDAStreamCreationCallbacks", stream);
+  void trace_gpu_memory_allocation(at::DeviceType device_type, uintptr_t ptr)
+      const override {
+    CONCRETE_GPU_TRACE(device_type, "MemoryAllocationCallbacks", ptr);
   }
-  void trace_gpu_device_synchronization() const override {
-    CONCRETE_TRACE_CUDA("CUDADeviceSynchronizationCallbacks");
+  void trace_gpu_memory_deallocation(at::DeviceType device_type, uintptr_t ptr)
+      const override {
+    CONCRETE_GPU_TRACE(device_type, "MemoryDeallocationCallbacks", ptr);
   }
-  void trace_gpu_stream_synchronization(uintptr_t stream) const override {
-    CONCRETE_TRACE_CUDA("CUDAStreamSynchronizationCallbacks", stream);
+  void trace_gpu_stream_creation(at::DeviceType device_type, uintptr_t stream)
+      const override {
+    CONCRETE_GPU_TRACE(device_type, "StreamCreationCallbacks", stream);
   }
-  void trace_gpu_event_synchronization(uintptr_t event) const override {
-    CONCRETE_TRACE_CUDA("CUDAEventSynchronizationCallbacks", event);
+  void trace_gpu_device_synchronization(
+      at::DeviceType device_type) const override {
+    CONCRETE_GPU_TRACE(device_type, "DeviceSynchronizationCallbacks");
+  }
+  void trace_gpu_stream_synchronization(
+      at::DeviceType device_type,
+      uintptr_t stream) const override {
+    CONCRETE_GPU_TRACE(device_type, "StreamSynchronizationCallbacks", stream);
+  }
+  void trace_gpu_event_synchronization(
+      at::DeviceType device_type,
+      uintptr_t event) const override {
+    CONCRETE_GPU_TRACE(device_type, "EventSynchronizationCallbacks", event);
   }
 
   void reset_backward_hooks(const c10::TensorImpl* self) const override;
@@ -170,8 +198,7 @@ py::object torchDispatchFromTensorImpl(
       c10::intrusive_ptr<c10::TensorImpl, c10::UndefinedTensorImpl>::
           // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
       unsafe_reclaim_from_nonowning(const_cast<c10::TensorImpl*>(self)));
-  auto self_p =
-      py::reinterpret_steal<py::object>(THPVariable_Wrap(std::move(self_t)));
+  auto self_p = py::reinterpret_steal<py::object>(THPVariable_Wrap(self_t));
   // NB: this may not be a python tensor if you got here from a mode!
   // TORCH_INTERNAL_ASSERT(isPythonTensor(self_t));
   append_overloaded_tensor(&overloaded_args, self_p.ptr());
@@ -248,29 +275,12 @@ void ConcretePyInterpreterVTable::decref(PyObject* pyobj, bool has_pyobj_slot)
   Py_DECREF(pyobj);
 };
 
-py::handle getTorchApiFunction(const c10::OperatorHandle& op) {
-  return op.getPythonOp(getPyInterpreter(), [&]() -> PyObject* {
-    // Parse the name into namespace and name (no overload_name)
-    // TODO: put this into the library
-    const auto& schema = op.schema();
-    const auto& qualified_name = op.operator_name().name;
-    const auto& overload_name = schema.overload_name();
-    auto pos = qualified_name.find("::");
-    TORCH_INTERNAL_ASSERT(pos != std::string::npos, qualified_name);
-    // Make me some null terminated strings
-    std::string ns_str = qualified_name.substr(0, pos);
-    const char* ns = ns_str.c_str();
-    const char* func_name = qualified_name.c_str() + pos + strlen("::");
-
-    py::handle torch_api_function =
-        py::module::import("torch").attr("ops").attr(ns).attr(func_name);
-    if (overload_name.empty()) {
-      return torch_api_function.attr("default").ptr();
-    } else {
-      return torch_api_function.attr(overload_name.c_str()).ptr();
-    }
-  });
-}
+void ConcretePyInterpreterVTable::incref(PyObject* pyobj) const {
+  if (!Py_IsInitialized())
+    return;
+  pybind11::gil_scoped_acquire gil;
+  Py_INCREF(pyobj);
+};
 
 bool isPythonTensor(const at::Tensor& tensor) {
   return tensor.unsafeGetTensorImpl()->key_set().has(c10::DispatchKey::Python);
@@ -356,9 +366,12 @@ void ConcretePyInterpreterVTable::python_dispatcher(
   }
 
   c10::DispatchKey k = ks.highestPriorityTypeId();
-  // TODO: allow this to be non-owning
-  auto handler = py::reinterpret_borrow<py::object>(
-      PyDict_GetItem(cache.ptr(), py::cast(k).ptr()));
+  PyObject* raw_handler = nullptr;
+  if (PyDict_GetItemRef(cache.ptr(), py::cast(k).ptr(), &raw_handler) < 0) {
+    // There was an error that is not missing key (which would return 0)
+    throw python_error();
+  }
+  auto handler = py::reinterpret_steal<py::object>(raw_handler);
   if (handler.ptr() == nullptr) {
     // Slow path
     handler = torch_api_function_overload.attr("_get_dispatch")(k);
@@ -568,7 +581,7 @@ static void set_tensor_attr_with_capsule(
     const c10::TensorImpl* tensor,
     py::capsule& capsule,
     const char* attr_name) {
-  c10::optional<PyObject*> mb_obj = tensor->pyobj_slot()->check_pyobj(
+  std::optional<PyObject*> mb_obj = tensor->pyobj_slot()->check_pyobj(
       getPyInterpreter(), /*ignore_hermetic_tls=*/false);
   TORCH_CHECK(
       mb_obj.has_value(), "Tensor subclass's PyInterpreter has no value");
@@ -596,7 +609,7 @@ static c10::ArrayRef<T> get_set_cached_attr(
     const c10::TensorImpl* tensor,
     const char* base_attr_name,
     const py::object& obj) {
-  c10::optional<PyObject*> mb_obj =
+  std::optional<PyObject*> mb_obj =
       tensor->pyobj_slot()->check_pyobj(getPyInterpreter());
   TORCH_CHECK(
       mb_obj.has_value(), "Tensor subclass's PyInterpreter has no value");
@@ -807,12 +820,16 @@ c10::Layout ConcretePyInterpreterVTable::layout(
       "torch.ops.prim");
 
   TORCH_CHECK(
-      THPLayout_Check(out.ptr()),
+      THPLayout_Check(out.ptr()) || PyLong_Check(out.ptr()),
       "layout returned invalid type ",
       py::detail::get_fully_qualified_tp_name(Py_TYPE(out.ptr())),
       ", expected Layout");
 
-  return toLayout(out.ptr());
+  if (THPLayout_Check(out.ptr())) {
+    return toLayout(out.ptr());
+  } else {
+    return c10::Layout(py::cast<int64_t>(out));
+  }
 }
 
 int64_t ConcretePyInterpreterVTable::numel(const c10::TensorImpl* self) const {
@@ -922,26 +939,51 @@ void ConcretePyInterpreterVTable::reset_backward_hooks(
       Tensor(c10::intrusive_ptr<c10::TensorImpl, c10::UndefinedTensorImpl>::
                  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
              unsafe_reclaim_from_nonowning(const_cast<c10::TensorImpl*>(self)));
-  auto self_p =
-      py::reinterpret_steal<py::object>(THPVariable_Wrap(std::move(self_t)));
+  auto self_p = py::reinterpret_steal<py::object>(THPVariable_Wrap(self_t));
   PyObject_SetAttrString(self_p.ptr(), "_backward_hooks", Py_None);
   END_HANDLE_TH_ERRORS_PYBIND
-}
-
-PyInterpreterHolder self_interpreter;
-
-} // anonymous namespace
-
-c10::impl::PyInterpreter* getPyInterpreter() {
-  return self_interpreter.get();
-}
-
-bool isMainPyInterpreter() {
-  return self_interpreter.is_main_interpreter();
 }
 
 std::string ConcretePyInterpreterVTable::name() const {
   std::stringstream ss;
   ss << getPyInterpreter();
   return ss.str();
+}
+
+PyInterpreterHolder self_interpreter;
+
+} // anonymous namespace
+
+py::handle getTorchApiFunction(const c10::OperatorHandle& op) {
+  return op.getPythonOp(getPyInterpreter(), [&]() -> PyObject* {
+    // Parse the name into namespace and name (no overload_name)
+    // TODO: put this into the library
+    const auto& schema = op.schema();
+    const auto& qualified_name = op.operator_name().name;
+    const auto& overload_name = schema.overload_name();
+    auto pos = qualified_name.find("::");
+    TORCH_INTERNAL_ASSERT(pos != std::string::npos, qualified_name);
+    // Make me some null terminated strings
+    std::string ns_str = qualified_name.substr(0, pos);
+    const char* ns = ns_str.c_str();
+    const char* func_name = qualified_name.c_str() + pos + strlen("::");
+
+    py::handle torch_api_function =
+        py::module::import("torch").attr("ops").attr(ns).attr(func_name);
+    if (overload_name.empty()) {
+      return torch_api_function.attr("default").ptr();
+    } else {
+      return torch_api_function.attr(overload_name.c_str()).ptr();
+    }
+  });
+}
+
+} // namespace torch::detail
+
+c10::impl::PyInterpreter* getPyInterpreter() {
+  return torch::detail::self_interpreter.get();
+}
+
+bool isMainPyInterpreter() {
+  return torch::detail::self_interpreter.is_main_interpreter();
 }

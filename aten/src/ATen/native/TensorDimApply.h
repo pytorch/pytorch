@@ -10,7 +10,7 @@ void tensor_dim_apply3(const Tensor& self, Tensor& values, Tensor& indices, int6
   int ndims = self.dim();
   int tensor_dim_apply_has_finished = 0;
   std::vector<int64_t> counter(ndims, 0);
-  T1* self_data = self.data_ptr<T1>();
+  const T1* self_data = self.const_data_ptr<T1>();
   T1* values_data = values.data_ptr<T1>();
   T2* indices_data = indices.data_ptr<T2>();
   int64_t self_stride = self.stride(dim);

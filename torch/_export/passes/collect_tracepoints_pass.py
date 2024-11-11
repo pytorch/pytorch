@@ -1,9 +1,10 @@
+# mypy: allow-untyped-defs
 import operator
 
 import torch
-
 from torch.export.exported_program import ConstantArgument, TensorArgument
 from torch.fx.passes.infra.pass_base import PassBase, PassResult
+
 
 __all__ = ["CollectTracepointsPass"]
 
@@ -28,7 +29,54 @@ class CollectTracepointsPass(PassBase):
                         "Symint input is not implemented yet for submodule call signature."
                     )
             else:
-                return ConstantArgument(value=arg)
+                return ConstantArgument(name="", value=arg)
+
+        for module in gm.modules():
+            if not isinstance(module, torch.fx.GraphModule):
+                continue
+            nn_module_stack = None
+            for node in module.graph.nodes:
+                if node.op != "call_function":
+                    continue
+                if node.target == torch.ops.higher_order._export_tracepoint:
+                    kind = node.kwargs["kind"]
+                    if kind == "module_call_outputs":
+                        nn_module_stack = node.meta["nn_module_stack"]
+                    elif kind == "module_call_inputs":
+                        nn_module_stack = None
+                    else:
+                        raise AssertionError(f"Unknown tracepoint kind: {kind}")
+                elif node.meta["nn_module_stack"] == nn_module_stack:
+                    node.meta["nn_module_stack"].popitem()
+                else:
+                    nn_module_stack = None
+            nn_module_stack = None
+            for node in reversed(module.graph.nodes):
+                if node.op != "call_function":
+                    continue
+                if node.target == torch.ops.higher_order._export_tracepoint:
+                    kind = node.kwargs["kind"]
+                    if kind == "module_call_inputs":
+                        nn_module_stack = node.meta["nn_module_stack"]
+                    elif kind == "module_call_outputs":
+                        nn_module_stack = None
+                    else:
+                        raise AssertionError(f"Unknown tracepoint kind: {kind}")
+                elif node.meta["nn_module_stack"] == nn_module_stack:
+                    node.meta["nn_module_stack"].popitem()
+                else:
+                    nn_module_stack = None
+
+        def copy_sig(sig):
+            from torch.export.exported_program import ModuleCallSignature
+
+            return ModuleCallSignature(
+                inputs=[],
+                outputs=[],
+                in_spec=sig.in_spec,
+                out_spec=sig.out_spec,
+                forward_arg_names=None,
+            )
 
         for module in gm.modules():
             if not isinstance(module, torch.fx.GraphModule):
@@ -37,16 +85,19 @@ class CollectTracepointsPass(PassBase):
                 if node.op != "call_function":
                     continue
                 if node.target == torch.ops.higher_order._export_tracepoint:
+                    path = node.kwargs["path"]
+                    module_key = next(reversed(node.meta["nn_module_stack"]))
+                    if "@" in module_key:
+                        call_path = f"{path}@{module_key.split('@')[-1]}"
+                        if call_path not in self.specs:
+                            self.specs[call_path] = copy_sig(self.specs[path])
+                        path = call_path
+                    kind = node.kwargs["kind"]
                     for i, arg in enumerate(node.args):
-                        kind = node.kwargs["kind"]
                         if kind == "module_call_inputs":
-                            self.specs[node.kwargs["path"]].inputs.append(
-                                get_arg_spec(arg)
-                            )
+                            self.specs[path].inputs.append(get_arg_spec(arg))
                         elif kind == "module_call_outputs":
-                            self.specs[node.kwargs["path"]].outputs.append(
-                                get_arg_spec(arg)
-                            )
+                            self.specs[path].outputs.append(get_arg_spec(arg))
                         else:
                             raise AssertionError(f"Unknown tracepoint kind: {kind}")
                         if isinstance(arg, torch.fx.Node):

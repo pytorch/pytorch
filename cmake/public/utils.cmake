@@ -16,71 +16,6 @@ endforeach()
 set(${OUTPUT} ${OUT} PARENT_SCOPE)
 endfunction(prepend)
 
-
-################################################################################################
-# Clears variables from list
-# Usage:
-#   caffe_clear_vars(<variables_list>)
-macro(caffe_clear_vars)
-  foreach(_var ${ARGN})
-    unset(${_var})
-  endforeach()
-endmacro()
-
-################################################################################################
-# Prints list element per line
-# Usage:
-#   caffe_print_list(<list>)
-function(caffe_print_list)
-  foreach(e ${ARGN})
-    message(STATUS ${e})
-  endforeach()
-endfunction()
-
-################################################################################################
-# Reads set of version defines from the header file
-# Usage:
-#   caffe_parse_header(<file> <define1> <define2> <define3> ..)
-macro(caffe_parse_header FILENAME FILE_VAR)
-  set(vars_regex "")
-  set(__parnet_scope OFF)
-  set(__add_cache OFF)
-  foreach(name ${ARGN})
-    if("${name}" STREQUAL "PARENT_SCOPE")
-      set(__parnet_scope ON)
-    elseif("${name}" STREQUAL "CACHE")
-      set(__add_cache ON)
-    elseif(vars_regex)
-      set(vars_regex "${vars_regex}|${name}")
-    else()
-      set(vars_regex "${name}")
-    endif()
-  endforeach()
-  if(EXISTS "${FILENAME}")
-    file(STRINGS "${FILENAME}" ${FILE_VAR} REGEX "#define[ \t]+(${vars_regex})[ \t]+[0-9]+" )
-  else()
-    unset(${FILE_VAR})
-  endif()
-  foreach(name ${ARGN})
-    if(NOT "${name}" STREQUAL "PARENT_SCOPE" AND NOT "${name}" STREQUAL "CACHE")
-      if(${FILE_VAR})
-        if(${FILE_VAR} MATCHES ".+[ \t]${name}[ \t]+([0-9]+).*")
-          string(REGEX REPLACE ".+[ \t]${name}[ \t]+([0-9]+).*" "\\1" ${name} "${${FILE_VAR}}")
-        else()
-          set(${name} "")
-        endif()
-        if(__add_cache)
-          set(${name} ${${name}} CACHE INTERNAL "${name} parsed from ${FILENAME}" FORCE)
-        elseif(__parnet_scope)
-          set(${name} "${${name}}" PARENT_SCOPE)
-        endif()
-      else()
-        unset(${name} CACHE)
-      endif()
-    endif()
-  endforeach()
-endmacro()
-
 ################################################################################################
 # Parses a version string that might have values beyond major, minor, and patch
 # and set version variables for the library.
@@ -101,7 +36,7 @@ endfunction()
 # setting to `python -c`, or using with pycmd. This allows multiline code to be
 # nested nicely in the surrounding code structure.
 #
-# This function respsects PYTHON_EXECUTABLE if it defined, otherwise it uses
+# This function respsects Python_EXECUTABLE if it defined, otherwise it uses
 # `python` and hopes for the best. An error will be thrown if it is not found.
 #
 # Args:
@@ -109,11 +44,11 @@ endfunction()
 #     text   : text to remove indentation from
 #
 function(dedent outvar text)
-  # Use PYTHON_EXECUTABLE if it is defined, otherwise default to python
-  if("${PYTHON_EXECUTABLE}" STREQUAL "")
-    set(_python_exe "python")
+  # Use Python_EXECUTABLE if it is defined, otherwise default to python
+  if("${Python_EXECUTABLE}" STREQUAL "")
+    set(_python_exe "python3")
   else()
-    set(_python_exe "${PYTHON_EXECUTABLE}")
+    set(_python_exe "${Python_EXECUTABLE}")
   endif()
   set(_fixup_cmd "import sys; from textwrap import dedent; print(dedent(sys.stdin.read()))")
   file(WRITE "${CMAKE_BINARY_DIR}/indented.txt" "${text}")
@@ -134,11 +69,11 @@ endfunction()
 
 
 function(pycmd_no_exit outvar exitcode cmd)
-  # Use PYTHON_EXECUTABLE if it is defined, otherwise default to python
-  if("${PYTHON_EXECUTABLE}" STREQUAL "")
+  # Use Python_EXECUTABLE if it is defined, otherwise default to python
+  if("${Python_EXECUTABLE}" STREQUAL "")
     set(_python_exe "python")
   else()
-    set(_python_exe "${PYTHON_EXECUTABLE}")
+    set(_python_exe "${Python_EXECUTABLE}")
   endif()
   # run the actual command
   execute_process(
@@ -159,7 +94,7 @@ endfunction()
 # Common indentation in the text of `cmd` is removed before the command is
 # executed, so the caller does not need to worry about indentation issues.
 #
-# This function respsects PYTHON_EXECUTABLE if it defined, otherwise it uses
+# This function respsects Python_EXECUTABLE if it defined, otherwise it uses
 # `python` and hopes for the best. An error will be thrown if it is not found.
 #
 # Args:
@@ -317,9 +252,6 @@ function(caffe2_binary_target target_name_or_src)
   if(DEFINED Caffe2_MODULES)
     target_link_libraries(${__target} ${Caffe2_MODULES})
   endif()
-  if(USE_TBB AND NOT USE_SYSTEM_TBB)
-    target_include_directories(${__target} PUBLIC ${TBB_INCLUDE_DIR})
-  endif()
   install(TARGETS ${__target} DESTINATION bin)
 endfunction()
 
@@ -375,6 +307,17 @@ macro(torch_hip_get_arch_list store_var)
 endmacro()
 
 ##############################################################################
+# Get the XPU arch flags specified by TORCH_XPU_ARCH_LIST.
+# Usage:
+#   torch_xpu_get_arch_list(variable_to_store_flags)
+#
+macro(torch_xpu_get_arch_list store_var)
+  if(DEFINED ENV{TORCH_XPU_ARCH_LIST})
+    set(${store_var} $ENV{TORCH_XPU_ARCH_LIST})
+  endif()
+endmacro()
+
+##############################################################################
 # Get the NVCC arch flags specified by TORCH_CUDA_ARCH_LIST and CUDA_ARCH_NAME.
 # Usage:
 #   torch_cuda_get_nvcc_gencode_flag(variable_to_store_flags)
@@ -408,12 +351,6 @@ endmacro()
 #   torch_compile_options(lib_name)
 function(torch_compile_options libname)
   set_property(TARGET ${libname} PROPERTY CXX_STANDARD 17)
-  set(private_compile_options "")
-
-  # ---[ Check if warnings should be errors.
-  if(WERROR)
-    list(APPEND private_compile_options -Werror)
-  endif()
 
   # until they can be unified, keep these lists synced with setup.py
   if(MSVC)
@@ -432,20 +369,26 @@ function(torch_compile_options libname)
         /bigobj>
       )
   else()
-    list(APPEND private_compile_options
+    set(private_compile_options
       -Wall
       -Wextra
       -Wdeprecated
       -Wno-unused-parameter
-      -Wno-unused-function
       -Wno-missing-field-initializers
-      -Wno-unknown-pragmas
       -Wno-type-limits
       -Wno-array-bounds
       -Wno-unknown-pragmas
       -Wno-strict-overflow
       -Wno-strict-aliasing
       )
+    list(APPEND private_compile_options -Wunused-function)
+    list(APPEND private_compile_options -Wunused-variable)
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+      list(APPEND private_compile_options -Wunused-but-set-variable)
+    endif()
+    if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
+      list(APPEND private_compile_options -Wunused-private-field)
+    endif()
     if(NOT "${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
       list(APPEND private_compile_options
         # Considered to be flaky.  See the discussion at
@@ -453,24 +396,28 @@ function(torch_compile_options libname)
         -Wno-maybe-uninitialized)
     endif()
 
+    if(WERROR)
+      list(APPEND private_compile_options
+        -Werror
+        -Werror=inconsistent-missing-override
+        -Werror=inconsistent-missing-destructor-override
+        -Werror=unused-function
+        -Werror=unused-variable
+        -Werror=pedantic
+      )
+      if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        list(APPEND private_compile_options -Werror=unused-but-set-variable)
+      endif()
+    endif()
   endif()
 
-  if(MSVC)
-  elseif(WERROR)
-    list(APPEND private_compile_options -Wno-strict-overflow)
-  endif()
 
   target_compile_options(${libname} PRIVATE
       $<$<COMPILE_LANGUAGE:CXX>:${private_compile_options}>)
   if(USE_CUDA)
-    string(FIND "${private_compile_options}" " " space_position)
-    if(NOT space_position EQUAL -1)
-      message(FATAL_ERROR "Found spaces in private_compile_options='${private_compile_options}'")
-    endif()
-    # Convert CMake list to comma-separated list
-    string(REPLACE ";" "," private_compile_options "${private_compile_options}")
-    target_compile_options(${libname} PRIVATE
-        $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=${private_compile_options}>)
+    foreach(option IN LISTS private_compile_options)
+      target_compile_options(${libname} PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler ${option}>)
+    endforeach()
   endif()
 
   if(NOT WIN32 AND NOT USE_ASAN)

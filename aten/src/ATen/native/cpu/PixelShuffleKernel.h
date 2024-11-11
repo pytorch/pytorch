@@ -5,10 +5,10 @@ namespace at {
 class TensorBase;
 }
 
-namespace at { namespace native {
+namespace at::native {
 
 using pixel_shuffle_fn = void(*)(TensorBase&, const TensorBase&, int64_t);
-DECLARE_DISPATCH(pixel_shuffle_fn, pixel_shuffle_kernel);
-DECLARE_DISPATCH(pixel_shuffle_fn, pixel_unshuffle_kernel);
+DECLARE_DISPATCH(pixel_shuffle_fn, pixel_shuffle_kernel)
+DECLARE_DISPATCH(pixel_shuffle_fn, pixel_unshuffle_kernel)
 
-}} // at::native
+} // at::native

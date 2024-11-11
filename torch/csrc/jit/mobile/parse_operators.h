@@ -1,8 +1,7 @@
 #pragma once
 #include <torch/csrc/jit/mobile/function.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 using c10::IValue;
 
 enum MobileModuleLoadOptions {
@@ -23,5 +22,4 @@ TORCH_API void parseOperators(
     const uint64_t& module_load_options,
     mobile::Function* function);
 } // namespace mobile
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

@@ -18,11 +18,11 @@ static std::vector<at::Tensor> get_tensor_vector() {
   return tensors;
 }
 
-static std::vector<optional<at::Tensor>> get_boxed_opt_tensor_vector() {
-  std::vector<optional<at::Tensor>> optional_tensors;
+static std::vector<std::optional<at::Tensor>> get_boxed_opt_tensor_vector() {
+  std::vector<std::optional<at::Tensor>> optional_tensors;
   const size_t SIZE = 5;
   for (size_t i = 0; i < SIZE * 2; i++) {
-    auto opt_tensor = (i % 2 == 0) ? optional<at::Tensor>(at::empty({0})) : nullopt;
+    auto opt_tensor = (i % 2 == 0) ? std::optional<at::Tensor>(at::empty({0})) : std::nullopt;
     optional_tensors.emplace_back(opt_tensor);
   }
   return optional_tensors;
@@ -103,7 +103,7 @@ TEST(ITensorListRefTest, Boxed_GetConstRefTensor) {
   const List<at::Tensor> boxed(vec);
   at::ITensorListRef list(boxed);
   static_assert(
-      std::is_same<decltype(*list.begin()), const at::Tensor&>::value,
+      std::is_same_v<decltype(*list.begin()), const at::Tensor&>,
       "Accessing elements from List<Tensor> through a ITensorListRef should be const references.");
   EXPECT_TRUE(boxed[0].is_same(*list.begin()));
   EXPECT_TRUE(boxed[1].is_same(*(++list.begin())));
@@ -113,7 +113,7 @@ TEST(ITensorListRefTest, Unboxed_GetConstRefTensor) {
   auto vec = get_tensor_vector();
   at::ITensorListRef list(vec);
   static_assert(
-      std::is_same<decltype(*list.begin()), const at::Tensor&>::value,
+      std::is_same_v<decltype(*list.begin()), const at::Tensor&>,
       "Accessing elements from ArrayRef<Tensor> through a ITensorListRef should be const references.");
   EXPECT_TRUE(vec[0].is_same(*list.begin()));
   EXPECT_TRUE(vec[1].is_same(*(++list.begin())));
@@ -234,7 +234,7 @@ TEST(ITensorListRefIteratorTest, Unboxed_Iterate) {
 
 TEST(IOptTensorListRefTest, Boxed_Iterate) {
   auto vec = get_boxed_opt_tensor_vector();
-  const List<optional<at::Tensor>> boxed(vec);
+  const List<std::optional<at::Tensor>> boxed(vec);
   at::IOptTensorListRef list(boxed);
   size_t i = 0;
   for (const auto t : list) {

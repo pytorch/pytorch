@@ -6,6 +6,7 @@
 #include <c10/core/DispatchKeySet.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/TypeList.h>
+#include <type_traits>
 
 namespace c10 {
 
@@ -17,11 +18,11 @@ class KernelFunction;
 
 template <typename T>
 using has_symint =
-  guts::disjunction<
+  std::disjunction<
     std::is_same<c10::SymInt, T>,
     std::is_same<c10::SymIntArrayRef, T>,
     std::is_same<at::OptionalSymIntArrayRef, T>,
-    std::is_same<c10::optional<c10::SymInt>, T>
+    std::is_same<std::optional<c10::SymInt>, T>
   >;
 
 template <typename T>
@@ -45,8 +46,8 @@ struct remove_symint<c10::SymIntArrayRef> {
 };
 
 template <>
-struct remove_symint<c10::optional<c10::SymInt>> {
-  using type = c10::optional<int64_t>;
+struct remove_symint<std::optional<c10::SymInt>> {
+  using type = std::optional<int64_t>;
 };
 
 

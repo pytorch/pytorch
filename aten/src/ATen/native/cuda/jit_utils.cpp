@@ -2,7 +2,7 @@
 #include <c10/core/ScalarType.h>
 #include <c10/util/irange.h>
 #include <c10/util/hash.h>
-#include <c10/util/Optional.h>
+#include <optional>
 #include <ATen/jit_macros.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
@@ -20,7 +20,7 @@
 #include <cstdlib>
 #include <string>
 
-// TODO: C++17 has the fileystem header, which may replace these
+// TODO: C++17 has the filesystem header, which may replace these
 #ifdef _WIN32
   // On Windows, the POSIX implementations are considered deprecated. We simply map to the newer variant.
   #include <process.h>
@@ -1002,7 +1002,7 @@ std::string generate_code(
   std::string extra_args = "";
   for (size_t i = 0; i < extra_args_typenames.size(); i++) {
     auto type = std::string(extra_args_typenames[i]);
-    auto name = "extra_arg_" + std::string(to_string(i));
+    auto name = "extra_arg_" + std::to_string(i);
     extra_params += "," + type + " " + name;
     extra_args += ", " + name;
   }
@@ -1393,10 +1393,10 @@ std::string generate_reduction_code(
 }
 
 // Acquires (possibly creating) the kernel cache directory
-c10::optional<std::string> get_cache_dir() {
+std::optional<std::string> get_cache_dir() {
   // If the environment variable USE_TORCH_KERNEL_CACHE is set to "0" then no persistent cache is used
-  const char* uptkc = std::getenv("USE_PYTORCH_KERNEL_CACHE");
-  const bool use_kernel_cache = (uptkc == nullptr) ? true : std::strcmp(uptkc, "0");
+  const auto uptkc = c10::utils::get_env("USE_PYTORCH_KERNEL_CACHE");
+  const bool use_kernel_cache = (uptkc != "0");
 
   if (!use_kernel_cache) {
     return {};
@@ -1404,31 +1404,31 @@ c10::optional<std::string> get_cache_dir() {
 
   // Cache path comes from PYTORCH_KERNEL_CACHE_PATH, then TEMP (Windows) or XDG_CACHE_HOME (Linux), then HOME environment variables
   std::string cache_dir;
-  char* ptkcp = std::getenv("PYTORCH_KERNEL_CACHE_PATH");
+  auto ptkcp = c10::utils::get_env("PYTORCH_KERNEL_CACHE_PATH");
   // Create kernel_cache_dir if needed as we do not want to create the base directory passed by the user
   std::string kernels_cache_dir = "";
-  if (ptkcp != nullptr) {
-    cache_dir = std::string(ptkcp);
+  if (ptkcp.has_value()) {
+    cache_dir = ptkcp.value();
   } else {
 #ifdef _WIN32
-    ptkcp = std::getenv("TEMP");
+    ptkcp = c10::utils::get_env("TEMP");
 #else
     // USES XDG_CACHE_HOME if it's set
-    ptkcp = std::getenv("XDG_CACHE_HOME");
+    ptkcp = c10::utils::get_env("XDG_CACHE_HOME");
 #endif
-    if (ptkcp != nullptr) {
+    if (ptkcp.has_value()) {
       kernels_cache_dir = "/torch/kernels";
-      cache_dir = std::string(ptkcp) + kernels_cache_dir;
+      cache_dir = ptkcp.value() + kernels_cache_dir;
     } else {
       // Falls back to HOME/.cache
-      ptkcp = std::getenv("HOME");
-      if (ptkcp == nullptr) {
+      ptkcp = c10::utils::get_env("HOME");
+      if (ptkcp.has_value()) {
         TORCH_WARN_ONCE("No PYTORCH_KERNEL_CACHE_PATH or HOME environment variable set!",
                         " This disables kernel caching.");
         return {};
       } else {
         kernels_cache_dir = "/.cache/torch/kernels";
-        cache_dir = std::string(ptkcp) + kernels_cache_dir;
+        cache_dir = ptkcp.value() + kernels_cache_dir;
       }
     }
   }
@@ -1437,7 +1437,7 @@ c10::optional<std::string> get_cache_dir() {
   const char* p_cache_dir = cache_dir.c_str();
   const bool cache_dir_exists = (access(p_cache_dir, F_OK) == 0);
   if (!cache_dir_exists) {
-    std::string s_ptkcp = std::string(ptkcp);
+    std::string s_ptkcp = ptkcp.value();
     if (!r_mkdir_with_base(s_ptkcp, kernels_cache_dir)) {
       TORCH_WARN_ONCE("Specified kernel cache directory could not be created! This disables kernel caching.",
                       " Specified directory is ", cache_dir, ".",
@@ -1483,7 +1483,7 @@ NvrtcFunction jit_pwise_function(
   NvrtcFunction compiled_kernel_;
   std::string name = kernel_name + "_kernel";
 
-  static const c10::optional<std::string> cache_dir = get_cache_dir();
+  static const std::optional<std::string> cache_dir = get_cache_dir();
 
   std::string file_path;
   if (cache_dir.has_value()) {
@@ -1500,7 +1500,11 @@ NvrtcFunction jit_pwise_function(
     std::stringstream ss;
     ss << *cache_dir << "/";
     ss << kernel_name;
+#ifdef USE_ROCM
+    ss << "_arch" << prop->gcnArchName;
+#else
     ss << "_arch" << cuda_major << "." << cuda_minor;
+#endif
     ss << "_nvrtc" << nvrtc_major << "." << nvrtc_minor;
     ss << (compile_to_sass ? "_sass" : "_ptx");
     ss << "_" << code.length();
@@ -1510,7 +1514,7 @@ NvrtcFunction jit_pwise_function(
     std::ifstream readin{file_path, std::ios::in | std::ifstream::binary};
     if (readin.fail()) {
       // NOTE: this does not warn because the file might not exist
-      // TODO: consider if this should explicilty check for the file's existence or not to throw
+      // TODO: consider if this should explicitly check for the file's existence or not to throw
       //   an informative warning
       readin.close();
     } else {
@@ -1537,7 +1541,7 @@ NvrtcFunction jit_pwise_function(
   // Constructs nvrtc build arguments
   // CUDA 11.1 allows going directly to SASS (sm_) instead of PTX (compute_)
   // which gives better backwards compatibility to work on older driver,
-  // (since older driver doesn't necessrily recognize PTX emitted by new
+  // (since older driver doesn't necessarily recognize PTX emitted by new
   // toolkit);
   // Meanwhile, for forward compatibility (future device with
   // `unsupported_arch==True`), since SASS are not necessarily compatible,
@@ -1565,11 +1569,9 @@ NvrtcFunction jit_pwise_function(
   if (compilation_result != NVRTC_SUCCESS) {
     size_t logsize;
     AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcGetProgramLogSize(program, &logsize));
-    std::vector<char> log(logsize);
-    AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcGetProgramLog(program, log.data()));
-    std::stringstream cu;
-    cu << log.data();
-    throw std::runtime_error(code + cu.str());
+    std::string log(logsize, '\0');
+    AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcGetProgramLog(program, &log[0]));
+    throw std::runtime_error(code + log);
   }
 
   size_t ptx_size = 0;

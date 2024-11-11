@@ -4,10 +4,7 @@
 #include <ATen/core/functional.h>
 #include <torch/csrc/jit/jit_log.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace onednn {
+namespace torch::jit::fuser::onednn {
 
 using namespace dnnl::graph;
 using data_type = dnnl::graph::logical_tensor::data_type;
@@ -129,7 +126,7 @@ std::tuple<RunArgs, RunArgs> LlgaKernel::prepareRunArgs(
   auto numInputs = runArgsIdx_.size();
   for (const auto i : c10::irange(numInputs)) {
     auto spec = inputSpecs_[i];
-    auto input = inputs[runArgsIdx_[i]];
+    const auto& input = inputs[runArgsIdx_[i]];
     runInputs.push_back(
         {spec.logical_tensor(), Engine::getEngine(), input.data_ptr()});
   }
@@ -275,8 +272,7 @@ void LlgaKernel::run(Stack& stack) {
   GRAPH_DEBUG("Preparing runtime tensors");
 #endif
   TensorArgs outputs;
-  RunArgs runInputs, runOutputs;
-  std::tie(runInputs, runOutputs) = prepareRunArgs(inputs, outputs);
+  auto [runInputs, runOutputs] = prepareRunArgs(inputs, outputs);
 #ifdef GRAPH_DEBUG_ENABLED
   GRAPH_DEBUG("Executing partition");
 #endif
@@ -294,7 +290,4 @@ void LlgaKernel::run(Stack& stack) {
 #endif
 }
 
-} // namespace onednn
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::fuser::onednn

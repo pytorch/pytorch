@@ -3,21 +3,19 @@ import sys
 import types
 from typing import Any, Callable, Dict, List, NamedTuple, Optional, Protocol, Union
 
-from typing_extensions import TypeAlias
+# CacheEntry has a `guard_manager` field for the guard, and a `code` field for the code object.
+from torch._C._dynamo.eval_frame import (
+    _CacheEntry as CacheEntry,
+    _ExtraState as ExtraState,
+)
+from torch._guards import CompileId
 
 
 if sys.version_info >= (3, 11):
-    from torch._C._dynamo import eval_frame
-
-    DynamoFrameType: TypeAlias = eval_frame._PyInterpreterFrame
+    from torch._C._dynamo.eval_frame import _PyInterpreterFrame as DynamoFrameType
 else:
-    DynamoFrameType: TypeAlias = types.FrameType
+    from types import FrameType as DynamoFrameType
 
-import torch
-
-# This class has a `check_fn` field for the guard,
-#  and a `code` field for the code object.
-CacheEntry = torch._C._dynamo.eval_frame._CacheEntry
 
 # We use a dict to store additional data per frame.
 FrameState = Dict[Any, Any]
@@ -37,6 +35,8 @@ class GuardFn(Protocol):
     verbose_code_parts: List[str]
     global_scope: Dict[str, object]
     guard_fail_fn: Optional[Callable[[GuardFail], None]]
+    cache_entry: Optional[CacheEntry]
+    extra_state: Optional[ExtraState]
 
     # maps locals of user function to bool
     def __call__(self, f_locals: Dict[str, object]) -> bool:
@@ -46,7 +46,9 @@ class GuardFn(Protocol):
 @dataclasses.dataclass
 class GuardedCode:
     code: types.CodeType
-    check_fn: GuardFn
+    guard_manager: GuardFn
+    compile_id: CompileId
+    trace_annotation: str = "Unknown"
 
 
 class DynamoCallbackFn(Protocol):
@@ -65,7 +67,7 @@ DynamoCallback = Union[DynamoCallbackFn, None, bool]
 class DynamoGuardHook(Protocol):
     def __call__(
         self,
-        guard_fn: GuardFn,
+        guard_manager: GuardFn,
         code: types.CodeType,
         f_locals: Dict[str, object],
         index: int,

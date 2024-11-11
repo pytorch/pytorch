@@ -15,74 +15,13 @@
 namespace at::native {
 namespace {
 
-static const char* METAL_RENORM = R"RENORM_METAL(
-
-#include <metal_stdlib>
-using namespace metal;
-
-template<typename T>
-kernel void renorm(constant T* norm [[buffer(0)]],
-                   device T* factor [[buffer(1)]],
-                   constant float& maxnorm [[buffer(2)]],
-                   uint index [[thread_position_in_grid]]) {
-  constexpr T eps = 1e-7;
-  constexpr T one = 1;
-  factor[index] = norm[index] > maxnorm ? maxnorm / (norm[index] + eps) : one;
-}
-
-#define REGISTER_RENORM_OP(DTYPE)                                  \
-template                                                           \
-[[host_name("renorm_" #DTYPE)]]                                    \
-kernel void renorm<DTYPE>(constant DTYPE* norm [[buffer(0)]],      \
-                          device DTYPE* factor [[buffer(1)]],      \
-                          constant float& maxnorm [[buffer(2)]],   \
-                          uint index [[thread_position_in_grid]]);
-
-REGISTER_RENORM_OP(float);
-REGISTER_RENORM_OP(half);
-
-)RENORM_METAL";
-
 using namespace mps;
 
-static id<MTLLibrary> compileRenormLibrary(id<MTLDevice> device, const std::string& key) {
-  static std::unordered_map<std::string, id<MTLLibrary>> libMap;
-  auto it = libMap.find(key);
-  if (it != libMap.end()) {
-    return it->second;
-  }
-
-  NSError* error = nil;
-  MTLCompileOptions* options = [[MTLCompileOptions new] autorelease];
-  [options setLanguageVersion:MTLLanguageVersion2_3];
-stringWithCString:
-  id<MTLLibrary> renormLibrary = [device newLibraryWithSource:[NSString stringWithUTF8String:METAL_RENORM]
-                                                      options:options
-                                                        error:&error];
-  TORCH_CHECK(
-      renormLibrary, "Failed to to create renorm mps kernel library, error: ", error.localizedDescription.UTF8String);
-
-  libMap[key] = renormLibrary;
-  return renormLibrary;
-}
-
-static id<MTLComputePipelineState> renormPipelineState(id<MTLDevice> device, const std::string& key) {
-  static std::unordered_map<std::string, id<MTLComputePipelineState>> psoCache;
-  id<MTLComputePipelineState> pso = psoCache[key];
-  if (pso) {
-    return pso;
-  }
-
-  NSError* error = nil;
-  id<MTLLibrary> renormLib = compileRenormLibrary(device, key);
-  id<MTLFunction> renormFunc = [renormLib newFunctionWithName:[NSString stringWithUTF8String:key.c_str()]];
-  TORCH_CHECK(renormFunc, "Failed to create function state object for: ", key);
-  pso = [device newComputePipelineStateWithFunction:renormFunc error:&error];
-  TORCH_CHECK(pso, "Failed to created pipeline state object, error: ", [[error description] UTF8String]);
-
-  psoCache[key] = pso;
-  return pso;
-}
+#ifndef PYTORCH_JIT_COMPILE_SHADERS
+static auto& lib = MetalShaderLibrary::getBundledLibrary();
+#else
+#include <ATen/native/mps/RenormKernel_metallib.h>
+#endif
 
 void renorm_out_mps(const Tensor& self, const Scalar& p, int64_t dim, const Scalar& maxnorm, const Tensor& out) {
   auto self_sizes = self.sizes();
@@ -94,16 +33,15 @@ void renorm_out_mps(const Tensor& self, const Scalar& p, int64_t dim, const Scal
 
   Tensor norm = at::linalg_vector_norm(self, p.toDouble(), reduce_dims, /*keepdim=*/true);
   auto factor = at::empty(norm.sizes(), self.options());
-  auto maxnorm_f = maxnorm.to<float>();
 
   id<MTLDevice> device = MPSDevice::getInstance()->device();
   id<MTLBuffer> normBuffer = getMTLBufferStorage(norm);
   id<MTLBuffer> factorBuffer = getMTLBufferStorage(factor);
 
-  string key = "renorm_" + scalarToMetalTypeString(self.scalar_type());
+  string key = "renorm_" + scalarToMetalTypeString(self);
   MPSStream* mpsStream = getCurrentMPSStream();
   id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
-  id<MTLComputePipelineState> renormPSO = renormPipelineState(device, key);
+  id<MTLComputePipelineState> renormPSO = lib.getPipelineStateForFunc(key);
 
   dispatch_sync(mpsStream->queue(), ^() {
     @autoreleasepool {
@@ -113,7 +51,7 @@ void renorm_out_mps(const Tensor& self, const Scalar& p, int64_t dim, const Scal
       [computeEncoder setComputePipelineState:renormPSO];
       mtl_setBuffer(computeEncoder, norm, 0);
       mtl_setBuffer(computeEncoder, factor, 1);
-      [computeEncoder setBytes:&maxnorm_f length:sizeof(float) atIndex:2];
+      mtl_setBytes(computeEncoder, maxnorm.to<float>(), 2);
       mtl_dispatch1DJob(computeEncoder, renormPSO, norm.numel());
 
       getMPSProfiler().endProfileKernel(renormPSO);

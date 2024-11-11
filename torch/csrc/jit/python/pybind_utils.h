@@ -31,13 +31,9 @@
 
 #include <ATen/core/function_schema.h>
 #include <c10/core/Stream.h>
-#ifdef USE_C10D_NCCL
-#include <c10/cuda/CUDACachingAllocator.h>
-#include <c10/cuda/CUDAStream.h>
-#endif
 #include <c10/util/Exception.h>
-#include <c10/util/Optional.h>
 #include <c10/util/irange.h>
+#include <optional>
 
 #include <algorithm>
 #include <cstddef>
@@ -62,7 +58,7 @@ void clear_registered_instances(void* ptr);
 TORCH_PYTHON_API IValue toIValue(
     py::handle obj,
     const TypePtr& type,
-    c10::optional<int32_t> N = c10::nullopt);
+    std::optional<int32_t> N = std::nullopt);
 
 TORCH_PYTHON_API py::object toPyObject(IValue ivalue);
 
@@ -111,7 +107,7 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
 
   explicit PythonFutureWrapper(
       c10::intrusive_ptr<c10::ivalue::Future> fut,
-      c10::optional<UnwrapFunc> unwrap_func = c10::nullopt)
+      std::optional<UnwrapFunc> unwrap_func = std::nullopt)
       : fut(std::move(fut)), unwrap_func(std::move(unwrap_func)) {}
 
   explicit PythonFutureWrapper(const PythonFutureWrapper&) = delete;
@@ -184,7 +180,7 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
               PyErr_Clear();
             }
 
-            throw err;
+            throw std::runtime_error(err);
           }
         },
         PyObjectType::get()));
@@ -194,7 +190,8 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
     auto pf = std::make_shared<PythonFunctionGuard>(std::move(cb));
     // NOLINTNEXTLINE(modernize-avoid-bind)
     fut->addCallback(std::bind(
-        [pyFut(this->getPtr())](std::shared_ptr<PythonFunctionGuard> pf) {
+        [pyFut(this->getPtr())](
+            const std::shared_ptr<PythonFunctionGuard>& pf) {
           try {
             pybind11::gil_scoped_acquire ag;
             pf->func_(pyFut);
@@ -232,7 +229,7 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
   c10::intrusive_ptr<c10::ivalue::Future> fut;
   // unwrap_func works like a callback for the value returned by
   // PythonFutureWrapper::wait().
-  c10::optional<UnwrapFunc> unwrap_func;
+  std::optional<UnwrapFunc> unwrap_func;
 
  private:
   std::shared_ptr<PythonFutureWrapper> getPtr() {
@@ -264,9 +261,10 @@ struct VISIBILITY_HIDDEN PythonAwaitWrapper
     aw_->markCompleted(toIValue(input, type));
   }
 
-  explicit PythonAwaitWrapper(py::function pf, py::tuple args) {
+  explicit PythonAwaitWrapper(py::function pf, py::tuple args)
+      : args_(std::move(args)) {
     pyfg_ = std::make_shared<torch::jit::PythonFunctionGuard>(std::move(pf));
-    args_ = std::move(args);
+
     std::function<IValue()> f = [fg(pyfg_), &args(args_)]() {
       pybind11::gil_scoped_acquire ag;
       return toIValue(fg->func_(*args), PyObjectType::get());
@@ -344,11 +342,12 @@ inline TypedIValue toDictKeyIValue(py::handle key) {
   } else if (py::isinstance<py::float_>(key)) {
     return TypedIValue(py::cast<double>(key), FloatType::get());
   } else {
-    AT_ERROR("Dictionary inputs may only have string, int, or float keys");
+    TORCH_CHECK(
+        false, "Dictionary inputs may only have string, int, or float keys");
   }
 }
 
-inline c10::optional<TypePtr> unifyOrInitializeType(
+inline std::optional<TypePtr> unifyOrInitializeType(
     const TypePtr& accum,
     const TypePtr& unify) {
   if (!accum) {
@@ -359,7 +358,7 @@ inline c10::optional<TypePtr> unifyOrInitializeType(
 
 using InferredType = c10::InferredType;
 
-InferredType tryToInferContainerType(py::handle input);
+InferredType tryToInferContainerType(py::handle input, bool primitiveTypeOnly);
 
 // Try to infer the type of a Python object
 // The type cannot be inferred if:
@@ -496,17 +495,44 @@ inline InferredType tryToInferType(py::handle input) {
   }
 
   // Try container types
-  return tryToInferContainerType(input);
+  return tryToInferContainerType(input, false);
 }
 
-inline InferredType tryToInferContainerType(py::handle input) {
+// This function is similar to tryToInferType, but it only tries to infer
+// primitive types (int, float, bool, complex) or nested container of primitive
+// types.
+inline InferredType tryToInferPrimitiveType(py::handle input) {
+  if (input.is_none()) {
+    return InferredType(NoneType::get());
+  }
+
+  // Only primitive data type
+  if (py::isinstance<py::bool_>(input)) {
+    return InferredType(BoolType::get());
+    // NOLINTNEXTLINE(bugprone-branch-clone)
+  } else if (py::isinstance<py::int_>(input)) {
+    return InferredType(IntType::get());
+  } else if (py::isinstance<py::float_>(input)) {
+    return InferredType(FloatType::get());
+  } else if (PyComplex_CheckExact(input.ptr())) {
+    return InferredType(ComplexType::get());
+  }
+
+  // Try container types
+  return tryToInferContainerType(input, true);
+}
+
+inline InferredType tryToInferContainerType(
+    py::handle input,
+    bool primitiveTypeOnly = false) {
   if (six::isTuple(input)) {
     py::tuple tuple = py::cast<py::tuple>(input);
     std::vector<TypePtr> element_types;
     element_types.reserve(tuple.size());
 
     for (py::handle elem : tuple) {
-      auto type_match = tryToInferType(elem);
+      auto type_match = primitiveTypeOnly ? tryToInferPrimitiveType(elem)
+                                          : tryToInferType(elem);
       if (type_match.success()) {
         element_types.push_back(type_match.type());
       } else {
@@ -528,7 +554,9 @@ inline InferredType tryToInferContainerType(py::handle input) {
 
     for (auto entry : dict) {
       // Try to infer the key type and unify it with the existing one
-      auto entry_key_type_match = tryToInferType(entry.first);
+      auto entry_key_type_match = primitiveTypeOnly
+          ? tryToInferPrimitiveType(entry.first)
+          : tryToInferType(entry.first);
       if (!entry_key_type_match.success()) {
         return entry_key_type_match.reason();
       }
@@ -543,7 +571,9 @@ inline InferredType tryToInferContainerType(py::handle input) {
       }
 
       // Try to infer the value type and unify it with the existing one
-      auto entry_value_type_match = tryToInferType(entry.second);
+      auto entry_value_type_match = primitiveTypeOnly
+          ? tryToInferPrimitiveType(entry.second)
+          : tryToInferType(entry.second);
       if (!entry_value_type_match.success()) {
         return entry_value_type_match.reason();
       }
@@ -571,7 +601,9 @@ inline InferredType tryToInferContainerType(py::handle input) {
 
     TypePtr element_type = nullptr;
     for (auto elem : list) {
-      auto element_type_match = tryToInferType(elem);
+      auto element_type_match = primitiveTypeOnly
+          ? tryToInferPrimitiveType(elem)
+          : tryToInferType(elem);
       if (!element_type_match.success()) {
         return InferredType(c10::str(
             "Could not infer type of list element: ",
@@ -590,16 +622,26 @@ inline InferredType tryToInferContainerType(py::handle input) {
     }
     return InferredType(ListType::create(element_type));
   } else {
-    // TODO: this message is not correct anymore, since this InferredType is
-    // used from a bunch of circumstances unrelated to tracing. We can re-use
-    // this instead of the attribute_failure stuff in concreteType
-    return InferredType(c10::str(
-        "Only tensors and (possibly nested) tuples of tensors, lists, or dicts",
-        "are supported ",
-        "as inputs or outputs of traced functions",
-        ", but instead got value of type ",
-        py::str(input.get_type().attr("__name__")),
-        "."));
+    if (primitiveTypeOnly) {
+      return InferredType(c10::str(
+          "Only tuple, list, or dict (possibly nested) of primitive types (bool, float, int, complex)",
+          "are supported ",
+          "as inputs or outputs of traced functions",
+          ", but instead got value of type ",
+          py::str(input.get_type().attr("__name__")),
+          "."));
+    } else {
+      // TODO: this message is not correct anymore, since this InferredType is
+      // used from a bunch of circumstances unrelated to tracing. We can re-use
+      // this instead of the attribute_failure stuff in concreteType
+      return InferredType(c10::str(
+          "Only tensors and (possibly nested) tuples of tensors, lists, or dicts",
+          "are supported ",
+          "as inputs or outputs of traced functions",
+          ", but instead got value of type ",
+          py::str(input.get_type().attr("__name__")),
+          "."));
+    }
   }
 }
 
@@ -646,8 +688,12 @@ inline IValue toTypeInferredIValue(py::handle input) {
       return c10::intrusive_ptr<c10::ivalue::Object>::reclaim_copy(
           ptr.release());
     }
-    AT_ERROR(
-        "Tracer cannot infer type of ", py::str(input), "\n:", match.reason());
+    TORCH_CHECK(
+        false,
+        "Tracer cannot infer type of ",
+        py::str(input),
+        "\n:",
+        match.reason());
   }
   return toIValue(input, match.type());
 }
@@ -707,7 +753,7 @@ inline void guardAgainstNamedTensor(const T& var) {
 template <typename T>
 c10::intrusive_ptr<T> toCustomClass(py::handle obj) {
   static_assert(
-      std::is_base_of<CustomClassHolder, T>::value, "T is not a CustomClass");
+      std::is_base_of_v<CustomClassHolder, T>, "T is not a CustomClass");
   const auto& type = c10::getCustomClassType<c10::intrusive_ptr<T>>();
   c10::IValue ivalue = toIValue(obj, type);
   return std::move(ivalue).toCustomClass<T>();
@@ -830,11 +876,121 @@ struct VISIBILITY_HIDDEN tuple_slice {
   int64_t e;
 };
 
+inline bool validateFakeScriptObjectSchema(
+    const c10::FunctionSchema& schema,
+    size_t argumentPosition,
+    py::handle object) {
+  auto argument = schema.arguments().at(argumentPosition);
+  auto class_type = argument.real_type()->expect<c10::ClassType>();
+  auto fake_class_registry =
+      py::module::import("torch._library.fake_class_registry");
+  auto fake_class = fake_class_registry.attr("find_fake_class")(
+      class_type->name().value().qualifiedName());
+  if (!py::isinstance(object.attr("wrapped_obj"), fake_class)) {
+    throw schema_match_error(c10::str(
+        schema.formatTypeMismatchMsg(
+            argument,
+            friendlyTypeName(object),
+            argumentPosition,
+            py::repr(object.attr("wrapped_obj"))),
+        "\nCast error details: ",
+        argument.name(),
+        " is expected to be a FakeScriptObject of ",
+        class_type->name().value().qualifiedName()));
+  }
+  return true;
+}
+
+inline bool matchSchemaAllowFakeScriptObject(
+    const FunctionSchema& schema,
+    const tuple_slice& args,
+    const py::kwargs& kwargs) {
+  size_t all_arguments = args.size() + kwargs.size();
+  if (all_arguments > schema.arguments().size()) {
+    throw schema_match_error(c10::str(
+        schema.name(),
+        "() expected at most ",
+        schema.arguments().size(),
+        " argument(s) but received ",
+        all_arguments,
+        " argument(s). Declaration: ",
+        schema));
+  }
+
+  int64_t arg_idx = 0;
+  auto fake_class_registry =
+      py::module::import("torch._library.fake_class_registry");
+
+  // First push all positional args.
+  for (const auto& arg : args) {
+    // ...but refuse to do it if the schema says that this was supposed
+    // to be keyword only
+    if (schema.arguments()[arg_idx].kwarg_only()) {
+      throw schema_match_error(c10::str(
+          schema.name(),
+          "() takes ",
+          arg_idx,
+          " positional argument(s) but ",
+          args.size(),
+          " was/were given.  Declaration: ",
+          schema));
+    }
+    // Use the type information from the schema to convert the PyObject.
+    const auto& argument = schema.arguments().at(arg_idx);
+    if (argument.real_type()->kind() == TypeKind::ClassType &&
+        py::isinstance(arg, fake_class_registry.attr("FakeScriptObject"))) {
+      validateFakeScriptObjectSchema(schema, arg_idx, arg);
+    } else {
+      argumentToIValue(schema, arg_idx, arg);
+    }
+
+    arg_idx++;
+  }
+
+  // Now for every remaining non-positional argument in the schema, look for it
+  // in the kwargs dict and push it if found, or use its default value if it
+  // has one.
+  size_t consumed_kwargs = 0;
+  for (size_t i = arg_idx; i < schema.arguments().size(); ++i) {
+    const auto& arg = schema.arguments()[i];
+    if (kwargs.contains(arg.name().c_str())) {
+      auto cur_kwarg = kwargs[arg.name().c_str()];
+      if (arg.real_type()->kind() == TypeKind::ClassType &&
+          py::isinstance(
+              cur_kwarg, fake_class_registry.attr("FakeScriptObject"))) {
+        validateFakeScriptObjectSchema(schema, i, cur_kwarg);
+      } else {
+        argumentToIValue(schema, i, cur_kwarg);
+      }
+      consumed_kwargs += 1;
+    } else if (arg.default_value()) {
+      continue;
+    } else {
+      throw schema_match_error(c10::str(
+          schema.name(),
+          "() is missing value for argument '",
+          arg.name(),
+          "'. Declaration: ",
+          schema));
+    }
+  }
+
+  if (consumed_kwargs != kwargs.size()) {
+    std::vector<std::string> names;
+    for (const auto& kwarg : kwargs) {
+      names.emplace_back(py::cast<std::string>(kwarg.first));
+    }
+    throw schema_match_error(schema.findErrorInKwargs(names));
+  }
+
+  return true;
+}
+
 inline Stack createStackForSchema(
     const FunctionSchema& schema,
     const tuple_slice& args,
     const py::kwargs& kwargs,
-    c10::optional<IValue> self) {
+    std::optional<IValue> self) {
   size_t all_arguments = (self ? 1 : 0) + args.size() + kwargs.size();
   if (all_arguments > schema.arguments().size()) {
     throw schema_match_error(c10::str(
@@ -922,7 +1078,11 @@ inline py::object createPyObjectForStack(Stack&& stack) {
     return_values[ret] = toPyObject(std::move(stack[ret]));
   }
 
+#if defined(__clang__)
   return std::move(return_values);
+#else
+  return return_values;
+#endif
 }
 
 // TODO: Remove once we clean up the GraphExecutor usage.
@@ -931,9 +1091,10 @@ inline Stack evilDeprecatedBadCreateStackDoNotUse(
     at::ArrayRef<Value*> inputs,
     size_t reserve_extra_space = 0) {
   if (tuple.size() != inputs.size()) {
-    AT_ERROR(
+    TORCH_CHECK(
+        false,
         "expected " + std::to_string(inputs.size()) + " inputs, but got " +
-        std::to_string(tuple.size()));
+            std::to_string(tuple.size()));
   }
   Stack result;
   result.reserve(tuple.size() + reserve_extra_space);
@@ -949,7 +1110,7 @@ inline py::object runAndInsertCall(
     Function& callee,
     const tuple_slice& args,
     const py::kwargs& kwargs,
-    c10::optional<IValue> self,
+    std::optional<IValue> self,
     // Lambda that tells this function how to insert `callee` into the graph if
     // we're tracing.
     const std::function<Value*(Graph&, const MatchedSchema& match)>&
@@ -1005,11 +1166,11 @@ inline py::object runAndInsertCall(
   return toPyObject(std::move(stack.back()));
 }
 
-inline c10::optional<py::object> maybeTorchFunctionDispatch(
+inline std::optional<py::object> maybeTorchFunctionDispatch(
     const py::object& callee,
     const tuple_slice& args_no_self,
     const py::kwargs& kwargs,
-    const c10::QualifiedName qualname) {
+    const c10::QualifiedName& qualname) {
   std::vector<py::handle> args_vec;
   for (const auto& arg : args_no_self) {
     args_vec.push_back(arg);
@@ -1052,7 +1213,7 @@ inline c10::optional<py::object> maybeTorchFunctionDispatch(
             /*module_name=*/qualname.prefix().c_str()));
   }
 
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 inline py::object invokeScriptFunctionFromPython(
@@ -1066,7 +1227,7 @@ inline py::object invokeScriptFunctionFromPython(
       callee,
       args,
       kwargs,
-      /*self=*/c10::nullopt,
+      /*self=*/std::nullopt,
       [&](Graph& graph, const MatchedSchema& match) {
         return graph.insertFunctionCall(&callee, match);
       });
@@ -1095,21 +1256,34 @@ inline py::object invokeScriptMethodFromPython(
 
 TORCH_PYTHON_API std::pair<std::shared_ptr<Operator>, Stack> getOpWithStack(
     const std::vector<std::shared_ptr<Operator>>& operations,
-    py::args args,
+    const py::args& args,
     const py::kwargs& kwargs);
 
 TORCH_PYTHON_API py::object invokeOperatorFromPython(
     const std::vector<std::shared_ptr<Operator>>& operations,
-    py::args args,
+    const py::args& args,
     const py::kwargs& kwargs,
-    c10::optional<c10::DispatchKey> dk = c10::nullopt);
+    std::optional<c10::DispatchKey> dk = std::nullopt);
+
+TORCH_PYTHON_API std::optional<py::object> _maybe_handle_torch_function(
+    const std::string& ns,
+    const std::string& method_name,
+    const std::string& overload_name,
+    bool is_overload,
+    const py::args& args,
+    const py::kwargs& kwargs);
+
+TORCH_PYTHON_API bool checkSchemaAllowFakeScriptObject(
+    const FunctionSchema& schema,
+    const py::args& args,
+    const py::kwargs& kwargs);
 
 TORCH_PYTHON_API py::object _get_operation_for_overload_or_packet(
     const std::vector<std::shared_ptr<Operator>>& operations,
     Symbol symbol,
-    py::args args,
+    const py::args& args,
     const py::kwargs& kwargs,
     bool is_overload,
-    c10::optional<c10::DispatchKey> dk = c10::nullopt);
+    std::optional<c10::DispatchKey> dk = std::nullopt);
 
 } // namespace torch::jit

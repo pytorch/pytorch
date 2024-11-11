@@ -3,6 +3,7 @@
 #include <ATen/Parallel.h>
 #include <ATen/core/Tensor.h>
 #include <torch/library.h>
+#include <ATen/native/mkldnn/Linear.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -26,7 +27,7 @@ namespace native {
 
 Tensor mkldnn_linear(
     const Tensor& self,
-    const Tensor& weight, const c10::optional<Tensor>& bias_opt) {
+    const Tensor& weight, const std::optional<Tensor>& bias_opt) {
   TORCH_CHECK(false, "mkldnn_linear: ATen not compiled with MKLDNN support");
 }
 Tensor mkldnn_linear_backward_input(
@@ -58,7 +59,7 @@ namespace native {
 
 Tensor mkldnn_linear(
     const Tensor& self,
-    const Tensor& weight_t, const c10::optional<Tensor>& bias_opt) {
+    const Tensor& weight_t, const std::optional<Tensor>& bias_opt) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
@@ -180,13 +181,13 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_linear_backward(
   return std::tuple<Tensor, Tensor, Tensor>{grad_input, grad_weight, grad_bias};
 }
 
-static Tensor mkldnn_linear_pointwise(
+Tensor mkldnn_linear_pointwise(
     const Tensor& input_t,
     const Tensor& weight_t,
-    const c10::optional<Tensor>& bias_opt,
+    const std::optional<Tensor>& bias_opt,
     c10::string_view attr,
-    torch::List<c10::optional<at::Scalar>> scalars,
-    c10::optional<c10::string_view> algorithm) {
+    c10::List<std::optional<at::Scalar>> scalars,
+    std::optional<c10::string_view> algorithm) {
   auto input = input_t.contiguous();
   auto input_size = input.sizes();
 
@@ -218,7 +219,7 @@ static Tensor mkldnn_linear_pointwise(
 
   const ideep::tensor mkldnn_input = itensor_view_from_dense(input_reshaped);
 
-  c10::optional<ideep::tensor> mkldnn_bias{c10::nullopt};
+  std::optional<ideep::tensor> mkldnn_bias{std::nullopt};
   if (bias.defined()) {
     mkldnn_bias = itensor_from_tensor(bias);
   }
@@ -254,11 +255,11 @@ static Tensor mkldnn_linear_pointwise(
   return output;
 }
 
-static Tensor mkldnn_linear_pointwise_binary(
+Tensor mkldnn_linear_pointwise_binary(
     const Tensor& input_t,
     const Tensor& other_t,
     const Tensor& weight_t,
-    const c10::optional<Tensor>& bias_opt,
+    const std::optional<Tensor>& bias_opt,
     c10::string_view attr) {
   c10::MaybeOwned<Tensor> bias_maybe_owned =
       at::borrow_from_optional_tensor(bias_opt);
@@ -268,6 +269,8 @@ static Tensor mkldnn_linear_pointwise_binary(
   check_mkldnn_binary_fusion_inputs(input_t, other_t, weight_t, bias);
 
   auto input = input_t.contiguous();
+  // Make sure input has default contiguous strides if it's contiguous tensors for better performance.
+  input = may_convert_to_default_contiguous_strides(input);
 
   auto it_binary = fusion_binary_alg_map().find(attr);
   TORCH_CHECK(
@@ -286,6 +289,7 @@ static Tensor mkldnn_linear_pointwise_binary(
     return output;
   }
   auto other_reshaped = other_t.contiguous();
+  other_reshaped = may_convert_to_default_contiguous_strides(other_reshaped);
 
   if (dim != 2) {
     std::vector<int64_t> output_size_reshaped = {
@@ -303,7 +307,7 @@ static Tensor mkldnn_linear_pointwise_binary(
   const ideep::tensor mkldnn_other = itensor_from_tensor(other_reshaped);
   const ideep::tensor mkldnn_input = itensor_view_from_dense(input_reshaped);
 
-  c10::optional<ideep::tensor> mkldnn_bias{c10::nullopt};
+  std::optional<ideep::tensor> mkldnn_bias{std::nullopt};
   if (bias.defined()) {
     mkldnn_bias = itensor_from_tensor(bias);
   }
@@ -335,11 +339,11 @@ static Tensor mkldnn_linear_pointwise_binary(
 #if AT_MKL_ENABLED()
 #include <mkl.h>
 
-static Tensor mkl_linear(
+Tensor mkl_linear(
     const Tensor& self,
     const Tensor& mkl_weight_t,
     const Tensor& origin_weight_t,
-    const c10::optional<Tensor>& bias_opt,
+    const std::optional<Tensor>& bias_opt,
     const int64_t prepack_batch_size) {
   c10::MaybeOwned<Tensor> bias_maybe_owned =
       at::borrow_from_optional_tensor(bias_opt);
@@ -419,17 +423,6 @@ TORCH_LIBRARY_IMPL(mkl, CPU, m) {
 
 TORCH_LIBRARY_IMPL(mkl, MkldnnCPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("mkl::_mkl_linear"), TORCH_FN(mkl_linear));
-}
-
-#else // AT_MKL_ENABLED
-
-static Tensor mkl_linear(
-    const Tensor& self,
-    const Tensor& mkl_weight_t,
-    const Tensor& origin_weight_t,
-    const c10::optional<Tensor>& bias_opt,
-    const int64_t prepack_batch_size) {
-  TORCH_CHECK(false, "mkl_linear: ATen not compiled with MKL support");
 }
 
 #endif// AT_MKL_ENABLED

@@ -44,8 +44,9 @@ Non-PT2 usage (check out test/test_fake_tensor.py for more examples):
     # Create a fake mode
     from torch._subclasses.fake_tensor import FakeTensorMode
     fake_mode = FakeTensorMode()
+    converter = fake_mode.fake_tensor_converter
     # Fakeify some real tensors
-    fake_x = fake_mode.from_real_tensor(x)
+    fake_x = converter.from_real_tensor(fake_mode, x)
     with fake_mode:
         # Do some operations on the fake tensors
         fake_y = fake_x * 2
@@ -64,7 +65,9 @@ PT2 pre-AOTAutograd usage (this is unusual, you probably don't want to do this):
     # Fake mode is not enabled!
     from torch._guards import detect_fake_mode
     fake_mode = detect_fake_mode(args)
-    fake_args = [fake_mode.from_real_tensor(arg) for arg in args]
+    # if fake_mode isn't None
+    converter = fake_mode.fake_tensor_converter
+    fake_args = [converter.from_real_tensor(fake_mode, arg) for arg in args]
     with fake_mode:
     ... do stuff with the fake args, if needed ...
 
@@ -72,18 +75,20 @@ detect_fake_mode will search a number of locations to try to find "the" fake ten
 
 PT2 post-AOTAutograd usage:
 
-# Fake mode is enabled! example_inputs is typically fake already
-# TODO: we probably want to change this
-# Still do this to access fake mode
-fake_mode = detect_fake_mode(example_inputs)
-# But in general you don't have to turn it on
+.. code:: python
+
+    # Fake mode is enabled! example_inputs is typically fake already
+    # TODO: we probably want to change this
+    # Still do this to access fake mode
+    fake_mode = detect_fake_mode(example_inputs)
+    # But in general you don't have to turn it on
 
 Other useful stuff:
 
 .. code:: python
 
-    from torch.fx.experimental.proxy_tensor import maybe_disable_fake_tensor_mode
-    with maybe_disable_fake_tensor_mode():
+    from torch._subclasses.fake_tensor import unset_fake_temporarily
+    with unset_fake_temporarily():
         # fake mode is disabled here, you can do real tensor compute
 
 When might you want to disable fake tensor mode? Usually you don't want to do this. One niche case where we've found it useful is to implement constant propagation on fake tensors: in this case, we need to do some actual tensor computation even though we're in a fake tensor mode.

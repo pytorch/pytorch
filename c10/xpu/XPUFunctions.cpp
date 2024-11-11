@@ -2,11 +2,6 @@
 #include <c10/util/Exception.h>
 #include <c10/xpu/XPUFunctions.h>
 
-#include <sys/wait.h>
-#include <unistd.h>
-#include <cmath>
-#include <deque>
-#include <mutex>
 #include <vector>
 
 namespace c10::xpu {
@@ -56,10 +51,20 @@ inline void initGlobalDevicePoolState() {
     return;
   }
 
+#ifdef _WIN32
+  // default context feature is disabled by default on Windows.
+  std::vector<sycl::device> deviceList;
+  for (auto it = gDevicePool.devices.begin(); it != gDevicePool.devices.end();
+       ++it) {
+    deviceList.push_back(*(*it));
+  }
+  gDevicePool.context = std::make_unique<sycl::context>(deviceList);
+#else
   // The default context is utilized for each Intel GPU device, allowing the
   // retrieval of the context from any GPU device.
   gDevicePool.context = std::make_unique<sycl::context>(
       gDevicePool.devices[0]->get_platform().ext_oneapi_get_default_context());
+#endif
 }
 
 inline void initDevicePoolCallOnce() {
@@ -81,17 +86,38 @@ void initDeviceProperties(DeviceProp* device_prop, int device) {
       ? raw_device.get_info<intel::info::device::property>()                 \
       : default_value;
 
+#define ASSIGN_DEVICE_ASPECT(member) \
+  device_prop->has_##member = raw_device.has(sycl::aspect::member);
+
+#define ASSIGN_EXP_CL_ASPECT(member)                                       \
+  device_prop->has_##member = raw_device.ext_oneapi_supports_cl_extension( \
+      "cl_intel_" #member, &cl_version);
+
   AT_FORALL_XPU_DEVICE_PROPERTIES(ASSIGN_DEVICE_PROP);
 
   device_prop->platform_name =
       raw_device.get_info<device::platform>().get_info<platform::name>();
 
   AT_FORALL_XPU_EXT_DEVICE_PROPERTIES(ASSIGN_EXT_DEVICE_PROP);
+
+  AT_FORALL_XPU_DEVICE_ASPECT(ASSIGN_DEVICE_ASPECT);
+
+  // TODO: Remove cl_version since it is unnecessary.
+  sycl::ext::oneapi::experimental::cl_version cl_version;
+  AT_FORALL_XPU_EXP_CL_ASPECT(ASSIGN_EXP_CL_ASPECT);
   return;
 }
 
-inline void check_device(int device) {
-  int total = static_cast<int>(gDevicePool.devices.size());
+inline void check_device(DeviceIndex device) {
+  // TODO: Use c10::Device::MAX_NUM_DEVICES directly. DeviceIndex is a int8_t
+  // value, and the maximum number of GPUs that PyTorch recognizes is 64. So, we
+  // have to check if there is an overflow happen. When DeviceIndex changes to
+  // int16_t and c10::Device::MAX_NUM_DEVICES is provided, we should use it
+  // directly to check if too many XPU devices are detected.
+  TORCH_CHECK(
+      gDevicePool.devices.size() <= std::numeric_limits<DeviceIndex>::max(),
+      "Too many XPU devices, DeviceIndex overflowed");
+  auto total = static_cast<DeviceIndex>(gDevicePool.devices.size());
   TORCH_CHECK(
       device >= 0 && device < total,
       "device is out of range, device is ",
@@ -103,7 +129,7 @@ inline void check_device(int device) {
 
 } // anonymous namespace
 
-sycl::device& get_raw_device(int device) {
+sycl::device& get_raw_device(DeviceIndex device) {
   initDevicePoolCallOnce();
   check_device(device);
   return *gDevicePool.devices[device];
@@ -117,14 +143,14 @@ sycl::context& get_device_context() {
   return *gDevicePool.context;
 }
 
-void get_device_properties(DeviceProp* device_prop, int device) {
+void get_device_properties(DeviceProp* device_prop, DeviceIndex device) {
   initDevicePoolCallOnce();
   TORCH_CHECK(device_prop, "device_prop is an invalid pointer.");
   check_device(device);
   initDeviceProperties(device_prop, device);
 }
 
-int get_device_idx_from_pointer(void* ptr) {
+DeviceIndex get_device_idx_from_pointer(void* ptr) {
   initDevicePoolCallOnce();
   TORCH_CHECK(ptr, "ptr is an invalid pointer.");
   auto type = sycl::get_pointer_type(ptr, get_device_context());
@@ -139,8 +165,9 @@ int get_device_idx_from_pointer(void* ptr) {
       gDevicePool.devices.begin(), gDevicePool.devices.end(), match_device);
   TORCH_CHECK(
       it != gDevicePool.devices.end(),
-      "Cant't find the pointer from XPU devices.");
-  return static_cast<int>(std::distance(gDevicePool.devices.begin(), it));
+      "Can't find the pointer from XPU devices.");
+  return static_cast<DeviceIndex>(
+      std::distance(gDevicePool.devices.begin(), it));
 }
 
 DeviceIndex device_count() {
@@ -162,20 +189,20 @@ DeviceIndex current_device() {
 
 void set_device(DeviceIndex device) {
   initDevicePoolCallOnce();
-  check_device(static_cast<int>(device));
+  check_device(device);
   curDeviceIndex = device;
 }
 
-int exchange_device(int to_device) {
-  auto cur_device = static_cast<int>(current_device());
+c10::DeviceIndex exchange_device(c10::DeviceIndex to_device) {
+  auto cur_device = current_device();
   if (to_device == cur_device) {
     return cur_device;
   }
-  set_device(static_cast<DeviceIndex>(to_device));
+  set_device(to_device);
   return cur_device;
 }
 
-int maybe_exchange_device(int to_device) {
+c10::DeviceIndex maybe_exchange_device(c10::DeviceIndex to_device) {
   return exchange_device(to_device);
 }
 

@@ -17,8 +17,7 @@
 #include <cstring>
 
 
-namespace at {
-namespace native {
+namespace at::native {
 
 // Define a typedef to dispatch to nearest_idx or nearest_exact_idx
 typedef int64_t (*nn_compute_source_index_fn_t)(const float, int64_t, int64_t);
@@ -36,9 +35,9 @@ static void upsample_nearest3d_out_frame(
     int64_t output_width,
     int64_t nbatch,
     int64_t channels,
-    c10::optional<double> scales_d,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w) {
+    std::optional<double> scales_d,
+    std::optional<double> scales_h,
+    std::optional<double> scales_w) {
   float depth_scale = compute_scales_value<float>(scales_d, input_depth, output_depth);
   float height_scale = compute_scales_value<float>(scales_h, input_height, output_height);
   float width_scale = compute_scales_value<float>(scales_w, input_width, output_width);
@@ -71,7 +70,7 @@ static void upsample_nearest3d_out_frame(
         const auto* pos1 = &i_p[d1 * input_height * input_width + h1 * input_width + w1];
         auto* pos2 = &o_p[d2 * output_height * output_width + h2 * output_width + w2];
 
-        for (C10_UNUSED const auto c : c10::irange(channels)) {
+        for ([[maybe_unused]] const auto c : c10::irange(channels)) {
           pos2[0] = pos1[0];
           pos1 += input_depth * input_height * input_width;
           pos2 += output_depth * output_height * output_width;
@@ -93,9 +92,9 @@ static void upsample_nearest3d_out_frame_nhwc(
     int64_t output_width,
     int64_t nbatch,
     int64_t channels,
-    c10::optional<double> scales_d,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w) {
+    std::optional<double> scales_d,
+    std::optional<double> scales_h,
+    std::optional<double> scales_w) {
   float depth_scale = compute_scales_value<float>(scales_d, input_depth, output_depth);
   float height_scale = compute_scales_value<float>(scales_h, input_height, output_height);
   float width_scale = compute_scales_value<float>(scales_w, input_width, output_width);
@@ -133,9 +132,9 @@ template <nn_compute_source_index_fn_t nn_compute_source_index_fn>
 Tensor _upsample_nearest3d_quantized_cpu(
     const Tensor& input,
     IntArrayRef output_size,
-    c10::optional<double> scales_d,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w) {
+    std::optional<double> scales_d,
+    std::optional<double> scales_h,
+    std::optional<double> scales_w) {
   TORCH_CHECK(
       output_size.size() == 3,
       "It is expected output_size equals to 3, but got size ",
@@ -162,7 +161,7 @@ Tensor _upsample_nearest3d_quantized_cpu(
         input.options().memory_format(input.suggest_memory_format()),
         input.q_scale(),
         input.q_zero_point(),
-        c10::nullopt);
+        std::nullopt);
 
     AT_DISPATCH_QINT_TYPES(input.scalar_type(), "upsample_nearest3d", [&] {
       auto* idata = static_cast<scalar_t*>(input.data_ptr());
@@ -217,9 +216,9 @@ Tensor _upsample_nearest3d_quantized_cpu(
 Tensor upsample_nearest3d_quantized_cpu(
     const Tensor& input,
     IntArrayRef osize,
-    c10::optional<double> scale_d,
-    c10::optional<double> scale_h,
-    c10::optional<double> scale_w) {
+    std::optional<double> scale_d,
+    std::optional<double> scale_h,
+    std::optional<double> scale_w) {
   return _upsample_nearest3d_quantized_cpu<nearest_neighbor_compute_source_index>(
       input, osize, scale_d, scale_h, scale_w);
 }
@@ -227,12 +226,11 @@ Tensor upsample_nearest3d_quantized_cpu(
 Tensor _upsample_nearest_exact3d_quantized_cpu(
     const Tensor& input,
     IntArrayRef osize,
-    c10::optional<double> scale_d,
-    c10::optional<double> scale_h,
-    c10::optional<double> scale_w) {
+    std::optional<double> scale_d,
+    std::optional<double> scale_h,
+    std::optional<double> scale_w) {
   return _upsample_nearest3d_quantized_cpu<nearest_neighbor_exact_compute_source_index>(
       input, osize, scale_d, scale_h, scale_w);
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

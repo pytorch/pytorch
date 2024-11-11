@@ -7,6 +7,7 @@
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
+#include <torch/csrc/utils/pythoncapi_compat.h>
 #include <torch/csrc/utils/tensor_dtypes.h>
 #include <torch/csrc/utils/tensor_types.h>
 #include <cstring>
@@ -25,7 +26,7 @@ PyObject* THPDtype_New(at::ScalarType scalar_type, const std::string& name) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPDtype_is_floating_point(THPDtype* self, PyObject* noargs) {
+static PyObject* THPDtype_is_floating_point(THPDtype* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   if (at::isFloatingType(self->scalar_type)) {
     Py_RETURN_TRUE;
@@ -35,14 +36,14 @@ PyObject* THPDtype_is_floating_point(THPDtype* self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPDtype_itemsize(THPDtype* self, PyObject* noargs) {
+static PyObject* THPDtype_itemsize(THPDtype* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   return THPUtils_packUInt64(
       scalarTypeToTypeMeta(self->scalar_type).itemsize());
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPDtype_is_complex(THPDtype* self, PyObject* noargs) {
+static PyObject* THPDtype_is_complex(THPDtype* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   if (at::isComplexType(self->scalar_type)) {
     Py_RETURN_TRUE;
@@ -52,7 +53,7 @@ PyObject* THPDtype_is_complex(THPDtype* self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPDtype_is_signed(THPDtype* self, PyObject* noargs) {
+static PyObject* THPDtype_is_signed(THPDtype* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   if (at::isSignedType(self->scalar_type)) {
     Py_RETURN_TRUE;
@@ -62,7 +63,7 @@ PyObject* THPDtype_is_signed(THPDtype* self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPDtype_reduce(PyObject* _self, PyObject* noargs) {
+static PyObject* THPDtype_reduce(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   /*
    * For singletons, a string is returned. The string should be interpreted
@@ -73,28 +74,31 @@ PyObject* THPDtype_reduce(PyObject* _self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPDtype_to_real(PyObject* _self, PyObject* noargs) {
+static PyObject* THPDtype_to_real(PyObject* _self, PyObject* noargs) {
+  HANDLE_TH_ERRORS
   auto* self = (THPDtype*)_self;
   auto scalar_type = self->scalar_type;
   if (!at::isFloatingType(self->scalar_type)) {
     scalar_type = at::toRealValueType(self->scalar_type);
   }
-  return (PyObject*)torch::getTHPDtype(scalar_type);
+  return Py_NewRef(torch::getTHPDtype(scalar_type));
+  END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPDtype_to_complex(PyObject* _self, PyObject* noargs) {
+static PyObject* THPDtype_to_complex(PyObject* _self, PyObject* noargs) {
+  HANDLE_TH_ERRORS
   auto* self = (THPDtype*)_self;
   auto scalar_type = self->scalar_type;
   if (!at::isComplexType(self->scalar_type)) {
     scalar_type = at::toComplexType(self->scalar_type);
   }
-  return (PyObject*)torch::getTHPDtype(scalar_type);
+  return Py_NewRef(torch::getTHPDtype(scalar_type));
+  END_HANDLE_TH_ERRORS
 }
 
 typedef PyObject* (*getter)(PyObject*, void*);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
-static struct PyGetSetDef THPDtype_properties[] = {
+static const std::initializer_list<PyGetSetDef> THPDtype_properties = {
     {"is_floating_point",
      (getter)THPDtype_is_floating_point,
      nullptr,
@@ -105,20 +109,20 @@ static struct PyGetSetDef THPDtype_properties[] = {
     {"itemsize", (getter)THPDtype_itemsize, nullptr, nullptr, nullptr},
     {nullptr}};
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
-static PyMethodDef THPDtype_methods[] = {
+static const std::initializer_list<PyMethodDef> THPDtype_methods = {
     {"__reduce__", THPDtype_reduce, METH_NOARGS, nullptr},
     {"to_real", THPDtype_to_real, METH_NOARGS, nullptr},
     {"to_complex", THPDtype_to_complex, METH_NOARGS, nullptr},
     {nullptr} /* Sentinel */
 };
 
-PyObject* THPDtype_repr(THPDtype* self) {
+static PyObject* THPDtype_repr(THPDtype* self) {
   return THPUtils_packString(std::string("torch.") + self->name);
 }
 
 PyTypeObject THPDtypeType = {
-    PyVarObject_HEAD_INIT(nullptr, 0) "torch.dtype", /* tp_name */
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "torch.dtype", /* tp_name */
     sizeof(THPDtype), /* tp_basicsize */
     0, /* tp_itemsize */
     nullptr, /* tp_dealloc */
@@ -144,9 +148,11 @@ PyTypeObject THPDtypeType = {
     0, /* tp_weaklistoffset */
     nullptr, /* tp_iter */
     nullptr, /* tp_iternext */
-    THPDtype_methods, /* tp_methods */
+    // NOLINTNEXTLINE(*const-cast)
+    const_cast<PyMethodDef*>(std::data(THPDtype_methods)), /* tp_methods */
     nullptr, /* tp_members */
-    THPDtype_properties, /* tp_getset */
+    // NOLINTNEXTLINE(*const-cast)
+    const_cast<PyGetSetDef*>(std::data(THPDtype_properties)), /* tp_getset */
     nullptr, /* tp_base */
     nullptr, /* tp_dict */
     nullptr, /* tp_descr_get */

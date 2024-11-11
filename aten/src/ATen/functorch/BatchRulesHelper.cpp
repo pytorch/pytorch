@@ -7,9 +7,9 @@
 #include <ATen/functorch/BatchRulesHelper.h>
 #include <ATen/WrapDimUtils.h>
 
-namespace at { namespace functorch {
+namespace at::functorch {
 
-Tensor moveBatchDimToFront(const Tensor& tensor, optional<int64_t> maybe_batch_dim) {
+Tensor moveBatchDimToFront(const Tensor& tensor, std::optional<int64_t> maybe_batch_dim) {
   if (!maybe_batch_dim.has_value()) {
     return tensor;
   }
@@ -19,7 +19,7 @@ Tensor moveBatchDimToFront(const Tensor& tensor, optional<int64_t> maybe_batch_d
   return tensor.movedim(maybe_batch_dim.value(), 0);
 }
 
-int64_t rankWithoutBatchDim(const Tensor& tensor, optional<int64_t> maybe_batch_dim) {
+int64_t rankWithoutBatchDim(const Tensor& tensor, std::optional<int64_t> maybe_batch_dim) {
   int64_t result = tensor.dim();
   if (maybe_batch_dim.has_value()) {
     result -= 1;
@@ -27,23 +27,23 @@ int64_t rankWithoutBatchDim(const Tensor& tensor, optional<int64_t> maybe_batch_
   return result;
 }
 
-int64_t numelWithoutBatchDim(const Tensor& tensor, optional<int64_t> maybe_batch_dim) {
+int64_t numelWithoutBatchDim(const Tensor& tensor, std::optional<int64_t> maybe_batch_dim) {
   if (!maybe_batch_dim) {
     return tensor.numel();
   }
   return tensor.numel() / tensor.size(*maybe_batch_dim);
 }
 
-optional<int64_t> valIfNonempty(optional<int64_t> maybe_empty, int64_t new_val) {
+std::optional<int64_t> valIfNonempty(std::optional<int64_t> maybe_empty, int64_t new_val) {
   if (maybe_empty.has_value()) {
     return new_val;
   }
-  return nullopt;
+  return std::nullopt;
 }
 
 int64_t getPhysicalDim(const Tensor& tensor, bool has_batch_dim, int64_t logical_dim) {
   // NB: assumes the batch dim is at the front of the tensor
-  optional<int64_t> bdim = has_batch_dim ? optional<int64_t>(0) : nullopt;
+  std::optional<int64_t> bdim = has_batch_dim ? std::optional<int64_t>(0) : std::nullopt;
   auto rank = rankWithoutBatchDim(tensor, bdim);
   auto wrapped_dim = maybe_wrap_dim(logical_dim, rank);
   if (has_batch_dim) {
@@ -54,7 +54,7 @@ int64_t getPhysicalDim(const Tensor& tensor, bool has_batch_dim, int64_t logical
 
 VmapDimVector getPhysicalDims(const Tensor& tensor, bool has_batch_dim, IntArrayRef logical_dims) {
   // NB: assumes the batch dim is at the front of the tensor
-  optional<int64_t> bdim = has_batch_dim ? optional<int64_t>(0) : nullopt;
+  std::optional<int64_t> bdim = has_batch_dim ? std::optional<int64_t>(0) : std::nullopt;
   auto rank = rankWithoutBatchDim(tensor, bdim);
   VmapDimVector result;
   result.reserve(logical_dims.size());
@@ -68,7 +68,7 @@ VmapDimVector getPhysicalDims(const Tensor& tensor, bool has_batch_dim, IntArray
   return result;
 }
 
-Tensor maybePadToLogicalRank(const Tensor& tensor, optional<int64_t> has_bdim, int64_t logical_rank) {
+Tensor maybePadToLogicalRank(const Tensor& tensor, std::optional<int64_t> has_bdim, int64_t logical_rank) {
   if (!has_bdim) {
     return tensor;
   }
@@ -118,11 +118,9 @@ Tensor reshape_dim_outof(int64_t src, int64_t size1, const Tensor& x) {
     // NOTE: 0 % 0 leads to FPE
     TORCH_INTERNAL_ASSERT(shape[src] % size1 == 0);
   }
-  int64_t size2;
   // split any size out of `0`-sized dim
-  if (shape[src] == 0) {
-    size2 = 0;
-  } else {
+  int64_t size2 = 0;
+  if (shape[src] != 0) {
     size2 = shape[src] / size1;
   }
   shape[src] = size1;
@@ -130,7 +128,7 @@ Tensor reshape_dim_outof(int64_t src, int64_t size1, const Tensor& x) {
   return at::reshape(x, shape);
 }
 
-Tensor reshape_dim_outof_symint(int64_t src, c10::SymInt size1, const Tensor& x) {
+Tensor reshape_dim_outof_symint(int64_t src, const c10::SymInt& size1, const Tensor& x) {
   src = maybe_wrap_dim(src, x.dim());
   c10::SymDimVector shape(x.sym_sizes().begin(), x.sym_sizes().end());
   if (shape[src] != 0) {
@@ -171,8 +169,8 @@ static void handleScalarTypePromotion(Tensor& logical_scalar_tensor, Tensor& sec
 }
 
 std::tuple<Tensor, Tensor> _binary_pointwise_helper(
-    const Tensor& tensor, optional<int64_t> tensor_batch_dim,
-    const Tensor& other, optional<int64_t> other_batch_dim,
+    const Tensor& tensor, std::optional<int64_t> tensor_batch_dim,
+    const Tensor& other, std::optional<int64_t> other_batch_dim,
     bool do_type_promotion) {
   // compute max logical rank
   auto tensor_logical_rank = rankWithoutBatchDim(tensor, tensor_batch_dim);
@@ -204,4 +202,4 @@ std::tuple<Tensor, Tensor> _binary_pointwise_helper(
   return std::make_tuple(tensor_, other_);
 }
 
-}}
+} // namespace at::functorch

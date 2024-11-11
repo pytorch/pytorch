@@ -12,8 +12,8 @@ functorch is `JAX-like <https://github.com/google/jax>`_ composable function tra
    We've integrated functorch into PyTorch. As the final step of the
    integration, the functorch APIs are deprecated as of PyTorch 2.0.
    Please use the torch.func APIs instead and see the
-   `migration guide <https://pytorch.org/docs/master/func.migrating.html>`_
-   and `docs <https://pytorch.org/docs/master/func.html>`_
+   `migration guide <https://pytorch.org/docs/main/func.migrating.html>`_
+   and `docs <https://pytorch.org/docs/main/func.html>`_
    for more details.
 
 What are composable function transforms?

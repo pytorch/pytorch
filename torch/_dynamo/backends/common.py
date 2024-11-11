@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import contextlib
 import functools
 import logging
@@ -5,19 +7,35 @@ from unittest.mock import patch
 
 import torch
 from torch._dynamo import disable
-from torch._dynamo.utils import counters, defake
+from torch._dynamo.utils import counters, defake, flatten_graph_inputs
 from torch._functorch.aot_autograd import aot_module_simplified
 from torch.utils._python_dispatch import _disable_current_modes
+
 
 log = logging.getLogger(__name__)
 
 
-def aot_autograd(**kwargs):
-    def compiler_fn(gm: torch.fx.GraphModule, example_inputs):
-        # Hack to get around circular import problems with aot_eager_decomp_partition
-        if callable(kwargs.get("decompositions")):
-            kwargs["decompositions"] = kwargs["decompositions"]()
+class AotAutograd:
+    def __init__(self, **kwargs) -> None:
+        self.__name__ = "compiler_fn"
+        self.kwargs = kwargs
 
+    def __call__(self, gm: torch.fx.GraphModule, example_inputs, **kwargs):
+        if kwargs:
+            log.warning("aot_autograd-based backend ignoring extra kwargs %s", kwargs)
+
+        if any(isinstance(x, (list, tuple, dict)) for x in example_inputs):
+            return flatten_graph_inputs(
+                gm,
+                example_inputs,
+                self,
+            )
+
+        # Hack to get around circular import problems with aot_eager_decomp_partition
+        if callable(self.kwargs.get("decompositions")):
+            self.kwargs["decompositions"] = self.kwargs["decompositions"]()
+
+        # NB: dont delete counter increment
         counters["aot_autograd"]["total"] += 1
         use_fallback = False
 
@@ -32,19 +50,18 @@ def aot_autograd(**kwargs):
             # stop TorchDynamo from trying to compile our generated backwards pass
             return disable(disable(bw_compiler)(*args, **kwargs))
 
-        bw_compiler = kwargs.get("bw_compiler") or kwargs["fw_compiler"]
-        kwargs["bw_compiler"] = _wrapped_bw_compiler
-        kwargs["inference_compiler"] = (
-            kwargs.get("inference_compiler") or kwargs["fw_compiler"]
+        bw_compiler = self.kwargs.get("bw_compiler") or self.kwargs["fw_compiler"]
+        self.kwargs["bw_compiler"] = _wrapped_bw_compiler
+        self.kwargs["inference_compiler"] = (
+            self.kwargs.get("inference_compiler") or self.kwargs["fw_compiler"]
         )
 
         from functorch.compile import nop
-
         from torch._inductor.debug import enable_aot_logging
 
         # debug asserts slow down compile time noticeably,
         # So only default them on when the aot_eager backend is used.
-        if kwargs.get("fw_compiler", None) == nop:
+        if self.kwargs.get("fw_compiler", None) == nop:
             patch_config = patch("functorch.compile.config.debug_assert", True)
         else:
             patch_config = contextlib.nullcontext()
@@ -52,14 +69,16 @@ def aot_autograd(**kwargs):
         try:
             # NB: NOT cloned!
             with enable_aot_logging(), patch_config:
-                cg = aot_module_simplified(gm, example_inputs, **kwargs)
+                cg = aot_module_simplified(gm, example_inputs, **self.kwargs)
                 counters["aot_autograd"]["ok"] += 1
                 return disable(cg)
         except Exception:
             counters["aot_autograd"]["not_ok"] += 1
             raise
 
-    return compiler_fn
+
+def aot_autograd(**kwargs) -> AotAutograd:
+    return AotAutograd(**kwargs)
 
 
 def mem_efficient_fusion_kwargs(use_decomps):

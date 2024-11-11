@@ -1,4 +1,5 @@
 #!/usr/bin/env/python3
+# mypy: allow-untyped-defs
 
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
@@ -138,14 +139,14 @@ Now all metrics in the group ``my_app`` will be printed to stdout as:
 from typing import Optional
 
 from .api import (  # noqa: F401
+    configure,
     ConsoleMetricHandler,
+    get_elapsed_time_ms,
+    getStream,
     MetricData,
     MetricHandler,
     MetricsConfig,
     NullMetricHandler,
-    configure,
-    get_elapsed_time_ms,
-    getStream,
     prof,
     profile,
     publish_metric,

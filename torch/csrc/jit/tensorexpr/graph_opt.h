@@ -2,9 +2,7 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 // Optimize aten::cat ops in the given subgraph.
 //
@@ -60,7 +58,7 @@ bool OptimizeCat(const std::shared_ptr<Graph>& graph);
 
 TORCH_API void annotateInputShapes(
     const std::shared_ptr<Graph>& graph,
-    const std::vector<c10::optional<at::Tensor>>& example_inputs);
+    const std::vector<std::optional<at::Tensor>>& example_inputs);
 TORCH_API std::shared_ptr<Graph> removeUnusedSelfArgument(
     const std::shared_ptr<Graph>& graph);
 TORCH_API std::shared_ptr<Graph> removeGraphOutput(
@@ -110,6 +108,4 @@ TORCH_API bool isGraphCompilable(const std::shared_ptr<Graph>& graph);
 // this, not always correct, workaround pass.
 TORCH_API void fixupMissingShapeInfo(const std::shared_ptr<Graph>& graph);
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr

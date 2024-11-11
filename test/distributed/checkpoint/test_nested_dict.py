@@ -13,7 +13,7 @@ class TestFlattening(TestCase):
         state_dict = {
             "key0": 1,
             "key1": [1, 2],
-            "key2": {1: 2, 2: 3},
+            "key2": {"1": 2, "2": 3},
             "key3": torch.tensor([1]),
             "key4": [[torch.tensor(2), "x"], [1, 2, 3], {"key6": [44]}],
         }
@@ -24,7 +24,7 @@ class TestFlattening(TestCase):
             {
                 'key0': 1,
                 'key1': [1, 2],
-                'key2': {1: 2, 2: 3},
+                'key2': {'1': 2, '2': 3},
                 'key3': tensor([1]),
                 'key4.0.0': tensor(2),
                 'key4.0.1': 'x',
@@ -55,7 +55,9 @@ class TestFlattening(TestCase):
         self.assertEqual(("k2", 0), mapping["k2.0"])
         self.assertEqual(("k2", 1), mapping["k2.1"])
         self.assertEqual(("k2", 2, 0, "k3"), mapping["k2.2.0.k3"])
-        self.assertEqual(("k3",), mapping["k3"])
+        self.assertEqual(("k3", 0), mapping["k3.0"])
+        self.assertEqual(("k3", 1), mapping["k3.1"])
+        self.assertEqual(("k3", 2, 0, "k3"), mapping["k3.2.0.k3"])
 
 
 if __name__ == "__main__":

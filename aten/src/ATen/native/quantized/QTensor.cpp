@@ -10,8 +10,8 @@
 #include <cmath>
 #include <utility>
 
-namespace at {
-namespace native {
+
+namespace at::native {
 
 Tensor quantize_per_tensor_dynamic(
     const Tensor& self,
@@ -29,8 +29,8 @@ Tensor quantize_per_tensor_dynamic(
     reduce_range = false;
   }
 
-  int qmin;
-  int qmax;
+  int qmin = 0;
+  int qmax = 0;
 
   if (dtype == ScalarType::QInt8) {
     qmin = -128;
@@ -188,13 +188,13 @@ QScheme qscheme_quant(const Tensor& self) {
 
 Tensor quantized_clone(
     const Tensor& self,
-    c10::optional<c10::MemoryFormat> optional_memory_format) {
+    std::optional<c10::MemoryFormat> optional_memory_format) {
   auto memory_format =
       optional_memory_format.value_or(MemoryFormat::Contiguous);
 
   // TODO: To support all features of MemoryFormat::Preserve we need to add
   // _empty_affine_quantized_strided function and use it similarly to
-  // Tensor clone(const Tensor& src, c10::optional<c10::MemoryFormat>
+  // Tensor clone(const Tensor& src, std::optional<c10::MemoryFormat>
   // optional_memory_format) if (self.is_non_overlapping_and_dense()) ->
   // _empty_affine_quantized_strided
   if (memory_format == MemoryFormat::Preserve) {
@@ -208,7 +208,7 @@ Tensor quantized_clone(
         self.options().memory_format(memory_format),
         self.q_scale(),
         self.q_zero_point(),
-        c10::nullopt);
+        std::nullopt);
   } else if (self.qscheme() == at::kPerChannelAffine) {
     dst = at::_empty_per_channel_affine_quantized(
         self.sizes(),
@@ -216,7 +216,7 @@ Tensor quantized_clone(
         self.q_per_channel_zero_points(),
         self.q_per_channel_axis(),
         self.options().memory_format(memory_format),
-        c10::nullopt);
+        std::nullopt);
   } else {
     TORCH_CHECK(false, "clone for quantized Tensor only works for \
       PerTensorAffine and PerChannelAffine qscheme right now");
@@ -344,7 +344,7 @@ std::tuple<Tensor, Tensor> choose_qparams_optimized(
 
   TORCH_CHECK(numel <= input_tensor.numel(), "numel ", numel,
       " greater than input_tensor.numel() ", input_tensor.numel());
-  const float* input_row = input_tensor.data_ptr<float>();
+  const float* input_row = input_tensor.const_data_ptr<float>();
   float xmin = *std::min_element(input_row, input_row + numel);
   float xmax = *std::max_element(input_row, input_row + numel);
 
@@ -352,7 +352,7 @@ std::tuple<Tensor, Tensor> choose_qparams_optimized(
   // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   int min_bins = n_bins * (1.0 - (float) ratio);
   Tensor input_tensor_contig = input_tensor.contiguous();
-  const float* input = input_tensor_contig.data_ptr<float>();
+  const float* input = input_tensor_contig.const_data_ptr<float>();
   std::vector<float> q_input(numel);
 
   float loss =
@@ -393,5 +393,4 @@ std::tuple<Tensor, Tensor> choose_qparams_optimized(
   xmin_tensor[0] = xmin;
   return std::make_tuple(xmax_tensor, xmin_tensor);
 }
-} // namespace native
-} // namespace at
+} // namespace at::native

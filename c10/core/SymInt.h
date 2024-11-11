@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <iterator>
 #include <numeric>
+#include <optional>
 #include <ostream>
 #include <type_traits>
 
@@ -42,7 +43,7 @@ class C10_API SymInt {
       // Large negative number, heap allocate it
       promote_to_negative();
     }
-  };
+  }
   SymInt() : data_(0) {}
   SymInt(SymNode n);
 
@@ -92,7 +93,7 @@ class C10_API SymInt {
     // https://stackoverflow.com/questions/42534749/signed-extension-from-24-bit-to-32-bit-in-c
     uint64_t extended_bits = (unextended_bits ^ sign_bit_mask) - sign_bit_mask;
     return static_cast<SymNodeImpl*>(
-        // NOLINTNEXTLINE(performance-no-int-to-ptr)
+        // NOLINTNEXTLINE(performance-no-int-to-ptr, bugprone*)
         reinterpret_cast<void*>(static_cast<uintptr_t>(extended_bits)));
   }
 
@@ -229,9 +230,9 @@ class C10_API SymInt {
     return data_;
   }
 
-  c10::optional<int64_t> maybe_as_int() const {
+  std::optional<int64_t> maybe_as_int() const {
     if (!is_heap_allocated()) {
-      return c10::make_optional(data_);
+      return std::make_optional(data_);
     }
     auto* node = toSymNodeImplUnowned();
     if (auto c = node->constant_int()) {
@@ -364,4 +365,60 @@ DECLARE_SYMINT_OP(size_t, SymInt)
 
 C10_API std::ostream& operator<<(std::ostream& os, const SymInt& s);
 C10_API SymInt operator-(const SymInt& s);
+
+inline bool sym_eq(int64_t a, int64_t b) {
+  return a == b;
+}
+
+inline SymBool sym_eq(const SymInt& a, const SymInt& b) {
+  return a.sym_eq(b);
+}
+
+inline bool sym_ne(int64_t a, int64_t b) {
+  return a != b;
+}
+
+inline SymBool sym_ne(const SymInt& a, const SymInt& b) {
+  return a.sym_ne(b);
+}
+
+inline bool sym_lt(int64_t a, int64_t b) {
+  return a < b;
+}
+
+inline SymBool sym_lt(const SymInt& a, const SymInt& b) {
+  return a.sym_lt(b);
+}
+
+inline bool sym_le(int64_t a, int64_t b) {
+  return a <= b;
+}
+
+inline SymBool sym_le(const SymInt& a, const SymInt& b) {
+  return a.sym_le(b);
+}
+
+inline bool sym_gt(int64_t a, int64_t b) {
+  return a > b;
+}
+
+inline SymBool sym_gt(const SymInt& a, const SymInt& b) {
+  return a.sym_gt(b);
+}
+
+inline bool sym_ge(int64_t a, int64_t b) {
+  return a >= b;
+}
+
+inline SymBool sym_ge(const SymInt& a, const SymInt& b) {
+  return a.sym_ge(b);
+}
+
+inline bool definitely_true(
+    const c10::SymBool& b,
+    const char* file,
+    int64_t line) {
+  return b.has_hint() && b.guard_bool(file, line);
+}
+
 } // namespace c10

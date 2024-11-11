@@ -3,14 +3,13 @@
 #ifdef USE_TENSORPIPE
 
 #include <c10/util/irange.h>
+#include <limits>
 
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated")
 #include <tensorpipe/tensorpipe.h>
 C10_DIAGNOSTIC_POP()
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace torch::distributed::rpc {
 namespace {
 
 // The TensorPipe agent splits the RPC message's information across multiple
@@ -37,7 +36,7 @@ inline c10::Device indexToDevice(c10::DeviceIndex index) {
 
 class TensorpipeCpuConverter : public TensorpipeDeviceTypeConverter {
  public:
-  c10::optional<std::vector<char>> prepareTensorForSending(
+  std::optional<std::vector<char>> prepareTensorForSending(
       const c10::Storage& storage,
       const std::vector<c10::Stream>& /* streams */,
       tensorpipe::Message& message) const override {
@@ -58,7 +57,7 @@ class TensorpipeCpuConverter : public TensorpipeDeviceTypeConverter {
 
       message.tensors.push_back(std::move(tensor));
 
-      return c10::make_optional(std::move(storageData));
+      return std::make_optional(std::move(storageData));
     } else {
       tensorpipe::CpuBuffer buffer;
       buffer.ptr = static_cast<char*>(storage.mutable_data());
@@ -69,12 +68,12 @@ class TensorpipeCpuConverter : public TensorpipeDeviceTypeConverter {
 
       message.tensors.push_back(std::move(tensor));
 
-      return c10::nullopt;
+      return std::nullopt;
     }
   }
 
   at::DataPtr allocateTensorForReceiving(
-      int /* deviceIndex */,
+      c10::DeviceIndex /* deviceIndex */,
       size_t length,
       const std::vector<c10::Stream>& /* streams */,
       tensorpipe::Allocation& allocation) const override {
@@ -131,7 +130,7 @@ TensorpipeDeviceTypeConverterRegistrar::TensorpipeDeviceTypeConverterRegistrar(
 }
 
 std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
-    c10::intrusive_ptr<Message> rpcMessage,
+    const c10::intrusive_ptr<Message>& rpcMessage,
     std::vector<c10::Device> devices,
     const std::vector<c10::Stream>& streams) {
   tensorpipe::Message tpMessage;
@@ -141,9 +140,11 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
   buffers.type = std::make_unique<MessageType>(rpcMessage->type());
   buffers.id = std::make_unique<int64_t>(rpcMessage->id());
   // kTpMessageTypeIdx = 0
+  // NOLINTNEXTLINE(modernize-use-emplace)
   tpMessage.payloads.push_back(
       tensorpipe::Message::Payload{buffers.type.get(), sizeof(MessageType)});
   // kTpMessageIdIdx = 1
+  // NOLINTNEXTLINE(modernize-use-emplace)
   tpMessage.payloads.push_back(
       tensorpipe::Message::Payload{buffers.id.get(), sizeof(int64_t)});
 
@@ -151,9 +152,9 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
   buffers.payload = std::move(rpcMessage->payload());
   // TensorPipe uses the same Message class for both reading and writing, thus
   // it uses non-const pointers even though it doesn't modify them when writing.
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-  char* payloadPtr = const_cast<char*>(buffers.payload.data());
+  char* payloadPtr = buffers.payload.data();
   // kTpMessagePayloadIdx = 2
+  // NOLINTNEXTLINE(modernize-use-emplace)
   tpMessage.payloads.push_back(
       tensorpipe::Message::Payload{payloadPtr, buffers.payload.size()});
 
@@ -177,6 +178,7 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
   pickler.pushIValue(buffers.tensors);
   pickler.stop();
   // kTpMessagePickleIdx = 3
+  // NOLINTNEXTLINE(modernize-use-emplace)
   tpMessage.payloads.push_back(tensorpipe::Message::Payload{
       buffers.pickle.data(), buffers.pickle.size()});
   const std::vector<torch::Tensor>& tensorDataVec = pickler.tensorData();
@@ -192,7 +194,7 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
         tensor.device());
 
     TORCH_INTERNAL_ASSERT(tpMessage.tensors.size() == i);
-    c10::optional<std::vector<char>> maybeCopiedTensor =
+    std::optional<std::vector<char>> maybeCopiedTensor =
         converter->prepareTensorForSending(
             tensor.storage(), streams, tpMessage);
     TORCH_INTERNAL_ASSERT(tpMessage.tensors.size() == i + 1);
@@ -267,8 +269,14 @@ std::pair<tensorpipe::Allocation, TensorpipeReadBuffers> tensorpipeAllocate(
         targetDeviceType);
 
     TORCH_INTERNAL_ASSERT(tpAllocation.tensors.size() == tensorIdx);
+    TORCH_INTERNAL_ASSERT(
+        tensor.targetDevice->index <=
+        std::numeric_limits<c10::DeviceIndex>::max());
     at::DataPtr dataPtr = converter->allocateTensorForReceiving(
-        tensor.targetDevice->index, tensor.length, streams, tpAllocation);
+        static_cast<c10::DeviceIndex>(tensor.targetDevice->index),
+        tensor.length,
+        streams,
+        tpAllocation);
     TORCH_INTERNAL_ASSERT(tpAllocation.tensors.size() == tensorIdx + 1);
 
     buffers.tensors.push_back(std::move(dataPtr));
@@ -278,7 +286,8 @@ std::pair<tensorpipe::Allocation, TensorpipeReadBuffers> tensorpipeAllocate(
 }
 
 c10::intrusive_ptr<Message> tensorpipeDeserialize(
-    tensorpipe::Descriptor&& tpDescriptor,
+    const tensorpipe::Descriptor& tpDescriptor,
+    // NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
     TensorpipeReadBuffers&& buffers) {
   // Tensors
   std::vector<at::Tensor> tensors;
@@ -315,7 +324,7 @@ c10::intrusive_ptr<Message> tensorpipeDeserialize(
   }
 
   for (const auto i : c10::irange(tpDescriptor.tensors.size())) {
-    auto& tensor = tpDescriptor.tensors[i];
+    const auto& tensor = tpDescriptor.tensors[i];
     if (tensor.targetDevice.has_value() &&
         tensor.targetDevice->type == tensorpipe::kCudaDeviceType) {
       TORCH_INTERNAL_ASSERT(
@@ -337,8 +346,6 @@ c10::intrusive_ptr<Message> tensorpipeDeserialize(
       *buffers.type,
       *buffers.id);
 }
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc
 
 #endif // USE_TENSORPIPE

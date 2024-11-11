@@ -1,4 +1,8 @@
+# mypy: ignore-errors
+
+import abc
 import faulthandler
+import itertools
 import logging
 import multiprocessing
 import os
@@ -17,9 +21,10 @@ from datetime import timedelta
 from enum import Enum
 from functools import partial, reduce, wraps
 from io import StringIO
-from typing import Dict, NamedTuple, Optional, Union
+from typing import Dict, NamedTuple, Optional, Union, List, Any, Callable, Tuple
 from unittest.mock import patch
 
+from torch._logging._internal import trace_log
 import torch
 import torch._dynamo.test_case
 import torch.cuda.nccl
@@ -35,6 +40,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TEST_WITH_TSAN,
     TestCase,
+    run_tests,
 )
 from torch.testing._internal.distributed.multi_threaded_pg import (
     _install_threaded_pg,
@@ -112,10 +118,16 @@ def skip_if_no_gpu(func):
     return wrapper
 
 
+# TODO (kwen2501): what is the purpose of this decorator?  Tests with this
+# decorator were always skipped. So they may be outdated already.
+# Oct 2024: bumping the small-world criteria to < 8, as we are increasing the
+# number of GPUs in CI from 2 to 4, and we need to continue skipping those tests
+# to keep CI green. But this is just a temporary solution. We should clean up
+# those tests somehow.
 def skip_if_small_worldsize(func):
     @wraps(func)
     def wrapper(*args, **kwargs):
-        if (os.environ["BACKEND"] != "mpi") and int(os.environ["WORLD_SIZE"]) <= 2:
+        if (os.environ["BACKEND"] != "mpi") and int(os.environ["WORLD_SIZE"]) < 8:
             sys.exit(TEST_SKIPS["small_worldsize"].exit_code)
 
         return func(*args, **kwargs)
@@ -165,6 +177,10 @@ def import_transformers_or_skip():
         return wrapper
 
     return decorator
+
+
+def at_least_x_gpu(x):
+    return torch.cuda.is_available() and torch.cuda.device_count() >= x
 
 
 def skip_if_lt_x_gpu(x):
@@ -301,9 +317,7 @@ def requires_nccl_version(version, msg):
     else:
         return skip_but_pass_in_sandcastle_if(
             torch.cuda.nccl.version() < version,
-            "Requires NCCL version greater than or equal to: {}, found: {}, reason: {}".format(
-                version, torch.cuda.nccl.version(), msg
-            ),
+            f"Requires NCCL version greater than or equal to: {version}, found: {torch.cuda.nccl.version()}, reason: {msg}",
         )
 
 
@@ -326,9 +340,9 @@ def requires_mpi():
     )
 
 
-def skip_if_rocm(func):
+def skip_if_rocm_multiprocess(func):
     """Skips a test for ROCm"""
-    func.skip_if_rocm = True
+    func.skip_if_rocm_multiprocess = True
 
     @wraps(func)
     def wrapper(*args, **kwargs):
@@ -346,6 +360,22 @@ def skip_if_win32():
     )
 
 
+def sm_is_or_higher_than(device: torch.device, major: int, minor: int) -> bool:
+    """
+    Returns True if the device's compute capability is (major, minor) or higher.
+    Error out if the device is not a CUDA device.
+    Returns False if device is a RoCM device.
+    """
+    if device.type != "cuda":
+        raise ValueError("sm_is_or_later() is only supported for CUDA devices")
+
+    if torch.version.hip is not None:
+        # ROCm devices may have different compute capability codes
+        return False
+
+    return torch.cuda.get_device_capability(device) >= (major, minor)
+
+
 @retry_on_connect_failures
 def create_tcp_store(
     addr="localhost",
@@ -354,7 +384,7 @@ def create_tcp_store(
     timeout=timedelta(minutes=5),
     wait_for_workers=True,
     jit_class=False,
-    use_libuv=False
+    use_libuv=True,
 ):
     """
     Creates a TCP store. Retries if the chosen port is already in use.
@@ -541,10 +571,20 @@ class MultiProcessTestCase(TestCase):
     # Constructor patches current instance test method to
     # assume the role of the main process and join its subprocesses,
     # or run the underlying test function.
-    def __init__(self, method_name: str = "runTest") -> None:
+    def __init__(self, method_name: str = "runTest", methodName: str = "runTest") -> None:
+        # methodName is the correct naming in unittest and testslide uses keyword arguments.
+        # So we need to use both to 1) not break BC and, 2) support testslide.
+        if methodName != "runTest":
+            method_name = methodName
         super().__init__(method_name)
-        fn = getattr(self, method_name)
-        setattr(self, method_name, self.join_or_run(fn))
+        try:
+            fn = getattr(self, method_name)
+            setattr(self, method_name, self.join_or_run(fn))
+        except AttributeError as e:
+            if methodName != 'runTest':
+                # we allow instantiation with no explicit method name
+                # but not an *incorrect* or missing method name
+                raise ValueError(f"no such test method in {self.__class__}: {methodName}") from e
 
     def setUp(self) -> None:
         super().setUp()
@@ -577,6 +617,9 @@ class MultiProcessTestCase(TestCase):
                 target=self.__class__._run,
                 name="process " + str(rank),
                 args=(rank, self._current_test_name(), self.file_name, child_conn),
+                kwargs={
+                    "fake_pg": getattr(self, "fake_pg", False),
+                }
             )
             process.start()
             logger.info("Started process %s with pid %s", rank, process.pid)
@@ -622,7 +665,7 @@ class MultiProcessTestCase(TestCase):
                 return
 
     @classmethod
-    def _run(cls, rank: int, test_name: str, file_name: str, parent_pipe) -> None:
+    def _run(cls, rank: int, test_name: str, file_name: str, parent_pipe, **kwargs) -> None:
         self = cls(test_name)
         self.rank = rank
         self.file_name = file_name
@@ -653,7 +696,7 @@ class MultiProcessTestCase(TestCase):
                 "Process %s skipping test %s for following reason: %s", self.rank, test_name, str(se)
             )
             sys.exit(TEST_SKIPS["generic"].exit_code)
-        except Exception as e:
+        except Exception:
             logger.error(
                 "Caught exception: \n%s exiting "
                 "process %s with exit code: %s",
@@ -795,9 +838,8 @@ class MultiProcessTestCase(TestCase):
                 # Get error from pipe.
                 error_message = self.pid_to_pipe[process.pid].recv()
                 error += (
-                    "Process {} exited with error code {} and exception:\n{}\n".format(
-                        i, MultiProcessTestCase.TEST_ERROR_EXIT_CODE, error_message
-                    )
+                    f"Process {i} exited with error code {MultiProcessTestCase.TEST_ERROR_EXIT_CODE} "
+                    f"and exception:\n{error_message}\n"
                 )
 
             raise RuntimeError(error)
@@ -811,9 +853,7 @@ class MultiProcessTestCase(TestCase):
             self.assertEqual(
                 p.exitcode,
                 first_process.exitcode,
-                msg="Expect process {} exit code to match Process 0 exit code of {}, but got {}".format(
-                    i, first_process.exitcode, p.exitcode
-                ),
+                msg=f"Expect process {i} exit code to match Process 0 exit code of {first_process.exitcode}, but got {p.exitcode}",
             )
         for skip in TEST_SKIPS.values():
             if first_process.exitcode == skip.exit_code:
@@ -837,6 +877,40 @@ class MultiProcessTestCase(TestCase):
     @property
     def is_master(self) -> bool:
         return self.rank == 0
+
+
+def run_subtests(
+    cls_inst,
+    subtest_config: Dict[str, List[Any]],
+    test_fn: Callable,
+    *test_args,
+    **test_kwargs: Any,
+):
+    """
+    Runs a test function given by ``test_fn`` as a subtest according to the
+    configurations specified by ``subtest_config``. This amortizes the
+    costly setup overhead (including process spawn and initializing the
+    process group) over the subtests.
+
+    Args:
+        subtest_config (Dict[str, List[Any]]): A mapping from subtest
+            keyword argument name to a list of its possible values.
+        test_fn (Callable): A callable that runs the actual test.
+        test_args: Positional arguments to pass to ``test_fn``.
+        test_kwargs: Keyword arguments to pass to ``test_fn``.
+    """
+    # Convert the config mapping to a list to have a fixed order
+    subtest_config_items: List[Tuple[str, List[Any]]] = list(subtest_config.items())
+    subtest_config_keys: List[str] = [item[0] for item in subtest_config_items]
+    subtest_config_values: List[List[Any]] = [item[1] for item in subtest_config_items]
+    for values in itertools.product(*subtest_config_values):
+        # Map keyword to chosen value
+        subtest_kwargs = dict(zip(subtest_config_keys, values))
+        with cls_inst.subTest(**subtest_kwargs):
+            torch._dynamo.reset()
+            test_fn(*test_args, **test_kwargs, **subtest_kwargs)
+            torch._dynamo.reset()
+        c10d.barrier()
 
 
 # Cannot use functools.cache as it requires python 3.9
@@ -917,9 +991,13 @@ def spawn_threads_and_init_comms(
     @wraps(func)
     def wrapper(self, *args, **kwargs):
         # TODO: get test name from kwargs
-        threads = _run_test_method_with_multi_threads(world_size, lambda: func(self, *args, **kwargs))
-        # join and error handling
-        MultiThreadedTestCase._join_threads(threads, func)
+        torch._C._distributed_c10d._set_thread_isolation_mode(True)
+        try:
+            threads = _run_test_method_with_multi_threads(world_size, lambda: func(self, *args, **kwargs))
+            # join and error handling
+            MultiThreadedTestCase._join_threads(threads, func)
+        finally:
+            torch._C._distributed_c10d._set_thread_isolation_mode(False)
 
     return wrapper
 
@@ -952,10 +1030,20 @@ class MultiThreadedTestCase(TestCase):
 
         return types.MethodType(wrapper, self)
 
-    def __init__(self, method_name: str = "runTest") -> None:
+    def __init__(self, method_name: str = "runTest", methodName: str = "runTest") -> None:
+        # methodName is the correct naming in unittest and testslide uses keyword arguments.
+        # So we need to use both to 1) not break BC and, 2) support testslide.
+        if methodName != "runTest":
+            method_name = methodName
         super().__init__(method_name)
-        test_fn = getattr(self, method_name, None)
-        setattr(self, method_name, self.join_or_run(test_fn))
+        try:
+            fn = getattr(self, method_name)
+            setattr(self, method_name, self.join_or_run(fn))
+        except AttributeError as e:
+            if methodName != 'runTest':
+                # we allow instantiation with no explicit method name
+                # but not an *incorrect* or missing method name
+                raise ValueError(f"no such test method in {self.__class__}: {methodName}") from e
 
     def perThreadSetUp(self):
         # super().setUp()  # TestCase.setUp() calls torch.manual_seed()
@@ -987,6 +1075,7 @@ class MultiThreadedTestCase(TestCase):
         """
         class method to spawn threads and run test, use this method in the SetUp of your TestCase
         """
+        torch._C._distributed_c10d._set_thread_isolation_mode(True)
         test_name = self._current_test_name
         # for each test case, we need to create thread local world, and a global store
         world = _install_threaded_pg()
@@ -1004,7 +1093,7 @@ class MultiThreadedTestCase(TestCase):
             self.threads.append(t)
 
     @classmethod
-    def _run(cls, test_name, rank, world_size):
+    def _run(cls, test_name, rank, world_size, **kwargs):
         self = cls(test_name)
         self.rank = rank
 
@@ -1064,6 +1153,7 @@ class MultiThreadedTestCase(TestCase):
                 failed_ranks.append(failure)
         finally:
             _uninstall_threaded_pg()
+            torch._C._distributed_c10d._set_thread_isolation_mode(False)
 
         cls._check_return_codes(failed_ranks, timeout, fn)
 
@@ -1171,14 +1261,24 @@ class SaveForwardInputsModel(nn.Module):
         return self.c2(self.c1(x))
 
 @contextmanager
-def _dynamo_dist_per_rank_init(rank, world_size, init_pg=True):
+def _dynamo_dist_per_rank_init(rank, world_size, init_pg=True, fake_pg=False):
     # To avoid multiple inheritance from _dynamo.test_case.TestCase and MultiProcessTestCase,
     # Just manually implement the most important part of the dynamo behavior to reset/clear.
-    torch.cuda.set_device(rank)
+    if not fake_pg:
+        torch.cuda.set_device(rank)
     os.environ['MASTER_ADDR'] = 'localhost'
     os.environ['MASTER_PORT'] = '6789'
     if init_pg:
-        c10d.init_process_group("nccl", rank=rank, world_size=world_size)
+        if fake_pg:
+            store = torch.testing._internal.distributed.fake_pg.FakeStore()
+            c10d.init_process_group(
+                backend="fake",
+                world_size=world_size,
+                rank=rank,
+                store=store,
+            )
+        else:
+            c10d.init_process_group("nccl", rank=rank, world_size=world_size)
     torch._dynamo.reset()
     torch._dynamo.utils.counters.clear()
     try:
@@ -1248,9 +1348,112 @@ class DynamoDistributedMultiProcTestCase(MultiProcessTestCase):
         return torch.cuda.device_count()
 
     @classmethod
-    def _run(cls, rank: int, test_name: str, file_name: str, parent_pipe) -> None:
+    def _run(cls, rank: int, test_name: str, file_name: str, parent_pipe, **kwargs) -> None:
+        trace_log.addHandler(logging.NullHandler())
+
         # The rest is copypasta from MultiProcessTestCase._run
         self = cls(test_name)
         self.rank = rank
         self.file_name = file_name
         self.run_test(test_name, parent_pipe)
+
+
+class MultiProcContinousTest(TestCase):
+    # Class variables:
+    # number of test processes
+    world_size: int = 2
+    # rank of the current process
+    rank: int = -1  # unset state
+    # Rendezvous file
+    rdvz_file: Optional[str] = None
+
+    @classmethod
+    @abc.abstractmethod
+    def backend_str(cls) -> str:
+        """
+        ProcessGroup backend str.
+        To be customized by sub test classes, e.g. "nccl".
+        Here we raise error.
+        """
+        raise NotImplementedError("Please implement backend_str in your test class")
+
+    @classmethod
+    def opts(cls, high_priority_stream=False):
+        """
+        ProcessGroup init options.
+        To be customized by sub test classes, e.g. ProcessGroupNCCLOpTest
+        Here we return None.
+        """
+        return None
+
+    @classmethod
+    def setUpClass(cls):
+        """
+        Class-scope test fixture. Run once for entire test class, before any test starts.
+        Set up the process group.
+        """
+        super().setUpClass()
+        if not 0 <= cls.rank < cls.world_size:
+            raise RuntimeError(
+                "Rank must be set and in the range of 0 to world_size. "
+                f"World size: {cls.world_size} Rank: {cls.rank}"
+            )
+        if cls.rdvz_file:
+            store = c10d.FileStore(cls.rdvz_file, cls.world_size)
+        else:
+            # torchrun takes care of rendezvous
+            store = None
+        opts = cls.opts()
+        backend = cls.backend_str()
+        print(f"Testing {backend=}")
+        # create nccl processgroup with opts
+        c10d.init_process_group(
+            backend=backend,
+            world_size=cls.world_size,
+            rank=cls.rank,
+            store=store,
+            pg_options=opts,
+        )
+        cls.pg = c10d.distributed_c10d._get_default_group()
+        print(f"Rank {cls.rank} setup complete")
+
+    @classmethod
+    def tearDownClass(cls):
+        """
+        Class-scope test fixture. Run once for entire test class, after all tests finish.
+        Tear down the process group.
+        """
+        c10d.destroy_process_group()
+        super().tearDownClass()
+        # Clear up the rendezvous file
+        if cls.rdvz_file:
+            try:
+                os.remove(cls.rdvz_file)
+            except OSError:
+                pass
+        print(f"Rank {cls.rank} teardown complete")
+
+    @classmethod
+    def run_rank(
+        cls,
+        rank: int,
+        world_size: int,
+        rdvz_file: Optional[str] = None,
+    ):
+        """
+        This is an entry point for each rank to run the tests in `MultiProcContinousTest`.
+        In this entry point, we set the class variables for the test class.
+        Then we run all tests.
+
+        Note:
+        - This helper only works for a subclass of `MultiProcContinousTest`.
+
+        Example:
+        - See `test_c10d_ops_nccl.py`.
+        """
+        # set class variables for the test class
+        cls.rank = rank
+        cls.world_size = world_size
+        cls.rdvz_file = rdvz_file
+        # Launch tests via `common_utils` infra
+        run_tests()

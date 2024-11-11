@@ -20,7 +20,6 @@
 #include <fmt/format.h>
 
 #include <sys/wait.h>
-#include <atomic>
 #include <csignal>
 #include <map>
 #include <set>
@@ -51,7 +50,7 @@ using namespace torch;
 
 // signal(2) is really not portable. So use sigaction.
 // http://man7.org/linux/man-pages/man2/signal.2.html
-static inline void setSignalHandler(
+static void setSignalHandler(
     int signal,
     void (*handler)(int, siginfo_t*, void*),
     struct sigaction* old_sa_ptr) {

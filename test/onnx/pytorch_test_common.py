@@ -18,6 +18,7 @@ from torch.autograd import function
 from torch.onnx._internal import diagnostics
 from torch.testing._internal import common_utils
 
+
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.insert(-1, pytorch_test_dir)
 
@@ -64,9 +65,8 @@ skipIfQuantizationBackendQNNPack = _skipper(
 
 
 # skips tests for all versions below min_opset_version.
-# if exporting the op is only supported after a specific version,
 # add this wrapper to prevent running the test for opset_versions
-# smaller than the currently tested opset_version
+# smaller than `min_opset_version`.
 def skipIfUnsupportedMinOpsetVersion(min_opset_version):
     def skip_dec(func):
         @functools.wraps(func)
@@ -83,6 +83,8 @@ def skipIfUnsupportedMinOpsetVersion(min_opset_version):
 
 
 # skips tests for all versions above max_opset_version.
+# add this wrapper to prevent running the test for opset_versions
+# higher than `max_opset_version`.
 def skipIfUnsupportedMaxOpsetVersion(max_opset_version):
     def skip_dec(func):
         @functools.wraps(func)
@@ -199,15 +201,15 @@ def xfail_dynamic_fx_test(
     model_type: Optional[TorchModelType] = None,
     reason: Optional[str] = None,
 ):
-    """Skip dynamic exporting test.
+    """Xfail dynamic exporting test.
 
     Args:
-        reason: The reason for skipping dynamic exporting test.
+        reason: The reason for xfailing dynamic exporting test.
         model_type (TorchModelType): The model type to xfail dynamic exporting test for.
-            When None, model type is not used to skip dynamic tests.
+            When None, model type is not used to xfail dynamic tests.
 
     Returns:
-        A decorator for skipping dynamic exporting test.
+        A decorator for xfailing dynamic exporting test.
     """
 
     def skip_dec(func):
@@ -292,8 +294,8 @@ def xfail(error_message: str, reason: Optional[str] = None):
             except Exception as e:
                 if isinstance(e, torch.onnx.OnnxExporterError):
                     # diagnostic message is in the cause of the exception
-                    assert error_message in str(
-                        e.__cause__
+                    assert (
+                        error_message in str(e.__cause__)
                     ), f"Expected error message: {error_message} NOT in {str(e.__cause__)}"
                 else:
                     assert error_message in str(
@@ -309,8 +311,8 @@ def xfail(error_message: str, reason: Optional[str] = None):
 
 
 # skips tests for opset_versions listed in unsupported_opset_versions.
-# if the caffe2 test cannot be run for a specific version, add this wrapper
-# (for example, an op was modified but the change is not supported in caffe2)
+# if the PyTorch test cannot be run for a specific version, add this wrapper
+# (for example, an op was modified but the change is not supported in PyTorch)
 def skipIfUnsupportedOpsetVersion(unsupported_opset_versions):
     def skip_dec(func):
         @functools.wraps(func)

@@ -18,8 +18,7 @@
 #include <unordered_map>
 #include <utility>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 
@@ -415,7 +414,7 @@ struct GraphFuser {
     return group;
   }
 
-  at::optional<Node*> tryFuse(Node* consumer, Value* producer) {
+  std::optional<Node*> tryFuse(Node* consumer, Value* producer) {
     // this handles cases where producer can be moved _into_ the fusion group of
     // consumer.
     // TODO: extend to fusion of consumer into _producer's_ fusion blob
@@ -431,13 +430,13 @@ struct GraphFuser {
         aliasDb_->moveBeforeTopologicallyValid(producer->node(), consumer);
 
     if (!shouldFuse) {
-      return at::nullopt;
+      return std::nullopt;
     }
 
     if ((consumer->inputs().size() + consumer->outputs().size() +
          producer->node()->inputs().size() +
          producer->node()->outputs().size()) > subgraph_arg_limit_) {
-      return at::nullopt;
+      return std::nullopt;
     }
 
     auto group = consumer;
@@ -490,11 +489,11 @@ struct GraphFuser {
     return true;
   }
 
-  c10::optional<Node*> findFusedChunk(Node* group, Value* input) {
+  std::optional<Node*> findFusedChunk(Node* group, Value* input) {
     AT_ASSERT(group->kind() == prim::FusionGroup);
     auto it = std::find(group->inputs().begin(), group->inputs().end(), input);
     if (it == group->inputs().end()) {
-      return c10::nullopt;
+      return std::nullopt;
     }
     size_t input_index = it - group->inputs().begin();
     auto& subgraph = getSubgraph(group);
@@ -505,7 +504,7 @@ struct GraphFuser {
       AT_ASSERT(subgraph_input->uses().size() == 1);
       return node;
     }
-    return c10::nullopt;
+    return std::nullopt;
   }
 
   void fuseChunkByReusingExistingFusedChunk(
@@ -830,8 +829,7 @@ struct GraphFuser {
     }
 
     bchunk->removeInput(producer_index);
-    for (const auto i : c10::irange(nchunks)) {
-      (void)i; // Suppress unused variable warning
+    for ([[maybe_unused]] const auto i : c10::irange(nchunks)) {
       bchunk->eraseOutput(nchunks * producer_index);
     }
 
@@ -1157,9 +1155,8 @@ struct GraphFuser {
     while (any_changed) {
       any_changed = false;
       for (auto it = block_->nodes().rbegin(); it != block_->nodes().rend();) {
-        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-        bool changed;
-        std::tie(it, changed) = scanNode(*it);
+        auto [tmp_it, changed] = scanNode(*it);
+        it = tmp_it;
         any_changed |= changed;
       }
     }
@@ -1284,5 +1281,4 @@ void CustomFuseGraph(
   Lint(&db);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

@@ -6,7 +6,8 @@
 #include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/cpu/vec/vec_base.h>
 #include <c10/util/irange.h>
-#if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
+#if defined(CPU_CAPABILITY_AVX2)
+#define SLEEF_STATIC_LIBS
 #include <sleef.h>
 #endif
 
@@ -15,7 +16,7 @@ namespace at::vec {
 inline namespace CPU_CAPABILITY {
 
 
-#if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
+#if defined(CPU_CAPABILITY_AVX2)
 
 template <> class Vectorized<double> {
 private:
@@ -139,6 +140,9 @@ public:
   }
   Vectorized<double> acos() const {
     return Vectorized<double>(Sleef_acosd4_u10(values));
+  }
+  Vectorized<double> acosh() const {
+    return Vectorized<double>(Sleef_acoshd4_u10(values));
   }
   Vectorized<double> asin() const {
     return Vectorized<double>(Sleef_asind4_u10(values));
@@ -412,11 +416,15 @@ inline Vectorized<double> Vectorized<double>::le(const Vectorized<double>& other
 template <>
 inline void convert(const double* src, double* dst, int64_t n) {
   int64_t i;
+#ifndef __msvc_cl__
 #pragma unroll
+#endif
   for (i = 0; i <= (n - Vectorized<double>::size()); i += Vectorized<double>::size()) {
     _mm256_storeu_pd(dst + i, _mm256_loadu_pd(src + i));
   }
+#ifndef __msvc_cl__
 #pragma unroll
+#endif
   for (; i < n; i++) {
     dst[i] = src[i];
   }

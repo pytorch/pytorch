@@ -1,9 +1,53 @@
 #define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/Dispatch.h>
+#include <ATen/Parallel.h>
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/cpu/zmath.h>
 #include <c10/util/irange.h>
 #include <c10/util/Unroll.h>
+
+#if !defined(C10_MOBILE)
+namespace at::native::blas_impl {
+void fp16_gemv_trans(
+    const int m,
+    const int n,
+    const float alpha,
+    const Half* a,
+    const int lda,
+    const Half* x,
+    const int incx,
+    const float beta,
+    Half* y,
+    const int incy);
+
+float fp16_dot_with_fp32_arith(
+  const Half* x,
+  const Half* a,
+  int64_t len);
+
+float bf16_dot_with_fp32_arith(
+  const at::BFloat16* x,
+  const at::BFloat16* a,
+  int64_t len);
+} // namespace at::native::blas_impl
+#endif
+#if defined(__aarch64__) && !defined(C10_MOBILE)
+#include <arm_neon.h>
+
+namespace at::native::blas_impl {
+void fp16_gemv_notrans(
+    const int m,
+    const int n,
+    const float alpha,
+    const Half* a,
+    const int lda,
+    const Half* x,
+    const int incx,
+    const float beta,
+    Half* y,
+    const int incy);
+} // namespace at::native::blas_impl
+#endif
 
 namespace at::native {
 namespace cpublas {
@@ -55,7 +99,7 @@ auto sum(int64_t N, Func f) {
 }
 
 template <typename scalar_t, typename opmath_t>
-typename std::enable_if<std::is_same<scalar_t, opmath_t>::value, void>::type
+std::enable_if_t<std::is_same_v<scalar_t, opmath_t>, void>
 gemm_notrans_(
     int64_t m,
     int64_t n,
@@ -91,7 +135,7 @@ gemm_notrans_(
 
 // std::is_same<scalar_t, at::BFloat16> || std::is_same<scalar_t, at::Half>
 template <typename scalar_t, typename opmath_t>
-typename std::enable_if<!std::is_same<scalar_t, opmath_t>::value, void>::type
+std::enable_if_t<!std::is_same_v<scalar_t, opmath_t>, void>
 gemm_notrans_(
     int64_t m,
     int64_t n,
@@ -149,8 +193,7 @@ void gemm_transa_(
 }
 
 template <typename scalar_t, typename opmath_t>
-typename std::enable_if<std::is_same<scalar_t, opmath_t>::value, void>::type
-gemm_transb_(
+void gemm_transb_impl(
     TransposeType transb,
     int64_t m,
     int64_t n,
@@ -160,12 +203,9 @@ gemm_transb_(
     int64_t lda,
     const scalar_t* b,
     int64_t ldb,
-    opmath_t beta,
-    scalar_t* c,
+    /* we expect pre-applied beta */
+    opmath_t* c,
     int64_t ldc) {
-  // c *= beta
-  scale_(m, n, beta, c, ldc);
-
   // c += alpha * (a @ b.T)
   for (const auto l : c10::irange(k)) {
     for (const auto j : c10::irange(n)) {
@@ -184,9 +224,8 @@ gemm_transb_(
   }
 }
 
-// std::is_same<scalar_t, at::BFloat16> || std::is_same<scalar_t, at::Half>
 template <typename scalar_t, typename opmath_t>
-typename std::enable_if<!std::is_same<scalar_t, opmath_t>::value, void>::type
+std::enable_if_t<std::is_same_v<scalar_t, opmath_t>, void>
 gemm_transb_(
     TransposeType transb,
     int64_t m,
@@ -200,18 +239,66 @@ gemm_transb_(
     opmath_t beta,
     scalar_t* c,
     int64_t ldc) {
-  // c += alpha * (a @ b.T)
-  for (const auto i : c10::irange(m)) {
+  // c *= beta
+  scale_(m, n, beta, c, ldc);
+
+  gemm_transb_impl(transb, m, n, k, alpha, a, lda, b, ldb, c, ldc);
+}
+
+// std::is_same<scalar_t, at::BFloat16> || std::is_same<scalar_t, at::Half>
+template <typename scalar_t, typename opmath_t>
+std::enable_if_t<!std::is_same_v<scalar_t, opmath_t>, void>
+gemm_transb_(
+    TransposeType transb,
+    int64_t m,
+    int64_t n,
+    int64_t k,
+    opmath_t alpha,
+    const scalar_t* a,
+    int64_t lda,
+    const scalar_t* b,
+    int64_t ldb,
+    opmath_t beta,
+    scalar_t* c,
+    int64_t ldc) {
+  // We need to calculate full-precision dot products for correctness;
+  // users notice error accumulation with reduced-width types (e.g.,
+  // https://github.com/pytorch/pytorch/issues/95125 and
+  // https://github.com/pytorch/pytorch/issues/83863, which were filed
+  // when we used gemm_transb_impl naively, accumulating into
+  // float16/bfloat16). The straightforward way to do this is to use
+  // the vector dot column algorithm anyway, but this gives terrible
+  // performance because of the non-contiguous matrix
+  // access. Therefore, we instead elect to allocate temporary space
+  // to hold the output at higher-precision so that we can accumulate
+  // into it using the above cache-friendly "load one vector element,
+  // FMA it with an entire matrix row into the entire result vector"
+  // algorithm instead.
+  const auto c_size = m * n;
+  auto c_accum = std::make_unique<opmath_t[]>(c_size);
+  if (beta == 1) {
     for (const auto j : c10::irange(n)) {
-      const auto dot = sum(k, [&](int64_t l) -> opmath_t {
-        return static_cast<opmath_t>(a[l * lda + i]) *
-            static_cast<opmath_t>(transb == TransposeType::ConjTranspose ? conj_impl(b[l * ldb + j]) : b[l * ldb + j]);
-      });
-      if (beta == opmath_t(0)) {
-        c[j * ldc + i] = alpha * dot;
-      } else {
-        c[j * ldc + i] = beta * c[j * ldc + i] + alpha * dot;
+      for (const auto i : c10::irange(m)) {
+        c_accum[j * m + i] = c[j * ldc + i];
       }
+    }
+  } else if (beta == 0) {
+    for (const auto j : c10::irange(n)) {
+      for (const auto i : c10::irange(m)) {
+        c_accum[j * m + i] = 0;
+      }
+    }
+  } else {
+    for (const auto j : c10::irange(n)) {
+      for (const auto i : c10::irange(m)) {
+        c_accum[j * m + i] = beta * c[j * ldc + i];
+      }
+    }
+  }
+  gemm_transb_impl(transb, m, n, k, alpha, a, lda, b, ldb, c_accum.get(), m);
+  for (const auto j : c10::irange(n)) {
+    for (const auto i : c10::irange(m)) {
+      c[j * ldc + i] = c_accum[j * m + i];
     }
   }
 }
@@ -242,6 +329,112 @@ void gemm_transab_(
   }
 }
 
+#if defined(__aarch64__) && !defined(C10_MOBILE)
+template <>
+void gemm_notrans_(
+    int64_t m,
+    int64_t n,
+    int64_t k,
+    float alpha,
+    const at::Half* a,
+    int64_t lda,
+    const at::Half* b,
+    int64_t ldb,
+    float beta,
+    at::Half* c,
+    int64_t ldc) {
+  // c += alpha * (a @ b)
+  if (n == 1 && beta == 0.0 && alpha == 1.0) {
+    at::native::blas_impl::fp16_gemv_notrans(m, k, 1.0, a, lda, b, 1, 0.0, c, 1);
+    return;
+  }
+  for (const auto i : c10::irange(m)) {
+    for (const auto j : c10::irange(n)) {
+      const auto dot = sum(k, [&](int64_t l) -> float {
+        return float(c10::detail::fp16_from_bits(a[l * lda + i].x)) *
+            float(c10::detail::fp16_from_bits(b[j * ldb + l].x));
+      });
+      if (beta == 0) {
+        c[j * ldc + i] = alpha * dot;
+      } else {
+        c[j * ldc + i] = beta * c[j * ldc + i] + alpha * dot;
+      }
+    }
+  }
+}
+#endif // defined(__aarch64__) && !defined(C10_MOBILE)
+
+#if !defined(C10_MOBILE)
+static float compute_dot(const at::Half* a, const at::Half* b, int64_t len) {
+  return at::native::blas_impl::fp16_dot_with_fp32_arith(
+      a, b, len);
+}
+
+template <>
+void gemm_transa_(
+    TransposeType transa,
+    int64_t m, int64_t n, int64_t k,
+    float alpha,
+    const at::Half *a, int64_t lda,
+    const at::Half *b, int64_t ldb,
+    float beta,
+    at::Half *c, int64_t ldc) {
+  // c = alpha * (a.T @ b) + beta * c
+  if (n == 1 && alpha == 1.0) {
+    at::native::blas_impl::fp16_gemv_trans(k, m, 1.0, a, lda, b, 1, beta, c, 1);
+    return;
+  }
+  parallel_for(0, m, 1, [&](int64_t begin, int64_t end) {
+    const auto *a_ = a + begin * lda;
+    for (const auto i : c10::irange(begin, end)) {
+      const auto *b_ = b;
+      for (const auto j : c10::irange(n)) {
+        const auto dot = compute_dot(a_, b_, k);
+        b_ += ldb;
+        if (beta == 0) {
+          c[j*ldc+i] = alpha*dot;
+        } else {
+          c[j*ldc+i] = beta*c[j*ldc+i]+alpha*dot;
+        }
+      }
+      a_ += lda;
+    }
+  });
+}
+
+static float compute_dot(const at::BFloat16* a, const at::BFloat16* b, int64_t len) {
+  return at::native::blas_impl::bf16_dot_with_fp32_arith(a, b, len);
+}
+
+template <>
+void gemm_transa_(
+    TransposeType transa,
+    int64_t m, int64_t n, int64_t k,
+    float alpha,
+    const at::BFloat16 *a, int64_t lda,
+    const at::BFloat16 *b, int64_t ldb,
+    float beta,
+    at::BFloat16 *c, int64_t ldc) {
+  // c = alpha * (a.T @ b) + beta * c
+  parallel_for(0, m, 1, [&](int64_t begin, int64_t end) {
+    const auto *a_ = a + begin * lda;
+    for (const auto i : c10::irange(begin, end)) {
+      const auto *b_ = b;
+      for (const auto j : c10::irange(n)) {
+        const auto dot = compute_dot(a_, b_, k);
+        b_ += ldb;
+        if (beta == 0) {
+          c[j*ldc+i] = alpha*dot;
+        } else {
+          c[j*ldc+i] = beta*c[j*ldc+i]+alpha*dot;
+        }
+      }
+      a_ += lda;
+    }
+  });
+}
+#endif // !defined(C10_MOBILE)
+
 template <typename scalar_t, typename opmath_t>
 void gemm_core_(
     TransposeType transa, TransposeType transb,
@@ -268,9 +461,9 @@ void gemm_core_(
 }
 
 #if !defined(C10_MOBILE)
-#define _AT_DISPATCH_GEMM_TYPES(TYPE, NAME, ...)                  \
-        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(                   \
-            kHalf, kBFloat16, kFloat8_e5m2, kFloat8_e4m3fn,       \
+#define _AT_DISPATCH_GEMM_TYPES(TYPE, NAME, ...)                                                \
+        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND6(                                                 \
+            kHalf, kBFloat16, kFloat8_e5m2, kFloat8_e4m3fn, kFloat8_e5m2fnuz, kFloat8_e4m3fnuz, \
             TYPE, NAME, __VA_ARGS__)
 #else
 #define _AT_DISPATCH_GEMM_TYPES(TYPE, NAME, ...)         \
@@ -335,8 +528,8 @@ void cpublas_copy_impl(at::ScalarType type, int64_t n, const void *_x, int64_t i
 }}  // namespace cpublas::(anonymous)
 
 
-REGISTER_DISPATCH(cpublas::gemm_stub, &cpublas::cpublas_gemm_impl);
-REGISTER_DISPATCH(cpublas::axpy_stub, &cpublas::cpublas_axpy_impl);
-REGISTER_DISPATCH(cpublas::copy_stub, &cpublas::cpublas_copy_impl);
+REGISTER_DISPATCH(cpublas::gemm_stub, &cpublas::cpublas_gemm_impl)
+REGISTER_DISPATCH(cpublas::axpy_stub, &cpublas::cpublas_axpy_impl)
+REGISTER_DISPATCH(cpublas::copy_stub, &cpublas::cpublas_copy_impl)
 
 }  // namespace at::native

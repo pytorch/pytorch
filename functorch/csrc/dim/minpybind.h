@@ -385,16 +385,8 @@ bool is_int(handle h) {
     return PyLong_Check(h.ptr());
 }
 
-bool is_float(handle h) {
-    return PyFloat_Check(h.ptr());
-}
-
 bool is_none(handle h) {
     return h.ptr() == Py_None;
-}
-
-bool is_bool(handle h) {
-    return PyBool_Check(h.ptr());
 }
 
 Py_ssize_t to_int(handle h) {
@@ -403,18 +395,6 @@ Py_ssize_t to_int(handle h) {
         throw mpy::exception_set();
     }
     return r;
-}
-
-double to_float(handle h) {
-    double r = PyFloat_AsDouble(h.ptr());
-    if (PyErr_Occurred()) {
-        throw mpy::exception_set();
-    }
-    return r;
-}
-
-bool to_bool_unsafe(handle h) {
-    return h.ptr() == Py_True;
 }
 
 bool to_bool(handle h) {

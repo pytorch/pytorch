@@ -1343,8 +1343,7 @@ TEST_F(FunctionalTest, GumbelSoftmax) {
 
     auto counts = torch::zeros_like(logits);
     torch::Tensor y_draw;
-    for (const auto i : c10::irange(num_draws)) {
-      (void)i; // Suppress unused variable warning
+    for ([[maybe_unused]] const auto i : c10::irange(num_draws)) {
       y_draw =
           F::gumbel_softmax(logits, F::GumbelSoftmaxFuncOptions().hard(true));
       counts += y_draw;
@@ -1524,6 +1523,13 @@ TEST_F(FunctionalTest, Bilinear) {
   ASSERT_EQ(y_no_bias.sizes(), torch::IntArrayRef({2, 1}));
   auto y_no_bias_exp = torch::tensor({{448, 1701}}).reshape({2, 1});
   ASSERT_TRUE(torch::allclose(y_no_bias, y_no_bias_exp, 1e-4, 1e-7));
+
+  input1 = input1.to(torch::kFloat64);
+  input2 = input2.to(torch::kInt32);
+  weight = weight.to(torch::kInt32);
+  ASSERT_THROWS_WITH(
+      F::bilinear(input1, input2, weight),
+      "All tensors must have the same dtype, got input1: double, input2: int, weight: int");
 }
 
 TEST_F(FunctionalTest, Normalize) {
@@ -2323,7 +2329,7 @@ TEST_F(FunctionalTest, Interpolate) {
     auto tensor = torch::rand({2, 3, 32, 32});
     std::vector<int64_t> osize = {8, 10};
     auto expected =
-        at::native::_upsample_nearest_exact2d(tensor, osize, torch::nullopt);
+        at::native::_upsample_nearest_exact2d(tensor, osize, std::nullopt);
 
     auto options = F::InterpolateFuncOptions()
                        .size(osize)
@@ -2336,8 +2342,8 @@ TEST_F(FunctionalTest, Interpolate) {
   {
     auto tensor = torch::rand({2, 3, 32, 32});
     std::vector<int64_t> osize = {8, 10};
-    auto expected = at::native::_upsample_bilinear2d_aa(
-        tensor, osize, false, torch::nullopt);
+    auto expected =
+        at::native::_upsample_bilinear2d_aa(tensor, osize, false, std::nullopt);
 
     auto options = F::InterpolateFuncOptions()
                        .size(osize)
@@ -2350,8 +2356,8 @@ TEST_F(FunctionalTest, Interpolate) {
   {
     auto tensor = torch::rand({2, 3, 32, 32});
     std::vector<int64_t> osize = {8, 10};
-    auto expected = at::native::_upsample_bicubic2d_aa(
-        tensor, osize, false, torch::nullopt);
+    auto expected =
+        at::native::_upsample_bicubic2d_aa(tensor, osize, false, std::nullopt);
 
     auto options = F::InterpolateFuncOptions()
                        .size(osize)

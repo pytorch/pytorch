@@ -1,160 +1,14 @@
 // NOTE: Like interface.cpp, this file will be copied into AOTInductor
 // generated output. This file is intended to keep implementation
 // details separate from the implementation of the AOTI public
-// interface. Note also that #includes should go into interface.cpp
-// for simplicity of maintenance.
+// interface.
+#include <torch/csrc/inductor/aoti_runtime/arrayref_tensor.h>
+#include <torch/csrc/inductor/aoti_runtime/scalar_to_tensor.h>
+#include <torch/csrc/inductor/aoti_runtime/thread_local.h>
+#include <torch/csrc/inductor/aoti_torch/utils.h>
 
 namespace torch {
 namespace aot_inductor {
-template <typename T>
-struct ThreadLocalCachedOutputTensor;
-
-template <>
-struct ThreadLocalCachedOutputTensor<RAIIAtenTensorHandle> {
-  explicit ThreadLocalCachedOutputTensor(const RAIIAtenTensorHandle&) {}
-  void copy_data_from(const RAIIAtenTensorHandle& handle) {
-    throw std::runtime_error("can't happen");
-  }
-
-  AtenTensorHandle tensor() const {
-    throw std::runtime_error("can't happen");
-  }
-};
-
-template <>
-struct ThreadLocalCachedOutputTensor<AtenTensorHandle> {
-  explicit ThreadLocalCachedOutputTensor(const AtenTensorHandle&) {}
-  void copy_data_from(const AtenTensorHandle& handle) {
-    throw std::runtime_error("can't happen");
-  }
-
-  AtenTensorHandle tensor() const {
-    throw std::runtime_error("can't happen");
-  }
-};
-
-template <>
-struct ThreadLocalCachedOutputTensor<ConstantHandle> {
-  explicit ThreadLocalCachedOutputTensor(const ConstantHandle&) {}
-  void copy_data_from(const ConstantHandle& handle) {
-    throw std::runtime_error("can't happen");
-  }
-
-  AtenTensorHandle tensor() const {
-    throw std::runtime_error("can't happen");
-  }
-};
-
-template <typename T>
-struct ThreadLocalCachedOutputTensor<ArrayRefTensor<T>> {
-  explicit ThreadLocalCachedOutputTensor(const ArrayRefTensor<T>& t) {
-    realloc(t);
-  }
-
-  void copy_data_from(const ArrayRefTensor<T>& t) {
-    if (t.numel() > capacity_) {
-      realloc(t);
-    }
-    std::copy(t.data(), t.data() + t.numel(), storage_.get());
-  }
-
-  AtenTensorHandle tensor() const {
-    return tensor_.get();
-  }
-
- private:
-  void realloc(const ArrayRefTensor<T>& t) {
-    capacity_ = t.numel();
-    storage_ = std::make_unique<T[]>(t.numel());
-    AtenTensorHandle handle;
-    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_create_tensor_from_blob(
-        storage_.get(),
-        t.sizes().size(),
-        t.sizes().data(),
-        t.strides().data(),
-        0,
-        aoti_torch_dtype<std::remove_const_t<T>>(),
-        t.device_type(),
-        t.device_idx(),
-        &handle));
-    tensor_ = handle;
-  }
-
-  std::unique_ptr<T[]> storage_;
-  size_t capacity_ = 0;
-  RAIIAtenTensorHandle tensor_;
-};
-
-template <typename T>
-struct ThreadLocalCachedOutputArray;
-
-// Just needs to compile, doesn't need to do anything.
-template <>
-struct ThreadLocalCachedOutputArray<RAIIAtenTensorHandle> {
-  explicit ThreadLocalCachedOutputArray(const RAIIAtenTensorHandle&) {
-    throw std::runtime_error("can't happen");
-  }
-
-  // Not supported yet! We would need to put contiguous() or
-  // expect_contiguous() into the ABI.
-  void copy_data_from(const RAIIAtenTensorHandle&) {
-    throw std::runtime_error("can't happen");
-  }
-
-  template <typename U>
-  ArrayRefTensor<U> arrayref_tensor() const {
-    throw std::runtime_error("can't happen");
-  }
-};
-
-// Just needs to compile, doesn't need to do anything.
-template <>
-struct ThreadLocalCachedOutputArray<ConstantHandle> {
-  explicit ThreadLocalCachedOutputArray(const ConstantHandle&) {
-    throw std::runtime_error("can't happen");
-  }
-
-  // Not supported yet! We would need to put contiguous() or
-  // expect_contiguous() into the ABI.
-  void copy_data_from(const ConstantHandle&) {
-    throw std::runtime_error("can't happen");
-  }
-
-  template <typename U>
-  ArrayRefTensor<U> arrayref_tensor() const {
-    throw std::runtime_error("can't happen");
-  }
-};
-
-template <typename T>
-struct ThreadLocalCachedOutputArray<ArrayRefTensor<T>> {
-  explicit ThreadLocalCachedOutputArray(const ArrayRefTensor<T>& t) {}
-
-  template <
-      typename U,
-      std::enable_if_t<
-          std::is_same_v<std::remove_const_t<T>, std::remove_const_t<U>>,
-          bool> = true>
-  ArrayRefTensor<T> arrayref_tensor() const {
-    return tensor_;
-  }
-
-  void copy_data_from(const ArrayRefTensor<T>& t) {
-    if (t.numel() > capacity_) {
-      capacity_ = t.numel();
-      storage_ = std::make_unique<T[]>(capacity_);
-    }
-    std::copy(t.data(), t.data() + t.numel(), storage_.get());
-    tensor_ = t;
-    tensor_.set_arrayref(MiniArrayRef<T>(storage_.get(), t.numel()));
-  }
-
- private:
-  std::unique_ptr<T[]> storage_;
-  uint32_t capacity_ = 0;
-  ArrayRefTensor<T> tensor_;
-};
-
 template <typename T>
 void convert_output_to_handle(
     const ArrayRefTensor<T>& output,
@@ -225,18 +79,7 @@ void convert_handles_to_inputs(
 }
 
 template <typename T>
-const T& convert_arrayref_tensor_to_tensor(const T& t) {
-  return t;
-}
-
-template <typename T>
-RAIIAtenTensorHandle convert_arrayref_tensor_to_tensor(
-    const ArrayRefTensor<T>& art) {
-  return art.expensiveCopyToTensor();
-}
-
-template <typename T>
-void assert_numel(const ArrayRefTensor<T>& tensor, int64_t numel) {
+void assert_numel(const ArrayRefTensor<T>& tensor, uint64_t numel) {
   if (tensor.numel() != numel) {
     std::stringstream err;
     err << "incorrect numel for input tensor. expected " << numel << ", got " << tensor.numel();

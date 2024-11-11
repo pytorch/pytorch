@@ -57,8 +57,7 @@
 #include <ATen/ops/empty.h>
 #endif
 
-namespace at {
-namespace cpp_custom_type_hack {
+namespace at::cpp_custom_type_hack {
 
 template <typename T>
 [[deprecated(
@@ -108,5 +107,4 @@ create(std::unique_ptr<T> ptr, TensorOptions options) {
   return retval;
 }
 
-} // namespace cpp_custom_type_hack
-} // namespace at
+} // namespace at::cpp_custom_type_hack

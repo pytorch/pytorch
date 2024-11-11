@@ -1,8 +1,9 @@
+from __future__ import annotations
+
 import json
 import logging
-
 import math
-from typing import Dict, List, Optional, Sequence, Tuple, Union
+from typing import Sequence
 
 import torchgen.api.cpp as cpp
 from torchgen.context import native_function_manager
@@ -21,11 +22,12 @@ from torchgen.model import (
 )
 from torchgen.static_runtime import config
 
+
 logger: logging.Logger = logging.getLogger()
 
 
 def has_alias(
-    arguments: Sequence[Union[Argument, SelfArgument, TensorOptionsArguments]]
+    arguments: Sequence[Argument | SelfArgument | TensorOptionsArguments],
 ) -> bool:
     for arg in arguments:
         annotation = getattr(arg, "annotation", None)
@@ -222,11 +224,22 @@ BLOCKED_OPS = frozenset(
         "special_spherical_bessel_j0",
         "_foobar",
         "_nested_tensor_strides",
+        "_nested_tensor_storage_offsets",
+        "_nested_get_values",  # no CPU backend
+        "_nested_get_values_copy",  # no CPU backend
+        "_nested_view_from_jagged",  # testing needs to be patched
+        "_nested_view_from_jagged_copy",  # testing needs to be patched
+        "_nested_view_from_buffer",  # testing needs to be patched
+        "_nested_view_from_buffer_copy",  # testing needs to be patched
+        "_int_mm",  # testing needs to be patched
+        "_to_sparse_csc",  # testing needs to be patched
+        "_to_sparse_csr",  # testing needs to be patched
+        "segment_reduce",  # testing needs to be patched
     )
 )
 
 
-def is_supported(g: Union[NativeFunctionsGroup, NativeFunctionsViewGroup]) -> bool:
+def is_supported(g: NativeFunctionsGroup | NativeFunctionsViewGroup) -> bool:
     base_op_name = ""
     func = None
     if isinstance(g, NativeFunctionsViewGroup):
@@ -287,8 +300,8 @@ def is_supported(g: Union[NativeFunctionsGroup, NativeFunctionsViewGroup]) -> bo
 
 
 def ivalue_type_conversion_method(
-    arg_type: Union[BaseType, OptionalType, Type]
-) -> Optional[Tuple[bool, str]]:
+    arg_type: BaseType | OptionalType | Type,
+) -> tuple[bool, str] | None:
     """
     Return the method call expression of `c10::ivalue' to convert its contained value to
     the expected value of `arg_type` type. For example, for `arg_type` == BaseTy.Tensor,
@@ -383,7 +396,7 @@ def test_tensor_dim(op_name: str) -> int:
 
 
 test_tensor_shapes_string = '{"view_as_complex": "{2, 2}"}'
-test_tensor_shape_json: Dict[str, str] = json.loads(test_tensor_shapes_string)
+test_tensor_shape_json: dict[str, str] = json.loads(test_tensor_shapes_string)
 
 
 def test_tensor_shape(op_name: str) -> str:
@@ -394,7 +407,7 @@ def test_tensor_shape(op_name: str) -> str:
 
 
 def test_value_expression(
-    arg_type: Union[BaseType, OptionalType, Type], index: int, op_name: str
+    arg_type: BaseType | OptionalType | Type, index: int, op_name: str
 ) -> str:
     tensor_size_ex = test_tensor_shape(op_name)
     if tensor_size_ex == "":
@@ -402,7 +415,7 @@ def test_value_expression(
         num_dim = test_tensor_dim(op_name)
         size_per_dim = math.ceil(num_tensors / float(num_dim))
         size_per_dim += size_per_dim % 2
-        tensor_size_ex = "{%s}" % (",".join([f"{size_per_dim}"] * num_dim))
+        tensor_size_ex = "{{{}}}".format(",".join([f"{size_per_dim}"] * num_dim))
     if should_use_int_tensor(op_name):
         tensor_expression = f"at::randint(1, 100, {tensor_size_ex}, at::kInt)"
     elif should_use_complex_tensor(op_name):
@@ -464,8 +477,8 @@ generate_test_ir_arguments_base_ty_to_type_str_ = {
 
 def generate_test_ir_arguments(
     schema: FunctionSchema,
-) -> List[Tuple[str, Optional[str]]]:
-    def ir_argument(arg: Argument) -> Tuple[str, Optional[str]]:
+) -> list[tuple[str, str | None]]:
+    def ir_argument(arg: Argument) -> tuple[str, str | None]:
         t = arg.type
         add_optional = False
         if isinstance(t, OptionalType):
@@ -610,7 +623,7 @@ REGISTER_OPERATOR_FUNCTOR(
       {body}
       LogAndDumpSchema(n);
       return nullptr;
-    }});
+    }})
 """
         return generated
 

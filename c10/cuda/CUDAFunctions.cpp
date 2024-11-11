@@ -1,5 +1,6 @@
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/WaitCounter.h>
 
 #include <limits>
 
@@ -22,7 +23,7 @@ int device_count_impl(bool fail_if_no_driver) {
   // Clear out the error state, so we don't spuriously trigger someone else.
   // (This shouldn't really matter, since we won't be running very much CUDA
   // code in this regime.)
-  cudaError_t last_err C10_UNUSED = cudaGetLastError();
+  [[maybe_unused]] cudaError_t last_err = cudaGetLastError();
   switch (err) {
     case cudaErrorNoDevice:
       // Zero devices is ok here
@@ -117,24 +118,28 @@ DeviceIndex device_count_ensure_non_zero() {
   int count = device_count_impl(/*fail_if_no_driver=*/true);
   // Zero gpus doesn't produce a warning in `device_count` but we fail here
   TORCH_CHECK(count, "No CUDA GPUs are available");
+  TORCH_INTERNAL_ASSERT(
+      count <= std::numeric_limits<DeviceIndex>::max(),
+      "Too many CUDA devices, DeviceIndex overflowed");
   return static_cast<DeviceIndex>(count);
 }
 
 DeviceIndex current_device() {
-  int cur_device = 0;
+  DeviceIndex cur_device = -1;
   C10_CUDA_CHECK(c10::cuda::GetDevice(&cur_device));
-  return static_cast<DeviceIndex>(cur_device);
+  return cur_device;
 }
 
 void set_device(DeviceIndex device) {
-  C10_CUDA_CHECK(c10::cuda::SetDevice(static_cast<int>(device)));
+  C10_CUDA_CHECK(c10::cuda::SetDevice(device));
 }
 
 void device_synchronize() {
   const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
   if (C10_UNLIKELY(interp)) {
-    (*interp)->trace_gpu_device_synchronization();
+    (*interp)->trace_gpu_device_synchronization(c10::kCUDA);
   }
+  STATIC_SCOPED_WAIT_COUNTER(pytorch.wait_counter.cuda_device_synchronize);
   C10_CUDA_CHECK(cudaDeviceSynchronize());
 }
 
@@ -148,7 +153,7 @@ void warn_or_error_on_sync() {
   }
 }
 
-c10::optional<DeviceIndex> getDeviceIndexWithPrimaryContext() {
+std::optional<DeviceIndex> getDeviceIndexWithPrimaryContext() {
   // check current device first
   auto current_device_index = current_device();
   if (current_device_index >= 0) {
@@ -163,14 +168,14 @@ c10::optional<DeviceIndex> getDeviceIndexWithPrimaryContext() {
       return device_index;
     }
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 namespace _internal {
-bool dummyHasPrimaryContext(C10_UNUSED DeviceIndex device_index) {
+bool dummyHasPrimaryContext([[maybe_unused]] DeviceIndex device_index) {
   TORCH_CHECK(false, "Should never been called");
 }
-bool (*hasPrimaryContext)(DeviceIndex) = dummyHasPrimaryContext;
+static bool (*hasPrimaryContext)(DeviceIndex) = dummyHasPrimaryContext;
 
 // Private api to be called from CUDAHooks.cpp
 C10_CUDA_API void setHasPrimaryContext(bool (*func)(DeviceIndex)) {
@@ -205,18 +210,28 @@ cudaError_t GetDeviceCount(int* dev_count) {
 // call y = torch.empty(1, device=“cuda”) # CUDA context is created on cuda:0
 // ```
 #if CUDA_VERSION >= 12000
-thread_local int targetDeviceIndex = -1;
+thread_local static DeviceIndex targetDeviceIndex = -1;
 
-cudaError_t GetDevice(int* device) {
+cudaError_t GetDevice(DeviceIndex* device) {
   if (targetDeviceIndex >= 0) {
     *device = targetDeviceIndex;
     return cudaSuccess;
   }
-  return cudaGetDevice(device);
+  int tmp_device = -1;
+  auto err = cudaGetDevice(&tmp_device);
+  if (err == cudaSuccess) {
+    TORCH_INTERNAL_ASSERT(
+        tmp_device >= 0 &&
+            tmp_device <= std::numeric_limits<DeviceIndex>::max(),
+        "cudaGetDevice returns invalid device ",
+        tmp_device);
+    *device = static_cast<DeviceIndex>(tmp_device);
+  }
+  return err;
 }
 
-cudaError_t SetDevice(int device) {
-  TORCH_CHECK(device >= 0, "device id must be positive!");
+cudaError_t SetDevice(DeviceIndex device) {
+  TORCH_CHECK(device >= 0, "device id must be positive!", device);
   targetDeviceIndex = -1;
   int cur_device = -1;
   C10_CUDA_CHECK(cudaGetDevice(&cur_device));
@@ -226,7 +241,7 @@ cudaError_t SetDevice(int device) {
   return cudaSetDevice(device);
 }
 
-cudaError_t MaybeSetDevice(int device) {
+cudaError_t MaybeSetDevice(DeviceIndex device) {
   if (hasPrimaryContext(device)) {
     return c10::cuda::SetDevice(device);
   }
@@ -236,11 +251,13 @@ cudaError_t MaybeSetDevice(int device) {
 
 // This function always initializes the CUDA context
 // on to_device
-int ExchangeDevice(int to_device) {
-  int cur_device = targetDeviceIndex;
+DeviceIndex ExchangeDevice(DeviceIndex to_device) {
+  auto cur_device = targetDeviceIndex;
   targetDeviceIndex = -1;
   if (cur_device < 0) {
-    C10_CUDA_CHECK(cudaGetDevice(&cur_device));
+    int tmp_device = -1;
+    C10_CUDA_CHECK(cudaGetDevice(&tmp_device));
+    cur_device = static_cast<DeviceIndex>(tmp_device);
     if (to_device == cur_device) {
       return cur_device;
     }
@@ -251,10 +268,16 @@ int ExchangeDevice(int to_device) {
 
 // This function does not initialize the CUDA context
 // on to_device if it does not already exist
-int MaybeExchangeDevice(int to_device) {
-  int cur_device = -1;
-  C10_CUDA_CHECK(cudaGetDevice(&cur_device));
-  if (to_device == cur_device) {
+DeviceIndex MaybeExchangeDevice(DeviceIndex to_device) {
+  int tmp_cur_device = -1;
+  C10_CUDA_CHECK(cudaGetDevice(&tmp_cur_device));
+  TORCH_INTERNAL_ASSERT(
+      tmp_cur_device >= 0 &&
+          tmp_cur_device <= std::numeric_limits<DeviceIndex>::max(),
+      "cudaGetDevice returns invalid device ",
+      tmp_cur_device);
+  auto cur_device = static_cast<DeviceIndex>(tmp_cur_device);
+  if (to_device == tmp_cur_device) {
     return cur_device;
   }
   if (hasPrimaryContext(to_device)) {
@@ -271,12 +294,22 @@ void SetTargetDevice() {
   }
 }
 #else
-cudaError_t GetDevice(int* device) {
-  return cudaGetDevice(device);
+cudaError_t GetDevice(DeviceIndex* device) {
+  int tmp_device = -1;
+  auto err = cudaGetDevice(&tmp_device);
+  if (err == cudaSuccess) {
+    TORCH_INTERNAL_ASSERT(
+        tmp_device >= 0 &&
+            tmp_device <= std::numeric_limits<DeviceIndex>::max(),
+        "cudaGetDevice returns invalid device ",
+        tmp_device);
+    *device = static_cast<DeviceIndex>(tmp_device);
+  }
+  return err;
 }
 
-cudaError_t SetDevice(int device) {
-  TORCH_CHECK(device >= 0, "device id must be positive!");
+cudaError_t SetDevice(DeviceIndex device) {
+  TORCH_CHECK(device >= 0, "device id must be positive!", device);
   int cur_device = -1;
   C10_CUDA_CHECK(cudaGetDevice(&cur_device));
   if (device == cur_device) {
@@ -285,12 +318,12 @@ cudaError_t SetDevice(int device) {
   return cudaSetDevice(device);
 }
 
-cudaError_t MaybeSetDevice(int device) {
+cudaError_t MaybeSetDevice(DeviceIndex device) {
   return c10::cuda::SetDevice(device);
 }
 
-int ExchangeDevice(int to_device) {
-  int cur_device = -1;
+DeviceIndex ExchangeDevice(DeviceIndex to_device) {
+  DeviceIndex cur_device = -1;
   C10_CUDA_CHECK(c10::cuda::GetDevice(&cur_device));
   if (to_device == cur_device) {
     return cur_device;
@@ -299,7 +332,7 @@ int ExchangeDevice(int to_device) {
   return cur_device;
 }
 
-int MaybeExchangeDevice(int to_device) {
+DeviceIndex MaybeExchangeDevice(DeviceIndex to_device) {
   return c10::cuda::ExchangeDevice(to_device);
 }
 

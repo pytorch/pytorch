@@ -2,6 +2,7 @@
 
 import copy
 import sys
+import unittest
 
 import torch
 import torch.distributed as dist
@@ -11,12 +12,14 @@ from torch.distributed.fsdp import ShardingStrategy
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
-    CUDAInitMode,
+    DEVICEInitMode,
     FSDPInitMode,
     FSDPTest,
     TransformerWithSharedParams,
 )
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
+from torch.testing._internal.inductor_utils import HAS_GPU
+
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -35,6 +38,7 @@ class TestCompile(FSDPTest):
     def world_size(self) -> int:
         return torch.cuda.device_count()
 
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     def test_compile(self):
         self.run_subtests(
@@ -71,7 +75,7 @@ class TestCompile(FSDPTest):
         base_model = TransformerWithSharedParams.init(
             self.process_group,
             FSDPInitMode.NO_FSDP,
-            CUDAInitMode.CUDA_BEFORE,
+            DEVICEInitMode.DEVICE_BEFORE,
             deterministic=True,
         )
         ref_model = fully_shard(copy.deepcopy(base_model), **fsdp_kwargs)

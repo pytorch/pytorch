@@ -1,49 +1,31 @@
+# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import functools
 import inspect
+import math
 import sys
 import typing
 import warnings
-from typing import (
-    Any,
-    Callable,
-    List,
-    Literal,
-    NoReturn,
-    Optional,
-    Sequence,
-    Set,
-    Tuple,
-    Union,
-)
+from typing import Any, Callable, Literal, NoReturn, Sequence, TypeVar as _TypeVar
+from typing_extensions import Concatenate as _Concatenate, ParamSpec as _ParamSpec
 
 import torch
 import torch._C._onnx as _C_onnx
 from torch import _C
 
 # Monkey-patch graph manipulation methods on Graph, used for the ONNX symbolics
-from torch.onnx import _constants, _type_utils, errors
+from torch.onnx import _constants, _type_utils, errors, utils
 from torch.onnx._globals import GLOBALS
-from torch.onnx._internal import _beartype, jit_utils
-from torch.types import Number
+from torch.onnx._internal import jit_utils
 
-__all__ = [
-    "args_have_same_dtype",
-    "cast_pytorch_to_onnx",
-    "check_training_mode",
-    "dequantize_helper",
-    "is_caffe2_aten_fallback",
-    "is_complex_value",
-    "parse_args",
-    "pytorch_name_to_type",
-    "quantize_helper",
-    "quantized_args",
-    "requantize_bias_helper",
-    "scalar_name_to_pytorch",
-    "scalar_type_to_onnx",
-    "scalar_type_to_pytorch_type",
-]
+
+if typing.TYPE_CHECKING:
+    from torch.types import Number
+
+_T = _TypeVar("_T")
+_U = _TypeVar("_U")
+_P = _ParamSpec("_P")
 
 # ---------------------------------------------------------------------------------
 # Helper functions
@@ -62,12 +44,11 @@ _ValueDescriptor = Literal[
 ]
 
 
-@_beartype.beartype
 def _parse_arg(
     value,
     desc: _ValueDescriptor,
-    arg_name: Optional[str] = None,
-    node_name: Optional[str] = None,
+    arg_name: str | None = None,
+    node_name: str | None = None,
 ):
     if desc == "none":
         return value
@@ -132,7 +113,6 @@ def _parse_arg(
     )
 
 
-@_beartype.beartype
 def _node_get(node: _C.Node, key: str):
     """Gets attributes of a node which is polymorphic over return type."""
     assert isinstance(node, _C.Node)
@@ -140,15 +120,13 @@ def _node_get(node: _C.Node, key: str):
     return getattr(node, sel)(key)
 
 
-@_beartype.beartype
 def _is_onnx_constant(value: _C.Value):
     """Whether a Value is an ONNX constant."""
     return value.node().kind() == "onnx::Constant"
 
 
-@_beartype.beartype
 def _maybe_get_const(
-    value: Optional[Union[_C.Value, torch.Tensor, Number, Sequence]],
+    value: _C.Value | torch.Tensor | Number | Sequence | None,
     descriptor: _ValueDescriptor,
 ):
     # NOTE: prim::Constant at this stage usually means something not compatible in ONNX,
@@ -159,7 +137,6 @@ def _maybe_get_const(
     return value
 
 
-@_beartype.beartype
 def _maybe_get_scalar(value):
     value_t = _maybe_get_const(value, "t")
     if isinstance(value_t, torch.Tensor) and value_t.shape == ():
@@ -167,7 +144,6 @@ def _maybe_get_scalar(value):
     return value
 
 
-@_beartype.beartype
 def _get_const(value, desc, arg_name):
     if not _is_constant(value):
         raise errors.SymbolicValueError(
@@ -178,8 +154,7 @@ def _get_const(value, desc, arg_name):
     return _parse_arg(value, desc)
 
 
-@_beartype.beartype
-def _unpack_list(list_value: _C.Value) -> List[_C.Value]:
+def _unpack_list(list_value: _C.Value) -> list[_C.Value]:
     list_node = list_value.node()
     if list_node.kind() != "prim::ListConstruct":
         raise errors.SymbolicValueError(
@@ -190,8 +165,7 @@ def _unpack_list(list_value: _C.Value) -> List[_C.Value]:
     return list(list_node.inputs())
 
 
-@_beartype.beartype
-def _unpack_tuple(tuple_value: _C.Value) -> Tuple[_C.Value, ...]:
+def _unpack_tuple(tuple_value: _C.Value) -> tuple[_C.Value, ...]:
     tuple_node = tuple_value.node()
     if not _is_tuple_construct(tuple_value):
         raise errors.SymbolicValueError(
@@ -202,8 +176,7 @@ def _unpack_tuple(tuple_value: _C.Value) -> Tuple[_C.Value, ...]:
     return tuple(tuple_node.inputs())
 
 
-@_beartype.beartype
-def _unpack_quantized_tensor(tuple_value: _C.Value) -> Tuple[_C.Value, ...]:
+def _unpack_quantized_tensor(tuple_value: _C.Value) -> tuple[_C.Value, ...]:
     """Unpacks a quantized tensor into a tuple of tensor and scale/zero_point.
     Args:
         tuple_value: A tuple of tensor, scale, zero_point, and optionally axis.
@@ -226,13 +199,13 @@ def _unpack_quantized_tensor(tuple_value: _C.Value) -> Tuple[_C.Value, ...]:
 
 # Check if list_value is output from prim::ListConstruct
 # This is usually called before _unpack_list to ensure the list can be unpacked.
-@_beartype.beartype
 def _is_packed_list(list_value: Any) -> bool:
     return _is_value(list_value) and list_value.node().kind() == "prim::ListConstruct"
 
 
-@_beartype.beartype
-def parse_args(*arg_descriptors: _ValueDescriptor):
+def parse_args(
+    *arg_descriptors: _ValueDescriptor,
+) -> Callable[[Callable[_Concatenate[_U, _P], _T]], Callable[_Concatenate[_U, _P], _T]]:
     """A decorator which converts args from torch._C.Value to built-in types.
 
     For example:
@@ -260,11 +233,13 @@ def parse_args(*arg_descriptors: _ValueDescriptor):
             "none": the variable is unused
     """
 
-    def decorator(fn):
-        fn._arg_descriptors = arg_descriptors
+    def decorator(
+        fn: Callable[_Concatenate[_U, _P], _T],
+    ) -> Callable[_Concatenate[_U, _P], _T]:
+        fn._arg_descriptors = arg_descriptors  # type: ignore[attr-defined]
 
         @functools.wraps(fn)
-        def wrapper(g, *args, **kwargs):
+        def wrapper(g: _U, *args: _P.args, **kwargs: _P.kwargs) -> _T:
             # some args may be optional, so the length may be smaller
             FILE_BUG_MSG = (
                 "If you believe this is not due to custom symbolic implementation within your code or "
@@ -287,7 +262,7 @@ def parse_args(*arg_descriptors: _ValueDescriptor):
                 arg_names = [None] * len(args)  # type: ignore[list-item]
                 fn_name = None
             args = [
-                _parse_arg(arg, arg_desc, arg_name, fn_name)  # type: ignore[assignment]
+                _parse_arg(arg, arg_desc, arg_name, fn_name)  # type: ignore[method-assign]
                 for arg, arg_desc, arg_name in zip(args, arg_descriptors, arg_names)
             ]
             # only support _outputs in kwargs
@@ -310,13 +285,12 @@ def parse_args(*arg_descriptors: _ValueDescriptor):
     return decorator
 
 
-@_beartype.beartype
 def quantized_args(
     *arg_q_descriptors: bool,
-    scale: Optional[float] = None,
-    zero_point: Optional[int] = None,
+    scale: float | None = None,
+    zero_point: int | None = None,
     quantize_output: bool = True,
-):
+) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
     """A decorator which extends support for quantized version of the base operator.
 
     Quantization is detected by examining the arguments that are annotated by
@@ -382,7 +356,7 @@ def quantized_args(
                 return descriptor and _is_value(arg) and _is_tuple_construct(arg)
 
             # Run regular symbolic function if none of the argument is QTensor.
-            is_quantized = list()
+            is_quantized = []
             for descriptor, arg in descriptor_args:
                 # ListConstruct
                 if _is_packed_list(arg):
@@ -447,15 +421,13 @@ def quantized_args(
     return decorator
 
 
-@_beartype.beartype
-def _scalar(x: Any) -> Optional[Number]:
+def _scalar(x: Any) -> Number | None:
     """Convert a scalar tensor into a Python value."""
     if isinstance(x, torch.Tensor) and x.shape == ():
         return x.item()
     return None
 
 
-@_beartype.beartype
 def _if_scalar_type_as(self, tensor):
     """
     Convert self into the same type of tensor, as necessary.
@@ -475,17 +447,14 @@ def _if_scalar_type_as(self, tensor):
     return self
 
 
-@_beartype.beartype
 def _is_none(x: Any) -> bool:
     return x is None or (x.node().mustBeNone() if isinstance(x, _C.Value) else False)
 
 
-@_beartype.beartype
 def _is_value(x: Any) -> bool:
     return isinstance(x, _C.Value)
 
 
-@_beartype.beartype
 def _is_constant(value: Any) -> bool:
     return not _is_value(value) or value.node().kind() in {
         "onnx::Constant",
@@ -493,24 +462,21 @@ def _is_constant(value: Any) -> bool:
     }
 
 
-@_beartype.beartype
 def _is_tensor(x: _C.Value) -> bool:
     return x.type().isSubtypeOf(_C.TensorType.get())
 
 
 # Note: _C.JitType is not exposed to Python and cannot be checked in runtime.
-def _as_list_type(jit_type: _C.JitType) -> Optional[_C.ListType]:
+def _as_list_type(jit_type: _C.JitType) -> _C.ListType | None:
     if isinstance(jit_type, _C.ListType):
         return jit_type
     return None
 
 
-@_beartype.beartype
 def _is_list(x: _C.Value) -> bool:
     return _as_list_type(x.type()) is not None
 
 
-@_beartype.beartype
 def _is_tensor_list(x: _C.Value) -> bool:
     x_type = _as_list_type(x.type())
     if x_type is None:
@@ -518,7 +484,6 @@ def _is_tensor_list(x: _C.Value) -> bool:
     return isinstance(x_type.getElementType(), _C.TensorType)
 
 
-@_beartype.beartype
 def _is_scalar_list(x: _C.Value) -> bool:
     """Checks if x is a scalar list, for example: List[float], List[int].
 
@@ -532,12 +497,10 @@ def _is_scalar_list(x: _C.Value) -> bool:
     return scalar_type.onnx_compatible()
 
 
-@_beartype.beartype
 def _is_tuple_construct(x: _C.Value) -> bool:
     return x.node().kind() == "prim::TupleConstruct"
 
 
-@_beartype.beartype
 def is_complex_value(x: _C.Value) -> bool:
     assert _is_value(x)
     return _type_utils.JitScalarType.from_value(
@@ -549,16 +512,7 @@ def is_complex_value(x: _C.Value) -> bool:
     }
 
 
-@_beartype.beartype
-def is_caffe2_aten_fallback() -> bool:
-    return (
-        GLOBALS.operator_export_type == _C_onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK
-        and _C_onnx._CAFFE2_ATEN_FALLBACK
-    )
-
-
-@_beartype.beartype
-def _get_tensor_rank(x: _C.Value) -> Optional[int]:
+def _get_tensor_rank(x: _C.Value) -> int | None:
     if not _is_tensor(x) or x.type() is None:
         return None
     x_type = x.type()
@@ -566,7 +520,6 @@ def _get_tensor_rank(x: _C.Value) -> Optional[int]:
     return x_type.dim()
 
 
-@_beartype.beartype
 def _get_tensor_sizes(x: _C.Value, allow_nonstatic: bool = True):
     if not _is_tensor(x) or x.type() is None:
         return None
@@ -581,14 +534,12 @@ def _get_tensor_sizes(x: _C.Value, allow_nonstatic: bool = True):
     return x_type.sizes()
 
 
-@_beartype.beartype
-def _get_tensor_dim_size(x: _C.Value, dim: int) -> Optional[int]:
+def _get_tensor_dim_size(x: _C.Value, dim: int) -> int | None:
     sizes = _get_tensor_sizes(x)
     return sizes[dim] if sizes else None
 
 
-@_beartype.beartype
-def _get_dim_for_cross(x: _C.Value, dim: Optional[int]):
+def _get_dim_for_cross(x: _C.Value, dim: int | None):
     if dim == -1:
         tensor_rank = _get_tensor_rank(x)
         assert tensor_rank is not None
@@ -603,17 +554,13 @@ def _get_dim_for_cross(x: _C.Value, dim: Optional[int]):
     return dim
 
 
-@_beartype.beartype
-def _unimplemented(op: str, msg: str, value: Optional[_C.Value] = None) -> None:
+def _unimplemented(op: str, msg: str, value: _C.Value | None = None) -> None:
     # For BC reasons, the behavior for Caffe2 does not raise exception for unimplemented operators
-    if _C_onnx._CAFFE2_ATEN_FALLBACK:
-        warnings.warn(f"ONNX export failed on {op} because {msg} not supported")
-    elif GLOBALS.operator_export_type == _C_onnx.OperatorExportTypes.ONNX:
+    if GLOBALS.operator_export_type == _C_onnx.OperatorExportTypes.ONNX:
         _onnx_unsupported(f"{op}, {msg}", value)
 
 
-@_beartype.beartype
-def _onnx_unsupported(op_name: str, value: Optional[_C.Value] = None) -> NoReturn:
+def _onnx_unsupported(op_name: str, value: _C.Value | None = None) -> NoReturn:
     message = (
         f"Unsupported: ONNX export of operator {op_name}. "
         f"Please feel free to request support or submit a pull request "
@@ -627,12 +574,11 @@ def _onnx_unsupported(op_name: str, value: Optional[_C.Value] = None) -> NoRetur
     raise errors.OnnxExporterError(message)
 
 
-@_beartype.beartype
 def _onnx_opset_unsupported(
     op_name: str,
     current_opset: int,
     supported_opset: int,
-    value: Optional[_C.Value] = None,
+    value: _C.Value | None = None,
 ) -> NoReturn:
     message = (
         f"Unsupported: ONNX export of {op_name} in opset {current_opset}. "
@@ -646,13 +592,12 @@ def _onnx_opset_unsupported(
     raise errors.OnnxExporterError(message)
 
 
-@_beartype.beartype
 def _onnx_opset_unsupported_detailed(
     op_name: str,
     current_opset: int,
     supported_opset: int,
     reason: str,
-    value: Optional[_C.Value] = None,
+    value: _C.Value | None = None,
 ) -> NoReturn:
     message = (
         f"Unsupported: ONNX export of {op_name} in "
@@ -666,7 +611,6 @@ def _onnx_opset_unsupported_detailed(
     raise errors.OnnxExporterError(message)
 
 
-@_beartype.beartype
 def _block_list_in_opset(name: str):
     def symbolic_fn(*args, **kwargs):
         raise errors.OnnxExporterError(
@@ -678,8 +622,7 @@ def _block_list_in_opset(name: str):
     return symbolic_fn
 
 
-@_beartype.beartype
-def _try_get_scalar_type(*args) -> Optional[_type_utils.JitScalarType]:
+def _try_get_scalar_type(*args) -> _type_utils.JitScalarType | None:
     for arg in args:
         scalar_type = _type_utils.JitScalarType.from_value(
             arg, _type_utils.JitScalarType.UNDEFINED
@@ -689,7 +632,34 @@ def _try_get_scalar_type(*args) -> Optional[_type_utils.JitScalarType]:
     return None
 
 
-@_beartype.beartype
+def _type_promote_from_values(*args) -> _type_utils.JitScalarType:
+    undef = _type_utils.JitScalarType.UNDEFINED
+    jit_types = [_try_get_scalar_type(arg) for arg in args]
+    if len(jit_types) == 0:
+        return undef
+    if len(jit_types) == 1:
+        return jit_types[0]  # type: ignore[return-value]
+    new_dtype = jit_types[0].dtype()  # type: ignore[union-attr]
+    for t in jit_types:
+        new_dtype = torch.promote_types(new_dtype, t.dtype())  # type: ignore[union-attr]
+    return _type_utils.JitScalarType.from_dtype(new_dtype)
+
+
+def _maybe_cast_to_type(
+    g: jit_utils.GraphContext, value, jit_type: _type_utils.JitScalarType
+):
+    if (
+        _type_utils.JitScalarType.from_value(value, _type_utils.JitScalarType.UNDEFINED)
+        != jit_type
+    ):
+        return g.op(
+            "Cast",
+            value,
+            to_i=jit_type.onnx_type(),
+        )
+    return value
+
+
 def _select_helper(g: jit_utils.GraphContext, self, dim, index, apply_reshape=True):
     index_const = _maybe_get_scalar(index)
     index_dim = _get_tensor_rank(index)
@@ -714,7 +684,6 @@ def _select_helper(g: jit_utils.GraphContext, self, dim, index, apply_reshape=Tr
     return g.op("Gather", self, index, axis_i=dim)
 
 
-@_beartype.beartype
 def _slice_helper(
     g: jit_utils.GraphContext,
     input,
@@ -733,7 +702,6 @@ def _slice_helper(
         return _slice10(g, input, axes, starts, ends, steps)
 
 
-@_beartype.beartype
 def _is_fp(value) -> bool:
     return _type_utils.JitScalarType.from_value(
         value, _type_utils.JitScalarType.UNDEFINED
@@ -745,14 +713,12 @@ def _is_fp(value) -> bool:
     }
 
 
-@_beartype.beartype
 def _is_bool(value) -> bool:
     return _type_utils.JitScalarType.from_value(
         value, _type_utils.JitScalarType.UNDEFINED
     ) in {_type_utils.JitScalarType.BOOL}
 
 
-@_beartype.beartype
 def _generate_wrapped_number(g: jit_utils.GraphContext, scalar):
     """Creates a wrapped number based on https://github.com/pytorch/pytorch/issues/9515.
 
@@ -771,7 +737,6 @@ def _generate_wrapped_number(g: jit_utils.GraphContext, scalar):
     return g.op("Constant", value_t=torch.tensor(scalar))
 
 
-@_beartype.beartype
 def _sort_helper(g: jit_utils.GraphContext, input, dim, decending=True, out=None):
     if out is not None:
         _unimplemented("Sort", "Out parameter is not supported")
@@ -791,7 +756,6 @@ def _sort_helper(g: jit_utils.GraphContext, input, dim, decending=True, out=None
         )
 
 
-@_beartype.beartype
 def _topk_helper(
     g: jit_utils.GraphContext, input, k, dim, largest=True, sorted=False, out=None
 ):
@@ -813,7 +777,6 @@ def _topk_helper(
         )
 
 
-@_beartype.beartype
 def _lt_helper(g: jit_utils.GraphContext, input, other):
     if g.opset <= 8:
         from torch.onnx.symbolic_opset8 import lt as _lt8
@@ -825,7 +788,6 @@ def _lt_helper(g: jit_utils.GraphContext, input, other):
         return _lt9(g, input, other)
 
 
-@_beartype.beartype
 def _interpolate_warning(interpolate_mode):
     onnx_op = (
         "onnx:Resize" if GLOBALS.export_onnx_opset_version >= 10 else "onnx:Upsample"
@@ -843,9 +805,11 @@ def _interpolate_warning(interpolate_mode):
     )
 
 
-@_beartype.beartype
 def _unsqueeze_helper(g: jit_utils.GraphContext, input, axes_i):
-    if _is_constant(axes_i[0]):
+    if len(axes_i) == 0:
+        # unnecessary unsqueeze if axes length==0
+        return input
+    elif _is_constant(axes_i[0]):
         if g.opset >= 13:
             axes = g.op("Constant", value_t=torch.tensor(axes_i, dtype=torch.long))
             return g.op("Unsqueeze", input, axes)
@@ -858,7 +822,6 @@ def _unsqueeze_helper(g: jit_utils.GraphContext, input, axes_i):
     return g.op("Unsqueeze", input, axes_i[0])
 
 
-@_beartype.beartype
 def _squeeze_helper(g: jit_utils.GraphContext, input, axes_i):
     if _is_constant(axes_i[0]):
         if g.opset >= 13:
@@ -884,7 +847,6 @@ def _squeeze_helper(g: jit_utils.GraphContext, input, axes_i):
     return g.op("Squeeze", input, axes_t)
 
 
-@_beartype.beartype
 def _reducesum_helper(
     g: jit_utils.GraphContext,
     input,
@@ -916,7 +878,6 @@ def _reducesum_helper(
         return g.op("ReduceSum", input, axes_i=axes_i, keepdims_i=keepdims_i)
 
 
-@_beartype.beartype
 def _interpolate_size_to_scales(g: jit_utils.GraphContext, input, output_size, dim):
     output_size = _maybe_get_const(output_size, "is")
     if _is_value(output_size):
@@ -943,7 +904,6 @@ def _interpolate_size_to_scales(g: jit_utils.GraphContext, input, output_size, d
     return scales
 
 
-@_beartype.beartype
 def _interpolate_get_scales_if_available(g: jit_utils.GraphContext, scales):
     available_scales = _maybe_get_const(scales[0], "fs") != -1 and not _is_none(
         scales[0]
@@ -960,7 +920,6 @@ def _interpolate_get_scales_if_available(g: jit_utils.GraphContext, scales):
     return scales
 
 
-@_beartype.beartype
 def _get_interpolate_attributes(g: jit_utils.GraphContext, mode, args):
     if mode == "nearest":
         align_corners = None
@@ -972,7 +931,6 @@ def _get_interpolate_attributes(g: jit_utils.GraphContext, mode, args):
     return scales, align_corners
 
 
-@_beartype.beartype
 def _interpolate_get_scales(g: jit_utils.GraphContext, scale_factor, dim):
     offsets = g.op("Constant", value_t=torch.ones(2, dtype=torch.float32))
     scale_factor_rank = _get_tensor_rank(scale_factor)
@@ -990,7 +948,6 @@ def _interpolate_get_scales(g: jit_utils.GraphContext, scale_factor, dim):
     return scale_factor
 
 
-@_beartype.beartype
 def _interpolate_get_scales_and_mode(
     g: jit_utils.GraphContext, input, size, scale_factor, mode, align_corners
 ):
@@ -1026,7 +983,6 @@ def _interpolate_get_scales_and_mode(
     return scale_factor, mode
 
 
-@_beartype.beartype
 def _argmin_argmax_helper(
     g: jit_utils.GraphContext,
     input: torch._C.Value,
@@ -1065,7 +1021,6 @@ def _argmin_argmax_helper(
     return op_wrapper(input, axis_i=dim, keepdims_i=keepdim)
 
 
-@_beartype.beartype
 def _interpolate_helper(name, dim, interpolate_mode):
     @quantized_args(True, False, False)
     def symbolic_fn(g, input, output_size, *args):
@@ -1133,7 +1088,6 @@ def _interpolate_helper(name, dim, interpolate_mode):
     return symbolic_fn
 
 
-@_beartype.beartype
 def __interpolate_helper(
     g: jit_utils.GraphContext,
     input,
@@ -1233,7 +1187,6 @@ def __interpolate_helper(
         )  # only valid when mode="nearest"
 
 
-@_beartype.beartype
 def _unbind_helper(g: jit_utils.GraphContext, self, dim, _outputs):
     if g.opset < 11:
         from torch.onnx.symbolic_opset9 import unbind
@@ -1244,7 +1197,6 @@ def _unbind_helper(g: jit_utils.GraphContext, self, dim, _outputs):
     return unbind(g, self, dim, _outputs)
 
 
-@_beartype.beartype
 def _scatter_helper(g: jit_utils.GraphContext, self, dim, index, src):
     if g.opset <= 10:
         from torch.onnx.symbolic_opset9 import scatter
@@ -1254,7 +1206,6 @@ def _scatter_helper(g: jit_utils.GraphContext, self, dim, index, src):
     return scatter(g, self, dim, index, src)
 
 
-@_beartype.beartype
 def _repeat_interleave_split_helper(g: jit_utils.GraphContext, self, reps, dim):
     if g.opset <= 12:
         split_out = g.op("Split", self, split_i=[1] * reps, axis_i=dim, outputs=reps)
@@ -1266,7 +1217,6 @@ def _repeat_interleave_split_helper(g: jit_utils.GraphContext, self, reps, dim):
     return split_out if reps > 1 else [split_out]
 
 
-@_beartype.beartype
 def _repeat_interleave_single_value_repeat_helper(
     g: jit_utils.GraphContext, self, repeats, dim
 ):
@@ -1288,7 +1238,7 @@ def _repeat_interleave_single_value_repeat_helper(
     # repeats_per_dim is 1 for all dims except for the new unsqueezed dim, where it has value 'repeats'.
     if const_repeats:
         # 'Repeats' is a constant, 'repeats_per_dim' can be a constant.
-        onehot = torch.ones(_get_tensor_rank(unsqueezed), dtype=torch.int64)
+        onehot = torch.ones(_get_tensor_rank(unsqueezed), dtype=torch.int64)  # type: ignore[arg-type]
         onehot[dim + 1] = reps
         repeats_per_dim = g.op("Constant", value_t=onehot)
     else:
@@ -1309,14 +1259,13 @@ def _repeat_interleave_single_value_repeat_helper(
     return flatten(g, tiled, dim, dim + 1)
 
 
-@_beartype.beartype
 def _arange_cast_helper(
     g: jit_utils.GraphContext, end, start=None, step=None, dtype=None
-) -> Tuple[
+) -> tuple[
     _type_utils.JitScalarType,
-    Optional[_C.Value],
-    Optional[_C.Value],
-    Optional[_C.Value],
+    _C.Value | None,
+    _C.Value | None,
+    _C.Value | None,
 ]:
     def _is_all_integral(scalars):
         for scalar in scalars:
@@ -1352,7 +1301,6 @@ def _arange_cast_helper(
     return scalar_type, end, start, step
 
 
-@_beartype.beartype
 def _arange_helper(g: jit_utils.GraphContext, *args):
     if g.opset <= 10:
         from torch.onnx.symbolic_opset9 import arange
@@ -1361,7 +1309,6 @@ def _arange_helper(g: jit_utils.GraphContext, *args):
     return arange(g, *args)
 
 
-@_beartype.beartype
 def _size_helper(g: jit_utils.GraphContext, self, dim):
     full_shape = g.op("Shape", self)
     from torch.onnx.symbolic_opset9 import select
@@ -1369,7 +1316,6 @@ def _size_helper(g: jit_utils.GraphContext, self, dim):
     return select(g, full_shape, g.op("Constant", value_t=torch.tensor([0])), dim)
 
 
-@_beartype.beartype
 def _index_fill_reshape_helper(g: jit_utils.GraphContext, self, dim, index):
     # 1. reshape index => [1, ..., 1, dim, 1, ..., 1]
     # 2. expand index => [..., dim, ...], same shape as self except for dim.
@@ -1405,7 +1351,6 @@ def _index_fill_reshape_helper(g: jit_utils.GraphContext, self, dim, index):
 # allowzero=1 indicates that if any value in the 'shape' input is set to zero,
 # the zero value is honored, similar to NumPy.
 # allowzero=1 is only supported for opset version >= 14.
-@_beartype.beartype
 def _reshape_helper(g: jit_utils.GraphContext, input, shape, allowzero=0):
     shape = _maybe_get_const(shape, "is")
     if not _is_value(shape):
@@ -1420,7 +1365,6 @@ def _reshape_helper(g: jit_utils.GraphContext, input, shape, allowzero=0):
         return g.op("Reshape", input, shape, allowzero_i=allowzero)
 
 
-@_beartype.beartype
 def _batchnorm_helper(
     g: jit_utils.GraphContext, input, weight, bias, running_mean, running_var
 ):
@@ -1478,21 +1422,19 @@ def _batchnorm_helper(
     return weight, bias, running_mean, running_var
 
 
-@_beartype.beartype
 def _avgpool_helper(
     tuple_fn: Callable[[Any], Sequence[int]],
-    padding: Union[int, Sequence[int]],
+    padding: int | Sequence[int],
     kernel_size,
     stride,
     divisor_override,
     name,
-) -> Tuple[int, ...]:
+) -> tuple[int, ...]:
     if divisor_override and divisor_override.node().kind() != "prim::Constant":
         _unimplemented(name, "divisor_override")
     return tuple(tuple_fn(padding))
 
 
-@_beartype.beartype
 def check_training_mode(op_train_mode: int, op_name: str) -> None:
     """Warns the user if the model's training mode and the export mode do not agree."""
     if GLOBALS.training_mode == _C_onnx.TrainingMode.PRESERVE:
@@ -1518,7 +1460,6 @@ def check_training_mode(op_train_mode: int, op_name: str) -> None:
     )
 
 
-@_beartype.beartype
 def _flatten_helper(g: jit_utils.GraphContext, input, start_dim, end_dim, dim):
     input_size = g.op("Shape", input)
     slice1 = _slice_helper(g, input_size, axes=[0], starts=[0], ends=[start_dim])
@@ -1539,7 +1480,6 @@ def _flatten_helper(g: jit_utils.GraphContext, input, start_dim, end_dim, dim):
     return _reshape_from_tensor(g, input, final_shape)
 
 
-@_beartype.beartype
 def _is_split_static(split_size_or_sizes, _outputs):
     if _outputs is None:
         return False
@@ -1551,14 +1491,12 @@ def _is_split_static(split_size_or_sizes, _outputs):
     return True
 
 
-@_beartype.beartype
 def _optional_input_placeholder_tensor(g):
     n = g.op("prim::Constant")
     n.setType(_C.OptionalType.ofTensor())
     return n
 
 
-@_beartype.beartype
 def _handle_reduce_dim_none(g: jit_utils.GraphContext, self, op_name):
     rank = _get_tensor_rank(self)
     if rank is not None and any(
@@ -1570,12 +1508,11 @@ def _handle_reduce_dim_none(g: jit_utils.GraphContext, self, op_name):
     return g.op(op_name, self, keepdims_i=0)
 
 
-@_beartype.beartype
 def dequantize_helper(
     g: jit_utils.GraphContext,
     qtensor: _C.Value,
-    qdtype: Optional[_C_onnx.TensorProtoDataType] = None,
-) -> Tuple[_C.Value, _C.Value, _C.Value, Optional[_C.Value]]:
+    qdtype: _C_onnx.TensorProtoDataType | None = None,
+) -> tuple[_C.Value, _C.Value, _C.Value, _C.Value | None]:
     """Appends to graph `g` ONNX nodes that dequantizes `qtensor` into `tensor`.
 
     Args:
@@ -1619,13 +1556,12 @@ def dequantize_helper(
     )
 
 
-@_beartype.beartype
 def quantize_helper(
     g: jit_utils.GraphContext,
     tensor: _C.Value,
     scale: _C.Value,
     zero_point: _C.Value,
-    axis: Optional[_C.Value] = None,
+    axis: _C.Value | None = None,
 ) -> _C.Value:
     """Appends to graph `g` ONNX nodes that quantizes `tensor` based on `scale`, `zero_point` and `axis`.
 
@@ -1681,7 +1617,6 @@ def quantize_helper(
     return g.op("prim::TupleConstruct", *args)
 
 
-@_beartype.beartype
 def requantize_bias_helper(
     g: jit_utils.GraphContext, bias, input_scale, weight_scale, axis=None
 ):
@@ -1704,7 +1639,6 @@ def requantize_bias_helper(
     return g.op("prim::TupleConstruct", q_bias, bias_scale, bias_zero_point, *axis_args)
 
 
-@_beartype.beartype
 def args_have_same_dtype(args):
     assert args
     base_dtype = _type_utils.JitScalarType.from_value(args[0])
@@ -1712,6 +1646,513 @@ def args_have_same_dtype(args):
         _type_utils.JitScalarType.from_value(elem) == base_dtype for elem in args
     )
     return has_same_dtype
+
+
+def _op_with_optional_float_cast(g: jit_utils.GraphContext, op_name, *args, **kwargs):
+    """Some PyTorch operators (e.g., Clip/Min/ReLU/Pad) are super set of ONNX in terms of data types.
+    This function maximizes the exportability of PyTorch-ONNX by allowing ONNX-unsupported PyTorch
+    operator data type. For example, `Cast<int>(Clip<float>(Cast<float>(INPUT)))` can be used to mimic
+    `Clip<int>(INPUT)` (opset version < 12).
+
+    Args:
+        g (torch._C.Graph): graph to write the ONNX representation into.
+        op_name (str): operator name in ONNX.
+        *args (tuple): operands to the operator.
+        **kwargs (dict): attributes to the operator along with "opset_before" (optional, None by default)
+            indicating the smallest opset version to trigger such casting behavior and "target_float_t"
+            (optional, torch.onnx.JitScalarType.FLOAT by default) indicating the data type of internal operator.
+
+    Returns:
+        Optional[torch._C.Value, Tuple[torch._C.Value, ...]]: output(s) of the operator.
+    """
+    opset_before = kwargs.pop("opset_before", None)
+    target_float_t = kwargs.pop("target_float_t", _type_utils.JitScalarType.FLOAT)
+
+    inputs = list(args)
+    dtype_0 = _type_utils.JitScalarType.from_value(inputs[0])
+
+    require_cast = not _is_fp(inputs[0]) and (
+        opset_before is None or GLOBALS.export_onnx_opset_version < opset_before
+    )
+
+    if require_cast:
+        for input in inputs:
+            if input.isCompleteTensor():
+                input_scalar_type = _type_utils.JitScalarType.from_value(input)
+                if input_scalar_type != dtype_0:
+                    raise errors.SymbolicValueError(
+                        f"Inputs of {op_name} must have same dtype."
+                        f"Got {dtype_0.scalar_name()} and {input_scalar_type.scalar_name()}",
+                        input,
+                    )
+        for i, input in enumerate(inputs):
+            if input.isCompleteTensor() and not _is_fp(input):
+                inputs[i] = g.op(
+                    "Cast",
+                    input,
+                    to_i=target_float_t.onnx_type(),
+                )
+
+    self = g.op(op_name, *inputs, **kwargs)
+
+    if require_cast:
+        self = g.op("Cast", self, to_i=dtype_0.onnx_type())
+
+    return self
+
+
+def _maybe_cast_reduce_op_input(g: jit_utils.GraphContext, self):
+    scalar_type = _type_utils.JitScalarType.from_value(
+        self, _type_utils.JitScalarType.UNDEFINED
+    )
+    if scalar_type != _type_utils.JitScalarType.UNDEFINED:
+        # This check only covers traced modules where dtype is present
+        # pytorch reduce-ops cast all other integral types to int64
+        if not _is_fp(self) and scalar_type != _type_utils.JitScalarType.INT64:
+            self = g.op("Cast", self, to_i=_C_onnx.TensorProtoDataType.INT64)
+    return self
+
+
+def _apply_params(*args, **kwargs):
+    """Returns a decorator that calls the decorated (higher-order) function with the given parameters."""
+
+    def _apply(fn):
+        return fn(*args, **kwargs)
+
+    return _apply
+
+
+def _reduce_op_symbolic_helper(onnx_op_name, allow_multi_dim_support=True):
+    def symbolic(g, self, dim=None, keepdim=None):
+        self = _maybe_cast_reduce_op_input(g, self)
+        if dim is None or dim == ():
+            # Dim can be 0, which will cause (not dim) == True. So we don't want to do
+            # (not dim)
+            # all-reduce path
+            return _handle_reduce_dim_none(g, self, onnx_op_name)
+        else:
+            # dim-reduce path
+            keepdim = _get_const(keepdim, "i", "keepdim")
+            if g.opset < 18:
+                desc = "is" if allow_multi_dim_support else "i"
+                dim = _get_const(dim, desc, "dim")
+                dim_list = dim if allow_multi_dim_support else [dim]
+                return g.op(onnx_op_name, self, axes_i=dim_list, keepdims_i=keepdim)
+            else:
+                if _is_value(dim):
+                    axes = dim
+                else:
+                    if allow_multi_dim_support:
+                        axes = g.op(
+                            "Constant", value_t=torch.tensor(dim, dtype=torch.long)
+                        )
+                    else:
+                        axes = g.op(
+                            "Constant", value_t=torch.tensor([dim], dtype=torch.long)
+                        )
+                return g.op(onnx_op_name, self, axes, keepdims_i=keepdim)
+
+    return symbolic
+
+
+def _overload_by_arg_count(fn):
+    @functools.wraps(fn)
+    def wrapper(g, *args):
+        overloads = fn(g, *args)
+        for overload in overloads:
+            arg_descriptors = overload._arg_descriptors
+            if len(arg_descriptors) == len(args):
+                return overload(g, *args)
+        return _unimplemented(f"aten::{fn.__name__}", f"with {len(args)} arguments")
+
+    return wrapper
+
+
+def _reduce_with_dtype_helper(
+    onnx_op: str, name: str, allow_multi_dim_support: bool = True
+):
+    symbolic = _reduce_op_symbolic_helper(
+        onnx_op, allow_multi_dim_support=allow_multi_dim_support
+    )
+
+    @_overload_by_arg_count
+    def reduce(g, *args, **kwargs):
+        @quantized_args(True)
+        @parse_args("v", "none")
+        def reduce_nodim(g, self, dtype):
+            dtype_onnx = None
+            if dtype.node().kind() == "onnx::Constant":
+                dtype = _get_const(dtype, "i", "dtype")
+                dtype_onnx = _type_utils.JitScalarType(dtype).onnx_type()
+                self = g.op("Cast", self, to_i=dtype_onnx)
+            elif dtype.node().kind() != "prim::Constant":
+                return _unimplemented(name, "dtype", dtype)
+            result = symbolic(g, self)
+            if dtype_onnx is not None:
+                result_dtype_onnx = _type_utils.JitScalarType.from_value(
+                    result
+                ).onnx_type()
+                if result_dtype_onnx != dtype_onnx:
+                    result = g.op("Cast", result, to_i=dtype_onnx)
+            return result
+
+        dim_desc = "is" if allow_multi_dim_support else "i"
+
+        @quantized_args(True)
+        @parse_args("v", dim_desc, "i", "none")  # type: ignore[arg-type]
+        def reduce_dim(g, self, dim, keepdim, dtype):
+            dtype_onnx = None
+            if dtype.node().kind() == "onnx::Constant":
+                dtype = _get_const(dtype, "i", "dtype")
+                dtype_onnx = _type_utils.JitScalarType(dtype).onnx_type()
+                self = g.op("Cast", self, to_i=dtype_onnx)
+            elif dtype.node().kind() != "prim::Constant":
+                return _unimplemented(name, "dtype", dtype)
+            result = symbolic(g, self, dim, keepdim)
+            if dtype_onnx is not None:
+                result_dtype_onnx = _type_utils.JitScalarType.from_value(
+                    result
+                ).onnx_type()
+                if result_dtype_onnx != dtype_onnx:
+                    result = g.op("Cast", result, to_i=dtype_onnx)
+            return result
+
+        return reduce_nodim, reduce_dim
+
+    return reduce
+
+
+def _max_helper(g: jit_utils.GraphContext, self, dim_or_y=None, keepdim=None):
+    # torch.max(input)
+    if dim_or_y is None and keepdim is None:
+        return g.op("ReduceMax", self, keepdims_i=0)
+    # torch.max(input, other)
+    if keepdim is None:
+        return _op_with_optional_float_cast(g, "Max", self, dim_or_y, opset_before=12)
+    # torch.max(input, dim, keepdim)
+    else:
+        keepdim = _get_const(keepdim, "i", "keepdim")
+        dim = _get_const(dim_or_y, "i", "dim")
+        if g.opset < 18:
+            max = g.op("ReduceMax", self, axes_i=[dim], keepdims_i=keepdim)
+        else:
+            axes = g.op("Constant", value_t=torch.tensor([dim], dtype=torch.long))
+            max = g.op("ReduceMax", self, axes, keepdims_i=keepdim)
+        indices = g.op("ArgMax", self, axis_i=dim, keepdims_i=keepdim)
+        return max, indices
+
+
+def _min_helper(g: jit_utils.GraphContext, self, dim_or_y=None, keepdim=None):
+    # torch.min(input)
+    if dim_or_y is None and keepdim is None:
+        return g.op("ReduceMin", self, keepdims_i=0)
+    # torch.min(input, other)
+    if keepdim is None:
+        return _op_with_optional_float_cast(g, "Min", self, dim_or_y, opset_before=12)
+    # torch.min(input, dim, keepdim)
+    else:
+        keepdim = _get_const(keepdim, "i", "keepdim")
+        dim = _get_const(dim_or_y, "i", "dim")
+        if g.opset < 18:
+            min = g.op("ReduceMin", self, axes_i=[dim], keepdims_i=keepdim)
+        else:
+            axes = g.op("Constant", value_t=torch.tensor([dim], dtype=torch.long))
+            min = g.op("ReduceMin", self, axes, keepdims_i=keepdim)
+        indices = g.op("ArgMin", self, axis_i=dim, keepdims_i=keepdim)
+        return min, indices
+
+
+def _numel_helper(g: jit_utils.GraphContext, self):
+    shape = g.op("Shape", self)
+    return g.op("ReduceProd", shape, keepdims_i=0)
+
+
+@parse_args("v", "is", "i", "i")
+def _var_mean_helper(g: jit_utils.GraphContext, input, dim, correction, keepdim):
+    if g.opset < 18:
+        if dim is None:
+            mean = g.op("ReduceMean", input, keepdims_i=0)
+            t_mean = mean
+            num_elements = _numel_helper(g, input)
+        else:
+            mean = g.op("ReduceMean", input, axes_i=dim, keepdims_i=keepdim)
+            t_mean = g.op("ReduceMean", input, axes_i=dim, keepdims_i=1)
+            redudced_dims = g.op("Shape", input)
+            # dim could contain one or multiple dimensions
+            redudced_dims = g.op(
+                "Gather",
+                redudced_dims,
+                g.op("Constant", value_t=torch.tensor(dim)),
+                axis_i=0,
+            )
+            num_elements = g.op("ReduceProd", redudced_dims, keepdims_i=0)
+        sub_v = g.op("Sub", input, t_mean)
+        sqr_sub = g.op("Mul", sub_v, sub_v)
+        keepdim_mean = 0 if dim is None else keepdim
+        var = g.op("ReduceMean", sqr_sub, axes_i=dim, keepdims_i=keepdim_mean)
+        # Correct bias in calculating variance, by dividing it over (N - correction) instead on N
+        if correction is None:
+            correction = 1
+        if correction != 0:
+            num_elements = g.op(
+                "Cast", num_elements, to_i=_C_onnx.TensorProtoDataType.FLOAT
+            )
+            one = g.op("Constant", value_t=torch.tensor(correction, dtype=torch.float))
+            mul = g.op("Mul", var, num_elements)
+            var = g.op("Div", mul, g.op("Sub", num_elements, one))
+        return var, mean
+    else:
+        axes = None
+        if dim is None:
+            mean = g.op("ReduceMean", input, keepdims_i=0)
+            t_mean = mean
+            num_elements = _numel_helper(g, input)
+        else:
+            axes = g.op("Constant", value_t=torch.tensor(dim, dtype=torch.long))
+            mean = g.op("ReduceMean", input, axes, keepdims_i=keepdim)
+            t_mean = g.op("ReduceMean", input, axes, keepdims_i=1)
+            redudced_dims = g.op("Shape", input)
+            # dim could contain one or multiple dimensions
+            redudced_dims = g.op(
+                "Gather",
+                redudced_dims,
+                g.op("Constant", value_t=torch.tensor(dim)),
+                axis_i=0,
+            )
+            num_elements = g.op("ReduceProd", redudced_dims, keepdims_i=0)
+        sub_v = g.op("Sub", input, t_mean)
+        sqr_sub = g.op("Mul", sub_v, sub_v)
+        keepdim_mean = 0 if dim is None else keepdim
+        if axes is None:
+            var = g.op("ReduceMean", sqr_sub, keepdims_i=keepdim_mean)
+        else:
+            var = g.op("ReduceMean", sqr_sub, axes, keepdims_i=keepdim_mean)
+        # Correct bias in calculating variance, by dividing it over (N - correction) instead on N
+        if correction is None:
+            correction = 1
+        if correction != 0:
+            num_elements = g.op(
+                "Cast", num_elements, to_i=_C_onnx.TensorProtoDataType.FLOAT
+            )
+            one = g.op("Constant", value_t=torch.tensor(correction, dtype=torch.float))
+            mul = g.op("Mul", var, num_elements)
+            var = g.op("Div", mul, g.op("Sub", num_elements, one))
+        return var, mean
+
+
+def _embedding_bag_helper(
+    g: jit_utils.GraphContext,
+    embedding_matrix,
+    indices,
+    offsets,
+    scale_grad_by_freq,
+    mode,
+    sparse,
+    per_sample_weights,
+    include_last_offset,
+    padding_idx,
+):
+    if scale_grad_by_freq and GLOBALS.export_training:
+        return _onnx_unsupported(
+            "embedding_bag with scale_grad_by_freq for training mode"
+        )
+    if padding_idx is not None and padding_idx >= 0:
+        raise RuntimeError("embedding_bag with padding_idx")
+
+    loop_condition = g.op("Constant", value_t=torch.tensor(1))
+    loop_condition = g.op("Cast", loop_condition, to_i=_C_onnx.TensorProtoDataType.BOOL)
+    zero = g.op("Constant", value_t=torch.tensor([0]))
+
+    indices_len = _unsqueeze_helper(
+        g,
+        _size_helper(g, indices, g.op("Constant", value_t=torch.tensor(0))),
+        [0],
+    )
+    if not include_last_offset:
+        offsets = [offsets, indices_len]
+        offsets = g.op("Concat", *offsets, axis_i=0)
+
+    # Offsets holds the starting index position of each bag. So we create a list of the indices slices (determined by
+    # offsets) and gather those indices in indices_row. Then we use this subset of indices to gather from embeddings.
+    # The embeddings output is a loop scan output, so we can avoid creating a sequence and inserting elements in.
+    offsets_starts = _slice_helper(
+        g, offsets, axes=[0], starts=[0], ends=[sys.maxsize], steps=[1]
+    )
+    offsets_ends = _slice_helper(
+        g, offsets, axes=[0], starts=[1], ends=[sys.maxsize], steps=[1]
+    )
+
+    loop_len = _size_helper(g, offsets_ends, g.op("Constant", value_t=torch.tensor(0)))
+
+    loop, (loop_context,), _ = jit_utils.add_op_with_blocks(
+        g, "Loop", loop_len, loop_condition, n_blocks=1
+    )
+    loop_block = loop_context.block
+
+    # FIXME(justinchuby): We need to handle what happens when we call b.op on a node return
+    block_input_iter = utils._add_input_to_block(loop_block)
+    utils._add_input_to_block(loop_block)
+
+    indices_start = loop_context.op(
+        "Gather", offsets_starts, block_input_iter, axis_i=0
+    )
+    indices_end = loop_context.op("Gather", offsets_ends, block_input_iter, axis_i=0)
+    indices_start = _unsqueeze_helper(loop_context, indices_start, [0])
+    indices_end = _unsqueeze_helper(loop_context, indices_end, [0])
+
+    indices_row = loop_context.op("Slice", indices, indices_start, indices_end, zero)
+    embeddings = loop_context.op("Gather", embedding_matrix, indices_row, axis_i=0)
+    if not _is_none(per_sample_weights):
+        per_sample_weights_row = loop_context.op(
+            "Slice", per_sample_weights, indices_start, indices_end, zero
+        )
+        per_sample_weights_row = _unsqueeze_helper(
+            loop_context, per_sample_weights_row, [1]
+        )
+        embeddings = loop_context.op("Mul", embeddings, per_sample_weights_row)
+    if mode == 0:
+        embeddings = _reducesum_helper(
+            loop_context, embeddings, axes_i=[0], keepdims_i=0
+        )
+    elif mode == 1:
+        if loop_context.opset < 18:
+            embeddings = loop_context.op(
+                "ReduceMean", embeddings, axes_i=[0], keepdims_i=0
+            )
+        else:
+            axes = loop_context.op(
+                "Constant", value_t=torch.tensor([0], dtype=torch.long)
+            )
+            embeddings = loop_context.op("ReduceMean", embeddings, axes, keepdims_i=0)
+    else:
+        if loop_context.opset < 18:
+            embeddings = loop_context.op(
+                "ReduceMax", embeddings, axes_i=[0], keepdims_i=0
+            )
+        else:
+            axes = loop_context.op(
+                "Constant", value_t=torch.tensor([0], dtype=torch.long)
+            )
+            embeddings = loop_context.op("ReduceMax", embeddings, axes, keepdims_i=0)
+
+    cond_out = loop_context.op(
+        "Cast", loop_condition, to_i=_C_onnx.TensorProtoDataType.BOOL
+    )
+    utils._add_output_to_block(loop_block, cond_out)
+    utils._add_output_to_block(loop_block, embeddings)
+
+    # aten::embedding_bag returns a tuple of 4 elements: output, offset2bag, bag_size, max_indices.
+    # But the last three outputs are not used in torch.nn.EmbeddingBag or torch.nn.functional.embedding_bag.
+    return loop.node().output(), None, None, None
+
+
+def _linalg_vector_norm_helper(
+    g: jit_utils.GraphContext,
+    self: torch._C.Value,
+    ord: float,
+    dim: Sequence[int] | None,
+    keepdim: bool,
+    dtype: torch._C.Value,
+):
+    axes = None
+    # Conditions based on https://pytorch.org/docs/stable/generated/torch.linalg.vector_norm.html
+    if _is_none(dim):
+        self = _reshape_helper(g, self, [-1])
+        keepdim = False
+    elif g.opset >= 18:
+        axes = g.op("Constant", value_t=torch.tensor(dim, dtype=torch.long))
+
+    if ord == math.inf:
+        if g.opset < 18:
+            result = g.op(
+                "ReduceMax", g.op("Abs", self), axes_i=dim, keepdims_i=keepdim
+            )
+        else:
+            if axes is None:
+                result = g.op("ReduceMax", g.op("Abs", self), keepdims_i=keepdim)
+            else:
+                result = g.op("ReduceMax", g.op("Abs", self), axes, keepdims_i=keepdim)
+    elif ord == -math.inf:
+        if g.opset < 18:
+            result = g.op(
+                "ReduceMin", g.op("Abs", self), axes_i=dim, keepdims_i=keepdim
+            )
+        else:
+            if axes is None:
+                result = g.op("ReduceMin", g.op("Abs", self), keepdims_i=keepdim)
+            else:
+                result = g.op("ReduceMin", g.op("Abs", self), axes, keepdims_i=keepdim)
+    elif ord == 0:
+        if g.opset < 11:
+            return _onnx_opset_unsupported_detailed(
+                "linalg_vector_norm", 9, 11, "ord=0 not supported", self
+            )
+        else:
+            if dim is None:
+                self = _reshape_helper(
+                    g,
+                    self,
+                    g.op("Constant", value_t=torch.tensor([-1], dtype=torch.int64)),
+                )
+                keepdim = False
+
+            cond_op = g.op(
+                "Not",
+                g.op("Equal", self, g.op("Constant", value_t=torch.LongTensor([0]))),
+            )
+            cond_op = g.op(
+                "Cast",
+                cond_op,
+                to_i=_type_utils.JitScalarType.from_value(self).onnx_type(),
+            )
+            return _reducesum_helper(g, cond_op, axes_i=dim, keepdims_i=keepdim)
+    elif ord == 1:
+        if g.opset < 18:
+            result = _reduce_op_symbolic_helper("ReduceL1")(
+                g, self, dim=dim, keepdim=keepdim
+            )
+        else:
+            if axes is None:
+                result = _reduce_op_symbolic_helper("ReduceL1")(
+                    g, self, keepdim=keepdim
+                )
+            else:
+                result = _reduce_op_symbolic_helper("ReduceL1")(
+                    g, self, axes, keepdim=keepdim
+                )
+    elif ord == 2:
+        if g.opset < 18:
+            result = _reduce_op_symbolic_helper("ReduceL2")(
+                g, self, dim=dim, keepdim=keepdim
+            )
+        else:
+            if axes is None:
+                result = _reduce_op_symbolic_helper("ReduceL2")(
+                    g, self, keepdim=keepdim
+                )
+            else:
+                result = _reduce_op_symbolic_helper("ReduceL2")(
+                    g, self, axes, keepdim=keepdim
+                )
+    else:
+        ord_op = g.op("Constant", value_t=torch.tensor(ord, dtype=torch.float32))
+        result = _reducesum_helper(
+            g, g.op("Pow", g.op("Abs", self), ord_op), axes_i=dim, keepdims_i=keepdim
+        )
+        result = g.op(
+            "Pow",
+            result,
+            g.op(
+                "Div",
+                g.op("Constant", value_t=torch.tensor(1, dtype=torch.float32)),
+                ord_op,
+            ),
+        )
+
+    if not _is_none(dtype):
+        dtype = _get_const(dtype, "i", "dtype")
+        result = g.op("Cast", result, to_i=_type_utils.JitScalarType(dtype).onnx_type())  # type: ignore[arg-type]
+    return result
 
 
 # Deprecated. Internally use _type_utils.ScalarType
@@ -1820,4 +2261,4 @@ scalar_type_to_onnx = [
 
 # Global set to store the list of quantized operators in the network.
 # This is currently only used in the conversion of quantized ops from PT -> C2 via ONNX.
-_quantized_ops: Set[int] = set()
+_quantized_ops: set[int] = set()

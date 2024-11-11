@@ -4,10 +4,7 @@
 #include <torch/csrc/profiler/util.h>
 #include <cstdint>
 
-namespace torch {
-namespace profiler {
-namespace impl {
-namespace vulkan {
+namespace torch::profiler::impl::vulkan {
 
 // Using function pointer i.e. [std::tuple<std::string, uint64_t> (*)(int64_t)]
 // doesn't work because we need to capture the QueryPool in the lambda context
@@ -22,7 +19,4 @@ TORCH_API void deregisterGetShaderNameAndDurationNs();
 std::tuple<std::string, uint64_t> getShaderNameAndDurationNs(
     const vulkan_id_t& vulkan_id);
 
-} // namespace vulkan
-} // namespace impl
-} // namespace profiler
-} // namespace torch
+} // namespace torch::profiler::impl::vulkan

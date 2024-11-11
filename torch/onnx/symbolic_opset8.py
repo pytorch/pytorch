@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """
 Note [ONNX operators that are added/updated from opset 8 to opset 9]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -38,6 +39,7 @@ from torch._C import _onnx as _C_onnx
 from torch.onnx import _type_utils, errors, symbolic_helper, symbolic_opset9 as opset9
 from torch.onnx._internal import jit_utils, registration
 
+
 _onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=8)
 
 block_listed_operators = (
@@ -64,38 +66,29 @@ for block_listed_op in block_listed_operators:
     )
 
 
-def _apply_params(*args, **kwargs):
-    """Returns a decorator that calls the decorated (higher-order) function with the given parameters."""
-
-    def _apply(fn):
-        return fn(*args, **kwargs)
-
-    return _apply
-
-
 @_onnx_symbolic(
     "aten::upsample_nearest1d",
-    decorate=[_apply_params("upsample_nearest1d", 3, "nearest")],
+    decorate=[symbolic_helper._apply_params("upsample_nearest1d", 3, "nearest")],
 )
 @_onnx_symbolic(
     "aten::upsample_nearest2d",
-    decorate=[_apply_params("upsample_nearest2d", 4, "nearest")],
+    decorate=[symbolic_helper._apply_params("upsample_nearest2d", 4, "nearest")],
 )
 @_onnx_symbolic(
     "aten::upsample_nearest3d",
-    decorate=[_apply_params("upsample_nearest3d", 5, "nearest")],
+    decorate=[symbolic_helper._apply_params("upsample_nearest3d", 5, "nearest")],
 )
 @_onnx_symbolic(
     "aten::upsample_linear1d",
-    decorate=[_apply_params("upsample_linear1d", 3, "linear")],
+    decorate=[symbolic_helper._apply_params("upsample_linear1d", 3, "linear")],
 )
 @_onnx_symbolic(
     "aten::upsample_bilinear2d",
-    decorate=[_apply_params("upsample_bilinear2d", 4, "linear")],
+    decorate=[symbolic_helper._apply_params("upsample_bilinear2d", 4, "linear")],
 )
 @_onnx_symbolic(
     "aten::upsample_trilinear3d",
-    decorate=[_apply_params("upsample_trilinear3d", 5, "linear")],
+    decorate=[symbolic_helper._apply_params("upsample_trilinear3d", 5, "linear")],
 )
 def _interpolate(name, dim, interpolate_mode):
     def symbolic_fn(g, input, output_size, *args):
@@ -173,7 +166,7 @@ def _try_cast_integer_to_float(g: jit_utils.GraphContext, *args):
     if arg0_type != _type_utils.JitScalarType.UNDEFINED:
         old_type = arg0_type
         if old_type not in floating_scalar_types:
-            old_type = old_type.scalar_name()
+            old_type = old_type.scalar_name()  # type: ignore[assignment]
             args = tuple(
                 g.op("Cast", arg, to_i=_C_onnx.TensorProtoDataType.FLOAT)
                 for arg in args

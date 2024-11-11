@@ -35,8 +35,8 @@
 #include <mkl.h>
 #endif
 
-namespace at {
-namespace vml {
+
+namespace at::vml {
 inline namespace CPU_CAPABILITY {
 
 using namespace vec;
@@ -100,20 +100,20 @@ IMPLEMENT_VML(lgamma)
 #if AT_MKL_ENABLED() && !defined(__APPLE__)
 
 // NB: LP64 MKL is the most commonly used and thus we assume it here. That means
-// we need to expect MKL_INT to be of type int, which implies int32_t in most
+// we need to expect MKL_INT to be of type int, which implies int32_t or int64_t in most
 // cases.
 static_assert(
-    std::is_same<MKL_INT, int32_t>::value,
-    "MKL_INT is assumed to be int32_t");
+    std::is_same_v<MKL_INT, int32_t> || std::is_same_v<MKL_INT, int64_t>,
+    "MKL_INT is assumed to be int32_t or int64_t");
 #define IMPLEMENT_VML_MKL_STUB(op, mklop, type, mkltype)                \
   template <>                                                           \
   inline void v##op(type * out, const type * in, int64_t size) {        \
-    int64_t max_mkl_ind = std::numeric_limits<MKL_INT>::max();          \
+    auto constexpr max_mkl_ind = std::numeric_limits<MKL_INT>::max();   \
     if (size <= static_cast<int64_t>(max_mkl_ind)) {                    \
       vm##mkltype##mklop(                                               \
           size, in, out, VML_HA | VML_FTZDAZ_OFF | VML_ERRMODE_IGNORE); \
     } else {                                                            \
-      MKL_INT ind = 0;                                                  \
+      int64_t ind = 0;                                                  \
       int64_t chunks = size / max_mkl_ind;                              \
       int64_t rest = size % max_mkl_ind;                                \
       for (; ind < chunks; ind++) {                                     \
@@ -167,5 +167,4 @@ IMPLEMENT_VML_MKL(log2, Log2)
 #endif
 
 } // namespace
-} // namespace vml
-} // namespace at
+} // namespace at::vml

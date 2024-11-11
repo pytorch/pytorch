@@ -9,9 +9,9 @@
 #include <ATen/functorch/BatchedTensorImpl.h>
 #include <ATen/functorch/PlumbingHelper.h>
 
-namespace at { namespace functorch {
+namespace at::functorch {
 
-void vmap_check_escaped(const optional<DynamicLayer> &layer, const char* what) {
+void vmap_check_escaped(const std::optional<DynamicLayer> &layer, const char* what) {
   TORCH_CHECK(
     layer.has_value(),
     "Either your tensor may have escaped from inside a function being vmapped and this is a user error ",
@@ -22,7 +22,7 @@ void vmap_check_escaped(const optional<DynamicLayer> &layer, const char* what) {
   )
 }
 
-Tensor makeBatched(const Tensor& tensor, optional<int64_t> bdim, int64_t level) {
+Tensor makeBatched(const Tensor& tensor, std::optional<int64_t> bdim, int64_t level) {
   if (bdim.has_value()) {
     TORCH_INTERNAL_ASSERT(*bdim >= 0);
     TORCH_INTERNAL_ASSERT(*bdim < tensor.dim());
@@ -31,7 +31,7 @@ Tensor makeBatched(const Tensor& tensor, optional<int64_t> bdim, int64_t level) 
   return tensor;
 }
 
-std::vector<Tensor> makeBatchedVector(const std::vector<Tensor>& tensors, optional<int64_t> bdim, int64_t level) {
+std::vector<Tensor> makeBatchedVector(const std::vector<Tensor>& tensors, std::optional<int64_t> bdim, int64_t level) {
   std::vector<Tensor> res;
   res.reserve(tensors.size());
   for (const auto & tensor : tensors) {
@@ -40,15 +40,15 @@ std::vector<Tensor> makeBatchedVector(const std::vector<Tensor>& tensors, option
   return res;
 }
 
-std::tuple<Tensor, c10::optional<int64_t>> unwrapTensorAtLevel(const Tensor& tensor, int64_t level) {
+std::tuple<Tensor, std::optional<int64_t>> unwrapTensorAtLevel(const Tensor& tensor, int64_t level) {
   auto* batched = maybeGetBatchedImpl(tensor);
   if (!batched) {
-    return std::make_tuple(tensor, nullopt);
+    return std::make_tuple(tensor, std::nullopt);
   }
   if (batched->level() == level) {
     return std::make_tuple(batched->value(), batched->bdim());
   }
-  return std::make_tuple(tensor, nullopt);
+  return std::make_tuple(tensor, std::nullopt);
 }
 
 bool isBatchedAtLevel(const Tensor& tensor, int64_t level) {
@@ -56,7 +56,7 @@ bool isBatchedAtLevel(const Tensor& tensor, int64_t level) {
   return std::get<1>(result).has_value();
 }
 
-bool isBatchedAtLevel(const c10::optional<Tensor>& maybe_tensor, int64_t level) {
+bool isBatchedAtLevel(const std::optional<Tensor>& maybe_tensor, int64_t level) {
   if (!maybe_tensor.has_value()) {
     return false;
   }
@@ -72,7 +72,7 @@ bool isBatchedAtLevel(ITensorListRef tensors, int64_t level) {
   return false;
 }
 
-bool isBatchedAtLevel(const c10::List<c10::optional<Tensor>>& maybe_tensors, int64_t level) {
+bool isBatchedAtLevel(const c10::List<std::optional<Tensor>>& maybe_tensors, int64_t level) {
   for (const auto idx : c10::irange(0, maybe_tensors.size())) {
     const auto& maybe_tensor = maybe_tensors.get(idx);
     if (isBatchedAtLevel(maybe_tensor, level)) {
@@ -82,7 +82,7 @@ bool isBatchedAtLevel(const c10::List<c10::optional<Tensor>>& maybe_tensors, int
   return false;
 }
 
-bool areAnyBatchedAtLevel(ArrayRef<optional<Tensor>> maybe_tensors, int64_t level) {
+bool areAnyBatchedAtLevel(ArrayRef<std::optional<Tensor>> maybe_tensors, int64_t level) {
   for (const auto& maybe_tensor : maybe_tensors) {
     if (isBatchedAtLevel(maybe_tensor, level)) {
       return true;
@@ -92,4 +92,4 @@ bool areAnyBatchedAtLevel(ArrayRef<optional<Tensor>> maybe_tensors, int64_t leve
 }
 
 
-}}
+} // namespace at::functorch

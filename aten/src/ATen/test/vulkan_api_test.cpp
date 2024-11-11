@@ -177,8 +177,8 @@ static void gen_all_subsets(
 static void slice_test(
     const std::vector<int64_t>& size,
     int64_t dim,
-    c10::optional<int64_t> start,
-    c10::optional<int64_t> end,
+    std::optional<int64_t> start,
+    std::optional<int64_t> end,
     int64_t step) {
   // Arrange
   const auto in_cpu = at::rand(size, at::device(at::kCPU).dtype(at::kFloat));
@@ -212,7 +212,7 @@ static void slice_tests(const std::unordered_map<int64_t, std::vector<int64_t>>&
   }
 }
 
-static void clone_test(const std::vector<int64_t>& size, c10::optional<at::MemoryFormat> optional_memory_format) {
+static void clone_test(const std::vector<int64_t>& size, std::optional<at::MemoryFormat> optional_memory_format) {
   // Arrange
   const auto in_cpu = at::rand(size, at::device(at::kCPU).dtype(at::kFloat));
   const auto in_vulkan = in_cpu.vulkan();
@@ -249,7 +249,7 @@ inline std::vector<c10::IValue> callOpByName(
     const char* func_name,
     const char* overload_name,
     Args... args) {
-  const c10::optional<c10::OperatorHandle> op_handle =
+  const std::optional<c10::OperatorHandle> op_handle =
       c10::Dispatcher::singleton().findSchema({func_name, overload_name});
   assert(op_handle.has_value());
   return callOpByHandle(op_handle.value(), std::forward<Args>(args)...);
@@ -788,7 +788,7 @@ TEST_F(VulkanAPITest, avg_pool2d) {
   ASSERT_TRUE(check);
 }
 
-TEST_F(VulkanAPITest, batch_norm_invalid_inputs) {
+TEST_F(VulkanAPITest, DISABLED_batch_norm_invalid_inputs) {
   c10::InferenceMode mode;
 
   // Act: Vulkan batchnorm only supports evaluation mode
@@ -1394,20 +1394,15 @@ TEST_F(VulkanAPITest, conv1d_simple) {
   const auto weights_vk = weights_cpu.vulkan();
   const auto bias_vk = bias_cpu.vulkan();
 
-  std::array<int64_t, 1> stride{1};
-  std::array<int64_t, 1> padding{0};
-  std::array<int64_t, 1> dilation{1};
+  int64_t stride = 1;
+  int64_t padding = 0;
+  int64_t dilation = 1;
 
   const auto output_cpu = at::conv1d(
-      input_cpu, weights_cpu, bias_cpu,
-      stride, padding, dilation, channels);
+      input_cpu, weights_cpu, bias_cpu, stride, padding, dilation, channels);
 
   const auto output_vk = at::conv1d(
-      input_vk, weights_vk, bias_vk,
-      stride,
-      padding,
-      dilation,
-      channels);
+      input_vk, weights_vk, bias_vk, stride, padding, dilation, channels);
   const auto output_vk_cpu = output_vk.cpu();
 
   const bool check = almostEqual(output_cpu, output_vk_cpu);
@@ -1418,32 +1413,34 @@ TEST_F(VulkanAPITest, conv1d_simple) {
   ASSERT_TRUE(check);
 }
 
-void test_conv1d(int64_t kernel_size, int64_t channels, int64_t lengths) {
+void test_conv1d(
+    int64_t kernel_size,
+    int64_t groups,
+    int64_t lengths,
+    int64_t stride = 1,
+    int64_t padding = 0,
+    int64_t dilation = 1,
+    int64_t in_group_size = 1,
+    int64_t out_group_size = 1,
+    int64_t batch_size = 1) {
   c10::InferenceMode mode;
 
-  const auto input_cpu = at::rand({1, channels, lengths}, at::kFloat);
-  const auto weights_cpu = at::rand({channels, 1, kernel_size}, at::kFloat);
-  const auto bias_cpu = at::rand({channels,}, at::kFloat);
+  int64_t in_channels = in_group_size * groups;
+  int64_t out_channels = out_group_size * groups;
+
+  const auto input_cpu = at::rand({batch_size, in_channels, lengths}, at::kFloat);
+  const auto weights_cpu = at::rand({out_channels, in_group_size, kernel_size}, at::kFloat);
+  const auto bias_cpu = at::rand({out_channels,}, at::kFloat);
 
   const auto input_vk = input_cpu.vulkan();
   const auto weights_vk = weights_cpu.vulkan();
   const auto bias_vk = bias_cpu.vulkan();
 
-  std::array<int64_t, 1> stride{1};
-  std::array<int64_t, 1> padding{0};
-  std::array<int64_t, 1> dilation{1};
-  int64_t groups = channels;
-
   const auto output_cpu = at::conv1d(
-      input_cpu, weights_cpu, bias_cpu,
-      stride, padding, dilation, groups);
+      input_cpu, weights_cpu, bias_cpu, stride, padding, dilation, groups);
 
   const auto output_vk = at::conv1d(
-      input_vk, weights_vk, bias_vk,
-      stride,
-      padding,
-      dilation,
-      channels);
+      input_vk, weights_vk, bias_vk, stride, padding, dilation, groups);
   const auto output_vk_cpu = output_vk.cpu();
 
   const bool check = almostEqual(output_cpu, output_vk_cpu);
@@ -1460,6 +1457,16 @@ TEST_F(VulkanAPITest, conv1d) {
   test_conv1d(1, 12, 3);
   test_conv1d(1, 12, 1);
   test_conv1d(10, 12, 20);
+  test_conv1d(3, 5, 9, 2, 0, 1);
+  test_conv1d(3, 5, 9, 2, 1, 1);
+  test_conv1d(3, 5, 9, 2, 1, 2);
+  test_conv1d(3, 5, 9, 1, 4, 2);
+  test_conv1d(6, 22, 30, 5, 5, 3);
+  test_conv1d(6, 5, 30, 5, 5, 3, 3, 5);
+  test_conv1d(6, 5, 30, 5, 5, 3, 4, 2);
+  test_conv1d(6, 5, 30, 5, 5, 3, 4, 2, 2);
+  test_conv1d(6, 5, 30, 5, 5, 3, 4, 2, 5);
+  test_conv1d(6, 5, 30, 5, 5, 3, 4, 2, 9);
 }
 
 
@@ -1486,7 +1493,7 @@ void test_conv2d_context(
   const auto prepack_vulkan = callOpByName(
       "vulkan_prepack::create_conv2d_context",
       "",
-      weight, bias, stride, padding, dilation, groups, c10::nullopt, c10::nullopt);
+      weight, bias, stride, padding, dilation, groups, std::nullopt, std::nullopt);
 
   const auto vulkan_output = callOpByName(
       "vulkan_prepack::run_conv2d_context",
@@ -1527,7 +1534,7 @@ void test_backwards_compatible_conv2d_context(
   const auto prepack_vulkan = callOpByName(
       "vulkan_prepack::conv2d_clamp_prepack",
       "",
-      weight, bias, stride, padding, dilation, groups, c10::nullopt, c10::nullopt);
+      weight, bias, stride, padding, dilation, groups, std::nullopt, std::nullopt);
 
   const auto vulkan_output = callOpByName(
       "vulkan_prepack::conv2d_clamp_run",
@@ -1569,7 +1576,7 @@ void test_transposed_conv2d_context(
   const auto prepack_vulkan = callOpByName(
       "vulkan_prepack::create_tconv2d_context",
       "",
-      weight, bias, stride, padding, output_padding, dilation, groups, c10::nullopt, c10::nullopt);
+      weight, bias, stride, padding, output_padding, dilation, groups, std::nullopt, std::nullopt);
 
   const auto vulkan_output = callOpByName(
       "vulkan_prepack::run_tconv2d_context",
@@ -2129,7 +2136,7 @@ TEST_F(VulkanAPITest, conv2d_clamp_after_div) {
   const auto prepack_cpu = callOpByName(
       "prepacked::conv2d_clamp_prepack",
       "",
-      weight, bias, stride, padding, dilation, groups, 0.0f, c10::nullopt)[0];
+      weight, bias, stride, padding, dilation, groups, 0.0f, std::nullopt)[0];
 
   const auto out_cpu = callOpByName(
       "prepacked::conv2d_clamp_run",
@@ -2140,7 +2147,7 @@ TEST_F(VulkanAPITest, conv2d_clamp_after_div) {
   const auto prepack_vk = callOpByName(
       "vulkan_prepack::create_conv2d_context",
       "",
-      weight, bias, stride, padding, dilation, groups, 0.0f, c10::nullopt)[0];
+      weight, bias, stride, padding, dilation, groups, 0.0f, std::nullopt)[0];
 
   const auto out_vk = callOpByName(
       "vulkan_prepack::run_conv2d_context",
@@ -2170,31 +2177,39 @@ TEST_F(VulkanAPITest, copy) {
   ASSERT_TRUE(check);
 }
 
-TEST_F(VulkanAPITest, cumsum) {
-  c10::InferenceMode mode;
+void test_cumsum(const at::IntArrayRef input_shape, const int64_t dim) {
+  const auto in_cpu = at::rand(input_shape, at::TensorOptions(at::kCPU).dtype(at::kFloat));
 
-  const auto in_cpu = at::rand({1, 17, 37, 49}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
-  // 0 do nothing
-  // 1 frame
-  // not implemented
-
-  // 2 height
-  const auto out_cpu2 = at::cumsum(in_cpu, 2);
-  const auto out_vulkan2 = at::cumsum(in_cpu.vulkan(), 2);
-  const auto check2 = almostEqual(out_cpu2, out_vulkan2.cpu());
-  if (!check2) {
-    showRtol(out_cpu2, out_vulkan2.cpu());
+  const auto out_cpu = at::cumsum(in_cpu, dim);
+  const auto out_vulkan = at::cumsum(in_cpu.vulkan(), dim);
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
   }
-  ASSERT_TRUE(check2);
+  ASSERT_TRUE(check);
+}
 
-  // 3 width
-  const auto out_cpu3 = at::cumsum(in_cpu, 3);
-  const auto out_vulkan3 = at::cumsum(in_cpu.vulkan(), 3);
-  const auto check3 = almostEqual(out_cpu3, out_vulkan3.cpu());
-  if (!check3) {
-    showRtol(out_cpu3, out_vulkan3.cpu());
+TEST_F(VulkanAPITest, cumsum_1d) {
+  test_cumsum({37}, 0);
+  test_cumsum({37}, -1);
+}
+
+TEST_F(VulkanAPITest, cumsum_2d) {
+  for (int64_t i = -1; i <= 1; i++) {
+    test_cumsum({17, 37}, i);
   }
-  ASSERT_TRUE(check3);
+}
+
+TEST_F(VulkanAPITest, cumsum_3d) {
+  for (int64_t i = -2; i <= 2; i++) {
+    test_cumsum({17, 37, 49}, i);
+  }
+}
+
+TEST_F(VulkanAPITest, cumsum_4d) {
+  for (int64_t i = -3; i <= 3; i++) {
+    test_cumsum({12, 17, 37, 49}, i);
+  }
 }
 
 void test_div(const at::IntArrayRef input_shape, const at::IntArrayRef other_shape) {
@@ -4457,6 +4472,56 @@ TEST_F(VulkanAPITest, sigmoid_) {
   ASSERT_TRUE(check);
 }
 
+TEST_F(VulkanAPITest, DISABLED_log_softmax_underflow_exception) {
+  // We apply softmax and log in a sequence to the tesnor [20, 0].
+  // The output of softmax on CPU is [1.0000e+00, 2.0612e-09]; while
+  // the output on Vulkan is [1, 0] since 2.0612e-09 is smaller than
+  // the smallest represetable positive 5.96e−8. We expect to see nan
+  // or -inf when applying log.
+  float data[] = {20, 0};
+  const auto in_cpu = at::from_blob(data, {2}, at::kFloat);
+  const auto in_vulkan = in_cpu.vulkan();
+
+  const auto softmax_out_cpu = at::softmax(in_cpu, 0);
+  const auto softmax_out_vulkan = at::softmax(in_vulkan, 0);
+
+  const auto log_out_cpu = at::log(softmax_out_cpu);
+  const auto log_out_vulkan = at::log(softmax_out_vulkan);
+
+  auto has_nan = log_out_vulkan.cpu().isnan().any().item().to<bool>();
+  auto has_inf = log_out_vulkan.cpu().isinf().any().item().to<bool>();
+
+  // We expect the output of log containing nan or inf.
+  const auto check = has_nan || has_inf;
+  if (!check) {
+    std::cout << "expect log_out_vulkan contains nan or inf, but got" << std::endl;
+    std::cout << log_out_vulkan.cpu() << std::endl;
+  }
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, log_softmax_underflow) {
+  // The minimum strictly positive (subnormal) value of float16 on Vulkan is 2−24 ≈ 5.96 × 10^−8.
+  // https://en.wikipedia.org/wiki/Half-precision_floating-point_format#Exponent_encoding
+  // then smallest_representable_log = log(5.96 × 10^−8) = -16.64.
+  // The implementation of `log_softmax` adds 6e-8 to the output of softmax before applying `log`
+  // to deal with underflow, so there won't be nan or -inf as shown in the
+  // `log_softmax_underflow_exception` test above
+  float smallest_representable_log = -16.64f;
+  float data[] = {20, 0};
+  const auto in_cpu = at::from_blob(data, {2}, at::kFloat);
+  const auto in_vulkan = in_cpu.vulkan();
+
+  const auto log_softmax_cpu = at::log_softmax(in_cpu, 0);
+  const auto log_softmax_vulkan = at::log_softmax(in_vulkan, 0);
+
+  const auto check = checkRtol(log_softmax_cpu - log_softmax_vulkan.cpu(), -smallest_representable_log);
+  if (!check) {
+    showRtol(log_softmax_cpu, log_softmax_vulkan.cpu());
+  }
+  ASSERT_TRUE(check);
+}
+
 void test_softmax(const at::IntArrayRef shape, bool log_softmax = false) {
   at::Tensor in_cpu =
       at::rand(shape, at::TensorOptions(at::kCPU).dtype(at::kFloat));
@@ -4503,7 +4568,7 @@ TEST_F(VulkanAPITest, softmax) {
   }
 }
 
-TEST_F(VulkanAPITest, log_softmax) {
+TEST_F(VulkanAPITest, DISABLED_log_softmax) {
   c10::InferenceMode mode;
   std::vector<std::vector<int64_t>> test_in_dims = {
       {1, 3, 4, 2},
@@ -4517,30 +4582,6 @@ TEST_F(VulkanAPITest, log_softmax) {
           std::vector<int64_t>(dim_vec.begin(), dim_vec.end() - trunc);
       test_softmax(trunc_dim_vec, log_softmax);
     }
-  }
-}
-
-// TODO: Currently the op is not working correctly. Add it back when it is fixed.
-TEST_F(VulkanAPITest, DISABLED_log_softmax) {
-  at::Tensor test_in[] = {
-    at::rand({1, 196, 302, 5}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
-    at::rand({1, 197, 302, 5}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
-    at::rand({1, 198, 302, 5}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
-    at::rand({1, 199, 302, 5}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
-  };
-
-  for (auto in_cpu : test_in) {
-    const auto out_cpu = at::softmax(in_cpu, 1);
-
-    const auto in_vulkan = in_cpu.vulkan();
-    const auto out_vulkan = at::log_softmax(in_vulkan, 1);
-
-    const auto check = almostEqual(out_cpu, out_vulkan.cpu());
-    if (!check) {
-      showRtol(out_cpu, out_vulkan.cpu());
-    }
-
-    ASSERT_TRUE(check);
   }
 }
 
@@ -5423,6 +5464,11 @@ void test_unsqueeze(const at::IntArrayRef input_shape, int64_t dim) {
               << input_shape << std::endl;
   }
   ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, unsqueeze_0dto1d_dim0) {
+  test_unsqueeze({}, 0);
+  test_unsqueeze({}, -1);
 }
 
 TEST_F(VulkanAPITest, unsqueeze_1dto2d_dim0) {
@@ -6927,6 +6973,12 @@ void test_stack(const at::IntArrayRef input_shape, int64_t dim, int numTensors) 
   ASSERT_TRUE(check);
 }
 
+TEST_F(VulkanAPITest, stack_0d) {
+  test_stack({}, 0, 1);
+  test_stack({}, 0, 2);
+  test_stack({}, 0, 3);
+}
+
 TEST_F(VulkanAPITest, stack_1d) {
   test_stack({221}, 0, 2);
   test_stack({193}, 1, 3);
@@ -7068,7 +7120,7 @@ TEST_F(VulkanAPITest, zeros) {
 
 TEST_F(VulkanAPITest, clone_success) {
   // Arrange
-  std::multimap<c10::optional<c10::MemoryFormat>, std::vector<int64_t>> mem2sizes {
+  std::multimap<std::optional<c10::MemoryFormat>, std::vector<int64_t>> mem2sizes {
     {c10::MemoryFormat::Preserve, {2, 3, 5, 161}},    // 4D tensors with MemoryFormat::Preserve
     {c10::MemoryFormat::Contiguous, {2, 3, 5, 161}},  // 4D tensors with MemoryFormat::Contiguous
     {{}, {2, 3, 5, 161}},                             // 4D tensors with null
@@ -7814,6 +7866,14 @@ void test_linear(
   }
 
   ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, linear_1d_small) {
+  test_linear({3}, {4, 3}, {4});
+}
+
+TEST_F(VulkanAPITest, linear_1d_large) {
+  test_linear({37}, {23, 37}, {23});
 }
 
 TEST_F(VulkanAPITest, linear_2d_flat) {

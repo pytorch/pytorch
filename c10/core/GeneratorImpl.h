@@ -61,6 +61,7 @@ struct C10_API GeneratorImpl : public c10::intrusive_ptr_target {
   GeneratorImpl(const GeneratorImpl& other) = delete;
   GeneratorImpl(GeneratorImpl&& other) = delete;
   GeneratorImpl& operator=(const GeneratorImpl& other) = delete;
+  GeneratorImpl& operator=(GeneratorImpl&& other) = delete;
 
   ~GeneratorImpl() override = default;
   c10::intrusive_ptr<GeneratorImpl> clone() const;
@@ -73,6 +74,9 @@ struct C10_API GeneratorImpl : public c10::intrusive_ptr_target {
   virtual uint64_t seed() = 0;
   virtual void set_state(const c10::TensorImpl& new_state) = 0;
   virtual c10::intrusive_ptr<c10::TensorImpl> get_state() const = 0;
+  virtual void graphsafe_set_state(
+      const c10::intrusive_ptr<c10::GeneratorImpl>& new_state);
+  virtual c10::intrusive_ptr<c10::GeneratorImpl> graphsafe_get_state() const;
   Device device() const;
 
   // See Note [Acquire lock when using random generators]

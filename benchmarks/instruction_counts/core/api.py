@@ -1,4 +1,7 @@
 """Key enums and structs used to handle data flow within the benchmark."""
+
+# mypy: ignore-errors
+
 import dataclasses
 import enum
 import itertools as it
@@ -7,6 +10,7 @@ import textwrap
 from typing import Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
 
 from worker.main import WorkerTimerArgs
+
 
 if TYPE_CHECKING:
     # Benchmark utils are only partially strict compliant, so MyPy won't follow

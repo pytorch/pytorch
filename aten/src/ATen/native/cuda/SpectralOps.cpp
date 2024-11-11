@@ -38,52 +38,8 @@ using namespace at::native::detail;
 static void exec_cufft_plan(
     const CuFFTConfig &config, void* in_data, void* out_data, bool forward) {
   auto& plan = config.plan();
-#if defined(USE_ROCM)
-  auto value_type = config.data_type();
-  if (value_type == kFloat) {
-    switch (config.transform_type()) {
-      case CuFFTTransformType::C2C: {
-        CUFFT_CHECK(hipfftExecC2C(plan, static_cast<hipfftComplex*>(in_data),
-                                  static_cast<hipfftComplex*>(out_data),
-                                  forward ? HIPFFT_FORWARD : HIPFFT_BACKWARD));
-        return;
-      }
-      case CuFFTTransformType::R2C: {
-        CUFFT_CHECK(hipfftExecR2C(plan, static_cast<hipfftReal*>(in_data),
-                                  static_cast<hipfftComplex*>(out_data)));
-        return;
-      }
-      case CuFFTTransformType::C2R: {
-        CUFFT_CHECK(hipfftExecC2R(plan, static_cast<hipfftComplex*>(in_data),
-                                  static_cast<hipfftReal*>(out_data)));
-        return;
-      }
-    }
-  } else if (value_type == kDouble) {
-    switch (config.transform_type()) {
-      case CuFFTTransformType::C2C: {
-        CUFFT_CHECK(hipfftExecZ2Z(plan, static_cast<hipfftDoubleComplex*>(in_data),
-                                  static_cast<hipfftDoubleComplex*>(out_data),
-                                  forward ? HIPFFT_FORWARD : HIPFFT_BACKWARD));
-        return;
-      }
-      case CuFFTTransformType::R2C: {
-        CUFFT_CHECK(hipfftExecD2Z(plan, static_cast<hipfftDoubleReal*>(in_data),
-                                  static_cast<hipfftDoubleComplex*>(out_data)));
-        return;
-      }
-      case CuFFTTransformType::C2R: {
-        CUFFT_CHECK(hipfftExecZ2D(plan, static_cast<hipfftDoubleComplex*>(in_data),
-                                  static_cast<hipfftDoubleReal*>(out_data)));
-        return;
-      }
-    }
-  }
-  TORCH_CHECK(false, "hipFFT doesn't support transforms on type: ", value_type);
-#else
   CUFFT_CHECK(cufftXtExec(plan, in_data, out_data,
                           forward ? CUFFT_FORWARD : CUFFT_INVERSE));
-#endif
 }
 
 
@@ -153,33 +109,33 @@ CuFFTParamsLRUCache &cufft_get_plan_cache(DeviceIndex device_index) {
 namespace detail {
 
 int64_t cufft_get_plan_cache_max_size_impl(DeviceIndex device_index) {
-  TORCH_CHECK(0 <= device_index && device_index < at::detail::getCUDAHooks().getNumGPUs(),
+  TORCH_CHECK(0 <= device_index && device_index < at::detail::getCUDAHooks().deviceCount(),
     "cufft_get_plan_cache_max_size: expected 0 <= device_index < ",
-    at::detail::getCUDAHooks().getNumGPUs(), "], but got device_index=",
+    at::detail::getCUDAHooks().deviceCount(), "], but got device_index=",
     device_index);
   return cufft_get_plan_cache(device_index).max_size();
 }
 
 void cufft_set_plan_cache_max_size_impl(DeviceIndex device_index, int64_t max_size) {
-  TORCH_CHECK(0 <= device_index && device_index < at::detail::getCUDAHooks().getNumGPUs(),
+  TORCH_CHECK(0 <= device_index && device_index < at::detail::getCUDAHooks().deviceCount(),
     "cufft_set_plan_cache_max_size: expected 0 <= device_index < ",
-    at::detail::getCUDAHooks().getNumGPUs(), "], but got device_index=",
+    at::detail::getCUDAHooks().deviceCount(), "], but got device_index=",
     device_index);
   return cufft_get_plan_cache(device_index).resize(max_size);
 }
 
 int64_t cufft_get_plan_cache_size_impl(DeviceIndex device_index) {
-  TORCH_CHECK(0 <= device_index && device_index < at::detail::getCUDAHooks().getNumGPUs(),
+  TORCH_CHECK(0 <= device_index && device_index < at::detail::getCUDAHooks().deviceCount(),
     "cufft_get_plan_cache_size: expected 0 <= device_index < ",
-    at::detail::getCUDAHooks().getNumGPUs(), "], but got device_index=",
+    at::detail::getCUDAHooks().deviceCount(), "], but got device_index=",
     device_index);
   return cufft_get_plan_cache(device_index).size();
 }
 
 void cufft_clear_plan_cache_impl(DeviceIndex device_index) {
-  TORCH_CHECK(0 <= device_index && device_index < at::detail::getCUDAHooks().getNumGPUs(),
+  TORCH_CHECK(0 <= device_index && device_index < at::detail::getCUDAHooks().deviceCount(),
     "cufft_clear_plan_cache: expected 0 <= device_index < ",
-    at::detail::getCUDAHooks().getNumGPUs(), "], but got device_index=",
+    at::detail::getCUDAHooks().deviceCount(), "], but got device_index=",
     device_index);
   return cufft_get_plan_cache(device_index).clear();
 }
@@ -262,7 +218,7 @@ static const Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_
   CuFFTParams Params(input.strides(), out.strides(), signal_size, fft_type, value_type);
   CuFFTParamsLRUCache& plan_cache = cufft_get_plan_cache(input.device().index());
   std::unique_lock<std::mutex> guard(plan_cache.mutex, std::defer_lock);
-  c10::optional<CuFFTConfig> uncached_plan;
+  std::optional<CuFFTConfig> uncached_plan;
   const CuFFTConfig * config = nullptr;
 
   // Workaround for gh-63152, gh-58724
@@ -271,7 +227,7 @@ static const Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_
   // sizes with only small prime factors can still be cached
   bool use_caching = true;
 #ifdef CUFFT_VERSION
-  if (10300 <= CUFFT_VERSION && CUFFT_VERSION < 10400) {
+  if constexpr (10300 <= CUFFT_VERSION && CUFFT_VERSION < 10400) {
     // Only cache plans for transforms with small prime factors
     use_caching = std::none_of(
         signal_size.begin() + 1, signal_size.end(), [](int64_t dim_size) {
@@ -315,7 +271,7 @@ static const Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_
     at::globalContext().getNVRTC().cuCtxSetCurrent(pctx);
   }
 #endif /* !defined(USE_ROCM) */
-  exec_cufft_plan(*config, input.data_ptr(), out.data_ptr(), forward);
+  exec_cufft_plan(*config, const_cast<void*>(input.const_data_ptr()), out.data_ptr(), forward);
 
   // Inplace reshaping to original batch shape and inverting the dimension permutation
   DimVector out_strides(ndim);
@@ -387,7 +343,7 @@ Tensor _fft_r2c_cufft(const Tensor& self, IntArrayRef dim, int64_t normalization
   // CuFFT requires real input to be over-aligned, as if it were complex
   const auto complex_size = 2 * self.element_size();
   const bool complex_aligned = (
-      reinterpret_cast<std::uintptr_t>(self.data_ptr()) % complex_size == 0);
+      reinterpret_cast<std::uintptr_t>(self.const_data_ptr()) % complex_size == 0);
   auto working_tensor = self;
   if (!complex_aligned) {
     working_tensor = self.movedim(last_dim, -1)

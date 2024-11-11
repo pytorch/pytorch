@@ -66,7 +66,7 @@ class DeviceHandle final {
 // instance for each physical device visible to the VkInstance. Upon
 // construction, this class will populate the physical device properties, but
 // will not create the logical device until specifically requested via the
-// init_device() funtion.
+// init_device() function.
 //
 // init_device() will create the logical device and obtain the VkDevice handle
 // for it. It will also create a number of compute queues up to the amount

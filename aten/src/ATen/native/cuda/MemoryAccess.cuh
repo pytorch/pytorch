@@ -16,7 +16,7 @@
 // References:
 // https://devblogs.nvidia.com/cuda-pro-tip-increase-performance-with-vectorized-memory-access/
 
-namespace at { namespace native { namespace memory {
+namespace at::native::memory {
 
 namespace detail {
 
@@ -57,11 +57,11 @@ struct static_unroll<func, end, end> {
 template<int arg_index>
 struct vectorized_load_helper {
   template <typename args_t, typename policy_t>
-  static __device__ void apply(policy_t &self, args_t *args, int idx) {
+  static __device__ void apply(policy_t &self, args_t *args, int idx, int block_work_size) {
     using arg_t = std::tuple_element_t<arg_index, args_t>;
     // `data` hold the data_ptr for tensors [output, input0, input1, ...], so we
     // need a +1 offset to get the input
-    auto ptr = reinterpret_cast<arg_t *>(self.data[arg_index + 1]) + block_work_size() * idx;
+    auto ptr = reinterpret_cast<arg_t *>(self.data[arg_index + 1]) + block_work_size * idx;
     auto args_accessor = [&args] __device__ (int thread_unroll_idx) -> arg_t & { return std::get<arg_index>(args[thread_unroll_idx]); };
     self.load_single_arg(args_accessor, ptr);
   }
@@ -109,7 +109,7 @@ struct LoadWithCast {
   size_array_t element_sizes;
 
   LoadWithCast(const TensorIteratorBase& iter) {
-    assert(iter.ninputs() == N);
+    CUDA_KERNEL_ASSERT(iter.ninputs() == N);
     #pragma unroll
     for (auto i = 0; i < N; ++i) {
       this->dtypes[i] = iter.dtype(i + iter.noutputs());
@@ -140,7 +140,7 @@ struct StoreWithCast {
   size_array_t element_sizes;
 
   StoreWithCast(const TensorIteratorBase& iter) {
-    assert(iter.noutputs() == N);
+    CUDA_KERNEL_ASSERT(iter.noutputs() == N);
     #pragma unroll
     for (auto i = 0; i < N; ++i) {
       this->dtypes[i] = iter.dtype(i);
@@ -181,9 +181,7 @@ __device__ aligned_vector<bool, vec_size> load_vector(const bool *base_ptr, uint
 
 namespace policies {
 
-// Assumption:
-// all tensors are contiguous, that is: stride == sizeof(type) for all tensors
-template<typename data_t, typename inp_calc_t, typename out_calc_t, typename loader_t, typename storer_t, int num_outputs = 1>
+template<typename data_t, typename inp_calc_t, typename out_calc_t, typename loader_t, typename storer_t, int elems_per_thread, int num_outputs=1>
 struct unroll {
 
   data_t data;
@@ -192,24 +190,25 @@ struct unroll {
   out_calc_t output_offset_calculator;
   loader_t loader;
   storer_t storer;
+  static constexpr int tws = elems_per_thread;
 
   __device__ unroll(data_t data, int remaining, inp_calc_t ic, out_calc_t oc, loader_t l, storer_t s):
     data(data), remaining(remaining), input_offset_calculator(ic), output_offset_calculator(oc), loader(l), storer(s) {}
 
   __device__ inline bool check_inbounds(int thread_work_elem) {
-    return ((threadIdx.x  + thread_work_elem*num_threads()) < remaining);
+    return ((int)(threadIdx.x  + thread_work_elem*num_threads()) < remaining);
   }
 
   template<typename args_t>
   __device__ inline void load(args_t *args, int idx) {
-    constexpr int arity = std::tuple_size<args_t>::value;
+    constexpr int arity = std::tuple_size_v<args_t>;
     int thread_idx = threadIdx.x;
     #pragma unroll
-    for (int i = 0; i < thread_work_size(); i++) {
+    for (int i = 0; i < elems_per_thread; i++) {
       if (thread_idx >= remaining) {
         return;
       }
-      int linear_idx = thread_idx + block_work_size() * idx;
+      int linear_idx = thread_idx + elems_per_thread * num_threads() * idx;
       auto offset = input_offset_calculator.get(linear_idx);
       detail::static_unroll<detail::unroll_load_helper, arity>::with_args(*this, args, offset, loader, i, num_outputs);
       thread_idx += num_threads();
@@ -219,13 +218,12 @@ struct unroll {
   template<typename scalar_t>
   __device__ inline void store(scalar_t *from, int idx) {
     int thread_idx = threadIdx.x;
-    scalar_t *to = reinterpret_cast<scalar_t *>(data[0]) + block_work_size() * idx;
     #pragma unroll
-    for (int i = 0; i < thread_work_size(); i++) {
+    for (int i = 0; i < elems_per_thread; i++) {
       if (thread_idx >= remaining) {
         return;
       }
-      int linear_idx = thread_idx + block_work_size() * idx;
+      int linear_idx = thread_idx + elems_per_thread * num_threads() * idx;
       int offset = output_offset_calculator.get(linear_idx)[0];
       storer.store(from[i], data[0], offset);
       thread_idx += num_threads();
@@ -238,11 +236,12 @@ struct unroll {
 // Note:
 // Functions in vectorized policy does not do boundary check. It assumes the whole block
 // has its job to do. So the reminders should be handled by the caller manually.
-template <int vec_size, typename data_t>  // vec_size: number of scalars, can be 1, 2, or 4.
+template <int vec_size, typename data_t, int elems_per_thread>  // vec_size: number of scalars, can be 1, 2, or 4.
 struct vectorized {
 
-  static_assert(thread_work_size() % vec_size == 0, "The workload per thread must be a multiple of vec_size");
-  static constexpr int loop_size = thread_work_size() / vec_size;
+  static_assert(elems_per_thread % vec_size == 0, "The workload per thread must be a multiple of vec_size");
+  static constexpr int loop_size = elems_per_thread / vec_size;
+  static constexpr int tws = elems_per_thread;
 
   data_t data;
 
@@ -268,14 +267,14 @@ struct vectorized {
 
   template<typename args_t>
   __device__ inline void load(args_t *args, int idx) {
-    constexpr int arity = std::tuple_size<args_t>::value;
-    detail::static_unroll<detail::vectorized_load_helper, arity>::with_args(*this, args, idx);
+    constexpr int arity = std::tuple_size_v<args_t>;
+    detail::static_unroll<detail::vectorized_load_helper, arity>::with_args(*this, args, idx, elems_per_thread * num_threads());
   }
 
   template<typename scalar_t>
   __device__ inline void store(scalar_t *from, int idx) {
     using vec_t = aligned_vector<scalar_t, vec_size>;
-    scalar_t *to = reinterpret_cast<scalar_t *>(data[0]) + block_work_size() * idx;
+    scalar_t *to = reinterpret_cast<scalar_t *>(data[0]) + elems_per_thread * num_threads() * idx;
     vec_t *to_ = reinterpret_cast<vec_t *>(to);
     int thread_idx = threadIdx.x;
     #pragma unroll
@@ -300,17 +299,18 @@ struct multi_outputs_unroll {
   out_calc_t output_offset_calculator;
   LoadWithoutCast loader;
   StoreWithoutCast storer;
+  static constexpr int tws = thread_work_size();
 
   __device__ multi_outputs_unroll(data_t data, int remaining, inp_calc_t ic, out_calc_t oc):
   data(data), remaining(remaining), input_offset_calculator(ic), output_offset_calculator(oc) {}
 
   __device__ inline bool check_inbounds(int thread_work_elem) {
-    return ((threadIdx.x  + thread_work_elem*num_threads()) < remaining);
+    return ((int)(threadIdx.x  + thread_work_elem*num_threads()) < remaining);
   }
 
   template<typename args_t>
   __device__ inline void load(args_t *args, int idx) {
-    constexpr int arity = std::tuple_size<args_t>::value;
+    constexpr int arity = std::tuple_size_v<args_t>;
     int thread_idx = threadIdx.x;
     #pragma unroll
     for (int i = 0; i < thread_work_size(); i++) {
@@ -347,16 +347,21 @@ struct multi_outputs_unroll {
 // which is C10_HOST_DEVICE, so we have to make this C10_HOST_DEVICE
 // in order to compile
 template<typename scalar_t>
-inline C10_HOST_DEVICE int can_vectorize_up_to(char *pointer) {
+inline C10_HOST_DEVICE int can_vectorize_up_to(const char *pointer) {
   uint64_t address = reinterpret_cast<uint64_t>(pointer);
-  constexpr int vec2_alignment = std::alignment_of<aligned_vector<scalar_t, 2>>::value;
-  constexpr int vec4_alignment = std::alignment_of<aligned_vector<scalar_t, 4>>::value;
+  constexpr int vec2_alignment = std::alignment_of_v<aligned_vector<scalar_t, 2>>;
+  constexpr int vec4_alignment = std::alignment_of_v<aligned_vector<scalar_t, 4>>;
   if (address % vec4_alignment == 0) {
     return 4;
   } else if (address % vec2_alignment == 0) {
     return 2;
   }
   return 1;
+}
+
+template<typename scalar_t>
+inline C10_HOST_DEVICE int can_vectorize_up_to(char *pointer) {
+  return can_vectorize_up_to<scalar_t>(static_cast<const char*>(pointer));
 }
 
 template<int i>
@@ -382,4 +387,4 @@ inline int can_vectorize_up_to(array_t pointers) {
   return result;
 }
 
-}}} // namespace at::native::memory
+} // namespace at::native::memory

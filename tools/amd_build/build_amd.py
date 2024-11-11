@@ -5,6 +5,7 @@ import argparse
 import os
 import sys
 
+
 sys.path.append(
     os.path.realpath(
         os.path.join(
@@ -14,6 +15,7 @@ sys.path.append(
 )
 
 from hipify import hipify_python  # type: ignore[import]
+
 
 parser = argparse.ArgumentParser(
     description="Top-level script for HIPifying, filling in most common parameters"
@@ -159,7 +161,10 @@ hip_platform_files = [
     "third_party/fbgemm/fbgemm_gpu/codegen/embedding_backward_split_host_template.cpp",
     "third_party/fbgemm/fbgemm_gpu/codegen/embedding_backward_split_template.cu",
     "third_party/fbgemm/fbgemm_gpu/codegen/embedding_forward_quantized_split_lookup.cu",
-    "third_party/fbgemm/fbgemm_gpu/include/fbgemm_gpu/fbgemm_cuda_utils.cuh",
+    "third_party/fbgemm/fbgemm_gpu/include/fbgemm_gpu/utils/cuda_prelude.cuh",
+    "third_party/fbgemm/fbgemm_gpu/include/fbgemm_gpu/utils/stochastic_rounding.cuh",
+    "third_party/fbgemm/fbgemm_gpu/include/fbgemm_gpu/utils/vec4.cuh",
+    "third_party/fbgemm/fbgemm_gpu/include/fbgemm_gpu/utils/weight_row.cuh",
     "third_party/fbgemm/fbgemm_gpu/include/fbgemm_gpu/sparse_ops.cuh",
     "third_party/fbgemm/fbgemm_gpu/src/jagged_tensor_ops.cu",
     "third_party/fbgemm/fbgemm_gpu/src/quantize_ops.cu",
@@ -200,7 +205,11 @@ hipify_python.hipify(
     output_directory=out_dir,
     includes=includes,
     ignores=ignores,
-    extra_files=["torch/_inductor/codegen/wrapper.py"],
+    extra_files=[
+        "torch/_inductor/codegen/cpp_wrapper_cpu.py",
+        "torch/_inductor/codegen/cpp_wrapper_gpu.py",
+        "torch/_inductor/codegen/wrapper.py",
+    ],
     out_of_place_only=args.out_of_place_only,
     hip_clang_launch=is_hip_clang(),
 )

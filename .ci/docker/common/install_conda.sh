@@ -5,17 +5,17 @@ set -ex
 # Optionally install conda
 if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   BASE_URL="https://repo.anaconda.com/miniconda"
+  CONDA_FILE="Miniconda3-latest-Linux-x86_64.sh"
+  if [[ $(uname -m) == "aarch64" ]] || [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
+    BASE_URL="https://github.com/conda-forge/miniforge/releases/latest/download"
+    CONDA_FILE="Miniforge3-Linux-$(uname -m).sh"
+  fi
 
   MAJOR_PYTHON_VERSION=$(echo "$ANACONDA_PYTHON_VERSION" | cut -d . -f 1)
   MINOR_PYTHON_VERSION=$(echo "$ANACONDA_PYTHON_VERSION" | cut -d . -f 2)
 
   case "$MAJOR_PYTHON_VERSION" in
-    2)
-      CONDA_FILE="Miniconda2-latest-Linux-x86_64.sh"
-    ;;
-    3)
-      CONDA_FILE="Miniconda3-latest-Linux-x86_64.sh"
-    ;;
+    3);;
     *)
       echo "Unsupported ANACONDA_PYTHON_VERSION: $ANACONDA_PYTHON_VERSION"
       exit 1
@@ -47,15 +47,27 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   # Uncomment the below when resolved to track the latest conda update
   # as_jenkins conda update -y -n base conda
 
+  if [[ $(uname -m) == "aarch64" ]]; then
+    export SYSROOT_DEP="sysroot_linux-aarch64=2.17"
+  else
+    export SYSROOT_DEP="sysroot_linux-64=2.17"
+  fi
+
   # Install correct Python version
-  as_jenkins conda create -n py_$ANACONDA_PYTHON_VERSION -y python="$ANACONDA_PYTHON_VERSION"
+  # Also ensure sysroot is using a modern GLIBC to match system compilers
+  as_jenkins conda create -n py_$ANACONDA_PYTHON_VERSION -y\
+             python="$ANACONDA_PYTHON_VERSION" \
+             ${SYSROOT_DEP}
+
+  # libstdcxx from conda default channels are too old, we need GLIBCXX_3.4.30
+  # which is provided in libstdcxx 12 and up.
+  conda_install libstdcxx-ng=12.3.0 -c conda-forge
 
   # Install PyTorch conda deps, as per https://github.com/pytorch/pytorch README
-  CONDA_COMMON_DEPS="astunparse pyyaml mkl=2021.4.0 mkl-include=2021.4.0 setuptools"
-  if [ "$ANACONDA_PYTHON_VERSION" = "3.11" ]; then
-    conda_install numpy=1.23.5 ${CONDA_COMMON_DEPS}
+  if [[ $(uname -m) == "aarch64" ]]; then
+    conda_install "openblas==0.3.25=*openmp*"
   else
-    conda_install numpy=1.21.2 ${CONDA_COMMON_DEPS}
+    conda_install "mkl=2021.4.0 mkl-include=2021.4.0"
   fi
 
   # Install llvm-8 as it is required to compile llvmlite-0.30.0 from source
@@ -79,23 +91,12 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   # Install some other packages, including those needed for Python test reporting
   pip_install -r /opt/conda/requirements-ci.txt
 
-  pip_install -U scikit-learn
-
   if [ -n "$DOCS" ]; then
     apt-get update
     apt-get -y install expect-dev
 
     # We are currently building docs with python 3.8 (min support version)
     pip_install -r /opt/conda/requirements-docs.txt
-  fi
-
-  # HACK HACK HACK
-  # gcc-9 for ubuntu-18.04 from http://ppa.launchpad.net/ubuntu-toolchain-r/test/ubuntu
-  # Pulls llibstdc++6 13.1.0-8ubuntu1~18.04 which is too new for conda
-  # So remove libstdc++6.so.3.29 installed by https://anaconda.org/anaconda/libstdcxx-ng/files?version=11.2.0
-  # Same is true for gcc-12 from Ubuntu-22.04
-  if grep -e [12][82].04.[623] /etc/issue >/dev/null; then
-    rm /opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/lib/libstdc++.so.6
   fi
 
   popd

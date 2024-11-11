@@ -16,7 +16,8 @@ __all__ = ["tree_map_", "treespec_pprint"]
 with warnings.catch_warnings():
     warnings.simplefilter("always")
     warnings.warn(
-        "torch._functorch.pytree_hacks is deprecated and will be removed in a future release. "
-        "Please use torch.utils._pytree instead.",
+        "`torch._functorch.pytree_hacks` is deprecated and will be removed in a future release. "
+        "Please `use torch.utils._pytree` instead.",
         DeprecationWarning,
+        stacklevel=2,
     )

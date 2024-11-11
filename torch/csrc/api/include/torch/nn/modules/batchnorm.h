@@ -7,10 +7,7 @@
 #include <torch/nn/pimpl.h>
 #include <torch/types.h>
 
-#include <cstdint>
-
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 /// Base class for all (dimension-specialized) batchnorm and instancenorm
 /// modules.
@@ -104,11 +101,8 @@ class BatchNormImplBase : public NormImplBase<D, Derived, BatchNormOptions> {
 
   Tensor forward(const Tensor& input) {
     this->_check_input_dim(input);
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    double exponential_average_factor;
-    if (this->options.momentum() == c10::nullopt) {
-      exponential_average_factor = 0.0;
-    } else {
+    double exponential_average_factor = 0.0;
+    if (this->options.momentum().has_value()) {
       exponential_average_factor = this->options.momentum().value();
     }
 
@@ -116,7 +110,7 @@ class BatchNormImplBase : public NormImplBase<D, Derived, BatchNormOptions> {
       if (this->num_batches_tracked.defined()) {
         this->num_batches_tracked += 1;
         if (this->options.momentum() ==
-            c10::nullopt) { // use cumulative moving average
+            std::nullopt) { // use cumulative moving average
           exponential_average_factor =
               1.0 / this->num_batches_tracked.template item<double>();
         } else { // use exponential moving average
@@ -160,7 +154,7 @@ class BatchNormImplBase : public NormImplBase<D, Derived, BatchNormOptions> {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies the BatchNorm1d function.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.BatchNorm1d to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.BatchNorm1d to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::BatchNorm1dOptions` class to learn
@@ -190,7 +184,7 @@ TORCH_MODULE(BatchNorm1d);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies the BatchNorm2d function.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.BatchNorm2d to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.BatchNorm2d to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::BatchNorm2dOptions` class to learn
@@ -220,7 +214,7 @@ TORCH_MODULE(BatchNorm2d);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies the BatchNorm3d function.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.BatchNorm3d to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.BatchNorm3d to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::BatchNorm3dOptions` class to learn
@@ -246,5 +240,4 @@ class TORCH_API BatchNorm3dImpl : public BatchNormImplBase<3, BatchNorm3dImpl> {
 /// learn about PyTorch's module storage semantics.
 TORCH_MODULE(BatchNorm3d);
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

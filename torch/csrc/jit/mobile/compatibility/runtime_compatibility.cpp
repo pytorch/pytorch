@@ -11,8 +11,7 @@ namespace c10 {
 TypePtr parseType(const std::string& pythonStr);
 } // namespace c10
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 uint64_t _get_runtime_bytecode_version() {
   return caffe2::serialize::kMaxSupportedBytecodeVersion;
@@ -40,7 +39,7 @@ std::unordered_map<std::string, OperatorInfo> _get_runtime_ops_and_info() {
   auto nonDispatcherOperators = torch::jit::getAllOperators();
   for (const auto& full_op : nonDispatcherOperators) {
     auto op = full_op->schema();
-    int num_schema_args = op.arguments().size();
+    auto num_schema_args = op.arguments().size();
     auto op_name = op.name();
     if (!op.overload_name().empty()) {
       op_name += ("." + op.overload_name());
@@ -53,7 +52,7 @@ std::unordered_map<std::string, OperatorInfo> _get_runtime_ops_and_info() {
   for (auto& op : dispatcherOperators) {
     // grab schema
     const auto op_handle = c10::Dispatcher::singleton().findOp(op);
-    c10::optional<int> num_schema_args;
+    std::optional<int> num_schema_args;
     if (op_handle->hasSchema()) {
       num_schema_args = op_handle->schema().arguments().size();
     }
@@ -94,5 +93,4 @@ TORCH_API std::unordered_set<std::string> _get_loaded_custom_classes() {
   return torch::getAllCustomClassesNames();
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

@@ -4,6 +4,17 @@ Extending PyTorch
 In this note we'll cover ways of extending :mod:`torch.nn`,
 :mod:`torch.autograd`, :mod:`torch`, and writing custom C++ extensions.
 
+Adding new operators
+--------------------
+
+PyTorch offers a large library of operators that work on Tensors (e.g. :func:`torch.add`,
+:func:`torch.sum`, etc). However, you may wish to bring a new custom operation to PyTorch
+and have it behave like PyTorch's built-in operators. In order to do so, you must
+register the custom operation with PyTorch via the Python :ref:`torch-library-docs` or C++ TORCH_LIBRARY
+APIs.
+
+Please see `PyTorch Custom Operators Landing Page <https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html>`_ for more details.
+
 .. _extending-autograd:
 
 Extending :mod:`torch.autograd`
@@ -626,10 +637,10 @@ keyword arguments like :func:`torch.add` does::
 
 For speed and flexibility the ``__torch_function__`` dispatch mechanism does not
 check that the signature of an override function matches the signature of the
-function being overrided in the :mod:`torch` API. For some applications ignoring
+function being overridden in the :mod:`torch` API. For some applications ignoring
 optional arguments would be fine but to ensure full compatibility with
 :class:`Tensor`, user implementations of torch API functions should take care to
-exactly emulate the API of the function that is being overrided.
+exactly emulate the API of the function that is being overridden.
 
 Functions in the :mod:`torch` API that do not have explicit overrides will
 return ``NotImplemented`` from ``__torch_function__``. If all operands with
@@ -848,7 +859,7 @@ signature of the original ``PyTorch`` function::
   <Signature (input, other, out=None)>
 
 Finally, ``torch.overrides.get_ignored_functions`` returns a tuple of functions
-that explicitly cannot be overrided by ``__torch_function__``. This list can be
+that explicitly cannot be overridden by ``__torch_function__``. This list can be
 useful to confirm that a function that isn't present in the dictionary returned
 by ``get_overridable_functions`` cannot be overridden.
 
@@ -901,6 +912,29 @@ Some more exotic functions or features are also registered in other places in th
 It is also possible to add `new` native functions using :mod:`torch.library`. This Python feature allows defining and/or adding new implementations to native functions. This can be used to add missing kernels, replace existing ones or define brand new native functions.
 
 You can find many examples of ``__torch_dispatch__``-based subclasses in the `subclass zoo <https://github.com/albanD/subclass_zoo>`_ repo.
+
+.. _torch-dispatch-calling-convention:
+
+``__torch_dispatch__`` calling convention
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. code-block:: python
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+        pass
+
+When a user calls an operator with inputs that have ``__torch_dispatch__``, that call
+may be forwarded to the ``__torch_dispatch__``. args and kwargs get normalized before
+the call to ``__torch_dispatch__``, that is:
+
+- the ``kwargs`` consist of keyword-only arguments in the operator's schema.
+  If a kwarg is equal to its default value (in the schema), it will not be passed.
+- the ``args`` consists of all other arguments, no matter how they were passed
+  to the operator (positional vs keyword).
+  If an arg is equal to its default value, and
+  it is the right-most positional arg or all the args to the right of it
+  are not passed, it will not be passed.
 
 Extending all :mod:`torch` API with Modes
 -----------------------------------------
@@ -968,13 +1002,3 @@ Which prints the following, with extra comments::
   Dispatch Log: aten.mul.Tensor(*(tensor([1., 1., 1., 1., 1., 1., 1., 1., 1., 1.]), 2), **{})
   Dispatch Log: aten.detach.default(*(tensor([2., 2., 2., 2., 2., 2., 2., 2., 2., 2.]),), **{})
   Dispatch Log: aten.detach.default(*(tensor([2., 2., 2., 2., 2., 2., 2., 2., 2., 2.]),), **{})
-
-
-Writing custom C++ extensions
------------------------------
-
-See this
-`PyTorch tutorial <https://pytorch.org/tutorials/advanced/cpp_extension.html>`_
-for a detailed explanation and examples.
-
-Documentations are available at :doc:`../cpp_extension`.

@@ -15,7 +15,7 @@
 namespace at::native {
 
 Tensor one_hot(const Tensor &self, int64_t num_classes) {
-    TORCH_CHECK(self.dtype() == kLong, "one_hot is only applicable to index tensor.");
+    TORCH_CHECK(self.dtype() == kLong, "one_hot is only applicable to index tensor of type LongTensor.");
 
     // using meta bit test to catch Fake Tensor as well until __torch_function__
     if (self.key_set().has_all(DispatchKeySet(BackendComponent::MetaBit)) ||
@@ -34,7 +34,7 @@ Tensor one_hot(const Tensor &self, int64_t num_classes) {
     // but shape inference is not possible.
     if (self.numel() == 0) {
         if (num_classes <= 0) {
-            AT_ERROR("Can not infer total number of classes from empty tensor.");
+            TORCH_CHECK(false, "Can not infer total number of classes from empty tensor.");
         } else {
             shape.push_back(num_classes);
             return at::empty(shape, self.options());
@@ -42,15 +42,17 @@ Tensor one_hot(const Tensor &self, int64_t num_classes) {
     }
 
     // non-empty tensor
-    if (self.device().type() != at::kCUDA && self.device().type() != at::kMPS) {
-      //for cuda, rely on device assert thrown by scatter
+    if (self.device().type() != at::kCUDA && self.device().type() != at::kMPS &&
+        self.device().type() != at::kPrivateUse1 && self.device().type() != at::kXLA) {
+      // for cuda, rely on device assert thrown by scatter
       TORCH_CHECK(self.min().item().toLong() >= 0, "Class values must be non-negative.");
     }
     if (num_classes == -1) {
         num_classes = self.max().item().toLong() + 1;
     } else {
-        if (self.device().type() != at::kCUDA && self.device().type() != at::kMPS) {
-          //rely on device asserts from scatter to avoid sync here
+        if (self.device().type() != at::kCUDA && self.device().type() != at::kMPS &&
+            self.device().type() != at::kPrivateUse1 && self.device().type() != at::kXLA) {
+          // rely on device asserts from scatter to avoid sync here
           TORCH_CHECK(num_classes > self.max().item().toLong(), "Class values must be smaller than num_classes.");
         } else {
             //for cuda, assert that num_classes is at least 1

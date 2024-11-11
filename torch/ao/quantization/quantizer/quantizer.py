@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Tuple, Union
@@ -7,6 +8,7 @@ from torch import Tensor
 from torch.ao.quantization import ObserverOrFakeQuantize
 from torch.ao.quantization.qconfig import _ObserverOrFakeQuantizeConstructor
 from torch.fx import Node
+
 
 __all__ = [
     "Quantizer",
@@ -24,8 +26,6 @@ class QuantizationSpecBase(ABC):  # noqa: B024
     """Base class for different types of quantization specs that allows users to
     specify how to quantize a Tensor (input/output of a Node) in the model
     """
-
-    pass
 
 
 @dataclass(eq=True, frozen=True)
@@ -47,6 +47,7 @@ class QuantizationSpec(QuantizationSpecBase):
     is_dynamic: bool = False
 
     def __post_init__(self):
+        # TODO: add init for quant_min/quant_max
         # quant_min must be less than quant_max
         if (
             self.quant_min is not None
@@ -71,6 +72,7 @@ class FixedQParamsQuantizationSpec(QuantizationSpecBase):
     quant_min: Optional[int] = None
     quant_max: Optional[int] = None
     qscheme: Optional[torch.qscheme] = None
+    is_dynamic: bool = False
 
 
 """
@@ -104,6 +106,7 @@ class DerivedQuantizationSpec(QuantizationSpecBase):
     quant_max: Optional[int] = None
     qscheme: Optional[torch.qscheme] = None
     ch_axis: Optional[int] = None
+    is_dynamic: bool = False
 
 
 @dataclass

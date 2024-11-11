@@ -3,9 +3,7 @@
 #include <torch/csrc/distributed/autograd/context/container.h>
 #include <torch/csrc/distributed/autograd/utils.h>
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace torch::distributed::rpc {
 
 using namespace torch::distributed::autograd;
 
@@ -20,6 +18,4 @@ c10::intrusive_ptr<JitFuture> RequestCallback::operator()(
   return processMessage(request, std::move(streams));
 }
 
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc

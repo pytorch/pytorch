@@ -10,10 +10,6 @@
 #include <ATen/ops/repeat_native.h>
 #include <fmt/format.h>
 
-#ifdef __OBJC__
-#include <MetalPerformanceShaders/MetalPerformanceShaders.h>
-#endif
-
 namespace at::native {
 
 Tensor permute_mps(const Tensor& self, IntArrayRef dims) {
@@ -66,14 +62,6 @@ Tensor repeat_mps(const Tensor& self, IntArrayRef repeats) {
   auto stream = at::mps::getCurrentMPSStream();
   auto inputDataType = getMPSDataType(expanded_tensor);
   auto outputDataType = getMPSDataType(result);
-  if (!is_macos_13_or_newer()) {
-    if (expanded_tensor.scalar_type() == kBool) {
-      inputDataType = MPSDataTypeInt8;
-    }
-    if (result.scalar_type() == kBool) {
-      outputDataType = MPSDataTypeInt8;
-    }
-  }
 
   @autoreleasepool {
     string key = "repeat_mps:" + getTensorsStringKey(self) + ":" + getArrayRefString(repeats);
@@ -90,73 +78,22 @@ Tensor repeat_mps(const Tensor& self, IntArrayRef repeats) {
     Placeholder outputPlaceholder =
         Placeholder(cachedGraph->outputTensor_, result, /*mpsShape=*/nil, /*gatherTensorData*/ false, outputDataType);
 
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds =
-        @{selfPlaceholder.getMPSGraphTensor() : selfPlaceholder.getMPSGraphTensorData()};
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    auto feeds = dictionaryFromPlaceholders(selfPlaceholder);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
   }
 
   return result;
 }
 
-static const char* METAL_REPEAT_INTERLEAVE = R"METAL_REPEAT(
-kernel void repeat_interleave(constant {0}     * repeat_ptr                [[buffer(0)]],
-                              constant int64_t * cumsum_ptr                [[buffer(1)]],
-                              device {0}       * result_ptr                [[buffer(2)]],
-                              uint               threads_per_threadgroup   [[threads_per_threadgroup]],
-                              uint               tid                       [[thread_position_in_grid]]) {{
-  int64_t end = cumsum_ptr[tid];
-  {0} repeat = repeat_ptr[tid];
-  int64_t start = end - repeat;
-  for (uint j = start; j < end; j++) {{
-    result_ptr[j] = tid;
-  }}
-}}
-)METAL_REPEAT";
-
-static id<MTLLibrary> compileRepeatInterleaveLib(id<MTLDevice> device, const std::string& t1) {
-  auto key = t1;
-  static std::unordered_map<std::string, id<MTLLibrary>> libMap;
-  auto it = libMap.find(key);
-  if (it != libMap.end()) {
-    return it->second;
-  }
-  NSError* error = nil;
-  MTLCompileOptions* options = [[MTLCompileOptions new] autorelease];
-  [options setLanguageVersion:MTLLanguageVersion2_3];
-  auto rc =
-      [device newLibraryWithSource:[NSString stringWithUTF8String:fmt::format(METAL_REPEAT_INTERLEAVE, t1).c_str()]
-                           options:options
-                             error:&error];
-  TORCH_CHECK(rc != nil && error == nil, "Failed to compile library: ", [[error localizedDescription] UTF8String]);
-  libMap[key] = rc;
-  return rc;
-}
-
-static id<MTLComputePipelineState> getPipelineState(id<MTLDevice> device, const std::string& t1) {
-  static std::string kernel = "repeat_interleave";
-  auto key = kernel + t1;
-  static std::unordered_map<std::string, id<MTLComputePipelineState>> cplMap;
-  auto it = cplMap.find(key);
-  if (it != cplMap.end()) {
-    return it->second;
-  }
-  NSError* error = nil;
-  auto library = compileRepeatInterleaveLib(device, t1);
-  id<MTLFunction> func = [library newFunctionWithName:[NSString stringWithUTF8String:kernel.c_str()]];
-  TORCH_CHECK(func != nil, "Can't get kernel ", kernel);
-  auto rc = [device newComputePipelineStateWithFunction:func error:&error];
-  TORCH_CHECK(
-      rc != nil && error == nil, "Failed to construct pipeline state: ", [[error localizedDescription] UTF8String]);
-  cplMap[key] = rc;
-  return rc;
-}
+#ifndef PYTORCH_JIT_COMPILE_SHADERS
+static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
+#else
+#include <ATen/native/mps/Repeat_metallib.h>
+#endif
 
 template <typename index_t>
-void computeRepeatIndices(index_t* repeat_ptr,
-                          int64_t* cumsum_ptr,
+void computeRepeatIndices(const index_t* repeat_ptr,
+                          const int64_t* cumsum_ptr,
                           index_t* result_ptr,
                           int64_t size,
                           int64_t result_size) {
@@ -166,9 +103,9 @@ void computeRepeatIndices(index_t* repeat_ptr,
   TORCH_CHECK(repeatBuffer && cumsumBuffer && resultBuffer);
 
   std::string scalar_type;
-  if (typeid(index_t) == typeid(int32_t)) {
+  if constexpr (std::is_same_v<index_t, int32_t>) {
     scalar_type = "int32_t";
-  } else if (typeid(index_t) == typeid(int64_t)) {
+  } else if constexpr (std::is_same_v<index_t, int64_t>) {
     scalar_type = "int64_t";
   } else {
     TORCH_CHECK(false, "repeat_interleave: unsupported indexing data type");
@@ -177,8 +114,8 @@ void computeRepeatIndices(index_t* repeat_ptr,
   MPSStream* mpsStream = getCurrentMPSStream();
   dispatch_sync(mpsStream->queue(), ^() {
     @autoreleasepool {
-      id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
-      id<MTLComputePipelineState> pipelineState = getPipelineState(MPSDevice::getInstance()->device(), scalar_type);
+      auto computeEncoder = mpsStream->commandEncoder();
+      auto pipelineState = lib.getPipelineStateForFunc(fmt::format("repeat_interleave_{}", scalar_type));
 
       // this function call is a no-op if MPS Profiler is not enabled
       getMPSProfiler().beginProfileKernel(pipelineState, "repeat_interleave:" + scalar_type, false);
@@ -187,22 +124,15 @@ void computeRepeatIndices(index_t* repeat_ptr,
       [computeEncoder setBuffer:repeatBuffer offset:0 atIndex:0];
       [computeEncoder setBuffer:cumsumBuffer offset:0 atIndex:1];
       [computeEncoder setBuffer:resultBuffer offset:0 atIndex:2];
-      [computeEncoder setBytes:&size length:sizeof(size) atIndex:3];
-      MTLSize gridSize = MTLSizeMake(size, 1, 1);
-      NSUInteger threadsPerThreadgroup_ = pipelineState.maxTotalThreadsPerThreadgroup;
-      if (threadsPerThreadgroup_ > static_cast<NSUInteger>(size)) {
-        threadsPerThreadgroup_ = size;
-      }
-      MTLSize threadsPerThreadgroup = MTLSizeMake(threadsPerThreadgroup_, 1, 1);
-
-      [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:threadsPerThreadgroup];
+      mps::mtl_setBytes(computeEncoder, size, 3);
+      mps::mtl_dispatch1DJob(computeEncoder, pipelineState, size);
 
       getMPSProfiler().endProfileKernel(pipelineState);
     }
   });
 }
 
-Tensor repeat_interleave_mps(const Tensor& repeat_, c10::optional<int64_t> output_size) {
+Tensor repeat_interleave_mps(const Tensor& repeat_, std::optional<int64_t> output_size) {
   Tensor output;
   Tensor repeat = repeat_;
   if (repeat.scalar_type() == kLong && !is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_3_PLUS)) {

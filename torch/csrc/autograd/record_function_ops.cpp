@@ -9,18 +9,16 @@
 namespace caffe2 {
 // Required for cpp_custom_type_hack to work
 // NOLINTNEXTLINE(bugprone-exception-escape)
-CAFFE_KNOWN_TYPE(at::RecordFunction);
+CAFFE_KNOWN_TYPE(at::RecordFunction)
 } // namespace caffe2
 
-namespace torch {
-namespace autograd {
-namespace profiler {
+namespace torch::autograd::profiler {
 
 // Creates a new profiling scope using RecordFunction and invokes its starting
 // callbacks.
 static void record_function_enter(
     const std::string& name,
-    const c10::optional<std::string>& args,
+    const std::optional<std::string>& args,
     at::RecordFunction& rec) {
   if (rec.isActive()) {
     if (rec.needsInputs() && args.has_value()) {
@@ -35,7 +33,7 @@ static void record_function_enter(
 // Legacy signature using cpp_custom_type_hack
 static at::Tensor record_function_enter_legacy(
     const std::string& name,
-    const c10::optional<std::string>& args) {
+    const std::optional<std::string>& args) {
   auto rec = std::make_unique<at::RecordFunction>(at::RecordScope::USER_SCOPE);
   record_function_enter(name, args, *rec);
   return at::cpp_custom_type_hack::create(std::move(rec), at::TensorOptions());
@@ -44,7 +42,7 @@ static at::Tensor record_function_enter_legacy(
 // New signature using custom_class
 c10::intrusive_ptr<PythonRecordFunction> record_function_enter_new(
     const std::string& name,
-    const c10::optional<std::string>& args) {
+    const std::optional<std::string>& args) {
   auto rec =
       c10::make_intrusive<PythonRecordFunction>(at::RecordScope::USER_SCOPE);
   record_function_enter(name, args, rec->record);
@@ -165,6 +163,4 @@ TORCH_LIBRARY_FRAGMENT(profiler, m) {
       c10::AliasAnalysisKind::FROM_SCHEMA));
 }
 
-} // namespace profiler
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd::profiler

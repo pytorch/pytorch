@@ -2,9 +2,9 @@
 // Licensed under the BSD-3-Clause license
 // This is the GPU implementation of the Connectionist Temporal Loss.
 // We mostly follow Graves.
-// 1. Graves et al: http://www.cs.toronto.edu/~graves/icml_2006.pdf
+// 1. Graves et al.: http://www.cs.toronto.edu/~graves/icml_2006.pdf
 // We use the equations from above link, but note that [1] has 1-based indexing and we (of course) use 0-based.
-// Graves et al call the probabilities y, we use log_probs (also calling them inputs)
+// Graves et al. call the probabilities y, we use log_probs (also calling them inputs)
 // A few optimizations (similar to those here, but also some I didn't take) are described in
 // 2. Minmin Sun: http://on-demand.gputechconf.com/gtc/2016/presentation/s6383-minmin-sun-speech-recognition.pdf
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
@@ -44,7 +44,7 @@ namespace {
 // so if l is l_0 l_1 ... l_(tl-1) then this looks up idx in
 // l' = BLANK l_0 BLANK l_1 BLANK ... BLANK l_(tl-1) BLANK
 // - note that no bound-checking is done
-// - it is important to only call it witth idx == 0 if the target length is 0
+// - it is important to only call it with idx == 0 if the target length is 0
 // - __restrict__ impact to be measured, see
 //   https://devblogs.nvidia.com/cuda-pro-tip-optimize-pointer-aliasing/
 template <typename target_t>
@@ -73,7 +73,7 @@ __device__ static inline int64_t get_target_prime(
 template<typename scalar_t, typename target_t>
 __global__ void
 #if defined (USE_ROCM)
-C10_LAUNCH_BOUNDS_2((std::is_same<scalar_t, float>::value ? 1024 : 896), 1)
+C10_LAUNCH_BOUNDS_2((std::is_same_v<scalar_t, float> ? 1024 : 896), 1)
 #endif
 ctc_loss_log_alpha_gpu_kernel(scalar_t* __restrict__ log_alpha_data,
                                     const scalar_t*log_probs_data, const int64_t* __restrict__ input_lengths, int64_t max_input_length,
@@ -96,6 +96,14 @@ ctc_loss_log_alpha_gpu_kernel(scalar_t* __restrict__ log_alpha_data,
 
   if (b >= batch_size)
     return;
+
+  if (input_length == 0) {
+    if (threadIdx.x == 0) {
+      scalar_t log_likelihood = target_length == 0 ? 0 : neginf;
+      neg_log_likelihood_data[b] = -log_likelihood;
+    }
+    return;
+  }
 
   // first row (t=0), the three equations for alpha_1 above eq (6)
   for (int64_t block_s = 0; block_s < 2*max_target_length+1; block_s += blockDim.x) {
@@ -214,7 +222,7 @@ std::tuple<Tensor, Tensor> ctc_loss_gpu_template(const Tensor& log_probs, const 
   // log_probs: input_len x batch_size x num_labels
   // targets [int64]: batch_size x target_length OR sum(target_lengths)
   CheckedFrom c = "ctc_loss_gpu";
-  using target_t = typename std::conditional<target_scalar_type == kInt, int, int64_t>::type;
+  using target_t = typename std::conditional_t<target_scalar_type == kInt, int, int64_t>;
   auto log_probs_arg = TensorArg(log_probs, "log_probs", 1);
   auto targets_arg = TensorArg(targets, "targets", 2);
   checkAllSameGPU(c, {log_probs_arg, targets_arg});
@@ -237,6 +245,9 @@ std::tuple<Tensor, Tensor> ctc_loss_gpu_template(const Tensor& log_probs, const 
   if (targets.dim() == 1) { // concatenated targets
     int64_t pos = 0;
     for (int64_t i = 0; i < batch_size; i++) {
+      TORCH_CHECK(target_lengths[i] >= 0,
+                  "Expected target_lengths to have value at least ", 0, ", but got value ", target_lengths[i],
+                  " (while checking arguments for ", c, ")");
       tg_batch_offsets_data[i] = pos;
       pos += target_lengths[i];
       if (max_target_length < target_lengths[i])
@@ -249,6 +260,9 @@ std::tuple<Tensor, Tensor> ctc_loss_gpu_template(const Tensor& log_probs, const 
     // dim is 2
     int64_t tg_batch_stride = targets.stride(0);
     for (int64_t i = 0; i < batch_size; i++) {
+      TORCH_CHECK(target_lengths[i] >= 0,
+                  "Expected target_lengths to have value at least ", 0, ", but got value ", target_lengths[i],
+                  " (while checking arguments for ", c, ")");
       tg_batch_offsets_data[i] = i * tg_batch_stride;
       if (max_target_length < target_lengths[i])
         max_target_length = target_lengths[i];
@@ -261,6 +275,9 @@ std::tuple<Tensor, Tensor> ctc_loss_gpu_template(const Tensor& log_probs, const 
   }
   int64_t max_input_length = log_probs.size(0);
   for (int64_t b = 0; b < batch_size; b++) {
+    TORCH_CHECK(input_lengths[b] >= 0,
+             "Expected input_lengths to have value at least ", 0, ", but got value ", input_lengths[b],
+             " (while checking arguments for ", c, ")");
     TORCH_CHECK(input_lengths[b] <= max_input_length,
              "Expected input_lengths to have value at most ", max_input_length, ", but got value ", input_lengths[b],
              " (while checking arguments for ", c, ")");
@@ -273,8 +290,8 @@ std::tuple<Tensor, Tensor> ctc_loss_gpu_template(const Tensor& log_probs, const 
   Tensor log_alpha = at::empty({batch_size, log_probs.size(0), 2*max_target_length+1}, log_probs.options());
   Tensor neg_log_likelihood = at::empty({batch_size}, log_probs.options());
 
-  // Very likely, we could be more clever here, e.g. learning (or genralizing and reusing) from SoftMax.cu...
-  constexpr int max_threads = std::is_same<scalar_t, float>::value ? 1024 : 896; // we need 72 or so 32 bit registers for double
+  // Very likely, we could be more clever here, e.g. learning (or generalizing and reusing) from SoftMax.cu...
+  constexpr int max_threads = std::is_same_v<scalar_t, float> ? 1024 : 768; // we need 72 or so 32 bit registers for double
   int threads_target = max_threads;
   while (threads_target / 2 >= 2*max_target_length+1) {
     threads_target /= 2;
@@ -301,7 +318,7 @@ std::tuple<Tensor, Tensor> ctc_loss_gpu_template(const Tensor& log_probs, const 
 // alpha kernel above. (As mentioned above, it might make sense do the calculation in the alpha kernel.)
 template<typename scalar_t, typename target_t>
 __global__ void
-C10_LAUNCH_BOUNDS_2((std::is_same<scalar_t, float>::value ? 1024 : 896), 1)
+C10_LAUNCH_BOUNDS_2((std::is_same_v<scalar_t, float> ? 1024 : 896), 1)
 ctc_loss_backward_log_beta_gpu_kernel(scalar_t* __restrict__ log_beta_data,
                                       const scalar_t*log_probs_data, const int64_t* __restrict__ input_lengths, int64_t max_input_length,
                                       const target_t* __restrict__ targets_data, const int64_t* __restrict__ target_lengths, int64_t max_target_length,
@@ -322,7 +339,10 @@ ctc_loss_backward_log_beta_gpu_kernel(scalar_t* __restrict__ log_beta_data,
   if (b >= batch_size)
     return;
 
-  // "first" row, the beta initiaization before eq (10) (t=target_length - differes per batch)
+  if (input_length == 0)
+    return;
+
+  // "first" row, the beta initialization before eq (10) (t=target_length - differes per batch)
   for (int64_t block_s = 2*max_target_length - (2*max_target_length % blockDim.x); block_s >= 0; block_s -= blockDim.x) {
     int64_t s = threadIdx.x + block_s;
     scalar_t lb;
@@ -427,7 +447,7 @@ ctc_loss_backward_log_beta_gpu_kernel(scalar_t* __restrict__ log_beta_data,
 template<typename scalar_t, typename target_t>
 __global__ void
 #if defined (USE_ROCM)
-C10_LAUNCH_BOUNDS_2((std::is_same<scalar_t, float>::value ? 1024 : 896), 1)
+C10_LAUNCH_BOUNDS_2((std::is_same_v<scalar_t, float> ? 1024 : 896), 1)
 #endif
 ctc_loss_backward_collect_nonblank_gpu_kernel(scalar_t* __restrict__ gradient_data,
                                                      const scalar_t* __restrict__ grad_out_data, int64_t grad_out_batch_stride,
@@ -479,7 +499,7 @@ ctc_loss_backward_collect_nonblank_gpu_kernel(scalar_t* __restrict__ gradient_da
 template<typename scalar_t, typename target_t>
 __global__ void
 #if defined (USE_ROCM)
-C10_LAUNCH_BOUNDS_2((std::is_same<scalar_t, float>::value ? 1024 : 896), 1)
+C10_LAUNCH_BOUNDS_2((std::is_same_v<scalar_t, float> ? 1024 : 896), 1)
 #endif
 ctc_loss_backward_collect_gpu_kernel(scalar_t* __restrict__ gradient_data,
                                                      const scalar_t* __restrict__ grad_out_data, int64_t grad_out_batch_stride,
@@ -551,7 +571,7 @@ ctc_loss_backward_collect_gpu_kernel(scalar_t* __restrict__ gradient_data,
 template<typename scalar_t>
 __global__ void
 #if defined (USE_ROCM)
-C10_LAUNCH_BOUNDS_2((std::is_same<scalar_t, float>::value ? 1024 : 896), 1)
+C10_LAUNCH_BOUNDS_2((std::is_same_v<scalar_t, float> ? 1024 : 896), 1)
 #endif
 ctc_loss_zero_padded_gradients(
     scalar_t* __restrict__ gradient_data,   /* (T, B, D) layout */
@@ -585,7 +605,7 @@ template<typename scalar_t, ScalarType target_scalar_type>
 Tensor ctc_loss_backward_gpu_template(const Tensor& grad_out, const Tensor& log_probs, const Tensor& targets, IntArrayRef input_lengths, IntArrayRef target_lengths,
                                       const Tensor& neg_log_likelihood, const Tensor& log_alpha, int64_t BLANK, bool zero_infinity) {
   constexpr scalar_t neginf = -INFINITY;
-  using target_t = typename std::conditional<target_scalar_type == kInt, int, int64_t>::type;
+  using target_t = typename std::conditional_t<target_scalar_type == kInt, int, int64_t>;
   int64_t batch_size = log_probs.size(1);
   int64_t num_labels = log_probs.size(2);
   int64_t tg_target_stride;
@@ -623,7 +643,7 @@ Tensor ctc_loss_backward_gpu_template(const Tensor& grad_out, const Tensor& log_
   Tensor grad = at::full_like(log_probs, neginf, LEGACY_CONTIGUOUS_MEMORY_FORMAT); // initialization for log(sum (alpha beta))
 
   // As above, there may be better configurations to use.
-  constexpr int max_threads = std::is_same<scalar_t, float>::value ? 1024 : 896; // we need 72 or so 32 bit registers for double
+  constexpr int max_threads = std::is_same_v<scalar_t, float> ? 1024 : 896; // we need 72 or so 32 bit registers for double
   int threads_target = max_threads;
   while (threads_target / 2 >= 2*max_target_length+1) {
     threads_target /= 2;

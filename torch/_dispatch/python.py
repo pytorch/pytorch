@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import itertools
 import unittest.mock
 from contextlib import contextmanager
@@ -8,6 +9,7 @@ import torch._C
 import torch._ops
 import torch.utils._python_dispatch
 import torch.utils._pytree as pytree
+
 
 __all__ = ["enable_python_dispatcher", "no_python_dispatcher", "enable_pre_dispatch"]
 

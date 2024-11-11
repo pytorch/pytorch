@@ -1,9 +1,7 @@
 #include <ATen/core/ivalue.h>
 #include <torch/csrc/jit/mobile/parse_operators.h>
 
-namespace torch {
-namespace jit {
-namespace mobile {
+namespace torch::jit::mobile {
 
 void parseOperators(
     c10::ivalue::TupleElements&& ops_list,
@@ -16,7 +14,7 @@ void parseOperators(
         "There should be either two parts (name and overload name), ",
         "or three parts (name, overload name and number of specified args) ",
         "for an operator");
-    c10::optional<int> num_args;
+    std::optional<int> num_args;
     if (op_item.size() > 2) {
       num_args = op_item[2].toInt();
     }
@@ -27,6 +25,4 @@ void parseOperators(
       (module_load_options & MobileModuleLoadOptions::OPERATOR_CHECK));
 }
 
-} // namespace mobile
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::mobile

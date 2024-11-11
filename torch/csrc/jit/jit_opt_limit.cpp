@@ -1,18 +1,16 @@
 #include <cstdlib>
-#include <iomanip>
 #include <sstream>
 #include <string>
 #include <utility>
-#include <vector>
 
 #include <ATen/core/function.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
+#include <c10/util/env.h>
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/jit_opt_limit.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 static std::unordered_map<std::string, int64_t>& passes_to_current_counter() {
   static std::unordered_map<std::string, int64_t> passes_to_current_counter;
@@ -21,8 +19,7 @@ static std::unordered_map<std::string, int64_t>& passes_to_current_counter() {
 
 static int parseOptLimit(const std::string& opt_limit) {
   try {
-    int64_t n = std::stoi(opt_limit);
-    return n;
+    return std::stoi(opt_limit);
   } catch (...) {
     return -1;
   }
@@ -51,14 +48,14 @@ static std::unordered_map<std::string, int64_t> parseJITOptLimitOption(
 }
 
 bool opt_limit(const char* pass_name) {
-  static const char* opt_limit = std::getenv("PYTORCH_JIT_OPT_LIMIT");
+  static const auto opt_limit = c10::utils::get_env("PYTORCH_JIT_OPT_LIMIT");
   // if nothing is provided, let's allow everything
-  if (!opt_limit) {
+  if (!opt_limit.has_value()) {
     return true;
   }
 
   static const std::unordered_map<std::string, int64_t> passes_to_opt_limits =
-      parseJITOptLimitOption(opt_limit);
+      parseJITOptLimitOption(opt_limit->c_str());
   std::string pass{pass_name};
   pass = c10::detail::StripBasename(pass);
   pass = c10::detail::ExcludeFileExtension(pass);
@@ -82,5 +79,4 @@ bool opt_limit(const char* pass_name) {
   return true;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

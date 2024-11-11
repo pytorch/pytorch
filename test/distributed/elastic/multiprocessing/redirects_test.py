@@ -123,7 +123,7 @@ class RedirectsTest(unittest.TestCase):
                 print_fn(i)
 
         with open(stdout_log) as fp:
-            actual = {int(line.split(":")[1]) for line in fp.readlines()}
+            actual = {int(line.split(":")[1]) for line in fp}
             expected = set(range(num_lines))
             self.assertSetEqual(expected, actual)
 
@@ -138,3 +138,7 @@ class RedirectsTest(unittest.TestCase):
             libc.printf(bytes(f"c:{i}\n", "utf-8"))
 
         self._redirect_large_buffer(c_print)
+
+
+if __name__ == "__main__":
+    unittest.main()

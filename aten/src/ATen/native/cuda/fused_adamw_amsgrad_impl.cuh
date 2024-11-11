@@ -1,8 +1,7 @@
 #pragma once
 #include <ATen/core/Tensor.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 void _fused_adamw_amsgrad_cuda_impl_(
     at::TensorList params,
@@ -17,8 +16,8 @@ void _fused_adamw_amsgrad_cuda_impl_(
     const double weight_decay,
     const double eps,
     const bool maximize,
-    const c10::optional<at::Tensor>& grad_scale,
-    const c10::optional<at::Tensor>& found_inf);
+    const std::optional<at::Tensor>& grad_scale,
+    const std::optional<at::Tensor>& found_inf);
 
 void _fused_adamw_amsgrad_cuda_impl_(
     at::TensorList params,
@@ -33,8 +32,7 @@ void _fused_adamw_amsgrad_cuda_impl_(
     const double weight_decay,
     const double eps,
     const bool maximize,
-    const c10::optional<at::Tensor>& grad_scale,
-    const c10::optional<at::Tensor>& found_inf);
+    const std::optional<at::Tensor>& grad_scale,
+    const std::optional<at::Tensor>& found_inf);
 
-} // namespace native
-} // namespace at
+} // namespace at::native

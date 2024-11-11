@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import torch
 from torch import nan
 from torch.distributions import constraints
@@ -5,6 +6,7 @@ from torch.distributions.transformed_distribution import TransformedDistribution
 from torch.distributions.transforms import AffineTransform, PowerTransform
 from torch.distributions.uniform import Uniform
 from torch.distributions.utils import broadcast_all, euler_constant
+
 
 __all__ = ["Kumaraswamy"]
 
@@ -46,7 +48,6 @@ class Kumaraswamy(TransformedDistribution):
         self.concentration1, self.concentration0 = broadcast_all(
             concentration1, concentration0
         )
-        finfo = torch.finfo(self.concentration0.dtype)
         base_dist = Uniform(
             torch.full_like(self.concentration0, 0),
             torch.full_like(self.concentration0, 1),

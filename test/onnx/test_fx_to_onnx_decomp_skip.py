@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import onnx
 import onnx.inliner
+
 import pytorch_test_common
 
 import torch
@@ -20,7 +21,7 @@ def assert_op_in_onnx_model(model: onnx.ModelProto, op_type: str):
 class TestDynamoExportDecompSkip(pytorch_test_common.ExportTestCase):
     def test_upsample_bilinear2d(self):
         class TestModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.upsample = torch.nn.Upsample(scale_factor=2, mode="bilinear")
 
@@ -30,6 +31,45 @@ class TestDynamoExportDecompSkip(pytorch_test_common.ExportTestCase):
         onnx_program = torch.onnx.dynamo_export(TestModel(), torch.randn(1, 1, 2, 2))
         # If decomposition is skipped, the model will contain a Resize op instead of fine grained subgraph.
         assert_op_in_onnx_model(onnx_program.model_proto, "Resize")
+
+    def test_upsample_bilinear2d_output_size(self):
+        def func(x: torch.Tensor):
+            return torch.nn.functional.interpolate(x, size=(4, 4), mode="bilinear")
+
+        onnx_program = torch.onnx.dynamo_export(func, torch.randn(1, 1, 2, 2))
+        # If decomposition is skipped, the model will contain a Resize op instead of fine grained subgraph.
+        assert_op_in_onnx_model(onnx_program.model_proto, "Resize")
+
+    def test_upsample_trilinear3d(self):
+        class TestModel(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.upsample = torch.nn.Upsample(scale_factor=2, mode="trilinear")
+
+            def forward(self, x):
+                return self.upsample(x)
+
+        onnx_program = torch.onnx.dynamo_export(TestModel(), torch.randn(1, 1, 2, 2, 3))
+        # If decomposition is skipped, the model will contain a Resize op instead of fine grained subgraph.
+        assert_op_in_onnx_model(onnx_program.model_proto, "Resize")
+
+    def test_upsample_trilinear3d_output_size(self):
+        def func(x: torch.Tensor):
+            return torch.nn.functional.interpolate(x, size=(4, 4, 4), mode="trilinear")
+
+        onnx_program = torch.onnx.dynamo_export(func, torch.randn(1, 1, 2, 2, 3))
+        # If decomposition is skipped, the model will contain a Resize op instead of fine grained subgraph.
+        assert_op_in_onnx_model(onnx_program.model_proto, "Resize")
+
+    def test_instance_norm(self):
+        class TestModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.nn.functional.instance_norm(x)
+
+        onnx_program = torch.onnx.dynamo_export(TestModel(), torch.randn(1, 1, 2, 2))
+        # If decomposition is skipped, the model will contain an InstanceNormalization op
+        # instead of BatchNormalization op w/ training=True.
+        assert_op_in_onnx_model(onnx_program.model_proto, "InstanceNormalization")
 
 
 if __name__ == "__main__":

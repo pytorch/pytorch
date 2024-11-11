@@ -8,7 +8,6 @@ import sys
 import warnings
 
 import numpy
-
 import pytest
 
 
@@ -21,6 +20,7 @@ from unittest import expectedFailure as xfail, skipIf as skipif, SkipTest
 from hypothesis import given, strategies as st
 from hypothesis.extra import numpy as hynp
 from pytest import raises as assert_raises
+
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -31,6 +31,7 @@ from torch.testing._internal.common_utils import (
     xfailIfTorchDynamo,
     xpassIfTorchDynamo,
 )
+
 
 # If we are going to trace through these, we should use NumPy
 # If testing on eager mode, we use torch._numpy
@@ -145,7 +146,7 @@ class TestNonarrayArgs(TestCase):
 
     def test_cumproduct(self):
         A = [[1, 2, 3], [4, 5, 6]]
-        assert_(np.all(np.cumproduct(A) == np.array([1, 2, 6, 24, 120, 720])))
+        assert_(np.all(np.cumprod(A) == np.array([1, 2, 6, 24, 120, 720])))
 
     def test_diagonal(self):
         a = [[0, 1, 2, 3], [4, 5, 6, 7], [8, 9, 10, 11]]
@@ -371,32 +372,53 @@ class TestBoolScalar(TestCase):
         assert_((t and s) is s)
         assert_((f and s) is f)
 
-    @xfailIfTorchDynamo
-    def test_bitwise_or(self):
+    def test_bitwise_or_eq(self):
         f = np.False_
         t = np.True_
-        assert_((t | t) is t)
-        assert_((f | t) is t)
-        assert_((t | f) is t)
-        assert_((f | f) is f)
+        assert_((t | t) == t)
+        assert_((f | t) == t)
+        assert_((t | f) == t)
+        assert_((f | f) == f)
 
-    @xfailIfTorchDynamo
-    def test_bitwise_and(self):
+    def test_bitwise_or_is(self):
         f = np.False_
         t = np.True_
-        assert_((t & t) is t)
-        assert_((f & t) is f)
-        assert_((t & f) is f)
-        assert_((f & f) is f)
+        assert_(bool(t | t) is bool(t))
+        assert_(bool(f | t) is bool(t))
+        assert_(bool(t | f) is bool(t))
+        assert_(bool(f | f) is bool(f))
 
-    @xfailIfTorchDynamo
-    def test_bitwise_xor(self):
+    def test_bitwise_and_eq(self):
         f = np.False_
         t = np.True_
-        assert_((t ^ t) is f)
-        assert_((f ^ t) is t)
-        assert_((t ^ f) is t)
-        assert_((f ^ f) is f)
+        assert_((t & t) == t)
+        assert_((f & t) == f)
+        assert_((t & f) == f)
+        assert_((f & f) == f)
+
+    def test_bitwise_and_is(self):
+        f = np.False_
+        t = np.True_
+        assert_(bool(t & t) is bool(t))
+        assert_(bool(f & t) is bool(f))
+        assert_(bool(t & f) is bool(f))
+        assert_(bool(f & f) is bool(f))
+
+    def test_bitwise_xor_eq(self):
+        f = np.False_
+        t = np.True_
+        assert_((t ^ t) == f)
+        assert_((f ^ t) == t)
+        assert_((t ^ f) == t)
+        assert_((f ^ f) == f)
+
+    def test_bitwise_xor_is(self):
+        f = np.False_
+        t = np.True_
+        assert_(bool(t ^ t) is bool(f))
+        assert_(bool(f ^ t) is bool(t))
+        assert_(bool(t ^ f) is bool(t))
+        assert_(bool(f ^ f) is bool(f))
 
 
 class TestBoolArray(TestCase):
@@ -435,10 +457,10 @@ class TestBoolArray(TestCase):
         for i in list(range(9, 6000, 507)) + [7764, 90021, -10]:
             d = np.array([False] * 100043, dtype=bool)
             d[i] = True
-            assert_(np.any(d), msg="%r" % i)
+            assert_(np.any(d), msg=f"{i!r}")
             e = np.array([True] * 100043, dtype=bool)
             e[i] = False
-            assert_(not np.all(e), msg="%r" % i)
+            assert_(not np.all(e), msg=f"{i!r}")
 
     def test_logical_not_abs(self):
         assert_array_equal(~self.t, self.f)
@@ -679,7 +701,7 @@ class TestFloatExceptions(TestCase):
     @parametrize("typecode", np.typecodes["AllFloat"])
     def test_floating_exceptions(self, typecode):
         # Test basic arithmetic function errors
-        ftype = np.obj2sctype(typecode)
+        ftype = np.dtype(typecode).type
         if np.dtype(ftype).kind == "f":
             # Get some extreme values for the type
             fi = np.finfo(ftype)
@@ -810,20 +832,20 @@ class TestTypes(TestCase):
         #           shouldn't narrow the float/complex type
         for a in [np.array([True, False]), np.array([-3, 12], dtype=np.int8)]:
             b = 1.234 * a
-            assert_equal(b.dtype, np.dtype("f8"), "array type %s" % a.dtype)
+            assert_equal(b.dtype, np.dtype("f8"), f"array type {a.dtype}")
             b = np.float64(1.234) * a
-            assert_equal(b.dtype, np.dtype("f8"), "array type %s" % a.dtype)
+            assert_equal(b.dtype, np.dtype("f8"), f"array type {a.dtype}")
             b = np.float32(1.234) * a
-            assert_equal(b.dtype, np.dtype("f4"), "array type %s" % a.dtype)
+            assert_equal(b.dtype, np.dtype("f4"), f"array type {a.dtype}")
             b = np.float16(1.234) * a
-            assert_equal(b.dtype, np.dtype("f2"), "array type %s" % a.dtype)
+            assert_equal(b.dtype, np.dtype("f2"), f"array type {a.dtype}")
 
             b = 1.234j * a
-            assert_equal(b.dtype, np.dtype("c16"), "array type %s" % a.dtype)
+            assert_equal(b.dtype, np.dtype("c16"), f"array type {a.dtype}")
             b = np.complex128(1.234j) * a
-            assert_equal(b.dtype, np.dtype("c16"), "array type %s" % a.dtype)
+            assert_equal(b.dtype, np.dtype("c16"), f"array type {a.dtype}")
             b = np.complex64(1.234j) * a
-            assert_equal(b.dtype, np.dtype("c8"), "array type %s" % a.dtype)
+            assert_equal(b.dtype, np.dtype("c8"), f"array type {a.dtype}")
 
         # The following use-case is problematic, and to resolve its
         # tricky side-effects requires more changes.
@@ -902,14 +924,19 @@ class TestTypes(TestCase):
     @xpassIfTorchDynamo  # (reason="value-based casting?")
     def test_can_cast_values(self):
         # gh-5917
-        for dt in np.sctypes["int"] + np.sctypes["uint"]:
+        for dt in [np.int8, np.int16, np.int32, np.int64] + [
+            np.uint8,
+            np.uint16,
+            np.uint32,
+            np.uint64,
+        ]:
             ii = np.iinfo(dt)
             assert_(np.can_cast(ii.min, dt))
             assert_(np.can_cast(ii.max, dt))
             assert_(not np.can_cast(ii.min - 1, dt))
             assert_(not np.can_cast(ii.max + 1, dt))
 
-        for dt in np.sctypes["float"]:
+        for dt in [np.float16, np.float32, np.float64, np.longdouble]:
             fi = np.finfo(dt)
             assert_(np.can_cast(fi.min, dt))
             assert_(np.can_cast(fi.max, dt))
@@ -947,15 +974,15 @@ class TestFromiter(TestCase):
         expected = np.array(list(self.makegen()))
         a = np.fromiter(self.makegen(), int)
         a20 = np.fromiter(self.makegen(), int, 20)
-        assert_(np.alltrue(a == expected, axis=0))
-        assert_(np.alltrue(a20 == expected[:20], axis=0))
+        assert_(np.all(a == expected, axis=0))
+        assert_(np.all(a20 == expected[:20], axis=0))
 
     def load_data(self, n, eindex):
         # Utility method for the issue 2592 tests.
         # Raise an exception at the desired index in the iterator.
         for e in range(n):
             if e == eindex:
-                raise NIterError("error at index %s" % eindex)
+                raise NIterError(f"error at index {eindex}")
             yield e
 
     @parametrize("dtype", [int])
@@ -2137,7 +2164,6 @@ class TestCreationFuncs(TestCase):
 
     def setUp(self):
         super().setUp()
-        # dtypes = {np.dtype(tp) for tp in itertools.chain.from_iterable(np.sctypes.values())}
         dtypes = {np.dtype(tp) for tp in "efdFDBbhil?"}
         self.dtypes = dtypes
         self.orders = {

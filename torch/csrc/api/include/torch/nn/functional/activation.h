@@ -10,9 +10,7 @@
 #include <limits>
 #include <utility>
 
-namespace torch {
-namespace nn {
-namespace functional {
+namespace torch::nn::functional {
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
@@ -27,7 +25,7 @@ inline Tensor elu(Tensor input, double alpha, bool inplace) {
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.elu
+/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.elu
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::ELUFuncOptions` class to
@@ -57,7 +55,7 @@ inline Tensor selu(Tensor input, bool inplace) {
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.selu
+/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.selu
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::SELUFuncOptions` class to
@@ -83,7 +81,7 @@ inline Tensor hardshrink(const Tensor& input, double lambda) {
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.hardshrink
+/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.hardshrink
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::HardshrinkFuncOptions`
@@ -119,7 +117,7 @@ inline Tensor hardtanh(
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.hardtanh
+/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.hardtanh
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::HardtanhFuncOptions` class
@@ -154,7 +152,7 @@ inline Tensor leaky_relu(Tensor input, double negative_slope, bool inplace) {
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.leaky_relu
+/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.leaky_relu
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::LeakyReLUFuncOptions`
@@ -208,7 +206,7 @@ inline Tensor gumbel_softmax(
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.gumbel_softmax
+/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.gumbel_softmax
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::GumbelSoftmaxFuncOptions`
@@ -233,10 +231,10 @@ namespace detail {
 inline Tensor softmax(
     const Tensor& input,
     int64_t dim,
-    c10::optional<torch::Dtype> dtype) {
+    std::optional<torch::Dtype> dtype) {
   Tensor ret;
 
-  if (dtype == c10::nullopt) {
+  if (dtype == std::nullopt) {
     ret = input.softmax(dim);
   } else {
     ret = input.softmax(dim, dtype);
@@ -248,7 +246,7 @@ inline Tensor softmax(
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.softmax
+/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.softmax
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::SoftmaxFuncOptions` class
@@ -270,10 +268,10 @@ namespace detail {
 inline Tensor softmin(
     const Tensor& input,
     int64_t dim,
-    c10::optional<torch::Dtype> dtype) {
+    std::optional<torch::Dtype> dtype) {
   Tensor ret;
 
-  if (dtype == c10::nullopt) {
+  if (dtype == std::nullopt) {
     ret = (-input).softmax(dim);
   } else {
     ret = (-input).softmax(dim, dtype);
@@ -285,7 +283,7 @@ inline Tensor softmin(
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.softmin
+/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.softmin
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::SoftminFuncOptions` class
@@ -307,10 +305,10 @@ namespace detail {
 inline Tensor log_softmax(
     const Tensor& input,
     int64_t dim,
-    c10::optional<torch::Dtype> dtype) {
+    std::optional<torch::Dtype> dtype) {
   Tensor ret;
 
-  if (dtype == c10::nullopt) {
+  if (dtype == std::nullopt) {
     ret = input.log_softmax(dim);
   } else {
     ret = input.log_softmax(dim, dtype);
@@ -322,7 +320,7 @@ inline Tensor log_softmax(
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.log_softmax
+/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.log_softmax
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::LogSoftmaxFuncOptions`
@@ -353,7 +351,7 @@ inline Tensor glu(const Tensor& input, int64_t dim) {
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.glu
+/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.glu
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::GLUFuncOptions` class to
@@ -372,7 +370,7 @@ inline Tensor glu(const Tensor& input, const GLUFuncOptions& options = {}) {
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
-inline Tensor gelu(const Tensor& input, string approximate) {
+inline Tensor gelu(const Tensor& input, const string& approximate) {
   return torch::gelu(input, approximate);
 }
 } // namespace detail
@@ -415,7 +413,7 @@ inline Tensor relu(Tensor input, bool inplace) {
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.relu
+/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.relu
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::ReLUFuncOptions` class to
@@ -445,7 +443,7 @@ inline Tensor relu6(Tensor input, bool inplace) {
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.relu6
+/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.relu6
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::ReLU6FuncOptions` class to
@@ -480,7 +478,7 @@ inline Tensor rrelu(
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.rrelu
+/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.rrelu
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::RReLUFuncOptions` class to
@@ -515,7 +513,7 @@ inline Tensor celu(Tensor input, double alpha, bool inplace) {
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.celu
+/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.celu
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::CELUFuncOptions` class to
@@ -541,7 +539,7 @@ inline Tensor softplus(const Tensor& input, double beta, double threshold) {
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.softplus
+/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.softplus
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::SoftplusFuncOptions` class
@@ -569,7 +567,7 @@ inline Tensor softshrink(const Tensor& input, double lambda) {
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.softshrink
+/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.softshrink
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::SoftshrinkFuncOptions`
@@ -617,7 +615,7 @@ inline Tensor threshold(
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.threshold
+/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.threshold
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::ThresholdFuncOptions`
@@ -693,7 +691,7 @@ inline std::tuple<Tensor, Tensor> multi_head_attention_forward(
       // encoder-decoder attention
       // This is inline in_proj function with in_proj_weight and in_proj_bias
       auto _b = in_proj_bias;
-      auto _start = 0;
+      int64_t _start = 0;
       auto _end = embed_dim;
       auto _w = in_proj_weight.slice(/*dim=*/0, _start, _end);
       if (_b.defined()) {
@@ -720,7 +718,7 @@ inline std::tuple<Tensor, Tensor> multi_head_attention_forward(
     } else {
       // This is inline in_proj function with in_proj_weight and in_proj_bias
       auto _b = in_proj_bias;
-      auto _start = 0;
+      int64_t _start = 0;
       auto _end = embed_dim;
       auto _w = in_proj_weight.slice(/*dim=*/0, _start, _end);
       if (_b.defined()) {
@@ -903,8 +901,7 @@ inline std::tuple<Tensor, Tensor> multi_head_attention_forward(
     attn_output_weights =
         attn_output_weights.view({bsz * num_heads, tgt_len, src_len});
   }
-  // NOLINTNEXTLINE(bugprone-argument-comment)
-  attn_output_weights = F::softmax(attn_output_weights, /*dim=*/-1);
+  attn_output_weights = F::softmax(attn_output_weights, /*options=*/-1);
   attn_output_weights = F::dropout(
       attn_output_weights,
       F::DropoutFuncOptions().p(dropout_p).training(training));
@@ -961,6 +958,4 @@ inline std::tuple<Tensor, Tensor> multi_head_attention_forward(
       options.average_attn_weights());
 }
 
-} // namespace functional
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn::functional

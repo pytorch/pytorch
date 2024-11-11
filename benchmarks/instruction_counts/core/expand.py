@@ -2,6 +2,9 @@
 
 This is mostly string manipulation, with just a bit of importlib magic.
 """
+
+# mypy: ignore-errors
+
 import importlib.abc
 import importlib.util
 import itertools as it
@@ -12,6 +15,7 @@ import uuid
 from typing import List, Optional, Tuple, TYPE_CHECKING
 
 import torch
+
 
 if TYPE_CHECKING:
     # See the note in api.py for why this is necessary.
@@ -79,7 +83,7 @@ def _generate_torchscript_file(model_src: str, name: str) -> Optional[str]:
     assert isinstance(
         jit_model, (torch.jit.ScriptFunction, torch.jit.ScriptModule)
     ), f"Expected ScriptFunction or ScriptModule, got: {type(jit_model)}"
-    jit_model.save(artifact_path)
+    jit_model.save(artifact_path)  # type: ignore[call-arg]
 
     # Cleanup now that we have the actual serialized model.
     os.remove(module_path)

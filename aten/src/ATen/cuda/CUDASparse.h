@@ -30,33 +30,19 @@
 #endif
 
 #if defined(USE_ROCM)
-
 // hipSparse const API added in v2.4.0
 #if HIPSPARSE_VERSION >= 200400
 #define AT_USE_HIPSPARSE_CONST_DESCRIPTORS() 1
-#define AT_USE_HIPSPARSE_GENERIC_52_API() 0
+#define AT_USE_HIPSPARSE_NON_CONST_DESCRIPTORS() 0
 #define AT_USE_HIPSPARSE_GENERIC_API() 1
 #else
 #define AT_USE_HIPSPARSE_CONST_DESCRIPTORS() 0
-
-// hipSparse Generic API ROCm 5.2
-#if ROCM_VERSION >= 50200
-#define AT_USE_HIPSPARSE_GENERIC_52_API() 1
-#else
-#define AT_USE_HIPSPARSE_GENERIC_52_API() 0
-#endif
-
-// hipSparse Generic API ROCm 5.1
-#if ROCM_VERSION >= 50100
+#define AT_USE_HIPSPARSE_NON_CONST_DESCRIPTORS() 1
 #define AT_USE_HIPSPARSE_GENERIC_API() 1
-#else
-#define AT_USE_HIPSPARSE_GENERIC_API() 0
 #endif
-
-#endif // HIPSPARSE_VERSION >= 200400
 #else // USE_ROCM
 #define AT_USE_HIPSPARSE_CONST_DESCRIPTORS() 0
-#define AT_USE_HIPSPARSE_GENERIC_52_API() 0
+#define AT_USE_HIPSPARSE_NON_CONST_DESCRIPTORS() 0
 #define AT_USE_HIPSPARSE_GENERIC_API() 0
 #endif // USE_ROCM
 
@@ -82,8 +68,7 @@
 #endif
 
 // BSR triangular solve functions were added in hipSPARSE 1.11.2 (ROCm 4.5.0)
-#if defined(CUDART_VERSION) ||                            \
-      (defined(USE_ROCM) && ROCM_VERSION >= 40500 )
+#if defined(CUDART_VERSION) || defined(USE_ROCM)
 #define AT_USE_HIPSPARSE_TRIANGULAR_SOLVE() 1
 #else
 #define AT_USE_HIPSPARSE_TRIANGULAR_SOLVE() 0

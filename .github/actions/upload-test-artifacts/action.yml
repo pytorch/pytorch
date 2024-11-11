@@ -11,6 +11,10 @@ inputs:
       Suffix to add to the filename of the artifacts. This should include the
       workflow job id, see [Job id in artifacts].
     required: true
+  s3-bucket:
+    description: S3 bucket to download builds
+    required: false
+    default: "gha-artifacts"
 
 runs:
   using: composite
@@ -24,7 +28,7 @@ runs:
       run: |
         # Remove any previous test jsons if they exist
         rm -f test-jsons-*.zip
-        zip -r "test-jsons-${FILE_SUFFIX}.zip" test -i '*.json'
+        zip -r "test-jsons-${FILE_SUFFIX}.zip" test/test-reports -i '*.json'
 
     - name: Zip test reports for upload
       if: runner.os != 'Windows' && !inputs.use-gha
@@ -34,7 +38,7 @@ runs:
       run: |
         # Remove any previous test reports if they exist
         rm -f test-reports-*.zip
-        zip -r "test-reports-${FILE_SUFFIX}.zip" test -i '*.xml' -i '*.csv'
+        zip -r "test-reports-${FILE_SUFFIX}.zip" test/test-reports -i '*.xml' -i '*.csv'
 
     - name: Zip usage log for upload
       if: runner.os != 'Windows' && !inputs.use-gha
@@ -42,15 +46,27 @@ runs:
       env:
         FILE_SUFFIX: ${{ inputs.file-suffix }}
       run: |
-        # Remove any previous test reports if they exist
+        # Remove any previous usage logs if they exist
         rm -f logs-*.zip
         # this workflow is also run in bazel build test, but we dont generate usage reports for it
         # so check to see if the file exists first
         if [ -f 'usage_log.txt' ]; then
             zip "logs-${FILE_SUFFIX}.zip" 'usage_log.txt'
         fi
-        if ls test/**/*.log 1> /dev/null 2>&1; then
-            zip -r "logs-${FILE_SUFFIX}.zip" test -i '*.log'
+        if find "test/test-reports" -name "*.log" 2>/dev/null | grep -q .; then
+            zip -r "logs-${FILE_SUFFIX}.zip" test/test-reports -i '*.log'
+        fi
+
+    - name: Zip debugging artifacts for upload
+      if: runner.os != 'Windows' && !inputs.use-gha
+      shell: bash
+      env:
+        FILE_SUFFIX: ${{ inputs.file-suffix }}
+      run: |
+        # Remove any previous debugging artifacts if they exist
+        rm -f debug-*.zip
+        if [ -d 'test/debug' ]; then
+          zip -r "debug-${FILE_SUFFIX}.zip" test/debug
         fi
 
     # Windows zip
@@ -61,7 +77,7 @@ runs:
         FILE_SUFFIX: ${{ inputs.file-suffix }}
       run: |
         # -ir => recursive include all files in pattern
-        7z a "test-jsons-$Env:FILE_SUFFIX.zip" -ir'!test\*.json'
+        7z a "test-jsons-$Env:FILE_SUFFIX.zip" -ir'!test\test-reports\*.json'
 
     - name: Zip test reports for upload
       if: runner.os == 'Windows' && !inputs.use-gha
@@ -70,7 +86,7 @@ runs:
         FILE_SUFFIX: ${{ inputs.file-suffix }}
       run: |
         # -ir => recursive include all files in pattern
-        7z a "test-reports-$Env:FILE_SUFFIX.zip" -ir'!test\*.xml' -ir'!test\*.csv'
+        7z a "test-reports-$Env:FILE_SUFFIX.zip" -ir'!test\test-reports\*.xml' -ir'!test\test-reports\*.csv'
 
     - name: Zip usage log for upload
       if: runner.os == 'Windows' && !inputs.use-gha
@@ -80,13 +96,14 @@ runs:
         FILE_SUFFIX: ${{ inputs.file-suffix }}
       run: |
         # -ir => recursive include all files in pattern
-        7z a "logs-$Env:FILE_SUFFIX.zip" 'usage_log.txt' -ir'!test\*.log'
+        7z a "logs-$Env:FILE_SUFFIX.zip" 'usage_log.txt' -ir'!test\test-reports\*.log'
 
     # S3 upload
     - name: Store Test Downloaded JSONs on S3
       uses: seemethere/upload-artifact-s3@v5
       if: ${{ !inputs.use-gha }}
       with:
+        s3-bucket: ${{ inputs.s3-bucket }}
         s3-prefix: |
           ${{ github.repository }}/${{ github.run_id }}/${{ github.run_attempt }}/artifact
         retention-days: 14
@@ -97,6 +114,7 @@ runs:
       uses: seemethere/upload-artifact-s3@v5
       if: ${{ !inputs.use-gha }}
       with:
+        s3-bucket: ${{ inputs.s3-bucket }}
         s3-prefix: |
           ${{ github.repository }}/${{ github.run_id }}/${{ github.run_attempt }}/artifact
         retention-days: 14
@@ -108,15 +126,28 @@ runs:
       if: ${{ !inputs.use-gha }}
       continue-on-error: true
       with:
+        s3-bucket: ${{ inputs.s3-bucket }}
         s3-prefix: |
           ${{ github.repository }}/${{ github.run_id }}/${{ github.run_attempt }}/artifact
         retention-days: 14
         if-no-files-found: ignore
         path: logs-*.zip
 
+    - name: Store Debug Artifacts on S3
+      uses: seemethere/upload-artifact-s3@v5
+      if: ${{ !inputs.use-gha }}
+      continue-on-error: true
+      with:
+        s3-bucket: ${{ inputs.s3-bucket }}
+        s3-prefix: |
+          ${{ github.repository }}/${{ github.run_id }}/${{ github.run_attempt }}/artifact
+        retention-days: 14
+        if-no-files-found: ignore
+        path: debug-*.zip
+
     # GHA upload
     - name: Store Test Downloaded JSONs on Github
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       if: inputs.use-gha
       continue-on-error: true
       with:
@@ -127,7 +158,7 @@ runs:
         path: test/**/*.json
 
     - name: Store Test Reports on Github
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       if: inputs.use-gha
       continue-on-error: true
       with:
@@ -141,7 +172,7 @@ runs:
           test/**/*.csv
 
     - name: Store Usage Logs on Github
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       if: inputs.use-gha
       continue-on-error: true
       with:

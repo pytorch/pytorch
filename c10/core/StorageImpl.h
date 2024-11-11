@@ -16,6 +16,16 @@
 
 namespace c10 {
 
+[[noreturn]] C10_API void throwNullDataPtrError();
+C10_API void warnDeprecatedDataPtr();
+
+// Used in StorageImpl to store extra metadata.
+// Currently used only for storing a custom error message
+// used when throwing an exception when data_ptr is accessed.
+struct C10_API StorageExtraMeta {
+  std::optional<std::string> custom_data_ptr_error_msg_ = std::nullopt;
+};
+
 // A storage represents the underlying backing data buffer for a
 // tensor.  This concept was inherited from the original Torch7
 // codebase; we'd kind of like to get rid of the concept
@@ -59,6 +69,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
       TORCH_INTERNAL_ASSERT(
           allocator_, "For resizable storage, allocator must be provided");
     }
+    refresh_has_data_ptr_check();
   }
 
   StorageImpl(
@@ -118,12 +129,31 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
     return resizable_;
   }
 
-  at::DataPtr& mutable_data_ptr() {
-    maybe_materialize_cow();
+  const at::DataPtr& data_ptr() const {
+    if (C10_UNLIKELY(throw_on_immutable_data_ptr_)) {
+      throw_data_ptr_access_error();
+    }
     return data_ptr_;
   }
 
-  const at::DataPtr& data_ptr() const {
+  at::DataPtr& mutable_data_ptr() {
+    if (C10_UNLIKELY(has_mutable_data_ptr_check_)) {
+      if (throw_on_immutable_data_ptr_) {
+        throw_data_ptr_access_error();
+      }
+      if (throw_on_mutable_data_ptr_) {
+        throwNullDataPtrError();
+      }
+      if (warn_deprecated_on_mutable_data_ptr_) {
+        warnDeprecatedDataPtr();
+      }
+      maybe_materialize_cow();
+    }
+    return data_ptr_;
+  }
+
+  // Returns the data_ptr. Bypasses all checks.
+  at::DataPtr& _mutable_data_ptr_no_checks() {
     return data_ptr_;
   }
 
@@ -137,14 +167,29 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
 
   void set_data_ptr_noswap(at::DataPtr&& data_ptr) {
     data_ptr_ = std::move(data_ptr);
+    refresh_has_data_ptr_check();
   }
 
   const void* data() const {
+    if (C10_UNLIKELY(throw_on_immutable_data_ptr_)) {
+      throw_data_ptr_access_error();
+    }
     return data_ptr_.get();
   }
 
   void* mutable_data() {
-    maybe_materialize_cow();
+    if (C10_UNLIKELY(has_mutable_data_ptr_check_)) {
+      if (throw_on_immutable_data_ptr_) {
+        throw_data_ptr_access_error();
+      }
+      if (throw_on_mutable_data_ptr_) {
+        throwNullDataPtrError();
+      }
+      if (warn_deprecated_on_mutable_data_ptr_) {
+        warnDeprecatedDataPtr();
+      }
+      maybe_materialize_cow();
+    }
     return data_ptr_.mutable_get();
   }
 
@@ -222,6 +267,32 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
     return &pyobj_slot_;
   }
 
+  StorageExtraMeta& get_extra_meta() {
+    if (!extra_meta_) {
+      extra_meta_ = std::make_unique<StorageExtraMeta>();
+    }
+    return *extra_meta_;
+  }
+
+  [[noreturn]] void throw_data_ptr_access_error() const;
+
+  void release_data_and_set_meta_custom_data_ptr_error_msg_(
+      std::optional<std::string> s) {
+    throw_on_immutable_data_ptr_ = true;
+    get_extra_meta().custom_data_ptr_error_msg_ = std::move(s);
+    refresh_has_data_ptr_check();
+  }
+
+  void set_throw_on_mutable_data_ptr() {
+    throw_on_mutable_data_ptr_ = true;
+    refresh_has_data_ptr_check();
+  }
+
+  void set_warn_deprecated_on_mutable_data_ptr() {
+    warn_deprecated_on_mutable_data_ptr_ = true;
+    refresh_has_data_ptr_check();
+  }
+
  protected:
   // materialize_cow_storage needs to call set_data_ptr_no_materlize_cow
   friend void c10::impl::cow::materialize_cow_storage(StorageImpl& storage);
@@ -231,13 +302,23 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   at::DataPtr set_data_ptr_no_materialize_cow(at::DataPtr&& data_ptr) {
     at::DataPtr old_data_ptr(std::move(data_ptr_));
     data_ptr_ = std::move(data_ptr);
+    refresh_has_data_ptr_check();
     return old_data_ptr;
   }
 
  private:
+  void refresh_has_data_ptr_check() {
+    has_mutable_data_ptr_check_ = is_cow() || throw_on_mutable_data_ptr_ ||
+        warn_deprecated_on_mutable_data_ptr_ || throw_on_immutable_data_ptr_;
+  }
+
+  inline bool is_cow() const {
+    return c10::impl::cow::is_cow_data_ptr(data_ptr_);
+  }
+
   // Triggers a copy if this is a copy-on-write tensor.
   void maybe_materialize_cow() {
-    if (data_ptr_.get_deleter() == impl::cow::cow_deleter) {
+    if (is_cow()) {
       impl::cow::materialize_cow_storage(*this);
     }
   }
@@ -249,19 +330,39 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   // Identifies that Storage was received from another process and doesn't have
   // local to process cuda memory allocation
   bool received_cuda_;
+  // All special checks in data/data_ptr calls are guarded behind this single
+  // boolean. This is for performance: .data/.data_ptr calls are commonly in the
+  // hot-path.
+  bool has_mutable_data_ptr_check_ = false;
+  // If we should throw when mutable_data_ptr() or mutable_data() is called.
+  bool throw_on_mutable_data_ptr_ = false;
+  // If we should throw when data_ptr() or data() is called.
+  bool throw_on_immutable_data_ptr_ = false;
+  // If we warn when mutable_data_ptr() or mutable_data() is called.
+  bool warn_deprecated_on_mutable_data_ptr_ = false;
   Allocator* allocator_;
   impl::PyObjectSlot pyobj_slot_;
+  std::unique_ptr<StorageExtraMeta> extra_meta_ = nullptr;
 };
 
 // Declare StorageImpl create function pointer types.
 using StorageImplCreateHelper = intrusive_ptr<StorageImpl> (*)(
     StorageImpl::use_byte_size_t,
     SymInt size_bytes,
+    DataPtr data_ptr,
     Allocator* allocator,
     bool resizable);
 
 C10_API void SetStorageImplCreate(DeviceType t, StorageImplCreateHelper fptr);
 
 C10_API StorageImplCreateHelper GetStorageImplCreate(DeviceType t);
+
+C10_API c10::intrusive_ptr<c10::StorageImpl> make_storage_impl(
+    c10::StorageImpl::use_byte_size_t use_byte_size,
+    c10::SymInt size_bytes,
+    c10::DataPtr data_ptr,
+    c10::Allocator* allocator,
+    bool resizable,
+    std::optional<at::Device> device_opt);
 
 } // namespace c10

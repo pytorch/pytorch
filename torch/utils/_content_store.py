@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # This module provides a FAST (on GPU) content addressable store for storages
 # (and tensors on top of them) with VERY WEAK portability guarantees (e.g.,
 # don't expect CPU/CUDA to address to the same hash, don't expect it to be
@@ -40,7 +41,6 @@ import torch._prims as prims
 import torch._utils
 import torch.nn.functional as F
 from torch._C import default_generator
-
 from torch.multiprocessing.reductions import StorageWeakRef
 
 

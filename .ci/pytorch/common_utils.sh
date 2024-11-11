@@ -56,19 +56,39 @@ function assert_git_not_dirty() {
 function pip_install_whl() {
   # This is used to install PyTorch and other build artifacts wheel locally
   # without using any network connection
-  python3 -mpip install --no-index --no-deps "$@"
+
+  # Convert the input arguments into an array
+  local args=("$@")
+
+  # Check if the first argument contains multiple paths separated by spaces
+  if [[ "${args[0]}" == *" "* ]]; then
+    # Split the string by spaces into an array
+    IFS=' ' read -r -a paths <<< "${args[0]}"
+    # Loop through each path and install individually
+    for path in "${paths[@]}"; do
+      echo "Installing $path"
+      python3 -mpip install --no-index --no-deps "$path"
+    done
+  else
+    # Loop through each argument and install individually
+    for path in "${args[@]}"; do
+      echo "Installing $path"
+      python3 -mpip install --no-index --no-deps "$path"
+    done
+  fi
 }
+
 
 function pip_install() {
   # retry 3 times
   # old versions of pip don't have the "--progress-bar" flag
-  pip install --progress-bar off "$@" || pip install --progress-bar off "$@" || pip install --progress-bar off "$@" ||\
-  pip install "$@" || pip install "$@" || pip install "$@"
+  pip3 install --progress-bar off "$@" || pip3 install --progress-bar off "$@" || pip3 install --progress-bar off "$@" ||\
+  pip3 install "$@" || pip3 install "$@" || pip3 install "$@"
 }
 
 function pip_uninstall() {
   # uninstall 2 times
-  pip uninstall -y "$@" || pip uninstall -y "$@"
+  pip3 uninstall -y "$@" || pip3 uninstall -y "$@"
 }
 
 function get_exit_code() {
@@ -158,6 +178,11 @@ function install_torchvision() {
   fi
 }
 
+function install_tlparse() {
+  pip_install --user "tlparse==0.3.25"
+  PATH="$(python -m site --user-base)/bin:$PATH"
+}
+
 function install_torchrec_and_fbgemm() {
   local torchrec_commit
   torchrec_commit=$(get_pinned_commit torchrec)
@@ -166,9 +191,22 @@ function install_torchrec_and_fbgemm() {
   pip_uninstall torchrec-nightly
   pip_uninstall fbgemm-gpu-nightly
   pip_install setuptools-git-versioning scikit-build pyre-extensions
+
+  # TODO (huydhn): I still have no clue on why sccache doesn't work with only fbgemm_gpu here, but it
+  # seems to be an sccache-related issue
+  if [[ "$IS_A100_RUNNER" == "1" ]]; then
+    unset CMAKE_CUDA_COMPILER_LAUNCHER
+    sudo mv /opt/cache/bin /opt/cache/bin-backup
+  fi
+
   # See https://github.com/pytorch/pytorch/issues/106971
   CUDA_PATH=/usr/local/cuda-12.1 pip_install --no-use-pep517 --user "git+https://github.com/pytorch/FBGEMM.git@${fbgemm_commit}#egg=fbgemm-gpu&subdirectory=fbgemm_gpu"
   pip_install --no-use-pep517 --user "git+https://github.com/pytorch/torchrec.git@${torchrec_commit}"
+
+  if [[ "$IS_A100_RUNNER" == "1" ]]; then
+    export CMAKE_CUDA_COMPILER_LAUNCHER=/opt/cache/bin/sccache
+    sudo mv /opt/cache/bin-backup /opt/cache/bin
+  fi
 }
 
 function clone_pytorch_xla() {
@@ -181,28 +219,6 @@ function clone_pytorch_xla() {
     git submodule update --init --recursive
     popd
   fi
-}
-
-function checkout_install_torchdeploy() {
-  local commit
-  commit=$(get_pinned_commit multipy)
-  pushd ..
-  git clone --recurse-submodules https://github.com/pytorch/multipy.git
-  pushd multipy
-  git checkout "${commit}"
-  python multipy/runtime/example/generate_examples.py
-  BUILD_CUDA_TESTS=1 pip install -e .
-  popd
-  popd
-}
-
-function test_torch_deploy(){
- pushd ..
- pushd multipy
- ./multipy/runtime/build/test_deploy
- ./multipy/runtime/build/test_deploy_gpu
- popd
- popd
 }
 
 function checkout_install_torchbench() {
@@ -219,6 +235,8 @@ function checkout_install_torchbench() {
     # to install and test other models
     python install.py --continue_on_fail
   fi
+  echo "Print all dependencies after TorchBench is installed"
+  python -mpip freeze
   popd
 }
 

@@ -1,5 +1,7 @@
+# mypy: ignore-errors
+
 import operator
-from typing import Dict, List
+from typing import Dict, List, TYPE_CHECKING
 
 import torch
 from torch._dynamo.source import GetItemSource
@@ -7,8 +9,13 @@ from torch._dynamo.source import GetItemSource
 from .. import variables
 from ..exc import unimplemented, UserError, UserErrorType
 from ..guards import GuardBuilder, install_guard
-from ..utils import istype, np
+from ..utils import common_constant_types, istype, np
 from .base import typestr, VariableTracker
+
+
+if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
+
 
 _type_to_assert_reason = {
     # NB - We CAN have ConstantVariable.create(set) because of how sets interact with guards.
@@ -37,7 +44,12 @@ class ConstantVariable(VariableTracker):
                 assert not isinstance(value, disallowed_type), reason
 
         # Routing for list and tuple literals.
-        if is_literal and isinstance(value, (list, tuple)):
+        if is_literal and isinstance(value, (set, frozenset)):
+            items = []
+            for i, x in enumerate(value):
+                items.append(ConstantVariable.create(x))
+            return variables.SetVariable(items, **kwargs)
+        elif is_literal and isinstance(value, (list, tuple)):
             items = []
             for i, x in enumerate(value):
                 item_source = GetItemSource(source, i) if source else None
@@ -53,7 +65,7 @@ class ConstantVariable(VariableTracker):
 
         return ConstantVariable(value, **kwargs)
 
-    def __init__(self, value, **kwargs):
+    def __init__(self, value, **kwargs) -> None:
         super().__init__(**kwargs)
         if not ConstantVariable.is_literal(value):
             for disallowed_type, reason in _type_to_assert_reason.items():
@@ -70,15 +82,14 @@ class ConstantVariable(VariableTracker):
     def as_proxy(self):
         return self.value
 
-    def __str__(self):
-        # return f"ConstantVariable({self.value})"
-        return f"ConstantVariable({type(self.value).__name__})"
-
-    def python_type(self):
-        return type(self.value)
+    def __repr__(self) -> str:
+        return f"ConstantVariable({type(self.value).__name__}: {repr(self.value)})"
 
     def as_python_constant(self):
         return self.value
+
+    def is_python_constant(self):
+        return True
 
     @property
     def items(self):
@@ -88,23 +99,14 @@ class ConstantVariable(VariableTracker):
         """
         return self.unpack_var_sequence(tx=None)
 
-    def getitem_const(self, arg: VariableTracker):
+    def getitem_const(self, tx: "InstructionTranslator", arg: VariableTracker):
         return ConstantVariable.create(
             self.value[arg.as_python_constant()],
         )
 
     @staticmethod
     def is_literal(obj):
-        if type(obj) in (
-            int,
-            float,
-            bool,
-            type(None),
-            str,
-            Ellipsis.__class__,
-            torch.dtype,
-            torch.device,
-        ):
+        if type(obj) in common_constant_types:
             return True
         # The structure within is_literal get routed to variables.BaseListVariable
         if type(obj) in (list, tuple, set, frozenset, torch.Size):
@@ -117,7 +119,7 @@ class ConstantVariable(VariableTracker):
         except TypeError as e:
             raise NotImplementedError from e
 
-    def const_getattr(self, tx, name):
+    def const_getattr(self, tx: "InstructionTranslator", name):
         if isinstance(self.value, type):
             raise UserError(
                 UserErrorType.ANTI_PATTERN,
@@ -127,7 +129,7 @@ class ConstantVariable(VariableTracker):
             )
         member = getattr(self.value, name)
         if callable(member):
-            raise NotImplementedError()
+            raise NotImplementedError
         return member
 
     def call_method(
@@ -143,6 +145,14 @@ class ConstantVariable(VariableTracker):
             return variables.BuiltinVariable(str.format).call_function(
                 tx, [self, *args], kwargs
             )
+        elif name == "join" and istype(self.value, str):
+            assert len(args) == 1 and len(kwargs) == 0
+            arg_unpacked = args[0].force_unpack_var_sequence(tx)
+            try:
+                arg_const = [x.as_python_constant() for x in arg_unpacked]
+                return ConstantVariable.create(self.value.join(arg_const))
+            except NotImplementedError:
+                return super().call_method(tx, name, args, kwargs)
 
         if any(isinstance(x, SymNodeVariable) for x in args):
             # Promote to SymNodeVariable for operations involving dynamic shapes.
@@ -156,34 +166,39 @@ class ConstantVariable(VariableTracker):
         except NotImplementedError:
             return super().call_method(tx, name, args, kwargs)
 
-        def has_arith_binop(num_ty):
-            return (
-                isinstance(self.value, num_ty)
-                and hasattr(operator, name)
-                and len(args) == 1
-                and args[0].is_python_constant()
-            )
-
         if isinstance(self.value, str) and name in str.__dict__.keys():
             method = getattr(self.value, name)
             return ConstantVariable.create(method(*const_args, **const_kwargs))
-        elif has_arith_binop(int) or has_arith_binop(float):
-            op = getattr(operator, name)
-            add_target = const_args[0]
-            if isinstance(add_target, (torch.SymInt, torch.SymFloat)):
-                from .tensor import SymNodeVariable
+        elif isinstance(self.value, (float, int)):
+            if not (args or kwargs):
+                return ConstantVariable.create(getattr(self.value, name)())
+            if (
+                hasattr(operator, name)
+                and len(args) == 1
+                and args[0].is_python_constant()
+            ):
+                add_target = const_args[0]
+                op = getattr(operator, name)
+                if isinstance(
+                    add_target, (torch.SymBool, torch.SymFloat, torch.SymInt)
+                ):
+                    # Addition between a non sym and sym makes a sym
+                    proxy = tx.output.create_proxy(
+                        "call_function", op, (self.value, add_target), {}
+                    )
+                    return SymNodeVariable.create(tx, proxy, add_target)
+                else:
+                    return ConstantVariable.create(op(self.value, add_target))
+        elif isinstance(self.value, bytes) and name == "decode":
+            method = getattr(self.value, name)
+            return ConstantVariable.create(method(*const_args, **const_kwargs))
 
-                # Addition between a non sym and sym makes a sym
-                # sym_num = tx.output.register_attr_or_module(
-                #     add_target, f"sym_shape_{add_target}", source=None
-                # )
-                proxy = tx.output.create_proxy(
-                    "call_function", op, (self.value, add_target), {}
-                )
-                return SymNodeVariable.create(tx, proxy, add_target)
-            return ConstantVariable.create(op(self.value, add_target))
-        elif name == "__len__" and not (args or kwargs):
+        if name == "__len__" and not (args or kwargs):
             return ConstantVariable.create(len(self.value))
+        elif name == "__round__" and len(args) == 1 and args[0].is_python_constant():
+            return ConstantVariable.create(
+                round(self.value, args[0].is_python_constant())
+            )
         elif name == "__contains__" and len(args) == 1 and args[0].is_python_constant():
             assert not kwargs
             search = args[0].as_python_constant()
@@ -192,30 +207,37 @@ class ConstantVariable(VariableTracker):
 
         unimplemented(f"const method call {typestr(self.value)}.{name}")
 
-    def call_hasattr(self, tx, name: str) -> "VariableTracker":
+    def call_hasattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         result = hasattr(self.value, name)
         return variables.ConstantVariable.create(result)
 
 
 class EnumVariable(VariableTracker):
-    def __init__(self, value, **kwargs):
+    def __init__(self, value, **kwargs) -> None:
         super().__init__(**kwargs)
         self.value = value
 
+    @classmethod
+    def create(cls, cls_type, value_vt, options):
+        if isinstance(value_vt, variables.ConstantVariable):
+            for member in list(cls_type):
+                if member.value == value_vt.as_python_constant():
+                    return cls(member, **options)
+        unimplemented("Enum variable is constructed with non constant values")
+
     def as_proxy(self):
+        if isinstance(self.value, int):
+            return int(self.value)  # convert IntEnum to a normal int
         return self.value
 
-    def __str__(self):
+    def __repr__(self) -> str:
         return f"EnumVariable({type(self.value)})"
-
-    def python_type(self):
-        return type(self.value)
 
     def as_python_constant(self):
         return self.value
 
-    def const_getattr(self, tx, name):
+    def const_getattr(self, tx: "InstructionTranslator", name):
         member = getattr(self.value, name)
         if callable(member):
-            raise NotImplementedError()
+            raise NotImplementedError
         return member

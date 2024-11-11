@@ -1,9 +1,10 @@
+# mypy: allow-untyped-defs
 import functools
 
 import torch
 from torch._inductor.compile_fx import fake_tensor_prop
-from ..._dynamo.utils import counters
 
+from ..._dynamo.utils import counters
 from .. import config
 from ..pattern_matcher import (
     _return_true,
@@ -18,6 +19,7 @@ from ..pattern_matcher import (
     register_replacement,
     stable_topological_sort,
 )
+
 
 aten = torch.ops.aten
 
@@ -50,7 +52,7 @@ def freezing_passes(gm: torch.fx.GraphModule, aot_example_inputs):
         constant_fold(gm)
         # Make sure meta['val'] is properly set for all nodes
         fake_tensor_prop(gm, aot_example_inputs, True)
-        binary_folding_pass.apply(gm.graph)
+        binary_folding_pass.apply(gm.graph)  # type: ignore[arg-type]
         # If we don't have binary folding, we don't need to run the pass again.
         # TODO: remove the need to run fake_tensor_prop on the whole model.
         if counters["inductor"]["binary_folding"] == binary_folding:
@@ -63,7 +65,7 @@ def freezing_passes(gm: torch.fx.GraphModule, aot_example_inputs):
     fake_tensor_prop(gm, aot_example_inputs, True)
 
     for pattern in pass_patterns:
-        pattern.apply(gm.graph)
+        pattern.apply(gm.graph)  # type: ignore[arg-type]
 
     # The CPU weight packing always assume the conv's weight is channels last,
     # So make sure the layout_optimization is on when doing it.
@@ -120,17 +122,30 @@ def addmm_patterns_init():
     val = functools.partial(torch.empty, (10, 10), device=device, requires_grad=False)
 
     def check_concat_weights(match):
-        weights = [
-            match.kwargs["w1"],
-            match.kwargs["w2"],
-        ]
+        weight_inputs = ["w1", "w2"]
         if "w3" in match.kwargs:
-            weights.append(match.kwargs["w3"])
+            weight_inputs.append("w3")
 
-        return all(
-            w.op == "get_attr" and w.meta["val"].shape == weights[0].meta["val"].shape
-            for w in weights
-        )
+        equal_shape_inputs = [weight_inputs]
+
+        if "b1" in match.kwargs:
+            bias_inputs = ["b1", "b2"]
+            if "b3" in match.kwargs:
+                bias_inputs.append("b3")
+
+            equal_shape_inputs.append(bias_inputs)
+
+        for equal_shape_group in equal_shape_inputs:
+            inps = [match.kwargs[name] for name in equal_shape_group]
+
+            if not all(
+                inp.op == "get_attr"
+                and inp.meta["val"].shape == inps[0].meta["val"].shape
+                for inp in inps
+            ):
+                return False
+
+        return True
 
     def matmul_fuse_pattern(inp, w1, w2, w3):
         return (inp @ w1, inp @ w2, inp @ w3)
@@ -208,5 +223,5 @@ def unnecessary_dtype_convert(match: Match, **kwargs):
     """Remove unnecessary dtype conversion op, probably left as a result of Conv-Bn folding"""
     graph = match.graph
     node = match.output_node()
-    node.replace_all_uses_with(node.args[0])
+    node.replace_all_uses_with(node.args[0])  # type: ignore[arg-type]
     graph.erase_node(node)

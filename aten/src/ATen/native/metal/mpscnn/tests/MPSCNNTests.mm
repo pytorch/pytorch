@@ -647,7 +647,7 @@ bool test_view2() {
 }
 
 bool test_view3() {
-  // nonarry -> array
+  // nonarray -> array
   __block std::vector<int64_t> size{5, 8};
   return TEST(size, __PRETTY_FUNCTION__, ^bool {
     auto X1 = at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat));
@@ -841,13 +841,13 @@ bool test_upsampling_nearest2d_vec() {
     auto X1 = at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat));
     auto Y1 = at::upsample_nearest2d(
         X1,
-        c10::optional<at::IntArrayRef>({}),
-        c10::optional<at::ArrayRef<double>>({2, 2}));
+        std::optional<at::IntArrayRef>({}),
+        std::optional<at::ArrayRef<double>>({2, 2}));
     auto X2 = X1.metal();
     auto Y2 = at::upsample_nearest2d(
                   X2,
-                  c10::optional<at::IntArrayRef>({}),
-                  c10::optional<at::ArrayRef<double>>({2, 2}))
+                  std::optional<at::IntArrayRef>({}),
+                  std::optional<at::ArrayRef<double>>({2, 2}))
                   .cpu();
     return almostEqual(Y1, Y2);
   });
@@ -859,13 +859,13 @@ bool test_upsampling_nearest2d_vec2() {
     auto X1 = at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat));
     auto Y1 = at::upsample_nearest2d(
         X1,
-        c10::optional<at::IntArrayRef>({}),
-        c10::optional<at::ArrayRef<double>>({2, 2}));
+        std::optional<at::IntArrayRef>({}),
+        std::optional<at::ArrayRef<double>>({2, 2}));
     auto X2 = X1.metal();
     auto Y2 = at::upsample_nearest2d(
                   X2,
-                  c10::optional<at::IntArrayRef>({}),
-                  c10::optional<at::ArrayRef<double>>({2, 2}))
+                  std::optional<at::IntArrayRef>({}),
+                  std::optional<at::ArrayRef<double>>({2, 2}))
                   .cpu();
     return almostEqual(Y1, Y2);
   });

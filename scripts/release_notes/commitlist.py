@@ -13,7 +13,6 @@ from common import (
     features_to_dict,
     frontend_categories,
     get_commit_data_cache,
-    get_features,
     run,
     topics,
 )
@@ -513,9 +512,7 @@ The categories below are as follows:
 * Developers: All commits that are not end-user facing but still impact people that compile from source, develop into pytorch, extend pytorch, etc
 """
 
-    return [
-        header,
-    ]
+    return [header]
 
 
 def main():
@@ -578,7 +575,7 @@ def main():
             with open(filename, "w") as f:
                 f.writelines(lines)
         return
-    raise AssertionError()
+    raise AssertionError
 
 
 if __name__ == "__main__":

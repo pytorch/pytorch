@@ -1,15 +1,15 @@
-The [`datapipes`](https://github.com/pytorch/pytorch/tree/master/torch/utils/data/datapipes) folder holds the implementation of the `IterDataPipe` and `MapDataPipe`.
+The [`datapipes`](https://github.com/pytorch/pytorch/tree/main/torch/utils/data/datapipes) folder holds the implementation of the `IterDataPipe` and `MapDataPipe`.
 
 This document serves as an entry point for DataPipe implementation.
 
 ## Implementing DataPipe
-For the sake of an example, let us implement an `IterDataPipe` to apply a callable over data under [`iter`](https://github.com/pytorch/pytorch/tree/master/torch/utils/data/datapipes/iter).
-For `MapDataPipe`, please take reference from files in [map](https://github.com/pytorch/pytorch/tree/master/torch/utils/data/datapipes/map) folder and implement the corresponding `__getitem__` method.
+For the sake of an example, let us implement an `IterDataPipe` to apply a callable over data under [`iter`](https://github.com/pytorch/pytorch/tree/main/torch/utils/data/datapipes/iter).
+For `MapDataPipe`, please take reference from files in [map](https://github.com/pytorch/pytorch/tree/main/torch/utils/data/datapipes/map) folder and implement the corresponding `__getitem__` method.
 
 ### Naming
 The naming convention for DataPipe is Operation-er and with suffix of `IterDataPipe` because each DataPipe behaves like a container to apply the operation to data yielded from the source DataPipe.
 And, when importing the DataPipe into `iter` module under `datapipes`, each DataPipe will be aliased as Op-er without the suffix of `IterDataPipe`.
-Please check [`__init__.py`](https://github.com/pytorch/pytorch/blob/master/torch/utils/data/datapipes/iter/__init__.py) in `iter` module for how we aliasing each DataPipe class.
+Please check [`__init__.py`](https://github.com/pytorch/pytorch/blob/main/torch/utils/data/datapipes/iter/__init__.py) in `iter` module for how we aliasing each DataPipe class.
 Like the example of `IterDataPipe` to map a function, we are going to name it as `MapperIterDataPipe` and alias it as `iter.Mapper` under `datapipes`.
 
 ### Constructor
@@ -23,7 +23,7 @@ class MapperIterDataPipe(IterDataPipe):
 ```
 Note:
 - Avoid loading data from the source DataPipe in `__init__` function, in order to support lazy data loading and save memory.
-- If `IterDataPipe` instance holds data in memory, please be ware of the in-place modification of data. When second iterator is created from the instance, the data may have already changed. Please take [`IterableWrapper`](https://github.com/pytorch/pytorch/blob/master/torch/utils/data/datapipes/iter/utils.py) class as reference to `deepcopy` data for each iterator.
+- If `IterDataPipe` instance holds data in memory, please be ware of the in-place modification of data. When second iterator is created from the instance, the data may have already changed. Please take [`IterableWrapper`](https://github.com/pytorch/pytorch/blob/main/torch/utils/data/datapipes/iter/utils.py) class as reference to `deepcopy` data for each iterator.
 
 ### Iterator
 For `IterDataPipe`, an `__iter__` function is needed to consume data from the source `IterDataPipe` then apply operation over the data before yield.

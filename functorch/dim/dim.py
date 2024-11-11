@@ -5,11 +5,11 @@
 # LICENSE file in the root directory of this source tree.
 import dis
 import inspect
-
 from dataclasses import dataclass
 from typing import Union
 
 from . import DimList
+
 
 _vmap_levels = []
 
@@ -32,8 +32,7 @@ class Dim:
         if self._vmap_level is not None:
             _vmap_active_levels[self._vmap_stack].alive = False  # noqa: F821
             while (
-                not _vmap_levels[-1].alive
-                and current_level() == _vmap_levels[-1].level  # noqa: F821
+                not _vmap_levels[-1].alive and current_level() == _vmap_levels[-1].level  # noqa: F821
             ):
                 _vmap_decrement_nesting()  # noqa: F821
                 _vmap_levels.pop()

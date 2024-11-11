@@ -18,15 +18,13 @@
 #include <c10/macros/Macros.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/SmallBuffer.h>
-#include <c10/util/C++17.h>
 
 #include <initializer_list>
 #include <type_traits>
 #include <tuple>
 #include <mutex>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 template <typename Tuple, std::size_t... I>
 constexpr auto tuple_to_array_helper(Tuple& t, std::index_sequence<I...> seq) {
@@ -292,6 +290,6 @@ static void jitted_gpu_kernel_impl(
     );
 }
 
-}}  // at::native
+}  // at::native
 
 #endif // AT_USE_JITERATOR()

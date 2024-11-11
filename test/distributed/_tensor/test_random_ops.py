@@ -5,16 +5,13 @@ import itertools
 
 import torch
 import torch.distributed._functional_collectives as funcol
-import torch.distributed._tensor.random as random
-
+import torch.distributed.tensor._random as random
 from torch.distributed._tensor import DeviceMesh, DTensor
 from torch.distributed._tensor._utils import compute_local_shape_and_global_offset
 from torch.distributed._tensor.api import distribute_tensor
 from torch.distributed._tensor.placement_types import Replicate, Shard
-from torch.distributed._tensor.random import is_rng_supported_mesh, manual_seed
-
 from torch.distributed.distributed_c10d import broadcast_object_list
-
+from torch.distributed.tensor._random import is_rng_supported_mesh, manual_seed
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,

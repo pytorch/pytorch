@@ -1,3 +1,5 @@
+# mypy: allow-untyped-defs
+import contextlib
 import copy
 import itertools
 import linecache
@@ -17,6 +19,7 @@ from torch.package import Importer, PackageExporter, PackageImporter, sys_import
 from ._compatibility import compatibility
 from .graph import _custom_builtins, _is_from_torch, _PyTreeCodeGen, Graph, PythonCode
 
+
 __all__ = [
     "reduce_graph_module",
     "reduce_package_graph_module",
@@ -25,6 +28,7 @@ __all__ = [
 ]
 
 _USER_PRESERVED_ATTRIBUTES_KEY = "_user_preserved_attributes"
+
 
 # Normal exec loses the source code, however we can work with
 # the linecache module to recover it.
@@ -111,9 +115,9 @@ def _format_import_statement(name: str, obj: Any, importer: Importer) -> str:
 
 
 def _format_import_block(globals: Dict[str, Any], importer: Importer):
-    import_strs: Set[str] = set()
-    for name, obj in globals.items():
-        import_strs.add(_format_import_statement(name, obj, importer))
+    import_strs: Set[str] = {
+        _format_import_statement(name, obj, importer) for name, obj in globals.items()
+    }
     # Sort the imports so we have a stable import block that allows us to
     # hash the graph module and get a consistent key for use in a cache.
     return "\n".join(sorted(import_strs))
@@ -157,7 +161,9 @@ class _CodeOnlyModule(torch.nn.Module):
         self.__dict__ = body
 
 
-def _deserialize_graph_module(forward, body: Dict[Any, Any], graph_module_cls=None) -> torch.nn.Module:
+def _deserialize_graph_module(
+    forward, body: Dict[Any, Any], graph_module_cls=None
+) -> torch.nn.Module:
     """
     Deserialize a GraphModule given the dictionary of the original module,
     using the code to reconstruct the graph. We delete the actual graph before
@@ -194,9 +200,11 @@ def _deserialize_graph_module(forward, body: Dict[Any, Any], graph_module_cls=No
     # Manually set Tracer class on the reconstructed Graph, to avoid
     # referencing the private local subclass KeepModules.
     graph._tracer_cls = tracer_cls
-    if graph_module_cls is None:
-        graph_module_cls = GraphModule
-    gm = graph_module_cls(com, graph, class_name=graphmodule_cls_name)
+    from ._lazy_graph_module import _make_graph_module
+
+    gm = _make_graph_module(
+        com, graph, class_name=graphmodule_cls_name, graph_module_cls=graph_module_cls
+    )
 
     # The GraphModule constructor only retains attributes referenced by the graph.
     # In this case, our goal is return a GraphModule as close to identical as the one
@@ -258,6 +266,81 @@ def _assign_attr(from_obj: Any, to_module: torch.nn.Module, target: str):
         setattr(to_module, field, from_obj)
 
 
+# Recursively look up target from a graph module.
+def _get_attr(model: torch.nn.Module, attr_name: str):
+    return _get_attr_via_attr_list(model, attr_name.split("."))
+
+
+def _get_attr_via_attr_list(model: torch.nn.Module, attr_list: List[str]):
+    if len(attr_list) == 0:
+        return model
+    *prefix, field = attr_list
+    t = model
+    for item in prefix:
+        t = getattr(t, item, None)  # type: ignore[assignment]
+        assert t is not None
+
+    return getattr(t, field)
+
+
+def _has_attr(model: torch.nn.Module, attr_name: str):
+    *prefix, field = attr_name.split(".")
+    t = model
+    for item in prefix:
+        t = hasattr(t, item)  # type: ignore[assignment]
+        if t is False:
+            return False
+
+    return hasattr(t, field)
+
+
+def _print_readable(
+    module,
+    module_name,
+    print_output=True,
+    include_stride=False,
+    include_device=False,
+    colored=False,
+):
+    graph = module.graph
+    assert graph is not None and isinstance(
+        graph, torch.fx.Graph
+    ), "print_readable must be used on a module with a graph"
+
+    verbose_python_code = graph.python_code(
+        root_module="self",
+        verbose=True,
+        include_stride=include_stride,
+        include_device=include_device,
+        colored=colored,
+    )
+    module_code = verbose_python_code.src
+    module_code = module_code.lstrip("\n")
+    module_code = f"class {module_name}(torch.nn.Module):\n" + module_code
+    module_code = _addindent(module_code, 4)
+
+    submodule_code_list = [""]
+    for submodule_name, submodule in module.named_children():
+        if hasattr(submodule, "graph"):
+            submodule_code_list.append(
+                _print_readable(
+                    submodule,
+                    submodule_name,
+                    print_output=False,
+                    include_stride=include_stride,
+                    include_device=include_device,
+                    colored=colored,
+                )
+            )
+    submodule_code = "\n".join(submodule_code_list)
+    submodule_code = _addindent(submodule_code, 4)
+
+    output = module_code + submodule_code
+    if print_output:
+        print(module_code + submodule_code)
+    return output
+
+
 class _WrappedCall:
     def __init__(self, cls, cls_call):
         self.cls = cls
@@ -283,7 +366,7 @@ class _WrappedCall:
         all_src_lines = linecache.getlines(frame_summary.filename)
 
         # constituent substrings of the error message
-        tb_repr = traceback.format_exc()
+        tb_repr = torch._dynamo.disable(traceback.format_exc)()
         custom_msg = (
             "Call using an FX-traced Module, "
             f"line {err_lineno} of the traced Module's "
@@ -306,13 +389,13 @@ class _WrappedCall:
             assert e.__traceback__
             topmost_framesummary: traceback.FrameSummary = (
                 traceback.StackSummary.extract(traceback.walk_tb(e.__traceback__))[-1]
-            )  # type: ignore[arg-type]
+            )
             if "eval_with_key" in topmost_framesummary.filename:
                 print(
                     _WrappedCall._generate_error_message(topmost_framesummary),
                     file=sys.stderr,
                 )
-                raise e.with_traceback(None)  # noqa: TRY200
+                raise e.with_traceback(None)  # noqa: B904
             else:
                 raise e
 
@@ -445,6 +528,9 @@ class GraphModule(torch.nn.Module):
 
         # Dictionary to store metadata
         self.meta: Dict[str, Any] = {}
+        self._replace_hook = None
+        self._create_node_hooks: List[Callable] = []
+        self._erase_node_hooks: List[Callable] = []
 
     # TorchScript breaks trying to compile the graph setter because of the
     # continued string literal. Issue here: https://github.com/pytorch/pytorch/issues/44842
@@ -521,21 +607,24 @@ class {module_name}(torch.nn.Module):
                 torch.save(module, module_file)
                 blobified_modules.append(module_name)
                 module_repr = module.__repr__().replace("\r", " ").replace("\n", " ")
-                module_str = f"torch.load(r'{module_file}') # {module_repr}"
-            model_str += f"{tab*2}self.{module_name} = {module_str}\n"
+                # weights_only=False as this is legacy code that saves the model
+                module_str = (
+                    f"torch.load(r'{module_file}', weights_only=False) # {module_repr}"
+                )
+            model_str += f"{tab * 2}self.{module_name} = {module_str}\n"
 
         for buffer_name, buffer in self._buffers.items():
             if buffer is None:
                 continue
-            model_str += f"{tab*2}self.register_buffer('{buffer_name}', torch.empty({list(buffer.shape)}, dtype={buffer.dtype}))\n"
+            model_str += f"{tab * 2}self.register_buffer('{buffer_name}', torch.empty({list(buffer.shape)}, dtype={buffer.dtype}))\n"  # noqa: B950
 
         for param_name, param in self._parameters.items():
             if param is None:
                 continue
-            model_str += f"{tab*2}self.{param_name} = torch.nn.Parameter(torch.empty({list(param.shape)}, dtype={param.dtype}))\n"
+            model_str += f"{tab * 2}self.{param_name} = torch.nn.Parameter(torch.empty({list(param.shape)}, dtype={param.dtype}))\n"  # noqa: B950
 
         model_str += (
-            f"{tab*2}self.load_state_dict(torch.load(r'{folder}/state_dict.pt'))\n"
+            f"{tab * 2}self.load_state_dict(torch.load(r'{folder}/state_dict.pt'))\n"
         )
         model_str += f"{_addindent(self.code, 4)}\n"
 
@@ -577,7 +666,6 @@ class {module_name}(torch.nn.Module):
         mod: torch.nn.Module = self
 
         for item in prefix:
-
             submod = getattr(mod, item, None)
 
             if submod is None:
@@ -617,7 +705,6 @@ class {module_name}(torch.nn.Module):
 
         # Get the parent module
         for item in path:
-
             if not hasattr(mod, item):
                 return False
 
@@ -653,9 +740,7 @@ class {module_name}(torch.nn.Module):
         used: List[str] = []
 
         for node in self.graph.nodes:
-
             if node.op == "call_module" or node.op == "get_attr":
-
                 # A list of strings representing the different parts
                 # of the path. For example, `foo.bar.baz` gives us
                 # ["foo", "bar", "baz"]
@@ -775,6 +860,7 @@ class {module_name}(torch.nn.Module):
         code to regenerate the underlying ``Graph``
         """
         dict_without_graph = self.__dict__.copy()
+
         python_code = self.recompile()
         import_block = _format_import_block(python_code.globals, sys_importer)
         del dict_without_graph["_graph"]
@@ -799,6 +885,9 @@ class {module_name}(torch.nn.Module):
             "_state_dict_hooks",
             "_load_state_dict_pre_hooks",
             "_load_state_dict_post_hooks",
+            "_replace_hook",
+            "_create_node_hooks",
+            "_erase_node_hooks",
         ]
         for attr in extra_preserved_attrs:
             if attr in self.__dict__:
@@ -810,32 +899,31 @@ class {module_name}(torch.nn.Module):
         return res
 
     def __copy__(self):
-        res = GraphModule(self, self.graph)
+        from ._lazy_graph_module import _make_graph_module
+
+        res = _make_graph_module(self, self.graph)
         res.meta = getattr(self, "meta", {})
         return res
 
     @compatibility(is_backward_compatible=False)
-    def print_readable(self, print_output=True):
+    def print_readable(
+        self,
+        print_output=True,
+        include_stride=False,
+        include_device=False,
+        colored=False,
+    ):
         """
         Return the Python code generated for current GraphModule and its children GraphModules
         """
-        verbose_python_code = self._graph.python_code(root_module="self", verbose=True)
-        module_code = verbose_python_code.src
-        module_code = module_code.lstrip("\n")
-        module_code = f"class {self._get_name()}(torch.nn.Module):\n" + module_code
-        module_code = _addindent(module_code, 4)
-
-        submodule_code_list = [""]
-        for submodule in self.children():
-            if isinstance(submodule, GraphModule):
-                submodule_code_list.append(submodule.print_readable(print_output=False))
-        submodule_code = "\n".join(submodule_code_list)
-        submodule_code = _addindent(submodule_code, 4)
-
-        output = module_code + submodule_code
-        if print_output:
-            print(module_code + submodule_code)
-        return output
+        return _print_readable(
+            self,
+            self._get_name(),
+            print_output,
+            include_stride,
+            include_device,
+            colored,
+        )
 
     def __str__(self) -> str:
         orig_str = super().__str__()
@@ -848,6 +936,53 @@ class {module_name}(torch.nn.Module):
         new_gm = self.__copy__()
         new_gm._is_replica = True
         return new_gm
+
+    @contextlib.contextmanager
+    def _set_replace_hook(self, f):
+        """
+        Takes a callable which will be called everytime when we replace a node
+        to a new node, or change the node's name. Callable takes three arguments:
+        the old node we're changing, and NAME of the new node, followed by the
+        user node which consumes the old node to be replaced.
+        """
+        assert callable(f), "Replace hook must be a callable."
+        prev, self._replace_hook = self._replace_hook, f
+        try:
+            yield
+        finally:
+            self._replace_hook = prev
+
+    def _register_create_node_hook(self, f):
+        """
+        Takes a callable which will be called after we create a new node. The
+        callable takes the newly created node as input and returns None.
+        """
+        assert callable(f), "create_node hook must be a callable."
+        self._create_node_hooks.append(f)
+
+    def _unregister_create_node_hook(self, f):
+        """
+        Takes a callable which was previously registered to be called after we create a node.
+        This function will unregister that callable so it is no longer invoked on node creation.
+        """
+        assert callable(f), "create_node hook must be a callable."
+        self._create_node_hooks.remove(f)
+
+    def _register_erase_node_hook(self, f):
+        """
+        Takes a callable which will be called after we erase a node. The
+        callable takes the node that is being erased as input and returns None.
+        """
+        assert callable(f), "erase_node hook must be a callable."
+        self._erase_node_hooks.append(f)
+
+    def _unregister_erase_node_hook(self, f):
+        """
+        Takes a callable which was previously registered to be called after we erase a node.
+        This function will unregister that callable so it is no longer invoked on node erasure.
+        """
+        assert callable(f), "erase_node hook must be a callable."
+        self._erase_node_hooks.remove(f)
 
 
 # workarounds for issues in __torch_function__

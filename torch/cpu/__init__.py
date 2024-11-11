@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 r"""
 This package implements abstractions found in ``torch.cuda``
 to facilitate writing device-agnostic code.
@@ -10,6 +11,7 @@ import torch
 
 from .. import device as _device
 from . import amp
+
 
 __all__ = [
     "is_available",
@@ -27,9 +29,45 @@ __all__ = [
 _device_t = Union[_device, str, int, None]
 
 
-def _is_cpu_support_vnni() -> bool:
+def _is_avx2_supported() -> bool:
+    r"""Returns a bool indicating if CPU supports AVX2."""
+    return torch._C._cpu._is_avx2_supported()
+
+
+def _is_avx512_supported() -> bool:
+    r"""Returns a bool indicating if CPU supports AVX512."""
+    return torch._C._cpu._is_avx512_supported()
+
+
+def _is_avx512_bf16_supported() -> bool:
+    r"""Returns a bool indicating if CPU supports AVX512_BF16."""
+    return torch._C._cpu._is_avx512_bf16_supported()
+
+
+def _is_vnni_supported() -> bool:
     r"""Returns a bool indicating if CPU supports VNNI."""
-    return torch._C._cpu._is_cpu_support_vnni()
+    # Note: Currently, it only checks avx512_vnni, will add the support of avx2_vnni later.
+    return torch._C._cpu._is_avx512_vnni_supported()
+
+
+def _is_amx_tile_supported() -> bool:
+    r"""Returns a bool indicating if CPU supports AMX_TILE."""
+    return torch._C._cpu._is_amx_tile_supported()
+
+
+def _is_amx_fp16_supported() -> bool:
+    r"""Returns a bool indicating if CPU supports AMX FP16."""
+    return torch._C._cpu._is_amx_fp16_supported()
+
+
+def _init_amx() -> bool:
+    r"""Initializes AMX instructions."""
+    return torch._C._cpu._init_amx()
+
+
+def _is_arm_sve_supported() -> bool:
+    r"""Returns a bool indicating if CPU supports Arm SVE."""
+    return torch._C._cpu._is_arm_sve_supported()
 
 
 def is_available() -> bool:
@@ -49,7 +87,6 @@ def synchronize(device: _device_t = None) -> None:
 
     N.B. This function only exists to facilitate device-agnostic code.
     """
-    pass
 
 
 class Stream:
@@ -57,7 +94,7 @@ class Stream:
     N.B. This class only exists to facilitate device-agnostic code
     """
 
-    def __init__(self, priority: int = -1):
+    def __init__(self, priority: int = -1) -> None:
         pass
 
     def wait_stream(self, stream) -> None:
@@ -68,13 +105,13 @@ class Event:
     def query(self) -> bool:
         return True
 
-    def record(self, stream=None):
+    def record(self, stream=None) -> None:
         pass
 
-    def synchronize(self):
+    def synchronize(self) -> None:
         pass
 
-    def wait(self, stream=None):
+    def wait(self, stream=None) -> None:
         pass
 
 
@@ -100,6 +137,7 @@ class StreamContext(AbstractContextManager):
     N.B. This class only exists to facilitate device-agnostic code
 
     """
+
     cur_stream: Optional[Stream]
 
     def __init__(self, stream):
@@ -115,7 +153,7 @@ class StreamContext(AbstractContextManager):
         self.prev_stream = _current_stream
         _current_stream = cur_stream
 
-    def __exit__(self, type: Any, value: Any, traceback: Any):
+    def __exit__(self, type: Any, value: Any, traceback: Any) -> None:
         cur_stream = self.stream
         if cur_stream is None:
             return
@@ -146,7 +184,6 @@ def set_device(device: _device_t) -> None:
 
     N.B. This function only exists to facilitate device-agnostic code
     """
-    pass
 
 
 def current_device() -> str:

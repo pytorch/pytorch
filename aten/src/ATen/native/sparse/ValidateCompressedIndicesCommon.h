@@ -312,7 +312,7 @@ void _validate_compressed_sparse_indices_kernel(
         idx.scalar_type(),
         NAME,
         [&iter, &idx, dim, nnz, idx_ndims, &idx_sizes, &idx_strides]() {
-          const auto* RESTRICT ptr_idx = idx.data_ptr<index_t>();
+          const auto* RESTRICT ptr_idx = idx.const_data_ptr<index_t>();
           const auto zero = index_t{0};
           KernelLauncher::launch(
               iter,

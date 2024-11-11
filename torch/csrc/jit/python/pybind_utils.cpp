@@ -13,6 +13,8 @@
 #include <torch/csrc/utils/python_arg_parser.h>
 
 #include <limits>
+#include <optional>
+#include <utility>
 
 namespace torch::jit {
 
@@ -31,6 +33,17 @@ ToIValueAllowNumbersAsTensors::~ToIValueAllowNumbersAsTensors() {
 // C++->Python. We need this because otherwise we may get the old Python object
 // if C++ creates a new object at the memory location of the deleted object.
 void clear_registered_instances(void* ptr) {
+#if IS_PYBIND_2_13_PLUS
+  py::detail::with_instance_map(
+      ptr, [&](py::detail::instance_map& registered_instances) {
+        auto range = registered_instances.equal_range(ptr);
+        for (auto it = range.first; it != range.second; ++it) {
+          auto vh = it->second->get_value_and_holder();
+          vh.set_instance_registered(false);
+        }
+        registered_instances.erase(ptr);
+      });
+#else
   auto& registered_instances =
       pybind11::detail::get_internals().registered_instances;
   auto range = registered_instances.equal_range(ptr);
@@ -39,6 +52,7 @@ void clear_registered_instances(void* ptr) {
     vh.set_instance_registered(false);
   }
   registered_instances.erase(ptr);
+#endif
 }
 
 // WARNING: Precondition for this function is that, e.g., you have tested if a
@@ -55,7 +69,7 @@ IValue listToIValue(py::handle obj) {
   return c10::impl::toList<T>(rs);
 }
 
-IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
+IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
   switch (type->kind()) {
     case TypeKind::TensorType: {
       if (obj.ptr() == Py_None) {
@@ -114,6 +128,16 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       if (torch::is_symfloat(py::handle(obj))) {
         return py::cast<c10::SymFloat>(obj).guard_float(__FILE__, __LINE__);
       }
+      if (THPVariable_Check(obj.ptr())) {
+        auto var = py::cast<autograd::Variable>(obj);
+        // NB: We carefully test if the storage is meta, because that is
+        // always accurate even if you have a fake tensor (which is the
+        // primary case we are trying to detect here)
+        if (var.storage().device_type() == c10::kMeta) {
+          throw py::cast_error(
+              "cannot extract float from tensor with meta storage");
+        }
+      }
       return py::cast<double>(obj);
     case TypeKind::ComplexType: {
       auto c_obj = py::cast<std::complex<double>>(obj.ptr());
@@ -144,6 +168,13 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       }
       if (torch::is_symint(py::handle(obj))) {
         return py::cast<c10::SymInt>(obj).guard_int(__FILE__, __LINE__);
+      }
+      if (THPVariable_Check(obj.ptr())) {
+        auto var = py::cast<autograd::Variable>(obj);
+        if (var.storage().device_type() == c10::kMeta) {
+          throw py::cast_error(
+              "cannot extract int from tensor with meta storage");
+        }
       }
       return py::cast<int64_t>(obj);
     case TypeKind::LayoutType: {
@@ -195,6 +226,13 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       if (torch::is_symbool(obj.ptr())) {
         return py::cast<c10::SymBool>(obj).guard_bool(__FILE__, __LINE__);
       }
+      if (THPVariable_Check(obj.ptr())) {
+        auto var = py::cast<autograd::Variable>(obj);
+        if (var.storage().device_type() == c10::kMeta) {
+          throw py::cast_error(
+              "cannot extract bool from tensor with meta storage");
+        }
+      }
       return py::cast<bool>(obj);
     case TypeKind::TupleType: {
       py::tuple tuple = py::cast<py::tuple>(obj);
@@ -243,7 +281,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       auto thp_stream = reinterpret_cast<THPStream*>(obj.ptr());
       auto stream = c10::Stream::unpack3(
           thp_stream->stream_id,
-          thp_stream->device_index,
+          static_cast<c10::DeviceIndex>(thp_stream->device_index),
           static_cast<c10::DeviceType>(thp_stream->device_type));
       return stream;
     }
@@ -494,7 +532,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
 #ifdef USE_RPC
       return obj.cast<torch::distributed::rpc::PyRRef>().toIValue();
 #else
-      AT_ERROR("RRef is only supported with the distributed package");
+      TORCH_CHECK(false, "RRef is only supported with the distributed package");
 #endif
     } break;
     case TypeKind::PyObjectType: {
@@ -574,7 +612,7 @@ py::object toPyObject(IValue ivalue) {
       }
     } else {
       guardAgainstNamedTensor<at::Tensor>(tensor);
-      return py::cast(autograd::Variable(std::move(tensor)));
+      return py::cast(std::move(tensor));
     }
   } else if (ivalue.isStorage()) {
     return py::cast(std::move(ivalue).toStorage());
@@ -641,7 +679,7 @@ py::object toPyObject(IValue ivalue) {
       return std::move(t);
     }
   } else if (ivalue.isDevice()) {
-    return py::cast<py::object>(THPDevice_New(std::move(ivalue).toDevice()));
+    return py::cast(std::move(ivalue).toDevice());
   } else if (ivalue.isStream()) {
     return py::cast(std::move(ivalue).toStream());
   } else if (ivalue.isGenericDict()) {
@@ -659,7 +697,7 @@ py::object toPyObject(IValue ivalue) {
             std::move(ivalue).toRRef());
     return py::cast(torch::distributed::rpc::PyRRef(RRefPtr));
 #else
-    AT_ERROR("RRef is only supported with the distributed package");
+    TORCH_CHECK(false, "RRef is only supported with the distributed package");
 #endif
   } else if (ivalue.isObject()) {
     const auto obj = std::move(ivalue).toObject();
@@ -672,7 +710,7 @@ py::object toPyObject(IValue ivalue) {
       return py::cast(Object(obj));
     }
     const auto classType = pyCu->get_class(c10::QualifiedName(obj->name()));
-    AT_ASSERT(classType);
+    AT_ASSERT(classType, c10::str(obj->name(), " is not found."));
     auto pyClass = getScriptedClassOrError(obj->type());
     auto pyObj = pyClass.attr("__new__")(pyClass);
 
@@ -713,7 +751,8 @@ py::object toPyObject(IValue ivalue) {
   } else if (ivalue.isSymBool()) {
     return py::cast(std::move(ivalue).toSymBool());
   } else {
-    AT_ERROR(
+    TORCH_CHECK(
+        false,
         "Missing cases in 'toPyObject'! Can't convert ",
         ivalue.tagKind(),
         " to a Python object");
@@ -722,14 +761,13 @@ py::object toPyObject(IValue ivalue) {
 
 std::pair<std::shared_ptr<Operator>, Stack> getOpWithStack(
     const std::vector<std::shared_ptr<Operator>>& operations,
-    py::args args,
+    const py::args& args,
     const py::kwargs& kwargs) {
   Stack stack;
   if (operations.size() == 1) {
     std::shared_ptr<Operator> op = operations.at(0);
     // Create a stack full of the arguments and keyword arguments.
-    stack = createStackForSchema(
-        op->schema(), std::move(args), kwargs, c10::nullopt);
+    stack = createStackForSchema(op->schema(), args, kwargs, std::nullopt);
 
     return std::make_pair(std::move(op), std::move(stack));
   } else {
@@ -737,7 +775,7 @@ std::pair<std::shared_ptr<Operator>, Stack> getOpWithStack(
     std::shared_ptr<Operator> found_op = nullptr;
     for (const auto& op : operations) {
       try {
-        stack = createStackForSchema(op->schema(), args, kwargs, c10::nullopt);
+        stack = createStackForSchema(op->schema(), args, kwargs, std::nullopt);
         found_op = op;
         break;
       } catch (schema_match_error& error) {
@@ -757,14 +795,29 @@ std::pair<std::shared_ptr<Operator>, Stack> getOpWithStack(
   }
 }
 
+// This function is used to check if the schema is valid for the given args and
+// kwargs. It checks script object by checking wether the FakeScriptObject is
+// an instance of the corresponding fake class for the actual class used in
+// schema.
+bool checkSchemaAllowFakeScriptObject(
+    const FunctionSchema& schema,
+    const py::args& args,
+    const py::kwargs& kwargs) {
+  bool match = false;
+  try {
+    match = matchSchemaAllowFakeScriptObject(schema, args, kwargs);
+  } catch (schema_match_error& error) {
+    throw std::runtime_error(error.what());
+  }
+  return match;
+}
+
 py::object invokeOperatorFromPython(
     const std::vector<std::shared_ptr<Operator>>& operations,
-    py::args args,
+    const py::args& args,
     const py::kwargs& kwargs,
-    c10::optional<c10::DispatchKey> dk) {
-  auto opWithStack = getOpWithStack(operations, args, kwargs);
-  std::shared_ptr<Operator> found_op = std::get<0>(opWithStack);
-  Stack stack = std::get<1>(opWithStack);
+    std::optional<c10::DispatchKey> dk) {
+  auto [found_op, stack] = getOpWithStack(operations, args, kwargs);
   {
     pybind11::gil_scoped_release no_gil_guard;
     if (dk) {
@@ -777,13 +830,13 @@ py::object invokeOperatorFromPython(
   return createPyObjectForStack(std::move(stack));
 }
 
-py::object _get_operation_for_overload_or_packet(
-    const std::vector<std::shared_ptr<Operator>>& operations,
-    Symbol symbol,
-    py::args args,
-    const py::kwargs& kwargs,
+std::optional<py::object> _maybe_handle_torch_function(
+    const std::string& ns,
+    const std::string& method_name,
+    const std::string& overload_name,
     bool is_overload,
-    c10::optional<c10::DispatchKey> dk) {
+    const py::args& args,
+    const py::kwargs& kwargs) {
   std::vector<PyObject*> overloaded_args;
   size_t total_arg_num = args.size() + kwargs.size();
   for (const auto i : c10::irange(args.size())) {
@@ -809,15 +862,11 @@ py::object _get_operation_for_overload_or_packet(
         false /* throw_error */);
   }
   if (!overloaded_args.empty() || at::impl::torch_function_mode_enabled()) {
-    py::object ret;
-    std::string ns = symbol.ns().toUnqualString();
-    std::string method_name = symbol.toUnqualString();
     auto self_func = py::module::import("torch")
                          .attr("ops")
                          .attr(ns.c_str())
                          .attr(method_name.c_str());
     if (is_overload) {
-      auto overload_name = operations[0]->schema().overload_name();
       if (overload_name.empty()) {
         self_func = self_func.attr("default");
       } else {
@@ -826,16 +875,34 @@ py::object _get_operation_for_overload_or_packet(
     }
     std::string module_name("torch.ops");
     module_name.append(ns);
-    return pybind11::reinterpret_steal<py::object>(
+    return {pybind11::reinterpret_steal<py::object>(
         handle_torch_function_no_python_arg_parser(
             overloaded_args,
             args.ptr(),
             kwargs.ptr(),
             method_name.c_str(),
             self_func.ptr(),
-            module_name.c_str()));
+            module_name.c_str()))};
   }
-  return invokeOperatorFromPython(operations, args, kwargs, dk);
+  return std::nullopt;
+}
+
+py::object _get_operation_for_overload_or_packet(
+    const std::vector<std::shared_ptr<Operator>>& operations,
+    Symbol symbol,
+    const py::args& args,
+    const py::kwargs& kwargs,
+    bool is_overload,
+    std::optional<c10::DispatchKey> dk) {
+  std::string ns = symbol.ns().toUnqualString();
+  std::string method_name = symbol.toUnqualString();
+  std::string overload_name = operations[0]->schema().overload_name();
+  auto res = _maybe_handle_torch_function(
+      ns, method_name, overload_name, is_overload, args, kwargs);
+  auto torch_function_called = res.has_value();
+  return torch_function_called
+      ? *res
+      : invokeOperatorFromPython(operations, args, kwargs, dk);
 }
 
 } // namespace torch::jit

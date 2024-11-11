@@ -10,17 +10,16 @@
 
 #include <torch/types.h>
 
-#include <ostream>
+#include <utility>
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ TransformerEncoder
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// TransformerEncoder module.
 /// See
-/// https://pytorch.org/docs/master/generated/torch.nn.TransformerEncoder.html
+/// https://pytorch.org/docs/main/generated/torch.nn.TransformerEncoder.html
 /// to learn abouut the exact behavior of this encoder layer module.
 ///
 /// See the documentation for `torch::nn::TransformerEncoder` class to learn
@@ -40,7 +39,7 @@ class TORCH_API TransformerEncoderImpl
       TransformerEncoderLayer encoder_layer,
       int64_t num_layers)
       : TransformerEncoderImpl(
-            TransformerEncoderOptions(encoder_layer, num_layers)) {}
+            TransformerEncoderOptions(std::move(encoder_layer), num_layers)) {}
   explicit TransformerEncoderImpl(TransformerEncoderOptions options_);
 
   Tensor forward(
@@ -79,7 +78,7 @@ TORCH_MODULE(TransformerEncoder);
 
 /// TransformerDecoder is a stack of N decoder layers.
 /// See
-/// https://pytorch.org/docs/master/generated/torch.nn.TransformerDecoder.html
+/// https://pytorch.org/docs/main/generated/torch.nn.TransformerDecoder.html
 /// to learn abouut the exact behavior of this decoder module
 ///
 /// See the documentation for `torch::nn::TransformerDecoderOptions` class to
@@ -101,7 +100,7 @@ class TORCH_API TransformerDecoderImpl
       TransformerDecoderLayer decoder_layer,
       int64_t num_layers)
       : TransformerDecoderImpl(
-            TransformerDecoderOptions(decoder_layer, num_layers)) {}
+            TransformerDecoderOptions(std::move(decoder_layer), num_layers)) {}
   explicit TransformerDecoderImpl(TransformerDecoderOptions options_);
 
   void reset() override;
@@ -150,5 +149,4 @@ class TORCH_API TransformerDecoderImpl
 /// module storage semantics.
 TORCH_MODULE(TransformerDecoder);
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

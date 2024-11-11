@@ -12,7 +12,7 @@ Tensor empty_with_tail_padding(
     const IntArrayRef size,
     const caffe2::TypeMeta dtype,
     const c10::MemoryFormat memory_format,
-    c10::optional<DimnameList> maybe_names) {
+    std::optional<DimnameList> maybe_names) {
   auto* const allocator_ptr = c10::GetDefaultMobileCPUAllocator();
   const int64_t nelements = c10::multiply_integers(size);
   size_t size_bytes = nelements * dtype.itemsize();

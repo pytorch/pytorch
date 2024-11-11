@@ -1,4 +1,5 @@
 # ${generated_comment}
+# mypy: allow-untyped-defs
 
 from typing import (
     Any,
@@ -8,10 +9,12 @@ from typing import (
     List,
     Literal,
     NamedTuple,
+    NoReturn,
     Optional,
     overload,
     Sequence,
     Tuple,
+    Type,
     TypeVar,
     Union,
 )
@@ -29,4 +32,6 @@ from torch.types import (
     Number,
 )
 
-${namedtuple_defs}
+${structseq_defs}
+
+all_return_types: List[Type] = []

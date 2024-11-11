@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """
 This file provides a number of "global" variables/handlers that are actually
 thread local and dynamically scoped, with Inductor patching them to various
@@ -48,30 +49,34 @@ ubiquitous enough to have its own top level variable, so you will typically see
 ``ops.constant(...)`` rather than ``V.ops.constant(...)``.  In fact, these are not
 equivalent; the former interface supports arithmetic overloads like ``x + y``
 instead of forcing ``ops.add(x, y)``, so it should be preferred.
+
+Some operators are seemingly unused, but they are implicitly used by ops_wrapper.
+In particular, we typically have an operator for every basic pointwise PyTorch operation
+supported.
 """
 
 from __future__ import annotations
 
-import itertools
 from contextlib import AbstractContextManager, contextmanager
-from itertools import chain
 from threading import local
 from typing import Any, Callable, Generic, List, Type, TYPE_CHECKING, TypeVar, Union
-from unittest.mock import patch
 
-import sympy
+from .ops_handler import (  # noqa: F401
+    KernelFormatterHandler,
+    MockHandler,
+    OpsHandler,
+    ReductionType,
+    StoreMode,
+    WrapperHandler,
+)
 
-from torch._inductor.utils import IndentedBuffer
-
-from torch.fx.graph import inplace_methods, magic_methods
-
-from .utils import reduction_num_outputs, sympy_str, sympy_symbol
 
 if TYPE_CHECKING:
     import torch
+    from torch._inductor.codegen.cpp_utils import LocalBufferContext
     from torch._inductor.debug import DebugContext
     from torch._inductor.graph import GraphLowering
-    from torch._inductor.ir import InterpreterShim
+    from torch._inductor.loop_body import InterpreterShim
     from torch._subclasses import FakeTensorMode
 
 threadlocal = local()
@@ -85,8 +90,6 @@ class NullHandler:
     attempting to access the global variable before it's set is an error, but with
     NullHandler it won't fail until you try to access an attribute on it.
     """
-
-    pass
 
 
 class Virtualized(Generic[T]):
@@ -148,116 +151,7 @@ class NullKernelHandler(NullHandler):
         self.index_dtype = "tl.int64"
 
 
-def _arg_str(a) -> str:
-    if isinstance(a, sympy.Expr):
-        return sympy_str(a)
-    return str(a)
-
-
-class MockHandler:
-    def __getattr__(self, name):
-        if name == "name":
-            return "MockHandler"
-
-        def inner(*args, **kwargs):
-            fargs = [_arg_str(a) for a in args]
-            fargs.extend(f"{k}={v}" for k, v in kwargs.items())
-            return f"ops.{name}({', '.join(fargs)})"
-
-        return inner
-
-    @staticmethod
-    def masked(mask, body, other) -> str:
-        return f"ops.masked({mask}, {body()}, {other})"
-
-    @staticmethod
-    def indirect_indexing(index_var, size, check=True) -> sympy.Symbol:
-        return sympy_symbol(f"({str(index_var)})")
-
-    @classmethod
-    def _init_cls(cls):
-        def make_handler(format_string):
-            @staticmethod  # type: ignore[misc]
-            def inner(*args):
-                return format_string.format(*args)
-
-            return inner
-
-        for name, format_string in chain(
-            magic_methods.items(), inplace_methods.items()
-        ):
-            setattr(cls, name, make_handler(format_string))
-
-
-class KernelFormatterHandler:
-    def __init__(self, parent_handler):
-        self.parent_handler = parent_handler
-        self.output = IndentedBuffer(1)
-        self.var_counter = itertools.count()
-
-    @staticmethod
-    def ir_to_string(ir_fn, index, rindex=None) -> str:
-        from .ir import FlexibleLayout
-
-        args = [index, rindex] if rindex is not None else [index]
-        names = ["index", "rindex"] if rindex is not None else ["index"]
-        formatter = KernelFormatterHandler(MockHandler())
-
-        with formatter.output.indent(-1):
-            formatter.output.writeline(f"def inner_fn({', '.join(names)}):")
-        for name, arg in zip(names, args):
-            if arg:
-                lhs = ", ".join(
-                    [
-                        str("_" if isinstance(v, (int, sympy.Integer)) else v)
-                        for v in arg
-                    ]
-                )
-                formatter.output.writeline(f"{lhs} = {name}")
-
-        with V.set_ops_handler(formatter), patch.object(
-            FlexibleLayout, "allow_indexing", True
-        ):
-            result = ir_fn(*args)
-            return formatter.getvalue(result)
-
-    def __getattr__(self, name) -> Callable[..., str]:
-        def inner(*args, **kwargs):
-            line = getattr(self.parent_handler, name)(*args, **kwargs)
-            if name == "indirect_indexing":
-                return line
-            # replace line with a new variable name
-            varname = f"tmp{next(self.var_counter)}"
-            self.output.writeline(f"{varname} = {line}")
-            return varname
-
-        return inner
-
-    def reduction(
-        self, dtype, src_dtype, reduction_type, value
-    ) -> Union[tuple[str, ...], str]:
-        line = self.parent_handler.reduction(dtype, src_dtype, reduction_type, value)
-        num_values = reduction_num_outputs(reduction_type)
-        varnames = [f"tmp{next(self.var_counter)}" for _ in range(num_values)]
-        self.output.writeline(f"{','.join(varnames)} = {line}")
-        return tuple(varnames) if num_values > 1 else varnames[0]
-
-    def getvalue(self, result):
-        self.output.writeline(f"return {result}")
-        return self.output.getvalue()
-
-
-class WrapperHandler:
-    def __init__(self, inner):
-        self._inner = inner
-
-    def __getattr__(self, item):
-        return getattr(self._inner, item)
-
-
-MockHandler._init_cls()
-
-_ops = Virtualized("ops", MockHandler)  # TODO: improve type
+_ops: Virtualized[OpsHandler[Any]] = Virtualized("ops", MockHandler)
 _graph: Virtualized[GraphLowering] = Virtualized("graph", NullHandler)
 _real_inputs: Virtualized[List[torch.Tensor]] = Virtualized("real_inputs", NullHandler)
 _fake_mode: Virtualized[FakeTensorMode] = Virtualized("fake_mode", NullHandler)
@@ -268,6 +162,9 @@ _debug: Virtualized[DebugContext] = Virtualized("debug", NullHandler)
 _interpreter: Virtualized[InterpreterShim] = Virtualized("interpreter", NullHandler)
 _aot_compilation: Virtualized[bool] = Virtualized("aot_compilation", NullHandler)
 _current_node: Virtualized[torch.fx.Node] = Virtualized("current_node", NullHandler)
+_local_buffer_context: Virtualized[LocalBufferContext] = Virtualized(
+    "local_buffer_context", NullHandler
+)
 
 
 class OpsValue:
@@ -319,6 +216,42 @@ class OpsValue:
     def __pow__(self, other):
         return ops.pow(self, other)
 
+    def __lt__(self, other):
+        return ops.lt(self, other)
+
+    def __le__(self, other):
+        return ops.le(self, other)
+
+    def __eq__(self, other):
+        return ops.eq(self, other)
+
+    def __ne__(self, other):
+        return ops.ne(self, other)
+
+    def __gt__(self, other):
+        return ops.gt(self, other)
+
+    def __ge__(self, other):
+        return ops.ge(self, other)
+
+    def __and__(self, other):
+        return ops.bitwise_and(self, other)
+
+    def __or__(self, other):
+        return ops.bitwise_or(self, other)
+
+    def __xor__(self, other):
+        return ops.bitwise_xor(self, other)
+
+    def __invert__(self):
+        return ops.bitwise_not(self)
+
+    def __rshfit__(self, n):
+        return ops.bitwise_right_shift(self, n)
+
+    def __lshift__(self, n):
+        return ops.bitwise_left_shift(self, n)
+
 
 class OpsWrapper:
     """This wraps any returned IR values into an `OpsValue` instance, so that we
@@ -348,15 +281,13 @@ class OpsWrapper:
         return OpsValue(x)
 
     @staticmethod
-    def indirect_indexing(index, size, check=True):
+    def indirect_indexing(index, size, check=True, wrap_neg=True):
         # Returns a sympy value, not IR value
         index = OpsWrapper._unwrap(index)
-        return _ops.indirect_indexing(index, size, check)
+        return _ops.indirect_indexing(index, size, check, wrap_neg)
 
 
 ops = OpsWrapper()
-
-_MockHandler = MockHandler
 
 
 class _V:
@@ -378,9 +309,11 @@ class _V:
     get_aot_compilation: Callable[[], Any] = _aot_compilation._get_handler
     set_current_node: Callable[[Any], Any] = _current_node._set_handler
     get_current_node: Callable[[], Any] = _current_node._get_handler
+    set_local_buffer_context: Callable[[Any], Any] = _local_buffer_context._set_handler
+    get_local_buffer_context: Callable[[], Any] = _local_buffer_context._get_handler
 
     @property
-    def ops(self) -> _MockHandler:
+    def ops(self) -> OpsHandler[Any]:
         """The operator handler specific to the current codegen task"""
         return _ops._get_handler()
 
@@ -419,6 +352,10 @@ class _V:
     @property
     def current_node(self):
         return _current_node._get_handler()
+
+    @property
+    def local_buffer_context(self):
+        return _local_buffer_context._get_handler()
 
 
 V = _V()

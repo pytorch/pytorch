@@ -1,14 +1,23 @@
+# mypy: allow-untyped-defs
 import abc
 import typing as t
 
 import torch
 import torch.fx
 from torch.fx._compatibility import compatibility
+
 from .shape_prop import TensorMetadata
-from .tools_common import get_node_target, CALLABLE_NODE_OPS
+from .tools_common import CALLABLE_NODE_OPS, get_node_target
 
 
-__all__ = ['OperatorSupportBase', 'OperatorSupport', 'create_op_support', 'chain', 'OpSupports', 'any_chain']
+__all__ = [
+    "OperatorSupportBase",
+    "OperatorSupport",
+    "create_op_support",
+    "chain",
+    "OpSupports",
+    "any_chain",
+]
 
 # fx.Node.target typename, as returned by `get_node_target()`
 TargetTypeName = str
@@ -27,11 +36,12 @@ SupportDict = t.Mapping[TargetTypeName, SupportedArgumentDTypes]
 @compatibility(is_backward_compatible=False)
 class OperatorSupportBase(abc.ABC):
     """Interface for determining if a fx.Node is supported by a backend"""
+
     @abc.abstractmethod
     def is_node_supported(
         self, submodules: t.Mapping[str, torch.nn.Module], node: torch.fx.Node
     ) -> bool:
-        raise NotImplementedError()
+        raise NotImplementedError
 
 
 @compatibility(is_backward_compatible=False)
@@ -56,10 +66,7 @@ class OperatorSupport(OperatorSupportBase):
 
     _support_dict: SupportDict
 
-    def __init__(
-        self,
-        support_dict: t.Optional[SupportDict] = None
-    ):
+    def __init__(self, support_dict: t.Optional[SupportDict] = None):
         self._support_dict = support_dict or {}
 
     def is_node_supported(
@@ -138,11 +145,13 @@ def create_op_support(is_node_supported: IsNodeSupported) -> OperatorSupportBase
     `IsNodeSupported` has the same call signature as
     `OperatorSupportBase.is_node_supported`
     """
+
     class FunctionalOperatorSupport(OperatorSupportBase):
         def is_node_supported(
-                self, submodules: t.Mapping[str, torch.nn.Module], node: torch.fx.Node
+            self, submodules: t.Mapping[str, torch.nn.Module], node: torch.fx.Node
         ) -> bool:
             return is_node_supported(submodules, node)
+
     return FunctionalOperatorSupport()
 
 
@@ -152,11 +161,10 @@ def chain(*op_support: OperatorSupportBase) -> OperatorSupportBase:
     instance by evaluating each input `OperatorSupportBase` instance, and returns False if
     any of it reports False.
     """
+
     def _chain(submods, node) -> bool:
-        return all(
-            x.is_node_supported(submods, node)
-            for x in op_support
-        )
+        return all(x.is_node_supported(submods, node) for x in op_support)
+
     return create_op_support(_chain)
 
 
@@ -166,11 +174,10 @@ def any_chain(*op_support: OperatorSupportBase) -> OperatorSupportBase:
     instance by evaluating each input `OperatorSupportBase` instance, and returns True if
     any of it reports True.
     """
+
     def _any_chain(submods, node) -> bool:
-        return any(
-            x.is_node_supported(submods, node)
-            for x in op_support
-        )
+        return any(x.is_node_supported(submods, node) for x in op_support)
+
     return create_op_support(_any_chain)
 
 
@@ -179,6 +186,7 @@ class OpSupports:
     """A set of atomic `OperatorSupportBase` instances that can be combined together
     to form more complex operator support logic.
     """
+
     @classmethod
     def decline_if_input_dtype(cls, dtype: torch.dtype) -> OperatorSupportBase:
         """Report a node as non-supported, if any of its arguments is of dtype"""
@@ -188,13 +196,11 @@ class OpSupports:
             node: torch.fx.Node,
         ) -> bool:
             for arg in node.all_input_nodes:
-                # escape dtype check for get_attr node
-                if arg.op == "get_attr":
-                    continue
                 arg_dtype = _get_arg_dtype(arg)
                 if arg_dtype == dtype:
                     return False
             return True
+
         return create_op_support(_decline_if_input_dtype)
 
     @classmethod
@@ -202,19 +208,22 @@ class OpSupports:
         """
         If a node has a name that is in the disallow set, reported it as non-supported.
         """
+
         def _decline_if_node_in_names(
             submodules: t.Mapping[str, torch.nn.Module],
             node: torch.fx.Node,
         ) -> bool:
-            if node.name in disallow_set:
-                return False
-            else:
-                return True
+            return node.name not in disallow_set
+
         return create_op_support(_decline_if_node_in_names)
 
 
 def _get_arg_dtype(arg: torch.fx.Node) -> t.Any:
     assert isinstance(arg, torch.fx.Node)
     tensor_meta = arg.meta.get("tensor_meta")  # type: ignore[union-attr]
-    dtype = tensor_meta.dtype if isinstance(tensor_meta, TensorMetadata) else arg.meta["type"]
+    dtype = (
+        tensor_meta.dtype
+        if isinstance(tensor_meta, TensorMetadata)
+        else arg.meta["type"]
+    )
     return dtype

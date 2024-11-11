@@ -1,6 +1,8 @@
+from __future__ import annotations
+
 from copy import copy
 from functools import total_ordering
-from typing import Iterable, List, Optional, Set, Tuple, Union
+from typing import Any, Iterable
 
 
 class TestRun:
@@ -15,38 +17,37 @@ class TestRun:
     """
 
     test_file: str
-    _exclued: Set[str]  # Tests that should be excluded from this test run
-    _included: Set[str]  # If non-empy, only these tests should be run in this test run
+    _excluded: frozenset[str]  # Tests that should be excluded from this test run
+    _included: frozenset[
+        str
+    ]  # If non-empy, only these tests should be run in this test run
 
     def __init__(
         self,
         name: str,
-        excluded: Optional[Iterable[str]] = None,
-        included: Optional[Iterable[str]] = None,
+        excluded: Iterable[str] | None = None,
+        included: Iterable[str] | None = None,
     ) -> None:
-        self._excluded = set()
-        self._included = set()
-
         if excluded and included:
             raise ValueError("Can't specify both included and excluded")
+
+        ins = set(included or [])
+        exs = set(excluded or [])
 
         if "::" in name:
             assert (
                 not included and not excluded
             ), "Can't specify included or excluded tests when specifying a test class in the file name"
             self.test_file, test_class = name.split("::")
-            self._included.add(test_class)
+            ins.add(test_class)
         else:
             self.test_file = name
 
-        # For testing purposes
-        if excluded:
-            self._excluded = set(excluded)
-        if included:
-            self._included = set(included)
+        self._excluded = frozenset(exs)
+        self._included = frozenset(ins)
 
     @staticmethod
-    def empty() -> "TestRun":
+    def empty() -> TestRun:
         return TestRun("")
 
     def is_empty(self) -> bool:
@@ -57,21 +58,21 @@ class TestRun:
     def is_full_file(self) -> bool:
         return not self._included and not self._excluded
 
-    def included(self) -> Set[str]:
-        return self._included.copy()
+    def included(self) -> frozenset[str]:
+        return self._included
 
-    def excluded(self) -> Set[str]:
-        return self._excluded.copy()
+    def excluded(self) -> frozenset[str]:
+        return self._excluded
 
     def get_pytest_filter(self) -> str:
         if self._included:
             return " or ".join(sorted(self._included))
         elif self._excluded:
-            return f"not ({' and '.join(sorted(self._excluded))})"
+            return f"not ({' or '.join(sorted(self._excluded))})"
         else:
             return ""
 
-    def contains(self, test: "TestRun") -> bool:
+    def contains(self, test: TestRun) -> bool:
         if self.test_file != test.test_file:
             return False
 
@@ -81,7 +82,7 @@ class TestRun:
         if test.is_full_file():
             return False  # test contains all tests, but self doesn't
 
-        # Does self exclude a subset of what test excldes?
+        # Does self exclude a subset of what test excludes?
         if test._excluded:
             return test._excluded.issubset(self._excluded)
 
@@ -93,7 +94,7 @@ class TestRun:
         # Does self exclude anything test includes? If not, we're good
         return not self._excluded.intersection(test._included)
 
-    def __copy__(self) -> "TestRun":
+    def __copy__(self) -> TestRun:
         return TestRun(self.test_file, excluded=self._excluded, included=self._included)
 
     def __bool__(self) -> bool:
@@ -124,17 +125,10 @@ class TestRun:
         ret = ret and self._excluded == other._excluded
         return ret
 
-    def __ior__(  # noqa: PYI034 Method returns `self`
-        self, other: "TestRun"
-    ) -> "TestRun":
-        res = self | other
-        self.test_file = res.test_file
-        self._included = res._included
-        self._excluded = res._excluded
+    def __hash__(self) -> int:
+        return hash((self.test_file, self._included, self._excluded))
 
-        return self
-
-    def __or__(self, other: "TestRun") -> "TestRun":
+    def __or__(self, other: TestRun) -> TestRun:
         """
         To OR/Union test runs means to run all the tests that either of the two runs specify.
         """
@@ -175,16 +169,7 @@ class TestRun:
         excluded = self._excluded | other._excluded
         return TestRun(self.test_file, excluded=excluded - included)
 
-    def __isub__(  # noqa: PYI034 Method returns `self`
-        self, other: "TestRun"
-    ) -> "TestRun":
-        res = self - other
-        self.test_file = res.test_file
-        self._included = res._included
-        self._excluded = res._excluded
-        return self
-
-    def __sub__(self, other: "TestRun") -> "TestRun":
+    def __sub__(self, other: TestRun) -> TestRun:
         """
         To subtract test runs means to run all the tests in the first run except for what the second run specifies.
         """
@@ -203,7 +188,7 @@ class TestRun:
         if other.is_full_file():
             return TestRun.empty()
 
-        def return_inclusions_or_empty(inclusions: Set[str]) -> TestRun:
+        def return_inclusions_or_empty(inclusions: frozenset[str]) -> TestRun:
             if inclusions:
                 return TestRun(self.test_file, included=inclusions)
             return TestRun.empty()
@@ -221,14 +206,29 @@ class TestRun:
             else:
                 return return_inclusions_or_empty(other._excluded - self._excluded)
 
-    def __and__(self, other: "TestRun") -> "TestRun":
+    def __and__(self, other: TestRun) -> TestRun:
         if self.test_file != other.test_file:
             return TestRun.empty()
 
         return (self | other) - (self - other) - (other - self)
 
+    def to_json(self) -> dict[str, Any]:
+        r: dict[str, Any] = {
+            "test_file": self.test_file,
+        }
+        if self._included:
+            r["included"] = list(self._included)
+        if self._excluded:
+            r["excluded"] = list(self._excluded)
+        return r
 
-TestRuns = Tuple[TestRun, ...]
+    @staticmethod
+    def from_json(json: dict[str, Any]) -> TestRun:
+        return TestRun(
+            json["test_file"],
+            included=json.get("included", []),
+            excluded=json.get("excluded", []),
+        )
 
 
 @total_ordering
@@ -236,14 +236,14 @@ class ShardedTest:
     test: TestRun
     shard: int
     num_shards: int
-    time: Optional[float]  # In seconds
+    time: float | None  # In seconds
 
     def __init__(
         self,
-        test: Union[TestRun, str],
+        test: TestRun | str,
         shard: int,
         num_shards: int,
-        time: Optional[float] = None,
+        time: float | None = None,
     ) -> None:
         if isinstance(test, str):
             test = TestRun(test)
@@ -295,10 +295,10 @@ class ShardedTest:
     def __str__(self) -> str:
         return f"{self.test} {self.shard}/{self.num_shards}"
 
-    def get_time(self) -> float:
-        return self.time or 0
+    def get_time(self, default: float = 0) -> float:
+        return self.time if self.time is not None else default
 
-    def get_pytest_args(self) -> List[str]:
+    def get_pytest_args(self) -> list[str]:
         filter = self.test.get_pytest_filter()
         if filter:
             return ["-k", self.test.get_pytest_filter()]

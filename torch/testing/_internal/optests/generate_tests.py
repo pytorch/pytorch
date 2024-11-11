@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import datetime
 import difflib
 import functools
@@ -8,14 +10,13 @@ import re
 import tempfile
 import threading
 import unittest
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 import torch
-
 import torch._dynamo
-
 import torch.utils._pytree as pytree
 from torch._dynamo.utils import clone_input
+from torch._library.custom_ops import CustomOpDef
 from torch._subclasses.schema_check_mode import SchemaCheckMode
 from torch._utils_internal import get_file_path_2
 from torch.overrides import TorchFunctionMode
@@ -144,8 +145,11 @@ DEFAULT_TEST_UTILS = [
     "test_schema",
     "test_autograd_registration",
     "test_faketensor",
-    "test_aot_dispatch_static",
     "test_aot_dispatch_dynamic",
+]
+
+DEPRECATED_DEFAULT_TEST_UTILS = DEFAULT_TEST_UTILS + [
+    "test_aot_dispatch_static",
 ]
 
 
@@ -153,7 +157,7 @@ def generate_opcheck_tests(
     testcase: Any,
     namespaces: List[str],
     failures_dict_path: Optional[str] = None,
-    additional_decorators: Dict[str, Callable] = None,
+    additional_decorators: Optional[Dict[str, Callable]] = None,
     test_utils: List[str] = DEFAULT_TEST_UTILS,
 ) -> None:
     """Given an existing TestCase, use the existing tests to generate
@@ -388,9 +392,7 @@ def validate_failures_dict_structure(
 
     """
     failure_dict = failure_dict.data
-    qualnames = list(failure_dict.keys())
     for test_to_option in failure_dict.values():
-        test_names = list(test_to_option.keys())
         for test_name, test_dict in test_to_option.items():
             if set(test_dict.keys()) != set({"comment", "status"}):
                 raise RuntimeError(
@@ -615,48 +617,19 @@ def should_print_better_repro() -> None:
 
 
 def opcheck(
-    op: torch._ops.OperatorBase,
+    op: Union[torch._ops.OpOverload, torch._ops.OpOverloadPacket, CustomOpDef],
     args: Tuple[Any, ...],
     kwargs: Optional[Dict[str, Any]] = None,
     *,
-    test_utils: Union[str, List[str]] = "ALL",
+    test_utils: Union[str, Sequence[str]] = DEFAULT_TEST_UTILS,
     raise_exception: bool = True,
 ) -> Dict[str, str]:
-    """Given an operator and some sample arguments, tests if the operator is
-    registered correctly.
-
-    We test the following (which are important for correctness in eager-mode
-    PyTorch and with torch.compile):
-    - test_schema: if the operator's schema is correct.
-    - test_autograd_registration: if autograd was registered correctly,
-        i.e. to the correct DispatchKey.
-    - test_faketensor: If the operator has a FakeTensor implementation
-        (and if it is correct).
-    - test_aot_dispatch_static: If the operator works with
-        AOTAutograd/AOTDispatch, which is one of the parts in the PT2 stack.
-        Checks that the outputs (and gradients, if they are computable)
-        of the operator are the same under eager-mode PyTorch and torch.compile.
-    - test_aot_dispatch_dynamic: Same as aot_dispatch_static, but
-        tests dynamic shapes instead of static shapes.
-
-    For best results, please call ``opcheck`` multiple times with a
-    representative set of inputs. For example, if your operator supports
-    autograd, please use ``opcheck`` with inputs that require_grad.
-
-    Args:
-        op: The operator. Should look like torch.ops.aten.foo
-        args: The args to the operator
-        kwargs: The kwargs to the operator
-        test_utils: Tests that we should run. Default: all of them.
-            Example: ["test_schema", "test_faketensor"]
-        raise_exception: If we should raise an exception on the first
-            error. If False, we will return a dict with information
-            on if each test passed or not.
-
-    """
+    """See torch.library.opcheck for docstring"""
 
     if kwargs is None:
         kwargs = {}
+    if isinstance(op, CustomOpDef):
+        op = op._opoverload
     if isinstance(op, torch._ops.OpOverloadPacket):
         op = resolve_unique_overload_or_throw(op)
     if not isinstance(op, torch._ops.OpOverload):

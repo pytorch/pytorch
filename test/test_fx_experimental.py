@@ -1,5 +1,6 @@
 # Owner(s): ["module: fx"]
 
+import functools
 import math
 import numbers
 import operator
@@ -17,6 +18,7 @@ import torch.fx.experimental.optimization as optimization
 from torch.fx._symbolic_trace import symbolic_trace
 from torch.fx.experimental import merge_matmul
 from torch.fx.experimental.accelerator_partitioner import Partitioner
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.normalize import NormalizeArgs, NormalizeOperators
 from torch.fx.experimental.partitioner_utils import (
     Device,
@@ -51,6 +53,7 @@ from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_nn import module_tests, new_module_tests
 from torch.testing._internal.common_utils import TEST_Z3, run_tests, TestCase
 from torch.testing._internal.jit_utils import JitTestCase
+import torch.utils._pytree as pytree
 
 try:
     import torchvision.models
@@ -119,7 +122,7 @@ class TestFXExperimental(JitTestCase):
 
     def test_large_node_error(self):
         class TestModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(4, 4)
 
@@ -176,7 +179,7 @@ class TestFXExperimental(JitTestCase):
 
     def test_size_based_partition(self):
         class TestModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(4, 4)
                 self.c = torch.rand(4)
@@ -208,7 +211,7 @@ class TestFXExperimental(JitTestCase):
 
     def test_partition_device_mapping(self):
         class TestModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(4, 4)
 
@@ -247,7 +250,7 @@ class TestFXExperimental(JitTestCase):
                     layers.append(torch.nn.ReLU())
                 return layers
 
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 layers = self.create_mlp(4, 4, 4)
                 self.bottom_layers = torch.nn.Sequential(*layers)
@@ -301,7 +304,7 @@ class TestFXExperimental(JitTestCase):
 
     def test_partition_latency(self):
         class TestModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(4, 4)
 
@@ -358,7 +361,7 @@ class TestFXExperimental(JitTestCase):
 
     def test_cost_aware_partition(self):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(4, 4)
 
@@ -420,7 +423,7 @@ class TestFXExperimental(JitTestCase):
 
     def test_aot_based_partition(self):
         class TestModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.b = torch.rand(4)
                 self.c = torch.rand(4)
@@ -479,7 +482,7 @@ class TestFXExperimental(JitTestCase):
 
     def test_saturate_host(self):
         class TestModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(4, 4)
 
@@ -535,7 +538,7 @@ class TestFXExperimental(JitTestCase):
 
     def test_conv_bn_fusion_not_running_state(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(32, 64, 3, stride=2)
                 self.bn = torch.nn.BatchNorm2d(64, eps=1e-05, momentum=0.1, affine=True, track_running_stats=False)
@@ -559,7 +562,7 @@ class TestFXExperimental(JitTestCase):
 
     def test_conv_bn_fusion_mixed_dtype(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(3, 16, kernel_size=3, stride=1, padding=1, bias=False, dtype=torch.bfloat16)
                 self.bn = torch.nn.BatchNorm2d(16, eps=0.001, momentum=0.1, affine=True, track_running_stats=True)
@@ -610,7 +613,7 @@ class TestFXExperimental(JitTestCase):
 
     def test_meta_tracer(self):
         class MetaTracerTestModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.emb = torch.nn.Embedding(num_embeddings=42, embedding_dim=16)
                 self.layernorm = torch.nn.LayerNorm(16)
@@ -733,7 +736,7 @@ terrible spacing
 
     def test_subgraph_creation(self):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.param = torch.nn.Parameter(torch.rand(3, 4))
                 self.linear = torch.nn.Linear(4, 5)
@@ -817,6 +820,23 @@ terrible spacing
             split(x), traced(x)
         )
 
+    def test_split_module_return_node(self):
+        def foo(x):
+            x.add_(1)
+
+        gm = make_fx(foo, tracing_mode="fake")(torch.randn(3,))
+
+        def cb(_):
+            return 1
+
+        sp_gm = split_module(gm, None, cb)
+        submod_gm = sp_gm.submod_1
+        for node in submod_gm.graph.nodes:
+            if node.op == "output":
+                break
+        else:
+            raise RuntimeError("Expected the subgraph to have an output node.")
+
 
     def test_split_module_kwargs_expansion(self):
         class ModuleWithKwargsExpansion(torch.nn.Module):
@@ -853,7 +873,7 @@ terrible spacing
 
     def test_split_module_default_arg(self):
         class ModelToTrace(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.lin = torch.nn.Linear(512, 512)
 
@@ -1167,7 +1187,7 @@ class {test_classname}(torch.nn.Module):
 
     def test_subgraph_uniquename(self):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(4, 4)
 
@@ -1197,7 +1217,7 @@ class {test_classname}(torch.nn.Module):
         d_hid = 4
 
         class ExampleCode(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.mm_param = torch.nn.Parameter(torch.randn(d_hid, d_hid))
                 self.mm_param2 = torch.nn.Parameter(torch.randn(d_hid, d_hid))
@@ -1242,14 +1262,14 @@ class {test_classname}(torch.nn.Module):
 
     def test_to_folder(self):
         class Test(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.W = torch.nn.Parameter(torch.randn(2))
                 self.seq = torch.nn.Sequential(torch.nn.BatchNorm1d(2, 2))
                 self.linear = torch.nn.Linear(2, 2)
                 self.attr = torch.randn(2)
-                self.register_buffer("attr2", torch.randn(2))
-                self.register_buffer("attr3", torch.ones(2, dtype=torch.int32))
+                self.attr2 = torch.nn.Buffer(torch.randn(2))
+                self.attr3 = torch.nn.Buffer(torch.ones(2, dtype=torch.int32))
 
             def forward(self, x):
                 return self.linear(self.seq(self.W + self.attr + self.attr2 + self.attr3 + x))
@@ -1297,7 +1317,7 @@ class {test_classname}(torch.nn.Module):
         }
 
         class TestModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(3, 3, 2)
                 self.bn = torch.nn.BatchNorm2d(3)
@@ -1491,7 +1511,7 @@ class {test_classname}(torch.nn.Module):
         import torch.nn as nn
 
         class Foo(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 layers = []
                 layers2 = []
@@ -1564,7 +1584,7 @@ class TestNormalizeOperators(JitTestCase):
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_normalize_operator_exhaustive(self, device, dtype, op):
         # These ops currently don't trace in FX for various reasons (i.e. they take a list of tensors)
-        fx_fail = {"cat", "stack", "hstack", "vstack", "dstack", "linalg.multi_dot", "_upsample_bilinear2d_aa"}
+        fx_fail = {"cat", "stack", "hstack", "vstack", "dstack", "linalg.multi_dot", "_upsample_bilinear2d_aa", "_chunk_cat"}
         sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
         if isinstance(op.op, torch._ops.OpOverload):
             self.skipTest("normalize operator doesn't work on torch.ops")
@@ -1623,21 +1643,40 @@ class TestNormalizeOperators(JitTestCase):
             param_names = []
             param_values = []
             fx_args = []
-            for idx, v in enumerate(arg_values):
-                if isinstance(v, torch.Tensor):
-                    param_names.append(f"arg_{idx}")
-                    param_values.append(v)
-                    fx_args.append(param_names[-1])
+
+            idx = 0
+
+            def process_arg(arg, name):
+                if isinstance(arg, torch.Tensor):
+                    param_names.append(name)
+                    param_values.append(arg)
+                    return name
                 else:
-                    fx_args.append(f"{repr(v)}")
+                    return f"{repr(arg)}"
+
+            def process_arg_with_idx(arg):
+                nonlocal idx
+                res = process_arg(arg, f"arg_{idx}")
+                idx = idx + 1
+                return res
+
+            def str_arg(arg):
+                if isinstance(arg, tuple):
+                    args = [f"{str_arg(v)}, " for v in arg]
+                    return f"({' '.join(args)})"
+                elif isinstance(arg, list):
+                    args = [f"{str_arg(v)}" for v in arg]
+                    return f"[{', '.join(args)}]"
+                else:
+                    return arg
+
+            for v in arg_values:
+                arg = pytree.tree_map(process_arg_with_idx, v)
+                fx_args.append(str_arg(arg))
 
             for k, v in kwarg_values.items():
-                if isinstance(v, torch.Tensor):
-                    param_names.append(k)
-                    param_values.append(v)
-                    fx_args.append(f"{k} = {k}")
-                else:
-                    fx_args.append(f"{k} = {repr(v)}")
+                arg = pytree.tree_map(functools.partial(process_arg, name=k), v)
+                fx_args.append(f"{k} = {str_arg(arg)}")
 
             code = f"""
 class TestModule(torch.nn.Module):
@@ -1691,7 +1730,7 @@ class TestModule(torch.nn.Module):
                 "include_last_offset",
             },
         )
-        self.assertEqual(norm_args_and_kwargs.args, tuple())
+        self.assertEqual(norm_args_and_kwargs.args, ())
 
     def test_normalize_args_op_overload(self):
         for target in [torch.ops.aten.resize_as_.default, torch.ops.aten.resize_as_]:

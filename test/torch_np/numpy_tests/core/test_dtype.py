@@ -2,17 +2,16 @@
 
 import functools
 import operator
-
 import pickle
 import sys
 import types
 from itertools import permutations
 from typing import Any
-
 from unittest import skipIf as skipif
 
 import pytest
 from pytest import raises as assert_raises
+
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -20,8 +19,10 @@ from torch.testing._internal.common_utils import (
     subtest,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
+    xfailIfTorchDynamo,
     xpassIfTorchDynamo,
 )
+
 
 skip = functools.partial(skipif, True)
 
@@ -67,6 +68,7 @@ class TestBuiltin(TestCase):
         assert_(left == right)
         assert_(hash(left) == hash(right))
 
+    @xfailIfTorchDynamo  # TypeError -> InternalTorchDynamoError
     def test_invalid_types(self):
         # Make sure invalid type strings raise an error
 

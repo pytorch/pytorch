@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import argparse
 import cProfile
 import pstats
@@ -156,7 +157,7 @@ exits in a finite amount of time.
 
 For more complicated uses of the profilers, please see
 https://docs.python.org/3/library/profile.html and
-https://pytorch.org/docs/master/autograd.html#profiler for more information.
+https://pytorch.org/docs/main/autograd.html#profiler for more information.
 """.strip()
 
 
@@ -171,7 +172,7 @@ def parse_args():
 
 
 def cpu_time_total(autograd_prof):
-    return sum([event.cpu_time_total for event in autograd_prof.function_events])
+    return sum(event.cpu_time_total for event in autograd_prof.function_events)
 
 
 def main():

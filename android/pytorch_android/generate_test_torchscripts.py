@@ -3,6 +3,7 @@ from typing import Dict, List, Optional, Tuple
 import torch
 from torch import Tensor
 
+
 OUTPUT_DIR = "src/androidTest/assets/"
 
 
@@ -121,6 +122,15 @@ class Test(torch.jit.ScriptModule):
         r = torch.nn.functional.conv2d(x, w)
         if toChannelsLast:
             r = r.contiguous(memory_format=torch.channels_last)
+        else:
+            r = r.contiguous()
+        return r
+
+    @torch.jit.script_method
+    def conv3d(self, x: Tensor, w: Tensor, toChannelsLast: bool) -> Tensor:
+        r = torch.nn.functional.conv3d(x, w)
+        if toChannelsLast:
+            r = r.contiguous(memory_format=torch.channels_last_3d)
         else:
             r = r.contiguous()
         return r

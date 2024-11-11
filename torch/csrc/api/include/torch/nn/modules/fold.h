@@ -7,11 +7,10 @@
 #include <torch/nn/pimpl.h>
 #include <torch/types.h>
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 /// Applies fold over a 3-D input.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.Fold to learn about
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.Fold to learn about
 /// the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::FoldOptions` class to learn what
@@ -49,7 +48,7 @@ TORCH_MODULE(Fold);
 // ============================================================================
 
 /// Applies unfold over a 4-D input.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.Unfold to learn about
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.Unfold to learn about
 /// the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::UnfoldOptions` class to learn what
@@ -83,5 +82,4 @@ class TORCH_API UnfoldImpl : public Cloneable<UnfoldImpl> {
 /// learn about PyTorch's module storage semantics.
 TORCH_MODULE(Unfold);
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

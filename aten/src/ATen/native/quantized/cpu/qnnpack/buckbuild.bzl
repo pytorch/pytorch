@@ -336,6 +336,7 @@ def define_qnnpack(third_party, labels = []):
             ":ukernels_sse2",
             ":ukernels_sse41",
             ":ukernels_ssse3",
+            third_party("clog"),
             third_party("cpuinfo"),
             third_party("FP16"),
             third_party("FXdiv"),
@@ -434,9 +435,6 @@ def define_qnnpack(third_party, labels = []):
         # @autodeps-skip
         name = "ukernels_asm",
         srcs = [
-            # Dummy empty source file to work around link error on x86-64 Android
-            # when static library contains no symbols.
-            "wrappers/dummy.c",
             # AArch32 ukernels
             "wrappers/hgemm/8x8-aarch32-neonfp16arith.S",
             "wrappers/q8conv/4x8-aarch32-neon.S",

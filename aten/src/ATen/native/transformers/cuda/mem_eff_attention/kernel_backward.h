@@ -57,6 +57,7 @@
 #include <ATen/native/transformers/cuda/mem_eff_attention/transform/tile_smem_loader.h>
 
 #include <cinttypes>
+#include <c10/util/Exception.h>
 
 using namespace gemm_kernel_utils;
 
@@ -606,7 +607,10 @@ struct AttentionBackwardKernel {
     using AccumTileGmem = GmemTile<typename Mma::FragmentC, (int)kNumThreads>;
   };
 
-  static constexpr bool kEnableSplitKeys = true;
+  // NOTE: nvcc 12.4 has correctness errors with this on M60 (sm52)
+  // when there is an attention bias. Let's just disable it for now.
+  static constexpr auto kMinSm = ArchTag::kMinComputeCapability;
+  static constexpr bool kEnableSplitKeys = kMinSm >= 70;
 
   static constexpr bool kNeedsAccumGradQ = kEnableSplitKeys ||
       !cutlass::platform::is_same<output_accum_t, output_t>::value;
@@ -624,16 +628,16 @@ struct AttentionBackwardKernel {
 
   struct Params {
     // Input tensors
-    scalar_t* query_ptr = nullptr; // [Mq, nH, K]
-    scalar_t* key_ptr = nullptr; // [Mk, nH, K]
-    scalar_t* value_ptr = nullptr; // [Mk, nH, Kv]
-    scalar_t* bias_ptr = nullptr;
-    lse_scalar_t* logsumexp_ptr = nullptr; // [nH, Mq]
-    scalar_t* output_ptr = nullptr; // [Mq, nH, Kv]
-    scalar_t* grad_output_ptr = nullptr; // [Mq, nH, Kv]
+    const scalar_t* query_ptr = nullptr; // [Mq, nH, K]
+    const scalar_t* key_ptr = nullptr; // [Mk, nH, K]
+    const scalar_t* value_ptr = nullptr; // [Mk, nH, Kv]
+    const scalar_t* bias_ptr = nullptr;
+    const lse_scalar_t* logsumexp_ptr = nullptr; // [nH, Mq]
+    const scalar_t* output_ptr = nullptr; // [Mq, nH, Kv]
+    const scalar_t* grad_output_ptr = nullptr; // [Mq, nH, Kv]
     accum_t* delta_ptr = nullptr; // [nH, Mq]
-    int32_t* cu_seqlens_q_ptr = nullptr;
-    int32_t* cu_seqlens_k_ptr = nullptr;
+    const int32_t* cu_seqlens_q_ptr = nullptr;
+    const int32_t* cu_seqlens_k_ptr = nullptr;
 
     // Output tensors
     output_t* grad_query_ptr = nullptr; //  [Mq, nH, K]
@@ -647,6 +651,9 @@ struct AttentionBackwardKernel {
         nullptr; // (will be calculated by the kernel)
     GradQTempStorage* workspace_gq =
         nullptr; // (will be calculated by the kernel)
+
+    // Sliding window. ignored if == 0
+    int32_t window_size = 0;
 
     // Scale
     accum_t scale = 1.0f;
@@ -716,11 +723,19 @@ struct AttentionBackwardKernel {
     int64_t gV_strideH = 0;
     int64_t gB_strideH = 0;
 
-    CUTLASS_DEVICE int16_t num_splits_key_device() const {
+    CUTLASS_HOST_DEVICE int16_t num_splits_key_device() const {
+#ifdef __CUDA_ARCH__
       return kEnableSplitKeys ? gridDim.x : 1;
+#else
+      return num_splits_key; // for host-side tests
+#endif
     }
-    CUTLASS_DEVICE int16_t split_key_device() const {
+    CUTLASS_HOST_DEVICE int16_t split_key_device() const {
+#ifdef __CUDA_ARCH__
       return kEnableSplitKeys ? blockIdx.x : 0;
+#else
+      return 0; // for host-side tests
+#endif
     }
 
     CUTLASS_DEVICE bool advance_to_block() {
@@ -842,14 +857,14 @@ struct AttentionBackwardKernel {
       if (!kNeedsAccumGradK) {
         return 0;
       }
-      return num_splits_key * align_up(num_keys, (int32_t)kBlockSizeJ) *
+      return num_splits_key * kBlockSizeJ *
           align_up(head_dim, (int32_t)kBlockSizeI);
     }
     CUTLASS_HOST_DEVICE int64_t workspace_elements_gv() const {
       if (!kNeedsAccumGradV) {
         return 0;
       }
-      return num_splits_key * align_up(num_keys, (int32_t)kBlockSizeJ) *
+      return num_splits_key * kBlockSizeJ *
           align_up(head_dim_value, (int32_t)kBlockSizeI);
     }
     CUTLASS_HOST_DEVICE int64_t workspace_elements_gq() const {
@@ -873,7 +888,7 @@ struct AttentionBackwardKernel {
       return num_batches * num_heads * workspace_strideBH() * sizeof(float);
     }
     CUTLASS_HOST_DEVICE bool should_zero_workspace() const {
-      return num_splits_key > 1;
+      return num_splits_key > 1 || window_size > 0;
     }
   };
 
@@ -1170,8 +1185,12 @@ struct AttentionBackwardKernel {
     CHECK_ALIGNED_PTR(p.output_ptr, kMinimumAlignment);
     CHECK_ALIGNED_PTR(p.grad_output_ptr, kMinimumAlignment);
     CHECK_ALIGNED_PTR(p.bias_ptr, kMinimumAlignment);
-    TORCH_CHECK(p.lse_strideH % 8 == 0, "LSE is not correctly aligned");
-    TORCH_CHECK(p.lse_strideB % 8 == 0, "LSE is not correctly aligned");
+    TORCH_CHECK(
+        p.num_heads <= 1 || p.lse_strideH % 8 == 0,
+        "LSE is not correctly aligned (strideH)");
+    TORCH_CHECK(
+        p.num_batches <= 1 || p.lse_strideB % 8 == 0,
+        "LSE is not correctly aligned (strideB)");
     TORCH_CHECK(
         p.num_heads <= 1 || p.q_strideH % kMinimumAlignment == 0,
         "query is not correctly aligned (strideH)");
@@ -1183,7 +1202,7 @@ struct AttentionBackwardKernel {
         "value is not correctly aligned (strideH)");
     TORCH_CHECK(
         p.num_batches <= 1 || p.q_strideB % kMinimumAlignment == 0,
-        "query is not correctly aligned (strideB).");
+        "query is not correctly aligned (strideB)");
     TORCH_CHECK(
         p.num_batches <= 1 || p.k_strideB % kMinimumAlignment == 0,
         "key is not correctly aligned (strideB)");
@@ -1264,13 +1283,19 @@ struct AttentionBackwardKernel {
     }
     TORCH_CHECK(
         kEnableSplitKeys || p.num_splits_key == 1, "SplitKeys is disabled");
-    TORCH_CHECK(p.num_splits_key > 0, "Invalid `num_splits_key` (expected >0)");
+    TORCH_CHECK(
+        p.num_splits_key > 0, "Invalid `num_splits_key` (expected >0)");
     TORCH_CHECK(
         p.num_splits_key <= cutlass::ceil_div(p.num_keys, kBlockSizeJ),
         "Invalid `num_splits_key` (",
         p.num_splits_key,
         ") - too large for `num_keys` = ",
         p.num_keys);
+    if (p.window_size != 0) {
+      TORCH_CHECK(
+          p.custom_mask_type != NoCustomMask,
+          "LocalAttention only supported in causal mode");
+    }
     return true;
   }
 
@@ -1331,15 +1356,15 @@ struct AttentionBackwardKernel {
           std::get<1>(seeds) + p.dropout_batch_head_rng_offset,
           &rng_state_init);
     }
+
     CUTLASS_PRAGMA_UNROLL
     for (; key_start < p.num_keys;
          key_start += p.num_splits_key_device() * kBlockSizeJ) {
       output_frags.clear();
 
-      CUTLASS_PRAGMA_UNROLL
-      for (int32_t query_start_shifted = getQueryStart(p, key_start);
-           query_start_shifted < getQueryStartShift(p) + getQueryEnd(p);
-           query_start_shifted += kBlockSizeI) {
+      int32_t next_key = key_start;
+      int32_t query_start = getQueryStart(p, key_start);
+      while (next_key == key_start && query_start < p.num_queries) {
         // This line here
         // vvvvvvvvvvvvvv
         warp_id = warp_uniform(warp_id);
@@ -1350,11 +1375,6 @@ struct AttentionBackwardKernel {
         // from the previous iteration, which prevents MASSIVE
         // register spilling.
 
-        int32_t query_start = query_start_shifted;
-        if (query_start >= p.num_queries) {
-          query_start = query_start % getQueryEnd(p);
-        }
-
         processBlockIJ<kKeysQueriesAlignedToBlockSize>(
             shared_storage,
             output_frags,
@@ -1364,6 +1384,10 @@ struct AttentionBackwardKernel {
             rng_state_init,
             warp_id,
             lane_id);
+
+        int32_t next_query;
+        incrIteration(p, query_start, key_start, next_query, next_key);
+        query_start = next_query;
       }
       if (kOutputInRF) {
         writeFragsToGmem<kKeysQueriesAlignedToBlockSize>(
@@ -1422,7 +1446,7 @@ struct AttentionBackwardKernel {
       uint8_t lane_id) {
     cutlass::Array<cutlass::uint1b_t, MatmulDOIVJ::Mma::FragmentC::kElements>
         dropout_keep_mask_doivj;
-    dropout_keep_mask_doivj.fill(1);
+    dropout_keep_mask_doivj.fill(cutlass::uint1b_t{1});
     const float dropout_scale =
         kApplyDropout ? 1.0 / (1.0 - p.dropout_prob) : 1.0f;
 
@@ -1463,7 +1487,7 @@ struct AttentionBackwardKernel {
     auto prologueGradV = [&](int col) {
       typename MatmulGradV::Mma::IteratorB iterator_dO(
           {int32_t(p.gO_strideM)},
-          p.grad_output_ptr + query_start * p.gO_strideM + col,
+          const_cast<scalar_t*>(p.grad_output_ptr + query_start * p.gO_strideM + col),
           {num_queries_in_block, p.head_dim_value - col},
           thread_id,
           no_offset);
@@ -1476,7 +1500,7 @@ struct AttentionBackwardKernel {
     auto prologueGradQ = [&](int col) {
       typename MatmulGradQ::Mma::IteratorB iterator_K(
           {int32_t(p.k_strideM)},
-          p.key_ptr + key_start * p.k_strideM + col,
+          const_cast<scalar_t*>(p.key_ptr + key_start * p.k_strideM + col),
           {num_keys_in_block, p.head_dim - col},
           thread_id,
           no_offset);
@@ -1486,7 +1510,7 @@ struct AttentionBackwardKernel {
     auto prologueGradK = [&](int col) {
       typename MatmulGradK::Mma::IteratorB iterator_Q(
           {int32_t(p.q_strideM)},
-          p.query_ptr + query_start * p.q_strideM + col,
+          const_cast<scalar_t*>(p.query_ptr + query_start * p.q_strideM + col),
           {num_queries_in_block, p.head_dim - col},
           thread_id,
           no_offset);
@@ -1499,13 +1523,13 @@ struct AttentionBackwardKernel {
     auto prologueDOV = [&]() {
       typename MatmulDOIVJ::Mma::IteratorA iterator_A(
           {int32_t(p.gO_strideM)},
-          p.grad_output_ptr + query_start * p.gO_strideM,
+          const_cast<scalar_t*>(p.grad_output_ptr + query_start * p.gO_strideM),
           {num_queries_in_block, p.head_dim_value},
           thread_id,
           no_offset);
       typename MatmulDOIVJ::Mma::IteratorB iterator_B(
           {int32_t(p.v_strideM)},
-          p.value_ptr + key_start * p.v_strideM,
+          const_cast<scalar_t*>(p.value_ptr + key_start * p.v_strideM),
           {p.head_dim_value, num_keys_in_block},
           thread_id,
           no_offset);
@@ -1532,7 +1556,7 @@ struct AttentionBackwardKernel {
       // k_j
       typename Mma::IteratorA iterator_A(
           {int32_t(p.k_strideM)},
-          p.key_ptr + key_start * p.k_strideM,
+          const_cast<scalar_t*>(p.key_ptr + key_start * p.k_strideM),
           {problem_size.m(), problem_size.k()},
           thread_id,
           no_offset);
@@ -1540,7 +1564,7 @@ struct AttentionBackwardKernel {
       // q_i.transpose(-2, -1)
       typename Mma::IteratorB iterator_B(
           {int32_t(p.q_strideM)},
-          p.query_ptr + query_start * p.q_strideM,
+          const_cast<scalar_t*>(p.query_ptr + query_start * p.q_strideM),
           {problem_size.k(), problem_size.n()},
           thread_id,
           no_offset);
@@ -1579,7 +1603,7 @@ struct AttentionBackwardKernel {
         // load bias tile Bij into shared memory
         typename MatmulQK::BiasLoader::GmemTileIterator bias_iter(
             {cutlass::layout::RowMajor(p.bias_strideM)},
-            p.bias_ptr + query_start * p.bias_strideM + key_start,
+            const_cast<scalar_t*>(p.bias_ptr + query_start * p.bias_strideM + key_start),
             {num_queries_in_block, num_keys_in_block},
             thread_id);
         cutlass::TensorRef<scalar_t, cutlass::layout::RowMajor> bias_tensor_ref(
@@ -1625,7 +1649,26 @@ struct AttentionBackwardKernel {
             },
             [&](int accum_m) {});
       }
+      if (p.window_size > 0) {
+        auto lane_offset = MatmulQK::AccumLambdaIterator::get_lane_offset(
+            lane_id, warp_id, output_tile_coords);
+        int shift = query_start - key_start - p.window_size;
+        // current_key = key_start + accum_m
+        // current_query = query_start + accum_n
+        // mask if: `current_key < current_query - window_size`
+        // if accum_m < accum_n + query_start - window_size - key_start
 
+        MatmulQK::AccumLambdaIterator::iterateRows(
+            lane_offset,
+            [&](int accum_m) {},
+            [&](int accum_m, int accum_n, int idx) {
+              if (accum_m <= accum_n + shift) {
+                accum[idx] =
+                    -cutlass::platform::numeric_limits<accum_t>::infinity();
+              }
+            },
+            [&](int accum_m) {});
+      }
       __syncthreads();
       if (kPrologueGV) {
         prologueGradV(0);
@@ -1720,7 +1763,7 @@ struct AttentionBackwardKernel {
             [&](int accum_m) {},
             [&](int accum_m /*q*/, int accum_n /*k*/, int idx) {
               if (zij.at({accum_n, accum_m}) == scalar_t(0)) {
-                dropout_keep_mask_doivj[idx] = cutlass::uint1b_t(0);
+                dropout_keep_mask_doivj[idx] = cutlass::uint1b_t{0};
               }
             },
             [&](int accum_m) {});
@@ -1752,7 +1795,7 @@ struct AttentionBackwardKernel {
       };
       typename Mma::IteratorB iterator_B(
           {int32_t(p.gO_strideM)},
-          p.grad_output_ptr + query_start * p.gO_strideM + col,
+          const_cast<scalar_t*>(p.grad_output_ptr + query_start * p.gO_strideM + col),
           {num_queries_in_block, p.head_dim_value - col},
           thread_id,
           no_offset);
@@ -1825,7 +1868,7 @@ struct AttentionBackwardKernel {
       // do_i
       typename Mma::IteratorA iterator_A(
           {int32_t(p.gO_strideM)},
-          p.grad_output_ptr + query_start * p.gO_strideM,
+          const_cast<scalar_t*>(p.grad_output_ptr + query_start * p.gO_strideM),
           {num_queries_in_block, p.head_dim_value},
           thread_id,
           no_offset);
@@ -1833,7 +1876,7 @@ struct AttentionBackwardKernel {
       // v_j.transpose(-2, -1)
       typename Mma::IteratorB iterator_B(
           {int32_t(p.v_strideM)},
-          p.value_ptr + key_start * p.v_strideM,
+          const_cast<scalar_t*>(p.value_ptr + key_start * p.v_strideM),
           {p.head_dim_value, num_keys_in_block},
           thread_id,
           no_offset);
@@ -1994,7 +2037,7 @@ struct AttentionBackwardKernel {
       // k_j
       typename Mma::IteratorB iterator_B(
           {int32_t(p.k_strideM)},
-          p.key_ptr + key_start * p.k_strideM + col,
+          const_cast<scalar_t*>(p.key_ptr + key_start * p.k_strideM + col),
           {problem_size.k(), problem_size.n()},
           thread_id,
           no_offset);
@@ -2087,14 +2130,20 @@ struct AttentionBackwardKernel {
             p.grad_query_ptr + query_start * p.gQ_strideM() + col,
             {problem_size.m(), problem_size.n()},
             thread_id);
-        bool storage_contains_zeros = kNeedsAccumGradQ || key_start == 0 ||
+        // if `direct_store` is True, we store to gmem (`*gmem = accum`)
+        // otherwise, we accumulate in gmem (`*gmem = *gmem + accum`)
+        // If we know ahead of time when we will write for the first time
+        // we can:
+        // (1) Avoid an additional memory read
+        // (2) Avoid the cost of initializing memory to 0
+        bool direct_store = kNeedsAccumGradQ || key_start == 0 ||
             (p.num_splits_key_device() > 1);
         accumulateInGmem<MatmulGradQ>(
             isLastColumn ? shared_storage.gradQ_epilogue_lastIter()
                          : shared_storage.gradQ_epilogue(),
             accum,
             output_it,
-            storage_contains_zeros,
+            direct_store,
             warp_id,
             lane_id);
       }
@@ -2129,7 +2178,7 @@ struct AttentionBackwardKernel {
       // q_i
       typename Mma::IteratorB iterator_B(
           {int32_t(p.q_strideM)},
-          p.query_ptr + query_start * p.q_strideM + col,
+          const_cast<scalar_t*>(p.query_ptr + query_start * p.q_strideM + col),
           {problem_size.k(), problem_size.n()},
           thread_id,
           no_offset);
@@ -2205,12 +2254,13 @@ struct AttentionBackwardKernel {
               isFirstQuery || kNeedsAccumGradK,
               warp_id,
               lane_id);
+          __syncthreads();
         }
       }
     }
   }
 
-  static CUTLASS_DEVICE int32_t getQueryStartShift(Params const& p) {
+  static CUTLASS_HOST_DEVICE int32_t getQueryStartShift(Params const& p) {
     if (p.custom_mask_type == NoCustomMask && p.num_splits_key_device() > 1) {
       return (p.split_key_device() * kBlockSizeI) % getQueryEnd(p);
     }
@@ -2218,47 +2268,70 @@ struct AttentionBackwardKernel {
   }
 
   // Iteration order logic
-  static CUTLASS_DEVICE int32_t
+  static CUTLASS_HOST_DEVICE int32_t
   getQueryStart(Params const& p, int32_t key_start) {
     return getSmallestQueryForKey(p, key_start) + getQueryStartShift(p);
   };
-  static CUTLASS_DEVICE int32_t getQueryEnd(Params const& p) {
+  static CUTLASS_HOST_DEVICE int32_t getQueryEnd(Params const& p) {
     return align_up(p.num_queries, kBlockSizeI);
   };
 
-  static CUTLASS_DEVICE int32_t
+  static CUTLASS_HOST_DEVICE int32_t
   getSmallestQueryForKey(Params const& p, int32_t key_start) {
-    if (p.custom_mask_type == CausalFromTopLeft) {
-      return (key_start / kBlockSizeI) * kBlockSizeI;
-    } else if (p.custom_mask_type == CausalFromBottomRight) {
-      int first_query =
-          cutlass::fast_max(0, key_start - p.num_keys + p.num_queries);
-      return (first_query / kBlockSizeI) * kBlockSizeI;
+    if (p.custom_mask_type == NoCustomMask) {
+      return 0;
     }
-    return 0;
+    int32_t shift = p.custom_mask_type == CausalFromBottomRight
+        ? p.num_keys - p.num_queries
+        : 0;
+    int32_t window_size =
+        p.window_size == 0 ? p.num_queries + p.num_keys : p.window_size;
+
+    auto last_key_for_block =
+        cutlass::fast_min(key_start + kBlockSizeJ, p.num_keys) - 1;
+    int first_query = key_start - shift;
+    int last_query = last_key_for_block - shift + window_size - 1;
+    if (last_query < 0 || first_query >= p.num_queries) {
+      return getQueryEnd(p); // nothing to compute in this column
+    }
+    first_query = cutlass::fast_max(0, first_query);
+    return (first_query / kBlockSizeI) * kBlockSizeI;
   };
 
   // Returns how many kernel blocks will write to a given block in `grad_query`
   // This is usually equal to the number of key splits, but can be different
   // for instance in the causal case, or varying seqlen
-  static CUTLASS_DEVICE int32_t
+  static CUTLASS_HOST_DEVICE int32_t
   getNumParallelBlocksForQuery(Params const& p, int32_t query_start) {
     int16_t num_key_blocks = ceil_div(p.num_keys, kBlockSizeJ);
-    if (p.custom_mask_type == CausalFromTopLeft) {
-      int32_t last_key_for_block = query_start + kBlockSizeI - 1;
-      last_key_for_block = cutlass::fast_min(last_key_for_block, p.num_keys);
-      num_key_blocks = ceil_div(last_key_for_block, kBlockSizeJ);
-    } else if (p.custom_mask_type == CausalFromBottomRight) {
+    if (p.custom_mask_type != NoCustomMask) {
+      int32_t shift = p.custom_mask_type == CausalFromBottomRight
+          ? p.num_keys - p.num_queries
+          : 0;
+      int32_t last_query_for_block =
+          cutlass::fast_min(query_start + kBlockSizeI, p.num_queries) - 1;
       int32_t last_key_for_block =
-          query_start + (kBlockSizeI - 1) + (1 + p.num_keys - p.num_queries);
-      last_key_for_block = cutlass::fast_min(last_key_for_block, p.num_keys);
-      num_key_blocks = ceil_div(last_key_for_block, kBlockSizeJ);
+          cutlass::fast_min(last_query_for_block + shift, p.num_keys - 1);
+      int32_t first_key_for_block = p.window_size == 0
+          ? 0
+          : cutlass::fast_max(query_start - p.window_size + 1 + shift, 0);
+
+      if (p.window_size == 0) {
+        num_key_blocks = last_key_for_block / kBlockSizeJ + 1;
+      } else {
+        num_key_blocks = (last_key_for_block / kBlockSizeJ) -
+            (first_key_for_block / kBlockSizeJ) + 1;
+      }
+
+      if (last_key_for_block < 0 || first_key_for_block >= p.num_keys) {
+        num_key_blocks = 0;
+      }
     }
     return cutlass::fast_min(p.num_splits_key_device(), num_key_blocks);
   };
 
   // Returns the next block to process
-  static CUTLASS_DEVICE void incrIteration(
+  static CUTLASS_HOST_DEVICE void incrIteration(
       Params const& p,
       int32_t query_start,
       int32_t key_start,
@@ -2278,7 +2351,18 @@ struct AttentionBackwardKernel {
         return;
       }
     } else {
-      if (next_query < p.num_queries) {
+      if (p.window_size > 0) {
+        int32_t shift = p.custom_mask_type == CausalFromBottomRight
+            ? p.num_keys - p.num_queries
+            : 0;
+        // last key that is not masked out
+        int last_key_for_block =
+            cutlass::fast_min(key_start + kBlockSizeJ, p.num_keys) - 1;
+        int last_query = last_key_for_block - shift + p.window_size - 1;
+        if (next_query <= last_query && next_query < p.num_queries) {
+          return;
+        }
+      } else if (next_query < p.num_queries) {
         return;
       }
       // jump to next key
@@ -2305,14 +2389,14 @@ struct AttentionBackwardKernel {
     int thread_id = 32 * warp_id + lane_id;
     typename MatmulQK::Mma::IteratorA iterator_A(
         {int32_t(p.k_strideM)},
-        p.key_ptr + key_start * p.k_strideM,
+        const_cast<scalar_t*>(p.key_ptr + key_start * p.k_strideM),
         {p.num_keys - key_start, p.head_dim},
         thread_id,
         cutlass::MatrixCoord{0, 0});
 
     typename MatmulQK::Mma::IteratorB iterator_B(
         {int32_t(p.q_strideM)},
-        p.query_ptr + query_start * p.q_strideM,
+        const_cast<scalar_t*>(p.query_ptr + query_start * p.q_strideM),
         {p.head_dim, p.num_queries - query_start},
         thread_id,
         cutlass::MatrixCoord{0, 0});

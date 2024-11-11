@@ -1,11 +1,15 @@
+# mypy: allow-untyped-defs
 import warnings
 from abc import ABC, abstractmethod
-from typing import Union, Iterable, Dict
+from typing import Dict, Iterable, Union
+
 import torch
 import torch.distributed as dist
 import torch.distributed.algorithms.model_averaging.utils as utils
 
-__all__ = ['ModelAverager', 'PeriodicModelAverager']
+
+__all__ = ["ModelAverager", "PeriodicModelAverager"]
+
 
 class ModelAverager(ABC):
     r"""Base class for all model averagers.
@@ -81,12 +85,7 @@ class PeriodicModelAverager(ModelAverager):
         >>>    averager.average_parameters(model.parameters())
     """
 
-    def __init__(
-        self,
-        period,
-        warmup_steps=0,
-        process_group=None
-    ):
+    def __init__(self, period, warmup_steps=0, process_group=None):
         super().__init__(process_group)
         if warmup_steps < 0:
             raise ValueError("Arg ``warmup_steps`` must be a non-negative number.")
@@ -102,7 +101,12 @@ class PeriodicModelAverager(ModelAverager):
             )
         self.period = period
 
-    def average_parameters(self, params: Union[Iterable[torch.nn.Parameter], Iterable[Dict[str, torch.nn.Parameter]]]):
+    def average_parameters(
+        self,
+        params: Union[
+            Iterable[torch.nn.Parameter], Iterable[Dict[str, torch.nn.Parameter]]
+        ],
+    ):
         """
         Averages parameters or parameter groups of an optimizer if ``step`` is no less than ``warmup_steps``.
 

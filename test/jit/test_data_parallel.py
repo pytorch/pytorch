@@ -8,22 +8,28 @@ import torch
 import torch.nn as nn
 import torch.nn.parallel as dp
 
+
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import JitTestCase, RUN_CUDA_MULTI_GPU
 
-if __name__ == '__main__':
-    raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
-                       "\tpython test/test_jit.py TESTNAME\n\n"
-                       "instead.")
+
+if __name__ == "__main__":
+    raise RuntimeError(
+        "This test file is not meant to be run directly, use:\n\n"
+        "\tpython test/test_jit.py TESTNAME\n\n"
+        "instead."
+    )
+
 
 class TestDataParallel(JitTestCase):
     class Mpy(torch.nn.Module):
-        def __init__(self):
+        def __init__(self) -> None:
             super(TestDataParallel.Mpy, self).__init__()
-            self.m = nn.Sequential(nn.Linear(2, 2), nn.BatchNorm1d(2),
-                                   nn.ReLU(), nn.Linear(2, 2))
+            self.m = nn.Sequential(
+                nn.Linear(2, 2), nn.BatchNorm1d(2), nn.ReLU(), nn.Linear(2, 2)
+            )
 
         @torch.jit.ignore
         def forward(self, input):
@@ -50,13 +56,13 @@ class TestDataParallel(JitTestCase):
             return self.m2(x)
 
     class Msm(torch.jit.ScriptModule):
+        __constants__ = ["m"]
 
-        __constants__ = ['m']
-
-        def __init__(self):
+        def __init__(self) -> None:
             super(TestDataParallel.Msm, self).__init__()
-            self.m = nn.Sequential(nn.Linear(2, 2), nn.BatchNorm1d(2),
-                                   nn.ReLU(), nn.Linear(2, 2))
+            self.m = nn.Sequential(
+                nn.Linear(2, 2), nn.BatchNorm1d(2), nn.ReLU(), nn.Linear(2, 2)
+            )
 
         @torch.jit.script_method
         def forward(self, input):
@@ -110,11 +116,10 @@ class TestDataParallel(JitTestCase):
 
         def assert_share_data(t1, t2):
             # Only checks that they point to the same memory on the same device.
-            if t1.device != t2.device:
-                return False
-            if t1.storage().data_ptr() != t2.storage().data_ptr():
-                return False
-            return True
+            return (
+                t1.device == t2.device
+                and t1.storage().data_ptr() == t2.storage().data_ptr()
+            )
 
         for p1, p2 in zip(module.parameters(), replica[0].parameters()):
             self.assertTrue(assert_share_data(p1, p2))
@@ -140,7 +145,7 @@ class TestDataParallel(JitTestCase):
                 # Use .data here to avoid version counter bump.
                 # The graph created by the following forward will be wrong but
                 # we never backward through them so it's fine
-                p.data -= 1. * p.grad
+                p.data -= 1.0 * p.grad
         second_forward = module(x)
 
         # replica which is on the same GPU has a shallow copy of the original

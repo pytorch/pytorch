@@ -20,7 +20,7 @@ constexpr uint32_t AT_APPLY_THREADS_PER_BLOCK = 512;
 constexpr uint32_t AT_APPLY_BLOCKS_PER_SM = 4;
 
 template <int step = 1>
-inline bool getApplyGrid(uint64_t totalElements, dim3& grid, int64_t curDevice, int max_threads_per_block=AT_APPLY_THREADS_PER_BLOCK) {
+inline bool getApplyGrid(uint64_t totalElements, dim3& grid, c10::DeviceIndex curDevice, int max_threads_per_block=AT_APPLY_THREADS_PER_BLOCK) {
   if (curDevice == -1) return false;
   uint64_t numel_per_thread = static_cast<uint64_t>(max_threads_per_block) * static_cast<uint64_t>(step);
   uint64_t numBlocks = ATenCeilDiv(totalElements, numel_per_thread);

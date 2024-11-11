@@ -5,9 +5,7 @@
 #include <torch/csrc/jit/tensorexpr/operators/misc.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 namespace {
 
@@ -20,8 +18,8 @@ void assert_dims_constant(const BufHandle& buf) {
 using InitFunc = std::function<ExprHandle(const std::vector<VarHandle>&)>;
 
 Tensor conv2d_depthwise_static(
-    BufHandle input,
-    BufHandle weight,
+    const BufHandle& input,
+    const BufHandle& weight,
     const InitFunc& init_func,
     int stride,
     int pad,
@@ -51,7 +49,7 @@ Tensor conv2d_depthwise_static(
   Tensor conv = Reduce(
       "conv2d_depthwise",
       {N, K, OH, OW},
-      c10::nullopt, // TODO
+      std::nullopt, // TODO
       Sum(),
       [&](const std::vector<VarHandle>& v) { return init_func(v); },
       [&](const std::vector<VarHandle>& v) {
@@ -78,14 +76,12 @@ Tensor conv2d_depthwise_static(
 
   constexpr int kLoopH = 2, kLoopW = 3;
   if (R == 3 && stride == 2 && pad == 1) {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     ForPtr head, tail;
     auto loops = nest.getLoopStmtsFor(conv);
     nest.sliceHead(loops[kLoopW], 2, &head, &tail);
     loops = nest.getLoopStmtsFor(conv);
     nest.sliceHead(loops[kLoopH], 2, &head, &tail);
   } else if (R == 3 && stride == 1 && pad == 1) {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     ForPtr main, peeled;
     auto loops = nest.getAllLoopNestsWritingToBuf(conv.buf());
     main = loops[1][kLoopW];
@@ -123,7 +119,7 @@ Tensor conv2d_depthwise_dynamic(
   return Reduce(
       "conv2d_depthwise",
       {N, K, OH, OW},
-      c10::nullopt, // TODO
+      std::nullopt, // TODO
       Sum(),
       [&](const std::vector<VarHandle>& v) { return init_func(v); },
       [&](const std::vector<VarHandle>& v) {
@@ -353,7 +349,7 @@ Tensor computeConv2d(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides,
-    const c10::optional<ScalarType>& outputType,
+    const std::optional<ScalarType>& outputType,
     at::Device device) {
   Dtype dtype = kFloat;
   if (outputType) {
@@ -401,7 +397,7 @@ Tensor computeConv1d(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides,
-    const c10::optional<ScalarType>& outputType,
+    const std::optional<ScalarType>& outputType,
     at::Device device) {
   Dtype dtype = kFloat;
   if (outputType) {
@@ -435,7 +431,7 @@ Tensor computePrepackedConv2dClampRun(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides,
-    const c10::optional<ScalarType>& outputType,
+    const std::optional<ScalarType>& outputType,
     at::Device device) {
   Dtype dtype = kFloat;
   if (outputType) {
@@ -454,7 +450,7 @@ Tensor computePrepackedLinearClampRun(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides,
-    const c10::optional<ScalarType>& outputType,
+    const std::optional<ScalarType>& outputType,
     at::Device device) {
   Dtype dtype = kFloat;
   if (outputType) {
@@ -473,7 +469,7 @@ Tensor computeMkldnnPrepackedConvRun(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides,
-    const c10::optional<ScalarType>& outputType,
+    const std::optional<ScalarType>& outputType,
     at::Device device) {
   Dtype dtype = kFloat;
   if (outputType) {
@@ -489,6 +485,4 @@ Tensor computeMkldnnPrepackedConvRun(
   return Tensor(ResultBuf.node(), s);
 }
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr

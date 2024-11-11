@@ -2,7 +2,26 @@
 #include <ATen/DynamicLibrary.h>
 
 #include <torch/csrc/inductor/aoti_runner/model_container_runner.h>
+#include <torch/csrc/inductor/aoti_torch/oss_proxy_executor.h>
 #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
+
+#ifndef _WIN32
+#include <sys/stat.h>
+#else
+#include <filesystem>
+namespace fs = std::filesystem;
+#endif
+
+namespace {
+bool file_exists(std::string& path) {
+#ifdef _WIN32
+  return fs::exists(path);
+#else
+  struct stat rc {};
+  return lstat(path.c_str(), &rc) == 0;
+#endif
+}
+} // namespace
 
 namespace torch::inductor {
 
@@ -38,11 +57,24 @@ AOTIModelContainerRunner::AOTIModelContainerRunner(
       reinterpret_cast<decltype(update_inactive_constant_buffer_func_)>(
           model_so_->sym(
               "AOTInductorModelContainerUpdateInactiveConstantBuffer"));
+  run_const_fold_func_ = reinterpret_cast<decltype(run_const_fold_func_)>(
+      model_so_->sym("AOTInductorModelContainerRunConstantFolding"));
   swap_constant_buffer_func_ =
       reinterpret_cast<decltype(swap_constant_buffer_func_)>(
           model_so_->sym("AOTInductorModelContainerSwapConstantBuffer"));
   get_call_spec_func_ = reinterpret_cast<decltype(get_call_spec_func_)>(
       model_so_->sym("AOTInductorModelContainerGetCallSpec"));
+
+  // Hack to find the json file name from the model so file
+  size_t lastindex = model_so_path.find_last_of('.');
+  std::string json_filename = model_so_path.substr(0, lastindex) + ".json";
+
+  if (file_exists(json_filename)) {
+    proxy_executor_ = std::make_unique<torch::aot_inductor::OSSProxyExecutor>(
+        json_filename, device_str == "cpu");
+    proxy_executor_handle_ =
+        reinterpret_cast<AOTIProxyExecutorHandle>(proxy_executor_.get());
+  }
 
   AOTI_RUNTIME_ERROR_CODE_CHECK(create_func_(
       &container_handle_,
@@ -58,7 +90,7 @@ AOTIModelContainerRunner::~AOTIModelContainerRunner() {
 }
 
 std::vector<at::Tensor> AOTIModelContainerRunner::run(
-    std::vector<at::Tensor>& inputs,
+    const std::vector<at::Tensor>& inputs,
     AOTInductorStreamHandle cuda_stream_handle) {
   auto input_handles =
       torch::aot_inductor::unsafe_alloc_new_handles_from_tensors(inputs);
@@ -136,16 +168,33 @@ void AOTIModelContainerRunner::update_inactive_constant_buffer(
       container_handle_, (AOTInductorConstantMapHandle)&const_map));
 }
 
+void AOTIModelContainerRunner::run_const_fold(
+    bool use_inactive,
+    AOTInductorStreamHandle cuda_stream_handle) {
+  AOTI_RUNTIME_ERROR_CODE_CHECK(run_const_fold_func_(
+      container_handle_,
+      use_inactive,
+      cuda_stream_handle,
+      proxy_executor_handle_));
+}
+
 void AOTIModelContainerRunner::swap_constant_buffer() {
   AOTI_RUNTIME_ERROR_CODE_CHECK(swap_constant_buffer_func_(container_handle_));
 }
 
 std::vector<std::string> AOTIModelContainerRunner::get_call_spec() {
-  const char* in_spec;
-  const char* out_spec;
+  const char* in_spec = nullptr;
+  const char* out_spec = nullptr;
   AOTI_RUNTIME_ERROR_CODE_CHECK(
       get_call_spec_func_(container_handle_, &in_spec, &out_spec));
   return {in_spec, out_spec};
+}
+
+std::unordered_map<std::string, CreateAOTIModelRunnerFunc>&
+getAOTIModelRunnerRegistry() {
+  static std::unordered_map<std::string, CreateAOTIModelRunnerFunc>
+      aoti_model_runner_registry_;
+  return aoti_model_runner_registry_;
 }
 
 } // namespace torch::inductor

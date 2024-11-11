@@ -2,9 +2,7 @@
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/jit/serialization/pickle.h>
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace torch::distributed::rpc {
 
 PythonRemoteCall::PythonRemoteCall(
     SerializedPyObj&& serializedPyObj,
@@ -64,6 +62,4 @@ std::unique_ptr<PythonRemoteCall> PythonRemoteCall::fromMessage(
       isAsyncExecution);
 }
 
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc

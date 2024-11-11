@@ -6,14 +6,13 @@ on:
       - opened
       - synchronize
       - reopened
-      - labeled
-      - unlabeled
     branches-ignore:
       - nightly
   workflow_dispatch:
 
 jobs:
   bc_linter:
+    if: github.repository_owner == 'pytorch'
     runs-on: ubuntu-latest
     steps:
       - name: Run BC Lint Action

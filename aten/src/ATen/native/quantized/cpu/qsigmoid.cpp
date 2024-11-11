@@ -20,8 +20,7 @@
 #include <algorithm>
 #include <utility>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 DEFINE_DISPATCH(qsigmoid_stub);
 
@@ -108,7 +107,7 @@ Tensor sigmoid_quantized_cpu(const Tensor& qx) {
 #endif  // USE_PYTORCH_QNNPACK
   Tensor qy;
   AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qsigmoid", [&]() {
-    // Naive implemenentation: uses dequantize/execute/quantize routine
+    // Naive implementation: uses dequantize/execute/quantize routine
     // - Output scale is set to 1.0 / 2^(BIT_NUM)
     // - For signed types output zero point is set to 0
     // - For unsigned types output zero point is set to (qmax + qmin) / 2.0
@@ -149,4 +148,4 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
 }
 } // namespace
 
-}}  // namespace at::native
+}  // namespace at::native

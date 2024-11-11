@@ -16,6 +16,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
 )
 
+
 try:
     from torchvision.models import resnet18
 
@@ -33,6 +34,7 @@ except ImportError:
 
 from pathlib import Path
 
+
 packaging_directory = Path(__file__).parent
 
 
@@ -44,7 +46,10 @@ class DirectoryReaderTest(PackageTestCase):
     """Tests use of DirectoryReader as accessor for opened packages."""
 
     @skipIfNoTorchVision
-    @skipIf(True, "Does not work with latest TorchVision, see https://github.com/pytorch/pytorch/issues/81115")
+    @skipIf(
+        True,
+        "Does not work with latest TorchVision, see https://github.com/pytorch/pytorch/issues/81115",
+    )
     def test_loading_pickle(self):
         """
         Test basic saving and loading of modules and pickles from a DirectoryReader.
@@ -108,16 +113,16 @@ class DirectoryReaderTest(PackageTestCase):
         with PackageExporter(filename) as pe:
             # Layout looks like:
             #    package
-            #    ├── one/
-            #    │   ├── a.txt
-            #    │   ├── b.txt
-            #    │   ├── c.txt
-            #    │   └── three/
-            #    │       ├── d.txt
-            #    │       └── e.txt
-            #    └── two/
-            #       ├── f.txt
-            #       └── g.txt
+            #    |-- one/
+            #    |   |-- a.txt
+            #    |   |-- b.txt
+            #    |   |-- c.txt
+            #    |   +-- three/
+            #    |       |-- d.txt
+            #    |       +-- e.txt
+            #    +-- two/
+            #       |-- f.txt
+            #       +-- g.txt
             pe.save_text("one", "a.txt", "hello, a!")
             pe.save_text("one", "b.txt", "hello, b!")
             pe.save_text("one", "c.txt", "hello, c!")

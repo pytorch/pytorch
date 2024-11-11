@@ -2,9 +2,7 @@
 
 #include <array>
 #include <cstring>
-#include <numeric>
 #include <utility>
-#include <vector>
 
 #include <ATen/Parallel.h>
 #include <ATen/OpMathType.h>
@@ -13,8 +11,7 @@
 #include <c10/util/SmallVector.h>
 #include <c10/util/irange.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 inline namespace CPU_CAPABILITY {
 
 template<typename T> using opmath_t = at::opmath_type<T>;
@@ -56,7 +53,7 @@ C10_ALWAYS_INLINE void AddMomentsVec(
 }
 
 template <typename T>
-inline typename std::enable_if<std::is_same<T, opmath_t<T>>::value, void>::type
+inline std::enable_if_t<std::is_same_v<T, opmath_t<T>>, void>
 UpdateMomentsVec(
     int64_t m0,
     const T* X_ptr,
@@ -79,7 +76,7 @@ UpdateMomentsVec(
 // each bfloat16/half vector will be converted to two float vectors,
 // and accumulated successively on m1_stk0/m2_stk0.
 template <typename T>
-inline typename std::enable_if<!std::is_same<T, at::opmath_type<T>>::value, void>::type
+inline std::enable_if_t<!std::is_same_v<T, at::opmath_type<T>>, void>
 UpdateMomentsVec(
     int64_t m0,
     const T* X_ptr,
@@ -93,8 +90,7 @@ UpdateMomentsVec(
   fVec m2_fvec0(0), m2_fvec1(0);
   for (const auto j : c10::irange(m0)) {
     const Vec x_bvec = Vec::loadu(X_ptr + j * Vec::size());
-    fVec x_fvec0, x_fvec1;
-    std::tie(x_fvec0, x_fvec1) = convert_to_float<T>(x_bvec);
+    auto [x_fvec0, x_fvec1] = convert_to_float<T>(x_bvec);
     const fVec delta_fvec0 = x_fvec0 - m1_fvec0;
     const fVec delta_fvec1 = x_fvec1 - m1_fvec1;
     m1_fvec0 += delta_fvec0 * c_vecs[j];
@@ -203,5 +199,4 @@ std::pair<opmath_t<T>, opmath_t<T>> RowwiseMoments(const T* X, int64_t N, int64_
 }
 
 } // namespace CPU_CAPABILITY
-} // namespace native
-} // namespace at
+} // namespace at::native

@@ -1,9 +1,9 @@
-from typing import Dict, Union
+from __future__ import annotations
 
 from torchgen.model import NativeFunctionsGroup, NativeFunctionsViewGroup
 
 
-def func_name_base_str(g: Union[NativeFunctionsGroup, NativeFunctionsViewGroup]) -> str:
+def func_name_base_str(g: NativeFunctionsGroup | NativeFunctionsViewGroup) -> str:
     if isinstance(g, NativeFunctionsGroup):
         return str(g.functional.func.name.name.base)
     else:
@@ -55,12 +55,12 @@ is_hand_written_ops_ = frozenset(
 )
 
 
-def is_hand_written(g: Union[NativeFunctionsGroup, NativeFunctionsViewGroup]) -> bool:
+def is_hand_written(g: NativeFunctionsGroup | NativeFunctionsViewGroup) -> bool:
     name_base = func_name_base_str(g)
     return name_base in is_hand_written_ops_
 
 
-def override_test_values(arg_map: Dict[str, str], op_name: str, index: int) -> None:
+def override_test_values(arg_map: dict[str, str], op_name: str, index: int) -> None:
     assert index == 0 or index == 1
     if op_name == "addr":
         if index == 0:
@@ -366,9 +366,9 @@ def override_test_values(arg_map: Dict[str, str], op_name: str, index: int) -> N
             arg_map["out_int32"] = "false"
         else:
             arg_map["crow_indices"] = "torch::tensor({0}, torch::kInt32)"
-            arg_map[
-                "col_indices"
-            ] = "torch::tensor({0, 1, 0, 2, 1, 2, 0, 1, 0, 2, 1, 2}, torch::kInt32)"
+            arg_map["col_indices"] = (
+                "torch::tensor({0, 1, 0, 2, 1, 2, 0, 1, 0, 2, 1, 2}, torch::kInt32)"
+            )
             arg_map["out_int32"] = "false"
         return
     if op_name == "_convert_indices_from_coo_to_csr":
@@ -383,6 +383,6 @@ def override_test_values(arg_map: Dict[str, str], op_name: str, index: int) -> N
         return
     if op_name in ("diagonal", "linalg_diagonal"):
         arg_map["offset"] = "0"
-        arg_map["dim0"] = "1"
         arg_map["dim1"] = "2"
+        arg_map["dim2"] = "1"
         return

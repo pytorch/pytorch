@@ -20,7 +20,8 @@ from torch.testing._internal.common_utils import (
     skipIfNoSciPy,
     IS_WINDOWS,
     gradcheck,
-    skipIfTorchDynamo,
+    is_iterable_of_tensors,
+    xfailIfTorchDynamo,
 )
 from torch.testing._internal.common_methods_invocations import (
     unary_ufuncs,
@@ -40,6 +41,7 @@ from torch.testing._internal.common_device_type import (
     precisionOverride,
     dtypesIfCPU,
 )
+from torch.utils import _pytree as pytree
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
@@ -267,7 +269,6 @@ class TestUnaryUfuncs(TestCase):
     #   1D tensors and a large 2D tensor with interesting and extremal values
     #   and noncontiguities.
     @suppress_warnings
-    @skipIfTorchDynamo()  # really flaky
     @ops(reference_filtered_ops)
     def test_reference_numerics_normal(self, device, dtype, op):
         tensors = generate_elementwise_unary_tensors(
@@ -276,7 +277,6 @@ class TestUnaryUfuncs(TestCase):
         self._test_reference_numerics(dtype, op, tensors)
 
     @suppress_warnings
-    @skipIfTorchDynamo()  # really flaky
     @ops(reference_filtered_ops)
     def test_reference_numerics_small(self, device, dtype, op):
         if dtype in (torch.bool,):
@@ -288,7 +288,6 @@ class TestUnaryUfuncs(TestCase):
         self._test_reference_numerics(dtype, op, tensors)
 
     @suppress_warnings
-    @skipIfTorchDynamo()  # really flaky
     @ops(reference_filtered_ops)
     def test_reference_numerics_large(self, device, dtype, op):
         if dtype in (torch.bool, torch.uint8, torch.int8):
@@ -322,9 +321,10 @@ class TestUnaryUfuncs(TestCase):
         self.assertFalse(non_contig.is_contiguous())
 
         torch_kwargs, _ = op.sample_kwargs(device, dtype, non_contig)
-        self.assertEqual(
-            op(contig, **torch_kwargs)[::2], op(non_contig, **torch_kwargs)
-        )
+        expected = op(non_contig, **torch_kwargs)
+        result = op(contig, **torch_kwargs)
+        result = pytree.tree_map(lambda x: x[::2], result)
+        self.assertEqual(result, expected)
 
     @ops(unary_ufuncs)
     def test_contig_vs_transposed(self, device, dtype, op):
@@ -337,7 +337,10 @@ class TestUnaryUfuncs(TestCase):
         self.assertFalse(non_contig.is_contiguous())
 
         torch_kwargs, _ = op.sample_kwargs(device, dtype, contig)
-        self.assertEqual(op(contig, **torch_kwargs).T, op(non_contig, **torch_kwargs))
+        expected = op(non_contig, **torch_kwargs)
+        result = op(contig, **torch_kwargs)
+        result = pytree.tree_map(lambda x: x.T, result)
+        self.assertEqual(result, expected)
 
     @ops(unary_ufuncs)
     def test_non_contig(self, device, dtype, op):
@@ -389,8 +392,9 @@ class TestUnaryUfuncs(TestCase):
             contig = op(contig, **torch_kwargs)
             non_contig = op(non_contig, **torch_kwargs)
             for i in range(3):
+                non_contig_i = pytree.tree_map(lambda x: x[i], non_contig)
                 self.assertEqual(
-                    contig, non_contig[i], msg="non-contiguous expand[" + str(i) + "]"
+                    contig, non_contig_i, msg="non-contiguous expand[" + str(i) + "]"
                 )
 
     @ops(unary_ufuncs)
@@ -437,7 +441,12 @@ class TestUnaryUfuncs(TestCase):
 
         torch_kwargs, _ = op.sample_kwargs(device, dtype, input)
         actual = op(input, **torch_kwargs)
-        expected = torch.stack([op(slice, **torch_kwargs) for slice in input])
+
+        all_outs = [op(slice, **torch_kwargs) for slice in input]
+        if is_iterable_of_tensors(actual):
+            expected = [torch.stack([out[i] for out in all_outs]) for i in range(len(actual))]
+        else:
+            expected = torch.stack(all_outs)
 
         self.assertEqual(actual, expected)
 
@@ -780,6 +789,8 @@ class TestUnaryUfuncs(TestCase):
                     _test(op, data[0:sz], data[1 : sz + 1])
 
     # TODO: run on non-native device types
+    # https://github.com/pytorch/pytorch/issues/126474
+    @xfailIfTorchDynamo
     @dtypes(torch.double)
     def test_unary_out_op_mem_overlap(self, device, dtype):
         sz = 3

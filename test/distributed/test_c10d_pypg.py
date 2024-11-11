@@ -1,26 +1,25 @@
 # Owner(s): ["oncall: distributed"]
 
 import os
+import weakref
+
+import test_c10d_common
 
 import torch
 import torch.distributed as dist
-from torch.testing._internal.common_utils import (
-    run_tests,
-)
-from torch.futures import Future
 import torch.nn as nn
-from torch.nn.parallel import DistributedDataParallel as DDP
-import test_c10d_common
-import weakref
 from torch._C._distributed_c10d import _create_work_from_future
-from torch.testing._internal.common_distributed import (
-    MultiProcessTestCase,
-)
+from torch.futures import Future
+from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.testing._internal.common_distributed import MultiProcessTestCase
+from torch.testing._internal.common_utils import run_tests
+
 
 def create_work(result):
     future = Future()
     future.set_result(result)
     return _create_work_from_future(future)
+
 
 class MyWork(dist._Work):
     def __init__(self, result, pg):
@@ -38,10 +37,12 @@ class MyWork(dist._Work):
         self.pg_().get_future_count += 1
         return self.future_
 
+
 class LonelyRankProcessGroup(dist.ProcessGroup):
     """
     This PG only supports world_size of 1
     """
+
     def __init__(self, rank, world, use_wrapper):
         super().__init__(rank, world)
         assert rank == 0
@@ -88,6 +89,7 @@ class LonelyRankProcessGroup(dist.ProcessGroup):
     def __repr__(self):
         return f"PLG w:{self._world} r:{self._rank}"
 
+
 # We cannot use parametrize as some tests are defined on the base class and use _get_process_group
 class AbstractDDPSingleRank(test_c10d_common.CommonDistributedDataParallelTest):
     def setUp(self):
@@ -112,10 +114,7 @@ class AbstractDDPSingleRank(test_c10d_common.CommonDistributedDataParallelTest):
         pg = self._get_process_group()
 
         torch.manual_seed(123)
-        model = nn.Sequential(
-            nn.Linear(2, 2),
-            nn.ReLU()
-        )
+        model = nn.Sequential(nn.Linear(2, 2), nn.ReLU())
         wrapped_model = model
         input_tensor = torch.rand(2)
         model = DDP(model, process_group=pg)
@@ -138,17 +137,22 @@ class AbstractDDPSingleRank(test_c10d_common.CommonDistributedDataParallelTest):
     def test_ddp_with_pypg_with_grad_views(self):
         pg = self._get_process_group()
 
-        self._test_ddp_with_process_group(pg, [torch.device("cpu")], device_ids=None, gradient_as_bucket_view=True)
+        self._test_ddp_with_process_group(
+            pg, [torch.device("cpu")], device_ids=None, gradient_as_bucket_view=True
+        )
+
 
 class TestDDPWithWorkSubclass(AbstractDDPSingleRank, MultiProcessTestCase):
     @property
     def use_wrapper(self):
         return False
 
+
 class TestDDPWithWorkWrapper(AbstractDDPSingleRank, MultiProcessTestCase):
     @property
     def use_wrapper(self):
         return True
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     run_tests()

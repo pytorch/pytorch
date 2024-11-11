@@ -35,7 +35,8 @@ RegisterOperators reg({
         prim::profile,
         [](const Node* node) -> Operation {
           return [](Stack& stack) {
-            AT_ERROR(
+            TORCH_CHECK(
+                false,
                 "Must be lowered to Interpreter's PROFILE instruction"); // NOLINT
           };
         },
@@ -44,7 +45,8 @@ RegisterOperators reg({
         prim::profile_ivalue,
         [](const Node* node) -> Operation {
           return [](Stack& stack) {
-            AT_ERROR(
+            TORCH_CHECK(
+                false,
                 "Must be lowered to Interpreter's PROFILE instruction"); // NOLINT
           };
         },
@@ -188,7 +190,7 @@ RegisterOperators reg({
         prim::TypeCheck /* (...)  -> (..., bool) */,
         [](const Node* /* node */) -> Operation {
           return [](Stack& /* stack */) {
-            AT_ERROR("prim::TypeCheck not yet implemented"); // NOLINT
+            TORCH_CHECK(false, "prim::TypeCheck not yet implemented"); // NOLINT
           };
         },
         aliasAnalysisSpecialCase()),
@@ -196,19 +198,22 @@ RegisterOperators reg({
         prim::FallbackGraph,
         [](const Node* node) -> Operation {
           return [](Stack& stack) {
-            AT_ERROR(
+            TORCH_CHECK(
+                false,
                 "Must be converted to prim::FunctionCall by replaceFallbackGraphWithFallbackFunction"); // NOLINT
           };
         },
         aliasAnalysisSpecialCase()),
     Operator(
         "prim::Guard(Tensor(a) t) -> Tensor(a)",
-        [](Stack& stack) { AT_ERROR("Should be replaced by prim::BailOut"); },
+        [](Stack& stack) {
+          TORCH_CHECK(false, "Should be replaced by prim::BailOut");
+        },
         aliasAnalysisFromSchema()),
     Operator(
         "prim::BailOut(...) -> Tensor(a)",
         [](Stack& /* stack */) {
-          AT_ERROR("prim::BailOut not yet implemented"); // NOLINT
+          TORCH_CHECK(false, "prim::BailOut not yet implemented"); // NOLINT
         },
         aliasAnalysisFromSchema()),
     Operator(
@@ -379,126 +384,10 @@ RegisterOperators logging_operators(
          },
          aliasAnalysisFromSchema())});
 
-C10_UNUSED void hashValue(Stack& stack) {
+[[maybe_unused]] void hashValue(Stack& stack) {
   auto value = pop(stack);
   push(stack, value.hash());
 }
-
-bool isSortableTupleType(
-    const TupleTypePtr& tuple_type,
-    std::stringstream& why_not) {
-  for (const TypePtr& ele_type : tuple_type->containedTypes()) {
-    switch (ele_type->kind()) {
-      case TypeKind::IntType:
-      case TypeKind::BoolType:
-      case TypeKind::FloatType:
-      case TypeKind::StringType:
-      case TypeKind::TensorType:
-        continue;
-      case TypeKind::TupleType:
-        if (!isSortableTupleType(ele_type->expect<TupleType>(), why_not)) {
-          return false;
-        }
-        continue;
-      case TypeKind::ClassType:
-        if (!c10::checkObjectSortSchema(
-                ele_type->expect<ClassType>(), why_not)) {
-          return false;
-        }
-        continue;
-      default:
-        why_not << "Contained elements in " << *tuple_type
-                << " are not sortable. Only Int, Bool, Float, String, Tensor, "
-                << "a User Defined Class with __lt__ method defined or Tuples "
-                << "of aforementionted types can be sorted.";
-        return false;
-    }
-  }
-
-  return true;
-}
-
-bool isSortableListOfObjectsOrTuples(
-    c10::List<IValue>& ivalues,
-    std::stringstream& why_not) {
-  if (ivalues.empty()) {
-    return true;
-  }
-
-  auto type = ivalues.get(0).type();
-  // We assume lists have homogenous types, use first element to determine
-  // best sorting methods. If in the future we need to support heterogenous
-  // types inside list, then sorting needs to have runtime sortable checks.
-  const size_t n = ivalues.size();
-  for (const auto i : c10::irange(n)) {
-    const IValue& v = ivalues.get(i);
-    auto curr_type = v.type();
-    if (*curr_type != *type) {
-      why_not << "Only values of same type can be compared. "
-              << "Found " << type->repr_str() << " and "
-              << curr_type->repr_str();
-      return false;
-    }
-  }
-
-  if (auto tuple_type = type->cast<TupleType>()) {
-    return isSortableTupleType(tuple_type, why_not);
-  }
-
-  if (auto class_type = type->cast<ClassType>()) {
-    return c10::checkObjectSortSchema(class_type, why_not) != nullptr;
-  }
-
-  // Basic types like tensors/ints/floats/bools/strs are not checked in this
-  // method because they should have been schema matched to specialized
-  // aten::sort kernels using listSort<T>.
-  why_not << "Only list of Tensors, ints, floats, bools, strs, "
-          << "a User Defined Class that defines the __lt__ compare method "
-          << "or Tuples of aforementioned types can be sorted, got list of "
-          << type->repr_str() << "\n";
-  return false;
-}
-
-template <bool has_reverse_arg, bool copy_return_list>
-void sort_op(Stack& stack) {
-  bool reverse = has_reverse_arg ? pop(stack).toBool() : false;
-  auto g_list = pop(stack).toList();
-
-  if (copy_return_list) {
-    g_list = g_list.copy();
-  }
-
-  if (!g_list.empty()) {
-    std::stringstream error_str;
-    if (!isSortableListOfObjectsOrTuples(g_list, error_str)) {
-      throw std::runtime_error(error_str.str());
-    }
-
-    c10::IValueComparator comparator;
-    if (reverse) {
-      comparator = c10::getGreaterThanComparator(g_list.get(0));
-    } else {
-      comparator = c10::getLessThanComparator(g_list.get(0));
-    }
-    std::sort(g_list.begin(), g_list.end(), comparator);
-  }
-
-  if (copy_return_list) {
-    push(stack, g_list);
-  }
-}
-
-// NB: this must be registered after the other aten::sort operators
-RegisterOperators regSort({
-    Operator(
-        "aten::sorted.any(t[](a) self) -> (t[])",
-        sort_op</*has_reverse_arg*/ false, /*copy_return_list*/ true>,
-        aliasAnalysisFromSchema()),
-    Operator(
-        "aten::sort.any(t[](a!) self, bool reverse=False) -> ()",
-        sort_op</*has_reverse_arg*/ true, /*copy_return_list*/ false>,
-        aliasAnalysisFromSchema()),
-});
 
 // reference: _output_size in torch/nn/functional.py
 // size can be none, int or intlist
@@ -543,16 +432,16 @@ at::Tensor interpolate(
     const IValue& size,
     const IValue& scale_factors,
     const std::string& mode,
-    c10::optional<bool> align_corners,
-    c10::optional<bool> recompute_scale_factor) {
+    std::optional<bool> align_corners,
+    std::optional<bool> recompute_scale_factor) {
   if ((mode == "nearest" || mode == "area")) {
-    if (align_corners != c10::nullopt) {
+    if (align_corners != std::nullopt) {
       throw std::runtime_error(
           "align_corners option can only be set with the "
           "interpolating modes: linear | bilinear | bicubic | trilinear");
     }
   } else {
-    if (align_corners == c10::nullopt) {
+    if (align_corners == std::nullopt) {
       TORCH_WARN(
           "Default upsampling behavior when mode=",
           mode,
@@ -567,7 +456,7 @@ at::Tensor interpolate(
   double scale_factors_2 = -1.0;
   double scale_factors_3 = -1.0;
 
-  if (!scale_factors.isNone() && recompute_scale_factor == c10::nullopt) {
+  if (!scale_factors.isNone() && recompute_scale_factor == std::nullopt) {
     recompute_scale_factor = true;
     bool warn_recompute_scale_factor = false;
 
@@ -626,7 +515,7 @@ at::Tensor interpolate(
     return at::upsample_nearest1d(
         input,
         _output_size(input, 1, size, scale_factors),
-        c10::make_optional(scale_factors_1));
+        std::make_optional(scale_factors_1));
   if (input_dim == dim2d && mode == "nearest")
     return at::upsample_nearest2d(
         input,
@@ -654,7 +543,7 @@ at::Tensor interpolate(
         input,
         _output_size(input, 1, size, scale_factors),
         *align_corners,
-        c10::make_optional(scale_factors_1));
+        std::make_optional(scale_factors_1));
   if (input_dim == dim1d && mode == "bilinear")
     throw std::runtime_error("Got 3D input, but bilinear mode needs 4D input");
   if (input_dim == dim1d && mode == "bicubic")
@@ -694,7 +583,8 @@ at::Tensor interpolate(
         scale_factors_2,
         scale_factors_3);
 
-  AT_ERROR(
+  TORCH_CHECK(
+      false,
       "Input Error: Only 3D, 4D and 5D input Tensors supported",
       " (got ",
       input_dim,
@@ -762,7 +652,7 @@ void upsample_nearest_op(Stack& stack) {
   pop(stack, input, size, scale_factor_int);
   IValue scale_factor_double = convert_scale_factor_to_double(scale_factor_int);
   at::Tensor res = interpolate(
-      input, size, scale_factor_double, "nearest", c10::nullopt, c10::nullopt);
+      input, size, scale_factor_double, "nearest", std::nullopt, std::nullopt);
   push(stack, std::move(res));
 }
 
@@ -780,7 +670,7 @@ void upsample_op(Stack& stack) {
       scale_factor_double,
       mode,
       align_corners.toOptional<bool>(),
-      c10::nullopt);
+      std::nullopt);
   push(stack, std::move(res));
 }
 
@@ -791,7 +681,7 @@ void upsample_bilinear_op(Stack& stack) {
   pop(stack, input, size, scale_factor_int);
   IValue scale_factor_double = convert_scale_factor_to_double(scale_factor_int);
   at::Tensor res = interpolate(
-      input, size, scale_factor_double, "bilinear", true, c10::nullopt);
+      input, size, scale_factor_double, "bilinear", true, std::nullopt);
   push(stack, std::move(res));
 }
 

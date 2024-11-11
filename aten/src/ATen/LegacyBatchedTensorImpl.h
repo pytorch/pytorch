@@ -1,7 +1,6 @@
 #pragma once
 
 #include <bitset>
-#include <utility>
 
 #include <ATen/ArrayRef.h>
 #include <ATen/SmallVector.h>
@@ -68,7 +67,7 @@ struct TORCH_API BatchedTensorImpl : public c10::TensorImpl {
   // BatchedTensorImpl wraps a Tensor
   const Tensor& value() const {
     return value_;
-  };
+  }
 
   // Given a public dimension index, return the dimension index in the
   // underlying value() tensor. For example, if we have

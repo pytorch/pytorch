@@ -1,11 +1,13 @@
+# mypy: allow-untyped-defs
 import functools
 import itertools
 
 import torch
-from ..._dynamo.utils import counters
 
+from ..._dynamo.utils import counters
 from ..pattern_matcher import Arg, CallFunction, KeywordArg
 from .freezing_patterns import register_binary_folding_pattern
+
 
 aten = torch.ops.aten
 prims = torch.ops.prims
@@ -32,10 +34,7 @@ def mark_mixed_dtype_conv(conv):
 
         conv_user = next(iter(conv_user.users.keys()))
 
-    if not (
-        conv_user.target == prims.convert_element_type.default
-        and conv_user.args[1] == conv_dtype
-    ):
+    if conv_user.target != prims.convert_element_type.default:
         return
 
     conv.meta["_allow_conv_mixed_dtype_folding"] = conv_dtype
@@ -46,9 +45,10 @@ def mark_mixed_dtype_allowed_convs(gm):
     Mark convolutions which we will binary fold even with mixed precision constants. We constant fold in the higher precision
     for better accuracy and then recover the original precision after.
     """
-    for node in gm.graph.nodes:
-        if node.target is aten.convolution.default:
-            mark_mixed_dtype_conv(node)
+    for node in gm.graph.find_nodes(
+        op="call_function", target=aten.convolution.default
+    ):
+        mark_mixed_dtype_conv(node)
 
 
 def recover_original_precision_folded_convs(gm):
@@ -56,8 +56,7 @@ def recover_original_precision_folded_convs(gm):
     After binary folding conv weights and biases to a higher dtype, recover the original precision they were in.
     """
     graph = gm.graph
-    convs = [node for node in graph.nodes if node.target is aten.convolution.default]
-    for node in convs:
+    for node in graph.find_nodes(op="call_function", target=aten.convolution.default):
         orig_dtype = node.meta.get("_allow_conv_mixed_dtype_folding", None)
         if orig_dtype is None:
             continue
@@ -152,17 +151,17 @@ def binary_folding_init():
             return False
         if isinstance(other, torch.fx.Node) and other.op == "get_attr":
             other_meta_value = other.meta.get("val")
-            if not other_meta_value.is_floating_point():
+            if not other_meta_value.is_floating_point():  # type: ignore[union-attr]
                 return False
             if (
-                torch.promote_types(other_meta_value.dtype, weight_meta_value.dtype)
+                torch.promote_types(other_meta_value.dtype, weight_meta_value.dtype)  # type: ignore[union-attr]
                 != weight_meta_value.dtype
             ):
                 if not conv_node.meta.get("_allow_conv_mixed_dtype_folding", False):
                     return False
 
                 if (
-                    other_meta_value.dtype != torch.float
+                    other_meta_value.dtype != torch.float  # type: ignore[union-attr]
                     and weight_meta_value.dtype not in (torch.float16, torch.bfloat16)
                 ):
                     return False

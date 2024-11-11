@@ -1,88 +1,83 @@
 # Owner(s): ["module: unknown"]
 
+import contextlib
 import copy
-from collections.abc import Sequence
-from functools import partial
-import warnings
-import unittest
 import inspect
 import itertools
-import torch
-import contextlib
-import re
 import os
-
+import re
+import unittest
+import warnings
 from collections import defaultdict
+from collections.abc import Sequence
+from functools import partial
 from importlib import import_module
-from torch.utils._pytree import tree_map
 from typing import Dict, List
-from torch.testing import make_tensor
-from torch.testing._internal.common_dtype import (
-    floating_and_complex_types_and,
-    all_types_and_complex_and,
-    integral_types_and,
-)
 
-from torch.testing._internal.common_utils import (
-    TestCase,
-    is_iterable_of_tensors,
-    run_tests,
-    IS_SANDCASTLE,
-    clone_input_helper,
-    IS_CI,
-    set_default_dtype,
-    suppress_warnings,
-    noncontiguous_like,
-    TEST_WITH_ASAN,
-    TEST_WITH_TORCHDYNAMO,
-    TEST_WITH_TORCHINDUCTOR,
-    TEST_WITH_UBSAN,
-    IS_WINDOWS,
-    IS_FBCODE,
-    first_sample,
-    parametrize,
-    skipIfTorchInductor,
-    slowTest,
-    unMarkDynamoStrictTest,
-)
-from torch.testing._internal.common_methods_invocations import (
-    op_db,
-    UnaryUfuncInfo,
-    ReductionOpInfo,
-    ReductionPythonRefInfo,
-    SpectralFuncInfo,
-    ops_and_refs,
-    python_ref_db,
-    BinaryUfuncInfo,
-    xfail,
-    skip,
-    skipOps
-)
+import torch
+import torch._prims as prims
+import torch.utils._pytree as pytree
+from torch._prims.context import TorchRefsMode
+from torch._prims_common.wrappers import _maybe_remove_out_wrapper
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch._subclasses.fake_utils import outputs_alias_inputs
+from torch.testing import make_tensor
+from torch.testing._internal import composite_compliance, opinfo
+from torch.testing._internal.common_cuda import with_tf32_off
 from torch.testing._internal.common_device_type import (
     deviceCountAtLeast,
     instantiate_device_type_tests,
-    ops,
-    onlyCUDA,
     onlyCPU,
-    onlyNativeDeviceTypes,
+    onlyCUDA,
+    onlyNativeDeviceTypesAnd,
     OpDTypes,
+    ops,
     skipMeta,
 )
-from torch._subclasses.fake_tensor import (
-    FakeTensor,
-    FakeTensorMode,
+from torch.testing._internal.common_dtype import (
+    all_types_and_complex_and,
+    floating_and_complex_types_and,
+    integral_types_and,
 )
-from torch._subclasses.fake_utils import outputs_alias_inputs
-
-import torch._prims as prims
-from torch._prims.context import TorchRefsMode
-from torch._prims_common.wrappers import _maybe_remove_out_wrapper
-
-from torch.testing._internal import opinfo
-from torch.testing._internal import composite_compliance
-
-import torch.utils._pytree as pytree
+from torch.testing._internal.common_methods_invocations import (
+    BinaryUfuncInfo,
+    op_db,
+    ops_and_refs,
+    python_ref_db,
+    ReductionOpInfo,
+    ReductionPythonRefInfo,
+    skip,
+    skipOps,
+    SpectralFuncInfo,
+    UnaryUfuncInfo,
+    xfail,
+)
+from torch.testing._internal.common_utils import (
+    clone_input_helper,
+    first_sample,
+    IS_CI,
+    IS_FBCODE,
+    is_iterable_of_tensors,
+    IS_SANDCASTLE,
+    noncontiguous_like,
+    parametrize,
+    run_tests,
+    set_default_dtype,
+    skipIfTorchDynamo,
+    skipIfTorchInductor,
+    slowTest,
+    suppress_warnings,
+    TEST_WITH_ASAN,
+    TEST_WITH_ROCM,
+    TEST_WITH_TORCHDYNAMO,
+    TEST_WITH_TORCHINDUCTOR,
+    TEST_WITH_UBSAN,
+    TestCase,
+    unMarkDynamoStrictTest,
+)
 from torch.utils._python_dispatch import TorchDispatchMode
+from torch.utils._pytree import tree_map
+
 
 assert torch.get_default_dtype() == torch.float32
 
@@ -107,15 +102,16 @@ _ref_test_ops = tuple(
     )
 )
 
-def reduction_dtype_filter(op):
-    if (not isinstance(op, ReductionPythonRefInfo) or not op.supports_out
-       or torch.int16 not in op.dtypes):
-        return False
 
-    argspec = inspect.getfullargspec(op.op)
-    if 'dtype' not in argspec.kwonlyargs:
+def reduction_dtype_filter(op):
+    if (
+        not isinstance(op, ReductionPythonRefInfo)
+        or not op.supports_out
+        or torch.int16 not in op.dtypes
+    ):
         return False
-    return True
+    return "dtype" in inspect.getfullargspec(op.op).kwonlyargs
+
 
 # Create a list of operators that are a subset of _ref_test_ops but don't have a
 # numpy ref to compare them too, If both CPU and CUDA are compared to numpy
@@ -123,6 +119,121 @@ def reduction_dtype_filter(op):
 _ops_and_refs_with_no_numpy_ref = [op for op in ops_and_refs if op.ref is None]
 
 aten = torch.ops.aten
+
+meta_consistency_out_dtype_mismatch_xfails = {
+    xfail("abs"),
+    xfail("addbmm"),
+    xfail("addmv"),
+    xfail("alias_copy"),
+    xfail("all"),
+    xfail("amax"),
+    xfail("amin"),
+    xfail("aminmax"),
+    xfail("any"),
+    xfail("as_strided_copy"),
+    xfail("baddbmm"),
+    xfail("bucketize"),
+    xfail("ceil"),
+    xfail("conj_physical"),
+    xfail("cross"),
+    xfail("cummax"),
+    xfail("cummin"),
+    xfail("diag"),
+    xfail("diagonal_copy"),
+    xfail("dot"),
+    xfail("expand_copy"),
+    xfail("fft.ihfft2"),
+    xfail("fft.ihfftn"),
+    xfail("floor"),
+    xfail("frac"),
+    xfail("frexp"),
+    xfail("geqrf"),
+    xfail("heaviside"),
+    xfail("histc"),
+    xfail("index_add"),
+    xfail("index_copy"),
+    xfail("index_select"),
+    xfail("isin"),
+    xfail("isneginf"),
+    xfail("isposinf"),
+    xfail("kthvalue"),
+    xfail("lerp"),
+    xfail("linalg.cross"),
+    xfail("linalg.eigh"),
+    xfail("linalg.eigvalsh"),
+    xfail("linalg.ldl_factor"),
+    xfail("linalg.ldl_factor_ex"),
+    xfail("linalg.ldl_solve"),
+    xfail("linalg.lu"),
+    xfail("linalg.lu_factor"),
+    xfail("linalg.lu_factor_ex"),
+    xfail("linalg.lu_solve"),
+    xfail("linalg.matrix_power"),
+    xfail("linalg.qr"),
+    xfail("linalg.slogdet"),
+    xfail("linalg.solve"),
+    xfail("linalg.solve_ex"),
+    xfail("linalg.solve_triangular"),
+    xfail("log_softmax"),
+    xfail("logcumsumexp"),
+    xfail("lu_solve"),
+    xfail("lu_unpack"),
+    xfail("matmul"),
+    xfail("mean"),
+    xfail("mm"),
+    xfail("mode"),
+    xfail("msort"),
+    xfail("multinomial"),
+    xfail("mv"),
+    xfail("nan_to_num"),
+    xfail("nanmean"),
+    xfail("narrow_copy"),
+    xfail("native_batch_norm"),
+    xfail("neg"),
+    xfail("nn.functional.avg_pool3d"),
+    xfail("nn.functional.gelu"),
+    xfail("nn.functional.hardshrink"),
+    xfail("nn.functional.linear"),
+    xfail("nn.functional.logsigmoid"),
+    xfail("nn.functional.softplus"),
+    xfail("nn.functional.softshrink"),
+    xfail("ormqr"),
+    xfail("permute_copy"),
+    xfail("qr"),
+    xfail("renorm"),
+    xfail("round"),
+    xfail("round", "decimals_0"),
+    xfail("scatter_reduce", "amax"),
+    xfail("scatter_reduce", "amin"),
+    xfail("scatter_reduce", "mean"),
+    xfail("scatter_reduce", "prod"),
+    xfail("scatter_reduce", "sum"),
+    xfail("searchsorted"),
+    xfail("sgn"),
+    xfail("sign"),
+    xfail("signbit"),
+    xfail("slice_scatter"),
+    xfail("softmax"),
+    xfail("sort"),
+    xfail("sparse.sampled_addmm"),
+    xfail("square"),
+    xfail("squeeze_copy"),
+    xfail("t_copy"),
+    xfail("take"),
+    xfail("transpose_copy"),
+    xfail("tril"),
+    xfail("triu"),
+    xfail("trunc"),
+    xfail("unfold_copy"),
+    xfail("unsqueeze_copy"),
+    xfail("vdot"),
+    xfail("view_copy"),
+    xfail("where"),
+    # Output has dynamic shape.
+    # Does not have a meta kernel implementation.
+    skip("linalg.lstsq"),
+}
+
 
 # Tests that apply to all operators and aren't related to any particular
 #   system
@@ -170,7 +281,6 @@ class TestCommon(TestCase):
                 )
 
     def test_pointwise_tag_coverage(self):
-
         pytorch_dir = os.path.abspath(__file__ + "/../../")
         files = [
             "aten/src/ATen/native/UnaryOps.cpp",
@@ -229,7 +339,7 @@ class TestCommon(TestCase):
                 lines = f.read()
                 matches = regex.findall(lines)
                 for match in matches:
-                    kernel = match[len("DEFINE_DISPATCH("):-len("_stub")]
+                    kernel = match[len("DEFINE_DISPATCH(") : -len("_stub")]
 
                     # no op definition for it, but defined with DEFINE_DISPATCH ?
                     if kernel == "trigamma":
@@ -259,15 +369,19 @@ class TestCommon(TestCase):
     # This test runs in double and complex double precision because
     # NumPy does computation internally using double precision for many functions
     # resulting in possible equality check failures.
-    @onlyNativeDeviceTypes
+    # skip windows case on CPU due to https://github.com/pytorch/pytorch/issues/129947
+    @onlyNativeDeviceTypesAnd(["hpu"])
     @suppress_warnings
     @ops(_ref_test_ops, allowed_dtypes=(torch.float64, torch.long, torch.complex128))
     def test_numpy_ref(self, device, dtype, op):
         if (
-            TEST_WITH_TORCHINDUCTOR and
-            op.formatted_name in ('signal_windows_exponential', 'signal_windows_bartlett') and
-            dtype == torch.float64 and 'cuda' in device
-           ):   # noqa: E121
+            TEST_WITH_TORCHINDUCTOR
+            and op.formatted_name
+            in ("signal_windows_exponential", "signal_windows_bartlett")
+            and dtype == torch.float64
+            and "cuda" in device
+            or "cpu" in device
+        ):  # noqa: E121
             raise unittest.SkipTest("XXX: raises tensor-likes are not close.")
 
         # Sets the default dtype to NumPy's default dtype of double
@@ -283,10 +397,9 @@ class TestCommon(TestCase):
     @slowTest
     @ops(_ops_and_refs_with_no_numpy_ref, dtypes=OpDTypes.any_common_cpu_cuda_one)
     def test_compare_cpu(self, device, dtype, op):
-
         def to_cpu(arg):
             if isinstance(arg, torch.Tensor):
-                return arg.to(device='cpu')
+                return arg.to(device="cpu")
             return arg
 
         samples = op.reference_inputs(device, dtype)
@@ -311,10 +424,14 @@ class TestCommon(TestCase):
     # Tests that experimental Python References can propagate shape, dtype,
     # and device metadata properly.
     # See https://github.com/pytorch/pytorch/issues/78050 for a discussion of stride propagation.
-    @onlyNativeDeviceTypes
+    @onlyNativeDeviceTypesAnd(["hpu"])
     @ops(python_ref_db)
     @skipIfTorchInductor("Takes too long for inductor")
     def test_python_ref_meta(self, device, dtype, op):
+        CHECK_CONJ_SKIPS = {
+            torch._refs.linalg.svd,
+        }
+
         with FakeTensorMode() as mode:
             pass
 
@@ -331,7 +448,9 @@ class TestCommon(TestCase):
             meta_sample = sample.transform(_to_tensormeta)
             try:
                 with mode:
-                    meta_result = op(meta_sample.input, *meta_sample.args, **meta_sample.kwargs)
+                    meta_result = op(
+                        meta_sample.input, *meta_sample.args, **meta_sample.kwargs
+                    )
             except torch._subclasses.fake_tensor.UnsupportedFakeTensorException:
                 continue
             except torch._subclasses.fake_tensor.DataDependentOutputException:
@@ -341,12 +460,16 @@ class TestCommon(TestCase):
 
             if isinstance(result, torch.Tensor):
                 self.assertTrue(isinstance(meta_result, FakeTensor))
-                prims.utils.compare_tensor_meta(result, meta_result)
+                prims.utils.compare_tensor_meta(
+                    result, meta_result, check_conj=op.op not in CHECK_CONJ_SKIPS
+                )
             elif isinstance(result, Sequence):
                 for a, b in zip(result, meta_result):
                     if isinstance(a, torch.Tensor) or isinstance(b, torch.Tensor):
                         self.assertTrue(isinstance(b, FakeTensor))
-                        prims.utils.compare_tensor_meta(a, b)
+                        prims.utils.compare_tensor_meta(
+                            a, b, check_conj=op.op not in CHECK_CONJ_SKIPS
+                        )
 
     def _ref_test_helper(
         self,
@@ -362,22 +485,27 @@ class TestCommon(TestCase):
         # NOTE: this test works by comparing the reference
         ex = None
         for sample in op.reference_inputs(device, dtype, requires_grad=False):
-            if isinstance(sample.input, torch.Tensor) and sample.input.numel() == 0 and skip_zero_numel:
+            if (
+                isinstance(sample.input, torch.Tensor)
+                and sample.input.numel() == 0
+                and skip_zero_numel
+            ):
                 continue
-            if isinstance(sample.input, torch.Tensor) and sample.input.ndim == 0 and skip_zero_dim:
+            if (
+                isinstance(sample.input, torch.Tensor)
+                and sample.input.ndim == 0
+                and skip_zero_dim
+            ):
                 continue
 
-            if (
-                skip_bfloat
-                and (
-                    (
-                        isinstance(sample.input, torch.Tensor)
-                        and sample.input.dtype == torch.bfloat16
-                    )
-                    or any(
-                        isinstance(arg, torch.Tensor) and arg.dtype == torch.bfloat16
-                        for arg in sample.args
-                    )
+            if skip_bfloat and (
+                (
+                    isinstance(sample.input, torch.Tensor)
+                    and sample.input.dtype == torch.bfloat16
+                )
+                or any(
+                    isinstance(arg, torch.Tensor) and arg.dtype == torch.bfloat16
+                    for arg in sample.args
                 )
             ):
                 continue
@@ -385,12 +513,19 @@ class TestCommon(TestCase):
                 ref_result = op(sample.input, *sample.args, **sample.kwargs)
             torch_result = op.torch_opinfo(sample.input, *sample.args, **sample.kwargs)
 
-            for a, b in zip(pytree.tree_leaves(ref_result), pytree.tree_leaves(torch_result)):
+            for a, b in zip(
+                pytree.tree_leaves(ref_result), pytree.tree_leaves(torch_result)
+            ):
                 if isinstance(a, torch.Tensor) or isinstance(b, torch.Tensor):
                     prims.utils.compare_tensor_meta(a, b)
-                    if getattr(op, 'validate_view_consistency', True) and not skip_view_consistency:
-                        msg = (f"The torch implementation {'returns' if b._is_view() else 'does not return'} "
-                               f"a view, while the reference {'does' if a._is_view() else 'does not'}")
+                    if (
+                        getattr(op, "validate_view_consistency", True)
+                        and not skip_view_consistency
+                    ):
+                        msg = (
+                            f"The torch implementation {'returns' if b._is_view() else 'does not return'} "
+                            f"a view, while the reference {'does' if a._is_view() else 'does not'}"
+                        )
                         self.assertEqual(a._is_view(), b._is_view(), msg)
 
             # Computes the dtype the more precise computatino would occur in
@@ -422,7 +557,6 @@ class TestCommon(TestCase):
 
                 ex = e
 
-
             # Goes to next sample if these results are close
             if not ex:
                 continue
@@ -437,7 +571,9 @@ class TestCommon(TestCase):
                 return x
 
             precise_sample = sample.transform(_make_precise)
-            precise_result = op.torch_opinfo(precise_sample.input, *precise_sample.args, **precise_sample.kwargs)
+            precise_result = op.torch_opinfo(
+                precise_sample.input, *precise_sample.args, **precise_sample.kwargs
+            )
 
             def _distance(a, b):
                 # Special-cases boolean comparisons
@@ -445,24 +581,34 @@ class TestCommon(TestCase):
                     assert b.dtype is torch.bool
                     return (a ^ b).sum()
 
-                same = (a == b)
-                if prims.utils.is_float_dtype(a.dtype) or prims.utils.is_complex_dtype(a.dtype):
-                    same = torch.logical_or(same, torch.logical_and(torch.isnan(a), torch.isnan(b)))
+                same = a == b
+                if prims.utils.is_float_dtype(a.dtype) or prims.utils.is_complex_dtype(
+                    a.dtype
+                ):
+                    same = torch.logical_or(
+                        same, torch.logical_and(torch.isnan(a), torch.isnan(b))
+                    )
 
                 actual_error = torch.where(same, 0, torch.abs(a - b)).sum()
                 return actual_error
 
             ref_distance = 0
-            for a, b in zip(pytree.tree_leaves(ref_result), pytree.tree_leaves(precise_result)):
+            for a, b in zip(
+                pytree.tree_leaves(ref_result), pytree.tree_leaves(precise_result)
+            ):
                 ref_distance = ref_distance + _distance(a, b)
 
             torch_distance = 0
-            for a, b in zip(pytree.tree_leaves(torch_result), pytree.tree_leaves(precise_result)):
+            for a, b in zip(
+                pytree.tree_leaves(torch_result), pytree.tree_leaves(precise_result)
+            ):
                 torch_distance = torch_distance + _distance(a, b)
 
             # TODO: consider adding some tolerance to this comparison
-            msg = f"Reference result was farther ({ref_distance}) from the precise " \
-                  f"computation than the torch result was ({torch_distance})!"
+            msg = (
+                f"Reference result was farther ({ref_distance}) from the precise "
+                f"computation than the torch result was ({torch_distance})!"
+            )
             self.assertTrue(ref_distance <= torch_distance, msg=msg)
 
         # Reports numerical accuracy discrepancies
@@ -473,33 +619,47 @@ class TestCommon(TestCase):
     # Tests that experimental Python References perform the same computation
     # as the operators they reference, when operator calls in the torch
     # namesapce are remapped to the refs namespace (torch.foo becomes refs.foo).
-    @onlyNativeDeviceTypes
+    @onlyNativeDeviceTypesAnd(["hpu"])
     @ops(python_ref_db)
     @skipIfTorchInductor("Takes too long for inductor")
     def test_python_ref(self, device, dtype, op):
         # In this test, primTorch refs call into the refs namespace
         # For example, a ref with torch.foo in it will calls refs.foo instead
         # Direct calls to refs and prims are not affected
+        if (
+            TEST_WITH_ROCM
+            and (op.name == "_refs.fft.ihfftn" or op.name == "_refs.fft.ihfft2")
+            and dtype == torch.float16
+        ):
+            self.skipTest("Skipped on ROCm")
         self._ref_test_helper(lambda: TorchRefsMode(strict=True), device, dtype, op)
 
     # Tests that experimental Python References perform the same computation
     # as the operators they reference, when operator calls in the torch
     # namespace are preserved (torch.foo remains torch.foo).
-    @onlyNativeDeviceTypes
+    @onlyNativeDeviceTypesAnd(["hpu"])
     @ops(python_ref_db)
     @skipIfTorchInductor("Takes too long for inductor")
     def test_python_ref_torch_fallback(self, device, dtype, op):
         # In this test, refs call into the torch namespace (after the initial invocation)
         # For example, a ref with torch.foo in it will call torch.foo instead of refs.foo
         # Direct calls to refs and prims are not translated
+        if TEST_WITH_ROCM and op.name == "_refs.fft.ihfftn" and dtype == torch.float16:
+            self.skipTest("Skipped on ROCm")
         self._ref_test_helper(contextlib.nullcontext, device, dtype, op)
 
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyCUDA
     @ops(python_ref_db)
-    @parametrize('executor', ['aten',])
+    @parametrize("executor", ["aten"])
     @skipIfTorchInductor("Takes too long for inductor")
     def test_python_ref_executor(self, device, dtype, op, executor):
+        if (
+            TEST_WITH_ROCM
+            and (op.name == "_refs.fft.ihfftn" or op.name == "_refs.fft.ihfft2")
+            and dtype == torch.float16
+        ):
+            self.skipTest("Skipped on ROCm")
         # skip zero-dim tensors for some composites of reduction operations and view
         skip_zero_dim_ops = [
             "_refs.logsumexp",
@@ -510,19 +670,16 @@ class TestCommon(TestCase):
             "ops.nvprims.view",
         ]
 
-        from torch._prims.executor import make_traced
         from copy import copy
+
+        from torch._prims.executor import make_traced
+
         op = copy(op)
         op.op = partial(make_traced(op.op), executor=executor)
-        self._ref_test_helper(
-            contextlib.nullcontext,
-            device,
-            dtype,
-            op,
-        )
+        self._ref_test_helper(contextlib.nullcontext, device, dtype, op)
 
     @skipMeta
-    @onlyNativeDeviceTypes
+    @onlyNativeDeviceTypesAnd(["hpu"])
     @ops([op for op in op_db if op.error_inputs_func is not None], dtypes=OpDTypes.none)
     def test_errors(self, device, op):
         error_inputs = op.error_inputs(device)
@@ -533,9 +690,21 @@ class TestCommon(TestCase):
                 self.assertFalse(isinstance(out, type(NotImplemented)))
 
     @skipMeta
-    @onlyNativeDeviceTypes
-    @ops([op for op in op_db if op.error_inputs_sparse_func is not None], dtypes=OpDTypes.none)
-    @parametrize("layout", (torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc, torch.sparse_coo))
+    @onlyNativeDeviceTypesAnd(["hpu"])
+    @ops(
+        [op for op in op_db if op.error_inputs_sparse_func is not None],
+        dtypes=OpDTypes.none,
+    )
+    @parametrize(
+        "layout",
+        (
+            torch.sparse_csr,
+            torch.sparse_csc,
+            torch.sparse_bsr,
+            torch.sparse_bsc,
+            torch.sparse_coo,
+        ),
+    )
     def test_errors_sparse(self, device, op, layout):
         for ei in op.error_inputs_sparse(device, layout):
             si = ei.sample_input
@@ -544,8 +713,11 @@ class TestCommon(TestCase):
                 self.assertFalse(isinstance(out, type(NotImplemented)))
 
     @skipMeta
-    @onlyNativeDeviceTypes
-    @ops([op for op in python_ref_db if op.error_inputs_func is not None], dtypes=OpDTypes.none)
+    @onlyNativeDeviceTypesAnd(["hpu"])
+    @ops(
+        [op for op in python_ref_db if op.error_inputs_func is not None],
+        dtypes=OpDTypes.none,
+    )
     @skipIfTorchInductor("Takes too long for inductor")
     def test_python_ref_errors(self, device, op):
         mode = FakeTensorMode()
@@ -566,10 +738,8 @@ class TestCommon(TestCase):
 
     # Tests that the function produces the same result when called with
     #   noncontiguous tensors.
-    # TODO: get working with Windows by addressing failing operators
-    # TODO: get working with ASAN by addressing failing operators
-    @unittest.skipIf(IS_WINDOWS, "Skipped under Windows")
-    @onlyNativeDeviceTypes
+    @with_tf32_off
+    @onlyNativeDeviceTypesAnd(["hpu"])
     @suppress_warnings
     @ops(op_db, allowed_dtypes=(torch.float32, torch.long, torch.complex64))
     def test_noncontiguous_samples(self, device, dtype, op):
@@ -746,8 +916,9 @@ class TestCommon(TestCase):
                 self.assertEqual(expected, out)
 
                 if compare_strides_and_data_ptrs:
-                    stride_msg = "Strides are not the same! Original strides were {} and strides are now {}".format(
-                        original_strides, final_strides
+                    stride_msg = (
+                        f"Strides are not the same! Original strides were {original_strides} "
+                        f"and strides are now {final_strides}"
                     )
                     self.assertEqual(original_strides, final_strides, msg=stride_msg)
                     self.assertEqual(original_ptrs, final_ptrs)
@@ -871,8 +1042,9 @@ class TestCommon(TestCase):
                 self.assertEqual(expected, out)
 
                 if compare_strides_and_data_ptrs:
-                    stride_msg = "Strides are not the same! Original strides were {} and strides are now {}".format(
-                        original_strides, final_strides
+                    stride_msg = (
+                        "Strides are not the same! "
+                        f"Original strides were {original_strides} and strides are now {final_strides}"
                     )
                     self.assertEqual(original_strides, final_strides, msg=stride_msg)
                     self.assertEqual(original_ptrs, final_ptrs)
@@ -888,7 +1060,6 @@ class TestCommon(TestCase):
                 except TypeError as te:
                     # for non-integer types fills with NaN
                     return torch.full_like(t, float("nan"))
-
 
             _compare_out(_case_zero_transform)
 
@@ -928,7 +1099,6 @@ class TestCommon(TestCase):
                 wrong_device = "cpu"
             elif torch.cuda.is_available():
                 wrong_device = "cuda"
-
 
             factory_fn_msg = (
                 "\n\nNOTE: If your op is a factory function (i.e., it accepts TensorOptions) you should mark its "
@@ -988,6 +1158,42 @@ class TestCommon(TestCase):
                     with self.assertRaises(RuntimeError, msg=msg_fail):
                         op_out(out=out)
 
+    @ops(
+        [
+            op
+            for op in op_db
+            if op.supports_out and (op.supports_autograd or op.is_factory_function)
+        ],
+        dtypes=OpDTypes.supported,
+        allowed_dtypes=[torch.float, torch.cfloat],
+    )
+    def test_out_requires_grad_error(self, device, dtype, op):
+        sample = first_sample(self, op.sample_inputs(device, dtype))
+
+        # Call op to get prototype for out arguments
+        expect = op(sample.input, *sample.args, **sample.kwargs)
+        any_requires_grad = False
+
+        def set_requires_grad(x):
+            nonlocal any_requires_grad
+            if isinstance(x, torch.Tensor) and (
+                x.is_floating_point() or x.is_complex()
+            ):
+                any_requires_grad = True
+                x.requires_grad_(True)
+            return x
+
+        out = pytree.tree_map_(set_requires_grad, expect)
+        if not any_requires_grad:
+            # Skip ops without any floating point outputs, e.g. isnan
+            return
+
+        msg = (
+            "functions with out=... arguments don't support automatic "
+            "differentiation, but one of the arguments requires grad."
+        )
+        with self.assertRaises(RuntimeError, msg=msg):
+            op(sample.input, *sample.args, **sample.kwargs, out=out)
 
     @ops(filter(reduction_dtype_filter, ops_and_refs), dtypes=(torch.int16,))
     def test_out_integral_dtype(self, device, dtype, op):
@@ -1002,24 +1208,32 @@ class TestCommon(TestCase):
                 self.assertFalse(expectFail)
             except RuntimeError as err:
                 self.assertEqual(
-                    str(err), "dtype argument and out dtype must match in reduction")
+                    str(err), "dtype argument and out dtype must match in reduction"
+                )
                 self.assertTrue(expectFail)
             return out
+
         samples = op.sample_inputs(device, dtype)
         for sample in samples:
-            if 'dtype' not in sample.kwargs:
+            if "dtype" not in sample.kwargs:
                 helper(False, False, op, sample.input, *sample.args, **sample.kwargs)
                 helper(True, False, op, sample.input, *sample.args, **sample.kwargs)
-                sample.kwargs['dtype'] = torch.int16
+                sample.kwargs["dtype"] = torch.int16
                 helper(False, False, op, sample.input, *sample.args, **sample.kwargs)
                 helper(True, True, op, sample.input, *sample.args, **sample.kwargs)
-                sample.kwargs['dtype'] = torch.int32
+                sample.kwargs["dtype"] = torch.int32
                 helper(False, False, op, sample.input, *sample.args, **sample.kwargs)
                 helper(True, False, op, sample.input, *sample.args, **sample.kwargs)
             else:
                 helper(False, False, op, sample.input, *sample.args, **sample.kwargs)
-                helper(True, sample.kwargs['dtype'] != torch.int32, op, sample.input,
-                       *sample.args, **sample.kwargs)
+                helper(
+                    True,
+                    sample.kwargs["dtype"] != torch.int32,
+                    op,
+                    sample.input,
+                    *sample.args,
+                    **sample.kwargs,
+                )
 
     # Tests that the forward and backward passes of operations produce the
     #   same values for the cross-product of op variants (method, inplace)
@@ -1032,7 +1246,6 @@ class TestCommon(TestCase):
         inplace = op.inplace_variant
         operator = op.operator_variant
         inplace_operator = op.inplace_operator_variant
-
 
         # list of all inplace ops: inplace variant + alias inplace variants if exist
         inplace_ops = [inplace, inplace_operator]
@@ -1214,8 +1427,11 @@ class TestCommon(TestCase):
             actual = op(sample.input, *sample.args, **sample.kwargs)
             # sample.transform applies the lambda to torch.Tensor and torch.dtype.
             # However, we only want to apply it to Tensors with dtype `torch.complex32`..
-            transformed_sample = sample.transform(lambda x: x.to(torch.complex64) if isinstance(
-                x, torch.Tensor) and x.dtype is torch.complex32 else x)
+            transformed_sample = sample.transform(
+                lambda x: x.to(torch.complex64)
+                if isinstance(x, torch.Tensor) and x.dtype is torch.complex32
+                else x
+            )
             expected = op(
                 transformed_sample.input,
                 *transformed_sample.args,
@@ -1224,15 +1440,18 @@ class TestCommon(TestCase):
             # Since range of chalf is much less compared to cfloat,
             # we get `inf`s easily (eg. with `pow`, `exp`),
             # so we cast `cfloat` back to `chalf`.
-            expected = tree_map(lambda x: x.to(torch.complex32) if isinstance(
-                x, torch.Tensor) and x.dtype is torch.complex64 else x, expected)
+            expected = tree_map(
+                lambda x: x.to(torch.complex32)
+                if isinstance(x, torch.Tensor) and x.dtype is torch.complex64
+                else x,
+                expected,
+            )
 
             # `exact_dtype` is False because for ops like real, imag
             # we get different dtypes for `actual` and `expected`
             # `chalf` input -> `half` output
             # `cfloat` input -> `float` output
             self.assertEqual(actual, expected, exact_dtype=False)
-
 
     @ops(op_db, allowed_dtypes=(torch.bool,))
     @unittest.skipIf(TEST_WITH_UBSAN, "Test uses undefined behavior")
@@ -1243,7 +1462,9 @@ class TestCommon(TestCase):
                 return x
 
             # Map False -> 0 and True -> Random value in [2, 255]
-            true_vals = torch.randint(2, 255, x.shape, dtype=torch.uint8, device=x.device)
+            true_vals = torch.randint(
+                2, 255, x.shape, dtype=torch.uint8, device=x.device
+            )
             false_vals = torch.zeros((), dtype=torch.uint8, device=x.device)
             x_int = torch.where(x, true_vals, false_vals)
 
@@ -1262,7 +1483,7 @@ class TestCommon(TestCase):
     # Validates that each OpInfo specifies its forward and backward dtypes
     #   correctly for CPU and CUDA devices
     @skipMeta
-    @onlyNativeDeviceTypes
+    @onlyNativeDeviceTypesAnd(["hpu"])
     @ops(ops_and_refs, dtypes=OpDTypes.none)
     def test_dtypes(self, device, op):
         # Check complex32 support only if the op claims.
@@ -1284,7 +1505,7 @@ class TestCommon(TestCase):
         unsupported_dtypes = set()
         supported_backward_dtypes = set()
         unsupported_backward_dtypes = set()
-        dtype_error: Dict[torch.dtype, Exception] = dict()
+        dtype_error: Dict[torch.dtype, Exception] = {}
 
         def unsupported(dtype, e):
             dtype_error[dtype] = e
@@ -1334,8 +1555,11 @@ class TestCommon(TestCase):
 
                     return False
 
-                requires_grad = _tensor_requires_grad(sample.input) \
-                    or _tensor_requires_grad(sample.args) or _tensor_requires_grad(sample.kwargs)
+                requires_grad = (
+                    _tensor_requires_grad(sample.input)
+                    or _tensor_requires_grad(sample.args)
+                    or _tensor_requires_grad(sample.kwargs)
+                )
                 if not requires_grad:
                     continue
 
@@ -1391,16 +1615,12 @@ class TestCommon(TestCase):
             if len(partially_supported_forward) > 0:
                 msg = (
                     msg
-                    + "The following dtypes only worked on some samples during forward: {}.\n".format(
-                        partially_supported_forward
-                    )
+                    + f"The following dtypes only worked on some samples during forward: {partially_supported_forward}.\n"
                 )
             if len(partially_supported_backward) > 0:
                 msg = (
                     msg
-                    + "The following dtypes only worked on some samples during backward: {}.\n".format(
-                        partially_supported_backward
-                    )
+                    + f"The following dtypes only worked on some samples during backward: {partially_supported_backward}.\n"
                 )
             print(msg)
 
@@ -1425,33 +1645,31 @@ class TestCommon(TestCase):
         if len(supported_but_unclaimed_forward) > 0:
             msg = (
                 msg
-                + "The following dtypes worked in forward but are not listed by the OpInfo: {}.\n".format(
-                    supported_but_unclaimed_forward
-                )
+                + "The following dtypes worked in forward but are not listed by the OpInfo: "
+                + f"{supported_but_unclaimed_forward}.\n"
             )
         if len(supported_but_unclaimed_backward) > 0:
             msg = (
                 msg
-                + "The following dtypes worked in backward but are not listed by the OpInfo: {}.\n".format(
-                    supported_but_unclaimed_backward
-                )
+                + "The following dtypes worked in backward but are not listed by the OpInfo: "
+                + f"{supported_but_unclaimed_backward}.\n"
             )
         if len(claimed_but_unsupported_forward) > 0:
             msg = (
                 msg
-                + "The following dtypes did not work in forward but are listed by the OpInfo: {}.\n".format(
-                    claimed_but_unsupported_forward
-                )
+                + "The following dtypes did not work in forward but are listed by the OpInfo: "
+                + f"{claimed_but_unsupported_forward}.\n"
             )
         if len(claimed_but_unsupported_backward) > 0:
             msg = (
                 msg
-                + "The following dtypes did not work in backward but are listed by the OpInfo: {}.\n".format(
-                    claimed_but_unsupported_backward
-                )
+                + "The following dtypes did not work in backward "
+                + f"but are listed by the OpInfo: {claimed_but_unsupported_backward}.\n"
             )
 
-        all_claimed_but_unsupported = set.union(claimed_but_unsupported_backward, claimed_but_unsupported_forward)
+        all_claimed_but_unsupported = set.union(
+            claimed_but_unsupported_backward, claimed_but_unsupported_forward
+        )
         if all_claimed_but_unsupported:
             msg += "Unexpected failures raised the following errors:\n"
             for dtype in all_claimed_but_unsupported:
@@ -1461,8 +1679,11 @@ class TestCommon(TestCase):
 
     # Validates that each OpInfo that sets promotes_int_to_float=True does as it says
     @skipMeta
-    @onlyNativeDeviceTypes
-    @ops((op for op in op_db if op.promotes_int_to_float), allowed_dtypes=integral_types_and(torch.bool))
+    @onlyNativeDeviceTypesAnd(["hpu"])
+    @ops(
+        (op for op in op_db if op.promotes_int_to_float),
+        allowed_dtypes=integral_types_and(torch.bool),
+    )
     def test_promotes_int_to_float(self, device, dtype, op):
         for sample in op.sample_inputs(device, dtype):
             output = op(sample.input, *sample.args, **sample.kwargs)
@@ -1470,6 +1691,86 @@ class TestCommon(TestCase):
                 self.fail(
                     f"The OpInfo sets `promotes_int_to_float=True`, but {dtype} was promoted to {output.dtype}."
                 )
+
+    # Checks whether running the operations on both CPU and meta devices raise errors
+    # when the output tensors have mismatching data-types (i.e. data-types that are
+    # different from the expected one).
+    #
+    # The idea is that the meta implementations should correctly reflect on the behavior
+    # of other concrete devices (e.g. CPU and CUDA).
+    @onlyCPU
+    @ops([op for op in op_db if op.supports_out], allowed_dtypes=(torch.float32,))
+    @skipOps(
+        "TestCommon",
+        "test_meta_consistency_out_dtype_mismatch",
+        meta_consistency_out_dtype_mismatch_xfails,
+    )
+    @skipIfTorchDynamo("meta device runs only on eager")
+    def test_meta_consistency_out_dtype_mismatch(self, device, dtype, op):
+        samples = op.sample_inputs(device, dtype)
+
+        for i, sample in enumerate(samples):
+            input, args, kwargs = (sample.input, sample.args, sample.kwargs)
+
+            try:
+                # Call the functional version of the operation, using a real device, so that
+                # we get the actual expected result.
+                expected = op(input, *args, **kwargs)
+
+                if isinstance(expected, tuple):
+                    # Some operations return named tuples. However, pytree does not work well
+                    # with that, so we turn it into a plain tuple.
+                    expected = tuple(expected)
+            except Exception:
+                # If that doesn't work out, go to the next sample.
+                continue
+
+            def run_on(dev):
+                # Create new outputs in the desired device, with a mismatching data type of
+                # the same kind.
+                out = pytree.tree_map_only(
+                    torch.Tensor,
+                    lambda t: torch.empty_like(t, device=dev, dtype=torch.float64),
+                    expected,
+                )
+
+                # Move inputs to the desired device.
+                arguments = (input, args, kwargs)
+                arguments = pytree.tree_map_only(
+                    torch.Tensor, lambda t: t.to(dev), arguments
+                )
+                # Also, replace every instance of 'cpu' arguments by whatever the desired
+                # device really should be.
+                arguments = pytree.tree_map_only(
+                    torch.device, lambda d: torch.device(dev), arguments
+                )
+                arguments = pytree.tree_map_only(
+                    str, lambda v: dev if v == device else v, arguments
+                )
+                input_, args_, kwargs_ = arguments
+
+                # Try running the operation, and return the raised error, if any.
+                try:
+                    op(input_, *args_, **kwargs_, out=out)
+                except Exception as e:
+                    return e
+
+            # Run the operation with the sample arguments on both CPU and meta devices, capturing
+            # the raised error, if any.
+            device_err = run_on(device)
+            meta_err = run_on("meta")
+
+            # Check whether they disagree on the result.
+            #
+            # In case there is an inconsistency of whether an error was raised using the real device,
+            # but not when using the meta device, we raise a RuntimeError, chaining with the captured
+            # one.
+            #
+            # We could just assertEquals here, but chaining the errors is more informative.
+            if device_err is None and meta_err is not None:
+                raise RuntimeError(f"{device} didn't fail, but meta did.") from meta_err
+            elif device_err is not None and meta_err is None:
+                raise RuntimeError(f"{device} failed, but meta didn't.") from device_err
 
 
 @unMarkDynamoStrictTest
@@ -1488,7 +1789,9 @@ class TestCompositeCompliance(TestCase):
             args = [sample.input] + list(sample.args)
             kwargs = sample.kwargs
             composite_compliance.check_with_mode(op, args, kwargs, self.assertEqual)
-            composite_compliance.check_all_permutations(op, args, kwargs, self.assertEqual)
+            composite_compliance.check_all_permutations(
+                op, args, kwargs, self.assertEqual
+            )
 
     @unittest.skipIf(
         IS_FBCODE or IS_SANDCASTLE, "__torch_dispatch__ does not work in fbcode"
@@ -1503,9 +1806,13 @@ class TestCompositeCompliance(TestCase):
             # We pass assertEqual so that decorators like `toleranceOverride`
             # actually work (otherwise they silently do nothing!)
             composite_compliance.check_backward_formula(
-                op.get_op(), args, kwargs,
+                op.get_op(),
+                args,
+                kwargs,
                 sample.output_process_fn_grad,
-                op.gradcheck_wrapper, self.assertEqual)
+                op.gradcheck_wrapper,
+                self.assertEqual,
+            )
 
     @unittest.skipIf(
         IS_FBCODE or IS_SANDCASTLE, "__torch_dispatch__ does not work in fbcode"
@@ -1526,7 +1833,167 @@ class TestCompositeCompliance(TestCase):
             # We pass assertEqual so that decorators like `toleranceOverride`
             # actually work (otherwise they silently do nothing!)
             composite_compliance.check_forward_ad_formula(
-                op.get_op(), args, kwargs, op.gradcheck_wrapper, self.assertEqual)
+                op.get_op(), args, kwargs, op.gradcheck_wrapper, self.assertEqual
+            )
+
+    @ops(op_db, allowed_dtypes=(torch.float,))
+    def test_cow_input(self, device, dtype, op):
+        samples = op.sample_inputs(device, dtype, requires_grad=op.supports_autograd)
+
+        def is_strided_tensor(arg):
+            return torch.is_tensor(arg) and arg.layout == torch.strided
+
+        def check_ignore_materialize(idx_or_kw, allow_list):
+            return (allow_list is not None) and (idx_or_kw in allow_list)
+
+        def check_cow_input(
+            arg,
+            arg_copy,
+            idx_or_kw,
+            backward_or_forward="forward",
+            supports_cow_input_no_materialize=op.supports_cow_input_no_materialize_forward,
+            allow_list=op.allow_cow_input_materialize_forward,
+        ):
+            arg_name = (
+                f"Argument {idx_or_kw}"
+                if isinstance(idx_or_kw, int)
+                else f"Keyword argument '{idx_or_kw}'"
+            ) + f" during {backward_or_forward} call"
+
+            if is_strided_tensor(arg):
+                is_cow = torch._C._is_cow_tensor(arg)
+
+                if supports_cow_input_no_materialize and not check_ignore_materialize(
+                    idx_or_kw, allow_list
+                ):
+                    self.assertTrue(
+                        is_cow,
+                        msg=(
+                            f"{arg_name} unexpectedly materializes. "
+                            f"Either set `supports_cow_input_no_materialize_{backward_or_forward}=False` "
+                            "in this operation's OpInfo, add the arg to the OpInfo's "
+                            f"`allow_cow_input_materialize_{backward_or_forward}` list, or change the "
+                            "implementation to avoid materialization."
+                        ),
+                    )
+
+                if is_cow:
+                    self.assertTrue(
+                        torch.allclose(arg, arg_copy, rtol=0, atol=0, equal_nan=True),
+                        msg=(
+                            f"{arg_name} avoided materialization, "
+                            "but the operation mutated its data."
+                        ),
+                    )
+
+        for sample in samples:
+            args_raw = [sample.input] + list(sample.args)
+            kwargs_raw = sample.kwargs
+            args_copy = []
+            args = []
+            kwargs_copy = {}
+            kwargs = {}
+
+            # Convert strided tensor inputs to COW tensors and make copies of
+            # all inputs
+            for idx, arg in enumerate(args_raw):
+                if is_strided_tensor(arg):
+                    args_copy.append(arg.clone().detach())
+                    args.append(torch._lazy_clone(arg))
+                else:
+                    if torch.is_tensor(arg):
+                        args_copy.append(arg.clone().detach())
+                    else:
+                        args_copy.append(copy.deepcopy(arg))
+                    args.append(arg)
+
+            for kw, arg in kwargs_raw.items():
+                if is_strided_tensor(arg):
+                    kwargs_copy[kw] = arg.clone().detach()
+                    kwargs[kw] = torch._lazy_clone(arg)
+                else:
+                    if torch.is_tensor(arg):
+                        kwargs_copy[kw] = arg.clone().detach()
+                    else:
+                        kwargs_copy[kw] = copy.deepcopy(arg)
+                    kwargs[kw] = arg
+
+            leaf_tensors = composite_compliance.gather_leaf_tensors(args, kwargs)
+
+            # Call forward op
+            results_raw = op.get_op()(*args, **kwargs)
+
+            # Check that COW inputs remain COW after the forward op is executed
+            for idx, arg in enumerate(args):
+                check_cow_input(arg, args_copy[idx], idx)
+
+            for kw, arg in kwargs.items():
+                check_cow_input(arg, kwargs_copy[kw], kw)
+
+            # Call backward op if it is supported. This part of the test is
+            # based on `composite_compliance.check_backward_formula`
+            if (
+                op.supports_autograd
+                and len(leaf_tensors) > 0
+                and not op.skip_cow_input_backward
+            ):
+                if sample.output_process_fn_grad is not None:
+                    results_raw = sample.output_process_fn_grad(results_raw)
+
+                leaf_results = pytree.tree_leaves(results_raw)
+                results = [
+                    r
+                    for r in leaf_results
+                    if isinstance(r, torch.Tensor) and r.requires_grad
+                ]
+
+                all_results_strided = all(
+                    is_strided_tensor(result) for result in results
+                )
+
+                # Only test backward if the results are strided tensors
+                if all_results_strided:
+                    output_grads_raw = [
+                        torch.ones(r.shape, device=r.device, dtype=r.dtype)
+                        for r in results
+                    ]
+                    output_grads_copy = []
+                    output_grads = []
+
+                    # Convert output grads to COW tensors and make copies
+                    for output_grad in output_grads_raw:
+                        output_grads_copy.append(output_grad.clone().detach())
+                        output_grads.append(torch._lazy_clone(output_grad))
+
+                    input_grads = torch.autograd.grad(
+                        results,
+                        leaf_tensors,
+                        output_grads,
+                        allow_unused=True,
+                        retain_graph=True,
+                    )
+
+                    # Check that COW inputs remain COW after the backward op is executed
+                    for idx, arg in enumerate(args):
+                        check_cow_input(
+                            arg,
+                            args_copy[idx],
+                            idx,
+                            backward_or_forward="backward",
+                            supports_cow_input_no_materialize=op.supports_cow_input_no_materialize_backward,
+                            allow_list=op.allow_cow_input_materialize_backward,
+                        )
+
+                    # Check that COW inputs remain COW after the backward op is executed
+                    for idx, output_grad in enumerate(output_grads):
+                        check_cow_input(
+                            output_grad,
+                            output_grads_copy[idx],
+                            f"output grad {idx}",
+                            backward_or_forward="backward",
+                            supports_cow_input_no_materialize=op.supports_cow_input_no_materialize_backward,
+                            allow_list=op.allow_cow_input_materialize_backward,
+                        )
 
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_view_replay(self, device, dtype, op):
@@ -1549,9 +2016,9 @@ class TestCompositeCompliance(TestCase):
                 # forward and reverse views via a functioning view_func() / rev_view_func().
                 for out in outs:
                     if not (
-                        isinstance(out, torch.Tensor) and
-                        out._is_view() and
-                        out._base is inp
+                        isinstance(out, torch.Tensor)
+                        and out._is_view()
+                        and out._base is inp
                     ):
                         continue
 
@@ -1560,6 +2027,7 @@ class TestCompositeCompliance(TestCase):
                     _assert_match_metadata(new_inp, inp)
                     new_out = out._view_func_unsafe(new_inp)
                     _assert_match_metadata(new_out, out)
+                    self.assertEqual(new_out, out)
 
                     # reverse view_func
                     new_out = out.detach()
@@ -1757,6 +2225,7 @@ class TestMathBits(TestCase):
             torch.is_complex,
         )
 
+
 # input strides and size may have been altered due to the result of an inplace op
 def check_inplace_view(func, input, rs, input_size, input_strides):
     if func is None:
@@ -1768,7 +2237,7 @@ def check_inplace_view(func, input, rs, input_size, input_strides):
         unequal_strides = rs.stride() != input_strides
         # resize_ should probably have inplace_view tag. Not adding the tag since it
         # breaks some codegen logic
-        if (unequal_size or unequal_strides):
+        if unequal_size or unequal_strides:
             if isinstance(func, torch._ops.OpOverloadPacket):
                 func = func.default
             # Reference: https://github.com/pytorch/pytorch/issues/78759
@@ -1776,10 +2245,11 @@ def check_inplace_view(func, input, rs, input_size, input_strides):
                 # TODO: use self.assertIn when we have separate tests for each tag
                 assert torch.Tag.inplace_view in func.tags
 
+
 # A mode that when enabled runs correctness checks to ensure
 # that operators have expected tags based on their input and
-# ouput tensor properties
-class TestTagsMode(TorchDispatchMode):
+# output tensor properties
+class _TestTagsMode(TorchDispatchMode):
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         if isinstance(args[0], torch.Tensor):
             old_size = args[0].size()
@@ -1789,6 +2259,7 @@ class TestTagsMode(TorchDispatchMode):
         else:
             rs = func(*args, **kwargs)
         return rs
+
 
 # Test to verify the correctness for tags in `tags.yaml`, also available for access through `torch.Tags`
 @unMarkDynamoStrictTest
@@ -1803,12 +2274,13 @@ class TestTags(TestCase):
             if isinstance(input, torch.Tensor):
                 old_size = input.size()
                 old_stride = input.stride()
-                with TestTagsMode():
+                with _TestTagsMode():
                     rs = op(input, *sample.args, **sample.kwargs)
                 # TODO: add test for aliases: https://github.com/pytorch/pytorch/issues/78761
                 aten_name = op.aten_name if op.aten_name is not None else op.name
                 opoverloadpacket = getattr(torch.ops.aten, aten_name, None)
                 check_inplace_view(opoverloadpacket, input, rs, old_size, old_stride)
+
 
 class TestSelfKwarg(TestCase):
     def test_self_kwargs(self):
@@ -1818,157 +2290,171 @@ class TestSelfKwarg(TestCase):
         torch.ops.aten.reshape.default(self=torch.rand(1, 2), shape=[2])
         torch.ops.aten.min.default(self=torch.rand(100))
 
+
 @unMarkDynamoStrictTest
 class TestRefsOpsInfo(TestCase):
-
-    import_paths = ["_refs", "_refs.special", "_refs.nn.functional", "_refs.fft", "_refs._conversions"]
-    module_alls = [(path, import_module(f"torch.{path}").__all__) for path in import_paths]
-    ref_ops_names = tuple(itertools.chain.from_iterable(
-        [f"{path}.{op}" for op in module_all] for path, module_all in module_alls))
+    import_paths = [
+        "_refs",
+        "_refs.special",
+        "_refs.nn.functional",
+        "_refs.fft",
+        "_refs._conversions",
+    ]
+    module_alls = [
+        (path, import_module(f"torch.{path}").__all__) for path in import_paths
+    ]
+    ref_ops_names = tuple(
+        itertools.chain.from_iterable(
+            [f"{path}.{op}" for op in module_all] for path, module_all in module_alls
+        )
+    )
     ref_db_names = {ref_op.name for ref_op in python_ref_db}
 
     # TODO: References that do not have an entry in python_ref_db
     skip_ref_ops = {
-        '_refs.alias',
-        '_refs.bitwise_right_shift',
-        '_refs.copy_to',
-        '_refs.empty_permuted',
-        '_refs.empty_strided',
-        '_refs.equal',
-        '_refs.full',
-        '_refs.full_like',
-        '_refs.is_complex',
-        '_refs.to',
-        '_refs.mvlgamma',
-        '_refs.ones',
-        '_refs.ones_like',
-        '_refs.special.expit',
-        '_refs.std_var',
-        '_refs.swap_axes',
-        '_refs.uniform',
-        '_refs.scalar_tensor',
-        '_refs.trunc_divide',
-        '_refs.zero',
-        '_refs.zeros',
-        '_refs.zeros_like',
-        '_refs.rfloordiv',
-        '_refs.rtruediv',
-        '_refs.rpow',
+        "_refs.alias",
+        "_refs.bitwise_right_shift",
+        "_refs.copy_to",
+        "_refs.empty_permuted",
+        "_refs.empty_strided",
+        "_refs.equal",
+        "_refs.full",
+        "_refs.full_like",
+        "_refs.is_complex",
+        "_refs.to",
+        "_refs.mvlgamma",
+        "_refs.ones",
+        "_refs.ones_like",
+        "_refs.special.expit",
+        "_refs.std_var",
+        "_refs.swap_axes",
+        "_refs.uniform",
+        "_refs.scalar_tensor",
+        "_refs.trunc_divide",
+        "_refs.zero",
+        "_refs.zeros",
+        "_refs.zeros_like",
+        "_refs.rfloordiv",
+        "_refs.rtruediv",
+        "_refs.rpow",
         # These should be tested with their out-of-place counterparts
-        '_refs.index_add_',
-        '_refs.index_copy_',
-        '_refs.index_fill_',
-        '_refs.native_group_norm',
+        "_refs.index_add_",
+        "_refs.index_copy_",
+        "_refs.index_fill_",
+        "_refs.native_group_norm",
     }
 
     not_in_decomp_table = {
         # duplicated in _decomp and _refs
-        '_refs.nn.functional.group_norm',
-        '_refs.nn.functional.mse_loss',
-        '_refs.floor_divide',
-        '_refs.rsub',
+        "_refs.nn.functional.group_norm",
+        "_refs.nn.functional.mse_loss",
+        "_refs.floor_divide",
         # duplicated as refs do not have decent support for advanced indexing
-        '_refs.index_copy',
-        '_refs.index_copy_',
-        '_refs.index_add',
-        '_refs.index_add_',
+        "_refs.index_copy",
+        "_refs.index_copy_",
+        "_refs.index_add",
+        "_refs.index_add_",
         # these are not aten ops?
-        '_refs._conversions.bfloat16',
-        '_refs._conversions.bool',
-        '_refs._conversions.byte',
-        '_refs._conversions.char',
-        '_refs._conversions.double',
-        '_refs._conversions.float',
-        '_refs._conversions.half',
-        '_refs._conversions.int',
-        '_refs._conversions.long',
-        '_refs._conversions.short',
-        '_refs._conversions.chalf',
-        '_refs._conversions.cfloat',
-        '_refs._conversions.cdouble',
-        '_refs.broadcast_shapes',
-        '_refs.broadcast_tensors',
-        '_refs.mvlgamma',
-        '_refs.nn.functional.layer_norm',
-        '_refs.nn.functional.tanhshrink',
-        '_refs.nn.functional.triplet_margin_loss',
-        '_refs.rfloordiv',
-        '_refs.rtruediv',
-        '_refs.rpow',
+        "_refs._conversions.bfloat16",
+        "_refs._conversions.bool",
+        "_refs._conversions.byte",
+        "_refs._conversions.char",
+        "_refs._conversions.double",
+        "_refs._conversions.float",
+        "_refs._conversions.half",
+        "_refs._conversions.int",
+        "_refs._conversions.long",
+        "_refs._conversions.short",
+        "_refs._conversions.chalf",
+        "_refs._conversions.cfloat",
+        "_refs._conversions.cdouble",
+        "_refs.broadcast_shapes",
+        "_refs.broadcast_tensors",
+        "_refs.mvlgamma",
+        "_refs.nn.functional.layer_norm",
+        "_refs.nn.functional.tanhshrink",
+        "_refs.nn.functional.triplet_margin_loss",
+        "_refs.rfloordiv",
+        "_refs.rtruediv",
+        "_refs.rpow",
         # CompositeImplicitAutograd
-        '_refs.allclose',
-        '_refs.atleast_1d',
-        '_refs.atleast_2d',
-        '_refs.atleast_3d',
-        '_refs.broadcast_to',
-        '_refs.chunk',
-        '_refs.column_stack',
-        '_refs.contiguous',
-        '_refs.dsplit',
-        '_refs.dstack',
-        '_refs.fill',
-        '_refs.fill_',
-        '_refs.flatten',
-        '_refs.fliplr',
-        '_refs.flipud',
-        '_refs.float_power',
-        '_refs.hsplit',
-        '_refs.hstack',
-        '_refs.isclose',
-        '_refs.isfinite',
-        '_refs.isreal',
-        '_refs.istft',
-        '_refs.log_softmax',
-        '_refs.movedim',
-        '_refs.narrow',
-        '_refs.nn.functional.dropout',
-        '_refs.nn.functional.l1_loss',
-        '_refs.nn.functional.smooth_l1_loss',
-        '_refs.nn.functional.log_softmax',
-        '_refs.nn.functional.poisson_nll_loss',
-        '_refs.nn.functional.softmax',
-        '_refs.nn.functional.softmin',
-        '_refs.positive',
-        '_refs.ravel',
-        '_refs.reshape',
-        '_refs.softmax',
-        '_refs.special.expit',
-        '_refs.special.log_softmax',
-        '_refs.special.softmax',
-        '_refs.square',
-        '_refs.stft',
-        '_refs.T',
-        '_refs.take_along_dim',
-        '_refs.tensor_split',
-        '_refs.to',
-        '_refs.true_divide',
-        '_refs.trunc_divide',
-        '_refs.vsplit',
-        '_refs.vstack',
-        '_refs.linalg.matrix_norm',
-        '_refs.linalg.norm',
-        '_refs.linalg.svd',
-        '_refs.linalg.svdvals',
-        '_refs.unflatten',
-        '_refs.sum_to_size',
+        "_refs.allclose",
+        "_refs.atleast_1d",
+        "_refs.atleast_2d",
+        "_refs.atleast_3d",
+        "_refs.broadcast_to",
+        "_refs.chunk",
+        "_refs.column_stack",
+        "_refs.contiguous",
+        "_refs.dsplit",
+        "_refs.dstack",
+        "_refs.fill",
+        "_refs.fill_",
+        "_refs.flatten",
+        "_refs.fliplr",
+        "_refs.flipud",
+        "_refs.float_power",
+        "_refs.hsplit",
+        "_refs.hstack",
+        "_refs.isclose",
+        "_refs.isfinite",
+        "_refs.isreal",
+        "_refs.istft",
+        "_refs.log_softmax",
+        "_refs.movedim",
+        "_refs.narrow",
+        "_refs.nn.functional.dropout",
+        "_refs.nn.functional.l1_loss",
+        "_refs.nn.functional.smooth_l1_loss",
+        "_refs.nn.functional.log_softmax",
+        "_refs.nn.functional.poisson_nll_loss",
+        "_refs.nn.functional.softmax",
+        "_refs.nn.functional.softmin",
+        "_refs.positive",
+        "_refs.ravel",
+        "_refs.reshape",
+        "_refs.softmax",
+        "_refs.special.expit",
+        "_refs.special.log_softmax",
+        "_refs.special.softmax",
+        "_refs.square",
+        "_refs.stft",
+        "_refs.T",
+        "_refs.take_along_dim",
+        "_refs.tensor_split",
+        "_refs.to",
+        "_refs.true_divide",
+        "_refs.trunc_divide",
+        "_refs.vsplit",
+        "_refs.vstack",
+        "_refs.linalg.matrix_norm",
+        "_refs.linalg.norm",
+        "_refs.linalg.svd",
+        "_refs.linalg.svdvals",
+        "_refs.unflatten",
+        "_refs.sum_to_size",
         # ref implementation missing kwargs
-        '_refs.full_like',  # missing "layout"
-        '_refs.round',  # missing "decimals"
-        '_refs.scalar_tensor',  # missing "layout"
+        "_refs.full_like",  # missing "layout"
+        "_refs.scalar_tensor",  # missing "layout"
         # other
-        '_refs.block_diag',  # only refs._block_diag_iterable is in decomposition table
-        '_refs.empty',  # intentional; direct empty is faster and has less guards
-        '_refs.empty_permuted',  # intentional; direct empty is faster and has less guards
-        '_refs.expand_as',
-        '_refs.as_strided',  # _prims._as_strided_meta: "reduce() of empty sequence with no initial value"
-        '_refs.copy_to',  # torch._C._jit_get_operation: No such operator aten::copy_to
-        '_refs.equal',  # 'bool' object has no attribute 'dtype'
-        '_refs.conj',  # Calls _prims.conj
-        '_refs.real',
-        '_refs.imag',
-        '_refs.reshape_as',
-        '_refs.view_as',
-        '_refs.view_as_complex'  # TorchInductor does not support complex at the moment.
+        "_refs.block_diag",  # only refs._block_diag_iterable is in decomposition table
+        "_refs.empty",  # intentional; direct empty is faster and has less guards
+        "_refs.empty_permuted",  # intentional; direct empty is faster and has less guards
+        "_refs.expand_as",
+        "_refs.as_strided",  # _prims._as_strided_meta: "reduce() of empty sequence with no initial value"
+        "_refs.copy_to",  # torch._C._jit_get_operation: No such operator aten::copy_to
+        "_refs.equal",  # 'bool' object has no attribute 'dtype'
+        "_refs.conj",  # Calls _prims.conj
+        "_refs.real",
+        "_refs.imag",
+        "_refs.reshape_as",
+        "_refs.view_as",
+        "_refs.view_as_complex",  # TorchInductor does not support complex at the moment.
+        # the decompositions for these ops are slightly different
+        # because of out handling
+        "_refs.var_mean",
+        "_refs.std_mean",
+        "_refs.native_layer_norm",
     }
 
     @parametrize("op", ref_ops_names)
@@ -1977,7 +2463,11 @@ class TestRefsOpsInfo(TestCase):
         if op in self.skip_ref_ops:
             raise unittest.SkipTest(f"{op} does not have an entry in python_ref_db")
         elif inplace:
-            self.assertNotIn(op, self.ref_db_names, msg=f"{op} is an in-place operation and should not have an OpInfo")
+            self.assertNotIn(
+                op,
+                self.ref_db_names,
+                msg=f"{op} is an in-place operation and should not have an OpInfo",
+            )
         else:
             # Intentionally don't use assertIn to avoid printing the
             # (very large) container
@@ -1985,17 +2475,23 @@ class TestRefsOpsInfo(TestCase):
 
     @parametrize("op", ref_ops_names)
     def test_refs_are_in_decomp_table(self, op):
-        path = op.split('.')
-        module_path = '.'.join(path[:-1])
+        path = op.split(".")
+        module_path = ".".join(path[:-1])
         op_name = path[-1]
         op_impl = getattr(import_module(f"torch.{module_path}"), op_name)
 
         if op in self.not_in_decomp_table:
-            self.assertNotIn(op_impl, torch._decomp.decomposition_table.values(),
-                             f"Unexpectedly found {op} in torch._decomp.decomposition_table.values()")
+            self.assertNotIn(
+                op_impl,
+                torch._decomp.decomposition_table.values(),
+                f"Unexpectedly found {op} in torch._decomp.decomposition_table.values()",
+            )
         else:
-            self.assertIn(op_impl, torch._decomp.decomposition_table.values(),
-                          f"Did not find {op} in torch._decomp.decomposition_table.values()")
+            self.assertIn(
+                op_impl,
+                torch._decomp.decomposition_table.values(),
+                f"Did not find {op} in torch._decomp.decomposition_table.values()",
+            )
 
 
 fake_skips = (
@@ -2035,6 +2531,7 @@ fake_autocast_device_skips = defaultdict(dict)
 
 # TODO: investigate/fix
 fake_autocast_device_skips["cpu"] = {"linalg.pinv"}
+fake_autocast_device_skips["cuda"] = {"linalg.pinv", "pinverse"}
 
 
 dynamic_output_op_tests = (
@@ -2049,11 +2546,17 @@ dynamic_output_op_tests = (
     "linalg.lstsq.grad_oriented",
 )
 
-# some inputs invoke dynamic output shape operators, some do not
-sometimes_dynamic_output_op_test = (
-    "__getitem__",
-    "index_select",
+# Ops that have dynamic output shapes that we can handle when
+# allow_dynamic_shape_ops is True in fake tensor shape environment.
+supported_dynamic_output_op_tests = (
+    "nonzero",
+    "unique",
+    "repeat_interleave",
+    "masked_select",
 )
+
+# some inputs invoke dynamic output shape operators, some do not
+sometimes_dynamic_output_op_test = ("__getitem__", "index_select")
 
 data_dependent_op_tests = (
     "equal",
@@ -2062,9 +2565,7 @@ data_dependent_op_tests = (
     "allclose",
 )
 
-aliasing_failures = (
-    "histogramdd",
-)
+aliasing_failures = ("histogramdd",)
 
 fake_backward_skips = {
     "linalg.cond",
@@ -2081,7 +2582,7 @@ fake_backward_skips = {
 fake_backward_xfails = {skip(s) for s in fake_backward_skips} | {
     xfail("fft.ihfftn"),  # Mismatch in aten._conj_physical.default
     xfail("fft.ihfft2"),  # Mismatch in aten._conj_physical.default
-    skip('nn.functional.ctc_loss'),
+    skip("nn.functional.ctc_loss"),
 }
 
 fake_autocast_backward_xfails = {
@@ -2090,8 +2591,9 @@ fake_autocast_backward_xfails = {
     skip("linalg.pinv"),
     skip("linalg.pinv", "hermitian"),
     skip("linalg.pinv", "singular"),
-    skip('pinverse'),
+    skip("pinverse"),
 }
+
 
 @unMarkDynamoStrictTest
 class TestFakeTensor(TestCase):
@@ -2118,12 +2620,28 @@ class TestFakeTensor(TestCase):
 
         samples = op.sample_inputs(device, dtype, requires_grad=False)
         for sample in samples:
-            try:
-                mode = FakeTensorMode()
+            mode = FakeTensorMode()
 
+            from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+            allow_dynamic_output_shape_shape_env = ShapeEnv(
+                allow_dynamic_output_shape_ops=True
+            )
+
+            allow_dynamic_output_shape_mode = FakeTensorMode(
+                shape_env=allow_dynamic_output_shape_shape_env
+            )
+
+            try:
+                with context():
+                    res = op(sample.input, *sample.args, **sample.kwargs)
+            except Exception:
+                continue
+
+            def run_with_fake_mode_and_verify(fake_mode, match_results=True):
                 def map_to_fake(e):
                     if isinstance(e, torch.Tensor):
-                        return mode.from_tensor(e)
+                        return fake_mode.from_tensor(e)
                     else:
                         return e
 
@@ -2133,45 +2651,71 @@ class TestFakeTensor(TestCase):
 
                 try:
                     with context():
-                        res = op(sample.input, *sample.args, **sample.kwargs)
-                except Exception as e:
-                    continue
+                        with fake_mode:
+                            res_fake = op(input, *args, **kwargs)
 
-                with context():
-                    with mode:
-                        res_fake = op(input, *args, **kwargs)
+                    if not match_results:
+                        return
 
+                    for fake_out, real_out in zip(
+                        pytree.tree_leaves(res_fake), pytree.tree_leaves(res)
+                    ):
+                        if not isinstance(fake_out, torch.Tensor):
+                            self.assertTrue(not isinstance(real_out, torch.Tensor))
+                            self.assertEqual(fake_out, real_out)
+                            continue
 
-                for fake_out, real_out in zip(
-                    pytree.tree_leaves(res_fake), pytree.tree_leaves(res)
-                ):
-                    if not isinstance(fake_out, torch.Tensor):
-                        self.assertTrue(not isinstance(real_out, torch.Tensor))
-                        continue
+                        self.assertTrue(isinstance(fake_out, FakeTensor))
+                        # if you see a shape exception here, you may need to add
+                        # a `dynamic_output_shape` tag to an operator
 
-                    self.assertTrue(isinstance(fake_out, FakeTensor))
-                    # if you see a shape exception here, you may need to add
-                    # a `dynamic_output_shape` tag to an operator
+                        if op.op not in [
+                            torch.ops.aten._efficient_attention_forward,
+                            torch.ops.aten._flash_attention_forward,
+                        ]:
+                            # prims/decomps must correctly model strides,
+                            # see https://github.com/pytorch/pytorch/issues/78050#issuecomment-1253950325
 
-                    # prims/decomps must correctly model strides,
-                    # see https://github.com/pytorch/pytorch/issues/78050#issuecomment-1253950325
-                    prims.utils.compare_tensor_meta(fake_out, real_out, True)
+                            # note: the excluded ops have intentionally incorrect device;
+                            # see "Note [Seed and Offset]" (_meta_registrations.py)
+                            prims.utils.compare_tensor_meta(fake_out, real_out, True)
 
-                    if name not in aliasing_failures:
-                        fake_aliasing = outputs_alias_inputs((input, args, kwargs), res_fake)
-                        real_aliasing = outputs_alias_inputs((sample.input, sample, args, sample.kwargs), res)
-                        self.assertEqual(fake_aliasing, real_aliasing)
+                        if name not in aliasing_failures:
+                            fake_aliasing = outputs_alias_inputs(
+                                (input, args, kwargs), res_fake
+                            )
+                            real_aliasing = outputs_alias_inputs(
+                                (sample.input, sample, args, sample.kwargs), res
+                            )
+                            self.assertEqual(fake_aliasing, real_aliasing)
 
-                self.assertTrue(name not in dynamic_output_op_tests and name not in data_dependent_op_tests)
+                    self.assertTrue(
+                        name not in dynamic_output_op_tests
+                        and name not in data_dependent_op_tests
+                    )
 
-            except torch._subclasses.fake_tensor.UnsupportedFakeTensorException:
-                pass
-            except torch._subclasses.fake_tensor.UnsupportedOperatorException:
-                pass
-            except torch._subclasses.fake_tensor.DynamicOutputShapeException:
-                self.assertTrue(name in dynamic_output_op_tests or name in sometimes_dynamic_output_op_test)
-            except torch._subclasses.fake_tensor.DataDependentOutputException:
-                self.assertTrue(name in data_dependent_op_tests)
+                except torch._subclasses.fake_tensor.UnsupportedFakeTensorException:
+                    pass
+                except torch._subclasses.fake_tensor.UnsupportedOperatorException:
+                    pass
+                except torch._subclasses.fake_tensor.DynamicOutputShapeException:
+                    self.assertTrue(
+                        name in dynamic_output_op_tests
+                        or name in sometimes_dynamic_output_op_test
+                    )
+                    self.assertTrue(
+                        fake_mode.shape_env is None
+                        or not fake_mode.shape_env.allow_dynamic_output_shape_ops
+                        or name not in supported_dynamic_output_op_tests
+                    )
+                except torch._subclasses.fake_tensor.DataDependentOutputException:
+                    self.assertTrue(name in data_dependent_op_tests)
+
+            run_with_fake_mode_and_verify(mode)
+            if name in supported_dynamic_output_op_tests:
+                run_with_fake_mode_and_verify(
+                    allow_dynamic_output_shape_mode, match_results=False
+                )
 
     @ops(op_db, dtypes=OpDTypes.any_one)
     def test_pointwise_ops(self, device, dtype, op):
@@ -2232,10 +2776,14 @@ class TestFakeTensor(TestCase):
 
     @ops(op_db, dtypes=OpDTypes.any_one)
     def test_fake_autocast(self, device, dtype, op):
-        if op.name in fake_autocast_device_skips[device]:
+        device_type = torch.device(device).type
+        if op.name in fake_autocast_device_skips[device_type]:
             self.skipTest("Skip failing test")
-        context = torch.cuda.amp.autocast if device == "cuda" else torch.cpu.amp.autocast
-        self._test_fake_helper(device, dtype, op, context)
+
+        def context_fn():
+            return torch.amp.autocast(device_type)
+
+        self._test_fake_helper(device, dtype, op, context_fn)
 
     def _test_fake_crossref_helper(self, device, dtype, op, context):
         samples = op.sample_inputs(device, dtype, requires_grad=True)
@@ -2254,24 +2802,37 @@ class TestFakeTensor(TestCase):
 
             # TODO: enable check_aliasing, batch norm fails
             try:
-                with torch._subclasses.CrossRefFakeMode(ignore_op_fn=lambda fn: fn in common_skip_ops, check_aliasing=True):
-                    with warnings.catch_warnings(), context(), torch.autograd.set_multithreading_enabled(False):
+                with torch._subclasses.CrossRefFakeMode(
+                    ignore_op_fn=lambda fn: fn in common_skip_ops, check_aliasing=True
+                ):
+                    with warnings.catch_warnings(), context(), torch.autograd.set_multithreading_enabled(
+                        False
+                    ):
                         composite_compliance.compute_expected_grads(
-                            op.get_op(), args, kwargs,
+                            op.get_op(),
+                            args,
+                            kwargs,
                             sample.output_process_fn_grad,
-                            op.gradcheck_wrapper)
+                            op.gradcheck_wrapper,
+                        )
             except torch._subclasses.fake_tensor.UnsupportedOperatorException:
                 pass
 
     @onlyCUDA
     @ops([op for op in op_db if op.supports_autograd], allowed_dtypes=(torch.float,))
-    @skipOps('TestFakeTensor', 'test_fake_crossref_backward_no_amp', fake_backward_xfails)
+    @skipOps(
+        "TestFakeTensor", "test_fake_crossref_backward_no_amp", fake_backward_xfails
+    )
     def test_fake_crossref_backward_no_amp(self, device, dtype, op):
         self._test_fake_crossref_helper(device, dtype, op, contextlib.nullcontext)
 
     @onlyCUDA
     @ops([op for op in op_db if op.supports_autograd], allowed_dtypes=(torch.float,))
-    @skipOps('TestFakeTensor', 'test_fake_crossref_backward_amp', fake_backward_xfails | fake_autocast_backward_xfails)
+    @skipOps(
+        "TestFakeTensor",
+        "test_fake_crossref_backward_amp",
+        fake_backward_xfails | fake_autocast_backward_xfails,
+    )
     def test_fake_crossref_backward_amp(self, device, dtype, op):
         self._test_fake_crossref_helper(device, dtype, op, torch.cuda.amp.autocast)
 
@@ -2280,7 +2841,7 @@ class TestFakeTensor(TestCase):
         samples = op.sample_inputs(device, dtype)
         for sample in samples:
             kwargs = sample.kwargs.copy()
-            kwargs['layout'] = torch.strided
+            kwargs["layout"] = torch.strided
             strided_result = op(sample.input, *sample.args, **kwargs)
             self.assertEqual(strided_result.layout, torch.strided)
 

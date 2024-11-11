@@ -172,7 +172,7 @@ class MmaBaseFromSharedMemory {
       Shape::kK / WarpGemm::kK>;
   using WarpCount1 = WarpCount;
 
-  /// Number of warp-level GEMM oeprations
+  /// Number of warp-level GEMM operations
   static int const kWarpGemmIterations =
       (WarpGemm::kK / Operator::Policy::MmaShape::kK);
   static int const kWarpGemmIterations1 = kWarpGemmIterations;
@@ -425,7 +425,7 @@ class MmaPipelinedFromSharedMemory : public MmaBaseFromSharedMemory<
   /// Complex transform on B operand
   static ComplexTransform const kTransformB = Operator::kTransformB;
 
-  // staticaly assert kStages for MmaPipelined is two (Double-buffered pipeline)
+  // statically assert kStages for MmaPipelined is two (Double-buffered pipeline)
   static_assert(
       (Base::kStages == 2),
       "MmaPipelined requires kStages set to value 2");
@@ -527,7 +527,7 @@ class MmaPipelinedFromSharedMemory : public MmaBaseFromSharedMemory<
 
   // For API compatibility with MmaMultistageFromSharedMemory
   // but not supported as it worsens perf: older gpus < sm80 don't
-  // support async tranfers and have to waste registers
+  // support async transfers and have to waste registers
   CUTLASS_DEVICE
   void set_prologue_done(bool value) {}
   CUTLASS_DEVICE

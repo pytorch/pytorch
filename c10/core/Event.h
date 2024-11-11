@@ -118,6 +118,18 @@ struct Event final {
     return impl_.query();
   }
 
+  double elapsedTime(const Event& event) const {
+    return impl_.elapsedTime(event.impl_);
+  }
+
+  void* eventId() const {
+    return impl_.eventId();
+  }
+
+  void synchronize() const {
+    return impl_.synchronize();
+  }
+
  private:
   impl::InlineEvent<impl::VirtualGuardImpl> impl_;
 };

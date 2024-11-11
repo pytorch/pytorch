@@ -10,11 +10,9 @@
 #include <torch/csrc/utils/object_ptr.h>
 
 #include <c10/core/DeviceGuard.h>
-#include <c10/util/Optional.h>
+#include <optional>
 
 #include <memory>
-#include <optional>
-#include <utility>
 #include <vector>
 
 namespace torch::jit {
@@ -36,7 +34,7 @@ struct PyNode : public Node {
       const std::vector<bool>& is_variable_input);
 
   variable_list apply(variable_list&& inputs) override;
-  variable_list compiled_apply(
+  variable_list defer_to_dynamo(
       variable_list&& inputs,
       std::optional<PyObject*> compiler);
 
@@ -57,6 +55,11 @@ struct PyNode : public Node {
   // The AutogradCompilerCall::hooks idx corresponding to this node's backward
   std::optional<int> _backward_idx;
 
+  // The AutogradCompilerCall::hooks idx corresponding to this node's
+  // backward_state
+  std::optional<int> _backward_state_idx;
+
+  // NOLINTNEXTLINE(bugprone-exception-escape)
   ~PyNode() override {
     // Can't use THPObjectPtr as a field in this class; destructor won't take
     // out GIL!  When I forgot to do this by hand
@@ -91,7 +94,7 @@ inline bool ensure_tuple(THPObjectPtr& obj) {
 struct THPFunction {
   PyObject_HEAD
 
-      PyObject* needs_input_grad;
+  PyObject* needs_input_grad;
 
   // Python tuple of tensors whose variables we should save.  Set
   // by Python with 'save_for_backward'.  If nullptr, no tensors were
@@ -121,6 +124,7 @@ struct THPFunction {
   // This is enabled by compiled autograd as a way to signal to AotAutograd it
   // should call the original FX graph rather than compiling.
   bool compiled_autograd_tracing;
+  PyObject* compiled_autograd_backward_state;
   std::vector<c10::SymInt> compiled_autograd_symints;
 
   std::vector<torch::autograd::VariableInfo> output_info;

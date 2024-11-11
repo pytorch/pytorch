@@ -1,4 +1,4 @@
-from pt import (  # noqa: F401  # noqa: F401
+from pt import (  # noqa: F401
     add_test,
     ao_sparsifier_test,
     as_strided_test,
@@ -30,6 +30,7 @@ from pt import (  # noqa: F401  # noqa: F401
 )
 
 import operator_benchmark as op_bench
+
 
 if __name__ == "__main__":
     op_bench.benchmark_runner.main()

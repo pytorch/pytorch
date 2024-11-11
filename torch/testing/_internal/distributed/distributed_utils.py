@@ -1,3 +1,5 @@
+# mypy: allow-untyped-defs
+
 from contextlib import contextmanager
 from datetime import timedelta
 from functools import (

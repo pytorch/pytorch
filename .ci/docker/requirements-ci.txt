@@ -5,7 +5,7 @@
 #Pinned versions: 1.6
 #test that import:
 
-boto3==1.19.12
+boto3==1.35.42
 #Description: AWS SDK for python
 #Pinned versions: 1.19.12, 1.16.34
 #test that import:
@@ -15,7 +15,7 @@ click
 #Pinned versions:
 #test that import:
 
-coremltools==5.0b5
+coremltools==5.0b5 ; python_version < "3.12"
 #Description: Apple framework for ML integration
 #Pinned versions: 5.0b5
 #test that import:
@@ -25,9 +25,19 @@ coremltools==5.0b5
 #Pinned versions:
 #test that import:
 
-expecttest==0.1.6
+dill==0.3.7
+#Description: dill extends pickle with serializing and de-serializing for most built-ins
+#Pinned versions: 0.3.7
+#test that import: dynamo/test_replay_record.py test_dataloader.py test_datapipe.py test_serialization.py
+
+expecttest==0.2.1
 #Description: method for writing tests where test framework auto populates
 # the expected output based on previous runs
+#Pinned versions: 0.2.1
+#test that import:
+
+fbscribelogger==0.1.6
+#Description: write to scribe from authenticated jobs on CI
 #Pinned versions: 0.1.6
 #test that import:
 
@@ -45,6 +55,11 @@ hypothesis==5.35.1
 junitparser==2.1.1
 #Description: unitparser handles JUnit/xUnit Result XML files
 #Pinned versions: 2.1.1
+#test that import:
+
+lark==0.12.0
+#Description: parser
+#Pinned versions: 0.12.0
 #test that import:
 
 librosa>=0.6.2 ; python_version < "3.11"
@@ -66,7 +81,7 @@ librosa>=0.6.2 ; python_version < "3.11"
 #Description: A testing library that allows you to replace parts of your
 #system under test with mock objects
 #Pinned versions:
-#test that import: test_module_init.py, test_modules.py, test_nn.py,
+#test that import: test_modules.py, test_nn.py,
 #test_testing.py
 
 #MonkeyType # breaks pytorch-xla-linux-bionic-py3.7-clang8
@@ -75,10 +90,10 @@ librosa>=0.6.2 ; python_version < "3.11"
 #Pinned versions:
 #test that import:
 
-mypy==1.7.0
+mypy==1.11.2
 # Pin MyPy version because new errors are likely to appear with each release
 #Description: linter
-#Pinned versions: 1.7.0
+#Pinned versions: 1.10.0
 #test that import: test_typing.py, test_type_hints.py
 
 networkx==2.8.8
@@ -94,7 +109,7 @@ networkx==2.8.8
 #test that import: run_test.py, test_cpp_extensions_aot.py,test_determination.py
 
 numba==0.49.0 ; python_version < "3.9"
-numba==0.54.1 ; python_version == "3.9"
+numba==0.55.2 ; python_version == "3.9"
 numba==0.55.2 ; python_version == "3.10"
 #Description: Just-In-Time Compiler for Numerical Functions
 #Pinned versions: 0.54.1, 0.49.0, <=0.49.1
@@ -103,7 +118,7 @@ numba==0.55.2 ; python_version == "3.10"
 
 #numpy
 #Description: Provides N-dimensional arrays and linear algebra
-#Pinned versions: 1.20
+#Pinned versions: 1.26.2
 #test that import: test_view_ops.py, test_unary_ufuncs.py, test_type_promotion.py,
 #test_type_info.py, test_torch.py, test_tensorexpr_pybind.py, test_tensorexpr.py,
 #test_tensorboard.py, test_tensor_creation_ops.py, test_static_runtime.py,
@@ -113,6 +128,9 @@ numba==0.55.2 ; python_version == "3.10"
 #test_nn.py, test_namedtensor.py, test_linalg.py, test_jit_cuda_fuser.py,
 #test_jit.py, test_indexing.py, test_datapipe.py, test_dataloader.py,
 #test_binary_ufuncs.py
+numpy==1.22.4; python_version == "3.9" or python_version == "3.10"
+numpy==1.26.2; python_version == "3.11" or python_version == "3.12"
+numpy==2.1.2; python_version >= "3.13"
 
 #onnxruntime
 #Description: scoring engine for Open Neural Network Exchange (ONNX) models
@@ -124,9 +142,9 @@ opt-einsum==3.3
 #Pinned versions: 3.3
 #test that import: test_linalg.py
 
-optree==0.9.1
+optree==0.13.0
 #Description: A library for tree manipulation
-#Pinned versions: 0.9.1
+#Pinned versions: 0.13.0
 #test that import: test_vmap.py, test_aotdispatch.py, test_dynamic_shapes.py,
 #test_pytree.py, test_ops.py, test_control_flow.py, test_modules.py,
 #common_utils.py, test_eager_transforms.py, test_python_dispatch.py,
@@ -137,9 +155,9 @@ optree==0.9.1
 #test_pointwise_ops.py, test_dtensor_ops.py, test_torchinductor.py, test_fx.py,
 #test_fake_tensor.py, test_mps.py
 
-pillow==10.0.1
+pillow==10.3.0
 #Description:  Python Imaging Library fork
-#Pinned versions: 10.0.1
+#Pinned versions: 10.3.0
 #test that import:
 
 protobuf==3.20.2
@@ -159,11 +177,6 @@ pytest==7.3.2
 
 pytest-xdist==3.3.1
 #Description: plugin for running pytest in parallel
-#Pinned versions:
-#test that import:
-
-pytest-shard==0.1.2
-#Description: plugin spliting up tests in pytest
 #Pinned versions:
 #test that import:
 
@@ -213,7 +226,7 @@ pygments==2.15.0
 #test that import:
 
 scikit-image==0.19.3 ; python_version < "3.10"
-scikit-image==0.20.0 ; python_version >= "3.10"
+scikit-image==0.22.0 ; python_version >= "3.10"
 #Description: image processing routines
 #Pinned versions:
 #test that import: test_nn.py
@@ -223,12 +236,11 @@ scikit-image==0.20.0 ; python_version >= "3.10"
 #Pinned versions: 0.20.3
 #test that import:
 
-scipy==1.6.3 ; python_version < "3.10"
-scipy==1.8.1 ; python_version == "3.10"
-scipy==1.10.1 ; python_version == "3.11"
+scipy==1.10.1 ; python_version <= "3.11"
+scipy==1.12.0 ; python_version == "3.12"
 # Pin SciPy because of failing distribution tests (see #60347)
 #Description: scientific python
-#Pinned versions: 1.6.3
+#Pinned versions: 1.10.1
 #test that import: test_unary_ufuncs.py, test_torch.py,test_tensor_creation_ops.py
 #test_spectral_ops.py, test_sparse_csr.py, test_reductions.py,test_nn.py
 #test_linalg.py, test_binary_ufuncs.py
@@ -243,7 +255,8 @@ tb-nightly==2.13.0a20230426
 #Pinned versions:
 #test that import:
 
-#typing-extensions
+# needed by torchgen utils
+typing-extensions>=4.10.0
 #Description: type hints for python
 #Pinned versions:
 #test that import:
@@ -258,24 +271,29 @@ unittest-xml-reporting<=3.2.0,>=2.0.0
 #Pinned versions:
 #test that import:
 
-lintrunner==0.10.7
+#lintrunner is supported on aarch64-linux only from 0.12.4 version
+lintrunner==0.12.5
 #Description: all about linters!
-#Pinned versions: 0.10.7
+#Pinned versions: 0.12.5
 #test that import:
+
+redis>=4.0.0
+#Description: redis database
+#test that import: anything that tests OSS caching/mocking (inductor/test_codecache.py, inductor/test_max_autotune.py)
 
 rockset==1.0.3
 #Description: queries Rockset
 #Pinned versions: 1.0.3
 #test that import:
 
-ghstack==0.7.1
+ghstack==0.8.0
 #Description: ghstack tool
-#Pinned versions: 0.7.1
+#Pinned versions: 0.8.0
 #test that import:
 
-jinja2==3.1.2
+jinja2==3.1.4
 #Description: jinja2 template engine
-#Pinned versions: 3.1.2
+#Pinned versions: 3.1.4
 #test that import:
 
 pytest-cpp==2.3.0
@@ -293,13 +311,59 @@ tensorboard==2.13.0
 #Pinned versions:
 #test that import: test_tensorboard
 
-pywavelets==1.4.1
+pywavelets==1.4.1 ; python_version < "3.12"
+pywavelets==1.5.0 ; python_version >= "3.12"
 #Description: This is a requirement of scikit-image, we need to pin
 # it here because 1.5.0 conflicts with numpy 1.21.2 used in CI
 #Pinned versions: 1.4.1
 #test that import:
 
-lxml==5.0.0.
+lxml==5.0.0
 #Description: This is a requirement of unittest-xml-reporting
 
 # Python-3.9 binaries
+
+PyGithub==2.3.0
+
+sympy==1.13.1 ; python_version >= "3.9"
+#Description: Required by coremltools, also pinned in .github/requirements/pip-requirements-macOS.txt
+#Pinned versions:
+#test that import:
+
+onnx==1.17.0
+#Description: Required by mypy and test_public_bindings.py when checking torch.onnx._internal
+#Pinned versions:
+#test that import:
+
+onnxscript==0.1.0.dev20240817
+#Description: Required by mypy and test_public_bindings.py when checking torch.onnx._internal
+#Pinned versions:
+#test that import:
+
+parameterized==0.8.1
+#Description: Parameterizes unittests, both the tests themselves and the entire testing class
+#Pinned versions:
+#test that import:
+
+#Description: required for testing torch/distributed/_tools/sac_estimator.py
+#Pinned versions: 1.24.0
+#test that import: test_sac_estimator.py
+
+pwlf==2.2.1 ; python_version >= "3.8"
+#Description: required for testing torch/distributed/_tools/sac_estimator.py
+#Pinned versions: 2.2.1
+#test that import: test_sac_estimator.py
+
+
+# To build PyTorch itself
+astunparse
+PyYAML
+setuptools
+
+ninja==1.11.1 ; platform_machine == "aarch64"
+scons==4.5.2 ; platform_machine == "aarch64"
+
+pulp==2.9.0 ; python_version >= "3.8"
+#Description: required for testing ilp formulaiton under torch/distributed/_tools
+#Pinned versions: 2.9.0
+#test that import: test_sac_ilp.py

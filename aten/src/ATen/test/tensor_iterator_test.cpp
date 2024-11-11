@@ -217,6 +217,32 @@ TEST(TensorIteratorTest, FailNonPromotingBinaryOp) {
   ASSERT_ANY_THROW(config.build());
 }
 
+TEST(TensorIteratorTest, ForEachConstInput) {
+  at::Tensor out = at::zeros({10});
+  at::Tensor a = at::_lazy_clone(at::arange({10}).to(at::kFloat));
+  EXPECT_TRUE(c10::impl::cow::is_cow_data_ptr(a.storage().data_ptr()));
+
+  at::TensorIteratorConfig iter_config;
+  iter_config
+    .add_output(out)
+    .add_const_input(a);
+  auto iter = iter_config.build();
+
+  auto my_loop = [](char** data, const int64_t* strides, int64_t n) {
+    auto* out_data = data[0];
+    auto* in_data = data[1];
+    for (int64_t i = 0; i < n; i++) {
+      *reinterpret_cast<float*>(out_data) += *reinterpret_cast<float*>(in_data);
+      out_data += strides[0];
+      in_data += strides[1];
+    }
+  };
+
+  iter.for_each(my_loop);
+  EXPECT_TRUE(c10::impl::cow::is_cow_data_ptr(a.storage().data_ptr()));
+  EXPECT_TRUE(out.eq(a).all().item<bool>());
+}
+
 #define MULTIPLE_OUTPUTS_TEST_ITER_FOR_TYPE(ctype,name)                                             \
 TEST(TensorIteratorTest, CpuKernelMultipleOutputs_##name) {                                         \
   auto in1 = random_tensor_for_type(k##name);                                                       \

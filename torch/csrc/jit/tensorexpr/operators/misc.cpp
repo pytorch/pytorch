@@ -3,9 +3,7 @@
 #include <torch/csrc/jit/tensorexpr/operators/misc.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 int64_t normalizeAndCheckIndex(int64_t idx, int64_t list_size) {
   if (idx < 0) {
@@ -14,7 +12,7 @@ int64_t normalizeAndCheckIndex(int64_t idx, int64_t list_size) {
   }
 
   if (idx < 0 || idx >= list_size) {
-    AT_ERROR("Invalid index ", idx, " for list_size", list_size);
+    TORCH_CHECK(false, "Invalid index ", idx, " for list_size", list_size);
   }
   return idx;
 }
@@ -30,12 +28,11 @@ ExprHandle promoteToDtype(ExprHandle e, ScalarType dt) {
   }
 
   switch (dt) {
-// NOLINTNEXTLINE
 #define TYPE_CASE(Type, Name) \
   case ScalarType::Name:      \
     e = cast<Type>(e);        \
     break;
-    AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE);
+    AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE)
 #undef TYPE_CASE
     case ScalarType::QUInt8:
       e = cast<c10::quint8>(e);
@@ -70,7 +67,7 @@ static bool checkTypes(const ScalarType highType, const int typeConstraints) {
   return false;
 }
 
-static bool isScalar(ExprHandle e) {
+static bool isScalar(const ExprHandle& e) {
   auto n = e.node();
   return n->isConstant() || to<Var>(n);
 }
@@ -136,7 +133,7 @@ ExprHandle promoteIntegerToDefaultType(const ExprHandle& e) {
 
 ExprHandle demoteOutput(
     const ExprHandle& e,
-    const c10::optional<ScalarType> type) {
+    const std::optional<ScalarType> type) {
   if (!type.has_value()) {
     return e;
   }
@@ -145,7 +142,6 @@ ExprHandle demoteOutput(
   }
 
   switch (*type) {
-// NOLINTNEXTLINE
 #define TYPE_CASE(Type, Name) \
   case ScalarType::Name:      \
     return cast<Type>(e);
@@ -160,12 +156,14 @@ ExprHandle demoteOutput(
   return e;
 }
 
-c10::optional<TensorInfo> getTensorInfo(BufHandle b) {
+std::optional<TensorInfo> getTensorInfo(const BufHandle& b) {
   std::vector<int64_t> dims;
-  for (auto dim : b.dims()) {
+  auto b_dims = b.dims();
+  dims.reserve(b_dims.size());
+  for (auto dim : b_dims) {
     auto val = intValue(dim.node());
     if (!val) {
-      return c10::nullopt;
+      return std::nullopt;
     }
     dims.push_back(*val);
   }
@@ -180,7 +178,7 @@ ExprHandle clamp(
   return CompareSelect::make(mm, cmax, cmax, mm, kGT);
 }
 
-static bool isOne(ExprHandle e) {
+static bool isOne(const ExprHandle& e) {
   auto const& n = intValue(e);
   if (!n) {
     return false;
@@ -239,7 +237,7 @@ static std::pair<std::vector<ExprHandle>, bool> broadcastShapesImpl(
 
 std::vector<ExprHandle> broadcastShapes(
     std::vector<std::vector<ExprHandle>> shapes) {
-  return broadcastShapesImpl(shapes).first;
+  return broadcastShapesImpl(std::move(shapes)).first;
 }
 
 std::vector<ExprHandle> broadcastShapes(
@@ -271,7 +269,7 @@ ExprHandle scalarOrConstant(const ArgValue& v) {
   return constant(v);
 }
 
-ExprHandle broadcast(BufHandle b, const std::vector<ExprHandle>& axes) {
+ExprHandle broadcast(const BufHandle& b, const std::vector<ExprHandle>& axes) {
   return b.load(computeIndicesToBroadcast(axes, b.dims()));
 }
 
@@ -321,7 +319,7 @@ Tensor computeChunk(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides,
-    const c10::optional<ScalarType>& outputType,
+    const std::optional<ScalarType>& outputType,
     at::Device device) {
   return Compute(
       "prim_constantchunk",
@@ -355,13 +353,13 @@ Tensor computeTranspose(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides,
-    const c10::optional<ScalarType>& outputType,
+    const std::optional<ScalarType>& outputType,
     at::Device device) {
   auto A = std::get<BufHandle>(inputs[0]);
   // Trivial case of 0-dim and 1-dim tensors: transpose is just a copy
   if (A.ndim() <= 1) {
     return Compute(
-        "aten_transpose", outputShape, [&](std::vector<VarHandle> axes) {
+        "aten_transpose", outputShape, [&](const std::vector<VarHandle>& axes) {
           TORCH_INTERNAL_ASSERT(
               axes.size() <= 1,
               buildErrorMessage("Invalid axes size in transpose"));
@@ -382,7 +380,7 @@ Tensor computeExpand(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides,
-    const c10::optional<ScalarType>& outputType,
+    const std::optional<ScalarType>& outputType,
     at::Device device) {
   auto A = std::get<BufHandle>(inputs[0]);
   return Compute(
@@ -396,7 +394,7 @@ Tensor computeReshape(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides,
-    const c10::optional<ScalarType>& outputType,
+    const std::optional<ScalarType>& outputType,
     at::Device device) {
   auto A = std::get<BufHandle>(inputs[0]);
   if (A.ndim() == 0) {
@@ -455,7 +453,6 @@ Tensor computeReshape(
           // then it's 3 for dim_idx = 1, and then it's 3*2 for dim_idx = 0.
           stride = stride * A.dim(dim_idx);
         }
-        // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
         return A.load(orig_buf_indexes);
       });
 }
@@ -464,7 +461,7 @@ Tensor computeFlatten(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides,
-    const c10::optional<ScalarType>& outputType,
+    const std::optional<ScalarType>& outputType,
     at::Device device) {
   std::vector<int64_t> outputShapeVec;
   for (const auto dim : c10::irange(outputShape.size())) {
@@ -512,8 +509,7 @@ static Tensor computeCatWoConditionals(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides) {
-  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-  auto input_list = std::get<BufList>(inputs[0]);
+  auto const& input_list = std::get<BufList>(inputs[0]);
   auto arg_dim = inputs[1];
   auto cat_info = processCatList(input_list);
   ScalarType high_type = cat_info.first;
@@ -569,14 +565,14 @@ static Tensor computeCatWoConditionals(
 
   auto gen_code_for_input = [&](const BufHandle& inp,
                                 size_t inp_pos,
-                                ExprPtr concat_dim_size,
+                                const ExprPtr& concat_dim_size,
                                 const std::vector<ExprHandle>& dims) {
     std::vector<VarPtr> for_vars(dims.size());
     std::vector<ExprPtr> load_indices(dims.size());
     std::vector<ExprPtr> store_indices(dims.size());
     for (int64_t i = 0; i < static_cast<int64_t>(dims.size()); ++i) {
       for_vars[i] = alloc<Var>(
-          "i" + c10::to_string(inp_pos) + "_" + c10::to_string(i),
+          "i" + std::to_string(inp_pos) + "_" + std::to_string(i),
           dims[i].dtype());
       load_indices[i] = for_vars[i];
       if (i == norm_concat_dim) {
@@ -622,13 +618,12 @@ Tensor computeCat(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides,
-    const c10::optional<ScalarType>& outputType,
+    const std::optional<ScalarType>& outputType,
     at::Device device) {
   if (device == at::kCPU && getCatWoConditionals()) {
     return computeCatWoConditionals(inputs, outputShape, outputStrides);
   }
-  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-  auto inputList = std::get<BufList>(inputs[0]);
+  auto const& inputList = std::get<BufList>(inputs[0]);
   auto argDim = inputs[1];
   auto catInfo = processCatList(inputList);
   ScalarType highType = catInfo.first;
@@ -685,7 +680,7 @@ Tensor computeEmbedding(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides,
-    const c10::optional<ScalarType>& outputType,
+    const std::optional<ScalarType>& outputType,
     at::Device device) {
   Dtype dtype = kFloat;
   if (outputType) {
@@ -701,6 +696,4 @@ Tensor computeEmbedding(
   return Tensor(ResultBuf.node(), s);
 }
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr

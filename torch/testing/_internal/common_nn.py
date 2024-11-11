@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 from abc import abstractmethod
 import tempfile
 import unittest
@@ -14,7 +16,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn import _reduction as _Reduction
 from torch.testing._internal.common_utils import TestCase, to_gpu, freeze_rng_state, is_iterable, \
-    gradcheck, gradgradcheck, set_default_dtype
+    gradcheck, gradgradcheck, set_default_dtype, skipIfTorchDynamo
 from torch.testing._internal.common_cuda import TEST_CUDA, SM90OrLater
 from torch.autograd.gradcheck import _get_numerical_jacobian, _iter_tensors
 from torch.autograd import Variable
@@ -70,7 +72,7 @@ def get_weight(m):
 #    functional optional arguments. For example, if the test dict's `constructor` entry is
 #    `wrap_functional(F.interpolate, size=12, scale_factor=None, mode='nearest')`,
 #    then the `cpp_options_args` entry should be
-#    "F::InterpolateFuncOptions().size(std::vector<int64_t>({12})).scale_factor(c10::nullopt).mode(torch::kNearest)".
+#    "F::InterpolateFuncOptions().size(std::vector<int64_t>({12})).scale_factor(std::nullopt).mode(torch::kNearest)".
 # 3. Otherwise, if the test dict's `constructor` entry looks like
 #    `wrap_functional(lambda i: F.some_functional_name(...))`,
 #    then you must add `cpp_function_call` entry to the test dict, with its value exactly matching the Python
@@ -1707,6 +1709,7 @@ new_module_tests = [
         input_fn=lambda: torch.empty(2, 3, dtype=torch.long).random_(4),
         check_gradgrad=False,
         default_dtype=torch.double,
+        decorator=skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/117971")
     ),
     dict(
         module_name='Embedding',
@@ -1716,6 +1719,7 @@ new_module_tests = [
         check_gradgrad=False,
         desc='discontiguous',
         default_dtype=torch.double,
+        decorator=skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/117971")
     ),
     dict(
         module_name='EmbeddingBag',
@@ -1739,7 +1743,7 @@ new_module_tests = [
         module_name='EmbeddingBag',
         constructor_args=(4, 3, None, 2., False, 'sum'),
         cpp_constructor_args='''torch::nn::EmbeddingBagOptions(4, 3)
-                                .max_norm(c10::nullopt).norm_type(2.).scale_grad_by_freq(false).mode(torch::kSum)''',
+                                .max_norm(std::nullopt).norm_type(2.).scale_grad_by_freq(false).mode(torch::kSum)''',
         input_fn=lambda: torch.empty(2, 3, dtype=torch.long).random_(4),
         check_gradgrad=False,
         desc='sum',
@@ -1749,7 +1753,7 @@ new_module_tests = [
         module_name='EmbeddingBag',
         constructor_args=(4, 3, None, 2., False, 'max'),
         cpp_constructor_args='''torch::nn::EmbeddingBagOptions(4, 3)
-                                .max_norm(c10::nullopt).norm_type(2.).scale_grad_by_freq(false).mode(torch::kMax)''',
+                                .max_norm(std::nullopt).norm_type(2.).scale_grad_by_freq(false).mode(torch::kMax)''',
         input_fn=lambda: torch.empty(2, 3, dtype=torch.long).random_(4),
         check_gradgrad=False,
         desc='max',
@@ -1767,7 +1771,7 @@ new_module_tests = [
         fullname='EmbeddingBag_sum_padding_idx',
         constructor=lambda: nn.EmbeddingBag(4, 3, None, 2., False, 'sum', padding_idx=1),
         cpp_constructor_args='''torch::nn::EmbeddingBagOptions(4, 3)
-                                .max_norm(c10::nullopt).norm_type(2.).scale_grad_by_freq(false).mode(torch::kSum).padding_idx(1)''',
+                                .max_norm(std::nullopt).norm_type(2.).scale_grad_by_freq(false).mode(torch::kSum).padding_idx(1)''',
         input_fn=lambda: torch.stack([torch.randperm(3), torch.randperm(3)]),
         check_gradgrad=False,
         default_dtype=torch.double,
@@ -1776,7 +1780,7 @@ new_module_tests = [
         fullname='EmbeddingBag_max_padding_idx',
         constructor=lambda: nn.EmbeddingBag(4, 3, None, 2., False, 'max', padding_idx=1),
         cpp_constructor_args='''torch::nn::EmbeddingBagOptions(4, 3)
-                                .max_norm(c10::nullopt).norm_type(2.).scale_grad_by_freq(false).mode(torch::kMax).padding_idx(1)''',
+                                .max_norm(std::nullopt).norm_type(2.).scale_grad_by_freq(false).mode(torch::kMax).padding_idx(1)''',
         input_fn=lambda: torch.stack([torch.randperm(3), torch.randperm(3)]),
         check_gradgrad=False,
         default_dtype=torch.double,
@@ -1814,7 +1818,7 @@ new_module_tests = [
     dict(
         constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='nearest'),
         cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(std::vector<int64_t>({12})).scale_factor(c10::nullopt).mode(torch::kNearest)''',
+                            .size(std::vector<int64_t>({12})).scale_factor(std::nullopt).mode(torch::kNearest)''',
         input_size=(1, 2, 4),
         fullname='interpolate_nearest_1d',
         pickle=False,
@@ -1823,7 +1827,7 @@ new_module_tests = [
     dict(
         constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='nearest'),
         cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(std::vector<int64_t>({12})).scale_factor(c10::nullopt).mode(torch::kNearest)''',
+                            .size(std::vector<int64_t>({12})).scale_factor(std::nullopt).mode(torch::kNearest)''',
         input_size=(0, 2, 4),
         fullname='interpolate_nearest_1d_zero_dim',
         pickle=False,
@@ -1831,7 +1835,7 @@ new_module_tests = [
     dict(
         constructor=wrap_functional(F.interpolate, size=(12, ), scale_factor=None, mode='nearest'),
         cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(std::vector<int64_t>({12})).scale_factor(c10::nullopt).mode(torch::kNearest)''',
+                            .size(std::vector<int64_t>({12})).scale_factor(std::nullopt).mode(torch::kNearest)''',
         input_size=(1, 2, 3),
         fullname='interpolate_nearest_tuple_1d',
         pickle=False,
@@ -1840,7 +1844,7 @@ new_module_tests = [
     dict(
         constructor=wrap_functional(F.interpolate, size=None, scale_factor=4., mode='nearest'),
         cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(c10::nullopt).scale_factor(std::vector<double>({4.})).mode(torch::kNearest)''',
+                            .size(std::nullopt).scale_factor(std::vector<double>({4.})).mode(torch::kNearest)''',
         input_size=(1, 2, 4),
         fullname='interpolate_nearest_scale_1d',
         pickle=False,
@@ -1850,7 +1854,7 @@ new_module_tests = [
         constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='linear', align_corners=False),
         cpp_options_args='''F::InterpolateFuncOptions()
                             .size(std::vector<int64_t>({12}))
-                            .scale_factor(c10::nullopt)
+                            .scale_factor(std::nullopt)
                             .mode(torch::kLinear)
                             .align_corners(false)''',
         input_size=(1, 2, 4),
@@ -1862,7 +1866,7 @@ new_module_tests = [
         constructor=wrap_functional(F.interpolate, size=(4, ), scale_factor=None, mode='linear', align_corners=False),
         cpp_options_args='''F::InterpolateFuncOptions()
                             .size(std::vector<int64_t>({4}))
-                            .scale_factor(c10::nullopt)
+                            .scale_factor(std::nullopt)
                             .mode(torch::kLinear)
                             .align_corners(false)''',
         input_size=(1, 2, 3),
@@ -1873,7 +1877,7 @@ new_module_tests = [
     dict(
         constructor=wrap_functional(F.interpolate, size=None, scale_factor=4., mode='linear', align_corners=False),
         cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(c10::nullopt)
+                            .size(std::nullopt)
                             .scale_factor(std::vector<double>({4.}))
                             .mode(torch::kLinear)
                             .align_corners(false)''',
@@ -1886,7 +1890,7 @@ new_module_tests = [
         constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='linear', align_corners=False),
         cpp_options_args='''F::InterpolateFuncOptions()
                             .size(std::vector<int64_t>({12}))
-                            .scale_factor(c10::nullopt)
+                            .scale_factor(std::nullopt)
                             .mode(torch::kLinear)
                             .align_corners(false)''',
         input_size=(0, 2, 4),
@@ -1897,7 +1901,7 @@ new_module_tests = [
         constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='linear', align_corners=True),
         cpp_options_args='''F::InterpolateFuncOptions()
                             .size(std::vector<int64_t>({12}))
-                            .scale_factor(c10::nullopt)
+                            .scale_factor(std::nullopt)
                             .mode(torch::kLinear)
                             .align_corners(true)''',
         input_size=(1, 2, 4),
@@ -1908,7 +1912,7 @@ new_module_tests = [
     dict(
         constructor=wrap_functional(F.interpolate, size=None, scale_factor=4., mode='linear', align_corners=True),
         cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(c10::nullopt)
+                            .size(std::nullopt)
                             .scale_factor(std::vector<double>({4.}))
                             .mode(torch::kLinear)
                             .align_corners(true)''',
@@ -1921,7 +1925,7 @@ new_module_tests = [
         constructor=wrap_functional(F.interpolate, size=2, scale_factor=None, mode='nearest'),
         cpp_options_args='''F::InterpolateFuncOptions()
                             .size(std::vector<int64_t>({2, 2}))
-                            .scale_factor(c10::nullopt)
+                            .scale_factor(std::nullopt)
                             .mode(torch::kNearest)''',
         input_size=(1, 128, 1, 1),
         fullname='interpolate_nearest_2d_launch_configs',
@@ -1932,7 +1936,7 @@ new_module_tests = [
         constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='nearest'),
         cpp_options_args='''F::InterpolateFuncOptions()
                             .size(std::vector<int64_t>({12, 12}))
-                            .scale_factor(c10::nullopt)
+                            .scale_factor(std::nullopt)
                             .mode(torch::kNearest)''',
         input_size=(1, 2, 4, 4),
         fullname='interpolate_nearest_2d',
@@ -1943,7 +1947,7 @@ new_module_tests = [
         constructor=wrap_functional(F.interpolate, size=(12, 16), scale_factor=None, mode='nearest'),
         cpp_options_args='''F::InterpolateFuncOptions()
                             .size(std::vector<int64_t>({12, 16}))
-                            .scale_factor(c10::nullopt)
+                            .scale_factor(std::nullopt)
                             .mode(torch::kNearest)''',
         input_size=(1, 2, 3, 4),
         fullname='interpolate_nearest_tuple_2d',
@@ -1953,7 +1957,7 @@ new_module_tests = [
     dict(
         constructor=wrap_functional(F.interpolate, size=None, scale_factor=4., mode='nearest'),
         cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(c10::nullopt)
+                            .size(std::nullopt)
                             .scale_factor(std::vector<double>({4., 4.}))
                             .mode(torch::kNearest)''',
         input_size=(1, 2, 4, 4),
@@ -1965,7 +1969,7 @@ new_module_tests = [
         constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='nearest'),
         cpp_options_args='''F::InterpolateFuncOptions()
                             .size(std::vector<int64_t>({12, 12}))
-                            .scale_factor(c10::nullopt)
+                            .scale_factor(std::nullopt)
                             .mode(torch::kNearest)''',
         input_size=(0, 2, 4, 4),
         fullname='interpolate_nearest_2d_zero_dim',
@@ -1975,7 +1979,7 @@ new_module_tests = [
         constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='bilinear', align_corners=False),
         cpp_options_args='''F::InterpolateFuncOptions()
                             .size(std::vector<int64_t>({12, 12}))
-                            .scale_factor(c10::nullopt)
+                            .scale_factor(std::nullopt)
                             .mode(torch::kBilinear)
                             .align_corners(false)''',
         input_size=(1, 2, 4, 4),
@@ -1987,7 +1991,7 @@ new_module_tests = [
         constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='bilinear', align_corners=False),
         cpp_options_args='''F::InterpolateFuncOptions()
                             .size(std::vector<int64_t>({12, 12}))
-                            .scale_factor(c10::nullopt)
+                            .scale_factor(std::nullopt)
                             .mode(torch::kBilinear)
                             .align_corners(false)''',
         input_size=(0, 2, 4, 4),
@@ -1999,7 +2003,7 @@ new_module_tests = [
                                     mode='bilinear', align_corners=False),
         cpp_options_args='''F::InterpolateFuncOptions()
                             .size(std::vector<int64_t>({4, 6}))
-                            .scale_factor(c10::nullopt)
+                            .scale_factor(std::nullopt)
                             .mode(torch::kBilinear)
                             .align_corners(false)''',
         input_size=(1, 2, 2, 3),
@@ -2011,7 +2015,7 @@ new_module_tests = [
         constructor=wrap_functional(F.interpolate, size=None, scale_factor=4.,
                                     mode='bilinear', align_corners=False),
         cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(c10::nullopt)
+                            .size(std::nullopt)
                             .scale_factor(std::vector<double>({4., 4.}))
                             .mode(torch::kBilinear)
                             .align_corners(false)''',
@@ -2024,7 +2028,7 @@ new_module_tests = [
         constructor=wrap_functional(F.interpolate, size=None, scale_factor=(2., 2.),
                                     mode='bilinear', align_corners=False),
         cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(c10::nullopt)
+                            .size(std::nullopt)
                             .scale_factor(std::vector<double>({2., 2.}))
                             .mode(torch::kBilinear)
                             .align_corners(false)''',
@@ -2037,7 +2041,7 @@ new_module_tests = [
         constructor=wrap_functional(F.interpolate, size=None, scale_factor=(2., 1.),
                                     mode='bilinear', align_corners=False),
         cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(c10::nullopt)
+                            .size(std::nullopt)
                             .scale_factor(std::vector<double>({2., 1.}))
                             .mode(torch::kBilinear)
                             .align_corners(false)''',
@@ -2050,7 +2054,7 @@ new_module_tests = [
         constructor=wrap_functional(F.interpolate, size=(4, 6), scale_factor=None, mode='bilinear', align_corners=True),
         cpp_options_args='''F::InterpolateFuncOptions()
                             .size(std::vector<int64_t>({4, 6}))
-                            .scale_factor(c10::nullopt)
+                            .scale_factor(std::nullopt)
                             .mode(torch::kBilinear)
                             .align_corners(true)''',
         input_size=(1, 2, 4, 4),
@@ -2062,7 +2066,7 @@ new_module_tests = [
         constructor=wrap_functional(F.interpolate, size=None, scale_factor=(2., 1.),
                                     mode='bilinear', align_corners=True),
         cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(c10::nullopt)
+                            .size(std::nullopt)
                             .scale_factor(std::vector<double>({2., 1.}))
                             .mode(torch::kBilinear)
                             .align_corners(true)''',
@@ -2075,7 +2079,7 @@ new_module_tests = [
         constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='bicubic', align_corners=False),
         cpp_options_args='''F::InterpolateFuncOptions()
                             .size(std::vector<int64_t>({12, 12}))
-                            .scale_factor(c10::nullopt)
+                            .scale_factor(std::nullopt)
                             .mode(torch::kBicubic)
                             .align_corners(false)''',
         input_size=(1, 2, 4, 4),
@@ -2087,7 +2091,7 @@ new_module_tests = [
         constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='bicubic', align_corners=False),
         cpp_options_args='''F::InterpolateFuncOptions()
                             .size(std::vector<int64_t>({12, 12}))
-                            .scale_factor(c10::nullopt)
+                            .scale_factor(std::nullopt)
                             .mode(torch::kBicubic)
                             .align_corners(false)''',
         input_size=(0, 2, 4, 4),
@@ -2099,7 +2103,7 @@ new_module_tests = [
                                     mode='bicubic', align_corners=False),
         cpp_options_args='''F::InterpolateFuncOptions()
                             .size(std::vector<int64_t>({4, 6}))
-                            .scale_factor(c10::nullopt)
+                            .scale_factor(std::nullopt)
                             .mode(torch::kBicubic)
                             .align_corners(false)''',
         input_size=(1, 2, 2, 3),
@@ -2110,7 +2114,7 @@ new_module_tests = [
     dict(
         constructor=wrap_functional(F.interpolate, size=None, scale_factor=4., mode='bicubic', align_corners=False),
         cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(c10::nullopt)
+                            .size(std::nullopt)
                             .scale_factor(std::vector<double>({4., 4.}))
                             .mode(torch::kBicubic)
                             .align_corners(false)''',
@@ -2123,7 +2127,7 @@ new_module_tests = [
         constructor=wrap_functional(F.interpolate, size=None, scale_factor=(2., 2.),
                                     mode='bicubic', align_corners=False),
         cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(c10::nullopt)
+                            .size(std::nullopt)
                             .scale_factor(std::vector<double>({2., 2.}))
                             .mode(torch::kBicubic)
                             .align_corners(false)''',
@@ -2136,7 +2140,7 @@ new_module_tests = [
         constructor=wrap_functional(F.interpolate, size=None, scale_factor=(2., 1.),
                                     mode='bicubic', align_corners=False),
         cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(c10::nullopt)
+                            .size(std::nullopt)
                             .scale_factor(std::vector<double>({2., 1.}))
                             .mode(torch::kBicubic)
                             .align_corners(false)''',
@@ -2149,7 +2153,7 @@ new_module_tests = [
         constructor=wrap_functional(F.interpolate, size=(4, 6), scale_factor=None, mode='bicubic', align_corners=True),
         cpp_options_args='''F::InterpolateFuncOptions()
                             .size(std::vector<int64_t>({4, 6}))
-                            .scale_factor(c10::nullopt)
+                            .scale_factor(std::nullopt)
                             .mode(torch::kBicubic)
                             .align_corners(true)''',
         input_size=(1, 2, 4, 4),
@@ -2161,7 +2165,7 @@ new_module_tests = [
         constructor=wrap_functional(F.interpolate, size=None, scale_factor=(2., 1.),
                                     mode='bicubic', align_corners=True),
         cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(c10::nullopt)
+                            .size(std::nullopt)
                             .scale_factor(std::vector<double>({2., 1.}))
                             .mode(torch::kBicubic)
                             .align_corners(true)''',
@@ -2174,7 +2178,7 @@ new_module_tests = [
         constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='nearest'),
         cpp_options_args='''F::InterpolateFuncOptions()
                             .size(std::vector<int64_t>({12, 12, 12}))
-                            .scale_factor(c10::nullopt)
+                            .scale_factor(std::nullopt)
                             .mode(torch::kNearest)''',
         input_size=(1, 2, 4, 4, 4),
         fullname='interpolate_nearest_3d',
@@ -2185,7 +2189,7 @@ new_module_tests = [
         constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='nearest'),
         cpp_options_args='''F::InterpolateFuncOptions()
                             .size(std::vector<int64_t>({12, 12, 12}))
-                            .scale_factor(c10::nullopt)
+                            .scale_factor(std::nullopt)
                             .mode(torch::kNearest)''',
         input_size=(0, 2, 4, 4, 4),
         fullname='interpolate_nearest_3d_zero_dim',
@@ -2195,7 +2199,7 @@ new_module_tests = [
         constructor=wrap_functional(F.interpolate, size=(12, 16, 16), scale_factor=None, mode='nearest'),
         cpp_options_args='''F::InterpolateFuncOptions()
                             .size(std::vector<int64_t>({12, 16, 16}))
-                            .scale_factor(c10::nullopt)
+                            .scale_factor(std::nullopt)
                             .mode(torch::kNearest)''',
         input_size=(1, 2, 3, 4, 4),
         fullname='interpolate_nearest_tuple_3d',
@@ -2205,7 +2209,7 @@ new_module_tests = [
     dict(
         constructor=wrap_functional(F.interpolate, size=None, scale_factor=4., mode='nearest'),
         cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(c10::nullopt)
+                            .size(std::nullopt)
                             .scale_factor(std::vector<double>({4., 4., 4.}))
                             .mode(torch::kNearest)''',
         input_size=(1, 2, 4, 4, 4),
@@ -2217,7 +2221,7 @@ new_module_tests = [
         constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='trilinear', align_corners=False),
         cpp_options_args='''F::InterpolateFuncOptions()
                             .size(std::vector<int64_t>({12, 12, 12}))
-                            .scale_factor(c10::nullopt)
+                            .scale_factor(std::nullopt)
                             .mode(torch::kTrilinear)
                             .align_corners(false)''',
         input_size=(1, 2, 4, 4, 4),
@@ -2229,7 +2233,7 @@ new_module_tests = [
         constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='trilinear', align_corners=False),
         cpp_options_args='''F::InterpolateFuncOptions()
                             .size(std::vector<int64_t>({12, 12, 12}))
-                            .scale_factor(c10::nullopt)
+                            .scale_factor(std::nullopt)
                             .mode(torch::kTrilinear)
                             .align_corners(false)''',
         input_size=(0, 2, 4, 4, 4),
@@ -2241,7 +2245,7 @@ new_module_tests = [
                                     scale_factor=None, mode='trilinear', align_corners=False),
         cpp_options_args='''F::InterpolateFuncOptions()
                             .size(std::vector<int64_t>({4, 6, 6}))
-                            .scale_factor(c10::nullopt)
+                            .scale_factor(std::nullopt)
                             .mode(torch::kTrilinear)
                             .align_corners(false)''',
         input_size=(1, 2, 2, 3, 3),
@@ -2252,7 +2256,7 @@ new_module_tests = [
     dict(
         constructor=wrap_functional(F.interpolate, size=None, scale_factor=3., mode='trilinear', align_corners=False),
         cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(c10::nullopt)
+                            .size(std::nullopt)
                             .scale_factor(std::vector<double>({3., 3., 3.}))
                             .mode(torch::kTrilinear)
                             .align_corners(false)''',
@@ -2268,7 +2272,7 @@ new_module_tests = [
                                     mode='trilinear', align_corners=True),
         cpp_options_args='''F::InterpolateFuncOptions()
                             .size(std::vector<int64_t>({4, 6, 6}))
-                            .scale_factor(c10::nullopt)
+                            .scale_factor(std::nullopt)
                             .mode(torch::kTrilinear)
                             .align_corners(true)''',
         input_size=(1, 2, 2, 3, 3),
@@ -2279,7 +2283,7 @@ new_module_tests = [
     dict(
         constructor=wrap_functional(F.interpolate, size=None, scale_factor=3., mode='trilinear', align_corners=True),
         cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(c10::nullopt)
+                            .size(std::nullopt)
                             .scale_factor(std::vector<double>({3., 3., 3.}))
                             .mode(torch::kTrilinear)
                             .align_corners(true)''',
@@ -3012,7 +3016,7 @@ def marginrankingloss_reference(input1, input2, target, margin=0, reduction='mea
     return output
 
 
-# this directly follows Graves et al's paper, in contrast to the production implementation, it does not use log-space
+# this directly follows Graves et al.'s paper, in contrast to the production implementation, it does not use log-space
 def ctcloss_reference(log_probs, targets, input_lengths, target_lengths, blank=0, reduction='mean'):
     input_lengths = torch.as_tensor(input_lengths, dtype=torch.long)
     target_lengths = torch.as_tensor(target_lengths, dtype=torch.long)
@@ -3274,7 +3278,7 @@ class NNTestCase(TestCase):
             if jacobian_parameters:
                 jacobian_param[:, i] = torch.cat(self._flatten_tensors(d_param), 0)
 
-        res: Tuple[torch.Tensor, ...] = tuple()
+        res: Tuple[torch.Tensor, ...] = ()
         if jacobian_input:
             res += jacobian_inp,
         if jacobian_parameters:
@@ -3286,7 +3290,7 @@ class NNTestCase(TestCase):
         def fw(*input):
             return self._forward(module, input).detach()
 
-        res: Tuple[torch.Tensor, ...] = tuple()
+        res: Tuple[torch.Tensor, ...] = ()
         if jacobian_input:
             res += _get_numerical_jacobian(fw, input, eps=1e-6),
         if jacobian_parameters:
@@ -3327,10 +3331,9 @@ class TestBase:
         for name in self._required_arg_names:
             if name not in kwargs and name + '_fn' not in kwargs and name + '_size' not in kwargs:
                 if name in {'constructor_args', 'extra_args'}:
-                    kwargs[name] = tuple()
+                    kwargs[name] = ()
                 else:
-                    raise ValueError("{}: Specify {} by a value, a function to generate it, or it's size!"
-                                     .format(self.get_name(), name))
+                    raise ValueError(f"{self.get_name()}: Specify {name} by a value, a function to generate it, or it's size!")
         self._extra_kwargs = kwargs
         self._arg_cache = {}
 
@@ -3434,7 +3437,8 @@ class ModuleTest(TestBase):
                     test_case._forward(module, input)
                     torch.save(module, f)
                     f.seek(0)
-                    module_copy = torch.load(f)
+                    # weights_only=False as this is legacy code that saves the model
+                    module_copy = torch.load(f, weights_only=False)
                     test_case.assertEqual(test_case._forward(module, input), test_case._forward(module_copy, input))
 
             self._do_test(test_case, module, input)
@@ -3964,17 +3968,17 @@ def _test_module_empty_input(test_case, module, inp, check_size=True, inference=
 
 def _create_basic_net():
     class Layer(nn.Module):
-        def __init__(self):
+        def __init__(self) -> None:
             super().__init__()
             self.layer_dummy_param = nn.Parameter(torch.empty(3, 5))
-            self.register_buffer('layer_dummy_buf', torch.zeros(1, 3, 3, 7))
+            self.layer_dummy_buf = nn.Buffer(torch.zeros(1, 3, 3, 7))
 
     class Net(nn.Module):
-        def __init__(self):
+        def __init__(self) -> None:
             super().__init__()
             self.l1 = Layer()
             self.dummy_param = nn.Parameter(torch.empty(3, 5))
-            self.register_buffer('dummy_buf', torch.zeros(7, 3, 3, 1))
+            self.dummy_buf = nn.Buffer(torch.zeros(7, 3, 3, 1))
 
     l = Layer()
     n = Net()

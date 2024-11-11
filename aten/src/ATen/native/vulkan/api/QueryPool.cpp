@@ -170,13 +170,7 @@ void QueryPool::extract_results() {
   results_pending_ = false;
 }
 
-std::ostream& operator<<(std::ostream& os, const VkExtent3D& extents) {
-  os << "{" << extents.width << ", " << extents.height << ", " << extents.depth
-     << "}";
-  return os;
-}
-
-std::string stringize(const VkExtent3D& extents) {
+static std::string stringize(const VkExtent3D& extents) {
   std::stringstream ss;
   ss << "{" << extents.width << ", " << extents.height << ", " << extents.depth
      << "}";
@@ -188,7 +182,7 @@ std::string QueryPool::generate_string_report() {
 
   std::stringstream ss;
 
-  int kernel_name_w = 25;
+  int kernel_name_w = 40;
   int global_size_w = 15;
   int duration_w = 25;
 

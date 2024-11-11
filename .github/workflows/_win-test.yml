@@ -25,7 +25,7 @@ on:
       timeout-minutes:
         required: false
         type: number
-        default: 300
+        default: 240
         description: |
           Set the maximum (in minutes) how long the workflow should take to finish
 
@@ -41,11 +41,15 @@ jobs:
       fail-fast: false
     runs-on: ${{ matrix.runner }}
     timeout-minutes: ${{ matrix.mem_leak_check == 'mem_leak_check' && 600 || inputs.timeout-minutes }}
+    defaults:
+      run:
+        shell: bash
     steps:
       # Duplicated in win-build because this MUST go before a checkout
-      - name: Enable git symlinks on Windows and disable fsmonitor daemon
+      - name: Enable git long paths and symlinks on Windows and disable fsmonitor daemon
         shell: bash
         run: |
+          git config --global core.longpaths true
           git config --global core.symlinks true
 
           # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
@@ -84,7 +88,7 @@ jobs:
 
       # TODO: Move to a requirements.txt file for windows
       - name: Install pip dependencies
-        uses: nick-fields/retry@3e91a01664abd3c5cd539100d10d33b9c5b68482
+        uses: nick-fields/retry@v3.0.0
         with:
           shell: bash
           timeout_minutes: 5
@@ -92,7 +96,7 @@ jobs:
           retry_wait_seconds: 30
           command: |
             set -eu
-            python3 -m pip install rockset==1.0.3
+            python3 -m pip install rockset==1.0.3 'xdoctest>=1.1.0'
 
       - name: Start monitoring script
         id: monitor-script
@@ -114,6 +118,10 @@ jobs:
         run: |
           tree /F C:\$Env:GITHUB_RUN_ID\build-results
 
+      - name: Download TD artifacts
+        continue-on-error: true
+        uses: ./.github/actions/download-td-artifacts
+
       - name: Get workflow job id
         id: get-job-id
         uses: ./.github/actions/get-workflow-job-id
@@ -132,14 +140,27 @@ jobs:
           test-matrix: ${{ inputs.test-matrix }}
           job-name: ${{ steps.get-job-id.outputs.job-name }}
 
+      - name: Set Test step time
+        id: test-timeout
+        shell: bash
+        env:
+          JOB_TIMEOUT: ${{ matrix.mem_leak_check == 'mem_leak_check' && 600 || inputs.timeout-minutes }}
+        run: |
+          echo "timeout=$((JOB_TIMEOUT-30))" >> "${GITHUB_OUTPUT}"
+
       - name: Test
         id: test
         shell: bash
+        timeout-minutes: ${{ fromJson(steps.test-timeout.outputs.timeout) }}
         env:
           USE_CUDA: ${{ inputs.cuda-version != 'cpu' && '1' || '0' }}
           INSTALL_WINDOWS_SDK: 1
-          PYTHON_VERSION: 3.8
+          PYTHON_VERSION: 3.9
           CONTINUE_THROUGH_ERROR: ${{ steps.keep-going.outputs.keep-going }}
+          VERBOSE_TEST_LOGS: ${{ steps.keep-going.outputs.ci-verbose-test-logs }}
+          TEST_SHOWLOCALS: ${{ steps.keep-going.outputs.ci-test-showlocals }}
+          NO_TEST_TIMEOUT: ${{ steps.keep-going.outputs.ci-no-test-timeout }}
+          NO_TD: ${{ steps.keep-going.outputs.ci-no-td }}
           VC_PRODUCT: "BuildTools"
           VC_VERSION: ""
           VS_VERSION: "16.8.6"
@@ -169,7 +190,7 @@ jobs:
         run: |
           pushd "${PYTORCH_FINAL_PACKAGE_DIR}"
           # shellcheck disable=SC2046,SC2102
-          python3 -mpip install $(echo *.whl)[opt-einsum,optree]
+          python3 -mpip install $(echo *.whl)[opt-einsum,optree] optree==0.13.0
           popd
 
           .ci/pytorch/win-test.sh
@@ -208,6 +229,7 @@ jobs:
 
       - name: Parse ref
         id: parse-ref
+        shell: bash
         run: python3 .github/scripts/parse_ref.py
 
       - name: Uninstall PyTorch

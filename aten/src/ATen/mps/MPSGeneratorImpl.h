@@ -5,12 +5,12 @@
 #include <ATen/core/Generator.h>
 #include <ATen/core/PhiloxRNGEngine.h>
 #include <c10/core/GeneratorImpl.h>
-#include <c10/util/Optional.h>
+#include <optional>
 
 namespace at {
 namespace mps::detail {
 
-static const uint32_t PHILOX_STATE_N = 7;
+constexpr uint32_t PHILOX_STATE_N = 7;
 struct rng_data_pod {
   std::array<uint32_t, PHILOX_STATE_N> state{1};
   uint64_t seed = default_rng_seed_val;
