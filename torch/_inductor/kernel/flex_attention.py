@@ -622,7 +622,13 @@ def _get_default_config_fwd(query) -> Tuple[int, int, int, int]:
     head_dim = query.get_size()[-1]
     default_config = None
 
-    if head_dim <= 256 and torch.cuda.get_device_capability() >= (9, 0):  # H100
+    if head_dim <= 256 and torch.version.hip:
+        if dtype == torch.float32:
+            default_config = (64, 64, 4, 1)
+        else:
+            default_config = (128, 64, 8, 1)
+        default_config = _rocm_default_config.get((dtype, head_dim), default_config)
+    elif head_dim <= 256 and torch.cuda.get_device_capability() >= (9, 0):  # H100
         if dtype == torch.float32:
             default_config = (64, 64, 4, 3)
         else:
@@ -634,12 +640,6 @@ def _get_default_config_fwd(query) -> Tuple[int, int, int, int]:
         else:
             default_config = (128, 64, 4, 3)
         default_config = _a100_default_config.get((dtype, head_dim), default_config)
-    elif head_dim <= 256 and torch.version.hip:
-        if dtype == torch.float32:
-            default_config = (64, 64, 4, 1)
-        else:
-            default_config = (128, 64, 8, 1)
-        default_config = _rocm_default_config.get((dtype, head_dim), default_config)
     else:  # modest hardware or extremely large head_dim
         if dtype == torch.float32:
             default_config = (32, 16, 4, 3)
