@@ -141,7 +141,7 @@ jobs:
     needs: linux-jammy-cpu-py3_9-gcc11-periodic-dynamo-benchmarks-build
     with:
       build-environment: linux-jammy-py3.9-gcc11-build
-      docker-image-name: ${{ needs.linux-jammy-cpu-py3_9-gcc11-periodic-dynamo-benchmarks-build.outputs.docker-image }}
+      docker-image: ${{ needs.linux-jammy-cpu-py3_9-gcc11-periodic-dynamo-benchmarks-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-cpu-py3_9-gcc11-periodic-dynamo-benchmarks-build.outputs.test-matrix }}
     secrets:
       HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
