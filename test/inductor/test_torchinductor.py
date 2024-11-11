@@ -427,7 +427,10 @@ def check_model(
             else:
                 return x
 
-        ref_inputs = list(map(upcast_fn, example_inputs))
+        # We previously call upcast_fn on example_inputs. It's incorrect
+        # if example_inputs is already fp32 and get inplace updated in the model.
+        # Call on the cloned tensors instead
+        ref_inputs = list(map(upcast_fn, ref_inputs))
         ref_kwargs = {k: upcast_fn(v) for k, v in kwargs.items()}
         if has_lowp_args and hasattr(model, "to"):
             ref_model = copy.deepcopy(model).to(torch.float)

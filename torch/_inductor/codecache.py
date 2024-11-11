@@ -3076,7 +3076,7 @@ class PyCodeCache:
         for mod in cls.modules:
             try:
                 assert mod.__file__
-                os.remove(mod.__file__)
+                # os.remove(mod.__file__)
             except FileNotFoundError:
                 pass
         cls.modules.clear()

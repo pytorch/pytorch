@@ -2193,3 +2193,12 @@ def ir_dataclass(cls=None, /, *, frozen: bool = True):
     if cls is None:
         return wrap
     return wrap(cls)
+
+def empty_strided_cuda(sizes, strides, dtype):
+    last_idx = 0
+    for size, stride in zip(sizes, strides):
+        last_idx += (size - 1) * stride
+    numel = last_idx + 1
+    storage = torch.empty(numel, dtype=dtype, device="cuda")
+    return torch.as_strided(storage, sizes, strides)
+        
