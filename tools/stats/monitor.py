@@ -7,7 +7,7 @@ import json
 import signal
 import time
 from datetime import timezone
-from typing import Any
+from typing import Any, Optional
 
 import psutil  # type: ignore[import]
 
@@ -83,13 +83,13 @@ def rocm_get_per_process_gpu_info(handle: Any) -> list[dict[str, Any]]:
 if __name__ == "__main__":
     nvml_handle = None
     amdsmi_handle = None
-    
+
     try:
         import pynvml  # type: ignore[import]
 
         try:
             pynvml.nvmlInit()
-            handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+            nvml_handle = pynvml.nvmlDeviceGetHandleByIndex(0)
         except pynvml.NVMLError:
             pass
     except ModuleNotFoundError:
