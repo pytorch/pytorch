@@ -83,7 +83,7 @@ def rocm_get_per_process_gpu_info(handle: Any) -> list[dict[str, Any]]:
 if __name__ == "__main__":
     nvml_handle = None
     amdsmi_handle = None
-    
+
     try:
         import pynvml  # type: ignore[import]
 
