@@ -4403,6 +4403,7 @@ PyObject* torch_c_dynamo_guards_init() {
   py::class_<GuardManager, std::unique_ptr<GuardManager>>(py_m, "GuardManager")
       // return by reference because GuardManager has the ownership of accessors
       .def("get_source", &GuardManager::get_source)
+      .def("fail_count", &GuardManager::fail_count)
       .def(
           "get_accessors",
           &GuardManager::get_accessors,
