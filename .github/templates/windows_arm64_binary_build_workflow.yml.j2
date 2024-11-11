@@ -39,9 +39,6 @@ name: !{{ build_environment }}
           path: !{{ directory }}
       {%- endif %}
           quiet-checkout: true
-      {%- if directory%}
-        working-directory: !{{ directory }}
-      {%- endif %}
 {%- endmacro -%}
 
 on:

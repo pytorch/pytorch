@@ -64,7 +64,6 @@ jobs:
           repository: iremyux/pytorch-builder
           path: builder
           quiet-checkout: true
-        working-directory: builder
       - name: Checkout PyTorch
         uses: malfet/checkout@silent-checkout
         with:
