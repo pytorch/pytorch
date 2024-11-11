@@ -9581,9 +9581,9 @@ class foreach_norm_sample_func(foreach_inputs_sample_func):
             (None,) + (torch.complex128,) if dtype in complex_types() else (torch.float64,),
             (True, False),
         ):
-            # inf norm on empty tensors is not supported by our reference func vector norm:
+            # inf norm and negative norms on empty tensors is not supported by our reference func vector norm:
             # linalg.vector_norm cannot compute the inf norm on an empty tensor because the operation does not have an identity
-            if ord in [float('inf'), float('-inf')] and intersperse_empty_tensors:
+            if (ord in [float('inf'), float('-inf')] or ord < 0) and intersperse_empty_tensors:
                 continue
 
             _foreach_inputs_kwargs["intersperse_empty_tensors"] = intersperse_empty_tensors
@@ -9647,9 +9647,7 @@ class foreach_pointwise_sample_func(foreach_inputs_sample_func):
         _foreach_inputs_kwargs["requires_grad"] = requires_grad
         allow_higher_dtype_scalars = kwargs.pop("allow_higher_dtype_scalars", False)
 
-        for num_tensors, rightmost_arg_type, intersperse_empty_tensors in itertools.product(
-                num_input_tensors, self._rightmost_arg_types, (True, False)):
-            _foreach_inputs_kwargs["intersperse_empty_tensors"] = intersperse_empty_tensors
+        for num_tensors, rightmost_arg_type in itertools.product(num_input_tensors, self._rightmost_arg_types):
             input = sample_inputs_foreach(None, device, dtype, num_tensors, zero_size=False, **_foreach_inputs_kwargs)
             args = [
                 sample_inputs_foreach(None, device, dtype, num_tensors, zero_size=False, **_foreach_inputs_kwargs)
