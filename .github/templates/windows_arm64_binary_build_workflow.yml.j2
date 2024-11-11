@@ -74,6 +74,8 @@ env:
   SKIP_ALL_TESTS: 1
   BUILDER_ROOT: /builder
   PYTORCH_ROOT: /pytorch
+  DOWNLOADS_DIR: /downloads
+  DEPENDENCIES_DIR: /dependencies
 !{{ common.concurrency(build_environment) }}
 
 jobs:
@@ -82,6 +84,10 @@ jobs:
     name: get-label-type
     uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
     with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      DOWNLOADS_DIR: /downloads
+      DEPENDENCIES_DIR: /dependencies
       triggering_actor: ${{ github.triggering_actor }}
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}

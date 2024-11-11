@@ -28,6 +28,8 @@ env:
   SKIP_ALL_TESTS: 1
   BUILDER_ROOT: /builder
   PYTORCH_ROOT: /pytorch
+  DOWNLOADS_DIR: /downloads
+  DEPENDENCIES_DIR: /dependencies
 concurrency:
   group: windows-arm64-binary-libtorch-release-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
@@ -38,6 +40,10 @@ jobs:
     name: get-label-type
     uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
     with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      DOWNLOADS_DIR: /downloads
+      DEPENDENCIES_DIR: /dependencies
       triggering_actor: ${{ github.triggering_actor }}
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
