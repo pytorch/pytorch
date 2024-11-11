@@ -30,6 +30,9 @@ env:
   PYTORCH_ROOT: /pytorch
   DOWNLOADS_DIR: c:\temp\downloads
   DEPENDENCIES_DIR: c:\temp\dependencies
+  MSVC_VERSION : '14.36'
+  PYTORCH_SOURCES_DIR: src
+  ENABLE_BUILD_WHEEL: 1
 concurrency:
   group: windows-arm64-binary-libtorch-debug-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
@@ -90,6 +93,13 @@ jobs:
         shell: cmd
         run: |
           "builder/windows/arm64/bootstrap_rust.bat"
+      - name: Checkout iremyux/pytorch
+        uses: malfet/checkout@silent-checkout
+        with:
+          ref: nightly-for-win-arm64
+          repository: iremyux/pytorch
+          path: builder
+          quiet-checkout: true
       - name: Build PyTorch binary
         shell: cmd
         run: |
