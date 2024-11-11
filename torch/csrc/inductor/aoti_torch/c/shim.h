@@ -639,8 +639,28 @@ aoti_torch_xpu_guard_set_index(XPUGuardHandle guard, int32_t device_index);
 struct XPUStreamGuardOpaque;
 using XPUStreamGuardHandle = XPUStreamGuardOpaque*;
 
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_create_xpu_stream_guard(
+    void* stream,
+    int32_t device_index,
+    XPUStreamGuardHandle* ret_guard // returns new reference
+);
+
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_delete_xpu_stream_guard(XPUStreamGuardHandle guard);
+
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_get_current_xpu_stream(int32_t device_index, void** ret_stream);
+
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_get_current_xpu_stream(int32_t device_index, void** ret_stream);
+
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_get_current_xpu_device(int32_t* device_index);
+
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_set_current_xpu_device(const int32_t& device_index);
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_current_sycl_queue(void** ret);
 
 #endif
 

@@ -14,6 +14,11 @@ inline void delete_xpu_guard(void* ptr) {
       aoti_torch_delete_xpu_guard(reinterpret_cast<XPUGuardHandle>(ptr)));
 }
 
+inline void delete_xpu_stream_guard(void* ptr) {
+  AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_delete_xpu_stream_guard(
+      reinterpret_cast<XPUStreamGuardHandle>(ptr)));
+}
+
 class AOTIXpuGuard {
  public:
   AOTIXpuGuard(int32_t device_index) : guard_(nullptr, delete_xpu_guard) {
@@ -31,5 +36,20 @@ class AOTIXpuGuard {
  private:
   std::unique_ptr<XPUGuardOpaque, DeleterFnPtr> guard_;
 };
+
+class AOTIXpuStreamGuard {
+ public:
+  AOTIXpuStreamGuard(void* stream, int32_t device_index)
+      : guard_(nullptr, delete_xpu_stream_guard) {
+    XPUStreamGuardHandle ptr = nullptr;
+    AOTI_TORCH_ERROR_CODE_CHECK(
+        aoti_torch_create_xpu_stream_guard(stream, device_index, &ptr));
+    guard_.reset(ptr);
+  }
+
+ private:
+  std::unique_ptr<XPUStreamGuardOpaque, DeleterFnPtr> guard_;
+};
+
 } // namespace torch::aot_inductor
 #endif // USE_XPU
