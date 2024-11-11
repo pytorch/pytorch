@@ -19,7 +19,7 @@ from torch.distributed._symmetric_memory import (
     restride_A_for_fused_matmul_reduce_scatter,
     restride_A_shard_for_fused_all_gather_matmul,
 )
-from torch.testing._internal.common_cuda import _get_torch_cuda_version, SM90OrLater
+from torch.testing._internal.common_cuda import SM90OrLater
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     skip_if_lt_x_gpu,
@@ -624,6 +624,30 @@ class SymmetricMemoryTest(MultiProcessTestCase):
 
         dist.destroy_process_group()
 
+    @skipIfRocm
+    @skip_if_lt_x_gpu(2)
+    def test_stream_write_value(self):
+        self._init_process()
+        group_name = dist.group.WORLD.group_name
+
+        t = _SymmetricMemory.empty_strided_p2p(
+            size=(64,),
+            stride=(1,),
+            dtype=torch.float32,
+            device=self.device,
+            group_name=group_name,
+        ).fill_(self.rank + 42)
+        symm_mem = _SymmetricMemory.rendezvous(t)
+
+        tensor = torch.zeros(4, dtype=torch.uint32, device=self.device)
+        expect = torch.tril(torch.ones(4, 4, device=self.device)).to(torch.uint32)
+
+        for i in range(4):
+            symm_mem.stream_write_value32(
+                int(tensor.data_ptr()) + i * tensor.element_size(), 1
+            )
+            torch.testing.assert_close(tensor, expect[i])
+
 
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
@@ -880,26 +904,6 @@ class LoweringTest(MultiProcessTestCase):
 
 
 class SymmMemSingleProcTest(TestCase):
-    @skipIfRocm
-    @requires_cuda
-    @skipIf(
-        _get_torch_cuda_version() < (12, 0),
-        "stream_write_value32 currently only supports cuda version>=12.0",
-    )
-    def test_stream_write_value32(self):
-        tensor = torch.zeros(4, dtype=torch.uint32, device="cuda")
-        expect = torch.tril(torch.ones(4, 4, device="cuda")).to(torch.uint32)
-
-        for i in range(4):
-            _SymmetricMemory.stream_write_value32(tensor, i, 1)
-            torch.testing.assert_close(tensor, expect[i])
-
-        with self.assertRaises(RuntimeError):
-            _SymmetricMemory.stream_write_value32(tensor, offset=-1, val=1)
-
-        with self.assertRaises(RuntimeError):
-            _SymmetricMemory.stream_write_value32(tensor, offset=0, val=4294967296)
-
     @skipIfRocm
     @requires_cuda
     def test_memset32(self):
