@@ -81,7 +81,9 @@ def rocm_get_per_process_gpu_info(handle: Any) -> list[dict[str, Any]]:
 
 
 if __name__ == "__main__":
-    handle = None
+    nvml_handle = None
+    amdsmi_handle = None
+    
     try:
         import pynvml  # type: ignore[import]
 
@@ -120,10 +122,10 @@ if __name__ == "__main__":
                 "total_cpu_percent": psutil.cpu_percent(),
                 "per_process_cpu_info": get_per_process_cpu_info(),
             }
-            if handle is not None:
-                stats["per_process_gpu_info"] = get_per_process_gpu_info(handle)
+            if nvml_handle is not None:
+                stats["per_process_gpu_info"] = get_per_process_gpu_info(nvml_handle)
                 # https://docs.nvidia.com/deploy/nvml-api/structnvmlUtilization__t.html
-                gpu_utilization = pynvml.nvmlDeviceGetUtilizationRates(handle)
+                gpu_utilization = pynvml.nvmlDeviceGetUtilizationRates(nvml_handle)
                 stats["total_gpu_utilization"] = gpu_utilization.gpu
                 stats["total_gpu_mem_utilization"] = gpu_utilization.memory
             if amdsmi_handle is not None:
