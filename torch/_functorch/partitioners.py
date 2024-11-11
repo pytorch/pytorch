@@ -608,7 +608,7 @@ def reordering_to_mimic_autograd_engine(gm: fx.GraphModule) -> fx.GraphModule:
         insert_node_in_graph(node)
 
     # The output node is already built by the traversal.
-    new_gm = torch.fx.GraphModule(gm, new_graph)
+    new_gm = fx._lazy_graph_module._make_graph_module(gm, new_graph)
     return new_gm
 
 

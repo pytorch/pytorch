@@ -8,6 +8,7 @@ from unittest.mock import patch
 import torch
 import torch._export
 from torch import fx
+from torch._inductor.graph import GraphLowering
 from torch.fx._lazy_graph_module import (
     _LazyGraphModule,
     _make_graph_module,
@@ -273,6 +274,26 @@ class TestLazyGraphModule(TestCase):
             wrapped_lazy_forward
         )
         assert hasattr(got_lazy_inner_forward, "__self__")
+
+    def test_gm_type_in_graph_lowering_init(self):
+        @torch.compile
+        def f(x):
+            x.sum().backward()
+
+        x = torch.randn(1024, device="cuda", requires_grad=True)
+        old_init = GraphLowering.__init__
+        cnt = 0
+
+        def mock_init(graph_lowering, gm, *args, **kwargs):
+            nonlocal cnt
+            cnt += 1
+            self.assertTrue(isinstance(gm, _LazyGraphModule))
+            return old_init(graph_lowering, gm, *args, **kwargs)
+
+        with patch.object(GraphLowering, "__init__", mock_init):
+            f(x)
+        # Once for fwd and once for bwd
+        self.assertEqual(cnt, 2)
 
 
 if __name__ == "__main__":
