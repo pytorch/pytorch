@@ -50,6 +50,11 @@ Tensor& addmm_out(
       mat1.dtype(),
       " != ",
       mat2.dtype())
+  // complex/double case
+  if (mat1.is_complex() || mat1.scalar_type() == ScalarType::Double) {
+    TORCH_CHECK(
+        false, "Double and complex datatype matmul is not supported in oneDNN");
+  }
 
   std::vector<int64_t> result_shape = {mat1.size(0), mat2.size(1)};
   result.resize_(result_shape);
@@ -76,12 +81,6 @@ Tensor& addmm_out(
       result_shape,
       " but got:",
       self.sizes());
-
-  // complex/double case
-  if (mat1.is_complex() || mat1.scalar_type() == ScalarType::Double) {
-    TORCH_CHECK(
-        false, "Double and complex datatype matmul is not supported in oneDNN");
-  }
 
   // general case
   Tensor bias = Tensor();
@@ -292,6 +291,10 @@ Tensor& addbmm_out(
       batch1.dim(),
       " and ",
       batch2.dim());
+  if (self.is_complex() || self.scalar_type() == ScalarType::Double) {
+    TORCH_CHECK(
+        false, "Double and complex datatype matmul is not supported in oneDNN");
+  }
 
   out.resize_({batch1.size(1), batch2.size(2)});
   if (alpha.to<float>() == 0.f || batch1.numel() == 0 || batch2.numel() == 0) {
