@@ -84,10 +84,6 @@ jobs:
     name: get-label-type
     uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
     with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      DOWNLOADS_DIR: /downloads
-      DEPENDENCIES_DIR: /dependencies
       triggering_actor: ${{ github.triggering_actor }}
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
@@ -99,7 +95,7 @@ jobs:
     needs: get-label-type
     runs-on: "windows-11-arm64"
     timeout-minutes: !{{ common.timeout_minutes }}
-    !{{ upload.binary_env(config, True) }}
+    !{{ upload.binary_env(config) }}
     {%- if config.pytorch_extra_install_requirements is defined and config.pytorch_extra_install_requirements|d('')|length > 0  %}
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: !{{ config.pytorch_extra_install_requirements }}
     {%- endif %}

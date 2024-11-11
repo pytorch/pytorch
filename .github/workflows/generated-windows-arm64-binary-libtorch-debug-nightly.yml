@@ -3,7 +3,6 @@
 # Template is at:    .github/templates/windows_arm64_binary_build_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
 name: windows-arm64-binary-libtorch-debug
-
 on:
   push:
     # NOTE: Meta Employees can trigger new nightlies using: https://fburl.com/trigger_pytorch_nightly_build
@@ -41,10 +40,6 @@ jobs:
     name: get-label-type
     uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
     with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      DOWNLOADS_DIR: /downloads
-      DEPENDENCIES_DIR: /dependencies
       triggering_actor: ${{ github.triggering_actor }}
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
@@ -55,18 +50,16 @@ jobs:
     runs-on: "windows-11-arm64"
     timeout-minutes: 240
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
-      BUILDER_ROOT: ${{ github.workspace }}/builder
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       SKIP_ALL_TESTS: 1
+      DOCKER_IMAGE: 
       LIBTORCH_VARIANT: shared-with-deps
-      # This is a dummy value for libtorch to work correctly with our batch scripts
-      # without this value pip does not get installed for some reason
-      DESIRED_PYTHON: "3.9"
     steps:
       - name: Checkout iremyux/pytorch-builder
         uses: malfet/checkout@silent-checkout
