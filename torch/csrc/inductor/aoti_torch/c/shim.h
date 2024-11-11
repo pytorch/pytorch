@@ -97,6 +97,7 @@ using AOTITorchError = int32_t;
 AOTI_TORCH_EXPORT int32_t aoti_torch_device_type_cpu();
 AOTI_TORCH_EXPORT int32_t aoti_torch_device_type_cuda();
 AOTI_TORCH_EXPORT int32_t aoti_torch_device_type_privateuse1();
+AOTI_TORCH_EXPORT int32_t aoti_torch_device_type_xpu();
 
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_float8_e5m2();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_float8_e4m3fn();
@@ -618,6 +619,30 @@ AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_get_current_cuda_stream(int32_t device_index, void** ret_stream);
 
 #endif // USE_CUDA
+
+#ifdef USE_XPU
+
+struct XPUGuardOpaque;
+using XPUGuardHandle = XPUGuardOpaque*;
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_create_xpu_guard(
+    int32_t device_index,
+    XPUGuardHandle* ret_guard // returns new reference
+);
+
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_delete_xpu_guard(XPUGuardHandle guard);
+
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_xpu_guard_set_index(XPUGuardHandle guard, int32_t device_index);
+
+struct XPUStreamGuardOpaque;
+using XPUStreamGuardHandle = XPUStreamGuardOpaque*;
+
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_get_current_xpu_stream(int32_t device_index, void** ret_stream);
+
+#endif
 
 // See `ProxyExecutor Design Note` in ir.py for more details
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_proxy_executor_call_function(
