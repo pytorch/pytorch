@@ -531,7 +531,7 @@ class CppMicroGemmAMX(CppMicroGemm):
     auto load_dequantized_B = [&](int n) {
         // Load a tile of B & cache it in L1D.
         // The assumption here is that if N would be a multiple of block_n,
-        // then B would be some consecutive tiles sized [k, block_n], so the
+        // then B would be some consecutive tiles sized [k, block_n] each, so the
         // first element of a subsequent [K, block_n] tile would be right after the last
         // element of the previous tile sized [K x block_n]
         auto base_idx = n * K * {{block_n}};
