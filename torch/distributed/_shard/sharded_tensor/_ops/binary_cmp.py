@@ -25,7 +25,6 @@ def binary_cmp(cmp_fun, types, args, kwargs=None, process_group=None):
     if len(args) != 2:
         raise ValueError(f"Expected two arguments for torch.{cmp_fun.__name__}")
 
-    result = True
     st1 = args[0]
     st2 = args[1]
     if not (isinstance(st1, ShardedTensor) and isinstance(st2, ShardedTensor)):

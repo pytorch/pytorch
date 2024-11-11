@@ -1,13 +1,13 @@
 # mypy: ignore-errors
 
-import torch
 from copy import deepcopy
-from torch.utils._pytree import tree_map
-import torch.utils._pytree as pytree
 
+import torch
+import torch.utils._pytree as pytree
 
 # TODO: Move LoggingTensor here.
 from torch.testing._internal.logging_tensor import LoggingTensor
+from torch.utils._pytree import tree_map
 
 
 # Base class for wrapper-style tensors.
@@ -47,12 +47,91 @@ class WrapperTensor(torch.Tensor):
         # Changing these on the python side is wrong as it would not be properly reflected
         # on the c++ side
         # This doesn't catch attributes set in the __init__
-        forbidden_overrides = ["size", "stride", "dtype", "layout", "device", "requires_grad"]
+        forbidden_overrides = [
+            "size",
+            "stride",
+            "dtype",
+            "layout",
+            "device",
+            "requires_grad",
+        ]
         for el in forbidden_overrides:
             if getattr(self.__class__, el) is not getattr(torch.Tensor, el):
-                raise RuntimeError(f"Subclass {self.__class__.__name__} is overwriting the "
-                                   f"property {el} but this is not allowed as such change would "
-                                   "not be reflected to c++ callers.")
+                raise RuntimeError(
+                    f"Subclass {self.__class__.__name__} is overwriting the "
+                    f"property {el} but this is not allowed as such change would "
+                    "not be reflected to c++ callers."
+                )
+
+
+class WrapperTensorWithCustomSizes(WrapperTensor):
+    @classmethod
+    def get_wrapper_properties(cls, t, requires_grad=False):
+        return t, {
+            "requires_grad": requires_grad,
+            "dispatch_sizes_strides_policy": "sizes",
+        }
+
+    def __init__(self, t, requires_grad=False):
+        self.t = t
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+        if not all(issubclass(cls, t) for t in types):
+            return NotImplemented
+
+        if kwargs is None:
+            kwargs = {}
+
+        def unwrap(e):
+            return e.t if isinstance(e, WrapperTensorWithCustomSizes) else e
+
+        def wrap(e):
+            return WrapperTensorWithCustomSizes(e) if isinstance(e, torch.Tensor) else e
+
+        rs = tree_map(
+            wrap, func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs or {}))
+        )
+        return rs
+
+    def __repr__(self):
+        return super().__repr__(tensor_contents=f"t={self.t}")
+
+
+class WrapperTensorWithCustomStrides(WrapperTensor):
+    @classmethod
+    def get_wrapper_properties(cls, t, requires_grad=False):
+        return t, {
+            "requires_grad": requires_grad,
+            "dispatch_sizes_strides_policy": "strides",
+        }
+
+    def __init__(self, t, requires_grad=False):
+        self.t = t
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+        if not all(issubclass(cls, t) for t in types):
+            return NotImplemented
+
+        if kwargs is None:
+            kwargs = {}
+
+        def unwrap(e):
+            return e.t if isinstance(e, WrapperTensorWithCustomStrides) else e
+
+        def wrap(e):
+            return (
+                WrapperTensorWithCustomStrides(e) if isinstance(e, torch.Tensor) else e
+            )
+
+        rs = tree_map(
+            wrap, func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs or {}))
+        )
+        return rs
+
+    def __repr__(self):
+        return super().__repr__(tensor_contents=f"t={self.t}")
 
 
 class DiagTensorBelow(WrapperTensor):
@@ -86,11 +165,17 @@ class DiagTensorBelow(WrapperTensor):
             def wrap(e):
                 if isinstance(e, torch.Tensor) and e.ndim == 1:
                     return DiagTensorBelow(e)
-                if isinstance(e, torch.Tensor) and e.ndim == 2 and e.count_nonzero() == e.diag().count_nonzero():
+                if (
+                    isinstance(e, torch.Tensor)
+                    and e.ndim == 2
+                    and e.count_nonzero() == e.diag().count_nonzero()
+                ):
                     return DiagTensorBelow(e.diag())
                 return e
 
-            rs = tree_map(wrap, func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs or {})))
+            rs = tree_map(
+                wrap, func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs or {}))
+            )
             return rs
 
     def __repr__(self):
@@ -108,7 +193,9 @@ class SparseTensor(WrapperTensor):
         self.indices = indices
 
     def __repr__(self):
-        return super().__repr__(tensor_contents=f"values={self.values}, indices={self.indices}")
+        return super().__repr__(
+            tensor_contents=f"values={self.values}, indices={self.indices}"
+        )
 
     def sparse_to_dense(self):
         res = torch.zeros(self.size(), dtype=self.values.dtype)
@@ -139,7 +226,9 @@ class SparseTensor(WrapperTensor):
             # Check for zeros and use that to get indices
             return SparseTensor.from_dense(e) if isinstance(e, torch.Tensor) else e
 
-        rs = tree_map(wrap, func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs or {})))
+        rs = tree_map(
+            wrap, func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs or {}))
+        )
         return rs
 
     # To show how things happen later
@@ -159,9 +248,7 @@ class SparseTensor(WrapperTensor):
 class NonWrapperTensor(torch.Tensor):
     def __new__(cls, data):
         t = torch.Tensor._make_subclass(cls, data)
-        t.extra_state = {
-            'last_func_called': None
-        }
+        t.extra_state = {"last_func_called": None}
         return t
 
     @classmethod
@@ -175,7 +262,7 @@ class NonWrapperTensor(torch.Tensor):
                 result.extra_state = deepcopy(args[0].extra_state)
             else:
                 result.extra_state = {
-                    'last_func_called': func.__name__,
+                    "last_func_called": func.__name__,
                 }
 
         return result
@@ -188,7 +275,7 @@ class NonWrapperTensor(torch.Tensor):
 # Class used to store info about subclass tensors used in testing.
 class SubclassInfo:
 
-    __slots__ = ['name', 'create_fn', 'closed_under_ops']
+    __slots__ = ["name", "create_fn", "closed_under_ops"]
 
     def __init__(self, name, create_fn, closed_under_ops=True):
         self.name = name
@@ -196,28 +283,52 @@ class SubclassInfo:
         self.closed_under_ops = closed_under_ops
 
 
+# Helper function to create a subclass of the given class and possibly cache sizes / strides.
+def _create_and_access_shape(cls, shape):
+    sub = cls(torch.randn(shape))
+    # NB: Wrapper subclasses with custom dispatched sizes / strides cache this info
+    # on the first call via non-serializable PyCapsules. We purposefully trigger cache
+    # population here for serialization / deepcopy tests to verify that the presence of this
+    # cache info doesn't cause problems.
+    sub.size()
+    sub.stride()
+    return sub
+
+
 subclass_db = {
-    torch.Tensor: SubclassInfo(
-        'base_tensor', create_fn=torch.randn
-    ),
+    torch.Tensor: SubclassInfo("base_tensor", create_fn=torch.randn),
     NonWrapperTensor: SubclassInfo(
-        'non_wrapper_tensor',
-        create_fn=lambda shape: NonWrapperTensor(torch.randn(shape))
+        "non_wrapper_tensor",
+        create_fn=lambda shape: NonWrapperTensor(torch.randn(shape)),
     ),
     LoggingTensor: SubclassInfo(
-        'logging_tensor',
-        create_fn=lambda shape: LoggingTensor(torch.randn(shape))
+        "logging_tensor", create_fn=lambda shape: LoggingTensor(torch.randn(shape))
     ),
     SparseTensor: SubclassInfo(
-        'sparse_tensor',
-        create_fn=lambda shape: SparseTensor.from_dense(torch.randn(shape).relu())
+        "sparse_tensor",
+        create_fn=lambda shape: SparseTensor.from_dense(torch.randn(shape).relu()),
     ),
     DiagTensorBelow: SubclassInfo(
-        'diag_tensor_below',
+        "diag_tensor_below",
         create_fn=lambda shape: DiagTensorBelow(torch.randn(shape)),
-        closed_under_ops=False  # sparse semantics
+        closed_under_ops=False,  # sparse semantics
+    ),
+    WrapperTensorWithCustomSizes: SubclassInfo(
+        "wrapper_with_custom_sizes",
+        create_fn=lambda shape: _create_and_access_shape(
+            WrapperTensorWithCustomSizes, shape
+        ),
+        closed_under_ops=False,
+    ),
+    WrapperTensorWithCustomStrides: SubclassInfo(
+        "wrapper_with_custom_strides",
+        create_fn=lambda shape: _create_and_access_shape(
+            WrapperTensorWithCustomStrides, shape
+        ),
+        closed_under_ops=False,
     ),
 }
+
 
 class SubclassWithTensorFactory(torch.Tensor):
     @staticmethod
@@ -253,7 +364,11 @@ class SubclassWithTensorFactory(torch.Tensor):
             kwargs = {}
 
         def _fn(x):
-            return x.src * torch.ones(x.src.shape) if x.src.dtype == torch.float32 else x.src
+            return (
+                x.src * torch.ones(x.src.shape)
+                if x.src.dtype == torch.float32
+                else x.src
+            )
 
         _args = pytree.tree_map_only(cls, _fn, args)
         _kwargs = pytree.tree_map_only(cls, _fn, kwargs)
@@ -264,108 +379,3 @@ class SubclassWithTensorFactory(torch.Tensor):
 
         out_flat = [cls(o) if isinstance(o, torch.Tensor) else o for o in _out_flat]
         return pytree.tree_unflatten(out_flat, _out_spec)
-
-
-def quant_rw(src, scale, bias, dtype): # scale, bias are tensors
-    assert src.ndim == 2
-    assert scale.ndim == 1
-    assert bias.ndim == 1
-    assert src.size(0) == scale.size(0)
-    assert src.size(0) == bias.size(0)
-    b = bias.expand(src.size(1), src.size(0)).t()
-    s = scale.expand(src.size(1), src.size(0)).t()
-    sub = src - b
-    return (sub / s).to(dtype)
-
-
-class QuantRWTensorBase(torch.Tensor):
-    DTYPE = torch.int32
-    QDTYPE = torch.int8
-    @staticmethod
-    def __new__(cls, qdata, scale, bias):
-        assert (
-            qdata.dtype == cls.QDTYPE
-        )
-        src = qdata
-        shape = src.shape
-        kwargs = {}
-        kwargs["strides"] = src.stride()
-        kwargs["storage_offset"] = src.storage_offset()
-        kwargs["device"] = src.device
-        kwargs["layout"] = src.layout
-        kwargs["requires_grad"] = src.requires_grad
-        kwargs["dtype"] = cls.DTYPE
-        out = torch.Tensor._make_wrapper_subclass(cls, shape, **kwargs)
-        return out
-
-    def __init__(self, qdata, scale, bias):
-        assert qdata.dtype == self.QDTYPE
-        assert qdata.size(0) == scale.size(0)
-        assert qdata.size(0) == bias.size(0)
-        assert scale.dtype == self.DTYPE
-        assert bias.dtype == self.DTYPE
-        assert scale.ndim == 1
-        assert bias.ndim == 1
-        self.qdata = qdata
-        self.scale = scale
-        self.bias = bias
-
-    @classmethod
-    def from_src(cls, src):
-        if isinstance(src, cls):
-            return src
-
-        if src.ndim == 0:
-            breakpoint()
-        scale = torch.ones((src.size(0), ), dtype=cls.DTYPE)
-        bias = torch.zeros((src.size(0), ), dtype=cls.DTYPE)
-        qdata = quant_rw(src, scale, bias, cls.QDTYPE)
-        return cls(qdata, scale, bias)
-
-    def dequant(self):
-        b = self.bias.expand(self.qdata.size(1), self.qdata.size(0)).t()
-        s = self.scale.expand(self.qdata.size(1), self.qdata.size(0)).t()
-        return (self.qdata * s + b).to(self.DTYPE)
-
-    def __repr__(self):
-        return f"{self.__class__.__name__}"
-
-    def __tensor_flatten__(self):
-        return ["qdata", "scale", "bias"], None
-
-    @classmethod
-    def __tensor_unflatten__(cls, inner_tensors, meta, outer_size, outer_stride):
-        assert meta is None
-        qdata, scale, bias = inner_tensors["qdata"], inner_tensors["scale"], inner_tensors["bias"]
-        return cls(qdata, scale, bias)
-
-    @classmethod
-    def __torch_dispatch__(cls, func, types, args, kwargs):
-        if kwargs is None:
-            kwargs = {}
-        args_dequant = pytree.tree_map_only(cls, lambda x: x.dequant(), args)
-        kwargs_dequant = pytree.tree_map_only(cls, lambda x: x.dequant(), kwargs)
-
-        raw_out = func(*args_dequant, **kwargs_dequant)
-        out_flat, spec = pytree.tree_flatten(raw_out)
-        res_out_flat = [
-            cls.from_src(o) if isinstance(o, torch.Tensor) and o.dtype == cls.DTYPE else o
-            for o in out_flat
-        ]
-        return pytree.tree_unflatten(res_out_flat, spec)
-
-
-class I32QuantRWTensor(QuantRWTensorBase):
-    DTYPE = torch.int16
-    QDTYPE = torch.int8
-
-class F32_QI32QuantRWTensor(QuantRWTensorBase):
-    DTYPE = torch.float32
-    QDTYPE = torch.int16
-    @classmethod
-    def from_src(cls, src):
-        scale = torch.full((src.size(0),), 1, dtype=cls.DTYPE)
-        bias = torch.full((src.size(0),), 1, dtype=cls.DTYPE)
-        qdata = quant_rw(src, scale, bias, dtype=cls.QDTYPE)
-        qqdata = I32QuantRWTensor.from_src(qdata)
-        return cls(qqdata, scale, bias)

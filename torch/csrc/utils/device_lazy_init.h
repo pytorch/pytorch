@@ -28,7 +28,8 @@ void set_requires_device_init(at::DeviceType device_type, bool value);
 
 inline void maybe_initialize_device(at::Device& device) {
   // Add more devices here to enable lazy initialization.
-  if (device.is_cuda() || device.is_xpu() || device.is_privateuseone()) {
+  if (device.is_cuda() || device.is_xpu() || device.is_privateuseone() ||
+      device.is_hpu() || device.is_mtia()) {
     device_lazy_init(device.type());
   }
 }

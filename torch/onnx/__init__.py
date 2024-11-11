@@ -24,30 +24,23 @@ __all__ = [
     "symbolic_opset19",
     "symbolic_opset20",
     # Enums
-    "ExportTypes",
     "OperatorExportTypes",
     "TrainingMode",
     "TensorProtoDataType",
     "JitScalarType",
     # Public functions
     "export",
-    "export_to_pretty_string",
     "is_in_onnx_export",
     "select_model_mode_for_export",
     "register_custom_op_symbolic",
     "unregister_custom_op_symbolic",
-    "disable_log",
-    "enable_log",
-    # Errors
-    "CheckerError",  # Backwards compatibility
+    # Base error
+    "OnnxExporterError",
     # Dynamo Exporter
     "DiagnosticOptions",
     "ExportOptions",
     "ONNXProgram",
-    "ONNXProgramSerializer",
     "ONNXRuntimeOptions",
-    "InvalidExportOptionsError",
-    "OnnxExporterError",
     "OnnxRegistry",
     "dynamo_export",
     "enable_fake_mode",
@@ -55,14 +48,14 @@ __all__ = [
     "is_onnxrt_backend_supported",
 ]
 
-from typing import Any, Collection, Mapping, Sequence, TYPE_CHECKING
+from typing import Any, Callable, Collection, Mapping, Sequence, TYPE_CHECKING
 
 import torch
 from torch import _C
 from torch._C import _onnx as _C_onnx
 from torch._C._onnx import OperatorExportTypes, TensorProtoDataType, TrainingMode
 
-from ._exporter_states import ExportTypes
+from ._internal.exporter._onnx_program import ONNXProgram
 from ._internal.onnxruntime import (
     is_onnxrt_backend_supported,
     OrtBackend as _OrtBackend,
@@ -70,12 +63,10 @@ from ._internal.onnxruntime import (
     OrtExecutionProvider as _OrtExecutionProvider,
 )
 from ._type_utils import JitScalarType
-from .errors import CheckerError  # Backwards compatibility
+from .errors import OnnxExporterError
 from .utils import (
-    _optimize_graph,
     _run_symbolic_function,
     _run_symbolic_method,
-    export_to_pretty_string,
     is_in_onnx_export,
     register_custom_op_symbolic,
     select_model_mode_for_export,
@@ -108,13 +99,8 @@ from . import (  # usort: skip. Keep the order instead of sorting lexicographica
 from ._internal._exporter_legacy import (  # usort: skip. needs to be last to avoid circular import
     DiagnosticOptions,
     ExportOptions,
-    ONNXProgram,
-    ONNXProgramSerializer,
     ONNXRuntimeOptions,
-    InvalidExportOptionsError,
-    OnnxExporterError,
     OnnxRegistry,
-    dynamo_export,
     enable_fake_mode,
 )
 
@@ -123,22 +109,18 @@ if TYPE_CHECKING:
     import os
 
 # Set namespace for exposed private names
-ExportTypes.__module__ = "torch.onnx"
-JitScalarType.__module__ = "torch.onnx"
-ExportOptions.__module__ = "torch.onnx"
-ONNXProgram.__module__ = "torch.onnx"
-ONNXProgramSerializer.__module__ = "torch.onnx"
-ONNXRuntimeOptions.__module__ = "torch.onnx"
-dynamo_export.__module__ = "torch.onnx"
-InvalidExportOptionsError.__module__ = "torch.onnx"
-OnnxExporterError.__module__ = "torch.onnx"
-enable_fake_mode.__module__ = "torch.onnx"
-OnnxRegistry.__module__ = "torch.onnx"
 DiagnosticOptions.__module__ = "torch.onnx"
-is_onnxrt_backend_supported.__module__ = "torch.onnx"
-_OrtExecutionProvider.__module__ = "torch.onnx"
-_OrtBackendOptions.__module__ = "torch.onnx"
+ExportOptions.__module__ = "torch.onnx"
+JitScalarType.__module__ = "torch.onnx"
+ONNXProgram.__module__ = "torch.onnx"
+ONNXRuntimeOptions.__module__ = "torch.onnx"
+OnnxExporterError.__module__ = "torch.onnx"
+OnnxRegistry.__module__ = "torch.onnx"
 _OrtBackend.__module__ = "torch.onnx"
+_OrtBackendOptions.__module__ = "torch.onnx"
+_OrtExecutionProvider.__module__ = "torch.onnx"
+enable_fake_mode.__module__ = "torch.onnx"
+is_onnxrt_backend_supported.__module__ = "torch.onnx"
 
 producer_name = "pytorch"
 producer_version = _C_onnx.PRODUCER_VERSION
@@ -166,7 +148,10 @@ def export(
     # Dynamo only options
     external_data: bool = True,
     dynamic_shapes: dict[str, Any] | tuple[Any, ...] | list[Any] | None = None,
+    custom_translation_table: dict[Callable, Callable | Sequence[Callable]]
+    | None = None,
     report: bool = False,
+    optimize: bool = False,
     verify: bool = False,
     profile: bool = False,
     dump_exported_program: bool = False,
@@ -180,7 +165,7 @@ def export(
     export_modules_as_functions: bool | Collection[type[torch.nn.Module]] = False,
     autograd_inlining: bool = True,
     **_: Any,  # ignored options
-) -> Any | None:
+) -> ONNXProgram | None:
     r"""Exports a model into ONNX format.
 
     Args:
@@ -294,19 +279,31 @@ def export(
             This is required for models with large weights that exceed the ONNX file size limit (2GB).
             When False, the weights are saved in the ONNX file with the model architecture.
         dynamic_shapes: A dictionary of dynamic shapes for the model inputs. Refer to
-            :func:`torch.export.export` for more details.
-        report: Whether to generate a markdown report for the export process.
-        verify: Whether to verify the exported model using ONNX Runtime.
-        profile: Whether to profile the export process.
+            :func:`torch.export.export` for more details. This is only used (and preferred) when dynamo is True.
+            Only one parameter `dynamic_axes` or `dynamic_shapes` should be set
+            at the same time.
+        custom_translation_table: A dictionary of custom decompositions for operators in the model.
+            The dictionary should have the callable target in the fx Node as the key (e.g. ``torch.ops.aten.stft.default``),
+            and the value should be a function that builds that graph using ONNX Script. This option
+            is only valid when dynamo is True.
+        report: Whether to generate a markdown report for the export process. This option
+            is only valid when dynamo is True.
+        optimize: Whether to optimize the exported model. This option
+            is only valid when dynamo is True.
+        verify: Whether to verify the exported model using ONNX Runtime. This option
+            is only valid when dynamo is True.
+        profile: Whether to profile the export process. This option
+            is only valid when dynamo is True.
         dump_exported_program: Whether to dump the :class:`torch.export.ExportedProgram` to a file.
-            This is useful for debugging the exporter.
+            This is useful for debugging the exporter. This option is only valid when dynamo is True.
         artifacts_dir: The directory to save the debugging artifacts like the report and the serialized
-            exported program.
+            exported program. This option is only valid when dynamo is True.
         fallback: Whether to fallback to the TorchScript exporter if the dynamo exporter fails.
+            This option is only valid when dynamo is True.
 
         training: Deprecated option. Instead, set the training mode of the model before exporting.
         operator_export_type: Deprecated option. Only ONNX is supported.
-        do_constant_folding: Deprecated option. The exported graph is always optimized.
+        do_constant_folding: Deprecated option.
         custom_opsets: Deprecated.
             A dictionary:
 
@@ -346,11 +343,11 @@ def export(
             Refer to https://github.com/pytorch/pytorch/pull/74765 for more details.
     """
     if dynamo is True or isinstance(model, torch.export.ExportedProgram):
-        from torch.onnx._internal import exporter
+        from torch.onnx._internal.exporter import _compat
 
         if isinstance(args, torch.Tensor):
             args = (args,)
-        return exporter.export_compat(
+        return _compat.export_compat(
             model,
             args,
             f,
@@ -360,11 +357,13 @@ def export(
             input_names=input_names,
             output_names=output_names,
             opset_version=opset_version,
+            custom_translation_table=custom_translation_table,
             dynamic_axes=dynamic_axes,
             keep_initializers_as_inputs=keep_initializers_as_inputs,
             external_data=external_data,
             dynamic_shapes=dynamic_shapes,
             report=report,
+            optimize=optimize,
             verify=verify,
             profile=profile,
             dump_exported_program=dump_exported_program,
@@ -373,6 +372,12 @@ def export(
         )
     else:
         from torch.onnx.utils import export
+
+        if dynamic_shapes:
+            raise ValueError(
+                "The exporter only supports dynamic shapes "
+                "through parameter dynamic_axes when dynamo=False."
+            )
 
         export(
             model,
@@ -396,35 +401,126 @@ def export(
         return None
 
 
-# TODO(justinchuby): Deprecate these logging functions in favor of the new diagnostic module.
+def dynamo_export(
+    model: torch.nn.Module | Callable | torch.export.ExportedProgram,  # type: ignore[name-defined]
+    /,
+    *model_args,
+    export_options: ExportOptions | None = None,
+    **model_kwargs,
+) -> ONNXProgram:
+    """Export a torch.nn.Module to an ONNX graph.
 
-# Returns True iff ONNX logging is turned on.
-is_onnx_log_enabled = _C._jit_is_onnx_log_enabled
+    Args:
+        model: The PyTorch model to be exported to ONNX.
+        model_args: Positional inputs to ``model``.
+        model_kwargs: Keyword inputs to ``model``.
+        export_options: Options to influence the export to ONNX.
+
+    Returns:
+        An in-memory representation of the exported ONNX model.
+
+    **Example 1 - Simplest export**
+    ::
+
+        class MyModel(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(2, 2)
+
+            def forward(self, x, bias=None):
+                out = self.linear(x)
+                out = out + bias
+                return out
 
 
-def enable_log() -> None:
-    r"""Enables ONNX logging."""
-    _C._jit_set_onnx_log_enabled(True)
+        model = MyModel()
+        kwargs = {"bias": 3.0}
+        args = (torch.randn(2, 2, 2),)
+        onnx_program = torch.onnx.dynamo_export(model, *args, **kwargs).save(
+            "my_simple_model.onnx"
+        )
 
+    **Example 2 - Exporting with dynamic shapes**
+    ::
 
-def disable_log() -> None:
-    r"""Disables ONNX logging."""
-    _C._jit_set_onnx_log_enabled(False)
+        # The previous model can be exported with dynamic shapes
+        export_options = torch.onnx.ExportOptions(dynamic_shapes=True)
+        onnx_program = torch.onnx.dynamo_export(
+            model, *args, **kwargs, export_options=export_options
+        )
+        onnx_program.save("my_dynamic_model.onnx")
+    """
 
+    # NOTE: The new exporter is experimental and is not enabled by default.
+    import warnings
 
-"""Sets output stream for ONNX logging.
+    from torch.onnx import _flags
+    from torch.onnx._internal.exporter import _compat
+    from torch.utils import _pytree
 
-Args:
-    stream_name (str, default "stdout"): Only 'stdout' and 'stderr' are supported
-        as ``stream_name``.
-"""
-set_log_stream = _C._jit_set_onnx_log_output_stream
+    if isinstance(model, torch.export.ExportedProgram):
+        return _compat.export_compat(
+            model,  # type: ignore[arg-type]
+            model_args,
+            f=None,
+            kwargs=model_kwargs,
+            opset_version=18,
+            external_data=True,
+            export_params=True,
+            fallback=True,
+        )
+    elif _flags.USE_EXPERIMENTAL_LOGIC:
+        if export_options is not None:
+            warnings.warn(
+                "You are using an experimental ONNX export logic, which currently only supports dynamic shapes. "
+                "For a more comprehensive set of export options, including advanced features, please consider using "
+                "`torch.onnx.export(..., dynamo=True)`. ",
+                category=FutureWarning,
+            )
 
+        if export_options is not None and export_options.dynamic_shapes:
+            # Make all shapes dynamic
+            def _to_dynamic_shapes_mapper():
+                arg_order = 0
 
-"""A simple logging facility for ONNX exporter.
+                def _to_dynamic_shape(x):
+                    nonlocal arg_order
+                    if isinstance(x, torch.Tensor):
+                        rank = len(x.shape)
+                        dynamic_shape = {}
+                        for i in range(rank):
+                            dynamic_shape[i] = torch.export.Dim(
+                                f"arg_{arg_order}_dim_{i}"
+                            )
+                        arg_order += 1
+                        return dynamic_shape
+                    else:
+                        return None
 
-Args:
-    args: Arguments are converted to string, concatenated together with a newline
-        character appended to the end, and flushed to output stream.
-"""
-log = _C._jit_onnx_log
+                return _to_dynamic_shape
+
+            # model_args could be nested
+            dynamic_shapes = _pytree.tree_map(
+                _to_dynamic_shapes_mapper(),
+                model_args,
+            )
+        else:
+            dynamic_shapes = None
+
+        return _compat.export_compat(
+            model,  # type: ignore[arg-type]
+            model_args,
+            f=None,
+            kwargs=model_kwargs,
+            dynamic_shapes=dynamic_shapes,
+            opset_version=18,
+            external_data=True,
+            export_params=True,
+            fallback=True,
+        )
+    else:
+        from torch.onnx._internal._exporter_legacy import dynamo_export
+
+        return dynamo_export(
+            model, *model_args, export_options=export_options, **model_kwargs
+        )

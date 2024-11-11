@@ -5,7 +5,13 @@
 # LICENSE file in the root directory of this source tree.
 
 import argparse
+import logging
 from typing import Optional, Sequence
+
+from tools.flight_recorder.components.fr_logger import FlightRecorderLogger
+
+
+logger: FlightRecorderLogger = FlightRecorderLogger()
 
 
 class JobConfig:
@@ -17,16 +23,37 @@ class JobConfig:
         self.parser = argparse.ArgumentParser(
             description="PyTorch Flight recorder analyzing script."
         )
-
         self.parser.add_argument(
-            "-d", "--dir", help="Directory with flight recorder dumps"
+            "trace_dir",
+            nargs="?",
+            help="Directory containing one trace file per rank, named with <prefix>_<rank>.",
+        )
+        self.parser.add_argument(
+            "--selected-ranks",
+            default=None,
+            nargs="+",
+            type=int,
+            help="List of ranks we want to show traces for.",
+        )
+        self.parser.add_argument(
+            "--pg-filters",
+            default=None,
+            nargs="+",
+            type=str,
+            help=(
+                "List of filter strings, it could be pg name or pg desc. "
+                "If specified, only show traces for the given pg."
+            ),
         )
         self.parser.add_argument("-o", "--output", default=None)
         self.parser.add_argument(
             "-p",
             "--prefix",
-            help="prefix to strip such that rank can be extracted",
-            default="rank_",
+            help=(
+                "Common filename prefix to strip such that rank can be extracted. "
+                "If not specified, will attempt to infer a common prefix."
+            ),
+            default=None,
         )
         self.parser.add_argument("-j", "--just_print_entries", action="store_true")
         self.parser.add_argument("-v", "--verbose", action="store_true")
@@ -34,4 +61,15 @@ class JobConfig:
     def parse_args(
         self: "JobConfig", args: Optional[Sequence[str]]
     ) -> argparse.Namespace:
-        return self.parser.parse_args(args)
+        args = self.parser.parse_args(args)
+        if args.selected_ranks is not None:
+            assert (
+                args.just_print_entries
+            ), "Not support selecting ranks without printing entries"
+        if args.pg_filters is not None:
+            assert (
+                args.just_print_entries
+            ), "Not support selecting pg filters without printing entries"
+        if args.verbose:
+            logger.set_log_level(logging.DEBUG)
+        return args

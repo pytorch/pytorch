@@ -157,24 +157,21 @@ void _amp_foreach_non_finite_check_and_unscale_cuda_(TensorList scaled_grads,
       using opmath_t = at::opmath_type<scalar_t>;
 
       // multi_tensor_apply guards onto tensor_lists[0][0], no need to guard explicitly.
-      DISPATCH_MULTI_TENSOR_APPLY([&]() {
-        multi_tensor_apply<1>(tensor_lists,
-                              UnaryOpFunctor<scalar_t,
-                                             /* depth */ 1,
-                                             /* r_args_depth */ 1,
-                                             /* res_arg_index */ 0,
-                                             large_kernel_arg>(),
-                              [found_inf_ptr, inv_scale_ptr] GPU_LAMBDA (opmath_t val) -> opmath_t {
-                                // There is a slight asymmetry here with the TensorIterator kernel above.
-                                // MTA Functors ensure val comes in as opmath_t rather than scalar_t.
-                                if (!isfinite_ensure_cuda_math(val)) {
-                                  *found_inf_ptr = 1.f;
-                                }
-                                // Every thread accesses inv_scale, but it will hit in cache.
-                                const auto inv_scale_val = *inv_scale_ptr;
-                                return static_cast<opmath_t>(inv_scale_val == 1.f ? val : val * inv_scale_val);
-                              });
-      });
+      multi_tensor_apply<1>(tensor_lists,
+                            UnaryOpFunctor<scalar_t,
+                                           /* depth */ 1,
+                                           /* r_args_depth */ 1,
+                                           /* res_arg_index */ 0>(),
+                            [found_inf_ptr, inv_scale_ptr] GPU_LAMBDA (opmath_t val) -> opmath_t {
+                              // There is a slight asymmetry here with the TensorIterator kernel above.
+                              // MTA Functors ensure val comes in as opmath_t rather than scalar_t.
+                              if (!isfinite_ensure_cuda_math(val)) {
+                                *found_inf_ptr = 1.f;
+                              }
+                              // Every thread accesses inv_scale, but it will hit in cache.
+                              const auto inv_scale_val = *inv_scale_ptr;
+                              return static_cast<opmath_t>(inv_scale_val == 1.f ? val : val * inv_scale_val);
+                            });
     });
 }
 

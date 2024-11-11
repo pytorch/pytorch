@@ -2,8 +2,8 @@
 
 import dataclasses
 import functools
+import itertools
 import logging
-import random
 from importlib import import_module
 from typing import Any, Callable, List, Optional, Type
 
@@ -34,6 +34,28 @@ def eager(gm, fake_tensor_inputs, **kwargs):
     if kwargs:
         log.warning("eager backend ignoring extra kwargs %s", kwargs)
     return gm.forward
+
+
+def make_eager_backend_with_torch_function_mode(mode):
+    return make_eager_backend_with_torch_function_modes([mode])
+
+
+def make_eager_backend_with_torch_function_modes(modes):
+    """Used to trace HOPs (cond and while) for eager exectution, the metadata
+    TF mode mutates vars outside of the scope of the HOP, and we can't have graph breaks
+    in the HOP, so we need to externally run this mode and not trace it."""
+    from contextlib import ExitStack
+
+    def fn(gm, fake_tensor_inputs, **kwargs):
+        stack = ExitStack()
+        for mode in modes:
+            stack.enter_context(mode)
+
+        result = gm.forward
+        stack.close()
+        return result
+
+    return fn
 
 
 @register_backend
@@ -101,13 +123,46 @@ def boxed_nop(fx_g, example_inputs):
     return run
 
 
+def fake_crossref_boxed_nop(fx_g, example_inputs, ignore_op_fn=None):
+    def run(args):
+        with torch._subclasses.CrossRefFakeMode(ignore_op_fn):
+            return torch.fx.Interpreter(fx_g).boxed_run(args)
+
+    run._boxed_call = True
+    return run
+
+
+def ignore_builtins(op: torch._ops.OpOverload) -> bool:
+    return op.namespace in ("aten", "prims", "prim")
+
+
+def get_nop_func():
+    if not torch._functorch.config.fake_tensor_crossref:
+        return boxed_nop
+    elif torch._functorch.config.fake_tensor_crossref == "all":
+        return fake_crossref_boxed_nop
+    else:
+        assert torch._functorch.config.fake_tensor_crossref == "custom_ops"
+        return functools.partial(fake_crossref_boxed_nop, ignore_op_fn=ignore_builtins)
+
+
 # Useful for debugging purpose
 # aot_eager uses AOT Autograd backend with nop compiler. It is helpful in debugging.
-aot_eager = aot_autograd(
-    fw_compiler=boxed_nop,
-    partition_fn=min_cut_rematerialization_partition,
-    keep_inference_input_mutations=True,
-)
+def aot_eager(
+    gm,
+    fake_tensor_inputs,
+    fw_compiler=None,
+    bw_compiler=None,
+    **kwargs,
+):
+    return aot_autograd(
+        fw_compiler=fw_compiler or boxed_nop,
+        bw_compiler=bw_compiler or boxed_nop,
+        partition_fn=min_cut_rematerialization_partition,
+        keep_inference_input_mutations=True,
+    )(gm, fake_tensor_inputs, **kwargs)
+
+
 register_backend(name="aot_eager", compiler_fn=aot_eager)
 
 aot_eager_default_partitioner = aot_autograd(
@@ -128,11 +183,19 @@ def aot_eager_decomp_partition(gm, fake_tensor_inputs, **kwargs):
             "aot_eager_decomp_partition backend ignoring extra kwargs %s", kwargs
         )
 
-    with functorch_config.patch(unlift_effect_tokens=True):
+    from torch._inductor.compiler_bisector import CompilerBisector
+
+    config_patches = {"unlift_effect_tokens": True}
+    if bisect_changes := CompilerBisector.get_config_change(
+        "aot_eager_decomp_partition"
+    ):
+        config_patches.update(bisect_changes)
+
+    with functorch_config.patch(config_patches):
         return aot_autograd(
             # these are taken from memory_efficient_fusion()
-            fw_compiler=boxed_nop,
-            bw_compiler=boxed_nop,
+            fw_compiler=get_nop_func(),
+            bw_compiler=get_nop_func(),
             # NB: lambda here is to delay import of inductor
             decompositions=lambda: import_module(
                 "torch._inductor.compile_fx"
@@ -145,6 +208,25 @@ def aot_eager_decomp_partition(gm, fake_tensor_inputs, **kwargs):
 
 register_backend(
     name="aot_eager_decomp_partition", compiler_fn=aot_eager_decomp_partition
+)
+
+
+def aot_eager_decomp_partition_crossref(gm, fake_tensor_inputs, **kwargs):
+    # if the config is set, respect it, otherwise only test custom_ops.
+    # custom_op bad metas always manifest as an error whereas aten will only sometimes.
+    # by default, use the less noisy option
+    config_val = (
+        "custom_ops"
+        if not functorch_config.fake_tensor_crossref
+        else functorch_config.fake_tensor_crossref
+    )
+    with functorch_config.patch(fake_tensor_crossref=config_val):
+        return aot_eager_decomp_partition(gm, fake_tensor_inputs, **kwargs)
+
+
+register_backend(
+    name="aot_eager_decomp_partition_crossref",
+    compiler_fn=aot_eager_decomp_partition_crossref,
 )
 
 
@@ -209,6 +291,15 @@ def _try_lift_tensor_arguments(gm, inputs):
     return gm, new_inputs
 
 
+@dataclasses.dataclass
+class TensorToSubclassTransform:
+    factory_fn: Callable[[Tensor], Type]
+    precondition: Optional[Callable[[Tensor], bool]] = None
+
+    def check_precondition(self, t):
+        return self.precondition is None or self.precondition(t)
+
+
 @register_backend
 def test_subclasses(gm, inputs, **kwargs):
     if kwargs:
@@ -221,22 +312,28 @@ def test_subclasses(gm, inputs, **kwargs):
     import copy
 
     test_gm = copy.deepcopy(gm)
-    test_inputs = copy.copy(inputs)
 
     compiler_fn = aot_eager
 
     # Verify original inputs
-    compiler_fn(test_gm, test_inputs)
+    compiler_fn(test_gm, inputs)
 
-    MAX_NUM_TEST_INPUTS: int = 10
-
-    from torch.testing._internal.common_subclass import F32_QI32QuantRWTensor
+    from torch.testing._internal.subclasses import WrapperSubclass
     from torch.testing._internal.two_tensor import TwoTensor
 
-    TRANSFORMATIONS: List[Callable[[Tensor], Type]] = [
-        (lambda t: TwoTensor(t, t), True),
-        (lambda t: F32_QI32QuantRWTensor.from_src(t), True),
-        (lambda t: t, False),
+    TRANSFORMATIONS: List[TensorToSubclassTransform] = [
+        TensorToSubclassTransform(
+            factory_fn=lambda t: WrapperSubclass(t),
+        ),
+        TensorToSubclassTransform(
+            factory_fn=lambda t: TwoTensor(t, t),
+        ),
+        # TensorToSubclassTransform(
+        #     factory_fn=lambda t: F32_QI32QuantRWTensor.from_src(t),
+        #     precondition=lambda t: t.ndim <= 2,
+        # ),
+        # DTensor
+        # NestedTensor
     ]
 
     def _is_tensor(t):
@@ -247,30 +344,50 @@ def test_subclasses(gm, inputs, **kwargs):
 
     if not any(_is_tensor(t) for t in inputs):
         # Try to find tensor creations with inputs and lift as arguments
-        test_gm, test_inputs = _try_lift_tensor_arguments(test_gm, test_inputs)
+        test_gm, test_inputs = _try_lift_tensor_arguments(test_gm, inputs)
 
         if not any(_is_tensor(t) for t in inputs):
             log.debug("No tensor inputs")
             return gm
 
-    def apply_transformation(inps, transform_tensor_subclasses: bool = False):
-        for j in range(len(inps)):
-            inp = inps[j]
-            if _is_tensor(inp) and (
-                not transform_tensor_subclasses or not _is_tensor_subclass(inp)
-            ):
-                tt = random.choice(TRANSFORMATIONS)
-                test_inputs[j] = tt[0](inp)
-                if tt[1]:
-                    return True
+    MAX_SUBCLASSES_NESTING: int = 2
+    N: int = len(TRANSFORMATIONS)
 
-        return False
+    TRANSFORM_SEQS: List[Any] = [
+        (),  # empty tuple means no transformation
+    ]
+    for k in range(1, MAX_SUBCLASSES_NESTING + 1):
+        for p in itertools.product(list(range(N)), repeat=k):
+            TRANSFORM_SEQS.append(p)  # noqa: PERF402
 
-    for i in range(MAX_NUM_TEST_INPUTS):
-        if not apply_transformation(test_inputs) and not apply_transformation(
-            test_inputs, True
-        ):
-            break
+    TENSOR_INPUTS_IDXS: List[int] = [
+        i for i, inp in enumerate(inputs) if _is_tensor(inp)
+    ]
+    NUM_TENSOR_INPUTS = len(TENSOR_INPUTS_IDXS)
+
+    TENSOR_INPUTS_TRANSFORM_SEQS = list(
+        itertools.product(TRANSFORM_SEQS, repeat=NUM_TENSOR_INPUTS)
+    )
+    log.debug(
+        "test_subclasses backend TENSOR_INPUTS_TRANSFORM_SEQS:%s",
+        TENSOR_INPUTS_TRANSFORM_SEQS,
+    )
+
+    def apply_transform_seq(transform_seq, inp):
+        ret = inp
+        for transform_idx in transform_seq:
+            transform = TRANSFORMATIONS[transform_idx]
+            if transform.check_precondition(ret):
+                ret = transform.factory_fn(ret)
+
+        return ret
+
+    for i, transform_seqs in enumerate(TENSOR_INPUTS_TRANSFORM_SEQS):
+        test_inputs = copy.copy(inputs)
+        for seq_idx, idx in enumerate(TENSOR_INPUTS_IDXS):
+            test_inputs[idx] = apply_transform_seq(
+                transform_seqs[seq_idx], test_inputs[idx]
+            )
 
         log.info(
             "test_subclasses backend testing %d transformed inputs:%s gm:%s",

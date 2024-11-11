@@ -5141,8 +5141,9 @@ def traceable(f):
 @markDynamoStrictTest
 class TestCompileTransforms(TestCase):
     @skipIfRocm(msg="test leaks memory on ROCm")
+    # torch.compile is not supported on Windows CUDA.
     # Triton only supports GPU with SM70 or later.
-    @expectedFailureIf(TEST_CUDA and not SM70OrLater)
+    @expectedFailureIf((IS_WINDOWS and TEST_CUDA) or (TEST_CUDA and not SM70OrLater))
     def test_compile_vmap_hessian(self, device):
         # The model and inputs are a smaller version
         # of code at benchmark repo:

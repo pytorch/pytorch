@@ -8,8 +8,7 @@
 
 namespace F = torch::nn::functional;
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 // ========================TransformerEncoderLayerImpl=========================
 TransformerEncoderLayerImpl::TransformerEncoderLayerImpl(
@@ -223,8 +222,7 @@ TransformerEncoderImpl::TransformerEncoderImpl(
 
 void TransformerEncoderImpl::reset() {
   layers = this->register_module("layers", ModuleList());
-  for (const auto i : c10::irange(options.num_layers())) {
-    (void)i; // Suppress unused variable warning
+  for ([[maybe_unused]] const auto i : c10::irange(options.num_layers())) {
     layers->push_back(options.encoder_layer()->clone());
   }
 
@@ -290,8 +288,7 @@ TransformerDecoderImpl::TransformerDecoderImpl(
 
 void TransformerDecoderImpl::reset() {
   layers = this->register_module("layers", ModuleList());
-  for (const auto i : c10::irange(options.num_layers())) {
-    (void)i; // Suppress unused variable warning
+  for ([[maybe_unused]] const auto i : c10::irange(options.num_layers())) {
     layers->push_back(options.decoder_layer()->clone());
   }
 
@@ -486,5 +483,4 @@ Tensor TransformerImpl::generate_square_subsequent_mask(int64_t sz) {
   }
 }
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

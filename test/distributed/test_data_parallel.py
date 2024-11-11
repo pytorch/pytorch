@@ -688,7 +688,7 @@ class TestDataParallel(TestCase):
             def __init__(self) -> None:
                 super().__init__(8, 8)
 
-            @torch.cuda.amp.autocast()
+            @torch.autocast(device_type="cuda")
             def forward(self, input):
                 return super().forward(input)
 

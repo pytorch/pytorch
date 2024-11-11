@@ -198,7 +198,7 @@ ScalarType infer_scalar_type(PyObject* obj) {
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     return *scalarType;
   }
-  AT_ERROR("Could not infer dtype of ", Py_TYPE(obj)->tp_name);
+  TORCH_CHECK(false, "Could not infer dtype of ", Py_TYPE(obj)->tp_name);
 }
 
 void recursive_store(
@@ -219,37 +219,13 @@ void recursive_store(
       auto new_obj = py::reinterpret_borrow<py::object>(obj);
       auto val = new_obj.cast<c10::SymFloat>();
       const double double_val = val.guard_float(__FILE__, __LINE__);
-      switch (elementSize) {
-        case 8:
-          *reinterpret_cast<double*>(data) = double_val;
-          break;
-        case 4:
-          *reinterpret_cast<float*>(data) = static_cast<float>(double_val);
-          break;
-      }
-      return;
+      obj = Py_BuildValue("d", double_val);
     }
     if (is_symint) {
       auto new_obj = py::reinterpret_borrow<py::object>(obj);
       auto val = new_obj.cast<c10::SymInt>();
-      const auto int_val = val.guard_int(__FILE__, __LINE__);
-      switch (elementSize) {
-        case 8:
-          *reinterpret_cast<int64_t*>(data) = int_val;
-          break;
-        case 4:
-          *reinterpret_cast<int32_t*>(data) = static_cast<int32_t>(int_val);
-          break;
-        case 2:
-          *reinterpret_cast<int16_t*>(data) = static_cast<int16_t>(int_val);
-          break;
-        case 1:
-          *reinterpret_cast<int8_t*>(data) = static_cast<int8_t>(int_val);
-          break;
-        default:
-          TORCH_CHECK(false, "Unexpected elementSize ", elementSize);
-      }
-      return;
+      const int64_t int_val = val.guard_int(__FILE__, __LINE__);
+      obj = Py_BuildValue("i", int_val);
     }
     torch::utils::store_scalar(data, scalarType, obj);
     return;
@@ -368,6 +344,23 @@ Tensor internal_new_from_data(
         /*copy=*/copy_numpy);
   }
 #endif
+
+  if (PyObject_HasAttrString(data, "__dlpack__")) {
+    py::object tensor_o =
+        py::module::import("torch").attr("utils").attr("dlpack").attr(
+            "from_dlpack")(py::handle(data));
+    Tensor tensor = py::cast<Tensor>(tensor_o);
+    const auto& inferred_scalar_type =
+        type_inference ? tensor.scalar_type() : scalar_type;
+    auto device = device_opt.has_value() ? *device_opt : tensor.device();
+    pybind11::gil_scoped_release no_gil;
+    maybe_initialize_device(device);
+    return tensor.to(
+        device,
+        inferred_scalar_type,
+        /*non_blocking=*/false,
+        /*copy=*/copy_variables);
+  }
 
   auto device = device_opt.has_value() ? *device_opt : options.device();
 
@@ -877,6 +870,14 @@ class CheckSparseTensorInvariantsContext {
   ~CheckSparseTensorInvariantsContext() {
     at::globalContext().setCheckSparseTensorInvariants(state);
   }
+  CheckSparseTensorInvariantsContext(
+      const CheckSparseTensorInvariantsContext&) = delete;
+  CheckSparseTensorInvariantsContext(CheckSparseTensorInvariantsContext&&) =
+      delete;
+  CheckSparseTensorInvariantsContext& operator=(
+      const CheckSparseTensorInvariantsContext&) = delete;
+  CheckSparseTensorInvariantsContext& operator=(
+      CheckSparseTensorInvariantsContext&&) = delete;
 
  private:
   bool state;

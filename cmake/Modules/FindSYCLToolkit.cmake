@@ -49,7 +49,10 @@ find_file(
   )
 
 # Find SYCL library fullname.
-if(LINUX)
+# Don't use if(LINUX) here since this requires cmake>=3.25 and file is installed
+# and used by other projects.
+# See: https://cmake.org/cmake/help/v3.25/variable/LINUX.html
+if(CMAKE_SYSTEM_NAME MATCHES "Linux")
   find_library(
     SYCL_LIBRARY
     NAMES sycl-preview
