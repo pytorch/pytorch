@@ -1740,33 +1740,11 @@ else:
             'embedding_bag_backward_cuda_max',
             torch.device(device).type == 'cuda')
 
-    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
-    @onlyCUDA
-    def test_deterministic_cumsum(self, device):
-        test_cases = [
-            # size, dim
-            [(2, 3, 4), 0],
-            [(2, 3, 4), 1],
-            [(2, 3, 4), 2],
-            [(1000, 10, 2), 0],
-        ]
-        for size, dim in test_cases:
-            input = 100 * torch.randn(*size, device=device)
-            with DeterministicGuard(True):
-                res0 = input.cumsum(dim)
-                for _ in range(3):
-                    res1 = input.cumsum(dim)
-                    self.assertEqual(res0, res1, atol=0, rtol=0)
-
-            res_cpu = input.cpu().cumsum(dim)
-            self.assertEqual(res0, res_cpu, atol=1e-3, rtol=1e-2)
-
-
     @dtypes(*all_types_and_complex_and(torch.bool))
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_cumsum(self, device, dtype):
         input = make_tensor((10,), dtype=dtype, device=device, low=-9, high=9)
-        should_alert = False
+        should_alert = torch.device(device).type == 'cuda' and (dtype.is_floating_point or dtype.is_complex)
 
         for op_call in [torch.Tensor.cumsum, torch.cumsum]:
             self.check_nondeterministic_alert(
@@ -3160,27 +3138,6 @@ else:
         x[0] = False
         x[1] = True
         self.assertEqual(x, torch.tensor([False, True], dtype=torch.bool, device=device))
-
-    # FIXME: move to shape ops test suite
-    def test_unfold_all_devices_and_dtypes(self, device):
-        for dt in all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16):
-
-            if dt == torch.bool:
-                x = torch.empty((0, 1, 3, 0), dtype=dt, device=device)
-                self.assertEqual((0, 1, 1, 0, 3), x.unfold(2, 3, 2).shape)
-            else:
-                x = torch.empty((0, 1, 3, 0), dtype=dt, device=device)
-                self.assertEqual((0, 1, 1, 0, 3), x.unfold(2, 3, 2).shape)
-
-    # FIXME: move to shape ops test suite
-    def test_unfold_scalars(self, device):
-        x = torch.tensor(0.5, device=device)
-        # unfold on a 0-dimensional tensor should always return a 1-d dimensional
-        # tensor of shape [size] (i.e., the second parameter to unfold)
-
-        self.assertEqual(torch.empty(0, device=device), x.unfold(0, 0, 1))
-        self.assertEqual(torch.empty(0, device=device), x.unfold(0, 0, 2))
-        self.assertEqual(torch.tensor([0.5], device=device), x.unfold(0, 1, 1))
 
     # FIXME: move to data movement test suite
     def test_copy_all_dtypes_and_devices(self, device):

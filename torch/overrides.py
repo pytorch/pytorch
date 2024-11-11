@@ -28,7 +28,7 @@ import functools
 import types
 import warnings
 from functools import wraps
-from typing import Any, Callable, Dict, Iterable, List, Set, Tuple, Type
+from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple, Type
 
 import torch
 from torch._C import (
@@ -901,7 +901,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
             lambda input, size=None, scale_factor=None, mode="nearest", align_corners=None, recompute_scale_factor=None, antialias=False: -1  # noqa: B950
         ),
         torch.nn.functional.kl_div: lambda input, target, size_average=None, reduce=None, reduction="mean", log_target=False: -1,  # noqa: B950
-        torch.nn.functional.l1_loss: lambda input, target, size_average=None, reduce=None, reduction="mean": -1,
+        torch.nn.functional.l1_loss: lambda input, target, size_average=None, reduce=None, reduction="mean", weight=None: -1,
         torch.nn.functional.layer_norm: lambda input, normalized_shape, weight=None, bias=None, eps=1e-05: -1,
         torch.nn.functional.leaky_relu: lambda input, negative_slope=0.01, inplace=False: -1,
         torch.nn.functional.linear: lambda input, weight, bias=None: -1,
@@ -935,7 +935,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.nn.functional.max_unpool1d: lambda input, indices, kernel_size, stride=None, padding=0, output_size=None: -1,  # noqa: B950
         torch.nn.functional.max_unpool2d: lambda input, indices, kernel_size, stride=None, padding=0, output_size=None: -1,  # noqa: B950
         torch.nn.functional.max_unpool3d: lambda input, indices, kernel_size, stride=None, padding=0, output_size=None: -1,  # noqa: B950
-        torch.nn.functional.mse_loss: lambda input, target, size_average=None, reduce=None, reduction="mean": -1,
+        torch.nn.functional.mse_loss: lambda input, target, size_average=None, reduce=None, reduction="mean", weight=None: -1,
         torch.nn.functional.multi_head_attention_forward: (
             lambda query, key, value, embed_dim_to_check, num_heads, in_proj_weight, in_proj_bias, bias_k, bias_v, add_zero_attn, dropout_p, out_proj_weight, out_proj_bias, training=True, key_padding_mask=None, need_weights=True, attn_mask=None, use_separate_proj_weight=False, q_proj_weight=None, k_proj_weight=None, v_proj_weight=None, static_k=None, static_v=None, average_attn_weights=None, is_causal=False: -1  # noqa: B950
         ),
@@ -968,7 +968,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.nn.functional.mish: lambda input, inplace=False: -1,
         torch.nn.functional.scaled_dot_product_attention: lambda query, key, value, attn_mask=None, dropout_p=0.0: -1,
         torch.nn.functional.smooth_l1_loss: lambda input, target, size_average=None, reduce=None, reduction="mean", beta=1.0: -1,  # noqa: B950
-        torch.nn.functional.huber_loss: lambda input, target, reduction="mean", delta=1.0: -1,
+        torch.nn.functional.huber_loss: lambda input, target, reduction="mean", delta=1.0, weight=None: -1,
         torch.nn.functional.soft_margin_loss: lambda input, target, size_average=None, reduce=None, reduction="mean": -1,  # noqa: B950
         torch.nn.functional.softmax: lambda input, dim=None, _stacklevel=3, dtype=None: -1,
         torch.nn.functional.softmin: lambda input, dim=None, _stacklevel=3, dtype=None: -1,
@@ -1589,7 +1589,7 @@ def wrap_torch_function(dispatcher: Callable):
 
 def _get_overloaded_args(
     relevant_args: Iterable[Any],
-    get_type_fn: Callable[[Any], Type] = None,
+    get_type_fn: Optional[Callable[[Any], Type]] = None,
 ) -> List[Any]:
     """Returns a list of arguments on which to call __torch_function__.
 
