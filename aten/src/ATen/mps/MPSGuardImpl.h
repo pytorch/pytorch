@@ -176,6 +176,6 @@ struct OptionalMPSGuard {
 };
 
 
-C10_REGISTER_GUARD_IMPL(MPS, MPSGuardImpl);
+C10_REGISTER_GUARD_IMPL(MPS, MPSGuardImpl)
 
 } // namespace at::mps
