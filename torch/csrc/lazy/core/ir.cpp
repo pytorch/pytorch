@@ -10,10 +10,9 @@
 C10_DEFINE_bool(
     ltc_enable_dynamic_shapes,
     false,
-    "Whether dynamic shape is enabled");
+    "Whether dynamic shape is enabled")
 
 namespace torch::lazy {
-
 static const torch::lazy::Output kNullOutput = torch::lazy::Output();
 
 size_t Output::Hasher::operator()(const Output& output) const {

@@ -1118,13 +1118,21 @@ This class does not support ``__members__`` property.)");
           py::arg("src_rank"),
           py::arg("channel") = 0,
           py::arg("timeout_ms") = 0)
-      .def(
-          "stream_write_value32",
-          &SymmetricMemory::stream_write_value32,
-          py::arg("addr"),
-          py::arg("val"))
       // Util functions that are often used together with symmetric memory but
       // not necessarily directly on symmetric memory.
+      .def_static(
+          "stream_write_value32",
+          [](at::Tensor& input, int64_t offset, int64_t val) {
+            // The range of `val` is checked inside the op
+            auto op =
+                c10::Dispatcher::singleton()
+                    .findSchemaOrThrow("symm_mem::stream_write_value32_", "")
+                    .typed<at::Tensor(at::Tensor&, int64_t, int64_t)>();
+            return op.call(input, offset, val);
+          },
+          py::arg("input"),
+          py::arg("offset"),
+          py::arg("val"))
       .def_static(
           "memset32",
           [](at::Tensor& input, int64_t offset, int64_t val, int64_t count) {
@@ -2321,10 +2329,6 @@ Arguments:
               "supports_splitting",
               &::c10d::Backend::supportsSplitting,
               "(test whether the backend supports splitting)")
-          .def_property_readonly(
-              "supports_coalescing",
-              &::c10d::Backend::supportsCoalescing,
-              "(test whether the backend supports coalescing)")
           .def(
               "broadcast",
               &::c10d::Backend::broadcast,
