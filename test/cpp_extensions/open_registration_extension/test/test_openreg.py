@@ -75,6 +75,50 @@ class TestOpenReg(TestCase):
         slice_a = pinned_a[2:5]
         self.assertTrue(slice_a.is_pinned())
 
+    def test_stream_synchronize(self):
+        stream = torch.Stream(device="openreg:1")
+        stream.synchronize()
+        self.assertEqual(True, stream.query())
+
+    def test_stream_wait_stream(self):
+        stream_1 = torch.Stream(device="openreg:0")
+        stream_2 = torch.Stream(device="openreg:1")
+        # Does not crash!
+        stream_2.wait_stream(stream_1)
+
+    def test_record_event(self):
+        stream = torch.Stream(device="openreg:1")
+        event1 = stream.record_event()
+        self.assertNotEqual(0, event1.event_id)
+        event2 = stream.record_event()
+        self.assertNotEqual(0, event2.event_id)
+        self.assertNotEqual(event1.event_id, event2.event_id)
+
+    def test_event_elapsed_time(self):
+        stream = torch.Stream(device="openreg:1")
+        e1 = torch.Event(device="openreg:1", enable_timing=True)
+        e1.record(stream)
+        e2 = torch.Event(device="openreg:1", enable_timing=True)
+        e2.record(stream)
+
+        e2.synchronize()
+        self.assertTrue(e2.query())
+
+        ms = e1.elapsed_time(e2)
+        self.assertTrue(ms > 0)
+
+    def test_stream_wait_event(self):
+        s1 = torch.Stream(device="openreg")
+        s2 = torch.Stream(device="openreg")
+        e = s1.record_event()
+        s2.wait_event(e)
+
+    def test_event_wait_stream(self):
+        s1 = torch.Stream(device="openreg")
+        s2 = torch.Stream(device="openreg")
+        e1 = s1.record_event()
+        e1.wait(s2)
+
 
 if __name__ == "__main__":
     run_tests()
