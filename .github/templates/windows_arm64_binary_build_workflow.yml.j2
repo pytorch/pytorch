@@ -124,7 +124,7 @@ jobs:
         shell: cmd
         run: |
           "builder/windows/arm64/bootstrap_rust.bat"
-      !{{ checkout(deep_clone=False, directory="builder", repository="iremyux/pytorch", branch="nightly-for-win-arm64") }}
+      !{{ common.checkout(deep_clone=False, directory="pytorch", repository="iremyux/pytorch", branch="nightly-for-win-arm64") }}
       - name: Build PyTorch binary
         shell: cmd
         run: |

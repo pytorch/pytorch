@@ -95,9 +95,15 @@ jobs:
         uses: malfet/checkout@silent-checkout
         with:
           ref: nightly-for-win-arm64
+          submodules: recursive
           repository: iremyux/pytorch
-          path: builder
+          path: pytorch
           quiet-checkout: true
+      - name: Clean iremyux/pytorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
       - name: Build PyTorch binary
         shell: cmd
         run: |
