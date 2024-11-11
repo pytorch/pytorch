@@ -69,16 +69,18 @@ class Adam(Optimizer):
             or (isinstance(betas[0], Tensor) and isinstance(betas[1], Tensor))
         ):
             raise ValueError("betas must be either both floats or both Tensors")
-        if isinstance(betas[0], Tensor) and not capturable and foreach:
-            raise ValueError(
-                "betas[0] as a Tensor is not supported for capturable=False and foreach=True"
-            )
+        if isinstance(betas[0], Tensor):
+            if not capturable and foreach:
+                raise ValueError(
+                    "betas[0] as a Tensor is not supported for capturable=False and foreach=True"
+                )
             if betas[0].numel() != 1:
                 raise ValueError("Tensor betas[0] must be 1-element")
-        if isinstance(betas[1], Tensor) and not capturable and foreach:
-            raise ValueError(
-                "betas[1] as a Tensor is not supported for capturable=False and foreach=True"
-            )
+        if isinstance(betas[1], Tensor):
+            if not capturable and foreach:
+                raise ValueError(
+                    "betas[1] as a Tensor is not supported for capturable=False and foreach=True"
+                )
             if betas[1].numel() != 1:
                 raise ValueError("Tensor betas[1] must be 1-element")
 
