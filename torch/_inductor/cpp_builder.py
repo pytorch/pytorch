@@ -1211,7 +1211,6 @@ def get_cpp_torch_device_options(
 
     include_dirs = cpp_extension.include_paths(device_type)
     libraries_dirs = cpp_extension.library_paths(device_type)
-
     if device_type == "cuda":
         definations.append(" USE_ROCM" if torch.version.hip else " USE_CUDA")
 
@@ -1234,7 +1233,8 @@ def get_cpp_torch_device_options(
         # "warning: overriding currently unsupported use of floating point
         # exceptions on this target [-Wunsupported-floating-point-opt]".
         # Since the compiler has not support some features.
-        cflags += ["fsycl", "Wno-unsupported-floating-point-opt"]
+        if compile_only:
+            cflags += ["fsycl", "Wno-unsupported-floating-point-opt"]
         libraries += ["c10_xpu", "sycl", "ze_loader", "torch_xpu"]
 
     if aot_mode:
