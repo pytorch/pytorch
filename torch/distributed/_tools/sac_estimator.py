@@ -206,14 +206,14 @@ class SACGreedyOrderMeta:
         recomputed_ops (Set[int]): Set of operator indices to be recomputed.
         stored_ops (Set[int]): Set of operator indices to be stored.
         inplace_op_groups (Dict[int, Set[int]]): Dictionary of inplace operator groups from group-head to operators.
-        random_ops_group (Dict[int, Set[int]]): Dictionary of random op group head to random ops.
+        random_inplace_ops (Set[int]): Set of union of random and in-place op groups that have a random op.
         msps_meta (List[MSPS]): List of Memory and Runtime Statistics for operators.
     """
 
     recomputed_ops: Set[int]
     stored_ops: Set[int]
     inplace_op_groups: Dict[int, Set[int]]
-    random_ops_group: Dict[int, Set[int]]
+    random_inplace_ops: Set[int]
     msps_meta: List[MSPS]
 
 
@@ -508,23 +508,28 @@ class SACEstimator(TorchDispatchMode):
         # as a group. This is because, they affect the ranom seed generator. If force_store_random is set True,
         # all of the random ops will be stored by default. For easy of manageability, we store the top-most random op
         # as the leader of the random_ops_group.
-        random_ops_group: Dict[int, Set[int]] = {}
-        random_group_head_idx = min(sac_stats.rand_ops, default=-1)
-        has_rand_ops = bool(sac_stats.rand_ops)
-        if has_rand_ops:
-            random_ops_group[random_group_head_idx] = set(sac_stats.rand_ops)
+        random_ops: Set[int] = set(sac_stats.rand_ops)
+        random_group_head_idx = min(random_ops, default=-1)
+        random_inplace_ops: Set[int] = set()
 
-        # 1. Random ops are stored if force_store_random is set
+        # If there are some in-place op-groups that contain random ops, they all will be treated as single group.
+        if random_ops:
+            for group_head_idx, op_group in inplace_op_groups.items():
+                if len(op_group & random_ops) > 0:
+                    group = inplace_op_groups.pop(group_head_idx)
+                    random_inplace_ops.update(group)
+        random_inplace_ops.update(random_ops)
+
+        # 1. Random or Random-In-place ops are stored if force_store_random is set
         # 2. View-like ops are recomputed by default
         # 3. For inplace_op_groups:
         #   a) If the head of this group is an inplace op, then we have to store the entire group.
-        #   b) If any op in the group is random and force_store_random is set, then entire group will be stored.
-        #   c) If none of ops in the group are random and the head of the group is not an in-place op, then
-        #       this group can be considered for recomputation in its entireity
+        #   b) If the head of the group is not an in-place op, then this group can be considered for recomputation
+        #        in its entireity.
         stored_ops: Set[int] = set()
         recomputed_ops: Set[int] = set()
         # Case 1:
-        if has_rand_ops and sac_stats.force_store_random:
+        if random_inplace_ops and sac_stats.force_store_random:
             stored_ops.add(random_group_head_idx)
         # Case 2:
         recomputed_ops.update(set(sac_stats.view_like_ops))
@@ -533,17 +538,11 @@ class SACEstimator(TorchDispatchMode):
             # Case 3a:
             if group_head_idx in inplace_op_to_group_head:
                 stored_ops.add(group_head_idx)
-            # Case 3b:
-            if (
-                sac_stats.force_store_random & len(op_group & set(sac_stats.rand_ops))
-                > 0
-            ):
-                stored_ops.add(group_head_idx)
 
         # The potential recompute candidates are populated as:
         recompute_candidates: Set[int] = set()
         # 1) The random group head if it is not stored
-        if has_rand_ops and random_group_head_idx not in stored_ops:
+        if random_inplace_ops and random_group_head_idx not in stored_ops:
             recompute_candidates.add(random_group_head_idx)
         # 2) The in-place op group heads that are not stored
         recompute_candidates.update(set(inplace_op_groups.keys()) - stored_ops)
@@ -552,8 +551,8 @@ class SACEstimator(TorchDispatchMode):
             set(range(len(sac_stats.memory)))
             - recomputed_ops
             - stored_ops
-            - set(inplace_op_to_group_head.keys())
-            - set(sac_stats.rand_ops)
+            - set.union(*inplace_op_groups.values())
+            - random_inplace_ops
         )
 
         # We define msps for a recomp candidate as the ratio of memory/runtime aka memory savings per second
@@ -562,8 +561,8 @@ class SACEstimator(TorchDispatchMode):
             op_indices = {cand_idx}
             if cand_idx in inplace_op_groups:
                 op_indices.update(inplace_op_groups[cand_idx])
-            if has_rand_ops and cand_idx == random_group_head_idx:
-                op_indices.update(sac_stats.rand_ops)
+            if random_inplace_ops and cand_idx == random_group_head_idx:
+                op_indices.update(random_inplace_ops)
 
             mem = sum(sac_stats.memory[op_idx] for op_idx in op_indices)
             runtime = sum(sac_stats.runtimes[op_idx] for op_idx in op_indices)
@@ -573,7 +572,7 @@ class SACEstimator(TorchDispatchMode):
         # We choose canidates to be recomputed based on increasing msps
         msps_meta.sort(key=lambda x: x.msps, reverse=True)
         return SACGreedyOrderMeta(
-            recomputed_ops, stored_ops, inplace_op_groups, random_ops_group, msps_meta
+            recomputed_ops, stored_ops, inplace_op_groups, random_inplace_ops, msps_meta
         )
 
     def _get_sac_tradeoff_pwlf_stats(
@@ -590,11 +589,11 @@ class SACEstimator(TorchDispatchMode):
         except ImportError as err:
             raise ImportError("Please install pwlf and numpy package.") from err
 
-        stored_ops, recomputed_ops, inplace_op_groups, random_ops_group, msps_meta = (
+        stored_ops, recomputed_ops, inplace_op_groups, random_inplace_ops, msps_meta = (
             greedy_order_meta.stored_ops,
             greedy_order_meta.recomputed_ops,
             greedy_order_meta.inplace_op_groups,
-            greedy_order_meta.random_ops_group,
+            greedy_order_meta.random_inplace_ops,
             greedy_order_meta.msps_meta,
         )
         # 1. Intitialize the discarded memory and recomputation runtime to sum of already chosen recomputed_ops
@@ -603,8 +602,8 @@ class SACEstimator(TorchDispatchMode):
             recomp_indices.add(r_idx)
             if r_idx in inplace_op_groups:
                 recomp_indices.update(inplace_op_groups[r_idx])
-            if r_idx in random_ops_group:
-                recomp_indices.update(random_ops_group[r_idx])
+            if r_idx in random_inplace_ops:
+                recomp_indices.update(random_inplace_ops)
 
         discarded_mem = sum(sac_stats.memory[op_idx] for op_idx in recomp_indices)
         recomp_runtime = sum(sac_stats.runtimes[op_idx] for op_idx in recomp_indices)
@@ -628,18 +627,18 @@ class SACEstimator(TorchDispatchMode):
                 recomp_runtime / sac_runtime
             )
         # 6. Finally, we add the memory and recomputation time of the always stored ops.
-        stored_indices: Set[int] = set()
-        for s_idx in stored_ops:
-            stored_indices.add(s_idx)
-            if s_idx in inplace_op_groups:
-                stored_indices.update(inplace_op_groups[s_idx])
-            if s_idx in random_ops_group:
-                stored_indices.update(random_ops_group[s_idx])
-        discarded_mem += sum(sac_stats.memory[op_idx] for op_idx in stored_indices)
-        recomp_runtime += sum(sac_stats.runtimes[op_idx] for op_idx in stored_indices)
-        tradeoff_curve[(discarded_mem / sac_memory) + delta] = (
-            recomp_runtime / sac_runtime
-        )
+        # stored_indices: Set[int] = set()
+        # for s_idx in stored_ops:
+        #     stored_indices.add(s_idx)
+        #     if s_idx in inplace_op_groups:
+        #         stored_indices.update(inplace_op_groups[s_idx])
+        #     if s_idx in random_inplace_ops:
+        #         stored_indices.update(random_inplace_ops)
+        # discarded_mem += sum(sac_stats.memory[op_idx] for op_idx in stored_indices)
+        # recomp_runtime += sum(sac_stats.runtimes[op_idx] for op_idx in stored_indices)
+        # tradeoff_curve[(discarded_mem / sac_memory) + delta] = (
+        #     recomp_runtime / sac_runtime
+        # )
         x_ = list(tradeoff_curve.keys())
         y_ = list(tradeoff_curve.values())
         # 7. We shift the y values to left and x values to right to upperbound the trade-off function
@@ -830,11 +829,11 @@ class SACEstimator(TorchDispatchMode):
             ]
             table_data.append(row)
 
-        stored_ops, recomputed_ops, inplace_op_groups, random_ops_group, msps_meta = (
+        stored_ops, recomputed_ops, inplace_op_groups, random_inplace_ops, msps_meta = (
             greedy_order_meta.stored_ops,
             greedy_order_meta.recomputed_ops,
             greedy_order_meta.inplace_op_groups,
-            greedy_order_meta.random_ops_group,
+            greedy_order_meta.random_inplace_ops,
             greedy_order_meta.msps_meta,
         )
 
@@ -842,8 +841,8 @@ class SACEstimator(TorchDispatchMode):
             op_indices: Set[int] = {op_idx}
             if op_idx in inplace_op_groups:
                 op_indices.update(inplace_op_groups[op_idx])
-            if op_idx in random_ops_group:
-                op_indices.update(random_ops_group[op_idx])
+            if op_idx in random_inplace_ops:
+                op_indices.update(random_inplace_ops)
             discarded_mem += sum(sac_stats.memory[i] for i in op_indices)
             recomp_runtime += sum(sac_stats.runtimes[i] for i in op_indices)
             func_names = {sac_stats.func_names[i] for i in op_indices}
@@ -855,16 +854,16 @@ class SACEstimator(TorchDispatchMode):
             op_indices = {cand.op_idx}
             if cand.op_idx in inplace_op_groups:
                 op_indices.update(inplace_op_groups[cand.op_idx])
-            if cand.op_idx in random_ops_group:
-                op_indices.update(random_ops_group[cand.op_idx])
+            if op_idx in random_inplace_ops:
+                op_indices.update(random_inplace_ops)
             append_row(op_indices, cand.func_names, msps=cand.msps)
 
         for op_idx in stored_ops:
             op_indices = {op_idx}
             if op_idx in inplace_op_groups:
                 op_indices.update(inplace_op_groups[op_idx])
-            if op_idx in random_ops_group:
-                op_indices.update(random_ops_group[op_idx])
+            if op_idx in random_inplace_ops:
+                op_indices.update(random_inplace_ops)
             discarded_mem += sum(sac_stats.memory[i] for i in op_indices)
             recomp_runtime += sum(sac_stats.runtimes[i] for i in op_indices)
             func_names = {sac_stats.func_names[i] for i in op_indices}

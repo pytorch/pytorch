@@ -13,6 +13,31 @@ from torch.distributed._tools.mem_tracker import (
 from torch.distributed._tools.runtime_estimator import RuntimeEstimator
 from torch.distributed._tools.sac_estimator import SACEstimator, SACTradeOffStats
 
+import weakref
+
+def get_module_name_dict(root_module: torch.nn.Module) -> weakref.WeakKeyDictionary:
+    """
+    Create a weak key dictionary of modules and their fully qualified names.
+
+    Args:
+        root_module (torch.nn.Module): Root module to start traversal.
+
+    Returns:
+        weakref.WeakKeyDictionary: Dictionary of modules and their names.
+    """
+    module_dict = weakref.WeakKeyDictionary()
+
+    def _get_mod_name(mod: torch.nn.Module, fqn: str=""):
+        if mod in module_dict:
+            return module_dict[mod]
+        mod_name = fqn or type(mod).__name__
+        module_dict[mod] = mod_name
+        for name, submod in mod.named_children():
+            _get_mod_name(submod, f"{mod_name}.{name}")
+        return mod_name
+
+    _get_mod_name(root_module)
+    return module_dict
 
 class ModOrder(TypedDict):
     fw_pre_order: List[str]
