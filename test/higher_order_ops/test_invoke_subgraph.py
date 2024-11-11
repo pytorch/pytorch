@@ -17,6 +17,10 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_CROSSREF,
     TestCase,
 )
+from torch.testing._internal.inductor_utils import HAS_CUDA
+
+
+requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 
 
 @skipIfTorchDynamo("Not a torch._dynamo test")
@@ -162,28 +166,70 @@ class TestInvokeSubgraphCompile(TestCase):
         self.assertEqual(ref, res)
         self.assertEqual(x.grad, x_clone.grad)
 
-    def test_diamond(self):
+    @requires_cuda
+    def test_sdpa(self):
         @mark_compile_region
-        def gn(x):
-            return torch.sin(x)
+        def gn(q, k, v):
+            return torch.nn.functional.scaled_dot_product_attention(
+                q, k, v, attn_mask=None, dropout_p=0.0, is_causal=True
+            )
 
-        def fn(x):
-            a = gn(x)
-            b = gn(x)
-            return torch.sin(a) + torch.cos(b)
+        def fn(q, k, v):
+            with torch.nn.attention.sdpa_kernel(
+                [torch.nn.attention.SDPBackend.FLASH_ATTENTION]
+            ):
+                return gn(q, k, v)
 
-        x = torch.randn(8, requires_grad=True)
-        ref = fn(x)
+        q = torch.randn(
+            1, 1, 32, 32, device="cuda", dtype=torch.bfloat16, requires_grad=True
+        )
+        k = torch.randn(
+            1, 1, 32, 32, device="cuda", dtype=torch.bfloat16, requires_grad=True
+        )
+        v = torch.randn(
+            1, 1, 32, 32, device="cuda", dtype=torch.bfloat16, requires_grad=True
+        )
 
-        x_clone = x.clone().detach().requires_grad_(True)
-        res = torch.compile(fn, fullgraph=True)(x_clone)
+        ref = fn(q, k, v)
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        res = opt_fn(q, k, v)
+        res.sum().backward()
+        self.assertEqual(ref, res)
 
-        # Run backward
-        ref.sum().backward()
+        res = opt_fn(q, k, v)
         res.sum().backward()
 
+    def test_symint_from_fwd_to_bwd(self):
+        @mark_compile_region
+        def gn(x, y):
+            a = torch.sum(x, (1,), keepdim=True).view(y.shape[1], y.shape[0])
+            return torch.matmul(a, y)
+
+        def fn(x, y):
+            return gn(x, y)
+
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+
+        x = torch.randn(64, 1, requires_grad=True)
+        y = torch.randn(8, 8, requires_grad=True)
+        ref = fn(x, y)
+        res = opt_fn(x, y)
         self.assertEqual(ref, res)
-        self.assertEqual(x.grad, x_clone.grad)
+
+        x = torch.randn(256, 1, requires_grad=True)
+        y = torch.randn(16, 16, requires_grad=True)
+        ref = fn(x, y)
+        res = opt_fn(x, y)
+        self.assertEqual(ref, res)
+        res.sum().backward()
+
+        x = torch.randn(16, 1, requires_grad=True)
+        y = torch.randn(4, 4, requires_grad=True)
+        ref = fn(x, y)
+        res = opt_fn(x, y)
+        self.assertEqual(ref, res)
+        res.sum().backward()
+
 
     def test_dropout(self):
         @mark_compile_region
@@ -442,11 +488,16 @@ class GraphModule(torch.nn.Module):
             return gn(x)
 
         opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
-        x = torch.randn(8, 8, requires_grad=True)
+        # requires_grad is False deliberately to force None the joint_graph
+        # outputs
+        x = torch.randn(8, 8, requires_grad=False)
 
         ref = mod(x)
         res = opt_fn(x)
         self.assertEqual(ref, res)
+
+        ref.sum().backward()
+        res.sum().backward()
 
     def test_fail_with_direct_invoke_subgraph(self):
         from torch._higher_order_ops import invoke_subgraph
