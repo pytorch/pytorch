@@ -59,56 +59,6 @@ union BLOCK_16B
     __uint128_t ow;
 };
 
-// uint32_t test_iters = 100;
-// uint32_t prewarm_ms = 50;
-// bool fill_zero = false;
-// bool nt_loads = false;
-// bool report_metric = true;
-
-// const uint64_t mall_size = 256 * 1024 * 1024;
-// uint32_t cu_cap = 0xffffffff;
-
-// hipStream_t stream = 0;
-// uint64_t data_size = 0;
-
-// template<typename T>
-// T* transpose_cpu_nk(T* src_gpu, int M, int N, int K) {
-//     T *src = (T *)malloc((uint64_t)M * N * K * sizeof(T));
-//     T *dst = (T *)malloc((uint64_t)M * N * K * sizeof(T));
-//     _CHECK(hipMemcpy(src, src_gpu, (uint64_t)M * N * K * sizeof(T), hipMemcpyDeviceToHost));
-//     for (int s = 0; s < M; ++s) {
-//         for (int i = 0; i < N; ++i) {
-//             for (int j = 0; j < K; ++j) {
-//                 dst[(uint64_t)j * N + i + (uint64_t)s * N * K] = src[(uint64_t)i * K + j + (uint64_t)s * N * K];
-//             }
-//         }
-//     }
-//     free(src);
-//     return dst;
-// }
-
-// template<typename T>
-// void compare_nk(T* ref_cpu, T *val_gpu, int M, int N, int K) {
-//     T *temp_cpu = (T *)malloc((uint64_t)M * N * K * sizeof(T));
-//     _CHECK(hipMemcpy(temp_cpu, val_gpu, (uint64_t)M * N * K * sizeof(T), hipMemcpyDeviceToHost));
-//     int print_cnt = 0;
-//     for (int s = 0; s < M; ++s) {
-//         for (int i = 0; i < K; ++i) {
-//             for (int j = 0; j < N; ++j) {
-//                 if(temp_cpu[(uint64_t)i * N + j + (uint64_t)s * N * K] != ref_cpu[(uint64_t)i * N + j + (uint64_t)s * N * K]) {
-//                     printf("error: %d %d %d ref %d val %d\n", s, j, i, ref_cpu[(uint64_t)i * N + (uint64_t)j + s * N * K], temp_cpu[(uint64_t)i * M + j + (uint64_t)s * N * K]);
-//                     print_cnt++;
-//                     if(print_cnt > 10){
-//                         free(temp_cpu);
-//                         return;
-//                     }
-//                 }
-//             }
-//         }
-//     }
-//     free(temp_cpu);
-// }
-
 template<bool _nt, class _T>
 __device__ __forceinline__ _T load(const _T& ref)
 {
