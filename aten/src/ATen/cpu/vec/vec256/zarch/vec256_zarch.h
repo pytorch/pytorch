@@ -22,18 +22,18 @@ inline namespace CPU_CAPABILITY {
 template <typename T>
 constexpr bool is_zarch_implemented() {
   return (
-      std::is_same<T, float>::value || std::is_same<T, double>::value ||
-      std::is_same<T, int8_t>::value || std::is_same<T, uint8_t>::value ||
-      std::is_same<T, uint16_t>::value || std::is_same<T, int16_t>::value ||
-      std::is_same<T, int32_t>::value || std::is_same<T, int64_t>::value);
+      std::is_same_v<T, float> || std::is_same_v<T, double> ||
+      std::is_same_v<T, int8_t> || std::is_same_v<T, uint8_t> ||
+      std::is_same_v<T, uint16_t> || std::is_same_v<T, int16_t> ||
+      std::is_same_v<T, int32_t> || std::is_same_v<T, int64_t>);
 }
 
 template <typename T>
 constexpr bool is_zarch_implemented_quant() {
   return (
-      std::is_same<T, c10::qint32>::value ||
-      std::is_same<T, c10::qint8>::value ||
-      std::is_same<T, c10::quint8>::value);
+      std::is_same_v<T, c10::qint32> ||
+      std::is_same_v<T, c10::qint8> ||
+      std::is_same_v<T, c10::quint8>);
 }
 
 template <typename T>
@@ -790,14 +790,14 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented<T>()>> {
 
   template <
       typename U = T,
-      std::enable_if_t<!std::is_unsigned<U>::value, int> = 0>
+      std::enable_if_t<!std::is_unsigned_v<U>, int> = 0>
   Vectorized<U> C10_ALWAYS_INLINE abs() const {
     return {vec_abs(_vec0), vec_abs(_vec1)};
   }
 
   template <
       typename U = T,
-      std::enable_if_t<std::is_unsigned<U>::value, int> = 0>
+      std::enable_if_t<std::is_unsigned_v<U>, int> = 0>
   Vectorized<U> C10_ALWAYS_INLINE abs() const {
     return {_vec0, _vec1};
   }
@@ -828,7 +828,7 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented<T>()>> {
 
   template <
       typename U = T,
-      std::enable_if_t<std::is_floating_point<U>::value, int> = 0>
+      std::enable_if_t<std::is_floating_point_v<U>, int> = 0>
   Vectorized<U> angle() const {
     auto tmp = blendv(
         Vectorized<U>(0), Vectorized<U>(c10::pi<U>), *this < Vectorized<U>(0));
@@ -837,7 +837,7 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented<T>()>> {
 
   template <
       typename U = T,
-      std::enable_if_t<!std::is_floating_point<U>::value, int> = 0>
+      std::enable_if_t<!std::is_floating_point_v<U>, int> = 0>
   Vectorized<U> angle() const {
     return blendv(
         Vectorized<U>(0), Vectorized<U>(c10::pi<U>), *this < Vectorized<U>(0));
@@ -855,7 +855,7 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented<T>()>> {
 
   template <
       typename U = T,
-      std::enable_if_t<std::is_floating_point<U>::value, int> = 0>
+      std::enable_if_t<std::is_floating_point_v<U>, int> = 0>
   int zero_mask() const {
     auto cmp = (*this == Vectorized<U>(0));
     constexpr auto mask_zero_bits = GetBpermZeroMask<U>();
@@ -902,7 +902,7 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented<T>()>> {
 
   template <
       typename U = T,
-      std::enable_if_t<std::is_same<U, float>::value, int> = 0>
+      std::enable_if_t<std::is_same_v<U, float>, int> = 0>
   inline Vectorized<T> mapOrdinary(float (*const f)(float)) const {
     float a00 = f(_vec0[0]);
     float a01 = f(_vec0[1]);
@@ -917,14 +917,14 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented<T>()>> {
 
   template <
       typename U = T,
-      std::enable_if_t<std::is_same<U, double>::value, int> = 0>
+      std::enable_if_t<std::is_same_v<U, double>, int> = 0>
   inline Vectorized<T> mapOrdinary(double (*const f)(double)) const {
     return Vectorized<T>(f(_vec0[0]), f(_vec0[1]), f(_vec1[0]), f(_vec1[1]));
   }
 
   template <
       typename U = T,
-      std::enable_if_t<std::is_same<U, float>::value, int> = 0>
+      std::enable_if_t<std::is_same_v<U, float>, int> = 0>
   inline Vectorized<T> mapOrdinary(
       float (*const f)(float, float),
       const Vectorized<T>& b) const {
@@ -941,7 +941,7 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented<T>()>> {
 
   template <
       typename U = T,
-      std::enable_if_t<std::is_same<U, double>::value, int> = 0>
+      std::enable_if_t<std::is_same_v<U, double>, int> = 0>
   inline Vectorized<T> mapOrdinary(
       double (*const f)(double, double),
       const Vectorized<T>& b) const {
@@ -956,7 +956,7 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented<T>()>> {
       typename FloatOp,
       typename DoubleOp,
       typename U = T,
-      std::enable_if_t<std::is_same<U, float>::value, int> = 0>
+      std::enable_if_t<std::is_same_v<U, float>, int> = 0>
   inline Vectorized<T> mapSleef(FloatOp f, DoubleOp d) const {
     vtype a0 = f(_vec0);
     vtype a1 = f(_vec1);
@@ -967,7 +967,7 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented<T>()>> {
       typename FloatOp,
       typename DoubleOp,
       typename U = T,
-      std::enable_if_t<std::is_same<U, double>::value, int> = 0>
+      std::enable_if_t<std::is_same_v<U, double>, int> = 0>
   inline Vectorized<T> mapSleef(FloatOp f, DoubleOp d) const {
     return Vectorized<T>(d(_vec0), d(_vec1));
   }
@@ -976,7 +976,7 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented<T>()>> {
       typename FloatOp,
       typename DoubleOp,
       typename U = T,
-      std::enable_if_t<std::is_same<U, float>::value, int> = 0>
+      std::enable_if_t<std::is_same_v<U, float>, int> = 0>
   inline Vectorized<T> mapSleef(FloatOp f, DoubleOp d, const Vectorized<T>& b)
       const {
     vtype a0 = f(_vec0, b._vec0);
@@ -988,7 +988,7 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented<T>()>> {
       typename FloatOp,
       typename DoubleOp,
       typename U = T,
-      std::enable_if_t<std::is_same<U, double>::value, int> = 0>
+      std::enable_if_t<std::is_same_v<U, double>, int> = 0>
   inline Vectorized<T> mapSleef(FloatOp f, DoubleOp d, const Vectorized<T>& b)
       const {
     return Vectorized<T>(d(_vec0, b._vec0), d(_vec1, b._vec1));
@@ -1112,7 +1112,7 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented<T>()>> {
 
   template <
       typename U = T,
-      std::enable_if_t<!std::is_floating_point<U>::value, int> = 0>
+      std::enable_if_t<!std::is_floating_point_v<U>, int> = 0>
   Vectorized<T> minimum(const Vectorized<T>& other) const {
     return {vec_min(_vec0, other._vec0), vec_min(_vec1, other._vec1)};
   }
@@ -1120,7 +1120,7 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented<T>()>> {
   /* Propagates NaN if either input is a NaN. */
   template <
       typename U = T,
-      std::enable_if_t<std::is_floating_point<U>::value, int> = 0>
+      std::enable_if_t<std::is_floating_point_v<U>, int> = 0>
   Vectorized<T> minimum(const Vectorized<T>& other) const {
     Vectorized<T> tmp = {vec_min(_vec0, other._vec0), vec_min(_vec1, other._vec1)};
     tmp = blendv(tmp, *this, isnan());
@@ -1129,7 +1129,7 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented<T>()>> {
 
   template <
       typename U = T,
-      std::enable_if_t<!std::is_floating_point<U>::value, int> = 0>
+      std::enable_if_t<!std::is_floating_point_v<U>, int> = 0>
   Vectorized<T> maximum(const Vectorized<T>& other) const {
     return {vec_max(_vec0, other._vec0), vec_max(_vec1, other._vec1)};
   }
@@ -1137,7 +1137,7 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented<T>()>> {
   /* Propagates NaN if either input is a NaN. */
   template <
       typename U = T,
-      std::enable_if_t<std::is_floating_point<U>::value, int> = 0>
+      std::enable_if_t<std::is_floating_point_v<U>, int> = 0>
   Vectorized<T> maximum(const Vectorized<T>& other) const {
     Vectorized<T> tmp = {vec_max(_vec0, other._vec0), vec_max(_vec1, other._vec1)};
     tmp = blendv(tmp, *this, isnan());
@@ -1146,7 +1146,7 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented<T>()>> {
 
   template <
       typename U = T,
-      std::enable_if_t<!std::is_floating_point<U>::value, int> = 0>
+      std::enable_if_t<!std::is_floating_point_v<U>, int> = 0>
   Vectorized<T> clamp_min(const Vectorized<T>& min) const {
     return {vec_max(_vec0, min._vec0), vec_max(_vec1, min._vec1)};
   }
@@ -1154,7 +1154,7 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented<T>()>> {
   /* Keeps NaN if actual value is NaN */
   template <
       typename U = T,
-      std::enable_if_t<std::is_floating_point<U>::value, int> = 0>
+      std::enable_if_t<std::is_floating_point_v<U>, int> = 0>
   Vectorized<T> clamp_min(const Vectorized<T>& min) const {
     Vectorized<T> tmp = {vec_max(_vec0, min._vec0), vec_max(_vec1, min._vec1)};
     return blendv(tmp, *this, isnan());
@@ -1162,7 +1162,7 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented<T>()>> {
 
   template <
       typename U = T,
-      std::enable_if_t<!std::is_floating_point<U>::value, int> = 0>
+      std::enable_if_t<!std::is_floating_point_v<U>, int> = 0>
   Vectorized<T> clamp_max(const Vectorized<T>& max) const {
     return {vec_min(_vec0, max._vec0), vec_min(_vec1, max._vec1)};
   }
@@ -1170,7 +1170,7 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented<T>()>> {
   /* Keeps NaN if actual value is NaN */
   template <
       typename U = T,
-      std::enable_if_t<std::is_floating_point<U>::value, int> = 0>
+      std::enable_if_t<std::is_floating_point_v<U>, int> = 0>
   Vectorized<T> clamp_max(const Vectorized<T>& max) const {
     Vectorized<T> tmp = {vec_min(_vec0, max._vec0), vec_min(_vec1, max._vec1)};
     return blendv(tmp, *this, isnan());
@@ -1178,7 +1178,7 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented<T>()>> {
 
   template <
       typename U = T,
-      std::enable_if_t<std::is_same<U, float>::value, int> = 0>
+      std::enable_if_t<std::is_same_v<U, float>, int> = 0>
   Vectorized<T> swapped() const {
     auto swap_mask = GetSwapMaskFloat();
     vtype v0 = vec_perm(_vec0, _vec0, swap_mask);
@@ -1188,7 +1188,7 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented<T>()>> {
 
   template <
       typename U = T,
-      std::enable_if_t<std::is_same<U, double>::value, int> = 0>
+      std::enable_if_t<std::is_same_v<U, double>, int> = 0>
   Vectorized<T> swapped() const {
     vtype v0 = {_vec0[1], _vec0[0]};
     vtype v1 = {_vec1[1], _vec1[0]};
@@ -1197,7 +1197,7 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented<T>()>> {
 
   template <
       typename U = T,
-      std::enable_if_t<std::is_floating_point<U>::value, int> = 0>
+      std::enable_if_t<std::is_floating_point_v<U>, int> = 0>
   static Vectorized<T> mergee(Vectorized<T>& first, Vectorized<T>& second) {
     return {
         vec_mergee(first._vec0, second._vec0),
@@ -1206,7 +1206,7 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented<T>()>> {
 
   template <
       typename U = T,
-      std::enable_if_t<std::is_floating_point<U>::value, int> = 0>
+      std::enable_if_t<std::is_floating_point_v<U>, int> = 0>
   static Vectorized<T> mergeo(Vectorized<T>& first, Vectorized<T>& second) {
     return {
         vec_mergeo(first._vec0, second._vec0),
@@ -1243,21 +1243,21 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented<T>()>> {
 
   template <
       typename U = T,
-      std::enable_if_t<std::is_floating_point<U>::value, int> = 0>
+      std::enable_if_t<std::is_floating_point_v<U>, int> = 0>
   Vectorized<T> mergee() const {
     return {vec_mergee(_vec0, _vec0), vec_mergee(_vec1, _vec1)};
   }
 
   template <
       typename U = T,
-      std::enable_if_t<std::is_floating_point<U>::value, int> = 0>
+      std::enable_if_t<std::is_floating_point_v<U>, int> = 0>
   Vectorized<T> mergeo() const {
     return {vec_mergeo(_vec0, _vec0), vec_mergeo(_vec1, _vec1)};
   }
 
   template <
       typename U = T,
-      std::enable_if_t<std::is_same<U, uint8_t>::value, int> = 0>
+      std::enable_if_t<std::is_same_v<U, uint8_t>, int> = 0>
   Vectorized<int32_t> to_vec_float_helper() const {
     int32_t values[8] = {
       _vec0[0],
@@ -1278,7 +1278,7 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented<T>()>> {
 
   template <
       typename U = T,
-      std::enable_if_t<std::is_same<U, int32_t>::value, int> = 0>
+      std::enable_if_t<std::is_same_v<U, int32_t>, int> = 0>
   Vectorized<uint8_t> to_vec_uint8_helper() const {
     // helper function for float to uint8_t conversion
     uint8_t values[8] = {

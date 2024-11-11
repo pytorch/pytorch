@@ -138,7 +138,8 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
    */
   c10::Stream getStream(c10::Device d) const noexcept override {
     py::gil_scoped_acquire acquire;
-    return get_method("getStream")(d.index()).cast<c10::Stream>();
+    auto stream_id = get_method("getStream")(d.index()).cast<c10::StreamId>();
+    return c10::Stream(c10::Stream::UNSAFE, d, stream_id);
   }
 
   /**
@@ -164,7 +165,8 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
    */
   c10::Stream getNewStream(c10::Device d, int priority = 0) const override {
     py::gil_scoped_acquire acquire;
-    return get_method("getNewStream")(d.index(), priority).cast<c10::Stream>();
+    auto stream_id = get_method("getNewStream")(d.index(), priority).cast<c10::StreamId>();
+    return c10::Stream(c10::Stream::UNSAFE, d, stream_id);
   }
 
   /**
@@ -174,7 +176,8 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
    */
   c10::Stream exchangeStream(c10::Stream s) const noexcept override {
     py::gil_scoped_acquire acquire;
-    return get_method("exchangeStream")(s).cast<c10::Stream>();
+    auto stream_id = get_method("exchangeStream")(s).cast<c10::StreamId>();
+    return c10::Stream(c10::Stream::UNSAFE, s.device(), stream_id);
   }
 
   /**
@@ -183,7 +186,7 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   void destroyEvent(void* event, const c10::DeviceIndex device_index)
       const noexcept override {
     py::gil_scoped_acquire acquire;
-    get_method("destroyEvent")(event, device_index);
+    get_method("destroyEvent")((int64_t)event, device_index);
   }
 
   /**
@@ -198,7 +201,7 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
       const c10::DeviceIndex device_index,
       const c10::EventFlag flag) const override {
     py::gil_scoped_acquire acquire;
-    get_method("record")(event, stream, device_index, flag);
+    get_method("record")((int64_t)event, stream, device_index, (int64_t)flag);
   }
 
   /**
@@ -211,7 +214,7 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
    */
   void block(void* event, const c10::Stream& stream) const override {
     py::gil_scoped_acquire acquire;
-    get_method("block")(event, stream);
+    get_method("block")((int64_t)event, stream);
   }
 
   /**
@@ -222,7 +225,7 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
    */
   bool queryEvent(void* event) const override {
     py::gil_scoped_acquire acquire;
-    return get_method("queryEvent")(event).cast<bool>();
+    return get_method("queryEvent")((int64_t)event).cast<bool>();
   }
 
   /**
@@ -258,7 +261,7 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
    */
   void synchronizeEvent(void* event) const override {
     py::gil_scoped_acquire acquire;
-    get_method("synchronizeEvent")(event);
+    get_method("synchronizeEvent")((int64_t)event);
   }
 
   /**
@@ -278,7 +281,7 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   double elapsedTime(void* event1, void* event2, const c10::DeviceIndex device_index)
       const override {
     py::gil_scoped_acquire acquire;
-    return get_method("elapsedTime")(event1, event2, device_index).cast<double>();
+    return get_method("elapsedTime")((int64_t)event1, (int64_t)event2, device_index).cast<double>();
   }
 };
 
