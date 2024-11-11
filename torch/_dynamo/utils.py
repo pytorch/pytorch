@@ -856,6 +856,9 @@ class CompilationMetrics:
     remote_fx_graph_cache_put_time_us: Optional[int] = None
     backward_cumulative_compile_time_us: Optional[int] = None
     end_time_us: Optional[int] = None
+    pre_grad_pass_cumulative_time_us: Optional[int] = None
+    post_grad_pass_cumulative_time_us: Optional[int] = None
+    joint_graph_pass_cumulative_time_us: Optional[int] = None
     log_format_version: int = LOG_FORMAT_VERSION
 
 
