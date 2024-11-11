@@ -97,7 +97,6 @@ jobs:
     {%- endif %}
     steps:
       !{{ checkout(deep_clone=False, directory="builder", repository="iremyux/pytorch-builder", branch="nightly-for-win-arm64") }}
-      !{{ common.checkout(deep_clone=False, directory="pytorch") }} 
       - name: Install Git
         shell: cmd
         run: |
