@@ -72,6 +72,8 @@ env:
   PR_NUMBER: ${{ github.event.pull_request.number }}
   SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
   SKIP_ALL_TESTS: 1
+  BUILDER_ROOT: /builder
+  PYTORCH_ROOT: /pytorch
 !{{ common.concurrency(build_environment) }}
 
 jobs:
