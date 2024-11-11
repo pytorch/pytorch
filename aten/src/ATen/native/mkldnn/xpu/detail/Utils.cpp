@@ -5,7 +5,7 @@ namespace at::native::onednn {
 dnnl::memory make_onednn_memory(
     dnnl::memory::desc md,
     dnnl::engine& engine,
-    void* ptr){
+    void* ptr) {
   return dnnl::sycl_interop::make_memory(
       md,
       engine,
@@ -114,10 +114,8 @@ dnnl::memory::dims get_onednn_strides(const at::Tensor& tensor) {
 }
 
 dnnl::memory::desc get_onednn_md(const at::Tensor& tensor) {
-  return {
-      get_onednn_dims(tensor),
-      get_onednn_dtype(tensor),
-      get_onednn_strides(tensor)};
+  Tensor t = tensor.sizes().size() == 0 ? tensor.unsqueeze(0) : tensor;
+  return {get_onednn_dims(t), get_onednn_dtype(t), get_onednn_strides(t)};
 }
 
 bool onednn_strides_check(const at::Tensor& src) {
@@ -206,9 +204,7 @@ bool is_broadcast(const at::Tensor& t) {
   return false;
 }
 
-bool is_onednn_matmul_strides(
-    const at::Tensor& tensor,
-    bool is_dst) {
+bool is_onednn_matmul_strides(const at::Tensor& tensor, bool is_dst) {
   // https://oneapi-src.github.io/oneDNN/dev_guide_matmul.html
   // oneDNN matmul only support 2-dim and 3-dim
   // 2D src(Mxk), wei(KxN), dst(MxN)
@@ -290,14 +286,14 @@ bool binary_valid(
      * 5. self and other should be in the same datatype.
      * 6. self and other should be contiguous or channel-last contiguous.*/
 
-
   // 1. self and other should be xpu tensor and be defined.
   if ((!self.defined()) || (!other.defined()) || (!self.is_xpu()) ||
       (!other.is_xpu()))
     return false;
 
   // 2. self or other should not be scalar (wrapped tensor).
-  if (self.unsafeGetTensorImpl()->is_wrapped_number() || other.unsafeGetTensorImpl()->is_wrapped_number())
+  if (self.unsafeGetTensorImpl()->is_wrapped_number() ||
+      other.unsafeGetTensorImpl()->is_wrapped_number())
     return false;
 
   // 3. dim of self and other should be equal and must be larger than 0 and
@@ -349,19 +345,19 @@ bool binary_valid(
   return false;
 }
 
-static inline bool is_channels_last(at::MemoryFormat fmt){
-  return (at::MemoryFormat::ChannelsLast == fmt) || (at::MemoryFormat::ChannelsLast3d == fmt);
+static inline bool is_channels_last(at::MemoryFormat fmt) {
+  return (at::MemoryFormat::ChannelsLast == fmt) ||
+      (at::MemoryFormat::ChannelsLast3d == fmt);
 }
 
-static inline bool is_smf_channels_last(const Tensor& t){
+static inline bool is_smf_channels_last(const Tensor& t) {
   return is_channels_last(t.suggest_memory_format());
 }
 
 bool use_channels_last_for_conv(
     const at::Tensor& src,
     const at::Tensor& weight,
-    bool is_transpose){
-
+    bool is_transpose) {
   if (!src.defined() || src.is_sparse()) {
     // suggest channels_first
     return false;
@@ -377,4 +373,4 @@ bool use_channels_last_for_conv(
   return false;
 }
 
-}
+} // namespace at::native::onednn
