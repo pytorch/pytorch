@@ -1603,7 +1603,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
         bool checkExceptionDump = false;
         try {
           checkExceptionDump =
-              globalStore_->check({std::string(EXCEPTION_DUMP)});
+              globalStore_->check({std::string(kStoreDumpKey)});
         } catch (const std::exception& e) {
           LOG(WARNING)
               << logPrefix()
@@ -1623,7 +1623,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
           }
           shouldDump_.store(true);
           try {
-            auto vec = globalStore_->get(std::string(EXCEPTION_DUMP));
+            auto vec = globalStore_->get(std::string(kStoreDumpKey));
             TORCH_CHECK_WITH(
                 DistBackendError,
                 vec.size() == sizeof(int),
@@ -1973,6 +1973,8 @@ void ProcessGroupNCCL::broadcastSignal(
 int ProcessGroupNCCL::getSignalSrcRank(
     c10::intrusive_ptr<Store>& store,
     const std::string& signal) {
+  // This function is 'non blocking'. We first 'check' if the key exists in the
+  // store, then read/get the value only if the key exists.
   int srcRank = -1;
   bool signalExists = false;
   try {
@@ -1983,6 +1985,7 @@ int ProcessGroupNCCL::getSignalSrcRank(
   }
 
   if (signalExists) {
+    // key exists, now read and parse the value (source rank)
     try {
       auto vec = store->get(std::string(signal));
       TORCH_CHECK_WITH(
@@ -2000,7 +2003,7 @@ int ProcessGroupNCCL::getSignalSrcRank(
 
 void ProcessGroupNCCL::broadcastDumpSignal() {
   // broadcast dump signal to all other global ranks.
-  broadcastSignal(globalStore_, std::string(EXCEPTION_DUMP), globalRank());
+  broadcastSignal(globalStore_, std::string(kStoreDumpKey), globalRank());
   // signal the local rank to start dumping
   if (!shouldDump_.load()) {
     LOG(ERROR) << logPrefix() << "First PG on this rank to signal dumping.";
@@ -2020,6 +2023,21 @@ void ProcessGroupNCCL::broadcastDumpSignal() {
     LOG(INFO) << logPrefix() << "slept for " << computeDeltaMS(start, end)
               << "ms"
               << " giving time for flight recorder dumps to finish.";
+  }
+}
+
+void ProcessGroupNCCL::checkAndSetRemoteError() {
+  // if the error is already set, no need to check again
+  if (getError() != ErrorType::NO_ERROR) {
+    return;
+  }
+  int remoteErrorRank =
+      getSignalSrcRank(store_, std::string(kStoreErrorSignalKey));
+  if (remoteErrorRank != -1) {
+    std::lock_guard<std::mutex> lock(errorMutex_);
+    error_ = ErrorType::REMOTE_ERROR;
+    LOG(ERROR) << c10::str(
+        logPrefix(), " remote error detected from rank: ", remoteErrorRank);
   }
 }
 
@@ -2087,18 +2105,7 @@ void ProcessGroupNCCL::watchdogHandler() {
     }
 
     // Check and set remote error if it has not been set before
-    if (getError() == ErrorType::NO_ERROR) {
-      int remoteErrorRank =
-          getSignalSrcRank(store_, std::string(REMOTE_ERROR_SIGNAL));
-      if (remoteErrorRank != -1) {
-        std::lock_guard<std::mutex> lock(errorMutex_);
-        error_ = ErrorType::REMOTE_ERROR;
-        LOG(ERROR) << c10::str(
-            logPrefix(),
-            " remote error detected by watchdog thread from rank: ",
-            remoteErrorRank);
-      }
-    }
+    checkAndSetRemoteError();
 
     for (auto it = workMetaList_.begin(); it != workMetaList_.end();
          /* no increment */) {
@@ -2112,10 +2119,12 @@ void ProcessGroupNCCL::watchdogHandler() {
       if (!terminateProcessGroup_.load()) {
         work.checkAndSetException();
       }
-      if (work.exception() && getError() == ErrorType::NO_ERROR) {
+      if (work.exception()) {
         // set the error to the first error found
         std::lock_guard<std::mutex> lock(errorMutex_);
-        error_ = ErrorType::NCCL_ERROR;
+        if (error_ == ErrorType::NO_ERROR) {
+          error_ = ErrorType::COMM_ERROR;
+        }
       }
       // Then check if work has timed out
       // Skip if work has encountered an error
@@ -2124,11 +2133,11 @@ void ProcessGroupNCCL::watchdogHandler() {
       // Report desync state in case of timeout (if TORCH_NCCL_DESYNC_DEBUG is
       // turned on; otherwise, run() is no-op)
       if (timedout) {
-        desyncDebugger_.run();
-        if (getError() == ErrorType::NO_ERROR) {
-          std::lock_guard<std::mutex> lock(errorMutex_);
+        std::lock_guard<std::mutex> lock(errorMutex_);
+        if (error_ == ErrorType::NO_ERROR) {
           error_ = ErrorType::TIMEOUT;
         }
+        desyncDebugger_.run();
       }
 
       // If work hits an exception (either an error or timeout)
@@ -2143,7 +2152,7 @@ void ProcessGroupNCCL::watchdogHandler() {
             pgStatus_->lastCompletedSeq);
 
         // broadcast remote error signal to all other ranks in this specific PG.
-        broadcastSignal(store_, std::string(REMOTE_ERROR_SIGNAL), rank_);
+        broadcastSignal(store_, std::string(kStoreErrorSignalKey), rank_);
 
         // Print the traceback of the collective at call time
         work.printTraceback();

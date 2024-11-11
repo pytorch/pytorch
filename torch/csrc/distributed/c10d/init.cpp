@@ -2829,12 +2829,6 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
       "_get_intra_node_comm_usage_counter",
       &::c10d::intra_node_comm::getIntraNodeCommUsageCounter);
 
-  py::enum_<::c10d::ErrorType>(module, "ErrorType")
-      .value("NO_ERROR", ::c10d::ErrorType::NO_ERROR)
-      .value("TIMEOUT", ::c10d::ErrorType::TIMEOUT)
-      .value("NCCL_ERROR", ::c10d::ErrorType::NCCL_ERROR)
-      .value("REMOTE_ERROR", ::c10d::ErrorType::REMOTE_ERROR);
-
 #ifdef NCCL_HAS_COMM_CTA_CGA
   py::class_<ncclConfig_t>(
       processGroupNCCL,
@@ -2976,6 +2970,12 @@ Example::
       .value("TIMEOUT", ::c10d::WorkResult::TIMEOUT)
       .value("COMM_ERROR", ::c10d::WorkResult::COMM_ERROR)
       .value("UNKNOWN", ::c10d::WorkResult::UNKNOWN);
+
+  py::enum_<::c10d::ErrorType>(module, "ErrorType")
+      .value("NO_ERROR", ::c10d::ErrorType::NO_ERROR)
+      .value("TIMEOUT", ::c10d::ErrorType::TIMEOUT)
+      .value("COMM_ERROR", ::c10d::ErrorType::COMM_ERROR)
+      .value("REMOTE_ERROR", ::c10d::ErrorType::REMOTE_ERROR);
 
   py::class_<::c10d::WorkInfo, std::shared_ptr<::c10d::WorkInfo>>(
       module, "WorkInfo")

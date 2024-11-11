@@ -125,9 +125,9 @@ static std::vector<std::string> TORCH_NCCL_NAN_CHECK = {"TORCH_NCCL_NAN_CHECK"};
 
 constexpr const char* NCCL_BACKEND_NAME = "nccl";
 
-constexpr const char* EXCEPTION_DUMP = "exception_dump";
+constexpr const char* kStoreDumpKey = "exception_dump";
 
-constexpr const char* REMOTE_ERROR_SIGNAL = "remote_error";
+constexpr const char* kStoreErrorSignalKey = "remote_error";
 
 constexpr const int kWorkStatusUpdatePeriodMs = 30 * 1000; // 30 seconds
 
@@ -146,15 +146,6 @@ enum ErrorHandlingMode {
   TearDown = 1,
   CleanUpOnly = 2,
   SkipCleanUp = 3
-};
-
-enum TORCH_API ErrorType {
-  NO_ERROR = 0,
-  TIMEOUT = 1,
-  NCCL_ERROR = 2,
-  // TODO, do we need to distinguish between remote timeout or remote NCCL
-  // errors?
-  REMOTE_ERROR = 3,
 };
 
 #define SHOULD_CLEAN_UP(a) (a != NoHandling && a != SkipCleanUp)
@@ -768,7 +759,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // If all comms on this PG are fully initialized, return true.
   bool isInitialized();
 
-  ErrorType getError();
+  ErrorType getError() override;
 
   // This method adds a temporary extension for the timeout period,
   // applying to all collectives between the calling of this API and
@@ -1007,6 +998,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   std::string getNCCLWatchdogTimeoutErrorMsg(const std::string& extraMsg);
 
   std::string getNCCLWatchdogTimeoutExitMsg(const std::string& exitReason);
+
+  void checkAndSetRemoteError();
 
   static const int64_t kWatchdogThreadSleepMillis;
 

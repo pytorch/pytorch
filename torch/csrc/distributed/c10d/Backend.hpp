@@ -17,6 +17,16 @@ constexpr auto kBackendDefaultTimeout =
 
 namespace c10d {
 
+enum TORCH_API ErrorType {
+  NO_ERROR = 0,
+  TIMEOUT = 1,
+  // e.g., NCCL error, etc
+  COMM_ERROR = 2,
+  // TODO, do we need to distinguish between remote timeout or remote NCCL
+  // errors?
+  REMOTE_ERROR = 3,
+};
+
 class TORCH_API Backend : public torch::CustomClassHolder {
  public:
   // Backend Options is a base struct that defines the basic options
@@ -391,6 +401,14 @@ class TORCH_API Backend : public torch::CustomClassHolder {
       TORCH_CHECK(device->has_index(), "setBoundDeviceId must have an index");
     }
     bound_device_id_ = device;
+  }
+
+  virtual ErrorType getError() {
+    TORCH_CHECK(
+        false,
+        "Only ProcessGrouppNCCL supports getError, but got ",
+        getBackendName(),
+        " backend.");
   }
 
  protected:
