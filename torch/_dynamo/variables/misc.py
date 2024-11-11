@@ -963,15 +963,23 @@ class LambdaVariable(VariableTracker):
 class GetAttrVariable(VariableTracker):
     _nonvar_fields = {
         "name",
+        "py_type",
         *VariableTracker._nonvar_fields,
     }
 
-    def __init__(self, obj, name, **kwargs) -> None:
+    def __init__(self, obj, name, py_type=None, **kwargs) -> None:
         super().__init__(**kwargs)
         assert isinstance(obj, VariableTracker)
         assert isinstance(name, str)
         self.obj = obj
         self.name = name
+        self.py_type = py_type  # In some cases we know the type (ex. tensor methods)
+
+    def python_type(self):
+        if self.py_type is not None:
+            return self.py_type
+        else:
+            super().python_type()
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.obj}, {self.name})"
