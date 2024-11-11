@@ -7,41 +7,6 @@
 #include <inttypes.h>
 #include <assert.h>
 #include <string.h>
-// #include <hip/hip_runtime.h>
-// #include <hip/hip_ext.h>
-
-// #define _CHECK(condition)                                                                   \
-//     {                                                                                       \
-//         const hipError_t error = condition;                                                 \
-//         if(error != hipSuccess)                                                             \
-//         {                                                                                   \
-//             std::cerr << "An error encountered: \"" << hipGetErrorString(error) << "\" at " \
-//                       << __FILE__ << ':' << __LINE__ << std::endl;                          \
-//             exit(1);                                                                  \
-//         }                                                                                   \
-//     }
-
-// class Timer
-// {
-// public:
-//     void Set(uint32_t delay_ms)
-//     {
-//         timespec t;
-//         clock_gettime(CLOCK_MONOTONIC, &t);
-//         et_ = t.tv_sec * 1000000000ULL + t.tv_nsec + delay_ms * 1000000ULL;
-//     }
-
-//     bool IsExpired()
-//     {
-//         timespec t;
-//         clock_gettime(CLOCK_MONOTONIC, &t);
-//         uint64_t ct = t.tv_sec * 1000000000ULL + t.tv_nsec;
-//         return ct > et_;
-//     }
-
-// private:
-//     uint64_t et_;
-// };
 
 #define EL_TYPE uint16_t
 #define BIG_TILE_SIZE 64
