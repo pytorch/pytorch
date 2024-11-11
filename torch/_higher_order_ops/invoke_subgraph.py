@@ -62,6 +62,33 @@ class InvokeSubgraphHOP(HigherOrderOperator):
 invoke_subgraph = InvokeSubgraphHOP()
 
 
+def invoke_subgraph_placeholder(subgraph, *args, **kwargs):
+    # Just a placeholder for Dynamo to replace with invoke_subgraph
+    return subgraph(*args, **kwargs)
+
+
+def mark_compile_region(fn=None):
+    """
+    This wrapper instructs torch.compile to compile the wrapped region once and
+    reuse the compiled artifact, instead of the usual way of aggressively
+    inlining the function.
+
+    Under the hood, it tells TorchDynamo to use InvokeSubgraph HOP for the
+    region. For PyTorch eager, this is a no-op.
+    """
+
+    def wrap(func):
+        def inner(*args, **kwargs):
+            return invoke_subgraph_placeholder(func, *args, **kwargs)
+
+        return inner
+
+    if fn:
+        return wrap(fn)
+    else:
+        return wrap
+
+
 def get_invoke_subgraph_cache():
     cache = None
     if tracing_ctx := torch._guards.TracingContext.try_get():
@@ -78,6 +105,13 @@ def trace_joint_graph(fn, fw_inputs, fw_outputs):
 
     dummy_aot_config = get_dummy_aot_autograd_config()
 
+    # This joint_fn is inserted as the backward graph as is. This simplifies the
+    # min-cut partitioner work later on.
+    #   Input signature - (*primals, *tangents)
+    #   Output signature - (*grads, *fw_outs)
+    # The output signature is deliberately kept grads first and fw_outs second.
+    # Having grads first makes the min-cut partitioner HOP graph stitching
+    # easier.
     def joint_fn(*primals_and_tangents):
         primals = primals_and_tangents[: len(fw_inputs)]
         tangents = primals_and_tangents[len(fw_inputs) :]
@@ -88,7 +122,9 @@ def trace_joint_graph(fn, fw_inputs, fw_outputs):
 
         maybe_clone = clone_outputs_aliasing_inputs(primals_and_tangents)
 
-        return pytree.tree_map(maybe_clone, list(fw_outs) + grads)
+        # return signature is deliberately kept (*grads, *fw_outs). This
+        # simplifies partitioning work later on.
+        return pytree.tree_map(maybe_clone, grads + list(fw_outs))
 
     primals = list(fw_inputs)
     # This assumes that the tangent strides match fw_outputs strides. Check the
@@ -164,12 +200,12 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
         contiguous_grad_outs = tuple([o.contiguous() for o in grad_outs])
 
         # bw_graph is a joint graph with signature (*primals_and_tangents) and
-        # returns (*fw_outs_and_grads). To get the grads, we use the num_fw_outs
+        # returns (*grads_and_fw_outs). To get the grads, we use the num_fw_outs
         # to extract the grads.
         primals_and_tangents = primals + contiguous_grad_outs
         grads = invoke_subgraph(
             bw_graph, f"___backward_{identifier}", primals_and_tangents
-        )[num_fw_outs:]
+        )[:-num_fw_outs]
         return None, None, None, None, *grads
 
 
@@ -235,7 +271,8 @@ def _(ctx, subgraph, identifier, operands):
 @invoke_subgraph.py_impl(FakeTensorMode)
 def _(mode, subgraph, identifier, operands):
     # TODO(anijain2305) - Implement fake tensor caching.
-    return subgraph(*operands)
+    with mode:
+        return subgraph(*operands)
 
 
 @invoke_subgraph.py_impl(ProxyTorchDispatchMode)
