@@ -582,18 +582,19 @@ class CPUReproTests(TestCase):
         batch_size,
         seq_len,
     ):
-        self._test_lstm_packed(
-            unbatched,
-            input_size,
-            hidden_size,
-            num_layers,
-            bidirectional,
-            bias,
-            empty_state,
-            batch_first,
-            batch_size,
-            seq_len,
-        )
+        with torch.backends.mkldnn.verbose(torch.backends.mkldnn.VERBOSE_ON):
+            self._test_lstm_packed(
+                unbatched,
+                input_size,
+                hidden_size,
+                num_layers,
+                bidirectional,
+                bias,
+                empty_state,
+                batch_first,
+                batch_size,
+                seq_len,
+            )
 
     @parametrize(
         "unbatched, input_size, hidden_size, num_layers, bidirectional, bias, empty_state, batch_first, batch_size, seq_len",
