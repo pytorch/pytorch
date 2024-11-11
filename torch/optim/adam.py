@@ -509,17 +509,19 @@ def _multi_tensor_adam(
             "lr as a Tensor is not supported for capturable=False and foreach=True"
         )
 
-    if isinstance(beta1, Tensor) and not capturable:
-        raise ValueError(
-            "beta1 as a Tensor is not supported for capturable=False and foreach=True"
-        )
+    if isinstance(beta1, Tensor):
+        if not capturable:
+            raise ValueError(
+                "beta1 as a Tensor is not supported for capturable=False and foreach=True"
+            )
         if beta1.numel() != 1:
             raise ValueError("Tensor beta1 must be 1-element")
 
-    if isinstance(beta2, Tensor) and not capturable:
-        raise ValueError(
-            "beta2 as a Tensor is not supported for capturable=False and foreach=True"
-        )
+    if isinstance(beta2, Tensor):
+        if not capturable:
+            raise ValueError(
+                "beta2 as a Tensor is not supported for capturable=False and foreach=True"
+            )
         if beta2.numel() != 1:
             raise ValueError("Tensor beta2 must be 1-element")
 
