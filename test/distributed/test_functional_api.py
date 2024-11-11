@@ -421,7 +421,6 @@ class TestGradCollectives(MultiThreadedTestCase):
         self.assertIsNone(x.grad)
 
 
-
 class TestMakeFx(TestCase):
     def setUp(self):
         # make_fx is not thread-safe due to patching nd mutating global states
@@ -470,14 +469,16 @@ class TestMakeFx(TestCase):
 BACKEND = dist.Backend.NCCL if torch.cuda.is_available() else dist.Backend.GLOO
 
 # Adding support for HCCL backend
-# To add a different backend, add an elif to the same chain with a conditional checking for the device type (along the lines of TEST_HPU or TEST_CUDA)
+# To add a different backend
+# add an elif to the same chain with a conditional checking for the device type (along the lines of TEST_HPU or TEST_CUDA)
 # And then set the BACKEND variable appropriately.
 if TEST_HPU:
     BACKEND = dist.Backend.HCCL
 
 
 # allows you to check for multiple accelerator irrespective of device type
-# to add new device types to this check simply follow the same format and append an elif with the conditional and appropriate device count function for your new device
+# to add new device types to this check simply follow the same format
+# and append an elif with the conditional and appropriate device count function for your new device
 def exit_if_lt_x_accelerators(x):
     if TEST_CUDA:
         if torch.cuda.device_count() < x:
@@ -501,7 +502,7 @@ def with_comms(func=None):
         try:
             return func(self, *args, **kwargs)
         finally:
-            self.destroy_pg()
+            torch.distributed.destroy_process_group()
 
     return wrapper
 
@@ -599,7 +600,7 @@ class TestCollectivesWithDistributedBackend(DistributedTestBase):
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @requires_nccl()
     @with_comms()
-    def test_tracing_with_dce_code(self,device):
+    def test_tracing_with_dce_code(self, device):
         if self.world_size > 2:
             return
 
@@ -618,7 +619,10 @@ class TestCollectivesWithDistributedBackend(DistributedTestBase):
         )
         dist.barrier()
 
-class TestDistributedBackendCollectivesWithWorldSize4(TestCollectivesWithDistributedBackend):
+
+class TestDistributedBackendCollectivesWithWorldSize4(
+    TestCollectivesWithDistributedBackend
+):
     @property
     def world_size(self):
         return 4
@@ -806,7 +810,9 @@ class TestFunctionalAutogradWithDistributedBackend(DistributedTestBase):
         self.assertEqual(t.grad, torch.full_like(t, 2.0))
 
 
-instantiate_device_type_tests(TestCollectivesWithDistributedBackend, globals(), only_for=DEVICE)
+instantiate_device_type_tests(
+    TestCollectivesWithDistributedBackend, globals(), only_for=DEVICE
+)
 instantiate_device_type_tests(
     TestDistributedBackendCollectivesWithWorldSize4, globals(), only_for=DEVICE
 )

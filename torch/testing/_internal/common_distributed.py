@@ -961,10 +961,6 @@ class DistributedTestBase(MultiProcessTestCase):
         num_visible_devices = self.device_handle(device).device_count()
         return {i: [i % num_visible_devices] for i in range(self.world_size)}
 
-    def destroy_pg(self) -> None:
-        torch.distributed.barrier()
-        torch.distributed.destroy_process_group()
-
 def run_subtests(
     cls_inst,
     subtest_config: Dict[str, List[Any]],
