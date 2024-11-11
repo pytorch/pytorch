@@ -110,6 +110,7 @@ jobs:
       PYTORCH_FINAL_PACKAGE_DIR: /artifacts
       SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
       USE_SPLIT_BUILD: ${{ inputs.use_split_build }}
+      PYTORCH_TEST_WITH_SUBCLASSES: 1
     steps:
       - name: Make the env permanent during this workflow (but not the secrets)
         shell: bash
@@ -138,6 +139,7 @@ jobs:
             echo "PYTORCH_FINAL_PACKAGE_DIR=${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
             echo "SHA1=${{ env.SHA1 }}"
             echo "USE_SPLIT_BUILD=${{ env.USE_SPLIT_BUILD }}"
+            echo "PYTORCH_TEST_WITH_SUBCLASSES=${{ env.PYTORCH_TEST_WITH_SUBCLASSES }}"
           } >> "${GITHUB_ENV} }}"
 
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"

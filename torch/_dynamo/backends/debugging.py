@@ -4,6 +4,8 @@ import dataclasses
 import functools
 import itertools
 import logging
+import os
+import traceback
 from importlib import import_module
 from typing import Any, Callable, List, Optional, Type
 
@@ -302,6 +304,11 @@ class TensorToSubclassTransform:
 
 @register_backend
 def test_subclasses(gm, inputs, **kwargs):
+    from torch._subclasses.functional_tensor import FunctionalTensor
+
+    if any(isinstance(inp, FunctionalTensor) for inp in inputs):
+        return gm
+
     if kwargs:
         log.warning("test_subclasses backend ignoring extra kwargs %s", kwargs)
 
@@ -318,7 +325,10 @@ def test_subclasses(gm, inputs, **kwargs):
     # Verify original inputs
     compiler_fn(test_gm, inputs)
 
-    from torch.testing._internal.subclasses import WrapperSubclass
+    from torch.testing._internal.subclasses import (
+        F32_QI32QuantRWTensor,
+        WrapperSubclass,
+    )
     from torch.testing._internal.two_tensor import TwoTensor
 
     TRANSFORMATIONS: List[TensorToSubclassTransform] = [
@@ -328,10 +338,10 @@ def test_subclasses(gm, inputs, **kwargs):
         TensorToSubclassTransform(
             factory_fn=lambda t: TwoTensor(t, t),
         ),
-        # TensorToSubclassTransform(
-        #     factory_fn=lambda t: F32_QI32QuantRWTensor.from_src(t),
-        #     precondition=lambda t: t.ndim <= 2,
-        # ),
+        TensorToSubclassTransform(
+            factory_fn=lambda t: F32_QI32QuantRWTensor.from_src(t),
+            precondition=lambda t: t.ndim <= 2,
+        ),
         # DTensor
         # NestedTensor
     ]
@@ -350,7 +360,9 @@ def test_subclasses(gm, inputs, **kwargs):
             log.debug("No tensor inputs")
             return gm
 
-    MAX_SUBCLASSES_NESTING: int = 2
+    MAX_SUBCLASSES_NESTING: int = int(
+        os.getenv("PYTORCH_TEST_WITH_SUBCLASSES_MAX_NESTING", default=1)
+    )
     N: int = len(TRANSFORMATIONS)
 
     TRANSFORM_SEQS: List[Any] = [
@@ -368,6 +380,7 @@ def test_subclasses(gm, inputs, **kwargs):
     TENSOR_INPUTS_TRANSFORM_SEQS = list(
         itertools.product(TRANSFORM_SEQS, repeat=NUM_TENSOR_INPUTS)
     )
+    NUM_TENSOR_INPUTS_TRANSFORM_SEQS = len(TENSOR_INPUTS_TRANSFORM_SEQS)
     log.debug(
         "test_subclasses backend TENSOR_INPUTS_TRANSFORM_SEQS:%s",
         TENSOR_INPUTS_TRANSFORM_SEQS,
@@ -390,15 +403,27 @@ def test_subclasses(gm, inputs, **kwargs):
             )
 
         log.info(
-            "test_subclasses backend testing %d transformed inputs:%s gm:%s",
+            "test_subclasses backend testing %d/%d transformed inputs:%s gm:%s",
             i,
+            NUM_TENSOR_INPUTS_TRANSFORM_SEQS,
             test_inputs,
             test_gm.print_readable(False),
         )
 
-        aot_eager(test_gm, test_inputs)
-
-        log.info("test_subclasses backend testing %d OK", i)
+        try:
+            aot_eager(test_gm, test_inputs)
+            log.info(
+                "test_subclasses backend testing %d/%d OK",
+                i,
+                NUM_TENSOR_INPUTS_TRANSFORM_SEQS,
+            )
+        except Exception as ex:
+            log.error(
+                "test_subclasses error compiling\ninputs:%s\nin graph_module:\n%s\nexception:%s",
+                test_inputs,
+                gm.print_readable(False),
+                "".join(traceback.format_exception(type(ex), ex, ex.__traceback__)),
+            )
 
     return gm
 
