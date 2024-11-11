@@ -2902,7 +2902,7 @@ Example::
 add_docstr(
     torch.conj_physical,
     r"""
-conj_physical(input: Tensor, *, out: Optional[Tensor]) -> Tensor
+conj_physical(input: Tensor, *, out: Optional[Tensor] = None) -> Tensor
 
 Computes the element-wise conjugate of the given :attr:`input` tensor.
 If :attr:`input` has a non-complex dtype, this function just returns :attr:`input`.
@@ -3015,7 +3015,7 @@ Example::
 add_docstr(
     torch.copysign,
     r"""
-copysign(input: Tensor, other: Tensor, *, out: Optional[Tensor]) -> Tensor
+copysign(input: Tensor, other: Tensor, *, out: Optional[Tensor] = None) -> Tensor
 
 Create a new floating-point tensor with the magnitude of :attr:`input` and the sign of :attr:`other`, elementwise.
 
@@ -3073,7 +3073,7 @@ Example::
 add_docstr(
     torch.cos,
     r"""
-cos(input: Tensor, *, out: Optional[Tensor]) -> Tensor
+cos(input: Tensor, *, out: Optional[Tensor] = None) -> Tensor
 
 Returns a new tensor with the cosine  of the elements of :attr:`input`.
 
@@ -3100,7 +3100,7 @@ Example::
 add_docstr(
     torch.cosh,
     r"""
-cosh(input: Tensor, *, out: Optional[Tensor]) -> Tensor
+cosh(input: Tensor, *, out: Optional[Tensor] = None) -> Tensor
 
 Returns a new tensor with the hyperbolic cosine  of the elements of
 :attr:`input`.
@@ -3133,7 +3133,7 @@ Example::
 add_docstr(
     torch.cross,
     r"""
-cross(input: Tensor, other: Tensor, dim: Optional[int], *, out: Optional[Tensor]) -> Tensor
+cross(input: Tensor, other: Tensor, dim: Optional[int] = None, *, out: Optional[Tensor] = None) -> Tensor
 
 
 Returns the cross product of vectors in dimension :attr:`dim` of :attr:`input`
@@ -3192,7 +3192,7 @@ Example::
 add_docstr(
     torch.logcumsumexp,
     r"""
-logcumsumexp(input: Tensor, dim: int, *, out: Optional[Tensor]) -> Tensor
+logcumsumexp(input: Tensor, dim: int, *, out: Optional[Tensor] = None) -> Tensor
 
 Returns the logarithm of the cumulative summation of the exponentiation of
 elements of :attr:`input` in the dimension :attr:`dim`.
@@ -3221,7 +3221,7 @@ Example::
 add_docstr(
     torch.cummax,
     r"""
-cummax(input: Tensor, dim: int, *, out: Union[Tensor, Tuple[Tensor, ...], List[Tensor]]) -> (Tensor, LongTensor)
+cummax(input: Tensor, dim: int, *, out: Union[Tensor, Tuple[Tensor, ...], List[Tensor]] = None) -> (Tensor, LongTensor)
 
 Returns a namedtuple ``(values, indices)`` where ``values`` is the cumulative maximum of
 elements of :attr:`input` in the dimension :attr:`dim`. And ``indices`` is the index
@@ -3287,7 +3287,7 @@ Example::
 add_docstr(
     torch.cumprod,
     r"""
-cumprod(input: Tensor, dim: int, *, dtype: Optional[dtype], out: Optional[Tensor]) -> Tensor
+cumprod(input: Tensor, dim: int, *, dtype: Optional[dtype] = None, out: Optional[Tensor] = None) -> Tensor
 
 Returns the cumulative product of elements of :attr:`input` in the dimension
 :attr:`dim`.
@@ -3326,7 +3326,7 @@ Example::
 add_docstr(
     torch.cumsum,
     r"""
-cumsum(input: Tensor, dim: int, *, dtype: Optional[dtype], out: Optional[Tensor]) -> Tensor
+cumsum(input: Tensor, dim: int, *, dtype: Optional[dtype] = None, out: Optional[Tensor] = None) -> Tensor
 
 Returns the cumulative sum of elements of :attr:`input` in the dimension
 :attr:`dim`.
@@ -3358,7 +3358,7 @@ Example::
 add_docstr(
     torch.count_nonzero,
     r"""
-count_nonzero(input: Tensor, dim: Optional[Union[int, Sequence[int]]]) -> Tensor
+count_nonzero(input: Tensor, dim: Optional[Union[int, Sequence[int]]] = None) -> Tensor
 
 Counts the number of non-zero values in the tensor :attr:`input` along the given :attr:`dim`.
 If no dim is specified then all non-zeros in the tensor are counted.
@@ -3733,7 +3733,7 @@ Example::
 add_docstr(
     torch.diff,
     r"""
-diff(input: Tensor, n: int = 1, dim: int = -1, prepend: Optional[Tensor], append: Optional[Tensor], *, out: Optional[Tensor]) -> Tensor # noqa: B950
+diff(input: Tensor, n: int = 1, dim: int = -1, prepend: Optional[Tensor] = None, append: Optional[Tensor] = None, *, out: Optional[Tensor]) -> Tensor # noqa: B950
 
 Computes the n-th forward difference along the given dimension.
 
@@ -3773,7 +3773,7 @@ Example::
 add_docstr(
     torch.digamma,
     r"""
-digamma(input: Tensor, *, out: Optional[Tensor]) -> Tensor
+digamma(input: Tensor, *, out: Optional[Tensor] = None) -> Tensor
 
 Alias for :func:`torch.special.digamma`.
 """,
@@ -3816,7 +3816,7 @@ Example::
 add_docstr(
     torch.div,
     r"""
-div(input: Union[Tensor, Number], other: Union[Tensor, Number], *, rounding_mode: Optional[str], out: Optional[Tensor]) -> Tensor
+div(input: Union[Tensor, Number], other: Union[Tensor, Number], *, rounding_mode: Optional[str] = None, out: Optional[Tensor] = None) -> Tensor
 
 Divides each element of the input ``input`` by the corresponding element of
 :attr:`other`.
@@ -3923,7 +3923,7 @@ Example::
 add_docstr(
     torch.vdot,
     r"""
-vdot(input: Tensor, other: Tensor, *, out: Optional[Tensor]) -> Tensor
+vdot(input: Tensor, other: Tensor, *, out: Optional[Tensor] = None) -> Tensor
 
 Computes the dot product of two 1D vectors along a dimension.
 
@@ -3972,7 +3972,7 @@ Example::
 add_docstr(
     torch.eq,
     r"""
-eq(input: Tensor, other: Tensor, *, out: Optional[Tensor]) -> Tensor
+eq(input: Tensor, other: Tensor, *, out: Optional[Tensor] = None) -> Tensor
 
 Computes element-wise equality
 
@@ -4018,7 +4018,7 @@ Example::
 add_docstr(
     torch.erf,
     r"""
-erf(input: Tensor, *, out: Optional[Tensor]) -> Tensor
+erf(input: Tensor, *, out: Optional[Tensor] = None) -> Tensor
 
 Alias for :func:`torch.special.erf`.
 """,
@@ -4027,7 +4027,7 @@ Alias for :func:`torch.special.erf`.
 add_docstr(
     torch.erfc,
     r"""
-erfc(input: Tensor, *, out: Optional[Tensor]) -> Tensor
+erfc(input: Tensor, *, out: Optional[Tensor] = None) -> Tensor
 
 Alias for :func:`torch.special.erfc`.
 """,
@@ -4036,7 +4036,7 @@ Alias for :func:`torch.special.erfc`.
 add_docstr(
     torch.erfinv,
     r"""
-erfinv(input: Tensor, *, out: Optional[Tensor]) -> Tensor
+erfinv(input: Tensor, *, out: Optional[Tensor] = None) -> Tensor
 
 Alias for :func:`torch.special.erfinv`.
 """,
@@ -4045,7 +4045,7 @@ Alias for :func:`torch.special.erfinv`.
 add_docstr(
     torch.exp,
     r"""
-exp(input: Tensor, *, out: Optional[Tensor]) -> Tensor
+exp(input: Tensor, *, out: Optional[Tensor] = None) -> Tensor
 
 Returns a new tensor with the exponential of the elements
 of the input tensor :attr:`input`.
@@ -4070,7 +4070,7 @@ Example::
 add_docstr(
     torch.exp2,
     r"""
-exp2(input: Tensor, *, out: Optional[Tensor]) -> Tensor
+exp2(input: Tensor, *, out: Optional[Tensor] = None) -> Tensor
 
 Alias for :func:`torch.special.exp2`.
 """,
@@ -4079,7 +4079,7 @@ Alias for :func:`torch.special.exp2`.
 add_docstr(
     torch.expm1,
     r"""
-expm1(input: Tensor, *, out: Optional[Tensor]) -> Tensor
+expm1(input: Tensor, *, out: Optional[Tensor] = None) -> Tensor
 
 Alias for :func:`torch.special.expm1`.
 """,
@@ -4118,7 +4118,7 @@ Example::
 add_docstr(
     torch.floor,
     r"""
-floor(input: Tensor, *, out: Optional[Tensor]) -> Tensor
+floor(input: Tensor, *, out: Optional[Tensor] = None) -> Tensor
 
 Returns a new tensor with the floor of the elements of :attr:`input`,
 the largest integer less than or equal to each element.
@@ -4149,7 +4149,7 @@ Example::
 add_docstr(
     torch.floor_divide,
     r"""
-floor_divide(input: Union[Tensor, Number], other: Union[Tensor, Number], *, out: Optional[Tensor]) -> Tensor
+floor_divide(input: Union[Tensor, Number], other: Union[Tensor, Number], *, out: Optional[Tensor] = None) -> Tensor
 
 .. note::
 
@@ -4189,7 +4189,7 @@ Example::
 add_docstr(
     torch.fmod,
     r"""
-fmod(input: Tensor, other: Union[Tensor, Number, _complex], *, out: Optional[Tensor]) -> Tensor
+fmod(input: Tensor, other: Union[Tensor, Number, _complex], *, out: Optional[Tensor] = None) -> Tensor
 
 Applies C++'s `std::fmod <https://en.cppreference.com/w/cpp/numeric/math/fmod>`_ entrywise.
 The result has the same sign as the dividend :attr:`input` and its absolute value
@@ -4240,7 +4240,7 @@ Example::
 add_docstr(
     torch.frac,
     r"""
-frac(input: Tensor, *, out: Optional[Tensor]) -> Tensor
+frac(input: Tensor, *, out: Optional[Tensor] = None) -> Tensor
 
 Computes the fractional portion of each element in :attr:`input`.
 
@@ -4257,7 +4257,7 @@ Example::
 add_docstr(
     torch.frexp,
     r"""
-frexp(input: Tensor, *, out: Union[Tensor, Tuple[Tensor, ...], List[Tensor]]) -> (Tensor mantissa, Tensor exponent)
+frexp(input: Tensor, *, out: Union[Tensor, Tuple[Tensor, ...], List[Tensor]] = None) -> (Tensor mantissa, Tensor exponent)
 
 Decomposes :attr:`input` into mantissa and exponent tensors
 such that :math:`\text{input} = \text{mantissa} \times 2^{\text{exponent}}`.
