@@ -16,6 +16,8 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_methods_invocations import ops_and_refs
 from torch.testing._internal.common_utils import (
+    find_library_location,
+    IS_LINUX,
     NoTest,
     run_tests,
     suppress_warnings,
@@ -427,6 +429,24 @@ print(torch.xpu.device_count())
         flags = torch.xpu.get_gencode_flags()
         for arch in arch_list:
             self.assertTrue(arch in flags)
+
+    def test_torch_version_xpu(self):
+        self.assertEqual(len(torch.version.xpu), 8)
+        compiler_version = int(torch.version.xpu)
+        self.assertGreater(compiler_version, 20230000)
+        if IS_LINUX:
+            library = find_library_location("libtorch_xpu.so")
+            cmd = f"ldd {library} | grep libsycl"
+            results = subprocess.check_output(cmd, shell=True).strip().split(b"\n")
+            # There should be only one libsycl.so or libsycl-preview.so
+            self.assertEqual(len(results), 1)
+            for result in results:
+                if b"libsycl.so" in result:
+                    self.assertGreaterEqual(compiler_version, 20250000)
+                elif b"libsycl-preview.so" in result:
+                    self.assertLess(compiler_version, 20250000)
+                else:
+                    self.fail("Unexpected libsycl library")
 
 
 instantiate_device_type_tests(TestXpu, globals(), only_for="xpu", allow_xpu=True)
