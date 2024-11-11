@@ -67,7 +67,7 @@ void initDynamoBindings(PyObject* torch) {
   auto m = py::handle(eval_frame).cast<py::module>();
 
   py::class_<CacheEntry>(m, "_CacheEntry")
-      .def_readonly("check_fn", &CacheEntry::check_fn)
+      .def_readonly("guard_manager", &CacheEntry::guard_manager)
       .def_readonly("code", &CacheEntry::code)
       .def_readonly("compile_id", &CacheEntry::compile_id)
       .def_readonly("trace_annotation", &CacheEntry::trace_annotation)
