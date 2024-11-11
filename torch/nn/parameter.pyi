@@ -1,4 +1,4 @@
-from typing_extensions import TypeGuard
+from typing_extensions import TypeIs
 
 from torch import dtype, Tensor
 from torch._C import _TensorMeta
@@ -16,7 +16,7 @@ class Parameter(Tensor, metaclass=_ParameterMeta):
 
 def is_lazy(
     param: Tensor,
-) -> TypeGuard[UninitializedParameter | UninitializedBuffer]: ...
+) -> TypeIs[UninitializedParameter | UninitializedBuffer]: ...
 
 class UninitializedParameter(Parameter):
     def __init__(

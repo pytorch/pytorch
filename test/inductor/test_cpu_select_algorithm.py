@@ -134,6 +134,12 @@ class BaseTestSelectAlgorithm(TestCase):
         else:
             self.assertEqual(counters["inductor"]["cpp_micro_gemm_amx_counter"], 0)
 
+    def _check_brgemm_counter(self, vec_amx):
+        if vec_amx and torch.cpu._is_amx_fp16_supported():
+            self.assertTrue(counters["inductor"]["cpp_micro_brgemm_counter"] > 0)
+        else:
+            self.assertEqual(counters["inductor"]["cpp_micro_brgemm_counter"], 0)
+
 
 class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     common = check_model
@@ -800,7 +806,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @parametrize("in_features", (1024,))
     @parametrize("out_features", (1024, 1025))
     @parametrize("bias", (True, False))
-    @dtypes(torch.bfloat16)
+    @dtypes(torch.bfloat16, torch.half)
     def test_linear_amx(self, batch_size, in_features, out_features, bias, dtype):
         class M(torch.nn.Module):
             def __init__(self, bias):
@@ -817,7 +823,11 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             self.common(mod, (v,), atol=atol, rtol=rtol)
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
         vec_amx = VecAMX()
-        self._check_amx_counter(vec_amx)
+        # Currently brgemm config is only added for half
+        if dtype == torch.half:
+            self._check_brgemm_counter(vec_amx)
+        else:
+            self._check_amx_counter(vec_amx)
 
     @inductor_config.patch({"freezing": True})
     @patches
@@ -1360,7 +1370,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @torch.no_grad
     @dtypes(torch.bfloat16)
     @parametrize("batch_size", (32,))
-    @parametrize("in_features", (128,))
+    @parametrize("in_features", (128, 144))
     @parametrize("out_features", (64, 65))
     def test_int8_woq_mm(self, dtype, batch_size, in_features, out_features):
         # x will be reshaped from 3d to 2d
@@ -1726,6 +1736,29 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 (v,),
             )
             self.assertEqual(actual, expected, atol=atol, rtol=rtol)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
+    @inductor_config.patch({"freezing": True})
+    @inductor_config.patch({"coordinate_descent_tuning": True})
+    @patches
+    @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    def test_cpp_coordinate_descent_tuning(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(512, 1024, bias=False)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        v = torch.randn(1, 512)
+        mod = M().eval()
+        torch._dynamo.reset()
+        torch._inductor.metrics.reset()
+        counters.clear()
+        with verify(torch.bfloat16) as (atol, rtol), torch.autocast(device_type="cpu"):
+            self.common(mod, (v,), atol=atol, rtol=rtol)
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
 

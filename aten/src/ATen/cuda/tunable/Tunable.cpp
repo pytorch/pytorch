@@ -13,22 +13,17 @@
 #include <ATen/cuda/tunable/Tunable.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
+#include <c10/util/env.h>
 #include <torch/version.h>
 
 #ifndef _WIN32
 #include <cxxabi.h>
 #endif
 
-#include <chrono>
 #include <fstream>
-#include <functional>
-#include <limits>
-#include <memory>
 #include <mutex>
 #include <sstream>
 #include <string>
-#include <thread>
-#include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -83,7 +78,7 @@ ResultEntry TuningResultsManager::Lookup(const std::string& op_signature, const 
   return it->second;
 }
 
-inline void TuningResultsManager::AddImpl(const std::string& op_signature,
+void TuningResultsManager::AddImpl(const std::string& op_signature,
     const std::string& params_signature,
     ResultEntry best,
     KernelMap& kernel_map) {
@@ -98,7 +93,7 @@ inline void TuningResultsManager::AddImpl(const std::string& op_signature,
   }
 
   TUNABLE_LOG2(op_signature, "(", params_signature, ") -> ", best);
-  kernel_map.emplace(params_signature, best);
+  kernel_map.emplace(params_signature, std::move(best));
 }
 
 void TuningResultsManager::Add(const std::string& op_signature, const std::string& params_signature, ResultEntry best) {
@@ -109,7 +104,7 @@ void TuningResultsManager::Add(const std::string& op_signature, const std::strin
     it = results_.insert({op_signature, {}}).first;
   }
 
-  AddImpl(op_signature, params_signature, best, it->second);
+  AddImpl(op_signature, params_signature, std::move(best), it->second);
 }
 
 void TuningResultsManager::RecordUntuned( std::ofstream& untuned_file, const std::string& op_signature, const std::string& params_signature) {
@@ -155,7 +150,7 @@ void TuningResultsManager::Delete(const std::string& op_signature, const std::st
   it->second.erase(it2);
 }
 
-inline void TuningResultsManager::DisjointMergeImpl(
+void TuningResultsManager::DisjointMergeImpl(
     const std::string& op_signature,
     const KernelMap& kernel_map,
     /*out*/ std::unordered_map<std::string, KernelMap>& results) {
@@ -205,7 +200,7 @@ size_t TuningResultsManager::GetSize() {
 TuningResultsValidator::TuningResultsValidator() {
   RegisterValidator(
       "PT_VERSION",
-      [this]() { return GetPyTorchVersion(); },
+      []() { return GetPyTorchVersion(); },
       [this](auto&& k) { return ValidatePyTorchVersion(std::forward<decltype(k)>(k)); });
 #ifdef USE_ROCM
   // rocm
@@ -368,7 +363,7 @@ void TuningResultsValidator::RegisterValidator(const std::string& key, const Get
   }
 }
 
-std::string TuningResultsValidator::GetPyTorchVersion() const {
+std::string TuningResultsValidator::GetPyTorchVersion() {
   return TORCH_VERSION;
 }
 
@@ -439,8 +434,8 @@ void TuningContext::EnableTunableOp(bool value) {
 }
 
 bool TuningContext::IsTunableOpEnabled() const {
-  static const char *env = std::getenv("PYTORCH_TUNABLEOP_ENABLED");
-  if (env != nullptr && strcmp(env, "1") == 0) {
+  static const auto env = c10::utils::get_env("PYTORCH_TUNABLEOP_ENABLED");
+  if (env == "1") {
     return true;
   }
   return enable_;
@@ -466,16 +461,16 @@ void TuningContext::EnableRecordUntuned(bool value) {
 }
 
 bool TuningContext::IsTuningEnabled() const {
-  static const char *env = std::getenv("PYTORCH_TUNABLEOP_TUNING");
-  if (env != nullptr && strcmp(env, "0") == 0) {
+  static const auto env = c10::utils::get_env("PYTORCH_TUNABLEOP_TUNING");
+  if (env == "0") {
     return false;
   }
   return tuning_enable_;
 }
 
 bool TuningContext::IsRecordUntunedEnabled() const {
-  static const char *env = std::getenv("PYTORCH_TUNABLEOP_RECORD_UNTUNED");
-  if (env != nullptr && strcmp(env, "1") == 0) {
+  static const auto env = c10::utils::get_env("PYTORCH_TUNABLEOP_RECORD_UNTUNED");
+  if (env == "1") {
     return true;
   }
   return record_untuned_enable_;
@@ -483,11 +478,11 @@ bool TuningContext::IsRecordUntunedEnabled() const {
 
 std::ofstream& TuningContext::GetUntunedFile(){
   if (!untuned_file_.is_open()) {
-    const char *env = std::getenv("PYTORCH_TUNABLEOP_UNTUNED_FILENAME");
-    std::string filename = (env == nullptr) ? "tunableop_untuned.csv" : env;
+    const auto env = c10::utils::get_env("PYTORCH_TUNABLEOP_UNTUNED_FILENAME");
+    std::string filename = (!env.has_value()) ? "tunableop_untuned.csv" : env.value();
 
     std::string device = c10::str(int(c10::cuda::current_device()));
-    std::size_t found = filename.rfind(".");
+    std::size_t found = filename.rfind('.');
     if (found != std::string::npos) {
       filename.insert(found, device);
     } else {
@@ -521,9 +516,9 @@ void TuningContext::SetMaxTuningDurationMs(int max_duration_ms) {
 }
 
 int TuningContext::GetMaxTuningDurationMs() const {
-  static const char *env = std::getenv("PYTORCH_TUNABLEOP_MAX_TUNING_DURATION_MS");
-  if (env != nullptr) {
-    int val = atoi(env);
+  static const auto env = c10::utils::get_env("PYTORCH_TUNABLEOP_MAX_TUNING_DURATION_MS");
+  if (env.has_value()) {
+    int val = stoi(env.value());
     return val < 0 ? 0 : val;
   }
   return max_tuning_duration_ms_;
@@ -534,9 +529,9 @@ void TuningContext::SetMaxTuningIterations(int max_iter) {
 }
 
 int TuningContext::GetMaxTuningIterations() const {
-  static const char *env = std::getenv("PYTORCH_TUNABLEOP_MAX_TUNING_ITERATIONS");
-  if (env != nullptr) {
-    int val = atoi(env);
+  static const auto env = c10::utils::get_env("PYTORCH_TUNABLEOP_MAX_TUNING_ITERATIONS");
+  if (env.has_value()) {
+    int val = stoi(env.value());
     return val < 0 ? 0 : val;
   }
   return max_tuning_iterations_;
@@ -547,9 +542,9 @@ void TuningContext::SetMaxWarmupDurationMs(int max_duration_ms) {
 }
 
 int TuningContext::GetMaxWarmupDurationMs() const {
-  static const char *env = std::getenv("PYTORCH_TUNABLEOP_MAX_WARMUP_DURATION_MS");
-  if (env != nullptr) {
-    int val = atoi(env);
+  static const auto env = c10::utils::get_env("PYTORCH_TUNABLEOP_MAX_WARMUP_DURATION_MS");
+  if (env.has_value()) {
+    int val = stoi(env.value());
     return val < 0 ? 0 : val;
   }
   return max_warmup_duration_ms_;
@@ -560,9 +555,9 @@ void TuningContext::SetMaxWarmupIterations(int max_iter) {
 }
 
 int TuningContext::GetMaxWarmupIterations() const {
-  static const char *env = std::getenv("PYTORCH_TUNABLEOP_MAX_WARMUP_ITERATIONS");
-  if (env != nullptr) {
-    int val = atoi(env);
+  static const auto env = c10::utils::get_env("PYTORCH_TUNABLEOP_MAX_WARMUP_ITERATIONS");
+  if (env.has_value()) {
+    int val = stoi(env.value());
     return val < 0 ? 0 : val;
   }
   return max_warmup_iterations_;
@@ -573,8 +568,8 @@ void TuningContext::EnableICacheFlush(bool value) {
 }
 
 bool TuningContext::IsICacheFlushEnabled() const {
-  static const char *env = std::getenv("PYTORCH_TUNABLEOP_ICACHE_FLUSH_ENABLED");
-  if (env != nullptr && strcmp(env, "0") == 0) {
+  static const auto env = c10::utils::get_env("PYTORCH_TUNABLEOP_ICACHE_FLUSH_ENABLED");
+  if (env == "0") {
     return false;
   }
   return icache_flush_;
@@ -585,10 +580,10 @@ void TuningContext::SetRotatingBufferSize(int size) {
 }
 
 int TuningContext::GetRotatingBufferSize() const {
-  static const char *env = std::getenv("PYTORCH_TUNABLEOP_ROTATING_BUFFER_SIZE");
-  if (env != nullptr) {
+  static const auto env = c10::utils::get_env("PYTORCH_TUNABLEOP_ROTATING_BUFFER_SIZE");
+  if (env.has_value()) {
     constexpr int MB = 1024 * 1024;
-    int val = atoi(env);
+    int val = stoi(env.value());
     return val < 0 ? 0 : val * MB;  // env var is specified as MB, returned as bytes
   }
   else {
@@ -608,8 +603,8 @@ TuningResultsManager& TuningContext::GetTuningResultsManager() {
     manager_initialized_ = true;
     if (GetFilename().empty()) {
       // if SetFilename() was not already called, call it now with the default or env var
-      const char *env = std::getenv("PYTORCH_TUNABLEOP_FILENAME");
-      std::string filename = (env == nullptr) ? "tunableop_results.csv" : env;
+      const auto env = c10::utils::get_env("PYTORCH_TUNABLEOP_FILENAME");
+      std::string filename = (!env.has_value()) ? "tunableop_results.csv" : env.value();
       SetFilename(filename, true);
     }
     auto filename = GetFilename();

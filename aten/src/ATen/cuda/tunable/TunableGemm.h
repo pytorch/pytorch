@@ -22,6 +22,7 @@
 #include <c10/util/Float8_e5m2.h>
 #include <c10/util/Float8_e5m2fnuz.h>
 #include <c10/util/StringUtil.h>
+#include <fmt/printf.h>
 
 namespace at::cuda::tunable {
 
@@ -135,57 +136,57 @@ inline bool IsZero(c10::complex<float> v) {
 }
 
 template <typename T>
-inline std::string TypeName(T v) {
+inline const char* TypeName(T v) {
   return "unknown";
 }
 
 template <>
-inline std::string TypeName(float v) {
+inline const char* TypeName(float v) {
   return "float";
 }
 
 template <>
-inline std::string TypeName(double v) {
+inline const char* TypeName(double v) {
   return "double";
 }
 
 template <>
-inline std::string TypeName(BFloat16 v) {
+inline const char* TypeName(BFloat16 v) {
   return "BFloat16";
 }
 
 template <>
-inline std::string TypeName(Half v) {
+inline const char* TypeName(Half v) {
   return "Half";
 }
 
 template <>
-inline std::string TypeName(Float8_e4m3fn v) {
+inline const char* TypeName(Float8_e4m3fn v) {
   return "Float8_e4m3fn";
 }
 
 template <>
-inline std::string TypeName(Float8_e5m2 v) {
+inline const char* TypeName(Float8_e5m2 v) {
   return "Float8_e5m2";
 }
 
 template <>
-inline std::string TypeName(Float8_e4m3fnuz v) {
+inline const char* TypeName(Float8_e4m3fnuz v) {
   return "Float8_e4m3fnuz";
 }
 
 template <>
-inline std::string TypeName(Float8_e5m2fnuz v) {
+inline const char* TypeName(Float8_e5m2fnuz v) {
   return "Float8_e5m2fnuz";
 }
 
 template <>
-inline std::string TypeName(c10::complex<double> v) {
+inline const char* TypeName(c10::complex<double> v) {
   return "c10::complex<double>";
 }
 
 template <>
-inline std::string TypeName(c10::complex<float> v) {
+inline const char* TypeName(c10::complex<float> v) {
   return "c10::complex<float>";
 }
 
@@ -196,15 +197,15 @@ class GemmTunableOp : public TunableOp<GemmParams<T>, StreamTimer> {
     this->RegisterOp(std::string("Default"), std::make_unique<DefaultGemmOp<T>>());
 
 #ifdef USE_ROCM
-    static const char *env_rocblas = std::getenv("PYTORCH_TUNABLEOP_ROCBLAS_ENABLED");
-    if (env_rocblas == nullptr || strcmp(env_rocblas, "1") == 0) {
+    static const auto env_rocblas = c10::utils::check_env("PYTORCH_TUNABLEOP_ROCBLAS_ENABLED");
+    if (!env_rocblas.has_value() || env_rocblas.value()) {
       for (auto&& [name, op] : GetRocBlasGemmTypeStringAndOps<T>()) {
         this->RegisterOp(std::move(name), std::move(op));
       }
     }
 
-    static const char *env_hipblaslt = std::getenv("PYTORCH_TUNABLEOP_HIPBLASLT_ENABLED");
-    if (env_hipblaslt == nullptr || strcmp(env_hipblaslt, "1") == 0) {
+    static const auto env_hipblaslt = c10::utils::check_env("PYTORCH_TUNABLEOP_HIPBLASLT_ENABLED");
+    if (!env_hipblaslt.has_value() || env_hipblaslt.value()) {
       // disallow tuning of hipblaslt with c10::complex
       if constexpr (
           !std::is_same_v<T, c10::complex<float>> &&
@@ -218,7 +219,7 @@ class GemmTunableOp : public TunableOp<GemmParams<T>, StreamTimer> {
   }
 
   std::string Signature() override {
-    return c10::str("GemmTunableOp_", TypeName<T>(T{}), "_", BlasOpToString(ALayout), BlasOpToString(BLayout));
+    return fmt::sprintf("GemmTunableOp_%s_%c%c", TypeName<T>(T{}), BlasOpToString(ALayout), BlasOpToString(BLayout));
   }
 };
 
@@ -229,8 +230,8 @@ class GemmAndBiasTunableOp : public TunableOp<GemmAndBiasParams<T>, StreamTimer>
     this->RegisterOp(std::string("Default"), std::make_unique<DefaultGemmAndBiasOp<T>>());
 
 #ifdef USE_ROCM
-    static const char *env_hipblaslt = std::getenv("PYTORCH_TUNABLEOP_HIPBLASLT_ENABLED");
-    if (env_hipblaslt == nullptr || strcmp(env_hipblaslt, "1") == 0) {
+    static const auto env_hipblaslt = c10::utils::check_env("PYTORCH_TUNABLEOP_HIPBLASLT_ENABLED");
+    if (!env_hipblaslt.has_value() || env_hipblaslt.value()) {
       // disallow tuning of hipblaslt with c10::complex
       if constexpr (
           !std::is_same_v<T, c10::complex<float>> &&
@@ -244,7 +245,7 @@ class GemmAndBiasTunableOp : public TunableOp<GemmAndBiasParams<T>, StreamTimer>
   }
 
   std::string Signature() override {
-    return c10::str("GemmAndBiasTunableOp_", TypeName<T>(T{}), "_", BlasOpToString(ALayout), BlasOpToString(BLayout));
+    return fmt::sprintf("GemmAndBiasTunableOp_%s_%c%c", TypeName<T>(T{}), BlasOpToString(ALayout), BlasOpToString(BLayout));
   }
 };
 
@@ -255,15 +256,15 @@ class GemmStridedBatchedTunableOp : public TunableOp<GemmStridedBatchedParams<T>
     this->RegisterOp(std::string("Default"), std::make_unique<DefaultGemmStridedBatchedOp<T>>());
 
 #ifdef USE_ROCM
-    static const char *env_rocblas = std::getenv("PYTORCH_TUNABLEOP_ROCBLAS_ENABLED");
-    if (env_rocblas == nullptr || strcmp(env_rocblas, "1") == 0) {
+    static const auto env_rocblas = c10::utils::check_env("PYTORCH_TUNABLEOP_ROCBLAS_ENABLED");
+    if (!env_rocblas.has_value() || env_rocblas.value()) {
       for (auto&& [name, op] : GetRocBlasGemmStridedBatchedTypeStringAndOps<T>()) {
         this->RegisterOp(std::move(name), std::move(op));
       }
     }
 
-    static const char *env_hipblaslt = std::getenv("PYTORCH_TUNABLEOP_HIPBLASLT_ENABLED");
-    if (env_hipblaslt == nullptr || strcmp(env_hipblaslt, "1") == 0) {
+    static const auto env_hipblaslt = c10::utils::check_env("PYTORCH_TUNABLEOP_HIPBLASLT_ENABLED");
+    if (!env_hipblaslt.has_value() || env_hipblaslt.value()) {
       // disallow tuning of hipblaslt with c10::complex
       if constexpr (
           !std::is_same_v<T, c10::complex<float>> &&
@@ -277,7 +278,7 @@ class GemmStridedBatchedTunableOp : public TunableOp<GemmStridedBatchedParams<T>
   }
 
   std::string Signature() override {
-    return c10::str("GemmStridedBatchedTunableOp_", TypeName<T>(T{}), "_", BlasOpToString(ALayout), BlasOpToString(BLayout));
+    return fmt::sprintf("GemmStridedBatchedTunableOp_%s_%c%c", TypeName<T>(T{}), BlasOpToString(ALayout), BlasOpToString(BLayout));
   }
 };
 
@@ -295,11 +296,11 @@ class ScaledGemmTunableOp : public TunableOp<ScaledGemmParams<CT>, StreamTimer> 
   }
 
   std::string Signature() override {
-    return c10::str("ScaledGemmTunableOp",
-            "_", TypeName<AT>(AT{}),
-            "_", TypeName<BT>(BT{}),
-            "_", TypeName<CT>(CT{}),
-            "_", BlasOpToString(ALayout), BlasOpToString(BLayout));
+    return fmt::sprintf("ScaledGemmTunableOp_%s_%s_%s_%c%c",
+      TypeName<AT>(AT{}),
+      TypeName<BT>(BT{}),
+      TypeName<CT>(CT{}),
+      BlasOpToString(ALayout), BlasOpToString(BLayout));
   }
 };
 
