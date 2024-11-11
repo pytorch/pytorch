@@ -9,6 +9,7 @@ import torch
 from torch._inductor.runtime.cache_dir_utils import (  # noqa: F401
     cache_dir,
     default_cache_dir,
+    triton_cache_dir,
 )
 
 
@@ -134,5 +135,25 @@ try:
 except AttributeError:  # Compile workers only have a mock version of torch
 
     @contextlib.contextmanager
-    def dynamo_timed(key, phase_name=None, fwd_only=True):
+    def dynamo_timed(
+        key,
+        phase_name=None,
+        fwd_only=True,
+        metadata=None,
+        dynamo_compile_column_us=None,
+    ):
         yield
+
+
+def triton_hash_to_path_key(key):
+    # In early versions of triton, the hash is directly used in the path name.
+    # Later, the hash is converted to base64 before being used in the path name.
+    #
+    # To handle this: try to import the to-base64-conversion function.
+    # If it exists, use it; otherwise fall back to using the hash directly.
+    try:
+        from triton.runtime.cache import _base64
+
+        return _base64(key)
+    except Exception as e:
+        return key

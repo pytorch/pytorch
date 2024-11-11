@@ -46,6 +46,7 @@ from torch._dynamo.utils import (
     detect_fake_mode,
     dynamo_timed,
     flatten_graph_inputs,
+    get_chromium_event_logger,
     lazy_format_graph_code,
 )
 from torch._functorch import config as functorch_config
@@ -191,6 +192,21 @@ def get_static_input_idxs(num_fixed: int) -> List[int]:
     return fixed + context.fw_metadata.static_input_indices
 
 
+def record_original_output_strides(gm: GraphModule) -> None:
+    output_node = gm.graph.find_nodes(op="output")[0]
+    output_strides = []
+    for output in output_node.args[0]:
+        if (
+            isinstance(output, torch.fx.Node)
+            and (val := output.meta.get("val")) is not None
+            and isinstance(val, torch.Tensor)
+        ):
+            output_strides.append(val.stride())
+        else:
+            output_strides.append(None)
+    output_node.meta["original_output_strides"] = output_strides
+
+
 @functools.lru_cache(None)
 def _step_logger() -> Callable[..., None]:
     return dynamo_logging.get_step_logger(log)
@@ -309,7 +325,7 @@ def _get_subgraph_names(gm: GraphModule) -> Generator[str, None, None]:
 def _recursive_pre_grad_passes(
     gm: GraphModule, example_inputs: Sequence[InputType]
 ) -> GraphModule:
-    with dynamo_timed("_recursive_pre_grad_passes"):
+    with dynamo_timed("_recursive_pre_grad_passes", log_pt2_compile_event=True):
         for subgraph_name in _get_subgraph_names(gm):
             subgraph = getattr(gm, subgraph_name)
             # as we don't have recursive example inputs, passing empty set here
@@ -326,7 +342,7 @@ def _recursive_joint_graph_passes(gm: GraphModule) -> None:
 
 
 def _recursive_post_grad_passes(gm: GraphModule, is_inference: bool = False) -> None:
-    with dynamo_timed("_recursive_post_grad_passes"):
+    with dynamo_timed("_recursive_post_grad_passes", log_pt2_compile_event=True):
         for subgraph_name in _get_subgraph_names(gm):
             subgraph = getattr(gm, subgraph_name)
             _recursive_post_grad_passes(subgraph, is_inference)
@@ -335,7 +351,8 @@ def _recursive_post_grad_passes(gm: GraphModule, is_inference: bool = False) -> 
 
 def split_const_gm(
     gm: GraphModule,
-    lifted_constants: Optional[Dict[str, Any]] = None,
+    skip_constructor: bool = True,
+    lifted_constant_names: Optional[List[str]] = None,
     skip_folding_node_fn: Optional[Callable[[torch.fx.Node], bool]] = None,
 ) -> Tuple[GraphModule, Dict[str, int]]:
     """
@@ -362,9 +379,10 @@ def split_const_gm(
         run_and_get_constant_graph,
     )
 
-    const_gm, const_result = run_and_get_constant_graph(
-        gm, lifted_constants, skip_folding_node_fn
+    const_gm = run_and_get_constant_graph(
+        gm, skip_constructor, lifted_constant_names, skip_folding_node_fn
     )
+    const_result = const_gm() if lifted_constant_names is None else None
 
     const_outputs = {
         x.name: idx for idx, x in enumerate(tuple(const_gm.graph.nodes)[-1].args[0])
@@ -384,7 +402,11 @@ def split_const_gm(
         replace_node_with_constant(
             gm,
             node,
-            const_result[const_outputs[node.name]],
+            (
+                const_result[const_outputs[node.name]]
+                if lifted_constant_names is None
+                else None
+            ),
             new_const_name,
         )
         const_output_index[new_const_name] = const_outputs[node.name]
@@ -431,6 +453,11 @@ def maybe_disable_comprehensive_padding(
 
     if config.disable_padding_cpu and config.comprehensive_padding and not has_gpu:
         perf_hint_log.info("Skip comprehensive padding on CPU")
+        return config.patch(comprehensive_padding=False)
+    elif config.aot_inductor.use_runtime_constant_folding:
+        perf_hint_log.info(
+            "Skip comprehensive padding for use_runtime_constant_folding"
+        )
         return config.patch(comprehensive_padding=False)
     else:
         return contextlib.nullcontext()
@@ -494,7 +521,6 @@ class _CompileFxKwargs(TypedDict, total=False):
     cpp_wrapper: bool
     aot_mode: bool
     is_inference: bool
-    user_visible_outputs: Optional[Dict[str, None]]
     layout_opt: Optional[bool]
     extern_node_serializer: Optional[Callable[[List[ExternKernelNode]], Any]]
 
@@ -526,7 +552,6 @@ def compile_fx_inner(
     kwargs.setdefault("aot_mode", False)
     kwargs.setdefault("is_inference", False)
     kwargs.setdefault("boxed_forward_device_index", None)
-    kwargs.setdefault("user_visible_outputs", None)
     kwargs.setdefault("layout_opt", None)
     kwargs.setdefault("extern_node_serializer", None)
 
@@ -539,11 +564,25 @@ def compile_fx_inner(
         stack.enter_context(_use_lazy_graph_module(dynamo_config.use_lazy_graph_module))
         stack.enter_context(
             dynamo_utils.dynamo_timed(
-                "compile_fx_inner", phase_name="inductor_compile", fwd_only=False
+                "compile_fx_inner",
+                phase_name="inductor_compile",
+                log_pt2_compile_event=True,
+                dynamo_compile_column_us="inductor_cumulative_compile_time_us",
             )
         )
+        # NB: Why is this the dynamo_compile counter?  The rule here is that
+        # if it gets an entry in the dynamo_compile table, we also want to
+        # tick up the wait counter.  We have to displeasingly manually trigger
+        # the counter here because we may dropped into compile_fx directly
+        # from lazy backwards compilation.
+        stack.enter_context(_WaitCounter("pytorch.wait_counter.dynamo_compile").guard())
         stack.enter_context(with_fresh_cache_if_config())
         stack.enter_context(DebugContext())
+
+        get_chromium_event_logger().add_event_data(
+            "inductor_compile",
+            is_backward=kwargs["is_backward"],
+        )
 
         return wrap_compiler_debug(_compile_fx_inner, compiler_name="inductor")(
             gm,
@@ -608,81 +647,86 @@ def _compile_fx_inner(
         This function calls fx_codegen_and_compile and also adds some extra metadata to the resulting
         compiled fx graph. The metadata is saved to FXGraphCache.
         """
-        compiled_graph = fx_codegen_and_compile(gm, example_inputs, **fx_kwargs)
-        if isinstance(compiled_graph, str):
-            # We only return a string in aot mode, in which case we don't
-            # need to do any post-compilation steps: we just return the string,
-            # which is the filename of the compiled code.
-            return compiled_graph
-        cudagraph_info = None
-        if cudagraphs:
-            # check cudagraph disabling reasons from inductor lowering
-            if compiled_graph.disabled_cudagraphs_reason:
-                if "cuda" in compiled_graph.device_types:
-                    log_cudagraph_skip_and_bump_counter(
-                        f"skipping cudagraphs due to {compiled_graph.disabled_cudagraphs_reason}"
-                    )
-                else:
-                    counters["inductor"]["cudagraph_skips"] += 1
-                BoxedBool.disable(cudagraphs)
-            else:
-                complex_memory_overlap_inputs = any(
-                    complex_memory_overlap(t)
-                    for t in example_inputs
-                    if isinstance(t, torch.Tensor)
-                )
-
-                if not config.triton.cudagraph_support_input_mutation:
-                    # Skip supports for cudagraph-managed tensors
-                    from torch._inductor.cudagraph_utils import (
-                        check_for_mutation_ignore_cuda_graph_managed_tensor,
-                    )
-
-                    has_mutation_str = (
-                        check_for_mutation_ignore_cuda_graph_managed_tensor(
-                            gm,
-                            compiled_graph,
-                            static_input_idxs,
+        with _WaitCounter("pytorch.wait_counter.actual_codegen_and_compile").guard():
+            compiled_graph = fx_codegen_and_compile(gm, example_inputs, **fx_kwargs)
+            if isinstance(compiled_graph, str):
+                # We only return a string in aot mode, in which case we don't
+                # need to do any post-compilation steps: we just return the string,
+                # which is the filename of the compiled code.
+                return compiled_graph
+            cudagraph_info = None
+            if cudagraphs:
+                # check cudagraph disabling reasons from inductor lowering
+                if compiled_graph.disabled_cudagraphs_reason:
+                    if "cuda" in compiled_graph.device_types:
+                        log_cudagraph_skip_and_bump_counter(
+                            f"skipping cudagraphs due to {compiled_graph.disabled_cudagraphs_reason}"
                         )
-                    )
-                    has_mutation = has_mutation_str is not None
-
-                    if has_mutation:
-                        compiled_graph.disabled_cudagraphs_reason = has_mutation_str
+                    else:
+                        counters["inductor"]["cudagraph_skips"] += 1
+                    BoxedBool.disable(cudagraphs)
                 else:
-                    # Check mutation later to support cudagraph-managed tensors
-                    has_mutation = None
+                    complex_memory_overlap_inputs = any(
+                        complex_memory_overlap(t)
+                        for t in example_inputs
+                        if isinstance(t, torch.Tensor)
+                    )
 
-                cudagraph_tests = [
-                    (not has_mutation, "mutated inputs"),
-                    (not complex_memory_overlap_inputs, "complex memory overlap"),
-                    (
-                        all(
-                            isinstance(t, (torch.Tensor, torch.SymInt))
-                            for t in example_inputs
+                    if not config.triton.cudagraph_support_input_mutation:
+                        # Skip supports for cudagraph-managed tensors
+                        from torch._inductor.cudagraph_utils import (
+                            check_for_mutation_ignore_cuda_graph_managed_tensor,
+                        )
+
+                        has_mutation_str = (
+                            check_for_mutation_ignore_cuda_graph_managed_tensor(
+                                gm,
+                                compiled_graph,
+                                static_input_idxs,
+                            )
+                        )
+                        has_mutation = has_mutation_str is not None
+
+                        if has_mutation:
+                            compiled_graph.disabled_cudagraphs_reason = has_mutation_str
+                    else:
+                        # Check mutation later to support cudagraph-managed tensors
+                        has_mutation = None
+
+                    cudagraph_tests = [
+                        (not has_mutation, "mutated inputs"),
+                        (not complex_memory_overlap_inputs, "complex memory overlap"),
+                        (
+                            all(
+                                isinstance(t, (torch.Tensor, torch.SymInt))
+                                for t in example_inputs
+                            ),
+                            "non-Tensor inputs",
                         ),
-                        "non-Tensor inputs",
-                    ),
-                ]
-                output = output_node(gm)
-                # output args are tuple of first argument
-                assert len(output.args) == 1
-                stack_traces = [
-                    (arg.stack_trace if isinstance(arg, torch.fx.node.Node) else None)
-                    for arg in output.args[0]
-                ]
-                cudagraph_fail_reasons = [s for b, s in cudagraph_tests if not b]
-                placeholders = tuple(get_placeholder_info(gm.graph))
-                cudagraph_info = CudagraphCachedInfo(
-                    placeholders, stack_traces, cudagraph_fail_reasons
-                )
+                    ]
+                    output = output_node(gm)
+                    # output args are tuple of first argument
+                    assert len(output.args) == 1
+                    stack_traces = [
+                        (
+                            arg.stack_trace
+                            if isinstance(arg, torch.fx.node.Node)
+                            else None
+                        )
+                        for arg in output.args[0]
+                    ]
+                    cudagraph_fail_reasons = [s for b, s in cudagraph_tests if not b]
+                    placeholders = tuple(get_placeholder_info(gm.graph))
+                    cudagraph_info = CudagraphCachedInfo(
+                        placeholders, stack_traces, cudagraph_fail_reasons
+                    )
 
-        compiled_graph.cudagraph_info = cudagraph_info
-        compiled_graph.inputs_to_check = inputs_to_check
-        compiled_graph.fx_kwargs = fx_kwargs
-        # TODO: should this be part of fx_kwargs
-        compiled_graph.boxed_forward_device_index = boxed_forward_device_index
-        return compiled_graph
+            compiled_graph.cudagraph_info = cudagraph_info
+            compiled_graph.inputs_to_check = inputs_to_check
+            compiled_graph.fx_kwargs = fx_kwargs
+            # TODO: should this be part of fx_kwargs
+            compiled_graph.boxed_forward_device_index = boxed_forward_device_index
+            return compiled_graph
 
     with _WaitCounter("pytorch.wait_counter.fx_codegen_and_compile").guard() as _:
         if (
@@ -716,7 +760,7 @@ def _compile_fx_inner(
                 # to return the string directly.
                 return compiled_graph
             compiled_graph = FxGraphCache.post_compile(
-                compiled_graph, example_inputs, cudagraphs
+                compiled_graph, example_inputs, cudagraphs, gm
             )
 
     log.debug("FX codegen and compilation took %.3fs", time.time() - start)
@@ -742,9 +786,6 @@ def fx_codegen_and_compile(
     cpp_wrapper: bool = False,
     aot_mode: bool = False,
     is_inference: bool = False,
-    # Use a dict with None value rather than a set for deterministic
-    # iteration order just in case.
-    user_visible_outputs: Optional[Dict[str, None]] = None,
     layout_opt: Optional[bool] = None,
     extern_node_serializer: Optional[Callable[[List[ExternKernelNode]], Any]] = None,
 ) -> Union[CompiledFxGraph, str]:
@@ -819,6 +860,8 @@ def fx_codegen_and_compile(
         with torch.no_grad():
             fake_mode = fake_tensor_prop(gm, example_inputs)
 
+        record_original_output_strides(gm)
+
         # pattern matcher passes might not preserve striding information
         # on node.meta["val"]. if in the future we rely on these being
         # correct we will need to fix.
@@ -867,7 +910,6 @@ def fx_codegen_and_compile(
                     graph_id=graph_id,
                     cpp_wrapper=cpp_wrapper,
                     aot_mode=aot_mode,
-                    user_visible_outputs=user_visible_outputs,
                     extern_node_serializer=extern_node_serializer,
                     is_inference=is_inference,
                     is_backward=is_backward,
@@ -889,7 +931,6 @@ def fx_codegen_and_compile(
                 graph_id=graph_id,
                 cpp_wrapper=cpp_wrapper,
                 aot_mode=aot_mode,
-                user_visible_outputs=user_visible_outputs,
                 extern_node_serializer=extern_node_serializer,
                 is_inference=is_inference,
                 is_backward=is_backward,
@@ -974,6 +1015,7 @@ def fx_codegen_and_compile(
                 compiled_graph = CompiledFxGraph(
                     compiled_fn,
                     graph,
+                    gm,
                     output_strides,
                     V.graph.disable_cudagraphs_reason,
                     metrics_helper.get_deltas(),
@@ -1055,7 +1097,8 @@ def cudagraphify(
         nonlocal compiled_fn
         if compiled_fn is None:
             with dynamo_utils.dynamo_timed(
-                "cudagraphify"
+                "cudagraphify",
+                log_pt2_compile_event=True,
             ), dynamo_utils.preserve_rng_state():
                 compiled_fn = cudagraphify_fn(model, new_inputs, static_input_idxs)
         return compiled_fn(new_inputs)
@@ -1196,7 +1239,11 @@ def compile_fx_aot(
         }
 
     extern_node_serializer = config_patches.pop("extern_node_serializer", None)
-    with V.set_aot_compilation(True):
+    saved_compile_id = model_.meta.get("dynamo_compile_id", None)
+    saved_compile_context = torch._guards.CompileContext(saved_compile_id)
+    with V.set_aot_compilation(True), torch._guards.compile_context(
+        saved_compile_context
+    ):
         compiled_lib_path = compile_fx(
             model_,
             example_inputs_,
@@ -1244,6 +1291,8 @@ def fw_compiler_freezing(
         aot_example_inputs,  # type: ignore[arg-type]
     )
 
+    setattr(opt_model, "_has_frozen_params", True)  # noqa: B010
+
     aot_example_inputs = [aot_example_inputs[ind] for ind in preserved_arg_indices]
     num_fixed = len(preserved_arg_indices) - num_example_inputs
 
@@ -1252,9 +1301,9 @@ def fw_compiler_freezing(
     # for freezing, all graph outputs should be user visible
     *_, model_outputs_node = opt_model.graph.nodes
     model_outputs = model_outputs_node.args[0]
-    user_visible_outputs = dict.fromkeys(
-        n.name for n in model_outputs if isinstance(n, torch.fx.Node)
-    )
+    model_outputs_node.meta["user_visible_output_idxs"] = [
+        idx for idx, n in enumerate(model_outputs) if isinstance(n, torch.fx.Node)
+    ]
 
     static_input_idxs = list(range(num_fixed))
     wrapper_new_args_unwrapped_indices: List[int] = []
@@ -1301,7 +1350,6 @@ def fw_compiler_freezing(
             is_inference=True,
             boxed_forward_device_index=forward_device,
             layout_opt=layout_opt,
-            user_visible_outputs=user_visible_outputs,
         )
 
     # aot_inductor codegens a call that takes in just the inputs, so we don't return a wrapper
@@ -1371,7 +1419,9 @@ def compile_fx(
     config_patches: Optional[Dict[str, Any]] = None,
     decompositions: Optional[Dict[OpOverload, Callable[..., Any]]] = None,
 ) -> Union[Callable[[List[object]], Sequence[torch.Tensor]], str]:
-    with _use_lazy_graph_module(dynamo_config.use_lazy_graph_module):
+    with _use_lazy_graph_module(
+        dynamo_config.use_lazy_graph_module
+    ), enable_python_dispatcher():
         """Main entrypoint to a compile given FX graph"""
         if config_patches:
             with config.patch(config_patches):
@@ -1391,6 +1441,7 @@ def compile_fx(
                 }
             ), V.set_real_inputs(example_inputs_):
                 inputs_: Sequence[InputType] = example_inputs_
+
                 if isinstance(model_, GraphModule):
                     fake_inputs = [
                         node.meta.get("val")
@@ -1404,7 +1455,7 @@ def compile_fx(
                         for inp in fake_inputs
                     ]
 
-                    if all(v is not None for v in fake_inputs):
+                    if any(v is not None for v in fake_inputs):
                         # Validate devices before switching to fake tensors.
                         for idx, fi, i in zip(count(), fake_inputs, inputs_):
                             if fi is not None:
@@ -1415,7 +1466,7 @@ def compile_fx(
                                         f"{fi.device} vs {i.device}. If the model was exported via torch.export(), "
                                         "make sure torch.export() and torch.aot_compile() run on the same device."
                                     )
-                        inputs_ = fake_inputs
+                        inputs_ = fake_inputs  # type: ignore[assignment]
                 return compile_fx(
                     model_,
                     inputs_,
@@ -1486,10 +1537,8 @@ def compile_fx(
                 num_example_inputs, len(example_inputs)
             )
 
-            user_visible_outputs = {}
-
+            model_outputs_node = output_node(model)
             if config.keep_output_stride:
-                model_outputs_node = output_node(model)
                 model_outputs = pytree.arg_tree_leaves(*model_outputs_node.args)
                 num_model_outputs = len(model_outputs)
 
@@ -1534,13 +1583,13 @@ def compile_fx(
                 # of "graph" outputs. Make sure we're within bounds.
                 assert orig_output_end_idx <= num_model_outputs
 
-                user_visible_outputs = dict.fromkeys(
-                    n.name
-                    for n in model_outputs[
-                        original_output_start_index:orig_output_end_idx
-                    ]
-                    if isinstance(n, torch.fx.Node)
-                )
+                model_outputs_node.meta["user_visible_output_idxs"] = [
+                    idx
+                    for idx in range(original_output_start_index, orig_output_end_idx)
+                    if isinstance(model_outputs[idx], torch.fx.Node)
+                ]
+            else:
+                model_outputs_node.meta["user_visible_output_idxs"] = []
 
             return inner_compile(
                 model,
@@ -1550,7 +1599,6 @@ def compile_fx(
                 graph_id=graph_id,
                 is_inference=is_inference,
                 boxed_forward_device_index=forward_device,
-                user_visible_outputs=user_visible_outputs,
             )
 
         fw_compiler = functools.partial(fw_compiler_base, is_inference=False)
@@ -1585,14 +1633,17 @@ def compile_fx(
             model: GraphModule, example_inputs: List[InputType]
         ) -> Union[CompiledFxGraph, str]:
             with dynamo_utils.dynamo_timed("compile_fx.<locals>.bw_compiler"):
-                user_visible_outputs = {}
-
+                model_outputs_node = output_node(model)
                 if config.bw_outputs_user_visible:
-                    model_outputs_node = output_node(model)
                     model_outputs = pytree.arg_tree_leaves(*model_outputs_node.args)
-                    user_visible_outputs = dict.fromkeys(
-                        n.name for n in model_outputs if isinstance(n, torch.fx.Node)
-                    )
+                    model_outputs_node.meta["user_visible_output_idxs"] = [
+                        idx
+                        for idx, n in enumerate(model_outputs)
+                        if isinstance(n, torch.fx.Node)
+                    ]
+                else:
+                    model_outputs_node.meta["user_visible_output_idxs"] = []
+
                 fixed = count_tangents(model)
                 with config.patch(
                     get_cpp_wrapper_config()
@@ -1605,7 +1656,6 @@ def compile_fx(
                         is_backward=True,
                         graph_id=graph_id,
                         boxed_forward_device_index=forward_device,
-                        user_visible_outputs=user_visible_outputs,
                     )
 
         # TODO: can add logging before/after the call to create_aot_dispatcher_function
@@ -1633,6 +1683,9 @@ def compile_fx(
                 unlifted_gm.meta["dynamo_flat_name_to_original_fqn"] = model_.meta[
                     "dynamo_flat_name_to_original_fqn"
                 ]
+
+            if "dynamo_compile_id" in model_.meta:
+                unlifted_gm.meta["dynamo_compile_id"] = model_.meta["dynamo_compile_id"]
 
             # Disable amp as in aot_dispatch_autograd (https://github.com/pytorch/pytorch/pull/86515)
             # In inference_compiler (fw_compiler_base), _recursive_joint_graph_passes will call into

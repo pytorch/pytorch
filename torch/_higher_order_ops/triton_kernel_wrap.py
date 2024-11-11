@@ -216,7 +216,18 @@ def generate_ttir(
     ordered_tensor_names = [
         name for name, arg in ordered_args.items() if isinstance(arg, Tensor)
     ]
-    specialization = kernel._get_config(*ordered_args.values())
+
+    def _get_specialization(args):  # type: ignore[no-untyped-def]
+        try:
+            from triton.backends.compiler import AttrsDescriptor  # noqa: F401
+
+            target = triton.runtime.driver.active.get_current_target()
+            backend = triton.compiler.compiler.make_backend(target)
+            return backend.get_attrs_descriptor(args, kernel.params)
+        except ImportError:
+            return kernel._get_config(*args)
+
+    specialization = _get_specialization(ordered_args.values())
     constants = {
         name: arg for name, arg in ordered_args.items() if not isinstance(arg, Tensor)
     }
@@ -699,7 +710,24 @@ def triton_kernel_wrapper_mutation_dense(
                 element_size,
             )
 
-    kernel[grid_fn](**kwargs, **constant_args)
+    # move as many positional arguments from dicts to args as we
+    # can to circumvent the bug with the kwargs and pre_/post_hook:
+    # https://github.com/triton-lang/triton/issues/5082
+    # TODO: remove this when the Triton issue above is fixed
+    args = []
+    # copy kwargs and constant_args here to
+    # avoid mutating the original inputs
+    kwargs = kwargs.copy()
+    constant_args = constant_args.copy()
+    for name in kernel.arg_names:
+        if name in kwargs:
+            args.append(kwargs.pop(name))
+        elif name in constant_args:
+            args.append(constant_args.pop(name))
+        else:
+            break
+
+    kernel[grid_fn](*args, **kwargs, **constant_args)
 
 
 @triton_kernel_wrapper_mutation.py_impl(FakeTensorMode)
@@ -1024,10 +1052,9 @@ class TritonHOPifier:
             import torch
             import torch._dynamo
 
-            # We only support configs and keys arguments of triton.autotune
-            # Make sure other arguments are defaulted
+            # We only support configs, keys, and restore_value arguments
+            # of triton.autotune. Make sure other arguments are defaulted.
             defaults = inspect.signature(Autotuner.__init__).parameters
-
             # Newer version of triton change attribute name from warmup to num_warmup and rep to num_rep.
             # The call to get_first_attr is to maintain backward-compatibility.
             if (
@@ -1051,8 +1078,13 @@ class TritonHOPifier:
                         != kernel.early_config_prune
                     )
                     # Set via reset_to_zero argument
-                    or len(kernel.reset_idx) != 0
-                    or len(kernel.restore_idx) != 0
+                    # https://github.com/triton-lang/triton/pull/5083
+                    # changes kernel.reset_idx to kernel.reset_to_zero
+                    or (hasattr(kernel, "reset_idx") and len(kernel.reset_idx) != 0)
+                    or (
+                        hasattr(kernel, "reset_to_zero")
+                        and len(kernel.reset_to_zero) != 0
+                    )
                     or (
                         "use_cuda_graph" in defaults
                         and defaults["use_cuda_graph"].default != kernel.use_cuda_graph
@@ -1060,7 +1092,19 @@ class TritonHOPifier:
                 )
             ):
                 self.raise_unsupported(
-                    "Only configs and keys are supported for triton.autotune"
+                    "Only configs, keys, and restore_value are supported for triton.autotune"
+                )
+            if (
+                not torch._inductor.config.unsafe_ignore_unsupported_triton_autotune_args
+                and (
+                    # pre_hook requires running arbitrary code at runtime, which we cannot handle at this time
+                    # https://github.com/pytorch/pytorch/issues/139059
+                    # Check Config passed to autotuner in configs
+                    any(cfg.pre_hook is not None for cfg in kernel.configs)
+                )
+            ):
+                self.raise_unsupported(
+                    "pre_hook is not supported in triton.Autotune Configs"
                 )
 
     def call_getitem(

@@ -7,6 +7,8 @@ jobs:
 
   get-label-type:
     name: get-label-type
+    # Don't run on forked repos
+    if: github.repository_owner == 'pytorch'
     uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
     with:
       triggering_actor: ${{ github.triggering_actor }}
@@ -83,7 +85,7 @@ jobs:
           path: td_results.json
 
       - name: Store TD results on GHA
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         if: steps.td.outcome == 'success'
         with:
           name: td_results.json

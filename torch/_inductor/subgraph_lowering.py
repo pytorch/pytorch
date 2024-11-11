@@ -42,8 +42,13 @@ class PointwiseSubgraphLowering(torch.fx.Interpreter):
 
     def register_buffer(self, buffer: ir.Buffer) -> str:
         raise SubgraphLoweringException(
-            "Buffer creation is not supported in this context"
+            "Buffers cannot be created while lowering a pointwise subgraph."
+            "This could be for a good reason (e.g. you're calling an op we can't codegen as a pointwise op), "
+            "but it could also be a bug. Please file a bug report if you think this should be supportable."
         )
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.root_graph, name)
 
     def call_function(
         self,
@@ -61,11 +66,6 @@ class PointwiseSubgraphLowering(torch.fx.Interpreter):
         if target not in lowerings:
             raise SubgraphLoweringException(
                 f"{target} not supported in subgraph, (missing lowering)"
-            )
-
-        if torch.Tag.pointwise not in target.tags:
-            raise SubgraphLoweringException(
-                f"Only pointwise operators are supported in this context, but got {target}"
             )
 
         return lowerings[target](*args, **kwargs)
