@@ -144,7 +144,7 @@ class TensorVariable(VariableTracker):
         is_sparse,
         class_type,
         has_grad_fn,
-        size=None,
+        _size=None,
         stride=None,
         is_contiguous=None,
         _is_name_set=None,
@@ -156,7 +156,7 @@ class TensorVariable(VariableTracker):
         self.device = device
         self.layout = layout
         self.ndim = ndim
-        self.size = size
+        self._size = _size  # this is accessed as a property for validation
         self.stride = stride
         self.requires_grad = requires_grad
         self.is_quantized = is_quantized
@@ -201,7 +201,7 @@ class TensorVariable(VariableTracker):
             props["has_grad_fn"] = False
 
         if is_sparse_any(value) and not has_free_symbols(value):
-            props["size"] = tuple(
+            props["_size"] = tuple(
                 [int(s) if is_symbolic(s) else s for s in value.size()]
             )
         elif not has_free_symbols(value):
@@ -211,7 +211,7 @@ class TensorVariable(VariableTracker):
             # already. We could remove the discrepancy here, by having ConstantVariable be more permissive for
             # constant backed SymInts, but that assert being strict has led to some good signal in hunting bugs, and
             # I'd like to keep it around for now.
-            props["size"] = tuple(
+            props["_size"] = tuple(
                 # the non is_symbolic case applies to the jagged layout
                 # NestedTensor case as singleton ints are not symbolic
                 [int(s) if is_symbolic(s) else s for s in value.size()]
@@ -321,7 +321,7 @@ class TensorVariable(VariableTracker):
             return ConstantVariable.create(self.device.type == "cuda")
 
     def method_attr_shape(self, tx):
-        if self.size is not None:
+        if self.valid_size():
             sizes = [variables.ConstantVariable.create(x) for x in self.size]
             return SizeVariable(sizes)
         else:
@@ -486,7 +486,7 @@ class TensorVariable(VariableTracker):
     def unpack_var_sequence(self, tx: "InstructionTranslator", idxes=None):
         from .builder import wrap_fx_proxy_cls
 
-        if self.size:
+        if self.valid_size():
             size_len = len(self.size)
         else:
             size_var = self.call_method(tx, "size", [], {})
@@ -495,7 +495,7 @@ class TensorVariable(VariableTracker):
         # Ensure we don't unpack a scalar tensor.
         assert size_len != 0, "Can't unpack scalar tensors."
 
-        if self.size:
+        if self.valid_size():
             length = self.size[0]
         else:
             dyn_length = self.call_method(tx, "size", [ConstantVariable.create(0)], {})
@@ -517,6 +517,14 @@ class TensorVariable(VariableTracker):
             wrap_fx_proxy_cls(target_cls=type(self), tx=tx, proxy=self.as_proxy()[i])
             for i in idxes
         ]
+
+    def valid_size(self):
+        return self._size is not None
+
+    @property
+    def size(self):
+        assert self._size is not None, "accessing None size in TensorVariable"
+        return self._size
 
     def _strict_mode_banned_ops(self):
         return torch._dynamo.config._autograd_backward_strict_mode_banned_ops
@@ -608,7 +616,14 @@ class TensorVariable(VariableTracker):
         # Technically, this should not be necessary, but I'm including it
         # for enhanced BC, in case example_value is sometimes not set
         # (it really should always be set though!)
-        if (r := getattr(self, name)) is not None:
+        if name != "size":
+            r = getattr(self, name)
+        elif name == "size" and self.valid_size():
+            r = self.size
+        else:
+            r = None
+
+        if r is not None:
             if dim is None:
                 return RetVariable(r)
             else:
@@ -628,7 +643,7 @@ class TensorVariable(VariableTracker):
                     return ConstantVariable.create(int(fake_r))
 
     def method_numel(self):
-        if self.size is not None:
+        if self.valid_size():
             return ConstantVariable.create(product(self.size))
 
         # It might still be constant!  Consult the fake tensor and see
