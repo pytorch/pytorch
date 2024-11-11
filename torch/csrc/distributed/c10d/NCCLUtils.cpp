@@ -16,7 +16,7 @@
 namespace c10d {
 
 ncclComm_t NCCLComm::getNcclComm() {
-  std::unique_lock<std::mutex> lock(mutex_);
+  LockType lock(mutex_);
   if (aborted_) {
     auto commFailureMsg = commFailureReason_ != std::nullopt
         ? c10::str(" Original reason for failure was: ", *commFailureReason_)
@@ -168,9 +168,9 @@ size_t hashTensors(const std::vector<at::Tensor>& tensors) {
 int nccl_nonblocking_timeout() {
   static int timeout = -2; // -2 means not initialized
   if (timeout == -2) {
-    const char* val = getenv("TORCH_NCCL_NONBLOCKING_TIMEOUT");
-    if (val && strlen(val) > 0) {
-      timeout = strtol(val, nullptr, 0);
+    const auto val = c10::utils::get_env("TORCH_NCCL_NONBLOCKING_TIMEOUT");
+    if (val.has_value() && !val.value().empty()) {
+      timeout = stoi(val.value());
     } else {
       // Default value consistent with kBackendDefaultTimeout
       timeout = 30 * 60;
@@ -345,7 +345,7 @@ void DebugInfoWriter::write(const std::string& ncclTrace) {
     return;
   }
 
-  file.write(ncclTrace.data(), ncclTrace.size());
+  file.write(ncclTrace.data(), static_cast<std::streamsize>(ncclTrace.size()));
   if (!file) {
     LOG(ERROR) << "Error opening file for writing NCCLPG debug info: "
                << filename_;
@@ -374,6 +374,33 @@ void DebugInfoWriter::registerWriter(std::unique_ptr<DebugInfoWriter> writer) {
       "debugInfoWriter already registered");
   hasWriterRegistered_.store(true);
   writer_ = std::move(writer);
+}
+
+// Returns the traceback of current entry, in string form.
+// Note: `getTraceback` invokes `torch::symbolize`, which may need to acquire
+// the GIL. If you don't want to block the current thread or take the risk of a
+// GIL deadlock, you can use an asynchronous calling mechanism like std::async.
+std::string NCCLTraceBuffer::Entry::getTraceback() {
+  torch::CapturedTraceback* traceback = traceback_.get();
+  torch::SymbolizedTracebacks s_tbs = torch::symbolize({traceback});
+  // We use 0 because we only have one traceback here.
+  const auto& s_tb = s_tbs.tracebacks.at(0);
+  std::stringstream oss;
+  for (auto idx : c10::irange(s_tb.size())) {
+    auto frame_id = s_tb[idx];
+    const auto& frame = s_tbs.all_frames.at(frame_id);
+    oss << "#" << idx << " " << frame.funcname << " from " << frame.filename
+        << ":" << frame.lineno << '\n';
+  }
+  /* Resulted format is like:
+    #0 all_reduce from pytorch/torch/distributed/distributed_c10d.py:2696
+    #1 wrapper from pytorch/torch/distributed/c10d_logger.py:83
+    #2 bar from /home/user/repro.py:15
+    #3 foo from /home/user/repro.py:24
+    #4 main from /home/user/repro.py:34
+    #5 <module> from /home/user/repro.py:40
+  */
+  return oss.str();
 }
 
 std::optional<size_t> NCCLTraceBuffer::record(
@@ -495,6 +522,23 @@ std::vector<NCCLTraceBuffer::Entry> NCCLTraceBuffer::dump_entries() {
   return result;
 }
 
+// Returns the entry with the given id, if it exists. Otherwise, returns
+// std::nullopt.
+std::optional<NCCLTraceBuffer::Entry> NCCLTraceBuffer::getEntry(
+    std::optional<size_t> id) {
+  if (!enabled_ || !id) {
+    return std::nullopt;
+  }
+
+  std::unique_lock<std::mutex> guard(mutex_);
+  Entry entry = entries_.at(*id % max_entries_);
+  if (entry.id_ == *id) {
+    return entry;
+  } else {
+    return std::nullopt;
+  }
+}
+
 void NCCLTraceBuffer::retire_id(
     std::optional<size_t> id,
     bool compute_duration) {
@@ -539,7 +583,7 @@ void NCCLTraceBuffer::retire_id(
       return;
     }
     if (duration.has_value()) {
-      entry->duration_ = duration.value();
+      entry->duration_ = duration;
     }
   }
 }

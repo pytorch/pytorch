@@ -288,6 +288,14 @@ def unimplemented_with_warning(e: Exception, code, msg: str) -> NoReturn:
     # exception, its ok to fallback to eager but not silently. Here, we can use
     # this function to log the message and the stack trace.
     graph_break_msg = format_error_msg_verbose(e, code)
+    torch._logging.trace_structured(
+        "artifact",
+        metadata_fn=lambda: {
+            "name": "dynamo_graph_break_reason",
+            "encoding": "string",
+        },
+        payload_fn=lambda: graph_break_msg,
+    )
     graph_breaks_log.debug("%s", graph_break_msg)
     log.warning(msg)
     unimplemented(msg, from_exc=e)
