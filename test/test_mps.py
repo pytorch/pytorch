@@ -152,7 +152,7 @@ def mps_ops_grad_modifier(ops):
 
     MACOS_12_3_XFAILLIST_GRAD = {
         # Unsupported Border padding mode, forward pass success as fallback to cpu
-        'grid_sampler_2d': [torch.float32],
+        'grid_sampler_2d': [torch.float32, torch.float16, torch.bfloat16],
         # Unimplemented
         'logaddexp2': [torch.float32],
 
@@ -165,7 +165,7 @@ def mps_ops_grad_modifier(ops):
         'masked.log_softmax': [torch.float32, torch.float16],
 
         # Unsupported Border padding mode, forward pass success as fallback to cpu
-        'grid_sampler_2d': [torch.float32],
+        'grid_sampler_2d': [torch.float32, torch.float16, torch.bfloat16],
 
         # Same issue as `argsort` and `sort` with duplicate elements (undefined behaviour).
         # Forward pass is passing since `msort` doesn't return the indices, just the values, which match the CPU.
@@ -638,7 +638,7 @@ def mps_ops_modifier(ops):
 
     MACOS_AFTER_13_1_XFAILLIST = {
         # before macOS 13.2 it falls back to cpu and pass the forward pass
-        'grid_sampler_2d': [torch.float32],  # Unsupported Border padding mode
+        'grid_sampler_2d': [torch.float32, torch.float16, torch.bfloat16],  # Unsupported Border padding mode
         # inconsistency errors between cpu and mps, max seen atol is 2
         'nn.functional.interpolatebilinear': [torch.uint8],
     }
@@ -4832,6 +4832,17 @@ class TestMPS(TestCaseMPS):
         loss = lf(y, y_hat)
         loss_mps = lf(y_mps, y_hat_mps)
         self.assertEqual(loss, loss_mps)
+
+    def test_mse_loss_unsupported_types(self):
+        loss = nn.MSELoss()
+        for dtype in MPS_DTYPES:
+            a_mps = torch.tensor([0, 1, 2], dtype=dtype, device='mps')
+            a_cpu = torch.tensor([0, 1, 2], dtype=dtype, device='cpu')
+            if dtype.is_floating_point:
+                self.assertEqual(loss(a_mps, a_mps), loss(a_cpu, a_cpu))
+                continue
+            self.assertRaises(RuntimeError, lambda: loss(a_mps, a_mps))
+            self.assertRaises(RuntimeError, lambda: loss(a_cpu, a_cpu))
 
     # Binary Cross Enropy
     def test_bce_loss_simple(self):
