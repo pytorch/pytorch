@@ -7047,6 +7047,16 @@ graph():
                         id(getattr(unflattened, a)), id(getattr(unflattened, b))
                     )
 
+            if not is_retracebility_test(self._testMethodName):
+                # preserving module call signatures
+                ep = export(m, inp, preserve_module_call_signature=("n", "p"))
+                exported_result = ep.module()(*inp)
+                self.assertTrue(torch.allclose(exported_result, eager_result))
+
+                unflattened = torch.export.unflatten(ep)
+                unflattened_result = unflattened(*inp)
+                self.assertTrue(torch.allclose(unflattened_result, eager_result))
+
         test(
             gen_m(n=True, n_1=False, p=False, p_1=False),
             # p should share n_1 graph, p_1 should be optimized away
