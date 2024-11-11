@@ -95,7 +95,7 @@ def mps_ops_grad_modifier(ops):
         'index_fill': [torch.float16, torch.float32],  # missing `aten::_unique`.
         'linalg.lu_factor': [torch.float16, torch.float32],  # missing `aten::lu_unpack`.
         'aminmax': [torch.float32, torch.float16],
-        'i0': None,  # missing `aten::i1`.
+        'special.i1': [torch.float16],  # "i1_backward" not implemented for 'Half'
 
         # Correctness issues
         'atanh': [torch.float32],
@@ -795,7 +795,6 @@ def mps_ops_modifier(ops):
         'special.hermite_polynomial_h': None,
         'special.hermite_polynomial_he': None,
         'special.i0e': None,
-        'special.i1': None,
         'special.i1e': None,
         'special.laguerre_polynomial_l': None,
         'special.log_ndtr': None,
@@ -4832,6 +4831,17 @@ class TestMPS(TestCaseMPS):
         loss = lf(y, y_hat)
         loss_mps = lf(y_mps, y_hat_mps)
         self.assertEqual(loss, loss_mps)
+
+    def test_mse_loss_unsupported_types(self):
+        loss = nn.MSELoss()
+        for dtype in MPS_DTYPES:
+            a_mps = torch.tensor([0, 1, 2], dtype=dtype, device='mps')
+            a_cpu = torch.tensor([0, 1, 2], dtype=dtype, device='cpu')
+            if dtype.is_floating_point:
+                self.assertEqual(loss(a_mps, a_mps), loss(a_cpu, a_cpu))
+                continue
+            self.assertRaises(RuntimeError, lambda: loss(a_mps, a_mps))
+            self.assertRaises(RuntimeError, lambda: loss(a_cpu, a_cpu))
 
     # Binary Cross Enropy
     def test_bce_loss_simple(self):
