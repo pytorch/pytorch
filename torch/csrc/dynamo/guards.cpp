@@ -756,7 +756,7 @@ static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
 }
 
 template <typename T>
-inline static void unwrap_size_tuple(PyObject* obj, T& output) {
+static void unwrap_size_tuple(PyObject* obj, T& output) {
   TORCH_CHECK(PyTuple_CheckExact(obj));
   size_t len = PyTuple_GET_SIZE(obj);
   output.reserve(len);
@@ -768,7 +768,7 @@ inline static void unwrap_size_tuple(PyObject* obj, T& output) {
 }
 
 template <typename T>
-inline static void _parse_empty_strided_args(
+static void _parse_empty_strided_args(
     PyObject* args,
     T& sizes,
     T& strides,
@@ -783,7 +783,7 @@ inline static void _parse_empty_strided_args(
   dtype = reinterpret_cast<THPDtype*>(py_dtype)->scalar_type;
 }
 
-inline static PyObject* _empty_strided_device(
+static PyObject* _empty_strided_device(
     PyObject* dummy,
     PyObject* args,
     c10::DeviceType device_type) {
@@ -3225,7 +3225,7 @@ class DictGetItemGuardAccessor : public GuardAccessor {
   }
 
   std::string repr() const override {
-    return "DictGetItemGuardAccessor(" + py::str(_key).cast<std::string>() +
+    return "DictGetItemGuardAccessor(" + py::repr(_key).cast<std::string>() +
         ")";
   }
 
