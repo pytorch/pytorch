@@ -95,7 +95,7 @@ jobs:
     needs: get-label-type
     runs-on: "windows-11-arm64"
     timeout-minutes: !{{ common.timeout_minutes }}
-    !{{ upload.binary_env(config) }}
+    !{{ upload.binary_env(config, True) }}
     {%- if config.pytorch_extra_install_requirements is defined and config.pytorch_extra_install_requirements|d('')|length > 0  %}
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: !{{ config.pytorch_extra_install_requirements }}
     {%- endif %}
@@ -104,25 +104,25 @@ jobs:
       - name: Install Git
         shell: cmd
         run: |
-          "${BUILDER_ROOT}/windows/arm64/bootstrap_git.bat"
+          "builder/windows/arm64/bootstrap_git.bat"
       - name: Bootstrap Python
         shell: cmd
         run: |
-          "${BUILDER_ROOT}/windows/arm64/bootstrap_python.bat"
+          "builder/windows/arm64/bootstrap_python.bat"
       - name: Bootstrap Build Tools
         shell: cmd
         run: |
-          "${BUILDER_ROOT}/windows/arm64/bootstrap_buildtools.bat"
+          "builder/windows/arm64/bootstrap_buildtools.bat"
       - name: Bootstrap APL
         shell: cmd
         run: |
-          "${BUILDER_ROOT}/windows/arm64/bootstrap_apl.bat"
+          "builder/windows/arm64/bootstrap_apl.bat"
       - name: Bootstrap Rust
         shell: cmd
         run: |
-          "${BUILDER_ROOT}/windows/arm64/bootstrap_rust.bat"
+          "builder/windows/arm64/bootstrap_rust.bat"
       - name: Build PyTorch binary
         shell: cmd
         run: |
-          "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_arm64_build.sh"
+          "builder/.circleci/scripts/binary_windows_arm64_build.sh"
 {%- endfor %}
