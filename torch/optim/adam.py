@@ -373,7 +373,7 @@ def _single_tensor_adam(
     # Note: ensure type declaration is under conditional check for isinstance
     # or else torchscript will get cranky about the DeviceDict type.
     if isinstance(beta1, Tensor):
-        beta1_dict: Optional[DeviceDtypeDict] = {}
+        beta1_dict: Optional[DeviceDtypeDict] = {(beta1.device, beta1.dtype): beta1}
     else:
         beta1_dict = None
 
