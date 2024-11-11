@@ -324,4 +324,5 @@ void gpu_kernel_multiple_outputs(TensorIteratorBase& iter, const func_t& f) {
 
   gpu_kernel_multiple_outputs_impl(iter, f);
 }
+
 } //namespace at::native
