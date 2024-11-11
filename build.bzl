@@ -36,7 +36,7 @@ def define_targets(rules):
             "caffe2/serialize/istream_adapter.cc",
             "caffe2/serialize/read_adapter_interface.cc",
         ],
-        copts = ["-fexceptions"],
+        copts = ["-fexceptions", "-DFBCODE_CAFFE2"],
         tags = [
             "-fbcode",
             "supermodule:android/default/pytorch",
@@ -47,7 +47,7 @@ def define_targets(rules):
         deps = [
             ":caffe2_headers",
             "//c10",
-            "//third_party/miniz-2.1.0:miniz",
+            "//third_party/miniz-3.0.2:miniz",
             "@com_github_glog//:glog",
         ],
     )
@@ -76,7 +76,7 @@ def define_targets(rules):
     ] + (["--static_dispatch_backend CPU"] if rules.is_cpu_static_dispatch_build() else []))
 
     gen_aten_outs_cuda = (
-        GENERATED_H_CUDA + GENERATED_CPP_CUDA +
+        GENERATED_H_CUDA + GENERATED_CPP_CUDA + GENERATED_AOTI_CUDA_CPP +
         aten_ufunc_generated_cuda_sources()
     )
 
@@ -320,5 +320,8 @@ GENERATED_AUTOGRAD_CPP = [
 
 GENERATED_AOTI_CPP = [
     "torch/csrc/inductor/aoti_torch/generated/c_shim_cpu.cpp",
+]
+
+GENERATED_AOTI_CUDA_CPP = [
     "torch/csrc/inductor/aoti_torch/generated/c_shim_cuda.cpp",
 ]

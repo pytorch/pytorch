@@ -281,7 +281,7 @@ def get_default_qconfig(backend="x86", version=0):
                 weight=default_weight_observer,
             )
         elif backend == "onednn":
-            if not torch.cpu._is_cpu_support_vnni():
+            if not torch.cpu._is_vnni_supported():
                 warnings.warn(
                     "Default qconfig of oneDNN backend with reduce_range of false may have accuracy issues "
                     "on CPU without Vector Neural Network Instruction support."

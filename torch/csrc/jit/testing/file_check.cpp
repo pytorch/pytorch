@@ -23,10 +23,7 @@
 #include <sstream>
 #include <string>
 
-namespace torch {
-namespace jit {
-
-namespace testing {
+namespace torch::jit::testing {
 
 enum CheckType {
   CHECK,
@@ -48,7 +45,7 @@ struct Check {
 
   Check(
       CheckType type,
-      c10::string_view str,
+      std::string_view str,
       std::optional<size_t> count = std::nullopt)
       : Check(type, std::string(str.begin(), str.end()), count) {}
 
@@ -228,6 +225,7 @@ struct FileCheckImpl {
         groups.push_back({check});
       }
     }
+    checks.push_back(check);
     has_run = false;
   }
 
@@ -505,13 +503,10 @@ struct FileCheckImpl {
         end_range = start_range + check.search_str_.size();
         break;
       }
-      case CHECK_DAG: {
-        AT_ERROR();
-      } break;
-      case CHECK_NOT: {
-        AT_ERROR();
-      } break;
+      default:
+        TORCH_CHECK(false);
     }
+
     return SourceRange(source, start_range, end_range);
   }
 
@@ -543,7 +538,7 @@ struct FileCheckImpl {
   std::vector<std::vector<Check>> groups;
 };
 
-FileCheck::FileCheck() : fcImpl(new FileCheckImpl()){};
+FileCheck::FileCheck() : fcImpl(new FileCheckImpl()) {}
 
 std::ostream& operator<<(std::ostream& out, const FileCheckImpl& fc) {
   out << "FileCheck checks:\n";
@@ -551,7 +546,7 @@ std::ostream& operator<<(std::ostream& out, const FileCheckImpl& fc) {
     out << "\t" << c << "\n";
   }
   return out;
-};
+}
 
 FileCheck::~FileCheck() {
   if (!fcImpl->has_run) {
@@ -559,17 +554,17 @@ FileCheck::~FileCheck() {
     std::cout << *fcImpl;
   }
   fcImpl.reset();
-};
+}
 
 void FileCheck::run(const std::string& test_file) {
   fcImpl->run(test_file);
-};
+}
 
 void FileCheck::run(const Graph& graph) {
   std::stringstream graph_str;
   graph_str << graph;
   fcImpl->run(graph_str.str());
-};
+}
 
 void FileCheck::run(
     const std::string& input_checks_string,
@@ -635,6 +630,4 @@ FileCheck* FileCheck::check_regex(const std::string& str) {
   return this;
 }
 
-} // namespace testing
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::testing

@@ -54,8 +54,9 @@ env:
 
 jobs:
   get-label-type:
+    if: github.repository_owner == 'pytorch'
     name: get-label-type
-    uses: ./.github/workflows/_runner-determinator.yml
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
     with:
       triggering_actor: ${{ github.triggering_actor }}
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
@@ -104,9 +105,9 @@ jobs:
       - get-label-type
 {%- if config["gpu_arch_type"] == "cuda" %}
 {%- if branches == "nightly" %}
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.8xlarge.nvidia.gpu"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
 {%- else %}
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.8xlarge.nvidia.gpu.nonephemeral"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge.nonephemeral"
 {%- endif %}
 {%- else %}
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"

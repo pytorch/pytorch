@@ -1,5 +1,6 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
+import dataclasses
 import functools
 import itertools
 import logging
@@ -101,11 +102,32 @@ def maybe_layout_constraints(fn: Callable[..., Any]) -> Optional[Callable[..., A
         _maybe_layout_constraints[fn] = None
         return None
     # We lazily register tag-based layout constraints.
-    if torch._C.Tag.needs_fixed_stride_order in fn.tags:
-        _maybe_layout_constraints[fn] = constrain_to_fx_strides
-        return _maybe_layout_constraints[fn]
-    _maybe_layout_constraints[fn] = None
-    return None
+
+    def handle_layout_constraint_tag(tag):
+        if tag is torch._C.Tag.needs_fixed_stride_order:
+            _maybe_layout_constraints[fn] = constrain_to_fx_strides
+            return _maybe_layout_constraints[fn]
+        elif tag is torch._C.Tag.flexible_layout:
+            _maybe_layout_constraints[fn] = None
+            return None
+        else:
+            raise AssertionError(f"Unknown layout constraint tag: {tag}")
+
+    tag = get_layout_constraint_tag(fn)
+    return handle_layout_constraint_tag(tag)
+
+
+def get_layout_constraint_tag(fn):
+    tags_by_priority = [
+        torch._C.Tag.needs_fixed_stride_order,
+        torch._C.Tag.flexible_layout,
+    ]
+    for tag in tags_by_priority:
+        if tag in fn.tags:
+            return tag
+    if torch._library.utils.is_builtin(fn):
+        return torch._C.Tag.flexible_layout
+    return getattr(torch._C.Tag, config.custom_op_default_layout_constraint)
 
 
 def assert_nyi(cond, msg):
@@ -237,41 +259,75 @@ def in_namespace(op, namespace):
     return False
 
 
-def transform_args(args, broadcast, type_promotion_kind, convert_input_to_bool):
-    indices = [i for i, x in enumerate(args) if isinstance(x, TensorBox)]
-    if (type_promotion_kind or convert_input_to_bool) and indices:
+def transform_args(
+    args: List[Any],
+    kwargs: Dict[str, Any],
+    broadcast: bool,
+    type_promotion_kind: Optional[ELEMENTWISE_TYPE_PROMOTION_KIND],
+    convert_input_to_bool: bool,
+) -> Tuple[List[Any], Dict[str, Any]]:
+    args_indices = [i for i, x in enumerate(args) if isinstance(x, TensorBox)]
+    kwargs_indices = [k for k, v in kwargs.items() if isinstance(v, TensorBox)]
+    # check that there's something to transform
+    if not args_indices and not kwargs_indices:
+        return args, kwargs
+
+    if type_promotion_kind or convert_input_to_bool:
         if convert_input_to_bool:
             dtype = torch.bool
         else:
-            # FIXME that's a crude approximation for promoting args
+            # FIXME this is a crude approximation for promoting args
             promoting_args = [
                 a
                 for a in args
-                if isinstance(a, (Number, sympy.Basic))
-                or getattr(a, "dtype", None) is not None
+                if isinstance(a, (Number, sympy.Basic)) or hasattr(a, "dtype")
             ]
+            # only consider tensor kwargs for promotion, for now
+            promoting_args.extend(a for a in kwargs.values() if hasattr(a, "dtype"))
             dtype = get_promoted_dtype(
-                *promoting_args, type_promotion_kind=type_promotion_kind
+                *promoting_args, type_promotion_kind=type_promotion_kind  # type: ignore[arg-type]
             )
+
+        device = (
+            args[args_indices[0]] if args_indices else kwargs[kwargs_indices[0]]
+        ).get_device()
 
         # sometimes args are an immutable list so we can't mutate them
         def promote(arg):
             if isinstance(arg, TensorBox):
                 return to_dtype(arg, dtype)
             elif isinstance(arg, ir.Constant):
-                return ir.Constant(arg.value, dtype, args[indices[0]].get_device())
+                return ir.Constant(value=arg.value, dtype=dtype, device=device)
             else:
                 return arg
 
         args = [promote(a) for a in args]
-    if broadcast and indices:
-        for i, x in zip(indices, broadcast_tensors(*[args[i] for i in indices])):
+        kwargs = {k: promote(v) for k, v in kwargs.items()}
+
+    if broadcast:
+        broadcasted = broadcast_tensors(
+            *list(
+                itertools.chain(
+                    (args[i] for i in args_indices),
+                    (kwargs[k] for k in kwargs_indices),
+                )
+            )
+        )
+        size = list(broadcasted[0].get_size())
+
+        for i, x in zip(args_indices, broadcasted[: len(args_indices)]):
             args[i] = x
+        for k, x in zip(kwargs_indices, broadcasted[len(args_indices) :]):
+            kwargs[k] = x
+
         for i in range(len(args)):
             if isinstance(args[i], ir.Constant):
-                args[i] = ExpandView.create(args[i], list(args[indices[0]].get_size()))
+                args[i] = ExpandView.create(args[i], size)
+        for k in kwargs:
+            if isinstance(kwargs[k], ir.Constant):
+                kwargs[k] = ExpandView.create(kwargs[k], size)
 
-    return args
+    return args, kwargs
 
 
 def _register_foreach_lowering(aten_fn, decomp_fn):
@@ -300,7 +356,11 @@ def _register_foreach_lowering(aten_fn, decomp_fn):
 
 
 def _register_lowering(
-    aten_fn, decomp_fn, broadcast, type_promotion_kind, convert_input_to_bool
+    aten_fn,
+    decomp_fn,
+    broadcast,
+    type_promotion_kind: Optional[ELEMENTWISE_TYPE_PROMOTION_KIND],
+    convert_input_to_bool,
 ):
     """
     Add a lowering to lowerings dict
@@ -315,25 +375,24 @@ def _register_lowering(
 
     @functools.wraps(decomp_fn)
     def wrapped(*args, **kwargs):
-        args: Union[List[Any], Tuple[Any, ...], Dict[Any, Any]] = list(args)
+        args: List[Any] = list(args)
+        kwargs: Dict[str, Any] = dict(kwargs)
         unpacked = False
         # TODO maybe we need to use pytrees here
         if len(args) == 1 and isinstance(args[0], (list, tuple)):
             unpacked = True
-            args = args[0]
+            args = list(args[0])
 
-        # kwargs tensors not supported yet unless it's a fallback op
         if not all(
             (fn in fallbacks or in_namespace(fn, "_c10d_functional")) for fn in aten_fn
         ):
-            assert not any(isinstance(x, TensorBox) for x in kwargs.values())
             # explicitly assert for "out=" ops for better error messages
             assert not any(
                 x == "out" for x in kwargs.keys()
             ), "out= ops aren't yet supported"
 
-        args = transform_args(
-            args, broadcast, type_promotion_kind, convert_input_to_bool
+        args, kwargs = transform_args(
+            args, kwargs, broadcast, type_promotion_kind, convert_input_to_bool
         )
 
         if unpacked:
@@ -353,7 +412,9 @@ def _register_lowering(
 def register_lowering(
     aten_fn,
     broadcast=False,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    type_promotion_kind: Optional[
+        ELEMENTWISE_TYPE_PROMOTION_KIND
+    ] = ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     convert_input_to_bool=False,
 ):
     """
@@ -376,12 +437,14 @@ def broadcast_symbolic_shapes(a, b):
     are symbolic sympy formulas.
     """
     output = []
-    for x, y in itertools.zip_longest(
-        reversed(a), reversed(b), fillvalue=sympy.Integer(1)
-    ):
-        if y == 1:
+    for x, y in itertools.zip_longest(reversed(a), reversed(b), fillvalue=sympy.S.One):
+        if V.graph.sizevars.shape_env.evaluate_expr(
+            sympy.Eq(y, 1), size_oblivious=True
+        ):
             output.append(x)
-        elif x == 1:
+        elif V.graph.sizevars.shape_env.evaluate_expr(
+            sympy.Eq(x, 1), size_oblivious=True
+        ):
             output.append(y)
         else:
             V.graph.sizevars.guard_equals(x, y)
@@ -409,9 +472,11 @@ def promote_constants(inputs, override_return_dtype=None, type_promotion_kind=No
 
         def const_func(x):
             if isinstance(x, sympy.Basic):
-                return ir.IndexingConstant(x, dtype, decode_device(None))
+                return ir.IndexingConstant(
+                    index=x, dtype=dtype, device=decode_device(None)
+                )
             else:
-                return ir.Constant(x, dtype, decode_device(None))
+                return ir.Constant(value=x, dtype=dtype, device=decode_device(None))
 
         return [const_func(x) for x in inputs]
     ex = next(x for x in inputs if isinstance(x, (TensorBox, ExpandView, ir.Constant)))
@@ -420,13 +485,16 @@ def promote_constants(inputs, override_return_dtype=None, type_promotion_kind=No
         if isinstance(x, (int, float)):
             out.append(
                 ExpandView.create(
-                    ir.Constant(x, ex.get_dtype(), ex.get_device()), list(ex.get_size())
+                    ir.Constant(value=x, dtype=ex.get_dtype(), device=ex.get_device()),
+                    list(ex.get_size()),
                 )
             )
         elif isinstance(x, sympy.Basic):
             out.append(
                 ExpandView.create(
-                    IndexingConstant(x, ex.get_dtype(), ex.get_device()),
+                    IndexingConstant(
+                        index=x, dtype=ex.get_dtype(), device=ex.get_device()
+                    ),
                     list(ex.get_size()),
                 )
             )
@@ -517,7 +585,7 @@ def make_pointwise(
         device = override_device or device
 
         return Pointwise.create(
-            device=device,
+            device=device,  # type: ignore[arg-type]
             dtype=dtype,
             inner_fn=inner_fn,
             ranges=ranges,
@@ -533,7 +601,9 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
         def group_args(arg_pairs):
             out = defaultdict(list)
             for i, args in enumerate(arg_pairs):
-                use_foreach = not is_dynamic(*args)
+                use_foreach = (
+                    not is_dynamic(*args) or config.combo_kernel_foreach_dynamic_shapes
+                )
                 device = None
                 for t in args:
                     if isinstance(t, TensorBox):
@@ -660,16 +730,16 @@ def _view_dtype(x: TensorBox, dtype: torch.dtype):
     return to_dtype_bitcast(x, dtype)
 
 
-def to_device(x: TensorBox, device: torch.device, *, copy=False):
+def to_device(x: TensorBox, device: torch.device, *, copy=False, non_blocking=False):
     device = decode_device(device)
     if x.get_device() == device:
         return clone(x) if copy else x
-    return TensorBox.create(ir.DeviceCopy.create(x, device))
+    return TensorBox.create(ir.DeviceCopy.create(x, device, non_blocking))
 
 
 @register_lowering(prims.device_put, type_promotion_kind=None)
-def _device_put(x: TensorBox, device: torch.device):
-    return to_device(x, device, copy=True)
+def _device_put(x: TensorBox, device: torch.device, non_blocking=False):
+    return to_device(x, device, copy=True, non_blocking=non_blocking)
 
 
 def register_pointwise(
@@ -722,10 +792,10 @@ def register_frexp():
     frexp = ops_wrapper("frexp")
 
     def frexp0(*args, **kwargs):
-        return frexp(*args, **kwargs)[0]  # type: ignore[index] # next PR
+        return frexp(*args, **kwargs)[0]  # type: ignore[index]
 
     def frexp1(*args, **kwargs):
-        return frexp(*args, **kwargs)[1]  # type: ignore[index] # next PR
+        return frexp(*args, **kwargs)[1]  # type: ignore[index]
 
     pw_fns = [
         make_pointwise(frexp0),
@@ -796,7 +866,25 @@ def broadcast_tensors(*inputs):
     for x in inputs:
         sizes = x.get_size()
         if len(sizes) != len(target) or any(
-            ((a == 1 and b != 1) or (a != 1 and b == 1)) for a, b in zip(sizes, target)
+            (
+                (
+                    V.graph.sizevars.shape_env.evaluate_expr(
+                        sympy.Eq(a, 1), size_oblivious=True
+                    )
+                    and not V.graph.sizevars.shape_env.evaluate_expr(
+                        sympy.Eq(b, 1), size_oblivious=True
+                    )
+                )
+                or (
+                    not V.graph.sizevars.shape_env.evaluate_expr(
+                        sympy.Eq(a, 1), size_oblivious=True
+                    )
+                    and V.graph.sizevars.shape_env.evaluate_expr(
+                        sympy.Eq(b, 1), size_oblivious=True
+                    )
+                )
+            )
+            for a, b in zip(sizes, target)
         ):
             x = expand(x, target)
         outputs.append(x)
@@ -947,7 +1035,7 @@ def expand_as(x, y):
 def repeat(x, repeats):
     old_size = list(x.get_size())
     if len(repeats) > len(old_size):
-        old_size = [sympy.Integer(1)] * (len(repeats) - len(old_size)) + old_size
+        old_size = [sympy.S.One] * (len(repeats) - len(old_size)) + old_size
         x = view(x, list(old_size))
     assert len(repeats) == len(x.get_size())
 
@@ -972,7 +1060,7 @@ def repeat(x, repeats):
         for i in range(len(repeats)):
             if repeats[i] != 1:
                 if old_size[i] == 1:
-                    index[i] = sympy.Integer(0)
+                    index[i] = sympy.S.Zero
                 else:
                     index[i] = ModularIndexing(index[i], 1, old_size[i])
         return x_loader(index)
@@ -1032,7 +1120,7 @@ def as_strided(x, size, stride, storage_offset=None):
         [sympy.expand(s) for s in stride],
         sympy.expand(storage_offset or 0),
     )
-    return TensorBox(ir.ReinterpretView(storage, new_layout))
+    return TensorBox(ir.ReinterpretView(data=storage, layout=new_layout))
 
 
 @register_lowering(aten.as_strided_, type_promotion_kind=None)
@@ -1460,7 +1548,7 @@ def cat(inputs, dim=0):
         if not isinstance(x, ir.Pointwise):
             return 0
 
-        count = x.inner_fn_opcount()
+        count = x.inner_fn_opcount().num_ops
         for read in x.get_read_names():
             count += op_count(V.graph.get_buffer(read))
 
@@ -1640,7 +1728,7 @@ def unfold(x, dimension, size, step):
 def unsqueeze(x, dim):
     dim = _validate_dim(x, dim, 1)
     new_shape = list(x.get_size())
-    new_shape.insert(dim, sympy.Integer(1))
+    new_shape.insert(dim, sympy.S.One)
     return view(x, new_shape)
 
 
@@ -2016,6 +2104,113 @@ def inductor_randint(
     )
 
 
+def _boundaries_helper(tb: TensorBox) -> Tuple[str, sympy.Expr, sympy.Expr, sympy.Expr]:
+    return (
+        tb.get_name(),
+        tb.get_size()[-1],
+        tb.get_size()[0] * tb.get_stride()[0],
+        tb.get_stride()[-1],
+    )
+
+
+def _sorter_helper(tb: TensorBox) -> Tuple[str, sympy.Expr]:
+    return tb.get_name(), tb.get_stride()[-1]
+
+
+@register_lowering(aten.searchsorted.Tensor, type_promotion_kind=None)
+def searchsorted(
+    sorted_sequence: TensorBox,
+    self: TensorBox,
+    *,
+    out_int32: bool = False,
+    right: bool = False,
+    side: Optional[str] = None,
+    sorter: Optional[TensorBox] = None,
+) -> TensorBox:
+    validate_bucketize = lambda tb: V.graph.has_feature(  # noqa: E731
+        tb, BackendFeature.BUCKETIZE
+    )
+    if (
+        not validate_bucketize(sorted_sequence)
+        or not validate_bucketize(self)
+        or (sorter is not None and not validate_bucketize(sorter))
+    ):
+        return fallback_handler(aten.searchsorted.Tensor, add_to_fallback_set=False)(
+            sorted_sequence,
+            self,
+            out_int32=out_int32,
+            right=right,
+            side=side,
+            sorter=sorter,
+        )
+
+    # If side is present, override the value of right if needed.  This assumes that
+    # validation of the two options being non-contradictory is already done by the
+    # searchsorted meta-function.
+    if side is not None and side == "right":
+        right = True
+
+    index_dtype = torch.int32 if out_int32 else torch.int64
+    values_loader = self.make_loader()
+
+    # The entire sorted_sequence tensor needs to be used by ops.bucketize, so we need to
+    # realize it into global memory; or in other words, we can't guarantee that
+    # sorted_sequence.get_name() (used below) will exist unless we call
+    # sorted_sequence.realize().
+    sorted_sequence.realize()
+
+    if sorter is not None:
+        sorter.realize()
+
+    if len(sorted_sequence.get_size()) == 1:
+
+        def inner_fn(idx):
+            val = values_loader(idx)
+            return ops.bucketize(
+                val,
+                _boundaries_helper(sorted_sequence),
+                0,
+                index_dtype,
+                right,
+                sorter=None if sorter is None else _sorter_helper(sorter),
+                sorter_indices=None if sorter is None else 0,
+            )
+
+    else:
+
+        def inner_fn(idx):
+            val = values_loader(idx)
+
+            # Get index to the beginning of the sorted sequence within a flattened
+            # version of the array.
+            def get_flattened_index(tb: TensorBox):
+                strides = tb.get_stride()
+                return ops.index_expr(
+                    functools.reduce(
+                        operator.add, (s * i for s, i in zip(strides[:-1], idx[:-1]))
+                    ),
+                    index_dtype,
+                )
+
+            return ops.bucketize(
+                val,
+                _boundaries_helper(sorted_sequence),
+                get_flattened_index(sorted_sequence),
+                index_dtype,
+                right,
+                sorter=None if sorter is None else _sorter_helper(sorter),
+                sorter_indices=None if sorter is None else get_flattened_index(sorter),
+            )
+
+    device = self.get_device()
+    return Pointwise.create(
+        device=device,
+        dtype=index_dtype,
+        inner_fn=inner_fn,
+        ranges=self.shape,
+    )
+
+
 @register_lowering(aten.bucketize, type_promotion_kind=None)
 def bucketize(
     input: TensorBox,
@@ -2039,7 +2234,6 @@ def bucketize(
     # guarantee that boundaries.get_name() (used below) will exist unless
     # we call boundaries.realize().
     boundaries.realize()
-    boundaries_size = boundaries.get_size()[0]
     device = input.get_device()
     input_loader = input.make_loader()
 
@@ -2049,8 +2243,8 @@ def bucketize(
         val = input_loader(index)
         indices = ops.bucketize(
             val,
-            boundaries.get_name(),
-            boundaries_size,
+            _boundaries_helper(boundaries),
+            0,
             index_dtype,
             right,
         )
@@ -2089,8 +2283,12 @@ def require_channels_last(_, *args, **kwargs):
 def constrain_to_fx_strides(fx_node, *args, **kwargs):
     def apply_constraint(arg, fx_arg):
         if isinstance(arg, ir.IRNode):
-            stride_order = ir.get_stride_order(fx_arg.meta["val"].stride())
+            stride_order = ir.get_stride_order(
+                fx_arg.meta["val"].stride(), V.graph.sizevars.shape_env
+            )
             return ir.ExternKernel.require_stride_order(arg, stride_order)
+        if isinstance(arg, dict):
+            return {key: apply_constraint(arg[key], fx_arg[key]) for key in arg.keys()}
         return arg
 
     args = tuple(
@@ -2110,7 +2308,7 @@ FALLBACK_ALLOW_LIST = {
 def sdpa_constraint(fx_node, *args, **kwargs):
     # sdpa requires dense last dimension]
 
-    def apply_constraint(arg, fx_arg):
+    def apply_constraint(idx, arg, fx_arg):
         if not isinstance(arg, ir.IRNode):
             return arg
 
@@ -2118,9 +2316,22 @@ def sdpa_constraint(fx_node, *args, **kwargs):
         meta_stride = meta_val.stride()
 
         stride_order = ir.get_stride_order(meta_stride)
+
         if stride_order and stride_order[-1] != 0:
             # contiguous stride order
             stride_order = list(reversed(range(len(arg.get_size()))))
+
+        if (
+            fx_node.target
+            == aten._scaled_dot_product_efficient_attention_backward.default
+            and idx in (0, 5)
+        ):
+            assert len(stride_order) == 4
+            # The 0 and 5th arguments for aten._scaled_dot_product_efficient_attention_backward.default
+            # are for out and gradient_out. They have to be in
+            # (3, 1, 2, 0) stride order. Otherwise the kernel will crash.
+            # Check https://github.com/pytorch/pytorch/issues/138772
+            stride_order = (3, 1, 2, 0)
 
         if not meta_val.is_cuda:
             return ir.ExternKernel.require_stride_order(arg, stride_order)
@@ -2138,9 +2349,12 @@ def sdpa_constraint(fx_node, *args, **kwargs):
                 (V.graph.sizevars.size_hint(x.get_stride()[i]) % ALIGNMENT) == 0
                 for i in range(len(x.get_stride()) - 1)
             )
-            return (
-                V.graph.sizevars.size_hint(x.get_stride()[-1])
-            ) == 1 and aligned_strides
+            # if the last dim size is <= 1, stride doesnt matter
+            aligned_last_dim = (
+                V.graph.sizevars.size_hint(x.get_stride()[-1]) == 1
+                or V.graph.sizevars.size_hint(x.get_size()[-1]) <= 1
+            )
+            return aligned_last_dim and aligned_strides
 
         try:
             arg.get_stride()
@@ -2164,9 +2378,10 @@ def sdpa_constraint(fx_node, *args, **kwargs):
         return ir.ExternKernel.require_stride_order(arg, stride_order)
 
     args = tuple(
-        apply_constraint(arg, fx_arg) for arg, fx_arg in zip(args, fx_node.args)
+        apply_constraint(idx, arg, fx_arg)
+        for idx, (arg, fx_arg) in enumerate(zip(args, fx_node.args))
     )
-    kwargs = {k: apply_constraint(v, fx_node.kwargs[k]) for k, v in kwargs.items()}
+    kwargs = {k: apply_constraint(-1, v, fx_node.kwargs[k]) for k, v in kwargs.items()}
     return args, kwargs
 
 
@@ -2182,7 +2397,6 @@ make_fallback(aten.uniform, warn=False)
 make_fallback(aten.exponential.default, warn=False)  # (fails accuracy on test_torch.py)
 make_fallback(aten._pdist_forward)  # Has decomp. Needs benchmarks
 make_fallback(aten.soft_margin_loss_backward, warn=False)  # py_impl?
-make_fallback(aten.searchsorted)  # bucketized is implemented (see eager impl)
 
 
 # 1.5) Easy or Impossible
@@ -2190,8 +2404,6 @@ make_fallback(aten._cdist_forward)  # p=2 should be feasible
 make_fallback(aten._cdist_backward)
 
 # 2) Medium
-make_fallback(aten.max_unpool2d)
-make_fallback(aten.max_unpool3d)
 make_fallback(aten._trilinear)
 
 
@@ -2210,7 +2422,6 @@ make_fallback(aten._histogramdd_from_bin_cts.default)
 
 # Need templated kernel
 make_fallback(aten.addbmm)
-make_fallback(aten.addmv, warn=False)
 make_fallback(aten._addmm_activation, warn=False)
 
 # Need templated kernel. Probably impossible to write efficiently
@@ -2407,7 +2618,7 @@ def clone_preserve_reinterpret_view(x):
     if reinterpret_view_layouts:
         x = x.data  # unwrap TensorBox
         for layout in reinterpret_view_layouts[::-1]:
-            x = ir.ReinterpretView(x, layout)
+            x = ir.ReinterpretView(data=x, layout=layout)
         x = TensorBox(x)
 
     return x
@@ -2632,6 +2843,7 @@ def _local_scalar_dense(data):
     unbacked_bindings = resolve_unbacked_bindings(
         V.graph.sizevars.shape_env, V.graph.current_node.meta["unbacked_bindings"]
     )
+    assert unbacked_bindings is not None
     assert len(unbacked_bindings) == 1, unbacked_bindings
     # NB: Have to be very careful here.  V.graph.current_node.meta["val"]
     # seemingly also contains a symbol which you want to do binding for,
@@ -2824,7 +3036,7 @@ def empty_strided(
     pointwise.realize()
     buffer = pointwise.data.data
     # explicitly set ranges to zeros in order to make a NopKernelSchedulerNode
-    buffer.data.ranges = [0] * len(size)
+    buffer.data = dataclasses.replace(buffer.data, ranges=[0] * len(size))
     assert isinstance(buffer, ir.ComputedBuffer)
     size = [sympy.expand(s) for s in size]
     stride = (
@@ -2967,6 +3179,7 @@ def index_output_size_and_inner_fn(
     indexed_size,
     x_loader,
     check,
+    wrap_neg=True,
 ):
     # Note that behavior of indexing differs when there are non consecutive
     # tensors. In this case, the tensor index is pulled to the beginning.
@@ -3018,6 +3231,7 @@ def index_output_size_and_inner_fn(
                         loader(idx[start_offset : start_offset + rank]),
                         size,
                         check=check,
+                        wrap_neg=wrap_neg,
                     )
                 )
         new_index = [
@@ -3040,7 +3254,7 @@ def index_impl(x, indices, check):
     )
 
 
-def index_impl_helper(x, indices, check):
+def index_impl_helper(x, indices, check, wrap_neg=True):
     assert isinstance(indices, (list, tuple))
     x_loader = x.make_loader()
     indices, tensor_indices = check_and_broadcast_indices(indices, x.get_device())
@@ -3068,6 +3282,7 @@ def index_impl_helper(x, indices, check):
         indexed_size,
         None,
         check=check,
+        wrap_neg=wrap_neg,
     )
 
     def inner_fn(idx):
@@ -3224,9 +3439,9 @@ def index_put_impl_(self, indices, values, accumulate, check):
         scatter_mode="atomic_add" if accumulate else None,
     )
     buffer = ir.ComputedBuffer(
-        None,
-        ir.MutationLayoutSHOULDREMOVE(self),
-        scatter,
+        name=None,
+        layout=ir.MutationLayoutSHOULDREMOVE(self),
+        data=scatter,
     )
     buffer.name = V.graph.register_buffer(buffer)
     V.graph.register_operation(buffer)
@@ -3247,7 +3462,9 @@ fallback__unsafe_masked_index_put_accumulate = fallback_handler(
 
 @register_lowering(aten._unsafe_masked_index, type_promotion_kind=None)
 def _unsafe_masked_index(self, mask, indices, fill):
-    ranges, _, _unsafe_index_fn = index_impl_helper(self, indices, check=False)
+    ranges, _, _unsafe_index_fn = index_impl_helper(
+        self, indices, check=False, wrap_neg=False
+    )
     mask_loader = mask.make_loader()
     self_loader = self.make_loader()
 
@@ -3445,9 +3662,9 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
             scatter_mode=None,
         )
         buffer = ir.ComputedBuffer(
-            None,
-            ir.MutationLayoutSHOULDREMOVE(self),
-            zero_out,
+            name=None,
+            layout=ir.MutationLayoutSHOULDREMOVE(self),
+            data=zero_out,
         )
         buffer.name = V.graph.register_buffer(buffer)
         V.graph.register_operation(buffer)
@@ -3464,9 +3681,9 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
         scatter_mode=backend_reduce_str(reduce),
     )
     buffer = ir.ComputedBuffer(
-        None,
-        ir.MutationLayoutSHOULDREMOVE(self),
-        scatter,
+        name=None,
+        layout=ir.MutationLayoutSHOULDREMOVE(self),
+        data=scatter,
     )
     buffer.name = V.graph.register_buffer(buffer)
     V.graph.register_operation(buffer)
@@ -4252,23 +4469,10 @@ def adaptive_max_pool2d(x, output_size):
         return empty(o_size, dtype=x.get_dtype(), device=x.get_device()), empty(
             o_size, dtype=torch.int64, device=x.get_device()
         )
+
     if h_in % h_out == 0 and w_in % w_out == 0:
-        kernel_size = [h_in // h_out, w_in // w_out]
-        if should_fallback_max_pool2d_with_indices(kernel_size, dilation=[1, 1]):
-            return max_pool2d_with_indices(x, kernel_size)  # type: ignore[name-defined]   # noqa: F821
-        else:
-            v, offsets = _low_memory_max_pool2d_with_offsets(
-                x,
-                kernel_size,
-                stride=kernel_size,
-                padding=[0, 0],
-                dilation=[1, 1],
-                ceil_mode=False,
-            )
-            indices = _low_memory_max_pool2d_offsets_to_indices(
-                offsets, kernel_size[1], w_in, kernel_size, padding=[0, 0]
-            )
-            return v, indices
+        # This is handled by a decomposition
+        raise ValueError
 
     h_kernel_max = ceildiv((h_in + h_out - 1), h_out)
     w_kernel_max = ceildiv((w_in + w_out - 1), w_out)
@@ -5061,7 +5265,7 @@ def _make_reduction_inner(x, *, axis, keepdims, dtype, override_return_dtype):
     if keepdims:
         new_size = list(size)
         for i in reduced_idx:
-            new_size[i] = sympy.Integer(1)
+            new_size[i] = sympy.S.One
     else:
         new_size = kept_sizes
 
@@ -5087,7 +5291,7 @@ def make_reduction(reduction_type: str, override_return_dtype=None):
         )
         result = Reduction.create(reduction_type=reduction_type, input_node=x, **kwargs)
         if isinstance(
-            result.data.data, Reduction
+            result.data.data, Reduction  # type: ignore[attr-defined]
         ):  # Only realize if reduction isn't unrolled
             result.realize()
         return result
@@ -5122,7 +5326,7 @@ def mean(x, axis=None, keepdim=False, *, dtype=None):
         x = to_dtype(x, torch.float)
     sum_result = sum_(x, axis, keepdim)
     denom = sympy_product(size[i] for i in axis)
-    denom = ir.IndexingConstant(denom, x.get_dtype(), x.get_device())
+    denom = ir.IndexingConstant(index=denom, dtype=x.get_dtype(), device=x.get_device())
     denom = ExpandView.create(denom, list(sum_result.get_size()))
     return to_dtype(div(sum_result, denom), output_dtype)
 
@@ -5143,7 +5347,7 @@ def var_mean_sum_(x, axis, correction, keepdim, return_mean):
     denom = sympy_product(size[i] for i in axis)
     if correction:
         denom = sympy.Max(denom - correction, 0)
-    denom = ir.IndexingConstant(denom, x.get_dtype(), x.get_device())
+    denom = ir.IndexingConstant(index=denom, dtype=x.get_dtype(), device=x.get_device())
     denom = ExpandView.create(denom, list(sum_result.get_size()))
     x_var = div(sum_result, denom)
     if not return_mean:
@@ -5615,7 +5819,7 @@ def cummax(x, axis=None):
     kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
     kwargs["dtypes"] = (dtype, torch.int64)
     kwargs["inner_fns"] = (x.make_loader(), lambda _: "rindex")
-    values, indices = ir.Scan.create(**kwargs, combine_fn=combine_fn)  # type: ignore[arg-type] # next PR
+    values, indices = ir.Scan.create(**kwargs, combine_fn=combine_fn)  # type: ignore[arg-type]
     if values is None:
         return fallback_cummax(x, dim=axis)
     return values, indices
@@ -5645,7 +5849,7 @@ def cummin(x, axis=None):
     kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
     kwargs["dtypes"] = (dtype, torch.int64)
     kwargs["inner_fns"] = (x.make_loader(), lambda _: "rindex")
-    values, indices = ir.Scan.create(**kwargs, combine_fn=combine_fn)  # type: ignore[arg-type] # next PR
+    values, indices = ir.Scan.create(**kwargs, combine_fn=combine_fn)  # type: ignore[arg-type]
     if values is None:
         return fallback_cummin(x, dim=axis)
     return values, indices
@@ -5911,14 +6115,17 @@ foreach_add_scalar = register_foreach_pointwise(
 )
 register_foreach_pointwise(aten._foreach_add.Tensor, add, allow_alpha=True)
 foreach_mul_list = register_foreach_pointwise(aten._foreach_mul.List, mul)
+register_foreach_pointwise(aten._foreach_mul.Tensor, mul)
 foreach_mul_scalar = register_foreach_pointwise(aten._foreach_mul.Scalar, mul)
 register_foreach_pointwise(aten._foreach_sub.List, sub)
 register_foreach_pointwise(aten._foreach_sub.Scalar, sub)
 register_foreach_pointwise(aten._foreach_neg.default, neg)
 register_foreach_pointwise(aten._foreach_abs.default, abs)
 register_foreach_pointwise(aten._foreach_pow.Scalar, pow)
+register_foreach_pointwise(aten._foreach_pow.List, pow)
 register_foreach_pointwise(aten._foreach_pow.ScalarAndTensor, pow)
 foreach_div_list = register_foreach_pointwise(aten._foreach_div.List, div)
+register_foreach_pointwise(aten._foreach_div.Tensor, div)
 foreach_div_scalar = register_foreach_pointwise(aten._foreach_div.Scalar, div)
 register_foreach_pointwise(aten._foreach_sqrt, sqrt)
 register_foreach_pointwise(aten._foreach_maximum.List, maximum)
@@ -6053,6 +6260,11 @@ for method, func in magic_methods.items():
     register_lowering(method_to_operator(method))(func)
 
 
+@register_lowering(torch.sym_sum)
+def sym_sum(args):
+    return sympy.Add(*args)
+
+
 @register_lowering(aten._foobar)
 def foobar(self, *args, **kwargs):
     raise NotImplementedError("Helpful for debugging")
@@ -6078,13 +6290,17 @@ def set__source_tensor(self, source_tensor):
     return TensorBox.create(ir.SetSourceTensorKernel(self, source_tensor))
 
 
-if hasattr(torch.ops.fsdp, "set_"):
+if hasattr(torch.ops.fsdp, "copy_"):
 
-    @register_lowering(torch.ops.fsdp.set_.default)
-    def fsdp_set_(self, source_tensor):
-        self.realize()
-        source_tensor.realize()
-        ir.SetSourceTensorKernel(self, source_tensor)
+    @register_lowering(torch.ops.fsdp.copy_.default)
+    def fsdp_copy_(dst, src):
+        if dst is src:
+            # dst.copy_(dst) can happen from the reinplacing pass
+            return dst
+        src = to_device(src, dst.get_device())
+        src = to_dtype(src, dst.get_dtype())
+        src = expand(src, dst.get_size())
+        return mutate_to(dst, src)
 
 
 @register_lowering(torch.ops.aten.resize)
@@ -6159,13 +6375,21 @@ make_fallback(auto_functionalized)
 
 
 @register_lowering(triton_kernel_wrapper_mutation)
-def triton_kernel_wrap_(*, kernel_idx, constant_args_idx, grid, kwargs):
+def triton_kernel_wrap_(
+    *,
+    kernel_idx,
+    constant_args_idx,
+    grid,
+    tma_descriptor_metadata,
+    kwargs,
+):
     from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
 
     constant_args = kernel_side_table.get_constant_args(constant_args_idx)
     ir.UserDefinedTritonKernel(
         kernel_idx=kernel_idx,
         grid=grid,
+        tma_descriptor_metadata=tma_descriptor_metadata,
         kernel_args={**kwargs, **constant_args},
     )
     return {key: val for key, val in kwargs.items() if isinstance(val, TensorBox)}
@@ -6195,13 +6419,19 @@ def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs):
     return list(map(TensorBox.create, result))
 
 
+@register_lowering(torch.ops.higher_order.invoke_subgraph, type_promotion_kind=None)
+def invoke_subgraph(subgraph_fn: ir.Subgraph, identifier: str, operands):
+    result = ir.InvokeSubgraph.create(subgraph_fn, operands)
+    return list(map(TensorBox.create, result))
+
+
 @register_lowering(associative_scan_op, type_promotion_kind=None)
-def associative_scan(combine_fn: ir.Subgraph, input, dim: int):
+def associative_scan(combine_fn: ir.Subgraph, xs, dim: int):
     from .subgraph_lowering import InputDescriptor, lower_pointwise_subgraph
 
     subgraph_inputs = [
         InputDescriptor(dtype=x.get_dtype(), device=x.get_device())
-        for x in itertools.chain(input, input)
+        for x in itertools.chain(xs, xs)
     ]
     lowered_combine_fn = lower_pointwise_subgraph(combine_fn, subgraph_inputs)  # type: ignore[var-annotated]
 
@@ -6211,9 +6441,9 @@ def associative_scan(combine_fn: ir.Subgraph, input, dim: int):
             *pytree.tree_leaves(rhs),
         )
 
-    kwargs = _make_scan_inner(input[0], axis=dim, dtype=None)
-    kwargs["dtypes"] = tuple(x.get_dtype() for x in input)
-    kwargs["inner_fns"] = tuple(x.make_loader() for x in input)
+    kwargs = _make_scan_inner(xs[0], axis=dim, dtype=None)
+    kwargs["dtypes"] = tuple(x.get_dtype() for x in xs)
+    kwargs["inner_fns"] = tuple(x.make_loader() for x in xs)
     result = ir.Scan.create(
         combine_fn=wrapped_combine_fn,
         can_fallback_to_aten=False,
@@ -6229,7 +6459,7 @@ def _sink_tokens(tokens):
     return None
 
 
-@register_lowering(torch.ops.higher_order.with_effects)
+@register_lowering(torch.ops.higher_order.with_effects, type_promotion_kind=None)
 def with_effects(token, op, *args, **kwargs):
     result = ir.EffectfulKernel.create(op, *args, **kwargs)
 
@@ -6249,162 +6479,10 @@ def with_effects(token, op, *args, **kwargs):
         return (effectful_kernel, *result)
 
 
-try:
-    import torch.distributed._functional_collectives
+from .comm_lowering import register_comm_lowerings
 
-    _c10d_functional = torch.ops._c10d_functional
 
-    @register_lowering(_c10d_functional.all_reduce)
-    def _all_reduce(inp, reduce_op, group_name):
-        inp = clone(inp)
-        if config.reorder_for_compute_comm_overlap:
-            # The horizontal fusion of this clone often severely delays the
-            # scheduling of the all_reduce_ node. Horizontally fusing this
-            # clone can almost never out-perform scheduling the all_reduce_
-            # earlier. Also in most cases, this clone is eliminated via
-            # in-place reuse. Therefore, we tell the scheduler to not fuse it.
-            inp.realize()
-            V.graph.no_fuse_buffer_names.add(inp.get_name())
-        ir._CollectiveKernel.create_inplace(
-            _c10d_functional.all_reduce_.default, inp, reduce_op, group_name
-        )
-        return inp
-
-    @register_lowering(_c10d_functional.all_reduce_)
-    def _all_reduce_(inp, reduce_op, group_name):
-        ir._CollectiveKernel.create_inplace(
-            _c10d_functional.all_reduce_.default, inp, reduce_op, group_name
-        )
-        return inp
-
-    @register_lowering(_c10d_functional.all_reduce_coalesced)
-    def _all_reduce_coalesced(inputs, reduce_op, group_name):
-        inputs = [clone(inp) for inp in inputs]
-        ir._CollectiveKernel.create_inplace(
-            _c10d_functional.all_reduce_coalesced_.default,
-            inputs,
-            reduce_op,
-            group_name,
-        )
-        return inputs
-
-    @register_lowering(_c10d_functional.all_reduce_coalesced_)
-    def _all_reduce_coalesced_(inputs, reduce_op, group_name):
-        ir._CollectiveKernel.create_inplace(
-            _c10d_functional.all_reduce_coalesced_.default,
-            inputs,
-            reduce_op,
-            group_name,
-        )
-        return inputs
-
-    @register_lowering(_c10d_functional.all_gather_into_tensor)
-    def _all_gather_into_tensor(inp, group_size, group_name):
-        return ir.TensorBox.create(
-            ir._CollectiveKernel.create_out_of_place(
-                _c10d_functional.all_gather_into_tensor.default,
-                inp,
-                group_size,
-                group_name,
-            )
-        )
-
-    @register_lowering(_c10d_functional.all_gather_into_tensor_coalesced)
-    def _all_gather_into_tensor_coalesced(inputs, group_size, group_name):
-        return pytree.tree_map(
-            ir.TensorBox.create,
-            ir._CollectiveKernel.create_out_of_place(
-                _c10d_functional.all_gather_into_tensor_coalesced.default,
-                inputs,
-                group_size,
-                group_name,
-            ),
-        )
-
-    @register_lowering(_c10d_functional.all_gather_into_tensor_out)
-    def _all_gather_into_tensor_out(inp, group_size, group_name, *, out):
-        ir._CollectiveKernel.create_inplace(
-            _c10d_functional.all_gather_into_tensor_out.default,
-            inp,
-            group_size,
-            group_name,
-            out=out,
-        )
-        return out
-
-    @register_lowering(_c10d_functional.reduce_scatter_tensor)
-    def _reduce_scatter_tensor(inp, reduce_op, group_size, group_name):
-        return ir.TensorBox.create(
-            ir._CollectiveKernel.create_out_of_place(
-                _c10d_functional.reduce_scatter_tensor.default,
-                inp,
-                reduce_op,
-                group_size,
-                group_name,
-            )
-        )
-
-    @register_lowering(_c10d_functional.reduce_scatter_tensor_coalesced)
-    def _reduce_scatter_tensor_coalesced(inputs, reduce_op, group_size, group_name):
-        return pytree.tree_map(
-            ir.TensorBox.create,
-            ir._CollectiveKernel.create_out_of_place(
-                _c10d_functional.reduce_scatter_tensor_coalesced.default,
-                inputs,
-                reduce_op,
-                group_size,
-                group_name,
-            ),
-        )
-
-    @register_lowering(_c10d_functional.all_to_all_single)
-    def _all_to_all_single(inp, output_split_sizes, input_split_sizes, group_name):
-        return ir.TensorBox.create(
-            ir._CollectiveKernel.create_out_of_place(
-                _c10d_functional.all_to_all_single.default,
-                inp,
-                output_split_sizes,
-                input_split_sizes,
-                group_name,
-            )
-        )
-
-    @register_lowering(_c10d_functional.broadcast)
-    def _broadcast(inp, src, group_name):
-        inp = clone(inp)
-        ir._CollectiveKernel.create_inplace(
-            _c10d_functional.broadcast_.default, inp, src, group_name
-        )
-        return inp
-
-    @register_lowering(_c10d_functional.broadcast_)
-    def _broadcast_(inp, src, group_name):
-        ir._CollectiveKernel.create_inplace(
-            _c10d_functional.broadcast_.default, inp, src, group_name
-        )
-        return inp
-
-    @register_lowering(_c10d_functional.wait_tensor)
-    def _wait_tensor(inp):
-        ir._WaitKernel.create_wait(_c10d_functional.wait_tensor.default, inp)
-        return inp
-
-    @register_lowering(torch.ops._dtensor.shard_dim_alltoall)
-    def _shard_dim_alltoall(inp, gather_dim, shard_dim, group_name):
-        return ir.TensorBox.create(
-            ir._CollectiveKernel.create_out_of_place(
-                torch.ops._dtensor.shard_dim_alltoall.default,
-                inp,
-                gather_dim,
-                shard_dim,
-                group_name,
-            )
-        )
-
-except (AttributeError, ImportError):
-    log.info(
-        "Inductor support for distributed collectives depends on building torch.distributed"
-    )
+register_comm_lowerings()
 
 # populate lowerings defined in kernel/*
 from . import kernel

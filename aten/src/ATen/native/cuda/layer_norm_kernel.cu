@@ -217,7 +217,7 @@ __device__ WelfordDataLN compute_stats(
 
 
 template <typename T, typename T_ACC,
-typename std::enable_if<!std::is_same<T, double>::value, int>::type = 0>
+typename std::enable_if_t<!std::is_same_v<T, double>, int> = 0>
 __device__ __inline__ void vectorized_layer_norm_kernel_impl(
   const int N,
   T_ACC eps,
@@ -282,7 +282,7 @@ __device__ __inline__ void vectorized_layer_norm_kernel_impl(
 }
 
 template <typename T, typename T_ACC,
-typename std::enable_if<std::is_same<T, double>::value, int>::type = 0>
+typename std::enable_if_t<std::is_same_v<T, double>, int> = 0>
 __device__ __inline__ void vectorized_layer_norm_kernel_impl(
   const int /*N*/,
   T_ACC /*eps*/,
@@ -784,7 +784,7 @@ void LayerNormKernelImplInternal(
   bool can_vec_gamma = gamma.defined() ? can_vectorize(gamma_data, alignment) : true;
   bool can_vec_beta = beta.defined() ? can_vectorize(beta_data, alignment) : true;
 
-  if ((std::is_same<T, float>::value || std::is_same<T, at::Half>::value || std::is_same<T, at::BFloat16>::value) &&
+  if ((std::is_same_v<T, float> || std::is_same_v<T, at::Half> || std::is_same_v<T, at::BFloat16>) &&
   N <= static_cast<int64_t>(1ULL << std::numeric_limits<float>::digits) && N % num_vec_elems == 0 &&
   can_vec_X && can_vec_Y && can_vec_gamma && can_vec_beta) {
     launch_vectorized_layer_norm_kernel(static_cast<int>(N), M, eps, X_data, gamma_data, beta_data, Y_data, mean_data, rstd_data);
@@ -1190,8 +1190,8 @@ void LayerNormBackwardKernelImplInternal(
     int nshared = (num_threads() / warp_size) * sizeof(T_ACC);
 
     bool bVectorSizeMultiple = (N % vec_size == 0);
-    bool bTargetDataTypes = (std::is_same<T, float>::value || std::is_same<T, at::Half>::value ||
-      std::is_same<T, at::BFloat16>::value);
+    bool bTargetDataTypes = (std::is_same_v<T, float> || std::is_same_v<T, at::Half> ||
+      std::is_same_v<T, at::BFloat16>);
     const unsigned int alignment = sizeof(T) * vec_size;
     bool bAlignedBuffers = can_vectorize(dY_data, alignment) && can_vectorize(X_data, alignment) &&
       can_vectorize(gamma_data, alignment) && can_vectorize(dX_data, alignment);
@@ -1374,7 +1374,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_cuda(
   for (const auto idx: c10::irange(axis)) {
     stat_shape.push_back(input_shape[idx]);
   }
-  for (const auto C10_UNUSED idx: c10::irange(axis, input.dim())) {
+  for ([[maybe_unused]] const auto idx : c10::irange(axis, input.dim())) {
     stat_shape.push_back(1);
   }
 
@@ -1459,7 +1459,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_cuda(
   return std::make_tuple(std::move(dX), std::move(dgamma), std::move(dbeta));
 }
 
-REGISTER_DISPATCH(LayerNormKernel, &LayerNormKernelImpl);
-REGISTER_DISPATCH(LayerNormBackwardKernel, &LayerNormBackwardKernelImpl);
+REGISTER_DISPATCH(LayerNormKernel, &LayerNormKernelImpl)
+REGISTER_DISPATCH(LayerNormBackwardKernel, &LayerNormBackwardKernelImpl)
 
 } // namespace at::native

@@ -73,7 +73,7 @@ __device__ static inline int64_t get_target_prime(
 template<typename scalar_t, typename target_t>
 __global__ void
 #if defined (USE_ROCM)
-C10_LAUNCH_BOUNDS_2((std::is_same<scalar_t, float>::value ? 1024 : 896), 1)
+C10_LAUNCH_BOUNDS_2((std::is_same_v<scalar_t, float> ? 1024 : 896), 1)
 #endif
 ctc_loss_log_alpha_gpu_kernel(scalar_t* __restrict__ log_alpha_data,
                                     const scalar_t*log_probs_data, const int64_t* __restrict__ input_lengths, int64_t max_input_length,
@@ -222,7 +222,7 @@ std::tuple<Tensor, Tensor> ctc_loss_gpu_template(const Tensor& log_probs, const 
   // log_probs: input_len x batch_size x num_labels
   // targets [int64]: batch_size x target_length OR sum(target_lengths)
   CheckedFrom c = "ctc_loss_gpu";
-  using target_t = typename std::conditional<target_scalar_type == kInt, int, int64_t>::type;
+  using target_t = typename std::conditional_t<target_scalar_type == kInt, int, int64_t>;
   auto log_probs_arg = TensorArg(log_probs, "log_probs", 1);
   auto targets_arg = TensorArg(targets, "targets", 2);
   checkAllSameGPU(c, {log_probs_arg, targets_arg});
@@ -291,7 +291,7 @@ std::tuple<Tensor, Tensor> ctc_loss_gpu_template(const Tensor& log_probs, const 
   Tensor neg_log_likelihood = at::empty({batch_size}, log_probs.options());
 
   // Very likely, we could be more clever here, e.g. learning (or generalizing and reusing) from SoftMax.cu...
-  constexpr int max_threads = std::is_same<scalar_t, float>::value ? 1024 : 768; // we need 72 or so 32 bit registers for double
+  constexpr int max_threads = std::is_same_v<scalar_t, float> ? 1024 : 768; // we need 72 or so 32 bit registers for double
   int threads_target = max_threads;
   while (threads_target / 2 >= 2*max_target_length+1) {
     threads_target /= 2;
@@ -318,7 +318,7 @@ std::tuple<Tensor, Tensor> ctc_loss_gpu_template(const Tensor& log_probs, const 
 // alpha kernel above. (As mentioned above, it might make sense do the calculation in the alpha kernel.)
 template<typename scalar_t, typename target_t>
 __global__ void
-C10_LAUNCH_BOUNDS_2((std::is_same<scalar_t, float>::value ? 1024 : 896), 1)
+C10_LAUNCH_BOUNDS_2((std::is_same_v<scalar_t, float> ? 1024 : 896), 1)
 ctc_loss_backward_log_beta_gpu_kernel(scalar_t* __restrict__ log_beta_data,
                                       const scalar_t*log_probs_data, const int64_t* __restrict__ input_lengths, int64_t max_input_length,
                                       const target_t* __restrict__ targets_data, const int64_t* __restrict__ target_lengths, int64_t max_target_length,
@@ -447,7 +447,7 @@ ctc_loss_backward_log_beta_gpu_kernel(scalar_t* __restrict__ log_beta_data,
 template<typename scalar_t, typename target_t>
 __global__ void
 #if defined (USE_ROCM)
-C10_LAUNCH_BOUNDS_2((std::is_same<scalar_t, float>::value ? 1024 : 896), 1)
+C10_LAUNCH_BOUNDS_2((std::is_same_v<scalar_t, float> ? 1024 : 896), 1)
 #endif
 ctc_loss_backward_collect_nonblank_gpu_kernel(scalar_t* __restrict__ gradient_data,
                                                      const scalar_t* __restrict__ grad_out_data, int64_t grad_out_batch_stride,
@@ -499,7 +499,7 @@ ctc_loss_backward_collect_nonblank_gpu_kernel(scalar_t* __restrict__ gradient_da
 template<typename scalar_t, typename target_t>
 __global__ void
 #if defined (USE_ROCM)
-C10_LAUNCH_BOUNDS_2((std::is_same<scalar_t, float>::value ? 1024 : 896), 1)
+C10_LAUNCH_BOUNDS_2((std::is_same_v<scalar_t, float> ? 1024 : 896), 1)
 #endif
 ctc_loss_backward_collect_gpu_kernel(scalar_t* __restrict__ gradient_data,
                                                      const scalar_t* __restrict__ grad_out_data, int64_t grad_out_batch_stride,
@@ -571,7 +571,7 @@ ctc_loss_backward_collect_gpu_kernel(scalar_t* __restrict__ gradient_data,
 template<typename scalar_t>
 __global__ void
 #if defined (USE_ROCM)
-C10_LAUNCH_BOUNDS_2((std::is_same<scalar_t, float>::value ? 1024 : 896), 1)
+C10_LAUNCH_BOUNDS_2((std::is_same_v<scalar_t, float> ? 1024 : 896), 1)
 #endif
 ctc_loss_zero_padded_gradients(
     scalar_t* __restrict__ gradient_data,   /* (T, B, D) layout */
@@ -605,7 +605,7 @@ template<typename scalar_t, ScalarType target_scalar_type>
 Tensor ctc_loss_backward_gpu_template(const Tensor& grad_out, const Tensor& log_probs, const Tensor& targets, IntArrayRef input_lengths, IntArrayRef target_lengths,
                                       const Tensor& neg_log_likelihood, const Tensor& log_alpha, int64_t BLANK, bool zero_infinity) {
   constexpr scalar_t neginf = -INFINITY;
-  using target_t = typename std::conditional<target_scalar_type == kInt, int, int64_t>::type;
+  using target_t = typename std::conditional_t<target_scalar_type == kInt, int, int64_t>;
   int64_t batch_size = log_probs.size(1);
   int64_t num_labels = log_probs.size(2);
   int64_t tg_target_stride;
@@ -643,7 +643,7 @@ Tensor ctc_loss_backward_gpu_template(const Tensor& grad_out, const Tensor& log_
   Tensor grad = at::full_like(log_probs, neginf, LEGACY_CONTIGUOUS_MEMORY_FORMAT); // initialization for log(sum (alpha beta))
 
   // As above, there may be better configurations to use.
-  constexpr int max_threads = std::is_same<scalar_t, float>::value ? 1024 : 896; // we need 72 or so 32 bit registers for double
+  constexpr int max_threads = std::is_same_v<scalar_t, float> ? 1024 : 896; // we need 72 or so 32 bit registers for double
   int threads_target = max_threads;
   while (threads_target / 2 >= 2*max_target_length+1) {
     threads_target /= 2;

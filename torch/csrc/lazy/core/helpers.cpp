@@ -4,10 +4,7 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/lazy/core/tensor_util.h>
 
-#include <limits>
-
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 
 std::vector<int64_t> DropDimensions(
     c10::ArrayRef<int64_t> sizes,
@@ -58,7 +55,8 @@ int64_t GetCanonicalPosition(
     c10::ArrayRef<int64_t> dimensions,
     int64_t dim,
     int64_t pos) {
-  dim = GetCanonicalDimensionIndex(dim, dimensions.size());
+  dim =
+      GetCanonicalDimensionIndex(dim, static_cast<int64_t>(dimensions.size()));
   if (pos < 0) {
     pos = GetCanonicalDimensionIndex(pos, dimensions[dim]);
   } else {
@@ -126,7 +124,7 @@ Shape GetPromotedBinaryOpShape(const Shape& shape1, const Shape& shape2) {
       GetPromotedShape(shape1.sizes(), shape2.sizes()));
 }
 
-std::vector<std::string> StrSplit(c10::string_view text, char delim) {
+std::vector<std::string> StrSplit(std::string_view text, char delim) {
   size_t start = 0;
   size_t end = 0;
 
@@ -139,5 +137,4 @@ std::vector<std::string> StrSplit(c10::string_view text, char delim) {
   return tokens;
 }
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

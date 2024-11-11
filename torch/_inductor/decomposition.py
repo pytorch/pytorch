@@ -48,6 +48,7 @@ quantized_decomposed = torch.ops.quantized_decomposed
 inductor_decompositions = get_decompositions(
     [
         aten._adaptive_avg_pool2d_backward,
+        aten.addmv,
         aten.arange,
         aten.bitwise_and_,
         aten.bitwise_or_,
@@ -74,6 +75,7 @@ inductor_decompositions = get_decompositions(
         aten.native_group_norm,
         aten.native_layer_norm,
         aten.nll_loss2d_backward,
+        aten.permute_copy,
         aten._softmax,
         aten.sin_,
         aten.sqrt_,
@@ -230,7 +232,7 @@ def bmm(
     self: torch.Tensor,
     batch2: torch.Tensor,
 ) -> torch.Tensor:
-    if config.coordinate_descent_tuning:
+    if config.coordinate_descent_tuning and self.device.type != "cpu":
         if guard_size_oblivious(self.shape[1] == 1) or guard_size_oblivious(
             batch2.shape[2] == 1
         ):
@@ -284,7 +286,7 @@ def mm(
 ) -> torch.Tensor:
     # Our matrix vector multiplies only achieve peak bandwidth with coordinate descent tuning.
     # todo: Look into why and fix it (hopefully)
-    if config.coordinate_descent_tuning:
+    if config.coordinate_descent_tuning and self.device.type != "cpu":
         if guard_size_oblivious(self.shape[0] == 1) or guard_size_oblivious(
             input2.shape[1] == 1
         ):
@@ -650,10 +652,10 @@ def wrapped_quantized_linear(
     out_zero_point: torch.Tensor,
     out_channel: int,
 ) -> torch.Tensor:
-    packed_weight = torch.ops._quantized.wrapped_linear_prepack(
+    packed_weight = torch.ops._quantized._wrapped_linear_prepack(
         weight, weight_scale, weight_zero_point, bias
     )
-    return torch.ops._quantized.wrapped_quantized_linear_prepacked(
+    return torch.ops._quantized._wrapped_quantized_linear_prepacked(
         input,
         input_scale,
         input_zero_point,
@@ -977,3 +979,41 @@ def max_pool2d_with_indices(
         padding,
     )
     return vals, indices
+
+
+@register_decomposition(aten.adaptive_max_pool2d)
+def adaptive_max_pool2d(
+    x: torch.Tensor, output_size: List[int]
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    *batch, h_in, w_in = x.shape
+    h_out, w_out = output_size
+
+    if h_out == 0 or w_out == 0:
+        o_size = [*batch, h_out, w_out]
+        return x.new_empty(o_size), x.new_empty(o_size, dtype=torch.int64)
+
+    if h_in % h_out == 0 and w_in % w_out == 0:
+        kernel_size = [h_in // h_out, w_in // w_out]
+        return aten.max_pool2d_with_indices(x, kernel_size)
+
+    return NotImplemented
+
+
+@register_decomposition(aten.searchsorted.Scalar)
+def searchsorted_scalar(
+    sorted_sequence: torch.Tensor,
+    self: torch.types.Number,
+    *,
+    out_int32: bool = False,
+    right: bool = False,
+    side: Optional[str] = None,
+    sorter: Optional[torch.Tensor] = None,
+) -> torch.Tensor:
+    return aten.searchsorted(
+        sorted_sequence,
+        torch.tensor([self], device=sorted_sequence.device),
+        out_int32=out_int32,
+        right=right,
+        side=side,
+        sorter=sorter,
+    )[0]

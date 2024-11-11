@@ -6,13 +6,11 @@ from __future__ import annotations
 
 import inspect
 import logging
-from typing import Any, Mapping, Sequence, TYPE_CHECKING
-
-import onnx
+from typing import Any, Callable, Mapping, Sequence, TYPE_CHECKING
 
 import torch
-import torch.export
-from torch.onnx._internal.exporter import _core, _onnx_program
+from torch.onnx._internal._lazy_import import onnxscript_apis, onnxscript_ir as ir
+from torch.onnx._internal.exporter import _core, _onnx_program, _registration
 
 
 if TYPE_CHECKING:
@@ -30,7 +28,9 @@ def _signature(model) -> inspect.Signature:
 
 def _from_dynamic_axes_to_dynamic_shapes(
     model,
+    *,
     dynamic_axes=None,
+    output_names: set[str],
     input_names: Sequence[str] | None = None,
 ) -> dict[str, Any] | None:
     """
@@ -70,10 +70,13 @@ def _from_dynamic_axes_to_dynamic_shapes(
     # for the exported program
     dynamic_shapes_to_exported_program = {}
     for input_name, axes in dynamic_axes.items():
-        # input_name can be either from inptu_names or from the model inputs
+        if input_name in output_names:
+            # User specified an output name as a dynamic axis, so we skip it
+            continue
+        # input_name can be either from input_names or from the model inputs
         if input_name not in input_names_to_model_inputs:
             raise ValueError(
-                f"dynamix axis: {input_name} is not found in the input names: {input_names}"
+                f"dynamic axis: {input_name} is not found in the input names: {input_names}"
             )
         model_input_name = input_names_to_model_inputs[input_name]
         if isinstance(axes, dict):
@@ -108,13 +111,6 @@ def _get_torch_export_args(
     return args, kwargs
 
 
-def _convert_version(path: str | os.PathLike, opset_version: int) -> None:
-    """Convert the ONNX file to a specific version."""
-    model = onnx.load(path, load_external_data=False)
-    model = onnx.version_converter.convert_version(model, opset_version)
-    onnx.save(model, path)
-
-
 def export_compat(
     model: torch.nn.Module
     | torch.export.ExportedProgram
@@ -129,6 +125,8 @@ def export_compat(
     input_names: Sequence[str] | None = None,
     output_names: Sequence[str] | None = None,
     opset_version: int | None = None,
+    custom_translation_table: dict[Callable, Callable | Sequence[Callable]]
+    | None = None,
     dynamic_axes: Mapping[str, Mapping[int, str]]
     | Mapping[str, Sequence[int]]
     | None = None,
@@ -136,32 +134,48 @@ def export_compat(
     keep_initializers_as_inputs: bool = False,
     external_data: bool = True,
     report: bool = False,
+    optimize: bool = False,
     verify: bool = False,
     profile: bool = False,
     dump_exported_program: bool = False,
     artifacts_dir: str | os.PathLike = ".",
     fallback: bool = False,
     **_,
-) -> _onnx_program.ONNXProgram | None:
+) -> _onnx_program.ONNXProgram:
+    if opset_version is None:
+        # TODO(justinchuby): Change the hardcoded opset version for it to be flexible
+        opset_version = 18
+
     if isinstance(model, torch.export.ExportedProgram):
-        # We the model is already exported program, so the args, kwargs, and dynamic_shapes
+        # We know the model is already exported program, so the args, kwargs, and dynamic_shapes
         # are not used
         dynamic_shapes = dynamic_shapes or {}
     else:
         args, kwargs = _get_torch_export_args(args, kwargs)
         if dynamic_shapes is None and dynamic_axes is not None:
             dynamic_shapes = _from_dynamic_axes_to_dynamic_shapes(
-                model, dynamic_axes, input_names
+                model,
+                dynamic_axes=dynamic_axes,
+                input_names=input_names,
+                output_names=set(output_names or ()),
             )
 
-    should_convert_version = False
-
+    registry = _registration.ONNXRegistry.from_torchlib()
+    if custom_translation_table is not None:
+        for torch_op, onnx_ops in custom_translation_table.items():
+            # TODO(justinchuby): Support complex inputs with annotations
+            if not isinstance(onnx_ops, Sequence):
+                onnx_ops = (onnx_ops,)
+            for op in reversed(onnx_ops):
+                # register_op places the op in the front of all onnx variants,
+                # so we reverse the list to maintain the order of the custom ops provided
+                registry.register_op(torch_op, op, is_complex=False)
     try:
         onnx_program = _core.export(
             model,
             args,
             kwargs,
-            registry=None,
+            registry=registry,
             dynamic_shapes=dynamic_shapes,
             input_names=input_names,
             output_names=output_names,
@@ -173,20 +187,6 @@ def export_compat(
             verbose=verbose,
         )
 
-        if f is not None:
-            # Always save the initializers as external data to reduce the size of the ONNX file
-            onnx_program.save(
-                f,
-                include_initializers=export_params,
-                keep_initializers_as_inputs=keep_initializers_as_inputs,
-                external_data=external_data,
-            )
-            if (
-                opset_version is not None
-                and opset_version != onnx_program.model.opset_imports.get("")
-            ):
-                should_convert_version = True
-
     except Exception as e:
         if fallback:
             if verbose is not False:
@@ -194,6 +194,8 @@ def export_compat(
                     "[torch.onnx] Falling back to legacy torch.onnx.export due "
                     f"to the following error: {e}",
                 )
+            if f is None:
+                raise TypeError("f must be provided when fallback is enabled") from e
             torch.onnx.utils.export(
                 model,  # type: ignore[arg-type]
                 args,
@@ -206,20 +208,28 @@ def export_compat(
                 dynamic_axes=dynamic_axes,
                 keep_initializers_as_inputs=keep_initializers_as_inputs,
             )
-            onnx_program = None
-            if opset_version is None:
-                opset_version = 18
-            if opset_version != 17:
-                should_convert_version = True
+            onnx_program = _onnx_program.ONNXProgram(ir.load(f), None)
+
+            # NOTE: It it's falling back to the legacy exporter, we don't need to
+            # optimize the model, so we return it here. Users can still optimize
+            # the model using the optimize() if they want.
+            return onnx_program
         else:
             raise
 
-    if f is not None and should_convert_version:
-        assert opset_version is not None
-        if verbose is not False:
-            print(
-                f"[torch.onnx] Converting the ONNX file to opset version {opset_version}..."
-            )
-        _convert_version(f, opset_version)
+    # Converter opset version and optimize
+    onnx_program.model = onnxscript_apis.convert_version(
+        onnx_program.model, opset_version
+    )
+    if optimize:
+        onnx_program.optimize()
+
+    if f is not None:
+        onnx_program.save(
+            f,
+            include_initializers=export_params,
+            keep_initializers_as_inputs=keep_initializers_as_inputs,
+            external_data=external_data,
+        )
 
     return onnx_program

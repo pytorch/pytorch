@@ -1,4 +1,3 @@
-import random
 import sys
 
 from benchmark_base import BenchmarkBase
@@ -17,7 +16,8 @@ class Benchmark(BenchmarkBase):
 
     def _prepare_once(self):
         torch._dynamo.config.capture_scalar_outputs = True
-        random.seed(42)
+        torch.manual_seed(0)
+
         self.splits = torch.randint(10, (self.N,))
         sz = self.splits.sum().item()
         self.input = torch.randn(sz)
@@ -34,8 +34,7 @@ class Benchmark(BenchmarkBase):
                 torch._check(x <= self.N)
             return a.split(xs)
 
-        for i in range(1000):
-            f(self.input, self.splits)
+        f(self.input, self.splits)
 
 
 def main():
