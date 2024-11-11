@@ -152,10 +152,6 @@ void float8_copy_kernel_cuda(TensorIteratorBase &iter) {
 bool is_permute_021(TensorIteratorBase &iter) {
   const auto& input = iter.tensor(1);
   const auto& output = iter.tensor(0);
-  // auto in_sizes = input.sizes();
-  // auto in_strides = input.strides();
-  // auto out_sizes = output.sizes();
-  // auto out_strides = output.strides();
 
   bool is_permute = false;
   if (input.dim() == 3) {
@@ -166,8 +162,7 @@ bool is_permute_021(TensorIteratorBase &iter) {
     is_permute &= input.stride(2) == input.size(1);
     is_permute &= output.is_contiguous();
   }
-  // return is_permute;
-  return false;
+  return is_permute;
 }
 
 template<class _T, int _WG>
