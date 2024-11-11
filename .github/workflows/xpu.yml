@@ -77,3 +77,14 @@ jobs:
       cuda-version: cpu
       use-xpu: true
       vc-year: '2022'
+
+  windows-xpu-2025_0-build:
+    if: github.repository_owner == 'pytorch'
+    name: win-vs2022-xpu-2025_0-py3
+    uses: ./.github/workflows/_win-build.yml
+    with:
+      build-environment: win-vs2022-xpu-py3
+      cuda-version: cpu
+      use-xpu: true
+      xpu-version: '2025.0'
+      vc-year: '2022'
