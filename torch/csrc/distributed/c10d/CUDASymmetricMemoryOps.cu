@@ -19,6 +19,7 @@
 
 #include <torch/csrc/distributed/c10d/CUDASymmetricMemory-inl.h>
 #include <torch/csrc/distributed/c10d/CUDASymmetricMemory.hpp>
+#include <torch/csrc/distributed/c10d/cuda/AsyncMM.cuh>
 
 #define INT_SWITCH_CASE(name, val, ...) \
   case val: {                           \
@@ -512,8 +513,16 @@ at::Tensor memset32_(
       "symm_mem::memset32_: input must be a flat, contiguous uint32 tensor.");
 
   TORCH_CHECK(
-      offset > 0 && count > 0,
-      "symm_mem::memset32_: offset and count must be positive integers.");
+      offset >= 0,
+      "symm_mem::memset32_: offset must be greater than or equal to 0 (got ",
+      offset,
+      ")");
+
+  TORCH_CHECK(
+      count > 0,
+      "symm_mem::memset32_: count must be a positive integer (got ",
+      count,
+      ")");
 
   TORCH_CHECK(
       val >= 0 &&
@@ -539,6 +548,59 @@ at::Tensor memset32_(
       val,
       count,
       at::cuda::getCurrentCUDAStream()));
+#else
+  TORCH_CHECK(
+      false, "CUDASymmetricMemory requires PYTORCH_C10_DRIVER_API_SUPPORTED");
+#endif
+  return input;
+}
+
+at::Tensor stream_write_value32_(
+    at::Tensor& input,
+    int64_t offset,
+    int64_t val) {
+#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
+  TORCH_CHECK(
+      input.dim() == 1 && input.is_contiguous() &&
+          input.scalar_type() == c10::ScalarType::UInt32,
+      "symm_mem::stream_write_value32_: input must be a flat, contiguous "
+      "uint32 tensor.");
+
+  TORCH_CHECK(
+      offset >= 0,
+      "symm_mem::stream_write_value32_: offset must be greater than or "
+      "equal to 0 (got ",
+      offset,
+      ")");
+
+  TORCH_CHECK(
+      val >= 0 &&
+          static_cast<size_t>(val) <= std::numeric_limits<uint32_t>::max(),
+      "symm_mem::stream_write_value32_: "
+      "val must be in the range of [0, 4294967295] (uint32_t).")
+
+  auto element_size = c10::elementSize(input.scalar_type());
+  TORCH_CHECK(
+      offset < input.numel(),
+      "symm_mem::stream_write_value32_: offset (",
+      offset,
+      ") exceeded the numel of the input (",
+      input.numel(),
+      ")");
+
+  auto addr = reinterpret_cast<uint32_t*>(input.data_ptr()) + offset;
+
+  c10::cuda::CUDAGuard guard(input.device());
+  auto driver_api = c10::cuda::DriverAPI::get();
+  // According to the documentation of CUstreamWriteValue_flags,
+  // cuStreamWriteValue32 will provide a memory fence before the write, which
+  // has similar semantics to __threadfence_system() but is scoped to the
+  // stream rather than a CUDA thread.
+  C10_CUDA_DRIVER_CHECK(driver_api->cuStreamWriteValue32_(
+      at::cuda::getCurrentCUDAStream(),
+      reinterpret_cast<CUdeviceptr>(addr),
+      val,
+      0));
 #else
   TORCH_CHECK(
       false, "CUDASymmetricMemory requires PYTORCH_C10_DRIVER_API_SUPPORTED");
@@ -593,7 +655,28 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
       "two_shot_all_reduce_(Tensor(a!) input, str reduce_op, str group_name) -> Tensor(a!)",
       torch::dispatch(c10::DispatchKey::CUDA, ::two_shot_all_reduce_),
       {at::Tag::pt2_compliant_tag});
+
+  // An mm that supports consuming asynchronous input. It guarantees the
+  // following rasterization order, and that the corresponding signal arrives
+  // before an input chunk is consumed.
+  //
+  // num_chunks = a_chunks_signals.numel()
+  // for chunk_idx in range(a_chunk_pivot, num_chunks + a_chunk_pivot):
+  //     chunk_idx = chunk_idx % num_chunks
+  //     wait_signal(a_chunk_signals, chunk_idx)
+  //     # Compute output tiles that consumes the input chunk
+  m.def(
+      "_async_input_mm(Tensor a, Tensor b, Tensor a_chunk_signals, int a_chunk_pivot) -> Tensor",
+      torch::dispatch(
+          c10::DispatchKey::CUDA, c10d::cuda::detail::async_input_mm),
+      {at::Tag::pt2_compliant_tag});
+
 #endif
+  m.def(
+      "stream_write_value32_(Tensor(a!) input, int offset, int val) -> Tensor(a!)",
+      torch::dispatch(c10::DispatchKey::CUDA, ::stream_write_value32_),
+      {at::Tag::pt2_compliant_tag});
+
   m.def(
       "memset32_(Tensor(a!) input, int offset, int val, int count) -> Tensor(a!)",
       torch::dispatch(c10::DispatchKey::CUDA, ::memset32_),
