@@ -756,7 +756,7 @@ static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
 }
 
 template <typename T>
-inline static void unwrap_size_tuple(PyObject* obj, T& output) {
+static void unwrap_size_tuple(PyObject* obj, T& output) {
   TORCH_CHECK(PyTuple_CheckExact(obj));
   size_t len = PyTuple_GET_SIZE(obj);
   output.reserve(len);
@@ -768,7 +768,7 @@ inline static void unwrap_size_tuple(PyObject* obj, T& output) {
 }
 
 template <typename T>
-inline static void _parse_empty_strided_args(
+static void _parse_empty_strided_args(
     PyObject* args,
     T& sizes,
     T& strides,
@@ -783,7 +783,7 @@ inline static void _parse_empty_strided_args(
   dtype = reinterpret_cast<THPDtype*>(py_dtype)->scalar_type;
 }
 
-inline static PyObject* _empty_strided_device(
+static PyObject* _empty_strided_device(
     PyObject* dummy,
     PyObject* args,
     c10::DeviceType device_type) {
@@ -3405,39 +3405,6 @@ class TupleIteratorGetItemAccessor : public GuardAccessor {
   Py_ssize_t _index;
 };
 
-// Gets weakref ref (strong ref) on construction,
-// releases the ref on destruction.
-// If an error occurred during the weakref call,
-// _obj points to null.
-class WeakrefRAII {
-  PyObject* _obj{nullptr};
-
- public:
-  WeakrefRAII(PyObject* weakref) {
-    if (PyWeakref_GetRef(weakref, &_obj) != -1) { // strong ref
-      // weakref doesn't point to anything
-      if (_obj == nullptr) {
-        _obj = Py_NewRef(Py_None);
-      }
-    } else {
-      // error occurred
-      _obj = nullptr;
-    }
-  }
-
-  ~WeakrefRAII() {
-    Py_XDECREF(_obj);
-  }
-
-  operator PyObject*() const {
-    return _obj;
-  }
-
-  bool failed() const {
-    return _obj == nullptr;
-  }
-};
-
 /**
  * GlobalWeakRef accessor. Dynamo can insert a weakref object into the frame
  * globals. This accessor reads the globals and then calls the weakref object
@@ -3477,11 +3444,15 @@ class GlobalWeakRefGuardAccessor : public GuardAccessor {
       return false;
     }
 
-    WeakrefRAII x(weakref);
-    if (x.failed()) {
+    PyObject* x = nullptr;
+    if (PyWeakref_GetRef(weakref, &x) != 1) {
+      // error or ref is dead
+      PyErr_Clear();
       return false;
     }
-    return _guard_manager->check_nopybind(x);
+    bool result = _guard_manager->check_nopybind(x);
+    Py_DECREF(x);
+    return result;
   }
 
   GuardDebugInfo check_verbose_nopybind(
@@ -3501,12 +3472,16 @@ class GlobalWeakRefGuardAccessor : public GuardAccessor {
           false, std::string("Not a weakref ") + get_source(), 0);
     }
 
-    WeakrefRAII x(weakref);
-    if (x.failed()) {
+    PyObject* x = nullptr;
+    if (PyWeakref_GetRef(weakref, &x) != 1) {
+      // error or ref is dead
+      PyErr_Clear();
       return GuardDebugInfo(
-          false, std::string("Weakref call failed ") + get_source(), 0);
+          false, std::string("Weakref_GetRef is empty or failed ") + get_source(), 0);
     }
-    return _guard_manager->check_verbose_nopybind(x);
+    auto result = _guard_manager->check_verbose_nopybind(x); 
+    Py_DECREF(x);
+    return result;
   }
 
   std::string repr() const override {
@@ -3544,11 +3519,15 @@ class WeakRefCallGuardAccessor : public GuardAccessor {
       return false;
     }
 
-    WeakrefRAII x(obj);
-    if (x.failed()) {
+    PyObject* x = nullptr;
+    if (PyWeakref_GetRef(obj, &x) != 1) {
+      // error or ref is dead
+      PyErr_Clear();
       return false;
     }
-    return _guard_manager->check_nopybind(x);
+    bool result = _guard_manager->check_nopybind(x);
+    Py_DECREF(x);
+    return result;
   }
 
   GuardDebugInfo check_verbose_nopybind(
@@ -3558,12 +3537,16 @@ class WeakRefCallGuardAccessor : public GuardAccessor {
           false, std::string("Not a weakref obj ") + get_source(), 0);
     }
 
-    WeakrefRAII x(obj);
-    if (x.failed()) {
+    PyObject* x = nullptr;
+    if (PyWeakref_GetRef(obj, &x) != 1) {
+      // error or ref is dead
+      PyErr_Clear();
       return GuardDebugInfo(
-          false, std::string("Weakref call failed ") + get_source(), 0);
+          false, std::string("Weakref_GetRef is empty or failed ") + get_source(), 0);
     }
-    return _guard_manager->check_verbose_nopybind(x);
+    auto result = _guard_manager->check_verbose_nopybind(x); 
+    Py_DECREF(x);
+    return result;
   }
 
   std::string repr() const override {
