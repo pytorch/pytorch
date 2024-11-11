@@ -311,7 +311,10 @@ def _get_decoding_default_config(key) -> Tuple[int, int, int]:
     if sm_version >= (9, 0):
         if head_dim > 128 and dtype == torch.float32:
             return default_config
-        return (64, 2, 3)
+        if torch.version.hip is None:
+            return (64, 2, 3)
+        else:
+            return (64, 2, 1)
     return default_config
 
 
@@ -407,6 +410,11 @@ def create_flex_decoding_kernel(*args, **kwargs):
             (32, 2, 3),
             (128, 2, 3),
         ]
+
+        # Use num_stages=1 on ROCm to avoid shmem limitation
+        if torch.version.hip:
+            configs = [(c[0], c[1], 1) for c in configs]
+
     # TODO: fix autotuning.
 
     kernel_options.setdefault("SM_SCALE", scale)
