@@ -3083,7 +3083,7 @@ Tensor softplus_double_backward(
 // This implements steps (2)~(4) of the algorithm in
 // NOTE [ Detecting Memory Overlap Within A Strided Tensor ]
 // Helper for as_strided_backward
-static inline bool _maybe_overlapping_memory(
+static bool _maybe_overlapping_memory(
     c10::SymIntArrayRef sizes,
     c10::SymIntArrayRef strides) {
   if (!sizes.empty()) {
@@ -3108,7 +3108,7 @@ static inline bool _maybe_overlapping_memory(
 
 // Returns the minimum storage size needed to contain a tensor of sizes,
 // strides, and storage_offset Helper for as_strided_backward
-static inline c10::SymInt _min_storage_size(
+static c10::SymInt _min_storage_size(
     c10::SymIntArrayRef sizes,
     c10::SymIntArrayRef strides,
     c10::SymInt storage_offset) {
