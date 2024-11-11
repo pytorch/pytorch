@@ -3961,12 +3961,12 @@ class TestCudaMallocAsync(TestCase):
         Verify memory activity reports a percentage output on memory utilization
         """
         memory_usage = []
-        tensor = torch.randn(8192, 8192).cuda()
+        tensor = torch.randn(16384, 16384).cuda()
 
         for i in range(100):
             t = tensor.t()
-            sliced_t = tensor[:4096, :4096].clone()
-            tensor[:4096, :4096] = sliced_t
+            sliced_t = tensor[:8192, :8192].clone()
+            tensor[:8192, :8192] = sliced_t
             torch.cuda.synchronize()
             memory_usage.append(torch.cuda.memory_usage())
 
