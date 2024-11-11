@@ -546,7 +546,7 @@ class CppMicroGemmAMX(CppMicroGemm):
     for (int64_t n = 0; n < N; n += {{block_n}}) {
 {%- if use_cached_dequantized_B %}
         // Dequantize K * 32 int8 B elements into BF16
-        load_dequantized_B(n);
+        load_dequantized_B(n / {{block_n}});
 {%- endif %}
         for (int64_t m = 0; m < M; m += {{block_m}}) {
             int64_t block_m = std::min<int64_t>(M - m, {{block_m}});
