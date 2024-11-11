@@ -510,7 +510,7 @@ void OperatorEntry::reportSignatureError(const CppSignature& call_signature, con
         "This likely happened in a call to OperatorHandle::typed<Return (Args...)>(). ",
         "Please make sure that the function signature matches the signature in the operator registration call."
   );
-};
+}
 
 #ifndef STRIP_ERROR_MESSAGES
 static std::string post_process_dispatch_key_str(std::string dispatch_key) {
