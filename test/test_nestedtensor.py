@@ -7859,7 +7859,6 @@ FORWARD_FAILURES = [
             "nn.functional.softplus",
             "nn.functional.softshrink",
             "nn.functional.threshold",
-            "rad2deg",
             # binary
             "__rsub__",
             "complex",
