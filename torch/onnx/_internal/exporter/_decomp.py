@@ -58,7 +58,7 @@ def create_onnx_friendly_decomposition_table(
     decomposition_table: dict[torch._ops.OperatorBase, Callable] = {}
 
     for op_overload, decomp_fn in itertools.chain(
-        torch._decomp._decomp_table_to_post_autograd_aten().items(),  # type: ignore[attr-defined]
+        torch._export.utils._decomp_table_to_post_autograd_aten().items(),  # type: ignore[attr-defined]
         torch._decomp.decomposition_table.items(),  # type: ignore[attr-defined]
     ):
         # Skip decomposition for op_overload as long as that op_overload has a corresponding ONNX

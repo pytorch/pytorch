@@ -95,11 +95,10 @@ if(USE_XPU)
     message(WARNING "Not compiling with XPU. Could NOT find SYCL."
     "Suppress this warning with -DUSE_XPU=OFF.")
     caffe2_update_option(USE_XPU OFF)
-  else()
-    if(LINUX)
-      string(APPEND CMAKE_CXX_FLAGS " -D__INTEL_PREVIEW_BREAKING_CHANGES")
-    endif()
   endif()
+  foreach(flag ${XPU_HOST_CXX_FLAGS})
+    add_definitions(${flag})
+  endforeach()
 endif()
 
 # ---[ Custom Protobuf
@@ -161,7 +160,7 @@ else()
   set(AT_MKLDNN_ENABLED 0)
   set(AT_MKL_ENABLED 0)
 endif()
-set_property(CACHE BLAS PROPERTY STRINGS "ATLAS;BLIS;Eigen;FLAME;Generic;MKL;OpenBLAS;vecLib")
+set_property(CACHE BLAS PROPERTY STRINGS "ATLAS;BLIS;Eigen;FLAME;Generic;MKL;OpenBLAS;vecLib;APL")
 message(STATUS "Trying to find preferred BLAS backend of choice: " ${BLAS})
 
 if(BLAS STREQUAL "Eigen")
@@ -226,6 +225,12 @@ elseif(BLAS STREQUAL "FlexiBLAS")
   find_package(FlexiBLAS REQUIRED)
   include_directories(SYSTEM ${FlexiBLAS_INCLUDE_DIR})
   list(APPEND Caffe2_DEPENDENCY_LIBS ${FlexiBLAS_LIB})
+elseif(BLAS STREQUAL "APL")
+  find_package(APL REQUIRED)
+  include_directories(SYSTEM ${APL_INCLUDE_DIR})
+  set(BLAS_INFO "apl")
+  set(BLAS_FOUND 1)
+  set(BLAS_LIBRARIES ${APL_LIBRARIES})
 elseif(BLAS STREQUAL "Generic")
   # On Debian family, the CBLAS ABIs have been merged into libblas.so
   if(ENV{GENERIC_BLAS_LIBRARIES} STREQUAL "")
@@ -246,7 +251,7 @@ endif()
 if(NOT INTERN_BUILD_MOBILE)
   set(AT_MKL_SEQUENTIAL 0)
   set(USE_BLAS 1)
-  if(NOT (ATLAS_FOUND OR BLIS_FOUND OR GENERIC_BLAS_FOUND OR MKL_FOUND OR OpenBLAS_FOUND OR VECLIB_FOUND OR FlexiBLAS_FOUND OR NVPL_BLAS_FOUND))
+  if(NOT (ATLAS_FOUND OR BLIS_FOUND OR GENERIC_BLAS_FOUND OR MKL_FOUND OR OpenBLAS_FOUND OR VECLIB_FOUND OR FlexiBLAS_FOUND OR NVPL_BLAS_FOUND OR APL_FOUND))
     message(WARNING "Preferred BLAS (" ${BLAS} ") cannot be found, now searching for a general BLAS library")
     find_package(BLAS)
     if(NOT BLAS_FOUND)
@@ -372,9 +377,6 @@ if(INTERN_BUILD_MOBILE OR NOT DISABLE_NNPACK_AND_FAMILY)
   set(USE_PTHREADPOOL ON CACHE BOOL "" FORCE)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_PTHREADPOOL")
 
-  # Always use third_party/pthreadpool.
-  set(USE_INTERNAL_PTHREADPOOL_IMPL OFF CACHE BOOL "" FORCE)
-
   if(NOT TARGET pthreadpool)
     if(USE_SYSTEM_PTHREADPOOL)
       add_library(pthreadpool SHARED IMPORTED)
@@ -384,7 +386,7 @@ if(INTERN_BUILD_MOBILE OR NOT DISABLE_NNPACK_AND_FAMILY)
         message(FATAL_ERROR "Cannot find pthreadpool")
       endif()
       message("-- Found pthreadpool: ${PTHREADPOOL_LIBRARY}")
-    elseif(NOT USE_INTERNAL_PTHREADPOOL_IMPL)
+    else()
       if(NOT DEFINED PTHREADPOOL_SOURCE_DIR)
         set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
         set(PTHREADPOOL_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/pthreadpool" CACHE STRING "pthreadpool source directory")
@@ -400,11 +402,7 @@ if(INTERN_BUILD_MOBILE OR NOT DISABLE_NNPACK_AND_FAMILY)
       set_property(TARGET pthreadpool PROPERTY POSITION_INDEPENDENT_CODE ON)
     endif()
 
-    if(USE_INTERNAL_PTHREADPOOL_IMPL)
-      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_INTERNAL_PTHREADPOOL_IMPL")
-    else()
-      list(APPEND Caffe2_DEPENDENCY_LIBS pthreadpool)
-    endif()
+    list(APPEND Caffe2_DEPENDENCY_LIBS pthreadpool)
   endif()
 else()
   set(USE_PTHREADPOOL OFF CACHE BOOL "" FORCE)
@@ -458,10 +456,6 @@ if(USE_PYTORCH_QNNPACK)
     endif()
 
     if(NOT TARGET pytorch_qnnpack)
-      if(NOT USE_SYSTEM_PTHREADPOOL AND USE_INTERNAL_PTHREADPOOL_IMPL)
-        set(PYTORCH_QNNPACK_CUSTOM_THREADPOOL ON CACHE BOOL "")
-      endif()
-
       set(PYTORCH_QNNPACK_BUILD_TESTS OFF CACHE BOOL "")
       set(PYTORCH_QNNPACK_BUILD_BENCHMARKS OFF CACHE BOOL "")
       set(PYTORCH_QNNPACK_LIBRARY_TYPE "static" CACHE STRING "")
@@ -474,28 +468,6 @@ if(USE_PYTORCH_QNNPACK)
       set_property(TARGET cpuinfo PROPERTY POSITION_INDEPENDENT_CODE ON)
       # QNNPACK depends on gemmlowp headers
       target_include_directories(pytorch_qnnpack PRIVATE "${CAFFE2_THIRD_PARTY_ROOT}/gemmlowp")
-
-      if(PYTORCH_QNNPACK_CUSTOM_THREADPOOL)
-        target_compile_definitions(
-          pytorch_qnnpack PRIVATE
-          pthreadpool_t=legacy_pthreadpool_t
-          pthreadpool_function_1d_t=legacy_pthreadpool_function_1d_t
-          pthreadpool_function_1d_tiled_t=legacy_pthreadpool_function_1d_tiled_t
-          pthreadpool_function_2d_t=legacy_pthreadpool_function_2d_t
-          pthreadpool_function_2d_tiled_t=legacy_pthreadpool_function_2d_tiled_t
-          pthreadpool_function_3d_tiled_t=legacy_pthreadpool_function_3d_tiled_t
-          pthreadpool_function_4d_tiled_t=legacy_pthreadpool_function_4d_tiled_t
-          pthreadpool_create=legacy_pthreadpool_create
-          pthreadpool_destroy=legacy_pthreadpool_destroy
-          pthreadpool_get_threads_count=legacy_pthreadpool_get_threads_count
-          pthreadpool_compute_1d=legacy_pthreadpool_compute_1d
-          pthreadpool_parallelize_1d=legacy_pthreadpool_parallelize_1d
-          pthreadpool_compute_1d_tiled=legacy_pthreadpool_compute_1d_tiled
-          pthreadpool_compute_2d=legacy_pthreadpool_compute_2d
-          pthreadpool_compute_2d_tiled=legacy_pthreadpool_compute_2d_tiled
-          pthreadpool_compute_3d_tiled=legacy_pthreadpool_compute_3d_tiled
-          pthreadpool_compute_4d_tiled=legacy_pthreadpool_compute_4d_tiled)
-      endif()
     endif()
 
     list(APPEND Caffe2_DEPENDENCY_LIBS pytorch_qnnpack)
@@ -1326,6 +1298,28 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
   endif()
   # Recover the build shared libs option.
   set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS})
+endif()
+
+# --[ x86-simd-sort integration
+if(USE_X86_SIMD_SORT)
+  if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
+    message(WARNING
+      "x64 operating system is required for x86-simd-sort. "
+      "Not compiling with x86-simd-sort. "
+      "Turn this warning off by USE_X86_SIMD_SORT=OFF.")
+    set(USE_X86_SIMD_SORT OFF)
+  endif()
+
+  if(USE_X86_SIMD_SORT)
+    if(USE_OPENMP AND NOT MSVC)
+      set(USE_XSS_OPENMP ON)
+    else()
+      set(USE_XSS_OPENMP OFF)
+    endif()
+
+    set(XSS_SIMD_SORT_INCLUDE_DIR ${CMAKE_CURRENT_LIST_DIR}/../third_party/x86-simd-sort)
+    include_directories(SYSTEM ${XSS_SIMD_SORT_INCLUDE_DIR})
+  endif()
 endif()
 
 # --[ ATen checks

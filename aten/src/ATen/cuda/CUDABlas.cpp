@@ -11,6 +11,7 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/macros/Export.h>
+#include <c10/util/env.h>
 #include <c10/util/irange.h>
 
 #ifdef USE_ROCM
@@ -18,6 +19,7 @@
 // until hipblas has an API to accept flags, we must use rocblas here
 #include <hipblas/hipblas.h>
 #include <rocblas/rocblas.h>
+#include <ATen/native/hip/ck_gemm.h>
 #define PYTORCH_ROCBLAS_VERSION_DECIMAL (ROCBLAS_VERSION_MAJOR * 100 + ROCBLAS_VERSION_MINOR)
 #define USE_GEMM_FLAGS_FP16_ALT_IMPL (PYTORCH_ROCBLAS_VERSION_DECIMAL >= 242)
 // needed to work around calling rocblas API instead of hipblas API
@@ -32,7 +34,7 @@ static rocblas_operation hipOperationToRocOperation(hipblasOperation_t op)
     case HIPBLAS_OP_C:
         return rocblas_operation_conjugate_transpose;
     }
-    AT_ERROR("HIPBLAS_STATUS_INVALID_ENUM");
+    TORCH_CHECK(false, "HIPBLAS_STATUS_INVALID_ENUM");
 }
 static hipblasStatus_t rocBLASStatusToHIPStatus(rocblas_status error)
 {
@@ -55,7 +57,7 @@ static hipblasStatus_t rocBLASStatusToHIPStatus(rocblas_status error)
     case rocblas_status_internal_error:
         return HIPBLAS_STATUS_INTERNAL_ERROR;
     }
-    AT_ERROR("HIPBLAS_STATUS_INVALID_ENUM");
+    TORCH_CHECK(false, "HIPBLAS_STATUS_INVALID_ENUM");
 }
 // hipblas does not have hipblasSetMathMode
 #define hipblasSetMathMode(handle, flags) HIPBLAS_STATUS_SUCCESS
@@ -100,9 +102,9 @@ static hipblasStatus_t rocBLASStatusToHIPStatus(rocblas_status error)
       " but got ",                            \
       X)
 
-namespace at::cuda::blas {
+namespace {
 
-cublasOperation_t _cublasOpFromChar(char op) {
+static cublasOperation_t _cublasOpFromChar(char op) {
   switch (op) {
     case 'n':
     case 'N':
@@ -114,11 +116,11 @@ cublasOperation_t _cublasOpFromChar(char op) {
     case 'C':
       return CUBLAS_OP_C;
   }
-  AT_ERROR(
+  TORCH_CHECK(false,
       "_cublasOpFromChar input should be 't', 'n' or 'c' but got `", op, "`");
 }
 
-void _cublasAdjustLdLevel2(int64_t m, int64_t n, int64_t* lda) {
+static void _cublasAdjustLdLevel2(int64_t m, int64_t n, int64_t* lda) {
   // Note: leading dimensions generally are checked that they are > 0
   // and at least as big the result requires (even if the value won't
   // be used).
@@ -132,7 +134,7 @@ void _cublasAdjustLdLevel2(int64_t m, int64_t n, int64_t* lda) {
     *lda = std::max<int64_t>(m, 1);
 }
 
-void _cublasAdjustLdLevel3(
+static void _cublasAdjustLdLevel3(
     char transa,
     char transb,
     int64_t m,
@@ -179,18 +181,21 @@ uint32_t _getAlignment(uintptr_t address) {
 }
 #endif
 
-size_t _parseChosenWorkspaceSize() {
-  const char * val = getenv("CUBLASLT_WORKSPACE_SIZE");
+static size_t _parseChosenWorkspaceSize() {
+  auto val = c10::utils::get_env("CUBLASLT_WORKSPACE_SIZE");
 #ifdef USE_ROCM
-  if (!val) {
+  if (!val.has_value()) {
     // accept either env var
-    val = getenv("HIPBLASLT_WORKSPACE_SIZE");
+    val = c10::utils::get_env("HIPBLASLT_WORKSPACE_SIZE");
   }
-#endif
+  size_t workspace_size = 76*1024; /* Use 76 MB for hipBLASLt */
+#else
   size_t workspace_size = 1024; /* default size in KiB according to #73328 */
-  if (val) {
+#endif
+
+  if (val.has_value()) {
     try {
-      workspace_size = std::stoi(val);
+      workspace_size = std::stoi(val.value());
     } catch(std::invalid_argument const& e) {
       TORCH_WARN("invalid CUBLASLT_WORKSPACE_SIZE,",
                  " using default workspace size of ", workspace_size, " KiB.");
@@ -202,10 +207,14 @@ size_t _parseChosenWorkspaceSize() {
   return workspace_size * 1024;
 }
 
-size_t _getWorkspaceSize() {
+static size_t _getWorkspaceSize() {
   static size_t workspace_size = _parseChosenWorkspaceSize();
   return workspace_size;
 }
+
+} // anonymous namespace
+
+namespace at::cuda::blas {
 
 /* LEVEL 3 BLAS FUNCTIONS */
 
@@ -229,6 +238,92 @@ size_t _getWorkspaceSize() {
     CUDABLAS_POSINT_CHECK(bgemm<Dtype>, ldc);  \
     CUDABLAS_NONNEGINT_CHECK(bgemm<Dtype>, num_batches);  \
   } while (0)
+
+
+namespace {
+// Following the pattern of CuSparseDescriptor
+// Defined here for now because this is the only place cublas_lt interface is
+// used but can be moved to a header once cublas_lt interface is used in
+// multiple places.
+template <typename T, cublasStatus_t (*destructor)(T*)>
+struct CuBlasLtDeleter {
+  void operator()(T* x) {
+    if (x != nullptr) {
+      TORCH_CUDABLAS_CHECK(destructor(x));
+    }
+  }
+};
+
+template <typename T, cublasStatus_t (*destructor)(T*)>
+class CuBlasLtDescriptor {
+ public:
+  T* descriptor() const {
+    return descriptor_.get();
+  }
+  T* descriptor() {
+    return descriptor_.get();
+  }
+
+ protected:
+  std::unique_ptr<T, CuBlasLtDeleter<T, destructor>> descriptor_;
+};
+
+class CuBlasLtMatmulDescriptor : public CuBlasLtDescriptor<
+                                     cublasLtMatmulDescOpaque_t,
+                                     &cublasLtMatmulDescDestroy> {
+ public:
+  CuBlasLtMatmulDescriptor(
+      cublasComputeType_t compute_type,
+      cudaDataType_t scale_type) {
+    cublasLtMatmulDesc_t raw_descriptor = nullptr;
+    TORCH_CUDABLAS_CHECK(
+        cublasLtMatmulDescCreate(&raw_descriptor, compute_type, scale_type));
+    descriptor_.reset(raw_descriptor);
+  }
+  template <typename T>
+  inline void setAttribute(cublasLtMatmulDescAttributes_t attr, const T value) {
+    // NOLINTNEXTLINE(bugprone-sizeof-expression)
+    TORCH_CUDABLAS_CHECK(::cublasLtMatmulDescSetAttribute(descriptor(), attr, &value, sizeof(T)));
+  }
+};
+
+class CuBlasLtMatrixLayout : public CuBlasLtDescriptor<
+                                 cublasLtMatrixLayoutOpaque_t,
+                                 &cublasLtMatrixLayoutDestroy> {
+ public:
+  CuBlasLtMatrixLayout(
+      cudaDataType_t type,
+      uint64_t rows,
+      uint64_t cols,
+      int64_t ld,
+      bool t = false) {
+    cublasLtMatrixLayout_t raw_descriptor = nullptr;
+    TORCH_CUDABLAS_CHECK(
+        cublasLtMatrixLayoutCreate(&raw_descriptor, type, t ? cols : rows, t ? rows : cols, ld));
+    descriptor_.reset(raw_descriptor);
+  }
+  template <typename T>
+  inline void setAttribute(cublasLtMatrixLayoutAttribute_t attr, const T value) {
+    TORCH_CUDABLAS_CHECK(::cublasLtMatrixLayoutSetAttribute(descriptor(), attr, &value, sizeof(T)));
+  }
+};
+
+class CuBlasLtMatmulPreference : public CuBlasLtDescriptor<
+                                     cublasLtMatmulPreferenceOpaque_t,
+                                     &cublasLtMatmulPreferenceDestroy> {
+ public:
+  CuBlasLtMatmulPreference() {
+    cublasLtMatmulPreference_t raw_descriptor = nullptr;
+    TORCH_CUDABLAS_CHECK(cublasLtMatmulPreferenceCreate(&raw_descriptor));
+    descriptor_.reset(raw_descriptor);
+  }
+  template <typename T>
+  inline void setAttribute(cublasLtMatmulPreferenceAttributes_t attr, const T value) {
+    TORCH_CUDABLAS_CHECK(::cublasLtMatmulPreferenceSetAttribute(descriptor(), attr, &value, sizeof(T)));
+  }
+};
+} // namespace
+
 
 template <typename Dtype>
 inline void bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES(Dtype)) {
@@ -606,19 +701,19 @@ inline void bgemm_tunable(CUDABLAS_BGEMM_ARGTYPES(DType)) {
   bool transb_ = ((transb != 'n') && (transb != 'N'));
 
   if (transa_ && transb_) {
-    static tunable::GemmStridedBatchedTunableOp<DType, tunable::BlasOp::T, tunable::BlasOp::T> bgemm{&params};
+    static tunable::GemmStridedBatchedTunableOp<DType, tunable::BlasOp::T, tunable::BlasOp::T> bgemm{};
     bgemm(&params);
   }
   else if (transa_ && !transb_) {
-    static tunable::GemmStridedBatchedTunableOp<DType, tunable::BlasOp::T, tunable::BlasOp::N> bgemm{&params};
+    static tunable::GemmStridedBatchedTunableOp<DType, tunable::BlasOp::T, tunable::BlasOp::N> bgemm{};
     bgemm(&params);
   }
   else if (!transa_ && transb_) {
-    static tunable::GemmStridedBatchedTunableOp<DType, tunable::BlasOp::N, tunable::BlasOp::T> bgemm{&params};
+    static tunable::GemmStridedBatchedTunableOp<DType, tunable::BlasOp::N, tunable::BlasOp::T> bgemm{};
     bgemm(&params);
   }
   else if (!transa_ && !transb_) {
-    static tunable::GemmStridedBatchedTunableOp<DType, tunable::BlasOp::N, tunable::BlasOp::N> bgemm{&params};
+    static tunable::GemmStridedBatchedTunableOp<DType, tunable::BlasOp::N, tunable::BlasOp::N> bgemm{};
     bgemm(&params);
   }
   else {
@@ -702,6 +797,7 @@ template <typename Dtype>
 inline void gemm_internal_cublas(CUDABLAS_GEMM_ARGTYPES(Dtype)) {
   static_assert(false && sizeof(Dtype), "at::cuda::blas::gemm_internal_cublas: not implemented");
 }
+
 
 template <>
 void gemm_internal_cublas<double>(CUDABLAS_GEMM_ARGTYPES(double)) {
@@ -911,6 +1007,11 @@ void gemm_internal<double>(CUDABLAS_GEMM_ARGTYPES(double))
     gemm_internal_cublaslt<double>(CUDABLAS_GEMM_ARGS(double));
 #endif
   }
+#ifdef USE_ROCM
+  else if (at::globalContext().blasPreferredBackend() == BlasBackend::Ck) {
+    at::native::gemm_internal_ck<double>(CUDABLAS_GEMM_ARGS(double));
+  }
+#endif
   else {
     gemm_internal_cublas<double>(CUDABLAS_GEMM_ARGS(double));
   }
@@ -922,6 +1023,11 @@ void gemm_internal<float>(CUDABLAS_GEMM_ARGTYPES(float))
   if (at::globalContext().blasPreferredBackend() == BlasBackend::Cublaslt) {
     gemm_internal_cublaslt<float>(CUDABLAS_GEMM_ARGS(float));
   }
+#ifdef USE_ROCM
+  else if (at::globalContext().blasPreferredBackend() == BlasBackend::Ck) {
+    at::native::gemm_internal_ck<float>(CUDABLAS_GEMM_ARGS(float));
+  }
+#endif
   else {
     gemm_internal_cublas<float>(CUDABLAS_GEMM_ARGS(float));
   }
@@ -965,6 +1071,11 @@ void gemm_internal<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half))
   if (at::globalContext().blasPreferredBackend() == BlasBackend::Cublaslt) {
     gemm_internal_cublaslt<at::Half>(CUDABLAS_GEMM_ARGS(at::Half));
   }
+#ifdef USE_ROCM
+  else if (at::globalContext().blasPreferredBackend() == BlasBackend::Ck) {
+    at::native::gemm_internal_ck<at::Half>(CUDABLAS_GEMM_ARGS(at::Half));
+  }
+#endif
   else {
     gemm_internal_cublas<at::Half>(CUDABLAS_GEMM_ARGS(at::Half));
   }
@@ -976,6 +1087,11 @@ void gemm_internal<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16))
   if (at::globalContext().blasPreferredBackend() == BlasBackend::Cublaslt) {
     gemm_internal_cublaslt<at::BFloat16>(CUDABLAS_GEMM_ARGS(at::BFloat16));
   }
+#ifdef USE_ROCM
+  else if (at::globalContext().blasPreferredBackend() == BlasBackend::Ck) {
+    at::native::gemm_internal_ck<at::BFloat16>(CUDABLAS_GEMM_ARGS(at::BFloat16));
+  }
+#endif
   else {
     gemm_internal_cublas<at::BFloat16>(CUDABLAS_GEMM_ARGS(at::BFloat16));
   }
@@ -1002,19 +1118,19 @@ inline void gemm_tunable(CUDABLAS_GEMM_ARGTYPES(DType)) {
   bool transb_ = ((transb != 'n') && (transb != 'N'));
 
   if (transa_ && transb_) {
-    static tunable::GemmTunableOp<DType, tunable::BlasOp::T, tunable::BlasOp::T> gemm{&params};
+    static tunable::GemmTunableOp<DType, tunable::BlasOp::T, tunable::BlasOp::T> gemm{};
     gemm(&params);
   }
   else if (transa_ && !transb_) {
-    static tunable::GemmTunableOp<DType, tunable::BlasOp::T, tunable::BlasOp::N> gemm{&params};
+    static tunable::GemmTunableOp<DType, tunable::BlasOp::T, tunable::BlasOp::N> gemm{};
     gemm(&params);
   }
   else if (!transa_ && transb_) {
-    static tunable::GemmTunableOp<DType, tunable::BlasOp::N, tunable::BlasOp::T> gemm{&params};
+    static tunable::GemmTunableOp<DType, tunable::BlasOp::N, tunable::BlasOp::T> gemm{};
     gemm(&params);
   }
   else if (!transa_ && !transb_) {
-    static tunable::GemmTunableOp<DType, tunable::BlasOp::N, tunable::BlasOp::N> gemm{&params};
+    static tunable::GemmTunableOp<DType, tunable::BlasOp::N, tunable::BlasOp::N> gemm{};
     gemm(&params);
   }
   else {
@@ -1635,6 +1751,7 @@ void trsm<c10::complex<double>>(CUDABLAS_TRSM_ARGTYPES(c10::complex<double>)) {
 }
 
 template <>
+// NOLINTNEXTLINE(*array*)
 void trsmBatched<float>(CUDABLAS_TRSM_BATCHED_ARGTYPES(float)) {
   TORCH_CUDABLAS_CHECK(cublasStrsmBatched(
       handle,
@@ -1653,6 +1770,7 @@ void trsmBatched<float>(CUDABLAS_TRSM_BATCHED_ARGTYPES(float)) {
 }
 
 template <>
+// NOLINTNEXTLINE(*array*)
 void trsmBatched<double>(CUDABLAS_TRSM_BATCHED_ARGTYPES(double)) {
   TORCH_CUDABLAS_CHECK(cublasDtrsmBatched(
       handle,
@@ -1672,6 +1790,7 @@ void trsmBatched<double>(CUDABLAS_TRSM_BATCHED_ARGTYPES(double)) {
 
 template <>
 void trsmBatched<c10::complex<float>>(
+// NOLINTNEXTLINE(*array*)
     CUDABLAS_TRSM_BATCHED_ARGTYPES(c10::complex<float>)) {
   TORCH_CUDABLAS_CHECK(cublasCtrsmBatched(
       handle,
@@ -1691,6 +1810,7 @@ void trsmBatched<c10::complex<float>>(
 
 template <>
 void trsmBatched<c10::complex<double>>(
+// NOLINTNEXTLINE(*array*)
     CUDABLAS_TRSM_BATCHED_ARGTYPES(c10::complex<double>)) {
   TORCH_CUDABLAS_CHECK(cublasZtrsmBatched(
       handle,

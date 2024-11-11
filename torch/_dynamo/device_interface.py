@@ -346,13 +346,13 @@ def register_interface_for_device(
     device: Union[str, torch.device], device_interface: Type[DeviceInterface]
 ):
     if isinstance(device, torch.device):
-        device = str(device)
+        device = device.type
     device_interfaces[device] = device_interface
 
 
 def get_interface_for_device(device: Union[str, torch.device]) -> Type[DeviceInterface]:
     if isinstance(device, torch.device):
-        device = str(device)
+        device = device.type
     if not _device_initialized:
         init_device_reg()
     if device in device_interfaces:

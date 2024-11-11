@@ -29,7 +29,7 @@
 
 namespace caffe2 {
 namespace serialize {
-constexpr c10::string_view kDebugPklSuffix(".debug_pkl");
+constexpr std::string_view kDebugPklSuffix(".debug_pkl");
 
 struct MzZipReaderIterWrapper {
   MzZipReaderIterWrapper(mz_zip_reader_extract_iter_state* iter) : impl(iter) {}
@@ -147,7 +147,7 @@ void PyTorchStreamReader::init() {
     char buf[kMagicValueLength];
     read(0, buf, kMagicValueLength);
     valid("checking magic number");
-    AT_ASSERTM(
+    TORCH_INTERNAL_ASSERT(
         memcmp("PYTORCH1", buf, kMagicValueLength) != 0,
         "File is an unsupported archive format from the preview release.");
   }
@@ -283,7 +283,7 @@ size_t getPadding(
 bool PyTorchStreamReader::hasRecord(const std::string& name) {
   std::lock_guard<std::mutex> guard(reader_lock_);
 
-  if ((!load_debug_symbol_) && c10::string_view(name).ends_with(kDebugPklSuffix)) {
+  if ((!load_debug_symbol_) && c10::string_view_ends_with(std::string_view(name), kDebugPklSuffix)) {
     return false;
   }
   std::string ss = archive_name_plus_slash_ + name;
@@ -320,7 +320,7 @@ std::vector<std::string> PyTorchStreamReader::getAllRecords() {
           buf);
     }
     if ((load_debug_symbol_) ||
-        (!c10::string_view(buf + archive_name_plus_slash_.size()).ends_with(kDebugPklSuffix))) {
+        (!c10::string_view_ends_with(std::string_view(buf + archive_name_plus_slash_.size()),kDebugPklSuffix))) {
       // NOLINTNEXTLINE(modernize-use-emplace)
       out.push_back(buf + archive_name_plus_slash_.size());
     }
@@ -343,7 +343,7 @@ size_t PyTorchStreamReader::getRecordID(const std::string& name) {
 // return dataptr, size
 std::tuple<at::DataPtr, size_t> PyTorchStreamReader::getRecord(const std::string& name) {
   std::lock_guard<std::mutex> guard(reader_lock_);
-  if ((!load_debug_symbol_) && c10::string_view(name).ends_with(kDebugPklSuffix)) {
+  if ((!load_debug_symbol_) && c10::string_view_ends_with(name, kDebugPklSuffix)) {
     at::DataPtr retval;
     return std::make_tuple(std::move(retval), 0);
   }
@@ -424,7 +424,7 @@ PyTorchStreamReader::getRecord(const std::string& name,
     return getRecord(name);
   }
 
-  if ((!load_debug_symbol_) && c10::string_view(name).ends_with(kDebugPklSuffix)) {
+  if ((!load_debug_symbol_) && c10::string_view_ends_with(name, kDebugPklSuffix)) {
     at::DataPtr retval;
     return std::make_tuple(std::move(retval), 0);
   }
@@ -448,7 +448,7 @@ PyTorchStreamReader::getRecord(const std::string& name,
 size_t
 PyTorchStreamReader::getRecord(const std::string& name, void* dst, size_t n) {
   std::lock_guard<std::mutex> guard(reader_lock_);
-  if ((!load_debug_symbol_) && c10::string_view(name).ends_with(kDebugPklSuffix)) {
+  if ((!load_debug_symbol_) && c10::string_view_ends_with(name, kDebugPklSuffix)) {
     return 0;
   }
   size_t key = getRecordID(name);
@@ -508,7 +508,7 @@ size_t PyTorchStreamReader::getRecord(
     void* buf,
     const std::function<void(void*, const void*, size_t)>& memcpy_func) {
   std::lock_guard<std::mutex> guard(reader_lock_);
-  if ((!load_debug_symbol_) && c10::string_view(name).ends_with(kDebugPklSuffix)) {
+  if ((!load_debug_symbol_) && c10::string_view_ends_with(name, kDebugPklSuffix)) {
     return 0;
   }
   if (chunk_size <= 0) {
@@ -621,15 +621,17 @@ size_t ostream_write_func(
   return ret;
 }
 
-PyTorchStreamWriter::PyTorchStreamWriter(const std::string& file_name)
-    : archive_name_(basename(file_name)) {
+PyTorchStreamWriter::PyTorchStreamWriter(const std::string& file_name, bool compute_crc32)
+    : archive_name_(basename(file_name)),
+      compute_crc32_(compute_crc32) {
   setup(file_name);
 }
 
 PyTorchStreamWriter::PyTorchStreamWriter(
-    const std::function<size_t(const void*, size_t)> writer_func)
+    const std::function<size_t(const void*, size_t)> writer_func, bool compute_crc32)
     : archive_name_("archive"),
-      writer_func_(writer_func) {
+      writer_func_(writer_func),
+      compute_crc32_(compute_crc32) {
   setup(archive_name_);
 }
 
@@ -695,6 +697,11 @@ void PyTorchStreamWriter::writeRecord(
   size_t padding_size =
       detail::getPadding(ar_->m_archive_size, full_name.size(), size, padding_);
   uint32_t flags = compress ? MZ_BEST_COMPRESSION : 0;
+  if (!compute_crc32_) {
+#if (!defined(FBCODE_CAFFE2))
+    flags |= MZ_ZIP_FLAG_DO_NOT_COMPUTE_CRC32;
+#endif
+  }
   mz_zip_writer_add_mem_ex_v2(
       /*pZip=*/ar_.get(),
       /*pArchive_name=*/full_name.c_str(),

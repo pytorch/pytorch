@@ -17,11 +17,10 @@ from ..ir import (
     ExternKernel,
     FixedLayout,
     FlexibleLayout,
-    get_stride_order,
+    get_fill_order,
     InputBuffer,
     IRNode,
     StorageBox,
-    stride_order2fill_order,
     Subgraph,
     TensorBox,
 )
@@ -71,13 +70,20 @@ def create_placeholder(
     name: str, dtype: torch.dtype, device: torch.device
 ) -> TensorBox:
     """Creates a placeholder input buffers for producing subgraph_output."""
-    input_buffer = InputBuffer(name, FixedLayout(device, dtype, [], []))
+    input_buffer = InputBuffer(name=name, layout=FixedLayout(device, dtype, [], []))
     return TensorBox.create(input_buffer)
 
 
 def maybe_realize(args: List[Optional[IRNode]]):
     """Accepts a list of optional IRNodes and returns a list of realized IRNodes"""
-    return tree_map(lambda x: realize_inputs(x) if x is not None else None, args)
+    return tree_map(
+        lambda x: (
+            realize_inputs(x)
+            if x is not None and not isinstance(x, sympy.Symbol)
+            else x
+        ),
+        args,
+    )
 
 
 def get_float32_precision():
@@ -591,6 +597,18 @@ _a100_default_config = {
     (torch.float16, 256): (32, 64, 4, 3),
 }
 
+_rocm_default_config = {
+    (torch.float32, 64): (128, 32, 4, 1),
+    (torch.float32, 128): (128, 32, 4, 1),
+    (torch.float32, 256): (64, 16, 4, 1),
+    (torch.bfloat16, 64): (128, 64, 8, 1),
+    (torch.bfloat16, 128): (128, 64, 8, 1),
+    (torch.bfloat16, 256): (32, 64, 8, 1),
+    (torch.float16, 64): (128, 64, 8, 1),
+    (torch.float16, 128): (128, 64, 8, 1),
+    (torch.float16, 256): (32, 64, 4, 1),
+}
+
 
 def _get_default_config_fwd(query) -> Tuple[int, int, int, int]:
     dtype = query.get_dtype()
@@ -609,6 +627,12 @@ def _get_default_config_fwd(query) -> Tuple[int, int, int, int]:
         else:
             default_config = (128, 64, 4, 3)
         default_config = _a100_default_config.get((dtype, head_dim), default_config)
+    elif head_dim <= 256 and torch.version.hip:
+        if dtype == torch.float32:
+            default_config = (64, 64, 4, 1)
+        else:
+            default_config = (128, 64, 8, 1)
+        default_config = _rocm_default_config.get((dtype, head_dim), default_config)
     else:  # modest hardware or extremely large head_dim
         if dtype == torch.float32:
             default_config = (32, 16, 4, 3)
@@ -624,7 +648,14 @@ def _get_default_config_bwd(query) -> Tuple[int, int, int, int]:
 
     if dtype == torch.float32:
         return (16, 16, 4, 1)
-    if head_dim <= 256 and torch.cuda.get_device_capability() >= (9, 0):  # H100
+    if head_dim <= 256 and torch.version.hip:
+        if head_dim == 64:
+            return (64, 64, 4, 1)
+        elif head_dim == 128:
+            return (64, 128, 4, 1)
+        else:
+            return (64, 64, 4, 1)
+    elif head_dim <= 256 and torch.cuda.get_device_capability() >= (9, 0):  # H100
         if head_dim == 64:
             return (64, 64, 4, 3)
         elif head_dim == 128:
@@ -793,8 +824,7 @@ def flex_attention(
 
     # Construct output layout with strides matching the query.
     out_size = [B, Hq, seq_len_q, v_head_dim]
-    stride_order = get_stride_order(query.get_stride())
-    fill_order = stride_order2fill_order(stride_order)
+    fill_order = get_fill_order(query.get_stride())
     out_strides = construct_strides(out_size, fill_order)
 
     layout = FixedLayout(
@@ -840,6 +870,10 @@ def flex_attention(
             (64, 64, 4, 3),
         ]
 
+        # On ROCm convert num_stages to 1 to avoid shmem issues
+        if torch.version.hip:
+            configs = [(c[0], c[1], c[2], 1) for c in configs]
+
     # Mark SPARSE_KV_BLOCK_SIZE & SPARSE_Q_BLOCK_SIZE as static shapes and add guards.
     SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_KV_BLOCK_SIZE)
     SPARSE_Q_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_Q_BLOCK_SIZE)
@@ -853,7 +887,7 @@ def flex_attention(
     # Note, we don't need to pass in the captured buffers explicitly
     # because they're implicitly added by the score_mod function
     # We do need to explicitly pass it in for autotuning though.
-
+    original_kernel_options = kernel_options.copy()
     for BLOCK_M, BLOCK_N, num_warps, num_stages in configs:
         if SPARSE_KV_BLOCK_SIZE % BLOCK_N != 0 or SPARSE_Q_BLOCK_SIZE % BLOCK_M != 0:
             continue
@@ -861,12 +895,13 @@ def flex_attention(
         if num_stages == 2:
             continue
 
+        cur_kernel_options = original_kernel_options.copy()
         # Performance tuning
-        kernel_options.setdefault("BLOCK_M", BLOCK_M)
-        kernel_options.setdefault("BLOCK_N", BLOCK_N)
+        cur_kernel_options.setdefault("BLOCK_M", BLOCK_M)
+        cur_kernel_options.setdefault("BLOCK_N", BLOCK_N)
         # Blocksparse options
-        kernel_options.setdefault("SPARSE_Q_BLOCK_SIZE", SPARSE_Q_BLOCK_SIZE)
-        kernel_options.setdefault("SPARSE_KV_BLOCK_SIZE", SPARSE_KV_BLOCK_SIZE)
+        cur_kernel_options.setdefault("SPARSE_Q_BLOCK_SIZE", SPARSE_Q_BLOCK_SIZE)
+        cur_kernel_options.setdefault("SPARSE_KV_BLOCK_SIZE", SPARSE_KV_BLOCK_SIZE)
 
         flex_attention_template.maybe_append_choice(
             choices=choices,
@@ -891,7 +926,7 @@ def flex_attention(
             num_stages=num_stages,
             num_warps=num_warps,
             call_sizes=query.get_size(),
-            **kernel_options,
+            **cur_kernel_options,
         )
     inputs_for_autotuning = (
         [
@@ -1774,17 +1809,18 @@ def flex_attention_backward(*args, **kwargs):
     configs: List[Tuple[int, int, int, int]] = []
     configs.append(_get_default_config_bwd(query))
     if config.max_autotune:
+        num_stages_list = [1, 3, 4, 5] if torch.version.hip is None else [1]
         configs.extend(
             [
                 (BLOCK1, BLOCK2, w, s)
                 for BLOCK1 in [32, 64]
                 for BLOCK2 in [32, 64, 128]
                 for w in [4, 8]
-                for s in [1, 3, 4, 5]
+                for s in num_stages_list
                 if BLOCK2 % BLOCK1 == 0
             ]
         )
-
+    original_kernel_options = kernel_options.copy()
     for BLOCK1, BLOCK2, num_warps, num_stages in configs:
         if (
             SPARSE_KV_BLOCK_SIZE % BLOCK1 != 0
@@ -1795,13 +1831,14 @@ def flex_attention_backward(*args, **kwargs):
             continue
 
         # Performance tuning
-        kernel_options.setdefault("BLOCK_M1", BLOCK1)
-        kernel_options.setdefault("BLOCK_N1", BLOCK2)
-        kernel_options.setdefault("BLOCK_M2", BLOCK2)
-        kernel_options.setdefault("BLOCK_N2", BLOCK1)
+        cur_kernel_options = original_kernel_options.copy()
+        cur_kernel_options.setdefault("BLOCK_M1", BLOCK1)
+        cur_kernel_options.setdefault("BLOCK_N1", BLOCK2)
+        cur_kernel_options.setdefault("BLOCK_M2", BLOCK2)
+        cur_kernel_options.setdefault("BLOCK_N2", BLOCK1)
         # Blocksparse options
-        kernel_options.setdefault("SPARSE_Q_BLOCK_SIZE", SPARSE_Q_BLOCK_SIZE)
-        kernel_options.setdefault("SPARSE_KV_BLOCK_SIZE", SPARSE_KV_BLOCK_SIZE)
+        cur_kernel_options.setdefault("SPARSE_Q_BLOCK_SIZE", SPARSE_Q_BLOCK_SIZE)
+        cur_kernel_options.setdefault("SPARSE_KV_BLOCK_SIZE", SPARSE_KV_BLOCK_SIZE)
 
         flex_attention_backward_template.maybe_append_choice(
             choices=choices,
@@ -1829,7 +1866,7 @@ def flex_attention_backward(*args, **kwargs):
             call_sizes=query.get_size() + key.get_size()[1:3],
             num_stages=num_stages,
             num_warps=num_warps,
-            **kernel_options,
+            **cur_kernel_options,
         )
     inputs_for_autotuning = (
         [

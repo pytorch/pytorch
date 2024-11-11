@@ -4,7 +4,7 @@
 #   docs/cpp/requirements.txt
 #   functorch/docs/requirements.txt
 #   .ci/docker/requirements-ci.txt
-boto3==1.19.12
+boto3==1.35.42
 jinja2==3.1.4
 lintrunner==0.10.7
 ninja==1.10.0.post1

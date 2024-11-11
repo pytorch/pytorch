@@ -18,105 +18,6 @@
 
 namespace at::cuda::blas {
 
-cublasOperation_t _cublasOpFromChar(char op);
-void _cublasAdjustLdLevel2(int64_t m, int64_t n, int64_t* lda);
-void _cublasAdjustLdLevel3(
-    char transa,
-    char transb,
-    int64_t m,
-    int64_t n,
-    int64_t k,
-    int64_t* lda,
-    int64_t* ldb,
-    int64_t* ldc);
-uint32_t _getAlignment(uintptr_t address);
-size_t _parseChosenWorkspaceSize();
-size_t _getWorkspaceSize();
-
-namespace {
-// Following the pattern of CuSparseDescriptor
-// Defined here for now because this is the only place cublas_lt interface is
-// used but can be moved to a header once cublas_lt interface is used in
-// multiple places.
-template <typename T, cublasStatus_t (*destructor)(T*)>
-struct CuBlasLtDeleter {
-  void operator()(T* x) {
-    if (x != nullptr) {
-      TORCH_CUDABLAS_CHECK(destructor(x));
-    }
-  }
-};
-
-template <typename T, cublasStatus_t (*destructor)(T*)>
-class CuBlasLtDescriptor {
- public:
-  T* descriptor() const {
-    return descriptor_.get();
-  }
-  T* descriptor() {
-    return descriptor_.get();
-  }
-
- protected:
-  std::unique_ptr<T, CuBlasLtDeleter<T, destructor>> descriptor_;
-};
-
-class CuBlasLtMatmulDescriptor : public CuBlasLtDescriptor<
-                                     cublasLtMatmulDescOpaque_t,
-                                     &cublasLtMatmulDescDestroy> {
- public:
-  CuBlasLtMatmulDescriptor(
-      cublasComputeType_t compute_type,
-      cudaDataType_t scale_type) {
-    cublasLtMatmulDesc_t raw_descriptor = nullptr;
-    TORCH_CUDABLAS_CHECK(
-        cublasLtMatmulDescCreate(&raw_descriptor, compute_type, scale_type));
-    descriptor_.reset(raw_descriptor);
-  }
-  template <typename T>
-  inline void setAttribute(cublasLtMatmulDescAttributes_t attr, const T value) {
-    TORCH_CUDABLAS_CHECK(::cublasLtMatmulDescSetAttribute(descriptor(), attr, &value, sizeof(T)));
-  }
-};
-
-class CuBlasLtMatrixLayout : public CuBlasLtDescriptor<
-                                 cublasLtMatrixLayoutOpaque_t,
-                                 &cublasLtMatrixLayoutDestroy> {
- public:
-  CuBlasLtMatrixLayout(
-      cudaDataType_t type,
-      uint64_t rows,
-      uint64_t cols,
-      int64_t ld,
-      bool t = false) {
-    cublasLtMatrixLayout_t raw_descriptor = nullptr;
-    TORCH_CUDABLAS_CHECK(
-        cublasLtMatrixLayoutCreate(&raw_descriptor, type, t ? cols : rows, t ? rows : cols, ld));
-    descriptor_.reset(raw_descriptor);
-  }
-  template <typename T>
-  inline void setAttribute(cublasLtMatrixLayoutAttribute_t attr, const T value) {
-    TORCH_CUDABLAS_CHECK(::cublasLtMatrixLayoutSetAttribute(descriptor(), attr, &value, sizeof(T)));
-  }
-};
-
-class CuBlasLtMatmulPreference : public CuBlasLtDescriptor<
-                                     cublasLtMatmulPreferenceOpaque_t,
-                                     &cublasLtMatmulPreferenceDestroy> {
- public:
-  CuBlasLtMatmulPreference() {
-    cublasLtMatmulPreference_t raw_descriptor = nullptr;
-    TORCH_CUDABLAS_CHECK(cublasLtMatmulPreferenceCreate(&raw_descriptor));
-    descriptor_.reset(raw_descriptor);
-  }
-  template <typename T>
-  inline void setAttribute(cublasLtMatmulPreferenceAttributes_t attr, const T value) {
-    TORCH_CUDABLAS_CHECK(::cublasLtMatmulPreferenceSetAttribute(descriptor(), attr, &value, sizeof(T)));
-  }
-};
-
-} // namespace
-
 // RAII guard that sets the CuBLAS pointer mode and restores it to
 // its previous value when the guard is destroyed
 class PointerModeGuard {
@@ -133,7 +34,7 @@ public:
 
 private:
   cublasHandle_t handle;
-  cublasPointerMode_t previous_mode;
+  cublasPointerMode_t previous_mode{};
 };
 
 /* LEVEL 3 BLAS FUNCTIONS */

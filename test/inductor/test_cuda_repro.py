@@ -417,7 +417,7 @@ class CudaReproTests(TestCase):
         https://github.com/pytorch/torchdynamo/issues/1670
         """
         from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
-        from torch._inductor.runtime.hints import HeuristicType, instance_descriptor
+        from torch._inductor.runtime.hints import AttrsDescriptorWrapper, HeuristicType
         from torch._inductor.runtime.triton_heuristics import CachingAutotuner, grid
 
         def autotune(configs, meta):
@@ -447,7 +447,9 @@ class CudaReproTests(TestCase):
                     "xnumel": "i32",
                 },
                 "device": DeviceProperties.create(torch.device("cuda")),
-                "configs": [instance_descriptor(divisible_by_16=(0, 1), equal_to_1=())],
+                "configs": [
+                    AttrsDescriptorWrapper(divisible_by_16=(0, 1), equal_to_1=())
+                ],
                 "constants": {},
             },
         )
@@ -1239,6 +1241,73 @@ class CudaReproTests(TestCase):
         out, code = run_and_get_code(outer_reduce, a)
         self.assertEqual(outer_reduce(a), out)
         self.assertTrue("for roffset" not in code)
+
+    @skipIfRocm
+    def test_scaled_dot_product_efficient_attention_backward(self):
+        from torch import nn, Tensor
+
+        class SelfAttention(nn.Module):
+            def __init__(
+                self,
+                num_attention_heads: int = 12,
+                hidden_size: int = 768,
+                attention_probs_dropout_prob: float = 0.1,
+            ):
+                super().__init__()
+
+                self.num_attention_heads = num_attention_heads
+                self.attention_head_size = hidden_size // num_attention_heads
+
+                self.query = nn.Linear(hidden_size, hidden_size)
+                self.key = nn.Linear(hidden_size, hidden_size)
+                self.value = nn.Linear(hidden_size, hidden_size)
+
+                self.dropout_prob = attention_probs_dropout_prob
+
+            def transpose_for_scores(self, x: Tensor) -> Tensor:
+                new_x_shape = x.size()[:-1] + (
+                    self.num_attention_heads,
+                    self.attention_head_size,
+                )
+                return x.view(new_x_shape).permute(0, 2, 1, 3)
+
+            def forward(self, hidden_states: Tensor, attention_mask: Tensor) -> Tensor:
+                query_layer = self.transpose_for_scores(self.query(hidden_states))
+                key_layer = self.transpose_for_scores(self.key(hidden_states))
+                value_layer = self.transpose_for_scores(self.value(hidden_states))
+
+                attn_output = torch.nn.functional.scaled_dot_product_attention(
+                    query_layer,
+                    key_layer,
+                    value_layer,
+                    attn_mask=attention_mask,
+                    dropout_p=self.dropout_prob if self.training else 0.0,
+                    is_causal=False,
+                )
+                return attn_output
+
+        device = torch.device("cuda")
+        num_attention_heads = 8
+        hidden_size = 512
+        attention_probs_dropout_prob = 0.0
+        model = SelfAttention(
+            num_attention_heads=num_attention_heads,
+            hidden_size=hidden_size,
+            attention_probs_dropout_prob=attention_probs_dropout_prob,
+        ).to(device)
+
+        model = torch.compile(model)
+
+        # runs without failure
+        batch_size = 8
+        length = 1
+        inputs_embeds = torch.randn(batch_size, length, hidden_size, device=device)
+        attention_mask = torch.ones(batch_size, 1, length, length, device=device)
+        attn_output = model(hidden_states=inputs_embeds, attention_mask=attention_mask)[
+            0
+        ]
+        loss = attn_output.mean()
+        loss.backward()
 
     def test_non_contiguous_unaligned_input_indices(self):
         from torch._inductor.compile_fx import remove_unaligned_input_idxs
