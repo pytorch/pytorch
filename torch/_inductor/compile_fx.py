@@ -46,6 +46,7 @@ from torch._dynamo.utils import (
     detect_fake_mode,
     dynamo_timed,
     flatten_graph_inputs,
+    get_chromium_event_logger,
     lazy_format_graph_code,
 )
 from torch._functorch import config as functorch_config
@@ -324,7 +325,7 @@ def _get_subgraph_names(gm: GraphModule) -> Generator[str, None, None]:
 def _recursive_pre_grad_passes(
     gm: GraphModule, example_inputs: Sequence[InputType]
 ) -> GraphModule:
-    with dynamo_timed("_recursive_pre_grad_passes"):
+    with dynamo_timed("_recursive_pre_grad_passes", log_pt2_compile_event=True):
         for subgraph_name in _get_subgraph_names(gm):
             subgraph = getattr(gm, subgraph_name)
             # as we don't have recursive example inputs, passing empty set here
@@ -341,7 +342,7 @@ def _recursive_joint_graph_passes(gm: GraphModule) -> None:
 
 
 def _recursive_post_grad_passes(gm: GraphModule, is_inference: bool = False) -> None:
-    with dynamo_timed("_recursive_post_grad_passes"):
+    with dynamo_timed("_recursive_post_grad_passes", log_pt2_compile_event=True):
         for subgraph_name in _get_subgraph_names(gm):
             subgraph = getattr(gm, subgraph_name)
             _recursive_post_grad_passes(subgraph, is_inference)
@@ -563,7 +564,10 @@ def compile_fx_inner(
         stack.enter_context(_use_lazy_graph_module(dynamo_config.use_lazy_graph_module))
         stack.enter_context(
             dynamo_utils.dynamo_timed(
-                "compile_fx_inner", phase_name="inductor_compile", fwd_only=False
+                "compile_fx_inner",
+                phase_name="inductor_compile",
+                log_pt2_compile_event=True,
+                fwd_only=False,
             )
         )
         # NB: Why is this the dynamo_compile counter?  The rule here is that
@@ -574,6 +578,11 @@ def compile_fx_inner(
         stack.enter_context(_WaitCounter("pytorch.wait_counter.dynamo_compile").guard())
         stack.enter_context(with_fresh_cache_if_config())
         stack.enter_context(DebugContext())
+
+        get_chromium_event_logger().add_event_data(
+            "inductor_compile",
+            is_backward=kwargs["is_backward"],
+        )
 
         return wrap_compiler_debug(_compile_fx_inner, compiler_name="inductor")(
             gm,
@@ -751,7 +760,7 @@ def _compile_fx_inner(
                 # to return the string directly.
                 return compiled_graph
             compiled_graph = FxGraphCache.post_compile(
-                compiled_graph, example_inputs, cudagraphs
+                compiled_graph, example_inputs, cudagraphs, gm
             )
 
     log.debug("FX codegen and compilation took %.3fs", time.time() - start)
@@ -1006,6 +1015,7 @@ def fx_codegen_and_compile(
                 compiled_graph = CompiledFxGraph(
                     compiled_fn,
                     graph,
+                    gm,
                     output_strides,
                     V.graph.disable_cudagraphs_reason,
                     metrics_helper.get_deltas(),
@@ -1087,7 +1097,8 @@ def cudagraphify(
         nonlocal compiled_fn
         if compiled_fn is None:
             with dynamo_utils.dynamo_timed(
-                "cudagraphify"
+                "cudagraphify",
+                log_pt2_compile_event=True,
             ), dynamo_utils.preserve_rng_state():
                 compiled_fn = cudagraphify_fn(model, new_inputs, static_input_idxs)
         return compiled_fn(new_inputs)
@@ -1279,6 +1290,8 @@ def fw_compiler_freezing(
         aot_autograd_model,
         aot_example_inputs,  # type: ignore[arg-type]
     )
+
+    setattr(opt_model, "_has_frozen_params", True)  # noqa: B010
 
     aot_example_inputs = [aot_example_inputs[ind] for ind in preserved_arg_indices]
     num_fixed = len(preserved_arg_indices) - num_example_inputs
