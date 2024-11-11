@@ -210,6 +210,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(mT);
   OP_DECOMPOSE(nanmean);
   m.impl("narrow", native::narrow_symint);
+  OP_DECOMPOSE(native_dropout_backward);
   OP_DECOMPOSE(negative);
   OP_DECOMPOSE2(frobenius_norm, dim);
   OP_DECOMPOSE2(nuclear_norm, dim);
