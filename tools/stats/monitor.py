@@ -85,11 +85,13 @@ def get_nvml_handle():
         import pynvml # type: ignore[import]
         try:
             pynvml.nvmlInit()
+
             handle = pynvml.nvmlDeviceGetHandleByIndex(0)
             return handle
         except pynvml.NVMLError:
             pass
     except ModuleNotFoundError:
+        # no pynvml avaliable, probably because not cuda
         pass
 
 def get_amdsmi_handle():
@@ -104,7 +106,7 @@ def get_amdsmi_handle():
     except ModuleNotFoundError:
         # no amdsmi is available
         pass
-    
+
 if __name__ == "__main__":
     nvml_handle = get_nvml_handle()
     amdsmi_handle = get_amdsmi_handle()
