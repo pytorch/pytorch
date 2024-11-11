@@ -6211,8 +6211,8 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
 
     # https://github.com/pytorch/pytorch/issues/140266
     def test_distributions_subclass(self):
-        from torch.distributions import Categorical
         import torch
+        from torch.distributions import Categorical
 
         class SubCateg(Categorical):
             ...
@@ -6225,7 +6225,6 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
 
         for _ in range(2):
             make_dist_and_execute(torch.randn(10), SubCateg)
-
 
     def test_tensor_split_within_device_cm(self):
         @torch.compile(fullgraph=True)
