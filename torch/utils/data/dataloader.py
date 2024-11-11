@@ -17,7 +17,6 @@ import warnings
 from typing import Any, Callable, Generic, Iterable, List, Optional, TypeVar, Union
 
 import torch
-import torch.distributed as dist
 import torch.utils.data.graph_settings
 from torch._utils import ExceptionWrapper
 from torch.utils.data import _utils
@@ -95,6 +94,8 @@ class _InfiniteConstantSampler(Sampler):
 
 
 def _get_distributed_settings():
+    import torch.distributed as dist
+
     if dist.is_available() and dist.is_initialized():
         return dist.get_world_size(), dist.get_rank()
     else:
@@ -121,6 +122,8 @@ def _sharding_worker_init_fn(worker_init_fn, world_size, rank_id, worker_id):
 
 
 def _share_dist_seed(generator, pg):
+    import torch.distributed as dist
+
     _shared_seed = torch.empty((), dtype=torch.int64).random_(generator=generator)
     if isinstance(pg, dist.ProcessGroup):
         dist.broadcast(_shared_seed, src=0, group=pg)
@@ -627,6 +630,8 @@ class _BaseDataLoaderIter:
         self._shared_seed = None
         self._pg = None
         if isinstance(self._dataset, IterDataPipe):
+            import torch.distributed as dist
+
             if dist.is_available() and dist.is_initialized():
                 self._pg = dist.new_group(backend="gloo")
             self._shared_seed = _share_dist_seed(loader.generator, self._pg)

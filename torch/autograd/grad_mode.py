@@ -73,7 +73,9 @@ class no_grad(_NoParamDecoratorContextManager):
     """
 
     def __init__(self) -> None:
-        if not torch._jit_internal.is_scripting():
+        from torch._jit_internal import is_scripting
+
+        if not is_scripting():
             super().__init__()
         self.prev = False
 

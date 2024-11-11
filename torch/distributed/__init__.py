@@ -155,3 +155,6 @@ else:
         pass
 
     sys.modules["torch.distributed"].ProcessGroup = _ProcessGroupStub  # type: ignore[attr-defined]
+
+
+from torch.distributed import rpc as rpc

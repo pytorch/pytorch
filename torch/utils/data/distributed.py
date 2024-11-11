@@ -2,7 +2,6 @@ import math
 from typing import Iterator, Optional, TypeVar
 
 import torch
-import torch.distributed as dist
 from torch.utils.data.dataset import Dataset
 from torch.utils.data.sampler import Sampler
 
@@ -72,13 +71,13 @@ class DistributedSampler(Sampler[_T_co]):
         drop_last: bool = False,
     ) -> None:
         if num_replicas is None:
-            if not dist.is_available():
+            if not torch.distributed.is_available():
                 raise RuntimeError("Requires distributed package to be available")
-            num_replicas = dist.get_world_size()
+            num_replicas = torch.distributed.get_world_size()
         if rank is None:
-            if not dist.is_available():
+            if not torch.distributed.is_available():
                 raise RuntimeError("Requires distributed package to be available")
-            rank = dist.get_rank()
+            rank = torch.distributed.get_rank()
         if rank >= num_replicas or rank < 0:
             raise ValueError(
                 f"Invalid rank {rank}, rank should be in the interval [0, {num_replicas - 1}]"

@@ -18,7 +18,7 @@ from typing import (
 from typing_extensions import deprecated, Self
 
 import torch
-from torch._jit_internal import _copy_to_script_wrapper
+from torch import _jit_internal
 from torch.nn.parameter import Parameter
 
 from .module import Module
@@ -135,7 +135,7 @@ class Sequential(Module):
         idx %= size
         return next(islice(iterator, idx, None))
 
-    @_copy_to_script_wrapper
+    @_jit_internal._copy_to_script_wrapper
     def __getitem__(self, idx: Union[slice, int]) -> Union["Sequential", T]:
         if isinstance(idx, slice):
             return self.__class__(OrderedDict(list(self._modules.items())[idx]))
@@ -157,7 +157,7 @@ class Sequential(Module):
         str_indices = [str(i) for i in range(len(self._modules))]
         self._modules = OrderedDict(list(zip(str_indices, self._modules.values())))
 
-    @_copy_to_script_wrapper
+    @_jit_internal._copy_to_script_wrapper
     def __len__(self) -> int:
         return len(self._modules)
 
@@ -231,13 +231,13 @@ class Sequential(Module):
                 offset += len_original
             return self
 
-    @_copy_to_script_wrapper
+    @_jit_internal._copy_to_script_wrapper
     def __dir__(self):
         keys = super().__dir__()
         keys = [key for key in keys if not key.isdigit()]
         return keys
 
-    @_copy_to_script_wrapper
+    @_jit_internal._copy_to_script_wrapper
     def __iter__(self) -> Iterator[Module]:
         return iter(self._modules.values())
 
@@ -326,7 +326,7 @@ class ModuleList(Module):
     def __getitem__(self, idx: int) -> Module:
         ...
 
-    @_copy_to_script_wrapper
+    @_jit_internal._copy_to_script_wrapper
     def __getitem__(self, idx: Union[int, slice]) -> Union[Module, "ModuleList"]:
         if isinstance(idx, slice):
             return self.__class__(list(self._modules.values())[idx])
@@ -347,11 +347,11 @@ class ModuleList(Module):
         str_indices = [str(i) for i in range(len(self._modules))]
         self._modules = OrderedDict(list(zip(str_indices, self._modules.values())))
 
-    @_copy_to_script_wrapper
+    @_jit_internal._copy_to_script_wrapper
     def __len__(self) -> int:
         return len(self._modules)
 
-    @_copy_to_script_wrapper
+    @_jit_internal._copy_to_script_wrapper
     def __iter__(self) -> Iterator[Module]:
         return iter(self._modules.values())
 
@@ -396,7 +396,7 @@ class ModuleList(Module):
         main_str += ")"
         return main_str
 
-    @_copy_to_script_wrapper
+    @_jit_internal._copy_to_script_wrapper
     def __dir__(self):
         keys = super().__dir__()
         keys = [key for key in keys if not key.isdigit()]
@@ -497,7 +497,7 @@ class ModuleDict(Module):
         if modules is not None:
             self.update(modules)
 
-    @_copy_to_script_wrapper
+    @_jit_internal._copy_to_script_wrapper
     def __getitem__(self, key: str) -> Module:
         return self._modules[key]
 
@@ -507,15 +507,15 @@ class ModuleDict(Module):
     def __delitem__(self, key: str) -> None:
         del self._modules[key]
 
-    @_copy_to_script_wrapper
+    @_jit_internal._copy_to_script_wrapper
     def __len__(self) -> int:
         return len(self._modules)
 
-    @_copy_to_script_wrapper
+    @_jit_internal._copy_to_script_wrapper
     def __iter__(self) -> Iterator[str]:
         return iter(self._modules)
 
-    @_copy_to_script_wrapper
+    @_jit_internal._copy_to_script_wrapper
     def __contains__(self, key: str) -> bool:
         return key in self._modules
 
@@ -533,17 +533,17 @@ class ModuleDict(Module):
         del self[key]
         return v
 
-    @_copy_to_script_wrapper
+    @_jit_internal._copy_to_script_wrapper
     def keys(self) -> Iterable[str]:
         r"""Return an iterable of the ModuleDict keys."""
         return self._modules.keys()
 
-    @_copy_to_script_wrapper
+    @_jit_internal._copy_to_script_wrapper
     def items(self) -> Iterable[Tuple[str, Module]]:
         r"""Return an iterable of the ModuleDict key/value pairs."""
         return self._modules.items()
 
-    @_copy_to_script_wrapper
+    @_jit_internal._copy_to_script_wrapper
     def values(self) -> Iterable[Module]:
         r"""Return an iterable of the ModuleDict values."""
         return self._modules.values()
