@@ -162,7 +162,7 @@ c10::intrusive_ptr<at::ivalue::Future> PythonEngine::execute_with_graph_task(
 
 PyObject* THPEngineClass = nullptr;
 
-inline static Edge parseGradientEdge(PyObject* obj, int64_t index) {
+static Edge parseGradientEdge(PyObject* obj, int64_t index) {
   PyObject* grad_fn = PyTuple_GetItem(obj, 0);
   auto output_nr = THPUtils_unpackLong(PyTuple_GetItem(obj, 1));
   std::shared_ptr<torch::autograd::Node> grad_fn_sp;
