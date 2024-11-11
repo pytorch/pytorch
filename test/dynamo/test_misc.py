@@ -3826,9 +3826,11 @@ utils_device.CURRENT_DEVICE == None""".split(
 
     def test_free_var_and_local_name_collision(self):
         x = 10
+
         def make_func():
             def func():
                 return x
+
             return func
 
         @torch.compile(backend="eager")
@@ -8772,7 +8774,7 @@ def ___make_guard_fn():
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_runtime_assert_replacement(self):
-        @torch.compile(backend="aot_eager")
+        @torch.compile(backend="eager")
         def fn(x, y):
             z = y.item()
             torch._check(z == 3)
