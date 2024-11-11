@@ -796,6 +796,41 @@ class HooksTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(cnts.frame_count, 1)
 
+    @torch._dynamo.config.patch(skip_nnmodule_hook_guards=False)
+    def test_nnmodule_hook_guards(self):
+        # Compile a model and then apply a hook
+
+        class Mod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(16, 16)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        mod = Mod()
+
+        def fn(x):
+            return mod(x)
+
+        opt_fn = torch.compile(fn, backend=cnts)
+
+        x = torch.ones(16, 16)
+        opt_fn(x)
+
+        # Register a hook
+        def forward_hook(self, inputs, out):
+            return out * 2
+
+        mod.register_forward_hook(forward_hook)
+
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+        self.assertEqual(cnts.frame_count, 2)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

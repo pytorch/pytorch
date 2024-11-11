@@ -11,15 +11,41 @@ concurrency:
 
 jobs:
   do_update_viablestrict:
+    permissions:
+      id-token: write
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: ubuntu-20.04
     environment: ${{ (github.event_name == 'schedule') && 'mergebot' || '' }}
     steps:
       - name: Update viable/strict
         uses: pytorch/test-infra/.github/actions/update-viablestrict@main
+        id: update_viablestrict
         with:
           repository: pytorch/pytorch
           stable-branch: viable/strict
           requires: '[\"pull\", \"trunk\", \"lint\", \"linux-binary\"]'
           secret-bot-token: ${{ secrets.MERGEBOT_TOKEN }}
-          rockset-api-key: ${{ secrets.ROCKSET_API_KEY }}
+          clickhouse-url: ${{ secrets.CLICKHOUSE_URL }}
+          clickhouse-username: ${{ secrets.CLICKHOUSE_VIABLESTRICT_USERNAME }}
+          clickhouse-password: ${{ secrets.CLICKHOUSE_VIABLESTRICT_PASSWORD }}
+
+      - name: Authenticate to AWS with OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/upload_to_ossci_raw_job_status
+          aws-region: us-east-1
+
+      - name: Print sha
+        env:
+          LATEST_SHA: ${{ steps.update_viablestrict.outputs.latest_viable_sha }}
+          PUSH_RESULT: ${{ steps.update_viablestrict.outputs.push_result }}
+          TIME: ${{ steps.update_viablestrict.outputs.time }}
+        run: |
+          echo "${PUSH_RESULT}"
+          if [ "$PUSH_RESULT" = "Everything up-to-date" ]; then
+            echo "No update pushed"
+          else
+            echo "{\"sha\": \"${LATEST_SHA}\", \"repository\":\"pytorch/pytorch\", \"timestamp\": ${TIME}}" > "/tmp/${LATEST_SHA}.json"
+            pip install awscli==1.29.40
+            aws s3 cp "/tmp/${LATEST_SHA}.json" "s3://ossci-raw-job-status/stable_pushes/pytorch/pytorch/${LATEST_SHA}.json"
+          fi

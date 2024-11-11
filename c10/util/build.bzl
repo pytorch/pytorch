@@ -43,6 +43,10 @@ def define_targets(rules):
             "//c10:using_glog": ["@com_github_glog//:glog"],
             "//conditions:default": [],
         }),
+        linkopts = rules.select({
+            "@bazel_tools//src/conditions:windows": [],
+            "//conditions:default": ["-ldl"],
+        }),
         # This library uses flags and registration. Do not let the
         # linker remove them.
         alwayslink = True,

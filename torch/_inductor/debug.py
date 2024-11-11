@@ -91,9 +91,7 @@ def draw_buffers(
     gm = GraphModule({}, graph)
     legalize_graph(gm)
     gm.graph.lint()
-    draw_graph(
-        gm, fname, clear_meta=False, dot_graph_shape=config.trace.dot_graph_shape
-    )
+    draw_graph(gm, fname, clear_meta=False)
 
 
 def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
@@ -111,6 +109,7 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
     FusionMeta = collections.namedtuple("FusionMeta", ["group", "snode", "type"])
 
     buf_to_fx_node = {}
+    node_to_fx_node = {}
     graph = torch.fx.Graph()
     first_node = None
 
@@ -162,10 +161,9 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
 
         fx_node.meta["fusion_meta"] = FusionMeta(group, snode, node_type)
 
-        if isinstance(snode, FusedSchedulerNode):
-            for x in snode.snodes:
-                buf_to_fx_node[x.get_name()] = fx_node
-        buf_to_fx_node[name] = fx_node
+        node_to_fx_node[name] = fx_node
+        for buf in snode.get_outputs():
+            buf_to_fx_node[buf.get_name()] = fx_node
 
         if first_node is None:
             first_node = fx_node
@@ -175,7 +173,7 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
         name = snode.get_name()
         deps = snode.read_writes.reads
 
-        fx_node = buf_to_fx_node[name]
+        fx_node = node_to_fx_node[name]
         new_args = []
         for dep in deps:
             if dep.name in buf_to_fx_node:
@@ -184,6 +182,8 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
                 with graph.inserting_before(first_node):
                     dep_node = graph.placeholder(dep.name)
                     buf_to_fx_node[dep.name] = dep_node
+            if dep_node == fx_node:  # to avoid cycles
+                continue
             new_args.append(dep_node)
 
         fx_node.args = tuple(new_args)
@@ -471,7 +471,26 @@ class DebugFormatter:
         inputs: List[torch.Tensor],
     ) -> None:
         with self.fopen("fx_graph_runnable.py") as fd:
-            save_graph_repro(fd, gm, inputs, "inductor")
+            save_dir = None
+            if torch._inductor.config.trace.save_real_tensors:
+                inputs = torch._subclasses.fake_utils.try_convert_fake_to_real(inputs)
+                save_dir = os.path.dirname(fd.name)
+
+            # dont try to use stable hash torchinductor compilation if saving real tensors
+            # and avoid recursively trying to save real tensors inside of the inductor compilation
+            # regardless
+            stable_hash = torch._inductor.config.trace.save_real_tensors
+            with torch._inductor.config.patch(
+                {"trace.enabled": False, "trace.save_real_tensors": False}
+            ):
+                save_graph_repro(
+                    fd,
+                    gm,
+                    inputs,
+                    "inductor",
+                    save_dir=save_dir,
+                    stable_hash=stable_hash,
+                )
 
         with self.fopen("fx_graph_readable.py") as fd:
             fd.write(gm.print_readable(print_output=False))
@@ -516,7 +535,6 @@ class DebugFormatter:
             clear_meta=False,
             prog=GRAPHVIZ_COMMAND_SCALABLE,
             parse_stack_trace=True,
-            dot_graph_shape=config.trace.dot_graph_shape,
         )
 
     def output_code(self, filename: str) -> None:

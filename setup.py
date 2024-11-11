@@ -119,6 +119,10 @@
 #     These are not CUDA versions, instead, they specify what
 #     classes of NVIDIA hardware we should generate PTX for.
 #
+#   TORCH_XPU_ARCH_LIST
+#     specify which XPU architectures to build for.
+#     ie `TORCH_XPU_ARCH_LIST="ats-m150,lnl-m"`
+#
 #   PYTORCH_ROCM_ARCH
 #     specify which AMD GPU targets to build for.
 #     ie `PYTORCH_ROCM_ARCH="gfx900;gfx906"`
@@ -183,7 +187,21 @@
 #   USE_SYSTEM_LIBS (work in progress)
 #      Use system-provided libraries to satisfy the build dependencies.
 #      When turned on, the following cmake variables will be toggled as well:
-#        USE_SYSTEM_CPUINFO=ON USE_SYSTEM_SLEEF=ON BUILD_CUSTOM_PROTOBUF=OFF
+#        USE_SYSTEM_CPUINFO=ON
+#        USE_SYSTEM_SLEEF=ON
+#        USE_SYSTEM_GLOO=ON
+#        BUILD_CUSTOM_PROTOBUF=OFF
+#        USE_SYSTEM_EIGEN_INSTALL=ON
+#        USE_SYSTEM_FP16=ON
+#        USE_SYSTEM_PTHREADPOOL=ON
+#        USE_SYSTEM_PSIMD=ON
+#        USE_SYSTEM_FXDIV=ON
+#        USE_SYSTEM_BENCHMARK=ON
+#        USE_SYSTEM_ONNX=ON
+#        USE_SYSTEM_XNNPACK=ON
+#        USE_SYSTEM_PYBIND11=ON
+#        USE_SYSTEM_NCCL=ON
+#        USE_SYSTEM_NVTX=ON
 #
 #   USE_MIMALLOC
 #      Static link mimalloc into C10, and use mimalloc in alloc_cpu & alloc_free.
@@ -214,7 +232,7 @@ import platform
 BUILD_LIBTORCH_WHL = os.getenv("BUILD_LIBTORCH_WHL", "0") == "1"
 BUILD_PYTHON_ONLY = os.getenv("BUILD_PYTHON_ONLY", "0") == "1"
 
-python_min_version = (3, 8, 0)
+python_min_version = (3, 9, 0)
 python_min_version_str = ".".join(map(str, python_min_version))
 if sys.version_info < python_min_version:
     print(
@@ -422,10 +440,6 @@ def check_submodules():
         )
     check_for_files(
         os.path.join(third_party_path, "fbgemm", "third_party", "asmjit"),
-        ["CMakeLists.txt"],
-    )
-    check_for_files(
-        os.path.join(third_party_path, "onnx", "third_party", "benchmark"),
         ["CMakeLists.txt"],
     )
 
@@ -1103,6 +1117,12 @@ def configure_extension_build():
             "default = torch.distributed.elastic.multiprocessing:DefaultLogsSpecs",
         ],
     }
+
+    if cmake_cache_vars["USE_DISTRIBUTED"]:
+        # Only enable fr_trace command if distributed is enabled
+        entry_points["console_scripts"].append(
+            "torchfrtrace = tools.flight_recorder.fr_trace:main",
+        )
     return extensions, cmdclass, packages, entry_points, extra_install_requires
 
 
@@ -1135,9 +1155,8 @@ def main():
         )
     install_requires = [
         "filelock",
-        "typing-extensions>=4.8.0",
+        "typing-extensions>=4.10.0",
         'setuptools ; python_version >= "3.12"',
-        'sympy==1.12.1 ; python_version == "3.8"',
         'sympy==1.13.1 ; python_version >= "3.9"',
         "networkx",
         "jinja2",
@@ -1197,7 +1216,7 @@ def main():
     install_requires += extra_install_requires
 
     extras_require = {
-        "optree": ["optree>=0.12.0"],
+        "optree": ["optree>=0.13.0"],
         "opt-einsum": ["opt-einsum>=3.3"],
     }
 
@@ -1229,11 +1248,13 @@ def main():
         "include/*.h",
         "include/ATen/*.h",
         "include/ATen/cpu/*.h",
+        "include/ATen/cpu/vec/vec128/*.h",
         "include/ATen/cpu/vec/vec256/*.h",
         "include/ATen/cpu/vec/vec256/vsx/*.h",
         "include/ATen/cpu/vec/vec256/zarch/*.h",
         "include/ATen/cpu/vec/vec512/*.h",
         "include/ATen/cpu/vec/*.h",
+        "include/ATen/cpu/vec/sve/*.h",
         "include/ATen/core/*.h",
         "include/ATen/cuda/*.cuh",
         "include/ATen/cuda/*.h",
@@ -1259,6 +1280,8 @@ def main():
         "include/ATen/native/hip/*.h",
         "include/ATen/native/hip/*.cuh",
         "include/ATen/native/mps/*.h",
+        "include/ATen/native/mkldnn/xpu/*.h",
+        "include/ATen/native/mkldnn/xpu/detail/*.h",
         "include/ATen/native/nested/*.h",
         "include/ATen/native/quantized/*.h",
         "include/ATen/native/quantized/cpu/*.h",
@@ -1318,6 +1341,7 @@ def main():
         "include/torch/csrc/distributed/autograd/rpc_messages/*.h",
         "include/torch/csrc/dynamo/*.h",
         "include/torch/csrc/inductor/*.h",
+        "include/torch/csrc/inductor/aoti_package/*.h",
         "include/torch/csrc/inductor/aoti_runner/*.h",
         "include/torch/csrc/inductor/aoti_runtime/*.h",
         "include/torch/csrc/inductor/aoti_torch/*.h",
@@ -1501,7 +1525,7 @@ def main():
             f"Programming Language :: Python :: 3.{i}"
             for i in range(python_min_version[1], version_range_max)
         ],
-        license="BSD-3",
+        license="BSD-3-Clause",
         keywords="pytorch, machine learning",
     )
     if EMIT_BUILD_WARNING:

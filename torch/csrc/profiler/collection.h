@@ -47,7 +47,7 @@ struct TORCH_API RawTensorMetadataBase {
   StorageImplData data_;
   c10::ScalarType dtype_{c10::ScalarType::Undefined};
   c10::Layout layout_{c10::Layout::Strided};
-  uint32_t dim_{0};
+  uint32_t size_dim_{0};
 };
 
 // Collected during profiling.
@@ -57,6 +57,7 @@ struct TORCH_API RawTensorMetadata : RawTensorMetadataBase {
   RawTensorMetadata(RawTensorMetadata&&) noexcept = default;
   RawTensorMetadata& operator=(const RawTensorMetadata&) = default;
   RawTensorMetadata& operator=(RawTensorMetadata&&) noexcept = default;
+  ~RawTensorMetadata() = default;
   explicit RawTensorMetadata(const at::Tensor& t);
 
   // Wrap `weak_self_` in `std::optional` and split device into components to

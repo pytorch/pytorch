@@ -126,7 +126,7 @@ jobs:
         # NB: When the previous build job is skipped, there won't be any artifacts and
         # this step will fail. Binary build jobs can only be skipped on CI, not nightly
         continue-on-error: true
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4.1.7
         with:
           name: ${{ inputs.build_name }}
           path: "${{ runner.temp }}/artifacts/"

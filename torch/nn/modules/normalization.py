@@ -325,11 +325,12 @@ class RMSNorm(Module):
     the paper `Root Mean Square Layer Normalization <https://arxiv.org/pdf/1910.07467.pdf>`__
 
     .. math::
-        y = \frac{x}{\sqrt{\mathrm{RMS}[x] + \epsilon}} * \gamma
+        y = \frac{x}{\mathrm{RMS}[x]} * \gamma \quad
+        \text{where} \quad \text{RMS}(x) = \sqrt{\epsilon + \frac{1}{n} \sum_{i=1}^{n} x_i^2}
 
-    The root mean squared norm is taken over the last ``D`` dimensions, where ``D``
+    The RMS is taken over the last ``D`` dimensions, where ``D``
     is the dimension of :attr:`normalized_shape`. For example, if :attr:`normalized_shape`
-    is ``(3, 5)`` (a 2-dimensional shape), the rms norm is computed over
+    is ``(3, 5)`` (a 2-dimensional shape), the RMS is computed over
     the last 2 dimensions of the input.
 
     Args:

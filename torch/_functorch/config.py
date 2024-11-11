@@ -9,7 +9,7 @@ Global flags for aot autograd
 """
 import os
 import sys
-from typing import TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING
 
 
 # Converts torch rng ops to their functional philox rng equivalents. Note that
@@ -43,7 +43,19 @@ static_weight_shapes = True
 cse = True
 
 
-enable_autograd_cache = os.environ.get("ENABLE_AOT_AUTOGRAD_CACHE", "0") == "1"
+enable_autograd_cache = os.environ.get("TORCHINDUCTOR_AUTOGRAD_CACHE", "0") == "1"
+
+
+def remote_autograd_cache_default() -> Optional[bool]:
+    if os.environ.get("TORCHINDUCTOR_AUTOGRAD_REMOTE_CACHE") == "1":
+        return True
+    if os.environ.get("TORCHINDUCTOR_AUTOGRAD_REMOTE_CACHE") == "0":
+        return False
+    return None
+
+
+enable_remote_autograd_cache = remote_autograd_cache_default()
+
 
 # When AOTAutograd regenerates aliased graph outputs,
 # attempt to use functionalization's view-replay logic
@@ -149,6 +161,11 @@ fake_tensor_allow_unsafe_data_ptr_access = True
 # which may lead to silent errors unless the backend knows how to handle the
 # tokens.
 unlift_effect_tokens = False
+
+
+# Run aot eager decomp partition with CrossRefFakeMode
+# options = False, "all", "custom_ops"
+fake_tensor_crossref = False
 
 # This mode specifies that we should also keep track of the real
 # tensor along with the fake tensor, and do real compute.  While

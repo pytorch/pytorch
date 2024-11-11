@@ -1394,28 +1394,38 @@ void initJITBindings(PyObject* module) {
           "fallback", [](GraphExecutorState& s) { return s.fallback; });
 
   py::class_<PyTorchStreamWriter>(m, "PyTorchFileWriter")
-      .def(py::init<std::string>())
-      .def(py::init([](const py::object& buffer) {
-        auto writer_func = [=](const void* data, size_t size) {
-          // Writing an empty file is a noop
-          if (size == 0) {
-            return size;
-          }
-          py::gil_scoped_acquire acquire;
-          if (!data) {
-            // See [Note: write_record_metadata]
-            buffer.attr("seek")(
-                size, py::module::import("os").attr("SEEK_CUR"));
-          } else {
-            auto memory_view = py::memoryview::from_memory(
-                reinterpret_cast<const char*>(data), size);
-            buffer.attr("write")(std::move(memory_view));
-          }
-          return size;
-        };
-        return std::make_unique<PyTorchStreamWriter>(std::move(writer_func));
-      }))
-      .def(py::init<const std::function<size_t(const void*, size_t)>&>())
+      .def(
+          py::init<std::string, bool>(),
+          py::arg("file_name"),
+          py::arg("compute_crc32") = true)
+      .def(
+          py::init([](const py::object& buffer, bool compute_crc32 = true) {
+            auto writer_func = [=](const void* data, size_t size) {
+              // Writing an empty file is a noop
+              if (size == 0) {
+                return size;
+              }
+              py::gil_scoped_acquire acquire;
+              if (!data) {
+                // See [Note: write_record_metadata]
+                buffer.attr("seek")(
+                    size, py::module::import("os").attr("SEEK_CUR"));
+              } else {
+                auto memory_view = py::memoryview::from_memory(
+                    reinterpret_cast<const char*>(data), size);
+                buffer.attr("write")(std::move(memory_view));
+              }
+              return size;
+            };
+            return std::make_unique<PyTorchStreamWriter>(
+                std::move(writer_func), compute_crc32);
+          }),
+          py::arg("buffer"),
+          py::arg("compute_crc32") = true)
+      .def(
+          py::init<const std::function<size_t(const void*, size_t)>&, bool>(),
+          py::arg("writer_func"),
+          py::arg("compute_crc32") = true)
       // [Note: write_record_metadata]
       // The write_record_metadata function is intended to write metadata (i.e.
       // the zipfile header and end of central directory record) for a file
@@ -1727,7 +1737,7 @@ void initJITBindings(PyObject* module) {
           bool allow_numbers_as_tensors = opAllowsNumbersAsTensors(symbol);
           ToIValueAllowNumbersAsTensors g(allow_numbers_as_tensors);
           const auto overloads = getAllSortedOperatorsFor(symbol);
-          auto opWithStack = getOpWithStack(overloads, std::move(args), kwargs);
+          auto opWithStack = getOpWithStack(overloads, args, kwargs);
           std::shared_ptr<Operator> overload = std::get<0>(opWithStack);
           auto result = overload->schema().overload_name();
           if (result.empty()) {
@@ -1992,6 +2002,14 @@ void initJITBindings(PyObject* module) {
           })
       .def_property_readonly(
           "alias_info", [](Argument& self) { return self.alias_info(); })
+      .def_property_readonly(
+          "is_write",
+          [](Argument& self) {
+            if (self.alias_info() == nullptr) {
+              return false;
+            }
+            return self.alias_info()->isWrite();
+          })
       .def_property_readonly(
           "is_out", [](Argument& self) { return self.is_out(); })
       .def_property_readonly("kwarg_only", [](Argument& self) -> bool {

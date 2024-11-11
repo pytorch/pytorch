@@ -784,6 +784,26 @@ def cleanup_recompute_tags(joint_module: fx.GraphModule) -> fx.GraphModule:
                     and user.meta["ac_graph_id"] > node.meta["ac_graph_id"]
                 ):
                     node.meta["recompute"] = CheckpointPolicy.MUST_SAVE
+            if node.meta.get("has_backward_hook", False) and not any(
+                must_recompute(user) for user in node.users
+            ):
+                # If node is AC region output and has a backward hook on it, we intentionally choose to save it.
+                # This is to work around circular dependencies in Traceable FSDP2+AC.
+                # Example:
+                # ```
+                # out = fully_shard(utils.checkpoint(module))(x)
+                # norm_out = layer_norm(out)
+                # ```
+                # Here there is a circular dependency:
+                # 1. In backward, grad_input of layer_norm aka. `out_grad` is actually dependent on `out`.
+                # 2. `out` depends on `out`'s backward hook created by FSDP2 (which does all-gather for `module` weights)
+                #    in order to be recomputed.
+                # 3. `out`'s backward hook, as is the case for all eager backward hooks, depends on `out_grad`
+                #    -> circular dependency with (1)!
+                #
+                # Solution: check whether `out` has a backward hook, and if so, intentionally save `out`
+                # in forward graph outputs. With this, we can break the above circular dependency.
+                node.meta["recompute"] = CheckpointPolicy.MUST_SAVE
     return joint_module
 
 
@@ -804,16 +824,17 @@ def solve_min_cut(
             if node.op == "call_function" and hasattr(node.target, "_overloadpacket")
         }
         ops_ignored = joint_module_ops - {str(i) for i in op_types.recomputable_ops}
-        print("Ops banned from rematerialization: ", ops_ignored)
+        print("Ops banned from re-materialization: ", ops_ignored)
         print()
 
     def can_fuse_into_auto_functionalized(a, b):
         if b.target != torch.ops.higher_order.auto_functionalized:
             return False
         mutable_op = b.args[0]
-        mutable_arg_names = (
-            torch._higher_order_ops.auto_functionalize.get_mutable_arg_names(mutable_op)
-        )
+        (
+            mutable_arg_names,
+            _,
+        ) = torch._higher_order_ops.auto_functionalize.get_mutable_args(mutable_op)
         for name in mutable_arg_names:
             arg = b.kwargs[name]
             if a is arg:
@@ -842,6 +863,14 @@ def solve_min_cut(
             return True
         if can_fuse_into_triton_kernel_wrapper_functional(a, b):
             return True
+        if (
+            a.target is operator.getitem
+            and a.args[0].target
+            is torch.ops.higher_order.triton_kernel_wrapper_functional
+        ):
+            # if a is the output of a user triton kernel,
+            # then (by default) we will not be able to fuse b into it
+            return False
         return op_types.is_fusible(a) and op_types.is_fusible(b)
 
     try:
@@ -1271,6 +1300,7 @@ def get_default_op_list() -> OpTypes:
         aten.expand,
         aten.as_strided,
         aten.permute,
+        aten.select,
     ]
     view_ops = recomputable_view_ops
     default_recomputable_ops += [
@@ -1476,9 +1506,12 @@ def dp_knapsack(
 
 
 def _optimize_runtime_with_given_memory(
+    joint_graph: fx.Graph,
     memory: List[float],
     runtimes: List[float],
     max_memory: float,
+    node_info: NodeInfo,
+    all_recomputable_banned_nodes: List[fx.Node],
 ) -> Tuple[float, List[int], List[int]]:
     SOLVER = config.activation_memory_budget_solver
     if SOLVER == "greedy":
@@ -1487,6 +1520,11 @@ def _optimize_runtime_with_given_memory(
         return ilp_knapsack(memory, runtimes, max_memory)
     elif SOLVER == "dp":
         return dp_knapsack(memory, runtimes, max_memory)
+    elif callable(SOLVER):
+        saved_node_idx, recomp_node_idx = SOLVER(
+            memory, joint_graph, max_memory, node_info, all_recomputable_banned_nodes
+        )
+        return (0.0, saved_node_idx, recomp_node_idx)
     else:
         raise RuntimeError(f"Not aware of memory budget knapsack solver: {SOLVER}")
 
@@ -1542,7 +1580,9 @@ def estimate_runtime(node):
 
 
 def choose_saved_values_set(
-    joint_graph: fx.Graph, node_info: NodeInfo, memory_budget=1
+    joint_graph: fx.Graph,
+    node_info: NodeInfo,
+    memory_budget=1,
 ) -> List[fx.Node]:
     if memory_budget > 1 or memory_budget < 0:
         raise RuntimeError(
@@ -1650,18 +1690,28 @@ def choose_saved_values_set(
     ]
     from torch.utils._mode_utils import no_dispatch
 
-    def get_saved_values_knapsack(memory_budget):
+    def get_saved_values_knapsack(memory_budget, node_info, joint_graph):
         with no_dispatch():
             (
                 expected_runtime,
                 saved_node_idxs,
                 recomputable_node_idxs,
             ) = _optimize_runtime_with_given_memory(
-                memories_banned_nodes, runtimes_banned_nodes, max(memory_budget, 0)
+                joint_graph,
+                memories_banned_nodes,
+                runtimes_banned_nodes,
+                max(memory_budget, 0),
+                node_info,
+                all_recomputable_banned_nodes,
             )
         dont_ban = set()
         for idx in recomputable_node_idxs:
-            dont_ban.add(all_recomputable_banned_nodes[idx])
+            # if idx in all_recomputable_banned_nodes:
+            try:
+                dont_ban.add(all_recomputable_banned_nodes[idx])
+            except BaseException:
+                pass
+
         assert dont_ban.issubset(all_recomputable_banned_nodes)
 
         saved_values, _ = solve_min_cut(
@@ -1676,7 +1726,7 @@ def choose_saved_values_set(
         options = []
         for sweep_memory_budget in range(100, -1, -5):
             saved_values, expected_runtime = get_saved_values_knapsack(
-                sweep_memory_budget / 100
+                sweep_memory_budget / 100, node_info=node_info, joint_graph=joint_graph
             )
             options.append(
                 (
@@ -1721,7 +1771,9 @@ def choose_saved_values_set(
     # tensors we actually banned from recompute, but there may be other
     # tensors that we choose to save.
 
-    return get_saved_values_knapsack(memory_budget=memory_budget)[0]
+    return get_saved_values_knapsack(
+        memory_budget=memory_budget, node_info=node_info, joint_graph=joint_graph
+    )[0]
 
 
 def min_cut_rematerialization_partition(
@@ -1847,7 +1899,9 @@ def min_cut_rematerialization_partition(
             break
     # print("Memory Budget: ", memory_budget)
     saved_values = choose_saved_values_set(
-        joint_graph, node_info, memory_budget=memory_budget
+        joint_graph,
+        node_info,
+        memory_budget=memory_budget,
     )
     # save_for_backward on tensors and stashes symints in autograd .ctx
     saved_sym_nodes = list(filter(is_sym_node, saved_values))
@@ -1906,7 +1960,6 @@ def draw_graph(
     clear_meta: bool = True,
     prog: Optional[Union[str, List[str]]] = None,
     parse_stack_trace: bool = False,
-    dot_graph_shape: Optional[str] = None,
 ) -> None:
     if clear_meta:
         new_graph = copy.deepcopy(traced.graph)
@@ -1921,7 +1974,6 @@ def draw_graph(
         traced,
         figname,
         parse_stack_trace=parse_stack_trace,
-        dot_graph_shape=dot_graph_shape,
     )
     x = g.get_main_dot_graph()
     write_method = getattr(x, "write_" + ext.lstrip("."))

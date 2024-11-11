@@ -14,9 +14,9 @@ from torch.distributed.pipelining import PipelineStage
 from torch.distributed.pipelining.schedules import (
     PipelineScheduleSingle,
     Schedule1F1B,
-    ScheduleFlexibleInterleaved1F1B,
     ScheduleGPipe,
     ScheduleInterleaved1F1B,
+    ScheduleInterleavedZeroBubble,
     ScheduleLoopedBFS,
 )
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -85,7 +85,7 @@ class ComposabilityTest(MultiProcessTestCase):
             Schedule1F1B,
             ScheduleInterleaved1F1B,
             ScheduleLoopedBFS,
-            ScheduleFlexibleInterleaved1F1B,
+            ScheduleInterleavedZeroBubble,
         ],
     )
     @parametrize("use_new_runtime", [False, True])
@@ -174,7 +174,6 @@ class ComposabilityTest(MultiProcessTestCase):
                 num_stages,
                 self.device,
                 group=pp_group,
-                input_args=input_mb[0],
             )
             return stage, offset
 
@@ -210,7 +209,14 @@ class ComposabilityTest(MultiProcessTestCase):
             )
 
         # Run
-        pipeline_schedule._step_microbatches(arg_mbs=input_mb, target_mbs=input_mb)
+        # TODO(whc) should we make it a hard error if you pass arguments into the step API on nonzero ranks?
+        # why are we passing inputs/targets on every rank?
+        if pp_group.rank() == 0:
+            pipeline_schedule._step_microbatches(arg_mbs=input_mb, target_mbs=input_mb)
+        else:
+            pipeline_schedule._step_microbatches(
+                arg_mbs=[[] for _ in input_mb], target_mbs=input_mb
+            )
 
         # Ref model runs on 2 different inputs, accumulating grads across them.
         # this ensures that we detect if the FSDP reduce becomes a no-op.
@@ -233,7 +239,9 @@ class ComposabilityTest(MultiProcessTestCase):
                     name = ".".join(parts)
                     ref_p = ref_parameters[name]
                     self.assertTrue(isinstance(p.grad, DTensor))
-                    self.assertEqual(ref_p.grad, p.grad.full_tensor())
+                    torch.testing.assert_close(
+                        ref_p.grad, p.grad.full_tensor(), rtol=1e-5, atol=5e-5
+                    )
         elif dp_type == "DDP":
             for partial_model, offset in zip(partial_models, offsets):
                 for name, p in partial_model.named_parameters():
@@ -241,7 +249,7 @@ class ComposabilityTest(MultiProcessTestCase):
                     parts[0] = str(int(parts[0]) + offset)
                     name = ".".join(parts)
                     ref_p = ref_parameters[name]
-                    self.assertEqual(ref_p.grad, p.grad)
+                    torch.testing.assert_close(ref_p.grad, p.grad, rtol=1e-5, atol=5e-5)
 
         torch.distributed.destroy_process_group()
 

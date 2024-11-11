@@ -16,7 +16,7 @@
 // References:
 // https://devblogs.nvidia.com/cuda-pro-tip-increase-performance-with-vectorized-memory-access/
 
-namespace at { namespace native { namespace memory {
+namespace at::native::memory {
 
 namespace detail {
 
@@ -202,7 +202,7 @@ struct unroll {
 
   template<typename args_t>
   __device__ inline void load(args_t *args, int idx) {
-    constexpr int arity = std::tuple_size<args_t>::value;
+    constexpr int arity = std::tuple_size_v<args_t>;
     int thread_idx = threadIdx.x;
     #pragma unroll
     for (int i = 0; i < thread_work_size(); i++) {
@@ -267,7 +267,7 @@ struct vectorized {
 
   template<typename args_t>
   __device__ inline void load(args_t *args, int idx) {
-    constexpr int arity = std::tuple_size<args_t>::value;
+    constexpr int arity = std::tuple_size_v<args_t>;
     detail::static_unroll<detail::vectorized_load_helper, arity>::with_args(*this, args, idx);
   }
 
@@ -309,7 +309,7 @@ struct multi_outputs_unroll {
 
   template<typename args_t>
   __device__ inline void load(args_t *args, int idx) {
-    constexpr int arity = std::tuple_size<args_t>::value;
+    constexpr int arity = std::tuple_size_v<args_t>;
     int thread_idx = threadIdx.x;
     #pragma unroll
     for (int i = 0; i < thread_work_size(); i++) {
@@ -348,8 +348,8 @@ struct multi_outputs_unroll {
 template<typename scalar_t>
 inline C10_HOST_DEVICE int can_vectorize_up_to(const char *pointer) {
   uint64_t address = reinterpret_cast<uint64_t>(pointer);
-  constexpr int vec2_alignment = std::alignment_of<aligned_vector<scalar_t, 2>>::value;
-  constexpr int vec4_alignment = std::alignment_of<aligned_vector<scalar_t, 4>>::value;
+  constexpr int vec2_alignment = std::alignment_of_v<aligned_vector<scalar_t, 2>>;
+  constexpr int vec4_alignment = std::alignment_of_v<aligned_vector<scalar_t, 4>>;
   if (address % vec4_alignment == 0) {
     return 4;
   } else if (address % vec2_alignment == 0) {
@@ -386,4 +386,4 @@ inline int can_vectorize_up_to(array_t pointers) {
   return result;
 }
 
-}}} // namespace at::native::memory
+} // namespace at::native::memory

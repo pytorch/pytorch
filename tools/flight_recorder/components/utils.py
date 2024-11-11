@@ -4,8 +4,9 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+import argparse
 import math
-from typing import Any, Dict, List, Set, Tuple  # type: ignore[attr-defined]
+from typing import Any, Dict, List, Set, Tuple
 
 from tools.flight_recorder.components.types import (
     Group,
@@ -40,9 +41,10 @@ def match_one_event(
     event_a: Dict[Any, Any],
     event_b: Dict[Any, Any],
     memberships: Dict[str, Set[Any]],
+    pg_name: str,
 ) -> MatchState:
-    op_a = Op(event_a, memberships)
-    op_b = Op(event_b, memberships)
+    op_a = Op(event_a, memberships, pg_name)
+    op_b = Op(event_b, memberships, pg_name)
     return op_a.match(op_b)
 
 
@@ -51,6 +53,7 @@ def match_coalesced_groups(
     group_size: int,
     groups: Dict[str, Group],
     memberships: Dict[str, Set[Any]],
+    _pg_guids: Dict[Tuple[str, int], str],
 ) -> bool:
     """
     all_rank_events: {
@@ -76,13 +79,22 @@ def match_coalesced_groups(
         rank1 [recv:0 (1000B), recv:0 (100B)]   —> not okay
     """
     all_ops = {
-        rank: [Op(e, memberships) for i, e in all_rank_events[rank]]
+        rank: [
+            Op(e, memberships, _pg_guids[(e["process_group"][0], rank)])
+            for i, e in all_rank_events[rank]
+        ]
         for rank in all_rank_events
     }
 
-    def visualize_ops(match: bool) -> None:
+    def visualize_ops(
+        match: bool,
+        _pg_guids: Dict[Tuple[str, int], str],
+    ) -> None:
         all_ops = {
-            rank: [Op(e, memberships) for i, e in all_rank_events[rank]]
+            rank: [
+                Op(e, memberships, _pg_guids[(e["process_group"][0], rank)])
+                for i, e in all_rank_events[rank]
+            ]
             for rank in all_rank_events
         }
 
@@ -94,8 +106,14 @@ def match_coalesced_groups(
             progress = False
             for r in all_ops:
                 if len(all_ops[r]) > i:
-                    _, event = all_rank_events[r][i]
-                    row.append(Op(event, memberships))
+                    rank, event = all_rank_events[r][i]
+                    row.append(
+                        Op(
+                            event,
+                            memberships,
+                            _pg_guids[(event["process_group"][0], rank)],
+                        )
+                    )
                     progress = True
                 else:
                     row.append(None)  # type: ignore[arg-type]
@@ -144,10 +162,10 @@ def match_coalesced_groups(
             my_ops.pop(0)
             peer_ops.pop(match_idx)
         else:
-            visualize_ops(False)
+            visualize_ops(False, _pg_guids)
             return False
 
-    visualize_ops(True)
+    visualize_ops(True, _pg_guids)
     return True
 
 
@@ -157,25 +175,31 @@ def check_size_alltoall(alltoall_cases: List[Dict[str, Any]]) -> Tuple[bool, int
     for e in alltoall_cases:
         input_numel += math.prod(e["input_sizes"][0])
         output_numel += math.prod(e["output_sizes"][0])
-    return input_numel == output_numel, input_numel, output_numel
+    return input_numel != output_numel, input_numel, output_numel
 
 
 def find_coalesced_group(
-    pg_name: str, entries: List[Dict[str, Any]]
+    pg_name: str,
+    entries: List[Dict[str, Any]],
+    _pg_guids: Dict[Tuple[str, int], str],
+    rank: int,
 ) -> List[Tuple[int, Dict[str, Any]]]:
     """Given a list of entries, if the collective_seq_id of the first entry matches that of subsequent ones,
     build an return a list of entries terminating in a 'coalesced' op entry all sharing a collective_seq_id
-    TODO: handle p2p_seq_id v/s collective_seq_id separately here.
     """
     found = []
     collective_seq_id = None
     for i, e in enumerate(entries):
-        if e["process_group"][0] != pg_name:
+        if _pg_guids[(e["process_group"][0], rank)] != pg_name:
             continue
         elif collective_seq_id is None:
-            collective_seq_id = e["collective_seq_id"]
+            collective_seq_id = (
+                e["p2p_seq_id"] if e["is_p2p"] else e["collective_seq_id"]
+            )
             found.append((i, e))
-        elif e["collective_seq_id"] == collective_seq_id:
+        elif not e["is_p2p"] and e["collective_seq_id"] == collective_seq_id:
+            found.append((i, e))
+        elif e["is_p2p"] and e["p2p_seq_id"] == collective_seq_id:
             found.append((i, e))
         else:
             break
@@ -190,20 +214,36 @@ def just_print_entries(
     all_entries: Dict[int, List[Dict[str, Any]]],
     _groups: Dict[str, Group],
     _memberships: Dict[str, Set[Any]],
+    _pg_guids: Dict[Tuple[str, int], str],
+    args: argparse.Namespace,
 ) -> None:
     rows = []
     ranks = sorted(all_entries.keys())
-    headers = [f"Rank {rank}" for rank in ranks]
+    headers = [
+        f"Rank {rank}"
+        for rank in ranks
+        if args.selected_ranks is None or rank in args.selected_ranks
+    ]
     progress = True
     while progress:
         progress = False
         row = []
         for rank in ranks:
+            if args.selected_ranks is not None and rank not in args.selected_ranks:
+                continue
             if len(all_entries[rank]) == 0:
                 row.append("")
             else:
                 entry = all_entries[rank].pop(0)
-                row.append(str(Op(entry, _memberships)))
+                pg_name = _pg_guids[(entry["process_group"][0], rank)]
+                if (
+                    args.pg_filters is None
+                    or entry["process_group"][1] in args.pg_filters
+                    or entry["process_group"][0] in args.pg_filters
+                ):
+                    row.append(str(Op(entry, _memberships, pg_name)))
+                else:
+                    row.append("")
                 progress = True
         if progress:
             rows.append(row)
@@ -223,23 +263,29 @@ def check_no_missing_dump_files(
     ), f"Missing dump files from ranks {all_ranks - dumps_ranks}"
 
 
-def check_version(versions: Dict[str, Any]) -> None:
-    for rank, version in versions.items():  # noqa: PERF102
-        major, minor = map(int, version.split("."))
-        # assert major == 2, f"Rank {rank} unsupported version {version}"
-        # assert minor >= 0, f"Rank {rank} unsupported version {version}"
+def check_version(version_by_ranks: Dict[str, str], version: str) -> None:
+    for rank, v in version_by_ranks.items():
+        assert (
+            v == version
+        ), f"Rank {rank} has different version {v} from the given version {version}"
 
 
-def sort_trace_from_beginning(
-    entries: Dict[int, List[Dict[str, Any]]]
+def get_version_detail(version: str) -> Tuple[int, int]:
+    version = version.split(".")
+    assert len(version) == 2, f"Invalid version {version}"
+    major, minor = map(int, version)
+    return major, minor
+
+
+def align_trace_from_beginning(
+    entries: Dict[int, List[Dict[str, Any]]],
 ) -> Dict[int, List[Dict[str, Any]]]:
     """
-    Sorts the trace entries by record ID for entries.
+    Align the trace entries by record ID for entries.
     This function takes a dictionary of rank names to lists of trace entries as input.
     Each trace entry is a dictionary containing information about a collective operation,
     including its unique identifier (`record_id` is monotonically increasing as we write into the ring buffer).
-    The function first sorts the entries in each rank by their `record_id` values.
-    Then, it finds the largest starting point across all ranks by taking the maximum
+    The function finds the largest starting point across all ranks by taking the maximum
     `record_id` value of the first entry in each rank. Finally, it filters out any
     entries with `record_id` values less than the maximum starting point.
     The function returns the updated dictionary of sorted and filtered trace entries.

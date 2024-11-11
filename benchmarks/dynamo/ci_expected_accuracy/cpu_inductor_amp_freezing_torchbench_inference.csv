@@ -10,10 +10,6 @@ Background_Matting,pass_due_to_skip,0
 
 
 
-DALLE2_pytorch,model_fail_to_load,0
-
-
-
 LearningToPaint,pass,0
 
 
@@ -78,7 +74,7 @@ detectron2_fasterrcnn_r_50_fpn,fail_accuracy,46
 
 
 
-detectron2_fcos_r_50_fpn,fail_accuracy,23
+detectron2_fcos_r_50_fpn,pass,24
 
 
 
@@ -142,7 +138,7 @@ hf_Bert_large,pass,0
 
 
 
-hf_BigBird,pass,61
+hf_BigBird,pass,19
 
 
 
@@ -211,10 +207,6 @@ mobilenet_v2_quantized_qat,pass,2
 
 
 mobilenet_v3_large,pass,0
-
-
-
-moco,model_fail_to_load,0
 
 
 
@@ -346,7 +338,7 @@ vgg16,pass,0
 
 
 
-vision_maskrcnn,fail_accuracy,28
+vision_maskrcnn,fail_accuracy,30
 
 
 
