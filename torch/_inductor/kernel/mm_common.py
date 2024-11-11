@@ -218,9 +218,6 @@ mixed_mm_kernel_configs = (
 
 persistent_mm_kernel_configs = [
     {"config": (128, 128, 64, 3, 8), "cond": True},
-    # {"config": (128, 64, 64, 3, 8), "cond": True},
-    # {"config": (64, 128, 64, 3, 8), "cond": True},
-    # {"config": (64, 64, 64, 3, 8), "cond": True},
     {"config": (128, 128, 128, 3, 8), "cond": True},
     {"config": (128, 128, 128, 4, 8), "cond": True},
     {"config": (128, 128, 128, 4, 4), "cond": True},
@@ -228,19 +225,7 @@ persistent_mm_kernel_configs = [
     {"config": (128, 128, 128, 5, 4), "cond": True},
     {"config": (128, 128, 128, 5, 8), "cond": True},
     {"config": (128, 128, 128, 6, 8), "cond": True},
-    # {"config": (128, 64, 128, 3, 8), "cond": True},
-    # {"config": (64, 128, 128, 3, 8), "cond": True},
-    # {"config": (64, 64, 128, 3, 8), "cond": True},
-    # # Varying stages (4)
-    # {"config": (128, 128, 64, 4, 4), "cond": True},
-    # {"config": (128, 64, 64, 4, 4), "cond": True},
-    # {"config": (64, 128, 64, 4, 4), "cond": True},
-    # {"config": (64, 64, 64, 4, 4), "cond": True},
-    # # Varying stages (5)
     {"config": (128, 128, 64, 4, 8), "cond": True},
-    # {"config": (128, 64, 64, 5, 2), "cond": True},
-    # {"config": (64, 128, 64, 5, 2), "cond": True},
-    # {"config": (64, 64, 64, 5, 2), "cond": True},
 ]
 
 
