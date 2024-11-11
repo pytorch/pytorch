@@ -935,7 +935,10 @@ class IncByTwo:
 
 class ReproTests(torch._dynamo.test_case.TestCase):
     def setUp(self) -> None:
-        from .utils import install_guard_manager_testing_hook
+        try:
+            from .utils import install_guard_manager_testing_hook
+        except ImportError:
+            from utils import install_guard_manager_testing_hook
 
         self.exit_stack = contextlib.ExitStack()
         self.exit_stack.enter_context(
