@@ -4,6 +4,7 @@
 #include <c10/core/impl/GPUTrace.h>
 #include <c10/xpu/XPUFunctions.h>
 
+
 namespace c10::xpu {
 
 /*
@@ -156,6 +157,16 @@ getStreamFromPool(const bool isHighPriority = false, DeviceIndex device = -1);
  */
 C10_XPU_API XPUStream
 getStreamFromPool(const int priority, DeviceIndex device = -1);
+
+/**
+ * Get a XPUStream from a externally allocated one.
+ *
+ * This is mainly for interoperability with different libraries where we
+ * want to operate on a non-torch allocated stream for data exchange or similar
+ * purposes
+ */
+C10_API XPUStream
+getStreamFromExternal(sycl::queue* ext_stream, DeviceIndex device_index);
 
 /**
  * Get the current XPU stream, for the passed XPU device, or for the current
