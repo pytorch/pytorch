@@ -12,7 +12,7 @@ DOCKER_RUN = set -eou pipefail; ${DOCKER_CMD} run --rm -i \
 	-e PACKAGE_NAME=${PACKAGE_NAME}${DESIRED_CUDA_SHORT} \
 	-e DESIRED_CUDA=${DESIRED_CUDA} \
 	-e CUDA_ARCH_LIST="${CUDA_ARCH_LIST}" \
-	"pytorch/manylinux-builder:cuda${DESIRED_CUDA}-main" \
+	"pytorch/manylinux-cuda${DESIRED_CUDA_SHORT}" \
 	magma/build_magma.sh
 
 .PHONY: all

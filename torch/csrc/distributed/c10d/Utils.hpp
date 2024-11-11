@@ -129,15 +129,15 @@ inline int getCvarInt(const std::vector<std::string>& env, int def) {
    * versions of a variable get higher priority than the latter
    * versions of the same variable */
   for (ssize_t i = static_cast<ssize_t>(env.size()) - 1; i >= 0; i--) {
-    const auto val = c10::utils::get_env(env[i].c_str());
-    if (!val.has_value()) {
+    char* val = std::getenv(env[i].c_str());
+    if (val == nullptr) {
       continue;
     } else if (i) {
       WARN_ENV_VAR_ONCE(env[i], env[0]);
     }
 
     try {
-      ret = std::stoi(val.value());
+      ret = std::stoi(val);
     } catch (std::exception&) {
       TORCH_CHECK(false, "Invalid value for environment variable: " + env[i]);
     }

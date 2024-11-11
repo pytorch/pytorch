@@ -82,13 +82,13 @@ function pip_install_whl() {
 function pip_install() {
   # retry 3 times
   # old versions of pip don't have the "--progress-bar" flag
-  pip3 install --progress-bar off "$@" || pip3 install --progress-bar off "$@" || pip3 install --progress-bar off "$@" ||\
-  pip3 install "$@" || pip3 install "$@" || pip3 install "$@"
+  pip install --progress-bar off "$@" || pip install --progress-bar off "$@" || pip install --progress-bar off "$@" ||\
+  pip install "$@" || pip install "$@" || pip install "$@"
 }
 
 function pip_uninstall() {
   # uninstall 2 times
-  pip3 uninstall -y "$@" || pip3 uninstall -y "$@"
+  pip uninstall -y "$@" || pip uninstall -y "$@"
 }
 
 function get_exit_code() {

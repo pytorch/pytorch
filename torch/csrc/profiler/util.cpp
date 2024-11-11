@@ -377,13 +377,19 @@ std::vector<std::string> inputTypes(const at::RecordFunction& fn) {
 static constexpr int32_t kTruncatLength = 30;
 
 template <typename ListLikeType>
-inline std::string format_list(ListLikeType list, bool truncate) {
+inline std::string format_list(ListLikeType list, bool truncate, bool with_escaped_quotes = true) {
   if (truncate && list.size() > kTruncatLength) {
     return fmt::format(
         "\"[{}, ...]\"",
         fmt::join(list.begin(), list.begin() + kTruncatLength, ", "));
   }
-  return fmt::format("\"[{}]\"", fmt::join(list.begin(), list.end(), ", "));
+  if (with_escaped_quotes == true) {
+    auto x = fmt::format("\"[{}]\"", fmt::join(list.begin(), list.end(), ", "));
+    return x;
+  } else {
+    auto x = fmt::format("[{}]", fmt::join(list.begin(), list.end(), ", "));
+    return x;
+  }
 }
 
 std::pair<bool, std::variant<int, std::vector<int>>> findStartAddrForTensors(
@@ -503,7 +509,7 @@ std::unordered_map<std::string, std::string> saveNcclMeta(
         auto [is_list, result] = findStartAddrForTensors(val);
         if (is_list) {
           auto list_result = std::get<std::vector<int>>(result);
-          addressList.push_back(format_list(list_result, truncate));
+          addressList.push_back(format_list(list_result, truncate, false));
         } else {
           auto scalar_result = std::get<int>(result);
           addressList.push_back(std::to_string(scalar_result));
@@ -528,7 +534,7 @@ std::unordered_map<std::string, std::string> saveNcclMeta(
         auto [is_list, result] = findStartAddrForTensors(val);
         if (is_list) {
           auto list_result = std::get<std::vector<int>>(result);
-          addressList.push_back(format_list(list_result, truncate));
+          addressList.push_back(format_list(list_result, truncate, false));
         } else {
           auto scalar_result = std::get<int>(result);
           addressList.push_back(std::to_string(scalar_result));
@@ -895,14 +901,14 @@ uint64_t computeFlops(
 
 // A function that takes an IValue
 // and returns a conventional string representation of the IValue
-// Currently it returns int representation of the last 16 bits of the address
+// Currently it returns int representation of the last 20 bits of the address
 // value
 int getTensorStartHint(const at::Tensor& t) {
   const auto tensor_impl = t.unsafeGetTensorImpl();
   uintptr_t storage_addr = 0;
   storage_addr = reinterpret_cast<uintptr_t>(tensor_impl->storage().data());
-  int last_16_bits = static_cast<int>(storage_addr & 0xFFFF);
-  return last_16_bits;
+  int last_bits = static_cast<int>(storage_addr & 0xFFFFF);
+  return last_bits;
 }
 
 bool checkFunctionOutputsForLogging(
