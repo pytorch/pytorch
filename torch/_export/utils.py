@@ -921,7 +921,7 @@ def remove_proxy_from_state_dict(state_dict: Dict, in_place: bool) -> Dict:
         new_state_dict = {}
         for k, v in state_dict.items():
             if hasattr(v, "proxy"):
-                new_state_dict[k] = v.clone().detach()
+                new_state_dict[k] = v.detach().clone()
             else:
                 new_state_dict[k] = v
         return new_state_dict
