@@ -9,6 +9,7 @@
 #include <ATen/core/function.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
+#include <c10/util/env.h>
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/ir/ir.h>
@@ -32,8 +33,10 @@ class JitLoggingConfig {
   std::ostream* out;
 
   JitLoggingConfig() : out(&std::cerr) {
-    const char* jit_log_level = std::getenv("PYTORCH_JIT_LOG_LEVEL");
-    logging_levels.assign(jit_log_level == nullptr ? "" : jit_log_level);
+    const auto jit_log_level = c10::utils::get_env("PYTORCH_JIT_LOG_LEVEL");
+    if (jit_log_level.has_value()) {
+      logging_levels = jit_log_level.value();
+    }
 
     parse();
   }
