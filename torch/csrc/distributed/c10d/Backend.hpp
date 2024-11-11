@@ -406,9 +406,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   virtual ErrorType getError() {
     TORCH_CHECK(
         false,
-        "Only ProcessGrouppNCCL supports getError, but got ",
-        getBackendName(),
-        " backend.");
+        c10::str("Backend ", getBackendName(), " does not support getError"));
   }
 
  protected:
