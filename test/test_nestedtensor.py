@@ -77,6 +77,9 @@ from torch.utils.checkpoint import checkpoint, create_selective_checkpoint_conte
 
 
 log = logging.getLogger(__name__)
+logging.basicConfig(
+    level=logging.DEBUG, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
 
 # Tests are ported from pytorch/nestedtensor.
 # This makes porting as_nested_tensor easier in the future.
@@ -8062,9 +8065,11 @@ BACKWARD_FAILURES = [
                 "__rpow__",
                 "clamp_max",
                 "clamp_min",
+                "float_power",
                 "pow",
                 "sinc",
                 "special.i1",
+                "special.i1e",
             }
         ),
         name="skip_things_that_break_in_ci_but_not_locally",
@@ -8352,15 +8357,6 @@ COMPILE_BACKWARD_FAILURES = [
             and sample.input._lengths is not None
         ),
         name="rms_norm_backward_unbind_data_dependency",
-    ),
-    # Bug: no idea what's going on here; needs investigation within AOTAutograd
-    XFailRule(
-        error_type=AssertionError,
-        error_msg="Node mul_1 was invalid, but is output",
-        match_fn=lambda device, dtype, op, sample: (
-            op.full_name == "nan_to_num" and "noncontig_transposed" in sample.name
-        ),
-        name="crazy_aot_autograd_bug1_backward",
     ),
     # clone() -> preserve format on an non-contiguous NJT with holes currently uses
     # unbind(), leading to data-dependent error in torch.compile
