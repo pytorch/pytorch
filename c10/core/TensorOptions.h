@@ -29,12 +29,12 @@ DispatchKey computeDispatchKey(
     std::optional<Device> device);
 
 inline ScalarType dtype_or_default(std::optional<ScalarType> dtype) {
-  return value_or_else(dtype, [] { return get_default_dtype_as_scalartype(); });
+  return dtype.value_or(get_default_dtype_as_scalartype());
 }
 
 inline caffe2::TypeMeta dtype_or_default(
     std::optional<caffe2::TypeMeta> dtype) {
-  return value_or_else(dtype, [] { return get_default_dtype(); });
+  return dtype.value_or(get_default_dtype());
 }
 
 inline Layout layout_or_default(std::optional<Layout> layout) {
@@ -42,7 +42,7 @@ inline Layout layout_or_default(std::optional<Layout> layout) {
 }
 
 inline Device device_or_default(std::optional<Device> device) {
-  return value_or_else(device, [] { return Device(kCPU); });
+  return device.value_or(Device(kCPU));
 }
 
 inline bool pinned_memory_or_default(std::optional<bool> pinned_memory) {
@@ -192,8 +192,8 @@ struct C10_API TensorOptions {
 
   /// Return a copy of `TensorOptions` with `device` set to the given one, or
   /// cleared if `device` is `nullopt`.
-  C10_NODISCARD TensorOptions
-  device(std::optional<Device> device) const noexcept {
+  [[nodiscard]] TensorOptions device(
+      std::optional<Device> device) const noexcept {
     TensorOptions r = *this;
     r.set_device(device);
     return r;
@@ -203,7 +203,7 @@ struct C10_API TensorOptions {
   /// (This overload ensures that variadic template std::optional constructor
   /// for Device work correctly.)
   template <typename... Args>
-  C10_NODISCARD TensorOptions device(Args&&... args) const noexcept {
+  [[nodiscard]] TensorOptions device(Args&&... args) const noexcept {
     return device(
         std::optional<Device>(std::in_place, std::forward<Args>(args)...));
   }
@@ -213,22 +213,22 @@ struct C10_API TensorOptions {
   ///
   /// TODO: This function encourages bad behavior (assuming CUDA is
   /// the only device that matters).  Get rid of it / rename it.
-  C10_NODISCARD TensorOptions
-  device_index(c10::DeviceIndex device_index) const noexcept {
+  [[nodiscard]] TensorOptions device_index(
+      c10::DeviceIndex device_index) const noexcept {
     return device(Device::Type::CUDA, device_index);
   }
 
   /// Return a copy of `TensorOptions` with `dtype` set to the given one.
-  C10_NODISCARD TensorOptions
-  dtype(std::optional<caffe2::TypeMeta> dtype) const noexcept {
+  [[nodiscard]] TensorOptions dtype(
+      std::optional<caffe2::TypeMeta> dtype) const noexcept {
     TensorOptions r = *this;
     r.set_dtype(dtype);
     return r;
   }
 
   // legacy function to support ScalarType
-  C10_NODISCARD TensorOptions
-  dtype(std::optional<ScalarType> dtype) const noexcept {
+  [[nodiscard]] TensorOptions dtype(
+      std::optional<ScalarType> dtype) const noexcept {
     TensorOptions r = *this;
     r.set_dtype(dtype);
     return r;
@@ -243,32 +243,32 @@ struct C10_API TensorOptions {
   }
 
   /// Sets the layout of the `TensorOptions`.
-  C10_NODISCARD TensorOptions
-  layout(std::optional<Layout> layout) const noexcept {
+  [[nodiscard]] TensorOptions layout(
+      std::optional<Layout> layout) const noexcept {
     TensorOptions r = *this;
     r.set_layout(layout);
     return r;
   }
 
   /// Sets the `requires_grad` property of the `TensorOptions`.
-  C10_NODISCARD TensorOptions
-  requires_grad(std::optional<bool> requires_grad) const noexcept {
+  [[nodiscard]] TensorOptions requires_grad(
+      std::optional<bool> requires_grad) const noexcept {
     TensorOptions r = *this;
     r.set_requires_grad(requires_grad);
     return r;
   }
 
   /// Sets the `pinned_memory` property on the `TensorOptions`.
-  C10_NODISCARD TensorOptions
-  pinned_memory(std::optional<bool> pinned_memory) const noexcept {
+  [[nodiscard]] TensorOptions pinned_memory(
+      std::optional<bool> pinned_memory) const noexcept {
     TensorOptions r = *this;
     r.set_pinned_memory(pinned_memory);
     return r;
   }
 
   /// Sets the `memory_format` property on `TensorOptions`.
-  C10_NODISCARD TensorOptions
-  memory_format(std::optional<MemoryFormat> memory_format) const noexcept {
+  [[nodiscard]] TensorOptions memory_format(
+      std::optional<MemoryFormat> memory_format) const noexcept {
     TensorOptions r = *this;
     r.set_memory_format(memory_format);
     return r;

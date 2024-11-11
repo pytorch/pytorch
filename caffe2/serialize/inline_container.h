@@ -205,9 +205,9 @@ class TORCH_API PyTorchStreamReader final {
 
 class TORCH_API PyTorchStreamWriter final {
  public:
-  explicit PyTorchStreamWriter(const std::string& archive_name);
+  explicit PyTorchStreamWriter(const std::string& archive_name, bool compute_crc32 = true);
   explicit PyTorchStreamWriter(
-      const std::function<size_t(const void*, size_t)> writer_func);
+      const std::function<size_t(const void*, size_t)> writer_func, bool compute_crc32 = true);
 
   void setMinVersion(const uint64_t version);
 
@@ -248,6 +248,7 @@ class TORCH_API PyTorchStreamWriter final {
   std::function<size_t(const void*, size_t)> writer_func_;
   uint64_t combined_uncomp_crc32_ = 0;
   std::string serialization_id_;
+  bool compute_crc32_;
 
   // This number will be updated when the model has operators
   // that have valid upgraders.
