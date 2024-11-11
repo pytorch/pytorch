@@ -7,6 +7,7 @@
 #include <c10/macros/Macros.h>
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/NumericUtils.h>
+#include <ATen/OpMathType.h>
 #if defined(__CUDACC__)
 #include <ATen/cuda/DeviceUtils.cuh>
 #include <ATen/native/cuda/DeviceSqrt.cuh>
@@ -196,7 +197,7 @@ template <typename scalar_t, typename acc_t = scalar_t, typename out_t = acc_t>
 struct AbsMinOps {
 
   inline C10_DEVICE acc_t reduce(acc_t acc, scalar_t data, int64_t /*idx*/) const {
-    return MIN(acc, static_cast<acc_t>(std::abs(data)));
+    return MIN(acc, static_cast<acc_t>(std::abs(at::opmath_type<scalar_t>(data))));
   }
 
   inline C10_DEVICE acc_t combine(acc_t a, acc_t b) const {
@@ -225,7 +226,7 @@ struct AbsMinOps {
 template <typename scalar_t, typename acc_t = scalar_t, typename out_t = acc_t>
 struct AbsMaxOps {
   inline C10_DEVICE acc_t reduce(acc_t acc, scalar_t data, int64_t /*idx*/) const {
-    return MAX(acc, static_cast<acc_t>(std::abs(data)));
+    return MAX(acc, static_cast<acc_t>(std::abs(at::opmath_type<scalar_t>(data))));
   }
 
   inline C10_DEVICE acc_t combine(acc_t a, acc_t b) const {
@@ -256,7 +257,7 @@ struct NormOps {
   acc_t norm_;
 
   inline C10_DEVICE acc_t reduce(acc_t acc, scalar_t data, int64_t /*idx*/) const {
-    return acc + compat_pow(static_cast<acc_t>(std::abs(data)), norm_);
+    return acc + compat_pow(static_cast<acc_t>(std::abs(at::opmath_type<scalar_t>(data))), norm_);
   }
 
   inline C10_DEVICE acc_t combine(acc_t a, acc_t b) const {
@@ -318,7 +319,7 @@ struct NormZeroOps {
 template <typename scalar_t, typename acc_t = scalar_t, typename out_t = acc_t>
 struct NormOneOps {
   inline C10_DEVICE acc_t reduce(acc_t acc, scalar_t data, int64_t /*idx*/) const {
-    return acc + static_cast<acc_t>(std::abs(data));
+    return acc + static_cast<acc_t>(std::abs(at::opmath_type<scalar_t>(data)));
   }
 
   inline C10_DEVICE acc_t combine(acc_t a, acc_t b) const {
@@ -356,7 +357,7 @@ inline C10_DEVICE acc_t abs_if_complex(std::complex<scalar_t> data, AbsSwitch<ac
 
 template<typename scalar_t, typename acc_t>
 inline C10_DEVICE acc_t abs_if_complex(c10::complex<scalar_t> data, AbsSwitch<acc_t>) {
-  return static_cast<acc_t>(std::abs(data));
+  return static_cast<acc_t>(std::abs(at::opmath_type<c10::complex<scalar_t>>(data)));
 }
 
 // This accumulator template is used to calculate the order two norm of the
