@@ -25,8 +25,6 @@
 #include <cuda_fp8.h>
 #endif
 
-#include "permute_last2dim.h"
-
 namespace at::native {
 
 void neg_kernel_cuda(TensorIteratorBase &iter);
@@ -151,26 +149,31 @@ void float8_copy_kernel_cuda(TensorIteratorBase &iter) {
   }
 }
 
+bool is_permute_021(TensorIteratorBase &iter) {
+  const auto& input = iter.tensor(1);
+  const auto& output = iter.tensor(0);
+  // auto in_sizes = input.sizes();
+  // auto in_strides = input.strides();
+  // auto out_sizes = output.sizes();
+  // auto out_strides = output.strides();
+
+  bool is_permute = false;
+  if (input.dim() == 3) {
+    is_permute = true;
+    is_permute &= input.dim() == output.dim();
+    is_permute &= input.stride(0) == input.size(1) * input.size(2);
+    is_permute &= input.stride(1) == 1;
+    is_permute &= input.stride(2) == input.size(1);
+    is_permute &= output.is_contiguous();
+  }
+  // return is_permute;
+  return false;
+}
+
 // TODO: We probably can use the opaque type trick to avoid creating duplicate
 // kernels for equivalent bit lengths
 void direct_copy_kernel_cuda(TensorIteratorBase &iter) {
   ScalarType dtype = iter.dtype(0);
-  const auto& input = iter.tensor(1);
-  const auto& output = iter.tensor(0);
-  auto in_sizes = input.sizes();
-  auto in_strides = input.strides();
-  auto out_sizes = output.sizes();
-  auto out_strides = output.strides();
-
-  bool is_permute_021 = false;
-  if (input.dim() == 3) {
-    is_permute_021 = true;
-    is_permute_021 &= input.dim() == output.dim();
-    is_permute_021 &= input.stride(0) == input.size(1) * input.size(2);
-    is_permute_021 &= input.stride(1) == 1;
-    is_permute_021 &= input.stride(2) == input.size(1);
-    is_permute_021 &= output.is_contiguous();
-  }
 
   if (isQIntType(dtype)) {
     AT_DISPATCH_QINT_TYPES(dtype, "copy_", [&] {
@@ -190,20 +193,22 @@ void direct_copy_kernel_cuda(TensorIteratorBase &iter) {
     AT_DISPATCH_BIT_TYPES(dtype, "copy_", [&] {
       gpu_kernel_nocast(iter, [] GPU_LAMBDA(scalar_t x) { return x; });
     });
-  } else if (is_permute_021) {
+  } else if (is_permute_021(iter) && (dtype == kBFloat16 || dtype == kHalf)) {
     void* dst = iter.data_ptr(0);
     void* src = iter.data_ptr(1);
+    const auto& input = iter.tensor(1);
 
     int M = input.size(0);
     int N = input.size(1);
     int K = input.size(2);
 
     auto stream = at::cuda::getCurrentHIPStream();
+    constexpr uint32_t BIG_TILE_SIZE = 64;
     int big_tile_wg = M * ((N + BIG_TILE_SIZE - 1) / BIG_TILE_SIZE) * ((K + BIG_TILE_SIZE - 1) / BIG_TILE_SIZE);
     const dim3 grid_dim(big_tile_wg, 1, 1);
     const dim3 block_dim(256, 1, 1);
-
-    transpose_tile_big_kernel<EL_TYPE, 256><<<grid_dim, block_dim, 0, stream>>>(src, dst, N, K);
+    size_t bpe = elementSize(dtype);
+    transpose_tile_big_kernel<uint16_t, 256><<<grid_dim, block_dim, 0, stream>>>(src, dst, N, K);
   } else {
     AT_DISPATCH_V2(
         dtype, "copy_", AT_WRAP([&] {
