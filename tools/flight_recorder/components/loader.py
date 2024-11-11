@@ -7,15 +7,21 @@
 import gc
 import os
 import pickle
+import re
 import time
-from typing import Any, Dict, List, Union
+import typing
+from collections import defaultdict
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
+
+from tools.flight_recorder.components.fr_logger import FlightRecorderLogger
+
+
+logger: FlightRecorderLogger = FlightRecorderLogger()
 
 
 def read_dump(prefix: str, filename: str) -> Dict[str, Union[str, int, List[Any]]]:
     basename = os.path.basename(filename)
-    assert (
-        basename.find(prefix) == 0
-    ), f"args.prefix ({prefix}) must match the beginning of each filename ({basename})"
+
     rank = int(basename[len(prefix) :])
     host_name = f"host_rank{rank}"
 
@@ -35,13 +41,51 @@ def read_dump(prefix: str, filename: str) -> Dict[str, Union[str, int, List[Any]
     }
 
 
-def read_dir(prefix: str, folder: str) -> Dict[str, Dict[str, Any]]:
+exp = re.compile(r"([\w\-\_]*?)(\d+)$")
+
+
+def _determine_prefix(files: List[str]) -> str:
+    """If the user doesn't specify a prefix, but does pass a dir full of similarly-prefixed files, we should be able to
+    infer the common prefix most of the time.  But if we can't confidently infer, just fall back to requring the user
+    to specify it
+    """
+    possible_prefixes: typing.DefaultDict[str, Set[int]] = defaultdict(set)
+    for f in files:
+        m = exp.search(f)
+        if m:
+            p, r = m.groups()
+            possible_prefixes[p].add(int(r))
+    if len(possible_prefixes) == 1:
+        prefix = next(iter(possible_prefixes))
+        logger.debug("Inferred common prefix %s", prefix)
+        return prefix
+    else:
+        raise ValueError(
+            "Unable to automatically determine the common prefix for the trace file names. "
+            "Please specify --prefix argument manually"
+        )
+
+
+def read_dir(
+    prefix: Optional[str], folder: str
+) -> Tuple[Dict[str, Dict[str, Any]], str]:
     gc.disable()
     details = {}
     t0 = time.time()
+    version = ""
+    filecount = 0
+    assert os.path.isdir(folder), f"folder {folder} does not exist"
     for root, _, files in os.walk(folder):
+        if prefix is None:
+            prefix = _determine_prefix(files)
         for f in files:
+            if f.find(prefix) != 0:
+                continue
             details[f] = read_dump(prefix, os.path.join(root, f))
+            filecount += 1
+            if not version:
+                version = str(details[f]["version"])
     tb = time.time()
-    print(f"loaded {len(files)} files in {tb - t0}s")
-    return details
+    assert len(details) > 0, f"no files loaded from {folder} with prefix {prefix}"
+    logger.debug("loaded %s files in %ss", filecount, tb - t0)
+    return details, version

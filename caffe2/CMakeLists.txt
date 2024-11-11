@@ -562,8 +562,19 @@ if(USE_CUDA)
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/intra_node_comm.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/CudaDMAConnectivity.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/CUDASymmetricMemory.cu
+        ${TORCH_SRC_DIR}/csrc/distributed/c10d/CUDASymmetricMemoryOps.cu
+        ${TORCH_SRC_DIR}/csrc/distributed/c10d/ProcessGroupNCCL.cpp
         PROPERTIES COMPILE_FLAGS "-DPYTORCH_C10_DRIVER_API_SUPPORTED=1"
       )
+    endif()
+
+    set(ASYNC_MM_FILE "${TORCH_SRC_DIR}/csrc/distributed/c10d/cuda/AsyncMM.cu")
+    # Disable the warning to make cutlass warp-specialized cooperative kernel build for gcc-9
+    if(CMAKE_COMPILER_IS_GNUCXX)
+      set_source_files_properties(${ASYNC_MM_FILE} PROPERTIES COMPILE_FLAGS "-Wno-unused-but-set-variable")
+    endif()
+    if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 12.0 AND EXISTING_ARCH_FLAGS MATCHES ".*compute_90.*")
+      set_source_files_properties(${ASYNC_MM_FILE} PROPERTIES COMPILE_FLAGS "-gencode arch=compute_90a,code=sm_90a")
     endif()
   endif()
   set_source_files_properties(
@@ -606,7 +617,7 @@ if(USE_ROCM)
   # caffe2_nvrtc's stubs to driver APIs are useful for HIP.
   # See NOTE [ ATen NVRTC Stub and HIP ]
   add_library(caffe2_nvrtc SHARED ${ATen_NVRTC_STUB_SRCS})
-  target_link_libraries(caffe2_nvrtc ${PYTORCH_HIP_LIBRARIES} ${ROCM_HIPRTC_LIB})
+  target_link_libraries(caffe2_nvrtc hip::amdhip64 hiprtc::hiprtc)
   target_include_directories(caffe2_nvrtc PRIVATE ${CMAKE_BINARY_DIR})
   target_compile_definitions(caffe2_nvrtc PRIVATE USE_ROCM __HIP_PLATFORM_AMD__)
   install(TARGETS caffe2_nvrtc DESTINATION "${TORCH_INSTALL_LIB_DIR}")
@@ -682,6 +693,10 @@ list(APPEND Caffe2_CPU_SRCS ${TORCH_SRCS})
 
 if(USE_MPS)
   list(APPEND Caffe2_CPU_SRCS ${Caffe2_MPS_SRCS})
+  if(CAN_COMPILE_METAL)
+      file(TOUCH ${CMAKE_BINARY_DIR}/aten/src/ATen/metallib_dummy.cpp)
+      list(APPEND Caffe2_CPU_SRCS ${CMAKE_BINARY_DIR}/aten/src/ATen/metallib_dummy.cpp)
+  endif()
 endif()
 
 # NOTE [ Linking AVX and non-AVX files ]
@@ -770,6 +785,10 @@ endif()
 if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang" AND NOT USE_IOS AND NOT USE_COREML_DELEGATE)
   target_compile_options_if_supported(torch_cpu "-Wmissing-prototypes")
   target_compile_options_if_supported(torch_cpu "-Werror=missing-prototypes")
+  if(TARGET torch_cuda)
+    target_compile_options_if_supported(torch_cuda "-Wmissing-prototypes")
+    target_compile_options_if_supported(torch_cuda "-Werror=missing-prototypes")
+  endif()
   get_target_property(TORCH_CPU_SOURCES torch_cpu SOURCES)
   foreach(generated_file IN LISTS GENERATED_CXX_TORCH)
     set_source_files_properties(${generated_file} PROPERTIES COMPILE_OPTIONS "-Wno-missing-prototypes;-Wno-error=missing-prototypes")
@@ -781,11 +800,20 @@ if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang" AND NOT USE_IOS AND NOT USE_COREML
       set_source_files_properties(${source_file} PROPERTIES COMPILE_OPTIONS "-Wno-missing-prototypes;-Wno-error=missing-prototypes")
       continue()
     endif()
-    string(FIND "${source_file}" "caffe2" res)
+    string(FIND "${source_file}" "embedding_lookup_idx_avx2.cc" res)
     if(res GREATER -1)
       set_source_files_properties(${source_file} PROPERTIES COMPILE_OPTIONS "-Wno-missing-prototypes;-Wno-error=missing-prototypes")
     endif()
   endforeach()
+endif()
+if(USE_MPS)
+  if(CAN_COMPILE_METAL)
+    add_dependencies(torch_cpu metallibs)
+    target_link_options(torch_cpu PRIVATE -Wl,-sectcreate,__TEXT,metal_basic,${CMAKE_CURRENT_BINARY_DIR}/aten/src/ATen/kernels_basic.metallib)
+    target_link_options(torch_cpu PRIVATE -Wl,-sectcreate,__TEXT,metal_bfloat,${CMAKE_CURRENT_BINARY_DIR}/aten/src/ATen/kernels_bfloat.metallib)
+  else()
+    target_compile_definitions(torch_cpu PRIVATE PYTORCH_JIT_COMPILE_SHADERS)
+  endif()
 endif()
 
 option(TORCH_USE_IWYU "Use include-what-you-use to clean up header inclusion" OFF)
@@ -927,7 +955,6 @@ elseif(USE_CUDA)
   set(CUDA_LINK_LIBRARIES_KEYWORD)
   torch_compile_options(torch_cuda)  # see cmake/public/utils.cmake
   target_compile_definitions(torch_cuda PRIVATE USE_CUDA)
-  target_link_libraries(torch_cuda PRIVATE fmt::fmt-header-only)
 
   if(USE_CUFILE)
     target_link_libraries(torch_cuda PRIVATE torch::cufile)
@@ -1067,12 +1094,12 @@ if(USE_XPU)
     target_link_libraries(torch_xpu PRIVATE torch_xpu_ops)
     if(MSVC)
       # Windows
-      target_link_libraries(torch_xpu PRIVATE
-      "-WHOLEARCHIVE:\"$<TARGET_FILE:torch_xpu_ops>\"")
+      target_link_options(torch_xpu PRIVATE
+      "-WHOLEARCHIVE:$<TARGET_FILE:torch_xpu_ops>")
     else()
       # Linux
-      target_link_libraries(torch_xpu PRIVATE
-        "-Wl,--whole-archive,\"$<TARGET_FILE:torch_xpu_ops>\" -Wl,--no-whole-archive")
+      target_link_options(torch_xpu PRIVATE
+          "-Wl,--whole-archive,$<TARGET_FILE:torch_xpu_ops>,--no-whole-archive")
     endif()
 
     # Set cached ${ATen_XPU_INCLUDE_DIRS} to torch
@@ -1326,8 +1353,8 @@ if(USE_ROCM)
     ${ROCM_SOURCE_DIR}/hcc/include
     ${ROCM_SOURCE_DIR}/rocblas/include
     ${ROCM_SOURCE_DIR}/hipsparse/include
+    ${ROCM_SOURCE_DIR}/include/rccl/
     )
-  target_link_libraries(torch_hip PRIVATE fmt::fmt-header-only)
   if(USE_FLASH_ATTENTION)
     target_compile_definitions(torch_hip PRIVATE USE_FLASH_ATTENTION)
   endif()
@@ -1715,7 +1742,10 @@ if(BUILD_TEST)
           endif()
         else()
           add_executable(${test_name}_${CPU_CAPABILITY} "${test_src}")
-          target_link_libraries(${test_name}_${CPU_CAPABILITY} torch_library sleef gtest_main)
+          target_link_libraries(${test_name}_${CPU_CAPABILITY} torch_library gtest_main)
+          if(NOT CMAKE_SYSTEM_PROCESSOR STREQUAL "ARM64")
+            target_link_libraries(${test_name}_${CPU_CAPABILITY} sleef)
+          endif()
         endif()
         target_include_directories(${test_name}_${CPU_CAPABILITY} PRIVATE $<INSTALL_INTERFACE:include>)
         target_include_directories(${test_name}_${CPU_CAPABILITY} PRIVATE $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>)
@@ -1741,6 +1771,7 @@ if(BUILD_TEST)
     target_include_directories(${test_name} PRIVATE ${Caffe2_CPU_INCLUDE})
     add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
     if(INSTALL_TEST)
+        set_target_properties(${test_name} PROPERTIES INSTALL_RPATH "${CMAKE_INSTALL_RPATH}:${_rpath_portable_origin}/../lib")
       install(TARGETS ${test_name} DESTINATION test)
       # Install PDB files for MSVC builds
       if(MSVC AND BUILD_SHARED_LIBS)
@@ -1761,6 +1792,7 @@ if(BUILD_TEST)
       target_include_directories(${test_name} PRIVATE ${Caffe2_CPU_INCLUDE})
       add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
       if(INSTALL_TEST)
+        set_target_properties(${test_name} PROPERTIES INSTALL_RPATH "${CMAKE_INSTALL_RPATH}:${_rpath_portable_origin}/../lib")
         install(TARGETS ${test_name} DESTINATION test)
         # Install PDB files for MSVC builds
         if(MSVC AND BUILD_SHARED_LIBS)
@@ -1782,6 +1814,7 @@ if(BUILD_TEST)
       target_include_directories(${test_name} PRIVATE ${Caffe2_CPU_INCLUDE})
       add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
       if(INSTALL_TEST)
+      set_target_properties(${test_name} PROPERTIES INSTALL_RPATH "${CMAKE_INSTALL_RPATH}:${_rpath_portable_origin}/../lib")
         install(TARGETS ${test_name} DESTINATION test)
         # Install PDB files for MSVC builds
         if(MSVC AND BUILD_SHARED_LIBS)
@@ -1803,6 +1836,7 @@ if(BUILD_TEST)
       target_include_directories(${test_name} PRIVATE ${Caffe2_CPU_INCLUDE})
       add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
       if(INSTALL_TEST)
+        set_target_properties(${test_name} PROPERTIES INSTALL_RPATH "${CMAKE_INSTALL_RPATH}:${_rpath_portable_origin}/../lib")
         install(TARGETS ${test_name} DESTINATION test)
       endif()
     endforeach()
@@ -1817,6 +1851,7 @@ if(BUILD_TEST)
       target_include_directories(${test_name} PRIVATE ${Caffe2_CPU_INCLUDE})
       add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
       if(INSTALL_TEST)
+        set_target_properties(${test_name} PROPERTIES INSTALL_RPATH "${CMAKE_INSTALL_RPATH}:${_rpath_portable_origin}/../lib")
         install(TARGETS ${test_name} DESTINATION test)
         # Install PDB files for MSVC builds
         if(MSVC AND BUILD_SHARED_LIBS)
@@ -1836,6 +1871,7 @@ if(BUILD_TEST)
       target_compile_options(${test_name} PRIVATE ${HIP_CXX_FLAGS})
       add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
       if(INSTALL_TEST)
+        set_target_properties(${test_name} PROPERTIES INSTALL_RPATH "${CMAKE_INSTALL_RPATH}:${_rpath_portable_origin}/../lib")
         install(TARGETS ${test_name} DESTINATION test)
       endif()
     endforeach()

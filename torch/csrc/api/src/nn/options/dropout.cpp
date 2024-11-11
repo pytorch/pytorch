@@ -1,9 +1,7 @@
 #include <torch/nn/options/dropout.h>
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 DropoutOptions::DropoutOptions(double p) : p_(p) {}
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

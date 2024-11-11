@@ -13,7 +13,6 @@ import torch
 import torch.fx as fx
 from torch.distributed import ProcessGroup
 from torch.export import ExportedProgram
-from torch.export._trace import _export
 from torch.export.unflatten import (
     _assign_attr,
     _AttrKind,
@@ -365,7 +364,7 @@ class DetachExecutor(fx.Interpreter):
         super().__init__(module, garbage_collect_values)
         self.value_remap = {}
 
-    def run(self, *args, initial_env=None):
+    def run(self, *args, initial_env=None):  # type: ignore[override]
         self.value_remap = {}
         return super().run(*args, initial_env=initial_env)
 
@@ -933,8 +932,7 @@ class Pipe(torch.nn.Module):
                         if node.op == "get_attr":
                             # get_attr might get access deeper level attribute
                             fqn = scope + "." + node.target if scope else node.target
-                            if fqn in unused_attributes:  # used, remove it
-                                unused_attributes.remove(fqn)
+                            unused_attributes.discard(fqn)
                 for _name, _submod in _mod.named_children():
                     stack.append((scope + "." + _name if scope else _name, _submod))
             # delete unused attributes
@@ -1005,14 +1003,11 @@ class Pipe(torch.nn.Module):
     ) -> ExportedProgram:
         logger.info("Tracing model ...")
         try:
-            with torch.no_grad():
-                ep = _export(
-                    mod,
-                    example_args,
-                    example_kwargs,
-                    strict=True,
-                    pre_dispatch=False,
-                )
+            ep = torch.export.export_for_training(
+                mod,
+                example_args,
+                example_kwargs,
+            )
         except Exception as e:
             raise RuntimeError(
                 "It seems that we cannot capture your model as a full graph. "

@@ -4,7 +4,6 @@
 #include <c10/util/Exception.h>
 #include <c10/util/Registry.h>
 
-#include <ATen/core/Generator.h>
 #include <ATen/detail/AcceleratorHooksInterface.h>
 
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-parameter")
@@ -14,10 +13,8 @@ namespace at {
 struct TORCH_API XPUHooksInterface : AcceleratorHooksInterface{
   ~XPUHooksInterface() override = default;
 
-  virtual void initXPU() const {
-    TORCH_CHECK(
-        false,
-        "Cannot initialize XPU without ATen_xpu library.");
+  void init() const override {
+    TORCH_CHECK(false, "Cannot initialize XPU without ATen_xpu library.");
   }
 
   virtual bool hasXPU() const {
@@ -34,12 +31,15 @@ struct TORCH_API XPUHooksInterface : AcceleratorHooksInterface{
     TORCH_CHECK(false, "Cannot get XPU global device index without ATen_xpu library.");
   }
 
-  virtual Generator getXPUGenerator(C10_UNUSED DeviceIndex device_index = -1) const {
-    TORCH_CHECK(false, "Cannot get XPU generator without ATen_xpu library.");
+  const Generator& getDefaultGenerator(
+      [[maybe_unused]] DeviceIndex device_index = -1) const override {
+    TORCH_CHECK(
+        false, "Cannot get default XPU generator without ATen_xpu library.");
   }
 
-  virtual const Generator& getDefaultXPUGenerator(C10_UNUSED DeviceIndex device_index = -1) const {
-    TORCH_CHECK(false, "Cannot get default XPU generator without ATen_xpu library.");
+  Generator getNewGenerator(
+      [[maybe_unused]] DeviceIndex device_index = -1) const override {
+    TORCH_CHECK(false, "Cannot get XPU generator without ATen_xpu library.");
   }
 
   virtual DeviceIndex getNumGPUs() const {
@@ -50,7 +50,7 @@ struct TORCH_API XPUHooksInterface : AcceleratorHooksInterface{
     TORCH_CHECK(false, "Cannot get current device on XPU without ATen_xpu library.");
   }
 
-  virtual Device getDeviceFromPtr(void* /*data*/) const {
+  Device getDeviceFromPtr(void* /*data*/) const override {
     TORCH_CHECK(false, "Cannot get device of pointer on XPU without ATen_xpu library.");
   }
 
@@ -81,4 +81,4 @@ namespace detail {
 TORCH_API const XPUHooksInterface& getXPUHooks();
 } // namespace detail
 } // namespace at
-C10_CLANG_DIAGNOSTIC_POP()
+C10_DIAGNOSTIC_POP()

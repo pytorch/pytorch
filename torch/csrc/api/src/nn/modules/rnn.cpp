@@ -18,8 +18,7 @@
 
 using namespace torch::nn::utils::rnn;
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 /// These must line up with the CUDNN mode codes:
 /// https://docs.nvidia.com/deeplearning/sdk/cudnn-developer-guide/index.html#cudnnRNNMode_t
@@ -608,7 +607,7 @@ std::tuple<Tensor, std::tuple<Tensor, Tensor>> LSTMImpl::forward_helper(
     const Tensor& batch_sizes,
     const Tensor& sorted_indices,
     int64_t max_batch_size,
-    torch::optional<std::tuple<Tensor, Tensor>> hx_opt) {
+    std::optional<std::tuple<Tensor, Tensor>> hx_opt) {
   std::tuple<Tensor, Tensor> hx;
   if (!hx_opt.has_value()) {
     int64_t num_directions = options.bidirectional() ? 2 : 1;
@@ -665,7 +664,7 @@ std::tuple<Tensor, std::tuple<Tensor, Tensor>> LSTMImpl::forward_helper(
 
 std::tuple<Tensor, std::tuple<Tensor, Tensor>> LSTMImpl::forward(
     const Tensor& input,
-    torch::optional<std::tuple<Tensor, Tensor>> hx_opt) {
+    std::optional<std::tuple<Tensor, Tensor>> hx_opt) {
   auto batch_sizes = torch::Tensor();
   auto max_batch_size = options.batch_first() ? input.size(0) : input.size(1);
   auto sorted_indices = torch::Tensor();
@@ -681,7 +680,7 @@ std::tuple<Tensor, std::tuple<Tensor, Tensor>> LSTMImpl::forward(
 std::tuple<PackedSequence, std::tuple<Tensor, Tensor>> LSTMImpl::
     forward_with_packed_input(
         const PackedSequence& packed_input,
-        torch::optional<std::tuple<Tensor, Tensor>> hx_opt) {
+        std::optional<std::tuple<Tensor, Tensor>> hx_opt) {
   const auto& input = packed_input.data();
   const auto& batch_sizes = packed_input.batch_sizes();
   const auto& sorted_indices = packed_input.sorted_indices();
@@ -892,7 +891,7 @@ RNNCellImpl::RNNCellImpl(const RNNCellOptions& options_)
           /*num_chunks=*/1)),
       options(options_) {}
 
-Tensor RNNCellImpl::forward(const Tensor& input, Tensor hx) {
+Tensor RNNCellImpl::forward(const Tensor& input, const Tensor& hx) {
   this->check_forward_input(input, "input");
   this->check_forward_input(hx, "hidden");
 
@@ -946,7 +945,7 @@ LSTMCellImpl::LSTMCellImpl(const LSTMCellOptions& options_)
 
 std::tuple<Tensor, Tensor> LSTMCellImpl::forward(
     const Tensor& input,
-    torch::optional<std::tuple<Tensor, Tensor>> hx_opt) {
+    std::optional<std::tuple<Tensor, Tensor>> hx_opt) {
   this->check_forward_input(input, "input");
   if (hx_opt.has_value()) {
     this->check_forward_input(std::get<0>(hx_opt.value()), "hx[0]");
@@ -1000,7 +999,7 @@ GRUCellImpl::GRUCellImpl(const GRUCellOptions& options_)
           /*num_chunks=*/3)),
       options(options_) {}
 
-Tensor GRUCellImpl::forward(const Tensor& input, Tensor hx) {
+Tensor GRUCellImpl::forward(const Tensor& input, const Tensor& hx) {
   this->check_forward_input(input, "input");
   this->check_forward_input(hx, "hidden");
 
@@ -1026,5 +1025,4 @@ Tensor GRUCellImpl::forward(const Tensor& input, Tensor hx) {
   return ret;
 }
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn
