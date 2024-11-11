@@ -680,6 +680,23 @@ class InputWriter:
             + f")  # {name}"
         )
 
+    def unsupported(self, name, arg):
+        # NB: Try hard not to /print/ a tensor, that will be very slow
+        self._lines.append(f"# {name} was unsupported type for dumping: {type(arg)}")
+        # Best effort dump as much useful stuff we can lol, in case you want
+        # to repair the repro
+        if isinstance(arg, (list, tuple)):
+            self._lines.append('"""')
+            for i, a in enumerate(arg):
+                name_i = f"{name}[{i}]"
+                if isinstance(a, torch.Tensor):
+                    self.tensor(name_i, a)
+                elif isinstance(a, (int, torch.SymInt)):
+                    self.symint(name_i, a)
+                else:
+                    self.unsupported(name_i, a)
+            self._lines.append('"""')
+
     # write out that the arg was filtered out as it is constant
     def const(self, name) -> None:
         self._lines.append(
