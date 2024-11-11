@@ -663,19 +663,13 @@ struct TernaryOpScalarFunctor {
   }
 };
 
-template <
-    typename T,
-    int depth,
-    int r_args_depth,
-    int res_arg_index,
-    bool large_kernel_arg>
+template <typename T, int depth, int r_args_depth, int res_arg_index>
 struct TernaryOpScalarListFunctor {
-  static constexpr bool use_large_kernel_arg = large_kernel_arg;
   using opmath_t = at::opmath_type<T>;
   template <typename Op>
   __device__ __forceinline__ void operator()(
       int chunk_size,
-      TensorListScalarListMetadata<opmath_t, depth, large_kernel_arg>& tl,
+      TensorListScalarListMetadata<opmath_t, depth>& tl,
       Op op) {
     static_assert(depth == 2 || depth == 3, "");
     static_assert(depth >= r_args_depth, "");
