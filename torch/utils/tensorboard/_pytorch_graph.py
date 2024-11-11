@@ -241,9 +241,6 @@ def parse(graph, trace, args=None, omit_useless_nodes=True):
       args (tuple): input tensor[s] for the model.
       omit_useless_nodes (boolean): Whether to remove nodes from the graph.
     """
-    n_inputs = len(args)
-
-    scope = {}
     nodes_py = GraphPy()
     for node in graph.inputs():
         if omit_useless_nodes:
@@ -264,7 +261,6 @@ def parse(graph, trace, args=None, omit_useless_nodes=True):
             if (
                 parent.kind() == GETATTR_KIND
             ):  # If the parent node is not the top-level "self" node
-                parent_attr_name = parent.s("name")
                 parent_attr_key = parent.output().debugName()
                 parent_scope = attr_to_scope[parent_attr_key]
                 attr_scope = parent_scope.split("/")[-1]

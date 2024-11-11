@@ -67,6 +67,17 @@ def _to(self, device, non_blocking=False):
     if self.device == device:
         return self
 
+    if device.type == "cpu":
+        pin_memory = non_blocking and self.device.type in (
+            "cuda",
+            torch._C._get_privateuse1_backend_name(),
+        )
+        untyped_storage = torch.empty(
+            self.nbytes(), dtype=torch.uint8, device=device, pin_memory=pin_memory
+        ).untyped_storage()
+        untyped_storage.copy_(self, non_blocking)
+        return untyped_storage
+
     device_module = getattr(torch, device.type, None)
     assert (
         device_module is not None

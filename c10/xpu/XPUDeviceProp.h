@@ -194,5 +194,6 @@ struct C10_XPU_API DeviceProp {
 #undef DEFINE_PLATFORM_PROP
 #undef DEFINE_EXT_DEVICE_PROP
 #undef DEFINE_DEVICE_ASPECT
+#undef DEFINE_EXP_DEVICE_PROP
 
 } // namespace c10::xpu
