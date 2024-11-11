@@ -226,8 +226,8 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
 
 
 class AOTAutogradCachePickler(FxGraphCachePickler):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, gm: torch.fx.GraphModule):
+        super().__init__(gm)
         self.dispatch_table: Dict
         self.dispatch_table.update(
             {
@@ -274,7 +274,7 @@ def autograd_cache_key(
     """
     check_cacheable(gm)
     details = AOTAutogradCacheDetails(gm, example_inputs, config, fx_config)
-    pickler = AOTAutogradCachePickler()
+    pickler = AOTAutogradCachePickler(gm)
     # The prefix distinguishes among the other kinds of objects we cache
     key = "a" + pickler.get_hash(details)
     debug_lines = pickler.debug_lines(details)

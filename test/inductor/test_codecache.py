@@ -493,10 +493,41 @@ class TestFxGraphCache(TestCase):
     @config.patch({"fx_graph_remote_cache": False})
     @parametrize("bundle_triton", (False, True))
     @parametrize("grad", (False, True))
-    def test_triton_higher_order_op_bypass(self, bundle_triton, grad):
+    def test_higher_order_op_bypass(self, bundle_triton, grad):
         """
-        Verify that we bypass the cache when we have a triton higher order ops
+        Verify that we bypass the cache when we have a higher order ops
         and that bundler start/end works with a cache bypass.
+        """
+
+        def fn(x):
+            def true_fn(x: torch.Tensor):
+                return x.cos()
+
+            def false_fn(x: torch.Tensor):
+                return x.sin()
+
+            return torch.cond(x.shape[0], true_fn, false_fn, (x,))
+
+        with config.patch(bundle_triton_into_fx_graph_cache=bundle_triton):
+            compiled_fn = torch.compile(fn, dynamic=True, fullgraph=True)
+
+            x = torch.randn(4, 4, device=GPU_TYPE, requires_grad=grad)
+            result = compiled_fn(x)
+            if grad:
+                result.sum().backward()
+
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+            self.assertGreater(counters["inductor"]["fxgraph_cache_bypass"], 0)
+
+    @requires_gpu()
+    @requires_triton()
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    @parametrize("bundle_triton", (False, True))
+    def test_triton_higher_order_op(self, bundle_triton):
+        """
+        Verify that we can cache user defined triton kernel higher order op
         """
 
         def fn(x, y):
@@ -510,15 +541,28 @@ class TestFxGraphCache(TestCase):
         with config.patch(bundle_triton_into_fx_graph_cache=bundle_triton):
             compiled_fn = torch.compile(fn, fullgraph=True)
 
-            x = torch.randn(4, device=GPU_TYPE, requires_grad=grad)
-            y = torch.randn(4, device=GPU_TYPE, requires_grad=grad)
-            result = compiled_fn(x, y)
-            if grad:
-                result.sum().backward()
+            x = torch.randn(4, device=GPU_TYPE)
+            y = torch.randn(4, device=GPU_TYPE)
 
-            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
+            result = compiled_fn(x, y)
+
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
-            self.assertGreater(counters["inductor"]["fxgraph_cache_bypass"], 0)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 0)
+
+            # A second call should hit. (First reset so in-memory guards
+            # don't prevent compilation).
+            self.reset()
+
+            # Clean PyCodeCache and triton kernels
+            PyCodeCache.cache_clear()
+            shutil.rmtree(os.path.join(cache_dir(), "triton"), ignore_errors=True)
+
+            result = compiled_fn(x, y)
+
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 0)
 
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
@@ -765,7 +809,8 @@ class TestFxGraphCacheHashing(TestCase):
         self.assertFalse(GraphLowering.can_inline_constant(large))
 
         # By default, we hash the metadata and values independent of the size.
-        pickler = FxGraphCachePickler()
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+        pickler = FxGraphCachePickler(gm)
 
         data = pickler.dumps(small)
         self.assertIsInstance(pickle.loads(data), TensorMetadataAndValues)
@@ -773,7 +818,7 @@ class TestFxGraphCacheHashing(TestCase):
         self.assertIsInstance(pickle.loads(data), TensorMetadataAndValues)
 
         # If include_non_inlined=False, we only hash the values of small tensors.
-        pickler = FxGraphCachePickler(False)
+        pickler = FxGraphCachePickler(gm, False)
 
         data = pickler.dumps(small)
         self.assertIsInstance(pickle.loads(data), TensorMetadataAndValues)
@@ -784,7 +829,8 @@ class TestFxGraphCacheHashing(TestCase):
         """
         Test hashing (pickling) FakeTensors with various characteristics.
         """
-        pickler = FxGraphCachePickler()
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+        pickler = FxGraphCachePickler(gm)
         with torch._subclasses.FakeTensorMode():
             # Verify that FakeTensors get pickled into a TensorMetadata:
             data = pickler.dumps(torch.randn(1))
@@ -890,7 +936,8 @@ class TestFxGraphCacheHashing(TestCase):
         Test the special handling of the kwargs when hashing, i.e.,
         ordering of the kwargs dict and any set arguments.
         """
-        pickler = FxGraphCachePickler()
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+        pickler = FxGraphCachePickler(gm)
 
         # Dict order of the kwargs should not affect hashes.
         details1 = FxGraphHashDetails(None, [], {"a": 0, "z": 1}, [])
@@ -938,7 +985,8 @@ class TestFxGraphCacheHashing(TestCase):
         with config.patch({"max_autotune": True}):
             details3 = FxGraphHashDetails(None, [], {}, [])
 
-        pickler = FxGraphCachePickler()
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+        pickler = FxGraphCachePickler(gm)
 
         self.assertEqual(
             pickler.dumps(details1),
@@ -973,7 +1021,8 @@ class TestFxGraphCacheHashing(TestCase):
             custom_pass._uuid = "2"
             details3 = FxGraphHashDetails(None, [], {}, [])
 
-            pickler = FxGraphCachePickler()
+            gm = torch.fx.GraphModule({}, torch.fx.Graph())
+            pickler = FxGraphCachePickler(gm)
 
             self.assertEqual(
                 pickler.dumps(details1),
@@ -988,8 +1037,9 @@ class TestFxGraphCacheHashing(TestCase):
         """
         Test _reduce_unsupported
         """
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
         with self.assertRaises(BypassFxGraphCache):
-            FxGraphCachePickler().dumps(
+            FxGraphCachePickler(gm).dumps(
                 torch.fx.experimental._backward_state.BackwardState()
             )
 
@@ -1004,7 +1054,8 @@ class TestFxGraphCacheHashing(TestCase):
 
         self.assertNotEqual(id(s1), id(s2))
 
-        pickler = FxGraphCachePickler()
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+        pickler = FxGraphCachePickler(gm)
         self.assertEqual(
             pickler.dumps([s1, s1]),
             pickler.dumps([s1, s2]),
