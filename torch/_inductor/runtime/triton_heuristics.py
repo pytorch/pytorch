@@ -174,10 +174,6 @@ def _dump_launch_params(args, kwargs, launcher, kernel_name):
         f.write(f"{kernel_name} | {args_str}\n")
 
 
-def reduce_prod(x: Iterable[int]) -> int:
-    return functools.reduce(lambda x, y: x * y, x)
-
-
 class CachingAutotuner(KernelInterface):
     """
     Simplified version of Triton autotuner that has no invalidation
@@ -1641,7 +1637,7 @@ def _reduction_configs(
         MAX_Rn_BLOCK = 1024
         register_intensive = True
 
-    total_rnumel = reduce_prod(rnumels)
+    total_rnumel = conditional_product(*rnumels)
     num_axes = len(rnumels)
 
     contiguous_config = triton_config_reduction(
@@ -1763,7 +1759,7 @@ def _persistent_reduction_configs(
 ):
     xnumel = size_hints[0]
     rnumels = size_hints[1:]
-    total_rnumel = reduce_prod(rnumels)
+    total_rnumel = conditional_product(*rnumels)
 
     configs = [
         triton_config_reduction(size_hints, xblock, rnumels, register_intensive=True)
