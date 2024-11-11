@@ -3407,24 +3407,34 @@ class TupleIteratorGetItemAccessor : public GuardAccessor {
 
 // Gets weakref ref (strong ref) on construction,
 // releases the ref on destruction.
+// If an error occurred during the weakref call,
+// _obj points to null.
 class WeakrefRAII {
   PyObject* _obj{nullptr};
 
  public:
   WeakrefRAII(PyObject* weakref) {
-    PyWeakref_GetRef(weakref, &_obj); // strong ref
-    if (_obj == nullptr) {
-      _obj = Py_None;
-      Py_INCREF(_obj);
+    if (PyWeakref_GetRef(weakref, &_obj) != -1) { // strong ref
+      // weakref doesn't point to anything
+      if (_obj == nullptr) {
+        _obj = Py_NewRef(Py_None);
+      }
+    } else {
+      // error occurred
+      _obj = nullptr;
     }
   }
 
   ~WeakrefRAII() {
-    Py_DECREF(_obj);
+    Py_XDECREF(_obj);
   }
 
   operator PyObject*() const {
     return _obj;
+  }
+
+  bool failed() const {
+    return _obj == nullptr;
   }
 };
 
@@ -3468,6 +3478,9 @@ class GlobalWeakRefGuardAccessor : public GuardAccessor {
     }
 
     WeakrefRAII x(weakref);
+    if (x.failed()) {
+      return false;
+    }
     return _guard_manager->check_nopybind(x);
   }
 
@@ -3489,6 +3502,10 @@ class GlobalWeakRefGuardAccessor : public GuardAccessor {
     }
 
     WeakrefRAII x(weakref);
+    if (x.failed()) {
+      return GuardDebugInfo(
+          false, std::string("Weakref call failed ") + get_source(), 0);
+    }
     return _guard_manager->check_verbose_nopybind(x);
   }
 
@@ -3528,6 +3545,9 @@ class WeakRefCallGuardAccessor : public GuardAccessor {
     }
 
     WeakrefRAII x(obj);
+    if (x.failed()) {
+      return false;
+    }
     return _guard_manager->check_nopybind(x);
   }
 
@@ -3539,6 +3559,10 @@ class WeakRefCallGuardAccessor : public GuardAccessor {
     }
 
     WeakrefRAII x(obj);
+    if (x.failed()) {
+      return GuardDebugInfo(
+          false, std::string("Weakref call failed ") + get_source(), 0);
+    }
     return _guard_manager->check_verbose_nopybind(x);
   }
 
