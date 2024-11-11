@@ -110,7 +110,9 @@ void initDeviceProperties(DeviceProp* device_prop, int device) {
   sycl::ext::oneapi::experimental::cl_version cl_version;
   AT_FORALL_XPU_EXP_CL_ASPECT(ASSIGN_EXP_CL_ASPECT);
 
+#if SYCL_COMPILER_VERSION >= 20250000
   AT_FORALL_XPU_EXP_DEVICE_PROPERTIES(ASSIGN_EXP_DEVICE_PROP);
+#endif
 
   return;
 }
