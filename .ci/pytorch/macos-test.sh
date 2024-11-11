@@ -210,16 +210,26 @@ test_torchbench_smoketest() {
 
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p $TEST_REPORTS_DIR
+  touch $TEST_REPORTS_DIR/torchbench_training.csv
+  touch $TEST_REPORTS_DIR/torchbench_inference.csv
 
   echo "Setup complete, launching torchbench training performance run"
   PYTHONPATH=$(pwd)/torchbench python benchmarks/dynamo/torchbench.py --performance --only hf_T5 --backend eager --training --devices mps --output "$TEST_REPORTS_DIR/torchbench_training.csv"
   PYTHONPATH=$(pwd)/torchbench python benchmarks/dynamo/torchbench.py --performance --only llama --backend eager --training --devices mps --output "$TEST_REPORTS_DIR/torchbench_training.csv"
-  PYTHONPATH=$(pwd)/torchbench python benchmarks/dynamo/torchbench.py --performance --only moco --backend eager --training --devices mps --output "$TEST_REPORTS_DIR/torchbench_training.csv"
+  PYTHONPATH=$(pwd)/torchbench python benchmarks/dynamo/torchbench.py --performance --only BERT_pytorch --backend eager --training --devices mps --output "$TEST_REPORTS_DIR/torchbench_training.csv"
+  PYTHONPATH=$(pwd)/torchbench python benchmarks/dynamo/torchbench.py --performance --only dcgan --backend eager --training --devices mps --output "$TEST_REPORTS_DIR/torchbench_training.csv"
+  PYTHONPATH=$(pwd)/torchbench python benchmarks/dynamo/torchbench.py --performance --only hf_GPT2 --backend eager --training --devices mps --output "$TEST_REPORTS_DIR/torchbench_training.csv"
+  PYTHONPATH=$(pwd)/torchbench python benchmarks/dynamo/torchbench.py --performance --only yolov3 --backend eager --training --devices mps --output "$TEST_REPORTS_DIR/torchbench_training.csv"
+  PYTHONPATH=$(pwd)/torchbench python benchmarks/dynamo/torchbench.py --performance --only resnet152 --backend eager --training --devices mps --output "$TEST_REPORTS_DIR/torchbench_training.csv"
 
   echo "Launching torchbench inference performance run"
   PYTHONPATH=$(pwd)/torchbench python benchmarks/dynamo/torchbench.py --performance --only hf_T5 --backend eager --inference --devices mps --output "$TEST_REPORTS_DIR/torchbench_inference.csv"
   PYTHONPATH=$(pwd)/torchbench python benchmarks/dynamo/torchbench.py --performance --only llama --backend eager --inference --devices mps --output "$TEST_REPORTS_DIR/torchbench_inference.csv"
-  PYTHONPATH=$(pwd)/torchbench python benchmarks/dynamo/torchbench.py --performance --only moco --backend eager --inference --devices mps --output "$TEST_REPORTS_DIR/torchbench_inference.csv"
+  PYTHONPATH=$(pwd)/torchbench python benchmarks/dynamo/torchbench.py --performance --only BERT_pytorch --backend eager --inference --devices mps --output "$TEST_REPORTS_DIR/torchbench_inference.csv"
+  PYTHONPATH=$(pwd)/torchbench python benchmarks/dynamo/torchbench.py --performance --only dcgan --backend eager --inference --devices mps --output "$TEST_REPORTS_DIR/torchbench_inference.csv"
+  PYTHONPATH=$(pwd)/torchbench python benchmarks/dynamo/torchbench.py --performance --only hf_GPT2 --backend eager --inference --devices mps --output "$TEST_REPORTS_DIR/torchbench_inference.csv"
+  PYTHONPATH=$(pwd)/torchbench python benchmarks/dynamo/torchbench.py --performance --only yolov3 --backend eager --inference --devices mps --output "$TEST_REPORTS_DIR/torchbench_inference.csv"
+  PYTHONPATH=$(pwd)/torchbench python benchmarks/dynamo/torchbench.py --performance --only resnet152 --backend eager --inference --devices mps --output "$TEST_REPORTS_DIR/torchbench_inference.csv"
 
   echo "Pytorch benchmark on mps device completed"
   # TEMP_DEBUG
