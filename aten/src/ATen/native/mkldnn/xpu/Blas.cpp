@@ -1,9 +1,24 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/native/Resize.h>
 #include <torch/library.h>
 #include <ATen/native/mkldnn/xpu/detail/oneDNN.h>
+#ifndef AT_PER_OPERATOR_HEADERS
 
-namespace at::native::xpu {
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_addmm_activation_native.h>
+#include <ATen/ops/addmm_native.h>
+#include <ATen/ops/addmv_native.h>
+#include <ATen/ops/baddbmm_native.h>
+#include <ATen/ops/bmm_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/mm_native.h>
+#endif
+
+namespace at::native {
+namespace xpu {
 
 // result = beta * self + alpha * (mat1 * mat2)
 Tensor& addmm_out(
@@ -68,7 +83,7 @@ Tensor& addmm_out(
 
   // complex/double case
   if (mat1.is_complex() || mat1.scalar_type() == ScalarType::Double) {
-    AT_ERROR(
+    TORCH_CHECK(false,
         "Double and complex datatype matmul is not supported in oneDNN");
   }
 
@@ -148,7 +163,7 @@ Tensor& mm_out(const Tensor& self, const Tensor& mat2, Tensor& result) {
   }
 
   if (self.is_complex() || self.scalar_type() == ScalarType::Double) {
-    AT_ERROR(
+    TORCH_CHECK(false,
         "Double and complex datatype matmul is not supported in oneDNN");
   }
 
@@ -203,7 +218,7 @@ Tensor& baddbmm_out(
 
   // complex and double case
   if (batch1.is_complex() || batch2.scalar_type() == ScalarType::Double) {
-    AT_ERROR(
+    TORCH_CHECK(false,
         "Double and complex datatype matmul is not supported in oneDNN");
   }
 
@@ -329,7 +344,7 @@ Tensor& bmm_out(const Tensor& self, const Tensor& batch2, Tensor& result) {
   }
 
   if (self.is_complex() || self.scalar_type() == ScalarType::Double) {
-    AT_ERROR(
+    TORCH_CHECK(false,
         "Double and complex datatype matmul is not supported in oneDNN");
   }
   onednn::matmul(result, self, batch2, at::Tensor(), true, onednn::Attr());
@@ -425,20 +440,35 @@ Tensor& tensordot_out(
 }
 
 TORCH_LIBRARY_IMPL(aten, XPU, m){
-  m.impl("addmm.out", TORCH_FN(addmm_out));
-  m.impl("_addmm_activation.out", TORCH_FN(_addmm_activation_out));
-  m.impl("mm.out", TORCH_FN(mm_out));
-  m.impl("mm", TORCH_FN(mm));
-  m.impl("baddbmm.out", TORCH_FN(baddbmm_out));
-  m.impl("baddbmm_", TORCH_FN(baddbmm_));
-  m.impl("baddbmm", TORCH_FN(baddbmm));
-  m.impl("addbmm.out", TORCH_FN(addbmm_out));
-  m.impl("addbmm_", TORCH_FN(addbmm_));
-  m.impl("addbmm", TORCH_FN(addbmm));
-  m.impl("bmm.out", TORCH_FN(bmm_out));
-  m.impl("bmm", TORCH_FN(bmm));
-  m.impl("addmv.out", TORCH_FN(addmv_out));
   m.impl("tensordot.out", TORCH_FN(tensordot_out));
 }
+} // namespace xpu
 
-} // namespace at::native::xpu
+TORCH_IMPL_FUNC(addmm_out_xpu)(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, const Tensor& result) {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+  xpu::addmm_out(self, mat1, mat2, beta, alpha, const_cast<Tensor&>(result));
+}
+
+TORCH_IMPL_FUNC(mm_out_xpu)(const Tensor& self, const Tensor& mat2, const Tensor& result) {
+  xpu::mm_out(self, mat2, const_cast<Tensor&>(result));
+}
+
+TORCH_IMPL_FUNC(bmm_out_xpu)(const Tensor& self, const Tensor& batch2, const Tensor &result) {
+  xpu::bmm_out(self, batch2, const_cast<Tensor&>(result));
+}
+
+TORCH_IMPL_FUNC(addmm_activation_out_xpu)(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, bool use_gelu, const Tensor& result) {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+  xpu::_addmm_activation_out(self, mat1, mat2, beta, alpha, use_gelu, const_cast<Tensor&>(result));
+}
+
+TORCH_IMPL_FUNC(baddbmm_out_xpu)(const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, const Tensor& result) {
+  xpu::baddbmm_out(
+      self, batch1, batch2, beta, alpha, const_cast<Tensor&>(result));
+}
+
+TORCH_IMPL_FUNC(addmv_out_xpu)(const Tensor &self, const Tensor &mat, const Tensor &vec, const Scalar& beta, const Scalar& alpha, const Tensor& result) {
+  xpu::addmv_out(self, mat, vec, beta, alpha, const_cast<Tensor&>(result));
+}
+
+} // namespace at::native
