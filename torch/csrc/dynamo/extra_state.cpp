@@ -114,10 +114,12 @@ void lookup(
     PyObject* f_locals,
     PyObject* backend,
     PyObject** maybe_cached_code,
-    const char** trace_annotation) {
+    const char** trace_annotation,
+    bool is_skip_guard_eval_unsafe) {
   size_t index = 0;
   CacheEntry* found = nullptr;
   py::handle locals(f_locals);
+
   for (CacheEntry& cache_entry : extra_state->cache_entry_list) {
     // Check backend. Py_False means run only mode.
 
@@ -126,8 +128,18 @@ void lookup(
 
     if (valid) {
       try {
-        valid = torch::dynamo::run_root_guard_manager(
-            cache_entry.root_mgr, f_locals);
+        if (is_skip_guard_eval_unsafe) {
+          // We cant stash the diff_guard_root_mgr in the cache_entry because we
+          // create a new one on every recompilation.
+          void* diff_guard_root_mgr =
+              torch::dynamo::convert_to_root_guard_manager(
+                  cache_entry.guard_manager.attr("diff_guard_root"));
+          valid = torch::dynamo::run_root_guard_manager(
+              diff_guard_root_mgr, f_locals);
+        } else {
+          valid = torch::dynamo::run_root_guard_manager(
+              cache_entry.root_mgr, f_locals);
+        }
       } catch (py::error_already_set& e) {
         if (guard_error_hook) {
           py::handle guard_error_hook_handle(guard_error_hook);

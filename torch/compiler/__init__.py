@@ -230,7 +230,7 @@ def disable(fn=None, recursive=True):
     return torch._dynamo.disable(fn, recursive)
 
 
-def set_stance(stance: str, force_backend=None):
+def set_stance(stance: str, skip_guard_eval_unsafe=False, force_backend=None):
     """
     Set the current stance of the compiler.
     Can be used as a function, context manager, or decorator.
@@ -275,7 +275,7 @@ def set_stance(stance: str, force_backend=None):
     """
     import torch._dynamo
 
-    return torch._dynamo.set_stance(stance, force_backend=force_backend)
+    return torch._dynamo.set_stance(stance, skip_guard_eval_unsafe=skip_guard_eval_unsafe, force_backend=force_backend)
 
 
 # forbid in graph

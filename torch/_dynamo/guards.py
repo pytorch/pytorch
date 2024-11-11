@@ -242,6 +242,7 @@ class GuardManagerWrapper:
 
     def populate_diff_guard_manager(self):
         self.diff_guard_root = self.clone_with_chosen_sources(self.diff_guard_sources)
+        print(GuardManagerWrapper(self.diff_guard_root))
 
     def clone_with_chosen_sources(self, chosen_sources):
         def filter_fn(node_mgr):
