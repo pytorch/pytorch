@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, Dict, Callable
+from typing import Any, Callable, Dict
 
 import torch
 
@@ -77,7 +77,9 @@ class RootGuardManager(GuardManager):
         guard: LeafGuard,
         verbose_code_parts: list[str],
     ) -> None: ...
-    def clone(self, clone_filter_fn: Callable[[GuardManager], bool]) -> RootGuardManager: ...
+    def clone_manager(
+        self, clone_filter_fn: Callable[[GuardManager], bool]
+    ) -> RootGuardManager: ...
 
 class DictGuardManager(GuardManager):
     def get_key_manager(
