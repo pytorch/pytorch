@@ -648,6 +648,10 @@ def _parse_visible_devices() -> Union[List[int], List[str]]:
         hip_devices = os.getenv("HIP_VISIBLE_DEVICES")
         if hip_devices is not None:
             var = hip_devices
+        else:
+            hip_devices = os.getenv("ROCR_VISIBLE_DEVICES")
+            if hip_devices is not None:
+                var = hip_devices
 
     if var is None:
         return list(range(64))
