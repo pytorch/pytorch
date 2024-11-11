@@ -18,6 +18,7 @@ import torch
 import torch.ao.quantization.fx._decomposed
 import torch.fx
 import torch.utils._pytree as pytree
+from torch._dynamo.utils import counters
 from torch._higher_order_ops.associative_scan import associative_scan_op
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mutation
 from torch._prims_common import (
@@ -71,7 +72,6 @@ from .utils import (
     use_scatter_fallback,
 )
 from .virtualized import ops, V
-from torch._dynamo.utils import counters
 
 
 log = logging.getLogger(__name__)
@@ -3811,6 +3811,7 @@ def rev(x, dims):
         ranges=sizes,
     )
 
+
 def inplace_constant_pad_nd(x, padding, fill_value):
     """
     This optimization changes the semantics of padding from 'clone'
@@ -3819,10 +3820,6 @@ def inplace_constant_pad_nd(x, padding, fill_value):
     Thanks to functionalization, this change can still maintain numerical
     correctness.
     """
-
-    # TODO: can safely do this only if nobody else mutate
-    # x and the view
-    # x = clone(x) # XXX this clone will show up in the generated code.
 
     def _padding_can_be_fused():
         """
@@ -3856,7 +3853,7 @@ def inplace_constant_pad_nd(x, padding, fill_value):
 
     x.freeze_layout()
 
-    _, layout = ir.as_storage_and_layout(x) 
+    _, layout = ir.as_storage_and_layout(x)
     strides = layout.stride
     if strides[1] != 1:
         return None
@@ -3875,8 +3872,10 @@ def inplace_constant_pad_nd(x, padding, fill_value):
         return None
 
     resized_x = as_strided(
-        x, [layout.size[0], layout.size[1] + npad],
-        layout.stride, layout.offset,
+        x,
+        [layout.size[0], layout.size[1] + npad],
+        layout.stride,
+        layout.offset,
     )
 
     sliced_x = slice_(resized_x, dim=1, start=rowsize, end=rowsize + npad)
@@ -3884,6 +3883,7 @@ def inplace_constant_pad_nd(x, padding, fill_value):
 
     counters["inductor"]["inplace_padding"] += 1
     return resized_x
+
 
 @register_lowering(aten.constant_pad_nd, type_promotion_kind=None)
 def constant_pad_nd(x, padding, fill_value=0):

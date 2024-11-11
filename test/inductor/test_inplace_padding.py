@@ -1,10 +1,14 @@
-from torch._inductor.test_case import TestCase, run_tests
-from torch.testing._internal.inductor_utils import HAS_GPU, GPU_TYPE
-import os, sys
-import torch
+# Owner(s): ["module: inductor"]
+import os
+import sys
 import unittest
+
+import torch
 from torch import nn
 from torch._dynamo.utils import same
+from torch._inductor.test_case import run_tests, TestCase
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -12,24 +16,26 @@ sys.path.append(pytorch_test_dir)
 
 # TODO move check_model to a common module since it's quite often to
 # be used by new test cases.
-from inductor.test_torchinductor import (
-    check_model,
-)
-
+from inductor.test_torchinductor import check_model
 from torch._dynamo.testing import rand_strided
 from torch._inductor import config as inductor_config
 
+
 aten = torch.ops.aten
+
 
 def num_inplace_padding():
     from torch._dynamo.utils import counters
+
     return counters["inductor"]["inplace_padding"]
+
 
 enable_inplace_padding = True
 if os.environ.get("TORCHINDUCTOR_INPLACE_PADDING") is not None:
     enable_inplace_padding = os.environ.get("TORCHINDUCTOR_INPLACE_PADDING") == "1"
 
 DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
+
 
 @inductor_config.patch(inplace_padding=enable_inplace_padding)
 class InplacePaddingTest(TestCase):
@@ -38,9 +44,10 @@ class InplacePaddingTest(TestCase):
         If the padding can be fused with downstream op, there would
         be little benefit to do inplace padding.
         """
+
         def f(x):
-           x = aten.constant_pad_nd(x, (0, 8, 0, 0), 12345.0)
-           return x.sum(dim=-1)
+            x = aten.constant_pad_nd(x, (0, 8, 0, 0), 12345.0)
+            return x.sum(dim=-1)
 
         M, N = 2048, 2048
         x = rand_strided((M, N), (N + 10, 1), device=GPU_TYPE)
@@ -50,8 +57,8 @@ class InplacePaddingTest(TestCase):
 
     def test_pad_nonzero_non_fusible(self):
         def f(x, y):
-           x = aten.constant_pad_nd(x, (0, 8, 0, 0), 12345.0)
-           return x @ y
+            x = aten.constant_pad_nd(x, (0, 8, 0, 0), 12345.0)
+            return x @ y
 
         M, N = 2048, 2048
         x = rand_strided((M, N), (N + 10, 1), device=GPU_TYPE)
@@ -62,8 +69,8 @@ class InplacePaddingTest(TestCase):
 
     def test_pad_too_large(self):
         def f(x, y):
-           x = aten.constant_pad_nd(x, (0, 8, 0, 0), 12345.0)
-           return x @ y
+            x = aten.constant_pad_nd(x, (0, 8, 0, 0), 12345.0)
+            return x @ y
 
         M, N = 2048, 2048
         x = rand_strided((M, N), (N + 5, 1), device=GPU_TYPE)
@@ -77,10 +84,11 @@ class InplacePaddingTest(TestCase):
         Even if `aten.constant_pad_nd` input get inplace updated,
         doing inplace-padding still generates the correct result.
         """
+
         def f(x, y):
-           x2 = aten.constant_pad_nd(x, (0, 8, 0, 0), 12345.0)
-           x.add_(5)
-           return x2 @ y
+            x2 = aten.constant_pad_nd(x, (0, 8, 0, 0), 12345.0)
+            x.add_(5)
+            return x2 @ y
 
         M, N = 2048, 2048
         x = rand_strided((M, N), (N + 10, 1), device=GPU_TYPE)
@@ -95,10 +103,11 @@ class InplacePaddingTest(TestCase):
         cause the user of the padding output to be not matmul. We skip
         inplace-padding in this case.
         """
+
         def f(x, y):
-           x = aten.constant_pad_nd(x, (0, 8, 0, 0), 12345.0)
-           x.add_(1)
-           return x @ y
+            x = aten.constant_pad_nd(x, (0, 8, 0, 0), 12345.0)
+            x.add_(1)
+            return x @ y
 
         M, N = 2048, 2048
         x = rand_strided((M, N), (N + 10, 1), device=GPU_TYPE)
@@ -107,7 +116,10 @@ class InplacePaddingTest(TestCase):
 
         self.assertEqual(num_inplace_padding(), 0)
 
-    @unittest.skipIf(torch.cuda.get_device_properties().total_memory < 2e10, "Only if the GPU has at least 20GB memory to be safe")
+    @unittest.skipIf(
+        torch.cuda.get_device_properties().total_memory < 2e10,
+        "Only if the GPU has at least 20GB memory to be safe",
+    )
     def test_linear_and_cel(self):
         # Use nan for torch.empty
         torch.use_deterministic_algorithms(True)
@@ -133,7 +145,7 @@ class InplacePaddingTest(TestCase):
         y = torch.randint(0, V, (B * T,)).cuda()
 
         opt_f = torch.compile(f)
-        
+
         expect = (f(x, y), x.grad, linear.weight.grad, linear.bias.grad)
         actual = (opt_f(x, y), x.grad, linear.weight.grad, linear.bias.grad)
         assert same(expect, actual, tol=1e-3), f"ref:\n{expect}\nact:\n{actual}"
@@ -143,6 +155,7 @@ class InplacePaddingTest(TestCase):
 
         if DO_PERF_TEST:
             from triton.testing import do_bench
+
             ms = do_bench(lambda: opt_f(x, y))
             print(f"{inductor_config.inplace_padding=} {ms=:.3f}")
 
