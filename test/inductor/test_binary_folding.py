@@ -277,8 +277,9 @@ class BinaryFoldingTemplate(TestCase):
                 expect_success=True,
             )
 
+        # In the following test, the shape of 'add_tensor' does not satisfy
+        # the requirements of binary folding, so it will not be folded.
         for use_bias, pytorch_op in itertools.product(linear_bias, ops):
-            # add
             test_linear_fusion(
                 use_bias,
                 pytorch_op,
@@ -290,7 +291,6 @@ class BinaryFoldingTemplate(TestCase):
                 expect_success=False,
             )
 
-            # broadcasting add
             test_linear_fusion(
                 use_bias,
                 pytorch_op,
