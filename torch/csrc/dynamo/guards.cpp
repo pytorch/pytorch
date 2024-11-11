@@ -1518,7 +1518,7 @@ std::unique_ptr<GuardManager> make_guard_manager(
 GuardManager* clone_guard_manager(
     GuardManager* from,
     RootGuardManager* root,
-    py::function clone_filter_fn);
+    const py::function& clone_filter_fn);
 void add_relational_guard_resetter_to_cloned_root(
     RootGuardManager* root,
     std::shared_ptr<RelationalGuard> guard);
@@ -1583,7 +1583,7 @@ class GuardAccessor {
  public: // Cloning related functions
   virtual GuardAccessor* clone(
       RootGuardManager* cloned_root,
-      py::function clone_filter_fn) = 0;
+      const py::function& clone_filter_fn) = 0;
 
   void clone_fields(GuardAccessor* to) { // NOLINT
     to->_source = this->_source;
@@ -1594,7 +1594,7 @@ class GuardAccessor {
   template <typename DerivedGuardAccessor>
   GuardAccessor* clone_common(
       RootGuardManager* cloned_root,
-      py::function clone_filter_fn) {
+      const py::function& clone_filter_fn) {
     GuardManager* cloned_mgr = clone_guard_manager(
         get_guard_manager().get(), cloned_root, clone_filter_fn);
     if (cloned_mgr == nullptr) {
@@ -1704,12 +1704,12 @@ class GuardManager {
  public:
   // For cloning
   GuardManager(RootGuardManager* root, std::string source, bool is_dict)
-      : _root(root), _source(source), _is_dict(is_dict) {}
+      : _root(root), _source(std::move(source)), _is_dict(is_dict) {}
 
   void clone_common(
       RootGuardManager* cloned_root,
       GuardManager* cloned_mgr,
-      py::function clone_filter_fn) {
+      const py::function& clone_filter_fn) {
     for (const auto& guard : _leaf_guards) {
       cloned_mgr->_leaf_guards.emplace_back(guard);
       if (std::shared_ptr<RelationalGuard> relational_guard =
@@ -1731,7 +1731,7 @@ class GuardManager {
 
   virtual GuardManager* clone(
       RootGuardManager* cloned_root,
-      py::function clone_filter_fn) {
+      const py::function& clone_filter_fn) {
     if (!py::cast<bool>(clone_filter_fn(this))) {
       return nullptr;
     }
@@ -2016,11 +2016,6 @@ class RootGuardManager : public GuardManager {
     _relational_guard_resetters.emplace_back(std::move(relational_guard));
   }
 
-  void add_relational_guard_resetter_without_move(
-      std::shared_ptr<RelationalGuard> relational_guard) {
-    _relational_guard_resetters.emplace_back(relational_guard);
-  }
-
   // Python visible API to check guard function.
   bool check(py::handle value) {
     return check_nopybind(value.ptr());
@@ -2149,7 +2144,7 @@ class RootGuardManager : public GuardManager {
     _init_local_state = true;
   }
 
-  RootGuardManager* clone(py::function clone_filter_fn) {
+  RootGuardManager* clone(const py::function& clone_filter_fn) {
     // Use clone_filter_fn
     if (!py::cast<bool>(clone_filter_fn(this))) {
       return nullptr;
@@ -2456,19 +2451,19 @@ class DictGuardManager : public GuardManager {
       RootGuardManager* cloned_root,
       std::string source,
       Py_ssize_t size,
-      PyTypeObject* _expected_type,
+      PyTypeObject* expected_type,
       bool is_exact_dict_type,
       std::vector<Py_ssize_t> indices)
-      : GuardManager(cloned_root, source, true),
+      : GuardManager(cloned_root, std::move(source), true),
         _size(size),
-        _expected_type(_expected_type),
+        _expected_type(expected_type),
         _is_exact_dict_type(is_exact_dict_type),
-        _indices(indices) {}
+        _indices(std::move(indices)) {}
 
   template <typename T>
   GuardManager* clone_dict_guard_manager(
       RootGuardManager* cloned_root,
-      py::function clone_filter_fn) {
+      const py::function& clone_filter_fn) {
     if (!py::cast<bool>(clone_filter_fn(this))) {
       return nullptr;
     }
@@ -2488,19 +2483,22 @@ class DictGuardManager : public GuardManager {
 
       cloned_mgr->_key_value_managers[index] = std::make_pair(nullptr, nullptr);
 
-      GuardManager* cloned_key_manager;
       if (key_manager) {
-        cloned_key_manager = key_manager->clone(cloned_root, clone_filter_fn);
-        cloned_mgr->_key_value_managers[index].first =
-            std::unique_ptr<GuardManager>(cloned_key_manager);
+        GuardManager* cloned_key_manager =
+            key_manager->clone(cloned_root, clone_filter_fn);
+        if (cloned_key_manager) {
+          cloned_mgr->_key_value_managers[index].first =
+              std::unique_ptr<GuardManager>(cloned_key_manager);
+        }
       }
 
-      GuardManager* cloned_value_manager;
       if (value_manager) {
-        cloned_value_manager =
+        GuardManager* cloned_value_manager =
             value_manager->clone(cloned_root, clone_filter_fn);
-        cloned_mgr->_key_value_managers[index].second =
-            std::unique_ptr<GuardManager>(cloned_value_manager);
+        if (cloned_value_manager) {
+          cloned_mgr->_key_value_managers[index].second =
+              std::unique_ptr<GuardManager>(cloned_value_manager);
+        }
       }
     }
     return cloned_mgr;
@@ -2508,7 +2506,7 @@ class DictGuardManager : public GuardManager {
 
   GuardManager* clone(
       RootGuardManager* cloned_root,
-      py::function clone_filter_fn) override {
+      const py::function& clone_filter_fn) override {
     return clone_dict_guard_manager<DictGuardManager>(
         cloned_root, clone_filter_fn);
   }
@@ -2711,15 +2709,15 @@ class DictSubclassGuardManager : public DictGuardManager {
       std::vector<Py_ssize_t> indices)
       : DictGuardManager(
             cloned_root,
-            source,
+            std::move(source),
             size,
             _expected_type,
             is_exact_dict_type,
-            indices) {}
+            std::move(indices)) {}
 
   GuardManager* clone(
       RootGuardManager* cloned_root,
-      py::function clone_filter_fn) override {
+      const py::function& clone_filter_fn) override {
     return clone_dict_guard_manager<DictSubclassGuardManager>(
         cloned_root, clone_filter_fn);
   }
@@ -2728,15 +2726,14 @@ class DictSubclassGuardManager : public DictGuardManager {
 GuardManager* clone_guard_manager(
     GuardManager* from,
     RootGuardManager* cloned_root,
-    py::function clone_filter_fn) {
+    const py::function& clone_filter_fn) {
   return from->clone(cloned_root, clone_filter_fn);
 }
 
 void add_relational_guard_resetter_to_cloned_root(
     RootGuardManager* root,
     std::shared_ptr<RelationalGuard> guard) {
-  // Don't std::move. Shared the pointers between root and cloned_root.
-  root->add_relational_guard_resetter_without_move(guard);
+  root->add_relational_guard_resetter(std::move(guard));
 }
 
 std::unique_ptr<GuardManager> make_guard_manager(
@@ -3000,7 +2997,7 @@ class GetAttrGuardAccessor : public GuardAccessor {
 
   GuardAccessor* clone(
       RootGuardManager* cloned_root,
-      py::function clone_filter_fn) override {
+      const py::function& clone_filter_fn) override {
     return clone_common<GetAttrGuardAccessor>(cloned_root, clone_filter_fn);
   }
 
@@ -3073,7 +3070,7 @@ class GetGenericDictGuardAccessor : public GuardAccessor {
 
   GuardAccessor* clone(
       RootGuardManager* cloned_root,
-      py::function clone_filter_fn) override {
+      const py::function& clone_filter_fn) override {
     return clone_common<GetGenericDictGuardAccessor>(
         cloned_root, clone_filter_fn);
   }
@@ -3136,7 +3133,7 @@ class GetItemGuardAccessor : public GuardAccessor {
 
   GuardAccessor* clone(
       RootGuardManager* cloned_root,
-      py::function clone_filter_fn) override {
+      const py::function& clone_filter_fn) override {
     return clone_common<GetItemGuardAccessor>(cloned_root, clone_filter_fn);
   }
 
@@ -3215,7 +3212,7 @@ class DictGetItemGuardAccessor : public GuardAccessor {
 
   GuardAccessor* clone(
       RootGuardManager* cloned_root,
-      py::function clone_filter_fn) override {
+      const py::function& clone_filter_fn) override {
     return clone_common<DictGetItemGuardAccessor>(cloned_root, clone_filter_fn);
   }
 
@@ -3289,7 +3286,7 @@ class ListGetItemGuardAccessor : public GuardAccessor {
 
   GuardAccessor* clone(
       RootGuardManager* cloned_root,
-      py::function clone_filter_fn) override {
+      const py::function& clone_filter_fn) override {
     return clone_common<ListGetItemGuardAccessor>(cloned_root, clone_filter_fn);
   }
 
@@ -3356,7 +3353,7 @@ class TupleGetItemGuardAccessor : public GuardAccessor {
       : GuardAccessor(guard_manager) {}
   GuardAccessor* clone(
       RootGuardManager* cloned_root,
-      py::function clone_filter_fn) override {
+      const py::function& clone_filter_fn) override {
     return clone_common<TupleGetItemGuardAccessor>(
         cloned_root, clone_filter_fn);
   }
@@ -3431,7 +3428,7 @@ class GradGuardAccessor : public GuardAccessor {
       : GuardAccessor(guard_manager) {}
   GuardAccessor* clone(
       RootGuardManager* cloned_root,
-      py::function clone_filter_fn) override {
+      const py::function& clone_filter_fn) override {
     return clone_common<GradGuardAccessor>(cloned_root, clone_filter_fn);
   }
 };
@@ -3501,7 +3498,7 @@ class FuncDefaultsGuardAccessor : public GuardAccessor {
       : GuardAccessor(guard_manager) {}
   GuardAccessor* clone(
       RootGuardManager* cloned_root,
-      py::function clone_filter_fn) override {
+      const py::function& clone_filter_fn) override {
     return clone_common<FuncDefaultsGuardAccessor>(
         cloned_root, clone_filter_fn);
   }
@@ -3572,7 +3569,7 @@ class FuncKwDefaultsGuardAccessor : public GuardAccessor {
       : GuardAccessor(guard_manager) {}
   GuardAccessor* clone(
       RootGuardManager* cloned_root,
-      py::function clone_filter_fn) override {
+      const py::function& clone_filter_fn) override {
     return clone_common<FuncKwDefaultsGuardAccessor>(
         cloned_root, clone_filter_fn);
   }
@@ -3623,7 +3620,7 @@ class GlobalsGuardAccessor : public GuardAccessor {
       : GuardAccessor(guard_manager) {}
   GuardAccessor* clone(
       RootGuardManager* cloned_root,
-      py::function clone_filter_fn) override {
+      const py::function& clone_filter_fn) override {
     return clone_common<GlobalsGuardAccessor>(cloned_root, clone_filter_fn);
   }
 
@@ -3680,7 +3677,7 @@ class TypeGuardAccessor : public GuardAccessor {
       : GuardAccessor(guard_manager) {}
   GuardAccessor* clone(
       RootGuardManager* cloned_root,
-      py::function clone_filter_fn) override {
+      const py::function& clone_filter_fn) override {
     return clone_common<TypeGuardAccessor>(cloned_root, clone_filter_fn);
   }
 
@@ -3747,7 +3744,7 @@ class TupleIteratorGetItemAccessor : public GuardAccessor {
       : GuardAccessor(guard_manager) {}
   GuardAccessor* clone(
       RootGuardManager* cloned_root,
-      py::function clone_filter_fn) override {
+      const py::function& clone_filter_fn) override {
     return clone_common<TupleIteratorGetItemAccessor>(
         cloned_root, clone_filter_fn);
   }
@@ -3835,7 +3832,7 @@ class GlobalWeakRefGuardAccessor : public GuardAccessor {
       : GuardAccessor(guard_manager) {}
   GuardAccessor* clone(
       RootGuardManager* cloned_root,
-      py::function clone_filter_fn) override {
+      const py::function& clone_filter_fn) override {
     return clone_common<GlobalWeakRefGuardAccessor>(
         cloned_root, clone_filter_fn);
   }
@@ -3899,7 +3896,7 @@ class WeakRefCallGuardAccessor : public GuardAccessor {
       : GuardAccessor(guard_manager) {}
   GuardAccessor* clone(
       RootGuardManager* cloned_root,
-      py::function clone_filter_fn) override {
+      const py::function& clone_filter_fn) override {
     return clone_common<WeakRefCallGuardAccessor>(cloned_root, clone_filter_fn);
   }
 
@@ -3975,7 +3972,7 @@ class CallFunctionNoArgsGuardAccessor : public GuardAccessor {
       : GuardAccessor(guard_manager) {}
   GuardAccessor* clone(
       RootGuardManager* cloned_root,
-      py::function clone_filter_fn) override {
+      const py::function& clone_filter_fn) override {
     return clone_common<CallFunctionNoArgsGuardAccessor>(
         cloned_root, clone_filter_fn);
   }
@@ -4043,7 +4040,7 @@ class PythonLambdaGuardAccessor : public GuardAccessor {
       : GuardAccessor(guard_manager) {}
   GuardAccessor* clone(
       RootGuardManager* cloned_root,
-      py::function clone_filter_fn) override {
+      const py::function& clone_filter_fn) override {
     return clone_common<PythonLambdaGuardAccessor>(
         cloned_root, clone_filter_fn);
   }
