@@ -2068,7 +2068,8 @@ class PythonWrapperCodegen(CodeGen):
             old, new.get_size(), new.get_stride(), 0, self.wrapper_call
         )
         return (
-            f"{self.declare_maybe_reference}{new_name} = {self.move_begin}{reinterpret_view}{self.move_end}{del_line}"
+            f"{self.declare_maybe_reference}{new_name} = "
+            f"{self.move_begin}{reinterpret_view}{self.move_end}{del_line}"
             f"  {self.comment} reuse"
         )
 
@@ -2076,7 +2077,8 @@ class PythonWrapperCodegen(CodeGen):
         self.writeline(
             DeferredLine(
                 name,
-                f"{self.declare_maybe_reference}{name} = {self.move_begin}{layout.view.codegen_reference()}{self.move_end}{self.ending}"
+                f"{self.declare_maybe_reference}{name} = "
+                f"{self.move_begin}{layout.view.codegen_reference()}{self.move_end}{self.ending}"
                 f"  {self.comment} alias",
             )
         )
