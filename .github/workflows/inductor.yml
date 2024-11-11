@@ -118,9 +118,6 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       test-matrix: |
         { include: [
-          { config: "cpu_inductor_huggingface", shard: 1, num_shards: 1, runner: "linux.8xlarge.amx" },
-          { config: "cpu_inductor_timm", shard: 1, num_shards: 2, runner: "linux.8xlarge.amx" },
-          { config: "cpu_inductor_timm", shard: 2, num_shards: 2, runner: "linux.8xlarge.amx" },
           { config: "cpu_inductor_torchbench", shard: 1, num_shards: 2, runner: "linux.8xlarge.amx" },
           { config: "cpu_inductor_torchbench", shard: 2, num_shards: 2, runner: "linux.8xlarge.amx" },
           { config: "cpu_inductor_freezing_huggingface", shard: 1, num_shards: 1, runner: "linux.8xlarge.amx" },
