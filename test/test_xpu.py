@@ -237,7 +237,14 @@ print(torch.xpu.device_count())
         time.sleep(0.1)
         stream.record_event(end_event)
         torch.xpu.synchronize()
-        self.assertGreater(start_event.elapsed_time(end_event), 0)
+        if int(torch.version.xpu) >= 20250000:
+            self.assertGreater(start_event.elapsed_time(end_event), 0)
+        else:
+            with self.assertRaisesRegex(
+                NotImplementedError,
+                "elapsed_time of XPUEvent requires PyTorch to be built with SYCL compiler version 2025.0.0 or newer.",
+            ):
+                start_event.elapsed_time(end_event)
 
     def test_generic_stream_event(self):
         stream = torch.Stream("xpu")
