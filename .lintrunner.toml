@@ -70,8 +70,6 @@ include_patterns = [
     'aten/src/ATen/native/cudnn/*.cpp',
     'c10/**/*.h',
     'c10/**/*.cpp',
-    'distributed/c10d/*DMAConnectivity.*',
-    'distributed/c10d/*SymmetricMemory.*',
     'torch/csrc/**/*.h',
     'torch/csrc/**/*.hpp',
     'torch/csrc/**/*.cpp',
@@ -429,6 +427,7 @@ exclude_patterns = [
     'test/cpp/jit/upgrader_models/*.ptl.ff',
     '.ci/docker/common/install_rocm_drm.sh',
     '.lintrunner.toml',
+    '.ci/magma/package_files/*.patch',
 ]
 command = [
     'python3',
