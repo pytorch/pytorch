@@ -52,9 +52,9 @@ from torch import _guards
 from torch._C._dynamo.eval_frame import (  # noqa: F401
     reset_code,
     set_guard_error_hook,
+    set_skip_guard_eval_unsafe,
     skip_code,
     unsupported,
-    set_skip_guard_eval_unsafe,
 )
 from torch._dispatch.python import enable_python_dispatcher
 from torch._subclasses.fake_tensor import unset_fake_temporarily
@@ -184,8 +184,10 @@ def _callback_from_stance(callback):
     else:
         raise RuntimeError(f"invalid torch.compile stance '{_stance}'")
 
+
 def _is_skip_guard_eval_unsafe_stance():
     return _stance.skip_guard_eval_unsafe
+
 
 def _reset_guarded_backend_cache():
     global cached_backends
@@ -450,7 +452,9 @@ class _TorchDynamoContext:
             )
         self.cleanup_fns = [enter() for enter in self.enter_exit_hooks]
         self.prior = _maybe_set_eval_frame(_callback_from_stance(self.callback))
-        self.prior_skip_guard_eval_unsafe = set_skip_guard_eval_unsafe(_is_skip_guard_eval_unsafe_stance())
+        self.prior_skip_guard_eval_unsafe = set_skip_guard_eval_unsafe(
+            _is_skip_guard_eval_unsafe_stance()
+        )
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         assert self.prior is not unset
@@ -547,7 +551,9 @@ class _TorchDynamoContext:
 
             cleanups = [enter() for enter in self.enter_exit_hooks]
             prior = _maybe_set_eval_frame(_callback_from_stance(callback))
-            prior_skip_guard_eval_unsafe = set_skip_guard_eval_unsafe(_is_skip_guard_eval_unsafe_stance())
+            prior_skip_guard_eval_unsafe = set_skip_guard_eval_unsafe(
+                _is_skip_guard_eval_unsafe_stance()
+            )
 
             # Ensure that if an assertion occurs after graph pushes
             # something onto the DynamicLayerStack then we pop it off (the
@@ -725,7 +731,9 @@ class DisableContext(_TorchDynamoContext):
         @functools.wraps(fn)
         def _fn(*args, **kwargs):
             prior = _maybe_set_eval_frame(_callback_from_stance(self.callback))
-            prior_skip_guard_eval_unsafe = set_skip_guard_eval_unsafe(_is_skip_guard_eval_unsafe_stance())
+            prior_skip_guard_eval_unsafe = set_skip_guard_eval_unsafe(
+                _is_skip_guard_eval_unsafe_stance()
+            )
             try:
                 return fn(*args, **kwargs)
             finally:

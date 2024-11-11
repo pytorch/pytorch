@@ -135,7 +135,6 @@ class RunDiffGuardTests(torch._dynamo.test_case.TestCase):
             res2 = opt_fn(x, a=1, b=None)
             res3 = opt_fn(x, a=1, b=1)
 
-        breakpoint()
         self.assertEqual(ref1, res1)
         self.assertEqual(ref2, res2)
         self.assertEqual(ref3, res3)

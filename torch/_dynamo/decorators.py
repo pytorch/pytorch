@@ -97,7 +97,9 @@ class set_stance(_DecoratorContextManager):
 
     _dynamo_forbidden = True
 
-    def __init__(self, stance: str, skip_guard_eval_unsafe: bool = False, force_backend=None) -> None:
+    def __init__(
+        self, stance: str, skip_guard_eval_unsafe: bool = False, force_backend=None
+    ) -> None:
         if force_backend is not None and stance != "default":
             raise RuntimeError("non-default stance cannot have force_backend set")
 
