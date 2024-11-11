@@ -140,8 +140,6 @@ class ScheduleWithW(PipelineScheduleMulti):
         self.use_full_backward = False
 
         # Go through two microbatches
-        # TODO(whc) unify the semantics of the IR for old runtime with new runtime.
-        # make 'I' a supported action in old runtime
         self.pipeline_order = {
             0: [
                 _Action(0, F, 0),
@@ -149,12 +147,12 @@ class ScheduleWithW(PipelineScheduleMulti):
                 _Action(2, F, 0),
                 _Action(2, F, 1),
                 None,
-                _Action(2, B, 0),
+                _Action(2, I, 0),
                 _Action(2, W, 0),
-                _Action(0, B, 0),
-                _Action(2, B, 1),
+                _Action(0, I, 0),
+                _Action(2, I, 1),
                 _Action(0, W, 0),
-                _Action(0, B, 1),
+                _Action(0, I, 1),
                 _Action(2, W, 1),
                 _Action(0, W, 1),
             ],
@@ -163,12 +161,12 @@ class ScheduleWithW(PipelineScheduleMulti):
                 _Action(1, F, 0),
                 _Action(1, F, 1),
                 _Action(3, F, 0),
-                _Action(3, B, 0),
+                _Action(3, I, 0),
                 _Action(3, F, 1),
-                _Action(1, B, 0),
-                _Action(3, B, 1),
+                _Action(1, I, 0),
+                _Action(3, I, 1),
                 _Action(3, W, 0),
-                _Action(1, B, 1),
+                _Action(1, I, 1),
                 _Action(1, W, 0),
                 _Action(3, W, 1),
                 _Action(1, W, 1),
