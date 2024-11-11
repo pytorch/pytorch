@@ -11,6 +11,8 @@ fi
 
 token_file=registration-token.json
 
+ACCESS_TOKEN="$(cat /run/runner_secret)"
+
 # Generate registration token
 curl \
         -X POST \
