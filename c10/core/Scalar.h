@@ -121,6 +121,9 @@ class C10_API Scalar {
       return checked_convert<type, double>(v.d, #type);               \
     } else if (Tag::HAS_z == tag) {                                   \
       return checked_convert<type, c10::complex<double>>(v.z, #type); \
+    } else if (Tag::HAS_sd == tag) {                                  \
+      return checked_convert<type, double>(                           \
+          toSymFloat().guard_float(__FILE__, __LINE__), #type);       \
     }                                                                 \
     if (Tag::HAS_b == tag) {                                          \
       return checked_convert<type, bool>(v.i, #type);                 \
@@ -131,9 +134,6 @@ class C10_API Scalar {
     } else if (Tag::HAS_si == tag) {                                  \
       return checked_convert<type, int64_t>(                          \
           toSymInt().guard_int(__FILE__, __LINE__), #type);           \
-    } else if (Tag::HAS_sd == tag) {                                  \
-      return checked_convert<type, int64_t>(                          \
-          toSymFloat().guard_float(__FILE__, __LINE__), #type);       \
     } else if (Tag::HAS_sb == tag) {                                  \
       return checked_convert<type, int64_t>(                          \
           toSymBool().guard_bool(__FILE__, __LINE__), #type);         \
