@@ -39,10 +39,6 @@ name: !{{ build_environment }}
           path: !{{ directory }}
       {%- endif %}
           quiet-checkout: true
-      - name: Clean !{{ 'PyTorch' if repository == "pytorch/pytorch" else repository }} checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
       {%- if directory%}
         working-directory: !{{ directory }}
       {%- endif %}
