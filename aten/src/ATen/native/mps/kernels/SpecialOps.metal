@@ -22,6 +22,9 @@ T chbevl(T x, const float array[], const int len) {
   return T{0.5} * (b0 - b2);
 }
 
+// Copied from
+// https://github.com/pytorch/pytorch/blob/58b661cda2c002a8e1ac3bee494bfe1f7420437c/aten/src/ATen/native/cuda/Math.cuh#L502
+
 template <typename T>
 T i0(T _x) {
   auto x = fabs(_x);
@@ -74,6 +77,9 @@ T i0(T _x) {
 
   return static_cast<T>((exp(x) * chbevl(32.0 / x - 2.0, B, 25)) / sqrt(x));
 }
+
+// Copied from
+// https://github.com/pytorch/pytorch/blob/58b661cda2c002a8e1ac3bee494bfe1f7420437c/aten/src/ATen/native/cuda/Math.cuh#L576
 
 template <typename T>
 T i1(T _x) {
