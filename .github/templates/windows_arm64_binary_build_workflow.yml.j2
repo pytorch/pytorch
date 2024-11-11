@@ -108,6 +108,7 @@ jobs:
     {%- endif %}
     steps:
       !{{ checkout(deep_clone=False, directory="builder", repository="iremyux/pytorch-builder", branch="nightly-for-win-arm64") }}
+      !{{ common.checkout(deep_clone=False, directory="pytorch") }} 
       - name: Install Git
         shell: cmd
         run: |
@@ -128,7 +129,6 @@ jobs:
         shell: cmd
         run: |
           "${BUILDER_ROOT}/windows/arm64/bootstrap_rust.bat"
-      !{{ checkout(deep_clone=False, directory="pytorch", repository="iremyux/pytorch", branch="nightly-for-win-arm64",) }}
       - name: Build PyTorch binary
         shell: cmd
         run: |
