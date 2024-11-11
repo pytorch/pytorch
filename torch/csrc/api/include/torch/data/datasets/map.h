@@ -85,7 +85,7 @@ class MapDataset : public BatchDataset<
     if (auto batch = dataset_.get_batch(std::move(indices))) {
       return transform_.apply_batch(std::move(*batch));
     }
-    return nullopt;
+    return std::nullopt;
   }
 
   /// The underlying dataset being transformed.
