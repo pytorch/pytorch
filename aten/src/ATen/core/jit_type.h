@@ -1961,6 +1961,12 @@ struct getTypePtr_<c10::string_view> final {
   }
 };
 template <>
+struct getTypePtr_<std::string_view> final {
+  static decltype(auto) call() {
+    return StringType::get();
+  }
+};
+template <>
 struct getTypePtr_<at::Dimname> final {
   static decltype(auto) call() {
     return StringType::get();
@@ -2198,7 +2204,7 @@ struct TORCH_API InterfaceType : public NamedType {
     return is_module_;
   }
   static const TypeKind Kind = TypeKind::InterfaceType;
-  ~InterfaceType() override;
+  ~InterfaceType() override = default;
  private:
   InterfaceType(QualifiedName name, bool is_module);
   static bool isSubTypeImpl(

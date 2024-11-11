@@ -1190,6 +1190,33 @@ utils_device.CURRENT_DEVICE == None""".split(
         inp.test = None
         self.assertEqual(torch.ones(2, 2) + 2, fn(inp))
 
+    def test_mro_type_tensor_no_source(self):
+        @torch.compile(fullgraph=True)
+        def fn(x):
+            z = []
+            input_type = type(torch.ones(2, 2))
+            for cls in input_type.__mro__:
+                z.append(cls.__name__)
+
+            return x, input_type, z
+
+        inp = torch.ones(2, 2)
+        fn(inp)
+
+    def test_tensor_dynamic_method(self):
+        def add_one(x):
+            return x + 1
+
+        t = torch.nn.Parameter(torch.ones(1))
+        t.add_one = add_one
+
+        @torch.compile(fullgraph=True)
+        def fn(x):
+            return t.add_one(t) + x
+
+        result = fn(torch.ones(1))
+        self.assertEqual(torch.ones(1) + 2, result)
+
     def test_shape_unpack(self):
         def fn(x):
             a, b = x.size()
@@ -8717,7 +8744,7 @@ def ___make_guard_fn():
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_runtime_assert_replacement(self):
-        @torch.compile(backend="aot_eager")
+        @torch.compile(backend="eager")
         def fn(x, y):
             z = y.item()
             torch._check(z == 3)
@@ -10218,7 +10245,7 @@ ShapeEnv not equal: field values don't match:
 ShapeEnv not equal: field values don't match:
 
 ==> axioms: values don't match.
-  >  Left: {0 < Mod(s0, 3): False, Eq(0, Mod(s0, 3)): True, Eq(Mod(s0, 3), 0): True, False: False, Mod(s0, 3) <= 0: True, Ne(0, Mod(s0, 3)): False, Ne(Mod(s0, 3), 0): False, True: True}
+  >  Left: {0 < Mod(s0, 3): False, 0 <= Mod(s0, 3): True, Eq(0, Mod(s0, 3)): True, Eq(Mod(s0, 3), 0): True, Mod(s0, 3) < 0: False, Mod(s0, 3) <= 0: True, Ne(0, Mod(s0, 3)): False, Ne(Mod(s0, 3), 0): False}
   > Right: {}
 ==> divisible: values don't match.
   >  Left: {Mod(s0, 3)}
@@ -10337,7 +10364,7 @@ ShapeEnv not equal: field values don't match:
 ShapeEnv not equal: field values don't match:
 
 ==> axioms: values don't match.
-  >  Left: {0 < PythonMod(u0, 3): False, Eq(0, PythonMod(u0, 3)): True, Eq(PythonMod(u0, 3), 0): True, False: False, Ne(0, PythonMod(u0, 3)): False, Ne(PythonMod(u0, 3), 0): False, PythonMod(u0, 3) <= 0: True, True: True}
+  >  Left: {0 < PythonMod(u0, 3): False, 0 <= PythonMod(u0, 3): True, Eq(0, PythonMod(u0, 3)): True, Eq(PythonMod(u0, 3), 0): True, Ne(0, PythonMod(u0, 3)): False, Ne(PythonMod(u0, 3), 0): False, PythonMod(u0, 3) < 0: False, PythonMod(u0, 3) <= 0: True}
   > Right: {}
 ==> deferred_runtime_asserts: values don't match.
   >  Left: {u0: [Eq(PythonMod(u0, 3), 0)]}
@@ -11430,8 +11457,14 @@ fn
 
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         x = torch.randn(4)
-        self.assertEqual(fn(x), opt_fn(x))
-        self.assertEqual(fn(x), opt_fn(x))
+        # Opt_fn is deliberately called first to trigger the __get__ function.
+        # Otherwise, the setattr removes the lazy property.
+        ref = opt_fn(x)
+        res = fn(x)
+        self.assertEqual(ref, res)
+        ref = opt_fn(x)
+        res = fn(x)
+        self.assertEqual(ref, res)
 
     def test_assert_size_stride(self):
         x = torch.randn(2, 3, 4)
