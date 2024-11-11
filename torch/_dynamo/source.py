@@ -260,8 +260,8 @@ class AutoDerefLocalSource(ChainedSource):
         #    python value.
         # 3. can be used for caching guard managers.
         #
-        # (2) requires us to return `self.base.name()` here, because that's the
-        # only general way for obtaining the contents object via `eval`.
+        # (2) requires us to return `self.base.name()` here, in the scope given
+        # to `eval()`, cells are already dereferenced.
         #
         # What about name collision that can affect (3)? Well, auto-deferenced
         # cells should never have any guards on them (only guards on the

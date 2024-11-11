@@ -2599,7 +2599,7 @@ class InstructionTranslatorBase(
         speculation_log: SpeculationLog,
         distributed_state: Optional[DistributedState],
         # This determines whether to use the execution recorder.
-        f_func: Optional[types.FunctionType] = None,
+        closure: Optional[Tuple[Any]] = None,
     ) -> None:
         super().__init__()
         self.speculation_log = speculation_log
@@ -2636,9 +2636,9 @@ class InstructionTranslatorBase(
         self.f_code: types.CodeType = f_code
 
         # Execution record for replaying errors
-        if f_func is not None and config.replay_record_enabled:
+        if closure is not None and config.replay_record_enabled:
             self.exec_recorder = ExecutionRecorder(
-                func=f_func, code_options=code_options
+                code=f_code, closure=closure, code_options=code_options
             )
         else:
             self.exec_recorder = None
@@ -2693,10 +2693,11 @@ class InstructionTranslator(InstructionTranslatorBase):
     def __init__(
         self,
         instructions: List[Instruction],
-        f_func,
+        f_code,
         f_locals,
         f_globals,
         f_builtins,
+        closure,
         torch_function_mode_stack,
         code_options,
         compiler_fn,
@@ -2707,7 +2708,6 @@ class InstructionTranslator(InstructionTranslatorBase):
         speculation_log: SpeculationLog,
         distributed_state: Optional[DistributedState],
     ) -> None:
-        f_code = f_func.__code__
         _step_logger()(
             logging.INFO,
             f"torchdynamo start tracing {f_code.co_name} {code_options['co_filename']}:{code_options['co_firstlineno']}",
@@ -2729,6 +2729,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             f_locals=f_locals,
             f_globals=f_globals,
             f_builtins=f_builtins,
+            closure=closure,
             code_options=code_options,
             symbolic_locals={},  # set below
             # A global var is inserted only after a STORE_GLOBAL happens to it
@@ -2739,7 +2740,6 @@ class InstructionTranslator(InstructionTranslatorBase):
             inline_depth=0,
             speculation_log=speculation_log,
             distributed_state=distributed_state,
-            f_func=f_func,
         )
 
         self._throw_if_in_functorch()
@@ -2810,7 +2810,6 @@ class InstructionTranslator(InstructionTranslatorBase):
 
             # Populate `symbolic_locals` with cells captured by this frame.
             # TODO refactor with the above and `UserFunctionVariable.bind_args`.
-            closure = f_func.__closure__ or ()
             for idx, name, cell in zip(itertools.count(), self.freevars(), closure):
                 cell_source = LocalSource(name)
                 contents_source = AutoDerefLocalSource(cell_source)

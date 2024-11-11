@@ -283,17 +283,14 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                 )
 
             else:
+                # TODO figure out why source isn't available here, and whether
+                # we can fix that and remove this branch.
                 try:
                     contents_var = VariableTracker.build(parent, cell.cell_contents)
                 except ValueError:
                     # Cell has not yet been assigned
                     contents_var = variables.DeletedVariable()
                 cell_var = side_effects.track_cell_existing(None, cell, contents_var)
-                # NOTE: we don't support mutation to this cell because we don't
-                # have a source to materialize the writes.
-                # TODO figure out why we have this branch, and whether we can
-                # remove it.
-                cell_var.mutation_type = None
 
             closure_cells[name] = cell_var
 
