@@ -19,7 +19,7 @@
 #include <ATen/ops/zeros.h>
 #endif
 
-namespace at { namespace native {
+namespace at::native {
 
 // The maximum number of threads in a block
 #if defined(USE_ROCM)
@@ -212,8 +212,8 @@ template <typename input_scalar_t, typename stat_scalar_t, typename stat_accscal
 __global__ void batch_norm_transform_input_kernel(
     const GenericPackedTensorAccessor<const input_scalar_t, 3, RestrictPtrTraits, index_t> input,
     GenericPackedTensorAccessor<input_scalar_t, 3, RestrictPtrTraits, index_t> output,
-    const GenericPackedTensorAccessor<typename std::conditional<train, stat_accscalar_t, stat_scalar_t>::type, 1, RestrictPtrTraits, index_t> mean_,
-    const GenericPackedTensorAccessor<typename std::conditional<train, stat_accscalar_t, stat_scalar_t>::type, 1, RestrictPtrTraits, index_t> var_or_invstd,
+    const GenericPackedTensorAccessor<typename std::conditional_t<train, stat_accscalar_t, stat_scalar_t>, 1, RestrictPtrTraits, index_t> mean_,
+    const GenericPackedTensorAccessor<typename std::conditional_t<train, stat_accscalar_t, stat_scalar_t>, 1, RestrictPtrTraits, index_t> var_or_invstd,
     const GenericPackedTensorAccessor<const stat_scalar_t, 1, RestrictPtrTraits, index_t> weight,
     const GenericPackedTensorAccessor<const stat_scalar_t, 1, RestrictPtrTraits, index_t> bias,
     stat_accscalar_t epsilon) {
@@ -582,7 +582,7 @@ __global__ void batch_norm_backward_elemt_kernel(
 template <typename scalar_t, int64_t dim, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
 static GenericPackedTensorAccessor<scalar_t, dim, PtrTraits, index_t> get_packed_accessor(
     const Tensor& t, c10::string_view var_name) {
-  constexpr auto expect_type = c10::CppTypeToScalarType<typename std::remove_const<scalar_t>::type>::value;
+  constexpr auto expect_type = c10::CppTypeToScalarType<typename std::remove_const_t<scalar_t>>::value;
   const auto actual_type = t.scalar_type();
   TORCH_CHECK(actual_type == expect_type, "Expected ", var_name,
               " to have type ", expect_type, " but got ", actual_type);
@@ -1739,4 +1739,4 @@ at::Tensor batch_norm_backward_elemt_channels_last_cuda_template(
   return grad_input;
 }
 
-} } // namespace at::native
+} // namespace at::native

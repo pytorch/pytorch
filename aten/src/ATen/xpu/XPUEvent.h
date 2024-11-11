@@ -136,6 +136,12 @@ struct TORCH_XPU_API XPUEvent {
         enable_timing_ && other.enable_timing_,
         "Both events must be created with argument 'enable_timing=True'.");
 
+#if SYCL_COMPILER_VERSION < 20250000
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false,
+        "elapsed_time of XPUEvent requires PyTorch to be built with SYCL compiler version 2025.0.0 or newer.");
+#endif
+
     using namespace sycl::info::event_profiling;
     // Block until both of the recorded events are completed.
     uint64_t end_time_ns = other.event().get_profiling_info<command_end>();
@@ -157,12 +163,16 @@ struct TORCH_XPU_API XPUEvent {
 
  private:
   void assignEvent(sycl::queue& queue) {
+#if SYCL_COMPILER_VERSION >= 20250000
     if (enable_timing_) {
       event_ = std::make_unique<sycl::event>(
           sycl::ext::oneapi::experimental::submit_profiling_tag(queue));
     } else {
-      event_ = std::make_unique<sycl::event>(queue.ext_oneapi_submit_barrier());
+      event_ = std::make_unique<sycl::event>(queue.ext_oneapi_get_last_event());
     }
+#else
+    event_ = std::make_unique<sycl::event>(queue.ext_oneapi_submit_barrier());
+#endif
   }
 
   void reassignEvent(sycl::queue& queue) {

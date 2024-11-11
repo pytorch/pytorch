@@ -12,7 +12,7 @@
 #define HAS_WARP_MERGE_SORT() (CUDA_VERSION >= 110600)
 
 
-namespace at { namespace native {
+namespace at::native {
 
 template <typename T>
 __device__ inline void swapVars(T& t1, T& t2) {
@@ -340,4 +340,4 @@ radixSortKVInPlace(at::cuda::detail::TensorInfo<K, IndexType> keys,
   StoreValues(tmp_storage.store_values).Store(values_iter, local_values, keySliceSize);
 }
 
-}} // at::native
+} // namespace at::native

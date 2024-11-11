@@ -4,7 +4,9 @@ import os
 import sys
 
 import torch
+from torch._inductor.codegen.triton import TritonScheduling
 from torch._inductor.test_case import TestCase as InductorTestCase
+from torch._inductor.test_operators import realize
 from torch._inductor.utils import fresh_inductor_cache, is_big_gpu, run_and_get_code
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import slowTest, TEST_WITH_ASAN
@@ -18,7 +20,11 @@ sys.path.append(pytorch_test_dir)
 import contextlib
 import unittest
 
-from inductor.test_torchinductor import check_model, check_model_cuda, copy_tests
+from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
+    check_model,
+    check_model_cuda,
+    copy_tests,
+)
 from torch._inductor import config
 from torch._inductor.scheduler import Scheduler
 
@@ -163,8 +169,16 @@ class BenchmarkFusionTestTemplate:
 
         for c in out_code[0], out_code2[0]:
             FileCheck().check("async_compile.wait").check("DeviceGuard").check_count(
-                "empty_strided_cuda", 2, exactly=True
-            ).check("return").run(c)
+                "empty_strided_cuda", 1, exactly=True
+            ).check_regex("buf[0-9]* = buf[0-9]*; del buf[0-9]*").check("return").run(c)
+
+    def test_tield_kernel_fusion(self):
+        def f(x):
+            y = realize(x + x.t())
+            return y + 1
+
+        x = torch.randn(1024, 1024, device=self.device)
+        self.common(f, (x,))
 
 
 if HAS_CUDA and not TEST_WITH_ASAN:
@@ -174,6 +188,37 @@ if HAS_CUDA and not TEST_WITH_ASAN:
         device = "cuda"
 
     copy_tests(BenchmarkFusionTestTemplate, BenchmarkFusionCudaTest, "cuda")
+
+    class BenchmarkingTest(TestCase):
+        @unittest.skipIf(
+            torch.cuda.device_count() < 2, "The test need at least 2 devices"
+        )
+        def test_benchmark_on_non_zero_device(self):
+            hit_count = 0
+            with torch.cuda.device("cuda:0"):
+
+                @torch.compile
+                def relu(x):
+                    return realize(x.relu()) + x
+
+                x = torch.randn(int(16e6), device="cuda:1")
+
+                orig_benchmark_fused_nodes = TritonScheduling.benchmark_fused_nodes
+
+                def mock_benchmark_fused_nodes(*args, **kwargs):
+                    nonlocal hit_count
+                    hit_count += 1
+                    ms, path = orig_benchmark_fused_nodes(*args, **kwargs)
+                    self.assertTrue(ms > 0)
+                    return ms, path
+
+                with unittest.mock.patch.object(
+                    TritonScheduling,
+                    "benchmark_fused_nodes",
+                    mock_benchmark_fused_nodes,
+                ):
+                    relu(x)
+                self.assertTrue(hit_count > 0)
 
     class BenchmarkMultiTemplateFusionCudaTest(InductorTestCase):
         @classmethod
@@ -234,7 +279,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             for out_code in [code, code2]:
                 FileCheck().check("def call").check_count(
                     "empty_strided_cuda", 1, exactly=True
-                ).check("triton_tem_fused_relu_0.run").check_count(
+                ).check("triton_tem_fused_addmm_relu_0.run").check_count(
                     "del", 3, exactly=True
                 ).check(
                     "return"

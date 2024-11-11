@@ -206,7 +206,9 @@ class TestForeach(TestCase):
             _, _, func, ref = self._get_funcs(op)
         else:
             func, ref, _, _ = self._get_funcs(op)
-        for sample in op.sample_inputs(device, dtype, noncontiguous=noncontiguous):
+        for sample in op.sample_inputs(
+            device, dtype, noncontiguous=noncontiguous, allow_higher_dtype_scalars=True
+        ):
             ref_kwargs = sample.kwargs
             # div promotes ints to floats, so we cannot go on the fastpath there
             div_slowpath = (
@@ -305,7 +307,12 @@ class TestForeach(TestCase):
 
         scalar_self_arg_test_complete = False
         for i, sample in enumerate(
-            op.sample_inputs(device, dtype, noncontiguous=not is_fastpath)
+            op.sample_inputs(
+                device,
+                dtype,
+                noncontiguous=not is_fastpath,
+                allow_higher_dtype_scalars=True,
+            )
         ):
             (rhs_arg,) = sample.args
             kwargs = {} or sample.kwargs
@@ -347,7 +354,12 @@ class TestForeach(TestCase):
     def test_pointwise_op_with_tensor_of_scalarlist_overload(
         self, device, dtype, op, is_fastpath
     ):
-        for sample in op.sample_inputs(device, dtype, noncontiguous=not is_fastpath):
+        for sample in op.sample_inputs(
+            device,
+            dtype,
+            noncontiguous=not is_fastpath,
+            allow_higher_dtype_scalars=True,
+        ):
             assert isinstance(sample.args, tuple)
             assert len(sample.args) == 2
             inputs = [sample.input, *sample.args]
@@ -532,6 +544,24 @@ class TestForeach(TestCase):
 
             # Regression test for https://github.com/pytorch/pytorch/issues/113156
             torch._foreach_mul_(tensors, 1)
+
+    @onlyCUDA
+    @dtypes(torch.float32)
+    def test_foreach_check_stride_ignore_dims_of_one(self, device, dtype):
+        # default tensor stride is (9, 9, 3, 1).
+        tensor = torch.ones((2, 1, 3, 3), device=device, dtype=dtype)
+        strided_tensor = torch.ones(
+            (2, 1, 3, 3), device=device, dtype=dtype
+        ).as_strided((2, 1, 3, 3), (9, 1, 3, 1))
+        left_inputs = [tensor, strided_tensor]
+        right_inputs = [strided_tensor, tensor]
+        compare_result = tensor + strided_tensor
+        foreach_add_check_ = ForeachFuncWrapper(torch._foreach_add)
+        out = foreach_add_check_(
+            (left_inputs, right_inputs), is_cuda=True, expect_fastpath=True
+        )
+        for res in out:
+            self.assertEqual(res, compare_result)
 
     @ops(
         filter(lambda op: op.supports_out, foreach_binary_op_db),
@@ -816,7 +846,14 @@ class TestForeach(TestCase):
         method, ref, inplace_method, ref_inplace = self._get_funcs(op)
         # tensors: ['cuda', 'cpu]
         tensors = next(
-            iter(op.sample_inputs(device, dtype, num_input_tensors=[2]))
+            iter(
+                op.sample_inputs(
+                    device,
+                    dtype,
+                    num_input_tensors=[2],
+                    allow_higher_dtype_scalars=True,
+                )
+            )
         ).input
         tensors[1] = tensors[1].to("cpu")
         if not op.supports_out:
@@ -844,10 +881,26 @@ class TestForeach(TestCase):
     @ops(filter(lambda op: op.supports_out, foreach_binary_op_db))
     def test_binary_op_tensors_on_different_devices(self, device, dtype, op):
         _cuda_tensors = next(
-            iter(op.sample_inputs(device, dtype, num_input_tensors=[2], same_size=True))
+            iter(
+                op.sample_inputs(
+                    device,
+                    dtype,
+                    num_input_tensors=[2],
+                    same_size=True,
+                    allow_higher_dtype_scalars=True,
+                )
+            )
         ).input
         _cpu_tensors = next(
-            iter(op.sample_inputs("cpu", dtype, num_input_tensors=[2], same_size=True))
+            iter(
+                op.sample_inputs(
+                    "cpu",
+                    dtype,
+                    num_input_tensors=[2],
+                    same_size=True,
+                    allow_higher_dtype_scalars=True,
+                )
+            )
         ).input
         tensors1, tensors2 = list(zip(_cuda_tensors, _cpu_tensors))
 
@@ -877,10 +930,24 @@ class TestForeach(TestCase):
         # tensors3: ['cuda', 'cpu]
         # first tensorlist is zero-size when float32
         _cuda_tensors = list(
-            op.sample_inputs(device, dtype, num_input_tensors=[3], same_size=True)
+            op.sample_inputs(
+                device,
+                dtype,
+                num_input_tensors=[3],
+                same_size=True,
+                allow_higher_dtype_scalars=True,
+            )
         )[int(dtype == torch.float32)].input
         _cpu_tensors = next(
-            iter(op.sample_inputs("cpu", dtype, num_input_tensors=[3], same_size=True))
+            iter(
+                op.sample_inputs(
+                    "cpu",
+                    dtype,
+                    num_input_tensors=[3],
+                    same_size=True,
+                    allow_higher_dtype_scalars=True,
+                )
+            )
         ).input
         tensors1, tensors2, tensors3 = list(zip(_cuda_tensors, _cpu_tensors))
 
@@ -947,20 +1014,34 @@ class TestForeach(TestCase):
     @onlyCUDA
     @ops(foreach_reduce_op_db, allowed_dtypes=floating_types())
     @parametrize("use_cuda_graph", (False, True))
-    def test_big_num_tensors(self, device, dtype, op, use_cuda_graph):
+    @parametrize("w_empty", (False, True))
+    def test_big_num_tensors(self, device, dtype, op, use_cuda_graph, w_empty):
+        # foreach_max cannot handle empty tensors as max requires an identity
+        intersperse_empty_tensors = w_empty and op.name != "_foreach_max"
+
         N = 600
+        indices_with_empty_tensors = (
+            set()
+            if not intersperse_empty_tensors
+            else {200, 300, 301, 400, 401, 402, 404, 598}
+        )
         tensorlist = [
             make_tensor((2, 3), dtype=dtype, device=device, noncontiguous=False)
-            for _ in range(N)
+            if i not in indices_with_empty_tensors
+            else torch.empty(0, dtype=dtype, device=device)
+            for i in range(N)
         ]
         fn, ref_fn, *_ = self._get_funcs(op)
 
         import math
 
         if op.name == "_foreach_norm":
-            ords = (1, 2, math.inf)
+            ords = [1, 2]
+            if not intersperse_empty_tensors:
+                # inf norm over an empty tensor is not defined by vector norm as it expects an identity
+                ords.append(math.inf)
         else:
-            ords = (None,)
+            ords = [None]
 
         for ord in ords:
             kwargs = {"ord": ord} if ord else {}
@@ -988,20 +1069,28 @@ class TestForeach(TestCase):
 
     @onlyCUDA
     @ops(foreach_reduce_op_db)
-    def test_foreach_reduce_large_input(self, device, dtype, op):
-        # test inputs larger than kChunkSize = 65536
-        N = 65536 * 2
+    @parametrize("w_empty", (False, True))
+    def test_foreach_reduce_large_input(self, device, dtype, op, w_empty):
+        # test inputs larger than kChunkSize (65536) * max_num_blocks (320)
+        N = 65536 * 320 * 2
         disable_fastpath = False
         kwargs = {}
         if op.name == "_foreach_norm":
-            ord = 2
-            disable_fastpath = not (
-                ord in (1, 2)
-                and dtype in floating_types_and(torch.half, torch.bfloat16)
+            kwargs["ord"] = 2
+            disable_fastpath = dtype not in floating_types_and(
+                torch.half, torch.bfloat16
             )
-            kwargs["ord"] = ord
 
-        inputs = ([make_tensor((N,), dtype=dtype, device=device, noncontiguous=False)],)
+        tensorlist = [
+            make_tensor((N,), dtype=dtype, device=device, noncontiguous=False)
+        ]
+        # foreach_max cannot handle empty tensors as max over empty is undefined
+        if w_empty and op.name != "_foreach_max":
+            tensorlist += [
+                torch.empty(0, dtype=dtype, device=device),
+                make_tensor((N,), dtype=dtype, device=device, noncontiguous=False),
+            ]
+        inputs = (tensorlist,)
         wrapped_op, ref, _, _ = self._get_funcs(op)
         self.assertEqual(
             ref(inputs, **kwargs),
@@ -1220,7 +1309,9 @@ class TestForeach(TestCase):
         foreach_copy_ = op.inplace_variant
         copy_ = op.ref_inplace
         for non_blocking in (False, True):
-            for sample in op.sample_inputs(device, dtype, noncontiguous=False):
+            for sample in op.sample_inputs(
+                device, dtype, noncontiguous=False, allow_higher_dtype_scalars=True
+            ):
                 with torch.no_grad():
                     ref_input = [t.clone().detach() for t in sample.input]
                 foreach_copy_(sample.input, sample.args[0], non_blocking)
@@ -1240,7 +1331,9 @@ class TestForeach(TestCase):
     def test_foreach_copy_with_multi_dtypes(self, device, dtype, op):
         # check (a) multi_tensor_apply is called and (b) numerical parity with for-loop and Tensor.copy_
         foreach_copy_ = ForeachFuncWrapper(op.inplace_variant)
-        for sample in op.sample_inputs(device, dtype, noncontiguous=False):
+        for sample in op.sample_inputs(
+            device, dtype, noncontiguous=False, allow_higher_dtype_scalars=True
+        ):
             for src_dtype in floating_types_and(torch.half, torch.bfloat16):
                 if src_dtype == dtype:
                     continue
@@ -1249,13 +1342,12 @@ class TestForeach(TestCase):
                 out = foreach_copy_(
                     (self_tensors, src_tensors), is_cuda=True, expect_fastpath=True
                 )
-                self.assertEqual(
-                    out,
-                    [
-                        torch.empty_like(t).copy_(s)
-                        for t, s in zip(self_tensors, src_tensors)
-                    ],
-                )
+                ref_out = [
+                    torch.empty_like(t).copy_(s)
+                    for t, s in zip(self_tensors, src_tensors)
+                ]
+                for t, ref_t in zip(out, ref_out):
+                    self.assertTrue(torch.equal(t, ref_t))
 
     # Test reverse-mode & forward-mode AD if supported.
     @onlyCUDA
@@ -1307,6 +1399,7 @@ class TestForeach(TestCase):
             dtype,
             requires_grad=True,
             num_input_tensors=[5],
+            allow_higher_dtype_scalars=True,
             **value_range,
         ):
             # Skip `_foreach_pow.ScalarAndTensor(Scalar, Tensor[])`
@@ -1420,10 +1513,10 @@ def check_autodiff_sample(op, sample, dtype, is_inplace):
         return False, "In-place abs is not supported for complex tensors."
     if op.name == "_foreach_sub" and (
         (
-            isinstance(sample.args[0], list)
-            and any(isinstance(a, bool) for a in sample.args[0])
+            isinstance(sample.args[-1], list)
+            and any(isinstance(a, bool) for a in sample.args[-1])
         )
-        or isinstance(sample.args[0], bool)
+        or isinstance(sample.args[-1], bool)
     ):
         return False, _BOOL_SUB_ERR_MSG
     if op.name == "_foreach_norm" and (not is_inplace):
@@ -1434,10 +1527,10 @@ def check_autodiff_sample(op, sample, dtype, is_inplace):
         )
     rhs_arg_has_complex_number = sample.args and (
         (
-            isinstance(sample.args[0], list)
-            and any(isinstance(a, complex) for a in sample.args[0])
+            isinstance(sample.args[-1], list)
+            and any(isinstance(a, complex) for a in sample.args[-1])
         )
-        or (isinstance(sample.args[0], complex))
+        or (isinstance(sample.args[-1], complex))
     )
     if rhs_arg_has_complex_number and dtype == torch.float64:
         if op.name in (
@@ -1447,6 +1540,8 @@ def check_autodiff_sample(op, sample, dtype, is_inplace):
             "_foreach_minimum",
         ):
             return False, "clamp is not supported for complex types"
+        if op.name == "_foreach_lerp" and is_inplace:
+            return False, "value cannot be converted to type double without overflow"
         if not is_inplace:
             return False, ""
         else:

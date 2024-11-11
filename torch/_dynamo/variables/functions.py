@@ -1,11 +1,23 @@
 # mypy: ignore-errors
 
+import builtins
 import collections
 import functools
 import inspect
 import itertools
 import types
-from typing import Dict, List, Optional, TYPE_CHECKING, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Tuple,
+    TYPE_CHECKING,
+    TypeVar,
+    Union,
+)
+from typing_extensions import Never
 
 import torch
 
@@ -16,12 +28,14 @@ from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, ConstantSource, DefaultsSource, GetItemSource
 from ..utils import (
     check_constant_args,
+    check_unspec_or_constant_args,
     identity,
+    is_function,
     is_wrapper_or_member_descriptor,
     istype,
     make_cell,
 )
-from .base import MutableLocal, typestr, VariableTracker
+from .base import typestr, ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 
 
@@ -34,6 +48,13 @@ except ModuleNotFoundError:
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
     from torch._guards import Source
+    from torch._higher_order_ops.triton_kernel_wrap import (
+        TritonGridType,
+        TritonKernelType,
+    )
+
+
+_F = TypeVar("_F", bound=Callable)
 
 
 def wrap_bound_arg(tx: "InstructionTranslator", val, source=None):
@@ -41,9 +62,7 @@ def wrap_bound_arg(tx: "InstructionTranslator", val, source=None):
     if isinstance(val, VariableTracker):
         return val
     elif not source:
-        from torch._dynamo.variables.builder import SourcelessBuilder
-
-        return SourcelessBuilder.create(tx, val)
+        return VariableTracker.build(tx, val)
     else:
         # Create a lazy variable to avoid guarding on __defaults__ unless really
         # needed.
@@ -134,10 +153,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     @classmethod
     def create_with_source(cls, value, source):
         install_guard(source.make_guard(GuardBuilder.CLOSURE_MATCH))
-        return cls(
-            value,
-            source=source,
-        )
+        return cls(value, source=source)
 
     def __init__(self, fn, is_constant=False, **kwargs) -> None:
         super().__init__(**kwargs)
@@ -150,6 +166,8 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         assert isinstance(
             fn, (types.FunctionType, torch.jit.ScriptFunction)
         ), f"expected FunctionType found {typestr(fn)} {fn}"
+        # TODO(anijain2305) - Replace directly calling UserFunctionVariable with
+        # VariableBuilder, which handles the wrapping of _torchdynamo_inline.
         # unpack @torch._dynamo.optimize()(fn) wrapped function
         fn = inspect.getattr_static(fn, "_torchdynamo_inline", fn)
         self.fn: types.FunctionType = fn
@@ -203,9 +221,11 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         )
         if fn.__kwdefaults__:
             kwdefaults_sources = {
-                k: None
-                if self.source is None
-                else DefaultsSource(self.source, k, is_kw=True)
+                k: (
+                    None
+                    if self.source is None
+                    else DefaultsSource(self.source, k, is_kw=True)
+                )
                 for k in fn.__kwdefaults__
             }
             fake_func.__kwdefaults__ = {
@@ -224,67 +244,55 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         for idx, name, cell in zip(
             itertools.count(), self.fn.__code__.co_freevars, closure
         ):
-            if name == "__class__":
-                source = AttrSource(self.source, "__class__") if self.source else None
-                result[name] = variables.UserDefinedClassVariable(
-                    cell.cell_contents,
-                    source=source,
-                )
-            else:
-                var = tx.match_nested_cell(name, cell)
-                if var is not None:
-                    # optimization for cleaner codegen
-                    result[name] = var
-                elif self.source:
-                    from .builder import VariableBuilder
-
-                    side_effects = parent.output.side_effects
-                    if cell in side_effects:
-                        out = side_effects[cell]
-                    else:
-                        closure_cell = GetItemSource(
-                            AttrSource(self.source, "__closure__"), idx
-                        )
-                        closure_cell_contents = AttrSource(
-                            closure_cell, "cell_contents"
-                        )
-                        try:
-                            contents_var = VariableBuilder(
-                                parent, closure_cell_contents
-                            )(cell.cell_contents)
-                        except ValueError:
-                            # Cell has not yet been assigned
-                            contents_var = variables.DeletedVariable()
-
-                        if (
-                            closure_cell_contents.name()
-                            not in tx.mutated_closure_cell_contents
-                        ):
-                            # Optimistically don't allocate the cell, to
-                            # reduce the number of side effects.  This is
-                            # important for cond, as without it, any accesses
-                            # to closures create side effects and cond doesn't
-                            # support side effects.  If we're wrong and this
-                            # closure cell gets written to, we will restart
-                            # the analysis with this cell's name in the
-                            # mutated list here
-                            result[name] = contents_var
-                            continue
-
-                        # cells are written to with "cell_contents",
-                        # so the source should just be the closure_cell, not its contents
-                        out = side_effects.track_cell_existing(closure_cell, cell)
-                        side_effects.store_cell(
-                            out,
-                            contents_var,
-                        )
-
-                    result[name] = out
-
+            var = tx.match_nested_cell(name, cell)
+            if var is not None:
+                # optimization for cleaner codegen
+                result[name] = var
+            elif self.source:
+                side_effects = parent.output.side_effects
+                if cell in side_effects:
+                    out = side_effects[cell]
                 else:
-                    from .builder import SourcelessBuilder
+                    closure_cell = GetItemSource(
+                        AttrSource(self.source, "__closure__"), idx
+                    )
+                    closure_cell_contents = AttrSource(closure_cell, "cell_contents")
+                    try:
+                        contents_var = VariableTracker.build(
+                            parent, cell.cell_contents, closure_cell_contents
+                        )
+                    except ValueError:
+                        # Cell has not yet been assigned
+                        contents_var = variables.DeletedVariable()
 
-                    result[name] = SourcelessBuilder.create(tx, cell.cell_contents)
+                    if id(cell) not in tx.mutated_closure_cell_ids:
+                        # Optimistically don't allocate the cell, to
+                        # reduce the number of side effects.  This is
+                        # important for cond, as without it, any accesses
+                        # to closures create side effects and cond doesn't
+                        # support side effects.  If we're wrong and this
+                        # closure cell gets written to, we will restart
+                        # the analysis with this cell's name in the
+                        # mutated list here
+                        result[name] = contents_var
+                        # Map the variable to the original cell so we can
+                        # look it up later, see
+                        # `InliningInstructionTranslator.STORE_DEREF`.
+                        tx.contents_var_to_mutated_cell[contents_var] = cell
+                        continue
+
+                    # cells are written to with "cell_contents",
+                    # so the source should just be the closure_cell, not its contents
+                    out = side_effects.track_cell_existing(closure_cell, cell)
+                    side_effects.store_cell(
+                        out,
+                        contents_var,
+                    )
+
+                result[name] = out
+
+            else:
+                result[name] = VariableTracker.build(tx, cell.cell_contents)
 
         return result, closure_cells
 
@@ -292,17 +300,14 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         pass
 
     def var_getattr(self, tx: "InstructionTranslator", name: str):
-        source = AttrSource(self.source, name) if self.source else None
+        source = self.source and AttrSource(self.source, name)
         try:
             subobj = inspect.getattr_static(self.fn, name)
         except AttributeError:
-            options = {"source": source}
-            return variables.GetAttrVariable(self, name, **options)
+            return variables.GetAttrVariable(self, name, source=source)
         if source:
             return variables.LazyVariableTracker.create(subobj, source)
-        from .builder import SourcelessBuilder
-
-        return SourcelessBuilder.create(tx, subobj)
+        return VariableTracker.build(tx, subobj)
 
     def call_hasattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         result = hasattr(self.fn, name)
@@ -318,7 +323,20 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             return invoke_and_store_as_constant(
                 tx, self.fn, self.get_name(), args, kwargs
             )
-
+        if (
+            tx.output.current_tracer.under_activation_checkpoint
+            and not tx.output.current_tracer.allow_side_effects_under_checkpoint
+        ):
+            try:
+                from torch.distributed._composable.fsdp._fsdp_state import FSDPState
+            except Exception:
+                FSDPState = None
+            if FSDPState is not None and self.fn in [
+                FSDPState._pre_forward,
+                FSDPState._post_forward,
+            ]:
+                with torch._dynamo.side_effects.allow_side_effects_under_checkpoint(tx):
+                    return super().call_function(tx, args, kwargs)
         return super().call_function(tx, args, kwargs)
 
 
@@ -329,7 +347,7 @@ class UserMethodVariable(UserFunctionVariable):
         super().__init__(fn=fn, **kwargs)
         self.obj = obj
 
-    def __str__(self) -> str:
+    def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.fn}, {self.obj})"
 
     def self_args(self):
@@ -444,7 +462,6 @@ def invoke_and_store_as_constant(tx: "InstructionTranslator", fn, name, args, kw
 
 class NestedUserFunctionVariable(BaseUserFunctionVariable):
     _nonvar_fields = {
-        "closure_scope",
         "f_globals",
         *BaseUserFunctionVariable._nonvar_fields,
     }
@@ -458,7 +475,6 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         kwdefaults,
         annotations,
         closure,
-        closure_scope,
         wrapped_reconstructible=None,
         **kwargs,
     ) -> None:
@@ -473,9 +489,6 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         self.kwdefaults = kwdefaults
         self.annotations = annotations
         self.closure = closure
-        if closure is None:
-            closure_scope = None
-        self.closure_scope = closure_scope
         # Either a source or a VT with .can_reconstruct() == True
         self.wrapped_reconstructible: Optional[
             Union[Source, VariableTracker]
@@ -521,7 +534,8 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         return self.f_globals
 
     def bind_args(self, parent, args, kwargs):
-        from .misc import InlinedClosureVariable
+        # Avoid circular import
+        from .misc import ClosureVariable, NewCellVariable
 
         code = self.get_code()
         func = types.FunctionType(
@@ -542,23 +556,15 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         for idx, name in enumerate(code.co_freevars):
             cell = self.closure.items[idx]
             assert name not in result
-            if isinstance(cell, InlinedClosureVariable):
-                # InlinedClosureVariable's are created from LOAD_CLOSURE's from
-                # InliningInstructionTranslators when the variable name is not found in closure_cells.
-                # They should remain outside of closure_cells, so that our callee (the
-                # InliningInstructionTranslator that traces `func`) handles
-                # the cell correctly - that is, the cell's contents are treated as if they
-                # are local variables, like in UserFunctionVariable's bind_args for freevars.
-                cand = parent
-                while cand and name not in cand.symbolic_locals:
-                    cand = cand.parent
-                if cand is None:
-                    raise RuntimeError(
-                        f"Couldn't find {name} in the symbolic_locals of the inline interpreter stack"
-                    )
-                result[name] = cand.symbolic_locals[name]
+            # In the regular case, a cell is either a `ClosureVariable` or
+            # `NewCellVariable`.
+            if isinstance(cell, (ClosureVariable, NewCellVariable)):
+                closure_cells[name] = cell
             else:
-                closure_cells[name] = self.closure.items[idx]
+                # We model unmodified cells captured by `UserFunctionVariable` as
+                # their contents, in tracer's `symbolic_locals`. See
+                # `UserFunctionVariable::bind_args`.
+                result[name] = cell
 
         return result, closure_cells
 
@@ -624,9 +630,6 @@ class SkipFunctionVariable(VariableTracker):
         self.value = value
         self.reason = reason
 
-    def python_type(self):
-        return type(self.value)
-
     def as_python_constant(self):
         return self.value
 
@@ -637,10 +640,7 @@ class SkipFunctionVariable(VariableTracker):
             # attribute lookup. They are unlikely to be changed, so we can skip
             # guarding them.
             install_guard(source.make_guard(GuardBuilder.FUNCTION_MATCH))
-        return cls(
-            value,
-            source=source,
-        )
+        return cls(value, source=source)
 
     @staticmethod
     @functools.lru_cache(None)
@@ -668,7 +668,7 @@ class SkipFunctionVariable(VariableTracker):
                 **{k: v.as_python_constant() for k, v in kwargs.items()},
             )
             return self.fold_through_function_to_wrapper().get(self.value)(
-                value, mutable_local=MutableLocal()
+                value, mutation_type=ValueMutationNew()
             )
         elif (
             self.value is functools.wraps
@@ -727,6 +727,12 @@ class SkipFunctionVariable(VariableTracker):
                     )
                     # also warn on it because most users won't see the graph break message
                     torch._dynamo.utils.warn_once(msg)
+            if self.value.__qualname__ == "allow_in_graph":
+                msg = (
+                    "Found an allow_in_graph decorator to a function which "
+                    "is created inside the parent function that is getting "
+                    "compiled. This is not supported for now."
+                )
             msg += f"', {self.reason}'" if self.reason else ""
             unimplemented(msg)
 
@@ -747,14 +753,8 @@ class WrapperUserFunctionVariable(VariableTracker):
     def var_getattr(self, tx: "InstructionTranslator", name):
         if name == self.attr_to_trace:
             val = getattr(self.wrapper_obj, self.attr_to_trace)
-            if self.source:
-                from .builder import VariableBuilder
-
-                return VariableBuilder(tx, AttrSource(self.source, name))(val)
-            else:
-                from .builder import SourcelessBuilder
-
-                return SourcelessBuilder.create(tx, val)
+            source = self.source and AttrSource(self.source, name)
+            return VariableTracker.build(tx, val, source)
 
         return super().var_getattr(tx, name)
 
@@ -932,24 +932,53 @@ class FunctoolsPartialVariable(VariableTracker):
 class PolyfilledFunctionVariable(VariableTracker):
     _nonvar_fields = {
         "fn",
-        *BaseUserFunctionVariable._nonvar_fields,
+        "wrapped_fn",
+        "traceable_fn",
+        *VariableTracker._nonvar_fields,
     }
 
     @classmethod
     @functools.lru_cache(None)
-    def _get_polyfill_handlers(cls):
+    def _get_polyfill_handlers(cls) -> Dict[Callable[..., Any], types.FunctionType]:
         return {}
 
     @classmethod
     def create_with_source(cls, value, source):
-        return cls(
-            value,
-            source=source,
-        )
+        install_guard(source.make_guard(GuardBuilder.FUNCTION_MATCH))
 
-    def __init__(self, fn: VariableTracker, **kwargs) -> None:
+        return cls(value, source=source)
+
+    def __init__(self, fn: _F, **kwargs) -> None:
         super().__init__(**kwargs)
-        self.fn = fn
+        self.fn: _F = fn
+
+        handler = self._get_polyfill_handlers().get(fn, fn)
+        assert callable(handler), f"Polyfill handler {handler} is not callable for {fn}"
+        for candidate_attr in (
+            "__torch_dynamo_polyfill__",  # registered polyfill
+            "__python_implementation__",  # self handler from third-party libraries
+        ):
+            candidate = getattr(handler, candidate_attr, None)
+            if candidate:
+                assert callable(candidate)
+                traceable_fn = candidate
+                break
+        else:
+            raise RuntimeError(
+                f"Polyfill handler {handler} does not have a traceable function"
+            )
+
+        self.wrapped_fn: _F = handler
+        self.traceable_fn: _F = traceable_fn
+
+    @property
+    def polyfill_fn(self) -> _F:
+        return self.traceable_fn
+
+    def can_constant_fold_through(self):
+        return getattr(
+            self.wrapped_fn, "__torch_dynamo_can_constant_fold_through__", False
+        )
 
     def get_function(self):
         return self.as_python_constant()
@@ -960,48 +989,94 @@ class PolyfilledFunctionVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        from torch._dynamo.variables.builder import SourcelessBuilder
+        if self.can_constant_fold_through() and check_unspec_or_constant_args(
+            args, kwargs
+        ):
+            result = (
+                self.fn(  # use the original function which is faster than the polyfill
+                    *[x.as_python_constant() for x in args],
+                    **{k: v.as_python_constant() for k, v in kwargs.items()},
+                )
+            )
+            return VariableTracker.build(tx, result)
 
-        handler = self._get_polyfill_handlers().get(self.fn)
-        if handler:
-            assert callable(handler)
-            return SourcelessBuilder.create(tx, handler).call_function(tx, args, kwargs)
+        # Special case for sum on tuple/list of ints
+        if (
+            self.fn is builtins.sum
+            and len(args) == 1
+            and not kwargs
+            and isinstance(args[0], (variables.ListVariable, variables.TupleVariable))
+            and all(
+                (isinstance(x, variables.ConstantVariable) and isinstance(x.value, int))
+                or (isinstance(x, variables.SymNodeVariable) and x.python_type() is int)
+                for x in args[0].items
+            )
+        ):
+            return variables.SymNodeVariable.create(
+                tx,
+                tx.output.create_proxy(
+                    "call_function",
+                    torch.sym_sum,
+                    (tuple(a.as_proxy() for a in args[0].items),),
+                    {},
+                ),
+                sym_num=torch.sym_sum(
+                    [
+                        (
+                            x.value
+                            if isinstance(x, variables.ConstantVariable)
+                            else x.sym_num
+                        )
+                        for x in args[0].items
+                    ]
+                ),
+            )
 
-        for candidate in ("__torch_dynamo_polyfill__", "__python_implementation__"):
-            handler = getattr(self.fn, candidate, None)
-            if handler:
-                assert callable(handler)
-                if self.source:
-                    source = AttrSource(self.source, candidate)
-                    return UserFunctionVariable.create_with_source(
-                        handler,
-                        source=source,
-                    ).call_function(tx, args, kwargs)
-                return SourcelessBuilder.create(
-                    tx,
-                    handler,
-                ).call_function(tx, args, kwargs)
+        traceable_function_variable = VariableTracker.build(tx, self.traceable_fn)
+        return traceable_function_variable.call_function(tx, args, kwargs)
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        if name == "__call__":
+            return self.call_function(tx, args, kwargs)
+
+        method = getattr(self.fn, name, None)
+        assert method is not None, f"Member {name} not found in {self.fn}"
+        assert is_function(method), f"Member {name} is not callable in {self.fn}"
+        options = {}
+        if self.source:
+            options["source"] = AttrSource(self.source, name)
+        polyfilled_method_variable = PolyfilledFunctionVariable(method, **options)
+        return polyfilled_method_variable.call_function(tx, args, kwargs)
 
     def as_python_constant(self):
         return self.fn
 
 
-from torch._higher_order_ops.triton_kernel_wrap import TritonHOPifier
+from torch._higher_order_ops.triton_kernel_wrap import (
+    TMADescriptorMetadata,
+    TritonHOPifier,
+)
 
 
 class DynamoTritonHOPifier(TritonHOPifier):
-    def raise_unsupported(self, msg):
+    def raise_unsupported(self, msg: str) -> Never:
         raise Unsupported(msg)
 
-    def is_callable(self, maybe_callable):
+    def is_callable(self, maybe_callable: Any) -> bool:
         return isinstance(
             maybe_callable, (NestedUserFunctionVariable, UserFunctionVariable)
         )
 
-    def get_value(self, val):
+    def get_value(self, val: Any) -> Any:
         return val.value
 
-    def check_grid(self, grid):
+    def check_grid(self, grid) -> Tuple[torch.fx.proxy.Proxy, ...]:
         from .lists import BaseListVariable
 
         if isinstance(grid, BaseListVariable):
@@ -1014,9 +1089,21 @@ class DynamoTritonHOPifier(TritonHOPifier):
         grid = grid.call_function(tx, [meta], {})
         return grid
 
-    def call_HOP(self, variable, grids, combined_args_raw, tx):
+    def call_HOP(self, variable, grids, combined_args_raw, tx) -> ConstantVariable:
         from .constant import ConstantVariable
         from .dicts import ConstDictVariable
+
+        # as we can only pass tensors as non-const args in fx graph,
+        # here we replace TMA descriptors (TMADescriptorVariable
+        # instances) with the underlying tensors, while moving the
+        # TMA descriptor-related metadata to a separate argument,
+        # so that we can reconstruct the TMA descriptors downstream
+        tma_descriptor_metadata: TMADescriptorMetadata = {}
+        for k in list(combined_args_raw.keys()):
+            v = combined_args_raw[k]
+            if isinstance(v, TMADescriptorVariable):
+                tma_descriptor_metadata[k] = v.to_metadata()
+                combined_args_raw[k] = v.data_ptr.from_tensor
 
         combined_args = {
             variables.ConstantVariable.create(k): v
@@ -1042,6 +1129,13 @@ class DynamoTritonHOPifier(TritonHOPifier):
             if not isinstance(v, ConstantVariable)
         }
 
+        for v in non_constant_args.values():
+            v = v.realize()
+            if not isinstance(v, (variables.TensorVariable, variables.SymNodeVariable)):
+                self.raise_unsupported(
+                    f"Unexpected argument type for a Triton kernel: {repr(v)}."
+                )
+
         constant_args_idx = kernel_side_table.add_constant_args(constant_args)
         meta = ConstDictVariable(non_constant_args, dict)
         tx.output.create_proxy(
@@ -1052,6 +1146,7 @@ class DynamoTritonHOPifier(TritonHOPifier):
                 "kernel_idx": variable.kernel_idx,
                 "constant_args_idx": constant_args_idx,
                 "grid": grids,
+                "tma_descriptor_metadata": tma_descriptor_metadata,
                 "kwargs": meta.as_proxy(),
             },
         )
@@ -1065,6 +1160,10 @@ dynamo_triton_hopifier_singleton = DynamoTritonHOPifier()
 
 
 class TritonKernelVariable(VariableTracker):
+    grid: "TritonGridType"
+    kernel: "TritonKernelType"
+    kernel_idx: Optional[int]
+
     def __init__(self, kernel, kernel_idx, grid, **kwargs) -> None:
         super().__init__(**kwargs)
         dynamo_triton_hopifier_singleton.init_variable(self, kernel, kernel_idx, grid)
@@ -1093,3 +1192,101 @@ class TritonKernelVariable(VariableTracker):
 
         # Bail out to parent's implementation
         return super().call_method(tx, name, args, kwargs)
+
+    def specialize_symbolic(self, arg: Any) -> Any:
+        from .constant import ConstantVariable
+        from .tensor import SymNodeVariable
+
+        # See [Note: Specialize tl.constexpr args in user-defined triton kernels]
+        if isinstance(arg, SymNodeVariable):
+            return ConstantVariable.create(arg.evaluate_expr())
+        return arg
+
+
+class TMADescriptorVariable(VariableTracker):
+    def __init__(
+        self,
+        data_ptr: "variables.DataPtrVariable",
+        dims: "List[ConstantVariable]",
+        block_dims: "List[ConstantVariable]",
+        element_size: "ConstantVariable",
+        **kwargs,
+    ):
+        assert isinstance(data_ptr, variables.DataPtrVariable)
+        super().__init__(**kwargs)
+        self.data_ptr = data_ptr
+        self.dims = dims
+        self.block_dims = block_dims
+        self.element_size = element_size
+
+    def to_metadata(self):
+        return (
+            [dim.as_proxy() for dim in self.dims],
+            [dim.as_proxy() for dim in self.block_dims],
+            self.element_size.as_proxy(),
+        )
+
+    def reconstruct(self, codegen):
+        codegen.add_push_null(
+            lambda: codegen.load_import_from(
+                "triton.tools.experimental_descriptor",
+                f"create_{len(self.dims)}d_tma_descriptor",
+            )
+        )
+        self.data_ptr.reconstruct(codegen)
+        args = [*self.dims, *self.block_dims, self.element_size]
+        codegen.foreach(args)
+        codegen.call_function(len(args) + 1, False)
+
+
+class CreateTMADescriptorVariable(VariableTracker):
+    def __init__(
+        self,
+        rank: int,
+        **kwargs,
+    ) -> None:
+        assert rank in (1, 2)
+        super().__init__(**kwargs)
+        self.rank = rank
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        ptr = kwargs["ptr"] if "ptr" in kwargs else args[0]
+
+        if not isinstance(ptr, variables.DataPtrVariable):
+            raise Unsupported(
+                "Please ensure there were no graph breaks between "
+                f"create_{self.rank}d_tma_descriptor and the upstream "
+                ".data_ptr() call."
+            )
+
+        if self.rank == 1:
+            assert len(args) + len(kwargs) == 4
+            dims = [
+                kwargs["dim"] if "dim" in kwargs else args[1],
+            ]
+            block_dims = [
+                kwargs["block_dim"] if "block_dim" in kwargs else args[2],
+            ]
+        else:
+            assert len(args) + len(kwargs) == 6
+            dims = [
+                kwargs["dim1"] if "dim1" in kwargs else args[1],
+                kwargs["dim0"] if "dim0" in kwargs else args[2],
+            ]
+            block_dims = [
+                kwargs["block_dim1"] if "block_dim1" in kwargs else args[3],
+                kwargs["block_dim0"] if "block_dim0" in kwargs else args[4],
+            ]
+        element_size = kwargs["element_size"] if "element_size" in kwargs else args[-1]
+
+        return TMADescriptorVariable(
+            data_ptr=ptr,
+            dims=dims,
+            block_dims=block_dims,
+            element_size=element_size,
+        )

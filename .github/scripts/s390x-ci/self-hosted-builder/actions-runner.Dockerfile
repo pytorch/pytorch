@@ -1,12 +1,12 @@
 # Self-Hosted IBM Z Github Actions Runner.
 
 # Temporary image: amd64 dependencies.
-FROM docker.io/amd64/ubuntu:22.04 as ld-prefix
+FROM docker.io/amd64/ubuntu:23.10 as ld-prefix
 ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get -y install ca-certificates libicu70 libssl3
+RUN apt-get update && apt-get -y install ca-certificates libicu72 libssl3
 
 # Main image.
-FROM docker.io/s390x/ubuntu:22.04
+FROM docker.io/s390x/ubuntu:23.10
 
 # Packages for pytorch building and testing.
 ENV DEBIAN_FRONTEND=noninteractive
@@ -16,6 +16,7 @@ RUN apt-get update && apt-get -y install \
         gcc \
         git \
         jq \
+        zip \
         libxml2-dev \
         libxslt-dev \
         ninja-build \
@@ -43,24 +44,28 @@ COPY fs/ /
 
 RUN chmod +x /usr/bin/actions-runner /usr/bin/entrypoint
 
+# install podman
+RUN apt -y install podman podman-docker
+
 # amd64 Github Actions Runner.
 RUN useradd -m actions-runner
 USER actions-runner
 WORKDIR /home/actions-runner
-RUN curl -L https://github.com/actions/runner/releases/download/v2.309.0/actions-runner-linux-x64-2.309.0.tar.gz | tar -xz
 
-# repository
-ARG repo
+# set up python virtual environment which is later used by runner.
+# build workflows use "python -m pip install ...",
+# and it doesn't work for non-root user
+RUN virtualenv --system-site-packages venv
 
-# repository token
-ARG token
+# copy prebuilt manywheel docker image for builds and tests
+# build command is:
+# GPU_ARCH_TYPE=cpu-s390x "$(pwd)/manywheel/build_docker.sh"
+# and save command is:
+# docker image save -o manywheel-s390x.tar pytorch/manylinuxs390x-builder:cpu-s390x
+#
+COPY --chown=actions-runner:actions-runner manywheel-s390x.tar /home/actions-runner/manywheel-s390x.tar
 
-RUN ./config.sh \
-        --unattended \
-        --url "https://github.com/${repo}" \
-        --token "${token}" \
-        --no-default-labels \
-        --labels self-hosted,linux.s390x
+RUN curl -L https://github.com/actions/runner/releases/download/v2.317.0/actions-runner-linux-x64-2.317.0.tar.gz | tar -xz
 
 ENTRYPOINT ["/usr/bin/entrypoint"]
 CMD ["/usr/bin/actions-runner"]

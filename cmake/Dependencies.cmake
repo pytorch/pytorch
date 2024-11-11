@@ -95,11 +95,10 @@ if(USE_XPU)
     message(WARNING "Not compiling with XPU. Could NOT find SYCL."
     "Suppress this warning with -DUSE_XPU=OFF.")
     caffe2_update_option(USE_XPU OFF)
-  else()
-    if(LINUX)
-      string(APPEND CMAKE_CXX_FLAGS " -D__INTEL_PREVIEW_BREAKING_CHANGES")
-    endif()
   endif()
+  foreach(flag ${XPU_HOST_CXX_FLAGS})
+    add_definitions(${flag})
+  endforeach()
 endif()
 
 # ---[ Custom Protobuf
@@ -161,7 +160,7 @@ else()
   set(AT_MKLDNN_ENABLED 0)
   set(AT_MKL_ENABLED 0)
 endif()
-set_property(CACHE BLAS PROPERTY STRINGS "ATLAS;BLIS;Eigen;FLAME;Generic;MKL;OpenBLAS;vecLib")
+set_property(CACHE BLAS PROPERTY STRINGS "ATLAS;BLIS;Eigen;FLAME;Generic;MKL;OpenBLAS;vecLib;APL")
 message(STATUS "Trying to find preferred BLAS backend of choice: " ${BLAS})
 
 if(BLAS STREQUAL "Eigen")
@@ -226,6 +225,12 @@ elseif(BLAS STREQUAL "FlexiBLAS")
   find_package(FlexiBLAS REQUIRED)
   include_directories(SYSTEM ${FlexiBLAS_INCLUDE_DIR})
   list(APPEND Caffe2_DEPENDENCY_LIBS ${FlexiBLAS_LIB})
+elseif(BLAS STREQUAL "APL")
+  find_package(APL REQUIRED)
+  include_directories(SYSTEM ${APL_INCLUDE_DIR})
+  set(BLAS_INFO "apl")
+  set(BLAS_FOUND 1)
+  set(BLAS_LIBRARIES ${APL_LIBRARIES})
 elseif(BLAS STREQUAL "Generic")
   # On Debian family, the CBLAS ABIs have been merged into libblas.so
   if(ENV{GENERIC_BLAS_LIBRARIES} STREQUAL "")
@@ -246,7 +251,7 @@ endif()
 if(NOT INTERN_BUILD_MOBILE)
   set(AT_MKL_SEQUENTIAL 0)
   set(USE_BLAS 1)
-  if(NOT (ATLAS_FOUND OR BLIS_FOUND OR GENERIC_BLAS_FOUND OR MKL_FOUND OR OpenBLAS_FOUND OR VECLIB_FOUND OR FlexiBLAS_FOUND OR NVPL_BLAS_FOUND))
+  if(NOT (ATLAS_FOUND OR BLIS_FOUND OR GENERIC_BLAS_FOUND OR MKL_FOUND OR OpenBLAS_FOUND OR VECLIB_FOUND OR FlexiBLAS_FOUND OR NVPL_BLAS_FOUND OR APL_FOUND))
     message(WARNING "Preferred BLAS (" ${BLAS} ") cannot be found, now searching for a general BLAS library")
     find_package(BLAS)
     if(NOT BLAS_FOUND)
@@ -372,9 +377,6 @@ if(INTERN_BUILD_MOBILE OR NOT DISABLE_NNPACK_AND_FAMILY)
   set(USE_PTHREADPOOL ON CACHE BOOL "" FORCE)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_PTHREADPOOL")
 
-  # Always use third_party/pthreadpool.
-  set(USE_INTERNAL_PTHREADPOOL_IMPL OFF CACHE BOOL "" FORCE)
-
   if(NOT TARGET pthreadpool)
     if(USE_SYSTEM_PTHREADPOOL)
       add_library(pthreadpool SHARED IMPORTED)
@@ -384,7 +386,7 @@ if(INTERN_BUILD_MOBILE OR NOT DISABLE_NNPACK_AND_FAMILY)
         message(FATAL_ERROR "Cannot find pthreadpool")
       endif()
       message("-- Found pthreadpool: ${PTHREADPOOL_LIBRARY}")
-    elseif(NOT USE_INTERNAL_PTHREADPOOL_IMPL)
+    else()
       if(NOT DEFINED PTHREADPOOL_SOURCE_DIR)
         set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
         set(PTHREADPOOL_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/pthreadpool" CACHE STRING "pthreadpool source directory")
@@ -400,11 +402,7 @@ if(INTERN_BUILD_MOBILE OR NOT DISABLE_NNPACK_AND_FAMILY)
       set_property(TARGET pthreadpool PROPERTY POSITION_INDEPENDENT_CODE ON)
     endif()
 
-    if(USE_INTERNAL_PTHREADPOOL_IMPL)
-      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_INTERNAL_PTHREADPOOL_IMPL")
-    else()
-      list(APPEND Caffe2_DEPENDENCY_LIBS pthreadpool)
-    endif()
+    list(APPEND Caffe2_DEPENDENCY_LIBS pthreadpool)
   endif()
 else()
   set(USE_PTHREADPOOL OFF CACHE BOOL "" FORCE)
@@ -458,10 +456,6 @@ if(USE_PYTORCH_QNNPACK)
     endif()
 
     if(NOT TARGET pytorch_qnnpack)
-      if(NOT USE_SYSTEM_PTHREADPOOL AND USE_INTERNAL_PTHREADPOOL_IMPL)
-        set(PYTORCH_QNNPACK_CUSTOM_THREADPOOL ON CACHE BOOL "")
-      endif()
-
       set(PYTORCH_QNNPACK_BUILD_TESTS OFF CACHE BOOL "")
       set(PYTORCH_QNNPACK_BUILD_BENCHMARKS OFF CACHE BOOL "")
       set(PYTORCH_QNNPACK_LIBRARY_TYPE "static" CACHE STRING "")
@@ -474,28 +468,6 @@ if(USE_PYTORCH_QNNPACK)
       set_property(TARGET cpuinfo PROPERTY POSITION_INDEPENDENT_CODE ON)
       # QNNPACK depends on gemmlowp headers
       target_include_directories(pytorch_qnnpack PRIVATE "${CAFFE2_THIRD_PARTY_ROOT}/gemmlowp")
-
-      if(PYTORCH_QNNPACK_CUSTOM_THREADPOOL)
-        target_compile_definitions(
-          pytorch_qnnpack PRIVATE
-          pthreadpool_t=legacy_pthreadpool_t
-          pthreadpool_function_1d_t=legacy_pthreadpool_function_1d_t
-          pthreadpool_function_1d_tiled_t=legacy_pthreadpool_function_1d_tiled_t
-          pthreadpool_function_2d_t=legacy_pthreadpool_function_2d_t
-          pthreadpool_function_2d_tiled_t=legacy_pthreadpool_function_2d_tiled_t
-          pthreadpool_function_3d_tiled_t=legacy_pthreadpool_function_3d_tiled_t
-          pthreadpool_function_4d_tiled_t=legacy_pthreadpool_function_4d_tiled_t
-          pthreadpool_create=legacy_pthreadpool_create
-          pthreadpool_destroy=legacy_pthreadpool_destroy
-          pthreadpool_get_threads_count=legacy_pthreadpool_get_threads_count
-          pthreadpool_compute_1d=legacy_pthreadpool_compute_1d
-          pthreadpool_parallelize_1d=legacy_pthreadpool_parallelize_1d
-          pthreadpool_compute_1d_tiled=legacy_pthreadpool_compute_1d_tiled
-          pthreadpool_compute_2d=legacy_pthreadpool_compute_2d
-          pthreadpool_compute_2d_tiled=legacy_pthreadpool_compute_2d_tiled
-          pthreadpool_compute_3d_tiled=legacy_pthreadpool_compute_3d_tiled
-          pthreadpool_compute_4d_tiled=legacy_pthreadpool_compute_4d_tiled)
-      endif()
     endif()
 
     list(APPEND Caffe2_DEPENDENCY_LIBS pytorch_qnnpack)
@@ -543,6 +515,11 @@ if(USE_XNNPACK AND NOT USE_SYSTEM_XNNPACK)
 
     # Disable I8MM For CI since clang 9 does not support neon i8mm.
     set(XNNPACK_ENABLE_ARM_I8MM OFF CACHE BOOL "")
+
+    # Older MSVC versions don't support AVX512FP. TODO Minimum version support?
+    IF(CMAKE_C_COMPILER_ID STREQUAL "MSVC")
+      set(XNNPACK_ENABLE_AVX512FP16  OFF CACHE BOOL "")
+    ENDIF()
 
     # Conditionally disable AVX512AMX, as it requires Clang 11 or later. Note that
     # XNNPACK does conditionally compile this based on GCC version. Once it also does
@@ -1088,8 +1065,8 @@ if(USE_ROCM)
     hip_include_directories(${Caffe2_HIP_INCLUDE})
 
     set(Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
-      ${PYTORCH_HIP_LIBRARIES} ${PYTORCH_MIOPEN_LIBRARIES} ${hipcub_LIBRARIES} ${ROCM_HIPRTC_LIB} ${ROCM_ROCTX_LIB})
-    list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS ${hipblaslt_LIBRARIES})
+      hip::amdhip64 MIOpen hiprtc::hiprtc) # libroctx will be linked in with MIOpen
+    list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS roc::hipblaslt)
 
     list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
       roc::hipblas hip::hipfft hip::hiprand roc::hipsparse roc::hipsolver)
@@ -1323,6 +1300,28 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
   set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS})
 endif()
 
+# --[ x86-simd-sort integration
+if(USE_X86_SIMD_SORT)
+  if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
+    message(WARNING
+      "x64 operating system is required for x86-simd-sort. "
+      "Not compiling with x86-simd-sort. "
+      "Turn this warning off by USE_X86_SIMD_SORT=OFF.")
+    set(USE_X86_SIMD_SORT OFF)
+  endif()
+
+  if(USE_X86_SIMD_SORT)
+    if(USE_OPENMP AND NOT MSVC)
+      set(USE_XSS_OPENMP ON)
+    else()
+      set(USE_XSS_OPENMP OFF)
+    endif()
+
+    set(XSS_SIMD_SORT_INCLUDE_DIR ${CMAKE_CURRENT_LIST_DIR}/../third_party/x86-simd-sort)
+    include_directories(SYSTEM ${XSS_SIMD_SORT_INCLUDE_DIR})
+  endif()
+endif()
+
 # --[ ATen checks
 set(USE_LAPACK 0)
 
@@ -1353,6 +1352,15 @@ if(NOT INTERN_BUILD_MOBILE)
     # we want to respect the standard, and we are bored of those **** .
     add_definitions(-D_CRT_SECURE_NO_DEPRECATE=1)
     string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler=/wd4819,/wd4503,/wd4190,/wd4244,/wd4251,/wd4275,/wd4522")
+  else()
+    if(WERROR)
+      if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU" AND ${CMAKE_CXX_COMPILER_VERSION} VERSION_GREATER_EQUAL 13)
+        string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Wno-dangling-reference ")
+      endif()
+      if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU" OR ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang" AND ${CMAKE_CXX_COMPILER_VERSION} VERSION_GREATER_EQUAL 13))
+        string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Werror -Xcompiler -Wno-error=sign-compare ")
+      endif()
+    endif()
   endif()
 
   string(APPEND CMAKE_CUDA_FLAGS " -Wno-deprecated-gpu-targets --expt-extended-lambda")
@@ -1560,7 +1568,7 @@ if(USE_KINETO)
     message(STATUS "Using Kineto with Roctracer support")
   endif()
 
-  if(NOT USE_XPU)
+  if((NOT USE_XPU) OR WIN32)
     set(LIBKINETO_NOXPUPTI ON CACHE STRING "" FORCE)
   else()
     set(LIBKINETO_NOXPUPTI OFF CACHE STRING "")

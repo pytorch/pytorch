@@ -17,6 +17,7 @@ from .decorators import (
     mark_static_address,
     maybe_mark_dynamic,
     run,
+    set_stance,
     substitute_in_graph,
 )
 from .eval_frame import (
@@ -32,6 +33,7 @@ from .eval_frame import (
 )
 from .external_utils import is_compiling
 from .mutation_guard import GenerationTracker
+from .pgo import reset_code_state
 from .utils import graph_break_reasons, guard_failures, orig_code_map, reset_frame_count
 
 
@@ -57,6 +59,7 @@ __all__ = [
     "run",
     "replay",
     "disable",
+    "set_stance",
     "reset",
     "OptimizedModule",
     "is_compiling",
@@ -76,10 +79,24 @@ if torch.manual_seed is torch.random.manual_seed:
 
 
 def reset() -> None:
-    """Clear all compile caches and restore initial state"""
+    """
+    Clear all compile caches and restore initial state.  This function is intended
+    to reset Dynamo's state *as if* you had started a fresh process invocation, which
+    makes it good for testing scenarios where you want to behave as if you started
+    a new process.  It does NOT affect any file system caches.
+
+    NB: this does NOT reset logging state.  Don't use this to test logging
+    initialization/reinitialization.
+    """
+    # TODO: https://github.com/pytorch/pytorch/issues/139200
+    import logging
+
+    log = logging.getLogger(__name__)
+    log.info("torch._dynamo.reset")
     with convert_frame.compile_lock:
         reset_code_caches()
         convert_frame.input_codes.clear()
+        reset_code_state()
         convert_frame.output_codes.clear()
         orig_code_map.clear()
         guard_failures.clear()
@@ -98,8 +115,19 @@ def reset() -> None:
 
 
 def reset_code_caches() -> None:
+    """
+    Clears in-memory code cache, which is what stores compiled products.  This
+    resets less state than :func:`reset` and is mostly only used for testing
+    purposes.
+    """
+    # TODO: https://github.com/pytorch/pytorch/issues/139200
+    import logging
+
+    log = logging.getLogger(__name__)
+    log.info("torch._dynamo.reset_code_caches")
     """Clear compile caches that are keyed by code objects"""
     with convert_frame.compile_lock:
+        reset_code_state()
         for weak_code in (
             convert_frame.input_codes.seen + convert_frame.output_codes.seen
         ):
@@ -107,4 +135,3 @@ def reset_code_caches() -> None:
             if code:
                 reset_code(code)
         code_context.clear()
-        convert_frame.disabled_codes.clear()

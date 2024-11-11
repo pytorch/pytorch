@@ -15,6 +15,7 @@ from .optimizer import (
     _get_capturable_supported_devices,
     _get_scalar_dtype,
     _maximize_doc,
+    _params_doc,
     _use_grad_for_differentiable,
     _view_as_real,
     Optimizer,
@@ -202,16 +203,15 @@ Rprop.__doc__ = (
     """
     + rf"""
     Args:
-        params (iterable): iterable of parameters to optimize or dicts defining
-            parameter groups
+        {_params_doc}
         lr (float, optional): learning rate (default: 1e-2)
         etas (Tuple[float, float], optional): pair of (etaminus, etaplus), that
             are multiplicative increase and decrease factors
             (default: (0.5, 1.2))
         step_sizes (Tuple[float, float], optional): a pair of minimal and
             maximal allowed step sizes (default: (1e-6, 50))
-        {_foreach_doc}
         {_capturable_doc}
+        {_foreach_doc}
         {_maximize_doc}
         {_differentiable_doc}
 

@@ -142,6 +142,11 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
 
   double elapsedTime(void* event1, void* event2, const DeviceIndex device_index)
       const override {
+#if SYCL_COMPILER_VERSION < 20250000
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false,
+        "elapsedTime requires PyTorch to be built with SYCL compiler version 2025.0.0 or newer.");
+#endif
     TORCH_CHECK(
         event1 && event2,
         "Both events must be recorded before calculating elapsed time.");
@@ -177,6 +182,14 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
           c10::kXPU, reinterpret_cast<uintptr_t>(xpu_event));
     }
     xpu_event->wait_and_throw();
+  }
+
+  void synchronizeDevice(const c10::DeviceIndex device_index) const override {
+    const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+    if (C10_UNLIKELY(interp)) {
+      (*interp)->trace_gpu_device_synchronization(c10::kXPU);
+    }
+    c10::xpu::syncStreamsOnDevice(device_index);
   }
 
   void recordDataPtrOnStream(const c10::DataPtr& data_ptr, const Stream& stream)
