@@ -48,6 +48,7 @@ from torch.testing._internal.common_quantized import (
     override_quantized_engine,
 )
 from torch.jit.mobile import _load_for_lite_interpreter
+from functorch.experimental import control_flow
 
 try:
     # graph mode quantization based on fx
@@ -2936,6 +2937,24 @@ class TestHelperModules:
         def forward(self, x):
             x = self.relu(self.fc(x))
             return x
+
+    class Cond(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.conv_true = nn.Conv2d(32, 32, 1)
+            self.conv_false = nn.Conv2d(32, 32, 1)
+
+        def true(self, x):
+            return self.conv_true(x)
+
+        def false(self, x):
+            return self.conv_false(x)
+
+        def forward(self, x, b):
+            return torch.cond(b, self.true, self.false, (x,))
+
+        def example_inputs(self):
+            return (torch.rand(1, 32, 16, 16), torch.tensor([True], dtype=torch.bool),)
 
 def _generate_qdq_quantized_model(
     mod, inputs, is_qat=False, is_dynamic=False, quantizer=None

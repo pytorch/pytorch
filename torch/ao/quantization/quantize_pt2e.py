@@ -28,6 +28,40 @@ __all__ = [
 ]
 
 
+def _annotate_cond_ops(model: torch.fx.GraphModule, quantizer: Quantizer) -> None:
+    gm_maybe_with_cond = [model]
+    while gm_maybe_with_cond:
+        gm = gm_maybe_with_cond.pop(0)
+        for n in gm.graph.nodes:
+            if n.target == torch.ops.higher_order.cond:
+                true_gm = getattr(gm, n.args[1].target)
+                false_gm = getattr(gm, n.args[2].target)
+                gm_maybe_with_cond.append(true_gm)
+                gm_maybe_with_cond.append(false_gm)
+                quantizer.annotate(true_gm)
+                quantizer.annotate(false_gm)
+
+def _prepare_cond_ops(model: torch.fx.GraphModule, is_qat: bool) -> None:
+    gm_maybe_with_cond = [model]
+    while gm_maybe_with_cond:
+        gm = gm_maybe_with_cond.pop(0)
+        for n in gm.graph.nodes:
+            if n.target == torch.ops.higher_order.cond:
+                true_gm = getattr(gm, n.args[1].target)
+                false_gm = getattr(gm, n.args[2].target)
+                gm_maybe_with_cond.append(true_gm)
+                gm_maybe_with_cond.append(false_gm)
+
+                node_name_to_scope = _get_node_name_to_scope(true_gm)
+                true_gm = prepare(true_gm, node_name_to_scope, is_qat=is_qat)
+                true_gm.recompile()
+                setattr(gm, n.args[1].target, true_gm)
+
+                node_name_to_scope = _get_node_name_to_scope(false_gm)
+                false_gm = prepare(false_gm, node_name_to_scope, is_qat=is_qat)
+                false_gm.recompile()
+                setattr(gm, n.args[2].target, false_gm)
+
 def prepare_pt2e(
     model: GraphModule,
     quantizer: Quantizer,
@@ -98,8 +132,12 @@ def prepare_pt2e(
     _fuse_conv_bn_(model)
     model = quantizer.transform_for_annotation(model)
     quantizer.annotate(model)
+    _annotate_cond_ops(model, quantizer)
+
     quantizer.validate(model)
     model = prepare(model, node_name_to_scope, is_qat=False)
+    _prepare_cond_ops(model, is_qat=False)
+
     model.meta.update(original_graph_meta)
     model = _disallow_eval_train(model)
     return model
@@ -167,12 +205,14 @@ def prepare_qat_pt2e(
     node_name_to_scope = _get_node_name_to_scope(model)
     model = quantizer.transform_for_annotation(model)
     quantizer.annotate(model)
+    _annotate_cond_ops(model, quantizer)
     quantizer.validate(model)
     # Perform fusion after annotate to avoid quantizing ops in the new
     # subgraph that don't need to be quantized
     # TODO: only fuse if conv and bn are both configured to be quantized
     _fuse_conv_bn_qat(model)
     model = prepare(model, node_name_to_scope, is_qat=True)
+    _prepare_cond_ops(model, is_qat=True)
     model.meta.update(original_graph_meta)
     model = _disallow_eval_train(model)
     return model
@@ -194,6 +234,58 @@ def _quant_node_constraint(n: Node) -> bool:
     related to quantization
     """
     return n.op == "call_function" and n.target in _QUANT_OPS
+
+def _convert_pt2e_impl(
+    model: GraphModule,
+    use_reference_representation: bool = False,
+    fold_quantize: bool = True,
+) -> GraphModule:
+    original_graph_meta = model.meta
+    model = _convert_to_reference_decomposed_fx(model)
+
+    model = _fold_conv_bn_qat(model)
+
+    pm = PassManager([DuplicateDQPass()])
+    model = pm(model).graph_module
+
+    pm = PassManager([PortNodeMetaForQDQ()])
+    model = pm(model).graph_module
+
+    if fold_quantize:
+        constant_fold(model, _quant_node_constraint)
+
+    if use_reference_representation:
+        model = reference_representation_rewrite(model)
+
+    model.meta.update(original_graph_meta)
+    model = _disallow_eval_train(model)
+    return model
+
+
+def _convert_cond_ops(
+    model: torch.fx.GraphModule,
+    use_reference_representation: bool = False,
+    fold_quantize: bool = True,
+) -> None:
+    gm_maybe_with_cond = [model]
+    while gm_maybe_with_cond:
+        gm = gm_maybe_with_cond.pop(0)
+        for n in gm.graph.nodes:
+            if n.target == torch.ops.higher_order.cond:
+                true_gm = getattr(gm, n.args[1].target)
+                false_gm = getattr(gm, n.args[2].target)
+                gm_maybe_with_cond.append(true_gm)
+                gm_maybe_with_cond.append(false_gm)
+
+                node_name_to_scope = _get_node_name_to_scope(true_gm)
+                true_gm = _convert_pt2e_impl(true_gm, use_reference_representation, fold_quantize)
+                true_gm.recompile()
+                setattr(gm, n.args[1].target, true_gm)
+
+                node_name_to_scope = _get_node_name_to_scope(false_gm)
+                false_gm = _convert_pt2e_impl(false_gm, use_reference_representation, fold_quantize)
+                false_gm.recompile()
+                setattr(gm, n.args[2].target, false_gm)
 
 
 def convert_pt2e(
@@ -228,22 +320,8 @@ def convert_pt2e(
             "Unexpected argument type for `use_reference_representation`, "
             f"please make sure you intend to pass argument {use_reference_representation} to convert_pt2e"
         )
-    original_graph_meta = model.meta
-    model = _convert_to_reference_decomposed_fx(model)
-    model = _fold_conv_bn_qat(model)
 
-    pm = PassManager([DuplicateDQPass()])
-    model = pm(model).graph_module
+    _convert_cond_ops(model)
 
-    pm = PassManager([PortNodeMetaForQDQ()])
-    model = pm(model).graph_module
-
-    if fold_quantize:
-        constant_fold(model, _quant_node_constraint)
-
-    if use_reference_representation:
-        model = reference_representation_rewrite(model)
-
-    model.meta.update(original_graph_meta)
-    model = _disallow_eval_train(model)
+    model = _convert_pt2e_impl(model, use_reference_representation, fold_quantize)
     return model
