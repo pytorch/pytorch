@@ -843,6 +843,28 @@ graph():
                 foo, bad_example_inp, dynamic_shapes=dynamic_shapes, strict=False
             )
 
+    def test_symint_item(self):
+        class M(torch.nn.Module):
+            def forward(self, tensor):
+                return tensor.item()
+
+        input = (torch.tensor([1], dtype=torch.int),)
+
+        orig_res = M()(*input)
+        ep_res = torch.export.export(M(), input).module()(*input)
+        self.assertEqual(orig_res, ep_res)
+
+    def test_symbool_item(self):
+        class M(torch.nn.Module):
+            def forward(self, tensor):
+                return tensor.item()
+
+        input = (torch.tensor([1], dtype=torch.bool),)
+
+        orig_res = M()(*input)
+        ep_res = torch.export.export(M(), input).module()(*input)
+        self.assertEqual(orig_res, ep_res)
+
     def test_unbacked_to_cond(self):
         class M(torch.nn.Module):
             def forward(self, a):
@@ -1056,6 +1078,120 @@ graph():
         ep_model = export(model, (x,), strict=False).module()
         self.assertTrue(torch.allclose(model(x), ep_model(x)))
 
+    def test_real_tensor_size_mismatch(self):
+        from torch._subclasses.fake_tensor import MetadataMismatchError
+
+        class M(torch.nn.Module):
+            def forward(self, a, b):
+                return torch.ops.mylib.foo(a, b)
+
+        @torch.library.custom_op("mylib::foo", mutates_args={})
+        def foo(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+            return a + b
+
+        @foo.register_fake
+        def foo_fake_impl(a, b):
+            m, n = a.shape
+            return torch.empty(n, m)  # incorrectly permute
+
+        error_type = (
+            MetadataMismatchError
+            if is_non_strict_test(self._testMethodName)
+            else torch._dynamo.exc.TorchRuntimeError
+        )
+        with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+            # won't catch anything if dims are equal
+            export(
+                M(),
+                (torch.randn(4, 4), torch.randn(4, 4)),
+            )
+            # catch concrete inequality
+            with self.assertRaisesRegex(
+                error_type,
+                "Real tensor propagation found an output size mismatch between fake shape 8 and real shape 4, "
+                "at output index 0, dimension 0 for func: mylib.foo.default",
+            ):
+                export(
+                    M(),
+                    (torch.randn(4, 8), torch.randn(4, 8)),
+                )
+            # same test with dynamic shapes
+            d0 = Dim("d0")
+            d1 = Dim("d1")
+            export(
+                M(),
+                (torch.randn(4, 4), torch.randn(4, 4)),
+                dynamic_shapes={
+                    "a": (d0, d1),
+                    "b": (d0, d1),
+                },
+            )
+            with self.assertRaisesRegex(
+                error_type,
+                "Real tensor propagation found an output size mismatch between fake shape s1 and real shape 4, "
+                "at output index 0, dimension 0 for func: mylib.foo.default",
+            ):
+                export(
+                    M(),
+                    (torch.randn(4, 8), torch.randn(4, 8)),
+                    dynamic_shapes={
+                        "a": (d0, d1),
+                        "b": (d0, d1),
+                    },
+                )
+
+    def test_real_tensor_alias_dtype_mismatch(self):
+        from torch._subclasses.fake_tensor import MetadataMismatchError
+
+        error_type = (
+            MetadataMismatchError
+            if is_non_strict_test(self._testMethodName)
+            else torch._dynamo.exc.TorchRuntimeError
+        )
+
+        # test alias case
+        class M(torch.nn.Module):
+            def forward(self, a):
+                return torch.ops.mylib.foo_alias(a)
+
+        @torch.library.custom_op("mylib::foo_alias", mutates_args={})
+        def foo_alias(a: torch.Tensor) -> torch.Tensor:
+            return a * 2
+
+        @foo_alias.register_fake
+        def foo_fake_impl(a):
+            return a
+
+        with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+            with self.assertRaisesRegex(
+                error_type,
+                r"Real tensor propagation found an aliasing mismatch between fake output (.*\n)*.* "
+                r"and real output (.*\n)*.* for func: mylib.foo_alias.default",
+            ):
+                ep = export(M(), (torch.randn(4, 4),))
+
+        # test dtype case
+        class N(torch.nn.Module):
+            def forward(self, a):
+                return torch.ops.mylib.foo_dtype(a)
+
+        @torch.library.custom_op("mylib::foo_dtype", mutates_args={})
+        def foo_dtype(a: torch.Tensor) -> torch.Tensor:
+            return a * 2
+
+        @foo_dtype.register_fake
+        def foo_fake_impl(a):
+            m, n = a.shape
+            return torch.empty([m, n], dtype=torch.int32)
+
+        with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+            with self.assertRaisesRegex(
+                error_type,
+                r"Real tensor propagation found a metadata mismatch between fake tensor (.*\n)*.* "
+                r"and real tensor (.*\n)*.* at output index 0, for func: mylib.foo_dtype.default",
+            ):
+                ep = export(N(), (torch.randn(4, 4),))
+
     def test_real_tensor_for_max_op(self):
         class Foo(torch.nn.Module):
             def forward(self, x, y):
@@ -1071,8 +1207,208 @@ graph():
         self.assertEqual(ep.module()(*inputs), model(*inputs))
         x = torch.zeros(64)
         y = torch.ones(64)
-        self.assertEqual(ep.module()(x, x), model(x, x))
+        # This seems to be a bug with old export because when we pass in x, x
+        # as input, runtime assertion should fail. This is because we would create
+        # guard on y.shape[0] > x.shape[0] but somehow in old export, we dce this
+        # assertion.
+        if is_training_ir_test(self._testMethodName) and is_non_strict_test(
+            self._testMethodName
+        ):
+            with self.assertRaisesRegex(RuntimeError, "Runtime assertion failed for"):
+                ep.module()(x, x)
+        else:
+            self.assertEqual(ep.module()(x, x), model(x, x))
         self.assertEqual(ep.module()(x, y), model(x, y))
+
+    def test_draft_export_checks_mutation_with_nan(self):
+        @torch.library.custom_op("export::foo", mutates_args={})
+        def foo(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            return x + y
+
+        @foo.register_fake
+        def _(x, y):
+            return x + y
+
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                return foo(x, y)
+
+        model = Foo()
+        inputs = (torch.full((64,), torch.nan), torch.full((64,), torch.nan))
+        with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+            ep = export(model, inputs)
+
+    def test_draft_export_checks_mutation(self):
+        @torch.library.custom_op("export::foo", mutates_args={})
+        def foo(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            y.add_(1)
+            return x.clone()
+
+        @foo.register_fake
+        def _(x, y):
+            return x.clone()
+
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                return foo(x, y)
+
+        model = Foo()
+        inputs = (torch.randn(64), torch.randn(64))
+        with self.assertRaisesRegex(RuntimeError, "for argument 'y'"):
+            with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+                ep = export(model, inputs)
+
+        @torch.library.custom_op("export::foo", mutates_args={"y"})
+        def foo(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            y.add_(1)
+            return x.clone()
+
+        @foo.register_fake
+        def _(x, y):
+            return x.clone()
+
+        # No errors
+        with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+            ep = export(model, inputs)
+
+    def test_draft_export_checks_mutation_list(self):
+        @torch.library.custom_op("export::foo", mutates_args={})
+        def foo(xs: List[torch.Tensor]) -> torch.Tensor:
+            x, y = xs
+            y.add_(1)
+            return x.clone()
+
+        @foo.register_fake
+        def _(xs):
+            x, y = xs
+            return x.clone()
+
+        class Foo(torch.nn.Module):
+            def forward(self, xs):
+                return foo(xs)
+
+        model = Foo()
+        inputs = ([torch.randn(64), torch.randn(64)],)
+        with self.assertRaisesRegex(RuntimeError, "for argument 'xs'"):
+            with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+                ep = export(model, inputs)
+
+        @torch.library.custom_op("export::foo", mutates_args={"xs"})
+        def foo(xs: List[torch.Tensor]) -> torch.Tensor:
+            x, y = xs
+            y.add_(1)
+            return x.clone()
+
+        @foo.register_fake
+        def _(xs):
+            x, y = xs
+            return x.clone()
+
+        # No errors
+        with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+            ep = export(model, inputs)
+
+    def test_draft_export_checks_aliasing(self):
+        @torch.library.custom_op("export::foo", mutates_args={})
+        def foo(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            return x
+
+        @foo.register_fake
+        def _(x, y):
+            return x.clone()
+
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                return foo(x, y)
+
+        model = Foo()
+        inputs = (torch.randn(64), torch.randn(64))
+        with self.assertRaisesRegex(RuntimeError, "may not alias"):
+            with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+                ep = export(model, inputs)
+
+        @torch.library.custom_op("export::foo", mutates_args={})
+        def foo(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            return x.clone()
+
+        @foo.register_fake
+        def _(x, y):
+            return x.clone()
+
+        # No errors
+        with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+            ep = export(model, inputs)
+
+    # Bug: ep.run_decompositions() doesn't propagate real tensors
+    @testing.expectedFailureTrainingIRToRunDecomp
+    # Bug: ep.run_decompositions() doesn't propagate real tensors
+    @testing.expectedFailureTrainingIRToRunDecompNonStrict
+    def test_draft_export_infers_fake_kernel(self):
+        with torch.library._scoped_library("export", "FRAGMENT") as lib:
+            lib.define("bar(Tensor x) -> Tensor")
+            lib.impl("bar", lambda x: x[0].clone(), "CPU")
+
+            @torch.library.custom_op("export::foo", mutates_args={})
+            def foo(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+                return x * y
+
+            class Foo(torch.nn.Module):
+                def forward(self, x, y):
+                    return foo(x, y), torch.ops.export.bar(y)
+
+            model = Foo()
+            inputs = (torch.randn(1, 3), torch.randn(2, 1))
+            with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+                ep = export(model, inputs)
+
+        # expecttest only works for the base TestExport class.
+        if self.__class__ != TestExport:
+            return
+
+        self.assertExpectedInline(
+            str(ep.graph_module.code).strip(),
+            """\
+def forward(self, x, y):
+    foo = torch.ops.export.foo.default(x, y);  x = None
+    sym_size_int_3 = torch.ops.aten.sym_size.int(foo, 0)
+    sym_size_int_4 = torch.ops.aten.sym_size.int(foo, 1)
+    sym_constrain_range_for_size_default = torch.ops.aten.sym_constrain_range_for_size.default(sym_size_int_3);  sym_constrain_range_for_size_default = None
+    ge_3 = sym_size_int_3 >= 0;  sym_size_int_3 = None
+    _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge_3, "Runtime assertion failed for expression u0 >= 0 on node 'ge_3'");  ge_3 = _assert_scalar_default = None
+    sym_constrain_range_for_size_default_1 = torch.ops.aten.sym_constrain_range_for_size.default(sym_size_int_4);  sym_constrain_range_for_size_default_1 = None
+    ge_4 = sym_size_int_4 >= 0;  sym_size_int_4 = None
+    _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(ge_4, "Runtime assertion failed for expression u1 >= 0 on node 'ge_4'");  ge_4 = _assert_scalar_default_1 = None
+    bar = torch.ops.export.bar.default(y);  y = None
+    sym_size_int_5 = torch.ops.aten.sym_size.int(bar, 0)
+    sym_constrain_range_for_size_default_2 = torch.ops.aten.sym_constrain_range_for_size.default(sym_size_int_5);  sym_constrain_range_for_size_default_2 = None
+    ge_5 = sym_size_int_5 >= 0;  sym_size_int_5 = None
+    _assert_scalar_default_2 = torch.ops.aten._assert_scalar.default(ge_5, "Runtime assertion failed for expression u2 >= 0 on node 'ge_5'");  ge_5 = _assert_scalar_default_2 = None
+    return (foo, bar)""",
+        )
+
+    def test_draft_export_fake_kernel_inference_errors(self):
+        @torch.library.custom_op("export::foo", mutates_args={})
+        def foo(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            return x.expand(32, 3).contiguous()[4]
+
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                return foo(x, y)
+
+        model = Foo()
+        inputs = (torch.randn(1, 3), torch.randn(2, 1))
+
+        with self.assertRaisesRegex(RuntimeError, "non-zero storage offset"):
+            with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+                ep = export(model, inputs)
+
+        @torch.library.custom_op("export::foo", mutates_args={})
+        def foo(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            return torch.randn(3, 3).diagonal()
+
+        with self.assertRaisesRegex(RuntimeError, "not dense in memory"):
+            with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+                ep = export(model, inputs)
 
     @testing.expectedFailureSerDer  # SymBool serialization? TODO(pianpwk)
     @testing.expectedFailureSerDerNonStrict
@@ -1943,6 +2279,20 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, b_
             "The op aten.index_put_.default",
         ):
             ep.run_decompositions({torch.ops.aten.index_put_.default: None})
+
+    def test_export_cond_warns_constant_pred(self):
+        class Mod(torch.nn.Module):
+            def forward(self, pred, x):
+                return torch.cond(pred, lambda x: x.sin(), lambda x: x.cos(), (x,))
+
+        mod = Mod()
+        with self.assertWarnsRegex(UserWarning, "Pred is a Python constant"):
+            ep = export(mod, (True, torch.randn(3, 3)))
+
+        nodes = ep.module().graph.find_nodes(
+            op="call_function", target=torch.ops.aten.sin.default
+        )
+        self.assertEqual(len(nodes), 1)
 
     def test_export_custom_decomp_table_basic_pop(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
@@ -3127,6 +3477,21 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
 
         args = (torch.rand(3, 700, 700), 150, 150)
         self.assertEqual(ecrop.module()(*args), ecrop(*args))
+
+    def test_dim_dynamic_divisibility(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                if x.size(0) % 2 == 0:
+                    return x.clone() * 2
+                else:
+                    return x.clone() * 0
+
+        input1 = (torch.randn(4),)
+        model = M()
+        dynamic_shapes = {
+            "x": {0: torch.export.Dim.DYNAMIC},
+        }
+        export(model, input1, dynamic_shapes=dynamic_shapes)
 
     def test_export_func_with_kwargs(self):
         class Module(torch.nn.Module):
@@ -5095,6 +5460,28 @@ def forward(self, b_a_buffer, x):
         self.assertEqual(len(ep.graph_signature.input_specs), 4)
         self.assertTrue(torch.allclose(ep.module()(*inp), transform.module()(*inp)))
 
+        class Boo(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.a = torch.tensor(True)
+
+            def forward(self, x):
+                list_tensor = [torch.tensor(False), torch.tensor(True)]
+                return x + self.a + list_tensor[0] + list_tensor[1]
+
+        ep = export(Boo(), (torch.tensor(False),))
+
+        self.assertEqual(len(ep.graph_signature.input_specs), 4)
+        self.assertEqual(len(ep.state_dict), 0)
+        self.assertEqual(len(ep.constants), 3)
+
+        inp = (torch.tensor(True),)
+        self.assertTrue(torch.allclose(ep.module()(*inp), Boo()(*inp)))
+
+        transform = ep.run_decompositions()
+        self.assertEqual(len(ep.graph_signature.input_specs), 4)
+        self.assertTrue(torch.allclose(ep.module()(*inp), transform.module()(*inp)))
+
     def test_tensor_attribute_zero_args(self):
         class Foo(torch.nn.Module):
             def __init__(self, value):
@@ -5648,6 +6035,21 @@ graph():
 
         unflattened = unflatten(ep)
         self.assertTrue(torch.allclose(unflattened(*inps), M2()(*inps)))
+
+    def test_module_dict_key(self):
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mod = torch.nn.Linear(10, 10)
+
+            def forward(self, x, d):
+                d = {m: d[name] for name, m in self.named_children()}
+                return x + d[self.mod]
+
+        m = Module()
+        sample_inputs = (torch.randn(10), {"mod": torch.randn(10)})
+        ep = export(m, sample_inputs)
+        self.assertEqual(ep.module()(*sample_inputs), m(*sample_inputs))
 
     def test_lazy_module_kwargs(self):
         class LazyModule(torch.nn.modules.lazy.LazyModuleMixin, torch.nn.Module):
@@ -6856,6 +7258,25 @@ def forward(self, p_bar_linear_weight, p_bar_linear_bias, x):
         # this doesn't work today
         gm_unflat_strict = unflatten(ep)
 
+    def test_modules_access_for_deleted_submodule(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+                self.foo = torch.nn.Linear(10, 10)
+
+            def forward(self, x):
+                for name, mod in self._modules.items():
+                    if mod is None:
+                        continue
+                    pass
+                return self.linear(x)
+
+        mod = Foo()
+        mod.foo = None
+        mod(torch.randn(10, 10))
+        export(mod, (torch.randn(10, 10),), strict=False)
+
     def test_predispatch_cond(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -7250,7 +7671,8 @@ def forward(self, x, b_t, y):
     def test_symint_tensor_return(self):
         class Module(torch.nn.Module):
             def forward(self, x):
-                return torch.ops.testlib.returns_tensor_symint(x)[0]
+                a, b = torch.ops.testlib.returns_tensor_symint(x)
+                return a, b
 
         self._test_export_same_as_eager(Module(), (torch.randn(4, 4),))
 
@@ -8863,6 +9285,35 @@ class GraphModule(torch.nn.Module):
             },
             state_dict.keys(),
         )
+
+    @testing.expectedFailureSerDer  # T202237665
+    @testing.expectedFailureSerDerNonStrict
+    def test_dynamic_sym_round(self):
+        class ModuleWithSymRound(torch.nn.Module):
+            def forward(self, x):
+                out_size = round(x.shape[0] / 2.0)
+                return x[:out_size]
+
+        dim_min = 5
+        dim_max = 10
+        dynamic_shapes = {"x": {0: Dim("n", min=dim_min, max=dim_max)}}
+
+        module = ModuleWithSymRound()
+        inp = (torch.randn(8),)
+        ep = export(module, inp, dynamic_shapes=dynamic_shapes)
+
+        # Expect builtin round in the export graph
+        round_nodes = [
+            n for n in ep.graph.nodes if n.op == "call_function" and n.target == round
+        ]
+        self.assertEqual(len(round_nodes), 1)
+
+        # Check pre/post-export equality
+        for i in range(dim_min, dim_max + 1):
+            dyn_inp = (torch.randn(i),)
+            export_res = ep.module()(*dyn_inp)
+            ref_res = module(*dyn_inp)
+            self.assertEqual(export_res, ref_res)
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
