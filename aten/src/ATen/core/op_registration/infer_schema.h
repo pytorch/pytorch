@@ -37,10 +37,10 @@ constexpr int checkStaticTypes() {
  // Give nice error messages for some of the common error cases.
  // Use a LOUD ERROR MESSAGE SO USERS SEE THE STATIC_ASSERT
  static_assert(std::conjunction<
-     bool_t<!std::is_integral<Types>::value || std::is_same<Types, int8_t>::value || std::is_same<Types, int64_t>::value || std::is_same<Types, bool>::value>...
+     bool_t<!std::is_integral_v<Types> || std::is_same_v<Types, int8_t> || std::is_same_v<Types, int64_t> || std::is_same_v<Types, bool>>...
    >::value, "INVALID TYPE: Only int8_t, int64_t and bool are supported as an integral argument type");
  static_assert(std::conjunction<
-     bool_t<!std::is_same<Types, float>::value>...
+     bool_t<!std::is_same_v<Types, float>>...
    >::value, "INVALID TYPE: float is not supported as an argument type, use double instead");
  return 0;
 }
@@ -87,7 +87,7 @@ struct createReturns<std::tuple<ReturnTypes...>, void> final {
 };
 
 template<class ReturnType>
-struct createReturns<ReturnType, std::enable_if_t<!std::is_same<void, ReturnType>::value && !guts::is_instantiation_of<std::tuple, ReturnType>::value>> final {
+struct createReturns<ReturnType, std::enable_if_t<!std::is_same_v<void, ReturnType> && !guts::is_instantiation_of<std::tuple, ReturnType>::value>> final {
   static constexpr std::array<ArgumentDef, 1> call() {
     return createReturns<std::tuple<ReturnType>>::call();
   }

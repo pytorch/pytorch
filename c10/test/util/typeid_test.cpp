@@ -72,18 +72,18 @@ TEST(TypeMetaTest, TypeMeta) {
 
 class ClassAllowAssignment {
  public:
-  ClassAllowAssignment() : x(42) {}
+  ClassAllowAssignment() = default;
   ClassAllowAssignment(const ClassAllowAssignment& src) = default;
   ClassAllowAssignment& operator=(const ClassAllowAssignment& src) = default;
-  int x;
+  int x{42};
 };
 
 class ClassNoAssignment {
  public:
-  ClassNoAssignment() : x(42) {}
+  ClassNoAssignment() = default;
   ClassNoAssignment(const ClassNoAssignment& src) = delete;
   ClassNoAssignment& operator=(const ClassNoAssignment& src) = delete;
-  int x;
+  int x{42};
 };
 } // namespace
 

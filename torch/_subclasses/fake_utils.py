@@ -2,12 +2,13 @@
 
 import functools
 import warnings
-from typing import Callable, Union
+from typing import Any, Callable, List, Union
 
 import torch
 import torch.utils._pytree as pytree
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import (
+    FakeTensor,
     FakeTensorMode,
     tree_flatten_only,
     UnsupportedFakeTensorException,
@@ -75,6 +76,74 @@ def is_sdpa_error(func, idx, e):
     return False
 
 
+def try_convert_fake_to_real(
+    ten_list: List[Union[FakeTensor, Any]]
+) -> List[Union[FakeTensor, torch.Tensor, Any]]:
+    """
+    Attempt to convert fake tensors to a corresponding real tensor with the correct underlying storage by looking up
+    the FakeTensorMode meta to real storage mapping. On failure to find the storage mapping, the FakeTensor will
+    remain in the list.
+
+    Note: this is not currently optimized (makes copies of the meta converter internal dictionaries)
+    """
+
+    fake_tensor = next(
+        (item for item in ten_list if isinstance(item, FakeTensor)), None
+    )
+    if fake_tensor is None:
+        return ten_list
+
+    fake_mode = fake_tensor.fake_mode
+    meta_converter = fake_mode.fake_tensor_converter.meta_converter
+    desc = meta_converter.describer
+
+    storage_to_key = {v: k for k, v in meta_converter.storage_memo.items()}
+    key_to_real_storage = {v: k for k, v in desc.lookup_storage.items()}
+    out = []
+    for t in ten_list:
+        if not isinstance(t, FakeTensor) or not t.layout == torch.strided:
+            out.append(t)
+            continue
+
+        key = storage_to_key.get(t.untyped_storage())
+        real_storage = None if key is None else key_to_real_storage.get(key)
+        if real_storage is None:
+            out.append(t)
+            continue
+
+        unhinted = False
+
+        def map_symint(s):
+            nonlocal unhinted
+            if not isinstance(s, torch.SymInt):
+                return s
+            unhinted = unhinted if not unhinted else s.node.has_hint()
+            return s.node.hint
+
+        stor_offset = map_symint(t.storage_offset())
+        size = [map_symint(s) for s in t.shape]
+        stride = [map_symint(s) for s in t.stride()]
+
+        if unhinted:
+            out.append(t)
+            continue
+
+        new_tensor = torch.empty(
+            [],
+            dtype=t.dtype,
+            device=t.device,
+        )
+        new_tensor.set_(
+            real_storage,
+            storage_offset=stor_offset,
+            size=size,
+            stride=stride,
+        )
+        out.append(new_tensor.clone())
+
+    return out
+
+
 class CrossRefFakeMode(TorchDispatchMode):
     def __init__(
         self,
@@ -82,6 +151,7 @@ class CrossRefFakeMode(TorchDispatchMode):
         *,
         check_strides=True,
         check_aliasing=True,
+        only_check_ops_with_meta=True,
     ):
         super().__init__()
         self.ignore_op_fn = (
@@ -89,6 +159,7 @@ class CrossRefFakeMode(TorchDispatchMode):
         )
         self.check_strides = check_strides
         self.check_aliasing = check_aliasing
+        self.only_check_ops_with_meta = only_check_ops_with_meta
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs or {}
@@ -105,6 +176,10 @@ class CrossRefFakeMode(TorchDispatchMode):
                 aten.set_.source_Storage_storage_offset,
             )
             and not self.ignore_op_fn(func)
+            and (
+                not self.only_check_ops_with_meta
+                or torch._subclasses.fake_impls.has_meta(func)
+            )
             and torch.Tag.dynamic_output_shape not in func.tags
             and torch.Tag.inplace_view not in func.tags
             and torch.Tag.data_dependent_output not in func.tags

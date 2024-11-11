@@ -1,6 +1,6 @@
 # Owner(s): ["oncall: export"]
 
-
+import copy
 import unittest
 
 import torch
@@ -17,6 +17,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    skipIfCrossRef,
     skipIfTorchDynamo,
     TestCase,
 )
@@ -720,6 +721,7 @@ def forward(self, token, p_linear_weight, p_linear_bias, tq, x):
         self.assertTrue(tq.pop() is a)
         self.assertTrue(tq.pop() is b)
 
+    @skipIfCrossRef  # arg names change with torch function mode
     def test_safe_to_trace_with_real(self):
         x = torch.randn(3, 3)
         safe_obj = torch.classes._TorchScriptTesting._ConstantTensorContainer(x)
@@ -1025,6 +1027,30 @@ graph():
     %queue_push_default : [num_users=0] = call_function[target=torch.ops._TorchScriptTesting.queue_push.default](args = (%tq, %x), kwargs = {})
     return (tq,)""",  # noqa: B950
         )
+
+    def test_deepcopy(self):
+        tq = torch.classes._TorchScriptTesting._TensorQueue(
+            torch.empty(
+                0,
+            ).fill_(-1)
+        )
+        tq_0 = copy.deepcopy(tq)
+        tq.push(torch.zeros(2, 2))
+        tq.push(torch.ones(2, 2))
+        tq_1 = copy.deepcopy(tq)
+        tq.push(torch.ones(2, 2) * 2)
+        self.assertEqual(tq_0.size(), 0)
+        self.assertEqual(tq_1.size(), 2)
+        self.assertEqual(tq.size(), 3)
+
+        foo = torch.classes._TorchScriptTesting._Foo(1, 2)
+        foo_0 = copy.deepcopy(foo)
+        foo.increment(1)
+        foo_1 = copy.deepcopy(foo)
+        foo.increment(1)
+        self.assertEqual(foo_0.add(1), 3)
+        self.assertEqual(foo_1.add(1), 5)
+        self.assertEqual(foo.add(1), 7)
 
 
 class TestCompileTorchbind(TestCase):

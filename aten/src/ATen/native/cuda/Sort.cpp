@@ -25,7 +25,7 @@ namespace at::native {
 
 std::vector<int64_t> infer_dense_strides_dim_last(const Tensor & self, int64_t dim);
 
-void fillSliceWithIndex(const Tensor& t, int dim) {
+void fillSliceWithIndex(const Tensor& t, int64_t dim) {
   if (t.numel()) {
     auto sizes = DimVector(t.dim(), 1);
     sizes[dim] = t.sizes()[dim];
@@ -122,6 +122,6 @@ void sort_cuda_kernel(
 // TODO: we should handle this accordingly when we start using REGISTER_HIP_DISPATCH,
 // since REGISTER_DISPATCH won't work in this cpp file.
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-REGISTER_CUDA_DISPATCH(sort_stub, &sort_cuda_kernel);
+REGISTER_CUDA_DISPATCH(sort_stub, &sort_cuda_kernel)
 
 }  // namespace at::native

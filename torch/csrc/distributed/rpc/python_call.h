@@ -22,6 +22,7 @@ class TORCH_API PythonCall final : public RpcCommandBase {
 
  private:
   SerializedPyObj serializedPyObj_;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const bool isAsyncExecution_;
 };
 

@@ -8,6 +8,7 @@ import random
 import re
 import sys
 import types
+import warnings
 from typing import Dict, List, Optional, TYPE_CHECKING
 
 import torch._C
@@ -41,6 +42,7 @@ from .functions import (
     UserMethodVariable,
     wrap_bound_arg,
 )
+from .nn_module import UnspecializedNNModuleVariable
 from .user_defined import call_random_fn, is_standard_setattr, UserDefinedObjectVariable
 
 
@@ -105,7 +107,13 @@ class SuperVariable(VariableTracker):
         resolved_class = None
         resolved_attr = None
         search_mro = type_to_use.__mro__
-        start_index = search_mro.index(search_type) + 1
+
+        try:
+            start_index = search_mro.index(search_type) + 1
+        except ValueError:
+            # Corner case where the typevar is not in the mro of the objvar
+            # https://github.com/python/cpython/blob/3.11/Objects/typeobject.c#L8843-L8844
+            return getattr(super(search_type, type_to_use), name), None
         # Implemented based on https://github.com/python/cpython/blob/3.11/Objects/typeobject.c#L8812
         # super has its getattro implementation. The key point is that instead of calling getattr, it checks the
         # attribute in the class __dict__
@@ -199,12 +207,10 @@ class SuperVariable(VariableTracker):
             and len(kwargs) == 0
             and args[0].is_python_constant()
         ):
-            from .builder import VariableBuilder
-
             key = args[0].as_python_constant()
-            return VariableBuilder(tx, ODictGetItemSource(self.objvar.source, key))(
-                collections.OrderedDict.__getitem__(self.objvar.value, key)
-            )
+            value = collections.OrderedDict.__getitem__(self.objvar.value, key)
+            source = ODictGetItemSource(self.objvar.source, key)
+            return VariableTracker.build(tx, value, source)
         elif inner_fn in (
             collections.OrderedDict.__setitem__,
             object.__setattr__,
@@ -341,21 +347,6 @@ class ClosureVariable(UnknownVariable):
         codegen.append_output(codegen.create_load_closure(self.name))
 
 
-# closure variable created by an inlined function
-class InlinedClosureVariable(UnknownVariable):
-    _nonvar_fields = {
-        "name",
-        *UnknownVariable._nonvar_fields,
-    }
-
-    def __init__(self, name, **kwargs) -> None:
-        super().__init__(**kwargs)
-        self.name = name
-
-    def reconstruct(self, codegen):
-        codegen.append_output(codegen.create_load_closure(self.name))
-
-
 class NewCellVariable(VariableTracker):
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
@@ -387,18 +378,20 @@ class InspectSignatureVariable(VariableTracker):
         super().__init__(**kwargs)
         self.inspected = inspected
 
+        try:
+            if hasattr(self.inspected, "get_function"):
+                self.fn = self.inspected.get_function()
+            elif isinstance(self.inspected, UnspecializedNNModuleVariable):
+                self.fn = self.inspected.value
+            else:
+                self.fn = self.inspected.as_python_constant()
+        except NotImplementedError:
+            unimplemented("inspect.signature with non-constant function")
+
+        self.signature = inspect.signature(self.fn)
+        self.parameters = list(self.signature.parameters.items())
         if isinstance(self.inspected, UserMethodVariable):
-            self.fn = self.inspected.get_function()
-            self.signature = inspect.signature(self.fn)
-            self.parameters = list(self.signature.parameters.items())[1:]
-        elif isinstance(self.inspected, UserFunctionVariable):
-            self.fn = self.inspected.get_function()
-            self.signature = inspect.signature(self.fn)
-            self.parameters = list(self.signature.parameters.items())
-        else:
-            self.fn = self.inspected.as_python_constant()
-            self.signature = inspect.signature(self.fn)
-            self.parameters = list(self.signature.parameters.items())
+            self.parameters = self.parameters[1:]
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         if name == "parameters":
@@ -432,9 +425,11 @@ class InspectSignatureVariable(VariableTracker):
             if self.fn.__kwdefaults__:
                 wrap = functools.partial(wrap_bound_arg, tx=tx)
                 kwdefaults_sources = {
-                    k: None
-                    if self.source is None
-                    else DefaultsSource(self.source, k, is_kw=True)
+                    k: (
+                        None
+                        if self.source is None
+                        else DefaultsSource(self.source, k, is_kw=True)
+                    )
                     for k in self.fn.__kwdefaults__
                 }
                 defaults = {
@@ -470,15 +465,10 @@ class InspectParameterVariable(VariableTracker):
         self.value = value
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
-        from .builder import SourcelessBuilder, VariableBuilder
-
         try:
             attr_value = getattr(self.value, name)
-            if self.source:
-                attr_source = AttrSource(self.source, name)
-                return VariableBuilder(tx, attr_source)(attr_value)
-            else:
-                return SourcelessBuilder.create(tx, attr_value)
+            source = self.source and AttrSource(self.source, name)
+            return VariableTracker.build(tx, attr_value, source)
         except AttributeError:
             unimplemented(f"getattr({self.value}, {name})")
 
@@ -649,11 +639,12 @@ class AutogradFunctionVariable(VariableTracker):
 
         VariableTracker.visit(visit, (args, kwargs))
 
-        if (
-            requires_grad
-            and torch.is_grad_enabled()
-            and config.capture_autograd_function
-        ):
+        if requires_grad and torch.is_grad_enabled():
+            if config.capture_autograd_function:
+                warnings.warn(
+                    "The config.capture_autograd_function flag is deprecated, it's now always true."
+                )
+
             from torch._functorch.autograd_function import (
                 autograd_function_forward_rewritten,
             )
@@ -714,6 +705,9 @@ class AutogradFunctionVariable(VariableTracker):
         ctx = AutogradFunctionContextVariable.create(tx, args, kwargs)
         args = [ctx, *args]
         if isinstance(fn, types.FunctionType):
+            sig = inspect.signature(fn)
+            if len(args) - 1 == len(sig._parameters):
+                args = args[1:]  # Don't use context
             return variables.UserFunctionVariable(fn, source=source).call_function(
                 tx, args, kwargs
             )
@@ -908,11 +902,9 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
             if self.needs_input_grad is not None:
                 return variables.ConstantVariable.create(self.needs_input_grad)
             if self.source:
-                from .builder import VariableBuilder
+                source = AttrSource(self.source, "needs_input_grad")
+                return VariableTracker.build(tx, self.value.needs_input_grad, source)
 
-                return VariableBuilder(tx, AttrSource(self.source, "needs_input_grad"))(
-                    self.value.needs_input_grad
-                )
         return super().var_getattr(tx, name)
 
 
@@ -937,7 +929,7 @@ class AutogradEngineVariable(UserDefinedObjectVariable):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if name == "queue_callback":
-            if torch._dynamo.compiled_autograd.compiled_autograd_enabled:
+            if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
                 assert (
                     tx.one_graph
                 ), "queue_callback() is only supported when Compiled Autograd is enabled with fullgraph=True"
@@ -984,7 +976,7 @@ class GetAttrVariable(VariableTracker):
         self.obj = obj
         self.name = name
 
-    def __str__(self) -> str:
+    def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.obj}, {self.name})"
 
     @staticmethod
@@ -993,6 +985,13 @@ class GetAttrVariable(VariableTracker):
 
     def as_proxy(self):
         return GetAttrVariable.create_getattr_proxy(self.obj.as_proxy(), self.name)
+
+    def as_python_constant(self):
+        constant = self.obj.as_python_constant()
+        try:
+            return getattr(constant, self.name)
+        except AttributeError:
+            raise NotImplementedError(f"{self} is not a constant") from None
 
     def const_getattr(self, tx: "InstructionTranslator", name):
         if not isinstance(self.obj, variables.NNModuleVariable):
@@ -1110,11 +1109,8 @@ class GetSetDescriptorVariable(VariableTracker):
 
     def var_getattr(self, tx: "InstructionTranslator", name):
         if name == "__get__" and self.source:
-            from .builder import VariableBuilder
-
-            return VariableBuilder(tx, AttrSource(self.source, "__get__"))(
-                self.desc.__get__
-            )
+            source = AttrSource(self.source, "__get__")
+            return VariableTracker.build(tx, self.desc.__get__, source)
         else:
             return super().var_getattr(tx, name)
 
@@ -1154,18 +1150,13 @@ class PythonModuleVariable(VariableTracker):
         if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
             return tx.output.side_effects.load_attr(self, name)
 
-        from .builder import SourcelessBuilder, VariableBuilder
-
         if self.is_torch or name not in self.value.__dict__:
             attr_value = getattr(self.value, name)
         else:
             attr_value = self.value.__dict__[name]
 
-        if self.source:
-            new_source = AttrSource(self.source, name)
-            return VariableBuilder(tx, new_source)(attr_value)
-        else:
-            return SourcelessBuilder.create(tx, attr_value)
+        source = self.source and AttrSource(self.source, name)
+        return VariableTracker.build(tx, attr_value, source)
 
 
 class TypingVariable(VariableTracker):
@@ -1186,8 +1177,18 @@ class TypingVariable(VariableTracker):
             )
         unimplemented("typing")
 
-    def python_type(self):
-        return type(self.value)
+    def var_getattr(self, tx: "InstructionTranslator", name: str):
+        from .builder import SourcelessBuilder, VariableBuilder
+
+        if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
+            return tx.side_effects.load_attr(self, name)
+
+        value = getattr(self.value, name)
+        if self.source:
+            attr_source = AttrSource(self.source, name)
+            return VariableBuilder(tx, attr_source)(value)
+        else:
+            return SourcelessBuilder(tx, value)
 
     def as_python_constant(self):
         return self.value
@@ -1306,9 +1307,6 @@ class NumpyVariable(VariableTracker):
     ) -> "VariableTracker":
         unimplemented("numpy")
 
-    def python_type(self):
-        return type(self.value)
-
     def as_python_constant(self):
         return self.value
 
@@ -1327,7 +1325,7 @@ class NullVariable(VariableTracker):
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
 
-    def __str__(self) -> str:
+    def __repr__(self) -> str:
         return "NullVariable"
 
     def reconstruct(self, codegen):
@@ -1482,9 +1480,6 @@ class ConstantLikeVariable(VariableTracker):
     def __init__(self, value, **kwargs) -> None:
         super().__init__(**kwargs)
         self.value = value
-
-    def python_type(self):
-        return type(self.value)
 
     def as_python_constant(self):
         return self.value

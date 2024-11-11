@@ -325,18 +325,30 @@ def custom_function_call_vmap_helper(
         batch_size=interpreter.batch_size(),
         randomness=interpreter.randomness(),
     )
+    # We're either in the autograd.Function case (vmap staticmethod)
+    # or the torch.library.register_vmap case.
+    autograd_function_case = isinstance(op, torch.autograd.function.FunctionMeta)
+
+    def lower_to_next():
+        if autograd_function_case:
+            return interpreter.lower()
+        else:
+            return torch._C._ExcludeDispatchKeyGuard(
+                torch._C.DispatchKeySet(torch._C.DispatchKey.FuncTorchBatched)
+            )
+
     unwrapped_operands, in_dims = unwrap_batched(operands, current_level)
     # If none of the tensors are batched at the current level, then we skip the
     # current level. This saves the user from needing to handle this case in
     # their vmap staticmethod (and is consistent with our C++ batching rule API)
     if pytree.tree_all(lambda dim: dim is None, in_dims):
-        with interpreter.lower():
-            if isinstance(op, torch.autograd.function.FunctionMeta):
+        with lower_to_next():
+            if autograd_function_case:
                 return custom_function_call(op, *operands)
             else:
                 return op(*operands, **kwargs)
 
-    with interpreter.lower():
+    with lower_to_next():
         result = vmap_function(info, in_dims, *unwrapped_operands, **kwargs)
     validate_vmap_returns_tuple_of_two_elements(result)
     unwrapped_output, out_dims = result

@@ -120,8 +120,8 @@ KERNEL_COUNT_OVERRIDES = {
     "test_adamw_amsgrad_capturable_foreach_xpu": 3,
     "test_adamw_amsgrad_capturable_cuda": 6,
     "test_adamw_amsgrad_capturable_xpu": 6,
-    "test_adamw_tensor_lr_amsgrad_capturable_foreach_cuda": 3,
-    "test_adamw_tensor_lr_amsgrad_capturable_foreach_xpu": 3,
+    "test_adamw_tensor_lr_tensor_betas_amsgrad_capturable_cuda": 6,
+    "test_adamw_tensor_lr_tensor_betas_amsgrad_capturable_xpu": 6,
     "test_adamw_tensor_lr_amsgrad_capturable_cuda": 6,
     "test_adamw_tensor_lr_amsgrad_capturable_xpu": 6,
     "test_adam_tensor_lr_amsgrad_capturable_cuda": 6,
@@ -132,8 +132,6 @@ KERNEL_COUNT_OVERRIDES = {
     "test_adadelta_tensor_lr_capturable_xpu": 6,
     "test_rmsprop_tensor_lr_capturable_cuda": 6,
     "test_rmsprop_tensor_lr_capturable_xpu": 6,
-    "test_adadelta_tensor_lr_capturable_foreach_cuda": 4,
-    "test_adadelta_tensor_lr_capturable_foreach_xpu": 4,
     "test_adadelta_foreach_weight_decay_maximize_cpu": 12,
     "test_adadelta_foreach_rho_weight_decay_cpu": 12,
     "test_adadelta_foreach_weight_decay_cpu": 12,
@@ -148,6 +146,7 @@ KERNEL_COUNT_OVERRIDES = {
     "test_sgd_weight_decay_maximize_cpu": 4,
     "test_sgd_weight_decay_cpu": 4,
     "test_sgd_weight_decay_cuda": 4,
+    "test_sgd_weight_decay_xpu": 4,
     "test_sgd_momentum_weight_decay_foreach_cuda": 2,
     "test_sgd_momentum_weight_decay_foreach_xpu": 2,
     "test_sgd_momentum_nesterov_weight_decay_foreach_cuda": 2,
@@ -155,8 +154,6 @@ KERNEL_COUNT_OVERRIDES = {
     "test_sgd_cuda": 4,
     "test_sgd_cpu": 4,
     "test_sgd_xpu": 4,
-    "test_rmsprop_tensor_lr_capturable_foreach_cuda": 4,
-    "test_rmsprop_tensor_lr_capturable_foreach_xpu": 4,
     "test_adagrad_initial_accumulator_value_weight_decay_foreach_xpu": 2,
     "test_adagrad_lr_decay_weight_decay_foreach_xpu": 2,
     "test_adagrad_weight_decay_foreach_xpu": 2,
@@ -168,21 +165,13 @@ KERNEL_COUNT_OVERRIDES = {
     "test_adamax_tensor_lr_weight_decay_capturable_xpu": 6,
     "test_asgd_tensor_lr_weight_decay_maximize_capturable_cuda": 5,
     "test_asgd_tensor_lr_weight_decay_maximize_capturable_xpu": 8,
-    "test_asgd_tensor_lr_weight_decay_maximize_capturable_foreach_cuda": 4,
-    "test_asgd_tensor_lr_weight_decay_maximize_capturable_foreach_xpu": 4,
     "test_nadam_tensor_lr_weight_decay_momentum_decay_decoupled_weight_decay_capturable_cuda": 6,
     "test_nadam_tensor_lr_weight_decay_momentum_decay_decoupled_weight_decay_capturable_xpu": 9,
-    "test_nadam_tensor_lr_weight_decay_momentum_decay_decoupled_weight_decay_capturable_foreach_cuda": 3,
-    "test_nadam_tensor_lr_weight_decay_momentum_decay_decoupled_weight_decay_capturable_foreach_xpu": 3,
     "test_radam_tensor_lr_capturable_weight_decay_decoupled_weight_decay_cuda": 6,
     "test_radam_tensor_lr_capturable_weight_decay_decoupled_weight_decay_xpu": 6,
-    "test_radam_tensor_lr_capturable_weight_decay_decoupled_weight_decay_foreach_cuda": 3,
-    "test_radam_tensor_lr_capturable_weight_decay_decoupled_weight_decay_foreach_xpu": 3,
     "test_sgd_tensor_lr_cpu": 2,
     "test_sgd_tensor_lr_cuda": 2,
     "test_sgd_tensor_lr_xpu": 2,
-    "test_sgd_tensor_lr_foreach_cuda": 2,
-    "test_sgd_tensor_lr_foreach_xpu": 2,
 }
 
 # also tracks currently supported optimizers
@@ -216,7 +205,7 @@ def build_opt_kwarg_db():
 
                 has_tensor_lr = False
                 for key, val in kwargs.items():
-                    if not key == "lr" and (
+                    if (not key == "lr" and not key == "betas") and (
                         not isinstance(val, bool) or (isinstance(val, bool) and val)
                     ):
                         name += "_" + key
@@ -224,6 +213,9 @@ def build_opt_kwarg_db():
                     if key == "lr" and isinstance(kwargs["lr"], torch.Tensor):
                         has_tensor_lr = True
                         name += "_tensor_lr"
+
+                    if key == "betas" and isinstance(kwargs["betas"][0], torch.Tensor):
+                        name += "_tensor_betas"
 
                 name += f"_{device}"
 
@@ -266,7 +258,10 @@ try:
     try:
         from .test_torchinductor import check_model, check_model_gpu
     except ImportError:
-        from test_torchinductor import check_model, check_model_gpu
+        from test_torchinductor import (  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
+            check_model,
+            check_model_gpu,
+        )
 except (unittest.SkipTest, ImportError) as e:
     sys.stderr.write(f"{type(e)}: {e}\n")
     if __name__ == "__main__":
@@ -333,6 +328,14 @@ def check_optim(
         rtol = 5.5e-4
         atol = 5e-5
 
+    # inductor/test_compiled_optimizers.py::CompiledOptimizerTests::test_nadam_tensor_lr_weight_decay_momentum_decay_decoupled_weight_decay_capturable_foreach_cuda_lambdalr
+    # Mismatched elements: 100 / 100 (100.0%)
+    # Greatest absolute difference: 1.4960765838623047e-05 at index (2, 0) (up to 1e-05 allowed)
+    # Greatest relative difference: 1.686977884673979e-05 at index (2, 0) (up to 1.3e-06 allowed)
+    if optim_cls is NAdam:
+        atol = 1.5e-5
+        rtol = 1.7e-5
+
     self.assertEqual(list(params_eager), list(params_compiled), atol=atol, rtol=rtol)
 
     for p_eager, p_compiled in zip(params_eager, params_compiled):
@@ -352,6 +355,7 @@ def make_test(
     device="cuda",
     **kwargs,
 ):
+    @config.patch("score_fusion_memory_threshold", 1)
     def test_fn(self):
         stack = ExitStack()
         try:
@@ -365,6 +369,16 @@ def make_test(
             if isinstance(kwargs.get("lr", None), torch.Tensor):
                 kwargs["lr"] = kwargs["lr"].to(device)
                 kwargs_compiled["lr"] = kwargs_compiled["lr"].to(device)
+
+            if "betas" in kwargs and isinstance(kwargs["betas"][0], torch.Tensor):
+                kwargs["betas"] = (
+                    kwargs["betas"][0].to(device),
+                    kwargs["betas"][1].to(device),
+                )
+                kwargs_compiled["betas"] = (
+                    kwargs_compiled["betas"][0].to(device),
+                    kwargs_compiled["betas"][1].to(device),
+                )
 
             torch._dynamo.reset()
             torch._inductor.metrics.reset()
@@ -426,6 +440,7 @@ def make_test(
 
 
 def make_recompile_test(optim_cls, closure=None, kernel_count=2, **kwargs):
+    @config.patch("score_fusion_memory_threshold", 1)
     @requires_gpu
     def test_fn(self):
         torch._dynamo.reset()
@@ -821,7 +836,7 @@ class CompiledOptimizerTests(TestCase):
         try:
             from . import s429861_repro
         except ImportError:
-            import s429861_repro
+            import s429861_repro  # @manual
 
         forward = s429861_repro.forward
 

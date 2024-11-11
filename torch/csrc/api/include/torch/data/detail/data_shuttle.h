@@ -9,9 +9,7 @@
 #include <chrono>
 #include <utility>
 
-namespace torch {
-namespace data {
-namespace detail {
+namespace torch::data::detail {
 
 /// Encapsulates the full life cycle of DataLoader jobs.
 ///
@@ -82,6 +80,4 @@ class DataShuttle {
   Queue<Result> results_;
 };
 
-} // namespace detail
-} // namespace data
-} // namespace torch
+} // namespace torch::data::detail

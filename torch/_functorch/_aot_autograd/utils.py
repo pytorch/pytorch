@@ -14,6 +14,8 @@ import torch
 import torch.utils._pytree as pytree
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._logging import getArtifactLogger
+from torch._subclasses.fake_tensor import FakeTensor
+from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import py_sym_types
 
@@ -444,3 +446,33 @@ def copy_fwd_metadata_to_bw_nodes(fx_g):
         if fwd_node is not None:
             node.meta["fwd_nn_module_stack"] = fwd_node.meta["nn_module_stack"]
             node.meta["fwd_source_fn_stack"] = fwd_node.meta.get("source_fn_stack")
+
+
+def register_buffer_assignment_hook(mod, assigned_buffers):
+    """
+    Register a hook that intercepts buffer assignments.
+    This is used to detect when a buffer is assigned to, and then we can
+    map that buffer to the corresponding proxy node in the graph.
+    """
+
+    def _map_assigned_buffer_to_proxy(_mod, name, buffer):
+        # We intercept buffer assignments on the root module through this hook.
+        if _mod._buffers is mod._buffers:
+            # either buffer is a functional tensor, which wraps a fake tensor
+            if isinstance(buffer, FunctionalTensor):
+                buffer = buffer.from_functional()
+            # or buffer is a fake tensor
+            assert isinstance(buffer, FakeTensor)
+            # The fake tensor in turn is associated with a proxy node.
+            proxy_mode = torch.fx.experimental.proxy_tensor.get_proxy_mode()
+            assert proxy_mode is not None
+            proxy = torch.fx.experimental.proxy_tensor.get_proxy_slot(
+                buffer, proxy_mode.tracer
+            ).proxy.node
+            # We map the assigned buffer to this proxy node.
+            assigned_buffers[name] = proxy.name
+        return buffer
+
+    return torch.nn.modules.module.register_module_buffer_registration_hook(
+        _map_assigned_buffer_to_proxy
+    )
