@@ -1275,10 +1275,10 @@ def parse_args():
             or TEST_CONFIG == "nogpu_AVX512"
             or TEST_CONFIG == "nogpu_NO_AVX2"
             or TEST_CONFIG == "default"
+            or TEST_WITH_ROCM
         )
         and get_pr_number() is not None
         and not strtobool(os.environ.get("NO_TD", "False"))
-        and not TEST_WITH_ROCM
         and not IS_MACOS
         and "xpu" not in BUILD_ENVIRONMENT
         and "onnx" not in BUILD_ENVIRONMENT
