@@ -42,7 +42,7 @@ class ModuleHolder : torch::detail::ModuleHolderIndicator {
   /// actually used.
   ModuleHolder() : impl_(default_construct()) {
     static_assert(
-        std::is_default_constructible<Contained>::value,
+        std::is_default_constructible_v<Contained>,
         "You are trying to default construct a module which has "
         "no default constructor. Use = nullptr to give it the empty state "
         "(e.g. `Linear linear = nullptr;` instead of `Linear linear;`).");
@@ -182,7 +182,7 @@ serialize::InputArchive& operator>>(
 #ifdef __CUDACC__
 #define TORCH_UNUSED_EXCEPT_CUDA
 #else
-#define TORCH_UNUSED_EXCEPT_CUDA C10_UNUSED
+#define TORCH_UNUSED_EXCEPT_CUDA [[maybe_unused]]
 #endif
 
 /// Defines a class `Name` which inherits from `nn::ModuleHolder` to provide a
