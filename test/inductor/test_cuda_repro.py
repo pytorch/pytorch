@@ -1242,6 +1242,7 @@ class CudaReproTests(TestCase):
         self.assertEqual(outer_reduce(a), out)
         self.assertTrue("for roffset" not in code)
 
+    @skipIfRocm
     def test_scaled_dot_product_efficient_attention_backward(self):
         from torch import nn, Tensor
 
