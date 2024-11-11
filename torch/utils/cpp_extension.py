@@ -4,6 +4,7 @@ import glob
 import importlib
 import importlib.abc
 import os
+import platform
 import re
 import shlex
 import shutil
@@ -994,7 +995,7 @@ def CppExtension(name, sources, *args, **kwargs):
     libraries.append('torch')
     libraries.append('torch_cpu')
     libraries.append('torch_python')
-    if IS_WINDOWS:
+    if IS_WINDOWS and platform.machine().lower() != "arm64":
         libraries.append("sleef")
 
     kwargs['libraries'] = libraries
