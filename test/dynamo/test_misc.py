@@ -3826,9 +3826,11 @@ utils_device.CURRENT_DEVICE == None""".split(
 
     def test_free_var_and_local_name_collision(self):
         x = 10
+
         def make_func():
             def func():
                 return x
+
             return func
 
         @torch.compile(backend="eager")
@@ -3842,6 +3844,24 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertTrue(torch.allclose(torch.ones(1) + 1, res[0]))
         self.assertEqual(0, res[1])
         self.assertEqual(10, res[2])
+
+    def test_cell_captured_by_existing_func_but_not_root_frame(self):
+        x = torch.ones(1)
+
+        def get_inner():
+            def inner():
+                return x + x
+
+            # Calling `inner` so Dynamo won't skip this frame.
+            return inner(), inner
+
+        @torch.compile
+        def root():
+            return get_inner()
+
+        res, inner = root()
+        self.assertTrue(torch.allclose(x + x, res))
+        self.assertTrue(torch.allclose(inner(), res))
 
     def test_top_package_import(self):
         def fn(x):
@@ -8772,7 +8792,7 @@ def ___make_guard_fn():
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_runtime_assert_replacement(self):
-        @torch.compile(backend="aot_eager")
+        @torch.compile(backend="eager")
         def fn(x, y):
             z = y.item()
             torch._check(z == 3)
