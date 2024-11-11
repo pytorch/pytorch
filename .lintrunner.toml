@@ -445,6 +445,52 @@ command = [
 ]
 
 [[linter]]
+code = 'C10_UNUSED'
+include_patterns = [
+    '**/*.cpp',
+    '**/*.h',
+]
+exclude_patterns = [
+    'c10/macros/Macros.h',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/grep_linter.py',
+    '--pattern=C10_UNUSED',
+    '--linter-name=C10_UNUSED',
+    '--error-name=deprecated C10_UNUSED macro',
+    '--replace-pattern=s/C10_UNUSED/[[maybe_unused]]/',
+    """--error-description=\
+        Deprecated macro, use [[maybe_unused]] directly\
+    """,
+    '--',
+    '@{{PATHSFILE}}'
+]
+
+[[linter]]
+code = 'C10_NODISCARD'
+include_patterns = [
+    '**/*.cpp',
+    '**/*.h',
+]
+exclude_patterns = [
+    'c10/macros/Macros.h',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/grep_linter.py',
+    '--pattern=C10_NODISCARD',
+    '--linter-name=C10_NODISCARD',
+    '--error-name=deprecated C10_NODISCARD macro',
+    '--replace-pattern=s/C10_NODISCARD/[[nodiscard]]/',
+    """--error-description=\
+        Deprecated macro, use [[nodiscard]] directly\
+    """,
+    '--',
+    '@{{PATHSFILE}}'
+]
+
+[[linter]]
 code = 'INCLUDE'
 include_patterns = [
     'c10/**',
