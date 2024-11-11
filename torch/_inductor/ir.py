@@ -4929,12 +4929,7 @@ class ExternKernel(InputsKernel):
         allow_padding=False,
     ):
         assert order is not None or exact_strides is not None
-        if x.get_numel() == 0:  # Layout doesn't matter
-            return x
-
-        if (
-            exact_strides is not None and len(exact_strides) == 0
-        ):  # Layout doesn't matter
+        if x.get_numel() in (0, 1):  # Layout doesn't matter
             return x
 
         # require x to have the layout
