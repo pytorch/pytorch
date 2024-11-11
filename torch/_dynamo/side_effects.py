@@ -309,10 +309,12 @@ class SideEffects:
         return variable
 
     def track_cell_existing(
-        self, source: Source, cell: CellType, contents: VariableTracker
+        self, source: Optional[Source], cell: CellType, contents: VariableTracker
     ):
         variable = variables.NewCellVariable(
-            mutation_type=AttributeMutationExisting(),
+            # We don't support mutation to cell without source because we need
+            # source to properly codegen the mutations.
+            mutation_type=None if source is None else AttributeMutationExisting(),
             pre_existing_contents=contents,
             source=source,
         )
