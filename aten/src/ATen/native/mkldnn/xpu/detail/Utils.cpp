@@ -118,12 +118,12 @@ dnnl::memory::desc get_onednn_md(const at::Tensor& tensor) {
   return {get_onednn_dims(t), get_onednn_dtype(t), get_onednn_strides(t)};
 }
 
-bool onednn_strides_check(const at::Tensor& src) {
+bool onednn_strides_check(const Tensor& src) {
   auto adims = get_onednn_dims(src);
   int ndims = (int)adims.size();
   auto dims = adims.data();
   auto data_type = static_cast<dnnl_data_type_t>(
-      get_onednn_dtype(src, /*allow_undef*/ true));
+      get_onednn_dtype_include_double(src, /*allow_undef*/ false));
   auto strides_info = get_onednn_strides(src);
   auto strides = strides_info.empty() ? nullptr : &strides_info[0];
 
@@ -138,6 +138,14 @@ bool onednn_strides_check(const at::Tensor& src) {
   dnnl_memory_desc_query(md, dnnl_query_format_kind, &md_fmt_kind);
   dnnl_memory_desc_query(md, dnnl_query_ndims_s32, &md_ndims);
   dnnl_memory_desc_query(md, dnnl_query_padded_dims, &md_padded_dims);
+  auto block_size = 1;
+  // const auto& blk = md->format_desc.blocking;
+  dnnl_dims_t md_inner_blks;
+  dnnl_dims_t md_blk_inner_idxs;
+  dnnl_memory_desc_query(md, dnnl_query_inner_idxs, &md_blk_inner_idxs);
+  dnnl_memory_desc_query(md, dnnl_query_inner_blks, &md_inner_blks);
+
+  dnnl_memory_desc_destroy(md);
   if (strides == nullptr || md_ndims == 0 ||
       md_fmt_kind != dnnl_format_kind_t::dnnl_blocked)
     return true;
@@ -157,11 +165,6 @@ bool onednn_strides_check(const at::Tensor& src) {
     blocks[d] = 1;
   }
 
-  auto block_size = 1;
-  dnnl_dims_t md_inner_blks;
-  dnnl_dims_t md_blk_inner_idxs;
-  dnnl_memory_desc_query(md, dnnl_query_inner_idxs, &md_blk_inner_idxs);
-  dnnl_memory_desc_query(md, dnnl_query_inner_blks, &md_inner_blks);
   for (int iblk = 0; iblk < md_inner_nblks; ++iblk) {
     blocks[md_blk_inner_idxs[iblk]] *= md_inner_blks[iblk];
     block_size *= md_inner_blks[iblk];
@@ -356,8 +359,7 @@ static inline bool is_smf_channels_last(const Tensor& t) {
 
 bool use_channels_last_for_conv(
     const at::Tensor& src,
-    const at::Tensor& weight,
-    bool is_transpose) {
+    const at::Tensor& weight) {
   if (!src.defined() || src.is_sparse()) {
     // suggest channels_first
     return false;
@@ -371,6 +373,78 @@ bool use_channels_last_for_conv(
   }
 
   return false;
+}
+
+dnnl::memory::format_tag conv_src_fmt(
+    const int64_t ndim,
+    const bool is_channels_last) {
+  if (!is_channels_last) {
+    return (ndim == 3)
+        ? dnnl::memory::format_tag::ncw
+        : ((ndim == 4) ? dnnl::memory::format_tag::nchw
+                       : ((ndim == 5) ? dnnl::memory::format_tag::ncdhw
+                                      : dnnl::memory::format_tag::undef));
+  } else {
+    return (ndim == 3)
+        ? dnnl::memory::format_tag::nwc
+        : ((ndim == 4) ? dnnl::memory::format_tag::nhwc
+                       : ((ndim == 5) ? dnnl::memory::format_tag::ndhwc
+                                      : dnnl::memory::format_tag::undef));
+  }
+}
+
+dnnl::memory::dims compatible_weight_dims(
+    const int64_t ndim,
+    const int64_t groups,
+    const int64_t oc,
+    const int64_t ic,
+    const IntArrayRef wsizes) {
+  if (ndim == 3) {
+    auto kw = wsizes[2];
+    return (groups != 1)
+        ? dnnl::memory::dims({groups, oc / groups, ic / groups, kw})
+        : dnnl::memory::dims({oc, ic, kw});
+  } else if (ndim == 4) {
+    auto kh = wsizes[2];
+    auto kw = wsizes[3];
+    return (groups != 1)
+        ? dnnl::memory::dims({groups, oc / groups, ic / groups, kh, kw})
+        : dnnl::memory::dims({oc, ic, kh, kw});
+  } else if (ndim == 5) {
+    auto kd = wsizes[2];
+    auto kh = wsizes[3];
+    auto kw = wsizes[4];
+    return (groups != 1)
+        ? dnnl::memory::dims({groups, oc / groups, ic / groups, kd, kh, kw})
+        : dnnl::memory::dims({oc, ic, kd, kh, kw});
+  }
+
+  return {};
+}
+
+dnnl::memory::format_tag conv_weight_fmt(
+    const int64_t ndim,
+    const bool grouped,
+    const bool is_channels_last) {
+  if (!is_channels_last) {
+    return (ndim == 3) ? (grouped ? dnnl::memory::format_tag::goiw
+                                  : dnnl::memory::format_tag::oiw)
+        : (ndim == 4)
+        ? (grouped ? dnnl::memory::format_tag::goihw
+                   : dnnl::memory::format_tag::oihw)
+        : ((ndim == 5) ? (grouped ? dnnl::memory::format_tag::goidhw
+                                  : dnnl::memory::format_tag::oidhw)
+                       : dnnl::memory::format_tag::undef);
+  } else {
+    return (ndim == 3) ? (grouped ? dnnl::memory::format_tag::gowi
+                                  : dnnl::memory::format_tag::owi)
+        : (ndim == 4)
+        ? (grouped ? dnnl::memory::format_tag::gohwi
+                   : dnnl::memory::format_tag::ohwi)
+        : ((ndim == 5) ? (grouped ? dnnl::memory::format_tag::godhwi
+                                  : dnnl::memory::format_tag::odhwi)
+                       : dnnl::memory::format_tag::undef);
+  }
 }
 
 } // namespace at::native::onednn
