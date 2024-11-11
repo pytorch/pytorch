@@ -2386,10 +2386,10 @@ class FakeTensorMode(TorchDispatchMode):
 
         # TODO(soulitzer): When can I have a cache_id that is not in the cache?
         if cache_id not in self.cache_id_to_fake_cache:
-            from torch.nested._internal.nested_tensor import NestedCache
+            from torch.nested._internal.nested_tensor import MetadataCache
             # TODO(soulitzer): why cannot we have this assertion?
             # assert self.enter_stack, "should only called while FakeTensorMode is active"
-            cache = NestedCache(data=data, id=cache_id, fake_mode=self)
+            cache = MetadataCache(data=data, id=cache_id, fake_mode=self)
             self.cache_id_to_fake_cache[cache_id] = cache
 
             for v in data.values():

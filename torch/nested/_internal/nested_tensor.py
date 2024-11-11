@@ -8,11 +8,11 @@ import torch
 from torch._C import DispatchKey, DispatchKeySet
 from torch._prims_common import is_expandable_to
 
-from torch.nested._internal.nested_cache import (
-    add_entry_to_cache,
-    create_cache_with_data,
-    get_cache_if_exists,
-    try_get_cache_entry,
+from torch.nested._internal.metadata_cache import (
+    add_entry,
+    create_cache,
+    try_get_cache,
+    try_get_entry,
 )
 from torch.nested._internal.nested_int import get_nested_symint
 
@@ -89,26 +89,26 @@ def get_nested_cache(offsets, lengths, cpu_offsets, cpu_lengths):
     caches = []
     for k in RAGGED_SOURCE_KEYS:
         if k in cache_data:
-            _cache = get_cache_if_exists(cache_data[k])
+            _cache = try_get_cache(cache_data[k])
             if _cache is not None:
                 caches.append(_cache)
 
     # Update/merge/create depending whether existing caches exist
     cache = None
     if len(caches) == 0:
-        cache = create_cache_with_data(cache_data)
+        cache = create_cache(cache_data)
     else:
         # Entries already registered to cache are prioritized.
         cache = caches[0]
         for cache_ in caches[1:]:
             for k, v in cache_.data.items():
-                if try_get_cache_entry(cache, k) is None and v is not None:
+                if try_get_entry(cache, k) is None and v is not None:
                     # view to avoid a single tensor instance shared between caches
-                    add_entry_to_cache(cache, k, v.view_as(v))
+                    add_entry(cache, k, v.view_as(v))
 
         for k, v in cache_data.items():
-            if try_get_cache_entry(cache, k) is None and v is not None:
-                add_entry_to_cache(cache, k, v)
+            if try_get_entry(cache, k) is None and v is not None:
+                add_entry(cache, k, v)
 
     return cache
 

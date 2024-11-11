@@ -3,12 +3,13 @@ from typing import *
 
 import torch
 from torch.nested._internal.tensor_registry import TensorRegistry
+from torch.nested._internal.utils import assert_not_fake, try_get_fake_mode
 
 
 # Thin wrapper around a dict to help us enable weak references, then handle
 # extra things?
 # Do not construct/update this directly! Search for the "Composite Cache APIs".
-class NestedCache:
+class MetadataCache:
     # I feel like this makes more sense anyway.
     def __init__(self, *, data, cache_id: int, fake_mode=None):
         self.data = data
@@ -23,7 +24,7 @@ class NestedCache:
         return tuple(k is not None for k in self.data.values())
 
 
-# Maintains a NestedCache to int map
+# Maintains a MetadataCache to int map
 class CacheRegistry:
     def __init__(self):
         self._cache_id_to_cache_ref: Dict[int, weakref.ReferenceType] = {}
@@ -40,7 +41,7 @@ class CacheRegistry:
         return None
 
     def create_cache(self, data):
-        cache = NestedCache(data=data, cache_id=self._cache_id_counter)
+        cache = MetadataCache(data=data, cache_id=self._cache_id_counter)
         self._cache_id_counter += 1
         self._cache_id_to_cache_ref[cache.id] = weakref.ref(cache)
         return cache
@@ -50,14 +51,6 @@ class CacheRegistry:
         ret._cache_id_to_cache_ref = self._cache_id_to_cache_ref.copy()
         ret._cache_id_counter = self._cache_id_counter
         return ret
-
-
-def _assert_not_fake(t):
-    from torch._subclasses.fake_tensor import FakeTensor
-    from torch._subclasses.functional_tensor import mb_unwrap_functional_tensor
-
-    t = mb_unwrap_functional_tensor(t)
-    assert not isinstance(t, FakeTensor)
 
 
 # TODO(soulitzer): Update the compile story for global state.
@@ -78,7 +71,7 @@ class CacheState:
         self.keys = keys
 
     def maybe_update_tensor_id_to_cache_id(self, cache, k, v):
-        _assert_not_fake(v)
+        assert_not_fake(v)
         if k not in self.keys:
             return
         tensor_id = self._tensor_registry.get_int(v)
@@ -86,24 +79,24 @@ class CacheState:
         assert tensor_id not in self._tensor_id_to_cache_id
         self._tensor_id_to_cache_id[tensor_id] = cache.id
 
-    def get_cache_if_exists(self, tensor) -> Optional[NestedCache]:
+    def try_get_cache(self, tensor) -> Optional[MetadataCache]:
         # What is the None story here...
-        _assert_not_fake(tensor)
+        assert_not_fake(tensor)
         tensor_id = self._tensor_registry.get_int(tensor)
         mb_cache_id = self._tensor_id_to_cache_id.get(tensor_id)
         if mb_cache_id is None:
             return None
         return self._cache_registry.try_get_cache(mb_cache_id)
 
-    def add_entry_to_cache(self, cache_id, key, value):
-        # Take cache_id instead of NestedCache because this must be called
+    def add_entry(self, cache_id, key, value):
+        # Take cache_id instead of MetadataCache because this must be called
         # through our custom op.
         cache = self._cache_registry.try_get_cache(cache_id)
-        assert cache is not None, "add_entry_to_cache: Expected cache to exist"
+        assert cache is not None, "add_entry: Expected cache to exist"
         cache.data[key] = value
         self.maybe_update_tensor_id_to_cache_id(cache, key, value)
 
-    def create_cache_with_data(self, data: Dict):
+    def create_cache(self, data: Dict):
         # Don't create a fresh dict because we created this one.
         cache = self._cache_registry.create_cache(data)
         for k, v in data.items():
@@ -133,32 +126,6 @@ def get_global_cache_state():
     return _global_cache_state
 
 
-def _try_get_fake_mode(obj):
-    from torch._subclasses.fake_tensor import FakeTensor
-    from torch._subclasses.functional_tensor import mb_unwrap_functional_tensor
-
-    if isinstance(obj, dict):
-        for v in obj.values():
-            if v is not None:
-                fake_mode = _try_get_fake_mode(v)
-                if fake_mode is not None:
-                    return fake_mode
-    elif isinstance(obj, torch.Tensor):
-        t = mb_unwrap_functional_tensor(obj)
-        if isinstance(t, FakeTensor):
-            return t.fake_mode
-        else:
-            return None
-    elif isinstance(obj, NestedCache):
-        # TODO(soulitzer): revisit assumptions
-        # Assume that I have a cache that is registered somewhere.
-        # Assume that anything in the cache has been registered.
-        # Every NestedCache must contain at least one tensor
-        return _try_get_fake_mode(obj.data)
-    else:
-        assert False, f"get_fake_mode: got unexpected type {type(obj)}"
-
-
 # Custom op registration for operations that perform side effect during compile
 # e.g. adding a new cache entry to an existing cache.
 
@@ -170,14 +137,14 @@ lib.define("_add_cache_entry(Tensor val, str key, int cache_id) -> ()")
 def _add_cache_entry_impl(val, key, cache_id):
     # Not sure if it actually matters, but the signatures are different because I want
     # the first argument of the custom op to be a tensor.
-    get_global_cache_state().add_entry_to_cache(cache_id, key, val)
+    get_global_cache_state().add_entry(cache_id, key, val)
 
 
 def _add_cache_entry_meta(val, key, cache_id):
     # Update the cache in the FakeMode
-    mb_fake_mode = _try_get_fake_mode(val)
+    mb_fake_mode = try_get_fake_mode(val)
     assert mb_fake_mode is not None
-    mb_fake_mode.add_entry_to_cache(cache_id, key, val)
+    mb_fake_mode.add_entry(cache_id, key, val)
 
 
 lib.impl("_add_cache_entry", _add_cache_entry_impl, "CPU")
@@ -202,25 +169,25 @@ _register_effectful_op(torch.ops.nested._add_cache_entry.default, _EffectType.OR
 # NB: We don't have all of these as custom-ops so that aot dispatch can
 # trace through.
 #
-def get_cache_if_exists(data: Dict[str, Optional[torch.Tensor]]):
-    mb_fake_mode = _try_get_fake_mode(data)
+def try_get_cache(data: Dict[str, Optional[torch.Tensor]]):
+    mb_fake_mode = try_get_fake_mode(data)
     if mb_fake_mode is not None:
         return mb_fake_mode.get_nested_cache_if_exists(data)
     else:
-        return get_global_cache_state().get_cache_if_exists(data)
+        return get_global_cache_state().try_get_cache(data)
 
 
-def create_cache_with_data(data: Dict[str, Optional[torch.Tensor]]):
-    mb_fake_mode = _try_get_fake_mode(data)
+def create_cache(data: Dict[str, Optional[torch.Tensor]]):
+    mb_fake_mode = try_get_fake_mode(data)
     if mb_fake_mode is not None:
-        return mb_fake_mode.create_cache_with_data(data)
+        return mb_fake_mode.create_cache(data)
     else:
-        return get_global_cache_state().create_cache_with_data(data)
+        return get_global_cache_state().create_cache(data)
 
 
-def add_entry_to_cache(cache, key, value):
+def add_entry(cache, key, value):
     torch.ops.nested._add_cache_entry(value, key, cache.id)
 
 
-def try_get_cache_entry(cache, key):
+def try_get_entry(cache, key):
     return cache.data.get(key)

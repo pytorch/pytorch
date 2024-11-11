@@ -4,7 +4,8 @@
 import torch
 from typing import *
 from torch.fx.experimental.sym_node import SymNode
-from torch.nested._internal.nested_cache import _try_get_fake_mode, NestedCache
+from torch.nested._internal.metadata_cache import MetadataCache
+from torch.nested._internal.utils import try_get_fake_mode
 
 
 def _raggedness_same(a: "NestedIntNode", b: "NestedIntNode"):
@@ -46,9 +47,9 @@ def _ge(lhs, rhs) -> bool:
 
 
 class NestedIntNode:
-    def __init__(self, cache: NestedCache, coeff):
+    def __init__(self, cache: MetadataCache, coeff):
         self.t_id = cache.id
-        self.cache: NestedCache = cache
+        self.cache: MetadataCache = cache
         self.coeff = coeff
 
     def nested_int_cache(self):
@@ -133,8 +134,8 @@ class NestedIntNode:
         return self.str()
 
 
-def get_nested_symint(cache: NestedCache, *, coeff=1):
-    mb_fake_mode = _try_get_fake_mode(cache)
+def get_nested_symint(cache: MetadataCache, *, coeff=1):
+    mb_fake_mode = try_get_fake_mode(cache)
     if mb_fake_mode is not None:
         # In compile, keep the same instance of nested int around
         return mb_fake_mode.get_nested_symint(cache) * coeff
