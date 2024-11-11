@@ -343,7 +343,7 @@ inductor_expected_failures_single_sample["xpu"] = {
     "cholesky_inverse": {f64},
     # could not create a primitive
     "addbmm": {f64},
-    "addmm": {f32, f64},
+    "addmm": {f64},
     "addmv": {f64},
     # could not create a primitive descriptor for
     # a deconvolution forward propagation primitive
