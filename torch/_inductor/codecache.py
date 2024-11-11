@@ -1163,11 +1163,16 @@ class FxGraphCache:
                 log_pt2_compile_event=True,
                 fwd_only=False,
             ):
+                # We can't safely use a cached module if we have frozen params so
+                # force reloading:
+                use_cache = not has_frozen_params(gm)
+
                 graph.current_callable = PyCodeCache.load_by_key_path(
                     graph.cache_key,
                     artifact_path,
                     graph.cache_linemap,
                     graph.get_constants(gm),
+                    use_cache,
                 ).call
         except OSError:
             # Not expected, but in case the PyCodeCache entry is removed from
@@ -3024,7 +3029,8 @@ class PyCodeCache:
     # clearing the cache. Note also that we may load the same path more
     # than once, but attach different attributes, i.e., due to different
     # constant values.
-    modules: List[ModuleType] = []
+    modules: Set[ModuleType] = set()
+    cache: Dict[str, ModuleType] = {}
     linemaps: Dict[str, List[Tuple[Any, ...]]] = {}
 
     @classmethod
@@ -3049,13 +3055,15 @@ class PyCodeCache:
         path: str,
         linemap: Optional[List[Tuple[int, str]]] = None,
         attrs: Optional[Dict[str, Any]] = None,
+        use_cache: bool = True,
     ) -> ModuleType:
-        if linemap is None:
-            linemap = []
+        if use_cache and key in cls.cache:
+            return cls.cache[key]
 
         mod = _reload_python_module(key, path)
 
         # unzip into separate lines/nodes lists
+        linemap = linemap or []
         cls.linemaps[path] = list(zip(*linemap))
 
         if attrs is not None:
@@ -3067,7 +3075,12 @@ class PyCodeCache:
                 _reload_python_module_in_subproc, key, path
             )
 
-        cls.modules.append(mod)
+        if use_cache:
+            # another thread might set this first
+            cls.cache.setdefault(key, mod)
+            mod = cls.cache[key]
+
+        cls.modules.add(mod)
         return mod
 
     @classmethod
@@ -3080,6 +3093,7 @@ class PyCodeCache:
                 except FileNotFoundError:
                     pass
         cls.modules.clear()
+        cls.cache.clear()
 
     @classmethod
     @functools.lru_cache(None)
