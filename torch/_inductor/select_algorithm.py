@@ -25,7 +25,7 @@ from filelock import FileLock
 import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 from torch._dynamo.testing import rand_strided
-from torch._dynamo.utils import counters, identity, preserve_rng_state
+from torch._dynamo.utils import counters, dynamo_timed, identity, preserve_rng_state
 
 from . import config, ir
 from .autotune_process import (
@@ -36,6 +36,7 @@ from .autotune_process import (
 )
 from .codecache import code_hash, PersistentCache, PyCodeCache
 from .codegen.common import IndentedBuffer, KernelTemplate, WorkspaceArg
+from .codegen.simd_kernel_features import SIMDKernelFeatures
 from .codegen.triton import (
     gen_common_triton_imports,
     texpr,
@@ -194,13 +195,12 @@ class TritonTemplateKernel(TritonKernel):
         epilogue_fn=identity,
         subgraphs: Optional[List[ir.ComputedBuffer]] = None,
         workspace_arg: Optional[WorkspaceArg] = None,
-        *,
-        index_dtype,
     ) -> None:
+        numel = sympy_product(output_node.get_size())
         super().__init__(
-            sympy_product(output_node.get_size()),
-            sympy.Integer(1),
-            index_dtype=index_dtype,
+            numel,
+            sympy.S.One,
+            features=SIMDKernelFeatures([], numel),
         )
         self.input_nodes = input_nodes
         self.output_node = output_node
@@ -519,9 +519,9 @@ class TritonTemplateKernel(TritonKernel):
             )
             contiguous_index = self.rename_indexing(contiguous_index)
             self.body.writeline("xindex = " + texpr(contiguous_index))
-            self.range_trees[0].lookup(
-                sympy.Integer(1), sympy_product(lengths)
-            ).set_name("xindex")
+            self.range_trees[0].lookup(sympy.S.One, sympy_product(lengths)).set_name(
+                "xindex"
+            )
             self.template_mask = mask
             self.template_out = val
             self.template_indices = indices
@@ -746,7 +746,6 @@ class TritonTemplate(KernelTemplate):
             "prefix_args": prefix_args,
             "suffix_args": suffix_args,
             "epilogue_fn": epilogue_fn,
-            "index_dtype": "tl.int32",
             "subgraphs": subgraphs,
         }
 
@@ -1415,7 +1414,8 @@ class AlgorithmSelectorCache(PersistentCache):
             return wait_on_futures
 
         def autotune(choices):
-            return make_benchmark_fn()(choices)
+            with dynamo_timed(f"{name}_template_autotuning"):
+                return make_benchmark_fn()(choices)
 
         if config.autotune_in_subproc:
             from .autotune_process import tuning_pool
@@ -1425,7 +1425,8 @@ class AlgorithmSelectorCache(PersistentCache):
 
         def do_autotuning(precompile_fn):
             precompile_start_ts = time.time()
-            precompile_fn()
+            with dynamo_timed(f"{name}_template_precompiling"):
+                precompile_fn()
             precompile_elapse = time.time() - precompile_start_ts
 
             autotune_start_ts = time.time()
@@ -1667,7 +1668,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     map(
                         str,
                         V.graph.sizevars.size_hints(
-                            n.get_size(), fallback=config.unbacked_symint_fallback
+                            n.get_size(), fallback=config.unbacked_symint_fallback  # type: ignore[arg-type]
                         ),
                     )
                 )
