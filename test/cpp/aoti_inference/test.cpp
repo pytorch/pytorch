@@ -29,8 +29,6 @@ void test_aoti(const std::string& device, bool use_runtime_constant_folding) {
   std::string inputs_attr = "inputs_" + suffix;
   std::string outputs_attr = "outputs_" + suffix;
   const auto& model_so_path = data_loader.attr(path_attr.c_str()).toStringRef();
-  auto input_tensors =
-      data_loader.attr(inputs_attr.c_str()).toTensorList().vec();
   const auto& ref_output_tensors =
       data_loader.attr(outputs_attr.c_str()).toTensorList().vec();
 
@@ -46,7 +44,8 @@ void test_aoti(const std::string& device, bool use_runtime_constant_folding) {
   } else {
     testing::AssertionFailure() << "unsupported device: " << device;
   }
-  auto actual_output_tensors = runner->run(input_tensors);
+  auto actual_output_tensors =
+      runner->run(data_loader.attr(inputs_attr.c_str()).toTensorList().vec());
   ASSERT_TRUE(torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
 }
 
