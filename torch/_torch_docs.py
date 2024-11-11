@@ -3254,7 +3254,7 @@ Example::
 add_docstr(
     torch.cummin,
     r"""
-cummin(input: Tensor, dim: int, *, out: Union[Tensor, Tuple[Tensor, ...], List[Tensor]]) -> (Tensor, LongTensor)
+cummin(input: Tensor, dim: int, *, out: Union[Tensor, Tuple[Tensor, ...], List[Tensor]] = None) -> (Tensor, LongTensor)
 
 Returns a namedtuple ``(values, indices)`` where ``values`` is the cumulative minimum of
 elements of :attr:`input` in the dimension :attr:`dim`. And ``indices`` is the index
@@ -3405,7 +3405,7 @@ Args:
 add_docstr(
     torch.diag,
     r"""
-diag(input: Tensor, diagonal: int = 0, *, out: Optional[Tensor]) -> Tensor
+diag(input: Tensor, diagonal: int = 0, *, out: Optional[Tensor] = None) -> Tensor
 
 - If :attr:`input` is a vector (1-D tensor), then returns a 2-D square tensor
   with the elements of :attr:`input` as the diagonal.
@@ -3816,7 +3816,7 @@ Example::
 add_docstr(
     torch.div,
     r"""
-div(input: Union[Tensor, Number], other: Union[Tensor, Number], *, rounding_mode: Optional[str] = None, out: Optional[Tensor] = None) -> Tensor
+div(input: Union[Tensor, Number], other: Union[Tensor, Number], *, rounding_mode: Optional[str] = None, out: Optional[Tensor] = None) -> Tensor # noqa: B950
 
 Divides each element of the input ``input`` by the corresponding element of
 :attr:`other`.
@@ -3893,7 +3893,7 @@ Alias for :func:`torch.div`.
 add_docstr(
     torch.dot,
     r"""
-dot(input: Tensor, other: Tensor, *, out: Optional[Tensor]) -> Tensor
+dot(input: Tensor, other: Tensor, *, out: Optional[Tensor] = None) -> Tensor
 
 Computes the dot product of two 1D tensors.
 
