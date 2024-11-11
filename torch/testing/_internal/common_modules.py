@@ -340,7 +340,10 @@ def module_inputs_torch_nn_KLDivLoss(module_info, device, dtype, requires_grad, 
         )
 
         scalar_input = make_input(()).log()
-        scalar_target = make_input(()) if kwargs.get('log_target', False) else make_input(()).log()
+        # FIXME(rec): scalar_target is unused, perhaps should be argument to FunctionInput?
+        scalar_target = (  # noqa: F841
+            make_input(()) if kwargs.get('log_target', False) else make_input(()).log()
+        )
         module_inputs.append(
             ModuleInput(constructor_input=FunctionInput(**constructor_kwargs),
                         forward_input=FunctionInput(scalar_input, scalar_input),
@@ -4137,6 +4140,9 @@ module_db: List[ModuleInfo] = [
                    DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-4, rtol=1e-4)}),
                                 'TestModule', 'test_non_contiguous_tensors',
                                 device_type='cpu', active_if=IS_WINDOWS),
+                   DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-4, rtol=2e-3)}),
+                                'TestModule', 'test_forward',
+                                device_type='mps'),
                    # Not implemented for SDPA backward derivative
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_gradgrad',
                                 device_type='cpu'),

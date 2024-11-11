@@ -1017,10 +1017,10 @@ class FlatParamHandle:
         sharded_flat_param_numel = unsharded_end_idx - unsharded_start_idx + 1
         # `unsharded_param_start_idx` and `unsharded_param_end_idx` are indices
         # into the unsharded flat parameter (inclusive) of the given parameter
-        for i, (
+        for (
             (unsharded_param_start_idx, unsharded_param_end_idx),
             is_padding,
-        ) in enumerate(zip(flat_param_offsets, self.flat_param._is_padding_mask)):
+        ) in zip(flat_param_offsets, self.flat_param._is_padding_mask):
             if is_padding:
                 continue
             in_sharded_flat_param = (
@@ -1439,7 +1439,10 @@ class FlatParamHandle:
         # HACK this should be handled by C10D
         if sharded_flat_param.is_cpu:  # type: ignore[attr-defined]
             tensor_list = list(
-                torch.chunk(padded_unsharded_flat_param, dist.get_world_size(pg))
+                torch.chunk(
+                    padded_unsharded_flat_param,
+                    dist.get_world_size(pg),  # type: ignore[arg-type]
+                )
             )
             dist.all_gather(tensor_list, sharded_flat_param, group=pg)
         else:
@@ -2205,8 +2208,8 @@ class FlatParamHandle:
                 else:
                     param.grad = None
         assert flat_param._shared_params is not None
-        for i, (param, (_, _, _, prim_param_name, prim_module, _)) in enumerate(
-            zip(flat_param._shared_params, flat_param._shared_param_infos)
+        for param, (_, _, _, prim_param_name, prim_module, _) in zip(
+            flat_param._shared_params, flat_param._shared_param_infos
         ):
             in_sharded_flat_param = hasattr(prim_module, prim_param_name)
             if in_sharded_flat_param and param.requires_grad:

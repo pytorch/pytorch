@@ -16,6 +16,7 @@ class TestRunnerDeterminatorIssueParser(TestCase):
                 rollout_perc: 25
             otherExp:
                 rollout_perc: 0
+                default: false
         ---
 
         Users:
@@ -32,7 +33,7 @@ class TestRunnerDeterminatorIssueParser(TestCase):
             "lf settings not parsed correctly",
         )
         self.assertTupleEqual(
-            rd.Experiment(rollout_perc=0),
+            rd.Experiment(rollout_perc=0, default=False),
             settings.experiments["otherExp"],
             "otherExp settings not parsed correctly",
         )
@@ -46,7 +47,7 @@ class TestRunnerDeterminatorIssueParser(TestCase):
                 rollout_perc: 25
             otherExp:
                 rollout_perc: 0
-
+                default: false
         ```
 
         ---
@@ -65,7 +66,7 @@ class TestRunnerDeterminatorIssueParser(TestCase):
             "lf settings not parsed correctly",
         )
         self.assertTupleEqual(
-            rd.Experiment(rollout_perc=0),
+            rd.Experiment(rollout_perc=0, default=False),
             settings.experiments["otherExp"],
             "otherExp settings not parsed correctly",
         )
@@ -177,6 +178,64 @@ class TestRunnerDeterminatorGetRunnerPrefix(TestCase):
         prefix = rd.get_runner_prefix(settings_text, ["User2"], USER_BRANCH)
         self.assertEqual("lf.otherExp.", prefix, "Runner prefix not correct for User2")
 
+    def test_opted_in_user_two_experiments_default(self) -> None:
+        settings_text = """
+        experiments:
+            lf:
+                rollout_perc: 0
+            otherExp:
+                rollout_perc: 0
+                default: false
+        ---
+
+        Users:
+        @User1,lf
+        @User2,lf,otherExp
+
+        """
+        prefix = rd.get_runner_prefix(settings_text, ["User2"], USER_BRANCH)
+        self.assertEqual("lf.", prefix, "Runner prefix not correct for User2")
+
+    def test_opted_in_user_two_experiments_default_exp(self) -> None:
+        settings_text = """
+        experiments:
+            lf:
+                rollout_perc: 0
+            otherExp:
+                rollout_perc: 0
+                default: false
+        ---
+
+        Users:
+        @User1,lf
+        @User2,lf,otherExp
+
+        """
+        prefix = rd.get_runner_prefix(
+            settings_text, ["User2"], USER_BRANCH, frozenset(["lf", "otherExp"])
+        )
+        self.assertEqual("lf.otherExp.", prefix, "Runner prefix not correct for User2")
+
+    def test_opted_in_user_two_experiments_default_exp_2(self) -> None:
+        settings_text = """
+        experiments:
+            lf:
+                rollout_perc: 0
+            otherExp:
+                rollout_perc: 0
+                default: false
+        ---
+
+        Users:
+        @User1,lf
+        @User2,lf,otherExp
+
+        """
+        prefix = rd.get_runner_prefix(
+            settings_text, ["User2"], USER_BRANCH, frozenset(["otherExp"])
+        )
+        self.assertEqual("otherExp.", prefix, "Runner prefix not correct for User2")
+
     @patch("random.uniform", return_value=50)
     def test_opted_out_user(self, mock_uniform: Mock) -> None:
         settings_text = """
@@ -214,6 +273,77 @@ class TestRunnerDeterminatorGetRunnerPrefix(TestCase):
         # User3 is opted out, but is pulled into both experiments by the 10% rollout
         prefix = rd.get_runner_prefix(settings_text, ["User3"], USER_BRANCH)
         self.assertEqual("lf.otherExp.", prefix, "Runner prefix not correct for user")
+
+    @patch("random.uniform", return_value=10)
+    def test_opted_out_user_was_pulled_in_by_rollout_excl_nondefault(
+        self, mock_uniform: Mock
+    ) -> None:
+        settings_text = """
+        experiments:
+            lf:
+                rollout_perc: 25
+            otherExp:
+                rollout_perc: 25
+                default: false
+        ---
+
+        Users:
+        @User1,lf
+        @User2,lf,otherExp
+
+        """
+
+        # User3 is opted out, but is pulled into default experiments by the 10% rollout
+        prefix = rd.get_runner_prefix(settings_text, ["User3"], USER_BRANCH)
+        self.assertEqual("lf.", prefix, "Runner prefix not correct for user")
+
+    @patch("random.uniform", return_value=10)
+    def test_opted_out_user_was_pulled_in_by_rollout_filter_exp(
+        self, mock_uniform: Mock
+    ) -> None:
+        settings_text = """
+        experiments:
+            lf:
+                rollout_perc: 25
+            otherExp:
+                rollout_perc: 25
+                default: false
+        ---
+
+        Users:
+        @User1,lf
+        @User2,lf,otherExp
+
+        """
+
+        # User3 is opted out, but is pulled into default experiments by the 10% rollout
+        prefix = rd.get_runner_prefix(
+            settings_text, ["User3"], USER_BRANCH, frozenset(["otherExp"])
+        )
+        self.assertEqual("otherExp.", prefix, "Runner prefix not correct for user")
+
+    @patch("random.uniform", return_value=25)
+    def test_opted_out_user_was_pulled_out_by_rollout_filter_exp(
+        self, mock_uniform: Mock
+    ) -> None:
+        settings_text = """
+        experiments:
+            lf:
+                rollout_perc: 10
+            otherExp:
+                rollout_perc: 50
+                default: false
+        ---
+
+        Users:
+        @User1,lf
+        @User2,lf,otherExp
+
+        """
+
+        # User3 is opted out, but is pulled into default experiments by the 10% rollout
+        prefix = rd.get_runner_prefix(settings_text, ["User3"], USER_BRANCH)
+        self.assertEqual("", prefix, "Runner prefix not correct for user")
 
     def test_lf_prefix_always_comes_first(self) -> None:
         settings_text = """

@@ -446,7 +446,13 @@ void dispatch_fp8_rowwise_kernel_on_cluster_size_and_transpose(
   // General case for large tensors.
 
   // Large M, N, k
-  if (M >= 4096 && N >= 4096 && N >= 4096) {
+  if (M >= 4096 && N >= 4096) {
+    if (M >= N){
+          return handle_transposition<
+          /*ClusterShape=*/cute::Shape<cute::_2, cute::_1, cute::_1>,
+          /*Transposed=*/std::false_type,
+          Types...>(XQ, WQ, x_scale, w_scale, bias, out, 8);
+    }
     return handle_transposition<
         /*ClusterShape=*/cute::Shape<cute::_2, cute::_1, cute::_1>,
         /*Transposed=*/std::true_type,
