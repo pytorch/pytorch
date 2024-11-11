@@ -1190,7 +1190,7 @@ Alias for :func:`torch.atanh`.
 add_docstr(
     torch.asarray,
     r"""
-asarray(obj: Any, *, dtype: Optional[dtype], device: Optional[DeviceLikeType], copy: Optional[bool], requires_grad: bool = False) -> Tensor # noqa: B950
+asarray(obj: Any, *, dtype: Optional[dtype], device: Optional[DeviceLikeType], copy: Optional[bool] = None, requires_grad: bool = False) -> Tensor # noqa: B950
 
 Converts :attr:`obj` to a tensor.
 
@@ -1413,7 +1413,7 @@ Example::
 add_docstr(
     torch.bincount,
     r"""
-bincount(input: Tensor, weights: Optional[Tensor], minlength: int = 0) -> Tensor
+bincount(input: Tensor, weights: Optional[Tensor] = None, minlength: int = 0) -> Tensor
 
 Count the frequency of each value in an array of non-negative ints.
 
@@ -1457,7 +1457,7 @@ Example::
 add_docstr(
     torch.bitwise_not,
     r"""
-bitwise_not(input: Tensor, *, out: Optional[Tensor]) -> Tensor
+bitwise_not(input: Tensor, *, out: Optional[Tensor] = None) -> Tensor
 
 Computes the bitwise NOT of the given input tensor. The input tensor must be of
 integral or Boolean types. For bool tensors, it computes the logical NOT.
@@ -1478,7 +1478,7 @@ Example::
 add_docstr(
     torch.bmm,
     r"""
-bmm(input: Tensor, mat2: Tensor, *, out: Optional[Tensor]) -> Tensor
+bmm(input: Tensor, mat2: Tensor, *, out: Optional[Tensor] = None) -> Tensor
 
 Performs a batch matrix-matrix product of matrices stored in :attr:`input`
 and :attr:`mat2`.
@@ -1521,7 +1521,7 @@ Example::
 add_docstr(
     torch.bitwise_and,
     r"""
-bitwise_and(input: Tensor, other: Tensor, *, out: Optional[Tensor] ) -> Tensor
+bitwise_and(input: Tensor, other: Tensor, *, out: Optional[Tensor] = None) -> Tensor
 
 Computes the bitwise AND of :attr:`input` and :attr:`other`. The input tensor must be of
 integral or Boolean types. For bool tensors, it computes the logical AND.
@@ -1569,7 +1569,7 @@ Example::
 add_docstr(
     torch.bitwise_xor,
     r"""
-bitwise_xor(input: Tensor, other: Tensor, *, out: Optional[Tensor] ) -> Tensor
+bitwise_xor(input: Tensor, other: Tensor, *, out: Optional[Tensor] = None) -> Tensor
 
 Computes the bitwise XOR of :attr:`input` and :attr:`other`. The input tensor must be of
 integral or Boolean types. For bool tensors, it computes the logical XOR.
@@ -1593,7 +1593,7 @@ Example::
 add_docstr(
     torch.bitwise_left_shift,
     r"""
-bitwise_left_shift(input: Tensor, other: Tensor, *, out: Optional[Tensor]) -> Tensor
+bitwise_left_shift(input: Tensor, other: Tensor, *, out: Optional[Tensor] = None) -> Tensor
 
 Computes the left arithmetic shift of :attr:`input` by :attr:`other` bits.
 The input tensor must be of integral type. This operator supports
@@ -1622,7 +1622,7 @@ Example::
 add_docstr(
     torch.bitwise_right_shift,
     r"""
-bitwise_right_shift(input: Tensor, other: Tensor, *, out: Optional[Tensor]) -> Tensor
+bitwise_right_shift(input: Tensor, other: Tensor, *, out: Optional[Tensor] = None) -> Tensor
 
 Computes the right arithmetic shift of :attr:`input` by :attr:`other` bits.
 The input tensor must be of integral type. This operator supports
@@ -1675,7 +1675,7 @@ Example::
 add_docstr(
     torch.stack,
     r"""
-stack(tensors: Union[Tuple[Tensor, ...], List[Tensor]], dim: int = 0, *, out: Optional[Tensor]) -> Tensor
+stack(tensors: Union[Tuple[Tensor, ...], List[Tensor]], dim: int = 0, *, out: Optional[Tensor] = None) -> Tensor
 
 Concatenates a sequence of tensors along a new dimension.
 
@@ -1735,7 +1735,7 @@ Example::
 add_docstr(
     torch.hstack,
     r"""
-hstack(tensors: Union[Tuple[Tensor, ...], List[Tensor]], *, out: Optional[Tensor]) -> Tensor
+hstack(tensors: Union[Tuple[Tensor, ...], List[Tensor]], *, out: Optional[Tensor] = None) -> Tensor
 
 Stack tensors in sequence horizontally (column wise).
 
@@ -1766,7 +1766,7 @@ Example::
 add_docstr(
     torch.vstack,
     r"""
-vstack(tensors: Union[Tuple[Tensor, ...], List[Tensor]], *, out: Optional[Tensor]) -> Tensor
+vstack(tensors: Union[Tuple[Tensor, ...], List[Tensor]], *, out: Optional[Tensor] = None) -> Tensor
 
 Stack tensors in sequence vertically (row wise).
 
@@ -1802,7 +1802,7 @@ Example::
 add_docstr(
     torch.dstack,
     r"""
-dstack(tensors: Union[Tuple[Tensor, ...], List[Tensor]], *, out: Optional[Tensor]) -> Tensor
+dstack(tensors: Union[Tuple[Tensor, ...], List[Tensor]], *, out: Optional[Tensor] = None) -> Tensor
 
 Stack tensors in sequence depthwise (along third axis).
 
@@ -2198,7 +2198,7 @@ Example::
 add_docstr(
     torch.cov,
     r"""
-cov(input: Tensor, *, correction: int = 1, fweights: Optional[Tensor], aweights: Optional[Tensor]) -> Tensor
+cov(input: Tensor, *, correction: int = 1, fweights: Optional[Tensor] = None, aweights: Optional[Tensor] = None) -> Tensor
 
 Estimates the covariance matrix of the variables given by the :attr:`input` matrix, where rows are
 the variables and columns are the observations.
@@ -2277,7 +2277,7 @@ Example::
 add_docstr(
     torch.cat,
     r"""
-cat(tensors: Union[Tuple[Tensor, ...], List[Tensor]], dim: int = 0, *, out: Optional[Tensor]) -> Tensor
+cat(tensors: Union[Tuple[Tensor, ...], List[Tensor]], dim: int = 0, *, out: Optional[Tensor] = None) -> Tensor
 
 Concatenates the given sequence of tensors in :attr:`tensors` in the given dimension.
 All tensors must either have the same shape (except in the concatenating
@@ -2325,7 +2325,7 @@ Example::
 add_docstr(
     torch.concat,
     r"""
-concat(tensors: Union[Tuple[Tensor, ...], List[Tensor]], dim: int = 0, *, out: Optional[Tensor] ) -> Tensor
+concat(tensors: Union[Tuple[Tensor, ...], List[Tensor]], dim: int = 0, *, out: Optional[Tensor] = None) -> Tensor
 
 Alias of :func:`torch.cat`.
 """,
@@ -2334,7 +2334,7 @@ Alias of :func:`torch.cat`.
 add_docstr(
     torch.concatenate,
     r"""
-concatenate(tensors: Union[Tuple[Tensor, ...], List[Tensor]], dim: int = 0, *, out: Optional[Tensor]) -> Tensor
+concatenate(tensors: Union[Tuple[Tensor, ...], List[Tensor]], dim: int = 0, *, out: Optional[Tensor] = None) -> Tensor
 
 Alias of :func:`torch.cat`.
 """,
@@ -2343,7 +2343,7 @@ Alias of :func:`torch.cat`.
 add_docstr(
     torch.ceil,
     r"""
-ceil(input: Tensor, *, out: Optional[Tensor]) -> Tensor
+ceil(input: Tensor, *, out: Optional[Tensor] = None) -> Tensor
 
 Returns a new tensor with the ceil of the elements of :attr:`input`,
 the smallest integer greater than or equal to each element.
@@ -2484,7 +2484,7 @@ Example::
 add_docstr(
     torch.reciprocal,
     r"""
-reciprocal(input: Tensor, *, out: Optional[Tensor]) -> Tensor
+reciprocal(input: Tensor, *, out: Optional[Tensor] = None) -> Tensor
 
 Returns a new tensor with the reciprocal of the elements of :attr:`input`
 
@@ -2516,7 +2516,7 @@ Example::
 add_docstr(
     torch.cholesky,
     r"""
-cholesky(input: Tensor, upper: bool = False, *, out: Optional[Tensor]) -> Tensor
+cholesky(input: Tensor, upper: bool = False, *, out: Optional[Tensor] = None) -> Tensor
 
 Computes the Cholesky decomposition of a symmetric positive-definite
 matrix :math:`A` or for batches of symmetric positive-definite matrices.
@@ -2598,7 +2598,7 @@ Example::
 add_docstr(
     torch.cholesky_solve,
     r"""
-cholesky_solve(B: Tensor, L: Tensor, upper: bool = False, *, out: Optional[Tensor]) -> Tensor
+cholesky_solve(B: Tensor, L: Tensor, upper: bool = False, *, out: Optional[Tensor] = None) -> Tensor
 
 Computes the solution of a system of linear equations with complex Hermitian
 or real symmetric positive-definite lhs given its Cholesky decomposition.
@@ -2663,7 +2663,7 @@ Example::
 add_docstr(
     torch.cholesky_inverse,
     r"""
-cholesky_inverse(L: Tensor, upper: bool = False, *, out: Optional[Tensor]) -> Tensor
+cholesky_inverse(L: Tensor, upper: bool = False, *, out: Optional[Tensor] = None) -> Tensor
 
 Computes the inverse of a complex Hermitian or real symmetric
 positive-definite matrix given its Cholesky decomposition.
@@ -2740,7 +2740,7 @@ Keyword args:
 add_docstr(
     torch.clamp,
     r"""
-clamp(input: Tensor, min: Optional[Union[Tensor, Number, _complex]], max: Optional[Union[Tensor, Number, _complex]], *, out: Optional[Tensor]) -> Tensor # noqa: B950
+clamp(input: Tensor, min: Optional[Union[Tensor, Number, _complex]] = None, max: Optional[Union[Tensor, Number, _complex]] = None, *, out: Optional[Tensor] = None) -> Tensor # noqa: B950
 
 Clamps all elements in :attr:`input` into the range `[` :attr:`min`, :attr:`max` `]`.
 Letting min_value and max_value be :attr:`min` and :attr:`max`, respectively, this returns:
@@ -2783,7 +2783,7 @@ Example::
 add_docstr(
     torch.clip,
     r"""
-clip(input: Tensor, min: Optional[Union[Tensor, Number, _complex]], max: Optional[Union[Tensor, Number, _complex]], *, out: Optional[Tensor]) -> Tensor # noqa: B950
+clip(input: Tensor, min: Optional[Union[Tensor, Number, _complex]] = None, max: Optional[Union[Tensor, Number, _complex]] = None, *, out: Optional[Tensor] = None) -> Tensor # noqa: B950
 
 Alias for :func:`torch.clamp`.
 """,
@@ -2792,7 +2792,7 @@ Alias for :func:`torch.clamp`.
 add_docstr(
     torch.column_stack,
     r"""
-column_stack(tensors: Union[Tuple[Tensor, ...], List[Tensor]], *, out: Optional[Tensor]) -> Tensor
+column_stack(tensors: Union[Tuple[Tensor, ...], List[Tensor]], *, out: Optional[Tensor] = None) -> Tensor
 
 Creates a new tensor by horizontally stacking the tensors in :attr:`tensors`.
 
@@ -2828,7 +2828,7 @@ Example::
 add_docstr(
     torch.complex,
     r"""
-complex(real: Tensor, imag: Tensor, *, out: Optional[Tensor]) -> Tensor
+complex(real: Tensor, imag: Tensor, *, out: Optional[Tensor] = None) -> Tensor
 
 Constructs a complex tensor with its real part equal to :attr:`real` and its
 imaginary part equal to :attr:`imag`.
@@ -2859,7 +2859,7 @@ Example::
 add_docstr(
     torch.polar,
     r"""
-polar(abs: Tensor, angle: Tensor, *, out: Optional[Tensor]) -> Tensor
+polar(abs: Tensor, angle: Tensor, *, out: Optional[Tensor] = None) -> Tensor
 
 Constructs a complex tensor whose elements are Cartesian coordinates
 corresponding to the polar coordinates with absolute value :attr:`abs` and angle
@@ -4502,7 +4502,7 @@ Examples::
 add_docstr(
     torch.gather,
     r"""
-gather(input: Tensor, dim: int, index: Tensor, *, sparse_grad: bool = False, out: Optional[Tensor] ) -> Tensor
+gather(input: Tensor, dim: int, index: Tensor, *, sparse_grad: bool = False, out: Optional[Tensor] = None) -> Tensor
 
 Gathers values along an axis specified by `dim`.
 
@@ -8608,7 +8608,7 @@ Example::
 add_docstr(
     torch.qr,
     r"""
-qr(input: Tensor, some: bool = True, *, out: Union[Tensor, Tuple[Tensor, ...], List[Tensor]]) -> (Tensor, Tensor)
+qr(input: Tensor, some: bool = True, *, out: Union[Tensor, Tuple[Tensor, ...], List[Tensor], None]) -> (Tensor, Tensor)
 
 Computes the QR decomposition of a matrix or a batch of matrices :attr:`input`,
 and returns a namedtuple (Q, R) of tensors such that :math:`\text{input} = Q R`
