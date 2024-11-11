@@ -1685,10 +1685,6 @@ class GuardManager {
     }
   }
 
-  // For cloning
-  GuardManager(RootGuardManager* root, std::string source, bool is_dict)
-      : _root(root), _source(source), _is_dict(is_dict) {}
-
   GuardManager(const GuardManager& m) = delete;
   GuardManager& operator=(const GuardManager&) = delete;
   virtual ~GuardManager() = default;
@@ -1704,6 +1700,11 @@ class GuardManager {
   virtual void add_leaf_guard(std::shared_ptr<LeafGuard> leaf_guard) {
     _leaf_guards.emplace_back(std::move(leaf_guard));
   }
+
+ public:
+  // For cloning
+  GuardManager(RootGuardManager* root, std::string source, bool is_dict)
+      : _root(root), _source(source), _is_dict(is_dict) {}
 
   void clone_common(
       RootGuardManager* cloned_root,

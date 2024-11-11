@@ -766,7 +766,7 @@ num_guards_executed=0)
 
         class Bar:
             x = 4
-            y = 5
+            y = torch.randn(4)
 
         foo = [2, 3]
         bar = Bar()
