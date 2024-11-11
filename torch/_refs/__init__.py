@@ -476,12 +476,13 @@ def _make_elementwise_unary_reference(
     *,
     aten_op=infer_aten_op,
     extra_meta=None,
+    exact_dtype=False,
 ) -> Callable:
     def inner(prim: Callable):
         nonlocal aten_op
 
         @wraps(prim)
-        @out_wrapper()
+        @out_wrapper(exact_dtype=exact_dtype)
         @elementwise_unary_scalar_wrapper
         @elementwise_type_promotion_wrapper(
             type_promoting_args=("a",),
@@ -545,7 +546,10 @@ def _make_inplace(fn):
     return _fn
 
 
-@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT)
+@_make_elementwise_unary_reference(
+    ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT,
+    exact_dtype=True,
+)
 def abs(a):
     return prims.abs(a)
 
@@ -585,7 +589,10 @@ def bitwise_not(a):
     return prims.bitwise_not(a)
 
 
-@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
+@_make_elementwise_unary_reference(
+    ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    exact_dtype=True,
+)
 def ceil(a):
     return prims.ceil(a)
 
@@ -679,12 +686,18 @@ def zero(input: TensorLikeType) -> TensorLikeType:
     return torch.zeros_like(input)
 
 
-@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
+@_make_elementwise_unary_reference(
+    ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    exact_dtype=True,
+)
 def floor(a):
     return prims.floor(a)
 
 
-@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
+@_make_elementwise_unary_reference(
+    ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    exact_dtype=True,
+)
 def frac(x: TensorLikeType) -> TensorLikeType:
     trunc_x = torch.mul(torch.floor(torch.abs(x)), torch.sign(x))
     return torch.sub(x, trunc_x)
@@ -719,7 +732,10 @@ def isinf(a: TensorLikeType) -> TensorLikeType:
     return torch.zeros_like(a, dtype=torch.bool)
 
 
-@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL)
+@_make_elementwise_unary_reference(
+    ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
+    exact_dtype=True,
+)
 def isposinf(a: TensorLikeType) -> TensorLikeType:
     torch._check(
         not utils.is_complex_dtype(a.dtype),
@@ -730,7 +746,10 @@ def isposinf(a: TensorLikeType) -> TensorLikeType:
     return torch.zeros_like(a, dtype=torch.bool)
 
 
-@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL)
+@_make_elementwise_unary_reference(
+    ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
+    exact_dtype=True,
+)
 def isneginf(a: TensorLikeType) -> TensorLikeType:
     torch._check(
         not utils.is_complex_dtype(a.dtype),
@@ -920,7 +939,10 @@ def sigmoid(a: TensorLikeType) -> TensorLikeType:
     return true_divide(1, add(1, exp(neg(a))))
 
 
-@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
+@_make_elementwise_unary_reference(
+    ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    exact_dtype=True,
+)
 def sgn(a):
     if utils.is_complex_dtype(a.dtype):
         a_abs = a.abs()
@@ -929,12 +951,18 @@ def sgn(a):
         return a.sign()
 
 
-@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
+@_make_elementwise_unary_reference(
+    ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    exact_dtype=True,
+)
 def sign(a):
     return prims.sign(a)
 
 
-@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL)
+@_make_elementwise_unary_reference(
+    ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
+    exact_dtype=True,
+)
 def signbit(a):
     return prims.signbit(a)
 
@@ -980,7 +1008,10 @@ def tanh(a):
     return prims.tanh(a)
 
 
-@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
+@_make_elementwise_unary_reference(
+    ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    exact_dtype=True,
+)
 def trunc(a):
     return prims.trunc(a)
 
@@ -1031,6 +1062,7 @@ def _make_elementwise_binary_reference(
     supports_rhs_python_scalar=True,
     supports_two_python_scalars=False,
     should_register_decomposition=True,
+    exact_dtype=False,
 ) -> Callable:
     def inner(prim: Callable):
         nonlocal aten_op, name
@@ -1066,7 +1098,7 @@ def _make_elementwise_binary_reference(
             return handle_noncontiguous_outputs([a, b], output)
 
         if has_out:
-            _ref = out_wrapper()(_ref)  # type: ignore[assignment]
+            _ref = out_wrapper(exact_dtype=exact_dtype)(_ref)  # type: ignore[assignment]
 
         _ref.__name__ = name
         if aten_op is infer_aten_op:
@@ -1209,6 +1241,7 @@ def eq(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
 
 @_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG,
+    exact_dtype=True,
 )
 def pow(
     a: Union[TensorLikeType, NumberType],
