@@ -182,6 +182,16 @@ def _get_allowed_globals():
             "torch.distributed.tensor.placement_types.Shard": torch.distributed.tensor.placement_types.Shard,
         }
         rc.update(dtensor_rc)
+
+    # nested tensor related
+    rc["torch.nested._internal.nested_tensor.NestedTensor"] = (
+        torch.nested._internal.nested_tensor.NestedTensor
+    )
+    rc["torch.nested._internal.nested_tensor._rebuild_njt"] = (
+        torch.nested._internal.nested_tensor._rebuild_njt
+    )
+    rc["torch._dynamo.decorators._DimRange"] = torch._dynamo.decorators._DimRange
+
     # dtype
     for t in torch.storage._dtype_to_storage_type_map().keys():
         rc[str(t)] = t
