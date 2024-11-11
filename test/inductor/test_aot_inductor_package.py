@@ -9,6 +9,7 @@ from parameterized import parameterized_class
 import torch
 from torch._inductor.package import AOTICompiledModel, load_package, package_aoti
 from torch._inductor.test_case import TestCase
+from torch._inductor.utils import fresh_inductor_cache
 from torch.export import Dim
 from torch.testing._internal.common_utils import IS_FBCODE
 from torch.testing._internal.triton_utils import HAS_CUDA
@@ -106,6 +107,44 @@ class TestAOTInductorPackage(TestCase):
             torch.randn(10, 10, device=self.device),
         )
         self.check_model(Model(), example_inputs)
+
+    def test_remove_intermediate_files(self):
+        # For CUDA, generated cpp files contain absolute path to the generated cubin files.
+        # With the package artifact, that cubin path should be overriden at the run time,
+        # so removing those intermeidate files in this test to verify that.
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y
+
+        example_inputs = (
+            torch.randn(10, 10, device=self.device),
+            torch.randn(10, 10, device=self.device),
+        )
+        model = Model()
+        with torch.no_grad():
+            torch.manual_seed(0)
+            model = model.to(self.device)
+            ref_model = copy.deepcopy(model)
+            ref_inputs = copy.deepcopy(example_inputs)
+            expected = ref_model(*ref_inputs)
+
+            torch.manual_seed(0)
+            with tempfile.NamedTemporaryFile(suffix=".pt2") as f:
+                ep = torch.export.export(
+                    model,
+                    example_inputs,
+                )
+                with fresh_inductor_cache():
+                    # cubin files are removed when exiting this context
+                    package_path = torch._inductor.aoti_compile_and_package(
+                        ep,
+                        example_inputs,
+                        package_path=f.name,
+                    )  # type: ignore[arg-type]
+                loaded = torch._inductor.aoti_load_package(package_path)
+                actual = loaded(*example_inputs)
+
+            self.assertEqual(actual, expected)
 
     def test_linear(self):
         class Model(torch.nn.Module):
