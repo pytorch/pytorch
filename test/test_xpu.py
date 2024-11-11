@@ -239,6 +239,7 @@ print(torch.xpu.device_count())
         torch.xpu.synchronize()
         if int(torch.version.xpu) >= 20250000:
             self.assertGreater(start_event.elapsed_time(end_event), 0)
+            self.assertLess(end_event.elapsed_time(start_event), 0)
         else:
             with self.assertRaisesRegex(
                 NotImplementedError,
@@ -279,7 +280,8 @@ print(torch.xpu.device_count())
         self.assertNotEqual(event1.event_id, event2.event_id)
         self.assertEqual(c_xpu.cpu(), a + b)
         if int(torch.version.xpu) >= 20250000:
-            self.assertTrue(event1.elapsed_time(event2) > 0)
+            self.assertGreater(event1.elapsed_time(event2), 0)
+            self.assertLess(event2.elapsed_time(event1), 0)
         else:
             with self.assertRaisesRegex(
                 NotImplementedError,
