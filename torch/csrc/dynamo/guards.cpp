@@ -1541,10 +1541,6 @@ void add_relational_guard_resetter_to_cloned_root(
  */
 class GuardAccessor {
  public:
-  // For cloning
-  GuardAccessor(GuardManager* guard_manager)
-      : _guard_manager(std::unique_ptr<GuardManager>(guard_manager)) {}
-
   GuardAccessor(
       RootGuardManager* root,
       py::object accessor_key,
@@ -1581,16 +1577,20 @@ class GuardAccessor {
   virtual ~GuardAccessor() = default;
 
  public: // Cloning related functions
+  GuardAccessor(GuardManager* guard_manager, GuardAccessor* from)
+      : _guard_manager(std::unique_ptr<GuardManager>(guard_manager)) {
+    from->clone_visitor(this);
+  }
+
   virtual GuardAccessor* clone(
       RootGuardManager* cloned_root,
       const py::function& clone_filter_fn) = 0;
 
-  void clone_fields(GuardAccessor* to) { // NOLINT
+  void clone_visitor(GuardAccessor* to) {
     to->_source = this->_source;
     to->_accessor_key = this->_accessor_key;
   }
 
-  // Use CRTP mechanism to call `clone_fields` of the derived type
   template <typename DerivedGuardAccessor>
   GuardAccessor* clone_common(
       RootGuardManager* cloned_root,
@@ -1601,8 +1601,7 @@ class GuardAccessor {
       return nullptr;
     }
     DerivedGuardAccessor* cloned_accessor =
-        new DerivedGuardAccessor(cloned_mgr);
-    static_cast<DerivedGuardAccessor*>(this)->clone_fields(cloned_accessor);
+        new DerivedGuardAccessor(cloned_mgr, (DerivedGuardAccessor*)this);
     return cloned_accessor;
   }
 
@@ -1999,6 +1998,21 @@ class GuardManager {
 };
 
 /**
+ Note on [Ownership with cloning] - GuardManagers have the facility to clone
+ itself. This is useful for cloning a subset of the guard manager in diff guard
+ manager.
+
+ As the ownership goes, the model is exactly same as before. We have unique_ptr
+ for GuardAccessor and GuardManagers. So, any state required for the accessors
+ and managers is copied over using constructors and clone_visitor functions.
+ The main thing to notice is leaf guards. The leaf guards are represented using
+ shared_ptr, and they are shared (not cloned) with the cloned managers.
+
+ So for leaf guard state to be released, both the original and cloned managers
+ have to be destructed.
+*/
+
+/**
  * RootGuardManager is the root of the guard tree. This is primarily
  * constructed to hold the relational guard pointers so that we can reset the
  * state of those guards on guard failure. All the other important
@@ -2144,7 +2158,8 @@ class RootGuardManager : public GuardManager {
     _init_local_state = true;
   }
 
-  RootGuardManager* clone(const py::function& clone_filter_fn) {
+  // See note on [Ownership with cloning]
+  RootGuardManager* clone_manager(const py::function& clone_filter_fn) {
     // Use clone_filter_fn
     if (!py::cast<bool>(clone_filter_fn(this))) {
       return nullptr;
@@ -2992,8 +3007,11 @@ class GetAttrGuardAccessor : public GuardAccessor {
   }
 
  public: // cloning functions
-  GetAttrGuardAccessor(GuardManager* guard_manager)
-      : GuardAccessor(guard_manager) {}
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  GetAttrGuardAccessor(GuardManager* guard_manager, GetAttrGuardAccessor* from)
+      : GuardAccessor(guard_manager, from) {
+    from->clone_visitor(this);
+  }
 
   GuardAccessor* clone(
       RootGuardManager* cloned_root,
@@ -3001,8 +3019,7 @@ class GetAttrGuardAccessor : public GuardAccessor {
     return clone_common<GetAttrGuardAccessor>(cloned_root, clone_filter_fn);
   }
 
-  void clone_fields(GetAttrGuardAccessor* to) {
-    GuardAccessor::clone_fields(to);
+  void clone_visitor(GetAttrGuardAccessor* to) {
     to->_attr_name = _attr_name;
   }
 
@@ -3065,8 +3082,13 @@ class GetGenericDictGuardAccessor : public GuardAccessor {
   }
 
  public: // cloning functions
-  GetGenericDictGuardAccessor(GuardManager* guard_manager)
-      : GuardAccessor(guard_manager) {}
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  GetGenericDictGuardAccessor(
+      GuardManager* guard_manager,
+      GetGenericDictGuardAccessor* from)
+      : GuardAccessor(guard_manager, from) {
+    from->clone_visitor(this);
+  }
 
   GuardAccessor* clone(
       RootGuardManager* cloned_root,
@@ -3128,8 +3150,11 @@ class GetItemGuardAccessor : public GuardAccessor {
   }
 
  public: // cloning functions
-  GetItemGuardAccessor(GuardManager* guard_manager)
-      : GuardAccessor(guard_manager) {}
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  GetItemGuardAccessor(GuardManager* guard_manager, GetItemGuardAccessor* from)
+      : GuardAccessor(guard_manager, from) {
+    from->clone_visitor(this);
+  }
 
   GuardAccessor* clone(
       RootGuardManager* cloned_root,
@@ -3137,8 +3162,7 @@ class GetItemGuardAccessor : public GuardAccessor {
     return clone_common<GetItemGuardAccessor>(cloned_root, clone_filter_fn);
   }
 
-  void clone_fields(GetItemGuardAccessor* to) {
-    GuardAccessor::clone_fields(to);
+  void clone_visitor(GetItemGuardAccessor* to) {
     to->_attr_name = _attr_name;
   }
 
@@ -3206,9 +3230,13 @@ class DictGetItemGuardAccessor : public GuardAccessor {
   }
 
  public: // cloning functions
-  // For cloning
-  DictGetItemGuardAccessor(GuardManager* guard_manager)
-      : GuardAccessor(guard_manager) {}
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  DictGetItemGuardAccessor(
+      GuardManager* guard_manager,
+      DictGetItemGuardAccessor* from)
+      : GuardAccessor(guard_manager, from) {
+    from->clone_visitor(this);
+  }
 
   GuardAccessor* clone(
       RootGuardManager* cloned_root,
@@ -3216,8 +3244,7 @@ class DictGetItemGuardAccessor : public GuardAccessor {
     return clone_common<DictGetItemGuardAccessor>(cloned_root, clone_filter_fn);
   }
 
-  void clone_fields(DictGetItemGuardAccessor* to) {
-    GuardAccessor::clone_fields(to);
+  void clone_visitor(DictGetItemGuardAccessor* to) {
     to->_key = _key;
     to->_is_immutable_object = _is_immutable_object;
   }
@@ -3280,9 +3307,13 @@ class ListGetItemGuardAccessor : public GuardAccessor {
   }
 
  public: // cloning functions
-  // For cloning
-  ListGetItemGuardAccessor(GuardManager* guard_manager)
-      : GuardAccessor(guard_manager) {}
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  ListGetItemGuardAccessor(
+      GuardManager* guard_manager,
+      ListGetItemGuardAccessor* from)
+      : GuardAccessor(guard_manager, from) {
+    from->clone_visitor(this);
+  }
 
   GuardAccessor* clone(
       RootGuardManager* cloned_root,
@@ -3290,8 +3321,7 @@ class ListGetItemGuardAccessor : public GuardAccessor {
     return clone_common<ListGetItemGuardAccessor>(cloned_root, clone_filter_fn);
   }
 
-  void clone_fields(ListGetItemGuardAccessor* to) {
-    GuardAccessor::clone_fields(to);
+  void clone_visitor(ListGetItemGuardAccessor* to) {
     to->_index = _index;
   }
 
@@ -3349,8 +3379,14 @@ class TupleGetItemGuardAccessor : public GuardAccessor {
   }
 
  public: // cloning functions
-  TupleGetItemGuardAccessor(GuardManager* guard_manager)
-      : GuardAccessor(guard_manager) {}
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  TupleGetItemGuardAccessor(
+      GuardManager* guard_manager,
+      TupleGetItemGuardAccessor* from)
+      : GuardAccessor(guard_manager, from) {
+    from->clone_visitor(this);
+  }
+
   GuardAccessor* clone(
       RootGuardManager* cloned_root,
       const py::function& clone_filter_fn) override {
@@ -3358,8 +3394,7 @@ class TupleGetItemGuardAccessor : public GuardAccessor {
         cloned_root, clone_filter_fn);
   }
 
-  void clone_fields(TupleGetItemGuardAccessor* to) {
-    GuardAccessor::clone_fields(to);
+  void clone_visitor(TupleGetItemGuardAccessor* to) {
     to->_index = _index;
   }
 
@@ -3424,8 +3459,12 @@ class GradGuardAccessor : public GuardAccessor {
   }
 
  public: // cloning functions
-  GradGuardAccessor(GuardManager* guard_manager)
-      : GuardAccessor(guard_manager) {}
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  GradGuardAccessor(GuardManager* guard_manager, GradGuardAccessor* from)
+      : GuardAccessor(guard_manager, from) {
+    from->clone_visitor(this);
+  }
+
   GuardAccessor* clone(
       RootGuardManager* cloned_root,
       const py::function& clone_filter_fn) override {
@@ -3494,8 +3533,13 @@ class FuncDefaultsGuardAccessor : public GuardAccessor {
   }
 
  public: // cloning functions
-  FuncDefaultsGuardAccessor(GuardManager* guard_manager)
-      : GuardAccessor(guard_manager) {}
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  FuncDefaultsGuardAccessor(
+      GuardManager* guard_manager,
+      FuncDefaultsGuardAccessor* from)
+      : GuardAccessor(guard_manager, from) {
+    from->clone_visitor(this);
+  }
   GuardAccessor* clone(
       RootGuardManager* cloned_root,
       const py::function& clone_filter_fn) override {
@@ -3565,8 +3609,14 @@ class FuncKwDefaultsGuardAccessor : public GuardAccessor {
   }
 
  public: // cloning functions
-  FuncKwDefaultsGuardAccessor(GuardManager* guard_manager)
-      : GuardAccessor(guard_manager) {}
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  FuncKwDefaultsGuardAccessor(
+      GuardManager* guard_manager,
+      FuncKwDefaultsGuardAccessor* from)
+      : GuardAccessor(guard_manager, from) {
+    from->clone_visitor(this);
+  }
+
   GuardAccessor* clone(
       RootGuardManager* cloned_root,
       const py::function& clone_filter_fn) override {
@@ -3616,16 +3666,19 @@ class GlobalsGuardAccessor : public GuardAccessor {
   }
 
  public: // cloning functions
-  GlobalsGuardAccessor(GuardManager* guard_manager)
-      : GuardAccessor(guard_manager) {}
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  GlobalsGuardAccessor(GuardManager* guard_manager, GlobalsGuardAccessor* from)
+      : GuardAccessor(guard_manager, from) {
+    from->clone_visitor(this);
+  }
+
   GuardAccessor* clone(
       RootGuardManager* cloned_root,
       const py::function& clone_filter_fn) override {
     return clone_common<GlobalsGuardAccessor>(cloned_root, clone_filter_fn);
   }
 
-  void clone_fields(GlobalsGuardAccessor* to) {
-    GuardAccessor::clone_fields(to);
+  void clone_visitor(GlobalsGuardAccessor* to) {
     to->_globals_dict = _globals_dict;
   }
 
@@ -3673,17 +3726,19 @@ class TypeGuardAccessor : public GuardAccessor {
   }
 
  public: // cloning functions
-  TypeGuardAccessor(GuardManager* guard_manager)
-      : GuardAccessor(guard_manager) {}
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  TypeGuardAccessor(GuardManager* guard_manager, TypeGuardAccessor* from)
+      : GuardAccessor(guard_manager, from) {
+    from->clone_visitor(this);
+  }
+
   GuardAccessor* clone(
       RootGuardManager* cloned_root,
       const py::function& clone_filter_fn) override {
     return clone_common<TypeGuardAccessor>(cloned_root, clone_filter_fn);
   }
 
-  void clone_fields(TypeGuardAccessor* to) {
-    GuardAccessor::clone_fields(to);
-  }
+  void clone_visitor(TypeGuardAccessor* to) {}
 };
 
 /**
@@ -3740,8 +3795,14 @@ class TupleIteratorGetItemAccessor : public GuardAccessor {
   }
 
  public: // cloning functions
-  TupleIteratorGetItemAccessor(GuardManager* guard_manager)
-      : GuardAccessor(guard_manager) {}
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  TupleIteratorGetItemAccessor(
+      GuardManager* guard_manager,
+      TupleIteratorGetItemAccessor* from)
+      : GuardAccessor(guard_manager, from) {
+    from->clone_visitor(this);
+  }
+
   GuardAccessor* clone(
       RootGuardManager* cloned_root,
       const py::function& clone_filter_fn) override {
@@ -3749,8 +3810,7 @@ class TupleIteratorGetItemAccessor : public GuardAccessor {
         cloned_root, clone_filter_fn);
   }
 
-  void clone_fields(TupleIteratorGetItemAccessor* to) {
-    GuardAccessor::clone_fields(to);
+  void clone_visitor(TupleIteratorGetItemAccessor* to) {
     to->_index = _index;
   }
 
@@ -3828,8 +3888,13 @@ class GlobalWeakRefGuardAccessor : public GuardAccessor {
   }
 
  public: // cloning functions
-  GlobalWeakRefGuardAccessor(GuardManager* guard_manager)
-      : GuardAccessor(guard_manager) {}
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  GlobalWeakRefGuardAccessor(
+      GuardManager* guard_manager,
+      GlobalWeakRefGuardAccessor* from)
+      : GuardAccessor(guard_manager, from) {
+    from->clone_visitor(this);
+  }
   GuardAccessor* clone(
       RootGuardManager* cloned_root,
       const py::function& clone_filter_fn) override {
@@ -3837,8 +3902,7 @@ class GlobalWeakRefGuardAccessor : public GuardAccessor {
         cloned_root, clone_filter_fn);
   }
 
-  void clone_fields(GlobalWeakRefGuardAccessor* to) {
-    GuardAccessor::clone_fields(to);
+  void clone_visitor(GlobalWeakRefGuardAccessor* to) {
     to->_global_name = _global_name;
   }
 
@@ -3892,17 +3956,21 @@ class WeakRefCallGuardAccessor : public GuardAccessor {
   }
 
  public: // cloning functions
-  WeakRefCallGuardAccessor(GuardManager* guard_manager)
-      : GuardAccessor(guard_manager) {}
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  WeakRefCallGuardAccessor(
+      GuardManager* guard_manager,
+      WeakRefCallGuardAccessor* from)
+      : GuardAccessor(guard_manager, from) {
+    from->clone_visitor(this);
+  }
+
   GuardAccessor* clone(
       RootGuardManager* cloned_root,
       const py::function& clone_filter_fn) override {
     return clone_common<WeakRefCallGuardAccessor>(cloned_root, clone_filter_fn);
   }
 
-  void clone_fields(WeakRefCallGuardAccessor* to) {
-    GuardAccessor::clone_fields(to);
-  }
+  void clone_visitor(WeakRefCallGuardAccessor* to) {}
 };
 
 /**
@@ -3968,8 +4036,14 @@ class CallFunctionNoArgsGuardAccessor : public GuardAccessor {
   }
 
  public: // cloning functions
-  CallFunctionNoArgsGuardAccessor(GuardManager* guard_manager)
-      : GuardAccessor(guard_manager) {}
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  CallFunctionNoArgsGuardAccessor(
+      GuardManager* guard_manager,
+      CallFunctionNoArgsGuardAccessor* from)
+      : GuardAccessor(guard_manager, from) {
+    from->clone_visitor(this);
+  }
+
   GuardAccessor* clone(
       RootGuardManager* cloned_root,
       const py::function& clone_filter_fn) override {
@@ -3977,9 +4051,7 @@ class CallFunctionNoArgsGuardAccessor : public GuardAccessor {
         cloned_root, clone_filter_fn);
   }
 
-  void clone_fields(CallFunctionNoArgsGuardAccessor* to) {
-    GuardAccessor::clone_fields(to);
-  }
+  void clone_visitor(CallFunctionNoArgsGuardAccessor* to) {}
 };
 
 /**
@@ -4036,8 +4108,14 @@ class PythonLambdaGuardAccessor : public GuardAccessor {
   }
 
  public: // cloning functions
-  PythonLambdaGuardAccessor(GuardManager* guard_manager)
-      : GuardAccessor(guard_manager) {}
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  PythonLambdaGuardAccessor(
+      GuardManager* guard_manager,
+      PythonLambdaGuardAccessor* from)
+      : GuardAccessor(guard_manager, from) {
+    from->clone_visitor(this);
+  }
+
   GuardAccessor* clone(
       RootGuardManager* cloned_root,
       const py::function& clone_filter_fn) override {
@@ -4045,8 +4123,7 @@ class PythonLambdaGuardAccessor : public GuardAccessor {
         cloned_root, clone_filter_fn);
   }
 
-  void clone_fields(PythonLambdaGuardAccessor* to) {
-    GuardAccessor::clone_fields(to);
+  void clone_visitor(PythonLambdaGuardAccessor* to) {
     to->_accessor_fn = _accessor_fn;
   }
 
@@ -4807,7 +4884,9 @@ PyObject* torch_c_dynamo_guards_init() {
       .def("check", &RootGuardManager::check)
       .def("check_verbose", &RootGuardManager::check_verbose)
       .def(
-          "clone", &RootGuardManager::clone, py::return_value_policy::reference)
+          "clone_manager",
+          &RootGuardManager::clone_manager,
+          py::return_value_policy::reference)
       // return by reference because GuardManager has the ownership of leaf
       // guards
       .def(

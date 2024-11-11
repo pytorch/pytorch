@@ -50,8 +50,6 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.two_tensor import TwoTensor
 
-from .utils import install_guard_manager_testing_hook
-
 
 _orig_module_call = torch.nn.Module.__call__
 
@@ -937,6 +935,8 @@ class IncByTwo:
 
 class ReproTests(torch._dynamo.test_case.TestCase):
     def setUp(self) -> None:
+        from .utils import install_guard_manager_testing_hook
+
         self.exit_stack = contextlib.ExitStack()
         self.exit_stack.enter_context(
             install_guard_manager_testing_hook(self.guard_manager_clone_hook_fn)
@@ -949,7 +949,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
     def guard_manager_clone_hook_fn(self, guard_manager_wrapper, f_locals):
         root = guard_manager_wrapper.root
-        cloned_root = root.clone(lambda x: True)
+        cloned_root = root.clone_manager(lambda x: True)
         cloned_wrapper = torch._dynamo.guards.GuardManagerWrapper(cloned_root)
         self.assertEqual(str(guard_manager_wrapper), str(cloned_wrapper))
         self.assertTrue(cloned_root.check(f_locals))
