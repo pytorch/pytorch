@@ -188,7 +188,7 @@ def process_signature(line: str) -> str:
             # Remove the datapipe after 'self' or 'cls' unless it has '*'
             tokens[i] = ""
         elif "Callable =" in token:  # Remove default argument if it is a function
-            head, default_arg = token.rsplit("=", 2)
+            head, _default_arg = token.rsplit("=", 2)
             tokens[i] = head.strip(" ") + "= ..."
     tokens = [t for t in tokens if t != ""]
     line = ", ".join(tokens)

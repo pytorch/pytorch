@@ -1415,6 +1415,7 @@ class TestOperators(TestCase):
                 xfail("nn.functional.dropout3d", ""),
                 xfail("as_strided_scatter", ""),
                 xfail("masked.cumprod", ""),
+                xfail("permute_copy"),
                 xfail("renorm"),  # hit vmap fallback, which is disabled
                 xfail("squeeze_copy"),
                 xfail("t_copy"),
@@ -1480,6 +1481,7 @@ class TestOperators(TestCase):
                 xfail("masked_select"),
                 xfail("nanquantile"),
                 xfail("ormqr"),
+                xfail("permute_copy"),
                 xfail("put"),
                 xfail("quantile"),
                 xfail("renorm"),

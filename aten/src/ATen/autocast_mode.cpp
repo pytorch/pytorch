@@ -149,7 +149,7 @@ Banned functions
 *******************************/
 
 static Tensor binary_cross_entropy_banned(const Tensor &, const Tensor &, const std::optional<Tensor>&, int64_t) {
-  AT_ERROR("torch.nn.functional.binary_cross_entropy and torch.nn.BCELoss are unsafe to autocast.\n"
+  TORCH_CHECK(false, "torch.nn.functional.binary_cross_entropy and torch.nn.BCELoss are unsafe to autocast.\n"
            "Many models use a sigmoid layer right before the binary cross entropy layer.\n"
            "In this case, combine the two layers using torch.nn.functional.binary_cross_entropy_with_logits\n"
            "or torch.nn.BCEWithLogitsLoss.  binary_cross_entropy_with_logits and BCEWithLogits are\n"
@@ -212,13 +212,13 @@ TORCH_LIBRARY_IMPL(_, AutocastMPS, m) {
 
 TORCH_LIBRARY_IMPL(aten, AutocastMPS, m) {
   // lower_precision_fp
-  KERNEL_MPS2(_convolution, deprecated, lower_precision_fp)
+  KERNEL_MPS(_convolution, deprecated, lower_precision_fp)
   KERNEL_MPS(_convolution, lower_precision_fp)
   KERNEL_MPS(conv1d, lower_precision_fp)
   KERNEL_MPS(conv2d, lower_precision_fp)
   KERNEL_MPS(conv_tbc, lower_precision_fp)
   KERNEL_MPS(conv_transpose1d, lower_precision_fp)
-  KERNEL_MPS2(conv_transpose2d, input, lower_precision_fp)
+  KERNEL_MPS(conv_transpose2d, input, lower_precision_fp)
   KERNEL_MPS(convolution, lower_precision_fp)
   KERNEL_MPS(_mps_convolution, lower_precision_fp)
   KERNEL_MPS(prelu, lower_precision_fp)
@@ -252,16 +252,16 @@ TORCH_LIBRARY_IMPL(aten, AutocastMPS, m) {
   KERNEL_MPS(rsqrt, fp32)
   KERNEL_MPS(sinh, fp32)
   KERNEL_MPS(tan, fp32)
-  KERNEL_MPS2(pow, Tensor_Scalar, fp32)
-  KERNEL_MPS2(pow, Tensor_Tensor, fp32)
-  KERNEL_MPS2(pow, Scalar, fp32)
+  KERNEL_MPS(pow, Tensor_Scalar, fp32)
+  KERNEL_MPS(pow, Tensor_Tensor, fp32)
+  KERNEL_MPS(pow, Scalar, fp32)
   KERNEL_MPS(softplus, fp32)
   KERNEL_MPS(layer_norm, fp32)
   KERNEL_MPS(native_layer_norm, fp32)
   KERNEL_MPS(group_norm, fp32)
-  KERNEL_MPS2(frobenius_norm, dim, fp32)
+  KERNEL_MPS(frobenius_norm, dim, fp32)
   KERNEL_MPS(nuclear_norm, fp32)
-  KERNEL_MPS2(nuclear_norm, dim, fp32)
+  KERNEL_MPS(nuclear_norm, dim, fp32)
   KERNEL_MPS(batch_norm, fp32)
   KERNEL_MPS(cosine_similarity, fp32)
   KERNEL_MPS(poisson_nll_loss, fp32)
@@ -288,22 +288,22 @@ TORCH_LIBRARY_IMPL(aten, AutocastMPS, m) {
 
   // fp32_set_opt_dtype
   KERNEL_MPS(prod, fp32)
-  KERNEL_MPS2(prod, dim_int, fp32)
-  KERNEL_MPS2(prod, dim_Dimname, fp32)
-  KERNEL_MPS2(softmax, int, fp32)
-  KERNEL_MPS2(softmax, Dimname, fp32)
-  KERNEL_MPS2(log_softmax, int, fp32)
-  KERNEL_MPS2(log_softmax, Dimname, fp32)
+  KERNEL_MPS(prod, dim_int, fp32)
+  KERNEL_MPS(prod, dim_Dimname, fp32)
+  KERNEL_MPS(softmax, int, fp32)
+  KERNEL_MPS(softmax, Dimname, fp32)
+  KERNEL_MPS(log_softmax, int, fp32)
+  KERNEL_MPS(log_softmax, Dimname, fp32)
   KERNEL_MPS(cumprod, fp32)
-  KERNEL_MPS2(cumprod, dimname, fp32)
+  KERNEL_MPS(cumprod, dimname, fp32)
   KERNEL_MPS(cumsum, fp32)
-  KERNEL_MPS2(cumsum, dimname, fp32)
+  KERNEL_MPS(cumsum, dimname, fp32)
   KERNEL_MPS(linalg_vector_norm, fp32)
   KERNEL_MPS(linalg_matrix_norm, fp32)
-  KERNEL_MPS2(linalg_matrix_norm, str_ord, fp32)
+  KERNEL_MPS(linalg_matrix_norm, str_ord, fp32)
   KERNEL_MPS(sum, fp32)
-  KERNEL_MPS2(sum, dim_IntList, fp32)
-  KERNEL_MPS2(sum, dim_DimnameList, fp32)
+  KERNEL_MPS(sum, dim_IntList, fp32)
+  KERNEL_MPS(sum, dim_DimnameList, fp32)
   //
   // promote
   KERNEL_MPS(addcdiv, promote)
