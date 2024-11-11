@@ -363,8 +363,7 @@ def _get_aten_graph_module_for_pattern(
     pattern: Callable,
     example_inputs: Tuple[Any, ...],
     is_cuda: bool = False,
-    *,
-    using_training_ir: bool,
+    using_training_ir: bool = True,
     **kwargs,
 ) -> GraphModule:
     """

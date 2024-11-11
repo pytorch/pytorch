@@ -1,7 +1,7 @@
 # Owner(s): ["module: inductor"]
-import functools
 import os
 import pickle
+import shutil
 import tempfile
 import unittest
 from typing import List, Optional, Union
@@ -13,6 +13,7 @@ from torch._dynamo.utils import counters
 from torch._inductor import config, metrics
 from torch._inductor.async_compile import AsyncCompile
 from torch._inductor.codecache import (
+    BypassFxGraphCache,
     cuda_compile_command,
     CUDACodeCache,
     FxGraphCachePickler,
@@ -23,6 +24,7 @@ from torch._inductor.codecache import (
 )
 from torch._inductor.custom_graph_pass import CustomGraphPass, get_hash_for_files
 from torch._inductor.graph import GraphLowering
+from torch._inductor.mock_cache import global_stats, PatchCaches, Stats
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import clear_inductor_caches, fresh_inductor_cache
@@ -37,26 +39,17 @@ from torch.testing._internal.inductor_utils import (
     HAS_CUDA,
     HAS_GPU,
     HAS_MULTIGPU,
+    HAS_TRITON,
     requires_gpu,
+    requires_triton,
 )
 from torch.testing._internal.triton_utils import requires_cuda
-from torch.utils._triton import has_triton
 
-
-try:
-    from .mock_cache import global_stats, PatchCaches, Stats
-except ImportError:
-    from mock_cache import global_stats, PatchCaches, Stats  # @manual
-
-
-HAS_TRITON = has_triton()
 
 if HAS_TRITON:
     import triton  # @manual
 
     from torch.testing._internal.triton_utils import add_kernel
-
-requires_triton = functools.partial(unittest.skipIf, not HAS_TRITON, "requires triton")
 
 torch._dynamo.config.fake_tensor_cache_enabled = True
 torch._dynamo.config.fake_tensor_cache_crosscheck_enabled = True
@@ -129,7 +122,9 @@ class TestFxGraphCache(TestCase):
     @parametrize("device", (GPU_TYPE, "cpu"))
     @parametrize("dtype", (torch.float32, torch.bfloat16))
     @parametrize("dynamic", (False, True))
-    def test_cache_load_function(self, device, dtype, dynamic):
+    @parametrize("bundle_triton", (False, True))
+    @parametrize("grad", (False, True))
+    def test_cache_load_function(self, device, dtype, dynamic, bundle_triton, grad):
         """
         Verify that we can populate and load functions from the cache.
         """
@@ -138,36 +133,97 @@ class TestFxGraphCache(TestCase):
         if device == "cuda" and dtype == torch.bfloat16 and not SM80OrLater:
             raise unittest.SkipTest("requires SM80 or later")
 
+        grad_multiplier = 2 if grad else 1
+
         def fn(x, y):
-            return (x * 2, y @ y)
+            yy = y @ y
+            return x * 2 + yy.view(25)
 
-        a = torch.rand(25, dtype=dtype, device=device)
-        b = torch.rand(5, 5, dtype=dtype, device=device)
+        a_orig = torch.rand(25, dtype=dtype, device=device)
+        b_orig = torch.rand(5, 5, dtype=dtype, device=device)
 
-        compiled_fn = torch.compile(fn, dynamic=dynamic)
+        with config.patch(bundle_triton_into_fx_graph_cache=bundle_triton):
+            compiled_fn = torch.compile(fn, dynamic=dynamic)
 
-        # A first call should miss in the cache.
-        self.assertEqual(fn(a, b), compiled_fn(a, b))
-        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
-        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
-        self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 0)
+            a1 = a_orig.clone().requires_grad_(grad)
+            b1 = b_orig.clone().requires_grad_(grad)
+            a2 = a_orig.clone().requires_grad_(grad)
+            b2 = b_orig.clone().requires_grad_(grad)
 
-        # A second call should hit. (First reset so in-memory guards
-        # don't prevent compilation).
-        for m in torch._inductor.codecache.PyCodeCache.cache.values():
-            os.remove(m.__file__)
-        self.reset()
-        self.assertEqual(fn(a, b), compiled_fn(a, b))
-        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
-        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
-        self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 1)
+            # A first call should miss in the cache.
+            eager_result = fn(a1, b1)
+            compiled_result = compiled_fn(a2, b2)
+            self.assertEqual(eager_result, compiled_result)
+            if grad:
+                eager_result.sum().backward()
+                compiled_result.sum().backward()
+                self.assertEqual(a1.grad, a2.grad)
+                self.assertEqual(b1.grad, b2.grad)
+            self.assertEqual(
+                counters["inductor"]["fxgraph_cache_miss"], grad_multiplier * 1
+            )
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+            self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 0)
+            # "cuda" has .ptx and .cubin file, but xpu only has .spv file
+            save_kernel_count = 6 if device == "xpu" else 7
+            read_and_emit_kernel_count = 6 if device == "xpu" else 7
+            if bundle_triton and device != "cpu":
+                self.assertEqual(
+                    counters["inductor"]["triton_bundler_save_kernel"],
+                    grad_multiplier * save_kernel_count,
+                )
+                self.assertEqual(
+                    counters["inductor"]["triton_bundler_read_and_emit_kernel"], 0
+                )
+
+            # A second call should hit. (First reset so in-memory guards
+            # don't prevent compilation).
+            self.reset()
+
+            # Clean PyCodeCache and triton kernels
+            PyCodeCache.cache_clear()
+            shutil.rmtree(os.path.join(cache_dir(), "triton"), ignore_errors=True)
+
+            a1 = a_orig.clone().requires_grad_(grad)
+            b1 = b_orig.clone().requires_grad_(grad)
+            a2 = a_orig.clone().requires_grad_(grad)
+            b2 = b_orig.clone().requires_grad_(grad)
+
+            eager_result = fn(a1, b1)
+            compiled_result = compiled_fn(a2, b2)
+            self.assertEqual(eager_result, compiled_result)
+            if grad:
+                eager_result.sum().backward()
+                compiled_result.sum().backward()
+                self.assertEqual(a1.grad, a2.grad)
+                self.assertEqual(b1.grad, b2.grad)
+            self.assertEqual(
+                counters["inductor"]["fxgraph_cache_miss"], grad_multiplier * 1
+            )
+            self.assertEqual(
+                counters["inductor"]["fxgraph_cache_hit"], grad_multiplier * 1
+            )
+            self.assertEqual(
+                counters["inductor"]["fxgraph_lookup_write_file"], grad_multiplier * 1
+            )
+
+            if bundle_triton and device != "cpu":
+                self.assertEqual(
+                    counters["inductor"]["triton_bundler_save_kernel"],
+                    grad_multiplier * save_kernel_count,
+                )
+                self.assertEqual(
+                    counters["inductor"]["triton_bundler_read_and_emit_kernel"],
+                    grad_multiplier * read_and_emit_kernel_count,
+                )
 
     @requires_triton()
     @config.patch({"fx_graph_remote_cache": True})
     @parametrize("device", (GPU_TYPE, "cpu"))
     @parametrize("dtype", (torch.float32, torch.bfloat16))
     @parametrize("dynamic", (False, True))
-    def test_remote_cache_load_function(self, device, dtype, dynamic):
+    @parametrize("bundle_triton", (False, True))
+    def test_remote_cache_load_function(self, device, dtype, dynamic, bundle_triton):
         from unittest.mock import patch
 
         if device == GPU_TYPE and not HAS_GPU:
@@ -184,6 +240,7 @@ class TestFxGraphCache(TestCase):
         with config.patch(
             {
                 "fx_graph_remote_cache": True,
+                "bundle_triton_into_fx_graph_cache": bundle_triton,
             }
         ), patch.dict(os.environ), PatchCaches():
             os.environ.pop("TRITON_CACHE_MANAGER", None)
@@ -365,6 +422,24 @@ class TestFxGraphCache(TestCase):
         self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
 
+        # Now pretend the constants are frozen params.
+        counters.clear()
+        self.reset()
+
+        with mock.patch(
+            "torch._inductor.codecache.has_frozen_params", return_value=True
+        ):
+            # A call to fn1 should miss in the cache since we do not consider
+            # the constant values.
+            self.assertEqual(fn1(a), compiled_fn1(a))
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+            # A call to fn2 should hit for the same reason.
+            self.assertEqual(fn2(a), compiled_fn2(a))
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+
     @requires_cuda
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
@@ -401,8 +476,6 @@ class TestFxGraphCache(TestCase):
 
         # A second call should hit. (First reset so in-memory guards
         # don't prevent compilation).
-        for m in torch._inductor.codecache.PyCodeCache.cache.values():
-            os.remove(m.__file__)
         self.reset()
         self.assertEqual(fn(a, b, c), compiled_fn(a, b, c), atol=atol, rtol=rtol)
         self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
@@ -410,8 +483,6 @@ class TestFxGraphCache(TestCase):
         self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 1)
 
         # A third call with different score_mod should have a cache miss
-        for m in torch._inductor.codecache.PyCodeCache.cache.values():
-            os.remove(m.__file__)
         self.reset()
         self.assertEqual(fn2(a, b, c), compiled_fn2(a, b, c), atol=atol, rtol=rtol)
         self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
@@ -422,29 +493,34 @@ class TestFxGraphCache(TestCase):
     @requires_triton()
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
-    def test_triton_higher_order_op_bypass(self):
+    @parametrize("bundle_triton", (False, True))
+    @parametrize("grad", (False, True))
+    def test_triton_higher_order_op_bypass(self, bundle_triton, grad):
         """
-        Verify that we bypass the cache when we have a triton higher order ops.
+        Verify that we bypass the cache when we have a triton higher order ops
+        and that bundler start/end works with a cache bypass.
         """
 
         def fn(x, y):
-            output = torch.zeros_like(x)
-            n_elements = output.numel()
+            n_elements = x.numel()
             grid = lambda meta: (  # noqa: E731
                 triton.cdiv(n_elements, meta["BLOCK_SIZE"]),
             )
-            add_kernel[grid](x, y, output, n_elements, BLOCK_SIZE=4)
-            return output
+            add_kernel[grid](x, y, x, n_elements, BLOCK_SIZE=4)
+            return x
 
-        compiled_fn = torch.compile(fn, fullgraph=True)
+        with config.patch(bundle_triton_into_fx_graph_cache=bundle_triton):
+            compiled_fn = torch.compile(fn, fullgraph=True)
 
-        x = torch.randn(4, device=GPU_TYPE)
-        y = torch.randn(4, device=GPU_TYPE)
-        compiled_fn(x, y)
+            x = torch.randn(4, device=GPU_TYPE, requires_grad=grad)
+            y = torch.randn(4, device=GPU_TYPE, requires_grad=grad)
+            result = compiled_fn(x, y)
+            if grad:
+                result.sum().backward()
 
-        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
-        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
-        self.assertGreater(counters["inductor"]["fxgraph_cache_bypass"], 0)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+            self.assertGreater(counters["inductor"]["fxgraph_cache_bypass"], 0)
 
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
@@ -631,119 +707,225 @@ class TestFxGraphCache(TestCase):
 
         self.assertNotEqual(a, b)
 
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    @config.patch({"freezing": True})
+    @parametrize("device", (GPU_TYPE, "cpu"))
+    def test_freezing(self, device):
+        if device == GPU_TYPE and not HAS_GPU:
+            raise unittest.SkipTest(f"requires {GPU_TYPE}")
+
+        class MM(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.rand(8, 8))
+
+            def forward(self, x):
+                return x @ self.param
+
+        dtype = torch.float16
+
+        # Populate a cache entry.
+        mod1 = MM().to(device=device, dtype=dtype)
+        with torch.no_grad():
+            x = torch.rand(8, 8).to(device=device, dtype=dtype)
+            out0 = mod1(x)
+            out1 = torch.compile(mod1)(x)
+            self.assertEqual(out0, out1)
+
+        # For mahcine that has mkldnn_fp16 support, the weight_pack in mkldnn_fusion.py
+        # wroks, which result in mkldnn format tensor, then the exception
+        # BypassFxGraphCache("mkldnn tensors unpickleable") is raised, and cause the
+        # fxgraph not cached.
+        def is_cpu_mkldnn_fp16_supported():
+            return (
+                device == "cpu"
+                and torch.backends.mkldnn.is_available()
+                and torch.ops.mkldnn._is_mkldnn_fp16_supported()
+            )
+
+        if is_cpu_mkldnn_fp16_supported():
+            fxgraph_cache_bypass_cnt = 1
+            fxgraph_cache_miss_cnt = 0
+            fxgraph_cache_hit_cnt = 0
+        else:
+            fxgraph_cache_bypass_cnt = 0
+            fxgraph_cache_miss_cnt = 1
+            fxgraph_cache_hit_cnt = 0
+
+        self.assertEqual(
+            counters["inductor"]["fxgraph_cache_bypass"], fxgraph_cache_bypass_cnt
+        )
+        self.assertEqual(
+            counters["inductor"]["fxgraph_cache_miss"], fxgraph_cache_miss_cnt
+        )
+        self.assertEqual(
+            counters["inductor"]["fxgraph_cache_hit"], fxgraph_cache_hit_cnt
+        )
+
+        counters.clear()
+        self.reset()
+
+        # Same nn.Module, but with different parameters should cache hit.
+        mod2 = MM().to(device=device, dtype=dtype)
+        self.assertNotEqual(mod1.param, mod2.param)
+
+        with torch.no_grad():
+            x = torch.rand(8, 8).to(device=device, dtype=dtype)
+            out0 = mod2(x)
+            out1 = torch.compile(mod2)(x)
+            self.assertEqual(out0, out1)
+
+        if is_cpu_mkldnn_fp16_supported():
+            fxgraph_cache_bypass_cnt = 1
+            fxgraph_cache_miss_cnt = 0
+            fxgraph_cache_hit_cnt = 0
+        else:
+            fxgraph_cache_bypass_cnt = 0
+            fxgraph_cache_miss_cnt = 0
+            fxgraph_cache_hit_cnt = 1
+
+        self.assertEqual(
+            counters["inductor"]["fxgraph_cache_bypass"], fxgraph_cache_bypass_cnt
+        )
+        self.assertEqual(
+            counters["inductor"]["fxgraph_cache_miss"], fxgraph_cache_miss_cnt
+        )
+        self.assertEqual(
+            counters["inductor"]["fxgraph_cache_hit"], fxgraph_cache_hit_cnt
+        )
+
 
 class TestFxGraphCacheHashing(TestCase):
     def test_tensor_constants(self):
         """
         Test the hashing of tensor constants.
         """
-        data = FxGraphCachePickler.dumps(torch.tensor(list(range(9))))
+        small = torch.tensor(list(range(8)))
+        large = torch.tensor(list(range(32)))
+
+        self.assertTrue(GraphLowering.can_inline_constant(small))
+        self.assertFalse(GraphLowering.can_inline_constant(large))
+
+        # By default, we hash the metadata and values independent of the size.
+        pickler = FxGraphCachePickler()
+
+        data = pickler.dumps(small)
         self.assertIsInstance(pickle.loads(data), TensorMetadataAndValues)
+        data = pickler.dumps(large)
+        self.assertIsInstance(pickle.loads(data), TensorMetadataAndValues)
+
+        # If include_non_inlined=False, we only hash the values of small tensors.
+        pickler = FxGraphCachePickler(False)
+
+        data = pickler.dumps(small)
+        self.assertIsInstance(pickle.loads(data), TensorMetadataAndValues)
+        data = pickler.dumps(large)
+        self.assertIsInstance(pickle.loads(data), TensorMetadata)
 
     def test_hash_fake_tensors(self):
         """
         Test hashing (pickling) FakeTensors with various characteristics.
         """
+        pickler = FxGraphCachePickler()
         with torch._subclasses.FakeTensorMode():
             # Verify that FakeTensors get pickled into a TensorMetadata:
-            data = FxGraphCachePickler.dumps(torch.randn(1))
+            data = pickler.dumps(torch.randn(1))
             self.assertIsInstance(pickle.loads(data), TensorMetadata)
 
             # Different shapes:
             self.assertEqual(
-                FxGraphCachePickler.dumps(torch.randn(3)),
-                FxGraphCachePickler.dumps(torch.randn(3)),
+                pickler.dumps(torch.randn(3)),
+                pickler.dumps(torch.randn(3)),
             )
             self.assertNotEqual(
-                FxGraphCachePickler.dumps(torch.randn(3)),
-                FxGraphCachePickler.dumps(torch.randn(4)),
+                pickler.dumps(torch.randn(3)),
+                pickler.dumps(torch.randn(4)),
             )
             self.assertNotEqual(
-                FxGraphCachePickler.dumps(torch.randn(3)),
-                FxGraphCachePickler.dumps(torch.randn(3, 3)),
+                pickler.dumps(torch.randn(3)),
+                pickler.dumps(torch.randn(3, 3)),
             )
 
             self.assertEqual(
-                FxGraphCachePickler.dumps(torch.randn(3, 3)),
-                FxGraphCachePickler.dumps(torch.randn(3, 3)),
+                pickler.dumps(torch.randn(3, 3)),
+                pickler.dumps(torch.randn(3, 3)),
             )
             self.assertNotEqual(
-                FxGraphCachePickler.dumps(torch.randn(3, 3)),
-                FxGraphCachePickler.dumps(torch.randn(3, 4)),
+                pickler.dumps(torch.randn(3, 3)),
+                pickler.dumps(torch.randn(3, 4)),
             )
             self.assertNotEqual(
-                FxGraphCachePickler.dumps(torch.randn(3, 3)),
-                FxGraphCachePickler.dumps(torch.randn(4, 3)),
+                pickler.dumps(torch.randn(3, 3)),
+                pickler.dumps(torch.randn(4, 3)),
             )
 
             # Different strides:
             self.assertEqual(
-                FxGraphCachePickler.dumps(torch.randn(3, 3)),
-                FxGraphCachePickler.dumps(
-                    torch.randn(3, 3).transpose(0, 1).transpose(0, 1)
-                ),
+                pickler.dumps(torch.randn(3, 3)),
+                pickler.dumps(torch.randn(3, 3).transpose(0, 1).transpose(0, 1)),
             )
             self.assertNotEqual(
-                FxGraphCachePickler.dumps(torch.randn(3, 3)),
-                FxGraphCachePickler.dumps(torch.randn(3, 3).transpose(0, 1)),
+                pickler.dumps(torch.randn(3, 3)),
+                pickler.dumps(torch.randn(3, 3).transpose(0, 1)),
             )
 
             # Different storage offsets:
             self.assertEqual(
-                FxGraphCachePickler.dumps(torch.randn(3)[1:]),
-                FxGraphCachePickler.dumps(torch.randn(3)[1:]),
+                pickler.dumps(torch.randn(3)[1:]),
+                pickler.dumps(torch.randn(3)[1:]),
             )
             self.assertEqual(
-                FxGraphCachePickler.dumps(torch.randn(3)[1:]),
-                FxGraphCachePickler.dumps(torch.randn(2)),
+                pickler.dumps(torch.randn(3)[1:]),
+                pickler.dumps(torch.randn(2)),
             )
 
             # Different dtypes:
             self.assertEqual(
-                FxGraphCachePickler.dumps(torch.randn(3, dtype=torch.float32)),
-                FxGraphCachePickler.dumps(torch.randn(3, dtype=torch.float32)),
+                pickler.dumps(torch.randn(3, dtype=torch.float32)),
+                pickler.dumps(torch.randn(3, dtype=torch.float32)),
             )
             self.assertNotEqual(
-                FxGraphCachePickler.dumps(torch.randn(3, dtype=torch.float32)),
-                FxGraphCachePickler.dumps(torch.randn(3, dtype=torch.float64)),
+                pickler.dumps(torch.randn(3, dtype=torch.float32)),
+                pickler.dumps(torch.randn(3, dtype=torch.float64)),
             )
 
             # Different 'requires_grad':
             self.assertEqual(
-                FxGraphCachePickler.dumps(torch.randn(3, requires_grad=True)),
-                FxGraphCachePickler.dumps(torch.randn(3, requires_grad=True)),
+                pickler.dumps(torch.randn(3, requires_grad=True)),
+                pickler.dumps(torch.randn(3, requires_grad=True)),
             )
             self.assertNotEqual(
-                FxGraphCachePickler.dumps(torch.randn(3, requires_grad=True)),
-                FxGraphCachePickler.dumps(torch.randn(3, requires_grad=False)),
+                pickler.dumps(torch.randn(3, requires_grad=True)),
+                pickler.dumps(torch.randn(3, requires_grad=False)),
             )
 
             # Different memory formats:
             self.assertNotEqual(
-                FxGraphCachePickler.dumps(torch.randn(1, 2, 3, 4)),
-                FxGraphCachePickler.dumps(
+                pickler.dumps(torch.randn(1, 2, 3, 4)),
+                pickler.dumps(
                     torch.randn(1, 2, 3, 4).to(memory_format=torch.channels_last)
                 ),
             )
 
             # Different devices:
             self.assertEqual(
-                FxGraphCachePickler.dumps(torch.randn(3, device="meta")),
-                FxGraphCachePickler.dumps(torch.randn(3, device="meta")),
+                pickler.dumps(torch.randn(3, device="meta")),
+                pickler.dumps(torch.randn(3, device="meta")),
             )
             self.assertNotEqual(
-                FxGraphCachePickler.dumps(torch.randn(3, device="meta")),
-                FxGraphCachePickler.dumps(torch.randn(3, device="cpu")),
+                pickler.dumps(torch.randn(3, device="meta")),
+                pickler.dumps(torch.randn(3, device="cpu")),
             )
 
             if HAS_MULTIGPU:
                 self.assertEqual(
-                    FxGraphCachePickler.dumps(torch.randn(3, device=f"{GPU_TYPE}:1")),
-                    FxGraphCachePickler.dumps(torch.randn(3, device=f"{GPU_TYPE}:1")),
+                    pickler.dumps(torch.randn(3, device=f"{GPU_TYPE}:1")),
+                    pickler.dumps(torch.randn(3, device=f"{GPU_TYPE}:1")),
                 )
                 self.assertNotEqual(
-                    FxGraphCachePickler.dumps(torch.randn(3, device=f"{GPU_TYPE}:0")),
-                    FxGraphCachePickler.dumps(torch.randn(3, device=f"{GPU_TYPE}:1")),
+                    pickler.dumps(torch.randn(3, device=f"{GPU_TYPE}:0")),
+                    pickler.dumps(torch.randn(3, device=f"{GPU_TYPE}:1")),
                 )
 
     def test_hash_kwargs(self):
@@ -751,20 +933,22 @@ class TestFxGraphCacheHashing(TestCase):
         Test the special handling of the kwargs when hashing, i.e.,
         ordering of the kwargs dict and any set arguments.
         """
+        pickler = FxGraphCachePickler()
+
         # Dict order of the kwargs should not affect hashes.
         details1 = FxGraphHashDetails(None, [], {"a": 0, "z": 1}, [])
         details2 = FxGraphHashDetails(None, [], {"z": 1, "a": 0}, [])
         self.assertEqual(
-            FxGraphCachePickler.dumps(details1),
-            FxGraphCachePickler.dumps(details2),
+            pickler.dumps(details1),
+            pickler.dumps(details2),
         )
 
         # Different kwarg values should affect hashes.
         details1 = FxGraphHashDetails(None, [], {"a": 0}, [])
         details2 = FxGraphHashDetails(None, [], {"a": 1}, [])
         self.assertNotEqual(
-            FxGraphCachePickler.dumps(details1),
-            FxGraphCachePickler.dumps(details2),
+            pickler.dumps(details1),
+            pickler.dumps(details2),
         )
 
         # Set order should not affect hashes. Sets are unordered, but
@@ -774,16 +958,16 @@ class TestFxGraphCacheHashing(TestCase):
         details1 = FxGraphHashDetails(None, [], {"a": set1}, [])
         details2 = FxGraphHashDetails(None, [], {"a": set2}, [])
         self.assertEqual(
-            FxGraphCachePickler.dumps(details1),
-            FxGraphCachePickler.dumps(details2),
+            pickler.dumps(details1),
+            pickler.dumps(details2),
         )
 
         # But different set contents should affect hashes.
         details1 = FxGraphHashDetails(None, [], {"a": {1, 2, 3}}, [])
         details2 = FxGraphHashDetails(None, [], {"a": {1, 2}}, [])
         self.assertNotEqual(
-            FxGraphCachePickler.dumps(details1),
-            FxGraphCachePickler.dumps(details2),
+            pickler.dumps(details1),
+            pickler.dumps(details2),
         )
 
     def test_hash_config_changes(self):
@@ -797,13 +981,15 @@ class TestFxGraphCacheHashing(TestCase):
         with config.patch({"max_autotune": True}):
             details3 = FxGraphHashDetails(None, [], {}, [])
 
+        pickler = FxGraphCachePickler()
+
         self.assertEqual(
-            FxGraphCachePickler.dumps(details1),
-            FxGraphCachePickler.dumps(details2),
+            pickler.dumps(details1),
+            pickler.dumps(details2),
         )
         self.assertNotEqual(
-            FxGraphCachePickler.dumps(details1),
-            FxGraphCachePickler.dumps(details3),
+            pickler.dumps(details1),
+            pickler.dumps(details3),
         )
 
     def test_hash_custom_passes(self):
@@ -830,14 +1016,42 @@ class TestFxGraphCacheHashing(TestCase):
             custom_pass._uuid = "2"
             details3 = FxGraphHashDetails(None, [], {}, [])
 
+            pickler = FxGraphCachePickler()
+
             self.assertEqual(
-                FxGraphCachePickler.dumps(details1),
-                FxGraphCachePickler.dumps(details2),
+                pickler.dumps(details1),
+                pickler.dumps(details2),
             )
             self.assertNotEqual(
-                FxGraphCachePickler.dumps(details1),
-                FxGraphCachePickler.dumps(details3),
+                pickler.dumps(details1),
+                pickler.dumps(details3),
             )
+
+    def test_bypass_unsupported(self):
+        """
+        Test _reduce_unsupported
+        """
+        with self.assertRaises(BypassFxGraphCache):
+            FxGraphCachePickler().dumps(
+                torch.fx.experimental._backward_state.BackwardState()
+            )
+
+    def test_stable_strings(self):
+        """
+        Test that objects containing identical strings pickle the same
+        even if they are not the same id.
+        """
+        s1 = "string"
+        s2 = "strin"
+        s2 += "g"
+
+        self.assertNotEqual(id(s1), id(s2))
+
+        pickler = FxGraphCachePickler()
+        self.assertEqual(
+            pickler.dumps([s1, s1]),
+            pickler.dumps([s1, s2]),
+        )
 
     def test_get_hash_for_files(self):
         """
@@ -912,6 +1126,7 @@ class TestAutotuneCache(TestCase):
     @config.patch({"fx_graph_remote_cache": False})
     @config.patch({"autotune_local_cache": False})
     @config.patch({"autotune_remote_cache": True})
+    @config.patch({"bundled_autotune_remote_cache": False})
     @config.patch({"max_autotune": True})
     def test_autotune_cache(self):
         class Model(torch.nn.Module):
@@ -941,6 +1156,52 @@ class TestAutotuneCache(TestCase):
             # Check that the cache entries seem reasonable
             for k in global_stats.autotune_remote.cache.keys():
                 self.assertRegex(k, r"[0-9a-z]{52}\.py")
+            for k in global_stats.triton.cache.keys():
+                self.assertRegex(k, r"triton:[0-9a-f]{64}::[0-9a-f]{64}:c10")
+
+    @unittest.skipIf(not HAS_CUDA, "Requires CUDA")
+    @unittest.skipIf(not SM80OrLater, "Requires SM80+")
+    @config.patch({"fx_graph_cache": False})
+    @config.patch({"fx_graph_remote_cache": False})
+    @config.patch({"autotune_local_cache": True})
+    @config.patch({"autotune_remote_cache": False})
+    @config.patch({"bundled_autotune_remote_cache": True})
+    @config.patch({"max_autotune": True})
+    def test_bundled_autotune_remote_cache(self):
+        class Model(torch.nn.Module):
+            def forward(self, a, b, c, d, e, f):
+                return a + b, c + d, e + f
+
+        def f(a, b, c, d, e, f):
+            return Model()(a, b, c, d, e, f)
+
+        f_compiled = torch.compile(f, fullgraph=True)
+
+        a = torch.randn(101, 100).cuda()
+        b = torch.randn(101, 100).cuda()
+        c = torch.randn(102, 100).cuda()
+        d = torch.randn(102, 100).cuda()
+        e = torch.randn(103, 100).cuda()
+        f = torch.randn(103, 100).cuda()
+
+        with PatchCaches():
+            f_compiled(a, b, c, d, e, f)
+
+            self.assertEqual(global_stats.autotune_local, Stats(3, 0, 3))
+            self.assertEqual(global_stats.bundled_autotune, Stats(1, 0, 1))
+
+            self.reset()
+            f_compiled(a, b, c, d, e, f)
+
+        self.assertEqual(global_stats.autotune_local, Stats(6, 3, 3))
+        self.assertEqual(global_stats.bundled_autotune, Stats(1, 1, 1))
+
+        if config.is_fbcode():
+            # Check that the cache entries seem reasonable
+            for k in global_stats.autotune_local.cache.keys():
+                self.assertRegex(k, r"tmp[^/]*/([^/]{2})/c\1[^/]{49}\.best_config")
+            for k in global_stats.bundled_autotune.cache.keys():
+                self.assertRegex(k, r"pt2:bundled-autotune-v1::[0-9a-z]{64}:c10")
             for k in global_stats.triton.cache.keys():
                 self.assertRegex(k, r"triton:[0-9a-f]{64}::[0-9a-f]{64}:c10")
 
@@ -1039,13 +1300,13 @@ class TestUtils(TestCase):
         b = torch.rand(10)
 
         with fresh_inductor_cache():
-            self.assertEqual(len(PyCodeCache.cache.keys()), 0)
+            self.assertEqual(len(PyCodeCache.modules), 0)
             res1 = torch.compile(fn)(a, b)
             cache_dir1 = cache_dir()
 
         torch._dynamo.reset()
         with fresh_inductor_cache():
-            self.assertEqual(len(PyCodeCache.cache.keys()), 0)
+            self.assertEqual(len(PyCodeCache.modules), 0)
             res2 = torch.compile(fn)(a, b)
             cache_dir2 = cache_dir()
 
