@@ -1031,6 +1031,7 @@ def _make_elementwise_binary_reference(
     supports_rhs_python_scalar=True,
     supports_two_python_scalars=False,
     should_register_decomposition=True,
+    exact_dtype=False,
 ) -> Callable:
     def inner(prim: Callable):
         nonlocal aten_op, name
@@ -1066,7 +1067,7 @@ def _make_elementwise_binary_reference(
             return handle_noncontiguous_outputs([a, b], output)
 
         if has_out:
-            _ref = out_wrapper()(_ref)  # type: ignore[assignment]
+            _ref = out_wrapper(exact_dtype=exact_dtype)(_ref)  # type: ignore[assignment]
 
         _ref.__name__ = name
         if aten_op is infer_aten_op:
@@ -1209,6 +1210,7 @@ def eq(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
 
 @_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG,
+    exact_dtype=True,
 )
 def pow(
     a: Union[TensorLikeType, NumberType],

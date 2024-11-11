@@ -216,7 +216,6 @@ meta_consistency_out_dtype_mismatch_xfails = {
     xfail("softmax"),
     xfail("sort"),
     xfail("sparse.sampled_addmm"),
-    xfail("square"),
     xfail("squeeze_copy"),
     xfail("t_copy"),
     xfail("take"),
