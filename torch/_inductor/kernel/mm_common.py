@@ -14,7 +14,7 @@ from .. import config as inductor_config
 from ..codegen.wrapper import PythonWrapperCodegen
 from ..ir import Layout
 from ..runtime.runtime_utils import next_power_of_2
-from ..utils import ceildiv as cdiv
+from ..utils import ceildiv as cdiv, get_backend_num_stages
 
 
 log = logging.getLogger(__name__)
@@ -24,6 +24,11 @@ def triton_config(num_stages, num_warps, **kwargs):
     from triton import Config
 
     return Config(kwargs, num_stages=num_stages, num_warps=num_warps)
+
+
+def build_rocm_gemm_configs(configs):
+    rocm_num_stages = get_backend_num_stages()
+    return tuple((c[0], c[1], c[2], rocm_num_stages, c[4]) for c in configs)
 
 
 def filtered_configs(
@@ -134,7 +139,7 @@ def filtered_configs(
 mm_kernel_configs = (
     [
         {"config": (32, 32, 16, 1, 2), "cond": True},
-        {"config": (32, 32, 128, 2, 4), "cond": torch.version.hip is None},
+        {"config": (32, 32, 128, 2, 4), "cond": True},
         {"config": (32, 64, 32, 5, 8), "cond": True},
         {"config": (64, 32, 32, 5, 8), "cond": True},
         {"config": (64, 32, 128, 5, 4), "cond": True},
@@ -195,8 +200,8 @@ int8_mm_kernel_configs = [
     # {"config": (32, 32, 128, 2, 4), "cond": True},
     # {"config": (64, 64, 16, 2, 4), "cond": True},
     # {"config": (32, 32, 16, 1, 2), "cond": True},
-    {"config": (128, 256, 128, 3, 8), "cond": torch.version.hip is None},
-    {"config": (256, 128, 128, 3, 8), "cond": torch.version.hip is None},
+    {"config": (128, 256, 128, 3, 8), "cond": True},
+    {"config": (256, 128, 128, 3, 8), "cond": True},
 ]
 
 # Mixed precision kernel configs for small sizes of m for mm's like (16, 8192) x (8192, 8192).
@@ -373,28 +378,13 @@ persistent_mm_platform_configs = tuple(
     if config["cond"]
 )
 
-# On ROCm convert num_stages to 0 to enable software pipelining
+# On ROCm convert num_stages to improve performance
 if torch.version.hip:
-    mm_platform_configs = tuple(
-        (config[0], config[1], config[2], 0, config[4])
-        for config in mm_platform_configs
-    )
-    extra_mm_platform_configs = tuple(
-        (config[0], config[1], config[2], 0, config[4])
-        for config in extra_mm_platform_configs
-    )
-    int8_platform_configs = tuple(
-        (config[0], config[1], config[2], 0, config[4])
-        for config in mm_platform_configs
-    )
-    mixed_mm_platform_configs = tuple(
-        (config[0], config[1], config[2], 0, config[4])
-        for config in mixed_mm_platform_configs
-    )
-    scaled_mm_platform_configs = tuple(
-        (config[0], config[1], config[2], 0, config[4])
-        for config in scaled_mm_platform_configs
-    )
+    mm_platform_configs = build_rocm_gemm_configs(mm_platform_configs)
+    extra_mm_platform_configs = build_rocm_gemm_configs(extra_mm_platform_configs)
+    int8_platform_configs = build_rocm_gemm_configs(int8_platform_configs)
+    mixed_mm_platform_configs = build_rocm_gemm_configs(mixed_mm_platform_configs)
+    scaled_mm_platform_configs = build_rocm_gemm_configs(scaled_mm_platform_configs)
 
 mm_configs = functools.partial(
     filtered_configs,
