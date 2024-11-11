@@ -33,6 +33,7 @@ env:
   MSVC_VERSION : '14.36'
   PYTORCH_SOURCES_DIR: src
   ENABLE_BUILD_WHEEL: 1
+  ENABLE_APL: 1
 concurrency:
   group: windows-arm64-binary-libtorch-release-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
@@ -93,19 +94,13 @@ jobs:
         shell: cmd
         run: |
           "builder/windows/arm64/bootstrap_rust.bat"
-      - name: Checkout iremyux/pytorch
-        uses: malfet/checkout@silent-checkout
+      - name: Git checkout PyTorch
+        uses: actions/checkout@v4
         with:
-          ref: nightly-for-win-arm64
-          submodules: recursive
-          repository: iremyux/pytorch
-          path: pytorch
-          quiet-checkout: true
-      - name: Clean iremyux/pytorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
+          repository:  "iremyux/pytorch"
+          ref: "nightly-for-win-arm64"
+          path: "pytorch"
+          submodules: recursive      
       - name: Build PyTorch binary
         shell: cmd
         run: |

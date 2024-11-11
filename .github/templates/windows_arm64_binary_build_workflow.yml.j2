@@ -79,6 +79,7 @@ env:
   MSVC_VERSION : '14.36'
   PYTORCH_SOURCES_DIR: src
   ENABLE_BUILD_WHEEL: 1
+  ENABLE_APL: 1
 !{{ common.concurrency(build_environment) }}
 
 jobs:
@@ -124,7 +125,13 @@ jobs:
         shell: cmd
         run: |
           "builder/windows/arm64/bootstrap_rust.bat"
-      !{{ common.checkout(deep_clone=False, directory="pytorch", repository="iremyux/pytorch", branch="nightly-for-win-arm64") }}
+      - name: Git checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          repository:  "iremyux/pytorch"
+          ref: "nightly-for-win-arm64"
+          path: "pytorch"
+          submodules: recursive      
       - name: Build PyTorch binary
         shell: cmd
         run: |
