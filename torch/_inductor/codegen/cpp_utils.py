@@ -81,6 +81,7 @@ DTYPE_TO_ATEN = {
 DEVICE_TO_ATEN = {
     "cpu": "at::kCPU",
     "cuda": "at::kCUDA",
+    "xpu": "at::kXPU",
 }
 
 LAYOUT_TO_ATEN = {

@@ -351,7 +351,6 @@ inductor_expected_failures_single_sample["xpu"] = {
     "nn.functional.conv_transpose3d": {f32, f64},
     # rrelu not supported on XPU now
     "nn.functional.rrelu": {f16, f32, f64},
-    # not implemented for 'Half'
     "sort": {b8},
     "argsort": {b8},
 }
