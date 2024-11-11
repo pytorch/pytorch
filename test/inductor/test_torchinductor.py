@@ -3130,7 +3130,6 @@ class CommonTemplate:
         self.assertEqual(actual, expect)
 
     @skip_if_gpu_halide  # only 32-bit indexing
-    @skip_if_cpp_wrapper  # OOM
     def test_large_broadcast_reduction(self):
         if self.device == "cpu":
             raise unittest.SkipTest("Fails on CPU")
@@ -3190,7 +3189,6 @@ class CommonTemplate:
         self.assertTrue((actual == 4).all())
 
     @skip_if_halide  # only 32-bit indexing
-    @skip_if_cpp_wrapper  # OOM
     def test_large_strided_reduction(self):
         # Test 64-bit indexing is used when input numel is less than INT_MAX
         # but stride calculations go above INT_MAX
@@ -3466,7 +3464,6 @@ class CommonTemplate:
         )
 
     @with_tf32_off
-    @skip_if_cpp_wrapper
     @config.patch(use_mixed_mm=True)
     def test_uint4x2_mixed_mm(self):
         def fn(a, b):
@@ -8031,7 +8028,6 @@ class CommonTemplate:
         self.assertTrue((d < 1).all())
 
     @config.patch(implicit_fallbacks=True)
-    @skip_if_cpp_wrapper
     def test_fallback_mutable_op_basic(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as m:
 
