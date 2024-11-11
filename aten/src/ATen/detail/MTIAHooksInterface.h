@@ -113,7 +113,7 @@ struct TORCH_API MTIAHooksInterface : AcceleratorHooksInterface {
 
 struct TORCH_API MTIAHooksArgs {};
 
-C10_DECLARE_REGISTRY(MTIAHooksRegistry, MTIAHooksInterface, MTIAHooksArgs);
+TORCH_DECLARE_REGISTRY(MTIAHooksRegistry, MTIAHooksInterface, MTIAHooksArgs);
 #define REGISTER_MTIA_HOOKS(clsname) \
   C10_REGISTER_CLASS(MTIAHooksRegistry, clsname, clsname)
 
