@@ -3409,7 +3409,7 @@ such as `dist.all_reduce(tensor, async_op=True)`.
 		  .def(
 			  "wait",
 			  &::c10d::FakeWork::wait,
-			  py::arg("timeout"))
+			  py::arg("timeout") = kNoTimeout)
 		  .def(
 			  "getFuture",
 			  &::c10d::FakeWork::getFuture);
