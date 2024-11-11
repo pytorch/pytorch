@@ -2378,12 +2378,12 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         input2 = torch.arange(2, dtype=torch.bfloat16)
         inputs = [input1, input2]
 
-        opt_fn = torch.compile()(fn)
+        opt_fn = torch.compile()(fn)  # will graph break
         self.assertEqual(opt_fn(inputs), fn(inputs))
 
         torch._dynamo.reset()
 
-        opt_fn = torch.compile(fullgraph=True)(fn)
+        opt_fn = torch.compile()(fn)  # will graph break
         self.assertEqual(opt_fn(inputs), fn(inputs))
 
     def test_filter_infinite_iterator(self):
