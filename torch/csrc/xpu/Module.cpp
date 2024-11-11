@@ -307,13 +307,12 @@ static void registerXpuDeviceProperties(PyObject* module) {
     return (prop.gpu_eu_count / prop.gpu_eu_count_per_subslice);
   };
   auto get_device_architecture = [](const DeviceProp& prop) {
-#if SYCL_COMPILER_VERSION >= 20250000
-    return static_cast<int64_t>(prop.architecture);
-#else
+#if SYCL_COMPILER_VERSION < 20250000
     TORCH_CHECK_NOT_IMPLEMENTED(
         false,
         "architecture requires PyTorch to be built with SYCL compiler version 2025.0.0 or newer.");
 #endif
+    return static_cast<int64_t>(prop.architecture);
   };
   auto m = py::handle(module).cast<py::module>();
 
