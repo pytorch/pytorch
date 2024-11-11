@@ -2,6 +2,7 @@
 #include <c10/util/env.h>
 #include <fmt/format.h>
 #include <cstdlib>
+#include <mutex>
 #include <shared_mutex>
 
 namespace c10::utils {
@@ -76,10 +77,10 @@ bool has_env(const char* name) noexcept {
 std::optional<bool> check_env(const char* name) {
   auto env_opt = get_env(name);
   if (env_opt.has_value()) {
-    if (*env_opt == "0") {
+    if (env_opt == "0") {
       return false;
     }
-    if (*env_opt == "1") {
+    if (env_opt == "1") {
       return true;
     }
     TORCH_WARN(
