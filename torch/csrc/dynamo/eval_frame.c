@@ -39,16 +39,26 @@ static void eval_frame_callback_set(PyObject* obj) {
 #if IS_PYTHON_3_11_PLUS
 #define THP_EVAL_API_FRAME_OBJECT _PyInterpreterFrame
 
+#else
+// Things specific to PY < 3.11
+#define THP_EVAL_API_FRAME_OBJECT PyFrameObject
+static int
+THP_PyFrame_FastToLocalsWithError(THP_EVAL_API_FRAME_OBJECT *frame, int *free_vars_copied) {
+  return PyFrame_FastToLocalsWithError(frame);
+}
+
+#endif // IS_PYTHON_3_11_PLUS
+
 // We need to be able to return the _PyInterpreterFrame to python so create
 // a python binding for it
 
 typedef struct THPPyInterpreterFrame {
   PyObject_HEAD
-  _PyInterpreterFrame* frame; // Borrowed reference
+  THP_EVAL_API_FRAME_OBJECT* frame; // Borrowed reference
   PyObject* locals;
 } THPPyInterpreterFrame;
 
-THPPyInterpreterFrame* THPPyInterpreterFrame_New(_PyInterpreterFrame* frame);
+THPPyInterpreterFrame* THPPyInterpreterFrame_New(THP_EVAL_API_FRAME_OBJECT* frame);
 
 #define DECLARE_PYOBJ_ATTR(name) \
 static PyObject* THPPyInterpreterFrame_##name(THPPyInterpreterFrame* self, PyObject* _noargs) { \
@@ -56,12 +66,6 @@ static PyObject* THPPyInterpreterFrame_##name(THPPyInterpreterFrame* self, PyObj
   Py_XINCREF(res); \
   return res; \
 }
-
-#if IS_PYTHON_3_12_PLUS
-DECLARE_PYOBJ_ATTR(f_funcobj)
-#else
-DECLARE_PYOBJ_ATTR(f_func)
-#endif
 
 DECLARE_PYOBJ_ATTR(f_globals)
 DECLARE_PYOBJ_ATTR(f_builtins)
@@ -78,22 +82,20 @@ DECLARE_PYOBJ_ATTR(f_executable)
 DECLARE_PYOBJ_ATTR(f_code)
 #endif
 
-DECLARE_PYOBJ_ATTR(frame_obj)
-
 #undef DECLARE_PYOBJ_ATTR
-
-static THPPyInterpreterFrame* THPPyInterpreterFrame_previous(THPPyInterpreterFrame* self, PyObject* _noargs) {
-  THPPyInterpreterFrame* res = THPPyInterpreterFrame_New(self->frame->previous);
-  return res;
-}
 
 // This is not a true attribute of the class but we do access it in python and it is hard to implement
 // on the python side, so do it here:
 static PyObject* THPPyInterpreterFrame_f_lasti(THPPyInterpreterFrame* self, PyObject* _noargs) {
+#if IS_PYTHON_3_11_PLUS
   return PyLong_FromLong(_PyInterpreterFrame_LASTI(self->frame));
+#else
+  return PyLong_FromLong(self->frame->f_lasti);
+#endif // IS_PYTHON_3_11_PLUS
 }
 
 static PyObject* THPPyInterpreterFrame_f_lineno(THPPyInterpreterFrame* self, PyObject* _noargs) {
+#if IS_PYTHON_3_11_PLUS
   if (!self->frame->frame_obj) {
     return PyLong_FromLong(F_CODE(self->frame)->co_firstlineno);
   }
@@ -102,22 +104,24 @@ static PyObject* THPPyInterpreterFrame_f_lineno(THPPyInterpreterFrame* self, PyO
     Py_RETURN_NONE;
   }
   return PyLong_FromLong(lineno);
+#else
+  return PyLong_FromLong(self->frame->f_lineno);
+#endif // IS_PYTHON_3_11_PLUS
 }
 
 static PyObject* THPPyInterpreterFrame_f_back(THPPyInterpreterFrame* self, PyObject* _noargs) {
+#if IS_PYTHON_3_11_PLUS
   if (!self->frame->frame_obj) {
     Py_RETURN_NONE;
   }
   return (PyObject*)PyFrame_GetBack(self->frame->frame_obj);
+#else
+  return (PyObject*)self->frame->f_back;
+#endif // IS_PYTHON_3_11_PLUS
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
 static struct PyGetSetDef THPPyInterpreterFrame_properties[] = {
-#if IS_PYTHON_3_12_PLUS
-    {"f_func", (getter)THPPyInterpreterFrame_f_funcobj, NULL, NULL, NULL},
-#else
-    {"f_func", (getter)THPPyInterpreterFrame_f_func, NULL, NULL, NULL},
-#endif
     {"f_globals", (getter)THPPyInterpreterFrame_f_globals, NULL, NULL, NULL},
     {"f_builtins", (getter)THPPyInterpreterFrame_f_builtins, NULL, NULL, NULL},
     {"f_locals", (getter)THPPyInterpreterFrame_f_locals, NULL, NULL, NULL},
@@ -126,8 +130,6 @@ static struct PyGetSetDef THPPyInterpreterFrame_properties[] = {
 #else
     {"f_code", (getter)THPPyInterpreterFrame_f_code, NULL, NULL, NULL},
 #endif
-    {"frame_obj", (getter)THPPyInterpreterFrame_frame_obj, NULL, NULL, NULL},
-    {"previous", (getter)THPPyInterpreterFrame_previous, NULL, NULL, NULL},
     {"f_lasti", (getter)THPPyInterpreterFrame_f_lasti, NULL, NULL, NULL},
     {"f_lineno", (getter)THPPyInterpreterFrame_f_lineno, NULL, NULL, NULL},
     {"f_back", (getter)THPPyInterpreterFrame_f_back, NULL, NULL, NULL},
@@ -142,7 +144,7 @@ static PyTypeObject THPPyInterpreterFrameType = {
 };
 
 
-THPPyInterpreterFrame* THPPyInterpreterFrame_New(_PyInterpreterFrame* frame) {
+THPPyInterpreterFrame* THPPyInterpreterFrame_New(THP_EVAL_API_FRAME_OBJECT* frame) {
   PyTypeObject* type = (PyTypeObject*)&THPPyInterpreterFrameType;
   THPPyInterpreterFrame* self = (THPPyInterpreterFrame*)type->tp_alloc(type, 0);
   if (!self)
@@ -151,13 +153,6 @@ THPPyInterpreterFrame* THPPyInterpreterFrame_New(_PyInterpreterFrame* frame) {
   self->locals = NULL;
   return self;
 }
-
-
-#else
-
-#define THP_EVAL_API_FRAME_OBJECT PyFrameObject
-
-#endif
 
 static PyObject* dynamo__custom_eval_frame_shim(
     PyThreadState* tstate,
@@ -246,6 +241,8 @@ static const char* get_frame_name(THP_EVAL_API_FRAME_OBJECT* frame) {
   return PyUnicode_AsUTF8(F_CODE(frame)->co_name);
 }
 
+// Remember to update the type signature for DynamoCallbackFn.__call__ in
+// torch/_dynamo/types.py if this function's signature changes.
 static PyObject* dynamo_call_callback(
     PyObject* callable,
     THP_EVAL_API_FRAME_OBJECT* _frame,
@@ -253,18 +250,11 @@ static PyObject* dynamo_call_callback(
     CacheEntry* cache_entry,
     FrameState* frame_state) {
 
-// remember to update the type signature for DynamoCallbackFn.__call__ in torch/_dynamo/types.py
-// if this function changes
-#if IS_PYTHON_3_11_PLUS
   THPPyInterpreterFrame* frame = THPPyInterpreterFrame_New(_frame);
   if (frame == NULL) {
     return NULL;
   }
   frame->locals = locals;
-#else
-  PyObject* frame = Py_NewRef(_frame);
-#endif
-
   PyObject* cache_entry_pyobj = CacheEntry_to_obj(cache_entry);
   PyObject* res = PyObject_CallFunction(
     callable,
@@ -716,7 +706,7 @@ static PyObject* dynamo__custom_eval_frame(
   }
 }
 
-#else // IS_PYTHON_3_14_PLUS
+#else // !(IS_PYTHON_3_14_PLUS)
 
 // Fake definitions for everything we removed
 
@@ -738,7 +728,7 @@ static PyTypeObject THPPyInterpreterFrameType = {
     .tp_getset = THPPyInterpreterFrame_properties,
 };
 
-#endif // CPython 3.14
+#endif // !(IS_PYTHON_3_14_PLUS)
 
 static PyObject* increment_working_threads(PyThreadState* tstate) {
   active_dynamo_threads = active_dynamo_threads + 1;
@@ -909,7 +899,6 @@ PyObject* torch_c_dynamo_eval_frame_init(void) {
     PyUnstable_Module_SetGIL(module, Py_MOD_GIL_NOT_USED);
   #endif
 
-#if IS_PYTHON_3_11_PLUS
   if (PyType_Ready(&THPPyInterpreterFrameType) < 0) {
     return NULL;
   }
@@ -917,7 +906,6 @@ PyObject* torch_c_dynamo_eval_frame_init(void) {
   if (PyModule_AddObject(module, "_PyInterpreterFrame", (PyObject*)&THPPyInterpreterFrameType) != 0) {
     return NULL;
   }
-#endif
 
   skip_code_recursive_flag = PyObject_New(PyObject, &PyBaseObject_Type);
   if (skip_code_recursive_flag == NULL) {
