@@ -21,6 +21,8 @@
 
 #if !AT_MKLDNN_ENABLED()
 
+#include <iostream>
+
 namespace at::native {
 
 
@@ -239,12 +241,13 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_layer(const Tensor& input,
       batch_first,
       train);
 
+  std::cout << "hz-debug " << " mkldnn_rnn_layer " << std::endl;
   auto output_size = _output_size</*is_single_direction*/ true>(rnn);
   auto output = at::empty(output_size, input.options());
 
   auto hy_ = at::empty(hx_.sizes(), hx_.options());
   auto cy_ = at::empty(cx_.sizes(), cx_.options());
-
+std::cout << "hz-debug " << " empty 1 " << std::endl;
   auto weight_ih = _shuffle_weight(w0, rnn.mode);
   auto weight_hh = _shuffle_weight(w1, rnn.mode);
 
@@ -252,7 +255,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_layer(const Tensor& input,
   auto bias = has_biases
       ? _shuffle_bias(w2, w3, rnn.mode)
       : at::zeros({rnn.num_bias_gates * rnn.hidden_size}, weight_ih.options().layout(at::Layout::Strided));
-
+std::cout << "hz-debug " << " shuffle done " << std::endl;
   // per layer input size
   int64_t input_size = input.size(2);
   ideep::tensor w1_, w2_;
@@ -273,20 +276,25 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_layer(const Tensor& input,
       cy_, rnn.dst_iter_c_desc(get_mkldnn_dtype(cy_)));
   w1_ = weight_ih.is_mkldnn() ? itensor_from_tensor(weight_ih) : itensor_view_from_dense(weight_ih, rnn.weights_layer_desc(input_size, get_mkldnn_dtype(weight_ih)));
   w2_ = weight_hh.is_mkldnn() ? itensor_from_tensor(weight_hh) : itensor_view_from_dense(weight_hh, rnn.weights_iter_desc(get_mkldnn_dtype(weight_hh)));
+  std::cout << "hz-debug " << " from tensor or dense done " << std::endl;
   if (at::GradMode::is_enabled()) {
     Tensor workspace = Tensor();
     auto pd = ideep::lstm_forward_training::prepare(
         x, hx, cx, w1_, w2_, b, y, hy, cy, reverse);
+        std::cout << "hz-debug " << " train prepare done " << std::endl;
     workspace = at::empty(pd.workspace_desc().get_size() / sizeof(uint8_t), input.options().dtype(at::kByte));
     ideep::tensor mkldnn_workspace;
     mkldnn_workspace.init(
         pd.workspace_desc(), workspace.template data_ptr<uint8_t>());
     ideep::lstm_forward_training::compute(
         pd, x, hx, cx, w1_, w2_, b, mkldnn_workspace, y, hy, cy, reverse, ideep::prop_kind::forward_training);
+        std::cout << "hz-debug " << " train compute done " << std::endl;
     return std::make_tuple(output, hy_, cy_, workspace);
   } else {
+    std::cout << "hz-debug " << " inference " << std::endl;
     ideep::lstm_forward_inference::compute(
         x, hx, cx, w1_, w2_, b, y, hy, cy, reverse, ideep::prop_kind::forward_inference);
+        std::cout << "hz-debug " << " inference done " << std::endl;
     return std::make_tuple(output, hy_, cy_, Tensor());
   }
 }

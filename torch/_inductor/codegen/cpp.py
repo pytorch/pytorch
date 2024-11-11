@@ -264,7 +264,7 @@ def move_code_under_inner_loop(
     transformed_code = BracesBuffer()
     with contextlib.ExitStack() as stack:
         transformed_code.writeline(
-            f"for (long {new_iter_var} = {cexpr_index(loop_start)}; {new_iter_var} < {cexpr_index(loop_end)}; {new_iter_var}++)"
+            f"for ({INDEX_TYPE} {new_iter_var} = {cexpr_index(loop_start)}; {new_iter_var} < {cexpr_index(loop_end)}; {new_iter_var}++)"
         )
         stack.enter_context(transformed_code.indent())
         for _, line in enumerate(code._lines):
