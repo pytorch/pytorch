@@ -19,20 +19,6 @@ name: !{{ build_environment }}
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
 {%- endmacro %}
 
-{%- macro install_git() -%}
-      - name: Ensure Git is installed
-        shell: powershell
-        run: |
-          if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
-            Write-Host "Git is not installed. Installing Git..."
-            Invoke-WebRequest -Uri "https://github.com/git-for-windows/git/releases/download/v2.46.0.windows.1/Git-2.46.0-64-bit.exe" -OutFile "${env:RUNNER_TEMP}\Git-2.46.0-64-bit.exe"
-            Start-Process -FilePath "${env:RUNNER_TEMP}\Git-2.46.0-64-bit.exe" -ArgumentList '/VERYSILENT', '/NORESTART', '/NOCANCEL', '/SP-' -NoNewWindow -Wait
-            [System.Environment]::SetEnvironmentVariable('PATH', $env:PATH + ';C:\Program Files\Git\bin', [System.EnvironmentVariableTarget]::Machine)
-          } else {
-            Write-Host "Git is already installed."
-          }
-{%- endmacro %}
-
 {%- macro checkout(submodules="recursive", deep_clone=True, directory="", repository="pytorch/pytorch", branch="", checkout_pr_head=True) -%}
       - name: Checkout !{{ 'PyTorch' if repository == "pytorch/pytorch" else repository }}
         uses: malfet/checkout@silent-checkout
@@ -126,6 +112,22 @@ jobs:
         shell: cmd
         run: |
           "${BUILDER_ROOT}/windows/arm64/bootstrap_git.bat"
+      - name: Bootstrap Python
+        shell: cmd
+        run: |
+          "${BUILDER_ROOT}/windows/arm64/bootstrap_python.bat"
+      - name: Bootstrap Build Tools
+        shell: cmd
+        run: |
+          "${BUILDER_ROOT}/windows/arm64/bootstrap_buildtools.bat"
+      - name: Bootstrap APL
+        shell: cmd
+        run: |
+          "${BUILDER_ROOT}/windows/arm64/bootstrap_apl.bat"
+      - name: Bootstrap Rust
+        shell: cmd
+        run: |
+          "${BUILDER_ROOT}/windows/arm64/bootstrap_rust.bat"
       !{{ checkout(deep_clone=False, directory="pytorch", repository="iremyux/pytorch", branch="nightly-for-win-arm64",) }}
       - name: Build PyTorch binary
         shell: cmd
@@ -138,40 +140,6 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      !{{ common.wait_and_kill_ssh_windows('pytorch') }}
-  !{{ config["build_name"] }}-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs:
-      - !{{ config["build_name"] }}-build
-      - get-label-type
-{%- if config["gpu_arch_type"] == "cuda" %}
-{%- if branches == "nightly" %}
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows-11-arm64"
-{%- else %}
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows-11-arm64"
-{%- endif %}
-{%- else %}
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows-11-arm64"
-{%- endif %}
-    timeout-minutes: !{{ common.timeout_minutes }}
-    !{{ upload.binary_env(config, True) }}
-    steps:
-      !{{ set_runner_specific_vars() }}
-      - uses: !{{ common.download_artifact_action }}
-        name: Download Build Artifacts
-        with:
-          name: !{{ config["build_name"] }}
-          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      !{{ common.checkout(deep_clone=False, directory="pytorch") }}
-      !{{ common.checkout(deep_clone=False, directory="builder", repository="iremyux/pytorch-builder", branch="nightly-for-win-arm64") }}
-      - name: Populate binary env
-        shell: cmd
-        run: |
-          "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
-      - name: Test PyTorch binary
-        shell: cmd
-        run: |
-          "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_arm64_test.sh"
       !{{ common.wait_and_kill_ssh_windows('pytorch') }}
   {%- if branches == "nightly" %}
   !{{ upload.upload_binaries(config, True) }}
