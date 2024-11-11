@@ -1,4 +1,8 @@
 #pragma once
+#if defined(__GNUC__) && __GNUC__ == 10 && __GNUC_MINOR__ <= 2 && defined(__ARM_FEATURE_SVE)
+// Workaround for https: //gcc.gnu.org/bugzilla/show_bug.cgi?id=117161
+#pragma GCC optimize("no-tree-vectorize")
+#endif
 
 // DO NOT DEFINE STATIC DATA IN THIS HEADER!
 // See Note [Do not compile initializers with AVX]
