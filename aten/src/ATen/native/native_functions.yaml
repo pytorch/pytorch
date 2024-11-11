@@ -4593,6 +4593,7 @@
     CompositeExplicitAutograd: rad2deg
     SparseCPU, SparseCUDA: rad2deg_sparse
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: rad2deg_sparse_csr
+  tags: pointwise
 
 - func: rad2deg_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
@@ -4600,12 +4601,14 @@
     CompositeExplicitAutograd: rad2deg_
     SparseCPU, SparseCUDA: rad2deg_sparse_
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: rad2deg_sparse_csr_
+  tags: pointwise
 
 - func: rad2deg.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CompositeExplicitAutograd: rad2deg_out
     SparseCPU, SparseCUDA: rad2deg_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: rad2deg_sparse_csr_out
+  tags: pointwise
 
 - func: deg2rad(Tensor self) -> Tensor
   variants: function, method
