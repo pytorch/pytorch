@@ -744,7 +744,10 @@ num_guards_executed=0)
         self.assertFalse(root.check(f_locals))
 
     def test_clone(self):
-        from .utils import install_guard_manager_testing_hook
+        try:
+            from .utils import install_guard_manager_testing_hook
+        except ImportError:
+            from utils import install_guard_manager_testing_hook
 
         def hook(guard_wrapper, f_locals):
             root = guard_wrapper.root
