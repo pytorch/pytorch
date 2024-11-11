@@ -273,13 +273,9 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
         _collect_all_valid_cia_ops_for_aten_namespace,
         _get_decomp_for_cia,
     )
-    from torch._inductor import config
 
     # Entry without functional CIA ops
     decomp_table = _core_aten_decompositions_post_autograd()
-    if config.is_fbcode():
-        return decomp_table
-
     for op in _collect_all_valid_cia_ops_for_aten_namespace():
         decomp_table[op] = _get_decomp_for_cia(op)
     return decomp_table

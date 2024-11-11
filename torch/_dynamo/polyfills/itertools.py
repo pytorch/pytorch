@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import itertools
 import sys
-from typing import Iterable, Iterator, TypeVar
+from typing import Generator, Iterable, Iterator, TypeVar
 
 from ..decorators import substitute_in_graph
 
@@ -16,10 +16,12 @@ __all__ = [
     "chain_from_iterable",
     "islice",
     "tee",
+    "compress",
 ]
 
 
 _T = TypeVar("_T")
+_U = TypeVar("_U")
 
 
 # Reference: https://docs.python.org/3/library/itertools.html#itertools.chain
@@ -101,3 +103,11 @@ def tee(iterable: Iterable[_T], n: int = 2, /) -> tuple[Iterator[_T], ...]:
             return
 
     return tuple(_tee(shared_link) for _ in range(n))
+
+
+# Reference: https://docs.python.org/3/library/itertools.html#itertools.compress
+@substitute_in_graph(itertools.compress, is_embedded_type=True)  # type: ignore[arg-type]
+def compress(
+    data: Iterable[_T], selectors: Iterable[_U], /
+) -> Generator[_T, None, None]:
+    return (datum for datum, selector in zip(data, selectors) if selector)
