@@ -807,22 +807,23 @@ class FxGraphHashDetails:
         # Node meta will not be part of gm's reduce function, so lets remember
         # the kernel source code separately
         self.user_defined_triton_source: List[Any] = []
-        for module in gm.modules():
-            if not isinstance(module, torch.fx.GraphModule):
-                continue
-            for node in module.graph.nodes:
-                if isinstance(
-                    node.target,
-                    (TritonKernelWrapperFunctional, TritonKernelWrapperMutation),
-                ):
-                    data = node.meta.get(
-                        "user_defined_triton_kernel_source_and_constant_args", None
-                    )
-                    if data is None:
-                        raise AssertionError(
-                            "TritonKernelWrapper does not contain source code meta"
+        if gm is not None:
+            for module in gm.modules():
+                if not isinstance(module, torch.fx.GraphModule):
+                    continue
+                for node in module.graph.nodes:
+                    if isinstance(
+                        node.target,
+                        (TritonKernelWrapperFunctional, TritonKernelWrapperMutation),
+                    ):
+                        data = node.meta.get(
+                            "user_defined_triton_kernel_source_and_constant_args", None
                         )
-                    self.user_defined_triton_source.append(data)
+                        if data is None:
+                            raise AssertionError(
+                                "TritonKernelWrapper does not contain source code meta"
+                            )
+                        self.user_defined_triton_source.append(data)
 
         # Alignment checks
         self.inputs_to_check = inputs_to_check
