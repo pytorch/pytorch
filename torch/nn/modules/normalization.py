@@ -345,8 +345,7 @@ class RMSNorm(Module):
             normalize over the last dimension which is expected to be of that specific size.
         eps: a value added to the denominator for numerical stability. Default: :func:`torch.finfo(x.dtype).eps`
         elementwise_affine: a boolean value that when set to ``True``, this module
-            has learnable per-element affine parameters initialized to ones (for weights)
-            and zeros (for biases). Default: ``True``.
+            has learnable per-element affine parameters initialized to ones (for weights). Default: ``True``.
 
     Shape:
         - Input: :math:`(N, *)`

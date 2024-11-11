@@ -17,6 +17,8 @@
 #include <torch/csrc/utils/pythoncapi_compat.h>
 #include <torch/extension.h>
 
+#include <torch/csrc/dynamo/debug_macros.h>
+
 #ifdef USE_CUDA
 #include <ATen/cuda/EmptyTensor.h>
 #endif
@@ -25,6 +27,7 @@
 #include <ATen/xpu/EmptyTensor.h>
 #endif
 
+#include <chrono>
 #include <sstream>
 #include <tuple>
 #include <utility>
@@ -655,7 +658,7 @@ static PyObject* check_obj_id(PyObject* dummy, PyObject* args) {
 
 static std::unordered_map<PyObject*, uint64_t> dict_version_map;
 static int dict_version_watcher_id;
-static uint64_t global_dict_version_id = 0;
+static uint64_t global_dict_version_id = 1;
 static int dict_version_watch_callback(
     PyDict_WatchEvent event,
     PyObject* dict,
@@ -753,7 +756,7 @@ static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
 }
 
 template <typename T>
-inline static void unwrap_size_tuple(PyObject* obj, T& output) {
+static void unwrap_size_tuple(PyObject* obj, T& output) {
   TORCH_CHECK(PyTuple_CheckExact(obj));
   size_t len = PyTuple_GET_SIZE(obj);
   output.reserve(len);
@@ -765,7 +768,7 @@ inline static void unwrap_size_tuple(PyObject* obj, T& output) {
 }
 
 template <typename T>
-inline static void _parse_empty_strided_args(
+static void _parse_empty_strided_args(
     PyObject* args,
     T& sizes,
     T& strides,
@@ -780,7 +783,7 @@ inline static void _parse_empty_strided_args(
   dtype = reinterpret_cast<THPDtype*>(py_dtype)->scalar_type;
 }
 
-inline static PyObject* _empty_strided_device(
+static PyObject* _empty_strided_device(
     PyObject* dummy,
     PyObject* args,
     c10::DeviceType device_type) {
@@ -884,6 +887,11 @@ std::string get_exception_message() {
 }
 
 bool is_immutable_object(py::handle example_value) {
+  static py::object config_module = py::module_::import("torch._dynamo.config");
+  bool is_tensor_immutable =
+      config_module.attr("skip_tensor_guards_with_matching_dict_tags")
+          .cast<bool>();
+
   if (PyTuple_Check(example_value.ptr())) {
     // Check that each element is immutable
     for (Py_ssize_t i = 0; i < PyTuple_Size(example_value.ptr()); ++i) {
@@ -894,10 +902,11 @@ bool is_immutable_object(py::handle example_value) {
     }
     return true;
   }
+
   return PyLong_Check(example_value.ptr()) ||
       PyFloat_Check(example_value.ptr()) || PyBool_Check(example_value.ptr()) ||
       PyUnicode_Check(example_value.ptr()) ||
-      THPVariable_Check(example_value.ptr());
+      (is_tensor_immutable && THPVariable_Check(example_value.ptr()));
 }
 
 bool is_parameter(py::handle tensor) {
@@ -1619,6 +1628,7 @@ class GuardAccessor {
  * entries.
  */
 
+// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
 class GuardManager {
  public:
   GuardManager() = delete;
@@ -2957,7 +2967,7 @@ class DictGetItemGuardAccessor : public GuardAccessor {
   }
 
   std::string repr() const override {
-    return "DictGetItemGuardAccessor(" + py::str(_key).cast<std::string>() +
+    return "DictGetItemGuardAccessor(" + py::repr(_key).cast<std::string>() +
         ")";
   }
 
@@ -3671,6 +3681,38 @@ void install_no_tensor_aliasing_guard(
   for (const auto& guard_manager : guard_managers) {
     py::cast<GuardManager*>(guard_manager)->add_leaf_guard(guard);
   }
+}
+
+double profile_guard_manager(RootGuardManager* root, py::object f_locals) {
+  PyObject* locals = f_locals.ptr();
+
+  // Warmup
+  for (int i = 0; i < 10; i++) {
+    root->check_nopybind(locals);
+  }
+
+  int count = 0;
+  auto start = std::chrono::high_resolution_clock::now();
+  float profile_duration = 1.0;
+
+  // Run the loop for profile_duration seconds
+  while (true) {
+    root->check_nopybind(locals);
+    count++;
+    auto end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> elapsed = end - start;
+
+    // Break the loop if 1 second has passed
+    if (elapsed.count() >= 1.0) {
+      break;
+    }
+  }
+
+  auto end = std::chrono::high_resolution_clock::now();
+  std::chrono::duration<double> total_elapsed = end - start;
+
+  // Calculate the average time per iteration in microseconds
+  return (total_elapsed.count() * profile_duration * 1e6) / count;
 }
 
 } // namespace
@@ -4498,6 +4540,7 @@ PyObject* torch_c_dynamo_guards_init() {
   py_m.def("install_object_aliasing_guard", install_object_aliasing_guard);
   py_m.def(
       "install_no_tensor_aliasing_guard", install_no_tensor_aliasing_guard);
+  py_m.def("profile_guard_manager", profile_guard_manager);
 
 // initialize dict_version_map watcher for 3.12
 #if IS_PYTHON_3_12_PLUS

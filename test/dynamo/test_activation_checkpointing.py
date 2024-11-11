@@ -86,7 +86,7 @@ def count_ops(
 
 
 def collect_fwd_graph_outputs(graph: torch.fx.Graph, *, fwd_outputs: Set[str]):
-    if not torch._dynamo.compiled_autograd.in_compiled_autograd_region():  # fwd graph
+    if not torch._dynamo.compiled_autograd.in_compiled_autograd_region:  # fwd graph
         return_node = list(graph.nodes)[-1]
         assert return_node.target == "output"
         for x in return_node.args[0]:
@@ -519,6 +519,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
                 mod_no_hook, backend, x, fullgraph=True, compiled_autograd=True
             )
 
+        torch._dynamo.reset()
         mod_with_hook, x, backend = _factory_fn()
         mod_with_hook.submod.register_forward_hook(my_post_forward_hook)
         mod_with_hook_fwd_outputs = set()
