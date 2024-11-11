@@ -793,7 +793,7 @@ static PyObject * THPVariable_numpy(PyObject* self, PyObject* args, PyObject* kw
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-    "numpy(*, bool force=False)"
+    "numpy(*, bool force=True)"
   });
   auto& self_ = THPVariable_Unpack(self);
   ParsedArgs<1> parsed_args;
