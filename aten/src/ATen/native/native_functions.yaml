@@ -4149,15 +4149,23 @@
 
 - func: _convert_weight_to_int4pack(Tensor self, int innerKTiles) -> Tensor
   dispatch:
-    CPU: _convert_weight_to_int4pack_cpu
     CUDA: _convert_weight_to_int4pack_cuda
     MPS: _convert_weight_to_int4pack_mps
 
 - func: _weight_int4pack_mm(Tensor self, Tensor mat2, int qGroupSize, Tensor qScaleAndZeros) -> Tensor
   dispatch:
-    CPU: _weight_int4pack_mm_cpu
     MPS: _weight_int4pack_mm_mps
     CUDA: _weight_int4pack_mm_cuda
+
+# Split int4 pack weight between cpu and other devices due to
+# https://github.com/pytorch/ao/issues/1117#issuecomment-2451252756.
+- func: _convert_weight_to_int4pack_for_cpu(Tensor self, int innerKTiles) -> Tensor
+  dispatch:
+    CPU: _convert_weight_to_int4pack_cpu
+
+- func: _weight_int4pack_mm_for_cpu(Tensor self, Tensor mat2, int qGroupSize, Tensor qScaleAndZeros) -> Tensor
+  dispatch:
+    CPU: _weight_int4pack_mm_cpu
 
 - func: _weight_int8pack_mm(Tensor self, Tensor mat2, Tensor scales) -> Tensor
   dispatch:
@@ -13435,7 +13443,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: special_i1_out
+    CPU, CUDA, MPS: special_i1_out
   tags: pointwise
 
 - func: special_i1e(Tensor self) -> Tensor
