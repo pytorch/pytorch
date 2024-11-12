@@ -37,8 +37,8 @@ attribute. Each will require a ``data_ptr()`` of its own. In general, there is n
 :meth:`torch.Tensor.data_ptr` and :meth:`torch.UntypedStorage.data_ptr` match and this should not be assumed to be true.
 
 Untyped storages are somewhat independent of the tensors that are built on them. Practically, this means that tensors
-with different dtypes or shape can point to the same storage. It also implies that a tensor storage can be changed, as
-the following example shows:
+with different dtypes or shape can point to the same storage.
+It also implies that a tensor storage can be changed, as the following example shows:
 
     >>> t = torch.ones(3)
     >>> s0 = t.untyped_storage()
@@ -74,6 +74,11 @@ the following example shows:
     >>> # Fill the tensor with a zeroed storage
     >>> t.set_(s1, storage_offset=t.storage_offset(), stride=t.stride(), size=t.size())
     tensor([0., 0., 0.])
+
+Please note that directly modifying a tensor's storage as shown in this example is not a recommended practice.
+This low-level manipulation is illustrated solely for educational purposes, to demonstrate the relationship between
+tensors and their underlying storages. In general, it's more efficient and safer to use standard ``torch.Tensor``
+methods, such as :meth:`~torch.Tensor.clone` and :meth:`~torch.Tensor.fill_`, to achieve the same results.
 
 Other than ``data_ptr``, untyped storage also have other attributes such as :attr:`~torch.UntypedStorage.filename`
 (in case the storage points to a file on disk), :attr:`~torch.UntypedStorage.device` or
