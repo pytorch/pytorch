@@ -199,7 +199,7 @@ class TritonTemplateKernel(TritonKernel):
         numel = sympy_product(output_node.get_size())
         super().__init__(
             {
-                "x": sympy_product(output_node.get_size()),
+                "x": numel,
                 "r0_": sympy.S.One,
             },
             features=SIMDKernelFeatures([], numel),
