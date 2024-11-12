@@ -3115,36 +3115,27 @@ class GraphModule(torch.nn.Module):
         l_value_ = L_value_
         l_block_mask_kv_num_blocks = L_block_mask_kv_num_blocks
         l_block_mask_kv_indices = L_block_mask_kv_indices
+
+        score_mod_0 = self.score_mod_0
+        mask_fn_0 = self.mask_fn_0
         l_block_mask_full_kv_num_blocks = L_block_mask_full_kv_num_blocks
         l_block_mask_full_kv_indices = L_block_mask_full_kv_indices
         l_block_mask_q_num_blocks = L_block_mask_q_num_blocks
         l_block_mask_q_indices = L_block_mask_q_indices
         l_block_mask_full_q_num_blocks = L_block_mask_full_q_num_blocks
         l_block_mask_full_q_indices = L_block_mask_full_q_indices
-
-        child_1: "i32[]" = l_query_.new_empty([], dtype = torch.int32);  child_1 = None
-        child_2: "i32[]" = l_query_.new_empty([], dtype = torch.int32);  child_2 = None
-        child_3: "i32[]" = l_query_.new_empty([], dtype = torch.int32);  child_3 = None
-        child_4: "i32[]" = l_query_.new_empty([], dtype = torch.int32);  child_4 = None
-        child: "f64[]" = l_query_.new_empty([], requires_grad = True);  child = None
-        score_mod_0 = self.score_mod_0
-        child_5: "i32[]" = l_query_.new_empty([], dtype = torch.int32);  child_5 = None
-        child_6: "i32[]" = l_query_.new_empty([], dtype = torch.int32);  child_6 = None
-        child_7: "i32[]" = l_query_.new_empty([], dtype = torch.int32);  child_7 = None
-        child_8: "i32[]" = l_query_.new_empty([], dtype = torch.int32);  child_8 = None
-        mask_fn_0 = self.mask_fn_0
         flex_attention = torch.ops.higher_order.flex_attention(l_query_, l_key_, l_value_, score_mod_0, (l_block_mask_kv_num_blocks, l_block_mask_kv_indices, l_block_mask_full_kv_num_blocks, l_block_mask_full_kv_indices, l_block_mask_q_num_blocks, l_block_mask_q_indices, l_block_mask_full_q_num_blocks, l_block_mask_full_q_indices, 128, 128, mask_fn_0), 0.5, {'ROWS_GUARANTEED_SAFE': False, 'PRESCALE_QK': False, 'OUTPUT_LOGSUMEXP': True}, (), ());  l_query_ = l_key_ = l_value_ = score_mod_0 = l_block_mask_kv_num_blocks = l_block_mask_kv_indices = l_block_mask_full_kv_num_blocks = l_block_mask_full_kv_indices = l_block_mask_q_num_blocks = l_block_mask_q_indices = l_block_mask_full_q_num_blocks = l_block_mask_full_q_indices = mask_fn_0 = None
         out: "f64[2, 2, 128, 4]" = flex_attention[0];  flex_attention = None
         return (out,)
 
     class score_mod_0(torch.nn.Module):
-        def forward(self, child: "f64[]", child_1: "i32[]", child_2: "i32[]", child_3: "i32[]", child_4: "i32[]"):
-            mul: "f64[]" = child * child;  child = None
+        def forward(self, subgraph_input_3: "f64[]", subgraph_input: "i32[]", subgraph_input_0: "i32[]", subgraph_input_1: "i32[]", subgraph_input_2: "i32[]"):
+            mul: "f64[]" = subgraph_input_3 * subgraph_input_3;  subgraph_input_3 = None
             return mul
 
     class mask_fn_0(torch.nn.Module):
-        def forward(self, child_5: "i32[]", child_6: "i32[]", child_7: "i32[]", child_8: "i32[]"):
-            ge: "b8[]" = child_7 >= child_8;  child_7 = child_8 = None
+        def forward(self, subgraph_input_4: "i32[]", subgraph_input_5: "i32[]", subgraph_input_6: "i32[]", subgraph_input_7: "i32[]"):
+            ge: "b8[]" = subgraph_input_6 >= subgraph_input_7;  subgraph_input_6 = subgraph_input_7 = None
             return ge
 """,  # noqa: B950
         )

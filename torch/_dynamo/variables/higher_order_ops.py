@@ -8,7 +8,7 @@ import itertools
 import logging
 import types
 import warnings
-from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
+from typing import Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch._C
 import torch.fx
@@ -31,7 +31,7 @@ from ..exc import (
     unimplemented,
     Unsupported,
 )
-from ..source import AttrSource
+from ..source import AttrSource, DummyHopPlaceholderSource
 from ..utils import proxy_args_kwargs
 from .base import VariableTracker
 from .dicts import ConstDictVariable
@@ -677,6 +677,39 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
         super().__init__(**kwargs)
         self.value = value
         self.source = source
+        self.subgraph_tmp_phs = []
+
+    def bind_subgraph_args(
+        self, tx, example_values: List[Union[torch.Tensor, torch.SymInt, int]]
+    ) -> List[VariableTracker]:
+        return [self.bind_subgraph_arg(tx, e) for e in example_values]
+
+    def bind_subgraph_arg(
+        self, tx, example_value: Union[torch.Tensor, torch.SymInt, int]
+    ) -> VariableTracker:
+        from .builder import wrap_fx_proxy
+
+        allowed_inp_types = (torch.Tensor, torch.SymInt, int)
+        if not isinstance(example_value, allowed_inp_types):
+            unimplemented(
+                f"Expected {allowed_inp_types} but got example input {type(example_value)} for arg {example_value}"
+            )
+        tmp_ph = tx.output.current_tracer.create_graph_input(
+            "subgraph_input",
+            type(example_value),
+            example_value,
+            source=DummyHopPlaceholderSource(),
+        )
+        self.subgraph_tmp_phs.append(tmp_ph)
+        return wrap_fx_proxy(tx, tmp_ph, example_value)
+
+    def clear_subgraph_args(self):
+        for ph in self.subgraph_tmp_phs:
+            node = ph.node
+            assert (
+                len(node.users) == 0
+            ), f"Expect no users for tmp phs but got {node.users} for ph {ph}."
+            node.graph.erase_node(node)
 
     @staticmethod
     def make(value, source=None, **kwargs):
@@ -1165,10 +1198,13 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # TODO: Fix these pointless new_empty calls appearing in the dynamo output graph.
         # The sub_args is a slice of original input, e.g. if input.size is (3, 4), and scan dim=0
         # the sub_args shape will be (4, ).
-        sub_args = [
-            _make_inlined(tx, first_slice_copy)(leaf, dim)
+        example_values = [
+            leaf.proxy.node.meta["example_value"]
             for leaf in itertools.chain(xs.items, xs.items)
         ]
+        sub_args = self.bind_subgraph_args(
+            tx, [first_slice_copy(val, dim) for val in example_values]
+        )
         (
             (combine_result, combine_treespec),
             combine_graph,
@@ -1182,6 +1218,8 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             source_target=self.value,
             set_subgraph_inputs="flatten_manual",
         )
+
+        self.clear_subgraph_args()
 
         if combine_lifted_freevars:
             unimplemented(
@@ -1288,18 +1326,21 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # Trace the subgraph
         # TODO: Fix these pointless new_empty calls appearing in the dynamo output graph.
         # TODO: Unify handling of sub_args across control flow ops, such as cond, while_loop, etc.
-        sub_args_init = [
-            ini.call_method(tx, "clone", args=(), kwargs={}) for ini in init.items
-        ]
+        sub_args_init = self.bind_subgraph_args(
+            tx, [get_fake_value(ini.as_proxy().node, tx) for ini in init.items]
+        )
         # The sub_args_inp is a slice of original input, e.g. if input.size is (3, 4), and scan dim=0
         # the sub_args_inp shape will be (4, ).
-        sub_args_inp = [
-            _make_inlined(tx, first_slice_copy)(inp, dim) for inp in xs.items
-        ]
-        sub_args_additional_inputs = [
-            t.call_method(tx, "clone", args=(), kwargs={})
-            for t in additional_inputs.items
-        ]
+        sub_args_inp = self.bind_subgraph_args(
+            tx,
+            [
+                first_slice_copy(get_fake_value(inp.as_proxy().node, tx), dim_fake)
+                for inp in xs.items
+            ],
+        )
+        sub_args_additional_inputs = self.bind_subgraph_args(
+            tx, [get_fake_value(t.as_proxy().node, tx) for t in additional_inputs.items]
+        )
         sub_args = sub_args_init + sub_args_inp + sub_args_additional_inputs
         (
             (combine_result, combine_treespec),
@@ -1314,6 +1355,8 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             source_target=self.value,
             set_subgraph_inputs="flatten_manual",
         )
+
+        self.clear_subgraph_args()
 
         # key in the combine_lifted_freevars are proxies in the root tracer.
         # We use root tracer's proxies to create scan op's inputs.
@@ -1412,7 +1455,6 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         kwargs: Dict[str, VariableTracker],
     ) -> VariableTracker:
         from . import TensorVariable
-        from .builder import wrap_fx_proxy_cls
 
         if len(kwargs) > 0:
             unimplemented(
@@ -1423,7 +1465,8 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         assert type(args[1].realize()) is TensorVariable
 
-        sample_shape = get_fake_value(args[1].as_proxy().node, tx).size()
+        example_value = get_fake_value(args[1].as_proxy().node, tx)
+        sample_shape = example_value.size()
 
         if len(sample_shape) < 1 or sample_shape[0] == 0:
             unimplemented(
@@ -1433,9 +1476,7 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # To get the example output from map() we will need to provide at least one sample to
         # the loop body. In our case we will always use xs[0], and our map() won't support zero
         # sized tensor during tracing.
-        first_dim = wrap_fx_proxy_cls(
-            target_cls=TensorVariable, tx=tx, proxy=args[1].as_proxy()[0]
-        )
+        first_dim = self.bind_subgraph_arg(tx, example_value[0])
 
         # TODO: Support kwargs
         (
@@ -1455,6 +1496,8 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             set_subgraph_inputs="flatten_manual",
             should_flatten_outputs=True,
         )
+
+        self.clear_subgraph_args()
 
         subgraph_example_value = [
             proxy.node.meta["example_value"] for proxy in body_r.as_proxy()
@@ -2166,24 +2209,19 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         tx: InstructionTranslator = tx
 
+        example_query = query.as_proxy().node.meta["example_value"]
+
         def create_scalar():
-            return query.call_method(
-                tx,
-                "new_empty",
-                (VariableTracker.build(tx, []),),
-                {
-                    "dtype": VariableTracker.build(tx, torch.int32),
-                },
+            return self.bind_subgraph_arg(
+                tx, example_query.new_empty((), dtype=torch.int32)
             )
 
         bhmn = [create_scalar() for _ in range(4)]
         if fn_name == "score_mod":
             scores_require_grad: bool = query.requires_grad
-            score = query.call_method(
+            score = self.bind_subgraph_arg(
                 tx,
-                "new_empty",
-                (VariableTracker.build(tx, []),),
-                {"requires_grad": VariableTracker.build(tx, scores_require_grad)},
+                example_query.new_empty((), requires_grad=scores_require_grad),
             )
             new_args = [score, *bhmn]
         else:
@@ -2204,6 +2242,8 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 source_target=self.value,
                 set_subgraph_inputs="flatten_manual",
             )
+
+        self.clear_subgraph_args()
 
         body_name = add_subgraph(
             tx,
