@@ -2849,10 +2849,13 @@ class InstructionTranslator(InstructionTranslatorBase):
             vars.extend(cells_and_freevars)
             cells_and_freevars_set = set(cells_and_freevars)
 
+            # TODO: populate from state
+            force_specialize = False
             self.symbolic_locals = {
                 k: variables.LazyVariableTracker.create(
                     f_locals[k],
                     source=LocalSource(k, cell_or_freevar=k in cells_and_freevars_set),
+                    force_specialize=force_specialize
                 )
                 for k in vars
                 if k in f_locals

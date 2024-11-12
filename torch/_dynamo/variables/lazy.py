@@ -10,11 +10,12 @@ from .tensor import SymNodeVariable
 class LazyCache:
     """Container to cache the real VariableTracker"""
 
-    def __init__(self, value: Any, source: Any) -> None:
+    def __init__(self, value: Any, source: Any, force_specialize: bool) -> None:
         if not isinstance(value, LazySymNodeFormatString):
             assert source
         self.value = value
         self.source = source
+        self.force_specialize = force_specialize
         self.vt: Optional[VariableTracker] = None
 
     def realize(self) -> None:
@@ -28,7 +29,7 @@ class LazyCache:
         else:
             source = self.source
 
-        self.vt = VariableTracker.build(tx, self.value, source)
+        self.vt = VariableTracker.build(tx, self.value, source, self.force_specialize)
         del self.value
         del self.source
 
@@ -50,8 +51,8 @@ class LazyVariableTracker(VariableTracker):
     _nonvar_fields = {"_cache", *VariableTracker._nonvar_fields}
 
     @staticmethod
-    def create(value: Any, source: Any, **options: Any) -> "LazyVariableTracker":
-        return LazyVariableTracker(LazyCache(value, source), source=source, **options)
+    def create(value: Any, source: Any, force_specialize: bool, **options: Any) -> "LazyVariableTracker":
+        return LazyVariableTracker(LazyCache(value, source, force_specialize), source=source, **options)
 
     def __init__(self, _cache: LazyCache, **kwargs: Any) -> None:
         assert isinstance(_cache, LazyCache)

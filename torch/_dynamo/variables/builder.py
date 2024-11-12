@@ -361,6 +361,7 @@ class VariableBuilder:
         self,
         tx,
         source: Source,
+        force_specialize: bool,
     ) -> None:
         assert (
             source is not None
@@ -370,6 +371,7 @@ class VariableBuilder:
         self.tx = tx
         self.source = source
         self.name = source.name()
+        self.force_specialize = force_specialize
 
     def __call__(self, value):
         if value in self.tx.output.side_effects:
@@ -478,23 +480,23 @@ class VariableBuilder:
 
         return result
 
-    def wrap_regex_pattern(self, value: re.Pattern):
+    def wrap_regex_pattern(self, value: re.Pattern, **kwargs):
         # TODO(jansel): something like a REPR_MATCH might be more robust here
         self.install_guards(GuardBuilder.ID_MATCH)
         return RegexPatternVariable(value)
 
-    def wrap_weakref(self, value: weakref.ReferenceType):
+    def wrap_weakref(self, value: weakref.ReferenceType, **kwargs):
         self.install_guards(GuardBuilder.TYPE_MATCH)
         return WeakRefVariable.build(self.tx, value, source=self.source)
 
-    def wrap_removable_handle(self, value):
+    def wrap_removable_handle(self, value, **kwargs):
         # This means that the removable handle was created in some other frame.
         # Our current infra requires the hook to be registered and removed in
         # the same frame. So graph break.
         # Related test - PYTORCH_TEST_WITH_DYNAMO=1 python test/test_autograd.py -k TestAutograd.test_hooks
         unimplemented("unregistered hook removable handle")
 
-    def wrap_jit_function(self, value):
+    def wrap_jit_function(self, value, **kwargs):
         self.install_guards(GuardBuilder.TYPE_MATCH)
         return WrapperUserFunctionVariable(
             value, "_torchdynamo_inline", source=self.source
@@ -567,7 +569,7 @@ class VariableBuilder:
         # Handle exact type() match
         type_dispatch = self._type_dispatch().get(type(value))
         if type_dispatch is not None:
-            return type_dispatch(self, value)
+            return type_dispatch(self, value, force_specialize=self.force_specialize)
 
         # Handle exact id() match
         id_dispatch = self._id_dispatch().get(id(value))
@@ -1222,7 +1224,7 @@ class VariableBuilder:
         else:
             return self.wrap_user_defined(value)
 
-    def wrap_user_defined(self, value: Any):
+    def wrap_user_defined(self, value: Any, **kwargs):
         self.install_guards(GuardBuilder.TYPE_MATCH)
         result = UserDefinedObjectVariable(value, source=self.source)
         if not SideEffects.cls_supports_mutation_side_effects(type(value)):
@@ -1230,7 +1232,7 @@ class VariableBuilder:
             return result
         return self.tx.output.side_effects.track_object_existing(value, result)
 
-    def wrap_listlike(self, value: Union[tuple, list, odict_values, NamedTuple]):
+    def wrap_listlike(self, value: Union[tuple, list, odict_values, NamedTuple], **kwargs):
         if config.specialize_int and type(value) is torch.Size:
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
             return ConstantVariable.create(value=value)
@@ -1325,7 +1327,7 @@ class VariableBuilder:
             return self.set_source_and_track_mutable(value, result)
         return result
 
-    def wrap_tuple_iterator(self, value: tuple_iterator):
+    def wrap_tuple_iterator(self, value: tuple_iterator, **kwargs):
         self.install_guards(GuardBuilder.TUPLE_ITERATOR_LEN)
         output = [
             VariableBuilder(self.tx, TupleIteratorGetItemSource(self.get_source(), i))(
@@ -1339,13 +1341,13 @@ class VariableBuilder:
 
         return self.set_source_and_track_mutable(value, result)
 
-    def wrap_range_iterator(self, value: range_iterator):
+    def wrap_range_iterator(self, value: range_iterator, **kwargs):
         self.install_guards(GuardBuilder.TYPE_MATCH)
         # Get all the values from the range iterator
         items = [ConstantVariable.create(v) for v in copy.deepcopy(value)]
         return ListIteratorVariable(items, mutation_type=ValueMutationNew())
 
-    def wrap_slice_range(self, value: Union[slice, range]):
+    def wrap_slice_range(self, value: Union[slice, range], **kwargs):
         items = [
             VariableBuilder(self.tx, AttrSource(self.get_source(), k))(
                 getattr(value, k)
@@ -1374,7 +1376,7 @@ class VariableBuilder:
                 "_dynamo_static_input_type"
             ] = value._dynamo_static_input_type
 
-    def wrap_module(self, value: torch.nn.Module):
+    def wrap_module(self, value: torch.nn.Module, **kwargs):
         from ..eval_frame import OptimizedModule
 
         if len(value.__dict__) == 0:
@@ -1472,7 +1474,7 @@ class VariableBuilder:
                 # Guards are added inside register_attr_or_module
             )
 
-    def wrap_literal(self, value):
+    def wrap_literal(self, value, **kwargs):
         if not config.specialize_int and type(value) is int:
             # unspecializing int by default, but still
             # specialize for the following conditions
@@ -1497,9 +1499,9 @@ class VariableBuilder:
                 self.install_guards(GuardBuilder.CONSTANT_MATCH)
                 return ConstantVariable.create(value=value, source=self.source)
             else:
-                return self.wrap_symint(value)
-        elif not config.specialize_float and type(value) is float:
-            return self.wrap_symfloat(value)
+                return self.wrap_symint(value, kwargs)
+        elif not config.specialize_float and not kwargs.get('force_specialize') and type(value) is float:
+            return self.wrap_symfloat(value, kwargs)
         else:
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
             result = ConstantVariable.create(value=value, source=self.source)
@@ -1514,7 +1516,7 @@ class VariableBuilder:
                 "wrapped by this instance of Dynamo",
             )
 
-    def wrap_tensor(self, value: torch.Tensor):
+    def wrap_tensor(self, value: torch.Tensor, **kwargs):
         source = self.get_source()
 
         # We cannot already be tracking the tensor, which implies
@@ -1712,7 +1714,7 @@ class VariableBuilder:
         tensor_proxy.node.meta["grapharg"] = grapharg
         return tensor_variable
 
-    def wrap_numpy_ndarray(self, value):
+    def wrap_numpy_ndarray(self, value, **kwargs):
         assert np is not None
         assert isinstance(value, np.ndarray)
 
@@ -1784,7 +1786,7 @@ class VariableBuilder:
 
         return numpy_ndarray_variable
 
-    def wrap_symint(self, value):
+    def wrap_symint(self, value, **kwargs):
         assert type(value) is int
 
         if self.name in self.tx.output.unspec_variable_map:
@@ -1886,7 +1888,7 @@ class VariableBuilder:
 
         return unspec_var
 
-    def wrap_symfloat(self, value):
+    def wrap_symfloat(self, value, **kwargs):
         # SymFloat wrapping is special.  We first wrap it in the same way we
         # do an unspecialized primitive, and then we item() it into a
         # SymFloat.  Removal of the item() call is left to a later FX pass,
@@ -1998,7 +2000,7 @@ class VariableBuilder:
 
         return r
 
-    def wrap_unspecialized_primitive(self, value):
+    def wrap_unspecialized_primitive(self, value, **kwargs):
         if self.name in self.tx.output.unspec_variable_map:
             return self.tx.output.unspec_variable_map[self.name]
 
