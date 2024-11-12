@@ -1127,15 +1127,3 @@ def _get_decomp_for_cia(op: "OperatorBase"):
             )
 
     return functools.partial(_special_op_to_decompose_cia, kernel=op)
-
-
-# This table is a stop-gap table which replicates
-# the old behaviour of post-dispatch IR.
-# This table contains all functional CIA ops mapping
-# to their default decomp. In old export, this will
-# be decomposed implicitly.
-def _decomp_table_to_post_autograd_aten():
-    decomp_table = {}
-    for k in _collect_all_valid_cia_ops_for_aten_namespace():
-        decomp_table[k] = _get_decomp_for_cia(k)
-    return decomp_table

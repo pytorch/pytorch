@@ -7,6 +7,7 @@
 #include <ATen/core/grad_mode.h>
 #include <ATen/core/jit_type.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/env.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/irange.h>
 #include <array>
@@ -45,9 +46,9 @@ static_assert(
     "getTypePtr<std::tuple<int64_t, int64_t>> not returning const ref!");
 
 TypeVerbosity type_verbosity() {
-  static const char* c_verbosity = std::getenv("PYTORCH_JIT_TYPE_VERBOSITY");
+  static const auto c_verbosity = c10::utils::get_env("PYTORCH_JIT_TYPE_VERBOSITY");
   static TypeVerbosity verbosity = c_verbosity ?
-    static_cast<TypeVerbosity>(std::stoi(c_verbosity)) : TypeVerbosity::Default;
+    static_cast<TypeVerbosity>(std::stoi(c_verbosity.value())) : TypeVerbosity::Default;
   return verbosity;
 }
 
@@ -728,7 +729,7 @@ TupleTypePtr TupleType::createNamed(
 
 TupleTypePtr TupleType::createNamed(
     const std::optional<c10::QualifiedName>& qualName,
-    const std::vector<std::string_view>& field_names,
+    const std::vector<c10::string_view>& field_names,
     const std::vector<TypePtr>& field_types) {
   std::vector<IValue> empty_defaults;
   return createWithSpec(qualName, field_names, field_types, empty_defaults);
@@ -784,11 +785,11 @@ TupleTypePtr TupleType::createWithSpec(const std::optional<c10::QualifiedName>& 
       field_types, qualName, std::move(schema))); // NOLINT(modernize-make-shared)
 }
 
-std::optional<std::vector<std::string_view>> TupleType::names() const {
+std::optional<std::vector<c10::string_view>> TupleType::names() const {
   if (!schema_) {
     return {};
   }
-  std::vector<std::string_view> ret;
+  std::vector<c10::string_view> ret;
   for (const auto& arg : schema_->arguments()) {
     ret.emplace_back(arg.name());
   }
