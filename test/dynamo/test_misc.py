@@ -3947,6 +3947,27 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertTrue(torch.allclose(result, torch.ones(1)))
         self.assertEqual(inner_x, 42)
 
+    def test_existing_func_that_creates_capturing_nested_func(self):
+        x = 0  # Captured by both `make_get_x` and `root`
+
+        def make_get_x():
+            def get_x():
+                return x
+
+            return get_x
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def root(t):
+            get_x = make_get_x()
+            res = t + x
+            return res, get_x
+
+        res, get_x = root(torch.ones(1))
+        self.assertTrue(torch.allclose(res, torch.ones(1)))
+        self.assertEqual(0, get_x())
+        x += 1
+        self.assertEqual(1, get_x())
+
     def test_top_package_import(self):
         def fn(x):
             import torch.fx
