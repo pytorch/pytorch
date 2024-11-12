@@ -2307,7 +2307,7 @@ def irecv(
 
 @_exception_logger
 def send(
-    tensor: torch.Tensor, dst: int, group: Optional[ProcessGroup] = None, tag: int = 0
+    tensor: torch.Tensor, dst: Optional[int] = None, group: Optional[ProcessGroup] = None, tag: int = 0, group_dst: Optional[int] = None
 ) -> None:
     """
     Send a tensor synchronously.
@@ -2322,8 +2322,20 @@ def send(
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         tag (int, optional): Tag to match send with remote recv
+        group_dst (int, optional): Destination rank on ``group``. 
 
     """
+    if group_dst != None:
+        assert dst is None, "Can't specify both group_dst and dst"
+        # TODO if we want to encourage migration to 'group_dst' arg and deprecate dst arg, should we support using 'group_dst'
+        # even when 'group' is None (for default group)?
+        assert group is not None, "Must specify group if using group_dst"
+        dst = get_global_rank(group, group_dst)
+    
+    else:
+        assert dst is not None, "Must specify dst or group_dst"
+
+
     if get_rank() == dst:
         raise ValueError(
             "Invalid destination rank: destination rank should not be the same as "
