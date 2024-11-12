@@ -6,6 +6,7 @@ import datetime
 import json
 import signal
 import time
+import subprocess
 from datetime import timezone
 from typing import Any
 
@@ -137,6 +138,12 @@ if __name__ == "__main__":
                     print(f"GPU {i}: {message}")
                     stats["total_gpu_utilization-{i}"] = gpu_utilization.gpu
                     stats["total_gpu_mem_utilization-{i}"] = gpu_utilization.memory
+                # Run the nvidia-smi command and capture its output
+                output = subprocess.check_output(['nvidia-smi', '--query-gpu=utilization.gpu', '--format=csv,noheader,nounits'])# Decode the output from bytes to string
+                output_str = output.decode('utf-8')
+                # Print the output
+                stats["nvidia-smi-test"] = output_str
+                stats["total_gpu_mem_utilization-{i}"] = gpu_utilization.memory
             if amdsmi_handle is not None:
                 stats["per_process_gpu_info"] = rocm_get_per_process_gpu_info(
                     amdsmi_handle
