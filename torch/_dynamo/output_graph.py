@@ -1394,7 +1394,7 @@ class OutputGraph:
 
     def call_user_compiler(self, gm: fx.GraphModule) -> CompiledFn:
         print(self.region_tracker)
-        print(self.region_tracker.get_identical_regions())
+        print(self.region_tracker.get_identical_regions(gm))
 
         with dynamo_timed(
             "OutputGraph.call_user_compiler",

@@ -1,3 +1,4 @@
+import math
 from collections import defaultdict, deque
 from typing import Any, Deque, Dict, List, Optional, Set, Tuple
 
@@ -71,19 +72,40 @@ class GraphRegionTracker:
             and self.node_to_duplicates[n0] == self.node_to_duplicates[n1]
         )
 
-    def get_identical_regions(self) -> List[List[Region]]:
-        region_groups = [
-            [{n} for n in group]
-            for group in self.loc_to_duplicates.values()
-            if len(group) > 1
-        ]
+    def get_identical_regions(self, gm: torch.fx.GraphModule) -> List[List[Region]]:
+        topological_ranking = {node: i for i, node in enumerate(gm.graph.nodes)}
+        group_ranking = {}
+        region_groups = []
 
+        # Create region groups; a region group is a group
+        # of regions that are all identical. In this initial state
+        # each region in the group is a single node, and we discard
+        # groups that are only a single region.
+        # We track the topological ranking to start with groups later in the graph
+        # the reason for this is that we will necessarily create the largest groups first.
+        for group in self.loc_to_duplicates.values():
+            if len(group) > 1:
+                region_group = []
+                min_rank = math.inf
+                for node in group:
+                    min_rank = min(min_rank, topological_ranking[node])
+                    region_group.append({node})
+
+                region_groups.append(region_group)
+                group_ranking[id(region_group)] = min_rank
+
+        region_groups.sort(key=lambda g: -group_ranking[id(g)])
+        print(region_groups)
+
+        seen_nodes: Set[Node] = set()
         for region_group in region_groups:
-            self.fully_expand_region_group(region_group)
+            self.fully_expand_region_group(region_group, seen_nodes)
 
         return region_groups
 
-    def fully_expand_region_group(self, regions: List[Region]) -> None:
+    def fully_expand_region_group(
+        self, regions: List[Region], seen_nodes: Set[Node]
+    ) -> None:
         # All regions should start with 1 node
         assert all(len(region) == 1 for region in regions)
         region_iters = []
@@ -92,7 +114,6 @@ class GraphRegionTracker:
             region_iters.append(BfsRegionIter.create(origin))
 
         nodes_to_add: List[Node] = []
-        seen_nodes: Set[Node] = set()
 
         # arg_name is set for kwargs, None for args
         current_arg_name, current_node = region_iters[0].next()
