@@ -130,15 +130,12 @@ def hierarchical_pickle(data):
             }
         if typename == "torch._utils._rebuild_tensor_v2":
             assert data.state is None
-            if len(data.args) == 6:
-                storage, offset, size, stride, requires_grad, hooks = data.args
-            else:
-                storage, offset, size, stride, requires_grad, hooks, metadata = data.args
+            storage, offset, size, stride, requires_grad, *_ = data.args
             storage_info = get_storage_info(storage)
             return {"__tensor_v2__": [storage_info, offset, size, stride, requires_grad]}
         if typename == "torch._utils._rebuild_qtensor":
             assert data.state is None
-            storage, offset, size, stride, quantizer, requires_grad, hooks = data.args
+            storage, offset, size, stride, quantizer, requires_grad, *_ = data.args
             storage_info = get_storage_info(storage)
             assert isinstance(quantizer, tuple)
             assert isinstance(quantizer[0], torch.utils.show_pickle.FakeClass)

@@ -9,7 +9,7 @@
 
 namespace at::xpu::detail {
 
-void XPUHooks::initXPU() const {
+void XPUHooks::init() const {
   C10_LOG_API_USAGE_ONCE("aten.init.xpu");
   const auto device_count = c10::xpu::device_count_ensure_non_zero();
   c10::xpu::XPUCachingAllocator::init(device_count);
@@ -25,7 +25,13 @@ std::string XPUHooks::showConfig() const {
 
 int32_t XPUHooks::getGlobalIdxFromDevice(const at::Device& device) const {
   TORCH_CHECK(device.is_xpu(), "Only the XPU device type is expected.");
+#if defined(_WIN32) && SYCL_COMPILER_VERSION < 20250000
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      false,
+      "Default context is not supported on XPU by default on Windows for SYCL compiler versions earlier than 2025.0.0. So we can NOT find its global index of the ATen device.");
+#else
   return at::xpu::getGlobalIdxFromDevice(device.index());
+#endif
 }
 
 Generator XPUHooks::getXPUGenerator(DeviceIndex device_index) const {
@@ -38,7 +44,13 @@ const Generator& XPUHooks::getDefaultXPUGenerator(
 }
 
 Device XPUHooks::getDeviceFromPtr(void* data) const {
+#if defined(_WIN32) && SYCL_COMPILER_VERSION < 20250000
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      false,
+      "Default context is not supported on XPU by default on Windows for SYCL compiler versions earlier than 2025.0.0. So we can NOT find the ATen device of a pointer.");
+#else
   return at::xpu::getDeviceFromPtr(data);
+#endif
 }
 
 /**

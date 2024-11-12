@@ -47,7 +47,7 @@ struct unique_type_checker {
 // tensors on one or more devices.
 
 // no checks
-static inline std::vector<Tensor>& _broadcast_out_impl(
+static std::vector<Tensor>& _broadcast_out_impl(
     const Tensor& tensor,
     std::vector<Tensor>& out_tensors) {
 #ifdef USE_NCCL
@@ -282,8 +282,7 @@ std::vector<at::Tensor>& scatter_out(
   at::cuda::OptionalCUDAStreamGuard cuda_guard;
   for (const auto i : c10::irange(chunks.size())) {
     if (i < (streams ? streams->size() : 0U) && (*streams)[i]) {
-      const auto device_index =
-          static_cast<int16_t>(out_tensors[i].get_device());
+      const auto device_index = out_tensors[i].get_device();
       TORCH_CHECK(
           (*streams)[i]->device_index() == device_index,
           "Expected the device associated with the stream at index ",
@@ -293,7 +292,7 @@ std::vector<at::Tensor>& scatter_out(
           ") ",
           "to match the device supplied at that index ",
           "(expected ",
-          device_index,
+          static_cast<int16_t>(device_index),
           ")");
       cuda_guard.reset_stream(*(*streams)[i]);
     }
@@ -366,7 +365,7 @@ std::vector<at::Tensor> scatter(
 // device, either CPU or CUDA.
 
 // no checks
-static inline at::Tensor& _gather_out_impl(
+static at::Tensor& _gather_out_impl(
     at::TensorList tensors,
     at::Tensor& out_tensor,
     int64_t dim) {

@@ -179,6 +179,8 @@ class FileTimerServer:
         self._timers: Dict[Tuple[int, str], FileTimerRequest] = {}
         self._stop_signaled = False
         self._watchdog_thread: Optional[threading.Thread] = None
+
+        self._is_client_started = False
         if os.path.exists(self._file_path):
             os.remove(self._file_path)
         os.mkfifo(self._file_path)
@@ -249,6 +251,7 @@ class FileTimerServer:
         #  2. We are running the watchdog loop in a separate daemon
         #     thread, which will not block the process to stop.
         with open(self._file_path) as fd:
+            self._is_client_started = True
             while not self._stop_signaled:
                 try:
                     run_once = self._run_once
@@ -390,4 +393,4 @@ class FileTimerServer:
         return False
 
     def get_last_progress_time(self) -> int:
-        return self._last_progress_time
+        return self._last_progress_time if self._is_client_started else int(time.time())
