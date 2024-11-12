@@ -1397,10 +1397,14 @@ class PythonWrapperCodegen(CodeGen):
             )
 
     def define_kernel(
-        self, name: str, kernel: str, metadata: Optional[str] = None, gpu=True
+        self,
+        kernel_name: str,
+        kernel_body: str,
+        metadata: Optional[str] = None,
+        gpu=True,
     ):
         metadata_comment = f"{metadata}\n" if metadata else ""
-        body = f"\n\n{metadata_comment}{name} = {kernel}"
+        body = f"\n\n{metadata_comment}{kernel_name} = {kernel_body}"
         self.header.splice(body)
         if config.triton.autotune_at_compile_time:
             self.kernel_autotune_defs.splice(body)
@@ -1860,7 +1864,7 @@ class PythonWrapperCodegen(CodeGen):
 
     def generate_kernel_call(
         self,
-        kernel_name,
+        kernel_name: str,
         call_args,
         grid=None,
         device_index=None,

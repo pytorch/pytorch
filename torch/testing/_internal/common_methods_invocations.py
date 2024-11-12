@@ -19517,8 +19517,9 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_msort,
            skips=(
+               # https://github.com/pytorch/pytorch/issues/139972
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_non_standard_bool_values',
-                            dtypes=[torch.bool], device_type='cuda'),
+                            dtypes=[torch.bool], device_type='cuda', active_if=TEST_WITH_ROCM),
            )),
     OpInfo('movedim',
            aliases=('moveaxis',),

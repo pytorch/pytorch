@@ -1,17 +1,89 @@
 # mypy: ignore-errors
 
+import contextlib
+from abc import ABC, abstractmethod
 from copy import copy
+from dataclasses import dataclass
 from functools import partial
+from typing import Callable, TypeVar
 
 import torch
+from torch.fx.experimental.symbolic_shapes import is_nested_int
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.opinfo.core import (
     BinaryUfuncInfo,
+    OpInfo,
     ReductionOpInfo,
     SampleInput,
     UnaryUfuncInfo,
 )
 from torch.utils._pytree import tree_map
+
+
+# Represents a rule matching a particular set of tests. It allows granularity
+# at the device, dtype, op, and individual sample levels. This flexibility allows entire
+# bugs to be represented by a single rule, even if this corresponds with multiple conceptual
+# test cases across multiple ops.
+@dataclass
+class SampleRule(ABC):
+    # function to indicate whether the rule applies; return True if so
+    match_fn: Callable[[torch.device, torch.dtype, OpInfo, SampleInput], bool] = None
+    # optional name for identifying the rule
+    name: str = ""
+
+    def __post_init__(self):
+        if self.match_fn is None:
+            raise ValueError("rule must have match_fn set to be useful")
+
+    # returns True if the rule applies or False otherwise
+    def match(self, device, dtype, op, sample) -> bool:
+        return self.match_fn(device, dtype, op, sample)
+
+    # returns a string identifier of the rule type
+    @abstractmethod
+    def type(self) -> str:
+        ...
+
+    # returns an appropriate context that e.g. handles the xfail, skips, etc.
+    @abstractmethod
+    def get_context(self, test_case):
+        ...
+
+
+# useful for specifying xfails
+@dataclass
+class XFailRule(SampleRule):
+    # expected error type
+    error_type: TypeVar = Exception
+    # expected error message
+    error_msg: str = ".*"
+
+    @property
+    def type(self) -> str:
+        return "xfail"
+
+    def get_context(self, test_case):
+        return test_case.assertRaisesRegex(
+            # failing within torch.compile wraps within a BackendCompilerFailed
+            (self.error_type, torch._dynamo.exc.BackendCompilerFailed),
+            self.error_msg,
+        )
+
+
+# useful for specifying skips
+@dataclass
+class SkipRule(SampleRule):
+    @property
+    def type(self):
+        return "skip"
+
+    def get_context(self, test_case):
+        @contextlib.contextmanager
+        def skipcontext(test_case=test_case):
+            test_case.skipTest("Skipped!")
+            yield
+
+        return skipcontext()
 
 
 # random integer used for sizes
@@ -44,6 +116,22 @@ def random_nt_from_dims(
     )
 
 
+# Helper function to get a reasonable string representation of an NJT for use in
+# SampleInput names.
+def _describe_njt(njt) -> str:
+    contig_type = "_contig" if njt.is_contiguous() else "_noncontig"
+    if njt._lengths is not None and njt._offsets is not None:
+        contig_type += "_holes"
+    elif njt._ragged_idx != 1:
+        contig_type += "_transposed"
+
+    cached_data = "_without_seqlen_cache"
+    if njt._max_seqlen_tensor is not None:
+        cached_data = "_with_seqlen_cache"
+
+    return f"{njt.dim()}D{contig_type}{cached_data}"
+
+
 # Helper function for generating a comprehensive set of NJT sample inputs.
 def _sample_njts(device, dtype, requires_grad=False, dims=None):
     if dims is None:
@@ -69,7 +157,20 @@ def _sample_njts(device, dtype, requires_grad=False, dims=None):
         offsets = nt.offsets().clone().detach()
         yield torch.nested.nested_tensor_from_jagged(values, offsets)
 
-    # TODO: add non-contiguous NJTs
+        # non-contiguous transposed NJT (not possible for 2D)
+        if dim > 2:
+            yield nt.transpose(-2, -1)
+
+        # non-contiguous with holes NJT
+        values = nt.values().clone().detach()
+        offsets = nt.offsets().clone().detach()
+        # subtract 1 to cause holes
+        lengths = (offsets.diff() - 1).clone().detach()
+        yield torch.nested.nested_tensor_from_jagged(
+            values=values,
+            offsets=offsets,
+            lengths=lengths,
+        )
 
 
 # Computes an unbind-based reference for a given OpInfo on a given SampleInput.
@@ -171,7 +272,6 @@ def reduction_reference(op, sample):
     keepdim = sample.kwargs.get("keepdim", False)
     assert dim != 0, "reductions over the batch dim are not supported"
     assert "dims" not in sample.kwargs
-    assert sample.input._ragged_idx == 1
 
     if isinstance(dim, (tuple, list)):
         reduce_on_ragged = sample.input._ragged_idx in dim
@@ -233,7 +333,7 @@ def sample_inputs_elementwise_njt_unary(
     for njt in _sample_njts(
         device=device, dtype=dtype, requires_grad=requires_grad, dims=[2, 3, 4]
     ):
-        yield SampleInput(njt, kwargs=dict(op_kwargs))
+        yield SampleInput(njt, kwargs=dict(op_kwargs), name=_describe_njt(njt))
 
 
 def sample_inputs_elementwise_njt_binary(
@@ -245,23 +345,42 @@ def sample_inputs_elementwise_njt_binary(
     for njt1 in _sample_njts(
         device=device, dtype=dtype, requires_grad=requires_grad, dims=[2, 3, 4]
     ):
-        # TODO: account for non-contiguous NJTs here
+        njt_desc = _describe_njt(njt1)
         njt2 = torch.randn_like(njt1)
-        yield SampleInput(njt1, args=(njt2,), kwargs=dict(op_kwargs))
+        yield SampleInput(
+            njt1.clone().detach(),
+            args=(njt2,),
+            kwargs=dict(op_kwargs),
+            name=f"{njt_desc}: (NT, NT)",
+        )
 
         # broadcasting case: (B, j0, ...) with (B, 1, ...)
+        dense_shape = list(njt1.shape)
+        dense_shape[njt1._ragged_idx] = 1
         t = torch.randn(
-            (njt1.shape[0], 1, *njt1.shape[2:]),
+            dense_shape,
             device=device,
             dtype=dtype,
             requires_grad=requires_grad,
         )
+        t2 = t.clone().detach()
         # used for slicing in unbind_reference()
         t._batch_dim = 0
+        t2._batch_dim = 0
         # (NT, T)
-        yield SampleInput(njt1, args=(t,), kwargs=dict(op_kwargs))
+        yield SampleInput(
+            njt1.clone().detach(),
+            args=(t,),
+            kwargs=dict(op_kwargs),
+            name=f"{njt_desc}: (NT, T) broadcasting 1 over ragged",
+        )
         # (T, NT)
-        yield SampleInput(t, args=(njt1,), kwargs=dict(op_kwargs))
+        yield SampleInput(
+            t2,
+            args=(njt1.clone().detach(),),
+            kwargs=dict(op_kwargs),
+            name=f"{njt_desc}: (T, NT) broadcasting 1 over ragged",
+        )
 
         # broadcasting case: (B, j0, ...) with (1, 1...)
         t = torch.randn(
@@ -270,28 +389,64 @@ def sample_inputs_elementwise_njt_binary(
             dtype=dtype,
             requires_grad=requires_grad,
         )
+        t2 = t.clone().detach()
         # used for slicing in unbind_reference()
         t._batch_dim = 0
+        t2._batch_dim = 0
         # (NT, T)
-        yield SampleInput(njt1, args=(t,), kwargs=dict(op_kwargs))
+        yield SampleInput(
+            njt1.clone().detach(),
+            args=(t,),
+            kwargs=dict(op_kwargs),
+            name=f"{njt_desc}: (NT, T) broadcasting all 1s",
+        )
         # (T, NT)
-        yield SampleInput(t, args=(njt1,), kwargs=dict(op_kwargs))
+        yield SampleInput(
+            t2,
+            args=(njt1.clone().detach(),),
+            kwargs=dict(op_kwargs),
+            name=f"{njt_desc}: (T, NT) broadcasting all 1s",
+        )
 
         # broadcasting case: (B, j0, ...) with (...)
-        t = torch.randn(
-            njt1.shape[2:], device=device, dtype=dtype, requires_grad=requires_grad
-        )
-        # (NT, T)
-        yield SampleInput(njt1, args=(t,), kwargs=dict(op_kwargs))
-        # (T, NT)
-        yield SampleInput(t, args=(njt1,), kwargs=dict(op_kwargs))
+        if njt1.dim() > njt1._ragged_idx + 1:
+            t = torch.randn(
+                njt1.shape[njt1._ragged_idx + 1 :],
+                device=device,
+                dtype=dtype,
+                requires_grad=requires_grad,
+            )
+            # (NT, T)
+            yield SampleInput(
+                njt1.clone().detach(),
+                args=(t.clone().detach(),),
+                kwargs=dict(op_kwargs),
+                name=f"{njt_desc}: (NT, T) broadcasting normal dims",
+            )
+            # (T, NT)
+            yield SampleInput(
+                t.clone().detach(),
+                args=(njt1.clone().detach(),),
+                kwargs=dict(op_kwargs),
+                name=f"{njt_desc}: (T, NT) broadcasting normal dims",
+            )
 
         # broadcasting case: (B, j0, ...) with scalar
         t = torch.randn((), device=device, dtype=dtype, requires_grad=requires_grad)
         # (NT, T)
-        yield SampleInput(njt1, args=(t,), kwargs=dict(op_kwargs))
+        yield SampleInput(
+            njt1.clone().detach(),
+            args=(t.clone().detach(),),
+            kwargs=dict(op_kwargs),
+            name=f"{njt_desc}: (NT, T) broadcasting with scalar",
+        )
         # (T, NT)
-        yield SampleInput(t, args=(njt1,), kwargs=dict(op_kwargs))
+        yield SampleInput(
+            t.clone().detach(),
+            args=(njt1.clone().detach(),),
+            kwargs=dict(op_kwargs),
+            name=f"{njt_desc}: (T, NT) broadcasting with scalar",
+        )
 
     # mixed broadcasting case: (B, j0, 1) with (B, 1, D)
     B = 4
@@ -303,14 +458,27 @@ def sample_inputs_elementwise_njt_binary(
         requires_grad=requires_grad,
         layout=torch.jagged,
     )
+    njt_desc = _describe_njt(njt)
     t = torch.randn(B, 1, D, device=device, dtype=dtype, requires_grad=requires_grad)
+    t2 = t.clone().detach()
     # used for slicing in unbind_reference()
     t._batch_dim = 0
+    t2._batch_dim = 0
 
     # (NT, T)
-    yield SampleInput(njt, args=(t,), kwargs=dict(op_kwargs))
+    yield SampleInput(
+        njt.clone().detach(),
+        args=(t,),
+        kwargs=dict(op_kwargs),
+        name=f"{njt_desc}: (NT, T) mixed broadcasting",
+    )
     # (T, NT)
-    yield SampleInput(t, args=(njt,), kwargs=dict(op_kwargs))
+    yield SampleInput(
+        t2,
+        args=(njt.clone().detach(),),
+        kwargs=dict(op_kwargs),
+        name=f"{njt_desc}: (T, NT) mixed broadcasting",
+    )
 
 
 def sample_inputs_njt_reduction(
@@ -319,6 +487,7 @@ def sample_inputs_njt_reduction(
     dtype,
     requires_grad,
     supports_dimlist=True,
+    supports_keepdim=True,
     op_kwargs=None,
     **kwargs,
 ):
@@ -328,14 +497,23 @@ def sample_inputs_njt_reduction(
     for njt in _sample_njts(
         device=device, dtype=dtype, requires_grad=requires_grad, dims=[2, 3, 4]
     ):
-        for keepdim in [False, True]:
+        njt_desc = _describe_njt(njt)
+        keepdim_values = [False, True] if supports_keepdim else [None]
+        for keepdim in keepdim_values:
+            keepdim_suffix = f" with keepdim={keepdim}" if supports_keepdim else ""
             # single dim-wise reduction; includes reduction over the ragged dim
             # NB: reduction over the batch dim is not supported!
             # TODO: Cover this in the set of error inputs
             for dim in range(1, njt.dim()):
+                dim_desc = "normal" if dim != njt._ragged_idx else "ragged"
                 yield SampleInput(
                     njt.clone().detach(),
-                    kwargs={**op_kwargs, "dim": dim, "keepdim": keepdim},
+                    kwargs={
+                        **op_kwargs,
+                        "dim": dim,
+                        **({"keepdim": keepdim} if supports_keepdim else {}),
+                    },
+                    name=f"{njt_desc}: {dim_desc} dim reduction{keepdim_suffix}",
                 )
 
             if supports_dimlist:
@@ -345,8 +523,9 @@ def sample_inputs_njt_reduction(
                     kwargs={
                         **op_kwargs,
                         "dim": [0, njt._ragged_idx],
-                        "keepdim": keepdim,
+                        **({"keepdim": keepdim} if supports_keepdim else {}),
                     },
+                    name=f"{njt_desc}: batch+ragged reduction{keepdim_suffix}",
                 )
 
                 # reduce on batch, ragged, and other dims
@@ -356,8 +535,12 @@ def sample_inputs_njt_reduction(
                         kwargs={
                             **op_kwargs,
                             "dim": [0, njt._ragged_idx, other_dim],
-                            "keepdim": keepdim,
+                            **({"keepdim": keepdim} if supports_keepdim else {}),
                         },
+                        name=(
+                            f"{njt_desc}: batch+ragged+dim={other_dim} "
+                            f"reduction{keepdim_suffix}"
+                        ),
                     )
 
                 # reduce on two non-ragged, non-batch dims
@@ -367,8 +550,9 @@ def sample_inputs_njt_reduction(
                         kwargs={
                             **op_kwargs,
                             "dim": [njt.dim() - 2, njt.dim() - 1],
-                            "keepdim": keepdim,
+                            **({"keepdim": keepdim} if supports_keepdim else {}),
                         },
+                        name=f"{njt_desc}: two normal dim reduction{keepdim_suffix}",
                     )
 
                 # full reduction by specifying all dims
@@ -377,15 +561,20 @@ def sample_inputs_njt_reduction(
                     kwargs={
                         **op_kwargs,
                         "dim": list(range(njt.dim())),
-                        "keepdim": keepdim,
+                        **({"keepdim": keepdim} if supports_keepdim else {}),
                     },
+                    name=f"{njt_desc}: all dim reduction{keepdim_suffix}",
                 )
 
                 # TODO: Reducing on ragged dim and non-batch dim is not supported;
                 # cover this in the set of error inputs.
 
         # full reduction
-        yield SampleInput(njt.clone().detach(), kwargs=dict(op_kwargs))
+        yield SampleInput(
+            njt.clone().detach(),
+            kwargs=dict(op_kwargs),
+            name=f"{njt_desc}: full reduction with keepdim={keepdim}",
+        )
 
 
 def unsupported_sample_inputs_func(op_name):
@@ -414,7 +603,7 @@ def sample_inputs_clone(op_info, device, dtype, requires_grad, **kwargs):
     for njt in _sample_njts(
         device=device, dtype=dtype, requires_grad=requires_grad, dims=[2, 3, 4]
     ):
-        yield SampleInput(njt)
+        yield SampleInput(njt, name=_describe_njt(njt))
 
     for memory_format in (torch.contiguous_format, torch.preserve_format):
         # construct a "non-contiguous with holes" NJT
@@ -427,7 +616,12 @@ def sample_inputs_clone(op_info, device, dtype, requires_grad, **kwargs):
             values, offsets=offsets, lengths=lengths
         )
 
-        yield SampleInput(njt, kwargs={"memory_format": memory_format})
+        njt_desc = _describe_njt(njt)
+        yield SampleInput(
+            njt,
+            kwargs={"memory_format": memory_format},
+            name=f"{njt_desc}: {memory_format})",
+        )
 
 
 def sample_inputs_mvl_gamma(p):
@@ -472,12 +666,18 @@ def sample_inputs_bmm(op_info, device, dtype, requires_grad, op_kwargs=None, **k
         device=device, dtype=dtype, requires_grad=requires_grad, dims=[3]
     ):
         # (B, j1, D) x (B, D, E) => (B, j1, E)
-        B, D = njt_3d.shape[0], njt_3d.shape[-1]
-        E = D + 2
-        other = torch.randn(B, D, E, device=device, dtype=dtype)
-        # used for slicing in unbind_reference()
-        other._batch_dim = 0
-        yield SampleInput(njt_3d.clone().detach(), kwargs={"mat2": other})
+        if njt_3d._ragged_idx == 1:
+            B, D = njt_3d.shape[0], njt_3d.shape[-1]
+            E = D + 2
+            other = torch.randn(B, D, E, device=device, dtype=dtype)
+            # used for slicing in unbind_reference()
+            other._batch_dim = 0
+            njt_desc = _describe_njt(njt_3d)
+            yield SampleInput(
+                njt_3d.clone().detach(),
+                kwargs={"mat2": other},
+                name=f"{njt_desc}: (B, j, D) x (B, D, E)",
+            )
 
         # TODO (need factory functions):
         # (B, D, j1) x (B, j1, E) => (B, D, E)
@@ -511,24 +711,30 @@ def sample_inputs_matmul(
         device=device, dtype=dtype, requires_grad=requires_grad, dims=[3]
     ):
         # (B, j1, D) x (D, E) => (B, j1, E)
-        D = njt_3d.shape[-1]
-        E = D + 2
-        yield SampleInput(
-            njt_3d.clone().detach(),
-            kwargs={"other": torch.randn(D, E, device=device, dtype=dtype)},
-        )
+        if njt_3d._ragged_idx == 1:
+            D = njt_3d.shape[-1]
+            E = D + 2
+            njt_desc = _describe_njt(njt_3d)
+            yield SampleInput(
+                njt_3d.clone().detach(),
+                kwargs={"other": torch.randn(D, E, device=device, dtype=dtype)},
+                name=f"{njt_desc}: (B, j, D) x (D, E)",
+            )
 
     # 4D cases
     for njt_4d in _sample_njts(
         device=device, dtype=dtype, requires_grad=requires_grad, dims=[4]
     ):
         # (B, j1, D, E) x (E, F) => (B, j1, D, F)
-        E = njt_4d.shape[-1]
-        F = E + 2
-        yield SampleInput(
-            njt_4d.clone().detach(),
-            kwargs={"other": torch.randn(E, F, device=device, dtype=dtype)},
-        )
+        if njt_4d._ragged_idx == 1:
+            E = njt_4d.shape[-1]
+            F = E + 2
+            njt_desc = _describe_njt(njt_4d)
+            yield SampleInput(
+                njt_4d.clone().detach(),
+                kwargs={"other": torch.randn(E, F, device=device, dtype=dtype)},
+                name=f"{njt_desc}: (B, j, D, E) x (E, F)",
+            )
 
         # TODO (need factory functions):
         # (B, j1, D, E) x (B, j1, E, F) => (B, j1, D, F)
@@ -541,7 +747,9 @@ def sample_inputs_masked_select(
         device=device, dtype=dtype, requires_grad=requires_grad, dims=[2]
     ):
         yield SampleInput(
-            njt, kwargs={"mask": (torch.randn_like(njt, requires_grad=False) < 0.0)}
+            njt,
+            kwargs={"mask": (torch.randn_like(njt, requires_grad=False) < 0.0)},
+            name=_describe_njt(njt),
         )
 
 
@@ -591,12 +799,14 @@ def sample_inputs_index_put(
                     for _ in range(dim - 1)
                 ],
             ]
+            njt_desc = _describe_njt(njt)
             yield SampleInput(
                 njt.clone().detach(),
                 kwargs={
                     "indices": indices,
                     "values": torch.tensor(1.0, device=njt.device),
                 },
+                name=f"{njt_desc}: up to dim {dim - 1}",
             )
 
     # Non-cont NJT for completeness
@@ -611,9 +821,11 @@ def sample_inputs_index_put(
         torch.zeros(7, 3, device=device), offsets, lengths
     )
 
+    njt_desc = _describe_njt(a)
     yield SampleInput(
         a.clone().detach(),
         kwargs={"indices": indices, "values": torch.tensor(1.0, device=a.device)},
+        name=f"{njt_desc}: all dims",
     )
 
 
@@ -679,6 +891,10 @@ def sample_inputs_nn_functional_linear(op_info, device, dtype, requires_grad, **
     for njt in _sample_njts(
         device=device, dtype=dtype, requires_grad=requires_grad, dims=[3, 4, 5]
     ):
+        # projection over a ragged dim is not currently supported
+        if is_nested_int(njt.size(-1)):
+            continue
+
         # with bias
         NUM_OUTPUT = 10
         weight = torch.randn(
@@ -715,7 +931,10 @@ def sample_inputs_nn_functional_rms_norm(
         device=device, dtype=dtype, requires_grad=requires_grad, dims=[3, 4]
     ):
         # normalize over non-ragged dims
-        for start_dim in range(2, njt.dim()):
+        for start_dim in range(njt.dim()):
+            if start_dim <= njt._ragged_idx:
+                continue
+
             normalized_shape = njt.shape[start_dim:]
             weight = torch.randn(
                 normalized_shape,
@@ -750,6 +969,7 @@ njt_sample_inputs = {
     "argmin": partial(sample_inputs_njt_reduction, supports_dimlist=False),
     "bmm": sample_inputs_bmm,
     "clone": sample_inputs_clone,
+    "count_nonzero": partial(sample_inputs_njt_reduction, supports_keepdim=False),
     **{f"mvlgamma.mvlgamma_p_{p}": sample_inputs_mvl_gamma(p=1) for p in (1, 3, 5)},
     "nn.functional.embedding": sample_inputs_nn_functional_embedding,
     "nn.functional.embedding_bag": sample_inputs_nn_functional_embedding_bag,
@@ -775,6 +995,7 @@ njt_references = {
     "argmax": reduction_reference,
     "argmin": reduction_reference,
     "bmm": reference_bmm,
+    "count_nonzero": reduction_reference,
     "max.reduction_with_dim": reduction_reference,
     "min.reduction_with_dim": reduction_reference,
     "nn.functional.embedding_bag": reference_nn_functional_embedding_bag,
