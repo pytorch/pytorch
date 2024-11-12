@@ -57,6 +57,7 @@ aten::_convert_indices_from_coo_to_csr.out
 aten::_convert_indices_from_csr_to_coo
 aten::_convert_indices_from_csr_to_coo.out
 aten::_convert_weight_to_int4pack
+aten::_convert_weight_to_int4pack_for_cpu
 aten::_convolution
 aten::_convolution.out
 aten::_copy_from
@@ -231,9 +232,12 @@ aten::_foreach_frac_
 aten::_foreach_lerp.List
 aten::_foreach_lerp.List_out
 aten::_foreach_lerp.Scalar
+aten::_foreach_lerp.ScalarList
+aten::_foreach_lerp.ScalarList_out
 aten::_foreach_lerp.Scalar_out
 aten::_foreach_lerp_.List
 aten::_foreach_lerp_.Scalar
+aten::_foreach_lerp_.ScalarList
 aten::_foreach_lgamma
 aten::_foreach_lgamma.out
 aten::_foreach_lgamma_
@@ -302,6 +306,9 @@ aten::_foreach_reciprocal_
 aten::_foreach_round
 aten::_foreach_round.out
 aten::_foreach_round_
+aten::_foreach_rsqrt
+aten::_foreach_rsqrt.out
+aten::_foreach_rsqrt_
 aten::_foreach_sigmoid
 aten::_foreach_sigmoid.out
 aten::_foreach_sigmoid_
@@ -637,6 +644,7 @@ aten::_values
 aten::_values_copy
 aten::_values_copy.out
 aten::_weight_int4pack_mm
+aten::_weight_int4pack_mm_for_cpu
 aten::_weight_int8pack_mm
 aten::_weight_norm_interface_backward
 aten::_weight_norm_interface_backward.out
