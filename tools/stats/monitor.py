@@ -89,7 +89,7 @@ if __name__ == "__main__":
 
         try:
             pynvml.nvmlInit()
-            handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+            nvml_handle = pynvml.nvmlDeviceGetHandleByIndex(0)
         except pynvml.NVMLError:
             pass
     except ModuleNotFoundError:
