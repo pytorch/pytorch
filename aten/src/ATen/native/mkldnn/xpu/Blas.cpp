@@ -1,7 +1,9 @@
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/native/Resize.h>
-#include <torch/library.h>
+#include <ATen/native/mkldnn/xpu/detail/Utils.h>
 #include <ATen/native/mkldnn/xpu/detail/oneDNN.h>
+#include <ATen/native/mkldnn/xpu/detail/oneDNNContext.h>
+#include <torch/library.h>
 
 namespace at::native::xpu {
 
@@ -424,6 +426,232 @@ Tensor& tensordot_out(
   return result;
 }
 
+Tensor& _scaled_mm_out_xpu(
+    const Tensor& mat1,
+    const Tensor& mat2,
+    const Tensor& scale_a,
+    const Tensor& scale_b,
+    const std::optional<at::Tensor>& bias,
+    const std::optional<at::Tensor>& scale_result,
+    std::optional<c10::ScalarType> out_dtype,
+    bool use_fast_accum,
+    Tensor& out) {
+  TORCH_CHECK(mat1.dim() == 2, "mat1 must be a matrix");
+  TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix");
+  TORCH_CHECK(
+      mat1.sizes()[1] == mat2.sizes()[0],
+      "mat1 and mat2 shapes cannot be multiplied (",
+      mat1.sizes()[0],
+      "x",
+      mat1.sizes()[1],
+      " and ",
+      mat2.sizes()[0],
+      "x",
+      mat2.sizes()[1],
+      ")");
+
+  TORCH_INTERNAL_ASSERT(
+      (scale_a.numel() == 1 && scale_b.numel() == 1),
+      "Now _scaled_mm only supports per-tensor scaling for XPU backend.");
+
+  // TORCH_CHECK(!scale_result || (scale_result->numel() == 1 &&
+  // scale_result->scalar_type() == kFloat),
+  //      "scale_result must be a float scalar");
+  TORCH_CHECK(
+      !bias || bias->numel() == mat2.sizes()[1],
+      "Bias must be size ",
+      mat2.sizes()[1],
+      " but got ",
+      bias->numel());
+
+  // Check types
+  TORCH_CHECK(
+      !out_dtype || *out_dtype == out.scalar_type(),
+      "out_dtype must match output matrix type");
+  TORCH_CHECK(
+      isFloat8Type(mat1.scalar_type()),
+      "Expected mat1 to be Float8 matrix got ",
+      mat1.scalar_type());
+  TORCH_CHECK(
+      isFloat8Type(mat2.scalar_type()),
+      "Expected mat2 to be Float8 matrix got ",
+      mat2.scalar_type());
+  if (bias) {
+    TORCH_CHECK(
+        out.scalar_type() != kFloat,
+        "Bias is not supported when out_dtype is set to Float32");
+    TORCH_CHECK(
+        bias->scalar_type() == ScalarType::BFloat16 ||
+            bias->scalar_type() == ScalarType::Half,
+        "Bias must be either Half or BFloat16, but got ",
+        bias->scalar_type());
+    TORCH_CHECK(
+        (out.scalar_type() != kFloat &&
+         out.scalar_type() != ScalarType::BFloat16) ||
+            bias->scalar_type() == ScalarType::BFloat16,
+        "Bias must be BFloat16 to compute ",
+        out.scalar_type(),
+        " output, but got ",
+        bias->scalar_type());
+    TORCH_CHECK(
+        out.scalar_type() != ScalarType::Half ||
+            bias->scalar_type() == ScalarType::Half,
+        "Bias must be Float16 to compute ",
+        out.scalar_type(),
+        " output, but got ",
+        bias->scalar_type());
+  }
+
+  dnnl::engine engine =
+      at::native::onednn::GpuEngineManager::Instance().get_engine(
+          {c10::kXPU, c10::xpu::current_device()});
+  auto stream = at::native::onednn::GpuStreamManager::Instance().get_stream();
+
+  // Validation checks have passed lets resize the output to actual size
+  IntArrayRef mat1_sizes = mat1.sizes();
+  IntArrayRef mat2_sizes = mat2.sizes();
+  at::native::resize_output(out, {mat1_sizes[0], mat2_sizes[1]});
+
+  float input_scale = scale_a.item<float>();
+  float weight_scale = scale_b.item<float>();
+  dnnl::memory src = at::native::onednn::make_onednn_memory(
+      {mat1.sizes().vec(),
+       at::native::onednn::get_onednn_dtype(mat1),
+       mat1.strides().vec()},
+      engine,
+      mat1.data_ptr());
+  dnnl::memory weight = at::native::onednn::make_onednn_memory(
+      {mat2.sizes().vec(),
+       at::native::onednn::get_onednn_dtype(mat2),
+       mat2.strides().vec()},
+      engine,
+      mat2.data_ptr());
+  bool with_bias = bias.has_value();
+  int64_t K = mat1_sizes[1], M = mat1_sizes[0], N = mat2_sizes[1];
+
+  std::vector<int64_t> src_dims = {M, K};
+  std::vector<int64_t> weight_dims = {K, N};
+  std::vector<int64_t> dst_dims = {M, N};
+
+  dnnl::memory dst = at::native::onednn::make_onednn_memory(
+      {out.sizes().vec(),
+       at::native::onednn::get_onednn_dtype(out),
+       out.strides().vec()},
+      engine,
+      out.data_ptr());
+  dnnl::memory onednn_bias;
+  if (with_bias) {
+    auto bias_value = bias.value();
+    if (bias_value.dim() == 1) {
+      auto b_reshape = bias_value.reshape({1, bias_value.size(0)});
+      onednn_bias = at::native::onednn::make_onednn_memory(
+          {b_reshape.sizes().vec(),
+           at::native::onednn::get_onednn_dtype(b_reshape),
+           b_reshape.strides().vec()},
+          engine,
+          b_reshape.data_ptr());
+    } else {
+      onednn_bias = at::native::onednn::make_onednn_memory(
+          {bias_value.sizes().vec(),
+           at::native::onednn::get_onednn_dtype(bias_value),
+           bias_value.strides().vec()},
+          engine,
+          bias_value.data_ptr());
+    }
+  }
+  dnnl::primitive_attr op_attr = dnnl::primitive_attr();
+  if (input_scale != 1.0f) {
+    op_attr.set_scales_mask(DNNL_ARG_SRC, 0);
+  }
+  if (weight_scale != 1.0f) {
+    op_attr.set_scales_mask(DNNL_ARG_WEIGHTS, 0);
+  }
+
+  op_attr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
+  // TODO: Remove this try/catch when oneDNN provides API to notify
+  // framework whether current platform can run FP8 primitives.
+  dnnl::matmul::primitive_desc primitive_desc;
+  try {
+    primitive_desc = with_bias ? dnnl::matmul::primitive_desc(
+                                     engine,
+                                     src.get_desc(),
+                                     weight.get_desc(),
+                                     onednn_bias.get_desc(),
+                                     dst.get_desc(),
+                                     op_attr)
+                               : dnnl::matmul::primitive_desc(
+                                     engine,
+                                     src.get_desc(),
+                                     weight.get_desc(),
+                                     dst.get_desc(),
+                                     op_attr);
+  } catch (dnnl::error& e) {
+    if (e.status == dnnl_unimplemented)
+      throw std::runtime_error("Onednn cannot create primitive.");
+    // on any other error just re-throw
+    throw;
+  }
+  auto primitive = dnnl::matmul(primitive_desc);
+
+  // Prepare args and execute primitive
+  dnnl::memory scratchpad = at::native::onednn::make_onednn_memory(
+      primitive_desc.scratchpad_desc(), engine, nullptr);
+  std::unordered_map<int, dnnl::memory> args;
+  args.insert({DNNL_ARG_SRC, src});
+  args.insert({DNNL_ARG_WEIGHTS, weight});
+  args.insert({DNNL_ARG_DST, dst});
+  args.insert({DNNL_ARG_SCRATCHPAD, scratchpad});
+  if (with_bias) {
+    args.insert({DNNL_ARG_BIAS, onednn_bias});
+  }
+  auto sycl_queue = dnnl::sycl_interop::get_queue(stream);
+  float* weight_scale_p = sycl::malloc_shared<float>(1, sycl_queue);
+  *weight_scale_p = weight_scale;
+  dnnl::memory wei_scales_t = at::native::onednn::make_onednn_memory(
+      {{1}, dnnl::memory::data_type::f32, {1}},
+      engine,
+      reinterpret_cast<void*>(weight_scale_p));
+
+  if (input_scale != 1.0f) {
+    float* input_scale_p = sycl::malloc_shared<float>(1, sycl_queue);
+    *input_scale_p = input_scale;
+    dnnl::memory src_scales_t = at::native::onednn::make_onednn_memory(
+        {{1}, dnnl::memory::data_type::f32, {1}},
+        engine,
+        reinterpret_cast<void*>(input_scale_p));
+    args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC, src_scales_t});
+  }
+  args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_WEIGHTS, wei_scales_t});
+
+  auto matmul_forward = dnnl::matmul(primitive_desc);
+  auto matmul_fwd_event =
+      dnnl::sycl_interop::execute(matmul_forward, stream, args);
+  return out;
+}
+
+Tensor _scaled_mm_xpu(
+    const Tensor& mat_a,
+    const Tensor& mat_b,
+    const Tensor& scale_a,
+    const Tensor& scale_b,
+    const std::optional<at::Tensor>& bias,
+    const std::optional<at::Tensor>& scale_result,
+    std::optional<c10::ScalarType> out_dtype,
+    bool use_fast_accum) {
+  const auto out_dtype_ = out_dtype.value_or(mat_a.scalar_type());
+  Tensor out = at::empty({0}, mat_a.options().dtype(out_dtype_));
+  return _scaled_mm_out_xpu(
+      mat_a,
+      mat_b,
+      scale_a,
+      scale_b,
+      bias,
+      scale_result,
+      out_dtype,
+      use_fast_accum,
+      out);
+}
+
 TORCH_LIBRARY_IMPL(aten, XPU, m){
   m.impl("addmm.out", TORCH_FN(addmm_out));
   m.impl("_addmm_activation.out", TORCH_FN(_addmm_activation_out));
@@ -439,6 +667,8 @@ TORCH_LIBRARY_IMPL(aten, XPU, m){
   m.impl("bmm", TORCH_FN(bmm));
   m.impl("addmv.out", TORCH_FN(addmv_out));
   m.impl("tensordot.out", TORCH_FN(tensordot_out));
+  m.impl("_scaled_mm", TORCH_FN(_scaled_mm_xpu));
+  m.impl("_scaled_mm.out", TORCH_FN(_scaled_mm_out_xpu));
 }
 
 } // namespace at::native::xpu

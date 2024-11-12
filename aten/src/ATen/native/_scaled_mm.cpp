@@ -52,6 +52,7 @@ _scaled_mm_out_cpu(const Tensor& mat1, const Tensor& mat2,
           std::optional<c10::ScalarType> out_dtype,
           bool use_fast_accum,
           Tensor& out) {
+  printf("Running _scaled_mm_out_cpu\n");
   TORCH_CHECK(mat1.dim() == 2, "mat1 must be a matrix");
   TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix");
   TORCH_CHECK(

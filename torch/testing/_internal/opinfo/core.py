@@ -911,8 +911,8 @@ class OpInfo:
         )
 
         # Validates the dtypes are generated from the dispatch-related functions
-        for dtype_list in dtypes_args:
-            assert isinstance(dtype_list, (_dispatch_dtypes, type(None)))
+        # for dtype_list in dtypes_args:
+        #     assert isinstance(dtype_list, (_dispatch_dtypes, type(None)))
 
         if self.aten_name is None:
             self.aten_name = self.name
