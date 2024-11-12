@@ -61,9 +61,15 @@ def sac_milp(
             note that value of -1 means that the ILP solver failed to find a solution.
 
     """
-
+    # ensure FSDP units is valid
     if not fsdp_units:
         fsdp_units = []
+    if fsdp_units:
+        if graph.nodes[0]["fqn"] not in fsdp_units:
+            raise ValueError(
+                "Root module must be an FSDP unit. Please add it to `fsdp_units`."
+            )
+
     num_nodes = len(graph.nodes)
     M = graph.nodes[0]["fw_runtime_per_module"]  # note: for big-M method
     MEM_MULTIPLIER = 2**30
@@ -152,7 +158,7 @@ def sac_milp(
     # 1. r_i > 0 only if y_i == 1 (discard only if it is an AC unit)
     # 2. r_i needs to be large enough to cover the difference between
     #    ACM and IA. Otherwise, we are not saving any memory
-    # 3. r_i cannot be too large as they are operators that have to be saved.
+    # 3. r_i cannot be too large as there are operators that have to be saved.
     for i in range(num_nodes):
         prob += y[i] >= r[i]
         if graph.nodes[i]["is_leaf"]:
@@ -202,7 +208,7 @@ def sac_milp(
 
     # [Constraint] express unsharded parameter all-gathered at each module
     # note: there are two assumptions here
-    # 1. no nested FSDP units
+    # 1. no nested FSDP units  TODO: relax this assumption
     # 2. root module is an FSDP unit
     for i in range(1, num_nodes):
         P_i = graph.nodes[i]["param_per_module"] / MEM_MULTIPLIER
