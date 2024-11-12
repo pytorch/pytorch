@@ -3085,6 +3085,10 @@ class PyCodeCache:
 
     @classmethod
     def cache_clear(cls, purge: bool = False) -> None:
+        """
+        Clear the in-memory module cache. If purge=True, also delete all the
+        corresponding on-disk source files.
+        """
         if purge:
             for mod in cls.modules:
                 try:
