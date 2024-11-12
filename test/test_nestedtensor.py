@@ -1289,6 +1289,7 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
             subtest(torch.isposinf, name="isposinf"),
             subtest(torch.isneginf, name="isneginf"),
             subtest(torch.isnan, name="isnan"),
+            subtest(torch.sqrt, name="sqrt"),
         ],
     )
     def test_unary_funcs(self, device, func):
