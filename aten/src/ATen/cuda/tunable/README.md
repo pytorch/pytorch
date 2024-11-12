@@ -107,21 +107,25 @@ os.putenv('PYTORCH_TUNABLEOP_RECORD_UNTUNED', '0')
 tunable.tune_gemm_in_file("tunableop_untuned0.csv")
 ```
 
-It is also possible to take multiple untuned files and distribute the GEMMs for tuning to multiple-GPUs.
-In the first step, the GEMMs are first gathered and duplicate GEMMs are eliminated. Next, the GEMMs are
-distributed to different GPUs for tuning. After all GEMMs are tuned, the results from all the GPUs are then
-gathered into a single file whose base filename has `_full0` appended to it (e.g. `tunableop_results_full0.csv`).
-Finally, this new file, containing the gathered results, will be duplicated N times, once for each GPU as
-convenience to the user will run the workload with the tuned configuration on N GPUs.
+It is also possible to take multiple untuned files and distribute the GEMMs for tuning to multiple GPUs
+within a single node. In the first step, the GEMMs are first gathered and duplicate GEMMs are eliminated.
+Next, the GEMMs are distributed to different GPUs for tuning. After all GEMMs are tuned, the results from
+all the GPUs are then gathered into a single file whose base filename has `_full0` appended to it
+(e.g. `tunableop_results_full0.csv`). Finally, this new file, containing the gathered results, will be
+duplicated N times, once for each GPU as convenience to the user will run the workload with the tuned
+configuration on N GPUs.
 
 ```
-num_gpus = 8 # number of GPUs that will be used during the tuning process
-tunable.mgpu_tune_gemm_in_file("tunableop_untuned?.csv", num_gpus)
+if __name__ == "__main__":
+    num_gpus = 8 # number of GPUs that will be used during the tuning process
+    tunable.mgpu_tune_gemm_in_file("tunableop_untuned?.csv", num_gpus)
 ```
 
-The argument to `mgpu_tune_gemm_in_file` must contain a wild card expression (? or *) to generate the list of
-untuned files containing the GEMMs to be processed. The `num_gpus` must between 1 and the total number of GPUs
-available.
+Note that the usage of the `mgpu_tune_gemm_in_file` API is different from its single GPU counterpart
+(`tune_gemm_in_file`). The body of the Python script that calls the API must be wrapped in `main()` as shown
+due to the use of concurrent futures module. The argument to `mgpu_tune_gemm_in_file` must contain a wild card
+expression (? or *) to generate the list of untuned files containing the GEMMs to be processed. The `num_gpus`
+must between 1 and the total number of GPUs available.
 
 ## Tuning Context
 The behavior of TunableOp is currently manipulated through environment variables, the C++ interface of
