@@ -584,8 +584,7 @@ def _multi_tensor_adafactor(
 
         # square the eps1 as we sqrt after to keep eps1's magnitude
         torch._foreach_clamp_min_(var_estimates, eps1 * eps1)
-        torch._foreach_sqrt_(var_estimates)
-        torch._foreach_reciprocal_(var_estimates)
+        torch._foreach_rsqrt_(var_estimates)
         torch._foreach_mul_(var_estimates, device_grads)
         updates = var_estimates
 

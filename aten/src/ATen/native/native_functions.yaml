@@ -11293,6 +11293,21 @@
     CUDA: foreach_tensor_round_cuda_
   autogen: _foreach_round.out
 
+- func: _foreach_rsqrt(Tensor[] self) -> Tensor[]
+  device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: foreach_tensor_rsqrt_slow
+    CUDA: foreach_tensor_rsqrt_cuda
+
+- func: _foreach_rsqrt_(Tensor(a!)[] self) -> ()
+  device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: foreach_tensor_rsqrt_slow_
+    CUDA: foreach_tensor_rsqrt_cuda_
+  autogen: _foreach_rsqrt.out
+
 - func: _foreach_sigmoid(Tensor[] self) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
   variants: function

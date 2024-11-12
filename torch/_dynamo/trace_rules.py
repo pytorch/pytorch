@@ -1452,6 +1452,8 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._foreach_round",
         "torch._foreach_sigmoid_",
         "torch._foreach_sigmoid",
+        "torch._foreach_rsqrt_",
+        "torch._foreach_rsqrt",
         "torch._foreach_sign_",
         "torch._foreach_sign",
         "torch._foreach_sin_",
