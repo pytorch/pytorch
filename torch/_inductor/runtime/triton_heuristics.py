@@ -1429,14 +1429,14 @@ def get_nd_reduction_numels(r: int, size_hints):
     r = min(r, conditional_product(*size_hints))
 
     remaining = r
-    rnumels = []
-    for idx, hint in enumerate(size_hints):
+    rnumels: List[int] = []
+    for idx, hint in reversed(list(enumerate(size_hints))):
         max_size = min(hint, TRITON_MAX_BLOCK[f"R{idx}_"])
         dim = min(max_size, remaining)
         assert (
             remaining % dim == 0
         ), f"Expected dimension '{dim}' to divide remaining size '{remaining}'"
-        rnumels.append(dim)
+        rnumels.insert(0, dim)
         remaining //= dim
 
     # Sanity check the results.
