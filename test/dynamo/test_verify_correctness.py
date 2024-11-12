@@ -110,7 +110,7 @@ class TestVerifyCorrectness(torch._dynamo.test_case.TestCase):
 
         toy_example(i1, i2)
         try:
-            opt_toy_example = torch.compile(toy_example, incorrect_compile_fn)
+            opt_toy_example = torch.compile(toy_example, backend=incorrect_compile_fn)
             opt_toy_example(i1, i2)
         except RuntimeError:
             pass
