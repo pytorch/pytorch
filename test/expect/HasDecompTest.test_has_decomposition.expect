@@ -57,6 +57,7 @@ aten::_convert_indices_from_coo_to_csr.out
 aten::_convert_indices_from_csr_to_coo
 aten::_convert_indices_from_csr_to_coo.out
 aten::_convert_weight_to_int4pack
+aten::_convert_weight_to_int4pack_for_cpu
 aten::_convolution
 aten::_convolution.out
 aten::_copy_from
@@ -637,6 +638,7 @@ aten::_values
 aten::_values_copy
 aten::_values_copy.out
 aten::_weight_int4pack_mm
+aten::_weight_int4pack_mm_for_cpu
 aten::_weight_int8pack_mm
 aten::_weight_norm_interface_backward
 aten::_weight_norm_interface_backward.out
