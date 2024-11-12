@@ -376,7 +376,7 @@ class SimpleFSDPModule:
         self.__init__(*args, **kwargs)
         return self
 
-    # NOTE(yf225): this is called by Ads workflow
+    # NOTE(yf225): per Andrew: this is only meant for implicit prefetching, which SimpleFSDP will not use.
     def set_post_optim_event(self, event: torch.Event) -> None:
         pass
 
