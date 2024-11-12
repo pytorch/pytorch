@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import builtins
+import collections
 import copy
 import functools
 import hashlib
@@ -1431,7 +1432,7 @@ def triton_config(
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
 
-def get_nd_reduction_numels(r: int, size_hints):
+def _get_nd_reduction_numels(r: int, size_hints: Sequence[int]) -> List[int]:
     """
     Converts a linear reduction numel to ND, in row major order.
     This order is often desirable as it presents opportunities to coalesce memory
@@ -1443,14 +1444,14 @@ def get_nd_reduction_numels(r: int, size_hints):
     r = min(r, conditional_product(*size_hints))
 
     remaining = r
-    rnumels: List[int] = []
+    rnumels: collections.deque[int] = collections.deque()
     for idx, hint in reversed(list(enumerate(size_hints))):
         max_size = min(hint, TRITON_MAX_BLOCK[f"R{idx}_"])
         dim = min(max_size, remaining)
         assert (
             remaining % dim == 0
         ), f"Expected dimension '{dim}' to divide remaining size '{remaining}'"
-        rnumels.insert(0, dim)
+        rnumels.appendleft(dim)
         remaining //= dim
 
     # Sanity check the results.
@@ -1459,7 +1460,7 @@ def get_nd_reduction_numels(r: int, size_hints):
         r == final_numel
     ), f"Expected ND reduction size ({rnumels}) to have {r} elements."
 
-    return rnumels
+    return list(rnumels)
 
 
 def triton_config_reduction(
@@ -1477,7 +1478,7 @@ def triton_config_reduction(
     """
     # Convert the linear reduction numel into a multi-dimensional block.
     reduction_size_hints = size_hints[1:]
-    rnumels = get_nd_reduction_numels(r, reduction_size_hints)
+    rnumels = _get_nd_reduction_numels(r, reduction_size_hints)
 
     # shrink sizes to size hints
     x = min(x, size_hints[0])

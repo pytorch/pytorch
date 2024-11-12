@@ -109,11 +109,11 @@ class BlockPatternMatcher:
         Compute the cumulative size of each dimension's slice.
         This proceeds from the last dim up to the second.
         """
-        numels = [sympy.S.One]
+        numels = collections.deque([sympy.S.One])
         for dim in dims[:0:-1]:
             numel = dim * numels[0]
-            numels.insert(0, numel)
-        return numels
+            numels.appendleft(numel)
+        return list(numels)
 
     @classmethod
     def match_mod_div_block_expr(
