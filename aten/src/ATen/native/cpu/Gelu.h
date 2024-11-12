@@ -42,8 +42,6 @@ vec::Vectorized<T> vectorized_gelu_approximated_with_tanh(vec::Vectorized<T> x) 
 
 template <typename T, std::enable_if_t<std::is_reduced_floating_point_v<T>, bool> = true>
 vec::Vectorized<T> vectorized_gelu_approximated_with_tanh(vec::Vectorized<T> x) {
-  const vec::Vectorized<float> kPointFiveVec(0.5f);
-  const vec::Vectorized<float> kOneVec(1);
   auto [x0, x1] = convert_to_float<T>(x);
   return convert_from_float<T>(
       vectorized_gelu_approximated_with_tanh(x0),
@@ -68,11 +66,8 @@ vec::Vectorized<T> vectorized_gelu(vec::Vectorized<T> x) {
 
 template<typename T, std::enable_if_t<std::is_reduced_floating_point_v<T>, bool> = true>
 vec::Vectorized<T> vectorized_gelu(vec::Vectorized<T> x) {
-  const vec::Vectorized<float> kAlphaVec(float(M_SQRT1_2));
-  const vec::Vectorized<float> kOneVec(float(1));
-  const vec::Vectorized<float> kPointFiveVec(float(0.5));
-  auto [x0, x1] = convert_to_float<T>(x);
-  return convert_from_float<T>(vectorized_gelu(x0), vectorized_gelu(x1));
+  auto [x0, x1] = at::vec::convert_to_float<T>(x);
+  return at::vec::convert_from_float<T>(vectorized_gelu(x0), vectorized_gelu(x1));
 }
 
 
