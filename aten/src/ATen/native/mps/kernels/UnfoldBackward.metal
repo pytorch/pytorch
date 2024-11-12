@@ -8,12 +8,18 @@ ulong offset_from_coord(thread ulong* idx, constant ulong* strides, uint ndim) {
    return rc;
 }
 
+ulong2 divmod(long x, ulong y) {
+  return ulong2(x/y, x%y);
+}
+
 void pos_from_index(ulong idx, thread ulong* pos, constant ulong* sizes, uint ndim) {
   for(uint i = 0; i < ndim; ++i) {
-    pos[i] = idx % sizes[i];
-    idx /= sizes[i];
+    auto rc = divmod(idx, sizes[i]);
+    pos[i] = rc.y;
+    idx = rc.x;
   }
 }
+
 
 
 // Consider out = in.unfold(dim, size, step), then
@@ -37,10 +43,17 @@ kernel void unfold_backward_float(
     auto size = dim_size_step_ndim.y;
     auto step = dim_size_step_ndim.z;
     auto ndim = dim_size_step_ndim.w;
-    auto dim_idx_size = (output_sizes[dim_idx] - size) / step + 1;
     ulong pos[16];
     pos_from_index(thread_index, pos, output_sizes, ndim);
-    auto output_offs = offset_from_coord(pos, output_strides, ndim);
-    pos[ndim] = size;
-    grad_out[output_offs] = 1.0 * thread_index;
+    const auto output_offs = offset_from_coord(pos, output_strides, ndim);
+
+    auto dim_idx_size = (output_sizes[dim_idx] - size) / step + 1;
+    auto rc = divmod(pos[dim_idx], step);
+    if (rc.x >= dim_idx_size or rc.y >= size) {
+      grad_out[output_offs] = 0.0;
+    }
+    pos[dim_idx_size] = rc.x;
+    pos[ndim] = rc.y;
+    const auto input_offs = offset_from_coord(pos, input_strides, ndim + 1);
+    grad_out[output_offs] = grad_in[input_offs];
 }

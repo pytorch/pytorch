@@ -9,6 +9,8 @@
 // unfold_backward, the algorithm is described in
 // /native/cpu/UnfoldBackwardKernel.cpp
 
+#include <ATen/mps/MPSProfiler.h>
+
 namespace at::native {
 namespace {
 
@@ -40,9 +42,12 @@ void unfold_backward_metal(
   auto stream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
+      if (getMPSProfiler().isCaptureEnabled()) {
+        getMPSProfiler().startCapture("unfold_backward", stream);
+      }
       auto computeEncoder = stream->commandEncoder();
       [computeEncoder setComputePipelineState:unfoldBackwardPSO];
-      std::array<uint32_t, 4> dim_size_step_ndim = {static_cast<uint32_t>(dim), static_cast<uint32_t>(step), static_cast<uint32_t>(size), static_cast<uint32_t>(grad_out.ndimension())};
+      std::array<uint32_t, 4> dim_size_step_ndim = {static_cast<uint32_t>(dim), static_cast<uint32_t>(size), static_cast<uint32_t>(step), static_cast<uint32_t>(grad_out.ndimension())};
       mtl_setBuffer(computeEncoder, grad_in, 0);
       mtl_setBuffer(computeEncoder, grad_out, 1);
       mtl_setBytes(computeEncoder, grad_in.strides(), 2);
@@ -50,6 +55,9 @@ void unfold_backward_metal(
       mtl_setBytes(computeEncoder, grad_out.strides(), 4);
       mtl_setBytes(computeEncoder, dim_size_step_ndim, 5);
       mtl_dispatch1DJob(computeEncoder, unfoldBackwardPSO, grad_out.numel());
+      if (getMPSProfiler().isCapturing()) {
+        getMPSProfiler().stopCapture(stream);
+      }
     }
   });
 }
