@@ -6,7 +6,9 @@ import tempfile
 import unittest
 
 import torch
+import torch.version
 import torch.xpu._gpu_trace as gpu_trace
+from torch.testing import make_tensor
 from torch.testing._internal.autocast_test_lists import AutocastTestLists, TestAutocast
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -18,6 +20,7 @@ from torch.testing._internal.common_methods_invocations import ops_and_refs
 from torch.testing._internal.common_utils import (
     find_library_location,
     IS_LINUX,
+    IS_WINDOWS,
     NoTest,
     run_tests,
     suppress_warnings,
@@ -447,6 +450,19 @@ print(torch.xpu.device_count())
                     self.assertLess(compiler_version, 20250000)
                 else:
                     self.fail("Unexpected libsycl library")
+
+    def test_dlpack_shared_storage(self):
+        x = make_tensor((5,), dtype=torch.float32, device="xpu")
+        if IS_WINDOWS and int(torch.version.xpu) < 20250000:
+            with self.assertRaisesRegex(
+                NotImplementedError,
+                "Default context is not supported on XPU by default on Windows for SYCL compiler versions earlier than 2025.0.0.",
+            ):
+                torch.to_dlpack(x)
+        else:
+            z = torch.from_dlpack(torch.to_dlpack(x))
+            z[0] = z[0] + 1.0
+            self.assertEqual(z, x)
 
 
 instantiate_device_type_tests(TestXpu, globals(), only_for="xpu", allow_xpu=True)
