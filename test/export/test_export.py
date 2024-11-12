@@ -9025,6 +9025,28 @@ def forward(self, x):
                 },
             }
             _load_dynamic_shapes(spec, from_dict=True)
+    
+    def test_attention(self):
+        class Foo(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.embed_dim = 768
+                self.num_heads = 12
+                self.dropout = 0.0
+                self.batch_first = True
+                self.self_attention = torch.nn.MultiheadAttention(
+                    self.embed_dim,
+                    self.num_heads,
+                    dropout=self.dropout,
+                    batch_first=self.batch_first,
+                )
+
+            def forward(self, input1: torch.Tensor):
+                x, _ = self.self_attention(input1, input1, input1, need_weights=False)
+                return x
+        
+        inps = (torch.randn(1, 224, 768, device="cpu"),)
+        export(Foo(), inps)
 
     @testing.expectedFailureSerDer  # TODO(pianpwk): PowByNatural valuerange deserialization
     @testing.expectedFailureSerDerNonStrict
