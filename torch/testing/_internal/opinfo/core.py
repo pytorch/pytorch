@@ -1631,9 +1631,19 @@ class SubtestRuleCtx:
 
     def __exit__(self, exc_type, exc, exc_tb):
         if self.rule_ctx is not None:
-            if self.rule_ctx.__exit__(exc_type, exc, exc_tb):
-                self.subtest_ctx.__exit__(None, None, None)
-                return True
+            try:
+                if self.rule_ctx.__exit__(exc_type, exc, exc_tb):
+                    self.subtest_ctx.__exit__(None, None, None)
+                    return True
+            except AssertionError as e:
+                # Thrown if an expected error is not raised.
+                # Hack in the rule name to help out with debugging.
+                if len(e.args) >= 1:
+                    e.args = (
+                        f"{e.args[0]}\nAssociated {self.rule.type} rule: {self.rule.name}",
+                        *e.args[1:],
+                    )
+                return self.subtest_ctx.__exit__(type(e), e, None)
         if self.subtest_ctx is not None:
             return self.subtest_ctx.__exit__(exc_type, exc, exc_tb)
         return True
