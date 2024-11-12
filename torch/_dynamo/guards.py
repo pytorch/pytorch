@@ -108,7 +108,14 @@ from .source import (
     UnspecializedParamBufferSource,
     WeakRefCallSource,
 )
-from .types import CacheEntry, ExtraState, GuardedCode, GuardFail, GuardFn  # noqa: F401
+from .types import (  # noqa: F401
+    CacheEntry,
+    DynamoFrameType,
+    ExtraState,
+    GuardedCode,
+    GuardFail,
+    GuardFn,
+)
 from .utils import (
     common_constant_types,
     dict_keys_repr,
@@ -2605,7 +2612,7 @@ def get_guard_fail_reason(
 
 
 def get_and_maybe_log_recompilation_reason(
-    cache_entry, frame: types.FrameType
+    cache_entry, frame: DynamoFrameType
 ) -> List[str]:
     """
     Return the list of guard failure reasons using cache_entry.
