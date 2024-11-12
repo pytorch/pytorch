@@ -2812,7 +2812,6 @@ def reduce(tensor, dst, op=ReduceOp.SUM, group=None, async_op=False):
         work.wait()
 
 
-@_time_logger
 def _object_to_tensor(obj, device, group):
     f = io.BytesIO()
     _pickler(f).dump(obj)
@@ -2832,7 +2831,6 @@ def _object_to_tensor(obj, device, group):
     return byte_tensor, local_size
 
 
-@_time_logger
 def _tensor_to_object(tensor, tensor_size, group):
     if get_debug_level() == DebugLevel.DETAIL and is_nccl_available():
         backend = get_backend(group)
