@@ -328,7 +328,7 @@ class CachingAutotuner(KernelInterface):
                         continue
 
                     # make sure rblocks are not too small
-                    if any(block <= 64 for block in rblocks):
+                    if conditional_product(*rblocks) <= 64:
                         continue
 
                     # each SM of A100 has 65536 32-bit registers. To maximize
