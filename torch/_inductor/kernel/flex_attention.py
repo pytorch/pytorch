@@ -503,7 +503,7 @@ def forward_block_mn(
         ) | indent_except_first(2) }}
 
         if CHECK_BLOCK_BOUNDARY:
-            mask_mod_output = tl.where(offs_n < KV_LEN, mask_mod_output, float("-inf"))
+            mask_mod_output = tl.where(offs_n < KV_LEN, mask_mod_output, False)
         # apply mask for partially unmasked blocks
         post_mod_scores = tl.where(mask_mod_output, post_mod_scores, float("-inf"))
 
