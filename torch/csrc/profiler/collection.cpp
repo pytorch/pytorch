@@ -362,12 +362,9 @@ std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
         torch::profiler::impl::saveExtraArgs(fn));
   }
 
-  // Record NCCL metadata for specific CPU ops
-  fn.isNcclMeta() ? torch_ops_.extra_meta_.emplace_back(
-                        torch::profiler::impl::saveNcclMeta(fn))
-                  : torch_ops_.extra_meta_.emplace_back();
-
   auto out = std::make_unique<KinetoObserverContext>(event);
+  // Record NCCL metadata for specific CPU ops
+  out->event_->extra_meta_ = torch_ops_.extra_meta_.emplace_back();
 
   if (config_.state == ProfilerState::KINETO_GPU_FALLBACK) {
     try {
@@ -1592,4 +1589,26 @@ void set_cuda_sync_enabled_val(bool val) {
   cuda_sync_enabled_fn() = [val]() { return val; };
 }
 
+namespace {
+std::function<bool()>& record_tensor_addrs_enabled() {
+  static std::function<bool()> fn = []() { return false; };
+  return fn;
+}
+} // namespace
+
+bool get_record_tensor_addrs_enabled() {
+  static std::optional<bool> cached_record_tensor_addrs_enabled;
+  if (!cached_record_tensor_addrs_enabled.has_value()) {
+    cached_record_tensor_addrs_enabled = record_tensor_addrs_enabled()();
+  }
+  return cached_record_tensor_addrs_enabled.value();
+}
+
+void set_record_tensor_addrs_enabled_fn(std::function<bool()> fn) {
+  record_tensor_addrs_enabled() = std::move(fn);
+}
+
+void set_record_tensor_addrs_enabled_val(bool val) {
+  record_tensor_addrs_enabled() = [val]() { return val; };
+}
 } // namespace torch::profiler::impl

@@ -502,6 +502,10 @@ void onFunctionExit(
   }
   kineto_ctx_ptr->event_->basic_fields_.end_tid_ =
       at::RecordFunction::currentThreadId();
+  if (fn.isNcclMeta()) {
+    auto& extra_meta = *(kineto_ctx_ptr->event_->extra_meta_);
+    extra_meta = torch::profiler::impl::saveNcclMeta(fn);
+  }
   if (config.state == ProfilerState::KINETO_GPU_FALLBACK) {
     try {
       auto fallback = kineto_ctx_ptr->fallback_;
