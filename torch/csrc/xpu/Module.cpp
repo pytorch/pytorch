@@ -311,8 +311,9 @@ static void registerXpuDeviceProperties(PyObject* module) {
     TORCH_CHECK_NOT_IMPLEMENTED(
         false,
         "architecture requires PyTorch to be built with SYCL compiler version 2025.0.0 or newer.");
-#endif
+#else
     return static_cast<int64_t>(prop.architecture);
+#endif
   };
   auto m = py::handle(module).cast<py::module>();
 
