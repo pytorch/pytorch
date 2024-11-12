@@ -1,5 +1,6 @@
 import copy
-from typing import cast, Dict, List, OrderedDict, Tuple, TypedDict
+import weakref
+from typing import cast, Dict, List, OrderedDict, Set, Tuple, TypedDict
 
 import numpy as np
 
@@ -11,9 +12,13 @@ from torch.distributed._tools.mem_tracker import (
     MemTracker,
 )
 from torch.distributed._tools.runtime_estimator import RuntimeEstimator
-from torch.distributed._tools.sac_estimator import SACEstimator, SACTradeOffStats
+from torch.distributed._tools.sac_estimator import (
+    SACEstimator,
+    SACGreedyOrderMeta,
+    SACStats,
+    SACTradeOffStats,
+)
 
-import weakref
 
 def get_module_name_dict(root_module: torch.nn.Module) -> weakref.WeakKeyDictionary:
     """
@@ -25,9 +30,9 @@ def get_module_name_dict(root_module: torch.nn.Module) -> weakref.WeakKeyDiction
     Returns:
         weakref.WeakKeyDictionary: Dictionary of modules and their names.
     """
-    module_dict = weakref.WeakKeyDictionary()
+    module_dict: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
 
-    def _get_mod_name(mod: torch.nn.Module, fqn: str=""):
+    def _get_mod_name(mod: torch.nn.Module, fqn: str = "") -> str:
         if mod in module_dict:
             return module_dict[mod]
         mod_name = fqn or type(mod).__name__
@@ -38,6 +43,7 @@ def get_module_name_dict(root_module: torch.nn.Module) -> weakref.WeakKeyDiction
 
     _get_mod_name(root_module)
     return module_dict
+
 
 class ModOrder(TypedDict):
     fw_pre_order: List[str]
@@ -82,6 +88,8 @@ class ModStats(TypedDict):
     sac_runtime: float
     # Total ac_memory for the module
     sac_memory: int
+    # The mandatory saved activation memory for a module
+    saved_memory: int
     # Number of piecewise-linear functions used for approximating ac tradeoff curve
     n_segments: int
     # Slopes of the of piecewise-linear functions
@@ -97,6 +105,7 @@ class ModStats(TypedDict):
 class ModuleInfo(TypedDict):
     mod_order: ModOrder
     mod_stats: List[ModStats]
+    opt_memory: int
 
 
 def aggregate_stats(
@@ -124,6 +133,7 @@ def aggregate_stats(
     mod_mem_stats: Dict[torch.nn.Module, _ModMemStats] = dict(
         copy.deepcopy(mem_tracker.memory_tracking)
     )
+    opt_memory = mem_tracker.get_tracker_snapshot("peak")[dev][_MemRefType.OPT]
 
     # Runtime stats
     mod_runtime_stats: Dict[str, ModRuntime] = {
@@ -144,10 +154,16 @@ def aggregate_stats(
     mod_sac_tradeoff_stats: Dict[str, SACTradeOffStats] = copy.deepcopy(
         sac_estimator.sac_mod_tradeoff_stats
     )
+    mod_sac_greedy_stats: Dict[str, SACGreedyOrderMeta] = copy.deepcopy(
+        sac_estimator.sac_mod_greedy_order_meta
+    )
+
+    mod_sac_stats: Dict[str, SACStats] = copy.deepcopy(sac_estimator.sac_mod_stats)
 
     module_info: ModuleInfo = {
         "mod_order": mod_order,
         "mod_stats": [],
+        "opt_memory": opt_memory,
     }
 
     for mod in model.modules():
@@ -161,8 +177,26 @@ def aggregate_stats(
                 breakpoints = tradeoff_stats.fit_breaks
                 tradeoff_curve = tradeoff_stats.tradeoff_curve
                 is_leaf = False
+
+                sac_stats_memory = mod_sac_stats[mod_mem_stat.mod_fqn].memory
+                greedy_meta = mod_sac_greedy_stats[mod_mem_stat.mod_fqn]
+                stored_ops, inplace_op_groups, random_inplace_ops = (
+                    greedy_meta.stored_ops,
+                    greedy_meta.inplace_op_groups,
+                    greedy_meta.random_inplace_ops,
+                )
+                stored_indices: Set[int] = set()
+                for s_idx in stored_ops:
+                    stored_indices.add(s_idx)
+                    if s_idx in inplace_op_groups:
+                        stored_indices.update(inplace_op_groups[s_idx])
+                    if s_idx in random_inplace_ops:
+                        stored_indices.update(random_inplace_ops)
+                saved_memory = sum(
+                    sac_stats_memory[op_idx] for op_idx in stored_indices
+                )
             else:
-                sac_runtime = sac_memory = n_segments = 0
+                sac_runtime = sac_memory = n_segments = saved_memory = 0
                 slopes = intercepts = breakpoints = []
                 tradeoff_curve: OrderedDict[float, float] = OrderedDict()  # type: ignore[no-redef]
                 is_leaf = True
@@ -199,6 +233,7 @@ def aggregate_stats(
                 "is_leaf": is_leaf,
                 "sac_runtime": sac_runtime,
                 "sac_memory": sac_memory,
+                "saved_memory": saved_memory,
                 "n_segments": n_segments,
                 "slopes": slopes,
                 "intercepts": intercepts,
@@ -221,6 +256,7 @@ class Graph:
         self.name2node: Dict[str, Node] = {}
         self.ad_matrix = np.zeros((n, n))
         self.fw_post_order: List[str] = []
+        self.opt_memory = 0
 
     def add_node(self, node: Node) -> None:
         self.nodes.append(node)
@@ -233,6 +269,7 @@ def parse_module_info(module_info: ModuleInfo) -> Graph:
     used by MILP solver to find optimal SAC and/or FSDP configurations.
     """
     mod_stats = module_info["mod_stats"]
+    opt_memory = module_info["opt_memory"]
     fw_pre_order = module_info["mod_order"]["fw_pre_order"]
     # assertion and number of nodes
     assert len(mod_stats) == len(fw_pre_order)
@@ -241,6 +278,7 @@ def parse_module_info(module_info: ModuleInfo) -> Graph:
     # create graph
     g = Graph(n_nodes)
     g.fw_post_order = module_info["mod_order"]["fw_post_order"]
+    g.opt_memory = opt_memory
 
     # sort the modules by pre-order and add them to the graph
     module_info["mod_stats"] = sorted(

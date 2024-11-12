@@ -304,9 +304,9 @@ class SACEstimator(TorchDispatchMode):
                 data=self._sac_mod_metadata[mod_fqn].sac_metadata,
                 force_store_random=self._sac_mod_metadata[mod_fqn].force_store_random,
             )
-            self.sac_mod_greedy_order_meta[mod_fqn] = self._get_greedy_order_meta(
-                self.sac_mod_stats[mod_fqn]
-            )
+            self.sac_mod_greedy_order_meta[
+                mod_fqn
+            ] = self.__class__._get_greedy_order_meta(self.sac_mod_stats[mod_fqn])
 
     def _get_force_store_random(self, inputs: Any) -> bool:
         flat_inputs, _ = tree_flatten(inputs)
@@ -491,7 +491,8 @@ class SACEstimator(TorchDispatchMode):
 
         return out
 
-    def _get_greedy_order_meta(self, sac_stats: SACStats) -> SACGreedyOrderMeta:
+    @classmethod
+    def _get_greedy_order_meta(cls, sac_stats: SACStats) -> SACGreedyOrderMeta:
         # An inplace-op group is a set of inplace-ops that operate on the same underlying tensor storage.
         # 1. inplace_op_groups: A dictionary from the top-most parent of inplace-ops to the inplace-ops in the group
         #   The top-most op can itself be an inplace-op or can be a non-inplace op.
@@ -551,7 +552,7 @@ class SACEstimator(TorchDispatchMode):
             set(range(len(sac_stats.memory)))
             - recomputed_ops
             - stored_ops
-            - set.union(*inplace_op_groups.values())
+            - set().union(*(group for group in inplace_op_groups.values()))
             - random_inplace_ops
         )
 
@@ -589,8 +590,7 @@ class SACEstimator(TorchDispatchMode):
         except ImportError as err:
             raise ImportError("Please install pwlf and numpy package.") from err
 
-        stored_ops, recomputed_ops, inplace_op_groups, random_inplace_ops, msps_meta = (
-            greedy_order_meta.stored_ops,
+        recomputed_ops, inplace_op_groups, random_inplace_ops, msps_meta = (
             greedy_order_meta.recomputed_ops,
             greedy_order_meta.inplace_op_groups,
             greedy_order_meta.random_inplace_ops,
@@ -626,19 +626,7 @@ class SACEstimator(TorchDispatchMode):
             tradeoff_curve[(discarded_mem / sac_memory) + delta] = (
                 recomp_runtime / sac_runtime
             )
-        # 6. Finally, we add the memory and recomputation time of the always stored ops.
-        # stored_indices: Set[int] = set()
-        # for s_idx in stored_ops:
-        #     stored_indices.add(s_idx)
-        #     if s_idx in inplace_op_groups:
-        #         stored_indices.update(inplace_op_groups[s_idx])
-        #     if s_idx in random_inplace_ops:
-        #         stored_indices.update(random_inplace_ops)
-        # discarded_mem += sum(sac_stats.memory[op_idx] for op_idx in stored_indices)
-        # recomp_runtime += sum(sac_stats.runtimes[op_idx] for op_idx in stored_indices)
-        # tradeoff_curve[(discarded_mem / sac_memory) + delta] = (
-        #     recomp_runtime / sac_runtime
-        # )
+
         x_ = list(tradeoff_curve.keys())
         y_ = list(tradeoff_curve.values())
         # 7. We shift the y values to left and x values to right to upperbound the trade-off function

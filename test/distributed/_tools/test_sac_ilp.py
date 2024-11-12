@@ -143,7 +143,7 @@ class TestSACILP(TestCase):
         self.assertAlmostEqual(peak_mem / 2583888896, 1, delta=0.05)
 
         ac_decisions, recomputation_time, _ = sac_milp(
-            g, memory_budget=1.6, world_size=4
+            g, memory_budget=1.6, shard_degree=4
         )
 
         # The solution should AC all four transformer layers. On A100 machine, the percentage of

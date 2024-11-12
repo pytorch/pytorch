@@ -1,9 +1,9 @@
 import logging
 import math
 from enum import IntEnum
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
-from torch.distributed._tools.ilp_utils import Graph, is_submodule
+from torch.distributed._tools.ilp_utils import Graph, is_self_or_submodule, is_submodule
 from torch.distributed._tools.sac_estimator import SACStats
 
 
@@ -35,9 +35,9 @@ logger.setLevel(logging.INFO)
 def sac_milp(
     graph: Graph,
     memory_budget: float,
-    world_size: int = 1,
-    ac_units: Optional[List[str]] = None,
-    fsdp_units: Optional[List[str]] = None,
+    shard_degree: int = 1,
+    ac_units: Optional[Set[str]] = None,
+    fsdp_units: Optional[Set[str]] = None,
 ) -> Tuple[Dict[str, float], float, int]:
     """
     MILP to decide which modules to AC and how much memory to discard.
@@ -48,10 +48,11 @@ def sac_milp(
         graph: graph representation of the model as a module submodule tree
             where each node is a submodule with memory & runtime stats
         memory_budget: memory budget in GiB
-        world_size: number of GPUs. In the case of FSDP, world_size will be
-            used to compute the amount of parameter and gradient memory on each rank
-        ac_units: a list of user-specified AC units.
-        fsdp_units: a list of FSDP units. AC units cannot be supermodules of FSDP units.
+        shard_degree: number of GPUs across which the model is sharded. In the case of FSDP,
+            shard_degree will be used to compute the amount of parameter, gradient and optimizer
+            memory on each rank.
+        ac_units: a set of user-specified AC unit FQNs.
+        fsdp_units: a set of FSDP units. AC units cannot be supermodules of FSDP unit FQNs.
 
     Returns:
         Dict[str, float]: the optimal SAC solution, mapping from module fqn to
@@ -62,8 +63,12 @@ def sac_milp(
 
     """
     num_nodes = len(graph.nodes)
-    M = 10**2  # note: numerical issue may occur if M is too big
+    M = graph.nodes[0][
+        "fw_runtime_per_module"
+    ]  # note: numerical issue may occur if M is too big
     MEM_MULTIPLIER = 2**30
+    max_fsdp_unit_memory = 0.0
+    opt_memory = graph.opt_memory / MEM_MULTIPLIER
 
     # Create a MILP problem
     prob = LpProblem("SAC", LpMinimize)
@@ -102,6 +107,50 @@ def sac_milp(
                 for fsdp_unit in fsdp_units
             ):
                 prob += y[i] == 0
+
+        # Extract FQNs of leaf nodes from the graph
+        leaf_fqns = {node["fqn"] for node in graph.nodes if node["is_leaf"]}
+        # Dictionary to store leaf FQNs for each FSDP unit
+        fsdp_unit_leaves: Dict[str, Set[str]] = {}
+        # Dictionary to store parameter count for each FSDP unit
+        fsdp_params_per_unit: Dict[str, int] = {}
+        # Populate leaf FQNs for FSDP units
+        for fsdp_unit in fsdp_units:
+            fsdp_unit_leaves[fsdp_unit] = {
+                leaf_fqn
+                for leaf_fqn in leaf_fqns
+                if is_self_or_submodule(leaf_fqn, fsdp_unit)
+            }
+        # Calculate parameter counts for FSDP units
+        for fsdp_unit in fsdp_units:
+            # Find sub-FSDP units
+            sub_fsdp_units = {
+                cand_unit
+                for cand_unit in fsdp_units
+                if is_submodule(cand_unit, fsdp_unit)
+            }
+            # Union of leaf FQNs from sub-FSDP units
+            sub_fsdp_unit_leaves: Set[str] = set.union(
+                *tuple(fsdp_unit_leaves[sub_unit] for sub_unit in sub_fsdp_units)
+            )
+            # Sum parameters from sub-FSDP unit leaves
+            sub_fsdp_unit_params = sum(
+                graph.name2node[leaf]["param_per_module"]
+                for leaf in sub_fsdp_unit_leaves
+            )
+            # Calculate FSDP unit parameters
+            fsdp_unit_params = (
+                graph.name2node[fsdp_unit]["param_per_module"] - sub_fsdp_unit_params
+            )
+            assert (
+                fsdp_unit_params >= 0
+            ), f"The param size handled by {fsdp_unit} cannot be negative"
+
+            # Store FSDP unit parameter count
+            fsdp_params_per_unit[fsdp_unit] = fsdp_unit_params
+
+        # Find maximum parameter count among FSDP units
+        max_fsdp_unit_memory = max(fsdp_params_per_unit.values()) / MEM_MULTIPLIER
 
     # [Constraint] No nested AC units
     for i in range(num_nodes):
@@ -145,13 +194,17 @@ def sac_milp(
     # 1. r_i > 0 only if y_i == 1 (discard only if it is an AC unit)
     # 2. r_i needs to be large enough to cover the difference between
     #    ACM and IA. Otherwise, we are not saving any memory
+    # 3. r_i cannot be larger than the total amount of ACM available
+    #   for discarding. Hence, we subtract the mandatorily saved memory (SAV).
     for i in range(num_nodes):
         prob += y[i] >= r[i]
         if graph.nodes[i]["is_leaf"]:
             continue
+        SAV_i = graph.nodes[i]["saved_memory"] / MEM_MULTIPLIER
         ACM_i = graph.nodes[i]["sac_memory"] / MEM_MULTIPLIER
         IA_i = graph.nodes[i]["act_fw_per_module"] / MEM_MULTIPLIER
         prob += r[i] >= (ACM_i - IA_i) / ACM_i * y[i]
+        prob += r[i] <= (ACM_i - SAV_i) / ACM_i * y[i]
 
     # [Constraint] Express total activation memory in the backward pass
     for i in range(num_nodes):
@@ -166,11 +219,17 @@ def sac_milp(
         prob += a[i] == TA_i + AG_i - lpDot(coeff, d)
 
     # [Constraint] Express the total amount of memory at each module
-    # Note that unsharded parameters and gradients are not included here
+    # The total is given by activation memory + 3 * max FSDP unit size
+    #   + sharded param, grad and opt memory
     P_1 = graph.nodes[0]["param_per_module"] / MEM_MULTIPLIER
     for i in range(num_nodes):
         TG_i = graph.nodes[i]["grad_total"] / MEM_MULTIPLIER
-        prob += m[i] == a[i] + (P_1 + TG_i) / world_size
+        prob += (
+            m[i]
+            == a[i]
+            + 3 * max_fsdp_unit_memory
+            + (P_1 + TG_i + opt_memory) / shard_degree
+        )
 
     # [Constraint] Express peak memory
     for i in range(num_nodes):
