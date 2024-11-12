@@ -6,6 +6,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/util/env.h>
 
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
 #include <c10/cuda/driver_api.h>
@@ -172,10 +173,10 @@ class IpcChannel {
 
  private:
   static std::string get_socket_name(int pid) {
-    const char* tmp_dir = "/tmp";
+    std::string tmp_dir = "/tmp";
     for (const char* env_var : {"TMPDIR", "TMP", "TEMP", "TEMPDIR"}) {
-      if (const char* path = getenv(env_var)) {
-        tmp_dir = path;
+      if (const auto path = c10::utils::get_env(env_var)) {
+        tmp_dir = path.value();
         break;
       }
     }
