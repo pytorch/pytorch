@@ -54,13 +54,6 @@ XS = 3
 _NOTHING = object()
 
 
-# Helper to combine multiple context managers into one
-@contextlib.contextmanager
-def _multi_context(*context_managers):
-    with contextlib.ExitStack() as stack:
-        yield (stack.enter_context(cm) for cm in context_managers)
-
-
 # Extension of getattr to support qualified names
 # e.g. _getattr_qual(torch, 'linalg.norm') -> torch.linalg.norm
 def _getattr_qual(obj, name, default=_NOTHING):
