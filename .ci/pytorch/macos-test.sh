@@ -235,7 +235,6 @@ test_torchbench_smoketest() {
   # TEMP_DEBUG
   cat ${TEST_REPORTS_DIR}/torchbench_training.csv
   cat ${TEST_REPORTS_DIR}/torchbench_inference.csv
-  cd pytorch
 }
 
 test_hf_perf() {
