@@ -385,11 +385,13 @@ class SideEffects:
         # Recursively visit Variables and see if any of them have been mutated.
         VariableTracker.visit(
             visit,
+            # TODO track from all possible sources.
             (
                 tx.stack,
                 tx.symbolic_locals,
                 pre_existing_vars,
-                self.output_graph_weakref().backward_state,  # type: ignore[union-attr]
+                tx.output.backward_state,
+                self.tensor_hooks,
             ),
         )
         # Manually release the self-referential function, which indirectly
