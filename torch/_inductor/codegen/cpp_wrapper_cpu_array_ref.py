@@ -74,7 +74,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         self.scalar_to_tensor_id = count()
         self.custom_op_wrapper_loaded = False
         self.expr_printer = cexpr
-        self.allow_stack_allocation: Optional[bool] = None
+        self.allow_stack_allocation: Optional[bool] = config.allow_stack_allocation
         self.stack_allocated_buffers: Dict[BufferName, BufferLike] = {}
 
     @staticmethod
@@ -650,7 +650,10 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         )
         if reinterpret_view in self.stack_allocated_buffers:
             self.stack_allocated_buffers[new_name] = new
-        return f"{self.declare_maybe_reference}{new_name} = {reinterpret_view}{del_line}  {self.comment} reuse"
+        return (
+            f"{self.declare_maybe_reference}{new_name} = std::move({reinterpret_view}){del_line}"
+            f"  {self.comment} reuse"
+        )
 
     def generate_c_shim_extern_kernel_call(self, kernel, args):
         # In the abi_compatible mode, we call fallback aten ops through a C shim layer
@@ -825,7 +828,6 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         offset = self.codegen_sizevar(offset)
         call_strs = []
         final_tmp_name = None
-        final_tmp_name_is_RAIIAtenTensorHandle = False
 
         def create_reinterpret_call() -> Tuple[str, str]:
             tmp_name = f"tmp_tensor_handle_{next(self.tmp_tensor_id)}"
@@ -880,7 +882,6 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                 tmp_output_name, tmp_call_strs = create_dtypeview_call(data.get_name())
                 call_strs.extend(tmp_call_strs)
                 final_tmp_name = tmp_output_name
-                final_tmp_name_is_RAIIAtenTensorHandle = True
             else:
                 return data.get_name()
         else:
@@ -892,6 +893,23 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                 # wrap it with dtypeview
                 final_tmp_name, tmp_call_strs = create_dtypeview_call(reinterpret_call)
                 call_strs.extend(tmp_call_strs)
+            elif (
+                self.can_stack_allocate_buffer(data)
+                and self.is_statically_known_list_of_ints(size)
+                and self.is_statically_known_list_of_ints(stride)
+                and ir.is_contiguous_strides_for_shape(stride, size)
+            ):
+                # No need to wrap with RAIIAtenTensorHandle when using stack allocation.
+                call_strs.append(
+                    f"auto wrap_with_raii_handle_if_needed_{final_tmp_name}"
+                    f" = wrap_with_raii_handle_if_needed({final_tmp_name});"
+                )
+                final_tmp_name = f"wrap_with_raii_handle_if_needed_{final_tmp_name}"
+            else:
+                call_strs.append(
+                    f"RAIIAtenTensorHandle {final_tmp_name}_raii({final_tmp_name});"
+                )
+                final_tmp_name = f"{final_tmp_name}_raii"
 
         if writer is None:
             writer = self
@@ -899,14 +917,6 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         # Because the memory planning is done in two passes (see the implementation
         # of self.generate), the writeline behavior is different in the two passes.
         writer.writelines(call_strs)
-
-        if (
-            self.can_stack_allocate_buffer(data)
-            and self.is_statically_known_list_of_ints(size)
-            and self.is_statically_known_list_of_ints(stride)
-            and ir.is_contiguous_strides_for_shape(stride, size)
-        ):
-            return final_tmp_name
 
         # NB, the return handle here represents a temporary tensor, which will be automatically
         # released.
@@ -937,10 +947,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         #     }.data()
         # );
         # ```
-        if not final_tmp_name_is_RAIIAtenTensorHandle:
-            return f"wrap_with_raii_handle_if_needed({final_tmp_name})"
-        else:
-            return final_tmp_name
+        return final_tmp_name
 
     def val_to_arg_str(self, val, type_=None) -> str:
         if val is None:
