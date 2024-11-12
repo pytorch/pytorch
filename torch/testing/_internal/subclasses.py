@@ -145,7 +145,7 @@ class QuantRWTensorBase(torch.Tensor):
         return (self.qdata * s + b).to(self.DTYPE)
 
     def __repr__(self):
-        return f"{self.__class__.__name__}"
+        return f"{self.__class__.__name__}.from_src({self.dequant()})"
 
     def __tensor_flatten__(self):
         return ["qdata", "scale", "bias"], None

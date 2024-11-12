@@ -10,13 +10,13 @@ from importlib import import_module
 from typing import Any, Callable, List, Optional, Type
 
 import torch
+import torch.utils._pytree as pytree
 from functorch.compile import min_cut_rematerialization_partition
 from torch import _guards, Tensor
 from torch._dynamo.source import LocalSource
 from torch._dynamo.variables.builder import GraphArg
 from torch._functorch import config as functorch_config
 from torch._functorch.compilers import ts_compile
-from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils.weak import TensorWeakRef
 
 from .common import aot_autograd
@@ -303,6 +303,7 @@ class TensorToSubclassTransform:
 
 
 @register_backend
+@torch._functorch.config.patch("enable_autograd_cache", False)
 def test_subclasses(gm, inputs, **kwargs):
     from torch._subclasses.functional_tensor import FunctionalTensor
 
@@ -320,10 +321,8 @@ def test_subclasses(gm, inputs, **kwargs):
 
     test_gm = copy.deepcopy(gm)
 
-    compiler_fn = aot_eager
-
     # Verify original inputs
-    compiler_fn(test_gm, inputs)
+    aot_eager(test_gm, inputs)
 
     from torch.testing._internal.subclasses import (
         F32_QI32QuantRWTensor,
@@ -342,15 +341,24 @@ def test_subclasses(gm, inputs, **kwargs):
             factory_fn=lambda t: F32_QI32QuantRWTensor.from_src(t),
             precondition=lambda t: t.ndim <= 2,
         ),
-        # DTensor
-        # NestedTensor
     ]
+    if bool(os.getenv("PYTORCH_TEST_WITH_SUBCLASSES_NONTRIVIAL", default=0)):
+        TRANSFORMATIONS.extend(
+            [
+                # TODO: NestedTensor transformation can have many false-positive failures
+                # as NT does not support many of the operations
+                TensorToSubclassTransform(
+                    factory_fn=lambda t: torch.nested.nested_tensor_from_jagged(
+                        t, offsets=torch.tensor([0, t.size(1)])
+                    ),
+                    precondition=lambda t: t.ndim >= 2,
+                ),
+                # TODO(ivankobzarev): DTensor
+            ]
+        )
 
     def _is_tensor(t):
         return isinstance(t, Tensor)
-
-    def _is_tensor_subclass(t):
-        return is_traceable_wrapper_subclass(t)
 
     if not any(_is_tensor(t) for t in inputs):
         # Try to find tensor creations with inputs and lift as arguments
@@ -395,33 +403,52 @@ def test_subclasses(gm, inputs, **kwargs):
 
         return ret
 
+    log.info(
+        "test_subclasses backend testing %d transformed inputs gm:%s",
+        NUM_TENSOR_INPUTS_TRANSFORM_SEQS,
+        test_gm.print_readable(False),
+    )
     for i, transform_seqs in enumerate(TENSOR_INPUTS_TRANSFORM_SEQS):
-        test_inputs = copy.copy(inputs)
+        test_inputs = pytree.tree_map(lambda x: x.detach(), copy.copy(inputs))
+        # Have to copy GraphModule, as AOTD caches some info based on inputs in attrs
+        _test_gm = copy.deepcopy(test_gm)
+
         for seq_idx, idx in enumerate(TENSOR_INPUTS_IDXS):
             test_inputs[idx] = apply_transform_seq(
                 transform_seqs[seq_idx], test_inputs[idx]
             )
 
-        log.info(
-            "test_subclasses backend testing %d/%d transformed inputs:%s gm:%s",
-            i,
-            NUM_TENSOR_INPUTS_TRANSFORM_SEQS,
-            test_inputs,
-            test_gm.print_readable(False),
-        )
-
         try:
-            aot_eager(test_gm, test_inputs)
+            aot_eager(_test_gm, test_inputs)
             log.info(
-                "test_subclasses backend testing %d/%d OK",
+                "test_subclasses backend testing %d/%d transformed inputs:%s OK",
                 i,
                 NUM_TENSOR_INPUTS_TRANSFORM_SEQS,
+                test_inputs,
             )
         except Exception as ex:
+            # TODO: Print script with graph and inputs for repro
+            repro_py = f"""
+import torch
+from torch import tensor
+from torch._dynamo.backends.debugging import aot_eager
+from torch.testing._internal.subclasses import (
+    F32_QI32QuantRWTensor,
+    WrapperSubclass,
+)
+from torch.testing._internal.two_tensor import TwoTensor
+from torch.nested._internal.nested_tensor import NestedTensor
+
+inputs = {[ti.detach() if _is_tensor(ti) else ti for ti in test_inputs]}
+{gm.print_readable(False)}
+gm = GraphModule()
+aot_eager(gm, inputs)"""
+
             log.error(
-                "test_subclasses error compiling\ninputs:%s\nin graph_module:\n%s\nexception:%s",
+                "test_subclasses error compiling\ninputs:%s\ntransform_seqs:%s\n---REPRO_BEGIN---%s\n---REPRO_END---\nexception:%s",
                 test_inputs,
-                gm.print_readable(False),
+                transform_seqs,
+                repro_py,
                 "".join(traceback.format_exception(type(ex), ex, ex.__traceback__)),
             )
 
