@@ -8137,7 +8137,7 @@ BACKWARD_SAMPLE_RULES = [
     XFailRule(
         error_type=NotImplementedError,
         op_match_fn=lambda device, op: (op.full_name == "atanh"),
-        sample_match_fn=lambda device, sample: ("with_seqlen_cache" in sample.name,),
+        sample_match_fn=lambda device, sample: ("with_seqlen_cache" in sample.name),
         name="atanh_unimplemented_fill",
     ),
     # expected: autodiff on complex dtype is not supported
