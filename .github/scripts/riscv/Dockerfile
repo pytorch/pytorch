@@ -36,8 +36,9 @@ RUN apt install -y \
 RUN update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 20
 RUN update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-14 20
 
-RUN python -m venv /opt/pyvenv
-ENV PATH=/opt/pyvenv/bin:${PATH}
+ENV VENV_PATH=/opt/pyvenv
+RUN python3 -m venv $VENV_PATH
+ENV PATH="$VENV_PATH/bin:${PATH}"
 RUN pip install --upgrade pip
 RUN pip install pyyaml
 RUN pip install setuptools
