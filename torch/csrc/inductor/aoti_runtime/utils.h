@@ -136,6 +136,34 @@ inline std::vector<RAIIAtenTensorHandle> steal_from_raw_handles_to_raii_handles(
   return result;
 }
 
+inline AtenTensorHandle reinterpret_tensor_wrapper(
+    AtenTensorHandle self,
+    int64_t ndim,
+    const int64_t* sizes_ptr,
+    const int64_t* strides_ptr,
+    int64_t storage_offset) {
+  AtenTensorHandle result = nullptr;
+  AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch__reinterpret_tensor(
+      self, ndim, sizes_ptr, strides_ptr, storage_offset, &result));
+  return result;
+}
+
+inline void* get_data_ptr_wrapper(AtenTensorHandle tensor) {
+  void* result = nullptr;
+  AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_data_ptr(tensor, &result));
+  return result;
+}
+
+inline AtenTensorHandle unwrap_raii_handle_if_needed(
+    const RAIIAtenTensorHandle& handle) {
+  return handle.get();
+}
+
+inline RAIIAtenTensorHandle wrap_with_raii_handle_if_needed(
+    AtenTensorHandle handle) {
+  return RAIIAtenTensorHandle(handle);
+}
+
 class ConstantHandle {
  public:
   ConstantHandle() = default;
