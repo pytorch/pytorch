@@ -2,14 +2,17 @@
 
 import collections
 import collections.abc
+import contextlib
+import logging
 import math
 import operator
 import unittest
+from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass
 from enum import Enum
 from functools import partial
 from itertools import product
-from typing import Any, Callable, Iterable, List, Optional, Tuple, Union
+from typing import Any, Callable, Iterable, List, Optional, Tuple, TypeVar, Union
 
 import torch
 from torch.testing import make_tensor
@@ -38,6 +41,9 @@ from torch.testing._internal.opinfo import utils
 from torchgen.utils import dataclass_repr
 
 
+# setup logging
+log = logging.getLogger(__name__)
+
 # Reasonable testing sizes for dimensions
 L = 20
 M = 10
@@ -46,6 +52,13 @@ XS = 3
 
 # Unique value to distinguish default from anything else
 _NOTHING = object()
+
+
+# Helper to combine multiple context managers into one
+@contextlib.contextmanager
+def _multi_context(*context_managers):
+    with contextlib.ExitStack() as stack:
+        yield (stack.enter_context(cm) for cm in context_managers)
 
 
 # Extension of getattr to support qualified names
@@ -1199,6 +1212,59 @@ class OpInfo:
         Returns None if the operator has no inplace operator variant"""
         return self.inplace_operator_variant
 
+    # Returns a callable from TestCase -> subtest context manager xfailing / skipping only
+    # for expected errors.
+    def _maybe_skip_or_xfail(self, rules, device, sample, idx):
+        def _subtest_fn(test_case, sample=sample, idx=idx):
+            return test_case.subTest(sample=sample, idx=idx)
+
+        if rules is None or len(rules) == 0:
+            return _subtest_fn
+
+        # NB: match first rule only (order matters!)
+        for rule in rules:
+            if rule.sample_match_fn(device, sample):
+                log.debug(
+                    "matched %s rule '%s': %s %s %s",
+                    rule.type,
+                    rule.name,
+                    self.full_name,
+                    device,
+                    sample,
+                )
+
+                # combined subtest + rule-specific context manager
+                return lambda test_case: SubtestRuleCtx(
+                    sample=sample,
+                    idx=idx,
+                    rule=rule,
+                    test_case=test_case,
+                )
+
+        log.debug("matched no rules: %s %s %s", self.full_name, device, sample)
+        return _subtest_fn
+
+    def _sample_callback_fn(self, sample_rules, device):
+        if sample_rules is None:
+            # no rules to apply; use the default callback that just returns the sample
+            return None
+
+        def _f(
+            sample,
+            idx,
+            self=self,
+            device=device,
+            sample_rules=sample_rules,
+        ):
+            # if there are sample skip / xfail rules to apply, return a tuple of the sample
+            # and a context manager for applying matching rules within a subtest context.
+            return (
+                sample,
+                self._maybe_skip_or_xfail(sample_rules, device, sample, idx),
+            )
+
+        return _f
+
     def conjugate_sample_inputs(self, device, dtype, requires_grad=False, **kwargs):
         """Returns an iterable of SampleInputs but with the tensor input or first
         tensor in a sequence input conjugated.
@@ -1207,6 +1273,7 @@ class OpInfo:
         set_seed = kwargs.pop("set_seed", True)
         samples = self.sample_inputs_func(self, device, dtype, requires_grad, **kwargs)
         conj_samples = list(samples)
+        sample_rules = kwargs.pop("sample_rules", None)
 
         def conjugate(tensor):
             _requires_grad = tensor.requires_grad
@@ -1224,6 +1291,7 @@ class OpInfo:
         return TrackedInputIter(
             iter(conj_samples),
             "conjugate sample input",
+            item_callback=self._sample_callback_fn(sample_rules, device),
             set_seed=set_seed,
             restrict_to_index=OPINFO_SAMPLE_INPUT_INDEX,
         )
@@ -1237,6 +1305,7 @@ class OpInfo:
         """
         set_seed = kwargs.pop("set_seed", True)
         samples = self.sample_inputs_func(self, device, dtype, requires_grad, **kwargs)
+        sample_rules = kwargs.pop("sample_rules", None)
 
         if kwargs.get("include_conjugated_inputs", False):
             conj_samples = self.conjugate_sample_inputs(
@@ -1249,6 +1318,7 @@ class OpInfo:
         return TrackedInputIter(
             iter(samples),
             "sample input",
+            item_callback=self._sample_callback_fn(sample_rules, device),
             set_seed=set_seed,
             restrict_to_index=OPINFO_SAMPLE_INPUT_INDEX,
         )
@@ -1262,6 +1332,7 @@ class OpInfo:
         the sample inputs.
         """
         set_seed = kwargs.pop("set_seed", True)
+        sample_rules = kwargs.pop("sample_rules", None)
         if self.reference_inputs_func is None:
             samples = self.sample_inputs_func(
                 self, device, dtype, requires_grad, **kwargs
@@ -1269,6 +1340,7 @@ class OpInfo:
             return TrackedInputIter(
                 iter(samples),
                 "reference input",
+                item_callback=self._sample_callback_fn(sample_rules, device),
                 set_seed=set_seed,
                 restrict_to_index=OPINFO_SAMPLE_INPUT_INDEX,
             )
@@ -1282,6 +1354,7 @@ class OpInfo:
         return TrackedInputIter(
             iter(references),
             "reference input",
+            item_callback=self._sample_callback_fn(sample_rules, device),
             set_seed=set_seed,
             restrict_to_index=OPINFO_SAMPLE_INPUT_INDEX,
         )
@@ -1291,11 +1364,24 @@ class OpInfo:
         Returns an iterable of ErrorInputs.
         """
         set_seed = kwargs.pop("set_seed", True)
+        sample_rules = kwargs.pop("sample_rules", None)
         errs = self.error_inputs_func(self, device, **kwargs)
+
+        def _error_item_callback(e, i, sample_rules=sample_rules, device=device):
+            cb = self._sample_callback_fn(sample_rules, device)
+            # no rules to apply; just return the sample
+            if cb is None:
+                return e
+
+            # adapt the callback call since ErrorInputs contain SampleInputs
+            _, subtest_ctx = cb(e.sample_input, i)
+            return (e, subtest_ctx)
+
         return TrackedInputIter(
             iter(errs),
             "error input",
-            callback=lambda e: e.sample_input,
+            track_callback=lambda e: e.sample_input,
+            item_callback=_error_item_callback,
             set_seed=set_seed,
             restrict_to_index=OPINFO_SAMPLE_INPUT_INDEX,
         )
@@ -1456,6 +1542,108 @@ class OpInfo:
     def formatted_name(self):
         """Returns a formatted full name for this OpInfo that can be used in test names."""
         return self.full_name.replace(".", "_")
+
+
+# Represents a rule matching a particular set of tests. It allows granularity
+# at the device, dtype, op, and individual sample levels. This flexibility allows entire
+# bugs to be represented by a single rule, even if this corresponds with multiple conceptual
+# test cases across multiple ops.
+@dataclass
+class SampleRule(ABC):
+    # function to indicate whether the rule applies to this op; return True if so
+    # NB: str arg of callable is device_type
+    op_match_fn: Callable[[str, OpInfo], bool] = None
+    # function to indicate whether the rule applies to this sample; return True if so
+    sample_match_fn: Callable[[torch.device, SampleInput], bool] = None
+    # optional name for identifying the rule
+    name: str = ""
+
+    def __post_init__(self):
+        if self.op_match_fn is None:
+            raise ValueError("must have op_match_fn set to be useful")
+        if self.sample_match_fn is None:
+            # by default, match for all samples
+            self.sample_match_fn = lambda device, sample: True
+
+    # returns a string identifier of the rule type
+    @abstractmethod
+    def type(self) -> str:
+        ...
+
+    # returns an appropriate context that e.g. handles the xfail, skips, etc.
+    @abstractmethod
+    def get_context(self, test_case):
+        ...
+
+
+# useful for specifying xfails
+@dataclass
+class XFailRule(SampleRule):
+    # expected error type
+    error_type: TypeVar = Exception
+    # expected error message
+    error_msg: str = ".*"
+
+    @property
+    def type(self) -> str:
+        return "xfail"
+
+    def get_context(self, test_case):
+        return test_case.assertRaisesRegex(
+            # failing within torch.compile wraps within a BackendCompilerFailed
+            (self.error_type, torch._dynamo.exc.BackendCompilerFailed),
+            self.error_msg,
+        )
+
+
+# useful for specifying skips
+@dataclass
+class SkipRule(SampleRule):
+    @property
+    def type(self):
+        return "skip"
+
+    def get_context(self, test_case):
+        @contextlib.contextmanager
+        def skipcontext(test_case=test_case):
+            test_case.skipTest("Skipped!")
+            yield
+
+        return skipcontext()
+
+
+# A combined subTest() + rule-specific context manager. I found it difficult to combine these
+# in a less verbose way, mainly due to the skip context not behaving as a proper context manager.
+# If there's a better way to do this, please fix it!
+class SubtestRuleCtx:
+    def __init__(self, sample, idx, rule, test_case):
+        self.sample = sample
+        self.idx = idx
+        self.rule = rule
+        self.test_case = test_case
+
+    def __enter__(self):
+        self.subtest_ctx = self.test_case.subTest(sample=self.sample, idx=self.idx)
+        self.subtest_ctx.__enter__()
+        self.rule_ctx = None
+        try:
+            self.rule_ctx = self.rule.get_context(self.test_case)
+            self.rule_ctx.__enter__()
+        except unittest.SkipTest as e:
+            # exit the subtest context, indicating skipped
+            self.rule_ctx = None
+            self.subtest_ctx.__exit__(type(e), e, e.__traceback__)
+            self.subtest_ctx = None
+        return self
+
+    def __exit__(self, exc_type, exc, exc_tb):
+        if self.rule_ctx is not None:
+            if self.rule_ctx.__exit__(exc_type, exc, exc_tb):
+                self.subtest_ctx.__exit__(None, None, None)
+                return True
+        if self.subtest_ctx is not None:
+            return self.subtest_ctx.__exit__(exc_type, exc, exc_tb)
+        return True
 
 
 def _generate_reduction_inputs(device, dtype, requires_grad, **kwargs):
