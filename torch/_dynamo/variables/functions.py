@@ -244,64 +244,55 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         for idx, name, cell in zip(
             itertools.count(), self.fn.__code__.co_freevars, closure
         ):
-            if name == "__class__":
-                source = AttrSource(self.source, "__class__") if self.source else None
-                result[name] = variables.UserDefinedClassVariable(
-                    cell.cell_contents,
-                    source=source,
-                )
-            else:
-                var = tx.match_nested_cell(name, cell)
-                if var is not None:
-                    # optimization for cleaner codegen
-                    result[name] = var
-                elif self.source:
-                    side_effects = parent.output.side_effects
-                    if cell in side_effects:
-                        out = side_effects[cell]
-                    else:
-                        closure_cell = GetItemSource(
-                            AttrSource(self.source, "__closure__"), idx
-                        )
-                        closure_cell_contents = AttrSource(
-                            closure_cell, "cell_contents"
-                        )
-                        try:
-                            contents_var = VariableTracker.build(
-                                parent, cell.cell_contents, closure_cell_contents
-                            )
-                        except ValueError:
-                            # Cell has not yet been assigned
-                            contents_var = variables.DeletedVariable()
-
-                        if id(cell) not in tx.mutated_closure_cell_ids:
-                            # Optimistically don't allocate the cell, to
-                            # reduce the number of side effects.  This is
-                            # important for cond, as without it, any accesses
-                            # to closures create side effects and cond doesn't
-                            # support side effects.  If we're wrong and this
-                            # closure cell gets written to, we will restart
-                            # the analysis with this cell's name in the
-                            # mutated list here
-                            result[name] = contents_var
-                            # Map the variable to the original cell so we can
-                            # look it up later, see
-                            # `InliningInstructionTranslator.STORE_DEREF`.
-                            tx.contents_var_to_mutated_cell[contents_var] = cell
-                            continue
-
-                        # cells are written to with "cell_contents",
-                        # so the source should just be the closure_cell, not its contents
-                        out = side_effects.track_cell_existing(closure_cell, cell)
-                        side_effects.store_cell(
-                            out,
-                            contents_var,
-                        )
-
-                    result[name] = out
-
+            var = tx.match_nested_cell(name, cell)
+            if var is not None:
+                # optimization for cleaner codegen
+                result[name] = var
+            elif self.source:
+                side_effects = parent.output.side_effects
+                if cell in side_effects:
+                    out = side_effects[cell]
                 else:
-                    result[name] = VariableTracker.build(tx, cell.cell_contents)
+                    closure_cell = GetItemSource(
+                        AttrSource(self.source, "__closure__"), idx
+                    )
+                    closure_cell_contents = AttrSource(closure_cell, "cell_contents")
+                    try:
+                        contents_var = VariableTracker.build(
+                            parent, cell.cell_contents, closure_cell_contents
+                        )
+                    except ValueError:
+                        # Cell has not yet been assigned
+                        contents_var = variables.DeletedVariable()
+
+                    if id(cell) not in tx.mutated_closure_cell_ids:
+                        # Optimistically don't allocate the cell, to
+                        # reduce the number of side effects.  This is
+                        # important for cond, as without it, any accesses
+                        # to closures create side effects and cond doesn't
+                        # support side effects.  If we're wrong and this
+                        # closure cell gets written to, we will restart
+                        # the analysis with this cell's name in the
+                        # mutated list here
+                        result[name] = contents_var
+                        # Map the variable to the original cell so we can
+                        # look it up later, see
+                        # `InliningInstructionTranslator.STORE_DEREF`.
+                        tx.contents_var_to_mutated_cell[contents_var] = cell
+                        continue
+
+                    # cells are written to with "cell_contents",
+                    # so the source should just be the closure_cell, not its contents
+                    out = side_effects.track_cell_existing(closure_cell, cell)
+                    side_effects.store_cell(
+                        out,
+                        contents_var,
+                    )
+
+                result[name] = out
+
+            else:
+                result[name] = VariableTracker.build(tx, cell.cell_contents)
 
         return result, closure_cells
 
