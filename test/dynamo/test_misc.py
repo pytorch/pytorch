@@ -3917,6 +3917,36 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual(res[1], 1)
         self.assertEqual(x, 1)
 
+    def test_write_to_cells_with_name_shadowing(self):
+        x = 0
+        y = x
+
+        def make_x_get_set():
+            # NOTE: this `x` is a different cell object than the outter `x`.
+            x = y
+
+            def set_x(v):
+                nonlocal x
+                x = v
+
+            def get_x():
+                return x
+
+            return get_x, set_x
+
+        get_x, set_x = make_x_get_set()
+
+        @torch.compile(fullgraph=True)
+        def fn(t):
+            set_x(42)  # This sets the `x` created within `make_x_get_set`
+            res = t + x  # This uses the `x` outside `make_x_get_set`.
+            return res
+
+        result = fn(torch.ones(1))
+        inner_x = get_x()
+        self.assertTrue(torch.allclose(result, torch.ones(1)))
+        self.assertEqual(inner_x, 42)
+
     def test_top_package_import(self):
         def fn(x):
             import torch.fx
@@ -11852,7 +11882,7 @@ fn
         test()
 
     def test_escaping_closure_var_with_backward_hook(self):
-        @torch.compile(backend=self.AssertNumOutputBackend(self, 2))
+        @torch.compile(backend=self.AssertNumOutputBackend(self, 2), fullgraph=True)
         def fn(x):
             temp = x * x
             captured_var = temp + 1

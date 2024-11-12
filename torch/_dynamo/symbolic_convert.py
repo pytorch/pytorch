@@ -1129,8 +1129,8 @@ class InstructionTranslatorBase(
         self.output.side_effects.store_cell(cell, val)
 
         assert isinstance(cell, NewCellVariable)  # tame mypy
-        if cell.root_frame_local_name is not None:
-            val.set_name_hint(cell.root_frame_local_name)
+        if cell.is_root_frame_cell():
+            val.set_name_hint(cell.source.local_name)  # type: ignore[attr-defined]
 
     def LOAD_CLOSURE(self, inst):
         self.push(self._load_closure(inst.argval))
@@ -2599,7 +2599,7 @@ class InstructionTranslatorBase(
         speculation_log: SpeculationLog,
         distributed_state: Optional[DistributedState],
         # This determines whether to use the execution recorder.
-        closure: Optional[Tuple[Any]] = None,
+        closure: Optional[Tuple[types.CellType]] = None,
     ) -> None:
         super().__init__()
         self.speculation_log = speculation_log
@@ -2764,19 +2764,20 @@ class InstructionTranslator(InstructionTranslatorBase):
                     )
                     self.symbolic_locals[name] = var
 
-            # Populate `symbolic_locals` with cells created by this frame.
+            # Populate `symbolic_locals` with cells created by this frame,
+            # effectively implementing the `MAKE_CELL` instructions.
             side_effects = self.output.side_effects
             for name in self.cellvars():
                 if name in f_locals:
                     # This models cells that are also function inputs.
                     value = f_locals[name]
-                    # NOTE: in `f_locals` cells are already dereferenced, so we
-                    # can't easily retrieve the original cell objects. However,
-                    # we create a new cell object for the sake of internal
-                    # consistency (variable for each existing cell has an
-                    # associated python cell object).
+                    # NOTE: cell objects in `f_locals` are already dereferenced,
+                    # so we can't easily retrieve the original cell objects.
+                    # However, we create a new cell object for the sake of
+                    # internal consistency (variable for each existing cell has
+                    # an associated python cell object in `SideEffects`).
                     #
-                    # But this isn't the original cell object, why is this safe?
+                    # But this isn't the original cell object, why is it safe?
                     # That's because
                     #
                     # 1. Dynamo only uses these cell objects for their ids, so that
@@ -2790,7 +2791,9 @@ class InstructionTranslator(InstructionTranslatorBase):
                     # after these cell objects are created. Thus they cannot be
                     # captured by any pre-existig function.
                     dummy_cell = types.CellType(value)
-                    cell_source = LocalSource(name, is_input=True)
+                    cell_source = LocalSource(
+                        name, is_input=True, is_root_frame_cell=True
+                    )
                     contents_source = AutoDerefLocalSource(cell_source)
                     contents_var: VariableTracker = LazyVariableTracker.create(
                         value, contents_source
@@ -2799,19 +2802,19 @@ class InstructionTranslator(InstructionTranslatorBase):
                         cell_source, dummy_cell, contents_var
                     )
                     side_effects.store_cell(cell_var, contents_var)
-                    cell_var.root_frame_local_name = name
                     self.symbolic_locals[name] = cell_var
                 else:
-                    # This models cells used later in `f_code`; it effectively
-                    # implements `MAKE_CELL` on these names.
                     cell_var = side_effects.track_cell_new()
-                    cell_var.root_frame_local_name = name
                     self.symbolic_locals[name] = cell_var
+                    # We conveniently piggyback on `LocalSource.reconstruct` so
+                    # we don't have to plumb extra stuff down to simplify
+                    # codegen of `cell_var` and its side effects.
+                    cell_var.source = LocalSource(name, is_root_frame_cell=True)
 
-            # Populate `symbolic_locals` with cells captured by this frame.
-            # TODO refactor with the above and `UserFunctionVariable.bind_args`.
+            # Populate `symbolic_locals` with cells captured by this frame,
+            # effectively implementing the `COPY_FREE_VARS` instruction.
             for idx, name, cell in zip(itertools.count(), self.freevars(), closure):
-                cell_source = LocalSource(name)
+                cell_source = LocalSource(name, is_root_frame_cell=True)
                 contents_source = AutoDerefLocalSource(cell_source)
                 try:
                     contents_var = LazyVariableTracker.create(
@@ -2823,7 +2826,6 @@ class InstructionTranslator(InstructionTranslatorBase):
                 cell_var = side_effects.track_cell_existing(
                     cell_source, cell, contents_var
                 )
-                cell_var.root_frame_local_name = name
                 self.symbolic_locals[name] = cell_var
 
             self.symbolic_torch_function_state = SymbolicTorchFunctionState(

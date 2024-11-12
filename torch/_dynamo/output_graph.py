@@ -98,7 +98,7 @@ from .variables.builder import (
     wrap_fx_proxy,
 )
 from .variables.lists import BaseListVariable
-from .variables.misc import NewCellVariable, NullVariable
+from .variables.misc import NullVariable
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
     NumpyNdarrayVariable,
@@ -1019,13 +1019,6 @@ class OutputGraph:
             # while running test_subgraphs.py
             if isinstance(v.source, LocalSource) and v.source.local_name == k:
                 continue  # no need to restore initial state
-
-            # We skip cells created by the root frame, since Python generated
-            # bytecode would never relocate them in the local slots.
-            if isinstance(v, NewCellVariable) and v.root_frame_local_name is not None:
-                assert v.source is None
-                continue
-
             # Do not load variable if it is NULL.
             if sys.version_info >= (3, 12):
                 # Continuation function will load the NULL for v.

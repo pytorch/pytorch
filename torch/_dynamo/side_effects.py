@@ -385,11 +385,13 @@ class SideEffects:
         # Recursively visit Variables and see if any of them have been mutated.
         VariableTracker.visit(
             visit,
+            # TODO track from all possible sources.
             (
                 tx.stack,
                 tx.symbolic_locals,
                 pre_existing_vars,
-                self.output_graph_weakref().backward_state,  # type: ignore[union-attr]
+                tx.output.backward_state,
+                self.tensor_hooks,
             ),
         )
         # Manually release the self-referential function, which indirectly
@@ -425,17 +427,17 @@ class SideEffects:
             if isinstance(var.mutation_type, AttributeMutationNew) and isinstance(
                 var, variables.NewCellVariable
             ):
-                if var.root_frame_local_name is None:
+                # Cells created in the root frame are created either by
+                # `MAKE_CELL` or by them being in `co_cellvars`, so we only emit
+                # `make_cell` for the non-root-frame cells here.
+                # TODO generalize this so we never need to call `make_cell`.
+                if not var.is_root_frame_cell():
                     cg.add_push_null(
                         lambda: cg.load_import_from(utils.__name__, "make_cell")
                     )
                     cg.extend_output(create_call_function(0, False))
                     cg.add_cache(var)
-                else:
-                    # This avoids having to create extra `make_cell` calls.
-                    # TODO generalize this for cells created during inlining.
-                    cg.tempvars[var] = var.root_frame_local_name
-                var.source = LocalSource(cg.tempvars[var])  # type: ignore[attr-defined]
+                    var.source = LocalSource(cg.tempvars[var])  # type: ignore[attr-defined]
             elif isinstance(var.mutation_type, AttributeMutationNew):
                 if isinstance(var, variables.AutogradFunctionContextVariable):
                     unimplemented("AutogradFunctionContextVariable escaped")
@@ -651,15 +653,14 @@ class SideEffects:
                 cg.append_output(create_instruction("POP_TOP"))
 
             elif (
-                isinstance(var, variables.NewCellVariable)
-                and var.root_frame_local_name is not None
+                isinstance(var, variables.NewCellVariable) and var.is_root_frame_cell()
             ):
                 # Emit more readable and performant bytecode.
                 # TODO generalize this for cells created during inlining.
                 if var in self.store_attr_mutations:
                     contents_var = self.load_cell(var)
                     cg(contents_var)
-                    cg.store_deref(var.root_frame_local_name)
+                    cg.store_deref(var.source.local_name)  # type: ignore[attr-defined]
 
             elif self.is_attribute_mutation(var):
                 # Applying mutations involves two steps: 1) Push all
