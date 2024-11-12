@@ -107,7 +107,6 @@ bool checkFunctionOutputsForLogging(
 bool checkFunctionInputsForLogging(
     const at::RecordFunction& fn,
     const char* fn_name);
-template <typename T>
 std::pair<bool, std::variant<int, std::vector<int>>> findStartAddrForTensors(
     const c10::IValue& val);
 uint64_t TORCH_API computeFlops(

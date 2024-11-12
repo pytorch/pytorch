@@ -392,8 +392,7 @@ inline std::string format_list(ListLikeType list, bool truncate, bool with_escap
   }
 }
 
-std::pair<bool, std::variant<int, std::vector<int>>> findStartAddrForTensors(
-    const c10::IValue& val) {
+std::pair<bool, std::variant<int, std::vector<int>>> findStartAddrForTensors(const c10::IValue& val) {
   if (val.isTensor()) {
     // Store hints about where the input starts in memory.
     // Useful for debugging memory access patterns.
