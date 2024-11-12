@@ -206,8 +206,8 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         this function, create new bindings for initial locals.
         """
         assert not self.is_constant
-        tx = parent.output.root_tx
-        wrap = functools.partial(wrap_bound_arg, tx=tx)
+        root_tx = parent.output.root_tx
+        wrap = functools.partial(wrap_bound_arg, tx=root_tx)
 
         fn: types.FunctionType = self.fn
         defaults = fn.__defaults__ or []
@@ -245,7 +245,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         bound.apply_defaults()
         result = dict(bound.arguments.items())
 
-        wrap_args_kwargs(tx, result)
+        wrap_args_kwargs(root_tx, result)
         init_cellvars(parent, result, fn.__code__)
         closure = self.fn.__closure__ or ()
         assert len(closure) == len(self.fn.__code__.co_freevars)
