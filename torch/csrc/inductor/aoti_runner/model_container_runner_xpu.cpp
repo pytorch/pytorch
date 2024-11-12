@@ -3,7 +3,6 @@
 
 namespace torch::inductor {
 
-
 AOTIModelContainerRunnerXpu::AOTIModelContainerRunnerXpu(
     const std::string& model_so_path,
     size_t num_models,

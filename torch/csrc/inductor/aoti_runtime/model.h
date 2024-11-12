@@ -50,7 +50,7 @@ GPUPtr RAII_gpuMalloc(size_t num_bytes) {
   void* data_ptr;
   AOTI_RUNTIME_DEVICE_CHECK(cudaMalloc((void**)&data_ptr, num_bytes));
   auto deleter = [](void* ptr) { AOTI_RUNTIME_DEVICE_CHECK(cudaFree(ptr)); };
-  return CUDAPtr(data_ptr, deleter);
+  return GPUPtr(data_ptr, deleter);
 }
 
 #endif // USE_CUDA

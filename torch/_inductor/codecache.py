@@ -1865,7 +1865,9 @@ class AotCodeCompiler:
                 object_output_dir,
             ) = get_name_and_dir_from_output_file_path(consts_s)
             object_build_options = CppTorchDeviceOptions(
-                device_type=device_type,
+                # Intel compiler failed to compile this manully constructed assembly file.
+                # it is ok to use gcc to compile the .S to a .o and linked with Intel comiler .
+                device_type=device_type if device_type != "xpu" else "cpu",
                 aot_mode=graph.aot_mode,
                 compile_only=True,
                 use_absolute_path=use_absolute_path,
