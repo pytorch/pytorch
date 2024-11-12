@@ -143,7 +143,6 @@ if __name__ == "__main__":
                 output_str = output.decode('utf-8')
                 # Print the output
                 stats["nvidia-smi-test"] = output_str
-                stats["total_gpu_mem_utilization-{i}"] = gpu_utilization.memory
             if amdsmi_handle is not None:
                 stats["per_process_gpu_info"] = rocm_get_per_process_gpu_info(
                     amdsmi_handle
