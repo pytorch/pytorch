@@ -12,7 +12,7 @@ class TORCH_API AOTIModelContainerRunnerCpu : public AOTIModelContainerRunner {
 
   ~AOTIModelContainerRunnerCpu();
 
-  std::vector<at::Tensor> run(std::vector<at::Tensor>& inputs);
+  std::vector<at::Tensor> run(const std::vector<at::Tensor>& inputs);
 };
 
 } // namespace torch::inductor
