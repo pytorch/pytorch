@@ -749,6 +749,20 @@ def _foreach_lerp_scalar(
     )
 
 
+@register_decomposition(aten._foreach_lerp.ScalarList)
+def _foreach_lerp_scalarlist(
+    start_tensors: List[torch.Tensor],
+    end_tensors: List[torch.Tensor],
+    scalars: List[torch.types.Number],
+) -> List[torch.Tensor]:
+    return aten._foreach_add.List(
+        start_tensors,
+        aten._foreach_mul.ScalarList(
+            aten._foreach_sub.List(end_tensors, start_tensors), scalars
+        ),
+    )
+
+
 @aten.miopen_batch_norm.default.py_impl(torch._C.DispatchKey.Autograd)
 @register_decomposition(aten.miopen_batch_norm)
 def miopen_batch_norm(
