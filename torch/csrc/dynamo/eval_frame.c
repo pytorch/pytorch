@@ -116,7 +116,7 @@ static PyObject* THPPyInterpreterFrame_f_back(THPPyInterpreterFrame* self, PyObj
   }
   return (PyObject*)PyFrame_GetBack(self->frame->frame_obj);
 #else
-  return (PyObject*)self->frame->f_back;
+  return Py_XNewRef(self->frame->f_back);
 #endif // IS_PYTHON_3_11_PLUS
 }
 
