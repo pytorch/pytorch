@@ -233,7 +233,7 @@ static void xss_sort_kernel(
       }
 
       if (values_dim_stride == 1 && indices_dim_stride == 1){
-        for (const auto i C10_UNUSED : c10::irange(n)) {
+        for (const auto i [[maybe_unused]] : c10::irange(n)) {
           x86simdsortStatic::keyvalue_qsort<scalar_t, index_t>(
               reinterpret_cast<scalar_t*>(values_data_bytes),
               reinterpret_cast<index_t*>(indices_data_bytes),
