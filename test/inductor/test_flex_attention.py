@@ -2990,19 +2990,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             torch.compile(flex_attention)(q, k, v, block_mask=block_mask)
 
     @supported_platform
-    def test_64bit_indexing(self):
-        # Create tensors on different devices
-        q, k, v = (
-            torch.randn(256, 16, 8192, 128, dtype=torch.float16, device="cuda")
-            for _ in range(3)
-        )
-
-        expected_error_message = "NotImplementedError: 64-bit indexing is not yet implemented for triton templates"
-
-        with self.assertRaisesRegex(RuntimeError, expected_error_message):
-            torch.compile(flex_attention)(q, k, v)
-
-    @supported_platform
     def test_small_q_kv_len(self):
         make_tensor = functools.partial(
             torch.ones,

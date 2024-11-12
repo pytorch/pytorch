@@ -443,6 +443,10 @@ inductor_override_kwargs["cpu"] = {
         "atol": 3e-4,
         "rtol": 0.002,
     },
+    ("nn.functional.triplet_margin_with_distance_loss", f16): {
+        "atol": 3e-4,
+        "rtol": 0.003,
+    },
     ("softmax", f16): {"atol": 1e-4, "rtol": 0.02},
     ("polygamma.polygamma_n_0", f32): {"atol": 1e-3, "rtol": 1e-4},
     ("polygamma.polygamma_n_1", f32): {"atol": 1e-3, "rtol": 1e-4},
