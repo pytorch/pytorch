@@ -80,7 +80,7 @@ def zeros_and_scatter_lowering(shape: List[int], indices, values):
     )
 
     buffer = ComputedBuffer(
-        name=None,
+        name=grad.data.data.name,
         layout=MutationLayoutSHOULDREMOVE(grad),
         data=scatter,
     )
@@ -1685,16 +1685,16 @@ def bwd_dkdv_block_mn(
     ) | indent_except_first(1) }}
 
     # ~~~~~~~~~~~~~~~~~~~ Apply other buffer grad writes ~~~~~~~~~~~~~
-    #  modification(
-    #     subgraph_number=3,
-    #     output_name = "scatter",
-    #     score="pre_mod_scores",
-    #     b="off_z",
-    #     h="off_hq",
-    #     m="m",
-    #     n="n",
-    #     grad_score_mod="dsT"
-    # ) | indent_except_first(1)
+    {{ modification(
+        subgraph_number=3,
+        output_name=None,
+        score="pre_mod_scores",
+        b="off_z",
+        h="off_hq",
+        m="m",
+        n="n",
+        grad_score_mod="dsT"
+    ) | indent_except_first(1) }}
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
     if CHECK_BLOCK_BOUNDARY:

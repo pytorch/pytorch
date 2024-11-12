@@ -414,7 +414,7 @@ class TritonTemplateKernel(TritonKernel):
     def modification(
         self,
         subgraph_number: int,
-        output_name: str,
+        output_name: Optional[str],
         **fixed_inputs,
     ) -> str:
         """This creates a modification function for a subgraph.
@@ -480,15 +480,20 @@ class TritonTemplateKernel(TritonKernel):
                         assert isinstance(
                             scatter_graph, ir.ComputedBuffer
                         ), "Expected a scatter if subgraph is a list"
-                        scatter_graph.data.store_output("buf0_grad", lambda x: x[0], [])
+                        out_name = scatter_graph.get_name()
+                        scatter_graph.data.store_output(
+                            scatter_graph.name, lambda x: x[0], []
+                        )
 
                 elif isinstance(subgraph.data, ir.InputBuffer):
                     out = subgraph.data.make_loader()(())
                 else:
                     out = subgraph.data.inner_fn(())
-            print(self.stores)
+
             self.codegen_body()
-            self.body.writeline(f"{output_name} = {out.value}")
+            if output_name is not None:
+                assert isinstance(output_name, str)
+                self.body.writeline(f"{output_name} = {out.value}")
 
             body_val = self.body.getvalue()
             self.cse.invalidate(set())  # type: ignore[arg-type]
