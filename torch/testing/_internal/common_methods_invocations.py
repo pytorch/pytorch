@@ -19517,8 +19517,9 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_msort,
            skips=(
+               # https://github.com/pytorch/pytorch/issues/139972
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_non_standard_bool_values',
-                            dtypes=[torch.bool], device_type='cuda'),
+                            dtypes=[torch.bool], device_type='cuda', active_if=TEST_WITH_ROCM),
            )),
     OpInfo('movedim',
            aliases=('moveaxis',),
@@ -20415,7 +20416,8 @@ op_db: List[OpInfo] = [
     OpInfo(
         "norm",
         sample_inputs_func=sample_inputs_norm,
-        dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+        dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16, torch.chalf),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
         # TODO Benchmark again with the new implementation
         # Runs very slowly on slow gradcheck - alternatively reduce input sizes
         gradcheck_fast_mode=True,
@@ -20477,7 +20479,8 @@ op_db: List[OpInfo] = [
         "norm",
         variant_test_name="inf",
         sample_inputs_func=sample_inputs_norm_inf,
-        dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+        dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16, torch.chalf),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
         supports_forward_ad=True,
         check_batched_forward_grad=False,
         supports_fwgrad_bwgrad=True,
@@ -20798,10 +20801,7 @@ op_db: List[OpInfo] = [
         supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
-        dtypes=floating_types_and(torch.float16),
-        backward_dtypes=floating_types(),
-        dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
-        backward_dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
+        dtypes=floating_types_and(torch.float16, torch.bfloat16),
         skips=(
             # RuntimeError: input->type()->kind() == TypeKind::OptionalType
             # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":252,
