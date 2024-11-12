@@ -1119,7 +1119,9 @@ def expand_as_default(func, *args, **kwargs):
     return NestedTensor(func(inp, other._values), **extract_kwargs(other))
 
 
-@register_jagged_func(torch.ops.aten.where.self, "condition: jt, self: jt, other: jt")
+@register_jagged_func(
+    torch.ops.aten.where.self, "condition: any, self: any, other: any"
+)
 def where_self(func, *args, **kwargs):
     _, new_kwargs = normalize_function(  # type: ignore[misc]
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
@@ -1129,12 +1131,36 @@ def where_self(func, *args, **kwargs):
     inp = new_kwargs.pop("input")
     other = new_kwargs.pop("other")
 
-    assert condition._size == other._size == inp._size
-
-    return NestedTensor(
-        func(condition._values, inp._values, other._values, **new_kwargs),
-        **extract_kwargs(condition),
+    new_args = [condition, inp, other]
+    nt = max(
+        (arg for arg in new_args if isinstance(arg, NestedTensor)),
+        key=lambda t: t.dim(),
     )
+    mismatch_error_msg = "cannot call function {} with inputs of shapes {}, {} and {}"
+    for i, arg in enumerate(new_args):
+        if arg is nt:
+            arg = arg._values
+        elif isinstance(arg, NestedTensor):
+            if not raggedness_matches(nt, arg._size):
+                raise RuntimeError(
+                    mismatch_error_msg.format(
+                        func.__name__, condition.shape, inp.shape, other.shape
+                    )
+                )
+            arg = arg._values
+        else:
+            if arg.dim() > nt.dim():
+                raise NotImplementedError("NYI: broadcasting NT with T with larger dim")
+            arg = squeeze_leading_ones(arg)
+            if nt.dim() < arg.dim() + 2:
+                raise RuntimeError(
+                    mismatch_error_msg.format(
+                        func.__name__, condition.shape, inp.shape, other.shape
+                    )
+                )
+        new_args[i] = arg
+
+    return NestedTensor(func(*new_args, **new_kwargs), **extract_kwargs(nt))
 
 
 @register_jagged_func(torch.ops.aten._pin_memory.default, "self: jt, device: any?")
