@@ -131,7 +131,7 @@ else:
         pass
 
 
-def supported_dtype_of_cpp_wrapper(dtype: torch.device, device_type: str) -> bool:
+def supported_dtype_of_cpp_wrapper(dtype: torch.dtype, device_type: str) -> bool:
     supported_dtype = {
         torch.float32,
         torch.float64,
@@ -1745,7 +1745,7 @@ class GraphLowering(torch.fx.Interpreter):
             ):
                 dtype = may_get_constant_buffer_dtype(value)
 
-            if not supported_dtype_of_cpp_wrapper(dtype, self.device_type):
+            if not supported_dtype_of_cpp_wrapper(dtype, self.device_type):  # type: ignore[arg-type]
                 raise CppWrapperCodegenError(f"Unsupported input dtype {dtype}")
 
     def init_wrapper_code(
@@ -1949,7 +1949,7 @@ class GraphLowering(torch.fx.Interpreter):
             "GraphLowering.compile_to_module",
             phase_name="code_gen",
             log_pt2_compile_event=True,
-            fwd_only=False,
+            dynamo_compile_column_us="inductor_code_gen_cumulative_compile_time_us",
         ):
             return self._compile_to_module()
 
