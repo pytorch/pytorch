@@ -281,6 +281,10 @@ def tensorify_python_scalars(
                     node.replace_all_uses_with(guard_scalar(val))
                     graph.erase_node(node)
 
+
+    # Sledgehammer time. Restart dynamo analysis, keeping track of which input sources
+    # are no longer needed and should be specialized.
+
     graph_code_log.debug(
         "%s", lazy_format_graph_code("tensorify_python_scalars", gm, colored=True)
     )
