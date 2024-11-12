@@ -7,17 +7,14 @@
 
 namespace {
 float float_from_bytes(uint32_t sign, uint32_t exponent, uint32_t fraction) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  uint32_t bytes;
-  bytes = 0;
+  uint32_t bytes = 0;
   bytes |= sign;
   bytes <<= 8;
   bytes |= exponent;
   bytes <<= 23;
   bytes |= fraction;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  float res;
+  float res = 0;
   std::memcpy(&res, &bytes, sizeof(res));
   return res;
 }
@@ -160,8 +157,7 @@ TEST(BFloat16Math, NextAfterZero) {
 }
 
 float BinaryToFloat(uint32_t bytes) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  float res;
+  float res = 0;
   std::memcpy(&res, &bytes, sizeof(res));
   return res;
 }

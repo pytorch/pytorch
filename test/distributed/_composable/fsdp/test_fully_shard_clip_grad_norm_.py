@@ -8,8 +8,8 @@ import torch
 import torch.nn as nn
 from torch.distributed._composable import replicate
 from torch.distributed._composable.fsdp import fully_shard
-from torch.distributed._tensor.debug import CommDebugMode
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
+from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, MLPStack
 from torch.testing._internal.common_utils import run_tests

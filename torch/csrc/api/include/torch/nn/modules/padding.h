@@ -6,8 +6,7 @@
 
 #include <torch/csrc/Export.h>
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 /// Base class for all (dimension-specialized) ReflectionPad modules.
 template <size_t D, typename Derived>
@@ -374,5 +373,4 @@ class TORCH_API ConstantPad3dImpl
 /// to learn about PyTorch's module storage semantics.
 TORCH_MODULE(ConstantPad3d);
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn
