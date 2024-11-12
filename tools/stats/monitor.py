@@ -126,8 +126,17 @@ if __name__ == "__main__":
                 stats["per_process_gpu_info"] = get_per_process_gpu_info(nvml_handle)
                 # https://docs.nvidia.com/deploy/nvml-api/structnvmlUtilization__t.html
                 gpu_utilization = pynvml.nvmlDeviceGetUtilizationRates(nvml_handle)
-                stats["total_gpu_utilization"] = gpu_utilization.gpu
-                stats["total_gpu_mem_utilization"] = gpu_utilization.memory
+                gpu_count = pynvml.nvmlDeviceGetCount()
+                # Iterate over the available GPUs
+                for i in range(gpu_count):
+                    # Get the handle to the current GPU
+                    gpu_handle = pynvml.nvmlDeviceGetHandleByIndex(i)
+                    # Get the message for the current GPU
+                    message = pynvml.nvmlDeviceGetErrorMessage(gpu_handle)
+                    # Print the message
+                    print(f"GPU {i}: {message}")
+                    stats["total_gpu_utilization-{i}"] = gpu_utilization.gpu
+                    stats["total_gpu_mem_utilization-{i}"] = gpu_utilization.memory
             if amdsmi_handle is not None:
                 stats["per_process_gpu_info"] = rocm_get_per_process_gpu_info(
                     amdsmi_handle
