@@ -1,4 +1,5 @@
 #include <metal_stdlib>
+using namespace metal;
 
 ulong offset_from_coord(thread ulong* idx, constant ulong* strides, uint ndim) {
    ulong rc = 0;
@@ -31,29 +32,50 @@ void pos_from_index(ulong idx, thread ulong* pos, constant ulong* sizes, uint nd
 // grad_in.shape == out.shape,
 // grad_out.shape == in.shape.
 
-kernel void unfold_backward_float(
-    constant float *grad_in,
-    device float* grad_out,
+template<typename T>
+kernel void unfold_backward(
+    constant T *grad_in,
+    device T* grad_out,
     constant ulong* input_strides,
     constant ulong* output_sizes,
     constant ulong* output_strides,
     constant uint4& dim_size_step_ndim,
     uint thread_index [[thread_position_in_grid]]) {
-    auto dim_idx = dim_size_step_ndim.x;
+    auto dim = dim_size_step_ndim.x;
     auto size = dim_size_step_ndim.y;
     auto step = dim_size_step_ndim.z;
     auto ndim = dim_size_step_ndim.w;
     ulong pos[16];
     pos_from_index(thread_index, pos, output_sizes, ndim);
     const auto output_offs = offset_from_coord(pos, output_strides, ndim);
-
-    auto dim_idx_size = (output_sizes[dim_idx] - size) / step + 1;
-    auto rc = divmod(pos[dim_idx], step);
-    if (rc.x >= dim_idx_size or rc.y >= size) {
-      grad_out[output_offs] = 0.0;
+    auto grad_in_dim_size = (output_sizes[dim] - size) / step + 1;
+    float rc = 0;
+    const auto grad_out_idx = pos[dim];
+    auto left_fold_idx = grad_out_idx > size ? (grad_out_idx - size) / step : 0UL;
+    auto right_fold_idx = min(grad_in_dim_size - 1, grad_out_idx / step);
+    for(auto idx = left_fold_idx; idx <= right_fold_idx; ++idx) {
+        pos[dim] = idx;
+        pos[ndim] = grad_out_idx - idx * step;
+        if (pos[ndim] >= size) continue;
+         auto input_offset = offset_from_coord(pos, input_strides, ndim + 1);
+         rc += grad_in[input_offset];
     }
-    pos[dim_idx_size] = rc.x;
-    pos[ndim] = rc.y;
-    const auto input_offs = offset_from_coord(pos, input_strides, ndim + 1);
-    grad_out[output_offs] = grad_in[input_offs];
+    grad_out[output_offs] = static_cast<T>(rc);
 }
+
+#define INSTANTIATE_UNFOLD_BACKWARD(DTYPE)                        \
+  template [[host_name("unfold_backward_" #DTYPE)]] kernel void \
+  unfold_backward<DTYPE>(                                       \
+      constant DTYPE *,                    \
+      device DTYPE *,                     \
+      constant ulong*, \
+      constant ulong*, \
+      constant ulong*, \
+      constant uint4&, \
+      uint thread_index [[thread_position_in_grid]])
+
+INSTANTIATE_UNFOLD_BACKWARD(float);
+INSTANTIATE_UNFOLD_BACKWARD(half);
+#if __METAL_VERSION__ >= 310
+INSTANTIATE_UNFOLD_BACKWARD(bfloat);
+#endif
