@@ -1,58 +1,44 @@
-# mypy: allow-untyped-defs
-# Copyright (c) Meta Platforms, Inc. and affiliates
+"""
+NOTICE: DTensor has moved to torch.distributed.tensor
 
-import torch
-import torch.distributed._tensor.ops as _ops  # force import all built-in dtensor ops
-from torch.distributed._tensor.api import (
+This file is a shim to redirect to the new location, and
+we keep the old import path starts with `_tensor` for
+backward compatibility. We will remove this folder once
+we resolve all the BC issues.
+"""
+import sys
+from importlib import import_module
+
+
+submodules = [
+    # TODO: _shards_wrapper/_utils here mainly for checkpoint BC, remove them
+    "_shards_wrapper",
+    "_utils",
+    "experimental",
+    "device_mesh",
+]
+
+# Redirect imports
+for submodule in submodules:
+    full_module_name = f"torch.distributed.tensor.{submodule}"
+    sys.modules[f"torch.distributed._tensor.{submodule}"] = import_module(
+        full_module_name
+    )
+
+from torch.distributed.tensor import (  # noqa: F401
+    DeviceMesh,
     distribute_module,
     distribute_tensor,
     DTensor,
     empty,
     full,
+    init_device_mesh,
     ones,
-    rand,
-    randn,
-    zeros,
-)
-from torch.distributed._tensor.placement_types import (
     Partial,
     Placement,
+    rand,
+    randn,
     Replicate,
     Shard,
+    zeros,
 )
-from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
-from torch.optim.optimizer import (
-    _foreach_supported_types as _optim_foreach_supported_types,
-)
-from torch.utils._foreach_utils import (
-    _foreach_supported_types as _util_foreach_supported_types,
-)
-
-
-# All public APIs from dtensor package
-__all__ = [
-    "DTensor",
-    "DeviceMesh",
-    "distribute_tensor",
-    "distribute_module",
-    "init_device_mesh,",
-    "Shard",
-    "Replicate",
-    "Partial",
-    "Placement",
-    "ones",
-    "empty",
-    "full",
-    "rand",
-    "randn",
-    "zeros",
-]
-
-
-# Append DTensor to the list of supported types for foreach implementation for optimizer
-# and clip_grad_norm_ so that we will try to use foreach over the for-loop implementation on CUDA.
-if DTensor not in _optim_foreach_supported_types:
-    _optim_foreach_supported_types.append(DTensor)
-
-if DTensor not in _util_foreach_supported_types:
-    _util_foreach_supported_types.append(DTensor)

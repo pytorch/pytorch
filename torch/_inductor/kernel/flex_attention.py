@@ -3,7 +3,7 @@
 
 import logging
 import math
-from typing import Any, List, Optional, Tuple
+from typing import Any, List, Optional, Sequence, Tuple
 
 import sympy
 
@@ -17,6 +17,7 @@ from ..ir import (
     ExternKernel,
     FixedLayout,
     FlexibleLayout,
+    get_fill_order,
     InputBuffer,
     IRNode,
     StorageBox,
@@ -29,6 +30,29 @@ from ..select_algorithm import autotune_select_algorithm, realize_inputs, Triton
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
+Expr = sympy.Expr
+
+
+def construct_strides(
+    sizes: Sequence[int],
+    fill_order: Sequence[int],
+) -> Sequence[int]:
+    """From a list of sizes and a fill order, construct the strides of the permuted tensor."""
+    # Initialize strides
+    assert len(sizes) == len(
+        fill_order
+    ), "Length of sizes must match the length of the fill order"
+    strides = [0] * len(sizes)
+
+    # Start with stride 1 for the innermost dimension
+    current_stride = 1
+
+    # Iterate through the fill order populating strides
+    for dim in fill_order:
+        strides[dim] = current_stride
+        current_stride *= sizes[dim]
+
+    return strides
 
 
 def flex_attention_grid(batch_size, q_heads, num_queries, d_model, meta):
@@ -46,13 +70,27 @@ def create_placeholder(
     name: str, dtype: torch.dtype, device: torch.device
 ) -> TensorBox:
     """Creates a placeholder input buffers for producing subgraph_output."""
-    input_buffer = InputBuffer(name, FixedLayout(device, dtype, [], []))
+    input_buffer = InputBuffer(name=name, layout=FixedLayout(device, dtype, [], []))
     return TensorBox.create(input_buffer)
 
 
 def maybe_realize(args: List[Optional[IRNode]]):
     """Accepts a list of optional IRNodes and returns a list of realized IRNodes"""
-    return tree_map(lambda x: realize_inputs(x) if x is not None else None, args)
+    return tree_map(
+        lambda x: (
+            realize_inputs(x)
+            if x is not None and not isinstance(x, sympy.Symbol)
+            else x
+        ),
+        args,
+    )
+
+
+def get_float32_precision():
+    if torch.get_float32_matmul_precision() == "highest" or torch.version.hip:
+        return "'ieee'"
+    else:
+        return "'tf32'"
 
 
 def build_subgraph_buffer(
@@ -76,46 +114,47 @@ def build_subgraph_buffer(
         # TensorBox for each of these inputs. For the rest of the inputs we
         # expect that these are lifted inputs that fill up the '*other_buffers'
         # tuple and already have corresponding TensorBoxes passed in as args.
-        if node.op == "placeholder":
-            env[node] = args[cnt]
-            cnt += 1
-        elif node.op == "call_function":
-            # For call_function we use the default lowerings and pass in the
-            # already created TensorBoxes as args
+        with V.graph.set_current_node(node):
+            if node.op == "placeholder":
+                env[node] = args[cnt]
+                cnt += 1
+            elif node.op == "call_function":
+                # For call_function we use the default lowerings and pass in the
+                # already created TensorBoxes as args
 
-            args, kwargs = tree_map(
-                lambda x: env[x] if x in env else x, (node.args, node.kwargs)
-            )
-            env[node] = lowerings[node.target](*args, **kwargs)
-        elif node.op == "output":
+                args, kwargs = tree_map(
+                    lambda x: env[x] if x in env else x, (node.args, node.kwargs)
+                )
+                env[node] = lowerings[node.target](*args, **kwargs)
+            elif node.op == "output":
 
-            def convert_output_node_to_buffer(output):
-                if output is None:
-                    return None
-                output_node = output
-                output_buffer = env[output_node]
-                assert isinstance(output_buffer, TensorBox), (
-                    "The output node  for flex attention's subgraph must be a TensorBox, but got: ",
-                    type(output_buffer),
-                )
-                assert isinstance(output_buffer.data, StorageBox), (
-                    "The output node for the flex attention subgraph must be a StorageBox, but got: ",
-                    type(output_buffer),
-                )
-                subgraph_buffer = ComputedBuffer(
-                    name=None,
-                    layout=FlexibleLayout(
-                        device=output_buffer.data.get_device(),
-                        dtype=output_buffer.data.get_dtype(),
-                        size=output_buffer.data.get_size(),
-                    ),
-                    data=output_buffer.data.data,  # type: ignore[arg-type]
-                )
-                return subgraph_buffer
+                def convert_output_node_to_buffer(output):
+                    if output is None:
+                        return None
+                    output_node = output
+                    output_buffer = env[output_node]
+                    assert isinstance(output_buffer, TensorBox), (
+                        "The output node  for flex attention's subgraph must be a TensorBox, but got: ",
+                        type(output_buffer),
+                    )
+                    assert isinstance(output_buffer.data, StorageBox), (
+                        "The output node for the flex attention subgraph must be a StorageBox, but got: ",
+                        type(output_buffer),
+                    )
+                    subgraph_buffer = ComputedBuffer(
+                        name=None,
+                        layout=FlexibleLayout(
+                            device=output_buffer.data.get_device(),
+                            dtype=output_buffer.data.get_dtype(),
+                            size=output_buffer.data.get_size(),
+                        ),
+                        data=output_buffer.data.data,  # type: ignore[arg-type]
+                    )
+                    return subgraph_buffer
 
-            # node.args[0] is either a single element or a list of elements
-            # representing all outputs of the function.
-            return tree_map(convert_output_node_to_buffer, node.args[0])
+                # node.args[0] is either a single element or a list of elements
+                # representing all outputs of the function.
+                return tree_map(convert_output_node_to_buffer, node.args[0])
 
     raise ValueError("FlexAttention was passed a subgraph with no output node!")
 
@@ -172,22 +211,27 @@ compute_flex_attention = r"""
     stride_kz, stride_kh, stride_kn, stride_kk = {{stride("K")}}
     stride_vz, stride_vh, stride_vn, stride_vk = {{stride("V")}}
 
-    Z = {{size("Q", 0)}}
+    ZQ = {{size("Q", 0)}}
     HQ = {{size("Q", 1)}}
     Q_LEN = {{size("Q", 2)}}
+    ZKV = {{size("K", 0)}}
     KV_LEN = {{size("K", 2)}}
 
     MATMUL_PRECISION = Q.dtype.element_ty
 
     q_start = tl.program_id(0)
-    off_z = tl.program_id(1) // HQ
+    off_zq = tl.program_id(1) // HQ
     off_hq = tl.program_id(1) % HQ
+
+    # We support two cases for batch dimension. a) (ZKV == ZQ) where off_zkv = off_zq.
+    # b) (ZKV == 1 and ZQ > 1) where KV is broadcasted along the batch dimension and off_zkv=0.
+    off_zkv = off_zq % ZKV
     off_hkv = off_hq // GQA_SHARED_HEADS
     off_g = off_hq % GQA_SHARED_HEADS
 
-    q_offset = off_z * stride_qz + off_hq * stride_qh
-    k_offset = off_z * stride_kz + off_hkv * stride_kh
-    v_offset = off_z * stride_vz + off_hkv * stride_vh
+    q_offset = off_zq * stride_qz + off_hq * stride_qh
+    k_offset = off_zkv * stride_kz + off_hkv * stride_kh
+    v_offset = off_zkv * stride_vz + off_hkv * stride_vh
 
     Q = Q + q_offset
     K = K + k_offset
@@ -196,14 +240,15 @@ compute_flex_attention = r"""
     SPARSE_Z = {{size("KV_NUM_BLKS", 0)}}
     SPARSE_HQ = {{size("KV_NUM_BLKS", 1)}}
 
-    sparse_idx_z = off_z % SPARSE_Z
+    sparse_idx_z = off_zq % SPARSE_Z
     sparse_idx_hq = off_hq % SPARSE_HQ
 
     SPARSE_Q_MULTIPLE: tl.constexpr = (SPARSE_Q_BLOCK_SIZE // BLOCK_M)
     SPARSE_KV_MULTIPLE: tl.constexpr = (SPARSE_KV_BLOCK_SIZE // BLOCK_N)
 
-    SPARSE_Q_BLOCK_CNT: tl.constexpr = tl.cdiv(Q_LEN, SPARSE_Q_BLOCK_SIZE)
-    SPARSE_KV_BLOCK_CNT: tl.constexpr = tl.cdiv(KV_LEN, SPARSE_KV_BLOCK_SIZE)
+    stride_kv_num_blks_h = {{stride("KV_NUM_BLKS", 1)}}
+    stride_kv_idx_h = {{stride("KV_IDX", 1)}}
+    stride_kv_idx_m = {{stride("KV_IDX", 2)}}
 
     # initialize pointer to m and l
     m_i = tl.zeros([BLOCK_M], dtype=tl.float32) - float("inf")
@@ -214,8 +259,8 @@ compute_flex_attention = r"""
 
     # KV_IDX and KV_NUM_BLKS are always contiguous.
     sparse_hz_offset = sparse_idx_z * SPARSE_HQ + sparse_idx_hq
-    sparse_kv_num_blks_offset = sparse_hz_offset * SPARSE_Q_BLOCK_CNT + q_start // SPARSE_Q_MULTIPLE
-    sparse_kv_idx_offset = sparse_hz_offset * SPARSE_Q_BLOCK_CNT * SPARSE_KV_BLOCK_CNT + (q_start // SPARSE_Q_MULTIPLE) * SPARSE_KV_BLOCK_CNT  # noqa: B950
+    sparse_kv_num_blks_offset = sparse_hz_offset * stride_kv_num_blks_h + q_start // SPARSE_Q_MULTIPLE
+    sparse_kv_idx_offset = sparse_hz_offset * stride_kv_idx_h + (q_start // SPARSE_Q_MULTIPLE) * stride_kv_idx_m  # noqa: B950
 
     Q_block_ptr = tl.make_block_ptr(
         base=Q,
@@ -231,7 +276,7 @@ compute_flex_attention = r"""
         q = tl.load(Q_block_ptr)
     else:
         # boundary check is not free, so we only do it when necessary.
-        q = tl.load(Q_block_ptr, boundary_check=(0,))
+        q = tl.load(Q_block_ptr, boundary_check=(0,), padding_option = "zero")
 
     # ~~~~~~~~~~~~~~ normal blocks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # We don't know anything "special" about these blocks, so we need to apply
@@ -263,7 +308,7 @@ compute_flex_attention = r"""
         {{gen_argdefs()}},
         q, K_block_ptr, V_block_ptr, Q_LEN, KV_LEN,
         acc, l_i, m_i,
-        off_z, off_hq, offs_m[:, None], offs_n[None, :],
+        off_zq, off_hq, offs_m[:, None], offs_n[None, :],
         kv_indices, kv_num_blocks,
         0, block_n_end,
         MATMUL_PRECISION,
@@ -302,7 +347,7 @@ compute_flex_attention = r"""
             {{gen_argdefs()}},
             q, K_block_ptr, V_block_ptr, Q_LEN, KV_LEN,
             acc, l_i, m_i,
-            off_z, off_hq, offs_m[:, None], offs_n[None, :],
+            off_zq, off_hq, offs_m[:, None], offs_n[None, :],
             kv_indices, kv_num_blocks,
             0, block_n_end,
             MATMUL_PRECISION,
@@ -316,14 +361,14 @@ compute_flex_attention = r"""
     l_i = tl.where(l_i == 0.0, 1, l_i)
 
     acc = acc / l_i[:, None]
-    idx_z = tl.program_id(1) // HQ
+    idx_zq = tl.program_id(1) // HQ
     idx_hq = tl.program_id(1) % HQ
     idx_m = offs_m[:, None]
     idx_d = tl.arange(0, V_HEAD_DIM)[None, :]
 
     mask = idx_m < Q_LEN
     # TODO generalize and add proper mask support
-    {{store_output(("idx_z", "idx_hq", "idx_m", "idx_d"), "acc", "mask")}}
+    {{store_output(("idx_zq", "idx_hq", "idx_m", "idx_d"), "acc", "mask")}}
 
     # TODO dont want to write this if we dont require grad
     if OUTPUT_LOGSUMEXP:
@@ -427,9 +472,9 @@ def forward_block_mn(
     if IS_DIVISIBLE:
         k = tl.load(K_block_ptr)
     else:
-        k = tl.load(K_block_ptr, boundary_check=(1,))
+        k = tl.load(K_block_ptr, boundary_check=(1,), padding_option = "zero")
     # -- compute qk ---
-    qk = tl.dot(q, k) # TODO: use cuda matmul when q_len <= 2.
+    qk = tl.dot(q, k, input_precision=FLOAT32_PRECISION) # TODO: use cuda matmul when q_len <= 2.
     if not PRESCALE_QK:
         qk *= SM_SCALE
     # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
@@ -500,8 +545,8 @@ def forward_block_mn(
     if IS_DIVISIBLE:
         v = tl.load(V_block_ptr)
     else:
-        v = tl.load(V_block_ptr, boundary_check=(0,))
-    acc = tl.dot(p.to(MATMUL_PRECISION), v, acc)
+        v = tl.load(V_block_ptr, boundary_check=(0,), padding_option = "zero")
+    acc = tl.dot(p.to(MATMUL_PRECISION), v, acc, input_precision=FLOAT32_PRECISION)
 
     # -- update m_i
     m_i = m_ij
@@ -552,6 +597,18 @@ _a100_default_config = {
     (torch.float16, 256): (32, 64, 4, 3),
 }
 
+_rocm_default_config = {
+    (torch.float32, 64): (128, 32, 4, 1),
+    (torch.float32, 128): (128, 32, 4, 1),
+    (torch.float32, 256): (64, 16, 4, 1),
+    (torch.bfloat16, 64): (128, 64, 8, 1),
+    (torch.bfloat16, 128): (128, 64, 8, 1),
+    (torch.bfloat16, 256): (32, 64, 8, 1),
+    (torch.float16, 64): (128, 64, 8, 1),
+    (torch.float16, 128): (128, 64, 8, 1),
+    (torch.float16, 256): (32, 64, 4, 1),
+}
+
 
 def _get_default_config_fwd(query) -> Tuple[int, int, int, int]:
     dtype = query.get_dtype()
@@ -570,6 +627,12 @@ def _get_default_config_fwd(query) -> Tuple[int, int, int, int]:
         else:
             default_config = (128, 64, 4, 3)
         default_config = _a100_default_config.get((dtype, head_dim), default_config)
+    elif head_dim <= 256 and torch.version.hip:
+        if dtype == torch.float32:
+            default_config = (64, 64, 4, 1)
+        else:
+            default_config = (128, 64, 8, 1)
+        default_config = _rocm_default_config.get((dtype, head_dim), default_config)
     else:  # modest hardware or extremely large head_dim
         if dtype == torch.float32:
             default_config = (32, 16, 4, 3)
@@ -585,7 +648,14 @@ def _get_default_config_bwd(query) -> Tuple[int, int, int, int]:
 
     if dtype == torch.float32:
         return (16, 16, 4, 1)
-    if head_dim <= 256 and torch.cuda.get_device_capability() >= (9, 0):  # H100
+    if head_dim <= 256 and torch.version.hip:
+        if head_dim == 64:
+            return (64, 64, 4, 1)
+        elif head_dim == 128:
+            return (64, 128, 4, 1)
+        else:
+            return (64, 64, 4, 1)
+    elif head_dim <= 256 and torch.cuda.get_device_capability() >= (9, 0):  # H100
         if head_dim == 64:
             return (64, 64, 4, 3)
         elif head_dim == 128:
@@ -659,8 +729,8 @@ def flex_attention(
         q_indices,
         full_q_num_blocks,
         full_q_indices,
-        SPARSE_KV_BLOCK_SIZE,
         SPARSE_Q_BLOCK_SIZE,
+        SPARSE_KV_BLOCK_SIZE,
         mask_graph,
     ) = block_mask
     placeholder_inps = [
@@ -689,6 +759,7 @@ def flex_attention(
         mask_graph_placeholder_inps + list(mask_mod_other_buffers), mask_graph
     )
     kernel_options = dict(kernel_options)
+    kernel_options.setdefault("FLOAT32_PRECISION", get_float32_precision())
     if _use_flex_decoding(query, kernel_options):
         return create_flex_decoding_kernel(
             query,
@@ -731,9 +802,14 @@ def flex_attention(
         ]
     )
 
+    score_mod_other_buffers = maybe_realize(score_mod_other_buffers)
+    mask_mod_other_buffers = maybe_realize(mask_mod_other_buffers)
+
     Bq, Hq, seq_len_q, qk_head_dim = query.get_size()
     Bkv, Hkv, seq_len_kv, v_head_dim = value.get_size()
-    assert Bq == Bkv, "Batch dimension must match"
+    assert V.graph.sizevars.evaluate_expr(
+        sympy.Eq(Bq, Bkv) | sympy.Eq(Bkv, 1)
+    ), f"Bq and Bkv must broadcastable. Got Bq={Bq} and Bkv={Bkv}"
     B = Bq
 
     if seq_len_q % 128 != 0 or seq_len_kv % 128 != 0:
@@ -745,11 +821,17 @@ def flex_attention(
     # This works because only the last dim differs and we check it is contiguous.
     q_strides = query.get_stride()
     assert q_strides[-1] == 1, "Query must be contiguous in the last dimension"
+
+    # Construct output layout with strides matching the query.
+    out_size = [B, Hq, seq_len_q, v_head_dim]
+    fill_order = get_fill_order(query.get_stride())
+    out_strides = construct_strides(out_size, fill_order)
+
     layout = FixedLayout(
         query.get_device(),
         query.get_dtype(),
         [B, Hq, seq_len_q, v_head_dim],
-        query.get_stride(),
+        stride=out_strides,
     )
     # see NOTE:[TritonTemplates with multiple outputs]
     logsumexp_shape = [B, Hq, seq_len_q]
@@ -788,10 +870,24 @@ def flex_attention(
             (64, 64, 4, 3),
         ]
 
+        # On ROCm convert num_stages to 1 to avoid shmem issues
+        if torch.version.hip:
+            configs = [(c[0], c[1], c[2], 1) for c in configs]
+
+    # Mark SPARSE_KV_BLOCK_SIZE & SPARSE_Q_BLOCK_SIZE as static shapes and add guards.
+    SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_KV_BLOCK_SIZE)
+    SPARSE_Q_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_Q_BLOCK_SIZE)
+    assert V.graph.sizevars.evaluate_expr(
+        sympy.Le(seq_len_q, sympy.Mul(kv_indices.get_size()[-2], SPARSE_Q_BLOCK_SIZE))
+    ), "Q seqlen must be smaller than the block_mask size in the Q dimension, considering pass a larger block_mask."
+    assert V.graph.sizevars.evaluate_expr(
+        sympy.Le(seq_len_kv, sympy.Mul(kv_indices.get_size()[-1], SPARSE_KV_BLOCK_SIZE))
+    ), "KV seqlen must be smaller than the block_mask size in the KV dimension, considering pass a larger block_mask."
+
     # Note, we don't need to pass in the captured buffers explicitly
     # because they're implicitly added by the score_mod function
     # We do need to explicitly pass it in for autotuning though.
-
+    original_kernel_options = kernel_options.copy()
     for BLOCK_M, BLOCK_N, num_warps, num_stages in configs:
         if SPARSE_KV_BLOCK_SIZE % BLOCK_N != 0 or SPARSE_Q_BLOCK_SIZE % BLOCK_M != 0:
             continue
@@ -799,12 +895,13 @@ def flex_attention(
         if num_stages == 2:
             continue
 
+        cur_kernel_options = original_kernel_options.copy()
         # Performance tuning
-        kernel_options.setdefault("BLOCK_M", BLOCK_M)
-        kernel_options.setdefault("BLOCK_N", BLOCK_N)
+        cur_kernel_options.setdefault("BLOCK_M", BLOCK_M)
+        cur_kernel_options.setdefault("BLOCK_N", BLOCK_N)
         # Blocksparse options
-        kernel_options.setdefault("SPARSE_Q_BLOCK_SIZE", SPARSE_Q_BLOCK_SIZE)
-        kernel_options.setdefault("SPARSE_KV_BLOCK_SIZE", SPARSE_KV_BLOCK_SIZE)
+        cur_kernel_options.setdefault("SPARSE_Q_BLOCK_SIZE", SPARSE_Q_BLOCK_SIZE)
+        cur_kernel_options.setdefault("SPARSE_KV_BLOCK_SIZE", SPARSE_KV_BLOCK_SIZE)
 
         flex_attention_template.maybe_append_choice(
             choices=choices,
@@ -829,7 +926,7 @@ def flex_attention(
             num_stages=num_stages,
             num_warps=num_warps,
             call_sizes=query.get_size(),
-            **kernel_options,
+            **cur_kernel_options,
         )
     inputs_for_autotuning = (
         [
@@ -932,10 +1029,11 @@ flex_attention_backward_template = TritonTemplate(
     stride_dqz, stride_dqh, stride_dqm, stride_dqd = {{stride("DQ")}}
     stride_dvz, stride_dvh, stride_dvm, stride_dvd = {{stride("DV")}}
 
-    Z = {{size("Q", 0)}}
+    ZQ = {{size("Q", 0)}}
     HQ = {{size("Q", 1)}}
     HKV = {{size("K", 1)}}
     Q_LEN = {{size("Q", 2)}}
+    ZKV = {{size("K", 0)}}
     KV_LEN = {{size("K", 2)}}
 
     MATMUL_PRECISION = Q.dtype.element_ty
@@ -945,17 +1043,20 @@ flex_attention_backward_template = TritonTemplate(
     NUM_Q_BLOCKS = tl.cdiv(Q_LEN, BLOCK_M2)
 
     off_hz = tl.program_id(2)
-    off_z = off_hz // HKV # batch idx
+    off_zq = off_hz // HKV # q batch idx
     off_hkv = off_hz % HKV # kv head idx
+    off_zkv = off_zq % ZKV # kv batch idx
 
     SPARSE_Z = {{size("KV_NUM_BLKS", 0)}}
     SPARSE_HQ = {{size("KV_NUM_BLKS", 1)}}
 
-    sparse_idx_z = off_z % SPARSE_Z
+    sparse_idx_z = off_zq % SPARSE_Z
 
-    k_adj = (stride_kh * off_hkv + stride_kz * off_z).to(tl.int64)
-    v_adj = (stride_vh * off_hkv + stride_vz * off_z).to(tl.int64)
-    dv_adj = (stride_dvh * off_hkv + stride_dvz * off_z).to(tl.int64)
+    k_adj = (stride_kh * off_hkv + stride_kz * off_zkv).to(tl.int64)
+    v_adj = (stride_vh * off_hkv + stride_vz * off_zkv).to(tl.int64)
+    # first compute broadcasted dv of shape [Bq, Hkv, KV_LEN, V_HEAD_DIM]
+    # then reduce to dv of shape [Bkv, Hkv, KV_LEN, V_HEAD_DIM]
+    dv_adj = (stride_dvh * off_hkv + stride_dvz * off_zq).to(tl.int64)
 
     # offset K, V, DV pointers for batch/kv-head
     K += k_adj
@@ -985,10 +1086,10 @@ flex_attention_backward_template = TritonTemplate(
         sparse_kv_idx_offset = sparse_hz_offset * stride_kv_idx_h + off_pid_mask * stride_kv_idx_m  # noqa: B950
 
         # Offset Q, DQ, DO, DELTA & LSE. These inputs are offseted by query heads.
-        q_adj2 = (stride_qh * off_hq2 + stride_qz * off_z).to(tl.int64)
-        do_adj2 = (stride_doh * off_hq2 + stride_doz * off_z).to(tl.int64)
-        dq_adj2 = (stride_dqh * off_hq2 + stride_dqz * off_z).to(tl.int64)
-        off_chz2 = ((off_z * HQ + off_hq2) * Q_LEN).to(tl.int64)
+        q_adj2 = (stride_qh * off_hq2 + stride_qz * off_zq).to(tl.int64)
+        do_adj2 = (stride_doh * off_hq2 + stride_doz * off_zq).to(tl.int64)
+        dq_adj2 = (stride_dqh * off_hq2 + stride_dqz * off_zq).to(tl.int64)
+        off_chz2 = ((off_zq * HQ + off_hq2) * Q_LEN).to(tl.int64)
 
         Q2 = Q + q_adj2
         DO2 = DO + do_adj2
@@ -1034,7 +1135,7 @@ flex_attention_backward_template = TritonTemplate(
             {{gen_argdefs()}},
             K, V,
             dq, q, do, Di, lse,
-            off_z, off_hq2, offs_m2, offs_n2,
+            off_zq, off_hq2, offs_m2, offs_n2,
             stride_kn, stride_kd, stride_vn, stride_vd,
             kv_indices, sparse_kv_num_blocks,
             MATMUL_PRECISION,
@@ -1053,7 +1154,7 @@ flex_attention_backward_template = TritonTemplate(
                 {{gen_argdefs()}},
                 K, V,
                 dq, q, do, Di, lse,
-                off_z, off_hq2, offs_m2, offs_n2,
+                off_zq, off_hq2, offs_m2, offs_n2,
                 stride_kn, stride_kd, stride_vn, stride_vd,
                 kv_indices, sparse_kv_num_blocks,
                 MATMUL_PRECISION,
@@ -1098,10 +1199,10 @@ flex_attention_backward_template = TritonTemplate(
             off_hq1 = off_hkv * GQA_SHARED_HEADS + off_g
 
             # Offset Q, DQ, DO, DELTA & LSE. These inputs are offseted by query heads.
-            q_adj1 = (stride_qh * off_hq1 + stride_qz * off_z).to(tl.int64)
-            do_adj1 = (stride_doh * off_hq1 + stride_doz * off_z).to(tl.int64)
-            dq_adj1 = (stride_dqh * off_hq1 + stride_dqz * off_z).to(tl.int64)
-            off_chz1 = ((off_z * HQ + off_hq1) * Q_LEN).to(tl.int64)
+            q_adj1 = (stride_qh * off_hq1 + stride_qz * off_zq).to(tl.int64)
+            do_adj1 = (stride_doh * off_hq1 + stride_doz * off_zq).to(tl.int64)
+            dq_adj1 = (stride_dqh * off_hq1 + stride_dqz * off_zq).to(tl.int64)
+            off_chz1 = ((off_zq * HQ + off_hq1) * Q_LEN).to(tl.int64)
 
             Q1 = Q + q_adj1
             DO1 = DO + do_adj1
@@ -1127,7 +1228,7 @@ flex_attention_backward_template = TritonTemplate(
                 {{gen_argdefs()}},
                 Q1, DO1, DELTA1, LSE1,
                 dk, dv, k, v,
-                off_z, off_hq1, offs_n1, offs_m1,
+                off_zq, off_hq1, offs_n1, offs_m1,
                 stride_qm, stride_qd, stride_dom, stride_dod,
                 q_indices, sparse_q_num_blocks,
                 MATMUL_PRECISION,
@@ -1147,7 +1248,7 @@ flex_attention_backward_template = TritonTemplate(
                     {{gen_argdefs()}},
                     Q1, DO1, DELTA1, LSE1,
                     dk, dv, k, v,
-                    off_z, off_hq1, offs_n1, offs_m1,
+                    off_zq, off_hq1, offs_n1, offs_m1,
                     stride_qm, stride_qd, stride_dom, stride_dod,
                     q_indices, sparse_q_num_blocks,
                     MATMUL_PRECISION,
@@ -1167,7 +1268,10 @@ flex_attention_backward_template = TritonTemplate(
 
         dk *= SM_SCALE
         mask = index_n < KV_LEN
-        {{store_output(("off_z", "off_hkv", "index_n", "index_k"), "dk", "mask", indent_width=8)}}
+
+        # first compute broadcasted dk of shape [Bq, Hkv, KV_LEN, V_HEAD_DIM]
+        # then reduce to dk of shape [Bkv, Hkv, KV_LEN, V_HEAD_DIM]
+        {{store_output(("off_zq", "off_hkv", "index_n", "index_k"), "dk", "mask", indent_width=8)}}
 
 @triton.jit
 def bwd_dq_inner(
@@ -1270,7 +1374,7 @@ def bwd_dq_block_mn(
         kT = tl.load(kT_ptrs)
     else:
         kT = tl.load(kT_ptrs, mask=offs_n2[None, :] < KV_LEN)
-    qk = tl.dot(q, kT)
+    qk = tl.dot(q, kT, input_precision=FLOAT32_PRECISION)
     if not PRESCALE_QK:
         qk *= SM_SCALE
     # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
@@ -1320,7 +1424,7 @@ def bwd_dq_block_mn(
         vT = tl.load(vT_ptrs)
     else:
         vT = tl.load(vT_ptrs, mask=offs_n2[None, :] < KV_LEN)
-    dp = tl.dot(do, vT)
+    dp = tl.dot(do, vT, input_precision=FLOAT32_PRECISION)
     ds = p * (dp - Di[:, None])
     # ~~~~~~~~~~~~~~~~~~~ Apply joint modification  ~~~~~~~~~~~~~~~~~~~
     {{ modification(
@@ -1346,7 +1450,7 @@ def bwd_dq_block_mn(
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     ds = ds.to(MATMUL_PRECISION)
     # Compute dQ.
-    dq += tl.dot(ds, tl.trans(kT))
+    dq += tl.dot(ds, tl.trans(kT), input_precision=FLOAT32_PRECISION)
 
     return dq
 
@@ -1454,7 +1558,7 @@ def bwd_dkdv_block_mn(
         qT = tl.load(qT_ptrs, mask=offs_m1[None, :] < Q_LEN)
         lse = tl.load(LSE + offs_m1, mask=offs_m1 < Q_LEN)
     lse = tl.where(lse == -float("inf"), 0.0, lse)
-    qkT = tl.dot(k, qT)
+    qkT = tl.dot(k, qT, input_precision=FLOAT32_PRECISION)
     if not PRESCALE_QK:
         qkT *= SM_SCALE
     # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
@@ -1504,13 +1608,13 @@ def bwd_dkdv_block_mn(
         do = tl.load(do_ptrs, mask=offs_m1[:, None] < Q_LEN)
     # Compute dV.
     ppT = pT
-    dv += tl.dot(ppT.to(MATMUL_PRECISION), do)
+    dv += tl.dot(ppT.to(MATMUL_PRECISION), do, input_precision=FLOAT32_PRECISION)
     if IS_DIVISIBLE:
         Di = tl.load(DELTA + offs_m1)
     else:
         Di = tl.load(DELTA + offs_m1, mask=offs_m1 < Q_LEN)
     # Compute dP and dS.
-    dpT = tl.dot(v, tl.trans(do))
+    dpT = tl.dot(v, tl.trans(do), input_precision=FLOAT32_PRECISION)
     dsT = pT * (dpT - Di[None, :])
     # ~~~~~~~~~~~~~~~~~~~ Apply joint modification  ~~~~~~~~~~~~~~~~~~~
     {{ modification(
@@ -1533,7 +1637,7 @@ def bwd_dkdv_block_mn(
         # (grads) apply mask for partially unmasked block
         dsT = tl.where(mask_mod_output, dsT, 0.0)
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    dk += tl.dot(dsT.to(MATMUL_PRECISION), tl.trans(qT))
+    dk += tl.dot(dsT.to(MATMUL_PRECISION), tl.trans(qT), input_precision=FLOAT32_PRECISION)
 
     return dk, dv
  """
@@ -1571,8 +1675,8 @@ def flex_attention_backward(*args, **kwargs):
         q_indices,
         full_q_num_blocks,
         full_q_indices,
-        SPARSE_KV_BLOCK_SIZE,
         SPARSE_Q_BLOCK_SIZE,
+        SPARSE_KV_BLOCK_SIZE,
         mask_graph,
     ) = block_mask
 
@@ -1610,10 +1714,14 @@ def flex_attention_backward(*args, **kwargs):
     dtype = query.get_dtype()
     Bq, Hq, seq_len_q, qk_head_dim = query.get_size()
     Bkv, Hkv, seq_len_kv, v_head_dim = value.get_size()
-    assert Bq == Bkv, "Batch dimension must match"
+
+    assert V.graph.sizevars.evaluate_expr(
+        sympy.Eq(Bq, Bkv) | sympy.Eq(Bkv, 1)
+    ), f"Bq and Bkv must broadcastable. Got Bq={Bq} and Bkv={Bkv}"
     B = Bq
 
     kernel_options = dict(kernel_options)
+    kernel_options.setdefault("FLOAT32_PRECISION", get_float32_precision())
     if seq_len_q % 128 != 0 or seq_len_kv % 128 != 0:
         kernel_options.setdefault("IS_DIVISIBLE", False)
     else:
@@ -1653,10 +1761,10 @@ def flex_attention_backward(*args, **kwargs):
         mask_graph_placeholder_inps + list(mask_mod_other_buffers), mask_graph
     )
 
-    layout_k = FixedLayout(
+    layout_broadcasted_k = FixedLayout(
         key.get_device(),
         key.get_dtype(),
-        key.get_size(),
+        [Bq, Hkv, seq_len_kv, qk_head_dim],
         key.get_stride(),
     )
 
@@ -1673,8 +1781,11 @@ def flex_attention_backward(*args, **kwargs):
     grad_query = empty_strided(
         query.get_size(), query.get_stride(), dtype=dtype, device=device
     )
-    grad_value = empty_strided(
-        value.get_size(), value.get_stride(), dtype=dtype, device=device
+    broadcasted_grad_value = empty_strided(
+        (Bq, *value.get_size()[1:]),
+        value.get_stride(),
+        dtype=dtype,
+        device=device,
     )
 
     kernel_options.setdefault("SM_SCALE", scale)
@@ -1698,17 +1809,18 @@ def flex_attention_backward(*args, **kwargs):
     configs: List[Tuple[int, int, int, int]] = []
     configs.append(_get_default_config_bwd(query))
     if config.max_autotune:
+        num_stages_list = [1, 3, 4, 5] if torch.version.hip is None else [1]
         configs.extend(
             [
                 (BLOCK1, BLOCK2, w, s)
                 for BLOCK1 in [32, 64]
                 for BLOCK2 in [32, 64, 128]
                 for w in [4, 8]
-                for s in [1, 3, 4, 5]
+                for s in num_stages_list
                 if BLOCK2 % BLOCK1 == 0
             ]
         )
-
+    original_kernel_options = kernel_options.copy()
     for BLOCK1, BLOCK2, num_warps, num_stages in configs:
         if (
             SPARSE_KV_BLOCK_SIZE % BLOCK1 != 0
@@ -1719,13 +1831,14 @@ def flex_attention_backward(*args, **kwargs):
             continue
 
         # Performance tuning
-        kernel_options.setdefault("BLOCK_M1", BLOCK1)
-        kernel_options.setdefault("BLOCK_N1", BLOCK2)
-        kernel_options.setdefault("BLOCK_M2", BLOCK2)
-        kernel_options.setdefault("BLOCK_N2", BLOCK1)
+        cur_kernel_options = original_kernel_options.copy()
+        cur_kernel_options.setdefault("BLOCK_M1", BLOCK1)
+        cur_kernel_options.setdefault("BLOCK_N1", BLOCK2)
+        cur_kernel_options.setdefault("BLOCK_M2", BLOCK2)
+        cur_kernel_options.setdefault("BLOCK_N2", BLOCK1)
         # Blocksparse options
-        kernel_options.setdefault("SPARSE_Q_BLOCK_SIZE", SPARSE_Q_BLOCK_SIZE)
-        kernel_options.setdefault("SPARSE_KV_BLOCK_SIZE", SPARSE_KV_BLOCK_SIZE)
+        cur_kernel_options.setdefault("SPARSE_Q_BLOCK_SIZE", SPARSE_Q_BLOCK_SIZE)
+        cur_kernel_options.setdefault("SPARSE_KV_BLOCK_SIZE", SPARSE_KV_BLOCK_SIZE)
 
         flex_attention_backward_template.maybe_append_choice(
             choices=choices,
@@ -1737,7 +1850,7 @@ def flex_attention_backward(*args, **kwargs):
                 delta,
                 grad_out,
                 grad_query,
-                grad_value,
+                broadcasted_grad_value,
                 kv_num_blocks,
                 kv_indices,
                 q_num_blocks,
@@ -1747,13 +1860,13 @@ def flex_attention_backward(*args, **kwargs):
                 full_q_num_blocks,
                 full_q_indices,
             ],
-            layout=layout_k,  # We use store_output only for grad_key
+            layout=layout_broadcasted_k,  # We use store_output only for grad_key
             subgraphs=[fw_subgraph_buffer, joint_subgraph_buffer, mask_graph_buffer],
-            mutated_inputs=[grad_query, grad_value],
+            mutated_inputs=[grad_query, broadcasted_grad_value],
             call_sizes=query.get_size() + key.get_size()[1:3],
             num_stages=num_stages,
             num_warps=num_warps,
-            **kernel_options,
+            **cur_kernel_options,
         )
     inputs_for_autotuning = (
         [
@@ -1764,7 +1877,7 @@ def flex_attention_backward(*args, **kwargs):
             delta,
             grad_out,
             grad_query,
-            grad_value,
+            broadcasted_grad_value,
             kv_num_blocks,
             kv_indices,
             q_num_blocks,
@@ -1788,13 +1901,24 @@ def flex_attention_backward(*args, **kwargs):
         15: create_indices_fake,
     }
 
-    grad_key = autotune_select_algorithm(
+    broadcasted_grad_key = autotune_select_algorithm(
         "flex_attention_backward",
         choices,
         inputs_for_autotuning,
-        layout_k,
+        layout_broadcasted_k,
         input_gen_fns=input_gen_fns,
-    )
+    )  # [Bq, Hkv, seq_len_kv, k_head_dim]
+
+    if V.graph.sizevars.evaluate_expr(sympy.Eq(Bq, Bkv)):
+        grad_key = broadcasted_grad_key
+        grad_value = broadcasted_grad_value
+    else:
+        assert V.graph.sizevars.evaluate_expr(
+            sympy.Gt(Bq, 1) & sympy.Eq(Bkv, 1)
+        ), f"Bq and Bkv must broadcastable. Got Bq={V.graph.sizevars.evaluate_expr(Bq)} and Bkv={V.graph.sizevars.evaluate_expr(Bkv)}"  # noqa: B950
+        grad_key = lowerings[aten.sum](broadcasted_grad_key, axis=0, keepdims=True)
+        grad_value = lowerings[aten.sum](broadcasted_grad_value, axis=0, keepdims=True)
+
     return (
         grad_query,
         grad_key,

@@ -9,6 +9,8 @@
 
 namespace c10::xpu::XPUCachingAllocator {
 
+using namespace c10::CachingDeviceAllocator;
+
 // newly allocated memory with 512-byte alignment.
 constexpr size_t kDeviceAlignment = 512;
 // all sizes are rounded to at least 512 bytes
@@ -117,6 +119,7 @@ struct AllocParams {
   BlockPool* pool;
   size_t alloc_size;
   Block* block;
+  StatTypes stat_types = {};
 };
 
 } // anonymous namespace
@@ -124,6 +127,7 @@ struct AllocParams {
 class DeviceCachingAllocator {
  private:
   mutable std::recursive_mutex mutex;
+  DeviceStats stats;
   BlockPool large_blocks; // unallocated cached blocks larger than 1 MB
   BlockPool small_blocks; // unallocated cached blocks 1 MB or smaller
   ska::flat_hash_set<Block*> active_blocks; // allocated or in use by a stream
@@ -164,6 +168,8 @@ class DeviceCachingAllocator {
         !block->allocated && block->event_count == 0 &&
         block->stream_uses.empty());
 
+    size_t original_block_size = block->size;
+    size_t requested_size = block->requested_size;
     auto& pool = *block->pool;
     const std::array<Block*, 2> merge_candidates = {block->prev, block->next};
     for (Block* merge_candidate : merge_candidates) {
@@ -173,6 +179,12 @@ class DeviceCachingAllocator {
     active_blocks.erase(block);
     bool inserted = pool.blocks.insert(block).second;
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(inserted);
+
+    StatTypes stat_types = get_stat_types_for_pool(pool);
+    for_each_selected_stat_type(stat_types, [&](size_t stat_type) {
+      stats.active_bytes[stat_type].decrease(original_block_size);
+      stats.requested_bytes[stat_type].decrease(requested_size);
+    });
   }
 
   void process_events() {
@@ -250,6 +262,9 @@ class DeviceCachingAllocator {
       return false;
     }
     p.block = new Block(device, p.queue(), size, p.pool, ptr);
+    for_each_selected_stat_type(p.stat_types, [&](size_t stat_type) {
+      stats.reserved_bytes[stat_type].increase(size);
+    });
     return true;
   }
 
@@ -281,6 +296,12 @@ class DeviceCachingAllocator {
     sycl::free(block->ptr, xpu::get_device_context());
     auto* pool = block->pool;
     pool->blocks.erase(block);
+
+    StatTypes stat_types = get_stat_types_for_pool(*pool);
+    for_each_selected_stat_type(stat_types, [&](size_t stat_type) {
+      stats.reserved_bytes[stat_type].decrease(block->size);
+    });
+
     delete block;
   }
 
@@ -312,6 +333,14 @@ class DeviceCachingAllocator {
     } else {
       return remaining > kSmallSize;
     }
+  }
+
+  StatTypes get_stat_types_for_pool(const BlockPool& pool) {
+    StatTypes stat_types = {};
+    stat_types[static_cast<size_t>(StatType::AGGREGATE)] = true;
+    stat_types[static_cast<size_t>(
+        pool.is_small ? StatType::SMALL_POOL : StatType::LARGE_POOL)] = true;
+    return stat_types;
   }
 
   Block* alloc_found_block(
@@ -350,6 +379,12 @@ class DeviceCachingAllocator {
     bool inserted = active_blocks.insert(block).second;
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(inserted)
 
+    for_each_selected_stat_type(params.stat_types, [&](size_t stat_type) {
+      stats.allocated_bytes[stat_type].increase(block->size);
+      stats.active_bytes[stat_type].increase(block->size);
+      stats.requested_bytes[stat_type].increase(block->requested_size);
+    });
+
     return block;
   }
 
@@ -376,6 +411,7 @@ class DeviceCachingAllocator {
     auto& pool = get_pool(size);
     const size_t alloc_size = get_allocation_size(size);
     AllocParams params(device, size, &queue, &pool, alloc_size);
+    params.stat_types = get_stat_types_for_pool(pool);
 
     // First, try to get a block from the existing pool.
     bool block_found = get_free_block(params);
@@ -384,9 +420,32 @@ class DeviceCachingAllocator {
       block_found = alloc_block(params) ||
           (release_cached_blocks() && alloc_block(params));
     }
-    TORCH_CHECK(
-        block_found,
-        "XPU out of memory, please use `empty_cache` to release all unoccupied cached memory.");
+    if (!block_found) {
+      c10::xpu::DeviceProp device_prop;
+      c10::xpu::get_device_properties(&device_prop, device);
+      auto device_total = device_prop.global_mem_size;
+      auto allocated_bytes =
+          stats.allocated_bytes[static_cast<size_t>(StatType::AGGREGATE)]
+              .current;
+      auto reserved_bytes =
+          stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)]
+              .current;
+      TORCH_CHECK_WITH(
+          OutOfMemoryError,
+          false,
+          "XPU out of memory. Tried to allocate ",
+          format_size(alloc_size),
+          ". GPU ",
+          static_cast<int>(device),
+          " has a total capacity of ",
+          format_size(device_total),
+          ". Of the allocated memory ",
+          format_size(allocated_bytes),
+          " is allocated by PyTorch, and ",
+          format_size(reserved_bytes - allocated_bytes),
+          " is reserved by PyTorch but unallocated.",
+          " Please use `empty_cache` to release all unoccupied cached memory.");
+    }
     bool split_remainder = should_split(params.block, params.size());
     return alloc_found_block(std::move(params), orig_size, split_remainder);
   }
@@ -394,6 +453,11 @@ class DeviceCachingAllocator {
   void free(Block* block) {
     std::scoped_lock<std::recursive_mutex> lock(mutex);
     block->allocated = false;
+
+    StatTypes stat_types = get_stat_types_for_pool(*block->pool);
+    for_each_selected_stat_type(stat_types, [&](size_t stat_type) {
+      stats.allocated_bytes[stat_type].decrease(block->size);
+    });
 
     if (!block->stream_uses.empty()) {
       insert_events(block);
@@ -413,6 +477,35 @@ class DeviceCachingAllocator {
   void emptyCache() {
     std::scoped_lock<std::recursive_mutex> lock(mutex);
     release_cached_blocks();
+  }
+
+  DeviceStats getStats() {
+    std::scoped_lock<std::recursive_mutex> lock(mutex);
+    return stats;
+  }
+
+  void resetAccumulatedStats() {
+    std::scoped_lock<std::recursive_mutex> lock(mutex);
+
+    for (const auto statType :
+         c10::irange(static_cast<size_t>(StatType::NUM_TYPES))) {
+      stats.allocated_bytes[statType].reset_accumulated();
+      stats.reserved_bytes[statType].reset_accumulated();
+      stats.active_bytes[statType].reset_accumulated();
+      stats.requested_bytes[statType].reset_accumulated();
+    }
+  }
+
+  void resetPeakStats() {
+    std::scoped_lock<std::recursive_mutex> lock(mutex);
+
+    for (const auto statType :
+         c10::irange(static_cast<size_t>(StatType::NUM_TYPES))) {
+      stats.allocated_bytes[statType].reset_peak();
+      stats.reserved_bytes[statType].reset_peak();
+      stats.active_bytes[statType].reset_peak();
+      stats.requested_bytes[statType].reset_peak();
+    }
   }
 };
 
@@ -547,6 +640,30 @@ class XPUAllocator : public Allocator {
   void copy_data(void* dest, const void* src, std::size_t count) const final {
     xpu::getCurrentXPUStream().queue().memcpy(dest, src, count);
   }
+
+  void assertValidDevice(DeviceIndex device) {
+    const auto device_num = device_allocators.size();
+    TORCH_CHECK(
+        0 <= device && device < static_cast<int64_t>(device_num),
+        "Invalid device argument ",
+        device,
+        ": did you call init?");
+  }
+
+  DeviceStats getDeviceStats(DeviceIndex device) {
+    assertValidDevice(device);
+    return device_allocators[device]->getStats();
+  }
+
+  void resetPeakStats(DeviceIndex device) {
+    assertValidDevice(device);
+    device_allocators[device]->resetPeakStats();
+  }
+
+  void resetAccumulatedStats(DeviceIndex device) {
+    assertValidDevice(device);
+    device_allocators[device]->resetAccumulatedStats();
+  }
 };
 
 static XPUAllocator allocator;
@@ -565,6 +682,18 @@ void init(DeviceIndex device_count) {
 
 void emptyCache() {
   return allocator.emptyCache();
+}
+
+void resetPeakStats(DeviceIndex device) {
+  return allocator.resetPeakStats(device);
+}
+
+void resetAccumulatedStats(DeviceIndex device) {
+  return allocator.resetAccumulatedStats(device);
+}
+
+DeviceStats getDeviceStats(DeviceIndex device) {
+  return allocator.getDeviceStats(device);
 }
 
 void* raw_alloc(size_t size) {

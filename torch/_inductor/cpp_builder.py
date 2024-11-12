@@ -24,6 +24,7 @@ from torch._dynamo.utils import dynamo_timed
 from torch._inductor import config, exc
 from torch._inductor.cpu_vec_isa import invalid_vec_isa, VecISA
 from torch._inductor.runtime.runtime_utils import cache_dir
+from torch.torch_version import TorchVersion
 
 
 if config.is_fbcode():
@@ -143,9 +144,7 @@ def get_cpp_compiler() -> str:
         check_compiler_exist_windows(compiler)
     else:
         if config.is_fbcode():
-            return (
-                build_paths.cc() if torch.version.hip is None else build_paths.clang()
-            )
+            return build_paths.cc
         if isinstance(config.cpp.cxx, (list, tuple)):
             search = tuple(config.cpp.cxx)
         else:
@@ -200,6 +199,16 @@ def _is_msvc_cl(cpp_compiler: str) -> bool:
 
 @functools.lru_cache(None)
 def _is_intel_compiler(cpp_compiler: str) -> bool:
+    def _check_minimal_version(compiler_version: TorchVersion) -> None:
+        """
+        On Windows: early version icx has `-print-file-name` issue, and can't preload correctly for inductor.
+        """
+        min_version = "2024.2.1" if _IS_WINDOWS else "0.0.0"
+        if compiler_version < TorchVersion(min_version):
+            raise RuntimeError(
+                f"Intel Compiler error: less than minimal version {min_version}."
+            )
+
     try:
         output_msg = (
             subprocess.check_output(
@@ -215,6 +224,13 @@ def _is_intel_compiler(cpp_compiler: str) -> bool:
                     raise RuntimeError(
                         "Please use icx-cl, due to torch.compile only support MSVC-like CLI (compiler flags syntax)."
                     )
+
+            # Version check
+            icx_ver_search = re.search(r"(\d+[.]\d+[.]\d+[.]\d+)", output_msg)
+            if icx_ver_search is not None:
+                icx_ver = icx_ver_search.group(1)
+                _check_minimal_version(TorchVersion(icx_ver))
+
         return is_intel_compiler
     except FileNotFoundError as exc:
         return False
@@ -485,8 +501,34 @@ def _get_os_related_cpp_cflags(cpp_compiler: str) -> List[str]:
     else:
         cflags = ["Wno-unused-variable", "Wno-unknown-pragmas"]
         if _is_clang(cpp_compiler):
-            cflags.append("Werror=ignored-optimization-argument")
+            ignored_optimization_argument = (
+                "Werror=ignored-optimization-argument"
+                if config.aot_inductor.raise_error_on_ignored_optimization
+                else "Wno-ignored-optimization-argument"
+            )
+            cflags.append(ignored_optimization_argument)
     return cflags
+
+
+def _get_ffast_math_flags() -> List[str]:
+    # ffast-math is equivalent to these flags as in
+    # https://github.com/gcc-mirror/gcc/blob/4700ad1c78ccd7767f846802fca148b2ea9a1852/gcc/opts.cc#L3458-L3468
+    # however gcc<13 sets the FTZ/DAZ flags for runtime on x86 even if we have
+    # -ffast-math -fno-unsafe-math-optimizations because the flags for runtime
+    # are added by linking in crtfastmath.o. This is done by the spec file which
+    # only does globbing for -ffast-math.
+    flags = [
+        "fno-trapping-math",
+        "funsafe-math-optimizations",
+        "ffinite-math-only",
+        "fno-signed-zeros",
+        "fno-math-errno",
+    ]
+
+    if is_gcc():
+        flags.append("fexcess-precision=fast")
+
+    return flags
 
 
 def _get_optimization_cflags() -> List[str]:
@@ -494,7 +536,7 @@ def _get_optimization_cflags() -> List[str]:
         return ["O2"]
     else:
         cflags = ["O0", "g"] if config.aot_inductor.debug_compile else ["O3", "DNDEBUG"]
-        cflags.append("ffast-math")
+        cflags += _get_ffast_math_flags()
         cflags.append("fno-finite-math-only")
 
         if not config.cpp.enable_unsafe_math_opt_flag:
@@ -503,6 +545,9 @@ def _get_optimization_cflags() -> List[str]:
             cflags.append("ffp-contract=off")
 
         if sys.platform != "darwin":
+            # on macos, unknown argument: '-fno-tree-loop-vectorize'
+            if is_gcc():
+                cflags.append("fno-tree-loop-vectorize")
             # https://stackoverflow.com/questions/65966969/why-does-march-native-not-work-on-apple-m1
             # `-march=native` is unrecognized option on M1
             if not config.is_fbcode():
@@ -624,7 +669,7 @@ def _get_glibcxx_abi_build_flags() -> List[str]:
 
 
 def _get_torch_cpp_wrapper_defination() -> List[str]:
-    return ["TORCH_INDUCTOR_CPP_WRAPPER"]
+    return ["TORCH_INDUCTOR_CPP_WRAPPER", "STANDALONE_TORCH_HEADER"]
 
 
 def _use_custom_generated_macros() -> List[str]:
@@ -666,24 +711,19 @@ def _setup_standard_sys_libs(
         return cflags, include_dirs, passthough_args
 
     if config.is_fbcode():
+        # TODO(T203137008) Can we unify these flags with triton_cc_command?
         cflags.append("nostdinc")
         # Note that the order of include paths do matter, as a result
         # we need to have several branches interleaved here
-        if torch.version.hip is None:
-            include_dirs.append(build_paths.sleef())
-        include_dirs.append(build_paths.openmp())
-        include_dirs.append(build_paths.python())
-        if torch.version.hip is not None:
-            include_dirs.append(build_paths.clang_include())
-            include_dirs.append(build_paths.gcc_include())
-            include_dirs.append(build_paths.gcc_install_tools_include())
-        else:
-            include_dirs.append(build_paths.cc_include())
-            include_dirs.append(build_paths.libgcc())
-            include_dirs.append(build_paths.libgcc_arch())
-        include_dirs.append(build_paths.libgcc_backward())
-        include_dirs.append(build_paths.glibc())
-        include_dirs.append(build_paths.linux_kernel())
+        include_dirs.append(build_paths.sleef_include)
+        include_dirs.append(build_paths.openmp_include)
+        include_dirs.append(build_paths.python_include)
+        include_dirs.append(build_paths.cc_include)
+        include_dirs.append(build_paths.libgcc_include)
+        include_dirs.append(build_paths.libgcc_arch_include)
+        include_dirs.append(build_paths.libgcc_backward_include)
+        include_dirs.append(build_paths.glibc_include)
+        include_dirs.append(build_paths.linux_kernel_include)
         include_dirs.append("include")
 
         if aot_mode and not use_absolute_path:
@@ -695,8 +735,8 @@ def _setup_standard_sys_libs(
             passthough_args.append(" --rtlib=compiler-rt")
             passthough_args.append(" -fuse-ld=lld")
             passthough_args.append(f" -Wl,--script={linker_script}")
-            passthough_args.append(" -B" + build_paths.glibc_lib())
-            passthough_args.append(" -L" + build_paths.glibc_lib())
+            passthough_args.append(" -B" + build_paths.glibc_lib)
+            passthough_args.append(" -L" + build_paths.glibc_lib)
 
     return cflags, include_dirs, passthough_args
 
@@ -742,13 +782,8 @@ def _get_torch_related_args(
         if not aot_mode:
             libraries.append("torch_python")
 
-    if _IS_WINDOWS:
+    if _IS_WINDOWS and platform.machine().lower() != "arm64":
         libraries.append("sleef")
-
-    # Unconditionally import c10 for non-abi-compatible mode to use TORCH_CHECK - See PyTorch #108690
-    if not config.abi_compatible:
-        libraries.append("c10")
-        libraries_dirs.append(TORCH_LIB_PATH)
 
     return include_dirs, libraries_dirs, libraries
 
@@ -781,7 +816,7 @@ def _get_python_related_args() -> Tuple[List[str], List[str]]:
         python_lib_path = [sysconfig.get_config_var("LIBDIR")]
 
     if config.is_fbcode():
-        python_include_dirs.append(build_paths.python())
+        python_include_dirs.append(build_paths.python_include)
 
     return python_include_dirs, python_lib_path
 
@@ -832,16 +867,33 @@ def perload_clang_libomp_win(cpp_compiler: str, omp_name: str) -> None:
 
 @functools.lru_cache(None)
 def perload_icx_libomp_win(cpp_compiler: str) -> None:
-    try:
-        output = subprocess.check_output(
-            [cpp_compiler, "-print-file-name=libiomp5md.dll"], stderr=subprocess.DEVNULL
-        ).decode(*SUBPROCESS_DECODE_ARGS)
-        omp_path = output.rstrip()
-        if os.path.isfile(omp_path):
-            os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
-            omp_module = cdll.LoadLibrary(omp_path)
-    except subprocess.SubprocessError:
-        pass
+    def _load_icx_built_in_lib_by_name(cpp_compiler: str, lib_name: str) -> bool:
+        try:
+            output = subprocess.check_output(
+                [cpp_compiler, f"-print-file-name={lib_name}"],
+                stderr=subprocess.DEVNULL,
+            ).decode(*SUBPROCESS_DECODE_ARGS)
+            omp_path = output.rstrip()
+            if os.path.isfile(omp_path):
+                os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+                omp_module = cdll.LoadLibrary(omp_path)
+                return True
+        except subprocess.SubprocessError:
+            pass
+        return False
+
+    """
+    Intel Compiler implenmented more math libraries than clang, for performance proposal.
+    We need preload them like openmp library.
+    """
+    preload_list = [
+        "libiomp5md.dll",  # openmp
+        "svml_dispmd.dll",  # svml library
+        "libmmd.dll",  # libm
+    ]
+
+    for lib_name in preload_list:
+        _load_icx_built_in_lib_by_name(cpp_compiler, lib_name)
 
 
 def _get_openmp_args(
@@ -930,9 +982,9 @@ def _get_openmp_args(
             cflags.append("openmp:experimental")  # MSVC CL
     else:
         if config.is_fbcode():
-            include_dir_paths.append(build_paths.openmp())
+            include_dir_paths.append(build_paths.openmp_include)
 
-            openmp_lib = build_paths.openmp_lib()
+            openmp_lib = build_paths.openmp_lib_so
             fb_openmp_extra_flags = f"-Wp,-fopenmp {openmp_lib}"
             passthough_args.append(fb_openmp_extra_flags)
 
@@ -942,6 +994,8 @@ def _get_openmp_args(
                 # TODO: fix issue, can't find omp.h
                 cflags.append("fopenmp")
                 libs.append("gomp")
+            elif _is_intel_compiler(cpp_compiler):
+                cflags.append("fiopenmp")
             else:
                 cflags.append("fopenmp")
                 libs.append("gomp")
@@ -1109,7 +1163,7 @@ def _set_gpu_runtime_env() -> None:
         and "CUDA_HOME" not in os.environ
         and "CUDA_PATH" not in os.environ
     ):
-        os.environ["CUDA_HOME"] = build_paths.cuda()
+        os.environ["CUDA_HOME"] = build_paths.sdk_home
 
 
 def _transform_cuda_paths(lpaths: List[str]) -> None:
@@ -1129,8 +1183,8 @@ def _transform_cuda_paths(lpaths: List[str]) -> None:
                     break
 
 
-def get_cpp_torch_cuda_options(
-    cuda: bool,
+def get_cpp_torch_device_options(
+    device_type: str,
     aot_mode: bool = False,
     compile_only: bool = False,
 ) -> Tuple[List[str], List[str], List[str], List[str], List[str], List[str], List[str]]:
@@ -1146,17 +1200,15 @@ def get_cpp_torch_cuda_options(
         and "CUDA_HOME" not in os.environ
         and "CUDA_PATH" not in os.environ
     ):
-        os.environ["CUDA_HOME"] = (
-            build_paths.rocm() if torch.version.hip else build_paths.cuda()
-        )
+        os.environ["CUDA_HOME"] = build_paths.sdk_home
 
     _set_gpu_runtime_env()
     from torch.utils import cpp_extension
 
-    include_dirs = cpp_extension.include_paths(cuda)
-    libraries_dirs = cpp_extension.library_paths(cuda)
+    include_dirs = cpp_extension.include_paths(device_type)
+    libraries_dirs = cpp_extension.library_paths(device_type)
 
-    if cuda:
+    if device_type == "cuda":
         definations.append(" USE_ROCM" if torch.version.hip else " USE_CUDA")
 
         if torch.version.hip is not None:
@@ -1169,10 +1221,12 @@ def get_cpp_torch_cuda_options(
             if config.is_fbcode():
                 libraries += ["cuda"]
             else:
-                if config.is_fbcode():
-                    libraries += ["cuda"]
-                else:
-                    libraries += ["c10_cuda", "cuda", "torch_cuda"]
+                libraries += ["c10_cuda", "cuda", "torch_cuda"]
+
+    if device_type == "xpu":
+        definations.append(" USE_XPU")
+        cflags += ["fsycl"]
+        libraries += ["c10_xpu", "sycl", "ze_loader", "torch_xpu"]
 
     if aot_mode:
         if config.is_fbcode():
@@ -1181,16 +1235,13 @@ def get_cpp_torch_cuda_options(
             cpp_prefix_include_dir = [f"{os.path.dirname(cpp_prefix_path())}"]
             include_dirs += cpp_prefix_include_dir
 
-        if cuda and torch.version.hip is None:
+        if device_type == "cuda" and torch.version.hip is None:
             _transform_cuda_paths(libraries_dirs)
 
     if config.is_fbcode():
-        if torch.version.hip is not None:
-            include_dirs.append(os.path.join(build_paths.rocm(), "include"))
-        else:
-            include_dirs.append(os.path.join(build_paths.cuda(), "include"))
+        include_dirs.append(build_paths.sdk_include)
 
-        if aot_mode and cuda:
+        if aot_mode and device_type == "cuda":
             if torch.version.hip is None:
                 if not compile_only:
                     # Only add link args, when compile_only is false.
@@ -1207,18 +1258,18 @@ def get_cpp_torch_cuda_options(
     )
 
 
-class CppTorchCudaOptions(CppTorchOptions):
+class CppTorchDeviceOptions(CppTorchOptions):
     """
     This class is inherited from CppTorchOptions, which automatic contains
     base cxx build options and torch common build options. And then it will
-    maintains cuda device related build args.
+    maintains cuda/xpu device related build args.
     """
 
     def __init__(
         self,
         vec_isa: VecISA = invalid_vec_isa,
         include_pytorch: bool = False,
-        cuda: bool = True,
+        device_type: str = "cuda",
         aot_mode: bool = False,
         compile_only: bool = False,
         use_absolute_path: bool = False,
@@ -1235,33 +1286,37 @@ class CppTorchCudaOptions(CppTorchOptions):
             use_mmap_weights=use_mmap_weights,
             extra_flags=extra_flags,
         )
+        if device_type == "xpu":
+            from torch.utils.cpp_extension import _join_sycl_home
 
-        cuda_definations: List[str] = []
-        cuda_include_dirs: List[str] = []
-        cuda_cflags: List[str] = []
-        cuda_ldflags: List[str] = []
-        cuda_libraries_dirs: List[str] = []
-        cuda_libraries: List[str] = []
-        cuda_passthough_args: List[str] = []
+            self._compiler = _join_sycl_home("bin", "icpx")
+
+        device_definations: List[str] = []
+        device_include_dirs: List[str] = []
+        device_cflags: List[str] = []
+        device_ldflags: List[str] = []
+        device_libraries_dirs: List[str] = []
+        device_libraries: List[str] = []
+        device_passthough_args: List[str] = []
 
         (
-            cuda_definations,
-            cuda_include_dirs,
-            cuda_cflags,
-            cuda_ldflags,
-            cuda_libraries_dirs,
-            cuda_libraries,
-            cuda_passthough_args,
-        ) = get_cpp_torch_cuda_options(
-            cuda=cuda, aot_mode=aot_mode, compile_only=compile_only
+            device_definations,
+            device_include_dirs,
+            device_cflags,
+            device_ldflags,
+            device_libraries_dirs,
+            device_libraries,
+            device_passthough_args,
+        ) = get_cpp_torch_device_options(
+            device_type=device_type, aot_mode=aot_mode, compile_only=compile_only
         )
-        _append_list(self._definations, cuda_definations)
-        _append_list(self._include_dirs, cuda_include_dirs)
-        _append_list(self._cflags, cuda_cflags)
-        _append_list(self._ldflags, cuda_ldflags)
-        _append_list(self._libraries_dirs, cuda_libraries_dirs)
-        _append_list(self._libraries, cuda_libraries)
-        _append_list(self._passthough_args, cuda_passthough_args)
+        _append_list(self._definations, device_definations)
+        _append_list(self._include_dirs, device_include_dirs)
+        _append_list(self._cflags, device_cflags)
+        _append_list(self._ldflags, device_ldflags)
+        _append_list(self._libraries_dirs, device_libraries_dirs)
+        _append_list(self._libraries, device_libraries)
+        _append_list(self._passthough_args, device_passthough_args)
         self._finalize_options()
 
 

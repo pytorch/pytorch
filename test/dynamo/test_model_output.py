@@ -47,6 +47,21 @@ class TestHFPretrained(torch._dynamo.test_case.TestCase):
         res = opt_fn(x, tmp)
         self.assertTrue(same(ref, res))
 
+    @maybe_skip
+    def test_pretrained_non_const_attr(self):
+        def fn(a, tmp):
+            if tmp.pruned_heads:
+                return a + 1
+            else:
+                return a - 1
+
+        x = torch.randn(2)
+        tmp = PretrainedConfig()
+        ref = fn(x, tmp)
+        opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+        res = opt_fn(x, tmp)
+        self.assertTrue(same(ref, res))
+
 
 class TestModelOutput(torch._dynamo.test_case.TestCase):
     @maybe_skip

@@ -1,6 +1,6 @@
 #include <ATen/ThreadLocalState.h>
+#include <distributed/c10d/ProcessGroup.hpp>
 
-#include <torch/csrc/distributed/c10d/LockGuard.hpp>
 #include <torch/csrc/distributed/c10d/Work.hpp>
 #include <utility>
 
@@ -46,17 +46,17 @@ OpType Work::retrieveOpType() const {
 Work::~Work() = default;
 
 bool Work::isCompleted() {
-  C10D_LOCK_GUARD(lock, mutex_);
+  std::lock_guard<std::mutex> lock(mutex_);
   return completed_;
 }
 
 bool Work::isSuccess() const {
-  C10D_LOCK_GUARD(lock, mutex_);
+  std::lock_guard<std::mutex> lock(mutex_);
   return !exception_;
 }
 
 std::exception_ptr Work::exception() const {
-  C10D_LOCK_GUARD(lock, mutex_);
+  std::lock_guard<std::mutex> lock(mutex_);
   return exception_;
 }
 
@@ -71,10 +71,15 @@ std::vector<at::Tensor> Work::result() {
   TORCH_CHECK(false, "result() not implemented.");
 }
 
-void Work::synchronize() {}
+void Work::synchronize() {
+  if (c10d::allow_inflight_collective_as_graph_input()) {
+    c10d::unregister_work(
+        c10::intrusive_ptr<Work>::unsafe_reclaim_from_nonowning(this));
+  }
+}
 
 bool Work::wait(std::chrono::milliseconds timeout) {
-  C10D_LOCK_GUARD(lock, mutex_);
+  std::unique_lock<std::mutex> lock(mutex_);
   if (timeout == kNoTimeout) {
     // This waits without a timeout.
     cv_.wait(lock, [&] { return completed_; });
@@ -99,12 +104,15 @@ void Work::abort() {
   TORCH_CHECK(false, "Work::abort not implemented.");
 }
 
-c10::intrusive_ptr<c10::ivalue::Future> Work::getFuture() {
-  TORCH_CHECK(false, "Work::getFuture not implemented.")
+c10::intrusive_ptr<c10::ivalue::Future> Work::getFuture(){
+    TORCH_CHECK(false, "Work::getFuture not implemented.")}
+
+c10::intrusive_ptr<c10::ivalue::Future> Work::getFutureResult() {
+  TORCH_CHECK(false, "Work::getFutureResult not implemented.")
 }
 
 void Work::finish(std::exception_ptr exception) {
-  C10D_LOCK_GUARD(lock, mutex_);
+  std::unique_lock<std::mutex> lock(mutex_);
   completed_ = true;
   exception_ = std::move(exception);
   if (recordFunctionEndCallback_) {
@@ -116,7 +124,7 @@ void Work::finish(std::exception_ptr exception) {
 }
 
 void Work::finishAndThrow(std::exception_ptr exception) {
-  C10D_LOCK_GUARD(lock, mutex_);
+  std::unique_lock<std::mutex> lock(mutex_);
   completed_ = true;
   exception_ = std::move(exception);
   if (recordFunctionEndCallback_) {
