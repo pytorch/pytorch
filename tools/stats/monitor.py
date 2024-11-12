@@ -144,8 +144,8 @@ if __name__ == "__main__":
                     gpu_handle = pynvml.nvmlDeviceGetHandleByIndex(i)
                     # Get the message for the current GPU
                     # Print the message
-                    stats["total_gpu_utilization-{i}"] = gpu_utilization.gpu
-                    stats["total_gpu_mem_utilization-{i}"] = gpu_utilization.memory
+                    stats[f"total_gpu_utilization-{i}"] = gpu_utilization.gpu
+                    stats[f"total_gpu_mem_utilization-{i}"] = gpu_utilization.memory
                 # Run the nvidia-smi command and capture its output
                 output = subprocess.check_output(['nvidia-smi', '--query-gpu=utilization.gpu', '--format=csv,noheader,nounits'])# Decode the output from bytes to string
                 output_str = output.decode('utf-8')
@@ -165,7 +165,7 @@ if __name__ == "__main__":
                 gpus = gputil.getGPUs()
                 # Print the GPU names and indices
                 for i, gpu in enumerate(gpus):
-                    stats["gputil-{i}"]= gpu.load*100
+                    stats[f"gputil-{i}"]= gpu.load*100
         except Exception as e:
             stats = {
                 "time": datetime.datetime.now(timezone.utc).isoformat("T") + "Z",
