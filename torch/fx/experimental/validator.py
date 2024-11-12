@@ -139,6 +139,22 @@ try:
         string = op + " " + " ".join(args)
         return f"({string.rstrip()})"
 
+    # We need to convert to/from BitVec in order to use z3 bitwise ops.
+    # We assume that integers are 64 bit.
+    # If all args are boolean, then use the boolean bitwise op implementation instead, if provided.
+    def _bitwise_op(bitwise_func, bool_func):
+        @functools.wraps(bitwise_func)
+        def wrapper(self, *args):
+            if bool_func is not None and all(
+                isinstance(arg, z3.BoolRef) for arg in args
+            ):
+                return bool_func(*args)
+
+            wrapped_args = tuple(z3.Int2BV(a, 64) for a in args)
+            return z3.BV2Int(bitwise_func(*wrapped_args))
+
+        return wrapper
+
     # Implementation of Python semantics as Z3 expressions.
     #
     # Z3 Real-Int theory has operators with semantics that differ that of
@@ -233,23 +249,6 @@ try:
                 self.ceil(number - 0.5),
                 self.floor(number + 0.5),
             )
-
-        # We need to convert to/from BitVec in order to use z3 bitwise ops.
-        # We assume that integers are 64 bit.
-        # If all args are boolean, then use the boolean bitwise op implementation instead, if provided.
-        @staticmethod
-        def _bitwise_op(bitwise_func, bool_func):
-            @functools.wraps(bitwise_func)
-            def wrapper(self, *args):
-                if bool_func is not None and all(
-                    isinstance(arg, z3.BoolRef) for arg in args
-                ):
-                    return bool_func(*args)
-
-                wrapped_args = tuple(z3.Int2BV(a, 64) for a in args)
-                return z3.BV2Int(bitwise_func(*wrapped_args))
-
-            return wrapper
 
         bitwise_and = _bitwise_op(operator.and_, z3.And)
         bitwise_or = _bitwise_op(operator.or_, z3.Or)
