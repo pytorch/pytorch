@@ -2,8 +2,7 @@
 #include <Linear.h>
 #include <torch/library.h>
 
-namespace at {
-namespace native::xpu {
+namespace at::native::xpu {
 
 Tensor linear_pointwise(
     const Tensor& input_t,
@@ -46,5 +45,4 @@ TORCH_LIBRARY_IMPL(mkldnn, XPU, m) {
       TORCH_FN(linear_pointwise_binary));
 }
 
-} // namespace native::xpu
-} // namespace at
+} // namespace at::native::xpu

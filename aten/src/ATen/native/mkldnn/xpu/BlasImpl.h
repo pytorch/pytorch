@@ -8,9 +8,7 @@
 
 #include <c10/util/typeid.h>
 
-namespace at {
-namespace native::xpu {
-namespace impl {
+namespace at::native::xpu::impl {
 
 static inline bool check_broadcast(
     const Tensor& src,
@@ -514,6 +512,4 @@ static Tensor& matmul_fusion_variants(
   }
 }
 
-} // namespace impl
-} // namespace native::xpu
-} // namespace at
+} // namespace at::native::xpu::impl

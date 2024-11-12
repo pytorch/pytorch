@@ -6,6 +6,7 @@ from typing import List, NamedTuple
 import torch
 import torch.nn as nn
 from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 
 
 CONV_MODULES = {2: torch.nn.Conv2d, 3: torch.nn.Conv3d}
@@ -18,7 +19,7 @@ class PointwisePostOp(NamedTuple):
     algorithm: str = ""
 
 
-class TestConvPostOP(TestCase):
+class TestoneDNNFusion(TestCase):
     def _unary_list(self):
         unary_list = {
             "relu": PointwisePostOp("relu", nn.ReLU()),
@@ -121,6 +122,9 @@ class TestConvPostOP(TestCase):
                 )
                 self.assertEqual(ref, fused)
 
+instantiate_device_type_tests(
+    TestoneDNNFusion, globals(), only_for="xpu", allow_xpu=True
+)
 
 if __name__ == "__main__":
     run_tests()
