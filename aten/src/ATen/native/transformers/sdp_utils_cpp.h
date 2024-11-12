@@ -22,15 +22,8 @@
 
 namespace sdp {
 
-constexpr int32_t num_backends = 5;
-enum class SDPBackend {
-  error = -1,
-  math = 0,
-  flash_attention = 1,
-  efficient_attention = 2,
-  cudnn_attention = 3,
-  overrideable = 4
-};
+constexpr int32_t num_backends = at::num_sdp_backends;
+using SDPBackend = at::SDPBackend;
 
 // Note that if this changed make sure to update
 // the templated enum in mem_eff/kernel_forward.h and mem_eff/kernel_backward.h

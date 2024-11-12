@@ -75,13 +75,7 @@ bool check_prefer_cudnn_attention() {
 
 // flash_attention V2 is universally faster than efficient_attention and Math
 std::array<SDPBackend, num_backends> priority_order(sdp_params const& params) {
-  constexpr std::array<SDPBackend, num_backends> default_order{
-      SDPBackend::flash_attention,
-      SDPBackend::efficient_attention,
-      SDPBackend::math,
-      SDPBackend::cudnn_attention,
-      };
-  return default_order;
+  return at::globalContext().sDPPriorityOrder();
 }
 
 bool use_tensor_cores(sdp_params const& params, cudaDeviceProp* dprops, bool is_half) {

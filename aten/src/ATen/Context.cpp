@@ -122,6 +122,20 @@ void Context::setAllowTF32CuDNN(bool b) {
   allow_tf32_cudnn = b;
 }
 
+void Context::setSDPPriorityOrder(const std::vector<int64_t>& order) {
+  // TODO*eqy): should it always be the number of backends - 1 (override backend excluded?)
+  TORCH_CHECK(at::num_sdp_backends == sdp_priority_order.size(),
+    "setSDPPriority order expected ", sdp_priority_order.size() - 1, " but got ",
+    at::num_sdp_backends, " unique backends specified in priority order.");
+  for (uint32_t i = 0; i < order.size(); i++) {
+    sdp_priority_order[i] = (at::SDPBackend) order[i];
+  }
+}
+
+std::array<at::SDPBackend, at::num_sdp_backends> Context::sDPPriorityOrder() {
+  return sdp_priority_order;
+}
+
 bool Context::userEnabledFlashSDP() const {
   return enabled_flashSDP;
 }
