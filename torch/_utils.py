@@ -922,11 +922,7 @@ def _functionalize_sync(t):
 
 
 @functools.lru_cache(2)
-def _get_device_module(device_type: Optional[str] = None):
-    # If no device type is specified as an argument,
-    # the detected underlying accelerator device type will be used.
-    if device_type is None:
-        device_type = torch._C._get_accelerator().type
+def _get_device_module(device_type: str):
     device_module = getattr(torch, device_type, None)
     if device_module is None:
         raise RuntimeError(
