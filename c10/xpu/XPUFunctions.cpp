@@ -27,8 +27,7 @@ struct DevicePool {
   std::unique_ptr<sycl::context> context;
 } gDevicePool;
 
-// Ensures we only call enumDevices only once.
-void enumDevices() {
+void enumDevices(std::vector<std::unique_ptr<sycl::device>>& devices) {
   auto platform_list = sycl::platform::get_platforms();
   // Enumerated GPU devices from the specific platform.
   for (const auto& platform : platform_list) {
@@ -38,28 +37,24 @@ void enumDevices() {
     auto device_list = platform.get_devices();
     for (const auto& device : device_list) {
       if (device.is_gpu()) {
-        gDevicePool.devices.push_back(std::make_unique<sycl::device>(device));
+        devices.push_back(std::make_unique<sycl::device>(device));
       }
     }
   }
-  // Here we need to check the number of XPU devices. c10::Device depends on
-  // c10::Device::MAX_NUM_DEVICES. Its index must be between -1 and
-  // MAX_NUM_DEVICES - 1.
-  TORCH_CHECK(
-      gDevicePool.devices.size() <= c10::Device::MAX_NUM_DEVICES,
-      "Number of XPU devices on the machine exceeds the compiled "
-      "max number of devices expected (",
-      c10::Device::MAX_NUM_DEVICES,
-      "). Increase that and recompile PyTorch.");
 }
 
 inline void initGlobalDevicePoolState() {
   // Enumerate all GPU devices and record them.
-  enumDevices();
+  enumDevices(gDevicePool.devices);
   if (gDevicePool.devices.empty()) {
     TORCH_WARN("XPU device count is zero!");
     return;
   }
+  // Ensures that the number of GPU devices does not exceed the maximum
+  // allowable value for DeviceIndex.
+  TORCH_CHECK(
+      gDevicePool.devices.size() <= std::numeric_limits<DeviceIndex>::max(),
+      "Too many XPU devices, DeviceIndex overflowed!");
 
 #ifdef _WIN32
   // default context feature is disabled by default on Windows.
@@ -122,7 +117,7 @@ void initDeviceProperties(DeviceProp* device_prop, DeviceIndex device) {
 
 sycl::device& get_raw_device(DeviceIndex device) {
   initDevicePoolCallOnce();
-  check_device(device);
+  check_device_index(device);
   return *gDevicePool.devices[device];
 }
 
@@ -137,7 +132,7 @@ sycl::context& get_device_context() {
 void get_device_properties(DeviceProp* device_prop, DeviceIndex device) {
   initDevicePoolCallOnce();
   TORCH_CHECK(device_prop, "device_prop is an invalid pointer.");
-  check_device(device);
+  check_device_index(device);
   initDeviceProperties(device_prop, device);
 }
 
@@ -180,7 +175,7 @@ DeviceIndex current_device() {
 
 void set_device(DeviceIndex device) {
   initDevicePoolCallOnce();
-  check_device(device);
+  check_device_index(device);
   curDeviceIndex = device;
 }
 

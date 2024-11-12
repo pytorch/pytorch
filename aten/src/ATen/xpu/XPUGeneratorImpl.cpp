@@ -32,7 +32,7 @@ const Generator& getDefaultXPUGenerator(DeviceIndex device) {
   if (device == -1) {
     device = c10::xpu::current_device();
   }
-  check_device(device);
+  check_device_index(device);
   c10::call_once(xpu_gens_init_flag[device], [&]() {
     default_gens_xpu[device] = make_generator<XPUGeneratorImpl>(device);
     default_gens_xpu[device].seed();
@@ -46,7 +46,7 @@ Generator createXPUGenerator(DeviceIndex device) {
   if (device == -1) {
     device = c10::xpu::current_device();
   }
-  check_device(device);
+  check_device_index(device);
   auto gen = make_generator<XPUGeneratorImpl>(device);
   auto xpu_gen = check_generator<XPUGeneratorImpl>(gen);
   xpu_gen->set_current_seed(default_rng_seed_val);

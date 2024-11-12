@@ -200,7 +200,7 @@ XPUStream getStreamFromPool(const int priority, DeviceIndex device) {
   if (device == -1) {
     device = c10::xpu::current_device();
   }
-  check_device(device);
+  check_device_index(device);
   TORCH_CHECK(
       priority <= 0,
       "Expected XPU stream priority to be less than or equal to 0, got ",
@@ -228,7 +228,7 @@ XPUStream getCurrentXPUStream(DeviceIndex device) {
   if (device == -1) {
     device = c10::xpu::current_device();
   }
-  check_device(device);
+  check_device_index(device);
   // Initializes the stream pool (once)
   initDeviceStreamOnce(device);
   return XPUStreamForId(device, current_streams[device]);
@@ -266,7 +266,7 @@ void syncStreamsOnDevice(DeviceIndex device) {
   if (device == -1) {
     device = c10::xpu::current_device();
   }
-  check_device(device);
+  check_device_index(device);
   // Initializes the stream pools (once)
   initDeviceStreamOnce(device);
 
