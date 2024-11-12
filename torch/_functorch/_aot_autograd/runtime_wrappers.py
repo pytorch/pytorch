@@ -2031,6 +2031,18 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         ),
                     )
 
+                # not ideal but prevent the user from seeing a nasty traceback - See #138422
+                stack = torch._C._functorch.peek_interpreter_stack()
+                vmap_type = torch._C._functorch.TransformType.Vmap
+                torch._check(
+                    not (stack is not None and stack.key() == vmap_type),
+                    lambda: (
+                        "It looks like you're trying to call a compiled backward function within vmap, "
+                        "which isn't supported. Try wrapping vmap inside torch.compile, or skip compiling the "
+                        "backward function."
+                    ),
+                )
+
                 out = call_func_at_runtime_with_args(
                     CompiledFunction.compiled_bw,
                     all_args,

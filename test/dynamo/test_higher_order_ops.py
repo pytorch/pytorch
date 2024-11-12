@@ -5967,6 +5967,27 @@ class GraphModule(torch.nn.Module):
         ):
             torch.func.vmap(fn)(x)
 
+    def test_vmap_call_compiled_backward_fn(self):
+        # See PyTorch issue #138422
+        N = 5
+
+        @torch.compile
+        def f(x):
+            return x**2
+
+        x = torch.randn(N, requires_grad=True)
+        y = f(x)
+        I_N = torch.eye(N)
+
+        def get_vjp(v):
+            return torch.autograd.grad(y, x, v)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "It looks like you're trying to call a compiled backward function within vmap, which isn't supported",
+        ):
+            torch.vmap(get_vjp)(I_N)
+
     def test_grad_call_torch_compile_fn(self):
         def wrapped_fn(x):
             return x.sin().sum()
