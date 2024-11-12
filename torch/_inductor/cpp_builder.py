@@ -544,11 +544,10 @@ def _get_optimization_cflags(cpp_compiler: str) -> List[str]:
         if not config.cpp.enable_floating_point_contract_flag:
             cflags.append("ffp-contract=off")
 
-        if _is_gcc(cpp_compiler):
-            #  '-fno-tree-loop-vectorize' is gcc specific flag, not clang.
-            cflags.append("fno-tree-loop-vectorize")
-
         if sys.platform != "darwin":
+            # on macos, unknown argument: '-fno-tree-loop-vectorize'
+            if _is_gcc(cpp_compiler):
+                cflags.append("fno-tree-loop-vectorize")
             # https://stackoverflow.com/questions/65966969/why-does-march-native-not-work-on-apple-m1
             # `-march=native` is unrecognized option on M1
             if not config.is_fbcode():
@@ -1233,8 +1232,7 @@ def get_cpp_torch_device_options(
         # "warning: overriding currently unsupported use of floating point
         # exceptions on this target [-Wunsupported-floating-point-opt]".
         # Since the compiler has not support some features.
-        if compile_only:
-            cflags += ["fsycl", "Wno-unsupported-floating-point-opt"]
+        cflags += ["fsycl", "Wno-unsupported-floating-point-opt"]
         libraries += ["c10_xpu", "sycl", "ze_loader", "torch_xpu"]
 
     if aot_mode:
