@@ -1289,7 +1289,7 @@ class TestMemoryLeak(TestCaseMPS):
         step(a)
         torch.mps.empty_cache()
         driver_after = torch.mps.driver_allocated_memory()
-        self.assertEqual(driver_before, driver_after, f"Detected {driver_after-driver_before} bytes leak of GPU memory")
+        self.assertEqual(driver_before, driver_after, f"Detected {driver_after - driver_before} bytes leak of GPU memory")
 
 
 class TestPixelShuffle(TestCaseMPS):
@@ -8075,7 +8075,7 @@ class TestMPS(TestCaseMPS):
 
     def test_mps_allocator_stats(self):
         max_memory = torch.mps.recommended_max_memory()
-        print(f"Recommended Max Memory : {max_memory/ 1024 ** 3} GB")
+        print(f"Recommended Max Memory : {max_memory / 1024 ** 3} GB")
         self.assertGreater(max_memory, 0)
 
     # to verify this test, run XCode Instruments "Metal System Trace" or "Logging" tool,
