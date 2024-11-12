@@ -1417,10 +1417,41 @@ def triton_config(
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
 
+def get_nd_reduction_numels(r: int, size_hints):
+    """
+    Converts a linear reduction numel to ND, in row major order.
+    This order is often desirable as it presents opportunities to coalesce memory
+    accesses.
+    For example, if r = 64 and size_hints = [32,32], this function returns [32, 2].
+    This unraveling works because both r and size_hints are powers of 2.
+    """
+    # Shrink r to size_hints.
+    r = min(r, conditional_product(*size_hints))
+
+    remaining = r
+    rnumels = []
+    for idx, hint in enumerate(size_hints):
+        max_size = min(hint, TRITON_MAX_BLOCK[f"R{idx}_"])
+        dim = min(max_size, remaining)
+        assert (
+            remaining % dim == 0
+        ), f"Expected dimension '{dim}' to divide remaining size '{remaining}'"
+        rnumels.append(dim)
+        remaining //= dim
+
+    # Sanity check the results.
+    final_numel = conditional_product(*rnumels)
+    assert (
+        r == final_numel
+    ), f"Expected ND reduction size ({rnumels}) to have {r} elements."
+
+    return rnumels
+
+
 def triton_config_reduction(
     size_hints,
     x: int,
-    rnumels: Sequence[int],
+    r: int,
     num_stages=1,
     num_warps=None,
     register_intensive=False,
@@ -1430,10 +1461,13 @@ def triton_config_reduction(
     based on size_hints. Size_hints is a tuple of numels in each tile
     dimension and will be rounded up to the nearest power of 2.
     """
+    # Convert the linear reduction numel into a multi-dimensional block.
+    reduction_size_hints = size_hints[1:]
+    rnumels = get_nd_reduction_numels(r, reduction_size_hints)
 
     # shrink sizes to size hints
     x = min(x, size_hints[0])
-    rnumels = [min(r, size_hints[axis + 1]) for axis, r in enumerate(rnumels)]
+    rnumels = [min(r, reduction_size_hints[axis]) for axis, r in enumerate(rnumels)]
     num_axes = len(rnumels)
 
     def total_numel() -> int:
@@ -1613,49 +1647,46 @@ def _reduction_configs(
     *, size_hints: List[int], inductor_meta: Dict[str, Any]
 ) -> List[Config]:
     reduction_hint = inductor_meta.get("reduction_hint", None)
+
+    # Convert reductions to 1D, to simplify heuristics.
     rnumels = size_hints[1:]
+    rnumel = conditional_product(*rnumels)
 
     register_intensive = False
-    MAX_Rn_BLOCK = 2048
+    MAX_R0_BLOCK = 2048
     if (
         size_hints[0] >= 1024
         and inductor_meta.get("num_load", 0) + inductor_meta.get("num_reduction", 0)
         >= 10
     ):
-        # A heuristics to reduce Rn_BLOCK if a kernel potentially need many registers.
+        # A heuristics to reduce R0_BLOCK if a kernel potentially need many registers.
         # Consider load and reduction since load need move data into registers and
         # reduction needs an accumulator.
         #
         # The magic numbers are a bit arbitrary.
         #
-        # We cannot rely on dynamically scaling down Rn_BLOCK later, since sometimes
+        # We cannot rely on dynamically scaling down R0_BLOCK later, since sometimes
         # triton makes it to use less registers with worse perf. Check:
         # https://github.com/pytorch/pytorch/issues/126463
         #
         # The heuristic is a very simple one since registers can be reused. But
         # hopefully it can be a good enough indicator.
-        MAX_Rn_BLOCK = 1024
+        MAX_R0_BLOCK = 1024
         register_intensive = True
-
-    total_rnumel = conditional_product(*rnumels)
-    num_axes = len(rnumels)
 
     contiguous_config = triton_config_reduction(
         size_hints,
         1,
-        tuple(
-            rnumel if 256 <= rnumel < MAX_Rn_BLOCK else MAX_Rn_BLOCK
-            for rnumel in rnumels
-        ),
+        rnumel if 256 <= rnumel < MAX_R0_BLOCK else MAX_R0_BLOCK,
         register_intensive=register_intensive,
     )
     outer_config = triton_config_reduction(
-        size_hints, 64, (8,) * num_axes, register_intensive=register_intensive
+        size_hints, 64, 8, register_intensive=register_intensive
     )
     tiny_config = triton_config_reduction(
         size_hints,
-        2 * (256 // total_rnumel) if total_rnumel <= 256 else 1,
-        tuple(min(rnumel, MAX_Rn_BLOCK) for rnumel in rnumels),
+        2 * (256 // rnumel) if rnumel <= 256 else 1,
+        min(rnumel, MAX_R0_BLOCK),
         register_intensive=register_intensive,
     )
     if inductor_meta.get("max_autotune") or inductor_meta.get("max_autotune_pointwise"):
@@ -1667,17 +1698,17 @@ def _reduction_configs(
     elif reduction_hint == ReductionHint.OUTER_TINY:
         return [tiny_config]
     if disable_pointwise_autotuning(inductor_meta):
-        return [triton_config_reduction(size_hints, 32, (128,) * num_axes)]
+        return [triton_config_reduction(size_hints, 32, 128)]
     return [
         contiguous_config,
         outer_config,
         tiny_config,
-        triton_config_reduction(size_hints, 64, (64,) * num_axes),
-        triton_config_reduction(size_hints, 8, (512,) * num_axes),
+        triton_config_reduction(size_hints, 64, 64),
+        triton_config_reduction(size_hints, 8, 512),
         # halve the XBLOCK/Rn_BLOCK compared to outer_config
         # TODO: this may only be beneficial when each iteration of the reduction
         # is quite heavy. E.g. https://gist.github.com/shunting314/189a8ef69f90db9d614a823385147a72
-        triton_config_reduction(size_hints, 64, (4,) * num_axes, num_warps=8),
+        triton_config_reduction(size_hints, 64, 4, num_warps=8),
     ]
 
 
@@ -1762,7 +1793,9 @@ def _persistent_reduction_configs(
     total_rnumel = conditional_product(*rnumels)
 
     configs = [
-        triton_config_reduction(size_hints, xblock, rnumels, register_intensive=True)
+        triton_config_reduction(
+            size_hints, xblock, total_rnumel, register_intensive=True
+        )
         for xblock in (1, 8, 32, 128)
         if xblock == 1 or (total_rnumel * xblock <= 4096 and xblock <= xnumel)
     ]
@@ -1777,7 +1810,7 @@ def _persistent_reduction_configs(
             triton_config_reduction(
                 size_hints,
                 2 * (256 // total_rnumel) if total_rnumel <= 256 else 1,
-                rnumels,
+                total_rnumel,
             )
         ]
     for c in configs:
