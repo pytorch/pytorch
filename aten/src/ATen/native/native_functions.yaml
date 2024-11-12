@@ -13435,7 +13435,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: special_i1_out
+    CPU, CUDA, MPS: special_i1_out
   tags: pointwise
 
 - func: special_i1e(Tensor self) -> Tensor
