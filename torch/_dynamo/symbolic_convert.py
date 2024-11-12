@@ -245,6 +245,12 @@ class DistributedState:
     all_states: Optional[List[LocalState]] = None
 
 
+@dataclasses.dataclass
+class TensorifyState:
+    force_specializations: Dict[str, bool] = dataclasses.field(
+        default_factory=dict
+    )
+
 @functools.lru_cache(None)
 def _step_logger():
     return torchdynamo_logging.get_step_logger(log)
@@ -2691,10 +2697,12 @@ class InstructionTranslatorBase(
         inline_depth: int,
         speculation_log: SpeculationLog,
         distributed_state: Optional[DistributedState],
+        tensorify_state: Optional[TensorifyState],
     ) -> None:
         super().__init__()
         self.speculation_log = speculation_log
         self.distributed_state = distributed_state
+        self.tensorify_state = tensorify_state
 
         # Mutable state checkpointed by copy_graphstate()
         self.output = output
@@ -2801,6 +2809,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         frame_state,
         speculation_log: SpeculationLog,
         distributed_state: Optional[DistributedState],
+        tensorify_state: Optional[TensorifyState],
     ) -> None:
         _step_logger()(
             logging.INFO,
@@ -2833,6 +2842,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             inline_depth=0,
             speculation_log=speculation_log,
             distributed_state=distributed_state,
+            tensorify_state=tensorify_state,
         )
 
         self._throw_if_in_functorch()
@@ -2854,13 +2864,11 @@ class InstructionTranslator(InstructionTranslatorBase):
             vars.extend(cells_and_freevars)
             cells_and_freevars_set = set(cells_and_freevars)
 
-            # TODO: populate from state
-            force_specialize = False
             self.symbolic_locals = {
                 k: variables.LazyVariableTracker.create(
                     f_locals[k],
                     source=LocalSource(k, cell_or_freevar=k in cells_and_freevars_set),
-                    force_specialize=force_specialize
+                    force_specialize=tensorify_state.force_specializations.get(k)
                 )
                 for k in vars
                 if k in f_locals
