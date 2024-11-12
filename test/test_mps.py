@@ -95,7 +95,7 @@ def mps_ops_grad_modifier(ops):
         'index_fill': [torch.float16, torch.float32],  # missing `aten::_unique`.
         'linalg.lu_factor': [torch.float16, torch.float32],  # missing `aten::lu_unpack`.
         'aminmax': [torch.float32, torch.float16],
-        'i0': None,  # missing `aten::i1`.
+        'special.i1': [torch.float16],  # "i1_backward" not implemented for 'Half'
 
         # Correctness issues
         'atanh': [torch.float32],
@@ -795,7 +795,6 @@ def mps_ops_modifier(ops):
         'special.hermite_polynomial_h': None,
         'special.hermite_polynomial_he': None,
         'special.i0e': None,
-        'special.i1': None,
         'special.i1e': None,
         'special.laguerre_polynomial_l': None,
         'special.log_ndtr': None,
@@ -9422,9 +9421,8 @@ class TestLinalgMPS(TestCaseMPS):
 
         def convert_weight_to_int4pack(b):
             b_int32, b_scales_and_zeros = _group_quantize_tensor(
-                b.to("cpu"), n_bit=4, q_group_size=q_group
+                b, n_bit=4, q_group_size=q_group
             )
-            b_int32 = b_int32.to("mps")
             b_scales_and_zeros = b_scales_and_zeros.to("mps")
             b_int4pack = torch._convert_weight_to_int4pack(
                 b_int32, inner_k_tiles
