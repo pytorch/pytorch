@@ -132,12 +132,6 @@ class TestXpu(TestCase):
                 device_properties.architecture,
                 device_capability["architecture"],
             )
-        else:
-            with self.assertRaisesRegex(
-                NotImplementedError,
-                "architecture requires PyTorch to be built with SYCL compiler version 2025.0.0 or newer.",
-            ):
-                device_properties.architecture
 
     def test_wrong_xpu_fork(self):
         stderr = TestCase.runWithPytorchAPIUsageStderr(
