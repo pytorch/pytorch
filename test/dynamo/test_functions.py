@@ -2390,11 +2390,15 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     def test_filter_infinite_iterator(self):
         def fn(x):
             x = x + 1
-            return zip(range(3), filter(lambda x: x < 10, itertools.count()))
+            return (
+                x,
+                list(zip(range(3), filter(lambda y: y < 10, itertools.count()))),
+                list(zip(range(10, 12), filter(lambda y: y > 10, itertools.count()))),
+            )
 
         inputs = torch.ones(1)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        self.assertListEqual(list(opt_fn(inputs)), list(fn(inputs)))
+        self.assertTupleEqual(opt_fn(inputs), fn(inputs))
 
     def test_filter_return_type(self):
         @torch.compile(backend="eager", fullgraph=True)

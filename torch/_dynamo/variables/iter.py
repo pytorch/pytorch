@@ -539,9 +539,10 @@ class FilterVariable(IteratorVariable):
             item = _next()
             self.index += 1
             res = self.fn.call_function(tx, [item], {})
-            if variables.UserFunctionVariable(polyfills.predicate).call_function(
-                tx, [res], {}
-            ):
+            pred_res = variables.UserFunctionVariable(
+                polyfills.predicate
+            ).call_function(tx, [res], {})
+            if pred_res.as_python_constant():
                 return item
 
     def reconstruct_items(self, codegen):
