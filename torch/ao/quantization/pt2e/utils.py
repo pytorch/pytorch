@@ -379,6 +379,7 @@ def _get_aten_graph_module_for_pattern(
             pattern,  # type: ignore[arg-type]
             example_inputs,
             kwargs,
+            strict=False,
         ).module()
     else:
         aten_pattern = capture_pre_autograd_graph(
