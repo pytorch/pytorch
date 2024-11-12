@@ -10,6 +10,7 @@ import builtins
 import collections
 import itertools
 import pprint
+import time
 from contextlib import nullcontext
 from dataclasses import dataclass, field
 from functools import wraps
@@ -18,6 +19,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 import torch
 import torch.utils.dlpack
 from torch import Tensor
+from torch._dynamo.utils import dynamo_timed, get_metrics_context, to_int_us
 from torch._guards import (
     compile_context,
     CompileContext,
@@ -1408,15 +1410,26 @@ def merge_view_inputs(
         # If no synthetic bases are necessary, just return the original inputs.
         return fwd_inputs, None
     else:
+        from torch.fx.experimental.symbolic_shapes import SymIntEqByExpr
+
+        def make_hashable(arg):
+            if isinstance(arg, torch.SymInt):
+                # Since only nested SymInt objects can be hashed, we wrap them with
+                # SymIntEqByExpr, which is a hashable wrapper of SymInts.
+                return SymIntEqByExpr(arg)
+            return arg
+
         # Otherwise, return:
         # (1) The new args according to the updated calling convention: (synthetic_bases, other_args)
         # (2) Metadata telling functionalization how to generate the inner argument list given the outer calling convention.
         #     We post-process it into a list, where meta[i] tells you info about the i'th argument in the inner calling convention.
         args_to_functionalization = base_args + other_args
-        arg_to_old_idx_map = {arg: i for (i, arg) in enumerate(fwd_inputs)}
+        arg_to_old_idx_map = {
+            make_hashable(arg): i for (i, arg) in enumerate(fwd_inputs)
+        }
         for i, other_arg in enumerate(other_args):
             new_idx = len(base_args) + i
-            old_idx = arg_to_old_idx_map[other_arg]
+            old_idx = arg_to_old_idx_map[make_hashable(other_arg)]
             inner_calling_convention_meta[old_idx] = new_idx
         # post process into a list
         post_processed_calling_convention_meta: List[
@@ -1478,7 +1491,7 @@ class AOTDispatchAutograd:
                 # Backward Compatibility, as some Subclass impls can have original 1-arg function.
                 return x.__coerce_same_metadata_as_tangent__(expected_meta)
 
-            return None
+            return x.__coerce_same_metadata_as_tangent__(expected_meta, expected_type)
 
         # Coerce to expected type and metadata
         orig_x = x
@@ -1991,17 +2004,49 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     context = torch._C._DisableAutocast if disable_amp else nullcontext
                     with tracing(saved_context), compile_context(
                         saved_compile_context
-                    ), context(), track_graph_compiling(aot_config, "backward"):
-                        CompiledFunction.compiled_bw = aot_config.bw_compiler(
-                            bw_module, placeholder_list
-                        )
-                        # Maybe save cache entry
-                        if try_save_cache_entry is not None:
-                            try_save_cache_entry(
-                                CompiledFunction.compiled_bw,
-                                fw_metadata,
-                                aot_config,
+                    ), context(), track_graph_compiling(
+                        aot_config, "backward"
+                    ), get_metrics_context(), dynamo_timed(
+                        "backward._backward_impl",
+                        phase_name="entire_backward_compile",
+                        dynamo_compile_column_us="backward_cumulative_compile_time_us",
+                    ):
+                        fail_type: Optional[str] = None
+                        fail_reason: Optional[str] = None
+                        start_ns = time.time_ns()
+                        try:
+                            CompiledFunction.compiled_bw = aot_config.bw_compiler(
+                                bw_module, placeholder_list
                             )
+                            # Maybe save cache entry
+                            if try_save_cache_entry is not None:
+                                try_save_cache_entry(
+                                    CompiledFunction.compiled_bw,
+                                    fw_metadata,
+                                    aot_config,
+                                )
+                        except Exception as e:
+                            # TODO(masnesral): Populating the exception info should be automatic.
+                            fail_type = type(e).__qualname__
+                            fail_reason = str(e)
+                        finally:
+                            # TODO(masnesral): Populating time fields should be automatic.
+                            end_ns = time.time_ns()
+                            metrics = {
+                                "compile_id": str(
+                                    torch._guards.CompileContext.current_compile_id()
+                                ),
+                                "fail_type": fail_type,
+                                "fail_reason": fail_reason,
+                                "is_forward": False,
+                                "start_time_us": start_ns // 1000,
+                                "end_time_us": end_ns // 1000,
+                                "duration_us": (end_ns - start_ns) // 1000,
+                                "structured_logging_overhead_us": to_int_us(
+                                    torch._logging.get_structured_logging_overhead(),
+                                ),
+                            }
+                            get_metrics_context().update_outer(metrics)
 
                 if (
                     torch._functorch.config.donated_buffer
