@@ -215,8 +215,8 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         - result: all other locals
         """
         assert not self.is_constant
-        tx = parent.output.root_tx
-        wrap = functools.partial(wrap_bound_arg, tx=tx)
+        root_tx = parent.output.root_tx
+        wrap = functools.partial(wrap_bound_arg, tx=root_tx)
 
         fn: types.FunctionType = self.fn
         defaults = fn.__defaults__ or []
@@ -254,16 +254,20 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         bound.apply_defaults()
         result = dict(bound.arguments.items())
 
-        wrap_args_kwargs(tx, result)
+        wrap_args_kwargs(root_tx, result)
         closure_cells = init_cellvars(parent, result, fn.__code__)
         closure = self.fn.__closure__ or ()
         assert len(closure) == len(self.fn.__code__.co_freevars)
         for idx, name, cell in zip(
             itertools.count(), self.fn.__code__.co_freevars, closure
         ):
-            var = tx.match_nested_cell(name, cell)
+            # This is critical, because we must make sure the same cell object
+            # is mapped to the same Dynamo representation. For regular cells we
+            # ensure that by checking them against `SideEffects`, and for
+            # unboxede cells (from the root frame), we ensure that via this
+            # `match_nested_cell` call.
+            var = root_tx.lookup_variable_for_captured_cell(cell)
             if var is not None:
-                # optimization for cleaner codegen
                 result[name] = var
                 continue
 
@@ -537,9 +541,6 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         return self.f_globals
 
     def bind_args(self, parent, args, kwargs):
-        # Avoid circular import
-        from .misc import ClosureVariable, NewCellVariable
-
         code = self.get_code()
         func = types.FunctionType(
             code,
@@ -557,17 +558,9 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         closure_cells = init_cellvars(parent, result, code)
 
         for idx, name in enumerate(code.co_freevars):
-            cell = self.closure.items[idx]
             assert name not in result
-            # In the regular case, a cell is either a `ClosureVariable` or
-            # `NewCellVariable`.
-            if isinstance(cell, (ClosureVariable, NewCellVariable)):
-                closure_cells[name] = cell
-            else:
-                # We model unmodified cells captured by `UserFunctionVariable` as
-                # their contents, in tracer's `symbolic_locals`. See
-                # `UserFunctionVariable::bind_args`.
-                result[name] = cell
+            cell = self.closure.items[idx]
+            closure_cells[name] = cell
 
         return result, closure_cells
 

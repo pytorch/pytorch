@@ -145,45 +145,32 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                 Otherwise it uses the CUDA language for codegen.
                 Only valid when cuda == True.
         """
-        if gpu:
-            return super().generate_kernel_call(
-                kernel_name,
-                call_args,
-                grid,
-                device_index,
-                gpu,
-                triton,
-                arg_types,
-                raw_args,
-                grid_fn,
-                triton_meta,
-                autotune_configs,
-                grid_extra_kwargs,
-            )
-        else:
-            assert arg_types is not None and len(call_args) == len(
-                arg_types
-            ), "Mismatch call_args and arg_types in generate_kernel_call"
-            new_args = []
-            for idx, arg in enumerate(call_args):
-                if "*" in arg_types[idx]:
-                    var_name = f"var_{next(self.arg_var_id)}"
-                    self.writeline(f"auto* {var_name} = get_data_ptr_wrapper({arg});")
-                    new_args.append(f"({arg_types[idx]})({var_name})")
-                else:
-                    # arg is a scalar
-                    new_args.append(arg)
-            # debug printer related logic for cpp kernel type.
-            debug_printer_manager = V.graph.wrapper_code.debug_printer
-            debug_printer_manager.set_printer_args(
-                call_args,
-                kernel_name,
-                None,
-                None,
-                "cpp",
-            )
-            with debug_printer_manager:
-                self.writeline(self.wrap_kernel_call(kernel_name, new_args))
+        assert (
+            not gpu
+        ), "CppWrapperCpuArrayRef.generate_kernel_call does not support GPU"
+        assert arg_types is not None and len(call_args) == len(
+            arg_types
+        ), "Mismatch call_args and arg_types in generate_kernel_call"
+        new_args = []
+        for idx, arg in enumerate(call_args):
+            if "*" in arg_types[idx]:
+                var_name = f"var_{next(self.arg_var_id)}"
+                self.writeline(f"auto* {var_name} = get_data_ptr_wrapper({arg});")
+                new_args.append(f"({arg_types[idx]})({var_name})")
+            else:
+                # arg is a scalar
+                new_args.append(arg)
+        # debug printer related logic for cpp kernel type.
+        debug_printer_manager = V.graph.wrapper_code.debug_printer
+        debug_printer_manager.set_printer_args(
+            call_args,
+            kernel_name,
+            None,
+            None,
+            "cpp",
+        )
+        with debug_printer_manager:
+            self.writeline(self.wrap_kernel_call(kernel_name, new_args))
 
     def write_wrapper_decl(self):
         inputs_len = len(V.graph.graph_inputs.keys())
