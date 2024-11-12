@@ -5043,9 +5043,11 @@
 
 - func: relu6(Tensor self) -> Tensor
   python_module: nn
+  tags: pointwise
 
 - func: relu6_(Tensor(a!) self) -> Tensor(a!)
   python_module: nn
+  tags: pointwise
 
 - func: prelu(Tensor self, Tensor weight) -> Tensor
   variants: function, method
@@ -5122,11 +5124,13 @@
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: hardshrink_out
+  tags: pointwise
 
 - func: hardshrink(Tensor self, Scalar lambd=0.5) -> Tensor
   structured_delegate: hardshrink.out
   device_check: NoCheck   # TensorIterator
   variants: function, method
+  tags: pointwise
 
 - func: hardshrink_backward.grad_input(Tensor grad_out, Tensor self, Scalar lambd, *, Tensor(a!) grad_input) -> Tensor(a!)
   structured: True
@@ -5137,6 +5141,7 @@
 - func: hardshrink_backward(Tensor grad_out, Tensor self, Scalar lambd) -> Tensor
   structured_delegate: hardshrink_backward.grad_input
   variants: function, method
+  tags: pointwise
 
 - func: rsqrt(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -5191,20 +5196,24 @@
 
 - func: selu(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
+  tags: pointwise
 
 - func: selu_(Tensor(a!) self) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
+  tags: pointwise
 
 - func: celu(Tensor self, Scalar alpha=1.0) -> Tensor
   device_check: NoCheck   # TensorIterator
   dispatch:
     CompositeExplicitAutograd: celu
+  tags: pointwise
 
 - func: celu_(Tensor(a!) self, Scalar alpha=1.0) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   dispatch:
     CompositeExplicitAutograd: celu_
   autogen: celu.out
+  tags: pointwise
 
 - func: silu(Tensor self) -> Tensor
   structured_delegate: silu.out
@@ -5249,10 +5258,12 @@
 - func: mish(Tensor self) -> Tensor
   structured_delegate: mish.out
   python_module: nn
+  tags: pointwise
 
 - func: mish_(Tensor(a!) self) -> Tensor(a!)
   structured_delegate: mish.out
   python_module: nn
+  tags: pointwise
 
 - func: mish.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
@@ -5261,6 +5272,7 @@
   dispatch:
     CPU, CUDA: mish_out
     MPS: mish_out_mps
+  tags: pointwise
 
 - func: mish_backward(Tensor grad_output, Tensor self) -> Tensor
   python_module: nn
@@ -5268,6 +5280,7 @@
     CPU, CUDA: mish_backward
     MPS: mish_backward_mps
     CompositeImplicitAutograd: math_mish_backward
+  tags: pointwise
 
 - func: sigmoid(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -6049,11 +6062,13 @@
   structured_delegate: threshold.out
   dispatch:
     QuantizedCPU: threshold_quantized_cpu
+  tags: pointwise
 
 - func: threshold_(Tensor(a!) self, Scalar threshold, Scalar value) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   variants: function
   structured_delegate: threshold.out
+  tags: pointwise
 
 - func: threshold.out(Tensor self, Scalar threshold, Scalar value, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -6062,6 +6077,7 @@
   dispatch:
     CPU, CUDA: threshold_out
     MPS: threshold_out_mps
+  tags: pointwise
 
 - func: threshold_backward.grad_input(Tensor grad_output, Tensor self, Scalar threshold, *, Tensor(a!) grad_input) -> Tensor(a!)
   structured: True
@@ -11763,11 +11779,13 @@
   dispatch:
     CPU, CUDA: elu_out
     MPS: elu_out_mps
+  tags: pointwise
 
 - func: elu(Tensor self, Scalar alpha=1, Scalar scale=1, Scalar input_scale=1) -> Tensor
   structured_delegate: elu.out
   device_check: NoCheck   # TensorIterator
   python_module: nn
+  tags: pointwise
 
 - func: elu_backward.grad_input(Tensor grad_output, Scalar alpha, Scalar scale, Scalar input_scale, bool is_result, Tensor self_or_result, *, Tensor(a!) grad_input) -> Tensor(a!)
   structured: True
@@ -11780,11 +11798,13 @@
 - func: elu_backward(Tensor grad_output, Scalar alpha, Scalar scale, Scalar input_scale, bool is_result, Tensor self_or_result) -> Tensor
   structured_delegate: elu_backward.grad_input
   python_module: nn
+  tags: pointwise
 
 - func: elu_(Tensor(a!) self, Scalar alpha=1, Scalar scale=1, Scalar input_scale=1) -> Tensor(a!)
   structured_delegate: elu.out
   device_check: NoCheck   # TensorIterator
   python_module: nn
+  tags: pointwise
 
 - func: glu.out(Tensor self, int dim=-1, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
@@ -11834,6 +11854,7 @@
     CPU, CUDA: hardsigmoid_out
     MPS: hardsigmoid_out_mps
     QuantizedCPU: hardsigmoid_out_quantized_cpu
+  tags: pointwise
 
 - func: hardsigmoid(Tensor self) -> Tensor
   structured_delegate: hardsigmoid.out
@@ -11841,11 +11862,13 @@
   python_module: nn
   dispatch:
     QuantizedCPU: hardsigmoid_quantized_cpu
+  tags: pointwise
 
 - func: hardsigmoid_(Tensor(a!) self) -> Tensor(a!)
   structured_delegate: hardsigmoid.out
   device_check: NoCheck   # TensorIterator
   python_module: nn
+  tags: pointwise
 
 - func: hardsigmoid_backward.grad_input(Tensor grad_output, Tensor self, *, Tensor(a!) grad_input) -> Tensor(a!)
   structured: True
@@ -11858,6 +11881,7 @@
 - func: hardsigmoid_backward(Tensor grad_output, Tensor self) -> Tensor
   structured_delegate: hardsigmoid_backward.grad_input
   python_module: nn
+  tags: pointwise
 
 - func: hardtanh.out(Tensor self, Scalar min_val=-1, Scalar max_val=1, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -11865,6 +11889,7 @@
   dispatch:
     CPU, CUDA, MPS: hardtanh_out
     QuantizedCPU: hardtanh_out_quantized_cpu
+  tags: pointwise
 
 - func: hardtanh(Tensor self, Scalar min_val=-1, Scalar max_val=1) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -11872,7 +11897,7 @@
   dispatch:
     CPU, CUDA, MPS: hardtanh
     QuantizedCPU: hardtanh_quantized_cpu
-  tags: core
+  tags: [core, pointwise]
 
 - func: hardtanh_backward.grad_input(Tensor grad_output, Tensor self, Scalar min_val, Scalar max_val, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
@@ -11885,6 +11910,7 @@
   dispatch:
     CPU, CUDA: hardtanh_backward
     MPS: hardtanh_backward_mps
+  tags: pointwise
 
 - func: hardtanh_(Tensor(a!) self, Scalar min_val=-1, Scalar max_val=1) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -11892,6 +11918,7 @@
   dispatch:
     CPU, CUDA, MPS: hardtanh_
     QuantizedCPU: hardtanh_quantized_cpu_
+  tags: pointwise
 
 - func: hardswish.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -11899,6 +11926,7 @@
   dispatch:
     CPU, CUDA: hardswish_out
     MPS: hardswish_out_mps
+  tags: pointwise
 
 - func: hardswish(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -11906,6 +11934,7 @@
   dispatch:
     CPU, CUDA: hardswish
     MPS: hardswish_mps
+  tags: pointwise
 
 - func: hardswish_(Tensor(a!) self) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -11913,6 +11942,7 @@
   dispatch:
     CPU, CUDA: hardswish_
     MPS: hardswish_mps_
+  tags: pointwise
 
 - func: hardswish_backward(Tensor grad_output, Tensor self) -> Tensor
   python_module: nn
@@ -11920,6 +11950,7 @@
     CPU, CUDA: hardswish_backward
     MPS: hardswish_backward_mps
   autogen: hardswish_backward.out
+  tags: pointwise
 
 - func: leaky_relu.out(Tensor self, Scalar negative_slope=0.01, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
@@ -11930,6 +11961,7 @@
     CPU, CUDA: leaky_relu_out
     MPS: leaky_relu_out_mps
     QuantizedCPU: leaky_relu_out_quantized_cpu
+  tags: pointwise
 
 - func: leaky_relu(Tensor self, Scalar negative_slope=0.01) -> Tensor
   structured_delegate: leaky_relu.out
@@ -11937,7 +11969,7 @@
   python_module: nn
   dispatch:
     QuantizedCPU: leaky_relu_quantized_cpu
-  tags: core
+  tags: [core, pointwise]
 
 - func: leaky_relu_backward.grad_input(Tensor grad_output, Tensor self, Scalar negative_slope, bool self_is_result, *, Tensor(a!) grad_input) -> Tensor(a!)
   structured: True
@@ -11950,6 +11982,7 @@
 - func: leaky_relu_backward(Tensor grad_output, Tensor self, Scalar negative_slope, bool self_is_result) -> Tensor
   structured_delegate: leaky_relu_backward.grad_input
   python_module: nn
+  tags: pointwise
 
 - func: leaky_relu_(Tensor(a!) self, Scalar negative_slope=0.01) -> Tensor(a!)
   structured_delegate: leaky_relu.out
@@ -11957,14 +11990,17 @@
   python_module: nn
   dispatch:
     QuantizedCPU: leaky_relu_quantized_cpu_
+  tags: pointwise
 
 - func: log_sigmoid.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   python_module: nn
+  tags: pointwise
 
 - func: log_sigmoid(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
   python_module: nn
+  tags: pointwise
 
 - func: log_sigmoid_forward.output(Tensor self, *, Tensor(a!) output, Tensor(b!) buffer) -> (Tensor(a!), Tensor(b!))
   device_check: NoCheck   # TensorIterator
@@ -11973,6 +12009,7 @@
     CPU: log_sigmoid_forward_out_cpu
     CUDA: log_sigmoid_forward_out_cuda
     MPS: log_sigmoid_forward_out_mps
+  tags: pointwise
 
 - func: log_sigmoid_forward(Tensor self) -> (Tensor output, Tensor buffer)
   device_check: NoCheck   # TensorIterator
@@ -11981,6 +12018,7 @@
     CPU: log_sigmoid_forward_cpu
     CUDA: log_sigmoid_forward_cuda
     MPS: log_sigmoid_forward_mps
+  tags: pointwise
 
 - func: log_sigmoid_backward.grad_input(Tensor grad_output, Tensor self, Tensor buffer, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
@@ -11988,6 +12026,7 @@
     CPU: log_sigmoid_backward_cpu_out
     CUDA: log_sigmoid_backward_cuda_out
     MPS: log_sigmoid_backward_mps_out
+  tags: pointwise
 
 - func: log_sigmoid_backward(Tensor grad_output, Tensor self, Tensor buffer) -> Tensor
   python_module: nn
@@ -11995,6 +12034,7 @@
     CPU: log_sigmoid_backward_cpu
     CUDA: log_sigmoid_backward_cuda
     MPS: log_sigmoid_backward_mps
+  tags: pointwise
 
 - func: rrelu_with_noise.out(Tensor self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
@@ -12031,11 +12071,13 @@
   dispatch:
     CPU, CUDA: softplus_out
     MPS: softplus_out_mps
+  tags: pointwise
 
 - func: softplus(Tensor self, Scalar beta=1, Scalar threshold=20) -> Tensor
   structured_delegate: softplus.out
   device_check: NoCheck   # TensorIterator
   python_module: nn
+  tags: pointwise
 
 - func: softplus_backward.grad_input(Tensor grad_output, Tensor self, Scalar beta, Scalar threshold, *, Tensor(a!) grad_input) -> Tensor(a!)
   structured: True
@@ -12048,6 +12090,7 @@
 - func: softplus_backward(Tensor grad_output, Tensor self, Scalar beta, Scalar threshold) -> Tensor
   structured_delegate: softplus_backward.grad_input
   python_module: nn
+  tags: pointwise
 
 - func: softshrink.out(Tensor self, Scalar lambd=0.5, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
@@ -12057,11 +12100,13 @@
   dispatch:
     CPU, CUDA: softshrink_out
     MPS: softshrink_out_mps
+  tags: pointwise
 
 - func: softshrink(Tensor self, Scalar lambd=0.5) -> Tensor
   structured_delegate: softshrink.out
   device_check: NoCheck   # TensorIterator
   python_module: nn
+  tags: pointwise
 
 - func: softshrink_backward.grad_input(Tensor grad_output, Tensor self, Scalar lambd, *, Tensor(a!) grad_input) -> Tensor(a!)
   structured: True
@@ -12074,6 +12119,7 @@
 - func: softshrink_backward(Tensor grad_output, Tensor self, Scalar lambd) -> Tensor
   structured_delegate: softshrink_backward.grad_input
   python_module: nn
+  tags: pointwise
 
 - func: adaptive_avg_pool2d.out(Tensor self, SymInt[2] output_size, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn

@@ -7847,19 +7847,7 @@ FORWARD_FAILURES = [
         match_fn=lambda device, dtype, op, sample: op.full_name
         in {
             # unary
-            "nn.functional.celu",
-            "nn.functional.elu",
-            "nn.functional.hardshrink",
-            "nn.functional.hardsigmoid",
-            "nn.functional.hardtanh",
-            "nn.functional.logsigmoid",
-            "nn.functional.mish",
-            "nn.functional.relu6",
             "nn.functional.rrelu",
-            "nn.functional.selu",
-            "nn.functional.softplus",
-            "nn.functional.softshrink",
-            "nn.functional.threshold",
             "rad2deg",
             # binary
             "__rsub__",
