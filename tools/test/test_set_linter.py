@@ -54,7 +54,7 @@ class TestSetLinter(TestCase):
         self.assertEqual(replace["original"], path.read_text())
         assert_expected(replace["replacement"], "python")
 
-        msgs = json.dumps(all_messages, indent=2)
+        msgs = json.dumps(all_messages, indent=2) + "\n"
         assert_expected(msgs, "json")
 
     def test_bracket_pairs(self) -> None:
