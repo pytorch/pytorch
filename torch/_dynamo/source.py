@@ -617,6 +617,15 @@ class GlobalStateSource(Source):
 
 
 @dataclasses.dataclass(frozen=True)
+class DummyHopPlaceholderSource(Source):
+    def name(self):
+        return ""
+
+    def guard_source(self):
+        raise ValueError("Cannot guard on DummyHopPlaceholderSource.")
+
+
+@dataclasses.dataclass(frozen=True)
 class TorchFunctionModeStackSource(Source):
     ind: int
 

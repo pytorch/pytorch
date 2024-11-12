@@ -1728,18 +1728,17 @@ def forward(self, L_xs_ : torch.Tensor, L_y_ : torch.Tensor):
     l_y_ = L_y_
     map_body_1 = self.map_body_1
     map_impl = torch.ops.higher_order.map_impl(map_body_1, [l_xs_], [l_y_]);  map_body_1 = l_xs_ = l_y_ = None
-    getitem_1 = map_impl[0];  map_impl = None
-    return (getitem_1,)""",
+    getitem = map_impl[0];  map_impl = None
+    return (getitem,)""",
             )
             self.assertExpectedInline(
                 body_graph,
                 """\
-def forward(self, child : torch.Tensor, l_y_ : torch.Tensor):
-    child_1 = child[0];  child_1 = None
+def forward(self, subgraph_input : torch.Tensor, l_y_ : torch.Tensor):
     map_body_0 = self.map_body_0
-    map_impl = torch.ops.higher_order.map_impl(map_body_0, [child], [l_y_]);  map_body_0 = child = l_y_ = None
-    getitem_1 = map_impl[0];  map_impl = None
-    return (getitem_1,)""",
+    map_impl = torch.ops.higher_order.map_impl(map_body_0, [subgraph_input], [l_y_]);  map_body_0 = subgraph_input = l_y_ = None
+    getitem = map_impl[0];  map_impl = None
+    return (getitem,)""",
             )
 
     def test_map_multi_return(self):
@@ -1759,17 +1758,17 @@ def forward(self, L_x_ : torch.Tensor):
     l_x_ = L_x_
     map_body_0 = self.map_body_0
     map_impl = torch.ops.higher_order.map_impl(map_body_0, [l_x_], []);  map_body_0 = l_x_ = None
-    getitem_1 = map_impl[0]
-    getitem_2 = map_impl[1];  map_impl = None
-    return (getitem_1, getitem_2)""",
+    getitem = map_impl[0]
+    getitem_1 = map_impl[1];  map_impl = None
+    return (getitem, getitem_1)""",
             )
             self.assertExpectedInline(
                 body_graph,
                 """\
-def forward(self, child : torch.Tensor):
-    child_1 = child.sin()
-    child_2 = child.sin();  child = None
-    return (child_1, child_2)""",
+def forward(self, subgraph_input : torch.Tensor):
+    child = subgraph_input.sin()
+    child_1 = subgraph_input.sin();  subgraph_input = None
+    return (child, child_1)""",
             )
 
     def test_map_pytree_return(self):
@@ -1795,20 +1794,20 @@ def forward(self, L_x_ : torch.Tensor):
     l_x_ = L_x_
     map_body_0 = self.map_body_0
     map_impl = torch.ops.higher_order.map_impl(map_body_0, [l_x_], []);  map_body_0 = l_x_ = None
-    getitem_1 = map_impl[0]
-    getitem_2 = map_impl[1]
-    getitem_3 = map_impl[2]
-    getitem_4 = map_impl[3]
-    getitem_5 = map_impl[4]
-    getitem_6 = map_impl[5]
-    getitem_7 = map_impl[6];  map_impl = None
-    return (getitem_1, getitem_2, getitem_3, getitem_4, getitem_5, getitem_6, getitem_7)""",
+    getitem = map_impl[0]
+    getitem_1 = map_impl[1]
+    getitem_2 = map_impl[2]
+    getitem_3 = map_impl[3]
+    getitem_4 = map_impl[4]
+    getitem_5 = map_impl[5]
+    getitem_6 = map_impl[6];  map_impl = None
+    return (getitem, getitem_1, getitem_2, getitem_3, getitem_4, getitem_5, getitem_6)""",
             )
             self.assertExpectedInline(
                 body_graph,
                 """\
-def forward(self, child : torch.Tensor):
-    return (child, child, child, child, child, child, child)""",
+def forward(self, subgraph_input : torch.Tensor):
+    return (subgraph_input, subgraph_input, subgraph_input, subgraph_input, subgraph_input, subgraph_input, subgraph_input)""",
             )
 
     def test_map_kwargs(self):
@@ -1844,14 +1843,14 @@ def forward(self, L_x_ : torch.Tensor):
     l_x_ = L_x_
     map_body_0 = self.map_body_0
     map_impl = torch.ops.higher_order.map_impl(map_body_0, [l_x_], [3]);  map_body_0 = l_x_ = None
-    getitem_1 = map_impl[0];  map_impl = None
-    return (getitem_1,)""",
+    getitem = map_impl[0];  map_impl = None
+    return (getitem,)""",
             )
             self.assertExpectedInline(
                 body_graph,
                 """\
-def forward(self, child : torch.Tensor, const_unused : int):
-    add = child + 3;  child = None
+def forward(self, subgraph_input : torch.Tensor, const_unused : int):
+    add = subgraph_input + 3;  subgraph_input = None
     sin = torch.sin(add);  add = None
     return (sin,)""",
             )
@@ -1878,14 +1877,14 @@ def forward(self, L_x_ : torch.Tensor):
     l_x_ = L_x_
     map_body_0 = self.map_body_0
     map_impl = torch.ops.higher_order.map_impl(map_body_0, [l_x_], [3]);  map_body_0 = l_x_ = None
-    getitem_1 = map_impl[0];  map_impl = None
-    return (getitem_1,)""",
+    getitem = map_impl[0];  map_impl = None
+    return (getitem,)""",
             )
             self.assertExpectedInline(
                 body_graph,
                 """\
-def forward(self, child : torch.Tensor, const_unused : int):
-    add = child + 3;  child = None
+def forward(self, subgraph_input : torch.Tensor, const_unused : int):
+    add = subgraph_input + 3;  subgraph_input = None
     sin = torch.sin(add);  add = None
     return (sin,)""",
             )
