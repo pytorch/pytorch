@@ -2,10 +2,8 @@ name: perf-nightly-macos
 # Technically not an inductor test, but uses it as a template for tracking macos performance
 
 on:
-  push:
-    tags:
-      - ciflow/mps/* # TODO: This is supposed to be a nightly job, making it on push for debugging purposes only
-  # NB: GitHub has an upper limit of 10 inputs here
+  schedule:
+    - cron: 0 7 * * *
   workflow_dispatch:
     inputs:
       training:
