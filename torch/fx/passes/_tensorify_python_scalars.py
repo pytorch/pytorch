@@ -9,6 +9,7 @@ from sympy.logic.boolalg import BooleanAtom
 
 import torch
 import torch.fx as fx
+from torch._dynamo.exc import TensorifyScalarRestartAnalysis
 from torch._prims_common import get_computation_dtype
 from torch._subclasses import fake_tensor  # noqa: TCH001
 from torch._utils_internal import justknobs_check
@@ -253,6 +254,7 @@ def tensorify_python_scalars(
 
     # Now do one more pass that specializes all symfloats we didn't manage
     # to tensorify away.
+    should_restart = False
     for node in reversed(graph.nodes):
         if node.op == "output" or node.op == "placeholder":
             continue
@@ -278,9 +280,13 @@ def tensorify_python_scalars(
                     #
                     # It's better to guard on zf // 2 == 2.0 than zf == 5.0
 
+                    should_restart = True
                     node.replace_all_uses_with(guard_scalar(val))
                     graph.erase_node(node)
 
+    if should_restart:
+        # TODO set state somewhere...
+        raise TensorifyScalarRestartAnalysis
 
     # Sledgehammer time. Restart dynamo analysis, keeping track of which input sources
     # are no longer needed and should be specialized.
