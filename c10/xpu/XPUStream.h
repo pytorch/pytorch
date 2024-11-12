@@ -4,7 +4,6 @@
 #include <c10/core/impl/GPUTrace.h>
 #include <c10/xpu/XPUFunctions.h>
 
-
 namespace c10::xpu {
 
 /*
