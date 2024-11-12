@@ -50,7 +50,7 @@ from ...utils._sympy.value_ranges import ValueRanges
 from .. import config, ir
 from ..codecache import code_hash, get_path, PyCodeCache
 from ..runtime.benchmarking import benchmarker
-from ..runtime.hints import TRITON_MAX_BLOCK
+from ..runtime.hints import ReductionHint, TRITON_MAX_BLOCK
 from ..runtime.runtime_utils import get_max_y_grid, next_power_of_2
 from ..scheduler import BaseSchedulerNode, FusedSchedulerNode, Scheduler, SchedulerNode
 from ..utils import (
@@ -1396,9 +1396,28 @@ class TritonKernel(SIMDKernel):
         return triton_type(dtype)
 
     def should_use_cooperative_reduction(self) -> bool:
-        return self.inside_reduction and V.choices.should_use_cooperative_reduction(
-            self.features
-        )
+        """Heuristic to decide self.cooperative_reduction should be used."""
+        if not self.inside_reduction:
+            return False
+        if config.triton.force_cooperative_reductions:
+            return True
+        if (
+            not config.triton.cooperative_reductions
+            or V.graph.get_current_device_or_throw().type == "cpu"
+        ):
+            return False
+
+        xnumel, rnumel = self.numels
+        # TODO(jansel): base this on num_bytes_read rather than numel
+        xhint = V.graph.sizevars.size_hint(xnumel, fallback=2)
+        if xhint <= 8:
+            threshold = 32768 * xhint
+        elif xhint <= 16:
+            threshold = 2097152
+        else:
+            return False
+        # TODO(jansel): should this default on for dynamic shapes?
+        return V.graph.sizevars.statically_known_geq(rnumel, threshold)
 
     def init_cooperative_reduction(self):
         """One time setup code for cooperative reductions."""
@@ -1452,15 +1471,39 @@ class TritonKernel(SIMDKernel):
         return True
 
     def should_use_persistent_reduction(self) -> bool:
-        return self.inside_reduction and V.choices.should_use_persistent_reduction(
-            self.features, self.cooperative_reduction
-        )
+        """
+        Heuristic to set self.persistent_reduction and add guards
+        if needed.
+        """
+        if not (self.inside_reduction and config.triton.persistent_reductions):
+            return False
+        threshold = {
+            ReductionHint.INNER: 1024,
+        }.get(self.features.get_reduction_hint(), 64)
+
+        if self.cooperative_reduction:
+            # The RSPLIT of cooperative reductions means each thread block is operating on fewer elements
+            xnumel, _ = self.numels
+            try:
+                threshold *= 32 // V.graph.sizevars.size_hint(xnumel)
+            except ValueError:
+                pass  # unbacked symint
+
+        # If multi_kernel is enabled, we do more aggressive persistent reduction.
+        # This may result in some persistent reductions slower than the
+        # corresponding non-persistent reductions. MultiKernel will do benchmarking
+        # to pick the faster one.
+        if config.triton.multi_kernel:
+            threshold *= 16
+        last_numel = self.numels[-1]
+        return V.graph.sizevars.statically_known_leq(last_numel, threshold)  # type: ignore[arg-types]
 
     def want_no_x_dim(self):
         return (
             self.persistent_reduction
             and len(self.numels) == 2
-            and V.choices.want_no_x_dim(self.features)
+            and self.features.get_reduction_hint() == ReductionHint.INNER
+            and V.graph.sizevars.statically_known_geq(self.numels[-1], 256)  # type: ignore[arg-types]
         )
 
     @property
@@ -3555,36 +3598,12 @@ class TritonScheduling(SIMDScheduling):
             store_cache()
             return ms, mod.__file__
 
-    def create_kernel_choices(
-        self, kernel_features, kernel_args, kernel_kwargs
-    ) -> List[SIMDKernel]:
-        is_scan = kernel_features.contains_op("scan")
-        is_split_scan = is_scan and any(
-            node.is_split_scan() for node in kernel_features.scheduler_nodes()
-        )
-        kernel_type = TritonKernel
-        if is_split_scan:
-            from .triton_split_scan import TritonSplitScanKernel
-
-            kernel_type = TritonSplitScanKernel
-
-        if is_scan:
-            # TODO(jansel): scan does not yet work with cooperative reductions
-            kernel_kwargs["override_cooperative_reduction"] = False
-
-        # ops.sort only works with persistent reduction, and is not bandwidth bound anyway
-        # so taking the hit of non-coalesced loads is okay
-        if kernel_features.contains_op("sort"):
-            kernel_kwargs["override_persistent_reduction"] = True
-
-        kernel = kernel_type(*kernel_args, **kernel_kwargs)
-        return self.add_multi_kernel_choices(kernel, kernel_args, kernel_kwargs)
-
     def add_multi_kernel_choices(
         self,
         kernel: SIMDKernel,
         kernel_args: List[Any],
         kernel_kwargs: Dict[str, Any],
+        node_schedule: List[BaseSchedulerNode],
     ) -> List[SIMDKernel]:
         kernels: List[SIMDKernel] = [kernel]
         if not config.triton.multi_kernel:
