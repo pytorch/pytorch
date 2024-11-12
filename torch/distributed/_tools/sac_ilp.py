@@ -61,8 +61,11 @@ def sac_milp(
             note that value of -1 means that the ILP solver failed to find a solution.
 
     """
+
+    if not fsdp_units:
+        fsdp_units = []
     num_nodes = len(graph.nodes)
-    M = 10**2  # note: numerical issue may occur if M is too big
+    M = graph.nodes[0]["fw_runtime_per_module"]  # note: for big-M method
     MEM_MULTIPLIER = 2**30
 
     # Create a MILP problem
@@ -77,6 +80,8 @@ def sac_milp(
     d = LpVariable.matrix("d", list(range(num_nodes)), 0)
     # a_i: total activation memory at module i
     a = LpVariable.matrix("a", list(range(num_nodes)), 0)
+    # p_i: unsharded parameter all-gathered by module i, if using FSDP
+    p = LpVariable.matrix("p", list(range(num_nodes)), 0)
     # m_i: memory at module i, combining parameters, gradients, and activations
     m = LpVariable.matrix("m", list(range(num_nodes)), 0)
     # rcp_i: percentage of recomputation time
@@ -85,6 +90,8 @@ def sac_milp(
     rct = LpVariable.matrix("rct", list(range(num_nodes)), 0)
     # max_m: peak memory
     max_m = LpVariable("max_m", 0)
+    # max_p: largest FSDP unit
+    max_p = LpVariable("max_p", 0)
 
     # Add constraints
     # [Constraint] User specified AC units
@@ -141,10 +148,11 @@ def sac_milp(
         prob += d[i] == ACM_i * r[i] - (ACM_i - IA_i) * y[i]
 
     # [Constraint] Ensure correctness of r_i
-    # There are two parts to its correctness
+    # There are three parts to its correctness
     # 1. r_i > 0 only if y_i == 1 (discard only if it is an AC unit)
     # 2. r_i needs to be large enough to cover the difference between
     #    ACM and IA. Otherwise, we are not saving any memory
+    # 3. r_i cannot be too large as they are operators that have to be saved.
     for i in range(num_nodes):
         prob += y[i] >= r[i]
         if graph.nodes[i]["is_leaf"]:
@@ -152,6 +160,7 @@ def sac_milp(
         ACM_i = graph.nodes[i]["sac_memory"] / MEM_MULTIPLIER
         IA_i = graph.nodes[i]["act_fw_per_module"] / MEM_MULTIPLIER
         prob += r[i] >= (ACM_i - IA_i) / ACM_i * y[i]
+        # TODO: add an upper bound on r_i
 
     # [Constraint] Express total activation memory in the backward pass
     for i in range(num_nodes):
@@ -160,8 +169,8 @@ def sac_milp(
         # related to discarded amount of memory
         pos = graph.nodes[i]["pos_fw_post_order"]
         coeff = [0] * num_nodes
-        for p in range(pos):
-            j = graph.name2node[graph.fw_post_order[p]]["index"]
+        for ps in range(pos):
+            j = graph.name2node[graph.fw_post_order[ps]]["index"]
             coeff[j] = 1
         prob += a[i] == TA_i + AG_i - lpDot(coeff, d)
 
@@ -191,8 +200,21 @@ def sac_milp(
         prob += rct[i] <= ACT_i * rcp[i]
         prob += rct[i] >= ACT_i * rcp[i] - M * (1 - y[i])
 
+    # [Constraint] express unsharded parameter all-gathered at each module
+    # note: there are two assumptions here
+    # 1. no nested FSDP units
+    # 2. root module is an FSDP unit
+    for i in range(1, num_nodes):
+        P_i = graph.nodes[i]["param_per_module"] / MEM_MULTIPLIER
+        prob += p[i] == P_i * (1 if graph.nodes[i]["fqn"] in fsdp_units else 0)
+    prob += p[0] == P_1 * (1 if fsdp_units else 0) - lpSum(p[1:])
+
+    # [Constraint] express the size of unsharded parameters of the largest FSDP unit
+    for i in range(num_nodes):
+        prob += max_p >= p[i]
+
     # [Constraint] Peak memory should be below budget
-    prob += max_m <= memory_budget
+    prob += max_m + 3 * max_p <= memory_budget
 
     # Set Objeictive
     prob += lpSum(rct)
