@@ -1,4 +1,4 @@
-name: Nightly Upload to rockset
+name: Nightly Upload to s3
 
 on:
   schedule:
@@ -7,8 +7,7 @@ on:
   pull_request:
     paths:
       - 'tools/stats/upload_external_contrib_stats.py'
-      - 'tools/stats/upload_test_stat_aggregates.py'
-      - '.github/workflows/nightly-rockset-uploads.yml'
+      - '.github/workflows/nightly-s3-uploads.yml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
@@ -16,7 +15,7 @@ concurrency:
 
 jobs:
 
-  upload-stats-to-rockset:
+  upload-stats-to-s3:
     if: github.repository_owner == 'pytorch'
     runs-on: ubuntu-22.04
     environment: upload-stats
@@ -33,16 +32,14 @@ jobs:
           cache: pip
 
       - run: |
-          pip3 install requests==2.32.2 rockset==1.0.3 boto3==1.35.42
+          pip3 install requests==2.32.2 boto3==1.35.42
 
       - name: Upload external contribution stats
         uses: nick-fields/retry@v3.0.0
         env:
-          ROCKSET_API_KEY: ${{ secrets.ROCKSET_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        if: ${{ env.ROCKSET_API_KEY != '' }}
         with:
           timeout_minutes: 10
           max_attempts: 10
@@ -50,5 +47,3 @@ jobs:
           command: |
             echo "Uploading external contribution stats for 10 days starting on" "$(date -d '10 days ago' '+%Y-%m-%d')"
             python3 -m tools.stats.upload_external_contrib_stats --startDate "$(date -d '10 days ago' '+%Y-%m-%d')" --length 10
-            echo "Uploading testing aggregate data" "$(date -d yesterday '+%Y-%m-%d')"
-            python3 -m tools.stats.upload_test_stat_aggregates --date "$(date -d yesterday '+%Y-%m-%d')"
