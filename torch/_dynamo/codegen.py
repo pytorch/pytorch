@@ -441,9 +441,6 @@ class PyCodegen:
     def store(self, varname):
         self.append_output(self.create_store(varname))
 
-    def store_deref(self, varname):
-        self.append_output(self.create_store_deref(varname))
-
     def load_deref(self, varname):
         self.append_output(self.create_load_deref(varname))
 
