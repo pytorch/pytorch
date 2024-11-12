@@ -931,7 +931,7 @@ if torch._C._has_mkldnn:
         Check if the node is supported for MKLDNN linear.
         """
 
-        def is_constant_weight(weight):
+        def is_const_or_cat_by_const(weight):
             if weight.op == "get_attr":
                 return True
             if weight.target != aten.cat.default:
@@ -947,7 +947,7 @@ if torch._C._has_mkldnn:
                 return False
         # weight_idx is 1 for aten.mm and is 2 for aten.addmm
         weight_idx = 2 if linear_node.target == aten.addmm.default else 1
-        if not is_constant_weight(linear_node.args[weight_idx]):
+        if not is_const_or_cat_by_const(linear_node.args[weight_idx]):
             return False
         input_meta_value = linear_node.args[weight_idx - 1].meta.get("val")
         weight_meta_value = linear_node.args[weight_idx].meta.get("val")
