@@ -20,8 +20,8 @@ fi
 DIR_SUFFIX=cpu
 if [[ "$GPU_ARCH_TYPE" == "xpu" ]]; then
     DIR_SUFFIX=xpu
-    # Refer https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu/2-5.html
-    source /opt/intel/oneapi/pytorch-gpu-dev-0.5/oneapi-vars.sh
+    # Refer https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpus.html
+    source /opt/intel/oneapi/compiler/latest/env/vars.sh
     source /opt/intel/oneapi/pti/latest/env/vars.sh
     export USE_STATIC_MKL=1
 fi
@@ -63,28 +63,32 @@ DEPS_SONAME=(
 if [[ "$GPU_ARCH_TYPE" == "xpu" ]]; then
     echo "Bundling with xpu support package libs."
     DEPS_LIST+=(
-        "/opt/intel/oneapi/compiler/latest/lib/libsycl-preview.so.7"
+        "/opt/intel/oneapi/compiler/latest/lib/libsycl.so.8"
         "/opt/intel/oneapi/compiler/latest/lib/libOpenCL.so.1"
-        "/opt/intel/oneapi/compiler/latest/lib/libxptifw.so"
+        "/opt/intel/oneapi/compiler/latest/lib/libur_loader.so.0"
+        "/opt/intel/oneapi/compiler/latest/lib/libur_adapter_level_zero.so.0"
+        "/opt/intel/oneapi/compiler/latest/lib/libur_adapter_opencl.so.0"
         "/opt/intel/oneapi/compiler/latest/lib/libsvml.so"
         "/opt/intel/oneapi/compiler/latest/lib/libirng.so"
         "/opt/intel/oneapi/compiler/latest/lib/libimf.so"
         "/opt/intel/oneapi/compiler/latest/lib/libintlc.so.5"
-        "/opt/intel/oneapi/compiler/latest/lib/libpi_level_zero.so"
-        "/opt/intel/oneapi/pti/latest/lib/libpti_view.so.0.9"
-        "/opt/intel/oneapi/pti/latest/lib/libpti.so.0.9"
+        "/opt/intel/oneapi/pti/latest/lib/libpti_view.so.0.10"
+        "/opt/intel/oneapi/umf/latest/lib/libumf.so.0"
+        "/opt/intel/oneapi/tcm/latest/lib/libhwloc.so.15"
     )
     DEPS_SONAME+=(
-        "libsycl-preview.so.7"
+        "libsycl.so.8"
         "libOpenCL.so.1"
-        "libxptifw.so"
+        "libur_loader.so.0"
+        "libur_adapter_level_zero.so.0"
+        "libur_adapter_opencl.so.0"
         "libsvml.so"
         "libirng.so"
         "libimf.so"
         "libintlc.so.5"
-        "libpi_level_zero.so"
-        "libpti_view.so.0.9"
-        "libpti.so.0.9"
+        "libpti_view.so.0.10"
+        "libumf.so.0"
+        "libhwloc.so.15"
     )
 fi
 
