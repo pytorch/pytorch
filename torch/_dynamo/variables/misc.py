@@ -25,6 +25,7 @@ from ..source import (
     AttrSource,
     DefaultsSource,
     GetItemSource,
+    LocalSource,
     ODictGetItemSource,
     TypeSource,
     WeakRefCallSource,
@@ -339,15 +340,23 @@ class NewCellVariable(VariableTracker):
     # `NewCellVariable` as a special case for `UserDefinedObjectVariable`.
     pre_existing_contents: Optional[VariableTracker]
 
-    # If this cell was a part of the root frame's locals (either captured or
-    # created by the root frame), this will be set to the local name.
-    root_frame_local_name: Optional[str] = None
-
     def __init__(
         self, pre_existing_contents: Optional[VariableTracker] = None, **kwargs
     ) -> None:
         super().__init__(**kwargs)
         self.pre_existing_contents = pre_existing_contents
+
+    def is_root_frame_cell(self):
+        """
+        Return true if this variable models a cell that is native to the root
+        frame, i.e., a part of its `co_cellvars` or `co_freevars`.
+        """
+        source = self.source
+        return (
+            source is not None
+            and isinstance(source, LocalSource)
+            and source.is_root_frame_cell
+        )
 
 
 class NewGlobalVariable(VariableTracker):
