@@ -5,11 +5,6 @@ using namespace at::native::onednn;
 
 namespace at::native::xpu {
 
-#define ATTR_FUNC(NAME)                                                       \
-  [](onednn::Attr attr) {                                                     \
-    return attr.append_post_eltwise(1.0f, 0.0f, 0.0f, attr.kind_with_##NAME); \
-  }
-
 onednn::Attr unary_attr_with_arg(
     c10::string_view unary,
     torch::List<c10::optional<at::Scalar>> scalars =
@@ -50,11 +45,11 @@ onednn::Attr unary_attr_with_arg(
 
 onednn::Attr string_to_unary_attr(c10::string_view unary, onednn::Attr attr) {
   if (unary == "relu") {
-    return ATTR_FUNC(relu)(attr);
+    return attr.append_post_eltwise(1.0f, 0.0f, 0.0f, attr.kind_with_relu);
   } else if (unary == "sigmoid") {
-    return ATTR_FUNC(sigmoid)(attr);
+    return attr.append_post_eltwise(1.0f, 0.0f, 0.0f, attr.kind_with_sigmoid);
   } else if (unary == "tanh") {
-    return ATTR_FUNC(tanh)(attr);
+    return attr.append_post_eltwise(1.0f, 0.0f, 0.0f, attr.kind_with_tanh);
   } else if (unary == "hardswish") {
     return unary_attr_with_arg(
         "hardswish",
