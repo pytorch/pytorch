@@ -2841,7 +2841,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
             self.world_size,
             timeout=timedelta(seconds=2),
         )
-        self.assertEqual(process_group.get_error(), ErrorType.NO_ERROR)
+        self.assertEqual(process_group.get_error(), ErrorType.SUCCESS)
         barrier_work = process_group.barrier()
         barrier_work.wait()
         barrier_result = barrier_work.get_future_result().wait()
@@ -2891,11 +2891,11 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
         )
         pg = c10d.distributed_c10d._get_default_group()
         nccl_backend = pg._get_backend(torch.device(device))
-        self.assertEqual(nccl_backend.get_error(), ErrorType.NO_ERROR)
+        self.assertEqual(nccl_backend.get_error(), ErrorType.SUCCESS)
         barrier_work = nccl_backend.barrier()
         barrier_work.wait()
         barrier_result = barrier_work.get_future_result().wait()
-        self.assertEqual(nccl_backend.get_error(), ErrorType.NO_ERROR)
+        self.assertEqual(nccl_backend.get_error(), ErrorType.SUCCESS)
         if self.rank == 0:
             work = nccl_backend.allreduce(torch.rand(10).cuda(self.rank))
             work.wait()
@@ -2928,7 +2928,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
         new_nccl_backend = new_pg._get_backend(torch.device(device))
         t = torch.rand(5, 5, device=device)
         dist.all_reduce(t)
-        self.assertEqual(new_nccl_backend.get_error(), ErrorType.NO_ERROR)
+        self.assertEqual(new_nccl_backend.get_error(), ErrorType.SUCCESS)
         torch.cuda.synchronize()
         dist.destroy_process_group()
 

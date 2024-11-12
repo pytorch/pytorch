@@ -2972,7 +2972,7 @@ Example::
       .value("UNKNOWN", ::c10d::WorkResult::UNKNOWN);
 
   py::enum_<::c10d::ErrorType>(module, "ErrorType")
-      .value("NO_ERROR", ::c10d::ErrorType::NO_ERROR)
+      .value("SUCCESS", ::c10d::ErrorType::SUCCESS)
       .value("TIMEOUT", ::c10d::ErrorType::TIMEOUT)
       .value("COMM_ERROR", ::c10d::ErrorType::COMM_ERROR)
       .value("REMOTE_ERROR", ::c10d::ErrorType::REMOTE_ERROR);

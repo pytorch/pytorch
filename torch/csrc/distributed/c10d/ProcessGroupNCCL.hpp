@@ -1190,7 +1190,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // handling.
   ErrorHandlingMode asyncErrorHandling_ = NoHandling;
 
-  ErrorType error_ = ErrorType::NO_ERROR;
+  ErrorType error_ = ErrorType::SUCCESS;
 
   std::mutex errorMutex_;
 

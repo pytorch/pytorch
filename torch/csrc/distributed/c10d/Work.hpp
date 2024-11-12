@@ -42,16 +42,6 @@ enum class WorkResult : std::uint8_t {
   UNKNOWN = 100,
 };
 
-enum TORCH_API ErrorType {
-  NO_ERROR = 0,
-  TIMEOUT = 1,
-  // e.g., NCCL error, etc
-  COMM_ERROR = 2,
-  // TODO, do we need to distinguish between remote timeout or remote COMM
-  // errors?
-  REMOTE_ERROR = 3
-};
-
 // Converts OpType to human readable string.
 TORCH_API std::string opTypeToString(OpType opType);
 

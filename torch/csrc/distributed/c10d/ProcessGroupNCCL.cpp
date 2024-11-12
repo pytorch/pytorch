@@ -2028,7 +2028,7 @@ void ProcessGroupNCCL::broadcastDumpSignal() {
 
 void ProcessGroupNCCL::checkAndSetRemoteError() {
   // if the error is already set, no need to check again
-  if (getError() != ErrorType::NO_ERROR) {
+  if (getError() != ErrorType::SUCCESS) {
     return;
   }
   int remoteErrorRank =
@@ -2122,7 +2122,7 @@ void ProcessGroupNCCL::watchdogHandler() {
       if (work.exception()) {
         // set the error to the first error found
         std::lock_guard<std::mutex> lock(errorMutex_);
-        if (error_ == ErrorType::NO_ERROR) {
+        if (error_ == ErrorType::SUCCESS) {
           error_ = ErrorType::COMM_ERROR;
         }
       }
@@ -2134,7 +2134,7 @@ void ProcessGroupNCCL::watchdogHandler() {
       // turned on; otherwise, run() is no-op)
       if (timedout) {
         std::lock_guard<std::mutex> lock(errorMutex_);
-        if (error_ == ErrorType::NO_ERROR) {
+        if (error_ == ErrorType::SUCCESS) {
           error_ = ErrorType::TIMEOUT;
         }
         desyncDebugger_.run();
