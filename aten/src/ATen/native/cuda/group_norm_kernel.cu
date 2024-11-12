@@ -374,7 +374,7 @@ __global__ void ComputeInternalGradientsCUDAKernelNHWC(
   T_ACC sum1 = 0;
   T_ACC sum2 = 0;
   for (int64_t hw = threadIdx.x; hw < HxW; hw += blockDim.x) {
-    const int64_t index = n * HxW + hw * C + c;
+    const int64_t index = n * HxW * C + hw * C + c;
     sum1 += static_cast<T_ACC>(dY[index]) * static_cast<T_ACC>(X[index]);
     sum2 += static_cast<T_ACC>(dY[index]);
   }
