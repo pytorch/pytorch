@@ -345,7 +345,7 @@ class _PipelineStageBase(ABC):
     should be called at the appropriate time during the pipeline schedule (after forward or backward execution).
     """
 
-    def set_local_fwd_input(self, prev_stage_outputs: Any, mb_index: int):
+    def set_local_fwd_input(self, prev_stage_outputs: Any, mb_index: int) -> None:
         """
         Moves 'prev_stage_outputs' from another stage on the same rank into place as inputs for this stage. Avoids
         copying tensor data or using send/recv op.  Detaches original tensor and sets requires_grad so the
@@ -386,13 +386,16 @@ class _PipelineStageBase(ABC):
 
         return self.grads_input
 
-    def set_local_bwd_input(self, next_stage_bwd_outputs: Tuple[Any], mb_index: int):
+    def set_local_bwd_input(
+        self, next_stage_bwd_outputs: Tuple[Optional[torch.Tensor], ...], mb_index: int
+    ) -> None:
         """
         Moves 'grad input' tensors from the next stage to 'grad_output' on this stage, avoiding a copy or send/recv.
         Does not detach or set '_requires_grad'.
         """
-        # TODO(whc) discrepancy between list/tuple type here. need to clean up
-        # assert isinstance(next_stage_bwd_outputs, tuple), f"Expected tuple, got {type(next_stage_bwd_outputs)}"
+        assert isinstance(
+            next_stage_bwd_outputs, tuple
+        ), f"Expected tuple, got {type(next_stage_bwd_outputs)}"
 
         assert (
             self.has_backward
