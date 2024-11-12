@@ -133,4 +133,20 @@ at::Tensor quantized_convolution(
     torch::List<std::optional<at::Scalar>> unary_scalars,
     std::optional<std::string_view> unary_algorithm);
 
+namespace graph {
+using namespace dnnl::graph;
+
+TORCH_API void gpu_float_sdpa(
+    int batch_size,
+    int seq_len_q,
+    int seq_len_k,
+    int num_head,
+    int size_per_head,
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    const Tensor& attn_mask,
+    const float& softmax_scale,
+    const Tensor& output);
+} // namespace graph
 } // namespace at::native::onednn
