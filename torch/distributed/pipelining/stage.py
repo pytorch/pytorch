@@ -345,7 +345,7 @@ class _PipelineStageBase(ABC):
     should be called at the appropriate time during the pipeline schedule (after forward or backward execution).
     """
 
-    def set_local_fwd_input(self, prev_stage_outputs: Any, mb_index: int):
+    def set_local_fwd_input(self, prev_stage_outputs: Any, mb_index: int) -> None:
         """
         Moves 'prev_stage_outputs' from another stage on the same rank into place as inputs for this stage. Avoids
         copying tensor data or using send/recv op.  Detaches original tensor and sets requires_grad so the
@@ -386,13 +386,16 @@ class _PipelineStageBase(ABC):
 
         return self.grads_input
 
-    def set_local_bwd_input(self, next_stage_bwd_outputs: Tuple[Any], mb_index: int):
+    def set_local_bwd_input(
+        self, next_stage_bwd_outputs: Tuple[Optional[torch.Tensor], ...], mb_index: int
+    ) -> None:
         """
         Moves 'grad input' tensors from the next stage to 'grad_output' on this stage, avoiding a copy or send/recv.
         Does not detach or set '_requires_grad'.
         """
-        # TODO(whc) discrepancy between list/tuple type here. need to clean up
-        # assert isinstance(next_stage_bwd_outputs, tuple), f"Expected tuple, got {type(next_stage_bwd_outputs)}"
+        assert isinstance(
+            next_stage_bwd_outputs, tuple
+        ), f"Expected tuple, got {type(next_stage_bwd_outputs)}"
 
         assert (
             self.has_backward
@@ -573,7 +576,7 @@ class _PipelineStageBase(ABC):
 
     def backward_maybe_with_nosync(
         self, backward_type, bwd_kwargs: Dict, last_backward=False
-    ):
+    ) -> Tuple[Tuple[Optional[torch.Tensor], ...], Optional[List[Dict[str, Any]]]]:
         """
         Whether using PP with FSDP or DDP, there are some runtime differences between the last backward step and the
         other steps.  Namely, we need to accumulate gradients on previous steps and reduce them on the last step, but
@@ -581,12 +584,20 @@ class _PipelineStageBase(ABC):
         This helper should adapt any pipeline parallel schedule to work with common/supported data parallel libraries.
         """
 
-        def perform_backward(backward_type):
+        def perform_backward(
+            backward_type,
+        ) -> Callable[
+            [],
+            Tuple[Tuple[Optional[torch.Tensor], ...], Optional[List[Dict[str, Any]]]],
+        ]:
             if backward_type == "full":
-                return lambda: stage_backward(
-                    bwd_kwargs["stage_output"],
-                    bwd_kwargs["output_grads"],
-                    bwd_kwargs["input_values"],
+                return lambda: (
+                    stage_backward(
+                        bwd_kwargs["stage_output"],
+                        bwd_kwargs["output_grads"],
+                        bwd_kwargs["input_values"],
+                    ),
+                    None,
                 )
             elif backward_type == "input":
                 return lambda: stage_backward_input(
@@ -596,8 +607,11 @@ class _PipelineStageBase(ABC):
                     self.submod.parameters(),
                 )
             elif backward_type == "weight":
-                return lambda: stage_backward_weight(
-                    self.submod.parameters(), bwd_kwargs["param_groups"]
+                return lambda: (
+                    stage_backward_weight(
+                        self.submod.parameters(), bwd_kwargs["param_groups"]
+                    ),
+                    None,
                 )
             else:
                 raise RuntimeError(f"Unknown backward type: {backward_type}")
@@ -640,12 +654,7 @@ class _PipelineStageBase(ABC):
             # Non-DP submodule, regular backward
             result = perform_backward(backward_type)()
 
-        if isinstance(result, tuple) and len(result) == 2:
-            # for stage_backward_input()
-            grads, param_groups = result
-        else:
-            grads, param_groups = result, None
-
+        grads, param_groups = result
         return grads, param_groups
 
     def forward_one_chunk(
@@ -779,8 +788,8 @@ class _PipelineStageBase(ABC):
                     "full", bwd_kwargs, last_backward=last_backward
                 )
             else:
-                grads_input = []
-                param_groups = []
+                grads_input: Tuple[torch.Tensor | None, ...] = ()
+                param_groups: List[Dict[str, Any]] | None = None
                 # Skip the backward for the first stage since we will perform the weight update with
                 # autograd.backward in backward_weight_one_chunk
                 if not self.is_first:
