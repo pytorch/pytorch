@@ -1,0 +1,68 @@
+[
+  {
+    "path": "tools/test/docstring_linter_testdata/python_code.py.txt",
+    "line": 17,
+    "char": 0,
+    "code": "DOCSTRING_LINTER",
+    "severity": "error",
+    "name": "No docstring found for class 'LongWithoutDocstring'",
+    "original": null,
+    "replacement": null,
+    "description": null
+  },
+  {
+    "path": "tools/test/docstring_linter_testdata/python_code.py.txt",
+    "line": 24,
+    "char": 0,
+    "code": "DOCSTRING_LINTER",
+    "severity": "error",
+    "name": "docstring found for class 'LongWithShortDocstring' was too short",
+    "original": null,
+    "replacement": null,
+    "description": null
+  },
+  {
+    "path": "tools/test/docstring_linter_testdata/python_code.py.txt",
+    "line": 71,
+    "char": 4,
+    "code": "DOCSTRING_LINTER",
+    "severity": "error",
+    "name": "No docstring found for function 'needs_docs'",
+    "original": null,
+    "replacement": null,
+    "description": null
+  },
+  {
+    "path": "tools/test/docstring_linter_testdata/python_code.py.txt",
+    "line": 72,
+    "char": 8,
+    "code": "DOCSTRING_LINTER",
+    "severity": "error",
+    "name": "No docstring found for function 'not_short'",
+    "original": null,
+    "replacement": null,
+    "description": null
+  },
+  {
+    "path": "tools/test/docstring_linter_testdata/python_code.py.txt",
+    "line": 73,
+    "char": 12,
+    "code": "DOCSTRING_LINTER",
+    "severity": "error",
+    "name": "No docstring found for class 'Long'",
+    "original": null,
+    "replacement": null,
+    "description": null
+  },
+  {
+    "path": "tools/test/docstring_linter_testdata/python_code.py.txt",
+    "line": 84,
+    "char": 0,
+    "code": "DOCSTRING_LINTER",
+    "severity": "error",
+    "name": "No docstring found for class 'NotDocstring'",
+    "original": null,
+    "replacement": null,
+    "description": null
+  }
+]
