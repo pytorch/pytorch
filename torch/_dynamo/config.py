@@ -442,6 +442,10 @@ log_compilation_metrics = True
 # mutated after the print statement.
 reorderable_logging_functions: Set[Callable[[Any], None]] = set()
 
+# A set of methods that will be ignored while tracing,
+# to prevent graph breaks.
+ignore_logger_methods = set()
+
 # simulates what would happen if we didn't have support for BUILD_SET opcode,
 # used for testing
 inject_BUILD_SET_unimplemented_TESTING_ONLY = False
@@ -518,9 +522,6 @@ automatic_dynamic_remote_pgo: Optional[bool] = get_tristate_env(
 
 # HACK: this is for testing custom ops profiling only
 _custom_ops_profile: Optional[Any] = None
-
-# Disable logger calls to avoid graph breaks
-disable_logs = os.environ.get("DISABLE_LOGS_WHILE_COMPILING", "0") == "1"
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
