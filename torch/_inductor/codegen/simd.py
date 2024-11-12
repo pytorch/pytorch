@@ -178,6 +178,16 @@ class BlockPatternMatcher:
             return None
         dims[0] = numel / slice_numels[0]
 
+        # Sanity check that we can recover the index from the matched subexpressions.
+        matched_index = sympy_dot(strides, block_index_exprs)
+        assert sizevars.statically_known_equals(matched_index, index), textwrap.dedent(
+            f"""
+            Invalid match!
+            Index: {index}
+            Matched expression: {matched_index}
+            """
+        )
+
         return dims, strides, block_index_exprs
 
 
