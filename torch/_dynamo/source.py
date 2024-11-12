@@ -617,12 +617,14 @@ class GlobalStateSource(Source):
 
 
 @dataclasses.dataclass(frozen=True)
-class DummyHopPlaceholderSource(Source):
+class HopUnspecializedIntSource(Source):
+    const_int: int
+
     def name(self):
-        return ""
+        return str(self.const_int)
 
     def guard_source(self):
-        raise ValueError("Cannot guard on DummyHopPlaceholderSource.")
+        raise ValueError("Cannot guard on HopUnspecializedIntSource.")
 
 
 @dataclasses.dataclass(frozen=True)
