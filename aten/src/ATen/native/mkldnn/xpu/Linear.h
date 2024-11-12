@@ -1,8 +1,8 @@
 #include <BlasImpl.h>
 #include <detail/oneDNN.h>
 
-namespace at {
-namespace native::xpu {
+namespace at::native::xpu {
+
 struct LinearConverter {
   LinearConverter() {
     is_fused_ = false;
@@ -42,5 +42,4 @@ struct LinearConverter {
   bool is_fused_;
 };
 
-} // namespace native::xpu
-} // namespace at
+} // namespace at::native::xpu

@@ -5,6 +5,7 @@ from typing import List, NamedTuple
 
 import torch
 import torch.nn as nn
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
@@ -18,7 +19,7 @@ class PointwisePostOp(NamedTuple):
     algorithm: str = ""
 
 
-class TestConvPostOP(TestCase):
+class TestoneDNNFusion(TestCase):
     def _unary_list(self):
         unary_list = {
             "relu": PointwisePostOp("relu", nn.ReLU()),
@@ -132,7 +133,7 @@ class TestConvPostOP(TestCase):
                 dilation,
                 groups,
                 bias,
-                **kwargs
+                **kwargs,
             ):
                 super().__init__()
                 self.conv = CONV_MODULES[dim](
@@ -141,7 +142,7 @@ class TestConvPostOP(TestCase):
                     dilation=dilation,
                     groups=groups,
                     bias=bias,
-                    **kwargs
+                    **kwargs,
                 )
                 self.unary = unary_fn
 
@@ -151,7 +152,7 @@ class TestConvPostOP(TestCase):
                 return x
 
         input_shapes = {2: (112, 112), 3: (55, 55, 55)}
-        for pointwise_name, pointwise_info in self._unary_list().items():
+        for pointwise_info in self._unary_list().values():
             for dim in [2, 3]:
                 channels_last = (
                     torch.channels_last if dim == 2 else torch.channels_last_3d
@@ -212,7 +213,7 @@ class TestConvPostOP(TestCase):
                 dilation,
                 groups,
                 bias,
-                **kwargs
+                **kwargs,
             ):
                 super().__init__()
                 self.conv = CONV_MODULES[dim](
@@ -221,7 +222,7 @@ class TestConvPostOP(TestCase):
                     dilation=dilation,
                     groups=groups,
                     bias=bias,
-                    **kwargs
+                    **kwargs,
                 )
                 self.binary = binary_fn
 
@@ -281,6 +282,9 @@ class TestConvPostOP(TestCase):
                 self.assertEqual(ref, fused, atol=5e-4, rtol=5e-4)
 
 
+instantiate_device_type_tests(
+    TestoneDNNFusion, globals(), only_for="xpu", allow_xpu=True
+)
 
 if __name__ == "__main__":
     run_tests()
