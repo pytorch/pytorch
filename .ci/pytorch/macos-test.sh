@@ -3,7 +3,7 @@ set -x
 
 # shellcheck disable=SC2034
 # shellcheck source=./macos-common.sh
-source "$(dirname "${BASH_SOURCE[0]}")/macos-common.sh"
+source "$(di.rname "${BASH_SOURCE[0]}")/macos-common.sh"
 
 if [[ -n "$CONDA_ENV" ]]; then
   # Use binaries under conda environment
@@ -169,6 +169,8 @@ torchbench_setup_macos() {
   python setup.py develop
   popd
 
+  # Shellcheck doesn't like it when you pass no arguments to a function that can take args. See https://www.shellcheck.net/wiki/SC2120
+  # shellcheck disable=SC2119,SC2120
   checkout_install_torchbench
 }
 
@@ -202,6 +204,7 @@ test_torchbench_smoketest() {
 
   echo "Launching torchbench setup"
   conda_benchmark_deps
+  # shellcheck disable=SC2119,SC2120
   torchbench_setup_macos
 
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
