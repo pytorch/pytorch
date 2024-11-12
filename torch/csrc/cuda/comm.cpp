@@ -47,7 +47,7 @@ struct unique_type_checker {
 // tensors on one or more devices.
 
 // no checks
-static inline std::vector<Tensor>& _broadcast_out_impl(
+static std::vector<Tensor>& _broadcast_out_impl(
     const Tensor& tensor,
     std::vector<Tensor>& out_tensors) {
 #ifdef USE_NCCL
@@ -365,7 +365,7 @@ std::vector<at::Tensor> scatter(
 // device, either CPU or CUDA.
 
 // no checks
-static inline at::Tensor& _gather_out_impl(
+static at::Tensor& _gather_out_impl(
     at::TensorList tensors,
     at::Tensor& out_tensor,
     int64_t dim) {
