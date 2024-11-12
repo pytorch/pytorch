@@ -450,7 +450,7 @@ print(torch.xpu.device_count())
                 else:
                     self.fail("Unexpected libsycl library")
 
-    def test_dlpack_shared_storage(self):
+    def test_dlpack_conversion(self):
         x = make_tensor((5,), dtype=torch.float32, device="xpu")
         if IS_WINDOWS and int(torch.version.xpu) < 20250000:
             with self.assertRaisesRegex(
