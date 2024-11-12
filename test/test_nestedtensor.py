@@ -4,7 +4,6 @@ import ast
 import contextlib
 import io
 import itertools
-import logging
 import math
 import random
 import sys
@@ -66,20 +65,16 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     xfailIfTorchDynamo,
 )
-from torch.testing._internal.opinfo.core import BinaryUfuncInfo, ReductionOpInfo
-from torch.testing._internal.opinfo.definitions.nested import (
-    njt_op_db,
+from torch.testing._internal.opinfo.core import (
+    BinaryUfuncInfo,
+    ReductionOpInfo,
     SkipRule,
     XFailRule,
 )
+from torch.testing._internal.opinfo.definitions.nested import njt_op_db
 from torch.utils._pytree import tree_flatten
 from torch.utils.checkpoint import checkpoint, create_selective_checkpoint_contexts
 
-
-log = logging.getLogger(__name__)
-logging.basicConfig(
-    level=logging.DEBUG, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
 
 # Tests are ported from pytorch/nestedtensor.
 # This makes porting as_nested_tensor easier in the future.
@@ -7839,11 +7834,11 @@ torch.cuda.synchronize()
 # expected to fail, should they be skipped, etc. Note that rules are attempted to be matched
 # from top to bottom and only one rule at most will be matched, so order matters! The guiding
 # general principle here should be one xfail / skip per bug if at all possible :)
-FORWARD_FAILURES = [
+FORWARD_SAMPLE_RULES = [
     # not implemented
     XFailRule(
         error_type=NotImplementedError,
-        match_fn=lambda device, dtype, op, sample: op.full_name
+        op_match_fn=lambda device, op: op.full_name
         in {
             # unary
             "nn.functional.celu",
@@ -7881,7 +7876,7 @@ FORWARD_FAILURES = [
     XFailRule(
         error_type=ValueError,
         error_msg="expects strided",
-        match_fn=lambda device, dtype, op, sample: op.full_name
+        op_match_fn=lambda device, op: op.full_name
         in {
             "masked.amax",
             "masked.amin",
@@ -7901,29 +7896,30 @@ FORWARD_FAILURES = [
     XFailRule(
         error_type=TypeError,
         error_msg="missing 1 required positional arguments",
-        match_fn=lambda device, dtype, op, sample: op.full_name
-        == "nn.functional.prelu",
+        op_match_fn=lambda device, op: (op.full_name == "nn.functional.prelu"),
         name="invalid_prelu_sample_input_func",
     ),
     # Op doesn't support lengths being present
     XFailRule(
         error_type=ValueError,
         error_msg="expected input to be a contiguous jagged layout NestedTensor",
-        match_fn=lambda device, dtype, op, sample: (
-            op.full_name == "nn.functional.linear" and sample.input._lengths is not None
-        ),
+        op_match_fn=lambda device, op: (op.full_name == "nn.functional.linear"),
+        sample_match_fn=lambda device, sample: (sample.input._lengths is not None),
         name="no_linear_noncontig_holes_support",
     ),
     # Some kinda reduction bug that needs to be fixed!
     XFailRule(
         error_type=IndexError,
         error_msg="tuple index out of range",
-        match_fn=lambda device, dtype, op, sample: (
+        op_match_fn=lambda device, op: (
             # min.reduction_with_dim and max.reduction_with_dim aren't associated with
             # ReductionOpInfo entries sadly even though they're reductions
-            (isinstance(op, ReductionOpInfo) or "reduction_with_dim" in op.full_name)
-            and (
-                sample.name == "3D_noncontig_transposed_with_seqlen_cache: "
+            isinstance(op, ReductionOpInfo) or "reduction_with_dim" in op.full_name
+        ),
+        sample_match_fn=lambda device, sample: (
+            sample.name
+            == (
+                "3D_noncontig_transposed_with_seqlen_cache: "
                 "normal dim reduction with keepdim=False"
             )
         ),
@@ -7933,9 +7929,9 @@ FORWARD_FAILURES = [
     # unimplemented sum() path
     XFailRule(
         error_type=NotImplementedError,
-        match_fn=lambda device, dtype, op, sample: (
-            op.full_name == "nanmean"
-            and not (
+        op_match_fn=lambda device, op: (op.full_name == "nanmean"),
+        sample_match_fn=lambda device, sample: (
+            not (
                 "noncontig_holes" in sample.name
                 and "dim" in sample.kwargs
                 and (
@@ -7960,11 +7956,13 @@ FORWARD_FAILURES = [
             "reducing across the ragged dimension is not supported for non-contiguous "
             "nested tensors with holes"
         ),
-        match_fn=lambda device, dtype, op, sample: (
+        op_match_fn=lambda device, op: (
             # min.reduction_with_dim and max.reduction_with_dim aren't associated with
             # ReductionOpInfo entries sadly even though they're reductions
-            (isinstance(op, ReductionOpInfo) or "reduction_with_dim" in op.full_name)
-            and "noncontig_holes" in sample.name
+            isinstance(op, ReductionOpInfo) or "reduction_with_dim" in op.full_name
+        ),
+        sample_match_fn=lambda device, sample: (
+            "noncontig_holes" in sample.name
             and "dim" in sample.kwargs
             and (
                 (
@@ -7983,9 +7981,9 @@ FORWARD_FAILURES = [
     XFailRule(
         error_type=RuntimeError,
         error_msg="If ragged dimension is not part of indices, this only works on contiguous NJTs",
-        match_fn=lambda device, dtype, op, sample: (
-            op.full_name == "index_put"
-            and not sample.input.is_contiguous()
+        op_match_fn=lambda device, op: (op.full_name == "index_put"),
+        sample_match_fn=lambda device, sample: (
+            not sample.input.is_contiguous()
             and len(sample.kwargs["indices"]) - 1 < sample.input._ragged_idx
         ),
         name="index_put_noncontig_holes_no_ragged_dim_indices",
@@ -7994,9 +7992,8 @@ FORWARD_FAILURES = [
     XFailRule(
         error_type=ValueError,
         error_msg="expected self to be a contiguous jagged layout NestedTensor",
-        match_fn=lambda device, dtype, op, sample: (
-            op.full_name == "masked_select" and not sample.input.is_contiguous()
-        ),
+        op_match_fn=lambda device, op: (op.full_name == "masked_select"),
+        sample_match_fn=lambda device, sample: (not sample.input.is_contiguous()),
         name="masked_select_noncontig",
     ),
     # expected: bmm / matmul sometimes use a to_padded_tensor() fallback which isn't
@@ -8004,12 +8001,11 @@ FORWARD_FAILURES = [
     XFailRule(
         error_type=RuntimeError,
         error_msg="not supported for nested tensors with holes",
-        match_fn=lambda device, dtype, op, sample: (
-            op.full_name in {"bmm", "matmul"}
-            and "noncontig_holes" in sample.name
-            and
+        op_match_fn=lambda device, op: (op.full_name in {"bmm", "matmul"}),
+        sample_match_fn=lambda device, sample: (
+            "noncontig_holes" in sample.name
             # "other" is the name for the matmul arg and "mat2" is the name for the bmm arg
-            sample.input.dim()
+            and sample.input.dim()
             == sample.kwargs.get("other", sample.kwargs.get("mat2")).dim()
         ),
         name="mm_noncontig_holes",
@@ -8018,7 +8014,7 @@ FORWARD_FAILURES = [
     XFailRule(
         error_type=RuntimeError,
         error_msg="unsupported tensor layout",
-        match_fn=lambda device, dtype, op, sample: op.full_name
+        op_match_fn=lambda device, op: op.full_name
         in {
             "jiterator_binary",
             "jiterator_binary_return_by_ref",
@@ -8031,9 +8027,9 @@ FORWARD_FAILURES = [
     XFailRule(
         error_type=RuntimeError,
         error_msg="cannot call binary pointwise function .* with inputs of shapes",
-        match_fn=lambda device, dtype, op, sample: (
-            isinstance(op, BinaryUfuncInfo)
-            and "noncontig_holes" in sample.name
+        op_match_fn=lambda device, op: (isinstance(op, BinaryUfuncInfo)),
+        sample_match_fn=lambda device, sample: (
+            "noncontig_holes" in sample.name
             and "broadcasting 1 over ragged" in sample.name
         ),
         name="binary_noncontig_holes_broadcasting_1_over_ragged",
@@ -8043,23 +8039,23 @@ FORWARD_FAILURES = [
     XFailRule(
         error_type=AttributeError,
         error_msg="'tuple' object has no attribute 'device'",
-        match_fn=lambda device, dtype, op, sample: op.full_name == "frexp",
+        op_match_fn=lambda device, op: op.full_name == "frexp",
         name="frexp_tuple_return",
     ),
     # Bug: fill doesn't work with NJTs at all for some reason
     XFailRule(
         error_type=TypeError,
         error_msg="received an invalid combination of arguments",
-        match_fn=lambda device, dtype, op, sample: op.full_name == "fill",
+        op_match_fn=lambda device, op: op.full_name == "fill",
         name="fill_bug",
     ),
 ]
 
-BACKWARD_FAILURES = [
-    *FORWARD_FAILURES,
+BACKWARD_SAMPLE_RULES = [
+    *FORWARD_SAMPLE_RULES,
     # I don't know why these fail in CI only and I just want to land this; investigate this later.
     SkipRule(
-        match_fn=lambda device, dtype, op, sample: (
+        op_match_fn=lambda device, op: (
             op.full_name
             in {
                 "__rpow__",
@@ -8079,7 +8075,7 @@ BACKWARD_FAILURES = [
     XFailRule(
         error_type=RuntimeError,
         error_msg="== Layout::Strided INTERNAL ASSERT FAILED",
-        match_fn=lambda device, dtype, op, sample: (
+        op_match_fn=lambda device, op: (
             op.full_name
             in {
                 "__rpow__",
@@ -8088,13 +8084,13 @@ BACKWARD_FAILURES = [
                 "float_power",
                 "pow",
             }
-            and (
-                (
-                    "(NT, T) broadcasting 1 over ragged" in sample.name
-                    and "noncontig_holes" not in sample.name
-                )
-                or "(NT, T) broadcasting all 1s" in sample.name
-                or "(NT, T) mixed broadcasting" in sample.name
+        ),
+        sample_match_fn=lambda device, sample: (
+            "(NT, T) broadcasting all 1s" in sample.name
+            or "(NT, T) mixed broadcasting" in sample.name
+            or (
+                "(NT, T) broadcasting 1 over ragged" in sample.name
+                and "noncontig_holes" not in sample.name
             )
         ),
         name="binary_empty_with_jagged_layout",
@@ -8104,26 +8100,28 @@ BACKWARD_FAILURES = [
     XFailRule(
         error_type=RuntimeError,
         error_msg="== Layout::Strided INTERNAL ASSERT FAILED",
-        match_fn=lambda device, dtype, op, sample: (
+        op_match_fn=lambda device, op: (
             op.full_name
             in {
                 "special.i1",
                 "special.i1e",
                 "sinc",
             }
-            and "with_seqlen_cache" in sample.name
         ),
+        sample_match_fn=lambda device, sample: ("with_seqlen_cache" in sample.name),
         name="binary_empty_with_jagged_layout_with_cached_seqlens",
     ),
     XFailRule(
         error_type=RuntimeError,
         error_msg="reducing across the ragged dimension is not supported for non-contiguous",
-        match_fn=lambda device, dtype, op, sample: (
+        op_match_fn=lambda device, op: (
             isinstance(op, BinaryUfuncInfo)
             # doesn't happen for these ops for some reason
             and op.full_name
             not in {"copysign", "max.binary", "maximum", "min.binary", "minimum"}
-            and "(NT, T) broadcasting all 1s" in sample.name
+        ),
+        sample_match_fn=lambda device, sample: (
+            "(NT, T) broadcasting all 1s" in sample.name
             and "noncontig_holes" in sample.name
         ),
         name="binary_noncontig_holes_ragged_dim_reduction",
@@ -8131,21 +8129,15 @@ BACKWARD_FAILURES = [
     XFailRule(
         error_type=RuntimeError,
         error_msg="reducing across the ragged dimension is not supported for non-contiguous",
-        match_fn=lambda device, dtype, op, sample: (
-            op.full_name == "nn.functional.rms_norm"
-            and sample.input._lengths is not None
-        ),
+        op_match_fn=lambda device, op: (op.full_name == "nn.functional.rms_norm"),
+        sample_match_fn=lambda device, sample: (sample.input._lengths is not None),
         name="rms_norm_noncontig_holes_ragged_dim_reduction",
     ),
-    # not implemented
+    # uses fill_ which isn't implemented
     XFailRule(
         error_type=NotImplementedError,
-        match_fn=lambda device, dtype, op, sample: op.full_name
-        in {
-            # uses fill_ which isn't implemented
-            "atanh",
-        }
-        and "with_seqlen_cache" in sample.name,
+        op_match_fn=lambda device, op: (op.full_name == "atanh"),
+        sample_match_fn=lambda device, sample: ("with_seqlen_cache" in sample.name,),
         name="atanh_unimplemented_fill",
     ),
     # expected: autodiff on complex dtype is not supported
@@ -8155,29 +8147,25 @@ BACKWARD_FAILURES = [
             "_nested_view_from_jagged does not support automatic differentiation "
             "for outputs with complex dtype"
         ),
-        match_fn=lambda device, dtype, op, sample: (
-            op.full_name in {"cdouble", "cfloat", "chalf"}
-            and "with_seqlen_cache" in sample.name
-        ),
+        op_match_fn=lambda device, op: (op.full_name in {"cdouble", "cfloat", "chalf"}),
+        sample_match_fn=lambda device, sample: ("with_seqlen_cache" in sample.name),
         name="no_complex_autodiff",
     ),
     # bad derivative formula or something
     XFailRule(
         error_type=RuntimeError,
         error_msg="NestedTensor does not support directly calling torch.ops.aten.size",
-        match_fn=lambda device, dtype, op, sample: (
-            op.full_name in {"sgn", "masked_select"}
-            and "with_seqlen_cache" in sample.name
-        ),
+        op_match_fn=lambda device, op: (op.full_name in {"sgn", "masked_select"}),
+        sample_match_fn=lambda device, sample: ("with_seqlen_cache" in sample.name),
         name="direct_size_call_with_seqlen_cache",
     ),
     # Bug: need to use the correct nested int in the return shape
     XFailRule(
         error_type=RuntimeError,
         error_msg="Function CloneBackward0 returned an invalid gradient",
-        match_fn=lambda device, dtype, op, sample: (
-            op.full_name == "clone"
-            and sample.kwargs.get("memory_format", None) == torch.contiguous_format
+        op_match_fn=lambda device, op: (op.full_name == "clone"),
+        sample_match_fn=lambda device, sample: (
+            sample.kwargs.get("memory_format", None) == torch.contiguous_format
         ),
         name="clone_wrong_nested_int_for_gradient",
     ),
@@ -8185,22 +8173,22 @@ BACKWARD_FAILURES = [
     XFailRule(
         error_type=NotImplementedError,
         error_msg="aten.masked_fill_.Scalar",
-        match_fn=lambda device, dtype, op, sample: (
+        op_match_fn=lambda device, op: (
             op.full_name in {"max.binary", "min.binary", "minimum", "maximum"}
-            and (
+        ),
+        sample_match_fn=lambda device, sample: (
+            sample.name
+            in {
+                "4D_noncontig_with_seqlen_cache: (NT, T) broadcasting 1 over ragged",
+                "4D_noncontig_with_seqlen_cache: (NT, T) broadcasting all 1s",
+            }
+            or (
                 (
-                    (
-                        "(NT, T) broadcasting all 1s" in sample.name
-                        or "(NT, T) broadcasting 1 over ragged" in sample.name
-                        or "(NT, T) mixed broadcasting" in sample.name
-                    )
-                    and "noncontig" not in sample.name
+                    "(NT, T) broadcasting all 1s" in sample.name
+                    or "(NT, T) broadcasting 1 over ragged" in sample.name
+                    or "(NT, T) mixed broadcasting" in sample.name
                 )
-                or sample.name
-                in {
-                    "4D_noncontig_with_seqlen_cache: (NT, T) broadcasting 1 over ragged",
-                    "4D_noncontig_with_seqlen_cache: (NT, T) broadcasting all 1s",
-                }
+                and "noncontig" not in sample.name
             )
         ),
         name="unimplemented_masked_fill",
@@ -8208,26 +8196,25 @@ BACKWARD_FAILURES = [
     XFailRule(
         error_type=ValueError,
         error_msg="expected condition to be a contiguous jagged layout NestedTensor",
-        match_fn=lambda device, dtype, op, sample: (
+        op_match_fn=lambda device, op: (
             op.full_name in {"max.binary", "min.binary", "minimum", "maximum"}
-            and (
-                "(NT, T) broadcasting all 1s" in sample.name
-                or "(NT, T) broadcasting 1 over ragged" in sample.name
-            )
+        ),
+        sample_match_fn=lambda device, sample: (
+            "(NT, T) broadcasting all 1s" in sample.name
+            or "(NT, T) broadcasting 1 over ragged" in sample.name
         ),
         name="no_where_noncontig_support",
     ),
 ]
 
-COMPILE_FORWARD_FAILURES = [
-    *FORWARD_FAILURES,
+COMPILE_FORWARD_SAMPLE_RULES = [
+    *FORWARD_SAMPLE_RULES,
     # Bug: cross-device conversions with to() result in new nested ints within compile only
     XFailRule(
         error_type=AssertionError,
         error_msg="The values for attribute 'shape' do not match",
-        match_fn=lambda device, dtype, op, sample: (
-            op.full_name == "to" and "-> cpu" in sample.name
-        ),
+        op_match_fn=lambda device, op: (op.full_name == "to"),
+        sample_match_fn=lambda device, sample: ("-> cpu" in sample.name),
         name="cross_device_transfer_wrong_nested_int_in_compile",
     ),
     # clone() -> contiguous format on an non-contiguous NJT with holes currently uses
@@ -8235,9 +8222,9 @@ COMPILE_FORWARD_FAILURES = [
     XFailRule(
         error_type=torch._dynamo.exc.Unsupported,
         error_msg="data dependent operator: aten._local_scalar_dense.default",
-        match_fn=lambda device, dtype, op, sample: (
-            op.full_name == "clone"
-            and "noncontig_holes" in sample.name
+        op_match_fn=lambda device, op: (op.full_name == "clone"),
+        sample_match_fn=lambda device, sample: (
+            "noncontig_holes" in sample.name
             and sample.kwargs.get("memory_format", None) == torch.contiguous_format
         ),
         name="clone_unbind_data_dependency",
@@ -8246,29 +8233,27 @@ COMPILE_FORWARD_FAILURES = [
     XFailRule(
         error_type=ValueError,
         error_msg="has length 1 but the spec refers to a pytree that holds 3 items",
-        match_fn=lambda device, dtype, op, sample: (
-            op.full_name == "nan_to_num" and "noncontig_transposed" in sample.name
-        ),
+        op_match_fn=lambda device, op: (op.full_name == "nan_to_num"),
+        sample_match_fn=lambda device, sample: ("noncontig_transposed" in sample.name),
         name="crazy_aot_autograd_bug1",
     ),
     # Bug: also no idea what's going on here: needs investigation within AOTAutograd
     XFailRule(
         error_type=AssertionError,
         error_msg="Expected 5 == 4",
-        match_fn=lambda device, dtype, op, sample: (
-            op.full_name == "isreal" and "noncontig_transposed" in sample.name
-        ),
+        op_match_fn=lambda device, op: (op.full_name == "isreal"),
+        sample_match_fn=lambda device, sample: ("noncontig_transposed" in sample.name),
         name="crazy_aot_autograd_bug2",
     ),
 ]
 
-COMPILE_BACKWARD_FAILURES = [
+COMPILE_BACKWARD_SAMPLE_RULES = [
     # Bug: Something is wrongly creating an empty tensor with the jagged layout on the C++ side
     # for these binary ops
     XFailRule(
         error_type=NotImplementedError,
         error_msg="non-strided meta tensors not supported yet",
-        match_fn=lambda device, dtype, op, sample: (
+        op_match_fn=lambda device, op: (
             op.full_name
             in {
                 "__rpow__",
@@ -8278,7 +8263,9 @@ COMPILE_BACKWARD_FAILURES = [
                 "pow",
                 "sinc",
             }
-            and "noncontig_holes" not in sample.name
+        ),
+        sample_match_fn=lambda device, sample: (
+            "noncontig_holes" not in sample.name
             and (
                 "(NT, T) broadcasting 1 over ragged" in sample.name
                 or "(NT, T) broadcasting all 1s" in sample.name
@@ -8292,25 +8279,23 @@ COMPILE_BACKWARD_FAILURES = [
     XFailRule(
         error_type=NotImplementedError,
         error_msg="non-strided meta tensors not supported yet",
-        match_fn=lambda device, dtype, op, sample: (
+        op_match_fn=lambda device, op: (
             op.full_name
             in {
                 "special.i1",
                 "special.i1e",
                 "sinc",
             }
-            and "with_seqlen_cache" in sample.name
         ),
+        sample_match_fn=lambda device, sample: ("with_seqlen_cache" in sample.name),
         name="empty_with_jagged_layout_with_cached_seqlens",
     ),
     # in compile, these complex ops use view_as_real(), which isn't implemented
     XFailRule(
         error_type=NotImplementedError,
         error_msg="aten.view_as_real.default",
-        match_fn=lambda device, dtype, op, sample: (
-            op.full_name in {"cdouble", "cfloat", "chalf"}
-            and "with_seqlen_cache" in sample.name
-        ),
+        op_match_fn=lambda device, op: (op.full_name in {"cdouble", "cfloat", "chalf"}),
+        sample_match_fn=lambda device, sample: ("with_seqlen_cache" in sample.name),
         name="unimplemented_view_as_real",
     ),
     # torch._subclasses.fake_tensor.DataDependentOutputException: aten._local_scalar_dense.default
@@ -8318,32 +8303,32 @@ COMPILE_BACKWARD_FAILURES = [
     XFailRule(
         error_type=torch._dynamo.exc.Unsupported,
         error_msg="Backend compiler failed with a fake tensor exception",
-        match_fn=lambda device, dtype, op, sample: (
-            (
-                (
-                    isinstance(op, BinaryUfuncInfo)
-                    and
-                    # don't include unimplemented ops
-                    op.full_name
-                    not in {
-                        "__rsub__",
-                        "complex",
-                        "floor_divide",
-                        "polar",
-                        "rsub",
-                    }
-                )
-                or op.full_name
-                in {
-                    "__rpow__",
-                    "clamp_max",
-                    "clamp_min",
-                    "float_power",
-                    "pow",
-                    "sinc",
+        op_match_fn=lambda device, op: (
+            op.full_name
+            in {
+                "__rpow__",
+                "clamp_max",
+                "clamp_min",
+                "float_power",
+                "pow",
+                "sinc",
+            }
+            or (
+                isinstance(op, BinaryUfuncInfo)
+                and
+                # don't include unimplemented ops
+                op.full_name
+                not in {
+                    "__rsub__",
+                    "complex",
+                    "floor_divide",
+                    "polar",
+                    "rsub",
                 }
             )
-            and "(NT, T) broadcasting all 1s" in sample.name
+        ),
+        sample_match_fn=lambda device, sample: (
+            "(NT, T) broadcasting all 1s" in sample.name
             and "noncontig_holes" in sample.name
         ),
         name="backward_unbind_data_dependency",
@@ -8352,10 +8337,8 @@ COMPILE_BACKWARD_FAILURES = [
     XFailRule(
         error_type=torch._dynamo.exc.Unsupported,
         error_msg="Backend compiler failed with a fake tensor exception",
-        match_fn=lambda device, dtype, op, sample: (
-            op.full_name == "nn.functional.rms_norm"
-            and sample.input._lengths is not None
-        ),
+        op_match_fn=lambda device, op: (op.full_name == "nn.functional.rms_norm"),
+        sample_match_fn=lambda device, sample: (sample.input._lengths is not None),
         name="rms_norm_backward_unbind_data_dependency",
     ),
     # clone() -> preserve format on an non-contiguous NJT with holes currently uses
@@ -8363,15 +8346,15 @@ COMPILE_BACKWARD_FAILURES = [
     XFailRule(
         error_type=torch._dynamo.exc.Unsupported,
         error_msg="Backend compiler failed with a fake tensor exception",
-        match_fn=lambda device, dtype, op, sample: (
-            op.full_name == "clone"
-            and "noncontig_holes" in sample.name
+        op_match_fn=lambda device, op: (op.full_name == "clone"),
+        sample_match_fn=lambda device, sample: (
+            "noncontig_holes" in sample.name
             and sample.kwargs.get("memory_format", None) == torch.preserve_format
         ),
         name="clone_unbind_data_dependency_backward",
     ),
-    *COMPILE_FORWARD_FAILURES,
-    *BACKWARD_FAILURES,
+    *COMPILE_FORWARD_SAMPLE_RULES,
+    *BACKWARD_SAMPLE_RULES,
 ]
 
 COMPARE_TENSOR_COMPONENT_EQUALITY = {
@@ -8391,36 +8374,16 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
         else:
             return (torch.ones_like(out_val),)
 
-    # Returns a context manager xfailing / skipping only for expected errors.
-    def maybe_skip_or_xfail(self, rules, device, dtype, op, sample):
-        if rules is None or len(rules) == 0:
-            return contextlib.nullcontext()
-
-        for rule in rules:
-            if rule.match(device, dtype, op, sample):
-                log.debug(
-                    "matched %s rule '%s': %s %s %s %s",
-                    rule.type,
-                    rule.name,
-                    op.full_name,
-                    device,
-                    dtype,
-                    sample,
-                )
-                return rule.get_context(self)
-
-        log.debug("matched no rules: %s %s %s %s", op.full_name, device, dtype, sample)
-        return contextlib.nullcontext()
-
-    @ops([op for op in njt_op_db if op.supports_njt], allowed_dtypes=(torch.float32,))
-    def test_forward(self, device, dtype, op):
-        for i, sample in enumerate(
-            op.sample_inputs(device=device, dtype=dtype, requires_grad=False)
+    @ops(
+        [op for op in njt_op_db if op.supports_njt],
+        allowed_dtypes=(torch.float32,),
+        sample_rules=FORWARD_SAMPLE_RULES,
+    )
+    def test_forward(self, device, dtype, op, sample_rules):
+        for sample, subtest_ctx in op.sample_inputs(
+            device=device, dtype=dtype, requires_grad=False, sample_rules=sample_rules
         ):
-            maybe_skip_or_xfail = self.maybe_skip_or_xfail(
-                FORWARD_FAILURES, device, dtype, op, sample
-            )
-            with self.subTest(sample=sample, i=i), maybe_skip_or_xfail:
+            with subtest_ctx(self):
                 # compare to reference, but expect different nested int
                 out = op.op(sample.input, *sample.args, **sample.kwargs)
                 out_ref = op.ref(op, sample)
@@ -8435,15 +8398,13 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
     @ops(
         [op for op in njt_op_db if op.supports_njt and op.supports_autograd],
         allowed_dtypes=(torch.float32,),
+        sample_rules=BACKWARD_SAMPLE_RULES,
     )
-    def test_backward(self, device, dtype, op):
-        for i, sample in enumerate(
-            op.sample_inputs(device=device, dtype=dtype, requires_grad=True)
+    def test_backward(self, device, dtype, op, sample_rules):
+        for sample, subtest_ctx in op.sample_inputs(
+            device=device, dtype=dtype, requires_grad=True, sample_rules=sample_rules
         ):
-            maybe_skip_or_xfail = self.maybe_skip_or_xfail(
-                BACKWARD_FAILURES, device, dtype, op, sample
-            )
-            with self.subTest(sample=sample, i=i), maybe_skip_or_xfail:
+            with subtest_ctx(self):
                 # compare to reference, but expect different nested int
                 out = op.op(sample.input, *sample.args, **sample.kwargs)
                 out_ref = op.ref(op, sample)
@@ -8469,15 +8430,16 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
                     self.assertEqualNoncontigAware(grads, grads_ref)
 
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
-    @ops([op for op in njt_op_db if op.supports_njt], allowed_dtypes=(torch.float32,))
-    def test_compile_forward(self, device, dtype, op):
-        for i, sample in enumerate(
-            op.sample_inputs(device=device, dtype=dtype, requires_grad=False)
+    @ops(
+        [op for op in njt_op_db if op.supports_njt],
+        allowed_dtypes=(torch.float32,),
+        sample_rules=COMPILE_FORWARD_SAMPLE_RULES,
+    )
+    def test_compile_forward(self, device, dtype, op, sample_rules):
+        for sample, subtest_ctx in op.sample_inputs(
+            device=device, dtype=dtype, requires_grad=False, sample_rules=sample_rules
         ):
-            maybe_skip_or_xfail = self.maybe_skip_or_xfail(
-                COMPILE_FORWARD_FAILURES, device, dtype, op, sample
-            )
-            with self.subTest(sample=sample, i=i), maybe_skip_or_xfail:
+            with subtest_ctx(self):
                 torch.compiler.reset()
 
                 op_fn = op.op
@@ -8527,16 +8489,14 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
     @ops(
         [op for op in njt_op_db if op.supports_njt and op.supports_autograd],
         allowed_dtypes=(torch.float32,),
+        sample_rules=COMPILE_BACKWARD_SAMPLE_RULES,
     )
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
-    def test_compile_backward(self, device, dtype, op):
-        for i, sample in enumerate(
-            op.sample_inputs(device=device, dtype=dtype, requires_grad=True)
+    def test_compile_backward(self, device, dtype, op, sample_rules):
+        for sample, subtest_ctx in op.sample_inputs(
+            device=device, dtype=dtype, requires_grad=True, sample_rules=sample_rules
         ):
-            maybe_skip_or_xfail = self.maybe_skip_or_xfail(
-                COMPILE_BACKWARD_FAILURES, device, dtype, op, sample
-            )
-            with self.subTest(sample=sample, i=i), maybe_skip_or_xfail:
+            with subtest_ctx(self):
                 torch.compiler.reset()
 
                 op_fn = op.op
