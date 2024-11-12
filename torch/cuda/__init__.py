@@ -665,7 +665,6 @@ def _parse_visible_devices() -> Union[List[int], List[str]]:
             if rocr_devices is not None:
                 var = ",".join(str(i) for i in range(max_length))
 
-
     if var is None:
         return list(range(64))
 
