@@ -17,16 +17,6 @@ constexpr auto kBackendDefaultTimeout =
 
 namespace c10d {
 
-enum TORCH_API ErrorType {
-  NO_ERROR,
-  TIMEOUT,
-  // e.g., NCCL error, etc
-  COMM_ERROR,
-  // TODO, do we need to distinguish between remote timeout or remote NCCL
-  // errors?
-  REMOTE_ERROR
-};
-
 class TORCH_API Backend : public torch::CustomClassHolder {
  public:
   // Backend Options is a base struct that defines the basic options
