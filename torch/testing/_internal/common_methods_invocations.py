@@ -10142,6 +10142,34 @@ foreach_unary_op_db: List[OpInfo] = [
         ),
     ),
     ForeachFuncInfo(
+        'rsqrt',
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
+        supports_autograd=True,
+        supports_inplace_autograd=True,
+        supports_forward_ad=True,
+        backward_requires_result=True,
+        decorators=(
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestMeta",
+                "test_dispatch_meta_inplace",
+                dtypes=integral_types_and(torch.bool),
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestMeta",
+                "test_dispatch_symbolic_meta_inplace",
+                dtypes=integral_types_and(torch.bool),
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestMeta",
+                "test_meta_inplace",
+                dtypes=integral_types_and(torch.bool),
+            ),
+        ),
+    ),
+    ForeachFuncInfo(
         'ceil',
         sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.int32, torch.int8),
