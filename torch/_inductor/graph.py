@@ -56,7 +56,7 @@ from torch.utils._mode_utils import no_dispatch
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.numbers import int_oo
 
-from . import config, ir
+from . import config, ir, metrics
 from .codegen.common import (
     BackendFeature,
     DeviceOpOverrides,
@@ -1878,6 +1878,7 @@ class GraphLowering(torch.fx.Interpreter):
             self.inplaced_to_remove.clear()
             V.graph.sizevars.precomputed_replacements.clear()
             V.graph.sizevars.inv_precomputed_replacements.clear()
+            metrics.reset()
             with config.patch({"triton.autotune_at_compile_time": False}):
                 return self.codegen()
         else:

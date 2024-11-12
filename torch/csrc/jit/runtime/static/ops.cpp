@@ -673,7 +673,7 @@ REGISTER_OPERATOR_FUNCTOR(
              &clamp_min,
              &clamp_max,
              &nan,
-             &output_size})
+             &output_size});
       };
     })
 
