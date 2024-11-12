@@ -164,8 +164,6 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
         super().__init__(device_type)
         # synchronize RNG state using rank 0's current one
         rng_state = self._device_handle.get_rng_state().to(device_type)
-        print(f"rank {dist.get_rank()} broadcast RNG state")
-        # torch.distributed.breakpoint()
         dist.broadcast(rng_state, 0)
         self.rng_states["parallel-rng"] = rng_state.to("cpu")
 

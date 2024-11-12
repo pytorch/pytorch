@@ -924,8 +924,10 @@ else:
                 )
 
             return _mesh_resources.create_flatten_mesh(self, mesh_dim_name)
-        
-        def manual_seed(self, seed: int, unique_dims: Tuple[Union[str, int], ...]=()):
+
+        def manual_seed(
+            self, seed: int, unique_dims: Tuple[Union[str, int], ...] = tuple()
+        ):
             """
             Given an initial seed `seed`, compute a per-rank seed that is the same for any global rank that has the
             same coordinates within `unique_dims`, and different for any global ranks that have different coordinates
@@ -933,14 +935,14 @@ else:
 
             For example, for a mesh like {"DP": 4, "TP": 4}
                 - if unique_dims is empty, all ranks use `seed`
-                - if unique_dims is ("TP"), ranks 0, 4 share a seed, ranks 1, 5 share a different seed, etc 
-            
+                - if unique_dims is ("TP"), ranks 0, 4 share a seed, ranks 1, 5 share a different seed, etc
+
             All ranks should call `manual_seed` with the same input values.
 
-            Note: the order of dims in unique_dims does not have to match the order of dims in the device mesh, and 
+            Note: the order of dims in unique_dims does not have to match the order of dims in the device mesh, and
             can be used to control how random seed offsets are computed.
 
-            Args: 
+            Args:
                 seed (int): The initial seed to use for rank 0 and as a starting point for computing seeds for other
                 uniquely seeded ranks.
                 unique_dims (tuple(str/int), optional): An ordered list of dims that should have unique seeds. If string
@@ -953,7 +955,9 @@ else:
                 # but its probably good practice to always do it from the root mesh?
                 # Another API design could be that if unique_dims is empty, we assume all dims are unique, and users
                 # can just call `fsdp_tp_mesh.manual_seed()` to get the same result as `root_mesh.manual_seed(fsdp,tp)`
-                raise RuntimeError("Cannot call manual seed from a submesh, please use the root mesh")
+                raise RuntimeError(
+                    "Cannot call manual seed from a submesh, please use the root mesh"
+                )
 
             # unique_dims has no duplicates and contains valid dim names
             types = set()
@@ -962,15 +966,23 @@ else:
                 types.add(type(dim_name_or_id))
                 vals.add(dim_name_or_id)
                 if isinstance(dim_name_or_id, str):
-                    assert self.mesh_dim_names is not None, "specified mesh-dim names but mesh does not have names"
-                    assert dim_name_or_id in self.mesh_dim_names, f"invalid dim name {dim_name_or_id}"
+                    assert (
+                        self.mesh_dim_names is not None
+                    ), "specified mesh-dim names but mesh does not have names"
+                    assert (
+                        dim_name_or_id in self.mesh_dim_names
+                    ), f"invalid dim name {dim_name_or_id}"
                 elif isinstance(dim_name_or_id, int):
-                    assert dim_name_or_id < self.ndim, f"invalid dim id {dim_name_or_id}"
-            assert len(types) == 1, f"unique_dims has mixed types {types}"
-            assert len(unique_dims) == len(vals), f"unique_dims has duplicates: {unique_dims}"
+                    assert (
+                        dim_name_or_id < self.ndim
+                    ), f"invalid dim id {dim_name_or_id}"
+            assert len(types) <= 1, f"unique_dims has mixed types {types}"
+            assert len(unique_dims) == len(
+                vals
+            ), f"unique_dims has duplicates: {unique_dims}"
 
             # seed uniqueness is determined only by the position of this rank within the unique_dims submesh,
-            # not by its position within the entire world.  So it is expected there would be duplicate 'rank_seed' 
+            # not by its position within the entire world.  So it is expected there would be duplicate 'rank_seed'
             # values in the world unless all mesh dims were specified as unique_dims.
             rank_seed = seed
             prev_size = 1
@@ -978,14 +990,19 @@ else:
                 if isinstance(dim_name, str):
                     dim = self.__getitem__(dim_name)
                 else:
-                    # dim = ...
-                    assert False, "NYI"
+                    # dim = TODO
+                    raise NotImplementedError(
+                        "dim-indices are not yet supported for unique_dims"
+                    )
                 rank_seed += prev_size * dim.get_local_rank()
                 prev_size = dim.size()
 
-            logger.debug(f"DeviceMesh manual_seed: global rank %d using seed %d", self.get_rank(), rank_seed) 
+            logger.debug(
+                "DeviceMesh manual_seed: global rank %d using seed %d",
+                self.get_rank(),
+                rank_seed,
+            )
             torch.manual_seed(rank_seed)
-            
 
     def init_device_mesh(
         device_type: str,
