@@ -328,7 +328,7 @@ def _recursive_pre_grad_passes(
     with dynamo_timed(
         "_recursive_pre_grad_passes",
         log_pt2_compile_event=True,
-        dynamo_compile_column_us="pre_grad_pass_cumulative_time_us",
+        dynamo_compile_column_us="pre_grad_pass_time_us",
     ):
         for subgraph_name in _get_subgraph_names(gm):
             subgraph = getattr(gm, subgraph_name)
@@ -342,7 +342,7 @@ def _recursive_joint_graph_passes(gm: GraphModule) -> None:
     with dynamo_timed(
         "_recursive_joint_graph_passes",
         log_pt2_compile_event=True,
-        dynamo_compile_column_us="joint_graph_pass_cumulative_time_us",
+        dynamo_compile_column_us="joint_graph_pass_time_us",
     ):
         for subgraph_name in _get_subgraph_names(gm):
             subgraph = getattr(gm, subgraph_name)
@@ -354,7 +354,7 @@ def _recursive_post_grad_passes(gm: GraphModule, is_inference: bool = False) -> 
     with dynamo_timed(
         "_recursive_post_grad_passes",
         log_pt2_compile_event=True,
-        dynamo_compile_column_us="post_grad_pass_cumulative_time_us",
+        dynamo_compile_column_us="post_grad_pass_time_us",
     ):
         for subgraph_name in _get_subgraph_names(gm):
             subgraph = getattr(gm, subgraph_name)
