@@ -1280,8 +1280,7 @@ PyObject* THPModule_increment_version(
 }
 
 // autograd methods on torch._C
-// NOLINTNEXTLINE(*array*)
-static PyMethodDef methods[] = {
+static std::initializer_list<PyMethodDef> methods = {
     {"_set_grad_enabled",
      castPyCFunctionWithKeywords(set_grad_enabled),
      METH_VARARGS | METH_KEYWORDS,
@@ -1409,8 +1408,8 @@ static PyMethodDef methods[] = {
 
     {nullptr, nullptr, 0, nullptr}};
 
-PyMethodDef* python_functions() {
-  return methods;
+const PyMethodDef* python_functions() {
+  return std::data(methods);
 }
 
 } // namespace torch::autograd

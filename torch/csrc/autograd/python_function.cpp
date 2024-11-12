@@ -1700,8 +1700,7 @@ PyObject* getRequiresGrad(PyObject* obj, void* _unused) {
 
 } // namespace
 
-// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
-static struct PyGetSetDef THPFunction_properties[] = {
+static std::initializer_list<PyGetSetDef> THPFunction_properties = {
     {"saved_tensors",
      (getter)THPFunction_saved_tensors,
      nullptr,
@@ -1771,27 +1770,23 @@ static struct PyGetSetDef THPFunction_properties[] = {
      nullptr},
     {nullptr}};
 
-// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
-static struct PyMethodDef THPFunction_methods[] = {
-    {(char*)"name", THPFunction_name, METH_NOARGS, nullptr},
-    {(char*)"_sequence_nr", THPFunction_sequence_nr, METH_NOARGS, nullptr},
-    {(char*)"_set_sequence_nr", THPFunction_set_sequence_nr, METH_O, nullptr},
-    {(char*)"maybe_clear_saved_tensors",
+static std::initializer_list<PyMethodDef> THPFunction_methods = {
+    {"name", THPFunction_name, METH_NOARGS, nullptr},
+    {"_sequence_nr", THPFunction_sequence_nr, METH_NOARGS, nullptr},
+    {"_set_sequence_nr", THPFunction_set_sequence_nr, METH_O, nullptr},
+    {"maybe_clear_saved_tensors",
      THPFunction_maybe_clear_saved_tensors,
      METH_NOARGS,
      nullptr},
-    {(char*)"apply", THPFunction_apply, METH_CLASS | METH_VARARGS, nullptr},
-    {(char*)"_register_hook_dict",
-     THPFunction__register_hook_dict,
-     METH_O,
-     nullptr},
-    {(char*)"register_hook", THPFunction_register_hook, METH_O, nullptr},
-    {(char*)"register_prehook", THPFunction_register_prehook, METH_O, nullptr},
-    {(char*)"_is_compiled_autograd_tracing",
+    {"apply", THPFunction_apply, METH_CLASS | METH_VARARGS, nullptr},
+    {"_register_hook_dict", THPFunction__register_hook_dict, METH_O, nullptr},
+    {"register_hook", THPFunction_register_hook, METH_O, nullptr},
+    {"register_prehook", THPFunction_register_prehook, METH_O, nullptr},
+    {"_is_compiled_autograd_tracing",
      THPFunction_is_compiled_autograd_tracing,
      METH_NOARGS,
      nullptr},
-    {(char*)"_get_compiled_autograd_symints",
+    {"_get_compiled_autograd_symints",
      THPFunction_get_compiled_autograd_symints,
      METH_NOARGS,
      nullptr},
@@ -1827,9 +1822,11 @@ PyTypeObject THPFunctionType = {
     0, /* tp_weaklistoffset */
     nullptr, /* tp_iter */
     nullptr, /* tp_iternext */
-    THPFunction_methods, /* tp_methods */
+    // NOLINTNEXTLINE(*const*)
+    const_cast<PyMethodDef*>(std::data(THPFunction_methods)), /* tp_methods */
     nullptr, /* tp_members */
-    THPFunction_properties, /* tp_getset */
+    // NOLINTNEXTLINE(*const*)
+    const_cast<PyGetSetDef*>(std::data(THPFunction_properties)), /* tp_getset */
     nullptr, /* tp_base */
     nullptr, /* tp_dict */
     nullptr, /* tp_descr_get */

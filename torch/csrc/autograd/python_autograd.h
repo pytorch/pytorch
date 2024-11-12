@@ -7,7 +7,7 @@ void THPAutograd_initFunctions();
 
 namespace torch::autograd {
 
-PyMethodDef* python_functions();
+const PyMethodDef* python_functions();
 
 }
 

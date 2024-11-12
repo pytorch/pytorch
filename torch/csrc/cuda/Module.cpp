@@ -1819,8 +1819,7 @@ PyObject* THCPModule_benchmarkLimitCuDNN(PyObject* _unused, PyObject* noargs) {
   return THPUtils_packInt32(at::globalContext().benchmarkLimitCuDNN());
 }
 
-// NOLINTNEXTLINE(*-c-arrays*, *-global-variables)
-static struct PyMethodDef _THCPModule_methods[] = {
+static std::initializer_list<PyMethodDef> _THCPModule_methods = {
     {"_cuda_init", THCPModule_initExtension, METH_NOARGS, nullptr},
     {"_cuda_setDevice", THCPModule_setDevice_wrap, METH_O, nullptr},
     {"_cuda_exchangeDevice", THCPModule_exchangeDevice, METH_O, nullptr},
@@ -2032,8 +2031,8 @@ static struct PyMethodDef _THCPModule_methods[] = {
      nullptr},
     {nullptr}};
 
-PyMethodDef* THCPModule_methods() {
-  return _THCPModule_methods;
+const PyMethodDef* THCPModule_methods() {
+  return std::data(_THCPModule_methods);
 }
 
 namespace torch::cuda {

@@ -132,11 +132,7 @@ static PyObject* THCPStream_eq(PyObject* _self, PyObject* _other) {
   END_HANDLE_TH_ERRORS
 }
 
-// NOLINTNEXTLINE(*-c-arrays*, *-global-variables)
-static struct PyMemberDef THCPStream_members[] = {{nullptr}};
-
-// NOLINTNEXTLINE(*-c-arrays*, *-global-variables)
-static struct PyGetSetDef THCPStream_properties[] = {
+static std::initializer_list<PyGetSetDef> THCPStream_properties = {
     {"cuda_stream",
      (getter)THCPStream_get_cuda_stream,
      nullptr,
@@ -145,8 +141,7 @@ static struct PyGetSetDef THCPStream_properties[] = {
     {"priority", (getter)THCPStream_get_priority, nullptr, nullptr, nullptr},
     {nullptr}};
 
-// NOLINTNEXTLINE(*-c-arrays*, *-global-variables)
-static PyMethodDef THCPStream_methods[] = {
+static std::initializer_list<PyMethodDef> THCPStream_methods = {
     {"query", THCPStream_query, METH_NOARGS, nullptr},
     {"synchronize", THCPStream_synchronize, METH_NOARGS, nullptr},
     {"priority_range",
@@ -184,9 +179,11 @@ PyTypeObject THCPStreamType = {
     0, /* tp_weaklistoffset */
     nullptr, /* tp_iter */
     nullptr, /* tp_iternext */
-    THCPStream_methods, /* tp_methods */
-    THCPStream_members, /* tp_members */
-    THCPStream_properties, /* tp_getset */
+    // NOLINTNEXTLINE(*const*)
+    const_cast<PyMethodDef*>(std::data(THCPStream_methods)), /* tp_methods */
+    nullptr, /* tp_members */
+    // NOLINTNEXTLINE(*const*)
+    const_cast<PyGetSetDef*>(std::data(THCPStream_properties)), /* tp_getset */
     nullptr, /* tp_base */
     nullptr, /* tp_dict */
     nullptr, /* tp_descr_get */

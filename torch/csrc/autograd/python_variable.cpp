@@ -227,9 +227,10 @@ static bool check_has_torch_dispatch(PyObject* obj) {
       attr.ptr() != torch::disabled_torch_dispatch_impl());
 }
 
-// NOLINTNEXTLINE(*-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
-static PyObject* device_to_py_class_[static_cast<size_t>(
-    c10::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES)];
+static std::array<
+    PyObject*,
+    static_cast<size_t>(c10::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES)>
+    device_to_py_class_;
 
 void registerPythonTensorClass(
     const std::string& device,
@@ -246,7 +247,7 @@ void registerPythonTensorClass(
   device_to_py_class_[static_cast<size_t>(dev.type())] = python_tensor_class;
 }
 
-static PyObject* getPythonTensorClass(c10::Device d) {
+static const PyObject* getPythonTensorClass(c10::Device d) {
   return device_to_py_class_[static_cast<size_t>(d.type())];
 }
 
@@ -1629,8 +1630,7 @@ PyObject* THPVariable__use_count(PyObject* self, PyObject* noargs) {
 
 // properties are registered here because we are currently only able to bind
 // them manually. TODO: make declarable in native_functions
-// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
-static struct PyGetSetDef THPVariable_properties[] = {
+static std::initializer_list<PyGetSetDef> THPVariable_properties = {
     {"_python_dispatch",
      (getter)THPVariable_get_python_dispatch,
      nullptr,
@@ -1751,8 +1751,7 @@ static PyMappingMethods THPVariable_as_mapping = {
     THPVariable_setitem,
 };
 
-// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
-static PyMethodDef extra_methods[] = {
+static std::initializer_list<PyMethodDef> extra_methods = {
     {"as_subclass",
      castPyCFunctionWithKeywords(THPVariable_as_subclass),
      METH_VARARGS | METH_KEYWORDS,
@@ -1865,7 +1864,8 @@ PyTypeObject THPVariableType = {
     nullptr, /* tp_iternext */
     nullptr, /* tp_methods */
     nullptr, /* tp_members */
-    THPVariable_properties, /* tp_getset */
+    // NOLINTNEXTLINE(*const*)
+    const_cast<PyGetSetDef*>(std::data(THPVariable_properties)), /* tp_getset */
     nullptr, /* tp_base */
     nullptr, /* tp_dict */
     nullptr, /* tp_descr_get */
@@ -2380,7 +2380,7 @@ bool THPVariable_initModule(PyObject* module) {
 
   static std::vector<PyMethodDef> methods;
   THPUtils_addPyMethodDefs(methods, torch::autograd::variable_methods);
-  THPUtils_addPyMethodDefs(methods, extra_methods);
+  THPUtils_addPyMethodDefs(methods, std::data(extra_methods));
   THPVariableType.tp_methods = methods.data();
   if (PyType_Ready(&THPVariableType) < 0)
     return false;

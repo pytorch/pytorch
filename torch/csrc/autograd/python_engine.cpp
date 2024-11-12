@@ -446,14 +446,13 @@ PyObject* THPEngine_new(PyTypeObject* type, PyObject* args, PyObject* kwargs) {
   return type->tp_alloc(type, 0);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
-static struct PyMethodDef THPEngine_methods[] = {
-    {(char*)"run_backward",
+static std::initializer_list<PyMethodDef> THPEngine_methods = {
+    {"run_backward",
      castPyCFunctionWithKeywords(THPEngine_run_backward),
      METH_VARARGS | METH_KEYWORDS,
      nullptr},
-    {(char*)"queue_callback", THPEngine_queue_callback, METH_O, nullptr},
-    {(char*)"is_checkpoint_valid",
+    {"queue_callback", THPEngine_queue_callback, METH_O, nullptr},
+    {"is_checkpoint_valid",
      THPEngine_is_checkpoint_valid,
      METH_NOARGS,
      nullptr},
@@ -488,7 +487,8 @@ PyTypeObject THPEngineType = {
     0, /* tp_weaklistoffset */
     nullptr, /* tp_iter */
     nullptr, /* tp_iternext */
-    THPEngine_methods, /* tp_methods */
+    // NOLINTNEXTLINE(*const*)
+    const_cast<PyMethodDef*>(std::data(THPEngine_methods)), /* tp_methods */
     nullptr, /* tp_members */
     nullptr, /* tp_getset */
     nullptr, /* tp_base */

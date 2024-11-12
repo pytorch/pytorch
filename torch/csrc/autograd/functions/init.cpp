@@ -57,8 +57,8 @@ static void addClass(
     PyObject* module,
     PyTypeObject& type,
     const char* name,
-    PyGetSetDef* function_properties = nullptr,
-    PyMethodDef* function_methods = nullptr) {
+    const PyGetSetDef* function_properties = nullptr,
+    const PyMethodDef* function_methods = nullptr) {
   createForwardFunctionPyTypeObject<T>(
       type, name, function_properties, function_methods);
   Py_INCREF(&type);
@@ -109,10 +109,9 @@ static PyObject* accumulateGradVar(PyObject* _self, void* _unused) {
   return THPVariable_Wrap(grad_acc->variable);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-static struct PyGetSetDef accumulate_grad_properties[] = {
+static std::initializer_list<PyGetSetDef> accumulate_grad_properties = {
     THP_FUNCTION_DEFAULT_PROPERTIES,
-    {(char*)"variable", accumulateGradVar, nullptr, nullptr, nullptr},
+    {"variable", accumulateGradVar, nullptr, nullptr, nullptr},
     {nullptr}};
 
 void THPAutograd_initFunctions() {
@@ -125,7 +124,7 @@ void THPAutograd_initFunctions() {
       module,
       AccumulateGradClass,
       "AccumulateGrad",
-      accumulate_grad_properties);
+      std::data(accumulate_grad_properties));
 
   static PyTypeObject ErrorClass;
   addClass<Error, NoCtor>(module, ErrorClass, "Error");

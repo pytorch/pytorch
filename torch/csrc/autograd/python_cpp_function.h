@@ -34,39 +34,28 @@ PyObject* CppFunction_pynew(
 }
 
 #define THP_FUNCTION_DEFAULT_METHODS                                           \
-  {(char*)"_register_hook_dict",                                               \
-   THPCppFunction_register_hook_dict,                                          \
-   METH_O,                                                                     \
-   nullptr},                                                                   \
-      {(char*)"register_hook", THPCppFunction_register_hook, METH_O, nullptr}, \
-      {(char*)"register_prehook",                                              \
-       THPCppFunction_register_prehook,                                        \
-       METH_O,                                                                 \
-       nullptr},                                                               \
-      {(char*)"name", THPCppFunction_name, METH_NOARGS, nullptr},              \
-      {(char*)"_sequence_nr",                                                  \
-       THPCppFunction_sequence_nr,                                             \
-       METH_NOARGS,                                                            \
-       nullptr},                                                               \
-  {                                                                            \
-    (char*)"_set_sequence_nr", THPCppFunction_set_sequence_nr, METH_O, nullptr \
+  {"_register_hook_dict", THPCppFunction_register_hook_dict, METH_O, nullptr}, \
+      {"register_hook", THPCppFunction_register_hook, METH_O, nullptr},        \
+      {"register_prehook", THPCppFunction_register_prehook, METH_O, nullptr},  \
+      {"name", THPCppFunction_name, METH_NOARGS, nullptr},                     \
+      {"_sequence_nr", THPCppFunction_sequence_nr, METH_NOARGS, nullptr}, {    \
+    "_set_sequence_nr", THPCppFunction_set_sequence_nr, METH_O, nullptr        \
   }
 
-#define THP_FUNCTION_DEFAULT_PROPERTIES                                        \
-  {(char*)"next_functions",                                                    \
-   THPCppFunction_next_functions,                                              \
-   nullptr,                                                                    \
-   nullptr,                                                                    \
-   nullptr},                                                                   \
-      {(char*)"requires_grad",                                                 \
-       THPCppFunction_requires_grad,                                           \
-       nullptr,                                                                \
-       nullptr,                                                                \
-       nullptr},                                                               \
-      {(char*)"metadata", THPCppFunction_metadata, nullptr, nullptr, nullptr}, \
-  {                                                                            \
-    (char*)"_input_metadata", THPCppFunction_input_metadata, nullptr, nullptr, \
-        nullptr                                                                \
+#define THP_FUNCTION_DEFAULT_PROPERTIES                                   \
+  {"next_functions",                                                      \
+   THPCppFunction_next_functions,                                         \
+   nullptr,                                                               \
+   nullptr,                                                               \
+   nullptr},                                                              \
+      {"requires_grad",                                                   \
+       THPCppFunction_requires_grad,                                      \
+       nullptr,                                                           \
+       nullptr,                                                           \
+       nullptr},                                                          \
+      {"metadata", THPCppFunction_metadata, nullptr, nullptr, nullptr}, { \
+    "_input_metadata", THPCppFunction_input_metadata, nullptr, nullptr,   \
+        nullptr                                                           \
   }
 
 PyObject* THPCppFunction_next_functions(PyObject* self, void* _unused);
@@ -83,8 +72,8 @@ PyObject* THPCppFunction_input_metadata(PyObject* self, void* _unused);
 PyTypeObject* _initFunctionPyTypeObject(
     PyTypeObject& type,
     const char* name,
-    PyGetSetDef* function_properties,
-    PyMethodDef* function_methods);
+    const PyGetSetDef* function_properties,
+    const PyMethodDef* function_methods);
 
 PyObject* registerFunctionHook(Node& fn, PyObject* hook);
 
@@ -94,8 +83,8 @@ template <typename Ctor>
 PyTypeObject* createForwardFunctionPyTypeObject(
     PyTypeObject& type,
     const char* name,
-    PyGetSetDef* function_properties = nullptr,
-    PyMethodDef* function_methods = nullptr) {
+    const PyGetSetDef* function_properties = nullptr,
+    const PyMethodDef* function_methods = nullptr) {
   type.tp_new = &CppFunction_pynew<Ctor>;
   return _initFunctionPyTypeObject(
       type, name, function_properties, function_methods);

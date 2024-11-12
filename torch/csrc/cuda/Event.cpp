@@ -179,14 +179,12 @@ static PyObject* THCPEvent_ipc_handle(PyObject* _self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-// NOLINTNEXTLINE(*c-arrays*, *global-variables)
-static struct PyGetSetDef THCPEvent_properties[] = {
+static std::initializer_list<PyGetSetDef> THCPEvent_properties = {
     {"device", (getter)THCPEvent_get_device, nullptr, nullptr, nullptr},
     {"cuda_event", (getter)THCPEvent_get_cuda_event, nullptr, nullptr, nullptr},
     {nullptr}};
 
-// NOLINTNEXTLINE(*c-arrays*, *global-variables)
-static PyMethodDef THCPEvent_methods[] = {
+static std::initializer_list<PyMethodDef> THCPEvent_methods = {
     {(char*)"from_ipc_handle",
      castPyCFunctionWithKeywords(THCPEvent_from_ipc_handle),
      METH_CLASS | METH_VARARGS | METH_KEYWORDS,
@@ -227,9 +225,11 @@ PyTypeObject THCPEventType = {
     0, /* tp_weaklistoffset */
     nullptr, /* tp_iter */
     nullptr, /* tp_iternext */
-    THCPEvent_methods, /* tp_methods */
+    // NOLINTNEXTLINE(*const*)
+    const_cast<PyMethodDef*>(std::data(THCPEvent_methods)), /* tp_methods */
     nullptr, /* tp_members */
-    THCPEvent_properties, /* tp_getset */
+    // NOLINTNEXTLINE(*const*)
+    const_cast<PyGetSetDef*>(std::data(THCPEvent_properties)), /* tp_getset */
     nullptr, /* tp_base */
     nullptr, /* tp_dict */
     nullptr, /* tp_descr_get */

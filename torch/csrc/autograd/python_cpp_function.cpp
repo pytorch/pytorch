@@ -231,21 +231,19 @@ PyObject* THPCppFunction_input_metadata(PyObject* self, void* closure) {
   END_HANDLE_TH_ERRORS
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
-static struct PyMethodDef default_methods[] = {
+static std::initializer_list<PyMethodDef> default_methods = {
     THP_FUNCTION_DEFAULT_METHODS,
     {nullptr}};
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
-static struct PyGetSetDef default_properties[] = {
+static std::initializer_list<PyGetSetDef> default_properties = {
     THP_FUNCTION_DEFAULT_PROPERTIES,
     {nullptr}};
 
 PyTypeObject* _initFunctionPyTypeObject(
     PyTypeObject& type,
     const char* name,
-    PyGetSetDef* function_properties,
-    PyMethodDef* function_methods) {
+    const PyGetSetDef* function_properties,
+    const PyMethodDef* function_methods) {
   type.ob_base = {
     PyObject_HEAD_INIT(nullptr)
       0};
@@ -254,9 +252,14 @@ PyTypeObject* _initFunctionPyTypeObject(
   type.tp_name = name;
   type.tp_basicsize = sizeof(THPCppFunction);
   type.tp_call = THPCppFunction_call;
-  type.tp_methods = function_methods ? function_methods : default_methods;
+  // NOLINTNEXTLINE(*const*)
+  type.tp_methods = const_cast<PyMethodDef*>(
+      function_methods ? function_methods : std::data(default_methods));
   type.tp_getset =
-      function_properties ? function_properties : default_properties;
+      // NOLINTNEXTLINE(*const*)
+      const_cast<PyGetSetDef*>(
+          function_properties ? function_properties
+                              : std::data(default_properties));
   type.tp_dealloc = THPCppFunction_dealloc;
   type.tp_traverse = THPCppFunction_traverse;
   type.tp_clear = THPCppFunction_clear;

@@ -154,15 +154,13 @@ static PyObject* Tensor_is_sparse_csr(PyTensorType* self, void* unused) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
-static struct PyMethodDef metaclass_methods[] = {
+static std::initializer_list<PyMethodDef> metaclass_methods = {
     {"__instancecheck__", Tensor_instancecheck, METH_O, nullptr},
     {nullptr}};
 
 typedef PyObject* (*getter)(PyObject*, void*);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
-static struct PyGetSetDef metaclass_properties[] = {
+static std::initializer_list<PyGetSetDef> metaclass_properties = {
     {"dtype", (getter)Tensor_dtype, nullptr, nullptr, nullptr},
     {"layout", (getter)Tensor_layout, nullptr, nullptr, nullptr},
     {"is_cuda", (getter)Tensor_is_cuda, nullptr, nullptr, nullptr},
@@ -180,8 +178,11 @@ static PyTypeObject metaclass = {
 static void py_initialize_metaclass(PyTypeObject& metaclass) {
   // NOLINTNEXTLINE(misc-redundant-expression)
   metaclass.tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE;
-  metaclass.tp_methods = metaclass_methods;
-  metaclass.tp_getset = metaclass_properties;
+  // NOLINTNEXTLINE(*const*)
+  metaclass.tp_methods = const_cast<PyMethodDef*>(std::data(metaclass_methods));
+  // NOLINTNEXTLINE(*const*)
+  metaclass.tp_getset =
+      const_cast<PyGetSetDef*>(std::data(metaclass_properties));
   metaclass.tp_base = &PyType_Type;
   if (PyType_Ready(&metaclass) < 0) {
     throw python_error();
