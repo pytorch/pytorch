@@ -27,7 +27,8 @@ void manual_seed(uint64_t seed) {
 void manual_seed_all(uint64_t seed) {
   auto num_gpu = device_count();
   for (const auto i : c10::irange(num_gpu)) {
-    auto gen = at::detail::getXPUHooks().getDefaultXPUGenerator(i);
+    auto gen = at::detail::getXPUHooks().getDefaultXPUGenerator(
+        static_cast<c10::DeviceIndex>(i));
     {
       // See Note [Acquire lock when using random generators]
       std::lock_guard<std::mutex> lock(gen.mutex());

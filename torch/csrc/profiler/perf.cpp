@@ -119,13 +119,13 @@ uint64_t PerfEvent::ReadCounter() const {
  * value
  */
 
-PerfEvent::~PerfEvent(){};
+PerfEvent::~PerfEvent() {}
 
-void PerfEvent::Init(){};
+void PerfEvent::Init() {}
 
 uint64_t PerfEvent::ReadCounter() const {
   return 0;
-};
+}
 
 #endif /* __ANDROID__ || __linux__ */
 

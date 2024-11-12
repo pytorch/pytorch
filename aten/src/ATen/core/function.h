@@ -8,7 +8,7 @@
 
 namespace c10 {
 struct FunctionSchema;
-};
+}
 
 namespace at {
 TORCH_API void launch(std::function<void()> func);
@@ -42,8 +42,8 @@ struct TORCH_API Function {
   Function& operator=(const Function&) = default;
   Function(Function&&) noexcept = default;
   Function& operator=(Function&&) noexcept = default;
-  virtual c10::string_view doc_string() const {
-    static constexpr c10::string_view no_doc_string = "";
+  virtual std::string_view doc_string() const {
+    static constexpr std::string_view no_doc_string = "";
     return no_doc_string;
   }
 
@@ -56,7 +56,7 @@ struct TORCH_API Function {
   virtual c10::intrusive_ptr<c10::ivalue::Future> runAsync(
       Stack& /*stack*/,
       // NOLINTNEXTLINE(performance-unnecessary-value-param)
-      C10_UNUSED TaskLauncher taskLauncher = at::launch) {
+      [[maybe_unused]] TaskLauncher taskLauncher = at::launch) {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(false);
     return {};
   }

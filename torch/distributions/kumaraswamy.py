@@ -48,7 +48,6 @@ class Kumaraswamy(TransformedDistribution):
         self.concentration1, self.concentration0 = broadcast_all(
             concentration1, concentration0
         )
-        finfo = torch.finfo(self.concentration0.dtype)
         base_dist = Uniform(
             torch.full_like(self.concentration0, 0),
             torch.full_like(self.concentration0, 1),

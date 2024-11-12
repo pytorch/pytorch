@@ -19,6 +19,10 @@ struct TORCH_API AcceleratorHooksInterface {
   // Whether the device at device_index is fully initialized or not.
   virtual bool hasPrimaryContext(DeviceIndex device_index) const = 0;
 
+  virtual void init() const {
+    TORCH_CHECK(false, "Backend doesn`t support init()");
+  }
+
   virtual DeviceIndex deviceCount() const {
     return 0;
   }

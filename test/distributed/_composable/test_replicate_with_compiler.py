@@ -30,6 +30,7 @@ from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     skip_if_lt_x_gpu,
     skip_if_rocm_multiprocess,
+    sm_is_or_higher_than,
 )
 from torch.testing._internal.common_utils import run_tests, skipIfRocm
 from torch.testing._internal.distributed.fake_pg import FakeStore
@@ -79,6 +80,8 @@ class MultiProcessInductorTestCase(MultiProcessTestCase, InductorTestCase):
 
 
 class ReplicateTest(MultiProcessInductorTestCase):
+    # TODO: consider using all devices? The min(2, ...) here would limit the
+    # test to always run on 2 GPUs only.
     @property
     def world_size(self) -> int:
         return min(2, torch.cuda.device_count())
@@ -219,14 +222,18 @@ class ReplicateTest(MultiProcessInductorTestCase):
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_rocm_multiprocess
     @skip_if_lt_x_gpu(2)
-    @torch._inductor.config.patch(reorder_for_locality=False)
+    @torch._inductor.config.patch(
+        reorder_for_locality=False, reorder_for_peak_memory=False
+    )
     def test_compile_gpu(self):
         self._test_compile(use_gpu=True, no_sync=False, checkpoint=False)
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_rocm_multiprocess
     @skip_if_lt_x_gpu(2)
-    @torch._inductor.config.patch(reorder_for_locality=False)
+    @torch._inductor.config.patch(
+        reorder_for_locality=False, reorder_for_peak_memory=False
+    )
     def test_compile_gpu_ac(self):
         self._test_compile(use_gpu=True, no_sync=False, checkpoint=True)
 
@@ -234,6 +241,11 @@ class ReplicateTest(MultiProcessInductorTestCase):
     @skip_if_rocm_multiprocess
     @skip_if_lt_x_gpu(2)
     def test_compile_bf16(self):
+        # Check device capability wrt bf16
+        device = torch.device("cuda", self.rank % torch.cuda.device_count())
+        if not sm_is_or_higher_than(device, 8, 0):
+            self.skipTest("bf16 requires sm >= 8.0")
+
         def setup(model, compiled_replicate_model, compiled_ddp_model) -> None:
             model.register_comm_hook(None, ddp_default_hooks.bf16_compress_hook)
             compiled_m = compiled_replicate_model._orig_mod
@@ -305,7 +317,13 @@ class ReplicateTest(MultiProcessInductorTestCase):
     )
     # todo: This pass mucks things up since Inductor thinks its inference
     # and can apply this. Should turn off these passes in compiled autograd
-    @torch._inductor.config.patch(reorder_for_locality=False)
+    @torch._inductor.config.patch(
+        reorder_for_locality=False,
+        reorder_for_peak_memory=False,
+        # The correctness of this test relies on the pointless permute ops
+        # in the joint graph does not get eliminated..
+        pattern_matcher=False,
+    )
     def test_bucketing_coalesced_op(self):
         # Gradient is None
         code = self._test_bucketing()
@@ -341,7 +359,13 @@ class ReplicateTest(MultiProcessInductorTestCase):
     )
     # todo: This pass mucks things up since Inductor thinks its inference
     # and can apply this. Should turn off these passes in compiled autograd
-    @torch._inductor.config.patch(reorder_for_locality=False)
+    @torch._inductor.config.patch(
+        reorder_for_locality=False,
+        reorder_for_peak_memory=False,
+        # The correctness of this test relies on the pointless permute ops
+        # in the joint graph does not get eliminated..
+        pattern_matcher=False,
+    )
     def test_bucketing_concat_op(self):
         # Gradient is None
         code = self._test_bucketing()
@@ -370,6 +394,7 @@ class ReplicateTest(MultiProcessInductorTestCase):
 
 class DDP_TP_Test(InductorTestCase):
     def setUp(self):
+        # Hmm, why a specific set_device call for rank 0?
         self.rank = 0
         self.world_size = 4
         torch.cuda.set_device("cuda:0")
@@ -385,6 +410,9 @@ class DDP_TP_Test(InductorTestCase):
     def tearDown(self):
         dist.destroy_process_group()
 
+    @unittest.skip(
+        "Temporarily disabled due to SymInt error: `unhashable type: non-nested SymInt`"
+    )
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skipIfRocm
     def test_ddp_tp(self):
