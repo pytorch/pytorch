@@ -249,30 +249,28 @@ static PyObject* THPEvent_repr(THPEvent* self) {
   END_HANDLE_TH_ERRORS
 }
 
-// NOLINTNEXTLINE(*c-arrays*, *global-variables)
-static struct PyGetSetDef THPEvent_properties[] = {
+static std::initializer_list<PyGetSetDef> THPEvent_properties = {
     {"device", (getter)THPEvent_get_device, nullptr, nullptr, nullptr},
     {"event_id", (getter)THPEvent_evend_id, nullptr, nullptr, nullptr},
     {nullptr}};
 
-// NOLINTNEXTLINE(*c-arrays*, *global-variables)
-static PyMethodDef THPEvent_methods[] = {
-    {(char*)"from_ipc_handle",
+static std::initializer_list<PyMethodDef> THPEvent_methods = {
+    {"from_ipc_handle",
      castPyCFunctionWithKeywords(THPEvent_from_ipc_handle),
      METH_CLASS | METH_VARARGS | METH_KEYWORDS,
      nullptr},
-    {(char*)"record",
+    {"record",
      castPyCFunctionWithKeywords(THPEvent_record),
      METH_VARARGS | METH_KEYWORDS,
      nullptr},
-    {(char*)"wait",
+    {"wait",
      castPyCFunctionWithKeywords(THPEvent_wait),
      METH_VARARGS | METH_KEYWORDS,
      nullptr},
-    {(char*)"query", THPEvent_query, METH_NOARGS, nullptr},
-    {(char*)"elapsed_time", THPEvent_elapsed_time, METH_O, nullptr},
-    {(char*)"synchronize", THPEvent_synchronize, METH_NOARGS, nullptr},
-    {(char*)"ipc_handle", THPEvent_ipc_handle, METH_NOARGS, nullptr},
+    {"query", THPEvent_query, METH_NOARGS, nullptr},
+    {"elapsed_time", THPEvent_elapsed_time, METH_O, nullptr},
+    {"synchronize", THPEvent_synchronize, METH_NOARGS, nullptr},
+    {"ipc_handle", THPEvent_ipc_handle, METH_NOARGS, nullptr},
     {nullptr}};
 
 PyTypeObject THPEventType = {
@@ -303,9 +301,11 @@ PyTypeObject THPEventType = {
     0, /* tp_weaklistoffset */
     nullptr, /* tp_iter */
     nullptr, /* tp_iternext */
-    THPEvent_methods, /* tp_methods */
+    // NOLINTNEXTLINE(*const-cast)
+    const_cast<PyMethodDef*>(std::data(THPEvent_methods)), /* tp_methods */
     nullptr, /* tp_members */
-    THPEvent_properties, /* tp_getset */
+    // NOLINTNEXTLINE(*const-cast)
+    const_cast<PyGetSetDef*>(std::data(THPEvent_properties)), /* tp_getset */
     nullptr, /* tp_base */
     nullptr, /* tp_dict */
     nullptr, /* tp_descr_get */

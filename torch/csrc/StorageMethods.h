@@ -3,6 +3,6 @@
 
 #include <Python.h>
 
-PyMethodDef* THPStorage_getMethods();
+const PyMethodDef* THPStorage_getMethods();
 
 #endif

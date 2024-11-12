@@ -601,8 +601,7 @@ static PyObject* THPStorage__get_filename(PyObject* self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
-static PyMethodDef THPStorage_methods[] = {
+static std::initializer_list<PyMethodDef> THPStorage_methods = {
     {"copy_",
      castPyCFunctionWithKeywords(THPStorage_copy_),
      METH_VARARGS | METH_KEYWORDS,
@@ -634,6 +633,6 @@ static PyMethodDef THPStorage_methods[] = {
     {"_get_filename", THPStorage__get_filename, METH_NOARGS, nullptr},
     {nullptr}};
 
-PyMethodDef* THPStorage_getMethods() {
-  return THPStorage_methods;
+const PyMethodDef* THPStorage_getMethods() {
+  return std::data(THPStorage_methods);
 }

@@ -301,13 +301,11 @@ static PyObject* THPGenerator_pickleSetState(PyObject* _self, PyObject* state) {
   END_HANDLE_TH_ERRORS
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
-static struct PyGetSetDef THPGenerator_properties[] = {
+static std::initializer_list<PyGetSetDef> THPGenerator_properties = {
     {"device", (getter)THPGenerator_get_device, nullptr, nullptr, nullptr},
     {nullptr}};
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
-static PyMethodDef THPGenerator_methods[] = {
+static std::initializer_list<PyMethodDef> THPGenerator_methods = {
     {"__reduce__", THPGenerator_reduce, METH_NOARGS, nullptr},
     {"__setstate__", THPGenerator_pickleSetState, METH_O, nullptr},
     {"get_state", THPGenerator_getState, METH_NOARGS, nullptr},
@@ -325,8 +323,7 @@ static PyMethodDef THPGenerator_methods[] = {
     {"get_offset", THPGenerator_getOffset, METH_NOARGS, nullptr},
     {nullptr}};
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
-static struct PyMemberDef THPGenerator_members[] = {
+static std::initializer_list<PyMemberDef> THPGenerator_members = {
     {"_cdata", T_ULONGLONG, offsetof(THPGenerator, cdata), READONLY, nullptr},
     {nullptr}};
 
@@ -359,9 +356,13 @@ PyTypeObject THPGeneratorType = {
     0, /* tp_weaklistoffset */
     nullptr, /* tp_iter */
     nullptr, /* tp_iternext */
-    THPGenerator_methods, /* tp_methods */
-    THPGenerator_members, /* tp_members */
-    THPGenerator_properties, /* tp_getset */
+    // NOLINTNEXTLINE(*const-cast*)
+    const_cast<PyMethodDef*>(std::data(THPGenerator_methods)), /* tp_methods */
+    // NOLINTNEXTLINE(*const-cast*)
+    const_cast<PyMemberDef*>(std::data(THPGenerator_members)), /* tp_members */
+    // NOLINTNEXTLINE(*const-cast*)
+    const_cast<PyGetSetDef*>(
+        std::data(THPGenerator_properties)), /* tp_getset */
     nullptr, /* tp_base */
     nullptr, /* tp_dict */
     nullptr, /* tp_descr_get */

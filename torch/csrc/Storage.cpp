@@ -703,8 +703,7 @@ static PyObject* THPStorage_get_cdata(THPStorage* self, void* unused) {
 
 typedef PyObject* (*getter)(PyObject*, void*);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
-static struct PyGetSetDef THPStorage_properties[] = {
+static std::initializer_list<PyGetSetDef> THPStorage_properties = {
     {"device", (getter)THPStorage_device, nullptr, nullptr, nullptr},
     {"_cdata", (getter)THPStorage_get_cdata, nullptr, nullptr, nullptr},
     {nullptr}};
@@ -721,7 +720,9 @@ bool THPStorage_init(PyObject* module) {
   PyModule_AddObject(module, "_StorageMeta", (PyObject*)&THPStorageMetaType);
 
   THPStorageType.tp_methods = methods.data();
-  THPStorageType.tp_getset = THPStorage_properties;
+  // NOLINTNEXTLINE(*const-cast*)
+  THPStorageType.tp_getset =
+      const_cast<PyGetSetDef*>(std::data(THPStorage_properties));
   if (PyType_Ready(&THPStorageType) < 0)
     return false;
   Py_INCREF(&THPStorageType);

@@ -33,8 +33,7 @@ PyObject* THPMemoryFormat_reduce(PyObject* _self, PyObject* noargs) {
   return THPUtils_packString(self->name);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
-static PyMethodDef THPMemoryFormat_methods[] = {
+static std::initializer_list<PyMethodDef> THPMemoryFormat_methods = {
     {"__reduce__", THPMemoryFormat_reduce, METH_NOARGS, nullptr},
     {nullptr} /* Sentinel */
 };
@@ -67,7 +66,9 @@ PyTypeObject THPMemoryFormatType = {
     0, /* tp_weaklistoffset */
     nullptr, /* tp_iter */
     nullptr, /* tp_iternext */
-    THPMemoryFormat_methods, /* tp_methods */
+    // NOLINTNEXTLINE(*const*)
+    const_cast<PyMethodDef*>(
+        std::data(THPMemoryFormat_methods)), /* tp_methods */
     nullptr, /* tp_members */
     nullptr, /* tp_getset */
     nullptr, /* tp_base */

@@ -28,7 +28,7 @@
 #include <ATen/MapAllocator.h>
 #include <ATen/StorageUtils.h>
 #include <torch/csrc/utils/python_numbers.h>
-#include <atomic>
+#include <initializer_list>
 #include <string>
 
 static PyObject* THPStorage_sharedDecref(PyObject* self, PyObject* noargs) {
@@ -643,8 +643,7 @@ static PyObject* THPStorage_isShared(PyObject* self, PyObject* noargs) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
-static PyMethodDef THPStorage_sharingMethods[] = {
+static std::initializer_list<PyMethodDef> THPStorage_sharingMethods = {
     {"_new_with_weak_ptr",
      THPStorage_newWithWeakPtr,
      METH_O | METH_CLASS,
@@ -685,6 +684,6 @@ static PyMethodDef THPStorage_sharingMethods[] = {
     {"is_shared", THPStorage_isShared, METH_NOARGS, nullptr},
     {nullptr}};
 
-PyMethodDef* THPStorage_getSharingMethods() {
-  return THPStorage_sharingMethods;
+const PyMethodDef* THPStorage_getSharingMethods() {
+  return std::data(THPStorage_sharingMethods);
 }

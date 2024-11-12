@@ -1637,7 +1637,7 @@ void THCPStream_init(PyObject* module);
 void THCPEvent_init(PyObject* module);
 void THCPGraph_init(PyObject* module);
 void THCPMemPool_init(PyObject* module);
-PyMethodDef* THCPModule_methods();
+const PyMethodDef* THCPModule_methods();
 namespace torch::cuda {
 void initModule(PyObject* module);
 } // namespace torch::cuda

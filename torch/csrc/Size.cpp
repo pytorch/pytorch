@@ -227,8 +227,7 @@ static PyObject* THPSize_reduce(PyObject* _self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-static PyMethodDef THPSize_methods[] = {
+static std::initializer_list<PyMethodDef> THPSize_methods = {
     {"numel", THPSize_numel, METH_NOARGS, nullptr},
     {"__reduce__", THPSize_reduce, METH_NOARGS, nullptr},
     {nullptr}};
@@ -261,7 +260,8 @@ PyTypeObject THPSizeType = {
     0, /* tp_weaklistoffset */
     nullptr, /* tp_iter */
     nullptr, /* tp_iternext */
-    THPSize_methods, /* tp_methods */
+    // NOLINTNEXTLINE(*const*)
+    const_cast<PyMethodDef*>(std::data(THPSize_methods)), /* tp_methods */
     nullptr, /* tp_members */
     nullptr, /* tp_getset */
     &PyTuple_Type, /* tp_base */

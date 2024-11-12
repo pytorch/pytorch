@@ -3,6 +3,6 @@
 
 #include <Python.h>
 
-PyMethodDef* THPStorage_getSharingMethods();
+const PyMethodDef* THPStorage_getSharingMethods();
 
 #endif
