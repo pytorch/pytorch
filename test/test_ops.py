@@ -168,7 +168,6 @@ meta_consistency_out_dtype_mismatch_xfails = {
     xfail("linalg.solve"),
     xfail("linalg.solve_ex"),
     xfail("linalg.solve_triangular"),
-    xfail("log_softmax"),
     xfail("logcumsumexp"),
     xfail("lu_solve"),
     xfail("lu_unpack"),
