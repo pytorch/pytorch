@@ -226,7 +226,7 @@ def fn():
             dummy_fn.__code__ = code
             self.assertEqual(dummy_fn(), test[3])
 
-            dummy_opt = torch.compile(dummy_opt, backend="eager")
+            dummy_opt = torch.compile(dummy_fn, backend="eager")
             self.assertEqual(dummy_opt(), test[3])
 
     def test_exception_table_encode_varint(self):
