@@ -657,7 +657,7 @@ def _get_nv_config(query, mode: str) -> Tuple[int, int, int, int]:
 
     capability = torch.cuda.get_device_capability()
     gpu_arch = (
-        "H100" if gpu_arch >= (9, 0) else "A100" if capability >= (8, 0) else None
+        "H100" if capability >= (9, 0) else "A100" if capability >= (8, 0) else None
     )
 
     if mode == "fwd":
