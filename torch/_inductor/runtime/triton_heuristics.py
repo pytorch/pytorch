@@ -371,8 +371,14 @@ class CachingAutotuner(KernelInterface):
                         # no need to improve occupancy
                         continue
                     new_config = copy.deepcopy(triton_config)
-                    for kwarg in reduction_kwargs:
-                        new_config.kwargs[kwarg] //= 2
+
+                    def get_block_size(kwarg: str) -> int:
+                        return triton_config.kwargs[kwarg]
+
+                    # Reduce the largest Rn_BLOCK by a factor of 2.
+                    largest_rkwarg: str = max(reduction_kwargs, key=get_block_size)
+                    new_config.kwargs[largest_rkwarg] //= 2
+
                     if new_config in seen_configs:
                         continue
                     seen_configs.add(new_config)
