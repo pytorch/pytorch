@@ -3917,6 +3917,57 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual(res[1], 1)
         self.assertEqual(x, 1)
 
+    def test_write_to_cells_with_name_shadowing(self):
+        x = 0
+        y = x
+
+        def make_x_get_set():
+            # NOTE: this `x` is a different cell object than the outter `x`.
+            x = y
+
+            def set_x(v):
+                nonlocal x
+                x = v
+
+            def get_x():
+                return x
+
+            return get_x, set_x
+
+        get_x, set_x = make_x_get_set()
+
+        @torch.compile(fullgraph=True)
+        def fn(t):
+            set_x(42)  # This sets the `x` created within `make_x_get_set`
+            res = t + x  # This uses the `x` outside `make_x_get_set`.
+            return res
+
+        result = fn(torch.ones(1))
+        inner_x = get_x()
+        self.assertTrue(torch.allclose(result, torch.ones(1)))
+        self.assertEqual(inner_x, 42)
+
+    def test_existing_func_that_creates_capturing_nested_func(self):
+        x = 0  # Captured by both `make_get_x` and `root`
+
+        def make_get_x():
+            def get_x():
+                return x
+
+            return get_x
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def root(t):
+            get_x = make_get_x()
+            res = t + x
+            return res, get_x
+
+        res, get_x = root(torch.ones(1))
+        self.assertTrue(torch.allclose(res, torch.ones(1)))
+        self.assertEqual(0, get_x())
+        x += 1
+        self.assertEqual(1, get_x())
+
     def test_top_package_import(self):
         def fn(x):
             import torch.fx
