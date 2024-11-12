@@ -783,15 +783,17 @@ public:
     return map(std::atanh);
   }
   Vectorized<c10::complex<float>> exp() const {
-    //exp(a + bi)
-    // = exp(a)*(cos(b) + sin(b)i)
-    auto exp = Sleef_expf16_u10(values);                               //exp(a)           exp(b)
-    exp = _mm512_mask_blend_ps(0xAAAA, exp, _mm512_permute_ps(exp, 0xB1));   //exp(a)           exp(a)
+    // TODO: The vectorized implementation requires special handling for the case where real number/imag number is 0/Inf/NaN.
+    // //exp(a + bi)
+    // // = exp(a)*(cos(b) + sin(b)i)
+    // auto exp = Sleef_expf16_u10(values);                               //exp(a)           exp(b)
+    // exp = _mm512_mask_blend_ps(0xAAAA, exp, _mm512_permute_ps(exp, 0xB1));   //exp(a)           exp(a)
 
-    auto sin_cos = Sleef_sincosf16_u10(values);                        //[sin(a), cos(a)] [sin(b), cos(b)]
-    auto cos_sin = _mm512_mask_blend_ps(0xAAAA, _mm512_permute_ps(sin_cos.y, 0xB1),
-                                   sin_cos.x);                  //cos(b)           sin(b)
-    return _mm512_mul_ps(exp, cos_sin);
+    // auto sin_cos = Sleef_sincosf16_u10(values);                        //[sin(a), cos(a)] [sin(b), cos(b)]
+    // auto cos_sin = _mm512_mask_blend_ps(0xAAAA, _mm512_permute_ps(sin_cos.y, 0xB1),
+    //                                sin_cos.x);                  //cos(b)           sin(b)
+    // return _mm512_mul_ps(exp, cos_sin);
+    return map(std::exp);
   }
   Vectorized<c10::complex<float>> exp2() const {
     // Use identity 2**x = exp(log(2) * x)
