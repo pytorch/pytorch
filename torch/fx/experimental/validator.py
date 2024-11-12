@@ -271,6 +271,7 @@ try:
         boolean_ops = {operator.not_}
         as_bool = op in boolean_ops
 
+        # Lifts the function into 'z3.ExprRef' domain.
         def lift(func):
             def wrap(a) -> z3.ExprRef:
                 if isinstance(a, (z3.ArithRef, z3.BoolRef)):
@@ -294,6 +295,8 @@ try:
                     wrapped_args = tuple(wrap(a) for a in args)
                 # Run the function on the Z3 expressions.
                 return func(*wrapped_args)
+
+            return wrapper
 
         ops = _Z3Ops(validator)
         replacement_map = {
