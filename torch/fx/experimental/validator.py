@@ -234,6 +234,28 @@ try:
                 self.floor(number + 0.5),
             )
 
+        # We need to convert to/from BitVec in order to use z3 bitwise ops.
+        # We assume that integers are 64 bit.
+        # If all args are boolean, then use the boolean bitwise op implementation instead, if provided.
+        @staticmethod
+        def _bitwise_op(bitwise_func, bool_func):
+            @functools.wraps(bitwise_func)
+            def wrapper(self, *args):
+                if bool_func is not None and all(
+                    isinstance(arg, z3.BoolRef) for arg in args
+                ):
+                    return bool_func(*args)
+
+                wrapped_args = tuple(z3.Int2BV(a, 64) for a in args)
+                return z3.BV2Int(bitwise_func(*wrapped_args))
+
+            return wrapper
+
+        bitwise_and = _bitwise_op(operator.and_, z3.And)
+        bitwise_or = _bitwise_op(operator.or_, z3.Or)
+        lshift = _bitwise_op(operator.lshift, None)
+        rshift = _bitwise_op(operator.rshift, None)
+
     # Lifts a callable to be used in Z3.
     #
     # This function replaces the given 'op' by a function that:
@@ -250,62 +272,38 @@ try:
         boolean_ops = {operator.not_}
         as_bool = op in boolean_ops
 
-        def wrap(a) -> z3.ExprRef:
-            if isinstance(a, (z3.ArithRef, z3.BoolRef)):
-                return a
-            # Convert it into a Z3 value, if it is some of the supported
-            # types below.
-            if isinstance(a, bool) or (as_bool and isinstance(a, int)):
-                return z3.BoolVal(bool(a))
-            if isinstance(a, (int, sympy.Integer)):
-                return z3.IntVal(int(a))
-            if isinstance(a, (float, sympy.Float)):
-                return z3.RealVal(float(a))
-            raise ValueError(f"can't lift type: {type(a)}")
-
-        def wrap_args(args, wrap_fn):
-            # Lifts the arguments into a list of Z3 inhabitants.
-            if len(args) == 1 and isinstance(args[0], (list, tuple)):
-                return (tuple(wrap_fn(a) for a in args[0]),)
-            else:
-                return tuple(wrap_fn(a) for a in args)
-
-        # Lifts the function into 'z3.ExprRef' domain.
         def lift(func):
+            def wrap(a) -> z3.ExprRef:
+                if isinstance(a, (z3.ArithRef, z3.BoolRef)):
+                    return a
+                # Convert it into a Z3 value, if it is some of the supported
+                # types below.
+                if isinstance(a, bool) or (as_bool and isinstance(a, int)):
+                    return z3.BoolVal(bool(a))
+                if isinstance(a, (int, sympy.Integer)):
+                    return z3.IntVal(int(a))
+                if isinstance(a, (float, sympy.Float)):
+                    return z3.RealVal(float(a))
+                raise ValueError(f"can't lift type: {type(a)}")
+
             @functools.wraps(func)
             def wrapper(*args):
+                # Lifts the arguments into a list of Z3 inhabitants.
+                if len(args) == 1 and isinstance(args[0], (list, tuple)):
+                    wrapped_args = (tuple(wrap(a) for a in args[0]),)
+                else:
+                    wrapped_args = tuple(wrap(a) for a in args)
                 # Run the function on the Z3 expressions.
-                return func(*wrap_args(args, wrap))
-
-            return wrapper
-
-        # Like `lift`, but for bitwise ops. We need to convert to/from BitVec
-        # in order to use z3 bitwise ops. We assume that integers are 64 bit.
-        def bitwise_lift(bitwise_func, bool_func):
-            @functools.wraps(bitwise_func)
-            def wrapper(*args):
-                wrapped_args = wrap_args(args, wrap)
-                # Run the function on the Z3 expressions.
-                if bool_func is not None and all(
-                    isinstance(arg, z3.BoolRef) for arg in wrapped_args
-                ):
-                    return bool_func(*wrapped_args)
-
-                def to_bv(a):
-                    return z3.Int2BV(a, 64)
-
-                return z3.BV2Int(bitwise_func(*wrap_args(wrapped_args, to_bv)))
-
-            return wrapper
+                return func(*wrapped_args)
 
         ops = _Z3Ops(validator)
         replacement_map = {
             # Operator module.
             operator.not_: lift(z3.Not),
-            operator.and_: bitwise_lift(operator.and_, z3.And),
-            operator.rshift: bitwise_lift(operator.rshift, None),
-            operator.lshift: bitwise_lift(operator.lshift, None),
-            operator.or_: bitwise_lift(operator.or_, z3.Or),
+            operator.and_: lift(ops.bitwise_and),
+            operator.or_: lift(ops.bitwise_or),
+            operator.lshift: lift(ops.lshift),
+            operator.rshift: lift(ops.rshift),
             operator.floordiv: lift(ops.floordiv),
             operator.truediv: lift(ops.div),
             operator.mod: lift(ops.mod),
@@ -439,6 +437,10 @@ try:
                 "and_": z3.And,
                 "or_": z3.Or,
                 "not_": z3.Not,
+                "bitwise_and": self._ops.bitwise_and,
+                "bitwise_or": self._ops.bitwise_or,
+                "lshift": self._ops.lshift,
+                "rshift": self._ops.rshift,
                 "floor": self._ops.floor,
                 "ceil": self._ops.ceil,
                 "minimum": self._ops.min,
