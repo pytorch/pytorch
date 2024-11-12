@@ -1699,7 +1699,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         return new_tensor_args, new_int_args
 
-    def generate_extern_kernel_alloc_and_find_schema_if_needed(
+    def generate_fallback_kernel_with_runtime_lookup(
         self,
         buf_name: str,
         python_kernel_name: str,
@@ -1739,14 +1739,14 @@ class CppWrapperCpu(PythonWrapperCodegen):
             assert raw_args is not None
             assert output_args is not None
 
-            return self.generate_extern_kernel_alloc_and_find_schema_if_needed_with_proxy_executor(
+            return self.generate_fallback_kernel_with_runtime_lookup_aot(
                 op_overload,
                 raw_args,
                 output_args,
                 outputs,
             )
         else:
-            return self.generate_extern_kernel_alloc_and_find_schema_if_needed_jit(
+            return self.generate_fallback_kernel_with_runtime_lookup_jit(
                 buf_name,
                 python_kernel_name,
                 cpp_kernel_name,
@@ -1886,7 +1886,7 @@ if (custom_op_wrapper.get() == NULL) {
             )
         return "".join(lines)
 
-    def generate_extern_kernel_alloc_and_find_schema_if_needed_jit(
+    def generate_fallback_kernel_with_runtime_lookup_jit(
         self,
         buf_name: str,
         python_kernel_name: str,
@@ -1961,7 +1961,7 @@ reinterpret_cast<AtenTensorHandle>(PyCapsule_GetPointer(PyList_GET_ITEM(py_{buf_
         )
         self.writelines(scope_gil_acquire)
 
-    def generate_extern_kernel_alloc_and_find_schema_if_needed_with_proxy_executor(
+    def generate_fallback_kernel_with_runtime_lookup_aot(
         self,
         op_overload,
         raw_args,  # contains both args and flatten kwargs
