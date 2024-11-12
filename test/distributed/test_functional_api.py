@@ -574,7 +574,7 @@ class TestCollectivesWithDistributedBackend(DistributedTestBase):
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @requires_nccl()
     @with_comms()
-    def test_tracing(self, device):
+    def test_tracing(self):
         def allreduce(t, pg):
             return ft_c.all_reduce(t, "sum", pg)
 
