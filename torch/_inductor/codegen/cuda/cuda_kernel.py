@@ -52,11 +52,15 @@ def _normalize_idx(index: int, total_length: int) -> int:
     return index if index >= 0 else index + total_length
 
 
+ValidSymbols = Literal["M", "N", "K", "lda", "ldb", "ldc", "ldd"]
+ValidAttrs = Literal["size", "stride"]
+
+
 @dataclass(frozen=True)
 class LayoutArg:
     node: IRNode
-    symbol: Literal["M", "N", "K", "lda", "ldb", "ldc", "ldd"]
-    attr: Literal["size", "stride"]
+    symbol: ValidSymbols
+    attr: ValidAttrs
     dim: int
 
     def matches(self, node, attr, dim) -> bool:
@@ -69,21 +73,22 @@ class CUDAKernel(Kernel):
     """
 
     overrides = OpOverrides  # type: ignore[assignment]
-    layout_args: Dict[str, LayoutArg]
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        self.layout_args = {}
+        self.layout_args: Dict[str, LayoutArg] = {}
+        self.named_nodes: Dict[str, IRNode] = {}
 
-    def find_layout_arg(self, node: IRNode, attr: str, dim: int):
+    def find_layout_arg(self, node: IRNode, attr: ValidAttrs, dim: int):
         matches = [
             arg for arg in self.layout_args.values() if arg.matches(node, attr, dim)
         ]
         assert len(matches) <= 1, matches
         return None if len(matches) == 0 else matches[0]
 
-    def add_layout_arg(self, symbol: str, node: IRNode, attr: str, dim: int):
-        # This is confusing what is being represented here?
+    def add_layout_arg(
+        self, symbol: ValidSymbols, node: IRNode, attr: ValidAttrs, dim: int
+    ):
         arg = LayoutArg(node, symbol, attr, dim)
         self.layout_args.setdefault(symbol, arg)
 
@@ -106,7 +111,7 @@ class CUDAKernel(Kernel):
         self.add_layout_arg("lda", X, "stride", lda_dim)
         self.add_layout_arg("ldb", W, "stride", ldb_dim)
         self.add_layout_arg("ldc", Y, "stride", ldc_dim)
-        if Bias:
+        if Bias and ldd_dim:
             self.add_layout_arg("ldd", Bias, "stride", ldd_dim)
 
     def get_layout_args(self) -> Tuple[Union[Expr, int], ...]:

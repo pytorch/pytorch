@@ -1073,8 +1073,8 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
             return False
         if len(B_layout.size) < 1:
             return False
-        A_size = V.graph.sizevars.size_hints(A_layout.size)
-        B_size = V.graph.sizevars.size_hints(B_layout.size)
+        A_size = list(V.graph.sizevars.size_hints(A_layout.size))
+        B_size = list(V.graph.sizevars.size_hints(B_layout.size))
         if len(A_size) < 2:
             A_size.insert(0, 1)
         if len(B_size) < 2:
