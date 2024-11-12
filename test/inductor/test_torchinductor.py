@@ -1240,6 +1240,11 @@ class CommonTemplate:
         self.common(fn, (torch.randn(32),))
 
     def test_add_inplace_permuted(self):
+        if config.cpu_backend == "halide":
+            raise unittest.SkipTest(
+                "Halide cpu backend does not work for this test case: https://github.com/pytorch/pytorch/issues/140344"
+            )
+
         def fn(x, y):
             return x.add_(y)
 
