@@ -42,8 +42,8 @@ vec::Vectorized<T> vectorized_gelu_approximated_with_tanh(vec::Vectorized<T> x) 
 
 template <typename T, std::enable_if_t<std::is_reduced_floating_point_v<T>, bool> = true>
 vec::Vectorized<T> vectorized_gelu_approximated_with_tanh(vec::Vectorized<T> x) {
-  auto [x0, x1] = convert_to_float<T>(x);
-  return convert_from_float<T>(
+  auto [x0, x1] = at::vec::convert_to_float<T>(x);
+  return at::vec::convert_from_float<T>(
       vectorized_gelu_approximated_with_tanh(x0),
       vectorized_gelu_approximated_with_tanh(x1));
 }
