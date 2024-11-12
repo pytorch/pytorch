@@ -5,20 +5,56 @@
 # LICENSE file in the root directory of this source tree.
 
 import argparse
+import logging
 import math
-from typing import Any, Dict, List, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
-from tools.flight_recorder.components.fr_logger import FlightRecorderLogger
-from tools.flight_recorder.components.types import (
-    Group,
-    MatchState,
-    Membership,
-    Op,
-    P2P,
-)
+from .types import Group, MatchState, Membership, Op, P2P
 
 
-logger: FlightRecorderLogger = FlightRecorderLogger()
+class FlightRecorderLogger:
+    _instance: Optional[Any] = None
+    logger: logging.Logger
+
+    def __init__(self) -> None:
+        self.logger: logging.Logger = logging.getLogger("Flight Recorder")
+
+    def __new__(cls) -> Any:
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+            cls._instance.logger = logging.getLogger("Flight Recorder")
+            cls._instance.logger.setLevel(logging.INFO)
+            formatter = logging.Formatter("%(message)s")
+            ch = logging.StreamHandler()
+            ch.setFormatter(formatter)
+            cls._instance.logger.addHandler(ch)
+        return cls._instance
+
+    def set_log_level(self, level: int) -> None:
+        self.logger.setLevel(level)
+
+    @property
+    def debug(self) -> Callable[..., None]:
+        return self.logger.debug
+
+    @property
+    def info(self) -> Callable[..., None]:
+        return self.logger.info
+
+    @property
+    def warning(self) -> Callable[..., None]:
+        return self.logger.warning
+
+    @property
+    def error(self) -> Callable[..., None]:
+        return self.logger.error
+
+    @property
+    def critical(self) -> Callable[..., None]:
+        return self.logger.critical
+
+
+logger = FlightRecorderLogger()
 
 
 try:

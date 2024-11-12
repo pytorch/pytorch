@@ -304,9 +304,7 @@ isolate_fails_code_str = None
         elif arg is None:
             writer.const(placeholder)
         else:
-            # It's better to produce a slightly wrong repro string than none
-            # at all
-            writer.unsupported(placeholder, arg)
+            raise TypeError(f"arg is neither SymInt/int nor torch.Tensor, {arg}")
 
     model_str += "\n".join(writer.lines()) + "\n"
 

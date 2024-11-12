@@ -753,11 +753,7 @@ def aot_dispatch_autograd(
                             "name": "eager_compile_backwards_failure",
                             "encoding": "string",
                         },
-                        payload_fn=lambda: "\n".join(
-                            traceback.format_exception(
-                                type(exc), exc, exc.__traceback__
-                            )
-                        ),
+                        payload_fn=lambda: "\n".join(traceback.format_exception(exc)),
                     )
                     log.warning(
                         "failed to eagerly compile backwards for dynamic, suppressing in case backwards not needed",

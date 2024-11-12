@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any, List, Union
 
 from sympy import Integer, Number, Symbol
@@ -11,7 +10,7 @@ import torch
 import torch.fx as fx
 from torch._prims_common import get_computation_dtype
 from torch._subclasses import fake_tensor  # noqa: TCH001
-from torch._utils_internal import justknobs_check
+from torch._utils_internal import JustKnobsConfig
 from torch.fx._utils import lazy_format_graph_code
 from torch.fx.experimental.symbolic_shapes import guard_scalar, ShapeEnv  # noqa: TCH001
 from torch.fx.graph_module import GraphModule  # noqa: TCH001
@@ -96,12 +95,11 @@ def tensorify_python_scalars(
     """
     import sympy
 
-    knob = True
-    if (env := os.getenv("TENSORIFY_PYTHON_SCALARS")) is not None:
-        if env in ("0", "FALSE"):
-            knob = False
-    else:
-        knob = justknobs_check("pytorch/compiler:tensorify_python_scalars")
+    knob = JustKnobsConfig(
+        name="pytorch/compiler:tensorify_python_scalars",
+        env_name="TENSORIFY_PYTHON_SCALARS",
+        default=True,
+    ).get()
     if not knob:
         return None
 
@@ -266,7 +264,7 @@ def tensorify_python_scalars(
                 (val := node.meta.get("val")),
                 (torch.SymFloat, torch.SymInt, torch.SymBool),
             ):
-                if all(
+                if len(val.node.expr.free_symbols) > 0 and all(
                     symbol_is_type(s, SymT.FLOAT) for s in val.node.expr.free_symbols
                 ):
                     # If all symbols are backed symfloats, we can just specialize the whole node

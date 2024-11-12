@@ -8,10 +8,10 @@ import argparse
 import logging
 from typing import Optional, Sequence
 
-from tools.flight_recorder.components.fr_logger import FlightRecorderLogger
+from tools.flight_recorder.components.utils import FlightRecorderLogger
 
 
-logger: FlightRecorderLogger = FlightRecorderLogger()
+logger = FlightRecorderLogger()
 
 
 class JobConfig:
@@ -34,15 +34,6 @@ class JobConfig:
             nargs="+",
             type=int,
             help="List of ranks we want to show traces for.",
-        )
-        self.parser.add_argument(
-            "--allow-incomplete-ranks",
-            action="store_true",
-            help=(
-                "FR trace require all ranks to have dumps for analysis. "
-                "This flag allows best-effort partial analysis of results "
-                "and printing of collected data."
-            ),
         )
         self.parser.add_argument(
             "--pg-filters",

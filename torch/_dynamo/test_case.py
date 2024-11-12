@@ -5,7 +5,6 @@ from typing import Tuple, Union
 
 import torch
 import torch.testing
-from torch._logging._internal import trace_log
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     IS_WINDOWS,
     TEST_WITH_CROSSREF,
@@ -64,11 +63,8 @@ class TestCase(TorchTestCase):
         super().setUp()
         reset()
         utils.counters.clear()
-        self.handler = logging.NullHandler()
-        trace_log.addHandler(self.handler)
 
     def tearDown(self) -> None:
-        trace_log.removeHandler(self.handler)
         for k, v in utils.counters.items():
             print(k, v.most_common())
         reset()

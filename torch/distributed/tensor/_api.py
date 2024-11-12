@@ -325,10 +325,7 @@ class DTensor(torch.Tensor):
         ]
         return self.redistribute(device_mesh=self.device_mesh, placements=placements)
 
-    def __coerce_same_metadata_as_tangent__(self, flatten_spec, expected_type=None):
-        if expected_type is not None:
-            return None
-
+    def __coerce_same_metadata_as_tangent__(self, flatten_spec):
         (spec, _) = flatten_spec  # Result of tensor_flatten()
         return self.redistribute(
             device_mesh=self.device_mesh,

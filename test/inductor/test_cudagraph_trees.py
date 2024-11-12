@@ -1051,34 +1051,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertFalse(first_node.unaliased_in_all_paths[0])
             self.assertTrue(first_node.cached_tensor_outputs[0] is None)
 
-        @torch._inductor.config.patch("implicit_fallbacks", True)
-        def test_multinomial(self):
-            def sample_multinomial(probs, num_samples, replacement=True):
-                return torch.multinomial(probs, num_samples, replacement=replacement)
-
-            # Create and prepare probability tensor on GPU
-            probs = torch.tensor([0.1, 0.2, 0.3, 0.4]).cuda()
-            probs = probs / probs.sum()
-
-            # Sample using the function
-            num_skipped = counters["inductor"]["cudagraph_skips"]
-
-            with torch._dynamo.utils.preserve_rng_state():
-                samples = self.run_twc(
-                    sample_multinomial, probs, num_samples=5, replacement=True
-                )
-
-            with torch._dynamo.utils.preserve_rng_state():
-                samples_compiled = self.run_twc(
-                    torch.compile(sample_multinomial),
-                    probs,
-                    num_samples=5,
-                    replacement=True,
-                )
-
-            self.assertEqual(samples, samples_compiled)
-            self.assertEqual(num_skipped, counters["inductor"]["cudagraph_skips"])
-
         @skipIfRocm
         def test_checkpointing_resets_persistent_refs(self):
             @torch.compile(mode="reduce-overhead")

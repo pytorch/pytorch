@@ -998,6 +998,9 @@ class PythonWrapperCodegen(CodeGen):
         python_kernel_name: str,
         cpp_kernel_name: str,
         codegen_args: List[str],
+        cpp_op_schema: str,
+        cpp_kernel_key: str,
+        cpp_kernel_overload_name: str = "",
         op_overload: Optional[torch._ops.OpOverload] = None,
         raw_args=None,
         outputs=None,
@@ -1396,14 +1399,10 @@ class PythonWrapperCodegen(CodeGen):
             )
 
     def define_kernel(
-        self,
-        kernel_name: str,
-        kernel_body: str,
-        metadata: Optional[str] = None,
-        gpu=True,
+        self, name: str, kernel: str, metadata: Optional[str] = None, gpu=True
     ):
         metadata_comment = f"{metadata}\n" if metadata else ""
-        body = f"\n\n{metadata_comment}{kernel_name} = {kernel_body}"
+        body = f"\n\n{metadata_comment}{name} = {kernel}"
         self.header.splice(body)
         if config.triton.autotune_at_compile_time:
             self.kernel_autotune_defs.splice(body)
@@ -1411,13 +1410,7 @@ class PythonWrapperCodegen(CodeGen):
     def define_subgraph_launcher_fn(self, fn_code: str):
         self.subgraph_definitions.splice(fn_code)
 
-    def define_user_defined_triton_kernel(
-        self,
-        kernel,
-        configs,
-        kwargs,
-        restore_value_args,
-    ):
+    def define_user_defined_triton_kernel(self, kernel, configs, kwargs):
         from torch.utils._triton import patch_triton_dtype_repr
 
         patch_triton_dtype_repr()
@@ -1500,9 +1493,6 @@ class PythonWrapperCodegen(CodeGen):
                 )
             ],
         }
-
-        if restore_value_args:
-            triton_meta["restore_value"] = tuple(restore_value_args)
 
         # Distinguish between different functions using function id
         cache_key: List[Any] = [id(kernel.fn)]
@@ -1863,7 +1853,7 @@ class PythonWrapperCodegen(CodeGen):
 
     def generate_kernel_call(
         self,
-        kernel_name: str,
+        kernel_name,
         call_args,
         grid=None,
         device_index=None,

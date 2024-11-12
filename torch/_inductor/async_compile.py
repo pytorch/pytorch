@@ -266,19 +266,12 @@ class AsyncCompile:
 
         return self.submit(task)
 
-    def rocm(
-        self,
-        source_code,
-        dst_file_ext,
-        aot_compile=False,
-    ):
+    def rocm(self, source_code, dst_file_ext, aot_compile=False):
         kernel_code_log.info("ROCm Kernel:\n%s", source_code)
 
         def task():
             if aot_compile:
                 _ = ROCmCodeCache.compile(source_code, dst_file_ext="o")
-            if config.rocm.generate_test_runner:
-                _ = ROCmCodeCache.compile(source_code, dst_file_ext="exe")
             return ROCmCodeCache.load(source_code, dst_file_ext)[0]
 
         return self.submit(task)

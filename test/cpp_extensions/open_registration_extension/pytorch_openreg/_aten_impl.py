@@ -32,17 +32,6 @@ _register_same_name("free", True)
 _register_same_name("isPinnedPtr", True)
 _register_same_name("hostMalloc", True)
 _register_same_name("hostFree", True)
-_register_same_name("getNewStream")
-_register_same_name("queryStream")
-_register_same_name("getStream")
-_register_same_name("exchangeStream")
-_register_same_name("synchronizeStream")
-_register_same_name("record")
-_register_same_name("destroyEvent")
-_register_same_name("synchronizeEvent")
-_register_same_name("elapsedTime")
-_register_same_name("block")
-_register_same_name("queryEvent")
 
 
 # TODO: replace it with implementing torch.openreg.device

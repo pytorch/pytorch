@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, Dict
+from typing import Any
 
 import torch
 
@@ -104,10 +104,6 @@ def install_no_tensor_aliasing_guard(
     tensor_names: list[str],
     verbose_code_parts: list[str],
 ): ...
-def profile_guard_manager(
-    guard_manager: GuardManager,
-    f_locals: Dict[str, Any],
-) -> float: ...
 
 class TensorGuards:
     def __init__(

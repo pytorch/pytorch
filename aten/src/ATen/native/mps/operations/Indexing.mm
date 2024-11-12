@@ -46,51 +46,6 @@ constexpr auto nonZeroMaxSize = 1UL << 24;
 
 namespace at::native {
 namespace mps {
-
-#ifndef PYTORCH_JIT_COMPILE_SHADERS
-static auto& lib = MetalShaderLibrary::getBundledLibrary();
-#else
-#include <ATen/native/mps/Indexing_metallib.h>
-#endif
-
-id<MTLBuffer> generateKernelDataOffsets(id<MTLComputeCommandEncoder> commandEncoder,
-                                        const TensorIteratorBase& iter,
-                                        bool use_64bit_index) {
-  constexpr uint32_t nOffsets = 3;
-  uint32_t numThreads = iter.numel();
-  const uint32_t nDim = iter.ndim();
-  const IntArrayRef& iterShape = iter.shape();
-  std::vector<uint32_t> iterShapeData(iterShape.size());
-  std::vector<std::array<uint32_t, nOffsets>> strides(nDim);
-  TORCH_INTERNAL_ASSERT(iter.ntensors() >= nOffsets);
-  TORCH_CHECK(use_64bit_index || iter.can_use_32bit_indexing(), "Can't be indexed using 32-bit iterator");
-
-  for (const auto i : c10::irange(iterShape.size())) {
-    iterShapeData[i] = static_cast<uint32_t>(iterShape[i]);
-  }
-
-  for (const auto i : c10::irange(nDim)) {
-    for (const auto offset : c10::irange(nOffsets)) {
-      strides[i][offset] = static_cast<uint32_t>(iter.strides(offset)[i]);
-    }
-  }
-
-  auto kernelDataOffsetsPSO =
-      lib.getPipelineStateForFunc(use_64bit_index ? "kernel_index_offsets_64" : "kernel_index_offsets_32");
-  const auto elementSize = use_64bit_index ? sizeof(simd_ulong3) : sizeof(simd_uint3);
-  id<MTLBuffer> kernelDataOffsets = (id<MTLBuffer>)getIMPSAllocator()->allocate(numThreads * elementSize).get();
-
-  [commandEncoder setComputePipelineState:kernelDataOffsetsPSO];
-  [commandEncoder setBytes:strides.data() length:sizeof(uint32_t) * nDim * nOffsets atIndex:0];
-  [commandEncoder setBuffer:kernelDataOffsets offset:0 atIndex:1];
-  [commandEncoder setBytes:iterShapeData.data() length:sizeof(uint32_t) * iterShape.size() atIndex:2];
-  [commandEncoder setBytes:&nDim length:sizeof(uint32_t) atIndex:3];
-
-  mtl_dispatch1DJob(commandEncoder, kernelDataOffsetsPSO, numThreads);
-
-  return kernelDataOffsets;
-}
-
 static std::string getBitSizeString(ScalarType scalar_type) {
   size_t scalarBitSize = c10::elementSize(scalar_type) * 8;
   TORCH_CHECK(scalarBitSize <= 64, "Unsupported data type: ", getMPSTypeString(scalar_type));
@@ -147,7 +102,7 @@ static bool dispatchIndexKernel(TensorIteratorBase& iter,
 
       auto indexFunction = getIndexFunctionName(
           inputTensor.scalar_type(), index_select, accumulate, serial_index_put, use_64bit_indexing);
-      auto indexSelectPSO = lib.getPipelineStateForFunc(indexFunction);
+      auto indexSelectPSO = MPSDevice::getInstance()->metalIndexingPSO(indexFunction);
       size_t argumentBufferLength = sizeof(uint64_t) * num_indices;
       auto indexAB = [[device newBufferWithLength:argumentBufferLength options:0] autorelease];
       uint64_t* indexABContents = (uint64_t*)(indexAB.contents);

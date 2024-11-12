@@ -25,7 +25,6 @@ from typing import (
     Any as _Any,
     Callable as _Callable,
     Dict as _Dict,
-    get_origin as _get_origin,
     Optional as _Optional,
     overload as _overload,
     Set as _Set,
@@ -229,8 +228,7 @@ if sys.platform == "win32":
         try:
             ctypes.CDLL("vcruntime140.dll")
             ctypes.CDLL("msvcp140.dll")
-            if platform.machine() != "ARM64":
-                ctypes.CDLL("vcruntime140_1.dll")
+            ctypes.CDLL("vcruntime140_1.dll")
         except OSError:
             print(
                 textwrap.dedent(
@@ -2282,18 +2280,13 @@ class _TorchCompileInductorWrapper:
                 raise RuntimeError(
                     f"Unexpected optimization option {key}, known options are {list(current_config.keys())}"
                 )
-            attr_type = config.get_type(attr_name)  # type: ignore[attr-defined]
-            # Subscriptable generic types don't support isinstance so skip the type
-            # check. There doesn't seem to be a good way of checking membership without
-            # 3rd party libraries.
-            if _get_origin(attr_type) is None:
-                if not isinstance(val, attr_type):
-                    val_type_str = type(val).__name__
-                    expected_type_str = type(current_config[attr_name]).__name__
-                    raise RuntimeError(
-                        f"Unexpected type of attr {key}, got {val_type_str} should be {expected_type_str}"
-                    )
-                self.config[attr_name] = val
+            if type(val) is not type(current_config[attr_name]):
+                val_type_str = type(val).__name__
+                expected_type_str = type(current_config[attr_name]).__name__
+                raise RuntimeError(
+                    f"Unexpected type of attr {key}, got {val_type_str} should be {expected_type_str}"
+                )
+            self.config[attr_name] = val
 
     def __call__(self, model_, inputs_):
         from torch._inductor.compile_fx import compile_fx

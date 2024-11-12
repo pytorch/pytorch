@@ -471,6 +471,7 @@ def invoke_and_store_as_constant(tx: "InstructionTranslator", fn, name, args, kw
 
 class NestedUserFunctionVariable(BaseUserFunctionVariable):
     _nonvar_fields = {
+        "closure_scope",
         "f_globals",
         *BaseUserFunctionVariable._nonvar_fields,
     }
@@ -484,6 +485,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         kwdefaults,
         annotations,
         closure,
+        closure_scope,
         wrapped_reconstructible=None,
         **kwargs,
     ) -> None:
@@ -498,6 +500,9 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         self.kwdefaults = kwdefaults
         self.annotations = annotations
         self.closure = closure
+        if closure is None:
+            closure_scope = None
+        self.closure_scope = closure_scope
         # Either a source or a VT with .can_reconstruct() == True
         self.wrapped_reconstructible: Optional[
             Union[Source, VariableTracker]

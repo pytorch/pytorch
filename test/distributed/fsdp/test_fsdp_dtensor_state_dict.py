@@ -247,7 +247,7 @@ class TestFSDPWithDeviceMeshAndDTensor(DTensorTestBase):
                     self.assertEqual(type(v1), DTensor)
                     self.assertEqual(type(v2), DTensor)
 
-    @with_comms()
+    @with_comms
     @skip_if_lt_x_gpu(2)
     @parametrize("offload_to_cpu", [True, False])
     @parametrize("is_even_sharded_model", [True, False])

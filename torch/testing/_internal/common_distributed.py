@@ -24,7 +24,6 @@ from io import StringIO
 from typing import Dict, NamedTuple, Optional, Union, List, Any, Callable, Tuple
 from unittest.mock import patch
 
-from torch._logging._internal import trace_log
 import torch
 import torch._dynamo.test_case
 import torch.cuda.nccl
@@ -1349,8 +1348,6 @@ class DynamoDistributedMultiProcTestCase(MultiProcessTestCase):
 
     @classmethod
     def _run(cls, rank: int, test_name: str, file_name: str, parent_pipe, **kwargs) -> None:
-        trace_log.addHandler(logging.NullHandler())
-
         # The rest is copypasta from MultiProcessTestCase._run
         self = cls(test_name)
         self.rank = rank

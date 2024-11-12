@@ -325,10 +325,6 @@ set(GENERATED_CXX_TORCH_CUDA
   "${TORCH_SRC_DIR}/csrc/inductor/aoti_torch/generated/c_shim_cuda.cpp"
   )
 
-set(GENERATED_CXX_TORCH_XPU
-  "${TORCH_SRC_DIR}/csrc/inductor/aoti_torch/generated/c_shim_xpu.cpp"
-  )
-
 set(TORCH_GENERATED_CODE
   ${GENERATED_CXX_TORCH}
   ${GENERATED_H_TORCH}
@@ -336,7 +332,6 @@ set(TORCH_GENERATED_CODE
   ${GENERATED_H_PYTHON}
   ${GENERATED_TESTING_PYTHON}
   ${GENERATED_CXX_TORCH_CUDA}
-  ${GENERATED_CXX_TORCH_XPU}
   )
 
 set(GEN_PER_OPERATOR_FLAG)
@@ -571,15 +566,6 @@ if(USE_CUDA)
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/ProcessGroupNCCL.cpp
         PROPERTIES COMPILE_FLAGS "-DPYTORCH_C10_DRIVER_API_SUPPORTED=1"
       )
-    endif()
-
-    set(ASYNC_MM_FILE "${TORCH_SRC_DIR}/csrc/distributed/c10d/cuda/AsyncMM.cu")
-    # Disable the warning to make cutlass warp-specialized cooperative kernel build for gcc-9
-    if(CMAKE_COMPILER_IS_GNUCXX)
-      set_source_files_properties(${ASYNC_MM_FILE} PROPERTIES COMPILE_FLAGS "-Wno-unused-but-set-variable")
-    endif()
-    if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 12.0 AND EXISTING_ARCH_FLAGS MATCHES ".*compute_90.*")
-      set_source_files_properties(${ASYNC_MM_FILE} PROPERTIES COMPILE_FLAGS "-gencode arch=compute_90a,code=sm_90a")
     endif()
   endif()
   set_source_files_properties(
@@ -1046,13 +1032,9 @@ elseif(USE_CUDA)
 endif()
 
 if(USE_XPU)
-  list(APPEND Caffe2_XPU_SRCS ${GENERATED_CXX_TORCH_XPU})
   add_library(torch_xpu ${Caffe2_XPU_SRCS})
   torch_compile_options(torch_xpu)  # see cmake/public/utils.cmake
   target_compile_definitions(torch_xpu PRIVATE USE_XPU)
-  if(WIN32)
-    target_compile_options(torch_xpu PRIVATE /permissive-)
-  endif()
 
   # ATen XPU implementation
   set(TORCH_XPU_OPS_DIR ${TORCH_ROOT}/third_party/torch-xpu-ops)
@@ -1219,7 +1201,7 @@ target_include_directories(torch_cpu PRIVATE
   ${TORCH_SRC_DIR}/csrc)
 
 target_include_directories(torch_cpu PRIVATE
-  ${TORCH_ROOT}/third_party/miniz-3.0.2)
+  ${TORCH_ROOT}/third_party/miniz-2.1.0)
 
 target_include_directories(torch_cpu PRIVATE
   ${TORCH_ROOT}/third_party/kineto/libkineto/include)
