@@ -1081,6 +1081,7 @@ class TestTensorCreation(TestCase):
     # NB: torch.uint16, torch.uint32, torch.uint64 excluded as this
     # nondeterministically fails, warning "invalid value encountered in cast"
     @onlyCPU
+    @unittest.skipIf(IS_MACOS, "Nonfinite conversion results on MacOS are different from others.")
     @dtypes(torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
     def test_float_to_int_conversion_nonfinite(self, device, dtype):
         vals = (float('-inf'), float('inf'), float('nan'))
