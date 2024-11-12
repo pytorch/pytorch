@@ -13095,6 +13095,7 @@
   variants: function, method
   device_check: NoCheck
   device_guard: False
+  tags: pointwise
 
 - func: isinf(Tensor self) -> Tensor
   variants: function, method
