@@ -32,9 +32,11 @@ class TritonSplitScanKernel(TritonKernel):
         self,
         tiling: Dict[str, sympy.Expr],
         pid_cache=None,
+        fixed_config=None,
         **kwargs,
     ) -> None:
         assert pid_cache is None, "not supported"
+        assert fixed_config is None, "not supported"
         super().__init__(
             tiling,
             **kwargs,

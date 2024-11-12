@@ -1085,6 +1085,9 @@ class aot_inductor:
         os.environ.get("AOTINDUCTOR_RAISE_ERROR_ON_IGNORED_OPTIMIZATION", "1") == "1"
     )
 
+    # dump an aoti minifier if program errors
+    dump_aoti_minifier: bool = os.environ.get("DUMP_AOTI_MINIFIER", "0") == "1"
+
     # Dictionary of presets that can be passed in
     presets: Dict[str, Any] = {}
 
@@ -1196,6 +1199,11 @@ class rocm:
     # Path to Composable Kernel library.
     # Install with `pip install git+https://github.com/rocm/composable_kernel@develop`.
     ck_dir = os.environ.get("TORCHINDUCTOR_CK_DIR")
+
+    # generate standalone executables for instances generated with the CK backend
+    generate_test_runner: bool = (
+        os.environ.get("INDUCTOR_CK_BACKEND_GENERATE_TEST_RUNNER_CODE", "0") == "1"
+    )
 
     # Number of op instance choices to trade off between runtime perf and compilation time
     n_max_profiling_configs: Optional[int] = None

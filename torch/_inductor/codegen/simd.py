@@ -752,7 +752,20 @@ class SIMDKernel(Kernel):
         except CantSplit:
             return False
 
-    def split_and_set_ranges(self, lengths: List[List[sympy.Expr]]):
+    def split_and_set_ranges(self, lengths: Sequence[Sequence[sympy.Expr]]):
+        groups = [rt.numel for rt in self.range_trees]
+        if not self.inside_reduction:
+            groups[-1] = sympy.S.One
+
+        return self.map_kernel_groups_to_node_sizes(groups, lengths, self.set_ranges)
+
+    @classmethod
+    def map_kernel_groups_to_node_sizes(
+        cls,
+        groups: Sequence[sympy.Expr],
+        lengths: Sequence[Sequence[sympy.Expr]],
+        set_ranges,
+    ) -> List[List[sympy.Expr]]:
         """
         We may want to fuse `for i0 in s0*s1` into a tiled kernel with groups (s0, s1).
 
@@ -765,20 +778,14 @@ class SIMDKernel(Kernel):
         This function matches and resplits lengths to the groups of
         this kernel to enable tiled + non-tiled fusions.
         """
-        groups = [rt.numel for rt in self.range_trees]
-        if not self.inside_reduction:
-            groups[-1] = sympy.S.One
-
-        if len(lengths) == len(self.range_trees) and all(
+        if len(lengths) == len(groups) and all(
             V.graph.sizevars.simplify(sympy_product(x) - g) == 0
             for x, g in zip(lengths, groups)
         ):
-            return self.set_ranges(*lengths)
+            return set_ranges(*lengths)
 
-        new_ranges, return_getters_groups = self._split_iteration_ranges(
-            groups, lengths
-        )
-        itervars = list(itertools.chain.from_iterable(self.set_ranges(*new_ranges)))
+        new_ranges, return_getters_groups = cls._split_iteration_ranges(groups, lengths)
+        itervars = [*itertools.chain.from_iterable(set_ranges(*new_ranges))]
         return [[fn(itervars) for fn in fns] for fns in return_getters_groups]
 
     def is_indirect_indexing(self, index: sympy.Expr):
@@ -1091,7 +1098,7 @@ class SIMDKernel(Kernel):
 
 
 class SIMDScheduling(BaseScheduling):
-    kernel_type = SIMDKernel  # override in subclass
+    kernel_type: Type[Any] = SIMDKernel  # override in subclass
 
     def __init__(self, scheduler) -> None:
         super().__init__()
@@ -1356,40 +1363,12 @@ class SIMDScheduling(BaseScheduling):
         return True
 
     def codegen_node_schedule(self, kernel_features: SIMDKernelFeatures):
-        from torch._inductor.codegen.triton_split_scan import TritonSplitScanKernel
-
         node_schedule = kernel_features.node_schedule
         tiling = self.select_tiling(
             node_schedule, kernel_features.numel, kernel_features.reduction_numel
         )
-
-        is_scan = kernel_features.contains_op("scan")
-        is_split_scan = is_scan and any(
-            node.is_split_scan() for node in kernel_features.scheduler_nodes()
-        )
-        kernel_type: Type[SIMDKernel] = self.kernel_type
-        if is_split_scan and issubclass(TritonSplitScanKernel, kernel_type):
-            kernel_type = TritonSplitScanKernel
-
-        kernel_args: List[Any] = [tiling]
-        kernel_kwargs: Dict[str, Any] = {"features": kernel_features}
-
-        if is_scan:
-            # TODO(jansel): scan does not yet work with cooperative reductions
-            kernel_kwargs["override_cooperative_reduction"] = False
-
-        # ops.sort only works with persistent reduction, and is not bandwidth bound anyway
-        # so taking the hit of non-coalesced loads is okay
-        if kernel_features.contains_op("sort"):
-            kernel_kwargs["override_persistent_reduction"] = True
-
-        kernel = kernel_type(
-            *kernel_args,
-            **kernel_kwargs,
-        )
-
-        kernels = self.add_multi_kernel_choices(
-            kernel, kernel_args, kernel_kwargs, node_schedule
+        kernels = self.create_kernel_choices(
+            kernel_features, [tiling], {"features": kernel_features}
         )
         for kernel in kernels:
             self.codegen_node_schedule_with_kernel(node_schedule, kernel)
@@ -1445,10 +1424,15 @@ class SIMDScheduling(BaseScheduling):
 
         self.scheduler.free_buffers()
 
-    def add_multi_kernel_choices(
-        self, kernel, kernel_args, kernel_kwargs, node_schedule
+    def create_kernel_choices(
+        self, kernel_features: SIMDKernelFeatures, kernel_args, kernel_kwargs
     ) -> List[SIMDKernel]:
-        return [kernel]
+        return [
+            self.kernel_type(
+                *kernel_args,
+                **kernel_kwargs,
+            )
+        ]
 
     def codegen_node_schedule_with_kernel(self, node_schedule, kernel):
         with kernel:
