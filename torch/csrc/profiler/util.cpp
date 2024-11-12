@@ -377,7 +377,10 @@ std::vector<std::string> inputTypes(const at::RecordFunction& fn) {
 static constexpr int32_t kTruncatLength = 30;
 
 template <typename ListLikeType>
-inline std::string format_list(ListLikeType list, bool truncate, bool with_escaped_quotes = true) {
+inline std::string format_list(
+    ListLikeType list,
+    bool truncate,
+    bool with_escaped_quotes = true) {
   if (truncate && list.size() > kTruncatLength) {
     return fmt::format(
         "\"[{}, ...]\"",
@@ -392,7 +395,8 @@ inline std::string format_list(ListLikeType list, bool truncate, bool with_escap
   }
 }
 
-std::pair<bool, std::variant<int, std::vector<int>>> findStartAddrForTensors(const c10::IValue& val) {
+std::pair<bool, std::variant<int, std::vector<int>>> findStartAddrForTensors(
+    const c10::IValue& val) {
   if (val.isTensor()) {
     // Store hints about where the input starts in memory.
     // Useful for debugging memory access patterns.
