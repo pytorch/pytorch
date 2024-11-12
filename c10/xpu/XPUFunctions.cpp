@@ -27,7 +27,8 @@ struct DevicePool {
   std::unique_ptr<sycl::context> context;
 } gDevicePool;
 
-void enumDevices(std::vector<std::unique_ptr<sycl::device>>& devices) {
+// Ensures we only call enumDevices only once.
+void enumDevices() {
   auto platform_list = sycl::platform::get_platforms();
   // Enumerated GPU devices from the specific platform.
   for (const auto& platform : platform_list) {
@@ -37,15 +38,24 @@ void enumDevices(std::vector<std::unique_ptr<sycl::device>>& devices) {
     auto device_list = platform.get_devices();
     for (const auto& device : device_list) {
       if (device.is_gpu()) {
-        devices.push_back(std::make_unique<sycl::device>(device));
+        gDevicePool.devices.push_back(std::make_unique<sycl::device>(device));
       }
     }
   }
+  // Here we need to check the number of XPU devices. c10::Device depends on
+  // c10::Device::MAX_NUM_DEVICES. Its index must be between -1 and
+  // MAX_NUM_DEVICES - 1.
+  TORCH_CHECK(
+      gDevicePool.devices.size() <= c10::Device::MAX_NUM_DEVICES,
+      "Number of XPU devices on the machine exceeds the compiled "
+      "max number of devices expected (",
+      c10::Device::MAX_NUM_DEVICES,
+      "). Increase that and recompile PyTorch.");
 }
 
 inline void initGlobalDevicePoolState() {
   // Enumerate all GPU devices and record them.
-  enumDevices(gDevicePool.devices);
+  enumDevices();
   if (gDevicePool.devices.empty()) {
     TORCH_WARN("XPU device count is zero!");
     return;
@@ -71,7 +81,7 @@ inline void initDevicePoolCallOnce() {
   c10::call_once(init_flag, initGlobalDevicePoolState);
 }
 
-void initDeviceProperties(DeviceProp* device_prop, int device) {
+void initDeviceProperties(DeviceProp* device_prop, DeviceIndex device) {
   using namespace sycl::info;
   using namespace sycl::ext;
   // Get raw sycl device associated with device index.
@@ -106,25 +116,6 @@ void initDeviceProperties(DeviceProp* device_prop, int device) {
   sycl::ext::oneapi::experimental::cl_version cl_version;
   AT_FORALL_XPU_EXP_CL_ASPECT(ASSIGN_EXP_CL_ASPECT);
   return;
-}
-
-inline void check_device(DeviceIndex device) {
-  // TODO: Use c10::Device::MAX_NUM_DEVICES directly. DeviceIndex is a int8_t
-  // value, and the maximum number of GPUs that PyTorch recognizes is 64. So, we
-  // have to check if there is an overflow happen. When DeviceIndex changes to
-  // int16_t and c10::Device::MAX_NUM_DEVICES is provided, we should use it
-  // directly to check if too many XPU devices are detected.
-  TORCH_CHECK(
-      gDevicePool.devices.size() <= std::numeric_limits<DeviceIndex>::max(),
-      "Too many XPU devices, DeviceIndex overflowed");
-  auto total = static_cast<DeviceIndex>(gDevicePool.devices.size());
-  TORCH_CHECK(
-      device >= 0 && device < total,
-      "device is out of range, device is ",
-      device,
-      ", total number of device is ",
-      total,
-      ".");
 }
 
 } // anonymous namespace
