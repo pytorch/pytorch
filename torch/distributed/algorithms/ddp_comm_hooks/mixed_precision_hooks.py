@@ -5,7 +5,6 @@ import torch
 import torch.distributed as dist
 from torch.autograd import Variable
 from torch.distributed.utils import _free_storage
-from torch._utils import _get_device_module
 
 
 @dataclass

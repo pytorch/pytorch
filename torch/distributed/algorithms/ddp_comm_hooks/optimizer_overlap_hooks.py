@@ -6,7 +6,7 @@ from typing import Any, Callable, List, no_type_check
 import torch
 import torch.distributed as dist
 from torch.autograd import Variable
-from torch._utils import _get_device_module
+
 
 __all__: List[str] = []
 
