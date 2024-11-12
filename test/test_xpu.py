@@ -6,7 +6,6 @@ import tempfile
 import unittest
 
 import torch
-import torch.version
 import torch.xpu._gpu_trace as gpu_trace
 from torch.testing import make_tensor
 from torch.testing._internal.autocast_test_lists import AutocastTestLists, TestAutocast
