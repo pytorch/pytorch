@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Type, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 from . import config
 from .runtime.hints import ReductionHint
@@ -8,10 +8,7 @@ from .virtualized import V
 
 
 if TYPE_CHECKING:
-    import sympy
-
     from .codegen.simd_kernel_features import SIMDKernelFeatures
-    from .codegen.triton import TritonKernel
 
 
 class InductorChoices:
@@ -26,16 +23,6 @@ class InductorChoices:
 
             torch._inductor.virtualized.V.set_choices_handler(MyHeuristics())
     """
-
-    def triton_kernel_kwargs(
-        self,
-        kernel_cls: Type[TritonKernel],
-        features: SIMDKernelFeatures,
-        groups: List[sympy.Expr],
-        kernel_kwargs: Dict[str, Any],
-    ) -> Dict[str, Any]:
-        """Hook to change the kwargs passed to TritonKernel, used to apply fixed configurations"""
-        return kernel_kwargs
 
     @staticmethod
     def should_use_cooperative_reduction(features: SIMDKernelFeatures) -> bool:
