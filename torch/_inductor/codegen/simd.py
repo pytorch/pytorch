@@ -1371,7 +1371,7 @@ class SIMDScheduling(BaseScheduling):
         if is_split_scan and issubclass(TritonSplitScanKernel, kernel_type):
             kernel_type = TritonSplitScanKernel
 
-        kernel_args: List[Dict[str, sympy.Expr]] = [tiling]
+        kernel_args: List[Any] = [tiling]
         kernel_kwargs: Dict[str, Any] = {"features": kernel_features}
 
         if is_scan:
@@ -1384,7 +1384,7 @@ class SIMDScheduling(BaseScheduling):
             kernel_kwargs["override_persistent_reduction"] = True
 
         kernel = kernel_type(
-            *kernel_args,  # type: ignore[arg-type]
+            *kernel_args,
             **kernel_kwargs,
         )
 
