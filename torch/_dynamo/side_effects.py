@@ -389,7 +389,7 @@ class SideEffects:
                 tx.stack,
                 tx.symbolic_locals,
                 pre_existing_vars,
-                self.output_graph_weakref().backward_state,  # type: ignore[union-attr]
+                tx.output.backward_state,
             ),
         )
         # Manually release the self-referential function, which indirectly
