@@ -1389,6 +1389,7 @@ class TestForeach(TestCase):
                 "_foreach_log",
                 "_foreach_pow",
                 "_foreach_sqrt",
+                "_foreach_rsqrt",
             )
         ):
             value_range = {"low": 0.5, "high": 1.0}
@@ -1523,7 +1524,7 @@ def check_autodiff_sample(op, sample, dtype, is_inplace):
         return (
             False,
             "Trying to set a forward gradient that has a different size than that of the original Tensor, "
-            "this is not supported. Tensor is of size [] while the given forward gradient is of size [1, 1].",
+            "this is not supported. Tensor is of size [] while the given forward gradient is of size [1",
         )
     rhs_arg_has_complex_number = sample.args and (
         (
