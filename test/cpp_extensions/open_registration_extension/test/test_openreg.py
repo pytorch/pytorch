@@ -119,6 +119,12 @@ class TestOpenReg(TestCase):
         e1 = s1.record_event()
         e1.wait(s2)
 
+    def test_expand(self):
+        x = torch.tensor([[1], [2], [3]], device="openreg")
+        y = x.expand(3, 2)
+        self.assertEqual(y.to(device="cpu"), torch.tensor([[1, 1], [2, 2], [3, 3]]))
+        self.assertEqual(x.data_ptr(), y.data_ptr())
+
 
 if __name__ == "__main__":
     run_tests()
