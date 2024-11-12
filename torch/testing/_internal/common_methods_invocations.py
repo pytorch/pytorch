@@ -19517,8 +19517,9 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_msort,
            skips=(
+               # https://github.com/pytorch/pytorch/issues/139972
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_non_standard_bool_values',
-                            dtypes=[torch.bool], device_type='cuda'),
+                            dtypes=[torch.bool], device_type='cuda', active_if=TEST_WITH_ROCM),
            )),
     OpInfo('movedim',
            aliases=('moveaxis',),
@@ -20800,10 +20801,7 @@ op_db: List[OpInfo] = [
         supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
-        dtypes=floating_types_and(torch.float16),
-        backward_dtypes=floating_types(),
-        dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
-        backward_dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
+        dtypes=floating_types_and(torch.float16, torch.bfloat16),
         skips=(
             # RuntimeError: input->type()->kind() == TypeKind::OptionalType
             # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":252,

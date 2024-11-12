@@ -18,7 +18,9 @@ E5M2_MAX_POS = torch.finfo(torch.float8_e5m2).max
 
 
 @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled")
-@unittest.skipIf(not torch.cpu._is_amx_tile_supported(), "FP8 cannot run on the current CPU platform")
+@unittest.skipIf(
+    not torch.cpu._is_amx_tile_supported(), "FP8 cannot run on the current CPU platform"
+)
 class TestFP8MatmulCpu(TestCase):
     def _test_tautological_mm(
         self,
