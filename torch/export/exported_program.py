@@ -209,7 +209,6 @@ def _override_composite_implicit_decomp(cia_ops_to_callable, safe=True):
     # replace with aten::_to_copy in FunctionalTensorMode.__torch_dispatch__.
     saved_tables = {}
     patched_ops = set()
-    patched_cia_ops = set()
     for op_overload, decomp_callable in cia_ops_to_callable.items():
         saved_tables[op_overload] = op_overload.py_kernels.copy()
         patched_ops.add(op_overload)
