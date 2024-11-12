@@ -4730,12 +4730,16 @@ class ExternKernel(InputsKernel):
         tensor_args = []
         non_tensor_args: List[Any] = []
         for arg in args_flat:
-            is_arg_tensor.append(isinstance(arg, IRNode))
+            is_arg_tensor.append(
+                isinstance(arg, IRNode) and not isinstance(arg, Subgraph)
+            )
             if is_arg_tensor[-1]:
                 tensor_args.append(arg)
             else:
                 if isinstance(arg, sympy.Expr):
                     arg = V.graph.sizevars.shape_env.create_symintnode(arg, hint=None)
+                elif isinstance(arg, Subgraph):
+                    arg = arg.graph_module
                 non_tensor_args.append(arg)
 
         def unflatten_args(new_tensor_args, new_non_tensor_args):  # type: ignore[no-untyped-def]
@@ -5258,6 +5262,7 @@ class ExternKernel(InputsKernel):
             r |= maybe_free_unbacked_symbols(arg)
         for arg in self.kwargs.values():
             r |= maybe_free_unbacked_symbols(arg)
+        breakpoint()
         return r
 
     def __str__(self) -> str:
@@ -6977,6 +6982,7 @@ class WhileLoop(ExternKernel):
         cond_subgraph: Subgraph,
         body_subgraph: Subgraph,
         layout: MultiOutputLayout,
+        unbacked_bindings: [Dict[sympy.Symbol, pytree.KeyPath]]
     ) -> None:
         self.carried_inputs = carried_inputs
         self.additional_inputs = additional_inputs
@@ -6990,6 +6996,7 @@ class WhileLoop(ExternKernel):
         )
 
         self.name = V.graph.register_buffer(self)
+        self.unbacked_bindings = unbacked_bindings
         V.graph.register_operation(self)
 
     @classmethod
@@ -6997,16 +7004,33 @@ class WhileLoop(ExternKernel):
         cls,
         cond_fn: Subgraph,
         body_fn: Subgraph,
-        carried_inputs: List[TensorBox],
+        carried_inputs: List[Union[TensorBox, ShapeAsConstantBuffer]],
         additional_inputs: List[TensorBox],
     ):
+        breakpoint()
+        from torch._higher_order_ops.while_loop import _unspecialize_int
         carried_inputs = [cls.realize_input(x) for x in carried_inputs]
         additional_inputs = [cls.realize_input(x) for x in additional_inputs]
         all_inputs = carried_inputs + additional_inputs
 
-        fx_all_inputs = V.graph.current_node.args[-2] + V.graph.current_node.args[-1]  # type: ignore[operator]
-        fake_all_inputs = [x.meta["val"] for x in fx_all_inputs]  # type: ignore[union-attr]
+        fx_all_inputs = V.graph.current_node.args[-2] + V.graph.current_node.args[-1]
 
+        # If carry contains a constant input say 0, while_loop nodes'
+        # args will contain a constant 0. However, we cannot trace/lower the
+        # subgraph with constant 0 because its value may vary from one iteration
+        # Therefore we need to use the unspecialized unbacked symint inputs
+        # See NOTE: [auto unspecialize int carries with unbacked symints]
+        meta_vals = [node.meta["val"] if isinstance(node, torch.fx.Node) else node for node in  fx_all_inputs]
+        unbacked_bindings: Dict[sympy.Symbol, pytree.KeyPath] = {}
+        fake_all_inputs = []
+        for val in meta_vals:
+            if isinstance(val, int):
+                fake_all_inputs.append(_unspecialize_int(V.graph.fake_mode, val))
+                unbacked_bindings[fake_all_inputs[-1].node.expr] = ()
+                continue
+            else:
+                fake_all_inputs.append(val)
+    
         for subgraph in (cond_fn, body_fn):
             if subgraph.graph is None:
                 # create and lower subgraphs
@@ -7027,27 +7051,47 @@ class WhileLoop(ExternKernel):
                 f"The outputs of the body_fn subgraph of torch.while_loop are aliased: {body_outputs}"
             )
 
-        # make sure cond_fn returns a boolean scalar Tensor
-        assert len(cond_outputs) == 1, cond_outputs
-        assert cond_outputs[0].get_dtype() == torch.bool, cond_outputs
-        assert len(cond_outputs[0].get_size()) == 0, cond_outputs
+        # check cond output
+        def _assert_valid_cond_output(cond_outputs):
+            # make sure cond_fn returns a boolean scalar Tensor
+            assert len(cond_outputs) == 1, cond_outputs
+            cond_out = cond_outputs[0]
+            if not isinstance(cond_out, ShapeAsConstantBuffer):
+                # For tensor outputs, we need to check it's boolean scalar tensor 
+                assert cond_out.get_dtype() == torch.bool, cond_outputs
+                assert len(cond_out.get_size()) == 0, cond_outputs
+        _assert_valid_cond_output(cond_outputs)
 
         assert (
             len(all_inputs) > 0
         ), "torch.while_loop is assumed to have at least one operand."
 
-        device = all_inputs[0].get_device()
+        def find_device(all_inputs):
+            device = None
+            for inp in all_inputs:
+                if not isinstance(inp, ShapeAsConstantBuffer):
+                    device = inp.get_device()
+                    break
+            assert device is not None
+            return device
 
-        # make sure carried_inputs and body outputs are structurally equivalent
-        assert len(carried_inputs) == len(body_outputs), (carried_inputs, body_outputs)
-        for i, (op, bo) in enumerate(zip(carried_inputs, body_outputs)):
-            assert op.get_size() == bo.get_size(), (i, op, bo)
-            assert op.get_stride() == bo.get_stride(), (i, op, bo)
-            # assume all carried_inputs and outputs are on the same device
-            # as the MultiOutputLayout below requires single device
-            assert op.get_device() == bo.get_device() == device, (i, op, bo, device)
-            assert op.get_dtype() == bo.get_dtype(), (i, op, bo)
-            assert op.get_layout().offset == bo.get_layout().offset, (i, op, bo)
+        device = find_device(all_inputs)
+
+        # check body_outputs matches carried_inputs 
+        def _assert_carry_matches_body_outputs(carried_inputs, body_outputs):
+            # make sure carried_inputs and body outputs are structurally equivalent
+            assert len(carried_inputs) == len(body_outputs), (carried_inputs, body_outputs)
+            for i, (op, bo) in enumerate(zip(carried_inputs, body_outputs)):
+                if isinstance(op, ShapeAsConstantBuffer) and isinstance(bo, ShapeAsConstantBuffer):
+                    continue
+                assert op.get_size() == bo.get_size(), (i, op, bo)
+                assert op.get_stride() == bo.get_stride(), (i, op, bo)
+                # assume all carried_inputs and outputs are on the same device
+                # as the MultiOutputLayout below requires single device
+                assert op.get_device() == bo.get_device() == device, (i, op, bo, device)
+                assert op.get_dtype() == bo.get_dtype(), (i, op, bo)
+                assert op.get_layout().offset == bo.get_layout().offset, (i, op, bo)
+        _assert_carry_matches_body_outputs(carried_inputs, body_outputs)
 
         while_loop = WhileLoop(
             carried_inputs=carried_inputs,
@@ -7056,8 +7100,11 @@ class WhileLoop(ExternKernel):
             body_subgraph=body_fn,
             # asserted above that there is at least one operand
             layout=MultiOutputLayout(device=device),
+            unbacked_bindings=unbacked_bindings
         )
-
+        # The output may like: tensor, symbol, tensor, symbol
+        # For tensors, they're accessed via while_loop_buf[i]
+        # For symbols, they're accssed directly via symbol expression
         outputs = [
             MultiOutput(
                 FixedLayout(
@@ -7069,11 +7116,13 @@ class WhileLoop(ExternKernel):
                 ),
                 while_loop,
                 [(list, i)],
-            )
+            ) if not isinstance(output, ShapeAsConstantBuffer) else output
             for i, output in enumerate(body_outputs)
         ]
 
         for inp, out in zip(carried_inputs, outputs):
+            if isinstance(inp, ShapeAsConstantBuffer):
+                continue
             if inp.get_name() in V.graph.graph_inputs:
                 # if a carried input of the while_loop is a graph input,
                 # it can be returned as is when the number of iterations
@@ -7082,8 +7131,20 @@ class WhileLoop(ExternKernel):
                 # the inputs may end up being mutated.
                 V.graph.never_reuse_buffers.add(out.get_name())
 
+        breakpoint()
         while_loop.outputs = outputs
         return outputs
+    
+    def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
+        ret = OrderedSet()
+        if unbacked_bindings := getattr(self, "unbacked_bindings", None):
+            resolved = resolve_unbacked_bindings(
+                V.graph.sizevars.shape_env, unbacked_bindings
+            )
+            assert resolved is not None
+            ret.update(resolved.keys())  # type: ignore[return-value]
+        print(ret)
+        return ret
 
     def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
         wrapper.codegen_while_loop(self)
