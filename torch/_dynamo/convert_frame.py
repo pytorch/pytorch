@@ -664,7 +664,7 @@ def _compile(
         except exc.UnspecializeRestartAnalysis:
             speculation_log.clear()
             raise
-        except (exc.SpeculationRestartAnalysis, exc.SkipFrame):
+        except (exc.SpeculationRestartAnalysis, exc.TensorifyScalarRestartAnalysis, exc.SkipFrame):
             raise
         except Exception:
             if translation_validation_enabled():
@@ -741,6 +741,7 @@ def _compile(
         for attempt in itertools.count():
             CompileContext.get().attempt = attempt
             try:
+                import fbvscode; fbvscode.set_trace()
                 out_code = transform_code_object(code, transform)
                 break
             except exc.RestartAnalysis as e:

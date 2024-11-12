@@ -28,6 +28,7 @@ from torch._guards import (
     Source,
     TracingContext,
 )
+from torch._dynamo.exc import TensorifyScalarRestartAnalysis
 from torch._utils_internal import signpost_event
 from torch.fx._lazy_graph_module import _make_graph_module  # type: ignore[attr-defined]
 from torch.fx.experimental._backward_state import BackwardState
@@ -1425,6 +1426,8 @@ class OutputGraph:
             compiled_fn = compiler_fn(gm, self.example_inputs())
             _step_logger()(logging.INFO, f"done compiler function {name}")
             assert callable(compiled_fn), "compiler_fn did not return callable"
+        except TensorifyScalarRestartAnalysis:
+            raise
         except exceptions_allowed_to_be_fallback as e:
             if self.has_user_defined_allowed_in_graph:
                 raise BackendCompilerFailed(self.compiler_fn, e).with_traceback(
@@ -1436,6 +1439,8 @@ class OutputGraph:
                 "Adding a graph break."
             )
             unimplemented_with_warning(e, self.root_tx.f_code, msg)
+
+
         except SkipFrame as e:
             # The backend compiler has requested that we skip the frame, instead of
             # aborting execution.

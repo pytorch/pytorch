@@ -24,6 +24,7 @@ from unittest.mock import patch
 
 import torch
 import torch._logging
+from torch._dynamo.exc import TensorifyScalarRestartAnalysis
 from torch._guards import tracing, TracingContext
 
 from . import config, exc, logging as torchdynamo_logging, trace_rules, variables
@@ -1031,6 +1032,8 @@ class InstructionTranslatorBase(
         try:
             self.dispatch_table[inst.opcode](self, inst)
             return not self.output.should_exit
+        except TensorifyScalarRestartAnalysis:
+            raise
         except exc.ObservedException as e:
             self.exception_handler(e)
             return True
@@ -1119,6 +1122,8 @@ class InstructionTranslatorBase(
                 self.output.push_tx(self)
                 while self.step():
                     pass
+            except TensorifyScalarRestartAnalysis:
+                raise
             except BackendCompilerFailed:
                 raise
             except Exception as e:
