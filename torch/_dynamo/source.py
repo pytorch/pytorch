@@ -107,8 +107,17 @@ class LocalSource(Source):
     # Whether this local is an input to the root frame.
     is_input: bool = False
 
+    # Whether the item at this source is a that is native to the root frame,
+    # i.e., a part of its `co_cellvars` or `co_freevars`.
+    is_root_frame_cell: bool = False
+
     def reconstruct(self, codegen):
-        codegen.append_output(codegen.create_load(self.local_name))
+        if self.is_root_frame_cell:
+            # Although `LOAD_FAST` and `LOAD_CLOSURE` have the same semantics,
+            # Dynamo's bytecode transformation differentiates them slightly.
+            codegen.append_output(codegen.create_load_closure(self.local_name))
+        else:
+            codegen.append_output(codegen.create_load(self.local_name))
 
     def guard_source(self):
         return GuardSource.LOCAL
@@ -244,6 +253,7 @@ class AutoDerefLocalSource(ChainedSource):
 
     def __post_init__(self):
         assert type(self.base) is LocalSource
+        assert self.base.is_root_frame_cell
 
     def reconstruct(self, codegen):
         # Emit more readable and performant bytecode.
@@ -255,15 +265,14 @@ class AutoDerefLocalSource(ChainedSource):
 
     def name(self):
         # The requirements for `Source.name` are
-        # 1. debugging-friendly
-        # 2. with appropriate scope, `eval()` will turn it into the target
+        # 1. with appropriate scope, `eval()` will turn it into the target
         #    python value.
-        # 3. can be used for caching guard managers.
+        # 2. can be used for caching guard managers.
         #
-        # (2) requires us to return `self.base.name()` here, in the scope given
+        # (1) requires us to return `self.base.name()` here, in the scope given
         # to `eval()`, cells are already dereferenced.
         #
-        # What about name collision that can affect (3)? Well, auto-deferenced
+        # What about name collision that can affect (2)? Well, auto-deferenced
         # cells should never have any guards on them (only guards on the
         # contents), so this name collision shouldn't matter.
         return self.base.name()

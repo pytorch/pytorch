@@ -1216,6 +1216,36 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
     )
     test_module_comparison = make_test(ModuleComparison())
 
+    def test_inject_module_parameters(self):
+        from collections import OrderedDict
+
+        class ZeROOrderedDict(OrderedDict):
+            def __init__(self, parent_module=None, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self._parent_module = parent_module
+
+            def __getitem__(self, key):
+                param = super().__getitem__(key)
+                return param
+
+        def inject_parameters(module, cls):
+            for m in module.modules():
+                if cls == ZeROOrderedDict:
+                    new_param = cls(parent_module=m)
+                else:
+                    new_param = cls()
+
+                for key, param in m._parameters.items():
+                    new_param[key] = param
+                m._parameters = new_param
+
+        model = ParametersModule5()
+        inject_parameters(model, ZeROOrderedDict)
+        model = torch.compile(model, backend="inductor")
+        x = torch.ones(10)
+        # model can be compiled without error
+        y = model(x)
+
     def test_module_forward_has_graph_break(self):
         m = ModuleForwardHasGraphBreak()
         x = torch.rand([10, 10])

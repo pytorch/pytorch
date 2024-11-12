@@ -6278,6 +6278,23 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         # Ensure that the listcomp is fully compiled
         self.assertEqual(cnt.op_count, 8)
 
+    # https://github.com/pytorch/pytorch/issues/140266
+    def test_distributions_subclass(self):
+        import torch
+        from torch.distributions import Categorical
+
+        class SubCateg(Categorical):
+            ...
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def make_dist_and_execute(t, d):
+            categ = d(logits=t)
+            a = categ.log_prob(categ.sample()) + categ.probs + categ.logits
+            return a
+
+        for _ in range(2):
+            make_dist_and_execute(torch.randn(10), SubCateg)
+
     def test_tensor_split_within_device_cm(self):
         @torch.compile(fullgraph=True)
         def split(x):
