@@ -1,6 +1,7 @@
 # Owner(s): ["module: nestedtensor"]
 
 import ast
+import contextlib
 import io
 import itertools
 import logging
@@ -3710,8 +3711,21 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
 
         with tempfile.TemporaryFile() as f:
             torch.save(nt, f)
+            safe_globals = [
+                torch.nested._internal.nested_tensor.NestedTensor,
+                torch.nested._internal.nested_tensor._rebuild_njt,
+                set,
+                torch._dynamo.decorators._DimRange,
+            ]
             f.seek(0)
-            nt_loaded = torch.load(f, weights_only=weights_only)
+            ctx = (
+                torch.serialization.safe_globals(safe_globals)
+                if weights_only
+                else contextlib.nullcontext()
+            )
+
+            with ctx:
+                nt_loaded = torch.load(f, weights_only=weights_only)
 
             self.assertIsNot(nt, nt_loaded)
             # we expect a new offsets tensor -> different nested int upon load
