@@ -1,26 +1,11 @@
-from contextlib import contextmanager
-from typing import Optional
-from torch.utils._pytree import tree_map
 import functools
-from torch.distributed._composable.fsdp._fsdp_api import MixedPrecisionPolicy
-from torch.distributed._composable.fsdp._fsdp_common import _cast_fp_tensor
-from typing import (
-    Dict,
-    Optional,
-    Type,
-    Tuple,
-)
-
-def unimplemented_deepcopy(*args, **kwargs):
-    raise AssertionError(
-        "FSDP does not support deepcopy. Please use state dict for serialization."
-    )
-
+from contextlib import contextmanager
+from typing import Dict, Optional, Tuple, Type
 
 import torch
 import torch.nn as nn
-from torch.nn.modules.lazy import LazyModuleMixin
-
+from torch.distributed._composable.fsdp._fsdp_api import MixedPrecisionPolicy
+from torch.distributed._composable.fsdp._fsdp_common import _cast_fp_tensor
 from torch.distributed.tensor import (
     distribute_tensor,
     DTensor,
@@ -28,11 +13,14 @@ from torch.distributed.tensor import (
     Replicate,
     Shard,
 )
+from torch.nn.modules.lazy import LazyModuleMixin
+from torch.utils._pytree import tree_map
 from torch.utils.checkpoint import (
     checkpoint,
     CheckpointPolicy,
     create_selective_checkpoint_contexts,
 )
+
 
 _active_parametrization = False
 
@@ -101,7 +89,9 @@ def fsdp_must_save_policy():
 
 
 class ReplicateComputation(torch.nn.Module):
-    def __init__(self, device_mesh, param_sharding, mode, reshard_after_forward, mp_policy):
+    def __init__(
+        self, device_mesh, param_sharding, mode, reshard_after_forward, mp_policy
+    ):
         super().__init__()
         self.device_mesh = device_mesh
         self.param_sharding = param_sharding
@@ -176,14 +166,20 @@ class ReplicateComputation(torch.nn.Module):
             if self.reshard_after_forward:
                 # apply checkpointing to implement reshard_after_forward=True
                 output = checkpoint(
-                    self.replicate_compute, x, use_reentrant=False, context_fn=fsdp_must_recompute_policy
+                    self.replicate_compute,
+                    x,
+                    use_reentrant=False,
+                    context_fn=fsdp_must_recompute_policy,
                 )
             else:
                 # apply must-save policy to implement reshard_after_forward=False
                 # NOTE(yf225): this is important for avoiding different ranks making different recompute vs. save decision for all-gather output,
                 # leading to NCCL stuckness in AOT backward graph.
                 output = checkpoint(
-                    self.replicate_compute, x, use_reentrant=False, context_fn=fsdp_must_save_policy
+                    self.replicate_compute,
+                    x,
+                    use_reentrant=False,
+                    context_fn=fsdp_must_save_policy,
                 )
         else:
             output = self.replicate_compute(x)
@@ -192,18 +188,16 @@ class ReplicateComputation(torch.nn.Module):
 
 cls_key_to_SimpleFSDP_cls: Dict[Tuple[Type, str], Type] = {}
 
+
 # NOTE(yf225): Ads model doesn't do explicit dtype casting for inputs
 # and rely on FSDP2 `MixedPrecisionPolicy.cast_forward_inputs=True` to do it.
 # Here we need to do the same dtype casting in SimpleFSDP.
-def _pre_forward(
-    mp_policy, module: nn.Module, args, kwargs
-):
+def _pre_forward(mp_policy, module: nn.Module, args, kwargs):
     if mp_policy.cast_forward_inputs and mp_policy.param_dtype:
-        cast_fn = functools.partial(
-            _cast_fp_tensor, mp_policy.param_dtype
-        )
+        cast_fn = functools.partial(_cast_fp_tensor, mp_policy.param_dtype)
         args, kwargs = tree_map(cast_fn, args), tree_map(cast_fn, kwargs)
     return args, kwargs
+
 
 # NOTE(yf225): to match FSDP2 behavior (output_dtype casting)
 def _post_forward(mp_policy, module: nn.Module, input, output):
@@ -219,11 +213,17 @@ def create_fsdp_managed_attr(p_name):
     def getter(self):
         # TODO(yf225): if this function throws exception, how does it behave? add a unit test for it.
         return self._name_to_fsdp_managed_attr_getter[p_name]()
-    
+
     def setter(self, value):
         raise RuntimeError("Setting FSDP-managed attribute is not supported")
-    
+
     return property(getter, setter)
+
+
+def unimplemented_deepcopy(*args, **kwargs):
+    raise AssertionError(
+        "FSDP does not support deepcopy. Please use state dict for serialization."
+    )
 
 
 def SimpleFSDP_data_parallel(
@@ -254,17 +254,23 @@ def SimpleFSDP_data_parallel(
             continue
 
         # NOTE(yf225): we need to be careful with LazyModuleMixin, as those modules don't have their params created until after the first iteration.
-        # We need to detect whether module is LazyModuleMixin and if so, assert they are initialized before doing register_parameter here.        
-        assert not (isinstance(mod, LazyModuleMixin) and mod.has_uninitialized_params()), "Lazy modules (inherited from LazyModuleMixin) must be initialized before applying SimpleFSDP. Please run your model at least once before applying SimpleFSDP"
+        # We need to detect whether module is LazyModuleMixin and if so, assert they are initialized before doing register_parameter here.
+        assert not (
+            isinstance(mod, LazyModuleMixin) and mod.has_uninitialized_params()
+        ), "Lazy modules (inherited from LazyModuleMixin) must be initialized before applying SimpleFSDP. Please run your model at least once before applying SimpleFSDP"
 
         params_dict = dict(mod.named_parameters(recurse=False))
-        
+
         # Create new class for this module with all parametrized parameters
         param_properties = {}
         for p_name, p in params_dict.items():
-            assert p is not None, "Expected None parameter to never appear in module.named_parameters()"
+            assert (
+                p is not None
+            ), "Expected None parameter to never appear in module.named_parameters()"
             if p.numel() > 0:
-                param_local = nn.Parameter(distribute_tensor(p, device_mesh, param_sharding))
+                param_local = nn.Parameter(
+                    distribute_tensor(p, device_mesh, param_sharding)
+                )
                 # TODO(yf225): verify whether new param registration for ParameterDict and ParameterList need special handling
                 if isinstance(mod, torch.nn.ParameterDict):
                     mod[p_name] = param_local
@@ -287,13 +293,18 @@ def SimpleFSDP_data_parallel(
                 )
 
                 # NOTE(yf225): adapted from Francisco's prototype (P1668496721) for fixing param FQN
-                def getter(self_mod=mod, _param_name=p_name, _pn=parametrization, _param_local=param_local):
+                def getter(
+                    self_mod=mod,
+                    _param_name=p_name,
+                    _pn=parametrization,
+                    _param_local=param_local,
+                ):
                     def _inner():
                         _param = self_mod._parameters[_param_name]
                         assert _param is not None, "Unexpected None parameter!"
                         ret = _pn(_param)
                         return ret
-                    
+
                     if torch.compiler.is_compiling():
                         return _inner()
                     else:
@@ -303,10 +314,11 @@ def SimpleFSDP_data_parallel(
                             e_str = str(e)
                             # NOTE(yf225): important for not letting the exception message be swallowed in the log.
                             # This prints false alarms with empty exception message at end of training process,
-                            # so need to check exception message length first.    
+                            # so need to check exception message length first.
                             if len(e_str) > 0:
                                 print(f"SimpleFSDP getter exception: {e_str}")
                             raise
+
                 param_properties[p_name] = getter
             else:
                 param_properties[p_name] = lambda: p
@@ -332,7 +344,9 @@ def SimpleFSDP_data_parallel(
                 # Different instances of the same class can resolve their parameter access to instance-specific getters
                 # (which contains unique objects used in that instance-specific parameter's unshard operation).
                 namespace[p_name] = create_fsdp_managed_attr(p_name)
-            new_cls = type(f"SimpleFSDP{cls.__name__}", (SimpleFSDPModule, cls), namespace)
+            new_cls = type(
+                f"SimpleFSDP{cls.__name__}", (SimpleFSDPModule, cls), namespace
+            )
             cls_key_to_SimpleFSDP_cls[(cls, param_properties_key)] = new_cls
         mod.__class__ = new_cls
         mod._name_to_fsdp_managed_attr_getter = param_properties
@@ -367,7 +381,7 @@ class SimpleFSDPModule:
         pass
 
     # TODO(yf225): do we need to implement these?
-    # def reshard(self) -> None:    
+    # def reshard(self) -> None:
     # def unshard(self, async_op: bool = False) -> Optional["UnshardHandle"]:
     # def set_is_last_backward(self, is_last_backward: bool) -> None:
     # def set_requires_gradient_sync(
