@@ -71,6 +71,7 @@ from .cpp_utils import (
     INDEX_TYPE,
     LocalBufferContext,
     promote_args,
+    template_fusion_with_epilogues_supported,
     unify_mask_base_type,
     value_to_cpp,
 )
@@ -245,7 +246,7 @@ def stride_at(index: sympy.Expr, var: sympy.Symbol):
         # see test_torchinductor_dynamic_shapes.py::test_full_boolean_dynamic_shapes_cpu
         # which has tmp0 = ops.index_expr(s0 >= 1024, torch.bool) and fails below calculation.
         # in this case, there is no dependencies between index and var.
-        return sympy.Integer(0)
+        return sympy.S.Zero
     replacement = {var: var + 1}
     new_index = sympy_subs(index, replacement)  # type: ignore[arg-type]
     return sympy.simplify(new_index - index)
@@ -1002,18 +1003,20 @@ class CppVecOverrides(CppOverrides):
                 if scalars and vectors:
                     assert isinstance(V.kernel, CppVecKernel)
                     new_args = [
-                        V.kernel.broadcast(new_arg)
-                        if (
-                            isinstance(new_arg, CppCSEVariable)
-                            and not new_arg.is_vec
-                            and func
-                            not in [
-                                CppVecOverrides.rand,
-                                CppVecOverrides.randn,
-                                CppVecOverrides.randint64,
-                            ]
+                        (
+                            V.kernel.broadcast(new_arg)
+                            if (
+                                isinstance(new_arg, CppCSEVariable)
+                                and not new_arg.is_vec
+                                and func
+                                not in [
+                                    CppVecOverrides.rand,
+                                    CppVecOverrides.randn,
+                                    CppVecOverrides.randint64,
+                                ]
+                            )
+                            else new_arg
                         )
-                        else new_arg
                         for new_arg in new_args
                     ]
 
@@ -1486,18 +1489,21 @@ class CppVecOverrides(CppOverrides):
 
         dtype = result.dtype
         body_code = f"{var}()"
-        body_code_vec = (
-            body_code
-            if result.is_vec
-            else f"{V.kernel._get_vec_type(dtype)}({body_code})"
-        )
+
+        def maskify_or_vecify(code):
+            return (
+                f"{V.kernel._get_mask_type()}::from({code})"
+                if dtype == torch.bool
+                else f"{V.kernel._get_vec_type(dtype)}({code})"
+            )
+
+        if result.is_vec:
+            body_code_vec = body_code
+        else:
+            body_code_vec = maskify_or_vecify(body_code)
         other_code = value_to_cpp(other, DTYPE_TO_CPP[dtype])
         # loading bool as VecMask<float, N>
-        other_code_vec = (
-            f"{V.kernel._get_mask_type()}::from({other_code})"
-            if dtype == torch.bool
-            else f"{V.kernel._get_vec_type(dtype)}({other_code})"
-        )
+        other_code_vec = maskify_or_vecify(other_code)
         assert isinstance(new_mask, CppCSEVariable), new_mask
         if new_mask.is_vec:
             code = BracesBuffer()
@@ -2146,10 +2152,7 @@ class CppKernel(Kernel):
 
     @property
     def assert_function(self) -> str:
-        if config.abi_compatible:
-            return "AOTI_TORCH_CHECK"
-        else:
-            return "TORCH_CHECK"
+        return "AOTI_TORCH_CHECK"
 
     def decide_parallel_depth(self, max_parallel_depth, threads):
         assert self.call_ranges is not None
@@ -2528,7 +2531,7 @@ class CppVecKernel(CppKernel):
                 n_idx = self._get_num_vectors(torch.int64)
                 cdtype = DTYPE_TO_CPP[dtype]
                 index = ops.index_expr(index, torch.int64).value
-                assert index.is_vec
+                assert isinstance(index, CppCSEVariable) and index.is_vec
                 line = f"atomic_add_vec<{cdtype}, {n_idx}, {n_src}>({var}, {index}, {value});"
                 self.stores.writeline(DeferredLine(name, line))
         else:
@@ -3090,7 +3093,12 @@ class CppTile2DKernel(CppVecKernel):
             tile_var = self.cse.cache[load_or_store]
 
         if need_define:
-            define_line = f"alignas({factor}) {DTYPE_TO_CPP[dtype]} {tile_var}[{factor}*{factor}];"
+            cpp_dtype = DTYPE_TO_CPP[dtype]
+            # tiling_factor might be smaller than the alignment of cpp_dtype, such as
+            # with a vector that only holds 4 elements due to NEON 128-bit vectors and
+            # cpp_dtype being a 64-bit integer.
+            alignas = f"alignas(std::max(std::size_t({factor}), alignof({cpp_dtype})))"
+            define_line = f"{alignas} {cpp_dtype} {tile_var}[{factor}*{factor}];"
             self.preloads.writeline(define_line)
 
         load_or_store = load_or_store.replace("__place_holder__", str(tile_var))
@@ -3368,15 +3376,14 @@ class TilingSelect:
                             group[tiling_indices[0]],
                         ]
                     )
-                    and group[tiling_indices[0]] < tiling_factor / 2
+                    and group[tiling_indices[0]] < tiling_factor / 4
+                    and op_num < 10
                 ):
-                    # For case of Multi Thread AMP Static shape of pyhpc_isoneutral_mixing,
-                    # the inner loop range doesn't have enough elements to do vectorization
-                    # explicitly and found that `#pragma GCC ivdep` has better performance than
-                    # `#pragma omp simd simdlen(8)`. Disable vectorization for this case.
-                    # <TODO> Leslie: maybe we can always disable vectorization when loop range is less
-                    # than tiling factor and enable `#pragma omp simd simdlen(8)` for scalar kernel
-                    # when needed.
+                    # We found that when the number of elements in the inner loop range is
+                    # relatively small(< tiling_factor / 4) and the number of operations is
+                    # not large(< 10), vectorization is not efficient.
+                    # And found that `#pragma GCC ivdep` has better performance than
+                    # `#pragma omp simd simdlen(8)` for these cases.
                     return [], []
 
             if dtype in DTYPE_LOWP_FP:
@@ -3393,7 +3400,7 @@ class TilingSelect:
                             call_ranges[tiling_indice], fallback=0
                         )
                         if call_range < factor_lowp:
-                            V.graph.sizevars.guard_lt(call_range, factor_lowp)
+                            V.graph.sizevars.guard_lt(call_range, factor_lowp)  # type: ignore[arg-type]
                             tiling_factor = factor_lowp // 2
                             break
                     elif call_ranges[tiling_indice] < factor_lowp:
@@ -3738,7 +3745,6 @@ class CppKernelProxy(CppKernel):
                     tail_loop.simd_vec = True
                 else:
                     tail_loop.set_kernel(scalar_kernel)
-                    tail_loop.simd_omp = True
                 # We chop the loop into two cubes by the nelements - main loop and tail loop.
                 # Regarding the main loop, it is straightforward that it could be vectorized with
                 # nelements. But for the tail loop, it still could be vectorized. For example,
@@ -3964,11 +3970,34 @@ class CppScheduling(BaseScheduling):
 
                 ref_node = node2 if len(vars1) < len(vars2) else node1
 
-                extra_indexing_constraints = get_indexing_ranges_exprs(ref_node)
+                ref_indexing_constraints = get_indexing_ranges_exprs(ref_node)
 
                 node_to_recomp.recompute_size_and_body(
-                    extra_indexing_constraints=extra_indexing_constraints
+                    extra_indexing_constraints=ref_indexing_constraints
                 )
+
+                _, (vars1, _) = node1.group
+                _, (vars2, _) = node2.group
+
+                if vars1 == vars2:
+                    return FusedSchedulerNode.fuse(node1, node2)
+
+                # recompute ref_node if its ranges are also changed
+                node_to_recomp_indexing_constraints = get_indexing_ranges_exprs(
+                    node_to_recomp
+                )
+                if isinstance(ref_node, SchedulerNode):
+                    ref_node.recompute_size_and_body(
+                        extra_indexing_constraints=node_to_recomp_indexing_constraints
+                    )
+                else:
+                    assert isinstance(ref_node, FusedSchedulerNode)
+                    for snode in ref_node.snodes:
+                        assert isinstance(snode, SchedulerNode)
+                        snode.recompute_size_and_body(
+                            extra_indexing_constraints=node_to_recomp_indexing_constraints
+                        )
+                    ref_node = FusedSchedulerNode(ref_node.scheduler, ref_node.snodes)
 
                 _, (vars1, _) = node1.group
                 _, (vars2, _) = node2.group
@@ -4043,7 +4072,7 @@ class CppScheduling(BaseScheduling):
         else:
             assert isinstance(ref_node, SchedulerNode)
             assert isinstance(ref_node.node, ir.ComputedBuffer)
-            ranges1 = ref_node.node.data.get_size()
+            ranges1 = ref_node.node.data.get_size()  # type: ignore[assignment]
 
         if ranges1 != ranges2:
             return False
@@ -4148,7 +4177,10 @@ class CppScheduling(BaseScheduling):
             # TODO(jgong5): support pre-op fusion with template
             return False
         if node1.is_template():
-            return not node2.is_reduction()
+            template_fusion_supported, _ = template_fusion_with_epilogues_supported(
+                node1, [node2]
+            )
+            return not node2.is_reduction() and template_fusion_supported
         return (
             self._can_fuse_horizontal_impl(node1, node2) and not node1.is_reduction()
         ) or self.can_fuse_vertical_outer_loop(node1, node2)
@@ -4159,9 +4191,9 @@ class CppScheduling(BaseScheduling):
         When one of the indexing_exprs contains a division, we eliminate the division by splitting the loop
         to avoid non-contiguous loads, subject to the following conditions:
             1. No reduction and no mudular index for all nodes.
-            2. Only one node's one indexing_exprs contains a division, according to this indexing_exprs,
-               we can get the dimension that needs to be split, and the split dimension is contiguous
-               in all other indexing_exprs.
+            2. The indexing_exprs of all nodes contain only one (or more, but all the same) division,
+               where the divisor is an integer, the dividend is one of the iter_vars, and this var,
+               i.e. the dimension that needs to be split, is contiguous in all other indexing_exprs.
 
         For example, if the node's var_ranges: {z0: 2, z1: 9216, z2: 960} and indexing_exprs:
         {'index0': 8847360*z0 + 960*z1 + z2, 'index1': 32*z0 + (z2//30), 'index2': z2},
@@ -4182,8 +4214,8 @@ class CppScheduling(BaseScheduling):
 
         split_var = None
         split_number = None
-        divide_index_name = None
         num_div = 0
+        div_expr_ = None
         match_div = False
         matched_node = None
 
@@ -4191,25 +4223,27 @@ class CppScheduling(BaseScheduling):
             assert isinstance(node.node, ir.ComputedBuffer)
             _, original_body, _ = node.node.get_default_sizes_body()
             for name, expr in original_body.indexing_exprs.items():
-                num_div += expr.count(FloorDiv)
-                if num_div > 1:
-                    return nodes
-                if expr.count(FloorDiv) == 1:
-                    div_expr = expr.find(FloorDiv).pop()
-                    split_var = div_expr.args[0]
-                    split_number = div_expr.args[1]
-                    divide_index_name = name
+                for div_expr in expr.find(FloorDiv):
                     if (
-                        isinstance(split_number, sympy.core.numbers.Integer)
-                        and isinstance(split_var, sympy.core.symbol.Symbol)
-                        and split_var in original_body.iter_vars
-                        and divide_index_name is not None
+                        any(div_expr.has(var) for var in original_body.iter_vars)
+                        and div_expr != div_expr_
+                    ):
+                        div_expr_ = div_expr
+                        num_div += 1
+                    if num_div > 1:
+                        return nodes
+                    if (
+                        isinstance(div_expr.args[1], sympy.core.numbers.Integer)
+                        and div_expr.args[0] in original_body.iter_vars
+                        and name is not None
                         and all(
-                            stride_at_vec_range(expr, split_var) == 1
-                            for name, expr in original_body.indexing_exprs.items()
-                            if name != divide_index_name
+                            stride_at_vec_range(expr_, div_expr.args[0]) in (0, 1)
+                            for name_, expr_ in original_body.indexing_exprs.items()
+                            if name_ != name
                         )
                     ):
+                        split_var = div_expr.args[0]
+                        split_number = div_expr.args[1]
                         match_div = True
                         matched_node = node
 
@@ -4390,8 +4424,8 @@ class CppScheduling(BaseScheduling):
                         if not local_buffer_used:
                             # Create new local buffer
                             local_buffer_used = ir.Buffer(
-                                f"{local_buf_prefix}_{len(local_buffers)}",
-                                local_buffer_layout,
+                                name=f"{local_buf_prefix}_{len(local_buffers)}",
+                                layout=local_buffer_layout,
                             )
                             local_buffers.append(local_buffer_used)
                             local_to_global_buffers[local_buffer_used.name] = []
@@ -4502,6 +4536,9 @@ class CppScheduling(BaseScheduling):
         def template_buffer_has_other_users(
             template_buffer, outputs_by_name, epilogue_nodes
         ):
+            if not epilogue_nodes:
+                return False
+
             assert template_buffer.get_name() in outputs_by_name
             users = outputs_by_name[template_buffer.get_name()].users
             return not all(
@@ -4643,7 +4680,7 @@ class KernelGroup:
     def call_kernel(self, wrapper, kernel_name):
         _, call_args, arg_types = self.args.cpp_argdefs()
         wrapper.generate_kernel_call(
-            kernel_name, call_args, gpu=False, arg_types=arg_types
+            kernel_name, call_args, gpu=False, triton=False, arg_types=arg_types
         )
 
 
@@ -4697,8 +4734,8 @@ class WorkSharing:
 class LoopLevel:
     var: Optional[sympy.Expr] = None
     size: Optional[sympy.Expr] = None
-    offset: sympy.Expr = sympy.Integer(0)
-    steps: sympy.Expr = sympy.Integer(1)
+    offset: sympy.Expr = sympy.S.Zero
+    steps: sympy.Expr = sympy.S.One
     parallel: int = 0
     simd_omp: bool = False
     simd_vec: bool = False

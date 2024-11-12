@@ -13,8 +13,9 @@ concurrency:
 jobs:
 
   get-label-type:
+    if: github.repository_owner == 'pytorch'
     name: get-label-type
-    uses: ./.github/workflows/_runner-determinator.yml
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
     with:
       triggering_actor: ${{ github.triggering_actor }}
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
@@ -51,6 +52,7 @@ jobs:
       test-matrix: ${{ needs.linux-jammy-xpu-py3_9-build.outputs.test-matrix }}
 
   windows-xpu-build:
+    if: github.repository_owner == 'pytorch'
     name: win-vs2022-xpu-py3
     uses: ./.github/workflows/_win-build.yml
     with:

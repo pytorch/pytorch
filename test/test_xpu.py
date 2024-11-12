@@ -16,6 +16,8 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_methods_invocations import ops_and_refs
 from torch.testing._internal.common_utils import (
+    find_library_location,
+    IS_LINUX,
     NoTest,
     run_tests,
     suppress_warnings,
@@ -237,6 +239,9 @@ print(torch.xpu.device_count())
             device_index=stream.device_index,
             device_type=stream.device_type,
         )
+        self.assertIsInstance(xpu_stream, torch.Stream)
+        self.assertTrue(issubclass(type(xpu_stream), torch.Stream))
+        self.assertTrue(torch.Stream in type(xpu_stream).mro())
         self.assertEqual(stream.stream_id, xpu_stream.stream_id)
         self.assertNotEqual(stream.stream_id, torch.xpu.current_stream().stream_id)
 
@@ -262,6 +267,10 @@ print(torch.xpu.device_count())
             NotImplementedError, "elapsedTime is not supported by XPU backend."
         ):
             event1.elapsed_time(event2)
+        xpu_event = torch.xpu.Event()
+        self.assertIsInstance(xpu_event, torch.Event)
+        self.assertTrue(issubclass(type(xpu_event), torch.Event))
+        self.assertTrue(torch.Event in type(xpu_event).mro())
 
     def test_generator(self):
         torch.manual_seed(2024)
@@ -412,6 +421,32 @@ print(torch.xpu.device_count())
                 for idx in range(1, device_count)
             )
         )
+
+    def test_get_arch_list(self):
+        arch_list = torch.xpu.get_arch_list()
+        if not arch_list:
+            return
+        flags = torch.xpu.get_gencode_flags()
+        for arch in arch_list:
+            self.assertTrue(arch in flags)
+
+    def test_torch_version_xpu(self):
+        self.assertEqual(len(torch.version.xpu), 8)
+        compiler_version = int(torch.version.xpu)
+        self.assertGreater(compiler_version, 20230000)
+        if IS_LINUX:
+            library = find_library_location("libtorch_xpu.so")
+            cmd = f"ldd {library} | grep libsycl"
+            results = subprocess.check_output(cmd, shell=True).strip().split(b"\n")
+            # There should be only one libsycl.so or libsycl-preview.so
+            self.assertEqual(len(results), 1)
+            for result in results:
+                if b"libsycl.so" in result:
+                    self.assertGreaterEqual(compiler_version, 20250000)
+                elif b"libsycl-preview.so" in result:
+                    self.assertLess(compiler_version, 20250000)
+                else:
+                    self.fail("Unexpected libsycl library")
 
 
 instantiate_device_type_tests(TestXpu, globals(), only_for="xpu", allow_xpu=True)

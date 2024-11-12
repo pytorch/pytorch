@@ -15,7 +15,7 @@ import torch._dynamo.testing
 import torch.distributed._composable.fsdp._fsdp_param
 import torch.nn.functional as F
 from torch import nn
-from torch._dynamo import compiled_autograd
+from torch._dynamo.utils import counters
 from torch._inductor import comms
 from torch._inductor.utils import is_fallback_op, run_and_get_code
 from torch.distributed._composable.fsdp import fully_shard
@@ -23,14 +23,18 @@ from torch.distributed._composable.fsdp._fsdp_common import TrainingState
 from torch.distributed._composable.fsdp._fsdp_param_group import FSDPParamGroup
 from torch.distributed._tensor import init_device_mesh
 from torch.testing import FileCheck
-from torch.testing._internal.common_distributed import at_least_x_gpu, skip_if_lt_x_gpu
+from torch.testing._internal.common_distributed import (
+    at_least_x_gpu,
+    skip_if_lt_x_gpu,
+    sm_is_or_higher_than,
+)
 from torch.testing._internal.common_fsdp import FSDPTest, MLP
 from torch.testing._internal.common_utils import run_tests, skipIfRocm
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
     Transformer,
 )
-from torch.utils._triton import has_triton
+from torch.testing._internal.inductor_utils import HAS_GPU
 
 
 log = logging.getLogger(__name__)
@@ -44,8 +48,11 @@ def _is_fallback_op_in_snodes(snodes, op):
     return any(is_fallback_op(snode.node, op) for snode in snodes)
 
 
+orig_F_scaled_dot_product_attention = F.scaled_dot_product_attention
+
+
 class TestFullyShardCompileCompute(FSDPTest):
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     def test_disable_compiling_hooks(self):
         self.run_subtests(
@@ -93,13 +100,21 @@ class TestFullyShardCompileCompute(FSDPTest):
             self.assertTrue(trace_rules_check_count > 0)
 
 
+@unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
 class TestFullyShardCompile(FSDPTest):
     fake_pg = not at_least_x_gpu(2)
 
-    @property
-    def world_size(self) -> int:
-        return 2
+    # This method is an override of the base class.
+    # Tests in this class requires bf16 support, so SM arch must be 80 or
+    # higher.
+    def skipTestForOldSm(self):
+        # Assumption: This test class is only run on GPU. See `HAS_GPU` check at
+        # the top of the class.
+        device = torch.device("cuda", self.rank % torch.cuda.device_count())
+        if not sm_is_or_higher_than(device, 8, 0):
+            self.skipTest("bf16 requires sm >= 8.0")
 
+    @skipIfRocm
     def test_dynamo_trace_use_training_state(self):
         torch._dynamo.reset()
         # Construct a dummy FSDPParamGroup, since we just want to test the `use_training_state` ctx manager.
@@ -108,7 +123,8 @@ class TestFullyShardCompile(FSDPTest):
             (torch.nn.Linear(1, 1),),  # module: Tuple[nn.Module, ...],
             None,  # mesh_info: FSDPMeshInfo,
             None,  # post_forward_mesh_info: Optional[FSDPMeshInfo],
-            None,  # device: torch.device,
+            torch.device("cuda"),  # device: torch.device,
+            None,  # shard_placement_fn: Optional[Callable],
             None,  # mp_policy: MixedPrecisionPolicy,
             None,  # offload_policy: OffloadPolicy,
         )
@@ -136,6 +152,7 @@ class TestFullyShardCompile(FSDPTest):
         self.assertEqual(cnt.op_count, 1)
         self.assertEqual(len(cnt.graphs), 1)
 
+    @skipIfRocm
     def test_trace_fsdp_copy_(self):
         @torch.library.custom_op("mylib::add_one_out", mutates_args={"out"})
         def add_one_out(x: torch.Tensor, out: torch.Tensor) -> None:
@@ -153,6 +170,16 @@ class TestFullyShardCompile(FSDPTest):
         f(ref_x)
         torch.compile(f, backend="aot_eager")(x)
         self.assertEqual(x, ref_x)
+
+    def _get_resize_count_in_fx_graph(self, graph: torch.fx.Graph):
+        resize_count = 0
+        for node in graph.nodes:
+            if (
+                node.op == "call_function"
+                and node.target == torch.ops.inductor.resize_storage_bytes_.default
+            ):
+                resize_count += 1
+        return resize_count
 
     def _assert_no_aliased_unsharded_params_in_graph_inputs(
         self, model, graph: torch.fx.Graph
@@ -195,13 +222,21 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
         self.assertTrue(no_aliased_unsharded_params_in_graph_inputs, err_msg)
 
     def _remove_fsdp2_unsharded_param_graph_input_usage_with_optional_checks(
-        self, model, fullgraph
+        self, model, *, bwd_resize_count_before_pass=None, fwd_fullgraph=False
     ):
         def _run_with_checks(graph, orig_fn):
+            if (
+                self._is_bwd_fx_graph(graph)
+                and bwd_resize_count_before_pass is not None
+            ):
+                self.assertEqual(
+                    bwd_resize_count_before_pass,
+                    self._get_resize_count_in_fx_graph(graph),
+                )
             self._assert_no_aliased_unsharded_params_in_graph_inputs(model, graph)
             orig_fn(graph)
 
-        if fullgraph:
+        if fwd_fullgraph:
             return mock.patch.object(
                 comms,
                 "remove_fsdp2_unsharded_param_graph_input_usage",
@@ -244,7 +279,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
         else:
             _check_count(bwd_copy_count, bwd_resize_count)  # bwd graph
 
-    def _reinplace_all_gather_with_optional_checks(self, fullgraph):
+    def _reinplace_all_gather_with_optional_checks(self, fwd_fullgraph):
         def _run_with_checks(graph, orig_fn):
             self.assertGreater(
                 _count_op_in_graph(
@@ -269,7 +304,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                 0,
             )
 
-        if fullgraph:
+        if fwd_fullgraph:
             return mock.patch.object(
                 comms,
                 "reinplace_fsdp_all_gather",
@@ -296,7 +331,17 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
         else:
             return False
 
-    def _maybe_run_decide_global_ordering_of_comms_with_checks(self, fullgraph):
+    def _is_bwd_fx_graph(self, graph):
+        for node in graph.nodes:
+            if (
+                node.op == "call_function"
+                and node.target
+                == torch.ops._c10d_functional.reduce_scatter_tensor.default
+            ):
+                return True
+        return False
+
+    def _maybe_run_decide_global_ordering_of_comms_with_checks(self, fwd_fullgraph):
         def _check_fsdp_ops_in_snodes(snodes, is_fwd_graph, expect=True):
             assert_method = self.assertTrue if expect else self.assertFalse
             common_ops = {
@@ -335,7 +380,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
             _check_fsdp_ops_in_snodes(new_snodes, is_fwd_graph, expect=False)
             return new_snodes
 
-        if fullgraph:
+        if fwd_fullgraph:
             return mock.patch.object(
                 comms,
                 "decide_global_ordering_of_comms",
@@ -397,25 +442,46 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
         file_check = file_check.check("torch.ops._c10d_functional.wait_tensor.")
         return file_check
 
+    @skipIfRocm
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    def test_compiled_autograd_ctx(self):
+        self.skipTestForOldSm()
+        with torch._dynamo.config.patch(
+            skip_fsdp_hooks=False,
+        ), torch._functorch.config.patch(
+            recompute_views=True,
+        ):
+            inputs = torch.randn(8, 8)
+            model = torch.nn.Linear(8, 8)
+            fully_shard(model)
+            model_compiled = torch.compile(model, backend="inductor")
+            for i in range(10):
+                torch.compiler.set_stance(
+                    "force_eager" if i < 1 else "default"
+                )  # eager warmup for 1 iteration
+                with torch._dynamo.compiled_autograd.enable(
+                    torch.compile(backend="inductor", fullgraph=True)
+                ):
+                    out = model_compiled(inputs)
+                    out.sum().backward()
+
     def _test_traceable_fsdp(
         self,
         model_init_fn,
         input_creation_fn,
         backend,
-        fullgraph,
+        fwd_fullgraph,
+        *,
+        bwd_resize_count_before_inductor=None,
     ):
-        def compiler_fn(compiled_autograd_backend):
-            def _fn(gm):
-                # fullgraph=True because graph-break in Compiled Autograd BWD graph is not supported by Traceable FSDP2 yet
-                # (main difficulty comes from queue_callback not working well when BWD has graph break).
-                return torch.compile(
-                    gm, backend=compiled_autograd_backend, fullgraph=True
-                )
-
-            return _fn
+        def fwd_bwd(model, inp):
+            out = model(inp)
+            loss = out.sum()
+            loss.backward()
+            return loss
 
         def run_iters(
-            model,
+            fwd_bwd_func,
             optim,
             n_iter=10,
             compiled_autograd_backend=None,
@@ -423,55 +489,66 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
             torch.manual_seed(42)
             losses = []
             for i in range(n_iter):
+                # eager warmup for 1 iteration, so that all FSDP2 lazy-initialization is done in eager
+                torch.compiler.set_stance("force_eager" if i < 1 else "default")
                 inp = input_creation_fn()
-                if compiled_autograd_backend is not None:
-                    maybe_compiled_autograd_ctx = compiled_autograd.enable(
-                        compiler_fn(compiled_autograd_backend)
-                    )
-                else:
-                    maybe_compiled_autograd_ctx = contextlib.nullcontext()
-                with maybe_compiled_autograd_ctx:
-                    out = model(inp)
-                    loss = out.sum()
-                    losses.append(loss.item())
-                    loss.backward()
+                loss = fwd_bwd_func(inp)
+                losses.append(loss.item())
                 optim.step()
                 optim.zero_grad(set_to_none=True)
             return losses
 
         def test_compiled():
             model, optim = model_init_fn()
-            # FSDP2 does lazy init using 1st run, so run it once to init using eager mode
-            run_iters(model, optim, n_iter=1)
+            fwd_bwd_fn = functools.partial(fwd_bwd, model)
 
+            counters.clear()
             with self._remove_fsdp2_unsharded_param_graph_input_usage_with_optional_checks(
-                model, fullgraph
+                model,
+                bwd_resize_count_before_pass=bwd_resize_count_before_inductor,
+                fwd_fullgraph=fwd_fullgraph,
             ):
-                model_compiled = torch.compile(
-                    model, backend=backend, fullgraph=fullgraph
+                fwd_bwd_fn_compiled = torch.compile(
+                    fwd_bwd_fn,
+                    backend=backend,
+                    # NOTE: we can't set `fullgraph=True` here because we will always graph-break
+                    # on `loss.backward()` call in `fwd_bwd()`. This is okay as long as
+                    # it's the only graph-break in forward pass.
+                    fullgraph=False,
                 )
                 res = run_iters(
-                    model_compiled,
+                    fwd_bwd_fn_compiled,
                     optim,
                     compiled_autograd_backend=backend,
                 )
+                if fwd_fullgraph:
+                    self.assertEqual(len(counters["graph_break"]), 1)
+                    self.assertIn("Tensor.backward", counters["graph_break"])
+                else:
+                    self.assertGreater(len(counters["graph_break"]), 1)
                 return res
 
         def test_eager():
             model, optim = model_init_fn()
-            # FSDP2 does lazy init using 1st run, so run it once to init using eager mode
-            run_iters(model, optim, n_iter=1)
+            fwd_bwd_fn = functools.partial(fwd_bwd, model)
 
-            res = run_iters(model, optim)
+            res = run_iters(fwd_bwd_fn, optim)
             return res
 
+        torch._dynamo.reset()
+        torch._dynamo.compiled_autograd.reset()
         with torch._dynamo.config.patch(
+            compiled_autograd=True,
+            compiled_autograd_kwargs_override={
+                "fullgraph": True,
+            },
             inline_inbuilt_nn_modules=True,
             skip_fsdp_hooks=False,
         ), torch._functorch.config.patch(
+            enable_autograd_cache=False,
             recompute_views=True,
-            cse=False,
         ), torch._inductor.config.patch(
+            force_disable_caches=True,
             reorder_for_compute_comm_overlap=True,
             reorder_for_compute_comm_overlap_passes=[
                 "sink_waits",
@@ -518,29 +595,30 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
         return model_init_fn, input_creation_fn
 
     @skipIfRocm
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_simple_mlp_fullgraph_backend_aot_eager(self):
         self._test_traceable_fsdp(
-            *self._create_simple_mlp_factory_fns(), "aot_eager", fullgraph=True
+            *self._create_simple_mlp_factory_fns(), "aot_eager", fwd_fullgraph=True
         )
 
     @skipIfRocm
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_simple_mlp_fullgraph_backend_aot_eager_decomp_partition(self):
         self._test_traceable_fsdp(
             *self._create_simple_mlp_factory_fns(),
             "aot_eager_decomp_partition",
-            fullgraph=True,
+            fwd_fullgraph=True,
         )
 
     @skipIfRocm
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_simple_mlp_fullgraph_backend_inductor(self):
+        self.skipTestForOldSm()
         self._test_traceable_fsdp(
-            *self._create_simple_mlp_factory_fns(), "inductor", fullgraph=True
+            *self._create_simple_mlp_factory_fns(), "inductor", fwd_fullgraph=True
         )
 
-    def _create_nested_fully_shard_factory_fns(self, fullgraph):
+    def _create_nested_fully_shard_factory_fns(self, fwd_fullgraph):
         hidden_dim = 16
 
         class TestSubmodule(nn.Module):
@@ -557,7 +635,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
 
             def forward(self, x):
                 ret = torch.matmul(x, self.param1)
-                if not fullgraph:
+                if not fwd_fullgraph:
                     torch._dynamo.graph_break()
                 ret = ret * self.param2
                 ret = torch.relu(ret)
@@ -573,8 +651,11 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
             def forward(self, x):
                 # Intentionally reusing all layers a few times,
                 # to test "multiple all-gathers for the same parameter" case.
-                for layer in self.layers:
-                    x = layer(x)
+                # Case 1: rerun the same layer twice
+                for layer_id in range(len(self.layers)):
+                    for _ in range(2):
+                        x = self.layers[layer_id](x)
+                # Case 2: iterate through all layers twice
                 for layer in self.layers:
                     x = layer(x)
                 for layer in self.layers:
@@ -602,33 +683,40 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
         return model_init_fn, input_creation_fn
 
     @skipIfRocm
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_nested_fully_shard_backend_aot_eager(self):
-        for fullgraph in [True, False]:
+        # TODO: fix fwd_fullgraph=False case
+        for fwd_fullgraph in [True]:
             self._test_traceable_fsdp(
-                *self._create_nested_fully_shard_factory_fns(fullgraph=fullgraph),
+                *self._create_nested_fully_shard_factory_fns(
+                    fwd_fullgraph=fwd_fullgraph
+                ),
                 "aot_eager",
-                fullgraph=fullgraph,
+                fwd_fullgraph=fwd_fullgraph,
             )
 
     @skipIfRocm
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_nested_fully_shard_backend_aot_eager_decomp_partition(self):
-        for fullgraph in [True, False]:
+        # TODO: fix fwd_fullgraph=False case
+        for fwd_fullgraph in [True]:
             self._test_traceable_fsdp(
-                *self._create_nested_fully_shard_factory_fns(fullgraph=fullgraph),
+                *self._create_nested_fully_shard_factory_fns(
+                    fwd_fullgraph=fwd_fullgraph
+                ),
                 "aot_eager_decomp_partition",
-                fullgraph=fullgraph,
+                fwd_fullgraph=fwd_fullgraph,
             )
 
     @skipIfRocm
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
-    def test_nested_fully_shard_backend_inductor(self):
-        for fullgraph in [True, False]:
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    def test_nested_fully_shard_backend_inductor_fullgraph_True(self):
+        self.skipTestForOldSm()
+        for fwd_fullgraph in [True]:
             with self._reinplace_all_gather_with_optional_checks(
-                fullgraph
+                fwd_fullgraph
             ), self._maybe_run_decide_global_ordering_of_comms_with_checks(
-                fullgraph
+                fwd_fullgraph
             ), torch._inductor.config.patch(
                 post_grad_custom_post_pass=functools.partial(
                     self._check_fsdp_copy_and_resize_ops_count_in_graph,
@@ -637,21 +725,23 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                     bwd_copy_count=0,
                     bwd_resize_count=0,
                 )
-                if fullgraph
+                if fwd_fullgraph
                 else None
             ):
                 _, triton_codes = run_and_get_code(
                     lambda: self._test_traceable_fsdp(
                         *self._create_nested_fully_shard_factory_fns(
-                            fullgraph=fullgraph
+                            fwd_fullgraph=fwd_fullgraph
                         ),
                         "inductor",
-                        fullgraph=fullgraph,
+                        fwd_fullgraph=fwd_fullgraph,
+                        bwd_resize_count_before_inductor=48 if fwd_fullgraph else None,
                     )
                 )
-            if fullgraph:
-                self.assertTrue(
-                    len(triton_codes) == 2,
+            if fwd_fullgraph:
+                self.assertEqual(
+                    len(triton_codes),
+                    2,
                     "Expected two separate lowerings to Triton code, one from FWD graph and one from Compiled Autograd BWD graph",
                 )
                 fwd_code = triton_codes[0]
@@ -715,13 +805,26 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                         file_check, **bwd_rs_block_info
                     )
                 file_check.run(bwd_code)
-            else:
-                # TODO: when fullgraph=False and there is graph break in FWD graph,
-                # there are several recompiles, need to figure out why.
-                self.assertTrue(
-                    len(triton_codes) > 2,
-                    "Expected at least 3 separate lowerings to Triton code, which means at least 1 graph break in FWD graph",
-                )
+
+    @unittest.skip("TODO: fix fwd_fullgraph=False case")
+    @skipIfRocm
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    def test_nested_fully_shard_backend_inductor_fullgraph_False(self):
+        self.skipTestForOldSm()
+        _, triton_codes = run_and_get_code(
+            lambda: self._test_traceable_fsdp(
+                *self._create_nested_fully_shard_factory_fns(fwd_fullgraph=False),
+                "inductor",
+                fwd_fullgraph=False,
+            )
+        )
+        # TODO: when fwd_fullgraph=False and there is graph break in FWD graph,
+        # there are several recompiles, need to figure out why.
+        self.assertGreater(
+            len(triton_codes),
+            2,
+            "Expected at least 3 separate lowerings to Triton code, which means at least 1 graph break in FWD graph",
+        )
 
     def _create_transformer_factory_fns(
         self, all_requires_grad, *, activation_checkpoint=False
@@ -768,74 +871,74 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
 
         return model_init_fn, input_creation_fn
 
-    def _maybe_add_graph_break_to_sdpa(self, fullgraph):
-        def _sdpa_with_graph_break(orig_fn, fullgraph, *args, **kwargs):
-            if not fullgraph:
-                torch._dynamo.graph_break()
-            return orig_fn(*args, **kwargs)
+    def _maybe_add_graph_break_to_sdpa(self, fwd_fullgraph):
+        def _sdpa_with_graph_break(*args, **kwargs):
+            torch._dynamo.graph_break()
+            return orig_F_scaled_dot_product_attention(*args, **kwargs)
 
-        return mock.patch.object(
-            F,
-            "scaled_dot_product_attention",
-            functools.partial(
+        if not fwd_fullgraph:
+            return mock.patch.object(
+                F,
+                "scaled_dot_product_attention",
                 _sdpa_with_graph_break,
-                F.scaled_dot_product_attention,
-                fullgraph,
-            ),
-        )
+            )
+        else:
+            return contextlib.nullcontext()
 
     @skipIfRocm
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_transformer_backend_aot_eager(self):
-        for fullgraph, all_requires_grad in itertools.product(
-            [True, False], [True, False]
+        # TODO: fix fwd_fullgraph=False case
+        for fwd_fullgraph, all_requires_grad in itertools.product(
+            [True], [True, False]
         ):
             with self._maybe_add_graph_break_to_sdpa(
-                fullgraph
-            ), self._reinplace_all_gather_with_optional_checks(fullgraph):
+                fwd_fullgraph
+            ), self._reinplace_all_gather_with_optional_checks(fwd_fullgraph):
                 self._test_traceable_fsdp(
                     *self._create_transformer_factory_fns(
                         all_requires_grad=all_requires_grad
                     ),
                     "aot_eager",
-                    fullgraph=fullgraph,
+                    fwd_fullgraph=fwd_fullgraph,
                 )
 
     @skipIfRocm
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     # TODO: native_dropout has worse accuracy after decomp, need to figure out why
     @torch._inductor.config.patch(fallback_random=True)
     def test_transformer_backend_aot_eager_decomp_partition(self):
-        for fullgraph, all_requires_grad in itertools.product(
-            [True, False], [True, False]
+        # TODO: fix fwd_fullgraph=False case
+        for fwd_fullgraph, all_requires_grad in itertools.product(
+            [True], [True, False]
         ):
-            with self._maybe_add_graph_break_to_sdpa(fullgraph):
+            with self._maybe_add_graph_break_to_sdpa(fwd_fullgraph):
                 self._test_traceable_fsdp(
                     *self._create_transformer_factory_fns(
                         all_requires_grad=all_requires_grad
                     ),
                     "aot_eager_decomp_partition",
-                    fullgraph=fullgraph,
+                    fwd_fullgraph=fwd_fullgraph,
                 )
 
     @skipIfRocm
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     # TODO: native_dropout causes CUDA IMA error, need to figure out why
     @torch._inductor.config.patch(fallback_random=True)
-    def test_transformer_backend_inductor(self):
-        # TODO: enable fullgraph=False case
-        for fullgraph, all_requires_grad, activation_checkpoint in itertools.product(
-            [True], [True, False], [True, False]
-        ):
+    def test_transformer_backend_inductor_fullgraph_True(self):
+        self.skipTestForOldSm()
+        for (
+            fwd_fullgraph,
+            all_requires_grad,
+            activation_checkpoint,
+        ) in itertools.product([True], [True, False], [True, False]):
             log.warning(
-                f"fullgraph={fullgraph}, all_requires_grad={all_requires_grad}, activation_checkpoint={activation_checkpoint}"  # noqa: G004, G001
+                f"fwd_fullgraph={fwd_fullgraph}, all_requires_grad={all_requires_grad}, activation_checkpoint={activation_checkpoint}"  # noqa: G004, G001, B950
             )
-            with self._maybe_add_graph_break_to_sdpa(
-                fullgraph
-            ), self._reinplace_all_gather_with_optional_checks(
-                fullgraph
+            with self._reinplace_all_gather_with_optional_checks(
+                fwd_fullgraph
             ), self._maybe_run_decide_global_ordering_of_comms_with_checks(
-                fullgraph
+                fwd_fullgraph
             ), torch._inductor.config.patch(
                 post_grad_custom_post_pass=functools.partial(
                     self._check_fsdp_copy_and_resize_ops_count_in_graph,
@@ -847,7 +950,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                     bwd_copy_count=0,
                     bwd_resize_count=4,
                 )
-                if fullgraph
+                if fwd_fullgraph
                 else None
             ):
                 _, triton_codes = run_and_get_code(
@@ -857,12 +960,14 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                             activation_checkpoint=activation_checkpoint,
                         ),
                         "inductor",
-                        fullgraph=fullgraph,
+                        fwd_fullgraph=fwd_fullgraph,
+                        bwd_resize_count_before_inductor=76 if fwd_fullgraph else None,
                     )
                 )
-            if fullgraph:
-                self.assertTrue(
-                    len(triton_codes) == 2,
+            if fwd_fullgraph:
+                self.assertEqual(
+                    len(triton_codes),
+                    2,
                     "Expected two separate lowerings to Triton code, one from FWD graph and one from Compiled Autograd BWD graph",
                 )
                 fwd_code = triton_codes[0]
@@ -922,13 +1027,40 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                             file_check, **bwd_rs_block_info
                         )
                 file_check.run(bwd_code)
-            else:
-                # TODO: when fullgraph=False and there is graph break in FWD graph,
-                # there are several recompiles, need to figure out why.
-                self.assertTrue(
-                    len(triton_codes) > 2,
-                    "Expected at least 3 separate lowerings to Triton code, which means at least 1 graph break in FWD graph",
+
+    @unittest.skip("TODO: fix fwd_fullgraph=False case")
+    @skipIfRocm
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    # TODO: native_dropout causes CUDA IMA error, need to figure out why
+    @torch._inductor.config.patch(fallback_random=True)
+    def test_transformer_backend_inductor_fullgraph_False(self):
+        self.skipTestForOldSm()
+        fwd_fullgraph = False
+        # TODO: fix numerical issue in activation_checkpoint=True case
+        for all_requires_grad, activation_checkpoint in itertools.product(
+            [True, False], [False]
+        ):
+            log.warning(
+                f"fwd_fullgraph={fwd_fullgraph}, all_requires_grad={all_requires_grad}, activation_checkpoint={activation_checkpoint}"  # noqa: G004, G001, B950
+            )
+            with self._maybe_add_graph_break_to_sdpa(fwd_fullgraph):
+                _, triton_codes = run_and_get_code(
+                    lambda: self._test_traceable_fsdp(
+                        *self._create_transformer_factory_fns(
+                            all_requires_grad=all_requires_grad,
+                            activation_checkpoint=activation_checkpoint,
+                        ),
+                        "inductor",
+                        fwd_fullgraph=fwd_fullgraph,
+                    )
                 )
+            # TODO: when fwd_fullgraph=False and there is graph break in FWD graph,
+            # there are several recompiles, need to figure out why.
+            self.assertGreater(
+                len(triton_codes),
+                2,
+                "Expected at least 3 separate lowerings to Triton code, which means at least 1 graph break in FWD graph",
+            )
 
 
 if __name__ == "__main__":

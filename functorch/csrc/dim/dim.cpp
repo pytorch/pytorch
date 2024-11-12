@@ -38,6 +38,7 @@ PyObject* Dim_init() {
 #include "python_variable_simple.h"
 
 #if IS_PYTHON_3_11_PLUS
+
 #define Py_BUILD_CORE
 #include "internal/pycore_opcode.h"
 #undef Py_BUILD_CORE
@@ -739,7 +740,7 @@ public:
 
     static mpy::obj<Tensor> create() {
         if (!TensorType) {
-            TensorType = (PyTypeObject*) mpy::import("functorch.dim").attr("Tensor").ptr();
+            TensorType = (PyTypeObject*) mpy::import("functorch.dim").attr("Tensor").release();
         }
         return Tensor::alloc(TensorType);
     }
@@ -867,7 +868,7 @@ mpy::object Tensor::from_positional(Arena & A, at::Tensor tensor, Slice<DimEntry
     }
     AT_ASSERT(last == 0 || last == -1);
     if (!seen_dims) {
-        return mpy::object::steal(THPVariable_Wrap(std::move(tensor)));
+        return mpy::object::steal(THPVariable_Wrap(tensor));
     }
 
     mpy::obj<Tensor> self = Tensor::create();

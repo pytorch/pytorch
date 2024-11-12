@@ -112,7 +112,7 @@ class TORCH_API ExprHandle {
   }
 
 #define IMM_EXPR_DECLARE(Type, Name) ExprHandle(Type v);
-  AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, IMM_EXPR_DECLARE);
+  AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, IMM_EXPR_DECLARE)
 #undef IMM_EXPR_DECLARE
 
   template <class Op>
@@ -274,7 +274,7 @@ class TORCH_API Buf : public ExprNode<Buf> {
 
   ExprPtr initializer() const {
     return initializer_;
-  };
+  }
 
   ExprPtr qzero() const {
     return qzero_;
@@ -488,6 +488,6 @@ TORCH_API ExprHandle Relu(const ExprHandle& v1);
 TORCH_API ExprHandle
 ifThenElse(const ExprHandle& c, const ExprHandle& t, const ExprHandle& f);
 
-TORCH_API ExprHandle expr_to_vec(ExprHandle v, int lanes);
+TORCH_API ExprHandle expr_to_vec(const ExprHandle& v, int lanes);
 
 } // namespace torch::jit::tensorexpr

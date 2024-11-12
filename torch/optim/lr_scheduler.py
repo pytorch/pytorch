@@ -247,8 +247,7 @@ class LRScheduler:
                 else:
                     values = self.get_lr()
 
-        for i, data in enumerate(zip(self.optimizer.param_groups, values)):
-            param_group, lr = data
+        for param_group, lr in zip(self.optimizer.param_groups, values):
             if isinstance(param_group["lr"], Tensor):
                 param_group["lr"].fill_(lr)
             else:
@@ -909,13 +908,25 @@ class SequentialLR(LRScheduler):
             group["lr"] = group["initial_lr"]
 
         # "Undo" the step performed by other schedulers
-        for scheduler in self._schedulers:
-            scheduler.last_epoch -= 1
+        self.recursive_undo()
 
         # Perform the initial step for only the first scheduler
         self._schedulers[0]._initial_step()
 
         self._last_lr = schedulers[0].get_last_lr()
+
+    def recursive_undo(self, sched=None):
+        """
+        Recursively undo any step performed by the initialisation of
+        schedulers.
+        """
+        scheds = self if sched is None else sched
+
+        if hasattr(scheds, "_schedulers"):
+            for s in scheds._schedulers:
+                self.recursive_undo(s)
+        elif hasattr(scheds, "last_epoch"):
+            scheds.last_epoch -= 1
 
     def step(self):  # type: ignore[override]
         """Perform a step."""
@@ -1318,8 +1329,10 @@ class ReduceLROnPlateau(LRScheduler):
                 raise ValueError(
                     f"expected {len(optimizer.param_groups)} min_lrs, got {len(min_lr)}"
                 )
+            self.default_min_lr = None
             self.min_lrs = list(min_lr)
         else:
+            self.default_min_lr = min_lr
             self.min_lrs = [min_lr] * len(optimizer.param_groups)
 
         self.patience = patience
@@ -1375,6 +1388,20 @@ class ReduceLROnPlateau(LRScheduler):
         self._last_lr = [group["lr"] for group in self.optimizer.param_groups]
 
     def _reduce_lr(self, epoch):
+        if len(self.optimizer.param_groups) != len(self.min_lrs):
+            if self.default_min_lr is None:
+                raise RuntimeError(
+                    "The number of param groups in the `optimizer` "
+                    f"({len(self.optimizer.param_groups)}) differs "
+                    f"from when `ReduceLROnPlateau` was initialized "
+                    f"({len(self.min_lrs)}), usually due to a new "
+                    "param group being added to the optimizer. Please "
+                    "modify the `min_lrs` field to match the length "
+                    "of the `optimizer` param groups."
+                )
+            else:
+                self.min_lrs = [self.default_min_lr] * len(self.optimizer.param_groups)
+
         for i, param_group in enumerate(self.optimizer.param_groups):
             old_lr = float(param_group["lr"])
             new_lr = max(old_lr * self.factor, self.min_lrs[i])
@@ -1837,8 +1864,7 @@ class CosineAnnealingWarmRestarts(LRScheduler):
         self.last_epoch = math.floor(epoch)
 
         with _enable_get_lr_call(self):
-            for i, data in enumerate(zip(self.optimizer.param_groups, self.get_lr())):
-                param_group, lr = data
+            for param_group, lr in zip(self.optimizer.param_groups, self.get_lr()):
                 param_group["lr"] = lr
 
         self._last_lr = [group["lr"] for group in self.optimizer.param_groups]

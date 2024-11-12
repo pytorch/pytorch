@@ -18,7 +18,7 @@ struct InputBuffer {
   explicit InputBuffer(size_t size) : buffer(size) {}
   InputBuffer(const InputBuffer& other) = delete;
   InputBuffer(InputBuffer&& other) = default;
-  explicit InputBuffer(variable_list&& inputs) : buffer(std::move(inputs)){};
+  explicit InputBuffer(variable_list&& inputs) : buffer(std::move(inputs)) {}
   InputBuffer& operator=(InputBuffer&& other) = default;
 
   // Accumulates the variable at a specified index.
@@ -29,8 +29,6 @@ struct InputBuffer {
       Variable&& var,
       const std::optional<c10::Stream>& opt_producer_stream,
       const std::optional<c10::Stream>& opt_consumer_stream);
-
-  at::Device device() const;
 
   Variable operator[](size_t pos) {
     return buffer[pos];

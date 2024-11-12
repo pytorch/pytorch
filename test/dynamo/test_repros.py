@@ -10,6 +10,7 @@ import copy
 import dataclasses
 import functools
 import gc
+import importlib
 import inspect
 import itertools
 import os
@@ -20,9 +21,9 @@ import weakref
 from abc import ABC
 from collections import namedtuple
 from copy import deepcopy
-from enum import Enum
+from enum import Enum, IntEnum
 from functools import wraps
-from typing import Any, Dict, Iterator, List, Tuple
+from typing import Any, Dict, Iterator, List, Literal, Tuple, TypedDict
 from unittest import mock
 
 import numpy as np
@@ -36,7 +37,7 @@ import torch.library
 import torch.utils._pytree as pytree
 from torch import nn
 from torch._dynamo.debug_utils import same_two_models
-from torch._dynamo.testing import CompileCounter, rand_strided, same
+from torch._dynamo.testing import CompileCounter, rand_strided, same, skipIfPy312
 from torch._inductor.utils import fresh_inductor_cache
 from torch.nn import functional as F
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
@@ -62,6 +63,15 @@ requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "requires cuda")
 
 
 _GLOBAL_CPU_TENSOR = torch.randn(3)
+
+HAS_MSGSPEC = importlib.util.find_spec("msgspec")
+if HAS_MSGSPEC:
+    import msgspec
+
+
+HAS_OMEGACONG = importlib.util.find_spec("omegaconf")
+if HAS_OMEGACONG:
+    from omegaconf import OmegaConf
 
 
 def exists(val):
@@ -457,7 +467,7 @@ class PartialT5(torch.nn.Module):
         if past_key_value is not None:
             assert (
                 len(past_key_value) == 2
-            ), f"past_key_value should have 2 past states: keys and values. Got { len(past_key_value)} past states"
+            ), f"past_key_value should have 2 past states: keys and values. Got {len(past_key_value)} past states"
             real_seq_length += (
                 past_key_value[0].shape[2] if query_length is None else query_length
             )
@@ -1690,10 +1700,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_model(inp)
         opt_model(inp)
         self.assertEqual(cnt.frame_count, 1)
-
-        self.assertEqual(
-            15 if torch._dynamo.config.inline_inbuilt_nn_modules else 12, cnt.op_count
-        )
+        self.assertEqual(12, cnt.op_count)
 
     def test_exec_import(self):
         def fn1():
@@ -3699,9 +3706,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         with self.assertRaises(RuntimeError):
             torch.jit.trace(f, torch.randn(3))
 
-        with torch._dynamo.config.patch(error_on_nested_jit_trace=False):
-            torch.jit.trace(f, torch.randn(3))
-
     @torch._dynamo.config.patch("assume_static_by_default", False)
     def test_tensor_split(self):
         def f(x):
@@ -4162,7 +4166,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
     def test_inductor_no_recursionerror_on_for_loops(self):
         def forward(x):
-            for _ in range(1000):
+            for _ in range(10000):
                 x = 1.0 * x
             return x
 
@@ -4546,6 +4550,84 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             f(*args)
         self.assertEqual(num_compiles, 1)
 
+    def test_issue134451(self):
+        class BoundingBox2DIndex(IntEnum):
+            _X = 0
+            _Y = 1
+            _HEADING = 2
+            _LENGTH = 3
+            _WIDTH = 4
+
+            @classmethod
+            def size(cls):
+                return 5
+
+            @classmethod
+            @property
+            def X(cls):
+                return cls._X
+
+            @classmethod
+            @property
+            def Y(cls):
+                return cls._Y
+
+            @classmethod
+            @property
+            def HEADING(cls):
+                return cls._HEADING
+
+            @classmethod
+            @property
+            def LENGTH(cls):
+                return cls._LENGTH
+
+            @classmethod
+            @property
+            def WIDTH(cls):
+                return cls._WIDTH
+
+            @classmethod
+            @property
+            def POINT(cls):
+                # assumes X, Y have subsequent indices
+                return slice(cls._X, cls._Y + 1)
+
+            @classmethod
+            @property
+            def STATE_SE2(cls):
+                # assumes X, Y, HEADING have subsequent indices
+                return slice(cls._X, cls._HEADING + 1)
+
+        class SimpleModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self._mlp_states = nn.Sequential(
+                    nn.Linear(10, 20),
+                    nn.ReLU(),
+                    nn.Linear(20, BoundingBox2DIndex.size()),
+                )
+
+            def forward(self, x):
+                agent_states = self._mlp_states(x)
+                agent_states[..., BoundingBox2DIndex.POINT] = (
+                    agent_states[..., BoundingBox2DIndex.POINT].tanh() * 32
+                )
+                agent_states[..., BoundingBox2DIndex.HEADING] = (
+                    agent_states[..., BoundingBox2DIndex.HEADING].tanh() * torch.pi
+                )
+                return agent_states
+
+        model = SimpleModel().eval()
+        input_tensor = torch.randn(1, 10, dtype=torch.float32)
+        opt = torch.compile(model.eval(), backend="eager", fullgraph=True)
+        actual = opt(input_tensor)
+        try:
+            expected = model(input_tensor)
+        except Exception as e:
+            raise unittest.SkipTest("eager failed, requires Python>=3.12") from e
+        self.assertEqual(actual, expected)
+
     def test_invalid_seq_unpack(self):
         def myfn(arg):
             (a, b) = arg
@@ -4773,6 +4855,20 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         expected = instances[0].cat(instances)
         self.assertEqual(type(actual), type(expected))
         self.assertEqual(actual.__dict__, expected.__dict__)
+
+    def test_weakref_construction(self):
+        def fn(x, y):
+            x_weak = weakref.ref(x)
+            return x_weak() * y
+
+        x = torch.randn(4)
+        y = torch.randn(4)
+
+        ref = fn(x, y)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x, y)
+        self.assertEqual(ref, res)
 
     def test_weakref(self):
         def fn(x_weak, weight, y):
@@ -5927,6 +6023,19 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         res = compile_outer(x)
         self.assertEqual(ref, res)
 
+    # https://github.com/pytorch/pytorch/issues/136640
+    def test_inductor_dynamic_shapes_broadcasting(self) -> None:
+        def fn(x, y):
+            x_view = x.view(-1, 4)
+            y_view = y.view(-1, 4)
+            return x_view * y_view
+
+        x = torch.randn(4)
+        y = torch.randn(8)
+        out_ref = fn(x, y)
+        out_test = torch.compile(fn, dynamic=True)(x, y)
+        self.assertEqual(out_ref, out_test)
+
     # https://github.com/pytorch/pytorch/issues/119162
     def test_inductor_rng_default_dtype(self) -> None:
         @torch.compile
@@ -5942,6 +6051,223 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
             torch.set_default_dtype(old)
         # output dtype should be float32
         self.assertEqual(out.dtype, torch.bfloat16)
+
+    @unittest.skipIf(not HAS_MSGSPEC, "missing msgspec package")
+    def test_c_defined_metaclass(self):
+        class User(msgspec.Struct):
+            """A new type describing a User"""
+
+            name: str
+            value: int
+
+        def fn(x):
+            u = User("alice", 10)
+            return x * u.value
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager")
+        self.assertEqual(fn(x), opt_fn(x))
+
+    @unittest.skipIf(not HAS_OMEGACONG, "missing omegaconf package")
+    def test_omegaconf_dictconfig(self):
+        def fn(cfg, x):
+            a = cfg["foo"].a * x
+            b = cfg.bar["b"] * a
+            cfg.__dict__["baz"] = 4
+            return b * cfg.baz
+
+        config = OmegaConf.create({"foo": {"a": 3}, "bar": {"b": 5}})
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        ref = fn(config, x)
+        cloned_config = copy.deepcopy(config)
+        res = opt_fn(cloned_config, x)
+
+        self.assertEqual(fn(config, x), opt_fn(config, x))
+        self.assertEqual(cloned_config.baz, 4)
+
+    # https://github.com/pytorch/pytorch/issues/136257
+    def test_overwriting_params(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = torch.nn.Linear(2, 2)
+                self.fc2 = torch.nn.Linear(2, 2)
+
+            def forward(self, x):
+                x = self.fc1(x)
+                x = self.fc2(x)
+                return x
+
+        class ZeROOrderedDict(collections.OrderedDict):
+            def __init__(self, parent_module=None, *args, **kwargs):
+                """A replacement for ``collections.OrderedDict`` to detect external ZeRO params.
+
+                Args:
+                    parent_module (``collections.OrderedDict``): the collection to replace
+                """
+
+                super().__init__(*args, **kwargs)
+                self._parent_module = parent_module
+
+            def __getitem__(self, key):
+                param = super().__getitem__(key)
+
+                # Params can be registered as None (e.g., bias)
+                if param is None:
+                    return param
+
+                # do something here
+                return param
+
+        def inject_parameters(module, cls):
+            for module in module.modules():  # noqa: B020
+                if cls == ZeROOrderedDict:
+                    new_param = cls(parent_module=module)
+                else:
+                    new_param = cls()
+
+                for key, param in module._parameters.items():
+                    new_param[key] = param
+                module._parameters = new_param
+
+        model = M()
+
+        inject_parameters(model, ZeROOrderedDict)
+
+        model = torch.compile(model, backend="eager", fullgraph=True)
+
+        x = torch.ones(2)
+        with torch.no_grad():
+            y = model(x)
+
+    def test_typed_dict(self):
+        class LlavaImagePixelInputs(TypedDict):
+            type: Literal["pixel_values"]
+            data: torch.Tensor
+            """Shape: `(batch_size, num_channels, height, width)`"""
+
+        def fn(x, y):
+            obj = LlavaImagePixelInputs(type=int, data=y)
+            out = x * obj["data"]
+            obj["data"] = 3
+            return out * obj["data"]
+
+        x, y = torch.randn(4), torch.randn(4)
+        ref = fn(x, y)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x, y)
+
+        self.assertEqual(ref, res)
+
+    def test_typed_dict_total(self):
+        class LlavaImagePixelInputs(TypedDict):
+            type: Literal["pixel_values"]
+            data: torch.Tensor
+            """Shape: `(batch_size, num_channels, height, width)`"""
+
+        def fn(x, y):
+            obj = LlavaImagePixelInputs(data=y, total=False)
+            return x * obj["data"]
+
+        x, y = torch.randn(4), torch.randn(4)
+        ref = fn(x, y)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x, y)
+
+        self.assertEqual(ref, res)
+
+    @skipIfPy312  # listcomp bytecode is optimized
+    def test_listcomp(self):
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self._num = 4
+
+            @torch._dynamo.disable(recursive=False)
+            def forward(self, x):
+                values = [i * torch.cos(x) for i in range(self._num)]
+                return sum(values)
+
+        mod = Module()
+
+        def fn(x):
+            return mod(x)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt)
+        x = torch.randn(4)
+
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+        self.assertEqual(cnt.frame_count, 1)
+        # Ensure that the listcomp is fully compiled
+        self.assertEqual(cnt.op_count, 8)
+
+    # https://github.com/pytorch/pytorch/issues/140266
+    def test_distributions_subclass(self):
+        import torch
+        from torch.distributions import Categorical
+
+        class SubCateg(Categorical):
+            ...
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def make_dist_and_execute(t, d):
+            categ = d(logits=t)
+            a = categ.log_prob(categ.sample()) + categ.probs + categ.logits
+            return a
+
+        for _ in range(2):
+            make_dist_and_execute(torch.randn(10), SubCateg)
+
+    def test_tensor_split_within_device_cm(self):
+        @torch.compile(fullgraph=True)
+        def split(x):
+            return x.split(4, 0)
+
+        x = torch.zeros(12)
+        res = split(x)
+
+        with torch.device("cpu"):
+            self.assertEqual(res, split(x))
+
+    def test_method_overriding(self):
+        class DilateConv(torch.nn.Module):
+            def __init__(
+                self,
+                dilate_func=None,
+            ):
+                super().__init__()
+                self.dilate_func = dilate_func
+
+            def forward(self, x):
+                return self.dilate_func() * torch.sin(x)
+
+        class MainModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mod = DilateConv(self.dilate_func)
+                self.a = 4
+
+            def dilate_func(self):
+                return self.a
+
+            def forward(self, x):
+                return self.mod(x)
+
+        mod = MainModule()
+
+        opt_mod = torch.compile(mod, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        ref = mod(x)
+        res = opt_mod(x)
+        self.assertEqual(ref, res)
 
 
 instantiate_parametrized_tests(ReproTests)

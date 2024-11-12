@@ -578,7 +578,7 @@ RangeValue::RangeValue(
 
 SugaredValuePtr RangeValue::iter(const SourceRange& loc, GraphFunction& m) {
   return shared_from_this();
-};
+}
 
 Value* RangeValue::len(const SourceRange& loc, GraphFunction& m) {
   if (static_len_) {

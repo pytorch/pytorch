@@ -545,6 +545,24 @@ class TestForeach(TestCase):
             # Regression test for https://github.com/pytorch/pytorch/issues/113156
             torch._foreach_mul_(tensors, 1)
 
+    @onlyCUDA
+    @dtypes(torch.float32)
+    def test_foreach_check_stride_ignore_dims_of_one(self, device, dtype):
+        # default tensor stride is (9, 9, 3, 1).
+        tensor = torch.ones((2, 1, 3, 3), device=device, dtype=dtype)
+        strided_tensor = torch.ones(
+            (2, 1, 3, 3), device=device, dtype=dtype
+        ).as_strided((2, 1, 3, 3), (9, 1, 3, 1))
+        left_inputs = [tensor, strided_tensor]
+        right_inputs = [strided_tensor, tensor]
+        compare_result = tensor + strided_tensor
+        foreach_add_check_ = ForeachFuncWrapper(torch._foreach_add)
+        out = foreach_add_check_(
+            (left_inputs, right_inputs), is_cuda=True, expect_fastpath=True
+        )
+        for res in out:
+            self.assertEqual(res, compare_result)
+
     @ops(
         filter(lambda op: op.supports_out, foreach_binary_op_db),
         dtypes=OpDTypes.supported,
@@ -996,20 +1014,34 @@ class TestForeach(TestCase):
     @onlyCUDA
     @ops(foreach_reduce_op_db, allowed_dtypes=floating_types())
     @parametrize("use_cuda_graph", (False, True))
-    def test_big_num_tensors(self, device, dtype, op, use_cuda_graph):
+    @parametrize("w_empty", (False, True))
+    def test_big_num_tensors(self, device, dtype, op, use_cuda_graph, w_empty):
+        # foreach_max cannot handle empty tensors as max requires an identity
+        intersperse_empty_tensors = w_empty and op.name != "_foreach_max"
+
         N = 600
+        indices_with_empty_tensors = (
+            set()
+            if not intersperse_empty_tensors
+            else {200, 300, 301, 400, 401, 402, 404, 598}
+        )
         tensorlist = [
             make_tensor((2, 3), dtype=dtype, device=device, noncontiguous=False)
-            for _ in range(N)
+            if i not in indices_with_empty_tensors
+            else torch.empty(0, dtype=dtype, device=device)
+            for i in range(N)
         ]
         fn, ref_fn, *_ = self._get_funcs(op)
 
         import math
 
         if op.name == "_foreach_norm":
-            ords = (1, 2, math.inf)
+            ords = [1, 2]
+            if not intersperse_empty_tensors:
+                # inf norm over an empty tensor is not defined by vector norm as it expects an identity
+                ords.append(math.inf)
         else:
-            ords = (None,)
+            ords = [None]
 
         for ord in ords:
             kwargs = {"ord": ord} if ord else {}
@@ -1037,20 +1069,28 @@ class TestForeach(TestCase):
 
     @onlyCUDA
     @ops(foreach_reduce_op_db)
-    def test_foreach_reduce_large_input(self, device, dtype, op):
-        # test inputs larger than kChunkSize = 65536
-        N = 65536 * 2
+    @parametrize("w_empty", (False, True))
+    def test_foreach_reduce_large_input(self, device, dtype, op, w_empty):
+        # test inputs larger than kChunkSize (65536) * max_num_blocks (320)
+        N = 65536 * 320 * 2
         disable_fastpath = False
         kwargs = {}
         if op.name == "_foreach_norm":
-            ord = 2
-            disable_fastpath = not (
-                ord in (1, 2)
-                and dtype in floating_types_and(torch.half, torch.bfloat16)
+            kwargs["ord"] = 2
+            disable_fastpath = dtype not in floating_types_and(
+                torch.half, torch.bfloat16
             )
-            kwargs["ord"] = ord
 
-        inputs = ([make_tensor((N,), dtype=dtype, device=device, noncontiguous=False)],)
+        tensorlist = [
+            make_tensor((N,), dtype=dtype, device=device, noncontiguous=False)
+        ]
+        # foreach_max cannot handle empty tensors as max over empty is undefined
+        if w_empty and op.name != "_foreach_max":
+            tensorlist += [
+                torch.empty(0, dtype=dtype, device=device),
+                make_tensor((N,), dtype=dtype, device=device, noncontiguous=False),
+            ]
+        inputs = (tensorlist,)
         wrapped_op, ref, _, _ = self._get_funcs(op)
         self.assertEqual(
             ref(inputs, **kwargs),
@@ -1349,6 +1389,7 @@ class TestForeach(TestCase):
                 "_foreach_log",
                 "_foreach_pow",
                 "_foreach_sqrt",
+                "_foreach_rsqrt",
             )
         ):
             value_range = {"low": 0.5, "high": 1.0}
@@ -1483,7 +1524,7 @@ def check_autodiff_sample(op, sample, dtype, is_inplace):
         return (
             False,
             "Trying to set a forward gradient that has a different size than that of the original Tensor, "
-            "this is not supported. Tensor is of size [] while the given forward gradient is of size [1, 1].",
+            "this is not supported. Tensor is of size [] while the given forward gradient is of size [1",
         )
     rhs_arg_has_complex_number = sample.args and (
         (

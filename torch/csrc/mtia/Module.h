@@ -2,11 +2,9 @@
 
 #include <torch/csrc/python_headers.h>
 
-namespace torch {
-namespace mtia {
+namespace torch::mtia {
 
 // PyMethodDef* python_functions();
 void initModule(PyObject* module);
 
-} // namespace mtia
-} // namespace torch
+} // namespace torch::mtia

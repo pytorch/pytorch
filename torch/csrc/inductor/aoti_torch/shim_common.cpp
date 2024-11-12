@@ -47,26 +47,31 @@
 
 #endif
 
-#if __has_include("filesystem")
-#include <filesystem>
-namespace fs = std::filesystem;
-#else
-#include <experimental/filesystem>
-namespace fs = std::experimental::filesystem;
-#endif
-
 #ifndef _WIN32
 #include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
+#include <climits>
+
+#else
+#include <filesystem>
+namespace fs = std::filesystem;
 #endif
 
 // HACK for failed builds in ARVR, where it cannot find these symbols within
 // std::experimental::filesystem
 namespace {
-fs::path get_current_path() {
-#if __has_include("filesystem")
-  return fs::current_path();
+std::string get_current_path() {
+#ifdef _WIN32
+  return fs::current_path().string();
 #else
-  throw std::runtime_error("Not implemented");
+  // NOLINTNEXTLINE(*array*)
+  char currentPath[PATH_MAX]{};
+  if (getcwd(currentPath, sizeof(currentPath)) != nullptr) {
+    return std::string(currentPath);
+  } else {
+    throw std::runtime_error("Failed to get current path");
+  }
 #endif
 }
 
@@ -74,16 +79,19 @@ bool file_exists(std::string& path) {
 #ifdef _WIN32
   return fs::exists(path);
 #else
-  struct stat rc;
+  struct stat rc {};
   return lstat(path.c_str(), &rc) == 0;
 #endif
 }
 
 bool create_directories(const std::string& path) {
-#if __has_include("filesystem")
+#ifdef _WIN32
   return fs::create_directories(path);
 #else
-  throw std::runtime_error("Not implemented");
+  if (mkdir(path.c_str(), 0777) == -1) {
+    throw std::runtime_error("Failed to create directory");
+  }
+  return true;
 #endif
 }
 } // namespace
@@ -104,13 +112,15 @@ static c10::Device c10_device(int32_t device_type, int32_t device_index) {
 
 const int AOTI_TORCH_MAX_NUMEL_TO_PRINT = 64;
 
-int32_t aoti_torch_device_type_cpu() {
-  return (int32_t)c10::DeviceType::CPU;
-}
+#define AOTI_TORCH_DEVICE_TYPE_IMPL(device_str, device_type) \
+  int32_t aoti_torch_device_type_##device_str() {            \
+    return (int32_t)c10::DeviceType::device_type;            \
+  }
 
-int32_t aoti_torch_device_type_cuda() {
-  return (int32_t)c10::DeviceType::CUDA;
-}
+AOTI_TORCH_DEVICE_TYPE_IMPL(cpu, CPU)
+AOTI_TORCH_DEVICE_TYPE_IMPL(cuda, CUDA)
+AOTI_TORCH_DEVICE_TYPE_IMPL(privateuse1, PrivateUse1)
+#undef AOTI_TORCH_DEVICE_TYPE_IMPL
 
 #define AOTI_TORCH_DTYPE_IMPL(dtype, stype) \
   int32_t aoti_torch_dtype_##dtype() {      \
@@ -990,6 +1000,7 @@ AOTITorchError aoti_torch_index_put_out(
     AtenTensorHandle self,
     const AtenTensorHandle* indices,
     const uint32_t num_indices,
+    // NOLINTNEXTLINE(misc-misplaced-const)
     const AtenTensorHandle values,
     bool accumulate) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
@@ -1037,16 +1048,16 @@ AOTI_TORCH_EXPORT void aoti_torch_save_tensor_handle(
   at::Tensor* t = tensor_handle_to_tensor_pointer(self);
 #ifndef C10_MOBILE
   // Save tensor to tmp .pt file for tensors and can be torch.load'ed later
-  std::string cwd = get_current_path().string();
+  std::string cwd = get_current_path();
   std::string tmp_folder = cwd + "/tmp/aoti_torch/";
   if (!file_exists(tmp_folder)) {
     std::cout
         << "aoti_torch_save_tensor_handle: Path does not exist, creating it..."
-        << tmp_folder << std::endl;
+        << tmp_folder << '\n';
 
     if (!create_directories(tmp_folder)) {
       std::cout << "aoti_torch_save_tensor_handle: Error creating directory: "
-                << tmp_folder << std::endl;
+                << tmp_folder << '\n';
       return;
     }
   }
@@ -1055,11 +1066,11 @@ AOTI_TORCH_EXPORT void aoti_torch_save_tensor_handle(
 
   auto bytes = torch::jit::pickle_save(c10::IValue(*t));
   std::ofstream fout(tensor_filepath_to_save, std::ios::out | std::ios::binary);
-  fout.write(bytes.data(), bytes.size());
+  fout.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
   fout.close();
 
   std::cout << "aoti_torch_save_tensor_handle: Saved tensor to "
-            << tensor_filepath_to_save << std::endl;
+            << tensor_filepath_to_save << '\n';
 #endif // !defined(C10_MOBILE)
 }
 
@@ -1074,7 +1085,7 @@ AOTI_TORCH_EXPORT void aoti_torch_print_tensor_handle(
     std::cout << "  " << msg;
   }
   std::cout << "  "
-            << "]:" << std::endl;
+            << "]:" << '\n';
 
   // Print exact tensor values for small size tensors
   const int64_t numel = t->numel();
@@ -1083,8 +1094,8 @@ AOTI_TORCH_EXPORT void aoti_torch_print_tensor_handle(
   }
 
   // Print summary stats of the tensor
-  std::cout << "Number of elements: " << numel << std::endl;
-  std::cout << "Dtype: " << t->dtype() << std::endl;
+  std::cout << "Number of elements: " << numel << '\n';
+  std::cout << "Dtype: " << t->dtype() << '\n';
   if (numel > 0) {
     // torch/aten `mean()` function only supports float and complex dtypes
     // See:
@@ -1096,24 +1107,24 @@ AOTI_TORCH_EXPORT void aoti_torch_print_tensor_handle(
         at::isComplexType(at::typeMetaToScalarType(t->dtype()));
     at::ScalarType float_dtype =
         is_complex_type ? at::kComplexFloat : at::kFloat;
-    std::cout << "Mean value: " << mean_value(float_dtype) << std::endl;
+    std::cout << "Mean value: " << mean_value(float_dtype) << '\n';
     if (!is_complex_type) {
       // "min_all_cuda" function is not implemented for 'ComplexFloat' type.
       // (similar for max) Skip printing min/max value for complex type tensors
       // here If encountered complex dtypes (rare occasions), suggest to print
       // out the whole value of the tensor.
-      std::cout << "Min value: " << t->min().item<float>() << std::endl;
-      std::cout << "Max value: " << t->max().item<float>() << std::endl;
+      std::cout << "Min value: " << t->min().item<float>() << '\n';
+      std::cout << "Max value: " << t->max().item<float>() << '\n';
     }
   }
-  std::cout << "Device: " << t->device() << std::endl;
-  std::cout << "Size: " << t->sizes() << std::endl;
-  std::cout << "Stride: " << t->strides() << std::endl;
-  std::cout << "Layout: " << t->layout() << std::endl;
-  std::cout << "Is contiguous: " << t->is_contiguous() << std::endl;
-  std::cout << "Requires grad: " << t->requires_grad() << std::endl;
+  std::cout << "Device: " << t->device() << '\n';
+  std::cout << "Size: " << t->sizes() << '\n';
+  std::cout << "Stride: " << t->strides() << '\n';
+  std::cout << "Layout: " << t->layout() << '\n';
+  std::cout << "Is contiguous: " << t->is_contiguous() << '\n';
+  std::cout << "Requires grad: " << t->requires_grad() << '\n';
 
-  std::cout << std::endl;
+  std::cout << '\n';
 }
 
 // ProxyExecutor
@@ -1164,5 +1175,12 @@ AOTITorchError aoti_torch__alloc_from_pool(
         static_cast<c10::ScalarType>(dtype),
         sizes,
         strides));
+  });
+}
+
+AOTITorchError aoti_torch_zero_(AtenTensorHandle tensor) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
+    t->zero_();
   });
 }

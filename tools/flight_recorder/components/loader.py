@@ -4,6 +4,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+import argparse
 import gc
 import os
 import pickle
@@ -11,7 +12,12 @@ import re
 import time
 import typing
 from collections import defaultdict
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Set, Tuple, Union
+
+from tools.flight_recorder.components.fr_logger import FlightRecorderLogger
+
+
+logger: FlightRecorderLogger = FlightRecorderLogger()
 
 
 def read_dump(prefix: str, filename: str) -> Dict[str, Union[str, int, List[Any]]]:
@@ -52,7 +58,7 @@ def _determine_prefix(files: List[str]) -> str:
             possible_prefixes[p].add(int(r))
     if len(possible_prefixes) == 1:
         prefix = next(iter(possible_prefixes))
-        print(f"Inferred common prefix {prefix}")
+        logger.debug("Inferred common prefix %s", prefix)
         return prefix
     else:
         raise ValueError(
@@ -61,22 +67,25 @@ def _determine_prefix(files: List[str]) -> str:
         )
 
 
-def read_dir(
-    prefix: Optional[str], folder: str
-) -> Tuple[Dict[str, Dict[str, Any]], str]:
+def read_dir(args: argparse.Namespace) -> Tuple[Dict[str, Dict[str, Any]], str]:
     gc.disable()
+    prefix = args.prefix
     details = {}
     t0 = time.time()
     version = ""
-    for root, _, files in os.walk(folder):
+    filecount = 0
+    assert os.path.isdir(args.folder), f"folder {args.folder} does not exist"
+    for root, _, files in os.walk(args.folder):
         if prefix is None:
             prefix = _determine_prefix(files)
         for f in files:
             if f.find(prefix) != 0:
                 continue
             details[f] = read_dump(prefix, os.path.join(root, f))
+            filecount += 1
             if not version:
                 version = str(details[f]["version"])
     tb = time.time()
-    print(f"loaded {len(files)} files in {tb - t0}s")
+    assert len(details) > 0, f"no files loaded from {args.folder} with prefix {prefix}"
+    logger.debug("loaded %s files in %ss", filecount, tb - t0)
     return details, version

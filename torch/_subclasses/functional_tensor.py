@@ -163,7 +163,8 @@ class FunctionalTensor(torch.Tensor):
         out.elem = elem
 
         if (
-            torch.is_inference_mode_enabled()
+            not mode.export
+            and torch.is_inference_mode_enabled()
             and torch._inductor.config.enable_auto_functionalized_v2
         ):
             if out.is_base_tensor():
@@ -309,6 +310,9 @@ class FunctionalTensor(torch.Tensor):
     def layout(self):
         return self.elem.layout
 
+    def __bool__(self):
+        return bool(self.item())
+
 
 class FunctionalTensorMode(TorchDispatchMode):
     def __init__(self, pre_dispatch=False, export=False, _allow_token_discovery=False):
@@ -418,16 +422,22 @@ class FunctionalTensorMode(TorchDispatchMode):
                 return True
 
             # If we are here, it means we are seeing functional composite op.
-            # For pre-dispatch IR or export inference IR, we wont' decompose them
-            if (self.export or self.pre_dispatch) and func._can_decompose():
-                if func.namespace not in ["aten", "prim"]:
-                    # TODO (tmanlaibaatar) check if the op is PT2 compliant
-                    warnings.warn(
-                        f"At pre-dispatch tracing, we assume that any custom op marked with "
-                        f"CompositeImplicitAutograd and have functional schema are safe to not decompose. "
-                        f"Found {func} to be one such op."
-                    )
-                return False
+            # For pre-dispatch IR, we don't want to decompose this op
+            # For post-dispatch IR, we do want to decompose this op. it is fine
+            # to decompose here even if you want to preserve a CIA in post-dispatch export
+            # because we already override decompose behaviour so it will do the
+            # right thing.
+            if self.export:
+                if self.pre_dispatch:
+                    # If it is CIA custom op, we warn that we are assuming this op is indeed functional.
+                    if func.namespace not in ["aten", "prim"] and func._can_decompose():
+                        warnings.warn(
+                            f"At pre-dispatch tracing, we assume that any custom op marked with "
+                            f"CompositeImplicitAutograd and have functional schema are safe to not decompose. "
+                            f"Found {func} to be one such op."
+                        )
+                    return False
+                return True
 
             # in normal torch.compile IR, we decompose functional composite ops
             return True

@@ -82,7 +82,7 @@ class ConstantVariable(VariableTracker):
     def as_proxy(self):
         return self.value
 
-    def __str__(self) -> str:
+    def __repr__(self) -> str:
         return f"ConstantVariable({type(self.value).__name__}: {repr(self.value)})"
 
     def as_python_constant(self):
@@ -195,6 +195,10 @@ class ConstantVariable(VariableTracker):
 
         if name == "__len__" and not (args or kwargs):
             return ConstantVariable.create(len(self.value))
+        elif name == "__round__" and len(args) == 1 and args[0].is_python_constant():
+            return ConstantVariable.create(
+                round(self.value, args[0].is_python_constant())
+            )
         elif name == "__contains__" and len(args) == 1 and args[0].is_python_constant():
             assert not kwargs
             search = args[0].as_python_constant()
@@ -222,9 +226,11 @@ class EnumVariable(VariableTracker):
         unimplemented("Enum variable is constructed with non constant values")
 
     def as_proxy(self):
+        if isinstance(self.value, int):
+            return int(self.value)  # convert IntEnum to a normal int
         return self.value
 
-    def __str__(self) -> str:
+    def __repr__(self) -> str:
         return f"EnumVariable({type(self.value)})"
 
     def as_python_constant(self):
