@@ -117,9 +117,11 @@ class InplacePaddingTest(TestCase):
         self.assertEqual(num_inplace_padding(), 0)
 
     @unittest.skipIf(
-        torch.cuda.get_device_properties().total_memory < 2e10,
+        torch.cuda.is_available()
+        and torch.cuda.get_device_properties().total_memory < 2e10,
         "Only if the GPU has at least 20GB memory to be safe",
     )
+    @inductor_config.patch(force_shape_pad=True)
     def test_linear_and_cel(self):
         # Use nan for torch.empty
         torch.use_deterministic_algorithms(True)

@@ -6036,6 +6036,21 @@ graph():
         unflattened = unflatten(ep)
         self.assertTrue(torch.allclose(unflattened(*inps), M2()(*inps)))
 
+    def test_module_dict_key(self):
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mod = torch.nn.Linear(10, 10)
+
+            def forward(self, x, d):
+                d = {m: d[name] for name, m in self.named_children()}
+                return x + d[self.mod]
+
+        m = Module()
+        sample_inputs = (torch.randn(10), {"mod": torch.randn(10)})
+        ep = export(m, sample_inputs)
+        self.assertEqual(ep.module()(*sample_inputs), m(*sample_inputs))
+
     def test_lazy_module_kwargs(self):
         class LazyModule(torch.nn.modules.lazy.LazyModuleMixin, torch.nn.Module):
             def initialize_parameters(self, *args, **kwargs):
@@ -7242,6 +7257,25 @@ def forward(self, p_bar_linear_weight, p_bar_linear_bias, x):
 
         # this doesn't work today
         gm_unflat_strict = unflatten(ep)
+
+    def test_modules_access_for_deleted_submodule(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+                self.foo = torch.nn.Linear(10, 10)
+
+            def forward(self, x):
+                for name, mod in self._modules.items():
+                    if mod is None:
+                        continue
+                    pass
+                return self.linear(x)
+
+        mod = Foo()
+        mod.foo = None
+        mod(torch.randn(10, 10))
+        export(mod, (torch.randn(10, 10),), strict=False)
 
     def test_predispatch_cond(self):
         class Model(torch.nn.Module):
@@ -9251,6 +9285,35 @@ class GraphModule(torch.nn.Module):
             },
             state_dict.keys(),
         )
+
+    @testing.expectedFailureSerDer  # T202237665
+    @testing.expectedFailureSerDerNonStrict
+    def test_dynamic_sym_round(self):
+        class ModuleWithSymRound(torch.nn.Module):
+            def forward(self, x):
+                out_size = round(x.shape[0] / 2.0)
+                return x[:out_size]
+
+        dim_min = 5
+        dim_max = 10
+        dynamic_shapes = {"x": {0: Dim("n", min=dim_min, max=dim_max)}}
+
+        module = ModuleWithSymRound()
+        inp = (torch.randn(8),)
+        ep = export(module, inp, dynamic_shapes=dynamic_shapes)
+
+        # Expect builtin round in the export graph
+        round_nodes = [
+            n for n in ep.graph.nodes if n.op == "call_function" and n.target == round
+        ]
+        self.assertEqual(len(round_nodes), 1)
+
+        # Check pre/post-export equality
+        for i in range(dim_min, dim_max + 1):
+            dyn_inp = (torch.randn(i),)
+            export_res = ep.module()(*dyn_inp)
+            ref_res = module(*dyn_inp)
+            self.assertEqual(export_res, ref_res)
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
