@@ -54,10 +54,10 @@ import torch
 import torch.distributed as dist
 from torch import SymInt, Tensor
 from torch._dynamo.utils import (
-    add_remote_cache_time_saved,
     counters,
     dynamo_timed,
     get_chromium_event_logger,
+    get_metrics_context,
 )
 from torch._inductor import config, exc, metrics
 from torch._inductor.codegen.cuda import cuda_env
@@ -1150,6 +1150,8 @@ class FxGraphCache:
                     logger.add_event_data(
                         "inductor_compile", cached_kernel_names=meta.cached_kernel_names
                     )
+                if len(meta.cached_kernel_names) > 0:
+                    get_metrics_context().increment("num_triton_bundles", 1)
 
         inductor_meta = autotune_cache.inductor_meta_from_config()
         AutotuneCacheBundler.begin_compile(inductor_meta, code=code)
@@ -1446,7 +1448,9 @@ class FxGraphCache:
 
             if (time_saved_ns := compiled_graph._time_taken_ns) is not None:
                 cache_info["time_saved_ns"] = time_saved_ns
-                add_remote_cache_time_saved(time_saved_ns, is_backward)
+                get_metrics_context().increment(
+                    "distributed_ephemeral_timeout_us", time_saved_ns // 1000
+                )
                 if (
                     ephemeral_increase := add_ephemeral_timeout_increase_for_distributed(
                         time_saved_ns
@@ -3483,8 +3487,9 @@ class ROCmCodeCache:
                     log.info(log_duration_msg)
                 else:
                     log.debug(
-                        "Compilation skipped: %s since output already exists",
+                        "Skip compiling %s: output %s already exists",
                         input_path,
+                        output_path,
                     )
                 cls.cache[key] = ROCmCodeCache.CacheEntry(input_path, output_path)
 
