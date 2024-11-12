@@ -361,6 +361,39 @@ __global__ void ComputeInternalGradientsCUDAKernel(
 }
 
 template <typename T>
+__global__ void ComputeInternalGradientsCUDAKernelNHWC(
+    int64_t HxW,
+    int64_t C,
+    const T* dY,
+    const T* X,
+    acc_type<T, true>* ds,
+    acc_type<T, true>* db) {
+  using T_ACC = acc_type<T, true>;
+  const int64_t n = blockIdx.x / C;
+  const int64_t c = blockIdx.x % C;
+  T_ACC sum1 = 0;
+  T_ACC sum2 = 0;
+  for (int64_t hw = threadIdx.x; hw < HxW; hw += blockDim.x) {
+    const int64_t index = n * HxW + hw * C + c;
+    sum1 += static_cast<T_ACC>(dY[index]) * static_cast<T_ACC>(X[index]);
+    sum2 += static_cast<T_ACC>(dY[index]);
+  }
+  if (blockDim.x <= C10_WARP_SIZE) {
+    sum1 = cuda_utils::WarpReduceSum<T_ACC>(sum1);
+    sum2 = cuda_utils::WarpReduceSum<T_ACC>(sum2);
+  } else {
+    __shared__ T_ACC ds_shared[C10_WARP_SIZE];
+    __shared__ T_ACC db_shared[C10_WARP_SIZE];
+    sum1 = cuda_utils::BlockReduceSum<T_ACC>(sum1, ds_shared);
+    sum2 = cuda_utils::BlockReduceSum<T_ACC>(sum2, db_shared);
+  }
+  if (threadIdx.x == 0) {
+    ds[blockIdx.x] = sum1;
+    db[blockIdx.x] = sum2;
+  }
+}
+
+template <typename T>
 __global__ void ComputeBackwardFusedParamsCUDAKernel(
     int64_t C,
     int64_t HxW,
@@ -958,13 +991,34 @@ void GroupNormBackwardKernelImplInternal(
     return;
   }
 
+  at::MemoryFormat x_format = X.suggest_memory_format();
+  dY.is_contiguous(x_format);
+
   int warp_size = at::cuda::warp_size();
   int64_t num_threads = HxW < cuda_utils::kCUDABlockReduceNumThreads
       ? warp_size
       : cuda_utils::kCUDABlockReduceNumThreads;
-  ComputeInternalGradientsCUDAKernel<T><<<N * C, num_threads, 0, cuda_stream>>>(
-      HxW, dY_data, X_data, ds_data, db_data);
+
+  switch (x_format) {
+    case MemoryFormat::Contiguous: {
+      ComputeInternalGradientsCUDAKernel<T><<<N * C, num_threads, 0, cuda_stream>>>(
+          HxW, dY_data, X_data, ds_data, db_data);
+      break;
+    }
+    case MemoryFormat::ChannelsLast: {
+      ComputeInternalGradientsCUDAKernelNHWC<T><<<N * C, num_threads, 0, cuda_stream>>>(
+          HxW, C, dY_data, X_data, ds_data, db_data);
+      break;
+    }
+    default: {
+      TORCH_CHECK(
+          false,
+          "Unsupported memory format for group normalization backward: ",
+          x_format);
+    }
+  }
   C10_CUDA_KERNEL_LAUNCH_CHECK();
+
 
   if (dX.defined()) {
     Tensor c1 = at::empty({0}, X.options().dtype(kAccType));
@@ -1006,12 +1060,12 @@ void GroupNormBackwardKernelImplInternal(
       auto iter = TensorIteratorConfig()
                       .check_all_same_dtype(std::is_same_v<T, T_ACC>)
                       .resize_outputs(false)
-                      .add_owned_output(dX.view({N * G, D, HxW}))
-                      .add_owned_const_input(dY.view({N * G, D, HxW}))
-                      .add_owned_const_input(X.view({N * G, D, HxW}))
-                      .add_owned_const_input(c1.view({N * G, D, 1}))
-                      .add_owned_const_input(c2.view({N * G, 1, 1}))
-                      .add_owned_const_input(c3.view({N * G, 1, 1}))
+                      .add_owned_output(dX.view({N, G, D, HxW}))
+                      .add_owned_const_input(dY.view({N, G, D, HxW}))
+                      .add_owned_const_input(X.view({N, G, D, HxW}))
+                      .add_owned_const_input(c1.view({N, G, D, 1}))
+                      .add_owned_const_input(c2.view({N, G, 1, 1}))
+                      .add_owned_const_input(c3.view({N, G, 1, 1}))
                       .build();
       gpu_kernel(
           iter, [] GPU_LAMBDA(T dy, T x, T_ACC c1, T_ACC c2, T_ACC c3) -> T {
@@ -1022,12 +1076,12 @@ void GroupNormBackwardKernelImplInternal(
       auto iter = TensorIteratorConfig()
                       .check_all_same_dtype(std::is_same_v<T, T_ACC>)
                       .resize_outputs(false)
-                      .add_owned_output(dX.view({N * G, D * HxW}))
-                      .add_owned_const_input(dY.view({N * G, D * HxW}))
-                      .add_owned_const_input(X.view({N * G, D * HxW}))
-                      .add_owned_const_input(rstd.view({N * G, 1}))
-                      .add_owned_const_input(c2.view({N * G, 1}))
-                      .add_owned_const_input(c3.view({N * G, 1}))
+                      .add_owned_output(dX.view({N, G, D, HxW}))
+                      .add_owned_const_input(dY.view({N, G, D, HxW}))
+                      .add_owned_const_input(X.view({N, G, D, HxW}))
+                      .add_owned_const_input(rstd.view({N, G, 1, 1}))
+                      .add_owned_const_input(c2.view({N, G, 1, 1}))
+                      .add_owned_const_input(c3.view({N, G, 1, 1}))
                       .build();
       gpu_kernel(
           iter, [] GPU_LAMBDA(T dy, T x, T_ACC c1, T_ACC c2, T_ACC c3) -> T {

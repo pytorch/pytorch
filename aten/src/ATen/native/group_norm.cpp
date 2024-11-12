@@ -76,7 +76,6 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm(
   // repeated check so expanded weights can call native_group_norm directly but
   // save mean and variance from forward
   check_group_norm_inputs(X, gamma, beta, C, group);
-  auto memory_format = X.suggest_memory_format();
 
   bool mixed_type = is_mixed_type(X, gamma, beta);
   if (mixed_type) {
@@ -90,7 +89,7 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm(
       std::nullopt /* layout */,
       std::nullopt /* device */,
       std::nullopt /* pin_memory */,
-      memory_format);
+      X.suggest_memory_format());
   const auto dtype = param_scalar_type(X, mixed_type);
   Tensor mean = at::empty({N, group}, X.options().dtype(dtype));
   Tensor rstd = at::empty({N, group}, X.options().dtype(dtype));
@@ -123,8 +122,6 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward(
   if (mixed_type) {
     check_mixed_data_type(X, mean, rstd);
   }
-  auto memory_format = X.device().is_cpu() ?
-      X.suggest_memory_format() : at::MemoryFormat::Contiguous;
 
   Tensor dX;
   Tensor dgamma;
@@ -136,7 +133,7 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward(
         std::nullopt /* layout */,
         std::nullopt /* device */,
         std::nullopt /* pin_memory */,
-        memory_format);
+        X.suggest_memory_format());
   }
   if (grad_input_mask[1]) {
     dgamma = at::native::empty_like(
@@ -194,8 +191,7 @@ Tensor group_norm(
   const auto HxW =
       c10::multiply_integers(input_shape.slice(2));
   const Tensor kEmpty;
-  auto memory_format = input.suggest_memory_format();
-  const auto& X = input.contiguous(memory_format);
+  const auto& X = input.contiguous(input.suggest_memory_format());
   const auto& gamma = weight.defined() ? weight.contiguous() : kEmpty;
   const auto& beta = bias.defined() ? bias.contiguous() : kEmpty;
   TORCH_CHECK(!gamma.defined() || gamma.sym_numel() == C);
