@@ -100,7 +100,6 @@ inline StreamId makeStreamId(StreamIdType st, StreamIdIndex si) {
       (static_cast<StreamId>(st) << 1) | 1;
 }
 
-
 void initGlobalStreamState() {
   num_gpus = c10::xpu::device_count();
   device_flags.resize(num_gpus);
@@ -162,16 +161,6 @@ inline void initDeviceStreamOnce(DeviceIndex device) {
   c10::call_once(device_flags[device], initDeviceStreamState, device);
 }
 
-inline void check_device(DeviceIndex device) {
-  TORCH_CHECK(
-      device >= 0 && device < num_gpus,
-      "device is out of range, device is ",
-      static_cast<int16_t>(device),
-      ", total number of device is ",
-      static_cast<int16_t>(num_gpus),
-      ".");
-}
-
 uint32_t get_idx(std::atomic<uint32_t>& counter) {
   auto raw_idx = counter++;
   return raw_idx % kStreamsPerPool;
@@ -191,10 +180,11 @@ XPUStream XPUStreamForId(DeviceIndex device_index, StreamId stream_id) {
 int XPUStream::priority() const {
   StreamId stream_id = stream_.id();
   StreamIdType st = streamIdType(stream_id);
-  // For an external queue which is not created in XPUStream, we can not trace the priority.
-  // Workaround here since sycl doesn't support get priority from a sycl::queue,
-  // like cudaStreamGetPriority .
-  // TODO: remove this workaround when sycl supports get priority from a sycl::queue.
+  // For an external queue which is not created in XPUStream, we can not trace
+  // the priority. Workaround here since sycl doesn't support get priority from
+  // a sycl::queue, like cudaStreamGetPriority .
+  // TODO: remove this workaround when sycl supports get priority from a
+  // sycl::queue.
   if (st == StreamIdType::EXT) {
     st = StreamIdType::NORMAL;
   }
@@ -234,7 +224,7 @@ XPUStream getStreamFromPool(const int priority, DeviceIndex device) {
   if (device == -1) {
     device = c10::xpu::current_device();
   }
-  check_device(device);
+  check_device_index(device);
   TORCH_CHECK(
       priority <= 0,
       "Expected XPU stream priority to be less than or equal to 0, got ",
@@ -271,7 +261,7 @@ XPUStream getCurrentXPUStream(DeviceIndex device) {
   if (device == -1) {
     device = c10::xpu::current_device();
   }
-  check_device(device);
+  check_device_index(device);
   // Initializes the stream pool (once)
   initDeviceStreamOnce(device);
   return XPUStreamForId(device, current_streams[device]);
@@ -309,7 +299,7 @@ void syncStreamsOnDevice(DeviceIndex device) {
   if (device == -1) {
     device = c10::xpu::current_device();
   }
-  check_device(device);
+  check_device_index(device);
   // Initializes the stream pools (once)
   initDeviceStreamOnce(device);
 
