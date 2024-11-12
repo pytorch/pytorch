@@ -222,6 +222,8 @@ class IterationRanges:
         self.root = root
 
     @property
+    @cache_on_self
+    @no_type_check
     def is_reduction(self) -> bool:
         return prefix_is_reduction(self.prefix)
 
@@ -484,10 +486,14 @@ class SIMDKernel(Kernel):
         self.initialize_range_tree(pid_cache)
 
     @property
+    @cache_on_self
+    @no_type_check
     def num_reduction_dims(self) -> int:
         return sum(dim.startswith("r") for dim in self.numels)
 
     @property
+    @cache_on_self
+    @no_type_check
     def total_reduction_numel(self):
         return sympy_product(
             [val for key, val in self.numels.items() if key.startswith("r")]
