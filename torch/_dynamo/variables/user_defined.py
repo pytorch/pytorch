@@ -802,6 +802,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     (self.value is args[0].value) is (method is object.__eq__)
                 )
 
+            if method is list.__len__ and self.source and not (args or kwargs):
+                install_guard(self.source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
+                return ConstantVariable(len(self.value))
+
             # check for methods implemented in C++
             if isinstance(method, types.FunctionType):
                 source = (
@@ -817,10 +821,17 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 return UserMethodVariable(method, self, source=source).call_function(
                     tx, args, kwargs
                 )
+            else:
+                method_str = str(method)
+                if method_qualname := getattr(method, "__qualname__", None):
+                    if method_name := getattr(method, "__name__", None):
+                        method_str = f"{method_qualname}.{method_name}"
 
-            if method is list.__len__ and self.source and not (args or kwargs):
-                install_guard(self.source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
-                return ConstantVariable(len(self.value))
+                unimplemented(
+                    f"Graph breaking because {method_str} method is encountered while tracing, "
+                    "and it is not implemented in Python. To avoid the graph break, consider "
+                    "removing this method from the scope of torch.compile if possible or open an issue."
+                )
 
         return super().call_method(tx, name, args, kwargs)
 
