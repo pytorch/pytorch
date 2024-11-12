@@ -283,39 +283,49 @@ static bool copy_requires_temporaries(TensorIterator& iter, bool p2p_enabled) {
   }
 
   bool same_dtype = iter.dtype(0) == iter.dtype(1);
-  bool is_complex = at::isComplexType(iter.dtype(0));
+  bool is_complex = at::isComplexType(iter.dtype(1));
 
   // Check if the tensor is 1D or 2D and non-contiguous
-  if (iter.ndim() <= 2 && !iter.is_contiguous() && same_dtype && !is_complex) {   
-    // Perform pitch checks to determine if a temporary is needed
+  if (iter.ndim() <= 2 && same_dtype && !is_complex) {
     const auto& src_tensor = iter.tensor(1);
-    const auto& dst_tensor = iter.tensor(0);   
+    const auto& dst_tensor = iter.tensor(0);
 
     size_t element_size = src_tensor.element_size();
     int64_t dim0 = src_tensor.size(0);
     int64_t dim1 = iter.ndim() == 1 ? 1 : src_tensor.size(1);
-    int64_t stride0 = src_tensor.stride(0);
-    int64_t stride1 = iter.ndim() == 1 ? 1 : src_tensor.stride(1);
+    int64_t src_stride0 = src_tensor.stride(0);
+    int64_t src_stride1 = iter.ndim() == 1 ? 1 : src_tensor.stride(1);
     int64_t dst_stride0 = dst_tensor.stride(0);
     int64_t dst_stride1 = iter.ndim() == 1 ? 1 : dst_tensor.stride(1);
 
-    bool is_column_major = (stride0 == 1 && stride1 >= dim0);
+    // Check for row-major contiguous data
+    bool src_row_contiguous = (src_stride1 == 1);
+    bool dst_row_contiguous = (dst_stride1 == 1);
+    if (src_row_contiguous && dst_row_contiguous) {
+        size_t width_in_bytes = dim1 * element_size;
+        size_t height = dim0;
+        size_t src_pitch = src_stride0 * element_size;
+        size_t dst_pitch = dst_stride0 * element_size;
 
-    size_t src_pitch, dst_pitch, width_in_bytes;
-    if (is_column_major) {
-        src_pitch = stride1 * element_size;
-        dst_pitch = dst_stride1 * element_size;
-        width_in_bytes = dim0 * element_size;
-    } else {
-        src_pitch = stride0 * element_size;
-        dst_pitch = dst_stride0 * element_size;
-        width_in_bytes = dim1 * element_size;
+        if (src_pitch >= width_in_bytes && dst_pitch >= width_in_bytes) {
+            return false; // No need for temporaries
+        }
     }
 
-    // If pitch conditions are met, no temporary is required
-    if (src_pitch >= width_in_bytes && dst_pitch >= width_in_bytes) {     
-      return false;
+    // Check for column-major contiguous data
+    bool src_col_contiguous = (src_stride0 == 1);
+    bool dst_col_contiguous = (dst_stride0 == 1);
+    if (src_col_contiguous && dst_col_contiguous) {
+        size_t width_in_bytes = dim0 * element_size;
+        size_t height = dim1;
+        size_t src_pitch = src_stride1 * element_size;
+        size_t dst_pitch = dst_stride1 * element_size;
+
+        if (src_pitch >= width_in_bytes && dst_pitch >= width_in_bytes) {
+            return false; // No need for temporaries
+        }
     }
+
   }
 
   if (same_dtype && iter.is_contiguous()) {
@@ -369,60 +379,85 @@ static bool maybe_enable_p2p_access(Device dst_device, Device src_device) {
  * @return bool         Returns `true` if the copy was successfully performed with `cudaMemcpy2DAsync`.
  *                      Returns `false` if conditions were not met for the optimized path.
  */
-static bool copy_non_contiguous_2d(
+ static bool copy_non_contiguous_2d(
   void* dst,
   const void* src,
   const TensorIterator& iter,
   cudaMemcpyKind kind,
-  cudaStream_t stream, 
+  cudaStream_t stream,
   bool non_blocking = false) {
 
   const auto& dst_tensor = iter.tensor(0);
   const auto& src_tensor = iter.tensor(1);
-  auto src_sizes = src_tensor.sizes();
-  auto src_strides = src_tensor.strides();
-  auto dst_strides = dst_tensor.strides();
   size_t element_size = src_tensor.element_size();
 
   // Set dimensions and strides for 1D or 2D cases
-  int64_t dim0 = src_sizes[0];
-  int64_t dim1 = iter.ndim() == 1 ? 1 : src_sizes[1];
-  int64_t stride0 = src_strides[0];
-  int64_t stride1 = iter.ndim() == 1 ? 1 : src_strides[1];
-  int64_t dst_stride0 = dst_strides[0];
-  int64_t dst_stride1 = iter.ndim() == 1 ? 1 : dst_strides[1];
+  int64_t dim0 = src_tensor.size(0);
+  int64_t dim1 = iter.ndim() == 1 ? 1 : src_tensor.size(1);
+  int64_t src_stride0 = src_tensor.stride(0);
+  int64_t src_stride1 = iter.ndim() == 1 ? 1 : src_tensor.stride(1);
+  int64_t dst_stride0 = dst_tensor.stride(0);
+  int64_t dst_stride1 = iter.ndim() == 1 ? 1 : dst_tensor.stride(1);
 
-  bool is_column_major = (stride0 == 1 && stride1 >= dim0);
+  
+  bool can_use_memcpy2d = false;
+  size_t width_in_bytes = 0;
+  size_t height = 0;
+  size_t src_pitch = 0;
+  size_t dst_pitch = 0;
 
-  size_t src_pitch, dst_pitch, width_in_bytes, height;
-  if (is_column_major) {
-      src_pitch = stride1 * element_size;
-      dst_pitch = dst_stride1 * element_size;
-      width_in_bytes = dim0 * element_size;
-      height = dim1;
-  } else {
-      src_pitch = stride0 * element_size;
-      dst_pitch = dst_stride0 * element_size;
-      width_in_bytes = dim1 * element_size;
-      height = dim0;
+  // Check for row-major contiguous data
+  if (src_stride1 == 1 && dst_stride1 == 1) {
+    width_in_bytes = dim1 * element_size;
+    height = dim0;
+    src_pitch = src_stride0 * element_size;
+    dst_pitch = dst_stride0 * element_size;
+
+    if (src_pitch >= width_in_bytes && dst_pitch >= width_in_bytes) {       
+        at::cuda::memcpy2d_conditional_sync(
+            dst,
+            src,
+            src_pitch,
+            dst_pitch,
+            width_in_bytes,
+            height,
+            kind,
+            stream,
+            non_blocking
+        );
+        return true; 
+    }
   }
 
-  TORCH_INTERNAL_ASSERT(src_pitch >= width_in_bytes && dst_pitch >= width_in_bytes, 
-                      "Source and destination pitch must be >= width_in_bytes for non-contiguous copy.");
+  // Check for column-major contiguous data
+  if (src_stride0 == 1 && dst_stride0 == 1) {
+    width_in_bytes = dim0 * element_size;
+    height = dim1;
+    src_pitch = src_stride1 * element_size;
+    dst_pitch = dst_stride1 * element_size;
 
-  at::cuda::memcpy2d_conditional_sync(
-      dst,
-      src,
-      src_pitch,
-      dst_pitch,
-      width_in_bytes,
-      height,
-      kind,
-      stream,
-      non_blocking
-  );
+    if (src_pitch >= width_in_bytes && dst_pitch >= width_in_bytes) {
+        // Perform the copy using memcpy2DAsync
+        at::cuda::memcpy2d_conditional_sync(
+            dst,
+            src,
+            src_pitch,
+            dst_pitch,
+            width_in_bytes,
+            height,
+            kind,
+            stream,
+            non_blocking
+        );
+        return true; // Copy successfully performed
+    }
+  }
 
-  return true;
+  // Assert that we can use memcpy2DAsync as per copy_requires_temporaries
+  TORCH_INTERNAL_ASSERT(false,
+      "copy_non_contiguous_2d: Expected to be able to use cudamemcpy2Dasync, but conditions were not met.");
+  
+  return false; 
 }
 
 static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
