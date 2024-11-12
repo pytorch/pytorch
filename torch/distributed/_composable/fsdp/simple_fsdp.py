@@ -26,7 +26,7 @@ _active_parametrization = False
 
 
 @contextmanager
-def disable_active_parametrization():
+def disable_active_parametrization():  # type: ignore[no-untyped-def]
     global _active_parametrization
     try:
         _active_parametrization = False
@@ -36,7 +36,7 @@ def disable_active_parametrization():
 
 
 @contextmanager
-def enable_active_parametrization():
+def enable_active_parametrization():  # type: ignore[no-untyped-def]
     global _active_parametrization
     try:
         _active_parametrization = True
@@ -45,14 +45,14 @@ def enable_active_parametrization():
         _active_parametrization = False
 
 
-def active_parametrization():
+def active_parametrization():  # type: ignore[no-untyped-def]
     global _active_parametrization
     return _active_parametrization
 
 
-def fsdp_must_recompute_policy():
-    def _fsdp_recomp_policy():
-        def _custom_policy(ctx, func, *args, **kwargs):
+def fsdp_must_recompute_policy():  # type: ignore[no-untyped-def]
+    def _fsdp_recomp_policy():  # type: ignore[no-untyped-def]
+        def _custom_policy(ctx, func, *args, **kwargs):  # type: ignore[no-untyped-def]
             to_recompute = func in {
                 torch.ops._c10d_functional.all_gather_into_tensor.default,
                 torch.ops._c10d_functional.wait_tensor.default,
@@ -69,9 +69,9 @@ def fsdp_must_recompute_policy():
     return create_selective_checkpoint_contexts(_fsdp_recomp_policy())
 
 
-def fsdp_must_save_policy():
-    def _fsdp_save_policy():
-        def _custom_policy(ctx, func, *args, **kwargs):
+def fsdp_must_save_policy():  # type: ignore[no-untyped-def]
+    def _fsdp_save_policy():  # type: ignore[no-untyped-def]
+        def _custom_policy(ctx, func, *args, **kwargs):  # type: ignore[no-untyped-def]
             to_save = func in {
                 torch.ops._c10d_functional.wait_tensor.default,
             }
@@ -89,7 +89,7 @@ def fsdp_must_save_policy():
 
 
 class ReplicateComputation(torch.nn.Module):
-    def __init__(
+    def __init__(  # type: ignore[no-untyped-def]
         self, device_mesh, param_sharding, mode, reshard_after_forward, mp_policy
     ):
         super().__init__()
