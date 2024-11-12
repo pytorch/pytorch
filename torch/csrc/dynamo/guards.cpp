@@ -3445,10 +3445,14 @@ class GlobalWeakRefGuardAccessor : public GuardAccessor {
     }
 
     PyObject* x = nullptr;
-    if (PyWeakref_GetRef(weakref, &x) != 1) {
-      // error or ref is dead
+    if (PyWeakref_GetRef(weakref, &x) == -1) { // strong reference
+      // error when attempting to call ref
       PyErr_Clear();
       return false;
+    }
+    if (x == nullptr) {
+      // weakref is dead
+      x = Py_NewRef(Py_None);
     }
     bool result = _guard_manager->check_nopybind(x);
     Py_DECREF(x);
@@ -3473,13 +3477,17 @@ class GlobalWeakRefGuardAccessor : public GuardAccessor {
     }
 
     PyObject* x = nullptr;
-    if (PyWeakref_GetRef(weakref, &x) != 1) {
-      // error or ref is dead
+    if (PyWeakref_GetRef(weakref, &x) == -1) { // strong reference
+      // error when attempting to call ref
       PyErr_Clear();
       return GuardDebugInfo(
-          false, std::string("Weakref_GetRef is empty or failed ") + get_source(), 0);
+          false, std::string("Weakref_GetRef failed ") + get_source(), 0);
     }
-    auto result = _guard_manager->check_verbose_nopybind(x); 
+    if (x == nullptr) {
+      // weakref is dead
+      x = Py_NewRef(Py_None);
+    }
+    auto result = _guard_manager->check_verbose_nopybind(x);
     Py_DECREF(x);
     return result;
   }
@@ -3520,10 +3528,14 @@ class WeakRefCallGuardAccessor : public GuardAccessor {
     }
 
     PyObject* x = nullptr;
-    if (PyWeakref_GetRef(obj, &x) != 1) {
-      // error or ref is dead
+    if (PyWeakref_GetRef(obj, &x) == -1) { // strong reference
+      // error when attempting to call ref
       PyErr_Clear();
       return false;
+    }
+    if (x == nullptr) {
+      // weakref is dead
+      x = Py_NewRef(Py_None);
     }
     bool result = _guard_manager->check_nopybind(x);
     Py_DECREF(x);
@@ -3538,13 +3550,17 @@ class WeakRefCallGuardAccessor : public GuardAccessor {
     }
 
     PyObject* x = nullptr;
-    if (PyWeakref_GetRef(obj, &x) != 1) {
-      // error or ref is dead
+    if (PyWeakref_GetRef(obj, &x) == -1) { // strong reference
+      // error when attempting to call ref
       PyErr_Clear();
       return GuardDebugInfo(
-          false, std::string("Weakref_GetRef is empty or failed ") + get_source(), 0);
+          false, std::string("Weakref_GetRef failed ") + get_source(), 0);
     }
-    auto result = _guard_manager->check_verbose_nopybind(x); 
+    if (x == nullptr) {
+      // weakref is dead
+      x = Py_NewRef(Py_None);
+    }
+    auto result = _guard_manager->check_verbose_nopybind(x);
     Py_DECREF(x);
     return result;
   }
