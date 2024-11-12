@@ -925,7 +925,7 @@ else:
 
             return _mesh_resources.create_flatten_mesh(self, mesh_dim_name)
 
-        def manual_seed(
+        def _manual_seed(
             self, seed: int, unique_dims: Tuple[Union[str, int], ...] = tuple()
         ):
             """

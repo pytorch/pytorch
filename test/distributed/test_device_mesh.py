@@ -279,14 +279,14 @@ class DeviceMeshTest(DTensorTestBase):
         tp_rank = self.rank % tp_size
         dp_rank = int(self.rank / tp_size)
 
-        mesh_2d.manual_seed(123)
+        mesh_2d._manual_seed(123)
         self.assertEqual(torch.initial_seed(), 123)
 
-        mesh_2d.manual_seed(123, unique_dims=("TP",))
+        mesh_2d._manual_seed(123, unique_dims=("TP",))
         self.assertEqual(torch.initial_seed(), 123 + tp_rank)
-        mesh_2d.manual_seed(123, unique_dims=("DP", "TP"))
+        mesh_2d._manual_seed(123, unique_dims=("DP", "TP"))
         self.assertEqual(torch.initial_seed(), 123 + self.rank)
-        mesh_2d.manual_seed(123, unique_dims=("TP", "DP"))
+        mesh_2d._manual_seed(123, unique_dims=("TP", "DP"))
         self.assertEqual(torch.initial_seed(), 123 + dp_rank + dp_size * tp_rank)
 
 
