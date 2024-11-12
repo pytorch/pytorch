@@ -2174,7 +2174,12 @@ class Scheduler:
                 # dead code
                 log.debug("removed dead operation: %s", node.get_name())
                 V.graph.removed_operations.add(node.get_name())
-
+                for read in node.read_writes.reads:
+                    if read.name in self.name_to_buf:
+                        users = self.name_to_buf[read.name].users
+                        self.name_to_buf[read.name].users = [
+                            u for u in users if u.node.get_name() != node.get_name()
+                        ]
         self.nodes = list(reversed(updated_nodes))
 
         # Prune any WeakDeps no longer needed
@@ -2352,7 +2357,8 @@ class Scheduler:
         device = nodes[0].get_device()
         self.current_device = device
         backend = self.get_backend(device)
-        return backend.benchmark_fused_nodes(nodes)
+        with dynamo_timed("benchmark_fused_nodes"):
+            return backend.benchmark_fused_nodes(nodes)
 
     def finalize_multi_template_buffers(self) -> None:
         def replace_operation_buffer(
