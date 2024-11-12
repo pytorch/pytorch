@@ -7,7 +7,7 @@ from unittest import TestCase
 
 from tools.linter.adapters.docstring_linter import DocstringLinter
 
-from .test_set_linter import assert_expected
+from tools.test.test_set_linter import assert_expected
 
 
 TEST_FILE = Path("tools/test/docstring_linter_testdata/python_code.py.txt")
