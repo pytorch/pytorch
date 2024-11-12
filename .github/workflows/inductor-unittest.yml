@@ -4,6 +4,7 @@
 name: inductor-unittest
 
 on:
+  pull_request:
   workflow_call:
   schedule:
     - cron: 29 8 * * * # about 1:29am PDT, for mem leak check and rerun disabled tests.
