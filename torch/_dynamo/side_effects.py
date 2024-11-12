@@ -660,7 +660,8 @@ class SideEffects:
                 if var in self.store_attr_mutations:
                     contents_var = self.load_cell(var)
                     cg(contents_var)
-                    cg.store_deref(var.source.local_name)  # type: ignore[attr-defined]
+                    cell_name = var.source.local_name  # type: ignore[attr-defined]
+                    suffixes.append([cg.create_store_deref(cell_name)])
 
             elif self.is_attribute_mutation(var):
                 # Applying mutations involves two steps: 1) Push all
