@@ -1615,7 +1615,7 @@ def get_native_function_definitions(
             registration_body += f"""
 TORCH_LIBRARY_IMPL({namespace}, {dispatch_key}, m) {{
     {newline.join(registrations[kernel_namespace][namespace])}
-}}"""
+}};"""
         definitions.extend(
             fm.substitute_with_template(
                 "RegisterDispatchDefinitions.ini",

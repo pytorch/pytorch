@@ -460,7 +460,7 @@ def gen_dispatcher_registrations(
             """\
 TORCH_LIBRARY_IMPL(aten, $dispatch_key, m) {
     $dispatch_registrations_body
-}"""
+};"""
         )
         static_init_dispatch_registrations = static_template.substitute(
             dispatch_key=dispatch_key,
