@@ -85,7 +85,6 @@ def get_nvml_handle():
         import pynvml # type: ignore[import]
         try:
             pynvml.nvmlInit()
-
             handle = pynvml.nvmlDeviceGetHandleByIndex(0)
             return handle
         except pynvml.NVMLError:
