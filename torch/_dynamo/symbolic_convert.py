@@ -2680,8 +2680,8 @@ class InstructionTranslatorBase(
         inline_depth: int,
         speculation_log: SpeculationLog,
         distributed_state: Optional[DistributedState],
-        # Whether to use the execution recorder.
-        use_recorder: bool = False,
+        # This determines whether to use the execution recorder.
+        closure: Optional[Tuple[types.CellType]] = None,
     ) -> None:
         super().__init__()
         self.speculation_log = speculation_log
@@ -2718,9 +2718,9 @@ class InstructionTranslatorBase(
         self.f_code: types.CodeType = f_code
 
         # Execution record for replaying errors
-        if use_recorder and config.replay_record_enabled:
+        if closure is not None and config.replay_record_enabled:
             self.exec_recorder = ExecutionRecorder(
-                code=f_code, code_options=code_options
+                code=f_code, closure=closure, code_options=code_options
             )
         else:
             self.exec_recorder = None
@@ -2779,6 +2779,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         f_locals,
         f_globals,
         f_builtins,
+        closure,
         torch_function_mode_stack,
         code_options,
         compiler_fn,
@@ -2810,6 +2811,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             f_locals=f_locals,
             f_globals=f_globals,
             f_builtins=f_builtins,
+            closure=closure,
             code_options=code_options,
             symbolic_locals={},  # set below
             # A global var is inserted only after a STORE_GLOBAL happens to it
@@ -2820,7 +2822,6 @@ class InstructionTranslator(InstructionTranslatorBase):
             inline_depth=0,
             speculation_log=speculation_log,
             distributed_state=distributed_state,
-            use_recorder=True,
         )
 
         self._throw_if_in_functorch()
@@ -2849,6 +2850,13 @@ class InstructionTranslator(InstructionTranslatorBase):
                 for name, value in f_locals.items()
             }
 
+            # Avoid mapping to VariableTracker to prevent holding on to tensors.
+            self._captured_cell_id_to_name = {}
+            for name in self.code_options["co_freevars"]:
+                if name in f_locals:
+                    cell = f_locals[name]
+                    self._captured_cell_id_to_name[id(cell)] = name
+
             self.symbolic_torch_function_state = SymbolicTorchFunctionState(
                 torch_function_mode_stack
             )
@@ -2860,11 +2868,6 @@ class InstructionTranslator(InstructionTranslatorBase):
                 self.symbolic_locals = variables.LazyVariableTracker.realize_all(
                     self.symbolic_locals
                 )
-
-            self._freevars_ids = {}
-            for name in self.code_options["co_freevars"]:
-                if name in f_locals:
-                    self._freevars_ids[name] = id(f_locals[name])
 
     def _throw_if_in_functorch(self):
         # Fallback to eager in case of a graph break inside vmap
@@ -2902,16 +2905,16 @@ class InstructionTranslator(InstructionTranslatorBase):
     def run(self):
         super().run()
 
-    def match_nested_cell(self, name, cell):
-        """Match a cell in this method to one in a function we are inlining"""
-        try:
-            value = cell.cell_contents
-        except ValueError:
-            return None
-        # TODO(jansel): check the id of the cell rather than the contents
-        if id(value) != self._freevars_ids.get(name):
-            return None
-        return self.symbolic_locals[name]
+    def lookup_variable_for_captured_cell(self, cell):
+        """
+        If `cell` is also captured by the root frame, return the VariableTracker
+        that represents the contents of the cell, else return None.
+        """
+        cell_id = id(cell)
+        if cell_id in self._captured_cell_id_to_name:
+            name = self._captured_cell_id_to_name[cell_id]
+            return self.symbolic_locals[name]
+        return None
 
     def should_compile_partial_graph(self):
         if sys.version_info >= (3, 11):

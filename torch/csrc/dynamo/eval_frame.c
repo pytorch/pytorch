@@ -120,6 +120,31 @@ static PyObject* THPPyInterpreterFrame_f_back(THPPyInterpreterFrame* self, PyObj
 #endif // IS_PYTHON_3_11_PLUS
 }
 
+static PyObject* THPPyInterpreterFrame_closure(THPPyInterpreterFrame* self, PyObject* _noargs) {
+#if IS_PYTHON_3_12_PLUS
+  PyObject* closure = ((PyFunctionObject*) self->frame->f_funcobj)->func_closure;
+  return closure == NULL ? PyTuple_New(0) : Py_XNewRef(closure);
+#elif IS_PYTHON_3_11_PLUS
+  PyObject* closure = ((PyFunctionObject*) self->frame->f_func)->func_closure;
+  return closure == NULL ? PyTuple_New(0) : Py_XNewRef(closure);
+#else
+  PyCodeObject* code = self->frame->f_code;
+  // Why this check? See
+  // https://github.com/python/cpython/blob/5f24da9d75bb0150781b17ee4706e93e6bb364ea/Objects/frameobject.c#L1058-L1065
+  if (code->co_flags & CO_OPTIMIZED) {
+    int size = PyTuple_GET_SIZE(code->co_freevars);
+    PyObject* freevars = PyTuple_New(size);
+    int ncells = PyTuple_GET_SIZE(code->co_cellvars);
+    PyObject** freevarArr = self->frame->f_localsplus + code->co_nlocals + ncells;
+    for (int i = 0; i < size; i++) {
+      PyTuple_SET_ITEM(freevars, i, Py_XNewRef(freevarArr[i]));
+    }
+    return freevars;
+  }
+  return PyTuple_New(0);
+#endif // IS_PYTHON_3_11_PLUS
+}
+
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
 static struct PyGetSetDef THPPyInterpreterFrame_properties[] = {
     {"f_globals", (getter)THPPyInterpreterFrame_f_globals, NULL, NULL, NULL},
@@ -133,6 +158,7 @@ static struct PyGetSetDef THPPyInterpreterFrame_properties[] = {
     {"f_lasti", (getter)THPPyInterpreterFrame_f_lasti, NULL, NULL, NULL},
     {"f_lineno", (getter)THPPyInterpreterFrame_f_lineno, NULL, NULL, NULL},
     {"f_back", (getter)THPPyInterpreterFrame_f_back, NULL, NULL, NULL},
+    {"closure", (getter)THPPyInterpreterFrame_closure, NULL, NULL, NULL},
     {NULL}};
 
 static PyTypeObject THPPyInterpreterFrameType = {
