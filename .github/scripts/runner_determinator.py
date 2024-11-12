@@ -46,9 +46,10 @@ Example config:
     # Opt-ins:
     # Users can opt into the LF fleet by adding their GitHub username to this list
     # and specifying experiments to enable in a comma-separated list.
+    # To always opt out of an experiment, prefix it with a "-".
     # Experiments should be from the above list.
 
-    @User1,lf,split_build
+    @User1,-lf,split_build
     @User2,lf
     @User3,split_build
 """
@@ -372,6 +373,15 @@ def is_user_opted_in(user: str, user_optins: UserOptins, experiment_name: str) -
     return experiment_name in user_optins.get(user, [])
 
 
+def is_user_opted_out(user: str, user_optins: UserOptins, experiment_name: str) -> bool:
+    """
+    Check if a user expliclyt opted out of an experiment
+    """
+    # if the experiment is prefixed with a "-", then it's an opt-out
+    experiment_optout = "-" + experiment_name
+    return experiment_optout in user_optins.get(user, [])
+
+
 def get_runner_prefix(
     rollout_state: str,
     workflow_requestors: Iterable[str],
@@ -417,6 +427,19 @@ def get_runner_prefix(
                 f"{', '.join(opted_in_users)} have opted into experiment {experiment_name}."
             )
             enabled = True
+
+        # Is any workflow_requestor opted out to this experiment?
+        opted_out_users = [
+            requestor
+            for requestor in workflow_requestors
+            if is_user_opted_out(requestor, user_optins, experiment_name)
+        ]
+
+        if opted_out_users:
+            log.info(
+                f"{', '.join(opted_in_users)} have opted out of experiment {experiment_name}."
+            )
+            continue
 
         elif experiment_settings.rollout_perc:
             # If no user is opted in, then we randomly enable the experiment based on the rollout percentage
