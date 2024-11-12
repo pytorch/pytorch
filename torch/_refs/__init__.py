@@ -1208,30 +1208,64 @@ def eq(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
     return prims.eq(a, b)
 
 
-@_make_elementwise_binary_reference(
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG,
-    exact_dtype=True,
-)
 def pow(
     a: Union[TensorLikeType, NumberType],
     b: Union[TensorLikeType, NumberType],
+    **kwargs,
 ) -> TensorLikeType:
-    assert isinstance(a, TensorLikeType) or isinstance(b, TensorLikeType)
+    # Dispatch to the correct pow function.
+    if isinstance(a, TensorLikeType) and isinstance(b, Number):
+        # Special function for Tensor_Scalar overloads.
+        return pow_Tensor_Scalar(a, b, **kwargs)
+    else:
+        return pow_Tensor(a, b, **kwargs)
 
-    if isinstance(b, Number):
-        if b == 1.0:
-            return a.clone()  # type: ignore[return-value,union-attr]
-        elif b == 2.0:
-            return a * a  # type: ignore[return-value]
-        elif b == 0.5:
-            return torch.sqrt(a)  # type: ignore[arg-type]
-    elif isinstance(a, Number):
+
+@_make_elementwise_binary_reference(
+    aten_op=(
+        aten.pow.Tensor_Tensor,
+        aten.pow.Tensor_Tensor_out,
+        aten.pow.Scalar,
+        aten.pow.Scalar_out,
+    ),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG,
+)
+def pow_Tensor(
+    a: Union[TensorLikeType, NumberType],
+    b: Union[TensorLikeType, NumberType],
+) -> TensorLikeType:
+    # Overloads for pow(tensor, scalar) are handled by pow_Tensor_Scalar.
+    assert isinstance(b, TensorLikeType)
+
+    if isinstance(a, Number):
         if a == 1.0:
             return torch.fill(b, True)
         if a == 2.0 and (
             utils.is_float_dtype(b.dtype) or utils.is_complex_dtype(b.dtype)
         ):
             return torch.exp2(b)
+
+    return prims.pow(a, b)
+
+
+@_make_elementwise_binary_reference(
+    aten_op=(
+        aten.pow.Tensor_Scalar,
+        aten.pow.Tensor_Scalar_out,
+    ),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG,
+    exact_dtype=True,
+)
+def pow_Tensor_Scalar(a: TensorLikeType, b: NumberType) -> TensorLikeType:
+    # Tensor_Scalar overloads needed to be separated, since the given out
+    # arguments should be of the exact dtype we are expecting.
+
+    if b == 1.0:
+        return a.clone()  # type: ignore[return-value,union-attr]
+    elif b == 2.0:
+        return a * a  # type: ignore[return-value]
+    elif b == 0.5:
+        return torch.sqrt(a)  # type: ignore[arg-type]
 
     return prims.pow(a, b)
 
