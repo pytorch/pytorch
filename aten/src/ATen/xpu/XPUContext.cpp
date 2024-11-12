@@ -49,16 +49,6 @@ void initDeviceGlobalIdx(DeviceIndex device) {
       static_cast<int32_t>(std::distance(devices.begin(), it));
 }
 
-inline void check_device(DeviceIndex device) {
-  TORCH_CHECK(
-      device >= 0 && device < num_gpus,
-      "device is out of range, device is ",
-      static_cast<int>(device),
-      ", total number of device is ",
-      static_cast<int>(num_gpus),
-      ".");
-}
-
 } // anonymous namespace
 
 DeviceProp* getCurrentDeviceProperties() {
