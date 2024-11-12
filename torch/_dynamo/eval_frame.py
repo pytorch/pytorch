@@ -438,7 +438,7 @@ class _TorchDynamoContext:
             self.enter_exit_hooks.append(call_backend_ctx)
 
     def __enter__(self):
-        if config.raise_on_ctx_manager_usage:
+        # Issue #136862 Flag is deprecated and default value is true
             raise RuntimeError(
                 "torch._dynamo.optimize(...) is used with a context manager. "
                 "Please refer to https://pytorch.org/tutorials/intermediate/torch_compile_tutorial.html "

@@ -53,7 +53,7 @@ class TestCase(TorchTestCase):
         cls._exit_stack = contextlib.ExitStack()  # type: ignore[attr-defined]
         cls._exit_stack.enter_context(  # type: ignore[attr-defined]
             config.patch(
-                raise_on_ctx_manager_usage=True,
+                # Issue #136862 Flag is deprecated and default value is true
                 suppress_errors=False,
                 log_compilation_metrics=False,
             ),

@@ -1311,28 +1311,29 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         # should trigger a recompile
         self.assertEqual(f(inp, m), inp + 1)
 
-    @patch.object(torch._dynamo.config, "raise_on_ctx_manager_usage", False)
+    # Issue #136862 Flag is deprecated and default value is true
     def test_generation_tag(self):
-        cnt = torch._dynamo.testing.CompileCounter()
+        with pytest.raises(RuntimeError, match="torch._dynamo.optimize(...) is used with a context manager. Please refer to https://pytorch.org/tutorials/intermediate/torch_compile_tutorial.html to use torch._dynamo.optimize(...) as an annotation/decorator. "):
+            cnt = torch._dynamo.testing.CompileCounter()
 
-        # guarantee that we have installed
-        # the generation tagging function
-        with torch._dynamo.optimize_assert(cnt):
-            pass
+            # guarantee that we have installed
+            # the generation tagging function
+            with torch._dynamo.optimize_assert(cnt):
+                pass
 
-        m1 = torch.nn.Linear(10, 10)
-        prev_generation = GenerationTracker.get_generation_value(m1)
-        cur_generation = prev_generation + 1
+            m1 = torch.nn.Linear(10, 10)
+            prev_generation = GenerationTracker.get_generation_value(m1)
+            cur_generation = prev_generation + 1
 
-        with torch._dynamo.optimize_assert(cnt):
-            m2 = torch.nn.Linear(10, 10)
+            with torch._dynamo.optimize_assert(cnt):
+                m2 = torch.nn.Linear(10, 10)
 
-        self.assertEqual(GenerationTracker.get_generation_value(m1), prev_generation)
-        self.assertEqual(GenerationTracker.get_generation_value(m2), cur_generation)
-        # check that newly constructed instances
-        # also have the same generation (even if copied from an old instance)
-        m3 = deepcopy(m1)
-        self.assertEqual(GenerationTracker.get_generation_value(m3), cur_generation)
+            self.assertEqual(GenerationTracker.get_generation_value(m1), prev_generation)
+            self.assertEqual(GenerationTracker.get_generation_value(m2), cur_generation)
+            # check that newly constructed instances
+            # also have the same generation (even if copied from an old instance)
+            m3 = deepcopy(m1)
+            self.assertEqual(GenerationTracker.get_generation_value(m3), cur_generation)
 
     def test_simple_torch_function(self):
         def foo(x):
@@ -1438,56 +1439,58 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         finally:
             TensorWithTFOverrideVariable.global_mangled_class_name = original
 
-    @patch.object(torch._dynamo.config, "raise_on_ctx_manager_usage", False)
+    # Issue #136862 Flag is deprecated and default value is true
     def test_nn_moduledict_contains(self):
-        class M(torch.nn.Module):
-            def __init__(self, module_dict):
-                super().__init__()
-                self.module_dict = module_dict
+        with pytest.raises(RuntimeError, match="torch._dynamo.optimize(...) is used with a context manager. Please refer to https://pytorch.org/tutorials/intermediate/torch_compile_tutorial.html to use torch._dynamo.optimize(...) as an annotation/decorator. "):
 
-            def forward(self, x):
-                if "foo" in self.module_dict:
-                    x = torch.mul(x, 1.0)
-                x = torch.add(x, 1.0)
-                return x
+            class M(torch.nn.Module):
+                def __init__(self, module_dict):
+                    super().__init__()
+                    self.module_dict = module_dict
 
-        module_dict = torch.nn.ModuleDict({"foo": torch.nn.Conv2d(1, 1, 1)})
-        m = M(module_dict)
-        data = torch.randn(1)
-        out1 = m(data)
-        cnt = torch._dynamo.testing.CompileCounter()
-        opt_m = torch._dynamo.optimize(cnt, nopython=True)(m)
-        out2 = opt_m(data)
-        self.assertEqual(cnt.op_count, 2)
-        self.assertTrue(torch._dynamo.testing.same(out1, out2))
+                def forward(self, x):
+                    if "foo" in self.module_dict:
+                        x = torch.mul(x, 1.0)
+                    x = torch.add(x, 1.0)
+                    return x
 
-        module_dict = torch.nn.ModuleDict({"bar": torch.nn.Conv2d(1, 1, 1)})
-        m = M(module_dict)
-        data = torch.randn(1)
-        out1 = m(data)
-        cnt = torch._dynamo.testing.CompileCounter()
-        torch._dynamo.reset()
-        opt_m = torch._dynamo.optimize(cnt, nopython=True)(m)
-        out2 = opt_m(data)
-
-        self.assertEqual(cnt.op_count, 1)
-        self.assertTrue(torch._dynamo.testing.same(out1, out2))
-
-        module_dict = torch.nn.ModuleDict({"cat": torch.nn.Conv2d(1, 1, 1)})
-        pre = m(data)
-        cnt.clear()
-
-        with torch._dynamo.optimize(cnt, nopython=False):
-            opt_pre = m(data)
+            module_dict = torch.nn.ModuleDict({"foo": torch.nn.Conv2d(1, 1, 1)})
             m = M(module_dict)
             data = torch.randn(1)
             out1 = m(data)
+            cnt = torch._dynamo.testing.CompileCounter()
+            opt_m = torch._dynamo.optimize(cnt, nopython=True)(m)
+            out2 = opt_m(data)
+            self.assertEqual(cnt.op_count, 2)
+            self.assertTrue(torch._dynamo.testing.same(out1, out2))
 
-        out_post = m(data)
-        self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(cnt.op_count, 1)
-        self.assertTrue(torch._dynamo.testing.same(pre, opt_pre))
-        self.assertTrue(torch._dynamo.testing.same(out1, out_post))
+            module_dict = torch.nn.ModuleDict({"bar": torch.nn.Conv2d(1, 1, 1)})
+            m = M(module_dict)
+            data = torch.randn(1)
+            out1 = m(data)
+            cnt = torch._dynamo.testing.CompileCounter()
+            torch._dynamo.reset()
+            opt_m = torch._dynamo.optimize(cnt, nopython=True)(m)
+            out2 = opt_m(data)
+
+            self.assertEqual(cnt.op_count, 1)
+            self.assertTrue(torch._dynamo.testing.same(out1, out2))
+
+            module_dict = torch.nn.ModuleDict({"cat": torch.nn.Conv2d(1, 1, 1)})
+            pre = m(data)
+            cnt.clear()
+
+            with torch._dynamo.optimize(cnt, nopython=False):
+                opt_pre = m(data)
+                m = M(module_dict)
+                data = torch.randn(1)
+                out1 = m(data)
+
+            out_post = m(data)
+            self.assertEqual(cnt.frame_count, 1)
+            self.assertEqual(cnt.op_count, 1)
+            self.assertTrue(torch._dynamo.testing.same(pre, opt_pre))
+            self.assertTrue(torch._dynamo.testing.same(out1, out_post))
 
     # RuntimeError: SymIntArrayRef expected to contain only concrete integers
     @expectedFailureDynamic

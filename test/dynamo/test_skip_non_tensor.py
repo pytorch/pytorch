@@ -124,69 +124,72 @@ class SkipNonTensorTests(torch._dynamo.test_case.TestCase):
 
         assert counter.op_count == 0
 
-    @patch.object(torch._dynamo.config, "raise_on_ctx_manager_usage", False)
+    # Issue #136862 Flag is deprecated and default value is true
     def test_recursive_list(self):
-        def fn(x):
-            return x
+        with pytest.raises(RuntimeError, match="torch._dynamo.optimize(...) is used with a context manager. Please refer to https://pytorch.org/tutorials/intermediate/torch_compile_tutorial.html to use torch._dynamo.optimize(...) as an annotation/decorator. "):
+            def fn(x):
+                return x
 
-        counter = CompileCounter()
+            counter = CompileCounter()
 
-        x = []
-        x.append(x)
-        with torch._dynamo.optimize_assert(counter):
-            fn(x)
+            x = []
+            x.append(x)
+            with torch._dynamo.optimize_assert(counter):
+                fn(x)
 
-        assert counter.op_count == 0
+            assert counter.op_count == 0
 
-    @patch.object(torch._dynamo.config, "raise_on_ctx_manager_usage", False)
+    # Issue #136862 Flag is deprecated and default value is true
     def test_custom_list(self):
-        def fn(x):
-            return x[0] + x[1]
+        with pytest.raises(RuntimeError, match="torch._dynamo.optimize(...) is used with a context manager. Please refer to https://pytorch.org/tutorials/intermediate/torch_compile_tutorial.html to use torch._dynamo.optimize(...) as an annotation/decorator. "):
+        
+            def fn(x):
+                return x[0] + x[1]
 
-        counter = CompileCounter()
+            counter = CompileCounter()
 
-        class Foo(list):
-            def __iter__(self):
-                raise Exception  # noqa: TRY002
+            class Foo(list):
+                def __iter__(self):
+                    raise Exception  # noqa: TRY002
 
-            def __len__(self):
-                raise Exception  # noqa: TRY002
+                def __len__(self):
+                    raise Exception  # noqa: TRY002
 
-        x = Foo()
-        x.append(torch.randn(4))
-        x.append(torch.randn(4))
-        with torch._dynamo.optimize_assert(counter):
-            fn(x)
+            x = Foo()
+            x.append(torch.randn(4))
+            x.append(torch.randn(4))
+            with torch._dynamo.optimize_assert(counter):
+                fn(x)
 
-        assert counter.op_count == 0
+            assert counter.op_count == 0
 
-    def test_do_not_skip_side_effects(self):
-        # https://github.com/pytorch/pytorch/issues/110765
+        def test_do_not_skip_side_effects(self):
+            # https://github.com/pytorch/pytorch/issues/110765
 
-        # By invoking torch._utils.is_compiling(),
-        # there may be side-effects inconsistent with eager when
-        # compiling. Thus we force dynamo to commit the graph,
-        # even if it does not perform any tensor operation
-        global _variable, _variable_2
+            # By invoking torch._utils.is_compiling(),
+            # there may be side-effects inconsistent with eager when
+            # compiling. Thus we force dynamo to commit the graph,
+            # even if it does not perform any tensor operation
+            global _variable, _variable_2
 
-        for mode in range(1, 7):
-            torch._dynamo.reset()
+            for mode in range(1, 7):
+                torch._dynamo.reset()
 
-            _variable = 0
-            _variable_2 = 0
+                _variable = 0
+                _variable_2 = 0
 
-            mod = MyModule(mode=mode)
-            model = torch._dynamo.optimize(backend="eager", nopython=mode != 6)(mod)
-            assert _variable == 0
-            assert _variable_2 == 0
+                mod = MyModule(mode=mode)
+                model = torch._dynamo.optimize(backend="eager", nopython=mode != 6)(mod)
+                assert _variable == 0
+                assert _variable_2 == 0
 
-            model(torch.tensor([1]))
-            assert _variable == 1
-            assert _variable_2 == 0
+                model(torch.tensor([1]))
+                assert _variable == 1
+                assert _variable_2 == 0
 
-            model(torch.tensor([1]))
-            assert _variable == 2
-            assert _variable_2 == 0
+                model(torch.tensor([1]))
+                assert _variable == 2
+                assert _variable_2 == 0
 
 
 if __name__ == "__main__":
