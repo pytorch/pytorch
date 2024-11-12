@@ -63,6 +63,8 @@ typedef struct VISIBILITY_HIDDEN CacheEntry {
 
   // Warning: returns a reference whose lifetime is controlled by C++
   py::object next();
+
+  void invalidate(py::object deleted_guard_manager);
 } CacheEntry;
 C10_DIAGNOSTIC_POP()
 C10_DIAGNOSTIC_POP()

@@ -166,7 +166,7 @@ class GuardManagerWrapper:
         self.guard_fail_fn = None
         self.cache_entry = None
         self.extra_state = None
-        self.id_matched_objs = None
+        self.id_matched_objs = {}
         self.no_tensor_aliasing_sources = []
 
         self.print_no_tensor_aliasing_guard = True
@@ -2112,6 +2112,12 @@ def must_add_nn_module_guards(guard):
 class DeletedGuardFn:
     pass
 
+class DeletedGuardManagerWrapper(GuardManagerWrapper):
+    def __init__(self):
+        super().__init__()
+        self.root.add_always_false_guard("always_false")
+
+deleted_guard_manager = DeletedGuardManagerWrapper()
 
 # NB: Naively, you'd expect this to only be a function that produces
 # the callable that constitutes the guard.  However, there is some
@@ -2403,7 +2409,8 @@ class CheckFunctionManager:
         ):
             assert isinstance(cache_entry, CacheEntry)
             assert isinstance(extra_state, ExtraState)
-            extra_state.invalidate(cache_entry)
+            extra_state.invalidate(cache_entry, deleted_guard_manager)
+            # cache_entry.guard_manager = DeletedGuardManagerWrapper()
             self.guard_manager.cache_entry = None
             self.guard_manager.extra_state = None
             self.guard_manager = DeletedGuardFn  # type: ignore[assignment]
@@ -2588,6 +2595,8 @@ def get_guard_fail_reason(
     f_locals: Dict[str, object],
     compile_id: CompileId,
 ) -> str:
+    if isinstance(guard_manager, DeletedGuardManagerWrapper):
+        return "Guard manager was invalidated"
     reason_str = get_guard_fail_reason_helper(guard_manager, f_locals, compile_id)
     guard_failures[orig_code_map[code]].append(reason_str)
 

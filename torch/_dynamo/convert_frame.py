@@ -836,9 +836,10 @@ def _compile(
         assert output.guards is not None
         CleanupManager.instance[out_code] = output.cleanups
         nonlocal cache_entry
+        old_cache_entry = cache_entry
         while cache_entry:
-            print(cache_entry.guard_manager)
             cache_entry = cache_entry.next
+        cache_entry = old_cache_entry
 
 
         check_fn = CheckFunctionManager(

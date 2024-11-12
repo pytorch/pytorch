@@ -1219,6 +1219,18 @@ class NOT_NONE : public LeafGuard {
   }
 };
 
+// Used to replace the existing guard manager with an always false guard manager
+// on invalidation.
+class ALWAYS_FALSE : public LeafGuard {
+ public:
+  ALWAYS_FALSE(py::object verbose_code_parts)
+      : LeafGuard(std::move(verbose_code_parts)) {}
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    return false;
+  }
+};
+
 class DEFAULT_DEVICE : public LeafGuard {
  public:
   DEFAULT_DEVICE(py::object verbose_code_parts)
@@ -3728,11 +3740,19 @@ static void* _torchinductor_pyobject_tensor_data_ptr(PyObject* obj) {
 }
 
 void* convert_to_root_guard_manager(py::object root) {
+  // For invalidated guards, return nullptr
+  if (root.is(py::none())){
+    return nullptr;
+  }
   RootGuardManager* root_mgr = std::move(root).cast<RootGuardManager*>();
   return (void*)root_mgr;
 }
 
 bool run_root_guard_manager(void* root, PyObject* f_locals) {
+  // for invalidated guards, return false
+  if (root == nullptr) {
+    return false;
+  }
   return ((RootGuardManager*)root)->check_nopybind(f_locals);
 }
 
@@ -3841,6 +3861,9 @@ PyObject* torch_c_dynamo_guards_init() {
   py::class_<NOT_NONE, LeafGuard, std::shared_ptr<NOT_NONE>>(py_m, "NOT_NONE")
       .def(py::init<py::list>())
       .def("__call__", &NOT_NONE::check);
+  py::class_<ALWAYS_FALSE, LeafGuard, std::shared_ptr<ALWAYS_FALSE>>(py_m, "ALWAYS_FALSE")
+      .def(py::init<py::list>())
+      .def("__call__", &ALWAYS_FALSE::check);
   py::class_<
       TUPLE_ITERATOR_LEN,
       LeafGuard,
@@ -4083,6 +4106,13 @@ PyObject* torch_c_dynamo_guards_init() {
             SKIP_IF_GUARD_ALREADY_PRESENT("NOT_NONE");
             self.add_leaf_guard(
                 std::make_shared<NOT_NONE>(std::move(verbose_code_parts)));
+          })
+      .def(
+          "add_always_false_guard",
+          [](GuardManager& self, py::object verbose_code_parts) -> void {
+            SKIP_IF_GUARD_ALREADY_PRESENT("ALWAYS_FALSE");
+            self.add_leaf_guard(
+                std::make_shared<ALWAYS_FALSE>(std::move(verbose_code_parts)));
           })
       .def(
           "add_global_state_guard",

@@ -31,11 +31,13 @@ void ExtraState::move_to_front(CacheEntry* cache_entry) {
       cache_entry->_owner_loc);
 }
 
-void ExtraState::invalidate(CacheEntry* cache_entry) {
+void ExtraState::invalidate(CacheEntry* cache_entry, py::object deleted_guard_manager) {
   CHECK(cache_entry->_owner == this);
   CHECK(!this->cache_entry_list.empty());
   CHECK(cache_entry == &*cache_entry->_owner_loc);
-  this->cache_entry_list.erase(cache_entry->_owner_loc);
+  cache_entry->invalidate(deleted_guard_manager);
+  // TODO (anijain2305) - Move this cache entry to end of the list.
+  // this->cache_entry_list.erase(cache_entry->_owner_loc);
 }
 
 static bool is_extra_state_unset(ExtraState* extra_state) {
