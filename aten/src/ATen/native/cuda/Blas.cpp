@@ -1015,7 +1015,7 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
       mat1.sizes()[0],
       "x",
       mat1.sizes()[1],
-      ".");
+      ").");
   TORCH_CHECK(mat2.sizes()[0] % 16 == 0 && mat2.sizes()[1] % 16 == 0, "mat2 shape (", mat2.sizes()[0], "x",
        mat2.sizes()[1], " must be divisible by 16");
   // Check types
