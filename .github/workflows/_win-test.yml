@@ -96,7 +96,7 @@ jobs:
           retry_wait_seconds: 30
           command: |
             set -eu
-            python3 -m pip install rockset==1.0.3 'xdoctest>=1.1.0'
+            python3 -m pip install 'xdoctest>=1.1.0'
 
       - name: Start monitoring script
         id: monitor-script
