@@ -163,6 +163,16 @@ jobs:
       docker-image: ${{ needs.linux-focal-cuda11_8-py3_10-gcc9-debug-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-cuda11_8-py3_10-gcc9-debug-build.outputs.test-matrix }}
 
+  buck-build-test:
+    if: github.repository_owner == 'pytorch'
+    name: buck-build-test
+    uses: ./.github/workflows/_buck-build-test.yml
+    with:
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 1, runner: "ubuntu-latest" },
+        ]}
+
   linux-focal-rocm6_2-py3_10-build:
     name: linux-focal-rocm6.2-py3.10
     uses: ./.github/workflows/_linux-build.yml

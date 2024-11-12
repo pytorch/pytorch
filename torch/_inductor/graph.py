@@ -1949,7 +1949,7 @@ class GraphLowering(torch.fx.Interpreter):
             "GraphLowering.compile_to_module",
             phase_name="code_gen",
             log_pt2_compile_event=True,
-            dynamo_compile_column_us="inductor_code_gen_cumulative_compile_time_us",
+            fwd_only=False,
         ):
             return self._compile_to_module()
 

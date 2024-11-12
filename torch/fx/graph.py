@@ -1027,12 +1027,6 @@ class Graph:
         return _node_list(self)
 
     @compatibility(is_backward_compatible=False)
-    def output_node(self) -> Node:
-        output_node = next(iter(reversed(self.nodes)))
-        assert output_node.op == "output"
-        return output_node
-
-    @compatibility(is_backward_compatible=False)
     def find_nodes(
         self, *, op: str, target: Optional["Target"] = None, sort: bool = True
     ):

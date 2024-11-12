@@ -4856,20 +4856,6 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         self.assertEqual(type(actual), type(expected))
         self.assertEqual(actual.__dict__, expected.__dict__)
 
-    def test_weakref_construction(self):
-        def fn(x, y):
-            x_weak = weakref.ref(x)
-            return x_weak() * y
-
-        x = torch.randn(4)
-        y = torch.randn(4)
-
-        ref = fn(x, y)
-
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        res = opt_fn(x, y)
-        self.assertEqual(ref, res)
-
     def test_weakref(self):
         def fn(x_weak, weight, y):
             if x_weak is not None and x_weak() is not weight:
@@ -6209,23 +6195,6 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         # Ensure that the listcomp is fully compiled
         self.assertEqual(cnt.op_count, 8)
 
-    # https://github.com/pytorch/pytorch/issues/140266
-    def test_distributions_subclass(self):
-        import torch
-        from torch.distributions import Categorical
-
-        class SubCateg(Categorical):
-            ...
-
-        @torch.compile(backend="eager", fullgraph=True)
-        def make_dist_and_execute(t, d):
-            categ = d(logits=t)
-            a = categ.log_prob(categ.sample()) + categ.probs + categ.logits
-            return a
-
-        for _ in range(2):
-            make_dist_and_execute(torch.randn(10), SubCateg)
-
     def test_tensor_split_within_device_cm(self):
         @torch.compile(fullgraph=True)
         def split(x):
@@ -6236,38 +6205,6 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
 
         with torch.device("cpu"):
             self.assertEqual(res, split(x))
-
-    def test_method_overriding(self):
-        class DilateConv(torch.nn.Module):
-            def __init__(
-                self,
-                dilate_func=None,
-            ):
-                super().__init__()
-                self.dilate_func = dilate_func
-
-            def forward(self, x):
-                return self.dilate_func() * torch.sin(x)
-
-        class MainModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.mod = DilateConv(self.dilate_func)
-                self.a = 4
-
-            def dilate_func(self):
-                return self.a
-
-            def forward(self, x):
-                return self.mod(x)
-
-        mod = MainModule()
-
-        opt_mod = torch.compile(mod, backend="eager", fullgraph=True)
-        x = torch.randn(4)
-        ref = mod(x)
-        res = opt_mod(x)
-        self.assertEqual(ref, res)
 
 
 instantiate_parametrized_tests(ReproTests)

@@ -27,7 +27,6 @@ from ..source import (
     GetItemSource,
     ODictGetItemSource,
     TypeSource,
-    WeakRefCallSource,
 )
 from ..utils import (
     check_unspec_or_constant_args,
@@ -963,23 +962,15 @@ class LambdaVariable(VariableTracker):
 class GetAttrVariable(VariableTracker):
     _nonvar_fields = {
         "name",
-        "py_type",
         *VariableTracker._nonvar_fields,
     }
 
-    def __init__(self, obj, name, py_type=None, **kwargs) -> None:
+    def __init__(self, obj, name, **kwargs) -> None:
         super().__init__(**kwargs)
         assert isinstance(obj, VariableTracker)
         assert isinstance(name, str)
         self.obj = obj
         self.name = name
-        self.py_type = py_type  # In some cases we know the type (ex. tensor methods)
-
-    def python_type(self):
-        if self.py_type is not None:
-            return self.py_type
-        else:
-            super().python_type()
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.obj}, {self.name})"
@@ -1726,26 +1717,3 @@ class RandomVariable(VariableTracker):
         codegen(self.wrap_state(self.random.getstate()))
         codegen.call_function(1, True)
         codegen.pop_top()
-
-
-class WeakRefVariable(VariableTracker):
-    @staticmethod
-    def build(tx, weakref_value, **options):
-        source = options.get("source", None)
-        referent = weakref_value()
-        source = source and WeakRefCallSource(source)
-        referent_vt = VariableTracker.build(tx, referent, source)
-        options["source"] = source
-        return WeakRefVariable(referent_vt, **options)
-
-    def __init__(self, referent_vt, **options):
-        super().__init__(**options)
-        self.referent_vt = referent_vt
-
-    def call_function(
-        self,
-        tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
-    ) -> "VariableTracker":
-        return self.referent_vt

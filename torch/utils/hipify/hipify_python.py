@@ -38,8 +38,6 @@ from .cuda_to_hip_mappings import MATH_TRANSPILATIONS
 from typing import Dict, List, Iterator, Optional
 from collections.abc import Mapping, Iterable
 from enum import Enum
-import functools
-import hashlib
 
 class CurrentState(Enum):
     INITIALIZED = 1
@@ -680,13 +678,9 @@ class Trie:
     def __init__(self):
         """Initialize the trie with an empty root node."""
         self.root = TrieNode()
-        self._hash = hashlib.md5()
-        self._digest = self._hash.digest()
 
     def add(self, word):
         """Add a word to the Trie. """
-        self._hash.update(word.encode())
-        self._digest = self._hash.digest()
         node = self.root
 
         for char in word:
@@ -715,13 +709,8 @@ class Trie:
         # make sure to check the end-of-word marker present
         return '' in node.children
 
-    @functools.lru_cache  # noqa: B019
-    def _pattern(self, root, digest):
-        """Convert a Trie into a regular expression pattern
-
-        Memoized on the hash digest of the trie, which is built incrementally
-        during add().
-        """
+    def _pattern(self, root):
+        """Convert a Trie into a regular expression pattern"""
         node = root
 
         if "" in node.children and len(node.children.keys()) == 1:
@@ -733,7 +722,7 @@ class Trie:
         for char in sorted(node.children.keys()):
             if isinstance(node.children[char], TrieNode):
                 try:
-                    recurse = self._pattern(node.children[char], self._digest)
+                    recurse = self._pattern(node.children[char])
                     alt.append(self.quote(char) + recurse)
                 except Exception:
                     cc.append(self.quote(char))
@@ -761,11 +750,11 @@ class Trie:
 
     def pattern(self):
         """Export the Trie to a regex pattern."""
-        return self._pattern(self.root, self._digest)
+        return self._pattern(self.root)
 
     def export_to_regex(self):
         """Export the Trie to a regex pattern."""
-        return self._pattern(self.root, self._digest)
+        return self._pattern(self.root)
 
 CAFFE2_TRIE = Trie()
 CAFFE2_MAP = {}

@@ -1,11 +1,5 @@
 from . import parametrizations, rnn, stateless
-from .clip_grad import (
-    _clip_grads_with_norm_ as clip_grads_with_norm_,
-    _get_total_norm as get_total_norm,
-    clip_grad_norm,
-    clip_grad_norm_,
-    clip_grad_value_,
-)
+from .clip_grad import clip_grad_norm, clip_grad_norm_, clip_grad_value_
 from .convert_parameters import parameters_to_vector, vector_to_parameters
 from .fusion import (
     fuse_conv_bn_eval,
@@ -25,7 +19,6 @@ from .weight_norm import remove_weight_norm, weight_norm
 __all__ = [
     "clip_grad_norm",
     "clip_grad_norm_",
-    "clip_grads_with_norm_",
     "clip_grad_value_",
     "convert_conv2d_weight_memory_format",
     "convert_conv3d_weight_memory_format",
@@ -33,7 +26,6 @@ __all__ = [
     "fuse_conv_bn_weights",
     "fuse_linear_bn_eval",
     "fuse_linear_bn_weights",
-    "get_total_norm",
     "parameters_to_vector",
     "parametrizations",
     "remove_spectral_norm",

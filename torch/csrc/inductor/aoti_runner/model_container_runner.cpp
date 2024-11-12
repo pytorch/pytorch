@@ -90,7 +90,7 @@ AOTIModelContainerRunner::~AOTIModelContainerRunner() {
 }
 
 std::vector<at::Tensor> AOTIModelContainerRunner::run(
-    const std::vector<at::Tensor>& inputs,
+    std::vector<at::Tensor>& inputs,
     AOTInductorStreamHandle cuda_stream_handle) {
   auto input_handles =
       torch::aot_inductor::unsafe_alloc_new_handles_from_tensors(inputs);

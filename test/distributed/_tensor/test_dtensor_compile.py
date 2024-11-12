@@ -652,6 +652,7 @@ def forward(self, primals_1):
     return (sin_1, primals_1, wait_tensor)""",
         )
 
+    @unittest.expectedFailure
     @skipIfTorchDynamo()
     def test_unwrap_async_collective_tensor_tangent(self):
         from torch.distributed._functional_collectives import AsyncCollectiveTensor

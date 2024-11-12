@@ -59,14 +59,6 @@ def set_driver_to_gpu():
     raise RuntimeError("Could not find an active GPU backend")
 
 
-def get_backend_options():
-    driver = triton.runtime.driver
-    target = driver.active.get_current_target()
-    backend = triton.compiler.compiler.make_backend(target)
-    options = backend.parse_options(dict())
-    return options.__dict__
-
-
 @triton.jit
 def promote_to_tensor(x):
     # Addition promotes to tensor for us

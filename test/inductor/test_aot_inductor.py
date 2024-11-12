@@ -3888,42 +3888,6 @@ class AOTInductorTestsTemplate:
                     2,
                 ).run(code)
 
-    def test_aoti_debug_printing_model_inputs_codegen(self):
-        if self.device != "cuda":
-            raise unittest.SkipTest("requires CUDA")
-
-        class Model(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
-            def forward(self, a, b, c):
-                x = a * 3.14
-                y = torch.addmm(c, x, b)
-                z = torch.nn.functional.gelu(y)
-                return z
-
-        example_inputs = (
-            torch.randn(10, 20, device="cuda"),
-            torch.randn(20, 30, device="cuda"),
-            torch.randn(10, 30, device="cuda"),
-        )
-        model = Model()
-        kernel_calls = [
-            ("aoti_model_inputs", 3),
-        ]
-
-        with config.patch({"aot_inductor.debug_intermediate_value_printer": "2"}):
-            result, code = run_and_get_cpp_code(
-                AOTIRunnerUtil.compile, model, example_inputs
-            )
-            self.assertEqual("aoti_torch_print_tensor_handle" in code, True)
-            # check the codegen for debug printing around aoti model inputs is expected
-            for kernel_call, count in kernel_calls:
-                FileCheck().check_count(
-                    f"{kernel_call}",
-                    count,
-                ).run(code)
-
     def test_size_from_multi_output(self):
         class Model(torch.nn.Module):
             def __init__(self):

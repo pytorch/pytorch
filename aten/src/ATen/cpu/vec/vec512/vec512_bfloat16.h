@@ -705,8 +705,6 @@ class Vectorized<BFloat16>: public Vectorized16<BFloat16> {
 public:
   using Vectorized16::Vectorized16;
 
-  using value_type = BFloat16;
-
   Vectorized<BFloat16> frac() const;
 
   Vectorized<BFloat16> eq(const Vectorized<BFloat16>& other) const;
@@ -1371,8 +1369,6 @@ template <>
 class Vectorized<Half>: public Vectorized16<Half> {
 public:
   using Vectorized16::Vectorized16;
-
-  using value_type = Half;
 
   Vectorized<Half> frac() const;
 

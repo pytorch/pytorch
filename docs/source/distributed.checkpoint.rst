@@ -15,13 +15,6 @@ DCP is different than `torch.save` and `torch.load` in a few significant ways:
 
 The entrypoints to load and save a checkpoint are the following:
 
-Additional resources:
----------------------
-
-* `Getting Started with Distributed Checkpoint (DCP) <https://pytorch.org/tutorials/recipes/distributed_checkpoint_recipe.html>`__
-* `Asynchronous Saving with Distributed Checkpoint (DCP) <https://pytorch.org/tutorials/recipes/distributed_async_checkpoint_recipe.html>`__
-* `TorchTitan Checkpointing Docs <https://github.com/pytorch/torchtitan/blob/main/docs/checkpoint.md>`__
-* `TorchTitan DCP Implementation <https://github.com/pytorch/torchtitan/blob/main/torchtitan/checkpoint.py>`__
 
 .. automodule:: torch.distributed.checkpoint
 

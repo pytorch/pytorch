@@ -397,7 +397,7 @@ AOTIModelContainerRunner* AOTIModelPackageLoader::get_runner() {
 }
 
 std::vector<at::Tensor> AOTIModelPackageLoader::run(
-    const std::vector<at::Tensor>& inputs) {
+    std::vector<at::Tensor>& inputs) {
   return runner_->run(inputs);
 }
 

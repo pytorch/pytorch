@@ -89,16 +89,6 @@ supported_const_comparison_op_values = dict.fromkeys(
 )
 
 
-def is_bound_tensor_method(value):
-    return (
-        callable(value)
-        and not torch._dynamo.utils.object_has_getattribute(value)
-        and hasattr(value, "__self__")
-        and isinstance(value.__self__, torch.Tensor)
-        and getattr(value.__self__, value.__name__, None)
-    )
-
-
 class TensorVariable(VariableTracker):
     """A torch.Tensor input or an intermediate value in the FX graph"""
 
@@ -144,7 +134,7 @@ class TensorVariable(VariableTracker):
         is_sparse,
         class_type,
         has_grad_fn,
-        _size=None,
+        size=None,
         stride=None,
         is_contiguous=None,
         _is_name_set=None,
@@ -156,7 +146,7 @@ class TensorVariable(VariableTracker):
         self.device = device
         self.layout = layout
         self.ndim = ndim
-        self._size = _size  # this is accessed as a property for validation
+        self.size = size
         self.stride = stride
         self.requires_grad = requires_grad
         self.is_quantized = is_quantized
@@ -201,7 +191,7 @@ class TensorVariable(VariableTracker):
             props["has_grad_fn"] = False
 
         if is_sparse_any(value) and not has_free_symbols(value):
-            props["_size"] = tuple(
+            props["size"] = tuple(
                 [int(s) if is_symbolic(s) else s for s in value.size()]
             )
         elif not has_free_symbols(value):
@@ -211,7 +201,7 @@ class TensorVariable(VariableTracker):
             # already. We could remove the discrepancy here, by having ConstantVariable be more permissive for
             # constant backed SymInts, but that assert being strict has led to some good signal in hunting bugs, and
             # I'd like to keep it around for now.
-            props["_size"] = tuple(
+            props["size"] = tuple(
                 # the non is_symbolic case applies to the jagged layout
                 # NestedTensor case as singleton ints are not symbolic
                 [int(s) if is_symbolic(s) else s for s in value.size()]
@@ -283,19 +273,14 @@ class TensorVariable(VariableTracker):
             raise NotImplementedError
 
         real_value = getattr(_input_associated_real_value, name)
+        if callable(real_value):
+            # Callables have more nuanced handling, and we should let the existing system delegate here.
+            # Raising was past behavior and so should always be sound to fall back.
+            # Note - at a certain point we may want to handle
+            raise NotImplementedError
 
         attr_source = AttrSource(self.source, name)
         install_guard(attr_source.make_guard(GuardBuilder.HASATTR))
-
-        # Typically we'd want to use variable builder here
-        # but unfortunately id(real_value.__self__) is not id(<original value>)
-        if is_bound_tensor_method(real_value):
-            from .misc import GetAttrVariable
-
-            return GetAttrVariable(
-                self, name, source=attr_source, py_type=type(real_value)
-            )
-
         return VariableTracker.build(tx, real_value, attr_source)
 
     def method_attr_ndim(self, tx):
@@ -321,7 +306,7 @@ class TensorVariable(VariableTracker):
             return ConstantVariable.create(self.device.type == "cuda")
 
     def method_attr_shape(self, tx):
-        if self.valid_size():
+        if self.size is not None:
             sizes = [variables.ConstantVariable.create(x) for x in self.size]
             return SizeVariable(sizes)
         else:
@@ -486,7 +471,7 @@ class TensorVariable(VariableTracker):
     def unpack_var_sequence(self, tx: "InstructionTranslator", idxes=None):
         from .builder import wrap_fx_proxy_cls
 
-        if self.valid_size():
+        if self.size:
             size_len = len(self.size)
         else:
             size_var = self.call_method(tx, "size", [], {})
@@ -495,7 +480,7 @@ class TensorVariable(VariableTracker):
         # Ensure we don't unpack a scalar tensor.
         assert size_len != 0, "Can't unpack scalar tensors."
 
-        if self.valid_size():
+        if self.size:
             length = self.size[0]
         else:
             dyn_length = self.call_method(tx, "size", [ConstantVariable.create(0)], {})
@@ -518,14 +503,6 @@ class TensorVariable(VariableTracker):
             for i in idxes
         ]
 
-    def valid_size(self):
-        return self._size is not None
-
-    @property
-    def size(self):
-        assert self._size is not None, "accessing None size in TensorVariable"
-        return self._size
-
     def _strict_mode_banned_ops(self):
         return torch._dynamo.config._autograd_backward_strict_mode_banned_ops
 
@@ -545,16 +522,16 @@ class TensorVariable(VariableTracker):
         # Only override builtin tensor methods
         # The user can manually add override handling
         # with a decorator for other methods (e.g. a dispatch subclass with other methods)
-        is_base_tensor_method = False
+        has_torch_function_override = False
         try:
             inspect.getattr_static(torch.Tensor, name)
-            is_base_tensor_method = True
+            has_torch_function_override = True
         except AttributeError:
-            is_base_tensor_method = False
+            has_torch_function_override = False
 
         if (
             can_dispatch_torch_function(tx, tuple([self] + list(args)), kwargs)
-            and is_base_tensor_method
+            and has_torch_function_override
         ):
             if self.source:
                 func_var = VariableBuilder(
@@ -616,14 +593,7 @@ class TensorVariable(VariableTracker):
         # Technically, this should not be necessary, but I'm including it
         # for enhanced BC, in case example_value is sometimes not set
         # (it really should always be set though!)
-        if name != "size":
-            r = getattr(self, name)
-        elif name == "size" and self.valid_size():
-            r = self.size
-        else:
-            r = None
-
-        if r is not None:
+        if (r := getattr(self, name)) is not None:
             if dim is None:
                 return RetVariable(r)
             else:
@@ -643,7 +613,7 @@ class TensorVariable(VariableTracker):
                     return ConstantVariable.create(int(fake_r))
 
     def method_numel(self):
-        if self.valid_size():
+        if self.size is not None:
             return ConstantVariable.create(product(self.size))
 
         # It might still be constant!  Consult the fake tensor and see

@@ -19,6 +19,7 @@ from torch._inductor.test_operators import realize
 from torch._inductor.utils import sympy_index_symbol
 from torch._inductor.virtualized import ops, V
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
+from torch.testing._internal.common_device_type import expectedFailureXPU
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.utils._pytree import tree_map
 from torch.utils._sympy.functions import ModularIndexing
@@ -240,6 +241,8 @@ class LoopOrderingTest(TestCase):
         expected_num_bytes *= x.itemsize
         self.assertEqual(expected_num_bytes, metrics.num_bytes_accessed)
 
+    # xpu generate 2 kernels
+    @expectedFailureXPU
     def test_apbt_realize(self):
         M = 1024
         N = 2048
@@ -259,6 +262,8 @@ class LoopOrderingTest(TestCase):
         self.do_acc_test(f, x, y)
         self.assertEqual(1, metrics.generated_kernel_count)
 
+    # xpu generate 2 kernels
+    @expectedFailureXPU
     def test_sum_and_t(self):
         N = 1024
 
@@ -269,6 +274,8 @@ class LoopOrderingTest(TestCase):
         self.do_acc_test(f, x)
         self.assertEqual(1, metrics.generated_kernel_count)
 
+    # xpu generate 2 kernels
+    @expectedFailureXPU
     def test_pw_outer_red(self):
         def f(x):
             x = realize(x + 1)
@@ -279,6 +286,8 @@ class LoopOrderingTest(TestCase):
         self.do_acc_test(f, x)
         self.assertEqual(1, metrics.generated_kernel_count)
 
+    # xpu generate 2 kernels
+    @expectedFailureXPU
     def test_pw_outer_red_2(self):
         """
         The pointwise kernel is a fused kernel
@@ -352,6 +361,8 @@ class LoopOrderingTest(TestCase):
         # some buffer is used before being defined.
         f(input_ids, labels, position_ids)
 
+    # xpu generate 2 kernels
+    @expectedFailureXPU
     def test_different_broadcast_shapes(self):
         def f(x, y, c):
             return x + c, y + c
@@ -462,7 +473,7 @@ class LoopOrderingTest(TestCase):
             M, N = 1024 * 32, 1024 * 8
         else:
             M, N = 200, 100
-        x = torch.randn(M, N, device=GPU_TYPE)
+        x = torch.randn(M, N, device="cuda")
         actual = f(x)
         opt_f = torch.compile(f)
         expected = opt_f(x)

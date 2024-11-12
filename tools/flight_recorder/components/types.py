@@ -5,7 +5,6 @@
 # LICENSE file in the root directory of this source tree.
 
 import math
-import os
 from enum import auto, Enum
 from typing import (  # type: ignore[attr-defined]
     _eval_type,
@@ -200,7 +199,7 @@ class Op:
         type = parts[0]
         meta = parts[1] if len(parts) == 2 else None
         self.state = event["state"]
-        self.pg_name, self.pg_desc = event["process_group"]
+        self.pg_name, _ = event["process_group"]
         assert type in COLLECTIVES | P2P | {
             "coalesced"
         }, f"{type} is not a supported operation"
@@ -213,6 +212,7 @@ class Op:
             self._dst, self._src = int(d), int(s)
         else:
             self._src, self._dst = -1, -1
+        _, pg_desc = event["process_group"]
         self._init_global_src_dst(memberships[pg_name])
         self.pg_size = len(memberships[pg_name])
         if type in P2P | COLLECTIVES:
@@ -224,8 +224,6 @@ class Op:
         self.p2p_seq_id = event["p2p_seq_id"]
         self.input_dtypes = event["input_dtypes"]
         self.output_dtypes = event["output_dtypes"]
-        self.time_created_ns = event["time_created_ns"]
-        self.is_verbose = os.getenv("FR_TRACE_VERBOSE_OUTPUT", "0") == "1"
 
     def _init_global_src_dst(self, pg_ranks: Set[Any]) -> None:
         pg_ranks = sorted(pg_ranks)
@@ -243,31 +241,9 @@ class Op:
         return self._dst
 
     def __repr__(self) -> str:
-        p2p_info = ""
         if self.type in P2P:
-            p2p_info = f"s={self._src_g} d={self._dst_g}"
-        if self.is_verbose:
-            verbose_info = (
-                f"timestamp_created={self.time_created_ns}",
-                p2p_info,
-                f"input_sizes={self.input_sizes}",
-                f"output_sizes={self.output_sizes}",
-                f"input_dtypes={self.input_dtypes}",
-                f"output_dtypes={self.output_dtypes}",
-                "collective_seq_id | p2p_seq_id="
-                f"{self.p2p_seq_id if self.type in P2P else self.collective_seq_id}",
-                f"pg_name={self.pg_name}",
-                f"pg_description={self.pg_desc}",
-                f"pg_size={self.pg_size}",
-                f"state={self.state}",
-            )
-            return f"{self.type}(%s)" % ", ".join(s for s in verbose_info if s)
-        return (
-            f"{self.type}(%sinput_sizes={self.input_sizes}, state={self.state})"
-            % f"{p2p_info}, "
-            if p2p_info
-            else ""
-        )
+            return f"{self.type}(s={self._src_g} d={self._dst_g}, sz={self.input_sizes}, state={self.state})"
+        return f"{self.type}(input_sizes={self.input_sizes}, state={self.state})"
 
     def match(self, other: "Op") -> MatchState:
         # TODO: I think this can validly not match,
