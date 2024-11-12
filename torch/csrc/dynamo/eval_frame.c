@@ -129,6 +129,8 @@ static PyObject* THPPyInterpreterFrame_closure(THPPyInterpreterFrame* self, PyOb
   return closure == NULL ? PyTuple_New(0) : Py_XNewRef(closure);
 #else
   PyCodeObject* code = self->frame->f_code;
+  // Why this check? See
+  // https://github.com/python/cpython/blob/5f24da9d75bb0150781b17ee4706e93e6bb364ea/Objects/frameobject.c#L1058-L1065
   if (code->co_flags & CO_OPTIMIZED) {
     int size = PyTuple_GET_SIZE(code->co_freevars);
     PyObject* freevars = PyTuple_New(size);
@@ -139,7 +141,6 @@ static PyObject* THPPyInterpreterFrame_closure(THPPyInterpreterFrame* self, PyOb
     }
     return freevars;
   }
-  // TODO when does this happen?
   return PyTuple_New(0);
 #endif // IS_PYTHON_3_11_PLUS
 }
