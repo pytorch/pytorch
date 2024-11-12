@@ -1081,6 +1081,9 @@ class aot_inductor:
         os.environ.get("AOTINDUCTOR_RAISE_ERROR_ON_IGNORED_OPTIMIZATION", "1") == "1"
     )
 
+    # dump an aoti minifier if program errors
+    dump_aoti_minifier: bool = os.environ.get("DUMP_AOTI_MINIFIER", "0") == "1"
+
     # Dictionary of presets that can be passed in
     presets: Dict[str, Any] = {}
 
@@ -1193,6 +1196,11 @@ class rocm:
     # Install with `pip install git+https://github.com/rocm/composable_kernel@develop`.
     ck_dir = os.environ.get("TORCHINDUCTOR_CK_DIR")
 
+    # generate standalone executables for instances generated with the CK backend
+    generate_test_runner: bool = (
+        os.environ.get("INDUCTOR_CK_BACKEND_GENERATE_TEST_RUNNER_CODE", "0") == "1"
+    )
+
     # Number of op instance choices to trade off between runtime perf and compilation time
     n_max_profiling_configs: Optional[int] = None
 
@@ -1269,6 +1277,16 @@ class trace:
 
     # SVG figure showing fx with fusion
     draw_orig_fx_graph = os.environ.get("INDUCTOR_ORIG_FX_SVG", "0") == "1"
+
+    # We draw our fx graphs with the "record" shape attribute by default.
+    # Sometimes, when the graph is very complex, we may hit dot errors like below:
+    #   "flat edge between adjacent nodes one of which has a record shape -
+    #    replace records with HTML-like labels"
+    # and thus fail to generate a graph. So, let's give the user an option
+    # to specify the shape attribute for the dot graph. For example, passing
+    # INDUCTOR_DOT_GRAPH_SHAPE_SVG = "none" would let us generate HTML-like lables
+    # to workaround the above failure.
+    dot_graph_shape = os.environ.get("INDUCTOR_DOT_GRAPH_SHAPE_SVG", None)
 
     # If not None, this is the URL that saves the SVG files of the input/output
     # graph of each pass that changed the graph
