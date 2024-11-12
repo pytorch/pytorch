@@ -231,13 +231,7 @@ Tensor& linspace_out_mps(const Scalar& start, const Scalar& end, int64_t steps, 
 
           @autoreleasepool {
             MPSGraph* mpsGraph = make_mps_graph();
-            newCachedGraph = new RangeCachedGraph(mpsGraph, MPSDataTypeFloat32, steps, true, start_less_end);
-
-            if (getMPSDataType(result) != MPSDataTypeFloat32) {
-              newCachedGraph->outputTensor = [mpsGraph castTensor:newCachedGraph->outputTensor
-                                                           toType:getMPSDataType(result)
-                                                             name:@"output"];
-            }
+            newCachedGraph = new RangeCachedGraph(mpsGraph, getMPSDataType(result), steps, true, start_less_end);
           }
           return newCachedGraph;
         });
