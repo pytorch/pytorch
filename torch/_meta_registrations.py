@@ -1495,7 +1495,7 @@ def linalg_solve_triangular_meta(
 
 
 @register_meta(aten.triangular_solve)
-@out_wrapper("X", "M")
+@out_wrapper("X", "M", exact_dtype=True)
 def triangular_solve_meta(
     self: Tensor,
     A: Tensor,
