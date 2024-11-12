@@ -109,22 +109,26 @@ jobs:
         shell: cmd
         run: |
           "builder/windows/arm64/bootstrap_git.bat"
-      - name: Bootstrap Python
+      - name: Verify Git installation
         shell: cmd
         run: |
-          "builder/windows/arm64/bootstrap_python.bat"
-      - name: Bootstrap Build Tools
-        shell: cmd
-        run: |
-          "builder/windows/arm64/bootstrap_buildtools.bat"
-      - name: Bootstrap APL
-        shell: cmd
-        run: |
-          "builder/windows/arm64/bootstrap_apl.bat"
-      - name: Bootstrap Rust
-        shell: cmd
-        run: |
-          "builder/windows/arm64/bootstrap_rust.bat"
+          git --version
+      # - name: Bootstrap Python
+      #   shell: cmd
+      #   run: |
+      #     "builder/windows/arm64/bootstrap_python.bat"
+      # - name: Bootstrap Build Tools
+      #   shell: cmd
+      #   run: |
+      #     "builder/windows/arm64/bootstrap_buildtools.bat"
+      # - name: Bootstrap APL
+      #   shell: cmd
+      #   run: |
+      #     "builder/windows/arm64/bootstrap_apl.bat"
+      # - name: Bootstrap Rust
+      #   shell: cmd
+      #   run: |
+      #     "builder/windows/arm64/bootstrap_rust.bat"
       - name: Git checkout PyTorch
         uses: actions/checkout@v4
         with:
