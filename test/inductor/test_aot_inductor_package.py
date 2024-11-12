@@ -11,7 +11,7 @@ from torch._inductor.package import AOTICompiledModel, load_package, package_aot
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import fresh_inductor_cache
 from torch.export import Dim
-from torch.testing._internal.common_utils import IS_FBCODE
+from torch.testing._internal.common_utils import IS_FBCODE, TEST_CUDA
 from torch.testing._internal.triton_utils import HAS_CUDA
 
 
@@ -250,6 +250,85 @@ class TestAOTInductorPackage(TestCase):
 
         self.assertEqual(loaded1(*example_inputs1), ep1.module()(*example_inputs1))
         self.assertEqual(loaded2(*example_inputs2), ep2.module()(*example_inputs2))
+
+    @unittest.skipIf(not TEST_CUDA, "requires cuda")
+    def test_duplicate_calls(self):
+        options = {
+            "aot_inductor.package": True,
+        }
+
+        device = "cuda"
+
+        class Model1(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, a, b):
+                return torch.cat([a, b], dim=0)
+
+        dim0_a = Dim("dim0_a", min=1, max=10)
+        dim0_b = Dim("dim0_b", min=1, max=20)
+        dynamic_shapes = {"a": {0: dim0_a}, "b": {0: dim0_b}}
+        example_inputs1 = (
+            torch.randn(2, 4, device=device),
+            torch.randn(3, 4, device=device),
+        )
+        self.check_model(Model1(), example_inputs1)
+        ep1 = torch.export.export(
+            Model1(), example_inputs1, dynamic_shapes=dynamic_shapes
+        )
+        aoti_files1 = torch._inductor.aot_compile(
+            ep1.module(), example_inputs1, options=options
+        )
+
+        device = "cpu"
+        example_inputs2 = (
+            torch.randn(2, 4, device=device),
+            torch.randn(3, 4, device=device),
+        )
+        ep2 = torch.export.export(
+            Model1(), example_inputs2, dynamic_shapes=dynamic_shapes
+        )
+        aoti_files2 = torch._inductor.aot_compile(
+            ep2.module(), example_inputs2, options=options
+        )
+
+        with tempfile.NamedTemporaryFile(suffix=".pt2") as f:
+            package_path = package_aoti(
+                f.name, {"model1": aoti_files1, "model2": aoti_files2}
+            )
+            loaded1 = load_package(package_path, "model1")
+            loaded2 = load_package(package_path, "model2")
+
+        assert torch.allclose(loaded1(*example_inputs1), ep1.module()(*example_inputs1))
+        assert torch.allclose(loaded2(*example_inputs2), ep2.module()(*example_inputs2))
+
+    def test_specified_output_dir(self):
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, a, b):
+                return torch.cat([a, b], dim=0)
+
+        example_inputs = (
+            torch.randn(2, 4, device=self.device),
+            torch.randn(3, 4, device=self.device),
+        )
+        ep = torch.export.export(Model(), example_inputs)
+        aoti_files = torch._inductor.aot_compile(
+            ep.module(),
+            example_inputs,
+            options={
+                "aot_inductor.output_path": "tmp_output_",
+                "aot_inductor.package": True,
+                "aot_inductor.package_cpp_only": self.package_cpp_only,
+            },
+        )
+        with tempfile.NamedTemporaryFile(suffix=".pt2") as f:
+            package_path = package_aoti(f.name, {"model1": aoti_files})
+            loaded = load_package(package_path, "model1")
+        assert torch.allclose(loaded(*example_inputs), ep.module()(*example_inputs))
 
 
 if __name__ == "__main__":
