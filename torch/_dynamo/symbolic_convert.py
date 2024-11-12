@@ -2782,7 +2782,6 @@ class InstructionTranslator(InstructionTranslatorBase):
                     cell_var = side_effects.track_cell_existing(
                         cell_source, dummy_cell, contents_var
                     )
-                    side_effects.store_cell(cell_var, contents_var)
                     self.symbolic_locals[name] = cell_var
                 else:
                     cell_var = side_effects.track_cell_new()
