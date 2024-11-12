@@ -155,7 +155,7 @@ class TritonSymbols:
     """
 
     reduction_types = OrderedSet([SymT.R0_INDEX, SymT.R1_INDEX])
-    block_types = OrderedSet([SymT.XBLOCK, SymT.YBLOCK] + list(reduction_types))
+    block_types = OrderedSet([SymT.XBLOCK, SymT.YBLOCK, *reduction_types])
 
     block_offsets = {
         symt: sympy.Symbol(f"{prefix_str[symt]}offset", integer=True, nonnegative=True)
