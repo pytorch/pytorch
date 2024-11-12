@@ -7,7 +7,8 @@ from token import NAME
 from tokenize import TokenInfo
 from unittest import TestCase
 
-from tools.linter.adapters.set_linter import get_args, lint_file, PythonLines
+from tools.linter.adapters._linter_common import PythonFile
+from tools.linter.adapters.set_linter import PythonLines, SetLinter
 
 
 TESTDATA = Path("tools/test/set_linter_testdata")
@@ -17,17 +18,27 @@ INCLUDES_FILE = TESTDATA / "includes.py.txt"
 INCLUDES_FILE2 = TESTDATA / "includes_doesnt_change.py.txt"
 FILES = TESTFILE, INCLUDES_FILE, INCLUDES_FILE2
 
-ARGS = get_args([])
+
+def python_lines(path: Path) -> PythonLines:
+    return PythonLines(PythonFile(path, SetLinter.linter_name))
+
+
+def assert_expected(self, path: Path, actual: str, suffix: str) -> None:
+    expected_file = Path(f"{path}.{suffix}")
+    if expected_file.exists():
+        self.assertEqual(actual, expected_file.read_text())
+    else:
+        expected_file.write_text(actual)
 
 
 class TestSetLinter(TestCase):
-    maxDiff = 1_000_000
+    assertExpected = assert_expected
 
     def test_get_all_tokens(self) -> None:
-        self.assertEqual(EXPECTED_SETS, PythonLines(TESTFILE).sets)
+        self.assertEqual(EXPECTED_SETS, python_lines(TESTFILE).sets)
 
     def test_omitted_lines(self) -> None:
-        actual = sorted(PythonLines(TESTFILE).omitted.omitted)
+        actual = sorted(python_lines(TESTFILE).omitted.omitted)
         expected = [3, 13]
         self.assertEqual(expected, actual)
 
@@ -42,20 +53,15 @@ class TestSetLinter(TestCase):
         self._test_linting(INCLUDES_FILE2)
 
     def _test_linting(self, path: Path) -> None:
-        def assert_expected(actual: str, suffix: str) -> None:
-            expected_file = Path(f"{path}.{suffix}")
-            if expected_file.exists():
-                self.assertEqual(actual, expected_file.read_text())
-            else:
-                expected_file.write_text(actual)
+        linter = SetLinter([str(path)])
+        messages = [i.asdict() for i in linter.lint_all()]
 
-        all_messages = [m.asdict() for m in lint_file(str(path), ARGS)]
-        replace = all_messages[-1]
+        replace = messages[-1]
         self.assertEqual(replace["original"], path.read_text())
-        assert_expected(replace["replacement"], "python")
+        self.assertExpected(path, replace["replacement"], "python")
 
-        msgs = json.dumps(all_messages, indent=2)
-        assert_expected(msgs, "json")
+        actual = json.dumps(messages, indent=2) + "\n"
+        self.assertExpected(path, actual, "json")
 
     def test_bracket_pairs(self) -> None:
         TESTS: tuple[tuple[str, dict[int, int]], ...] = (
@@ -71,7 +77,7 @@ class TestSetLinter(TestCase):
             ),
         )
         for i, (s, expected) in enumerate(TESTS):
-            pl = PythonLines(s)
+            pl = python_lines(s)
             if s:
                 actual = pl.token_lines[0].bracket_pairs
             else:
@@ -91,7 +97,7 @@ class TestSetLinter(TestCase):
             ("{One({'a': 1}), Two([{}, {2}, {1, 2}])}", 3),
         )
         for i, (s, expected) in enumerate(TESTS):
-            pl = PythonLines(s)
+            pl = python_lines(s)
             actual = pl.token_lines and pl.token_lines[0].braced_sets
             self.assertEqual(len(actual), expected)
 
