@@ -934,13 +934,20 @@ template <> Vectorized<c10::complex<float>> inline operator/(const Vectorized<c1
 
 // reciprocal. Implement this here so we can use multiplication.
 inline Vectorized<c10::complex<float>> Vectorized<c10::complex<float>>::reciprocal() const {
-  //re + im*i = (a + bi)  / (c + di)
-  //re = (ac + bd)/abs_2() = c/abs_2()
-  //im = (bc - ad)/abs_2() = d/abs_2()
-  const __m512 sign_mask = _mm512_setr_ps(0.0, -0.0, 0.0, -0.0, 0.0, -0.0, 0.0, -0.0,
-                                          0.0, -0.0, 0.0, -0.0, 0.0, -0.0, 0.0, -0.0);
-  auto c_d = _mm512_xor_ps(sign_mask, values);    //c       -d
-  return _mm512_div_ps(c_d, abs_2_());
+  // TODO: The vectorized implementation requires special handling for the case where real number/imag number is 0/Inf/NaN.
+  // //re + im*i = (a + bi)  / (c + di)
+  // //re = (ac + bd)/abs_2() = c/abs_2()
+  // //im = (bc - ad)/abs_2() = d/abs_2()
+  // const __m512 sign_mask = _mm512_setr_ps(0.0, -0.0, 0.0, -0.0, 0.0, -0.0, 0.0, -0.0,
+  //                                         0.0, -0.0, 0.0, -0.0, 0.0, -0.0, 0.0, -0.0);
+  // auto c_d = _mm512_xor_ps(sign_mask, values);    //c       -d
+  // return _mm512_div_ps(c_d, abs_2_());
+  __at_align__ c10::complex<float> tmp[size()];
+  store(tmp);
+  for (const auto i : c10::irange(size())) {
+    tmp[i] = c10::complex<float>(1) / tmp[i];
+  }
+  return loadu(tmp);
 }
 
 inline Vectorized<c10::complex<float>> Vectorized<c10::complex<float>>::atan() const {
