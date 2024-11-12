@@ -281,13 +281,17 @@ class DeviceMeshTest(DTensorTestBase):
 
         mesh_2d._manual_seed(123)
         self.assertEqual(torch.initial_seed(), 123)
-
         mesh_2d._manual_seed(123, unique_dims=("TP",))
         self.assertEqual(torch.initial_seed(), 123 + tp_rank)
         mesh_2d._manual_seed(123, unique_dims=("DP", "TP"))
         self.assertEqual(torch.initial_seed(), 123 + self.rank)
         mesh_2d._manual_seed(123, unique_dims=("TP", "DP"))
         self.assertEqual(torch.initial_seed(), 123 + dp_rank + dp_size * tp_rank)
+
+        with self.assertRaisesRegex(AssertionError, "duplicate"):
+            mesh_2d._manual_seed(123, unique_dims=("TP", "TP"))
+        with self.assertRaisesRegex(AssertionError, "invalid"):
+            mesh_2d._manual_seed(123, unique_dims=("blah",))
 
 
 class DeviceMeshTestNDim(DTensorTestBase):
