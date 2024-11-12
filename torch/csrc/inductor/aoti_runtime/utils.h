@@ -119,6 +119,18 @@ class RAIIAtenTensorHandle {
     return result;
   }
 
+  int64_t* sizes() const {
+    int64_t* result = nullptr;
+    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_sizes(handle_.get(), &result));
+    return result;
+  }
+
+  int64_t* strides() const {
+    int64_t* result = nullptr;
+    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_strides(handle_.get(), &result));
+    return result;
+  }
+
  private:
   std::unique_ptr<AtenTensorOpaque, DeleterFnPtr> handle_;
 };
@@ -186,6 +198,18 @@ class ConstantHandle {
 
   void* data_ptr() const {
     return data_;
+  }
+
+  int64_t* sizes() const {
+    int64_t* result = nullptr;
+    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_sizes(handle_, &result));
+    return result;
+  }
+
+  int64_t* strides() const {
+    int64_t* result = nullptr;
+    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_strides(handle_, &result));
+    return result;
   }
 
  private:

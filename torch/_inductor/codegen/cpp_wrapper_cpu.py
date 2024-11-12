@@ -250,7 +250,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # real input/output tensor match ones provided at compile time via sample
         # input/output.
         def gen_check(handle_kind, idx, name, tensor):
-            self.prefix.writeline(f"auto {name} = {handle_kind}[{idx}];")
+            # Wrap AtenTensorHandle with ConstantHandle for cleaner utility function access
+            self.prefix.writeline(
+                f"ConstantHandle {name} = ConstantHandle({handle_kind}[{idx}]);"
+            )
             self.codegen_tensor_dtype_var_decl(self.prefix, name)
             expected_dtype_name = DTYPE_TO_ATEN[tensor.dtype]
             dtype_str = str(tensor.dtype).split(".")[-1]
@@ -271,10 +274,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 if isinstance(d, (int, sympy.Integer)):
                     self.prefix.splice(
                         f"""
-                            if ({d} != {name}_size[{dim_idx}]) {{
+                            if ({d} != {name}_sizes[{dim_idx}]) {{
                                 std::stringstream ss;
                                 ss << "{handle_kind}[{idx}]: unmatched dim value at {dim_idx}, "
-                                   << "expected: {d}, " << "but got: " << {name}_size[{dim_idx}]
+                                   << "expected: {d}, " << "but got: " << {name}_sizes[{dim_idx}]
                                    << "\\n";
                                 throw std::runtime_error(ss.str());
                             }}
@@ -287,11 +290,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     if not math.isinf(sym_range.lower):
                         self.prefix.splice(
                             f"""
-                                if ({name}_size[{dim_idx}] < {sym_range.lower}) {{
+                                if ({name}_sizes[{dim_idx}] < {sym_range.lower}) {{
                                     std::stringstream ss;
                                     ss << "{handle_kind}[{idx}]: dim value is too small at {dim_idx}, "
                                        << "expected it to be >= {sym_range.lower}, " << "but got: "
-                                       << {name}_size[{dim_idx}] << "\\n";
+                                       << {name}_sizes[{dim_idx}] << "\\n";
                                     throw std::runtime_error(ss.str());
                                 }}
                             """
@@ -299,11 +302,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     if not math.isinf(sym_range.upper):
                         self.prefix.splice(
                             f"""
-                                if ({name}_size[{dim_idx}] > {sym_range.upper}) {{
+                                if ({name}_sizes[{dim_idx}] > {sym_range.upper}) {{
                                     std::stringstream ss;
                                     ss << "{handle_kind}[{idx}]: dim value is too large at {dim_idx}, "
                                        << "expected to be <= {sym_range.upper}, " << "but got: "
-                                       << {name}_size[{dim_idx}] << "\\n";
+                                       << {name}_sizes[{dim_idx}] << "\\n";
                                     throw std::runtime_error(ss.str());
                                 }}
                             """
@@ -315,10 +318,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     continue
                 self.prefix.splice(
                     f"""
-                        if ({s} != {name}_stride[{stride_idx}]) {{
+                        if ({s} != {name}_strides[{stride_idx}]) {{
                             std::stringstream ss;
                             ss << "{handle_kind}[{idx}]: unmatched stride value at {stride_idx}, "
-                               << "expected: {s}, " << "but got: " << {name}_stride[{stride_idx}]
+                               << "expected: {s}, " << "but got: " << {name}_strides[{stride_idx}]
                                << "\\n";
                             throw std::runtime_error(ss.str());
                         }}
@@ -486,16 +489,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
         )
 
     def codegen_input_size_var_decl(self, code: IndentedBuffer, name):
-        code.writeline(f"int64_t* {name}_size;")
-        code.writeline(
-            f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_sizes({name}, &{name}_size));"
-        )
+        code.writeline(f"int64_t* {name}_sizes = {name}.sizes();")
 
     def codegen_input_stride_var_decl(self, code: IndentedBuffer, name):
-        code.writeline(f"int64_t* {name}_stride;")
-        code.writeline(
-            f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_strides({name}, &{name}_stride));"
-        )
+        code.writeline(f"int64_t* {name}_strides = {name}.strides();")
 
     def codegen_model_kernels(self):
         self.prefix.writeline("namespace {")
