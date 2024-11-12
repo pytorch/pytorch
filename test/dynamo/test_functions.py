@@ -2400,16 +2400,55 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertTupleEqual(opt_fn(inputs), fn(inputs))
 
-    def test_filter_return_type(self):
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(x):
-            x = x + 1
-            return filter(lambda x: x < 10, [1, 2, 3])
+    def test_filter_reconstruct(self):
+        def fn(a):
+            return filter(lambda x: x[0] + x[1] < 10, zip([1, 2, 3], [1, 2, 3])), a + 1
 
-        inputs = torch.ones(1)
-        res = fn(inputs)
-        self.assertEqual(type(res), filter)
-        self.assertTrue(isinstance(res, filter))
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        m = opt_fn(torch.ones(3, 3))[0]
+        n = fn(torch.ones(3, 3))[0]
+        self.assertIsInstance(m, filter)
+        self.assertEqual(list(m), list(n))
+
+    def test_filter_graph_break_reconstruct(self):
+        def fn(x, y):
+            if x.sum() > 0:
+                return x + y
+            return x * y
+
+        backend = EagerAndRecordGraphs()
+        cnts = CompileCounterWithBackend(backend)
+        opt_fn = torch.compile(fn, backend=cnts)
+        a = torch.zeros(3)
+        b = torch.ones(3)
+        self.assertEqual(opt_fn(a, b), fn(a, b))
+
+        if torch._dynamo.config.assume_static_by_default:
+            self.assertExpectedInline(
+                normalize_gm(backend.graphs[0].print_readable(print_output=False)),
+                """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[3]"):
+        l_x_ = L_x_
+
+        sum_1: "f32[]" = l_x_.sum();  l_x_ = None
+        gt: "b8[]" = sum_1 > 0;  sum_1 = None
+        return (gt,)
+""",
+            )
+        else:
+            self.assertExpectedInline(
+                normalize_gm(backend.graphs[0].print_readable(print_output=False)),
+                """\
+class GraphModule(torch.nn.Module):
+    def forward(self, s0: "Sym(s0)", L_x_: "f32[s0]"):
+        l_x_ = L_x_
+
+        sum_1: "f32[]" = l_x_.sum();  l_x_ = None
+        gt: "b8[]" = sum_1 > 0;  sum_1 = None
+        return (gt,)
+""",
+            )
 
     def test_filter_with_graph_break(self):
         def f(a):
