@@ -120,7 +120,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
-          no-sudo: ${{ inputs.build-environment == 'linux-s390x-binary-manywheel' }}
+          no-sudo: true
 
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
