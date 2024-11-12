@@ -12,6 +12,65 @@ export TERM=vt100
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
+TEST_REPORTS_CHECK=$(pwd)/test/test-reports/check
+LOG_FILE="gpu_utilization.log"
+MONITOR_PID=""
+function monitor_gpu_utilization {
+    echo "Starting GPU utilization monitoring in the background..."
+    echo "Timestamp, GPU Utilization (%)" > "$TEST_REPORTS_CHECK/$LOG_FILE"
+
+    # Inner function to handle graceful exit
+    function graceful_exit {
+        echo "Gracefully stopping GPU utilization tracking..."
+        echo "Logs are saved in $TEST_REPORTS_CHECK/$LOG_FILE"
+        exit 0
+    }
+
+    # Trap signals for graceful exit
+    trap graceful_exit SIGINT SIGTERM
+
+    # Monitoring loop
+    while true; do
+        # Get current timestamp and GPU utilization using nvidia-smi
+        TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
+        GPU_UTIL=$(nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits)
+
+        # Append the data to the log file
+        echo "$TIMESTAMP, $GPU_UTIL" >> "$LOG_FILE"
+
+        # Sleep for a specified interval (e.g., 1 second)
+        sleep 1
+    done
+}
+
+# Function to start GPU monitoring in the background
+function start_gpu_monitoring {
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
+  mkdir -p "$TEST_REPORTS_DIR"
+
+
+  monitor_gpu_utilization &
+  MONITOR_PID=$!
+  echo "GPU monitoring started with PID $MONITOR_PID"
+}
+
+# Function to stop GPU monitoring gracefully
+function stop_gpu_monitoring {
+    if [[ -n "$MONITOR_PID" ]]; then
+        echo "Stopping GPU monitoring with PID $MONITOR_PID..."
+        kill -SIGTERM "$MONITOR_PID"
+        wait "$MONITOR_PID" 2>/dev/null
+        echo "GPU monitoring stopped."
+    else
+        echo "GPU monitoring is not running."
+    fi
+}
+
+# Trap EXIT to ensure GPU monitoring stops if the script exits
+trap stop_gpu_monitoring EXIT
+
+# Start GPU monitoring in the background
+start_gpu_monitoring
 # Do not change workspace permissions for ROCm CI jobs
 # as it can leave workspace with bad permissions for cancelled jobs
 if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
@@ -1545,3 +1604,5 @@ else
   test_torch_function_benchmark
   test_benchmarks
 fi
+
+stop_gpu_monitoring
