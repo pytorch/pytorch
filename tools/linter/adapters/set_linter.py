@@ -29,13 +29,19 @@ IMPORT_LINE = "from torch.utils._ordered_set import OrderedSet\n"
 OMIT = "# noqa: set_linter"
 
 DESCRIPTION = """`set_linter` is a lintrunner linter which finds usages of the
-Python built-in class `set` in Python code, and optionally replaces them with with
+Python built-in class `set` in Python code, and optionally replaces them with
 `OrderedSet`.
 """
 
 EPILOG = """
+`lintrunner` operates on whole commits. If you want to remove uses of `set`
+from existing files not part of a commit, call `set_linter` directly:
 
-To exempt a line of Python code from `set_linter` checking, append a comment:
+    python tools/linter/adapters/set_linter.py --fix [... python files ...]
+
+---
+
+To omit a line of Python code from `set_linter` checking, append a comment:
 
     s = set()  # noqa: set_linter
     t = {  # noqa: set_linter
@@ -43,25 +49,30 @@ To exempt a line of Python code from `set_linter` checking, append a comment:
        "two",
     }
 
-`lintrunner` only operates on the entire repository. If you want to fix an existing
-section of code, run this `set_linter` directly:
+---
 
-    python tools/linter/adapters/set_linter.py --fix [... python file names ...]
+Running set_linter in fix mode (though either `lintrunner -a` or `--fix`
+should not significantly change the behavior of working code, but will still
+usually needs some manual intervention:
 
-Fix mode usually needs some manual intervention in one of three ways:
+1. Replacing `set` with `OrderedSet` will sometimes introduce new typechecking
+errors because `OrderedSet` is imperfectly generic. Find a common type for its
+elements (in the worst case, `typing.Any` always works), and use
+`OrderedSet[YourCommonTypeHere]`.
 
-1. Replacing `set` with `OrderedSet` will keep the behavior of the code the same,
-but sometimes introduce new errors in the typechecking.  To fix these, you will need
-to replace `OrderedSet` with `OrderedSet[SomeType]`, or if the actual type of the elements
-is too hard to represent, with with `OrderedSet[typing.Any]`
+2. The fix mode doesn't recognize generator expressions, so it replaces:
 
-2. The fix mode doesn't do a great job on recognizing generator expressions, so it
-will replace `s = {i for i in range(3)}` with `s = OrderedSet([i for i in range(3)])`.
-You can correctly delete the square brackets in every such case.
+    s = {i for i in range(3)}
 
-3. There is a common pattern of set usage where a set is created and then only used
-for testing inclusion. For small collections, up to around 12 elements, a tuple
-is more time-efficient than an OrderedSet and also has less visual clutter
+with
+
+    s = OrderedSet([i for i in range(3)])
+
+You can and should delete the square brackets in every such case.
+
+3. There is a common pattern of set usage where a set is created and then only
+used for testing inclusion. For small collections, up to around 12 elements, a
+tuple is more time-efficient than an OrderedSet and also has less visual clutter
 (see https://github.com/rec/test/blob/master/python/time_access.py).
 """
 

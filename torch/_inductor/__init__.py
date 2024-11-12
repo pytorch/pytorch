@@ -2,6 +2,7 @@
 
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
+import torch._inductor.config
 import torch.fx
 import torch.utils._pytree as pytree
 
@@ -10,7 +11,13 @@ if TYPE_CHECKING:
     from torch._inductor.utils import InputType
 
 
-__all__ = ["compile", "list_mode_options", "list_options", "cudagraph_mark_step_begin"]
+__all__ = [
+    "compile",
+    "list_mode_options",
+    "list_options",
+    "cudagraph_mark_step_begin",
+    "_aoti_compile_and_package_inner",
+]
 
 
 def compile(
@@ -73,7 +80,6 @@ def aoti_compile_and_package(
     Returns:
         Path to the generated artifact
     """
-    from torch._inductor.package import package_aoti
     from torch.export import ExportedProgram
 
     if not isinstance(exported_program, ExportedProgram):
@@ -90,10 +96,36 @@ def aoti_compile_and_package(
             "Please pass in a package path to aot_inductor_compile() instead "
             "of setting the aot_inductor.output_path config."
         )
-    inductor_configs["aot_inductor.package"] = True
 
-    m = exported_program.module()
-    assert isinstance(m, torch.fx.GraphModule)
+    # a wrapper around aoti_compile_and_package_inner.
+    return aoti_compile_and_package_debug_wrapper(
+        exported_program,
+        args,
+        kwargs,
+        package_path=package_path,
+        inductor_configs=inductor_configs,
+    )
+
+
+def _aoti_compile_and_package_inner(
+    m,
+    args: Tuple[Any],
+    kwargs: Optional[Dict[str, Any]] = None,
+    *,
+    load_and_run: bool = False,
+    package_path: Optional[str] = None,
+    inductor_configs: Optional[Dict[str, Any]] = None,
+):
+    """
+    See docstring for aoti_compile_and_package.
+
+    If `load_and_run` is True, this function will load the compiled model and run it.
+    This is for the minifier to check the correctness of the compiled model.
+    """
+    from torch._inductor.package import package_aoti
+
+    inductor_configs = inductor_configs or {}
+    inductor_configs["aot_inductor.package"] = True
 
     aoti_files = aot_compile(m, args, kwargs, options=inductor_configs)  # type: ignore[arg-type]
 
@@ -102,7 +134,50 @@ def aoti_compile_and_package(
 
     res = package_aoti(package_path, aoti_files)
     assert res == package_path
+
+    if load_and_run:
+        compiled_model = aoti_load_package(package_path)
+        aoti_result = compiled_model(*args)
     return package_path
+
+
+def aoti_compile_and_package_debug_wrapper(
+    exported_program,
+    args: Tuple[Any],
+    kwargs: Optional[Dict[str, Any]] = None,
+    *,
+    package_path: Optional[str] = None,
+    inductor_configs: Optional[Dict[str, Any]] = None,
+):
+    m = exported_program.module()
+    assert isinstance(m, torch.fx.GraphModule)
+
+    use_minifier = torch._inductor.config.aot_inductor.dump_aoti_minifier
+
+    try:
+        return _aoti_compile_and_package_inner(
+            m,
+            args,
+            kwargs,
+            load_and_run=use_minifier,
+            package_path=package_path,
+            inductor_configs=inductor_configs,
+        )
+
+    except Exception as e:
+        if use_minifier:
+            # TODO: check accuracy and re-direct to minifier
+            from torch._dynamo.repro.aoti import dump_to_minify
+
+            exported_program._example_inputs = (args, kwargs)
+
+            dump_to_minify(
+                exported_program,
+                "compile_fx_aot",
+                options=inductor_configs,
+            )
+
+        raise e
 
 
 def aoti_load_package(path: str) -> Any:  # type: ignore[type-arg]
