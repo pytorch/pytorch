@@ -9,12 +9,7 @@ install_ubuntu() {
   # Instead use lib and headers from OpenSSL1.1 installed in `install_openssl.sh``
   apt-get install -y cargo
   echo "Checking out sccache repo"
-  if [ -n "$CUDA_VERSION" ]; then
-      # TODO: Remove this
-      git clone https://github.com/pytorch/sccache
-  else
-      git clone https://github.com/mozilla/sccache -b v0.8.2
-  fi
+  git clone https://github.com/mozilla/sccache -b v0.8.2
   cd sccache
   echo "Building sccache"
   cargo build --release
@@ -44,16 +39,7 @@ export PATH="/opt/cache/bin:$PATH"
 if [ -n "$ROCM_VERSION" ]; then
   curl --retry 3 http://repo.radeon.com/misc/.sccache_amd/sccache -o /opt/cache/bin/sccache
 else
-  ID=$(grep -oP '(?<=^ID=).+' /etc/os-release | tr -d '"')
-  if [ -n "$CUDA_VERSION" ]; then
-    # TODO: Install the pre-built binary from S3 as building from source
-    # https://github.com/pytorch/sccache has started failing mysteriously
-    # in which sccache server couldn't start with the following error:
-    #   sccache: error: Invalid argument (os error 22)
-    install_binary
-  else
-    install_ubuntu
-  fi
+  install_ubuntu
 fi
 chmod a+x /opt/cache/bin/sccache
 
