@@ -1013,9 +1013,23 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         return key in self.value.__dict__
 
     def is_supported_nn_module_method(self, method):
-        return torch._dynamo.config.inline_inbuilt_nn_modules and method in (
-            torch.nn.Module.parameters,
-        )
+        if not torch._dynamo.config.inline_inbuilt_nn_modules:
+            return False
+        if method is not torch.nn.Module.parameters:
+            return False
+        return istype(self.value._parameters, dict)
+
+    def get_source_by_walking_mro(self, name):
+        assert self.cls_source is not None
+
+        for idx, klass in enumerate(type(self.value).__mro__):
+            if name in klass.__dict__:
+                mro_source = AttrSource(self.cls_source, "__mro__")
+                klass_source = GetItemSource(mro_source, idx)
+                dict_source = AttrSource(klass_source, "__dict__")
+                return GetItemSource(dict_source, name)
+
+        unimplemented(f"Could not find {name} in {type(self.value).__mro__}")
 
     def var_getattr(self, tx: "InstructionTranslator", name):
         from .. import trace_rules
@@ -1121,10 +1135,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             descriptor_get_source = None
             if self.cls_source:
                 # To access the method descriptor from the udf object w/o using
-                # inspect.getattr_static, we can look into the class __dict__
-                descriptor_source = GetItemSource(
-                    AttrSource(self.cls_source, "__dict__"), name
-                )
+                # inspect.getattr_static, we can look into the class mro
+                descriptor_source = self.get_source_by_walking_mro(name)
                 descriptor_get_source = AttrSource(descriptor_source, "__get__")
                 descriptor_var = VariableTracker.build(tx, subobj, descriptor_source)
             else:
@@ -1158,7 +1170,20 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
             if isinstance(subobj, types.MethodType):
                 if dynamic_subobj.__self__ is not self.value:
-                    unimplemented("__self__ mismatch for bound method")
+                    if not isinstance(dynamic_subobj.__func__, types.FunctionType):
+                        unimplemented(
+                            f"Found a method whose __func__ is not of FunctionType - {dynamic_subobj}"
+                        )
+
+                    from .builder import SourcelessUserDefinedObjectBuilder
+
+                    # This means that we are calling a method of some other object here.
+                    object_vt = SourcelessUserDefinedObjectBuilder.create(
+                        tx, dynamic_subobj.__self__
+                    )
+                    return variables.UserMethodVariable(
+                        dynamic_subobj.__func__, object_vt
+                    )
                 func = subobj.__func__
             else:
                 assert isinstance(subobj, types.FunctionType)

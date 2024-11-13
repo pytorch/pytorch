@@ -2086,7 +2086,6 @@ class InstructionTranslatorBase(
                 kwdefaults,
                 annotations,
                 closure,
-                closure_scope=self,
             )
         )
 
@@ -2588,7 +2587,6 @@ class InstructionTranslatorBase(
             fn.closure = TupleVariable(
                 [self._load_closure(name) for name in attr_names]
             )
-            fn.closure_scope = self
         elif flags & 0x04:
             fn.annotations = attr
         elif flags & 0x02:
@@ -2643,12 +2641,6 @@ class InstructionTranslatorBase(
     @property
     def fake_mode(self):
         return self.output.tracing_context.fake_mode
-
-    def find_symbolic_locals_name(self, tensor_variable):
-        for key, value in self.symbolic_locals.items():
-            if value is tensor_variable:
-                return key
-        return None
 
     @contextlib.contextmanager
     def strict_translation_mode(self, check_fn: Callable[[VariableTracker], bool]):
@@ -2765,9 +2757,6 @@ class InstructionTranslatorBase(
 
 
 class InstructionTranslator(InstructionTranslatorBase):
-    mutated_closure_cell_ids: Set[int]
-    contents_var_to_mutated_cell: Dict[VariableTracker, Any]
-
     @staticmethod
     def current_tx() -> "InstructionTranslator":
         return tls.current_tx
@@ -2794,7 +2783,6 @@ class InstructionTranslator(InstructionTranslatorBase):
         one_graph,
         export,
         export_constraints,
-        mutated_closure_cell_ids: Set[int],
         frame_state,
         speculation_log: SpeculationLog,
         distributed_state: Optional[DistributedState],
@@ -2839,25 +2827,23 @@ class InstructionTranslator(InstructionTranslatorBase):
         with tracing(self.output.tracing_context), self.set_current_tx():
             self.one_graph: bool = one_graph
             self.export = export
-            self.mutated_closure_cell_ids = mutated_closure_cell_ids
-            self.contents_var_to_mutated_cell = {}
             if self.export:
                 assert (
                     self.one_graph
                 ), "Export without one graph - something has gone wrong."
 
-            vars = list(code_options["co_varnames"])
-            cells_and_freevars = [x for x in self.cell_and_freevars() if x not in vars]
-            vars.extend(cells_and_freevars)
-            cells_and_freevars_set = set(cells_and_freevars)
-
+            args_info = inspect.getargs(f_code)
+            input_names: Set[str] = set(args_info.args)
+            if args_info.varargs:
+                input_names.add(args_info.varargs)
+            if args_info.varkw:
+                input_names.add(args_info.varkw)
             self.symbolic_locals = {
-                k: variables.LazyVariableTracker.create(
-                    f_locals[k],
-                    source=LocalSource(k, cell_or_freevar=k in cells_and_freevars_set),
+                name: variables.LazyVariableTracker.create(
+                    f_locals[name],
+                    source=LocalSource(name, is_input=name in input_names),
                 )
-                for k in vars
-                if k in f_locals
+                for name, value in f_locals.items()
             }
 
             self.symbolic_torch_function_state = SymbolicTorchFunctionState(
@@ -3271,7 +3257,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             log.debug("FAILED INLINING %s", code)
             raise
         assert tracer.symbolic_result is not None
-        func.export_freevars(parent, tracer)
 
         if tracer.f_globals is parent.f_globals:
             # Merge symbolic_globals back if parent and child are in the same namespace
@@ -3349,27 +3334,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             else:
                 self.output.side_effects.store_cell(cell, val)
         else:
-            maybe_cell = self.symbolic_locals.get(inst.argval)
-            if isinstance(
-                maybe_cell,
-                variables.NewCellVariable,
-            ):
-                self.output.side_effects.store_cell(
-                    self.symbolic_locals[inst.argval], self.pop()
-                )
-            else:
-                root_tx = self.output.root_tx
-                if (
-                    maybe_cell is not None
-                    and maybe_cell in root_tx.contents_var_to_mutated_cell
-                    and id(root_tx.contents_var_to_mutated_cell[maybe_cell])
-                    not in root_tx.mutated_closure_cell_ids
-                ):
-                    self.output.root_tx.mutated_closure_cell_ids.add(
-                        id(root_tx.contents_var_to_mutated_cell[maybe_cell])
-                    )
-                    raise exc.UnspecializeRestartAnalysis
-                unimplemented("write to __closure__ while inlining")
+            unimplemented("write to __closure__ while inlining")
 
     def LOAD_DEREF(self, inst):
         if inst.argval in self.closure_cells:
@@ -3379,11 +3344,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             else:
                 self.push(self.output.side_effects.load_cell(cell))
         else:
-            maybe_sym_local = self.symbolic_locals.get(inst.argval, None)
-            if isinstance(maybe_sym_local, variables.NewCellVariable):
-                self.push(self.output.side_effects.load_cell(maybe_sym_local))
-            else:
-                super().LOAD_DEREF(inst)
+            super().LOAD_DEREF(inst)
 
     def _load_closure(self, name):
         assert name in self.cell_and_freevars()
