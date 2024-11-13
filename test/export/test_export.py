@@ -9025,7 +9025,7 @@ def forward(self, x):
                 },
             }
             _load_dynamic_shapes(spec, from_dict=True)
-    
+
     def test_attention(self):
         class Foo(torch.nn.Module):
             def __init__(self) -> None:
@@ -9044,7 +9044,7 @@ def forward(self, x):
             def forward(self, input1: torch.Tensor):
                 x, _ = self.self_attention(input1, input1, input1, need_weights=False)
                 return x
-        
+
         inps = (torch.randn(1, 224, 768, device="cpu"),)
         export(Foo(), inps)
 
