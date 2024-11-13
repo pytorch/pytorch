@@ -174,8 +174,9 @@ def export_compat(
                 )
             except Exception as e:
                 raise RuntimeError(
-                    "# ❌ **Failed to convert dynamic_axes to dynamic_shapes. "
-                    "Please provide dynamic_shapes directly."
+                    "# Failed to convert 'dynamic_axes' to 'dynamic_shapes'. "
+                    "Please provide 'dynamic_shapes' directly. "
+                    "Refer to the documentation for 'torch.export.export' for more information on dynamic shapes."
                 ) from e
 
     registry = _registration.ONNXRegistry.from_torchlib()
