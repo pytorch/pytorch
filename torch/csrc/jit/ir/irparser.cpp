@@ -427,6 +427,69 @@ void IRParser::parseAttr(Node* n) {
     }
     L.expect(')');
     deferred_empty_container_initializations_.push_back(n);
+  } else if (L.cur().text() == "torch") {
+    L.next();
+    L.expect('.');
+    auto function = L.cur().text();
+    if (function == "Generator") {
+      L.next();
+      L.expect('(');
+      std::optional<uint64_t> seed;
+      std::string device = "cpu";
+      while (!L.nextIf(')')) {
+        auto arg = L.expect(TK_IDENT).text();
+        L.expect('=');
+        if (arg == "device") {
+          ParsedLiteral r = parseScalarLiteral(n);
+          if (r.k != AttributeKind::s) {
+            throw(
+                ErrorReport(L.cur().range)
+                << "Expected string literal for device argument");
+          }
+          if (r.s != "cpu") {
+            throw(
+                ErrorReport(L.cur().range)
+                << "Only cpu device is supported for Generator at this time.");
+          }
+          device = r.s;
+        } else if (arg == "seed") {
+          ParsedLiteral r = parseScalarLiteral(n);
+          if (r.k != AttributeKind::i) {
+            throw(
+                ErrorReport(L.cur().range)
+                << "Expected int literal for seed argument");
+          }
+          if (r.i < 0) {
+            throw(
+                ErrorReport(L.cur().range)
+                << "Seed must be a non-negative integer");
+          }
+          seed = r.i;
+        } else {
+          throw(
+              ErrorReport(L.cur().range)
+              << "Generator only supports the following arguments:\n"
+              << "- device\n"
+              << "- seed\n"
+              << "Got: " << arg);
+        }
+        L.nextIf(',');
+      }
+      if (device == "cpu") {
+        if (seed.has_value()) {
+          n->ival_(
+              Symbol::attr(attrname), at::detail::createCPUGenerator(*seed));
+        } else {
+          n->ival_(Symbol::attr(attrname), at::detail::createCPUGenerator());
+        }
+      }
+    } else {
+      throw(
+          ErrorReport(L.cur().range)
+          << "Expected one of the following torch functions:\n"
+          << "- Generator\n"
+          << "Got: " << function);
+    }
   } else {
     // scalar
     ParsedLiteral r = parseScalarLiteral(n);
