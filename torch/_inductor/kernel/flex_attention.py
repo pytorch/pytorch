@@ -666,9 +666,10 @@ def _get_nv_config(query, mode: str) -> Tuple[int, int, int, int]:
                 fwd_config = (64, 64, 4, 3)
             else:
                 fwd_config = (128, 64, 4, 3)
-            fwd_config = _nv_default_fwd_config[gpu_arch](
-                (dtype, head_dim), default_config
-            )
+            if gpu_arch:
+                fwd_config = _nv_default_fwd_config[gpu_arch].get(
+                    (dtype, head_dim), default_config
+                )
         else:  # modest hardware or extremely large head_dim
             if dtype == torch.float32:
                 fwd_config = (32, 16, 4, 3)
