@@ -2905,13 +2905,14 @@ class InstructionTranslator(InstructionTranslatorBase):
 
     def lookup_variable_for_captured_cell(self, cell):
         """
-        If `cell` is also captured by the root frame, return the VariableTracker
-        that represents the contents of the cell, else return None.
+        If `cell` is captured by `self`'s frame, return a VariableTracker that
+        can represent the cell and be reconstructed (in case the cell escapes);
+        return None if `cell` is not captured by `self`'s frame.
         """
         cell_id = id(cell)
         if cell_id in self._captured_cell_id_to_name:
             name = self._captured_cell_id_to_name[cell_id]
-            return self.symbolic_locals[name]
+            return ClosureVariable(name)
         return None
 
     def should_compile_partial_graph(self):
