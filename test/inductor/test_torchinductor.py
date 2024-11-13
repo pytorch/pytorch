@@ -3102,13 +3102,18 @@ class CommonTemplate:
         self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
 
     @skip_if_halide  # only 32-bit indexing
-    @skip_if_cpp_wrapper  # OOM
     def test_large_tensor_reduction(self):
-        if not _has_sufficient_memory(self.device, 4.5 * 1024**3):  # 4.5 GiB
-            raise unittest.SkipTest("insufficient memory")
-
         if self.device == "cpu":
             raise unittest.SkipTest("Fails on CPU")
+
+        # If this is running with cpp_wrapper, the auto-tuning step will generate an
+        # additional array of the same size as the input, so required memory doubles.
+        required_memory = 4.5 * 1024**3  # 4.5 GiB
+        if config.cpp_wrapper:
+            required_memory *= 2
+
+        if not _has_sufficient_memory(self.device, required_memory):
+            raise unittest.SkipTest("insufficient memory")
 
         # Test 64-bit indexing works correctly
         def fn(a):
@@ -3118,7 +3123,7 @@ class CommonTemplate:
         t[-1] = 2
 
         # self.common OOMs here because it copies inputs to check for mutations
-        compiled_fn = torch._dynamo.optimize()(fn)
+        compiled_fn = torch.compile(fn)
         actual = compiled_fn(t)
         expect = torch.tensor(2, dtype=torch.int8, device=self.device)
         self.assertEqual(actual, expect)
@@ -3140,22 +3145,27 @@ class CommonTemplate:
         t2[-1, -1] = 2
 
         # self.common OOMs here because it copies inputs to check for mutations
-        compiled_fn = torch._dynamo.optimize()(fn)
+        compiled_fn = torch.compile(fn)
         actual = compiled_fn(t1, t2)
         expect = torch.tensor(4, dtype=torch.int8, device=self.device)
         self.assertEqual(actual, expect)
 
     @skip_if_halide  # only 32-bit indexing
-    @skip_if_cpp_wrapper  # OOM
     def test_large_pointwise(self):
-        if not _has_sufficient_memory(self.device, 2 * (2**31 + 1)):
+        # If this is running with cpp_wrapper, the auto-tuning step will generate an
+        # additional array of the same size as the input, so required memory doubles.
+        required_memory = 2 * (2**31 + 1)
+        if config.cpp_wrapper:
+            required_memory *= 2
+
+        if not _has_sufficient_memory(self.device, required_memory):
             raise unittest.SkipTest("insufficient memory")
 
         def fn(a):
             return a + 1
 
         t = torch.ones(2**31 + 1, dtype=torch.int8, device=self.device)
-        compiled_fn = torch._dynamo.optimize()(fn)
+        compiled_fn = torch.compile(fn)
         actual = compiled_fn(t)
 
         # Can't use assertEqual as it expands broadcasted inputs
@@ -3170,7 +3180,14 @@ class CommonTemplate:
         # Test 64-bit indexing is used when input views a tensor that can be
         # indexed with 32-bit strides but the storage offset pushes it over
         # INT_MAX
-        if not _has_sufficient_memory(self.device, (2**31 + 1) + (2**30 + 1)):
+
+        # If this is running with cpp_wrapper, the auto-tuning step will generate an
+        # additional array of the same size as the input, so required memory doubles.
+        required_memory = (2**31 + 1) + (2**30 + 1)
+        if config.cpp_wrapper:
+            required_memory *= 2
+
+        if not _has_sufficient_memory(self.device, required_memory):
             raise unittest.SkipTest("insufficient memory")
 
         def fn(a):
@@ -3178,7 +3195,7 @@ class CommonTemplate:
 
         t = torch.ones(2**31 + 1, dtype=torch.int8, device=self.device)
         t[2**30 :] = 0
-        compiled_fn = torch._dynamo.optimize()(fn)
+        compiled_fn = torch.compile(fn)
         actual = compiled_fn(t[2**30 :])
         self.assertTrue((actual == 4).all())
 
@@ -3186,7 +3203,14 @@ class CommonTemplate:
     def test_large_strided_reduction(self):
         # Test 64-bit indexing is used when input numel is less than INT_MAX
         # but stride calculations go above INT_MAX
-        if not _has_sufficient_memory(self.device, 2**31 + 2):
+
+        # If this is running with cpp_wrapper, the auto-tuning step will generate an
+        # additional array of the same size as the input, so required memory doubles.
+        required_memory = 2**31 + 2
+        if config.cpp_wrapper:
+            required_memory *= 2
+
+        if not _has_sufficient_memory(self.device, required_memory):
             raise unittest.SkipTest("insufficient memory")
 
         def fn(a):
