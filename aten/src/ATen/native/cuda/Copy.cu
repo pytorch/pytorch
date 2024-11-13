@@ -302,8 +302,7 @@ static bool copy_requires_temporaries(TensorIterator& iter, bool p2p_enabled) {
     bool src_row_contiguous = (src_stride1 == 1);
     bool dst_row_contiguous = (dst_stride1 == 1);
     if (src_row_contiguous && dst_row_contiguous) {
-        size_t width_in_bytes = dim1 * element_size;
-        size_t height = dim0;
+        size_t width_in_bytes = dim1 * element_size;       
         size_t src_pitch = src_stride0 * element_size;
         size_t dst_pitch = dst_stride0 * element_size;
 
@@ -317,7 +316,6 @@ static bool copy_requires_temporaries(TensorIterator& iter, bool p2p_enabled) {
     bool dst_col_contiguous = (dst_stride0 == 1);
     if (src_col_contiguous && dst_col_contiguous) {
         size_t width_in_bytes = dim0 * element_size;
-        size_t height = dim1;
         size_t src_pitch = src_stride1 * element_size;
         size_t dst_pitch = dst_stride1 * element_size;
 
@@ -399,8 +397,6 @@ static bool maybe_enable_p2p_access(Device dst_device, Device src_device) {
   int64_t dst_stride0 = dst_tensor.stride(0);
   int64_t dst_stride1 = iter.ndim() == 1 ? 1 : dst_tensor.stride(1);
 
-  
-  bool can_use_memcpy2d = false;
   size_t width_in_bytes = 0;
   size_t height = 0;
   size_t src_pitch = 0;
