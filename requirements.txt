@@ -21,3 +21,4 @@ lintrunner ; platform_system != "Windows"
 ninja
 packaging
 optree>=0.13.0
+cmake
