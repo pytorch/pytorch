@@ -85,7 +85,7 @@ std::ostream& operator<<(std::ostream& out, const Check& c) {
   }
   out << ": " << c.search_str_;
   return out;
-};
+}
 
 namespace {
 
@@ -538,7 +538,7 @@ struct FileCheckImpl {
   std::vector<std::vector<Check>> groups;
 };
 
-FileCheck::FileCheck() : fcImpl(new FileCheckImpl()){};
+FileCheck::FileCheck() : fcImpl(new FileCheckImpl()) {}
 
 std::ostream& operator<<(std::ostream& out, const FileCheckImpl& fc) {
   out << "FileCheck checks:\n";
@@ -546,7 +546,7 @@ std::ostream& operator<<(std::ostream& out, const FileCheckImpl& fc) {
     out << "\t" << c << "\n";
   }
   return out;
-};
+}
 
 FileCheck::~FileCheck() {
   if (!fcImpl->has_run) {
@@ -554,17 +554,17 @@ FileCheck::~FileCheck() {
     std::cout << *fcImpl;
   }
   fcImpl.reset();
-};
+}
 
 void FileCheck::run(const std::string& test_file) {
   fcImpl->run(test_file);
-};
+}
 
 void FileCheck::run(const Graph& graph) {
   std::stringstream graph_str;
   graph_str << graph;
   fcImpl->run(graph_str.str());
-};
+}
 
 void FileCheck::run(
     const std::string& input_checks_string,
