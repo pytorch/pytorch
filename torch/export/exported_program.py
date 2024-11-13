@@ -60,6 +60,7 @@ from torch._export.utils import (
     _populate_param_buffer_metadata_to_new_gm,
     _rename_without_collisions,
     _special_op_to_preserve_cia,
+    _force_dispatch_to_orig_cia_callable,
 )
 from torch._export.verifier import Verifier
 from torch._guards import detect_fake_mode
@@ -209,6 +210,7 @@ def _override_composite_implicit_decomp(cia_ops_to_callable, safe=True):
     # replace with aten::_to_copy in FunctionalTensorMode.__torch_dispatch__.
     saved_tables = {}
     patched_ops = set()
+    ops_that_we_register_fake_kernels = set()
     for op_overload, decomp_callable in cia_ops_to_callable.items():
         saved_tables[op_overload] = op_overload.py_kernels.copy()
         patched_ops.add(op_overload)
@@ -230,22 +232,20 @@ def _override_composite_implicit_decomp(cia_ops_to_callable, safe=True):
             )
 
         # [NOTE] Directly registering fake tensor rule to CIA ops
-        # The problem we are facing here is if your CIA custom rule
-        # says we want to preserve the op, we will return NotImplemented.
-        # Unfortunately, this will invoke meta device tracing in fake tensor
-        # resulting in divergent behaviour for CIA kernels that has device based
-        # branching (one case is torch.ops.aten.scaled_dot_product.attention)
-        # To get around this issue, we register direct fake impl so that we
-        # run the kernel before we actually try to decompose the op in FakeTensorMode.
-        # Note that is a no-op in most cases, because:
-        #   1) In post dispatch tracing, CIA would have already decomposed
-        #   2) Most CIA impl are device agnostic.
-        def _force_dispatch_to_orig_cia_callable(fake_tensor_mode, op, *args, **kwargs):
-            orig_cia_callable = kwargs["original_callable"]
-            del kwargs["original_callable"]
-            with fake_tensor_mode:
-                return orig_cia_callable(*args, **kwargs)
-
+        #
+        # There are effectively 3 places where an op register tensor propagation logic:
+        # (1) as a CompositeImplicitAutograd decomposition (above FakeTensorMode)
+        # (2) as a FakeTensorMode registration
+        # (3) as a DispatchKey::Meta registration
+        #
+        # During export, we nub out most CIA ops to return NotImplemented to 
+        # avoid decomposing them during tracing. To recover the existing shape propagation behavior, 
+        # we register these CIA decomps directly as FakeTensorMode rules as well.
+        # A valid question is: all CIA ops are also registered to the Meta key, so why 
+        # can't we just rely on running the meta tensor kernels? The issue is that when 
+        # FakeTensorMode runs a meta tensor kernel, the devices of all inputs have been 
+        # nubbed out to return "meta". If we have any CIA op impls that need to branch on 
+        # device, we need to register them as FakeTensorMode rules to preserve any device-specific behavior.
         if not _is_op_registered_to_fake_rule(op_overload):
             register_op_impl(op_overload)(
                 functools.partial(
@@ -253,6 +253,7 @@ def _override_composite_implicit_decomp(cia_ops_to_callable, safe=True):
                     original_callable=orig_cia_callable,
                 )
             )
+            ops_that_we_register_fake_kernels.add(op_overload)
 
         for key in _BACKEND_KEYS_TO_OVERRIDE:
             if key not in op_overload.py_kernels:
@@ -280,6 +281,8 @@ def _override_composite_implicit_decomp(cia_ops_to_callable, safe=True):
             op.py_kernels.clear()
             op.py_kernels.update(saved_tables[op])
             op._dispatch_cache.clear()
+
+        for op in ops_that_we_register_fake_kernels:
             _deregister_op_impl(op)
 
 

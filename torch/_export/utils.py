@@ -1127,3 +1127,10 @@ def _get_decomp_for_cia(op: "OperatorBase"):
             )
 
     return functools.partial(_special_op_to_decompose_cia, kernel=op)
+
+
+def _force_dispatch_to_orig_cia_callable(fake_tensor_mode, op, *args, **kwargs):
+    orig_cia_callable = kwargs["original_callable"]
+    del kwargs["original_callable"]
+    with fake_tensor_mode:
+        return orig_cia_callable(*args, **kwargs)
