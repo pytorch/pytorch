@@ -33,9 +33,8 @@ def get_per_process_cpu_info() -> list[dict[str, Any]]:
             "cmd": " ".join(p.cmdline()),
             "cpu_percent": p.cpu_percent(),
             "rss_memory": p.memory_info().rss,
-            "ppid":p.ppid.pid,
+            "ppid":p.ppid(),
         }
-
         # https://psutil.readthedocs.io/en/latest/index.html?highlight=memory_full_info
         # requires higher user privileges and could throw AccessDenied error, i.e. mac
         try:
@@ -45,7 +44,6 @@ def get_per_process_cpu_info() -> list[dict[str, Any]]:
             if "pss" in memory_full_info:
                 # only availiable in linux
                 info["pss_memory"] = memory_full_info.pss
-
         except psutil.AccessDenied as e:
             # It's ok to skip this
             pass
