@@ -71,6 +71,7 @@ class TestExportAPIDynamo(common_utils.TestCase):
         self.assert_export(
             SampleModelForDynamicShapes(),
             (torch.randn(2, 2, 3), {"b": torch.randn(2, 2, 3)}),
+            input_names=["x", "b"],
             dynamic_axes={
                 "b": [0, 1, 2],
             },
@@ -80,6 +81,7 @@ class TestExportAPIDynamo(common_utils.TestCase):
         self.assert_export(
             SampleModelForDynamicShapes(),
             (torch.randn(2, 2, 3), {"b": torch.randn(2, 2, 3)}),
+            input_names=["x", "b"],
             dynamic_axes={
                 "b": [0, 1, 2],
             },
