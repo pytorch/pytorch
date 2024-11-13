@@ -795,7 +795,7 @@ def to_int_us(v: Optional[float]) -> Optional[int]:
 
 # Version field added to every log. Increment to make it easier to distinguish new
 # vs. old entries when you make a substantive change to how the logs are populated.
-LOG_FORMAT_VERSION = 2
+LOG_FORMAT_VERSION = 3
 
 
 @dataclasses.dataclass
@@ -867,40 +867,40 @@ _compilation_metrics: Deque[CompilationMetrics] = collections.deque(
 )
 
 
-def add_compilation_metrics_to_chromium(c: CompilationMetrics):
+def add_compilation_metrics_to_chromium(c: Dict[str, Any]) -> None:
     event_logger = get_chromium_event_logger()
     # The following compilation metrics are related to
     # dynamo, so go with the "entire frame compile" event
     event_logger.add_event_data(
         event_name="dynamo",
-        frame_key=c.frame_key,
-        co_name=c.co_name,
-        co_filename=c.co_filename,
-        co_firstlineno=c.co_firstlineno,
-        cache_size=c.cache_size,
-        accumulated_cache_size=c.accumulated_cache_size,
-        guard_count=c.guard_count,
-        shape_env_guard_count=c.shape_env_guard_count,
-        graph_op_count=c.graph_op_count,
-        graph_node_count=c.graph_node_count,
-        graph_input_count=c.graph_input_count,
-        fail_type=c.fail_type,
-        fail_reason=c.fail_reason,
-        fail_user_frame_filename=c.fail_user_frame_filename,
-        fail_user_frame_lineno=c.fail_user_frame_lineno,
+        frame_key=c["frame_key"],
+        co_name=c["co_name"],
+        co_filename=c["co_filename"],
+        co_firstlineno=c["co_firstlineno"],
+        cache_size=c["cache_size"],
+        accumulated_cache_size=c["accumulated_cache_size"],
+        guard_count=c["guard_count"],
+        shape_env_guard_count=c["shape_env_guard_count"],
+        graph_op_count=c["graph_op_count"],
+        graph_node_count=c["graph_node_count"],
+        graph_input_count=c["graph_input_count"],
+        fail_type=c["fail_type"],
+        fail_reason=c["fail_reason"],
+        fail_user_frame_filename=c["fail_user_frame_filename"],
+        fail_user_frame_lineno=c["fail_user_frame_lineno"],
         # Sets aren't JSON serializable
-        non_compliant_ops=list(c.non_compliant_ops)
-        if c.non_compliant_ops is not None
+        non_compliant_ops=list(c["non_compliant_ops"])
+        if c["non_compliant_ops"] is not None
         else None,
-        compliant_custom_ops=list(c.compliant_custom_ops)
-        if c.compliant_custom_ops is not None
+        compliant_custom_ops=list(c["compliant_custom_ops"])
+        if c["compliant_custom_ops"] is not None
         else None,
-        restart_reasons=list(c.restart_reasons)
-        if c.restart_reasons is not None
+        restart_reasons=list(c["restart_reasons"])
+        if c["restart_reasons"] is not None
         else None,
-        dynamo_time_before_restart_s=c.dynamo_time_before_restart_s,
-        has_guarded_code=c.has_guarded_code,
-        dynamo_config=c.dynamo_config,
+        dynamo_time_before_restart_s=c["dynamo_time_before_restart_s"],
+        has_guarded_code=c["has_guarded_code"],
+        dynamo_config=c["dynamo_config"],
     )
 
 
@@ -933,7 +933,6 @@ def record_compilation_metrics(metrics: Dict[str, Any]):
     _compilation_metrics.append(compilation_metrics)
     if compilation_metrics.is_forward:
         name = "compilation_metrics"
-        add_compilation_metrics_to_chromium(compilation_metrics)
     else:
         name = "bwd_compilation_metrics"
     torch._logging.trace_structured(
