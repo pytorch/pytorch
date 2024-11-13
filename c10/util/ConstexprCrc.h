@@ -128,4 +128,4 @@ inline constexpr crc64_t crc64(c10::string_view str) {
 } // namespace c10::util
 
 // Allow usage of crc64_t in std::unordered_set
-C10_DEFINE_HASH_FOR_IDWRAPPER(c10::util::crc64_t);
+C10_DEFINE_HASH_FOR_IDWRAPPER(c10::util::crc64_t)
