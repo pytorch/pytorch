@@ -42,7 +42,7 @@ class PointwiseSubgraphLowering(torch.fx.Interpreter):
 
     def register_buffer(self, buffer: ir.Buffer) -> str:
         raise SubgraphLoweringException(
-            "Buffers cannot be created while lowering a pointwise subgraph."
+            "Buffers cannot be created while lowering a pointwise subgraph. "
             "This could be for a good reason (e.g. you're calling an op we can't codegen as a pointwise op), "
             "but it could also be a bug. Please file a bug report if you think this should be supportable."
         )
