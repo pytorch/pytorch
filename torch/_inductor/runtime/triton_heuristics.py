@@ -384,7 +384,8 @@ class CachingAutotuner(KernelInterface):
                         continue
                     seen_configs.add(new_config)
                     log.debug(
-                        "Dynamically scale down R0_BLOCK from TritonConfig(%s) and get a new TritonConfig(%s)",
+                        "Dynamically scale down %s from TritonConfig(%s) and get a new TritonConfig(%s)",
+                        largest_rkwarg,
                         triton_config,
                         new_config,
                     )
