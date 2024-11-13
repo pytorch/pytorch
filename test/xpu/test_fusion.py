@@ -5,8 +5,8 @@ from typing import List, NamedTuple
 
 import torch
 import torch.nn as nn
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 
 
 CONV_MODULES = {2: torch.nn.Conv2d, 3: torch.nn.Conv3d}
@@ -121,7 +121,6 @@ class TestoneDNNFusion(TestCase):
                     attr,
                 )
                 self.assertEqual(ref, fused)
-
 
 instantiate_device_type_tests(
     TestoneDNNFusion, globals(), only_for="xpu", allow_xpu=True
