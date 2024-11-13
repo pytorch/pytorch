@@ -242,6 +242,14 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_layer(const Tensor& input,
       train);
 
   std::cout << "hz-debug " << " mkldnn_rnn_layer " << std::endl;
+  std::cout << "hz-debug " << " input " << input << std::endl;
+  std::cout << "hz-debug " << " input.sizes " << input.sizes() << std::endl;
+  std::cout << "hz-debug " << " w0 " << w0 << std::endl;
+  std::cout << "hz-debug " << " w1 " << w1 << std::endl;
+  std::cout << "hz-debug " << " w2 " << w2 << std::endl;
+  std::cout << "hz-debug " << " w3 " << w3 << std::endl;
+  std::cout << "hz-debug " << " hx_ " << hx_ << std::endl;
+  std::cout << "hz-debug " << " cx_ " << cx_ << std::endl;
   auto output_size = _output_size</*is_single_direction*/ true>(rnn);
   auto output = at::empty(output_size, input.options());
 
