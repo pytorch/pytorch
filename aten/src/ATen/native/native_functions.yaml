@@ -13549,6 +13549,42 @@
   dispatch:
     CompositeExplicitAutograd: special_betainc_out
 
+- func: special_betaln(Tensor a, Tensor b) -> Tensor
+  python_module: special
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: special_betaln
+
+- func: special_betaln.a_scalar(Scalar a, Tensor b) -> Tensor
+  python_module: special
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: special_betaln
+
+- func: special_betaln.b_scalar(Tensor a, Scalar b) -> Tensor
+  python_module: special
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: special_betaln
+
+- func: special_betaln.out(Tensor a, Tensor b, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: special_betaln_out
+
+- func: special_betaln.a_scalar_out(Scalar a, Tensor b, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: special_betaln_out
+
+- func: special_betaln.b_scalar_out(Tensor a, Scalar b, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: special_betaln_out
+
 - func: special_i0(Tensor self) -> Tensor
   python_module: special
   variants: function
