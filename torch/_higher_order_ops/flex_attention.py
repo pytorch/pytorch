@@ -410,8 +410,8 @@ def flex_attention_functionalize(
     assert isinstance(mask_mod_other_buffers_unwrapped, tuple)
 
     example_vals = (
-        [torch.zeros((), dtype=query.dtype)]
-        + [torch.zeros((), dtype=torch.int) for _ in range(4)]
+        [query_unwrapped.new_zeros(())]
+        + [query_unwrapped.new_zeros((), dtype=torch.int) for _ in range(4)]
         + list(score_mod_other_buffers_unwrapped)
     )
     with ctx.redispatch_to_next() as m:
@@ -710,11 +710,11 @@ def flex_attention_autograd(
         input_requires_grad = any(t.requires_grad for t in (query, key, value))
         if torch.is_grad_enabled() and input_requires_grad:
             example_vals = (
-                torch.zeros((), dtype=query.dtype, requires_grad=input_requires_grad),
-                torch.zeros((), dtype=torch.int),
-                torch.zeros((), dtype=torch.int),
-                torch.zeros((), dtype=torch.int),
-                torch.zeros((), dtype=torch.int),
+                query.new_zeros((), requires_grad=input_requires_grad),
+                query.new_zeros((), dtype=torch.int),
+                query.new_zeros((), dtype=torch.int),
+                query.new_zeros((), dtype=torch.int),
+                query.new_zeros((), dtype=torch.int),
             )
             fw_graph, bw_graph = create_fw_bw_graph(
                 score_mod, example_vals, score_mod_other_buffers
@@ -930,9 +930,9 @@ def trace_flex_attention_backward(
         mask_mod_other_buffers,
     )
 
-    fw_example_vals = [
-        torch.zeros((), dtype=query.dtype, requires_grad=query.requires_grad)
-    ] + [torch.zeros((), dtype=torch.int) for _ in range(4)]
+    fw_example_vals = [query.new_zeros((), requires_grad=query.requires_grad)] + [
+        query.new_zeros((), dtype=torch.int) for _ in range(4)
+    ]
     bw_example_vals = fw_example_vals + [torch.zeros((), dtype=query.dtype)]
     mask_example_vals = [torch.zeros((), dtype=torch.int) for _ in range(4)]
     mask_graph = block_mask[-1]

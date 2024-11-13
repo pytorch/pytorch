@@ -2029,6 +2029,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                             # TODO(masnesral): Populating the exception info should be automatic.
                             fail_type = type(e).__qualname__
                             fail_reason = str(e)
+                            raise
                         finally:
                             # TODO(masnesral): Populating time fields should be automatic.
                             end_ns = time.time_ns()
