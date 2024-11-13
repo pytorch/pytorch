@@ -310,13 +310,15 @@ class OptimizerVariable(UserDefinedObjectVariable):
             p_state_source = GetItemSource(
                 state_source, ConstDictKeySource(state_source, idx)
             )
-            for k, v in value.items():
+            for inner_idx, (k, v) in enumerate(value.items()):
                 if (
                     isinstance(v, torch.Tensor)
                     and v not in self.grad_to_source
                     and v not in self.tensor_to_source
                 ):
-                    self.tensor_to_source[v] = GetItemSource(p_state_source, k)
+                    self.tensor_to_source[v] = GetItemSource(
+                        p_state_source, ConstDictKeySource(p_state_source, inner_idx)
+                    )
 
     def wrap_tensor(self, tx: "InstructionTranslator", tensor_value):
         """Wrap state tensor in a TensorVariable"""
