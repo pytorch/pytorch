@@ -40,8 +40,16 @@ namespace at::native {
 // Parse environment variable "TORCH_LINEAR_FLATTEN_3D"
 static inline bool parseLinearFlatten3d() {
   // Uninitialized value
-  static auto value = c10::utils::check_env("TORCH_LINEAR_FLATTEN_3D");
-  return value.has_value() && value.value();
+  static int value = -1;
+  if (value == -1) {
+    const char* env_str = std::getenv("TORCH_LINEAR_FLATTEN_3D");
+    if (env_str != nullptr && strcmp(env_str, "1") == 0) {
+      value = 1;
+    } else {
+      value = 0;
+    }
+  }
+  return bool(value);
 }
 
 // `_flatten_nd_linear` flattens all but the last dimension of the input tensor

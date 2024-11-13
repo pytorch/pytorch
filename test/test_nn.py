@@ -31,7 +31,7 @@ from torch.nn.parallel._functions import Broadcast
 from torch.testing._internal.common_dtype import integral_types, get_all_math_dtypes, floating_types
 from torch.testing._internal.common_utils import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, skipIfRocm, \
     TEST_NUMPY, TEST_SCIPY, TEST_WITH_CROSSREF, TEST_WITH_ROCM, \
-    download_file, get_function_arglist, load_tests, skipIfMps, \
+    download_file, get_function_arglist, load_tests, skipIfMPS, \
     IS_PPC, \
     parametrize as parametrize_test, subtest, instantiate_parametrized_tests, \
     skipIfTorchDynamo, gcIfJetson, set_default_dtype
@@ -4718,7 +4718,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
         for reduction in ['none', 'mean', 'sum']:
             output_sig = torch.rand(x_size, y_size) - 0.5
-            output_logits = output_sig.clone().detach()
+            output_logits = output_sig.detach().clone()
 
             output_sig.requires_grad = True
             output_logits.requires_grad = True
@@ -7867,19 +7867,19 @@ class TestNNDeviceType(NNTestCase):
 
             # fp32
             m_fp32 = deepcopy(m).to(device, torch.float)
-            x_fp32 = input.clone().detach().float().requires_grad_()
+            x_fp32 = input.detach().clone().float().requires_grad_()
             out_fp32 = m_fp32(x_fp32)
             out_fp32.sum().backward()
 
             # bf16/half
             m_bf16 = deepcopy(m)
-            x_bf16 = input.clone().detach().requires_grad_()
+            x_bf16 = input.detach().clone().requires_grad_()
             out_bf16 = m_bf16(x_bf16)
             out_bf16.sum().backward()
 
             # bf16/half mixed type
             m_mix = deepcopy(m).to(device, torch.float)
-            x_mix = input.clone().detach().requires_grad_()
+            x_mix = input.detach().clone().requires_grad_()
             out_mix = m_mix(x_mix)
             out_mix.sum().backward()
             self.assertEqual(out_fp32.to(dtype=dtype), out_bf16)
@@ -7953,7 +7953,7 @@ class TestNNDeviceType(NNTestCase):
             channels = size[1]
             input = torch.randn(size).cpu().to(dtype=dtype)
             input_bf1 = input.contiguous(memory_format=memory_format).detach().requires_grad_(True)
-            input_bf2 = input_bf1.clone().detach().requires_grad_(True)
+            input_bf2 = input_bf1.detach().clone().requires_grad_(True)
             input_f = input_bf1.float().detach().requires_grad_(True)
             m_bf = nn.GroupNorm(groups, channels).cpu().to(dtype=dtype)
             m_f = deepcopy(m_bf).float()
@@ -7968,7 +7968,7 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(out2.float(), out3, atol=5e-3, rtol=5e-3)
             grad_out = torch.randn(out2.shape).cpu().to(dtype=dtype)
             grad_out_bf1 = grad_out.contiguous(memory_format=memory_format).detach().requires_grad_(True)
-            grad_out_bf2 = grad_out_bf1.clone().detach().requires_grad_(True)
+            grad_out_bf2 = grad_out_bf1.detach().clone().requires_grad_(True)
             grad_out_f = grad_out_bf2.clone().float().detach().requires_grad_(True)
             # bfloat16/half input grad and float parameters
             out2.backward(grad_out_bf2, retain_graph=True)
@@ -8527,7 +8527,7 @@ class TestNNDeviceType(NNTestCase):
             net = copy.deepcopy(net_orig)
             x_orig = torch.rand(B, C, W, H, device=device, requires_grad=True)
             grad_orig = torch.rand(B, C, W, H, device=device)
-            x = x_orig.clone().detach().to(memory_format=input_format).requires_grad_(True)
+            x = x_orig.detach().clone().to(memory_format=input_format).requires_grad_(True)
             grad = grad_orig.detach().to(memory_format=grad_format)
 
             y = net(x)
@@ -9394,7 +9394,7 @@ class TestNNDeviceType(NNTestCase):
             expected_out = in_t.repeat_interleave(2, dim=-1)
             self.assertEqual(out_t, expected_out)
 
-    @skipIfMps  # Partially passes https://github.com/pytorch/pytorch/issues/134430
+    @skipIfMPS  # Partially passes https://github.com/pytorch/pytorch/issues/134430
     @parametrize_test("isize, osize", [(20, 11), (10, 15)])
     def test_upsamplingNearestExact1d_correctness(self, device, isize, osize):
         # Here we check if output matches Scikit-Image/Scipy-like result
@@ -9502,7 +9502,7 @@ class TestNNDeviceType(NNTestCase):
         expected_out = expected_out.to(device=device)
         self.assertEqual(out_t, expected_out)
 
-    @skipIfMps  # Partially passes https://github.com/pytorch/pytorch/issues/134430
+    @skipIfMPS  # Partially passes https://github.com/pytorch/pytorch/issues/134430
     @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
     @parametrize_test("isize, osize", [(20, 11), (10, 15)])
     def test_upsamplingNearestExact2d_correctness(self, device, memory_format, isize, osize):
@@ -9745,7 +9745,7 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(expected_out.expand([*shape[:2], 2, 2]), t_out)
 
     # Partially passes. NotImplementedError: aten::upsample_bicubic2d.out https://github.com/pytorch/pytorch/issues/77764
-    @skipIfMps
+    @skipIfMPS
     @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
     @parametrize_test("mode", ["bilinear", "bicubic"])
     @parametrize_test("antialias", [True, False])
@@ -12445,7 +12445,7 @@ if __name__ == '__main__':
         self.assertFalse(torch.allclose(m_initialized.weight, m_uninitialized.weight))
 
     @skipIfRocm(msg='Not our bug: TransformerEncoderLayer._sa_block still uses FA/ME and effectively takes fastpath')
-    @skipIfMps  # TODO(hvaara): Investigate as possible bug. macOS 13 passes, while 14 and 15 fails.
+    @skipIfMPS  # TODO(hvaara): Investigate as possible bug. macOS 13 passes, while 14 and 15 fails.
     @dtypes(torch.float)
     @dtypesIfCUDA(torch.double, torch.float, torch.half)
     def test_transformerencoderlayer(self, device, dtype):
@@ -12751,7 +12751,7 @@ if __name__ == '__main__':
             with cm:
                 _test(activation=activation, batch_first=batch_first, training=training)
 
-    @skipIfMps  # RuntimeError: foreach=True was passed, but can't use the foreach API on mps tensors
+    @skipIfMPS  # RuntimeError: foreach=True was passed, but can't use the foreach API on mps tensors
     @parametrize_test('foreach', (False, True))
     def test_clip_grad_value(self, foreach, device):
         if torch.device(device).type == 'xla' and foreach:
@@ -12781,7 +12781,7 @@ if __name__ == '__main__':
         clip_grad_value_([p2], clip_value, foreach=foreach)
         self.assertEqual(p1.grad, p2.grad)
 
-    @skipIfMps  # TypeError: the MPS framework doesn't support float64
+    @skipIfMPS  # TypeError: the MPS framework doesn't support float64
     @parametrize_test('foreach', (False, True))
     @parametrize_test('norm_type', (0.5, 1.5, 2, 4, 'inf'))
     def test_clip_grad_norm(self, norm_type, foreach, device):
