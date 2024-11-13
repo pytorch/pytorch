@@ -6,7 +6,6 @@ from pathlib import Path
 from unittest import TestCase
 
 from tools.linter.adapters.docstring_linter import DocstringLinter
-
 from tools.test.test_set_linter import assert_expected
 
 
