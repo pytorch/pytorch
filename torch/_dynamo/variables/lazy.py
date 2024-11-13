@@ -51,8 +51,12 @@ class LazyVariableTracker(VariableTracker):
     _nonvar_fields = {"_cache", *VariableTracker._nonvar_fields}
 
     @staticmethod
-    def create(value: Any, source: Any, force_specialize: bool, **options: Any) -> "LazyVariableTracker":
-        return LazyVariableTracker(LazyCache(value, source, force_specialize), source=source, **options)
+    def create(
+        value: Any, source: Any, force_specialize: bool = False, **options: Any
+    ) -> "LazyVariableTracker":
+        return LazyVariableTracker(
+            LazyCache(value, source, force_specialize), source=source, **options
+        )
 
     def __init__(self, _cache: LazyCache, **kwargs: Any) -> None:
         assert isinstance(_cache, LazyCache)

@@ -21,6 +21,7 @@ import torch.distributed as dist
 import torch.nn
 import torch.utils._pytree as pytree
 from torch import fx
+from torch._dynamo.exc import TensorifyScalarRestartAnalysis
 from torch._guards import (
     CompileContext,
     CompileId,
@@ -28,7 +29,6 @@ from torch._guards import (
     Source,
     TracingContext,
 )
-from torch._dynamo.exc import TensorifyScalarRestartAnalysis
 from torch._utils_internal import signpost_event
 from torch.fx._lazy_graph_module import _make_graph_module  # type: ignore[attr-defined]
 from torch.fx.experimental._backward_state import BackwardState
@@ -1439,7 +1439,6 @@ class OutputGraph:
                 "Adding a graph break."
             )
             unimplemented_with_warning(e, self.root_tx.f_code, msg)
-
 
         except SkipFrame as e:
             # The backend compiler has requested that we skip the frame, instead of

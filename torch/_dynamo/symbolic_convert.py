@@ -2198,7 +2198,8 @@ class InstructionTranslatorBase(
             )
 
             value = LazyVariableTracker.create(
-                LazySymNodeFormatString(value, fmt_spec), source=value.source
+                LazySymNodeFormatString(value, fmt_spec),
+                source=value.source,
             )
             self.push(value)
             return
@@ -2874,7 +2875,7 @@ class InstructionTranslator(InstructionTranslatorBase):
                 k: variables.LazyVariableTracker.create(
                     f_locals[k],
                     source=LocalSource(k, cell_or_freevar=k in cells_and_freevars_set),
-                    force_specialize=TensorifyState.should_specialize(i)
+                    force_specialize=TensorifyState.should_specialize(i),
                 )
                 for i, k in enumerate(vars)
                 if k in f_locals

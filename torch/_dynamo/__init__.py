@@ -34,6 +34,7 @@ from .eval_frame import (
 from .external_utils import is_compiling
 from .mutation_guard import GenerationTracker
 from .pgo import reset_code_state
+from .symbolic_convert import TensorifyState
 from .utils import graph_break_reasons, guard_failures, orig_code_map, reset_frame_count
 
 

@@ -1232,7 +1232,9 @@ class VariableBuilder:
             return result
         return self.tx.output.side_effects.track_object_existing(value, result)
 
-    def wrap_listlike(self, value: Union[tuple, list, odict_values, NamedTuple], **kwargs):
+    def wrap_listlike(
+        self, value: Union[tuple, list, odict_values, NamedTuple], **kwargs
+    ):
         if config.specialize_int and type(value) is torch.Size:
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
             return ConstantVariable.create(value=value)
@@ -1500,7 +1502,11 @@ class VariableBuilder:
                 return ConstantVariable.create(value=value, source=self.source)
             else:
                 return self.wrap_symint(value, **kwargs)
-        elif not config.specialize_float and not kwargs.get('force_specialize') and type(value) is float:
+        elif (
+            not config.specialize_float
+            and not kwargs.get("force_specialize")
+            and type(value) is float
+        ):
             return self.wrap_symfloat(value, **kwargs)
         else:
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
