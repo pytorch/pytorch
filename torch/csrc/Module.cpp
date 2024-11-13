@@ -920,8 +920,9 @@ static PyObject* THPModule_setDeterministicAlgorithms(
   END_HANDLE_TH_ERRORS
 }
 
-
-static PyObject* THPModule_setAllowTF32Onednn(PyObject* _unsued, PyObject* arg) {
+static PyObject* THPModule_setAllowTF32Onednn(
+    PyObject* _unsued,
+    PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
       PyBool_Check(arg),
@@ -933,7 +934,9 @@ static PyObject* THPModule_setAllowTF32Onednn(PyObject* _unsued, PyObject* arg) 
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPModule_allowTF32Onednn(PyObject* _unused, PyObject* noargs) {
+static PyObject* THPModule_allowTF32Onednn(
+    PyObject* _unused,
+    PyObject* noargs) {
   if (at::globalContext().allowTF32Onednn())
     Py_RETURN_TRUE;
   else
