@@ -20,7 +20,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
     def test_disallow_in_graph(self):
         cnts = torch._dynamo.testing.CompileCounter()
 
-        @torch._dynamo.optimize(cnts)
+        @torch.compile(backend=cnts)
         def fn(a):
             x = torch.add(a, 1)
             x = torch.add(x, 1)
@@ -63,7 +63,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         ref = fn(x)
 
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         res = opt_fn(x)
         self.assertEqual(cnts.frame_count, 2)
         self.assertEqual(ref, res)
@@ -187,7 +187,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
     def test_allow_in_graph(self):
         cnts = torch._dynamo.testing.CompileCounter()
 
-        @torch._dynamo.optimize(cnts)
+        @torch.compile(backend=cnts)
         def fn(a):
             x = torch.add(a, 1)
             x = torch.add(x, 1)
@@ -214,7 +214,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
     def test_graph_break(self):
         cnts = torch._dynamo.testing.CompileCounter()
 
-        @torch._dynamo.optimize(cnts)
+        @torch.compile(backend=cnts)
         def fn(x):
             x = torch.cos(x)
             x = torch.cos(x)
@@ -243,7 +243,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
             return fn1(x.tan())
 
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         opt_fn(torch.randn(4))
         self.assertEqual(cnts.frame_count, 2)
 
@@ -254,7 +254,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         #     out of the box
         cnts = torch._dynamo.testing.CompileCounter()
         fn = operator.indexOf
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         out = fn([1, 2, 3, 4, 5], 3)
         opt_out = opt_fn([1, 2, 3, 4, 5], 3)
         self.assertEqual(out, opt_out)
@@ -282,7 +282,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
 
         cnts = torch._dynamo.testing.CompileCounter()
         fn = operator.indexOf
-        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
         out = fn([1, 2, 3, 4, 5], 3)
         opt_out = opt_fn([1, 2, 3, 4, 5], 3)
         self.assertEqual(out, opt_out)
@@ -294,7 +294,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
 
         cnts = torch._dynamo.testing.CompileCounter()
         fn = polyfill
-        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
         out = fn([1, 2, 3, 4, 5], 3)
         opt_out = opt_fn([1, 2, 3, 4, 5], 3)
         self.assertEqual(out, opt_out)
@@ -309,7 +309,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         def fn1(x):
             return torch.sin(x) * 10
 
-        @torch._dynamo.optimize(cnts)
+        @torch.compile(backend=cnts)
         def fn2(x):
             x = x + 1
             x = x + 1
@@ -318,7 +318,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
             x = x + 1
             return x
 
-        @torch._dynamo.optimize(cnts, nopython=True)
+        @torch.compile(backend=cnts, fullgraph=True)
         def fn3(x):
             return fn2(x)
 
@@ -335,14 +335,14 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
     def test_disable_optimize(self):
         cnt = torch._dynamo.testing.CompileCounter()
 
-        @torch._dynamo.optimize(cnt, disable=True)
+        @torch.compile(backend=cnt, disable=True)
         def f1(x):
             return x + 1
 
         f1(torch.ones(6))
         self.assertEqual(cnt.frame_count, 0)
 
-        @torch._dynamo.optimize(cnt, disable=True)
+        @torch.compile(backend=cnt, disable=True)
         def f2(x):
             return x + 1
 
@@ -351,7 +351,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
 
         with patch.dict(os.environ, {"TORCHDYNAMO_DISABLE": "1"}):
 
-            @torch._dynamo.optimize(cnt)
+            @torch.compile(backend=cnt)
             def f3(x):
                 return x + 1
 
@@ -389,7 +389,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
             "torch._guards.TracingContext.current_frame",
             side_effect=global_context_capture_fn,
         ):
-            torch._dynamo.optimize("eager")(e)(x)
+            torch.compile(e, backend="eager")(x)
 
         self.assertEqual(len(seen_frames), 0)
 
@@ -463,7 +463,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
             compiles += 1
             return gm
 
-        @torch._dynamo.optimize(backend=debug_compiler)
+        @torch.compile(backend=debug_compiler)
         def fn(x):
             return x + 1
 

@@ -6767,7 +6767,7 @@ graph():
         if not is_retracebility_test(self._testMethodName):
             test(
                 export(M(), inp, preserve_module_call_signature=("n",)),
-                swap={"n": N(), "n@1": N()},
+                swap={"n": N()},
             )
 
         class _N(torch.nn.Module):
@@ -6820,6 +6820,56 @@ graph():
             unflattened_result = ufm(*inp)
             self.assertTrue(torch.allclose(unflattened_result, eager_result))
 
+    def test_unflatten_multiple_graphs_dispatch(self):
+        class N(torch.nn.Module):
+            def forward(self, x, b):
+                if b:
+                    return x + 1
+                else:
+                    return x + 2
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.n = N()
+
+            def forward(self, x):
+                x = x + 3
+                x = self.n(x, True)
+                x = x + 4
+                x = self.n(x, True)
+                x = x + 5
+                x = self.n(x, False)
+                x = x + 6
+                return x
+
+        inp = (torch.ones(1),)
+        m = M()
+        eager_result = m(*inp)
+
+        def test(ep):
+            epm = ep.module()
+            ufm = torch.export.unflatten(ep)
+
+            exported_result = epm(*inp)
+            self.assertTrue(torch.allclose(exported_result, eager_result))
+
+            unflattened_result = ufm(*inp)
+            self.assertTrue(torch.allclose(unflattened_result, eager_result))
+
+        if not is_retracebility_test(self._testMethodName):
+            if is_training_ir_test(self._testMethodName):
+                test(
+                    torch.export.export_for_training(
+                        M(),
+                        inp,
+                        strict=not is_non_strict_test(self._testMethodName),
+                        preserve_module_call_signature=("n",),
+                    )
+                )
+
+            test(export(M(), inp, preserve_module_call_signature=("n",)))
+
     def test_unflatten_multiple_graphs_preserve_signature_no_error(self):
         class N(torch.nn.Module):
             def forward(self, x, b):
@@ -6845,7 +6895,7 @@ graph():
         m = M()
         eager_result = m(*inp)
 
-        def test(ep):
+        def test(ep, swap=None):
             epm = ep.module()
             ufm = torch.export.unflatten(ep)
 
@@ -6855,8 +6905,17 @@ graph():
             unflattened_result = ufm(*inp)
             self.assertTrue(torch.allclose(unflattened_result, eager_result))
 
+            if swap:
+                for fqn, mod in swap.items():
+                    ufm.set_submodule(fqn, mod)
+                unflattened_result = ufm(*inp)
+                self.assertTrue(torch.allclose(unflattened_result, eager_result))
+
         if not is_retracebility_test(self._testMethodName):
-            test(export(M(), inp, preserve_module_call_signature=("n",)))
+            test(
+                export(M(), inp, preserve_module_call_signature=("n",)),
+                swap={"n": N()},
+            )
 
         test(export(M(), inp))
 
@@ -6893,7 +6952,7 @@ graph():
         m = M()
         eager_result = m(*inp)
 
-        def test(ep):
+        def test(ep, swap=None):
             epm = ep.module()
             ufm = torch.export.unflatten(ep)
 
@@ -6903,11 +6962,20 @@ graph():
             unflattened_result = ufm(*inp)
             self.assertTrue(torch.allclose(unflattened_result, eager_result))
 
+            if swap:
+                for fqn, mod in swap.items():
+                    ufm.set_submodule(fqn, mod)
+                unflattened_result = ufm(*inp)
+                self.assertTrue(torch.allclose(unflattened_result, eager_result))
+
         if not is_retracebility_test(self._testMethodName):
-            test(export(M(), inp, preserve_module_call_signature=("n",)))
+            test(
+                export(M(), inp, preserve_module_call_signature=("n",)),
+                swap={"n": N()},
+            )
             # running decompositions again should work for all IRs
             ep = export(M(), inp, preserve_module_call_signature=("n",))
-            test(ep.run_decompositions({}))
+            test(ep.run_decompositions({}), swap={"n": N()})
             if is_training_ir_test(self._testMethodName):
                 # since we run decompositions by default when testing training IR,
                 # also test training IR without running decompositions
@@ -6918,7 +6986,7 @@ graph():
                     strict=strict,
                     preserve_module_call_signature=("n",),
                 )
-                test(ept)
+                test(ept, swap={"n": N()})
 
         test(export(M(), inp))
 
@@ -7046,6 +7114,16 @@ graph():
                     self.assertEqual(
                         id(getattr(unflattened, a)), id(getattr(unflattened, b))
                     )
+
+            if not is_retracebility_test(self._testMethodName):
+                # preserving module call signatures
+                ep = export(m, inp, preserve_module_call_signature=("n", "p"))
+                exported_result = ep.module()(*inp)
+                self.assertTrue(torch.allclose(exported_result, eager_result))
+
+                unflattened = torch.export.unflatten(ep)
+                unflattened_result = unflattened(*inp)
+                self.assertTrue(torch.allclose(unflattened_result, eager_result))
 
         test(
             gen_m(n=True, n_1=False, p=False, p_1=False),
