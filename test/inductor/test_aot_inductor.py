@@ -3932,7 +3932,7 @@ class AOTInductorTestsTemplate:
 
             def forward(self, x):
                 _x, _i = torch.unique(x, sorted=True, return_inverse=True)
-                _x = _x.clone().detach()
+                _x = _x.detach().clone()
                 return self.relu(_x), _i
 
         example_inputs = (torch.randn(8, device=self.device),)
