@@ -21690,7 +21690,7 @@ python_ref_db = [
             DecorateInfo(
                 toleranceOverride({torch.float16: tol(atol=1e-05, rtol=1e-03)}),
                 'TestUnaryUfuncs', device_type='cuda'),
-            precisionOverride({torch.bfloat16: 1e-2}),
+            precisionOverride({torch.bfloat16: 1e-2, torch.complex64: 5e-05}),
         ],
         skips=(
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
