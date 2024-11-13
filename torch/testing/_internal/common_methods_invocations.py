@@ -15309,6 +15309,10 @@ op_db: list[OpInfo] = [
                    toleranceOverride({torch.float32: tol(atol=5e-5, rtol=5e-6)}),
                    'TestOperators', 'test_vjpvmap',
                ),
+               DecorateInfo(
+                   toleranceOverride({torch.float16: tol(atol=5e-3, rtol=1e-3)}),
+                   'TestInductorOpInfo', 'test_comprehensive',
+               ),
            ),
            skips=(
                # RuntimeError: !lhs.isAliasOf(rhs) INTERNAL ASSERT FAILED at
