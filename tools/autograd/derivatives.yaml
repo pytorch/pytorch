@@ -1031,6 +1031,16 @@
 - name: special_zeta.other_scalar(Tensor self, Scalar other) -> Tensor
   self: not_implemented("zeta")
 
+- name: special_betaln(Tensor a, Tensor b) -> Tensor
+  a: grad * (at::digamma(a) - at::digamma(a + b))
+  b: grad * (at::digamma(b) - at::digamma(a + b))
+
+- name: special_betaln.a_scalar(Scalar a, Tensor b) -> Tensor
+  b: grad * (at::digamma(b) - at::digamma(a + b))
+
+- name: special_betaln.b_scalar(Tensor a, Scalar b) -> Tensor
+  a: grad * (at::digamma(a) - at::digamma(a + b))
+
 - name: special_betainc(Tensor self, Tensor a, Tensor b) -> Tensor
   a, b, self: special_betainc_backward_full(grad, a, b, self)
 

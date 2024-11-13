@@ -639,41 +639,34 @@ Example::
     ),
 )
 
+betaln = _add_docstr(
+    _special.special_betaln,
+    r"""
+betainc(input, a, b, out=None) -> Tensor
 
-def betaln(
-    a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType]
-) -> TensorLikeType:
-    (
-        r"""
-    betainc(input, a, b, out=None) -> Tensor
-
-    Computes the natural logarithm of absolute value of Beta function (as defined below)
-    for each element of :attr:`input`,  :attr:`a`, :attr:`b`.
-    .. math::
-        \log\,|\,\Beta(a,b)\,|
-    Similar to SciPy's `scipy.special.betaln`.
-    """
-        + r"""
-    Args:
-        a (Tensor) : (:attr:`a > 0`)
-        b (Tensor) : (:attr:`b > 0`)
-    Keyword args:
-        {out}
-    Example::
-        >>> torch.special.betaln( torch.tensor([-1, 0, 1, float('inf'), float('nan')]), torch.tensor(9))
-        tensor([    inf,     inf, -2.1972,     nan,     nan])
-        >>> torch.special.betaln(torch.tensor([2, 4, 5]), torch.tensor(9))
-        tensor([-4.4998, -7.5909, -8.7695])
-        >>> torch.special.betaln(torch.tensor(6), torch.tensor(9))
-        tensor(-9.7991)
-    """
-    )
-    torch._check(
-        isinstance(a, TensorLike) or isinstance(b, TensorLike),
-        lambda: "Expected either argument a or b to be a Tensor",
-    )
-
-    return torch.lgamma(a) + torch.lgamma(b) - torch.lgamma(a)
+Computes the natural logarithm of absolute value of Beta function (as defined below)
+for each element of :attr:`input`,  :attr:`a`, :attr:`b`.
+.. math::
+    \log\,|\,\Beta(a,b)\,|
+Similar to SciPy's `scipy.special.betaln`.
+"""
+    + r"""
+Args:
+    a (Tensor) : (:attr:`a > 0`)
+    b (Tensor) : (:attr:`b > 0`)
+Keyword args:
+    {out}
+Example::
+    >>> torch.special.betaln( torch.tensor([-1, 0, 1, float('inf'), float('nan')]), torch.tensor(9))
+    tensor([    inf,     inf, -2.1972,     nan,     nan])
+    >>> torch.special.betaln(torch.tensor([2, 4, 5]), torch.tensor(9))
+    tensor([-4.4998, -7.5909, -8.7695])
+    >>> torch.special.betaln(torch.tensor(6), torch.tensor(9))
+    tensor(-9.7991)
+""".format(
+        **common_args
+    ),
+)
 
 
 def beta(
@@ -709,7 +702,7 @@ def beta(
         lambda: "Expected either argument a or b to be a Tensor",
     )
 
-    return torch.exp(betaln(a, b))
+    return torch.exp(torch.special.betaln(a, b))
 
 
 i1 = _add_docstr(
