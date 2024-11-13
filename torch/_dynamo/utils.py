@@ -1410,9 +1410,8 @@ def is_namedtuple_cls(cls):
                     # This is a namedtuple type directly created by `collections.namedtuple(...)`
                     return True
                 if (
-                    len(cls.__bases__) >= 2
-                    and cls.__bases__[-1] is tuple
-                    and is_namedtuple_cls(cls.__bases__[0])
+                    # Subclass of namedtuple
+                    is_namedtuple_cls(cls.__bases__[0])
                     # For subclasses of namedtuple, the __new__ method should not be customized
                     and cls.__new__ is cls.__bases__[0].__new__
                 ):
