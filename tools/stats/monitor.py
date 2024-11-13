@@ -33,7 +33,7 @@ def get_per_process_cpu_info() -> list[dict[str, Any]]:
             "cmd": " ".join(p.cmdline()),
             "cpu_percent": p.cpu_percent(),
             "rss_memory": p.memory_info().rss,
-            "ppid":p.ppid,
+            "ppid":p.ppid.pid,
         }
 
         # https://psutil.readthedocs.io/en/latest/index.html?highlight=memory_full_info
