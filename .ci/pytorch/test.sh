@@ -578,10 +578,10 @@ record_time() {
 
   if [ $status -ne 0 ]; then
     echo "TestName: $command, Start Time: $start_time, End Time: $end_time, Status: Failed"
-    echo "{\"test-name\": \"$command\", \"start_time\": \"$start_time\", \"end_time\": \"$end_time\", \"status\": \"failed\"}" >> "$TEST_REPORTS_DIR/$LOG_FILE"
+    echo "{\"test-name\": \"$command\", \"start_time\": \"$start_time\", \"end_time\": \"$end_time\", \"status\": \"failed\"}" > "$TEST_REPORTS_DIR/$LOG_FILE"
   else
     echo "TestName: $command, Start Time: $start_time, End Time: $end_time, Status: Success"
-    echo "{\"test-name\": \"$command\", \"start_time\": \"$start_time\", \"end_time\": \"$end_time\", \"status\": \"success\"}" >> "$TEST_REPORTS_DIR/$LOG_FILE"
+    echo "{\"test-name\": \"$command\", \"start_time\": \"$start_time\", \"end_time\": \"$end_time\", \"status\": \"success\"}" > "$TEST_REPORTS_DIR/$LOG_FILE"
   fi
 
   return $status
