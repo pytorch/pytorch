@@ -558,7 +558,7 @@ class ScheduleTest(MultiProcContinousTest):
         schedule = ScheduleClass(stages, num_microbatches, loss_fn=loss_fn)
 
         # Run reference
-        ref_x = x.clone().detach().requires_grad_(x.requires_grad)
+        ref_x = x.detach().clone().requires_grad_(x.requires_grad)
         torch.testing.assert_close(x, ref_x)
         for _ in range(num_steps):
             ref_out = ref_mod(ref_x)

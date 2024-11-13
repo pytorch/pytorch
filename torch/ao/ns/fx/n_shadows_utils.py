@@ -387,7 +387,7 @@ def create_submodule_from_subgraph(
             if len(cur_node_orig.args) > 1:
                 for arg in cur_node_orig.args[1:]:
                     if isinstance(arg, torch.nn.Parameter):
-                        new_arg = arg.clone().detach()  # type: ignore[assignment]
+                        new_arg = arg.detach().clone()  # type: ignore[assignment]
                         mod_name = f"mod_{cur_name_idx}"
                         cur_name_idx += 1
                         setattr(gm, mod_name, new_arg)

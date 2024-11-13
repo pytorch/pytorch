@@ -1264,7 +1264,7 @@ class TestAutograd(TestCase):
             tensor.mul_(4.0)
 
         tensor = torch.rand(3, requires_grad=True)
-        tensor_ref = tensor.clone().detach()
+        tensor_ref = tensor.detach().clone()
         tensor.register_post_accumulate_grad_hook(hook1)
         tensor.register_post_accumulate_grad_hook(hook2)
         sum = tensor.sum()
@@ -1277,9 +1277,9 @@ class TestAutograd(TestCase):
             tensor.sub_(tensor.grad)
 
         tensor1 = torch.rand(3, requires_grad=True)
-        tensor1_ref = tensor1.clone().detach()
+        tensor1_ref = tensor1.detach().clone()
         tensor2 = torch.rand(5, requires_grad=True)
-        tensor2_ref = tensor2.clone().detach()
+        tensor2_ref = tensor2.detach().clone()
         tensor1.register_post_accumulate_grad_hook(hook)
         tensor2.register_post_accumulate_grad_hook(hook)
         tensor1.sum().backward()
@@ -1335,7 +1335,7 @@ class TestAutograd(TestCase):
         params_copy = []  # freeze a copy of the params to compare later
         for p_reference, p in zip(model_copy.parameters(), model.parameters()):
             self.assertEqual(p_reference, p)
-            params_copy.append(p_reference.clone().detach())
+            params_copy.append(p_reference.detach().clone())
 
         # After removing the handle, the model should no longer update.
         for h in handles:
@@ -2352,8 +2352,8 @@ class TestAutograd(TestCase):
 
             r = a.mm(b)
             s = r.sum().backward()
-            a_grad = None if a.grad is None else a.grad.clone().detach()
-            b_grad = None if b.grad is None else b.grad.clone().detach()
+            a_grad = None if a.grad is None else a.grad.detach().clone()
+            b_grad = None if b.grad is None else b.grad.detach().clone()
 
             # Redo with only dense tensors
             a = (
@@ -10295,20 +10295,20 @@ get_out().sum().backward()
             offsets = torch.tensor([0, 3, 6, 10])
             _test_fn(nested_view_from_values_offsets, values, offsets)
 
-            nt = nested_view_from_values_offsets(values, offsets).clone().detach()
+            nt = nested_view_from_values_offsets(values, offsets).detach().clone()
             _test_fn(
                 torch.ops.aten._nested_get_values.default, nt, use_unsafe_view_func=True
             )
 
             def chain_nt_to_dense_back_and_forth(nt):
                 # NJT1 -> dense -> NJT2 -> dense
-                offsets2 = nt.offsets().clone().detach()
+                offsets2 = nt.offsets().detach().clone()
                 return nested_view_from_values_offsets(nt.values(), offsets2).values()
 
             _test_fn(chain_nt_to_dense_back_and_forth, nt, use_unsafe_view_func=True)
 
             def chain_dense_to_nt_back_and_forth(values, offsets):
-                offsets2 = offsets.clone().detach()
+                offsets2 = offsets.detach().clone()
                 # dense -> NJT1 -> dense -> NJT2
                 return nested_view_from_values_offsets(
                     nested_view_from_values_offsets(values, offsets).values(), offsets2
@@ -14082,7 +14082,7 @@ class TestAutogradMultipleDispatch(TestCase):
         # tests that view_copy derivative formulas are also generated per dispatch key
         # from their respective view ops in derivatives.yaml
         t = torch.randn(2, 2, device=device, requires_grad=True)
-        t_ref = t.clone().detach().requires_grad_()
+        t_ref = t.detach().clone().requires_grad_()
         # _test_autograd_multiple_dispatch_view does a .view(-1) on the input
         t_view = torch._test_autograd_multiple_dispatch_view(t_ref)
         t_view_copy = torch._test_autograd_multiple_dispatch_view_copy(t)

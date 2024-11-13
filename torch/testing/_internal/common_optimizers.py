@@ -2248,7 +2248,7 @@ class TensorTracker:
         """
         Add a clone().detach()'d version of the tensor
         """
-        self.tensors.append(tensor.clone().detach())
+        self.tensors.append(tensor.detach().clone())
 
     # pops from beginning, like a queue and not a stack!
     def pop_check_set(self, tensor_to_set, testcase):

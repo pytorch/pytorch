@@ -229,7 +229,7 @@ class TestBasics(TestCase):
         for sample in _generate_sample_data(device=device):
             data = sample.input
             mask = sample.kwargs["mask"]
-            mt = masked_tensor(data.clone().detach(), mask, requires_grad=True)
+            mt = masked_tensor(data.detach().clone(), mask, requires_grad=True)
 
             sparse_mt = mt.to_sparse()
             data.to_sparse().to_dense().sum().backward()

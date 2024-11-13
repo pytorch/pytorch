@@ -2570,7 +2570,7 @@ else:
     def test_cdist_grad_p_lt_1_no_nan(self, device):
         for p in [0.99, 0.7, 0.5, 0.1, 0.01]:
             x = torch.randn(1, 2, device=device)
-            y = x.clone().detach() + torch.tensor([[1., 0.]], device=device)
+            y = x.detach().clone() + torch.tensor([[1., 0.]], device=device)
             x.requires_grad = True
             y.requires_grad = True
             result = torch.cdist(x, y, p=p)
@@ -3464,7 +3464,7 @@ else:
             with DeterministicGuard(True):
                 y0 = torch.index_copy(x, dim, index, src)
 
-            x0 = x.clone().detach()
+            x0 = x.detach().clone()
             index_list = index.tolist()
             for i in range(len(index_list)):
                 if dim == 0:
@@ -10641,7 +10641,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             self.assertEqual(t1.foo, "bar")
 
             if t1.is_floating_point():
-                t3 = t1.clone().detach().requires_grad_(True)
+                t3 = t1.detach().clone().requires_grad_(True)
                 out = t3 * 2
                 torch.utils.swap_tensors(t3, t2)
                 with self.assertRaisesRegex(RuntimeError, "AccumulateGrad node that was poisoned by swap_tensors"):
