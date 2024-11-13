@@ -1,12 +1,10 @@
 ---
 name: "⚠️ CI SEV"
 about: Tracking incidents for PyTorch's CI infra.
+label: ["ci: sev"]
 ---
 
-> NOTE: Remember to label this issue with "`ci: sev`"
-
- <!-- uncomment the below line if you don't want this SEV to block merges -->
- <!--  **MERGE BLOCKING** -->
+ <!-- Add the `merge blocking` label to this PR to prevent PRs from being merged while this issue is open -->
 
 ## Current Status
 *Status could be: preemptive, ongoing, mitigated, closed. Also tell people if they need to take action to fix it (i.e. rebase)*.
