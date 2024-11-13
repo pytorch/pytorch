@@ -8,7 +8,7 @@ import pickle
 import sys
 import warnings
 from inspect import signature
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Dict, Literal, Optional, Tuple, Union
 from typing_extensions import deprecated
 
 import torch
@@ -738,7 +738,7 @@ def _record_memory_history_legacy(
     )
 
 
-def _record_memory_history(enabled="all", *args, **kwargs):
+def _record_memory_history(enabled: Literal[None, "state", "all"] = "all", *args, **kwargs):
     """Enable recording of stack traces associated with memory
     allocations, so you can tell what allocated any piece of memory in
     :func:`torch.cuda.memory._snapshot()`.
