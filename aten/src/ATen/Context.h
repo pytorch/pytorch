@@ -592,6 +592,10 @@ inline void manual_seed(uint64_t seed) {
 //     NoTF32Guard disable_tf32;
 struct TORCH_API NoTF32Guard {
   NoTF32Guard();
+  NoTF32Guard(NoTF32Guard&& other) = delete;
+  NoTF32Guard(const NoTF32Guard&) = delete;
+  NoTF32Guard& operator=(const NoTF32Guard&) = delete;
+  NoTF32Guard& operator=(NoTF32Guard&&) = delete;
   ~NoTF32Guard();
   static bool should_disable_tf32();
 
@@ -601,6 +605,10 @@ struct TORCH_API NoTF32Guard {
 
 struct TORCH_API ROCmBackwardPassGuard {
   ROCmBackwardPassGuard();
+  ROCmBackwardPassGuard(ROCmBackwardPassGuard&& other) = delete;
+  ROCmBackwardPassGuard(const ROCmBackwardPassGuard&) = delete;
+  ROCmBackwardPassGuard& operator=(const ROCmBackwardPassGuard&) = delete;
+  ROCmBackwardPassGuard& operator=(ROCmBackwardPassGuard&&) = delete;
   ~ROCmBackwardPassGuard();
   static bool is_backward_pass();
 };
