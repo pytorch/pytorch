@@ -315,11 +315,17 @@ class OptimizeForInferenceTemplate(TestCase):
                 return mod(inp)
 
             kernel_invoke = "kernel_cpp_0" if self.device == "cpu" else "triton.jit"
+            # https://github.com/pytorch/pytorch/blob/e754611d190b323e53c5d17db0dc39a96687513c/torch/_inductor/fx_passes/mkldnn_fusion.py#L1263
+            mkldnn_weight_pack_init = (
+                torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_available()
+            )
+            # https://github.com/pytorch/pytorch/blob/e754611d190b323e53c5d17db0dc39a96687513c/torch/_inductor/fx_passes/mkldnn_fusion.py#L960-L964
+            mkl_packable = (
+                torch.ops.mkldnn._is_mkldnn_acl_supported() or torch._C.has_mkl
+            )
             mm_invoke = (
                 "mkl_linear.default("
-                if self.device == "cpu"
-                and torch.backends.mkldnn.enabled
-                and torch.backends.mkldnn.is_available()
+                if self.device == "cpu" and mkldnn_weight_pack_init and mkl_packable
                 else "mm("
             )
 
