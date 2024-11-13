@@ -7,7 +7,8 @@ In PyTorch, a regular tensor is a multi-dimensional array that is defined by the
   - ``dtype``: The data type of the elements in the tensor, such as torch.float32 or torch.int64.
   - ``shape``: A tuple indicating the size of the tensor in each dimension.
   - Stride: The step size needed to move from one element to the next in each dimension.
-  - Offset: The starting point in the storage from which the tensor data begins.
+  - Offset: The starting point in the storage from which the tensor data begins. This will usually be 0 for newly
+    created tensors.
 
 These components together define the structure and data of a tensor, with the storage holding the
 actual data and the rest serving as metadata.
@@ -75,10 +76,11 @@ It also implies that a tensor storage can be changed, as the following example s
     >>> t.set_(s1, storage_offset=t.storage_offset(), stride=t.stride(), size=t.size())
     tensor([0., 0., 0.])
 
-Please note that directly modifying a tensor's storage as shown in this example is not a recommended practice.
-This low-level manipulation is illustrated solely for educational purposes, to demonstrate the relationship between
-tensors and their underlying storages. In general, it's more efficient and safer to use standard ``torch.Tensor``
-methods, such as :meth:`~torch.Tensor.clone` and :meth:`~torch.Tensor.fill_`, to achieve the same results.
+.. warning::
+  Please note that directly modifying a tensor's storage as shown in this example is not a recommended practice.
+  This low-level manipulation is illustrated solely for educational purposes, to demonstrate the relationship between
+  tensors and their underlying storages. In general, it's more efficient and safer to use standard ``torch.Tensor``
+  methods, such as :meth:`~torch.Tensor.clone` and :meth:`~torch.Tensor.fill_`, to achieve the same results.
 
 Other than ``data_ptr``, untyped storage also have other attributes such as :attr:`~torch.UntypedStorage.filename`
 (in case the storage points to a file on disk), :attr:`~torch.UntypedStorage.device` or
@@ -126,7 +128,7 @@ Legacy Typed Storage
   in the future, and :class:`torch.UntypedStorage` will be used in all cases.
 
 :class:`torch.Storage` is an alias for the storage class that corresponds with
-the default data type (:func:`torch.get_default_dtype()`). For instance, if the
+the default data type (:func:`torch.get_default_dtype()`). For example, if the
 default data type is :attr:`torch.float`, :class:`torch.Storage` resolves to
 :class:`torch.FloatStorage`.
 
