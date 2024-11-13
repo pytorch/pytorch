@@ -18,31 +18,24 @@ static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
 #include <ATen/native/mps/UnfoldBackward_metallib.h>
 #endif
 
-void unfold_backward_metal(
-  Tensor& grad_out,
-  const Tensor& grad_in,
-  int64_t dim,
-  int64_t size,
-  int64_t step
-) {
-  dim = maybe_wrap_dim(dim, grad_out.dim());
-  // last dim stores the folds
-  auto last_dim = maybe_wrap_dim(-1, grad_in.dim());
-
-  auto grad_in_dim_stride = ensure_nonempty_stride(grad_in, dim);
-  auto grad_in_last_dim_stride = ensure_nonempty_stride(grad_in, last_dim);
-  auto grad_in_dim_size = ensure_nonempty_size(grad_in, dim);
-
-  auto grad_out_dim_stride = ensure_nonempty_stride(grad_out, dim);
+void unfold_backward_mps(Tensor& grad_out, const Tensor& grad_in, int64_t dim, int64_t size, int64_t step) {
+  if (grad_in.numel() == 0) {
+    return;
+  }
+  TORCH_CHECK(grad_in.ndimension() < 16, "unfold_backward_mps :Only up to 16-dim tensors supported");
 
   using namespace mps;
+  dim = maybe_wrap_dim(dim, grad_out.dim());
   auto unfoldBackwardPSO = lib.getPipelineStateForFunc("unfold_backward_" + scalarToMetalTypeString(grad_in));
   auto stream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
       auto computeEncoder = stream->commandEncoder();
       [computeEncoder setComputePipelineState:unfoldBackwardPSO];
-      std::array<uint32_t, 4> dim_size_step_ndim = {static_cast<uint32_t>(dim), static_cast<uint32_t>(size), static_cast<uint32_t>(step), static_cast<uint32_t>(grad_out.ndimension())};
+      std::array<uint32_t, 4> dim_size_step_ndim = {static_cast<uint32_t>(dim),
+                                                    static_cast<uint32_t>(size),
+                                                    static_cast<uint32_t>(step),
+                                                    static_cast<uint32_t>(grad_out.ndimension())};
       mtl_setBuffer(computeEncoder, grad_in, 0);
       mtl_setBuffer(computeEncoder, grad_out, 1);
       mtl_setBytes(computeEncoder, grad_in.strides(), 2);
@@ -55,6 +48,5 @@ void unfold_backward_metal(
 }
 
 } // anonymous namespace
-REGISTER_DISPATCH(unfold_backward_stub, &unfold_backward_metal);
+REGISTER_DISPATCH(unfold_backward_stub, &unfold_backward_mps);
 } // namespace at::native
-
