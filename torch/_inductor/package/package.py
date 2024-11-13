@@ -155,7 +155,9 @@ def compile_so(aoti_dir: str, aoti_files: List[str], so_path: str) -> str:
     return output_so
 
 
-def package_aoti(archive_file: str, aoti_files: Union[str, Dict[str, str]]) -> str:
+def package_aoti(
+    archive_file: str, aoti_files: Union[List[str], Dict[str, List[str]]]
+) -> str:
     """
     Saves the AOTInductor generated files to the PT2Archive format.
 
@@ -165,35 +167,56 @@ def package_aoti(archive_file: str, aoti_files: Union[str, Dict[str, str]]) -> s
         the AOTInductor files, or a dictionary mapping the model name to the
         path to its AOTInductor generated files.
     """
-    if isinstance(aoti_files, str):
+    if isinstance(aoti_files, list):
         aoti_files = {"model": aoti_files}
 
-    assert isinstance(aoti_files, dict)
+    assert isinstance(aoti_files, dict), (
+        "Please pass a list of AOTI generated files to be packaged or "
+        "a dictionary mapping model names to their list of AOTI generated "
+        "files. You can get this list of files through calling "
+        "`torch._inductor.aot_compile(..., options={aot_inductor.package=True})`"
+    )
     assert archive_file.endswith(".pt2")
 
     # Save using the PT2 packaging format
     # (https://docs.google.com/document/d/1jLPp8MN8Whs0-VW9PmJ93Yg02W85tpujvHrTa1pc5x8/edit#heading=h.v2y2jgnwc56a)
 
     with PT2ArchiveWriter(archive_file) as archive_writer:
-        for model_name, aoti_output_dir in aoti_files.items():
-            log.debug(
-                "Packaging AOTInductor files from %s with model name, %s",
-                aoti_output_dir,
-                model_name,
-            )
-            for root, dirs, files in os.walk(aoti_output_dir):
-                for file in files:
-                    log.debug(
-                        "Saving AOTI generated file %s to archive in %s%s/%s",
-                        os.path.join(root, file),
-                        AOTINDUCTOR_DIR,
-                        model_name,
-                        file,
-                    )
-                    archive_writer.write_file(
-                        f"{AOTINDUCTOR_DIR}{model_name}/{file}",
-                        os.path.join(root, file),
-                    )
+        for model_name, files in aoti_files.items():
+            num_so_files = 0
+            num_cpp_files = 0
+
+            for file in files:
+                if file == "":
+                    continue
+
+                if file.endswith(".so"):
+                    num_so_files += 1
+                    if num_so_files > 1:
+                        raise RuntimeError(
+                            f"Multiple .so files found in {files}. "
+                            "You might need to clear your cache "
+                            "directory before calling aoti_compile again."
+                        )
+                if file.endswith(".cpp"):
+                    num_cpp_files += 1
+                    if num_so_files > 1:
+                        raise RuntimeError(
+                            f"Multiple .cpp files found in {files}. "
+                            "You might need to clear your cache "
+                            "directory before calling aoti_compile again."
+                        )
+
+                filename = os.path.basename(file)
+                new_filepath = os.path.join(AOTINDUCTOR_DIR, model_name, filename)
+                log.debug(
+                    "Saving AOTI generated file %s to archive in %s", file, new_filepath
+                )
+                archive_writer.write_file(
+                    str(new_filepath),
+                    file,
+                )
+
     return archive_file
 
 
