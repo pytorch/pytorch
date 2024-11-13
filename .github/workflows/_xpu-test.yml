@@ -162,8 +162,10 @@ jobs:
         timeout-minutes: ${{ fromJson(steps.test-timeout.outputs.timeout) }}
         run: |
           # Fetch aws credential from IMDs
-          eval "$(python3 .github/scripts/get_aws_session_tokens.py)"
           set -x
+          python3 -m pip install boto3==1.19.12
+
+          eval "$(python3 .github/scripts/get_aws_session_tokens.py)"
 
           TEST_COMMAND=.ci/pytorch/test.sh
 
