@@ -64,10 +64,8 @@ class Allocator:
 
         # Raw 1d uint8 data
         raw = found_base
-        # Slice the right storage part
-        raw_slice = raw.narrow(0, 0, meta.nelem_in_bytes)
         # Reinterpret cast in the right dtype
-        as_dtype = raw_slice.view(dtype=meta.dtype)
+        as_dtype = raw.view(dtype=meta.dtype)
         # View to the right shape/stride/offset
         view = as_dtype.as_strided(meta.size, meta.stride, meta.storage_offset)
         return view
