@@ -271,15 +271,39 @@ ParsedLiteral IRParser::parseScalarLiteral(Node* n) {
       if (L.cur().kind == '-') {
         L.next();
       }
-      auto text = L.expect(TK_NUMBER);
       if (!parse_tensor_constants_) {
+        auto text = L.expect(TK_NUMBER);
         throw(
             ErrorReport(token.range)
             << "Single-element tensor constant encountered but "
             << "`parse_tensor_constants` is set to false " << token.text());
       }
-      L.expect('}');
+      if (L.cur().kind != TK_NUMBER) {
+        auto text = L.expect(TK_NUMBER);
+        throw(
+            ErrorReport(token.range)
+            << "Expected single-element tensor constant to contain a number"
+            << token.text());
+      }
+      auto number = parseScalarLiteral(n);
+      switch (number.k) {
+        case AttributeKind::i:
+          n->ival_(attr::value, c10::Scalar(number.i));
+          break;
+        case AttributeKind::f:
+          n->ival_(attr::value, c10::Scalar(number.f));
+          break;
+        case AttributeKind::c:
+          n->ival_(attr::value, c10::Scalar(number.c));
+          break;
+        default:
+          throw(
+              ErrorReport(token.range)
+              << "Expected single-element tensor constant to contain a number"
+              << token.text());
+      }
       deferred_tensor_value_initializations_.push_back(n);
+      L.expect('}');
       r.k = AttributeKind::t;
       return r;
     }
@@ -647,7 +671,14 @@ void IRParser::parse() {
     auto dtype = tt->scalarType();
     TORCH_INTERNAL_ASSERT(dtype);
     auto options = at::TensorOptions(*device).dtype(dtype);
-    auto t = n->t_(attr::value, at::empty_strided(*sizes, *strides, options));
+
+    auto e = at::empty_strided(*sizes, *strides, options);
+    if (n->hasAttribute(attr::value)) {
+      auto value = n->ival(attr::value);
+      e.fill_(value.toScalar());
+    }
+
+    auto t = n->t_(attr::value, e);
     (void)t;
   }
 

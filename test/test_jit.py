@@ -8237,6 +8237,42 @@ dedent """
         with self.assertRaises(RuntimeError):
             parse_ir(g, parse_tensor_constants=False)
 
+    def test_parse_scalar_tensor_constants(self):
+        for dtype_str, dtype, value in [
+            ("Float", torch.float32, 1234.5),
+            ("Double", torch.float64, 1234.5),
+            ("BFloat16", torch.bfloat16, 123.5),
+            ("Int", torch.int32, 12345),
+            ("Long", torch.int64, 12345),
+            ("Short", torch.int16, 12345),
+        ]:
+            g_str = f"""
+                graph():
+                  %1 : {dtype_str}(requires_grad=0, device=cpu) = prim::Constant[value={{{value}}}]()
+                  return (%1)
+            """
+
+            jit_graph = parse_ir(g_str, parse_tensor_constants=True)
+
+            node = next(
+                n
+                for n in jit_graph.nodes()
+                if isinstance(n.output().type(), torch.TensorType)
+            )
+            assert isinstance(node.output().type(), torch.TensorType)
+            t = node.t("value")
+            assert isinstance(t, torch.Tensor)
+            self.assertEqual(t.dtype, dtype)
+            self.assertEqual(t.item(), value)
+
+        with self.assertRaises(RuntimeError):
+            g_str = """
+                graph():
+                  %1 : Long(requires_grad=0, device=cpu) = prim::Constant[value={invalid}]()
+                  return (%1)
+            """
+            jit_graph = parse_ir(g_str, parse_tensor_constants=True)
+
     def test_parse_nested_names(self):
         g_str = """
     graph(%x.1 : Tensor):
