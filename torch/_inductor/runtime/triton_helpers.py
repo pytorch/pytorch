@@ -59,6 +59,14 @@ def set_driver_to_gpu():
     raise RuntimeError("Could not find an active GPU backend")
 
 
+def get_backend_options():
+    driver = triton.runtime.driver
+    target = driver.active.get_current_target()
+    backend = triton.compiler.compiler.make_backend(target)
+    options = backend.parse_options(dict())
+    return options.__dict__
+
+
 @triton.jit
 def promote_to_tensor(x):
     # Addition promotes to tensor for us
@@ -641,8 +649,8 @@ def x_grid_barrier(sem):
     bar_flipped = False
     while not bar_flipped:
         # want a `ld.acquire.gpu.u32 $0,[$1];` but Triton doesn't have it
-        # current_arrive = tl.atomic_add(sem, 0, sem="acquire")
-        current_arrive = tl.load(sem, volatile=True)  # is missing .acquire
+        current_arrive = tl.atomic_add(sem, 0, sem="acquire")
+        # current_arrive = tl.load(sem, volatile=True)
         bar_flipped = ((old_arrive ^ current_arrive) & 0x80000000) != 0
 
     # TODO(jansel): is this needed?

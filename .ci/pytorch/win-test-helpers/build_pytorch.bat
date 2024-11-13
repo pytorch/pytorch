@@ -52,7 +52,8 @@ if not errorlevel 0 goto fail
 
 if "%USE_XPU%"=="1" (
   :: Activate xpu environment - VS env is required for xpu
-  call "C:\Program Files (x86)\Intel\oneAPI\setvars.bat"
+  call "C:\Program Files (x86)\Intel\oneAPI\compiler\latest\env\vars.bat"
+  call "C:\Program Files (x86)\Intel\oneAPI\ocloc\latest\env\vars.bat"
   if errorlevel 1 exit /b 1
   :: Reduce build time. Only have MTL self-hosted runner now
   SET TORCH_XPU_ARCH_LIST=xe-lpg
