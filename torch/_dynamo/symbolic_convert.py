@@ -2812,7 +2812,7 @@ class InstructionTranslator(InstructionTranslatorBase):
 
             # Populate `symbolic_locals` with cells captured by this frame,
             # effectively implementing the `COPY_FREE_VARS` instruction.
-            for idx, name, cell in zip(itertools.count(), self.freevars(), closure):
+            for name, cell in zip(self.freevars(), closure):
                 cell_source = LocalSource(name, is_root_frame_cell=True)
                 contents_source = AutoDerefLocalSource(cell_source)
                 try:
