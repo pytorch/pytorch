@@ -97,7 +97,7 @@ from .pgo import put_code_state
 from .replay_record import ExecutionRecord
 from .resume_execution import TORCH_DYNAMO_RESUME_IN_PREFIX
 from .symbolic_convert import (
-    TensorifyState,
+
     DistributedState,
     InstructionTranslator,
     LocalState,
@@ -657,7 +657,6 @@ def _compile(
             frame_state=frame_state,
             speculation_log=speculation_log,
             distributed_state=distributed_state,
-            tensorify_state=tensorify_state,
         )
 
         try:
@@ -743,7 +742,7 @@ def _compile(
         for attempt in itertools.count():
             CompileContext.get().attempt = attempt
             try:
-                import fbvscode; fbvscode.set_trace()
+                # import fbvscode; fbvscode.set_trace()
                 out_code = transform_code_object(code, transform)
                 break
             except exc.RestartAnalysis as e:
@@ -874,7 +873,6 @@ def _compile(
         # This is shared across restarts
         mutated_closure_cell_ids: Set[int] = set()
         speculation_log = SpeculationLog()
-        tensorify_state = TensorifyState()
         if compile_pg := get_compile_pg():
             distributed_state = DistributedState(compile_pg, LocalState())
         else:

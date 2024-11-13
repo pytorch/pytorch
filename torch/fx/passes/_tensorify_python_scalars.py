@@ -9,6 +9,9 @@ from sympy.logic.boolalg import BooleanAtom
 
 import torch
 import torch.fx as fx
+from torch._dynamo.symbolic_convert import (
+    TensorifyState,
+)
 from torch._dynamo.exc import TensorifyScalarRestartAnalysis
 from torch._prims_common import get_computation_dtype
 from torch._subclasses import fake_tensor  # noqa: TCH001
@@ -285,7 +288,13 @@ def tensorify_python_scalars(
                     graph.erase_node(node)
 
     if should_restart:
-        # TODO set state somewhere...
+        for i, node in enumerate(graph.nodes):
+            if node.op == 'placeholder' and len(node.users) == 0:
+                # At this point we've lost the back pointer to
+                # what f_local this placeholder points to. Instead,
+                # we will rely on the index to specialize when we
+                # restart analysis.
+                TensorifyState.specialize(i)
         raise TensorifyScalarRestartAnalysis
 
     # Sledgehammer time. Restart dynamo analysis, keeping track of which input sources
