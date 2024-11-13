@@ -286,7 +286,7 @@ static bool copy_requires_temporaries(TensorIterator& iter, bool p2p_enabled) {
   bool is_complex = at::isComplexType(iter.dtype(1));
 
   // Check if the tensor is 1D or 2D and non-contiguous
-  if (iter.ndim() <= 2 && same_dtype && !is_complex) {
+  if (iter.ndim() == 2 && same_dtype && !is_complex) {
     const auto& src_tensor = iter.tensor(1);
     const auto& dst_tensor = iter.tensor(0);
 
@@ -531,7 +531,7 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
   CUDAStream stream = getCurrentCUDAStream();
 
   // Try optimized 1D/2D non-contiguous path first for both blocking and non-blocking
-  if (iter.ndim() <= 2 && !iter.is_contiguous()) {       
+  if (iter.ndim() == 2 && !iter.is_contiguous()) {       
     if (copy_non_contiguous_2d(dst, src, iter, kind, stream, non_blocking)) {
       if (iter.tensor(0).is_conj() != iter.tensor(1).is_conj()) {
         iter.tensor(0).conj_physical_();
