@@ -534,11 +534,11 @@ class CppMicroGemmAMX(CppMicroGemm):
         // then B would be some consecutive tiles sized [k, block_n] elements each, so the
         // first element of a subsequent [K, block_n] tile would be right after the last
         // element of the previous tile sized [K x block_n] elements.
-        const int base_idx = tile_idx * K * {{block_n}};
-        for (int idx = 0; idx < buf_size; idx += {{block_k}}) {
+        const int base_idx = tile_idx * K * 32;
+        for (int idx = 0; idx < buf_size; idx += 32) {
             auto b_int8 = at::vec::Vectorized<int8_t>::loadu(
                 const_cast<{{input2_t}}*>(B) + base_idx + idx,
-                static_cast<int64_t>({{block_k}})
+                static_cast<int64_t>(32)
             );
             auto b_bf16 = at::vec::convert<{{input_t}}>(b_int8);
             b_bf16.store(dequantized_B_buf + idx);
@@ -548,7 +548,7 @@ class CppMicroGemmAMX(CppMicroGemm):
     // TODO(jgong5): loop unroll for M and N
     for (int64_t n = 0; n < N; n += {{block_n}}) {
 {%- if use_cached_dequantized_B %}
-        // Dequantize K * 32 int8 B elements into BF16
+        // Dequantize K * block_n int8 B elements into BF16
         load_dequantized_B(n / {{block_n}});
 {%- endif %}
         for (int64_t m = 0; m < M; m += {{block_m}}) {
