@@ -982,7 +982,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             x_inference = torch.randn(2, 2)
 
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
 
         x = torch.randn(2, 2)
 

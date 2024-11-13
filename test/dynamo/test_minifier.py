@@ -13,7 +13,7 @@ class MinifierTests(MinifierTestBase):
     # Test that compile, runtime, and accuracy errors after dynamo can be repro'd (both CPU and CUDA)
     def _test_after_dynamo(self, device, backend, expected_error):
         run_code = f"""\
-@torch._dynamo.optimize({backend!r})
+@torch.compile(backend={backend!r})
 def inner(x):
     for _ in range(10):
         x = torch.sin(x)
