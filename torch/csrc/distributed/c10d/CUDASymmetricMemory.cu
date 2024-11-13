@@ -6,6 +6,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/util/env.h>
 
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
 #include <c10/cuda/driver_api.h>
@@ -172,10 +173,10 @@ class IpcChannel {
 
  private:
   static std::string get_socket_name(int pid) {
-    const char* tmp_dir = "/tmp";
+    std::string tmp_dir = "/tmp";
     for (const char* env_var : {"TMPDIR", "TMP", "TEMP", "TEMPDIR"}) {
-      if (const char* path = getenv(env_var)) {
-        tmp_dir = path;
+      if (const auto path = c10::utils::get_env(env_var)) {
+        tmp_dir = path.value();
         break;
       }
     }
@@ -585,24 +586,6 @@ int CUDASymmetricMemory::get_rank() {
 
 int CUDASymmetricMemory::get_world_size() {
   return world_size_;
-}
-
-void CUDASymmetricMemory::stream_write_value32(uintptr_t addr, uint32_t val) {
-#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
-  auto driver_api = c10::cuda::DriverAPI::get();
-  // According to the documentation of CUstreamWriteValue_flags,
-  // cuStreamWriteValue32 will provide a memory fence before the write, which
-  // has similar semantics to __threadfence_system() but is scoped to the
-  // stream rather than a CUDA thread.
-  driver_api->cuStreamWriteValue32_(
-      at::cuda::getCurrentCUDAStream(),
-      reinterpret_cast<CUdeviceptr>((void*)addr),
-      val,
-      0);
-#else
-  TORCH_CHECK(
-      false, "CUDASymmetricMemory requires PYTORCH_C10_DRIVER_API_SUPPORTED");
-#endif
 }
 
 void* CUDASymmetricMemoryAllocator::alloc(

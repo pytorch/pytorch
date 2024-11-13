@@ -54,10 +54,10 @@ import torch
 import torch.distributed as dist
 from torch import SymInt, Tensor
 from torch._dynamo.utils import (
-    add_remote_cache_time_saved,
     counters,
     dynamo_timed,
     get_chromium_event_logger,
+    get_metrics_context,
 )
 from torch._inductor import config, exc, metrics
 from torch._inductor.codegen.cuda import cuda_env
@@ -96,7 +96,6 @@ from torch._inductor.cpp_builder import (
     CppOptions,
     CppTorchDeviceOptions,
     get_compiler_version_info,
-    get_cpp_compiler,
     get_name_and_dir_from_output_file_path,
     normalize_path_separator,
 )
@@ -1145,9 +1144,14 @@ class FxGraphCache:
             triton_bundler_meta = TritonBundler.read_and_emit(bundle)
             if (meta := triton_bundler_meta) is not None:
                 cache_info["triton_bundler_meta"] = str(meta)
-                get_chromium_event_logger().add_event_data(
-                    "inductor_compile", cached_kernel_names=meta.cached_kernel_names
-                )
+                logger = get_chromium_event_logger()
+                if "inductor_compile" in logger.get_stack():
+                    # TODO: Clean up autograd cache integration
+                    logger.add_event_data(
+                        "inductor_compile", cached_kernel_names=meta.cached_kernel_names
+                    )
+                if len(meta.cached_kernel_names) > 0:
+                    get_metrics_context().increment("num_triton_bundles", 1)
 
         inductor_meta = autotune_cache.inductor_meta_from_config()
         AutotuneCacheBundler.begin_compile(inductor_meta, code=code)
@@ -1444,7 +1448,9 @@ class FxGraphCache:
 
             if (time_saved_ns := compiled_graph._time_taken_ns) is not None:
                 cache_info["time_saved_ns"] = time_saved_ns
-                add_remote_cache_time_saved(time_saved_ns, is_backward)
+                get_metrics_context().increment(
+                    "distributed_ephemeral_timeout_us", time_saved_ns // 1000
+                )
                 if (
                     ephemeral_increase := add_ephemeral_timeout_increase_for_distributed(
                         time_saved_ns
@@ -1504,13 +1510,20 @@ class FxGraphCache:
             assert compiled_graph is None
             assert key_info is not None
             start_time = cache_info["cache_event_time"]
-            compiled_graph = compile_fx_fn(
-                gm, example_inputs, inputs_to_check, fx_kwargs
-            )
-            compiled_graph._time_taken_ns = time_ns() - start_time
-            cache_key = key_info[0]
-            compiled_graph._fx_graph_cache_key = cache_key
-            compiled_graph._triton_bundle, triton_bundler_meta = TritonBundler.collect()
+            TritonBundler.begin_compile()
+            try:
+                compiled_graph = compile_fx_fn(
+                    gm, example_inputs, inputs_to_check, fx_kwargs
+                )
+                compiled_graph._time_taken_ns = time_ns() - start_time
+                cache_key = key_info[0]
+                compiled_graph._fx_graph_cache_key = cache_key
+                (
+                    compiled_graph._triton_bundle,
+                    triton_bundler_meta,
+                ) = TritonBundler.collect()
+            finally:
+                TritonBundler.end_compile()
             if triton_bundler_meta is not None:
                 cache_info["triton_bundler_meta"] = str(triton_bundler_meta)
             cache_info["time_taken_ns"] = compiled_graph._time_taken_ns
@@ -1773,19 +1786,11 @@ class AotCodeCompiler:
         # guarantee the source code hash contains ISA difference.
         cpp_command = repr(vec_isa_cmd_gen.get_command_line())
 
-        fbcode_aot_cpu_re = False
-        use_absolute_path = False
-        if config.is_fbcode():
-            ld_command = build_paths.ld
-            if device_type == "cpu" and graph.aot_mode:  # Meta internal AOTInductor CPU
-                objcopy_command = build_paths.objcopy_fallback
-                fbcode_aot_cpu_re = True
-                use_absolute_path = True
-            else:
-                objcopy_command = build_paths.objcopy
-        else:
-            ld_command = "ld -z noexecstack"
-            objcopy_command = "objcopy"
+        # Meta internal AOTInductor CPU
+        fbcode_aot_cpu_re = (
+            config.is_fbcode() and device_type == "cpu" and graph.aot_mode
+        )
+        use_absolute_path = fbcode_aot_cpu_re
 
         (
             specified_output_path,
@@ -1809,7 +1814,7 @@ class AotCodeCompiler:
         )
 
         # We use a file lock below to protect FS operations. The lock file
-        # is scoped to the 'key', so make sure the consts_path is protected
+        # is scoped to the 'key', so make sure the consts_s is protected
         # by the same lock:
         consts_specified_dir = os.path.join(os.path.split(input_path)[0], key)
 
@@ -1850,14 +1855,37 @@ class AotCodeCompiler:
                 consts_asm += f"\t.space {len(consts) - 8}\n"
             consts_asm += f".globl\t{symbol_prefix}_binary_constants_bin_end\n"
             consts_asm += f"{symbol_prefix}_binary_constants_bin_end:\n"
-            _, consts_path = write(
+            _, consts_s = write(
                 consts_asm,
                 "S",
                 specified_dir=consts_specified_dir,
             )
-            consts_o = os.path.splitext(consts_path)[0] + ".o"
-            cmd = f"{get_cpp_compiler()} -c -o {consts_o} {consts_path}"
-            run_command_and_check(cmd)
+            (
+                object_output_name,
+                object_output_dir,
+            ) = get_name_and_dir_from_output_file_path(consts_s)
+            object_build_options = CppTorchDeviceOptions(
+                device_type=device_type,
+                aot_mode=graph.aot_mode,
+                compile_only=True,
+                use_absolute_path=use_absolute_path,
+            )
+            object_builder = CppBuilder(
+                name=object_output_name,
+                sources=consts_s,
+                output_dir=object_output_dir,
+                BuildOption=object_build_options,
+            )
+            compile_cmd = object_builder.get_command_line()
+            consts_o = object_builder.get_target_file_path()
+            if fbcode_aot_cpu_re:
+                # TODO: refactor fbcode_aot_cpu_re logic into CppBuilder
+                consts_o = os.path.splitext(consts_s)[0] + ".o"
+                compile_file(consts_s, consts_o, compile_cmd.split())
+                os.chmod(consts_o, 0o644)
+            else:
+                run_command_and_check(compile_cmd)
+
             if is_large_consts:
                 with open(consts_o, "r+b") as f:
                     f.seek(0)
@@ -2056,8 +2084,12 @@ class AotCodeCompiler:
                 else:
                     run_command_and_check(link_cmd)
 
-                for o_file in [output_o, consts_o]:
-                    # remove .o files to save disk space since we already have the .so file
+                for o_file in [
+                    output_o,
+                    consts_o,
+                    os.path.splitext(consts_o)[0] + ".S",
+                ]:
+                    # No need to package .o or .S into the output artifact
                     os.remove(o_file)
 
                 if use_mmap_weights:
@@ -3455,8 +3487,9 @@ class ROCmCodeCache:
                     log.info(log_duration_msg)
                 else:
                     log.debug(
-                        "Compilation skipped: %s since output already exists",
+                        "Skip compiling %s: output %s already exists",
                         input_path,
+                        output_path,
                     )
                 cls.cache[key] = ROCmCodeCache.CacheEntry(input_path, output_path)
 
