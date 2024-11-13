@@ -229,7 +229,7 @@ namespace {
 typedef std::vector<TensorCheck> ChecksList;
 
 typedef struct {
-  PyObject_HEAD;
+  PyObject_HEAD
   ChecksList* checks;
 } TensorGuards;
 
@@ -510,7 +510,7 @@ static PyTypeObject TensorGuardsType = { PyVarObject_HEAD_INIT(nullptr, 0)
 // merged.
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct GlobalStateGuard {
-  PyObject_HEAD;
+  PyObject_HEAD
 
   inline void init() {
     auto& ctx = at::globalContext();
