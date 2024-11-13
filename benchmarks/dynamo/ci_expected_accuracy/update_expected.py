@@ -209,7 +209,6 @@ if __name__ == "__main__":
 
     results = query_job_sha(repo, args.sha)
     urls = get_artifacts_urls(results, suites)
-    print(urls)
-    # dataframes = download_artifacts_and_extract_csvs(urls)
-    # write_filtered_csvs(root_path, dataframes)
-    # print("Success. Now, confirm the changes to .csvs and `git add` them if satisfied.")
+    dataframes = download_artifacts_and_extract_csvs(urls)
+    write_filtered_csvs(root_path, dataframes)
+    print("Success. Now, confirm the changes to .csvs and `git add` them if satisfied.")
