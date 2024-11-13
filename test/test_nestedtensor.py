@@ -1289,6 +1289,7 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
             subtest(torch.isposinf, name="isposinf"),
             subtest(torch.isneginf, name="isneginf"),
             subtest(torch.isnan, name="isnan"),
+            subtest(torch.sqrt, name="sqrt"),
         ],
     )
     def test_unary_funcs(self, device, func):
@@ -3035,7 +3036,7 @@ class TestNestedTensorAutograd(NestedTensorTestCase):
             )
         p = 0.2
         y = torch.nn.functional.dropout(nt, p)
-        y.backward(nt.clone().detach())
+        y.backward(nt.detach().clone())
         self.assertEqual(nt.grad, y)
 
     def test_nested_tensor_bmm_gradcheck(self, device):
@@ -3711,21 +3712,8 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
 
         with tempfile.TemporaryFile() as f:
             torch.save(nt, f)
-            safe_globals = [
-                torch.nested._internal.nested_tensor.NestedTensor,
-                torch.nested._internal.nested_tensor._rebuild_njt,
-                set,
-                torch._dynamo.decorators._DimRange,
-            ]
             f.seek(0)
-            ctx = (
-                torch.serialization.safe_globals(safe_globals)
-                if weights_only
-                else contextlib.nullcontext()
-            )
-
-            with ctx:
-                nt_loaded = torch.load(f, weights_only=weights_only)
+            nt_loaded = torch.load(f, weights_only=weights_only)
 
             self.assertIsNot(nt, nt_loaded)
             # we expect a new offsets tensor -> different nested int upon load
@@ -6384,7 +6372,7 @@ torch.cuda.synchronize()
 
         compile_counter = torch._dynamo.testing.CompileCounter()
 
-        compiled_fn = torch._dynamo.optimize(compile_counter, nopython=True)(fn)
+        compiled_fn = torch.compile(fn, backend=compile_counter, fullgraph=True)
         check_results(fn, compiled_fn, generate_inp(18))
         self.assertEqual(compile_counter.frame_count, 1)
 
@@ -6763,7 +6751,7 @@ torch.cuda.synchronize()
         self.assertTrue(isinstance(output, NestedTensor))
         output.values().sum().backward()
 
-        query_dense = query.clone().detach().requires_grad_(True)
+        query_dense = query.detach().clone().requires_grad_(True)
         # should be equivalent to just running the buffers through
         output_dense = F.scaled_dot_product_attention(
             query_dense.values(), key.values(), value.values()
@@ -6906,7 +6894,7 @@ torch.cuda.synchronize()
 
         def get_values():
             return tuple(
-                x.clone().detach().requires_grad_(True) for x in (values32, values16)
+                x.detach().clone().requires_grad_(True) for x in (values32, values16)
             )
 
         v32_dense_eager, v16_dense_eager = get_values()
@@ -7240,7 +7228,7 @@ torch.cuda.synchronize()
                 nt.apply_(f)
             return
 
-        before = nt._values.clone().detach()
+        before = nt._values.detach().clone()
 
         nt.apply_(f)
         expected = f(before)
@@ -7398,7 +7386,7 @@ torch.cuda.synchronize()
                 )
 
             # error case: final offset != total_L
-            offsets_wrong = offsets.clone().detach()
+            offsets_wrong = offsets.detach().clone()
             offsets_wrong[-1] = total_L + 1
             with self.assertRaisesRegex(
                 RuntimeError, "final offset should match total_L value"
@@ -7408,7 +7396,7 @@ torch.cuda.synchronize()
                 )
 
             # error case: 1D padded input
-            padded_wrong = padded.flatten().clone().detach()
+            padded_wrong = padded.flatten().detach().clone()
             with self.assertRaisesRegex(RuntimeError, "expected padded dim >= 2"):
                 torch.ops.aten._padded_dense_to_jagged_forward(
                     padded_wrong, [offsets], total_L
@@ -7694,7 +7682,7 @@ torch.cuda.synchronize()
         expected_output = f(nt)
         if requires_grad:
             expected_output.backward(torch.ones_like(expected_output))
-            expected_grad = nt.grad.clone().detach()
+            expected_grad = nt.grad.detach().clone()
             nt.grad = None
 
         from torch._inductor.utils import run_and_get_code
@@ -7702,7 +7690,7 @@ torch.cuda.synchronize()
         compiled_output, generated_code = run_and_get_code(g, nt)
         if requires_grad:
             compiled_output.backward(torch.ones_like(compiled_output))
-            compiled_grad = nt.grad.clone().detach()
+            compiled_grad = nt.grad.detach().clone()
             self.assertEqual(compiled_grad, expected_grad, rtol=1e-3, atol=1e-3)
 
         self.assertEqual(compiled_output, expected_output, rtol=1e-3, atol=1e-3)
@@ -7859,7 +7847,6 @@ FORWARD_FAILURES = [
             "nn.functional.softplus",
             "nn.functional.softshrink",
             "nn.functional.threshold",
-            "rad2deg",
             # binary
             "__rsub__",
             "complex",
