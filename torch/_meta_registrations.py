@@ -3712,6 +3712,14 @@ def meta_relu_(self):
     return self
 
 
+@register_meta(aten._add_relu.Tensor)
+@out_wrapper()
+def meta__add_relu(self, other, alpha=1) -> Tensor:
+    return elementwise_meta(
+        self, other, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    )
+
+
 @register_meta([aten.index_put.default, aten._unsafe_index_put.default])
 def meta_index_put(self, indices, values, accumulate=False):
     return torch.empty_like(self)
