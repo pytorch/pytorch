@@ -317,7 +317,8 @@ class OptimizeForInferenceTemplate(TestCase):
             kernel_invoke = "kernel_cpp_0" if self.device == "cpu" else "triton.jit"
             mm_invoke = (
                 "mkl_linear.default("
-                if self.device == "cpu" and torch._C.has_mkl
+                if self.device == "cpu"
+                and (torch.ops.mkldnn._is_mkldnn_acl_supported() or torch._C.has_mkl)
                 else "mm("
             )
 
