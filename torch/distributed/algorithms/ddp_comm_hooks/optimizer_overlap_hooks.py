@@ -99,7 +99,9 @@ def _apply_optim_in_backward_hook(
         # enqueue a callback to wait for this optimizer stream at the end of
         # backward and set all DDP managed grads to None.
         def wait_for_optim_stream_callback():
-            torch.accelerator.current_stream().wait_stream(optim_stream_state.optim_stream)
+            torch.accelerator.current_stream().wait_stream(
+                optim_stream_state.optim_stream
+            )
             # Set DDP managed grads to None
             for param in ddp_inst._get_data_parallel_params(ddp_inst.module):
                 if hasattr(param, "_in_backward_optimizers"):
