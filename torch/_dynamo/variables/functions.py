@@ -522,6 +522,8 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         return self.f_globals
 
     def bind_args(self, parent, args, kwargs):
+        # Avoid circular import
+
         code = self.get_code()
         func = types.FunctionType(
             code,
@@ -539,7 +541,6 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         init_cellvars(parent, result, code)
 
         for idx, name in enumerate(code.co_freevars):
-            assert name not in result
             cell = self.closure.items[idx]
             result[name] = cell
 
