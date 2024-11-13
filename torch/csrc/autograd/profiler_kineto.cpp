@@ -502,6 +502,10 @@ void onFunctionExit(
   }
   kineto_ctx_ptr->event_->basic_fields_.end_tid_ =
       at::RecordFunction::currentThreadId();
+  if (fn.isNcclMeta()) {
+    auto& extra_meta = *(kineto_ctx_ptr->event_->extra_meta_);
+    extra_meta = torch::profiler::impl::saveNcclMeta(fn);
+  }
   if (config.state == ProfilerState::KINETO_GPU_FALLBACK) {
     try {
       auto fallback = kineto_ctx_ptr->fallback_;
@@ -685,6 +689,11 @@ void toggleCollectionDynamic(
       activities.count(torch::autograd::profiler::ActivityType::CUDA) == 0) {
     LOG(WARNING)
         << "Toggling CPU activity with CUDA activity on may result in traces with CUDA events on artibrary tracks";
+  } else if (
+      activities.count(torch::autograd::profiler::ActivityType::CUDA) > 0 &&
+      activities.count(torch::autograd::profiler::ActivityType::CPU) == 0) {
+    LOG(WARNING)
+        << "Toggling CUDA activity with CPU activity on may result in traces with incorrect correlation between CPU and CUDA events";
   }
   for (auto act : activities) {
     if (act == torch::autograd::profiler::ActivityType::CUDA) {

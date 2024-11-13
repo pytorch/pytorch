@@ -2808,7 +2808,7 @@ class ReinterpretView(BaseView):
             self.layout.size,
             self.layout.stride,
             self.layout.offset,
-            writer,
+            writer.writeline if writer is not None else V.graph.wrapper_code.writeline,
             dtype=self.layout.dtype,
         )
 
@@ -4913,8 +4913,9 @@ class ExternKernel(InputsKernel):
         allow_padding=False,
     ):
         assert order is not None or exact_strides is not None
-        if x.get_numel() == 0:  # Layout doesn't matter
+        if x.get_numel() in (0, 1):  # Layout doesn't matter
             return x
+
         # require x to have the layout
         if is_storage_and_layout(x):
             while isinstance(x.get_layout(), NonOwningLayout):
