@@ -422,7 +422,6 @@ class ScheduleTest(MultiProcContinousTest):
                 num_microbatches,
                 loss_fn=loss_fn,
                 stage_index_to_group_rank=old_schedule.stage_index_to_group_rank,
-                use_full_backward=old_schedule.use_full_backward,
             )
             tmp_schedule._load_actions(old_schedule.pipeline_order)
             # test that csv round-trip works for compute_comms schedule
@@ -431,7 +430,6 @@ class ScheduleTest(MultiProcContinousTest):
                 num_microbatches,
                 loss_fn=loss_fn,
                 stage_index_to_group_rank=old_schedule.stage_index_to_group_rank,
-                use_full_backward=old_schedule.use_full_backward,
             )
             with tempfile.NamedTemporaryFile() as f:
                 tmp_schedule._dump_csv(f.name)
@@ -442,7 +440,6 @@ class ScheduleTest(MultiProcContinousTest):
                 num_microbatches,
                 loss_fn=loss_fn,
                 stage_index_to_group_rank=old_schedule.stage_index_to_group_rank,
-                use_full_backward=old_schedule.use_full_backward,
             )
             one_more_schedule._load_actions(
                 schedule.pipeline_order_with_comms, format="compute_comms"
@@ -561,7 +558,7 @@ class ScheduleTest(MultiProcContinousTest):
         schedule = ScheduleClass(stages, num_microbatches, loss_fn=loss_fn)
 
         # Run reference
-        ref_x = x.clone().detach().requires_grad_(x.requires_grad)
+        ref_x = x.detach().clone().requires_grad_(x.requires_grad)
         torch.testing.assert_close(x, ref_x)
         for _ in range(num_steps):
             ref_out = ref_mod(ref_x)

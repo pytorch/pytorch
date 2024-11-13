@@ -19,6 +19,7 @@ from typing import Any, Container, Dict, List, Optional, Set, Tuple
 
 import torch
 
+from ..triton_bundler import TritonBundler
 from .autotune_cache import AutotuneCache
 from .benchmarking import benchmarker
 from .coordinate_descent_tuner import CoordescTuner
@@ -33,7 +34,6 @@ from .hints import (
     TRITON_MAX_RSPLIT,
 )
 from .runtime_utils import (
-    cache_dir,
     ceildiv,
     conditional_product,
     create_bandwidth_info_str,
@@ -42,7 +42,9 @@ from .runtime_utils import (
     get_max_y_grid,
     get_num_bytes,
     next_power_of_2,
+    triton_cache_dir,
     triton_config_to_hashable,
+    triton_hash_to_path_key,
     validate_triton_config,
 )
 
@@ -229,10 +231,8 @@ class CachingAutotuner(KernelInterface):
         self.launchers = []  # type: ignore[var-annotated]
         self.lock = threading.Lock()
         if os.getenv("TRITON_CACHE_DIR") is None:
-            os.environ["TRITON_CACHE_DIR"] = os.path.join(
-                cache_dir(),
-                "triton",
-                str(self.triton_meta.get("device", 0)),
+            os.environ["TRITON_CACHE_DIR"] = triton_cache_dir(
+                self.triton_meta.get("device", 0)
             )
         log.debug("Triton cache dir: %s", os.environ["TRITON_CACHE_DIR"])
 
@@ -244,6 +244,16 @@ class CachingAutotuner(KernelInterface):
             inductor_meta=self.inductor_meta,
         )
         self.filename = filename
+
+        # used for profiling
+        self.kernel_hash: str = ""
+
+        # Kernels are stored in the codecache with the filename as a hash of the code.
+        # We rely on this to obtain the kernel hash
+        if self.filename is not None:
+            base_name = os.path.basename(self.filename)
+            if ".py" in base_name:
+                self.kernel_hash = os.path.splitext(base_name)[0]
 
         self.precompile_time_taken_ns = 0
         self.autotune_time_taken_ns = 0
@@ -443,6 +453,7 @@ class CachingAutotuner(KernelInterface):
                 "num_warps": compile_meta["num_warps"],
                 "num_stages": compile_meta["num_stages"],
                 "debug": compile_meta["debug"],
+                "sanitize_overflow": False,  # turn off additional asserts added for overflow checks
             }
             if self.device_props.type == "hip":
                 if "waves_per_eu" in compile_meta:
@@ -460,10 +471,12 @@ class CachingAutotuner(KernelInterface):
             compile_kwargs = compile_meta
 
         if warm_cache_only:
-            return (
-                triton.compile(*compile_args, **compile_kwargs),
-                None,
+            binary = triton.compile(*compile_args, **compile_kwargs)
+            launcher = None
+            TritonBundler.put(
+                triton_hash_to_path_key(binary.hash), self.triton_meta.get("device", 0)
             )
+            return binary, launcher
 
         # importing from torch is safe now that precompile has returned
         from torch._dynamo.device_interface import DeviceGuard
@@ -702,6 +715,10 @@ class CachingAutotuner(KernelInterface):
             launcher.fn = self.fn
             launcher.bin = binary
 
+        TritonBundler.put(
+            triton_hash_to_path_key(binary.hash), self.triton_meta.get("device", 0)
+        )
+
         return binary, launcher
 
     def bench(self, launcher, *args, grid, with_profiler=False, **kwargs):
@@ -822,7 +839,9 @@ class CachingAutotuner(KernelInterface):
         return self.maybe_clone_args(set(), *args, **kwargs)
 
     def benchmark_all_configs(self, *args, **kwargs):
-        with dynamo_timed("CachingAutotuner.benchmark_all_configs"):
+        with dynamo_timed(
+            "CachingAutotuner.benchmark_all_configs", log_pt2_compile_event=True
+        ):
             timings = {
                 launcher: self.bench(launcher, *args, **kwargs)
                 for launcher in self.launchers
@@ -990,11 +1009,13 @@ class CachingAutotuner(KernelInterface):
                 grid_info = str(grid)
             else:
                 grid_info = getattr(grid, "grid_fn_str", "")
+
             with torch._C._profiler._RecordFunctionFast(
                 self.inductor_meta.get("kernel_name", "triton kernel"),
                 args,
                 {
-                    "kernel_file": "" if self.filename is None else self.filename,
+                    "kernel_file": (self.filename or ""),
+                    "kernel_hash": self.kernel_hash,
                     "kernel_backend": "triton",
                     "grid": grid_info,
                     "stream": stream,
@@ -1049,15 +1070,20 @@ def end_graph(output_file):
         f"SUMMARY ({cur_file})\n"
         f"{overall_time:.2f}ms   \t {overall_gb:.2f} GB\t {overall_gb / (overall_time / 1e3):.2f}GB/s"
     )
-    print(summary_str)
-    print()
+    log.info(
+        "%s",
+        summary_str,
+    )
     if output_file is not None:
         # sort perf numbers in descending order, i.e. placing the
         # most runtime-heavy kernels at the top of the list
         sorted_calls = sorted(collected_calls, key=lambda c: float(c[0]), reverse=True)
         try:
             with open(output_file, "a") as file:
-                log.debug("Save profile bandwidth results to %s", output_file)
+                log.info(
+                    "Save profile bandwidth results to %s",
+                    output_file,
+                )
                 file.write("====================\n")
                 file.write(f"TRITON KERNELS BANDWIDTH INFO ({cur_file})\n")
                 for ms, num_gb, gb_per_s, kernel_name in sorted_calls:
@@ -1082,42 +1108,68 @@ def end_graph(output_file):
 
 
 class DebugAutotuner(CachingAutotuner):
-    def __init__(self, *args, regex_filter="", with_profiler=False, **kwargs):
+    def __init__(
+        self,
+        *args,
+        regex_filter="",
+        with_profiler=False,
+        with_bandwidth_info=True,
+        **kwargs,
+    ):
         self.regex_filter = regex_filter
         self.with_profiler = with_profiler
+        self.with_bandwidth_info = with_bandwidth_info
         super().__init__(*args, **kwargs)
         self.cached = None
 
     def run(self, *args, grid, stream, **kwargs):
-        possible_names = _find_names(self)
-        kernel_name = f"{max(possible_names, key=len)}"
-        if not re.match(self.regex_filter, kernel_name):
+        if not self.with_bandwidth_info:
+            super().run(*args, grid=grid, stream=stream, **kwargs, benchmark_run=True)
             return
-        super().run(*args, grid=grid, stream=stream, **kwargs)
-        (launcher,) = self.launchers
+        else:
+            possible_names = _find_names(self)
+            kernel_name = f"{max(possible_names, key=len)}"
+            if not re.match(self.regex_filter, kernel_name):
+                return
 
-        if self.cached is None:
-            ms = self.bench(
-                launcher, *args, grid=grid, with_profiler=self.with_profiler
-            )
-            num_in_out_ptrs = len(
-                [
-                    arg_name
-                    for arg_name in self.fn.arg_names
-                    if arg_name.startswith("in_out_ptr")
-                ]
-            )
-            num_gb = self.inductor_meta.get("kernel_num_gb", None)
-            if num_gb is None:
-                num_gb = get_num_bytes(*args, num_in_out_args=num_in_out_ptrs) / 1e9
-            gb_per_s = num_gb / (ms / 1e3)
-            self.cached = ms, num_gb, gb_per_s, kernel_name
-            collected_calls.append((ms, num_gb, gb_per_s, kernel_name))
-            print(
-                create_bandwidth_info_str(
-                    ms, num_gb, gb_per_s, suffix=f" \t {kernel_name}"
+            if len(self.launchers) != 1:
+                if len(self.launchers) == 0:
+                    start_time = time.time_ns()
+                    self.precompile()
+                    self.precompile_time_taken_ns = time.time_ns() - start_time
+                if len(self.launchers) > 1:
+                    self.autotune_to_one_config(*args, grid=grid, **kwargs)
+            (launcher,) = self.launchers
+
+            if launcher.store_cubin:
+                self.save_gpu_kernel(grid, stream, launcher)
+
+            if self.cached is None:
+                ms = self.bench(
+                    launcher, *args, grid=grid, with_profiler=self.with_profiler
                 )
-            )
+                num_in_out_ptrs = len(
+                    [
+                        arg_name
+                        for arg_name in self.fn.arg_names
+                        if arg_name.startswith("in_out_ptr")
+                    ]
+                )
+                num_gb = self.inductor_meta.get("kernel_num_gb", None)
+                if num_gb is None:
+                    num_gb = get_num_bytes(*args, num_in_out_args=num_in_out_ptrs) / 1e9
+                gb_per_s = num_gb / (ms / 1e3)
+                self.cached = ms, num_gb, gb_per_s, kernel_name
+                collected_calls.append((ms, num_gb, gb_per_s, kernel_name))
+                log.info(
+                    "%s",
+                    create_bandwidth_info_str(
+                        ms, num_gb, gb_per_s, suffix=f" \t {kernel_name}"
+                    ),
+                )
+            else:
+                # in AOTI, we will call the kernel and its timing info has been cached already
+                collected_calls.append(self.cached)
 
 
 def hash_configs(configs: List[Config]):
@@ -1172,6 +1224,9 @@ def cached_autotune(
     mutated_arg_names = inductor_meta.pop("mutated_arg_names", ())
     optimize_mem = inductor_meta.pop("optimize_mem", True)
 
+    if "restore_value" in triton_meta:
+        mutated_arg_names += triton_meta.pop("restore_value")
+
     def decorator(fn):
         # Remove XBLOCK from config if it's not a function argument.
         # This way, coordinate descent tuning will not try to tune it.
@@ -1202,6 +1257,7 @@ def cached_autotune(
                 size_hints=size_hints,
                 custom_kernel=custom_kernel,
                 filename=filename,
+                with_bandwidth_info=True,
             )
         return CachingAutotuner(
             fn,
