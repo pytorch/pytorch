@@ -1001,8 +1001,8 @@ void GroupNormKernelImplInternal(
                     .resize_outputs(false)
                     .add_owned_output(Y.view({N, G, D, HxW}))
                     .add_owned_const_input(X.view({N, G, D, HxW}))
-                    .add_owned_input(mean.view({N, G, 1}))
-                    .add_owned_input(rstd.view({N, G, 1}))
+                    .add_owned_input(mean.view({N, G, 1, 1}))
+                    .add_owned_input(rstd.view({N, G, 1, 1}))
                     .build();
 
     gpu_kernel(iter, [] GPU_LAMBDA(T x, T mean, T rstd) -> T {
