@@ -9,6 +9,9 @@ set -ex
 # Suppress ANSI color escape sequences
 export TERM=vt100
 
+TEST_REPORTS_CHECK=$(pwd)/test/test-reports/check
+LOG_FILE="gpu_utilization.log"
+
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
@@ -557,6 +560,25 @@ test_perf_for_dashboard() {
       fi
     done
   done
+}
+
+record_timing_and_pid() {
+  mkdir -p "$TEST_REPORTS_DIR"
+  local start_time end_time
+  local command="$*"
+
+  # Get start time
+  start_time=$(date +%s)
+
+  # Execute the command passed as arguments
+  "$@"
+
+  # Get end time
+  end_time=$(date +%s)
+
+  # Print the details
+  echo "TestName: $command, Start Time: $(date -d @$start_time +'%Y-%m-%d %H:%M:%S'), End Time: $(date -d @$end_time +'%Y-%m-%d %H:%M:%S')"
+  echo "{\"test-name\": \"$command\", \"start_time\": \"$(date -d @$start_time +'%Y-%m-%d %H:%M:%S')\", \"end_time\": \"$(date -d @$end_time +'%Y-%m-%d %H:%M:%S')\"}" > "$TEST_REPORTS_CHECK/$LOG_FILE"
 }
 
 test_single_dynamo_benchmark() {

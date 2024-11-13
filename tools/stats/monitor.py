@@ -119,7 +119,6 @@ if __name__ == "__main__":
                 "total_cpu_percent": psutil.cpu_percent(),
                 "per_process_cpu_info": get_per_process_cpu_info(),
             }
-
             if nvml_handle is not None:
                 stats["per_process_gpu_info"] = get_per_process_gpu_info(nvml_handle)
                 # https://docs.nvidia.com/deploy/nvml-api/structnvmlUtilization__t.html
