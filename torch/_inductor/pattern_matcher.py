@@ -78,7 +78,6 @@ import torch.fx
 import torch.utils._pytree as pytree
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import counters
-from torch._inductor.config import trace as trace_config
 from torch._prims_common import is_integer_dtype
 from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -1223,21 +1222,13 @@ def log_trace_failure(search_fn: Callable[..., Any], e: RuntimeError) -> None:
     )
 
 
-# For a particular generated pattern repr, store all the equivalent
-# patterns and the gm that used to generate them. Because we ignore certain patterns
-# in searching, but not in matching, use the graph to distinguish if two equivalent
-# searches are actually different.
-# Element are first inserted as graphs and lazily converted to their str reprs when
-# there is a duplicate. If the graph is not present we will error on duplicate
-
-_seen_patterns: Dict[str, List[Union[torch.fx.Graph, str, None]]] = defaultdict(list)
-
-
 def check_and_add_duplicate_pattern(
-    pattern: PatternExpr, gm: Optional[torch.fx.GraphModule]
+    pattern: PatternExpr,
+    gm: Optional[torch.fx.GraphModule],
+    seen_patterns: Dict[str, List[Union[torch.fx.Graph, str, None]]],
 ) -> None:
     pattern_repr = PatternPrettyPrinter.run(pattern)
-    if equiv_pattern_reprs := _seen_patterns.get(pattern_repr):
+    if equiv_pattern_reprs := seen_patterns.get(pattern_repr):
         torch._check(
             gm is not None
             and not any(pattern_repr is None for pattern_repr in equiv_pattern_reprs),
@@ -1255,7 +1246,7 @@ def check_and_add_duplicate_pattern(
             )
         equiv_pattern_reprs.append(new_graph_str)
     else:
-        _seen_patterns[pattern_repr].append(gm.graph if gm else None)
+        seen_patterns[pattern_repr].append(gm.graph if gm else None)
 
 
 def register_replacement(
@@ -1430,7 +1421,14 @@ def register_replacement(
             pattern = search_fn_pattern
             gm = None
 
-        check_and_add_duplicate_pattern(pattern, gm)
+        for pattern_matcher_pass in (
+            pass_dicts if isinstance(pass_dicts, Sequence) else [pass_dicts]
+        ):
+            if isinstance(pattern_matcher_pass, PatternMatcherPass):
+                check_and_add_duplicate_pattern(
+                    pattern, gm, pattern_matcher_pass.seen_patterns
+                )
+
         pattern = ReplacementPatternEntry(
             pattern=pattern,
             extra_check=check_fn,
@@ -1446,7 +1444,7 @@ _serialized_patterns: Set[str] = set()
 def _serialize_pattern(
     unique_name: str,
     search_fn: SearchFn,
-    example_inputs: Iterable[Any],
+    example_inputs: Sequence[Any],
     trace_fn: TraceFn,
     scalar_workaround: Union[Dict[str, Union[float, int]], None],
 ) -> PatternExpr:
@@ -1531,6 +1529,8 @@ _known_precompiled_patterns: List[
     ]
 ] = []
 
+_gen_register_seen_patterns: Set[str] = set()
+
 
 def gen_register_replacement(
     unique_name: str,
@@ -1571,8 +1571,12 @@ def gen_register_replacement(
             # Since this is just an optimization we can clear it out.
             arg.constant = None
 
-    if PatternPrettyPrinter.run(pat) in _seen_patterns and skip_duplicates:
+    pat_pp = PatternPrettyPrinter.run(pat)
+    if pat_pp in _gen_register_seen_patterns and skip_duplicates:
         return
+
+    _gen_register_seen_patterns.add(pat_pp)
+
     _known_precompiled_patterns.append(
         (search_fn, example_inputs, trace_fn, scalar_workaround, pat)
     )
@@ -1764,10 +1768,20 @@ class PatternMatcherPass:
         ] = defaultdict(list)
         self.pass_name = pass_name
 
+        # For a particular generated pattern repr, store all the equivalent
+        # patterns and the gm that used to generate them. Because we ignore certain patterns
+        # in searching, but not in matching, use the graph to distinguish if two equivalent
+        # searches are actually different.
+        # Element are first inserted as graphs and lazily converted to their str reprs when
+        # there is a duplicate. If the graph is not present we will error on duplicate
+        self.seen_patterns: Dict[
+            str, List[Union[torch.fx.Graph, str, None]]
+        ] = defaultdict(list)
+
     def __getitem__(self, item: Tuple[str, torch.fx.node.Target]) -> List[PatternEntry]:
         return self.patterns[item]
 
-    def apply(self, gm: torch.fx.GraphModule) -> int:
+    def apply(self, gm: Union[torch.fx.GraphModule, torch.fx.Graph]) -> int:
         if not self.patterns:
             return 0
         if isinstance(gm, torch.fx.GraphModule):
@@ -1795,9 +1809,8 @@ class PatternMatcherPass:
         if has_call_module:
             nodes.append(graph.find_nodes(op="call_module", sort=False))
         pass_name = self.pass_name if self.pass_name is not None else "pattern_matcher"
-        with GraphTransformObserver(
-            gm, pass_name, trace_config.log_url_for_graph_xform
-        ):
+        assert isinstance(gm, torch.fx.GraphModule)
+        with GraphTransformObserver(gm, pass_name):
             for node in sorted(itertools.chain.from_iterable(nodes), reverse=True):
                 target = extract_target(node)
                 if node.op == "call_module":
