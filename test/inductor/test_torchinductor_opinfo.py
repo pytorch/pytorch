@@ -349,6 +349,8 @@ inductor_expected_failures_single_sample["xpu"] = {
     # a deconvolution forward propagation primitive
     "nn.functional.conv_transpose2d": {f32, f64},
     "nn.functional.conv_transpose3d": {f32, f64},
+    # frexp not supported on XPU now
+    "frexp": {f16, f32, f64},
     # not implemented for 'Half'
     "sort": {b8},
     "argsort": {b8},
