@@ -151,6 +151,11 @@ def _load_model(x: GPTModelConfig, device="cuda", precision=torch.bfloat16):
         model = x.module.from_name(x.name)
     model = model.to(dtype=precision)
 
+    if x.mode == "autoquant":
+        model.eval()
+        model = torchao.autoquant(torch.compile(model, mode="max-autotune"))
+        return model
+
     if x.mode == "int8":
         print("Using int8 weight-only quantization!")
         model = x.quantizer(model).convert_for_runtime()
@@ -363,6 +368,106 @@ def run_mixtral_8x7b_int8(device: str = "cuda"):
         MixtralMoE,
         "int8",
         MixtralMoEWeightOnlyInt8QuantHandler,
+        175,
+        1130,
+        133,
+    )
+    token_per_sec, memory_bandwidth, compilation_time = run_experiment(
+        model, device=device
+    )
+    return [
+        Experiment(
+            model.name,
+            "token_per_sec",
+            model.token_per_sec,
+            f"{token_per_sec:.02f}",
+            model.mode,
+            device,
+            get_arch_name(),
+            True,
+        ),
+        Experiment(
+            model.name,
+            "memory_bandwidth(GB/s)",
+            model.memory_bandwidth,
+            f"{memory_bandwidth:.02f}",
+            model.mode,
+            device,
+            get_arch_name(),
+            True,
+        ),
+        Experiment(
+            model.name,
+            "compilation_time(s)",
+            model.compilation_time,
+            f"{compilation_time:.02f}",
+            model.mode,
+            device,
+            get_arch_name(),
+            True,
+        ),
+    ]
+
+
+# token_per_sec and memory_bandwidth target numbers are for A100-40GB, which are different from the typical A100-80GB.
+def run_llama2_7b_autoquant(device: str = "cuda"):
+    from benchmark import Experiment
+
+    model = GPTModelConfig(
+        "Llama-2-7b-chat-hf",
+        LLaMA,
+        "autoquant",
+        None,
+        144,
+        957,
+        136,
+    )
+    token_per_sec, memory_bandwidth, compilation_time = run_experiment(
+        model, device=device
+    )
+    return [
+        Experiment(
+            model.name,
+            "token_per_sec",
+            model.token_per_sec,
+            f"{token_per_sec:.02f}",
+            model.mode,
+            device,
+            get_arch_name(),
+            True,
+        ),
+        Experiment(
+            model.name,
+            "memory_bandwidth(GB/s)",
+            model.memory_bandwidth,
+            f"{memory_bandwidth:.02f}",
+            model.mode,
+            device,
+            get_arch_name(),
+            True,
+        ),
+        Experiment(
+            model.name,
+            "compilation_time(s)",
+            model.compilation_time,
+            f"{compilation_time:.02f}",
+            model.mode,
+            device,
+            get_arch_name(),
+            True,
+        ),
+    ]
+
+
+# token_per_sec and memory_bandwidth target numbers are for A100-40GB, which are different from the typical A100-80GB.
+def run_mixtral_8x7b_int8(device: str = "cuda"):
+    from benchmark import Experiment
+
+    # We reduced the original number of layers from 32 to 16 to adapt CI memory limitation.
+    model = GPTModelConfig(
+        "Mixtral-8x7B-v0.1",
+        MixtralMoE,
+        "autoquant",
         175,
         1130,
         133,

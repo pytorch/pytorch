@@ -611,6 +611,7 @@ test_single_dynamo_benchmark() {
 }
 
 test_inductor_micro_benchmark() {
+  install_torchao
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   if [[ "${TEST_CONFIG}" == *cpu* ]]; then
     test_inductor_set_cpu_affinity
