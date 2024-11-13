@@ -406,9 +406,15 @@ def _single_tensor_adam(
             param = torch.view_as_real(param)
 
         device = param.device
-        dtype = param.dtype
 
         if beta1_dict is not None:
+            dtype = beta1.dtype  # type: ignore[union-attr]
+
+            if (
+                param.dtype == torch.float64
+            ):  # Only upcast if float64 to workaround https://github.com/pytorch/pytorch/issues/140601
+                dtype = torch.float64
+
             key = (device, dtype)
             if key not in beta1_dict:
                 beta1_dict[key] = beta1.to(device=device, dtype=dtype, non_blocking=True)  # type: ignore[union-attr]
