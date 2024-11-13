@@ -3,7 +3,6 @@
 #include <ATen/ATen.h>
 #include <c10/util/Exception.h>
 #include <c10/util/accumulate.h>
-#include <c10/util/env.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/distributed/c10d/Types.hpp>
 
@@ -93,7 +92,7 @@ inline std::vector<std::string> split(
 inline std::string getCvarString(
     const std::vector<std::string>& env,
     const char* def) {
-  std::string ret(def);
+  const char* ret = def;
 
   if (env.empty()) {
     TORCH_CHECK(false, "No environment variables passed");
@@ -104,14 +103,14 @@ inline std::string getCvarString(
    * versions of a variable get higher priority than the latter
    * versions of the same variable */
   for (ssize_t i = static_cast<ssize_t>(env.size()) - 1; i >= 0; i--) {
-    auto val = c10::utils::get_env(env[i].c_str());
-    if (!val) {
+    const char* val = std::getenv(env[i].c_str());
+    if (val == nullptr) {
       continue;
     } else if (i) {
       WARN_ENV_VAR_ONCE(env[i], env[0]);
     }
 
-    ret = val.value();
+    ret = val;
   }
 
   return ret;
@@ -158,14 +157,15 @@ inline bool getCvarBool(const std::vector<std::string>& env, bool def) {
    * versions of a variable get higher priority than the latter
    * versions of the same variable */
   for (ssize_t i = static_cast<ssize_t>(env.size()) - 1; i >= 0; i--) {
-    auto val = c10::utils::get_env(env[i].c_str());
-    if (!val.has_value()) {
+    char* val_ = std::getenv(env[i].c_str());
+    if (val_ == nullptr) {
       continue;
     } else if (i) {
       WARN_ENV_VAR_ONCE(env[i], env[0]);
     }
 
-    for (auto& x : val.value()) {
+    std::string val = std::string(val_);
+    for (auto& x : val) {
       // NOLINTNEXTLINE(*-narrowing-conversions)
       x = std::tolower(x);
     }
