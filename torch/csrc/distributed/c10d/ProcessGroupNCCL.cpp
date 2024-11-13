@@ -1,6 +1,5 @@
 #ifdef USE_C10D_NCCL
 
-#include <dlfcn.h>
 #include <exception>
 #include <map>
 #include <mutex>
@@ -370,74 +369,9 @@ static std::
   }
   return ncclDumpMap;
 #else
-  /*
-  The following code is designed to work with NCCL versions above 2.23.4, which
-  support the profiler plugin.
-  For information on the NCCL profiler plugin, please refer to
-  https://github.com/NVIDIA/nccl/tree/v2.23.4-1/ext-profiler/example.
-  The plugin is a shared library (.so file) that is loaded by NCCL and PyTorch.
-  Users must define the dump function in the plugin, which should dump the
-  internal buffers of the profiler plugin.
-
-  env variables:
-  1. TORCH_NCCL_ENABLE_PROFILER_PLUGIN is a boolean flag to enable the plugin.
-  2. NCCL_PROFILER_PLUGIN is the path to the plugin.
-  3. NCCL_PROFILER_PLUGIN_FUN is the name of the dump function in the plugin.
-
-  Hint:
-  1. The function name would be mangled in C++. Use readelf -s -W <plugin>.so to
-  find the mangled name.
-  */
-  std::unordered_map<std::string, std::unordered_map<std::string, std::string>>
-      ncclDumpMap;
-
-  const bool isProfilerPluginEnabled =
-      getCvarBool({"TORCH_NCCL_ENABLE_PROFILER_PLUGIN"}, false);
-  if (!isProfilerPluginEnabled) {
-    return ncclDumpMap;
-  }
-
-  const std::string profilerPluginPath = getCvarString(
-      {"NCCL_PROFILER_PLUGIN"},
-      "/packages/training_platform/libnccl_profiler_plugin.so");
-  LOG(INFO) << "NCCL_PROFILER_PLUGIN: " << profilerPluginPath;
-  if (profilerPluginPath.empty()) {
-    return ncclDumpMap;
-  }
-
-  void* handle = dlopen(profilerPluginPath.c_str(), RTLD_LAZY | RTLD_LOCAL);
-  if (handle == nullptr) {
-    LOG(WARNING) << "Failed to open handle to process: ";
-    LOG(WARNING) << "dlopen failed:" << dlerror();
-    return ncclDumpMap;
-  }
-
-  const std::string profilerPluginFun = getCvarString(
-      {"NCCL_PROFILER_PLUGIN_FUN"}, "_Z22ncclProfilerPluginDumpB5cxx11v");
-  if (profilerPluginFun.empty()) {
-    LOG(WARNING) << "NCCL_PROFILER_PLUGIN_FUN is empty";
-    return ncclDumpMap;
-  }
-  std::
-      unordered_map<std::string, std::unordered_map<std::string, std::string>> (
-          *dumpFn)() =
-          (std::unordered_map<
-              std::string,
-              std::unordered_map<std::string, std::string>>(*)())
-              dlsym(handle, profilerPluginFun.c_str());
-  if (dumpFn == nullptr) {
-    LOG(WARNING) << "Failed to find " << profilerPluginFun;
-    return ncclDumpMap;
-  }
-
-  try {
-    // nonblocking call
-    ncclDumpMap = (*dumpFn)();
-  } catch (const std::exception& e) {
-    LOG(WARNING) << "Failed to call " << profilerPluginFun << ": " << e.what();
-  }
-
-  return ncclDumpMap;
+  return std::unordered_map<
+      std::string,
+      std::unordered_map<std::string, std::string>>();
 #endif
 }
 

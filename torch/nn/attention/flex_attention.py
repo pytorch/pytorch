@@ -1026,8 +1026,9 @@ def _apply_kernel_options(
 ):
     kernel_options = {} if kernel_options is None else dict(kernel_options)
 
-    kernel_options.setdefault("ROWS_GUARANTEED_SAFE", False)
     kernel_options.setdefault("PRESCALE_QK", False)
+    kernel_options.setdefault("ROWS_GUARANTEED_SAFE", False)
+    kernel_options.setdefault("BLOCKS_ARE_CONTIGUOUS", False)
 
     # If foward kernel needs to return logsumexp is decided by this rule internally.
     assert "OUTPUT_LOGSUMEXP" not in kernel_options
@@ -1242,6 +1243,7 @@ def flex_attention(
         for x in [query, key, value]:
             torch._dynamo.mark_static(x, -3)
             torch._dynamo.mark_static(x, -1)
+
         out, lse = flex_attention_hop(
             query, key, value, score_mod, block_mask.as_tuple(), scale, kernel_options  # type: ignore[union-attr]
         )
