@@ -76,6 +76,7 @@ from torch._subclasses.meta_utils import is_sparse_compressed
 from torch._utils_internal import (
     log_chromium_event_internal,
     log_compilation_event,
+    record_chromium_event_internal,
     signpost_event,
 )
 from torch.fx._utils import _format_graph_code, lazy_format_graph_code
@@ -1175,6 +1176,7 @@ class ChromiumEventLogger:
             suppress_context=False,
             expect_trace_id=False,  # Not every chromium event will have a trace_id
         )
+        record_chromium_event_internal(event)
         return event
 
     def log_instant_event(
