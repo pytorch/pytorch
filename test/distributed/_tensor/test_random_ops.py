@@ -11,7 +11,11 @@ from torch.distributed._tensor._utils import compute_local_shape_and_global_offs
 from torch.distributed._tensor.api import distribute_tensor
 from torch.distributed._tensor.placement_types import Replicate, Shard
 from torch.distributed.distributed_c10d import broadcast_object_list
-from torch.distributed.tensor._random import is_rng_supported_mesh, manual_seed
+from torch.distributed.tensor._random import (
+    is_rng_supported_mesh,
+    manual_seed,
+    use_dtensor_random_ops,
+)
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -91,6 +95,42 @@ class DistTensorRandomOpTest(DTensorTestBase):
             torch.empty([self.world_size], device="cuda"), device_mesh, [Shard(0)]
         )
         self.assertEqual(seed_from_rank_0, random._rng_tracker.get_seed("parallel-rng"))
+
+    @with_comms
+    @skip_unless_torch_gpu
+    def test_use_dtensor_random_ops(self):
+        # test 0: when RNG tracker is not initialized
+        self.assertTrue(torch.distributed.tensor._random._enable_dtensor_rng)
+        use_dtensor_random_ops(False)
+        self.assertTrue(not torch.distributed.tensor._random._enable_dtensor_rng)
+        self.assertTrue(torch.distributed.tensor._random._rng_tracker is None)
+
+        device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        # test 1: not use DTensor RNG
+        torch.manual_seed(0)
+        manual_seed(0, device_mesh)
+        self.assertTrue(torch.distributed.tensor._random._rng_tracker is not None)
+        rng_tracker = torch.distributed.tensor._random._rng_tracker
+        self.assertTrue(not rng_tracker.distribute_region_enabled)
+        local_tensor = torch.rand(4, 4, device=self.device_type)
+        dtensor = torch.distributed.tensor.rand(
+            4, 4, device_mesh=device_mesh, placements=[Replicate()]
+        )
+        self.assertNotEqual(local_tensor, dtensor.to_local())
+
+        # test 2: use DTensor RNG
+        torch.manual_seed(0)
+        manual_seed(0, device_mesh)
+        self.assertTrue(torch.distributed.tensor._random._rng_tracker is not None)
+        rng_tracker = torch.distributed.tensor._random._rng_tracker
+        # enable DTensor RNG
+        use_dtensor_random_ops(True)
+        self.assertTrue(rng_tracker.distribute_region_enabled)
+        local_tensor = torch.rand(4, 4, device=self.device_type)
+        dtensor = torch.distributed.tensor.rand(
+            4, 4, device_mesh=device_mesh, placements=[Replicate()]
+        )
+        self.assertEqual(local_tensor, dtensor.to_local())
 
     @with_comms
     @skip_unless_torch_gpu

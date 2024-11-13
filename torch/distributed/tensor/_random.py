@@ -17,9 +17,30 @@ __all__ = [
     "manual_seed",
     "OffsetBasedRNGTracker",
     "TensorParallelRNGTracker",
+    "use_dtensor_random_ops",
 ]
 
 _rng_tracker: Optional["_RNGStateTracker"] = None
+_enable_dtensor_rng: bool = True
+
+
+def use_dtensor_random_ops(enable_dtensor_rng: bool) -> None:
+    """Switches ON/OFF DTensor RNG state tracker for DTensor random operators.
+    DTensor RNG state tracker offers an isolated RNG space from the generators
+    used for torch.Tensor random ops.
+
+    Args:
+        enable_dtensor_rng (bool): If ``enable_dtensor_rng`` is True, use
+        the DTensor RNG state tracker to maintain an isolated RNG state solely
+        for random ops on DTensor (i.e. calling random ops on torch.Tensor
+        won't change the next DTensor random ops result). If ``enable_dtensor_rng``
+        is False, random ops on DTensor uses the default ``torch.Generator``.
+    """
+    if not _rng_tracker:
+        global _enable_dtensor_rng
+        _enable_dtensor_rng = enable_dtensor_rng
+    else:
+        _rng_tracker.distribute_region_enabled = enable_dtensor_rng
 
 
 def is_rng_supported_mesh(device_mesh: DeviceMesh) -> bool:
@@ -118,7 +139,7 @@ class _RNGStateTracker:
 
         self._states: Dict[str, Tensor] = {}
         self._devices = [self._device_handle.current_device()]
-        self._use_distribute_region = True
+        self._use_distribute_region = _enable_dtensor_rng
 
     @property
     def rng_states(self) -> Dict[str, Tensor]:
