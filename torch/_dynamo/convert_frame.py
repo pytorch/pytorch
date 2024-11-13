@@ -30,6 +30,7 @@ import torch
 import torch._logging
 from torch._C._dynamo.guards import GlobalStateGuard
 from torch._dynamo.distributed import get_compile_pg
+from torch._dynamo.symbolic_convert import TensorifyState
 from torch._dynamo.utils import CompileTimeInstructionCounter
 from torch._guards import compile_context, CompileContext, CompileId, tracing
 from torch._logging import structured
@@ -748,6 +749,8 @@ def _compile(
                 out_code = transform_code_object(code, transform)
                 break
             except exc.RestartAnalysis as e:
+                if not isinstance(e, exc.TensorifyScalarRestartAnalysis):
+                    TensorifyState.clear()
                 log.info(
                     "Restarting analysis due to %s",
                     LazyString(format_traceback_short, e.__traceback__),

@@ -457,7 +457,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         tx: "InstructionTranslatorBase",
         value: Any,
         source: Optional[Source] = None,
-        force_specialize: bool = False,
     ) -> Any:
         """Create a new VariableTracker from a value and optional Source"""
         from . import builder
@@ -465,7 +464,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         if source is None:
             return builder.SourcelessBuilder.create(tx, value)
         else:
-            return builder.VariableBuilder(tx, source, force_specialize)(value)
+            return builder.VariableBuilder(tx, source)(value)
 
     def __init__(
         self,

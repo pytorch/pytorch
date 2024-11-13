@@ -32,7 +32,12 @@ from torch._guards import (
 from torch._utils_internal import signpost_event
 from torch.fx._lazy_graph_module import _make_graph_module  # type: ignore[attr-defined]
 from torch.fx.experimental._backward_state import BackwardState
-from torch.fx.experimental.symbolic_shapes import free_symbols, is_symbolic, ShapeEnv
+from torch.fx.experimental.symbolic_shapes import (
+    free_symbols,
+    guard_scalar,
+    is_symbolic,
+    ShapeEnv,
+)
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
@@ -1302,6 +1307,8 @@ class OutputGraph:
             ncalls = count_calls(self.graph)
             counters["stats"]["calls_captured"] += ncalls
 
+            self.remove_specialized_graphargs()
+
             # free a bit of memory
             self.real_value_cache.clear()
 
@@ -1616,6 +1623,19 @@ class OutputGraph:
                 else:
                     # Make sure we delete later occurrences of the same symbol
                     used_symbols.remove(symbol)
+
+    def remove_specialized_graphargs(self) -> None:
+        # Import here to prevent circular import
+        from torch._dynamo.symbolic_convert import TensorifyState
+
+        for i, node in enumerate(self.graph.nodes):
+            if TensorifyState.should_specialize(i):
+                for u in list(node.users):
+                    u.replace_all_uses_with(
+                        guard_scalar(node.meta["example_value"].item_memo)
+                    )
+                    self.remove_node(u)
+                self.remove_node(node)
 
     def add_output_instructions(self, prefix: List[Instruction]) -> None:
         """
