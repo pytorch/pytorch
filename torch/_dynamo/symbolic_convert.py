@@ -246,14 +246,14 @@ class DistributedState:
 
 
 class TensorifyState:
-    force_specializations: Set[int] = set()
+    force_specializations: Set[str] = set()
 
     @classmethod
-    def specialize(cls, index: int) -> None:
+    def specialize(cls, index: str) -> None:
         cls.force_specializations.add(index)
 
     @classmethod
-    def should_specialize(cls, index: int) -> bool:
+    def should_specialize(cls, index: str) -> bool:
         return index in cls.force_specializations
 
     @classmethod

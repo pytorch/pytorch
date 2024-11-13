@@ -111,6 +111,7 @@ def tensorify_python_scalars(
     tracer = fx.proxy.GraphAppendingTracer(graph)
     expr_to_sym_proxy: dict[sympy.Expr, MetaProxy] = {}
     expr_to_tensor_proxy: dict[sympy.Expr, MetaProxy] = {}
+    placeholder_to_symfloat_name: dict[fx.Node, str] = {}
 
     first_non_placeholder = None
     placeholders = set()
@@ -200,6 +201,10 @@ def tensorify_python_scalars(
                 expr_to_sym_proxy[s] = MetaProxy(
                     node, tracer=tracer, fake_mode=fake_mode
                 )
+                # We use _expr instead of expr b/c we want the symbol not the replacement
+                placeholder_to_symfloat_name[node.args[0]] = node.meta[
+                    "val"
+                ].node._expr.name
 
             elif (sym_expr := _get_sym_val(node)) is not None:
                 if sym_expr not in expr_to_sym_proxy and not isinstance(
@@ -285,12 +290,16 @@ def tensorify_python_scalars(
 
     should_restart = False
     for i, node in enumerate(graph.nodes):
-        if node.op == "placeholder" and len(node.users) == 0:
+        if (
+            node.op == "placeholder"
+            and len(node.users) == 0
+            and (name := placeholder_to_symfloat_name.get(node))
+        ):
             # At this point we've lost the back pointer to
             # what f_local this placeholder points to. Instead,
             # we will rely on the index to specialize when we
             # restart analysis.
-            TensorifyState.specialize(i)
+            TensorifyState.specialize(name)
             should_restart = True
 
     if should_restart:

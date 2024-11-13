@@ -762,6 +762,8 @@ def _compile(
                 if attempt > 100:
                     unimplemented("100+ RestartAnalysis() calls")
             except exc.SkipFrame as e:
+                if not isinstance(e, exc.TensorifyScalarRestartAnalysis):
+                    TensorifyState.clear()
                 log.debug(
                     "Skipping frame %s %s \
                     %s %s",
