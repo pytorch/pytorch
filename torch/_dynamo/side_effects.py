@@ -383,7 +383,15 @@ class SideEffects:
         # The only live side effects come from returns (tx.stack), any intermediates
         # during a graph break (tx.symbolic_locals), and mutation on pre-existing variables.
         # Recursively visit Variables and see if any of them have been mutated.
-        VariableTracker.visit(visit, (tx.stack, tx.symbolic_locals, pre_existing_vars))
+        VariableTracker.visit(
+            visit,
+            (
+                tx.stack,
+                tx.symbolic_locals,
+                pre_existing_vars,
+                tx.output.backward_state,
+            ),
+        )
         # Manually release the self-referential function, which indirectly
         # captures certain `VariableTracker` and affects parts of PT test/logic
         # that are sensitive to when certain objects get released.
