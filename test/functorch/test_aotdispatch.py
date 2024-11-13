@@ -6288,6 +6288,41 @@ metadata incorrectly.
         torch.compile(fn, backend="inductor", fullgraph=True)(x)
         torch.compile(fn_, backend="inductor", fullgraph=True)(x)
 
+    def test_subclass_parameters(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.p1 = torch.nn.Parameter(WrapperSubclass(torch.ones(3, 4)))
+                self.p2 = torch.nn.Parameter(
+                    TwoTensor(torch.zeros(3, 4), torch.zeros(3, 4))
+                )
+
+            def forward(self, x):
+                return x + 2 * self.p1 + self.p2
+
+        m = M()
+        ref_x = torch.randn(3, 4)
+        ref_out = m(ref_x)
+        ref_out.sum().backward()
+
+        from torch._functorch._aot_autograd.subclass_parametrization import (
+            unwrap_tensor_subclass_parameters,
+        )
+
+        unwrap_tensor_subclass_parameters(m)
+        ref_x2 = ref_x.detach().clone()
+        ref_out2 = m(ref_x2)
+        self.assertEqual(ref_out2, ref_out)
+        ref_out2.sum().backward()
+        self.assertEqual(ref_x2.grad, ref_x.grad)
+
+        x = ref_x.detach().clone()
+        comp_fn = torch.compile(m, backend="aot_eager", fullgraph=True)
+        out = comp_fn(x)
+        self.assertEqual(ref_out, out)
+        out.sum().backward()
+        self.assertEqual(ref_x.grad, x.grad)
+
 
 # entries in here don't work and need to be fixed.
 # Each one of these is a bug (or needs to be investigated)

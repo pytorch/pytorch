@@ -3,7 +3,6 @@ from typing import Any, Optional, Type
 
 import torch
 import torch.utils._pytree as pytree
-from torch._subclasses.fake_tensor import is_fake
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils._python_dispatch import return_and_correct_aliasing
 
@@ -40,9 +39,6 @@ class WrapperSubclass(torch.Tensor):
     def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
         assert meta is None
         a = inner_tensors["a"]
-        if is_fake(a):
-            assert outer_size is not None
-            assert outer_stride is not None
         return WrapperSubclass(a, outer_size, outer_stride)
 
     @classmethod

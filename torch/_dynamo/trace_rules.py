@@ -3275,6 +3275,7 @@ MOD_INLINELIST = [
     "torch._dynamo._trace_wrapped_higher_order_op",
     "torch._dynamo.comptime",
     "torch._dynamo.polyfills",
+    "torch._functorch._aot_autograd.subclass_parametrization",
     "torch._functorch.autograd_function",
     "torch._functorch.eager_transforms",
     "torch._functorch.functional_call",
