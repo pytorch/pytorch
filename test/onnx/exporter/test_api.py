@@ -33,6 +33,16 @@ class SampleModelForDynamicShapes(torch.nn.Module):
         return x.relu(), b.sigmoid()
 
 
+class NestedModelForDynamicShapes(torch.nn.Module):
+    def forward(self, x, ys, zs, c):
+        y = ys[0] + ys[1] + zs["a"] + zs["b"]
+        w = 5
+        if x.shape[0] < 3 and c.shape[0] != 4:
+            return x + w, x + y
+        else:
+            return x - w, x - y
+
+
 class TestExportAPIDynamo(common_utils.TestCase):
     """Tests for the ONNX exporter API when dynamo=True."""
 
@@ -182,6 +192,47 @@ class TestExportAPIDynamo(common_utils.TestCase):
         )
         assert onnx_program is not None
         onnx_testing.assert_onnx_program(onnx_program)
+
+    def test_dynamic_shapes_supports_nested_input_model_with_input_names_assigned(self):
+        # kwargs can still be renamed as long as it's in order
+        input_names = ["input_x", "input_y", "input_z", "d", "e", "f"]
+
+        dynamic_axes = {
+            "input_x": {0: "dim"},
+            "input_y": {0: "dim"},
+            "input_z": {0: "dim"},
+            "d": {0: "dim"},
+            "e": {0: "dim"},
+        }
+
+        model = NestedModelForDynamicShapes()
+        input = (
+            torch.ones(5),
+            [torch.zeros(5), torch.ones(5)],
+            {"a": torch.zeros(5), "b": torch.ones(5)},
+            torch.ones(4),
+        )
+
+        self.assert_export(
+            model, input, dynamic_axes=dynamic_axes, input_names=input_names
+        )
+
+        # Check whether inputs are dynamically shaped
+        onnx_program = torch.onnx.export(
+            model,
+            input,
+            dynamic_axes=dynamic_axes,
+            input_names=input_names,
+            dynamo=True,
+        )
+        self.assertTrue(
+            all(
+                [
+                    input.type.tensor_type.shape.dim[0].dim_param
+                    for input in onnx_program.model_proto.graph.input
+                ][:-1]
+            )
+        )
 
     def test_refine_dynamic_shapes_with_onnx_export(self):
         # NOTE: From test/export/test_export.py

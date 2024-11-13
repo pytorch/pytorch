@@ -62,18 +62,22 @@ def _from_dynamic_axes_to_dynamic_shapes(
 
     dynamic_shapes: dict[str, Any | None] = {}
     for input_name, axes in dynamic_axes.items():
+        # NOTE: torch.export.Dim requires strict min and max constraints, and it
+        # dpends on the traced model to provide the correct min and max values.
+        # We set max to 99999 to avoid the constraints violation error with the default int64 max.
+        # https://github.com/pytorch/pytorch/blob/32f585d9346e316e554c8d9bf7548af9f62141fc/test/export/test_export.py#L687
         if input_name in output_names:
             # User specified an output name as a dynamic axis, so we skip it
             continue
         if isinstance(axes, dict):
             # Dim needs to pass str.isidentifier()
             dynamic_shapes[input_name] = {
-                k: torch.export.Dim(re.sub(r"[^A-Za-z_]", "", v))
+                k: torch.export.Dim(re.sub(r"[^A-Za-z_]", "", v), max=99999)
                 for k, v in axes.items()
             }
         elif isinstance(axes, list):
             dynamic_shapes[input_name] = {
-                k: torch.export.Dim(f"{input_name}_dim_{k}") for k in axes
+                k: torch.export.Dim(f"{input_name}_dim_{k}", max=99999) for k in axes
             }
         else:
             raise ValueError(
