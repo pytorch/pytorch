@@ -618,6 +618,14 @@ test_inductor_micro_benchmark() {
   python benchmarks/gpt_fast/benchmark.py --output "${TEST_REPORTS_DIR}/gpt_fast_benchmark.csv"
 }
 
+test_torchao_benchmark() {
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
+  if [[ "${TEST_CONFIG}" == *cpu* ]]; then
+    test_inductor_set_cpu_affinity
+  fi
+  python benchmarks/torchao/benchmark.py --output "${TEST_REPORTS_DIR}/torchao_benchmark.csv"
+}
+
 test_inductor_halide() {
   python test/run_test.py --include inductor/test_halide.py --verbose
   assert_git_not_dirty
@@ -1435,6 +1443,8 @@ elif [[ "${TEST_CONFIG}" == *inductor-triton-cpu* ]]; then
   test_inductor_triton_cpu
 elif [[ "${TEST_CONFIG}" == *inductor-micro-benchmark* ]]; then
   test_inductor_micro_benchmark
+elif [[ "${TEST_CONFIG}" == *torchao-benchmark* ]]; then
+  test_torchao_benchmark
 elif [[ "${TEST_CONFIG}" == *huggingface* ]]; then
   install_torchvision
   id=$((SHARD_NUMBER-1))
