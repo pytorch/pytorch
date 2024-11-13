@@ -1400,10 +1400,10 @@ def is_namedtuple_cls(cls):
     """Test if an object is a namedtuple or a (torch.return_types|torch.autograd.forward_ad).* quasi-namedtuple"""
     try:
         if issubclass(cls, tuple):
-            bases = getattr(cls, "__bases__", []) or [None]
             module = getattr(cls, "__module__", None)
             return module in ("torch.return_types", "torch.autograd.forward_ad") or (
-                bases[0] is tuple and hasattr(cls, "_make") and hasattr(cls, "_fields")
+                isinstance(getattr(cls, "_fields", None), tuple)
+                and callable(getattr(cls, "_make", None))
             )
     except TypeError:
         pass
@@ -1411,10 +1411,10 @@ def is_namedtuple_cls(cls):
 
 
 @functools.lru_cache(1)
-def namedtuple_fields(cls):
+def namedtuple_fields(cls) -> Tuple[str, ...]:
     """Get the fields of a namedtuple or a torch.return_types.* quasi-namedtuple"""
     if cls is slice:
-        return ["start", "stop", "step"]
+        return ("start", "stop", "step")
 
     assert issubclass(cls, tuple)
     if hasattr(cls, "_fields"):
@@ -1428,11 +1428,12 @@ def namedtuple_fields(cls):
     # frustrating ones e.g. torch.return_types.max
     assert cls.__module__ == "torch.return_types"
     obj = cls(map(Marker, range(cls.n_fields)))
-    fields: List[Optional[str]] = [None] * cls.n_fields
+    fields: Dict[str, int] = {}
     for name in dir(obj):
         if name[0] != "_" and isinstance(getattr(obj, name), Marker):
-            fields[getattr(obj, name).index] = name
-    return fields
+            fields[name] = getattr(obj, name).index
+    assert len(fields) == cls.n_fields
+    return tuple(sorted(fields, key=fields.get))  # type: ignore[arg-type]
 
 
 def checkpoint_params(gm):
