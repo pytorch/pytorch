@@ -833,6 +833,12 @@ def _compile(
         if output.export and output.is_empty_graph():
             return None
 
+        nonlocal cache_entry
+        old_cache_entry = cache_entry
+        while cache_entry:
+            cache_entry = cache_entry.next
+        cache_entry = old_cache_entry
+
         assert output.guards is not None
         CleanupManager.instance[out_code] = output.cleanups
         check_fn = CheckFunctionManager(
