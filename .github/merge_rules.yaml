@@ -329,6 +329,7 @@
 
 - name: DCP
   patterns:
+  - docs/source/distributed.checkpoint.rst
   - torch/distributed/checkpoint/**
   approved_by:
   - LucasLLC
@@ -544,6 +545,7 @@
   - anijain2305
   - bdhirsh
   - zou3519
+  - isuruf
   mandatory_checks_name:
   - EasyCLA
   - Lint

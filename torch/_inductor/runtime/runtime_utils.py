@@ -3,13 +3,14 @@ from __future__ import annotations
 
 import contextlib
 import functools
-import getpass
 import operator
-import os
-import re
-import tempfile
 
 import torch
+from torch._inductor.runtime.cache_dir_utils import (  # noqa: F401
+    cache_dir,
+    default_cache_dir,
+    triton_cache_dir,
+)
 
 
 def conditional_product(*args):
@@ -86,22 +87,6 @@ def get_max_y_grid():
     return 65535
 
 
-def cache_dir() -> str:
-    cache_dir = os.environ.get("TORCHINDUCTOR_CACHE_DIR")
-    if cache_dir is None:
-        os.environ["TORCHINDUCTOR_CACHE_DIR"] = cache_dir = default_cache_dir()
-    os.makedirs(cache_dir, exist_ok=True)
-    return cache_dir
-
-
-def default_cache_dir():
-    sanitized_username = re.sub(r'[\\/:*?"<>|]', "_", getpass.getuser())
-    return os.path.join(
-        tempfile.gettempdir(),
-        "torchinductor_" + sanitized_username,
-    )
-
-
 try:
     import colorama
 
@@ -150,5 +135,33 @@ try:
 except AttributeError:  # Compile workers only have a mock version of torch
 
     @contextlib.contextmanager
-    def dynamo_timed(key, phase_name=None, fwd_only=True):
+    def dynamo_timed(
+        key,
+        phase_name=None,
+        fwd_only=True,
+        metadata=None,
+        dynamo_compile_column_us=None,
+    ):
         yield
+
+
+def triton_hash_to_path_key(key):
+    # In early versions of Triton, the hash is directly used in the path name.
+    # Later, the hash is converted to base64 before being used in the path name.
+    # Later, the base64 convertion was replaced to the base32
+    #
+    # This code tries to import _base64 and falls back to _base32 if _base64 is unavailable.
+    #
+    # To handle this, try to import the to-base64-conversion function.
+    # If it exists, use it; otherwise, try using _base32; if both are unavailable, use the hash directly.
+    try:
+        from triton.runtime.cache import _base64
+
+        return _base64(key)
+    except Exception as e:
+        try:
+            from triton.runtime.cache import _base32
+
+            return _base32(key)
+        except Exception as e:
+            return key

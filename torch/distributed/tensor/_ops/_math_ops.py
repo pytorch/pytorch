@@ -431,6 +431,12 @@ def foreach_norm_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> TupleStrateg
         aten.tril.default,
         aten.triu.default,
         aten._linalg_eigh.default,
+        aten.upsample_bicubic2d.default,
+        aten.upsample_bilinear2d.default,
+        aten.upsample_linear1d.default,
+        aten.upsample_nearest2d.default,
+        aten.upsample_trilinear3d.default,
+        # TODO: support the full F.interpolate set of options.
     ],
     schema_info=RuntimeSchemaInfo(1),
 )
@@ -473,7 +479,7 @@ def softmax_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
     softmax_dim = normalize_dim(softmax_dim, input_strategy.ndim)
 
     output_strategy = OpStrategy([])
-    for idx, input_placement_strategy in enumerate(input_strategy.strategies):
+    for input_placement_strategy in input_strategy.strategies:
         redistribute_costs = []
         input_src_spec = input_placement_strategy.output_spec
 
@@ -1032,8 +1038,6 @@ def layer_norm_bwd_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy
 )
 def topk_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
     input_strategy = cast(OpStrategy, op_schema.args_schema[0])
-    k = cast(int, op_schema.args_schema[1])
-    input_shape = input_strategy.shape
     topk_dim = (
         cast(int, op_schema.args_schema[2]) if len(op_schema.args_schema) > 2 else -1
     )

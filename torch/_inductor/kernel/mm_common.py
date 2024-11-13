@@ -11,8 +11,10 @@ from torch._inductor.select_algorithm import realize_inputs
 from torch._inductor.virtualized import V
 
 from .. import config as inductor_config
+from ..codegen.wrapper import PythonWrapperCodegen
+from ..ir import Layout
 from ..runtime.runtime_utils import next_power_of_2
-from ..utils import ceildiv as cdiv
+from ..utils import ceildiv as cdiv, get_backend_num_stages
 
 
 log = logging.getLogger(__name__)
@@ -24,14 +26,26 @@ def triton_config(num_stages, num_warps, **kwargs):
     return Config(kwargs, num_stages=num_stages, num_warps=num_warps)
 
 
+def build_rocm_gemm_configs(configs):
+    rocm_num_stages = get_backend_num_stages()
+    return tuple((c[0], c[1], c[2], rocm_num_stages, c[4]) for c in configs)
+
+
 def filtered_configs(
     m: int,
     n: int,
     k: int,
     configs: Sequence[Tuple[int, int, int, int, int]],
     has_int8_tensor=False,
+    scale=1,
+    exclude=lambda m, n, k: False,
 ):
-    """Heuristic to shrink configs when they are bigger than the input size"""
+    """
+    Heuristic to shrink configs when they are bigger than the input size
+
+    :param scale: scale factor applied to the config values
+    :param exclude: whether a given config should be excluded
+    """
 
     min_block_size = 16
     # block_k=16 seems to be causing issues
@@ -64,9 +78,13 @@ def filtered_configs(
     used = set()
     for block_m, block_n, block_k, num_stages, num_warps in configs:
         # shrink configs for small sizes
-        block_m = max(min(block_m, m), min_block_size)
-        block_n = max(min(block_n, n), min_block_size)
-        block_k = max(min(block_k, k), min_block_size_k)
+        block_m = max(min(int(block_m * scale), m), min_block_size)
+        block_n = max(min(int(block_n * scale), n), min_block_size)
+        block_k = max(min(int(block_k * scale), k), min_block_size_k)
+
+        if exclude(block_m, block_n, block_k):
+            continue
+
         # each warp computes 16x16 tile = 256
         num_warps = min(num_warps, block_m * block_n // 256)
         if torch.version.hip:
@@ -121,7 +139,7 @@ def filtered_configs(
 mm_kernel_configs = (
     [
         {"config": (32, 32, 16, 1, 2), "cond": True},
-        {"config": (32, 32, 128, 2, 4), "cond": torch.version.hip is None},
+        {"config": (32, 32, 128, 2, 4), "cond": True},
         {"config": (32, 64, 32, 5, 8), "cond": True},
         {"config": (64, 32, 32, 5, 8), "cond": True},
         {"config": (64, 32, 128, 5, 4), "cond": True},
@@ -182,8 +200,8 @@ int8_mm_kernel_configs = [
     # {"config": (32, 32, 128, 2, 4), "cond": True},
     # {"config": (64, 64, 16, 2, 4), "cond": True},
     # {"config": (32, 32, 16, 1, 2), "cond": True},
-    {"config": (128, 256, 128, 3, 8), "cond": torch.version.hip is None},
-    {"config": (256, 128, 128, 3, 8), "cond": torch.version.hip is None},
+    {"config": (128, 256, 128, 3, 8), "cond": True},
+    {"config": (256, 128, 128, 3, 8), "cond": True},
 ]
 
 # Mixed precision kernel configs for small sizes of m for mm's like (16, 8192) x (8192, 8192).
@@ -326,28 +344,13 @@ scaled_mm_platform_configs = tuple(
     if config["cond"]
 )
 
-# On ROCm convert num_stages to 0 to enable software pipelining
+# On ROCm convert num_stages to improve performance
 if torch.version.hip:
-    mm_platform_configs = tuple(
-        (config[0], config[1], config[2], 0, config[4])
-        for config in mm_platform_configs
-    )
-    extra_mm_platform_configs = tuple(
-        (config[0], config[1], config[2], 0, config[4])
-        for config in extra_mm_platform_configs
-    )
-    int8_platform_configs = tuple(
-        (config[0], config[1], config[2], 0, config[4])
-        for config in mm_platform_configs
-    )
-    mixed_mm_platform_configs = tuple(
-        (config[0], config[1], config[2], 0, config[4])
-        for config in mixed_mm_platform_configs
-    )
-    scaled_mm_platform_configs = tuple(
-        (config[0], config[1], config[2], 0, config[4])
-        for config in scaled_mm_platform_configs
-    )
+    mm_platform_configs = build_rocm_gemm_configs(mm_platform_configs)
+    extra_mm_platform_configs = build_rocm_gemm_configs(extra_mm_platform_configs)
+    int8_platform_configs = build_rocm_gemm_configs(int8_platform_configs)
+    mixed_mm_platform_configs = build_rocm_gemm_configs(mixed_mm_platform_configs)
+    scaled_mm_platform_configs = build_rocm_gemm_configs(scaled_mm_platform_configs)
 
 mm_configs = functools.partial(
     filtered_configs,
@@ -464,3 +467,34 @@ def addmm_epilogue(dtype, alpha, beta):
         return V.ops.add(acc, bias)
 
     return epilogue
+
+
+def _is_static_problem(layout: Layout) -> Tuple[bool, bool]:
+    """
+    Check if input tensors and output layout have static shapes and non-zero sizes.
+
+    Args:
+        layout: Output layout object with a 'size' attribute.
+
+    Returns:
+        Tuple[bool, bool]: (is_static, is_nonzero)
+            is_static: True if all shapes are statically known
+            is_nonzero: True if all dimensions are non-zero
+    """
+    static_shape = True
+    static_size = PythonWrapperCodegen.statically_known_list_of_ints_or_none(
+        layout.size
+    )
+    if static_size is None:
+        nonzero = True
+        for s in layout.size:
+            sz = PythonWrapperCodegen.statically_known_int_or_none(s)
+            if sz is not None and sz == 0:
+                nonzero = False
+                break
+        return False, nonzero
+    numel = 1
+    for dim in static_size:
+        numel *= dim
+    nonzero = numel > 0
+    return static_shape, nonzero

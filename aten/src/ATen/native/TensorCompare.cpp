@@ -584,8 +584,8 @@ std::tuple<Tensor, Tensor> mode(const Tensor& self, int64_t dim, bool keepdim) {
 
 std::tuple<Tensor &,Tensor &> mode_out(const Tensor& self, int64_t dim, bool keepdim,
                                        Tensor& values, Tensor& indices) {
-  TORCH_CHECK(self.device().is_cpu() || self.is_cuda(),
-              "mode only supports CPU AND CUDA device type, got: ", self.device().type());
+  TORCH_CHECK(self.device().is_cpu() || self.is_cuda() || self.is_xpu(),
+              "mode only supports CPU, CUDA and XPU device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
               "mode only supports strided layout, got: ", self.layout());
   TORCH_CHECK(self.device() == values.device(),

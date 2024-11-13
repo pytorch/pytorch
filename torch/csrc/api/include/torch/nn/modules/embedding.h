@@ -9,8 +9,7 @@
 
 #include <cstddef>
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Embedding
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -70,10 +69,8 @@ class Embedding : public torch::nn::ModuleHolder<EmbeddingImpl> {
         embeddings.dim() == 2,
         "Embeddings parameter is expected to be 2-dimensional");
 
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    int64_t rows, cols;
-    rows = embeddings.size(0);
-    cols = embeddings.size(1);
+    auto rows = embeddings.size(0);
+    auto cols = embeddings.size(1);
 
     Embedding embedding(EmbeddingOptions(rows, cols)
                             ._weight(embeddings)
@@ -149,10 +146,8 @@ class EmbeddingBag : public torch::nn::ModuleHolder<EmbeddingBagImpl> {
         embeddings.dim() == 2,
         "Embeddings parameter is expected to be 2-dimensional");
 
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    int64_t rows, cols;
-    rows = embeddings.size(0);
-    cols = embeddings.size(1);
+    auto rows = embeddings.size(0);
+    auto cols = embeddings.size(1);
 
     EmbeddingBag embeddingbag(
         EmbeddingBagOptions(rows, cols)
@@ -167,5 +162,4 @@ class EmbeddingBag : public torch::nn::ModuleHolder<EmbeddingBagImpl> {
     return embeddingbag;
   }
 };
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

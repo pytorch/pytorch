@@ -154,8 +154,8 @@ void remove_padding_kernelLauncher(
     const int* offsets,
     const int* input_sizes,
     const int* output_sizes,
-    int output_dim,
-    const int batch_size) {
+    int64_t output_dim,
+    const int64_t batch_size) {
   dim3 grid;
   grid.x = batch_size;
   grid.y = GRID_DIM_Y;
@@ -188,8 +188,8 @@ void remove_padding_transform0213_kernelLauncher(
     const int* offsets,
     const int* input_sizes,
     const int* output_sizes,
-    int output_dim,
-    const int batch_size) {
+    int64_t output_dim,
+    const int64_t batch_size) {
   dim3 grid;
   grid.x = batch_size;
   grid.y = GRID_DIM_Y;
@@ -214,8 +214,8 @@ template void remove_padding_kernelLauncher<float>(
     const int* offsets,
     const int* input_sizes,
     const int* output_sizes,
-    int output_dim,
-    const int batch_size);
+    int64_t output_dim,
+    const int64_t batch_size);
 
 template void remove_padding_kernelLauncher<c10::Half>(
     const c10::Half* input,
@@ -223,8 +223,8 @@ template void remove_padding_kernelLauncher<c10::Half>(
     const int* offsets,
     const int* input_sizes,
     const int* output_sizes,
-    int output_dim,
-    const int batch_size);
+    int64_t output_dim,
+    const int64_t batch_size);
 
 template void remove_padding_transform0213_kernelLauncher<float>(
     const float* input,
@@ -232,8 +232,8 @@ template void remove_padding_transform0213_kernelLauncher<float>(
     const int* offsets,
     const int* input_sizes,
     const int* output_sizes,
-    int output_dim,
-    const int batch_size);
+    int64_t output_dim,
+    const int64_t batch_size);
 
 template void remove_padding_transform0213_kernelLauncher<c10::Half>(
     const c10::Half* input,
@@ -241,8 +241,8 @@ template void remove_padding_transform0213_kernelLauncher<c10::Half>(
     const int* offsets,
     const int* input_sizes,
     const int* output_sizes,
-    int output_dim,
-    const int batch_size);
+    int64_t output_dim,
+    const int64_t batch_size);
 
 template <typename T>
 __global__ void add_padding_1(
@@ -579,7 +579,7 @@ inline std::tuple<dim3, dim3, StackArray<int64_t>> check_shape_and_partition_(
   const dim3 blocks(
       div_round_up(outer_dense_size * jagged_folded_size, threads_y));
 
-  StackArray<int64_t> jagged_dims_tensor;
+  StackArray<int64_t> jagged_dims_tensor{};
   const int num_jagged_dim = dense_tensor.dim() - 2;
   TORCH_CHECK(num_jagged_dim <= static_cast<int>(kStackArrayMaxDims));
   jagged_dims_tensor.ndim = num_jagged_dim;
@@ -845,7 +845,7 @@ __launch_bounds__(kMaxThreads) void jagged_dense_dense_elementwise_jagged_output
     }
     if (!truncated) {
       const int oidx = offset_temp;
-      int iidx;
+      int iidx = 0;
       for (iidx = threadIdx.x; iidx * 2 + 1 < inner_dense_size;
            iidx += blockDim.x) {
         output_values[offset][2 * iidx] =
@@ -1201,7 +1201,7 @@ inline bool jagged_dense_dense_elementwise_jagged_output_matches_opt(
   matches &= (y_0_reshaped.size(0) < INT_MAX);
   matches &= (y_0_reshaped.size(1) < INT_MAX);
 
-  int max_shared_bytes;
+  int max_shared_bytes = 0;
 #ifndef USE_ROCM
   C10_CUDA_CHECK(cudaDeviceGetAttribute(
       &max_shared_bytes,
@@ -1226,7 +1226,7 @@ inline bool jagged_dense_dense_elementwise_jagged_output_matches_opt(
         auto B = y_0_reshaped.size(0);
         // the default shared memory on V100/A100/H100 is 48 KB from
         // https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#shared-memory-8-x
-        if ((B + 1) * sizeof(index_t) >= used_shared_bytes) {
+        if ((B + 1) * sizeof(index_t) >= static_cast<size_t>(used_shared_bytes)) {
           matches = false;
         }
       });

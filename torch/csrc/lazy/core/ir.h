@@ -18,7 +18,7 @@
 #include <torch/csrc/lazy/core/ir_metadata.h>
 #include <torch/csrc/lazy/core/shape.h>
 
-C10_DECLARE_bool(ltc_enable_dynamic_shapes);
+TORCH_DECLARE_bool(ltc_enable_dynamic_shapes);
 
 namespace torch::lazy {
 
@@ -95,20 +95,13 @@ class TORCH_API Node {
       std::vector<Shape>&& shapes,
       size_t num_outputs = 1);
 
-  // Construct node with operands and shape generated from a function
-  Node(
-      OpKind op,
-      OpList operands,
-      const std::function<Shape()>& shape_fn,
-      size_t num_outputs = 1);
-
   // Construct node with operands and no shape
   Node(OpKind op, OpList operands, size_t num_outputs = 1);
 
   // Construct node with shape and no operands
   Node(OpKind op, Shape shape, size_t num_outputs = 1);
 
-  virtual ~Node();
+  virtual ~Node() = default;
 
   const OpKind& op() const {
     return op_;

@@ -20,13 +20,7 @@ import torch._C._onnx as _C_onnx
 import torch.jit._trace
 import torch.serialization
 from torch import _C
-from torch.onnx import (  # noqa: F401
-    _constants,
-    _deprecation,
-    _exporter_states,
-    errors,
-    symbolic_helper,
-)
+from torch.onnx import _constants, _deprecation, errors, symbolic_helper  # noqa: F401
 from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import diagnostics, jit_utils, onnx_proto_utils, registration
 
@@ -41,7 +35,6 @@ __all__ = [
     "model_signature",
     "warn_on_static_input_change",
     "unpack_quantized_tensor",
-    "export_to_pretty_string",
     "unconvertible_ops",
     "register_custom_op_symbolic",
     "unregister_custom_op_symbolic",
@@ -813,64 +806,6 @@ def _decide_input_format(model, args):
     return args
 
 
-def _from_dynamic_axes_to_dynamic_shapes(
-    model,
-    dynamic_axes: Mapping[str, Mapping[int, str]]
-    | Mapping[str, Sequence[int]]
-    | None = None,
-    input_names: Sequence[str] | None = None,
-) -> dict[str, Any] | None:
-    """
-
-    dynamic_axes examples:
-    (1) dynamic_axes = {"x": {0: "my_custom_axis_name_1"}, "y": {1: "my_custom_axis_name_2"}}
-    (2) dynamic_axes = {"x": [0], "y": [1]}
-
-    these will be converted to dynamic_shapes respectively:
-    (1) dynamic_shapes = {"x": {0: Dim("my_custom_axis_name_1")}, "y": {1: Dim("my_custom_axis_name_2")}}
-    (2) dynamic_shapes = {"x": {0: Dim("x_dim_0")}, "y": {1: Dim("y_dim_1")}}  # auto-generated dim names
-
-    """
-    if dynamic_axes is None:
-        return None
-
-    if input_names is None:
-        input_names_set = set()
-    else:
-        input_names_set = set(input_names)
-
-    dynamic_shapes: dict[str, Any | None] = {}
-    for input_name, axes in dynamic_axes.items():
-        if input_name in input_names_set:
-            raise ValueError(
-                "Assinging new input names is not supported yet. Please use model forward signature "
-                "to specify input names in dynamix_axes."
-            )
-        if isinstance(axes, dict):
-            dynamic_shapes[input_name] = {
-                k: torch.export.Dim(v) for k, v in axes.items()
-            }
-        elif isinstance(axes, list):
-            dynamic_shapes[input_name] = {
-                k: torch.export.Dim(f"{input_name}_dim_{k}") for k in axes
-            }
-        else:
-            raise TypeError(
-                f"dynamic_axes value must be either a dict or a list, but got {type(axes)}"
-            )
-    # torch.export.export needs static dim to present in dynamic_shapes
-    # for all input tensors, so we need to add them with None
-    try:
-        sig = _signature(model)
-    except ValueError as e:
-        warnings.warn(f"{e}, skipping auto filling None on static axes...")
-        return dynamic_shapes
-    for input_name in sig.parameters.keys():
-        if input_name not in dynamic_shapes:
-            dynamic_shapes[input_name] = None
-    return dynamic_shapes
-
-
 def _trace(func, args, operator_export_type, return_outs=False):
     # Special case for common case of passing a single Tensor
     if isinstance(args, torch.Tensor):
@@ -1124,7 +1059,7 @@ def _model_to_graph(
             input_names=input_names,
             module=module,
         )
-    except Exception as e:
+    except Exception:
         _C._jit_onnx_log("Torch IR graph at exception: ", graph)
         raise
 
@@ -1202,84 +1137,6 @@ def _model_to_graph(
     _apply_friendly_debug_names(graph, params_dict)
 
     return graph, params_dict, torch_out
-
-
-@torch._disable_dynamo
-@_deprecation.deprecated("2.5", "the future", "use onnx.printer.to_text() instead")
-def export_to_pretty_string(
-    model,
-    args,
-    export_params=True,
-    verbose=False,
-    training=_C_onnx.TrainingMode.EVAL,
-    input_names=None,
-    output_names=None,
-    operator_export_type=_C_onnx.OperatorExportTypes.ONNX,
-    export_type=None,
-    google_printer=False,
-    opset_version=None,
-    keep_initializers_as_inputs=None,
-    custom_opsets=None,
-    add_node_names=True,
-    do_constant_folding=True,
-    dynamic_axes=None,
-):
-    """Similar to :func:`export`, but returns a text representation of the ONNX model.
-
-    Only differences in args listed below. All other args are the same
-    as :func:`export`.
-
-    Args:
-        add_node_names (bool, default True): Whether or not to set
-            NodeProto.name. This makes no difference unless
-            ``google_printer=True``.
-        google_printer (bool, default False): If False, will return a custom,
-            compact representation of the model. If True will return the
-            protobuf's `Message::DebugString()`, which is more verbose.
-
-    Returns:
-        A UTF-8 str containing a human-readable representation of the ONNX model.
-    """
-    if opset_version is None:
-        opset_version = _constants.ONNX_DEFAULT_OPSET
-    if custom_opsets is None:
-        custom_opsets = {}
-    GLOBALS.export_onnx_opset_version = opset_version
-    GLOBALS.operator_export_type = operator_export_type
-
-    with exporter_context(model, training, verbose):
-        val_keep_init_as_ip = _decide_keep_init_as_input(
-            keep_initializers_as_inputs, operator_export_type, opset_version
-        )
-        val_add_node_names = _decide_add_node_names(
-            add_node_names, operator_export_type
-        )
-        val_do_constant_folding = _decide_constant_folding(
-            do_constant_folding, operator_export_type, training
-        )
-        args = _decide_input_format(model, args)
-        graph, params_dict, torch_out = _model_to_graph(
-            model,
-            args,
-            verbose,
-            input_names,
-            output_names,
-            operator_export_type,
-            val_do_constant_folding,
-            training=training,
-            dynamic_axes=dynamic_axes,
-        )
-
-        return graph._pretty_print_onnx(  # type: ignore[attr-defined]
-            params_dict,
-            opset_version,
-            False,
-            operator_export_type,
-            google_printer,
-            val_keep_init_as_ip,
-            custom_opsets,
-            val_add_node_names,
-        )
 
 
 @_deprecation.deprecated("2.5", "the future", "avoid using this function")
@@ -1481,9 +1338,6 @@ def _export(
 ):
     assert GLOBALS.in_onnx_export is False
 
-    if export_type is None:
-        export_type = _exporter_states.ExportTypes.PROTOBUF_FILE
-
     if isinstance(model, torch.nn.DataParallel):
         raise ValueError(
             "torch.nn.DataParallel is not supported by ONNX "
@@ -1574,10 +1428,6 @@ def _export(
                 dynamic_axes=dynamic_axes,
             )
 
-            # TODO: Don't allocate a in-memory string for the protobuf
-            defer_weight_export = (
-                export_type is not _exporter_states.ExportTypes.PROTOBUF_FILE
-            )
             if custom_opsets is None:
                 custom_opsets = {}
 
@@ -1598,12 +1448,13 @@ def _export(
                     getattr(model, "training", False),  # type: ignore[arg-type]
                 )
             _C._jit_pass_onnx_assign_scoped_names_for_node_and_value(graph)
+            defer_weight_export = False
             if export_params:
                 (
                     proto,
                     export_map,
-                    val_use_external_data_format,
-                    node_names,
+                    _val_use_external_data_format,
+                    _node_names,
                 ) = graph._export_onnx(  # type: ignore[attr-defined]
                     params_dict,
                     opset_version,
@@ -1621,13 +1472,13 @@ def _export(
                 (
                     proto,
                     export_map,
-                    val_use_external_data_format,
-                    node_names,
+                    _,
+                    _,
                 ) = graph._export_onnx(  # type: ignore[attr-defined]
                     {},
                     opset_version,
                     dynamic_axes,
-                    False,
+                    defer_weight_export,
                     operator_export_type,
                     not verbose,
                     val_keep_init_as_ip,
@@ -1643,7 +1494,7 @@ def _export(
             )
             if verbose:
                 _C._jit_onnx_log("Exported graph: ", graph)
-            onnx_proto_utils._export_file(proto, f, export_type, export_map)
+            onnx_proto_utils._export_file(proto, f, export_map)
     finally:
         assert GLOBALS.in_onnx_export
         GLOBALS.in_onnx_export = False

@@ -10,7 +10,7 @@ import copy
 import itertools
 import unittest
 import warnings
-from contextlib import nullcontext
+from contextlib import ContextDecorator, nullcontext
 from functools import partial, wraps
 from typing import Any, Callable, Dict, List, Optional, Union
 from unittest.mock import patch
@@ -78,6 +78,7 @@ from torch.testing._internal.optests import (
     _test_aot_autograd_forwards_backwards_helper,
     aot_autograd_check,
 )
+from torch.testing._internal.subclasses import WrapperSubclass
 from torch.testing._internal.two_tensor import TwoTensor, TwoTensorMode
 
 
@@ -385,7 +386,7 @@ class TestAOTAutograd(AOTTestCase):
                         if not isinstance(x, torch.Tensor):
                             x_copy = x
                         else:
-                            x_copy = x.clone().detach().requires_grad_(x.requires_grad)
+                            x_copy = x.detach().clone().requires_grad_(x.requires_grad)
                             if x.requires_grad and not x.is_leaf:
                                 x_copy = x_copy.clone()
 
@@ -787,9 +788,9 @@ def forward(self, primals_1):
             return x.sin().cos()
 
         a = torch.ones(4, requires_grad=True)
-        a2 = a.clone().detach().requires_grad_()
-        a3 = a.clone().detach().requires_grad_()
-        a4 = a.clone().detach().requires_grad_()
+        a2 = a.detach().clone().requires_grad_()
+        a3 = a.detach().clone().requires_grad_()
+        a4 = a.detach().clone().requires_grad_()
         aa = TwoTensor(a, a2)
         aa2 = TwoTensor(a3, a4)
         aaaa = TwoTensor(aa, aa2)
@@ -814,19 +815,22 @@ def forward(self, primals_1):
             return x.sin().cos()
 
         a = torch.ones(4, requires_grad=True)
-        a2 = a.clone().detach().requires_grad_()
-        a3 = a.clone().detach().requires_grad_()
-        a4 = a.clone().detach().requires_grad_()
+        a2 = a.detach().clone().requires_grad_()
+        a3 = a.detach().clone().requires_grad_()
+        a4 = a.detach().clone().requires_grad_()
         new_aa = TwoTensor(a3, a4)
         aa = TwoTensor(a, a2)
 
-        aa2 = aa.clone().detach().requires_grad_()
+        aa2 = aa.detach().clone().requires_grad_()
         aaaa = TwoTensor(aa, aa2)
         out = f(new_aa)
         new_out = out + aaaa
         with self.assertRaisesRegex(
             RuntimeError,
-            "The grad inputs should be same tensor subclass type as forward output",
+            """
+During the backward, we encountered a tensor subclass where we guessed its
+metadata incorrectly.
+""",  # noqa: F541
         ):
             new_out.sum().backward()
 
@@ -845,7 +849,7 @@ def forward(self, primals_1):
         custom_aa = ConstantExtraMetadataTensor(custom_a)
         custom_aa.constant_attribute = 4
 
-        custom_aa_compile = custom_aa.clone().detach().requires_grad_()
+        custom_aa_compile = custom_aa.detach().clone().requires_grad_()
         custom_aa_compile.elem.constant_attribute = 6
         out_eager = f(custom_aa)
 
@@ -870,18 +874,18 @@ def forward(self, primals_1):
             return x.sin().cos() + res
 
         x = torch.ones(4, requires_grad=True)
-        x2 = x.clone().detach().requires_grad_()
+        x2 = x.detach().clone().requires_grad_()
         xx = TwoTensor(x, x2)
-        xx2 = xx.clone().detach().requires_grad_()
+        xx2 = xx.detach().clone().requires_grad_()
 
         x_nested = TwoTensor(xx, xx2)
-        x_nested_compile = x_nested.clone().detach().requires_grad_()
+        x_nested_compile = x_nested.detach().clone().requires_grad_()
 
-        y_nested = x_nested.clone().detach().requires_grad_()
-        y_nested_compile = y_nested.clone().detach().requires_grad_()
+        y_nested = x_nested.detach().clone().requires_grad_()
+        y_nested_compile = y_nested.detach().clone().requires_grad_()
 
-        z = x.clone().detach().requires_grad_()
-        z_compile = z.clone().detach().requires_grad_()
+        z = x.detach().clone().requires_grad_()
+        z_compile = z.detach().clone().requires_grad_()
 
         out_eager = f(x_nested, y_nested, z)
         compiled_f = torch.compile(f, backend="aot_eager")
@@ -922,12 +926,12 @@ def forward(self, primals_1):
             return y * y_elem * y_elem_elem * y_elem_metadata + x
 
         x = torch.ones(4, requires_grad=True)
-        x2 = x.clone().detach().requires_grad_()
+        x2 = x.detach().clone().requires_grad_()
         xx = TwoTensor(x, x2)
-        xx2 = xx.clone().detach().requires_grad_()
+        xx2 = xx.detach().clone().requires_grad_()
 
         x_nested = TwoTensor(xx, xx2)
-        x_nested_compile = x_nested.clone().detach().requires_grad_()
+        x_nested_compile = x_nested.detach().clone().requires_grad_()
 
         a = torch.ones(4, requires_grad=True)
         custom_a = ConstantExtraMetadataTensor(a)
@@ -935,7 +939,7 @@ def forward(self, primals_1):
         custom_aa = ConstantExtraMetadataTensor(custom_a)
         custom_aa.constant_attribute = 4
 
-        custom_aa_compile = custom_aa.clone().detach().requires_grad_()
+        custom_aa_compile = custom_aa.detach().clone().requires_grad_()
         custom_aa_compile.constant_attribute = 4
         custom_aa_compile.elem.constant_attribute = 6
 
@@ -2463,6 +2467,7 @@ def forward(self, primals_1, primals_2):
         # Not checking equality of ref and x as Exception is expected
 
     # Partially addresses https://github.com/pytorch/pytorch/issues/106457
+    @skipIfTorchDynamo()
     def test_input_mutation_false_aliasing(self):
         def f(a, b):
             a.mul_(3)
@@ -2492,8 +2497,11 @@ def forward(self, primals_1, primals_2):
         )
         # Input mutations on subclasses with training graphs fail backward guards today.
         with self.assertRaisesRegex(
-            AssertionError,
-            "attempted to compile the backward with incorrect subclass metadata",
+            RuntimeError,
+            """
+During the backward, we encountered a tensor subclass where we guessed its
+metadata incorrectly.
+""",  # noqa: F541
         ):
             self.verify_aot_autograd(
                 f,
@@ -4705,10 +4713,10 @@ class <lambda>(torch.nn.Module):
         # Now test the backward
         x = torch.randn(2, requires_grad=True)
         y = torch.randn(2, requires_grad=True)
-        x2 = x.clone().detach().requires_grad_(True)
-        y2 = y.clone().detach().requires_grad_(True)
-        x3 = x.clone().detach().requires_grad_(True)
-        y3 = y.clone().detach().requires_grad_(True)
+        x2 = x.detach().clone().requires_grad_(True)
+        y2 = y.detach().clone().requires_grad_(True)
+        x3 = x.detach().clone().requires_grad_(True)
+        y3 = y.detach().clone().requires_grad_(True)
         f_graph_joint = aot_export_joint_simple(f, [x, y], trace_joint=True)
         num_fw_outputs = 2
         fw_g, bw_g = default_partition(
@@ -4995,8 +5003,8 @@ class TestPartitioning(AOTTestCase):
         ref.sum().backward()
 
         # Compiled function calculation
-        res_a = ref_a.clone().detach().requires_grad_(True)
-        res_b = ref_b.clone().detach().requires_grad_(True)
+        res_a = ref_a.detach().clone().requires_grad_(True)
+        res_b = ref_b.detach().clone().requires_grad_(True)
 
         def compile_fn(x, _):
             return x
@@ -5314,10 +5322,10 @@ class TestAOTDispatch(AOTTestCase):
         a_ref = TwoTensor(a1_ref, a2_ref)
         b_ref = torch.ones(3, 3, requires_grad=True)
 
-        a1_test = a1_ref.clone().detach().requires_grad_(True)
-        a2_test = a2_ref.clone().detach().requires_grad_(True)
+        a1_test = a1_ref.detach().clone().requires_grad_(True)
+        a2_test = a2_ref.detach().clone().requires_grad_(True)
         a_test = TwoTensor(a1_test, a2_test)
-        b_test = b_ref.clone().detach().requires_grad_(True)
+        b_test = b_ref.detach().clone().requires_grad_(True)
 
         fw_graph_cell = [None]
         bw_graph_cell = [None]
@@ -5410,6 +5418,7 @@ def forward(self, tangents_1, tangents_2):
         self.assertEqual(out_ref.a, out_test.a)
         self.assertEqual(out_ref.b, out_test.b)
 
+    @skipIfTorchDynamo()
     def test_aot_dispatch_incorrect_backward(self):
         # a is a subclass, b is not
         def f(a, b):
@@ -5428,10 +5437,10 @@ def forward(self, tangents_1, tangents_2):
         a_ref = TwoTensor(a1_ref, a2_ref)
         b_ref = torch.ones(3, 3, requires_grad=True)
 
-        a1_test = a1_ref.clone().detach().requires_grad_(True)
-        a2_test = a2_ref.clone().detach().requires_grad_(True)
+        a1_test = a1_ref.detach().clone().requires_grad_(True)
+        a2_test = a2_ref.detach().clone().requires_grad_(True)
         a_test = TwoTensor(a1_test, a2_test)
-        b_test = b_ref.clone().detach().requires_grad_(True)
+        b_test = b_ref.detach().clone().requires_grad_(True)
 
         compiled_f = aot_function(
             f,
@@ -5450,8 +5459,11 @@ def forward(self, tangents_1, tangents_2):
         # but we were wrong: in the below tests, it is a subclass.
         # This will eventually require a repartition + recompile
         with self.assertRaisesRegex(
-            AssertionError,
-            "incorrectly attempted to compile the backward with incorrect subclass metadata",
+            RuntimeError,
+            """
+During the backward, we encountered a tensor subclass where we guessed its
+metadata incorrectly.
+""",  # noqa: F541
         ):
             (out_test[0] + out_test[1]).sum().backward()
 
@@ -5465,10 +5477,10 @@ def forward(self, tangents_1, tangents_2):
         b_ref = TwoTensor(b1_ref, b2_ref)
         a_ref = torch.ones(3, 3, requires_grad=True)
 
-        b1_test = b1_ref.clone().detach().requires_grad_(True)
-        b2_test = b2_ref.clone().detach().requires_grad_(True)
+        b1_test = b1_ref.detach().clone().requires_grad_(True)
+        b2_test = b2_ref.detach().clone().requires_grad_(True)
         b_test = TwoTensor(b1_test, b2_test)
-        a_test = a_ref.clone().detach().requires_grad_(True)
+        a_test = a_ref.detach().clone().requires_grad_(True)
 
         compiled_f = aot_function(
             f,
@@ -5503,10 +5515,10 @@ def forward(self, tangents_1, tangents_2):
         b_ref = b_ref_base + 1
         a_ref = a_ref_base + 1
 
-        b1_test = b1_ref.clone().detach().requires_grad_(True)
-        b2_test = b2_ref.clone().detach().requires_grad_(True)
+        b1_test = b1_ref.detach().clone().requires_grad_(True)
+        b2_test = b2_ref.detach().clone().requires_grad_(True)
         b_test_base = TwoTensor(b1_test, b2_test)
-        a_test_base = a_ref_base.clone().detach().requires_grad_(True)
+        a_test_base = a_ref_base.detach().clone().requires_grad_(True)
         b_test = b_test_base + 1
         a_test = a_test_base + 1
 
@@ -5556,10 +5568,10 @@ def forward(self, tangents_1, tangents_2):
         b_ref = b_ref_base + 1
         a_ref = a_ref_base + 1
 
-        b1_test = b1_ref.clone().detach().requires_grad_(True)
-        b2_test = b2_ref.clone().detach().requires_grad_(True)
+        b1_test = b1_ref.detach().clone().requires_grad_(True)
+        b2_test = b2_ref.detach().clone().requires_grad_(True)
         b_test_base = TwoTensor(b1_test, b2_test)
-        a_test_base = a_ref_base.clone().detach().requires_grad_(True)
+        a_test_base = a_ref_base.detach().clone().requires_grad_(True)
         b_test = b_test_base + 1
         a_test = a_test_base + 1
 
@@ -5611,10 +5623,10 @@ def forward(self, tangents_1, tangents_2):
         b_ref = b_ref_base + 1
         a_ref = a_ref_base + 1
 
-        b1_test = b1_ref.clone().detach().requires_grad_(True)
-        b2_test = b2_ref.clone().detach().requires_grad_(True)
+        b1_test = b1_ref.detach().clone().requires_grad_(True)
+        b2_test = b2_ref.detach().clone().requires_grad_(True)
         b_test_base = TwoTensor(b1_test, b2_test)
-        a_test_base = a_ref_base.clone().detach().requires_grad_(True)
+        a_test_base = a_ref_base.detach().clone().requires_grad_(True)
         b_test = b_test_base + 1
         a_test = a_test_base + 1
 
@@ -5661,10 +5673,10 @@ def forward(self, tangents_1, tangents_2):
         b_ref = b_ref_base + 1
         a_ref = a_ref_base + 1
 
-        b1_test = b1_ref.clone().detach().requires_grad_(True)
-        b2_test = b2_ref.clone().detach().requires_grad_(True)
+        b1_test = b1_ref.detach().clone().requires_grad_(True)
+        b2_test = b2_ref.detach().clone().requires_grad_(True)
         b_test_base = TwoTensor(b1_test, b2_test)
-        a_test_base = a_ref_base.clone().detach().requires_grad_(True)
+        a_test_base = a_ref_base.detach().clone().requires_grad_(True)
         b_test = b_test_base + 1
         a_test = a_test_base + 1
 
@@ -5744,6 +5756,62 @@ def forward(self, tangents_1, tangents_2):
 
             self.assertEqual(ref_out1.requires_grad, out1.requires_grad)
             self.assertEqual(ref_out2.requires_grad, out2.requires_grad)
+
+
+class GradsNoForceContiguousContextManager(ContextDecorator):
+    def __enter__(self):
+        # flake8: noqa: TOR901
+        self.lib = torch.library.Library("_mylib", "FRAGMENT")
+        self.d = {
+            torch.channels_last: 0,
+            torch.contiguous_format: 0,
+        }
+
+        self.lib.define("foo(Tensor x) -> Tensor")
+        self.lib.define("foo2(Tensor x) -> Tensor")
+
+        def foo_impl(a):
+            return a.clone()
+
+        def foo_meta(a):
+            return a.clone()
+
+        def foo2_impl(x):
+            self.d[torch._prims_common.suggest_memory_format(x)] += 1
+            return x.clone()
+
+        def foo2_meta(a):
+            return a.clone()
+
+        for backend in ["CPU", "CUDA"]:
+            self.lib.impl("foo", foo_impl, backend)
+            self.lib.impl("foo2", foo2_impl, backend)
+
+        self.lib.impl("foo", foo_meta, "Meta")
+        self.lib.impl("foo2", foo2_meta, "Meta")
+
+        def foo_bwd(ctx, grad):
+            torch.ops._mylib.foo2(grad)
+            return grad.clone()
+
+        torch.library.register_autograd("_mylib::foo", foo_bwd, lib=self.lib)
+
+        from torch._higher_order_ops.effects import _EffectType, _register_effectful_op
+
+        _register_effectful_op(torch.ops._mylib.foo.default, _EffectType.ORDERED)
+        _register_effectful_op(torch.ops._mylib.foo2.default, _EffectType.ORDERED)
+
+        return self
+
+    def __exit__(self, type, value, tb):
+        self.lib._destroy()
+        return False
+
+    def reset_counters(self):
+        self.d = {
+            torch.channels_last: 0,
+            torch.contiguous_format: 0,
+        }
 
 
 class TestAOTModuleSimplified(AOTTestCase):
@@ -5969,12 +6037,230 @@ class TestAOTModuleSimplified(AOTTestCase):
         out = torch.compile(fn, backend="aot_eager", fullgraph=True)(inp)
         self.assertEqual(ref_out, out)
 
+    # Next several tests are related to issue:
+    # https://github.com/pytorch/pytorch/issues/134644
+    # AOTD tries to predict tangents for tracing ahead of time.
+    # The first strategy was to coerce traced_tangents and runtime_tangents to be contiguous().
+    # But for models working in channels_last memory format this will add additional contiguous() calls.
+    # The fix is predicting tangents memory format to be similar to outputs memory format.
+    # And coerce runtime tangents to that traced memory format.
+    def test_grads_no_force_contiguous_dense(self):
+        with GradsNoForceContiguousContextManager() as ctx:
+
+            class M(torch.nn.Module):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.conv = torch.nn.Conv2d(3, 3, 3)
+
+                def forward(self, x, y, cont_inp):
+                    z = y + 3
+                    y.mul_(2)
+                    r = self.conv(x)
+                    r = torch.ops._mylib.foo(r)
+                    return (
+                        r,
+                        r.transpose(0, 1),
+                        z.view(-1),
+                        z.transpose(0, 1),
+                        cont_inp * 2,
+                    )
+
+            m = M()
+            m.to(memory_format=torch.channels_last)
+            m.train()
+
+            def dense_inps():
+                return (
+                    torch.randn(2, 3, 5, 5, requires_grad=True).to(
+                        memory_format=torch.channels_last
+                    ),
+                    torch.randn(3, 2, 1, 1, requires_grad=True).to(
+                        memory_format=torch.channels_last
+                    ),
+                    torch.randn(3, 2, 1, 1, requires_grad=True),
+                )
+
+            ref_inps = dense_inps()
+            ref_outs = m(*ref_inps)
+            ref_outs[0].sum().backward()
+
+            ctx.reset_counters()
+            inps = dense_inps()
+            outs = torch.compile(m, backend="inductor", fullgraph=True)(*inps)
+            outs[0].sum().backward()
+
+            self.assertEqual(ctx.d[torch.channels_last], 1)
+            self.assertEqual(ctx.d[torch.contiguous_format], 0)
+
+    def test_grads_no_force_contiguous_subclass(self):
+        with GradsNoForceContiguousContextManager() as ctx:
+
+            class M(torch.nn.Module):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.conv = torch.nn.Conv2d(3, 3, 3)
+
+                def forward(self, x, y):
+                    r = self.conv(x)
+                    r = torch.ops._mylib.foo(r)
+                    return r, y + 1
+
+            m = M()
+            m.to(memory_format=torch.channels_last)
+            m.train()
+
+            def inps_fn():
+                return (
+                    TwoTensor(
+                        torch.randn(2, 3, 5, 5, requires_grad=True).to(
+                            memory_format=torch.channels_last
+                        ),
+                        torch.randn(2, 3, 5, 5, requires_grad=True).to(
+                            memory_format=torch.channels_last
+                        ),
+                    ),
+                    torch.randn(3, 2, requires_grad=True).clone(),
+                )
+
+            ref_outs = m(*inps_fn())
+            ref_outs[0].sum().backward()
+
+            ctx.reset_counters()
+            mc = M()
+            mc.to(memory_format=torch.channels_last)
+            mc.train()
+            outs = torch.compile(mc, backend="aot_eager", fullgraph=True)(*inps_fn())
+            outs[0].sum().backward()
+
+            self.assertEqual(ctx.d[torch.channels_last], 2)
+            self.assertEqual(ctx.d[torch.contiguous_format], 0)
+
+    def test_grads_no_force_contiguous_nested_subclass(self):
+        with GradsNoForceContiguousContextManager() as ctx:
+
+            class M(torch.nn.Module):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.conv = torch.nn.Conv2d(3, 3, 3)
+
+                def forward(self, x):
+                    r = self.conv(x)
+                    r = torch.ops._mylib.foo(r)
+                    return r
+
+            m = M()
+            m.to(memory_format=torch.channels_last)
+            m.train()
+
+            def inps_fn(x):
+                return (
+                    TwoTensor(
+                        TwoTensor(x.clone(), x.clone()), TwoTensor(x.clone(), x.clone())
+                    ),
+                )
+
+            x = torch.randn(2, 3, 5, 5, requires_grad=True).to(
+                memory_format=torch.channels_last
+            )
+            ref_inps = inps_fn(x)
+            ref_outs = m(*ref_inps)
+            ref_outs[0].sum().backward()
+
+            ctx.reset_counters()
+
+            mc = M()
+            mc.to(memory_format=torch.channels_last)
+            mc.train()
+
+            x = torch.randn(2, 3, 5, 5, requires_grad=True).to(
+                memory_format=torch.channels_last
+            )
+            inps = inps_fn(x)
+            outs = torch.compile(mc, backend="aot_eager", fullgraph=True)(*inps)
+            outs[0].sum().backward()
+            self.assertEqual(ctx.d[torch.channels_last], 4)
+            self.assertEqual(ctx.d[torch.contiguous_format], 0)
+
+    def test_grads_no_force_contiguous_nested_tensor_tangent(self):
+        # NestedTensor setattr could fails with AttributeError for attr "_min_seqlen_tensor"
+        # Adding test to verify that it is handled.
+        def fn(x):
+            return x.clone()
+
+        a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64)
+        b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64)
+        c = torch.randn(4, 3, requires_grad=True, dtype=torch.float64)
+        nt = torch.nested.as_nested_tensor([a, b, c], layout=torch.jagged)
+
+        out = torch.compile(fn, backend="aot_eager", fullgraph=True)(nt)
+        out_buffer = out.values()
+        ga, gb, gc = torch.autograd.grad(out_buffer.sum(), (a, b, c))
+
+    @skipIfTorchDynamo()
+    def test_wrong_guess_tangent_type(self):
+        def fn(x):
+            return x.clone()
+
+        ref_x = TwoTensor(
+            torch.randn(2, 3, requires_grad=True), torch.randn(2, 3, requires_grad=True)
+        )
+        ref_y = fn(ref_x)
+        ref_y.backward(gradient=TwoTensor(torch.randn(2, 3), torch.randn(2, 3)))
+
+        fn_comp = torch.compile(fn, fullgraph=True)
+
+        x = TwoTensor(
+            torch.randn(2, 3, requires_grad=True), torch.randn(2, 3, requires_grad=True)
+        )
+        y = fn_comp(x)
+        y.backward(gradient=TwoTensor(torch.randn(2, 3), torch.randn(2, 3)))
+
+        x2 = TwoTensor(
+            torch.randn(2, 3, requires_grad=True), torch.randn(2, 3, requires_grad=True)
+        )
+        y2 = fn_comp(x2)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            """
+During the backward, we encountered a tensor subclass where we guessed its
+metadata incorrectly.
+""",  # noqa: F541
+        ):
+            y2.backward(gradient=torch.randn(2, 3))
+
+    def test_tangent_type_coercion(self):
+        def fn(x):
+            return x.clone()
+
+        ref_y = fn(WrapperSubclass(torch.randn(2, 3, requires_grad=True)))
+        ref_y.sum().backward()
+
+        fn_comp = torch.compile(fn, fullgraph=True)
+
+        x = TwoTensor(
+            torch.randn(2, 3, requires_grad=True), torch.randn(2, 3, requires_grad=True)
+        )
+        y = fn_comp(x)
+        y.backward(gradient=TwoTensor(torch.randn(2, 3), torch.randn(2, 3)))
+
+        x2 = TwoTensor(
+            torch.randn(2, 3, requires_grad=True), torch.randn(2, 3, requires_grad=True)
+        )
+        y2 = fn_comp(x2)
+        # Test coercion WrapperSubclass -> TwoTensor
+        y2.backward(gradient=WrapperSubclass(torch.randn(2, 3)))
+
+        y3 = torch.compile(fn, fullgraph=True)(torch.randn(2, 3, requires_grad=True))
+        # Test coercion WrapperSubclass -> Tensor
+        y3.backward(gradient=WrapperSubclass(torch.randn(2, 3)))
+
     @torch._inductor.config.patch({"freezing": True})
     def test_inductor_freezing_with_subclasses(self):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
                 self.w = TwoTensor(torch.randn(3, 4), torch.randn(3, 4))
+                self.wt = torch.randn(3, 4)
 
             def forward(self, x):
                 return (
@@ -5982,12 +6268,25 @@ class TestAOTModuleSimplified(AOTTestCase):
                         dim=0, index=torch.tensor([0, 2, 1], dtype=torch.int64)
                     )
                     + self.w
+                    + self.wt
                 )
 
         m = M()
         inp = torch.randn(3, 4)
         with torch.no_grad():
             torch.compile(m, fullgraph=True)(inp)
+
+    def test_rrelu(self):
+        def fn(x):
+            return torch.rrelu(x, training=True)
+
+        def fn_(x):
+            torch.rrelu_(x, training=True)
+            return x
+
+        x = torch.randn(4, 4)
+        torch.compile(fn, backend="inductor", fullgraph=True)(x)
+        torch.compile(fn_, backend="inductor", fullgraph=True)(x)
 
 
 # entries in here don't work and need to be fixed.
@@ -6078,12 +6377,6 @@ symbolic_aot_autograd_failures = {
     xfail(
         "nn.functional.nll_loss", ""
     ),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail(
-        "_segment_reduce", "lengths"
-    ),  # aten.segment_reduce.default - couldn't find symbolic meta functio...
-    xfail(
-        "_segment_reduce", "offsets"
-    ),  # aten.segment_reduce.default - couldn't find symbolic meta functio...
     xfail("trace", ""),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail(
         "_upsample_bilinear2d_aa"
@@ -6141,6 +6434,7 @@ def _test_aot_autograd_helper(self, device, dtype, op, dynamic=False):
                 self.assertEqual,
                 check_gradients=True,
                 try_check_data_specialization=try_check_data_specialization,
+                skip_correctness_check=op.skip_correctness_check_compile_vs_eager,
             )
         except DynamicOutputShapeException:
             self.skipTest("Dynamic output shape operation in trace")
@@ -6365,6 +6659,24 @@ class TestAOTAutogradWithDynamo(TestAOTAutograd):
 
         return torch_compile_wrapper
 
+    def test_inputs_overlapping_unsqueeze_with_mutation(self):
+        def f(x, y):
+            x.add_(1)
+            y.add_(1)
+            return x
+
+        def run(f):
+            base = torch.ones(10)
+            inputs = [base.unsqueeze(0), base.unsqueeze(0)]
+            return f(*inputs)
+
+        optf = torch.compile(backend="aot_eager", dynamic=True)(f)
+
+        out = run(f)
+        optout = run(optf)
+
+        self.assertEqual(out, optout)
+
 
 class MockFXGraphCache:
     """
@@ -6389,14 +6701,14 @@ class MockFXGraphCache:
             gm._fx_graph_cache_key = key
             return gm
 
-    def _lookup_graph(self, key, inputs, local, remote_cache):
+    def load_with_key(self, key, debug_lines, inputs, local, remote_cache, is_backward):
         gm = self.cache.get(key)
         if gm is not None:
             gm = make_boxed_func(gm)
-        return gm
+        return gm, {}
 
     def post_compile(self, gm, inputs, cudagraphs):
-        pass
+        return gm
 
 
 # The following tests fail in strict caching mode (i.e. they bypass or
@@ -6467,8 +6779,8 @@ class TestAOTAutogradWithCache(TestAOTAutogradWithDynamo):
         self.inductor_cache = MockFXGraphCache()
         AOTAutogradCache.clear()
         with patch(
-            "torch._inductor.codecache.FxGraphCache._lookup_graph",
-            new=self.inductor_cache._lookup_graph,
+            "torch._inductor.codecache.FxGraphCache.load_with_key",
+            new=self.inductor_cache.load_with_key,
         ), patch(
             "torch._inductor.codecache.FxGraphCache.post_compile",
             new=self.inductor_cache.post_compile,
