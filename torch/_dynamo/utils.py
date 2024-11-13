@@ -1401,10 +1401,22 @@ def is_namedtuple_cls(cls):
     try:
         if issubclass(cls, tuple):
             module = getattr(cls, "__module__", None)
-            return module in ("torch.return_types", "torch.autograd.forward_ad") or (
-                isinstance(getattr(cls, "_fields", None), tuple)
-                and callable(getattr(cls, "_make", None))
-            )
+            if module in ("torch.return_types", "torch.autograd.forward_ad"):
+                return True
+            if isinstance(getattr(cls, "_fields", None), tuple) and callable(
+                getattr(cls, "_make", None)
+            ):
+                if cls.__bases__ == (tuple,):
+                    # This is a namedtuple type directly created by `collections.namedtuple(...)`
+                    return True
+                if (
+                    len(cls.__bases__) >= 2
+                    and cls.__bases__[-1] is tuple
+                    and is_namedtuple_cls(cls.__bases__[0])
+                    # For subclasses of namedtuple, the __new__ method should not be customized
+                    and cls.__new__ is cls.__bases__[0].__new__
+                ):
+                    return True
     except TypeError:
         pass
     return False
