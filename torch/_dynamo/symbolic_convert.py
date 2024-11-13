@@ -2198,8 +2198,7 @@ class InstructionTranslatorBase(
             )
 
             value = LazyVariableTracker.create(
-                LazySymNodeFormatString(value, fmt_spec),
-                source=value.source,
+                LazySymNodeFormatString(value, fmt_spec), source=value.source
             )
             self.push(value)
             return
