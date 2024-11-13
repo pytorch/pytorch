@@ -975,11 +975,6 @@ class GuardBuilder(GuardBuilderBase):
                         guard_manager_enum,
                     )
                 else:
-                    if isinstance(source.index, ConstDictKeySource):
-                        raise RuntimeError(
-                            "Expecting clean index here. Likely Dynamo forgot to mark"
-                            " a dict as guard_on_key_order"
-                        )
                     out = base_guard_manager.dict_getitem_manager(
                         key=source.index,
                         source=source_name,
