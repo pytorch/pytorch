@@ -53,6 +53,7 @@
 #include <utility>
 #include <vector>
 
+// clang-format off
 C10_DEFINE_bool(
     torch_jit_execution_plan_reuse_code_graph,
     false,
