@@ -38,6 +38,7 @@ PyObject* Dim_init() {
 #include "python_variable_simple.h"
 
 #if IS_PYTHON_3_11_PLUS
+
 #define Py_BUILD_CORE
 #include "internal/pycore_opcode.h"
 #undef Py_BUILD_CORE

@@ -15,7 +15,7 @@
 static struct PyModuleDef _module =
     {PyModuleDef_HEAD_INIT, "torch._C._dynamo", "", -1, nullptr};
 
-PYBIND11_MAKE_OPAQUE(std::vector<uint8_t>);
+PYBIND11_MAKE_OPAQUE(std::vector<uint8_t>)
 
 namespace torch::dynamo {
 
