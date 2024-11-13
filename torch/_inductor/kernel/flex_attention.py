@@ -628,7 +628,7 @@ def _get_rocm_config(query, mode: str) -> Tuple[int, int, int, int]:
                 fwd_config = (64, 64, 4, 1)
             else:
                 fwd_config = (128, 64, 8, 1)
-            fwd_config = _rocm_default_fwd_config.get((dtype, head_dim), fwd_config)
+            fwd_config = _rocm_default_config.get((dtype, head_dim), fwd_config)
         else:  # modest hardware or extremely large head_dim
             if dtype == torch.float32:
                 fwd_config = (32, 16, 4, 1)
@@ -663,13 +663,9 @@ def _get_nv_config(query, mode: str) -> Tuple[int, int, int, int]:
             else:
                 fwd_config = (128, 64, 4, 3)
             if capability > (9, 0):
-                fwd_config = _h100_default_config.get(
-                    (dtype, head_dim), default_config
-                )
+                fwd_config = _h100_default_config.get((dtype, head_dim), default_config)
             elif capability > (8, 0):
-                fwd_config = _a100_default_fwd_config.get(
-                    (dtype, head_dim), default_config
-                )
+                fwd_config = _a100_default_config.get((dtype, head_dim), default_config)
         else:  # modest hardware or extremely large head_dim
             if dtype == torch.float32:
                 fwd_config = (32, 16, 4, 3)
