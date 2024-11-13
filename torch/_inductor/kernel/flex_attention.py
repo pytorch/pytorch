@@ -1739,6 +1739,8 @@ def flex_attention_backward(*args, **kwargs):
     joint_placeholder_inps = fwd_placeholder_inps + [
         create_placeholder("grad_score_mod", dtype, device)
     ]
+    # Sometimes we have weird unused nodes here
+    joint_graph.graph_module.graph.eliminate_dead_code()
     joint_subgraph_buffer, *_ = build_subgraph_buffer(
         joint_placeholder_inps + list(score_mod_other_buffers), joint_graph
     )

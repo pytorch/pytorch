@@ -933,8 +933,8 @@ def trace_flex_attention_backward(
     fw_example_vals = [query.new_zeros((), requires_grad=query.requires_grad)] + [
         query.new_zeros((), dtype=torch.int) for _ in range(4)
     ]
-    bw_example_vals = fw_example_vals + [torch.zeros((), dtype=query.dtype)]
-    mask_example_vals = [torch.zeros((), dtype=torch.int) for _ in range(4)]
+    bw_example_vals = fw_example_vals + [query.new_zeros(())]
+    mask_example_vals = [query.new_zeros((), dtype=torch.int) for _ in range(4)]
     mask_graph = block_mask[-1]
     with TransformGetItemToIndex():
         fw_graph = reenter_make_fx(fw_graph)(*fw_example_vals, *score_mod_other_buffers)
