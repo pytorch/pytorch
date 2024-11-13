@@ -24,16 +24,16 @@ def get_processes_running_python_tests() -> list[Any]:
             pass
     return python_processes
 
-
 def get_per_process_cpu_info() -> list[dict[str, Any]]:
     processes = get_processes_running_python_tests()
     per_process_info = []
     for p in processes:
         info = {
             "pid": p.pid,
-            "cmd": " ".join(p.cmdline()),
+            "cmd": p.cmdline(),
             "cpu_percent": p.cpu_percent(),
             "rss_memory": p.memory_info().rss,
+            "ppid":p.ppid,
         }
 
         # https://psutil.readthedocs.io/en/latest/index.html?highlight=memory_full_info
@@ -49,7 +49,6 @@ def get_per_process_cpu_info() -> list[dict[str, Any]]:
         except psutil.AccessDenied as e:
             # It's ok to skip this
             pass
-
         per_process_info.append(info)
     return per_process_info
 
@@ -84,19 +83,8 @@ def rocm_get_per_process_gpu_info(handle: Any) -> list[dict[str, Any]]:
 if __name__ == "__main__":
     nvml_handle = None
     amdsmi_handle = None
-    isValid = True
-    try:
-        import gputil
-
-    except ModuleNotFoundError:
-        print("gputil not found, skipping gputil stats")
-        # no pynvml avaliable, probably because not cuda
-        isValid = False
-        pass
-
     try:
         import pynvml  # type: ignore[import]
-
         try:
             pynvml.nvmlInit()
             nvml_handle = pynvml.nvmlDeviceGetHandleByIndex(0)
@@ -107,7 +95,6 @@ if __name__ == "__main__":
         pass
     try:
         import amdsmi  # type: ignore[import]
-
         try:
             amdsmi.amdsmi_init()
             amdsmi_handle = amdsmi.amdsmi_get_processor_handles()[0]
@@ -161,11 +148,6 @@ if __name__ == "__main__":
                 stats["total_gpu_mem_utilization"] = amdsmi.amdsmi_get_gpu_activity(
                     amdsmi_handle
                 )["umc_activity"]
-            if isValid:
-                gpus = gputil.getGPUs()
-                # Print the GPU names and indices
-                for i, gpu in enumerate(gpus):
-                    stats[f"gputil-{i}"]= gpu.load*100
         except Exception as e:
             stats = {
                 "time": datetime.datetime.now(timezone.utc).isoformat("T") + "Z",
