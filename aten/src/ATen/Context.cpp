@@ -529,6 +529,10 @@ void Context::setDisplayVmapFallbackWarnings(bool enabled) {
   display_vmap_fallback_warnings_ = enabled;
 }
 
+bool Context::isDefaultMobileCPUAllocatorSet() {
+  return prev_allocator_ptr_ != nullptr;
+}
+
 void Context::setDefaultMobileCPUAllocator() {
   TORCH_CHECK(prev_allocator_ptr_ == nullptr,
       "Already within the scope of another non-default cpu allocator."
