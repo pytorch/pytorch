@@ -729,6 +729,7 @@ if torch._C._has_mkldnn:
 
     def _recover_linear():
         # convert reshape+linear+reshape to a single linear for applying fusion path.
+        # concat_linear (pass_number=0) -> mkldnn_linear_pack (pass_numer=1) -> _recover_linear(pass_number=2)
         @register_freezing_graph_pattern(
             CallFunction(
                 aten.reshape.default,
