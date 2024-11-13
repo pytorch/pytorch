@@ -421,10 +421,8 @@ static inline void construct_attr_by_post_op(
   TORCH_INTERNAL_ASSERT(
       is_unary_post_op_only || is_none_post_op,
       "Currently, quantization backend for Intel GPU only supports convolution or convolution with unary post operation like ReLU");
-  if (binary_post_op == "none") {
-    construct_attr_for_unary(
-        unary_post_op, unary_post_op_args, unary_post_op_algorithm, attr);
-  }
+  construct_attr_for_unary(
+      unary_post_op, unary_post_op_args, unary_post_op_algorithm, attr);
 }
 
 } // namespace at::native::onednn
