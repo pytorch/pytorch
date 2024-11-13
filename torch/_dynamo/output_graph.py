@@ -29,6 +29,7 @@ from torch._guards import (
     Source,
     TracingContext,
 )
+from torch._subclasses.fake_tensor import FakeTensor
 from torch._utils_internal import signpost_event
 from torch.fx._lazy_graph_module import _make_graph_module  # type: ignore[attr-defined]
 from torch.fx.experimental._backward_state import BackwardState
@@ -1626,14 +1627,15 @@ class OutputGraph:
     def remove_specialized_graphargs(self) -> None:
         # Import here to prevent circular import
         from torch._dynamo.symbolic_convert import TensorifyState
-        from torch._subclasses.fake_tensor import FakeTensor
 
         for node in self.graph.nodes:
             example_value = node.meta.get("example_value")
             if (
                 isinstance(example_value, FakeTensor)
                 and example_value.item_memo is not None
-                and TensorifyState.should_specialize(example_value.item_memo.node._expr.name)
+                and TensorifyState.should_specialize(
+                    example_value.item_memo.node._expr.name
+                )
             ):
                 for u in list(node.users):
                     u.replace_all_uses_with(guard_scalar(example_value.item_memo))

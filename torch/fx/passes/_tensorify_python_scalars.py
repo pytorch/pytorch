@@ -297,7 +297,7 @@ def tensorify_python_scalars(
         ):
             # At this point we've lost the back pointer to
             # what f_local this placeholder points to. Instead,
-            # we will rely on the index to specialize when we
+            # we will rely on the symfloat name to specialize when we
             # restart analysis.
             TensorifyState.specialize(name)
             should_restart = True
