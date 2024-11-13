@@ -14148,6 +14148,34 @@ dedent """
 
             FileCheck().check_not("prim::PythonOp").run(cu.test.graph)
 
+    def test_parse_generator(self):
+        seed = 2024
+        jit_graph = parse_ir(
+            f"""
+            graph():
+              %0 : float = prim::Constant[value=-0.31622776601683789]()
+              %1 : float = prim::Constant[value=0.31622776601683789]()
+              %2 : Generator = prim::Constant[value=torch.Generator(device="cpu", seed={seed})]()
+              %3 : NoneType = prim::Constant()
+              %4 : int[] = prim::Constant[value=[]]()
+              %5 : int = prim::Constant[value=6]()
+              %6 : Device = prim::Constant[value="cpu"]()
+              %7 : Tensor = aten::empty(%4, %5, %3, %6, %3, %3)
+              %8 : Float() = aten::uniform(%7, %0, %1, %2)
+              return (%8)
+            """,
+        )
+
+        node = next(
+            n
+            for n in jit_graph.nodes()
+            if isinstance(n.output().type(), torch._C._GeneratorType)
+        )
+        assert isinstance(node.output().type(), torch._C._GeneratorType)
+        g = node.ival("value")
+        assert isinstance(g, torch.Generator)
+        assert g.initial_seed() == seed
+
     def test_early_return_rewrite(self):
         def test_foo(x: bool):
             if x:
