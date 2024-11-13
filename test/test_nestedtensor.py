@@ -1289,6 +1289,7 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
             subtest(torch.isposinf, name="isposinf"),
             subtest(torch.isneginf, name="isneginf"),
             subtest(torch.isnan, name="isnan"),
+            subtest(torch.sqrt, name="sqrt"),
         ],
     )
     def test_unary_funcs(self, device, func):
@@ -3711,21 +3712,8 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
 
         with tempfile.TemporaryFile() as f:
             torch.save(nt, f)
-            safe_globals = [
-                torch.nested._internal.nested_tensor.NestedTensor,
-                torch.nested._internal.nested_tensor._rebuild_njt,
-                set,
-                torch._dynamo.decorators._DimRange,
-            ]
             f.seek(0)
-            ctx = (
-                torch.serialization.safe_globals(safe_globals)
-                if weights_only
-                else contextlib.nullcontext()
-            )
-
-            with ctx:
-                nt_loaded = torch.load(f, weights_only=weights_only)
+            nt_loaded = torch.load(f, weights_only=weights_only)
 
             self.assertIsNot(nt, nt_loaded)
             # we expect a new offsets tensor -> different nested int upon load
@@ -7859,7 +7847,6 @@ FORWARD_FAILURES = [
             "nn.functional.softplus",
             "nn.functional.softshrink",
             "nn.functional.threshold",
-            "rad2deg",
             # binary
             "__rsub__",
             "complex",
