@@ -345,8 +345,19 @@ class ClosureVariable(UnknownVariable):
 
 
 class NewCellVariable(VariableTracker):
-    def __init__(self, **kwargs) -> None:
+    # If the cell existed before Dynamo tracing started, this will be the
+    # VariableTracker that represents the cell content.
+    #
+    # Note that all mutation to the cell (i.e., its content) will be buffered in
+    # SideEffects, rather than being reflected here. One can think of
+    # `NewCellVariable` as a special case for `UserDefinedObjectVariable`.
+    pre_existing_contents: Optional[VariableTracker]
+
+    def __init__(
+        self, pre_existing_contents: Optional[VariableTracker] = None, **kwargs
+    ) -> None:
         super().__init__(**kwargs)
+        self.pre_existing_contents = pre_existing_contents
 
 
 class NewGlobalVariable(VariableTracker):

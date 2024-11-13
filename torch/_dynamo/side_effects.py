@@ -5,6 +5,7 @@ import inspect
 import warnings
 import weakref
 from collections.abc import MutableMapping
+from types import CellType
 from typing import Any, Dict, List, Optional, Set, Type
 
 import torch.nn
@@ -160,7 +161,11 @@ class SideEffects:
 
     def load_cell(self, cellvar):
         assert isinstance(cellvar, variables.NewCellVariable)
-        return self.load_attr(cellvar, "cell_contents")
+        if self.has_pending_mutation_of_attr(cellvar, "cell_contents"):
+            return self.load_attr(cellvar, "cell_contents")
+        if cellvar.pre_existing_contents:
+            return cellvar.pre_existing_contents
+        unimplemented("cannot read uninitialized cell")
 
     def load_global(self, gvar: VariableTracker, name: str):
         assert isinstance(gvar, variables.VariableTracker)
@@ -298,13 +303,16 @@ class SideEffects:
         self.keepalive.append(obj)
         return variable
 
-    def track_cell_existing(self, source: Source, item: Any):
+    def track_cell_existing(
+        self, source: Source, cell: CellType, contents: VariableTracker
+    ):
         variable = variables.NewCellVariable(
             mutation_type=AttributeMutationExisting(),
+            pre_existing_contents=contents,
             source=source,
         )
-        self.id_to_variable[id(item)] = variable
-        self.keepalive.append(item)
+        self.id_to_variable[id(cell)] = variable
+        self.keepalive.append(cell)
         return variable
 
     def track_global_existing(self, source: Source, item: Any):

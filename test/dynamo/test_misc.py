@@ -3845,6 +3845,24 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual(0, res[1])
         self.assertEqual(10, res[2])
 
+    def test_cell_captured_by_existing_func_but_not_root_frame(self):
+        x = torch.ones(1)
+
+        def get_inner():
+            def inner():
+                return x + x
+
+            # Calling `inner` so Dynamo won't skip this frame.
+            return inner(), inner
+
+        @torch.compile
+        def root():
+            return get_inner()
+
+        res, inner = root()
+        self.assertTrue(torch.allclose(x + x, res))
+        self.assertTrue(torch.allclose(inner(), res))
+
     def test_top_package_import(self):
         def fn(x):
             import torch.fx
