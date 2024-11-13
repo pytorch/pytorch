@@ -1410,7 +1410,7 @@ if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-baze
   (cd test && python -c "import torch; print(torch.__config__.show())")
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
 fi
-if [[ "${BUILD_ENVIRONMENT}" == *numpy-2* ]]; then
+if [[ "${TEST_CONFIG}" == *numpy_2* ]]; then
   # Install numpy-2.0.2 and test inductor tracing
   python -mpip install --pre numpy==2.0.2
   python test/run_test.py --include inductor/test_unspec.py
