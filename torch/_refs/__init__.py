@@ -3275,6 +3275,11 @@ def native_layer_norm(
     return (out, mean, rstd)
 
 
+@torch._subclasses.fake_impls.register_op_impl(aten.native_layer_norm.default)
+def native_layer_norm_fake(fake_mode, func, *args, **kwargs):
+    return native_layer_norm(*args)
+
+
 # TODO: Adding this as a meta function causes functorch tests to fail when compiled with debug mode.
 # test/test_eager_transforms.py::TestFunctionalizeCPU::test_functionalize_fx_transpose_simple_cpu
 @register_decomposition(aten.permute)
