@@ -2112,12 +2112,15 @@ def must_add_nn_module_guards(guard):
 class DeletedGuardFn:
     pass
 
+
 class DeletedGuardManagerWrapper(GuardManagerWrapper):
     def __init__(self):
         super().__init__()
         self.root.add_always_false_guard("always_false")
 
+
 deleted_guard_manager = DeletedGuardManagerWrapper()
+
 
 # NB: Naively, you'd expect this to only be a function that produces
 # the callable that constitutes the guard.  However, there is some
@@ -2397,20 +2400,22 @@ class CheckFunctionManager:
         self.guard_manager.extra_state = None
         self.guard_manager.no_tensor_aliasing_sources = no_tensor_aliasing_names
 
-    def invalidate(self):
+    def invalidate(self, obj_str=None):
         # Some tests reveal that CheckFunctionManager has no attribute
         # guard_manager, but this case should not be of any concern.
         # This case doesn't seem easy to repro.
         if (
             hasattr(self, "guard_manager")
             and self.guard_manager is not DeletedGuardFn
+            # not isinstance(self.guard_manager, DeletedGuardManagerWrapper)
             and (cache_entry := self.guard_manager.cache_entry) is not None
             and (extra_state := self.guard_manager.extra_state) is not None
         ):
+            print(f"Invalidating {obj_str}", flush=True)
             assert isinstance(cache_entry, CacheEntry)
             assert isinstance(extra_state, ExtraState)
             extra_state.invalidate(cache_entry, deleted_guard_manager)
-            # cache_entry.guard_manager = DeletedGuardManagerWrapper()
+            # breakpoint()
             self.guard_manager.cache_entry = None
             self.guard_manager.extra_state = None
             self.guard_manager = DeletedGuardFn  # type: ignore[assignment]
@@ -2423,7 +2428,8 @@ class CheckFunctionManager:
                 # function, which will delete the callbacks as well. Therefore,
                 # we are using a finalizer which is kept alive.
                 self._weakrefs[id(obj)] = weakref.ref(obj)
-                weakref.finalize(obj, self.invalidate)
+                weakref.finalize(obj, functools.partial(self.invalidate, obj_str=str(obj)))
+                # weakref.finalize(obj, self.invalidate)
         except TypeError:
             pass  # cannot weakref bool object
         return id(obj)

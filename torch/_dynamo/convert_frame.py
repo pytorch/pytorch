@@ -833,6 +833,12 @@ def _compile(
         if output.export and output.is_empty_graph():
             return None
 
+        nonlocal cache_entry
+        old_cache_entry = cache_entry
+        while cache_entry:
+            cache_entry = cache_entry.next
+        cache_entry = old_cache_entry
+
         assert output.guards is not None
         CleanupManager.instance[out_code] = output.cleanups
         nonlocal cache_entry
@@ -841,7 +847,6 @@ def _compile(
             cache_entry = cache_entry.next
         cache_entry = old_cache_entry
 
-
         check_fn = CheckFunctionManager(
             output,
             hooks.guard_fail_fn if hooks else None,
@@ -849,6 +854,7 @@ def _compile(
 
         compile_id_str = str(compile_id) if compile_id is not None else "Unknown"
         annotation_str = "Torch-Compiled Region: " + compile_id_str
+        print("Generating", code, "   TO  ", out_code, flush=True)
         guarded_code = GuardedCode(
             out_code, check_fn.guard_manager, compile_id, annotation_str  # type: ignore[arg-type]
         )

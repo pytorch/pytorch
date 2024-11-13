@@ -3741,7 +3741,7 @@ static void* _torchinductor_pyobject_tensor_data_ptr(PyObject* obj) {
 
 void* convert_to_root_guard_manager(py::object root) {
   // For invalidated guards, return nullptr
-  if (root.is(py::none())){
+  if (root.is(py::none())) {
     return nullptr;
   }
   RootGuardManager* root_mgr = std::move(root).cast<RootGuardManager*>();
@@ -3861,7 +3861,8 @@ PyObject* torch_c_dynamo_guards_init() {
   py::class_<NOT_NONE, LeafGuard, std::shared_ptr<NOT_NONE>>(py_m, "NOT_NONE")
       .def(py::init<py::list>())
       .def("__call__", &NOT_NONE::check);
-  py::class_<ALWAYS_FALSE, LeafGuard, std::shared_ptr<ALWAYS_FALSE>>(py_m, "ALWAYS_FALSE")
+  py::class_<ALWAYS_FALSE, LeafGuard, std::shared_ptr<ALWAYS_FALSE>>(
+      py_m, "ALWAYS_FALSE")
       .def(py::init<py::list>())
       .def("__call__", &ALWAYS_FALSE::check);
   py::class_<
