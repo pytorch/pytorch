@@ -40,6 +40,7 @@
 
 #include <ATen/CompositeExplicitAutogradFunctions.h>
 
+// clang-format off
 C10_DEFINE_bool(
     static_runtime_enable_fast_math,
     true,
@@ -673,7 +674,7 @@ REGISTER_OPERATOR_FUNCTOR(
              &clamp_min,
              &clamp_max,
              &nan,
-             &output_size})
+             &output_size});
       };
     })
 
