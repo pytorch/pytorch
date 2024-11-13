@@ -176,7 +176,7 @@ class SkipNonTensorTests(torch._dynamo.test_case.TestCase):
             _variable_2 = 0
 
             mod = MyModule(mode=mode)
-            model = torch._dynamo.optimize(backend="eager", nopython=mode != 6)(mod)
+            model = torch.compile(mod, backend="eager", fullgraph=mode != 6)
             assert _variable == 0
             assert _variable_2 == 0
 
