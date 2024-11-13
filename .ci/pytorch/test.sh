@@ -46,7 +46,7 @@ function monitor_gpu_utilization {
 
 # Function to start GPU monitoring in the background
 function start_gpu_monitoring {
-  TEST_REPORTS_DIR=$(pwd)/test/test-reports
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports/check
   mkdir -p "$TEST_REPORTS_DIR"
 
   monitor_gpu_utilization &
@@ -67,12 +67,13 @@ function stop_gpu_monitoring {
     fi
 }
 
-# Trap EXIT to ensure GPU monitoring stops if the script exits
-trap stop_gpu_monitoring EXIT
 
 if command -v nvidia-smi &> /dev/null; then
   # Start GPU monitoring in the background
   start_gpu_monitoring
+
+  # Trap EXIT to ensure GPU monitoring stops if the script exits
+  trap stop_gpu_monitoring EXIT
 fi
 
 # Do not change workspace permissions for ROCm CI jobs
