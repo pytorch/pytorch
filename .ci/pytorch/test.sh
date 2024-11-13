@@ -10,7 +10,7 @@ set -ex
 export TERM=vt100
 
 TEST_REPORTS_CHECK=$(pwd)/test/test-reports/check
-LOG_FILE="gpu_utilization.log"
+LOG_FILE="test_time.log"
 
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
@@ -562,24 +562,31 @@ test_perf_for_dashboard() {
   done
 }
 
-record_timing_and_pid() {
-  mkdir -p "$TEST_REPORTS_DIR"
+record_time() {
   local start_time end_time
   local command="$*"
 
   # Get start time
-  start_time=$(date +%s)
+  start_time=$(date +"%Y-%m-%d %H:%M:%S")
 
   # Execute the command passed as arguments
   "$@"
+  local status=$?  # Capture the exit status
 
   # Get end time
-  end_time=$(date +%s)
+  end_time=$(date +"%Y-%m-%d %H:%M:%S")
 
-  # Print the details
-  echo "TestName: $command, Start Time: $(date -d @$start_time +'%Y-%m-%d %H:%M:%S'), End Time: $(date -d @$end_time +'%Y-%m-%d %H:%M:%S')"
-  echo "{\"test-name\": \"$command\", \"start_time\": \"$(date -d @$start_time +'%Y-%m-%d %H:%M:%S')\", \"end_time\": \"$(date -d @$end_time +'%Y-%m-%d %H:%M:%S')\"}" > "$TEST_REPORTS_CHECK/$LOG_FILE"
+  if [ $status -ne 0 ]; then
+    echo "TestName: $command, Start Time: $start_time, End Time: $end_time, Status: Failed"
+    echo "{\"test-name\": \"$command\", \"start_time\": \"$start_time\", \"end_time\": \"$end_time\", \"status\": \"failed\"}" >> "$TEST_REPORTS_DIR/$LOG_FILE"
+  else
+    echo "TestName: $command, Start Time: $start_time, End Time: $end_time, Status: Success"
+    echo "{\"test-name\": \"$command\", \"start_time\": \"$start_time\", \"end_time\": \"$end_time\", \"status\": \"success\"}" >> "$TEST_REPORTS_DIR/$LOG_FILE"
+  fi
+
+  return $status
 }
+
 
 test_single_dynamo_benchmark() {
   # Usage: test_single_dynamo_benchmark inductor_inference huggingface 0 --args-for-script
@@ -1498,16 +1505,16 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
     PYTHONPATH=$(pwd)/torchbench test_dynamo_benchmark torchbench "$id"
   fi
 elif [[ "${TEST_CONFIG}" == *inductor_cpp_wrapper* ]]; then
-  install_torchaudio cuda
-  install_torchvision
-  checkout_install_torchbench hf_T5 llama moco
-  PYTHONPATH=$(pwd)/torchbench test_inductor_cpp_wrapper
+  record_time install_torchaudio cuda
+  record_time install_torchvision
+  record_time checkout_install_torchbench hf_T5 llama moco
+  record_time PYTHONPATH=$(pwd)/torchbench test_inductor_cpp_wrapper
 elif [[ "${TEST_CONFIG}" == *inductor* ]]; then
   install_torchvision
-  test_inductor_shard "${SHARD_NUMBER}"
+  record_time test_inductor_shard "${SHARD_NUMBER}"
   if [[ "${SHARD_NUMBER}" == 1 ]]; then
     if [[ "${BUILD_ENVIRONMENT}" != linux-jammy-py3.9-gcc11-build ]]; then
-      test_inductor_distributed
+      record_time test_inductor_distributed
     fi
   fi
 elif [[ "${TEST_CONFIG}" == *dynamo_wrapped* ]]; then
