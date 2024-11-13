@@ -2570,7 +2570,7 @@ else:
     def test_cdist_grad_p_lt_1_no_nan(self, device):
         for p in [0.99, 0.7, 0.5, 0.1, 0.01]:
             x = torch.randn(1, 2, device=device)
-            y = x.clone().detach() + torch.tensor([[1., 0.]], device=device)
+            y = x.detach().clone() + torch.tensor([[1., 0.]], device=device)
             x.requires_grad = True
             y.requires_grad = True
             result = torch.cdist(x, y, p=p)
@@ -3139,27 +3139,6 @@ else:
         x[1] = True
         self.assertEqual(x, torch.tensor([False, True], dtype=torch.bool, device=device))
 
-    # FIXME: move to shape ops test suite
-    def test_unfold_all_devices_and_dtypes(self, device):
-        for dt in all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16):
-
-            if dt == torch.bool:
-                x = torch.empty((0, 1, 3, 0), dtype=dt, device=device)
-                self.assertEqual((0, 1, 1, 0, 3), x.unfold(2, 3, 2).shape)
-            else:
-                x = torch.empty((0, 1, 3, 0), dtype=dt, device=device)
-                self.assertEqual((0, 1, 1, 0, 3), x.unfold(2, 3, 2).shape)
-
-    # FIXME: move to shape ops test suite
-    def test_unfold_scalars(self, device):
-        x = torch.tensor(0.5, device=device)
-        # unfold on a 0-dimensional tensor should always return a 1-d dimensional
-        # tensor of shape [size] (i.e., the second parameter to unfold)
-
-        self.assertEqual(torch.empty(0, device=device), x.unfold(0, 0, 1))
-        self.assertEqual(torch.empty(0, device=device), x.unfold(0, 0, 2))
-        self.assertEqual(torch.tensor([0.5], device=device), x.unfold(0, 1, 1))
-
     # FIXME: move to data movement test suite
     def test_copy_all_dtypes_and_devices(self, device):
         from copy import copy
@@ -3485,7 +3464,7 @@ else:
             with DeterministicGuard(True):
                 y0 = torch.index_copy(x, dim, index, src)
 
-            x0 = x.clone().detach()
+            x0 = x.detach().clone()
             index_list = index.tolist()
             for i in range(len(index_list)):
                 if dim == 0:
@@ -10662,7 +10641,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             self.assertEqual(t1.foo, "bar")
 
             if t1.is_floating_point():
-                t3 = t1.clone().detach().requires_grad_(True)
+                t3 = t1.detach().clone().requires_grad_(True)
                 out = t3 * 2
                 torch.utils.swap_tensors(t3, t2)
                 with self.assertRaisesRegex(RuntimeError, "AccumulateGrad node that was poisoned by swap_tensors"):

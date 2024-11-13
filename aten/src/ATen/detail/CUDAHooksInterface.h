@@ -75,7 +75,7 @@ struct TORCH_API CUDAHooksInterface : AcceleratorHooksInterface {
   }
 
   Generator getNewGenerator(
-      C10_UNUSED DeviceIndex device_index = -1) const override {
+      [[maybe_unused]] DeviceIndex device_index = -1) const override {
     TORCH_CHECK(
         false,
         "Cannot get CUDA generator without ATen_cuda library. ",

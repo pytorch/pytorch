@@ -9,6 +9,7 @@
 //
 #pragma once
 
+#include <c10/util/env.h>
 #include <c10/util/CallOnce.h>
 #include <c10/util/StringUtil.h>
 
@@ -49,10 +50,13 @@ inline OstreamPtr get_stream(const std::string& filename) {
 
 template<class... Types>
 static void TunableLog(int level, Types... args) {
-  static const char *env_file = getenv("PYTORCH_TUNABLEOP_VERBOSE_FILENAME");
-  static const char *env_verbose = getenv("PYTORCH_TUNABLEOP_VERBOSE");
-  static int level_user = env_verbose ? atoi(env_verbose) : 0;
-  static auto streamptr = detail::get_stream(env_file ? env_file : "err");
+  static const auto env_file =
+      c10::utils::get_env("PYTORCH_TUNABLEOP_VERBOSE_FILENAME");
+  static const auto env_verbose =
+      c10::utils::get_env("PYTORCH_TUNABLEOP_VERBOSE");
+  static int level_user = env_verbose ? stoi(env_verbose.value()) : 0;
+  static auto streamptr =
+      detail::get_stream(env_file ? env_file.value() : "err");
   if (level_user >= level) {
     (*streamptr) << c10::str(args...) << std::endl;
   }
