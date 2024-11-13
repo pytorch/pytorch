@@ -272,6 +272,42 @@ void copy_device_to_device(TensorIterator& iter,
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
+/**
+ * @brief Determines if two tensor size arrays are broadcast-compatible according to PyTorch's broadcasting rules.
+ *
+ * Broadcasting rules:
+ * - Two dimensions are compatible if they are equal or if either of them is `1`.
+ * - Tensors are broadcast-compatible if all dimensions (from last to first) satisfy this rule.
+ *
+ * @param tensor1 The first tensor
+ * @param tensor2 The second tensor 
+ * @return true if the tensors are broadcast-compatible, false otherwise.
+ *
+ * Example:
+ * - can_broadcast({10, 5}, {5}) returns true (5 is compatible with 10x5).
+ * - can_broadcast({3, 1, 5}, {2, 5}) returns false (3 is incompatible with 2).
+ */
+ bool broadcast_required(const at::Tensor& tensor1, const at::Tensor& tensor2) {
+  // If shapes are identical, broadcasting is not needed
+  if (tensor1.sizes() == tensor2.sizes()) {
+    return false;
+  }
+
+  // Check compatibility from the last dimensions backward
+  auto it1 = tensor1.sizes().rbegin();
+  auto it2 = tensor2.sizes().rbegin();
+
+  // Compare dimensions from the last to the first
+  while (it1 != tensor1.sizes().rend() && it2 != tensor2.sizes().rend()) {
+      if (*it1 != *it2 && *it1 != 1 && *it2 != 1) {
+          return false; 
+      }
+      ++it1;
+      ++it2;
+  }
+  return true;
+}
+
 static bool copy_requires_temporaries(TensorIterator& iter, bool p2p_enabled) {
   Device dst_device = iter.device(0);
   Device src_device = iter.device(1);
@@ -284,9 +320,9 @@ static bool copy_requires_temporaries(TensorIterator& iter, bool p2p_enabled) {
 
   bool same_dtype = iter.dtype(0) == iter.dtype(1);
   bool is_complex = at::isComplexType(iter.dtype(1));
+  bool broadcast =  broadcast_required(iter.tensor(0), iter.tensor(1));
 
-  // Check if the tensor is 1D or 2D and non-contiguous
-  if (iter.ndim() == 2 && same_dtype && !is_complex) {
+  if (iter.ndim() == 2 && same_dtype && !broadcast && !is_complex) {
     const auto& src_tensor = iter.tensor(1);
     const auto& dst_tensor = iter.tensor(0);
 
@@ -319,7 +355,7 @@ static bool copy_requires_temporaries(TensorIterator& iter, bool p2p_enabled) {
         size_t src_pitch = src_stride1 * element_size;
         size_t dst_pitch = dst_stride1 * element_size;
 
-        if (src_pitch >= width_in_bytes && dst_pitch >= width_in_bytes) {
+        if (src_pitch >= width_in_bytes && dst_pitch >= width_in_bytes) {         
             return false; // No need for temporaries
         }
     }
@@ -432,8 +468,7 @@ static bool maybe_enable_p2p_access(Device dst_device, Device src_device) {
     src_pitch = src_stride1 * element_size;
     dst_pitch = dst_stride1 * element_size;
 
-    if (src_pitch >= width_in_bytes && dst_pitch >= width_in_bytes) {
-        // Perform the copy using memcpy2DAsync
+    if (src_pitch >= width_in_bytes && dst_pitch >= width_in_bytes) {   
         at::cuda::memcpy2d_conditional_sync(
             dst,
             src,
