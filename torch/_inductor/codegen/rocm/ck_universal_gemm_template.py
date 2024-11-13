@@ -273,6 +273,14 @@ class CKGemmTemplate(CKTemplate):
                 using BlockGemmPipelineScheduler = ck::BlockGemmPipelineScheduler;
                 using GemmSpecialization = ck::tensor_operation::device::GemmSpecialization;
                 using BlockGemmPipelineVersion = ck::BlockGemmPipelineVersion;
+
+                struct MultiplyMultiplyAdd {
+                    template <typename E, typename C, typename D0, typename D1, typename D2>
+                    __host__ __device__ constexpr void
+                    operator()(E& e, const C& c, const D0& d0, const D1& d1, const D2& d2) const {
+                        e = ck::type_convert<E>(ck::type_convert<float>(c) * ck::type_convert<float>(d0) * ck::type_convert<float>(d1) + ck::type_convert<float>(d2));
+                    }
+                };
             """
         )
         return res
@@ -427,7 +435,7 @@ class CKGemmTemplate(CKTemplate):
             op.c_shuffle_block_transfer_scalar_per_vector_n_per_block,
         )
 
-        if len(self.input_nodes) == 4:
+        if len(self.input_nodes) in (4, 5):
             scale_x = self.input_nodes[2]
             scale_w = self.input_nodes[3]
             if 1 == scale_x.get_numel() and 1 == scale_w.get_numel():
@@ -448,22 +456,34 @@ class CKGemmTemplate(CKTemplate):
             scale_x = None
             scale_w = None
 
+        if len(self.input_nodes) == 5:
+            Bias = self.input_nodes[4]
+            if 1 == scale_x.get_numel() and 1 == scale_w.get_numel():
+                op.c_elementwise_op = "Bilinear"
+            else:
+                op.c_elementwise_op = "MultiplyMultiplyAdd"
+
         if Bias is not None:
-            op.ds_layouts = (torch_layout_to_ck_layout(Bias.get_layout()),)
-            op.ds_element_dtypes = ((self._TORCH_DTYPE_TO_CK[Bias.get_layout().dtype]),)
-            op.c_elementwise_op = "Bilinear"
+            bias_layout = torch_layout_to_ck_layout(Bias.get_layout())
+            bias_dtype = self._TORCH_DTYPE_TO_CK[Bias.get_layout().dtype]
+            op.ds_layouts += (bias_layout,)
+            op.ds_element_dtypes += (bias_dtype,)
+            if scale_w is None:
+                op.c_elementwise_op = "Bilinear"
             # c_shuffle_dtype is also used for adding bias to matmul result
             # before converting down to the result dtype
             op.c_shuffle_dtype = op.acc_dtype
             # this parameter needs to be set accordingly to bias stride for correct accumulation
-            if op.ds_layouts[0] == "Row":
+            if bias_layout == "Row":
                 # bias has (N, ) shape
                 bias_shuffle_block_transfer_scalar_per_vector_n_per_block = (
                     op.c_shuffle_block_transfer_scalar_per_vector_n_per_block
                 )
-            else:
+            elif bias_layout == "Col":
                 # bias has (M, 1) shape
                 bias_shuffle_block_transfer_scalar_per_vector_n_per_block = (1,)
+            else:
+                raise AssertionError("Bias layout is neither row-major nor column-major")
             # ...and the second tuple element corresponds to the bias
             op.c_shuffle_block_transfer_scalar_per_vector_n_per_block += (
                 bias_shuffle_block_transfer_scalar_per_vector_n_per_block
@@ -483,14 +503,20 @@ class CKGemmTemplate(CKTemplate):
 """
         epilogue = None
 
-        if op.c_elementwise_op == "Bilinear":
+        if op.c_elementwise_op == "Bilinear" and scale_w is None:
             epilogue = f"Bilinear {{ {self.alpha}, {self.beta} }}"
 
         elif op.c_elementwise_op == "Scale":
             epilogue = "Scale { (inv_scale_w && inv_scale_x) ? (*inv_scale_w * *inv_scale_x) : 1.0f }"
 
+        elif op.c_elementwise_op == "Bilinear" and scale_w is not None:
+            epilogue = "Bilinear { (inv_scale_w && inv_scale_x) ? (*inv_scale_w * *inv_scale_x) : 1.0f, 1.0f }"
+
         elif op.c_elementwise_op == "MultiplyMultiply":
             epilogue = "MultiplyMultiply {}"
+
+        elif op.c_elementwise_op == "MultiplyMultiplyAdd":
+            epilogue = "MultiplyMultiplyAdd {}"
 
         elif op.c_elementwise_op == "PassThrough":
             epilogue = "PassThrough {}"
@@ -516,7 +542,7 @@ class CKGemmTemplate(CKTemplate):
             a_element_dtype=op.a_element_dtype,
             b_element_dtype=op.b_element_dtype,
             c_element_dtype=op.c_element_dtype,
-            bias_element_dtype=op.ds_element_dtypes[0] if Bias is not None else "",
+            bias_element_dtype=bias_dtype if Bias is not None else "",
             alpha=self.alpha,
             beta=self.beta,
             a_elementwise_op="PassThrough {}",
@@ -524,22 +550,28 @@ class CKGemmTemplate(CKTemplate):
             epilogue=epilogue,
             has_bias=Bias is not None,
             ds_size=1
-            if Bias is not None
+            if op.c_elementwise_op in ("Bilinear", "ScaleAdd")
             else 2
             if op.c_elementwise_op == "MultiplyMultiply"
+            else 3
+            if op.c_elementwise_op == "MultiplyMultiplyAdd"
             else 0,
             ds_names=", ".join(
                 ["Bias"]
-                if Bias is not None
+                if op.c_elementwise_op in ("Bilinear", "ScaleAdd")
                 else ["inv_scale_x", "inv_scale_w"]
                 if op.c_elementwise_op == "MultiplyMultiply"
+                else ["inv_scale_x", "inv_scale_w", "Bias"]
+                if op.c_elementwise_op == "MultiplyMultiplyAdd"
                 else []
             ),
             ds_strides=", ".join(
                 ["LDD"]
-                if Bias is not None
+                if op.c_elementwise_op in ("Bilinear", "ScaleAdd")
                 else ["0", "0"]
                 if op.c_elementwise_op == "MultiplyMultiply"
+                else ["0", "0", "LDD"]
+                if op.c_elementwise_op == "MultiplyMultiplyAdd"
                 else []
             ),
             version_comment=version_comment,

@@ -291,7 +291,7 @@ class TestCKBackend(TestCase):
         K = 256
 
         x = torch.randn(M, K, **tensor_options)
-        w = torch.randn(K, N, **tensor_options)
+        w = torch.randn(N, K, **tensor_options)
 
         bias = None
         if has_bias:
