@@ -81,30 +81,22 @@ int64_t ClosestFactor(int64_t n) {
 
 template <typename T>
 __global__ void RowwiseMomentsCUDAKernel(
-    int64_t C,
-    int64_t HxW,
-    int64_t G,
+    int64_t group_span,
     T eps,
     const T* X,
     T* mean,
     T* rstd,
-    bool use_nchw) {
+    int64_t C) {
   using T_ACC = acc_type<T, true>;
   using WelfordType = WelfordData<T_ACC, int64_t>;
   using WelfordOp =
       WelfordOps<T_ACC, T_ACC, int64_t, thrust::pair<T_ACC, T_ACC>>;
-
+  const int64_t i = blockIdx.x;
   WelfordOp welford_op = {/*correction=*/0, /*take_sqrt=*/false};
   WelfordType val(0, 0, 0, 0);
-  const int64_t n = blockIdx.x / G;
-  const int64_t g = blockIdx.x % G;
-  const int64_t D = C / G;
-  int64_t batch_offset = n * C * HxW;
-  for (int64_t d = 0; d < D; ++d) {
-    for (int64_t hw = threadIdx.x; hw < HxW; hw += blockDim.x) {
-      const int64_t index = batch_offset + (use_nchw ? (g * D + d) * HxW + hw : hw * C + g * D + d);
-      val = welford_op.reduce(val, static_cast<T_ACC>(X[index]), index);
-    }
+  for (int64_t j = threadIdx.x; j < group_span; j += blockDim.x) {
+    const int64_t index = i * group_span + j;
+    val = welford_op.reduce(val, static_cast<T_ACC>(X[index]), index);
   }
   if (blockDim.x <= C10_WARP_SIZE) {
     val = cuda_utils::WarpReduce(val, welford_op);
@@ -125,8 +117,8 @@ __global__ void RowwiseMomentsCUDAKernel(
     T_ACC m1;
     T_ACC m2;
     thrust::tie(m2, m1) = welford_op.project(val);
-    mean[blockIdx.x] = m1;
-    rstd[blockIdx.x] = c10::cuda::compat::rsqrt(m2 + static_cast<T_ACC>(eps));
+    mean[i] = m1;
+    rstd[i] = c10::cuda::compat::rsqrt(m2 + static_cast<T_ACC>(eps));
   }
 }
 
@@ -499,21 +491,17 @@ __global__ void GammaBeta1dBackwardCUDAKernel2(
 
 template <typename T>
 __global__ void ComputeInternalGradientsCUDAKernel(
-    int64_t C,
     int64_t HxW,
     const T* dY,
     const T* X,
     acc_type<T, true>* ds,
-    acc_type<T, true>* db,
-    bool is_nchw) {
+    acc_type<T, true>* db) {
   using T_ACC = acc_type<T, true>;
   const int64_t nc = blockIdx.x;
-  const int64_t n = nc / C;
-  const int64_t c = nc % C;
   T_ACC sum1 = 0;
   T_ACC sum2 = 0;
   for (int64_t hw = threadIdx.x; hw < HxW; hw += blockDim.x) {
-    const int64_t index = is_nchw ? nc * HxW + hw: n * HxW * C + hw * C + c;
+    const int64_t index = nc * HxW + hw;
     sum1 += static_cast<T_ACC>(dY[index]) * static_cast<T_ACC>(X[index]);
     sum2 += static_cast<T_ACC>(dY[index]);
   }
@@ -953,7 +941,7 @@ void GroupNormKernelImplInternal(
   switch (x_format) {
     case MemoryFormat::Contiguous: {
       RowwiseMomentsCUDAKernel<T><<<N * G, num_threads, 0, cuda_stream>>>(
-        C, HxW, G, eps, X_data, mean_data, rstd_data, x_format == MemoryFormat::Contiguous);
+        D * HxW, eps, X_data, mean_data, rstd_data, C);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
       break;
     }
@@ -1286,7 +1274,7 @@ void GroupNormBackwardKernelImplInternal(
   switch (x_format) {
     case MemoryFormat::Contiguous: {
       ComputeInternalGradientsCUDAKernel<T><<<N * C, num_threads, 0, cuda_stream>>>(
-        C, HxW, dY_data, X_data, ds_data, db_data, x_format == MemoryFormat::Contiguous);
+        HxW, dY_data, X_data, ds_data, db_data);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
       break;
     }
