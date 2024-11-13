@@ -22,6 +22,10 @@ _P = ParamSpec("_P")
 
 
 class PointwiseSubgraphLowering(torch.fx.Interpreter):
+    """
+    Lowers a pointwise subgraph to a single set of buffers with a separate
+    lowering object. Errors if buffers are created unexpectedly
+    """
     graph_outputs: Optional[List[ir.IRNode]]
 
     def __init__(
@@ -32,10 +36,6 @@ class PointwiseSubgraphLowering(torch.fx.Interpreter):
         super().__init__(gm)
         self.graph_outputs = None
         self.root_graph = root_graph_lowering
-
-    @property
-    def sizevars(self) -> SizeVarAllocator:
-        return self.root_graph.sizevars
 
     def mark_buffer_mutated(self, name: str) -> None:
         raise SubgraphLoweringException("Mutations are not supported in this context")
