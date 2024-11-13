@@ -2642,12 +2642,6 @@ class InstructionTranslatorBase(
     def fake_mode(self):
         return self.output.tracing_context.fake_mode
 
-    def find_symbolic_locals_name(self, tensor_variable):
-        for key, value in self.symbolic_locals.items():
-            if value is tensor_variable:
-                return key
-        return None
-
     @contextlib.contextmanager
     def strict_translation_mode(self, check_fn: Callable[[VariableTracker], bool]):
         """
