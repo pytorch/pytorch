@@ -843,6 +843,99 @@ def forward(self, x_1):
             )
         )
 
+    def test_sympy_custom_add_binary_search(self):
+        import sympy
+
+        from torch.fx.experimental.sym_node import _binary_search_insert_arg
+
+        a = sympy.Symbol("a")
+        b = sympy.Symbol("b")
+        c = sympy.Symbol("c")
+
+        args = []
+        args = _binary_search_insert_arg([], b)
+        self.assertEqual(args, [b])
+
+        self.assertEqual(_binary_search_insert_arg(args, b), None)
+
+        args = _binary_search_insert_arg(args, a)
+        self.assertEqual(args, [a, b])
+
+        self.assertEqual(_binary_search_insert_arg(args, b), None)
+        self.assertEqual(_binary_search_insert_arg(args, a), None)
+
+        args = _binary_search_insert_arg(args, c)
+        self.assertEqual(args, [a, b, c])
+
+        self.assertEqual(_binary_search_insert_arg(args, a), None)
+        self.assertEqual(_binary_search_insert_arg(args, b), None)
+        self.assertEqual(_binary_search_insert_arg(args, c), None)
+
+        a1 = sympy.Symbol("a1")
+        a2 = sympy.Symbol("a2")
+
+        args = _binary_search_insert_arg(args, a1)
+        self.assertEqual(args, [a, a1, b, c])
+
+        args = _binary_search_insert_arg(args, a2)
+        self.assertEqual(args, [a, a1, a2, b, c])
+
+        c1 = sympy.Symbol("c1")
+        args = _binary_search_insert_arg(args, c1)
+        self.assertEqual(args, [a, a1, a2, b, c, c1])
+
+    def test_sympy_custom_add(self):
+        shape_env = ShapeEnv()
+        s0 = create_symint(shape_env, 2)
+        s1 = create_symint(shape_env, 3)
+        s2 = create_symint(shape_env, 4)
+        sum = s0 + s1
+
+        self.assertTrue(sum.node._optimized_summation)
+
+        def assert_optimized(sym):
+            self.assertTrue(sum.node._optimized_summation)
+
+        def assert_not_optimized(sym):
+            self.assertFalse(getattr(sym.node, "_optimized_summation", False))
+
+        assert_optimized(sum)
+
+        # add duplicate symbol
+        assert_not_optimized(sum + s0)
+
+        # add constant.
+        assert_not_optimized(sum + 1)
+
+        # add new unique symbol, should maintain _optimized_summation property.
+        assert_optimized(sum + s2)
+
+        # add x + (a+b) with no  _optimized_summation on the rhs sum.
+        a = create_symint(shape_env, 10)
+        b = create_symint(shape_env, 11)
+        two_sum = torch.sym_sum([a, b])
+        assert_not_optimized(two_sum)
+        assert_optimized(sum + two_sum)
+
+        # adding two expressions of length >2 that are _optimized_summation.
+        a = s0 + s1 + s2
+        s3 = create_symint(shape_env, 10)
+        s4 = create_symint(shape_env, 20)
+        s5 = create_symint(shape_env, 30)
+        b = s3 + s4 + s5
+        assert_optimized(a)
+        assert_optimized(b)
+        assert_optimized(a + b)
+
+        # same as above but b does not have ordered_summation_of_unique_symbols.
+        s6 = create_symint(shape_env, 11)
+        s7 = create_symint(shape_env, 21)
+        s8 = create_symint(shape_env, 31)
+        b = torch.sym_sum([s6, s7, s8])
+        assert_optimized(a)
+        assert_not_optimized(b)
+        assert_not_optimized(a + b)
+
     def test_sym_max_multi_max_simplify(self):
         shape_env = ShapeEnv()
         u0 = shape_env.create_unbacked_symint()
