@@ -9575,11 +9575,18 @@ class foreach_norm_sample_func(foreach_inputs_sample_func):
         _foreach_inputs_kwargs["requires_grad"] = requires_grad
         _allow_higher_dtype_scalars = kwargs.pop("allow_higher_dtype_scalars", False)
 
-        for num_tensors, ord, out_dtype in product(
+        for num_tensors, ord, out_dtype, intersperse_empty_tensors in product(
             num_input_tensors,
             (0, 1, 2, -1, -2, float('inf'), float('-inf')),
             (None,) + (torch.complex128,) if dtype in complex_types() else (torch.float64,),
+            (True, False),
         ):
+            # inf norm and negative norms on empty tensors is not supported by our reference func vector norm:
+            # linalg.vector_norm cannot compute the inf norm on an empty tensor because the operation does not have an identity
+            if (ord in [float('inf'), float('-inf')] or ord < 0) and intersperse_empty_tensors:
+                continue
+
+            _foreach_inputs_kwargs["intersperse_empty_tensors"] = intersperse_empty_tensors
             input = sample_inputs_foreach(None, device, dtype, num_tensors, zero_size=False, **_foreach_inputs_kwargs)
             disable_fastpath = True
             if ord in (1, 2, float('inf')) and dtype in floating_types_and(torch.half, torch.bfloat16):
@@ -9640,7 +9647,9 @@ class foreach_pointwise_sample_func(foreach_inputs_sample_func):
         _foreach_inputs_kwargs["requires_grad"] = requires_grad
         allow_higher_dtype_scalars = kwargs.pop("allow_higher_dtype_scalars", False)
 
-        for num_tensors, rightmost_arg_type in itertools.product(num_input_tensors, self._rightmost_arg_types):
+        for num_tensors, rightmost_arg_type, intersperse_empty_tensors in itertools.product(
+                num_input_tensors, self._rightmost_arg_types, (True, False)):
+            _foreach_inputs_kwargs["intersperse_empty_tensors"] = intersperse_empty_tensors
             input = sample_inputs_foreach(None, device, dtype, num_tensors, zero_size=False, **_foreach_inputs_kwargs)
             args = [
                 sample_inputs_foreach(None, device, dtype, num_tensors, zero_size=False, **_foreach_inputs_kwargs)
@@ -9653,7 +9662,7 @@ class foreach_pointwise_sample_func(foreach_inputs_sample_func):
                 dtype,
                 num_tensors,
                 zero_size=False,
-                allow_higher_dtype_scalars=allow_higher_dtype_scalars,
+                allow_higher_dtype_scalars=False if intersperse_empty_tensors else allow_higher_dtype_scalars,
                 **_foreach_inputs_kwargs,
             )
             for rightmost_arg in rightmost_arg_list:
@@ -10116,6 +10125,34 @@ foreach_unary_op_db: List[OpInfo] = [
         'sqrt',
         sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
+        supports_autograd=True,
+        supports_inplace_autograd=True,
+        supports_forward_ad=True,
+        backward_requires_result=True,
+        decorators=(
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestMeta",
+                "test_dispatch_meta_inplace",
+                dtypes=integral_types_and(torch.bool),
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestMeta",
+                "test_dispatch_symbolic_meta_inplace",
+                dtypes=integral_types_and(torch.bool),
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestMeta",
+                "test_meta_inplace",
+                dtypes=integral_types_and(torch.bool),
+            ),
+        ),
+    ),
+    ForeachFuncInfo(
+        'rsqrt',
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         supports_autograd=True,
         supports_inplace_autograd=True,
         supports_forward_ad=True,
@@ -11250,7 +11287,7 @@ foreach_reduce_op_db: List[ForeachFuncInfo] = [
 foreach_other_op_db: List[ForeachFuncInfo] = [
     ForeachFuncInfo(
         "lerp",
-        sample_inputs_func=foreach_inputs_sample_func(3, True, False),
+        sample_inputs_func=foreach_inputs_sample_func(3, True, True),
         dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
         supports_autograd=True,
         supports_inplace_autograd=True,
@@ -11280,8 +11317,30 @@ foreach_other_op_db: List[ForeachFuncInfo] = [
                 "test_dispatch_symbolic_meta_inplace",
                 dtypes=integral_types_and(torch.bool),
             ),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace", dtypes=integral_types_and(torch.bool)),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace", dtypes=integral_types_and(torch.bool)),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestMeta",
+                "test_meta_inplace",
+                dtypes=integral_types_and(torch.bool),
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestMeta",
+                "test_meta_outplace",
+                dtypes=integral_types_and(torch.bool),
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestMeta",
+                "test_dispatch_symbolic_meta_inplace_all_strides",
+                dtypes=integral_types_and(torch.bool),
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestMeta",
+                "test_dispatch_symbolic_meta_outplace_all_strides",
+                dtypes=integral_types_and(torch.bool),
+            ),
         ),
     ),
 ]
