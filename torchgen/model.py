@@ -279,6 +279,7 @@ dispatch_keys = [
     DispatchKey.CUDA,
     DispatchKey.MPS,
     DispatchKey.XPU,
+    DispatchKey.SparseXPU,
     DispatchKey.SparseCUDA,
     DispatchKey.SparseCsrCUDA,
     DispatchKey.QuantizedCPU,

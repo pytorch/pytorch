@@ -220,7 +220,7 @@ class TestForeach(TestCase):
             ref_input, ctxmgr = sample.input, nullcontext()
             if inplace:
                 with torch.no_grad():
-                    ref_input = [t.clone().detach() for t in sample.input]
+                    ref_input = [t.detach().clone() for t in sample.input]
                 ctxmgr = InplaceForeachVersionBumpCheck(self, sample.input)
             try:
                 with ctxmgr:
@@ -250,7 +250,7 @@ class TestForeach(TestCase):
         scalar_self_arg: bool,
     ):
         ref_inputs = (
-            [[t.clone().detach() for t in inputs[0]], inputs[1]]
+            [[t.detach().clone() for t in inputs[0]], inputs[1]]
             if is_inplace
             else inputs
         )
@@ -301,7 +301,7 @@ class TestForeach(TestCase):
             if isinstance(arg, (list, tuple)):
                 return [clone(a) for a in arg]
             if torch.is_tensor(arg):
-                return arg.clone().detach().requires_grad_()
+                return arg.detach().clone().requires_grad_()
             else:
                 return arg
 
@@ -370,7 +370,7 @@ class TestForeach(TestCase):
 
             if is_fastpath and scalars:
                 sample = sample.transform(
-                    lambda t: t.clone().detach() if torch.is_tensor(t) else t
+                    lambda t: t.detach().clone() if torch.is_tensor(t) else t
                 )
                 inputs = [sample.input, *sample.args]
                 tensor_values = torch.tensor(scalars)
@@ -493,7 +493,7 @@ class TestForeach(TestCase):
         **kwargs,
     ):
         ref_inputs = (
-            [[t.clone().detach() for t in inputs[0]], inputs[1], inputs[2]]
+            [[t.detach().clone() for t in inputs[0]], inputs[1], inputs[2]]
             if is_inplace
             else inputs
         )
@@ -1127,7 +1127,7 @@ class TestForeach(TestCase):
             inplace_op(sample.input, *sample.args)
 
         _tensors = [
-            t.clone().detach().requires_grad_(i == 0)
+            t.detach().clone().requires_grad_(i == 0)
             for i, t in enumerate(sample.input)
         ]
         tensors = [t.clone() for t in _tensors]
@@ -1313,7 +1313,7 @@ class TestForeach(TestCase):
                 device, dtype, noncontiguous=False, allow_higher_dtype_scalars=True
             ):
                 with torch.no_grad():
-                    ref_input = [t.clone().detach() for t in sample.input]
+                    ref_input = [t.detach().clone() for t in sample.input]
                 foreach_copy_(sample.input, sample.args[0], non_blocking)
                 for t, s in zip(ref_input, sample.args[0]):
                     copy_(t, s, non_blocking)
@@ -1389,6 +1389,7 @@ class TestForeach(TestCase):
                 "_foreach_log",
                 "_foreach_pow",
                 "_foreach_sqrt",
+                "_foreach_rsqrt",
             )
         ):
             value_range = {"low": 0.5, "high": 1.0}
@@ -1469,7 +1470,7 @@ class TestForeach(TestCase):
 
                     return hook
 
-                _inputs = [t.clone().detach().requires_grad_() for t in sample.input]
+                _inputs = [t.detach().clone().requires_grad_() for t in sample.input]
                 inputs = [t.clone() for t in _inputs]
                 kwargs = (
                     {"alpha": sample.kwargs["alpha"]}
@@ -1523,7 +1524,7 @@ def check_autodiff_sample(op, sample, dtype, is_inplace):
         return (
             False,
             "Trying to set a forward gradient that has a different size than that of the original Tensor, "
-            "this is not supported. Tensor is of size [] while the given forward gradient is of size [1, 1].",
+            "this is not supported. Tensor is of size [] while the given forward gradient is of size [1",
         )
     rhs_arg_has_complex_number = sample.args and (
         (
@@ -1533,6 +1534,8 @@ def check_autodiff_sample(op, sample, dtype, is_inplace):
         or (isinstance(sample.args[-1], complex))
     )
     if rhs_arg_has_complex_number and dtype == torch.float64:
+        if op.name == "_foreach_lerp":
+            return False, "value cannot be converted to type double without overflow"
         if op.name in (
             "_foreach_clamp_max",
             "_foreach_clamp_min",
