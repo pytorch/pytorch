@@ -37,7 +37,7 @@ function monitor_gpu_utilization {
         GPU_UTIL=$(nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits)
 
         # Append the data to the log file
-        echo "$TIMESTAMP, $GPU_UTIL" >> "$LOG_FILE"
+        echo "$TIMESTAMP, $GPU_UTIL" > "$TEST_REPORTS_CHECK/$LOG_FILE"
 
         # Sleep for a specified interval (e.g., 1 second)
         sleep 1
