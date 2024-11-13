@@ -447,7 +447,15 @@ jobs:
               """
               # if the experiment is prefixed with a "-", then it's an opt-out
               experiment_optout = "-" + experiment_name
-              return experiment_optout in user_optins.get(user, [])
+              if experiment_optout not in user_optins.get(user, []):
+                  return False
+
+              if is_user_opted_in(user, user_optins, experiment_name):
+                  log.warning(
+                      f"User {user} is opted into experiment {experiment_name}, but also opted out of it. Defaulting to opting out"
+                  )
+
+              return True
 
 
           def get_runner_prefix(
@@ -491,7 +499,7 @@ jobs:
 
                   if opted_out_users:
                       log.info(
-                          f"{', '.join(opted_in_users)} have opted out of experiment {experiment_name}."
+                          f"{', '.join(opted_out_users)} have opted out of experiment {experiment_name}."
                       )
                       continue
 
