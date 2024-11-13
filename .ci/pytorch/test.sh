@@ -71,10 +71,10 @@ function stop_gpu_monitoring {
 if command -v nvidia-smi &> /dev/null; then
   # Start GPU monitoring in the background
   start_gpu_monitoring
-
   # Trap EXIT to ensure GPU monitoring stops if the script exits
-  trap stop_gpu_monitoring EXIT
 fi
+
+trap stop_gpu_monitoring EXIT
 
 # Do not change workspace permissions for ROCm CI jobs
 # as it can leave workspace with bad permissions for cancelled jobs
