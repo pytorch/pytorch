@@ -531,9 +531,6 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         return self.f_globals
 
     def bind_args(self, parent, args, kwargs):
-        # Avoid circular import
-        from .misc import ClosureVariable, NewCellVariable
-
         code = self.get_code()
         func = types.FunctionType(
             code,
@@ -551,17 +548,9 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         closure_cells = init_cellvars(parent, result, code)
 
         for idx, name in enumerate(code.co_freevars):
-            cell = self.closure.items[idx]
             assert name not in result
-            # In the regular case, a cell is either a `ClosureVariable` or
-            # `NewCellVariable`.
-            if isinstance(cell, (ClosureVariable, NewCellVariable)):
-                closure_cells[name] = cell
-            else:
-                # We model unmodified cells captured by `UserFunctionVariable` as
-                # their contents, in tracer's `symbolic_locals`. See
-                # `UserFunctionVariable::bind_args`.
-                result[name] = cell
+            cell = self.closure.items[idx]
+            closure_cells[name] = cell
 
         return result, closure_cells
 
