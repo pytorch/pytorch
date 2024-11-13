@@ -567,7 +567,7 @@ def compile_fx_inner(
                 "compile_fx_inner",
                 phase_name="inductor_compile",
                 log_pt2_compile_event=True,
-                dynamo_compile_column_us="inductor_cumulative_compile_time_us",
+                fwd_only=False,
             )
         )
         # NB: Why is this the dynamo_compile counter?  The rule here is that
