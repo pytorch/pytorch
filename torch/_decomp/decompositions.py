@@ -1431,7 +1431,7 @@ def split(self: Tensor, split_size: int, dim: int = 0) -> Tuple[Tensor, ...]:
     dim_size = input_sizes[dim]
     if split_size == 0:
         assert dim_size == 0
-        return (self,)
+        return (self.detach(),)
     chunks = (dim_size + split_size - 1) // split_size
 
     # Avoid importing sympy at a module level
@@ -2291,7 +2291,8 @@ def native_batch_norm_backward(
     mean = save_mean_cast
     invstd = save_invstd_cast
     if train:
-        assert save_mean_cast is not None and save_invstd_cast is not None
+        assert mean is not None and invstd is not None
+
     else:
         assert running_mean_cast is not None and running_var_cast is not None
         mean = running_mean_cast
@@ -3926,7 +3927,9 @@ def _unsafe_masked_index(x, mask, indices, fill):
         lambda: "tensors used as masks must be bool tensors",
     )
 
-    if x.numel() == 0:
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
+    if guard_size_oblivious(x.numel() == 0):
         meta_result = torch._meta_registrations.meta_index_Tensor(x, indices)
         return x.new_full(meta_result.shape, fill)
 

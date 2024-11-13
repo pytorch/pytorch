@@ -710,7 +710,24 @@ def triton_kernel_wrapper_mutation_dense(
                 element_size,
             )
 
-    kernel[grid_fn](**kwargs, **constant_args)
+    # move as many positional arguments from dicts to args as we
+    # can to circumvent the bug with the kwargs and pre_/post_hook:
+    # https://github.com/triton-lang/triton/issues/5082
+    # TODO: remove this when the Triton issue above is fixed
+    args = []
+    # copy kwargs and constant_args here to
+    # avoid mutating the original inputs
+    kwargs = kwargs.copy()
+    constant_args = constant_args.copy()
+    for name in kernel.arg_names:
+        if name in kwargs:
+            args.append(kwargs.pop(name))
+        elif name in constant_args:
+            args.append(constant_args.pop(name))
+        else:
+            break
+
+    kernel[grid_fn](*args, **kwargs, **constant_args)
 
 
 @triton_kernel_wrapper_mutation.py_impl(FakeTensorMode)
@@ -757,10 +774,16 @@ def trace_triton_kernel_wrapper(
         proxy_args,
         name=func_overload.__name__ + "_proxy",
     )
-    kernel = kernel_side_table.get_kernel(proxy_args["kernel_idx"])
+
+    from triton.runtime.autotuner import Autotuner
+
     from torch._inductor.codegen.wrapper import (
         user_defined_triton_kernel_transitive_closure_source_code,
     )
+
+    kernel = kernel_side_table.get_kernel(proxy_args["kernel_idx"])
+    if isinstance(kernel, Autotuner):
+        kernel = kernel.fn
 
     kernel_source = user_defined_triton_kernel_transitive_closure_source_code(kernel)
     constant_args = kernel_side_table.get_constant_args(proxy_args["constant_args_idx"])
@@ -1049,8 +1072,8 @@ class TritonHOPifier:
             import torch
             import torch._dynamo
 
-            # We only support configs and keys arguments of triton.autotune
-            # Make sure other arguments are defaulted
+            # We only support configs, keys, and restore_value arguments
+            # of triton.autotune. Make sure other arguments are defaulted.
             defaults = inspect.signature(Autotuner.__init__).parameters
             # Newer version of triton change attribute name from warmup to num_warmup and rep to num_rep.
             # The call to get_first_attr is to maintain backward-compatibility.
@@ -1075,8 +1098,13 @@ class TritonHOPifier:
                         != kernel.early_config_prune
                     )
                     # Set via reset_to_zero argument
-                    or len(kernel.reset_idx) != 0
-                    or len(kernel.restore_idx) != 0
+                    # https://github.com/triton-lang/triton/pull/5083
+                    # changes kernel.reset_idx to kernel.reset_to_zero
+                    or (hasattr(kernel, "reset_idx") and len(kernel.reset_idx) != 0)
+                    or (
+                        hasattr(kernel, "reset_to_zero")
+                        and len(kernel.reset_to_zero) != 0
+                    )
                     or (
                         "use_cuda_graph" in defaults
                         and defaults["use_cuda_graph"].default != kernel.use_cuda_graph
@@ -1084,7 +1112,7 @@ class TritonHOPifier:
                 )
             ):
                 self.raise_unsupported(
-                    "Only configs and keys are supported for triton.autotune"
+                    "Only configs, keys, and restore_value are supported for triton.autotune"
                 )
             if (
                 not torch._inductor.config.unsafe_ignore_unsupported_triton_autotune_args

@@ -241,7 +241,7 @@ def user_defined_kernel_grid_fn_code(
 def user_defined_triton_kernel_transitive_closure_source_code(kernel) -> str:
     """
     Given a triton kernel function pointer collect the transitive closure of
-    its dependancies
+    its dependencies
     """
     compile_wrapper = IndentedBuffer()
     compile_wrapper.splice(kernel.src, strip=True)
@@ -635,6 +635,8 @@ class PythonWrapperCodegen(CodeGen):
         self.none_str = "None"
         self.size = "size()"
         self.stride = "stride()"
+        self.move_begin = "std::move(" if V.graph.cpp_wrapper else ""
+        self.move_end = ")" if V.graph.cpp_wrapper else ""
         self.last_seen_device_guard_index: Optional[int] = None
         self.supports_intermediate_hooks = True
         self.expr_printer: Callable[[Any], str] = pexpr
@@ -1076,9 +1078,6 @@ class PythonWrapperCodegen(CodeGen):
         python_kernel_name: str,
         cpp_kernel_name: str,
         codegen_args: List[str],
-        cpp_op_schema: str,
-        cpp_kernel_key: str,
-        cpp_kernel_overload_name: str = "",
         op_overload: Optional[torch._ops.OpOverload] = None,
         raw_args=None,
         outputs=None,
@@ -1329,7 +1328,13 @@ class PythonWrapperCodegen(CodeGen):
         )
 
     def codegen_reinterpret_view(
-        self, data, size, stride, offset, writer, dtype=None
+        self,
+        data,
+        size,
+        stride,
+        offset,
+        writeline: Callable[..., None],
+        dtype=None,
     ) -> str:
         if (
             size == data.layout.size
@@ -1477,10 +1482,14 @@ class PythonWrapperCodegen(CodeGen):
             )
 
     def define_kernel(
-        self, name: str, kernel: str, metadata: Optional[str] = None, gpu=True
+        self,
+        kernel_name: str,
+        kernel_body: str,
+        metadata: Optional[str] = None,
+        gpu=True,
     ):
         metadata_comment = f"{metadata}\n" if metadata else ""
-        body = f"\n\n{metadata_comment}{name} = {kernel}"
+        body = f"\n\n{metadata_comment}{kernel_name} = {kernel_body}"
         self.header.splice(body)
         if config.triton.autotune_at_compile_time:
             self.kernel_autotune_defs.splice(body)
@@ -1488,7 +1497,13 @@ class PythonWrapperCodegen(CodeGen):
     def define_subgraph_launcher_fn(self, fn_code: str):
         self.subgraph_definitions.splice(fn_code)
 
-    def define_user_defined_triton_kernel(self, kernel, configs, kwargs):
+    def define_user_defined_triton_kernel(
+        self,
+        kernel,
+        configs,
+        kwargs,
+        restore_value_args,
+    ):
         from torch.utils._triton import patch_triton_dtype_repr
 
         patch_triton_dtype_repr()
@@ -1571,6 +1586,9 @@ class PythonWrapperCodegen(CodeGen):
                 )
             ],
         }
+
+        if restore_value_args:
+            triton_meta["restore_value"] = tuple(restore_value_args)
 
         # Distinguish between different functions using function id
         cache_key: List[Any] = [id(kernel.fn)]
@@ -1865,7 +1883,7 @@ class PythonWrapperCodegen(CodeGen):
 
     def generate_kernel_call(
         self,
-        kernel_name,
+        kernel_name: str,
         call_args,
         grid=None,
         device_index=None,
@@ -2069,16 +2087,21 @@ class PythonWrapperCodegen(CodeGen):
             return self.codegen_exact_buffer_reuse(old_name, new_name, del_line)
 
         reinterpret_view = self.codegen_reinterpret_view(
-            old, new.get_size(), new.get_stride(), 0, self.wrapper_call
+            old, new.get_size(), new.get_stride(), 0, self.wrapper_call.writeline
         )
-        return f"{self.declare_maybe_reference}{new_name} = {reinterpret_view}{del_line}  {self.comment} reuse"
+        return (
+            f"{self.declare_maybe_reference}{new_name} = "
+            f"{self.move_begin}{reinterpret_view}{self.move_end}{del_line}"
+            f"  {self.comment} reuse"
+        )
 
     def codegen_deferred_allocation(self, name, layout):
         self.writeline(
             DeferredLine(
                 name,
-                f"{self.declare_maybe_reference}{name} = {layout.view.codegen_reference()}{self.ending}  "
-                f"{self.comment} alias",
+                f"{self.declare_maybe_reference}{name} = "
+                f"{self.move_begin}{layout.view.codegen_reference()}{self.move_end}{self.ending}"
+                f"  {self.comment} alias",
             )
         )
 
