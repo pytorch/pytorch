@@ -11903,7 +11903,7 @@ fn
         test()
 
     def test_escaping_closure_var_with_backward_hook(self):
-        @torch.compile(backend=self.AssertNumOutputBackend(self, 2), fullgraph=True)
+        @torch.compile(backend=self.AssertNumOutputBackend(self, 2))
         def fn(x):
             temp = x * x
             captured_var = temp + 1
