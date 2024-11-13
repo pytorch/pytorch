@@ -202,10 +202,16 @@ class CppWrapperGpu(CppWrapperCpu):
         return name
 
     def define_kernel(
-        self, name: str, kernel: str, metadata: Optional[str] = None, gpu=True
+        self,
+        kernel_name: str,
+        kernel_body: str,
+        metadata: Optional[str] = None,
+        gpu=True,
     ):
         if not gpu:
-            return super().define_kernel(name, kernel, metadata, gpu)
+            return CppWrapperCpu.define_kernel(
+                self, kernel_name, kernel_body, metadata, gpu
+            )
 
     def generate(self, is_inference):
         self.prefix.writeline("\n")
@@ -307,7 +313,7 @@ class CppWrapperGpu(CppWrapperCpu):
         return kernel_var_name
 
     def generate_args_decl(self, call_args, arg_types, arg_signatures):
-        new_args = []
+        new_args: list[str] = []
 
         # Add more cases for other types as needed
         signature2dtype = {
@@ -405,7 +411,8 @@ class CppWrapperGpu(CppWrapperCpu):
 
         if not gpu:
             # Even in CppWrapperGpu, we may see cpp kernels
-            return super().generate_kernel_call(
+            return CppWrapperCpu.generate_kernel_call(
+                self,
                 kernel_name,
                 call_args,
                 grid,
@@ -496,8 +503,7 @@ class CppWrapperGpu(CppWrapperCpu):
             for arg_type, arg in zip(arg_types, call_args):
                 new_arg = arg
                 if arg_type.endswith("*") and arg != "nullptr":
-                    new_arg = f"var_{next(self.arg_var_id)}"
-                    self.writeline(f"auto* {new_arg} = get_data_ptr_wrapper({arg});")
+                    new_arg = f"{arg}.data_ptr()"
                 casted.append(f"({arg_type}){new_arg}")
             call_args_str = ", ".join(casted)
             self.writeline(f"kernels.{kernel_name}({call_args_str}, {stream});")
