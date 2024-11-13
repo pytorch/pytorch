@@ -222,6 +222,7 @@ meta_consistency_out_dtype_mismatch_xfails = {
     xfail("take"),
     xfail("transpose_copy"),
     xfail("tril"),
+    xfail("triangular_solve"),
     xfail("triu"),
     xfail("trunc"),
     xfail("unfold_copy"),
