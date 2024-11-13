@@ -144,9 +144,6 @@
 #include <ATen/ops/xlogy.h>
 #include <ATen/ops/xlogy_native.h>
 #include <ATen/ops/xor_native.h>
-#include <ATen/ops/special_betainc.h>
-#include <ATen/ops/special_betainc_native.h>
-
 #endif
 
 namespace at::meta {
@@ -245,18 +242,6 @@ TORCH_META_FUNC(special_shifted_chebyshev_polynomial_v) (const Tensor& self, con
 
 TORCH_META_FUNC(special_shifted_chebyshev_polynomial_w) (const Tensor& self, const Tensor& n) {
   build_borrowing_binary_float_op(maybe_get_output(), self, n);
-}
-
-TORCH_META_FUNC(special_betainc) (const Tensor& self, const Tensor& a, const Tensor& b) {
-  build(TensorIteratorConfig()
-    .allow_cpu_scalars(true) // same as build_ternary_op except this line
-    .promote_inputs_to_common_dtype(true)
-    .cast_common_dtype_to_outputs(true)
-    .enforce_safe_casting_to_output(true)
-    .add_owned_output(maybe_get_output())
-    .add_owned_const_input(self)
-    .add_owned_const_input(a)
-    .add_owned_const_input(b));
 }
 
 TORCH_META_FUNC2(copysign, Tensor) (
@@ -444,7 +429,6 @@ DEFINE_DISPATCH(shifted_chebyshev_polynomial_t_stub);
 DEFINE_DISPATCH(shifted_chebyshev_polynomial_u_stub);
 DEFINE_DISPATCH(shifted_chebyshev_polynomial_v_stub);
 DEFINE_DISPATCH(shifted_chebyshev_polynomial_w_stub);
-DEFINE_DISPATCH(betainc_stub);
 
 TORCH_IMPL_FUNC(sub_out) (
   const Tensor& self, const Tensor& other, const Scalar& alpha, const Tensor& result
@@ -541,10 +525,6 @@ TORCH_IMPL_FUNC(special_shifted_chebyshev_polynomial_w_out) (const Tensor& self,
 
 TORCH_IMPL_FUNC(tanh_backward_out) (const Tensor& grad_output, const Tensor& output, const Tensor& result) {
   tanh_backward_stub(device_type(), *this);
-}
-
-TORCH_IMPL_FUNC(special_betainc_out) (const Tensor& self, const Tensor& a, const Tensor& b, const Tensor& result) {
-  betainc_stub(device_type(), *this);
 }
 
 #define CREATE_BINARY_TORCH_IMPL_FUNC(func_out, func_stub)                                                    \
@@ -809,38 +789,6 @@ Tensor& special_gammaincc_out(const Tensor& self, const Tensor& other, Tensor& r
 
 Tensor special_gammaincc(const Tensor& self, const Tensor& other) {
   return at::igammac(self, other);
-}
-
-Tensor special_betainc(const Tensor& self, const Scalar& a, const Scalar& b) {
-  return at::special_betainc(self, wrapped_scalar_tensor(a), wrapped_scalar_tensor(b));
-}
-
-Tensor special_betainc(const Tensor& self, const Scalar& a, const Tensor& b) {
-  return at::special_betainc(self, wrapped_scalar_tensor(a), b);
-}
-
-Tensor special_betainc(const Tensor& self, const Tensor& a, const Scalar& b) {
-  return at::special_betainc(self, a, wrapped_scalar_tensor(b));
-}
-
-Tensor special_betainc(const Scalar& self, const Tensor& a, const Tensor& b) {
-  return at::special_betainc(wrapped_scalar_tensor(self), a, b);
-}
-
-Tensor& special_betainc_out(const Tensor& self, const Scalar& a, const Scalar& b, Tensor& result) {
-  return at::special_betainc_out(result, self, wrapped_scalar_tensor(a), wrapped_scalar_tensor(b));
-}
-
-Tensor& special_betainc_out(const Tensor& self, const Scalar& a, const Tensor& b, Tensor& result) {
-  return at::special_betainc_out(result, self, wrapped_scalar_tensor(a), b);
-}
-
-Tensor& special_betainc_out(const Tensor& self, const Tensor& a, const Scalar& b, Tensor& result) {
-  return at::special_betainc_out(result, self, a, wrapped_scalar_tensor(b));
-}
-
-Tensor& special_betainc_out(const Scalar& self, const Tensor& a, const Tensor& b, Tensor& result) {
-  return at::special_betainc_out(result, wrapped_scalar_tensor(self), a, b);
 }
 
 TORCH_IMPL_FUNC(atan2_out) (const Tensor& self, const Tensor& other, const Tensor& result) {
