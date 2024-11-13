@@ -418,4 +418,6 @@ class TestDecomposeMemMM(TestCase):
 
 
 if __name__ == "__main__":
-    run_tests()
+    # Intel GPU has not enable decompose_mem_bound_mm PASS yet
+    if not torch.xpu.is_available():
+        run_tests()
