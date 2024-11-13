@@ -50,11 +50,11 @@ from torch.testing._internal.common_quantization import (
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    run_tests,
     skipIfHpu,
     TemporaryFileName,
     TEST_CUDA,
     TEST_HPU,
-    run_tests,
 )
 
 
@@ -2388,9 +2388,13 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         for node in gm.graph.nodes:
             if node.target == torch.ops.higher_order.cond:
                 true_gm = getattr(gm, node.args[1].target)
-                self.checkGraphModuleNodes(true_gm, expected_node_occurrence=node_occurrences)
+                self.checkGraphModuleNodes(
+                    true_gm, expected_node_occurrence=node_occurrences
+                )
                 false_gm = getattr(gm, node.args[2].target)
-                self.checkGraphModuleNodes(false_gm, expected_node_occurrence=node_occurrences)
+                self.checkGraphModuleNodes(
+                    false_gm, expected_node_occurrence=node_occurrences
+                )
 
 
 instantiate_parametrized_tests(TestQuantizePT2E)

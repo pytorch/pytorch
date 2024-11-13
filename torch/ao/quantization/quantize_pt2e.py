@@ -41,6 +41,7 @@ def _annotate_cond_ops(model: torch.fx.GraphModule, quantizer: Quantizer) -> Non
                 quantizer.annotate(true_gm)
                 quantizer.annotate(false_gm)
 
+
 def _prepare_cond_ops(model: torch.fx.GraphModule, is_qat: bool) -> None:
     gm_maybe_with_cond = [model]
     while gm_maybe_with_cond:
@@ -61,6 +62,7 @@ def _prepare_cond_ops(model: torch.fx.GraphModule, is_qat: bool) -> None:
                 false_gm = prepare(false_gm, node_name_to_scope, is_qat=is_qat)
                 false_gm.recompile()
                 setattr(gm, n.args[2].target, false_gm)
+
 
 def prepare_pt2e(
     model: GraphModule,
@@ -235,6 +237,7 @@ def _quant_node_constraint(n: Node) -> bool:
     """
     return n.op == "call_function" and n.target in _QUANT_OPS
 
+
 def _convert_pt2e_impl(
     model: GraphModule,
     use_reference_representation: bool = False,
@@ -278,12 +281,16 @@ def _convert_cond_ops(
                 gm_maybe_with_cond.append(false_gm)
 
                 node_name_to_scope = _get_node_name_to_scope(true_gm)
-                true_gm = _convert_pt2e_impl(true_gm, use_reference_representation, fold_quantize)
+                true_gm = _convert_pt2e_impl(
+                    true_gm, use_reference_representation, fold_quantize
+                )
                 true_gm.recompile()
                 setattr(gm, n.args[1].target, true_gm)
 
                 node_name_to_scope = _get_node_name_to_scope(false_gm)
-                false_gm = _convert_pt2e_impl(false_gm, use_reference_representation, fold_quantize)
+                false_gm = _convert_pt2e_impl(
+                    false_gm, use_reference_representation, fold_quantize
+                )
                 false_gm.recompile()
                 setattr(gm, n.args[2].target, false_gm)
 

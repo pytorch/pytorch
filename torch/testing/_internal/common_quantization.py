@@ -48,7 +48,6 @@ from torch.testing._internal.common_quantized import (
     override_quantized_engine,
 )
 from torch.jit.mobile import _load_for_lite_interpreter
-from functorch.experimental import control_flow
 
 try:
     # graph mode quantization based on fx
