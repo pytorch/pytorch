@@ -1,3 +1,5 @@
+import json
+import os
 import sys
 
 from benchmark_base import BenchmarkBase
@@ -56,6 +58,43 @@ class Benchmark(BenchmarkBase):
                 self.m.cuda() if self._is_gpu else self.m
             )
             opt_m(self.input)
+
+    def _write_to_json(self, output_dir: str):
+        records = []
+        for entry in self.results:
+            metric_name = entry[1]
+            value = entry[2]
+
+            if not metric_name or value is None:
+                continue
+
+            records.append(
+                {
+                    "benchmark": (
+                        "pr_time_benchmarks",
+                        "",  # training or inference, not use
+                        "",  # dtype, not use
+                        {
+                            "is_dynamic": self._dynamic,
+                            "device": "cuda" if self._is_gpu else "cpu",
+                            "is_force_shape_pad": self._force_shape_pad,
+                            "description": self.description(),
+                        },
+                    ),
+                    "model": (
+                        self.name(),
+                        "basic_modules",
+                        self.backend,
+                    ),
+                    "metric": (
+                        metric_name,
+                        [value],
+                    ),
+                }
+            )
+
+        with open(os.path.join(output_dir, f"{self.name()}.json"), "w") as f:
+            json.dump(records, f)
 
 
 def main():

@@ -1,5 +1,6 @@
 import csv
 import gc
+import os
 from abc import ABC, abstractmethod
 
 from fbscribelogger import make_scribe_logger
@@ -141,6 +142,16 @@ class BenchmarkBase(ABC):
             # Write the data to the CSV file
             for entry in self.results:
                 writer.writerow(entry)
+
+        self._write_to_json(os.path.dirname(os.path.abspath(path)))
+
+    @abstractmethod
+    def _write_to_json(self, output_dir: str):
+        """
+        Write the result into JSON format, so that it can be uploaded to the benchmark database
+        to be displayed on OSS dashboard. The JSON format is defined at
+        https://github.com/pytorch/pytorch/wiki/How-to-integrate-with-PyTorch-OSS-benchmark-database
+        """
 
     def print(self):
         for entry in self.results:

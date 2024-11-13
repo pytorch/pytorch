@@ -1,3 +1,5 @@
+import json
+import os
 import sys
 
 from benchmark_base import BenchmarkBase
@@ -51,6 +53,42 @@ class Benchmark(BenchmarkBase):
             return outs
 
         f(*self._args)
+
+    def _write_to_json(self, output_dir: str):
+        records = []
+        for entry in self.results:
+            metric_name = entry[1]
+            value = entry[2]
+
+            if not metric_name or value is None:
+                continue
+
+            records.append(
+                {
+                    "benchmark": (
+                        "pr_time_benchmarks",
+                        "training" if self._training else "inference",
+                        "",  # dtype, not use
+                        {
+                            "subclass": self._subclass,
+                            "device": self._device,
+                            "description": self.description(),
+                        },
+                    ),
+                    "model": (
+                        self.name(),
+                        "aotdispatcher",
+                        "aot_eager_decomp_partition",
+                    ),
+                    "metric": (
+                        metric_name,
+                        [value],
+                    ),
+                }
+            )
+
+        with open(os.path.join(output_dir, f"{self.name()}.json"), "w") as f:
+            json.dump(records, f)
 
 
 def main():

@@ -1,3 +1,5 @@
+import json
+import os
 import sys
 
 from benchmark_base import BenchmarkBase
@@ -45,6 +47,42 @@ class Benchmark(BenchmarkBase):
 
         with fresh_inductor_cache():
             f(self.a, self.b)
+
+    def _write_to_json(self, output_dir: str):
+        records = []
+        for entry in self.results:
+            metric_name = entry[1]
+            value = entry[2]
+
+            if not metric_name or value is None:
+                continue
+
+            records.append(
+                {
+                    "benchmark": (
+                        "pr_time_benchmarks",
+                        "",  # training or inference, not use
+                        "",  # dtype, not use
+                        {
+                            "is_dynamic": self._dynamic,
+                            "device": self._device,
+                            "description": self.description(),
+                        },
+                    ),
+                    "model": (
+                        self.name(),
+                        "add_loop",
+                        self._backend,
+                    ),
+                    "metric": (
+                        metric_name,
+                        [value],
+                    ),
+                }
+            )
+
+        with open(os.path.join(output_dir, f"{self.name()}.json"), "w") as f:
+            json.dump(records, f)
 
 
 def main():
