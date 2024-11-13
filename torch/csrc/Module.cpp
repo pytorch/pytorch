@@ -926,7 +926,7 @@ static PyObject* THPModule_setAllowTF32Onednn(
   HANDLE_TH_ERRORS
   TORCH_CHECK(
       PyBool_Check(arg),
-      "set_allow_tf32_onednn expects a bool, "
+      "_set_onednn_allow_tf32 expects a bool, "
       "but got ",
       THPUtils_typename(arg));
   at::globalContext().setAllowTF32Onednn(arg == Py_True);
