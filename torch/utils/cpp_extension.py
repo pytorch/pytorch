@@ -904,7 +904,6 @@ class BuildExtension(build_ext):
         # suffixed with "<SOABI>.so", where <SOABI> will be something like
         # cpython-37m-x86_64-linux-gnu.
         ext_filename = super().get_ext_filename(ext_name)
-        print(f"{ext_filename=} was returned from super call")
         # If `no_python_abi_suffix` is `True`, we omit the Python 3 ABI
         # component. This makes building shared libraries with setuptools that
         # aren't Python modules nicer.
@@ -914,7 +913,6 @@ class BuildExtension(build_ext):
             # Omit the second to last element.
             without_abi = ext_filename_parts[:-2] + ext_filename_parts[-1:]
             ext_filename = '.'.join(without_abi)
-        print(f"Now about to return {ext_filename=} in our own get_ext_filename")
         return ext_filename
 
     def _check_abi(self) -> Tuple[str, TorchVersion]:
@@ -1782,8 +1780,7 @@ def _jit_compile(name,
                         build_directory=build_directory,
                         verbose=verbose,
                         with_cuda=with_cuda,
-                        is_standalone=is_standalone,
-                    )
+                        is_standalone=is_standalone)
             elif verbose:
                 print('No modifications detected for re-loaded extension '
                       f'module {name}, skipping build step...', file=sys.stderr)
@@ -1854,8 +1851,7 @@ def _write_ninja_file_and_build_library(
         build_directory: str,
         verbose: bool,
         with_cuda: Optional[bool],
-        is_standalone: bool = False,
-) -> None:
+        is_standalone: bool = False) -> None:
     verify_ninja_availability()
 
     compiler = get_cxx_compiler()
@@ -1938,7 +1934,6 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose, is_standalone):
         extra_ldflags.append('-ltorch')
         if not is_standalone:
             extra_ldflags.append('-ltorch_python')
-            print("whatever")
 
         if is_standalone:
             extra_ldflags.append(f"-Wl,-rpath,{TORCH_LIB_PATH}")
