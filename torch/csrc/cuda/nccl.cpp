@@ -155,7 +155,7 @@ using namespace at;
 
 namespace detail {
 
-static inline void NCCL_CHECK(ncclResult_t result) {
+static void NCCL_CHECK(ncclResult_t result) {
   NCCL_CHECK(from_nccl_result(result));
 }
 
@@ -173,10 +173,9 @@ bool nccl_use_nonblocking() {
 static int nccl_nonblocking_timeout() {
   static int timeout = -2; // -2 means not initialized
   if (timeout == -2) {
-    const char* val = getenv("TORCH_NCCL_NONBLOCKING_TIMEOUT");
-    if (val && strlen(val) > 0) {
-      // NOLINTNEXTLINE(*-narrowing-conversions)
-      timeout = strtol(val, nullptr, 0);
+    const auto val = c10::utils::get_env("TORCH_NCCL_NONBLOCKING_TIMEOUT");
+    if (val && !val.value().empty()) {
+      timeout = std::stoi(val.value());
     } else {
       // Default value consistent with kBackendDefaultTimeout
       timeout = 30 * 60;
@@ -185,7 +184,7 @@ static int nccl_nonblocking_timeout() {
   return timeout;
 }
 
-static inline void NCCL_CHECK_TIMEOUT(ncclResult status, ncclComm_t comm) {
+static void NCCL_CHECK_TIMEOUT(ncclResult status, ncclComm_t comm) {
 #ifdef NCCL_HAS_COMM_NONBLOCKING
   ncclResult_t result = to_nccl_result(status);
   auto startTimepoint = std::chrono::steady_clock::now();
@@ -210,11 +209,11 @@ static inline void NCCL_CHECK_TIMEOUT(ncclResult status, ncclComm_t comm) {
 #endif
 }
 
-static inline void NCCL_CHECK_TIMEOUT(ncclResult_t result, ncclComm_t comm) {
+static void NCCL_CHECK_TIMEOUT(ncclResult_t result, ncclComm_t comm) {
   NCCL_CHECK_TIMEOUT(from_nccl_result(result), comm);
 }
 
-static inline void NCCL_CHECK_TIMEOUT(
+static void NCCL_CHECK_TIMEOUT(
     ncclResult status,
     std::vector<ncclComm_t>& comms) {
 #ifdef NCCL_HAS_COMM_NONBLOCKING
@@ -248,7 +247,7 @@ static inline void NCCL_CHECK_TIMEOUT(
 #endif
 }
 
-static inline void NCCL_CHECK_TIMEOUT(
+static void NCCL_CHECK_TIMEOUT(
     ncclResult_t result,
     std::vector<ncclComm_t>& comms) {
   NCCL_CHECK_TIMEOUT(from_nccl_result(result), comms);
@@ -310,7 +309,7 @@ ArrayRef<ncclComm_t> get_communicators(TensorList inputs) {
   return it->second.ref();
 }
 
-static inline void check_tensor(
+static void check_tensor(
     const at::Tensor& input,
     const std::optional<at::Tensor>& output,
     size_t input_multiplier,

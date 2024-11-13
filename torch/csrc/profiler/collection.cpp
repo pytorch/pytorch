@@ -362,12 +362,9 @@ std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
         torch::profiler::impl::saveExtraArgs(fn));
   }
 
-  // Record NCCL metadata for specific CPU ops
-  fn.isNcclMeta() ? torch_ops_.extra_meta_.emplace_back(
-                        torch::profiler::impl::saveNcclMeta(fn))
-                  : torch_ops_.extra_meta_.emplace_back();
-
   auto out = std::make_unique<KinetoObserverContext>(event);
+  // Record NCCL metadata for specific CPU ops
+  out->event_->extra_meta_ = torch_ops_.extra_meta_.emplace_back();
 
   if (config_.state == ProfilerState::KINETO_GPU_FALLBACK) {
     try {
@@ -402,6 +399,10 @@ struct StealOrDefault {
   explicit StealOrDefault(T& container)
       : container_{container}, it_{container.begin()} {}
 
+  StealOrDefault(const StealOrDefault&) = delete;
+  StealOrDefault(StealOrDefault&&) = delete;
+  StealOrDefault& operator=(const StealOrDefault&) = delete;
+  StealOrDefault& operator=(StealOrDefault&&) = delete;
   ~StealOrDefault() {
     container_.get().clear();
   }
@@ -421,7 +422,7 @@ struct StealOrDefault {
 };
 } // namespace
 
-std::string profilerStepString = "ProfilerStep#";
+static constexpr std::string_view profilerStepString = "ProfilerStep#";
 
 void ThreadLocalSubqueue::TorchOpStorage::materialize(
     std::vector<std::shared_ptr<Result>>& out,
@@ -499,7 +500,7 @@ void ThreadLocalSubqueue::TorchOpStorage::materialize(
 }
 
 template <size_t BlockSize>
-void materialize_vulkan(
+static void materialize_vulkan(
     std::vector<std::shared_ptr<Result>>& out,
     AppendOnlyList<ExtraFields<EventType::Vulkan>::raw_event_t, BlockSize>&
         raw_events,
@@ -732,7 +733,7 @@ void mark_finished(std::shared_ptr<Result>& r) {
 #ifdef USE_KINETO
 // Assumption: Total threads number will not exceed 2^16-1, and total ops will
 // not exceed 2^48 -1.
-static inline uint64_t getForwardThreadKey(uint64_t tid, uint64_t seqNr) {
+static uint64_t getForwardThreadKey(uint64_t tid, uint64_t seqNr) {
   return (((tid) << 48) | ((seqNr) & (((uint64_t)1 << 48) - 1)));
 }
 
@@ -1491,7 +1492,7 @@ RecordQueue::getRecords(
         // annotation to the event start time
         if (right_intersection_only(step, i->start_time_ns_, i->endTimeNS())) {
           // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
-          auto currStepRes = out[step.out_idx];
+          auto const& currStepRes = out[step.out_idx];
           currStepRes->start_time_ns_ = i->start_time_ns_ + 1;
           step_idx++;
           step =
@@ -1588,4 +1589,26 @@ void set_cuda_sync_enabled_val(bool val) {
   cuda_sync_enabled_fn() = [val]() { return val; };
 }
 
+namespace {
+std::function<bool()>& record_tensor_addrs_enabled() {
+  static std::function<bool()> fn = []() { return false; };
+  return fn;
+}
+} // namespace
+
+bool get_record_tensor_addrs_enabled() {
+  static std::optional<bool> cached_record_tensor_addrs_enabled;
+  if (!cached_record_tensor_addrs_enabled.has_value()) {
+    cached_record_tensor_addrs_enabled = record_tensor_addrs_enabled()();
+  }
+  return cached_record_tensor_addrs_enabled.value();
+}
+
+void set_record_tensor_addrs_enabled_fn(std::function<bool()> fn) {
+  record_tensor_addrs_enabled() = std::move(fn);
+}
+
+void set_record_tensor_addrs_enabled_val(bool val) {
+  record_tensor_addrs_enabled() = [val]() { return val; };
+}
 } // namespace torch::profiler::impl
