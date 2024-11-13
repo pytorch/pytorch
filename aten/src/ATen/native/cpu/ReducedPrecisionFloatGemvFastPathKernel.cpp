@@ -476,8 +476,8 @@ void bf16_gemv_trans(
 #if !defined(C10_MOBILE)
 REGISTER_DISPATCH(fp16_dot_with_fp32_arith_stub, &fp16_dot_with_fp32_arith)
 REGISTER_DISPATCH(fp16_gemv_trans_stub, &fp16_gemv_trans)
-REGISTER_DISPATCH(bf16_dot_with_fp32_arith_stub, &bf16_dot_with_fp32_arith);
-REGISTER_DISPATCH(bf16_gemv_trans_stub, &bf16_gemv_trans);
+REGISTER_DISPATCH(bf16_dot_with_fp32_arith_stub, &bf16_dot_with_fp32_arith)
+REGISTER_DISPATCH(bf16_gemv_trans_stub, &bf16_gemv_trans)
 #endif //!defined(C10_MOBILE)
 
 } // namespace at::native
