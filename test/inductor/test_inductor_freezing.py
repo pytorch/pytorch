@@ -318,7 +318,8 @@ class OptimizeForInferenceTemplate(TestCase):
             mm_invoke = (
                 "mkl_linear.default("
                 if self.device == "cpu"
-                and (torch.ops.mkldnn._is_mkldnn_acl_supported() or torch._C.has_mkl)
+                and torch.backends.mkldnn.enabled
+                and torch.backends.mkldnn.is_available()
                 else "mm("
             )
 
