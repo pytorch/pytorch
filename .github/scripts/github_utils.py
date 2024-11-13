@@ -73,7 +73,7 @@ def gh_fetch_url(
     headers: Optional[Dict[str, str]] = None,
     data: Union[Optional[Dict[str, Any]], str] = None,
     method: Optional[str] = None,
-    reader: Callable[[Any], Any] = lambda x: json.load(x),
+    reader: Callable[[Any], Any] = json.load,
 ) -> Any:
     return gh_fetch_url_and_headers(
         url, headers=headers, data=data, reader=reader, method=method
