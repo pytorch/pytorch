@@ -59,7 +59,7 @@ kernel void unfold_backward(
   const auto out_dim_idx = pos[dim];
   const auto left_fold_idx = max(0L, (out_dim_idx - size) / step);
   const auto right_fold_idx = min(in_dim_size - 1, out_dim_idx / step);
-  // Shift grad_in to start of unfold wndows
+  // Shift grad_in to start of unfold windows
   pos[dim] = 0;
   grad_in += offset_from_coord(pos, input_strides, ndim);
   float rc = 0;
