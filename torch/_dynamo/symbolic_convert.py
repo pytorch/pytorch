@@ -70,8 +70,8 @@ from .utils import (
     LazyString,
     proxy_args_kwargs,
 )
-from .variables.base import MutableLocal, typestr, VariableTracker
-from .variables.builder import wrap_fx_proxy
+from .variables.base import typestr, ValueMutationNew, VariableTracker
+from .variables.builder import FrameStateSizeEntry, wrap_fx_proxy
 from .variables.builtin import BuiltinVariable
 from .variables.constant import ConstantVariable
 from .variables.ctx_manager import (
@@ -226,8 +226,14 @@ Otherwise, please submit a bug report, ideally including the contents of TORCH_L
 
 @dataclasses.dataclass
 class LocalState:
-    input_sizes: Dict[str, List[int]] = dataclasses.field(default_factory=dict)
-    input_strides: Dict[str, List[int]] = dataclasses.field(default_factory=dict)
+    automatic_dynamic: Dict[str, FrameStateSizeEntry] = dataclasses.field(
+        default_factory=dict
+    )
+
+    def render(self) -> str:
+        return "\n".join(
+            f"{k}: {v.render()}" for k, v in self.automatic_dynamic.items()
+        )
 
 
 # Mutable box that is shared across restarts
@@ -1950,13 +1956,13 @@ class InstructionTranslatorBase(
 
     def BUILD_LIST(self, inst):
         items = self.popn(inst.argval)
-        self.push(ListVariable(items, mutable_local=MutableLocal()))
+        self.push(ListVariable(items, mutation_type=ValueMutationNew()))
 
     def BUILD_SET(self, inst):
         if config.inject_BUILD_SET_unimplemented_TESTING_ONLY:
             unimplemented("missing: BUILD_SET")
         items = self.popn(inst.argval)
-        new_set = SetVariable(items, mutable_local=MutableLocal())
+        new_set = SetVariable(items, mutation_type=ValueMutationNew())
         self.push(new_set)
 
     def BUILD_LIST_UNPACK(self, inst, cls=ListVariable):
@@ -1967,7 +1973,7 @@ class InstructionTranslatorBase(
                 items.extend(seq.force_unpack_var_sequence(self))
             except NotImplementedError:
                 unimplemented(f"BUILD_LIST_UNPACK {seq}")
-        self.push(cls(items, mutable_local=MutableLocal()))
+        self.push(cls(items, mutation_type=ValueMutationNew()))
 
     def BUILD_TUPLE_UNPACK(self, inst):
         self.BUILD_LIST_UNPACK(inst, cls=TupleVariable)
@@ -1977,7 +1983,7 @@ class InstructionTranslatorBase(
     def BUILD_MAP(self, inst):
         items = self.popn(inst.argval * 2)
         d = dict(zip(items[::2], items[1::2]))
-        self.push(ConstDictVariable(d, mutable_local=MutableLocal()))
+        self.push(ConstDictVariable(d, mutation_type=ValueMutationNew()))
 
     def BUILD_MAP_UNPACK(self, inst):
         items = self.popn(inst.argval)
@@ -1990,7 +1996,7 @@ class InstructionTranslatorBase(
         self.push(
             ConstDictVariable(
                 result,
-                mutable_local=MutableLocal(),
+                mutation_type=ValueMutationNew(),
             )
         )
 
@@ -2008,7 +2014,7 @@ class InstructionTranslatorBase(
         self.push(
             ConstDictVariable(
                 dict(zip(keys, values)),
-                mutable_local=MutableLocal(),
+                mutation_type=ValueMutationNew(),
             )
         )
 
@@ -2024,7 +2030,7 @@ class InstructionTranslatorBase(
         assert inst.argval > 0
         obj = self.stack[-inst.arg]
         assert isinstance(obj, SetVariable)
-        assert obj.mutable_local
+        assert obj.is_mutable()
         return obj.call_method(self, "add", [v], {})
 
     def SET_UPDATE(self, inst):
@@ -2032,7 +2038,7 @@ class InstructionTranslatorBase(
         assert inst.argval > 0
         obj = self.stack[-inst.arg]
         assert isinstance(obj, SetVariable)
-        assert obj.mutable_local
+        assert obj.is_mutable()
         obj.call_method(self, "update", [v], {})
 
     def LIST_APPEND(self, inst):
@@ -2040,7 +2046,7 @@ class InstructionTranslatorBase(
         assert inst.argval > 0
         obj = self.stack[-inst.arg].realize()
         assert isinstance(obj, ListVariable)
-        assert obj.mutable_local
+        assert obj.is_mutable()
         self.output.side_effects.mutation(obj)
         obj.items.append(v)
 
@@ -2080,7 +2086,6 @@ class InstructionTranslatorBase(
                 kwdefaults,
                 annotations,
                 closure,
-                closure_scope=self,
             )
         )
 
@@ -2242,7 +2247,7 @@ class InstructionTranslatorBase(
         assert inst.argval > 0
         obj = self.stack[-inst.arg]
         assert isinstance(obj, ListVariable)
-        assert obj.mutable_local
+        assert obj.is_mutable()
         obj.call_method(self, "extend", [v], {})
 
     def LIST_TO_TUPLE(self, inst):
@@ -2253,7 +2258,7 @@ class InstructionTranslatorBase(
         assert inst.argval > 0
         obj = self.stack[-inst.arg].realize()
         assert isinstance(obj, ConstDictVariable)
-        assert obj.mutable_local
+        assert obj.is_mutable()
         obj.call_method(self, "update", [v], {})
 
     DICT_UPDATE = DICT_MERGE
@@ -2582,7 +2587,6 @@ class InstructionTranslatorBase(
             fn.closure = TupleVariable(
                 [self._load_closure(name) for name in attr_names]
             )
-            fn.closure_scope = self
         elif flags & 0x04:
             fn.annotations = attr
         elif flags & 0x02:
@@ -2759,7 +2763,8 @@ class InstructionTranslatorBase(
 
 
 class InstructionTranslator(InstructionTranslatorBase):
-    mutated_closure_cell_contents: Set[str]
+    mutated_closure_cell_ids: Set[int]
+    contents_var_to_mutated_cell: Dict[VariableTracker, Any]
 
     @staticmethod
     def current_tx() -> "InstructionTranslator":
@@ -2787,7 +2792,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         one_graph,
         export,
         export_constraints,
-        mutated_closure_cell_contents: Set[str],
+        mutated_closure_cell_ids: Set[int],
         frame_state,
         speculation_log: SpeculationLog,
         distributed_state: Optional[DistributedState],
@@ -2832,7 +2837,8 @@ class InstructionTranslator(InstructionTranslatorBase):
         with tracing(self.output.tracing_context), self.set_current_tx():
             self.one_graph: bool = one_graph
             self.export = export
-            self.mutated_closure_cell_contents = mutated_closure_cell_contents
+            self.mutated_closure_cell_ids = mutated_closure_cell_ids
+            self.contents_var_to_mutated_cell = {}
             if self.export:
                 assert (
                     self.one_graph
@@ -3278,7 +3284,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             assert tracer.symbolic_result.as_python_constant() is None
             return ListIteratorVariable(
                 tracer.generated_items,
-                mutable_local=MutableLocal(),
+                mutation_type=ValueMutationNew(),
             )
         else:
             return tracer.symbolic_result
@@ -3350,19 +3356,15 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                     self.symbolic_locals[inst.argval], self.pop()
                 )
             else:
+                root_tx = self.output.root_tx
                 if (
                     maybe_cell is not None
-                    and maybe_cell.source.name()
-                    not in self.output.root_tx.mutated_closure_cell_contents
+                    and maybe_cell in root_tx.contents_var_to_mutated_cell
+                    and id(root_tx.contents_var_to_mutated_cell[maybe_cell])
+                    not in root_tx.mutated_closure_cell_ids
                 ):
-                    # Why is the source name here unique?
-                    # mutated_closure_cell_contents is a per-frame
-                    # concept, and sources identify, e.g., particular
-                    # locals from the frame.  If you had two locals,
-                    # they'll get different source names, and therefore
-                    # differ here.
-                    self.output.root_tx.mutated_closure_cell_contents.add(
-                        maybe_cell.source.name()
+                    self.output.root_tx.mutated_closure_cell_ids.add(
+                        id(root_tx.contents_var_to_mutated_cell[maybe_cell])
                     )
                     raise exc.UnspecializeRestartAnalysis
                 unimplemented("write to __closure__ while inlining")

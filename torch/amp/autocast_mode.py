@@ -327,7 +327,7 @@ class autocast:
             if self.fast_dtype not in supported_dtype:
                 error_message = "In MPS autocast, but the target dtype is not supported. Disabling autocast.\n"
                 error_message += (
-                    "MPS Autocast only supports dtype of torch.bfloat16 currently."
+                    "MPS Autocast only supports dtype of torch.float16 currently."
                 )
                 warnings.warn(error_message)
                 enabled = False
