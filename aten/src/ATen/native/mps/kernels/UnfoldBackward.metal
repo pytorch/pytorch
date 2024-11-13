@@ -33,12 +33,12 @@ void pos_from_thread_index(
 // grad_out.shape == in.shape.
 
 // For each index in grad_out find the elements contributing to it and sum them
-// up. Such algorithm requires no synchonization between threads. I.e.
+// up. Such algorithm requires no synchronization between threads. I.e.
 // grad_out[...,out_dim_idx,...] accumulates all values
 // grad_in[...,in_dim_idx,...,in_last_idx], where in_dim_idx is range
-// [(out_dim_idx - size) / step, out_dim_idx / step] clampd to (0, in_dim_size)
-// and in_last_idx is out_dim_idx - in_dim_idx * step and
-// and accumulation step is skipped if in_last_idx is outside of [0, size] range
+// [(out_dim_idx - size) / step, out_dim_idx / step] clamped to (0, in_dim_size)
+// and in_last_idx is out_dim_idx - in_dim_idx * step.
+// Accumulation step is skipped if in_last_idx is outside of [0, size] range
 template <typename T>
 kernel void unfold_backward(
     constant T* grad_in,
