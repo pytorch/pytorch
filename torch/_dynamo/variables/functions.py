@@ -268,7 +268,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             elif self.source:
                 side_effects = parent.output.side_effects
                 if cell in side_effects:
-                    out = side_effects[cell]
+                    cell_var = side_effects[cell]
                 else:
                     closure_cell = GetItemSource(
                         AttrSource(self.source, "__closure__"), idx
@@ -281,32 +281,10 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                     except ValueError:
                         # Cell has not yet been assigned
                         contents_var = variables.DeletedVariable()
-
-                    if id(cell) not in tx.mutated_closure_cell_ids:
-                        # Optimistically don't allocate the cell, to
-                        # reduce the number of side effects.  This is
-                        # important for cond, as without it, any accesses
-                        # to closures create side effects and cond doesn't
-                        # support side effects.  If we're wrong and this
-                        # closure cell gets written to, we will restart
-                        # the analysis with this cell's name in the
-                        # mutated list here
-                        result[name] = contents_var
-                        # Map the variable to the original cell so we can
-                        # look it up later, see
-                        # `InliningInstructionTranslator.STORE_DEREF`.
-                        tx.contents_var_to_mutated_cell[contents_var] = cell
-                        continue
-
-                    # cells are written to with "cell_contents",
-                    # so the source should just be the closure_cell, not its contents
-                    out = side_effects.track_cell_existing(closure_cell, cell)
-                    side_effects.store_cell(
-                        out,
-                        contents_var,
+                    cell_var = side_effects.track_cell_existing(
+                        closure_cell, cell, contents_var
                     )
-
-                closure_cells[name] = out
+                closure_cells[name] = cell_var
 
             else:
                 result[name] = VariableTracker.build(tx, cell.cell_contents)

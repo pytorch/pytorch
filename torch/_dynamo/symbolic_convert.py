@@ -19,7 +19,7 @@ import traceback
 import types
 import typing
 import weakref
-from typing import Any, Callable, cast, Dict, List, Optional, Set, Tuple, Type, Union
+from typing import Any, Callable, cast, Dict, List, Optional, Tuple, Type, Union
 from unittest.mock import patch
 
 import torch
@@ -2763,9 +2763,6 @@ class InstructionTranslatorBase(
 
 
 class InstructionTranslator(InstructionTranslatorBase):
-    mutated_closure_cell_ids: Set[int]
-    contents_var_to_mutated_cell: Dict[VariableTracker, Any]
-
     @staticmethod
     def current_tx() -> "InstructionTranslator":
         return tls.current_tx
@@ -2792,7 +2789,6 @@ class InstructionTranslator(InstructionTranslatorBase):
         one_graph,
         export,
         export_constraints,
-        mutated_closure_cell_ids: Set[int],
         frame_state,
         speculation_log: SpeculationLog,
         distributed_state: Optional[DistributedState],
@@ -2837,8 +2833,6 @@ class InstructionTranslator(InstructionTranslatorBase):
         with tracing(self.output.tracing_context), self.set_current_tx():
             self.one_graph: bool = one_graph
             self.export = export
-            self.mutated_closure_cell_ids = mutated_closure_cell_ids
-            self.contents_var_to_mutated_cell = {}
             if self.export:
                 assert (
                     self.one_graph
@@ -3346,17 +3340,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             else:
                 self.output.side_effects.store_cell(cell, val)
         else:
-            unboxed_cell = self.symbolic_locals.get(inst.argval)
-            root_tx = self.output.root_tx
-            if (
-                unboxed_cell in root_tx.contents_var_to_mutated_cell
-                and id(root_tx.contents_var_to_mutated_cell[unboxed_cell])
-                not in root_tx.mutated_closure_cell_ids
-            ):
-                self.output.root_tx.mutated_closure_cell_ids.add(
-                    id(root_tx.contents_var_to_mutated_cell[unboxed_cell])
-                )
-                raise exc.UnspecializeRestartAnalysis
             unimplemented("write to __closure__ while inlining")
 
     def LOAD_DEREF(self, inst):
