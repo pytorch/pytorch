@@ -238,6 +238,84 @@ def user_defined_kernel_grid_fn_code(
     return fn_name, output.getvalue()
 
 
+def user_defined_triton_kernel_transitive_closure_source_code(kernel) -> str:
+    """
+    Given a triton kernel function pointer collect the transitive closure of
+    its dependancies
+    """
+    compile_wrapper = IndentedBuffer()
+    compile_wrapper.splice(kernel.src, strip=True)
+
+    # Also include any possible kernel being called indirectly
+    from triton import JITFunction  # type: ignore[name-defined, attr-defined]
+    from triton.language import constexpr  # type: ignore[name-defined]
+
+    # global constexpr vars handled above
+    symbols_included = {kernel.__name__}
+
+    def traverse(cur_kernel):
+        # here we extract the unqualified names (i.e., not attributes and
+        # without prepended module name) loaded in the kernel code, which
+        # are matched with the co_names and __globals__ below to codegen
+        # the respective imports necessary for the kernel compilation
+        unqualified_loads = {
+            inst.argval
+            for inst in dis.Bytecode(cur_kernel.fn)
+            if inst.opname == "LOAD_GLOBAL"
+        }
+        global_annotations = cur_kernel.fn.__globals__.get("__annotations__", {})
+        for symbol_name in cur_kernel.fn.__code__.co_names:
+            if symbol_name in symbols_included:
+                continue
+            if symbol_name in cur_kernel.fn.__globals__:
+                symbol = cur_kernel.fn.__globals__[symbol_name]
+                if isinstance(symbol, JITFunction):
+                    compile_wrapper.newline()
+                    compile_wrapper.writeline("@triton.jit")
+                    compile_wrapper.splice(symbol.src, strip=True)
+                    symbols_included.add(symbol_name)
+                    traverse(symbol)
+                elif isinstance(symbol, (int, str, bool, constexpr)):
+                    compile_wrapper.newline()
+                    if isinstance(symbol, constexpr):
+                        symbol_str = f"tl.constexpr({symbol.value!r})"
+                    else:
+                        symbol_str = f"{symbol!r}"
+                    if annotation := global_annotations.get(symbol_name):
+                        annotion_code = ""
+                        if isinstance(annotation, type):
+                            annotation_code = (
+                                f": {annotation.__module__}.{annotation.__name__}"
+                            )
+                        else:
+                            annotation_code = f": {annotation!r}"
+                        compile_wrapper.writeline(
+                            f"{symbol_name}{annotation_code} = {symbol_str}"
+                        )
+                    else:
+                        compile_wrapper.writeline(f"{symbol_name} = {symbol_str}")
+                    symbols_included.add(symbol_name)
+                elif (
+                    symbol_name in unqualified_loads
+                    and symbol_name != "tl"  # already imported
+                    and hasattr(symbol, "__module__")
+                    # only codegen imports from triton; JITFunctions
+                    # imported from other modules will be codegened
+                    # in the separate branch above
+                    and symbol.__module__.startswith("triton")
+                ):
+                    # a global symbol imported from triton is referenced
+                    # without module qualification (i.e., `store` instead
+                    # of `tl.store`): need to codegen an import
+                    compile_wrapper.writeline(
+                        f"from {symbol.__module__} import {symbol.__name__} as {symbol_name}"
+                    )
+                    symbols_included.add(symbol_name)
+
+    traverse(kernel)
+    return compile_wrapper.getvalue()
+
+
 @dataclasses.dataclass
 class SymbolicCallArg:
     inner: str
@@ -557,6 +635,8 @@ class PythonWrapperCodegen(CodeGen):
         self.none_str = "None"
         self.size = "size()"
         self.stride = "stride()"
+        self.move_begin = "std::move(" if V.graph.cpp_wrapper else ""
+        self.move_end = ")" if V.graph.cpp_wrapper else ""
         self.last_seen_device_guard_index: Optional[int] = None
         self.supports_intermediate_hooks = True
         self.expr_printer: Callable[[Any], str] = pexpr
@@ -998,9 +1078,6 @@ class PythonWrapperCodegen(CodeGen):
         python_kernel_name: str,
         cpp_kernel_name: str,
         codegen_args: List[str],
-        cpp_op_schema: str,
-        cpp_kernel_key: str,
-        cpp_kernel_overload_name: str = "",
         op_overload: Optional[torch._ops.OpOverload] = None,
         raw_args=None,
         outputs=None,
@@ -1251,7 +1328,13 @@ class PythonWrapperCodegen(CodeGen):
         )
 
     def codegen_reinterpret_view(
-        self, data, size, stride, offset, writer, dtype=None
+        self,
+        data,
+        size,
+        stride,
+        offset,
+        writeline: Callable[..., None],
+        dtype=None,
     ) -> str:
         if (
             size == data.layout.size
@@ -1399,10 +1482,14 @@ class PythonWrapperCodegen(CodeGen):
             )
 
     def define_kernel(
-        self, name: str, kernel: str, metadata: Optional[str] = None, gpu=True
+        self,
+        kernel_name: str,
+        kernel_body: str,
+        metadata: Optional[str] = None,
+        gpu=True,
     ):
         metadata_comment = f"{metadata}\n" if metadata else ""
-        body = f"\n\n{metadata_comment}{name} = {kernel}"
+        body = f"\n\n{metadata_comment}{kernel_name} = {kernel_body}"
         self.header.splice(body)
         if config.triton.autotune_at_compile_time:
             self.kernel_autotune_defs.splice(body)
@@ -1410,7 +1497,13 @@ class PythonWrapperCodegen(CodeGen):
     def define_subgraph_launcher_fn(self, fn_code: str):
         self.subgraph_definitions.splice(fn_code)
 
-    def define_user_defined_triton_kernel(self, kernel, configs, kwargs):
+    def define_user_defined_triton_kernel(
+        self,
+        kernel,
+        configs,
+        kwargs,
+        restore_value_args,
+    ):
         from torch.utils._triton import patch_triton_dtype_repr
 
         patch_triton_dtype_repr()
@@ -1494,6 +1587,9 @@ class PythonWrapperCodegen(CodeGen):
             ],
         }
 
+        if restore_value_args:
+            triton_meta["restore_value"] = tuple(restore_value_args)
+
         # Distinguish between different functions using function id
         cache_key: List[Any] = [id(kernel.fn)]
         if len(configs) > 0:
@@ -1544,75 +1640,9 @@ class PythonWrapperCodegen(CodeGen):
             @triton.jit
             """
         )
-        compile_wrapper.splice(kernel.src, strip=True)
-
-        # Also include any possible kernel being called indirectly
-        from triton import JITFunction  # type: ignore[name-defined, attr-defined]
-        from triton.language import constexpr  # type: ignore[name-defined]
-
-        # global constexpr vars handled above
-        symbols_included = {original_name}
-
-        def traverse(cur_kernel):
-            # here we extract the unqualified names (i.e., not attributes and
-            # without prepended module name) loaded in the kernel code, which
-            # are matched with the co_names and __globals__ below to codegen
-            # the respective imports necessary for the kernel compilation
-            unqualified_loads = {
-                inst.argval
-                for inst in dis.Bytecode(cur_kernel.fn)
-                if inst.opname == "LOAD_GLOBAL"
-            }
-            global_annotations = cur_kernel.fn.__globals__.get("__annotations__", {})
-            for symbol_name in cur_kernel.fn.__code__.co_names:
-                if symbol_name in symbols_included:
-                    continue
-                if symbol_name in cur_kernel.fn.__globals__:
-                    symbol = cur_kernel.fn.__globals__[symbol_name]
-                    if isinstance(symbol, JITFunction):
-                        compile_wrapper.newline()
-                        compile_wrapper.writeline("@triton.jit")
-                        compile_wrapper.splice(symbol.src, strip=True)
-                        symbols_included.add(symbol_name)
-                        traverse(symbol)
-                    elif isinstance(symbol, (int, str, bool, constexpr)):
-                        compile_wrapper.newline()
-                        if isinstance(symbol, constexpr):
-                            symbol_str = f"tl.constexpr({symbol.value!r})"
-                        else:
-                            symbol_str = f"{symbol!r}"
-                        if annotation := global_annotations.get(symbol_name):
-                            annotion_code = ""
-                            if isinstance(annotation, type):
-                                annotation_code = (
-                                    f": {annotation.__module__}.{annotation.__name__}"
-                                )
-                            else:
-                                annotation_code = f": {annotation!r}"
-                            compile_wrapper.writeline(
-                                f"{symbol_name}{annotation_code} = {symbol_str}"
-                            )
-                        else:
-                            compile_wrapper.writeline(f"{symbol_name} = {symbol_str}")
-                        symbols_included.add(symbol_name)
-                    elif (
-                        symbol_name in unqualified_loads
-                        and symbol_name != "tl"  # already imported
-                        and hasattr(symbol, "__module__")
-                        # only codegen imports from triton; JITFunctions
-                        # imported from other modules will be codegened
-                        # in the separate branch above
-                        and symbol.__module__.startswith("triton")
-                    ):
-                        # a global symbol imported from triton is referenced
-                        # without module qualification (i.e., `store` instead
-                        # of `tl.store`): need to codegen an import
-                        compile_wrapper.writeline(
-                            f"from {symbol.__module__} import {symbol.__name__} as {symbol_name}"
-                        )
-                        symbols_included.add(symbol_name)
-
-        traverse(kernel)
+        compile_wrapper.splice(
+            user_defined_triton_kernel_transitive_closure_source_code(kernel)
+        )
 
         current_device = V.graph.get_current_device_or_throw()
         compile_wrapper.writeline(f"''', device_str='{current_device.type}')")
@@ -1853,7 +1883,7 @@ class PythonWrapperCodegen(CodeGen):
 
     def generate_kernel_call(
         self,
-        kernel_name,
+        kernel_name: str,
         call_args,
         grid=None,
         device_index=None,
@@ -2057,16 +2087,21 @@ class PythonWrapperCodegen(CodeGen):
             return self.codegen_exact_buffer_reuse(old_name, new_name, del_line)
 
         reinterpret_view = self.codegen_reinterpret_view(
-            old, new.get_size(), new.get_stride(), 0, self.wrapper_call
+            old, new.get_size(), new.get_stride(), 0, self.wrapper_call.writeline
         )
-        return f"{self.declare_maybe_reference}{new_name} = {reinterpret_view}{del_line}  {self.comment} reuse"
+        return (
+            f"{self.declare_maybe_reference}{new_name} = "
+            f"{self.move_begin}{reinterpret_view}{self.move_end}{del_line}"
+            f"  {self.comment} reuse"
+        )
 
     def codegen_deferred_allocation(self, name, layout):
         self.writeline(
             DeferredLine(
                 name,
-                f"{self.declare_maybe_reference}{name} = {layout.view.codegen_reference()}{self.ending}  "
-                f"{self.comment} alias",
+                f"{self.declare_maybe_reference}{name} = "
+                f"{self.move_begin}{layout.view.codegen_reference()}{self.move_end}{self.ending}"
+                f"  {self.comment} alias",
             )
         )
 

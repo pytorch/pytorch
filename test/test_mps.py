@@ -95,7 +95,7 @@ def mps_ops_grad_modifier(ops):
         'index_fill': [torch.float16, torch.float32],  # missing `aten::_unique`.
         'linalg.lu_factor': [torch.float16, torch.float32],  # missing `aten::lu_unpack`.
         'aminmax': [torch.float32, torch.float16],
-        'i0': None,  # missing `aten::i1`.
+        'special.i1': [torch.float16],  # "i1_backward" not implemented for 'Half'
 
         # Correctness issues
         'atanh': [torch.float32],
@@ -152,7 +152,7 @@ def mps_ops_grad_modifier(ops):
 
     MACOS_12_3_XFAILLIST_GRAD = {
         # Unsupported Border padding mode, forward pass success as fallback to cpu
-        'grid_sampler_2d': [torch.float32],
+        'grid_sampler_2d': [torch.float32, torch.float16, torch.bfloat16],
         # Unimplemented
         'logaddexp2': [torch.float32],
 
@@ -165,7 +165,7 @@ def mps_ops_grad_modifier(ops):
         'masked.log_softmax': [torch.float32, torch.float16],
 
         # Unsupported Border padding mode, forward pass success as fallback to cpu
-        'grid_sampler_2d': [torch.float32],
+        'grid_sampler_2d': [torch.float32, torch.float16, torch.bfloat16],
 
         # Same issue as `argsort` and `sort` with duplicate elements (undefined behaviour).
         # Forward pass is passing since `msort` doesn't return the indices, just the values, which match the CPU.
@@ -638,7 +638,7 @@ def mps_ops_modifier(ops):
 
     MACOS_AFTER_13_1_XFAILLIST = {
         # before macOS 13.2 it falls back to cpu and pass the forward pass
-        'grid_sampler_2d': [torch.float32],  # Unsupported Border padding mode
+        'grid_sampler_2d': [torch.float32, torch.float16, torch.bfloat16],  # Unsupported Border padding mode
         # inconsistency errors between cpu and mps, max seen atol is 2
         'nn.functional.interpolatebilinear': [torch.uint8],
     }
@@ -795,7 +795,6 @@ def mps_ops_modifier(ops):
         'special.hermite_polynomial_h': None,
         'special.hermite_polynomial_he': None,
         'special.i0e': None,
-        'special.i1': None,
         'special.i1e': None,
         'special.laguerre_polynomial_l': None,
         'special.log_ndtr': None,
@@ -4832,6 +4831,17 @@ class TestMPS(TestCaseMPS):
         loss = lf(y, y_hat)
         loss_mps = lf(y_mps, y_hat_mps)
         self.assertEqual(loss, loss_mps)
+
+    def test_mse_loss_unsupported_types(self):
+        loss = nn.MSELoss()
+        for dtype in MPS_DTYPES:
+            a_mps = torch.tensor([0, 1, 2], dtype=dtype, device='mps')
+            a_cpu = torch.tensor([0, 1, 2], dtype=dtype, device='cpu')
+            if dtype.is_floating_point:
+                self.assertEqual(loss(a_mps, a_mps), loss(a_cpu, a_cpu))
+                continue
+            self.assertRaises(RuntimeError, lambda: loss(a_mps, a_mps))
+            self.assertRaises(RuntimeError, lambda: loss(a_cpu, a_cpu))
 
     # Binary Cross Enropy
     def test_bce_loss_simple(self):
@@ -9411,9 +9421,8 @@ class TestLinalgMPS(TestCaseMPS):
 
         def convert_weight_to_int4pack(b):
             b_int32, b_scales_and_zeros = _group_quantize_tensor(
-                b.to("cpu"), n_bit=4, q_group_size=q_group
+                b, n_bit=4, q_group_size=q_group
             )
-            b_int32 = b_int32.to("mps")
             b_scales_and_zeros = b_scales_and_zeros.to("mps")
             b_int4pack = torch._convert_weight_to_int4pack(
                 b_int32, inner_k_tiles
