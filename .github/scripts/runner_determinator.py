@@ -58,6 +58,7 @@ import json
 import logging
 import os
 import random
+import re
 import sys
 from argparse import ArgumentParser
 from functools import lru_cache
@@ -308,6 +309,27 @@ def parse_user_opt_in_from_text(user_optin_text: str) -> UserOptins:
     return optins
 
 
+def is_valid_experiment_name(experiment_name: str) -> bool:
+    """
+    Check if the experiment name is valid.
+    A valid name:
+        - Contains only alphanumeric characters and the special characters "_" & "-"
+        - The special characters "_" & "-" shouldn't be the first or last characters
+        - Cannot contain spaces
+    """
+
+    valid_char_regex = r"^[a-zA-Z0-9]([\w-]*[a-zA-Z0-9])?$"
+    valid = bool(re.match(valid_char_regex, experiment_name))
+
+    if valid:
+        return True
+
+    log.error(
+        f"Invalid experiment name: {experiment_name}. Experiment names should only contain alphanumeric characters, '_', and '-'. They cannot contain spaces, and the special characters '_' and '-' cannot be the first or last characters."
+    )
+    return False
+
+
 def parse_settings_from_text(settings_text: str) -> Settings:
     """
     Parse the experiments from the issue body into a list of ExperimentSettings
@@ -326,6 +348,10 @@ def parse_settings_from_text(settings_text: str) -> Settings:
             experiments = {}
 
             for exp_name, exp_settings in settings.get(SETTING_EXPERIMENTS).items():
+                if not is_valid_experiment_name(exp_name):
+                    # Exclude invalid experiments from the list. We log an error, but don't raise an exception so that other experiments can still be processed.
+                    continue
+
                 valid_settings = {}
                 for setting in exp_settings:
                     if setting not in Experiment._fields:

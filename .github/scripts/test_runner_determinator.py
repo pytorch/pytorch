@@ -38,6 +38,31 @@ class TestRunnerDeterminatorIssueParser(TestCase):
             "otherExp settings not parsed correctly",
         )
 
+    def test_parse_settings_with_invalid_experiment_name_skips_experiment(self) -> None:
+        settings_text = """
+        experiments:
+            lf:
+                rollout_perc: 25
+            -badExp:
+                rollout_perc: 0
+                default: false
+        ---
+
+        Users:
+        @User1,lf
+        @User2,lf,-badExp
+
+        """
+
+        settings = rd.parse_settings(settings_text)
+
+        self.assertTupleEqual(
+            rd.Experiment(rollout_perc=25),
+            settings.experiments["lf"],
+            "lf settings not parsed correctly",
+        )
+        self.assertNotIn("-badExp", settings.experiments)
+
     def test_parse_settings_in_code_block(self) -> None:
         settings_text = """
 
