@@ -87,6 +87,7 @@ from torch.testing._internal.common_utils import (
     subtest,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
+    HAS_HIPCC,
 )
 from torch.utils import _pytree as pytree
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -119,6 +120,8 @@ from torch.testing._internal.inductor_utils import (
 
 
 HAS_AVX2 = "fbgemm" in torch.backends.quantized.supported_engines
+
+ROCM_WHEELS_ENV = TEST_WITH_ROCM and not HAS_HIPCC
 
 aten = torch.ops.aten
 
@@ -973,6 +976,7 @@ class CommonTemplate:
                 self.assertEqual(ref_value, res_value)
 
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
+    @skipCUDAIf(ROCM_WHEELS_ENV, "ROCm requires hipcc compiler")
     @skip_if_halide  # aoti
     @skip_if_triton_cpu  # aoti
     @skipIfWindows(msg="aoti not support on Windows")
@@ -1017,6 +1021,7 @@ class CommonTemplate:
                 self.assertEqual(ref_value, res_value)
 
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
+    @skipCUDAIf(ROCM_WHEELS_ENV, "ROCm requires hipcc compiler")
     @skip_if_halide  # aoti
     @skip_if_triton_cpu  # aoti
     @skipIfWindows(msg="aoti not support on Windows")
