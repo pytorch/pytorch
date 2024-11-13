@@ -1413,7 +1413,7 @@ fi
 if [[ "${TEST_CONFIG}" == *numpy_2* ]]; then
   # Install numpy-2.0.2 and test inductor tracing
   python -mpip install --pre numpy==2.0.2
-  python test/run_test.py --include inductor/test_unspec.py
+  python test/run_test.py --include dynamo/test_unspec.py
 elif [[ "${BUILD_ENVIRONMENT}" == *aarch64* && "${TEST_CONFIG}" != *perf_cpu_aarch64* ]]; then
   test_linux_aarch64
 elif [[ "${TEST_CONFIG}" == *backward* ]]; then
