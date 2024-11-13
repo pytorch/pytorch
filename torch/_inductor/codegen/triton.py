@@ -1088,7 +1088,9 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     def signbit(x):
         # XX: This is wrong for the value -0.0 in floating point
-        return f"libdevice.signbit({x}) if ({x}).dtype is tl.float32 else {x} < 0"
+        return (
+            f"(libdevice.signbit({x}) != 0) if ({x}).dtype is tl.float32 else {x} < 0"
+        )
 
     @staticmethod
     def fmod(a, b):
@@ -1253,7 +1255,7 @@ class TritonKernelOverrides(TritonOverrides):
             return V.kernel.cse.cache[cache_key]
 
         mantissa = V.kernel.cse.newvar(dtype=x.dtype)
-        exponent = V.kernel.cse.newvar(dtype=x.dtype)
+        exponent = V.kernel.cse.newvar(dtype=torch.int32)
         V.kernel.compute.writeline(
             f"{mantissa}, {exponent} = triton_helpers.frexp({x})"
         )

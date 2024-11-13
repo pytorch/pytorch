@@ -67,6 +67,7 @@ from .utils import (
     is_pointwise_use,
     needs_fallback_due_to_atomic_add_limitations,
     pad_listlike,
+    register_op_dtype_propagation_rules,
     sympy_product,
     use_scatter_fallback,
 )
@@ -759,6 +760,14 @@ def register_pointwise(
     fn = ops_wrapper(name)
     if use_libdevice_for_f64:
         fn_libdevice = ops_wrapper("libdevice_" + name)
+        register_op_dtype_propagation_rules(
+            "libdevice_" + name, type_promotion_kind, override_return_dtype
+        )
+
+    register_op_dtype_propagation_rules(
+        name, type_promotion_kind, override_return_dtype
+    )
+
     if override_fn_when_input_bool is not None:
         override_fn_when_input_bool = ops_wrapper(override_fn_when_input_bool)
 
@@ -5695,18 +5704,6 @@ def fmod(a, b):
     return make_pointwise(fn)(a, b)
 
 
-@register_lowering(aten.rsqrt)
-def rsqrt(x):
-    dtype = x.get_dtype()
-    if is_integer_dtype(dtype) or is_boolean_dtype(dtype):
-        x = to_dtype(x, torch.get_default_dtype())
-
-    def _rsqrt(x):
-        return ops.rsqrt(x)
-
-    return make_pointwise(_rsqrt)(x)
-
-
 @register_lowering([aten.sum, prims.sum])
 def sum_(x, axis=None, keepdims=False, *, dtype=None):
     if (
@@ -5973,6 +5970,7 @@ def register_pointwise_numeric_ldf64(op):
     )
 
 
+rsqrt = register_pointwise_numeric(aten.rsqrt)
 exp = register_pointwise_numeric_ldf64(aten.exp)
 exp2 = register_pointwise_numeric(aten.exp2)
 expm1 = register_pointwise_numeric(aten.expm1)
