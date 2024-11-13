@@ -1,6 +1,7 @@
 # Owner(s): ["module: nestedtensor"]
 
 import ast
+import contextlib
 import io
 import itertools
 import logging
@@ -1288,6 +1289,7 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
             subtest(torch.isposinf, name="isposinf"),
             subtest(torch.isneginf, name="isneginf"),
             subtest(torch.isnan, name="isnan"),
+            subtest(torch.sqrt, name="sqrt"),
         ],
     )
     def test_unary_funcs(self, device, func):
@@ -7845,7 +7847,6 @@ FORWARD_FAILURES = [
             "nn.functional.softplus",
             "nn.functional.softshrink",
             "nn.functional.threshold",
-            "rad2deg",
             # binary
             "__rsub__",
             "complex",
