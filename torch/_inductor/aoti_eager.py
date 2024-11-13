@@ -236,7 +236,6 @@ def aoti_compile_with_persistent_cache(
                 # need to keep the same signature.
                 same_signature=False,
             )
-            assert isinstance(kernel_lib_path, str)
 
             kernel_metadata_items = []
 
