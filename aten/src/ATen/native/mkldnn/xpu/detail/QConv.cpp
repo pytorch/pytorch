@@ -16,12 +16,14 @@ qconv_get_md(
     const at::Tensor& src,
     const at::Tensor& wgh,
     const at::Tensor& dst,
-    int64_t groups,
-    bool is_channels_last_suggested) {
+    int64_t groups) {
   // create dnnl::memory desc from the src/wgh/dst tensors
   dnnl::memory::desc src_usr_md, wgh_usr_md, dst_usr_md;
   auto ndim = src.ndimension();
-  auto fmt_src = conv_src_fmt(ndim, is_channels_last_suggested);
+  bool src_is_cl =
+      (src.suggest_memory_format() == at::MemoryFormat::ChannelsLast) ||
+      (src.suggest_memory_format() == at::MemoryFormat::ChannelsLast3d);
+  auto fmt_src = conv_src_fmt(ndim, src_is_cl);
 
   auto src_tz = src.sizes().vec();
   auto src_data_t = get_onednn_dtype(src);
@@ -34,9 +36,12 @@ qconv_get_md(
   auto ic = src.size(1);
   auto oc = dst.size(1);
   auto wei_data_t = dnnl::memory::data_type::s8;
+  bool wgh_is_cl =
+      (wgh.suggest_memory_format() == at::MemoryFormat::ChannelsLast) ||
+      (wgh.suggest_memory_format() == at::MemoryFormat::ChannelsLast3d);
   dnnl::memory::dims wgh_tz =
       compatible_weight_dims(ndim, groups, oc, ic, wgh.sizes());
-  auto fmt_wgh = conv_weight_fmt(ndim, groups != 1, is_channels_last_suggested);
+  auto fmt_wgh = conv_weight_fmt(ndim, groups != 1, wgh_is_cl);
   wgh_usr_md = dnnl::memory::desc(wgh_tz, wei_data_t, fmt_wgh);
 
   return {src_usr_md, wgh_usr_md, dst_usr_md};
@@ -97,7 +102,6 @@ at::Tensor quantized_convolution(
 
   // create usr_md for tensors, and md for conv primitive
   dnnl::memory::desc src_md, weight_md, output_md;
-  bool is_channels_last_suggested = use_channels_last_for_conv(act, weight);
   // input tensors config
   dnnl::memory::dims src_dims = act.sizes().vec();
   dnnl::memory::dims weight_dims = weight.sizes().vec();
@@ -126,7 +130,7 @@ at::Tensor quantized_convolution(
   bool src_need_zp = (act_scale != 0);
 
   std::tie(src_md, weight_md, output_md) =
-      qconv_get_md(act, weight, output, groups, is_channels_last_suggested);
+      qconv_get_md(act, weight, output, groups);
 
   // get tensor md
   auto ic = act.size(1);
