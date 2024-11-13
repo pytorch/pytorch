@@ -21,7 +21,7 @@ struct TORCH_API IPUHooksInterface : AcceleratorHooksInterface {
   }
 
   const Generator& getDefaultGenerator(
-      C10_UNUSED DeviceIndex device_index = -1) const override {
+      [[maybe_unused]] DeviceIndex device_index = -1) const override {
     TORCH_CHECK(false, "Cannot initialize IPU without ATen_ipu library.");
   }
 
