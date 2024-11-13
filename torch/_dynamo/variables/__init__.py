@@ -47,6 +47,7 @@ from .higher_order_ops import (
 from .iter import (
     CountIteratorVariable,
     CycleIteratorVariable,
+    FilterVariable,
     IteratorVariable,
     ItertoolsVariable,
     MapVariable,

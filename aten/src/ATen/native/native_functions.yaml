@@ -1791,7 +1791,7 @@
   variants: function, method
   structured_delegate: cos.out
   dispatch:
-    NestedTensorCPU, NestedTensorCUDA: cos_nested
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_cos
   tags: [core, pointwise]
 
 - func: cos_(Tensor(a!) self) -> Tensor(a!)
@@ -4601,6 +4601,7 @@
     CompositeExplicitAutograd: rad2deg
     SparseCPU, SparseCUDA: rad2deg_sparse
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: rad2deg_sparse_csr
+  tags: pointwise
 
 - func: rad2deg_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
@@ -4608,12 +4609,14 @@
     CompositeExplicitAutograd: rad2deg_
     SparseCPU, SparseCUDA: rad2deg_sparse_
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: rad2deg_sparse_csr_
+  tags: pointwise
 
 - func: rad2deg.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CompositeExplicitAutograd: rad2deg_out
     SparseCPU, SparseCUDA: rad2deg_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: rad2deg_sparse_csr_out
+  tags: pointwise
 
 - func: deg2rad(Tensor self) -> Tensor
   variants: function, method
@@ -5321,7 +5324,7 @@
   dispatch:
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: sin_sparse_csr
     SparseCPU, SparseCUDA: sin_sparse
-    NestedTensorCPU, NestedTensorCUDA: sin_nested
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_sin
   tags: [core, pointwise]
 
 - func: sin_(Tensor(a!) self) -> Tensor(a!)
@@ -5819,6 +5822,7 @@
   structured_delegate: sqrt.out
   variants: function, method
   dispatch:
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_sqrt
     SparseCPU, SparseCUDA: sqrt_sparse
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: sqrt_sparse_csr
   tags: [core, pointwise]
@@ -11105,6 +11109,22 @@
     CUDA: foreach_tensor_lerp_list_cuda_
   autogen: _foreach_lerp.Scalar_out
 
+- func: _foreach_lerp.ScalarList(Tensor[] self, Tensor[] tensors1, Scalar[] weight) -> Tensor[]
+  device_check: NoCheck   # foreach kernels fall back to slow path when tensors are on different devices
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: foreach_tensor_lerp_scalarlist_kernel_slow
+    CUDA: foreach_tensor_lerp_scalarlist_cuda
+  autogen: _foreach_lerp.ScalarList_out
+
+- func: _foreach_lerp_.ScalarList(Tensor(a!)[] self, Tensor[] tensors1, Scalar[] weight) -> ()
+  device_check: NoCheck   # foreach kernels fall back to slow path when tensors are on different devices
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: foreach_tensor_lerp_scalarlist_kernel_slow_
+    CUDA: foreach_tensor_lerp_scalarlist_cuda_
+  autogen: _foreach_lerp.ScalarList_out
+
 - func: _foreach_lgamma(Tensor[] self) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
   variants: function
@@ -11292,6 +11312,21 @@
     CompositeExplicitAutograd: foreach_tensor_round_slow_
     CUDA: foreach_tensor_round_cuda_
   autogen: _foreach_round.out
+
+- func: _foreach_rsqrt(Tensor[] self) -> Tensor[]
+  device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: foreach_tensor_rsqrt_slow
+    CUDA: foreach_tensor_rsqrt_cuda
+
+- func: _foreach_rsqrt_(Tensor(a!)[] self) -> ()
+  device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: foreach_tensor_rsqrt_slow_
+    CUDA: foreach_tensor_rsqrt_cuda_
+  autogen: _foreach_rsqrt.out
 
 - func: _foreach_sigmoid(Tensor[] self) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
@@ -13080,6 +13115,7 @@
   variants: function, method
   device_check: NoCheck
   device_guard: False
+  tags: pointwise
 
 - func: isinf(Tensor self) -> Tensor
   variants: function, method
