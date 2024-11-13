@@ -76,7 +76,13 @@ def wrap_args_kwargs(tx: "InstructionTranslator", result):
             result[k] = wrap_bound_arg(tx, v)
 
 
-def init_cellvars(parent, result, code):
+def init_cellvars(
+    parent, result: Dict[str, VariableTracker], code
+) -> Dict[str, VariableTracker]:
+    """
+    Return a mapping from local name to new cells created directly by `code`,
+    and make sure that mapping is disjoint from `result`.
+    """
     closure_cells = {}
     side_effects = parent.output.side_effects
 
@@ -84,6 +90,8 @@ def init_cellvars(parent, result, code):
     for name in code.co_cellvars:
         closure_cells[name] = side_effects.track_cell_new()
         if name in result:
+            # This handles when a function argument is a cell (e.g., captured by
+            # a nested func). See `MAKE_CELL` bytecode for more info.
             side_effects.store_cell(closure_cells[name], result.pop(name))
 
     return closure_cells
@@ -197,6 +205,15 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         return self.fn.__globals__
 
     def bind_args(self, parent, args, kwargs):
+        """
+        Assume `args` and `kwargs` are VariableTracker arguments for a call to
+        this function, create new bindings for interpreting the function call.
+
+        Return 2 `Dict[str, VariableTracker]` mappings:
+        - closure_cells: locals that are cells created directly by this
+          function's frame.
+        - result: all other locals
+        """
         assert not self.is_constant
         tx = parent.output.root_tx
         wrap = functools.partial(wrap_bound_arg, tx=tx)
@@ -289,7 +306,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                         contents_var,
                     )
 
-                result[name] = out
+                closure_cells[name] = out
 
             else:
                 result[name] = VariableTracker.build(tx, cell.cell_contents)
