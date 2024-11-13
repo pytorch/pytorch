@@ -48,6 +48,7 @@ from .higher_order_ops import (
 from .iter import (
     CountIteratorVariable,
     CycleIteratorVariable,
+    FilterVariable,
     IteratorVariable,
     ItertoolsVariable,
     MapVariable,
@@ -88,6 +89,7 @@ from .misc import (
     TorchVersionVariable,
     TypingVariable,
     UnknownVariable,
+    WeakRefVariable,
 )
 from .nn_module import (
     FSDPManagedNNModuleVariable,
@@ -112,7 +114,6 @@ from .user_defined import (
     RemovableHandleVariable,
     UserDefinedClassVariable,
     UserDefinedObjectVariable,
-    WeakRefVariable,
 )
 
 
