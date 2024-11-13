@@ -94,6 +94,7 @@ from torch.testing._comparison import (
 from torch.testing._comparison import not_close_error_metas
 from torch.testing._internal.common_dtype import get_all_dtypes
 from torch.utils._import_utils import _check_module_exists
+from torch.utils.cpp_extension import ROCM_HOME
 import torch.utils._pytree as pytree
 
 try:
@@ -102,8 +103,9 @@ try:
 except ImportError:
     has_pytest = False
 
-
 NAVI_ARCH = ("gfx1030", "gfx1100", "gfx1101")
+
+HAS_HIPCC = torch.version.hip is not None and ROCM_HOME is not None and shutil.which('hipcc') is not None
 
 def freeze_rng_state(*args, **kwargs):
     return torch.testing._utils.freeze_rng_state(*args, **kwargs)
