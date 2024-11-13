@@ -5,8 +5,19 @@
 import itertools
 import sys
 from dataclasses import dataclass
-from functools import wraps
-from typing import Any, Callable, cast, Dict, Iterator, List, Sequence, Tuple, TypeVar
+from functools import partial, wraps
+from typing import (
+    Any,
+    Callable,
+    cast,
+    Dict,
+    Iterator,
+    List,
+    Sequence,
+    Tuple,
+    TypeVar,
+    Union,
+)
 
 import torch
 import torch.distributed as dist
@@ -364,9 +375,9 @@ TestFunc = Callable[[object], object]
 
 
 # wrapper to initialize comms (processgroup)
-def with_comms(eager_init: bool = False) -> TestFunc:
+def with_comms(eager_init: Union[TestFunc, bool] = False) -> TestFunc:
 
-    def decorator(func):
+    def decorator(func, eager_init: bool = False):
 
         @wraps(func)  # pyre-ignore[6]
         def wrapper(
@@ -390,8 +401,7 @@ def with_comms(eager_init: bool = False) -> TestFunc:
 
         return wrapper
 
-    return decorator
-
+    return decorator(func=eager_init) if callable(eager_init) else partial(decorator, eager_init=eager_init)
 
 
 class DTensorOpTestBase(MultiThreadedTestCase):
