@@ -327,14 +327,6 @@ class OptimizeForInferenceTemplate(TestCase):
                     mm_invoke = "mkldnn._linear_pointwise.default("
                 elif torch._C.has_mkl:
                     mm_invoke = "mkl_linear.default("
-            mkl_packable = (
-                torch.ops.mkldnn._is_mkldnn_acl_supported() or torch._C.has_mkl
-            )
-            mm_invoke = (
-                "mkl_linear.default("
-                if self.device == "cpu" and mkldnn_weight_pack_init and mkl_packable
-                else "mm("
-            )
 
             with torch.no_grad():
                 out_eager = mod(inp)
