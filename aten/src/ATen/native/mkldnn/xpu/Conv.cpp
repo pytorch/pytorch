@@ -588,7 +588,7 @@ Tensor _convolution_out(
           params.stride,
           params.dilation);
       output = at::empty(dst_tz, input.options(), mfmt);
-    }else{
+    } else {
       output = output_r;
     }
     onednn::convolution(
