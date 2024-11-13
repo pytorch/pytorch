@@ -583,6 +583,19 @@ class CPUReproTests(TestCase):
         seq_len,
     ):
         with torch.backends.mkldnn.verbose(torch.backends.mkldnn.VERBOSE_ON):
+            import psutil
+            import os
+            import logging
+            process = psutil.Process(os.getpid())
+            memory_info = process.memory_info()
+            logger = logging.getLogger('hz debug')
+            logger.propagate = True
+
+            logger.critical(f"RSS: {memory_info.rss / (1024 * 1024):.2f} MB")
+            logger.critical(f"VMS: {memory_info.vms / (1024 * 1024):.2f} MB")
+            logger.critical(f"virtual_memory: {psutil.virtual_memory()}")
+            logger.critical(f"available: {psutil.virtual_memory().available / (1024 * 1024):.2f} MB")
+
             self._test_lstm_packed(
                 unbatched,
                 input_size,
