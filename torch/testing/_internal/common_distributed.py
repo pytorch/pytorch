@@ -914,38 +914,8 @@ class DistributedTestBase(MultiProcessTestCase):
         else :
             return "gloo"
 
-    def device_handle(self, device) :
-        """
-        Get the torch module for the given device type.
-
-        This method is used to handle different device types in distributed testing.
-        It extracts the device name from the input string and returns the corresponding
-        torch module if available.
-
-        Args:
-            device (str): A string representing the device, e.g., "cuda:0", "cpu", "hpu".
-
-        Returns:
-            Union[torch.device, None]: The corresponding torch module if available,
-                                       or None if the device is not found but is an attribute of torch.
-
-        Raises:
-            RuntimeError: If the device library is not found in torch.
-
-        Example:
-            >>> self.device_handle("cuda:0")
-            <module 'torch.cuda' from '...'>
-        """
-        device_name = device.split(":")[0]
-        if hasattr(torch, device_name):
-            return getattr(torch, device_name, None)
-        else:
-            raise RuntimeError(
-                f"Device {device} library not found"
-            )
-
     def create_pg(self, device):
-        num_visible_devices = self.device_handle(device).device_count()
+        num_visible_devices = torch.get_device_module(device).device_count()
         store = torch.distributed.FileStore(self.file_name, num_visible_devices)
         torch.distributed.init_process_group(
             backend=self.backend(device),
@@ -958,7 +928,7 @@ class DistributedTestBase(MultiProcessTestCase):
         return torch.distributed.distributed_c10d._get_default_group()
 
     def rank_to_device(self, device):
-        num_visible_devices = self.device_handle(device).device_count()
+        num_visible_devices = torch.get_device_module(device).device_count()
         return {i: [i % num_visible_devices] for i in range(self.world_size)}
 
 def run_subtests(
