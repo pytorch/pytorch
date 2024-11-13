@@ -46,11 +46,10 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     skipIfRocm,
     TEST_WITH_ROCM,
-    parametrize,
 )
+from torch.testing._internal.inductor_utils import HAS_CPU
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 from torch.testing._internal.triton_utils import HAS_CUDA, requires_cuda
-from torch.testing._internal.inductor_utils import HAS_CPU
 from torch.utils import _pytree as pytree
 from torch.utils._triton import has_triton_tma
 
@@ -740,9 +739,13 @@ class AOTInductorTestsTemplate:
         self.check_model(Model(), example_inputs, dynamic_shapes=dynamic_shapes)
 
     @skipIfRocm  # _scaled_mm_out_cuda  is not compiled for ROCm platform
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled")
+    @unittest.skipIf(
+        not torch.cpu._is_amx_tile_supported(), "FP8 cannot run on the current CPU platform"
+    )
     def test_fp8(self):
         if self.device == "cuda" and not SM90OrLater:
-            raise unittest.SkipTest(f"FP8 is only supported on H100+")
+            raise unittest.SkipTest("FP8 is only supported on H100+")
 
         class Model(torch.nn.Module):
             def __init__(self, dtype):
@@ -772,7 +775,9 @@ class AOTInductorTestsTemplate:
         b_inverse_scale = 1 / b_scale
 
         x_shape = (16, 16)
-        x = torch.rand(*x_shape, device=self.device, dtype=dtype).to(torch.float8_e4m3fn)
+        x = torch.rand(*x_shape, device=self.device, dtype=dtype).to(
+            torch.float8_e4m3fn
+        )
         dim0_x = Dim("dim0_x", min=1, max=2048)
         dynamic_shapes = ({0: dim0_x}, None, None, None, None)
         self.check_model(
@@ -782,9 +787,13 @@ class AOTInductorTestsTemplate:
         )
 
     @skipIfRocm  # _scaled_mm_out_cuda  is not compiled for ROCm platform
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled")
+    @unittest.skipIf(
+        not torch.cpu._is_amx_tile_supported(), "FP8 cannot run on the current CPU platform"
+    )
     def test_fp8_view_of_param(self):
         if self.device == "cuda" and not SM90OrLater:
-            raise unittest.SkipTest(f"FP8 is only supported on H100+")
+            raise unittest.SkipTest("FP8 is only supported on H100+")
 
         class Model(torch.nn.Module):
             def __init__(self, dtype, weight):

@@ -13,7 +13,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     TEST_WITH_ROCM,
 )
-from torch.testing._internal.inductor_utils import HAS_CUDA, HAS_CPU
+from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
 
 torch.set_float32_matmul_precision("high")
@@ -163,7 +163,9 @@ class TestFP8Types(TestCase):
         else [(torch.float8_e4m3fnuz, torch.float8_e5m2fnuz)],
     )
     @parametrize("device", ("cuda", "cpu"))
-    def test_valid_cast(self, dtype: torch.dtype, shape: str, dst_types: tuple, device: torch.device):
+    def test_valid_cast(
+        self, dtype: torch.dtype, shape: str, dst_types: tuple, device: torch.device
+    ):
         if device == "cuda" and not PLATFORM_SUPPORTS_FP8:
             raise unittest.SkipTest(f8_msg)
         e4m3, e5m2 = dst_types
@@ -215,10 +217,15 @@ class TestFP8Types(TestCase):
     @parametrize("shape", ("16,16,16", "4,2048,4096"))
     @parametrize("device", ("cuda", "cpu"))
     def test_to_fp8_saturated(
-        self, src_dtype: torch.dtype, dst_dtype: torch.dtype, shape: str, device: torch.device
+        self,
+        src_dtype: torch.dtype,
+        dst_dtype: torch.dtype,
+        shape: str,
+        device: torch.device,
     ):
         if device == "cuda" and not PLATFORM_SUPPORTS_FP8:
             raise unittest.SkipTest(f8_msg)
+
         def fp8_saturated(x, dtype):
             return _to_fp8_saturated(x, dtype)
 
@@ -241,9 +248,11 @@ class TestFP8Types(TestCase):
     )
     @parametrize("shape", ("1,1,15", "1,10,15", "1,10,512", "1,10,4096", "4,2048,4096"))
     @parametrize("device", ("cuda", "cpu"))
-    def test_amax_fp8_quant(self, float8_dtype: torch.dtype, shape: str, device: torch.device):
+    def test_amax_fp8_quant(
+        self, float8_dtype: torch.dtype, shape: str, device: torch.device
+    ):
         if device == "cuda" and not SM90OrLater:
-            raise unittest.SkipTest(f"FP8 is only supported on H100+")
+            raise unittest.SkipTest("FP8 is only supported on H100+")
         shape = [int(dim) for dim in shape.split(",")]
         batch_size, sequence_length, hidden_size = shape
 
@@ -272,7 +281,9 @@ class TestFP8Types(TestCase):
     )
     @parametrize("shape", ("1,1,15", "1,10,15", "1,10,512", "1,10,4096", "4,2048,4096"))
     @parametrize("device", ("cuda", "cpu"))
-    def test_amax_along_with_fp8_quant(self, float8_dtype: torch.dtype, shape: str, device: torch.device):
+    def test_amax_along_with_fp8_quant(
+        self, float8_dtype: torch.dtype, shape: str, device: torch.device
+    ):
         if device == "cuda" and not PLATFORM_SUPPORTS_FP8:
             raise unittest.SkipTest(f8_msg)
         shape = [int(dim) for dim in shape.split(",")]
@@ -311,10 +322,14 @@ class TestFP8Types(TestCase):
     @parametrize("shape", ("1,1,15", "1,10,15", "1,10,512", "1,10,4096", "4,2048,4096"))
     @parametrize("device", ("cuda", "cpu"))
     def test_layernorm_fp8_quant(
-        self, float8_dtype: torch.dtype, amax_keep_dim: bool, shape: str, device: torch.device
+        self,
+        float8_dtype: torch.dtype,
+        amax_keep_dim: bool,
+        shape: str,
+        device: torch.device,
     ):
         if device == "cuda" and not SM90OrLater:
-            raise unittest.SkipTest(f"FP8 is only supported on H100+")
+            raise unittest.SkipTest("FP8 is only supported on H100+")
         shape = [int(dim) for dim in shape.split(",")]
         batch_size, sequence_length, hidden_size = shape
 
@@ -427,10 +442,15 @@ class TestFP8Lowering(TestCase):
     @parametrize("use_fast_accum", (False, True))
     @parametrize("device", ("cuda", "cpu"))
     def test_tensorwise_scaling(
-        self, dtype: torch.dtype, shape: str, has_bias: bool, use_fast_accum: bool, device: torch.device
+        self,
+        dtype: torch.dtype,
+        shape: str,
+        has_bias: bool,
+        use_fast_accum: bool,
+        device: torch.device,
     ):
         if device == "cuda" and not SM90OrLater:
-            raise unittest.SkipTest(f"FP8 is only supported on H100+")
+            raise unittest.SkipTest("FP8 is only supported on H100+")
         if dtype is torch.float32 and has_bias:
             self.skipTest("bias is not supported when output dtype is float32")
 
