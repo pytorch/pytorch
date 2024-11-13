@@ -3,12 +3,12 @@ torch.Storage
 
 In PyTorch, a regular tensor is a multi-dimensional array that is defined by the following components:
 
-  - Storage: The actual data of the tensor, stored as a contiguous, one-dimensional array of bytes.
-  - ``dtype``: The data type of the elements in the tensor, such as torch.float32 or torch.int64.
-  - ``shape``: A tuple indicating the size of the tensor in each dimension.
-  - Stride: The step size needed to move from one element to the next in each dimension.
-  - Offset: The starting point in the storage from which the tensor data begins. This will usually be 0 for newly
-    created tensors.
+- Storage: The actual data of the tensor, stored as a contiguous, one-dimensional array of bytes.
+- ``dtype``: The data type of the elements in the tensor, such as torch.float32 or torch.int64.
+- ``shape``: A tuple indicating the size of the tensor in each dimension.
+- Stride: The step size needed to move from one element to the next in each dimension.
+- Offset: The starting point in the storage from which the tensor data begins. This will usually be 0 for newly
+  created tensors.
 
 These components together define the structure and data of a tensor, with the storage holding the
 actual data and the rest serving as metadata.
@@ -91,11 +91,6 @@ reference below. Keep in mind that modifying storages is a low-level API and com
 Most of these APIs also exist on the tensor level: if present, they should be prioritized over their storage
 counterparts.
 
-.. autoclass:: torch.UntypedStorage
-   :members:
-   :undoc-members:
-   :inherited-members:
-
 Special cases
 -------------
 
@@ -116,6 +111,11 @@ There are also special cases where tensors do not have a typical storage, or no 
 
 Tensor subclasses or tensor-like objects can also display unusual behaviours. In general, we do not
 expect many use cases to require operating at the Storage level!
+
+.. autoclass:: torch.UntypedStorage
+   :members:
+   :undoc-members:
+   :inherited-members:
 
 Legacy Typed Storage
 --------------------
