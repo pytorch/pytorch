@@ -580,32 +580,31 @@ def _use_flex_decoding(query, kernel_options):
     ) and V.graph.sizevars.evaluate_expr(sympy.Lt(query.get_size()[-2], 128))
 
 
-_nv_default_fwd_config = {
-    "H100": {
-        (torch.float32, 64): (128, 32, 4, 3),
-        (torch.float32, 128): (32, 64, 4, 3),
-        (torch.float32, 256): (32, 32, 4, 3),
-        (torch.bfloat16, 64): (128, 128, 4, 3),
-        (torch.bfloat16, 128): (128, 64, 8, 3),
-        (torch.bfloat16, 256): (64, 32, 4, 3),
-        (torch.float16, 64): (128, 128, 4, 3),
-        (torch.float16, 128): (128, 128, 8, 3),
-        (torch.float16, 256): (64, 32, 4, 3),
-    },
-    "A100": {
-        (torch.float32, 64): (128, 32, 4, 3),
-        (torch.float32, 128): (128, 32, 4, 3),
-        (torch.float32, 256): (64, 16, 4, 3),
-        (torch.bfloat16, 64): (128, 64, 4, 3),
-        (torch.bfloat16, 128): (128, 64, 8, 3),
-        (torch.bfloat16, 256): (32, 64, 4, 3),
-        (torch.float16, 64): (128, 64, 4, 3),
-        (torch.float16, 128): (128, 64, 8, 3),
-        (torch.float16, 256): (32, 64, 4, 3),
-    },
+_h100_default_config = {
+    (torch.float32, 64): (128, 32, 4, 3),
+    (torch.float32, 128): (32, 64, 4, 3),
+    (torch.float32, 256): (32, 32, 4, 3),
+    (torch.bfloat16, 64): (128, 128, 4, 3),
+    (torch.bfloat16, 128): (128, 64, 8, 3),
+    (torch.bfloat16, 256): (64, 32, 4, 3),
+    (torch.float16, 64): (128, 128, 4, 3),
+    (torch.float16, 128): (128, 128, 8, 3),
+    (torch.float16, 256): (64, 32, 4, 3),
 }
 
-_rocm_default_fwd_config = {
+_a100_default_config = {
+    (torch.float32, 64): (128, 32, 4, 3),
+    (torch.float32, 128): (128, 32, 4, 3),
+    (torch.float32, 256): (64, 16, 4, 3),
+    (torch.bfloat16, 64): (128, 64, 4, 3),
+    (torch.bfloat16, 128): (128, 64, 8, 3),
+    (torch.bfloat16, 256): (32, 64, 4, 3),
+    (torch.float16, 64): (128, 64, 4, 3),
+    (torch.float16, 128): (128, 64, 8, 3),
+    (torch.float16, 256): (32, 64, 4, 3),
+}
+
+_rocm_default_config = {
     (torch.float32, 64): (128, 32, 4, 1),
     (torch.float32, 128): (128, 32, 4, 1),
     (torch.float32, 256): (64, 16, 4, 1),
@@ -656,9 +655,6 @@ def _get_nv_config(query, mode: str) -> Tuple[int, int, int, int]:
     default_config = None
 
     capability = torch.cuda.get_device_capability()
-    gpu_arch = (
-        "H100" if capability >= (9, 0) else "A100" if capability >= (8, 0) else None
-    )
 
     if mode == "fwd":
         if head_dim <= 256:
@@ -666,8 +662,12 @@ def _get_nv_config(query, mode: str) -> Tuple[int, int, int, int]:
                 fwd_config = (64, 64, 4, 3)
             else:
                 fwd_config = (128, 64, 4, 3)
-            if gpu_arch:
-                fwd_config = _nv_default_fwd_config[gpu_arch].get(
+            if capability > (9, 0):
+                fwd_config = _h100_default_config.get(
+                    (dtype, head_dim), default_config
+                )
+            elif capability > (8, 0):
+                fwd_config = _a100_default_fwd_config.get(
                     (dtype, head_dim), default_config
                 )
         else:  # modest hardware or extremely large head_dim
