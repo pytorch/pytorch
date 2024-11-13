@@ -384,7 +384,7 @@ use_numpy_random_stream = False
 enable_cpp_guard_manager = True
 
 # Enable tracing through contextlib.contextmanager
-enable_trace_contextlib_contextmanager = False
+enable_trace_contextlib_contextmanager = True
 
 # Inline inbuilt nn modules
 inline_inbuilt_nn_modules = not is_fbcode()
