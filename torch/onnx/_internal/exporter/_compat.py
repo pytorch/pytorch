@@ -158,9 +158,9 @@ def export_compat(
         args, kwargs = _get_torch_export_args(args, kwargs)
         if dynamic_shapes is None and dynamic_axes is not None:
             warnings.warn(
-                "# ⚠️ **dynamic_axes is not recommended to dynamo=True, "
-                "and might lead to torch._dynamo.exc.UserError: Constraints violated. "
-                "Please use dynamic_shapes for better user experience.** ⚠️",
+                "# 'dynamic_axes' is not recommended when dynamo=True, "
+                "and may lead to 'torch._dynamo.exc.UserError: Constraints violated.' "
+                "Supply the 'dynamic_shapes' argument instead if export is unsuccessful.",
                 UserWarning,
             )
             try:
