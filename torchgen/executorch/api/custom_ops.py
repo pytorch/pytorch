@@ -6,8 +6,9 @@ from typing import Sequence, TYPE_CHECKING
 
 from torchgen import dest
 
+
 # disable import sorting to avoid circular dependency.
-from torchgen.api.types import DispatcherSignature  # usort:skip
+from torchgen.api.types import DispatcherSignature  # usort: skip
 from torchgen.context import method_with_native_function
 from torchgen.model import BaseTy, BaseType, DispatchKey, NativeFunction, Variant
 from torchgen.utils import concatMap, Target
@@ -128,7 +129,7 @@ def gen_custom_ops_registration(
         static_init_dispatch_registrations += f"""
 TORCH_LIBRARY_IMPL({namespace}, {dispatch_key}, m) {{
 {dispatch_registrations_body}
-}};"""
+}}"""
     anonymous_definition = "\n".join(
         list(
             concatMap(

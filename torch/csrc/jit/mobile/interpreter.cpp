@@ -15,8 +15,7 @@
 #include <torch/csrc/jit/runtime/jit_exception.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 char const* toString(OpCode op);
 std::ostream& operator<<(std::ostream& out, Instruction inst);
 namespace mobile {
@@ -363,7 +362,7 @@ bool InterpreterState::run(Stack& stack) {
           frame.step();
         } break;
         default:
-          AT_ERROR(toString(inst.op), " is invalid.");
+          TORCH_CHECK(false, toString(inst.op), " is invalid.");
       }
 
       if (!prev_value) {
@@ -400,5 +399,4 @@ IValue& InterpreterState::reg(size_t reg) {
 }
 
 } // namespace mobile
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

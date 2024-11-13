@@ -31,8 +31,9 @@ import torch
 from torch._prims_common import dtype_to_type, is_integer_dtype
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing, Where
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
-from .utils import generate_assert
 
+from .sizevars import evaluate_expr
+from .utils import generate_assert
 from .virtualized import V
 
 
@@ -86,7 +87,10 @@ class SymPyOps:
 
     @staticmethod
     def to_dtype(
-        value: TypedExpr, dtype: torch.dtype, src_dtype: Optional[torch.dtype] = None
+        value: TypedExpr,
+        dtype: torch.dtype,
+        src_dtype: Optional[torch.dtype] = None,
+        use_compute_types: bool = False,
     ) -> TypedExpr:
         return TypedExpr(value.expr, dtype)
 
@@ -131,7 +135,7 @@ class SymPyOps:
         if not is_integer_dtype(result_type):
             return NotImplemented
 
-        result_expr = ModularIndexing(x.expr, sympy.Integer(1), y.expr)
+        result_expr = ModularIndexing(x.expr, sympy.S.One, y.expr)
         return TypedExpr(result_expr, result_type)
 
     @staticmethod
@@ -148,7 +152,7 @@ class SymPyOps:
             x_expr.is_nonnegative is not None
             and x_expr.is_nonnegative == y_expr.is_positive
         ):
-            result_expr = ModularIndexing(x.expr, sympy.Integer(1), y.expr)
+            result_expr = ModularIndexing(x.expr, sympy.S.One, y.expr)
             return TypedExpr(result_expr, result_type)
         return NotImplemented
 
@@ -189,7 +193,12 @@ class IndexPropagation:
 
     """
 
-    def __init__(self, inner: Any, iter_ranges: Dict[sympy.Symbol, sympy.Expr]):
+    def __init__(
+        self,
+        inner: Any,
+        iter_ranges: Dict[sympy.Symbol, sympy.Expr],
+        indirect_var_ranges: Dict[sympy.Symbol, sympy.Expr],
+    ) -> None:
         self._inner = inner
         self.shape_env = V.graph.sizevars.shape_env
 
@@ -199,6 +208,9 @@ class IndexPropagation:
         self.var_to_range = tuple(
             itertools.chain(self.shape_env.var_to_range.items(), var_to_range.items())
         )
+        # NOTE: this is intentionally kept as a reference so the caller can
+        # update it in-place
+        self.indirect_var_ranges = indirect_var_ranges
 
         axioms = []
         for x, s in iter_ranges.items():
@@ -306,15 +318,21 @@ class IndexPropagation:
               to perform wrap_expr and in CSEProxy.check_bounds to elide upper / lower bounds also
               for indirect_indexing
         """
-        evaluated = self.shape_env._maybe_evaluate_static(
-            e,
-            axioms=self.axioms,
-            var_to_range=self.var_to_range,
+        var_to_range = (
+            *self.var_to_range,
+            *(
+                (k, ValueRanges(0, upper_bound(v) - 1))
+                for k, v in self.indirect_var_ranges.items()
+            ),
         )
-        return bool(evaluated)
+        return evaluate_expr(self.shape_env, e, self.axioms, var_to_range)
 
     def indirect_indexing(
-        self, index: Union[Any, IndexPropVar], size: Any, check: bool = True
+        self,
+        index: Union[Any, IndexPropVar],
+        size: Any,
+        check: bool = True,
+        wrap_neg=True,
     ) -> Any:
         if isinstance(index, IndexPropVar) and index.is_symbolic:
             # If we find something we can convert into a direct indexing we do so
@@ -339,7 +357,8 @@ class IndexPropagation:
                 -size <= expr
             )
             can_prove_upper = self.statically_true(expr < size)
-            expr = wrap_expr(expr)
+            if wrap_neg:
+                expr = wrap_expr(expr)
             if generate_assert(check):
                 self.fallback(
                     "check_bounds",
@@ -349,11 +368,6 @@ class IndexPropagation:
             return expr
 
         indirect_var = self.fallback(
-            "indirect_indexing", (index, size, check), {}
+            "indirect_indexing", (index, size, check, wrap_neg), {}
         ).value
-        assert (
-            indirect_var not in self.var_to_range
-        ), f"{indirect_var} should've been created in the fallback."
-        indirect_range = (indirect_var, ValueRanges(0, upper_bound(size) - 1))
-        self.var_to_range = self.var_to_range + (indirect_range,)
         return indirect_var

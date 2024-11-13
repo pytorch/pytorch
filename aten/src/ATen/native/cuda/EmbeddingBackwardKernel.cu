@@ -244,7 +244,7 @@ Tensor embedding_backward_cuda_kernel(
   AT_DISPATCH_INDEX_TYPES(orig_indices.scalar_type(), "embedding_backward_cuda_kernel", [&] () {
     cuda::cub::unique_by_key(
       sorted_indices.const_data_ptr<index_t>(), thrust::make_counting_iterator(0),
-      nullptr, segment_offsets.mutable_data_ptr<index_t>(),
+      segment_offsets.mutable_data_ptr<index_t>(),
       num_of_segments_ptr, sorted_indices.numel());
   });
 #endif

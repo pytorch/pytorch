@@ -4,12 +4,10 @@ import copy
 import itertools
 import logging
 import math
-
 from typing import Tuple
 
 import torch
 from torch import nn
-
 from torch.ao.pruning._experimental.data_sparsifier import (
     BaseDataSparsifier,
     DataNormSparsifier,
@@ -19,6 +17,7 @@ from torch.ao.pruning._experimental.data_sparsifier.quantization_utils import (
 )
 from torch.nn.utils.parametrize import is_parametrized
 from torch.testing._internal.common_utils import TestCase
+
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
@@ -687,7 +686,7 @@ class TestNormDataSparsifiers(_NormDataSparsifierTestCase):
 
 
 class Model(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.emb1 = nn.Embedding(100, 3)
         self.embbag1 = nn.EmbeddingBag(200, 32)

@@ -1,3 +1,4 @@
+#include <cassert>
 #include <ATen/cpu/Utils.h>
 #if !defined(__s390x__ ) && !defined(__powerpc__)
 #include <cpuinfo.h>
@@ -8,7 +9,7 @@
 #endif
 
 namespace at::cpu {
-bool is_cpu_support_avx2() {
+bool is_avx2_supported() {
 #if !defined(__s390x__) && !defined(__powerpc__)
   return cpuinfo_initialize() && cpuinfo_has_x86_avx2();
 #else
@@ -16,7 +17,7 @@ bool is_cpu_support_avx2() {
 #endif
 }
 
-bool is_cpu_support_avx512() {
+bool is_avx512_supported() {
 #if !defined(__s390x__) && !defined(__powerpc__)
   return cpuinfo_initialize() && cpuinfo_has_x86_avx512f() && cpuinfo_has_x86_avx512vl() && cpuinfo_has_x86_avx512bw() && cpuinfo_has_x86_avx512dq();
 #else
@@ -24,7 +25,7 @@ bool is_cpu_support_avx512() {
 #endif
 }
 
-bool is_cpu_support_avx512_vnni() {
+bool is_avx512_vnni_supported() {
 #if !defined(__s390x__) && !defined(__powerpc__)
   return cpuinfo_initialize() && cpuinfo_has_x86_avx512vnni();
 #else
@@ -32,7 +33,15 @@ bool is_cpu_support_avx512_vnni() {
 #endif
 }
 
-bool is_cpu_support_amx_tile() {
+bool is_avx512_bf16_supported() {
+#if !defined(__s390x__) && !defined(__powerpc__)
+  return cpuinfo_initialize() && cpuinfo_has_x86_avx512bf16();
+#else
+  return false;
+#endif
+}
+
+bool is_amx_tile_supported() {
 #if !defined(__s390x__) && !defined(__powerpc__)
   return cpuinfo_initialize() && cpuinfo_has_x86_amx_tile();
 #else
@@ -40,8 +49,16 @@ bool is_cpu_support_amx_tile() {
 #endif
 }
 
+bool is_amx_fp16_supported() {
+#if !defined(__s390x__) && !defined(__powerpc__)
+  return is_amx_tile_supported() && cpuinfo_has_x86_amx_fp16();
+#else
+  return false;
+#endif
+}
+
 bool init_amx() {
-  if (!is_cpu_support_amx_tile()) {
+  if (!is_amx_tile_supported()) {
     return false;
   }
 
@@ -73,6 +90,52 @@ bool init_amx() {
 #else
   return true;
 #endif
+}
+
+bool is_arm_sve_supported() {
+#if !defined(__s390x__) && !defined(__powerpc__)
+  return cpuinfo_initialize() && cpuinfo_has_arm_sve();
+#else
+  return false;
+#endif
+}
+
+static uint32_t get_cache_size(int level) {
+#if !defined(__s390x__) && !defined(__powerpc__)
+  if (!cpuinfo_initialize()) {
+    return 0;
+  }
+  const struct cpuinfo_processor* processors = cpuinfo_get_processors();
+  if (!processors) {
+    return 0;
+  }
+  const struct cpuinfo_cache* cache = nullptr;
+  switch (level) {
+    case 1:
+      cache = processors[0].cache.l1d;
+      break;
+    case 2:
+      cache = processors[0].cache.l2;
+      break;
+    default:
+      assert(false && "Unsupported cache level");
+  }
+
+  if (!cache) {
+    return 0;
+  }
+  return cache->size;
+#else
+  return 0;
+#endif
+}
+
+uint32_t L1d_cache_size() {
+  return get_cache_size(1);
+}
+
+uint32_t L2_cache_size() {
+  return get_cache_size(2);
 }
 
 } // namespace at::cpu

@@ -1,16 +1,11 @@
 # mypy: allow-untyped-defs
 import functools
 
-from typing import Optional, Set
-
-import torch._inductor.runtime.hints
 from torch._inductor import config
 from torch._inductor.codegen.simd import IterationRangesRoot
-
 from torch._inductor.codegen.triton import triton_compute_type, TritonKernel
-
+from torch._inductor.runtime.triton_heuristics import split_scan_grid
 from torch._prims_common import prod
-
 from torch.utils._sympy.functions import CeilDiv
 
 
@@ -33,20 +28,21 @@ class TritonSplitScanKernel(TritonKernel):
     def __init__(
         self,
         *groups,
-        index_dtype: str,
-        mutations: Optional[Set[str]] = None,
-        reduction_hint=torch._inductor.runtime.hints.ReductionHint.DEFAULT,
-        min_elem_per_thread=0,
-    ):
+        pid_cache=None,
+        **kwargs,
+    ) -> None:
+        assert pid_cache is None, "not supported"
         super().__init__(
             *groups,
-            index_dtype=index_dtype,
-            mutations=mutations,
-            pid_cache=None,
-            reduction_hint=reduction_hint,
-            min_elem_per_thread=min_elem_per_thread,
+            **kwargs,
         )
         self.no_x_dim = True
+
+    def should_use_persistent_reduction(self) -> bool:
+        return False
+
+    def should_use_cooperative_reduction(self) -> bool:
+        return False
 
     def initialize_range_tree(self, pid_cache):
         prefixes = "yxr"
@@ -74,8 +70,6 @@ class TritonSplitScanKernel(TritonKernel):
                     has_zdim=False,
                 )
             )
-        for tree in self.range_trees:
-            self.iteration_ranges_codegen_header(tree, self.body)
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
         raise NotImplementedError("NYI TritonSplitDimKernel reductions")
@@ -98,7 +92,7 @@ class TritonSplitScanKernel(TritonKernel):
             scratch_type_triton.primitive_bitwidth // 8
         )
 
-        cse_load = functools.partial(self.cse.generate, self.loads)
+        cse_load = functools.partial(self.cse.generate, self.loads, dtype=dtype)
         cse_compute = functools.partial(self.cse.generate, self.compute)
 
         assert len(self.numels) == 2, "Unexpected tiling"
@@ -116,18 +110,28 @@ class TritonSplitScanKernel(TritonKernel):
 
         masks = {f"{tree.prefix}mask" for tree in self.range_trees}
         self.filter_masks(masks)
-        masks = sorted(masks)
         assert not self._load_mask, "ops.scan not supported inside ops.masked"
 
-        value = cse_compute(f"{value}.to({compute_type})")
-        value = cse_compute(f"tl.broadcast_to({value}, {self.dense_size_str()})")
+        value = cse_compute(
+            f"{value}.to({compute_type})",
+            dtype=dtype,
+        )
+        value = cse_compute(
+            f"tl.broadcast_to({value}, {self.dense_size_str()})",
+            dtype=dtype,
+        )
 
         combine_helper_fn = self._lift_helper(combine_fn, 1)
         dim = self.triton_tensor_ndim() - 1
         assert dim == 0, ""
 
-        block_sum = cse_compute(f"tl.reduce({value}, {dim}, {combine_helper_fn})")
-        exclusive_prefix = self.cse.newvar()
+        block_sum = cse_compute(
+            f"tl.reduce({value}, {dim}, {combine_helper_fn})",
+            dtype=dtype,
+        )
+        exclusive_prefix = self.cse.newvar(
+            dtype=dtype,
+        )
         if element_nbits == 64:
             self.compute.splice(
                 f"""
@@ -160,17 +164,25 @@ class TritonSplitScanKernel(TritonKernel):
             )
         # Compute final cumsum
         block_scan = cse_compute(
-            f"tl.associative_scan({value}, {dim}, {combine_helper_fn})"
+            f"tl.associative_scan({value}, {dim}, {combine_helper_fn})",
+            dtype=dtype,
         )
         combined_result = cse_compute(
-            f"{combine_helper_fn}({exclusive_prefix}, {block_scan})"
+            f"{combine_helper_fn}({exclusive_prefix}, {block_scan})",
+            dtype=dtype,
         )
         return (
-            cse_compute(f"tl.where(roffset == 0, {block_scan}, {combined_result})"),
+            cse_compute(
+                f"tl.where(roffset == 0, {block_scan}, {combined_result})",
+                dtype=dtype,
+            ),
         )
 
     def _get_heuristic(self):
         return "split_scan"
 
-    def _get_grid_fn(self):
+    def _get_grid_fn_str(self):
         return "split_scan_grid"
+
+    def _get_grid_fn(self):
+        return split_scan_grid

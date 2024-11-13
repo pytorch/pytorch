@@ -49,6 +49,7 @@ from torch.utils.checkpoint import (
 )
 from torch.utils.data import DataLoader
 
+
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
@@ -116,7 +117,7 @@ class TestCheckpoint(TestCase):
     # the number of times forward pass happens
     def test_checkpoint_trigger(self):
         class Net(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.counter = 0
 
@@ -217,7 +218,7 @@ class TestCheckpoint(TestCase):
 
     def test_checkpoint_module_list(self):
         class ModuleListNet(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 module_list = [
                     nn.Linear(100, 50),

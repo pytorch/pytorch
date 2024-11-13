@@ -1,14 +1,14 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
-import functools
 import logging
 from typing import cast, List, Optional, Sequence, Tuple, TYPE_CHECKING, TypedDict
 
 import torch
+from torch._inductor.codegen.rocm.ck_conv_template import CKGroupedConvFwdTemplate
 
 from .. import config, ir
-
 from ..lowering import (
     add_layout_constraint,
     constrain_to_fx_strides,
@@ -26,10 +26,12 @@ from ..utils import (
     is_zeros,
     pad_listlike,
     sympy_product,
+    use_ck_conv_template,
     use_triton_template,
 )
 from ..virtualized import V
-from .mm_common import filtered_configs
+from .mm_common import build_rocm_gemm_configs, filtered_configs
+
 
 if TYPE_CHECKING:
     from ..ir import TensorBox
@@ -78,14 +80,28 @@ platform_configs = tuple(
 
 # On ROCm convert num_stages to 1 as pipelining provides no benefit
 if torch.version.hip:
-    platform_configs = tuple(
-        (config[0], config[1], config[2], 1, config[4]) for config in platform_configs
-    )
+    platform_configs = build_rocm_gemm_configs(platform_configs)
 
-conv_configs = functools.partial(
-    filtered_configs,
-    configs=platform_configs,
-)
+
+def _is_large_block_for_cpu(m, n, k):
+    # Thresholds are experimentally determined to reduce Triton CPU compile times
+    if m > 256 or n > 256 or k > 256:
+        return True
+    return m * n * k > 2**17
+
+
+def conv_configs(m, n, k, *, device_type, **kwargs):
+    if device_type == "cpu":
+        return filtered_configs(
+            m,
+            n,
+            k,
+            configs=platform_configs,
+            scale=0.5,
+            exclude=_is_large_block_for_cpu,
+        )
+    return filtered_configs(m, n, k, configs=platform_configs)
+
 
 LOOP_BODY_2D = """
         idx_x_h = i - PADDING_H + idx_y_h * STRIDE_H
@@ -459,6 +475,16 @@ def convolution(
     if not isinstance(groups, int):
         groups = V.graph.sizevars.evaluate_static_shape(groups)
     assert isinstance(groups, int)
+
+    # Need use hint for triton template since the template does not
+    # work with a dynamic shape.
+    #
+    # No need to evaluate_static_shape for dilation and output_padding
+    # since the template is only used when dilation is 1 and output_padding
+    # is 0.
+    stride = tuple(V.graph.sizevars.evaluate_static_shapes(stride))
+    padding = tuple(V.graph.sizevars.evaluate_static_shapes(padding))
+
     kwargs: ConvLayoutParams = {
         "stride": stride,
         "padding": padding,
@@ -554,17 +580,21 @@ def convolution(
         bias.realize()
         bias.freeze_layout()
         V.graph.sizevars.evaluate_static_shapes(bias.get_size())
-    choices = [
-        aten_convolution.bind(
-            args,
-            layout,
-            ordered_kwargs_for_cpp_kernel,
-            **kwargs,
-        )
-    ]
+
+    choices = []
+    if torch._inductor.utils._use_conv_autotune_backend("ATEN"):
+        choices = [
+            aten_convolution.bind(
+                args,
+                layout,
+                ordered_kwargs_for_cpp_kernel,
+                **kwargs,
+            )
+        ]
 
     if (
-        use_triton_template(layout)
+        torch._inductor.utils._use_conv_autotune_backend("TRITON")
+        and use_triton_template(layout)
         # templates only support these:
         and is_ones(dilation)
         and not transposed
@@ -584,6 +614,7 @@ def convolution(
             sympy_product([x.get_size()[0], *x.get_size()[2:]]),
             out_chan,
             in_chan,
+            device_type=ir.get_device_type(x),
         ):
             if ndim == 2:
                 conv2d_template.maybe_append_choice(
@@ -628,7 +659,17 @@ def convolution(
                     num_warps=cfg.num_warps,
                     **cfg.kwargs,
                 )
-
+    if use_ck_conv_template(layout):
+        CKGroupedConvFwdTemplate.add_ck_conv_choices(
+            choices,
+            layout,
+            input_nodes=(x, weight) + ((bias,) if bias is not None else tuple()),
+            stride=stride,
+            padding=padding,
+            dilation=dilation,
+            groups=groups,
+            n_spatial_dimensions=ndim,
+        )
     return autotune_select_algorithm("convolution", choices, args, layout)
 
 

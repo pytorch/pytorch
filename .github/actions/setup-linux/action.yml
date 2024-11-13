@@ -20,7 +20,7 @@ runs:
           elif [[ $runner_name_str == *"gcp"* ]]; then
             echo "Runner is from Google Cloud Platform, No info on ec2 metadata"
           else
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+            curl -H "X-aws-ec2-metadata-token: $(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 30")" -fsSL "http://169.254.169.254/latest/meta-data/${category}"
           fi
         }
         echo "ami-id: $(get_ec2_metadata ami-id)"
@@ -28,14 +28,14 @@ runs:
         echo "instance-type: $(get_ec2_metadata instance-type)"
         echo "system info $(uname -a)"
 
-    - name: Check if in a ARC runner
+    - name: Check if in a container runner
       shell: bash
-      id: check_arc_runner
-      run: echo "IN_ARC_RUNNER=$([ -f /.inarc ] && echo true || echo false)"  >> $GITHUB_OUTPUT
+      id: check_container_runner
+      run: echo "IN_CONTAINER_RUNNER=$(if [ -f /.inarc ] || [ -f /.incontainer ]; then echo true ; else echo false; fi)" >> "$GITHUB_OUTPUT"
 
     - name: Start docker if docker deamon is not running
       shell: bash
-      if: ${{ steps.check_arc_runner.outputs.IN_ARC_RUNNER == 'false' }}
+      if: ${{ steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'false' }}
       run: |
         if systemctl is-active --quiet docker; then
             echo "Docker daemon is running...";
@@ -44,7 +44,7 @@ runs:
         fi
 
     - name: Log in to ECR
-      uses: nick-fields/retry@3e91a01664abd3c5cd539100d10d33b9c5b68482
+      uses: nick-fields/retry@v3.0.0
       env:
         AWS_RETRY_MODE: standard
         AWS_MAX_ATTEMPTS: "5"
@@ -59,6 +59,13 @@ runs:
           aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
 
+          # For LF Runners we need to make sure we also login to Meta's ECR docker registry too.
+          META_AWS_ACCOUNT_ID=308535385114
+          if [ "$AWS_ACCOUNT_ID" != "$META_AWS_ACCOUNT_ID" ] ; then
+              aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
+                  --password-stdin "$META_AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+          fi
+
     - name: Preserve github env variables for use in docker
       shell: bash
       run: |
@@ -66,7 +73,7 @@ runs:
         env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
 
     - name: Kill any existing containers, clean up images
-      if: ${{ steps.check_arc_runner.outputs.IN_ARC_RUNNER == 'false' }}
+      if: ${{ steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'false' }}
       shell: bash
       run: |
         # ignore expansion of "docker ps -q" since it could be empty
@@ -109,7 +116,7 @@ runs:
     - name: Check that the docker daemon is running
       shell: bash
       continue-on-error: true
-      if: ${{ steps.check_arc_runner.outputs.IN_ARC_RUNNER == 'true' }}
+      if: ${{ steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'true' }}
       run: |
         set +x
 

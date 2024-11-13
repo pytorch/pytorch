@@ -145,17 +145,39 @@ struct TensorQueue : torch::CustomClassHolder {
     }
   }
 
-  c10::Dict<std::string, at::Tensor> serialize() const {
-    c10::Dict<std::string, at::Tensor> dict;
-    dict.insert(std::string("init_tensor"), init_tensor_);
-    const std::string key = "queue";
-    dict.insert(
-        key + "/size", torch::tensor(static_cast<int64_t>(queue_.size())));
-    for (const auto index : c10::irange(queue_.size())) {
-      dict.insert(key + "/" + std::to_string(index), queue_[index]);
-    }
-    return dict;
+  std::tuple<
+      std::tuple<std::string, at::Tensor>,
+      std::tuple<std::string, std::vector<at::Tensor>>>
+  serialize() {
+    return std::tuple(
+        std::tuple("init_tensor", this->init_tensor_.clone()),
+        std::tuple("queue", this->clone_queue()));
   }
+
+  static c10::intrusive_ptr<TensorQueue> deserialize(
+      std::tuple<
+          std::tuple<std::string, at::Tensor>,
+          std::tuple<std::string, std::vector<at::Tensor>>> flattened) {
+    TORCH_CHECK(std::tuple_size<decltype(flattened)>::value == 2);
+
+    auto init_tensor_tuple = std::get<0>(flattened);
+    TORCH_CHECK(std::tuple_size<decltype(init_tensor_tuple)>::value == 2);
+    TORCH_CHECK(std::get<0>(init_tensor_tuple) == std::string("init_tensor"));
+
+    c10::intrusive_ptr<TensorQueue> queue =
+        c10::make_intrusive<TensorQueue>(std::get<1>(init_tensor_tuple));
+
+    auto queue_tuple = std::get<1>(flattened);
+    TORCH_CHECK(std::tuple_size<decltype(queue_tuple)>::value == 2);
+    TORCH_CHECK(std::get<0>(queue_tuple) == std::string("queue"));
+
+    for (auto& value : std::get<1>(queue_tuple)) {
+      queue->push(value);
+    }
+
+    return queue;
+  }
+
   // Push the element to the rear of queue.
   // Lock is added for thread safe.
   void push(at::Tensor x) {
@@ -220,6 +242,21 @@ struct TensorQueue : torch::CustomClassHolder {
   std::deque<at::Tensor> queue_;
   std::mutex mutex_;
   at::Tensor init_tensor_;
+};
+
+struct ConstantTensorContainer : torch::CustomClassHolder {
+  explicit ConstantTensorContainer(at::Tensor x) : x_(x) {}
+
+  at::Tensor get() {
+    return x_;
+  }
+
+  std::string tracing_mode() {
+    return "real";
+  }
+
+ private:
+  at::Tensor x_;
 };
 
 at::Tensor take_an_instance(const c10::intrusive_ptr<PickleTester>& instance) {
@@ -468,6 +505,11 @@ TORCH_LIBRARY(_TorchScriptTesting, m) {
       .def("get", &FlattenWithTensorOp::get)
       .def("__obj_flatten__", &FlattenWithTensorOp::__obj_flatten__);
 
+  m.class_<ConstantTensorContainer>("_ConstantTensorContainer")
+      .def(torch::init<at::Tensor>())
+      .def("get", &ConstantTensorContainer::get)
+      .def("tracing_mode", &ConstantTensorContainer::tracing_mode);
+
   m.def(
       "takes_foo(__torch__.torch.classes._TorchScriptTesting._Foo foo, Tensor x) -> Tensor");
   m.def(
@@ -619,13 +661,17 @@ TORCH_LIBRARY(_TorchScriptTesting, m) {
       .def_pickle(
           // __getstate__
           [](const c10::intrusive_ptr<TensorQueue>& self)
-              -> c10::Dict<std::string, at::Tensor> {
+              -> std::tuple<
+                  std::tuple<std::string, at::Tensor>,
+                  std::tuple<std::string, std::vector<at::Tensor>>> {
             return self->serialize();
           },
           // __setstate__
-          [](c10::Dict<std::string, at::Tensor> data)
+          [](std::tuple<
+              std::tuple<std::string, at::Tensor>,
+              std::tuple<std::string, std::vector<at::Tensor>>> data)
               -> c10::intrusive_ptr<TensorQueue> {
-            return c10::make_intrusive<TensorQueue>(std::move(data));
+            return TensorQueue::deserialize(data);
           });
 }
 

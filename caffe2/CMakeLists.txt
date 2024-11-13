@@ -42,10 +42,10 @@ endif()
 
 # ---[ ATen build
 if(INTERN_BUILD_ATEN_OPS)
-  set(__caffe2_CMAKE_POSITION_INDEPENDENT_CODE ${CMAKE_POSITION_INDEPENDENT_CODE})
+  set(__torch_CMAKE_POSITION_INDEPENDENT_CODE ${CMAKE_POSITION_INDEPENDENT_CODE})
   set(CMAKE_POSITION_INDEPENDENT_CODE ON)
   add_subdirectory(../aten aten)
-  set(CMAKE_POSITION_INDEPENDENT_CODE ${__caffe2_CMAKE_POSITION_INDEPENDENT_CODE})
+  set(CMAKE_POSITION_INDEPENDENT_CODE ${__torch_CMAKE_POSITION_INDEPENDENT_CODE})
 
   # Generate the headers wrapped by our operator
   file(GLOB_RECURSE torchgen_python "${PROJECT_SOURCE_DIR}/torchgen/*.py")
@@ -325,6 +325,10 @@ set(GENERATED_CXX_TORCH_CUDA
   "${TORCH_SRC_DIR}/csrc/inductor/aoti_torch/generated/c_shim_cuda.cpp"
   )
 
+set(GENERATED_CXX_TORCH_XPU
+  "${TORCH_SRC_DIR}/csrc/inductor/aoti_torch/generated/c_shim_xpu.cpp"
+  )
+
 set(TORCH_GENERATED_CODE
   ${GENERATED_CXX_TORCH}
   ${GENERATED_H_TORCH}
@@ -333,6 +337,10 @@ set(TORCH_GENERATED_CODE
   ${GENERATED_TESTING_PYTHON}
   ${GENERATED_CXX_TORCH_CUDA}
   )
+
+if(USE_XPU)
+  list(APPEND TORCH_GENERATED_CODE ${GENERATED_CXX_TORCH_XPU})
+endif()
 
 set(GEN_PER_OPERATOR_FLAG)
 if(USE_PER_OPERATOR_HEADERS)
@@ -562,8 +570,19 @@ if(USE_CUDA)
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/intra_node_comm.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/CudaDMAConnectivity.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/CUDASymmetricMemory.cu
+        ${TORCH_SRC_DIR}/csrc/distributed/c10d/CUDASymmetricMemoryOps.cu
+        ${TORCH_SRC_DIR}/csrc/distributed/c10d/ProcessGroupNCCL.cpp
         PROPERTIES COMPILE_FLAGS "-DPYTORCH_C10_DRIVER_API_SUPPORTED=1"
       )
+    endif()
+
+    set(ASYNC_MM_FILE "${TORCH_SRC_DIR}/csrc/distributed/c10d/cuda/AsyncMM.cu")
+    # Disable the warning to make cutlass warp-specialized cooperative kernel build for gcc-9
+    if(CMAKE_COMPILER_IS_GNUCXX)
+      set_source_files_properties(${ASYNC_MM_FILE} PROPERTIES COMPILE_FLAGS "-Wno-unused-but-set-variable")
+    endif()
+    if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 12.0 AND EXISTING_ARCH_FLAGS MATCHES ".*compute_90.*")
+      set_source_files_properties(${ASYNC_MM_FILE} PROPERTIES COMPILE_FLAGS "-gencode arch=compute_90a,code=sm_90a")
     endif()
   endif()
   set_source_files_properties(
@@ -606,7 +625,7 @@ if(USE_ROCM)
   # caffe2_nvrtc's stubs to driver APIs are useful for HIP.
   # See NOTE [ ATen NVRTC Stub and HIP ]
   add_library(caffe2_nvrtc SHARED ${ATen_NVRTC_STUB_SRCS})
-  target_link_libraries(caffe2_nvrtc ${PYTORCH_HIP_LIBRARIES} ${ROCM_HIPRTC_LIB})
+  target_link_libraries(caffe2_nvrtc hip::amdhip64 hiprtc::hiprtc)
   target_include_directories(caffe2_nvrtc PRIVATE ${CMAKE_BINARY_DIR})
   target_compile_definitions(caffe2_nvrtc PRIVATE USE_ROCM __HIP_PLATFORM_AMD__)
   install(TARGETS caffe2_nvrtc DESTINATION "${TORCH_INSTALL_LIB_DIR}")
@@ -682,6 +701,10 @@ list(APPEND Caffe2_CPU_SRCS ${TORCH_SRCS})
 
 if(USE_MPS)
   list(APPEND Caffe2_CPU_SRCS ${Caffe2_MPS_SRCS})
+  if(CAN_COMPILE_METAL)
+      file(TOUCH ${CMAKE_BINARY_DIR}/aten/src/ATen/metallib_dummy.cpp)
+      list(APPEND Caffe2_CPU_SRCS ${CMAKE_BINARY_DIR}/aten/src/ATen/metallib_dummy.cpp)
+  endif()
 endif()
 
 # NOTE [ Linking AVX and non-AVX files ]
@@ -767,9 +790,13 @@ if(NOT MSVC)
   set_source_files_properties(${PROJECT_SOURCE_DIR}/torch/csrc/distributed/c10d/socket.cpp PROPERTIES COMPILE_OPTIONS "-Wno-error=deprecated")
 endif()
 
-if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang" AND NOT USE_VULKAN AND NOT USE_IOS AND NOT USE_COREML_DELEGATE)
+if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang" AND NOT USE_IOS AND NOT USE_COREML_DELEGATE)
   target_compile_options_if_supported(torch_cpu "-Wmissing-prototypes")
   target_compile_options_if_supported(torch_cpu "-Werror=missing-prototypes")
+  if(TARGET torch_cuda)
+    target_compile_options_if_supported(torch_cuda "-Wmissing-prototypes")
+    target_compile_options_if_supported(torch_cuda "-Werror=missing-prototypes")
+  endif()
   get_target_property(TORCH_CPU_SOURCES torch_cpu SOURCES)
   foreach(generated_file IN LISTS GENERATED_CXX_TORCH)
     set_source_files_properties(${generated_file} PROPERTIES COMPILE_OPTIONS "-Wno-missing-prototypes;-Wno-error=missing-prototypes")
@@ -781,11 +808,20 @@ if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang" AND NOT USE_VULKAN AND NOT USE_IOS
       set_source_files_properties(${source_file} PROPERTIES COMPILE_OPTIONS "-Wno-missing-prototypes;-Wno-error=missing-prototypes")
       continue()
     endif()
-    string(FIND "${source_file}" "caffe2" res)
+    string(FIND "${source_file}" "embedding_lookup_idx_avx2.cc" res)
     if(res GREATER -1)
       set_source_files_properties(${source_file} PROPERTIES COMPILE_OPTIONS "-Wno-missing-prototypes;-Wno-error=missing-prototypes")
     endif()
   endforeach()
+endif()
+if(USE_MPS)
+  if(CAN_COMPILE_METAL)
+    add_dependencies(torch_cpu metallibs)
+    target_link_options(torch_cpu PRIVATE -Wl,-sectcreate,__TEXT,metal_basic,${CMAKE_CURRENT_BINARY_DIR}/aten/src/ATen/kernels_basic.metallib)
+    target_link_options(torch_cpu PRIVATE -Wl,-sectcreate,__TEXT,metal_bfloat,${CMAKE_CURRENT_BINARY_DIR}/aten/src/ATen/kernels_bfloat.metallib)
+  else()
+    target_compile_definitions(torch_cpu PRIVATE PYTORCH_JIT_COMPILE_SHADERS)
+  endif()
 endif()
 
 option(TORCH_USE_IWYU "Use include-what-you-use to clean up header inclusion" OFF)
@@ -928,9 +964,17 @@ elseif(USE_CUDA)
   torch_compile_options(torch_cuda)  # see cmake/public/utils.cmake
   target_compile_definitions(torch_cuda PRIVATE USE_CUDA)
 
+  if(USE_CUFILE)
+    target_link_libraries(torch_cuda PRIVATE torch::cufile)
+    target_compile_definitions(torch_cuda PRIVATE USE_CUFILE)
+  endif()
   if(USE_CUSPARSELT)
       target_link_libraries(torch_cuda PRIVATE torch::cusparselt)
       target_compile_definitions(torch_cuda PRIVATE USE_CUSPARSELT)
+  endif()
+  if(USE_CUDSS)
+    target_link_libraries(torch_cuda PRIVATE torch::cudss)
+    target_compile_definitions(torch_cuda PRIVATE USE_CUDSS)
   endif()
   if(USE_NCCL)
     target_link_libraries(torch_cuda PRIVATE __caffe2_nccl)
@@ -1005,9 +1049,13 @@ elseif(USE_CUDA)
 endif()
 
 if(USE_XPU)
+  list(APPEND Caffe2_XPU_SRCS ${GENERATED_CXX_TORCH_XPU})
   add_library(torch_xpu ${Caffe2_XPU_SRCS})
   torch_compile_options(torch_xpu)  # see cmake/public/utils.cmake
   target_compile_definitions(torch_xpu PRIVATE USE_XPU)
+  if(WIN32)
+    target_compile_options(torch_xpu PRIVATE /permissive-)
+  endif()
 
   # ATen XPU implementation
   set(TORCH_XPU_OPS_DIR ${TORCH_ROOT}/third_party/torch-xpu-ops)
@@ -1047,6 +1095,7 @@ if(USE_XPU)
   # 1. Sources in torch-xpu-ops depend on generated ATen headers.
   # 2. Using add_custom_command in torch-xpu-ops to define sycl device sources
   #    compilation. add_custom_command requires an explicit dependency.
+  list(APPEND ${Caffe2_XPU_INCLUDE} ${TORCH_XPU_OPS_DIR}/src/ATen/)
   set(TORCH_XPU_OPS_PYTORCH_DEPS ATEN_CPU_FILES_GEN_TARGET)
 
   add_subdirectory(${TORCH_ROOT}/third_party/torch-xpu-ops
@@ -1057,13 +1106,17 @@ if(USE_XPU)
     target_link_libraries(torch_xpu PRIVATE torch_xpu_ops)
     if(MSVC)
       # Windows
-      target_link_libraries(torch_xpu PRIVATE
-      "-WHOLEARCHIVE:\"$<TARGET_FILE:torch_xpu_ops>\"")
+      target_link_options(torch_xpu PRIVATE
+      "-WHOLEARCHIVE:$<TARGET_FILE:torch_xpu_ops>")
     else()
       # Linux
-      target_link_libraries(torch_xpu PRIVATE
-        "-Wl,--whole-archive,\"$<TARGET_FILE:torch_xpu_ops>\" -Wl,--no-whole-archive")
+      target_link_options(torch_xpu PRIVATE
+          "-Wl,--whole-archive,$<TARGET_FILE:torch_xpu_ops>,--no-whole-archive")
     endif()
+
+    # Set cached ${ATen_XPU_INCLUDE_DIRS} to torch
+    include_directories(SYSTEM ${ATen_XPU_INCLUDE_DIRS})
+
   endif()
 endif()
 
@@ -1169,7 +1222,7 @@ target_include_directories(torch_cpu PRIVATE
   ${TORCH_SRC_DIR}/csrc)
 
 target_include_directories(torch_cpu PRIVATE
-  ${TORCH_ROOT}/third_party/miniz-2.1.0)
+  ${TORCH_ROOT}/third_party/miniz-3.0.2)
 
 target_include_directories(torch_cpu PRIVATE
   ${TORCH_ROOT}/third_party/kineto/libkineto/include)
@@ -1213,6 +1266,7 @@ if(BUILD_TEST)
     )
   else()
     add_subdirectory(${TORCH_ROOT}/test/cpp/jit ${CMAKE_BINARY_DIR}/test_jit)
+    add_subdirectory(${TORCH_ROOT}/test/inductor ${CMAKE_BINARY_DIR}/test_inductor)
     add_subdirectory(
       ${TORCH_ROOT}/test/cpp/tensorexpr
       ${CMAKE_BINARY_DIR}/test_tensorexpr
@@ -1311,6 +1365,7 @@ if(USE_ROCM)
     ${ROCM_SOURCE_DIR}/hcc/include
     ${ROCM_SOURCE_DIR}/rocblas/include
     ${ROCM_SOURCE_DIR}/hipsparse/include
+    ${ROCM_SOURCE_DIR}/include/rccl/
     )
   if(USE_FLASH_ATTENTION)
     target_compile_definitions(torch_hip PRIVATE USE_FLASH_ATTENTION)
@@ -1435,75 +1490,6 @@ if("${EXPERIMENTAL_SINGLE_THREAD_POOL}")
   target_compile_definitions(torch_cpu PUBLIC "-DAT_EXPERIMENTAL_SINGLE_THREAD_POOL=1")
 endif()
 
-if(MSVC AND NOT BUILD_SHARED_LIBS)
-  # Note [Supporting both static and dynamic libraries on Windows]
-  # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  # A Windows library may be distributed as either a static or dynamic
-  # library.  The chosen distribution mechanism affects how you setup
-  # the headers for the library: if you statically link a function,
-  # all you need is an ordinary signature:
-  #
-  #     void f();
-  #
-  # But if you *dynamically* link it, then you must provide a __declspec
-  # specifying that it should be imported from a DLL:
-  #
-  #     __declspec(dllimport) void f();
-  #
-  # Mixing the two situations will not work: if you specify dllimport
-  # while statically linking, the linker will complain it cannot find
-  # the __imp_f symbol (which serve as the DLL entrypoint); if you
-  # fail to specify dllimport for a symbol that's coming from a DLL,
-  # the linker will complain that it can't find f.  Joy!
-  #
-  # Most places on the Internet, you will find people have written
-  # their headers under the assumption that the application will
-  # only ever be dynamically linked, as they define a macro which
-  # tags a function as __declspec(dllexport) if you are actually
-  # building the library, and __declspec(dllimport) otherwise.  But
-  # if you want these headers to also work if you are linking against
-  # a static library, you need a way to avoid adding these __declspec's
-  # at all.  And that "mechanism" needs to apply to any downstream
-  # libraries/executables which are going to link against your library.
-  #
-  #   As an aside, why do we need to support both modes?
-  #   For historical reasons, PyTorch ATen on Windows is built dynamically,
-  #   while Caffe2 on Windows is built statically (mostly because if
-  #   we build it dynamically, we are over the DLL exported symbol limit--and
-  #   that is because Caffe2 hasn't comprehensively annotated all symbols
-  #   which cross the DLL boundary with CAFFE_API).  So any code
-  #   which is used by both PyTorch and Caffe2 needs to support both
-  #   modes of linking.
-  #
-  # So, you have a macro (call it AT_CORE_STATIC_WINDOWS) which you need to have
-  # set for any downstream library/executable that transitively includes your
-  # headers.  How are you going to do this?  You have two options:
-  #
-  #   1. Write out a config.h header which stores whether or not
-  #      you are linking statically or dynamically.
-  #
-  #   2. Force all of users to set the macro themselves.  If they
-  #      use cmake, you can set -DAT_CORE_STATIC_WINDOWS=1 as a PUBLIC
-  #      compile option, in which case cmake will automatically
-  #      add the macro for you.
-  #
-  # Which one is better? Well, it depends: they trade off implementor
-  # ease versus user ease: (1) is more work for the library author
-  # but the user doesn't have to worry about it; (2) requires the user
-  # to set the macro themselves... but only if they don't use cmake.
-  #
-  # So, which is appropriate in our situation?  In my mind, here is
-  # the distinguishing factor: it is more common to distribute
-  # DLLs, since they don't require you to line up the CRT version
-  # (/MD, /MDd, /MT, /MTd) and MSVC version at the use site.  So,
-  # if a user is already in the business of static linkage, they're
-  # already in "expert user" realm.  So, I've decided that at this
-  # point in time, the simplicity of implementation of (2) wins out.
-  #
-  # NB: This must be target_compile_definitions, not target_compile_options,
-  # as the latter is not respected by nvcc
-  target_compile_definitions(torch_cpu PUBLIC "AT_CORE_STATIC_WINDOWS=1")
-endif()
 if(MSVC AND BUILD_SHARED_LIBS)
   # ONNX is linked statically and needs to be exported from this library
   # to be used externally. Make sure that references match the export.
@@ -1570,7 +1556,12 @@ if(USE_CUDA)
     target_link_libraries(torch_cpu PRIVATE torch::cudart)
   endif()
   target_link_libraries(torch_cuda INTERFACE torch::cudart)
-  target_link_libraries(torch_cuda PUBLIC c10_cuda torch::nvtoolsext)
+  target_link_libraries(torch_cuda PUBLIC c10_cuda)
+  if(TARGET torch::nvtx3)
+    target_link_libraries(torch_cuda PRIVATE torch::nvtx3)
+  else()
+    target_link_libraries(torch_cuda PUBLIC torch::nvtoolsext)
+  endif()
 
   target_include_directories(
       torch_cuda INTERFACE $<INSTALL_INTERFACE:include>)
@@ -1598,7 +1589,25 @@ if(USE_XPU)
   target_link_libraries(
       torch_xpu PRIVATE ${Caffe2_XPU_DEPENDENCY_LIBS})
 
-  target_link_libraries(torch_xpu PUBLIC torch_cpu_library)
+  # Ensure that torch_cpu is ready before being linked by torch_xpu.
+  add_dependencies(torch_xpu torch_cpu)
+
+  if(MSVC)
+    target_link_libraries(torch_xpu PUBLIC torch_cpu_library)
+  else()
+    include(CheckLinkerFlag)
+
+    # Check whether the compiler supports '--no-as-needed' and '--as-needed'
+    check_linker_flag(CXX "-Wl,--no-as-needed" HAVE_NO_AS_NEEDED)
+    check_linker_flag(CXX "-Wl,--as-needed" HAVE_AS_NEEDED)
+
+    if(HAVE_NO_AS_NEEDED AND HAVE_AS_NEEDED)
+      target_link_libraries(torch_xpu PRIVATE
+          "-Wl,--no-as-needed,\"$<TARGET_FILE:torch_cpu>\" -Wl,--as-needed")
+    else()
+      target_link_libraries(torch_xpu PRIVATE "$<TARGET_FILE:torch_cpu>")
+    endif()
+  endif()
 endif()
 
 # ---[ Metal(OSX) modification
@@ -1643,7 +1652,10 @@ if(BUILD_SHARED_LIBS)
   # not find them, because they're usually in non-standard locations)
   if(USE_CUDA)
     target_link_libraries(torch_global_deps ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
-    target_link_libraries(torch_global_deps torch::cudart torch::nvtoolsext)
+    target_link_libraries(torch_global_deps torch::cudart)
+    if(TARGET torch::nvtoolsext)
+      target_link_libraries(torch_global_deps torch::nvtoolsext)
+    endif()
   endif()
   install(TARGETS torch_global_deps DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 endif()
@@ -1742,7 +1754,10 @@ if(BUILD_TEST)
           endif()
         else()
           add_executable(${test_name}_${CPU_CAPABILITY} "${test_src}")
-          target_link_libraries(${test_name}_${CPU_CAPABILITY} torch_library sleef gtest_main)
+          target_link_libraries(${test_name}_${CPU_CAPABILITY} torch_library gtest_main)
+          if(NOT CMAKE_SYSTEM_PROCESSOR STREQUAL "ARM64")
+            target_link_libraries(${test_name}_${CPU_CAPABILITY} sleef)
+          endif()
         endif()
         target_include_directories(${test_name}_${CPU_CAPABILITY} PRIVATE $<INSTALL_INTERFACE:include>)
         target_include_directories(${test_name}_${CPU_CAPABILITY} PRIVATE $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>)
@@ -1768,6 +1783,7 @@ if(BUILD_TEST)
     target_include_directories(${test_name} PRIVATE ${Caffe2_CPU_INCLUDE})
     add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
     if(INSTALL_TEST)
+        set_target_properties(${test_name} PROPERTIES INSTALL_RPATH "${CMAKE_INSTALL_RPATH}:${_rpath_portable_origin}/../lib")
       install(TARGETS ${test_name} DESTINATION test)
       # Install PDB files for MSVC builds
       if(MSVC AND BUILD_SHARED_LIBS)
@@ -1788,6 +1804,7 @@ if(BUILD_TEST)
       target_include_directories(${test_name} PRIVATE ${Caffe2_CPU_INCLUDE})
       add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
       if(INSTALL_TEST)
+        set_target_properties(${test_name} PROPERTIES INSTALL_RPATH "${CMAKE_INSTALL_RPATH}:${_rpath_portable_origin}/../lib")
         install(TARGETS ${test_name} DESTINATION test)
         # Install PDB files for MSVC builds
         if(MSVC AND BUILD_SHARED_LIBS)
@@ -1809,6 +1826,7 @@ if(BUILD_TEST)
       target_include_directories(${test_name} PRIVATE ${Caffe2_CPU_INCLUDE})
       add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
       if(INSTALL_TEST)
+      set_target_properties(${test_name} PROPERTIES INSTALL_RPATH "${CMAKE_INSTALL_RPATH}:${_rpath_portable_origin}/../lib")
         install(TARGETS ${test_name} DESTINATION test)
         # Install PDB files for MSVC builds
         if(MSVC AND BUILD_SHARED_LIBS)
@@ -1830,6 +1848,7 @@ if(BUILD_TEST)
       target_include_directories(${test_name} PRIVATE ${Caffe2_CPU_INCLUDE})
       add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
       if(INSTALL_TEST)
+        set_target_properties(${test_name} PROPERTIES INSTALL_RPATH "${CMAKE_INSTALL_RPATH}:${_rpath_portable_origin}/../lib")
         install(TARGETS ${test_name} DESTINATION test)
       endif()
     endforeach()
@@ -1844,6 +1863,7 @@ if(BUILD_TEST)
       target_include_directories(${test_name} PRIVATE ${Caffe2_CPU_INCLUDE})
       add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
       if(INSTALL_TEST)
+        set_target_properties(${test_name} PROPERTIES INSTALL_RPATH "${CMAKE_INSTALL_RPATH}:${_rpath_portable_origin}/../lib")
         install(TARGETS ${test_name} DESTINATION test)
         # Install PDB files for MSVC builds
         if(MSVC AND BUILD_SHARED_LIBS)
@@ -1863,6 +1883,7 @@ if(BUILD_TEST)
       target_compile_options(${test_name} PRIVATE ${HIP_CXX_FLAGS})
       add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
       if(INSTALL_TEST)
+        set_target_properties(${test_name} PROPERTIES INSTALL_RPATH "${CMAKE_INSTALL_RPATH}:${_rpath_portable_origin}/../lib")
         install(TARGETS ${test_name} DESTINATION test)
       endif()
     endforeach()

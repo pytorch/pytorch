@@ -18,7 +18,6 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     apply_activation_checkpointing,
     CheckpointWrapper,
 )
-
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, MLP
 from torch.testing._internal.common_utils import run_tests

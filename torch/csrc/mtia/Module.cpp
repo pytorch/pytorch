@@ -1,19 +1,17 @@
 #include <ATen/ATen.h>
+#include <c10/core/DeviceType.h>
+#include <c10/core/Stream.h>
 #include <c10/util/CallOnce.h>
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/Stream.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/device_lazy_init.h>
 #include <torch/csrc/utils/pybind.h>
-
-#include <c10/core/DeviceType.h>
-#include <c10/core/Stream.h>
 #ifndef WIN32
 #include <pthread.h>
 #endif
 
-namespace torch {
-namespace mtia {
+namespace torch::mtia {
 
 static bool in_bad_fork = false; // True for children forked after mtia init
 
@@ -41,7 +39,7 @@ void initModule(PyObject* module) {
   m.def("_mtia_init", []() {
     TORCH_INTERNAL_ASSERT(!in_bad_fork); // Handled at python level
     poison_fork();
-    at::globalContext().lazyInitMTIA();
+    at::globalContext().lazyInitDevice(c10::DeviceType::MTIA);
   });
 
   m.def("_mtia_isBuilt", []() {
@@ -75,7 +73,18 @@ void initModule(PyObject* module) {
     }
     at::detail::getMTIAHooks().setCurrentStream(stream);
   });
+
+  m.def("_mtia_memoryStats", [](c10::DeviceIndex device_index) {
+    PyObject* raw_pyobject =
+        at::detail::getMTIAHooks().memoryStats(device_index);
+    return py::reinterpret_steal<py::object>(raw_pyobject);
+  });
+
+  m.def("_mtia_getDeviceCapability", [](c10::DeviceIndex device_index) {
+    PyObject* raw_pyobject =
+        at::detail::getMTIAHooks().getDeviceCapability(device_index);
+    return py::reinterpret_steal<py::object>(raw_pyobject);
+  });
 }
 
-} // namespace mtia
-} // namespace torch
+} // namespace torch::mtia

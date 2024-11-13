@@ -69,8 +69,8 @@ Dict<Key, Value>::Dict()
   :Dict(make_intrusive<detail::DictImpl>(
       detail::DictImpl::dict_map_type(),
       detail::DictImpl::DictElementTypes{getTypePtr<Key>(), getTypePtr<Value>()})) {
-  static_assert(!std::is_same<Key, IValue>::value, "This constructor is not valid for Dict<IValue, _>. Please use c10::impl::GenericDict(keyType, valueType) instead.");
-  static_assert(!std::is_same<Value, IValue>::value, "This constructor is not valid for Dict<_, IValue>. Please use c10::impl::GenericDict(keyType, valueType) instead.");
+  static_assert(!std::is_same_v<Key, IValue>, "This constructor is not valid for Dict<IValue, _>. Please use c10::impl::GenericDict(keyType, valueType) instead.");
+  static_assert(!std::is_same_v<Value, IValue>, "This constructor is not valid for Dict<_, IValue>. Please use c10::impl::GenericDict(keyType, valueType) instead.");
 }
 
 template<class Key, class Value>
@@ -78,8 +78,8 @@ Dict<Key, Value>::Dict(TypePtr keyType, TypePtr valueType)
 : Dict(make_intrusive<detail::DictImpl>(
     detail::DictImpl::dict_map_type(),
     detail::DictImpl::DictElementTypes {std::move(keyType), std::move(valueType)})) {
-  static_assert(std::is_same<Key, IValue>::value, "This constructor is only valid for c10::impl::GenericDict.");
-  static_assert(std::is_same<Value, IValue>::value, "This constructor is only valid for c10::impl::GenericDict.");
+  static_assert(std::is_same_v<Key, IValue>, "This constructor is only valid for c10::impl::GenericDict.");
+  static_assert(std::is_same_v<Value, IValue>, "This constructor is only valid for c10::impl::GenericDict.");
 }
 
 template<class Key, class Value>
@@ -118,8 +118,8 @@ void Dict<Key, Value>::clear() const {
 template<class Key, class Value>
 template<class Key_, class Value_>
 std::pair<typename Dict<Key, Value>::iterator, bool> Dict<Key, Value>::insert(Key_&& key, Value_&& value) const {
-  static_assert(std::is_constructible<Key, Key_>::value, "Wrong type for the key argument of Dict::insert");
-  static_assert(std::is_constructible<Value, Value_>::value, "Wrong type for the value argument of Dict::insert");
+  static_assert(std::is_constructible_v<Key, Key_>, "Wrong type for the key argument of Dict::insert");
+  static_assert(std::is_constructible_v<Value, Value_>, "Wrong type for the value argument of Dict::insert");
   auto inserted = impl_->dict.emplace(
       Key(std::forward<Key_>(key)),
       Value(std::forward<Value_>(value)));
@@ -129,8 +129,8 @@ std::pair<typename Dict<Key, Value>::iterator, bool> Dict<Key, Value>::insert(Ke
 template<class Key, class Value>
 template<class Key_, class Value_>
 std::pair<typename Dict<Key, Value>::iterator, bool> Dict<Key, Value>::insert_or_assign(Key_&& key, Value_&& value) const {
-  static_assert(std::is_constructible<Key, Key_>::value, "Wrong type for the key argument of Dict::insert_or_assign");
-  static_assert(std::is_constructible<Value, Value_>::value, "Wrong type for the value argument of Dict::insert_or_assign");
+  static_assert(std::is_constructible_v<Key, Key_>, "Wrong type for the key argument of Dict::insert_or_assign");
+  static_assert(std::is_constructible_v<Value, Value_>, "Wrong type for the value argument of Dict::insert_or_assign");
   auto inserted = impl_->dict.insert_or_assign(
     Key(std::forward<Key_>(key)),
     Value(std::forward<Value_>(value)));
@@ -142,8 +142,8 @@ void Dict<Key, Value>::erase(iterator iter) const {
   impl_->dict.erase(iter.entryRef_.iterator_);
 }
 
-template<class Key, class Value>
-C10_NODISCARD size_t Dict<Key, Value>::erase(const Key& key) const {
+template <class Key, class Value>
+[[nodiscard]] size_t Dict<Key, Value>::erase(const Key& key) const {
   return impl_->dict.erase(key);
 }
 

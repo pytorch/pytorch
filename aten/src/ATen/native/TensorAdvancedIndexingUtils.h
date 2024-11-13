@@ -50,14 +50,15 @@ const Tensor& value){
       }
     }
   }
-  for (C10_UNUSED const auto i : c10::irange(num_ind, self.ndimension())) {
+  for ([[maybe_unused]] const auto i :
+       c10::irange(num_ind, self.ndimension())) {
     mask = mask.unsqueeze(-1);
   }
   return std::make_tuple(true, mask);
 }
 
 inline AdvancedIndex make_info(Tensor self, IOptTensorListRef orig) {
-  checkIndexTensorTypes(orig);
+  checkIndexTensorTypes(orig, /*allow_int*/ true);
   // first expand BoolTensor (masks) or ByteTensor (masks) into 1 or more LongTensors
   auto indices = expandTensors(self, orig);
   // next broadcast all index tensors together

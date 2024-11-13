@@ -6,12 +6,12 @@
 namespace at::native {
 
 template<typename scalar_t>
-inline std::vector<int> generate_intervals(
+inline std::vector<int64_t> generate_intervals(
     scalar_t sample,
     int64_t inputSize,
     int64_t outputSize,
     int64_t poolSize) {
-  std::vector<int> sequence(outputSize);
+  std::vector<int64_t> sequence(outputSize);
   if (outputSize > 1) {
     scalar_t alpha = static_cast<scalar_t>(inputSize - poolSize) /
       static_cast<scalar_t>(outputSize - 1);
@@ -45,7 +45,7 @@ inline void fractional_max_pool_check_shape(
   int64_t C = randomSamples.size(1);
   int64_t D = randomSamples.size(2);
 
-  int64_t input_batch, input_channel;
+  int64_t input_batch = 0, input_channel = 0;
   if (ndim == 2) {
     // fractional_max_pool2d
     if (input.ndimension() == 3) {

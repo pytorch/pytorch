@@ -5,11 +5,10 @@ from collections import defaultdict
 
 import torch
 from torch.autograd import DeviceType
-from .runtime.runtime_utils import (
-    create_bandwidth_info_str,
-    do_bench_gpu,
-    get_num_bytes,
-)
+
+from .runtime.benchmarking import benchmarker
+from .runtime.runtime_utils import create_bandwidth_info_str, get_num_bytes
+
 
 _kernel_category_choices = [
     "foreach",
@@ -78,7 +77,8 @@ def benchmark_all_kernels(benchmark_name, benchmark_all_configs):
     from torch._inductor.codecache import PyCodeCache
 
     nfound = 0
-    for kernel_key, kernel_mod in PyCodeCache.cache.items():
+    for kernel_mod in PyCodeCache.modules:
+        kernel_key = kernel_mod.key
         if not hasattr(kernel_mod, "get_args") or not hasattr(kernel_mod, "call"):
             continue
 
@@ -121,7 +121,7 @@ def benchmark_all_kernels(benchmark_name, benchmark_all_configs):
                     f"  {get_info_str(ms, launcher.n_regs, launcher.n_spills, launcher.shared)} @ {launcher.config}"
                 )
         else:
-            ms = do_bench_gpu(lambda: kernel_mod.call(args), rep=40, fast_flush=True)
+            ms = benchmarker.benchmark_gpu(lambda: kernel_mod.call(args), rep=40)
             assert (
                 len(triton_kernel.launchers) == 1
             ), "Autotuner should have selected the best config"
@@ -147,18 +147,20 @@ def benchmark_all_kernels(benchmark_name, benchmark_all_configs):
 class ProfileEvent:
     category: str
     key: str
-    self_cuda_time_ms: float
+    self_device_time_ms: float
     # the benchmark is run multiple times and we average the count across all the
     # runs. It should be an integer but define a float just in case.
     count: float
 
 
-def parse_profile_event_list(benchmark_name, event_list, wall_time_ms, nruns):
-    def get_self_cuda_time(ev):
+def parse_profile_event_list(
+    benchmark_name, event_list, wall_time_ms, nruns, device_name
+):
+    def get_self_device_time(ev):
         """
-        ev.self_cuda_time_total is in microsecond. Convert to millisecond.
+        ev.self_device_time_total is in microsecond. Convert to millisecond.
         """
-        return ev.self_cuda_time_total / 1000 / nruns
+        return ev.self_device_time_total / 1000 / nruns
 
     all_events = defaultdict(list)
 
@@ -166,7 +168,7 @@ def parse_profile_event_list(benchmark_name, event_list, wall_time_ms, nruns):
         profile_ev = ProfileEvent(
             category=category,
             key=ev.key,
-            self_cuda_time_ms=get_self_cuda_time(ev),
+            self_device_time_ms=get_self_device_time(ev),
             count=ev.count / nruns,  # average across all runs
         )
         all_events[category].append(profile_ev)
@@ -193,21 +195,27 @@ def parse_profile_event_list(benchmark_name, event_list, wall_time_ms, nruns):
     def report_category(category, profile_events):
         from tabulate import tabulate
 
-        profile_events.sort(key=lambda ev: ev.self_cuda_time_ms, reverse=True)
+        profile_events.sort(key=lambda ev: ev.self_device_time_ms, reverse=True)
 
         rows = []
         total_time = 0.0
         print(f"\n  == {category} category kernels == ")
         for ev in profile_events:
-            total_time += ev.self_cuda_time_ms
-            percent = f"{ev.self_cuda_time_ms / wall_time_ms * 100:.2f}%"
-            rows.append([ev.key[:120], ev.self_cuda_time_ms, ev.count, percent])
+            total_time += ev.self_device_time_ms
+            percent = f"{ev.self_device_time_ms / wall_time_ms * 100:.2f}%"
+            rows.append([ev.key[:120], ev.self_device_time_ms, ev.count, percent])
         rows.append(
             ["Total", total_time, "", f"{total_time / wall_time_ms * 100:.2f}%"]
         )
         print(
             tabulate(
-                rows, headers=["Kernel", "Self CUDA TIME (ms)", "Count", "Percent"]
+                rows,
+                headers=[
+                    "Kernel",
+                    f"Self {device_name.upper()} TIME (ms)",
+                    "Count",
+                    "Percent",
+                ],
             )
         )
         return total_time
@@ -225,32 +233,62 @@ def parse_profile_event_list(benchmark_name, event_list, wall_time_ms, nruns):
         ), f"{list(all_events.keys())}"
 
         per_category_wall_time = {}
-        total_cuda_ms = 0.0
+        total_device_ms = 0.0
         for category in category_list:
             if category in all_events:
                 _time = report_category(category, all_events[category])
                 per_category_wall_time[category] = _time
-                total_cuda_ms += _time
+                total_device_ms += _time
 
-        gpu_busy_percent = f"{total_cuda_ms / wall_time_ms * 100:.2f}%"
-        print(f"\nPercent of time when GPU is busy: {gpu_busy_percent}")
+        device_busy_percent = f"{total_device_ms / wall_time_ms * 100:.2f}%"
+        print(
+            f"\nPercent of time when {device_name.upper()} is busy: {device_busy_percent}"
+        )
         print(f"Total wall time {wall_time_ms:.3f} ms")
 
         # output such a line so we can gather such line from all compiled modules from all
         # benchmarks and tabulate it!
         # Columns: benchmark_name, pointwise_percent, reduction_percent, persistent_reduction_percent,
-        #   unknown_category_percent, GPU_busy_percent, wall_time_ms
+        #   unknown_category_percent, device_busy_percent, wall_time_ms
         tabulate_line = f"Output for tabulate: {benchmark_name}"
         for category in category_list:
             percent = (
                 f"{per_category_wall_time.get(category, 0.0) / wall_time_ms * 100:.2f}%"
             )
             tabulate_line += f", {percent}"
-        tabulate_line += f", {gpu_busy_percent}, {wall_time_ms:.3f}ms"
+        tabulate_line += f", {device_busy_percent}, {wall_time_ms:.3f}ms"
 
         print(tabulate_line)
 
     report()
+
+
+def perf_profile(
+    wall_time_ms, times, repeat, benchmark_name, benchmark_compiled_module_fn
+):
+    with torch.profiler.profile(record_shapes=True) as p:
+        benchmark_compiled_module_fn(times=times, repeat=repeat)
+
+    path = f"{tempfile.gettempdir()}/compiled_module_profile.json"
+    p.export_chrome_trace(path)
+    print(f"Profiling result for a compiled module of benchmark {benchmark_name}:")
+    print(f"Chrome trace for the profile is written to {path}")
+    event_list = p.key_averages(group_by_input_shape=True)
+    print(event_list.table(sort_by="self_device_time_total", row_limit=10))
+    parse_profile_event_list(
+        benchmark_name, event_list, wall_time_ms, times * repeat, p.use_device
+    )
+
+
+def collect_memory_snapshot(benchmark_compiled_module_fn):
+    assert torch.cuda.is_available()
+
+    torch.cuda.memory._record_memory_history(max_entries=100000)
+    benchmark_compiled_module_fn(times=10, repeat=1)  # run 10 times
+    snapshot_path = f"{tempfile.gettempdir()}/memory_snapshot.pickle"
+    torch.cuda.memory._dump_snapshot(snapshot_path)
+    torch.cuda.memory._record_memory_history(enabled=None)
+    print(f"The collect memory snapshot has been written to {snapshot_path}")
 
 
 def compiled_module_main(benchmark_name, benchmark_compiled_module_fn):
@@ -278,6 +316,15 @@ def compiled_module_main(benchmark_name, benchmark_compiled_module_fn):
         action="store_true",
         help="Whether to profile the compiled module",
     )
+    parser.add_argument(
+        "--cuda-memory-snapshot",
+        action="store_true",
+        help="""
+            Whether to collect CUDA memory snapshot. Refer to
+            "https://pytorch.org/blog/understanding-gpu-memory-1/
+            for details about how to visualize the collected snapshot
+        """,
+    )
     args = parser.parse_args()
 
     if args.benchmark_kernels:
@@ -285,20 +332,23 @@ def compiled_module_main(benchmark_name, benchmark_compiled_module_fn):
     else:
         times = 10
         repeat = 10
+
+        if torch.cuda.is_available():
+            torch.cuda.reset_peak_memory_stats()
         wall_time_ms = benchmark_compiled_module_fn(times=times, repeat=repeat) * 1000
 
-        if not args.profile:
-            return
+        if torch.cuda.is_available():
+            peak_mem = torch.cuda.max_memory_allocated()
+            print(f"Peak GPU memory usage {peak_mem/1e6:.3f} MB")
 
-        with torch.profiler.profile(record_shapes=True) as p:
-            benchmark_compiled_module_fn(times=times, repeat=repeat)
+        if torch.cuda.is_available() and args.cuda_memory_snapshot:
+            collect_memory_snapshot(benchmark_compiled_module_fn)
 
-        path = f"{tempfile.gettempdir()}/compiled_module_profile.json"
-        p.export_chrome_trace(path)
-        print(f"Profiling result for a compiled module of benchmark {benchmark_name}:")
-        print(f"Chrome trace for the profile is written to {path}")
-        event_list = p.key_averages(group_by_input_shape=True)
-        print(event_list.table(sort_by="self_cuda_time_total", row_limit=10))
-        parse_profile_event_list(
-            benchmark_name, event_list, wall_time_ms, times * repeat
-        )
+        if args.profile:
+            perf_profile(
+                wall_time_ms,
+                times,
+                repeat,
+                benchmark_name,
+                benchmark_compiled_module_fn,
+            )

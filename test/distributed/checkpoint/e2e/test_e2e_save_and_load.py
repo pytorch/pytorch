@@ -23,6 +23,7 @@ from torch.distributed.checkpoint.state_dict import (
     set_state_dict,
 )
 from torch.distributed.checkpoint.state_dict_loader import _load_state_dict_from_keys
+from torch.distributed.checkpoint.stateful import Stateful
 from torch.distributed.checkpoint.utils import CheckpointException
 from torch.distributed.distributed_c10d import ReduceOp
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
@@ -33,7 +34,6 @@ from torch.distributed.tensor.parallel import (
     RowwiseParallel,
 )
 from torch.nn.parallel import DistributedDataParallel
-
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -50,7 +50,7 @@ from torch.testing._internal.distributed.common_state_dict import VerifyStateDic
 
 # Simple and boring model
 class TestDummyModel(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         torch.manual_seed(0)
         self.net1 = nn.Linear(8, 16)
@@ -70,7 +70,7 @@ class TestDummyModel(torch.nn.Module):
 
 
 class TestStatefulObj:
-    def __init__(self):
+    def __init__(self) -> None:
         self.data = torch.rand(10, 10, device="cuda")
 
     def state_dict(self):
@@ -281,6 +281,49 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
 
         self._verify_msd(model_sd, dist_msd)
         self._verify_osd_by_load(model, optim, self._optim(model), dist_osd)
+
+    @with_temp_dir
+    def test_stateful_and_non_stateful_loads(self) -> None:
+        class StateDict(Dict):
+            def __init__(self):
+                self.set_sd_item_called = False
+
+            def __setitem__(self, item, value):
+                self.set_sd_item_called = True
+                super().__setitem__(item, value)
+
+        class Foo(Stateful):
+            def __init__(self):
+                self.load_state_dict_called = False
+
+            def state_dict(self):
+                return {}
+
+            def load_state_dict(self, state_dict):
+                self.load_state_dict_called = True
+
+        stateful_foo = Foo()
+        sd = StateDict()
+        sd["foo"] = stateful_foo
+        sd.set_sd_item_called = False
+
+        DCP.save(sd, checkpoint_id=self.temp_dir)
+        DCP.load(sd, checkpoint_id=self.temp_dir)
+
+        # Validate that the stateful object was loaded in-place
+        self.assertTrue(stateful_foo.load_state_dict_called)
+        # Validate that the stateful object was NOT replaced in the state dict
+        self.assertFalse(sd.set_sd_item_called)
+
+        sd = StateDict()
+        sd["foo"] = {"replicated": torch.rand(10, 10), "bytes": [1, 2, 3, 4]}
+        sd.set_sd_item_called = False
+
+        DCP.save(sd, checkpoint_id=self.temp_dir)
+        DCP.load(sd, checkpoint_id=self.temp_dir)
+
+        # Validate that the non-stateful state dict was replaced with the loaded state dict
+        self.assertTrue(sd.set_sd_item_called)
 
     @with_comms
     @with_temp_dir

@@ -1,12 +1,12 @@
 import time
 
 import numpy as np
-
 from agent import AgentBase
 from observer import ObserverBase
 
 import torch
 import torch.distributed.rpc as rpc
+
 
 COORDINATOR_NAME = "coordinator"
 AGENT_NAME = "agent"

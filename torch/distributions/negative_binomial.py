@@ -10,6 +10,7 @@ from torch.distributions.utils import (
     probs_to_logits,
 )
 
+
 __all__ = ["NegativeBinomial"]
 
 

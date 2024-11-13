@@ -9,7 +9,7 @@
 #include <c10/util/irange.h>
 #include <caffe2/serialize/in_memory_adapter.h>
 #include <caffe2/serialize/inline_container.h>
-#include <caffe2/serialize/read_adapter_interface.h>
+#include <caffe2/serialize/istream_adapter.h>
 #include <caffe2/serialize/versions.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/mobile/file_format.h>
@@ -81,8 +81,7 @@
 //  - Argument::{known_length_,kwarg_only_}
 //  - FunctionSchema::{overload_name_, is_vararg_, is_varret_}
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 using caffe2::serialize::MemoryReadAdapter;
 using caffe2::serialize::PyTorchStreamReader;
 using caffe2::serialize::ReadAdapterInterface;
@@ -91,7 +90,7 @@ OpCode parseOpCode(const char* str);
 
 TypePtr resolveTypeNameMobile(
     const c10::QualifiedName& qn,
-    std::shared_ptr<CompilationUnit> compilation_unit) {
+    const std::shared_ptr<CompilationUnit>& compilation_unit) {
   // HACK: first we check whether the name starts with special prefix to
   // tell if it's a supported pytorch class type. There are two special
   // prefixes. "__torch__" for nn module, and "torch.jit" from to_backend.
@@ -146,7 +145,7 @@ c10::intrusive_ptr<c10::ivalue::Object> objLoaderMobile(
     custom_class_type->getMethod("__setstate__").run(stack);
     return obj;
   } else {
-    auto dict = std::move(input).toGenericDict();
+    auto dict = input.toGenericDict();
     size_t ndict = dict.size();
     auto obj = c10::ivalue::Object::create(type, ndict);
     auto it = dict.begin();
@@ -223,8 +222,8 @@ class BytecodeDeserializer final {
   // dynamically. It's used for finding the minimum required runtime to run all
   // operators from the given model. If it's less than the current runtime,
   // upgrader will be applied at loading stage.
-  uint64_t operator_version_;
-  uint64_t bytecode_version_;
+  uint64_t operator_version_{0};
+  uint64_t bytecode_version_{0};
 };
 
 BytecodeDeserializer::BytecodeDeserializer(
@@ -319,9 +318,7 @@ void BytecodeDeserializer::parseMethods(
     method_i_start = 1;
   }
   TORCH_CHECK(
-      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       caffe2::serialize::kMinSupportedBytecodeVersion <= bytecode_version_ &&
-          // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
           bytecode_version_ <= caffe2::serialize::kMaxSupportedBytecodeVersion,
       "Lite Interpreter version number does not match. ",
       "The model version must be between ",
@@ -342,8 +339,7 @@ void BytecodeDeserializer::parseMethods(
     auto element = std::move(vals[i]);
     auto m_tuple = std::move(element.toTupleRef()).elements();
     const std::string& function_name = m_tuple[0].toStringRef();
-    auto codeTableElements =
-        std::move(std::move(m_tuple[1]).toTupleRef()).elements();
+    auto codeTableElements = std::move(m_tuple[1].toTupleRef()).elements();
     IValue* schemaTable = // older files do not store function schema
         (bytecode_version_ > 0x4L ||
          (bytecode_version_ == 0x4L && m_tuple.size() >= 3))
@@ -486,8 +482,7 @@ c10::IValue BytecodeDeserializer::readArchive(
   };
 
   bool bytecode_tensor_in_constants_archive =
-      (archive_name == "bytecode" &&
-       !isTensorInBytecodeArchive(*reader_.get()));
+      (archive_name == "bytecode" && !isTensorInBytecodeArchive(*reader_));
 
   auto ivalues = torch::jit::readArchiveAndTensors(
       archive_name,
@@ -497,7 +492,7 @@ c10::IValue BytecodeDeserializer::readArchive(
       type_resolver,
       obj_loader,
       device_,
-      *reader_.get(),
+      *reader_,
       nullptr);
   return ivalues;
 }
@@ -632,7 +627,7 @@ mobile::Module _load_for_mobile(
     return _load_mobile_from_bytes(
         data, size, device, extra_files, module_load_options);
   }
-  std::unique_ptr<IStreamAdapter> rai = std::make_unique<IStreamAdapter>(&in);
+  auto rai = std::make_unique<caffe2::serialize::IStreamAdapter>(&in);
   auto module = _load_for_mobile_impl(
       std::move(rai), device, extra_files, module_load_options);
   return module;
@@ -663,7 +658,7 @@ mobile::Module _load_for_mobile(
         data, size, device, extra_files, module_load_options);
   }
 
-  std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
+  auto rai = std::make_unique<caffe2::serialize::FileAdapter>(filename);
   return _load_for_mobile_impl(
       std::move(rai), device, extra_files, module_load_options);
 }
@@ -693,8 +688,7 @@ void _load_extra_only_for_mobile(
   auto format = getFileFormat(filename);
   switch (format) {
     case FileFormat::ZipFileFormat: {
-      std::unique_ptr<FileAdapter> rai =
-          std::make_unique<FileAdapter>(filename);
+      auto rai = std::make_unique<caffe2::serialize::FileAdapter>(filename);
       auto reader = std::make_unique<PyTorchStreamReader>(std::move(rai));
       BytecodeDeserializer deserializer(std::move(reader));
       deserializer.deserialize_only_extra(device, extra_files);
@@ -734,5 +728,4 @@ std::set<std::string> _export_operator_list(
 }
 
 } // namespace mobile
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

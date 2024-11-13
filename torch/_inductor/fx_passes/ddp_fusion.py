@@ -26,9 +26,9 @@ from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
 
-from .. import config
 from ..fx_utils import get_fake_args_kwargs
 from ..virtualized import V
+
 
 aten = torch.ops.aten
 logger: logging.Logger = logging.getLogger("comm_fusion")
@@ -582,9 +582,7 @@ def fuse_ddp_communication(
 ) -> None:
     for i, pa in enumerate(passes):
         with GraphTransformObserver(
-            graph.owning_module,
-            f"fuse_ddp_communication_pass_{i}",
-            config.trace.log_url_for_graph_xform,
+            graph.owning_module, f"fuse_ddp_communication_pass_{i}"
         ):
             if isinstance(pa, str):
                 func = globals()[pa]

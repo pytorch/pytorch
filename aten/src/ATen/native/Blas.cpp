@@ -71,7 +71,7 @@ TORCH_IMPL_FUNC(addmv_out_cpu)(const Tensor &self, const Tensor &mat, const Tens
           const_cast<Tensor&>(result),
           self,
           at::native::scalar_tensor(
-              beta_, self.scalar_type(), c10::nullopt /* layout */, at::kCPU, c10::nullopt /* pin_memory */));
+              beta_, self.scalar_type(), std::nullopt /* layout */, at::kCPU, std::nullopt /* pin_memory */));
     }
   } else {
     if (!result.is_same(*self_) && betaval != 0.0) { //if beta is 0, result contents is ignored

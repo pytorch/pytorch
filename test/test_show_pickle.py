@@ -6,7 +6,6 @@ import unittest
 
 import torch
 import torch.utils.show_pickle
-
 from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, TestCase
 
 

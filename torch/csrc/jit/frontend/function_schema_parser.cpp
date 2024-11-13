@@ -8,7 +8,6 @@
 #include <torch/csrc/jit/frontend/schema_type_parser.h>
 #include <optional>
 
-#include <functional>
 #include <memory>
 #include <vector>
 
@@ -25,7 +24,7 @@ namespace {
 struct SchemaParser {
   explicit SchemaParser(const std::string& str, bool allow_typevars)
       : L(std::make_shared<Source>(
-            c10::string_view(str),
+            std::string_view(str),
             std::nullopt,
             0,
             nullptr,
@@ -49,8 +48,9 @@ struct SchemaParser {
     size_t idx = 0;
     parseList('(', ',', ')', [&] {
       if (is_vararg)
-        throw ErrorReport(L.cur())
-            << "... must be the last element of the argument list";
+        throw(
+            ErrorReport(L.cur())
+            << "... must be the last element of the argument list");
       if (L.nextIf('*')) {
         kwarg_only = true;
       } else if (L.nextIf(TK_DOTS)) {
@@ -65,8 +65,9 @@ struct SchemaParser {
     if (is_vararg) {
       for (const auto& arg : arguments) {
         if (arg.default_value().has_value()) {
-          throw ErrorReport(L.cur())
-              << "schemas with vararg (...) can't have default value args";
+          throw(
+              ErrorReport(L.cur())
+              << "schemas with vararg (...) can't have default value args");
         }
       }
     }
@@ -78,8 +79,9 @@ struct SchemaParser {
     } else if (L.cur().kind == '(') {
       parseList('(', ',', ')', [&] {
         if (is_varret) {
-          throw ErrorReport(L.cur())
-              << "... must be the last element of the return list";
+          throw(
+              ErrorReport(L.cur())
+              << "... must be the last element of the return list");
         }
         if (L.nextIf(TK_DOTS)) {
           is_varret = true;
@@ -259,7 +261,7 @@ struct SchemaParser {
             str2dtype.count(text) > 0) {
           return static_cast<int64_t>(str2dtype.at(text));
         } else {
-          throw ErrorReport(L.cur().range) << "invalid numeric default value";
+          throw(ErrorReport(L.cur().range) << "invalid numeric default value");
         }
       }
       default:
@@ -300,8 +302,9 @@ struct SchemaParser {
         return convertToList(
             type, type.expectRef<c10::DynamicType>().dynamicKind(), range, vs);
       default:
-        throw ErrorReport(range)
-            << "lists are only supported for float, int and complex types";
+        throw(
+            ErrorReport(range)
+            << "lists are only supported for float, int and complex types");
     }
   }
   IValue parseConstantList(
@@ -372,7 +375,7 @@ struct SchemaParser {
             real_type,
             arg_N);
       default:
-        throw ErrorReport(range) << "unexpected type, file a bug report";
+        throw(ErrorReport(range) << "unexpected type, file a bug report");
     }
     return IValue(); // silence warnings
   }
@@ -395,7 +398,6 @@ struct SchemaParser {
   }
   Lexer L;
   SchemaTypeParser type_parser;
-  bool allow_typevars_;
 };
 } // namespace
 

@@ -1,25 +1,34 @@
 # mypy: allow-untyped-defs
+from typing import Any, Callable, List, TypeVar
+
 import torch
-from typing import List
+
 
 __all__ = [
     "compile",
     "assume_constant_result",
     "reset",
     "allow_in_graph",
+    "substitute_in_graph",
     "list_backends",
     "disable",
+    "set_stance",
     "cudagraph_mark_step_begin",
     "wrap_numpy",
     "is_compiling",
     "is_dynamo_compiling",
 ]
 
+
+_F = TypeVar("_F", bound=Callable[..., Any])
+
+
 def compile(*args, **kwargs):
     """
     See :func:`torch.compile` for details on the arguments for this function.
     """
     return torch.compile(*args, **kwargs)
+
 
 def reset() -> None:
     """
@@ -31,6 +40,7 @@ def reset() -> None:
 
     torch._dynamo.reset()
 
+
 def allow_in_graph(fn):
     """
     Tells the compiler frontend (Dynamo) to skip symbolic introspection of the function
@@ -39,7 +49,8 @@ def allow_in_graph(fn):
     If you are using :func:`torch.compile` (with backend="inductor" (the default)), or
     :func:`torch.export.export`, and trying to black-box a Python function throughout
     all tracing, do not use this API.
-    Instead, please create a custom operator (see :ref:`custom-ops-landing-page`)
+    Instead, please create a custom operator (see `PyTorch Custom Operators Landing Page
+    <https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html>`_)
 
     .. warning::
 
@@ -95,7 +106,7 @@ def allow_in_graph(fn):
         torch.compiler.allow_in_graph(my_custom_function)
 
         @torch.compile(...)
-        def fn(a):
+        def fn(x):
             x = torch.add(x, 1)
             x = my_custom_function(x)
             x = torch.add(x, 1)
@@ -111,6 +122,69 @@ def allow_in_graph(fn):
     return torch._dynamo.allow_in_graph(fn)
 
 
+def substitute_in_graph(
+    original_fn: _F,
+    *,
+    can_constant_fold_through: bool = False,
+    skip_signature_check: bool = False,
+) -> Callable[[_F], _F]:
+    """
+    Register a polyfill handler for a function, usually a C function from the C extension, to be
+    used in place of the original function when inlining the original function in the graph.
+
+    .. note::
+
+        The polyfill handler is only used when inlining the original function. It is not used when
+        the original function is called directly. In the eager mode, the decorated function calls
+        the performant C function rather than the polyfill handler.
+
+    The polyfill handler is a function that will be called in place of the original function when
+    inlining the original function. The polyfill handler should have the same signature and the same
+    behavior as the original function.
+
+    Args:
+        original_fn (callable): The original function, usually a C function, to register a polyfill
+            handler for.
+        can_constant_fold_through (bool, optional): Whether the polyfill handler can be constant
+            folded through. That is, if the polyfill handler is a pure function and its arguments
+            are constant, the result of the polyfill handler can be constant folded during the
+            compilation. Defaults to ``False``.
+        skip_signature_check (bool, optional): Whether to skip the signature check between the
+            original function and the polyfill handler. Defaults to ``False``.
+
+    Returns:
+        A decorator that registers the polyfill handler for the original function.
+
+    Example::
+
+        >>> import operator
+        >>> operator.indexOf([1, 2, 3, 4, 5], 3)
+        2
+        >>> torch.compile(operator.indexOf, fullgraph=True)([1, 2, 3, 4, 5], 3)
+        ... # xdoctest: +SKIP("Long tracebacks")
+        Traceback (most recent call last):
+        ...
+        torch._dynamo.exc.Unsupported: ...
+
+        >>> @torch.compiler.substitute_in_graph(operator.indexOf)
+        ... def indexOf(a, b, /):
+        ...     for i, item in enumerate(a):
+        ...         if item is b or item == b:
+        ...             return i
+        ...     raise ValueError("sequence.index(x): x not in sequence")
+        >>>
+        >>> torch.compile(operator.indexOf, fullgraph=True)([1, 2, 3, 4, 5], 3)
+        2
+    """
+    import torch._dynamo
+
+    return torch._dynamo.substitute_in_graph(
+        original_fn,
+        can_constant_fold_through=can_constant_fold_through,
+        skip_signature_check=skip_signature_check,
+    )
+
+
 def list_backends(exclude_tags=("debug", "experimental")) -> List[str]:
     """
     Return valid strings that can be passed to `torch.compile(..., backend="name")`.
@@ -121,6 +195,7 @@ def list_backends(exclude_tags=("debug", "experimental")) -> List[str]:
     import torch._dynamo
 
     return torch._dynamo.list_backends(exclude_tags)
+
 
 def assume_constant_result(fn):
     """
@@ -140,9 +215,10 @@ def assume_constant_result(fn):
 
     return torch._dynamo.assume_constant_result(fn)
 
+
 def disable(fn=None, recursive=True):
     """
-    This function provides both a decorator and a context manager to disable compilation on a function
+    This function provides a decorator to disable compilation on a function
     It also provides the option of recursively disabling called functions
 
     Args:
@@ -152,6 +228,59 @@ def disable(fn=None, recursive=True):
     import torch._dynamo
 
     return torch._dynamo.disable(fn, recursive)
+
+
+def set_stance(stance: str, force_backend=None):
+    """
+    Set the current stance of the compiler.
+    Can be used as a function, context manager, or decorator.
+    Do not use this function inside a `torch.compile` region - an error will be raised otherwise.
+
+    .. code-block:: python
+
+        @torch.compile
+        def foo(x):
+            ...
+
+        @torch.compiler.set_stance("force_eager")
+        def bar():
+            # will not be compiled
+            foo(...)
+
+        bar()
+
+        with torch.compiler.set_stance("force_eager"):
+            # will also not be compiled
+            foo(...)
+
+        torch.compiler.set_stance("force_eager")
+        # will also not be compiled
+        foo(...)
+        torch.compiler.set_stance("default")
+
+        # will be compiled
+        foo(...)
+
+    Args:
+        stance: The stance to set the compiler to. Valid values are:
+
+            - "default": The default stance, used for normal compilation.
+            - "force_eager": Ignore all `torch.compile` directives.
+            - "eager_on_recompile": Run code eagerly when a recompile is necessary.
+              If there is cached compiled code valid for the input, it will still be used.
+            - "fail_on_recompile": Raise an error when recompiling a function.
+
+        force_backend: If `stance` is "default", this argument can be used to force `torch.compile`
+            to use a specific backend. Otherwise, an error is raised.
+    """
+    import torch._dynamo
+
+    return torch._dynamo.set_stance(stance, force_backend=force_backend)
+
+
+# forbid in graph
+set_stance._dynamo_forbidden = True  # type: ignore[attr-defined]
+
 
 def cudagraph_mark_step_begin():
     """
@@ -177,6 +306,7 @@ def cudagraph_mark_step_begin():
     from torch._inductor import cudagraph_trees
 
     cudagraph_trees.mark_step_begin()
+
 
 def wrap_numpy(fn):
     r"""Decorator that turns a function from ``np.ndarray``s to ``np.ndarray``s into a function
@@ -206,9 +336,12 @@ def wrap_numpy(fn):
         tensor([ 0.,  2.,  4.,  6.,  8., 10.], device='cuda:0')
     """
     from torch._dynamo.external_utils import wrap_numpy as wrap
+
     return wrap(fn)
 
+
 _is_compiling_flag: bool = False
+
 
 def is_compiling() -> bool:
     """
@@ -230,6 +363,7 @@ def is_compiling() -> bool:
         return False
     else:
         return _is_compiling_flag
+
 
 def is_dynamo_compiling() -> bool:
     """

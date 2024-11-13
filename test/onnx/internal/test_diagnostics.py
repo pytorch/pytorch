@@ -16,13 +16,13 @@ from torch.onnx._internal.diagnostics.infra import formatter, sarif
 from torch.onnx._internal.fx import diagnostics as fx_diagnostics
 from torch.testing._internal import common_utils, logging_utils
 
+
 if typing.TYPE_CHECKING:
     import unittest
 
 
 class _SarifLogBuilder(Protocol):
-    def sarif_log(self) -> sarif.SarifLog:
-        ...
+    def sarif_log(self) -> sarif.SarifLog: ...
 
 
 def _assert_has_diagnostics(
@@ -343,9 +343,7 @@ class TestTorchScriptOnnxDiagnostics(common_utils.TestCase):
         self.assertIn("test_diagnostics.py", frame.location.uri)
 
     def test_diagnostics_records_cpp_call_stack(self):
-        diagnostic = (
-            self._trigger_node_missing_onnx_shape_inference_warning_diagnostic_from_cpp()
-        )
+        diagnostic = self._trigger_node_missing_onnx_shape_inference_warning_diagnostic_from_cpp()
         stack = diagnostic.cpp_call_stack
         assert stack is not None  # for mypy
         self.assertGreater(len(stack.frames), 0)
@@ -367,9 +365,9 @@ class TestDiagnosticsInfra(common_utils.TestCase):
     def setUp(self):
         self.rules = _RuleCollectionForTest()
         with contextlib.ExitStack() as stack:
-            self.context: infra.DiagnosticContext[
-                infra.Diagnostic
-            ] = stack.enter_context(infra.DiagnosticContext("test", "1.0.0"))
+            self.context: infra.DiagnosticContext[infra.Diagnostic] = (
+                stack.enter_context(infra.DiagnosticContext("test", "1.0.0"))
+            )
             self.addCleanup(stack.pop_all().close)
         return super().setUp()
 
@@ -399,12 +397,14 @@ class TestDiagnosticsInfra(common_utils.TestCase):
             },
         ):
             diagnostic1 = infra.Diagnostic(
-                custom_rules.custom_rule, infra.Level.WARNING  # type: ignore[attr-defined]
+                custom_rules.custom_rule,  # type: ignore[attr-defined]
+                infra.Level.WARNING,
             )
             self.context.log(diagnostic1)
 
             diagnostic2 = infra.Diagnostic(
-                custom_rules.custom_rule_2, infra.Level.ERROR  # type: ignore[attr-defined]
+                custom_rules.custom_rule_2,  # type: ignore[attr-defined]
+                infra.Level.ERROR,
             )
             self.context.log(diagnostic2)
 

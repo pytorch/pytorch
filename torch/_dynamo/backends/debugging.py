@@ -2,17 +2,22 @@
 
 import dataclasses
 import functools
+import logging
 from importlib import import_module
 from typing import Any, List, Optional
 
 import torch
-
 from functorch.compile import min_cut_rematerialization_partition
 from torch import _guards
 from torch._functorch import config as functorch_config
 from torch._functorch.compilers import ts_compile
+
 from .common import aot_autograd
 from .registry import register_debug_backend as register_backend
+
+
+log = logging.getLogger(__name__)
+
 
 """
 This file contains TorchDynamo backends intended for debugging uses.
@@ -20,12 +25,39 @@ This file contains TorchDynamo backends intended for debugging uses.
 
 
 @register_backend
-def eager(gm, fake_tensor_inputs):
+def eager(gm, fake_tensor_inputs, **kwargs):
+    if kwargs:
+        log.warning("eager backend ignoring extra kwargs %s", kwargs)
     return gm.forward
 
 
+def make_eager_backend_with_torch_function_mode(mode):
+    return make_eager_backend_with_torch_function_modes([mode])
+
+
+def make_eager_backend_with_torch_function_modes(modes):
+    """Used to trace HOPs (cond and while) for eager exectution, the metadata
+    TF mode mutates vars outside of the scope of the HOP, and we can't have graph breaks
+    in the HOP, so we need to externally run this mode and not trace it."""
+    from contextlib import ExitStack
+
+    def fn(gm, fake_tensor_inputs, **kwargs):
+        stack = ExitStack()
+        for mode in modes:
+            stack.enter_context(mode)
+
+        result = gm.forward
+        stack.close()
+        return result
+
+    return fn
+
+
 @register_backend
-def eager_noexcept(gm, fake_tensor_inputs):
+def eager_noexcept(gm, fake_tensor_inputs, **kwargs):
+    if kwargs:
+        log.warning("eager_noexcept backend ignoring extra kwargs %s", kwargs)
+
     # This backend is intended to check that dynamo-generated GraphModules
     # do not cause errors.
     def inner(*args):
@@ -40,7 +72,10 @@ def eager_noexcept(gm, fake_tensor_inputs):
 
 
 @register_backend
-def pre_dispatch_eager(gm, fake_tensor_inputs):
+def pre_dispatch_eager(gm, fake_tensor_inputs, **kwargs):
+    if kwargs:
+        log.warning("pre_dispatch_eager backend ignoring extra kwargs %s", kwargs)
+
     from torch.fx.experimental.proxy_tensor import make_fx
 
     def runnable_gm(*args):
@@ -53,7 +88,10 @@ def pre_dispatch_eager(gm, fake_tensor_inputs):
 
 
 @register_backend
-def eager_debug(gm, fake_tensor_inputs):
+def eager_debug(gm, fake_tensor_inputs, **kwargs):
+    if kwargs:
+        log.warning("eager_debug backend ignoring extra kwargs %s", kwargs)
+
     from torch._subclasses.schema_check_mode import SchemaCheckMode
 
     # We could add more debugging bits here.
@@ -80,13 +118,46 @@ def boxed_nop(fx_g, example_inputs):
     return run
 
 
+def fake_crossref_boxed_nop(fx_g, example_inputs, ignore_op_fn=None):
+    def run(args):
+        with torch._subclasses.CrossRefFakeMode(ignore_op_fn):
+            return torch.fx.Interpreter(fx_g).boxed_run(args)
+
+    run._boxed_call = True
+    return run
+
+
+def ignore_builtins(op: torch._ops.OpOverload) -> bool:
+    return op.namespace in ("aten", "prims", "prim")
+
+
+def get_nop_func():
+    if not torch._functorch.config.fake_tensor_crossref:
+        return boxed_nop
+    elif torch._functorch.config.fake_tensor_crossref == "all":
+        return fake_crossref_boxed_nop
+    else:
+        assert torch._functorch.config.fake_tensor_crossref == "custom_ops"
+        return functools.partial(fake_crossref_boxed_nop, ignore_op_fn=ignore_builtins)
+
+
 # Useful for debugging purpose
 # aot_eager uses AOT Autograd backend with nop compiler. It is helpful in debugging.
-aot_eager = aot_autograd(
-    fw_compiler=boxed_nop,
-    partition_fn=min_cut_rematerialization_partition,
-    keep_inference_input_mutations=True,
-)
+def aot_eager(
+    gm,
+    fake_tensor_inputs,
+    fw_compiler=None,
+    bw_compiler=None,
+    **kwargs,
+):
+    return aot_autograd(
+        fw_compiler=fw_compiler or boxed_nop,
+        bw_compiler=bw_compiler or boxed_nop,
+        partition_fn=min_cut_rematerialization_partition,
+        keep_inference_input_mutations=True,
+    )(gm, fake_tensor_inputs, **kwargs)
+
+
 register_backend(name="aot_eager", compiler_fn=aot_eager)
 
 aot_eager_default_partitioner = aot_autograd(
@@ -101,12 +172,25 @@ register_backend(
 # inductor problems.
 # aot_eager_decomp_partition just replaces the inductor compiler with nop to help
 # isolate inductor vs aot_eager errors
-def aot_eager_decomp_partition(gm, fake_tensor_inputs):
-    with functorch_config.patch(unlift_effect_tokens=True):
+def aot_eager_decomp_partition(gm, fake_tensor_inputs, **kwargs):
+    if kwargs:
+        log.warning(
+            "aot_eager_decomp_partition backend ignoring extra kwargs %s", kwargs
+        )
+
+    from torch._inductor.compiler_bisector import CompilerBisector
+
+    config_patches = {"unlift_effect_tokens": True}
+    if bisect_changes := CompilerBisector.get_config_change(
+        "aot_eager_decomp_partition"
+    ):
+        config_patches.update(bisect_changes)
+
+    with functorch_config.patch(config_patches):
         return aot_autograd(
             # these are taken from memory_efficient_fusion()
-            fw_compiler=boxed_nop,
-            bw_compiler=boxed_nop,
+            fw_compiler=get_nop_func(),
+            bw_compiler=get_nop_func(),
             # NB: lambda here is to delay import of inductor
             decompositions=lambda: import_module(
                 "torch._inductor.compile_fx"
@@ -119,6 +203,25 @@ def aot_eager_decomp_partition(gm, fake_tensor_inputs):
 
 register_backend(
     name="aot_eager_decomp_partition", compiler_fn=aot_eager_decomp_partition
+)
+
+
+def aot_eager_decomp_partition_crossref(gm, fake_tensor_inputs, **kwargs):
+    # if the config is set, respect it, otherwise only test custom_ops.
+    # custom_op bad metas always manifest as an error whereas aten will only sometimes.
+    # by default, use the less noisy option
+    config_val = (
+        "custom_ops"
+        if not functorch_config.fake_tensor_crossref
+        else functorch_config.fake_tensor_crossref
+    )
+    with functorch_config.patch(fake_tensor_crossref=config_val):
+        return aot_eager_decomp_partition(gm, fake_tensor_inputs, **kwargs)
+
+
+register_backend(
+    name="aot_eager_decomp_partition_crossref",
+    compiler_fn=aot_eager_decomp_partition_crossref,
 )
 
 
@@ -202,7 +305,7 @@ class ExplainOutput:
     out_guards: Optional[List[_guards.Guard]] = None
     compile_times: Optional[str] = None
 
-    def __str__(self):
+    def __str__(self) -> str:
         output = f"Graph Count: {self.graph_count}\n"
         output += f"Graph Break Count: {self.graph_break_count}\n"
         output += f"Op Count: {self.op_count}\n"
@@ -288,7 +391,7 @@ class ExplainWithBackend:
         print(eb.output())
     """
 
-    def __init__(self, backend):
+    def __init__(self, backend) -> None:
         from .registry import lookup_backend
 
         self.backend = lookup_backend(backend)

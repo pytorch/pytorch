@@ -1,17 +1,18 @@
 # Owner(s): ["module: decompositions"]
 
 import functools
-
 import itertools
 import re
 import unittest
 from collections import defaultdict
 from functools import partial
 
+import torch._inductor.decomposition
 import torch.autograd
 from torch import Tensor
 from torch._decomp import core_aten_decompositions, decomposition_table
 from torch._dispatch.python import enable_python_dispatcher
+from torch._export.utils import _is_cia_op
 from torch._ops import DispatchKey
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import tf32_off
@@ -31,7 +32,6 @@ from torch.testing._internal.common_methods_invocations import (
 from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.common_utils import (
     is_iterable_of_tensors,
-    IS_MACOS,
     run_tests,
     skipIfCrossRef,
     skipIfTorchDynamo,
@@ -43,8 +43,8 @@ from torch.testing._internal.common_utils import (
 )
 from torch.utils import _pytree as pytree
 from torch.utils._python_dispatch import TorchDispatchMode
-
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
+
 
 aten = torch.ops.aten
 
@@ -63,7 +63,7 @@ decomposition_names = {
 core_decomposition_names = {
     overload_to_aten_name(k)
     for k in core_aten_decompositions()
-    if isinstance(k, torch._ops.OpOverload)
+    if isinstance(k, torch._ops.OpOverload) and not _is_cia_op(k)
 }
 _decomp_test_ops = [
     op
@@ -214,10 +214,17 @@ def op_assert_ref(test_case, op, test_dtype, i, orig, decomp, ref, args, kwargs)
         (torch.bfloat16, torch.ops.aten.multi_margin_loss.default): 5e-2,
         (torch.float16, torch.ops.aten.multilabel_margin_loss_forward.default): 3e-2,
         (torch.bfloat16, torch.ops.aten.multilabel_margin_loss_forward.default): 3e-2,
+        (torch.float16, torch.ops.aten.reflection_pad1d_backward.default): 5e-3,
+        (torch.bfloat16, torch.ops.aten.reflection_pad1d_backward.default): 5e-3,
+        (torch.float16, torch.ops.aten.reflection_pad2d_backward.default): 5e-3,
+        (torch.bfloat16, torch.ops.aten.reflection_pad2d_backward.default): 5e-3,
+        (torch.float16, torch.ops.aten.reflection_pad3d_backward.default): 5e-3,
+        (torch.bfloat16, torch.ops.aten.reflection_pad3d_backward.default): 5e-2,
         # see https://github.com/pytorch/pytorch/pull/96264
         (torch.float16, torch.ops.aten.mv.default): 1e-5,
         (torch.bfloat16, torch.ops.aten.mv.default): 1e-5,
         (torch.float16, torch.ops.aten.log_sigmoid_backward.default): 2e-5,
+        (torch.float16, torch.ops.aten._softmax_backward_data.default): 3e-7,
     }
     if ref.is_floating_point():
         orig_diff = (orig - ref).abs().max()
@@ -538,7 +545,6 @@ class TestDecomp(TestCase):
     # NB: This actually overlaps with test_comprehensive, but it only
     # runs on things that are definitely decomposed so it's a lot faster
     # to run
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyNativeDeviceTypes
     @skipIfCrossRef
     @suppress_warnings
@@ -546,7 +552,6 @@ class TestDecomp(TestCase):
     def test_quick(self, device, dtype, op):
         self.do_cross_ref(device, dtype, op, run_all=False)
 
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @skipOps("TestDecomp", "test_quick_core_backward", core_backward_failures)
     @onlyNativeDeviceTypes
     @skipIfCrossRef
@@ -602,15 +607,21 @@ class TestDecomp(TestCase):
 
         self.assertEqual(xs, xs_two)
 
+    def test_cat_single_input(self, device):
+        decomp_table = torch._inductor.decomposition.select_decomp_table()
+        cat_inductor = decomp_table[torch.ops.aten.cat.default]
+
+        inp = torch.rand([2048, 2048], device=device)
+        inps = [inp for _ in range(10)]
+
+        for dim in (-1, 0, 1):
+            self.assertEqual(torch.cat(inps, dim), cat_inductor(inps, dim))
+
     def test_rrelu_with_noise(self, device):
         # rrelu_with_noise behavior depends on a) whether elements in the input
         # are <= 0, and b) whether we're in training mode. Cover all cases:
         dtype = torch.float64
-        x = torch.tensor(
-            [-3.0, -2.0, -1.0, 0.0, 1.0, 2.0],
-            dtype=dtype,
-            device=device,
-        )
+        x = torch.tensor([-3.0, -2.0, -1.0, 0.0, 1.0, 2.0], dtype=dtype, device=device)
         lower = 1.0
         upper = 4.0
         training = False
@@ -650,7 +661,6 @@ class TestDecomp(TestCase):
         self.assertEqual(ref, res)
         self.assertEqual(noise_ref, noise_res)
 
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @suppress_warnings
     @tf32_off()
     # only tests RNNs since we have py dispsatcher decomps for them
@@ -1025,7 +1035,6 @@ instantiate_device_type_tests(TestDecomp, globals())
 
 
 class DecompOneOffTests(TestCase):
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyNativeDeviceTypes
     @skipIfCrossRef
     def test_contiguous_softmax(self, device):
@@ -1040,7 +1049,6 @@ class DecompOneOffTests(TestCase):
         res = torch._decomp.decompositions._softmax(x, -1, False)
         self.assertEqual(ref.stride(), res.stride())
 
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyNativeDeviceTypes
     @skipIfCrossRef
     def test_contiguous_log_softmax(self, device):
@@ -1106,7 +1114,6 @@ class DecompOneOffTests(TestCase):
             self.assertEqual(a.stride(), b.stride())
             self.assertEqual(a.dtype, b.dtype)
 
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyNativeDeviceTypes
     @skipIfCrossRef
     def test_elu_backward(self, device):
@@ -1119,7 +1126,6 @@ class DecompOneOffTests(TestCase):
         res = torch._decomp.decompositions.elu_backward(grad_out, 1.0, 1, 1, True, out)
         self.assertEqual(ref, res)
 
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyNativeDeviceTypes
     @skipIfCrossRef
     def test_threshold_backward_dtype(self, device):
@@ -1130,7 +1136,6 @@ class DecompOneOffTests(TestCase):
         res = torch._decomp.decompositions.threshold_backward(grad, input_tensor, 1)
         self.assertEqual(ref.dtype, res.dtype)
 
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyNativeDeviceTypes
     @skipIfCrossRef
     def test_weight_norm_interface(self, device):
@@ -1150,7 +1155,6 @@ class DecompOneOffTests(TestCase):
             torch._decomp.decompositions._weight_norm_interface(inp, inp2),
         )
 
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyCPU
     @skipIfCrossRef
     @skipOps(
@@ -1159,7 +1163,7 @@ class DecompOneOffTests(TestCase):
         [
             xfail(
                 "nn.functional.scaled_dot_product_attention",
-                dtypes=[torch.half] + ([torch.bfloat16] if IS_MACOS else []),
+                dtypes=[torch.half],
             ),
         ],
     )
@@ -1167,24 +1171,6 @@ class DecompOneOffTests(TestCase):
     def test_sdpa(self, device, dtype, op):
         # SDPA doesn't support float16, this is aligned with aten/src/ATen/native/transformers/attention.cpp. If we
         # add support for float16 over there we should update this test as well.
-
-        class ScaledDotProductAttention(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
-            def forward(
-                self, query_layer, key_layer, value_layer, mask=None, is_causal=True
-            ):
-                attn_output = op(
-                    query_layer,
-                    key_layer,
-                    value_layer,
-                    attn_mask=mask,
-                    dropout_p=0.0,
-                    is_causal=is_causal,
-                )
-                return attn_output
-
         query_layer = torch.randn(1, 128, 100, 64, device=device, dtype=dtype)
         key_layer = torch.randn(1, 128, 100, 64, device=device, dtype=dtype)
         value_layer = torch.randn(1, 128, 100, 64, device=device, dtype=dtype)
@@ -1194,12 +1180,17 @@ class DecompOneOffTests(TestCase):
 
         for mask in masks:
             is_causal = mask is None
-            attention = ScaledDotProductAttention()
             decomposed_res = (
                 torch._decomp.decompositions.scaled_dot_product_flash_attention_for_cpu(
                     query_layer, key_layer, value_layer, 0.0, is_causal, attn_mask=mask
                 )
             )
+            actual_res = decomposed_res[0]
+            # Output has form (N, H, L, E), but should be continuous on (L, N, H, E)
+            # in order for subsequent view(L * N, H * E) to be valid.
+            # So permute(2, 0, 1, 3) before checking that tensor is contiguous
+            self.assertTrue(actual_res.permute(2, 0, 1, 3).is_contiguous())
+
             eager_res = op(
                 query_layer,
                 key_layer,
@@ -1209,9 +1200,7 @@ class DecompOneOffTests(TestCase):
                 is_causal=is_causal,
             )
 
-            self.assertTrue(
-                torch.allclose(decomposed_res[0], eager_res, atol=atol, rtol=rtol)
-            )
+            self.assertTrue(torch.allclose(actual_res, eager_res, atol=atol, rtol=rtol))
 
 
 instantiate_device_type_tests(DecompOneOffTests, globals())
@@ -1233,9 +1222,7 @@ class HasDecompTest(TestCase):
 
         try:
             # CompositeImplicitAutograd ops are transparent to the tracer, so don't need decompositions
-            return not op.has_kernel_for_dispatch_key(
-                DispatchKey.CompositeImplicitAutograd
-            )
+            return not _is_cia_op(op)
         except RuntimeError as e:
             # has_key fails for some jit-registered ops, which shouldn't be
             # relevant here anyway

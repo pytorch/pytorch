@@ -106,7 +106,7 @@ inline Tensor& fill_empty_deterministic_(Tensor& tensor) {
     AT_DISPATCH_V2(
       tensor.scalar_type(), "fill_empty_deterministic_", AT_WRAP([&]() {
         tensor.fill_(std::numeric_limits<scalar_t>::quiet_NaN());
-    }), AT_EXPAND(AT_FLOATING_TYPES), AT_EXPAND(AT_COMPLEX_TYPES), AT_EXPAND(AT_FLOAT8_TYPES), kBFloat16, kHalf);
+    }), AT_EXPAND(AT_FLOATING_TYPES), AT_EXPAND(AT_COMPLEX_TYPES), AT_EXPAND(AT_FLOAT8_TYPES), kBFloat16, kHalf, kComplexHalf);
   } else {
     AT_DISPATCH_V2(
       tensor.scalar_type(), "fill_empty_deterministic_", AT_WRAP([&]() {
@@ -119,7 +119,7 @@ inline Tensor& fill_empty_deterministic_(Tensor& tensor) {
 // The ZeroTensor allocator ignores whatever allocation is requested and always
 // gives you nullptr
 struct ZeroTensorAllocator final : public at::Allocator {
-  ZeroTensorAllocator(at::Device device) : device_(device) {};
+  ZeroTensorAllocator(at::Device device) : device_(device) {}
   ~ZeroTensorAllocator() override = default;
   static void deleter(void* const pointer) {
     TORCH_INTERNAL_ASSERT(!pointer);
@@ -130,13 +130,13 @@ struct ZeroTensorAllocator final : public at::Allocator {
   DeleterFnPtr raw_deleter() const override {
     return deleter;
   }
-  void copy_data(void* dest, const void* src, std::size_t count) const final {}
+  void copy_data(void* dest [[maybe_unused]], const void* src [[maybe_unused]], std::size_t count [[maybe_unused]]) const final {}
   at::Device device_;
 };
 
 using binary_fn = void (*)(TensorIterator&);
 
-DECLARE_DISPATCH(binary_fn, complex_stub);
-DECLARE_DISPATCH(binary_fn, polar_stub);
+DECLARE_DISPATCH(binary_fn, complex_stub)
+DECLARE_DISPATCH(binary_fn, polar_stub)
 
 } // namespace at::native

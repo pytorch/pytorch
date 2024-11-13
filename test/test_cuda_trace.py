@@ -8,6 +8,7 @@ import torch
 import torch.cuda._gpu_trace as gpu_trace
 from torch.testing._internal.common_utils import NoTest, run_tests, TEST_CUDA, TestCase
 
+
 # NOTE: Each test needs to be run in a brand new process, to reset the registered hooks
 # and make sure the CUDA streams are initialized for each test that uses them.
 

@@ -9,9 +9,7 @@
 #include <torch/csrc/jit/python/module_python.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace torch::distributed::rpc {
 
 /////////////////////  Pickle/Unpickle Helplers ////////////////////////////
 
@@ -139,6 +137,7 @@ PyRRef::PyRRef(const py::object& value, const py::object& type_hint)
         return rref;
       }()) {}
 
+// NOLINTNEXTLINE(bugprone-exception-escape)
 PyRRef::~PyRRef() {
   if (type_.has_value()) {
     pybind11::gil_scoped_acquire ag;
@@ -363,6 +362,4 @@ void PyRRef::backward(
   }
 }
 
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc

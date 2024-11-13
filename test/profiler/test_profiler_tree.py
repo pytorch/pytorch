@@ -21,6 +21,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.utils._pytree import tree_map
 
+
 # These functions can vary from based on platform and build (e.g. with CUDA)
 # and generally distract from rather than adding to the test.
 PRUNE_ALL = 1
@@ -259,7 +260,10 @@ class TestProfilerTree(TestCase):
 
     # TODO: Add logic for CUDA version of test
     @ProfilerTree.test
-    @unittest.skipIf(torch.cuda.is_available(), "Test not working for CUDA")
+    @unittest.skipIf(
+        torch.cuda.is_available() or torch.xpu.is_available(),
+        "Test not working for CUDA and XPU",
+    )
     def test_profiler_experimental_tree(self):
         t1, t2 = torch.ones(1, requires_grad=True), torch.ones(1, requires_grad=True)
         with torch.profiler.profile() as p:
@@ -314,7 +318,10 @@ class TestProfilerTree(TestCase):
 
     # TODO: Add logic for CUDA version of test
     @ProfilerTree.test
-    @unittest.skipIf(torch.cuda.is_available(), "Test not working for CUDA")
+    @unittest.skipIf(
+        torch.cuda.is_available() or torch.xpu.is_available(),
+        "Test not working for CUDA and XPU",
+    )
     def test_profiler_experimental_tree_with_record_function(self):
         with torch.profiler.profile() as p:
             with torch.autograd.profiler.record_function("Top level Annotation"):
@@ -364,7 +371,10 @@ class TestProfilerTree(TestCase):
 
     # TODO: Add logic for CUDA version of test
     @ProfilerTree.test
-    @unittest.skipIf(torch.cuda.is_available(), "Test not working for CUDA")
+    @unittest.skipIf(
+        torch.cuda.is_available() or torch.xpu.is_available(),
+        "Test not working for CUDA and XPU",
+    )
     def test_profiler_experimental_tree_with_memory(self):
         t1, t2 = torch.ones(1, requires_grad=True), torch.ones(1, requires_grad=True)
         with torch.profiler.profile(profile_memory=True) as p:
@@ -436,6 +446,7 @@ class TestProfilerTree(TestCase):
             [memory]""",
         )
 
+    @unittest.skip("https://github.com/pytorch/pytorch/issues/83606")
     @unittest.skipIf(
         TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite."
     )
@@ -478,8 +489,19 @@ class TestProfilerTree(TestCase):
                   <built-in function len>
                   torch/autograd/__init__.py(...): _tensor_or_tensors_to_tuple
                   torch/autograd/__init__.py(...): _make_grads
+                    typing.py(...): inner
+                      typing.py(...): __hash__
+                        <built-in function hash>
+                    typing.py(...): cast
+                    <built-in function isinstance>
+                    <built-in function isinstance>
+                    <built-in function isinstance>
+                    <built-in function isinstance>
+                    <built-in function isinstance>
                     <built-in function isinstance>
                     <built-in method numel of Tensor object at 0xXXXXXXXXXXXX>
+                    <built-in function isinstance>
+                    <built-in function isinstance>
                     <built-in method ones_like of type object at 0xXXXXXXXXXXXX>
                       aten::ones_like
                         aten::empty_like
@@ -543,7 +565,7 @@ class TestProfilerTree(TestCase):
     @ProfilerTree.test
     def test_profiler_experimental_tree_with_stack_and_modules(self):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.layers = [
                     torch.nn.ReLU(),
@@ -715,6 +737,10 @@ class TestProfilerTree(TestCase):
         x = TorchDispatchTensor(torch.ones((1,)))
         y = torch.ones((1,))
 
+        # warmup round
+        with torch.profiler.profile(with_stack=True):
+            x + y
+
         with torch.profiler.profile(with_stack=True) as p:
             x + y
 
@@ -725,6 +751,10 @@ class TestProfilerTree(TestCase):
               torch/profiler/profiler.py(...): __enter__
                 ...
               aten::add
+                torch/_library/simple_registry.py(...): find_torch_dispatch_rule
+                  torch/_library/simple_registry.py(...): find
+                  torch/_library/simple_registry.py(...): find
+                    <built-in method get of dict object at 0xXXXXXXXXXXXX>
                 test_profiler_tree.py(...): __torch_dispatch__
                   torch/utils/_pytree.py(...): tree_map
                     ...
@@ -902,6 +932,9 @@ class TestProfilerTree(TestCase):
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     @ProfilerTree.test
     def test_profiler_experimental_tree_cuda_detailed(self):
+        # Do lazy imports ahead of time to avoid it showing up in the tree
+        import torch.nested._internal.nested_tensor
+
         model = torch.nn.modules.Linear(1, 1, device="cuda")
         model.train()
         opt = torch.optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
@@ -959,8 +992,19 @@ class TestProfilerTree(TestCase):
                     <built-in function len>
                     torch/autograd/__init__.py(...): _tensor_or_tensors_to_tuple
                     torch/autograd/__init__.py(...): _make_grads
+                      typing.py(...): inner
+                        typing.py(...): __hash__
+                          <built-in function hash>
+                      typing.py(...): cast
+                      <built-in function isinstance>
+                      <built-in function isinstance>
+                      <built-in function isinstance>
+                      <built-in function isinstance>
+                      <built-in function isinstance>
                       <built-in function isinstance>
                       <built-in method numel of Tensor object at 0xXXXXXXXXXXXX>
+                      <built-in function isinstance>
+                      <built-in function isinstance>
                       <built-in method ones_like of type object at 0xXXXXXXXXXXXX>
                         aten::ones_like
                           aten::empty_like

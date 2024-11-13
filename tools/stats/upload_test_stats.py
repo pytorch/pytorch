@@ -13,6 +13,7 @@ from tools.stats.test_dashboard import upload_additional_info
 from tools.stats.upload_stats_lib import (
     download_s3_artifacts,
     get_job_id,
+    remove_nan_inf,
     unzip,
     upload_workflow_stats_to_s3,
 )
@@ -67,7 +68,7 @@ def process_xml_element(element: ET.Element) -> dict[str, Any]:
     ret.update(element.attrib)
 
     # The XML format encodes all values as strings. Convert to ints/floats if
-    # possible to make aggregation possible in Rockset.
+    # possible to make aggregation possible in SQL.
     for k, v in ret.items():
         try:
             ret[k] = int(v)
@@ -217,7 +218,7 @@ def summarize_test_cases(test_cases: list[dict[str, Any]]) -> list[dict[str, Any
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Upload test stats to Rockset")
+    parser = argparse.ArgumentParser(description="Upload test stats to s3")
     parser.add_argument(
         "--workflow-run-id",
         required=True,
@@ -255,18 +256,18 @@ if __name__ == "__main__":
     else:
         test_cases = get_tests(args.workflow_run_id, args.workflow_run_attempt)
 
-    # Flush stdout so that any errors in Rockset upload show up last in the logs.
+    # Flush stdout so that any errors in the upload show up last in the logs.
     sys.stdout.flush()
 
     # For PRs, only upload a summary of test_runs. This helps lower the
-    # volume of writes we do to Rockset.
+    # volume of writes we do to the HUD backend database.
     test_case_summary = summarize_test_cases(test_cases)
 
     upload_workflow_stats_to_s3(
         args.workflow_run_id,
         args.workflow_run_attempt,
         "test_run_summary",
-        test_case_summary,
+        remove_nan_inf(test_case_summary),
     )
 
     # Separate out the failed test cases.
@@ -281,13 +282,16 @@ if __name__ == "__main__":
         args.workflow_run_id,
         args.workflow_run_attempt,
         "failed_test_runs",
-        failed_tests_cases,
+        remove_nan_inf(failed_tests_cases),
     )
 
     if args.head_branch == "main" and args.head_repository == "pytorch/pytorch":
         # For jobs on main branch, upload everything.
         upload_workflow_stats_to_s3(
-            args.workflow_run_id, args.workflow_run_attempt, "test_run", test_cases
+            args.workflow_run_id,
+            args.workflow_run_attempt,
+            "test_run",
+            remove_nan_inf(test_cases),
         )
 
     upload_additional_info(args.workflow_run_id, args.workflow_run_attempt, test_cases)

@@ -50,7 +50,7 @@ RUN  bash ./install_lcov.sh && rm install_lcov.sh
 
 # Install cuda and cudnn
 ARG CUDA_VERSION
-RUN wget -q https://raw.githubusercontent.com/pytorch/builder/main/common/install_cuda.sh -O install_cuda.sh
+COPY ./common/install_cuda.sh install_cuda.sh
 RUN bash ./install_cuda.sh ${CUDA_VERSION} && rm install_cuda.sh
 ENV DESIRED_CUDA ${CUDA_VERSION}
 ENV PATH /usr/local/nvidia/bin:/usr/local/cuda/bin:$PATH
@@ -86,19 +86,6 @@ COPY ./common/install_vision.sh ./common/cache_vision_models.sh ./common/common_
 RUN if [ -n "${VISION}" ]; then bash ./install_vision.sh; fi
 RUN rm install_vision.sh cache_vision_models.sh common_utils.sh
 ENV INSTALLED_VISION ${VISION}
-
-# (optional) Install Android NDK
-ARG ANDROID
-ARG ANDROID_NDK
-ARG GRADLE_VERSION
-COPY ./common/install_android.sh ./common/cache_vision_models.sh ./common/common_utils.sh ./
-COPY ./android/AndroidManifest.xml AndroidManifest.xml
-COPY ./android/build.gradle build.gradle
-RUN if [ -n "${ANDROID}" ]; then bash ./install_android.sh; fi
-RUN rm install_android.sh cache_vision_models.sh common_utils.sh
-RUN rm AndroidManifest.xml
-RUN rm build.gradle
-ENV INSTALLED_ANDROID ${ANDROID}
 
 # (optional) Install Vulkan SDK
 ARG VULKAN_SDK_VERSION
@@ -146,6 +133,13 @@ COPY ./common/common_utils.sh common_utils.sh
 COPY ci_commit_pins/triton.txt triton.txt
 RUN if [ -n "${TRITON}" ]; then bash ./install_triton.sh; fi
 RUN rm install_triton.sh common_utils.sh triton.txt
+
+ARG TRITON_CPU
+COPY ./common/install_triton.sh install_triton.sh
+COPY ./common/common_utils.sh common_utils.sh
+COPY ci_commit_pins/triton-cpu.txt triton-cpu.txt
+RUN if [ -n "${TRITON_CPU}" ]; then bash ./install_triton.sh; fi
+RUN rm install_triton.sh common_utils.sh triton-cpu.txt
 
 ARG EXECUTORCH
 # Build and install executorch

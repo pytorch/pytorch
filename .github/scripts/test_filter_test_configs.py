@@ -683,6 +683,7 @@ class TestConfigFilter(TestCase):
         def _gen_expected_string(
             keep_going: bool = False,
             ci_verbose_test_logs: bool = False,
+            ci_test_showlocals: bool = False,
             ci_no_test_timeout: bool = False,
             ci_no_td: bool = False,
             ci_td_distributed: bool = False,
@@ -692,6 +693,7 @@ class TestConfigFilter(TestCase):
             return (
                 f"keep-going={keep_going}\n"
                 f"ci-verbose-test-logs={ci_verbose_test_logs}\n"
+                f"ci-test-showlocals={ci_test_showlocals}\n"
                 f"ci-no-test-timeout={ci_no_test_timeout}\n"
                 f"ci-no-td={ci_no_td}\n"
                 f"ci-td-distributed={ci_td_distributed}\n"
@@ -732,6 +734,21 @@ class TestConfigFilter(TestCase):
                     ci_verbose_test_logs=True, ci_no_test_timeout=True
                 ),
                 "description": "No pipe logs label and no test timeout in PR body",
+            },
+            {
+                "labels": {"ci-test-showlocals"},
+                "test_matrix": '{include: [{config: "default"}]}',
+                "job_name": "A job name",
+                "expected": _gen_expected_string(ci_test_showlocals=True),
+                "description": "Has ci-test-showlocals",
+            },
+            {
+                "labels": {},
+                "test_matrix": '{include: [{config: "default"}]}',
+                "job_name": "A job name",
+                "pr_body": "[ci-test-showlocals]",
+                "expected": _gen_expected_string(ci_test_showlocals=True),
+                "description": "ci-test-showlocals in body",
             },
             {
                 "labels": {"ci-no-test-timeout"},

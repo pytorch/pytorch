@@ -11,19 +11,47 @@
 
 namespace torch::cuda::CUDAPluggableAllocator {
 
+using MallocFuncType = void*(size_t, int, cudaStream_t);
+using FreeFuncType = void(void*, size_t, int, cudaStream_t);
+
+// A CUDAPluggableAllocatorDeleterContext object is used as the `ctx`
+// argument for DataPtr. We need context because a user can use
+// multiple allocators in the same PyTorch program, and
+// the allocators can have different free functions, such as:
+// free, cudaFree, cudaFreeAsync, ncclMemFree etc.
+struct TORCH_CUDA_CPP_API CUDAPluggableAllocatorDeleterContext {
+  explicit CUDAPluggableAllocatorDeleterContext(
+      std::function<FreeFuncType> free_fn,
+      void* data,
+      size_t size,
+      int device,
+      cudaStream_t stream);
+
+  void free();
+
+ private:
+  std::function<FreeFuncType> free_fn_;
+  void* data_;
+  size_t size_;
+  int device_;
+  cudaStream_t stream_;
+};
+
 #if defined(TORCH_HIP_VERSION)
 using streamType = c10::hip::HIPStream;
 #else
 using streamType = c10::cuda::CUDAStream;
 #endif
 
-std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>
+TORCH_CUDA_CPP_API std::shared_ptr<
+    c10::cuda::CUDACachingAllocator::CUDAAllocator>
 getCurrentAllocator();
-std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>
+TORCH_CUDA_CPP_API std::shared_ptr<
+    c10::cuda::CUDACachingAllocator::CUDAAllocator>
 createCustomAllocator(
-    std::function<void*(size_t, int, cudaStream_t)> alloc_fn,
-    std::function<void(void*, size_t, int, cudaStream_t)> free_fn);
-void changeCurrentAllocator(
+    std::function<MallocFuncType> alloc_fn,
+    std::function<FreeFuncType> free_fn);
+TORCH_CUDA_CPP_API void changeCurrentAllocator(
     const std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>&
         allocator);
 
@@ -38,13 +66,18 @@ struct _AllocationMetadata {
   cudaStream_t stream;
 };
 
-struct CUDAPluggableAllocator
+struct TORCH_CUDA_CPP_API CUDAPluggableAllocator
     : public c10::cuda::CUDACachingAllocator::CUDAAllocator {
   CUDAPluggableAllocator(
-      std::function<void*(size_t, int, cudaStream_t)> alloc_fn,
-      std::function<void(void*, size_t, int, cudaStream_t)> free_fn);
+      std::function<MallocFuncType> alloc_fn,
+      std::function<FreeFuncType> free_fn);
 
   CUDAPluggableAllocator(CUDAPluggableAllocator& other);
+  CUDAPluggableAllocator(CUDAPluggableAllocator&& other) = delete;
+  CUDAPluggableAllocator& operator=(const CUDAPluggableAllocator& other) =
+      delete;
+  CUDAPluggableAllocator& operator=(CUDAPluggableAllocator&& other) = delete;
+  ~CUDAPluggableAllocator() override = default;
 
   void set_init_fn(std::function<void(int)> init_fn);
 
@@ -81,12 +114,16 @@ struct CUDAPluggableAllocator
   bool initialized() override;
   void setMemoryFraction(double fraction, c10::DeviceIndex device) override;
   void emptyCache() override;
+  void enable(bool) override {}
+  bool isEnabled() const override {
+    return true;
+  }
   void cacheInfo(c10::DeviceIndex device, size_t* largestBlock) override;
   void* getBaseAllocation(void* ptr, size_t* size) override;
 
   void recordStream(const c10::DataPtr&, streamType stream) override;
 
-  c10::cuda::CUDACachingAllocator::DeviceStats getDeviceStats(
+  c10::CachingDeviceAllocator::DeviceStats getDeviceStats(
       c10::DeviceIndex device) override;
   void resetAccumulatedStats(c10::DeviceIndex device) override;
   void resetPeakStats(c10::DeviceIndex device) override;
@@ -101,6 +138,8 @@ struct CUDAPluggableAllocator
   void releasePool(c10::DeviceIndex device, c10::cuda::MempoolId_t mempool_id)
       override;
   std::shared_ptr<void> getIpcDevPtr(std::string handle) override;
+  c10::cuda::CUDACachingAllocator::ShareableHandle shareIpcHandle(
+      void*) override;
   void recordHistory(
       bool enabled,
       c10::cuda::CUDACachingAllocator::CreateContextFn context_recorder,
@@ -131,8 +170,8 @@ struct CUDAPluggableAllocator
   void copy_data(void* dest, const void* src, std::size_t count) const final;
 
  protected:
-  std::function<void*(size_t, int, cudaStream_t)> alloc_fn_;
-  std::function<void(void*, size_t, int, cudaStream_t)> free_fn_;
+  std::function<MallocFuncType> alloc_fn_;
+  std::function<FreeFuncType> free_fn_;
   std::function<void(int)> init_fn_;
   std::function<void()> reset_fn_;
   std::function<void(double, int)> memory_fraction_fn_;

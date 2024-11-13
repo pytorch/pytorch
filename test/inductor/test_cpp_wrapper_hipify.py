@@ -1,9 +1,7 @@
 # Owner(s): ["module: inductor"]
 import torch
-
 from torch._inductor.codegen.aoti_hipify_utils import maybe_hipify_code_wrapper
-from torch._inductor.codegen.codegen_device_driver import cuda_kernel_driver
-
+from torch._inductor.codegen.common import get_device_op_overrides
 from torch._inductor.test_case import run_tests, TestCase
 
 
@@ -36,13 +34,19 @@ class TestCppWrapperHipify(TestCase):
             self.assertEqual(result, expected)
 
     def test_hipify_aoti_driver_header(self) -> None:
-        header = cuda_kernel_driver()
+        cuda_codegen = get_device_op_overrides("cuda")
+        header = cuda_codegen.kernel_driver()
         expected = """
             #define CUDA_DRIVER_CHECK(EXPR)                    \\
             do {                                               \\
                 hipError_t code = EXPR;                          \\
                 const char *msg;                               \\
-                hipDrvGetErrorString(code, &msg);                  \\
+                hipError_t code_get_error = hipDrvGetErrorString(code, &msg); \\
+                if (code_get_error != hipSuccess) {          \\
+                    throw std::runtime_error(                  \\
+                        std::string("CUDA driver error: ") +   \\
+                        std::string("invalid error code!"));   \\
+                }                                              \\
                 if (code != hipSuccess) {                    \\
                     throw std::runtime_error(                  \\
                         std::string("CUDA driver error: ") +   \\

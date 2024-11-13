@@ -4,13 +4,11 @@ import random
 import unittest
 import warnings
 from functools import partial
-
 from itertools import chain, combinations, permutations, product
 
 import numpy as np
 
 import torch
-
 from torch import nan
 from torch.testing import make_tensor
 from torch.testing._internal.common_device_type import (
@@ -806,6 +804,31 @@ class TestShapeOps(TestCase):
                 x = torch.randint(-9, 9, shape, device=device, dtype=dtype)
             self.assertEqual(x.sparse_dim(), 0)
             self.assertEqual(x.dense_dim(), len(shape))
+
+    def test_unfold_all_devices_and_dtypes(self, device):
+        for dt in all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16):
+            if dt == torch.bool:
+                x = torch.empty((0, 1, 3, 0), dtype=dt, device=device)
+                self.assertEqual((0, 1, 1, 0, 3), x.unfold(2, 3, 2).shape)
+            else:
+                x = torch.empty((0, 1, 3, 0), dtype=dt, device=device)
+                self.assertEqual((0, 1, 1, 0, 3), x.unfold(2, 3, 2).shape)
+
+    def test_unfold_scalars(self, device):
+        x = torch.tensor(0.5, device=device)
+        # unfold on a 0-dimensional tensor should always return a 1-d dimensional
+        # tensor of shape [size] (i.e., the second parameter to unfold)
+
+        self.assertEqual(torch.empty(0, device=device), x.unfold(0, 0, 1))
+        self.assertEqual(torch.empty(0, device=device), x.unfold(0, 0, 2))
+        self.assertEqual(torch.tensor([0.5], device=device), x.unfold(0, 1, 1))
+
+    def test_unfold_errors(self, device):
+        x = torch.arange(1.0, 8, device=device)
+        with self.assertRaisesRegex(RuntimeError, "size is -1 but must be >= 0"):
+            x.unfold(0, -1, 1)
+        with self.assertRaisesRegex(RuntimeError, "step is -1 but must be > 0"):
+            x.unfold(0, 1, -1)
 
 
 instantiate_device_type_tests(TestShapeOps, globals())

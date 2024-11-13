@@ -66,6 +66,7 @@
 #include <torch/csrc/utils/python_symnode.h>
 #include <torch/csrc/utils/six.h>
 
+#include <ATen/DeviceAccelerator.h>
 #include <ATen/PythonTorchFunctionTLS.h>
 #include <ATen/core/Tensor.h>
 #include <c10/util/Exception.h>
@@ -280,11 +281,11 @@ struct PythonArgs {
   inline std::string string(int i);
   inline std::string stringWithDefault(int i, const std::string& default_str);
   inline std::optional<std::string> stringOptional(int i);
-  inline c10::string_view stringView(int i);
-  inline c10::string_view stringViewWithDefault(
+  inline std::string_view stringView(int i);
+  inline std::string_view stringViewWithDefault(
       int i,
-      const c10::string_view default_str);
-  inline std::optional<c10::string_view> stringViewOptional(int i);
+      const std::string_view default_str);
+  inline std::optional<std::string_view> stringViewOptional(int i);
   inline PyObject* pyobject(int i);
   inline int64_t toInt64(int i);
   inline c10::SymInt toSymInt(int i);
@@ -701,7 +702,12 @@ inline std::vector<double> PythonArgs::getDoublelist(int i) {
     PyObject* obj =
         tuple ? PyTuple_GET_ITEM(arg, idx) : PyList_GET_ITEM(arg, idx);
     try {
-      res[idx] = THPUtils_unpackDouble(obj);
+      if (torch::is_symfloat(py::handle(obj))) {
+        res[idx] = py::cast<c10::SymFloat>(py::handle(obj))
+                       .guard_float(__FILE__, __LINE__);
+      } else {
+        res[idx] = THPUtils_unpackDouble(obj);
+      }
     } catch (const std::exception&) {
       throw TypeError(
           "%s(): argument '%s' must be %s, but found element of type %s at pos %zu",
@@ -803,21 +809,25 @@ inline std::optional<at::Layout> PythonArgs::layoutOptional(int i) {
   return layout(i);
 }
 
+inline at::Device deviceFromLong(int64_t device_index) {
+  TORCH_CHECK(device_index >= 0, "Device index must not be negative");
+  return at::Device(
+      at::getAccelerator(true).value(),
+      static_cast<c10::DeviceIndex>(device_index));
+}
+
 inline at::Device toDevice(PyObject* obj) {
   if (THPDevice_Check(obj)) {
     const auto device = reinterpret_cast<THPDevice*>(obj);
     return device->device;
   }
   if (THPUtils_checkLong(obj)) {
-    const auto device_index = THPUtils_unpackLong(obj);
-    TORCH_CHECK(device_index >= 0, "Device index must not be negative");
-    if (c10::is_privateuse1_backend_registered()) {
-      return at::Device(
-          c10::DeviceType::PrivateUse1,
-          static_cast<c10::DeviceIndex>(device_index));
-    }
-    return at::Device(
-        c10::DeviceType::CUDA, static_cast<c10::DeviceIndex>(device_index));
+    return deviceFromLong(THPUtils_unpackLong(obj));
+  }
+  if (torch::is_symint(py::handle(obj))) {
+    auto device_index =
+        py::cast<c10::SymInt>(py::handle(obj)).guard_int(__FILE__, __LINE__);
+    return deviceFromLong(device_index);
   }
   const std::string& device_str = THPUtils_unpackString(obj);
   return at::Device(device_str);
@@ -925,19 +935,19 @@ inline std::optional<std::string> PythonArgs::stringOptional(int i) {
   return THPUtils_unpackString(args[i]);
 }
 
-inline c10::string_view PythonArgs::stringView(int i) {
+inline std::string_view PythonArgs::stringView(int i) {
   return stringViewWithDefault(i, signature.params[i].default_string);
 }
 
-inline c10::string_view PythonArgs::stringViewWithDefault(
+inline std::string_view PythonArgs::stringViewWithDefault(
     int i,
-    const c10::string_view default_str) {
+    const std::string_view default_str) {
   if (!args[i])
     return default_str;
   return THPUtils_unpackStringView(args[i]);
 }
 
-inline std::optional<c10::string_view> PythonArgs::stringViewOptional(int i) {
+inline std::optional<std::string_view> PythonArgs::stringViewOptional(int i) {
   if (!args[i])
     return std::nullopt;
   return THPUtils_unpackStringView(args[i]);
@@ -1259,7 +1269,7 @@ bool is_tensor_and_append_overloaded(
 bool is_tensor_list_and_append_overloaded(
     PyObject* obj,
     std::vector<PyObject*>* overloaded_args,
-    int argnum,
+    size_t argnum,
     bool throw_error);
 
 /* Given an argument that is definitely a tensor and is definitely overloaded,

@@ -127,7 +127,7 @@ TEST(TestException, TestCustomException) {
   std::cerr << "Def is:\n" << def << std::endl;
   auto cu = std::make_shared<torch::jit::CompilationUnit>();
   (void)cu->define(
-      c10::nullopt,
+      std::nullopt,
       {},
       {},
       {def},

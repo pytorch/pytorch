@@ -2,7 +2,7 @@
 #include <c10/core/ScalarType.h>
 #include <c10/util/irange.h>
 #include <c10/util/hash.h>
-#include <c10/util/Optional.h>
+#include <optional>
 #include <ATen/jit_macros.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>

@@ -567,14 +567,12 @@ class _FileSystemWriter(StorageWriter):
             while True:
                 res += result_queue.get_nowait()
         except queue.Empty:
-            pass
-
             fut: Future[List[WriteResult]] = Future()
             fut.set_result(res)
             return fut
 
     def finish(self, metadata: Metadata, results: List[List[WriteResult]]) -> None:
-        storage_md = dict()
+        storage_md = {}
         for wr_list in results:
             storage_md.update({wr.index: wr.storage_data for wr in wr_list})
         metadata.storage_data = storage_md
@@ -620,21 +618,21 @@ class FileSystemReader(StorageReader):
         super().__init__()
         self.fs = FileSystem()
         self.path = self.fs.init_path(path)
-        self.storage_data: Dict[MetadataIndex, _StorageInfo] = dict()
+        self.storage_data: Dict[MetadataIndex, _StorageInfo] = {}
         self.load_id = _generate_uuid()
 
     def _slice_file(self, file, sinfo: _StorageInfo) -> io.IOBase:
         return _create_file_view(file, sinfo.offset, sinfo.length)
 
     def reset(self, checkpoint_id: Union[str, os.PathLike, None] = None) -> None:
-        self.storage_data = dict()
+        self.storage_data = {}
         if checkpoint_id:
             self.path = self.fs.init_path(checkpoint_id)
         self.load_id = _generate_uuid()
 
     def read_data(self, plan: LoadPlan, planner: LoadPlanner) -> Future[None]:
         # group requests by file
-        per_file: Dict[str, List[ReadItem]] = dict()
+        per_file: Dict[str, List[ReadItem]] = {}
         for read_item in plan.items:
             item_md = self.storage_data[read_item.storage_index]
             path = item_md.relative_path
@@ -654,7 +652,11 @@ class FileSystemReader(StorageReader):
                     else:
                         tensor = cast(
                             Tensor,
-                            torch.load(cast(IO[bytes], file_slice), map_location="cpu"),
+                            torch.load(
+                                cast(IO[bytes], file_slice),
+                                map_location="cpu",
+                                weights_only=True,
+                            ),
                         )
                         tensor = narrow_tensor_by_index(
                             tensor, req.storage_offsets, req.lengths
@@ -745,14 +747,18 @@ class FileSystemWriter(_FileSystemWriter, BlockingAsyncStager):
 
         N. B. If sync_files is disabled, there's no guarantee that the checkpoint will be consistent in the case of a failure.
         """
-        super().__init__(
+        _FileSystemWriter.__init__(
+            self,
             path=path,
             single_file_per_rank=single_file_per_rank,
             sync_files=sync_files,
             thread_count=thread_count,
             per_thread_copy_ahead=per_thread_copy_ahead,
-            cache_staged_state_dict=cache_staged_state_dict,
             overwrite=overwrite,
+        )
+        BlockingAsyncStager.__init__(
+            self,
+            cache_staged_state_dict=cache_staged_state_dict,
         )
 
     def stage(self, state_dict: STATE_DICT_TYPE) -> STATE_DICT_TYPE:

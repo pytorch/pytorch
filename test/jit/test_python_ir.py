@@ -9,6 +9,7 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_utils import IS_MACOS
 from torch.testing._internal.jit_utils import JitTestCase
 
+
 if __name__ == "__main__":
     raise RuntimeError(
         "This test file is not meant to be run directly, use:\n\n"

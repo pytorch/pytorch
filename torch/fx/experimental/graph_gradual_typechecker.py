@@ -1,18 +1,20 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
-from functools import reduce
-import torch
-import operator
-from torch.fx.tensor_type import Dyn, is_consistent, TensorType, is_more_precise
-from typing import Callable, Dict
-from torch.fx.node import Target, Node
-from torch.nn.modules.batchnorm import BatchNorm2d
-from torch.nn.modules.conv import Conv2d
-from torch.fx.experimental.refinement_types import Equality
 import itertools
-
-from torch.fx.experimental.unification import Var  # type: ignore[attr-defined]
+import operator
+from functools import reduce
+from typing import Callable, Dict
 
 import sympy
+
+import torch
+from torch.fx.experimental.refinement_types import Equality
+from torch.fx.experimental.unification import Var  # type: ignore[attr-defined]
+from torch.fx.node import Node, Target
+from torch.fx.tensor_type import Dyn, is_consistent, is_more_precise, TensorType
+from torch.nn.modules.batchnorm import BatchNorm2d
+from torch.nn.modules.conv import Conv2d
+
 
 _INFERENCE_RULES: Dict[Target, Callable] = {}
 _REFINEMENT_RULES: Dict[Target, Callable] = {}
@@ -31,10 +33,12 @@ def expand_to_tensor_dim(t, n):
         return TensorType(tuple(dims))
     elif isinstance(t, TensorType):
         if len(t.__args__) != n:
-            raise TypeError(f'Cannot extend tensor. Tensor {t} has rank {len(t.__args__)}. It should have rank {n}')
+            raise TypeError(
+                f"Cannot extend tensor. Tensor {t} has rank {len(t.__args__)}. It should have rank {n}"
+            )
         return t
     else:
-        raise TypeError(f'Cannot match the type {t}')
+        raise TypeError(f"Cannot match the type {t}")
 
 
 def broadcast_types(t1, t2):
@@ -79,31 +83,38 @@ def broadcast_types(t1, t2):
         (t1, t2) = TensorType(tuple(new_t1)), TensorType(tuple(new_t2))
         return (t1, t2)
     else:
-        raise TypeError(f'Cannot broadcast types {t1} and {t2}')
+        raise TypeError(f"Cannot broadcast types {t1} and {t2}")
+
 
 def register_inference_rule(call_target):
     def register(fn):
         if call_target in _INFERENCE_RULES:
-            raise RuntimeError(f'Inference rule already registered for {call_target}!')
+            raise RuntimeError(f"Inference rule already registered for {call_target}!")
         _INFERENCE_RULES[call_target] = fn
         return fn
+
     return register
+
 
 def register_refinement_rule(call_target):
     def register(fn):
         if call_target in _REFINEMENT_RULES:
-            raise RuntimeError(f'Refinement rule already registered for {call_target}!')
+            raise RuntimeError(f"Refinement rule already registered for {call_target}!")
         _REFINEMENT_RULES[call_target] = fn
         return fn
+
     return register
+
 
 def register_algebraic_expressions_inference_rule(call_target):
     def register(fn):
         if call_target in _RULES:
-            raise RuntimeError(f'Rule already registered for {call_target}!')
+            raise RuntimeError(f"Rule already registered for {call_target}!")
         _RULES[call_target] = fn
         return fn
+
     return register
+
 
 @register_inference_rule(torch.add)
 @register_inference_rule(operator.add)
@@ -141,15 +152,15 @@ def add_inference_rule(n: Node):
     (new_t1, new_t2) = broadcast_types(t1, t2)
 
     if new_t1 != t1 or new_t2 != t2:
-        n.meta['broadcast'] = True
+        n.meta["broadcast"] = True
         n.meta[str(n.args[0])] = new_t1
         n.meta[str(n.args[1])] = new_t2
 
     else:
-        n.meta['broadcast'] = False
+        n.meta["broadcast"] = False
 
-    new_t1 = t1 if not n.meta['broadcast'] else new_t1
-    new_t2 = t2 if not n.meta['broadcast'] else new_t2
+    new_t1 = t1 if not n.meta["broadcast"] else new_t1
+    new_t2 = t2 if not n.meta["broadcast"] else new_t2
 
     # we check for consistency between the new types
     if is_consistent(new_t1, new_t2):
@@ -163,8 +174,11 @@ def add_inference_rule(n: Node):
             n.type = new_t1
         return n.type
     else:
-        raise TypeError(f'Cannot add arguments {n.args[0]} ({ n.args[0].type}) and {n.args[1]} ({ n.args[1].type}) in node {n}.'
-                        f' Types should match ')
+        raise TypeError(
+            f"Cannot add arguments {n.args[0]} ({n.args[0].type}) and {n.args[1]} ({n.args[1].type}) in node {n}."
+            f" Types should match "
+        )
+
 
 @register_inference_rule(getattr)
 def get_attr_inference_rule(n: Node, traced):
@@ -174,7 +188,6 @@ def get_attr_inference_rule(n: Node, traced):
     The most representitive type we have is "Dyn" but the system
     can be extended with more types, such as a type to represent shapes
     """
-    attr_node = n.args[0]
     attr_name = n.args[1]
 
     if attr_name == "shape":
@@ -184,6 +197,7 @@ def get_attr_inference_rule(n: Node, traced):
 
     # TODO. We leave it like this till we add a type to represent tensor sizes
     return n.type
+
 
 @register_inference_rule(torch.transpose)
 def transpose_inference_rule(n: Node):
@@ -211,9 +225,13 @@ def transpose_inference_rule(n: Node):
                 n.type = get_greatest_upper_bound(n.type, final)
                 return n.type
             else:
-                raise TypeError(f'Cannot transpose {dim1} and {dim2} in type {t} for node {n}')
+                raise TypeError(
+                    f"Cannot transpose {dim1} and {dim2} in type {t} for node {n}"
+                )
         else:
-            raise TypeError(f'Cannot transpose {dim1} and {dim2} in type {t} for node {n}')
+            raise TypeError(
+                f"Cannot transpose {dim1} and {dim2} in type {t} for node {n}"
+            )
 
 
 @register_inference_rule(torch.reshape)
@@ -251,9 +269,10 @@ def reshape_inference_rule(n: Node):
             n.type = t2_type
             return t2_type
         else:
-            raise TypeError(f'Cannot reshape in node {n} from {t1} to {t2_type}')
+            raise TypeError(f"Cannot reshape in node {n} from {t1} to {t2_type}")
     else:
-        raise TypeError(f'Cannot reshape in node {n} from {t1} to {t2_type}')
+        raise TypeError(f"Cannot reshape in node {n} from {t1} to {t2_type}")
+
 
 @register_inference_rule(BatchNorm2d)
 def bn2d_inference_rule(n: Node, module_instance):
@@ -274,10 +293,11 @@ def bn2d_inference_rule(n: Node, module_instance):
     # we check the conditions on the incoming argument
     # and any existing annotation
     # we also check for consistency between both annotations
-    if is_consistent(arg_type.__args__[1], module_instance.num_features) and \
-            is_consistent(n.type.__args__[1], module_instance.num_features) and \
-            is_consistent(arg_type, n.type):
-
+    if (
+        is_consistent(arg_type.__args__[1], module_instance.num_features)
+        and is_consistent(n.type.__args__[1], module_instance.num_features)
+        and is_consistent(arg_type, n.type)
+    ):
         # we choose the more precise type
         # to be the node type
         # so if an incoming argument has more type information
@@ -285,21 +305,35 @@ def bn2d_inference_rule(n: Node, module_instance):
         n.type = get_greatest_upper_bound(arg_type, n.type)
         return n.type
     else:
-        raise TypeError(f'Cannot apply {module_instance} with input type {arg_type} and existing type {n.type} on {n}')
+        raise TypeError(
+            f"Cannot apply {module_instance} with input type {arg_type} and existing type {n.type} on {n}"
+        )
 
 
 def calculate_out_dimension(d_in, module_instance, index):
     """
     For calculating h_in and w_out according to the conv2D documentation
     """
-    padding = (module_instance.padding, module_instance.padding) \
-        if isinstance(module_instance.padding, int) else module_instance.padding
-    kernel_size = (module_instance.kernel_size, module_instance.kernel_size) \
-        if isinstance(module_instance.kernel_size, int) else module_instance.kernel_size
-    stride = (module_instance.stride, module_instance.stride) \
-        if isinstance(module_instance.stride, int) else module_instance.stride
-    dilation = (module_instance.dilation, module_instance.dilation) \
-        if isinstance(module_instance.dilation, int) else module_instance.dilation
+    padding = (
+        (module_instance.padding, module_instance.padding)
+        if isinstance(module_instance.padding, int)
+        else module_instance.padding
+    )
+    kernel_size = (
+        (module_instance.kernel_size, module_instance.kernel_size)
+        if isinstance(module_instance.kernel_size, int)
+        else module_instance.kernel_size
+    )
+    stride = (
+        (module_instance.stride, module_instance.stride)
+        if isinstance(module_instance.stride, int)
+        else module_instance.stride
+    )
+    dilation = (
+        (module_instance.dilation, module_instance.dilation)
+        if isinstance(module_instance.dilation, int)
+        else module_instance.dilation
+    )
 
     DIMENSION_TYPES = (int, sympy.Symbol)
 
@@ -307,14 +341,14 @@ def calculate_out_dimension(d_in, module_instance, index):
         return Dyn
 
     elif isinstance(d_in, DIMENSION_TYPES):
-        n = d_in + 2 * padding[index] - \
-            dilation[index] * \
-            (kernel_size[index] - 1) - 1
+        n = d_in + 2 * padding[index] - dilation[index] * (kernel_size[index] - 1) - 1
 
         return (n // stride[0]) + 1
 
     else:
-        raise TypeError(f'{d_in} in {module_instance} must be a number or Dyn. Received {type(d_in)}')
+        raise TypeError(
+            f"{d_in} in {module_instance} must be a number or Dyn. Received {type(d_in)}"
+        )
 
 
 def get_greatest_upper_bound(type1, type2):
@@ -327,8 +361,11 @@ def get_greatest_upper_bound(type1, type2):
         return type1
     elif isinstance(type1, TensorType) and isinstance(type2, TensorType):
         if not is_consistent(type1, type2):
-            raise TypeError(f'Inconsistent types {type1}, {type2}')
-        gub = [t1 if is_more_precise(t1, t2) else t2 for (t1, t2) in zip(type1.__args__, type2.__args__)]
+            raise TypeError(f"Inconsistent types {type1}, {type2}")
+        gub = [
+            t1 if is_more_precise(t1, t2) else t2
+            for (t1, t2) in zip(type1.__args__, type2.__args__)
+        ]
         return TensorType(tuple(gub))
 
 
@@ -352,12 +389,16 @@ def conv2d_inference_rule(n: Node, module_instance):
         h_in = arg_type.__args__[2]
         h_out = calculate_out_dimension(h_in, module_instance, 0)
         w_out = calculate_out_dimension(w_in, module_instance, 1)
-        new_type = TensorType((arg_type.__args__[0], module_instance.out_channels, h_out, w_out))
+        new_type = TensorType(
+            (arg_type.__args__[0], module_instance.out_channels, h_out, w_out)
+        )
         gub = get_greatest_upper_bound(new_type, curr_node_type)
         n.type = gub
         return n.type
     else:
-        raise TypeError(f'Cannot apply {module_instance} with input type { arg_type} and existing type {n.type} on {n}')
+        raise TypeError(
+            f"Cannot apply {module_instance} with input type {arg_type} and existing type {n.type} on {n}"
+        )
 
 
 @register_inference_rule(torch.nn.ReLU)
@@ -393,7 +434,7 @@ def maxpool2d_check(typ, module_instance):
         return TensorType(tuple(new_type_list))
 
     else:
-        raise TypeError(f'Wrong size {typ} for {module_instance}')
+        raise TypeError(f"Wrong size {typ} for {module_instance}")
 
 
 @register_inference_rule(torch.nn.MaxPool2d)
@@ -417,7 +458,6 @@ def maxpool2d_inference_rule(n: Node, module_instance):
     return n.type
 
 
-
 def linear_check(tensor_type, module_instance):
     """
     Checks that an input tensor type satisfies the conditions for linear operation
@@ -429,9 +469,11 @@ def linear_check(tensor_type, module_instance):
             new_type_args[-1] = module_instance.out_features
             return TensorType(tuple(new_type_args))
         else:
-            raise TypeError(f'Inconsistent {module_instance.in_features} and {tensor_type.__args__[-1]} in {module_instance}')
+            raise TypeError(
+                f"Inconsistent {module_instance.in_features} and {tensor_type.__args__[-1]} in {module_instance}"
+            )
     else:
-        raise TypeError(f'Type {tensor_type} must have rank 2 or more.')
+        raise TypeError(f"Type {tensor_type} must have rank 2 or more.")
 
 
 @register_inference_rule(torch.nn.Linear)
@@ -469,7 +511,8 @@ def adaptiveavgpool2d_check(tensor_type, module_instance):
         return TensorType(tuple(new_type_list))
 
     else:
-        raise TypeError(f'Tensor ranks must be 3 or 4. Got {tensor_type}')
+        raise TypeError(f"Tensor ranks must be 3 or 4. Got {tensor_type}")
+
 
 @register_inference_rule(torch.nn.AdaptiveAvgPool2d)
 def adaptiveavgpool2d_inference_rule(n: Node, module_instance):
@@ -484,6 +527,7 @@ def adaptiveavgpool2d_inference_rule(n: Node, module_instance):
         output_type = adaptiveavgpool2d_check(n.args[0].type, module_instance)
         n.type = get_greatest_upper_bound(n.type, output_type)
     return n.type
+
 
 def flatten_check(tensor_type, start_dim, end_dim):
     l = len(tensor_type.__args__)
@@ -503,7 +547,10 @@ def flatten_check(tensor_type, start_dim, end_dim):
         new_type_list = lhs + mid + rhs
         return TensorType(tuple(new_type_list))
     else:
-        raise TypeError(f'Incompatible dimensions {start_dim}, {end_dim - 1} in type {tensor_type}')
+        raise TypeError(
+            f"Incompatible dimensions {start_dim}, {end_dim - 1} in type {tensor_type}"
+        )
+
 
 @register_inference_rule(torch.flatten)
 def flatten_inference_rule(n: Node):
@@ -530,9 +577,10 @@ def flatten_inference_rule(n: Node):
 
     if isinstance(n.args[0].type, TensorType):
         output_type = flatten_check(n.args[0].type, start_dim, end_dim)
-        n.type = get_greatest_upper_bound(output_type , n.type)
+        n.type = get_greatest_upper_bound(output_type, n.type)
 
     return n.type
+
 
 class GraphTypeChecker:
     def __init__(self, env, traced):
@@ -571,16 +619,16 @@ class GraphTypeChecker:
         if n.type is None:
             n.type = Dyn
 
-        if n.op == 'placeholder':
+        if n.op == "placeholder":
             return n.type
 
-        elif n.op == 'get_attr':
+        elif n.op == "get_attr":
             t = get_parameter(self.traced, n.target)  # type: ignore[arg-type]
             if isinstance(t.data, torch.Tensor):
                 n.type = TensorType(t.data.shape)
             return n.type
 
-        elif n.op == 'call_function':
+        elif n.op == "call_function":
             if n.target == getattr:
                 assert getattr in _INFERENCE_RULES
                 return _INFERENCE_RULES[n.target](n, self.traced)
@@ -588,18 +636,24 @@ class GraphTypeChecker:
             elif n.target in _INFERENCE_RULES:
                 return _INFERENCE_RULES[n.target](n)
             else:
-                raise RuntimeError(f'No inference rule registered for target {n.target}!')
+                raise RuntimeError(
+                    f"No inference rule registered for target {n.target}!"
+                )
 
-        elif n.op == 'call_module':
+        elif n.op == "call_module":
             module_instance = self.traced.get_submodule(n.target)
             if type(module_instance) in _INFERENCE_RULES:
                 return _INFERENCE_RULES[type(module_instance)](n, module_instance)
             else:
-                raise RuntimeError(f'No inference rule registered for class {type(module_instance)}!')
+                raise RuntimeError(
+                    f"No inference rule registered for class {type(module_instance)}!"
+                )
 
-        elif n.op == 'output':
+        elif n.op == "output":
+
             def get_node_type(a):
                 return a.type
+
             n.type = torch.fx.node.map_arg(n.args[0], get_node_type)
             return n.type
 
@@ -633,6 +687,7 @@ def linear_refinement_rule(n: Node):
     if isinstance(arg_type, TensorType) and isinstance(n.type, TensorType):
         res = [Equality(arg_type.__args__[0], n.type.__args__[0])]
     return res
+
 
 @register_refinement_rule(BatchNorm2d)
 @register_refinement_rule(torch.nn.ReLU)
@@ -688,7 +743,11 @@ def element_wise_eq(n: Node):
     if isinstance(n.args[0], Node) and isinstance(n.args[1], Node):
         arg_type1 = n.args[0].type
         arg_type2 = n.args[1].type
-        if isinstance(arg_type1, TensorType) and isinstance(arg_type2, TensorType) and isinstance(n.type, TensorType):
+        if (
+            isinstance(arg_type1, TensorType)
+            and isinstance(arg_type2, TensorType)
+            and isinstance(n.type, TensorType)
+        ):
             args1, args2 = broadcast_types(arg_type1, arg_type2)
             # by this point, we know that args1 and args2 are the same size.
             a1 = args1.__args__
@@ -757,12 +816,14 @@ def conv_rule(n: Node, module_instance):
         n.type = new_type
         return new_type
 
+
 class Refine:
     """
     Symbolic shape inference.
     Generates constraints over type variables.
     Currently all constraints are equality constraints.
     """
+
     def __init__(self, traced):
         self.constraints = []
         self.traced = traced
@@ -805,7 +866,6 @@ class Refine:
         else:
             return typ
 
-
     def convert_to_sympy_symbols(self, typ):
         """
         Replace all unknown types with fresh type variables.
@@ -835,22 +895,24 @@ class Refine:
 
         n.type = self.replace_dyn_with_fresh_var(n.type)
 
-        if n.op == 'call_function':
+        if n.op == "call_function":
             if n.target in _REFINEMENT_RULES:
                 self.constraints += _REFINEMENT_RULES[n.target](n)
             else:
                 pass
 
-        if n.op == 'call_module':
+        if n.op == "call_module":
             module_instance = self.traced.get_submodule(n.target)
             if type(module_instance) in _REFINEMENT_RULES:
                 self.constraints += _REFINEMENT_RULES[type(module_instance)](n)
             else:
                 pass
 
-        if n.op == 'output':
+        if n.op == "output":
+
             def get_node_type(a):
                 return a.type
+
             n.type = torch.fx.node.map_arg(n.args[0], get_node_type)
             return n.type
 
@@ -859,27 +921,30 @@ class Refine:
 
     def infer_symbolic_relations(self, n: Node):
         n.type = self.convert_to_sympy_symbols(n.type)
-        if n.op == 'call_function':
+        if n.op == "call_function":
             if n.target in _RULES:
                 return _RULES[n.target](n)
             else:
                 pass
 
-        if n.op == 'call_module':
+        if n.op == "call_module":
             module_instance = self.traced.get_submodule(n.target)
             if type(module_instance) in _RULES:
                 return _RULES[type(module_instance)](n, module_instance)
             else:
                 pass
 
-        if n.op == 'output':
+        if n.op == "output":
+
             def get_node_type(a):
                 return a.type
+
             n.type = torch.fx.node.map_arg(n.args[0], get_node_type)
             return n.type
 
         else:
             pass
+
 
 def get_parameter(traced, target: str):
     """

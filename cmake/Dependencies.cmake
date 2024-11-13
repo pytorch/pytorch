@@ -39,6 +39,7 @@ if(USE_CUDA)
   set(CAFFE2_USE_CUDA ${USE_CUDA})
   set(CAFFE2_USE_CUDNN ${USE_CUDNN})
   set(CAFFE2_USE_CUSPARSELT ${USE_CUSPARSELT})
+  set(CAFFE2_USE_CUFILE ${USE_CUFILE})
   set(CAFFE2_USE_NVRTC ${USE_NVRTC})
   include(${CMAKE_CURRENT_LIST_DIR}/public/cuda.cmake)
   if(CAFFE2_USE_CUDA)
@@ -60,6 +61,9 @@ if(USE_CUDA)
     else()
       caffe2_update_option(USE_CUSPARSELT OFF)
     endif()
+    if(CAFFE2_USE_CUFILE)
+      list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS torch::cufile)
+    endif()
     find_program(SCCACHE_EXECUTABLE sccache)
     if(SCCACHE_EXECUTABLE)
       # Using RSP/--options-file renders output noncacheable by sccache
@@ -79,6 +83,7 @@ if(USE_CUDA)
     set(CAFFE2_USE_CUDA OFF)
     set(CAFFE2_USE_CUDNN OFF)
     set(CAFFE2_USE_CUSPARSELT OFF)
+    set(CAFFE2_USE_CUFILE OFF)
     set(CAFFE2_USE_NVRTC OFF)
   endif()
 endif()
@@ -91,6 +96,9 @@ if(USE_XPU)
     "Suppress this warning with -DUSE_XPU=OFF.")
     caffe2_update_option(USE_XPU OFF)
   endif()
+  foreach(flag ${XPU_HOST_CXX_FLAGS})
+    add_definitions(${flag})
+  endforeach()
 endif()
 
 # ---[ Custom Protobuf
@@ -152,7 +160,7 @@ else()
   set(AT_MKLDNN_ENABLED 0)
   set(AT_MKL_ENABLED 0)
 endif()
-set_property(CACHE BLAS PROPERTY STRINGS "ATLAS;BLIS;Eigen;FLAME;Generic;MKL;OpenBLAS;vecLib")
+set_property(CACHE BLAS PROPERTY STRINGS "ATLAS;BLIS;Eigen;FLAME;Generic;MKL;OpenBLAS;vecLib;APL")
 message(STATUS "Trying to find preferred BLAS backend of choice: " ${BLAS})
 
 if(BLAS STREQUAL "Eigen")
@@ -217,6 +225,12 @@ elseif(BLAS STREQUAL "FlexiBLAS")
   find_package(FlexiBLAS REQUIRED)
   include_directories(SYSTEM ${FlexiBLAS_INCLUDE_DIR})
   list(APPEND Caffe2_DEPENDENCY_LIBS ${FlexiBLAS_LIB})
+elseif(BLAS STREQUAL "APL")
+  find_package(APL REQUIRED)
+  include_directories(SYSTEM ${APL_INCLUDE_DIR})
+  set(BLAS_INFO "apl")
+  set(BLAS_FOUND 1)
+  set(BLAS_LIBRARIES ${APL_LIBRARIES})
 elseif(BLAS STREQUAL "Generic")
   # On Debian family, the CBLAS ABIs have been merged into libblas.so
   if(ENV{GENERIC_BLAS_LIBRARIES} STREQUAL "")
@@ -237,7 +251,7 @@ endif()
 if(NOT INTERN_BUILD_MOBILE)
   set(AT_MKL_SEQUENTIAL 0)
   set(USE_BLAS 1)
-  if(NOT (ATLAS_FOUND OR BLIS_FOUND OR GENERIC_BLAS_FOUND OR MKL_FOUND OR OpenBLAS_FOUND OR VECLIB_FOUND OR FlexiBLAS_FOUND OR NVPL_BLAS_FOUND))
+  if(NOT (ATLAS_FOUND OR BLIS_FOUND OR GENERIC_BLAS_FOUND OR MKL_FOUND OR OpenBLAS_FOUND OR VECLIB_FOUND OR FlexiBLAS_FOUND OR NVPL_BLAS_FOUND OR APL_FOUND))
     message(WARNING "Preferred BLAS (" ${BLAS} ") cannot be found, now searching for a general BLAS library")
     find_package(BLAS)
     if(NOT BLAS_FOUND)
@@ -363,9 +377,6 @@ if(INTERN_BUILD_MOBILE OR NOT DISABLE_NNPACK_AND_FAMILY)
   set(USE_PTHREADPOOL ON CACHE BOOL "" FORCE)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_PTHREADPOOL")
 
-  # Always use third_party/pthreadpool.
-  set(USE_INTERNAL_PTHREADPOOL_IMPL OFF CACHE BOOL "" FORCE)
-
   if(NOT TARGET pthreadpool)
     if(USE_SYSTEM_PTHREADPOOL)
       add_library(pthreadpool SHARED IMPORTED)
@@ -375,7 +386,7 @@ if(INTERN_BUILD_MOBILE OR NOT DISABLE_NNPACK_AND_FAMILY)
         message(FATAL_ERROR "Cannot find pthreadpool")
       endif()
       message("-- Found pthreadpool: ${PTHREADPOOL_LIBRARY}")
-    elseif(NOT USE_INTERNAL_PTHREADPOOL_IMPL)
+    else()
       if(NOT DEFINED PTHREADPOOL_SOURCE_DIR)
         set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
         set(PTHREADPOOL_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/pthreadpool" CACHE STRING "pthreadpool source directory")
@@ -391,11 +402,7 @@ if(INTERN_BUILD_MOBILE OR NOT DISABLE_NNPACK_AND_FAMILY)
       set_property(TARGET pthreadpool PROPERTY POSITION_INDEPENDENT_CODE ON)
     endif()
 
-    if(USE_INTERNAL_PTHREADPOOL_IMPL)
-      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_INTERNAL_PTHREADPOOL_IMPL")
-    else()
-      list(APPEND Caffe2_DEPENDENCY_LIBS pthreadpool)
-    endif()
+    list(APPEND Caffe2_DEPENDENCY_LIBS pthreadpool)
   endif()
 else()
   set(USE_PTHREADPOOL OFF CACHE BOOL "" FORCE)
@@ -449,10 +456,6 @@ if(USE_PYTORCH_QNNPACK)
     endif()
 
     if(NOT TARGET pytorch_qnnpack)
-      if(NOT USE_SYSTEM_PTHREADPOOL AND USE_INTERNAL_PTHREADPOOL_IMPL)
-        set(PYTORCH_QNNPACK_CUSTOM_THREADPOOL ON CACHE BOOL "")
-      endif()
-
       set(PYTORCH_QNNPACK_BUILD_TESTS OFF CACHE BOOL "")
       set(PYTORCH_QNNPACK_BUILD_BENCHMARKS OFF CACHE BOOL "")
       set(PYTORCH_QNNPACK_LIBRARY_TYPE "static" CACHE STRING "")
@@ -465,28 +468,6 @@ if(USE_PYTORCH_QNNPACK)
       set_property(TARGET cpuinfo PROPERTY POSITION_INDEPENDENT_CODE ON)
       # QNNPACK depends on gemmlowp headers
       target_include_directories(pytorch_qnnpack PRIVATE "${CAFFE2_THIRD_PARTY_ROOT}/gemmlowp")
-
-      if(PYTORCH_QNNPACK_CUSTOM_THREADPOOL)
-        target_compile_definitions(
-          pytorch_qnnpack PRIVATE
-          pthreadpool_t=legacy_pthreadpool_t
-          pthreadpool_function_1d_t=legacy_pthreadpool_function_1d_t
-          pthreadpool_function_1d_tiled_t=legacy_pthreadpool_function_1d_tiled_t
-          pthreadpool_function_2d_t=legacy_pthreadpool_function_2d_t
-          pthreadpool_function_2d_tiled_t=legacy_pthreadpool_function_2d_tiled_t
-          pthreadpool_function_3d_tiled_t=legacy_pthreadpool_function_3d_tiled_t
-          pthreadpool_function_4d_tiled_t=legacy_pthreadpool_function_4d_tiled_t
-          pthreadpool_create=legacy_pthreadpool_create
-          pthreadpool_destroy=legacy_pthreadpool_destroy
-          pthreadpool_get_threads_count=legacy_pthreadpool_get_threads_count
-          pthreadpool_compute_1d=legacy_pthreadpool_compute_1d
-          pthreadpool_parallelize_1d=legacy_pthreadpool_parallelize_1d
-          pthreadpool_compute_1d_tiled=legacy_pthreadpool_compute_1d_tiled
-          pthreadpool_compute_2d=legacy_pthreadpool_compute_2d
-          pthreadpool_compute_2d_tiled=legacy_pthreadpool_compute_2d_tiled
-          pthreadpool_compute_3d_tiled=legacy_pthreadpool_compute_3d_tiled
-          pthreadpool_compute_4d_tiled=legacy_pthreadpool_compute_4d_tiled)
-      endif()
     endif()
 
     list(APPEND Caffe2_DEPENDENCY_LIBS pytorch_qnnpack)
@@ -534,6 +515,11 @@ if(USE_XNNPACK AND NOT USE_SYSTEM_XNNPACK)
 
     # Disable I8MM For CI since clang 9 does not support neon i8mm.
     set(XNNPACK_ENABLE_ARM_I8MM OFF CACHE BOOL "")
+
+    # Older MSVC versions don't support AVX512FP. TODO Minimum version support?
+    IF(CMAKE_C_COMPILER_ID STREQUAL "MSVC")
+      set(XNNPACK_ENABLE_AVX512FP16  OFF CACHE BOOL "")
+    ENDIF()
 
     # Conditionally disable AVX512AMX, as it requires Clang 11 or later. Note that
     # XNNPACK does conditionally compile this based on GCC version. Once it also does
@@ -848,7 +834,7 @@ if(NOT Python_EXECUTABLE)
 endif()
 
 if(BUILD_PYTHON)
-  set(PYTHON_COMPONENTS Development)
+  set(PYTHON_COMPONENTS Development.Module)
   if(USE_NUMPY)
     list(APPEND PYTHON_COMPONENTS NumPy)
   endif()
@@ -868,7 +854,7 @@ endif()
 
 # ---[ Python + Numpy
 if(BUILD_PYTHON)
-  if(Python_Development_FOUND)
+  if(Python_Development.Module_FOUND)
     if(USE_NUMPY)
       if(NOT Python_NumPy_FOUND)
         message(WARNING "NumPy could not be found. Not building with NumPy. Suppress this warning with -DUSE_NUMPY=OFF")
@@ -1035,7 +1021,6 @@ if(USE_ROCM)
       caffe2_update_option(USE_SYSTEM_NCCL ON)
     endif()
 
-
     list(APPEND HIP_CXX_FLAGS -fPIC)
     list(APPEND HIP_CXX_FLAGS -D__HIP_PLATFORM_AMD__=1)
     list(APPEND HIP_CXX_FLAGS -DCUDA_HAS_FP16=1)
@@ -1080,8 +1065,8 @@ if(USE_ROCM)
     hip_include_directories(${Caffe2_HIP_INCLUDE})
 
     set(Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
-      ${PYTORCH_HIP_LIBRARIES} ${PYTORCH_MIOPEN_LIBRARIES} ${hipcub_LIBRARIES} ${ROCM_HIPRTC_LIB} ${ROCM_ROCTX_LIB})
-    list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS ${hipblaslt_LIBRARIES})
+      hip::amdhip64 MIOpen hiprtc::hiprtc) # libroctx will be linked in with MIOpen
+    list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS roc::hipblaslt)
 
     list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
       roc::hipblas hip::hipfft hip::hiprand roc::hipsparse roc::hipsolver)
@@ -1095,10 +1080,6 @@ if(USE_ROCM)
       message(STATUS "Disabling Kernel Assert for ROCm")
     endif()
 
-    include(${CMAKE_CURRENT_LIST_DIR}/External/aotriton.cmake)
-    if(USE_CUDA)
-      caffe2_update_option(USE_MEM_EFF_ATTENTION OFF)
-    endif()
   else()
     caffe2_update_option(USE_ROCM OFF)
   endif()
@@ -1200,20 +1181,23 @@ if(USE_GLOO)
       endif()
       set(GLOO_USE_CUDA_TOOLKIT ON CACHE BOOL "" FORCE)
       add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/gloo)
+      # Here is a little bit hacky. We have to put PROJECT_BINARY_DIR in front
+      # of PROJECT_SOURCE_DIR with/without conda system. The reason is that
+      # gloo generates a new config.h in the binary diretory.
+      include_directories(BEFORE SYSTEM ${CMAKE_CURRENT_LIST_DIR}/../third_party/gloo)
+      include_directories(BEFORE SYSTEM ${PROJECT_BINARY_DIR}/third_party/gloo)
     else()
-      add_library(gloo SHARED IMPORTED)
-      find_library(GLOO_LIBRARY gloo)
-      if(NOT GLOO_LIBRARY)
+      find_package(Gloo)
+      if(NOT Gloo_FOUND)
         message(FATAL_ERROR "Cannot find gloo")
       endif()
-      message("Found gloo: ${GLOO_LIBRARY}")
-      set_target_properties(gloo PROPERTIES IMPORTED_LOCATION ${GLOO_LIBRARY})
+      message("Found gloo: ${Gloo_LIBRARY}")
+      message("Found gloo include directories: ${Gloo_INCLUDE_DIRS}")
+      add_library(gloo SHARED IMPORTED)
+      set_target_properties(gloo PROPERTIES IMPORTED_LOCATION ${Gloo_LIBRARY})
+      # need to use Gloo_INCLUDE_DIRS over third_party/gloo to find Gloo's auto-generated config.h
+      include_directories(BEFORE SYSTEM ${Gloo_INCLUDE_DIRS})
     endif()
-    # Here is a little bit hacky. We have to put PROJECT_BINARY_DIR in front
-    # of PROJECT_SOURCE_DIR with/without conda system. The reason is that
-    # gloo generates a new config.h in the binary diretory.
-    include_directories(BEFORE SYSTEM ${CMAKE_CURRENT_LIST_DIR}/../third_party/gloo)
-    include_directories(BEFORE SYSTEM ${PROJECT_BINARY_DIR}/third_party/gloo)
     set(BUILD_TEST ${__BUILD_TEST})
     set(BUILD_BENCHMARK ${__BUILD_BENCHMARK})
 
@@ -1287,7 +1271,6 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
       set_target_properties(onnx_proto PROPERTIES CXX_STANDARD 17)
     endif()
   endif()
-  add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/foxi EXCLUDE_FROM_ALL)
 
   add_definitions(-DONNX_NAMESPACE=${ONNX_NAMESPACE})
   if(NOT USE_SYSTEM_ONNX)
@@ -1316,10 +1299,30 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
     message("-- Found onnx: ${ONNX_LIBRARY} ${ONNX_PROTO_LIBRARY}")
     list(APPEND Caffe2_DEPENDENCY_LIBS onnx_proto onnx)
   endif()
-  include_directories(${FOXI_INCLUDE_DIRS})
-  list(APPEND Caffe2_DEPENDENCY_LIBS foxi_loader)
   # Recover the build shared libs option.
   set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS})
+endif()
+
+# --[ x86-simd-sort integration
+if(USE_X86_SIMD_SORT)
+  if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
+    message(WARNING
+      "x64 operating system is required for x86-simd-sort. "
+      "Not compiling with x86-simd-sort. "
+      "Turn this warning off by USE_X86_SIMD_SORT=OFF.")
+    set(USE_X86_SIMD_SORT OFF)
+  endif()
+
+  if(USE_X86_SIMD_SORT)
+    if(USE_OPENMP AND NOT MSVC)
+      set(USE_XSS_OPENMP ON)
+    else()
+      set(USE_XSS_OPENMP OFF)
+    endif()
+
+    set(XSS_SIMD_SORT_INCLUDE_DIR ${CMAKE_CURRENT_LIST_DIR}/../third_party/x86-simd-sort)
+    include_directories(SYSTEM ${XSS_SIMD_SORT_INCLUDE_DIR})
+  endif()
 endif()
 
 # --[ ATen checks
@@ -1352,15 +1355,22 @@ if(NOT INTERN_BUILD_MOBILE)
     # we want to respect the standard, and we are bored of those **** .
     add_definitions(-D_CRT_SECURE_NO_DEPRECATE=1)
     string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler=/wd4819,/wd4503,/wd4190,/wd4244,/wd4251,/wd4275,/wd4522")
+  else()
+    if(WERROR)
+      if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU" AND ${CMAKE_CXX_COMPILER_VERSION} VERSION_GREATER_EQUAL 13)
+        string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Wno-dangling-reference ")
+      endif()
+      if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU" OR ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang" AND ${CMAKE_CXX_COMPILER_VERSION} VERSION_GREATER_EQUAL 13))
+        string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Werror -Xcompiler -Wno-error=sign-compare ")
+      endif()
+    endif()
   endif()
 
   string(APPEND CMAKE_CUDA_FLAGS " -Wno-deprecated-gpu-targets --expt-extended-lambda")
 
   # use cub in a safe manner, see:
   # https://github.com/pytorch/pytorch/pull/55292
-  if(NOT ${CUDA_VERSION} LESS 11.5)
-    string(APPEND CMAKE_CUDA_FLAGS " -DCUB_WRAPPED_NAMESPACE=at_cuda_detail")
-  endif()
+  string(APPEND CMAKE_CUDA_FLAGS " -DCUB_WRAPPED_NAMESPACE=at_cuda_detail")
 
   message(STATUS "Found CUDA with FP16 support, compiling with torch.cuda.HalfTensor")
   string(APPEND CMAKE_CUDA_FLAGS " -DCUDA_HAS_FP16=1"
@@ -1428,11 +1438,6 @@ if(NOT INTERN_BUILD_MOBILE)
   if(CORTEXA9_FOUND)
     message(STATUS "Cortex-A9 Found with compiler flag : -mcpu=cortex-a9")
     add_compile_options(-mcpu=cortex-a9)
-  endif()
-
-  if(WIN32 AND NOT CYGWIN)
-    set(BLAS_INSTALL_LIBRARIES "OFF"
-      CACHE BOOL "Copy the required BLAS DLLs into the TH install dirs")
   endif()
 
   find_package(LAPACK)
@@ -1566,7 +1571,14 @@ if(USE_KINETO)
     message(STATUS "Using Kineto with Roctracer support")
   endif()
 
-  if(LIBKINETO_NOCUPTI AND LIBKINETO_NOROCTRACER)
+  if((NOT USE_XPU) OR WIN32)
+    set(LIBKINETO_NOXPUPTI ON CACHE STRING "" FORCE)
+  else()
+    set(LIBKINETO_NOXPUPTI OFF CACHE STRING "")
+    message(STATUS "Using Kineto with XPUPTI support")
+  endif()
+
+  if(LIBKINETO_NOCUPTI AND LIBKINETO_NOROCTRACER AND LIBKINETO_NOXPUPTI)
     message(STATUS "Using CPU-only version of Kineto")
   endif()
 
@@ -1665,7 +1677,12 @@ if(USE_KINETO)
   if(LIBKINETO_NOROCTRACER)
     string(APPEND CMAKE_CXX_FLAGS " -DLIBKINETO_NOROCTRACER")
   endif()
-  if(LIBKINETO_NOCUPTI AND LIBKINETO_NOROCTRACER)
+  if(LIBKINETO_NOXPUPTI)
+    string(APPEND CMAKE_CXX_FLAGS " -DLIBKINETO_NOXPUPTI=ON")
+  else()
+    string(APPEND CMAKE_CXX_FLAGS " -DLIBKINETO_NOXPUPTI=OFF")
+  endif()
+  if(LIBKINETO_NOCUPTI AND LIBKINETO_NOROCTRACER AND LIBKINETO_NOXPUPTI)
     message(STATUS "Configured Kineto (CPU)")
   else()
     message(STATUS "Configured Kineto")

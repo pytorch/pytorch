@@ -1,10 +1,14 @@
 # mypy: allow-untyped-defs
 import dataclasses
 from enum import auto, Enum
-from typing import Collection, Dict, List, Mapping, Optional, Set, Tuple, Union
+from typing import Collection, Dict, List, Mapping, Optional, Set, TYPE_CHECKING, Union
 
 from torch._library.fake_class_registry import FakeScriptObject
 
+
+if TYPE_CHECKING:
+    import torch
+    from torch._functorch._aot_autograd.schemas import GraphSignature
 
 __all__ = [
     "ConstantArgument",
@@ -16,6 +20,7 @@ __all__ = [
     "OutputKind",
     "OutputSpec",
     "SymIntArgument",
+    "SymBoolArgument",
     "TensorArgument",
 ]
 
@@ -36,6 +41,11 @@ class SymIntArgument:
 
 
 @dataclasses.dataclass
+class SymBoolArgument:
+    name: str
+
+
+@dataclasses.dataclass
 class CustomObjArgument:
     name: str
     class_fqn: str
@@ -51,6 +61,7 @@ class ConstantArgument:
 ArgumentSpec = Union[
     TensorArgument,
     SymIntArgument,
+    SymBoolArgument,
     ConstantArgument,
     CustomObjArgument,
     TokenArgument,
@@ -83,6 +94,7 @@ class InputSpec:
             (
                 TensorArgument,
                 SymIntArgument,
+                SymBoolArgument,
                 ConstantArgument,
                 CustomObjArgument,
                 TokenArgument,
@@ -112,105 +124,12 @@ class OutputSpec:
             (
                 TensorArgument,
                 SymIntArgument,
+                SymBoolArgument,
                 ConstantArgument,
                 TokenArgument,
                 CustomObjArgument,
             ),
         ), self.arg
-
-
-def _sig_to_specs(
-    *,
-    user_inputs: Set[str],
-    inputs_to_parameters: Mapping[str, str],
-    inputs_to_buffers: Mapping[str, str],
-    user_outputs: Set[str],
-    buffer_mutations: Mapping[str, str],
-    user_input_mutations: Mapping[str, str],
-    grad_params: Mapping[str, str],
-    grad_user_inputs: Mapping[str, str],
-    loss_output: Optional[str],
-    inputs: List[ArgumentSpec],
-    outputs: List[ArgumentSpec],
-    input_tokens: List[str],
-    output_tokens: List[str],
-) -> Tuple[List[InputSpec], List[OutputSpec]]:
-    def to_input_spec(inp: ArgumentSpec) -> InputSpec:
-        if isinstance(inp, TokenArgument):
-            return InputSpec(kind=InputKind.TOKEN, arg=inp, target=None)
-
-        if not isinstance(inp, TensorArgument):
-            return InputSpec(kind=InputKind.USER_INPUT, arg=inp, target=None)
-        name = inp.name
-        if name in user_inputs:
-            return InputSpec(kind=InputKind.USER_INPUT, arg=inp, target=None)
-        elif name in inputs_to_parameters:
-            return InputSpec(
-                kind=InputKind.PARAMETER,
-                arg=inp,
-                target=inputs_to_parameters[name],
-            )
-        elif name in inputs_to_buffers:
-            return InputSpec(
-                kind=InputKind.BUFFER,
-                arg=inp,
-                target=inputs_to_buffers[name],
-                # Mark as True for now; we will fix this up to distinguish
-                # persistent from non-persistent later in tracing.
-                # See: rewrite_non_persistent_buffers()
-                # TODO(suo): this is horrible.
-                persistent=True,
-            )
-        else:
-            raise AssertionError(f"Unknown tensor input kind: {name}")
-
-    def to_output_spec(idx: int, o: ArgumentSpec) -> OutputSpec:
-        if isinstance(o, TokenArgument):
-            return OutputSpec(kind=OutputKind.TOKEN, arg=o, target=None)
-
-        if not isinstance(o, TensorArgument):
-            return OutputSpec(kind=OutputKind.USER_OUTPUT, arg=o, target=None)
-        name = o.name
-        if idx < len(buffer_mutations) + len(user_input_mutations) + len(output_tokens):
-            if name in buffer_mutations:
-                return OutputSpec(
-                    kind=OutputKind.BUFFER_MUTATION,
-                    arg=o,
-                    target=buffer_mutations[name],
-                )
-            elif name in user_input_mutations:
-                return OutputSpec(
-                    kind=OutputKind.USER_INPUT_MUTATION,
-                    arg=o,
-                    target=user_input_mutations[name],
-                )
-            else:
-                raise AssertionError(f"Unknown tensor mutation kind: {name}")
-        else:
-            if name in user_outputs:
-                return OutputSpec(kind=OutputKind.USER_OUTPUT, arg=o, target=None)
-
-            elif name in grad_params:
-                return OutputSpec(
-                    kind=OutputKind.GRADIENT_TO_PARAMETER,
-                    arg=o,
-                    target=grad_params[name],
-                )
-            elif name in grad_user_inputs:
-                return OutputSpec(
-                    kind=OutputKind.GRADIENT_TO_USER_INPUT,
-                    arg=o,
-                    target=grad_user_inputs[name],
-                )
-            elif name == loss_output:
-                return OutputSpec(kind=OutputKind.LOSS_OUTPUT, arg=o, target=None)
-
-            else:
-                raise AssertionError(f"Unknown tensor output kind: {name}")
-
-    input_specs = [to_input_spec(inp) for inp in inputs]
-    output_specs = [to_output_spec(idx, o) for idx, o in enumerate(outputs)]
-    return input_specs, output_specs
 
 
 @dataclasses.dataclass
@@ -241,7 +160,7 @@ class ExportGraphSignature:
     e.g. If following module is exported::
 
         class CustomModule(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super(CustomModule, self).__init__()
 
                 # Define a parameter
@@ -298,55 +217,51 @@ class ExportGraphSignature:
     # A list of parameters uniquely identified by mangled fully qualified name
     @property
     def parameters(self) -> Collection[str]:
-        # TODO Make this tuple.
-        return [
+        return tuple(
             s.target
             for s in self.input_specs
             if s.kind == InputKind.PARAMETER
             if isinstance(s.target, str)
-        ]
+        )
 
     # A list of buffers uniquely identified by mangled fully qualified name
     @property
     def buffers(self) -> Collection[str]:
-        # TODO Make this tuple.
-        return [
+        return tuple(
             s.target
             for s in self.input_specs
             if s.kind == InputKind.BUFFER
             if isinstance(s.target, str)
-        ]
+        )
 
     @property
     def non_persistent_buffers(self) -> Collection[str]:
-        return [
+        return tuple(
             s.target
             for s in self.input_specs
             if s.kind == InputKind.BUFFER
             if s.persistent is False
             if isinstance(s.target, str)
-        ]
+        )
 
     # A list of lifted constant tensors
     @property
     def lifted_tensor_constants(self) -> Collection[str]:
-        # TODO Make this tuple.
-        return [
+        return tuple(
             s.target
             for s in self.input_specs
             if s.kind == InputKind.CONSTANT_TENSOR
             if isinstance(s.target, str)
-        ]
+        )
 
     @property
     def lifted_custom_objs(self) -> Collection[str]:
-        # TODO Make this tuple.
-        return [
+        return tuple(
             s.target
             for s in self.input_specs
             if s.kind == InputKind.CUSTOM_OBJ
             if isinstance(s.target, str)
-        ]
+        )
 
     # Graph node names of pytree-flattened inputs of original program
     @property
@@ -356,7 +271,10 @@ class ExportGraphSignature:
             if s.kind != InputKind.USER_INPUT:
                 continue
 
-            if isinstance(s.arg, (TensorArgument, SymIntArgument, CustomObjArgument)):
+            if isinstance(
+                s.arg,
+                (TensorArgument, SymIntArgument, SymBoolArgument, CustomObjArgument),
+            ):
                 user_inputs.append(s.arg.name)
             elif isinstance(s.arg, ConstantArgument):
                 user_inputs.append(s.arg.value)
@@ -372,7 +290,7 @@ class ExportGraphSignature:
             if s.kind != OutputKind.USER_OUTPUT:
                 continue
 
-            if isinstance(s.arg, (TensorArgument, SymIntArgument)):
+            if isinstance(s.arg, (TensorArgument, SymIntArgument, SymBoolArgument)):
                 user_outputs.append(s.arg.name)
             elif isinstance(s.arg, ConstantArgument):
                 user_outputs.append(s.arg.value)
@@ -386,68 +304,68 @@ class ExportGraphSignature:
     # name is found in this dictionary, it is guranteed to be a lifted parameter.
     @property
     def inputs_to_parameters(self) -> Mapping[str, str]:
-        return {
-            s.arg.name: s.target
+        return _immutable_dict(
+            (s.arg.name, s.target)
             for s in self.input_specs
             if s.kind == InputKind.PARAMETER
             and isinstance(s.arg, TensorArgument)
             and isinstance(s.target, str)
-        }
+        )
 
     # A dictionary mapping graph input node names to buffers. If a graph input
     # name is found in this dictionary, it is guranteed to be a lifted buffer.
     @property
     def inputs_to_buffers(self) -> Mapping[str, str]:
-        return {
-            s.arg.name: s.target  # type: ignore[union-attr, misc]
+        return _immutable_dict(
+            (s.arg.name, s.target)  # type: ignore[union-attr, misc]
             for s in self.input_specs
             if s.kind == InputKind.BUFFER
             and isinstance(s.arg, TensorArgument)
             and isinstance(s.target, str)
-        }
+        )
 
     # A dictionary mapping graph output node names to buffers that are mutated in the
     # original program. Buffers that are not mutated will not be found in this dictionary.
     @property
     def buffers_to_mutate(self) -> Mapping[str, str]:
-        return {
-            s.arg.name: s.target
+        return _immutable_dict(
+            (s.arg.name, s.target)
             for s in self.output_specs
             if s.kind == OutputKind.BUFFER_MUTATION
             and isinstance(s.arg, TensorArgument)
             and isinstance(s.target, str)
-        }
+        )
 
     @property
     def user_inputs_to_mutate(self) -> Mapping[str, str]:
-        return {
-            s.arg.name: s.target
+        return _immutable_dict(
+            (s.arg.name, s.target)
             for s in self.output_specs
             if s.kind == OutputKind.USER_INPUT_MUTATION
             and isinstance(s.arg, TensorArgument)
             and isinstance(s.target, str)
-        }
+        )
 
     # A dictionary mapping graph input node names to lifted tensor constants.
     @property
     def inputs_to_lifted_tensor_constants(self) -> Mapping[str, str]:
-        return {
-            s.arg.name: s.target
+        return _immutable_dict(
+            (s.arg.name, s.target)
             for s in self.input_specs
             if s.kind == InputKind.CONSTANT_TENSOR
             and isinstance(s.arg, TensorArgument)
             and isinstance(s.target, str)
-        }
+        )
 
     @property
     def inputs_to_lifted_custom_objs(self) -> Mapping[str, str]:
-        return {
-            s.arg.name: s.target
+        return _immutable_dict(
+            (s.arg.name, s.target)
             for s in self.input_specs
             if s.kind == InputKind.CUSTOM_OBJ
             and isinstance(s.arg, CustomObjArgument)
             and isinstance(s.target, str)
-        }
+        )
 
     @property
     def backward_signature(self) -> Optional[ExportBackwardSignature]:
@@ -485,22 +403,22 @@ class ExportGraphSignature:
         return None
 
     @property
-    def input_tokens(self) -> List[str]:
+    def input_tokens(self) -> Collection[str]:
         input_tokens = []
         for s in self.input_specs:
             if s.kind == InputKind.TOKEN:
                 assert isinstance(s.arg, TokenArgument)
                 input_tokens.append(s.arg.name)
-        return input_tokens
+        return tuple(input_tokens)
 
     @property
-    def output_tokens(self) -> List[str]:
+    def output_tokens(self) -> Collection[str]:
         output_tokens = []
         for s in self.output_specs:
             if s.kind == OutputKind.TOKEN:
                 assert isinstance(s.arg, TokenArgument)
                 output_tokens.append(s.arg.name)
-        return output_tokens
+        return tuple(output_tokens)
 
     def __post_init__(self) -> None:
         assertion_dep_token = self.assertion_dep_token
@@ -519,7 +437,13 @@ class ExportGraphSignature:
         """
         assert isinstance(old, str)
         assert isinstance(new, str)
-        arg_types = (TensorArgument, SymIntArgument, CustomObjArgument, TokenArgument)
+        arg_types = (
+            TensorArgument,
+            SymIntArgument,
+            SymBoolArgument,
+            CustomObjArgument,
+            TokenArgument,
+        )
         for o in self.output_specs:
             if isinstance(o.arg, arg_types):
                 if o.arg.name == old:
@@ -535,3 +459,155 @@ class ExportGraphSignature:
                 self.replace_all_uses(old.name, new)
 
         return _
+
+
+def _immutable_dict(items):
+    """
+    Creates a mapping where items cannot be added, deleted, or updated.
+    NOTE: The immutability is shallow (like tuple is an immutable collection).
+    """
+    from types import MappingProxyType
+
+    return MappingProxyType(dict(items))
+
+
+def _make_argument_spec(node, token_names) -> ArgumentSpec:
+    from torch import ScriptObject, SymBool, SymInt
+    from torch._library.fake_class_registry import FakeScriptObject
+    from torch._subclasses.fake_tensor import FakeTensor
+
+    if isinstance(node, (int, bool, float, type(None), str)):
+        # For const outputs we just directly return this
+        return ConstantArgument(name="", value=node)
+
+    assert (
+        "val" in node.meta
+    ), f"{node} is not a constant or a node with a 'val' metadata field"
+    val = node.meta["val"]
+    if node.name in token_names:
+        return TokenArgument(name=node.name)
+    elif isinstance(val, FakeTensor):
+        return TensorArgument(name=node.name)
+    elif isinstance(val, SymInt):
+        return SymIntArgument(name=node.name)
+    elif isinstance(val, SymBool):
+        return SymBoolArgument(name=node.name)
+    elif isinstance(val, ScriptObject):
+        return CustomObjArgument(name=node.name, class_fqn=val._type().qualified_name())  # type: ignore[attr-defined]
+    elif isinstance(val, FakeScriptObject):
+        return CustomObjArgument(
+            name=node.name, class_fqn=val.script_class_name, fake_val=val
+        )
+    elif isinstance(val, (int, bool, str, float, type(None))):
+        return ConstantArgument(name=node.name, value=val)
+    else:
+        raise AssertionError(
+            f"Encountered an unsupported object of type {type(val)} "
+            f"while writing the metadata for exported program"
+        )
+
+
+def _convert_to_export_graph_signature(
+    graph_signature: "GraphSignature",
+    gm: "torch.fx.GraphModule",
+    non_persistent_buffers: Set[str],
+) -> "ExportGraphSignature":
+    from torch.utils import _pytree as pytree
+
+    is_joint = graph_signature.backward_signature is not None
+
+    # unpack objects
+    user_inputs = set(graph_signature.user_inputs)
+    inputs_to_parameters = graph_signature.inputs_to_parameters
+    inputs_to_buffers = graph_signature.inputs_to_buffers
+    user_outputs = set(graph_signature.user_outputs)
+    buffer_mutations = graph_signature.buffers_to_mutate
+    user_input_mutations = graph_signature.user_inputs_to_mutate
+    grad_params = graph_signature.backward_signature.gradients_to_parameter if is_joint else {}  # type: ignore[union-attr]
+    grad_user_inputs = graph_signature.backward_signature.gradients_to_user_inputs if is_joint else {}  # type: ignore[union-attr]
+    loss_output = graph_signature.backward_signature.loss_output if is_joint else None  # type: ignore[union-attr]
+    input_tokens = graph_signature.input_tokens
+    output_tokens = graph_signature.output_tokens
+
+    inputs = [
+        _make_argument_spec(node, input_tokens)
+        for node in gm.graph.nodes
+        if node.op == "placeholder"
+    ]
+    outputs = [
+        _make_argument_spec(node, output_tokens)
+        for node in pytree.tree_leaves(next(iter(reversed(gm.graph.nodes))).args)
+    ]
+
+    def to_input_spec(inp: ArgumentSpec) -> InputSpec:
+        if isinstance(inp, TokenArgument):
+            return InputSpec(kind=InputKind.TOKEN, arg=inp, target=None)
+
+        if not isinstance(inp, TensorArgument):
+            return InputSpec(kind=InputKind.USER_INPUT, arg=inp, target=None)
+        name = inp.name
+        if name in user_inputs:
+            return InputSpec(kind=InputKind.USER_INPUT, arg=inp, target=None)
+        elif name in inputs_to_parameters:
+            return InputSpec(
+                kind=InputKind.PARAMETER,
+                arg=inp,
+                target=inputs_to_parameters[name],  # type: ignore[index]
+            )
+        elif name in inputs_to_buffers:
+            return InputSpec(
+                kind=InputKind.BUFFER,
+                arg=inp,
+                target=inputs_to_buffers[name],  # type: ignore[index]
+                persistent=(inputs_to_buffers[name] not in non_persistent_buffers),  # type: ignore[index]
+            )
+        else:
+            raise AssertionError(f"Unknown tensor input kind: {name}")
+
+    def to_output_spec(idx: int, o: ArgumentSpec) -> OutputSpec:
+        if isinstance(o, TokenArgument):
+            return OutputSpec(kind=OutputKind.TOKEN, arg=o, target=None)
+
+        if not isinstance(o, TensorArgument):
+            return OutputSpec(kind=OutputKind.USER_OUTPUT, arg=o, target=None)
+        name = o.name
+        if idx < len(buffer_mutations) + len(user_input_mutations) + len(output_tokens):
+            if name in buffer_mutations:
+                return OutputSpec(
+                    kind=OutputKind.BUFFER_MUTATION,
+                    arg=o,
+                    target=buffer_mutations[name],  # type: ignore[index]
+                )
+            elif name in user_input_mutations:
+                return OutputSpec(
+                    kind=OutputKind.USER_INPUT_MUTATION,
+                    arg=o,
+                    target=user_input_mutations[name],  # type: ignore[index]
+                )
+            else:
+                raise AssertionError(f"Unknown tensor mutation kind: {name}")
+        else:
+            if name in user_outputs:
+                return OutputSpec(kind=OutputKind.USER_OUTPUT, arg=o, target=None)
+
+            elif name in grad_params:
+                return OutputSpec(
+                    kind=OutputKind.GRADIENT_TO_PARAMETER,
+                    arg=o,
+                    target=grad_params[name],
+                )
+            elif name in grad_user_inputs:
+                return OutputSpec(
+                    kind=OutputKind.GRADIENT_TO_USER_INPUT,
+                    arg=o,
+                    target=grad_user_inputs[name],
+                )
+            elif name == loss_output:
+                return OutputSpec(kind=OutputKind.LOSS_OUTPUT, arg=o, target=None)
+
+            else:
+                raise AssertionError(f"Unknown tensor output kind: {name}")
+
+    input_specs = [to_input_spec(inp) for inp in inputs]
+    output_specs = [to_output_spec(idx, o) for idx, o in enumerate(outputs)]
+    return ExportGraphSignature(input_specs=input_specs, output_specs=output_specs)

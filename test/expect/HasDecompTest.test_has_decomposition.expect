@@ -57,6 +57,7 @@ aten::_convert_indices_from_coo_to_csr.out
 aten::_convert_indices_from_csr_to_coo
 aten::_convert_indices_from_csr_to_coo.out
 aten::_convert_weight_to_int4pack
+aten::_convert_weight_to_int4pack_for_cpu
 aten::_convolution
 aten::_convolution.out
 aten::_copy_from
@@ -231,9 +232,12 @@ aten::_foreach_frac_
 aten::_foreach_lerp.List
 aten::_foreach_lerp.List_out
 aten::_foreach_lerp.Scalar
+aten::_foreach_lerp.ScalarList
+aten::_foreach_lerp.ScalarList_out
 aten::_foreach_lerp.Scalar_out
 aten::_foreach_lerp_.List
 aten::_foreach_lerp_.Scalar
+aten::_foreach_lerp_.ScalarList
 aten::_foreach_lgamma
 aten::_foreach_lgamma.out
 aten::_foreach_lgamma_
@@ -302,6 +306,9 @@ aten::_foreach_reciprocal_
 aten::_foreach_round
 aten::_foreach_round.out
 aten::_foreach_round_
+aten::_foreach_rsqrt
+aten::_foreach_rsqrt.out
+aten::_foreach_rsqrt_
 aten::_foreach_sigmoid
 aten::_foreach_sigmoid.out
 aten::_foreach_sigmoid_
@@ -445,6 +452,7 @@ aten::_nested_from_padded
 aten::_nested_from_padded.out
 aten::_nested_from_padded_and_nested_example
 aten::_nested_from_padded_and_nested_example.out
+aten::_nested_from_padded_tensor
 aten::_nested_get_jagged_dummy
 aten::_nested_get_lengths
 aten::_nested_get_max_seqlen
@@ -496,6 +504,7 @@ aten::_resize_output.out
 aten::_resize_output_
 aten::_sample_dirichlet
 aten::_sample_dirichlet.out
+aten::_scaled_dot_product_attention_math_for_mps
 aten::_scaled_dot_product_cudnn_attention
 aten::_scaled_dot_product_cudnn_attention_backward
 aten::_scaled_dot_product_efficient_attention
@@ -554,6 +563,7 @@ aten::_sparse_sum_backward
 aten::_sparse_sum_backward.out
 aten::_spdiags
 aten::_spdiags.out
+aten::_spsolve
 aten::_stack
 aten::_stack.out
 aten::_standard_gamma
@@ -613,7 +623,6 @@ aten::_unique
 aten::_unique.out
 aten::_unique2
 aten::_unique2.out
-aten::_unsafe_index_put
 aten::_upsample_bicubic2d_aa
 aten::_upsample_bicubic2d_aa.out
 aten::_upsample_bicubic2d_aa_backward
@@ -635,6 +644,7 @@ aten::_values
 aten::_values_copy
 aten::_values_copy.out
 aten::_weight_int4pack_mm
+aten::_weight_int4pack_mm_for_cpu
 aten::_weight_int8pack_mm
 aten::_weight_norm_interface_backward
 aten::_weight_norm_interface_backward.out
@@ -708,8 +718,6 @@ aten::bmm.out
 aten::ccol_indices
 aten::ccol_indices_copy
 aten::ccol_indices_copy.out
-aten::channel_shuffle
-aten::channel_shuffle.out
 aten::cholesky
 aten::cholesky.out
 aten::cholesky_inverse
@@ -779,8 +787,6 @@ aten::empty_permuted.out
 aten::empty_quantized
 aten::empty_quantized.out
 aten::equal
-aten::expand_copy
-aten::expand_copy.out
 aten::fake_quantize_per_channel_affine_cachemask
 aten::fake_quantize_per_channel_affine_cachemask.out
 aten::fake_quantize_per_tensor_affine_cachemask
@@ -927,10 +933,6 @@ aten::max_pool3d_with_indices
 aten::max_pool3d_with_indices.out
 aten::max_pool3d_with_indices_backward
 aten::max_pool3d_with_indices_backward.grad_input
-aten::max_unpool2d
-aten::max_unpool2d.out
-aten::max_unpool3d
-aten::max_unpool3d.out
 aten::median
 aten::median.dim
 aten::median.dim_values
@@ -1016,8 +1018,6 @@ aten::ones.names_out
 aten::ones.out
 aten::ormqr
 aten::ormqr.out
-aten::permute_copy
-aten::permute_copy.out
 aten::poisson
 aten::poisson.out
 aten::polygamma
@@ -1106,12 +1106,6 @@ aten::range.out
 aten::range.out_
 aten::range.step
 aten::record_stream
-aten::reflection_pad1d_backward
-aten::reflection_pad1d_backward.grad_input
-aten::reflection_pad2d_backward
-aten::reflection_pad2d_backward.grad_input
-aten::reflection_pad3d_backward
-aten::reflection_pad3d_backward.grad_input
 aten::repeat_interleave.Tensor
 aten::repeat_interleave.Tensor_out
 aten::replication_pad1d_backward
@@ -1295,16 +1289,8 @@ aten::split_copy.Tensor_out
 aten::squeeze_
 aten::squeeze_.dim
 aten::squeeze_.dims
-aten::squeeze_copy
-aten::squeeze_copy.dim
-aten::squeeze_copy.dim_out
-aten::squeeze_copy.dims
-aten::squeeze_copy.dims_out
-aten::squeeze_copy.out
 aten::sspaddmm.out
 aten::t_
-aten::t_copy
-aten::t_copy.out
 aten::to_mkldnn
 aten::to_mkldnn.out
 aten::to_padded_tensor
@@ -1312,8 +1298,6 @@ aten::to_padded_tensor.out
 aten::topk
 aten::topk.values
 aten::transpose_
-aten::transpose_copy.int
-aten::transpose_copy.int_out
 aten::triangular_solve
 aten::triangular_solve.X
 aten::unbind_copy.int
@@ -1327,8 +1311,6 @@ aten::unique_dim_consecutive.out
 aten::unsafe_split.Tensor_out
 aten::unsafe_split_with_sizes.out
 aten::unsqueeze_
-aten::unsqueeze_copy
-aten::unsqueeze_copy.out
 aten::upsample_bicubic2d_backward
 aten::upsample_bicubic2d_backward.grad_input
 aten::upsample_bilinear2d_backward
@@ -1353,10 +1335,6 @@ aten::view_as_complex_copy.out
 aten::view_as_real
 aten::view_as_real_copy
 aten::view_as_real_copy.out
-aten::view_copy
-aten::view_copy.dtype
-aten::view_copy.dtype_out
-aten::view_copy.out
 aten::zeros.names
 aten::zeros.names_out
 aten::zeros.out

@@ -7,7 +7,6 @@ import numpy as np
 
 import torch
 from torch import nan
-
 from torch.testing import make_tensor
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -194,8 +193,7 @@ class TestSortAndSelect(TestCase):
         self.assertEqual(res1val, res1val_cpu.cuda())
         self.assertEqual(res1ind, res1ind_cpu.cuda())
 
-    # FIXME: remove torch.bool from unsupported types once support is added for cub sort
-    @dtypes(*all_types_and(torch.half, torch.bfloat16))
+    @dtypes(*all_types_and(torch.bool, torch.half, torch.bfloat16))
     def test_stable_sort(self, device, dtype):
         sizes = (100, 1000, 10000)
         for ncopies in sizes:
@@ -324,8 +322,7 @@ class TestSortAndSelect(TestCase):
             self.assertEqual(indices, indices_cont)
             self.assertEqual(values, values_cont)
 
-    # FIXME: remove torch.bool from unsupported types once support is added for cub sort
-    @dtypes(*all_types_and(torch.half, torch.bfloat16))
+    @dtypes(*all_types_and(torch.bool, torch.half, torch.bfloat16))
     def test_stable_sort_against_numpy(self, device, dtype):
         if dtype in floating_types_and(torch.float16, torch.bfloat16):
             inf = float("inf")
@@ -403,10 +400,10 @@ class TestSortAndSelect(TestCase):
             if tensor.size() != torch.Size([]):
                 if dtype is torch.bfloat16:
                     expected = torch.from_numpy(
-                        np.msort(tensor.float().cpu().numpy())
+                        np.sort(tensor.float().cpu().numpy(), axis=0)
                     ).bfloat16()
                 else:
-                    expected = torch.from_numpy(np.msort(tensor.cpu().numpy()))
+                    expected = torch.from_numpy(np.sort(tensor.cpu().numpy(), axis=0))
             else:
                 expected = tensor  # numpy.msort() does not support empty shapes tensor
 
@@ -419,12 +416,8 @@ class TestSortAndSelect(TestCase):
 
         shapes = (
             [],
-            [
-                0,
-            ],
-            [
-                20,
-            ],
+            [0],
+            [20],
             [1, 20],
             [30, 30],
             [10, 20, 30],

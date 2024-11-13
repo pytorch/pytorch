@@ -77,6 +77,21 @@ class VectorizedN {
     return result;
   }
 
+  template <typename Op>
+  inline VectorizedN<T, N> ternary_op(
+      const VectorizedN<T, N>& other,
+      const VectorizedN<T, N>& other2,
+      Op op) const {
+    VectorizedN<T, N> result;
+#ifndef _MSC_VER
+#pragma unroll
+#endif
+    for (int i = 0; i < N; ++i) {
+      result.values[i] = op(values[i], other.values[i], other2.values[i]);
+    }
+    return result;
+  }
+
   VectorizedN() = default;
 
   explicit VectorizedN(T val) {
@@ -87,6 +102,10 @@ class VectorizedN {
 
   template <int L = N, typename std::enable_if_t<L == 1, int> = 0>
   VectorizedN(const Vectorized<T>& val) : values({val}) {}
+
+  template <int L = N, typename std::enable_if_t<L == 2, int> = 0>
+  VectorizedN(const Vectorized<T>& val_0, const Vectorized<T>& val_1)
+      : values({val_0, val_1}) {}
 
   template <int L = N, typename std::enable_if_t<L == 1, int> = 0>
   inline operator Vectorized<T>() const {
@@ -107,7 +126,8 @@ class VectorizedN {
       const VectorizedN<T, N>& b) {
     VectorizedN<T, N> result;
     for (int i = 0; i < N; ++i) {
-      result.values[i] = Vectorized<T>::template blend<mask>(a.values[i], b.values[i]);
+      result.values[i] =
+          Vectorized<T>::template blend<mask>(a.values[i], b.values[i]);
     }
     return result;
   }
@@ -142,13 +162,14 @@ class VectorizedN {
       int64_t count = size()) {
     VectorizedN<T, N> result;
     for (int i = 0; i < N; ++i) {
-      result.values[i] = Vectorized<T>::set(
-          a.values[i],
-          b.values[i],
-          std::min(count, (int64_t)Vectorized<T>::size()));
-      count -= Vectorized<T>::size();
-      if (count <= 0) {
-        break;
+      if (count > 0) {
+        result.values[i] = Vectorized<T>::set(
+            a.values[i],
+            b.values[i],
+            std::min(count, (int64_t)Vectorized<T>::size()));
+        count -= Vectorized<T>::size();
+      } else {
+        result.values[i] = a.values[i];
       }
     }
     return result;
@@ -220,6 +241,7 @@ class VectorizedN {
     return result;
   }
 
+  VECTORIZEDN_DEFINE_UNARY_OP(isnan)
   VECTORIZEDN_DEFINE_UNARY_OP(abs)
   VECTORIZEDN_DEFINE_UNARY_OP(sgn)
   VECTORIZEDN_DEFINE_UNARY_OP(angle)
@@ -301,6 +323,20 @@ class VectorizedN {
     });                                                                        \
   }
 
+#define VECTORIZEDN_DEFINE_TERNARY_OP_GLOBAL(op)             \
+  template <typename T, int N>                               \
+  inline VectorizedN<T, N> op(                               \
+      const VectorizedN<T, N>& a,                            \
+      const VectorizedN<T, N>& b,                            \
+      const VectorizedN<T, N>& c) {                          \
+    return a.ternary_op(                                     \
+        b,                                                   \
+        c,                                                   \
+        [](const Vectorized<T>& a,                           \
+           const Vectorized<T>& b,                           \
+           const Vectorized<T>& c) { return op(a, b, c); }); \
+  }
+
 #define VECTORIZEDN_DEFINE_BINARY_OP_INPLACE_GLOBAL(op)                     \
   template <typename T, int N>                                              \
   inline VectorizedN<T, N>& op(                                             \
@@ -321,9 +357,9 @@ VECTORIZEDN_DEFINE_BINARY_OP_GLOBAL(operator<<)
 VECTORIZEDN_DEFINE_BINARY_OP_GLOBAL(operator>>)
 VECTORIZEDN_DEFINE_BINARY_OP_GLOBAL(maximum)
 VECTORIZEDN_DEFINE_BINARY_OP_GLOBAL(minimum)
-VECTORIZEDN_DEFINE_BINARY_OP_GLOBAL(fmadd)
-VECTORIZEDN_DEFINE_BINARY_OP_GLOBAL(fmsub)
-VECTORIZEDN_DEFINE_BINARY_OP_GLOBAL(clamp)
+VECTORIZEDN_DEFINE_TERNARY_OP_GLOBAL(fmadd)
+VECTORIZEDN_DEFINE_TERNARY_OP_GLOBAL(fmsub)
+VECTORIZEDN_DEFINE_TERNARY_OP_GLOBAL(clamp)
 VECTORIZEDN_DEFINE_BINARY_OP_GLOBAL(clamp_max)
 VECTORIZEDN_DEFINE_BINARY_OP_GLOBAL(clamp_min)
 VECTORIZEDN_DEFINE_BINARY_OP_GLOBAL(operator&)
@@ -352,5 +388,17 @@ inline T vec_reduce_all(const OpVec& vec_fun, VectorizedN<T, N> acc_vec) {
   return vec_reduce_all(vec_fun, vec_result);
 }
 
+template <typename T, int N>
+std::ostream& operator<<(std::ostream& stream, const VectorizedN<T, N>& vec_n) {
+  stream << "vec_n[";
+  for (int i = 0; i < N; ++i) {
+    if (i != 0) {
+      stream << ", ";
+    }
+    stream << vec_n[i];
+  }
+  stream << ']';
+  return stream;
+}
 } // namespace CPU_CAPABILITY
 } // namespace at::vec

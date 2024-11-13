@@ -3,9 +3,7 @@
 from copy import deepcopy
 
 import torch
-
 import torch.nn as nn
-
 from torch.distributed._tensor import (
     DeviceMesh,
     distribute_module,
@@ -15,7 +13,6 @@ from torch.distributed._tensor import (
     Shard,
 )
 from torch.testing._internal.common_utils import run_tests
-
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     MLPModule,

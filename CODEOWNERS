@@ -18,6 +18,7 @@
 /torch/optim/ @albanD @janeyx99
 /test/test_public_bindings.py @albanD
 /test/allowlist_for_publicAPI.json @albanD
+/test/forward_backward_compatibility/check_forward_backward_compatibility.py @larryliu0820
 /docs/source/conf.py @albanD
 /aten/src/ATen/native/tags.yaml @ezyang
 
@@ -56,7 +57,6 @@ nn/qat/ @jerryzh168
 # Docker
 /.ci/docker/ @jeffdaily
 /.ci/docker/ci_commit_pins/triton.txt @desertfire @Chillee @eellison @shunting314 @bertmaher @jeffdaily @jataylo @jithunnair-amd @pruthvistony
-/.ci/docker/ci_commit_pins/triton-rocm.txt @jeffdaily @jataylo @jithunnair-amd @pruthvistony
 /.ci/docker/ci_commit_pins/triton-xpu.txt @EikanWang @gujinghui
 
 # Github Actions
@@ -98,6 +98,14 @@ test/test_type_promotion.py @mruberry
 test/functorch/test_ops.py @zou3519 @chillee @kshitij12345
 test/functorch/test_vmap.py @zou3519 @chillee @kshitij12345
 
+# HOPs
+torch/_higher_order_ops/*.py @zou3519
+torch/_dynamo/variables/higher_order_ops.py @zou3519
+
+# AOTAutograd
+torch/_functorch/_aot_autograd/*.py @bdhirsh
+torch/_functorch/aot_autograd.py @bdhirsh
+
 # torch MPS
 test/test_mps.py @kulinseth @malfet
 aten/src/ATen/mps/ @kulinseth @malfet
@@ -108,16 +116,16 @@ aten/src/ATen/detail/MTIAHooksInterface.h @egienvalue
 torch/csrc/mtia/ @egienvalue
 
 # Profiler
-torch/csrc/autograd/profiler* @aaronenyeshi @sraikund16
-torch/autograd/profiler* @aaronenyeshi @sraikund16
-torch/csrc/profiler/ @aaronenyeshi @sraikund16
-torch/profiler/ @aaronenyeshi @sraikund16
+torch/csrc/autograd/profiler* @sraikund16
+torch/autograd/profiler* @sraikund16
+torch/csrc/profiler/ @sraikund16
+torch/profiler/ @sraikund16
 
 # AOTDispatch tests
 test/functorch/test_aotdispatch.py @ezyang @Chillee
 
 # Dataloader
-torch/utils/data/ @andrewkho @gokulavasan
+torch/utils/data/ @andrewkho @divyanshk
 
 # hipify
 torch/utils/hipify/ @jeffdaily @jithunnair-amd
@@ -143,8 +151,8 @@ caffe2/utils/hip @jeffdaily @jithunnair-amd
 /third_party/xpu.txt @EikanWang @gujinghui
 
 # torch.export
-/torch/export/ @avikchaudhuri @gmagogsfm @tugsbayasgalan @zhxchen17
-/torch/_export/ @avikchaudhuri @gmagogsfm @tugsbayasgalan @zhxchen17
+/torch/export/ @avikchaudhuri @tugsbayasgalan @zhxchen17 @ydwu4 @angelayi
+/torch/_export/ @avikchaudhuri @tugsbayasgalan @zhxchen17 @ydwu4 @angelayi
 
 # serialization-related files
 /aten/src/ATen/MapAllocator* @mikaylagawarecki
@@ -156,12 +164,12 @@ caffe2/utils/hip @jeffdaily @jithunnair-amd
 /torch/csrc/jit/python/init.cpp @mikaylagawarecki
 
 # CUDA and CUDA math libraries
-aten/src/ATen/cuda/ @eqy
-aten/src/ATen/cudnn/ @eqy
-aten/src/ATen/native/cuda/ @eqy
-aten/src/ATen/native/cudnn/ @eqy
-c10/cuda @eqy
-torch/cuda/ @eqy
-torch/csrc/cuda/ @eqy
-torch/backends/cuda/ @eqy
-torch/backends/cudnn/ @eqy
+aten/src/ATen/cuda/ @eqy @syed-ahmed
+aten/src/ATen/cudnn/ @eqy @syed-ahmed
+aten/src/ATen/native/cuda/ @eqy @syed-ahmed
+aten/src/ATen/native/cudnn/ @eqy @syed-ahmed
+c10/cuda @eqy @syed-ahmed
+torch/cuda/ @eqy @syed-ahmed
+torch/csrc/cuda/ @eqy @syed-ahmed
+torch/backends/cuda/ @eqy @syed-ahmed
+torch/backends/cudnn/ @eqy @syed-ahmed

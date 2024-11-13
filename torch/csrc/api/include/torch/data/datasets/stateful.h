@@ -6,16 +6,12 @@
 #include <cstddef>
 #include <vector>
 
-namespace torch {
-namespace serialize {
+namespace torch::serialize {
 class OutputArchive;
 class InputArchive;
-} // namespace serialize
-} // namespace torch
+} // namespace torch::serialize
 
-namespace torch {
-namespace data {
-namespace datasets {
+namespace torch::data::datasets {
 
 /// A stateful dataset is a dataset that maintains some internal state, which
 /// will be `reset()` at the beginning of each epoch. Subclasses can override
@@ -35,7 +31,7 @@ template <
     typename Batch = std::vector<Example<>>,
     typename BatchRequest = size_t>
 class StatefulDataset
-    : public BatchDataset<Self, optional<Batch>, BatchRequest> {
+    : public BatchDataset<Self, std::optional<Batch>, BatchRequest> {
  public:
   /// Resets internal state of the dataset.
   virtual void reset() = 0;
@@ -65,6 +61,4 @@ serialize::InputArchive& operator>>(
   return archive;
 }
 
-} // namespace datasets
-} // namespace data
-} // namespace torch
+} // namespace torch::data::datasets

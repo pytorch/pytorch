@@ -51,15 +51,13 @@ inline AtenTensorHandle new_tensor_handle(at::Tensor&& tensor) {
 inline void assert_inf_and_nan(
     const std::string& tensor_name,
     at::Tensor& check_tensor) {
-  auto flattened = check_tensor.view({-1});
-
-  for (int64_t i = 0; i < flattened.numel(); i++) {
-    auto value = flattened[i].item<float>();
-    if (std::isinf(value)) {
-      throw std::runtime_error("At least one INF in " + tensor_name);
-    } else if (std::isnan(value)) {
-      throw std::runtime_error("At least one NaN in " + tensor_name);
-    }
+  auto isnan_tensor = check_tensor.isnan();
+  if (isnan_tensor.any().item<bool>()) {
+    throw std::runtime_error("At least one NaN in " + tensor_name);
+  }
+  auto isinf_tensor = check_tensor.isinf();
+  if (isinf_tensor.any().item<bool>()) {
+    throw std::runtime_error("At least one INF in " + tensor_name);
   }
 }
 
@@ -150,7 +148,7 @@ inline std::vector<at::Tensor> pointer_to_list(
   std::vector<at::Tensor> result;
   result.reserve(len);
   for (int64_t i = 0; i < len; i++) {
-    result.emplace_back(*tensor_handle_to_tensor_pointer(*ptr));
+    result.emplace_back(*tensor_handle_to_tensor_pointer(ptr[i]));
   }
   return result;
 }

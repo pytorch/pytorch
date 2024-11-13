@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import os
 import warnings
@@ -67,6 +68,8 @@ def load(
     For each ``Stateful`` object (having both a ``state_dict`` and a ``load_state_dict``),
     load will first call ``state_dict`` before attempting deserialization, followed by
     ``load_state_dict`` once the deserialization is complete.
+    For each non-``Stateful`` object, load will deserailize the object, and then replace
+    it in the ``state_dict`` with the deserialized object.
 
     .. warning::
         All tensors in ``state_dict`` must be allocated on their
@@ -178,8 +181,12 @@ def load(
                 continue
             elem = state_dict[key]
             if isinstance(elem, Stateful):
+                # If the state_dict is a Stateful object,
+                # DCP does an in-place load in the original state dict.
                 elem.load_state_dict(statetful_sd[key])
-            state_dict[key] = statetful_sd[key]
+            else:
+                # Otherwise, replace the state_dict with the loaded state_dict.
+                state_dict[key] = statetful_sd[key]
 
 
 def _load_state_dict(
@@ -199,6 +206,7 @@ def _load_state_dict(
     ckpt_kwargs = {}
     if (ckpt_id := getattr(storage_reader, "checkpoint_id", None)) is not None:
         ckpt_kwargs["checkpoint_id"] = ckpt_id
+        ckpt_kwargs["process_group"] = distW.group
 
     @_dcp_method_logger(**ckpt_kwargs)
     def local_step():

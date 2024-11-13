@@ -1,4 +1,6 @@
 # Owner(s): ["oncall: pt2"]
+import functools
+import itertools
 import os
 import sys
 import textwrap
@@ -11,9 +13,9 @@ from torch._inductor.codecache import HalideCodeCache
 from torch._inductor.runtime.hints import HalideInputSpec, HalideMeta
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import parallel_num_threads
-
 from torch.testing._internal.common_utils import IS_CI, IS_MACOS, IS_WINDOWS
 from torch.testing._internal.inductor_utils import HAS_CPU
+from torch.utils._triton import has_triton
 
 
 if IS_WINDOWS and IS_CI:
@@ -25,7 +27,7 @@ if IS_WINDOWS and IS_CI:
     raise unittest.SkipTest("requires sympy/functorch/filelock")
 
 try:
-    import halide
+    import halide  # @manual
 
     HAS_HALIDE = halide is not None
 except ImportError:
@@ -35,7 +37,7 @@ except ImportError:
 try:
     from . import test_torchinductor
 except ImportError:
-    import test_torchinductor
+    import test_torchinductor  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
 
 
 make_halide = config.patch(
@@ -43,7 +45,6 @@ make_halide = config.patch(
         "halide.scan_kernels": True,
         "cpu_backend": "halide",
         "cuda_backend": "halide",
-        "fallback_random": True,  # TODO(jansel): support random
     }
 )
 
@@ -194,6 +195,42 @@ class HalideTests(TestCase):
         c = torch.randn(1024)
         fn(a, b, c)
         self.assertEqual(c, a + b)
+
+    @unittest.skipUnless(has_triton(), "requires triton")
+    def test_random_consistency(self):
+        seed = 1234
+        shape = (3, 3)
+        dtype = torch.float32
+
+        for (rand_fn,) in itertools.product(
+            (
+                functools.partial(torch.rand, shape, dtype=dtype, device="cuda"),
+                functools.partial(torch.randn, shape, dtype=dtype, device="cuda"),
+                functools.partial(
+                    torch.randint,
+                    -1000,
+                    1000,
+                    size=shape,
+                    dtype=torch.int64,
+                    device="cuda",
+                ),
+            )
+        ):
+
+            @torch.compile(backend="inductor", options={"cuda_backend": "halide"})
+            def get_rand_halide():
+                return rand_fn()
+
+            @torch.compile(backend="inductor", options={"cuda_backend": "triton"})
+            def get_rand_triton():
+                return rand_fn()
+
+            torch.manual_seed(seed)
+            halide_output = get_rand_halide()
+            torch.manual_seed(seed)
+            triton_output = get_rand_triton()
+
+        self.assertEqual(halide_output, triton_output)
 
 
 if test_torchinductor.HAS_CPU and HAS_HALIDE:

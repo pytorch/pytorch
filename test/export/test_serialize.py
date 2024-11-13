@@ -7,6 +7,7 @@ with test_sym_bool)
 # Owner(s): ["oncall: export"]
 import copy
 import io
+import math
 import tempfile
 import unittest
 import zipfile
@@ -28,7 +29,7 @@ from torch._export.serde.serialize import (
 )
 from torch._higher_order_ops.torchbind import enable_torchbind_tracing
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
-from torch.export import Dim, export, load, save
+from torch.export import Dim, export_for_training, load, save
 from torch.fx.experimental.symbolic_shapes import is_concrete_int, ValueRanges
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -51,55 +52,77 @@ def get_filtered_export_db_tests():
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestSerialize(TestCase):
-    def test_export_with_custom_op_serialization(self):
+    def test_export_with_extension_op_serialization(self):
         class TestModule(torch.nn.Module):
             def forward(self, x):
-                return x + 1
+                return x + x
 
-        class FooCustomOp(torch.nn.Module):
-            pass
+        class FooExtensionOp:
+            def __hash__(self):
+                return 0
 
-        class FooCustomOpHandler(torch._export.serde.serialize.CustomOpHandler):
-            def namespace(self):
-                return "Foo"
+            def __eq__(self, other):
+                return type(other) == type(self)
 
-            def op_name(self, op_type):
-                if op_type == FooCustomOp:
-                    return "FooCustomOp"
-                return None
+            def __call__(self, *args, **kwargs):
+                return torch.ops.aten.add.Tensor(*args, **kwargs)
 
-            def op_type(self, op_name):
-                if op_name == "FooCustomOp":
-                    return FooCustomOp
-                return None
+            @property
+            def __name__(self):
+                return "foo.my_op"
 
-            def op_schema(self, op_type):
-                if op_type == FooCustomOp:
-                    return self.attached_schema
-                return None
+        class ExtensionVerifier(torch._export.verifier.Verifier):
+            dialect = "FOO"
+
+            def allowed_op_types(self):
+                return super().allowed_op_types() + (FooExtensionOp,)
+
+        class FooExtensionHandler(torch._export.serde.serialize.ExtensionHandler):
+            @classmethod
+            def namespace(cls):
+                return "foo"
+
+            @classmethod
+            def to_op_name(cls, op):
+                return "my_op"
+
+            @classmethod
+            def from_op_name(cls, name: str):
+                self.assertEqual(name, "my_op")
+                return FooExtensionOp()
+
+            @classmethod
+            def op_schema(cls, op):
+                return torch.ops.aten.add.Tensor._schema
 
         inp = (torch.ones(10),)
-        ep = export(TestModule(), inp)
+        ep = export_for_training(TestModule(), inp)
 
         # Register the custom op handler.
-        foo_custom_op = FooCustomOp()
-        foo_custom_op_handler = FooCustomOpHandler()
-        torch._export.serde.serialize.register_custom_op_handler(
-            foo_custom_op_handler, type(foo_custom_op)
+        foo_custom_op = FooExtensionOp()
+        torch._export.serde.serialize.register_extension(
+            FooExtensionOp, FooExtensionHandler
         )
 
+        new_gm = copy.deepcopy(ep.graph_module)
         # Inject the custom operator.
-        for node in ep.graph.nodes:
+        for node in new_gm.graph.nodes:
             if node.name == "add":
-                foo_custom_op_handler.attached_schema = node.target._schema
                 node.target = foo_custom_op
 
-        # Serialization.
-        serialize(ep)
+        new_ep = ep._update(new_gm, ep.graph_signature, verifiers=[ExtensionVerifier])
+        serialized = serialize(new_ep)
+        deserialized = deserialize(serialized)
+        self.assertEqual(
+            len(
+                deserialized.graph.find_nodes(op="call_function", target=foo_custom_op)
+            ),
+            1,
+        )
 
     def test_predispatch_export_with_autograd_op(self):
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x):
@@ -126,7 +149,7 @@ class TestSerialize(TestCase):
         class MyModule(torch.nn.Module):
             """A test module with that has multiple args and uses kwargs"""
 
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.p = torch.nn.Parameter(torch.ones(2, 3))
 
@@ -138,7 +161,7 @@ class TestSerialize(TestCase):
 
         model = MyModule().eval()
         random_inputs = (torch.rand([2, 3]), torch.rand([2, 3]))
-        exp_program = torch.export.export(model, random_inputs, {"use_p": True})
+        exp_program = export_for_training(model, random_inputs, {"use_p": True})
 
         output_buffer = io.BytesIO()
         # Tests that example inputs are preserved when saving and loading module.
@@ -152,11 +175,33 @@ class TestSerialize(TestCase):
         loaded_out = loaded_model.module()(*loaded_args, **loaded_kwargs)
         self.assertEqual(orig_out, loaded_out)
 
+    def test_metadata_run_decomp_serder(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x.sin()
+
+        exp_program = export_for_training(M(), (torch.randn(4, 4),))
+
+        output_buffer = io.BytesIO()
+        # Tests that example forward arg names are preserved when saving and loading module.
+        torch.export.save(exp_program, output_buffer)
+        loaded_model = torch.export.load(output_buffer)
+
+        ep = loaded_model.run_decompositions({})
+        # We should preserve the original module name
+        self.assertExpectedInline(
+            str(ep.graph_module.code).strip(),
+            """\
+def forward(self, x):
+    sin = torch.ops.aten.sin.default(x);  x = None
+    return (sin,)""",
+        )
+
     def test_metadata_parsing_with_layer_split(self):
         # Tests that modules with more complicated layer patterns can be serialized
         # and deserialized correctly.
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.layers = torch.nn.Sequential(
                     torch.nn.SiLU(),
@@ -175,7 +220,7 @@ class TestSerialize(TestCase):
         inp = (torch.ones(10),)
         # Module will only be able to roundtrip if metadata
         # can be correctly parsed.
-        ep = export(MyModule(), inp)
+        ep = export_for_training(MyModule(), inp)
         buffer = io.BytesIO()
         save(ep, buffer)
         loaded_ep = load(buffer)
@@ -187,7 +232,7 @@ class TestSerialize(TestCase):
 
     def test_serialize_constant_outputs(self):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x):
@@ -198,7 +243,7 @@ class TestSerialize(TestCase):
 
         # Check that module can be roundtripped, thereby confirming proper deserialization.
         inp = (torch.ones(10),)
-        ep = export(MyModule(), inp)
+        ep = export_for_training(MyModule(), inp)
         buffer = io.BytesIO()
         save(ep, buffer)
         loaded_ep = load(buffer)
@@ -209,7 +254,7 @@ class TestSerialize(TestCase):
 
     def test_serialize_multiple_returns_from_node(self) -> None:
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x, w, b):
@@ -221,7 +266,7 @@ class TestSerialize(TestCase):
                     eps=1e-5,
                 )
 
-        exported_module = export(
+        exported_module = export_for_training(
             MyModule(),
             (
                 torch.ones([512, 512], requires_grad=True),
@@ -243,16 +288,78 @@ class TestSerialize(TestCase):
             self.assertNotIn(name, seen)
             seen.add(name)
 
+    def test_serialize_sym_int(self) -> None:
+        class DynamicShapeSimpleModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, a, b, c) -> torch.Tensor:
+                d = (torch.matmul(a, b) + c) / 2
+                d_s0 = d.shape[0]
+                d_s1 = d.shape[1]
+                d_s3 = d_s0 * d_s1
+                e = d.view(d_s3)
+                return torch.cat([e, e])
+
+        inputs = (torch.randn(2, 4), torch.randn(4, 7), torch.randn(2, 7))
+        dim0_ac = torch.export.Dim("dim0_ac")
+        dim1_bc = torch.export.Dim("dim1_b")
+        dynamic_shapes = {
+            "a": {0: dim0_ac},
+            "b": {1: dim1_bc},
+            "c": {0: dim0_ac, 1: dim1_bc},
+        }
+        exported_module = export_for_training(
+            DynamicShapeSimpleModel(), inputs, dynamic_shapes=dynamic_shapes
+        ).run_decompositions()
+        serialized = ExportedProgramSerializer().serialize(exported_module)
+        sym_size_nodes = [
+            node
+            for node in serialized.exported_program.graph_module.graph.nodes
+            if node.target == "torch.ops.aten.sym_size.int"
+        ]
+        for node in sym_size_nodes:
+            self.assertEqual(node.inputs[0].name, "self")
+            self.assertEqual(node.inputs[1].name, "dim")
+
+    def test_serialize_infinite_sym_int(self) -> None:
+        class DynamicShapeSimpleModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, a, b, c) -> torch.Tensor:
+                d = (torch.matmul(a, b) + c) / 2
+                d_s0 = d.shape[0]
+                d_s1 = d.shape[1]
+                d_s3 = d_s0 * d_s1
+                e = d.view(d_s3)
+                return torch.cat([e, e])
+
+        inputs = (torch.randn(2, 4), torch.randn(4, 7), torch.randn(2, 7))
+        dim0_ac = torch.export.Dim("dim0_ac")
+        dim1_bc = torch.export.Dim("dim1_b")
+        dynamic_shapes = {
+            "a": {0: dim0_ac},
+            "b": {1: dim1_bc},
+            "c": {0: dim0_ac, 1: dim1_bc},
+        }
+        exported_module = export_for_training(
+            DynamicShapeSimpleModel(), inputs, dynamic_shapes=dynamic_shapes
+        ).run_decompositions()
+        serialized = ExportedProgramSerializer().serialize(exported_module)
+        for v in serialized.exported_program.range_constraints.values():
+            self.assertEqual(v.max_val, None)
+
     def test_serialize_list_returns(self) -> None:
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x):
                 return torch.split(x, 2)
 
         input = torch.arange(10.0).reshape(5, 2)
-        exported_module = export(MyModule(), (input,)).run_decompositions()
+        exported_module = export_for_training(MyModule(), (input,)).run_decompositions()
 
         serialized = ExportedProgramSerializer().serialize(exported_module)
         node = serialized.exported_program.graph_module.graph.nodes[-1]
@@ -287,13 +394,13 @@ class TestSerialize(TestCase):
         """
 
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x):
                 return torch.ops.aten.var_mean.correction(x, [1])[0]
 
-        exported_module = export(
+        exported_module = export_for_training(
             MyModule(),
             (torch.ones([512, 512], requires_grad=True),),
         ).run_decompositions()
@@ -315,7 +422,7 @@ class TestSerialize(TestCase):
             def forward(self, x):
                 return x + x
 
-        ep = torch.export.export(
+        ep = export_for_training(
             M(), (torch.randn(4),), dynamic_shapes=({0: Dim("temp")},)
         )
 
@@ -347,7 +454,7 @@ class TestSerialize(TestCase):
         f = Foo()
 
         x, _ = torch.sort(torch.randn(3, 4))
-        exported_module = export(f, (x,)).run_decompositions()
+        exported_module = export_for_training(f, (x,)).run_decompositions()
         serialized = ExportedProgramSerializer().serialize(exported_module)
 
         node = serialized.exported_program.graph_module.graph.nodes[-1]
@@ -365,7 +472,7 @@ class TestSerialize(TestCase):
                 b = x + y
                 return b + a
 
-        ep = torch.export.export(Module(), (torch.randn(3, 2), torch.randn(3, 2)))
+        ep = export_for_training(Module(), (torch.randn(3, 2), torch.randn(3, 2)))
         s = ExportedProgramSerializer().serialize(ep)
         c = canonicalize(s.exported_program)
         g = c.graph_module.graph
@@ -379,7 +486,7 @@ class TestSerialize(TestCase):
             def forward(self, x):
                 return torch.ops.aten.sum.dim_IntList(x, [])
 
-        ep = torch.export.export(M(), (torch.randn(3, 2),))
+        ep = torch.export.export_for_training(M(), (torch.randn(3, 2),))
         serialized = ExportedProgramSerializer().serialize(ep)
         for node in serialized.exported_program.graph_module.graph.nodes:
             if "aten.sum.dim_IntList" in node.target:
@@ -477,23 +584,43 @@ class TestDeserialize(TestCase):
     ) -> None:
         """Export a graph, serialize it, deserialize it, and compare the results."""
 
+        def _deepcopy_inputs(inputs):
+            # copy.deepcopy(deepcopy) can fail if tensor inputs have attribute (i.e. __dict__).
+            # we remove __dict__ when deepcopying.
+            dict_mapping = dict()
+            inputs_clone = ()
+            for idx, i in enumerate(inputs):
+                if isinstance(i, torch.Tensor) and hasattr(inputs[0], "__dict__"):
+                    dict_mapping[idx] = i.__dict__
+                    i.__dict__ = {}
+                inputs_clone += (copy.deepcopy(i),)
+
+            # Add __dict__ back.
+            for k, v in dict_mapping.items():
+                inputs[k].__dict__ = v
+                inputs_clone[k].__dict__ = v
+            return inputs_clone
+
         def _check_graph(pre_dispatch):
             if pre_dispatch:
-                ep = torch.export._trace._export(
+                ep = torch.export.export_for_training(
                     fn,
-                    copy.deepcopy(inputs),
+                    _deepcopy_inputs(inputs),
                     {},
                     dynamic_shapes=dynamic_shapes,
-                    pre_dispatch=True,
                     strict=strict,
                 )
             else:
-                ep = torch.export.export(
+                # We should have this branch because
+                # PT2 Inference goes through this private
+                # export API.
+                ep = torch.export._trace._export(
                     fn,
-                    copy.deepcopy(inputs),
+                    _deepcopy_inputs(inputs),
                     {},
                     dynamic_shapes=dynamic_shapes,
                     strict=strict,
+                    pre_dispatch=False,
                 )
             ep.graph.eliminate_dead_code()
 
@@ -503,8 +630,8 @@ class TestDeserialize(TestCase):
             )
             deserialized_ep.graph.eliminate_dead_code()
 
-            orig_outputs = ep.module()(*copy.deepcopy(inputs))
-            loaded_outputs = deserialized_ep.module()(*copy.deepcopy(inputs))
+            orig_outputs = ep.module()(*_deepcopy_inputs(inputs))
+            loaded_outputs = deserialized_ep.module()(*_deepcopy_inputs(inputs))
 
             flat_orig_outputs = pytree.tree_leaves(orig_outputs)
             flat_loaded_outputs = pytree.tree_leaves(loaded_outputs)
@@ -550,6 +677,20 @@ class TestDeserialize(TestCase):
                     return torch.ops.mylib.foo(a, b, c)
 
             self.check_graph(M(), (torch.randn(3), torch.randn(3), torch.randn(3)))
+
+    def test_sym_bool_dynamic_shapes(self) -> None:
+        class MyModule(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, x, y):
+                z = x[:, -y.shape[0] :, :]
+                return z
+
+        inputs = (torch.ones(4, 5, 10), torch.ones(3))
+        dynamic_shapes = {"x": {}, "y": {0: Dim("seqlen", max=4)}}
+        # Compile with dynamic_shapes set to get operator.neg involved
+        self.check_graph(MyModule(), inputs, dynamic_shapes=dynamic_shapes)
 
     def test_auto_functionalize(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
@@ -614,7 +755,7 @@ class TestDeserialize(TestCase):
         """
 
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x, w, b):
@@ -635,7 +776,7 @@ class TestDeserialize(TestCase):
 
     def test_basic(self) -> None:
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x):
@@ -649,7 +790,7 @@ class TestDeserialize(TestCase):
 
     def test_dynamic(self) -> None:
         class DynamicShapeSimpleModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, a, b, c) -> torch.Tensor:
@@ -665,6 +806,7 @@ class TestDeserialize(TestCase):
         dynamic_shapes = {"a": {0: dim0_ac}, "b": None, "c": {0: dim0_ac}}
         self.check_graph(DynamicShapeSimpleModel(), inputs, dynamic_shapes)
 
+    @unittest.expectedFailure  # T206587081
     def test_sym_bool(self):
         class Module(torch.nn.Module):
             def forward(self, x, y):
@@ -687,7 +829,7 @@ class TestDeserialize(TestCase):
 
     def test_module(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear1 = torch.nn.Linear(3, 3)
                 self.relu = torch.nn.ReLU()
@@ -705,7 +847,7 @@ class TestDeserialize(TestCase):
 
     def test_module_meta(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.p = torch.nn.Parameter(torch.ones(3, 3))
 
@@ -734,6 +876,26 @@ class TestDeserialize(TestCase):
                 return cond(x[0][0] > 4, t, f, [x, y])
 
         self.check_graph(M(), inputs)
+
+    def test_arg_from(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("compress_weight", torch.ones((10, 10)))
+                self.register_buffer("compress_bias", torch.ones(10))
+
+            def forward(self) -> None:
+                if self.compress_weight is None or self.compress_bias is None:
+                    return
+                torch.nn.init.kaiming_uniform_(self.compress_weight, a=math.sqrt(5))
+                fan_in, _ = torch.nn.init._calculate_fan_in_and_fan_out(
+                    self.compress_weight
+                )
+                bound = 1 / math.sqrt(fan_in) if fan_in > 0 else 0
+                torch.nn.init.uniform_(self.compress_bias, -bound, bound)
+
+        with torch.no_grad():
+            self.check_graph(M(), ())
 
     def test_map(self):
         from functorch.experimental import control_flow
@@ -781,7 +943,7 @@ class TestDeserialize(TestCase):
 
     def test_list_of_optional_tensors(self) -> None:
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x, y, z):
@@ -809,7 +971,7 @@ class TestDeserialize(TestCase):
                 a = a * 2
                 return a, b
 
-        ep = torch.export.export(M(), (torch.ones(3),))
+        ep = torch.export.export_for_training(M(), (torch.ones(3),))
 
         # insert another getitem node
         for node in ep.graph.nodes:
@@ -884,7 +1046,7 @@ def forward(self, x):
     @unittest.skipIf(not torch.cuda.is_available(), "Requires cuda")
     def test_device(self) -> None:
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(3, 16, 3, stride=1, bias=True)
                 self.relu = torch.nn.ReLU()
@@ -901,7 +1063,7 @@ def forward(self, x):
 
     def test_custom_obj_tuple_out(self):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.attr = torch.classes._TorchScriptTesting._Foo(10, 20)
 
@@ -917,7 +1079,7 @@ def forward(self, x):
 
     def test_custom_obj(self):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.attr = torch.classes._TorchScriptTesting._Foo(10, 20)
 
@@ -932,7 +1094,7 @@ def forward(self, x):
 
     def test_custom_obj_list_out(self):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.attr = torch.classes._TorchScriptTesting._Foo(10, 20)
 
@@ -948,14 +1110,14 @@ def forward(self, x):
 
     def test_export_no_inputs(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.p = torch.ones(3, 3)
 
             def forward(self):
                 return self.p * self.p
 
-        ep = torch.export.export(M(), ())
+        ep = torch.export.export_for_training(M(), ())
         ep._example_inputs = None
         roundtrip_ep = deserialize(serialize(ep))
         self.assertTrue(torch.allclose(ep.module()(), roundtrip_ep.module()()))
@@ -972,7 +1134,7 @@ class TestSchemaVersioning(TestCase):
                 return x + x
 
         f = Module()
-        ep = export(f, (torch.randn(1, 3),))
+        ep = export_for_training(f, (torch.randn(1, 3),))
 
         serialized_program = ExportedProgramSerializer().serialize(ep)
         serialized_program.exported_program.schema_version.major = -1
@@ -997,7 +1159,7 @@ class TestSaveLoad(TestCase):
         inp = (torch.tensor([0.1, 0.1]),)
 
         class Module(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(2, 2)
 
@@ -1008,7 +1170,7 @@ class TestSaveLoad(TestCase):
                 y = self.linear(y)
                 return y
 
-        ep = export(Module(), inp)
+        ep = export_for_training(Module(), inp)
 
         buffer = io.BytesIO()
         save(ep, buffer)
@@ -1025,7 +1187,7 @@ class TestSaveLoad(TestCase):
         f = Foo()
 
         inp = (torch.randn(2, 2),)
-        ep = export(f, inp)
+        ep = export_for_training(f, inp)
 
         with tempfile.NamedTemporaryFile() as f:
             save(ep, f)
@@ -1042,7 +1204,7 @@ class TestSaveLoad(TestCase):
         f = Foo()
 
         inp = (torch.tensor([6]), torch.tensor([7]))
-        ep = export(f, inp)
+        ep = export_for_training(f, inp)
 
         with TemporaryFileName() as fname:
             path = Path(fname)
@@ -1060,7 +1222,7 @@ class TestSaveLoad(TestCase):
 
         f = Foo()
 
-        ep = export(f, inp)
+        ep = export_for_training(f, inp)
 
         buffer = io.BytesIO()
         save(ep, buffer, extra_files={"extra.txt": "moo"})
@@ -1078,7 +1240,7 @@ class TestSaveLoad(TestCase):
 
         f = Foo()
 
-        ep = export(f, (torch.randn(1, 3),))
+        ep = export_for_training(f, (torch.randn(1, 3),))
 
         with tempfile.NamedTemporaryFile() as f:
             save(ep, f)
@@ -1096,7 +1258,7 @@ class TestSaveLoad(TestCase):
 
     def test_save_constants(self):
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.a = torch.tensor(3)
 
@@ -1104,7 +1266,7 @@ class TestSaveLoad(TestCase):
                 list_tensor = [torch.tensor(3), torch.tensor(4)]
                 return x + self.a + list_tensor[0] + list_tensor[1]
 
-        ep = export(Foo(), (torch.tensor(1),))
+        ep = export_for_training(Foo(), (torch.tensor(1),))
         buffer = io.BytesIO()
         save(ep, buffer)
         buffer.seek(0)
@@ -1130,7 +1292,7 @@ class TestSerializeCustomClass(TestCase):
         f = Foo()
 
         inputs = (torch.zeros(4, 4),)
-        ep = export(f, inputs)
+        ep = export_for_training(f, inputs)
 
         # Replace one of the values with an instance of our custom class
         for node in ep.graph.nodes:
@@ -1170,7 +1332,7 @@ class TestSerializeCustomClass(TestCase):
 
     def test_custom_class_containing_fake_tensor(self):
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.custom_obj = torch.classes._TorchScriptTesting._ContainsTensor(
                     torch.rand(2, 3)
@@ -1184,11 +1346,111 @@ class TestSerializeCustomClass(TestCase):
 
         inputs = (torch.zeros(2, 3),)
         with enable_torchbind_tracing():
-            ep = export(f, inputs, strict=False)
+            ep = export_for_training(f, inputs, strict=False)
 
         serialized_vals = serialize(ep)
         ep = deserialize(serialized_vals)
         self.assertTrue(isinstance(ep.constants["custom_obj"].get(), FakeTensor))
+
+    def test_custom_tag_metadata_serialization(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return x + x
+
+        f = Foo()
+
+        inputs = (torch.zeros(4, 4),)
+        ep = export_for_training(f, inputs)
+
+        new_gm = copy.deepcopy(ep.graph_module)
+        new_gm.meta["custom"] = {}
+        new_gm.meta["custom"]["f"] = "bar"
+
+        for node in new_gm.graph.nodes:
+            if node.op == "call_function" and node.target == torch.ops.aten.add.Tensor:
+                node.meta["custom"] = {}
+                node.meta["custom"]["quantization_tag"] = "foo"
+
+        new_ep = ep._update(new_gm, ep.graph_signature)
+        serialized_vals = serialize(new_ep)
+        new_ep = deserialize(serialized_vals)
+
+        self.assertEqual(new_ep.graph_module.meta["custom"]["f"], "bar")
+        counter = 0
+        for node in new_ep.graph.nodes:
+            if node.op == "call_function" and node.target == torch.ops.aten.add.Tensor:
+                counter += 1
+                self.assertTrue(node.meta["custom"]["quantization_tag"] == "foo")
+        self.assertEqual(counter, 1)
+
+    def test_custom_tag_metadata_decomp(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(2, 2)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        f = Foo()
+
+        inputs = (torch.ones(2, 2),)
+        ep = export_for_training(f, inputs)
+
+        new_gm = copy.deepcopy(ep.graph_module)
+        new_gm.meta["custom"] = {}
+        new_gm.meta["custom"]["f"] = "bar"
+
+        counter = 0
+        for node in new_gm.graph.nodes:
+            if (
+                node.op == "call_function"
+                and node.target == torch.ops.aten.linear.default
+            ):
+                counter += 1
+                node.meta["custom"] = {}
+                node.meta["custom"]["quantization_tag"] = "foo"
+        self.assertEqual(counter, 1)
+
+        new_ep = ep._update(new_gm, ep.graph_signature)
+        new_ep = new_ep.run_decompositions()
+
+        self.assertEqual(new_ep.graph_module.meta["custom"]["f"], "bar")
+        counter = 0
+        for node in new_ep.graph.nodes:
+            if node.op == "call_function":
+                counter += 1
+                self.assertTrue(node.meta["custom"]["quantization_tag"] == "foo")
+        self.assertTrue(counter > 1)
+
+    def test_custom_tag_metadata_copy(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return x + x
+
+        f = Foo()
+
+        inputs = (torch.zeros(4, 4),)
+        ep = export_for_training(f, inputs)
+
+        new_gm = copy.deepcopy(ep.graph_module)
+        new_gm.meta["custom"] = {}
+        new_gm.meta["custom"]["f"] = "bar"
+
+        for node in new_gm.graph.nodes:
+            if node.op == "call_function" and node.target == torch.ops.aten.add.Tensor:
+                node.meta["custom"] = {}
+                node.meta["custom"]["quantization_tag"] = "foo"
+
+        new_gm = copy.deepcopy(new_gm)
+
+        self.assertEqual(new_gm.meta["custom"]["f"], "bar")
+        counter = 0
+        for node in new_gm.graph.nodes:
+            if node.op == "call_function" and node.target == torch.ops.aten.add.Tensor:
+                counter += 1
+                self.assertTrue(node.meta["custom"]["quantization_tag"] == "foo")
+        self.assertEqual(counter, 1)
 
 
 if __name__ == "__main__":

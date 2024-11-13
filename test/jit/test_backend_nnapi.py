@@ -9,6 +9,7 @@ import torch
 import torch._C
 from torch.testing._internal.common_utils import IS_FBCODE, skipIfTorchDynamo
 
+
 # hacky way to skip these tests in fbcode:
 # during test execution in fbcode, test_nnapi is available during test discovery,
 # but not during test execution. So we can't try-catch here, otherwise it'll think

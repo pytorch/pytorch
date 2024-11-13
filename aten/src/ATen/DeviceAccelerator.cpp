@@ -2,7 +2,7 @@
 #include <ATen/DeviceAccelerator.h>
 namespace at {
 
-C10_API std::optional<DeviceType> getAccelerator(bool checked) {
+std::optional<c10::DeviceType> getAccelerator(bool checked) {
 #define DETECT_AND_ASSIGN_ACCELERATOR(device_name) \
   if (at::has##device_name()) {                    \
     device_type = k##device_name;                  \
@@ -20,11 +20,14 @@ C10_API std::optional<DeviceType> getAccelerator(bool checked) {
     // first.
     return kPrivateUse1;
   }
-  std::optional<DeviceType> device_type = std::nullopt;
+  std::optional<c10::DeviceType> device_type = std::nullopt;
   bool is_accelerator_detected = false;
   DETECT_AND_ASSIGN_ACCELERATOR(CUDA)
   DETECT_AND_ASSIGN_ACCELERATOR(MTIA)
   DETECT_AND_ASSIGN_ACCELERATOR(XPU)
+  DETECT_AND_ASSIGN_ACCELERATOR(HIP)
+  DETECT_AND_ASSIGN_ACCELERATOR(MPS)
+  DETECT_AND_ASSIGN_ACCELERATOR(HPU)
   if (checked) {
     TORCH_CHECK(
         device_type, "Cannot access accelerator device when none is available.")
@@ -32,6 +35,21 @@ C10_API std::optional<DeviceType> getAccelerator(bool checked) {
   return device_type;
 
 #undef DETECT_AND_ASSIGN_ACCELERATOR
+}
+
+bool isAccelerator(c10::DeviceType d) {
+  switch (d) {
+    case at::kCUDA:
+    case at::kMTIA:
+    case at::kXPU:
+    case at::kHIP:
+    case at::kMPS:
+    case at::kHPU:
+    case at::kPrivateUse1:
+      return true;
+    default:
+      return false;
+  }
 }
 
 } // namespace at

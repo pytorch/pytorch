@@ -6,7 +6,6 @@
 from unittest import expectedFailure as xfail, skipIf
 
 import numpy
-
 from pytest import raises as assert_raises
 
 from torch.testing._internal.common_utils import (

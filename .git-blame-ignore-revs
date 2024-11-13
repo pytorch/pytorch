@@ -40,3 +40,7 @@ e6ec0efaf87703c5f889cfc20b29be455885d58d
 a53cda1ddc15336dc1ff0ce1eff2a49cdc5f882e
 # 2024-01-02 clangformat: fused adam #116583
 9dc68d1aa9e554d09344a10fff69f7b50b2d23a0
+# 2024-06-28 enable UFMT in `torch/storage.py`
+d80939e5e9337e8078f11489afefec59fd42f93b
+# 2024-06-28 enable UFMT in `torch.utils.data`
+7cf0b90e49689d45be91aa539fdf54cf2ea8a9a3

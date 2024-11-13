@@ -10,6 +10,8 @@
 #include <torch/csrc/distributed/rpc/rref_proto.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
+#include <utility>
+
 namespace {
 // If the type is subtype of named type, return its qualifiedname, otherwise
 // return its type str.
@@ -30,9 +32,7 @@ std::string getTypeStr(const c10::TypePtr& type) {
 
 } // namespace
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace torch::distributed::rpc {
 
 std::atomic<local_id_t> RRefContext::nextLocalId_{0};
 
@@ -242,7 +242,12 @@ OwnerRRef::OwnerRRef(
     const RRefId& rrefId,
     TypePtr type,
     std::vector<c10::Device> devices)
-    : OwnerRRef(ownerId, rrefId, type, /* value */ {}, std::move(devices)) {}
+    : OwnerRRef(
+          ownerId,
+          rrefId,
+          std::move(type),
+          /* value */ {},
+          std::move(devices)) {}
 
 OwnerRRef::OwnerRRef(
     worker_id_t ownerId,
@@ -250,7 +255,7 @@ OwnerRRef::OwnerRRef(
     TypePtr type,
     std::optional<IValue> value,
     std::vector<c10::Device> devices)
-    : RRef(ownerId, rrefId, type) {
+    : RRef(ownerId, rrefId, std::move(type)) {
   future_ = c10::make_intrusive<JitFuture>(type_, std::move(devices));
 
   if (value.has_value()) {
@@ -276,7 +281,7 @@ c10::intrusive_ptr<JitFuture> OwnerRRef::getFuture() {
 }
 
 void OwnerRRef::setValue(IValue&& value) {
-  future_->markCompleted(value);
+  future_->markCompleted(std::move(value));
 }
 
 void OwnerRRef::setError(std::exception_ptr eptr) {
@@ -295,6 +300,4 @@ std::ostream& operator<<(std::ostream& os, const RRef& rref) {
   }
 }
 
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc

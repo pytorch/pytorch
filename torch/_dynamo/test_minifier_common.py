@@ -15,6 +15,7 @@ from unittest.mock import patch
 import torch
 import torch._dynamo
 import torch._dynamo.test_case
+from torch._dynamo.trace_rules import _as_posix_path
 from torch.utils._traceback import report_compile_source_on_error
 
 
@@ -30,6 +31,18 @@ class MinifierTestResult:
         r = re.sub(r"\s+$", "\n", r, flags=re.MULTILINE)
         r = re.sub(r"\n{3,}", "\n\n", r)
         return r.strip()
+
+    def get_exported_program_path(self):
+        # Extract the exported program file path from AOTI minifier's repro.py
+        # Regular expression pattern to match the file path
+        pattern = r'torch\.export\.load\(\s*["\'](.*?)["\']\s*\)'
+        # Search for the pattern in the text
+        match = re.search(pattern, self.repro_code)
+        # Extract and print the file path if a match is found
+        if match:
+            file_path = match.group(1)
+            return file_path
+        return None
 
     def minifier_module(self):
         return self._get_module(self.minifier_code)
@@ -99,16 +112,17 @@ torch._inductor.config.{"cpp" if device == "cpu" else "triton"}.inject_relu_bug_
 
             # NB: Can't use save_config because that will omit some fields,
             # but we must save and reset ALL fields
-            dynamo_config = torch._dynamo.config.shallow_copy_dict()
-            inductor_config = torch._inductor.config.shallow_copy_dict()
+            dynamo_config = torch._dynamo.config.get_config_copy()
+            inductor_config = torch._inductor.config.get_config_copy()
             try:
                 stderr = io.StringIO()
                 log_handler = logging.StreamHandler(stderr)
                 log = logging.getLogger("torch._dynamo")
                 log.addHandler(log_handler)
                 try:
-                    prev_cwd = os.getcwd()
+                    prev_cwd = _as_posix_path(os.getcwd())
                     if cwd is not None:
+                        cwd = _as_posix_path(cwd)
                         os.chdir(cwd)
                     with patch("sys.argv", args), report_compile_source_on_error():
                         exec(code, {"__name__": "__main__", "__compile_source__": code})
@@ -135,6 +149,8 @@ torch._inductor.config.{"cpp" if device == "cpu" else "triton"}.inject_relu_bug_
                 stderr.getvalue().encode("utf-8"),
             )
         else:
+            if cwd is not None:
+                cwd = _as_posix_path(cwd)
             return subprocess.run(args, capture_output=True, cwd=cwd, check=False)
 
     # Run `code` in a separate python process.
@@ -157,7 +173,7 @@ torch._inductor.config.{"cpp" if device == "cpu" else "triton"}.inject_relu_bug_
     # Runs the minifier launcher script in `repro_dir`
     def _run_minifier_launcher(self, repro_dir, isolate, *, minifier_args=()):
         self.assertIsNotNone(repro_dir)
-        launch_file = os.path.join(repro_dir, "minifier_launcher.py")
+        launch_file = _as_posix_path(os.path.join(repro_dir, "minifier_launcher.py"))
         with open(launch_file) as f:
             launch_code = f.read()
         self.assertTrue(os.path.exists(launch_file))
@@ -176,7 +192,7 @@ torch._inductor.config.{"cpp" if device == "cpu" else "triton"}.inject_relu_bug_
     # Runs the repro script in `repro_dir`
     def _run_repro(self, repro_dir, *, isolate=True):
         self.assertIsNotNone(repro_dir)
-        repro_file = os.path.join(repro_dir, "repro.py")
+        repro_file = _as_posix_path(os.path.join(repro_dir, "repro.py"))
         with open(repro_file) as f:
             repro_code = f.read()
         self.assertTrue(os.path.exists(repro_file))
@@ -193,14 +209,21 @@ torch._inductor.config.{"cpp" if device == "cpu" else "triton"}.inject_relu_bug_
     # `patch_code` is the code to be patched in every generated file; usually
     # just use this to turn on bugs via the config
     def _gen_test_code(self, run_code, repro_after, repro_level):
+        repro_after_line = (
+            f"""\
+torch._dynamo.config.repro_after = "{repro_after}"
+"""
+            if repro_after
+            else ""
+        )
         return f"""\
 import torch
 import torch._dynamo
-{torch._dynamo.config.codegen_config()}
-{torch._inductor.config.codegen_config()}
-torch._dynamo.config.repro_after = "{repro_after}"
+{_as_posix_path(torch._dynamo.config.codegen_config())}
+{_as_posix_path(torch._inductor.config.codegen_config())}
+{repro_after_line}
 torch._dynamo.config.repro_level = {repro_level}
-torch._dynamo.config.debug_dir_root = "{self.DEBUG_DIR}"
+torch._dynamo.config.debug_dir_root = "{_as_posix_path(self.DEBUG_DIR)}"
 {run_code}
 """
 

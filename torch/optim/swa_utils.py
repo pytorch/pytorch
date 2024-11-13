@@ -11,7 +11,9 @@ from torch import Tensor
 from torch.nn import Module
 from torch.optim.lr_scheduler import _format_param, LRScheduler
 from torch.utils._foreach_utils import _get_foreach_kernels_supported_devices
+
 from .optimizer import Optimizer
+
 
 __all__ = [
     "AveragedModel",
@@ -25,11 +27,17 @@ __all__ = [
 
 from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
 
+
 PARAM_LIST = Union[Tuple[Tensor, ...], List[Tensor]]
 
 
 def get_ema_multi_avg_fn(decay=0.999):
     """Get the function applying exponential moving average (EMA) across multiple params."""
+
+    if decay < 0.0 or decay > 1.0:
+        raise ValueError(
+            f"Invalid decay value {decay} provided. Please provide a value in [0,1] range."
+        )
 
     @torch.no_grad()
     def ema_update(ema_param_list: PARAM_LIST, current_param_list: PARAM_LIST, _):
@@ -79,6 +87,11 @@ def get_swa_multi_avg_fn():
 
 def get_ema_avg_fn(decay=0.999):
     """Get the function applying exponential moving average (EMA) across a single param."""
+
+    if decay < 0.0 or decay > 1.0:
+        raise ValueError(
+            f"Invalid decay value {decay} provided. Please provide a value in [0,1] range."
+        )
 
     @torch.no_grad()
     def ema_update(ema_param: Tensor, current_param: Tensor, num_averaged):
@@ -302,6 +315,7 @@ def update_bn(
 
     It performs one pass over data in `loader` to estimate the activation
     statistics for BatchNorm layers in the model.
+
     Args:
         loader (torch.utils.data.DataLoader): dataset loader to compute the
             activation statistics on. Each data batch should be either a

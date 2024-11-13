@@ -2,6 +2,8 @@
 import logging
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
 
+from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
+
 from ...autotune_process import CUDABenchmarkRequest
 from ...ir import (
     Buffer,
@@ -14,9 +16,15 @@ from ...ir import (
 )
 from ...utils import sympy_product
 from ...virtualized import V
-from ..common import IndentedBuffer, Kernel, OpOverrides
-
+from ..common import (
+    IndentedBuffer,
+    Kernel,
+    OpOverrides,
+    WorkspaceArg,
+    WorkspaceZeroMode,
+)
 from ..cpp_utils import CppPrinter, DTYPE_TO_CPP
+
 
 if TYPE_CHECKING:
     from torch._inductor.codegen.cuda.cuda_template import CUDATemplate
@@ -45,7 +53,7 @@ class CUDATemplateKernel(CUDAKernel):
 
     _EXTRA_CPP_ARGS = "size_t* workspace_size, uint8_t* workspace, cudaStream_t stream"
 
-    def __init__(self, kernel_name):
+    def __init__(self, kernel_name) -> None:
         """
         Initializes a new instance of the CUDATemplateKernel class.
 
@@ -96,6 +104,9 @@ class CUDATemplateKernel(CUDAKernel):
         )
         return res.getvalue()
 
+    def get_signature(self) -> str:
+        return self.signature
+
     def def_kernel(
         self,
         inputs: List[IRNode],
@@ -141,7 +152,11 @@ class CUDATemplateKernel(CUDAKernel):
                 self.args.output_buffers[node.get_name()] = name
 
         arg_defs, *_ = self.args.cpp_argdefs()
-        return f"PT_EXPORT int {self.kernel_name}({', '.join(arg_defs)}, {self._EXTRA_CPP_ARGS})"
+        signature = (
+            f"int {self.kernel_name}({', '.join(arg_defs)}, {self._EXTRA_CPP_ARGS})"
+        )
+        self.signature = signature
+        return signature
 
     def call_kernel(
         self,
@@ -150,42 +165,70 @@ class CUDATemplateKernel(CUDAKernel):
     ) -> None:
         """
         Generates code to call the kernel through V.graph.wrapper_code.
-        used from within torch._inductor.wrapper.WrapperCodeGen
+        used from within torch._inductor.wrapper.PythonWrapperCodegen
 
         name: Name of kernel function.
         node: The CUDATemplateBuffer node which contains information about the kernel, it's fused epilogue nodes
         as well as all required inputs and outputs.
         """
         wrapper = V.graph.wrapper_code
-        _, call_args, _, arg_types = self.args.python_argdefs()
+
+        if V.graph.cpp_wrapper:
+            # Make sure we initialize these kernels since they're exported as
+            # C-style symbol names.
+            assert isinstance(wrapper, CppWrapperCpu)
+            wrapper.initialized_kernels[name] = self
+            # We always originally initialize name with "KERNEL_NAME". So, we
+            # we replace with the real kernel name passed as an arg to this function.
+            self.signature = self.signature.replace("KERNEL_NAME", name)
+            _, call_args, arg_types = self.args.cpp_argdefs()
+        else:
+            _, call_args, _, arg_types = self.args.python_argdefs()
         # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
         for i in range(len(call_args)):
             if V.graph.is_unspec_arg(call_args[i]):
                 call_args[i] = call_args[i] + ".item()"
             else:
-                call_args[i] = f"c_void_p({call_args[i]}.data_ptr())"
+                call_args[i] = (
+                    call_args[i]
+                    if V.graph.cpp_wrapper
+                    else f"c_void_p({call_args[i]}.data_ptr())"
+                )
 
         # workspace_size ptr is NULL to mark this call is not intended for retrieving workspace_size.
         # workspace_size should have already been retrieved prior to this call.
-        call_args.append("None")
+        # workspace_size is here.
+        call_args.append("nullptr" if V.graph.cpp_wrapper else "None")
+        if V.graph.cpp_wrapper:
+            arg_types.append("size_t*")
 
         if node.get_workspace_size() > 0:
-            wrapper.generate_workspace_allocation(
-                node.get_workspace_size(), V.graph.scheduler.current_device, False
+            ws = WorkspaceArg(
+                count=node.get_workspace_size(),
+                device=V.graph.get_current_device_or_throw(),
+                zero_mode=WorkspaceZeroMode.UNINITIALIZED,
+                outer_name=WorkspaceArg.unique_name(),
             )
-            call_args.append("c_void_p(workspace.data_ptr())")
+            wrapper.generate_workspace_allocation(ws)
+            data_ptr = f"{ws.outer_name}.data_ptr()"
+            call_args.append(
+                data_ptr if V.graph.cpp_wrapper else f"c_void_p({data_ptr})"
+            )
         else:
-            call_args.append("None")
+            ws = None
+            call_args.append("nullptr" if V.graph.cpp_wrapper else "None")
+        if V.graph.cpp_wrapper:
+            arg_types.append("uint8_t*")
 
         wrapper.generate_kernel_call(
             name,
             call_args,
-            cuda=True,
+            gpu=True,
             triton=False,
             arg_types=arg_types,
         )
-        if node.get_workspace_size() > 0:
-            wrapper.writeline(wrapper.make_free_by_names(["workspace"]))
+        if ws:
+            wrapper.generate_workspace_deallocation(ws)
 
     def dtype(self, node: IRNode) -> Optional[str]:
         """
@@ -220,7 +263,7 @@ class CUDATemplateKernel(CUDAKernel):
 
         if node is None:
             return "0"
-        return str(node.get_layout().offset)
+        return str(node.get_layout().offset)  # type: ignore[union-attr]
 
     def ptr(self, node: IRNode) -> str:
         """
@@ -331,8 +374,9 @@ class CUDATemplateCaller(ChoiceCaller):
         bmreq: CUDABenchmarkRequest,
         template: "CUDATemplate",  # type: ignore[name-defined]
         info_kwargs: Optional[Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]],  # type: ignore[type-arg]
-    ):
-        super().__init__(name, input_nodes, layout)
+        description: str,
+    ) -> None:
+        super().__init__(name, input_nodes, layout, description)
         self.category = category
         self.make_kernel_render = make_kernel_render
         self.bmreq = bmreq
@@ -349,7 +393,7 @@ class CUDATemplateCaller(ChoiceCaller):
             *args, output_tensor=out
         )  # @TODO: Hack for ensuring that Cutlass Kernel is preferred
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"CUDATemplateCaller(source_file={self.bmreq.source_file})"
 
     def call_name(self) -> str:

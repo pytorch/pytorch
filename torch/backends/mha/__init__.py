@@ -2,6 +2,7 @@
 # and nn.TransformerEncoder
 import torch
 
+
 _is_fastpath_enabled: bool = True
 
 

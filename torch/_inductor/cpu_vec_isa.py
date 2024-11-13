@@ -3,14 +3,15 @@ import dataclasses
 import functools
 import os
 import platform
-
 import re
 import subprocess
 import sys
-from typing import Any, Callable, Dict, List
+import warnings
+from typing import Any, Callable, Dict, List, Union
 
 import torch
 from torch._inductor import config
+
 
 _IS_WINDOWS = sys.platform == "win32"
 
@@ -52,7 +53,7 @@ class VecISA:
     # In fbcode however, we are using the same compiler for pytorch and for inductor codegen,
     # making the runtime check unnecessary.
     _avx_code = """
-#if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_ZVECTOR) || defined(CPU_CAPABILITY_NEON)
+#if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_ZVECTOR) || defined(CPU_CAPABILITY_NEON) || defined(CPU_CAPABILITY_VSX) || defined(CPU_CAPABILITY_SVE)
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
 #endif
@@ -89,7 +90,11 @@ cdll.LoadLibrary("__lib_path__")
 
     def check_build(self, code: str) -> bool:
         from torch._inductor.codecache import get_lock_dir, LOCK_TIMEOUT, write
-        from torch._inductor.cpp_builder import CppBuilder, CppTorchOptions
+        from torch._inductor.cpp_builder import (
+            CppBuilder,
+            CppTorchOptions,
+            normalize_path_separator,
+        )
 
         key, input_path = write(
             code,
@@ -111,7 +116,9 @@ cdll.LoadLibrary("__lib_path__")
             )
             try:
                 # Check if the output file exist, and compile when not.
-                output_path = x86_isa_help_builder.get_target_file_path()
+                output_path = normalize_path_separator(
+                    x86_isa_help_builder.get_target_file_path()
+                )
                 if not os.path.isfile(output_path):
                     status, target_file = x86_isa_help_builder.build()
 
@@ -122,6 +129,7 @@ cdll.LoadLibrary("__lib_path__")
                         "-c",
                         VecISA._avx_py_load.replace("__lib_path__", output_path),
                     ],
+                    cwd=output_dir,
                     stderr=subprocess.DEVNULL,
                     env={**os.environ, "PYTHONPATH": ":".join(sys.path)},
                 )
@@ -130,10 +138,13 @@ cdll.LoadLibrary("__lib_path__")
 
             return True
 
-    @functools.lru_cache(None)  # noqa: B019
     def __bool__(self) -> bool:
-        if config.cpp.vec_isa_ok is not None:
-            return config.cpp.vec_isa_ok
+        return self.__bool__impl(config.cpp.vec_isa_ok)
+
+    @functools.lru_cache(None)  # noqa: B019
+    def __bool__impl(self, vec_isa_ok) -> bool:
+        if vec_isa_ok is not None:
+            return vec_isa_ok
 
         if config.is_fbcode():
             return True
@@ -143,15 +154,31 @@ cdll.LoadLibrary("__lib_path__")
 
 @dataclasses.dataclass
 class VecNEON(VecISA):
-    _bit_width = 256  # This is required to leverage the compute implemented in aten/src/ATen/cpu/vec/vec256/vec256_float_neon.h
-    _macro = ["CPU_CAPABILITY_NEON"]
-    if sys.platform == "darwin" and platform.processor() == "arm":
-        _macro.append("AT_BUILD_ARM_VEC256_WITH_SLEEF")
+    _bit_width = 128  # This is required to leverage the compute implemented in aten/src/ATen/cpu/vec/vec128/vec128_float_neon.h
+    _macro = ["CPU_CAPABILITY_NEON", "AT_BUILD_ARM_VEC256_WITH_SLEEF"]
     _arch_flags = ""  # Unused
-    _dtype_nelements = {torch.float: 8, torch.bfloat16: 16, torch.float16: 16}
+    _dtype_nelements = {torch.float: 4, torch.bfloat16: 8, torch.float16: 8}
 
     def __str__(self) -> str:
         return "asimd"  # detects the presence of advanced SIMD on armv8-a kernels
+
+    __hash__: Callable[[VecISA], Any] = VecISA.__hash__
+
+
+@dataclasses.dataclass
+class VecSVE(VecISA):
+    # this function can be repurposed for SVE with variable vec length
+    _bit_width = 256
+    _macro = [
+        "CPU_CAPABILITY_SVE",
+        "CPU_CAPABILITY_SVE256",
+        "AT_BUILD_ARM_VEC256_WITH_SLEEF",
+    ]
+    _arch_flags = "-march=armv8-a+sve -msve-vector-bits=256"
+    _dtype_nelements = {torch.float: 8, torch.bfloat16: 16, torch.float16: 16}
+
+    def __str__(self) -> str:
+        return "asimd"
 
     __hash__: Callable[[VecISA], Any] = VecISA.__hash__
 
@@ -245,6 +272,19 @@ class VecZVECTOR(VecISA):
     __hash__: Callable[[VecISA], Any] = VecISA.__hash__
 
 
+@dataclasses.dataclass
+class VecVSX(VecISA):
+    _bit_width = 256  # VSX simd supports 128 bit_width, but aten is emulating it as 256
+    _macro = ["CPU_CAPABILITY_VSX"]
+    _arch_flags = "-mvsx"
+    _dtype_nelements = {torch.float: 8, torch.bfloat16: 16, torch.float16: 16}
+
+    def __str__(self) -> str:
+        return "vsx"
+
+    __hash__: Callable[[VecISA], Any] = VecISA.__hash__
+
+
 class InvalidVecISA(VecISA):
     _bit_width = 0
     _macro = [""]
@@ -276,9 +316,9 @@ def x86_isa_checker() -> List[str]:
     if Arch != "x86_64" and Arch != "AMD64":
         return supported_isa
 
-    avx2 = torch.cpu._is_cpu_support_avx2()
-    avx512 = torch.cpu._is_cpu_support_avx512()
-    amx_tile = torch.cpu._is_cpu_support_amx_tile()
+    avx2 = torch.cpu._is_avx2_supported()
+    avx512 = torch.cpu._is_avx512_supported()
+    amx_tile = torch.cpu._is_amx_tile_supported()
 
     _check_and_append_supported_isa(supported_isa, avx2, "avx2")
     _check_and_append_supported_isa(supported_isa, avx512, "avx512")
@@ -288,7 +328,36 @@ def x86_isa_checker() -> List[str]:
 
 
 invalid_vec_isa = InvalidVecISA()
-supported_vec_isa_list = [VecAMX(), VecAVX512(), VecAVX2(), VecNEON()]
+supported_vec_isa_list = [VecAMX(), VecAVX512(), VecAVX2(), VecNEON(), VecSVE()]
+
+
+def get_isa_from_cpu_capability(
+    capability: Union[str, None],
+    vec_isa_list: List[VecISA],
+    invalid_vec_isa: InvalidVecISA,
+):
+    # AMX setting is not supported in eager
+    # VecAMX will be prioritized for selection when setting ATEN_CPU_CAPABILITY to avx512
+    # TODO add sve256 support
+    capability_to_isa_str = {
+        "default": "INVALID_VEC_ISA",
+        "zvector": "zvector",
+        "vsx": "vsx",
+        "avx2": "avx2",
+        "avx512": "avx512",
+    }
+    if capability in capability_to_isa_str.keys():
+        isa_str = capability_to_isa_str[capability]
+        if isa_str == "INVALID_VEC_ISA":
+            return invalid_vec_isa
+        for vec_isa in vec_isa_list:
+            if isa_str in str(vec_isa):
+                return vec_isa
+
+    if capability:
+        warnings.warn(f"ignoring invalid value for ATEN_CPU_CAPABILITY {capability}")
+
+    return vec_isa_list[0]
 
 
 # Cache the cpuinfo to avoid I/O overhead. Meanwhile, the cpuinfo content
@@ -317,8 +386,13 @@ def valid_vec_isa_list() -> List[VecISA]:
                         if re.search(r"[\^ ]+vxe[\$ ]+", group):
                             isa_list.append(VecZVECTOR())
                             break
+    elif arch == "ppc64le":
+        isa_list.append(VecVSX())
     elif arch == "aarch64":
-        isa_list.append(VecNEON())
+        if torch.cpu._is_arm_sve_supported():
+            isa_list.append(VecSVE())
+        else:
+            isa_list.append(VecNEON())
     elif arch in ["x86_64", "AMD64"]:
         """
         arch value is x86_64 on Linux, and the value is AMD64 on Windows.
@@ -332,17 +406,19 @@ def valid_vec_isa_list() -> List[VecISA]:
 
 
 def pick_vec_isa() -> VecISA:
-    if config.is_fbcode():
+    if config.is_fbcode() and (platform.machine() in ["x86_64", "AMD64"]):
         return VecAVX2()
 
     _valid_vec_isa_list: List[VecISA] = valid_vec_isa_list()
     if not _valid_vec_isa_list:
         return invalid_vec_isa
 
-    # If the simdlen is None, it indicates determine the vectorization length automatically
+    # If the simdlen is None, set simdlen based on the environment ATEN_CPU_CAPABILITY
+    # to control CPU vec ISA
     if config.cpp.simdlen is None:
-        assert _valid_vec_isa_list
-        return _valid_vec_isa_list[0]
+        return get_isa_from_cpu_capability(
+            os.getenv("ATEN_CPU_CAPABILITY"), _valid_vec_isa_list, invalid_vec_isa
+        )
 
     for isa in _valid_vec_isa_list:
         if config.cpp.simdlen == isa.bit_width():

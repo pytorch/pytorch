@@ -86,7 +86,7 @@ Tensor constant_pad_nd(const Tensor& self, IntArrayRef pad, const Scalar& value)
                     "Only per-tensor padding is supported.");
         output = at::_empty_affine_quantized(
             new_shape, self.options().memory_format(memory_format),
-            self.q_scale(), self.q_zero_point(), c10::nullopt);
+            self.q_scale(), self.q_zero_point(), std::nullopt);
     } else {
         output = at::empty(new_shape, self.options().memory_format(memory_format));
     }

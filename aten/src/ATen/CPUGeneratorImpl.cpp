@@ -98,7 +98,7 @@ void CPUGeneratorImpl::set_current_seed(uint64_t seed) {
  * Sets the offset of RNG state.
  * See Note [Acquire lock when using random generators]
  */
-void CPUGeneratorImpl::set_offset(uint64_t offset) {
+void CPUGeneratorImpl::set_offset(uint64_t offset [[maybe_unused]]) {
   TORCH_CHECK(false, "CPU Generator does not use offset");
 }
 
@@ -189,7 +189,7 @@ void CPUGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
       double_normal_sample = std::optional<double>(legacy_pod->normal_y);
     }
   } else {
-    AT_ERROR("Expected either a CPUGeneratorImplStateLegacy of size ", size_legacy,
+    TORCH_CHECK(false, "Expected either a CPUGeneratorImplStateLegacy of size ", size_legacy,
              " or a CPUGeneratorImplState of size ", size_current,
              " but found the input RNG state size to be ", new_state_size);
   }

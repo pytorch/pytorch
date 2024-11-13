@@ -1,11 +1,12 @@
 # mypy: allow-untyped-defs
+# mypy: allow-untyped-decorators
 import torch
+from torch._C import DispatchKey
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
 from .module_tracker import ModuleTracker
 from typing import List, Any, Dict, Optional, Union, Tuple, Iterator
 from collections import defaultdict
 from torch.utils._python_dispatch import TorchDispatchMode
-from torch._decomp import register_decomposition
 from math import prod
 from functools import wraps
 import warnings
@@ -34,7 +35,20 @@ def register_flop_formula(targets, get_raw=False):
     def register_fun(flop_formula):
         if not get_raw:
             flop_formula = shape_wrapper(flop_formula)
-        register_decomposition(targets, registry=flop_registry, unsafe=True)(flop_formula)
+
+        def register(target):
+            if not isinstance(target, torch._ops.OpOverloadPacket):
+                raise ValueError(
+                    f"register_flop_formula(targets): expected each target to be "
+                    f"OpOverloadPacket (i.e. torch.ops.mylib.foo), got "
+                    f"{target} which is of type {type(target)}")
+            if target in flop_registry:
+                raise RuntimeError(f"duplicate registrations for {target}")
+            flop_registry[target] = flop_formula
+
+        # To handle allowing multiple aten_ops at once
+        torch.utils._pytree.tree_map_(register, targets)
+
         return flop_formula
 
     return register_fun
@@ -252,6 +266,18 @@ def sdpa_flop(query_shape, key_shape, value_shape, *args, out_shape=None, **kwar
     return sdpa_flop_count(query_shape, key_shape, value_shape)
 
 
+def _offsets_to_lengths(offsets, max_len):
+    """
+    If the offsets tensor is fake, then we don't know the actual lengths.
+    In that case, we can just assume the worst case; each batch has max length.
+    """
+    from torch._subclasses.fake_tensor import FakeTensor
+    from torch._subclasses.functional_tensor import FunctionalTensor
+    if not isinstance(offsets, (FakeTensor, FunctionalTensor)):
+        return offsets.diff().tolist()
+    return [max_len] * (offsets.size(0) - 1)
+
+
 def _unpack_flash_attention_nested_shapes(
     *,
     query,
@@ -285,8 +311,8 @@ def _unpack_flash_attention_nested_shapes(
         assert cum_seq_q is not None
         assert cum_seq_k is not None
         assert cum_seq_q.shape == cum_seq_k.shape
-        seq_q_lengths = (cum_seq_q[1:] - cum_seq_q[:-1]).tolist()
-        seq_k_lengths = (cum_seq_k[1:] - cum_seq_k[:-1]).tolist()
+        seq_q_lengths = _offsets_to_lengths(cum_seq_q, max_q)
+        seq_k_lengths = _offsets_to_lengths(cum_seq_k, max_k)
         for (seq_q_len, seq_k_len) in zip(seq_q_lengths, seq_k_lengths):
             new_query_shape = (1, h_q, seq_q_len, d_q)
             new_key_shape = (1, h_k, seq_k_len, d_k)
@@ -333,8 +359,8 @@ def _unpack_efficient_attention_nested_shapes(
         assert cu_seqlens_q is not None
         assert cu_seqlens_k is not None
         assert cu_seqlens_q.shape == cu_seqlens_k.shape
-        seqlens_q = (cu_seqlens_q[1:] - cu_seqlens_q[:-1]).tolist()
-        seqlens_k = (cu_seqlens_k[1:] - cu_seqlens_k[:-1]).tolist()
+        seqlens_q = _offsets_to_lengths(cu_seqlens_q, max_seqlen_q)
+        seqlens_k = _offsets_to_lengths(cu_seqlens_k, max_seqlen_k)
         for len_q, len_k in zip(seqlens_q, seqlens_k):
             new_query_shape = (1, h_q, len_q, d_q)
             new_key_shape = (1, h_k, len_k, d_k)
@@ -594,6 +620,7 @@ class FlopCounterMode(TorchDispatchMode):
             depth: int = 2,
             display: bool = True,
             custom_mapping: Optional[Dict[Any, Any]] = None):
+        super().__init__()
         self.flop_counts: Dict[str, Dict[Any, int]] = defaultdict(lambda: defaultdict(int))
         self.depth = depth
         self.display = display
@@ -606,6 +633,7 @@ class FlopCounterMode(TorchDispatchMode):
             **{k: v if getattr(v, "_get_raw", False) else shape_wrapper(v) for k, v in custom_mapping.items()}
         }
         self.mod_tracker = ModuleTracker()
+        self.decomposed_counter = _DecomposedCounterMode(self)
 
     def get_total_flops(self) -> int:
         return sum(self.flop_counts['Global'].values())
@@ -672,8 +700,8 @@ class FlopCounterMode(TorchDispatchMode):
         # if there are any FLOPs in there that aren't already fully contained by
         # a module.
         if 'Global' in self.flop_counts and not is_global_subsumed:
-            for idx, value in enumerate(values):
-                values[idx][0] = " " + values[idx][0]
+            for value in values:
+                value[0] = " " + value[0]
 
             values = process_mod('Global', 0) + values
 
@@ -696,8 +724,34 @@ class FlopCounterMode(TorchDispatchMode):
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs if kwargs else {}
-        out = func(*args, **kwargs)
-        return self._count_flops(func._overloadpacket, out, args, kwargs)
+
+        # Skip ops from non-standard dispatch_sizes_strides_policy such as NJT
+        if func in {torch.ops.aten.is_contiguous.default,
+                    torch.ops.aten.is_contiguous.memory_format,
+                    torch.ops.aten.is_strides_like_format.default,
+                    torch.ops.aten.is_non_overlapping_and_dense.default,
+                    torch.ops.aten.size.default,
+                    torch.ops.aten.sym_size.default,
+                    torch.ops.aten.stride.default,
+                    torch.ops.aten.sym_stride.default,
+                    torch.ops.aten.storage_offset.default,
+                    torch.ops.aten.sym_storage_offset.default,
+                    torch.ops.aten.numel.default,
+                    torch.ops.aten.sym_numel.default,
+                    torch.ops.aten.dim.default,
+                    torch.ops.prim.layout.default}:
+
+            return NotImplemented
+
+        dk = DispatchKey.CompositeImplicitAutograd
+        if torch._C._dispatch_has_kernel_for_dispatch_key(func.name(), dk):
+            # func can be decomposed; redispatch
+            with self.decomposed_counter:
+                return func._op_dk(dk, *args, **kwargs)
+        else:
+            # no further decomposition; execute & count flops
+            out = func(*args, **kwargs)
+            return self._count_flops(func._overloadpacket, out, args, kwargs)
 
     def _count_flops(self, func_packet, out, args, kwargs):
         if func_packet in self.flop_registry:
@@ -707,3 +761,12 @@ class FlopCounterMode(TorchDispatchMode):
                 self.flop_counts[par][func_packet] += flop_count
 
         return out
+
+class _DecomposedCounterMode(TorchDispatchMode):
+    def __init__(self, counter):
+        self.counter = counter
+
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        kwargs = kwargs if kwargs else {}
+        out = func(*args, **kwargs)
+        return self.counter._count_flops(func._overloadpacket, out, args, kwargs)

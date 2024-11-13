@@ -33,15 +33,15 @@ namespace at {
   _(==, x.eq(y), y.eq(x))                                                   \
   _(!=, x.ne(y), y.ne(x))
 
-#define DEFINE_OPERATOR(op, body, reverse_scalar_body)                 \
-  static inline Tensor operator op(const Tensor& x, const Tensor& y) { \
-    return body;                                                       \
-  }                                                                    \
-  static inline Tensor operator op(const Tensor& x, const Scalar& y) { \
-    return body;                                                       \
-  }                                                                    \
-  static inline Tensor operator op(const Scalar& x, const Tensor& y) { \
-    return reverse_scalar_body;                                        \
+#define DEFINE_OPERATOR(op, body, reverse_scalar_body)          \
+  inline Tensor operator op(const Tensor& x, const Tensor& y) { \
+    return body;                                                \
+  }                                                             \
+  inline Tensor operator op(const Tensor& x, const Scalar& y) { \
+    return body;                                                \
+  }                                                             \
+  inline Tensor operator op(const Scalar& x, const Tensor& y) { \
+    return reverse_scalar_body;                                 \
   }
 
 AT_FORALL_BINARY_OPS(DEFINE_OPERATOR)

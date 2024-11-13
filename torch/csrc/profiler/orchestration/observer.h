@@ -5,9 +5,7 @@
 
 #include <utility>
 
-namespace torch {
-namespace profiler {
-namespace impl {
+namespace torch::profiler::impl {
 
 // ----------------------------------------------------------------------------
 // -- Profiler Config ---------------------------------------------------------
@@ -20,6 +18,14 @@ enum class C10_API_ENUM ActivityType {
   PrivateUse1, // PrivateUse1 kernels, runtime
   NUM_KINETO_ACTIVITIES, // must be the last one
 };
+
+inline std::string actToString(ActivityType t) {
+  const std::array<
+      std::string,
+      static_cast<size_t>(ActivityType::NUM_KINETO_ACTIVITIES)>
+      ActivityTypeNames = {"CPU", "XPU", "CUDA", "MTIA", "PrivateUse1"};
+  return ActivityTypeNames[static_cast<int>(t)];
+}
 
 enum class C10_API_ENUM ProfilerState {
   Disabled = 0,
@@ -51,6 +57,7 @@ struct TORCH_API ExperimentalConfig {
       bool verbose = false,
       std::vector<std::string> performance_events = {},
       bool enable_cuda_sync_events = false,
+      bool adjust_profiler_step = false,
       bool adjust_timestamps = false);
   explicit operator bool() const;
 
@@ -69,6 +76,13 @@ struct TORCH_API ExperimentalConfig {
    */
   bool enable_cuda_sync_events;
   /*
+   * Controls whether or not timestamp adjustment for ProfilerStep and parent
+   * Python events occurs after profiling. This occurs at an O(n) cost and
+   * affects only the start of profiler step events.
+   */
+  bool adjust_profiler_step;
+
+  /*
    * Controls whether or not timestamp adjustment occurs after profiling.
    * The purpose of this is to adjust Vulkan event timelines to align with those
    * of their parent CPU events.
@@ -82,14 +96,15 @@ struct TORCH_API ExperimentalConfig {
 };
 
 struct TORCH_API ProfilerConfig {
-  ProfilerConfig(
+  explicit ProfilerConfig(
       ProfilerState state,
       bool report_input_shapes = false,
       bool profile_memory = false,
       bool with_stack = false,
       bool with_flops = false,
       bool with_modules = false,
-      ExperimentalConfig experimental_config = ExperimentalConfig());
+      ExperimentalConfig experimental_config = ExperimentalConfig(),
+      std::string trace_id = "");
 
   bool disabled() const;
   bool global() const;
@@ -101,6 +116,7 @@ struct TORCH_API ProfilerConfig {
   bool with_stack;
   bool with_flops;
   bool with_modules;
+  std::string trace_id;
 
   // For serialization
   at::IValue toIValue() const;
@@ -112,6 +128,10 @@ struct TORCH_API ProfilerConfig {
 // ----------------------------------------------------------------------------
 struct TORCH_API ProfilerStateBase : public c10::MemoryReportingInfoBase {
   explicit ProfilerStateBase(ProfilerConfig config);
+  ProfilerStateBase(const ProfilerStateBase&) = delete;
+  ProfilerStateBase(ProfilerStateBase&&) = delete;
+  ProfilerStateBase& operator=(const ProfilerStateBase&) = delete;
+  ProfilerStateBase& operator=(ProfilerStateBase&&) = delete;
   ~ProfilerStateBase() override;
 
   static ProfilerStateBase* get(bool global);
@@ -155,6 +175,4 @@ TORCH_API bool profilerEnabled();
 TORCH_API ActiveProfilerType profilerType();
 TORCH_API ProfilerConfig getProfilerConfig();
 
-} // namespace impl
-} // namespace profiler
-} // namespace torch
+} // namespace torch::profiler::impl

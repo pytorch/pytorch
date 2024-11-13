@@ -10,13 +10,13 @@ from torch.distributed._shard.sharder import Sharder
 from torch.distributed._shard.sharding_plan import ShardingPlan
 from torch.distributed._shard.sharding_spec import ChunkShardingSpec
 from torch.testing._internal.common_distributed import requires_nccl, skip_if_lt_x_gpu
-
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
 from torch.testing._internal.distributed._shard.sharded_tensor import (
     ShardedTensorTestBase,
     TEST_GPU_NUM,
     with_comms,
 )
+
 
 if TEST_WITH_DEV_DBG_ASAN:
     print(
@@ -100,7 +100,7 @@ class TestCustomSharder(ShardedTensorTestBase):
     @requires_nccl()
     def test_custom_sharder(self):
         class MyModule(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.ebc = CustomEmbeddingBagCollection(10, 10, 8)
 

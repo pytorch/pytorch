@@ -34,7 +34,7 @@ static std::string getUniqueKey(const ScalarType& dtype,
                                 const bool return_inverse,
                                 const bool return_counts,
                                 const bool consecutive,
-                                c10::optional<int64_t> dimOpt) {
+                                std::optional<int64_t> dimOpt) {
   return "_unique2_mps:" + getMPSTypeString(dtype) + "[" + getArrayRefString(base_shape) + "]:[" +
       (dimOpt.has_value() ? std::to_string(dimOpt.value()) : "None") + "]:[" + std::to_string(return_inverse) + "]:[" +
       std::to_string(return_counts) + "]:[" + std::to_string(consecutive) + "]";
@@ -46,7 +46,7 @@ static std::array<MPSGraphTensor*, 4> buildUniqueGraph(const Tensor& self,
                                                        const bool return_inverse,
                                                        const bool return_counts,
                                                        const bool consecutive,
-                                                       c10::optional<int64_t> dimOpt) {
+                                                       std::optional<int64_t> dimOpt) {
   int64_t dim = dimOpt.has_value() ? maybe_wrap_dim(dimOpt.value(), self.dim()) : 0;
 
   MPSGraph* graph = uniqueGraph->graph();
@@ -182,7 +182,7 @@ static UniqueCachedGraph* getUniqueGraph(const Tensor& self,
                                          const bool return_inverse,
                                          const bool return_counts,
                                          const bool consecutive,
-                                         c10::optional<int64_t> dim) {
+                                         std::optional<int64_t> dim) {
   @autoreleasepool {
     string key = getUniqueKey(self.scalar_type(), self.sizes(), return_inverse, return_counts, consecutive, dim);
     return LookUpOrCreateCachedGraph<UniqueCachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
@@ -234,7 +234,7 @@ static std::tuple<Tensor, Tensor, Tensor> _unique_impl_mps(const Tensor& self,
                                                            const bool return_inverse,
                                                            const bool return_counts,
                                                            const bool consecutive,
-                                                           c10::optional<int64_t> dimOpt) {
+                                                           std::optional<int64_t> dimOpt) {
   const Tensor& input = self.contiguous();
 
   // get flat output size
@@ -255,11 +255,11 @@ static std::tuple<Tensor, Tensor, Tensor> _unique_impl_mps(const Tensor& self,
   if (!return_counts)
     countsShape = {};
 
-  Tensor output = at::empty(outputShape, input.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+  Tensor output = at::empty(outputShape, input.scalar_type(), std::nullopt, kMPS, std::nullopt, std::nullopt);
   Tensor inverse_indices =
-      at::empty(inverseIndicesShape, ScalarType::Long, c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
-  Tensor counts = at::empty(countsShape, ScalarType::Long, c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
-  Tensor length = at::empty({1}, ScalarType::Int, c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+      at::empty(inverseIndicesShape, ScalarType::Long, std::nullopt, kMPS, std::nullopt, std::nullopt);
+  Tensor counts = at::empty(countsShape, ScalarType::Long, std::nullopt, kMPS, std::nullopt, std::nullopt);
+  Tensor length = at::empty({1}, ScalarType::Int, std::nullopt, kMPS, std::nullopt, std::nullopt);
 
   if (input.numel() == 0) {
     return std::make_tuple(output, inverse_indices, counts);
@@ -285,13 +285,7 @@ static std::tuple<Tensor, Tensor, Tensor> castToMPS(std::tuple<Tensor, Tensor, T
 std::tuple<Tensor, Tensor, Tensor> unique_consecutive_mps(const Tensor& self,
                                                           const bool return_inverse,
                                                           const bool return_counts,
-                                                          c10::optional<int64_t> dim) {
-  if (!is_macos_13_or_newer()) {
-    TORCH_WARN_ONCE("MPS: unique_consecutive op is supported natively starting from macOS 13.0. ",
-                    "Falling back on CPU. This may have performance implications.");
-    return castToMPS(at::unique_consecutive(self.to("cpu"), return_inverse, return_counts, dim));
-  }
-
+                                                          std::optional<int64_t> dim) {
   return _unique_impl_mps(self, return_inverse, return_counts, true, dim);
 }
 
@@ -299,26 +293,14 @@ std::tuple<Tensor, Tensor, Tensor> unique_dim_consecutive_mps(const Tensor& self
                                                               int64_t dim,
                                                               const bool return_inverse,
                                                               const bool return_counts) {
-  if (!is_macos_13_or_newer()) {
-    TORCH_WARN_ONCE("MPS: unique_dim_consecutive op is supported natively starting from macOS 13.0. ",
-                    "Falling back on CPU. This may have performance implications.");
-    return castToMPS(at::unique_dim_consecutive(self.to("cpu"), dim, return_inverse, return_counts));
-  }
-
-  return _unique_impl_mps(self, return_inverse, return_counts, true, c10::make_optional((int64_t)dim));
+  return _unique_impl_mps(self, return_inverse, return_counts, true, std::make_optional((int64_t)dim));
 }
 
 std::tuple<Tensor, Tensor, Tensor> _unique2_mps(const Tensor& self,
                                                 const bool sorted,
                                                 const bool return_inverse,
                                                 const bool return_counts) {
-  if (!is_macos_13_or_newer()) {
-    TORCH_WARN_ONCE("MPS: _unique2 op is supported natively starting from macOS 13.0. ",
-                    "Falling back on CPU. This may have performance implications.");
-    return castToMPS(at::_unique2(self.to("cpu"), sorted, return_inverse, return_counts));
-  }
-
-  return _unique_impl_mps(self, return_inverse, return_counts, false, c10::nullopt);
+  return _unique_impl_mps(self, return_inverse, return_counts, false, std::nullopt);
 }
 
 } // namespace at::native

@@ -5,6 +5,7 @@ import torch
 
 from .base_structured_sparsifier import BaseStructuredSparsifier
 
+
 __all__ = ["FPGMPruner"]
 
 
@@ -74,7 +75,9 @@ class FPGMPruner(BaseStructuredSparsifier):
 
         return distance
 
-    def update_mask(self, module, tensor_name, sparsity_level, **kwargs):
+    def update_mask(  # type: ignore[override]
+        self, module, tensor_name, sparsity_level, **kwargs
+    ):
         tensor_weight = getattr(module, tensor_name)
         mask = getattr(module.parametrizations, tensor_name)[0].mask
 

@@ -11,7 +11,7 @@ custom operators, and extending operators defined with PyTorch's C++ operator
 registration APIs (e.g. aten operators).
 
 For a detailed guide on effectively using these APIs, please see
-Please see :ref:`custom-ops-landing-page`
+`PyTorch Custom Operators Landing Page <https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html>`_
 for more details on how to effectively use these APIs.
 
 Testing custom ops
@@ -35,15 +35,21 @@ Extending custom ops (created from Python or C++)
 -------------------------------------------------
 
 Use the register.* methods, such as :func:`torch.library.register_kernel` and
-func:`torch.library.register_fake`, to add implementations
+:func:`torch.library.register_fake`, to add implementations
 for any operators (they may have been created using :func:`torch.library.custom_op` or
 via PyTorch's C++ operator registration APIs).
 
 .. autofunction:: register_kernel
 .. autofunction:: register_autograd
 .. autofunction:: register_fake
+.. autofunction:: register_vmap
 .. autofunction:: impl_abstract
 .. autofunction:: get_ctx
+.. autofunction:: register_torch_dispatch
+.. autofunction:: infer_schema
+.. autoclass:: torch._library.custom_ops.CustomOpDef
+
+    .. automethod:: set_kernel_enabled
 
 Low-level APIs
 --------------

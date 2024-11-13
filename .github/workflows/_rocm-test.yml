@@ -154,6 +154,7 @@ jobs:
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           CONTINUE_THROUGH_ERROR: ${{ steps.keep-going.outputs.keep-going }}
           VERBOSE_TEST_LOGS: ${{ steps.keep-going.outputs.ci-verbose-test-logs }}
+          TEST_SHOWLOCALS: ${{ steps.keep-going.outputs.ci-test-showlocals }}
           NO_TEST_TIMEOUT: ${{ steps.keep-going.outputs.ci-no-test-timeout }}
           NO_TD: ${{ steps.keep-going.outputs.ci-no-td }}
           TEST_CONFIG: ${{ matrix.config }}
@@ -205,6 +206,7 @@ jobs:
             -e REENABLED_ISSUES \
             -e CONTINUE_THROUGH_ERROR \
             -e VERBOSE_TEST_LOGS \
+            -e TEST_SHOWLOCALS \
             -e NO_TEST_TIMEOUT \
             -e NO_TD \
             -e MAX_JOBS="$(nproc --ignore=2)" \
@@ -267,7 +269,7 @@ jobs:
           find . -iname "core.[1-9]*" -exec docker exec "${CONTAINER_NAME}" sh -c "gdb python {} -ex 'bt' -ex 'q'" \;
 
       - name: Store Core dumps on GitHub
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         if: failure()
         with:
           name: coredumps-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}

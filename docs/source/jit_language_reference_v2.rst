@@ -830,7 +830,7 @@ TorchScript Type System Definition
     TSMetaType      ::= "Any"
     TSPrimitiveType ::= "int" | "float" | "double" | "complex" | "bool" | "str" | "None"
 
-    TSStructualType ::=  TSTuple | TSNamedTuple | TSList | TSDict | TSOptional |
+    TSStructuralType ::= TSTuple | TSNamedTuple | TSList | TSDict | TSOptional |
                          TSUnion | TSFuture | TSRRef | TSAwait
     TSTuple         ::= "Tuple" "[" (TSType ",")* TSType "]"
     TSNamedTuple    ::= "namedtuple" "(" (TSType ",")* TSType ")"

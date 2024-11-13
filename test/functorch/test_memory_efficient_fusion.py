@@ -8,12 +8,12 @@ from typing import Callable
 import torch
 import torch.fx as fx
 import torch.nn as nn
-
 from functorch import make_fx
 from functorch.compile import memory_efficient_fusion
 from torch._functorch.compile_utils import fx_graph_cse
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import run_tests, TestCase
+
 
 HAS_CUDA = torch.cuda.is_available()
 
@@ -107,7 +107,7 @@ def run_and_compare_activation(self, fn, inps):
             torch.randn(shape, device=device, dtype=dtype, requires_grad=True)
             for shape in inps
         ]
-        res_args = [i.clone().detach().requires_grad_(True) for i in ref_args]
+        res_args = [i.detach().clone().requires_grad_(True) for i in ref_args]
 
         ref = fn(*ref_args)
         ref.sum().backward()

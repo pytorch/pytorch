@@ -16,6 +16,7 @@
 #include <torch/csrc/autograd/autograd_not_implemented_fallback.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/grad_mode.h>
+#include <torch/csrc/autograd/input_metadata.h>
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/autograd/profiler_python.h>
 #include <torch/csrc/autograd/python_function.h>
@@ -184,6 +185,23 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       .value("NO_GRAD_MODE", CreationMeta::NO_GRAD_MODE)
       .value("INFERENCE_MODE", CreationMeta::INFERENCE_MODE);
 
+  py::class_<torch::autograd::InputMetadata>(m, "_InputMetadata")
+      .def_property_readonly(
+          "dtype",
+          [](const torch::autograd::InputMetadata& m) {
+            PyObject* raw_obj =
+                (PyObject*)torch::getTHPDtype(m.dtype().toScalarType());
+            return py::reinterpret_borrow<py::object>(raw_obj);
+          })
+      .def_property_readonly("device", &torch::autograd::InputMetadata::device)
+      .def_property_readonly(
+          "shape", &torch::autograd::InputMetadata::shape_as_dim_vector)
+      .def_property_readonly(
+          "is_nested_tensor", &torch::autograd::InputMetadata::is_nested_tensor)
+      .def_property_readonly(
+          "is_cpp_nested_tensor",
+          &torch::autograd::InputMetadata::is_cpp_nested_tensor);
+
   py::class_<KinetoEvent>(m, "_KinetoEvent")
       // name of the event
       .def("name", [](const KinetoEvent& e) { return e.name(); })
@@ -228,6 +246,15 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
                 });
             return as_pyobj;
           })
+      .def(
+          "kwinputs",
+          [](const KinetoEvent& e) {
+            std::unordered_map<std::string, py::object> inputs;
+            for (const auto& [key, value] : e.kwinputs()) {
+              inputs[key] = torch::jit::toPyObject(value);
+            }
+            return inputs;
+          })
       // stack traces of the PyTorch CPU events
       .def("stack", [](const KinetoEvent& e) { return e.stack().vec(); })
       // type of the RecordFunction that generated a PyTorch CPU event
@@ -251,6 +278,14 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       .def("is_async", [](const KinetoEvent& e) { return e.isAsync(); })
       .def("cuda_elapsed_us", &KinetoEvent::cudaElapsedUs)
       .def("privateuse1_elapsed_us", &KinetoEvent::privateuse1ElapsedUs)
+      .def(
+          "is_user_annotation",
+          [](const KinetoEvent& e) {
+            return e.activityType() ==
+                (uint8_t)libkineto::ActivityType::USER_ANNOTATION ||
+                e.activityType() ==
+                (uint8_t)libkineto::ActivityType::GPU_USER_ANNOTATION;
+          })
       .def("nbytes", [](const KinetoEvent& e) { return e.nBytes(); });
 
   m.def("_soft_assert_raises", &setSoftAssertRaises);
@@ -275,6 +310,10 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   m.def(
       "_prepare_profiler",
       prepareProfiler,
+      py::call_guard<py::gil_scoped_release>());
+  m.def(
+      "_toggle_collection_dynamic",
+      toggleCollectionDynamic,
       py::call_guard<py::gil_scoped_release>());
   m.def("_add_metadata_json", addMetadataJson); // Only if `USE_KINETO` is set
   m.def("_kineto_step", profilerStep); // Only if `USE_KINETO` is set
@@ -406,6 +445,13 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
         TORCH_CHECK(meta != nullptr);
         meta->set_creation_meta(new_creation_meta);
       });
+
+  m.def("_get_current_graph_task_keep_graph", []() {
+    return torch::autograd::get_current_graph_task_keep_graph();
+  });
+
+  m.def(
+      "_get_data_attr", [](const at::Tensor& t) { return t.variable_data(); });
 
   _C_m.def(
       "_register_py_class_for_device",
@@ -1212,17 +1258,30 @@ static PyObject* len_torch_dispatch_stack(PyObject* _unused, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPModule_increment_version(PyObject* _unused, PyObject* tensor) {
+PyObject* THPModule_increment_version(
+    PyObject* _unused,
+    PyObject* tensor_list) {
   HANDLE_TH_ERRORS
-  TORCH_CHECK(
-      THPVariable_Check(tensor), "increment_version expect a Tensor as input");
-  torch::autograd::increment_version((THPVariable_Unpack(tensor)));
+  auto iterator = THPObjectPtr(PyObject_GetIter(tensor_list));
+  TORCH_CHECK(iterator, "increment_version expect a Iterable[Tensor] as input");
+  auto item = THPObjectPtr(PyIter_Next(iterator));
+  while (item) {
+    TORCH_CHECK(
+        THPVariable_Check(item),
+        "increment_version expects each element of the iterable to be a tensor");
+    auto t = THPVariable_Unpack(item);
+    if (!t.is_inference()) {
+      torch::autograd::increment_version(t);
+    }
+    item = THPObjectPtr(PyIter_Next(iterator));
+  }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
 // autograd methods on torch._C
-static PyMethodDef methods[] = { // NOLINT
+// NOLINTNEXTLINE(*array*)
+static PyMethodDef methods[] = {
     {"_set_grad_enabled",
      castPyCFunctionWithKeywords(set_grad_enabled),
      METH_VARARGS | METH_KEYWORDS,

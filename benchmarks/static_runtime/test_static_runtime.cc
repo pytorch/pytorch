@@ -1443,7 +1443,7 @@ TEST(StaticRuntime, to) {
     std::vector<IValue> args2{a, other, c, d, e};
     std::vector<IValue> args2WithDifferentOtherType{
         a, at::randn({4, 3, 1, 2}, ScalarType::Double), c, d, e};
-    std::vector<IValue> args3{a, c10::nullopt, c, d};
+    std::vector<IValue> args3{a, std::nullopt, c, d};
 
     std::vector<IValue> args0WithInt{a, ScalarType::Int, c, d, e};
     testStaticRuntime(
@@ -1478,7 +1478,7 @@ TEST(StaticRuntime, to) {
     testStaticRuntime(to_script_dtype_strided, args0, {a2, b, c, d, e});
     testStaticRuntime(to_script_prim_dtype, args1, {a2, b, c, d});
     if (!d) {
-      testStaticRuntime(to_script_prim_dtype, args3, {a2, c10::nullopt, c, d});
+      testStaticRuntime(to_script_prim_dtype, args3, {a2, std::nullopt, c, d});
     }
     testStaticRuntime(to_script_other, args2, {a2, a2_other, c, d, e});
     testStaticRuntime(to_script_alias, {a}, {a2});
@@ -1758,14 +1758,14 @@ TEST(StaticRuntime, Linear) {
   auto bias = at::randn({1, 1});
 
   std::vector<IValue> args{input, weights, bias};
-  std::vector<IValue> args_no_bias{input, weights, c10::nullopt};
+  std::vector<IValue> args_no_bias{input, weights, std::nullopt};
 
   auto input2 = at::randn({6, 3});
   auto weights2 = at::randn({6, 3});
   auto bias2 = at::randn({6, 6});
 
   std::vector<IValue> args2{input2, weights2, bias2};
-  std::vector<IValue> args2_no_bias{input2, weights2, c10::nullopt};
+  std::vector<IValue> args2_no_bias{input2, weights2, std::nullopt};
 
   testStaticRuntime(linear_script, args);
   testStaticRuntime(linear_script, args_no_bias);

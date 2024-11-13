@@ -26,7 +26,9 @@ TORCH_API LoggerBase* setLogger(LoggerBase* logger);
 
 class NoopLogger : public LoggerBase {
  public:
-  void addStatValue(const std::string& stat_name, int64_t val) override {}
+  void addStatValue(
+      const std::string& stat_name [[maybe_unused]],
+      int64_t val [[maybe_unused]]) override {}
   ~NoopLogger() override = default;
 };
 

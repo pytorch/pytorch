@@ -8,6 +8,7 @@ from torch.jit._passes._property_propagation import apply_input_props_using_exam
 from torch.testing._internal.common_utils import TEST_CUDA
 from torch.testing._internal.jit_utils import JitTestCase
 
+
 try:
     from torchvision import models
 except ImportError:

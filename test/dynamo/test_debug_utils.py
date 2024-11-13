@@ -3,12 +3,12 @@
 import unittest
 
 import torch
-
 from functorch import make_fx
 from torch._dynamo import debug_utils
 from torch._dynamo.debug_utils import aot_graph_input_parser
 from torch._dynamo.test_case import TestCase
 from torch.testing._internal.inductor_utils import HAS_CUDA
+
 
 requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 

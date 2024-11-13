@@ -1,13 +1,14 @@
 # mypy: allow-untyped-defs
+import contextlib
 import sys
 import warnings
-from typing import cast, List, Optional, Tuple, TYPE_CHECKING, Union
+from typing import Any, cast, List, Optional, Tuple, Type, TYPE_CHECKING, Union
 
 import torch
 import torch.distributed as dist
 import torch.distributed.distributed_c10d as c10d
 from torch.distributed.device_mesh import DeviceMesh
-from torch.fx.experimental.proxy_tensor import get_innermost_proxy_mode
+from torch.fx.experimental.proxy_tensor import get_proxy_mode
 
 from . import _functional_collectives_impl as fun_col_impl
 
@@ -97,7 +98,7 @@ RANK_TYPES = Union[
     List[List[int]],
     dist.ProcessGroup,
     DeviceMesh,
-    Tuple["dist._tensor.DeviceMesh", int],
+    Tuple["dist.tensor.DeviceMesh", int],
     str,
 ]
 
@@ -600,7 +601,15 @@ class AsyncCollectiveTensor(torch.Tensor):
         elem = inner_tensors["elem"]
         return AsyncCollectiveTensor(elem)
 
-    def __repr__(self):
+    def __coerce_same_metadata_as_tangent__(
+        self, expected_metadata: Any, expected_type: Optional[Type] = None
+    ):
+        if expected_type is not torch.Tensor:
+            return None
+
+        return self.trigger_wait()
+
+    def __repr__(self) -> str:  # type: ignore[override]
         return f"AsyncCollectiveTensor({self.trigger_wait()})"
 
     def trigger_wait(self):
@@ -653,7 +662,7 @@ class AsyncCollectiveTensor(torch.Tensor):
 
         return out
 
-    def numpy(self):
+    def numpy(self):  # type: ignore[override]
         return self.wait().numpy()
 
 
@@ -806,10 +815,7 @@ def _are_we_tracing() -> bool:
         is not None
     ):
         return True
-    mode = get_innermost_proxy_mode()
-    if mode is None:
-        return False
-    return mode.tracer is not None
+    return get_proxy_mode() is not None
 
 
 def _maybe_wrap_tensor(self) -> torch.Tensor:
@@ -817,6 +823,43 @@ def _maybe_wrap_tensor(self) -> torch.Tensor:
         return wait_tensor(self)
     res = AsyncCollectiveTensor(self)
     return cast(torch.Tensor, res)
+
+
+@contextlib.contextmanager
+def allow_inflight_collective_as_graph_input_ctx(value: bool = True):
+    """
+    Context manager to temporarily set whether inflight collectives are allowed as torch.compile graph inputs.
+    Common use case is when the collective is issued in eager (with `async_op=True`) but waited in compiled region:
+    ```
+    def all_reduce_eager(x):
+        y = x * x
+        req = dist.all_reduce(y, op=dist.ReduceOp.SUM, async_op=True)
+        return y
+
+    @torch.compile(fullgraph=True)
+    def all_reduce_wait_compiled(y):
+        torch.ops.c10d_functional.wait_tensor(y)
+        return y * y
+
+    x = torch.ones(1280, 1280, device="cuda") + self.rank
+    # the context manager ensures that `wait_tensor(y)` will wait on the correct work object
+    with allow_inflight_collective_as_graph_input_ctx():
+        y = all_reduce_eager(x)
+        z = all_reduce_wait_compiled(y)
+    ```
+    With this context manager, when a collective is called, under the hood the work object of the collective
+    will be registered in the work registry, and the wait_tensor() in compiled region called on
+    the output tensor of the collective will wait on the correct work object.
+    """
+    previous = torch._C._distributed_c10d._allow_inflight_collective_as_graph_input()
+
+    try:
+        torch._C._distributed_c10d._set_allow_inflight_collective_as_graph_input(value)
+        yield
+    finally:
+        torch._C._distributed_c10d._set_allow_inflight_collective_as_graph_input(
+            previous
+        )
 
 
 def _all_gather_into_tensor_coalesced_meta(self, tag, rankset, group_size):
@@ -960,6 +1003,10 @@ if not torch._running_with_deploy():
     lib_impl.impl("all_to_all_single", _all_to_all_single_meta, "Meta")
     lib_impl.impl("broadcast", _broadcast_meta, "Meta")
     lib_impl.impl("broadcast_", _broadcast__meta, "Meta")
+
+    # mark these ops has side effect so that they won't be removed by DCE
+    torch.fx.node.has_side_effect(torch.ops._c10d_functional.wait_tensor.default)
+    torch.fx.node.has_side_effect(torch.ops._c10d_functional.wait_tensor)
 
     # Register legacy ops for backward compatibility
     # TODO(yifu): remove these in functional collective beta release

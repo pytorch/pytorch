@@ -8,9 +8,10 @@ import torch
 from torch import nn
 from torch._dynamo.utils import counters, same
 from torch._inductor import metrics
-from torch._inductor.runtime.runtime_utils import do_bench_gpu as do_bench
+from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+
 
 DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
 
@@ -190,7 +191,7 @@ class TestScatterOpt(TestCase):
             torch.cuda.reset_peak_memory_stats()
             for _ in range(3):
                 opt_f(opt_model, x, label)
-            ms = do_bench(lambda: opt_f(opt_model, x, label))
+            ms = benchmarker.benchmark_gpu(lambda: opt_f(opt_model, x, label))
             peak_mem = torch.cuda.max_memory_allocated() / 10**9
             print(f"{ms=:.3f}, {peak_mem=:.3f} GB")
 

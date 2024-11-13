@@ -17,7 +17,8 @@ class BytecodeTests(torch._dynamo.test_case.TestCase):
         def fn():
             a = 10
             b = 20
-            c = a + b
+            # prevent LOAD_FAST_LOAD_FAST in 3.13 by wrapping b with g()
+            c = a + g(b)
             f = "linetable_writer"
             return f"Test if {f} generates correct co_linetable: {c}"
 
@@ -121,7 +122,7 @@ def fn():
                 z *= 3
             return z
 
-        opt_f = torch._dynamo.optimize("eager", nopython=True)(f)
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
         self.assertEqual(opt_f(None, torch.ones(2)), 6)
 
         if sys.version_info >= (3, 11):
@@ -225,7 +226,7 @@ def fn():
             dummy_fn.__code__ = code
             self.assertEqual(dummy_fn(), test[3])
 
-            dummy_opt = torch._dynamo.optimize("eager")(dummy_fn)
+            dummy_opt = torch.compile(dummy_fn, backend="eager")
             self.assertEqual(dummy_opt(), test[3])
 
     def test_exception_table_encode_varint(self):

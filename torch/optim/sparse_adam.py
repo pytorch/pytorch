@@ -1,10 +1,12 @@
 # mypy: allow-untyped-defs
-from typing import List, Tuple
+from typing import List, Tuple, Union
 
 import torch
 from torch import Tensor
+
 from . import _functional as F
-from .optimizer import _maximize_doc, Optimizer, ParamsT
+from .optimizer import _maximize_doc, _params_doc, Optimizer, ParamsT
+
 
 __all__ = ["SparseAdam"]
 
@@ -13,11 +15,13 @@ class SparseAdam(Optimizer):
     def __init__(
         self,
         params: ParamsT,
-        lr: float = 1e-3,
+        lr: Union[float, Tensor] = 1e-3,
         betas: Tuple[float, float] = (0.9, 0.999),
         eps: float = 1e-8,
         maximize: bool = False,
     ):
+        if isinstance(lr, Tensor) and lr.numel() != 1:
+            raise ValueError("Tensor lr must be 1-element")
         if not 0.0 < lr:
             raise ValueError(f"Invalid learning rate: {lr}")
         if not 0.0 < eps:
@@ -166,9 +170,8 @@ SparseAdam.__doc__ = rf"""SparseAdam implements a masked version of the Adam alg
 
 
     Args:
-        params (iterable): iterable of parameters to optimize or dicts defining
-            parameter groups
-        lr (float, optional): learning rate (default: 1e-3)
+        {_params_doc}
+        lr (float, Tensor, optional): learning rate (default: 1e-3)
         betas (Tuple[float, float], optional): coefficients used for computing
             running averages of gradient and its square (default: (0.9, 0.999))
         eps (float, optional): term added to the denominator to improve

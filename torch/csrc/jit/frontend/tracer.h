@@ -13,7 +13,6 @@
 
 #include <cstdint>
 #include <memory>
-#include <mutex>
 #include <unordered_map>
 #include <vector>
 
@@ -101,10 +100,9 @@ struct TORCH_API TracingState
 // data dependencies, but once they get to the ATen call where we actually have
 // the tracing logic, they get converted into a raw IntArrayRef, and we loose
 // all information. To prevent this, we temporarily stash it in here.
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct ArgumentStash {
   struct IntArrayRefTrace : std::vector<Value*> {
-    IntArrayRefTrace(int size) : std::vector<Value*>(size, nullptr) {}
+    IntArrayRefTrace(size_t size) : std::vector<Value*>(size, nullptr) {}
   };
 
   static bool empty() {
@@ -232,7 +230,7 @@ TORCH_API void abandon();
 // NB: those serve both as an intermediate steps in addInputs below,
 // as well as the overloads that terminate template recursion
 TORCH_API void addInputs(Node* n, const char* name, int64_t value);
-TORCH_API void addInputs(Node* n, const char* name, c10::SymInt value);
+TORCH_API void addInputs(Node* n, const char* name, const c10::SymInt& value);
 TORCH_API void addInputs(
     Node* n,
     const char* name,
@@ -283,7 +281,7 @@ TORCH_API void addInputs(
 TORCH_API void addInputs(
     Node* n,
     const char* name,
-    std::vector<at::Tensor> value,
+    const std::vector<at::Tensor>& value,
     bool allow_undefined = false);
 TORCH_API void addInputs(
     Node* n,
@@ -346,19 +344,21 @@ inline void addInputs(
     Node* n,
     const char* name,
     const std::vector<bool>& value) {
-  AT_ERROR("Tracing a list of bool type is currently not supported!");
+  TORCH_CHECK(false, "Tracing a list of bool type is currently not supported!");
 }
 
 template <typename T>
 void addInputs(Node* n, const char* name, ArrayRef<T> value) {
-  AT_ERROR("Tracing a list of arbitrary type is currently not supported!");
+  TORCH_CHECK(
+      false, "Tracing a list of arbitrary type is currently not supported!");
 }
 template <typename K, typename V>
 void addInputs(
     Node* n,
     const char* name,
     const std::unordered_map<K, V>& value) {
-  AT_ERROR("Tracing a dict of arbitrary types is currently not supported!");
+  TORCH_CHECK(
+      false, "Tracing a dict of arbitrary types is currently not supported!");
 }
 
 template <size_t N>
@@ -389,7 +389,8 @@ template <
              std::decay_t<T>,
              c10::intrusive_ptr<c10::ivalue::Object>>)>>
 void addOutput(Node* node, T&&) {
-  AT_ERROR(
+  TORCH_CHECK(
+      false,
       "Found an unsupported argument type ",
       c10::demangle_type<T>(),
       " in the JIT tracer. File a bug report.");

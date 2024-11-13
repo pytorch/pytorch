@@ -22,9 +22,7 @@ class GcovCoverageParser:
         This is repo-specific and only makes sense for the current state of
         ovrsource.
         """
-        if "third-party" in path:
-            return True
-        return False
+        return "third-party" in path
 
     def parse(self) -> list[CoverageRecord]:
         # The JSON format is described in the gcov source code

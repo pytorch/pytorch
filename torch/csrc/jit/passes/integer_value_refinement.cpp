@@ -6,8 +6,7 @@
 
 #include <utility>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 using IntegerRefinement = std::unordered_map<Value*, int64_t>;
 
@@ -202,7 +201,7 @@ struct IntegerValueRefiner {
 
     active_refinements_.pop_back();
     return block_refinements;
-  };
+  }
 
   std::optional<int64_t> tryFindRefinement(Value* v) {
     for (const auto& ref : active_refinements_) {
@@ -227,5 +226,4 @@ bool RefineIntegerValues(const std::shared_ptr<Graph>& graph) {
   return IntegerValueRefiner(graph).run();
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

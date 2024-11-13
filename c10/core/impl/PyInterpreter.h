@@ -124,6 +124,8 @@ struct C10_API PyInterpreterVTable {
   // Report the name of this interpreter
   virtual std::string name() const = 0;
 
+  // Run Py_INCREF on a PyObject.
+  virtual void incref(PyObject* pyobj) const = 0;
   // Run Py_DECREF on a PyObject.  We DO NOT assume the GIL is held on call
   // See NOTE [PyInterpreter::decref takes a `has_pyobj_slot` arg]
   virtual void decref(PyObject* pyobj, bool has_pyobj_slot) const = 0;
@@ -150,7 +152,8 @@ struct C10_API PyInterpreterVTable {
       c10::DispatchKey,
       c10::DispatchKeySet keyset,
       torch::jit::Stack* stack,
-      bool with_keyset) const = 0;
+      bool with_keyset,
+      bool with_op) const = 0;
 
   virtual void throw_abstract_impl_not_imported_error(
       std::string opname,
@@ -217,7 +220,7 @@ struct C10_API PyInterpreterVTable {
 struct C10_API PyInterpreter {
   const PyInterpreterVTable* vtable_;
 
-  PyInterpreter(const PyInterpreterVTable* vtable) : vtable_(vtable){};
+  PyInterpreter(const PyInterpreterVTable* vtable) : vtable_(vtable) {}
 
   const PyInterpreterVTable& operator*() const noexcept {
     return *vtable_;

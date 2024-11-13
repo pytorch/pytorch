@@ -291,7 +291,7 @@ at::Tensor& embedding_bag_nbit_impl(
       shape_arr[1] = D;
       shape = c10::IntArrayRef(&shape_arr[0], 2);
     }
-    at::native::resize_(output, shape, c10::nullopt);
+    at::native::resize_(output, shape, std::nullopt);
   }
 #ifdef USE_FBGEMM
   const auto indices_data = indices.data_ptr<IndexType>();
@@ -461,7 +461,7 @@ at::Tensor& embedding_bag_byte_impl(
       shape_arr[1] = D;
       shape = c10::IntArrayRef(&shape_arr[0], 2);
     }
-    at::native::resize_(output, shape, c10::nullopt);
+    at::native::resize_(output, shape, std::nullopt);
   }
 #ifdef USE_FBGEMM
   const int64_t N = weight_sizes[0];
@@ -812,8 +812,7 @@ at::Tensor PackedEmbeddingBagWeight::embeddingbag_4bit(
     is_embedding_op);
 }
 
-namespace at {
-namespace native {
+namespace at::native {
 
 Tensor& embedding_bag_byte_rowwise_offsets_out(
     Tensor& output,
@@ -915,7 +914,7 @@ inline at::Tensor create_empty_from(
     const at::Tensor& t,
     c10::ScalarType dtype) {
   return at::detail::empty_cpu(
-      {0}, dtype, t.layout(), t.device(), c10::nullopt, c10::nullopt);
+      {0}, dtype, t.layout(), t.device(), std::nullopt, std::nullopt);
 }
 
 Tensor embedding_bag_byte_rowwise_offsets(
@@ -1087,8 +1086,8 @@ class QEmbedding final {
           indices,
           offsets,
           pruned_weights,
-          c10::nullopt,
-          c10::nullopt,
+          std::nullopt,
+          std::nullopt,
           false /* include_last_offset */,
           true /* is_embedding_op */);
     } else if (bit_rate == 4) {
@@ -1096,8 +1095,8 @@ class QEmbedding final {
           indices,
           offsets,
           pruned_weights,
-          c10::nullopt,
-          c10::nullopt,
+          std::nullopt,
+          std::nullopt,
           false,
           true);
     } else {
@@ -1143,5 +1142,4 @@ TORCH_LIBRARY_IMPL(quantized, Meta, m) {
 }
 
 } // namespace
-} // namespace native
-} // namespace at
+} // namespace at::native

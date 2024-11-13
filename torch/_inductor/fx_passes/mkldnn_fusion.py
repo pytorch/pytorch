@@ -5,11 +5,9 @@ from functools import reduce
 from typing import Any, Tuple
 
 import torch
-
 from torch.fx.experimental.symbolic_shapes import has_free_symbols
 
 from .. import ir
-
 from ..lowering import lowerings as L
 from ..pattern_matcher import (
     Arg,
@@ -27,6 +25,7 @@ from .quantization import (
     _register_quantization_weight_pack_pass,
     _register_woq_lowerings,
 )
+
 
 if torch._C._has_mkldnn:
     aten = torch.ops.aten
@@ -552,7 +551,9 @@ if torch._C._has_mkldnn:
     ]
 
     class UnaryAttr:
-        def __init__(self, op_name: str, scalars_attr=None, algorithm_attr=None):
+        def __init__(
+            self, op_name: str, scalars_attr=None, algorithm_attr=None
+        ) -> None:
             self.op_name = op_name
             self.scalars_attr = scalars_attr if scalars_attr else []
             self.algorithm_attr = algorithm_attr if algorithm_attr else ""
@@ -834,7 +835,7 @@ if torch._C._has_mkldnn:
             )
             repl.meta.update(add_node.meta)
             add_node.replace_all_uses_with(repl)
-            match.erase_nodes(graph)
+            match.erase_nodes()
 
     def _is_packable_mkldnn_rnn_layer(match):
         lstm_node = match.output_node()
@@ -1208,7 +1209,7 @@ if torch._C._has_mkldnn:
         Combine packed weight nodes with the same inputs to reduce memory usage.
         for example:
         class Model(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = nn.Linear(32, 32, bias=True)
 

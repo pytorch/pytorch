@@ -9,33 +9,22 @@ from __future__ import annotations
 import contextlib
 import functools
 import inspect
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    Mapping,
-    Optional,
-    Sequence,
-    Tuple,
-    Type,
-    Union,
-)
+from typing import Any, Callable, Mapping, Sequence
 
 import torch._dynamo
 import torch.export as torch_export
 import torch.fx
 import torch.onnx
-from torch.onnx._internal import _beartype, exporter, io_adapter
+from torch.onnx._internal import _exporter_legacy, io_adapter
 from torch.utils import _pytree as pytree
 
 
 class _PyTreeExtensionContext:
     """Context manager to register PyTree extension."""
 
-    _extensions: Dict[Type, Tuple[pytree.FlattenFunc, pytree.UnflattenFunc]]
+    _extensions: dict[type, tuple[pytree.FlattenFunc, pytree.UnflattenFunc]]
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._extensions = {}
         # Register PyTree extension for HuggingFace model output.
         self._register_huggingface_model_output_extension()
@@ -53,10 +42,9 @@ class _PyTreeExtensionContext:
         for class_type in self._extensions:
             pytree.SUPPORTED_NODES.pop(class_type)
 
-    @_beartype.beartype
     def register_pytree_node(
         self,
-        class_type: Type,
+        class_type: type,
         flatten_func: pytree.FlattenFunc,
         unflatten_func: pytree.UnflattenFunc,
     ):
@@ -80,18 +68,16 @@ class _PyTreeExtensionContext:
     def _register_huggingface_model_output_extension(self):
         try:
             from transformers import modeling_outputs  # type: ignore[import]
-        except ImportError as e:
+        except ImportError:
             return
 
-        @_beartype.beartype
         def model_output_flatten(
             output: modeling_outputs.ModelOutput,
-        ) -> Tuple[List[Any], pytree.Context]:
+        ) -> tuple[list[Any], pytree.Context]:
             return list(output.values()), (type(output), list(output.keys()))
 
-        @_beartype.beartype
         def model_output_unflatten(
-            values: List[Any], context: pytree.Context
+            values: list[Any], context: pytree.Context
         ) -> modeling_outputs.ModelOutput:
             output_type, keys = context
             return output_type(**dict(zip(keys, values)))
@@ -108,7 +94,9 @@ class _PyTreeExtensionContext:
 
         for _, class_type in named_model_output_classes:
             self.register_pytree_node(
-                class_type, model_output_flatten, model_output_unflatten
+                class_type,
+                model_output_flatten,
+                model_output_unflatten,  # type: ignore[arg-type ]
             )
 
 
@@ -123,9 +111,7 @@ class DynamoFlattenOutputStep(io_adapter.FlattenOutputStep):
     object. See :meth:`_PyTreeExtensionContext.register_pytree_node`.
     """
 
-    def __init__(
-        self, pytree_extension_context: Optional[_PyTreeExtensionContext] = None
-    ):
+    def __init__(self, pytree_extension_context: _PyTreeExtensionContext | None = None):
         super().__init__()
         self._pytree_extension_context = (
             pytree_extension_context or _PyTreeExtensionContext()
@@ -134,9 +120,7 @@ class DynamoFlattenOutputStep(io_adapter.FlattenOutputStep):
     def apply(
         self,
         model_outputs: Any,
-        model: Optional[
-            Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
-        ] = None,
+        model: torch.nn.Module | Callable | torch_export.ExportedProgram | None = None,
     ) -> Sequence[Any]:
         """Flatten the model outputs, under the context of pytree extension."""
         with self._pytree_extension_context:
@@ -144,7 +128,7 @@ class DynamoFlattenOutputStep(io_adapter.FlattenOutputStep):
 
 
 def _wrap_model_with_output_adapter(
-    model: Union[torch.nn.Module, Callable],
+    model: torch.nn.Module | Callable,
     output_adapter: DynamoFlattenOutputStep,
 ) -> Callable:
     """Wrap model with output adapter.
@@ -171,7 +155,7 @@ def _wrap_model_with_output_adapter(
     return wrapped
 
 
-class DynamoExport(exporter.FXGraphExtractor):
+class DynamoExport(_exporter_legacy.FXGraphExtractor):
     """Generates a FX GraphModule using torch.dynamo.export API
     Args:
         aten_graph: If True, exports a graph with ATen operators.
@@ -180,15 +164,15 @@ class DynamoExport(exporter.FXGraphExtractor):
 
     def __init__(
         self,
-        aten_graph: Optional[bool] = None,
+        aten_graph: bool | None = None,
     ):
         super().__init__()
         self.aten_graph = aten_graph or True
 
     def generate_fx(
         self,
-        options: exporter.ResolvedExportOptions,
-        model: Union[torch.nn.Module, Callable],
+        options: _exporter_legacy.ResolvedExportOptions,
+        model: torch.nn.Module | Callable,
         model_args: Sequence[Any],
         model_kwargs: Mapping[str, Any],
     ) -> torch.fx.GraphModule:
@@ -232,14 +216,13 @@ class DynamoExport(exporter.FXGraphExtractor):
 
         return self.pre_export_passes(options, model, graph_module, updated_model_args)  # type: ignore[return-value]
 
-    @_beartype.beartype
     def pre_export_passes(
         self,
-        options: exporter.ResolvedExportOptions,
-        original_model: Union[torch.nn.Module, Callable],
+        options: _exporter_legacy.ResolvedExportOptions,
+        original_model: torch.nn.Module | Callable,
         fx_module: torch.fx.GraphModule,
         fx_module_args: Sequence[Any],
     ):
-        return exporter.common_pre_export_passes(
+        return _exporter_legacy.common_pre_export_passes(
             options, original_model, fx_module, fx_module_args
         )

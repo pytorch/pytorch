@@ -28,20 +28,18 @@
 #include "torch/csrc/utils/python_arg_parser.h"
 #include "torch/csrc/utils/python_numbers.h"
 #include "torch/csrc/utils/python_strings.h"
-#include "torch/csrc/utils/python_tuples.h"
 #include "torch/csrc/utils/tensor_apply.h"
 #include "torch/csrc/utils/tensor_list.h"
 #include "torch/csrc/utils/tensor_new.h"
 #include "torch/csrc/utils/tensor_numpy.h"
 #include "torch/csrc/utils/tensor_types.h"
-#include "torch/csrc/utils/structseq.h"
 #include "torch/csrc/autograd/generated/python_return_types.h"
 
 #include <ATen/core/Tensor.h>
 #include <ATen/FuncTorchTLS.h>
-#include "c10/util/Optional.h"
 #include "c10/core/Stream.h"
 
+#include <optional>
 #include <stdexcept>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -51,10 +49,8 @@ $ops_headers
 #include <ATen/ops/_local_scalar_dense.h>
 #endif
 
-using at::DeviceGuard;
 using at::device_of;
 using at::OptionalDeviceGuard;
-using at::Backend;
 using at::Scalar;
 using at::ScalarType;
 using at::Tensor;
@@ -155,7 +151,7 @@ static PyObject * THPVariable_stride(PyObject* self, PyObject* args, PyObject* k
     // we can't do the normal wrapping here because IntArrayRef maps to both
     // torch.Size and tuple in python
     // TODO: consider factoring this out
-    THPObjectPtr tuple(PyTuple_New(strides.size()));
+    THPObjectPtr tuple(PyTuple_New(static_cast<Py_ssize_t>(strides.size())));
     if (!tuple) throw python_error();
     for (size_t i = 0; i != strides.size(); i++) {
       PyObject* s = torch::toPyObject(strides[i]);
@@ -273,7 +269,7 @@ static PyObject * THPVariable_contiguous(PyObject* self, PyObject* args, PyObjec
     // we actually call contiguous here, we need to record this information
     // manually.
     if (jit::tracer::isTracing()) {
-      auto tracer_state = jit::tracer::getTracingState();
+      const auto& tracer_state = jit::tracer::getTracingState();
       auto op_name = c10::Symbol::fromQualString("aten::contiguous");
       auto node = tracer_state->createNode(op_name, /*num_outputs=*/0);
       jit::tracer::recordSourceLocation(node);
@@ -497,6 +493,29 @@ static PyObject * THPVariable_cuda(PyObject* self, PyObject* args, PyObject* kwa
   auto opt_memory_format = r.memoryformatOptional(2);
   TORCH_CHECK(device.is_cuda(), "Invalid device, must be cuda device");
   torch::utils::device_lazy_init(at::kCUDA);
+  return THPVariable_Wrap(dispatch_to(self_, device, r.toBool(1), false, opt_memory_format));
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THPVariable_mtia(PyObject* self, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+    "mtia(Device? device=None, bool non_blocking=False, *, MemoryFormat? memory_format=None)",
+    "mtia(Device? device=None, bool async=False, *, MemoryFormat? memory_format=None)|deprecated"
+  });
+  auto& self_ = THPVariable_Unpack(self);
+  ParsedArgs<3> parsed_args;
+  auto r = parser.parse(self, args, kwargs, parsed_args);
+
+  if (r.has_torch_function()) {
+    return handle_torch_function(r, self, args, kwargs, THPVariableClass, "torch.Tensor");
+  }
+
+  auto device = r.isNone(0) ? at::Device(at::DeviceType::MTIA) : r.device(0);
+  auto opt_memory_format = r.memoryformatOptional(2);
+  TORCH_CHECK(device.is_mtia(), "Invalid device, must be MTIA device");
+  torch::utils::device_lazy_init(at::kMTIA);
   return THPVariable_Wrap(dispatch_to(self_, device, r.toBool(1), false, opt_memory_format));
   END_HANDLE_TH_ERRORS
 }
@@ -976,9 +995,6 @@ static PyObject * THPVariable_to(PyObject* self, PyObject* args, PyObject* kwarg
   auto opt_memory_format = std::get<4>(parsed);
   auto& self_ = THPVariable_Unpack(self);
   torch::utils::maybe_initialize_device(device);
-  if (device && device->is_privateuseone()) {
-    at::globalContext().lazyInitPrivateUse1();
-  }
   if (!device && !scalarType && !copy && !opt_memory_format.has_value()) {
     Py_INCREF(self);
     return self;
@@ -1045,22 +1061,18 @@ static PyObject * THPVariable_type(PyObject* self, PyObject* args, PyObject* kwa
   } else {
     throw TypeError("dtype must be a type, str, or dtype object");
   }
-  ScalarType scalar_type;
   Device device = self_.device();
   if (is_dtype) {
-    scalar_type = r.scalartype(0);
+    auto scalar_type = r.scalartype(0);
     return THPVariable_Wrap(dispatch_to(self_, scalar_type, /*non_blocking=*/ r.toBool(1), /*copy=*/ false, opt_memory_format));
   }
   at::TensorOptions options = torch::utils::options_from_string(type_name);
-  scalar_type = at::typeMetaToScalarType(options.dtype());
+  auto scalar_type = at::typeMetaToScalarType(options.dtype());
   auto device_type = options.device().type();
   if (device_type != device.type()) {
     device = at::Device(device_type);
   }
   torch::utils::maybe_initialize_device(device);
-  if (device.is_privateuseone()) {
-    at::globalContext().lazyInitPrivateUse1();
-  }
   return THPVariable_Wrap(dispatch_to(self_, device, scalar_type, /*non_blocking=*/ r.toBool(1), /*copy=*/ false, opt_memory_format));
   END_HANDLE_TH_ERRORS
 }
@@ -1162,7 +1174,7 @@ static PyObject* THPVariable_set_(
     case 1: {
       // aten::set_.source_Storage(Tensor(a!) self, Storage source) ->
       // Tensor(a!)
-      at::ScalarType storage_scalar_type;
+      at::ScalarType storage_scalar_type{};
       bool is_typed_storage = true;
       at::Storage storage = _r.storage(0, storage_scalar_type, is_typed_storage);
       TORCH_CHECK(storage_scalar_type == self.dtype() || !is_typed_storage,
@@ -1171,14 +1183,14 @@ static PyObject* THPVariable_set_(
         " for argument 1 'storage'");
       auto dispatch_set_ = [](const Tensor& self, Storage source) -> Tensor {
         pybind11::gil_scoped_release no_gil;
-        return self.set_(source);
+        return self.set_(std::move(source));
       };
       return wrap(dispatch_set_(self, storage));
     }
     case 2: {
       // aten::set_.source_Storage_storage_offset(Tensor(a!) self, Storage
       // source, int storage_offset, int[] size, int[] stride=[]) -> Tensor(a!)
-      at::ScalarType storage_scalar_type;
+      at::ScalarType storage_scalar_type{};
       bool is_typed_storage = true;
       at::Storage storage = _r.storage(0, storage_scalar_type, is_typed_storage);
       TORCH_CHECK(storage_scalar_type == self.dtype() || !is_typed_storage,
@@ -1191,7 +1203,7 @@ static PyObject* THPVariable_set_(
                               c10::SymIntArrayRef size,
                               c10::SymIntArrayRef stride) -> Tensor {
         pybind11::gil_scoped_release no_gil;
-        return self.set__symint(source, storage_offset, size, stride);
+        return self.set__symint(std::move(source), std::move(storage_offset), size, stride);
       };
       return wrap(dispatch_set_(
           self, storage, _r.toSymInt(1), _r.symintlist(2), _r.symintlist(3)));
@@ -1215,7 +1227,7 @@ static PyObject* THPVariable_set_(
                               c10::SymIntArrayRef size,
                               c10::SymIntArrayRef stride) -> Tensor {
         pybind11::gil_scoped_release no_gil;
-        return self.set__symint(source, storage_offset, size, stride);
+        return self.set__symint(source, std::move(storage_offset), size, stride);
       };
       return wrap(dispatch_set_(
           self, storage, _r.toSymInt(1), _r.symintlist(2), _r.symintlist(3)));
@@ -1230,86 +1242,87 @@ static PyObject* THPVariable_set_(
 // being registered through native_functions.yaml, and be tagged cpp / JIT
 PyMethodDef variable_methods[] = {
   // These magic methods are all implemented on python object to wrap NotImplementedError
-  {"__add__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_add>), METH_VARARGS | METH_KEYWORDS, NULL},
-  {"__radd__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_add>), METH_VARARGS | METH_KEYWORDS, NULL},
-  {"__iadd__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_add_>), METH_VARARGS | METH_KEYWORDS, NULL},
-  {"__rmul__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_mul>), METH_VARARGS | METH_KEYWORDS, NULL},
-  {"__mul__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_mul>), METH_VARARGS | METH_KEYWORDS, NULL},
-  {"__imul__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_mul_>), METH_VARARGS | METH_KEYWORDS, NULL},
-  {"__sub__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_sub>), METH_VARARGS | METH_KEYWORDS, NULL},
-  {"__isub__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_sub_>), METH_VARARGS | METH_KEYWORDS, NULL},
-  {"__div__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_div>), METH_VARARGS | METH_KEYWORDS, NULL},
-  {"__truediv__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_div>), METH_VARARGS | METH_KEYWORDS, NULL},
-  {"__floordiv__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_floor_divide>), METH_VARARGS | METH_KEYWORDS, NULL},
-  {"__idiv__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_div_>), METH_VARARGS | METH_KEYWORDS, NULL},
-  {"__ifloordiv__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_floor_divide_>), METH_VARARGS | METH_KEYWORDS, NULL},
-  {"__mod__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_remainder>), METH_VARARGS | METH_KEYWORDS, NULL},
-  {"__imod__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_remainder_>), METH_VARARGS | METH_KEYWORDS, NULL},
-  {"__eq__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable___eq__>), METH_VARARGS | METH_KEYWORDS, NULL},
-  {"__ne__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_ne>), METH_VARARGS | METH_KEYWORDS, NULL},
-  {"__lt__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_lt>), METH_VARARGS | METH_KEYWORDS, NULL},
-  {"__le__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_le>), METH_VARARGS | METH_KEYWORDS, NULL},
-  {"__gt__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_gt>), METH_VARARGS | METH_KEYWORDS, NULL},
-  {"__ge__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_ge>), METH_VARARGS | METH_KEYWORDS, NULL},
-  {"__rand__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_bitwise_and>), METH_VARARGS | METH_KEYWORDS, NULL},
-  {"__ror__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_bitwise_or>), METH_VARARGS | METH_KEYWORDS, NULL},
-  {"__rxor__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_bitwise_xor>), METH_VARARGS | METH_KEYWORDS, NULL},
-  {"__bool__", THPVariable_bool_scalar, METH_NOARGS, NULL},
-  {"__float__", THPVariable_float_scalar, METH_NOARGS, NULL},
-  {"__complex__", THPVariable_complex_scalar, METH_NOARGS, NULL},
-  {"__int__", THPVariable_integral_scalar, METH_NOARGS, NULL},
-  {"__long__", THPVariable_integral_scalar, METH_NOARGS, NULL},
-  {"__index__", THPVariable_index_scalar, METH_NOARGS, NULL},
-  {"__nonzero__", THPVariable_bool_scalar, METH_NOARGS, NULL},
-  {"__invert__", THPVariable_invert, METH_NOARGS, NULL},
-  {"__matmul__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_matmul>), METH_VARARGS | METH_KEYWORDS, NULL},
-  {"_is_view", THPVariable__is_view, METH_NOARGS, NULL},
-  {"apply_", THPVariable_apply_, METH_O, NULL},
-  {"bfloat16", castPyCFunctionWithKeywords(THPVariable_bfloat16), METH_VARARGS | METH_KEYWORDS, NULL},
-  {"byte", castPyCFunctionWithKeywords(THPVariable_byte), METH_VARARGS | METH_KEYWORDS, NULL},
-  {"char", castPyCFunctionWithKeywords(THPVariable_char), METH_VARARGS | METH_KEYWORDS, NULL},
-  {"contiguous", castPyCFunctionWithKeywords(THPVariable_contiguous), METH_VARARGS | METH_KEYWORDS, NULL},
-  {"copy_", castPyCFunctionWithKeywords(THPVariable_copy_), METH_VARARGS | METH_KEYWORDS, NULL},
-  {"cpu", castPyCFunctionWithKeywords(THPVariable_cpu), METH_VARARGS | METH_KEYWORDS, NULL},
-  {"cuda", castPyCFunctionWithKeywords(THPVariable_cuda), METH_VARARGS | METH_KEYWORDS, NULL},
-  {"xpu", castPyCFunctionWithKeywords(THPVariable_xpu), METH_VARARGS | METH_KEYWORDS, NULL},
-  {"ipu", castPyCFunctionWithKeywords(THPVariable_ipu), METH_VARARGS | METH_KEYWORDS, NULL},
-  {"data_ptr", THPVariable_data_ptr, METH_NOARGS, NULL},
-  {"dim", THPVariable_dim, METH_NOARGS, NULL},
-  {"has_names", THPVariable_has_names, METH_NOARGS, NULL},
-  {"double", castPyCFunctionWithKeywords(THPVariable_double), METH_VARARGS | METH_KEYWORDS, NULL},
-  {"cdouble", castPyCFunctionWithKeywords(THPVariable_cdouble), METH_VARARGS | METH_KEYWORDS, NULL},
-  {"element_size", THPVariable_element_size, METH_NOARGS, NULL},
-  {"float", castPyCFunctionWithKeywords(THPVariable_float), METH_VARARGS | METH_KEYWORDS, NULL},
-  {"cfloat", castPyCFunctionWithKeywords(THPVariable_cfloat), METH_VARARGS | METH_KEYWORDS, NULL},
-  {"get_device", THPVariable_get_device, METH_NOARGS, NULL},
-  {"bool", castPyCFunctionWithKeywords(THPVariable_bool), METH_VARARGS | METH_KEYWORDS, NULL},
-  {"half", castPyCFunctionWithKeywords(THPVariable_half), METH_VARARGS | METH_KEYWORDS, NULL},
-  {"int", castPyCFunctionWithKeywords(THPVariable_int), METH_VARARGS | METH_KEYWORDS, NULL},
-  {"is_contiguous", castPyCFunctionWithKeywords(THPVariable_is_contiguous), METH_VARARGS | METH_KEYWORDS, NULL},
-  {"item", THPVariable_item, METH_NOARGS, NULL},
-  {"long", castPyCFunctionWithKeywords(THPVariable_long), METH_VARARGS | METH_KEYWORDS, NULL},
-  {"map_", castPyCFunctionWithKeywords(THPVariable_map_), METH_VARARGS | METH_KEYWORDS, NULL},
-  {"map2_", castPyCFunctionWithKeywords(THPVariable_map2_), METH_VARARGS | METH_KEYWORDS, NULL},
-  {"ndimension", THPVariable_dim, METH_NOARGS, NULL},
-  {"nelement", THPVariable_numel, METH_NOARGS, NULL},
-  {"new", castPyCFunctionWithKeywords(THPVariable_new), METH_VARARGS | METH_KEYWORDS, NULL},
-  {"new_tensor", castPyCFunctionWithKeywords(THPVariable_new_tensor), METH_VARARGS | METH_KEYWORDS, NULL},
-  {"nonzero", castPyCFunctionWithKeywords(THPVariable_nonzero), METH_VARARGS | METH_KEYWORDS, NULL},
-  {"numel", THPVariable_numel, METH_NOARGS, NULL},
-  {"numpy", castPyCFunctionWithKeywords(THPVariable_numpy), METH_VARARGS | METH_KEYWORDS, NULL},
-  {"requires_grad_", castPyCFunctionWithKeywords(THPVariable_requires_grad_), METH_VARARGS | METH_KEYWORDS, NULL},
-  {"set_", castPyCFunctionWithKeywords(THPVariable_set_), METH_VARARGS | METH_KEYWORDS, NULL},
-  {"short", castPyCFunctionWithKeywords(THPVariable_short), METH_VARARGS | METH_KEYWORDS, NULL},
-  {"size", castPyCFunctionWithKeywords(THPVariable_size), METH_VARARGS | METH_KEYWORDS, NULL},
-  {"untyped_storage", THPVariable_storage, METH_NOARGS, NULL},
-  {"storage_offset", THPVariable_storage_offset, METH_NOARGS, NULL},
-  {"stride", castPyCFunctionWithKeywords(THPVariable_stride), METH_VARARGS | METH_KEYWORDS, NULL},
-  {"to", castPyCFunctionWithKeywords(THPVariable_to), METH_VARARGS | METH_KEYWORDS, NULL},
-  {"tolist", THPVariable_tolist, METH_NOARGS, NULL},
-  {"type", castPyCFunctionWithKeywords(THPVariable_type), METH_VARARGS | METH_KEYWORDS, NULL},
+  {"__add__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_add>), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"__radd__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_add>), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"__iadd__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_add_>), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"__rmul__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_mul>), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"__mul__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_mul>), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"__imul__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_mul_>), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"__sub__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_sub>), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"__isub__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_sub_>), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"__div__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_div>), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"__truediv__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_div>), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"__floordiv__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_floor_divide>), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"__idiv__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_div_>), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"__ifloordiv__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_floor_divide_>), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"__mod__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_remainder>), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"__imod__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_remainder_>), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"__eq__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable___eq__>), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"__ne__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_ne>), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"__lt__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_lt>), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"__le__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_le>), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"__gt__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_gt>), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"__ge__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_ge>), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"__rand__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_bitwise_and>), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"__ror__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_bitwise_or>), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"__rxor__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_bitwise_xor>), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"__bool__", THPVariable_bool_scalar, METH_NOARGS, nullptr},
+  {"__float__", THPVariable_float_scalar, METH_NOARGS, nullptr},
+  {"__complex__", THPVariable_complex_scalar, METH_NOARGS, nullptr},
+  {"__int__", THPVariable_integral_scalar, METH_NOARGS, nullptr},
+  {"__long__", THPVariable_integral_scalar, METH_NOARGS, nullptr},
+  {"__index__", THPVariable_index_scalar, METH_NOARGS, nullptr},
+  {"__nonzero__", THPVariable_bool_scalar, METH_NOARGS, nullptr},
+  {"__invert__", THPVariable_invert, METH_NOARGS, nullptr},
+  {"__matmul__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_matmul>), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"_is_view", THPVariable__is_view, METH_NOARGS, nullptr},
+  {"apply_", THPVariable_apply_, METH_O, nullptr},
+  {"bfloat16", castPyCFunctionWithKeywords(THPVariable_bfloat16), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"byte", castPyCFunctionWithKeywords(THPVariable_byte), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"char", castPyCFunctionWithKeywords(THPVariable_char), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"contiguous", castPyCFunctionWithKeywords(THPVariable_contiguous), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"copy_", castPyCFunctionWithKeywords(THPVariable_copy_), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"cpu", castPyCFunctionWithKeywords(THPVariable_cpu), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"cuda", castPyCFunctionWithKeywords(THPVariable_cuda), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"mtia", castPyCFunctionWithKeywords(THPVariable_mtia), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"xpu", castPyCFunctionWithKeywords(THPVariable_xpu), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"ipu", castPyCFunctionWithKeywords(THPVariable_ipu), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"data_ptr", THPVariable_data_ptr, METH_NOARGS, nullptr},
+  {"dim", THPVariable_dim, METH_NOARGS, nullptr},
+  {"has_names", THPVariable_has_names, METH_NOARGS, nullptr},
+  {"double", castPyCFunctionWithKeywords(THPVariable_double), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"cdouble", castPyCFunctionWithKeywords(THPVariable_cdouble), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"element_size", THPVariable_element_size, METH_NOARGS, nullptr},
+  {"float", castPyCFunctionWithKeywords(THPVariable_float), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"cfloat", castPyCFunctionWithKeywords(THPVariable_cfloat), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"get_device", THPVariable_get_device, METH_NOARGS, nullptr},
+  {"bool", castPyCFunctionWithKeywords(THPVariable_bool), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"half", castPyCFunctionWithKeywords(THPVariable_half), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"int", castPyCFunctionWithKeywords(THPVariable_int), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"is_contiguous", castPyCFunctionWithKeywords(THPVariable_is_contiguous), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"item", THPVariable_item, METH_NOARGS, nullptr},
+  {"long", castPyCFunctionWithKeywords(THPVariable_long), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"map_", castPyCFunctionWithKeywords(THPVariable_map_), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"map2_", castPyCFunctionWithKeywords(THPVariable_map2_), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"ndimension", THPVariable_dim, METH_NOARGS, nullptr},
+  {"nelement", THPVariable_numel, METH_NOARGS, nullptr},
+  {"new", castPyCFunctionWithKeywords(THPVariable_new), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"new_tensor", castPyCFunctionWithKeywords(THPVariable_new_tensor), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"nonzero", castPyCFunctionWithKeywords(THPVariable_nonzero), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"numel", THPVariable_numel, METH_NOARGS, nullptr},
+  {"numpy", castPyCFunctionWithKeywords(THPVariable_numpy), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"requires_grad_", castPyCFunctionWithKeywords(THPVariable_requires_grad_), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"set_", castPyCFunctionWithKeywords(THPVariable_set_), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"short", castPyCFunctionWithKeywords(THPVariable_short), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"size", castPyCFunctionWithKeywords(THPVariable_size), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"untyped_storage", THPVariable_storage, METH_NOARGS, nullptr},
+  {"storage_offset", THPVariable_storage_offset, METH_NOARGS, nullptr},
+  {"stride", castPyCFunctionWithKeywords(THPVariable_stride), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"to", castPyCFunctionWithKeywords(THPVariable_to), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"tolist", THPVariable_tolist, METH_NOARGS, nullptr},
+  {"type", castPyCFunctionWithKeywords(THPVariable_type), METH_VARARGS | METH_KEYWORDS, nullptr},
   ${py_method_defs}
-  {NULL}
+  {nullptr}
 };
 
 } // namespace torch::autograd

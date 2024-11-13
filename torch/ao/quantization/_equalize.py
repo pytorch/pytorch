@@ -1,7 +1,9 @@
 # mypy: allow-untyped-defs
-import torch
 import copy
-from typing import Dict, Any
+from typing import Any, Dict
+
+import torch
+
 
 __all__ = [
     "set_module_weight",
@@ -21,8 +23,13 @@ __all__ = [
 ]
 
 _supported_types = {torch.nn.Conv2d, torch.nn.Linear, torch.nn.Conv1d}
-_supported_intrinsic_types = {torch.ao.nn.intrinsic.ConvReLU2d, torch.ao.nn.intrinsic.LinearReLU, torch.ao.nn.intrinsic.ConvReLU1d}
+_supported_intrinsic_types = {
+    torch.ao.nn.intrinsic.ConvReLU2d,
+    torch.ao.nn.intrinsic.LinearReLU,
+    torch.ao.nn.intrinsic.ConvReLU1d,
+}
 _all_supported_types = _supported_types.union(_supported_intrinsic_types)
+
 
 def set_module_weight(module, weight) -> None:
     if type(module) in _supported_types:
@@ -30,11 +37,13 @@ def set_module_weight(module, weight) -> None:
     else:
         module[0].weight = torch.nn.Parameter(weight)
 
+
 def set_module_bias(module, bias) -> None:
     if type(module) in _supported_types:
         module.bias = torch.nn.Parameter(bias)
     else:
         module[0].bias = torch.nn.Parameter(bias)
+
 
 def has_bias(module) -> bool:
     if type(module) in _supported_types:
@@ -42,17 +51,20 @@ def has_bias(module) -> bool:
     else:
         return module[0].bias is not None
 
+
 def get_module_weight(module):
     if type(module) in _supported_types:
         return module.weight
     else:
         return module[0].weight
 
+
 def get_module_bias(module):
     if type(module) in _supported_types:
         return module.bias
     else:
         return module[0].bias
+
 
 def max_over_ndim(input, axis_list, keepdim=False):
     """Apply 'torch.max' over the given axes."""
@@ -61,12 +73,14 @@ def max_over_ndim(input, axis_list, keepdim=False):
         input, _ = input.max(axis, keepdim)
     return input
 
+
 def min_over_ndim(input, axis_list, keepdim=False):
     """Apply 'torch.min' over the given axes."""
     axis_list.sort(reverse=True)
     for axis in axis_list:
         input, _ = input.min(axis, keepdim)
     return input
+
 
 def channel_range(input, axis=0):
     """Find the range of weights associated with a specific channel."""
@@ -77,8 +91,11 @@ def channel_range(input, axis=0):
     mins = min_over_ndim(input, axis_list)
     maxs = max_over_ndim(input, axis_list)
 
-    assert mins.size(0) == input.size(axis), "Dimensions of resultant channel range does not match size of requested axis"
+    assert mins.size(0) == input.size(
+        axis
+    ), "Dimensions of resultant channel range does not match size of requested axis"
     return maxs - mins
+
 
 def get_name_by_module(model, module):
     """Get the name of a module within a model.
@@ -95,6 +112,7 @@ def get_name_by_module(model, module):
             return name
     raise ValueError("module is not in the model")
 
+
 def cross_layer_equalization(module1, module2, output_axis=0, input_axis=1):
     """Scale the range of Tensor1.output to equal Tensor2.input.
 
@@ -102,21 +120,24 @@ def cross_layer_equalization(module1, module2, output_axis=0, input_axis=1):
     the ranges of the first tensors' output channel are equal to the
     ranges of the second tensors' input channel
     """
-    if type(module1) not in _all_supported_types or type(module2) not in _all_supported_types:
-        raise ValueError("module type not supported:", type(module1), " ", type(module2))
+    if (
+        type(module1) not in _all_supported_types
+        or type(module2) not in _all_supported_types
+    ):
+        raise ValueError(
+            "module type not supported:", type(module1), " ", type(module2)
+        )
 
-    conv1_has_bias = has_bias(module1)
-    bias = None
+    bias = get_module_bias(module1) if has_bias(module1) else None
 
     weight1 = get_module_weight(module1)
     weight2 = get_module_weight(module2)
 
     if weight1.size(output_axis) != weight2.size(input_axis):
-        raise TypeError("Number of output channels of first arg do not match \
-        number input channels of second arg")
-
-    if conv1_has_bias:
-        bias = get_module_bias(module1)
+        raise TypeError(
+            "Number of output channels of first arg do not match \
+        number input channels of second arg"
+        )
 
     weight1_range = channel_range(weight1, output_axis)
     weight2_range = channel_range(weight2, input_axis)
@@ -126,7 +147,7 @@ def cross_layer_equalization(module1, module2, output_axis=0, input_axis=1):
     scaling_factors = torch.sqrt(weight1_range / weight2_range)
     inverse_scaling_factors = torch.reciprocal(scaling_factors)
 
-    if conv1_has_bias:
+    if bias is not None:
         bias = bias * inverse_scaling_factors
 
     # formatting the scaling (1D) tensors to be applied on the given argument tensors
@@ -143,12 +164,13 @@ def cross_layer_equalization(module1, module2, output_axis=0, input_axis=1):
     weight2 = weight2 * scaling_factors
 
     set_module_weight(module1, weight1)
-    if conv1_has_bias:
+    if bias is not None:
         set_module_bias(module1, bias)
     set_module_weight(module2, weight2)
 
+
 def process_paired_modules_list_to_name(model, paired_modules_list):
-    """Processes a list of paired modules to a list of names of paired modules. """
+    """Processes a list of paired modules to a list of names of paired modules."""
 
     for group in paired_modules_list:
         for i, item in enumerate(group):
@@ -158,8 +180,9 @@ def process_paired_modules_list_to_name(model, paired_modules_list):
                 raise TypeError("item must be a nn.Module or a string")
     return paired_modules_list
 
+
 def expand_groups_in_paired_modules_list(paired_modules_list):
-    """Expands module pair groups larger than two into groups of two modules. """
+    """Expands module pair groups larger than two into groups of two modules."""
     new_list = []
 
     for group in paired_modules_list:
@@ -200,14 +223,16 @@ def equalize(model, paired_modules_list, threshold=1e-4, inplace=True):
         inplace (bool): determines if function is inplace or not
     """
 
-    paired_modules_list = process_paired_modules_list_to_name(model, paired_modules_list)
+    paired_modules_list = process_paired_modules_list_to_name(
+        model, paired_modules_list
+    )
 
     if not inplace:
         model = copy.deepcopy(model)
 
     paired_modules_list = expand_groups_in_paired_modules_list(paired_modules_list)
 
-    name_to_module : Dict[str, torch.nn.Module] = {}
+    name_to_module: Dict[str, torch.nn.Module] = {}
     previous_name_to_module: Dict[str, Any] = {}
     name_set = {name for pair in paired_modules_list for name in pair}
 
@@ -224,6 +249,7 @@ def equalize(model, paired_modules_list, threshold=1e-4, inplace=True):
 
     return model
 
+
 def converged(curr_modules, prev_modules, threshold=1e-4):
     """Test whether modules are converged to a specified threshold.
 
@@ -236,9 +262,11 @@ def converged(curr_modules, prev_modules, threshold=1e-4):
 
     """
     if curr_modules.keys() != prev_modules.keys():
-        raise ValueError("The keys to the given mappings must have the same set of names of modules")
+        raise ValueError(
+            "The keys to the given mappings must have the same set of names of modules"
+        )
 
-    summed_norms = torch.tensor(0.)
+    summed_norms = torch.tensor(0.0)
     if None in prev_modules.values():
         return False
     for name in curr_modules.keys():

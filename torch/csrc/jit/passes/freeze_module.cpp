@@ -15,8 +15,7 @@
 #include <stack>
 #include <utility>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 
@@ -894,8 +893,7 @@ class AttributePropagator {
       auto attr = module.attr(name);
       auto attrTy = attr.type();
 
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      bool isMutable;
+      bool isMutable = false;
       if (AliasDb::isMutableType(attrTy)) {
         isMutable = preservedAttrs_.count(attr);
       } else {
@@ -1045,5 +1043,4 @@ void freeze_module_inplace(
   attrPropagator.run();
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

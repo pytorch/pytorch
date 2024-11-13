@@ -22,16 +22,15 @@
 #include <unordered_set>
 #include <utility>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 inline bool PyNone_Check(PyObject* o) {
   return o == Py_None;
 }
 
 std::pair<TypePtr, bool> MergeInferredType(
-    TypePtr existing_type,
-    TypePtr inferred_type) {
+    const TypePtr& existing_type,
+    const TypePtr& inferred_type) {
   auto new_list_type = inferred_type->cast<ListType>();
   auto use_inferred_type = false;
   if (new_list_type) {
@@ -75,8 +74,8 @@ std::pair<TypePtr, bool> MergeInferredType(
 
 void MergeInferredTypeAndSetMap(
     Value* dest_v,
-    TypePtr existing_type,
-    TypePtr inferred_type) {
+    const TypePtr& existing_type,
+    const TypePtr& inferred_type) {
   auto [mergedType, inferred] = MergeInferredType(existing_type, inferred_type);
   dest_v->setType(mergedType);
   ConstantValueMap::SetUseInferredType(dest_v->debugName(), inferred);
@@ -256,7 +255,7 @@ bool CustomSettype(Node* node) {
 
 Value* CloneValueFromListConstruct(
     Value* v,
-    std::shared_ptr<Graph> n_graph,
+    const std::shared_ptr<Graph>& n_graph,
     int opset_version) {
   auto lc_node = v->node();
   TORCH_INTERNAL_ASSERT(lc_node->kind() == ::c10::prim::ListConstruct);
@@ -355,7 +354,7 @@ Node* CloneNodeToGraph(
   return clone_node;
 }
 
-bool HasValidType(TypePtr type, std::string name) {
+bool HasValidType(const TypePtr& type, const std::string& name) {
   if (auto t_type = type->cast<TensorType>()) {
     if (!t_type->scalarType().has_value()) {
       GRAPH_UPDATE("Input ", name, " is missing tensor datatype.");
@@ -371,7 +370,7 @@ bool HasValidType(TypePtr type, std::string name) {
   return true;
 }
 
-bool IsGraphValidForInference(std::shared_ptr<Graph> graph) {
+bool IsGraphValidForInference(const std::shared_ptr<Graph>& graph) {
   // Verify if every input has type (either Tensor, Sequence or Optional) and
   // scalar type. This is a requirement for ONNX graph inputs.
   for (auto in : graph->inputs()) {
@@ -381,34 +380,31 @@ bool IsGraphValidForInference(std::shared_ptr<Graph> graph) {
 }
 
 void ConvertGraphToONNXProto(
-    std::shared_ptr<Graph> graph,
+    const std::shared_ptr<Graph>& graph,
     std::shared_ptr<onnx::ModelProto>& model_proto,
     SymbolDimMap& symbol_dim_map,
     DimSymbolMap& dim_symbol_map,
     int opset_version) {
-  RawDataExportMap export_map;
-  bool val_use_external_data_format;
-  SymbolDimMap new_symbol_dim_map;
-  NodeNameMap node_names;
-  std::tie(
-      model_proto,
-      export_map,
-      new_symbol_dim_map,
-      val_use_external_data_format,
-      node_names) =
-      export_onnx(
-          graph,
-          {},
-          opset_version,
-          {},
-          false,
-          onnx_torch::OperatorExportTypes::ONNX,
-          true,
-          true,
-          {},
-          true,
-          false,
-          std::string());
+  auto
+      [model_proto_tmp,
+       export_map,
+       new_symbol_dim_map,
+       val_use_external_data_format,
+       node_names] =
+          export_onnx(
+              graph,
+              {},
+              opset_version,
+              {},
+              false,
+              onnx_torch::OperatorExportTypes::ONNX,
+              true,
+              true,
+              {},
+              true,
+              false,
+              std::string());
+  model_proto = std::move(model_proto_tmp);
   symbol_dim_map.insert(new_symbol_dim_map.begin(), new_symbol_dim_map.end());
   for (const auto& pair : new_symbol_dim_map) {
     dim_symbol_map[pair.second] = pair.first;
@@ -1655,7 +1651,8 @@ void SpecialPostProcess(Node* n) {
       auto seq_node = n->input(0)->node();
       auto t_type = n->input(1)->type()->cast<TensorType>();
 
-      auto update_sequence_empty_dtype = [](Node* n, TensorTypePtr t_type) {
+      auto update_sequence_empty_dtype = [](Node* n,
+                                            const TensorTypePtr& t_type) {
         TORCH_INTERNAL_ASSERT(n && n->kind() == ::c10::onnx::SequenceEmpty);
         TORCH_INTERNAL_ASSERT(t_type && t_type->scalarType().has_value());
         auto scalar_type = t_type->scalarType().value();
@@ -1714,7 +1711,7 @@ void SpecialPostProcess(Node* n) {
           return nullptr;
         };
         return find_sequence_empty_impl(
-            input, t_type, find_sequence_empty_impl);
+            input, std::move(t_type), find_sequence_empty_impl);
       };
 
       if (seq_node && t_type && t_type->scalarType()) {
@@ -2125,9 +2122,9 @@ void ONNXShapeTypeInference(
           case ::c10::onnx::Gather: {
             auto* schema_registry = onnx::OpSchemaRegistry::Instance();
             onnx::ShapeInferenceOptions options{
-                /*check_type=*/false,
-                /*error_mode=*/false,
-                /*enable_data_propagation=*/true};
+                /*check_type_val=*/false,
+                /*strict_mode_val=*/0,
+                /*data_prop_val=*/true};
             onnx::shape_inference::InferShapes(
                 *model_proto, schema_registry, options, &inferred_shape_data);
             break;
@@ -2147,10 +2144,8 @@ void ONNXShapeTypeInference(
             ex.what(),
             " on graph: ",
             n_graph->toString());
-        // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-        const char shape_err[] = "ShapeInferenceError";
-        // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-        const char type_err[] = "TypeInferenceError";
+        constexpr const char* shape_err = "ShapeInferenceError";
+        constexpr const char* type_err = "TypeInferenceError";
         if ((strstr(ex.what(), shape_err) == nullptr) &&
             (strstr(ex.what(), type_err) == nullptr)) {
           throw;
@@ -2512,5 +2507,4 @@ void UpdateShapeConstantIfReliable(torch::jit::Value* node_output) {
   }
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

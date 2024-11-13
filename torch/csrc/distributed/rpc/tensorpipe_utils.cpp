@@ -9,9 +9,7 @@ C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated")
 #include <tensorpipe/tensorpipe.h>
 C10_DIAGNOSTIC_POP()
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace torch::distributed::rpc {
 namespace {
 
 // The TensorPipe agent splits the RPC message's information across multiple
@@ -132,7 +130,7 @@ TensorpipeDeviceTypeConverterRegistrar::TensorpipeDeviceTypeConverterRegistrar(
 }
 
 std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
-    c10::intrusive_ptr<Message> rpcMessage,
+    const c10::intrusive_ptr<Message>& rpcMessage,
     std::vector<c10::Device> devices,
     const std::vector<c10::Stream>& streams) {
   tensorpipe::Message tpMessage;
@@ -142,9 +140,11 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
   buffers.type = std::make_unique<MessageType>(rpcMessage->type());
   buffers.id = std::make_unique<int64_t>(rpcMessage->id());
   // kTpMessageTypeIdx = 0
+  // NOLINTNEXTLINE(modernize-use-emplace)
   tpMessage.payloads.push_back(
       tensorpipe::Message::Payload{buffers.type.get(), sizeof(MessageType)});
   // kTpMessageIdIdx = 1
+  // NOLINTNEXTLINE(modernize-use-emplace)
   tpMessage.payloads.push_back(
       tensorpipe::Message::Payload{buffers.id.get(), sizeof(int64_t)});
 
@@ -154,6 +154,7 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
   // it uses non-const pointers even though it doesn't modify them when writing.
   char* payloadPtr = buffers.payload.data();
   // kTpMessagePayloadIdx = 2
+  // NOLINTNEXTLINE(modernize-use-emplace)
   tpMessage.payloads.push_back(
       tensorpipe::Message::Payload{payloadPtr, buffers.payload.size()});
 
@@ -177,6 +178,7 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
   pickler.pushIValue(buffers.tensors);
   pickler.stop();
   // kTpMessagePickleIdx = 3
+  // NOLINTNEXTLINE(modernize-use-emplace)
   tpMessage.payloads.push_back(tensorpipe::Message::Payload{
       buffers.pickle.data(), buffers.pickle.size()});
   const std::vector<torch::Tensor>& tensorDataVec = pickler.tensorData();
@@ -284,7 +286,8 @@ std::pair<tensorpipe::Allocation, TensorpipeReadBuffers> tensorpipeAllocate(
 }
 
 c10::intrusive_ptr<Message> tensorpipeDeserialize(
-    tensorpipe::Descriptor&& tpDescriptor,
+    const tensorpipe::Descriptor& tpDescriptor,
+    // NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
     TensorpipeReadBuffers&& buffers) {
   // Tensors
   std::vector<at::Tensor> tensors;
@@ -321,7 +324,7 @@ c10::intrusive_ptr<Message> tensorpipeDeserialize(
   }
 
   for (const auto i : c10::irange(tpDescriptor.tensors.size())) {
-    auto& tensor = tpDescriptor.tensors[i];
+    const auto& tensor = tpDescriptor.tensors[i];
     if (tensor.targetDevice.has_value() &&
         tensor.targetDevice->type == tensorpipe::kCudaDeviceType) {
       TORCH_INTERNAL_ASSERT(
@@ -343,8 +346,6 @@ c10::intrusive_ptr<Message> tensorpipeDeserialize(
       *buffers.type,
       *buffers.id);
 }
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc
 
 #endif // USE_TENSORPIPE

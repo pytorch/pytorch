@@ -13,8 +13,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 
@@ -79,10 +78,10 @@ std::optional<AutocastScope> parseAutocast(
       if (use.user->kind() == prim::SetAttr &&
           use.user->s(attr::name) == "_enabled") {
         // Search for `prim::SetAttr[name="_enabled"]`
-        auto ret = constant_as<bool>(use.user->input(1));
+        enabled = constant_as<bool>(use.user->input(1));
         TORCH_CHECK(
-            ret.has_value(), "Autocast _enabled argument must be a constant");
-        enabled = ret.value();
+            enabled.has_value(),
+            "Autocast _enabled argument must be a constant");
       } else if (
           use.user->kind() == prim::SetAttr &&
           use.user->s(attr::name) == "device") {
@@ -109,7 +108,7 @@ std::optional<AutocastScope> parseAutocast(
     TORCH_CHECK(
         dtype != c10::ScalarType::Undefined,
         "Autocast has invalid fast_dtype attribute");
-    if (device == "cuda") {
+    if (device == "cuda" || device == "mps") {
       scope.context.gpu_enabled = enabled.value();
       scope.context.gpu_scalar_type = dtype;
     } else if (device == "cpu") {
@@ -132,7 +131,7 @@ std::optional<AutocastScope> parseAutocast(
     //
     // TODO: better error message
     //
-    AT_ERROR("Unsupported autocast syntax");
+    TORCH_CHECK(false, "Unsupported autocast syntax");
   }
 
   return std::nullopt;
@@ -331,7 +330,7 @@ void handleBlock(Block* block, AutocastContext initial_state) {
                 parseAutocast(node->input(), current_state())) {
           if (node->hasUses()) {
             // TODO: better error message
-            AT_ERROR("`with autocast() as ...` is not supported");
+            TORCH_CHECK(false, "`with autocast() as ...` is not supported");
           }
           TORCH_INTERNAL_ASSERT(
               !incompatible_amp.has_value() || !incompatible_amp.value(),
@@ -493,7 +492,7 @@ void handleBlock(Block* block, AutocastContext initial_state) {
       // Banned in autocast, see binary_cross_entropy_banned()
       case aten::binary_cross_entropy:
         if (current_state()) {
-          AT_ERROR("Unsafe to autocast");
+          TORCH_CHECK(false, "Unsafe to autocast");
         }
     }
 
@@ -532,5 +531,4 @@ void Autocast(const std::shared_ptr<Graph>& graph) {
   GRAPH_DUMP("\nAfter Autocast: ", graph);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

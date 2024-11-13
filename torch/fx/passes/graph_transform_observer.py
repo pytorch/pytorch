@@ -1,11 +1,17 @@
 # mypy: allow-untyped-defs
 import os
-from typing import Optional
+from typing import Callable, Optional, TypeVar
 
+from torch.fx import Graph
 from torch.fx._compatibility import compatibility
 from torch.fx.graph_module import GraphModule
 
+
+T = TypeVar("T")
+
+
 from .graph_drawer import FxGraphDrawer
+
 
 __all__ = ["GraphTransformObserver"]
 
@@ -14,14 +20,31 @@ __all__ = ["GraphTransformObserver"]
 class GraphTransformObserver:
     __pass_count = 0
 
-    def __init__(self, gm: GraphModule, passname: str, log_url: Optional[str] = None):
+    def __init__(
+        self,
+        gm: GraphModule,
+        passname: str,
+        subsystem: Optional[str] = None,
+        log_url: Optional[str] = None,
+    ):
+        """
+        log_url is inferred to be torch._inductor.config.trace.log_url_for_graph_xform unless otherwise specified
+        """
+
+        self.gm = gm
+        self.passname = passname
+        self.subsystem = subsystem
+
         # If log_url is None, we don't log anything
+        if log_url is None:
+            from torch._inductor.config import trace
+
+            log_url = trace.log_url_for_graph_xform
+
         self.log_url = log_url
         if self.log_url is None:
             return
         GraphTransformObserver.__pass_count += 1
-        self.gm = gm
-        self.passname = passname
 
         self.input_dot_graph = FxGraphDrawer(
             self.gm,
@@ -33,6 +56,31 @@ class GraphTransformObserver:
     @classmethod
     def get_current_pass_count(cls):
         return cls.__pass_count
+
+    def apply_gm_pass(self, pass_fn: Callable[[GraphModule], T]) -> Optional[T]:
+        with self:
+            if not self._check_disable_pass():
+                return pass_fn(self.gm)
+
+        return None
+
+    def apply_graph_pass(self, pass_fn: Callable[[Graph], T]) -> Optional[T]:
+        with self:
+            if not self._check_disable_pass():
+                return pass_fn(self.gm.graph)
+
+        return None
+
+    def _check_disable_pass(self):
+        if self.subsystem is None:
+            return False
+
+        debug_info = lambda: self.passname  # noqa: E731
+        from torch._inductor.compiler_bisector import CompilerBisector
+
+        return CompilerBisector.disable_subsystem(
+            "inductor", self.subsystem, debug_info
+        )
 
     def __enter__(self):
         if self.log_url is None or self.gm is None:

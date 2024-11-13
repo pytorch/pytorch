@@ -26,7 +26,7 @@ class CondBranchClassMethod(torch.nn.Module):
     NOTE: If the `pred` is test on a dim with batch size < 2, it will be specialized.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.subm = MySubModule()
 

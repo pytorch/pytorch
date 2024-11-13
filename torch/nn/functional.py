@@ -2681,7 +2681,17 @@ def embedding_bag(
             f"weight has to be a 2D Tensor, but got Tensor of dimension {weight.dim()}"
         )
 
-    if input.dim() == 2:
+    if not torch.jit.is_scripting() and input.dim() == 2 and input.is_nested:
+        include_last_offset = True
+        offsets = input.offsets()
+        input = input.values().reshape(-1)
+        if per_sample_weights is not None:
+            if not per_sample_weights.is_nested:
+                raise ValueError(
+                    "If input is nested, then per_sample_weights must be nested if specified"
+                )
+            per_sample_weights = per_sample_weights.values().reshape(-1)
+    elif input.dim() == 2:
         if offsets is not None:
             type_str = "<unknown>"
             # TODO: Remove this once script supports type() calls
@@ -3683,8 +3693,11 @@ def huber_loss(
     target: Tensor,
     reduction: str = "mean",
     delta: float = 1.0,
+    weight: Optional[Tensor] = None,
 ) -> Tensor:
-    r"""Compute the Huber loss.
+    r"""huber_loss(input, target, reduction='mean', delta=1.0, weight=None) -> Tensor
+
+    Computes the Huber loss, with optional weighting.
 
     Function uses a squared term if the absolute
     element-wise error falls below delta and a delta-scaled L1 term otherwise.
@@ -3692,17 +3705,30 @@ def huber_loss(
     When delta equals 1, this loss is equivalent to SmoothL1Loss.
     In general, Huber loss differs from SmoothL1Loss by a factor of delta (AKA beta in Smooth L1).
 
-    See :class:`~torch.nn.HuberLoss` for details.
+    Args:
+        input (Tensor): Predicted values.
+        target (Tensor): Ground truth values.
+        reduction (str, optional): Specifies the reduction to apply to the output:
+                                   'none' | 'mean' | 'sum'. 'mean': the mean of the output is taken.
+                                   'sum': the output will be summed. 'none': no reduction will be applied.
+                                   Default: 'mean'.
+        delta (float, optional): The threshold at which to change between delta-scaled L1 and L2 loss. Default: 1.0.
+        weight (Tensor, optional): Weights for each sample. Default: None.
+
+    Returns:
+        Tensor: Huber loss (optionally weighted).
     """
-    if has_torch_function_variadic(input, target):
+    if has_torch_function_variadic(input, target, weight):
         return handle_torch_function(
             huber_loss,
-            (input, target),
+            (input, target, weight),
             input,
             target,
             reduction=reduction,
             delta=delta,
+            weight=weight,
         )
+
     if not (target.size() == input.size()):
         warnings.warn(
             f"Using a target size ({target.size()}) that is different to the input size ({input.size()}). "
@@ -3712,9 +3738,34 @@ def huber_loss(
         )
 
     expanded_input, expanded_target = torch.broadcast_tensors(input, target)
-    return torch._C._nn.huber_loss(
-        expanded_input, expanded_target, _Reduction.get_enum(reduction), delta
-    )
+
+    if weight is None:
+        # Use the optimized C++ backend for standard Huber loss
+        return torch._C._nn.huber_loss(
+            expanded_input, expanded_target, _Reduction.get_enum(reduction), delta
+        )
+    else:
+        if weight.size() != input.size():
+            raise ValueError("Weights and input must have the same size.")
+
+        # Calculate the unweighted loss first
+        unweighted_loss = torch._C._nn.huber_loss(
+            expanded_input, expanded_target, _Reduction.get_enum("none"), delta
+        )
+
+        # Apply weight to the unweighted loss
+        weighted_loss = unweighted_loss * weight
+
+        if reduction == "none":
+            return weighted_loss
+        elif reduction == "sum":
+            return torch.sum(weighted_loss)
+        elif reduction == "mean":
+            return weighted_loss.mean()
+        else:
+            raise ValueError(
+                f"Invalid reduction mode: {reduction}. Expected one of 'none', 'mean', 'sum'."
+            )
 
 
 def l1_loss(
@@ -3723,6 +3774,7 @@ def l1_loss(
     size_average: Optional[bool] = None,
     reduce: Optional[bool] = None,
     reduction: str = "mean",
+    weight: Optional[Tensor] = None,
 ) -> Tensor:  # noqa: D400,D402
     r"""l1_loss(input, target, size_average=None, reduce=None, reduction='mean') -> Tensor
 
@@ -3733,7 +3785,7 @@ def l1_loss(
     if has_torch_function_variadic(input, target):
         return handle_torch_function(
             l1_loss,
-            (input, target),
+            (input, target, weight),
             input,
             target,
             size_average=size_average,
@@ -3751,9 +3803,28 @@ def l1_loss(
         reduction = _Reduction.legacy_get_string(size_average, reduce)
 
     expanded_input, expanded_target = torch.broadcast_tensors(input, target)
-    return torch._C._nn.l1_loss(
-        expanded_input, expanded_target, _Reduction.get_enum(reduction)
-    )
+
+    if weight is not None:
+        if weight.size() != input.size():
+            raise ValueError("Weights and input must have the same size.")
+
+        absolute_errors = torch.abs(expanded_input - expanded_target)
+        weighted_absolute_errors = absolute_errors * weight
+
+        if reduction == "none":
+            return weighted_absolute_errors
+        elif reduction == "sum":
+            return torch.sum(weighted_absolute_errors)
+        elif reduction == "mean":
+            return torch.sum(weighted_absolute_errors) / torch.sum(weight)
+        else:
+            raise ValueError(
+                f"Invalid reduction mode: {reduction}. Expected one of 'none', 'mean', 'sum'."
+            )
+    else:
+        return torch._C._nn.l1_loss(
+            expanded_input, expanded_target, _Reduction.get_enum(reduction)
+        )
 
 
 def mse_loss(
@@ -3762,22 +3833,38 @@ def mse_loss(
     size_average: Optional[bool] = None,
     reduce: Optional[bool] = None,
     reduction: str = "mean",
-) -> Tensor:  # noqa: D400,D402
-    r"""mse_loss(input, target, size_average=None, reduce=None, reduction='mean') -> Tensor
+    weight: Optional[Tensor] = None,
+) -> Tensor:
+    r"""mse_loss(input, target, size_average=None, reduce=None, reduction='mean', weight=None) -> Tensor
 
-    Measures the element-wise mean squared error.
-    See :class:`~torch.nn.MSELoss` for details.
+    Measures the element-wise mean squared error, with optional weighting.
+
+    Args:
+        input (Tensor): Predicted values.
+        target (Tensor): Ground truth values.
+        size_average (bool, optional): Deprecated (use reduction).
+        reduce (bool, optional): Deprecated (use reduction).
+        reduction (str, optional): Specifies the reduction to apply to the output:
+                                   'none' | 'mean' | 'sum'. 'mean': the mean of the output is taken.
+                                   'sum': the output will be summed. 'none': no reduction will be applied.
+                                   Default: 'mean'.
+        weight (Tensor, optional): Weights for each sample. Default: None.
+
+    Returns:
+        Tensor: Mean Squared Error loss (optionally weighted).
     """
-    if has_torch_function_variadic(input, target):
+    if has_torch_function_variadic(input, target, weight):
         return handle_torch_function(
             mse_loss,
-            (input, target),
+            (input, target, weight),
             input,
             target,
             size_average=size_average,
             reduce=reduce,
             reduction=reduction,
+            weight=weight,
         )
+
     if not (target.size() == input.size()):
         warnings.warn(
             f"Using a target size ({target.size()}) that is different to the input size ({input.size()}). "
@@ -3785,13 +3872,34 @@ def mse_loss(
             "Please ensure they have the same size.",
             stacklevel=2,
         )
+
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
 
     expanded_input, expanded_target = torch.broadcast_tensors(input, target)
-    return torch._C._nn.mse_loss(
-        expanded_input, expanded_target, _Reduction.get_enum(reduction)
-    )
+
+    if weight is not None:
+        if weight.size() != input.size():
+            raise ValueError("Weights and input must have the same size.")
+
+        # Perform weighted MSE loss manually
+        squared_errors = torch.pow(expanded_input - expanded_target, 2)
+        weighted_squared_errors = squared_errors * weight
+
+        if reduction == "none":
+            return weighted_squared_errors
+        elif reduction == "sum":
+            return torch.sum(weighted_squared_errors)
+        elif reduction == "mean":
+            return torch.sum(weighted_squared_errors) / torch.sum(weight)
+        else:
+            raise ValueError(
+                f"Invalid reduction mode: {reduction}. Expected one of 'none', 'mean', 'sum'."
+            )
+    else:
+        return torch._C._nn.mse_loss(
+            expanded_input, expanded_target, _Reduction.get_enum(reduction)
+        )
 
 
 def margin_ranking_loss(
@@ -4568,7 +4676,9 @@ def interpolate(  # noqa: F811
         # Two levels are necessary to prevent TorchScript from touching
         # are_deterministic_algorithms_enabled.
         if not torch.jit.is_scripting():
-            if torch.are_deterministic_algorithms_enabled() and input.is_cuda:
+            if torch.are_deterministic_algorithms_enabled() and (
+                input.is_cuda or input.is_xpu
+            ):
                 # Use slow decomp whose backward will be in terms of index_put
                 # importlib is required because the import cannot be top level
                 # (cycle) and cannot be nested (TS doesn't support)
@@ -5081,7 +5191,9 @@ def pad(
             torch.nn.functional.pad, (input,), input, pad, mode=mode, value=value
         )
     if not torch.jit.is_scripting():
-        if torch.are_deterministic_algorithms_enabled() and input.is_cuda:
+        if torch.are_deterministic_algorithms_enabled() and (
+            input.is_cuda or input.is_xpu
+        ):
             if mode == "replicate":
                 # Use slow decomp whose backward will be in terms of index_put.
                 # importlib is required because the import cannot be top level
@@ -5602,137 +5714,164 @@ def _in_projection(
 
 scaled_dot_product_attention = _add_docstr(
     torch._C._nn.scaled_dot_product_attention,
-    r"""
-scaled_dot_product_attention(query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False, scale=None) -> Tensor:
+    r"""scaled_dot_product_attention(query, key, value, attn_mask=None, dropout_p=0.0,
+        is_causal=False, scale=None, enable_gqa=False) -> Tensor:
 
-Computes scaled dot product attention on query, key and value tensors, using
-an optional attention mask if passed, and applying dropout if a probability
-greater than 0.0 is specified. The optional scale argument can only be specified as a keyword argument.
-
-.. code-block:: python
-
-    # Efficient implementation equivalent to the following:
-    def scaled_dot_product_attention(query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False, scale=None) -> torch.Tensor:
-        L, S = query.size(-2), key.size(-2)
-        scale_factor = 1 / math.sqrt(query.size(-1)) if scale is None else scale
-        attn_bias = torch.zeros(L, S, dtype=query.dtype)
-        if is_causal:
-            assert attn_mask is None
-            temp_mask = torch.ones(L, S, dtype=torch.bool).tril(diagonal=0)
-            attn_bias.masked_fill_(temp_mask.logical_not(), float("-inf"))
-            attn_bias.to(query.dtype)
-
-        if attn_mask is not None:
-            if attn_mask.dtype == torch.bool:
-                attn_bias.masked_fill_(attn_mask.logical_not(), float("-inf"))
-            else:
-                attn_bias += attn_mask
-        attn_weight = query @ key.transpose(-2, -1) * scale_factor
-        attn_weight += attn_bias
-        attn_weight = torch.softmax(attn_weight, dim=-1)
-        attn_weight = torch.dropout(attn_weight, dropout_p, train=True)
-        return attn_weight @ value
-
-.. warning:: This function is beta and subject to change.
-
-.. warning::
-
-    This function always applies dropout according to the specified ``dropout_p`` argument.
-    To disable dropout during evaluation, be sure to pass a value of ``0.0`` when the module
-    that makes the function call is not in training mode.
-
-    For example:
+    Computes scaled dot product attention on query, key and value tensors, using an optional attention mask if passed,
+    and applying dropout if a probability greater than 0.0 is specified. The optional scale argument can only be
+    specified as a keyword argument.
 
     .. code-block:: python
 
-        class MyModel(nn.Module):
-            def __init__(self, p=0.5):
-                super().__init__()
-                self.p = p
+        # Efficient implementation equivalent to the following:
+        def scaled_dot_product_attention(query, key, value, attn_mask=None, dropout_p=0.0,
+                is_causal=False, scale=None, enable_gqa=False) -> torch.Tensor:
+            L, S = query.size(-2), key.size(-2)
+            scale_factor = 1 / math.sqrt(query.size(-1)) if scale is None else scale
+            attn_bias = torch.zeros(L, S, dtype=query.dtype, device=query.device)
+            if is_causal:
+                assert attn_mask is None
+                temp_mask = torch.ones(L, S, dtype=torch.bool).tril(diagonal=0)
+                attn_bias.masked_fill_(temp_mask.logical_not(), float("-inf"))
+                attn_bias.to(query.dtype)
 
-            def forward(self, ...):
-                return F.scaled_dot_product_attention(..., dropout_p=(self.p if self.training else 0.0))
+            if attn_mask is not None:
+                if attn_mask.dtype == torch.bool:
+                    attn_bias.masked_fill_(attn_mask.logical_not(), float("-inf"))
+                else:
+                    attn_bias = attn_mask + attn_bias
 
-Note:
+            if enable_gqa:
+                key = key.repeat_interleave(query.size(-3)//key.size(-3), -3)
+                value = value.repeat_interleave(query.size(-3)//value.size(-3), -3)
 
-    There are currently three supported implementations of scaled dot product attention:
+            attn_weight = query @ key.transpose(-2, -1) * scale_factor
+            attn_weight += attn_bias
+            attn_weight = torch.softmax(attn_weight, dim=-1)
+            attn_weight = torch.dropout(attn_weight, dropout_p, train=True)
+            return attn_weight @ value
 
-        - `FlashAttention-2: Faster Attention with Better Parallelism and Work Partitioning`_
-        - `Memory-Efficient Attention`_
-        - A PyTorch implementation defined in C++ matching the above formulation
+    .. warning::
+        This function is beta and subject to change.
 
-    The function may call optimized kernels for improved performance when using the CUDA backend.
-    For all other backends, the PyTorch implementation will be used.
+    .. warning::
+        This function always applies dropout according to the specified ``dropout_p`` argument.
+        To disable dropout during evaluation, be sure to pass a value of ``0.0`` when the module
+        that makes the function call is not in training mode.
 
-    All implementations are enabled by default. Scaled dot product attention attempts to automatically select the
-    most optimal implementation based on the inputs. In order to provide more fine-grained control over what implementation
-    is used, the following functions are provided for enabling and disabling implementations.
-    The context manager is the preferred mechanism:
+        For example:
 
-        - :func:`torch.nn.attention.sdpa_kernel`: A context manager used to enable or disable any of the implementations.
-        - :func:`torch.backends.cuda.enable_flash_sdp`: Globally enables or disables FlashAttention.
-        - :func:`torch.backends.cuda.enable_mem_efficient_sdp`: Globally enables or disables  Memory-Efficient Attention.
-        - :func:`torch.backends.cuda.enable_math_sdp`: Globally enables or disables  the PyTorch C++ implementation.
+        .. code-block:: python
 
-    Each of the fused kernels has specific input limitations. If the user requires the use of a specific fused implementation,
-    disable the PyTorch C++ implementation using :func:`torch.nn.attention.sdpa_kernel`.
-    In the event that a fused implementation is not available, a warning will be raised with the
-    reasons why the fused implementation cannot run.
+            class MyModel(nn.Module):
+                def __init__(self, p=0.5):
+                    super().__init__()
+                    self.p = p
 
-    Due to the nature of fusing floating point operations, the output of this function may be different
-    depending on what backend kernel is chosen.
-    The c++ implementation supports torch.float64 and can be used when higher precision is required.
+                def forward(self, ...):
+                    return F.scaled_dot_product_attention(...,
+                        dropout_p=(self.p if self.training else 0.0))
+
+    Note:
+
+        There are currently three supported implementations of scaled dot product attention:
+
+            - `FlashAttention-2: Faster Attention with Better Parallelism and Work Partitioning`_
+            - `Memory-Efficient Attention`_
+            - A PyTorch implementation defined in C++ matching the above formulation
+
+        The function may call optimized kernels for improved performance when using the CUDA backend.
+        For all other backends, the PyTorch implementation will be used.
+
+        All implementations are enabled by default. Scaled dot product attention attempts to automatically select the
+        most optimal implementation based on the inputs. In order to provide more fine-grained control over what implementation
+        is used, the following functions are provided for enabling and disabling implementations.
+        The context manager is the preferred mechanism:
+
+            - :func:`torch.nn.attention.sdpa_kernel`: A context manager used to enable or disable any of the implementations.
+            - :func:`torch.backends.cuda.enable_flash_sdp`: Globally enables or disables FlashAttention.
+            - :func:`torch.backends.cuda.enable_mem_efficient_sdp`: Globally enables or disables  Memory-Efficient Attention.
+            - :func:`torch.backends.cuda.enable_math_sdp`: Globally enables or disables  the PyTorch C++ implementation.
+
+        Each of the fused kernels has specific input limitations. If the user requires the use of a specific fused implementation,
+        disable the PyTorch C++ implementation using :func:`torch.nn.attention.sdpa_kernel`.
+        In the event that a fused implementation is not available, a warning will be raised with the
+        reasons why the fused implementation cannot run.
+
+        Due to the nature of fusing floating point operations, the output of this function may be different
+        depending on what backend kernel is chosen.
+        The c++ implementation supports torch.float64 and can be used when higher precision is required.
+        For math backend, all intermediates are kept in torch.float if inputs are in torch.half or torch.bfloat16.
     For more information please see :doc:`/notes/numerical_accuracy`
 
-Note:
-    {cudnn_reproducibility_note}
-""".format(
+        Grouped Query Attention (GQA) is an experimental feature. It currently works only for Flash_attention
+        and math kernel on CUDA tensor, and does not support Nested tensor.
+        Constraints for GQA:
+
+            - number_of_heads_query % number_of_heads_key_value == 0 and,
+            - number_of_heads_key == number_of_heads_value
+
+    Note:
+
+        {cudnn_reproducibility_note}
+    """.format(
         **reproducibility_notes
     )
     + r"""
-Args:
-    query (Tensor): Query tensor; shape :math:`(N, ..., L, E)`.
-    key (Tensor): Key tensor; shape :math:`(N, ..., S, E)`.
-    value (Tensor): Value tensor; shape :math:`(N, ..., S, Ev)`.
-    attn_mask (optional Tensor): Attention mask; shape must be broadcastable to the shape of attention weights,
-        which is :math:`(N,..., L, S)`. Two types of masks are supported.
-        A boolean mask where a value of True indicates that the element *should* take part in attention.
-        A float mask of the same type as query, key, value that is added to the attention score.
-    dropout_p (float): Dropout probability; if greater than 0.0, dropout is applied
-    is_causal (bool): If set to true, the attention masking is a lower triangular matrix when the mask is a
-        square matrix. The attention masking has the form of the upper left causal bias due to the alignment
-        (see :class:`torch.nn.attention.bias.CausalBias`) when the mask is a non-square matrix.
-        An error is thrown if both attn_mask and is_causal are set.
-    scale (optional float, keyword-only): Scaling factor applied prior to softmax. If None, the default value is set
-        to :math:`\frac{1}{\sqrt{E}}`.
+    Args:
+        query (Tensor): Query tensor; shape :math:`(N, ..., Hq, L, E)`.
+        key (Tensor): Key tensor; shape :math:`(N, ..., H, S, E)`.
+        value (Tensor): Value tensor; shape :math:`(N, ..., H, S, Ev)`.
+        attn_mask (optional Tensor): Attention mask; shape must be broadcastable to the shape of attention weights,
+            which is :math:`(N,..., L, S)`. Two types of masks are supported.
+            A boolean mask where a value of True indicates that the element *should* take part in attention.
+            A float mask of the same type as query, key, value that is added to the attention score.
+        dropout_p (float): Dropout probability; if greater than 0.0, dropout is applied
+        is_causal (bool): If set to true, the attention masking is a lower triangular matrix when the mask is a
+            square matrix. The attention masking has the form of the upper left causal bias due to the alignment
+            (see :class:`torch.nn.attention.bias.CausalBias`) when the mask is a non-square matrix.
+            An error is thrown if both attn_mask and is_causal are set.
+        scale (optional float, keyword-only): Scaling factor applied prior to softmax. If None, the default value is set
+            to :math:`\frac{1}{\sqrt{E}}`.
+        enable_gqa (bool): If set to True, Grouped Query Attention (GQA) is enabled, by default it is set to False.
+
+    Returns:
+        output (Tensor): Attention output; shape :math:`(N, ..., Hq, L, Ev)`.
+
+    Shape legend:
+        - :math:`N: \text{Batch size} ... : \text{Any number of other batch dimensions (optional)}`
+        - :math:`S: \text{Source sequence length}`
+        - :math:`L: \text{Target sequence length}`
+        - :math:`E: \text{Embedding dimension of the query and key}`
+        - :math:`Ev: \text{Embedding dimension of the value}`
+        - :math:`Hq: \text{Number of heads of query}`
+        - :math:`H: \text{Number of heads of key and value}`
+
+    Examples:
+
+        >>> # Optionally use the context manager to ensure one of the fused kernels is run
+        >>> query = torch.rand(32, 8, 128, 64, dtype=torch.float16, device="cuda")
+        >>> key = torch.rand(32, 8, 128, 64, dtype=torch.float16, device="cuda")
+        >>> value = torch.rand(32, 8, 128, 64, dtype=torch.float16, device="cuda")
+        >>> with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION]):
+        >>>     F.scaled_dot_product_attention(query,key,value)
 
 
-Returns:
-    output (Tensor): Attention output; shape :math:`(N, ..., L, Ev)`.
-
-Shape legend:
-    - :math:`N: \text{Batch size} ... : \text{Any number of other batch dimensions (optional)}`
-    - :math:`S: \text{Source sequence length}`
-    - :math:`L: \text{Target sequence length}`
-    - :math:`E: \text{Embedding dimension of the query and key}`
-    - :math:`Ev: \text{Embedding dimension of the value}`
-
-Examples:
-
-    >>> # Optionally use the context manager to ensure one of the fused kernels is run
-    >>> query = torch.rand(32, 8, 128, 64, dtype=torch.float16, device="cuda")
-    >>> key = torch.rand(32, 8, 128, 64, dtype=torch.float16, device="cuda")
-    >>> value = torch.rand(32, 8, 128, 64, dtype=torch.float16, device="cuda")
-    >>> with torch.backends.cuda.sdp_kernel(enable_math=False):
-    >>>     F.scaled_dot_product_attention(query,key,value)
+        >>> # Sample for GQA for llama3
+        >>> query = torch.rand(32, 32, 128, 64, dtype=torch.float16, device="cuda")
+        >>> key = torch.rand(32, 8, 128, 64, dtype=torch.float16, device="cuda")
+        >>> value = torch.rand(32, 8, 128, 64, dtype=torch.float16, device="cuda")
+        >>> with sdpa_kernel(backends=[SDPBackend.MATH]):
+        >>>     F.scaled_dot_product_attention(query,key,value,enable_gqa=True)
 
 
-.. _FlashAttention-2\: Faster Attention with Better Parallelism and Work Partitioning:
-    https://arxiv.org/abs/2307.08691
-.. _Memory-Efficient Attention:
-    https://github.com/facebookresearch/xformers
-
-""",
+    .. _FlashAttention-2\: Faster Attention with Better Parallelism and Work Partitioning:
+        https://arxiv.org/abs/2307.08691
+    .. _Memory-Efficient Attention:
+        https://github.com/facebookresearch/xformers
+    .. _Grouped-Query Attention:
+        https://arxiv.org/pdf/2305.13245
+    """,
 )
 
 
@@ -6195,7 +6334,7 @@ def multi_head_attention_forward(
     #
 
     if need_weights:
-        B, Nt, E = q.shape
+        _B, _Nt, E = q.shape
         q_scaled = q * math.sqrt(1.0 / float(E))
 
         assert not (

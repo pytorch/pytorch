@@ -22,13 +22,14 @@ from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
-    CUDAInitMode,
+    DEVICEInitMode,
     FSDPInitMode,
     FSDPTest,
     NestedWrappedModule,
     TransformerWithSharedParams,
 )
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
+
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -124,7 +125,7 @@ class TestUnshardParamsBase(FSDPTest):
         local_model = NestedWrappedModule.init(
             self.process_group,
             FSDPInitMode.NO_FSDP,
-            CUDAInitMode.CUDA_BEFORE,
+            DEVICEInitMode.DEVICE_BEFORE,
             fsdp_kwargs={},
             deterministic=True,
         )
@@ -133,7 +134,7 @@ class TestUnshardParamsBase(FSDPTest):
         fsdp_model = NestedWrappedModule.init(
             self.process_group,
             FSDPInitMode.RECURSIVE,
-            CUDAInitMode.CUDA_BEFORE,
+            DEVICEInitMode.DEVICE_BEFORE,
             fsdp_kwargs={
                 "cpu_offload": cpu_offload,
                 "mixed_precision": mixed_precision,
@@ -433,10 +434,10 @@ class TestUnshardParams(TestUnshardParamsBase):
         model = NestedWrappedModule.init(
             self.process_group,
             FSDPInitMode.NO_FSDP,
-            CUDAInitMode.CUDA_BEFORE,
+            DEVICEInitMode.DEVICE_BEFORE,
             deterministic=True,
         )
-        model.register_buffer("buffer", torch.ones(1))
+        model.buffer = nn.Buffer(torch.ones(1))
         # Wrap the top-level with FSDP since `named_parameters()` and
         # `named_buffers` will contain FSDP prefixes if called on a non-FSDP
         # root module
@@ -444,12 +445,12 @@ class TestUnshardParams(TestUnshardParamsBase):
             NestedWrappedModule.init(
                 self.process_group,
                 FSDPInitMode.NO_FSDP,
-                CUDAInitMode.CUDA_BEFORE,
+                DEVICEInitMode.DEVICE_BEFORE,
                 deterministic=True,
             ),
             self.process_group,
         )
-        fsdp_model.register_buffer("buffer", torch.ones(1))
+        fsdp_model.buffer = nn.Buffer(torch.ones(1))
         with FSDP.summon_full_params(fsdp_model):
             for call in ["named_parameters", "named_buffers"]:
                 for (n1, p1), (n2, p2) in itertools.zip_longest(
@@ -553,14 +554,14 @@ class TestUnshardParams(TestUnshardParamsBase):
         model = TransformerWithSharedParams.init(
             self.process_group,
             FSDPInitMode.NO_FSDP,
-            CUDAInitMode.CUDA_BEFORE,
+            DEVICEInitMode.DEVICE_BEFORE,
             deterministic=True,
         )
         ddp_model = DDP(model, device_ids=[self.rank])
         fsdp_model = TransformerWithSharedParams.init(
             self.process_group,
             FSDPInitMode.RECURSIVE,
-            CUDAInitMode.CUDA_BEFORE,
+            DEVICEInitMode.DEVICE_BEFORE,
             deterministic=True,
             fsdp_kwargs={
                 "use_orig_params": use_orig_params,
@@ -610,7 +611,7 @@ class TestUnshardParams(TestUnshardParamsBase):
         fsdp_model = TransformerWithSharedParams.init(
             self.process_group,
             FSDPInitMode.RECURSIVE,
-            CUDAInitMode.CUDA_BEFORE,
+            DEVICEInitMode.DEVICE_BEFORE,
             deterministic=True,
             fsdp_kwargs={
                 "use_orig_params": True,
@@ -675,7 +676,7 @@ class TestUnshardParamsErrors(TestUnshardParamsBase):
     @skip_if_lt_x_gpu(2)
     def test_unshard_params_from_forward_raises(self):
         class MyModule(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.a = nn.Parameter(torch.zeros(5))
 
@@ -710,7 +711,7 @@ class TestUnshardParamsErrors(TestUnshardParamsBase):
         nested_wrapped_module = NestedWrappedModule.init(
             self.process_group,
             FSDPInitMode.RECURSIVE,
-            CUDAInitMode.CUDA_BEFORE,
+            DEVICEInitMode.DEVICE_BEFORE,
         )
         with self.assertRaisesRegex(NotImplementedError, "is not supported"):
             with FSDP.summon_full_params(
@@ -723,7 +724,7 @@ class TestUnshardParamsErrors(TestUnshardParamsBase):
         nested_wrapped_module = NestedWrappedModule.init(
             self.process_group,
             FSDPInitMode.RECURSIVE,
-            CUDAInitMode.CUDA_BEFORE,
+            DEVICEInitMode.DEVICE_BEFORE,
             {"sharding_strategy": ShardingStrategy.NO_SHARD},
         )
         with self.assertRaisesRegex(NotImplementedError, "is not supported"):

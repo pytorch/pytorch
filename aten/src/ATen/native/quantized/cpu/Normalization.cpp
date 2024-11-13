@@ -16,8 +16,7 @@
 
 #include <algorithm>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 DEFINE_DISPATCH(qbatch_norm_stub);
 DEFINE_DISPATCH(qbatch_norm_relu_stub);
@@ -111,7 +110,7 @@ Tensor q_batch_norm1d_impl(
         .memory_format(MemoryFormat::ChannelsLast),
       output_scale,
       output_zero_point,
-      c10::nullopt);
+      std::nullopt);
 
   compute_fused_params(
       C,
@@ -212,7 +211,7 @@ Tensor q_batch_norm2d_impl(
         .memory_format(MemoryFormat::ChannelsLast),
       output_scale,
       output_zero_point,
-      c10::nullopt);
+      std::nullopt);
 
   compute_fused_params(
       C,
@@ -308,7 +307,7 @@ Tensor q_batch_norm3d_impl(
         .memory_format(MemoryFormat::ChannelsLast3d),
       output_scale,
       output_zero_point,
-      c10::nullopt);
+      std::nullopt);
 
   compute_fused_params(
       C,
@@ -389,14 +388,14 @@ Tensor quantized_batch_norm(
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
-  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+  const Tensor& bias = bias_opt.value_or(Tensor());
 
   Tensor qy;
   // TODO: this should arguably support 3d as well
   qy = q_batch_norm2d_impl<false>(
       qx,
-      weight.defined() ? c10::make_optional(weight) : c10::nullopt,
-      bias.defined() ? c10::make_optional(bias) : c10::nullopt,
+      weight.defined() ? std::make_optional(weight) : std::nullopt,
+      bias.defined() ? std::make_optional(bias) : std::nullopt,
       mean, var, eps, output_scale, output_zero_point);
   return qy;
 }
@@ -412,5 +411,4 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("quantized::batch_norm3d_relu"), TORCH_FN(q_batch_norm3d_impl<true>));
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

@@ -18,9 +18,7 @@
 #include <torch/csrc/utils/python_compat.h>
 #include <exception>
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace torch::distributed::rpc {
 
 namespace {
 
@@ -268,7 +266,7 @@ c10::intrusive_ptr<JitFuture> pyRpcTorchscript(
       dstWorkerName,
       qualifiedName,
       functionSchema,
-      stack,
+      std::move(stack),
       rpcTimeoutSeconds,
       isAsyncExecution);
   return fut;
@@ -421,6 +419,4 @@ PyRRef pyRemoteTorchscript(
   return PyRRef(rrefPtr);
 }
 
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc

@@ -13,13 +13,7 @@
 #include <string>
 #include <vector>
 
-C10_CLANG_DIAGNOSTIC_PUSH()
-#if C10_CLANG_HAS_WARNING("-Wshorten-64-to-32")
-C10_CLANG_DIAGNOSTIC_IGNORE("-Wshorten-64-to-32")
-#endif
-
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // single character tokens are just the character itself '+'
 // multi-character tokens need an entry here
@@ -143,7 +137,7 @@ TORCH_API int stringToKind(const std::string& str);
 struct TokenTrie;
 using TokenTrieRef = std::unique_ptr<TokenTrie>;
 struct TokenTrie {
-  TokenTrie() : kind(0) {}
+  TokenTrie() = default;
   void insert(const char* str, int tok) {
     if (*str == '\0') {
       AT_ASSERT(kind == 0);
@@ -162,7 +156,7 @@ struct TokenTrie {
     child_tries.emplace_back(std::make_unique<TokenTrie>());
     child_tries.back()->insert(str + 1, tok);
   }
-  int kind; // 0 == invalid token
+  int kind{0}; // 0 == invalid token
 
   std::vector<char> child_chars;
   std::vector<TokenTrieRef> child_tries;
@@ -172,7 +166,6 @@ struct TokenTrie {
 // once.
 struct TORCH_API SharedParserData {
   SharedParserData() : head(new TokenTrie()) {
-    std::stringstream ss;
     for (const char* c = valid_single_char_tokens; *c; c++) {
       std::string str(1, *c);
       head->insert(str.c_str(), *c);
@@ -240,7 +233,7 @@ struct TORCH_API SharedParserData {
     // invariant: the next token is not whitespace or newline
     *start = pos;
     // check for a valid number
-    size_t len;
+    size_t len = 0;
     if (isNumber(pos.rest_line(), 0, &len)) {
       *end = *start;
       *end += len;
@@ -313,7 +306,7 @@ struct TORCH_API SharedParserData {
   // 1. skip whitespace
   // 2. handle comment or newline
   //
-  bool isNumber(c10::string_view str, size_t start, size_t* len) {
+  bool isNumber(std::string_view str, size_t start, size_t* len) {
     char first = str[start];
     // strtod allows numbers to start with + or - or nan or inf
     // http://en.cppreference.com/w/cpp/string/byte/strtof
@@ -322,8 +315,7 @@ struct TORCH_API SharedParserData {
     if (first == '-' || first == '+' || isalpha(first))
       return false;
     const char* startptr = str.data() + start;
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    char* endptr;
+    char* endptr = nullptr;
     torch::jit::strtod_c(startptr, &endptr);
     *len = endptr - startptr;
     // check if the number is complex valued
@@ -334,7 +326,7 @@ struct TORCH_API SharedParserData {
     return *len > 0;
   }
 
-  bool isCharCount(char c, c10::string_view str, size_t start, int len) {
+  bool isCharCount(char c, std::string_view str, size_t start, int len) {
     // count checks from [start, start + len)
     return start + len <= str.size() &&
         std::count(str.begin() + start, str.begin() + start + len, c) == len;
@@ -344,7 +336,7 @@ struct TORCH_API SharedParserData {
   // strings can be enclosed with 1 or 3 single or double quotes
   // if enclosed with 3 quotes newlines are valid
   // as elsewhere, backslash and new line should be ignored
-  bool isString(c10::string_view str, size_t start, size_t* len) {
+  bool isString(std::string_view str, size_t start, size_t* len) {
     char quote = str[start];
     if (quote != '\"' && quote != '\'')
       return false;
@@ -377,7 +369,7 @@ struct TORCH_API SharedParserData {
   }
 
   bool isTypeComment(StringCordView::Iterator str_iter) {
-    c10::string_view rest_line = str_iter.rest_line();
+    std::string_view rest_line = str_iter.rest_line();
     const std::string type_string = "# type:";
     if (rest_line.size() < type_string.length()) {
       return false;
@@ -387,7 +379,7 @@ struct TORCH_API SharedParserData {
   }
 
   // Make an exception ignoring comments for type annotation comments
-  bool isTypeComment(StringCordView str, size_t pos) {
+  bool isTypeComment(const StringCordView& str, size_t pos) {
     const std::string type_string = "# type:";
     if (str.size() < pos + type_string.length()) {
       return false;
@@ -416,8 +408,7 @@ struct Token {
 struct Lexer {
   explicit Lexer(std::shared_ptr<Source> source)
       : source(std::move(source)),
-        pos(0),
-        nesting(0),
+
         indent_stack(),
         next_tokens(),
         shared(sharedParserData()) {
@@ -497,9 +488,8 @@ struct Lexer {
         break;
       case TK_WHITESPACE:
       case TK_WHITESPACE_EOF: {
-        const auto depth = static_cast<int64_t>(
-            r.kind == TK_WHITESPACE_EOF ? indent_stack.front()
-                                        : r.range.size());
+        const auto depth =
+            r.kind == TK_WHITESPACE_EOF ? indent_stack.front() : r.range.size();
         // note: TK_WHITESPACE_EOF is whitespace right before the EOF token
         // just like we allow the code to be indented to a particular initial
         // indent level, we allow the final indent to be anything and set
@@ -529,8 +519,6 @@ struct Lexer {
     next_tokens.push_back(std::move(r));
   }
   Token lexRaw(bool whitespace_token = false) {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    int kind;
     AT_ASSERT(source);
     if (current == nullptr) {
       AT_ASSERT(pos == 0);
@@ -540,6 +528,7 @@ struct Lexer {
 
     StringCordView::Iterator start_iter = *current;
     StringCordView::Iterator end_iter = *current;
+    int kind = 0;
     if (!shared.match(
             *current,
             nesting > 0,
@@ -562,14 +551,12 @@ struct Lexer {
 
   std::shared_ptr<Source> source;
   std::unique_ptr<StringCordView::Iterator> current;
-  size_t pos;
-  size_t nesting; // depth of ( [ { nesting...
-  std::vector<int> indent_stack; // stack of indentation level of blocks
+  size_t pos{0};
+  size_t nesting{0}; // depth of ( [ { nesting...
+  std::vector<size_t> indent_stack; // stack of indentation level of blocks
   // Invariant: this should always contain at least a single element
   std::vector<Token> next_tokens;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   SharedParserData& shared;
 };
-} // namespace jit
-} // namespace torch
-
-C10_CLANG_DIAGNOSTIC_POP()
+} // namespace torch::jit

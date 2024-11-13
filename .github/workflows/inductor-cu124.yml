@@ -1,3 +1,5 @@
+# Workflow: Inductor
+# runs all inductor cu124 tests, including both benchmark tests and unit tests.
 name: inductor-cu124
 
 on:
@@ -17,20 +19,45 @@ concurrency:
 permissions: read-all
 
 jobs:
+  unit-test:
+    if: github.repository_owner == 'pytorch'
+    name: inductor-unittest
+    uses: ./.github/workflows/inductor-cu124-unittest.yml
+
+  get-default-label-prefix:
+    name: get-default-label-prefix
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    if: ${{ (github.event_name != 'schedule' || github.repository == 'pytorch/pytorch') && github.repository_owner == 'pytorch' }}
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+
+  get-a100-test-label-type:
+    name: get-a100-test-label-type
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    if: ${{ (github.event_name != 'schedule' || github.repository == 'pytorch/pytorch') && github.repository_owner == 'pytorch' }}
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+      check_experiments: "awsa100"
+
   linux-focal-cuda12_4-py3_10-gcc9-inductor-build:
-    # Should be synced with the one in inductor.yml, but this doesn't run inductor_timm
+    # Should be synced with the benchmark tests in inductor.yml, but this doesn't run inductor_timm
     name: cuda12.4-py3.10-gcc9-sm86
     uses: ./.github/workflows/_linux-build.yml
+    needs: get-default-label-prefix
     with:
+      runner_prefix: "${{ needs.get-default-label-prefix.outputs.label-type }}"
       sync-tag: linux-focal-cuda12_4-py3_10-gcc9-inductor-build
       build-environment: linux-focal-cuda12.4-py3.10-gcc9-sm86
       docker-image-name: pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9-inductor-benchmarks
       cuda-arch-list: '8.6'
       test-matrix: |
         { include: [
-          { config: "inductor", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "inductor", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "inductor_distributed", shard: 1, num_shards: 1, runner: "linux.g5.12xlarge.nvidia.gpu" },
           { config: "inductor_huggingface", shard: 1, num_shards: 1, runner: "linux.g5.4xlarge.nvidia.gpu" },
           { config: "inductor_torchbench", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
           { config: "inductor_torchbench", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
@@ -44,7 +71,6 @@ jobs:
           { config: "aot_inductor_timm", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
           { config: "aot_inductor_torchbench", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
           { config: "aot_inductor_torchbench", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "inductor_cpp_wrapper_abi_compatible", shard: 1, num_shards: 1, runner: "linux.g5.4xlarge.nvidia.gpu" },
         ]}
     secrets:
       HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
@@ -62,15 +88,17 @@ jobs:
       HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
 
   linux-focal-cuda12_4-py3_10-gcc9-inductor-build-gcp:
+    if: github.repository_owner == 'pytorch'
     name: cuda12.4-py3.10-gcc9-sm80
     uses: ./.github/workflows/_linux-build.yml
+    needs: get-a100-test-label-type
     with:
       build-environment: linux-focal-cuda12.4-py3.10-gcc9-sm80
       docker-image-name: pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9-inductor-benchmarks
       cuda-arch-list: '8.0'
       test-matrix: |
         { include: [
-          { config: "inductor_torchbench_smoketest_perf", shard: 1, num_shards: 1, runner: "linux.gcp.a100" },
+          { config: "inductor_torchbench_smoketest_perf", shard: 1, num_shards: 1, runner: "${{ needs.get-a100-test-label-type.outputs.label-type }}linux.gcp.a100" },
         ]}
     secrets:
       HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
@@ -86,25 +114,3 @@ jobs:
       use-gha: anything-non-empty-to-use-gha
     secrets:
       HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
-
-  linux-focal-cuda12_4-py3_12-gcc9-inductor-build:
-    name: cuda12.4-py3.12-gcc9-sm86
-    uses: ./.github/workflows/_linux-build.yml
-    with:
-      build-environment: linux-focal-cuda12.4-py3.12-gcc9-sm86
-      docker-image-name: pytorch-linux-focal-cuda12.4-cudnn9-py3.12-gcc9-inductor-benchmarks
-      cuda-arch-list: '8.6'
-      test-matrix: |
-        { include: [
-          { config: "inductor", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "inductor", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-        ]}
-
-  linux-focal-cuda12_4-py3_12-gcc9-inductor-test:
-    name: cuda12.4-py3.12-gcc9-sm86
-    uses: ./.github/workflows/_linux-test.yml
-    needs: linux-focal-cuda12_4-py3_12-gcc9-inductor-build
-    with:
-      build-environment: linux-focal-cuda12.4-py3.12-gcc9-sm86
-      docker-image: ${{ needs.linux-focal-cuda12_4-py3_12-gcc9-inductor-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-focal-cuda12_4-py3_12-gcc9-inductor-build.outputs.test-matrix }}

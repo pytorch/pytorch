@@ -36,6 +36,7 @@ from warnings import warn
 
 import yaml
 from github_utils import (
+    gh_close_pr,
     gh_fetch_json_list,
     gh_fetch_merge_base,
     gh_fetch_url,
@@ -45,7 +46,6 @@ from github_utils import (
     gh_update_pr_state,
     GitHubComment,
 )
-
 from gitutils import (
     are_ghstack_branches_in_sync,
     get_git_remote_name,
@@ -61,6 +61,7 @@ from label_utils import (
     LABEL_ERR_MSG,
 )
 from trymerge_explainer import get_revert_message, TryMergeExplainer
+
 
 # labels
 MERGE_IN_PROGRESS_LABEL = "merging"
@@ -451,8 +452,6 @@ RE_DIFF_REV = re.compile(r"^Differential Revision:.+?(D[0-9]+)", re.MULTILINE)
 CIFLOW_LABEL = re.compile(r"^ciflow/.+")
 CIFLOW_TRUNK_LABEL = re.compile(r"^ciflow/trunk")
 MERGE_RULE_PATH = Path(".github") / "merge_rules.yaml"
-ROCKSET_MERGES_COLLECTION = "merges"
-ROCKSET_MERGES_WORKSPACE = "commons"
 REMOTE_MAIN_BRANCH = "origin/main"
 DRCI_CHECKRUN_NAME = "Dr.CI"
 INTERNAL_CHANGES_CHECKRUN_NAME = "Meta Internal-Only Changes Check"
@@ -1116,15 +1115,20 @@ class GitHubPR:
         msg = self.get_title() + f" (#{self.pr_num})\n\n"
         msg += msg_body
 
-        # Mention PR co-authors
-        for author_login, author_name in self.get_authors().items():
-            if author_login != self.get_pr_creator_login():
-                msg += f"\nCo-authored-by: {author_name}"
-
         msg += f"\nPull Request resolved: {self.get_pr_url()}\n"
         msg += f"Approved by: {approved_by_urls}\n"
         if ghstack_deps:
             msg += f"ghstack dependencies: {', '.join([f'#{pr.pr_num}' for pr in ghstack_deps])}\n"
+
+        # Mention PR co-authors, which should be at the end of the message
+        # And separated from the body by two newlines
+        first_coauthor = True
+        for author_login, author_name in self.get_authors().items():
+            if author_login != self.get_pr_creator_login():
+                if first_coauthor:
+                    msg, first_coauthor = (msg + "\n", False)
+                msg += f"\nCo-authored-by: {author_name}"
+
         return msg
 
     def add_numbered_label(self, label_base: str, dry_run: bool) -> None:
@@ -1135,7 +1139,10 @@ class GitHubPR:
             if label_base in label:
                 count += 1
                 full_label = f"{label_base}X{count}"
-        gh_add_labels(self.org, self.project, self.pr_num, [full_label], dry_run)
+        self.add_label(full_label, dry_run)
+
+    def add_label(self, label: str, dry_run: bool) -> None:
+        gh_add_labels(self.org, self.project, self.pr_num, [label], dry_run)
 
     def merge_into(
         self,
@@ -1169,12 +1176,12 @@ class GitHubPR:
             for pr in additional_merged_prs:
                 pr.add_numbered_label(MERGE_COMPLETE_LABEL, dry_run)
 
-        if comment_id and self.pr_num:
-            # When the merge process reaches this part, we can assume that the commit
-            # has been successfully pushed to trunk
-            merge_commit_sha = repo.rev_parse(name=REMOTE_MAIN_BRANCH)
+        # When the merge process reaches this part, we can assume that the commit
+        # has been successfully pushed to trunk
+        merge_commit_sha = repo.rev_parse(name=self.default_branch())
 
-            # Finally, upload the record to Rockset. The list of pending and failed
+        if comment_id and self.pr_num:
+            # Finally, upload the record to s3. The list of pending and failed
             # checks are at the time of the merge
             save_merge_record(
                 comment_id=comment_id,
@@ -1196,7 +1203,18 @@ class GitHubPR:
                 ignore_current=bool(ignore_current_checks),
             )
         else:
-            print("Missing comment ID or PR number, couldn't upload to Rockset")
+            print("Missing comment ID or PR number, couldn't upload to s3")
+
+        # Usually Github will see that the commit has "resolves <pr_num>" in the
+        # commit message and close the PR, but sometimes it doesn't, leading to
+        # confusion.  When it doesn't, we close it manually.
+        time.sleep(60)  # Give Github some time to close the PR
+        manually_close_merged_pr(
+            pr=self,
+            additional_merged_prs=additional_merged_prs,
+            merge_commit_sha=merge_commit_sha,
+            dry_run=dry_run,
+        )
 
     def merge_changes(
         self,
@@ -1459,12 +1477,12 @@ def find_matching_merge_rule(
 
         if not skip_internal_checks and pr.has_internal_changes():
             raise RuntimeError(
-                "This PR has internal changes and must be landed via Phabricator"
+                "This PR has internal changes and must be landed via Phabricator! Please try reimporting/rexporting the PR!"
             )
 
         # Categorize all checks when skip_mandatory_checks (force merge) is set. Do it here
         # where the list of checks is readily available. These records will be saved into
-        # Rockset merge records
+        # s3 merge records
         (
             pending_mandatory_checks,
             failed_mandatory_checks,
@@ -1491,11 +1509,39 @@ def checks_to_str(checks: List[Tuple[str, Optional[str]]]) -> str:
 
 
 def checks_to_markdown_bullets(
-    checks: List[Tuple[str, Optional[str], Optional[int]]]
+    checks: List[Tuple[str, Optional[str], Optional[int]]],
 ) -> List[str]:
     return [
         f"- [{c[0]}]({c[1]})" if c[1] is not None else f"- {c[0]}" for c in checks[:5]
     ]
+
+
+def manually_close_merged_pr(
+    pr: GitHubPR,
+    additional_merged_prs: List[GitHubPR],
+    merge_commit_sha: str,
+    dry_run: bool,
+) -> None:
+    def _comment_and_close(pr: GitHubPR, comment: str) -> None:
+        pr = GitHubPR(pr.org, pr.project, pr.pr_num)  # Refresh the PR
+        if not pr.is_closed():
+            gh_post_pr_comment(pr.org, pr.project, pr.pr_num, comment, dry_run)
+            gh_close_pr(pr.org, pr.project, pr.pr_num, dry_run)
+
+    message = (
+        f"This PR (#{pr.pr_num}) was merged in {merge_commit_sha} but it is still open, likely due to a Github bug, "
+        "so mergebot is closing it manually.  If you think this is a mistake, please feel free to reopen and contact Dev Infra."
+    )
+    _comment_and_close(pr, message)
+    for additional_pr in additional_merged_prs:
+        message = (
+            f"This PR (#{additional_pr.pr_num}) was merged as part of PR #{pr.pr_num} in the stack under {merge_commit_sha} "
+            "but it is still open, likely due to a Github bug, so mergebot is closing it manually. "
+            "If you think this is a mistake, please feel free to reopen and contact Dev Infra."
+        )
+        _comment_and_close(additional_pr, message)
+
+    print(f"PR {pr.pr_num} and all additional PRs in the stack have been closed.")
 
 
 @retries_decorator()
@@ -1523,7 +1569,7 @@ def save_merge_record(
     This saves the merge records as a json, which can later be uploaded to s3
     """
 
-    # Prepare the record to be written into Rockset
+    # Prepare the record to be written into s3
     data = [
         {
             "comment_id": comment_id,
@@ -1545,7 +1591,8 @@ def save_merge_record(
             "ignore_current": ignore_current,
             "error": error,
             # This is a unique identifier for the record for deduping purposes
-            # in rockset.  Any unique string would work
+            # in Rockset.  Any unique string would work.  This will not be used
+            # after we migrate off Rockset
             "_id": f"{project}-{pr_num}-{comment_id}-{os.environ.get('GITHUB_RUN_ID')}",
         }
     ]
@@ -1553,36 +1600,6 @@ def save_merge_record(
 
     with open(repo_root / "merge_record.json", "w") as f:
         json.dump(data, f)
-
-
-@retries_decorator(rc=[])
-def get_rockset_results(head_sha: str, merge_base: str) -> List[Dict[str, Any]]:
-    query = f"""
-SELECT
-    w.name as workflow_name,
-    j.id,
-    j.name,
-    j.conclusion,
-    j.completed_at,
-    j.html_url,
-    j.head_sha,
-    j.torchci_classification.captures as failure_captures,
-    LENGTH(j.steps) as steps,
-FROM
-    commons.workflow_job j join commons.workflow_run w on w.id = j.run_id
-where
-    j.head_sha in ('{head_sha}','{merge_base}')
-"""
-    try:
-        import rockset  # type: ignore[import]
-
-        res = rockset.RocksetClient(
-            host="api.usw2a1.rockset.com", api_key=os.environ["ROCKSET_API_KEY"]
-        ).sql(query)
-        return cast(List[Dict[str, Any]], res.results)
-    except ModuleNotFoundError:
-        print("Could not use RockSet as rocket dependency is missing")
-        return []
 
 
 @retries_decorator()
@@ -1930,6 +1947,7 @@ def do_revert_prs(
         )
 
         pr.add_numbered_label("reverted", dry_run)
+        pr.add_label("ci-no-td", dry_run)
         if not dry_run:
             gh_post_commit_comment(pr.org, pr.project, commit_sha, revert_msg)
             gh_update_pr_state(pr.org, pr.project, pr.pr_num)
@@ -2022,7 +2040,7 @@ def categorize_checks(
     pending_checks: List[Tuple[str, Optional[str], Optional[int]]] = []
     failed_checks: List[Tuple[str, Optional[str], Optional[int]]] = []
 
-    # failed_checks_categorization is used to keep track of all ignorable failures when saving the merge record on Rockset
+    # failed_checks_categorization is used to keep track of all ignorable failures when saving the merge record on s3
     failed_checks_categorization: Dict[str, List[Any]] = defaultdict(list)
 
     # If required_checks is not set or empty, consider all names are relevant
@@ -2081,7 +2099,7 @@ def categorize_checks(
     ):
         failed_checks = failed_checks + flaky_or_broken_trunk
 
-    # The list of failed_checks_categorization is returned so that it can be saved into the Rockset merge record
+    # The list of failed_checks_categorization is returned so that it can be saved into the s3 merge record
     return (pending_checks, failed_checks, failed_checks_categorization)
 
 
@@ -2365,7 +2383,7 @@ def main() -> None:
         handle_exception(e)
 
         if args.comment_id and args.pr_num:
-            # Finally, upload the record to Rockset, we don't have access to the
+            # Finally, upload the record to s3, we don't have access to the
             # list of pending and failed checks here, but they are not really
             # needed at the moment
             save_merge_record(
@@ -2388,7 +2406,7 @@ def main() -> None:
                 error=str(e),
             )
         else:
-            print("Missing comment ID or PR number, couldn't upload to Rockset")
+            print("Missing comment ID or PR number, couldn't upload to s3")
     finally:
         if not args.check_mergeability:
             gh_remove_label(

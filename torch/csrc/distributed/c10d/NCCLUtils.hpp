@@ -2,12 +2,12 @@
 
 #ifdef USE_C10D_NCCL
 
-#include <stdio.h>
-#include <stdlib.h>
+#include <sched.h>
+#include <cstdio>
+#include <cstdlib>
 
 #include <memory>
 #include <mutex>
-#include <thread>
 
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAEvent.h>
@@ -15,6 +15,8 @@
 #include <nccl.h>
 #include <torch/csrc/distributed/c10d/TraceUtils.h>
 #include <optional>
+
+constexpr int64_t kCommInitBusyWaitMillis = 2;
 
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
     (NCCL_MINOR >= 14)
@@ -101,60 +103,77 @@
     }                                                                         \
   } while (0)
 
+// Error out if (current time - startTime) is greater than timeout (sec).
+#define C10D_CHECK_TIMEOUT(startTime, timeout)                              \
+  do {                                                                      \
+    auto currentTime = std::chrono::steady_clock::now();                    \
+    auto timeElapsed = std::chrono::duration_cast<std::chrono::seconds>(    \
+                           currentTime - startTime)                         \
+                           .count();                                        \
+    if (timeElapsed > timeout) {                                            \
+      std::string err = "NCCL timeout in: " + std::string(__FILE__) + ":" + \
+          std::to_string(__LINE__);                                         \
+      TORCH_CHECK_WITH(DistBackendError, false, err);                       \
+    }                                                                       \
+  } while (0)
+
 // Macro to throw on a non-successful NCCL return value, non-blocking.
-#define C10D_NCCL_CHECK_TIMEOUT(cmd, comm, failureReason)                     \
-  ncclResult_t result = cmd;                                                  \
-  auto startTimepoint = std::chrono::steady_clock::now();                     \
-  while (result == ncclInProgress) {                                          \
-    if (nccl_nonblocking_timeout() > 0) {                                     \
-      auto currentTimepoint = std::chrono::steady_clock::now();               \
-      auto timeElapsed = std::chrono::duration_cast<std::chrono::seconds>(    \
-                             currentTimepoint - startTimepoint)               \
-                             .count();                                        \
-      if (timeElapsed > nccl_nonblocking_timeout()) {                         \
-        std::string err = "NCCL timeout in: " + std::string(__FILE__) + ":" + \
-            std::to_string(__LINE__) + ", " +                                 \
-            ncclGetErrorWithVersion(result) + "\n" +                          \
-            getNcclErrorDetailStr(result, failureReason);                     \
-        TORCH_CHECK_WITH(DistBackendError, false, err);                       \
-      }                                                                       \
+#define C10D_NCCL_CHECK_TIMEOUT_BASE(cmd, comm, failureReason, yield_fn)      \
+  do {                                                                        \
+    ncclResult_t result = cmd;                                                \
+    auto startTimepoint = std::chrono::steady_clock::now();                   \
+    auto timeout = nccl_nonblocking_timeout();                                \
+    while (result == ncclInProgress) {                                        \
+      C10D_CHECK_TIMEOUT(startTimepoint, timeout);                            \
+      yield_fn;                                                               \
+      ncclCommGetAsyncError(comm, &result);                                   \
     }                                                                         \
-    ncclCommGetAsyncError(comm, &result);                                     \
-  }                                                                           \
-  if (result != ncclSuccess) {                                                \
-    std::string err = "NCCL error in: " + std::string(__FILE__) + ":" +       \
-        std::to_string(__LINE__) + ", " + ncclGetErrorWithVersion(result) +   \
-        "\n" + getNcclErrorDetailStr(result, failureReason);                  \
-    TORCH_CHECK_WITH(DistBackendError, false, err);                           \
-  }
+    if (result != ncclSuccess) {                                              \
+      std::string err = "NCCL error in: " + std::string(__FILE__) + ":" +     \
+          std::to_string(__LINE__) + ", " + ncclGetErrorWithVersion(result) + \
+          "\n" + getNcclErrorDetailStr(result, failureReason);                \
+      TORCH_CHECK_WITH(DistBackendError, false, err);                         \
+    }                                                                         \
+  } while (0)
+
+// Sleep for kCommInitBusyWaitMillis milliseconds.
+#define C10D_SCHED_SLEEP()     \
+  std::this_thread::sleep_for( \
+      std::chrono::milliseconds(kCommInitBusyWaitMillis))
+
+// Macro to throw exception on a non-successful NCCL return value or timeout.
+// This macro uses sched_yield() to yield the CPU.
+// Thus suitable for NCCL calls that would quickly turn ncclSuccess, e.g.
+// collectives.
+#define C10D_NCCL_CHECK_TIMEOUT(cmd, comm, failureReason) \
+  C10D_NCCL_CHECK_TIMEOUT_BASE(cmd, comm, failureReason, sched_yield())
+
+// Macro to throw exception on a non-successful NCCL return value or timeout.
+// This macro uses sleep to yield the CPU.
+// Thus suitable for NCCL calls that would take longer to turn ncclSuccess, e.g.
+// ncclCommInitRankConfig, ncclCommFinalize, etc.
+#define C10D_NCCL_CHECK_TIMEOUT_SLEEP(cmd, comm, failureReason) \
+  C10D_NCCL_CHECK_TIMEOUT_BASE(cmd, comm, failureReason, C10D_SCHED_SLEEP())
 
 #define C10D_NCCL_CHECK_TIMEOUT_GROUPEND(cmd, comm, failureReason)           \
-  ncclResult_t state = cmd;                                                  \
-  auto startTimepoint = std::chrono::steady_clock::now();                    \
-  if (state == ncclInProgress) {                                             \
-    do {                                                                     \
-      if (nccl_nonblocking_timeout() > 0) {                                  \
-        auto currentTimepoint = std::chrono::steady_clock::now();            \
-        auto timeElapsed = std::chrono::duration_cast<std::chrono::seconds>( \
-                               currentTimepoint - startTimepoint)            \
-                               .count();                                     \
-        if (timeElapsed > nccl_nonblocking_timeout()) {                      \
-          std::string err = "NCCL timeout in: " + std::string(__FILE__) +    \
-              ":" + std::to_string(__LINE__) + ", " +                        \
-              ncclGetErrorWithVersion(state) + "\n" +                        \
-              getNcclErrorDetailStr(state, failureReason);                   \
-          TORCH_CHECK_WITH(DistBackendError, false, err);                    \
-        }                                                                    \
-      }                                                                      \
-      ncclCommGetAsyncError(comm->getNcclComm(), &state);                    \
-    } while (state == ncclInProgress);                                       \
-  }                                                                          \
-  if (state != ncclSuccess) {                                                \
-    std::string err = "NCCL error in: " + std::string(__FILE__) + ":" +      \
-        std::to_string(__LINE__) + ", " + ncclGetErrorWithVersion(state) +   \
-        "\n" + getNcclErrorDetailStr(state, failureReason);                  \
-    TORCH_CHECK_WITH(DistBackendError, false, err);                          \
-  }
+  do {                                                                       \
+    ncclResult_t state = cmd;                                                \
+    auto startTimepoint = std::chrono::steady_clock::now();                  \
+    auto timeout = nccl_nonblocking_timeout();                               \
+    if (state == ncclInProgress) {                                           \
+      do {                                                                   \
+        C10D_CHECK_TIMEOUT(startTimepoint, timeout);                         \
+        sched_yield();                                                       \
+        ncclCommGetAsyncError(comm->getNcclComm(), &state);                  \
+      } while (state == ncclInProgress);                                     \
+    }                                                                        \
+    if (state != ncclSuccess) {                                              \
+      std::string err = "NCCL error in: " + std::string(__FILE__) + ":" +    \
+          std::to_string(__LINE__) + ", " + ncclGetErrorWithVersion(state) + \
+          "\n" + getNcclErrorDetailStr(state, failureReason);                \
+      TORCH_CHECK_WITH(DistBackendError, false, err);                        \
+    }                                                                        \
+  } while (0)
 
 // Macro to print and abort on a non-successful NCCL return value.
 #define C10D_NCCL_ASSERT(cmd)                            \
@@ -173,46 +192,51 @@
   } while (0)
 
 namespace c10d {
-
-static c10::IValue entries_key = "entries";
-static c10::IValue nccl_comm_key = "nccl_comm_state";
-static c10::IValue version_key = "version";
+#define DEFINE_CONSTANT(name, value) \
+  static c10::IValue name = value;   \
+  static std::string name##_str = value;
 // Update whenever changing contents or formatting of the dump
 // (minor when adding fields, major when changing existing fields)
-static c10::IValue version_val = "2.2";
-static c10::IValue pg_config_key = "pg_config";
-static c10::IValue record_id_key = "record_id";
-static c10::IValue pg_id_key = "pg_id";
-static c10::IValue pg_name_key = "process_group";
-static c10::IValue collective_seq_id_key = "collective_seq_id";
-static c10::IValue p2p_seq_id_key = "p2p_seq_id";
-static c10::IValue is_p2p_key = "is_p2p";
-static c10::IValue op_id_key = "op_id";
-static c10::IValue profiling_name_key = "profiling_name";
-static c10::IValue input_sizes_key = "input_sizes";
-static c10::IValue input_dtypes_key = "input_dtypes";
-static c10::IValue output_sizes_key = "output_sizes";
-static c10::IValue output_dtypes_key = "output_dtypes";
-static c10::IValue time_created_key = "time_created_ns";
-static c10::IValue duration_key = "duration_ms";
-static c10::IValue timeout_key = "timeout_ms";
-
-static c10::IValue frames_key = "frames";
-static c10::IValue state_key = "state";
-static c10::IValue line_key = "line";
-static c10::IValue name_key = "name";
-static c10::IValue filename_key = "filename";
-static c10::IValue retired_key = "retired";
-static c10::IValue time_discovered_started_key = "time_discovered_started_ns";
-static c10::IValue time_discovered_completed_key =
-    "time_discovered_completed_ns";
+// Also update both JSON and Pickle dumps to make use of the newly defined
+// field(s).
+DEFINE_CONSTANT(version_val, "2.4");
+DEFINE_CONSTANT(entries_key, "entries");
+DEFINE_CONSTANT(nccl_comm_key, "nccl_comm_state");
+DEFINE_CONSTANT(version_key, "version");
+DEFINE_CONSTANT(pg_config_key, "pg_config");
+DEFINE_CONSTANT(pg_status_key, "pg_status");
+DEFINE_CONSTANT(record_id_key, "record_id");
+DEFINE_CONSTANT(pg_id_key, "pg_id");
+DEFINE_CONSTANT(pg_name_key, "process_group");
+DEFINE_CONSTANT(collective_seq_id_key, "collective_seq_id");
+DEFINE_CONSTANT(p2p_seq_id_key, "p2p_seq_id");
+DEFINE_CONSTANT(is_p2p_key, "is_p2p");
+DEFINE_CONSTANT(op_id_key, "op_id");
+DEFINE_CONSTANT(profiling_name_key, "profiling_name");
+DEFINE_CONSTANT(input_sizes_key, "input_sizes");
+DEFINE_CONSTANT(input_dtypes_key, "input_dtypes");
+DEFINE_CONSTANT(output_sizes_key, "output_sizes");
+DEFINE_CONSTANT(output_dtypes_key, "output_dtypes");
+DEFINE_CONSTANT(time_created_key, "time_created_ns");
+DEFINE_CONSTANT(duration_key, "duration_ms");
+DEFINE_CONSTANT(timeout_key, "timeout_ms");
+DEFINE_CONSTANT(frames_key, "frames");
+DEFINE_CONSTANT(state_key, "state");
+DEFINE_CONSTANT(line_key, "line");
+DEFINE_CONSTANT(name_key, "name");
+DEFINE_CONSTANT(filename_key, "filename");
+DEFINE_CONSTANT(retired_key, "retired");
+DEFINE_CONSTANT(time_discovered_started_key, "time_discovered_started_ns");
+DEFINE_CONSTANT(time_discovered_completed_key, "time_discovered_completed_ns");
+DEFINE_CONSTANT(completed_state, "completed");
+DEFINE_CONSTANT(scheduled_state, "scheduled");
+DEFINE_CONSTANT(started_state, "started");
+#undef DEFINE_CONSTANT
 
 TORCH_API size_t hashTensors(const std::vector<at::Tensor>& tensors);
 TORCH_API std::string getNcclVersion();
 TORCH_API std::string ncclGetErrorWithVersion(ncclResult_t error);
-bool nccl_use_nonblocking();
 int nccl_nonblocking_timeout();
-bool shouldBroadcastNCCLUniqueID(bool isSendRecvSelf);
 
 // Provides additional detail into NCCL error codes based on when these are
 // thrown in the NCCL codebase.
@@ -239,7 +263,7 @@ class TORCH_API DebugInfoWriter {
   }
 
  protected:
-  DebugInfoWriter(std::string namePrefix, int rank) {
+  DebugInfoWriter(const std::string& namePrefix, int rank) {
     filename_ = c10::str(namePrefix, rank);
   }
   std::string filename_;
@@ -251,21 +275,19 @@ class TORCH_API DebugInfoWriter {
 
 // RAII wrapper for NCCL communicator
 class NCCLComm {
- public:
-  explicit NCCLComm(ncclComm_t ncclComm)
-      : ncclComm_(ncclComm),
-        aborted_(false),
-        ncclAsyncErr_(ncclSuccess),
-        commFailureReason_(std::nullopt),
-        initialized_(false) {}
+  using MutexType = std::recursive_mutex;
+  using LockType = std::unique_lock<MutexType>;
 
-  NCCLComm() : NCCLComm(nullptr) {}
+ public:
+  explicit NCCLComm(ncclComm_t ncclComm) : ncclComm_(ncclComm) {}
+
+  NCCLComm() = default;
 
   ~NCCLComm() noexcept {
     // Add lock in this destructor, as aborted_ needs to be read after memory
     // barrier here.
-    std::unique_lock<std::mutex> lock(mutex_);
-    if (ncclComm_ && !aborted_) {
+    LockType lock(mutex_);
+    if (ncclComm_ && initialized_ && !aborted_) {
 #ifdef ENABLE_NCCL_ERROR_CHECKING
       // Use ncclCommAbort instead of ncclCommDestroy here since
       // ncclCommDestroy could block forever waiting for work to complete on
@@ -288,6 +310,8 @@ class NCCLComm {
     comm->ncclId_ = commId;
     comm->rank_ = rank;
     comm->initialized_ = true;
+    // Old style comm is always blocking.
+    comm->nonBlocking_ = false;
     return comm;
   }
 
@@ -298,29 +322,21 @@ class NCCLComm {
       ncclUniqueId commId,
       ncclConfig_t& config) {
     auto comm = std::make_shared<NCCLComm>();
-    bool isInitialized = false;
-    if (nccl_use_nonblocking()) {
-      config.blocking = 0;
-      LOG(INFO) << "Rank " << rank
-                << ": creating NCCL communicator in nonblocking mode";
-      C10D_NCCL_CHECK_NONBLOCKING(
-          ncclCommInitRankConfig(
-              &(comm->ncclComm_), numRanks, commId, rank, &config),
-          std::nullopt);
-    } else {
-      C10D_NCCL_CHECK(
-          ncclCommInitRankConfig(
-              &(comm->ncclComm_), numRanks, commId, rank, &config),
-          std::nullopt);
-      // under blocking mode, comm is initialized after NCCL CHECK
-      isInitialized = true;
-    }
+    comm->nonBlocking_ = config.blocking == 0;
+    LOG(INFO) << "Rank " << rank << ": creating NCCL communicator with mode: "
+              << (comm->nonBlocking_ ? "nonblocking" : "blocking");
+    C10D_NCCL_CHECK_NONBLOCKING(
+        ncclCommInitRankConfig(
+            &(comm->ncclComm_), numRanks, commId, rank, &config),
+        std::nullopt);
     comm->ncclId_ = commId;
     comm->rank_ = rank;
-    comm->initialized_ = isInitialized;
+    // Under blocking mode, comm is initialized immediately after NCCL init
+    // returns; Under nonblocking mode, we check whether comm is initialized the
+    // *next* time ncclComm_ is accessed.
+    comm->initialized_ = !comm->nonBlocking_;
     return comm;
   }
-#endif
 
   static std::shared_ptr<NCCLComm> split(
       NCCLComm* source,
@@ -328,6 +344,7 @@ class NCCLComm {
       int rank,
       ncclConfig_t& config,
       std::vector<uint64_t>& ranks_ull);
+#endif
 
 #if defined(IS_NCCLX) && defined(NCCL_COMM_DUMP)
   std::unordered_map<std::string, std::string> ncclCommDump() {
@@ -353,28 +370,30 @@ class NCCLComm {
   NCCLComm& operator=(NCCLComm&& other) = delete;
 
   // Move constructable
+  // NOLINTNEXTLINE(*-noexcept-move-*)
   NCCLComm(NCCLComm&& other) {
     // Using other's lock, as it reads other's states
     // Can not use this.mutex_, as this object is being constructed.
-    std::unique_lock<std::mutex> lock(other.mutex_);
+    LockType lock(other.mutex_);
     std::swap(ncclComm_, other.ncclComm_);
     std::swap(aborted_, other.aborted_);
     std::swap(ncclAsyncErr_, other.ncclAsyncErr_);
     std::swap(initialized_, other.initialized_);
+    std::swap(nonBlocking_, other.nonBlocking_);
   }
 
   ncclComm_t getNcclComm();
 
   std::optional<std::string> getNcclCommFailureReason() const {
-    std::unique_lock<std::mutex> lock(mutex_);
+    LockType lock(mutex_);
     return commFailureReason_;
   }
 
   void ncclCommAbort(
       std::optional<std::string> commFailureReason = std::nullopt) {
-    std::unique_lock<std::mutex> lock(mutex_);
+    LockType lock(mutex_);
 #ifdef ENABLE_NCCL_ERROR_CHECKING
-    if (aborted_) {
+    if (aborted_ && !initialized_) {
       // Should not abort twice.
       return;
     }
@@ -419,8 +438,13 @@ class NCCLComm {
 #endif
   }
 
+  bool isInitialized() const {
+    LockType lock(mutex_);
+    return initialized_;
+  }
+
   bool isAborted() const {
-    std::unique_lock<std::mutex> lock(mutex_);
+    LockType lock(mutex_);
     return aborted_;
   }
 
@@ -429,7 +453,7 @@ class NCCLComm {
   }
 
   ncclResult_t checkForNcclError() {
-    std::unique_lock<std::mutex> lock(mutex_);
+    LockType lock(mutex_);
 #ifdef ENABLE_NCCL_ERROR_CHECKING
     if (ncclAsyncErr_ != ncclSuccess) {
       return ncclAsyncErr_;
@@ -444,7 +468,7 @@ class NCCLComm {
   }
 
   ncclResult_t registerSegment(void* ptr, size_t size) {
-    std::unique_lock<std::mutex> lock(mutex_);
+    LockType lock(mutex_);
 #ifdef NCCL_HAS_COMM_REGISTER
     // We register only segments from cache allocator
     // which are guaranteed to be with disjoint addr ranges. Thus, a ptr always
@@ -457,16 +481,18 @@ class NCCLComm {
         " has already been registered on ncclComm_ ",
         ncclComm_);
 
-    void* handle;
+    void* handle = nullptr;
+    // Use getNcclComm to make sure comm is ready before calling nccl APIs
+    auto comm = getNcclComm();
     C10D_NCCL_CHECK(
-        ncclCommRegister(ncclComm_, ptr, size, &handle),
+        ncclCommRegister(comm, ptr, size, &handle),
         c10::str(
             "Failed to register segment with ptr ",
             ptr,
             ", size ",
             size,
             " on ncclComm_ ",
-            ncclComm_));
+            comm));
     registeredSegmentHandles_[ptr] = handle;
     return ncclSuccess;
 #else
@@ -475,7 +501,7 @@ class NCCLComm {
   }
 
   ncclResult_t deregisterSegment(void* ptr) {
-    std::unique_lock<std::mutex> lock(mutex_);
+    LockType lock(mutex_);
 #ifdef NCCL_HAS_COMM_REGISTER
     TORCH_CHECK(
         registeredSegmentHandles_.count(ptr) == 1,
@@ -485,15 +511,17 @@ class NCCLComm {
         ncclComm_);
 
     void* handle = registeredSegmentHandles_[ptr];
+    // Use getNcclComm to make sure comm is ready before calling nccl APIs
+    auto comm = getNcclComm();
     C10D_NCCL_CHECK(
-        ncclCommDeregister(ncclComm_, handle),
+        ncclCommDeregister(comm, handle),
         c10::str(
             "Failed to deregister segment handle ",
             handle,
             ", with ptr ",
             ptr,
             " on ncclComm_ ",
-            ncclComm_));
+            comm));
     registeredSegmentHandles_.erase(ptr);
     return ncclSuccess;
 #else
@@ -501,28 +529,36 @@ class NCCLComm {
 #endif
   }
 
+  std::string repr() const {
+    return c10::str((void*)ncclComm_);
+  }
+
   friend class ProcessGroupNCCL;
 
  protected:
-  // a helper function to wait until the communicator is initialized;
-  void waitUntilInitialized(int timeoutSecs);
-  ncclComm_t ncclComm_;
   // Unique nccl_id for this communicator.
-  ncclUniqueId ncclId_;
-  bool aborted_;
+  ncclUniqueId ncclId_{};
+  bool aborted_{false};
   uint64_t ncclCommSplitCounter_{0};
-  ncclResult_t ncclAsyncErr_;
-  mutable std::mutex mutex_;
+  ncclResult_t ncclAsyncErr_{ncclSuccess};
+  mutable MutexType mutex_;
   // Rank that this communicator corresponds to.
-  int rank_;
+  int rank_{};
   // Optional reason for communicator failure, provided by ProcessGroupNCCL for
   // better error messaging.
-  std::optional<std::string> commFailureReason_;
+  std::optional<std::string> commFailureReason_{};
   bool initialized_{false};
+  // Whether this communicator is using nonblocking mode. Recorded during comm
+  // creation or split. For safety, we give a default value of true (more
+  // protection).
+  bool nonBlocking_{true};
 #ifdef NCCL_HAS_COMM_REGISTER
   // Stores handlers for tensors registered by NCCL
   std::unordered_map<void*, void*> registeredSegmentHandles_;
 #endif
+
+ private:
+  ncclComm_t ncclComm_{nullptr};
 };
 
 // Helper that automatically cleans up premul sums.
@@ -533,7 +569,7 @@ struct ncclRedOpRAII {
       : op_(op), comm_(comm), premul_sum_(true) {}
   ncclRedOpRAII(const ncclRedOpRAII&) = delete;
   ncclRedOpRAII& operator=(const ncclRedOpRAII&) = delete;
-  ncclRedOpRAII(ncclRedOpRAII&& tmp) : ncclRedOpRAII() {
+  ncclRedOpRAII(ncclRedOpRAII&& tmp) noexcept : ncclRedOpRAII() {
     std::swap(tmp.op_, this->op_);
     std::swap(tmp.comm_, this->comm_);
     std::swap(tmp.premul_sum_, this->premul_sum_);
@@ -548,8 +584,8 @@ struct ncclRedOpRAII {
   operator ncclRedOp_t() const {
     return op_;
   }
-  ncclRedOp_t op_;
-  ncclComm_t comm_;
+  ncclRedOp_t op_{};
+  ncclComm_t comm_{};
   bool premul_sum_ = false;
 };
 
@@ -620,13 +656,16 @@ struct NCCLTraceBuffer {
     std::optional<c10::time_t> time_discovered_completed_;
 
     // size information for input/output tensors
-    c10::SmallVector<int, 4> input_dims_;
+    c10::SmallVector<int64_t, 4> input_dims_;
     std::vector<c10::ScalarType> input_dtypes_;
-    c10::SmallVector<int, 4> output_dims_;
+    c10::SmallVector<int64_t, 4> output_dims_;
     std::vector<c10::ScalarType> output_dtypes_;
     c10::SmallVector<int64_t, 8> sizes_; // flattened from inputs, outputs
     bool retired_ = false; // is this work entry no longer in the workMetaList_?
                            // a retired but not completed event has timed out
+
+    // Returns the traceback of current entry, in string form.
+    std::string getTraceback();
   };
 
   bool enabled_ = false;
@@ -636,6 +675,7 @@ struct NCCLTraceBuffer {
   size_t max_entries_ = 0;
   size_t next_ = 0;
   size_t id_ = 0;
+  std::map<size_t, std::shared_ptr<ProcessGroupStatus>> all_pg_status_ = {};
   std::map<std::tuple<std::string, std::string>, std::vector<uint64_t>>
       pg_name_to_ranks_ = {};
 
@@ -651,101 +691,20 @@ struct NCCLTraceBuffer {
       Event* start,
       Event* end,
       std::chrono::milliseconds timeout_ms,
-      bool isP2P) {
-    if (!enabled_) {
-      return std::nullopt;
-    }
-    auto traceback =
-        torch::CapturedTraceback::gather(true, true, capture_cpp_stack_);
-    std::lock_guard<std::mutex> guard(mutex_);
-
-    auto te = Entry{
-        id_,
-        pg_id,
-        pg_name,
-        collective_seq_id,
-        p2p_seq_id,
-        op_id,
-        std::move(profiling_name),
-        std::move(traceback),
-        std::move(start),
-        std::move(end),
-        c10::getTime(),
-        timeout_ms.count(),
-        isP2P,
-        std::nullopt,
-        std::nullopt,
-        std::nullopt,
-        {},
-        {},
-        {},
-        {},
-        {},
-        false};
-
-    for (const auto& input : inputs) {
-      c10::IntArrayRef sizes = input.sizes();
-      te.input_dtypes_.push_back(input.dtype().toScalarType());
-      te.input_dims_.push_back(sizes.size());
-      te.sizes_.insert(te.sizes_.end(), sizes.begin(), sizes.end());
-    }
-
-    for (const auto& output : outputs) {
-      c10::IntArrayRef sizes = output.sizes();
-      te.output_dtypes_.push_back(output.dtype().toScalarType());
-      te.output_dims_.push_back(sizes.size());
-      te.sizes_.insert(te.sizes_.end(), sizes.begin(), sizes.end());
-    }
-
-    if (entries_.size() < max_entries_) {
-      entries_.emplace_back(std::move(te));
-    } else {
-      entries_[next_++] = std::move(te);
-      if (next_ == max_entries_) {
-        next_ = 0;
-      }
-    }
-    return id_++;
-  }
+      std::shared_ptr<ProcessGroupStatus> pg_status,
+      bool isP2P);
 
   void record_pg_ranks(
       const std::tuple<std::string, std::string>& pg_name,
-      std::vector<uint64_t> ranks) {
-    if (!enabled_) {
-      return;
-    }
-    std::lock_guard<std::mutex> guard(mutex_);
-    pg_name_to_ranks_[pg_name] = ranks;
-  }
+      std::vector<uint64_t> ranks);
 
-  void update_state(Entry& r) {
-    if (r.start_ != nullptr) {
-      bool started = r.start_->query();
-      if (started && !r.time_discovered_started_) {
-        r.time_discovered_started_ = c10::getTime();
-      }
-    }
-    if (r.end_ != nullptr) {
-      bool completed = r.end_->query();
-      if (completed && !r.time_discovered_completed_) {
-        r.time_discovered_completed_ = c10::getTime();
-      }
-    }
-  }
+  void update_state(Entry& r);
 
-  std::vector<Entry> dump_entries() {
-    std::lock_guard<std::mutex> guard(mutex_);
-    std::vector<Entry> result;
-    result.reserve(entries_.size());
-    result.insert(result.end(), entries_.begin() + next_, entries_.end());
-    result.insert(result.end(), entries_.begin(), entries_.begin() + next_);
-    // query any remaining events
-    for (auto& r : result) {
-      update_state(r);
-      r.start_ = r.end_ = nullptr;
-    }
-    return result;
-  }
+  std::vector<Entry> dump_entries();
+
+  // Returns the entry with the given id, if it exists. Otherwise, returns
+  // std::nullopt.
+  std::optional<Entry> getEntry(std::optional<size_t> id);
 
   /*
   Mark an Event as completed and free its events.
@@ -757,171 +716,30 @@ struct NCCLTraceBuffer {
   never hang. (timing must also be enabled for compute_duration - see
   TORCH_NCCL_ENABLE_TIMING).
   */
-  void retire_id(std::optional<size_t> id, bool compute_duration = true) {
-    if (!enabled_ || !id) {
-      return;
-    }
-
-    bool can_compute_duration = false;
-    Event* startEvent = nullptr;
-    Event* endEvent = nullptr;
-    std::optional<float> duration = std::nullopt;
-
-    std::unique_lock<std::mutex> guard(mutex_);
-
-    Entry* entry = &entries_.at(*id % max_entries_);
-    if (entry->id_ == *id) {
-      update_state(*entry);
-
-      if (compute_duration) {
-        can_compute_duration = entry->time_discovered_completed_.has_value() &&
-            entry->start_ && entry->end_;
-        startEvent = entry->start_;
-        endEvent = entry->end_;
-      }
-      entry->retired_ = true;
-      entry->start_ = entry->end_ = nullptr;
-    }
-
-    if (can_compute_duration) {
-      // Compute duration without without holding the lock, because
-      // cudaEventDuration() can hang, and we need to acquire the lock before we
-      // can dump(), which we never want to block.
-      guard.unlock();
-      duration = getDurationFromEvent(*startEvent, *endEvent);
-      guard.lock();
-
-      // Refresh the entry pointer, see if the entry has been overwritten
-      entry = &entries_.at(*id % max_entries_);
-      if (entry->id_ != *id) {
-        LOG(INFO)
-            << "retire_id abandoned for id " << *id
-            << ", event was overwritten while waiting to compute duration.";
-        return;
-      }
-      if (duration.has_value()) {
-        entry->duration_ = duration.value();
-      }
-    }
-  }
+  void retire_id(std::optional<size_t> id, bool compute_duration = true);
 
   const c10::List<c10::IValue> getCollectiveTrace(
       bool includeStacktraces,
-      bool onlyActive) {
-    auto entries = new_list();
-    auto result = dump_entries();
-    std::vector<torch::CapturedTraceback*> tracebacks;
-    torch::SymbolizedTracebacks stracebacks;
-    std::vector<c10::IValue> all_frames;
-    if (includeStacktraces) {
-      for (auto& e : result) {
-        tracebacks.push_back(e.traceback_.get());
-      }
-      stracebacks = torch::symbolize(tracebacks);
-      for (const auto& f : stracebacks.all_frames) {
-        auto d = new_dict();
-        d.insert(name_key, f.funcname);
-        d.insert(filename_key, f.filename);
-        d.insert(line_key, int64_t(f.lineno));
-        all_frames.emplace_back(std::move(d));
-      }
-    }
-    for (auto i : c10::irange(result.size())) {
-      auto dict = new_dict();
-      auto& e = result.at(i);
-      // Skip completed events
-      if (onlyActive && e.time_discovered_completed_.has_value()) {
-        continue;
-      }
-
-      if (includeStacktraces) {
-        auto& tb = stracebacks.tracebacks.at(i);
-        auto frames = new_list();
-        for (int64_t frame : tb) {
-          frames.push_back(all_frames.at(frame));
-        }
-        dict.insert(frames_key, frames);
-      }
-
-      dict.insert(record_id_key, int64_t(e.id_));
-      dict.insert(pg_id_key, int64_t(e.pg_id_));
-      dict.insert(pg_name_key, e.pg_name_);
-      dict.insert(collective_seq_id_key, int64_t(e.collective_seq_id_));
-      dict.insert(p2p_seq_id_key, int64_t(e.p2p_seq_id_));
-      dict.insert(op_id_key, int64_t(e.op_id_));
-      dict.insert(profiling_name_key, e.profiling_name_);
-      dict.insert(time_created_key, int64_t(e.time_created_));
-      if (e.duration_) {
-        dict.insert(duration_key, *e.duration_);
-      }
-
-      auto it = e.sizes_.begin();
-      auto read_sizes = [&](const c10::SmallVector<int, 4>& dims) {
-        auto sizes = new_list();
-        for (auto dim : dims) {
-          auto arg_sizes = new_list();
-          for (auto i : c10::irange(dim)) {
-            (void)i;
-            arg_sizes.push_back(*it++);
-          }
-          sizes.push_back(arg_sizes);
-        }
-        return sizes;
-      };
-
-      dict.insert(input_sizes_key, read_sizes(e.input_dims_));
-      std::vector<std::string> input_dtypes_strs;
-      input_dtypes_strs.reserve(e.input_dtypes_.size());
-      for (const auto& input_dtype : e.input_dtypes_) {
-        input_dtypes_strs.push_back(c10::toString(input_dtype));
-      }
-      dict.insert(input_dtypes_key, input_dtypes_strs);
-      dict.insert(output_sizes_key, read_sizes(e.output_dims_));
-      std::vector<std::string> output_dtypes_strs;
-      output_dtypes_strs.reserve(e.output_dtypes_.size());
-      for (const auto& output_dtype : e.output_dtypes_) {
-        output_dtypes_strs.push_back(c10::toString(output_dtype));
-      }
-      dict.insert(output_dtypes_key, output_dtypes_strs);
-      if (e.time_discovered_completed_.has_value()) {
-        dict.insert(state_key, "completed");
-      } else if (e.time_discovered_started_.has_value()) {
-        dict.insert(state_key, "started");
-      } else {
-        dict.insert(state_key, "scheduled");
-      }
-
-      dict.insert(
-          time_discovered_started_key,
-          e.time_discovered_started_.has_value()
-              ? int64_t(*e.time_discovered_started_)
-              : c10::IValue());
-      dict.insert(
-          time_discovered_completed_key,
-          e.time_discovered_completed_.has_value()
-              ? int64_t(*e.time_discovered_completed_)
-              : c10::IValue());
-      dict.insert(retired_key, e.retired_);
-      dict.insert(timeout_key, e.timeout_ms_);
-      dict.insert(is_p2p_key, e.isP2P_);
-
-      entries.push_back(dict);
-    }
-    return entries;
-  }
+      bool onlyActive);
 
   // dump pg_entries
-  const c10::Dict<c10::IValue, c10::IValue> getPgConfig() {
-    auto pg_config = new_dict();
-    for (const auto& [pg_name, ranks] : pg_name_to_ranks_) {
-      auto pg_info = new_dict();
-      pg_info.insert("name", std::get<0>(pg_name));
-      pg_info.insert("desc", std::get<1>(pg_name));
-      pg_info.insert("ranks", ranks_str(ranks));
-      pg_config.insert(std::get<0>(pg_name), pg_info);
-    }
-    return pg_config;
-  }
+  const c10::Dict<c10::IValue, c10::IValue> getPgConfig();
+
+  const std::map<std::string, std::map<std::string, std::string>>
+  getPgConfigJson();
+
+  // dump pg_status
+  const c10::Dict<c10::IValue, c10::IValue> getPgStatus();
+
+  const std::map<std::string, std::map<std::string, std::string>>
+  getPgStatusJson();
+
+  std::string dump_json(
+      const std::optional<std::unordered_map<
+          std::string,
+          std::unordered_map<std::string, std::string>>>& ncclDumpMap,
+      bool includeCollectives,
+      bool onlyActive);
 
   // dump all collectives + ncclDumpMap
   std::string dump(
@@ -930,36 +748,8 @@ struct NCCLTraceBuffer {
           std::unordered_map<std::string, std::string>>>& ncclDumpMap,
       bool includeCollectives,
       bool includeStackTraces,
-      bool onlyActive) {
-    auto result = new_dict();
-    // common values
-    result.insert(version_key, version_val);
-    result.insert(pg_config_key, getPgConfig());
-
-    // collective trace
-    if (includeCollectives) {
-      result.insert(
-          entries_key, getCollectiveTrace(includeStackTraces, onlyActive));
-    }
-
-    // convert ncclDumpMap into a dictionary
-    auto per_comm_dict = new_dict();
-    if (ncclDumpMap.has_value()) {
-      for (const auto& [ncclId, ncclDump] : ncclDumpMap.value()) {
-        auto inner_dict = new_dict();
-        for (const auto& [key, value] : ncclDump) {
-          inner_dict.insert(key, value);
-        }
-        per_comm_dict.insert(ncclId, inner_dict);
-      }
-    }
-    if (per_comm_dict.size() > 0) {
-      result.insert(nccl_comm_key, per_comm_dict);
-    }
-    return pickle_str(result);
-  }
+      bool onlyActive);
 };
-
 } // namespace c10d
 
 #endif // USE_C10D_NCCL

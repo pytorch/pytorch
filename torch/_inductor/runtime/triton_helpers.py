@@ -1,4 +1,7 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
+import warnings
+
 import triton
 import triton.language as tl
 
@@ -30,10 +33,61 @@ except ImportError:
         raise NotImplementedError
 
 
+def set_driver_to_cpu():
+    driver = triton.runtime.driver
+    if backend := triton.backends.backends.get("cpu", None):
+        if isinstance(driver.active, backend.driver):
+            # Don't re-initialize backend if it is already active
+            return
+        driver.set_active(backend.driver())
+        return
+    # This can be a hard error once triton-cpu is merged into fbcode
+    warnings.warn(
+        "Could not find an active CPU backend. Generated kernels will not be executable!"
+    )
+
+
+def set_driver_to_gpu():
+    driver = triton.runtime.driver
+    for name, backend in triton.backends.backends.items():
+        if backend.driver.is_active() and name != "cpu":
+            if isinstance(driver.active, backend.driver):
+                # Don't re-initialize backend if it is already active
+                return
+            driver.set_active(backend.driver())
+            return
+    raise RuntimeError("Could not find an active GPU backend")
+
+
+def get_backend_options():
+    driver = triton.runtime.driver
+    target = driver.active.get_current_target()
+    backend = triton.compiler.compiler.make_backend(target)
+    options = backend.parse_options(dict())
+    return options.__dict__
+
+
 @triton.jit
 def promote_to_tensor(x):
     # Addition promotes to tensor for us
     return x + tl.zeros((1,), tl.int1)
+
+
+@triton.jit
+def div_floor_integer(a, b):
+    # NOTE: a // b is C division, but we want floor division
+    # Based on c10::div_floor_integer
+    quot = a // b
+    remainder = a % b
+    fixed = tl.where(remainder != 0, quot - 1, quot)
+    return tl.where((a < 0) != (b < 0), fixed, quot)
+
+
+@triton.jit
+def remainder_integer(a, b):
+    # NOTE: a % b matches C division, not floor division
+    remainder = a % b
+    return tl.where(remainder != 0 and ((a < 0) != (b < 0)), remainder + b, remainder)
 
 
 @triton.jit
@@ -180,25 +234,71 @@ def any(a, dim):
 
 @triton.jit
 def bucketize_binary_search(
-    values,  # 1D tensor
-    offsets_ptr,
-    indexing_dtype,
-    right,  # bool: if true, use intervals closed on the left; see [Note: Inductor bucketize op]
-    OFFSETS_SIZE: int,
-    BLOCK_SHAPE,  # tuple/list of block shape
+    values: tl.tensor,
+    boundaries_ptr: tl.tensor,
+    BOUNDARIES_SIZE: int,
+    BOUNDARIES_UNDERLYING_NUMEL: int,
+    BOUNDARIES_STRIDE: int,
+    boundary_indices: tl.tensor,
+    indexing_dtype: tl.dtype,
+    right: "bool",  # triton can't handle the unquoted bool annotation
+    sorter_ptr: tl.tensor,
+    SORTER_STRIDE: int,
+    sorter_indices: tl.tensor,
+    BLOCK_SHAPE,
 ):
     """
     See [Note: Inductor bucketize op]
+
+    Inputs:
+    -------
+    values: the values to bucketize.
+    boundaries_ptr: a pointer to the beginning of the boundaries tensor, in 1-D.
+    BOUNDARIES_SIZE: the length of the last dimension of the boundaries tensor (i.e. one
+    individual set of boundaries).
+    BOUNDARIES_UNDERLYING_NUMEL: the length of the boundaries tensor, in 1-D, ignoring
+    any striding.
+    BOUNDARIES_STRIDE: the stride of the last dimension of the boundaries tensor
+    boundary_indices: a tensor of the same size as "values"; each element is an index
+    into a 1-D, un-strided boundaries tensor, pointing to the first element in the set
+    of boundaries used for that value.
+    indexing_dtype: the dtype used for indexing into the boundaries tensor, and the
+    return dtype.
+    right: if true, use boundary intervals closed on the left; otherwise use intervals
+    closed on the right.
+    sorter_ptr: an optional pointer to a sorter tensor of the same shape as boundaries,
+    but potentially different striding.  If present, this allows us to treat boundaries
+    as sorted even if the elements of boundaries are unsorted.
+    SORTER_STRIDE: must be present if sorter_ptr is non-None; the stride of the last
+    dimension of the sorter tensor.
+    sorter_indices: must be present if sorter_ptr is non-None; see "boundary_indices".
+    BLOCK_SHAPE: the shape of the data block being processed.
     """
 
     low = tl.zeros(BLOCK_SHAPE, dtype=indexing_dtype)
-    high = tl.full(BLOCK_SHAPE, OFFSETS_SIZE, dtype=indexing_dtype)
+    high = tl.full(BLOCK_SHAPE, BOUNDARIES_SIZE, dtype=indexing_dtype)
 
-    full_range = OFFSETS_SIZE + 1
+    full_range = BOUNDARIES_SIZE + 1
     while full_range > 1:
         mid = (high + low) // 2
-        mask = mid < OFFSETS_SIZE
-        bucket_upper_bound = tl.load(offsets_ptr + mid, mask=mask, other=0.0)
+        mask = (
+            mid * BOUNDARIES_STRIDE + boundary_indices
+        ) < BOUNDARIES_UNDERLYING_NUMEL and mid < BOUNDARIES_SIZE
+        mid_indices = (
+            mid
+            if sorter_ptr is None or SORTER_STRIDE is None
+            else tl.load(
+                sorter_ptr + sorter_indices + SORTER_STRIDE * mid,
+                mask=mask,
+                other=0,
+            )
+        )
+
+        bucket_upper_bound = tl.load(
+            boundaries_ptr + boundary_indices + BOUNDARIES_STRIDE * mid_indices,
+            mask=mask,
+            other=0,
+        )
         if right:
             is_above = values >= bucket_upper_bound
         else:
@@ -386,7 +486,7 @@ def frexp(x):
 def _compare_and_swap_with_index(
     x,
     idxs,
-    valid_mask,
+    rnumel,
     flip,
     i: tl.constexpr,
     n_dims: tl.constexpr,
@@ -422,19 +522,12 @@ def _compare_and_swap_with_index(
     right_idx = tl.reshape(right_idx, x.shape)
 
     # valid
-    if valid_mask is None:
+    if rnumel is None:
         left_valid_mask = tl.full(x.shape, True, tl.int1)
         right_valid_mask = tl.full(x.shape, True, tl.int1)
     else:
-        y_valid_mask = tl.reshape(valid_mask, shape)
-        left_valid_mask = tl.broadcast_to(
-            tl.sum(y_valid_mask * left_mask.to(tl.int8), 1)[:, None, :], shape
-        ).to(tl.int1)
-        right_valid_mask = tl.broadcast_to(
-            tl.sum(y_valid_mask * right_mask.to(tl.int8), 1)[:, None, :], shape
-        ).to(tl.int1)
-        left_valid_mask = tl.reshape(left_valid_mask, x.shape)
-        right_valid_mask = tl.reshape(right_valid_mask, x.shape)
+        left_valid_mask = left_idx < rnumel
+        right_valid_mask = right_idx < rnumel
 
     # actual compare-and-swap
     ix = x.to(idtype, bitcast=True)
@@ -454,21 +547,15 @@ def _compare_and_swap_with_index(
     cond = cond ^ flip
     ret = ix ^ tl.where(cond, ileft ^ iright, tl.zeros_like(ix))
     new_idxs = idxs ^ tl.where(cond, left_idx ^ right_idx, tl.zeros_like(idxs))
-    if valid_mask is None:
-        new_valid_mask = tl.full(x.shape, True, tl.int1)
-    else:
-        new_valid_mask = valid_mask ^ tl.where(
-            cond, left_valid_mask ^ right_valid_mask, tl.zeros_like(valid_mask)
-        )
 
-    return ret.to(x.dtype, bitcast=True), new_idxs, new_valid_mask
+    return ret.to(x.dtype, bitcast=True), new_idxs
 
 
 @triton.jit
 def _bitonic_merge_with_index(
     x,
     idxs,
-    mask,
+    rnumel,
     stage: tl.constexpr,
     alternating: tl.constexpr,
     n_dims: tl.constexpr,
@@ -490,28 +577,23 @@ def _bitonic_merge_with_index(
     else:
         flip = False
     # perform `stage` rounds of `compare-and-swap`
-    next_mask = mask
     for i in tl.static_range(stage):
-        x, idxs, next_mask = _compare_and_swap_with_index(
-            x, idxs, mask, flip, i + (n_dims - stage), n_dims, stable, descending
+        x, idxs = _compare_and_swap_with_index(
+            x, idxs, rnumel, flip, i + (n_dims - stage), n_dims, stable, descending
         )
-        if mask is not None:
-            mask = next_mask
-    return x, idxs, next_mask
+    return x, idxs
 
 
 @triton.jit
 def sort_with_index(
     x,  # value
     idxs,  # index
-    mask,  # mask if current value is valid (invalid values sort to the end)
+    rnumel,  # number of elements
     dim: tl.constexpr = None,
     stable: tl.constexpr = tl.constexpr(False),
     descending: tl.constexpr = tl.constexpr(False),
 ):
     x, idxs = tl.broadcast(x, idxs)
-    if mask is not None:
-        x, mask = tl.broadcast(x, mask)
     # handle default dimension or check that it is the most minor dim
     _dim: tl.constexpr = len(x.shape) - 1 if dim is None else dim
     tl.static_assert(
@@ -521,16 +603,55 @@ def sort_with_index(
     n_dims: tl.constexpr = _log2(x.shape[_dim])
 
     for i in tl.static_range(1, n_dims + 1):
-        x, idxs, next_mask = _bitonic_merge_with_index(
+        x, idxs = _bitonic_merge_with_index(
             x,
             idxs,
-            mask,
+            rnumel,
             i,
             alternating=i < n_dims,
             n_dims=n_dims,
             stable=stable,
             descending=descending,
         )
-        if mask is not None:
-            mask = next_mask
     return x, idxs
+
+
+@triton.jit
+def select_one(x, mask, dim, keep_dims=False):
+    idtype = tl.core.get_int_dtype(x.dtype.primitive_bitwidth, signed=False)
+    ix = x.to(idtype, bitcast=True)
+    iy = tl.sum(ix * mask, dim, keep_dims=keep_dims)
+    return iy.to(x.dtype, bitcast=True)
+
+
+@triton.jit
+def x_grid_barrier(sem):
+    """
+    Wait for all other thread blocks in grid sharing same y/z program_id
+    to reach this barrier before returning.
+
+    Args:
+        sem: an uint32 semaphores, zero or 0x80000000 initialized.  Must be unique to each y/z program ID.
+    """
+    # ensure stores before this are visible
+    tl.debug_barrier()
+
+    one_i32 = 1
+    one_u32 = one_i32.to(tl.uint32)  # type: ignore[attr-defined]
+    expected = tl.num_programs(0).to(tl.uint32)
+    if tl.program_id(0) == 0:
+        nb = 0x80000000 - (expected - one_u32)
+    else:
+        nb = one_u32
+
+    old_arrive = tl.atomic_add(sem, nb, sem="release")
+
+    bar_flipped = False
+    while not bar_flipped:
+        # want a `ld.acquire.gpu.u32 $0,[$1];` but Triton doesn't have it
+        current_arrive = tl.atomic_add(sem, 0, sem="acquire")
+        # current_arrive = tl.load(sem, volatile=True)
+        bar_flipped = ((old_arrive ^ current_arrive) & 0x80000000) != 0
+
+    # TODO(jansel): is this needed?
+    tl.debug_barrier()

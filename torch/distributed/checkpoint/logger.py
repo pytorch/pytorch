@@ -3,6 +3,7 @@ import functools
 import time
 from typing import Any, Callable, Dict, List, TypeVar
 from typing_extensions import ParamSpec
+from uuid import uuid4
 
 import torch.distributed.c10d_logger as c10d_logger
 from torch.distributed.checkpoint.logging_handlers import DCP_LOGGER_NAME
@@ -36,6 +37,9 @@ def _msg_dict_from_dcp_method_args(*args, **kwargs) -> Dict[str, Any]:
         str(checkpoint_id) if checkpoint_id is not None else checkpoint_id
     )
 
+    # Uniquely identify a _dcp_method_logger wrapped function call.
+    msg_dict["uuid"] = str(uuid4().int)
+
     if storage_writer:
         msg_dict["storage_writer"] = storage_writer.__class__.__name__
 
@@ -50,7 +54,7 @@ def _msg_dict_from_dcp_method_args(*args, **kwargs) -> Dict[str, Any]:
 
 def _get_msg_dict(func_name, *args, **kwargs) -> Dict[str, Any]:
     msg_dict = _msg_dict_from_dcp_method_args(*args, **kwargs)
-    msg_dict.update(c10d_logger._get_msg_dict(func_name, **msg_dict))
+    msg_dict.update(c10d_logger._get_msg_dict(func_name, *args, **kwargs))
 
     return msg_dict
 
@@ -71,12 +75,13 @@ def _dcp_method_logger(
             msg_dict["event"] = "start"
             t0 = time.time_ns()
             msg_dict["time"] = t0
+            msg_dict["log_exceptions"] = log_exceptions
             _dcp_logger.debug(msg_dict)
 
             # exceptions
             try:
                 result = func(*args, **kwargs)
-            except Exception as error:
+            except BaseException as error:
                 if log_exceptions:
                     msg_dict["event"] = "exception"
                     msg_dict["error"] = f"{error}"

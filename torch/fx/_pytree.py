@@ -3,8 +3,8 @@ from collections import namedtuple
 from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple, Type
 
 import torch.return_types
-
 from torch.utils._pytree import PyTree, TreeSpec
+
 
 FlattenFuncSpec = Callable[[PyTree, TreeSpec], List]
 FlattenFuncExactMatchSpec = Callable[[PyTree, TreeSpec], bool]

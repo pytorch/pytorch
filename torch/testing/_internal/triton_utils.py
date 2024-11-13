@@ -5,6 +5,7 @@ import unittest
 from torch.testing._internal.inductor_utils import HAS_CUDA, HAS_GPU
 from torch.utils._triton import has_triton
 
+
 requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 requires_gpu = unittest.skipUnless(HAS_GPU, "requires gpu")
 
@@ -79,6 +80,31 @@ if has_triton():
 
     @triton.autotune(
         configs=[
+            triton.Config({"BLOCK_SIZE": 16}, num_stages=2, num_warps=2),
+        ],
+        key=[],
+    )
+    @triton.jit
+    def add_kernel_autotuned_weird_param_order(
+        in_ptr0,
+        in_ptr1,
+        n_elements,
+        BLOCK_SIZE: "tl.constexpr",
+        out_ptr,
+    ):
+        # out_ptr is after an autotuned param that's declared as tl.constexpr.
+        # This param ordering can create bugs if not handled correctly.
+        pid = tl.program_id(axis=0)
+        block_start = pid * BLOCK_SIZE
+        offsets = block_start + tl.arange(0, BLOCK_SIZE)
+        mask = offsets < n_elements
+        x = tl.load(in_ptr0 + offsets, mask=mask)
+        y = tl.load(in_ptr1 + offsets, mask=mask)
+        output = x + y
+        tl.store(out_ptr + offsets, output, mask=mask)
+
+    @triton.autotune(
+        configs=[
             triton.Config(
                 {"BLOCK_SIZE_X": 128, "BLOCK_SIZE_Y": 128}, num_stages=3, num_warps=8
             ),
@@ -117,6 +143,36 @@ if has_triton():
         tmp2 = tmp0 + tmp1
         tl.store(out_ptr + (x1 + (x_elements * y0)), tmp2, xmask & ymask)
 
+    def _dummy_early_config_prune(configs, *_, **__):
+        return configs
+
+    @triton.autotune(
+        configs=[
+            triton.Config({"BLOCK_SIZE": 128}, num_stages=3, num_warps=8),
+            triton.Config({"BLOCK_SIZE": 64}, num_stages=4, num_warps=4),
+        ],
+        key=[],
+        warmup=10,
+        rep=20,
+        prune_configs_by={"early_config_prune": _dummy_early_config_prune},
+    )
+    @triton.jit
+    def add_kernel_autotuned_with_unsupported_args(
+        in_ptr0,
+        in_ptr1,
+        out_ptr,
+        n_elements,
+        BLOCK_SIZE: "tl.constexpr",
+    ):
+        pid = tl.program_id(axis=0)
+        block_start = pid * BLOCK_SIZE
+        offsets = block_start + tl.arange(0, BLOCK_SIZE)
+        mask = offsets < n_elements
+        x = tl.load(in_ptr0 + offsets, mask=mask)
+        y = tl.load(in_ptr1 + offsets, mask=mask)
+        output = x + y
+        tl.store(out_ptr + offsets, output, mask=mask)
+
     @triton.jit
     def add_kernel_with_scaling(
         in_ptr0,
@@ -134,6 +190,71 @@ if has_triton():
         y = tl.load(in_ptr1 + offsets, mask=mask)
         output = (x + y) * scaling_factor
         tl.store(out_ptr + offsets, output, mask=mask)
+
+    @triton.jit
+    def add_kernel_with_tma_1d(
+        in_desc_ptr0,
+        in_desc_ptr1,
+        out_desc_ptr,
+        BLOCK_SIZE: "tl.constexpr",
+    ):
+        pid = tl.program_id(axis=0)
+        offset = pid * BLOCK_SIZE
+
+        a = tl._experimental_descriptor_load(
+            in_desc_ptr0,
+            [offset],
+            [BLOCK_SIZE],
+            tl.float32,
+        )
+        b = tl._experimental_descriptor_load(
+            in_desc_ptr1,
+            [offset],
+            [BLOCK_SIZE],
+            tl.float32,
+        )
+
+        output = a + b
+
+        tl._experimental_descriptor_store(
+            out_desc_ptr,
+            output,
+            [offset],
+        )
+
+    @triton.jit
+    def add_kernel_with_tma_2d(
+        in_desc_ptr0,
+        in_desc_ptr1,
+        out_desc_ptr,
+        BLOCK_SIZE_X: "tl.constexpr",
+        BLOCK_SIZE_Y: "tl.constexpr",
+    ):
+        pid_x = tl.program_id(axis=0)
+        pid_y = tl.program_id(axis=1)
+        offset_x = pid_x * BLOCK_SIZE_X
+        offset_y = pid_y * BLOCK_SIZE_Y
+
+        x = tl._experimental_descriptor_load(
+            in_desc_ptr0,
+            [offset_x, offset_y],
+            [BLOCK_SIZE_X, BLOCK_SIZE_Y],
+            tl.float32,
+        )
+        y = tl._experimental_descriptor_load(
+            in_desc_ptr1,
+            [offset_x, offset_y],
+            [BLOCK_SIZE_X, BLOCK_SIZE_Y],
+            tl.float32,
+        )
+
+        output = x + y
+
+        tl._experimental_descriptor_store(
+            out_desc_ptr,
+            output,
+            [offset_x, offset_y],
+        )
 
     @triton.jit
     def mul2_kernel(

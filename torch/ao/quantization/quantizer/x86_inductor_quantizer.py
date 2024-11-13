@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-import copy
 import functools
 import itertools
 import operator
@@ -17,7 +16,6 @@ from typing import (
     TYPE_CHECKING,
     Union,
 )
-
 from typing_extensions import TypeAlias
 
 import torch
@@ -40,15 +38,12 @@ from torch.ao.quantization.quantizer.quantizer import (
     Quantizer,
     SharedQuantizationSpec,
 )
-
 from torch.ao.quantization.quantizer.utils import _get_module_name_filter
 from torch.ao.quantization.quantizer.xnnpack_quantizer_utils import (
     get_bias_qspec,
     get_input_act_qspec,
     get_output_act_qspec,
     get_weight_qspec,
-    OperatorConfig,
-    OperatorPatternType,
     QuantizationConfig,
 )
 from torch.fx import Node
@@ -56,6 +51,7 @@ from torch.fx.passes.utils.source_matcher_utils import (
     get_source_partitions,
     SourcePartition,
 )
+
 
 FilterFn: TypeAlias = Callable[[List[Node]], bool]
 
@@ -226,7 +222,7 @@ def _map_module_function_to_aten_operator_type():
         ),
     )
     for map_item in map_list:
-        module_function_to_aten_operator.update(dict.fromkeys(map_item[0], map_item[1]))  # type: ignore[call-overload]
+        module_function_to_aten_operator.update(dict.fromkeys(map_item[0], map_item[1]))  # type: ignore[arg-type, call-overload]
     return module_function_to_aten_operator
 
 
@@ -279,53 +275,15 @@ def _is_quantized_op_pt2e(node: torch.fx.Node):
     return quantization_annotation._is_output_of_quantized_pattern
 
 
-def _supported_quantized_operators() -> Dict[str, List[OperatorPatternType]]:
-    # TODO: Add more supported operators here.
-    supported_operators: Dict[str, List[OperatorPatternType]] = {
-        "conv2d": [
-            [torch.nn.Conv2d],
-            [F.conv2d],
-        ],
-    }
-
-    # Append Conv Optional(Add) Optioinal(ReLU)
-    conv_add_relu_options = itertools.product(
-        [torch.nn.Conv2d, F.conv2d],
-        [torch.add, operator.add, None],  # add
-        [torch.nn.ReLU, F.relu, None],  # relu
-    )
-    for conv_op, add_op, relu_op in conv_add_relu_options:
-        if add_op is None:
-            # Append Conv ReLU
-            supported_operators["conv2d"].append([conv_op, relu_op])  # type: ignore[list-item]
-        elif relu_op is None:
-            # Append Conv Add
-            supported_operators["conv2d"].append([conv_op, add_op])  # type: ignore[list-item]
-        else:
-            # Append Conv Add ReLU
-            supported_operators["conv2d"].append([conv_op, add_op, relu_op])  # type: ignore[list-item]
-
-    return copy.deepcopy(supported_operators)
-
-
-def _get_supported_x86_inductor_config_and_operators() -> List[OperatorConfig]:
-    supported_config_and_operators: List[OperatorConfig] = []
-    for quantization_config in [
-        get_default_x86_inductor_quantization_config(),
-    ]:
-        ops = _supported_quantized_operators()
-        for pattern_list in ops.values():
-            supported_config_and_operators.append(
-                OperatorConfig(quantization_config, pattern_list)
-            )
-    return copy.deepcopy(supported_config_and_operators)
-
-
 @functools.lru_cache
 def get_default_x86_inductor_quantization_config(
     is_qat: bool = False,
     is_dynamic: bool = False,
+    reduce_range: bool = False,
 ):
+    """
+    reduce_range is False by default. Set it to True on earlier CPUs without VNNI to avoid accuracy issue.
+    """
     extra_args: Dict[str, Any] = {"eps": 2**-12}
     if is_qat:
         if is_dynamic:
@@ -346,7 +304,7 @@ def get_default_x86_inductor_quantization_config(
     act_quantization_spec = QuantizationSpec(
         dtype=torch.uint8,
         quant_min=0,
-        quant_max=255,  # reduce_range=False
+        quant_max=127 if reduce_range else 255,
         qscheme=torch.per_tensor_affine,
         is_dynamic=is_dynamic,
         observer_or_fake_quant_ctr=act_observer_or_fake_quant_ctr.with_args(
@@ -381,10 +339,6 @@ def get_default_x86_inductor_quantization_config(
         is_qat,
     )
     return quantization_config
-
-
-def _get_supported_config_and_operators() -> List[OperatorConfig]:
-    return _get_supported_x86_inductor_config_and_operators()
 
 
 def _annotate_nodes_not_quantize(nodes: Union[Node, List[Node]]) -> None:
@@ -434,38 +388,15 @@ class _CurrentQuantizationMode:
 
 
 class X86InductorQuantizer(Quantizer):
-    supported_config_and_operators = _get_supported_config_and_operators()
     module_function_to_aten_operator_type = _map_module_function_to_aten_operator_type()
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.global_config: Optional[QuantizationConfig] = None
         self.operator_type_qconfig: Dict[
             torch._ops.OpOverloadPacket, Optional[QuantizationConfig]
         ] = {}
         self.module_name_qconfig: Dict[str, Optional[QuantizationConfig]] = {}
-
-    @classmethod
-    def get_supported_quantization_configs(cls) -> List[QuantizationConfig]:
-        op_configs: Set[QuantizationConfig] = {
-            spec for spec, _ in cls.supported_config_and_operators
-        }
-        return list(op_configs)
-
-    @classmethod
-    def get_supported_operator_for_quantization_config(
-        cls, quantization_config: Optional[QuantizationConfig]
-    ) -> List[OperatorPatternType]:
-        if quantization_config is None:
-            all_ops = []
-            for _, ops in cls.supported_config_and_operators:
-                all_ops.extend(ops)
-            return all_ops
-
-        for config, ops in cls.supported_config_and_operators:
-            if config == quantization_config:
-                return ops
-        return []
 
     def _get_current_quantization_mode(self) -> _CurrentQuantizationMode:
         """Retrieves the current quantization mode based on all configurations."""
@@ -1380,6 +1311,15 @@ class X86InductorQuantizer(Quantizer):
                 if not is_all_inputs_connected_to_quantized_op(input_nodes_to_check):
                     return
                 self._annotate_cat(node, quantization_config)
+            elif (
+                node.target is torch.ops.aten.flatten.using_ints
+                and len(node.users) > 0
+                and not any(
+                    user.target in quantizable_ops for user in node.users.keys()
+                )
+            ):
+                # Recipe of flatten: check if any users of flatten node are quantizable ops or not
+                return
             else:
                 input_node = node.all_input_nodes[0]
                 if not is_all_inputs_connected_to_quantized_op(
@@ -1620,7 +1560,3 @@ class X86InductorQuantizer(Quantizer):
 
     def validate(self, model: torch.fx.GraphModule) -> None:
         pass
-
-    @classmethod
-    def get_supported_operators(cls) -> List[OperatorConfig]:
-        return cls.supported_config_and_operators

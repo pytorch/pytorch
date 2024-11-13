@@ -7,6 +7,7 @@
 #include <c10/core/ScalarType.h>
 #include <c10/core/Scalar.h>
 
+
 namespace at::native::cpublas {
 
 namespace internal {
@@ -26,7 +27,7 @@ using gemm_fn = void(*)(
     const Scalar& beta,
     void *c, int64_t ldc);
 
-DECLARE_DISPATCH(gemm_fn, gemm_stub);
+DECLARE_DISPATCH(gemm_fn, gemm_stub)
 
 template <typename scalar_t>
 void gemm(
@@ -146,7 +147,7 @@ void gemm_batched_with_stride(
 
 using axpy_fn = void(*)(at::ScalarType type, int64_t n, const Scalar& a, const void *x, int64_t incx, void *y, int64_t incy);
 
-DECLARE_DISPATCH(axpy_fn, axpy_stub);
+DECLARE_DISPATCH(axpy_fn, axpy_stub)
 
 template<typename scalar_t>
 void axpy(int64_t n, scalar_t a, const scalar_t *x, int64_t incx, scalar_t *y, int64_t incy){
@@ -167,7 +168,7 @@ void axpy(int64_t n, c10::complex<float> a, const c10::complex<float> *x, int64_
 
 using copy_fn = void(*)(at::ScalarType type, int64_t n, const void *x, int64_t incx, void *y, int64_t incy);
 
-DECLARE_DISPATCH(copy_fn, copy_stub);
+DECLARE_DISPATCH(copy_fn, copy_stub)
 
 template<typename scalar_t>
 void copy(int64_t n, const scalar_t *x, int64_t incx, scalar_t *y, int64_t incy) {
@@ -186,4 +187,39 @@ void copy(int64_t n, const float *x, int64_t incx, float *y, int64_t incy);
 void copy(int64_t n, const c10::complex<double> *x, int64_t incx, c10::complex<double> *y, int64_t incy);
 void copy(int64_t n, const c10::complex<float> *x, int64_t incx, c10::complex<float> *y, int64_t incy);
 
-}  // namespace at::native::cpublas
+// Batch-reduce GEMM
+// Operates by the following formula:
+// C = SUM(A[i] x B[i]) + C if add_C is true, i = 0 to batch size
+// A Base pointer to a tensor A.
+// B Base pointer to a tensor B.
+// C Pointer to a tensor C (accumulation buffer).
+TORCH_API void brgemm(
+    int64_t M,
+    int64_t N,
+    int64_t K,
+    int64_t ld_a,
+    int64_t ld_b,
+    int64_t ld_c,
+    const bool add_C,
+    const at::Half* A,
+    const at::Half* B,
+    float* C);
+
+// Release brgemm hardware context
+TORCH_API void brgemm_release();
+
+// Pack B matrix to get better performance if needed
+void pack(
+    int64_t K,
+    int64_t N,
+    int64_t ld_in,
+    int64_t ld_out,
+    ScalarType dt_in,
+    ScalarType dt_out,
+    const void* in,
+    void* out);
+
+// Whether pack is needed in the platform.
+bool need_pack(ScalarType dt_in);
+
+} // namespace at::native::cpublas

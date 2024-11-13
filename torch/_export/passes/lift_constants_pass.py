@@ -1,12 +1,13 @@
 # mypy: allow-untyped-defs
 import collections
+import warnings
 from typing import Any, Dict, List, Union
 
 import torch
 from torch._export.verifier import SpecViolationError
 from torch._guards import detect_fake_mode
-
 from torch._library.fake_class_registry import FakeScriptObject
+from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch.export.exported_program import (
     ArgumentSpec,
     CustomObjArgument,
@@ -15,6 +16,7 @@ from torch.export.exported_program import (
     InputSpec,
     TensorArgument,
 )
+from torch.fx.graph_module import _get_attr
 
 
 class ConstantAttrMap(collections.abc.MutableMapping):
@@ -25,7 +27,7 @@ class ConstantAttrMap(collections.abc.MutableMapping):
     if that's the case).
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         # Underlying dict that we use to implement this mapping.
         self._constant_attrs: Dict[
             Union[int, torch.Tensor, FakeScriptObject], List[Any]
@@ -90,6 +92,8 @@ def get_constant_fqn(node: torch.fx.Node, constant_name: str) -> str:
     # The FQN of the constant tensor in the state dict should
     # correspond to the module where the constant tensor was
     # originally used.
+    if len(node.meta["nn_module_stack"]) == 0:
+        return constant_name
     parent_fqn = list(node.meta["nn_module_stack"].values())[-1][0]
     if len(parent_fqn) > 0:
         return f"{parent_fqn}.{constant_name}"
@@ -143,7 +147,7 @@ def lift_constants_pass(
         tuple(node.meta["val"] for node in gm.graph.nodes if node.op == "placeholder")
     )
 
-    first_user_input_loc, first_user_input = 0, None
+    first_user_input_loc, first_user_input = 0, next(iter(gm.graph.nodes))
     for node in gm.graph.nodes:
         if node.op == "placeholder" and node.name in graph_signature.user_inputs:
             first_user_input = node
@@ -151,9 +155,10 @@ def lift_constants_pass(
         first_user_input_loc += 1
 
     lifted_objs = ConstantAttrMap()
+    renamed_targets = {}
     for node in gm.graph.nodes:
         if node.op == "get_attr":
-            constant_val = getattr(gm, node.target)
+            constant_val = _get_attr(gm, node.target)
             if constant_val in lifted_objs:
                 # We already lifted this constant elsewhere. Just rewrite uses
                 # of this get_attr to point to the already-existing placeholder
@@ -161,6 +166,7 @@ def lift_constants_pass(
                 const_placeholder_node = _get_first_fqn(lifted_objs, constant_val)
                 node.replace_all_uses_with(const_placeholder_node)
                 gm.graph.erase_node(node)
+                renamed_targets[node.name] = const_placeholder_node.name
                 continue
 
             # For ScriptObject, Tensor and FakeScriptObject constants:
@@ -182,6 +188,15 @@ def lift_constants_pass(
                     constant_fqn = get_constant_fqn(node, constant_name)
                     num_custom_obj += 1
             elif isinstance(constant_val, torch.Tensor):
+                # Remove the parameterness of constant_val
+                if isinstance(constant_val, torch.nn.Parameter):
+                    warnings.warn(
+                        f"{node.target} created when tracing {node.meta['stack_trace']} is a parameter. But"
+                        f"it's not registered with register_parameter(). export will treat it as a constant tensor"
+                    )
+                    # We get the real data out of the parameter by disabling the surrounding fake mode.
+                    with unset_fake_temporarily():
+                        constant_val = constant_val.data
                 constant_kind = InputKind.CONSTANT_TENSOR
                 constant_fqn = _get_first_fqn(constant_attrs, constant_val)
                 if constant_fqn is not None:
@@ -250,6 +265,8 @@ def lift_constants_pass(
                 node.replace_all_uses_with(const_placeholder_node)
                 gm.graph.erase_node(node)
 
+                renamed_targets[node.name] = const_placeholder_node.name
+
                 # Add the constant as a buffer to the graph signature
                 graph_signature.input_specs.insert(
                     first_user_input_loc,
@@ -265,6 +282,10 @@ def lift_constants_pass(
                 else:
                     all_constants[constant_fqn] = constant_val
                 first_user_input_loc += 1
+
+    for spec in graph_signature.output_specs:
+        if spec.arg.name in renamed_targets:
+            spec.arg.name = renamed_targets[spec.arg.name]
 
     return all_constants
 

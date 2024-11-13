@@ -93,7 +93,7 @@ inline c10::MaybeOwned<Tensor> borrow_else_clone(const bool cond, const Tensor& 
  *  broadcasted shape.
  */
 inline Tensor copyBatchedColumnMajor(const Tensor& src, int64_t nrows = -1,
-    at::OptionalIntArrayRef desired_batch_sizes = c10::nullopt) {
+    at::OptionalIntArrayRef desired_batch_sizes = std::nullopt) {
   nrows = (nrows == -1) ? src.size(-2) : nrows;
   auto copy_sizes = desired_batch_sizes.has_value()
     ? desired_batch_sizes.value().vec()
@@ -241,8 +241,9 @@ void batch_iterator_with_broadcasting(const Tensor& a, const Tensor& b, const fu
     auto* b_batch_idx_ptr = data[0];
     auto* a_batch_idx_ptr = data[1];
 
-    for (const auto elem C10_UNUSED : c10::irange(nelems)) {
-      auto b_curr_linear_batch_idx = *reinterpret_cast<int64_t*>(b_batch_idx_ptr);
+    for ([[maybe_unused]] const auto elem : c10::irange(nelems)) {
+      auto b_curr_linear_batch_idx =
+          *reinterpret_cast<int64_t*>(b_batch_idx_ptr);
       auto a_curr_linear_batch_idx = *reinterpret_cast<int64_t*>(a_batch_idx_ptr);
 
       check_if_copy_needed_for_a(a_curr_linear_batch_idx);
@@ -268,7 +269,7 @@ inline double _get_epsilon(const ScalarType& sc_type) {
     case at::ScalarType::Double:
       return std::numeric_limits<double>::epsilon();
     default:
-      AT_ERROR("This function doesn't handle types other than float and double");
+      TORCH_CHECK(false, "This function doesn't handle types other than float and double");
   }
 }
 

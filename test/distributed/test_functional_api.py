@@ -10,12 +10,12 @@ import torch.distributed as dist
 import torch.distributed._functional_collectives as ft_c
 import torch.distributed._tensor as dt
 import torch.distributed.distributed_c10d as c10d
-
 from functorch import make_fx
 from torch._inductor.utils import run_and_get_code
 from torch.testing import FileCheck
 from torch.testing._internal.distributed.fake_pg import FakeStore
-from torch.utils._triton import has_triton
+from torch.testing._internal.inductor_utils import HAS_GPU
+
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -384,20 +384,23 @@ class TestGradCollectives(MultiThreadedTestCase):
         self.assertIsNone(x.grad)
 
 
-class TestMakeFx(MultiThreadedTestCase):
-    @property
-    def world_size(self):
-        return 2
-
+class TestMakeFx(TestCase):
     def setUp(self):
-        super().setUp()
-        self._spawn_threads()
+        # make_fx is not thread-safe due to patching nd mutating global states
+        # so create a fake_pg.
+        self.rank = 0
+        self.world_size = 2
+        store = FakeStore()
+        dist.init_process_group(
+            backend="fake",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
 
     def tearDown(self):
         super().tearDown()
 
-        # race condition with threads causes is_fx_tracing flag to be set incorrectly.
-        torch.fx._symbolic_trace._is_fx_tracing_flag = False
         self.assertFalse(torch.fx._symbolic_trace.is_fx_tracing())
 
     def test_all_reduce_tracing(self):
@@ -561,7 +564,7 @@ class TestCollectivesWithNCCL(MultiProcessTestCase):
         expected = torch.cat(expected)
         self.assertEqual(y, expected)
 
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @requires_nccl()
     @with_comms()
     def test_tracing(self):
@@ -571,7 +574,7 @@ class TestCollectivesWithNCCL(MultiProcessTestCase):
         compiled_allreduce = torch.compile(allreduce, fullgraph=True)
         compiled_allreduce(torch.randn(8, device=self.device), self.process_group)
 
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_tracing_with_fakepg(self):
         exit_if_lt_x_gpu(self.world_size)
 
@@ -586,6 +589,28 @@ class TestCollectivesWithNCCL(MultiProcessTestCase):
             store=FakeStore(),
         )
         allreduce(torch.randn(8, device=self.device), pg=dist.group.WORLD)
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @requires_nccl()
+    @with_comms()
+    def test_tracing_with_dce_code(self):
+        if self.world_size > 2:
+            return
+
+        def func(batch, group, rank):
+            ret = ft_c.permute_tensor(batch, [1, 0], group)
+            if hasattr(ret, "wait"):
+                ret = ret.wait()
+            if rank == 0:
+                return ret
+            else:
+                return batch * 5
+
+        compiled_func = torch.compile(func)
+        ret = compiled_func(
+            torch.ones((100,), device="cuda"), self.process_group, self.rank
+        )
+        dist.barrier()
 
 
 class TestNCCLCollectivesWithWorldSize4(TestCollectivesWithNCCL):

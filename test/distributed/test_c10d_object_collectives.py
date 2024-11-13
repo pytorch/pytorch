@@ -7,13 +7,14 @@ from functools import partial, wraps
 import torch
 import torch.distributed as dist
 
+
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
 from torch.testing._internal.common_distributed import MultiProcessTestCase, TEST_SKIPS
-
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
+
 
 if TEST_WITH_DEV_DBG_ASAN:
     print(
@@ -23,7 +24,6 @@ if TEST_WITH_DEV_DBG_ASAN:
     sys.exit(0)
 
 BACKEND = dist.Backend.NCCL if torch.cuda.is_available() else dist.Backend.GLOO
-WORLD_SIZE = min(4, max(2, torch.cuda.device_count()))
 
 
 def with_comms(func=None):
@@ -53,14 +53,16 @@ class TestObjectCollectives(MultiProcessTestCase):
     @property
     def device(self):
         return (
-            torch.device(self.rank)
+            torch.device("cuda", self.rank % torch.cuda.device_count())
             if BACKEND == dist.Backend.NCCL
             else torch.device("cpu")
         )
 
     @property
     def world_size(self):
-        return WORLD_SIZE
+        if BACKEND == dist.Backend.NCCL:
+            return torch.cuda.device_count()
+        return super().world_size
 
     @property
     def process_group(self):

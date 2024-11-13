@@ -33,11 +33,17 @@ RawTensorMetadataBase::RawTensorMetadataBase(const at::Tensor& t)
     : data_{t.has_storage() ? t.storage().data() : nullptr},
       dtype_{t.scalar_type()},
       layout_{t.layout()},
-      dim_{static_cast<uint32_t>(t.sizes().size())} {
+      size_dim_{static_cast<uint32_t>(t.sizes().size())} {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       t.sizes().size() <= std::numeric_limits<uint32_t>::max(),
       "Cannot profile Tensors of size > uint32 max. Got dim: ",
       t.sizes().size());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      t.sizes().size() == t.strides().size(),
+      "Tensor has mismatching sizes and strides. Sizes: ",
+      t.sizes().size(),
+      " Strides: ",
+      t.strides().size());
 }
 
 RawTensorMetadata::RawTensorMetadata(const at::Tensor& t)
@@ -181,14 +187,31 @@ auto InputOutputEncoder::getIValueGenerator(const IOType& io_type) {
           ivals_it = ivalues_.begin(),
           io_type]() mutable {
     auto decode_tensor = [&]() -> TensorMetadata {
-      const auto& raw_metadata = *tensor_metadata_it++;
       std::vector<int64_t> sizes;
       std::vector<int64_t> strides;
-      for (C10_UNUSED const auto _ : c10::irange(raw_metadata.dim_)) {
+      if (tensor_metadata_it.exhausted()) {
+        LOG(WARNING)
+            << "Tensor metadata exhausted prematurely. Reported shapes may be inaccurate!";
+        return {RawTensorMetadata(), sizes, strides};
+      }
+      const auto& raw_metadata = *tensor_metadata_it++;
+      for ([[maybe_unused]] const auto _ :
+           c10::irange(raw_metadata.size_dim_)) {
+        if (tensor_size_strides_it.exhausted()) {
+          LOG(WARNING)
+              << "Expected Tensor Size mismatch with raw Tensor metadata. Reported shapes may be inaccurate!";
+          return {raw_metadata, sizes, strides};
+        }
         sizes.push_back(*tensor_size_strides_it++);
       }
       if (raw_metadata.layout_ == at::kStrided) {
-        for (C10_UNUSED const auto _ : c10::irange(raw_metadata.dim_)) {
+        for ([[maybe_unused]] const auto _ :
+             c10::irange(raw_metadata.size_dim_)) {
+          if (tensor_size_strides_it.exhausted()) {
+            LOG(WARNING)
+                << "Expected Tensor Strides mismatch with raw Tensor metadata. Reported shapes may be inaccurate!";
+            return {raw_metadata, sizes, strides};
+          }
           strides.push_back(*tensor_size_strides_it++);
         }
       }
@@ -314,6 +337,7 @@ std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
           fn.name()});
   if (config_.report_input_shapes) {
     torch_ops_.inputs_outputs_.push(fn.inputs());
+    torch_ops_.kwinputs_.emplace_back(fn.kwinputs());
   }
   if (fn.scope() == at::RecordScope::USER_SCOPE) {
     torch::profiler::impl::kineto::pushUserCorrelationId(corr_id);
@@ -375,9 +399,13 @@ std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
 namespace {
 template <typename T>
 struct StealOrDefault {
-  StealOrDefault(T& container)
+  explicit StealOrDefault(T& container)
       : container_{container}, it_{container.begin()} {}
 
+  StealOrDefault(const StealOrDefault&) = delete;
+  StealOrDefault(StealOrDefault&&) = delete;
+  StealOrDefault& operator=(const StealOrDefault&) = delete;
+  StealOrDefault& operator=(StealOrDefault&&) = delete;
   ~StealOrDefault() {
     container_.get().clear();
   }
@@ -397,14 +425,17 @@ struct StealOrDefault {
 };
 } // namespace
 
+static constexpr std::string_view profilerStepString = "ProfilerStep#";
+
 void ThreadLocalSubqueue::TorchOpStorage::materialize(
     std::vector<std::shared_ptr<Result>>& out,
+    std::vector<ProfilerStepInfo>& step_info,
     const std::function<c10::time_t(c10::approx_time_t)>& time_converter,
     const uint64_t tid,
     const kineto::DeviceAndResource& kineto_info) {
   // Plumb Autograd info to the top level annotation.
   auto it = op_events_.begin();
-  for (C10_UNUSED const auto _ :
+  for ([[maybe_unused]] const auto _ :
        c10::irange(static_cast<int64_t>(op_events_.size()) - 1)) {
     auto& first = it->basic_fields_;
     auto& second = (++it)->basic_fields_;
@@ -437,6 +468,7 @@ void ThreadLocalSubqueue::TorchOpStorage::materialize(
   auto jit_module = StealOrDefault<decltype(jit_modules_)>(jit_modules_);
   auto extra_args = StealOrDefault<decltype(extra_args_)>(extra_args_);
   auto extra_meta = StealOrDefault<decltype(extra_meta_)>(extra_meta_);
+  auto kwinputs = StealOrDefault<decltype(kwinputs_)>(kwinputs_);
   auto gpu_fallback =
       StealOrDefault<decltype(device_fallback_)>(device_fallback_);
 
@@ -451,10 +483,17 @@ void ThreadLocalSubqueue::TorchOpStorage::materialize(
         jit_module(),
         extra_args(),
         extra_meta(),
+        kwinputs(),
         gpu_fallback(),
         event->allow_tf32_cublas_,
         std::move(event->counters_)};
 
+    if (e.name_.find(profilerStepString) != std::string::npos) {
+      step_info.emplace_back(
+          time_converter(event->start_time_),
+          time_converter(event->end_time_),
+          out.size());
+    }
     out.emplace_back(Result::create(
         time_converter(event->start_time_), tid, kineto_info, std::move(e)));
   }
@@ -464,7 +503,7 @@ void ThreadLocalSubqueue::TorchOpStorage::materialize(
 }
 
 template <size_t BlockSize>
-void materialize_vulkan(
+static void materialize_vulkan(
     std::vector<std::shared_ptr<Result>>& out,
     AppendOnlyList<ExtraFields<EventType::Vulkan>::raw_event_t, BlockSize>&
         raw_events,
@@ -486,6 +525,7 @@ void materialize_vulkan(
             static_cast<int64_t>(std::get<1>(name_and_duration_ns)),
             /*in_tree_building_=*/false}));
   }
+  raw_events.clear();
 }
 
 namespace {
@@ -680,6 +720,12 @@ void RecordQueue::stop() {
   }
 }
 
+void RecordQueue::restart() {
+  if (python_tracer_) {
+    python_tracer_->restart();
+  }
+}
+
 namespace {
 void mark_finished(std::shared_ptr<Result>& r) {
   TORCH_INTERNAL_ASSERT(!r->finished_, r->name());
@@ -690,7 +736,7 @@ void mark_finished(std::shared_ptr<Result>& r) {
 #ifdef USE_KINETO
 // Assumption: Total threads number will not exceed 2^16-1, and total ops will
 // not exceed 2^48 -1.
-static inline uint64_t getForwardThreadKey(uint64_t tid, uint64_t seqNr) {
+static uint64_t getForwardThreadKey(uint64_t tid, uint64_t seqNr) {
   return (((tid) << 48) | ((seqNr) & (((uint64_t)1 << 48) - 1)));
 }
 
@@ -1020,7 +1066,7 @@ class TransferEvents {
       std::shared_ptr<Result>& r,
       std::shared_ptr<Result> parent) {
     r->visit(c10::overloaded(
-        [&](ExtraFields<EventType::Kineto>& i) {
+        [&]([[maybe_unused]] ExtraFields<EventType::Kineto>& i) {
           TORCH_INTERNAL_ASSERT(r->start_tid_ == noTID);
           r->start_tid_ = parent ? parent->start_tid_
                                  : at::RecordFunction::currentThreadId();
@@ -1257,7 +1303,7 @@ int64_t adjust_durations_dfs(std::shared_ptr<Result>& r) {
           [&children_total_duration](ExtraFields<EventType::Vulkan>& i) {
             i.duration_ns_ = children_total_duration;
           },
-          [](ExtraFields<EventType::Allocation>& _) {
+          []([[maybe_unused]] ExtraFields<EventType::Allocation>& _) {
             // Pass- Allocation events can't have children
           },
           [&](auto&) {
@@ -1293,10 +1339,10 @@ int64_t adjust_timestamps_dfs(
             i.end_time_ns_ =
                 new_start_time + (i.end_time_ns_ - r->start_time_ns_);
           },
-          [](ExtraFields<EventType::Vulkan>& i) {
+          []([[maybe_unused]] ExtraFields<EventType::Vulkan>& i) {
             // Pass- We don't need to manually adjust end time for Vulkan events
           },
-          [](ExtraFields<EventType::Allocation>& _) {
+          []([[maybe_unused]] ExtraFields<EventType::Allocation>& _) {
             // Pass- No duration or end time to adjust
           },
           [&](auto&) {
@@ -1363,8 +1409,18 @@ RecordQueue::getRecords(
         ? std::numeric_limits<c10::time_t>::min()
         : time_converter(t);
   };
+
+  // Lambda that checks that only the right side of the base intersects with
+  // ev_start and ev_end
+  auto right_intersection_only =
+      [&](ProfilerStepInfo base, int64_t ev_start, int64_t ev_end) {
+        return (base.start_time_ns < ev_start) &&
+            (base.end_time_ns <= ev_end && base.end_time_ns > ev_start);
+      };
   std::vector<std::shared_ptr<Result>> out;
   std::vector<python_tracer::CompressedEvent> python_enters;
+  std::vector<ProfilerStepInfo> step_info;
+  long unsigned int step_idx = 0;
   for (auto& subqueue_it : sub_queues_) {
     auto& queue = *subqueue_it.second;
     auto materialize = [&](auto& events) {
@@ -1387,7 +1443,7 @@ RecordQueue::getRecords(
     };
 
     queue.torch_ops_.materialize(
-        out, converter, queue.tid(), queue.kineto_info());
+        out, step_info, converter, queue.tid(), queue.kineto_info());
     materialize(queue.backend_events_);
     materialize_vulkan(
         out, queue.vulkan_events_, converter, queue.tid(), queue.kineto_info());
@@ -1398,6 +1454,7 @@ RecordQueue::getRecords(
           /*kineto_info_=*/queue.kineto_info(),
           /*extra_fields_=*/ExtraFields<EventType::Allocation>(i)));
     }
+    queue.allocations_.clear();
     materialize(queue.ooms_);
 
     for (auto& i : queue.py_calls_) {
@@ -1419,7 +1476,32 @@ RecordQueue::getRecords(
       torch::profiler::impl::kineto::stopTrace();
       throw;
     }
+    // Placeholder for if we run out of ProfilerStep annotations
+    ProfilerStepInfo defaultStep = {LLONG_MAX, LLONG_MAX, 0};
+    ProfilerStepInfo step =
+        step_idx < step_info.size() ? step_info[step_idx] : defaultStep;
     for (const auto& i : ev) {
+      // Only adjust timestamps if experimental config is enabled
+      if (config_.experimental_config.adjust_profiler_step) {
+        // If event has start time after step end time we can continue to the
+        // next step
+        while (i->start_time_ns_ > step.end_time_ns) {
+          step_idx++;
+          step =
+              step_idx < step_info.size() ? step_info[step_idx] : defaultStep;
+        }
+        // If Step annotation starts before event and ends before event ends
+        // with intersection then we move the lefthand side of the step
+        // annotation to the event start time
+        if (right_intersection_only(step, i->start_time_ns_, i->endTimeNS())) {
+          // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
+          auto const& currStepRes = out[step.out_idx];
+          currStepRes->start_time_ns_ = i->start_time_ns_ + 1;
+          step_idx++;
+          step =
+              step_idx < step_info.size() ? step_info[step_idx] : defaultStep;
+        }
+      }
       out.push_back(i);
     }
     python_tracer_.reset();

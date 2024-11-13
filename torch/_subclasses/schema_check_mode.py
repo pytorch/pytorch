@@ -10,6 +10,7 @@ from torch.utils import _pytree as pytree
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map
 
+
 # Named Tuples used within SchemaCheckMode
 Mutation = namedtuple("Mutation", ["op_name", "arg_name"])
 Aliasing = namedtuple("Aliasing", ["op_name", "arg_name", "output_number"])
@@ -59,7 +60,7 @@ def clone_inputs(args):
 
 
 class SchemaCheckMode(TorchDispatchMode):
-    def __init__(self):
+    def __init__(self) -> None:
         # Information recorded for testing purposes. For example:
         #  - incorrect schemas
         #  - overly conservative schemas

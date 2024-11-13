@@ -10,9 +10,9 @@
 #include <ATen/ops/_fused_adagrad.h>
 #include <ATen/ops/_fused_adagrad_native.h>
 #endif
-namespace at {
 
-namespace native {
+
+namespace at::native {
 
 void _fused_adagrad_kernel_cpu_(
     at::TensorList params,
@@ -55,5 +55,4 @@ void _fused_adagrad_kernel_cpu_(
 
 DEFINE_DISPATCH(fused_adagrad_stub);
 
-}
 }

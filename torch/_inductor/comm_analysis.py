@@ -5,8 +5,8 @@ from enum import IntEnum
 import sympy
 
 import torch
-from . import ir
 
+from . import ir
 from .utils import get_dtype_size, sympy_product
 from .virtualized import V
 

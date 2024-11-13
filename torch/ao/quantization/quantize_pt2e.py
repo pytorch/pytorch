@@ -1,32 +1,25 @@
 import torch
-from torch.fx import GraphModule
-from torch.fx import Node
-
-from .pt2e.prepare import prepare
-from .pt2e.qat_utils import (
-    _fuse_conv_bn_qat,
-    _fold_conv_bn_qat,
-)
-from .pt2e.utils import (
-    _get_node_name_to_scope,
-    _fuse_conv_bn_,
-    _disallow_eval_train,
-)
-from .pt2e.representation import reference_representation_rewrite
-from .quantize_fx import _convert_to_reference_decomposed_fx
-from torch.ao.quantization.quantizer import (  # noqa: F401
-    Quantizer,
-    QuantizationSpecBase,
-    QuantizationSpec,
-    FixedQParamsQuantizationSpec,
-    SharedQuantizationSpec,
-    DerivedQuantizationSpec,
-    QuantizationAnnotation,
-)
-from torch.fx.passes.infra.pass_manager import PassManager
+from torch._export.passes.constant_folding import constant_fold
 from torch.ao.quantization.pt2e.duplicate_dq_pass import DuplicateDQPass
 from torch.ao.quantization.pt2e.port_metadata_pass import PortNodeMetaForQDQ
-from torch._export.passes.constant_folding import constant_fold
+from torch.ao.quantization.quantizer import (  # noqa: F401
+    DerivedQuantizationSpec,
+    FixedQParamsQuantizationSpec,
+    QuantizationAnnotation,
+    QuantizationSpec,
+    QuantizationSpecBase,
+    Quantizer,
+    SharedQuantizationSpec,
+)
+from torch.fx import GraphModule, Node
+from torch.fx.passes.infra.pass_manager import PassManager
+
+from .pt2e.prepare import prepare
+from .pt2e.qat_utils import _fold_conv_bn_qat, _fuse_conv_bn_qat
+from .pt2e.representation import reference_representation_rewrite
+from .pt2e.utils import _disallow_eval_train, _fuse_conv_bn_, _get_node_name_to_scope
+from .quantize_fx import _convert_to_reference_decomposed_fx
+
 
 __all__ = [
     "prepare_pt2e",
@@ -63,7 +56,7 @@ def prepare_pt2e(
         )
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(5, 10)
 
@@ -83,7 +76,7 @@ def prepare_pt2e(
         # Step 1. program capture
         # NOTE: this API will be updated to torch.export API in the future, but the captured
         # result shoud mostly stay the same
-        m = capture_pre_autograd_graph(m, *example_inputs)
+        m = torch.export.export_for_training(m, *example_inputs).module()
         # we get a model with aten ops
 
         # Step 2. quantization
@@ -103,13 +96,14 @@ def prepare_pt2e(
     # to be quantized before fusion
     # TODO: (maybe) rewrite this with subgraph_rewriter
     _fuse_conv_bn_(model)
-    quantizer.transform_for_annotation(model)
+    model = quantizer.transform_for_annotation(model)
     quantizer.annotate(model)
     quantizer.validate(model)
     model = prepare(model, node_name_to_scope, is_qat=False)
     model.meta.update(original_graph_meta)
     model = _disallow_eval_train(model)
     return model
+
 
 def prepare_qat_pt2e(
     model: GraphModule,
@@ -135,7 +129,7 @@ def prepare_qat_pt2e(
         )
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(5, 10)
 
@@ -154,7 +148,7 @@ def prepare_qat_pt2e(
         # Step 1. program capture
         # NOTE: this API will be updated to torch.export API in the future, but the captured
         # result shoud mostly stay the same
-        m = capture_pre_autograd_graph(m, *example_inputs)
+        m = torch.export.export_for_training(m, *example_inputs).module()
         # we get a model with aten ops
 
         # Step 2. quantization
@@ -171,7 +165,7 @@ def prepare_qat_pt2e(
     torch._C._log_api_usage_once("quantization_api.quantize_pt2e.prepare_qat_pt2e")
     original_graph_meta = model.meta
     node_name_to_scope = _get_node_name_to_scope(model)
-    quantizer.transform_for_annotation(model)
+    model = quantizer.transform_for_annotation(model)
     quantizer.annotate(model)
     quantizer.validate(model)
     # Perform fusion after annotate to avoid quantizing ops in the new
@@ -183,11 +177,14 @@ def prepare_qat_pt2e(
     model = _disallow_eval_train(model)
     return model
 
+
 _QUANT_OPS = [
     torch.ops.quantized_decomposed.quantize_per_tensor.default,
     torch.ops.quantized_decomposed.quantize_per_tensor.tensor,
     torch.ops.quantized_decomposed.quantize_per_channel.default,
 ]
+
+
 def _quant_node_constraint(n: Node) -> bool:
     """If there is any pure ops between get_attr and quantize op they will be const propagated
     e.g. get_attr(weight) -> transpose -> quantize -> dequantize*
@@ -197,6 +194,7 @@ def _quant_node_constraint(n: Node) -> bool:
     related to quantization
     """
     return n.op == "call_function" and n.target in _QUANT_OPS
+
 
 def convert_pt2e(
     model: GraphModule,
@@ -228,7 +226,8 @@ def convert_pt2e(
     if not isinstance(use_reference_representation, bool):
         raise ValueError(
             "Unexpected argument type for `use_reference_representation`, "
-            f"please make sure you intend to pass argument {use_reference_representation} to convert_pt2e")
+            f"please make sure you intend to pass argument {use_reference_representation} to convert_pt2e"
+        )
     original_graph_meta = model.meta
     model = _convert_to_reference_decomposed_fx(model)
     model = _fold_conv_bn_qat(model)

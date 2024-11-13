@@ -1,4 +1,4 @@
-# mypy: ignore-errors
+# mypy: allow-untyped-defs
 
 import time
 import io
@@ -153,7 +153,7 @@ def script_add_ones_with_record_function(x, block: str):
 @torch.jit.script
 def record_function_on_caller_rpc_async(dst_worker_name: str, block: str) -> Tensor:
     t: Tensor = torch.ones(1)
-    with record_function(block) as rf:
+    with record_function(block):
         fut1 = rpc.rpc_async(dst_worker_name, script_add_ones, (t, ))
         # Extra operator call to avoid de-duplication of the next async call
         # see https://github.com/pytorch/pytorch/pull/62710#discussion_r694680279
@@ -669,8 +669,6 @@ class JitRpcOpTest:
         if self.rank != 0:
             return
 
-        dst_worker_name = worker_name((self.rank + 1) % self.world_size)
-
         # Notice, args matching happens during scripting.
         with self.assertRaisesRegex(RuntimeError, "Argument second_arg not provided"):
 
@@ -688,8 +686,6 @@ class JitRpcOpTest:
     def test_more_than_needed_args_are_specified(self):
         if self.rank != 0:
             return
-
-        dst_worker_name = worker_name((self.rank + 1) % self.world_size)
 
         # Notice, args matching happens during scripting.
         with self.assertRaisesRegex(
@@ -893,10 +889,10 @@ class JitRpcTest(
     def test_torchscript_function_exception(self):
         dst_worker_name = worker_name((self.rank + 1) % self.world_size)
         with self.assertRaisesRegex(RuntimeError, r"one_arg\(\) expected at most"):
-            ret = rpc.rpc_sync(dst_worker_name, one_arg, args=(10, 20))
+            rpc.rpc_sync(dst_worker_name, one_arg, args=(10, 20))
 
         with self.assertRaisesRegex(RuntimeError, r"one_arg\(\) expected at most"):
-            rref = rpc.remote(dst_worker_name, one_arg, args=(10, 20))
+            rpc.remote(dst_worker_name, one_arg, args=(10, 20))
 
     @dist_init
     def test_torchscript_functions_not_supported(self):
@@ -913,13 +909,13 @@ class JitRpcTest(
 
         # rpc_sync still accepts script class and run it in
         # the same code path as python call.
-        ret = rpc.rpc_sync(dst_worker_name, MyScriptClass, args=(self.rank,))
+        rpc.rpc_sync(dst_worker_name, MyScriptClass, args=(self.rank,))
 
         # rpc_sync does not accept script module method.
         # Python 3.5 and Python 3.6 throw different error message, the only
         # common word can be greped is "pickle".
         with self.assertRaisesRegex(TypeError, "pickle"):
-            ret = rpc.rpc_async(
+            rpc.rpc_async(
                 dst_worker_name, my_local_script_module.forward, args=()
             )
 
@@ -1070,7 +1066,6 @@ class JitRpcTest(
     @dist_init
     def test_callback_chain(self):
         n = self.rank + 1
-        dst = worker_name(n % self.world_size)
 
         def callback(fut):
             return fut.wait() + 1
@@ -1148,7 +1143,7 @@ class JitRpcTest(
                     "worker1",
                 )
                 with torch.autograd.profiler.record_function(prof_key) as rf:
-                    ret = call_rpc_with_profiling(rf.record, "worker1")
+                    call_rpc_with_profiling(rf.record, "worker1")
             # TODO: Can't get a reliable time for this profiling event since
             # it's hard to estimate the execution time on the remote end for non-UDFs.
             # This can be resolved by https://github.com/pytorch/pytorch/issues/36272.
@@ -1297,7 +1292,7 @@ class JitRpcTest(
         # future from within a script function with torch.jit.fork
         with _profile() as prof:
             with torch.autograd.profiler.record_function("foo") as rf:
-                ret = call_fork_with_profiling(rf.record)
+                call_fork_with_profiling(rf.record)
 
         events = prof.function_events
         function_event = get_function_event(events, "foo")

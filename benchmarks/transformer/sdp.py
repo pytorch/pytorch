@@ -1,7 +1,6 @@
 import argparse
 import itertools
 import random
-
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,6 +14,7 @@ from tqdm import tqdm
 import torch
 import torch.utils.benchmark as benchmark
 from torch.backends.cuda import sdp_kernel
+
 
 warnings.filterwarnings("ignore")
 
@@ -82,10 +82,10 @@ class ExperimentResults:
     @classmethod
     def get_entry_names(cls) -> List[str]:
         return [
-            "nn_mha_time (\u00B5s)",
-            "compiled_nn_mha_time (\u00B5s)",
-            "composite_mha_time (\u00B5s)",
-            "compiled_composite_mha_time (\u00B5s)",
+            "nn_mha_time (\u00b5s)",
+            "compiled_nn_mha_time (\u00b5s)",
+            "composite_mha_time (\u00b5s)",
+            "compiled_composite_mha_time (\u00b5s)",
         ]
 
 

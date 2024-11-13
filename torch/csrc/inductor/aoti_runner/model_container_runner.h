@@ -3,6 +3,7 @@
 
 #include <ATen/Tensor.h>
 #include <torch/csrc/inductor/aoti_runtime/interface.h>
+#include <torch/csrc/inductor/aoti_torch/proxy_executor.h>
 
 // Forward declare DynamicLibrary
 namespace at {
@@ -24,7 +25,7 @@ class TORCH_API AOTIModelContainerRunner {
   ~AOTIModelContainerRunner();
 
   std::vector<at::Tensor> run(
-      std::vector<at::Tensor>& inputs,
+      const std::vector<at::Tensor>& inputs,
       AOTInductorStreamHandle cuda_stream_handle = nullptr);
 
   std::unordered_map<std::string, std::string> getConstantNamesToOriginalFQNs()
@@ -75,9 +76,32 @@ class TORCH_API AOTIModelContainerRunner {
 
   AOTInductorModelContainerHandle container_handle_ = nullptr;
 
-  // TODO: need an OSS proxy executor implementation. For now,
-  // proxy_executor_handle_ will always be nullptr.
-  AOTIProxyExecutorHandle proxy_executor_handle_ = nullptr;
+  AOTIProxyExecutorHandle proxy_executor_handle_;
+
+ private:
+  std::unique_ptr<torch::aot_inductor::ProxyExecutor> proxy_executor_;
+};
+
+using CreateAOTIModelRunnerFunc = std::unique_ptr<AOTIModelContainerRunner> (*)(
+    const std::string& model_so_path,
+    size_t num_models,
+    const std::string& device_str,
+    const std::string& bin_dir);
+
+// Return a global map "device name" -> "aoti model runner create function" for
+// all registered in AOTI external backends
+TORCH_API std::unordered_map<std::string, CreateAOTIModelRunnerFunc>&
+getAOTIModelRunnerRegistry();
+
+// To register a new external backend in AOTI one needs to create an instance of
+// this struct. It is not thread-safe. Becase it is expected to be called during
+// the initialization of the program.
+struct TORCH_API RegisterAOTIModelRunner {
+  RegisterAOTIModelRunner(
+      const std::string& name,
+      CreateAOTIModelRunnerFunc create_aoti_model_runner_fn) {
+    getAOTIModelRunnerRegistry()[name] = create_aoti_model_runner_fn;
+  }
 };
 
 } // namespace torch::inductor

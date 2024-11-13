@@ -5,17 +5,20 @@ import weakref
 from dataclasses import dataclass
 from typing import Tuple
 
+from torch._guards import CompileId
+
 from . import config
+
 
 log = logging.getLogger(__name__)
 """
 [Note on cache size limit]
 
 Background - TorchDynamo cache is a linked list. Each cache entry is a
-(check_fn, out_code, next pointer). These are stored on the f_code's co_extra
+(guard_manager, out_code, next pointer). These are stored on the f_code's co_extra
 scratch space. When a frame is invoked, we walk this linked list and run
-check_fn in each cache_entry to decide if the frame needs recompilation. If none
-of the check_fn's returns True, we recompile and add a new entry. To ensure we
+guard_manager in each cache_entry to decide if the frame needs recompilation. If none
+of the guard_manager's returns True, we recompile and add a new entry. To ensure we
 don't end up recompiling infinitely, we put limits on the cache size.
 
 There are two limits
@@ -118,10 +121,10 @@ def _has_same_id_matched_objs(frame: types.FrameType, cache_entry) -> bool:
     for (
         local_name,
         weakref_from_cache_entry,
-    ) in cache_entry.check_fn.id_matched_objs.items():
+    ) in cache_entry.guard_manager.id_matched_objs.items():
         if weakref_from_cache_entry() is not None:
             weakref_from_frame = _get_weakref_from_f_locals(frame, local_name)
-            if weakref_from_frame != weakref_from_cache_entry:
+            if weakref_from_frame is not weakref_from_cache_entry:
                 return False
 
     # Also covers the case where no ID_MATCH objects are saved in frame.f_locals
@@ -162,7 +165,9 @@ def is_recompilation(cache_size: CacheSizeRelevantForFrame) -> bool:
     return cache_size.will_compilation_exceed(1)
 
 
-def exceeds_cache_size_limit(cache_size: CacheSizeRelevantForFrame) -> Tuple[bool, str]:
+def exceeds_cache_size_limit(
+    cache_size: CacheSizeRelevantForFrame, compile_id: CompileId
+) -> Tuple[bool, str]:
     """
     Checks if we are exceeding the cache size limit.
     """
@@ -170,4 +175,11 @@ def exceeds_cache_size_limit(cache_size: CacheSizeRelevantForFrame) -> Tuple[boo
         return True, "accumulated_cache_size_limit"
     if cache_size.will_compilation_exceed_specific_limit(config.cache_size_limit):
         return True, "cache_size_limit"
+    # NOTE this check is needed in the case that the frame's cache doesn't grow
+    # and we keep recompiling. This can happen if the guard guard_manager becomes invalidated,
+    # e.g. due to guarded objects being freed. This technically makes the
+    # will_compilation_exceed_accumulated_limit check unnecessary, but we will keep the
+    # check in case we have a better fix in the future.
+    if compile_id.frame_compile_id >= config.accumulated_cache_size_limit:
+        return True, "accumulated_cache_size_limit"
     return False, ""

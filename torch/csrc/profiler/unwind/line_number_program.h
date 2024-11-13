@@ -70,7 +70,7 @@ struct LineNumberProgram {
           switch (member.content_type) {
             case DW_LNCT_path: {
               include_directories_.emplace_back(
-                  s_.readString(L, member.form, is_64bit_, 0));
+                  s_.readString(L, member.form, is_64bit_));
             } break;
             default: {
               skipForm(L, member.form);
@@ -94,7 +94,7 @@ struct LineNumberProgram {
           switch (member.content_type) {
             case DW_LNCT_path: {
               file_names_.emplace_back(
-                  s_.readString(L, member.form, is_64bit_, 0));
+                  s_.readString(L, member.form, is_64bit_));
             } break;
             case DW_LNCT_directory_index: {
               file_directory_index_.emplace_back(readData(L, member.form));
@@ -147,7 +147,7 @@ struct LineNumberProgram {
     uint32_t file = 1;
     int64_t line = 1;
   };
-  unwind::optional<Entry> find(uint64_t address) {
+  std::optional<Entry> find(uint64_t address) {
     auto e = program_index_.find(address);
     if (!e) {
       return std::nullopt;

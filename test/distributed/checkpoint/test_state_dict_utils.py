@@ -5,16 +5,20 @@ import io
 import torch
 import torch.distributed as dist
 import torch.distributed._functional_collectives as funcol
-
 from torch.distributed._state_dict_utils import (
     _check_state_dict_similarity,
     _copy_state_dict,
     _create_cpu_state_dict,
+    _distribute_tensors,
     _gather_state_dict,
     _offload_state_dict_to_cpu,
 )
-from torch.distributed._tensor import DTensor
-from torch.distributed._tensor.placement_types import Shard
+from torch.distributed._tensor import (
+    distribute_tensor,
+    DTensor,
+    init_device_mesh,
+    Shard,
+)
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -171,6 +175,37 @@ class TestStateDictUtils(DTensorTestBase):
             state_dict, share_memory=True, pin_memory=True
         )
         _verify(cpu_state_dict)
+
+    @with_comms
+    @skip_if_lt_x_gpu(2)
+    def test_state_dict_util_distribute_tensors(self):
+        even_tensor = torch.randn(self.world_size, 2)
+        uneven_tensor = torch.randn(1, 2)
+
+        mesh = init_device_mesh("cuda", mesh_shape=(self.world_size,))
+        even_dtensor = distribute_tensor(
+            torch.randn(self.world_size, 2), mesh, [Shard(0)]
+        )
+        uneven_dtensor = distribute_tensor(torch.randn(1, 2), mesh, [Shard(0)])
+
+        # the dtensor and tensor are different before _distribute_tensors is called.
+        local_state_dict = {
+            "even": [even_dtensor, even_tensor],
+            "uneven": [uneven_dtensor, uneven_tensor],
+        }
+        ref_local_state_dict = copy.deepcopy(local_state_dict)
+        keys = ["even", "uneven"]
+
+        _distribute_tensors(local_state_dict, keys, self.device_type)
+        for local_v, ref_v in zip(
+            local_state_dict.values(), ref_local_state_dict.values()
+        ):
+            self.assertEqual(local_v.size(), ref_v[0].size())
+            self.assertEqual(local_v.stride(), ref_v[0].stride())
+            self.assertNotEqual(
+                local_v_full_tensor := local_v.full_tensor(), ref_v[0].full_tensor()
+            )
+            self.assertEqual(local_v_full_tensor, ref_v[1])
 
 
 if __name__ == "__main__":

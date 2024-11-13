@@ -15,7 +15,7 @@
 #include <structmember.h>
 #include <string>
 
-PyObject* THPEventClass = nullptr;
+PyTypeObject* THPEventClass = nullptr;
 
 static PyObject* THPEvent_pynew(
     PyTypeObject* type,
@@ -87,11 +87,7 @@ static void THPEvent_dealloc(THPEvent* self) {
 
 static PyObject* THPEvent_get_device(THPEvent* self, void* unused) {
   HANDLE_TH_ERRORS
-  std::optional<at::Device> device = self->event.device();
-  if (!device) {
-    Py_RETURN_NONE;
-  }
-  return THPDevice_New(device.value());
+  return THPDevice_New(self->event.device());
   END_HANDLE_TH_ERRORS
 }
 
@@ -118,7 +114,7 @@ static PyObject* THPEvent_record(
     auto stream = (THPStream*)_stream;
     self->event.record(c10::Stream::unpack3(
         stream->stream_id,
-        stream->device_index,
+        static_cast<c10::DeviceIndex>(stream->device_index),
         static_cast<c10::DeviceType>(stream->device_type)));
   } else {
     c10::impl::VirtualGuardImpl impl{
@@ -143,7 +139,6 @@ static PyObject* THPEvent_from_ipc_handle(
   auto r = parser.parse(args, kwargs, parsed_args);
 
   at::Device device = r.device(0);
-  std::string handle_string = r.string(1);
   TORCH_CHECK_NOT_IMPLEMENTED(
       false,
       "torch.Event ipc is not supported yet, please open an issue if you need this!");
@@ -161,15 +156,16 @@ static PyObject* THPEvent_from_ipc_handle(
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPEvent_ipc_handle(PyObject* _self, PyObject* noargs) {
+static PyObject* THPEvent_ipc_handle(
+    PyObject* _self [[maybe_unused]],
+    PyObject* noargs) {
   HANDLE_TH_ERRORS
-  auto self = (THPEvent*)_self;
-  (void)self;
   TORCH_CHECK_NOT_IMPLEMENTED(
       false,
       "torch.Event ipc is not supported yet, please open an issue if you need this!");
-  std::string handle = "0";
-  return PyBytes_FromStringAndSize((const char*)&handle, sizeof(handle));
+  constexpr const char* handle = "0";
+  return PyBytes_FromStringAndSize(
+      handle, std::char_traits<char>::length(handle));
   END_HANDLE_TH_ERRORS
 }
 
@@ -196,7 +192,7 @@ static PyObject* THPEvent_wait(
       auto stream = (THPStream*)_stream;
       self->event.block(c10::Stream::unpack3(
           stream->stream_id,
-          stream->device_index,
+          static_cast<c10::DeviceIndex>(stream->device_index),
           static_cast<c10::DeviceType>(stream->device_type)));
     } else {
       c10::impl::VirtualGuardImpl impl{
@@ -280,7 +276,8 @@ static PyMethodDef THPEvent_methods[] = {
     {nullptr}};
 
 PyTypeObject THPEventType = {
-    PyVarObject_HEAD_INIT(nullptr, 0) "torch.Event", /* tp_name */
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "torch.Event", /* tp_name */
     sizeof(THPEvent), /* tp_basicsize */
     0, /* tp_itemsize */
     (destructor)THPEvent_dealloc, /* tp_dealloc */
@@ -320,7 +317,7 @@ PyTypeObject THPEventType = {
 };
 
 void THPEvent_init(PyObject* module) {
-  THPEventClass = (PyObject*)&THPEventType;
+  THPEventClass = &THPEventType;
   if (PyType_Ready(&THPEventType) < 0) {
     throw python_error();
   }

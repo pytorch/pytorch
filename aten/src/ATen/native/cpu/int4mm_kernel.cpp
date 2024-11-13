@@ -605,11 +605,13 @@ inline void tinygemm_kernel(
 //
 void weight_to_int4pack_kernel(
     const Tensor& weight_packed,
-    const Tensor& weight,
-    int N, int K) {
+    const Tensor& weight) {
 
   auto weight_packed_data = reinterpret_cast<uint8_t*>(weight_packed.data_ptr());
   const auto weight_data = weight.data_ptr<int32_t>();
+
+  int N = weight.size(0);
+  int K = weight.size(1);
 
   // 64 for avx512 and 32 for avx2/non-vectorized
   constexpr int BLOCK_N = vec::Vectorized<float>::size() * 4;
@@ -687,8 +689,7 @@ void int4pack_mm_kernel_(
     const Tensor& A,
     const Tensor& B,
     int qGroupSize,
-    const Tensor& qScaleAndZeros,
-    int N, int K) {
+    const Tensor& qScaleAndZeros) {
 
   const auto* A_data = A.const_data_ptr<T>();
   const auto* B_data = reinterpret_cast<const uint8_t*>(B.const_data_ptr());
@@ -696,6 +697,8 @@ void int4pack_mm_kernel_(
   const auto* S_data = qScaleAndZeros.const_data_ptr<T>();
 
   int M = A.size(0);
+  int N = B.size(0);
+  int K = A.size(1);
 
   constexpr int BLOCK_M = 4;
   // 64 for avx512 and 32 for avx2/non-vectorized
@@ -710,7 +713,7 @@ void int4pack_mm_kernel_(
     int mb{0}, nb{0};
     data_index_init(begin, mb, MB, nb, NB);
 
-    for (C10_UNUSED const auto i : c10::irange(begin, end)) {
+    for ([[maybe_unused]] const auto i : c10::irange(begin, end)) {
       int mb_start = mb * BLOCK_M;
       int mb_size = std::min(BLOCK_M, M - mb_start);
       int nb_start = nb * BLOCK_N;
@@ -749,21 +752,20 @@ void int4pack_mm_kernel(
     const Tensor& A,
     const Tensor& B,
     int qGroupSize,
-    const Tensor& qScaleAndZeros,
-    int N, int K) {
+    const Tensor& qScaleAndZeros) {
   if (C.scalar_type() == kBFloat16) {
-    int4pack_mm_kernel_<BFloat16>(C, A, B, qGroupSize, qScaleAndZeros, N, K);
+    int4pack_mm_kernel_<BFloat16>(C, A, B, qGroupSize, qScaleAndZeros);
   } else if (C.scalar_type() == kHalf) {
-    int4pack_mm_kernel_<Half>(C, A, B, qGroupSize, qScaleAndZeros, N, K);
+    int4pack_mm_kernel_<Half>(C, A, B, qGroupSize, qScaleAndZeros);
   } else {
-    int4pack_mm_kernel_<float>(C, A, B, qGroupSize, qScaleAndZeros, N, K);
+    int4pack_mm_kernel_<float>(C, A, B, qGroupSize, qScaleAndZeros);
   }
 }
 
 } // anonymous namespace
 
-ALSO_REGISTER_AVX512_DISPATCH(weight_to_int4pack_stub, &weight_to_int4pack_kernel);
-ALSO_REGISTER_AVX512_DISPATCH(int4pack_mm_stub, &int4pack_mm_kernel);
+ALSO_REGISTER_AVX512_DISPATCH(weight_to_int4pack_stub, &weight_to_int4pack_kernel)
+ALSO_REGISTER_AVX512_DISPATCH(int4pack_mm_stub, &int4pack_mm_kernel)
 
 } // at::native
 C10_DIAGNOSTIC_POP()

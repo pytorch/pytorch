@@ -210,6 +210,27 @@ PyObject* THPCppFunction_set_sequence_nr(
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPCppFunction_input_metadata(PyObject* self, void* closure) {
+  HANDLE_TH_ERRORS;
+  auto& fn = *((THPCppFunction*)self)->cdata;
+  const auto num_inputs =
+      fn.num_inputs(); // Assuming there's a method to get the number of inputs
+  THPObjectPtr list(PyTuple_New(num_inputs));
+  if (!list) {
+    return nullptr;
+  }
+  for (size_t i = 0; i < num_inputs; ++i) {
+    const auto& metadata = fn.input_metadata(i);
+    THPObjectPtr item(py::cast(metadata).release().ptr());
+    if (!item) {
+      return nullptr;
+    }
+    PyTuple_SET_ITEM(list.get(), i, item.release());
+  }
+  return list.release();
+  END_HANDLE_TH_ERRORS
+}
+
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
 static struct PyMethodDef default_methods[] = {
     THP_FUNCTION_DEFAULT_METHODS,
@@ -225,7 +246,9 @@ PyTypeObject* _initFunctionPyTypeObject(
     const char* name,
     PyGetSetDef* function_properties,
     PyMethodDef* function_methods) {
-  type.ob_base = {PyObject_HEAD_INIT(nullptr) 0};
+  type.ob_base = {
+    PyObject_HEAD_INIT(nullptr)
+      0};
   // NOLINTNEXTLINE(misc-redundant-expression)
   type.tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC;
   type.tp_name = name;
@@ -276,8 +299,7 @@ PyObject* functionToPyObject(const std::shared_ptr<Node>& cdata) {
   } else {
     auto& fn = *cdata;
     auto it = cpp_function_types_map.find(std::type_index(typeid(fn)));
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    PyTypeObject* type;
+    PyTypeObject* type = nullptr;
     if (it == cpp_function_types_map.end()) {
       type = get_default_type();
     } else {

@@ -2,10 +2,11 @@ import triton
 from benchmark_helper import time_with_torch_timer
 
 import torch
-
 import torch._dynamo
 import torch._dynamo.config
 import torch._inductor.config as config
+from torch._inductor.runtime.benchmarking import benchmarker
+
 
 # The flag below controls whether to allow TF32 on matmul. This flag defaults to True.
 torch.backends.cuda.matmul.allow_tf32 = True
@@ -74,10 +75,12 @@ def test_GPU_time(shapes):
         config.triton.mm = "triton"
         inductor_triton_mm(a, b)
 
-        torch_ms, _, _ = triton.testing.do_bench(lambda: torch_mm(a, b))
-        triton_ms, _, _ = triton.testing.do_bench(lambda: triton_mm(a, b))
-        ind_aten_ms, _, _ = triton.testing.do_bench(lambda: inductor_aten_mm(a, b))
-        ind_triton_ms, _, _ = triton.testing.do_bench(lambda: inductor_triton_mm(a, b))
+        torch_ms, _, _ = benchmarker.benchmark_gpu(lambda: torch_mm(a, b))
+        triton_ms, _, _ = benchmarker.benchmark_gpu(lambda: triton_mm(a, b))
+        ind_aten_ms, _, _ = benchmarker.benchmark_gpu(lambda: inductor_aten_mm(a, b))
+        ind_triton_ms, _, _ = benchmarker.benchmark_gpu(
+            lambda: inductor_triton_mm(a, b)
+        )
         print(torch_ms, triton_ms, ind_aten_ms, ind_triton_ms, sep="; ")
 
         torch._dynamo.reset()

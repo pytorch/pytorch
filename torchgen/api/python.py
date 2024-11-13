@@ -236,7 +236,6 @@ class PythonArgument:
         if self.default is not None:
             default = {
                 "nullptr": "None",
-                "c10::nullopt": "None",
                 "::std::nullopt": "None",
                 "std::nullopt": "None",
                 "{}": "None",
@@ -285,11 +284,10 @@ class PythonArgument:
             else:
                 default = {
                     "nullptr": "None",
-                    "c10::nullopt": "None",
                     "::std::nullopt": "None",
                     "std::nullopt": "None",
                     "{}": "None",
-                    "MemoryFormat::Contiguous": "contiguous_format",
+                    "c10::MemoryFormat::Contiguous": "contiguous_format",
                     "QScheme::PER_TENSOR_AFFINE": "per_tensor_affine",
                 }.get(self.default, self.default)
             return f"{name}: {type_str} = {default}"
@@ -553,9 +551,9 @@ class PythonSignatureGroup:
 
         # Out overloads in C++ don't have TensorOptions arguments,
         # so take these from the functional variant
-        signature_kwargs[
-            "tensor_options_args"
-        ] = functional.signature.tensor_options_args
+        signature_kwargs["tensor_options_args"] = (
+            functional.signature.tensor_options_args
+        )
 
         return PythonSignatureGroup(
             signature=type(out.signature)(**signature_kwargs),
@@ -1230,7 +1228,7 @@ def cpp_dispatch_exprs(
 ) -> tuple[str, ...]:
     cpp_args: Sequence[Binding] = _cpp_signature(f, method=False).arguments()
 
-    exprs: tuple[str, ...] = tuple()
+    exprs: tuple[str, ...] = ()
     if not isinstance(python_signature, PythonSignatureDeprecated):
         # By default the exprs are consistent with the C++ signature.
         exprs = tuple(a.name for a in cpp_args)
@@ -1320,7 +1318,6 @@ def arg_parser_unpack_method(
         elif not has_default_init and default in (
             None,
             "None",
-            "c10::nullopt",
             "::std::nullopt",
             "std::nullopt",
         ):

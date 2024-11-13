@@ -1,11 +1,12 @@
 # mypy: allow-untyped-defs
 from ..cutlass_utils import try_import_cutlass
 
+
 if try_import_cutlass():
     import enum
 
-    from cutlass_library.library import *  # noqa: F401, F403
     from cutlass_library.gemm_operation import *  # noqa: F401, F403
+    from cutlass_library.library import *  # noqa: F401, F403
 
     # copied / modified from original at
     # https://github.com/NVIDIA/cutlass/blob/8783c41851cd3582490e04e69e0cd756a8c1db7f/tools/library/scripts/gemm_operation.py#L658
@@ -14,7 +15,7 @@ if try_import_cutlass():
     class EmitGemmUniversal3xInstanceWithEVT:
         """Responsible for emitting a CUTLASS 3.x template definition"""
 
-        def __init__(self, operation_suffix=""):
+        def __init__(self, operation_suffix="") -> None:
             self.operation_suffix = operation_suffix
             self.includes = [
                 "cutlass/cutlass.h",

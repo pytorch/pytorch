@@ -9,7 +9,6 @@ from torch.fx.passes.infra.pass_manager import (
     PassManager,
     this_before_that_pass_constraint,
 )
-
 from torch.testing._internal.common_utils import TestCase
 
 

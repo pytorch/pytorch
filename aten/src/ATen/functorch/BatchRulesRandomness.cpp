@@ -182,11 +182,11 @@ static std::tuple<Tensor,Tensor> native_dropout_batching_rule(const Tensor& tens
   auto [tensor_value, tensor_bdim] = unwrapTensorAtLevel(tensor, cur_level);
   tensor_value = moveBatchDimToFront(tensor_value, tensor_bdim);
 
-  if (!train.has_value() || train) {
+  if (!train.has_value() || *train) {
     check_randomness(randomness); // if we are in eval mode, we don't use about randomness
   }
 
-  if ((train.has_value() && !train) ||
+  if ((train.has_value() && !*train) ||
       randomness == RandomnessType::Different) {
     if (!tensor_bdim) {
       // if tensor is unbatched, add batch dim before
@@ -213,7 +213,12 @@ static std::tuple<Tensor,Tensor> native_dropout_batching_rule(const Tensor& tens
   return std::make_tuple(output, mask);
 }
 
-static Tensor multinomial_batching_rule(const Tensor& self, const int64_t num_samples, const bool replacement, const std::optional<Generator> generator) {
+static Tensor native_dropout_backward_batch_rule(const Tensor& grad_out, const Tensor& mask, double scale){
+  Tensor result = grad_out * mask * scale;
+  return result;
+}
+
+static Tensor multinomial_batching_rule(const Tensor& self, const int64_t num_samples, const bool replacement, std::optional<Generator> generator) {
   c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchVmapMode);
   auto maybe_layer = maybeCurrentDynamicLayer();
   const auto cur_level = maybe_layer->layerId();
@@ -237,7 +242,7 @@ static Tensor multinomial_batching_rule(const Tensor& self, const int64_t num_sa
     if (is_2D_case) {
       self_value = reshape_dim_into(0, 0, self_value);
     }
-    auto out = multinomial(self_value, num_samples, replacement, generator);
+    auto out = multinomial(self_value, num_samples, replacement, std::move(generator));
     if (is_2D_case) {
       out = reshape_dim_outof_symint(0, maybe_layer->batchSize(), out);
     }
@@ -249,7 +254,7 @@ static Tensor multinomial_batching_rule(const Tensor& self, const int64_t num_sa
   // Must be same randomness with unbatched input
   // 1D case: S -> multinomial(S) -> S
   // 2D case: MS -> multinomial(MS) -> MS
-  return multinomial(self_value, num_samples, replacement, generator);
+  return multinomial(self_value, num_samples, replacement, std::move(generator));
 }
 
 template <typename A, A a, typename C>
@@ -462,6 +467,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchVmapMode, m) {
   UNARY_POINTWISE_RANDOM_LEADING_FLOAT(normal, float_Tensor);
 
   m.impl("native_dropout", native_dropout_batching_rule); // needs special casing because cuda version doesn't call bernoulli
+  m.impl("native_dropout_backward", native_dropout_backward_batch_rule);
 
   UNARY_POINTWISE_RANDOM(_standard_gamma);
   UNARY_POINTWISE_RANDOM(_sample_dirichlet);
@@ -469,7 +475,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchVmapMode, m) {
   UNARY_POINTWISE_RANDOM(poisson);
   UNARY_POINTWISE_RANDOM(bernoulli);
 
-  #define TENSOR_LIKE_COMMON_ARG_TYPES optional<ScalarType>, optional<Layout>, optional<Device>, optional<bool>, optional<MemoryFormat>
+  #define TENSOR_LIKE_COMMON_ARG_TYPES std::optional<ScalarType>, std::optional<Layout>, std::optional<Device>, std::optional<bool>, std::optional<MemoryFormat>
   m.impl("randint_like", tensor_like_random_batch_rule<decltype(&ATEN_FN(randint_like)), &ATEN_FN(randint_like), int64_t, TENSOR_LIKE_COMMON_ARG_TYPES>);
   m.impl("randint_like.low_dtype", tensor_like_random_batch_rule<\
     decltype(&ATEN_FN2(randint_like, low_dtype)), &ATEN_FN2(randint_like, low_dtype), int64_t, int64_t, TENSOR_LIKE_COMMON_ARG_TYPES>);

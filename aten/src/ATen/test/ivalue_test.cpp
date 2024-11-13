@@ -769,7 +769,7 @@ TEST(IValueTest, getSubValues) {
 
   IValue dict(std::move(m));
 
-  auto objType = ClassType::create(nullopt, {});
+  auto objType = ClassType::create(std::nullopt, {});
   objType->addAttribute("t1", tv1.type());
   objType->addAttribute("t2", tv2.type());
 

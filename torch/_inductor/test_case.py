@@ -6,7 +6,6 @@ from torch._dynamo.test_case import (
     run_tests as dynamo_run_tests,
     TestCase as DynamoTestCase,
 )
-
 from torch._inductor import config
 from torch._inductor.utils import fresh_inductor_cache
 

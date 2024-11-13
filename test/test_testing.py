@@ -17,9 +17,11 @@ from typing import Any, Callable, Iterator, List, Tuple
 import torch
 
 from torch.testing import make_tensor
-from torch.testing._internal.common_utils import \
-    (IS_FBCODE, IS_JETSON, IS_MACOS, IS_SANDCASTLE, IS_WINDOWS, TestCase, run_tests, slowTest,
-     parametrize, subtest, instantiate_parametrized_tests, dtype_name, TEST_WITH_ROCM, decorateIf)
+from torch.testing._internal.common_utils import (
+    IS_FBCODE, IS_JETSON, IS_MACOS, IS_SANDCASTLE, IS_WINDOWS, TestCase, run_tests, slowTest,
+    parametrize, reparametrize, subtest, instantiate_parametrized_tests, dtype_name,
+    TEST_WITH_ROCM, decorateIf, skipIfRocm
+)
 from torch.testing._internal.common_device_type import \
     (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
      get_device_type_test_bases, instantiate_device_type_tests, onlyCPU, onlyCUDA, onlyNativeDeviceTypes,
@@ -30,6 +32,7 @@ from torch.testing._internal.common_dtype import all_types_and_complex_and, floa
 from torch.testing._internal.common_modules import modules, module_db, ModuleInfo
 from torch.testing._internal.opinfo.core import SampleInput, DecorateInfo, OpInfo
 import operator
+import string
 
 # For testing TestCase methods and torch.testing functions
 class TestTesting(TestCase):
@@ -813,7 +816,6 @@ class TestAssertClose(TestCase):
         the test should mock a component to raise this instead of the regular behavior. We avoid using a builtin
         exception here to avoid triggering possible handling of them.
         """
-        pass
 
     @unittest.mock.patch("torch.testing._comparison.TensorLikePair.__init__", side_effect=UnexpectedException)
     def test_unexpected_error_originate(self, _):
@@ -1395,7 +1397,7 @@ class TestMakeTensor(TestCase):
     )
 
     @supported_dtypes
-    @parametrize("shape", [tuple(), (0,), (1,), (1, 1), (2,), (2, 3), (8, 16, 32)])
+    @parametrize("shape", [(), (0,), (1,), (1, 1), (2,), (2, 3), (8, 16, 32)])
     @parametrize("splat_shape", [False, True])
     def test_smoke(self, dtype, device, shape, splat_shape):
         t = torch.testing.make_tensor(*shape if splat_shape else shape, dtype=dtype, device=device)
@@ -1426,7 +1428,7 @@ class TestMakeTensor(TestCase):
 
     @supported_dtypes
     @parametrize("noncontiguous", [False, True])
-    @parametrize("shape", [tuple(), (0,), (1,), (1, 1), (2,), (2, 3), (8, 16, 32)])
+    @parametrize("shape", [(), (0,), (1,), (1, 1), (2,), (2, 3), (8, 16, 32)])
     def test_noncontiguous(self, dtype, device, noncontiguous, shape):
         numel = functools.reduce(operator.mul, shape, 1)
 
@@ -1647,6 +1649,46 @@ class TestTestParametrization(TestCase):
             'TestParametrized.test_two_things_custom_names_alternate_1__2',
             'TestParametrized.test_two_things_custom_names_alternate_1__3',
             'TestParametrized.test_two_things_custom_names_alternate_1__4',
+        ]
+        test_names = _get_test_names_for_test_class(TestParametrized)
+        self.assertEqual(expected_test_names, test_names)
+
+    def test_reparametrize(self):
+
+        def include_is_even_arg(test_name, param_kwargs):
+            x = param_kwargs["x"]
+            is_even = x % 2 == 0
+            new_param_kwargs = dict(param_kwargs)
+            new_param_kwargs["is_even"] = is_even
+            is_even_suffix = "_even" if is_even else "_odd"
+            new_test_name = f"{test_name}{is_even_suffix}"
+            yield (new_test_name, new_param_kwargs)
+
+        def exclude_odds(test_name, param_kwargs):
+            x = param_kwargs["x"]
+            is_even = x % 2 == 0
+            yield None if not is_even else (test_name, param_kwargs)
+
+        class TestParametrized(TestCase):
+            @reparametrize(parametrize("x", range(5)), include_is_even_arg)
+            def test_foo(self, x, is_even):
+                pass
+
+            @reparametrize(parametrize("x", range(5)), exclude_odds)
+            def test_bar(self, x):
+                pass
+
+        instantiate_parametrized_tests(TestParametrized)
+
+        expected_test_names = [
+            'TestParametrized.test_bar_x_0',
+            'TestParametrized.test_bar_x_2',
+            'TestParametrized.test_bar_x_4',
+            'TestParametrized.test_foo_x_0_even',
+            'TestParametrized.test_foo_x_1_odd',
+            'TestParametrized.test_foo_x_2_even',
+            'TestParametrized.test_foo_x_3_odd',
+            'TestParametrized.test_foo_x_4_even',
         ]
         test_names = _get_test_names_for_test_class(TestParametrized)
         self.assertEqual(expected_test_names, test_names)
@@ -2062,7 +2104,7 @@ class TestTestParametrizationDeviceType(TestCase):
 
         # Create a test module, ModuleInfo entry, and decorator to apply.
         class TestModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.x = torch.nn.Parameter(torch.randn(3))
 
@@ -2216,12 +2258,15 @@ class TestImports(TestCase):
     @classmethod
     def _check_python_output(cls, program) -> str:
         return subprocess.check_output(
-            [sys.executable, "-W", "all", "-c", program],
+            [sys.executable, "-W", "always", "-c", program],
             stderr=subprocess.STDOUT,
             # On Windows, opening the subprocess with the default CWD makes `import torch`
             # fail, so just set CWD to this script's directory
             cwd=os.path.dirname(os.path.realpath(__file__)),).decode("utf-8")
 
+    # The test is flaky on ROCm and has been open and close multiple times
+    # https://github.com/pytorch/pytorch/issues/110040
+    @skipIfRocm
     def test_circular_dependencies(self) -> None:
         """ Checks that all modules inside torch can be imported
         Prevents regression reported in https://github.com/pytorch/pytorch/issues/77441 """
@@ -2231,7 +2276,7 @@ class TestImports(TestCase):
                            "torch.contrib.",  # something weird
                            "torch.testing._internal.distributed.",  # just fails
                            "torch.ao.pruning._experimental.",  # depends on pytorch_lightning, not user-facing
-                           "torch.onnx._internal.fx",  # depends on onnx-script
+                           "torch.onnx._internal",  # depends on onnx-script
                            "torch._inductor.runtime.triton_helpers",  # depends on triton
                            "torch._inductor.codegen.cuda",  # depends on cutlass
                            ]
@@ -2297,7 +2342,7 @@ class TestImports(TestCase):
         # Calling logging.basicConfig, among other things, modifies the global
         # logging state. It is not OK to modify the global logging state on
         # `import torch` (or other submodules we own) because users do not expect it.
-        expected = 'abcdefghijklmnopqrstuvwxyz'
+        expected = string.ascii_lowercase
         commands = [
             'import logging',
             f'import {path}',

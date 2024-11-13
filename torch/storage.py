@@ -1,15 +1,35 @@
 # mypy: allow-untyped-defs
+
+from __future__ import annotations
+
 import collections
 import copy
 import functools
 import io
 import threading
 import warnings
-from typing import Any, cast, Dict as _Dict, Optional as _Optional, Type, TypeVar, Union
+from typing import (
+    Any,
+    cast,
+    Dict as _Dict,
+    Optional as _Optional,
+    Type,
+    TYPE_CHECKING,
+    TypeVar,
+    Union,
+)
+from typing_extensions import Self
 
 import torch
 from torch._utils import _to, _type
 from torch.types import _bool, _int, Storage
+
+
+if TYPE_CHECKING:
+    from torch._prims_common import DeviceLikeType
+
+
+__all__ = ["TypedStorage", "UntypedStorage"]
 
 
 try:
@@ -32,6 +52,8 @@ class _StorageBase:
     is_sparse: _bool = False
     is_sparse_csr: _bool = False
     device: torch.device
+    # Used when stashing FakeTensor device onto storage in torch.save(metadata_only=True)
+    _fake_device: _Optional[torch.device] = None
 
     def __init__(self, *args, **kwargs):
         pass
@@ -48,7 +70,7 @@ class _StorageBase:
     def copy_(self, source: T, non_blocking: _Optional[_bool] = None) -> T:
         raise NotImplementedError
 
-    def new(self) -> T:  # type: ignore[type-var]
+    def new(self) -> Union[_StorageBase, TypedStorage]:
         raise NotImplementedError
 
     def nbytes(self) -> _int:
@@ -57,10 +79,14 @@ class _StorageBase:
     def size(self) -> _int:
         return self.nbytes()
 
-    def type(self, dtype: _Optional[str] = None, non_blocking: _bool = False) -> T:  # type: ignore[type-var]
+    def type(
+        self, dtype: _Optional[str] = None, non_blocking: _bool = False
+    ) -> Union[_StorageBase, TypedStorage]:
         return _type(self, dtype, non_blocking)
 
-    def cuda(self, device=None, non_blocking=False) -> T:  # type: ignore[type-var, misc] # noqa: E704
+    def cuda(
+        self, device=None, non_blocking=False
+    ) -> Union[_StorageBase, TypedStorage]:
         """Returns a copy of this object in CUDA memory.
 
         If this object is already in CUDA memory and on the correct device, then
@@ -75,7 +101,7 @@ class _StorageBase:
         device2 = torch.device("cuda", device) if device else torch.device("cuda")
         return self.to(device=device2, non_blocking=non_blocking)
 
-    def hpu(self, device=None, non_blocking=False) -> T:  # type: ignore[type-var, misc] # noqa: E704
+    def hpu(self, device=None, non_blocking=False) -> Union[_StorageBase, TypedStorage]:
         """Returns a copy of this object in HPU memory.
 
         If this object is already in HPU memory and on the correct device, then
@@ -141,7 +167,7 @@ class _StorageBase:
     def _new_with_weak_ptr(cls: Type[T], *args, **kwargs) -> T:
         raise NotImplementedError
 
-    def _shared_decref(self) -> T:  # type: ignore[type-var]
+    def _shared_decref(self) -> Union[_StorageBase, TypedStorage]:
         raise NotImplementedError
 
     def _write_file(self, *args, **kwargs):
@@ -150,7 +176,7 @@ class _StorageBase:
     def resize_(self, size: _int):
         raise NotImplementedError
 
-    def _weak_ref(self, *args, **kwargs) -> T:  # type: ignore[type-var]
+    def _weak_ref(self, *args, **kwargs) -> Union[_StorageBase, TypedStorage]:
         raise NotImplementedError
 
     def _set_from_file(self, *args, **kwargs):
@@ -185,11 +211,11 @@ class _StorageBase:
         raise NotImplementedError
 
     @classmethod
-    def from_file(cls, filename, shared, nbytes) -> T:  # type: ignore[type-var]
+    def from_file(cls, filename, shared, nbytes) -> Union[_StorageBase, TypedStorage]:
         raise NotImplementedError
 
     @classmethod
-    def _expired(cls, *args, **kwargs) -> T:  # type: ignore[type-var]
+    def _expired(cls, *args, **kwargs) -> Union[_StorageBase, TypedStorage]:
         raise NotImplementedError
 
     def _byteswap(self, *args, **kwargs):
@@ -260,7 +286,9 @@ class _StorageBase:
             storage = storage.clone()
         return storage
 
-    def to(self, *, device: torch.device, non_blocking: _bool = False) -> T:  # type: ignore[type-var, misc] # noqa: E704
+    def to(self, *, device: DeviceLikeType, non_blocking: _bool = False):
+        if not isinstance(device, torch.device):
+            device = torch.device(device)
         return _to(self, device, non_blocking)
 
     def double(self):
@@ -502,7 +530,7 @@ class UntypedStorage(torch._C.StorageBase, _StorageBase):
 
 
 def _load_from_bytes(b):
-    return torch.load(io.BytesIO(b))
+    return torch.load(io.BytesIO(b), weights_only=False)
 
 
 @functools.lru_cache(maxsize=None)
@@ -520,6 +548,9 @@ def _new_dtypes():
         torch.bits2x4,
         torch.bits4x2,
         torch.complex32,
+        torch.uint16,
+        torch.uint32,
+        torch.uint64,
     }
 
 
@@ -636,6 +667,8 @@ def _get_device_from_module(module: str):
 
 class TypedStorage:
     is_sparse: _bool = False
+    # Used when stashing FakeTensor device onto storage in torch.save(metadata_only=True)
+    _fake_device: _Optional[torch.device] = None
 
     dtype: torch.dtype
 
@@ -852,12 +885,15 @@ class TypedStorage:
         _warn_typed_storage_removal()
         return self._untyped_storage
 
-    def _new_wrapped_storage(self, untyped_storage):
+    def _new_wrapped_storage(self, untyped_storage) -> Self:
         assert type(untyped_storage) == torch.UntypedStorage
 
         if type(self) == TypedStorage:
-            return TypedStorage(
-                wrap_storage=untyped_storage, dtype=self.dtype, _internal=True
+            return cast(
+                Self,
+                TypedStorage(
+                    wrap_storage=untyped_storage, dtype=self.dtype, _internal=True
+                ),
             )
         else:
             return type(self)(wrap_storage=untyped_storage)
@@ -982,9 +1018,9 @@ class TypedStorage:
     def copy_(self, source: T, non_blocking: _Optional[bool] = None):
         _warn_typed_storage_removal()
         if isinstance(source, TypedStorage):
-            self._untyped_storage.copy_(source._untyped_storage, non_blocking)  # type: ignore[arg-type]
+            self._untyped_storage.copy_(source._untyped_storage, non_blocking)
         else:
-            self._untyped_storage.copy_(source, non_blocking)  # type: ignore[arg-type]
+            self._untyped_storage.copy_(source, non_blocking)
         return self
 
     def nbytes(self):
@@ -999,7 +1035,7 @@ class TypedStorage:
         self,
         dtype: _Optional[str] = None,
         non_blocking: bool = False,
-    ) -> Union[T, str]:
+    ) -> Union[_StorageBase, TypedStorage, str]:
         _warn_typed_storage_removal()
         if dtype is None:
             legacy_class = self._get_legacy_storage_class()
@@ -1012,7 +1048,7 @@ class TypedStorage:
         else:
             return self._untyped_storage.type(dtype, non_blocking)
 
-    def cuda(self, device=None, non_blocking=False) -> T:  # type: ignore[misc,type-var]
+    def cuda(self, device=None, non_blocking=False) -> Self:
         _warn_typed_storage_removal()
         if self.dtype in [
             torch.quint8,
@@ -1022,12 +1058,10 @@ class TypedStorage:
             torch.qint8,
         ]:
             raise RuntimeError("Cannot create CUDA storage with quantized dtype")
-        cuda_storage: torch.UntypedStorage = self._untyped_storage.cuda(
-            device, non_blocking
-        )
+        cuda_storage = self._untyped_storage.cuda(device, non_blocking)
         return self._new_wrapped_storage(cuda_storage)
 
-    def hpu(self, device=None, non_blocking=False) -> T:  # type: ignore[misc,type-var]
+    def hpu(self, device=None, non_blocking=False) -> Self:
         _warn_typed_storage_removal()
         if self.dtype in [
             torch.quint8,
@@ -1037,13 +1071,13 @@ class TypedStorage:
             torch.qint8,
         ]:
             raise RuntimeError("Cannot create HPU storage with quantized dtype")
-        hpu_storage: torch.UntypedStorage = self._untyped_storage.hpu(
-            device, non_blocking
-        )
+        hpu_storage = self._untyped_storage.hpu(device, non_blocking)
         return self._new_wrapped_storage(hpu_storage)
 
-    def to(self, *, device: torch.device, non_blocking: bool = False) -> T:  # type: ignore[type-var, misc]
+    def to(self, *, device: DeviceLikeType, non_blocking: bool = False) -> Self:
         _warn_typed_storage_removal()
+        if not isinstance(device, torch.device):
+            device = torch.device(device)
         if self.dtype in [
             torch.quint8,
             torch.quint4x2,
@@ -1054,9 +1088,7 @@ class TypedStorage:
             raise RuntimeError(
                 f"Cannot create {device.type.upper()} storage with quantized dtype"
             )
-        to_storage: torch.UntypedStorage = self._untyped_storage.to(
-            device=device, non_blocking=non_blocking
-        )
+        to_storage = self._untyped_storage.to(device=device, non_blocking=non_blocking)
         return self._new_wrapped_storage(to_storage)
 
     def element_size(self):
@@ -1385,7 +1417,7 @@ class TypedStorage:
         _warn_typed_storage_removal()
         if cls == TypedStorage:
             raise RuntimeError("from_file can only be called on derived classes")
-        untyped_storage: UntypedStorage = UntypedStorage.from_file(
+        untyped_storage = UntypedStorage.from_file(
             filename, shared, size * torch._utils._element_size(cls.dtype)
         )
         storage = cls(wrap_storage=untyped_storage)

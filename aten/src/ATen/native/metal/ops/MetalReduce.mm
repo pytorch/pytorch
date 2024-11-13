@@ -30,7 +30,7 @@ static Tensor wrapper_mean_dim(
     const Tensor& input,
     OptionalIntArrayRef opt_dims,
     bool keepdim,
-    c10::optional<ScalarType> dtype) {
+    std::optional<ScalarType> dtype) {
   if (@available(iOS 11.3, *)) {
     MPSImage* X = imageFromTensor(input);
     auto imageSize = input.sizes().vec();

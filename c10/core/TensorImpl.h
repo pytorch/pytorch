@@ -133,6 +133,7 @@ struct C10_API PlacementDeleteContext {
   DataPtr data_ptr_;
   PlacementDtor placement_dtor_;
   size_t size_;
+
   PlacementDeleteContext(
       DataPtr&& data_ptr,
       PlacementDtor placement_dtor,
@@ -140,6 +141,11 @@ struct C10_API PlacementDeleteContext {
       : data_ptr_(std::move(data_ptr)),
         placement_dtor_(placement_dtor),
         size_(size) {}
+
+  PlacementDeleteContext(PlacementDeleteContext&&) noexcept = delete;
+  PlacementDeleteContext(const PlacementDeleteContext&) = delete;
+  PlacementDeleteContext& operator=(const PlacementDeleteContext&) = delete;
+  PlacementDeleteContext& operator=(PlacementDeleteContext&&) = delete;
   static DataPtr makeDataPtr(
       DataPtr&& data_ptr,
       PlacementDtor placement_dtor,
@@ -200,11 +206,11 @@ struct C10_API NamedTensorMetaInterface {
   virtual std::unique_ptr<NamedTensorMetaInterface> clone() const {
     TORCH_INTERNAL_ASSERT(
         false, "Not implemented: NamedTensorMetaInterface::clone");
-  };
+  }
   virtual int64_t slow_dim() const {
     TORCH_INTERNAL_ASSERT(
         false, "Not implemented: NamedTensorMetaInterface::slow_dim");
-  };
+  }
 };
 
 // For ease of copy pasting
@@ -237,6 +243,7 @@ struct C10_API ExtraMeta {
   std::optional<std::string> custom_storage_error_msg_ = std::nullopt;
 
   ExtraMeta() = default;
+  ~ExtraMeta() = default;
   ExtraMeta(const ExtraMeta& other) {
     if (other.symbolic_shape_meta_) {
       symbolic_shape_meta_ =
@@ -255,6 +262,9 @@ struct C10_API ExtraMeta {
       custom_storage_error_msg_ = other.custom_storage_error_msg_;
     }
   }
+  ExtraMeta& operator=(const ExtraMeta& other) = delete;
+  ExtraMeta(ExtraMeta&& other) = delete;
+  ExtraMeta& operator=(ExtraMeta&& other) = delete;
 
   ExtraMeta(
       std::unique_ptr<c10::SymbolicShapeMeta> symbolic_shape_meta,
@@ -1891,7 +1901,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * storage / storage_offset). See NOTE [ Metadata Change for a Detached Tensor
    * ] for details.
    */
-  void set_allow_tensor_metadata_change(bool value) {
+  void set_allow_tensor_metadata_change(bool value [[maybe_unused]]) {
     // TODO: at some point, we should kill this field completely.
     allow_tensor_metadata_change_ = true;
   }
@@ -2031,7 +2041,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
            BackendComponent::MPSBit,
            BackendComponent::HIPBit,
            BackendComponent::XPUBit,
-           BackendComponent::HPUBit});
+           BackendComponent::HPUBit,
+           BackendComponent::MTIABit});
       constexpr auto dense_k = DispatchKeySet(DispatchKey::Dense);
       return ts.has_any(dense_k) && ts.has_any(dense_backends);
     };
@@ -2311,7 +2322,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     // Check it here statically - otherwise TypeMeta would throw the runtime
     // error in attempt to invoke TypeMeta::ctor()
     static_assert(
-        std::is_default_constructible<T>::value,
+        std::is_default_constructible_v<T>,
         "Tensor can't hold non-default-constructable types");
     return static_cast<T*>(raw_mutable_data(caffe2::TypeMeta::Make<T>()));
   }

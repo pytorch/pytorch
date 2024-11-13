@@ -10,6 +10,7 @@
 
 #include <cstddef>
 
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-parameter")
 namespace at {
 
 struct TORCH_API MPSHooksInterface : AcceleratorHooksInterface {
@@ -21,7 +22,7 @@ struct TORCH_API MPSHooksInterface : AcceleratorHooksInterface {
   ~MPSHooksInterface() override = default;
 
   // Initialize the MPS library state
-  virtual void initMPS() const {
+  void init() const override {
     FAIL_MPSHOOKS_FUNC(__func__);
   }
   virtual bool hasMPS() const {
@@ -93,6 +94,12 @@ struct TORCH_API MPSHooksInterface : AcceleratorHooksInterface {
   bool hasPrimaryContext(DeviceIndex device_index) const override {
     FAIL_MPSHOOKS_FUNC(__func__);
   }
+  bool isPinnedPtr(const void* data) const override {
+    return false;
+  }
+  Allocator* getPinnedMemoryAllocator() const override {
+    FAIL_MPSHOOKS_FUNC(__func__);
+  }
   #undef FAIL_MPSHOOKS_FUNC
 };
 
@@ -107,3 +114,4 @@ TORCH_API const MPSHooksInterface& getMPSHooks();
 
 } // namespace detail
 } // namespace at
+C10_DIAGNOSTIC_POP()

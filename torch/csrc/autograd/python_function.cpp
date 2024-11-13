@@ -297,7 +297,7 @@ auto PyNode::compiled_autograd_should_lift() const -> bool {
 void PyNode::compiled_args(CompiledNodeArgs& args) {
   static PyObject* method_name =
       PyUnicode_InternFromString("_compiled_autograd_key");
-  THPObjectPtr pykey(PyObject_CallMethodNoArgs(obj, method_name));
+  THPObjectPtr pykey(PyObject_CallMethodObjArgs(obj, method_name, nullptr));
   if (!pykey)
     throw_python_error();
   TORCH_CHECK(
@@ -330,7 +330,7 @@ void PyNode::compiled_args(CompiledNodeArgs& args) {
   args.collect(f->compiled_autograd_symints);
   args.set_default_dyn_type(prior);
 
-  args.collect(f->saved_variables);
+  args.collect(f->saved_variables, true); // always unpacked as output in eager
   args.collect(f->materialize_grads);
   args.collect(f->is_variable_input);
   args.collect(f->needs_input_grad);
@@ -413,8 +413,7 @@ PyObject* PyNode::to_py_args(
     throw_python_error();
   auto& output_info = py_fn->output_info;
   for (const auto i : c10::irange(num_inputs)) {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    PyObject* input;
+    PyObject* input = nullptr;
     if (inputs[i].defined() || !py_fn->materialize_grads ||
         (input_metadata(i).was_default_constructed() &&
          !py_fn->materialize_non_diff_grads)) {
@@ -734,8 +733,18 @@ static void _wrap_outputs(
       PyTuple_SetItem(outputs, i, obj);
     } else {
       if (is_executable) {
+        // If one of the grad outputs is undefined, a correctly-shaped zeros
+        // should be used instead. To construct these for NJT, zeros_like() must
+        // be used until we have factory function support.
         // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-        self->output_info.emplace_back(*wrapped_outputs[i]);
+        bool is_differentiable =
+            (non_differentiable.count(
+                 wrapped_outputs[i]->unsafeGetTensorImpl()) == 0 &&
+             isDifferentiableType(wrapped_outputs[i]->scalar_type()));
+        bool use_zeros_like = is_differentiable && num_outputs > 1 &&
+            wrapped_outputs[i]->is_nested();
+        // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+        self->output_info.emplace_back(*wrapped_outputs[i], use_zeros_like);
       }
       // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       PyTuple_SetItem(outputs, i, THPVariable_Wrap(*wrapped_outputs[i]));
@@ -1133,14 +1142,11 @@ PyObject* process_outputs(
     _save_variables(tensors_to_save, cdata, grad_fn);
   } else {
     // Remove unnecessary attributes
-    Py_XDECREF(grad_fn->to_save);
-    grad_fn->to_save = nullptr;
-    Py_XDECREF(grad_fn->non_differentiable);
-    grad_fn->non_differentiable = nullptr;
+    Py_CLEAR(grad_fn->to_save);
+    Py_CLEAR(grad_fn->non_differentiable);
   }
 
-  Py_XDECREF(grad_fn->saved_for_forward);
-  grad_fn->saved_for_forward = nullptr;
+  Py_CLEAR(grad_fn->saved_for_forward);
 
   // Unpack the output, unless .forward() returned a tuple
   if (unpack_output) {
@@ -1178,6 +1184,26 @@ PyObject* THPFunction_set_sequence_nr(PyObject* self, PyObject* sequence_nr) {
   auto cdata = ((THPFunction*)self)->cdata.lock();
   cdata->set_sequence_nr(THPUtils_unpackUInt64(sequence_nr));
   Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THPFunction_input_metadata(PyObject* self, void* unused) {
+  HANDLE_TH_ERRORS;
+  auto cdata = ((THPFunction*)self)->cdata.lock();
+  const auto num_inputs = cdata->num_inputs();
+  THPObjectPtr list(PyTuple_New(num_inputs));
+  if (!list) {
+    return nullptr;
+  }
+  for (size_t i = 0; i < num_inputs; ++i) {
+    const auto& metadata = cdata->input_metadata(i);
+    THPObjectPtr item(py::cast(metadata).release().ptr());
+    if (!item) {
+      return nullptr;
+    }
+    PyTuple_SET_ITEM(list.get(), i, item.release());
+  }
+  return list.release();
   END_HANDLE_TH_ERRORS
 }
 
@@ -1628,8 +1654,8 @@ PyObject* THPFunction_metadata(THPFunction* self, void* _unused) {
   END_HANDLE_TH_ERRORS
 }
 
-typedef PyObject* (*getter)(PyObject*, void*);
-typedef int (*setter)(PyObject*, PyObject*, void*);
+using getter = PyObject* (*)(PyObject*, void*);
+using setter = int (*)(PyObject*, PyObject*, void*);
 
 namespace {
 
@@ -1723,6 +1749,11 @@ static struct PyGetSetDef THPFunction_properties[] = {
      nullptr},
     {"requires_grad", getRequiresGrad, nullptr, nullptr, nullptr},
     {"metadata", (getter)THPFunction_metadata, nullptr, nullptr, nullptr},
+    {"_input_metadata",
+     (getter)THPFunction_input_metadata,
+     nullptr,
+     nullptr,
+     nullptr},
     {"materialize_grads",
      nullptr,
      (setter)THPFunction_set_materialize_grads,
@@ -1767,7 +1798,8 @@ static struct PyMethodDef THPFunction_methods[] = {
     {nullptr}};
 
 PyTypeObject THPFunctionType = {
-    PyVarObject_HEAD_INIT(nullptr, 0) "torch._C._FunctionBase", /* tp_name */
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "torch._C._FunctionBase", /* tp_name */
     sizeof(THPFunction), /* tp_basicsize */
     0, /* tp_itemsize */
     (destructor)THPFunction_dealloc, /* tp_dealloc */

@@ -6,7 +6,6 @@ from enum import Enum
 import torch
 import torch.ao.quantization.quantizer.x86_inductor_quantizer as xiq
 import torch.nn as nn
-from torch._export import capture_pre_autograd_graph
 from torch.ao.quantization import ObserverBase
 from torch.ao.quantization.quantize_pt2e import (
     convert_pt2e,
@@ -17,6 +16,7 @@ from torch.ao.quantization.quantizer.x86_inductor_quantizer import (
     QUANT_ANNOTATION_KEY,
     X86InductorQuantizer,
 )
+from torch.export import export_for_training
 from torch.testing._internal.common_quantization import (
     NodeSpec as ns,
     QuantizationTestCase,
@@ -528,6 +528,29 @@ class TestHelperModules:
             weighted = torch.matmul(attention, v)
             return weighted
 
+    class Conv2dFlattenTranspose(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.projection = torch.nn.Conv2d(
+                3, 768, kernel_size=(16, 16), stride=(16, 16)
+            )
+            self.cls_token = torch.rand(1, 1, 768)
+
+        def forward(self, pixel_values):
+            embeddings = self.projection(pixel_values).flatten(2).transpose(1, 2)
+            embeddings = torch.cat((self.cls_token, embeddings), dim=1)
+            return embeddings
+
+    class Conv2dFlattenCatTranspose(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.conv = torch.nn.Conv2d(3, 768, kernel_size=(16, 16), stride=(16, 16))
+
+        def forward(self, x):
+            y = self.conv(x).flatten(2)
+            y = torch.cat([y, y], dim=-1)
+            return y.transpose(1, 2)
+
 
 class X86InductorQuantTestCase(QuantizationTestCase):
     def _test_quantizer(
@@ -544,10 +567,10 @@ class X86InductorQuantTestCase(QuantizationTestCase):
 
         # program capture
         m = copy.deepcopy(m_eager)
-        m = capture_pre_autograd_graph(
+        m = export_for_training(
             m,
             example_inputs,
-        )
+        ).module()
 
         # QAT Model failed to deepcopy
         export_model = m if is_qat else copy.deepcopy(m)
@@ -938,15 +961,97 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
     @skipIfNoX86
     def test_flatten_recipe(self):
         r"""
-        Test pattern: int8_in_int8_out_ops(flatten) - non_quantizable op(pow)
-        Since flatten is a int8_in_int8_out_op, there is obs between flatten and pow.
+        Test pattern: conv -> flatten -> cat -> transpose
         """
-        self._single_op_share_observer_recipe_test_helper(
-            TestHelperModules.Conv2dSingleOpPowModule(
-                lambda x: torch.flatten(x, 1)
-            ).eval(),
-            torch.rand(1, 2, 14, 14),
+        m = TestHelperModules.Conv2dFlattenCatTranspose().eval()
+        x = torch.randn(1, 3, 224, 224)
+        quantizer = X86InductorQuantizer().set_global(
+            xiq.get_default_x86_inductor_quantization_config()
+        )
+        example_inputs = (x,)
+        node_occurrence = {
+            torch.ops.quantized_decomposed.quantize_per_tensor.default: 4,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 4,
+            # quantize_per_channel for weights are const propagated
+            torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
+            torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
+        }
+        node_list = [
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+            torch.ops.aten.conv2d.default,
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
             torch.ops.aten.flatten.using_ints,
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+            torch.ops.aten.cat.default,
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+        ]
+        _, prepare_model, _ = self._test_quantizer(
+            m,
+            example_inputs,
+            quantizer,
+            node_occurrence,
+            node_list,
+        )
+        # Check Flatten has share observer at input and output
+        for node in prepare_model.graph.nodes:
+            if (
+                node.op == "call_function"
+                and node.target is torch.ops.aten.flatten.using_ints
+            ):
+                single_op_node = node
+                input_obs_of_single_op = getattr(
+                    prepare_model, single_op_node.args[0].target
+                )
+                output_obs_of_single_op = getattr(
+                    prepare_model, next(iter(single_op_node.users)).target
+                )
+            elif (
+                node.op == "call_function"
+                and node.target is torch.ops.aten.conv2d.default
+            ):
+                conv_node = node
+                input_obs_of_conv = getattr(prepare_model, conv_node.args[0].target)
+        self.assertTrue(isinstance(input_obs_of_single_op, ObserverBase))
+        self.assertTrue(isinstance(output_obs_of_single_op, ObserverBase))
+        self.assertTrue(isinstance(input_obs_of_conv, ObserverBase))
+        self.assertTrue(input_obs_of_single_op is output_obs_of_single_op)
+        self.assertTrue(input_obs_of_single_op is not input_obs_of_conv)
+
+    @skipIfNoX86
+    def test_flatten_recipe2(self):
+        r"""
+        Test pattern: conv -> flatten -> transpose
+        """
+        m = TestHelperModules.Conv2dFlattenTranspose().eval()
+        x = torch.randn(1, 3, 224, 224)
+        quantizer = X86InductorQuantizer().set_global(
+            xiq.get_default_x86_inductor_quantization_config()
+        )
+        example_inputs = (x,)
+        node_occurrence = {
+            torch.ops.quantized_decomposed.quantize_per_tensor.default: 1,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 1,
+            # quantize_per_channel for weights are const propagated
+            torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
+            torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
+        }
+        node_list = [
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+            torch.ops.aten.conv2d.default,
+            torch.ops.aten.flatten.using_ints,
+            torch.ops.aten.transpose.int,
+        ]
+        self._test_quantizer(
+            m,
+            example_inputs,
+            quantizer,
+            node_occurrence,
+            node_list,
         )
 
     @skipIfNoX86
@@ -1216,7 +1321,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         Test pattern of linear with unary post ops (e.g. relu) with X86InductorQuantizer.
         """
         use_bias_list = [True, False]
-        # TODO test for inplace add after refactoring of capture_pre_autograd_graph
+        # TODO test for inplace add after refactoring of export_for_training
         inplace_list = [False]
         if post_op_algo_list is None:
             post_op_algo_list = [None]
@@ -1356,7 +1461,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         Currently, only add as binary post op is supported.
         """
         linear_pos_list = [NodePosType.left, NodePosType.right, NodePosType.both]
-        # TODO test for inplace add after refactoring of capture_pre_autograd_graph
+        # TODO test for inplace add after refactoring of export_for_training
         inplace_add_list = [False]
         example_inputs = (torch.randn(2, 16),)
         quantizer = X86InductorQuantizer().set_global(
@@ -1460,7 +1565,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         Since linear_1 has 2 users, we should annotate linear_2 for binary fusion instead of linear_1
         """
         example_inputs = (torch.randn(2, 16),)
-        # TODO test for inplace add after refactoring of capture_pre_autograd_graph
+        # TODO test for inplace add after refactoring of export_for_training
         inplace_add_list = [False]
         is_qat_list = [False, True]
         is_dynamic_list = [False, True]
@@ -1529,9 +1634,9 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         Currently, only add as binary post op and relu as unary post op are supported.
         """
         linear_pos_list = [NodePosType.left, NodePosType.right, NodePosType.both]
-        # TODO test for inplace add after refactoring of capture_pre_autograd_graph
+        # TODO test for inplace add after refactoring of export_for_training
         inplace_add_list = [False]
-        # TODO test for inplace relu after refactoring of capture_pre_autograd_graph
+        # TODO test for inplace relu after refactoring of export_for_training
         inplace_relu_list = [False]
         example_inputs = (torch.randn(2, 16),)
         quantizer = X86InductorQuantizer().set_global(
@@ -2026,7 +2131,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         """
 
         class Sub(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear1 = torch.nn.Linear(5, 10)
                 self.relu1 = torch.nn.ReLU(inplace=False)
@@ -2039,7 +2144,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 return x
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(5, 5)
                 self.sub = Sub()
@@ -2088,7 +2193,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         """Test that if a module name has an underscore, we can still quantize it."""
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 # This module name has underscores, which can be part of a mangled name.
                 self.foo_bar = torch.nn.Linear(2, 2)
@@ -2104,7 +2209,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         )
         example_inputs = (torch.randn(2, 2),)
         m = M().eval()
-        m = capture_pre_autograd_graph(m, example_inputs)
+        m = export_for_training(m, example_inputs).module()
         m = prepare_pt2e(m, quantizer)
         # Use a linear count instead of names because the names might change, but
         # the order should be the same.
@@ -2141,7 +2246,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         """
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear1 = torch.nn.Linear(5, 10)
                 self.linear2 = torch.nn.Linear(10, 5)
@@ -2195,7 +2300,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         """
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear1 = torch.nn.Linear(5, 10)
                 self.linear2 = torch.nn.Linear(10, 5)
@@ -2374,7 +2479,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         """
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear1 = torch.nn.Linear(5, 10)
                 self.linear2 = torch.nn.Linear(10, 5)

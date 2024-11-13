@@ -6,16 +6,17 @@ from typing import cast, List, Optional
 
 import torch
 import torch.nn.functional as F
-from torch.distributed._tensor import DeviceMesh, distribute_tensor
-from torch.distributed._tensor.api import DTensor
-from torch.distributed._tensor.debug import CommDebugMode
-from torch.distributed._tensor.placement_types import (
+from torch.distributed import DeviceMesh, init_device_mesh
+from torch.distributed.tensor import (
+    distribute_tensor,
+    DTensor,
     Partial,
     Placement,
     Replicate,
     Shard,
 )
-from torch.testing._internal.common_utils import run_tests
+from torch.distributed.tensor.debug import CommDebugMode
+from torch.testing._internal.common_utils import run_tests, skipIfRocm
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     skip_unless_torch_gpu,
@@ -302,8 +303,9 @@ class DistMatrixOpsTest(DTensorTestBase):
         # TODO: Add test cases where is_causal=False and an attention mask is provided.
         #       Gaps include missing op support for aten.masked_fill_.Scalar.
         is_causal = True
+        enable_gqa = False
         params = torch.backends.cuda.SDPAParams(
-            query, key, value, None, dropout_p, is_causal
+            query, key, value, None, dropout_p, is_causal, enable_gqa
         )
         if torch.backends.cuda.can_use_flash_attention(params, debug=False):
             available_backends.append(SDPBackend.FLASH_ATTENTION)
@@ -337,6 +339,32 @@ class DistMatrixOpsTest(DTensorTestBase):
                     self.assertEqual(dist_key.grad.full_tensor(), key.grad)
                     self.assertTrue(dist_value.grad.placements[0].is_shard(dim=1))
                     self.assertEqual(dist_value.grad.full_tensor(), value.grad)
+
+    @skipIfRocm
+    @skip_unless_torch_gpu
+    @with_comms()
+    def test_dtensor_mm(self):
+        """
+        Test mm with DTensor with 2D mesh.
+        We need to add the test here since we only test 1D mesh in test_dtensor_ops.py.
+        Also, we added tests for the corner case where one of the 2D dimension is 1.
+
+        # TODO: we need to test more DTensor ops with 2D mesh, especially when 1 of the
+        mesh dimension of the 2D mesh is 1.
+        """
+        mesh_0 = init_device_mesh(self.device_type, (self.world_size // 2, 2))
+        mesh_1 = init_device_mesh(self.device_type, (self.world_size, 1))
+        mesh_2 = init_device_mesh(self.device_type, (1, self.world_size))
+
+        for mesh in [mesh_0, mesh_1, mesh_2]:
+            lhs = torch.randn(256, 128)
+            rhs = torch.randn(128, 256)
+            mm_result = lhs @ rhs
+
+            lhs_dtensor = distribute_tensor(lhs, mesh, [Shard(dim=0), Replicate()])
+            rhs_dtensor = distribute_tensor(rhs, mesh, [Replicate(), Shard(dim=1)])
+            dtensor_result = lhs_dtensor @ rhs_dtensor
+            self.assertEqual(dtensor_result.full_tensor(), mm_result)
 
 
 if __name__ == "__main__":

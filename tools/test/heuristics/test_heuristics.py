@@ -9,8 +9,10 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
+
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 sys.path.append(str(REPO_ROOT))
+
 from tools.test.heuristics.test_interface import TestTD
 from tools.testing.target_determination.determinator import TestPrioritizations
 from tools.testing.target_determination.heuristics.filepath import (
@@ -24,6 +26,7 @@ from tools.testing.target_determination.heuristics.previously_failed_in_pr impor
     get_previous_failures,
 )
 from tools.testing.test_run import TestRun
+
 
 sys.path.remove(str(REPO_ROOT))
 
@@ -152,11 +155,12 @@ class TestParsePrevTests(TestTD):
 
 class TestFilePath(TestTD):
     def test_get_keywords(self) -> None:
-        self.assertEqual(get_keywords("test/test_car.py"), [])
-        self.assertEqual(get_keywords("test/nn/test_amp.py"), ["nn"])
-        self.assertEqual(get_keywords("torch/nn/test_amp.py"), ["nn"])
+        self.assertEqual(get_keywords("test/test_car.py"), ["car"])
+        self.assertEqual(get_keywords("test/nn/test_amp.py"), ["nn", "amp"])
+        self.assertEqual(get_keywords("torch/nn/test_amp.py"), ["nn", "amp"])
         self.assertEqual(
-            get_keywords("torch/nn/mixed_precision/test_amp.py"), ["nn", "amp"]
+            get_keywords("torch/nn/mixed_precision/test_something.py"),
+            ["nn", "amp", "something"],
         )
 
     def test_match_keywords(self) -> None:

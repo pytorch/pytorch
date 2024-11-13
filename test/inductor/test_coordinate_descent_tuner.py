@@ -6,13 +6,13 @@ from unittest import mock
 
 import torch
 from torch._inductor.runtime.hints import TRITON_MAX_BLOCK
-
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import IS_LINUX
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
+
 try:
-    import triton
+    import triton  # @manual
 except ImportError:
     if __name__ == "__main__":
         sys.exit(0)
@@ -20,6 +20,7 @@ except ImportError:
 
 from torch._inductor import config
 from torch._inductor.runtime.coordinate_descent_tuner import CoordescTuner
+
 
 config.benchmark_kernel = True
 config.coordinate_descent_tuning = True

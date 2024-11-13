@@ -6,6 +6,8 @@
 
 #include <c10/util/Registry.h>
 
+#include <ATen/detail/AcceleratorHooksInterface.h>
+
 #include <memory>
 
 namespace at {
@@ -19,14 +21,13 @@ namespace at {
 // which we may want to call into from CPU code (and thus must be dynamically
 // dispatched, to allow for separate compilation of HIP code).  See
 // CUDAHooksInterface for more detailed motivation.
-struct TORCH_API HIPHooksInterface {
+struct TORCH_API HIPHooksInterface : AcceleratorHooksInterface {
   // This should never actually be implemented, but it is used to
   // squelch -Werror=non-virtual-dtor
-  virtual ~HIPHooksInterface() = default;
+  ~HIPHooksInterface() override = default;
 
-  // Initialize the HIP library state
-  virtual void initHIP() const {
-    AT_ERROR("Cannot initialize HIP without ATen_hip library.");
+  void init() const override {
+    TORCH_CHECK(false, "Cannot initialize HIP without ATen_hip library.");
   }
 
   virtual std::unique_ptr<c10::GeneratorImpl> initHIPGenerator(Context*) const {
@@ -41,8 +42,12 @@ struct TORCH_API HIPHooksInterface {
     return -1;
   }
 
-  virtual Allocator* getPinnedMemoryAllocator() const {
-    AT_ERROR("Pinned memory requires HIP.");
+  bool isPinnedPtr(const void* data) const override {
+    return false;
+  }
+
+  Allocator* getPinnedMemoryAllocator() const override {
+    TORCH_CHECK(false, "Pinned memory requires HIP.");
   }
 
   virtual void registerHIPTypes(Context*) const {
@@ -51,6 +56,10 @@ struct TORCH_API HIPHooksInterface {
 
   virtual int getNumGPUs() const {
     return 0;
+  }
+
+  bool hasPrimaryContext(DeviceIndex device_index) const override {
+    TORCH_CHECK(false, "Cannot check primary context without ATen_hip library.");
   }
 };
 

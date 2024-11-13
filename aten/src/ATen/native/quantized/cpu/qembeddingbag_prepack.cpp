@@ -155,8 +155,7 @@ c10::intrusive_ptr<EmbeddingPackedParamsBase> PackedEmbeddingBagWeight::prepack(
   return packed_ptr;
 }
 
-namespace at {
-namespace native {
+namespace at::native {
 
 // Note - This is a temporary pack function for embedding bag which quantizes
 // and packs the float weight tensor. In the next step it will be replaced by a
@@ -250,7 +249,7 @@ Tensor& qembeddingbag_byte_prepack_out(Tensor& output, const Tensor& weight) {
   // Adjust output dimensions to account for FP32 scale and zero_points.
   std::vector<int64_t> output_shape = weight_sizes.vec();
   output_shape[cols_dim] = output_columns;
-  at::native::resize_(output, output_shape, c10::nullopt);
+  at::native::resize_(output, output_shape, std::nullopt);
   auto* output_data = output.data_ptr<uint8_t>();
 
 #ifdef USE_FBGEMM
@@ -318,8 +317,8 @@ Tensor qembeddingbag_byte_prepack(const Tensor& weight) {
       at::kByte,
       weight_contig->layout(),
       weight_contig->device(),
-      c10::nullopt,
-      c10::nullopt);
+      std::nullopt,
+      std::nullopt);
   qembeddingbag_byte_prepack_out(output, weight);
   return output;
 }
@@ -561,5 +560,4 @@ TORCH_LIBRARY_IMPL(quantized, Meta, m) {
 }
 
 } // namespace
-} // namespace native
-} // namespace at
+} // namespace at::native

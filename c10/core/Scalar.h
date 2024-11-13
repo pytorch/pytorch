@@ -69,6 +69,12 @@ class C10_API Scalar {
       "int64_t is the same as long long on MacOS");
   Scalar(long vv) : Scalar(vv, true) {}
 #endif
+#if defined(_MSC_VER)
+  static_assert(
+      std::is_same_v<long long, int64_t>,
+      "int64_t is the same as long long on Windows");
+  Scalar(long vv) : Scalar(vv, true) {}
+#endif
 #if defined(__linux__) && !defined(__ANDROID__)
   static_assert(
       std::is_same_v<long, int64_t>,
@@ -115,6 +121,9 @@ class C10_API Scalar {
       return checked_convert<type, double>(v.d, #type);               \
     } else if (Tag::HAS_z == tag) {                                   \
       return checked_convert<type, c10::complex<double>>(v.z, #type); \
+    } else if (Tag::HAS_sd == tag) {                                  \
+      return checked_convert<type, double>(                           \
+          toSymFloat().guard_float(__FILE__, __LINE__), #type);       \
     }                                                                 \
     if (Tag::HAS_b == tag) {                                          \
       return checked_convert<type, bool>(v.i, #type);                 \
@@ -125,9 +134,6 @@ class C10_API Scalar {
     } else if (Tag::HAS_si == tag) {                                  \
       return checked_convert<type, int64_t>(                          \
           toSymInt().guard_int(__FILE__, __LINE__), #type);           \
-    } else if (Tag::HAS_sd == tag) {                                  \
-      return checked_convert<type, int64_t>(                          \
-          toSymFloat().guard_float(__FILE__, __LINE__), #type);       \
     } else if (Tag::HAS_sb == tag) {                                  \
       return checked_convert<type, int64_t>(                          \
           toSymBool().guard_bool(__FILE__, __LINE__), #type);         \

@@ -3,6 +3,7 @@
 #include <condition_variable>
 #include <memory>
 #include <optional>
+#include <tuple>
 #include <type_traits>
 #include <utility>
 
@@ -301,8 +302,10 @@ struct TORCH_API ConstantString final : c10::intrusive_ptr_target {
  public:
   ConstantString(std::string str) : str_(std::move(str)) {}
   ConstantString(c10::string_view str) : str_(std::string(str)) {}
+  ConstantString(std::string_view str) : str_(std::string(str)) {}
   static c10::intrusive_ptr<ConstantString> create(std::string str_);
   static c10::intrusive_ptr<ConstantString> create(c10::string_view str_);
+  static c10::intrusive_ptr<ConstantString> create(std::string_view str_);
   static c10::intrusive_ptr<ConstantString> create(const char* str_);
 
   const std::string& string() const {
@@ -500,7 +503,7 @@ struct TORCH_API TupleElements {
     return *this;
   }
 
-  C10_NODISCARD c10::ArrayRef<IValue> asArrayRef() const {
+  [[nodiscard]] c10::ArrayRef<IValue> asArrayRef() const {
     if (inlineSize_) {
       return c10::ArrayRef<IValue>(elementsInline_, inlineSize_);
     } else {
@@ -527,15 +530,15 @@ struct TORCH_API TupleElements {
     }
   }
 
-  C10_NODISCARD bool empty() const {
+  [[nodiscard]] bool empty() const {
     return inlineSize_ ? false : elementsVector_.empty();
   }
 
-  C10_NODISCARD size_t size() const {
+  [[nodiscard]] size_t size() const {
     return inlineSize_ ? inlineSize_ : elementsVector_.size();
   }
 
-  C10_NODISCARD IValue& operator[](size_t idx) {
+  [[nodiscard]] IValue& operator[](size_t idx) {
     if (inlineSize_) {
       return elementsInline_[idx];
     } else {
@@ -543,7 +546,7 @@ struct TORCH_API TupleElements {
     }
   }
 
-  C10_NODISCARD const IValue& operator[](size_t idx) const {
+  [[nodiscard]] const IValue& operator[](size_t idx) const {
     if (inlineSize_) {
       return elementsInline_[idx];
     } else {
@@ -551,7 +554,7 @@ struct TORCH_API TupleElements {
     }
   }
 
-  C10_NODISCARD IValue& at(size_t idx) {
+  [[nodiscard]] IValue& at(size_t idx) {
     if (inlineSize_) {
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(inlineSize_ <= 3);
       TORCH_CHECK(idx < inlineSize_, "TupleElements: invalid index Index = ", idx, "; Length = ", inlineSize_);
@@ -561,7 +564,7 @@ struct TORCH_API TupleElements {
     }
   }
 
-  C10_NODISCARD const IValue& at(size_t idx) const {
+  [[nodiscard]] const IValue& at(size_t idx) const {
     if (inlineSize_) {
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(inlineSize_ <= 3);
       TORCH_CHECK(idx < inlineSize_, "TupleElements: invalid index Index = ", idx, "; Length = ", inlineSize_);
@@ -572,7 +575,7 @@ struct TORCH_API TupleElements {
     }
   }
 
-  C10_NODISCARD iterator begin() {
+  [[nodiscard]] iterator begin() {
     if (inlineSize_) {
       return elementsInline_;
     } else {
@@ -580,7 +583,7 @@ struct TORCH_API TupleElements {
     }
   }
 
-  C10_NODISCARD iterator end() {
+  [[nodiscard]] iterator end() {
     if (inlineSize_) {
       return elementsInline_ + inlineSize_;
     } else {
@@ -588,7 +591,7 @@ struct TORCH_API TupleElements {
     }
   }
 
-  C10_NODISCARD const_iterator begin() const {
+  [[nodiscard]] const_iterator begin() const {
     if (inlineSize_) {
       return elementsInline_;
     } else {
@@ -596,7 +599,7 @@ struct TORCH_API TupleElements {
     }
   }
 
-  C10_NODISCARD const_iterator end() const {
+  [[nodiscard]] const_iterator end() const {
     if (inlineSize_) {
       return elementsInline_ + inlineSize_;
     } else {
@@ -604,27 +607,27 @@ struct TORCH_API TupleElements {
     }
   }
 
-  C10_NODISCARD const_iterator cbegin() const {
+  [[nodiscard]] const_iterator cbegin() const {
     return begin();
   }
 
-  C10_NODISCARD const_iterator cend() const {
+  [[nodiscard]] const_iterator cend() const {
     return end();
   }
 
-  C10_NODISCARD std::vector<IValue> vec() const & {
+  [[nodiscard]] std::vector<IValue> vec() const& {
     return asArrayRef().vec();
   }
 
-  C10_NODISCARD IValue& back() {
+  [[nodiscard]] IValue& back() {
     return *(end() - 1);
   }
 
-  C10_NODISCARD const IValue& back() const {
+  [[nodiscard]] const IValue& back() const {
     return *(end() - 1);
   }
 
-  C10_NODISCARD std::vector<IValue> vec() && {
+  [[nodiscard]] std::vector<IValue> vec() && {
     std::vector<IValue> result;
     result.reserve(size());
     for (auto&& iv : *this) {
@@ -862,6 +865,19 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   Future(Future&&) = delete;
   Future& operator=(const Future&) = delete;
   Future& operator=(Future&&) = delete;
+
+  // Destructor
+  // Explicitly destroy events under device guard, otherwise it can lead to
+  // extra context being created on device 0.  Reason: python garbage collector
+  // calls this destructor, but python GC does not have a device context, so a
+  // "default" one (usually on device 0) could be created when we go down the
+  // line of event destroy.
+  ~Future() override {
+    while (!events_.empty()) {
+      c10::OptionalDeviceGuard deviceGuard(events_.back().device());
+      events_.pop_back();
+    }
+  }
 
   struct TORCH_API FutureError final : public std::exception {
     explicit FutureError(std::string&& error_msg_)
@@ -1375,7 +1391,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   // The device that was current when markCompleted was called, which we'll
   // restore when invoking callbacks. It's optional because we'll only store it
   // if the future completes successfully.
-  optional<c10::Device> currentDevice_;
+  std::optional<c10::Device> currentDevice_;
 
   // The events that correspond to the completion of the async I/O kernels. They
   // are recorded on the appropriate streams when the future is marked completed
@@ -1667,7 +1683,7 @@ struct ivalue::EnumHolder : c10::intrusive_ptr_target {
 namespace detail {
 
 struct _guarded_unsigned_long_unique_dummy final {
-  _guarded_unsigned_long_unique_dummy(int64_t){};
+  _guarded_unsigned_long_unique_dummy(int64_t){}
 };
 using _guarded_unsigned_long = std::conditional_t<
     std::is_same_v<unsigned long, uint32_t> ||
@@ -1714,7 +1730,7 @@ DEFINE_TO(uint64_t, toInt)
 DEFINE_TO(detail::_guarded_unsigned_long, toInt)
 DEFINE_TO(int64_t, toInt)
 DEFINE_TO(bool, toBool)
-DEFINE_TO(c10::intrusive_ptr<caffe2::Blob>, toBlob);
+DEFINE_TO(c10::intrusive_ptr<caffe2::Blob>, toBlob)
 DEFINE_TO(c10::intrusive_ptr<ivalue::ConstantString>, toString)
 DEFINE_TO(c10::intrusive_ptr<ivalue::Object>, toObject)
 DEFINE_TO(at::Scalar, toScalar)
@@ -1748,7 +1764,7 @@ template <class T>
 struct _fake_type {};
 
 // generic_to<T> converts an IValue from a generic list or generic dict
-// to a concrete list/dict type likelike List<T>, Dict<...> or optional<T>.
+// to a concrete list/dict type likelike List<T>, Dict<...> or std::optional<T>.
 // Note that in the case of lists, this only works for IValue-based lists,
 // i.e. not for int64_t, double, ...
 // generic_to<T> is an implementation detail of IValue::to<T> and not
@@ -1949,7 +1965,7 @@ inline T IValue::to() && {
 template <>
 inline std::optional<c10::string_view> IValue::to() && {
   // In the default implementation, the IValue is destroyed with std::move.
-  // But if the unboxed type is optional<string_view> we cannot destroy
+  // But if the unboxed type is std::optional<string_view> we cannot destroy
   // the IValue.
   return generic_to(*this, _fake_type<std::optional<c10::string_view>>{});
 }
@@ -2366,7 +2382,7 @@ inline std::optional<std::reference_wrapper<const std::string>> IValue::
   if (isNone()) {
     return std::nullopt;
   }
-  AT_ASSERT(isString(), "Expected optional<string> but got ", tagKind());
+  AT_ASSERT(isString(), "Expected std::optional<string> but got ", tagKind());
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton(),
       "called toOptionalStringRef on null intrusive_ptr IValue");
@@ -2390,17 +2406,17 @@ inline PyObject* IValue::toPyObject() const {
 }
 
 template <typename T>
-inline optional<T> IValue::toOptional() {
+inline std::optional<T> IValue::toOptional() {
   if (this->isNone()) {
-    return nullopt;
+    return std::nullopt;
   }
   return this->to<T>();
 }
 
 template <typename T>
-inline optional<T> IValue::toOptional() const {
+inline std::optional<T> IValue::toOptional() const {
   if (this->isNone()) {
-    return nullopt;
+    return std::nullopt;
   }
   return this->to<T>();
 }

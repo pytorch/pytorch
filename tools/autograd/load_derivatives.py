@@ -128,9 +128,9 @@ def load_derivatives(
         # function schema is the complete declaration including mutability annotation / default value and etc.
         # signature is the canonical schema for a group of functions (in-place/out/functional variants)
         # that are semantically related.
-        functions_by_signature: dict[
-            FunctionSchema, list[NativeFunction]
-        ] = defaultdict(list)
+        functions_by_signature: dict[FunctionSchema, list[NativeFunction]] = (
+            defaultdict(list)
+        )
         functions_by_schema: dict[str, NativeFunction] = {}
         for function in native_functions:
             functions_by_signature[function.func.signature()].append(function)
@@ -240,7 +240,7 @@ def create_forward_derivative(
     for r in f.func.returns:
         if r.name in var_names:
             if var_types is None:
-                var_types = tuple()
+                var_types = ()
             var_types = var_types + (r.type,)
 
     # Handle default return names
@@ -253,7 +253,7 @@ def create_forward_derivative(
                 res = re.findall(r"^result(\d+)$", var_name)
                 if len(res) == 1:
                     if var_types is None:
-                        var_types = tuple()
+                        var_types = ()
                     arg_idx = int(res[0])
                     var_types = var_types + (f.func.returns[arg_idx].type,)
 
@@ -436,10 +436,7 @@ def is_forward_derivative_definition(
     all_arg_names: list[str], names: tuple[str, ...]
 ) -> bool:
     for name in names:
-        if name not in all_arg_names:
-            return True
-        else:
-            return False
+        return name not in all_arg_names
     raise RuntimeError("Expected `names` to be non-empty")
 
 
@@ -780,7 +777,7 @@ def saved_variables(
                 "nctype": lambda name: NamedCType(
                     name, OptionalCType(BaseCType(symIntArrayRefT))
                 ),
-                "expr": lambda name: f"{name}.has_value() ? c10::optional<c10::SymIntArrayRef>({name}->sym_sizes()) : c10::nullopt",
+                "expr": lambda name: f"{name}.has_value() ? std::optional<c10::SymIntArrayRef>({name}->sym_sizes()) : std::nullopt",
             },
         ),
         # replace self.sym_blocksize() with self_sym_blocksize_opt
@@ -962,13 +959,13 @@ def saved_variables(
 
             formula = re.sub(regex.format(name), repl, formula)
 
-        # c10::optional<std::string> types stored in Backward nodes must be
-        # converted to c10::optional<c10::string_view> before being passed into
+        # std::optional<std::string> types stored in Backward nodes must be
+        # converted to std::optional<std::string_view> before being passed into
         # the backward function
         if nctype.type == OptionalCType(BaseCType(stringT)):
             formula = re.sub(
                 rf"\b{name}\b",
-                f"{name}.has_value() ? c10::optional<c10::string_view>({name}.value()) : c10::nullopt",
+                f"{name}.has_value() ? std::optional<c10::string_view>({name}.value()) : std::nullopt",
                 formula,
             )
 
@@ -994,7 +991,7 @@ def _create_op_prefix(name: str) -> str:
     OP names correspond to classes, hence the change to title case.
 
     Example::
-    >>> _create_op_prefix('add')
+    >>> _create_op_prefix("add")
     'AddBackward'
     """
     camel_case = "".join([p.title() for p in name.split("_")])

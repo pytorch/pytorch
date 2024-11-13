@@ -1,6 +1,6 @@
 import torch
 from torch._inductor import ir
-from torch._inductor.runtime.runtime_utils import do_bench
+from torch._inductor.runtime.benchmarking import benchmarker
 
 
 def to_channels_last(x):
@@ -54,8 +54,8 @@ def bench_conv(with_stack=True):
         test_out[0][0][0][:32],
     )
 
-    baseline_ms = do_bench(baseline_fn, rep=40)
-    test_ms = do_bench(test_fn, rep=40)
+    baseline_ms = benchmarker.benchmark_gpu(baseline_fn, rep=40)
+    test_ms = benchmarker.benchmark_gpu(test_fn, rep=40)
     print(f"baseline {baseline_ms} test {test_ms} speedup {baseline_ms / test_ms:.3f}x")
 
 

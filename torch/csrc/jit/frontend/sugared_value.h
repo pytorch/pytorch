@@ -1,5 +1,4 @@
 #pragma once
-#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -13,8 +12,7 @@
 #include <torch/csrc/jit/frontend/versioned_symbols.h>
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 using SugaredValuePtr = std::shared_ptr<SugaredValue>;
 
@@ -34,7 +32,7 @@ struct TORCH_API SugaredValue
   // what can we do with this thing?
   // use it as a value e.g.  `this + 4`
   virtual Value* asValue(const SourceRange& loc, GraphFunction& m) {
-    throw ErrorReport(loc) << kind() << " cannot be used as a value";
+    throw(ErrorReport(loc) << kind() << " cannot be used as a value");
   }
 
   // select an attribute on it, e.g. `this.field`
@@ -42,14 +40,14 @@ struct TORCH_API SugaredValue
       const SourceRange& loc,
       GraphFunction& m,
       const std::string& field) {
-    throw ErrorReport(loc) << "attribute lookup is not defined on " << kind();
+    throw(ErrorReport(loc) << "attribute lookup is not defined on " << kind());
   }
 
   virtual bool hasAttr(
       const SourceRange& loc,
       GraphFunction& m,
       const std::string& field) {
-    throw ErrorReport(loc) << "attribute lookup is not defined on " << kind();
+    throw(ErrorReport(loc) << "attribute lookup is not defined on " << kind());
   }
 
   // assign an attribute on it, e.g. `this.field = newValue`
@@ -58,8 +56,9 @@ struct TORCH_API SugaredValue
       GraphFunction& m,
       const std::string& field,
       Value* newValue) {
-    throw ErrorReport(loc) << "attribute assignment is not defined on "
-                           << kind();
+    throw(
+        ErrorReport(loc) << "attribute assignment is not defined on "
+                         << kind());
   }
 
   // use it as a vector of values, e.g. a tuple of values as return value from
@@ -68,20 +67,20 @@ struct TORCH_API SugaredValue
       const SourceRange& loc,
       GraphFunction& m,
       const std::optional<size_t>& size_hint = {}) {
-    throw ErrorReport(loc) << kind() << " cannot be used as a tuple";
+    throw(ErrorReport(loc) << kind() << " cannot be used as a tuple");
   }
 
   // TODO @wconstab refactor to use ModuleValue::asTuple instead of new API
   virtual SugaredValuePtr asTupleValue(
       const SourceRange& loc,
       GraphFunction& m) {
-    throw ErrorReport(loc) << kind() << " cannot be used as a tuplevalue";
+    throw(ErrorReport(loc) << kind() << " cannot be used as a tuplevalue");
   }
 
   virtual std::vector<std::shared_ptr<SugaredValue>> asType(
       const SourceRange& loc,
       Method& m) {
-    throw ErrorReport(loc) << kind() << " cannot be used as a type";
+    throw(ErrorReport(loc) << kind() << " cannot be used as a type");
   }
 
   // call it like a function, e.g. `outputs = this(inputs)`
@@ -106,7 +105,7 @@ struct TORCH_API SugaredValue
     // check that n_binders match the number of things they are returning, the
     // assignment logic will do that anyway.
 
-    throw ErrorReport(loc) << "cannot call a " << kind();
+    throw(ErrorReport(loc) << "cannot call a " << kind());
   }
 
   // This function is called when to convert a SugaredValue to its iterator.
@@ -114,7 +113,7 @@ struct TORCH_API SugaredValue
   virtual std::shared_ptr<SugaredValue> iter(
       const SourceRange& loc,
       GraphFunction& m) {
-    throw ErrorReport(loc) << kind() << " cannot be used as an iterable";
+    throw(ErrorReport(loc) << kind() << " cannot be used as an iterable");
   }
 
   // If we are iterating over a Sugared Value and it returns a value from this
@@ -136,8 +135,9 @@ struct TORCH_API SugaredValue
   // be iterated over with a modulelist. If it does it must return a constant
   // Value *
   virtual Value* len(const SourceRange& loc, GraphFunction& m) {
-    throw ErrorReport(loc) << "'" << kind() << "'"
-                           << " object is not iterable";
+    throw(
+        ErrorReport(loc) << "'" << kind() << "'"
+                         << " object is not iterable");
   }
 
   // expression for ith elemement for iterable value
@@ -146,8 +146,9 @@ struct TORCH_API SugaredValue
       GraphFunction& m,
       Value* idx,
       TypePtr type_hint = nullptr) {
-    throw ErrorReport(loc) << "'" << kind() << "'"
-                           << " object is not subscriptable";
+    throw(
+        ErrorReport(loc) << "'" << kind() << "'"
+                         << " object is not subscriptable");
   }
 
   virtual ~SugaredValue() = default;
@@ -241,14 +242,14 @@ struct TORCH_API BuiltinFunction : public SugaredValue {
 
 struct TORCH_API SugaredTupleValue : public SugaredValue {
   explicit SugaredTupleValue(std::vector<std::shared_ptr<SugaredValue>> tup)
-      : tup_(std::move(tup)){};
+      : tup_(std::move(tup)) {}
 
   std::vector<std::shared_ptr<SugaredValue>> asTuple(
       const SourceRange& loc,
       GraphFunction& m,
       const std::optional<size_t>& size_hint = {}) override {
     return tup_;
-  };
+  }
 
   Value* asValue(const SourceRange& loc, GraphFunction& m) override {
     std::vector<Value*> vec;
@@ -270,18 +271,20 @@ struct TORCH_API SugaredTupleValue : public SugaredValue {
       Value* idx,
       TypePtr type_hint = nullptr) override {
     if (!(idx->type()->cast<IntType>() && toIValue(idx))) {
-      throw ErrorReport(loc)
+      throw(
+          ErrorReport(loc)
           << "Expected integer literal for index but got a variable or non-integer. "
           << "ModuleList/Sequential indexing is only supported with integer literals. "
           << "For example, 'i = 4; self.layers[i](x)' will fail because i is not a literal. "
-          << "Enumeration is supported, e.g. 'for index, v in enumerate(self): out = v(inp)'";
+          << "Enumeration is supported, e.g. 'for index, v in enumerate(self): out = v(inp)'");
     }
     auto index = toIValue(idx)->toInt();
     int64_t adj_index =
         (index < 0) ? index + static_cast<int64_t>(tup_.size()) : index;
     if (!(adj_index >= 0 && adj_index < static_cast<int64_t>(tup_.size()))) {
-      throw ErrorReport(loc)
-          << "Index " << index << " out of range of length " << tup_.size();
+      throw(
+          ErrorReport(loc) << "Index " << index << " out of range of length "
+                           << tup_.size());
     }
     return tup_.at(adj_index);
   }
@@ -292,7 +295,7 @@ struct TORCH_API SugaredTupleValue : public SugaredValue {
   std::shared_ptr<SugaredValue> iter(const SourceRange& loc, GraphFunction& m)
       override {
     return shared_from_this();
-  };
+  }
 
   // Because this is used to contain SugaredValues of Heterogenous types,
   // we define staticLen() so that when this is iterated over it is emitted
@@ -403,9 +406,10 @@ struct FunctionValue : public SugaredValue {
       try {
         callee->ensure_defined();
       } catch (const RecursiveMethodCallError&) {
-        throw ErrorReport(loc)
+        throw(
+            ErrorReport(loc)
             << " function '" << callee->name() << "' is called recursively. "
-            << "Recursive calls are not supported";
+            << "Recursive calls are not supported");
       }
       schemas.push_back(&callee->getSchema());
     }
@@ -465,9 +469,10 @@ struct MethodValue : public SugaredValue {
         try {
           method.ensure_defined();
         } catch (const RecursiveMethodCallError&) {
-          throw ErrorReport(loc)
+          throw(
+              ErrorReport(loc)
               << " method '" << method.name() << "' is called recursively. "
-              << "Recursive calls are not supported";
+              << "Recursive calls are not supported");
         }
         schemas.push_back(&method.getSchema());
       } else if (auto interface_type = self_->type()->cast<InterfaceType>()) {
@@ -839,13 +844,13 @@ struct TORCH_API SliceValue : public SugaredValue {
 
   Value* start() {
     return start_;
-  };
+  }
   Value* stop() {
     return stop_;
-  };
+  }
   Value* step() {
     return step_;
-  };
+  }
 
  private:
   Value* start_;
@@ -853,5 +858,4 @@ struct TORCH_API SliceValue : public SugaredValue {
   Value* step_;
 };
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

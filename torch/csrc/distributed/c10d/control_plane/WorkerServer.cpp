@@ -1,8 +1,4 @@
-#include <filesystem>
-#include <mutex>
-#include <shared_mutex>
 #include <sstream>
-#include <tuple>
 #include <unordered_map>
 
 #include <ATen/core/interned_strings.h>
@@ -11,15 +7,23 @@
 #include <torch/csrc/distributed/c10d/control_plane/WorkerServer.hpp>
 #include <torch/csrc/distributed/c10d/logging.h>
 
-namespace c10d {
-namespace control_plane {
+// NS: TODO: Use `std::filesystem` regardless of OS when it's possible
+// to use it without leaking symbols on PRECXX11 ABI Linux OSes
+// See https://github.com/pytorch/pytorch/issues/133437 for more details
+#ifdef _WIN32
+#include <filesystem>
+#else
+#include <sys/stat.h>
+#endif
+
+namespace c10d::control_plane {
 
 namespace {
 class RequestImpl : public Request {
  public:
   RequestImpl(const httplib::Request& req) : req_(req) {}
 
-  const std::string& body() override {
+  const std::string& body() const override {
     return req_.body;
   }
 
@@ -74,18 +78,30 @@ std::string jsonStrEscape(const std::string& str) {
   }
   return ostream.str();
 }
+
+bool file_exists(const std::string& path) {
+#ifdef _WIN32
+  return std::filesystem::exists(path);
+#else
+  struct stat rc {};
+  return lstat(path.c_str(), &rc) == 0;
+#endif
+}
 } // namespace
 
 WorkerServer::WorkerServer(const std::string& hostOrFile, int port) {
-  server_.Get("/", [](const httplib::Request& req, httplib::Response& res) {
-    res.set_content(
-        R"BODY(<h1>torch.distributed.WorkerServer</h1>
+  server_.Get(
+      "/",
+      [](const httplib::Request& req [[maybe_unused]], httplib::Response& res) {
+        res.set_content(
+            R"BODY(<h1>torch.distributed.WorkerServer</h1>
 <a href="/handler/">Handler names</a>
 )BODY",
-        "text/html");
-  });
+            "text/html");
+      });
   server_.Get(
-      "/handler/", [](const httplib::Request& req, httplib::Response& res) {
+      "/handler/",
+      [](const httplib::Request& req [[maybe_unused]], httplib::Response& res) {
         std::ostringstream body;
         body << "[";
         bool first = true;
@@ -145,7 +161,7 @@ WorkerServer::WorkerServer(const std::string& hostOrFile, int port) {
     // using unix sockets
     server_.set_address_family(AF_UNIX);
 
-    if (std::filesystem::exists(hostOrFile)) {
+    if (file_exists(hostOrFile)) {
       throw std::runtime_error(fmt::format("{} already exists", hostOrFile));
     }
 
@@ -189,5 +205,4 @@ WorkerServer::~WorkerServer() {
   }
 }
 
-} // namespace control_plane
-} // namespace c10d
+} // namespace c10d::control_plane

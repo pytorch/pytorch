@@ -21,7 +21,7 @@ class MutationExportTests(torch._dynamo.test_case.TestCase):
     def test_module_attribute_mutation_violation_positive_1(self):
         # Mutating attribute with a Tensor type
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.a = torch.randn(3, 2)
 
@@ -35,7 +35,7 @@ class MutationExportTests(torch._dynamo.test_case.TestCase):
         # Mutating attribute with a Tensor type inside __init__ but
         # not in forward()
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.a = torch.randn(3, 2)
 
@@ -47,7 +47,7 @@ class MutationExportTests(torch._dynamo.test_case.TestCase):
     def test_module_attribute_mutation_violation_negative_2(self):
         # Mutating attribute with a Tensor type inside __init__ twice
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.a = torch.randn(3, 2)
                 self.a = self.a.to(torch.float64)
@@ -60,7 +60,7 @@ class MutationExportTests(torch._dynamo.test_case.TestCase):
     def test_module_attribute_mutation_violation_negative_3(self):
         # Mutating local variable inside forward()
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.a = torch.randn(3, 2)
 
@@ -76,7 +76,7 @@ class MutationExportTests(torch._dynamo.test_case.TestCase):
         # Mutating attribute with a Tensor type
         # But not exporting but using eager mode as well as dynamo optimize mode
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.a = torch.randn(3, 2)
 

@@ -21,8 +21,8 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.utils.data
-
 from torch.func import functional_call, grad_and_value, vmap
+
 
 logging.basicConfig(
     format="%(asctime)s:%(levelname)s:%(message)s",

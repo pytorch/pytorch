@@ -20,7 +20,7 @@
 #include <ATen/native/cuda/MemoryAccess.cuh>
 #include <ATen/native/cuda/PersistentSoftmax.cuh>
 #include <ATen/native/cuda/block_reduce.cuh>
-#include <c10/util/Optional.h>
+#include <optional>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -560,7 +560,7 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cuda(
     auto k = key.view({key.size(0), -1, num_head, dim_per_head}).transpose(1, 2);
     auto v = value.view({value.size(0), -1, num_head, dim_per_head}).transpose(1, 2);
 
-    sdp::sdp_params kernel_params{q, k, v, mask, 0.0, false};
+    sdp::sdp_params kernel_params{q, k, v, mask, 0.0, false, false};
     auto backend = select_sdp_backend(kernel_params);
     // strides from packed projection for nested tensors when seq_len is 1 will be
     // and will trigger a contiguous call in the kernel, so we prevent this
@@ -583,7 +583,7 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cuda(
       chunks[2] = (chunks[2].view({x_size_0, -1, num_head, dim_per_head}))
                       .transpose(1, 2);
       auto y = at::scaled_dot_product_attention(
-          chunks[0], chunks[1], chunks[2], mask, 0.0, false, c10::nullopt);
+          chunks[0], chunks[1], chunks[2], mask, 0.0, false, std::nullopt);
 
       auto past_sdp = y.transpose(1, 2).reshape({x_size_0, -1, embed_dim});
       return std::make_tuple(
@@ -719,16 +719,16 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
               q_t,
               k_t,
               v_t,
-              c10::nullopt,
-              c10::nullopt,
+              std::nullopt,
+              std::nullopt,
               max_seqlen_batch_q,
               max_seqlen_batch_k,
               dropout_p,
               is_causal,
               return_debug_mask,
               scale,
-              c10::nullopt,
-              c10::nullopt);
+              std::nullopt,
+              std::nullopt);
   // Reshape output to convert nnz to batch_size and seq_len
   Tensor attention = output.transpose(1,2);
 
@@ -757,7 +757,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
     double dropout_p,
     bool is_causal,
     bool return_debug_mask,
-    c10::optional<double> scale) {
+    std::optional<double> scale) {
   // Used for tracking usage statistics
   C10_LOG_API_USAGE_ONCE("torch.sdpa.flash_attention_cudnn");
   // TODO(eqy): debug mask support
@@ -774,6 +774,18 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
   TORCH_CHECK(
       max_seqlen_batch_k == max_seqlen_batch_v,
       "Key and Value must have the same sequence length");
+  auto attn_bias_ = attn_bias;
+  if (attn_bias_.has_value()) {
+    const auto bias_dim = attn_bias_.value().dim();
+    if (bias_dim == 2) {
+      attn_bias_ = attn_bias_.value().expand({batch_size, 1, max_seqlen_batch_q, max_seqlen_batch_k});
+    } else if (bias_dim == 3) {
+      attn_bias_ = attn_bias_.value().expand({batch_size, 1, max_seqlen_batch_q, max_seqlen_batch_k});
+    } else {
+      TORCH_CHECK(bias_dim == 4, "cuDNN SDPA expects either a 2D, 3D, or 4D attn_bias but got ", attn_bias_.value().dim(), "D");
+      attn_bias_ = attn_bias_.value().expand({batch_size, attn_bias_.value().size(1), max_seqlen_batch_q, max_seqlen_batch_k});
+    }
+  }
 
   Tensor attention, log_sumexp;
 
@@ -790,7 +802,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
   if (use_dropout) {
     // Device
     auto gen = at::get_generator_or_default<at::CUDAGeneratorImpl>(
-        c10::nullopt, at::cuda::detail::getDefaultCUDAGenerator());
+        std::nullopt, at::cuda::detail::getDefaultCUDAGenerator());
 
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(gen->mutex_);
@@ -818,13 +830,14 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
                       query/* Tensor q*/,
                       key/* Tensor k*/,
                       value/* Tensor v*/,
+                      attn_bias_ /* std::optional<Tensor> */,
                       log_sumexp/*Tensor softmaxstats*/,
                       attention/*Tensor o*/,
                       cudnn_seed/*Tensor dropoutseed*/,
                       cudnn_offset/*Tensor dropoutoffset*/);
 
   // TODO(eqy): support debug_attn_mask
-  return std::make_tuple(attention, log_sumexp, Tensor(), Tensor(), max_seqlen_batch_q, max_seqlen_batch_k, cudnn_seed, cudnn_offset, Tensor());
+  return std::make_tuple(std::move(attention), std::move(log_sumexp), Tensor(), Tensor(), max_seqlen_batch_q, max_seqlen_batch_k, std::move(cudnn_seed), std::move(cudnn_offset), Tensor());
 }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attention_cuda(
@@ -854,10 +867,10 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attenti
       k_t,
       v_t,
       attn_bias,
-      c10::nullopt,
-      c10::nullopt,
-      c10::nullopt,
-      c10::nullopt,
+      std::nullopt,
+      std::nullopt,
+      std::nullopt,
+      std::nullopt,
       dropout_p,
       static_cast<int64_t>(custom_mask_type),
       compute_log_sumexp,
@@ -868,8 +881,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attenti
 }
 
 int64_t _fused_sdp_choice_cuda(const Tensor& query_, const Tensor& key, const Tensor& value,
-        const std::optional<Tensor>& attn_mask_, double dropout_p, bool is_causal, std::optional<double> scale){
-  sdp::sdp_params kernel_params{query_, key, value, attn_mask_, dropout_p, is_causal};
+        const std::optional<Tensor>& attn_mask_, double dropout_p, bool is_causal, std::optional<double> scale, bool enable_gqa){
+  sdp::sdp_params kernel_params{query_, key, value, attn_mask_, dropout_p, is_causal, enable_gqa};
   auto backend = select_sdp_backend(kernel_params);
   if (backend == sdp::SDPBackend::error) {
     TORCH_CHECK(
@@ -901,9 +914,10 @@ _flash_attention_forward(
 #if defined(USE_FLASH_ATTENTION)
   const auto softmax_scale =
       sdp::calculate_scale(query, scale).as_float_unchecked();
-  std::optional<Tensor> out = c10::nullopt;
+  std::optional<Tensor> out = std::nullopt;
 
   std::optional<Tensor> seqused_k = _seqused_k;
+  std::optional<at::Tensor> block_table = std::nullopt;  // we are not using the block table yet
   std::optional<Tensor> alibi_slopes = _alibi_slopes;
 
   const int non_null_window_left = window_size_left.has_value() ? window_size_left.value() : -1;
@@ -936,6 +950,7 @@ _flash_attention_forward(
             cumulative_sequence_length_q.value(),
             cumulative_sequence_length_k.value(),
             seqused_k, /*seqused_k*/
+            block_table, /*block_table*/
             alibi_slopes, /*alibi_slopes*/
             max_seqlen_batch_q,
             max_seqlen_batch_k,
@@ -946,7 +961,7 @@ _flash_attention_forward(
             non_null_window_left,
             non_null_window_right,
             return_debug_mask,
-            c10::nullopt /*gen_*/);
+            std::nullopt /*gen_*/);
   } else {
     std::tie(
         output,
@@ -969,7 +984,7 @@ _flash_attention_forward(
             non_null_window_left,
             non_null_window_right,
             return_debug_mask, /*return_softmax (this is used for testing)*/
-            c10::nullopt);
+            std::nullopt);
   }
   debug_attn_mask =
       return_debug_mask ? debug_attn_mask : at::empty({0}, query.options());
@@ -1086,7 +1101,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
   auto device = in_capture_stream ? at::kCUDA : at::kCPU;
   if (use_dropout) {
     auto gen = at::get_generator_or_default<at::CUDAGeneratorImpl>(
-        c10::nullopt, at::cuda::detail::getDefaultCUDAGenerator());
+        std::nullopt, at::cuda::detail::getDefaultCUDAGenerator());
 
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(gen->mutex_);
@@ -1100,10 +1115,13 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
       offset_t = at::empty({}, at::dtype(at::kLong).device(device));
     } else {
       auto [seed, offset] = at::cuda::philox::unpack(philox_state);
-      seed_t = at::scalar_tensor(
-          at::Scalar(static_cast<int64_t>(seed)), at::dtype(at::kLong));
-      offset_t = at::scalar_tensor(
-          at::Scalar(static_cast<int64_t>(offset)), at::dtype(at::kLong));
+#ifdef USE_ROCM
+      const auto options = at::dtype(at::kLong).device(at::kCUDA);
+#else
+      const auto options = at::dtype(at::kLong);
+#endif
+      seed_t = at::scalar_tensor(at::Scalar(static_cast<int64_t>(seed)), options);
+      offset_t = at::scalar_tensor(at::Scalar(static_cast<int64_t>(offset)), options);
     }
   } else {
     // Not using dropout
@@ -1116,7 +1134,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
   auto ret = aotriton::v2::flash::check_gpu(stream);
   if (hipSuccess != ret) {
       TORCH_CHECK(false,
-                  "[AOTriton] Accelerated SDPA only supports MI200/MI300X GPUs (gfx90a:sramecc+:xnack- or gfx94a:sramecc+:xnack-)")
+                  "[AOTriton] Accelerated SDPA only supports MI200/MI300X/Navi31 GPUs"
+                  " (gfx90a:sramecc+:xnack-/gfx942:sramecc+:xnack-/gfx1100)")
   }
 
   // AOTriton may accept aligned on logsumexp tensor in the future for better
@@ -1145,8 +1164,16 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
 
   using aotriton::v2::flash::attn_fwd;
   using sdp::aotriton_adapter::mk_aotensor;
+  using sdp::aotriton_adapter::mk_aoscalartensor;
+  using sdp::aotriton_adapter::mk_philoxtensor;
   aotriton::TensorView<4> empty_t4(0, {0, 0, 0, 0}, {0, 0, 0, 0}, aotriton::DType::kFloat16);
   at::Tensor softmax_fa_t = at::empty({ 0, 0, 0, 0 }, query.options());
+  const bool use_philox_state = in_capture_stream;
+  auto seed = use_philox_state ? mk_philoxtensor(philox_state.seed_.ptr) : mk_aoscalartensor(seed_t);
+  auto offset1 = use_philox_state ? mk_philoxtensor(philox_state.offset_.ptr) : mk_aoscalartensor(offset_t);
+  auto offset2 = use_philox_state ? philox_state.offset_intragraph_ : 0;
+  auto seed_output = use_philox_state ? mk_philoxtensor(seed_t.data_ptr<int64_t>()) : mk_philoxtensor(nullptr);
+  auto offset_output = use_philox_state ? mk_philoxtensor(offset_t.data_ptr<int64_t>()) : mk_philoxtensor(nullptr);
   hipError_t err; // TODO: Error handling
   err = attn_fwd(mk_aotensor(q_t, "q"),
                  mk_aotensor(k_t, "k"),
@@ -1156,8 +1183,11 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
                  mk_aotensor<2>(softmax_lse, "M"),
                  mk_aotensor(output_t, "Out"),
                  dropout_p,
-                 use_dropout ? *seed_t.data_ptr<int64_t>() : 0,
-                 use_dropout ? *offset_t.data_ptr<int64_t>() : 0,
+                 seed,
+                 offset1,
+                 offset2,
+                 seed_output,
+                 offset_output,
                  mk_aotensor(softmax_fa_t, "encoded_softmax"),
                  is_causal,
                  stream);
@@ -1357,7 +1387,7 @@ Tensor triton_scaled_dot_attention(const Tensor& q, const Tensor& k, const Tenso
   return at::Tensor();
 }
 
-REGISTER_CUDA_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_cuda);
+REGISTER_CUDA_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_cuda)
 
 #if defined(USE_MEM_EFF_ATTENTION) and !defined(USE_ROCM)
 namespace {

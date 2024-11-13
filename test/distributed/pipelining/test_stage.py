@@ -27,6 +27,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.utils._pytree import tree_map_only
 
+
 d_hid = 512
 batch_size = 256
 chunks = 4
@@ -172,14 +173,12 @@ class StageTest(MultiProcContinousTest):
         schedule = ScheduleGPipe(stage, chunks)
 
         # Run
-        def _run_step(x):
-            if self.rank == 0:
-                return schedule.step(x, y=y)
-            else:
-                return schedule.step()
+        if self.rank == 0:
+            out = schedule.step(x, y=y)
+        else:
+            out = schedule.step()
 
         # Last rank checks result
-        out = _run_step(x)
         if self.rank == self.world_size - 1:
             ref_out = mod(x, y=y)
             torch.testing.assert_close(out, ref_out, atol=1e-3, rtol=5e-2)
@@ -189,23 +188,6 @@ class StageTest(MultiProcContinousTest):
         # Confirm keys are consistent with original model
         old_keys = mod.state_dict().keys()
         assert all(k in old_keys for k in submod_keys)
-
-        if self.rank == 0:
-            with self.assertRaisesRegex(PipeliningShapeError, "shape mismatch"):
-                _run_step(torch.randn(batch_size + 1, d_hid, device=self.device))
-
-            with self.assertRaisesRegex(PipeliningShapeError, "dtype mismatch"):
-                _run_step(x.to(torch.int32))
-
-            # output of stage's mlp layer will be flattened by this hook, the stage should err
-            handle = stage.submod.register_forward_hook(get_flatten_hook())
-            with self.assertRaisesRegex(PipeliningShapeError, "shape mismatch"):
-                _run_step(x)
-            handle.remove()
-
-            stage.submod.register_forward_hook(get_dtype_change_hook(torch.bfloat16))
-            with self.assertRaisesRegex(PipeliningShapeError, "dtype mismatch"):
-                _run_step(x)
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
@@ -221,7 +203,6 @@ class StageTest(MultiProcContinousTest):
             self.rank,
             self.world_size,
             self.device,
-            input_args=x.chunk(chunks)[0],
         )
 
         # Attach to a schedule
@@ -269,7 +250,7 @@ class StageTest(MultiProcContinousTest):
         target = torch.randn(batch_size, d_hid, device=self.device)
 
         class CustomState:
-            def __init__(self):
+            def __init__(self) -> None:
                 self.i = 0
 
             def dw_builder(self):
@@ -291,7 +272,6 @@ class StageTest(MultiProcContinousTest):
             self.rank,
             self.world_size,
             self.device,
-            input_args=x.chunk(chunks)[0],
             dw_builder=cs.dw_builder,
         )
 
@@ -338,25 +318,10 @@ class StageTest(MultiProcContinousTest):
             self.rank,
             self.world_size,
             self.device,
-            input_args=x.chunk(chunks)[0],
             dw_builder=lambda: None,
         )
         with self.assertRaisesRegex(AssertionError, "backward_one_chunk"):
             stage_with_dw_builder.backward_weight_one_chunk(bwd_chunk_id=0)
-
-        stage_without_dw_builder = PipelineStage(
-            stage_mod,
-            self.rank,
-            self.world_size,
-            self.device,
-            input_args=x.chunk(chunks)[0],
-            dw_builder=None,
-        )
-
-        with self.assertRaisesRegex(AssertionError, "dw_builder"):
-            stage_without_dw_builder.backward_one_chunk(
-                bwd_chunk_id=0, full_backward=False
-            )
 
 
 instantiate_parametrized_tests(StageTest)

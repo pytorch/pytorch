@@ -24,7 +24,7 @@ from torchgen.api.types import (
     OptionalCType,
     symIntArrayRefT,
     SymIntT,
-    tensorT,  # See Note [Nested Arg Types]
+    tensorT,
 )
 from torchgen.code_template import CodeTemplate
 from torchgen.context import with_native_function
@@ -590,8 +590,7 @@ def inplace_or_view_method_definition(
         # For functions that modify their inputs but don't return them,
         # we can't give them autograd support.
         # See https://github.com/pytorch/pytorch/issues/53796
-        not modifies_arguments(f)
-        or len(f.func.returns) == 0
+        not modifies_arguments(f) or len(f.func.returns) == 0
     ):
         return None
     return METHOD_DEFINITION.substitute(

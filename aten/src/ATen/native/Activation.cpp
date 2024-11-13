@@ -396,6 +396,13 @@ auto approximate_type = get_gelutype_enum(approximate);
     ideep::tensor y = itensor_from_tensor(result);
     ideep::eltwise_forward::compute(
       x, y, ideep::algorithm::eltwise_gelu_erf, ideep::prop_kind::forward_training, /*alpha*/ 0.0);
+#ifdef __aarch64__
+  } else if (use_mkldnn(self) && (approximate_type == GeluType::Tanh)) {
+    const ideep::tensor& x = itensor_from_tensor(self);
+    ideep::tensor y = itensor_from_tensor(result);
+    ideep::eltwise_forward::compute(
+      x, y, ideep::algorithm::eltwise_gelu_tanh, ideep::prop_kind::forward_training, /*alpha*/ 0.0);
+#endif  // ifdef __aarch64__
   } else {
     GeluKernel(kCPU, *this, approximate_type);
   }

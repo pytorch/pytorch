@@ -79,6 +79,11 @@ class Node(abc.ABC):
         r"""Return the metadata."""
         raise NotImplementedError
 
+    @property
+    @abc.abstractmethod
+    def _input_metadata(self) -> List[Any]:
+        raise NotImplementedError
+
     @abc.abstractmethod
     def _register_hook_dict(self, tensor: torch.Tensor) -> None:
         raise NotImplementedError
@@ -102,6 +107,13 @@ class Node(abc.ABC):
         .. note::
             See :ref:`backward-hooks-execution` for more information on how when this hook
             is executed, and how its execution is ordered relative to other hooks.
+
+        .. note::
+            In the rare case where the hook is registered while the Node has already
+            begun execution, there is no longer any guarantee on :attr:`grad_outputs`
+            content (it might be as usual or empty depending on other factors). The
+            hook can still optionally return a new gradient to be used in place of
+            :attr:`grad_inputs` independent of :attr:`grad_outputs`.
 
         Example::
 
@@ -170,9 +182,12 @@ class Node(abc.ABC):
         return NotImplemented
 
 
-def _get_grad_fn_or_grad_acc(t: torch.Tensor) -> Node:
+def _get_grad_fn_or_grad_acc(t: Union[torch.Tensor, "GradientEdge"]) -> Node:
+    if isinstance(t, GradientEdge):
+        return t.node
     if t.requires_grad and t.grad_fn is None:
-        node = t.view_as(t).grad_fn.next_functions[0][0]  # type: ignore[union-attr]
+        with torch.enable_grad():
+            node = t.view_as(t).grad_fn.next_functions[0][0]  # type: ignore[union-attr]
     else:
         node = t.grad_fn
     assert node is not None
@@ -208,7 +223,7 @@ def get_gradient_edge(tensor: torch.Tensor) -> GradientEdge:
     return GradientEdge(grad_fn, tensor.output_nr)
 
 
-def increment_version(tensor: torch.Tensor) -> None:
+def increment_version(tensor: Union[torch.Tensor, Iterable[torch.Tensor]]) -> None:
     """Update autograd metadata tracking whether the given Tensor was modified in place.
 
     This is to enable more accurate error checking within the autograd engine.
@@ -216,11 +231,16 @@ def increment_version(tensor: torch.Tensor) -> None:
     when mark_dirty() is called appropriately so you only need to call this explicitly
     if you are doing inplace operation on the Tensor data in a way that Pytorch doesn't
     know about. For example a custom kernel that reads the Tensor data_ptr and modifies
-    the memory inplace based on this pointer.
+    the memory inplace based on this pointer. Can accept either a tensor, or a list of tensors.
 
     Note that incrementing the version counter multiple times for a single inplace operation
     is not problematic.
+
+    Note that if you pass in tensor constructed under torch.inference_mode(),
+    we will not bump its version counter (because your tensor does not have one).
     """
+    if isinstance(tensor, torch.Tensor):
+        tensor = (tensor,)
     torch._C._increment_version(tensor)
 
 
@@ -427,7 +447,7 @@ def register_multi_grad_hook(
     ],
     *,
     mode: Literal["all", "any"] = "all",
-) -> _MultiHandle:
+) -> RemovableHandle:
     r"""Register a multi-grad backward hook.
 
     There are two supported modes: ``"all"`` and ``"any"``.
@@ -476,6 +496,8 @@ def register_multi_grad_hook(
         >>>
     """
     supported_modes = ("all", "any")
+    lock = threading.Lock()
+
     if mode not in supported_modes:
         raise ValueError(f"Expects mode to be one of {supported_modes} but got {mode}")
 
@@ -497,14 +519,19 @@ def register_multi_grad_hook(
                 count[id] = count.get(id, 0)
                 buffer[id] = buffer.get(id, [None] * len_tensors)
 
-                if count[id] == 0:
-                    # On the first call, compute the actual nb_calls and buffer
-                    nb_calls = sum(map(torch._C._will_engine_execute_node, grad_fns))
+                with lock:
+                    curr_count, count[id] = count[id], count[id] + 1
+
+                    if curr_count == 0:
+                        # On the first call, compute the actual nb_calls and buffer
+                        nb_calls = sum(
+                            map(torch._C._will_engine_execute_node, grad_fns)
+                        )
 
                 buffer[id][idx] = grad
-                count[id] += 1
 
-                if count[id] == nb_calls:
+                assert nb_calls is not None
+                if curr_count == nb_calls - 1:
                     fn = cast(Callable[[Sequence[Optional[torch.Tensor]]], None], fn)
                     fn(buffer[id])
                     del count[id]
@@ -517,7 +544,6 @@ def register_multi_grad_hook(
         )
     elif mode == "any":
         fn = cast(Callable[[torch.Tensor], None], fn)
-        lock = threading.Lock()
         ran_hook: Dict[int, bool] = defaultdict(bool)
 
         @functools.wraps(fn)
@@ -738,7 +764,7 @@ def allow_mutation_on_saved_tensors() -> (
 
 
 def _register_logging_hooks_on_whole_graph(
-    t_outputs: Sequence[torch.Tensor],
+    t_outputs: Sequence[Union[torch.Tensor, GradientEdge]],
 ) -> Callable[[], None]:
     grad_fns = list(map(_get_grad_fn_or_grad_acc, t_outputs))
 
@@ -788,7 +814,7 @@ def _register_logging_hooks_on_whole_graph(
 
 
 def _engine_run_backward(
-    t_outputs: Sequence[torch.Tensor],
+    t_outputs: Sequence[Union[torch.Tensor, GradientEdge]],
     *args: Any,
     **kwargs: Any,
 ) -> Tuple[torch.Tensor, ...]:

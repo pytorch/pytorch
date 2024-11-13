@@ -3,12 +3,18 @@ import csv
 import dataclasses
 import os
 
-from generate import run_llama2_7b_bf16, run_llama2_7b_int8, run_mixtral_8x7b_int8
-from triton.testing import do_bench
+from generate import (
+    get_arch_name,
+    run_llama2_7b_bf16,
+    run_llama2_7b_int8,
+    run_mixtral_8x7b_int8,
+)
 
 import torch
 import torch.nn as nn
+from torch._inductor.runtime.benchmarking import benchmarker
 from torch.utils.flop_counter import FlopCounterMode
+
 
 WARMUP_ITER = 5
 
@@ -23,6 +29,7 @@ class Experiment:
     actual: float
     dtype: str
     device: str
+    arch: str  # GPU name for CUDA or CPU arch for CPU
     is_model: bool = False
 
 
@@ -70,7 +77,12 @@ def run_mlp_layer_norm_gelu(device: str = "cuda"):
             for _ in range(WARMUP_ITER):
                 compiled_mod(x)
 
-            us_per_iter = do_bench(lambda: compiled_mod(x)) * 1000
+            benchmark_fn = (
+                benchmarker.benchmark_gpu
+                if device == "cuda"
+                else benchmarker.benchmark_cpu
+            )
+            us_per_iter = benchmark_fn(lambda: compiled_mod(x)) * 1000
             flops_utilization += us_per_iter * flops / 1e9 / A100_40G_BF16_TFLOPS
 
         flops_utilization = flops_utilization / len(input_shapes)
@@ -83,6 +95,7 @@ def run_mlp_layer_norm_gelu(device: str = "cuda"):
                 f"{flops_utilization:.02f}",
                 dtype_str,
                 device,
+                get_arch_name(),
             )
         )
     return results
@@ -107,7 +120,12 @@ def run_layer_norm(device: str = "cuda"):
             for _ in range(WARMUP_ITER):
                 compiled_mod(x)
 
-            us_per_iter = do_bench(lambda: compiled_mod(x)) * 1000
+            benchmark_fn = (
+                benchmarker.benchmark_gpu
+                if device == "cuda"
+                else benchmarker.benchmark_cpu
+            )
+            us_per_iter = benchmark_fn(lambda: compiled_mod(x)) * 1000
             memory_bandwidth += (1e6 / us_per_iter) * 2 * BS * D * dtype.itemsize / 1e9
 
         memory_bandwidth = memory_bandwidth / len(input_shapes)
@@ -120,6 +138,7 @@ def run_layer_norm(device: str = "cuda"):
                 f"{memory_bandwidth:.02f}",
                 dtype_str,
                 device,
+                get_arch_name(),
             )
         )
     return results
@@ -150,7 +169,12 @@ def run_gather_gemv(device: str = "cuda"):
             for _ in range(WARMUP_ITER):
                 compiled_fn(W, score_idxs, x)
 
-            us_per_iter = do_bench(lambda: compiled_fn(W, score_idxs, x)) * 1000
+            benchmark_fn = (
+                benchmarker.benchmark_gpu
+                if device == "cuda"
+                else benchmarker.benchmark_cpu
+            )
+            us_per_iter = benchmark_fn(lambda: compiled_fn(W, score_idxs, x)) * 1000
             memory_bandwidth += (1e6 / us_per_iter) * 2 * D * D * dtype.itemsize / 1e9
 
         memory_bandwidth = memory_bandwidth / len(input_shapes)
@@ -163,6 +187,7 @@ def run_gather_gemv(device: str = "cuda"):
                 f"{memory_bandwidth:.02f}",
                 dtype_str,
                 device,
+                get_arch_name(),
             )
         )
     return results
@@ -183,15 +208,20 @@ def run_gemv(device: str = "cuda"):
             def gemv(W, x):
                 return W.to(x.dtype) @ x
 
-            W = torch.randn(D, D, device="cuda").to(dtype=dtype)
-            x = torch.randn(D, device="cuda", dtype=torch.bfloat16)
+            W = torch.randn(D, D, device=device).to(dtype=dtype)
+            x = torch.randn(D, device=device, dtype=torch.bfloat16)
 
             compiled_fn = torch.compile(gemv, dynamic=False)
 
             for _ in range(WARMUP_ITER):
                 compiled_fn(W, x)
 
-            us_per_iter = do_bench(lambda: compiled_fn(W, x)) * 1000
+            benchmark_fn = (
+                benchmarker.benchmark_gpu
+                if device == "cuda"
+                else benchmarker.benchmark_cpu
+            )
+            us_per_iter = benchmark_fn(lambda: compiled_fn(W, x)) * 1000
             memory_bandwidth += (1e6 / us_per_iter) * D * D * dtype.itemsize / 1e9
 
         memory_bandwidth = memory_bandwidth / len(input_shapes)
@@ -204,6 +234,7 @@ def run_gemv(device: str = "cuda"):
                 f"{memory_bandwidth:.02f}",
                 dtype_str,
                 device,
+                get_arch_name(),
             )
         )
     return results
@@ -249,7 +280,13 @@ def main(output_file=DEFAULT_OUTPUT_FILE):
     results = []
 
     for func in all_experiments:
-        lst = func()
+        try:
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+        except AssertionError:
+            # This happens when torch is compiled with CUDA turning off completely
+            device = "cpu"
+
+        lst = func(device)
         for x in lst:
             results.append(dataclasses.astuple(x))
 

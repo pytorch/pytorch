@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 import torch
 import torch.nn as nn
-
 from torch._dynamo.utils import counters
 from torch._inductor import config as inductor_config
 from torch.func import functional_call
@@ -12,7 +11,6 @@ from ..pattern_matcher import (
     Match,
     register_graph_pattern,
 )
-
 from .pre_grad import efficient_conv_bn_eval_pass
 
 
@@ -35,6 +33,7 @@ def efficient_conv_bn_eval(
     """
 
     assert bn.running_var is not None
+    assert bn.running_mean is not None
 
     # These lines of code are designed to deal with various cases
     # like bn without affine transform, and conv without bias
@@ -215,7 +214,7 @@ def efficient_conv_bn_eval_graph_transform_inlined(match: Match, *args, **kwargs
         new_node = graph.create_node(
             op="call_function",
             target=efficient_conv_bn_eval_decomposed,
-            args=args,
+            args=args,  # type: ignore[arg-type]
             name="efficient_conv_bn_eval",
         )
 
@@ -225,7 +224,7 @@ def efficient_conv_bn_eval_graph_transform_inlined(match: Match, *args, **kwargs
     # take care of the deletion order:
     # delete bn_node first, and then conv_node
     graph.erase_node(bn_node)
-    graph.erase_node(conv_node)
+    graph.erase_node(conv_node)  # type: ignore[arg-type]
 
     return
 
@@ -306,7 +305,7 @@ def efficient_conv_bn_eval_graph_transform_decomposed(match: Match, *args, **kwa
         new_node = graph.create_node(
             op="call_function",
             target=efficient_conv_bn_eval_decomposed,
-            args=args,
+            args=args,  # type: ignore[arg-type]
             name="efficient_conv_bn_eval",
         )
 
@@ -316,7 +315,7 @@ def efficient_conv_bn_eval_graph_transform_decomposed(match: Match, *args, **kwa
     # take care of the deletion order:
     # delete bn_node first, and then conv_node
     graph.erase_node(bn_node)
-    graph.erase_node(conv_node)
+    graph.erase_node(conv_node)  # type: ignore[arg-type]
 
     return
 
@@ -375,7 +374,7 @@ def efficient_conv_bn_eval_graph_transform(match: Match, *args, **kwargs):
     # Find a pair of conv and bn computation nodes to optimize.
     counters["inductor"]["efficient_conv_bn_eval"] += 1
 
-    with graph.inserting_before(conv_node):
+    with graph.inserting_before(conv_node):  # type: ignore[arg-type]
         # create `get_attr` node to access modules
         # note that we directly call `create_node` to fill the `name`
         # argument. `graph.get_attr` and
@@ -405,4 +404,4 @@ def efficient_conv_bn_eval_graph_transform(match: Match, *args, **kwargs):
     # take care of the deletion order:
     # delete bn_node first, and then conv_node
     graph.erase_node(bn_node)
-    graph.erase_node(conv_node)
+    graph.erase_node(conv_node)  # type: ignore[arg-type]

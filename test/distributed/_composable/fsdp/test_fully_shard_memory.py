@@ -1,9 +1,9 @@
 # Owner(s): ["oncall: distributed"]
 
 import functools
+import gc
 
 import torch
-
 from torch.distributed._composable.fsdp import (
     CPUOffloadPolicy,
     fully_shard,
@@ -197,6 +197,36 @@ class TestFullyShardMemory(FSDPTest):
             # 2x sharded optimizer states
             expected_mem_mb += (2 * model_sharded_numel) * 4 / 1e6 + buffer_mb
         self.assertLessEqual(mem_mb - base_mem_mb, expected_mem_mb)
+
+    @skip_if_lt_x_gpu(2)
+    def test_fully_shard_del_memory(self):
+        base_mem_mb = self._get_peak_active_memory_mb()
+        vocab_size = 32
+        model_args = ModelArgs(
+            vocab_size=vocab_size, n_layers=3, dim=768, n_heads=12, weight_tying=False
+        )
+        model = Transformer(model_args)
+        # Initializing the model on CPU should not change the GPU memory usage
+        post_model_init_mem_mb = self._get_peak_active_memory_mb()
+        self.assertEqual(base_mem_mb, post_model_init_mem_mb)
+
+        for module in model.modules():
+            if isinstance(module, TransformerBlock):
+                fully_shard(module)
+        fully_shard(model)
+        unsharded_numel = sum(p.numel() for p in model.parameters())
+        sharded_numel = unsharded_numel // self.world_size
+        buffer_mb = 4
+        mem_mb = self._get_curr_active_memory_mb()
+        expected_mb = sharded_numel * 4 / 1e6 + buffer_mb
+        self.assertLessEqual(mem_mb - base_mem_mb, expected_mb)
+
+        # Deleting the model should free all of the FSDP-managed GPU memory
+        del model
+        # Manually call garbage collection since there are ref cycles in FSDP
+        gc.collect()
+        mem_mb = self._get_curr_active_memory_mb()
+        self.assertEqual(mem_mb, base_mem_mb)
 
     def _get_peak_active_memory_mb(self) -> int:
         mem_stats = torch.cuda.memory_stats()

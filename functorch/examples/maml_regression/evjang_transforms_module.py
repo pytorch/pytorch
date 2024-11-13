@@ -9,16 +9,16 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 import torch
-
 from functorch import grad, make_functional, vmap
 from torch import nn
 from torch.nn import functional as F
+
 
 mpl.use("Agg")
 
 
 class ThreeLayerNet(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.fc1 = nn.Linear(1, 40)
         self.relu1 = nn.ReLU()

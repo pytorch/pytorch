@@ -13,6 +13,7 @@ from typing import Tuple
 # flake8: noqa
 from torch.onnx._internal.diagnostics import infra
 
+
 """
 GENERATED CODE - DO NOT EDIT DIRECTLY
 The purpose of generating a class for each rule is to override the `format_message`

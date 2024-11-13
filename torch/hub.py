@@ -12,7 +12,7 @@ import uuid
 import warnings
 import zipfile
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Union
 from typing_extensions import deprecated
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse  # noqa: F401
@@ -389,7 +389,7 @@ def _load_entry_from_hubconf(m, model):
     return func
 
 
-def get_dir():
+def get_dir() -> str:
     r"""
     Get the Torch Hub cache directory used for storing downloaded models & weights.
 
@@ -408,7 +408,7 @@ def get_dir():
     return os.path.join(_get_torch_home(), "hub")
 
 
-def set_dir(d):
+def set_dir(d: Union[str, os.PathLike]) -> None:
     r"""
     Optionally set the Torch Hub directory used to save downloaded models & weights.
 
@@ -466,7 +466,7 @@ def list(
 
     Example:
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_HUB)
-        >>> entrypoints = torch.hub.list('pytorch/vision', force_reload=True)
+        >>> entrypoints = torch.hub.list("pytorch/vision", force_reload=True)
     """
     repo_dir = _get_cache_or_reload(
         github,
@@ -526,7 +526,7 @@ def help(github, model, force_reload=False, skip_validation=False, trust_repo=No
             Default is ``None`` and will eventually change to ``"check"`` in v2.0.
     Example:
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_HUB)
-        >>> print(torch.hub.help('pytorch/vision', 'resnet18', force_reload=True))
+        >>> print(torch.hub.help("pytorch/vision", "resnet18", force_reload=True))
     """
     repo_dir = _get_cache_or_reload(
         github,
@@ -618,12 +618,14 @@ def load(
     Example:
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_HUB)
         >>> # from a github repo
-        >>> repo = 'pytorch/vision'
-        >>> model = torch.hub.load(repo, 'resnet50', weights='ResNet50_Weights.IMAGENET1K_V1')
+        >>> repo = "pytorch/vision"
+        >>> model = torch.hub.load(
+        ...     repo, "resnet50", weights="ResNet50_Weights.IMAGENET1K_V1"
+        ... )
         >>> # from a local directory
-        >>> path = '/some/local/path/pytorch/vision'
+        >>> path = "/some/local/path/pytorch/vision"
         >>> # xdoctest: +SKIP
-        >>> model = torch.hub.load(path, 'resnet50', weights='ResNet50_Weights.DEFAULT')
+        >>> model = torch.hub.load(path, "resnet50", weights="ResNet50_Weights.DEFAULT")
     """
     source = source.lower()
 
@@ -663,8 +665,8 @@ def _load_local(hubconf_dir, model, *args, **kwargs):
 
     Example:
         >>> # xdoctest: +SKIP("stub local path")
-        >>> path = '/some/local/path/pytorch/vision'
-        >>> model = _load_local(path, 'resnet50', weights='ResNet50_Weights.IMAGENET1K_V1')
+        >>> path = "/some/local/path/pytorch/vision"
+        >>> model = _load_local(path, "resnet50", weights="ResNet50_Weights.IMAGENET1K_V1")
     """
     with _add_to_sys_path(hubconf_dir):
         hubconf_path = os.path.join(hubconf_dir, MODULE_HUBCONF)
@@ -695,7 +697,10 @@ def download_url_to_file(
     Example:
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_HUB)
         >>> # xdoctest: +REQUIRES(POSIX)
-        >>> torch.hub.download_url_to_file('https://s3.amazonaws.com/pytorch/models/resnet18-5c106cde.pth', '/tmp/temporary_file')
+        >>> torch.hub.download_url_to_file(
+        ...     "https://s3.amazonaws.com/pytorch/models/resnet18-5c106cde.pth",
+        ...     "/tmp/temporary_file",
+        ... )
 
     """
     file_size = None
@@ -715,7 +720,7 @@ def download_url_to_file(
     # We deliberately do not use NamedTemporaryFile to avoid restrictive
     # file permissions being applied to the downloaded file.
     dst = os.path.expanduser(dst)
-    for seq in range(tempfile.TMP_MAX):
+    for _ in range(tempfile.TMP_MAX):
         tmp_dst = dst + "." + uuid.uuid4().hex + ".partial"
         try:
             f = open(tmp_dst, "w+b")
@@ -831,7 +836,9 @@ def load_state_dict_from_url(
 
     Example:
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_HUB)
-        >>> state_dict = torch.hub.load_state_dict_from_url('https://s3.amazonaws.com/pytorch/models/resnet18-5c106cde.pth')
+        >>> state_dict = torch.hub.load_state_dict_from_url(
+        ...     "https://s3.amazonaws.com/pytorch/models/resnet18-5c106cde.pth"
+        ... )
 
     """
     # Issue warning to move data if old env is set

@@ -7,7 +7,6 @@ import warnings
 import weakref
 from collections import namedtuple, OrderedDict
 from copy import deepcopy
-
 from functools import partial
 from tempfile import NamedTemporaryFile
 from typing import Any, Dict, List, Tuple
@@ -588,21 +587,28 @@ class TestStateDictHooks(TestCase):
             hook_called += 1
 
         hook_called = 0
+        # Test private API since this sets with_module=False which diverges from public API
         m_load._register_load_state_dict_pre_hook(hook_without_module)
         m_load.load_state_dict(m_state_dict)
         self.assertEqual(1, hook_called)
 
         hook_called = 0
-        m_load._register_load_state_dict_pre_hook(hook_with_module, True)
+        m_load.register_load_state_dict_pre_hook(hook_with_module)
         m_load.load_state_dict(m_state_dict)
         self.assertEqual(2, hook_called)
+
+        # Test private API with with_module=True
+        hook_called = 0
+        m_load._register_load_state_dict_pre_hook(hook_with_module, True)
+        m_load.load_state_dict(m_state_dict)
+        self.assertEqual(3, hook_called)
 
     def test_no_extra_ref_to_module(self):
         try:
             gc.disable()
             m = nn.Linear(10, 10)
 
-            m._register_load_state_dict_pre_hook(_hook_to_pickle, True)
+            m.register_load_state_dict_pre_hook(_hook_to_pickle)
             weak_m = weakref.ref(m)
             del m
 
@@ -612,7 +618,7 @@ class TestStateDictHooks(TestCase):
 
     def test_pickled_hook(self):
         m = nn.Linear(10, 10)
-        m._register_load_state_dict_pre_hook(_hook_to_pickle, True)
+        m.register_load_state_dict_pre_hook(_hook_to_pickle)
         pickle.loads(pickle.dumps(m))
 
     @swap([True, False])
@@ -621,7 +627,7 @@ class TestStateDictHooks(TestCase):
 
         # Test with module instance method as hook
         class MyModule(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.foo = torch.nn.Parameter(torch.rand(10))
 
@@ -678,14 +684,13 @@ class TestStateDictHooks(TestCase):
                 mod = m
 
             hook_called = 0
+            # Test private API since this sets with_module=False which diverges from public API
             mod._register_load_state_dict_pre_hook(mod.my_pre_load_hook)
             m.load_state_dict(state_dict)
             self.assertEqual(1, hook_called)
 
             hook_called = 0
-            mod._register_load_state_dict_pre_hook(
-                mod.my_pre_load_hook_with_module, True
-            )
+            mod.register_load_state_dict_pre_hook(mod.my_pre_load_hook_with_module)
             m.load_state_dict(state_dict)
             self.assertEqual(2, hook_called)
 
@@ -694,7 +699,7 @@ class TestStateDictHooks(TestCase):
         hook_called = 0
 
         class MyModule(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.foo = torch.nn.Parameter(torch.rand(10))
 
@@ -767,7 +772,8 @@ class TestStateDictHooks(TestCase):
                 # Note that torch.save / torch.load is not recommended to save/load
                 # modules.
                 torch.save(m, f.name)
-                m = torch.load(f.name)
+                # weights_only=False as this is legacy code that saves the model
+                m = torch.load(f.name, weights_only=False)
                 m.load_state_dict(sd)
                 self.assertFalse(called)
 
@@ -808,7 +814,7 @@ class TestStateDictHooks(TestCase):
 
     def test_register_state_dict_pre_hook(self):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.a = nn.Sequential(
                     nn.Linear(3, 3), nn.Linear(3, 3), nn.Linear(3, 3)
@@ -822,7 +828,7 @@ class TestStateDictHooks(TestCase):
 
     def test_register_state_dict_pre_hook_lazy_module(self):
         class MyLazyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.layer1 = nn.LazyLinear(8)
                 self.layer2 = nn.LazyLinear(5)
@@ -850,7 +856,8 @@ class TestStateDictHooks(TestCase):
             # Note that torch.save / torch.load is not recommended
             # to save / load modules.
             torch.save(m, f.name)
-            m = torch.load(f.name)
+            # weights_only=False as this is legacy code that saves the model
+            m = torch.load(f.name, weights_only=False)
 
         # Ensure we can run state_dict without issues
         _ = m.state_dict()
@@ -858,6 +865,63 @@ class TestStateDictHooks(TestCase):
         m.register_state_dict_pre_hook(my_state_dict_pre_hook)
         _ = m.state_dict()
         self.assertTrue(called)
+
+    @parametrize_test("private", [True, False])
+    def test_register_state_dict_post_hook(self, private):
+        m = nn.Transformer(
+            d_model=4, nhead=2, num_encoder_layers=2, num_decoder_layers=2
+        )
+
+        def linear_state_dict_post_hook(module, state_dict, prefix, local_metadata):
+            for name, param in module.named_parameters(recurse=False):
+                state_dict[prefix + name] = torch.nn.Parameter(
+                    state_dict[prefix + name]
+                )
+
+        def register_linear_hook(module):
+            if isinstance(module, nn.Linear):
+                hook_registration_fn = (
+                    module._register_state_dict_hook
+                    if private
+                    else module.register_state_dict_post_hook
+                )
+                hook_registration_fn(linear_state_dict_post_hook)
+
+        def _check_sd(state_dict):
+            for k, v in m.state_dict().items():
+                if "linear" in k or "out_proj" in k:
+                    self.assertTrue(isinstance(v, torch.nn.Parameter))
+                else:
+                    self.assertFalse(isinstance(v, torch.nn.Parameter))
+
+        # verify that return type of hook registered on child submodules has no effect
+        # regardless of whether using public or private API
+        m.apply(register_linear_hook)
+        _check_sd(m.state_dict())
+
+        # verify that return type of hook registered root module has no effect
+        # for public API but has effect for private API
+        hook_registration_fn = (
+            m._register_state_dict_hook if private else m.register_state_dict_post_hook
+        )
+
+        def fn(m, s, p, l):
+            return OrderedDict()
+
+        handle = hook_registration_fn(fn)
+        if private:
+            self.assertFalse(hasattr(fn, "_from_public_api"))
+            self.assertTrue(len(m.state_dict()) == 0)
+        else:
+            self.assertTrue(hasattr(fn, "_from_public_api"))
+            with self.assertRaisesRegex(
+                RuntimeError, "state_dict post-hook must return None"
+            ):
+                sd = m.state_dict()
+            with self.assertRaisesRegex(
+                RuntimeError, "previously registered via register_state_dict_post_hook"
+            ):
+                m._register_state_dict_hook(fn)
 
 
 class TestModuleGlobalHooks(TestCase):
@@ -1148,6 +1212,27 @@ class TestModuleGlobalHooks(TestCase):
 
         output.backward(torch.ones(5, 5), retain_graph=True)
         self.assertTrue(local_backward_called and global_backward_called)
+
+    @skipIfTorchDynamo("TorchDynamo does not work well with hooks")
+    def test_module_global_hooks_with_kwargs(self):
+        def kwarg_global_forward_hook(
+            module: nn.Module,
+            args: Tuple[torch.Tensor],
+            kwargs: Dict[str, Any],
+            out: torch.Tensor,
+        ) -> Any:
+            out = out + kwargs["bias"]
+            return out
+
+        model = KwargModel()
+        nn.modules.module.register_module_forward_hook(
+            kwarg_global_forward_hook,
+            with_kwargs=True,
+        )
+        x: torch.Tensor = torch.randn(10, 20)
+        bias: torch.Tensor = torch.randn(10, 20)
+        out = model(x, bias=bias)
+        self.assertEqual(out, x + 2 * bias, rtol=0, atol=1e-5)
 
 
 class TestModuleHookNN(NNTestCase):

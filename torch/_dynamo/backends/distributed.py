@@ -13,6 +13,7 @@ from torch._dynamo.utils import deepcopy_to_fake_tensor, detect_fake_mode
 from torch._logging import trace_structured
 from torch.fx.node import Node
 
+
 # Regular log messages should go through 'log'.
 # ddp_graph_log is a separate artifact logger reserved for dumping graphs.
 # See docs/source/logging.rst for more info.
@@ -130,7 +131,7 @@ def has_higher_order_op(gm):
 
 # compile each of the partitioned submodules using the user-provided compiler
 class SubmodCompiler(torch.fx.interpreter.Interpreter):
-    def __init__(self, module, compiler, fake_mode):
+    def __init__(self, module, compiler, fake_mode) -> None:
         super().__init__(module)
         self.compiler = compiler
         self.fake_mode = fake_mode
@@ -144,7 +145,7 @@ class SubmodCompiler(torch.fx.interpreter.Interpreter):
         assert len(kwargs) == 0, "We assume only args for these modules"
 
         class WrapperModule(torch.nn.Module):
-            def __init__(self, submod, unwrap_singleton_tuple):
+            def __init__(self, submod, unwrap_singleton_tuple) -> None:
                 super().__init__()
                 self.submod = submod
                 self.unwrap_singleton_tuple = unwrap_singleton_tuple
@@ -246,12 +247,12 @@ class SubmodCompiler(torch.fx.interpreter.Interpreter):
             # This gives us the appropriately strided outputs here which will reflect runtime strides.
 
             class FakeifyFirstAOTInvocationGuard:
-                def __init__(self):
+                def __init__(self) -> None:
                     self.tc = torch._guards.TracingContext.try_get()
                     assert self.tc
                     torch._guards.TracingContext.try_get().fakify_first_call = True
 
-                def __del__(self):
+                def __del__(self) -> None:
                     self.tc.fakify_first_call = False
 
             # For aot_eager and other backends, tracing context is not set
@@ -361,7 +362,7 @@ class DDPOptimizer:
         bucket_bytes_cap: int,
         backend_compile_fn,
         first_bucket_cap: Optional[int] = None,
-    ):
+    ) -> None:
         if first_bucket_cap is not None:
             self.first_bucket_cap = first_bucket_cap
         elif torch.distributed.is_available():
@@ -412,23 +413,6 @@ class DDPOptimizer:
         to compile each subgraph. Finally, stiches compiled graphs into one graphmodule
         and returns its callable.
         """
-        if has_higher_order_op(gm):
-            # This indicates presence of a higher order op. For now, we
-            # have no way to break the higher order op into two buckets.
-            # Allowing higher order ops in the graph also requires
-            # changes in the split_module, becuase graph splitter
-            # currently assumes that all the args of all ops are
-            # tensors, but in the case of higher order ops, it could be
-            # a graph module. As a workaround, we are shortcircuiting
-            raise NotImplementedError(
-                "DDPOptimizer backend: Found a higher order op in the graph. "
-                "This is not supported. Please turn off DDP optimizer using "
-                "torch._dynamo.config.optimize_ddp=False. Note that this can "
-                "cause performance degradation because there will be one bucket "
-                "for the entire Dynamo graph. Please refer to this issue - "
-                "https://github.com/pytorch/pytorch/issues/104674."
-            )
-
         # 1: compute the partition map according to DDP bucket logic
         buckets = [Bucket()]  # (size, param_names)
         processed_modules = set()

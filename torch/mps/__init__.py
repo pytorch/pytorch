@@ -8,7 +8,8 @@ See https://developer.apple.com/documentation/metalperformanceshaders for more d
 from typing import Union
 
 import torch
-from .. import Tensor
+from torch import Tensor
+
 
 _is_in_bad_fork = getattr(torch._C, "_mps_is_in_bad_fork", lambda: False)
 _default_mps_generator: torch._C.Generator = None  # type: ignore[assignment]
@@ -139,8 +140,13 @@ def recommended_max_memory() -> int:
     return torch._C._mps_recommendedMaxMemory()
 
 
+def is_available() -> bool:
+    return device_count() > 0
+
+
 from . import profiler
 from .event import Event
+
 
 __all__ = [
     "device_count",
@@ -156,4 +162,5 @@ __all__ = [
     "Event",
     "profiler",
     "recommended_max_memory",
+    "is_available",
 ]

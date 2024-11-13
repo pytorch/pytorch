@@ -1,6 +1,6 @@
 # Owner(s): ["oncall: export"]
 
-
+import copy
 import unittest
 
 import torch
@@ -8,16 +8,15 @@ import torch.utils._pytree as pytree
 from torch._dynamo.testing import EagerAndRecordGraphs
 from torch._functorch.aot_autograd import aot_export_module
 from torch._higher_order_ops.torchbind import enable_torchbind_tracing
-
 from torch._higher_order_ops.wrap import wrap
 from torch._library.fake_class_registry import FakeScriptObject
-from torch.export import export
 from torch.export._trace import _export
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    skipIfCrossRef,
     skipIfTorchDynamo,
     TestCase,
 )
@@ -134,35 +133,38 @@ class TestExportTorchbind(TestCase):
     ):
         kwargs = kwargs or {}
 
-        def export_wrapper(f, args, kwargs, strcit, pre_dispatch):
+        def export_wrapper(f, args, kwargs, strict, pre_dispatch):
             with enable_torchbind_tracing():
                 if pre_dispatch:
-                    exported_program = _export(
-                        f, args, kwargs, strict=strict, pre_dispatch=True
-                    )
+                    exported_program = torch.export.export_for_training(
+                        f, args, kwargs, strict=strict
+                    ).run_decompositions({})
                 else:
-                    exported_program = export(f, args, kwargs, strict=strict)
+                    exported_program = _export(
+                        f, args, kwargs, strict=strict, pre_dispatch=False
+                    )
             return exported_program
 
         exported_program = export_wrapper(f, args, kwargs, strict, pre_dispatch)
         reversed_kwargs = {key: kwargs[key] for key in reversed(kwargs)}
         unlifted = exported_program.module()
         exp = f(*args, **kwargs)
-        self.assertEqual(unlifted(*args, **kwargs), exp)
-        self.assertEqual(
+        _assertEqualScriptObject(self, unlifted(*args, **kwargs), exp)
+        _assertEqualScriptObject(
+            self,
             unlifted(*args, **reversed_kwargs),
             exp,
         )
 
         # check re-tracing
         retraced_ep = export_wrapper(unlifted, args, kwargs, strict, pre_dispatch)
-        self.assertEqual(retraced_ep.module()(*args, **kwargs), exp)
+        _assertEqualScriptObject(self, retraced_ep.module()(*args, **kwargs), exp)
         return exported_program
 
     @parametrize("pre_dispatch", [True, False])
     def test_none(self, pre_dispatch):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.attr = torch.classes._TorchScriptTesting._Foo(10, 20)
 
@@ -189,7 +191,7 @@ def forward(self, x, n):
             ep.graph_module.code.strip(),
             """\
 def forward(self, token, obj_attr, x, n):
-    with_effects = torch._higher_order_ops.effects.with_effects(token, torch.ops.higher_order.call_torchbind, obj_attr, 'add_tensor', x);  token = obj_attr = None
+    with_effects = torch.ops.higher_order.with_effects(token, torch.ops.higher_order.call_torchbind, obj_attr, 'add_tensor', x);  token = obj_attr = None
     getitem = with_effects[0]
     getitem_1 = with_effects[1];  with_effects = None
     add = torch.ops.aten.add.Tensor(x, getitem_1);  x = getitem_1 = None
@@ -199,7 +201,7 @@ def forward(self, token, obj_attr, x, n):
     def test_method_schema(self):
         tq = _empty_tensor_queue()
         fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
-        fake_obj = torch._library.fake_class_registry.to_fake_obj(fake_mode, tq)
+        fake_obj = torch._library.fake_class_registry.maybe_to_fake_obj(fake_mode, tq)
         self.assertExpectedInline(
             str(fake_obj.push.schema),
             """push(__torch__.torch.classes._TorchScriptTesting._TensorQueue _0, Tensor _1) -> NoneType _0""",
@@ -212,7 +214,7 @@ def forward(self, token, obj_attr, x, n):
     @parametrize("pre_dispatch", [True, False])
     def test_attribute(self, pre_dispatch):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.attr = torch.classes._TorchScriptTesting._Foo(10, 20)
 
@@ -236,7 +238,7 @@ def forward(self, x):
             ep.graph_module.code.strip(),
             """\
 def forward(self, token, obj_attr, x):
-    with_effects = torch._higher_order_ops.effects.with_effects(token, torch.ops.higher_order.call_torchbind, obj_attr, 'add_tensor', x);  token = obj_attr = None
+    with_effects = torch.ops.higher_order.with_effects(token, torch.ops.higher_order.call_torchbind, obj_attr, 'add_tensor', x);  token = obj_attr = None
     getitem = with_effects[0]
     getitem_1 = with_effects[1];  with_effects = None
     add = torch.ops.aten.add.Tensor(x, getitem_1);  x = getitem_1 = None
@@ -246,7 +248,7 @@ def forward(self, token, obj_attr, x):
     @parametrize("pre_dispatch", [True, False])
     def test_attribute_as_custom_op_argument(self, pre_dispatch):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.attr = torch.classes._TorchScriptTesting._Foo(10, 20)
 
@@ -270,7 +272,7 @@ def forward(self, x):
             ep.graph_module.code.strip(),
             """\
 def forward(self, token, obj_attr, x):
-    with_effects = torch._higher_order_ops.effects.with_effects(token, torch.ops._TorchScriptTesting.takes_foo.default, obj_attr, x);  token = obj_attr = None
+    with_effects = torch.ops.higher_order.with_effects(token, torch.ops._TorchScriptTesting.takes_foo.default, obj_attr, x);  token = obj_attr = None
     getitem = with_effects[0]
     getitem_1 = with_effects[1];  with_effects = None
     add = torch.ops.aten.add.Tensor(x, getitem_1);  x = getitem_1 = None
@@ -282,7 +284,7 @@ def forward(self, token, obj_attr, x):
         cc = torch.classes._TorchScriptTesting._Foo(10, 20)
 
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x, cc):
@@ -304,7 +306,7 @@ def forward(self, x, cc):
             ep.graph_module.code.strip(),
             """\
 def forward(self, token, x, cc):
-    with_effects = torch._higher_order_ops.effects.with_effects(token, torch.ops.higher_order.call_torchbind, cc, 'add_tensor', x);  token = cc = None
+    with_effects = torch.ops.higher_order.with_effects(token, torch.ops.higher_order.call_torchbind, cc, 'add_tensor', x);  token = cc = None
     getitem = with_effects[0]
     getitem_1 = with_effects[1];  with_effects = None
     add = torch.ops.aten.add.Tensor(x, getitem_1);  x = getitem_1 = None
@@ -313,14 +315,17 @@ def forward(self, token, x, cc):
         # aot_export_function runs the program twice
         # in run_functionalized_fw_and_collect_metadata and create_aot_dispatcher_function
         # We also have a re-tracing test, which doubles the count.
-        self.assertEqual(self.foo_add_tensor_counter, 4)
+        if pre_dispatch:
+            self.assertEqual(self.foo_add_tensor_counter, 6)
+        else:
+            self.assertEqual(self.foo_add_tensor_counter, 4)
 
     @parametrize("pre_dispatch", [True, False])
     def test_input_as_custom_op_argument(self, pre_dispatch):
         cc = torch.classes._TorchScriptTesting._Foo(10, 20)
 
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x, cc):
@@ -363,7 +368,7 @@ def forward(self, x, cc):
             ep.graph_module.code.strip(),
             """\
 def forward(self, token, x, cc):
-    with_effects = torch._higher_order_ops.effects.with_effects(token, torch.ops._TorchScriptTesting.takes_foo.default, cc, x);  token = cc = None
+    with_effects = torch.ops.higher_order.with_effects(token, torch.ops._TorchScriptTesting.takes_foo.default, cc, x);  token = cc = None
     getitem = with_effects[0]
     getitem_1 = with_effects[1];  with_effects = None
     add = torch.ops.aten.add.Tensor(x, getitem_1);  x = getitem_1 = None
@@ -381,7 +386,7 @@ def forward(self, token, x, cc):
                 return x + torch.ops._TorchScriptTesting.takes_foo(self.foo, x)
 
         class F1(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.alpha = torch.classes._TorchScriptTesting._Foo(10, 20)
                 self.beta = self.alpha
@@ -417,7 +422,7 @@ def forward(self, token, x, cc):
     @parametrize("pre_dispatch", [True, False])
     def test_unlift_custom_obj(self, pre_dispatch):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.attr = torch.classes._TorchScriptTesting._Foo(10, 20)
 
@@ -445,10 +450,10 @@ def forward(self, x):
             ep.graph_module.code.strip(),
             """\
 def forward(self, token, obj_attr, x):
-    with_effects = torch._higher_order_ops.effects.with_effects(token, torch.ops._TorchScriptTesting.takes_foo.default, obj_attr, x);  token = None
+    with_effects = torch.ops.higher_order.with_effects(token, torch.ops._TorchScriptTesting.takes_foo.default, obj_attr, x);  token = None
     getitem = with_effects[0]
     getitem_1 = with_effects[1];  with_effects = None
-    with_effects_1 = torch._higher_order_ops.effects.with_effects(getitem, torch.ops._TorchScriptTesting.takes_foo.default, obj_attr, getitem_1);  getitem = obj_attr = getitem_1 = None
+    with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops._TorchScriptTesting.takes_foo.default, obj_attr, getitem_1);  getitem = obj_attr = getitem_1 = None
     getitem_2 = with_effects_1[0]
     getitem_3 = with_effects_1[1];  with_effects_1 = None
     add = torch.ops.aten.add.Tensor(x, getitem_3);  x = getitem_3 = None
@@ -458,7 +463,7 @@ def forward(self, token, obj_attr, x):
     @parametrize("pre_dispatch", [True, False])
     def test_custom_obj_list_out(self, pre_dispatch):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.attr = torch.classes._TorchScriptTesting._Foo(10, 20)
 
@@ -492,7 +497,7 @@ def forward(self, x):
             ep.graph_module.code.strip(),
             """\
 def forward(self, token, obj_attr, x):
-    with_effects = torch._higher_order_ops.effects.with_effects(token, torch.ops._TorchScriptTesting.takes_foo_list_return.default, obj_attr, x);  token = None
+    with_effects = torch.ops.higher_order.with_effects(token, torch.ops._TorchScriptTesting.takes_foo_list_return.default, obj_attr, x);  token = None
     getitem = with_effects[0]
     getitem_1 = with_effects[1];  with_effects = None
     getitem_2 = getitem_1[0]
@@ -500,7 +505,7 @@ def forward(self, token, obj_attr, x):
     getitem_4 = getitem_1[2];  getitem_1 = None
     add = torch.ops.aten.add.Tensor(getitem_2, getitem_3);  getitem_2 = getitem_3 = None
     add_1 = torch.ops.aten.add.Tensor(add, getitem_4);  add = getitem_4 = None
-    with_effects_1 = torch._higher_order_ops.effects.with_effects(getitem, torch.ops._TorchScriptTesting.takes_foo.default, obj_attr, add_1);  getitem = obj_attr = add_1 = None
+    with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops._TorchScriptTesting.takes_foo.default, obj_attr, add_1);  getitem = obj_attr = add_1 = None
     getitem_5 = with_effects_1[0]
     getitem_6 = with_effects_1[1];  with_effects_1 = None
     add_2 = torch.ops.aten.add.Tensor(x, getitem_6);  x = getitem_6 = None
@@ -510,7 +515,7 @@ def forward(self, token, obj_attr, x):
     @parametrize("pre_dispatch", [True, False])
     def test_custom_obj_tuple_out(self, pre_dispatch):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.attr = torch.classes._TorchScriptTesting._Foo(10, 20)
 
@@ -542,12 +547,12 @@ def forward(self, x):
             ep.graph_module.code.strip(),
             """\
 def forward(self, token, obj_attr, x):
-    with_effects = torch._higher_order_ops.effects.with_effects(token, torch.ops._TorchScriptTesting.takes_foo_tuple_return.default, obj_attr, x);  token = None
+    with_effects = torch.ops.higher_order.with_effects(token, torch.ops._TorchScriptTesting.takes_foo_tuple_return.default, obj_attr, x);  token = None
     getitem = with_effects[0]
     getitem_1 = with_effects[1]
     getitem_2 = with_effects[2];  with_effects = None
     add = torch.ops.aten.add.Tensor(getitem_1, getitem_2);  getitem_1 = getitem_2 = None
-    with_effects_1 = torch._higher_order_ops.effects.with_effects(getitem, torch.ops._TorchScriptTesting.takes_foo.default, obj_attr, add);  getitem = obj_attr = add = None
+    with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops._TorchScriptTesting.takes_foo.default, obj_attr, add);  getitem = obj_attr = add = None
     getitem_3 = with_effects_1[0]
     getitem_4 = with_effects_1[1];  with_effects_1 = None
     add_1 = torch.ops.aten.add.Tensor(x, getitem_4);  x = getitem_4 = None
@@ -559,7 +564,7 @@ def forward(self, token, obj_attr, x):
         test = self
 
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(3, 2)
                 self.check_tq_is_fake = True
@@ -595,14 +600,14 @@ def forward(self, token, obj_attr, x):
             """\
 def forward(self, arg0_1, arg1_1):
     cos = torch.ops.aten.cos.default(arg1_1)
-    call_torchbind = torch.ops.higher_order.call_torchbind(arg0_1, 'push', cos);  cos = None
+    call_torchbind = torch.ops.higher_order.call_torchbind(arg0_1, 'push', cos);  cos = call_torchbind = None
     sin = torch.ops.aten.sin.default(arg1_1);  arg1_1 = None
-    call_torchbind_1 = torch.ops.higher_order.call_torchbind(arg0_1, 'push', sin);  sin = None
+    call_torchbind_1 = torch.ops.higher_order.call_torchbind(arg0_1, 'push', sin);  sin = call_torchbind_1 = None
     call_torchbind_2 = torch.ops.higher_order.call_torchbind(arg0_1, 'pop')
-    call_torchbind_3 = torch.ops.higher_order.call_torchbind(arg0_1, 'size')
+    call_torchbind_3 = torch.ops.higher_order.call_torchbind(arg0_1, 'size');  call_torchbind_3 = None
     add = torch.ops.aten.add.Tensor(call_torchbind_2, 1);  call_torchbind_2 = None
     call_torchbind_4 = torch.ops.higher_order.call_torchbind(arg0_1, 'pop')
-    call_torchbind_5 = torch.ops.higher_order.call_torchbind(arg0_1, 'size')
+    call_torchbind_5 = torch.ops.higher_order.call_torchbind(arg0_1, 'size');  call_torchbind_5 = None
     sub = torch.ops.aten.sub.Tensor(call_torchbind_4, 0);  call_torchbind_4 = None
     return (sub, add, arg0_1)
     """,
@@ -617,7 +622,7 @@ def forward(self, arg0_1, arg1_1):
         test = self
 
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(3, 2)
                 self.check_tq_is_fake = True
@@ -656,11 +661,11 @@ def forward(self, arg0_1, arg1_1):
             """\
 def forward(self, arg0_1, arg1_1):
     call_torchbind = torch.ops.higher_order.call_torchbind(arg0_1, 'pop')
-    call_torchbind_1 = torch.ops.higher_order.call_torchbind(arg0_1, 'size')
+    call_torchbind_1 = torch.ops.higher_order.call_torchbind(arg0_1, 'size');  call_torchbind_1 = None
     add = torch.ops.aten.add.Tensor(call_torchbind, 1);  call_torchbind = None
     add_1 = torch.ops.aten.add.Tensor(add, arg1_1);  add = None
     call_torchbind_2 = torch.ops.higher_order.call_torchbind(arg0_1, 'pop')
-    call_torchbind_3 = torch.ops.higher_order.call_torchbind(arg0_1, 'size')
+    call_torchbind_3 = torch.ops.higher_order.call_torchbind(arg0_1, 'size');  call_torchbind_3 = None
     sub = torch.ops.aten.sub.Tensor(call_torchbind_2, 0);  call_torchbind_2 = None
     add_2 = torch.ops.aten.add.Tensor(sub, arg1_1);  sub = arg1_1 = None
     return (add_2, add_1, arg0_1)
@@ -674,7 +679,7 @@ def forward(self, arg0_1, arg1_1):
 
     def test_non_strict_export_methods(self):
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(2, 2)
 
@@ -692,25 +697,27 @@ def forward(self, arg0_1, arg1_1):
         b = torch.randn(2, 2)
         tq.push(a)
         tq.push(b)
-        ep = torch.export.export(mod, (tq, torch.randn(2, 2)), strict=False)
+        ep = torch.export.export_for_training(
+            mod, (tq, torch.randn(2, 2)), strict=False
+        ).run_decompositions({})
         self.assertExpectedInline(
             ep.graph_module.code.strip(),
             """\
 def forward(self, token, p_linear_weight, p_linear_bias, tq, x):
-    with_effects = torch._higher_order_ops.effects.with_effects(token, torch.ops.higher_order.call_torchbind, tq, 'pop');  token = None
+    with_effects = torch.ops.higher_order.with_effects(token, torch.ops.higher_order.call_torchbind, tq, 'pop');  token = None
     getitem = with_effects[0]
     getitem_1 = with_effects[1];  with_effects = None
-    with_effects_1 = torch._higher_order_ops.effects.with_effects(getitem, torch.ops.higher_order.call_torchbind, tq, 'float_size');  getitem = None
+    with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops.higher_order.call_torchbind, tq, 'float_size');  getitem = None
     getitem_2 = with_effects_1[0];  with_effects_1 = None
     add = torch.ops.aten.add.Tensor(getitem_1, 1.0);  getitem_1 = None
     linear = torch.ops.aten.linear.default(x, p_linear_weight, p_linear_bias);  p_linear_weight = p_linear_bias = None
     add_1 = torch.ops.aten.add.Tensor(add, linear);  add = linear = None
-    with_effects_2 = torch._higher_order_ops.effects.with_effects(getitem_2, torch.ops.higher_order.call_torchbind, tq, 'is_empty');  getitem_2 = None
+    with_effects_2 = torch.ops.higher_order.with_effects(getitem_2, torch.ops.higher_order.call_torchbind, tq, 'is_empty');  getitem_2 = None
     getitem_4 = with_effects_2[0];  with_effects_2 = None
-    with_effects_3 = torch._higher_order_ops.effects.with_effects(getitem_4, torch.ops.higher_order.call_torchbind, tq, 'pop');  getitem_4 = None
+    with_effects_3 = torch.ops.higher_order.with_effects(getitem_4, torch.ops.higher_order.call_torchbind, tq, 'pop');  getitem_4 = None
     getitem_6 = with_effects_3[0]
     getitem_7 = with_effects_3[1];  with_effects_3 = None
-    with_effects_4 = torch._higher_order_ops.effects.with_effects(getitem_6, torch.ops.higher_order.call_torchbind, tq, 'size');  getitem_6 = None
+    with_effects_4 = torch.ops.higher_order.with_effects(getitem_6, torch.ops.higher_order.call_torchbind, tq, 'size');  getitem_6 = None
     getitem_8 = with_effects_4[0];  with_effects_4 = None
     add_2 = torch.ops.aten.add.Tensor(getitem_7, 0);  getitem_7 = None
     add_3 = torch.ops.aten.add.Tensor(add_2, x);  add_2 = x = None
@@ -719,6 +726,44 @@ def forward(self, token, p_linear_weight, p_linear_bias, tq, x):
         self.assertEqual(tq.size(), 2)
         self.assertTrue(tq.pop() is a)
         self.assertTrue(tq.pop() is b)
+
+    @skipIfCrossRef  # arg names change with torch function mode
+    def test_safe_to_trace_with_real(self):
+        x = torch.randn(3, 3)
+        safe_obj = torch.classes._TorchScriptTesting._ConstantTensorContainer(x)
+
+        class Mod(torch.nn.Module):
+            def forward(self, safe_obj: torch.ScriptObject) -> None:
+                return safe_obj.get().sin()
+
+        mod = Mod()
+        backend = EagerAndRecordGraphs()
+        out = torch.compile(mod, backend=backend, fullgraph=True)(safe_obj)
+        self.assertEqual(out, mod(safe_obj))
+        self.assertExpectedInline(
+            backend.graphs[0].code.strip(),
+            """\
+def forward(self, L_safe_obj_ : torch.ScriptObject):
+    l_safe_obj_ = L_safe_obj_
+    call_torchbind = torch.ops.higher_order.call_torchbind(l_safe_obj_, 'get');  l_safe_obj_ = None
+    sin = call_torchbind.sin();  call_torchbind = None
+    return (sin,)""",
+        )
+
+        with enable_torchbind_tracing():
+            ep = torch.export.export_for_training(
+                mod, (safe_obj,), strict=False
+            ).run_decompositions({})
+            self.assertExpectedInline(
+                ep.graph_module.code.strip(),
+                """\
+def forward(self, token, safe_obj):
+    with_effects = torch.ops.higher_order.with_effects(token, torch.ops.higher_order.call_torchbind, safe_obj, 'get');  token = safe_obj = None
+    getitem = with_effects[0]
+    getitem_1 = with_effects[1];  with_effects = None
+    sin = torch.ops.aten.sin.default(getitem_1);  getitem_1 = None
+    return (getitem, sin)""",  # noqa: B950
+            )
 
     def test_identifying_torchbind_ops(self):
         for op in self.torch_bind_ops:
@@ -822,7 +867,7 @@ def forward(self, token, p_linear_weight, p_linear_bias, tq, x):
     @parametrize("fallthrough_via", ["lib_impl", "py_impl"])
     def test_make_fx_tensor_queue_operators(self, fallthrough_via):
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, tq, x):
@@ -882,14 +927,14 @@ def forward(self, token, p_linear_weight, p_linear_bias, tq, x):
             """\
 def forward(self, arg0_1, arg1_1):
     cos = torch.ops.aten.cos.default(arg1_1)
-    queue_push = torch.ops._TorchScriptTesting.queue_push.default(arg0_1, cos);  cos = None
+    queue_push = torch.ops._TorchScriptTesting.queue_push.default(arg0_1, cos);  cos = queue_push = None
     sin = torch.ops.aten.sin.default(arg1_1);  arg1_1 = None
-    queue_push_1 = torch.ops._TorchScriptTesting.queue_push.default(arg0_1, sin);  sin = None
+    queue_push_1 = torch.ops._TorchScriptTesting.queue_push.default(arg0_1, sin);  sin = queue_push_1 = None
     queue_pop = torch.ops._TorchScriptTesting.queue_pop.default(arg0_1)
-    queue_size = torch.ops._TorchScriptTesting.queue_size.default(arg0_1)
+    queue_size = torch.ops._TorchScriptTesting.queue_size.default(arg0_1);  queue_size = None
     sub = torch.ops.aten.sub.Tensor(queue_pop, 1);  queue_pop = None
     queue_pop_1 = torch.ops._TorchScriptTesting.queue_pop.default(arg0_1)
-    queue_size_1 = torch.ops._TorchScriptTesting.queue_size.default(arg0_1)
+    queue_size_1 = torch.ops._TorchScriptTesting.queue_size.default(arg0_1);  queue_size_1 = None
     add = torch.ops.aten.add.Tensor(queue_pop_1, 0);  queue_pop_1 = None
     return (sub, add, arg0_1)""",
         )
@@ -897,7 +942,7 @@ def forward(self, arg0_1, arg1_1):
 
     def test_aot_export_tensor_queue_operators(self):
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, tq, x):
@@ -921,7 +966,7 @@ def forward(self, arg0_1, arg1_1):
         x = torch.ones(2, 3)
 
         fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
-        fake_tq1 = torch._library.fake_class_registry.to_fake_obj(fake_mode, tq1)
+        fake_tq1 = torch._library.fake_class_registry.maybe_to_fake_obj(fake_mode, tq1)
         fake_x = fake_mode.from_tensor(x)
         gm = aot_export_module(mod, (fake_tq1, fake_x), trace_joint=False)[0]
 
@@ -932,25 +977,88 @@ def forward(self, arg0_1, arg1_1):
             """\
 def forward(self, arg0_1, arg1_1, arg2_1):
     cos = torch.ops.aten.cos.default(arg2_1)
-    with_effects = torch._higher_order_ops.effects.with_effects(arg0_1, torch.ops._TorchScriptTesting.queue_push.default, arg1_1, cos);  arg0_1 = cos = None
+    with_effects = torch.ops.higher_order.with_effects(arg0_1, torch.ops._TorchScriptTesting.queue_push.default, arg1_1, cos);  arg0_1 = cos = None
     getitem = with_effects[0];  with_effects = None
     sin = torch.ops.aten.sin.default(arg2_1);  arg2_1 = None
-    with_effects_1 = torch._higher_order_ops.effects.with_effects(getitem, torch.ops._TorchScriptTesting.queue_push.default, arg1_1, sin);  getitem = sin = None
+    with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops._TorchScriptTesting.queue_push.default, arg1_1, sin);  getitem = sin = None
     getitem_2 = with_effects_1[0];  with_effects_1 = None
-    with_effects_2 = torch._higher_order_ops.effects.with_effects(getitem_2, torch.ops._TorchScriptTesting.queue_pop.default, arg1_1);  getitem_2 = None
+    with_effects_2 = torch.ops.higher_order.with_effects(getitem_2, torch.ops._TorchScriptTesting.queue_pop.default, arg1_1);  getitem_2 = None
     getitem_4 = with_effects_2[0]
     getitem_5 = with_effects_2[1];  with_effects_2 = None
-    with_effects_3 = torch._higher_order_ops.effects.with_effects(getitem_4, torch.ops._TorchScriptTesting.queue_size.default, arg1_1);  getitem_4 = None
+    with_effects_3 = torch.ops.higher_order.with_effects(getitem_4, torch.ops._TorchScriptTesting.queue_size.default, arg1_1);  getitem_4 = None
     getitem_6 = with_effects_3[0];  with_effects_3 = None
     sub = torch.ops.aten.sub.Tensor(getitem_5, 1);  getitem_5 = None
-    with_effects_4 = torch._higher_order_ops.effects.with_effects(getitem_6, torch.ops._TorchScriptTesting.queue_pop.default, arg1_1);  getitem_6 = None
+    with_effects_4 = torch.ops.higher_order.with_effects(getitem_6, torch.ops._TorchScriptTesting.queue_pop.default, arg1_1);  getitem_6 = None
     getitem_8 = with_effects_4[0]
     getitem_9 = with_effects_4[1];  with_effects_4 = None
-    with_effects_5 = torch._higher_order_ops.effects.with_effects(getitem_8, torch.ops._TorchScriptTesting.queue_size.default, arg1_1);  getitem_8 = None
+    with_effects_5 = torch.ops.higher_order.with_effects(getitem_8, torch.ops._TorchScriptTesting.queue_size.default, arg1_1);  getitem_8 = None
     getitem_10 = with_effects_5[0];  with_effects_5 = None
     add = torch.ops.aten.add.Tensor(getitem_9, 0);  getitem_9 = None
     return (getitem_10, sub, add, arg1_1)""",  # noqa: B950
         )
+
+    def test_export_inplace_custom_op(self):
+        class Model(torch.nn.Module):
+            def forward(self, tq: torch.ScriptObject, x: torch.Tensor) -> None:
+                torch.ops._TorchScriptTesting.queue_push(tq, x)
+                return tq
+
+        mod = Model()
+        ep = self._test_export_same_as_eager(
+            mod,
+            (_empty_tensor_queue(), torch.randn(3, 3)),
+            strict=False,
+            pre_dispatch=True,
+        )
+        self.assertExpectedInline(
+            ep.module().code.strip(),
+            """\
+def forward(self, tq, x):
+    tq, x, = fx_pytree.tree_flatten_spec(([tq, x], {}), self._in_spec)
+    queue_push_default = torch.ops._TorchScriptTesting.queue_push.default(tq, x);  x = queue_push_default = None
+    return pytree.tree_unflatten((tq,), self._out_spec)""",
+        )
+        self.assertExpectedInline(
+            ep.graph_module.code.strip(),
+            """\
+def forward(self, token, tq, x):
+    with_effects = torch.ops.higher_order.with_effects(token, torch.ops._TorchScriptTesting.queue_push.default, tq, x);  token = x = None
+    getitem = with_effects[0];  with_effects = None
+    return (getitem, tq)""",  # noqa: B950
+        )
+        self.assertExpectedInline(
+            str(ep.graph_module.graph).strip(),
+            """\
+graph():
+    %tq : [num_users=2] = placeholder[target=tq]
+    %x : [num_users=1] = placeholder[target=x]
+    %queue_push_default : [num_users=0] = call_function[target=torch.ops._TorchScriptTesting.queue_push.default](args = (%tq, %x), kwargs = {})
+    return (tq,)""",  # noqa: B950
+        )
+
+    def test_deepcopy(self):
+        tq = torch.classes._TorchScriptTesting._TensorQueue(
+            torch.empty(
+                0,
+            ).fill_(-1)
+        )
+        tq_0 = copy.deepcopy(tq)
+        tq.push(torch.zeros(2, 2))
+        tq.push(torch.ones(2, 2))
+        tq_1 = copy.deepcopy(tq)
+        tq.push(torch.ones(2, 2) * 2)
+        self.assertEqual(tq_0.size(), 0)
+        self.assertEqual(tq_1.size(), 2)
+        self.assertEqual(tq.size(), 3)
+
+        foo = torch.classes._TorchScriptTesting._Foo(1, 2)
+        foo_0 = copy.deepcopy(foo)
+        foo.increment(1)
+        foo_1 = copy.deepcopy(foo)
+        foo.increment(1)
+        self.assertEqual(foo_0.add(1), 3)
+        self.assertEqual(foo_1.add(1), 5)
+        self.assertEqual(foo.add(1), 7)
 
 
 class TestCompileTorchbind(TestCase):
@@ -998,7 +1106,7 @@ class TestCompileTorchbind(TestCase):
             backend = EagerAndRecordGraphs()
 
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.check_tq_is_fake = True
 
@@ -1059,7 +1167,7 @@ class TestCompileTorchbind(TestCase):
     @parametrize("backend", ["eager", "aot_eager"])
     def test_compile_script_object_input_guards(self, backend):
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.check_tq_is_fake = True
 
@@ -1110,7 +1218,7 @@ class TestCompileTorchbind(TestCase):
 
     def test_compile_script_object_input_automatic_dynamic_shape(self):
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.check_tq_is_fake = True
 
@@ -1147,7 +1255,7 @@ class TestCompileTorchbind(TestCase):
             backend = EagerAndRecordGraphs()
 
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.check_tq_is_fake = True
 
@@ -1238,16 +1346,18 @@ def forward(self, L_x_ : torch.Tensor, L_tq_ : torch.ScriptObject):
         mod = TestMod()
 
         torch.compile(mod, backend=backend, fullgraph=True)(test_obj, torch.randn(3, 1))
-        ep = torch.export.export(mod, (test_obj, torch.randn(3, 1)), strict=False)
+        ep = torch.export.export_for_training(
+            mod, (test_obj, torch.randn(3, 1)), strict=False
+        ).run_decompositions({})
         self.assertExpectedInline(
             ep.graph_module.code.strip(),
             """\
 def forward(self, token, obj, x):
-    with_effects = torch._higher_order_ops.effects.with_effects(token, torch.ops.higher_order.call_torchbind, obj, 'get');  token = obj = None
+    with_effects = torch.ops.higher_order.with_effects(token, torch.ops.higher_order.call_torchbind, obj, 'get');  token = obj = None
     getitem = with_effects[0]
     getitem_1 = with_effects[1];  with_effects = None
-    add = torch.ops.aten.add.Tensor(getitem_1, x);  getitem_1 = x = None
-    return (getitem, add)""",  # noqa: B950
+    add_3 = torch.ops.aten.add.Tensor(getitem_1, x);  getitem_1 = x = None
+    return (getitem, add_3)""",  # noqa: B950
         )
 
     @parametrize("backend", ["eager", "aot_eager"])
@@ -1344,7 +1454,7 @@ def forward(self, token, obj, x):
             backend = EagerAndRecordGraphs()
 
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.tq = _empty_tensor_queue()
 
@@ -1408,7 +1518,7 @@ class TestRegisterFakeClass(TestCase):
 
             @torch._library.register_fake_class("_TorchScriptTesting::_Foo")
             class InvalidFakeFoo:
-                def __init__(self):
+                def __init__(self) -> None:
                     pass
 
     def test_register_fake_class_from_real_not_classmethod(self):

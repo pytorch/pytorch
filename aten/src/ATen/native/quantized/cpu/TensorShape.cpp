@@ -163,10 +163,11 @@ Tensor cat_quantized_cpu(const ITensorListRef& qxs, int64_t dim) {
   TORCH_CHECK(is_valid_quantization_scheme(materialized[0]),
               "Only per-tensor quantization is supported in 'cat'!");
 
-  if (all_inputs_sharing_qparams(materialized)) {
+  if (!all_inputs_sharing_qparams(materialized)) {
       // TODO: if possible change this warning to an error T194501002
       TORCH_WARN("All inputs of this cat operator must share the same quantization parameters. Otherwise large numerical inaccuracies may occur.");
-  }  check_cat_no_zero_dim(materialized);
+  }
+  check_cat_no_zero_dim(materialized);
   dim = legacy_cat_wrap_dim(dim, materialized);
   double _scale = materialized[0].get().q_scale();
   int64_t _zero_point = materialized[0].get().q_zero_point();

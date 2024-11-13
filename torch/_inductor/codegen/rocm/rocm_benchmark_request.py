@@ -3,18 +3,23 @@ from __future__ import annotations
 
 import functools
 import logging
-from ctypes import byref, c_size_t, c_void_p
+from ctypes import byref, c_int, c_size_t, c_void_p
 from typing import Any, Callable, Iterable, List, Optional, Union
 
 import torch
-
-from torch._inductor.autotune_process import GPUDeviceBenchmarkRequest, TensorMeta
+from torch._inductor import config
+from torch._inductor.autotune_process import (
+    BenchmarkRequest,
+    GPUDeviceBenchmarkMixin,
+    TensorMeta,
+)
 from torch._inductor.codecache import DLLWrapper, ROCmCodeCache
+
 
 log = logging.getLogger(__name__)
 
 
-class ROCmBenchmarkRequest(GPUDeviceBenchmarkRequest):
+class ROCmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
     # Important: Instances of this class have to be serializable
     # across process boundaries. Do not put CUDA Tensors in here!
 
@@ -25,7 +30,7 @@ class ROCmBenchmarkRequest(GPUDeviceBenchmarkRequest):
         output_tensor_meta: Union[TensorMeta, List[TensorMeta]],
         extra_args: Iterable[Any],
         source_code: str,
-    ):
+    ) -> None:
         super().__init__(kernel_name, input_tensor_meta, output_tensor_meta, extra_args)
         self.source_code = source_code
         self.workspace_size: int = 0
@@ -41,6 +46,8 @@ class ROCmBenchmarkRequest(GPUDeviceBenchmarkRequest):
         # may happen in separate Threadpool
         log.debug("Precompiling %s", self)
         ROCmCodeCache.compile(self.source_code, "so")
+        if config.rocm.generate_test_runner:
+            ROCmCodeCache.compile(self.source_code, "exe")
         log.debug("Done precompiling %s", self)
 
     def make_run_fn(
@@ -52,6 +59,7 @@ class ROCmBenchmarkRequest(GPUDeviceBenchmarkRequest):
             c_void_p(tensor.data_ptr())
             for tensor in list(input_tensors) + [output_tensor]
         ]
+        size_args = [c_int(arg) for arg in self.extra_args]
         log.debug(
             "make_run_fn: self.kernel_name=%s, self.source_file=%s, self.hash_key=%s, self.DLL=%s, args=%s, self.extra_args=%s",
             self.kernel_name,
@@ -76,7 +84,7 @@ class ROCmBenchmarkRequest(GPUDeviceBenchmarkRequest):
         return functools.partial(
             run_method,
             *args,
-            *self.extra_args,
+            *size_args,
             None,  # null workspace size ptr
             workspace_ptr,  # set workspace ptr,
             stream_ptr,
@@ -93,9 +101,10 @@ class ROCmBenchmarkRequest(GPUDeviceBenchmarkRequest):
         run_method = getattr(self.DLL, self.kernel_name)
         # Retrieve workspace_size and initialize workspace.
         c_workspace_size = c_size_t()
+        size_args = [c_int(arg) for arg in self.extra_args]
         run_method(
             *args,  # input ptrs and output ptrs
-            *self.extra_args,
+            *size_args,
             byref(
                 c_workspace_size
             ),  # set workspace size ptr to retrieve workspace size

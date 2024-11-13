@@ -25,8 +25,7 @@
 #include <algorithm>
 #include <utility>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 DEFINE_DISPATCH(qadd_relu_stub);
 DEFINE_DISPATCH(qadd_stub);
@@ -161,9 +160,9 @@ Tensor qnnpack_add(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
   Tensor qy = at::native::empty_affine_quantized(
       qa_contig.sizes(),
       kQUInt8,
-      c10::nullopt /* layout */,
+      std::nullopt /* layout */,
       kCPU,
-      c10::nullopt /* pin_memory */,
+      std::nullopt /* pin_memory */,
       scale,
       zero_point,
       qa.suggest_memory_format());
@@ -309,9 +308,9 @@ Tensor xnnp_add(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
   Tensor qy = at::native::empty_affine_quantized(
       at::infer_size_dimvector(qa_contig.sizes(), qb_contig.sizes()),
       qa.scalar_type(),
-      c10::nullopt /* layout */,
+      std::nullopt /* layout */,
       kCPU,
-      c10::nullopt /* pin_memory */,
+      std::nullopt /* pin_memory */,
       scale,
       zero_point,
       qa_mem_format);
@@ -419,7 +418,7 @@ Tensor qadd(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
          .memory_format(qa.suggest_memory_format()),
       scale,
       zero_point,
-      c10::nullopt);
+      std::nullopt);
   return _add_out<ReLUFused>(qc, qa, qb);
 }
 
@@ -505,4 +504,4 @@ Tensor quantized_add(Tensor qa, Tensor qb, double scale, int64_t zero_point){
   return qadd<false>(std::move(qa), std::move(qb), scale, zero_point);
 }
 
-}}  // namespace at::native
+}  // namespace at::native

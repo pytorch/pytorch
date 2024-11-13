@@ -8,6 +8,7 @@ import torch.export
 import torch.export._trace
 from torch._utils_internal import log_export_usage
 
+
 log = logging.getLogger(__name__)
 
 __all__ = ["report_exportability"]
@@ -90,10 +91,15 @@ def report_exportability(
     all_submod_names = [name for name, _ in mod.named_modules() if name != ""]
     submod_inputs = _generate_inputs_for_submodules(mod, all_submod_names, args, kwargs)
 
+    tried_module_types = set()
     report: Dict[str, Optional[Exception]] = {}
 
     def try_export(module, module_name, args, kwargs):
-        nonlocal submod_inputs, report, strict, pre_dispatch
+        nonlocal submod_inputs, report, strict, pre_dispatch, tried_module_types
+
+        if type(module) in tried_module_types:
+            return
+        tried_module_types.add(type(module))
 
         if args is not None or kwargs is not None:
             try:

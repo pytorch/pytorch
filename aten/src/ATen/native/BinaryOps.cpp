@@ -321,14 +321,14 @@ TORCH_META_FUNC(tanh_backward) (const Tensor& grad_output, const Tensor& output)
     build_borrowing_binary_op(maybe_get_output(), self, other);                 \
   }
 
-CREATE_BINARY_META_FUNC(logaddexp);
-CREATE_BINARY_META_FUNC(logaddexp2);
-CREATE_BINARY_META_FUNC(gcd);
-CREATE_BINARY_META_FUNC(lcm);
-CREATE_BINARY_META_FUNC(hypot);
-CREATE_BINARY_META_FUNC(igamma);
-CREATE_BINARY_META_FUNC(igammac);
-CREATE_BINARY_META_FUNC(nextafter);
+CREATE_BINARY_META_FUNC(logaddexp)
+CREATE_BINARY_META_FUNC(logaddexp2)
+CREATE_BINARY_META_FUNC(gcd)
+CREATE_BINARY_META_FUNC(lcm)
+CREATE_BINARY_META_FUNC(hypot)
+CREATE_BINARY_META_FUNC(igamma)
+CREATE_BINARY_META_FUNC(igammac)
+CREATE_BINARY_META_FUNC(nextafter)
 
 TORCH_META_FUNC(maximum) (const Tensor& self, const Tensor& other) {
   TORCH_CHECK(!self.is_complex() && !other.is_complex(), "maximum not implemented for complex tensors.");
@@ -362,12 +362,12 @@ TORCH_META_FUNC(fmin) (const Tensor& self, const Tensor& other) {
     build_borrowing_except_last_argument_comparison_op(maybe_get_output(), self, other_tensor);  \
   }
 
-CREATE_COMPARISON_SCALAR_TENSOR_META_FUNC(eq);
-CREATE_COMPARISON_SCALAR_TENSOR_META_FUNC(ne);
-CREATE_COMPARISON_SCALAR_TENSOR_META_FUNC(lt);
-CREATE_COMPARISON_SCALAR_TENSOR_META_FUNC(le);
-CREATE_COMPARISON_SCALAR_TENSOR_META_FUNC(gt);
-CREATE_COMPARISON_SCALAR_TENSOR_META_FUNC(ge);
+CREATE_COMPARISON_SCALAR_TENSOR_META_FUNC(eq)
+CREATE_COMPARISON_SCALAR_TENSOR_META_FUNC(ne)
+CREATE_COMPARISON_SCALAR_TENSOR_META_FUNC(lt)
+CREATE_COMPARISON_SCALAR_TENSOR_META_FUNC(le)
+CREATE_COMPARISON_SCALAR_TENSOR_META_FUNC(gt)
+CREATE_COMPARISON_SCALAR_TENSOR_META_FUNC(ge)
 
 } // namespace at::meta
 
@@ -532,24 +532,24 @@ TORCH_IMPL_FUNC(func_out) (const Tensor& self, const Tensor& other, const Tensor
   func_stub(device_type(), *this);                                                           \
 }
 
-CREATE_BINARY_TORCH_IMPL_FUNC(bitwise_and_out, bitwise_and_stub);
-CREATE_BINARY_TORCH_IMPL_FUNC(bitwise_or_out, bitwise_or_stub);
-CREATE_BINARY_TORCH_IMPL_FUNC(bitwise_xor_out, bitwise_xor_stub);
-CREATE_BINARY_TORCH_IMPL_FUNC(maximum_out, maximum_stub);
-CREATE_BINARY_TORCH_IMPL_FUNC(minimum_out, minimum_stub);
-CREATE_BINARY_TORCH_IMPL_FUNC(fmax_out, fmax_stub);
-CREATE_BINARY_TORCH_IMPL_FUNC(fmin_out, fmin_stub);
-CREATE_BINARY_TORCH_IMPL_FUNC(fmod_out, fmod_stub);
-CREATE_BINARY_TORCH_IMPL_FUNC(logaddexp_out, logaddexp_stub);
-CREATE_BINARY_TORCH_IMPL_FUNC(logaddexp2_out, logaddexp2_stub);
-CREATE_BINARY_TORCH_IMPL_FUNC(gcd_out, gcd_stub);
-CREATE_BINARY_TORCH_IMPL_FUNC(lcm_out, lcm_stub);
-CREATE_BINARY_TORCH_IMPL_FUNC(hypot_out, hypot_stub);
-CREATE_BINARY_TORCH_IMPL_FUNC(igamma_out, igamma_stub);
-CREATE_BINARY_TORCH_IMPL_FUNC(igammac_out, igammac_stub);
-CREATE_BINARY_TORCH_IMPL_FUNC(nextafter_out, nextafter_stub);
-CREATE_BINARY_TORCH_IMPL_FUNC(remainder_out, remainder_stub);
-CREATE_BINARY_TORCH_IMPL_FUNC(xlogy_out, xlogy_stub);
+CREATE_BINARY_TORCH_IMPL_FUNC(bitwise_and_out, bitwise_and_stub)
+CREATE_BINARY_TORCH_IMPL_FUNC(bitwise_or_out, bitwise_or_stub)
+CREATE_BINARY_TORCH_IMPL_FUNC(bitwise_xor_out, bitwise_xor_stub)
+CREATE_BINARY_TORCH_IMPL_FUNC(maximum_out, maximum_stub)
+CREATE_BINARY_TORCH_IMPL_FUNC(minimum_out, minimum_stub)
+CREATE_BINARY_TORCH_IMPL_FUNC(fmax_out, fmax_stub)
+CREATE_BINARY_TORCH_IMPL_FUNC(fmin_out, fmin_stub)
+CREATE_BINARY_TORCH_IMPL_FUNC(fmod_out, fmod_stub)
+CREATE_BINARY_TORCH_IMPL_FUNC(logaddexp_out, logaddexp_stub)
+CREATE_BINARY_TORCH_IMPL_FUNC(logaddexp2_out, logaddexp2_stub)
+CREATE_BINARY_TORCH_IMPL_FUNC(gcd_out, gcd_stub)
+CREATE_BINARY_TORCH_IMPL_FUNC(lcm_out, lcm_stub)
+CREATE_BINARY_TORCH_IMPL_FUNC(hypot_out, hypot_stub)
+CREATE_BINARY_TORCH_IMPL_FUNC(igamma_out, igamma_stub)
+CREATE_BINARY_TORCH_IMPL_FUNC(igammac_out, igammac_stub)
+CREATE_BINARY_TORCH_IMPL_FUNC(nextafter_out, nextafter_stub)
+CREATE_BINARY_TORCH_IMPL_FUNC(remainder_out, remainder_stub)
+CREATE_BINARY_TORCH_IMPL_FUNC(xlogy_out, xlogy_stub)
 
 Tensor special_xlog1py(const Scalar& x, const Tensor& y) {
   return at::special_xlog1py(wrapped_scalar_tensor(x), y);
@@ -1417,7 +1417,7 @@ Tensor& comparison_op_(Tensor& self, const Scalar& other, OutImpl& out_impl) {
 
 // We need explicit cast to OutFunc because each *_out func is overloaded twice. Without An explicit cast, merely
 // referring to *_out function is ambiguous.
-using OutFunc = std::add_const<Tensor&(&)(Tensor&, const Tensor&, const Tensor&)>::type;
+using OutFunc = std::add_const_t<Tensor&(&)(Tensor&, const Tensor&, const Tensor&)>;
 
 // less, alias for torch.lt
 Tensor& less_out(const Tensor& self, const Tensor& other, Tensor& result) { return at::lt_out(result, self, other); }
@@ -1462,12 +1462,12 @@ Tensor& greater_equal_(Tensor& self, const Scalar& other) { return self.ge_(othe
     func##_stub(device_type(), *this);                              \
   }
 
-CREATE_COMPARISON_SCALAR_TENSOR_IMPL_FUNC(eq);
-CREATE_COMPARISON_SCALAR_TENSOR_IMPL_FUNC(ne);
-CREATE_COMPARISON_SCALAR_TENSOR_IMPL_FUNC(gt);
-CREATE_COMPARISON_SCALAR_TENSOR_IMPL_FUNC(ge);
-CREATE_COMPARISON_SCALAR_TENSOR_IMPL_FUNC(lt);
-CREATE_COMPARISON_SCALAR_TENSOR_IMPL_FUNC(le);
+CREATE_COMPARISON_SCALAR_TENSOR_IMPL_FUNC(eq)
+CREATE_COMPARISON_SCALAR_TENSOR_IMPL_FUNC(ne)
+CREATE_COMPARISON_SCALAR_TENSOR_IMPL_FUNC(gt)
+CREATE_COMPARISON_SCALAR_TENSOR_IMPL_FUNC(ge)
+CREATE_COMPARISON_SCALAR_TENSOR_IMPL_FUNC(lt)
+CREATE_COMPARISON_SCALAR_TENSOR_IMPL_FUNC(le)
 
 // not_equal, alias for torch.ne
 Tensor& not_equal_out(const Tensor& self, const Tensor& other, Tensor& result) { return at::ne_out(result, self, other); }
@@ -1542,12 +1542,23 @@ TORCH_IMPL_FUNC(heaviside_out) (
   heaviside_stub(device_type(), *this);
 }
 
-Tensor& ldexp_out(const Tensor& self, const Tensor& other, Tensor& result) {
-  return at::mul_out(result, self, at::pow(2.0, other));
+static inline Tensor _pow2(const Tensor& self, const Tensor& other) {
+  const auto self_dtype = self.scalar_type();
+  // All integral types are promoted to float32
+  if (isIntegralType(self_dtype, true) || self_dtype == kFloat) {
+      return at::pow(2.0, other);
+  }
+  // For double and reduced floating types do regular type promotion
+  return at::full({}, 2.0, self.options()).pow(other);
 }
 
+Tensor& ldexp_out(const Tensor& self, const Tensor& other, Tensor& result) {
+  return at::mul_out(result, self, _pow2(self, other));
+}
+
+
 Tensor ldexp(const Tensor& self, const Tensor& other) {
-  return at::mul(self, at::pow(2.0, other));
+  return at::mul(self, _pow2(self, other));
 }
 
 Tensor& ldexp_(Tensor& self, const Tensor& other) {

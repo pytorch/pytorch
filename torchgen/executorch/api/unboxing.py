@@ -126,10 +126,8 @@ class Unboxing:
         )
         return (
             f"""
-    {ctype.cpp_type(strip_ref=True)} {out_name} = {arg_name}.toOptional<{base_type.cpp_type(strip_ref=True)}>();
-            """.split(
-                "\n"
-            ),
+    auto {out_name} = {arg_name}.toOptional<{base_type.cpp_type(strip_ref=True)}>();
+            """.split("\n"),
             decl,
         )
 
@@ -146,37 +144,38 @@ class Unboxing:
         if isinstance(t.elem, BaseType) and t.elem.name == BaseTy.Tensor:
             code.extend(
                 f"""
-    {ctype.cpp_type(strip_ref=True)} {out_name} = {arg_name}.toTensorList();
-                """.split(
-                    "\n"
-                )
+    auto {out_name} = {arg_name}.toTensorList();
+                """.split("\n")
             )
         elif isinstance(t.elem, BaseType) and (
             t.elem.name == BaseTy.int or t.elem.name == BaseTy.SymInt
         ):
             code.extend(
                 f"""
-    {ctype.cpp_type(strip_ref=True)} {out_name} = {arg_name}.toIntList();
-                """.split(
-                    "\n"
-                )
+    auto {out_name} = {arg_name}.toIntList();
+                """.split("\n")
             )
         elif isinstance(t.elem, BaseType) and t.elem.name == BaseTy.float:
             code.extend(
                 f"""
-    {ctype.cpp_type(strip_ref=True)} {out_name} = {arg_name}.toDoubleList();
-                """.split(
-                    "\n"
-                )
+    auto {out_name} = {arg_name}.toDoubleList();
+                """.split("\n")
             )
         elif isinstance(t.elem, BaseType) and t.elem.name == BaseTy.bool:
             # handle list type with size, e.g., bool[4]
             code.extend(
                 f"""
-    {ctype.cpp_type(strip_ref=True)} {out_name} = {arg_name}.toBoolList();
-                """.split(
-                    "\n"
-                )
+#ifdef USE_ATEN_LIB
+std::array<bool, {t.size}> {out_name};
+auto {in_name} = {arg_name}.toBoolList();
+size_t _i = 0;
+for (auto {elem_name}: {in_name}) {{
+    {out_name}[_i++] = {elem_name};
+}}
+#else
+auto {out_name} = {arg_name}.toBoolList();
+#endif
+                """.split("\n")
             )
         # pytorch codegen:
         # we have to use c10::List for optional element. e.g., Tensor?[] -> c10::List<::std::optional<at::Tensor>>
@@ -194,11 +193,9 @@ for (auto {elem_name}: {in_name}) {{
     {out_name}.push_back({elem_name});
 }}
 #else
-torch::executor::ArrayRef<torch::executor::optional<torch::executor::Tensor>> {out_name} = {arg_name}.toListOptionalTensor();
+auto {out_name} = {arg_name}.toListOptionalTensor();
 #endif
-                """.split(
-                    "\n"
-                )
+                """.split("\n")
             )
         else:
             # use ArrayRef as default.
@@ -214,8 +211,6 @@ torch::executor::ArrayRef<torch::executor::optional<torch::executor::Tensor>> {o
         {vec_name}.push_back({res_name});
     }}
     {ctype.cpp_type(strip_ref=True)} {out_name}({vec_name});
-                """.split(
-                    "\n"
-                )
+                """.split("\n")
             )
         return code, decl

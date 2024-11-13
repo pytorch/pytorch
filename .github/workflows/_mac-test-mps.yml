@@ -17,9 +17,9 @@ on:
       python-version:
         required: false
         type: string
-        default: "3.8"
+        default: "3.9"
         description: |
-          The python version to be used. Will be 3.8 by default
+          The python version to be used. Will be 3.9 by default
       test-matrix:
         required: true
         type: string
@@ -35,6 +35,7 @@ jobs:
       is-test-matrix-empty: ${{ steps.filter.outputs.is-test-matrix-empty }}
       keep-going: ${{ steps.filter.outputs.keep-going }}
       ci-verbose-test-logs: ${{ steps.filter.outputs.ci-verbose-test-logs }}
+      ci-test-showlocals: ${{ steps.filter.outputs.ci-test-showlocals }}
       ci-no-test-timeout: ${{ steps.filter.outputs.ci-no-test-timeout }}
       ci-no-td: ${{ steps.filter.outputs.ci-no-td }}
       reenabled-issues: ${{ steps.filter.outputs.reenabled-issues }}
@@ -87,6 +88,13 @@ jobs:
           environment-file: .github/requirements/conda-env-${{ runner.os }}-${{ runner.arch }}
           pip-requirements-file: .github/requirements/pip-requirements-${{ runner.os }}.txt
 
+      - name: Get workflow job id
+        id: get-job-id
+        uses: ./.github/actions/get-workflow-job-id
+        if: always()
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Install PyTorch and run MPS tests
         id: test
         env:
@@ -98,9 +106,18 @@ jobs:
           PR_BODY: ${{ github.event.pull_request.body }}
           CONTINUE_THROUGH_ERROR: ${{ needs.filter.outputs.keep-going }}
           VERBOSE_TEST_LOGS: ${{ needs.filter.outputs.ci-verbose-test-logs }}
+          TEST_SHOWLOCALS: ${{ needs.filter.outputs.ci-test-showlocals }}
           NO_TEST_TIMEOUT: ${{ needs.filter.outputs.ci-no-test-timeout }}
           NO_TD: ${{ needs.filter.outputs.ci-no-td }}
           PIP_REQUIREMENTS_FILE: .github/requirements/pip-requirements-${{ runner.os }}.txt
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_WORKFLOW: ${{ github.workflow }}
+          GITHUB_JOB: ${{ github.job }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
+          JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
+          JOB_NAME: ${{ steps.get-job-id.outputs.job-name }}
           REENABLED_ISSUES: ${{ needs.filter.outputs.reenabled-issues }}
         run: |
           # shellcheck disable=SC1090
@@ -141,13 +158,6 @@ jobs:
         if: always() && steps.test.conclusion
         run: |
           cat test/**/*_toprint.log || true
-
-      - name: Get workflow job id
-        id: get-job-id
-        uses: ./.github/actions/get-workflow-job-id
-        if: always()
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload test artifacts
         uses: ./.github/actions/upload-test-artifacts

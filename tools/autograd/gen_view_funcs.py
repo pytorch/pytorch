@@ -40,16 +40,16 @@ FUNCTION_DECLARATION = CodeTemplate(
 #define ${uppercase_op}_AVAILABLE
 struct ${op} : public ${superclass} {
   ${op}(${constructor_args}) ${initializer_list}
-  {};
-  virtual ~${op}() override {};
+  {}
+  virtual ~${op}() override = default;
   virtual std::vector<c10::SymInt> get_symints() const override;
   virtual size_t num_symints() const override;
   virtual std::vector<at::Tensor> get_tensors() const override;
   virtual size_t num_tensors() const override;
   virtual at::Tensor operator()(const at::Tensor&) const override;
   virtual std::unique_ptr<ViewFunc> clone_and_set(
-      std::optional<std::vector<c10::SymInt>> = c10::nullopt,
-      std::optional<std::vector<at::Tensor>> = c10::nullopt) const override;
+      std::optional<std::vector<c10::SymInt>> = ::std::nullopt,
+      std::optional<std::vector<at::Tensor>> = ::std::nullopt) const override;
 
 protected:
   virtual void set_symints(std::vector<c10::SymInt>) override;

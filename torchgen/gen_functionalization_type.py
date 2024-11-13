@@ -278,13 +278,13 @@ def assert_view_op_properties(func: FunctionSchema) -> None:
 
     args = func.arguments.flat_non_out
     # The first argument is a tensor with an alias semantics (annotations)
-    assert len(args) > 0 and args[0].type == BaseType(
-        BaseTy.Tensor
+    assert (
+        len(args) > 0 and args[0].type == BaseType(BaseTy.Tensor)
     ), f"""In the functionalization codegen, we expect the first argument of every view operator to be a tensor,
 but found an argument of type {str(args[0].type)} for operator: {str(func.name)}."""
     # No other arguments have aliasing semantics
-    assert is_alias(args[0]) and not any(
-        is_alias(a) for a in args[1:]
+    assert (
+        is_alias(args[0]) and not any(is_alias(a) for a in args[1:])
     ), """In the functionalization codegen, we expect the first argument of every view operator to alias the output.
 View operators with multiple aliasing inputs aren't supported yet. Found an operator that doesn't satisfy this constraint"""
 
@@ -590,10 +590,12 @@ def wrap_propagate_mutations_and_return(
     ):
         updates.append(
             f"""\
-  at::functionalization::impl::propagate_xla_data({outer_arg}, {inner_ret});
+  auto {outer_arg}_inner = at::functionalization::impl::from_functional_tensor({outer_arg});
   at::functionalization::impl::replace_({outer_arg}, {inner_ret});
   at::functionalization::impl::commit_update({outer_arg});
-  at::functionalization::impl::sync({outer_arg});"""
+  at::functionalization::impl::sync({outer_arg});
+  auto {outer_arg}_inner_updated = at::functionalization::impl::from_functional_tensor({outer_arg});
+  at::functionalization::impl::propagate_xla_data_direct({outer_arg}_inner, {outer_arg}_inner_updated);"""
         )
 
     # Finally, we return:

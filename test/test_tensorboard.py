@@ -520,7 +520,7 @@ class TestTensorBoardPytorchGraph(BaseTestCase):
         dummy_input = (torch.zeros(1, 3),)
 
         class myLinear(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.l = torch.nn.Linear(3, 5)
 
@@ -597,7 +597,7 @@ class TestTensorBoardPytorchGraph(BaseTestCase):
 
     def test_pytorch_graph_dict_input(self):
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.l = torch.nn.Linear(3, 5)
 
@@ -605,7 +605,7 @@ class TestTensorBoardPytorchGraph(BaseTestCase):
                 return self.l(x)
 
         class ModelDict(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.l = torch.nn.Linear(3, 5)
 
@@ -640,7 +640,7 @@ class TestTensorBoardPytorchGraph(BaseTestCase):
         # However, it should not raise an error during
         # the add_graph call and still continue.
         class myMLP(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.input_len = 1 * 28 * 28
                 self.fc1 = torch.nn.Linear(self.input_len, 1200)

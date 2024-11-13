@@ -6,12 +6,12 @@
 #include <ideep.hpp>
 #endif
 
-namespace torch {
-namespace aot_inductor {
+namespace torch::aot_inductor {
 
 #if AT_MKLDNN_ENABLED()
 
 void* data_ptr_from_mkldnn(at::Tensor* mkldnn_tensor) {
+  // NOLINTNEXTLINE(performance-no-int-to-ptr)
   return reinterpret_cast<void*>(
       at::native::data_ptr_from_mkldnn(*mkldnn_tensor));
 }
@@ -45,5 +45,4 @@ at::Tensor mkldnn_tensor_from_data_ptr(
 
 #endif
 
-} // namespace aot_inductor
-} // namespace torch
+} // namespace torch::aot_inductor

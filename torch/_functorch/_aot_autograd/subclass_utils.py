@@ -5,16 +5,23 @@ AOTAutograd's responsibility is to trace through all pytorch capabilities that l
 and this includes tensor subclasses that implement __torch_dispatch__.
 """
 
-from typing import Any, List, Optional, Tuple, Union
+import typing
+from typing import Any, Iterable, List, Optional, Tuple, Union
 
+import torch
 import torch.utils._pytree as pytree
-
-from torch import Tensor
+from torch import SymInt, Tensor
 from torch._subclasses.fake_tensor import get_plain_tensors
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
-from .schemas import MutationType, SubclassCreationMeta, ViewAndMutationMeta
+from .schemas import (
+    MutationType,
+    PlainTensorMeta,
+    SubclassCreationMeta,
+    ViewAndMutationMeta,
+)
 from .utils import strict_zip
+
 
 zip = strict_zip
 
@@ -35,34 +42,18 @@ def requires_subclass_dispatch(args, fw_metadata: ViewAndMutationMeta) -> bool:
     return any_subclass_args or any_subclass_outputs
 
 
-def create_subclass_metadata(a, start_idx):
-    if not is_traceable_wrapper_subclass(a):
-        return None, start_idx + 1
-
-    inner_keys, metadata = a.__tensor_flatten__()
-    new_start_idx = start_idx
-    attrs = {}
-    for key in inner_keys:
-        new_subclass_meta, new_start_idx = create_subclass_metadata(
-            getattr(a, key), new_start_idx
-        )
-        attrs[key] = new_subclass_meta
-
-    return (
-        SubclassCreationMeta(
-            flat_tensor_start_idx=start_idx,
-            arg_count=new_start_idx - start_idx,
-            attrs=attrs,
-            meta=metadata,
-            outer_size=a.size(),
-            outer_stride=a.stride(),
-            original_subclass=a,
-        ),
-        new_start_idx,
-    )
+suggest_memory_format = torch._prims_common.suggest_memory_format
 
 
-# Given a real tensor subclass, returns a nested list of Plain tensor types
+def maybe_suggest_memory_format(
+    t, with_memory_format: bool
+) -> Optional[torch.memory_format]:
+    if not with_memory_format:
+        return None
+
+    return suggest_memory_format(t)
+
+
 def get_types_for_subclass(tensor_subclass):
     if not is_traceable_wrapper_subclass(tensor_subclass):
         return ["Tensor"]
@@ -74,61 +65,240 @@ def get_types_for_subclass(tensor_subclass):
     return result
 
 
+def create_subclass_metadata(
+    a: Any, start_idx: int, count_symints: bool, with_memory_format: bool = False
+):
+    if not is_traceable_wrapper_subclass(a):
+        idx = start_idx + 1
+        return (
+            PlainTensorMeta(
+                idx, memory_format=maybe_suggest_memory_format(a, with_memory_format)
+            ),
+            idx,
+        )
+
+    inner_keys, metadata = a.__tensor_flatten__()
+    new_start_idx = start_idx
+    attrs = {}
+
+    for key in inner_keys:
+        new_subclass_meta, new_start_idx = create_subclass_metadata(
+            getattr(a, key),
+            new_start_idx,
+            count_symints=count_symints,
+            with_memory_format=with_memory_format,
+        )
+        attrs[key] = new_subclass_meta
+
+    # It *must* be because is_traceable_wrapper_subclass() - but mypy is not smart.
+    assert isinstance(a, Tensor)
+
+    new_start_idx = (
+        new_start_idx
+        + count_symints * len(filter_symints(a.size()))
+        + count_symints * len(filter_symints(a.stride()))
+    )
+
+    return (
+        SubclassCreationMeta(
+            flat_tensor_start_idx=start_idx,
+            arg_count=new_start_idx - start_idx,
+            included_subclass_symints=count_symints,
+            attrs=attrs,
+            meta=metadata,
+            outer_size=a.size(),  # type: ignore[attr-defined, arg-type]
+            outer_stride=a.stride(),  # type: ignore[arg-type]
+            original_subclass=a,
+            memory_format=maybe_suggest_memory_format(a, with_memory_format),
+        ),
+        new_start_idx,
+    )
+
+
 # Given a flat list of arguments, some of which may be tensor subclasses,
 # computes metadata about "how to reconstruct the current list of subclasses,
 # if we were given their flattened dense tensors instead"
 def create_subclass_meta(
-    curr_args: Union[List[Any], Tuple[Any, ...]]
-) -> List[Union[int, SubclassCreationMeta]]:
+    curr_args: Union[List[Any], Tuple[Any, ...]],
+    *,
+    count_symints: bool = True,
+    with_memory_format: bool = False,
+) -> List[Union[PlainTensorMeta, SubclassCreationMeta]]:
     idx = 0
-    infos: List[Union[int, SubclassCreationMeta]] = []
+    infos: List[Union[PlainTensorMeta, SubclassCreationMeta]] = []
     for a in curr_args:
-        if isinstance(a, Tensor) and is_traceable_wrapper_subclass(a):
+        if is_traceable_wrapper_subclass(a):
+            assert isinstance(a, Tensor)
             start_idx = idx
-            subclass_meta, _ = create_subclass_metadata(a, start_idx)
+            subclass_meta, _ = create_subclass_metadata(
+                a,
+                start_idx,
+                count_symints=count_symints,
+                with_memory_format=with_memory_format,
+            )
             infos.append(subclass_meta)
             cnt = subclass_meta.arg_count
         else:
-            infos.append(idx)
+            infos.append(
+                PlainTensorMeta(
+                    idx,
+                    memory_format=maybe_suggest_memory_format(a, with_memory_format),
+                )
+            )
             cnt = 1
         idx += cnt
     return infos
 
 
-# Output structure:
-# - List[Tensor] if tracing an inference graph
-# - Tuple[List[Tensor], List[Tensor]] if tracing a joint graph.
-# This function effectively concats each inner list of subclass tensors
-# into a (potentially longer) list of inner tensors.
-#
-# This function takes in a pytree of arguments and unwraps any tensor subclasses.
-# Annoyingly, we can't use pytrees to perform the unwrapping, because unwrapping returns
-# a list of tensors that we would then need to concat together.
-# Instead, we specialize the logic for the inference vs. joint graph case.
-# NOTE: this function is hot, since we unwrap tensor subclass inputs at runtime
-def unwrap_tensor_subclasses(wrapped_args, *, is_joint_structure: bool):
-    def concat_inner_tensors_from_subclasses(xs):
-        xs_inner = []
-        for x in xs:
-            if is_traceable_wrapper_subclass(x):
-                xs_inner.extend(get_plain_tensors(x))
-            else:
-                xs_inner.append(x)
-        return xs_inner
+def filter_symints(lst: Iterable[Union[int, SymInt]]):
+    # Capture all SymInts from the iterable.
+    def symint_check(s: Union[int, SymInt]) -> bool:
+        return isinstance(s, SymInt) and not s.node.is_nested_int()
 
-    if is_joint_structure:
-        assert isinstance(wrapped_args, tuple) and len(wrapped_args) == 2
-        assert isinstance(wrapped_args[0], (tuple, list)) and isinstance(
-            wrapped_args[1], (tuple, list)
-        )
-        unwrapped_args_fw = concat_inner_tensors_from_subclasses(wrapped_args[0])
-        unwrapped_args_tangents = concat_inner_tensors_from_subclasses(wrapped_args[1])
-        unwrapped_args = (unwrapped_args_fw, unwrapped_args_tangents)
-    else:
-        assert isinstance(wrapped_args, (list, tuple))
-        unwrapped_args_fw = concat_inner_tensors_from_subclasses(wrapped_args)
-        unwrapped_args = unwrapped_args_fw
-    return unwrapped_args
+    return [s for s in lst if symint_check(s)]
+
+
+def compute_symint_placeholders(lst: Iterable[Union[None, int, SymInt]]) -> List[bool]:
+    # Non-nested symints are replaced with None in `make_runtime_safe()`
+    return [s is None for s in lst]
+
+
+# This function takes in a pytree of arguments and unwraps any tensor
+# subclasses.
+#
+# NOTE: The reason for "append_symints":
+#
+# * At compile time: we append extra symint args when unwrapping primals
+# (but not tangents, because they should always share symints with primals).
+# We also append extra symints when unwrapping the subclass outputs of the
+# traced function, so we can return them as extra outputs
+#
+# * At runtime: we similarly append subclass sizes when we unwrap subclass
+# primals (but not tangents) on entry to the forward. See the runtime version of
+# this function below.
+def unwrap_tensor_subclasses(
+    wrapped_args: List[Union[Tensor, int]],
+    *,
+    append_symints: bool,
+):
+    def flatten_subclass(t: Union[Tensor, int], *, out=None):
+        # unwrap a subclass into plain tensors and their size/stride if "append_symint"
+        # is True
+        if not is_traceable_wrapper_subclass(t):
+            out.append(t)
+            return
+
+        attrs, _ = t.__tensor_flatten__()
+
+        for attr in attrs:
+            inner_tensor = getattr(t, attr)
+            flatten_subclass(inner_tensor, out=out)
+
+        if append_symints:
+            out.extend(filter_symints(t.size()))
+            out.extend(filter_symints(t.stride()))
+
+    xs_inner: List[Union[int, Tensor, SymInt]] = []
+
+    for x in wrapped_args:
+        flatten_subclass(typing.cast(Tensor, x), out=xs_inner)
+
+    return xs_inner
+
+
+# subclass_metas is needed at runtime to compute which indices are symints in
+# the outer_size/outer_stride
+def runtime_unwrap_tensor_subclasses(
+    wrapped_args: List[Union[Tensor, int]],
+    *,
+    append_symints: bool,
+    subclass_metas: Optional[List[Union[PlainTensorMeta, SubclassCreationMeta]]] = None,
+):
+    def flatten_subclass(x: Tensor, meta: Optional[SubclassCreationMeta], *, out):
+        if not is_traceable_wrapper_subclass(x):
+            out.append(x)
+            return out
+
+        assert isinstance(x, Tensor)
+
+        attrs, _ = x.__tensor_flatten__()
+
+        for attr in attrs:
+            inner_tensor = getattr(x, attr)
+            inner_meta = meta.attrs.get(attr)
+            flatten_subclass(inner_tensor, inner_meta, out=out)
+
+        if append_symints:
+            assert isinstance(meta, SubclassCreationMeta)
+            # outer_size
+            size = x.size()
+            symint_placeholders = compute_symint_placeholders(meta.outer_size)
+            assert len(size) == len(symint_placeholders)
+            out.extend(
+                [r for (r, is_symint) in zip(size, symint_placeholders) if is_symint]
+            )
+
+            # outer_stride
+            stride = x.stride()
+            symint_placeholders = compute_symint_placeholders(meta.outer_stride)
+            assert len(stride) == len(symint_placeholders)
+            out.extend(
+                [r for (r, is_symint) in zip(stride, symint_placeholders) if is_symint]
+            )
+        return out
+
+    xs_inner: List[Union[int, Tensor, SymInt]] = []
+
+    if append_symints:
+        assert subclass_metas is not None
+
+    for idx, x in enumerate(wrapped_args):
+        if not is_traceable_wrapper_subclass(x):
+            xs_inner.append(x)
+            continue
+
+        if subclass_metas is None:
+            get_plain_tensors(typing.cast(Tensor, x), out=xs_inner)
+        else:
+            meta = subclass_metas[idx]
+            assert isinstance(meta, SubclassCreationMeta)
+            flatten_subclass(typing.cast(Tensor, x), meta, out=xs_inner)
+
+    return xs_inner
+
+
+def unwrap_tensor_subclasses_with_indices_to_original(wrapped_args):
+    ret_unwrapped = []
+    ret_indices_to_original = []
+    for i, a in enumerate(wrapped_args):
+        a_unwrapped = unwrap_tensor_subclasses([a], append_symints=False)
+        ret_unwrapped.extend(a_unwrapped)
+        n = len(a_unwrapped)
+        ret_indices_to_original.extend([i] * n)
+
+    return ret_unwrapped, ret_indices_to_original
+
+
+def remap_unwrapped_subclass_arg_indices(wrapped_args, static_input_indices):
+    static_input_indices = set(static_input_indices)
+    new_ind = 0
+    remapped_static_indices = []
+    for i, arg in enumerate(wrapped_args):
+        num_indices = 1
+        if is_traceable_wrapper_subclass(arg):
+            num_indices = (
+                len(get_plain_tensors(typing.cast(Tensor, arg), out=[]))
+                + len(filter_symints(arg.size()))
+                + len(filter_symints(arg.stride()))
+            )
+
+        for _ in range(num_indices):
+            if i in static_input_indices:
+                remapped_static_indices.append(new_ind)
+
+            new_ind += 1
+
+    return remapped_static_indices
 
 
 # Turns a flattened list of tensor arguments into (maybe) subclass tensors.
@@ -136,18 +306,20 @@ def unwrap_tensor_subclasses(wrapped_args, *, is_joint_structure: bool):
 def wrap_tensor_subclasses(
     unwrapped_args: Union[Tuple[Any, ...], List[Any]],
     *,
-    subclass_metas: List[Union[int, SubclassCreationMeta]],
+    subclass_metas: List[Union[PlainTensorMeta, SubclassCreationMeta]],
     num_fw_outs_saved_for_bw: Optional[int] = None,
+    included_subclass_symints: bool = False,
     is_runtime: bool = False,
 ) -> Tuple[Any, ...]:
     wrapped_args = []
     num_args_tallied = 0
     for subclass_meta in subclass_metas:
-        if isinstance(subclass_meta, int):
-            wrapped_args.append(unwrapped_args[subclass_meta])
+        if isinstance(subclass_meta, PlainTensorMeta):
+            wrapped_args.append(unwrapped_args[subclass_meta.unwrapped_idx])
             num_args_tallied += 1
         else:
             assert isinstance(subclass_meta, SubclassCreationMeta)
+            assert subclass_meta.included_subclass_symints == included_subclass_symints
             wrapped_args.append(
                 subclass_meta.creation_fn(unwrapped_args, is_runtime=is_runtime)
             )
@@ -187,7 +359,9 @@ def wrap_tensor_subclasses(
             return wrapped_args + activations
         return tuple(list(wrapped_args) + list(activations))
     else:
-        assert len(unwrapped_args) == num_args_tallied
+        assert (
+            len(unwrapped_args) == num_args_tallied
+        ), f"Expected {len(unwrapped_args)} == {num_args_tallied}"
         return tuple(wrapped_args)
 
 
@@ -206,70 +380,23 @@ def wrap_tensor_subclasses_maybe_joint(
         )
         primals, tangents = unwrapped_args[0], unwrapped_args[1]
         wrapped_primals = wrap_tensor_subclasses(
-            primals, subclass_metas=meta.subclass_inp_meta
+            primals,
+            subclass_metas=meta.subclass_inp_meta,
+            included_subclass_symints=True,
         )
         wrapped_tangents = wrap_tensor_subclasses(
-            tangents, subclass_metas=meta.subclass_tangent_meta
+            tangents,
+            subclass_metas=meta.subclass_tangent_meta,
+            included_subclass_symints=False,
         )
         return (wrapped_primals, wrapped_tangents)
     else:
         wrapped_args = wrap_tensor_subclasses(
-            unwrapped_args, subclass_metas=meta.subclass_inp_meta
+            unwrapped_args,
+            subclass_metas=meta.subclass_inp_meta,
+            included_subclass_symints=True,
         )
         return wrapped_args
-
-
-# TODO: UNUSED. delete?
-def create_metadata_for_subclass(meta: ViewAndMutationMeta) -> ViewAndMutationMeta:
-    # input infos
-    input_info = []
-    for inp, subclass_meta in zip(meta.input_info, meta.subclass_inp_meta):
-        num_inps = 1 if isinstance(subclass_meta, int) else subclass_meta.arg_count
-        for _ in range(num_inps):
-            input_info.append(inp)
-
-    # output infos
-    output_info = []
-    subclass_out_meta_user_outs_only = meta.subclass_fw_graph_out_meta[
-        meta.num_mutated_inp_runtime_indices :
-    ]
-    if meta.num_intermediate_bases > 0:
-        subclass_out_meta_user_outs_only = subclass_out_meta_user_outs_only[
-            : -meta.num_intermediate_bases
-        ]
-    # sanity assert
-    assert len(meta.output_info) == len(subclass_out_meta_user_outs_only)
-    # Assume that the information on the output is shared by all of its inner tensors.
-    for out, subclass_meta in zip(meta.output_info, subclass_out_meta_user_outs_only):
-        num_outs = 1 if isinstance(subclass_meta, int) else subclass_meta.arg_count
-        for _ in range(num_outs):
-            output_info.append(out)
-
-    # A bit hacky, but we don't actually care about all of the metadata here.
-    # This metadata is used **underneath** both autograd and subclass de-sugaring,
-    # So all we really care about is stuff like:
-    # - num inputs/outputs (needed by the partitioner)
-    # - input mutations (**not** used today, since we don't handle input mutations inside the subclass,
-    #   although we should handle this eventually)
-    #   TODO: add a test case to assert we error when this happens, instead of getting silent correctness
-    num_intermediate_bases = None
-    keep_input_mutations = meta.keep_input_mutations
-    traced_tangents = None
-    subclass_inp_meta = None
-    subclass_fw_graph_out_meta = None
-    subclass_tangent_meta = None
-
-    metadata = ViewAndMutationMeta(
-        input_info=input_info,  # type: ignore[arg-type]
-        output_info=output_info,  # type: ignore[arg-type]
-        num_intermediate_bases=num_intermediate_bases,  # type: ignore[arg-type]
-        keep_input_mutations=keep_input_mutations,  # type: ignore[arg-type]
-        traced_tangents=traced_tangents,  # type: ignore[arg-type]
-        subclass_inp_meta=subclass_inp_meta,  # type: ignore[arg-type]
-        subclass_fw_graph_out_meta=subclass_fw_graph_out_meta,  # type: ignore[arg-type]
-        subclass_tangent_meta=subclass_tangent_meta,  # type: ignore[arg-type]
-    )
-    return metadata
 
 
 def compute_inner_mutated_inp_indices_from_subclass_meta(
@@ -300,7 +427,7 @@ def compute_inner_mutated_inp_indices_from_subclass_meta(
         return inner_metadata.mutated_inp_runtime_indices
     assert len(fw_metadata.subclass_inp_meta) == len(fw_metadata.input_info)
     for outer_idx, inp_meta in enumerate(fw_metadata.subclass_inp_meta):
-        if isinstance(inp_meta, int):
+        if isinstance(inp_meta, PlainTensorMeta):
             assert outer_idx < len(fw_metadata.input_info)
             if inner_metadata is not None:
                 assert inner_idx < len(inner_metadata.input_info)
@@ -311,6 +438,7 @@ def compute_inner_mutated_inp_indices_from_subclass_meta(
             updated_input_info.append(fw_metadata.input_info[outer_idx])
             inner_idx += 1
         else:
+            assert inp_meta.original_subclass is not None
             for _ in range(inp_meta.arg_count):
                 updated_input_info.append(fw_metadata.input_info[outer_idx])
                 inner_idx += 1

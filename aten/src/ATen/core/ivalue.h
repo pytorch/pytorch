@@ -87,7 +87,7 @@ struct StreamData3Holder : c10::intrusive_ptr_target {
 } // namespace ivalue
 
 // This is an owning wrapper for a std::optional<std::vector<T>>
-// that can be implicitly converted to a (non-owning) optional<ArrayRef<T>>.
+// that can be implicitly converted to a (non-owning) std::optional<ArrayRef<T>>.
 // Its purpose is to be used in generated code to keep the vector alive
 // either until the end of a statement (as a temporary), or as a saved arg
 // in autograd.
@@ -103,7 +103,7 @@ struct OptionalArray {
     if (ref) {
       list = std::vector<T>(ref->begin(), ref->end());
     } else {
-      list = nullopt;
+      list = std::nullopt;
     }
     return *this;
   }
@@ -113,21 +113,21 @@ struct OptionalArray {
     if (ref) {
       list = std::vector<T>(ref->begin(), ref->end());
     } else {
-      list = nullopt;
+      list = std::nullopt;
     }
     return *this;
   }
 
   operator std::optional<c10::ArrayRef<T>>() {
     if (!list) {
-      return nullopt;
+      return std::nullopt;
     }
     return *list;
   }
 
   operator c10::OptionalArrayRef<T>() {
     if (!list) {
-      return nullopt;
+      return std::nullopt;
     }
     return *list;
   }
@@ -522,7 +522,7 @@ struct TORCH_API IValue final {
   }
   c10::intrusive_ptr<ivalue::Tuple> toTuple() &&;
   c10::intrusive_ptr<ivalue::Tuple> toTuple() const&;
-  C10_NODISCARD ivalue::Tuple& toTupleRef() const;
+  [[nodiscard]] ivalue::Tuple& toTupleRef() const;
 
   // Double
   IValue(double d) : tag(Tag::Double) {
@@ -690,7 +690,8 @@ struct TORCH_API IValue final {
   IValue(c10::intrusive_ptr<ivalue::ConstantString> v);
   IValue(std::string v);
   IValue(const char* v) : IValue(std::string(v)) {}
-  IValue(c10::string_view v) : IValue(std::string(v)){};
+  IValue(c10::string_view v) : IValue(std::string(v)){}
+  IValue(std::string_view v) : IValue(std::string(v)){}
   bool isString() const {
     return Tag::String == tag;
   }
@@ -1021,9 +1022,9 @@ struct TORCH_API IValue final {
   // ToOptional: convert a IValue to the Optional obj that accepts both T and
   // None
   template <typename T>
-  optional<T> toOptional();
+  std::optional<T> toOptional();
   template <typename T>
-  optional<T> toOptional() const;
+  std::optional<T> toOptional() const;
 
   /// @private [doxygen private]
   /// this is a shallow comparison of two IValues to test the object identity
@@ -1163,7 +1164,7 @@ struct TORCH_API IValue final {
   // this value different (e.g. using NaN boxing), and this would make it more
   // costly to determine the tag for all types vs just determining if something
   // is a particular type. Instead we want clients to use the `isX` methods when
-  // possible. If for perf. reasons you really, absolutely, must have a jump
+  // possible. If for performance reasons you really, absolutely, must have a jump
   // table, then we can revisit this.
   enum class Tag : uint32_t {
 #define DEFINE_TAG(x) x,
@@ -1352,8 +1353,14 @@ struct TORCH_API IValue final {
         DeviceIndex index;
       } as_device;
     } u;
+    static_assert(std::is_trivially_copyable_v<TriviallyCopyablePayload>);
     at::Tensor as_tensor;
     Payload() : u() {}
+    Payload(const Payload&) = delete;
+    Payload(Payload&&) = delete;
+    Payload& operator=(const Payload&) = delete;
+    Payload& operator=(Payload&&) = delete;
+    // NOLINTNEXTLINE(modernize-use-equals-default)
     ~Payload() {}
   };
 

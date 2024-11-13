@@ -9,8 +9,7 @@
 
 #include <c10/util/string_view.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 
@@ -116,9 +115,9 @@ MobileDebugTable::MobileDebugTable(
     const std::shared_ptr<CompilationUnit>& cu) {
   ska::flat_hash_map<int64_t, SourceRange> source_range_map;
   const std::vector<std::string>& record_names = reader->getAllRecords();
-  const c10::string_view suffix(".debug_pkl");
+  constexpr std::string_view suffix(".debug_pkl");
   for (const auto& record_name : record_names) {
-    if (c10::string_view(record_name).ends_with(suffix)) {
+    if (c10::string_view_ends_with(std::string_view(record_name), suffix)) {
       auto [debug_data, debug_size] = reader->getRecord(record_name);
       auto ivalueTuple = jit::unpickle(
           reinterpret_cast<const char*>(debug_data.get()),
@@ -140,7 +139,7 @@ MobileDebugTable::MobileDebugTable(
       }
 
       for (auto& val : lines.toTuple()->elements()) {
-        auto tup_elems = std::move(*std::move(val).toTuple()).elements();
+        auto tup_elems = std::move(*val.toTuple()).elements();
         // For BC we decode only tuples with 3 elements
         // assuming it contains
         // byte_offset, debug_handle (=source range tag), source range
@@ -159,7 +158,7 @@ MobileDebugTable::MobileDebugTable(
         reader->getRecord(callstack_debug_file);
     CallStackDebugInfoUnpickler unpickler;
     callstack_ptr_map_ = unpickler.unpickle(
-        std::move(callstack_data), callstack_data_size, source_range_map, cu);
+        callstack_data, callstack_data_size, source_range_map, cu);
   }
 }
 
@@ -229,5 +228,4 @@ std::pair<std::string, std::string> MobileDebugTable::
       debug_infos, "top", top_module_type_name));
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

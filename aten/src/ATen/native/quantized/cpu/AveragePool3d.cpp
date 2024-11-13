@@ -16,8 +16,7 @@
 
 #include <vector>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 DEFINE_DISPATCH(qavg_pool3d_nhwc_stub);
 
@@ -128,7 +127,7 @@ Tensor q_avg_pool3d(
       input_nhwc.options().memory_format(input_nhwc.suggest_memory_format()),
       input_nhwc.q_scale(),
       input_nhwc.q_zero_point(),
-      c10::nullopt);
+      std::nullopt);
   // fast path for channel last: qavg_pool_2d_nhwc_stub
   qavg_pool3d_nhwc_stub(
       input_nhwc.device().type(),
@@ -180,5 +179,4 @@ Tensor avg_pool3d_quantized_cpu(
   return output;
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

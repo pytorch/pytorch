@@ -6,14 +6,11 @@ import operator
 import sys
 import warnings
 from fractions import Fraction
-
 from unittest import expectedFailure as xfail, skipIf as skipif
 
 import hypothesis
 import hypothesis.strategies as st
-
 import numpy
-
 import pytest
 from hypothesis.extra.numpy import arrays
 from pytest import raises as assert_raises
@@ -29,11 +26,14 @@ from torch.testing._internal.common_utils import (
     xpassIfTorchDynamo,
 )
 
+
 skip = functools.partial(skipif, True)
 
 HAS_REFCOUNT = True
 IS_WASM = False
 IS_PYPY = False
+
+import string
 
 # FIXME: make from torch._numpy
 # These are commented, as if they are imported, some of the tests pass for the wrong reasons
@@ -68,17 +68,16 @@ if TEST_WITH_TORCHDYNAMO:
     )
     from numpy.core.numeric import normalize_axis_tuple
     from numpy.random import rand
-
     from numpy.testing import (
         assert_,
-        assert_allclose,  # IS_PYPY,
+        assert_allclose,
         assert_almost_equal,
         assert_array_almost_equal,
         assert_array_equal,
         assert_equal,
         assert_raises_regex,
         assert_warns,
-        suppress_warnings,  # HAS_REFCOUNT, IS_WASM
+        suppress_warnings,
     )
 else:
     import torch._numpy as np
@@ -101,17 +100,16 @@ else:
     )
     from torch._numpy._util import normalize_axis_tuple
     from torch._numpy.random import rand
-
     from torch._numpy.testing import (
         assert_,
-        assert_allclose,  # IS_PYPY,
+        assert_allclose,
         assert_almost_equal,
         assert_array_almost_equal,
         assert_array_equal,
         assert_equal,
         assert_raises_regex,
         assert_warns,
-        suppress_warnings,  # HAS_REFCOUNT, IS_WASM
+        suppress_warnings,
     )
 
 
@@ -127,7 +125,7 @@ def _make_complex(real, imag):
     Like real + 1j * imag, but behaves as expected when imag contains non-finite
     values
     """
-    ret = np.zeros(np.broadcast(real, imag).shape, np.complex_)
+    ret = np.zeros(np.broadcast(real, imag).shape, np.complex128)
     ret.real = real
     ret.imag = imag
     return ret
@@ -268,8 +266,8 @@ class TestAny(TestCase):
     def test_nd(self):
         y1 = [[0, 0, 0], [0, 1, 0], [1, 1, 0]]
         assert_(np.any(y1))
-        assert_array_equal(np.sometrue(y1, axis=0), [1, 1, 0])
-        assert_array_equal(np.sometrue(y1, axis=1), [0, 1, 1])
+        assert_array_equal(np.any(y1, axis=0), [1, 1, 0])
+        assert_array_equal(np.any(y1, axis=1), [0, 1, 1])
 
 
 class TestAll(TestCase):
@@ -285,8 +283,8 @@ class TestAll(TestCase):
     def test_nd(self):
         y1 = [[0, 0, 1], [0, 1, 1], [1, 1, 1]]
         assert_(not np.all(y1))
-        assert_array_equal(np.alltrue(y1, axis=0), [0, 0, 1])
-        assert_array_equal(np.alltrue(y1, axis=1), [0, 0, 1])
+        assert_array_equal(np.all(y1, axis=0), [0, 0, 1])
+        assert_array_equal(np.all(y1, axis=1), [0, 0, 1])
 
 
 class TestCopy(TestCase):
@@ -496,7 +494,7 @@ class TestSelect(TestCase):
         assert_equal(select([True], [0], default=[0]).shape, (1,))
 
     def test_return_dtype(self):
-        assert_equal(select(self.conditions, self.choices, 1j).dtype, np.complex_)
+        assert_equal(select(self.conditions, self.choices, 1j).dtype, np.complex128)
         # But the conditions need to be stronger then the scalar default
         # if it is scalar.
         choices = [choice.astype(np.int8) for choice in self.choices]
@@ -1532,7 +1530,7 @@ class TestVectorize(TestCase):
     def test_string_ticket_1892(self):
         # Test vectorization over strings: issue 1892.
         f = np.vectorize(lambda x: x)
-        s = "0123456789" * 10
+        s = string.digits * 10
         assert_equal(s, f(s))
 
     def test_cache(self):
@@ -2607,7 +2605,7 @@ class TestBincount(TestCase):
 parametrize_interp_sc = parametrize(
     "sc",
     [
-        subtest(lambda x: np.float_(x), name="real"),
+        subtest(lambda x: np.float64(x), name="real"),
         subtest(lambda x: _make_complex(x, 0), name="complex-real"),
         subtest(lambda x: _make_complex(0, x), name="complex-imag"),
         subtest(lambda x: _make_complex(x, np.multiply(x, -2)), name="complex-both"),
@@ -2863,9 +2861,9 @@ class TestPercentile(TestCase):
     @parametrize("dtype", np.typecodes["Float"])
     def test_linear_nan_1D(self, dtype):
         # METHOD 1 of H&F
-        arr = np.asarray([15.0, np.NAN, 35.0, 40.0, 50.0], dtype=dtype)
+        arr = np.asarray([15.0, np.nan, 35.0, 40.0, 50.0], dtype=dtype)
         res = np.percentile(arr, 40.0, method="linear")
-        np.testing.assert_equal(res, np.NAN)
+        np.testing.assert_equal(res, np.nan)
         np.testing.assert_equal(res.dtype, arr.dtype)
 
     H_F_TYPE_CODES = [

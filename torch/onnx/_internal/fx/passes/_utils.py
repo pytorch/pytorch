@@ -3,20 +3,17 @@
 
 These functions should NOT be directly invoked outside of `passes` package.
 """
+
 from __future__ import annotations
 
 import collections
-
 import re
-
-from typing import Callable, Dict, Optional, Tuple
+from typing import Callable
 
 import torch.fx
 import torch.fx.traceback as fx_traceback
-from torch.onnx._internal import _beartype
 
 
-@_beartype.beartype
 def wrap_graph_module_for_node_meta_preservation(
     graph_module: torch.fx.GraphModule,
 ) -> Callable:
@@ -33,7 +30,7 @@ def wrap_graph_module_for_node_meta_preservation(
     return wrapped
 
 
-def _get_node_base_name(node_name: str) -> Tuple[str, Optional[int]]:
+def _get_node_base_name(node_name: str) -> tuple[str, int | None]:
     pattern = r"(.*)\.(\d+)"
     match = re.match(pattern, node_name)
     if match is not None:
@@ -42,11 +39,10 @@ def _get_node_base_name(node_name: str) -> Tuple[str, Optional[int]]:
     return node_name, None
 
 
-@_beartype.beartype
 def set_node_name(
     node: torch.fx.Node,
     new_name: str,
-    name_to_node_cache: Dict[str, torch.fx.Node],
+    name_to_node_cache: dict[str, torch.fx.Node],
 ):
     """Safely set the unique name of a node.
 
@@ -65,7 +61,6 @@ def set_node_name(
         new_name: The new name to use.
         name_to_node_cache: A cache of node names to nodes.
     """
-    module = node.graph.owning_module
     node_name_to_set = collections.deque([(node, new_name)])
 
     while node_name_to_set:
@@ -81,7 +76,6 @@ def set_node_name(
         name_to_node_cache[new_name] = node
 
 
-@_beartype.beartype
 def replace_placeholder_name_and_target(
     module: torch.fx.GraphModule, reference_module: torch.fx.GraphModule
 ):
@@ -109,7 +103,7 @@ def replace_placeholder_name_and_target(
             f"module: {len(placeholders)}, reference_module: {len(reference_placeholders)}"
         )
 
-    name_to_node: Dict[str, torch.fx.Node] = {}
+    name_to_node: dict[str, torch.fx.Node] = {}
     for node in module.graph.nodes:
         name_to_node[node.name] = node
 

@@ -420,7 +420,7 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_optimize_frozen_graph", &OptimizeFrozenGraph)
       .def(
           "_jit_pass_optimize_for_inference",
-          [](Module& module, std::vector<std::string> other_methods) {
+          [](Module& module, const std::vector<std::string>& other_methods) {
             optimize_for_inference(module, other_methods);
           },
           py::arg("module"),
@@ -671,7 +671,7 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "_jit_pass_create_autodiff_subgraphs",
-          [](const std::shared_ptr<Graph>& graph, py::object threshold) {
+          [](const std::shared_ptr<Graph>& graph, const py::object& threshold) {
             if (threshold.is_none()) {
               CreateAutodiffSubgraphs(graph);
             } else {
@@ -863,7 +863,7 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "_jit_set_fusion_strategy",
-          [](std::vector<std::pair<std::string, size_t>> strategy) {
+          [](const std::vector<std::pair<std::string, size_t>>& strategy) {
             FusionStrategy vec_conv;
             for (const auto& pair : strategy) {
               if (pair.first == "STATIC") {
@@ -900,18 +900,18 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_set_logging_option",
           [](std::string loggingOption) -> void {
-            ::torch::jit::set_jit_logging_levels(loggingOption);
+            ::torch::jit::set_jit_logging_levels(std::move(loggingOption));
           })
       .def(
           "_jit_set_logging_stream",
-          [](std::string stream_name) -> void {
+          [](const std::string& stream_name) -> void {
             if (stream_name == "stdout") {
               ::torch::jit::set_jit_logging_output_stream(std::cout);
             } else if (stream_name == "stderr") {
               ::torch::jit::set_jit_logging_output_stream(std::cerr);
             } else {
               std::cerr << "ERROR: only `stdout` and `stderr`"
-                        << "are supported as output options" << std::endl;
+                        << "are supported as output options" << '\n';
             }
           })
       .def(
@@ -1173,13 +1173,13 @@ void initJITBindings(PyObject* module) {
 
   // NB: This isn't actually used for regular PyTorch symbolic tracing;
   // XLA is what needs this
-#define SYMNODE_UNARY(n) .def(#n, [](c10::SymNode a) { return a->n(); })
+#define SYMNODE_UNARY(n) .def(#n, [](const c10::SymNode& a) { return a->n(); })
 #define SYMNODE_BINARY(n) \
-  .def(#n, [](c10::SymNode a, c10::SymNode b) { return a->n(b); })
+  .def(#n, [](const c10::SymNode& a, const c10::SymNode& b) { return a->n(b); })
 #define SYMNODE_SIZES_STRIDES(n)                \
   .def(                                         \
       #n,                                       \
-      [](c10::SymNode a,                        \
+      [](const c10::SymNode& a,                 \
          c10::ArrayRef<c10::SymNode> sizes,     \
          c10::ArrayRef<c10::SymNode> strides) { \
         return a->n(sizes, strides);            \
@@ -1230,60 +1230,63 @@ void initJITBindings(PyObject* module) {
       SYMNODE_SIZES_STRIDES(is_non_overlapping_and_dense)
       .def(
           "guard_int",
-          [](c10::SymNode a, const char* file, int64_t line) {
+          [](const c10::SymNode& a, const char* file, int64_t line) {
             return a->guard_int(file, line);
           })
       .def(
           "guard_bool",
-          [](c10::SymNode a, const char* file, int64_t line) {
+          [](const c10::SymNode& a, const char* file, int64_t line) {
             return a->guard_bool(file, line);
           })
       .def(
           "guard_float",
-          [](c10::SymNode a, const char* file, int64_t line) {
+          [](const c10::SymNode& a, const char* file, int64_t line) {
             return a->guard_float(file, line);
           })
       .def(
           "expect_true",
-          [](c10::SymNode a, const char* file, int64_t line) {
+          [](const c10::SymNode& a, const char* file, int64_t line) {
             return a->expect_true(file, line);
           })
       .def(
           "expect_size",
-          [](c10::SymNode a, const char* file, int64_t line) {
+          [](const c10::SymNode& a, const char* file, int64_t line) {
             return a->expect_size(file, line);
           })
       .def(
           "guard_size_oblivious",
-          [](c10::SymNode a, const char* file, int64_t line) {
+          [](const c10::SymNode& a, const char* file, int64_t line) {
             return a->guard_size_oblivious(file, line);
           })
       .def(
           "has_hint",
-          [](c10::SymNode a) {
+          [](const c10::SymNode& a) {
             return a->has_hint();
           })
       .def(
           "wrap_int",
-          [](c10::SymNode a, int64_t b) {
+          [](const c10::SymNode& a, int64_t b) {
             return a->wrap_int(b);
           })
       .def(
           "wrap_float",
-          [](c10::SymNode a, double b) {
+          [](const c10::SymNode& a, double b) {
             return a->wrap_float(b);
           })
       .def(
           "wrap_bool",
-          [](c10::SymNode a, bool b) {
+          [](const c10::SymNode& a, bool b) {
             return a->wrap_bool(b);
           })
       .def(
           "__str__",
-          [](c10::SymNode a) { return a->str(); })
+          [](const c10::SymNode& a) { return a->str(); })
       .def(
           "__repr__",
-          [](c10::SymNode a) { return a->str(); })
+          [](const c10::SymNode& a) { return a->str(); })
+      .def(
+          "_graph_repr",
+          [](const c10::SymNode& a) { return a->_graph_repr(); })
       .def(
           "is_constant",
           [](const c10::SymNode& node){
@@ -1386,28 +1389,38 @@ void initJITBindings(PyObject* module) {
           "fallback", [](GraphExecutorState& s) { return s.fallback; });
 
   py::class_<PyTorchStreamWriter>(m, "PyTorchFileWriter")
-      .def(py::init<std::string>())
-      .def(py::init([](const py::object& buffer) {
-        auto writer_func = [=](const void* data, size_t size) {
-          // Writing an empty file is a noop
-          if (size == 0) {
-            return size;
-          }
-          py::gil_scoped_acquire acquire;
-          if (!data) {
-            // See [Note: write_record_metadata]
-            buffer.attr("seek")(
-                size, py::module::import("os").attr("SEEK_CUR"));
-          } else {
-            auto memory_view = py::memoryview::from_memory(
-                reinterpret_cast<const char*>(data), size);
-            buffer.attr("write")(std::move(memory_view));
-          }
-          return size;
-        };
-        return std::make_unique<PyTorchStreamWriter>(std::move(writer_func));
-      }))
-      .def(py::init<const std::function<size_t(const void*, size_t)>&>())
+      .def(
+          py::init<std::string, bool>(),
+          py::arg("file_name"),
+          py::arg("compute_crc32") = true)
+      .def(
+          py::init([](const py::object& buffer, bool compute_crc32 = true) {
+            auto writer_func = [=](const void* data, size_t size) {
+              // Writing an empty file is a noop
+              if (size == 0) {
+                return size;
+              }
+              py::gil_scoped_acquire acquire;
+              if (!data) {
+                // See [Note: write_record_metadata]
+                buffer.attr("seek")(
+                    size, py::module::import("os").attr("SEEK_CUR"));
+              } else {
+                auto memory_view = py::memoryview::from_memory(
+                    reinterpret_cast<const char*>(data), size);
+                buffer.attr("write")(std::move(memory_view));
+              }
+              return size;
+            };
+            return std::make_unique<PyTorchStreamWriter>(
+                std::move(writer_func), compute_crc32);
+          }),
+          py::arg("buffer"),
+          py::arg("compute_crc32") = true)
+      .def(
+          py::init<const std::function<size_t(const void*, size_t)>&, bool>(),
+          py::arg("writer_func"),
+          py::arg("compute_crc32") = true)
       // [Note: write_record_metadata]
       // The write_record_metadata function is intended to write metadata (i.e.
       // the zipfile header and end of central directory record) for a file
@@ -1452,7 +1465,7 @@ void initJITBindings(PyObject* module) {
           "write_record",
           [](PyTorchStreamWriter& self,
              const std::string& name,
-             c10::Storage data,
+             const c10::Storage& data,
              size_t size) {
             // Reading Tensor data is always ok without the GIL held
             py::gil_scoped_release release;
@@ -1504,8 +1517,8 @@ void initJITBindings(PyObject* module) {
       buffer.attr("seek")(current, py::module::import("os").attr("SEEK_END"));
       size_ = py::cast<size_t>(buffer.attr("tell")()) - start_offset_;
       buffer.attr("seek")(current);
-
       // If we can read directly into a buffer, do that instead of an extra copy
+      // NOLINTNEXTLINE(cppcoreguidelines-prefer-member-initializer)
       use_readinto_ = py::hasattr(buffer, "readinto");
     }
 
@@ -1554,7 +1567,7 @@ void initJITBindings(PyObject* module) {
     py::object buffer_;
     size_t size_;
     size_t start_offset_;
-    bool use_readinto_;
+    bool use_readinto_{};
   };
 
   py::class_<PyTorchStreamReader, std::shared_ptr<PyTorchStreamReader>>(
@@ -1662,34 +1675,37 @@ void initJITBindings(PyObject* module) {
 
   m.def(
       "_get_operation_overload",
-      [](const std::string& op_name, const std::string& overload_name) {
+      [](const std::string& op_name,
+         const std::string& overload_name) -> std::optional<py::tuple> {
         try {
           auto symbol = Symbol::fromQualString(op_name);
           auto operations = getAllOperatorsFor(symbol);
           bool allow_numbers_as_tensors = opAllowsNumbersAsTensors(symbol);
           for (const auto& op : operations) {
             if (op->schema().overload_name() == overload_name) {
-              auto func =
-                  py::cpp_function([op, symbol, allow_numbers_as_tensors](
-                                       py::args args, py::kwargs kwargs) {
+              auto func = py::cpp_function(
+                  [op, symbol, allow_numbers_as_tensors](
+                      const py::args& args, const py::kwargs& kwargs) {
                     ToIValueAllowNumbersAsTensors g(allow_numbers_as_tensors);
                     return _get_operation_for_overload_or_packet(
                         {op}, symbol, args, kwargs, /*is_overload*/ true);
                   });
-              auto func_dk = py::cpp_function(
-                  [op, symbol, allow_numbers_as_tensors](
-                      c10::DispatchKey dk_, py::args args, py::kwargs kwargs) {
+              auto func_dk =
+                  py::cpp_function([op, symbol, allow_numbers_as_tensors](
+                                       c10::DispatchKey dk_,
+                                       const py::args& args,
+                                       const py::kwargs& kwargs) {
                     std::optional<c10::DispatchKey> dk =
                         std::make_optional(dk_);
                     ToIValueAllowNumbersAsTensors g(allow_numbers_as_tensors);
                     return _get_operation_for_overload_or_packet(
                         {op}, symbol, args, kwargs, /*is_overload*/ true, dk);
                   });
-              return py::make_tuple(
-                  func, func_dk, py::cast(op->getTags().vec()));
+              return std::make_optional(
+                  py::make_tuple(func, func_dk, py::cast(op->getTags().vec())));
             }
           }
-          throw std::runtime_error("Found no matching operator overload");
+          return std::nullopt;
         } catch (const c10::Error& e) {
           auto msg = torch::get_cpp_stacktraces_enabled()
               ? e.what()
@@ -1700,7 +1716,9 @@ void initJITBindings(PyObject* module) {
 
   m.def(
       "_check_schema_allow_fake_script_object",
-      [](const FunctionSchema& schema, py::args args, py::kwargs kwargs) {
+      [](const FunctionSchema& schema,
+         const py::args& args,
+         const py::kwargs& kwargs) {
         // checkSchemaAllowFakeScriptObject will throw runtime error if there is
         // a schema mismatch. Otherwise, it returns true.
         return checkSchemaAllowFakeScriptObject(schema, args, kwargs);
@@ -1708,7 +1726,7 @@ void initJITBindings(PyObject* module) {
 
   m.def(
       "_jit_resolve_packet",
-      [](const char* op_name, py::args args, py::kwargs kwargs) {
+      [](const char* op_name, py::args args, const py::kwargs& kwargs) {
         try {
           auto symbol = Symbol::fromQualString(op_name);
           bool allow_numbers_as_tensors = opAllowsNumbersAsTensors(symbol);
@@ -1717,7 +1735,7 @@ void initJITBindings(PyObject* module) {
           auto opWithStack = getOpWithStack(overloads, args, kwargs);
           std::shared_ptr<Operator> overload = std::get<0>(opWithStack);
           auto result = overload->schema().overload_name();
-          if (result == "") {
+          if (result.empty()) {
             result = "default";
           }
           return result;
@@ -1757,7 +1775,7 @@ void initJITBindings(PyObject* module) {
 
           auto func = py::cpp_function(
               [sortedOps, symbol, allow_numbers_as_tensors](
-                  py::args args, py::kwargs kwargs) {
+                  const py::args& args, const py::kwargs& kwargs) {
                 ToIValueAllowNumbersAsTensors g(allow_numbers_as_tensors);
                 return _get_operation_for_overload_or_packet(
                     sortedOps, symbol, args, kwargs, false);
@@ -1776,7 +1794,9 @@ void initJITBindings(PyObject* module) {
 
   m.def(
       "_maybe_call_torch_function_for_op_packet",
-      [](py::handle op_overload_packet, py::args args, py::kwargs kwargs) {
+      [](py::handle op_overload_packet,
+         const py::args& args,
+         const py::kwargs& kwargs) {
         py::list ns_method =
             op_overload_packet.attr("_qualified_op_name").attr("split")("::");
         auto res = _maybe_handle_torch_function(
@@ -1946,7 +1966,7 @@ void initJITBindings(PyObject* module) {
             ss << self;
             return py::str(ss.str());
           },
-          [](py::str schema) { // __setstate__, note: no `self` argument
+          [](const py::str& schema) { // __setstate__, note: no `self` argument
             return parseSchema(schema);
           }))
       .def_property_readonly(
@@ -1977,6 +1997,14 @@ void initJITBindings(PyObject* module) {
           })
       .def_property_readonly(
           "alias_info", [](Argument& self) { return self.alias_info(); })
+      .def_property_readonly(
+          "is_write",
+          [](Argument& self) {
+            if (self.alias_info() == nullptr) {
+              return false;
+            }
+            return self.alias_info()->isWrite();
+          })
       .def_property_readonly(
           "is_out", [](Argument& self) { return self.is_out(); })
       .def_property_readonly("kwarg_only", [](Argument& self) -> bool {
@@ -2142,7 +2170,7 @@ void initJITBindings(PyObject* module) {
     return self_value->overlaps(*other_value);
   });
   m.def("_awaitable", [](const py::args& args, const py::kwargs& kwargs) {
-    AT_ASSERT(args.size() >= 1);
+    AT_ASSERT(!args.empty());
     py::tuple args_tup(args.size() - 1);
     for (const auto i : c10::irange(1, args.size())) {
       args_tup[i - 1] = args[i];
@@ -2151,7 +2179,7 @@ void initJITBindings(PyObject* module) {
         py::cast<py::function>(args[0]), std::move(args_tup));
   });
   m.def("_awaitable_nowait", [](py::handle input) {
-    return std::make_shared<PythonAwaitWrapper>(std::move(input));
+    return std::make_shared<PythonAwaitWrapper>(input);
   });
   m.def(
       "_awaitable_wait", [](const std::shared_ptr<PythonAwaitWrapper>& py_aw) {

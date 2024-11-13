@@ -61,7 +61,7 @@ class CutlassEVTEpilogueTypeFormatter:
         self.output = IndentedBuffer(0)
         self.var_counter = 0
         self.evt_type_name = evt_type_name
-        self.aliases = dict()
+        self.aliases = {}
 
     @staticmethod
     def ir_to_evt_string(
@@ -243,7 +243,7 @@ class CutlassEVTEpilogueArgumentFormatter:
         self.var_counter: int = (
             0  # used to generate variable names, incremented for each new variable
         )
-        self.aliases: Dict[str, str] = dict()  # Aliases for subexpression functors
+        self.aliases: Dict[str, str] = {}  # Aliases for subexpression functors
 
     @staticmethod
     def ir_to_evt_argument_string(
@@ -265,7 +265,7 @@ class CutlassEVTEpilogueArgumentFormatter:
                 result = pnode.inner_fn(index)
                 # each epilogue node results in a single "using" statement and may refer to the previous steps by name
                 if node.name is not None:
-                    formatter.aliases[node.name] = result
+                    formatter.aliases[node.name] = result  # type: ignore[assignment]
 
             res: str = formatter.getvalue(result)  # type: ignore[possibly-undefined]
             if _MAGIC_SYMPY_ERROR_STRING in res:

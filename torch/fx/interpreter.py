@@ -1,20 +1,24 @@
 # mypy: allow-untyped-defs
-from .graph_module import GraphModule
-from ._lazy_graph_module import _make_graph_module
-from .graph import Graph
-from .node import Argument, Node, Target, map_arg, map_aggregate
-from .proxy import Proxy
-from ._symbolic_trace import Tracer
-from ._compatibility import compatibility
-from . import config
-import torch.fx.traceback as fx_traceback
-import torch
-from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 import inspect
 from contextlib import contextmanager
+from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
+
+import torch
+import torch.fx.traceback as fx_traceback
 from torch.hub import tqdm
 
-__all__ = ['Interpreter', 'Transformer']
+from . import config
+from ._compatibility import compatibility
+from ._lazy_graph_module import _make_graph_module
+from ._symbolic_trace import Tracer
+from .graph import Graph
+from .graph_module import GraphModule
+from .node import Argument, map_aggregate, map_arg, Node, Target
+from .proxy import Proxy
+
+
+__all__ = ["Interpreter", "Transformer"]
+
 
 @compatibility(is_backward_compatible=True)
 class Interpreter:
@@ -43,21 +47,21 @@ class Interpreter:
         method equivalents). We could subclass Interpreter like so::
 
             class NegSigmSwapInterpreter(Interpreter):
-                def call_function(self, target : Target,
-                                  args : Tuple, kwargs : Dict) -> Any:
+                def call_function(self, target: Target, args: Tuple, kwargs: Dict) -> Any:
                     if target == torch.sigmoid:
                         return torch.neg(*args, **kwargs)
-                    return super().call_function(n)
+                    return super().call_function(target, args, kwargs)
 
-                def call_method(self, target : Target,
-                                args : Tuple, kwargs : Dict) -> Any:
-                    if target == 'neg':
+                def call_method(self, target: Target, args: Tuple, kwargs: Dict) -> Any:
+                    if target == "neg":
                         call_self, *args_tail = args
                         return call_self.sigmoid(*args_tail, **kwargs)
-                    return super().call_method(n)
+                    return super().call_method(target, args, kwargs)
+
 
             def fn(x):
                 return torch.sigmoid(x).neg()
+
 
             gm = torch.fx.symbolic_trace(fn)
             input = torch.randn(3, 4)
@@ -74,15 +78,21 @@ class Interpreter:
             graph instead of `module.graph`, using the provided `module`
             argument to satisfy any requests for state.
     """
+
     @compatibility(is_backward_compatible=True)
-    def __init__(self, module: torch.nn.Module, garbage_collect_values: bool = True, graph: Optional[Graph] = None):
+    def __init__(
+        self,
+        module: torch.nn.Module,
+        garbage_collect_values: bool = True,
+        graph: Optional[Graph] = None,
+    ):
         self.module = module
         self.submodules = dict(self.module.named_modules())
         if graph is not None:
             self.graph = graph
         else:
             self.graph = self.module.graph
-        self.env : Dict[Node, Any] = {}
+        self.env: Dict[Node, Any] = {}
         self.name = "Interpreter"
         self.garbage_collect_values = garbage_collect_values
         self.extra_traceback = True
@@ -92,10 +102,10 @@ class Interpreter:
             # of a given node. This represents the *last* use of the node in the
             # execution order of the program, which we will use to free unused
             # values
-            node_to_last_use : Dict[Node, Node] = {}
-            self.user_to_last_uses : Dict[Node, List[Node]] = {}
+            node_to_last_use: Dict[Node, Node] = {}
+            self.user_to_last_uses: Dict[Node, List[Node]] = {}
 
-            def register_last_uses(n : Node, user : Node):
+            def register_last_uses(n: Node, user: Node):
                 if n not in node_to_last_use:
                     node_to_last_use[n] = user
                     self.user_to_last_uses.setdefault(user, []).append(n)
@@ -105,7 +115,12 @@ class Interpreter:
                 map_arg(node.kwargs, lambda n: register_last_uses(n, node))
 
     @compatibility(is_backward_compatible=True)
-    def run(self, *args, initial_env : Optional[Dict[Node, Any]] = None, enable_io_processing : bool = True) -> Any:
+    def run(
+        self,
+        *args,
+        initial_env: Optional[Dict[Node, Any]] = None,
+        enable_io_processing: bool = True,
+    ) -> Any:
         """
         Run `module` via interpretation and return the result.
 
@@ -128,10 +143,16 @@ class Interpreter:
         # position and extract those values.
         if enable_io_processing:
             args = self.graph.process_inputs(*args)
-        self.args_iter : Iterator[Any] = iter(args)
-        pbar = tqdm(total=len(self.graph.nodes),
-                    desc=f"{self.name}: {str(list(self.graph.nodes)) if config.verbose_progress else ''}",
-                    initial=0, position=0, leave=True, disable=config.disable_progress, delay=0)
+        self.args_iter: Iterator[Any] = iter(args)
+        pbar = tqdm(
+            total=len(self.graph.nodes),
+            desc=f"{self.name}: {str(list(self.graph.nodes)) if config.verbose_progress else ''}",
+            initial=0,
+            position=0,
+            leave=True,
+            disable=config.disable_progress,
+            delay=0,
+        )
 
         for node in self.graph.nodes:
             pbar.update(1)
@@ -147,7 +168,7 @@ class Interpreter:
             except Exception as e:
                 if self.extra_traceback:
                     msg = f"While executing {node.format_node()}"
-                    msg = f'{e.args[0]}\n\n{msg}' if e.args else str(msg)
+                    msg = f"{e.args[0]}\n\n{msg}" if e.args else str(msg)
                     msg += f"\nOriginal traceback:\n{node.stack_trace}"
                     e.args = (msg,) + e.args[1:]
                     if isinstance(e, KeyError):
@@ -158,9 +179,13 @@ class Interpreter:
                 for to_delete in self.user_to_last_uses.get(node, []):
                     del self.env[to_delete]
 
-            if node.op == 'output':
+            if node.op == "output":
                 output_val = self.env[node]
-                return self.graph.process_outputs(output_val) if enable_io_processing else output_val
+                return (
+                    self.graph.process_outputs(output_val)
+                    if enable_io_processing
+                    else output_val
+                )
 
     @compatibility(is_backward_compatible=True)
     def boxed_run(self, args_list):
@@ -183,7 +208,7 @@ class Interpreter:
             yield
 
     @compatibility(is_backward_compatible=True)
-    def run_node(self, n : Node) -> Any:
+    def run_node(self, n: Node) -> Any:
         """
         Run a specific node ``n`` and return the result.
         Calls into placeholder, get_attr, call_function,
@@ -204,7 +229,9 @@ class Interpreter:
 
     # Main Node running APIs
     @compatibility(is_backward_compatible=True)
-    def placeholder(self, target : 'Target', args : Tuple[Argument, ...], kwargs : Dict[str, Any]) -> Any:
+    def placeholder(
+        self, target: "Target", args: Tuple[Argument, ...], kwargs: Dict[str, Any]
+    ) -> Any:
         """
         Execute a ``placeholder`` node. Note that this is stateful:
         ``Interpreter`` maintains an internal iterator over
@@ -222,7 +249,7 @@ class Interpreter:
             Any: The argument value that was retrieved.
         """
         assert isinstance(target, str)
-        if target.startswith('*'):
+        if target.startswith("*"):
             # For a starred parameter e.g. `*args`, retrieve all
             # remaining values from the args list.
             return list(self.args_iter)
@@ -233,10 +260,14 @@ class Interpreter:
                 if len(args) > 0:
                     return args[0]
                 else:
-                    raise RuntimeError(f'Expected positional argument for parameter {target}, but one was not passed in!') from si
+                    raise RuntimeError(
+                        f"Expected positional argument for parameter {target}, but one was not passed in!"
+                    ) from si
 
     @compatibility(is_backward_compatible=True)
-    def get_attr(self, target : 'Target', args : Tuple[Argument, ...], kwargs : Dict[str, Any]) -> Any:
+    def get_attr(
+        self, target: "Target", args: Tuple[Argument, ...], kwargs: Dict[str, Any]
+    ) -> Any:
         """
         Execute a ``get_attr`` node. Will retrieve an attribute
         value from the ``Module`` hierarchy of ``self.module``.
@@ -255,7 +286,9 @@ class Interpreter:
         return self.fetch_attr(target)
 
     @compatibility(is_backward_compatible=True)
-    def call_function(self, target : 'Target', args : Tuple[Argument, ...], kwargs : Dict[str, Any]) -> Any:
+    def call_function(
+        self, target: "Target", args: Tuple[Argument, ...], kwargs: Dict[str, Any]
+    ) -> Any:
         """
         Execute a ``call_function`` node and return the result.
 
@@ -275,7 +308,9 @@ class Interpreter:
         return target(*args, **kwargs)
 
     @compatibility(is_backward_compatible=True)
-    def call_method(self, target : 'Target', args : Tuple[Argument, ...], kwargs : Dict[str, Any]) -> Any:
+    def call_method(
+        self, target: "Target", args: Tuple[Argument, ...], kwargs: Dict[str, Any]
+    ) -> Any:
         """
         Execute a ``call_method`` node and return the result.
 
@@ -297,7 +332,9 @@ class Interpreter:
         return getattr(self_obj, target)(*args_tail, **kwargs)
 
     @compatibility(is_backward_compatible=True)
-    def call_module(self, target : 'Target', args : Tuple[Argument, ...], kwargs : Dict[str, Any]) -> Any:
+    def call_module(
+        self, target: "Target", args: Tuple[Argument, ...], kwargs: Dict[str, Any]
+    ) -> Any:
         """
         Execute a ``call_module`` node and return the result.
 
@@ -320,7 +357,9 @@ class Interpreter:
         return submod(*args, **kwargs)
 
     @compatibility(is_backward_compatible=True)
-    def output(self, target : 'Target', args : Tuple[Argument, ...], kwargs : Dict[str, Any]) -> Any:
+    def output(
+        self, target: "Target", args: Tuple[Argument, ...], kwargs: Dict[str, Any]
+    ) -> Any:
         """
         Execute an ``output`` node. This really just retrieves
         the value referenced by the ``output`` node and returns it.
@@ -339,7 +378,7 @@ class Interpreter:
 
     # Helper methods
     @compatibility(is_backward_compatible=True)
-    def fetch_attr(self, target : str):
+    def fetch_attr(self, target: str):
         """
         Fetch an attribute from the ``Module`` hierarchy of ``self.module``.
 
@@ -349,16 +388,18 @@ class Interpreter:
         Return:
             Any: The value of the attribute.
         """
-        target_atoms = target.split('.')
+        target_atoms = target.split(".")
         attr_itr = self.module
         for i, atom in enumerate(target_atoms):
             if not hasattr(attr_itr, atom):
-                raise RuntimeError(f"Node referenced nonexistent target {'.'.join(target_atoms[:i+1])}")
+                raise RuntimeError(
+                    f"Node referenced nonexistent target {'.'.join(target_atoms[:i + 1])}"
+                )
             attr_itr = getattr(attr_itr, atom)
         return attr_itr
 
     @compatibility(is_backward_compatible=True)
-    def fetch_args_kwargs_from_env(self, n : Node) -> Tuple[Tuple, Dict]:
+    def fetch_args_kwargs_from_env(self, n: Node) -> Tuple[Tuple, Dict]:
         """
         Fetch the concrete values of ``args`` and ``kwargs`` of node ``n``
         from the current execution environment.
@@ -376,7 +417,7 @@ class Interpreter:
         return args, kwargs
 
     @compatibility(is_backward_compatible=True)
-    def map_nodes_to_values(self, args : Argument, n : Node) -> Argument:
+    def map_nodes_to_values(self, args: Argument, n: Node) -> Argument:
         """
         Recursively descend through ``args`` and look up the concrete value
         for each ``Node`` in the current execution environment.
@@ -386,12 +427,17 @@ class Interpreter:
 
             n (Node): Node to which ``args`` belongs. This is only used for error reporting.
         """
-        def load_arg(n_arg : Node) -> Any:
+
+        def load_arg(n_arg: Node) -> Any:
             if n_arg not in self.env:
-                raise RuntimeError(f'Node {n} referenced nonexistent value {n_arg}! Run Graph.lint() '
-                                   f'to diagnose such issues')
+                raise RuntimeError(
+                    f"Node {n} referenced nonexistent value {n_arg}! Run Graph.lint() "
+                    f"to diagnose such issues"
+                )
             return self.env[n_arg]
+
         return map_arg(args, load_arg)
+
 
 @compatibility(is_backward_compatible=True)
 class Transformer(Interpreter):
@@ -409,23 +455,29 @@ class Transformer(Interpreter):
         method equivalents). We could subclass ``Transformer`` like so::
 
             class NegSigmSwapXformer(Transformer):
-                def call_function(self, target : 'Target', args : Tuple[Argument, ...], kwargs : Dict[str, Any]) -> Any:
+                def call_function(
+                    self, target: "Target", args: Tuple[Argument, ...], kwargs: Dict[str, Any]
+                ) -> Any:
                     if target == torch.sigmoid:
                         return torch.neg(*args, **kwargs)
-                    return super().call_function(n)
+                    return super().call_function(target, args, kwargs)
 
-                def call_method(self, target : 'Target', args : Tuple[Argument, ...], kwargs : Dict[str, Any]) -> Any:
-                    if target == 'neg':
+                def call_method(
+                    self, target: "Target", args: Tuple[Argument, ...], kwargs: Dict[str, Any]
+                ) -> Any:
+                    if target == "neg":
                         call_self, *args_tail = args
                         return call_self.sigmoid(*args_tail, **kwargs)
-                    return super().call_method(n)
+                    return super().call_method(target, args, kwargs)
+
 
             def fn(x):
                 return torch.sigmoid(x).neg()
 
+
             gm = torch.fx.symbolic_trace(fn)
 
-            transformed : torch.nn.Module = NegSigmSwapXformer(gm).transform()
+            transformed: torch.nn.Module = NegSigmSwapXformer(gm).transform()
             input = torch.randn(3, 4)
             torch.testing.assert_close(transformed(input), torch.neg(input).sigmoid())
 
@@ -452,7 +504,9 @@ class Transformer(Interpreter):
         self.tracer.root = module
 
     @compatibility(is_backward_compatible=True)
-    def placeholder(self, target : 'Target', args : Tuple[Argument, ...], kwargs : Dict[str, Any]) -> Proxy:
+    def placeholder(
+        self, target: "Target", args: Tuple[Argument, ...], kwargs: Dict[str, Any]
+    ) -> Proxy:
         """
         Execute a ``placeholder`` node. In ``Transformer``, this is
         overridden to insert a new ``placeholder`` into the output
@@ -467,10 +521,14 @@ class Transformer(Interpreter):
         """
         assert isinstance(target, str)
         default_value = next(iter(args)) if args else inspect.Signature.empty
-        return Proxy(self.new_graph.placeholder(target, default_value=default_value), self.tracer)
+        return Proxy(
+            self.new_graph.placeholder(target, default_value=default_value), self.tracer
+        )
 
     @compatibility(is_backward_compatible=True)
-    def get_attr(self, target : 'Target', args : Tuple[Argument, ...], kwargs : Dict[str, Any]) -> Proxy:
+    def get_attr(
+        self, target: "Target", args: Tuple[Argument, ...], kwargs: Dict[str, Any]
+    ) -> Proxy:
         """
         Execute a ``get_attr`` node. In ``Transformer``, this is
         overridden to insert a new ``get_attr`` node into the output
@@ -487,16 +545,20 @@ class Transformer(Interpreter):
         return self.tracer.create_proxy("get_attr", target, args, kwargs)
 
     @compatibility(is_backward_compatible=True)
-    def call_module(self, target : 'Target', args : Tuple[Argument, ...], kwargs : Dict[str, Any]) -> Any:
+    def call_module(
+        self, target: "Target", args: Tuple[Argument, ...], kwargs: Dict[str, Any]
+    ) -> Any:
         # Override so that the leaf module policy from `self.tracer` is respected.
         assert isinstance(target, str)
         submod = self.fetch_attr(target)
         return self.tracer.call_module(submod, submod.forward, args, kwargs)
 
     @compatibility(is_backward_compatible=True)
-    def call_function(self, target : 'Target', args : Tuple[Argument, ...], kwargs : Dict[str, Any]) -> Any:
+    def call_function(
+        self, target: "Target", args: Tuple[Argument, ...], kwargs: Dict[str, Any]
+    ) -> Any:
         # Override so that functions that were wrapped are still wrapped.
-        return self.tracer.create_proxy('call_function', target, args, kwargs)
+        return self.tracer.create_proxy("call_function", target, args, kwargs)
 
     @compatibility(is_backward_compatible=True)
     def transform(self) -> GraphModule:
@@ -507,7 +569,15 @@ class Transformer(Interpreter):
         with fx_traceback.preserve_node_meta():
             result = super().run(enable_io_processing=False)
         if result is not None:
-            def strip_proxy(a : Union[Argument, Proxy]) -> Any:
+
+            def strip_proxy(a: Union[Argument, Proxy]) -> Any:
                 return a.node if isinstance(a, Proxy) else a
-            self.new_graph.output(map_aggregate(result, strip_proxy))
+
+            new_output_node = self.new_graph.output(map_aggregate(result, strip_proxy))
+            # also preserve the metadata from the old output node, if it exists
+            old_output_node = list(self.graph.nodes)[-1]
+            assert old_output_node.op == "output"
+            for k, v in old_output_node.meta.items():
+                new_output_node.meta[k] = v
+
         return _make_graph_module(self.module, self.new_graph)

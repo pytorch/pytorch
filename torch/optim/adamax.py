@@ -1,5 +1,6 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
-from typing import List, Optional, Tuple, Union
+from typing import cast, List, Optional, Tuple, Union
 
 import torch
 from torch import Tensor
@@ -14,11 +15,13 @@ from .optimizer import (
     _get_scalar_dtype,
     _get_value,
     _maximize_doc,
+    _params_doc,
     _use_grad_for_differentiable,
     _view_as_real,
     Optimizer,
     ParamsT,
 )
+
 
 __all__ = ["Adamax", "adamax"]
 
@@ -27,7 +30,7 @@ class Adamax(Optimizer):
     def __init__(
         self,
         params: ParamsT,
-        lr: float = 2e-3,
+        lr: Union[float, Tensor] = 2e-3,
         betas: Tuple[float, float] = (0.9, 0.999),
         eps: float = 1e-8,
         weight_decay: float = 0,
@@ -37,6 +40,8 @@ class Adamax(Optimizer):
         differentiable: bool = False,
         capturable: bool = False,
     ):
+        if isinstance(lr, Tensor) and lr.numel() != 1:
+            raise ValueError("Tensor lr must be 1-element")
         if not 0.0 <= lr:
             raise ValueError(f"Invalid learning rate: {lr}")
         if not 0.0 <= eps:
@@ -199,9 +204,8 @@ Adamax.__doc__ = (
     """
     + rf"""
     Args:
-        params (iterable): iterable of parameters to optimize or dicts defining
-            parameter groups
-        lr (float, optional): learning rate (default: 2e-3)
+        {_params_doc}
+        lr (float, Tensor, optional): learning rate (default: 2e-3)
         betas (Tuple[float, float], optional): coefficients used for computing
             running averages of gradient and its square
         eps (float, optional): term added to the denominator to improve
@@ -327,15 +331,21 @@ def _multi_tensor_adamax(
         ), f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
-        [params, grads, exp_avgs, exp_infs, state_steps]
+        [params, grads, exp_avgs, exp_infs, state_steps]  # type: ignore[list-item]
     )
     for (
-        grouped_params,
-        grouped_grads,
-        grouped_exp_avgs,
-        grouped_exp_infs,
-        grouped_state_steps,
+        grouped_params_,
+        grouped_grads_,
+        grouped_exp_avgs_,
+        grouped_exp_infs_,
+        grouped_state_steps_,
     ), _ in grouped_tensors.values():
+        grouped_params = cast(List[Tensor], grouped_params_)
+        grouped_grads = cast(List[Tensor], grouped_grads_)
+        grouped_exp_avgs = cast(List[Tensor], grouped_exp_avgs_)
+        grouped_exp_infs = cast(List[Tensor], grouped_exp_infs_)
+        grouped_state_steps = cast(List[Tensor], grouped_state_steps_)
+
         if has_complex:
             _view_as_real(
                 grouped_params, grouped_grads, grouped_exp_avgs, grouped_exp_infs
@@ -348,7 +358,7 @@ def _multi_tensor_adamax(
         # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over
         # and over. 1 will then be wrapped into a Tensor over and over again, which is slower than if we just
         # wrapped it once now. The alpha is required to assure we go to the right overload.
-        if grouped_state_steps[0].is_cpu:
+        if not torch._utils.is_compiling() and grouped_state_steps[0].is_cpu:
             torch._foreach_add_(
                 grouped_state_steps, torch.tensor(1.0, device="cpu"), alpha=1.0
             )

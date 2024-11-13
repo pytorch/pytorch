@@ -177,16 +177,19 @@ DONT_REQUIRE_DERIVATIVE = {
 GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "fill",
     "t",
+    "t_copy",
     "view",
     "reshape",
     "reshape_as",
     "view_as",
+    "view_copy",
     "roll",
     "clone",
     "block_diag",
     "diag_embed",
     "repeat",
     "expand",
+    "expand_copy",
     "flip",
     "fliplr",
     "flipud",
@@ -194,9 +197,13 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "nanmean",
     "nansum",
     "transpose",
+    "transpose_copy",
     "permute",
+    "permute_copy",
     "squeeze",
+    "squeeze_copy",
     "unsqueeze",
+    "unsqueeze_copy",
     "resize",
     "resize_as",
     "tril",
@@ -255,6 +262,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "log1p",
     "log2",
     "logaddexp",
+    "logsumexp",
     "logcumsumexp",
     "reciprocal",
     "tan",
@@ -377,6 +385,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "linalg_lu",
     "pixel_shuffle",
     "pixel_unshuffle",
+    "channel_shuffle",
     "linalg_lu_solve",
     "_linalg_slogdet",
     "_linalg_solve_ex",
@@ -415,8 +424,8 @@ RESET_GRAD_ACCUMULATOR = {"set_", "resize_"}
 # The following code templates implement the checks for this invariant:
 SAVE_TENSOR_STORAGE = CodeTemplate(
     """\
-c10::optional<Storage> ${tensor_name}_storage_saved =
-  ${tensor_name}.has_storage() ? c10::optional<Storage>(${tensor_name}.storage()) : c10::nullopt;
+auto ${tensor_name}_storage_saved =
+  ${tensor_name}.has_storage() ? ::std::optional<Storage>(${tensor_name}.storage()) : ::std::nullopt;
 """
 )
 
@@ -434,10 +443,10 @@ if (${tensor_name}_storage_saved.has_value() &&
 
 SAVE_TENSORLIST_STORAGE = CodeTemplate(
     """\
-std::vector<c10::optional<Storage>> ${tensorlist_name}_storage_saved(${tensorlist_name}.size());
+std::vector<::std::optional<Storage>> ${tensorlist_name}_storage_saved(${tensorlist_name}.size());
 for (const Tensor& tensor : ${tensorlist_name})
   ${tensorlist_name}_storage_saved.push_back(
-    tensor.has_storage() ? c10::optional<Storage>(tensor.storage()) : c10::nullopt);
+    tensor.has_storage() ? ::std::optional<Storage>(tensor.storage()) : ::std::nullopt);
 """
 )
 
@@ -452,10 +461,10 @@ for (size_t i=0; i<${tensorlist_name}.size() && !at::impl::dispatch_mode_enabled
 
 SAVE_OPTIONALTENSORLIST_STORAGE = CodeTemplate(
     """\
-std::vector<c10::optional<Storage>> ${tensorlist_name}_storage_saved(${tensorlist_name}.size());
-for (const c10::optional<Tensor>& tensor : ${tensorlist_name})
+std::vector<::std::optional<Storage>> ${tensorlist_name}_storage_saved(${tensorlist_name}.size());
+for (const ::std::optional<Tensor>& tensor : ${tensorlist_name})
   ${tensorlist_name}_storage_saved.push_back(
-    tensor.has_value() && tensor->has_storage() ? c10::optional<Storage>(tensor->storage()) : c10::nullopt);
+    tensor.has_value() && tensor->has_storage() ? ::std::optional<Storage>(tensor->storage()) : ::std::nullopt);
 """
 )
 
@@ -464,7 +473,7 @@ ENFORCE_SAME_OPTIONALTENSORLIST_STORAGE = CodeTemplate(
 for (size_t i=0; i<${tensorlist_name}.size() && !at::impl::dispatch_mode_enabled(); i++) {
   if (${tensorlist_name}_storage_saved[i].has_value() && !at::impl::tensorlist_has_dispatch(${tensorlist_name}))
     TORCH_INTERNAL_ASSERT(${tensorlist_name}_storage_saved[i].value().is_alias_of(
-        static_cast<c10::optional<Tensor>>(${tensorlist_name}[i])->storage()));
+        static_cast<::std::optional<Tensor>>(${tensorlist_name}[i])->storage()));
 }
 """
 )
@@ -519,7 +528,7 @@ SAVE_OPTIONALTENSORLIST_IMPL = CodeTemplate(
     """\
 std::vector<c10::intrusive_ptr<TensorImpl>> ${tensorlist_name}_impl_saved(${tensorlist_name}.size());
 for (size_t i=0; i<${tensorlist_name}.size(); i++) {
-  c10::optional<Tensor> t = ${tensorlist_name}[i];
+  ::std::optional<Tensor> t = ${tensorlist_name}[i];
   if (t.has_value() && t->defined()) ${tensorlist_name}_impl_saved[i] = t->getIntrusivePtr();
 }
 """
@@ -530,7 +539,7 @@ ENFORCE_SAME_OPTIONALTENSORLIST_IMPL = CodeTemplate(
 for (size_t i=0; i<${tensorlist_name}.size() && !at::impl::dispatch_mode_enabled(); i++) {
   if (${tensorlist_name}_impl_saved[i])
     TORCH_INTERNAL_ASSERT(
-      ${tensorlist_name}_impl_saved[i] == static_cast<c10::optional<Tensor>>(${tensorlist_name}[i])->getIntrusivePtr());
+      ${tensorlist_name}_impl_saved[i] == static_cast<::std::optional<Tensor>>(${tensorlist_name}[i])->getIntrusivePtr());
 }
 """
 )
@@ -653,7 +662,7 @@ DISPATCH_TO_NON_VAR_TYPE_WITH_TMP_RETURN_VALUES_JVP_DECOMP = CodeTemplate(
 auto ${tmp_var} = ([&]() {
   if (${any_has_forward_grad}) {
     static c10::OperatorName full_name("aten::${op_name}", "${op_overload}");
-    static c10::optional<c10::OperatorHandle> opt_op = c10::Dispatcher::singleton().findSchema(full_name);
+    static ::std::optional<c10::OperatorHandle> opt_op = c10::Dispatcher::singleton().findSchema(full_name);
     return impl::run_jit_decomposition_with_args_for_jvp<${return_types}>("${op_name}", *opt_op, ks, ${arg_names});
   } else {
     ${guard}
@@ -1383,10 +1392,10 @@ def emit_body(
         if inplace:
             if is_inplace_foreach:
                 body.append(
-                    "std::vector<c10::optional<at::Tensor>> original_selfs(self.size());"
+                    "std::vector<::std::optional<at::Tensor>> original_selfs(self.size());"
                 )
             else:
-                body.append("c10::optional<at::Tensor> original_self;")
+                body.append("::std::optional<at::Tensor> original_self;")
 
             all_forward_grad_cond = []
             for derivative in fw_derivatives:
@@ -1499,7 +1508,7 @@ def emit_body(
             elif type == BaseCType(stringT):
                 expr = f"std::string({expr})"
             elif type == OptionalCType(BaseCType(stringT)):
-                expr = f"{expr}.has_value() ? c10::optional<std::string>(std::string({expr}.value())) : c10::nullopt"
+                expr = f"{expr}.has_value() ? ::std::optional<std::string>(std::string({expr}.value())) : ::std::nullopt"
             elif type == ArrayRefCType(
                 elem=BaseCType(type=BaseCppType(ns="at", name="Scalar"))
             ):
@@ -1989,7 +1998,7 @@ def emit_body(
                 raise RuntimeError("Unsupported output type for forward derivative")
 
             if not is_foreach:
-                fw_grad_opt_definition = f"{opt_res_grad_type} {'_'.join(res)}_new_fw_grad_opt = c10::nullopt;"
+                fw_grad_opt_definition = f"{opt_res_grad_type} {'_'.join(res)}_new_fw_grad_opt = ::std::nullopt;"
                 # View ops create fw_grad that already is a view of the base's fw_grad so just use that
                 content.append(
                     FW_DERIVATIVE_TEMPLATE.substitute(
@@ -2004,7 +2013,7 @@ def emit_body(
                 # note(crcrpar): Assuming `self` is TensorList.
                 fw_grad_opt_definition = (
                     f"std::vector<{opt_res_grad_type}> {'_'.join(res)}_new_fw_grad_opts"
-                    "(self.size(), c10::nullopt);"
+                    "(self.size(), ::std::nullopt);"
                 )
                 foreach_forward_grad_formula = derivative.formula
                 _foreach_arg: Argument | DifferentiableInput

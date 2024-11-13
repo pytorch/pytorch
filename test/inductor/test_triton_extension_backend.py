@@ -8,9 +8,12 @@ import torch
 import torch._dynamo
 import torch.utils.cpp_extension
 
+
 try:
-    from extension_backends.triton.device_interface import DeviceInterface
-    from extension_backends.triton.extension_codegen_backend import (
+    from extension_backends.triton.device_interface import (  # @manual=fbcode//caffe2/test/inductor/extension_backends:extension_codegen_backend  # noqa: B950
+        DeviceInterface,
+    )
+    from extension_backends.triton.extension_codegen_backend import (  # @manual=fbcode//caffe2/test/inductor/extension_backends:extension_codegen_backend  # noqa: B950
         CPUDeviceOpOverrides,
         ExtensionScheduling,
         ExtensionWrapperCodegen,
@@ -33,13 +36,19 @@ from torch._inductor.codegen.common import (
     register_device_op_overrides,
 )
 from torch._inductor.utils import get_triton_code
-from torch.testing._internal.common_utils import IS_MACOS
+from torch.testing._internal.common_utils import IS_FBCODE, IS_MACOS
+
+
+try:
+    from .test_extension_backend import BaseExtensionBackendTests
+except ImportError:
+    from test_extension_backend import BaseExtensionBackendTests
 
 try:
     try:
         from . import test_torchinductor
     except ImportError:
-        import test_torchinductor
+        import test_torchinductor  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
 except unittest.SkipTest:
     if __name__ == "__main__":
         sys.exit(0)
@@ -55,42 +64,31 @@ def mock_triton_hash_with_backend(*args, **kwargs):
     return "".join(random.choices(string.ascii_uppercase + string.digits, k=64))
 
 
-class TritonExtensionBackendTests(TestCase):
+@unittest.skipIf(IS_FBCODE, "cpp_extension doesn't work in fbcode right now")
+class TritonExtensionBackendTests(BaseExtensionBackendTests):
     """
     Test creating a backend for inductor with Triton scheduling.
     """
 
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._stack.close()
-        super().tearDownClass()
-
-    def setUp(self):
-        torch._dynamo.reset()
-        super().setUp()
-
-    def tearDown(self):
-        super().tearDown()
-        torch._dynamo.reset()
-
     def test_open_device_registration(self):
-        register_backend_for_device("cpu", ExtensionScheduling, ExtensionWrapperCodegen)
-        register_device_op_overrides("cpu", CPUDeviceOpOverrides())
-        device_interface.register_interface_for_device("cpu", DeviceInterface)
-
-        self.assertTrue(get_scheduling_for_device("cpu") == ExtensionScheduling)
-        self.assertTrue(
-            get_wrapper_codegen_for_device("cpu") == ExtensionWrapperCodegen
+        torch._register_device_module("privateuseone", self.module)
+        register_backend_for_device(
+            "privateuseone", ExtensionScheduling, ExtensionWrapperCodegen
         )
-        self.assertTrue(
-            device_interface.get_interface_for_device("cpu") == DeviceInterface
+        register_device_op_overrides("privateuseone", CPUDeviceOpOverrides())
+        device_interface.register_interface_for_device("privateuseone", DeviceInterface)
+
+        self.assertEqual(
+            get_scheduling_for_device("privateuseone"), ExtensionScheduling
+        )
+        self.assertEqual(
+            get_wrapper_codegen_for_device("privateuseone"), ExtensionWrapperCodegen
+        )
+        self.assertEqual(
+            device_interface.get_interface_for_device("privateuseone"), DeviceInterface
         )
 
-        device = torch.device("cpu")
+        device = torch.device("privateuseone")
         x = torch.empty(2, 16).fill_(1).to(device)
 
         def foo(x):
@@ -109,7 +107,7 @@ class TritonExtensionBackendTests(TestCase):
 
         FileCheck().check("import triton").check("@triton.jit").check(
             "tl_math.sin"
-        ).check("device_str='cpu'").run(code)
+        ).check("device_str='privateuseone'").run(code)
 
 
 if __name__ == "__main__":

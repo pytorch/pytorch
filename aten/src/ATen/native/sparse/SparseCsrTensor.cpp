@@ -17,6 +17,7 @@
 #else
 #include <ATen/ops/_convert_indices_from_csr_to_coo.h>
 #include <ATen/ops/_nnz_native.h>
+#include <ATen/ops/_pin_memory_native.h>
 #include <ATen/ops/_sparse_compressed_tensor_unsafe_native.h>
 #include <ATen/ops/_sparse_csr_tensor_unsafe_native.h>
 #include <ATen/ops/_sparse_csc_tensor_unsafe_native.h>
@@ -40,6 +41,7 @@
 #include <ATen/ops/empty.h>
 #include <ATen/ops/empty_like_native.h>
 #include <ATen/ops/empty_native.h>
+#include <ATen/ops/is_pinned_native.h>
 #include <ATen/ops/resize_as_sparse_native.h>
 #include <ATen/ops/resize_native.h>
 #include <ATen/ops/row_indices_native.h>
@@ -290,8 +292,22 @@ static void _validate_sparse_compressed_tensor_args_worker(const Tensor& compres
       compressed_indices.get_device() == plain_indices.get_device(),
       "device of ", compressed_indices_name, " (=",
       compressed_indices.device(),
-      ") must match device of ", plain_indices_name," (=",
+      ") must match device of ", plain_indices_name, " (=",
       plain_indices.device(),
+      ")");
+  TORCH_CHECK(
+      compressed_indices.is_pinned() == values.is_pinned(),
+      "memory pinning of ", compressed_indices_name, " (=",
+      compressed_indices.is_pinned(),
+      ") must match memory pinning of values (=",
+      values.is_pinned(),
+      ")");
+  TORCH_CHECK(
+      compressed_indices.is_pinned() == plain_indices.is_pinned(),
+      "memory pinning of ", compressed_indices_name, " (=",
+      compressed_indices.is_pinned(),
+      ") must match memory pinning of ", plain_indices_name, " (=",
+      plain_indices.is_pinned(),
       ")");
 
   // Autograd Invariants
@@ -423,10 +439,13 @@ Tensor sparse_compressed_tensor_with_dims(
   auto compressed_indices = at::empty(compressed_indices_size, options_.dtype(index_dtype));
   auto plain_indices = at::empty(plain_indices_size, options_.dtype(index_dtype));
   auto values = at::empty(values_size, options_.dtype(dtype));
-
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout_).device(device).pinned_memory(pin_memory);
   SparseCsrTensor self = new_compressed_tensor(options);
-  get_sparse_csr_impl(self)->set_member_tensors(compressed_indices, plain_indices, values, size);
+  if (pin_memory.value_or(false) && !values.is_pinned()) {
+    get_sparse_csr_impl(self)->set_member_tensors(compressed_indices.pin_memory(), plain_indices.pin_memory(), values.pin_memory(), size);
+  } else {
+    get_sparse_csr_impl(self)->set_member_tensors(compressed_indices, plain_indices, values, size);
+  }
   return self;
 }
 
@@ -440,7 +459,7 @@ Tensor _sparse_compressed_tensor_unsafe_symint(
      std::optional<Device> device,
      std::optional<bool> pin_memory) {
   if (!layout) {
-    AT_ERROR("sparse_compressed_tensor_unsafe expected sparse compressed tensor layout but got none");
+    TORCH_CHECK(false, "sparse_compressed_tensor_unsafe expected sparse compressed tensor layout but got none");
   }
   Layout layout_ = layout.value();
   AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(layout_, "sparse_compressed_tensor_unsafe", [&]{});
@@ -449,7 +468,11 @@ Tensor _sparse_compressed_tensor_unsafe_symint(
   }
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout_).device(device).pinned_memory(pin_memory);
   SparseCsrTensor self = new_compressed_tensor(options);
-  get_sparse_csr_impl(self)->set_member_tensors(compressed_indices, plain_indices, values, size);
+  if (pin_memory.value_or(false) && !values.is_pinned()) {
+    get_sparse_csr_impl(self)->set_member_tensors(compressed_indices.pin_memory(), plain_indices.pin_memory(), values.pin_memory(), size);
+  } else {
+    get_sparse_csr_impl(self)->set_member_tensors(compressed_indices, plain_indices, values, size);
+  }
   return self;
 }
 
@@ -469,7 +492,11 @@ Tensor _sparse_compressed_tensor_unsafe_template(const Tensor& compressed_indice
   }
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout_).device(device).pinned_memory(pin_memory);
   SparseCsrTensor self = new_compressed_tensor(options);
-  get_sparse_csr_impl(self)->set_member_tensors(compressed_indices, plain_indices, values, size);
+  if (pin_memory.value_or(false) && !values.is_pinned()) {
+    get_sparse_csr_impl(self)->set_member_tensors(compressed_indices.pin_memory(), plain_indices.pin_memory(), values.pin_memory(), size);
+  } else {
+    get_sparse_csr_impl(self)->set_member_tensors(compressed_indices, plain_indices, values, size);
+  }
   return self;
 }
 
@@ -485,10 +512,10 @@ Tensor _sparse_compressed_tensor_unsafe_template(const Tensor& compressed_indice
     return _sparse_compressed_tensor_unsafe_template<REQUIRED_LAYOUT>(compressed_indices, plain_indices, values, size, dtype, layout, device, pin_memory); \
   }
 
-SPARSE_COMPRESSED_TENSOR_UNSAFE(csr, kSparseCsr);
-SPARSE_COMPRESSED_TENSOR_UNSAFE(csc, kSparseCsc);
-SPARSE_COMPRESSED_TENSOR_UNSAFE(bsr, kSparseBsr);
-SPARSE_COMPRESSED_TENSOR_UNSAFE(bsc, kSparseBsc);
+SPARSE_COMPRESSED_TENSOR_UNSAFE(csr, kSparseCsr)
+SPARSE_COMPRESSED_TENSOR_UNSAFE(csc, kSparseCsc)
+SPARSE_COMPRESSED_TENSOR_UNSAFE(bsr, kSparseBsr)
+SPARSE_COMPRESSED_TENSOR_UNSAFE(bsc, kSparseBsc)
 
 static DimVector _estimate_sparse_compressed_tensor_size(
     const Tensor& compressed_indices,
@@ -560,7 +587,7 @@ Tensor sparse_compressed_tensor(
     std::optional<bool> pin_memory) {
 
   if (!layout) {
-    AT_ERROR("sparse_compressed_tensor expected sparse compressed tensor layout but got none");
+    TORCH_CHECK(false, "sparse_compressed_tensor expected sparse compressed tensor layout but got none");
   }
   Layout layout_ = layout.value();
   AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(layout_, "sparse_compressed_tensor", [&]{});
@@ -589,7 +616,7 @@ Tensor sparse_compressed_tensor(
     std::optional<bool> pin_memory) {
 
   if (!layout) {
-    AT_ERROR("sparse_compressed_tensor expected sparse compressed tensor layout but got none");
+    TORCH_CHECK(false, "sparse_compressed_tensor expected sparse compressed tensor layout but got none");
   }
   Layout layout_ = layout.value();
   AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(layout_, "sparse_compressed_tensor", [&]{});
@@ -1230,6 +1257,30 @@ Tensor select_sparse_csr(const Tensor& self, int64_t dim, int64_t index) {
 
 Tensor select_copy_sparse_csr(const Tensor& self, int64_t dim, int64_t index) {
   return select_sparse_csr_worker<false, true>(self, dim, index);
+}
+
+bool is_pinned_sparse_compressed(const Tensor& self, std::optional<Device> device) {
+  // Assuming that compressed/plain_indices has the same pin memory state as values
+  return self.values().is_pinned(device);
+}
+
+Tensor _pin_memory_sparse_compressed(const Tensor& self, std::optional<Device> device) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!device.has_value() || device->is_cuda());
+  // pinning of sparse tensor is equivalent to cloning indices and
+  // values that will not change the sparse tensor invariants. Hence,
+  // we can skip checking the sparse tensor invariants for efficiency.
+  CheckSparseTensorInvariants _(false);
+  TensorOptions options = self.options().pinned_memory(true);
+  auto impl = get_sparse_csr_impl(self);
+  return at::_sparse_compressed_tensor_unsafe(
+        impl->compressed_indices().pin_memory(device),
+        impl->plain_indices().pin_memory(device),
+        impl->values().pin_memory(device),
+        self.sizes(),
+        optTypeMetaToScalarType(options.dtype_opt()),
+        options.layout_opt(),
+        options.device_opt(),
+        options.pinned_memory_opt());
 }
 
 } // namespace at::native

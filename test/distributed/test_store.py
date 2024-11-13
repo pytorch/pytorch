@@ -19,6 +19,7 @@ from torch.distributed import DistError, DistNetworkError, DistStoreError
 from torch.testing._internal.common_distributed import MultiThreadedTestCase
 from torch.testing._internal.common_utils import instantiate_parametrized_tests
 
+
 if not dist.is_available():
     print("torch.distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)
@@ -37,6 +38,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TestCase,
 )
+
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -134,7 +136,8 @@ class StoreTestBase:
 
     def _test_append(self, store):
         if not store.has_extended_api():
-            self.skipTest("Store doesn't support extended APIs")
+            # Just return for stores that don't support extended APIs.
+            return
         store.set("foo", "po")
         store.append("foo", "tato")
         store.append("bar", "po")
@@ -147,7 +150,8 @@ class StoreTestBase:
 
     def _test_multi_set(self, store):
         if not store.has_extended_api():
-            self.skipTest("Store doesn't support extended APIs")
+            # Just return for stores that don't support extended APIs.
+            return
         store.multi_set(["foo", "bar"], ["po", "tato"])
         self.assertEqual(b"po", store.get("foo"))
         self.assertEqual(b"tato", store.get("bar"))
@@ -157,7 +161,8 @@ class StoreTestBase:
 
     def _test_multi_get(self, store):
         if not store.has_extended_api():
-            self.skipTest("Store doesn't support extended APIs")
+            # Just return for stores that don't support extended APIs.
+            return
         store.set("foo", "po")
         store.set("bar", "tato")
         v0, v1 = store.multi_get(["foo", "bar"])
@@ -245,6 +250,10 @@ class PrefixStoreTest(TestCase):
                 prefix_store = dist.PrefixStore("prefix", store)
                 self.assertEqual(prefix_store.underlying_store, store)
 
+        # We do not allow passing in None as the underlying store, this would cause a segfault if used
+        with self.assertRaises(ValueError):
+            dist.PrefixStore("prefix", None)
+
 
 class PrefixFileStoreTest(TestCase, StoreTestBase):
     def setUp(self):
@@ -276,11 +285,11 @@ class TCPStoreTest(TestCase, StoreTestBase):
         )
 
     def test_address_already_in_use(self):
-        err_msg_reg = "^The server socket has failed to listen on any local "
-        with self.assertRaisesRegex(RuntimeError, err_msg_reg):
-            addr = DEFAULT_HOSTNAME
-            port = common.find_free_port()
+        addr = DEFAULT_HOSTNAME
+        port = common.find_free_port()
 
+        err_msg_reg = f"^The server socket has failed to listen on any local .*{port}"
+        with self.assertRaisesRegex(RuntimeError, err_msg_reg):
             # Use noqa to silence flake8.
             # Need to store in an unused variable here to ensure the first
             # object is not destroyed before the second object is created.
@@ -309,6 +318,30 @@ class TCPStoreTest(TestCase, StoreTestBase):
         )  # type: ignore[call-arg] # noqa: F841
         self.assertEqual(store1.libuvBackend, self._use_libuv)
         self.assertEqual(store2.libuvBackend, self._use_libuv)
+
+    def test_repr(self) -> None:
+        # server
+        store1 = self._create_store()
+        self.assertRegex(
+            repr(store1),
+            r"TCPStore\("
+            r"client=TCPClient\(SocketImpl\(fd=\d+, addr=\[?localhost\]?:\d+, remote=\[?localhost\]?:\d+\)\), "
+            r"server=TCPServer\(port=\d+\)\)",
+        )
+
+        # client
+        store2 = dist.TCPStore(
+            store1.host,
+            store1.port,
+            world_size=2,
+            is_master=False,
+        )
+        self.assertRegex(
+            repr(store2),
+            r"TCPStore\("
+            r"client=TCPClient\(SocketImpl\(fd=\d+, addr=\[?localhost\]?:\d+, remote=\[?localhost\]?:\d+\)\), "
+            r"server=<nullptr>\)",
+        )
 
     @skip_if_win32()
     @retry_on_connect_failures
@@ -483,6 +516,11 @@ class TCPStoreTest(TestCase, StoreTestBase):
             use_libuv=self._use_libuv,
         )
 
+    @skip_if_win32()
+    def test_world_size_0_raises(self):
+        with self.assertRaisesRegex(ValueError, "TCPStore world size cannot be 0"):
+            dist.TCPStore("localhost", 0, world_size=0, is_master=False)
+
 
 class LibUvTCPStoreTest(TCPStoreTest):
     _use_libuv = True
@@ -552,7 +590,7 @@ class PrefixTCPStoreTest(TestCase, StoreTestBase):
 
 
 class MyPythonStore(dist.Store):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.store = {}
 
@@ -708,28 +746,34 @@ class RendezvousTCPTest(TestCase):
     @retry_on_connect_failures(connect_errors=(CONNECT_TIMEOUT, ADDRESS_IN_USE))
     def test_tcp_store_timeout_set(self):
         url = self.create_tcp_url()
-        test_store_timeout = timedelta(seconds=10)
-        gen0 = dist.rendezvous(url + "&rank=0", timeout=test_store_timeout)
+        test_store_timeout = timedelta(seconds=0.1)
+        gen0 = dist.rendezvous(url + "&rank=0", timeout=timedelta(seconds=10))
         store0, rank0, size0 = next(gen0)
-        # this should time out in 10s. If the timeout passed into rendezvous was
+        store0.set_timeout(test_store_timeout)
+        # this should time out in 0.1s. If the timeout passed into rendezvous was
         # not respected, it will take much longer to timeout.
         start = time.time()
-        with self.assertRaisesRegex(RuntimeError, "Timeout"):
+        with self.assertRaisesRegex(
+            DistStoreError, "wait timeout after 100ms, keys: /nonexistant key"
+        ):
             store0.get("nonexistant key")
 
         end = time.time()
         time_diff = end - start
-        self.assertGreater(test_store_timeout.seconds * 10, time_diff)
+        self.assertGreater(10, time_diff)
 
     def test_tcp_store_timeout_doest_break_client(self):
         url = self.create_tcp_url()
-        test_store_timeout = timedelta(seconds=10)
-        gen0 = dist.rendezvous(url + "&rank=0", timeout=test_store_timeout)
+        test_store_timeout = timedelta(seconds=0.1)
+        gen0 = dist.rendezvous(url + "&rank=0", timeout=timedelta(seconds=10))
         store0, rank0, size0 = next(gen0)
+        store0.set_timeout(test_store_timeout)
         # this should time out in 10s. If the timeout passed into rendezvous was
         # not respected, it will take much longer to timeout.
         start = time.time()
-        with self.assertRaisesRegex(RuntimeError, "Timeout"):
+        with self.assertRaisesRegex(
+            DistStoreError, "wait timeout after 100ms, keys: /the_key"
+        ):
             store0.get("the_key")
 
         store0.set("the_key", "x")
@@ -738,7 +782,7 @@ class RendezvousTCPTest(TestCase):
 
         end = time.time()
         time_diff = end - start
-        self.assertGreater(test_store_timeout.seconds * 10, time_diff)
+        self.assertGreater(10, time_diff)
 
     def test_tcp_store_url_with_libuv(self):
         url = self.create_tcp_url()
@@ -748,7 +792,7 @@ class RendezvousTCPTest(TestCase):
 
 
 class DummyStore(dist.Store):
-    def __init__(self):
+    def __init__(self) -> None:
         self.appends = []
         self.multi_sets = []
         self.multi_gets = []

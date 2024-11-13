@@ -1,15 +1,16 @@
 # Owner(s): ["module: inductor"]
 import contextlib
+import re
 from unittest.mock import patch
 
 import functorch
-
 import torch
 import torch._inductor.config as config
 import torch.autograd
 from torch._inductor import metrics
 from torch._inductor.compile_fx import compile_fx, compile_fx_inner
 from torch._inductor.test_case import TestCase as InductorTestCase
+from torch._inductor.utils import run_and_get_code
 
 ########################
 # Explanation of Tests #
@@ -25,11 +26,15 @@ from torch._inductor.test_case import TestCase as InductorTestCase
 #
 # That may still be aceeptable, but be aware that you are likely lowering
 # performance for that setting.
-
+#
 # Defines all the kernels for tests
 from torch.testing._internal.triton_utils import HAS_CUDA, requires_cuda
 
+
 if HAS_CUDA:
+    import triton  # @manual
+    import triton.language as tl  # @manual
+
     from torch.testing._internal.triton_utils import add_kernel
 
 aten = torch.ops.aten
@@ -82,7 +87,6 @@ def TI(*size, mx=10, dtype=torch.int32, device=DEVICE):
 
 class TestCase(InductorTestCase):
     device = DEVICE
-    pass
 
 
 class NumBytesMetricTests(TestCase):
@@ -262,6 +266,13 @@ class NumBytesMetricTests(TestCase):
 
         inp = (T(10, 10), T(10, 10))
         self.assertExpectedInline(count_numel(f, *inp), """400""")
+
+        def f(a, b):
+            a = a @ a
+            return torch.constant_pad_nd(torch.cat([a, b]), [2, 2], 0.5)
+
+        inp = (T(10, 10), T(10, 10))
+        self.assertExpectedInline(count_numel(f, *inp), """680""")
 
     @patch.object(config, "split_cat_fx_passes", False)
     @patch.object(
@@ -490,6 +501,9 @@ class FusionTests(TestCase):
         expected_numel = (
             1 + hidden_size * 2 + 4 * 2048 * hidden_size * 2 + 4 * 2048 * 2 + 1
         )
+        if config.triton.cooperative_reductions:
+            expected_numel = 134225922
+
         self.assertExpectedInline(count_numel(f, *inp, True), str(expected_numel))
         self.assertExpectedInline(count_numel(f, *inp, False), str(expected_numel))
 
@@ -521,6 +535,52 @@ class FusionTests(TestCase):
         actual_numel_amax_no_keep_dim = count_numel(f, *inp, False)
         self.assertEqual(actual_numel_amax_keep_dim, actual_numel_amax_no_keep_dim)
         self.assertGreaterAlmostEqual(actual_numel_amax_keep_dim, str(expected_numel))
+
+    def test_create_block_mask(self):
+        def mk_3d_flex_natten_mask(dims, kernel_size):
+            T, H, W = dims
+            K_T, K_H, K_W = kernel_size
+            spatial = H * W
+
+            def get_x_y_t(idx: int) -> tuple[int, int, int]:
+                t = idx // spatial
+                s = idx % spatial
+                x = s // W
+                y = s % W
+                return x, y, t
+
+            def get_mask(b, h, q_idx, kv_idx):
+                q_x, q_y, q_t = get_x_y_t(q_idx)
+                kv_x, kv_y, kv_t = get_x_y_t(kv_idx)
+                kernel_x = q_x.clamp(K_W // 2, (W - 1) - K_W // 2)
+                kernel_y = q_y.clamp(K_H // 2, (H - 1) - K_H // 2)
+                kernel_t = q_t.clamp(K_T // 2, (T - 1) - K_T // 2)
+                hori_mask = (kernel_x - kv_x).abs() <= K_W // 2
+                vert_mask = (kernel_y - kv_y).abs() <= K_H // 2
+                temp_mask = (kernel_t - kv_t).abs() <= K_T // 2
+                return hori_mask & vert_mask & temp_mask
+
+            return get_mask
+
+        T = 4
+        H = 16
+        W = 16
+        t = 5
+        h = 5
+        w = 5
+        data_size = (T, H, W)
+        kernel_size = (t, h, w)
+        S = T * H * W
+        from torch.nn.attention.flex_attention import create_block_mask
+
+        mask_mod = mk_3d_flex_natten_mask(data_size, kernel_size)
+
+        torch.compile(create_block_mask)(mask_mod, None, None, S, S)
+        numel = int(count_numel(create_block_mask, mask_mod, None, None, S, S))
+
+        # We should be writing way less than a quadratic amount of bytes here
+        # With fusion, we should only be writing a linear number of bytes
+        self.assertLess(numel * 5, S * S)
 
 
 class SchedulerFusionTests(TestCase):
@@ -683,6 +743,13 @@ class MinCutPartitioningTests(TestCase):
 
         inp = (T(10, grad=True), T(10, grad=True))
         self.assertExpectedInline(count_numel_train(f, *inp), """70""")
+
+    def test_partitioning_relu(self):
+        def f(x):
+            return torch.relu(x)
+
+        inp = (T(16, grad=True),)
+        self.assertExpectedInline(count_numel_train(f, *inp), """72""")
 
     def test_partitioning_with_view(self):
         class Foo(torch.autograd.Function):
@@ -851,6 +918,247 @@ class InplacingTests(TestCase):
         self.assertExpectedInline(count_numel(f, *inp), """42""")
 
     @requires_cuda
+    def test_inplace_triton_kernel_training(self):
+        @triton.jit
+        def sin_kernel(
+            in_ptr0,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            output = tl.sin(x)
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        def sin_triton(x, out):
+            n_elements = x.numel()
+            sin_kernel[(n_elements,)](x, out, n_elements, BLOCK_SIZE=4)
+
+        factory_op = torch.empty_like
+
+        class MySin(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                out = factory_op(x)
+                sin_triton(x, out)
+                ctx.save_for_backward(out)
+                return out
+
+            @staticmethod
+            def backward(ctx, grad):
+                (saved,) = ctx.saved_tensors
+                out = factory_op(grad)
+                sin_triton(saved, out)
+                return out
+
+        def f(x):
+            return MySin.apply(x)
+
+        x = T(3, grad=True)
+        self.assertExpectedInline(count_numel_train(f, x), """9""")
+
+    @requires_cuda
+    def test_triton_kernel_not_fusable_with_users(self):
+        @triton.jit
+        def _sin_kernel(
+            in_ptr0,
+            out_ptr,
+            out2_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            output = tl.sin(x)
+            tl.store(out_ptr + offsets, output, mask=mask)
+            tl.store(out2_ptr + offsets, output, mask=mask)
+
+        from typing import List
+
+        from torch._library import capture_triton, triton_op
+
+        @triton_op("mylib::sin_kernel", mutates_args={})
+        def sin_kernel(x: torch.Tensor) -> List[torch.Tensor]:
+            n_elements = x.numel()
+            out = torch.empty_like(x)
+            out2 = torch.empty_like(x)
+            capture_triton(_sin_kernel)[(n_elements,)](
+                x, out, out2, n_elements, BLOCK_SIZE=4
+            )
+            return [out, out2]
+
+        class MySin(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                out, saved = tuple(torch.ops.mylib.sin_kernel(x))
+                ctx.save_for_backward(x, saved)
+                return out
+
+            @staticmethod
+            def backward(ctx, grad):
+                (x, saved) = ctx.saved_tensors
+                return grad * saved.sigmoid() * x
+
+        def f(x):
+            return MySin.apply(x)
+
+        x = T(3, grad=True)
+        # Important bit: saved.sigmoid() can be fused into its consumer (mul),
+        # but not its producer (user triton kernel).
+        # So we should not compute it in the fw and save it for backward
+        # (it will cost an extra kernel)
+        self.assertExpectedInline(count_numel_train(f, x), """27""")
+
+    @requires_cuda
+    def test_inplace_custom_op_training_two_mutated_inputs(self):
+        @torch.library.custom_op(
+            "_reinplacing::sin_cos", mutates_args={"out_sin", "out_cos"}
+        )
+        def sin_cos(
+            x: torch.Tensor, out_sin: torch.Tensor, out_cos: torch.Tensor
+        ) -> None:
+            out_sin.copy_(x.sin())
+            out_cos.copy_(x.cos())
+
+        def f(x):
+            out0 = torch.empty_like(x)
+            out1 = torch.empty_like(x)
+            sin_cos(x, out0, out1)
+            return x.clone(), out0, out1
+
+        x = T(3, grad=True)
+        self.assertExpectedInline(count_numel(f, x), """21""")
+
+    @requires_cuda
+    def test_inplace_custom_op_training(self):
+        @torch.library.custom_op("_reinplacing::sin", mutates_args={"result"})
+        def sin(x: torch.Tensor, result: torch.Tensor) -> None:
+            result.copy_(x.sin())
+
+        factory_op = torch.empty_like
+
+        class MySin(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                out = factory_op(x)
+                sin(x, out)
+                ctx.save_for_backward(out)
+                return out
+
+            @staticmethod
+            def backward(ctx, grad):
+                (saved,) = ctx.saved_tensors
+                out = factory_op(grad)
+                sin(saved, out)
+                return out
+
+        def f(x):
+            return MySin.apply(x)
+
+        x = T(3, grad=True)
+        self.assertExpectedInline(count_numel_train(f, x), """9""")
+
+    @requires_cuda
+    def test_inplace_custom_op(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as m:
+            m.define("foo(Tensor x, Tensor(a!) out) -> ()")
+
+            def foo(x: torch.Tensor, out: torch.Tensor) -> None:
+                out.copy_(x.sin())
+
+            m.impl("foo", foo, "CompositeExplicitAutograd")
+
+            def f(x, out):
+                torch.ops.mylib.foo(x, out)
+                torch.ops.mylib.foo(out, out)
+                torch.ops.mylib.foo(out, out)
+                return out
+
+            x = T(3)
+            out = T(3)
+
+            compiled_out, (code,) = run_and_get_code(
+                torch.compile(f, fullgraph=True), x, out
+            )
+            self.assertEqual(compiled_out, x.sin().sin().sin())
+
+            # Check that we are allocating the minimum number of intermediate buffers
+            matches = re.findall(r"empty_strided_\w+\(", code)
+            self.assertEqual(len(matches), 0)
+
+            self.assertExpectedInline(count_numel(f, x, out), """21""")
+
+    @requires_cuda
+    def test_inplace_custom_op_intermediate(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as m:
+            m.define("foo(Tensor x, Tensor(a!) out) -> ()")
+
+            def foo(x: torch.Tensor, out: torch.Tensor) -> None:
+                out.copy_(x.sin())
+
+            m.impl("foo", foo, "CompositeExplicitAutograd")
+
+            def f(x, out):
+                out = torch.empty_like(x)
+                torch.ops.mylib.foo(x, out)
+                torch.ops.mylib.foo(out, out)
+                torch.ops.mylib.foo(out, out)
+                return out
+
+            x = T(3)
+            out = T(3)
+
+            compiled_out, (code,) = run_and_get_code(
+                torch.compile(f, fullgraph=True), x, out
+            )
+            self.assertEqual(compiled_out, x.sin().sin().sin())
+
+            # Check that we are allocating the minimum number of intermediate buffers
+            matches = re.findall(r"empty_strided_\w+\(", code)
+            self.assertEqual(len(matches), 1)
+
+            self.assertExpectedInline(count_numel(f, x, out), """21""")
+
+    @requires_cuda
+    def test_inplace_custom_op_two_mutated_inputs(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as m:
+            m.define("foo(Tensor q, Tensor(a!) k_cache, Tensor(b!) v_cache) -> Tensor")
+
+            def foo(q, k_cache, v_cache):
+                k_cache.add_(1)
+                v_cache.add_(1)
+                return q + 1
+
+            m.impl("foo", foo, "CompositeExplicitAutograd")
+
+            q = T(3)
+            k_cache = T(3)
+            v_cache = torch.rand_like(k_cache)
+
+            def f():
+                x = 0
+                for _ in range(2):
+                    x = x + torch.ops.mylib.foo(q, k_cache, v_cache)
+                return x
+
+            compiled_out, (code,) = run_and_get_code(
+                torch.compile(f, fullgraph=True),
+            )
+
+            # Check that we are allocating the minimum number of intermediate buffers
+            matches = re.findall(r"empty_strided_\w+\(", code)
+            self.assertEqual(len(matches), 1)
+
+            self.assertExpectedInline(count_numel(f), """39""")
+
+    @requires_cuda
     def test_inplace_triton_kernel_v1(self):
         def f(x: torch.Tensor, y: torch.Tensor):
             output = torch.zeros_like(x)
@@ -860,7 +1168,7 @@ class InplacingTests(TestCase):
             return output
 
         inp = (T(10), T(10))
-        self.assertExpectedInline(count_numel(f, *inp), """40""")
+        self.assertExpectedInline(count_numel(f, *inp), """50""")
 
     @requires_cuda
     def test_inplace_triton_kernel_v2(self):
@@ -873,7 +1181,7 @@ class InplacingTests(TestCase):
             return output, tmp
 
         inp = (T(10), T(10))
-        self.assertExpectedInline(count_numel(f, *inp), """60""")
+        self.assertExpectedInline(count_numel(f, *inp), """70""")
 
     @requires_cuda
     def test_inplace_triton_kernel_v3(self):
@@ -886,7 +1194,7 @@ class InplacingTests(TestCase):
             return output
 
         inp = (T(10), T(10))
-        self.assertExpectedInline(count_numel(f, *inp), """60""")
+        self.assertExpectedInline(count_numel(f, *inp), """80""")
 
     @requires_cuda
     def test_inplace_triton_kernel_v4(self):
@@ -900,7 +1208,7 @@ class InplacingTests(TestCase):
             return output, output2
 
         inp = (T(10), T(10))
-        self.assertExpectedInline(count_numel(f, *inp), """60""")
+        self.assertExpectedInline(count_numel(f, *inp), """70""")
 
     @requires_cuda
     def test_inplace_triton_kernel_v5(self):
@@ -914,7 +1222,7 @@ class InplacingTests(TestCase):
             return output
 
         inp = (T(10), T(10))
-        self.assertExpectedInline(count_numel(f, *inp), """60""")
+        self.assertExpectedInline(count_numel(f, *inp), """80""")
 
     @requires_cuda
     def test_inplace_triton_kernel_v6(self):
@@ -927,7 +1235,7 @@ class InplacingTests(TestCase):
 
         t = T(10)
         inp = (t, t.view(-1))
-        self.assertExpectedInline(count_numel(f, *inp), """40""")
+        self.assertExpectedInline(count_numel(f, *inp), """50""")
 
     def test_inplace_randperm_scatter(self):
         def scaled_index_add(x, y, scale_y):
@@ -936,7 +1244,7 @@ class InplacingTests(TestCase):
             return out
 
         inp = (T(10, 10), T(5, 10), T(10))
-        self.assertExpectedInline(count_numel(scaled_index_add, *inp), """240""")
+        self.assertExpectedInline(count_numel(scaled_index_add, *inp), """250""")
 
 
 # Test cases where we don't do the right thing yet.

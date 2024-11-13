@@ -1,5 +1,7 @@
 import operator_benchmark as op_bench
+
 import torch
+
 
 """
 Microbenchmarks for batch matrix mult with einsum and torch.bmm.

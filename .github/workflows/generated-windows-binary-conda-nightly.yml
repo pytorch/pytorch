@@ -32,986 +32,19 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  conda-py3_8-cpu-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge.nonephemeral
-    timeout-minutes: 240
-    env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
-      BUILDER_ROOT: ${{ github.workspace }}/builder
-      PACKAGE_TYPE: conda
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cpu
-      GPU_ARCH_TYPE: cpu
-      SKIP_ALL_TESTS: 1
-      DESIRED_PYTHON: "3.8"
-    steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-          echo "system info $(uname -a)"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: pytorch/test-infra/.github/actions/setup-ssh@main
-        continue-on-error: true
-        with:
-          github-secret: ${{ secrets.GITHUB_TOKEN }}
-      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
-      - name: Enable long paths on Windows
-        shell: powershell
-        run: |
-          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
-      # Since it's just a defensive command, the workflow should continue even the command fails. This step can be
-      # removed once Windows Defender is removed from the AMI
-      - name: Disables Windows Defender scheduled and real-time scanning for files in directories used by PyTorch
-        continue-on-error: true
-        shell: powershell
-        run: |
-          Add-MpPreference -ExclusionPath $(Get-Location).tostring(),$Env:TEMP -ErrorAction Ignore
-          # Let's both exclude the path and disable Windows Defender completely just to be sure
-          # that it doesn't interfere
-          Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      - name: Populate binary env
-        shell: bash
-        run: |
-          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
-          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
-          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          quiet-checkout: true
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-          quiet-checkout: true
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
-      - name: Populate binary env
-        shell: bash
-        run: |
-          "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
-      - name: Build PyTorch binary
-        shell: bash
-        run: |
-          "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3
-        if: always()
-        with:
-          name: conda-py3_8-cpu
-          retention-days: 14
-          if-no-files-found: error
-          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Wait until all sessions have drained
-        shell: powershell
-        working-directory: pytorch
-        if: always()
-        timeout-minutes: 120
-        run: |
-          .github\scripts\wait_for_ssh_to_drain.ps1
-      - name: Kill active ssh sessions if still around (Useful if workflow was cancelled)
-        shell: powershell
-        working-directory: pytorch
-        if: always()
-        run: |
-          .github\scripts\kill_active_ssh_sessions.ps1
-  conda-py3_8-cpu-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_8-cpu-build
-    runs-on: windows.4xlarge.nonephemeral
-    timeout-minutes: 240
-    env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
-      BUILDER_ROOT: ${{ github.workspace }}/builder
-      PACKAGE_TYPE: conda
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cpu
-      GPU_ARCH_TYPE: cpu
-      SKIP_ALL_TESTS: 1
-      DESIRED_PYTHON: "3.8"
-    steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-          echo "system info $(uname -a)"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: pytorch/test-infra/.github/actions/setup-ssh@main
-        continue-on-error: true
-        with:
-          github-secret: ${{ secrets.GITHUB_TOKEN }}
-      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
-      - name: Enable long paths on Windows
-        shell: powershell
-        run: |
-          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
-      # Since it's just a defensive command, the workflow should continue even the command fails. This step can be
-      # removed once Windows Defender is removed from the AMI
-      - name: Disables Windows Defender scheduled and real-time scanning for files in directories used by PyTorch
-        continue-on-error: true
-        shell: powershell
-        run: |
-          Add-MpPreference -ExclusionPath $(Get-Location).tostring(),$Env:TEMP -ErrorAction Ignore
-          # Let's both exclude the path and disable Windows Defender completely just to be sure
-          # that it doesn't interfere
-          Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      - name: Populate binary env
-        shell: bash
-        run: |
-          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
-          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
-          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: actions/download-artifact@v3
-        name: Download Build Artifacts
-        with:
-          name: conda-py3_8-cpu
-          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          quiet-checkout: true
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-          quiet-checkout: true
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
-      - name: Populate binary env
-        shell: bash
-        run: |
-          "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
-      - name: Test PyTorch binary
-        shell: bash
-        run: |
-          "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_test.sh"
-      - name: Wait until all sessions have drained
-        shell: powershell
-        working-directory: pytorch
-        if: always()
-        timeout-minutes: 120
-        run: |
-          .github\scripts\wait_for_ssh_to_drain.ps1
-      - name: Kill active ssh sessions if still around (Useful if workflow was cancelled)
-        shell: powershell
-        working-directory: pytorch
-        if: always()
-        run: |
-          .github\scripts\kill_active_ssh_sessions.ps1
-  conda-py3_8-cpu-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
-    permissions:
-      id-token: write
-      contents: read
-    needs: conda-py3_8-cpu-test
+  get-label-type:
+    if: github.repository_owner == 'pytorch'
+    name: get-label-type
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
     with:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
-      BUILDER_ROOT: ${{ github.workspace }}/builder
-      PACKAGE_TYPE: conda
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cpu
-      GPU_ARCH_TYPE: cpu
-      DESIRED_PYTHON: "3.8"
-      build_name: conda-py3_8-cpu
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
-    uses: ./.github/workflows/_binary-upload.yml
-  conda-py3_8-cuda11_8-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge.nonephemeral
-    timeout-minutes: 240
-    env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
-      BUILDER_ROOT: ${{ github.workspace }}/builder
-      PACKAGE_TYPE: conda
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu118
-      GPU_ARCH_VERSION: 11.8
-      GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
-      DESIRED_PYTHON: "3.8"
-    steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-          echo "system info $(uname -a)"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: pytorch/test-infra/.github/actions/setup-ssh@main
-        continue-on-error: true
-        with:
-          github-secret: ${{ secrets.GITHUB_TOKEN }}
-      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
-      - name: Enable long paths on Windows
-        shell: powershell
-        run: |
-          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
-      # Since it's just a defensive command, the workflow should continue even the command fails. This step can be
-      # removed once Windows Defender is removed from the AMI
-      - name: Disables Windows Defender scheduled and real-time scanning for files in directories used by PyTorch
-        continue-on-error: true
-        shell: powershell
-        run: |
-          Add-MpPreference -ExclusionPath $(Get-Location).tostring(),$Env:TEMP -ErrorAction Ignore
-          # Let's both exclude the path and disable Windows Defender completely just to be sure
-          # that it doesn't interfere
-          Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      - name: Populate binary env
-        shell: bash
-        run: |
-          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
-          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
-          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          quiet-checkout: true
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-          quiet-checkout: true
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
-      - name: Populate binary env
-        shell: bash
-        run: |
-          "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
-      - name: Build PyTorch binary
-        shell: bash
-        run: |
-          "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3
-        if: always()
-        with:
-          name: conda-py3_8-cuda11_8
-          retention-days: 14
-          if-no-files-found: error
-          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Wait until all sessions have drained
-        shell: powershell
-        working-directory: pytorch
-        if: always()
-        timeout-minutes: 120
-        run: |
-          .github\scripts\wait_for_ssh_to_drain.ps1
-      - name: Kill active ssh sessions if still around (Useful if workflow was cancelled)
-        shell: powershell
-        working-directory: pytorch
-        if: always()
-        run: |
-          .github\scripts\kill_active_ssh_sessions.ps1
-  conda-py3_8-cuda11_8-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_8-cuda11_8-build
-    runs-on: windows.8xlarge.nvidia.gpu
-    timeout-minutes: 240
-    env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
-      BUILDER_ROOT: ${{ github.workspace }}/builder
-      PACKAGE_TYPE: conda
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu118
-      GPU_ARCH_VERSION: 11.8
-      GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
-      DESIRED_PYTHON: "3.8"
-    steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-          echo "system info $(uname -a)"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: pytorch/test-infra/.github/actions/setup-ssh@main
-        continue-on-error: true
-        with:
-          github-secret: ${{ secrets.GITHUB_TOKEN }}
-      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
-      - name: Enable long paths on Windows
-        shell: powershell
-        run: |
-          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
-      # Since it's just a defensive command, the workflow should continue even the command fails. This step can be
-      # removed once Windows Defender is removed from the AMI
-      - name: Disables Windows Defender scheduled and real-time scanning for files in directories used by PyTorch
-        continue-on-error: true
-        shell: powershell
-        run: |
-          Add-MpPreference -ExclusionPath $(Get-Location).tostring(),$Env:TEMP -ErrorAction Ignore
-          # Let's both exclude the path and disable Windows Defender completely just to be sure
-          # that it doesn't interfere
-          Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      - name: Populate binary env
-        shell: bash
-        run: |
-          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
-          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
-          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: actions/download-artifact@v3
-        name: Download Build Artifacts
-        with:
-          name: conda-py3_8-cuda11_8
-          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          quiet-checkout: true
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-          quiet-checkout: true
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
-      - name: Populate binary env
-        shell: bash
-        run: |
-          "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
-      - name: Test PyTorch binary
-        shell: bash
-        run: |
-          "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_test.sh"
-      - name: Wait until all sessions have drained
-        shell: powershell
-        working-directory: pytorch
-        if: always()
-        timeout-minutes: 120
-        run: |
-          .github\scripts\wait_for_ssh_to_drain.ps1
-      - name: Kill active ssh sessions if still around (Useful if workflow was cancelled)
-        shell: powershell
-        working-directory: pytorch
-        if: always()
-        run: |
-          .github\scripts\kill_active_ssh_sessions.ps1
-  conda-py3_8-cuda11_8-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
-    permissions:
-      id-token: write
-      contents: read
-    needs: conda-py3_8-cuda11_8-test
-    with:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
-      BUILDER_ROOT: ${{ github.workspace }}/builder
-      PACKAGE_TYPE: conda
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu118
-      GPU_ARCH_VERSION: 11.8
-      GPU_ARCH_TYPE: cuda
-      DESIRED_PYTHON: "3.8"
-      build_name: conda-py3_8-cuda11_8
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
-    uses: ./.github/workflows/_binary-upload.yml
-  conda-py3_8-cuda12_1-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge.nonephemeral
-    timeout-minutes: 240
-    env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
-      BUILDER_ROOT: ${{ github.workspace }}/builder
-      PACKAGE_TYPE: conda
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu121
-      GPU_ARCH_VERSION: 12.1
-      GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
-      DESIRED_PYTHON: "3.8"
-    steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-          echo "system info $(uname -a)"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: pytorch/test-infra/.github/actions/setup-ssh@main
-        continue-on-error: true
-        with:
-          github-secret: ${{ secrets.GITHUB_TOKEN }}
-      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
-      - name: Enable long paths on Windows
-        shell: powershell
-        run: |
-          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
-      # Since it's just a defensive command, the workflow should continue even the command fails. This step can be
-      # removed once Windows Defender is removed from the AMI
-      - name: Disables Windows Defender scheduled and real-time scanning for files in directories used by PyTorch
-        continue-on-error: true
-        shell: powershell
-        run: |
-          Add-MpPreference -ExclusionPath $(Get-Location).tostring(),$Env:TEMP -ErrorAction Ignore
-          # Let's both exclude the path and disable Windows Defender completely just to be sure
-          # that it doesn't interfere
-          Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      - name: Populate binary env
-        shell: bash
-        run: |
-          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
-          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
-          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          quiet-checkout: true
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-          quiet-checkout: true
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
-      - name: Populate binary env
-        shell: bash
-        run: |
-          "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
-      - name: Build PyTorch binary
-        shell: bash
-        run: |
-          "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3
-        if: always()
-        with:
-          name: conda-py3_8-cuda12_1
-          retention-days: 14
-          if-no-files-found: error
-          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Wait until all sessions have drained
-        shell: powershell
-        working-directory: pytorch
-        if: always()
-        timeout-minutes: 120
-        run: |
-          .github\scripts\wait_for_ssh_to_drain.ps1
-      - name: Kill active ssh sessions if still around (Useful if workflow was cancelled)
-        shell: powershell
-        working-directory: pytorch
-        if: always()
-        run: |
-          .github\scripts\kill_active_ssh_sessions.ps1
-  conda-py3_8-cuda12_1-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_8-cuda12_1-build
-    runs-on: windows.8xlarge.nvidia.gpu
-    timeout-minutes: 240
-    env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
-      BUILDER_ROOT: ${{ github.workspace }}/builder
-      PACKAGE_TYPE: conda
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu121
-      GPU_ARCH_VERSION: 12.1
-      GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
-      DESIRED_PYTHON: "3.8"
-    steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-          echo "system info $(uname -a)"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: pytorch/test-infra/.github/actions/setup-ssh@main
-        continue-on-error: true
-        with:
-          github-secret: ${{ secrets.GITHUB_TOKEN }}
-      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
-      - name: Enable long paths on Windows
-        shell: powershell
-        run: |
-          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
-      # Since it's just a defensive command, the workflow should continue even the command fails. This step can be
-      # removed once Windows Defender is removed from the AMI
-      - name: Disables Windows Defender scheduled and real-time scanning for files in directories used by PyTorch
-        continue-on-error: true
-        shell: powershell
-        run: |
-          Add-MpPreference -ExclusionPath $(Get-Location).tostring(),$Env:TEMP -ErrorAction Ignore
-          # Let's both exclude the path and disable Windows Defender completely just to be sure
-          # that it doesn't interfere
-          Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      - name: Populate binary env
-        shell: bash
-        run: |
-          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
-          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
-          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: actions/download-artifact@v3
-        name: Download Build Artifacts
-        with:
-          name: conda-py3_8-cuda12_1
-          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          quiet-checkout: true
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-          quiet-checkout: true
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
-      - name: Populate binary env
-        shell: bash
-        run: |
-          "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
-      - name: Test PyTorch binary
-        shell: bash
-        run: |
-          "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_test.sh"
-      - name: Wait until all sessions have drained
-        shell: powershell
-        working-directory: pytorch
-        if: always()
-        timeout-minutes: 120
-        run: |
-          .github\scripts\wait_for_ssh_to_drain.ps1
-      - name: Kill active ssh sessions if still around (Useful if workflow was cancelled)
-        shell: powershell
-        working-directory: pytorch
-        if: always()
-        run: |
-          .github\scripts\kill_active_ssh_sessions.ps1
-  conda-py3_8-cuda12_1-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
-    permissions:
-      id-token: write
-      contents: read
-    needs: conda-py3_8-cuda12_1-test
-    with:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
-      BUILDER_ROOT: ${{ github.workspace }}/builder
-      PACKAGE_TYPE: conda
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu121
-      GPU_ARCH_VERSION: 12.1
-      GPU_ARCH_TYPE: cuda
-      DESIRED_PYTHON: "3.8"
-      build_name: conda-py3_8-cuda12_1
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
-    uses: ./.github/workflows/_binary-upload.yml
-  conda-py3_8-cuda12_4-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge.nonephemeral
-    timeout-minutes: 240
-    env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
-      BUILDER_ROOT: ${{ github.workspace }}/builder
-      PACKAGE_TYPE: conda
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu124
-      GPU_ARCH_VERSION: 12.4
-      GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
-      DESIRED_PYTHON: "3.8"
-    steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-          echo "system info $(uname -a)"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: pytorch/test-infra/.github/actions/setup-ssh@main
-        continue-on-error: true
-        with:
-          github-secret: ${{ secrets.GITHUB_TOKEN }}
-      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
-      - name: Enable long paths on Windows
-        shell: powershell
-        run: |
-          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
-      # Since it's just a defensive command, the workflow should continue even the command fails. This step can be
-      # removed once Windows Defender is removed from the AMI
-      - name: Disables Windows Defender scheduled and real-time scanning for files in directories used by PyTorch
-        continue-on-error: true
-        shell: powershell
-        run: |
-          Add-MpPreference -ExclusionPath $(Get-Location).tostring(),$Env:TEMP -ErrorAction Ignore
-          # Let's both exclude the path and disable Windows Defender completely just to be sure
-          # that it doesn't interfere
-          Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      - name: Populate binary env
-        shell: bash
-        run: |
-          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
-          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
-          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          quiet-checkout: true
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-          quiet-checkout: true
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
-      - name: Populate binary env
-        shell: bash
-        run: |
-          "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
-      - name: Build PyTorch binary
-        shell: bash
-        run: |
-          "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3
-        if: always()
-        with:
-          name: conda-py3_8-cuda12_4
-          retention-days: 14
-          if-no-files-found: error
-          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Wait until all sessions have drained
-        shell: powershell
-        working-directory: pytorch
-        if: always()
-        timeout-minutes: 120
-        run: |
-          .github\scripts\wait_for_ssh_to_drain.ps1
-      - name: Kill active ssh sessions if still around (Useful if workflow was cancelled)
-        shell: powershell
-        working-directory: pytorch
-        if: always()
-        run: |
-          .github\scripts\kill_active_ssh_sessions.ps1
-  conda-py3_8-cuda12_4-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_8-cuda12_4-build
-    runs-on: windows.8xlarge.nvidia.gpu
-    timeout-minutes: 240
-    env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
-      BUILDER_ROOT: ${{ github.workspace }}/builder
-      PACKAGE_TYPE: conda
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu124
-      GPU_ARCH_VERSION: 12.4
-      GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
-      DESIRED_PYTHON: "3.8"
-    steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-          echo "system info $(uname -a)"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: pytorch/test-infra/.github/actions/setup-ssh@main
-        continue-on-error: true
-        with:
-          github-secret: ${{ secrets.GITHUB_TOKEN }}
-      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
-      - name: Enable long paths on Windows
-        shell: powershell
-        run: |
-          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
-      # Since it's just a defensive command, the workflow should continue even the command fails. This step can be
-      # removed once Windows Defender is removed from the AMI
-      - name: Disables Windows Defender scheduled and real-time scanning for files in directories used by PyTorch
-        continue-on-error: true
-        shell: powershell
-        run: |
-          Add-MpPreference -ExclusionPath $(Get-Location).tostring(),$Env:TEMP -ErrorAction Ignore
-          # Let's both exclude the path and disable Windows Defender completely just to be sure
-          # that it doesn't interfere
-          Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      - name: Populate binary env
-        shell: bash
-        run: |
-          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
-          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
-          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: actions/download-artifact@v3
-        name: Download Build Artifacts
-        with:
-          name: conda-py3_8-cuda12_4
-          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          quiet-checkout: true
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-          quiet-checkout: true
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
-      - name: Populate binary env
-        shell: bash
-        run: |
-          "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
-      - name: Test PyTorch binary
-        shell: bash
-        run: |
-          "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_test.sh"
-      - name: Wait until all sessions have drained
-        shell: powershell
-        working-directory: pytorch
-        if: always()
-        timeout-minutes: 120
-        run: |
-          .github\scripts\wait_for_ssh_to_drain.ps1
-      - name: Kill active ssh sessions if still around (Useful if workflow was cancelled)
-        shell: powershell
-        working-directory: pytorch
-        if: always()
-        run: |
-          .github\scripts\kill_active_ssh_sessions.ps1
-  conda-py3_8-cuda12_4-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
-    permissions:
-      id-token: write
-      contents: read
-    needs: conda-py3_8-cuda12_4-test
-    with:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
-      BUILDER_ROOT: ${{ github.workspace }}/builder
-      PACKAGE_TYPE: conda
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu124
-      GPU_ARCH_VERSION: 12.4
-      GPU_ARCH_TYPE: cuda
-      DESIRED_PYTHON: "3.8"
-      build_name: conda-py3_8-cuda12_4
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
-    uses: ./.github/workflows/_binary-upload.yml
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
   conda-py3_9-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge.nonephemeral
+    needs: get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -1032,7 +65,7 @@ jobs:
             # Pulled from instance metadata endpoint for EC2
             # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
             category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+            curl -H "X-aws-ec2-metadata-token: $(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 30")" -fsSL "http://169.254.169.254/latest/meta-data/${category}"
           }
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
@@ -1043,6 +76,16 @@ jobs:
         continue-on-error: true
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
+      - name: Enable git long paths and symlinks on Windows and disable fsmonitor daemon
+        shell: bash
+        run: |
+          git config --global core.longpaths true
+          git config --global core.symlinks true
+
+          # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
+          # the directory on Windows and prevent GHA from checking out as reported
+          # in https://github.com/actions/checkout/issues/1018
+          git config --global core.fsmonitor false
       # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
       - name: Enable long paths on Windows
         shell: powershell
@@ -1100,7 +143,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4.4.0
         if: always()
         with:
           name: conda-py3_9-cpu
@@ -1122,8 +165,10 @@ jobs:
           .github\scripts\kill_active_ssh_sessions.ps1
   conda-py3_9-cpu-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_9-cpu-build
-    runs-on: windows.4xlarge.nonephemeral
+    needs:
+      - conda-py3_9-cpu-build
+      - get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -1144,7 +189,7 @@ jobs:
             # Pulled from instance metadata endpoint for EC2
             # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
             category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+            curl -H "X-aws-ec2-metadata-token: $(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 30")" -fsSL "http://169.254.169.254/latest/meta-data/${category}"
           }
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
@@ -1155,6 +200,16 @@ jobs:
         continue-on-error: true
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
+      - name: Enable git long paths and symlinks on Windows and disable fsmonitor daemon
+        shell: bash
+        run: |
+          git config --global core.longpaths true
+          git config --global core.symlinks true
+
+          # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
+          # the directory on Windows and prevent GHA from checking out as reported
+          # in https://github.com/actions/checkout/issues/1018
+          git config --global core.fsmonitor false
       # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
       - name: Enable long paths on Windows
         shell: powershell
@@ -1179,7 +234,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
           name: conda-py3_9-cpu
@@ -1253,7 +308,8 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   conda-py3_9-cuda11_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge.nonephemeral
+    needs: get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -1275,7 +331,7 @@ jobs:
             # Pulled from instance metadata endpoint for EC2
             # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
             category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+            curl -H "X-aws-ec2-metadata-token: $(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 30")" -fsSL "http://169.254.169.254/latest/meta-data/${category}"
           }
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
@@ -1286,6 +342,16 @@ jobs:
         continue-on-error: true
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
+      - name: Enable git long paths and symlinks on Windows and disable fsmonitor daemon
+        shell: bash
+        run: |
+          git config --global core.longpaths true
+          git config --global core.symlinks true
+
+          # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
+          # the directory on Windows and prevent GHA from checking out as reported
+          # in https://github.com/actions/checkout/issues/1018
+          git config --global core.fsmonitor false
       # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
       - name: Enable long paths on Windows
         shell: powershell
@@ -1343,7 +409,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4.4.0
         if: always()
         with:
           name: conda-py3_9-cuda11_8
@@ -1365,8 +431,10 @@ jobs:
           .github\scripts\kill_active_ssh_sessions.ps1
   conda-py3_9-cuda11_8-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_9-cuda11_8-build
-    runs-on: windows.8xlarge.nvidia.gpu
+    needs:
+      - conda-py3_9-cuda11_8-build
+      - get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -1388,7 +456,7 @@ jobs:
             # Pulled from instance metadata endpoint for EC2
             # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
             category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+            curl -H "X-aws-ec2-metadata-token: $(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 30")" -fsSL "http://169.254.169.254/latest/meta-data/${category}"
           }
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
@@ -1399,6 +467,16 @@ jobs:
         continue-on-error: true
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
+      - name: Enable git long paths and symlinks on Windows and disable fsmonitor daemon
+        shell: bash
+        run: |
+          git config --global core.longpaths true
+          git config --global core.symlinks true
+
+          # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
+          # the directory on Windows and prevent GHA from checking out as reported
+          # in https://github.com/actions/checkout/issues/1018
+          git config --global core.fsmonitor false
       # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
       - name: Enable long paths on Windows
         shell: powershell
@@ -1423,7 +501,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
           name: conda-py3_9-cuda11_8
@@ -1496,254 +574,10 @@ jobs:
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
       conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
-  conda-py3_9-cuda12_1-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge.nonephemeral
-    timeout-minutes: 240
-    env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
-      BUILDER_ROOT: ${{ github.workspace }}/builder
-      PACKAGE_TYPE: conda
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu121
-      GPU_ARCH_VERSION: 12.1
-      GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
-      DESIRED_PYTHON: "3.9"
-    steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-          echo "system info $(uname -a)"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: pytorch/test-infra/.github/actions/setup-ssh@main
-        continue-on-error: true
-        with:
-          github-secret: ${{ secrets.GITHUB_TOKEN }}
-      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
-      - name: Enable long paths on Windows
-        shell: powershell
-        run: |
-          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
-      # Since it's just a defensive command, the workflow should continue even the command fails. This step can be
-      # removed once Windows Defender is removed from the AMI
-      - name: Disables Windows Defender scheduled and real-time scanning for files in directories used by PyTorch
-        continue-on-error: true
-        shell: powershell
-        run: |
-          Add-MpPreference -ExclusionPath $(Get-Location).tostring(),$Env:TEMP -ErrorAction Ignore
-          # Let's both exclude the path and disable Windows Defender completely just to be sure
-          # that it doesn't interfere
-          Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      - name: Populate binary env
-        shell: bash
-        run: |
-          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
-          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
-          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          quiet-checkout: true
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-          quiet-checkout: true
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
-      - name: Populate binary env
-        shell: bash
-        run: |
-          "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
-      - name: Build PyTorch binary
-        shell: bash
-        run: |
-          "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3
-        if: always()
-        with:
-          name: conda-py3_9-cuda12_1
-          retention-days: 14
-          if-no-files-found: error
-          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Wait until all sessions have drained
-        shell: powershell
-        working-directory: pytorch
-        if: always()
-        timeout-minutes: 120
-        run: |
-          .github\scripts\wait_for_ssh_to_drain.ps1
-      - name: Kill active ssh sessions if still around (Useful if workflow was cancelled)
-        shell: powershell
-        working-directory: pytorch
-        if: always()
-        run: |
-          .github\scripts\kill_active_ssh_sessions.ps1
-  conda-py3_9-cuda12_1-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_9-cuda12_1-build
-    runs-on: windows.8xlarge.nvidia.gpu
-    timeout-minutes: 240
-    env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
-      BUILDER_ROOT: ${{ github.workspace }}/builder
-      PACKAGE_TYPE: conda
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu121
-      GPU_ARCH_VERSION: 12.1
-      GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
-      DESIRED_PYTHON: "3.9"
-    steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-          echo "system info $(uname -a)"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: pytorch/test-infra/.github/actions/setup-ssh@main
-        continue-on-error: true
-        with:
-          github-secret: ${{ secrets.GITHUB_TOKEN }}
-      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
-      - name: Enable long paths on Windows
-        shell: powershell
-        run: |
-          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
-      # Since it's just a defensive command, the workflow should continue even the command fails. This step can be
-      # removed once Windows Defender is removed from the AMI
-      - name: Disables Windows Defender scheduled and real-time scanning for files in directories used by PyTorch
-        continue-on-error: true
-        shell: powershell
-        run: |
-          Add-MpPreference -ExclusionPath $(Get-Location).tostring(),$Env:TEMP -ErrorAction Ignore
-          # Let's both exclude the path and disable Windows Defender completely just to be sure
-          # that it doesn't interfere
-          Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      - name: Populate binary env
-        shell: bash
-        run: |
-          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
-          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
-          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: actions/download-artifact@v3
-        name: Download Build Artifacts
-        with:
-          name: conda-py3_9-cuda12_1
-          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          quiet-checkout: true
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-          quiet-checkout: true
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
-      - name: Populate binary env
-        shell: bash
-        run: |
-          "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
-      - name: Test PyTorch binary
-        shell: bash
-        run: |
-          "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_test.sh"
-      - name: Wait until all sessions have drained
-        shell: powershell
-        working-directory: pytorch
-        if: always()
-        timeout-minutes: 120
-        run: |
-          .github\scripts\wait_for_ssh_to_drain.ps1
-      - name: Kill active ssh sessions if still around (Useful if workflow was cancelled)
-        shell: powershell
-        working-directory: pytorch
-        if: always()
-        run: |
-          .github\scripts\kill_active_ssh_sessions.ps1
-  conda-py3_9-cuda12_1-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
-    permissions:
-      id-token: write
-      contents: read
-    needs: conda-py3_9-cuda12_1-test
-    with:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
-      BUILDER_ROOT: ${{ github.workspace }}/builder
-      PACKAGE_TYPE: conda
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu121
-      GPU_ARCH_VERSION: 12.1
-      GPU_ARCH_TYPE: cuda
-      DESIRED_PYTHON: "3.9"
-      build_name: conda-py3_9-cuda12_1
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
-    uses: ./.github/workflows/_binary-upload.yml
   conda-py3_9-cuda12_4-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge.nonephemeral
+    needs: get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -1765,7 +599,7 @@ jobs:
             # Pulled from instance metadata endpoint for EC2
             # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
             category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+            curl -H "X-aws-ec2-metadata-token: $(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 30")" -fsSL "http://169.254.169.254/latest/meta-data/${category}"
           }
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
@@ -1776,6 +610,16 @@ jobs:
         continue-on-error: true
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
+      - name: Enable git long paths and symlinks on Windows and disable fsmonitor daemon
+        shell: bash
+        run: |
+          git config --global core.longpaths true
+          git config --global core.symlinks true
+
+          # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
+          # the directory on Windows and prevent GHA from checking out as reported
+          # in https://github.com/actions/checkout/issues/1018
+          git config --global core.fsmonitor false
       # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
       - name: Enable long paths on Windows
         shell: powershell
@@ -1833,7 +677,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4.4.0
         if: always()
         with:
           name: conda-py3_9-cuda12_4
@@ -1855,8 +699,10 @@ jobs:
           .github\scripts\kill_active_ssh_sessions.ps1
   conda-py3_9-cuda12_4-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_9-cuda12_4-build
-    runs-on: windows.8xlarge.nvidia.gpu
+    needs:
+      - conda-py3_9-cuda12_4-build
+      - get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -1878,7 +724,7 @@ jobs:
             # Pulled from instance metadata endpoint for EC2
             # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
             category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+            curl -H "X-aws-ec2-metadata-token: $(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 30")" -fsSL "http://169.254.169.254/latest/meta-data/${category}"
           }
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
@@ -1889,6 +735,16 @@ jobs:
         continue-on-error: true
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
+      - name: Enable git long paths and symlinks on Windows and disable fsmonitor daemon
+        shell: bash
+        run: |
+          git config --global core.longpaths true
+          git config --global core.symlinks true
+
+          # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
+          # the directory on Windows and prevent GHA from checking out as reported
+          # in https://github.com/actions/checkout/issues/1018
+          git config --global core.fsmonitor false
       # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
       - name: Enable long paths on Windows
         shell: powershell
@@ -1913,7 +769,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
           name: conda-py3_9-cuda12_4
@@ -1988,7 +844,8 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   conda-py3_10-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge.nonephemeral
+    needs: get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -2009,7 +866,7 @@ jobs:
             # Pulled from instance metadata endpoint for EC2
             # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
             category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+            curl -H "X-aws-ec2-metadata-token: $(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 30")" -fsSL "http://169.254.169.254/latest/meta-data/${category}"
           }
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
@@ -2020,6 +877,16 @@ jobs:
         continue-on-error: true
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
+      - name: Enable git long paths and symlinks on Windows and disable fsmonitor daemon
+        shell: bash
+        run: |
+          git config --global core.longpaths true
+          git config --global core.symlinks true
+
+          # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
+          # the directory on Windows and prevent GHA from checking out as reported
+          # in https://github.com/actions/checkout/issues/1018
+          git config --global core.fsmonitor false
       # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
       - name: Enable long paths on Windows
         shell: powershell
@@ -2077,7 +944,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4.4.0
         if: always()
         with:
           name: conda-py3_10-cpu
@@ -2099,8 +966,10 @@ jobs:
           .github\scripts\kill_active_ssh_sessions.ps1
   conda-py3_10-cpu-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_10-cpu-build
-    runs-on: windows.4xlarge.nonephemeral
+    needs:
+      - conda-py3_10-cpu-build
+      - get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -2121,7 +990,7 @@ jobs:
             # Pulled from instance metadata endpoint for EC2
             # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
             category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+            curl -H "X-aws-ec2-metadata-token: $(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 30")" -fsSL "http://169.254.169.254/latest/meta-data/${category}"
           }
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
@@ -2132,6 +1001,16 @@ jobs:
         continue-on-error: true
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
+      - name: Enable git long paths and symlinks on Windows and disable fsmonitor daemon
+        shell: bash
+        run: |
+          git config --global core.longpaths true
+          git config --global core.symlinks true
+
+          # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
+          # the directory on Windows and prevent GHA from checking out as reported
+          # in https://github.com/actions/checkout/issues/1018
+          git config --global core.fsmonitor false
       # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
       - name: Enable long paths on Windows
         shell: powershell
@@ -2156,7 +1035,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
           name: conda-py3_10-cpu
@@ -2230,7 +1109,8 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   conda-py3_10-cuda11_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge.nonephemeral
+    needs: get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -2252,7 +1132,7 @@ jobs:
             # Pulled from instance metadata endpoint for EC2
             # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
             category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+            curl -H "X-aws-ec2-metadata-token: $(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 30")" -fsSL "http://169.254.169.254/latest/meta-data/${category}"
           }
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
@@ -2263,6 +1143,16 @@ jobs:
         continue-on-error: true
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
+      - name: Enable git long paths and symlinks on Windows and disable fsmonitor daemon
+        shell: bash
+        run: |
+          git config --global core.longpaths true
+          git config --global core.symlinks true
+
+          # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
+          # the directory on Windows and prevent GHA from checking out as reported
+          # in https://github.com/actions/checkout/issues/1018
+          git config --global core.fsmonitor false
       # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
       - name: Enable long paths on Windows
         shell: powershell
@@ -2320,7 +1210,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4.4.0
         if: always()
         with:
           name: conda-py3_10-cuda11_8
@@ -2342,8 +1232,10 @@ jobs:
           .github\scripts\kill_active_ssh_sessions.ps1
   conda-py3_10-cuda11_8-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_10-cuda11_8-build
-    runs-on: windows.8xlarge.nvidia.gpu
+    needs:
+      - conda-py3_10-cuda11_8-build
+      - get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -2365,7 +1257,7 @@ jobs:
             # Pulled from instance metadata endpoint for EC2
             # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
             category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+            curl -H "X-aws-ec2-metadata-token: $(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 30")" -fsSL "http://169.254.169.254/latest/meta-data/${category}"
           }
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
@@ -2376,6 +1268,16 @@ jobs:
         continue-on-error: true
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
+      - name: Enable git long paths and symlinks on Windows and disable fsmonitor daemon
+        shell: bash
+        run: |
+          git config --global core.longpaths true
+          git config --global core.symlinks true
+
+          # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
+          # the directory on Windows and prevent GHA from checking out as reported
+          # in https://github.com/actions/checkout/issues/1018
+          git config --global core.fsmonitor false
       # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
       - name: Enable long paths on Windows
         shell: powershell
@@ -2400,7 +1302,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
           name: conda-py3_10-cuda11_8
@@ -2473,254 +1375,10 @@ jobs:
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
       conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
-  conda-py3_10-cuda12_1-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge.nonephemeral
-    timeout-minutes: 240
-    env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
-      BUILDER_ROOT: ${{ github.workspace }}/builder
-      PACKAGE_TYPE: conda
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu121
-      GPU_ARCH_VERSION: 12.1
-      GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
-      DESIRED_PYTHON: "3.10"
-    steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-          echo "system info $(uname -a)"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: pytorch/test-infra/.github/actions/setup-ssh@main
-        continue-on-error: true
-        with:
-          github-secret: ${{ secrets.GITHUB_TOKEN }}
-      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
-      - name: Enable long paths on Windows
-        shell: powershell
-        run: |
-          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
-      # Since it's just a defensive command, the workflow should continue even the command fails. This step can be
-      # removed once Windows Defender is removed from the AMI
-      - name: Disables Windows Defender scheduled and real-time scanning for files in directories used by PyTorch
-        continue-on-error: true
-        shell: powershell
-        run: |
-          Add-MpPreference -ExclusionPath $(Get-Location).tostring(),$Env:TEMP -ErrorAction Ignore
-          # Let's both exclude the path and disable Windows Defender completely just to be sure
-          # that it doesn't interfere
-          Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      - name: Populate binary env
-        shell: bash
-        run: |
-          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
-          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
-          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          quiet-checkout: true
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-          quiet-checkout: true
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
-      - name: Populate binary env
-        shell: bash
-        run: |
-          "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
-      - name: Build PyTorch binary
-        shell: bash
-        run: |
-          "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3
-        if: always()
-        with:
-          name: conda-py3_10-cuda12_1
-          retention-days: 14
-          if-no-files-found: error
-          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Wait until all sessions have drained
-        shell: powershell
-        working-directory: pytorch
-        if: always()
-        timeout-minutes: 120
-        run: |
-          .github\scripts\wait_for_ssh_to_drain.ps1
-      - name: Kill active ssh sessions if still around (Useful if workflow was cancelled)
-        shell: powershell
-        working-directory: pytorch
-        if: always()
-        run: |
-          .github\scripts\kill_active_ssh_sessions.ps1
-  conda-py3_10-cuda12_1-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_10-cuda12_1-build
-    runs-on: windows.8xlarge.nvidia.gpu
-    timeout-minutes: 240
-    env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
-      BUILDER_ROOT: ${{ github.workspace }}/builder
-      PACKAGE_TYPE: conda
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu121
-      GPU_ARCH_VERSION: 12.1
-      GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
-      DESIRED_PYTHON: "3.10"
-    steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-          echo "system info $(uname -a)"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: pytorch/test-infra/.github/actions/setup-ssh@main
-        continue-on-error: true
-        with:
-          github-secret: ${{ secrets.GITHUB_TOKEN }}
-      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
-      - name: Enable long paths on Windows
-        shell: powershell
-        run: |
-          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
-      # Since it's just a defensive command, the workflow should continue even the command fails. This step can be
-      # removed once Windows Defender is removed from the AMI
-      - name: Disables Windows Defender scheduled and real-time scanning for files in directories used by PyTorch
-        continue-on-error: true
-        shell: powershell
-        run: |
-          Add-MpPreference -ExclusionPath $(Get-Location).tostring(),$Env:TEMP -ErrorAction Ignore
-          # Let's both exclude the path and disable Windows Defender completely just to be sure
-          # that it doesn't interfere
-          Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      - name: Populate binary env
-        shell: bash
-        run: |
-          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
-          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
-          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: actions/download-artifact@v3
-        name: Download Build Artifacts
-        with:
-          name: conda-py3_10-cuda12_1
-          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          quiet-checkout: true
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-          quiet-checkout: true
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
-      - name: Populate binary env
-        shell: bash
-        run: |
-          "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
-      - name: Test PyTorch binary
-        shell: bash
-        run: |
-          "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_test.sh"
-      - name: Wait until all sessions have drained
-        shell: powershell
-        working-directory: pytorch
-        if: always()
-        timeout-minutes: 120
-        run: |
-          .github\scripts\wait_for_ssh_to_drain.ps1
-      - name: Kill active ssh sessions if still around (Useful if workflow was cancelled)
-        shell: powershell
-        working-directory: pytorch
-        if: always()
-        run: |
-          .github\scripts\kill_active_ssh_sessions.ps1
-  conda-py3_10-cuda12_1-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
-    permissions:
-      id-token: write
-      contents: read
-    needs: conda-py3_10-cuda12_1-test
-    with:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
-      BUILDER_ROOT: ${{ github.workspace }}/builder
-      PACKAGE_TYPE: conda
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu121
-      GPU_ARCH_VERSION: 12.1
-      GPU_ARCH_TYPE: cuda
-      DESIRED_PYTHON: "3.10"
-      build_name: conda-py3_10-cuda12_1
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
-    uses: ./.github/workflows/_binary-upload.yml
   conda-py3_10-cuda12_4-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge.nonephemeral
+    needs: get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -2742,7 +1400,7 @@ jobs:
             # Pulled from instance metadata endpoint for EC2
             # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
             category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+            curl -H "X-aws-ec2-metadata-token: $(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 30")" -fsSL "http://169.254.169.254/latest/meta-data/${category}"
           }
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
@@ -2753,6 +1411,16 @@ jobs:
         continue-on-error: true
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
+      - name: Enable git long paths and symlinks on Windows and disable fsmonitor daemon
+        shell: bash
+        run: |
+          git config --global core.longpaths true
+          git config --global core.symlinks true
+
+          # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
+          # the directory on Windows and prevent GHA from checking out as reported
+          # in https://github.com/actions/checkout/issues/1018
+          git config --global core.fsmonitor false
       # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
       - name: Enable long paths on Windows
         shell: powershell
@@ -2810,7 +1478,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4.4.0
         if: always()
         with:
           name: conda-py3_10-cuda12_4
@@ -2832,8 +1500,10 @@ jobs:
           .github\scripts\kill_active_ssh_sessions.ps1
   conda-py3_10-cuda12_4-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_10-cuda12_4-build
-    runs-on: windows.8xlarge.nvidia.gpu
+    needs:
+      - conda-py3_10-cuda12_4-build
+      - get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -2855,7 +1525,7 @@ jobs:
             # Pulled from instance metadata endpoint for EC2
             # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
             category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+            curl -H "X-aws-ec2-metadata-token: $(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 30")" -fsSL "http://169.254.169.254/latest/meta-data/${category}"
           }
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
@@ -2866,6 +1536,16 @@ jobs:
         continue-on-error: true
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
+      - name: Enable git long paths and symlinks on Windows and disable fsmonitor daemon
+        shell: bash
+        run: |
+          git config --global core.longpaths true
+          git config --global core.symlinks true
+
+          # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
+          # the directory on Windows and prevent GHA from checking out as reported
+          # in https://github.com/actions/checkout/issues/1018
+          git config --global core.fsmonitor false
       # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
       - name: Enable long paths on Windows
         shell: powershell
@@ -2890,7 +1570,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
           name: conda-py3_10-cuda12_4
@@ -2965,7 +1645,8 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   conda-py3_11-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge.nonephemeral
+    needs: get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -2986,7 +1667,7 @@ jobs:
             # Pulled from instance metadata endpoint for EC2
             # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
             category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+            curl -H "X-aws-ec2-metadata-token: $(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 30")" -fsSL "http://169.254.169.254/latest/meta-data/${category}"
           }
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
@@ -2997,6 +1678,16 @@ jobs:
         continue-on-error: true
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
+      - name: Enable git long paths and symlinks on Windows and disable fsmonitor daemon
+        shell: bash
+        run: |
+          git config --global core.longpaths true
+          git config --global core.symlinks true
+
+          # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
+          # the directory on Windows and prevent GHA from checking out as reported
+          # in https://github.com/actions/checkout/issues/1018
+          git config --global core.fsmonitor false
       # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
       - name: Enable long paths on Windows
         shell: powershell
@@ -3054,7 +1745,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4.4.0
         if: always()
         with:
           name: conda-py3_11-cpu
@@ -3076,8 +1767,10 @@ jobs:
           .github\scripts\kill_active_ssh_sessions.ps1
   conda-py3_11-cpu-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_11-cpu-build
-    runs-on: windows.4xlarge.nonephemeral
+    needs:
+      - conda-py3_11-cpu-build
+      - get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -3098,7 +1791,7 @@ jobs:
             # Pulled from instance metadata endpoint for EC2
             # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
             category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+            curl -H "X-aws-ec2-metadata-token: $(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 30")" -fsSL "http://169.254.169.254/latest/meta-data/${category}"
           }
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
@@ -3109,6 +1802,16 @@ jobs:
         continue-on-error: true
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
+      - name: Enable git long paths and symlinks on Windows and disable fsmonitor daemon
+        shell: bash
+        run: |
+          git config --global core.longpaths true
+          git config --global core.symlinks true
+
+          # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
+          # the directory on Windows and prevent GHA from checking out as reported
+          # in https://github.com/actions/checkout/issues/1018
+          git config --global core.fsmonitor false
       # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
       - name: Enable long paths on Windows
         shell: powershell
@@ -3133,7 +1836,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
           name: conda-py3_11-cpu
@@ -3207,7 +1910,8 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   conda-py3_11-cuda11_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge.nonephemeral
+    needs: get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -3229,7 +1933,7 @@ jobs:
             # Pulled from instance metadata endpoint for EC2
             # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
             category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+            curl -H "X-aws-ec2-metadata-token: $(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 30")" -fsSL "http://169.254.169.254/latest/meta-data/${category}"
           }
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
@@ -3240,6 +1944,16 @@ jobs:
         continue-on-error: true
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
+      - name: Enable git long paths and symlinks on Windows and disable fsmonitor daemon
+        shell: bash
+        run: |
+          git config --global core.longpaths true
+          git config --global core.symlinks true
+
+          # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
+          # the directory on Windows and prevent GHA from checking out as reported
+          # in https://github.com/actions/checkout/issues/1018
+          git config --global core.fsmonitor false
       # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
       - name: Enable long paths on Windows
         shell: powershell
@@ -3297,7 +2011,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4.4.0
         if: always()
         with:
           name: conda-py3_11-cuda11_8
@@ -3319,8 +2033,10 @@ jobs:
           .github\scripts\kill_active_ssh_sessions.ps1
   conda-py3_11-cuda11_8-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_11-cuda11_8-build
-    runs-on: windows.8xlarge.nvidia.gpu
+    needs:
+      - conda-py3_11-cuda11_8-build
+      - get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -3342,7 +2058,7 @@ jobs:
             # Pulled from instance metadata endpoint for EC2
             # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
             category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+            curl -H "X-aws-ec2-metadata-token: $(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 30")" -fsSL "http://169.254.169.254/latest/meta-data/${category}"
           }
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
@@ -3353,6 +2069,16 @@ jobs:
         continue-on-error: true
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
+      - name: Enable git long paths and symlinks on Windows and disable fsmonitor daemon
+        shell: bash
+        run: |
+          git config --global core.longpaths true
+          git config --global core.symlinks true
+
+          # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
+          # the directory on Windows and prevent GHA from checking out as reported
+          # in https://github.com/actions/checkout/issues/1018
+          git config --global core.fsmonitor false
       # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
       - name: Enable long paths on Windows
         shell: powershell
@@ -3377,7 +2103,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
           name: conda-py3_11-cuda11_8
@@ -3450,254 +2176,10 @@ jobs:
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
       conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
-  conda-py3_11-cuda12_1-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge.nonephemeral
-    timeout-minutes: 240
-    env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
-      BUILDER_ROOT: ${{ github.workspace }}/builder
-      PACKAGE_TYPE: conda
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu121
-      GPU_ARCH_VERSION: 12.1
-      GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
-      DESIRED_PYTHON: "3.11"
-    steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-          echo "system info $(uname -a)"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: pytorch/test-infra/.github/actions/setup-ssh@main
-        continue-on-error: true
-        with:
-          github-secret: ${{ secrets.GITHUB_TOKEN }}
-      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
-      - name: Enable long paths on Windows
-        shell: powershell
-        run: |
-          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
-      # Since it's just a defensive command, the workflow should continue even the command fails. This step can be
-      # removed once Windows Defender is removed from the AMI
-      - name: Disables Windows Defender scheduled and real-time scanning for files in directories used by PyTorch
-        continue-on-error: true
-        shell: powershell
-        run: |
-          Add-MpPreference -ExclusionPath $(Get-Location).tostring(),$Env:TEMP -ErrorAction Ignore
-          # Let's both exclude the path and disable Windows Defender completely just to be sure
-          # that it doesn't interfere
-          Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      - name: Populate binary env
-        shell: bash
-        run: |
-          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
-          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
-          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          quiet-checkout: true
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-          quiet-checkout: true
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
-      - name: Populate binary env
-        shell: bash
-        run: |
-          "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
-      - name: Build PyTorch binary
-        shell: bash
-        run: |
-          "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3
-        if: always()
-        with:
-          name: conda-py3_11-cuda12_1
-          retention-days: 14
-          if-no-files-found: error
-          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Wait until all sessions have drained
-        shell: powershell
-        working-directory: pytorch
-        if: always()
-        timeout-minutes: 120
-        run: |
-          .github\scripts\wait_for_ssh_to_drain.ps1
-      - name: Kill active ssh sessions if still around (Useful if workflow was cancelled)
-        shell: powershell
-        working-directory: pytorch
-        if: always()
-        run: |
-          .github\scripts\kill_active_ssh_sessions.ps1
-  conda-py3_11-cuda12_1-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_11-cuda12_1-build
-    runs-on: windows.8xlarge.nvidia.gpu
-    timeout-minutes: 240
-    env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
-      BUILDER_ROOT: ${{ github.workspace }}/builder
-      PACKAGE_TYPE: conda
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu121
-      GPU_ARCH_VERSION: 12.1
-      GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
-      DESIRED_PYTHON: "3.11"
-    steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-          echo "system info $(uname -a)"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: pytorch/test-infra/.github/actions/setup-ssh@main
-        continue-on-error: true
-        with:
-          github-secret: ${{ secrets.GITHUB_TOKEN }}
-      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
-      - name: Enable long paths on Windows
-        shell: powershell
-        run: |
-          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
-      # Since it's just a defensive command, the workflow should continue even the command fails. This step can be
-      # removed once Windows Defender is removed from the AMI
-      - name: Disables Windows Defender scheduled and real-time scanning for files in directories used by PyTorch
-        continue-on-error: true
-        shell: powershell
-        run: |
-          Add-MpPreference -ExclusionPath $(Get-Location).tostring(),$Env:TEMP -ErrorAction Ignore
-          # Let's both exclude the path and disable Windows Defender completely just to be sure
-          # that it doesn't interfere
-          Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      - name: Populate binary env
-        shell: bash
-        run: |
-          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
-          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
-          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: actions/download-artifact@v3
-        name: Download Build Artifacts
-        with:
-          name: conda-py3_11-cuda12_1
-          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          quiet-checkout: true
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-          quiet-checkout: true
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
-      - name: Populate binary env
-        shell: bash
-        run: |
-          "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
-      - name: Test PyTorch binary
-        shell: bash
-        run: |
-          "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_test.sh"
-      - name: Wait until all sessions have drained
-        shell: powershell
-        working-directory: pytorch
-        if: always()
-        timeout-minutes: 120
-        run: |
-          .github\scripts\wait_for_ssh_to_drain.ps1
-      - name: Kill active ssh sessions if still around (Useful if workflow was cancelled)
-        shell: powershell
-        working-directory: pytorch
-        if: always()
-        run: |
-          .github\scripts\kill_active_ssh_sessions.ps1
-  conda-py3_11-cuda12_1-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
-    permissions:
-      id-token: write
-      contents: read
-    needs: conda-py3_11-cuda12_1-test
-    with:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
-      BUILDER_ROOT: ${{ github.workspace }}/builder
-      PACKAGE_TYPE: conda
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu121
-      GPU_ARCH_VERSION: 12.1
-      GPU_ARCH_TYPE: cuda
-      DESIRED_PYTHON: "3.11"
-      build_name: conda-py3_11-cuda12_1
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
-    uses: ./.github/workflows/_binary-upload.yml
   conda-py3_11-cuda12_4-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge.nonephemeral
+    needs: get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -3719,7 +2201,7 @@ jobs:
             # Pulled from instance metadata endpoint for EC2
             # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
             category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+            curl -H "X-aws-ec2-metadata-token: $(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 30")" -fsSL "http://169.254.169.254/latest/meta-data/${category}"
           }
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
@@ -3730,6 +2212,16 @@ jobs:
         continue-on-error: true
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
+      - name: Enable git long paths and symlinks on Windows and disable fsmonitor daemon
+        shell: bash
+        run: |
+          git config --global core.longpaths true
+          git config --global core.symlinks true
+
+          # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
+          # the directory on Windows and prevent GHA from checking out as reported
+          # in https://github.com/actions/checkout/issues/1018
+          git config --global core.fsmonitor false
       # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
       - name: Enable long paths on Windows
         shell: powershell
@@ -3787,7 +2279,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4.4.0
         if: always()
         with:
           name: conda-py3_11-cuda12_4
@@ -3809,8 +2301,10 @@ jobs:
           .github\scripts\kill_active_ssh_sessions.ps1
   conda-py3_11-cuda12_4-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_11-cuda12_4-build
-    runs-on: windows.8xlarge.nvidia.gpu
+    needs:
+      - conda-py3_11-cuda12_4-build
+      - get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -3832,7 +2326,7 @@ jobs:
             # Pulled from instance metadata endpoint for EC2
             # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
             category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+            curl -H "X-aws-ec2-metadata-token: $(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 30")" -fsSL "http://169.254.169.254/latest/meta-data/${category}"
           }
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
@@ -3843,6 +2337,16 @@ jobs:
         continue-on-error: true
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
+      - name: Enable git long paths and symlinks on Windows and disable fsmonitor daemon
+        shell: bash
+        run: |
+          git config --global core.longpaths true
+          git config --global core.symlinks true
+
+          # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
+          # the directory on Windows and prevent GHA from checking out as reported
+          # in https://github.com/actions/checkout/issues/1018
+          git config --global core.fsmonitor false
       # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
       - name: Enable long paths on Windows
         shell: powershell
@@ -3867,7 +2371,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
           name: conda-py3_11-cuda12_4
@@ -3942,7 +2446,8 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   conda-py3_12-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge.nonephemeral
+    needs: get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -3963,7 +2468,7 @@ jobs:
             # Pulled from instance metadata endpoint for EC2
             # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
             category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+            curl -H "X-aws-ec2-metadata-token: $(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 30")" -fsSL "http://169.254.169.254/latest/meta-data/${category}"
           }
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
@@ -3974,6 +2479,16 @@ jobs:
         continue-on-error: true
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
+      - name: Enable git long paths and symlinks on Windows and disable fsmonitor daemon
+        shell: bash
+        run: |
+          git config --global core.longpaths true
+          git config --global core.symlinks true
+
+          # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
+          # the directory on Windows and prevent GHA from checking out as reported
+          # in https://github.com/actions/checkout/issues/1018
+          git config --global core.fsmonitor false
       # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
       - name: Enable long paths on Windows
         shell: powershell
@@ -4031,7 +2546,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4.4.0
         if: always()
         with:
           name: conda-py3_12-cpu
@@ -4053,8 +2568,10 @@ jobs:
           .github\scripts\kill_active_ssh_sessions.ps1
   conda-py3_12-cpu-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_12-cpu-build
-    runs-on: windows.4xlarge.nonephemeral
+    needs:
+      - conda-py3_12-cpu-build
+      - get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -4075,7 +2592,7 @@ jobs:
             # Pulled from instance metadata endpoint for EC2
             # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
             category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+            curl -H "X-aws-ec2-metadata-token: $(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 30")" -fsSL "http://169.254.169.254/latest/meta-data/${category}"
           }
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
@@ -4086,6 +2603,16 @@ jobs:
         continue-on-error: true
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
+      - name: Enable git long paths and symlinks on Windows and disable fsmonitor daemon
+        shell: bash
+        run: |
+          git config --global core.longpaths true
+          git config --global core.symlinks true
+
+          # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
+          # the directory on Windows and prevent GHA from checking out as reported
+          # in https://github.com/actions/checkout/issues/1018
+          git config --global core.fsmonitor false
       # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
       - name: Enable long paths on Windows
         shell: powershell
@@ -4110,7 +2637,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
           name: conda-py3_12-cpu
@@ -4184,7 +2711,8 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   conda-py3_12-cuda11_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge.nonephemeral
+    needs: get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -4206,7 +2734,7 @@ jobs:
             # Pulled from instance metadata endpoint for EC2
             # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
             category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+            curl -H "X-aws-ec2-metadata-token: $(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 30")" -fsSL "http://169.254.169.254/latest/meta-data/${category}"
           }
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
@@ -4217,6 +2745,16 @@ jobs:
         continue-on-error: true
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
+      - name: Enable git long paths and symlinks on Windows and disable fsmonitor daemon
+        shell: bash
+        run: |
+          git config --global core.longpaths true
+          git config --global core.symlinks true
+
+          # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
+          # the directory on Windows and prevent GHA from checking out as reported
+          # in https://github.com/actions/checkout/issues/1018
+          git config --global core.fsmonitor false
       # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
       - name: Enable long paths on Windows
         shell: powershell
@@ -4274,7 +2812,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4.4.0
         if: always()
         with:
           name: conda-py3_12-cuda11_8
@@ -4296,8 +2834,10 @@ jobs:
           .github\scripts\kill_active_ssh_sessions.ps1
   conda-py3_12-cuda11_8-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_12-cuda11_8-build
-    runs-on: windows.8xlarge.nvidia.gpu
+    needs:
+      - conda-py3_12-cuda11_8-build
+      - get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -4319,7 +2859,7 @@ jobs:
             # Pulled from instance metadata endpoint for EC2
             # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
             category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+            curl -H "X-aws-ec2-metadata-token: $(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 30")" -fsSL "http://169.254.169.254/latest/meta-data/${category}"
           }
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
@@ -4330,6 +2870,16 @@ jobs:
         continue-on-error: true
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
+      - name: Enable git long paths and symlinks on Windows and disable fsmonitor daemon
+        shell: bash
+        run: |
+          git config --global core.longpaths true
+          git config --global core.symlinks true
+
+          # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
+          # the directory on Windows and prevent GHA from checking out as reported
+          # in https://github.com/actions/checkout/issues/1018
+          git config --global core.fsmonitor false
       # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
       - name: Enable long paths on Windows
         shell: powershell
@@ -4354,7 +2904,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
           name: conda-py3_12-cuda11_8
@@ -4427,254 +2977,10 @@ jobs:
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
       conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
-  conda-py3_12-cuda12_1-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge.nonephemeral
-    timeout-minutes: 240
-    env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
-      BUILDER_ROOT: ${{ github.workspace }}/builder
-      PACKAGE_TYPE: conda
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu121
-      GPU_ARCH_VERSION: 12.1
-      GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
-      DESIRED_PYTHON: "3.12"
-    steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-          echo "system info $(uname -a)"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: pytorch/test-infra/.github/actions/setup-ssh@main
-        continue-on-error: true
-        with:
-          github-secret: ${{ secrets.GITHUB_TOKEN }}
-      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
-      - name: Enable long paths on Windows
-        shell: powershell
-        run: |
-          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
-      # Since it's just a defensive command, the workflow should continue even the command fails. This step can be
-      # removed once Windows Defender is removed from the AMI
-      - name: Disables Windows Defender scheduled and real-time scanning for files in directories used by PyTorch
-        continue-on-error: true
-        shell: powershell
-        run: |
-          Add-MpPreference -ExclusionPath $(Get-Location).tostring(),$Env:TEMP -ErrorAction Ignore
-          # Let's both exclude the path and disable Windows Defender completely just to be sure
-          # that it doesn't interfere
-          Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      - name: Populate binary env
-        shell: bash
-        run: |
-          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
-          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
-          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          quiet-checkout: true
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-          quiet-checkout: true
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
-      - name: Populate binary env
-        shell: bash
-        run: |
-          "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
-      - name: Build PyTorch binary
-        shell: bash
-        run: |
-          "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3
-        if: always()
-        with:
-          name: conda-py3_12-cuda12_1
-          retention-days: 14
-          if-no-files-found: error
-          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Wait until all sessions have drained
-        shell: powershell
-        working-directory: pytorch
-        if: always()
-        timeout-minutes: 120
-        run: |
-          .github\scripts\wait_for_ssh_to_drain.ps1
-      - name: Kill active ssh sessions if still around (Useful if workflow was cancelled)
-        shell: powershell
-        working-directory: pytorch
-        if: always()
-        run: |
-          .github\scripts\kill_active_ssh_sessions.ps1
-  conda-py3_12-cuda12_1-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_12-cuda12_1-build
-    runs-on: windows.8xlarge.nvidia.gpu
-    timeout-minutes: 240
-    env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
-      BUILDER_ROOT: ${{ github.workspace }}/builder
-      PACKAGE_TYPE: conda
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu121
-      GPU_ARCH_VERSION: 12.1
-      GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
-      DESIRED_PYTHON: "3.12"
-    steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-          echo "system info $(uname -a)"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: pytorch/test-infra/.github/actions/setup-ssh@main
-        continue-on-error: true
-        with:
-          github-secret: ${{ secrets.GITHUB_TOKEN }}
-      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
-      - name: Enable long paths on Windows
-        shell: powershell
-        run: |
-          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
-      # Since it's just a defensive command, the workflow should continue even the command fails. This step can be
-      # removed once Windows Defender is removed from the AMI
-      - name: Disables Windows Defender scheduled and real-time scanning for files in directories used by PyTorch
-        continue-on-error: true
-        shell: powershell
-        run: |
-          Add-MpPreference -ExclusionPath $(Get-Location).tostring(),$Env:TEMP -ErrorAction Ignore
-          # Let's both exclude the path and disable Windows Defender completely just to be sure
-          # that it doesn't interfere
-          Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      - name: Populate binary env
-        shell: bash
-        run: |
-          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
-          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
-          echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: actions/download-artifact@v3
-        name: Download Build Artifacts
-        with:
-          name: conda-py3_12-cuda12_1
-          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          quiet-checkout: true
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-          quiet-checkout: true
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
-      - name: Populate binary env
-        shell: bash
-        run: |
-          "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
-      - name: Test PyTorch binary
-        shell: bash
-        run: |
-          "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_test.sh"
-      - name: Wait until all sessions have drained
-        shell: powershell
-        working-directory: pytorch
-        if: always()
-        timeout-minutes: 120
-        run: |
-          .github\scripts\wait_for_ssh_to_drain.ps1
-      - name: Kill active ssh sessions if still around (Useful if workflow was cancelled)
-        shell: powershell
-        working-directory: pytorch
-        if: always()
-        run: |
-          .github\scripts\kill_active_ssh_sessions.ps1
-  conda-py3_12-cuda12_1-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
-    permissions:
-      id-token: write
-      contents: read
-    needs: conda-py3_12-cuda12_1-test
-    with:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
-      BUILDER_ROOT: ${{ github.workspace }}/builder
-      PACKAGE_TYPE: conda
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu121
-      GPU_ARCH_VERSION: 12.1
-      GPU_ARCH_TYPE: cuda
-      DESIRED_PYTHON: "3.12"
-      build_name: conda-py3_12-cuda12_1
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
-    uses: ./.github/workflows/_binary-upload.yml
   conda-py3_12-cuda12_4-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge.nonephemeral
+    needs: get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -4696,7 +3002,7 @@ jobs:
             # Pulled from instance metadata endpoint for EC2
             # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
             category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+            curl -H "X-aws-ec2-metadata-token: $(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 30")" -fsSL "http://169.254.169.254/latest/meta-data/${category}"
           }
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
@@ -4707,6 +3013,16 @@ jobs:
         continue-on-error: true
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
+      - name: Enable git long paths and symlinks on Windows and disable fsmonitor daemon
+        shell: bash
+        run: |
+          git config --global core.longpaths true
+          git config --global core.symlinks true
+
+          # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
+          # the directory on Windows and prevent GHA from checking out as reported
+          # in https://github.com/actions/checkout/issues/1018
+          git config --global core.fsmonitor false
       # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
       - name: Enable long paths on Windows
         shell: powershell
@@ -4764,7 +3080,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4.4.0
         if: always()
         with:
           name: conda-py3_12-cuda12_4
@@ -4786,8 +3102,10 @@ jobs:
           .github\scripts\kill_active_ssh_sessions.ps1
   conda-py3_12-cuda12_4-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_12-cuda12_4-build
-    runs-on: windows.8xlarge.nvidia.gpu
+    needs:
+      - conda-py3_12-cuda12_4-build
+      - get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -4809,7 +3127,7 @@ jobs:
             # Pulled from instance metadata endpoint for EC2
             # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
             category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+            curl -H "X-aws-ec2-metadata-token: $(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 30")" -fsSL "http://169.254.169.254/latest/meta-data/${category}"
           }
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
@@ -4820,6 +3138,16 @@ jobs:
         continue-on-error: true
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
+      - name: Enable git long paths and symlinks on Windows and disable fsmonitor daemon
+        shell: bash
+        run: |
+          git config --global core.longpaths true
+          git config --global core.symlinks true
+
+          # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
+          # the directory on Windows and prevent GHA from checking out as reported
+          # in https://github.com/actions/checkout/issues/1018
+          git config --global core.fsmonitor false
       # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
       - name: Enable long paths on Windows
         shell: powershell
@@ -4844,7 +3172,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
           name: conda-py3_12-cuda12_4

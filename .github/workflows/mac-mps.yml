@@ -14,6 +14,7 @@ permissions: read-all
 
 jobs:
   macos-py3-arm64-build:
+    if: github.repository_owner == 'pytorch'
     name: macos-py3-arm64
     uses: ./.github/workflows/_mac-build.yml
     with:
@@ -28,7 +29,8 @@ jobs:
       test-matrix: |
         { include: [
           { config: "mps", shard: 1, num_shards: 1, runner: "macos-m1-13" },
-          { config: "mps", shard: 1, num_shards: 1, runner: "macos-m2-14" },
+          { config: "mps", shard: 1, num_shards: 1, runner: "macos-m1-14" },
+          { config: "mps", shard: 1, num_shards: 1, runner: "macos-m2-15" },
         ]}
 
   macos-py3-arm64-mps-test:

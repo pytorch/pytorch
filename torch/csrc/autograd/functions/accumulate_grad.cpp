@@ -12,8 +12,7 @@
 #include <stdexcept>
 #include <utility>
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 // AccumulateGrad sets sequence_nr to the max value so it's always called
 // ASAP during backwards.
@@ -104,5 +103,4 @@ variable_list AccumulateGrad::apply_with_saved(
   return variable_list();
 }
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

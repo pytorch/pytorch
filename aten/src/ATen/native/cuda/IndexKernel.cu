@@ -259,7 +259,14 @@ void index_put_kernel_quantized_cuda(TensorIterator& iter, const IntArrayRef ind
 
     gpu_index_kernel(iter, index_size, index_stride, [inv_scale, zero_point, qmin, qmax]C10_DEVICE(char* const out_data, const char* const in_data, const int64_t offset) {
       int64_t qvalue = static_cast<int64_t>(zero_point + nearbyintf(*(float*)in_data * inv_scale));
-      qvalue = std::clamp(qvalue, qmin, qmax);
+      // See https://github.com/pytorch/pytorch/issues/127666
+      // and https://github.com/pytorch/pytorch/issues/128253.
+      // hip-clang std::clamp __glibcxx_assert_fail host function when building on Fedora40/gcc14.
+      // The following replaces std::clamp(qvalue, qmin, qmax) and is a viable solution for
+      // both CUDA and ROCm since std::clamp and this replacement generates the same PTX.
+      // Using #ifdef USE_ROCM to differentiate caused Windows build failures.
+      // The replacement should generate the same PTX as std::clamp. See https://godbolt.org/z/Wde9KW3v4
+      qvalue = (qvalue < qmin) ? qmin : (qmax < qvalue) ? qmax : qvalue;
       *(scalar_t*)(out_data + offset) = static_cast<scalar_t>(qvalue);
     });
   });
@@ -450,24 +457,32 @@ void flip_kernel(TensorIterator& iter, const bool quantized) {
       flip_kernel_impl<dtype>(iter);
     });
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
-                                           iter.dtype(), "flip_cuda",
-    [&] {
-      using dtype = OpaqueType<sizeof(scalar_t)>;
-      flip_kernel_impl<dtype>(iter);
-    });
+    AT_DISPATCH_V2(
+      iter.dtype(),
+      "flip_cuda",
+      AT_WRAP([&] {
+        using dtype = OpaqueType<sizeof(scalar_t)>;
+        flip_kernel_impl<dtype>(iter);
+      }),
+      AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX),
+      AT_EXPAND(AT_FLOAT8_TYPES),
+      AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES),
+      kComplexHalf,
+      kHalf,
+      kBool,
+      kBFloat16);
   }
 }
 
 
-REGISTER_DISPATCH(index_stub, &index_kernel);
-REGISTER_DISPATCH(index_fill_stub, &index_fill_kernel);
-REGISTER_DISPATCH(index_copy_stub, &index_copy_kernel);
-REGISTER_DISPATCH(index_put_stub, &index_put_kernel);
-REGISTER_DISPATCH(put_stub, &put_kernel);
-REGISTER_DISPATCH(take_stub, &take_kernel);
-REGISTER_DISPATCH(flip_stub, &flip_kernel);
+REGISTER_DISPATCH(index_stub, &index_kernel)
+REGISTER_DISPATCH(index_fill_stub, &index_fill_kernel)
+REGISTER_DISPATCH(index_copy_stub, &index_copy_kernel)
+REGISTER_DISPATCH(index_put_stub, &index_put_kernel)
+REGISTER_DISPATCH(put_stub, &put_kernel)
+REGISTER_DISPATCH(take_stub, &take_kernel)
+REGISTER_DISPATCH(flip_stub, &flip_kernel)
 
-REGISTER_CUDA_DISPATCH(index_put_kernel_quantized_stub, &index_put_kernel_quantized_cuda);
+REGISTER_CUDA_DISPATCH(index_put_kernel_quantized_stub, &index_put_kernel_quantized_cuda)
 
 } // namespace at::native

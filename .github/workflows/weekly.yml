@@ -12,6 +12,7 @@ permissions: read-all
 
 jobs:
   update-commit-hash:
+    if: github.repository_owner == 'pytorch'
     runs-on: ubuntu-latest
     environment: update-commit-hash
     steps:
@@ -39,3 +40,34 @@ jobs:
           test-infra-ref: main
           updatebot-token: ${{ secrets.UPDATEBOT_TOKEN }}
           pytorchbot-token: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
+
+  update-slow-tests:
+    if: github.repository_owner == 'pytorch'
+    runs-on: ubuntu-latest
+    environment: update-commit-hash
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.UPDATEBOT_TOKEN }}
+      - name: Setup Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: '3.9'
+      - name: Install requirements
+        shell: bash
+        run: |
+          pip install requests==2.32.2 clickhouse-connect==0.7.16
+      - name: Update slow test file
+        shell: bash
+        env:
+          PYTORCHBOT_TOKEN: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
+          UPDATEBOT_TOKEN: ${{ secrets.UPDATEBOT_TOKEN }}
+          CLICKHOUSE_ENDPOINT: ${{ secrets.CLICKHOUSE_ENDPOINT }}
+          CLICKHOUSE_USERNAME: ${{ secrets.CLICKHOUSE_READONLY_USERNAME }}
+          CLICKHOUSE_PASSWORD: ${{ secrets.CLICKHOUSE_READONLY_PASSWORD }}
+        run: |
+          git config --global user.name "PyTorch UpdateBot"
+          git config --global user.email "pytorchupdatebot@users.noreply.github.com"
+          python tools/testing/update_slow_tests.py

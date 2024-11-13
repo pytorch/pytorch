@@ -192,10 +192,10 @@ static MPSGraphTensor* bce_backward_mps(CachedGraph* bceGraph) {
 // NOTE: "loss" tensor would be "grad_input" if it's a backward pass
 static Tensor& bce_loss_out_impl(const Tensor& input,
                                  const Tensor& target,
-                                 const c10::optional<Tensor>& weight_opt,
+                                 const std::optional<Tensor>& weight_opt,
                                  int64_t reduction,
                                  Tensor& loss,
-                                 const c10::optional<Tensor>& grad_output_opt,
+                                 const std::optional<Tensor>& grad_output_opt,
                                  const string op_name) {
   // TODO: add sanity check for the elements of input tensor to be within [0..1]
   TORCH_CHECK(target.is_same_size(input), op_name + ": target and input tensors must have identical shapes")
@@ -437,6 +437,20 @@ static void nllnd_loss_forward_impl(Tensor& output,
   if (output.numel() == 0)
     return;
 
+  // https://github.com/pytorch/pytorch/blob/042f2f7746a064f1527d95d1f1d712b4f0b34186/aten/src/ATen/native/cuda/Loss.cu#L335-L346
+  if (target_arg.numel() == 0) {
+    // Here target (and input) have zero elements
+    // Mean reduction on empty tensors produces NaN. See the discussion in
+    // https://github.com/pytorch/pytorch/pull/64572#issuecomment-926504162
+    if (reduction == Reduction::Mean) {
+      output.fill_(std::numeric_limits<double>::quiet_NaN());
+    } else {
+      output.zero_();
+    }
+    total_weight.zero_();
+    return;
+  }
+
   struct CachedGraph : public MPSCachedGraph {
     CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
     MPSGraphTensor* inputTensor_ = nil;
@@ -537,7 +551,9 @@ static void nllnd_loss_forward_impl(Tensor& output,
           mpsGraphBatchSizeTensor = [mpsGraph reductionSumWithTensor:mpsSelectOneTensor
                                                                 axes:nil
                                                                 name:@"batchSizeReductionTensor"];
-          mpsGraphReducedTensor = divisionNoNaN(mpsGraph, mpsGraphReducedTensor, mpsGraphBatchSizeTensor);
+          mpsGraphReducedTensor = [mpsGraph divisionWithPrimaryTensor:mpsGraphReducedTensor
+                                                      secondaryTensor:mpsGraphBatchSizeTensor
+                                                                 name:@"divisionTensor"];
         }
       }
 
@@ -551,14 +567,18 @@ static void nllnd_loss_forward_impl(Tensor& output,
       newCachedGraph->outputTensor_ = mpsGraphReducedTensor;
     });
 
-    Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, input);
-    Placeholder targetPlaceholder = Placeholder(cachedGraph->targetTensor_, target);
+    Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, input, nil, true, MPSDataTypeInvalid, false);
+    Placeholder targetPlaceholder =
+        Placeholder(cachedGraph->targetTensor_, target, nil, true, MPSDataTypeInvalid, false);
     Placeholder weightPlaceholder = Placeholder();
     if (isWeightsArrayValid)
-      weightPlaceholder = Placeholder(cachedGraph->weightTensor_, weight);
-    Placeholder batchSizePlaceholder = Placeholder(cachedGraph->batchSizeTensor_, batchSizeTensor);
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
-    Placeholder totalWeightsPlaceholder = Placeholder(cachedGraph->totalWeightTensor_, total_weight);
+      weightPlaceholder = Placeholder(cachedGraph->weightTensor_, weight, nil, true, MPSDataTypeInvalid, false);
+    Placeholder batchSizePlaceholder =
+        Placeholder(cachedGraph->batchSizeTensor_, batchSizeTensor, nil, true, MPSDataTypeInvalid, false);
+    Placeholder outputPlaceholder =
+        Placeholder(cachedGraph->outputTensor_, output, nil, true, MPSDataTypeInvalid, false);
+    Placeholder totalWeightsPlaceholder =
+        Placeholder(cachedGraph->totalWeightTensor_, total_weight, nil, true, MPSDataTypeInvalid, false);
 
     // Create dictionary of inputs and outputs
     NSMutableDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds =
@@ -867,7 +887,7 @@ Tensor& huber_loss_out_mps(const Tensor& input, const Tensor& target, int64_t re
 
 Tensor huber_loss_mps(const Tensor& input, const Tensor& target, int64_t reduction, double delta) {
   TORCH_CHECK(delta > 0, "huber_loss does not support non-positive values for delta.");
-  Tensor output = at::empty(input.sizes(), input.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+  Tensor output = at::empty(input.sizes(), input.scalar_type(), std::nullopt, kMPS, std::nullopt, std::nullopt);
   return huber_loss_out_mps(input, target, reduction, delta, output);
 }
 
@@ -975,16 +995,17 @@ Tensor& huber_loss_backward_out_mps(const Tensor& grad_output,
 
 // MSELoss
 TORCH_IMPL_FUNC(mse_loss_out_mps)(const Tensor& input, const Tensor& target, int64_t reduction, const Tensor& output_) {
-  string op_name = __func__;
+  string op_name = "mse_loss_out_mps";
   using namespace mps;
-
-  bool contiguousOutput = output_.is_contiguous();
+  bool contiguousOutput = !needsGather(output_);
   Tensor output = output_;
   if (!contiguousOutput) {
     output = output_.contiguous();
   }
 
-  TORCH_CHECK(target.is_same_size(input), op_name + ": target and input tensors must have identical shapes")
+  TORCH_CHECK(target.is_same_size(input), op_name + ": target and input tensors must have identical shapes");
+  TORCH_CHECK(c10::isFloatingType(input.scalar_type()) && c10::isFloatingType(target.scalar_type()),
+              op_name + ": only defined for floating types");
   TORCH_CHECK(output.is_mps());
 
   struct CachedGraph : public MPSCachedGraph {
@@ -1035,24 +1056,24 @@ Tensor mse_loss_backward_mps(const Tensor& grad_output, const Tensor& input, con
 // BCELoss
 Tensor& binary_cross_entropy_out_mps(const Tensor& input,
                                      const Tensor& target,
-                                     const c10::optional<Tensor>& weight_opt,
+                                     const std::optional<Tensor>& weight_opt,
                                      int64_t reduction,
                                      Tensor& loss) {
-  return mps::BCELoss::bce_loss_out_impl(input, target, weight_opt, reduction, loss, c10::nullopt, __func__);
+  return mps::BCELoss::bce_loss_out_impl(input, target, weight_opt, reduction, loss, std::nullopt, __func__);
 }
 
 Tensor binary_cross_entropy_mps(const Tensor& input,
                                 const Tensor& target,
-                                const c10::optional<Tensor>& weight_opt,
+                                const std::optional<Tensor>& weight_opt,
                                 int64_t reduction) {
   Tensor loss = at::empty_like(input);
-  return mps::BCELoss::bce_loss_out_impl(input, target, weight_opt, reduction, loss, c10::nullopt, __func__);
+  return mps::BCELoss::bce_loss_out_impl(input, target, weight_opt, reduction, loss, std::nullopt, __func__);
 }
 
 Tensor& binary_cross_entropy_backward_out_mps(const Tensor& grad_output,
                                               const Tensor& input,
                                               const Tensor& target,
-                                              const c10::optional<Tensor>& weight_opt,
+                                              const std::optional<Tensor>& weight_opt,
                                               int64_t reduction,
                                               Tensor& grad_input) {
   return mps::BCELoss::bce_loss_out_impl(input, target, weight_opt, reduction, grad_input, grad_output, __func__);
@@ -1061,7 +1082,7 @@ Tensor& binary_cross_entropy_backward_out_mps(const Tensor& grad_output,
 Tensor binary_cross_entropy_backward_mps(const Tensor& grad_output,
                                          const Tensor& input,
                                          const Tensor& target,
-                                         const c10::optional<Tensor>& weight_opt,
+                                         const std::optional<Tensor>& weight_opt,
                                          int64_t reduction) {
   Tensor grad_input = at::empty_like(input);
   return mps::BCELoss::bce_loss_out_impl(input, target, weight_opt, reduction, grad_input, grad_output, __func__);
@@ -1159,7 +1180,7 @@ static void nll_loss2d_forward_out_mps_template(Tensor& output,
 
 std::tuple<Tensor&, Tensor&> nll_loss2d_forward_out_mps(const Tensor& self,
                                                         const Tensor& target,
-                                                        const c10::optional<Tensor>& weight_opt,
+                                                        const std::optional<Tensor>& weight_opt,
                                                         int64_t reduction,
                                                         int64_t ignore_index,
                                                         Tensor& output,
@@ -1174,7 +1195,7 @@ std::tuple<Tensor&, Tensor&> nll_loss2d_forward_out_mps(const Tensor& self,
 
 std::tuple<Tensor, Tensor> nll_loss2d_forward_mps(const Tensor& self,
                                                   const Tensor& target,
-                                                  const c10::optional<Tensor>& weight_opt,
+                                                  const std::optional<Tensor>& weight_opt,
                                                   int64_t reduction,
                                                   int64_t ignore_index) {
   // See [Note: hacky wrapper removal for optional tensor]
@@ -1215,7 +1236,7 @@ static void nll_loss2d_backward_out_mps_template(Tensor& grad_input,
 Tensor& nll_loss2d_backward_out_mps(const Tensor& grad_output,
                                     const Tensor& self,
                                     const Tensor& target,
-                                    const c10::optional<Tensor>& weight_opt,
+                                    const std::optional<Tensor>& weight_opt,
                                     int64_t reduction,
                                     int64_t ignore_index,
                                     const Tensor& total_weight,
@@ -1232,7 +1253,7 @@ Tensor& nll_loss2d_backward_out_mps(const Tensor& grad_output,
 Tensor nll_loss2d_backward_mps(const Tensor& grad_output,
                                const Tensor& self,
                                const Tensor& target,
-                               const c10::optional<Tensor>& weight_opt,
+                               const std::optional<Tensor>& weight_opt,
                                int64_t reduction,
                                int64_t ignore_index,
                                const Tensor& total_weight) {

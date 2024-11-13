@@ -5,6 +5,7 @@
 #include <c10/util/ArrayRef.h>
 #include <c10/util/irange.h>
 #include <fmt/format.h>
+#include <fmt/ranges.h>
 
 #ifdef USE_KINETO
 #include <libkineto.h>
@@ -292,6 +293,35 @@ std::string strListToStr(const std::vector<std::string>& types) {
     return "[" + rc + "]";
   }
 }
+std::string ivalueToStr(const c10::IValue& val, bool isString) {
+  std::stringstream ss;
+  if (val.isNone()) {
+    return "\"None\"";
+  } else {
+    ss.str("");
+    if (isString) {
+      ss << "\"";
+    }
+    ss << val;
+    if (isString) {
+      ss << "\"";
+    }
+    std::string mystr = ss.str();
+
+    // For boolean the values that ivalue gives is "True" and "False" but
+    // json only takes "true" and "false" so we convert the string to lower case
+    if (val.isBool()) {
+      for (char& c : mystr) {
+        c = static_cast<char>(std::tolower(c));
+      }
+    }
+
+    // A double quote can cause issues with the chrome tracing so force
+    // all inputs to not contain more than the 2 we add in this function
+    auto count = std::count(mystr.begin(), mystr.end(), '"');
+    return count > 2 ? "\"None\"" : mystr;
+  }
+}
 
 std::string ivalueListToStr(const std::vector<c10::IValue>& list) {
   std::vector<std::string> concrete_str_inputs;
@@ -358,8 +388,8 @@ std::unordered_map<std::string, std::string> saveNcclMeta(
     return map;
   }
 
-  map.emplace(
-      kCommsName, fmt::format("\"{}\"", debugInfo->getCollectiveName()));
+  auto& collective_name = debugInfo->getCollectiveName();
+  map.emplace(kCommsName, fmt::format("\"{}\"", collective_name));
   map.emplace(
       kDtype, fmt::format("\"{}\"", c10::toString(debugInfo->getDType())));
   map.emplace(kInMsgNelems, std::to_string(debugInfo->getInMessageNelems()));
@@ -393,6 +423,16 @@ std::unordered_map<std::string, std::string> saveNcclMeta(
 
   auto rank = debugInfo->getRank();
   map.emplace(kRank, std::to_string(rank));
+  int nRanks = static_cast<int>(groupRanks.size());
+  if (collective_name == "send") {
+    if (rank >= 0 && rank < nRanks) {
+      map.emplace(kP2pDst, std::to_string(groupRanks[rank]));
+    }
+  } else if (collective_name == "recv") {
+    if (rank >= 0 && rank < nRanks) {
+      map.emplace(kP2pSrc, std::to_string(groupRanks[rank]));
+    }
+  }
 #endif // USE_DISTRIBUTED
   return map;
 }

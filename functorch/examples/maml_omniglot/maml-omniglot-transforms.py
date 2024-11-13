@@ -34,7 +34,6 @@ import time
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
-
 import pandas as pd
 from support.omniglot_loaders import OmniglotNShot
 
@@ -43,6 +42,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch import nn
 from torch.func import functional_call, grad, vmap
+
 
 mpl.use("Agg")
 plt.style.use("bmh")
@@ -132,7 +132,7 @@ def loss_for_task(net, n_inner_iter, x_spt, y_spt, x_qry, y_qry):
     new_params = params
     for _ in range(n_inner_iter):
         grads = grad(compute_loss)(new_params, buffers, x_spt, y_spt)
-        new_params = {k: new_params[k] - g * 1e-1 for k, g, in grads.items()}
+        new_params = {k: new_params[k] - g * 1e-1 for k, g in grads.items()}
 
     # The final set of adapted parameters will induce some
     # final loss and accuracy on the query dataset.
@@ -216,7 +216,7 @@ def test(db, net, device, epoch, log):
                 spt_loss = F.cross_entropy(spt_logits, y_spt[i])
                 grads = torch.autograd.grad(spt_loss, new_params.values())
                 new_params = {
-                    k: new_params[k] - g * 1e-1 for k, g, in zip(new_params, grads)
+                    k: new_params[k] - g * 1e-1 for k, g in zip(new_params, grads)
                 }
 
             # The query loss and acc induced by these parameters.

@@ -19,10 +19,9 @@ import torch.distributed as dist
 from torch._utils import _get_device_index
 from torch.autograd import Function, Variable
 from torch.distributed.algorithms.join import Join, Joinable, JoinHook
+from torch.nn.modules import Module
+from torch.nn.parallel.scatter_gather import gather, scatter_kwargs
 from torch.utils._pytree import tree_flatten, tree_unflatten
-
-from ..modules import Module
-from .scatter_gather import gather, scatter_kwargs
 
 
 RPC_AVAILABLE = False
@@ -46,6 +45,7 @@ if dist.rpc.is_available():
 
 if TYPE_CHECKING:
     from torch.utils.hooks import RemovableHandle
+
 
 __all__ = ["DistributedDataParallel"]
 
@@ -645,7 +645,7 @@ class DistributedDataParallel(Module, Joinable):
     ):
         super().__init__()
         Joinable.__init__(self)
-        self.logger = None
+        self.logger: Optional[dist.Logger] = None
         if bool(delay_all_reduce_named_params is not None) != bool(
             param_to_hook_all_reduce is not None
         ):
@@ -672,7 +672,10 @@ class DistributedDataParallel(Module, Joinable):
             self.process_group = device_mesh.get_group(mesh_dim=0)
             from torch.distributed.device_mesh import _mesh_resources
 
-            if _mesh_resources.get_parent_mesh(device_mesh) is not None:
+            root_mesh = _mesh_resources.get_root_mesh(device_mesh)
+            # if a root mesh is not the same as device_mesh,
+            # meaning the device_mesh is sliced out from the root mesh.
+            if root_mesh != device_mesh:
                 # TODO: This is a temporary work around to enable DDP + TP.
                 # We should do the logic in DDP so that the 2D implementation is
                 # sound and the state_dict works out of the box.
@@ -1207,9 +1210,11 @@ class DistributedDataParallel(Module, Joinable):
             param_to_name_mapping,
             # User can set dist._DEFAULT_FIRST_BUCKET_BYTES to tune DDP first
             # bucket.
-            dist._DEFAULT_FIRST_BUCKET_BYTES
-            if self.bucket_bytes_cap_default
-            else self.bucket_bytes_cap,
+            (
+                dist._DEFAULT_FIRST_BUCKET_BYTES
+                if self.bucket_bytes_cap_default
+                else self.bucket_bytes_cap
+            ),
         )
 
         self.logger = dist.Logger(self.reducer)
@@ -1491,7 +1496,7 @@ class DistributedDataParallel(Module, Joinable):
 
         # Disable the python reducer if compiled_autograd is not enabled.
         if self._accum_grad_hooks:
-            for index, h in enumerate(self._accum_grad_hooks):
+            for h in self._accum_grad_hooks:
                 h.remove()
             self._accum_grad_hooks.clear()
 

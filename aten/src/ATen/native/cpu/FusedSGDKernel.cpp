@@ -12,10 +12,10 @@ namespace at::native {
 namespace{
 
 template <typename scalar_t, typename opmath_t>
-typename std::enable_if<
-    std::is_same<scalar_t, Half>::value || std::is_same<scalar_t, BFloat16>::value,
-    void>::
-    type inline sgd_math(
+std::enable_if_t<
+    std::is_same_v<scalar_t, Half> || std::is_same_v<scalar_t, BFloat16>,
+    void>
+    inline sgd_math(
   scalar_t* param_ptr,
   scalar_t* grad_ptr,
   scalar_t* momentum_buf_ptr,
@@ -31,20 +31,16 @@ typename std::enable_if<
 ){
   using lpVec = at::vec::Vectorized<scalar_t>;
   using fVec = at::vec::Vectorized<opmath_t>;
-  lpVec grad_vec_to_store;
-  fVec param_vec1, param_vec2;
-  fVec grad_vec1, grad_vec2;
-  fVec momentum_buffer_vec1, momentum_buffer_vec2;
   int64_t d = 0;
   for (; d < size - (size % lpVec::size()); d += lpVec::size()) {
     lpVec param_lpvec = lpVec::loadu(param_ptr + d);
-    std::tie(param_vec1, param_vec2) = vec::convert_to_float<scalar_t>(param_lpvec);
+    auto [param_vec1, param_vec2] = vec::convert_to_float<scalar_t>(param_lpvec);
     lpVec grad_lpvec = lpVec::loadu(grad_ptr + d);
-    std::tie(grad_vec1, grad_vec2) = vec::convert_to_float<scalar_t>(grad_lpvec);
+    auto [grad_vec1, grad_vec2] = vec::convert_to_float<scalar_t>(grad_lpvec);
     if (grad_scale_ptr) {
       grad_vec1 = grad_vec1 / fVec(float(*grad_scale_ptr));
       grad_vec2 = grad_vec2 / fVec(float(*grad_scale_ptr));
-      grad_vec_to_store = vec::convert_from_float<scalar_t>(grad_vec1, grad_vec2);
+      lpVec grad_vec_to_store = vec::convert_from_float<scalar_t>(grad_vec1, grad_vec2);
       grad_vec_to_store.store(grad_ptr + d);
     }
     if (maximize){
@@ -61,7 +57,6 @@ typename std::enable_if<
         momentum_vec1 = grad_vec1;
         momentum_vec2 = grad_vec2;
       } else {
-
         momentum_vec1 = fVec::loadu(momentum_buf_ptr + d) * fVec(scalar_t(momentum));
         momentum_vec2 = fVec::loadu(momentum_buf_ptr + d + fVec::size()) * fVec(scalar_t(momentum));
         momentum_vec1 = vec::fmadd(fVec(scalar_t(1 - dampening)), grad_vec1, momentum_vec1);
@@ -77,14 +72,12 @@ typename std::enable_if<
       }
     }
   }
-  scalar_t grad_val_to_store;
   for (; d < size; d++) {
     opmath_t grad_val = grad_ptr[d];
     opmath_t param_val = param_ptr[d];
     if (grad_scale_ptr) {
       grad_val = grad_ptr[d] / opmath_t(*grad_scale_ptr);
-      grad_val_to_store = grad_val;
-      grad_ptr[d] = grad_val_to_store;
+      grad_ptr[d] = grad_val;
     }
     if (maximize) grad_val = -grad_val;
     if (weight_decay != 0.0){
@@ -111,10 +104,10 @@ typename std::enable_if<
 
 
 template <typename scalar_t, typename opmath_t>
-typename std::enable_if<
-    std::is_same<scalar_t, float>::value || std::is_same<scalar_t, double>::value,
-    void>::
-    type inline sgd_math(
+std::enable_if_t<
+    std::is_same_v<scalar_t, float> || std::is_same_v<scalar_t, double>,
+    void>
+    inline sgd_math(
   scalar_t* param_ptr,
   scalar_t* grad_ptr,
   scalar_t* momentum_buf_ptr,
@@ -129,14 +122,13 @@ typename std::enable_if<
   int64_t size
 ){
   using Vec = at::vec::Vectorized<scalar_t>;
-  Vec grad_vec_to_store;
   int64_t d = 0;
   for (; d < size - (size % Vec::size()); d += Vec::size()) {
     Vec param_vec = Vec::loadu(param_ptr + d);
     Vec grad_vec = Vec::loadu(grad_ptr + d);
     if (grad_scale_ptr) {
       grad_vec = grad_vec / Vec(scalar_t(*grad_scale_ptr));
-      grad_vec_to_store = grad_vec;
+      Vec grad_vec_to_store = grad_vec;
       grad_vec_to_store.store(grad_ptr + d);
     }
     if (maximize) grad_vec = grad_vec * Vec(scalar_t(-1.0));
@@ -162,13 +154,11 @@ typename std::enable_if<
     param_vec += grad_vec * Vec(scalar_t(-lr));
     param_vec.store(param_ptr + d);
   }
-  scalar_t grad_val_to_store;
   for (; d < size; d++) {
     scalar_t grad_val = grad_ptr[d];
     if (grad_scale_ptr) {
       grad_val = grad_ptr[d] / scalar_t(*grad_scale_ptr);
-      grad_val_to_store = grad_val;
-      grad_ptr[d] = grad_val_to_store;
+      grad_ptr[d] = grad_val;
     }
     if (maximize) grad_val = -grad_val;
     if (weight_decay != 0.0){
@@ -274,5 +264,5 @@ void fused_sgd_kernel(
 
 }
 
-REGISTER_DISPATCH(fused_sgd_stub, &fused_sgd_kernel);
+REGISTER_DISPATCH(fused_sgd_stub, &fused_sgd_kernel)
 } // namespace at::native

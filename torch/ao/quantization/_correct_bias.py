@@ -1,10 +1,10 @@
 # mypy: allow-untyped-defs
 import torch
-import torch.nn as nn
 import torch.ao.nn.quantized as nnq
-
-import torch.ao.quantization
 import torch.ao.ns._numeric_suite as ns
+import torch.ao.quantization
+import torch.nn as nn
+
 
 __all__ = [
     "get_module",
@@ -17,17 +17,20 @@ __all__ = [
 _supported_modules = {nn.Linear, nn.Conv2d}
 _supported_modules_quantized = {nnq.Linear, nnq.Conv2d}
 
+
 def get_module(model, name):
     """Given name of submodule, this function grabs the submodule from given model."""
     return dict(model.named_modules())[name]
 
+
 def parent_child_names(name):
     """Split full name of submodule into parent submodule's full name and submodule's name."""
-    split_name = name.rsplit('.', 1)
+    split_name = name.rsplit(".", 1)
     if len(split_name) == 1:
-        return '', split_name[0]
+        return "", split_name[0]
     else:
         return split_name[0], split_name[1]
+
 
 def get_param(module, attr):
     """Get the parameter given a module and attribute.
@@ -40,6 +43,7 @@ def get_param(module, attr):
         return param()
     else:
         return param
+
 
 class MeanShadowLogger(ns.Logger):
     """Mean Logger for a Shadow module.
@@ -57,7 +61,7 @@ class MeanShadowLogger(ns.Logger):
         self.float_sum = None
         self.quant_sum = None
 
-    def forward(self, x, y):
+    def forward(self, x, y):  # type: ignore[override]
         """Compute the average of quantized and floating-point data from modules.
 
         The inputs x,y are output data from the quantized and floating-point modules.
@@ -88,7 +92,14 @@ class MeanShadowLogger(ns.Logger):
         self.float_sum = None
         self.quant_sum = None
 
-def bias_correction(float_model, quantized_model, img_data, target_modules=_supported_modules_quantized, neval_batches=None):
+
+def bias_correction(
+    float_model,
+    quantized_model,
+    img_data,
+    target_modules=_supported_modules_quantized,
+    neval_batches=None,
+):
     """Perform bias correction on a module.
 
     Using numeric suite shadow module, the expected output of the floating point and quantized modules
@@ -104,7 +115,9 @@ def bias_correction(float_model, quantized_model, img_data, target_modules=_supp
                 unquantized submodules)
         neval_batches: a cap to the number of batches you want to be used for estimating the expected output
     """
-    ns.prepare_model_with_stubs(float_model, quantized_model, _supported_modules, MeanShadowLogger)
+    ns.prepare_model_with_stubs(
+        float_model, quantized_model, _supported_modules, MeanShadowLogger
+    )
 
     uncorrected_modules = {}
     for name, submodule in quantized_model.named_modules():
@@ -113,9 +126,8 @@ def bias_correction(float_model, quantized_model, img_data, target_modules=_supp
 
     for uncorrected_module in uncorrected_modules:
         quantized_submodule = get_module(quantized_model, uncorrected_module)
-        bias = get_param(quantized_submodule, 'bias')
+        bias = get_param(quantized_submodule, "bias")
         if bias is not None:
-
             count = 0
             for data in img_data:
                 quantized_model(data[0])
@@ -125,8 +137,8 @@ def bias_correction(float_model, quantized_model, img_data, target_modules=_supp
             ob_dict = ns.get_logger_dict(quantized_model)
             parent_name, _ = parent_child_names(uncorrected_module)
 
-            float_data = ob_dict[parent_name + '.stats']['float']
-            quant_data = ob_dict[parent_name + '.stats']['quantized']
+            float_data = ob_dict[parent_name + ".stats"]["float"]
+            quant_data = ob_dict[parent_name + ".stats"]["quantized"]
 
             # math for expected_error
             quantization_error = quant_data - float_data

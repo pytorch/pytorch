@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import math
 import numbers
@@ -1009,9 +1010,9 @@ class LSTM(RNNBase):
         )
 
     # Same as above, see torch/nn/modules/module.py::_forward_unimplemented
-    def permute_hidden(
+    def permute_hidden(  # type: ignore[override]
         self,
-        hx: Tuple[Tensor, Tensor],  # type: ignore[override]
+        hx: Tuple[Tensor, Tensor],
         permutation: Optional[Tensor],
     ) -> Tuple[Tensor, Tensor]:
         if permutation is None:
@@ -1042,7 +1043,6 @@ class LSTM(RNNBase):
         orig_input = input
         # xxx: isinstance check needs to be in conditional for TorchScript to compile
         batch_sizes = None
-        do_permute = False
         num_directions = 2 if self.bidirectional else 1
         real_hidden_size = self.proj_size if self.proj_size > 0 else self.hidden_size
         if isinstance(orig_input, PackedSequence):

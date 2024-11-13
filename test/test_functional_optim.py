@@ -13,7 +13,7 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 class MyModule(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         torch.manual_seed(0)
         self.lin1 = nn.Linear(3, 3, bias=False)
@@ -111,10 +111,10 @@ class TestFunctionalOptimParity(TestCase):
         )
         # Save old parameters to verify optimizer modifies them.
         old_module_optim_params = [
-            param.clone().detach() for param in module_optim.parameters()
+            param.detach().clone() for param in module_optim.parameters()
         ]
         old_module_functional_params = [
-            param.clone().detach() for param in module_functional.parameters()
+            param.detach().clone() for param in module_functional.parameters()
         ]
 
         t1 = torch.randn(3, 3)

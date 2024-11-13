@@ -115,7 +115,7 @@ class ComputeCodegenUnboxedKernels:
             # Using method=False faithful C++ API, so we should not see SelfArgument/TensorOptionsArgument
             assert isinstance(arg.argument, Argument)
             if not arg.argument.default:
-                arg_cpp = "c10::IValue(c10::nullopt)"
+                arg_cpp = "c10::IValue(::std::nullopt)"
             else:
                 # The unboxing code uses the faithful C++ API to avoid the overhead
                 # from wrapping/unwrapping TensorOptios.
@@ -129,7 +129,7 @@ class ComputeCodegenUnboxedKernels:
                 else:
                     arg_cpp = f"c10::IValue({arg_default})"
             args_code.append(
-                f"""c10::Argument("{arg.name}", nullptr, c10::nullopt, {arg_cpp})"""
+                f"""c10::Argument("{arg.name}", nullptr, ::std::nullopt, {arg_cpp})"""
             )
 
         returns = f.func.returns

@@ -43,6 +43,10 @@ on:
         required: false
         type: string
         default: ""
+      runner_prefix:
+        description: prefix for runner label
+        type: string
+        default: ""
     secrets:
       GH_PYTORCHBOT_TOKEN:
         required: false
@@ -63,20 +67,20 @@ jobs:
             # an OOM issue when running the job, so this upgrades the runner from 4xlarge
             # to the next available tier of 12xlarge. So much memory just to generate cpp
             # doc
-            runner: linux.12xlarge
+            runner: ${{ inputs.runner_prefix }}linux.12xlarge
             # TODO: Nightly cpp docs take longer and longer to finish (more than 3h now)
             # Let's try to figure out how this can be improved
             timeout-minutes: 240
           - docs_type: python
-            runner: linux.2xlarge
+            runner: ${{ inputs.runner_prefix }}linux.2xlarge
             # It takes less than 30m to finish python docs unless there are issues
             timeout-minutes: 30
           - docs_type: functorch
-            runner: linux.2xlarge
+            runner: ${{ inputs.runner_prefix }}linux.2xlarge
             # It takes less than 15m to finish functorch docs unless there are issues
             timeout-minutes: 15
     # Set a fixed name for this job instead of using the current matrix-generated name, i.e. build-docs (cpp, linux.12xlarge, 180)
-    # The current name requires updating the Rockset last docs push query from test-infra every time the matrix is updated
+    # The current name requires updating the database last docs push query from test-infra every time the matrix is updated
     name: build-docs-${{ matrix.docs_type }}-${{ inputs.push }}
     steps:
       - name: Setup SSH (Click me for login details)

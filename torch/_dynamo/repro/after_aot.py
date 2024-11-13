@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+
 import argparse
 import copy
 import functools
@@ -12,7 +13,8 @@ import textwrap
 import uuid
 from importlib import import_module
 from tempfile import TemporaryFile
-from typing import Any, Callable, Dict, Union
+from typing import Any, Callable, Dict, Sequence, TYPE_CHECKING, Union
+from typing_extensions import Unpack
 
 import torch
 import torch.fx as fx
@@ -23,6 +25,7 @@ from torch._dynamo.debug_utils import (
     backend_accuracy_fails,
     BuckTargetWriter,
     cast_to_fp64,
+    extra_deps,
     extra_imports,
     generate_config_string,
     helper_for_dump_minify,
@@ -34,6 +37,7 @@ from torch._dynamo.debug_utils import (
     NopInputReader,
     same_two_models,
 )
+from torch._dynamo.trace_rules import is_fbcode
 from torch._dynamo.utils import clone_inputs, counters, same
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
@@ -43,6 +47,13 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.hub import tqdm
 
 from .. import config
+
+
+if TYPE_CHECKING:
+    from torch._inductor.codecache import CompiledFxGraph
+    from torch._inductor.compile_fx import _CompileFxCallableEx, _CompileFxKwargsEx
+    from torch._inductor.utils import InputType
+
 
 log = logging.getLogger(__name__)
 
@@ -55,7 +66,10 @@ use_buck = inductor_config.is_fbcode()
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
 
-def wrap_compiler_debug(unconfigured_compiler_fn, compiler_name: str):
+def wrap_compiler_debug(
+    unconfigured_compiler_fn: "_CompileFxCallableEx",
+    compiler_name: str,
+) -> "_CompileFxCallableEx":
     """
     Minifier for Fx Graph modules after Aot Autograd has finished. We wrap both
     forward and backward call separately with the backend compiler_fn - like
@@ -65,7 +79,11 @@ def wrap_compiler_debug(unconfigured_compiler_fn, compiler_name: str):
     """
 
     @functools.wraps(unconfigured_compiler_fn)
-    def debug_wrapper(gm, example_inputs, **kwargs):
+    def debug_wrapper(
+        gm: torch.fx.GraphModule,
+        example_inputs: Sequence["InputType"],
+        **kwargs: Unpack["_CompileFxKwargsEx"],
+    ) -> Union["CompiledFxGraph", str]:
         from torch._subclasses import FakeTensorMode
 
         compiler_fn = functools.partial(unconfigured_compiler_fn, **kwargs)
@@ -103,11 +121,15 @@ def wrap_compiler_debug(unconfigured_compiler_fn, compiler_name: str):
 
         # We may run regular PyTorch compute that may trigger Dynamo, do NOT
         # recursively attempt to accuracy minify in that case!
-        def deferred_for_real_inputs(real_inputs):
+        def deferred_for_real_inputs(
+            real_inputs: Sequence["InputType"], **_kwargs: object
+        ) -> Any:
             # This is a bit obscure: if we recursively try to accuracy minify
             # the SAME function, this would trigger.  But most of the time
             # we should never hit this branch
+            assert not _kwargs
             if config.repro_after != "aot":
+                assert not isinstance(inner_compiled_fn, str)
                 return inner_compiled_fn(real_inputs)
             with config.patch(repro_after=None):
                 return inner_debug_fn(real_inputs)
@@ -164,11 +186,11 @@ def wrap_compiler_debug(unconfigured_compiler_fn, compiler_name: str):
                     raise AccuracyError("Bad accuracy detected")
                 else:
                     # Call the compiled function with real inputs
-                    return inner_compiled_fn(real_inputs)
+                    return inner_compiled_fn(real_inputs)  # type: ignore[operator]
             else:
                 try:
                     # Call the compiled function with real inputs
-                    out = inner_compiled_fn(real_inputs)
+                    out = inner_compiled_fn(real_inputs)  # type: ignore[operator]
                     # sync cuda kernels to ensure IMA detection
                     for arg in example_inputs:
                         if isinstance(arg, torch.Tensor) and arg.is_cuda:
@@ -193,7 +215,7 @@ def wrap_compiler_debug(unconfigured_compiler_fn, compiler_name: str):
         if config.repro_after == "aot":
             compiled_fn = deferred_for_real_inputs
             compiled_fn._boxed_call = True  # type: ignore[attr-defined]
-            return compiled_fn
+            return compiled_fn  # type: ignore[return-value]
         else:
             return inner_compiled_fn
 
@@ -205,7 +227,41 @@ def wrap_compiler_debug(unconfigured_compiler_fn, compiler_name: str):
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
 
-def generate_compiler_repro_string(gm, args, *, stable_output=False, save_dir=None):
+def maybe_fbcode_instructions():
+    if is_fbcode:
+        extra_deps_formatted = "\n".join([f'        "{dep}",' for dep in extra_deps])
+        if len(extra_deps_formatted) > 0:
+            extra_deps_formatted = "\n" + extra_deps_formatted
+        return f"""\
+\"\"\"
+To run this script in fbcode:
+- Create a directory (//scripts/{{your_unixname}}/repro)
+- Put this file in scripts/{{your_unixname}}/repro/fx_graph_runnable.py
+- Add a TARGETS file that looks like the following
+- `buck2 run //scripts/{{your_unixname}}/repro:repro`
+
+NOTE: you may need additional deps to actually be able to run the script.
+```
+# Contents of TARGETS file
+load("@fbcode_macros//build_defs:python_binary.bzl", "python_binary")
+
+python_binary(
+    name = "repro",
+    main_src = "fx_graph_runnable.py",
+    deps = [
+        "//caffe2:torch",{extra_deps_formatted}
+    ],
+)
+```
+\"\"\"
+"""
+    else:
+        return ""
+
+
+def generate_compiler_repro_string(
+    gm, args, *, stable_output=False, save_dir=None, stable_hash=False
+):
     model_str = textwrap.dedent(
         f"""
 import torch
@@ -221,6 +277,7 @@ isolate_fails_code_str = None
 
 {extra_imports}
 
+{maybe_fbcode_instructions()}
         """
     )
     if not stable_output:
@@ -237,15 +294,19 @@ isolate_fails_code_str = None
     def hint_if_symint(x):
         return tuple(i.node.hint if isinstance(i, torch.SymInt) else i for i in x)
 
-    writer = InputWriter(save_dir)
+    writer = InputWriter(save_dir, stable_hash=stable_hash)
     for placeholder, arg in zip(fx_placeholder_targets(gm), args):
         if isinstance(arg, (int, torch.SymInt)):
             writer.symint(placeholder, arg)
         elif isinstance(arg, torch.Tensor):
             # TODO: improve these names with FQN
             writer.tensor(placeholder, arg)
+        elif arg is None:
+            writer.const(placeholder)
         else:
-            raise TypeError(f"arg is neither SymInt/int nor torch.Tensor, {arg}")
+            # It's better to produce a slightly wrong repro string than none
+            # at all
+            writer.unsupported(placeholder, arg)
 
     model_str += "\n".join(writer.lines()) + "\n"
 
@@ -265,6 +326,7 @@ def save_graph_repro(
     accuracy=None,
     tracing_mode=None,
     check_str=None,
+    stable_hash=False,
 ):
     if any(
         isinstance(arg, torch.fx.experimental._backward_state.BackwardState)
@@ -274,12 +336,14 @@ def save_graph_repro(
             "Repro is not generated due to existence of BackwardState in graph input"
         )
         return
+
     fd.write(
         generate_compiler_repro_string(
             gm,
             args,
             stable_output=stable_output,
             save_dir=save_dir,
+            stable_hash=stable_hash,
         )
     )
     if accuracy is None:
@@ -322,7 +386,6 @@ def dump_compiler_graph_state(gm, args, compiler_name, *, accuracy=None):
             BuckTargetWriter(file_name).write()
     except OSError:
         log.warning("No write permissions for %s", repro_path)
-        pass
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
@@ -430,6 +493,7 @@ def inductor_fails(fx_g, args, check_str=None):
 
     try:
         compile_mod = compile_fx_inner(fx_g, args)
+        assert not isinstance(compile_mod, str)
         compile_mod(args)
         sync()
     except Exception as e:
@@ -521,7 +585,7 @@ ACCURACY_FAILS: Dict[str, Callable[[nn.Module, Any], bool]] = {
 def repro_minifier_query(options, mod, load_args):
     mod, args = repro_common(options, mod, load_args)
     fail_fn = functools.partial(
-        ACCURACY_FAILS[options.accuracy], check_str=options.check_str
+        ACCURACY_FAILS[options.accuracy], check_str=options.check_str  # type: ignore[call-arg]
     )
     if fail_fn(mod, args):
         sys.exit(1)
@@ -599,6 +663,7 @@ def repro_analyze(options, mod, load_args):
     with intermediate_hook(save_hook), tqdm(
         desc="Saving inductor intermediates", total=total
     ) as pbar:
+        assert not isinstance(compiled, str)
         compiled(new_args)
         assert not new_args
 
@@ -628,7 +693,7 @@ def repro_analyze(options, mod, load_args):
             assert not new_args
 
     class WriterInterp(fx.Interpreter):
-        def __init__(self, mod, subdir):
+        def __init__(self, mod, subdir) -> None:
             super().__init__(mod)
             self.subdir = subdir
 
@@ -715,6 +780,7 @@ def repro_run(options, mod, load_args):
     from torch.cuda import synchronize
 
     compiled = compile_fx_inner(mod, args)
+    assert not isinstance(compiled, str)
 
     if options.accuracy != "":
         # We don't really respect --accuracy vs --strict-accuracy here, it
@@ -729,14 +795,16 @@ def repro_run(options, mod, load_args):
             raise AccuracyError("Bad accuracy detected")
     else:
         need_sync = False
+
         for arg in args:
             if isinstance(arg, torch.Tensor) and arg.is_cuda:
                 need_sync = True
                 break
-        ref = compiled(list(args))
+
+        compiled(list(args))
+
         if need_sync:
             synchronize()  # ensure segfaults are surfaced
-    return lambda: compiled(list(args))
 
 
 # TODO: lazily load the inputs or something, rather than cloning them

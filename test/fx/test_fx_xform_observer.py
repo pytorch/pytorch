@@ -6,7 +6,6 @@ import tempfile
 import torch
 from torch.fx import subgraph_rewriter, symbolic_trace
 from torch.fx.passes.graph_transform_observer import GraphTransformObserver
-
 from torch.testing._internal.common_utils import TestCase
 
 
@@ -35,7 +34,9 @@ class TestGraphTransformObserver(TestCase):
 
         log_url = tempfile.mkdtemp()
 
-        with GraphTransformObserver(traced, "replace_neg_with_relu", log_url) as ob:
+        with GraphTransformObserver(
+            traced, "replace_neg_with_relu", log_url=log_url
+        ) as ob:
             subgraph_rewriter.replace_pattern(traced, pattern, replacement)
 
             self.assertTrue("relu" in ob.created_nodes)

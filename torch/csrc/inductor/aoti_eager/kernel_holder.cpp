@@ -5,6 +5,8 @@
 
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <torch/csrc/Dtype.h>
+#include <torch/csrc/Layout.h>
+#include <torch/csrc/MemoryFormat.h>
 #include <torch/csrc/PyInterpreter.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/inductor/aoti_runner/model_container_runner_cpu.h>
@@ -14,7 +16,6 @@
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
 
 #include <ATen/core/jit_type.h>
-#include <torch/csrc/inductor/aoti_runner/model_container_runner_cpu.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
 
@@ -57,109 +58,132 @@ inline void unpack_optional_tensor_list_ivalue(
   }
 }
 
-inline void unpack_scalar_ivalue(
-    const c10::IValue& ivalue,
-    const c10::Device& device,
-    std::vector<at::Tensor>& inputs) {
-  inputs.push_back(at::scalar_tensor(
-      ivalue.toScalar(),
-      c10::TensorOptions().device(device).dtype(ivalue.toScalar().type())));
+std::vector<at::Tensor> unpack_tensors(
+    const std::vector<c10::Argument>& arguments,
+    const torch::jit::Stack& stack,
+    const c10::Device& device) {
+  std::vector<at::Tensor> inputs;
+  for (size_t idx = 0; idx < stack.size(); idx++) {
+    const auto& ivalue = stack[idx];
+    const auto& ivalue_arg = arguments[idx];
+    if (ivalue.isTensor()) {
+      unpack_tensor_ivalue(ivalue, device, inputs);
+    } else if (ivalue.isTensorList()) {
+      unpack_tensor_list_ivalue(ivalue, device, inputs);
+    } else if (ivalue.isOptionalTensorList()) {
+      unpack_optional_tensor_list_ivalue(ivalue, device, inputs);
+    } else if (
+        *ivalue_arg.real_type() ==
+        *c10::getTypePtr<std::optional<at::Tensor>>()) {
+      // ivalue is std::optional<at::Tensor>
+      unpack_optional_tensor_ivalue(ivalue, device, inputs);
+    }
+  }
+  return inputs;
 }
 
-bool unpack_ivalue(
+// Find the first positional argument that isn't defaulted
+bool is_default_value(
     const c10::Argument& argument,
-    const c10::IValue& ivalue,
-    const c10::Device& device,
-    std::vector<at::Tensor>& inputs) {
-  if (ivalue.isTensor()) {
-    unpack_tensor_ivalue(ivalue, device, inputs);
-  } else if (ivalue.isTensorList()) {
-    unpack_tensor_list_ivalue(ivalue, device, inputs);
-  } else if (ivalue.isOptionalTensorList()) {
-    unpack_optional_tensor_list_ivalue(ivalue, device, inputs);
-  } else if (ivalue.isScalar()) {
-    // ivalue is scalar
-    unpack_scalar_ivalue(ivalue, device, inputs);
-  } else if (
-      *argument.real_type() == *c10::getTypePtr<std::optional<at::Tensor>>()) {
-    // ivalue is std::optional<at::Tensor>
-    unpack_optional_tensor_ivalue(ivalue, device, inputs);
-  } else {
-    // Unsupport IValue type.
+    const c10::IValue& ivalue) {
+  if (!argument.default_value().has_value()) {
+    return false;
+  }
+  const auto& default_ivalue = *argument.default_value();
+  if (default_ivalue != ivalue) {
     return false;
   }
 
   return true;
 }
 
-bool unpack_tensors(
+std::vector<ParameterMetadata> unpack_input_parameters(
     const std::vector<c10::Argument>& arguments,
-    const torch::jit::Stack& stack,
-    const c10::Device& device,
-    std::vector<at::Tensor>& inputs,
-    bool with_scalar = false) {
+    const torch::jit::Stack& stack) {
+  std::vector<ParameterMetadata> inputs_metadata;
+  // Represent the order of argument and skip default parameter
+  int64_t arg_order = 0;
   for (size_t idx = 0; idx < stack.size(); idx++) {
-    if (!with_scalar && stack[idx].isScalar()) {
+    // By default, the parameter will not be cached if its value is the default
+    // value.
+    //   - produce_aoti_kernel_lib utilizes parseIValuesToPyArgsKwargs to get
+    //   args and kwargs.
+    //   - parseIValuesToPyArgsKwargs skips the parameter if its value is the
+    //   default value.
+    if (is_default_value(arguments[idx], stack[idx])) {
       continue;
     }
 
-    if (!unpack_ivalue(arguments[idx], stack[idx], device, inputs)) {
-      return false;
-    }
-  }
-
-  return true;
-}
-
-std::vector<size_t> get_tensor_parameter_index(
-    const std::vector<c10::Argument>& arguments,
-    const torch::jit::Stack& stack) {
-  std::vector<size_t> tensor_parameter_index;
-  for (size_t idx = 0; idx < stack.size(); idx++) {
-    if (stack[idx].isScalar() || stack[idx].isTensor()) {
-      // scalar and tensor
-      tensor_parameter_index.push_back(idx);
+    if (stack[idx].isScalar()) {
+      // Beyond c10::Scalar, the floating value and interger value are also
+      // represented as Scalar.
+      inputs_metadata.emplace_back(stack[idx].toScalar(), arg_order);
     } else if (stack[idx].isTensorList()) {
       // tensor list
-      std::fill_n(
-          std::back_inserter(tensor_parameter_index),
-          stack[idx].toListRef().size(),
-          idx);
+      inputs_metadata.emplace_back(stack[idx].toTensorList().vec(), arg_order);
     } else if (stack[idx].isOptionalTensorList()) {
       // optional tensor list: std::vector<std::optional<at::Tensor>>
+      std::vector<at::Tensor> tensor_list;
       for (const auto& item : stack[idx].toListRef()) {
         if (item.toOptional<at::Tensor>().has_value()) {
-          tensor_parameter_index.push_back(idx);
+          tensor_list.push_back(item.toOptional<at::Tensor>().value());
         }
       }
+      inputs_metadata.emplace_back(tensor_list, arg_order);
     } else if (
         *arguments[idx].real_type() ==
         *c10::getTypePtr<std::optional<at::Tensor>>()) {
       // optional tensor
       if (stack[idx].toOptional<at::Tensor>().has_value()) {
-        tensor_parameter_index.push_back(idx);
+        inputs_metadata.emplace_back(
+            stack[idx].toOptional<at::Tensor>().value(), arg_order);
       }
+    } else if (stack[idx].isTensor()) {
+      inputs_metadata.emplace_back(stack[idx].toTensor(), arg_order);
+    } else if (stack[idx].isString()) {
+      inputs_metadata.emplace_back(stack[idx].toStringRef(), arg_order);
+    } else if (stack[idx].isBool()) {
+      inputs_metadata.emplace_back(c10::Scalar(stack[idx].toBool()), arg_order);
+    } else if (stack[idx].isDevice()) {
+      inputs_metadata.emplace_back(stack[idx].toDevice(), arg_order);
+    } else {
+      TORCH_CHECK_NOT_IMPLEMENTED(
+          false,
+          "Not implemented for operations that contain a parameter which is ",
+          "not one of the following types: at::Tensor, at::TensorList, ",
+          "std::optional<at::Tensor>, std::vector<std::optional<at::Tensor>> and c10::Scalar.",
+          "The input type is ",
+          stack[idx].type()->str());
     }
+
+    arg_order++;
   }
 
-  return tensor_parameter_index;
+  return inputs_metadata;
 }
 
 } // namespace
 
 AOTIPythonKernelHolder::AOTIPythonKernelHolder(
     c10::DispatchKey dispatch_key,
-    c10::string_view ns,
-    c10::string_view op_name_with_overload)
+    std::string_view ns,
+    std::string_view op_name_with_overload)
     : dispatch_key_(dispatch_key),
       ns_(std::string(ns)),
       op_name_with_overload_(std::string(op_name_with_overload)),
       device_(c10::dispatchKeyToDeviceType(dispatch_key_), 0),
       pyinterpreter_(getPyInterpreter()) {
+  auto device_name = c10::DeviceTypeName(device_.type());
+  auto registered_aoti_runner = getAOTIModelRunnerRegistry();
   TORCH_CHECK(
-      (device_.type() == c10::DeviceType::CPU) ||
-          (device_.type() == c10::DeviceType::CUDA),
-      "Unsupported device type");
+      device_.type() == c10::DeviceType::CUDA ||
+          device_.type() == c10::DeviceType::CPU ||
+          registered_aoti_runner.find(device_name) !=
+              registered_aoti_runner.end(),
+      "AOTI for eager does not support ",
+      c10::DeviceTypeName(device_.type()),
+      " now.");
+
   init_aoti_kernel_cache();
 }
 
@@ -167,9 +191,9 @@ void AOTIPythonKernelHolder::operator()(
     const c10::OperatorHandle& op,
     c10::DispatchKeySet keyset,
     torch::jit::Stack* stack) {
-  AOTIKernelState kernel_state;
-  if (cache_lookup(op, keyset, stack, kernel_state)) {
-    cache_hit(kernel_state, op, keyset, stack);
+  AOTIKernelMetadata aoti_kernel_metadata;
+  if (cache_lookup(op, keyset, stack, aoti_kernel_metadata)) {
+    cache_hit(aoti_kernel_metadata, op, keyset, stack);
   } else {
     cache_miss(op, keyset, stack);
   }
@@ -179,7 +203,7 @@ bool AOTIPythonKernelHolder::cache_lookup(
     const c10::OperatorHandle& op,
     const c10::DispatchKeySet& keyset,
     const torch::jit::Stack* stack,
-    AOTIKernelState& kernel_state) {
+    AOTIKernelMetadata& aoti_kernel_metadata) {
   TORCH_CHECK_NOT_IMPLEMENTED(
       op.schema().returns().size() == 1,
       "Not implemented for operations that return either multiple values or no value.");
@@ -187,108 +211,30 @@ bool AOTIPythonKernelHolder::cache_lookup(
       op.schema().returns()[0].type()->isSubtypeOf(c10::TensorType::get()),
       "Not implemented for operations that return a non-Tensor value.");
 
-  std::vector<at::Tensor> inputs;
-  auto res =
-      unpack_tensors(op.schema().arguments(), *stack, device_, inputs, true);
-  TORCH_CHECK_NOT_IMPLEMENTED(
-      res && inputs.size() > 0,
-      "Not implemented for operations that contain a parameter which is ",
-      "not one of the following types: at::Tensor, at::TensorList, ",
-      "std::optional<at::Tensor>, std::vector<std::optional<at::Tensor>>.");
-
-  auto tensor_parameter_index =
-      get_tensor_parameter_index(op.schema().arguments(), *stack);
-  TORCH_INTERNAL_ASSERT(tensor_parameter_index.size() == inputs.size());
-  auto inputs_metadata = get_inputs_metadata(
-      inputs, op.schema().arguments(), tensor_parameter_index);
-  auto aoti_kernel_state = aoti_kernel_cache_.find(inputs_metadata);
-  if (aoti_kernel_state == aoti_kernel_cache_.end()) {
-    return false;
-  }
-
-  if (aoti_kernel_state->second.tensor_checks_.size() != inputs.size()) {
-    return false;
-  }
-
-  torch::dynamo::LocalState local_state;
-  local_state.overrideDispatchKeySet(c10::DispatchKeySet(dispatch_key_));
-
-  for (size_t i = 0; i < inputs.size(); ++i) {
-    bool pass = aoti_kernel_state->second.tensor_checks_[i].check(
-        local_state, inputs[i]);
-    if (!pass) {
-      return false;
+  auto inputs_metadata =
+      unpack_input_parameters(op.schema().arguments(), *stack);
+  for (const auto& aoti_kernel_cache : aoti_kernel_cache_) {
+    if (aoti_kernel_cache.check(inputs_metadata)) {
+      aoti_kernel_metadata = aoti_kernel_cache;
+      return true;
     }
   }
 
-  kernel_state = aoti_kernel_state->second;
-  return true;
+  return false;
 }
 
 void AOTIPythonKernelHolder::cache_hit(
-    const AOTIKernelState& kernel_state,
+    const AOTIKernelMetadata& aoti_kernel_metadata,
     const c10::OperatorHandle& op,
     const c10::DispatchKeySet& keyset,
     torch::jit::Stack* stack) {
-  std::vector<at::Tensor> inputs;
-  unpack_tensors(op.schema().arguments(), *stack, device_, inputs);
+  auto inputs = unpack_tensors(op.schema().arguments(), *stack, device_);
   torch::jit::drop(*stack, op.schema().arguments().size());
 
-  auto outputs = kernel_state.kernel_runner_->run(inputs);
+  auto outputs = aoti_kernel_metadata.kernel_runner_->run(inputs);
   for (auto& output : outputs) {
-    stack->push_back(output);
+    stack->emplace_back(output);
   }
-}
-
-AOTIKernelMetadata AOTIPythonKernelHolder::get_inputs_metadata(
-    const std::vector<at::Tensor>& inputs,
-    const std::vector<c10::Argument>& inputs_argument,
-    const std::vector<size_t>& inputs_argument_index) {
-  AOTIKernelMetadata inputs_metadata;
-  for (size_t idx = 0; idx < inputs.size(); ++idx) {
-    auto input = inputs[idx];
-    auto input_info = inputs_argument[inputs_argument_index[idx]];
-
-    auto device = input.device();
-    if (device.is_cpu()) {
-      // If the device is CPU, set the device index to -1.
-      device = c10::Device(device.type(), -1);
-    }
-
-    c10::Scalar scalar_value((double)1.0);
-    auto tensor_type = input.scalar_type();
-
-    bool is_scalar = input_info.type()->isSubtypeOf(*c10::NumberType::get());
-    if (is_scalar) {
-      if (c10::isFloatingType(input.scalar_type())) {
-        auto scalar_numeric_value = input.item().toDouble();
-        tensor_type = c10::ScalarType::Double;
-        scalar_value = c10::Scalar(scalar_numeric_value);
-      } else if (c10::isIntegralType(input.scalar_type(), false)) {
-        auto scalar_numeric_value = input.item().toUInt64();
-        tensor_type = c10::ScalarType::UInt64;
-        scalar_value = c10::Scalar(scalar_numeric_value);
-      } else if (input.scalar_type() == c10::ScalarType::Bool) {
-        auto scalar_numeric_value = input.item().toBool();
-        tensor_type = c10::ScalarType::Bool;
-        scalar_value = c10::Scalar(scalar_numeric_value);
-      } else {
-        TORCH_CHECK(
-            false,
-            "Unsupported scalar tensor type: ",
-            c10::toString(input.scalar_type()));
-      }
-    }
-
-    inputs_metadata.emplace_back(
-        false,
-        tensor_type,
-        c10::IValue(scalar_value),
-        device,
-        input.sizes().vec(),
-        input.strides().vec());
-  }
-  return inputs_metadata;
 }
 
 void AOTIPythonKernelHolder::init_aoti_kernel_cache() {
@@ -299,10 +245,11 @@ void AOTIPythonKernelHolder::init_aoti_kernel_cache() {
   py::gil_scoped_acquire gil;
 
   py::handle load_aoti_eager_cache_function =
-      py::module::import("torch._inductor.utils").attr("load_aoti_eager_cache");
+      py::module::import("torch._inductor.aoti_eager")
+          .attr("load_aoti_eager_cache");
   TORCH_INTERNAL_ASSERT(
       load_aoti_eager_cache_function.ptr() != nullptr,
-      "Failed to import - torch._inductor.utils.load_aoti_eager_cache");
+      "Failed to import - torch._inductor.aoti_eager.load_aoti_eager_cache");
 
   auto result = py::reinterpret_steal<py::object>(PyObject_CallFunctionObjArgs(
       load_aoti_eager_cache_function.ptr(),
@@ -315,8 +262,46 @@ void AOTIPythonKernelHolder::init_aoti_kernel_cache() {
       "Failed to load AOTI kernel. Operator Name is ",
       op_name_with_overload_);
 
+  auto build_tensor_metadata = [](const py::dict& metadata) -> TensorMetadata {
+    // Access the fields of each metadata dict
+    auto is_dynamic = metadata["is_dynamic"].cast<bool>();
+    auto device_type = metadata["device_type"].cast<std::string>();
+    auto device_index = metadata["device_index"].cast<int8_t>();
+    auto data_type_obj = metadata["dtype"].cast<py::object>();
+    TORCH_INTERNAL_ASSERT(THPDtype_Check(data_type_obj.ptr()));
+    auto data_type =
+        reinterpret_cast<THPDtype*>(data_type_obj.ptr())->scalar_type;
+    auto sizes = metadata["sizes"].cast<std::vector<int64_t>>();
+    auto strides = metadata["strides"].cast<std::vector<int64_t>>();
+    auto requires_grad = metadata["requires_grad"].cast<bool>();
+    auto dispatch_key_set_raw_repr =
+        metadata["dispatch_key_set"].cast<uint64_t>();
+    auto dispatch_key_set = c10::DispatchKeySet(
+        c10::DispatchKeySet::RAW, dispatch_key_set_raw_repr);
+    auto device = c10::Device(device_type);
+    device.set_index(device_index);
+
+    auto tensor_metadata = TensorMetadata(
+        is_dynamic,
+        data_type,
+        device,
+        dispatch_key_set,
+        sizes,
+        strides,
+        requires_grad);
+
+    // Build guard for tensor check
+    torch::dynamo::LocalState state;
+    state.overrideDispatchKeySet(dispatch_key_set);
+    tensor_metadata.build_guard(state);
+
+    return tensor_metadata;
+  };
+
+  TORCH_INTERNAL_ASSERT(py::isinstance<py::list>(result));
   auto kernel_info_list = result.cast<py::list>();
   for (auto kernel_info : kernel_info_list) {
+    TORCH_INTERNAL_ASSERT(py::isinstance<py::dict>(kernel_info));
     auto item_dict = kernel_info.cast<py::dict>();
 
     // Access the kernel_path field
@@ -325,97 +310,130 @@ void AOTIPythonKernelHolder::init_aoti_kernel_cache() {
     // Access the meta_info list
     auto inputs_metadata = item_dict["meta_info"].cast<py::list>();
 
-    std::vector<torch::dynamo::TensorCheck> tensor_checks;
-    std::vector<TensorMetadata> tensor_metadata_list;
-
-    torch::dynamo::LocalState state;
+    std::vector<ParameterMetadata> parameter_metadata_list;
     // Loop over the meta_info list
-    for (auto item : inputs_metadata) {
-      // Convert the handle to a dict
-      auto metadata = item.cast<py::dict>();
-
-      // Access the fields of each metadata dict
-      auto is_dynamic = metadata["is_dynamic"].cast<bool>();
-      auto device_type = metadata["device_type"].cast<std::string>();
-      auto device_index = metadata["device_index"].cast<int8_t>();
-      auto data_type_obj = metadata["dtype"].cast<py::object>();
-      TORCH_INTERNAL_ASSERT(THPDtype_Check(data_type_obj.ptr()));
-      auto data_type =
-          reinterpret_cast<THPDtype*>(data_type_obj.ptr())->scalar_type;
-      auto sizes = metadata["sizes"].cast<std::vector<int64_t>>();
-      auto strides = metadata["strides"].cast<std::vector<int64_t>>();
+    for (auto item_metadata : inputs_metadata) {
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(py::isinstance<py::dict>(item_metadata));
+      auto metadata = item_metadata.cast<py::dict>();
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(metadata.contains("arg_order"));
+      uint64_t arg_idx = metadata["arg_order"].cast<uint64_t>();
       bool is_scalar = metadata.contains("scalar_value");
+      bool is_tensor_list = metadata.contains("tensor_list");
+      bool is_string = metadata.contains("string_value");
+      bool is_device = metadata.contains("device_type_value");
+      bool is_dtype = metadata.contains("dtype_value");
+      bool is_layout = metadata.contains("layout_value");
 
-      std::vector<std::optional<c10::SymInt>> sym_optional_sizes;
-      std::vector<std::optional<c10::SymInt>> sym_optional_strides;
-      for (int64_t size : sizes) {
-        sym_optional_sizes.push_back(std::optional<c10::SymInt>(size));
-      }
-      for (int64_t stride : strides) {
-        sym_optional_strides.push_back(std::optional<c10::SymInt>(stride));
-      }
-
-      // If an input parameter is a scalar, its detailed value is cached.
-      // This is done to ensure correctness during subsequent checks.
-      c10::Scalar scalar_value((double)1.0);
-      if (is_scalar) {
-        if (c10::isFloatingType(data_type)) {
-          auto scalar_numeric_value = metadata["scalar_value"].cast<double>();
-          data_type = c10::ScalarType::Double;
-          scalar_value = c10::Scalar(scalar_numeric_value);
-        } else if (c10::isIntegralType(data_type, false)) {
-          auto scalar_numeric_value = metadata["scalar_value"].cast<int64_t>();
-          data_type = c10::ScalarType::UInt64;
-          scalar_value = c10::Scalar(scalar_numeric_value);
-        } else if (data_type == c10::ScalarType::Bool) {
-          auto scalar_numeric_value = metadata["scalar_value"].cast<bool>();
-          data_type = c10::ScalarType::Bool;
-          scalar_value = c10::Scalar(scalar_numeric_value);
-        } else {
-          TORCH_CHECK(
-              false,
-              "Unsupported scalar tensor type: ",
-              c10::toString(data_type));
+      if (is_tensor_list) {
+        // Tensor List
+        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+            py::isinstance<py::list>(metadata["tensor_list"]));
+        auto tensor_list = metadata["tensor_list"].cast<py::list>();
+        std::vector<TensorMetadata> test_list_metadata;
+        for (auto item_tensor : tensor_list) {
+          TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+              py::isinstance<py::dict>(item_tensor));
+          auto metadata = item_tensor.cast<py::dict>();
+          auto tensor_metadata = build_tensor_metadata(metadata);
+          test_list_metadata.push_back(tensor_metadata);
         }
-      }
+        parameter_metadata_list.emplace_back(test_list_metadata, arg_idx);
+      } else if (is_scalar) {
+        // Scalar
+        auto metadata = item_metadata.cast<py::dict>();
+        auto dtype_obj = metadata["dtype"].cast<py::object>();
+        TORCH_INTERNAL_ASSERT(THPDtype_Check(dtype_obj.ptr()));
+        auto dtype_value =
+            reinterpret_cast<THPDtype*>(dtype_obj.ptr())->scalar_type;
 
-      tensor_metadata_list.emplace_back(
-          is_dynamic,
-          data_type,
-          c10::IValue(scalar_value),
-          c10::Device(c10::Device(device_type).type(), device_index),
-          sizes,
-          strides);
-      tensor_checks.emplace_back(
-          state,
-          nullptr,
-          uint64_t(c10::DispatchKeySet(dispatch_key_).raw_repr()),
-          data_type,
-          c10::DeviceIndex(device_index),
-          sym_optional_sizes,
-          sym_optional_strides);
+        c10::Scalar scalar;
+        if (c10::isFloatingType(dtype_value)) {
+          scalar = metadata["scalar_value"].cast<double>();
+        } else if (c10::isIntegralType(dtype_value, false)) {
+          scalar = metadata["scalar_value"].cast<int64_t>();
+        } else if (dtype_value == c10::kBool) {
+          scalar = metadata["scalar_value"].cast<bool>();
+        } else {
+          TORCH_CHECK_NOT_IMPLEMENTED(
+              false,
+              "Not implemented for operations that contain a scalar parameter which is ",
+              dtype_value);
+        }
+
+        parameter_metadata_list.emplace_back(c10::Scalar(scalar), arg_idx);
+      } else if (is_string) {
+        // String
+        auto metadata = item_metadata.cast<py::dict>();
+        auto str_value = metadata["string_value"].cast<std::string>();
+        parameter_metadata_list.emplace_back(str_value, arg_idx);
+      } else if (is_dtype) {
+        // Dtype
+        auto metadata = item_metadata.cast<py::dict>();
+        auto dtype_value_obj = metadata["dtype_value"].cast<py::object>();
+        TORCH_INTERNAL_ASSERT(THPDtype_Check(dtype_value_obj.ptr()));
+        auto dtype_value =
+            reinterpret_cast<THPDtype*>(dtype_value_obj.ptr())->scalar_type;
+        parameter_metadata_list.emplace_back(
+            c10::Scalar(static_cast<int>(dtype_value)), arg_idx);
+      } else if (is_device) {
+        // Device
+        auto metadata = item_metadata.cast<py::dict>();
+        auto device_type_value =
+            metadata["device_type_value"].cast<std::string>();
+        auto device = c10::Device(device_type_value);
+        if (metadata["device_index_value"].ptr() != Py_None) {
+          auto device_index_value =
+              metadata["device_index_value"].cast<c10::DeviceIndex>();
+          device.set_index(device_index_value);
+        }
+        parameter_metadata_list.emplace_back(device, arg_idx);
+      } else if (is_layout) {
+        auto metadata = item_metadata.cast<py::dict>();
+        auto layout_value_obj = metadata["layout_value"].cast<py::object>();
+        TORCH_INTERNAL_ASSERT(THPLayout_Check(layout_value_obj.ptr()));
+        auto layout_value =
+            reinterpret_cast<THPLayout*>(layout_value_obj.ptr())->layout;
+        parameter_metadata_list.emplace_back(
+            c10::Scalar(static_cast<int>(layout_value)), arg_idx);
+      } else {
+        // Tensor
+        auto metadata = item_metadata.cast<py::dict>();
+        auto tensor_metadata = build_tensor_metadata(metadata);
+        parameter_metadata_list.emplace_back(tensor_metadata, arg_idx);
+      }
     }
 
-    AOTIKernelState aoti_kernel_state;
-    aoti_kernel_state.kernel_runner_ = load_aoti_model_runner(kernel_path);
-    aoti_kernel_state.tensor_checks_ = tensor_checks;
-    aoti_kernel_cache_[tensor_metadata_list] = aoti_kernel_state;
+    AOTIKernelMetadata aoti_kernel_metadata;
+    aoti_kernel_metadata.parameter_metadata_list_ =
+        std::move(parameter_metadata_list);
+    aoti_kernel_metadata.kernel_runner_ = load_aoti_model_runner(kernel_path);
+    aoti_kernel_cache_.push_back(aoti_kernel_metadata);
   }
 }
 
 std::shared_ptr<AOTIModelContainerRunner> AOTIPythonKernelHolder::
     load_aoti_model_runner(const std::string& so_path) {
+  auto device_name = c10::DeviceTypeName(device_.type());
+  auto registered_aoti_runner = getAOTIModelRunnerRegistry();
+  TORCH_CHECK(
+      device_.type() == c10::DeviceType::CUDA ||
+          device_.type() == c10::DeviceType::CPU ||
+          registered_aoti_runner.find(device_name) !=
+              registered_aoti_runner.end(),
+      "AOTI for eager does not support ",
+      c10::DeviceTypeName(device_.type()),
+      " now.");
   if (device_.type() == c10::DeviceType::CUDA) {
 #ifdef USE_CUDA
-    return std::make_shared<AOTIModelContainerRunnerCpu>(so_path);
+    return std::make_shared<AOTIModelContainerRunnerCuda>(so_path);
 #else
     return nullptr;
 #endif
   } else if (device_.type() == c10::DeviceType::CPU) {
     return std::make_shared<AOTIModelContainerRunnerCpu>(so_path);
   } else {
-    TORCH_WARN("Unsupported device type");
-    return nullptr;
+    auto aoti_model_runer_fn = registered_aoti_runner[device_name];
+    return aoti_model_runer_fn(so_path, 1, device_name, "");
   }
 }
 
@@ -425,22 +443,12 @@ void AOTIPythonKernelHolder::cache_miss(
     torch::jit::Stack* stack) {
   auto kernel_lib_path = produce_aoti_kernel_lib(op, keyset, stack);
   std::shared_ptr<AOTIModelContainerRunner> kernel = nullptr;
-  // TODO: To enable the plugin mechanism to allow registration for other
-  // backends
-  if (device_.type() == c10::DeviceType::CPU) {
-    kernel = std::make_shared<AOTIModelContainerRunnerCpu>(kernel_lib_path);
-  } else {
-#ifdef USE_CUDA
-    kernel = std::make_shared<AOTIModelContainerRunnerCuda>(kernel_lib_path);
-#else
-    TORCH_CHECK(false, "Unsupported CUDA device type");
-#endif
-  }
-
-  std::vector<at::Tensor> inputs;
+  kernel = load_aoti_model_runner(kernel_lib_path);
   TORCH_INTERNAL_ASSERT(
-      unpack_tensors(op.schema().arguments(), *stack, device_, inputs),
-      "Failed to unpack tensors for the stack to run the AOTI kernel.");
+      kernel != nullptr,
+      "Unsupported device: ",
+      c10::DeviceTypeName(device_.type()));
+  auto inputs = unpack_tensors(op.schema().arguments(), *stack, device_);
   auto outputs = kernel->run(inputs);
   torch::jit::drop(*stack, op.schema().arguments().size());
   // TODO: Get the output type of this operation and then convert to the
@@ -462,9 +470,12 @@ std::string AOTIPythonKernelHolder::produce_aoti_kernel_lib(
       schema.overload_name().empty() ? "default" : schema.overload_name();
   auto pos = qualified_name.find("::");
   TORCH_INTERNAL_ASSERT(pos != std::string::npos, qualified_name);
-  std::string ns_str(qualified_name.begin(), qualified_name.begin() + pos);
+  std::string ns_str(
+      qualified_name.begin(),
+      qualified_name.begin() + static_cast<ptrdiff_t>(pos));
   std::string func_name(
-      qualified_name.begin() + pos + strlen("::"), qualified_name.end());
+      qualified_name.begin() + static_cast<ptrdiff_t>(pos + strlen("::")),
+      qualified_name.end());
 
   py::gil_scoped_acquire gil;
   py::handle op_py_func = op.getPythonOp(pyinterpreter_, [&]() -> PyObject* {
@@ -487,12 +498,12 @@ std::string AOTIPythonKernelHolder::produce_aoti_kernel_lib(
       overload_name);
 
   py::handle aot_compile_function =
-      py::module::import("torch._inductor.utils")
+      py::module::import("torch._inductor.aoti_eager")
           .attr("aoti_compile_with_persistent_cache");
   TORCH_INTERNAL_ASSERT(
       aot_compile_function.ptr() != nullptr &&
           aot_compile_function.ptr() != Py_None,
-      "Failed to import - torch._inductor.utils.aoti_compile_with_persistent_cache");
+      "Failed to import - torch._inductor.aoti_eager.aoti_compile_with_persistent_cache");
 
   // Pass the python operation to the AOT Inductor to generate the kernel
   // library.

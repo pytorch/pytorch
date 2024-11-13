@@ -3,6 +3,7 @@ import torch.library
 from torch import Tensor
 from torch.autograd import Function
 
+
 if not torch._running_with_deploy():
     _test_lib_def = torch.library.Library("_inductor_test", "DEF")
     _test_lib_def.define(

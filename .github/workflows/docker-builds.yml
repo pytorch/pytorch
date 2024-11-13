@@ -30,8 +30,19 @@ env:
 permissions: read-all
 
 jobs:
+  get-label-type:
+    if: github.repository_owner == 'pytorch'
+    name: get-label-type
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+
   docker-build:
     environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) && 'docker-build' || '' }}
+    needs: get-label-type
     timeout-minutes: 240
     strategy:
       fail-fast: false
@@ -45,18 +56,18 @@ jobs:
           pytorch-linux-focal-cuda12.1-cudnn9-py3-gcc9-inductor-benchmarks,
           pytorch-linux-focal-cuda12.1-cudnn9-py3.12-gcc9-inductor-benchmarks,
           pytorch-linux-focal-cuda11.8-cudnn9-py3-gcc9,
-          pytorch-linux-focal-py3.8-clang10,
+          pytorch-linux-focal-py3.9-clang10,
           pytorch-linux-focal-py3.11-clang10,
           pytorch-linux-focal-py3.12-clang10,
           pytorch-linux-focal-rocm-n-1-py3,
           pytorch-linux-focal-rocm-n-py3,
-          pytorch-linux-jammy-cuda11.8-cudnn9-py3.8-clang12,
-          pytorch-linux-focal-py3-clang9-android-ndk-r21e,
-          pytorch-linux-jammy-py3.8-gcc11,
-          pytorch-linux-jammy-py3.8-gcc11-inductor-benchmarks,
+          pytorch-linux-jammy-cuda11.8-cudnn9-py3.9-clang12,
+          pytorch-linux-jammy-py3.9-gcc11,
+          pytorch-linux-jammy-py3.9-gcc11-inductor-benchmarks,
           pytorch-linux-jammy-py3.12-halide,
           pytorch-linux-jammy-xpu-2024.0-py3,
           pytorch-linux-jammy-py3-clang15-asan,
+          pytorch-linux-jammy-py3-clang18-asan,
           pytorch-linux-focal-py3-clang10-onnx,
           pytorch-linux-focal-linter,
           pytorch-linux-jammy-cuda11.8-cudnn9-py3.9-linter,
@@ -65,7 +76,12 @@ jobs:
         include:
           - docker-image-name: pytorch-linux-jammy-aarch64-py3.10-gcc11
             runner: linux.arm64.2xlarge
-    runs-on: [self-hosted, "${{ matrix.runner }}"]
+          - docker-image-name: pytorch-linux-jammy-aarch64-py3.10-gcc11-inductor-benchmarks
+            runner: linux.arm64.m7g.4xlarge
+            timeout-minutes: 600
+    # Docker uploads fail from LF runners, see https://github.com/pytorch/pytorch/pull/137358
+    # runs-on: "${{ needs.get-label-type.outputs.label-type }}${{ matrix.runner }}"
+    runs-on: "${{ matrix.runner }}"
     env:
       DOCKER_IMAGE_BASE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/${{ matrix.docker-image-name }}
     steps:
@@ -97,7 +113,7 @@ jobs:
         with:
           docker-image: ${{ steps.build-docker-image.outputs.docker-image }}
 
-      - uses: nick-fields/retry@3e91a01664abd3c5cd539100d10d33b9c5b68482
+      - uses: nick-fields/retry@v3.0.0
         name: Push to https://https://ghcr.io/
         id: push-to-ghcr-io
         if: ${{ github.event_name == 'push' }}
@@ -107,7 +123,7 @@ jobs:
           IMAGE_NAME: ${{ matrix.docker-image-name }}
         with:
           shell: bash
-          timeout_minutes: 15
+          timeout_minutes: 30
           max_attempts: 5
           retry_wait_seconds: 90
           command: |
@@ -121,7 +137,7 @@ jobs:
       - name: Chown workspace
         uses: ./.github/actions/chown-workspace
         with:
-          ALPINE_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/${{ (matrix.runner == 'linux.arm64.2xlarge') && 'arm64v8' || 'tool' }}/alpine
+          ALPINE_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/${{ contains(matrix.runner, 'arm64') && 'arm64v8' || 'tool' }}/alpine
         if: always()
 
       - name: Teardown Linux

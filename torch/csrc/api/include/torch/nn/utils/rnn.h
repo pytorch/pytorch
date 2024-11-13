@@ -5,10 +5,7 @@
 
 #include <utility>
 
-namespace torch {
-namespace nn {
-namespace utils {
-namespace rnn {
+namespace torch::nn::utils::rnn {
 
 inline Tensor invert_permutation(const Tensor& permutation) {
   if (!permutation.defined()) {
@@ -244,10 +241,10 @@ inline PackedSequence pack_padded_sequence(
 ///     Tuple of Tensor containing the padded sequence, and a Tensor
 ///     containing the list of lengths of each sequence in the batch.
 inline std::tuple<Tensor, Tensor> pad_packed_sequence(
-    PackedSequence sequence,
+    const PackedSequence& sequence,
     bool batch_first = false,
     double padding_value = 0.0,
-    std::optional<int64_t> total_length = torch::nullopt) {
+    std::optional<int64_t> total_length = std::nullopt) {
   int64_t max_seq_length = sequence.batch_sizes().size(0);
   if (total_length.has_value()) {
     int64_t total_length_val = total_length.value();
@@ -300,6 +297,8 @@ inline std::tuple<Tensor, Tensor> pad_packed_sequence(
 ///     or in
 ///         ``T x B x *`` otherwise
 ///     padding_value (double, optional): value for padded elements. Default: 0.
+///     padding_side (str, optional): the side to pad the sequences on. Default:
+///         "right".
 ///
 /// Returns:
 ///     Tensor of size ``T x B x *`` if `batch_first` is ``false``.
@@ -307,8 +306,9 @@ inline std::tuple<Tensor, Tensor> pad_packed_sequence(
 inline Tensor pad_sequence(
     ArrayRef<Tensor> sequences,
     bool batch_first = false,
-    double padding_value = 0) {
-  return at::pad_sequence(sequences, batch_first, padding_value);
+    double padding_value = 0,
+    c10::string_view padding_side = "right") {
+  return at::pad_sequence(sequences, batch_first, padding_value, padding_side);
 }
 
 /// Packs a list of variable length Tensors
@@ -336,7 +336,7 @@ inline PackedSequence pack_sequence(
     bool enforce_sorted = true) {
   Tensor lengths = torch::empty({(int64_t)sequences.size()}, kInt64);
   for (const auto i : c10::irange(sequences.size())) {
-    lengths[i] = sequences[i].size(0);
+    lengths[static_cast<int64_t>(i)] = sequences[i].size(0);
   }
   return pack_padded_sequence(
       at::pad_sequence(sequences),
@@ -345,7 +345,4 @@ inline PackedSequence pack_sequence(
       /*enforce_sorted=*/enforce_sorted);
 }
 
-} // namespace rnn
-} // namespace utils
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn::utils::rnn

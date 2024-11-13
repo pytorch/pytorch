@@ -3,8 +3,7 @@
 #include <ATen/core/jit_type.h>
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 struct TORCH_API HashType {
   size_t operator()(const TypePtr& type) const;
@@ -16,5 +15,4 @@ struct EqualType {
   bool operator()(const c10::ConstTypePtr& a, const c10::ConstTypePtr& b) const;
 };
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

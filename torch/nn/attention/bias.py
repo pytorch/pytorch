@@ -9,6 +9,7 @@ import torch.nn.functional as F
 from torch.backends.cuda import (
     can_use_efficient_attention,
     can_use_flash_attention,
+    is_flash_attention_available,
     SDPAParams,
 )
 from torch.nn.attention import _raise_kernel_warnings
@@ -23,6 +24,7 @@ from torch.nn.attention._utils import (
 __all__ = ["causal_upper_left", "causal_lower_right", "CausalVariant", "CausalBias"]
 
 
+torch._dynamo.allow_in_graph(is_flash_attention_available)
 torch._dynamo.allow_in_graph(can_use_flash_attention)
 torch._dynamo.allow_in_graph(can_use_efficient_attention)
 torch._dynamo.allow_in_graph(SDPAParams)
@@ -173,6 +175,7 @@ class CausalBias(torch.Tensor):
         dropout_p: float = 0.0,
         is_causal: bool = False,
         scale: Optional[float] = None,
+        enable_gqa: bool = False,
     ) -> torch.Tensor:
         r"""
         Handles the logic for computing attention with the specified causal bias.
@@ -189,6 +192,7 @@ class CausalBias(torch.Tensor):
                 are set.
             scale (optional float): Scaling factor applied prior to softmax. If None, the default value is set
                 to :math:`\frac{1}{\sqrt{E}}`.
+            enable_gqa (optional bool): If set to True, Grouped Query Attention (GQA) is enabled, by default it is set to False.
 
         Returns:
             output (Tensor): Attention output; shape :math:`(N, ..., L, Ev)`.
@@ -212,10 +216,13 @@ class CausalBias(torch.Tensor):
                 dropout_p=dropout_p,
                 is_causal=True,
                 scale=scale,
+                enable_gqa=enable_gqa,
             )
         elif attn_mask.variant == CausalVariant.LOWER_RIGHT:
             _validate_sdpa_input(query, key, value, None, dropout_p, is_causal, scale)
-            sdpa_params = SDPAParams(query, key, value, None, dropout_p, is_causal)
+            sdpa_params = SDPAParams(
+                query, key, value, None, dropout_p, is_causal, enable_gqa
+            )
             if can_use_flash_attention(sdpa_params):
                 needs_padding = query.size(-1) % 8 != 0
                 og_head_size = query.size(-1)
@@ -264,6 +271,7 @@ class CausalBias(torch.Tensor):
                     dropout_p=dropout_p,
                     is_causal=False,
                     scale=scale,
+                    enable_gqa=enable_gqa,
                 )
         else:
             raise ValueError(
@@ -281,7 +289,7 @@ class CausalBias(torch.Tensor):
             )
         return cls._dispatch(*args, **kwargs)
 
-    def __repr__(self):
+    def __repr__(self):  # type:ignore[override]
         return self._materialize().__repr__()
 
 

@@ -13,8 +13,7 @@
 #include <torch/csrc/jit/passes/peephole_non_tensor.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // Conservatively compare two optionals. If both are undefined, assume
 // they aren't equal
@@ -25,10 +24,9 @@ static bool mustBeEqual(const std::optional<T>& a, const std::optional<T>& b) {
 
 struct PeepholeOptimizeImpl {
   PeepholeOptimizeImpl(
-      // NOLINTNEXTLINE(modernize-pass-by-value)
-      const std::shared_ptr<Graph>& graph,
+      std::shared_ptr<Graph> graph,
       bool disable_shape_peepholes)
-      : graph_(graph), shape_peepholes_(!disable_shape_peepholes) {}
+      : graph_(std::move(graph)), shape_peepholes_(!disable_shape_peepholes) {}
 
   bool run() {
     bool changed = optimizeBlock(graph_->block());
@@ -185,14 +183,14 @@ struct PeepholeOptimizeImpl {
           shape_peepholes_) {
         if (auto ptt = node->inputs().at(0)->type()->cast<TensorType>()) {
           if (auto maybe_ndim = ptt->sizes().size()) {
-            auto ndim = *maybe_ndim;
+            auto ndim = static_cast<int64_t>(*maybe_ndim);
             auto maybe_index = toIValue(node->inputs().at(1));
             if (!maybe_index) {
               continue;
             }
             int64_t index = maybe_index->toInt();
             int64_t norm_index = index < 0 ? ndim + index : index;
-            if (norm_index >= 0 && norm_index < static_cast<int64_t>(ndim) &&
+            if (norm_index >= 0 && norm_index < ndim &&
                 ptt->sizes()[norm_index]) {
               WithInsertPoint guard(node);
               IValue ival(*ptt->sizes()[norm_index]);
@@ -468,5 +466,4 @@ bool PeepholeOptimize(
   return changed;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

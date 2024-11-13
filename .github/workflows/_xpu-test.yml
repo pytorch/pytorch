@@ -143,6 +143,7 @@ jobs:
           PYTORCH_RETRY_TEST_CASES: 1
           PYTORCH_OVERRIDE_FLAKY_SIGNAL: 1
           CONTINUE_THROUGH_ERROR: ${{ steps.keep-going.outputs.keep-going }}
+          TEST_SHOWLOCALS: ${{ steps.keep-going.outputs.ci-test-showlocals }}
           VERBOSE_TEST_LOGS: ${{ steps.keep-going.outputs.ci-verbose-test-logs }}
           NO_TEST_TIMEOUT: ${{ steps.keep-going.outputs.ci-no-test-timeout }}
           NO_TD: ${{ steps.keep-going.outputs.ci-no-td }}
@@ -151,6 +152,8 @@ jobs:
           NUM_TEST_SHARDS: ${{ matrix.num_shards }}
           REENABLED_ISSUES: ${{ steps.keep-going.outputs.reenabled-issues }}
           SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
+          SCCACHE_REGION: us-east-1
+          SCCACHE_S3_KEY_PREFIX: ${{ github.workflow }}
           DOCKER_IMAGE: ${{ inputs.docker-image }}
           XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
           PYTORCH_TEST_CUDA_MEM_LEAK_CHECK: ${{ matrix.mem_leak_check && '1' || '0' }}
@@ -158,6 +161,8 @@ jobs:
           TESTS_TO_INCLUDE: ${{ inputs.tests-to-include }}
         timeout-minutes: ${{ fromJson(steps.test-timeout.outputs.timeout) }}
         run: |
+          # Fetch aws credential from IMDs
+          eval "$(python3 .github/scripts/get_aws_session_tokens.py)"
           set -x
 
           TEST_COMMAND=.ci/pytorch/test.sh
@@ -180,6 +185,9 @@ jobs:
             -e BRANCH \
             -e SHA1 \
             -e AWS_DEFAULT_REGION \
+            -e AWS_ACCESS_KEY_ID \
+            -e AWS_SECRET_ACCESS_KEY \
+            -e AWS_SESSION_TOKEN \
             -e IN_WHEEL_TEST \
             -e SHARD_NUMBER \
             -e TEST_CONFIG \
@@ -189,10 +197,13 @@ jobs:
             -e PYTORCH_OVERRIDE_FLAKY_SIGNAL \
             -e CONTINUE_THROUGH_ERROR \
             -e VERBOSE_TEST_LOGS \
+            -e TEST_SHOWLOCALS \
             -e NO_TEST_TIMEOUT \
             -e NO_TD \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \
+            -e SCCACHE_REGION \
+            -e SCCACHE_S3_KEY_PREFIX \
             -e XLA_CLANG_CACHE_S3_BUCKET_NAME \
             -e PYTORCH_TEST_CUDA_MEM_LEAK_CHECK \
             -e PYTORCH_TEST_RERUN_DISABLED_TESTS \
@@ -259,7 +270,7 @@ jobs:
           docker stop "${{ env.CONTAINER_NAME }}"
 
       - name: Store Core dumps on GitHub
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         if: failure()
         with:
           name: coredumps-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}

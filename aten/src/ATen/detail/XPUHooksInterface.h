@@ -7,16 +7,15 @@
 #include <ATen/core/Generator.h>
 #include <ATen/detail/AcceleratorHooksInterface.h>
 
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-parameter")
 
 namespace at {
 
 struct TORCH_API XPUHooksInterface : AcceleratorHooksInterface{
   ~XPUHooksInterface() override = default;
 
-  virtual void initXPU() const {
-    TORCH_CHECK(
-        false,
-        "Cannot initialize XPU without ATen_xpu library.");
+  void init() const override {
+    TORCH_CHECK(false, "Cannot initialize XPU without ATen_xpu library.");
   }
 
   virtual bool hasXPU() const {
@@ -33,12 +32,15 @@ struct TORCH_API XPUHooksInterface : AcceleratorHooksInterface{
     TORCH_CHECK(false, "Cannot get XPU global device index without ATen_xpu library.");
   }
 
-  virtual Generator getXPUGenerator(C10_UNUSED DeviceIndex device_index = -1) const {
+  virtual Generator getXPUGenerator(
+      [[maybe_unused]] DeviceIndex device_index = -1) const {
     TORCH_CHECK(false, "Cannot get XPU generator without ATen_xpu library.");
   }
 
-  virtual const Generator& getDefaultXPUGenerator(C10_UNUSED DeviceIndex device_index = -1) const {
-    TORCH_CHECK(false, "Cannot get default XPU generator without ATen_xpu library.");
+  virtual const Generator& getDefaultXPUGenerator(
+      [[maybe_unused]] DeviceIndex device_index = -1) const {
+    TORCH_CHECK(
+        false, "Cannot get default XPU generator without ATen_xpu library.");
   }
 
   virtual DeviceIndex getNumGPUs() const {
@@ -49,7 +51,7 @@ struct TORCH_API XPUHooksInterface : AcceleratorHooksInterface{
     TORCH_CHECK(false, "Cannot get current device on XPU without ATen_xpu library.");
   }
 
-  virtual Device getDeviceFromPtr(void* /*data*/) const {
+  Device getDeviceFromPtr(void* /*data*/) const override {
     TORCH_CHECK(false, "Cannot get device of pointer on XPU without ATen_xpu library.");
   }
 
@@ -57,22 +59,22 @@ struct TORCH_API XPUHooksInterface : AcceleratorHooksInterface{
     TORCH_CHECK(false, "Cannot synchronize XPU device without ATen_xpu library.");
   }
 
-  virtual Allocator* getPinnedMemoryAllocator() const  {
+  Allocator* getPinnedMemoryAllocator() const override {
     TORCH_CHECK(false, "Cannot get XPU pinned memory allocator without ATen_xpu library.");
   }
 
-  virtual bool isPinnedPtr(const void* /*data*/) const {
+  bool isPinnedPtr(const void* data) const override {
     return false;
   }
 
-  virtual bool hasPrimaryContext(DeviceIndex /*device_index*/) const override{
+  bool hasPrimaryContext(DeviceIndex device_index) const override {
     TORCH_CHECK(false, "Cannot query primary context without ATen_xpu library.");
   }
 };
 
 struct TORCH_API XPUHooksArgs {};
 
-C10_DECLARE_REGISTRY(XPUHooksRegistry, XPUHooksInterface, XPUHooksArgs);
+TORCH_DECLARE_REGISTRY(XPUHooksRegistry, XPUHooksInterface, XPUHooksArgs);
 #define REGISTER_XPU_HOOKS(clsname) \
   C10_REGISTER_CLASS(XPUHooksRegistry, clsname, clsname)
 
@@ -80,3 +82,4 @@ namespace detail {
 TORCH_API const XPUHooksInterface& getXPUHooks();
 } // namespace detail
 } // namespace at
+C10_DIAGNOSTIC_POP()

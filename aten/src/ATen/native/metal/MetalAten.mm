@@ -70,11 +70,11 @@ static Tensor& metal_copy_impl_(Tensor& dst, const Tensor& src) {
 
 static Tensor empty(
     c10::SymIntArrayRef sym_size,
-    optional<ScalarType> dtype,
-    optional<Layout> layout,
-    optional<Device> device,
-    optional<bool> pin_memory,
-    c10::optional<MemoryFormat> memory_format) {
+    std::optional<ScalarType> dtype,
+    std::optional<Layout> layout,
+    std::optional<Device> device,
+    std::optional<bool> pin_memory,
+    std::optional<MemoryFormat> memory_format) {
   auto size = C10_AS_INTARRAYREF_SLOW(sym_size);
   TORCH_CHECK(
       !pin_memory.has_value(),
@@ -90,10 +90,10 @@ static Tensor empty(
 static Tensor empty_strided(
     IntArrayRef size,
     IntArrayRef stride,
-    optional<ScalarType> dtype,
-    optional<Layout> layout,
-    optional<Device> device,
-    optional<bool> pin_memory) {
+    std::optional<ScalarType> dtype,
+    std::optional<Layout> layout,
+    std::optional<Device> device,
+    std::optional<bool> pin_memory) {
   TORCH_CHECK(
       !pin_memory.has_value() || !pin_memory.value(),
       "'pin_memory' argument is incompatible with Metal tensor");

@@ -25,7 +25,6 @@ from torch.distributed._shard.sharded_tensor import (
     Shard,
     ShardedTensor,
 )
-from torch.distributed._tensor import DTensor
 from torch.distributed.device_mesh import _mesh_resources
 from torch.distributed.fsdp._common_utils import (
     _FSDPState,
@@ -49,6 +48,7 @@ from torch.distributed.fsdp.api import (
     ShardingStrategy,
     StateDictType,
 )
+from torch.distributed.tensor import DTensor
 from torch.distributed.utils import _replace_by_prefix
 
 from ._fsdp_extensions import (
@@ -65,12 +65,10 @@ logger = logging.getLogger(__name__)
 
 
 def _should_unshard_params(fsdp_state: _FSDPState) -> bool:
-    if fsdp_state.sharding_strategy == ShardingStrategy.NO_SHARD and (
-        _is_composable(fsdp_state) or fsdp_state._use_orig_params
-    ):
-        return False
-    else:
-        return True
+    return not (
+        fsdp_state.sharding_strategy == ShardingStrategy.NO_SHARD
+        and (_is_composable(fsdp_state) or fsdp_state._use_orig_params)
+    )
 
 
 def _convert_to_wrapped_module_name(module_name: str) -> str:
@@ -299,7 +297,7 @@ def _full_pre_state_dict_hook(
     ``nn.Module``.
     """
     if getattr(fsdp_state, "_device_mesh", False):
-        parent_mesh = _mesh_resources.get_parent_mesh(fsdp_state._device_mesh)
+        _mesh_resources.get_root_mesh(fsdp_state._device_mesh)
 
     _common_pre_state_dict_hook(module, fsdp_state)
     _common_unshard_pre_state_dict_hook(
@@ -340,7 +338,7 @@ def _full_post_state_dict_hook(
         # Clone parameters before exiting the `_unshard_fsdp_state_params()` context.
         if not getattr(state_dict[fqn], "_has_been_cloned", False):
             try:
-                state_dict[fqn] = state_dict[fqn].clone().detach()
+                state_dict[fqn] = state_dict[fqn].detach().clone()
                 state_dict[fqn]._has_been_cloned = True  # type: ignore[attr-defined]
             except BaseException as e:
                 warnings.warn(
@@ -667,9 +665,9 @@ def _sharded_pre_load_state_dict_hook(
             if param.device != fsdp_state._device_mesh.device_type:
                 param = param.to(fsdp_state._device_mesh.device_type)
 
-            parent_mesh = _mesh_resources.get_parent_mesh(fsdp_state._device_mesh)
+            root_mesh = _mesh_resources.get_root_mesh(fsdp_state._device_mesh)
             local_tensor = _ext_all_gather_dtensor(
-                param, parent_mesh, fsdp_state._fsdp_extension
+                param, root_mesh, fsdp_state._fsdp_extension
             )
 
             if fqn_to_param_ext.get(fqn) is not None:
@@ -732,13 +730,18 @@ def _post_state_dict_hook(
         for key, tensor in sorted(processed_state_dict.items()):
             if key.startswith(prefix) and isinstance(tensor, torch.Tensor):
                 local_shape = tensor.shape
+                device = None
                 if isinstance(tensor, ShardedTensor):
                     local_shape = None
                     shards = tensor.local_shards()
                     if shards:
                         local_shape = shards[0].tensor.shape
+                        device = shards[0].tensor.device
                 elif isinstance(tensor, DTensor):
                     local_shape = tensor.to_local().shape
+                    device = tensor.device
+                else:
+                    device = tensor.device
                 logger.info(
                     "FQN=%s: type=%s, shape=%s, local_shape=%s, dtype=%s, device=%s",
                     key,
@@ -746,7 +749,7 @@ def _post_state_dict_hook(
                     tensor.shape,
                     local_shape,
                     tensor.dtype,
-                    tensor.device,
+                    device,
                 )
 
     return processed_state_dict

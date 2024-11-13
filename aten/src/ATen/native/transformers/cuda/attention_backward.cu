@@ -85,15 +85,15 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
   const int non_null_window_left = window_size_left.has_value() ? window_size_left.value() : -1;
   const int non_null_window_right = window_size_right.has_value() ? window_size_right.value() : -1;
 
-  std::optional<at::Tensor> dq{c10::nullopt};
-  std::optional<at::Tensor> dk{c10::nullopt};
-  std::optional<at::Tensor> dv{c10::nullopt};
+  std::optional<at::Tensor> dq{std::nullopt};
+  std::optional<at::Tensor> dk{std::nullopt};
+  std::optional<at::Tensor> dv{std::nullopt};
 
   //  The kernel computes irregardless we will drop for this functions return
   Tensor grad_softmax;
 
   // Currently unused args:
-  std::optional<at::Tensor> alibi_slopes{c10::nullopt};
+  std::optional<at::Tensor> alibi_slopes{std::nullopt};
 
   bool determinisitic{false};
   auto& ctx = at::globalContext();
@@ -180,7 +180,7 @@ std::tuple<Tensor, Tensor, Tensor> _scaled_dot_product_cudnn_attention_backward_
     const int64_t max_k,
     double dropout_p,
     bool is_causal,
-    c10::optional<double> scale) {
+    std::optional<double> scale) {
 
     auto& ctx = at::globalContext();
     if (ctx.deterministicAlgorithms()) {
@@ -195,6 +195,27 @@ std::tuple<Tensor, Tensor, Tensor> _scaled_dot_product_cudnn_attention_backward_
     const int64_t num_heads = query.size(1);
     const int64_t head_dim_qk = query.size(3);
     const int64_t head_dim_v = value.size(3);
+    const int64_t max_seqlen_batch_q = query.size(2);
+    const int64_t max_seqlen_batch_k = key.size(2);
+
+    // This is needed because SaveVariable automatically converts
+    // std::optional to undefined tensor
+    std::optional<Tensor> attn_bias_;
+    if (attn_bias.defined()) {
+      attn_bias_ = attn_bias;
+    }
+    if (attn_bias_.has_value()) {
+      const auto bias_dim = attn_bias_.value().dim();
+      if (bias_dim == 2) {
+        attn_bias_ = attn_bias_.value().expand({batch_size, 1, max_seqlen_batch_q, max_seqlen_batch_k});
+      } else if (bias_dim == 3) {
+        attn_bias_ = attn_bias_.value().expand({batch_size, 1, max_seqlen_batch_q, max_seqlen_batch_k});
+      } else {
+        TORCH_CHECK(bias_dim == 4, "cuDNN SDPA expects either a 2D, 3D, or 4D attn_bias but got ", attn_bias_.value().dim(), "D");
+        attn_bias_ = attn_bias_.value().expand({batch_size, attn_bias_.value().size(1), max_seqlen_batch_q, max_seqlen_batch_k});
+      }
+    }
+
     const auto softmax_scale = sdp::calculate_scale(query, scale).as_float_unchecked();
     auto dq = at::empty_like(query);
     auto dk = at::empty_like(key);
@@ -211,6 +232,7 @@ std::tuple<Tensor, Tensor, Tensor> _scaled_dot_product_cudnn_attention_backward_
                         query /*const Tensor& q*/,
                         key /*const Tensor& k*/,
                         value /*const Tensor& v*/,
+                        attn_bias_ /*const std::optional<Tensor>& attn_bias*/,
                         out /*const Tensor& o*/,
                         grad_out/*const Tensor& dO*/,
                         logsumexp.unsqueeze(-1)/*const Tensor& softmaxstats*/,
@@ -219,7 +241,7 @@ std::tuple<Tensor, Tensor, Tensor> _scaled_dot_product_cudnn_attention_backward_
                         dv/*Tensor& dV*/,
                         philox_seed/*Tensor& dropoutseed*/,
                         philox_offset/*Tensor& dropoutoffset*/);
-    return std::make_tuple(dq, dk, dv);
+    return std::make_tuple(std::move(dq), std::move(dk), std::move(dv));
 }
 
 std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor>
@@ -259,9 +281,9 @@ _efficient_attention_backward(
   // This is needed because SaveVariable automatically converts
   // std::optional to undefined tensor
   std::optional<Tensor> bias, cu_seqlens_q, cu_seqlens_k;
-  bias = kernel_bias.has_value() && !kernel_bias->defined() ? c10::nullopt : kernel_bias;
-  cu_seqlens_q = cu_seqlens_q_dummy.has_value() && !cu_seqlens_q_dummy->defined() ? c10::nullopt : cu_seqlens_q_dummy;
-  cu_seqlens_k = cu_seqlens_k_dummy.has_value() && !cu_seqlens_k_dummy->defined() ? c10::nullopt : cu_seqlens_k_dummy;
+  bias = kernel_bias.has_value() && !kernel_bias->defined() ? std::nullopt : kernel_bias;
+  cu_seqlens_q = cu_seqlens_q_dummy.has_value() && !cu_seqlens_q_dummy->defined() ? std::nullopt : cu_seqlens_q_dummy;
+  cu_seqlens_k = cu_seqlens_k_dummy.has_value() && !cu_seqlens_k_dummy->defined() ? std::nullopt : cu_seqlens_k_dummy;
 
     // ndim
   TORCH_CHECK(query.dim() == grad_out_.dim());
@@ -394,7 +416,8 @@ _efficient_attention_backward(
   auto ret = aotriton::v2::flash::check_gpu(stream);
   if (hipSuccess != ret) {
     TORCH_CHECK(false,
-                "[AOTriton] Accelerated SDPA only supports MI200/MI300X GPUs (gfx90a:sramecc+:xnack- or gfx942:sramecc+:xnack-)")
+                "[AOTriton] Accelerated SDPA only supports MI200/MI300X/Navi31 GPUs"
+                " (gfx90a:sramecc+:xnack-/gfx942:sramecc+:xnack-/gfx1100)")
   }
   const auto softmax_scale = sdp::calculate_scale(query, scale).as_float_unchecked();
   bool is_causal;
@@ -419,6 +442,7 @@ _efficient_attention_backward(
   hipError_t err;
   using aotriton::v2::flash::attn_bwd;
   using sdp::aotriton_adapter::mk_aotensor;
+  using sdp::aotriton_adapter::mk_aoscalartensor;
   using sdp::aotriton_adapter::cast_dtype;
   aotriton::TensorView<4> empty_t4(0, {0, 0, 0, 0}, {0, 0, 0, 0}, cast_dtype(query.dtype()));
   err = attn_bwd(mk_aotensor(q_t, "q"),
@@ -435,8 +459,9 @@ _efficient_attention_backward(
                  mk_aotensor<2>(softmax_lse, "L"),
                  mk_aotensor<2>(delta, "delta"),
                  float(dropout_p),
-                 rng_engine_inputs.seed_.val,
-                 rng_engine_inputs.offset_.val,
+                 mk_aoscalartensor(philox_seed),
+                 mk_aoscalartensor(philox_offset),
+                 0,
                  is_causal,
                  stream);
 #else
@@ -780,8 +805,6 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_e
   auto k_t = key.transpose(1, 2);
   auto v_t = value.transpose(1, 2);
 
-  Tensor grad_q, grad_k, grad_v, grad_bias;
-
   // This is needed because SaveVariable automatically converts
   // std::optional to undefined tensor
   std::optional<Tensor> kernel_bias;
@@ -797,7 +820,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_e
   sdp::CustomMaskType custom_mask_type = causal
     ? sdp::CustomMaskType::CausalFromTopLeft
     : sdp::CustomMaskType::NoCustomMask;
-  std::tie(grad_q, grad_k, grad_v, grad_bias) =
+  auto [grad_q, grad_k, grad_v, grad_bias] =
       at::_efficient_attention_backward(
           grad_out,
           q_t,
@@ -805,8 +828,8 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_e
           v_t,
           kernel_bias,
           out_t,
-          c10::nullopt,
-          c10::nullopt,
+          std::nullopt,
+          std::nullopt,
           max_seqlen_q,
           max_seqlen_k,
           logsumexp,
@@ -816,7 +839,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_e
           static_cast<int64_t>(custom_mask_type),
           grad_input_mask[3],
           scale,
-          c10::nullopt);  // num_split_keys
+          std::nullopt);  // num_split_keys
   return std::make_tuple(
       grad_q.transpose(1, 2), grad_k.transpose(1, 2), grad_v.transpose(1, 2), grad_bias);
 }

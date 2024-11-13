@@ -7,14 +7,17 @@ from sympy.parsing.sympy_parser import parse_expr
 
 import torch
 from torch.utils._sympy.symbol import SymT
-from .. import config, cpp_builder, ir, lowering as L
 
+from .. import config, cpp_builder, ir, lowering as L
 from ..autotune_process import CppBenchmarkRequest
+from ..loop_body import LoopBody
 from ..select_algorithm import PartialRender
 from ..utils import sympy_index_symbol, sympy_index_symbol_with_prefix
 from ..virtualized import V
+from .common import CppWrapperKernelArgs
 from .cpp import CppKernel, CppKernelProxy, KernelGroup
-from .cpp_utils import cexpr_index, DTYPE_TO_CPP, LocalBufferScope
+from .cpp_utils import cexpr_index, DTYPE_TO_CPP, LocalBufferContext
+from .cpp_wrapper_cpu import CppWrapperCpu
 
 
 def parse_expr_with_index_symbols(expr):
@@ -40,6 +43,8 @@ class CppTemplateKernel(CppKernel):
         self.kernel_name = kernel_name
         self.render_hooks = {}
         self.local_buffers = {}
+        if isinstance(V.graph.wrapper_code, CppWrapperCpu):
+            self.args = CppWrapperKernelArgs()
 
     def render(self, template, **kwargs):
         return PartialRender(
@@ -50,7 +55,7 @@ class CppTemplateKernel(CppKernel):
         self,
         inputs: Dict[str, ir.Buffer],
         outputs: Dict[str, ir.Buffer],
-        aliases: Optional[List[Tuple[ir.Buffer, ir.Buffer]]] = None,
+        aliases: Optional[Dict[str, str]] = None,
     ) -> str:
         for name, inp in inputs.items():
             if inp is not None:
@@ -58,17 +63,11 @@ class CppTemplateKernel(CppKernel):
         for name, out in outputs.items():
             self.args.output_buffers[out.get_name()] = name
         if aliases is not None:
-            for alias, orig in aliases:
-                orig_name = orig.get_name()
-                alias_name = alias.get_name()
-                if orig_name in self.args.input_buffers:
-                    self.args.input_buffers[alias_name] = self.args.input_buffers[
-                        orig_name
-                    ]
-                if orig_name in self.args.output_buffers:
-                    self.args.output_buffers[alias_name] = self.args.output_buffers[
-                        orig_name
-                    ]
+            for alias, orig in aliases.items():
+                if orig in self.args.input_buffers:
+                    self.args.input_buffers[alias] = self.args.input_buffers[orig]
+                if orig in self.args.output_buffers:
+                    self.args.output_buffers[alias] = self.args.output_buffers[orig]
 
         unique_sizevars = {
             s
@@ -92,12 +91,11 @@ class CppTemplateKernel(CppKernel):
         def hook():
             # remove all aliases before generate function definition
             if aliases is not None:
-                for alias, _ in aliases:
-                    alias_name = alias.get_name()
-                    if alias_name in self.args.input_buffers:
-                        self.args.input_buffers[alias_name] = "REMOVED"
-                    if alias_name in self.args.output_buffers:
-                        self.args.output_buffers[alias_name] = "REMOVED"
+                for alias in aliases:
+                    if alias in self.args.input_buffers:
+                        self.args.input_buffers[alias] = "REMOVED"
+                    if alias in self.args.output_buffers:
+                        self.args.output_buffers[alias] = "REMOVED"
             cpp_argdefs, _, _ = self.args.cpp_argdefs()
             return f"void {self.kernel_name}({', '.join(cpp_argdefs)})"
 
@@ -109,7 +107,9 @@ class CppTemplateKernel(CppKernel):
     def call_kernel(self, name: str, node: ir.CppTemplateBuffer):
         wrapper = V.graph.wrapper_code
         _, call_args, arg_types = self.args.cpp_argdefs()
-        wrapper.generate_kernel_call(name, call_args, cuda=False, arg_types=arg_types)
+        wrapper.generate_kernel_call(
+            name, call_args, triton=False, gpu=False, arg_types=arg_types
+        )
 
     def dtype(self, node: ir.Buffer) -> str:
         return DTYPE_TO_CPP[node.get_dtype()]
@@ -143,7 +143,7 @@ class CppTemplateKernel(CppKernel):
         Slice the given node with a list of ranges (start and end) corresponding to its dims.
         The dim is not sliced if the corresponding range is empty.
         """
-        assert len(ranges) == len(node.get_size())
+        assert len(ranges) == len(node.get_size()), f"{ranges=}, {node=}"
         sliced = wrap_with_tensorbox(node)
         for dim, _range in enumerate(ranges):
             if len(_range) == 0:
@@ -182,11 +182,26 @@ class CppTemplateKernel(CppKernel):
     def define_buffer(self, name, sizes: List[Any], dtype=torch.float) -> str:
         """Define kernel local buffer"""
         sizes = parse_expr_with_index_symbols(sizes)
-        buf = ir.Buffer(name, ir.FixedLayout(torch.device("cpu"), dtype, sizes))
+        buf = ir.Buffer(
+            name=name, layout=ir.FixedLayout(torch.device("cpu"), dtype, sizes)
+        )
         self.local_buffers[name] = buf
         ctype = f"{DTYPE_TO_CPP[dtype]}"
         numel = f"{cexpr_index(buf.get_numel())}"
         return f"auto _{name} = std::make_unique<{ctype}[]>({numel}); auto {name} = _{name}.get();"
+
+    def reinit_buffer_if_null(self, name):
+        """Reinit the previously defined local buffer if it is null"""
+        assert name in self.local_buffers
+        buf = self.local_buffers[name]
+        ctype = f"{DTYPE_TO_CPP[buf.layout.dtype]}"
+        numel = f"{cexpr_index(buf.get_numel())}"
+        return f"if (_{name} == nullptr) {{ _{name} = std::make_unique<{ctype}[]>({numel}); {name} = _{name}.get(); }}"
+
+    def release_buffer(self, name):
+        """Codegen the code to release the ownership of a local buffer to others"""
+        assert name in self.local_buffers
+        return f"_{name}.release()"
 
     def store_pointwise_nodes(
         self,
@@ -201,7 +216,7 @@ class CppTemplateKernel(CppKernel):
             for i, sz in enumerate(var_sizes[0])
         }
         if not offsets:
-            offsets = [sympy.Integer(0)] * len(var_sizes[0])
+            offsets = [sympy.S.Zero] * len(var_sizes[0])
         if not reindexers:
             reindexers = [None] * len(nodes)
         assert len(offsets) == len(var_sizes[0])
@@ -229,7 +244,13 @@ class CppTemplateKernel(CppKernel):
                     node.make_loader()(new_args).value,
                 )
 
-            body = ir.LoopBody(fn, (list(var_ranges.keys()), ()), var_ranges)
+            body = LoopBody(
+                fn,
+                (list(var_ranges.keys()), ()),
+                var_ranges,
+                list(var_ranges.keys()),
+                tuple(),
+            )
             bodies.append(body)
             var_sizes_list.append(var_sizes)
 
@@ -266,17 +287,20 @@ class CppTemplateKernel(CppKernel):
            c) If `src` is local, we need to add a local buffer for it and localize the `orig_src` buffer
               in `epilogue_nodes` with `src`.
         """
-        assert dst.get_size() == src.get_size()
+        assert dst.get_size() == src.get_size(), f"{dst=}, {src=}"
         if offsets:
             offsets = parse_expr_with_index_symbols(offsets)
         if epilogue_nodes:
-            with LocalBufferScope(self) as scope:
+            with LocalBufferContext(self.args) as scope:
                 assert orig_src is not None
                 if orig_src.get_name() != src.get_name():
-                    scope.add_local_buffer(src)
-                    epilogue_nodes = scope.localize_buffer(
-                        orig_src, src, epilogue_nodes
+                    scope.add_local_buffer(
+                        src,
+                        [
+                            orig_src,
+                        ],
                     )
+                    epilogue_nodes = scope.localize_nodes(epilogue_nodes)
                 return self.store_pointwise_nodes(
                     dst, epilogue_nodes, offsets, reindexers  # type: ignore[arg-type]
                 )
@@ -284,11 +308,11 @@ class CppTemplateKernel(CppKernel):
             if dst.get_name() != src.get_name():
                 # src is local
                 copy = L.copy(dst, src).data.data
-                with LocalBufferScope(self) as scope:
+                with LocalBufferContext(self.args) as scope:
                     scope.add_local_buffer(src)
                     return self.store_pointwise_nodes(dst, [copy])
             else:
-                assert dst.layout == src.layout
+                assert dst.layout == src.layout, f"{dst=}, {src=}"
                 return ""
 
 
@@ -311,7 +335,12 @@ class CppTemplateCaller(ir.ChoiceCaller):
         input_nodes: List[ir.Buffer],
         layout: ir.Layout,
         make_kernel_render: Callable[
-            [ir.CppTemplateBuffer, Optional[List[ir.IRNode]]], str
+            [
+                ir.CppTemplateBuffer,
+                bool,
+                Optional[List[ir.IRNode]],
+            ],
+            str,
         ],
         bmreq: CppBenchmarkRequest,
         template: "CppTemplate",  # type: ignore[name-defined]  # noqa: F821
@@ -319,7 +348,7 @@ class CppTemplateCaller(ir.ChoiceCaller):
             Dict[str, Union[ir.PrimitiveInfoType, List[ir.PrimitiveInfoType]]]
         ] = None,
     ):
-        super().__init__(name, input_nodes, layout)
+        super().__init__(name, input_nodes, layout, description="")
         self.category = category
         self.make_kernel_render = make_kernel_render
         self.bmreq = bmreq

@@ -3,13 +3,14 @@ import logging
 import sys
 import zipfile
 from pathlib import Path
-from typing import Set
-
-import torch
 
 # Use asterisk symbol so developer doesn't need to import here when they add tests for upgraders.
 from test.jit.fixtures_srcs.fixtures_src import *  # noqa: F403
+from typing import Set
+
+import torch
 from torch.jit.mobile import _export_operator_list, _load_for_lite_interpreter
+
 
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
 logger = logging.getLogger(__name__)

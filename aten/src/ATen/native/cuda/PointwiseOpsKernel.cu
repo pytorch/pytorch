@@ -11,7 +11,9 @@
 
 namespace at::native {
 
-CONSTEXPR_EXCEPT_WIN_CUDA char addcmul_name[] = "addcmul";
+#if AT_USE_JITERATOR() && CUDA_VERSION >= 11050
+constexpr char addcmul_name[] = "addcmul";
+#endif
 void addcmul_cuda_kernel(TensorIteratorBase& iter, const Scalar& value) {
   auto dtype = iter.common_dtype();
   if (at::isComplexType(dtype)) {
@@ -55,8 +57,10 @@ void addcmul_cuda_kernel(TensorIteratorBase& iter, const Scalar& value) {
   }
 }
 
+#if AT_USE_JITERATOR() && CUDA_VERSION >= 11050
 // return a + alpha * (b / static_cast<accscalar_t>(c));
-CONSTEXPR_EXCEPT_WIN_CUDA char addcdiv_name[] = "addcdiv";
+constexpr char addcdiv_name[] = "addcdiv";
+#endif
 void addcdiv_cuda_kernel(TensorIteratorBase& iter, const Scalar& value) {
   auto dtype = iter.common_dtype();
   if (at::isComplexType(dtype)) {
@@ -143,9 +147,9 @@ void mse_backward_cuda_kernel(TensorIterator& iter, const Scalar& value) {
   });
 }
 
-REGISTER_DISPATCH(addcdiv_stub, &addcdiv_cuda_kernel);
-REGISTER_DISPATCH(addcmul_stub, &addcmul_cuda_kernel);
-REGISTER_DISPATCH(smooth_l1_backward_stub, &smooth_l1_backward_cuda_kernel);
-REGISTER_DISPATCH(huber_backward_stub, &huber_backward_cuda_kernel);
-REGISTER_DISPATCH(mse_backward_stub, &mse_backward_cuda_kernel);
+REGISTER_DISPATCH(addcdiv_stub, &addcdiv_cuda_kernel)
+REGISTER_DISPATCH(addcmul_stub, &addcmul_cuda_kernel)
+REGISTER_DISPATCH(smooth_l1_backward_stub, &smooth_l1_backward_cuda_kernel)
+REGISTER_DISPATCH(huber_backward_stub, &huber_backward_cuda_kernel)
+REGISTER_DISPATCH(mse_backward_stub, &mse_backward_cuda_kernel)
 } // namespace at::native

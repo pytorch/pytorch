@@ -174,8 +174,6 @@ aten::cumsum
 aten::cumsum.out
 aten::cumsum_
 aten::diagonal
-aten::diagonal_copy
-aten::diagonal_copy.out
 aten::diagonal_scatter
 aten::diagonal_scatter.out
 aten::digamma
@@ -350,6 +348,7 @@ aten::maximum
 aten::maximum.out
 aten::mean
 aten::mean.dim
+aten::mean.dtype_out
 aten::mean.out
 aten::minimum
 aten::minimum.out
@@ -381,10 +380,6 @@ aten::new_empty_strided.out
 aten::nextafter
 aten::nextafter.out
 aten::nextafter_
-aten::nll_loss2d_backward
-aten::nll_loss2d_backward.grad_input
-aten::nll_loss2d_forward
-aten::nll_loss2d_forward.output
 aten::normal.Tensor_Tensor
 aten::normal.Tensor_Tensor_out
 aten::normal.Tensor_float
@@ -396,6 +391,8 @@ aten::normal.float_float_out
 aten::normal.out
 aten::normal_
 aten::permute
+aten::permute_copy
+aten::permute_copy.out
 aten::polar
 aten::polar.out
 aten::pow.Scalar
@@ -516,13 +513,19 @@ aten::uniform_
 aten::unsqueeze
 aten::upsample_bicubic2d
 aten::upsample_bicubic2d.out
+aten::upsample_bilinear2d
 aten::upsample_nearest1d.out
 aten::upsample_nearest2d.out
 aten::upsample_nearest3d.out
+aten::upsample_trilinear3d
 aten::var.correction
 aten::var.correction_out
 aten::var_mean.correction
 aten::var_mean.correction_out
 aten::view
+aten::view_copy
+aten::view_copy.dtype
+aten::view_copy.dtype_out
+aten::view_copy.out
 aten::where.self
 aten::where.self_out

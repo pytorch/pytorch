@@ -54,7 +54,7 @@ if __name__ == "__main__":
             name="command-failed",
             original=None,
             replacement=None,
-            description="Lintrunner is not installed, did you forget to run `make setup_lint && make lint`?",
+            description="Lintrunner is not installed, did you forget to run `make setup-lint && make lint`?",
         )
         sys.exit(0)
 

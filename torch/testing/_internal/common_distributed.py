@@ -24,6 +24,7 @@ from io import StringIO
 from typing import Dict, NamedTuple, Optional, Union, List, Any, Callable, Tuple
 from unittest.mock import patch
 
+from torch._logging._internal import trace_log
 import torch
 import torch._dynamo.test_case
 import torch.cuda.nccl
@@ -117,10 +118,16 @@ def skip_if_no_gpu(func):
     return wrapper
 
 
+# TODO (kwen2501): what is the purpose of this decorator?  Tests with this
+# decorator were always skipped. So they may be outdated already.
+# Oct 2024: bumping the small-world criteria to < 8, as we are increasing the
+# number of GPUs in CI from 2 to 4, and we need to continue skipping those tests
+# to keep CI green. But this is just a temporary solution. We should clean up
+# those tests somehow.
 def skip_if_small_worldsize(func):
     @wraps(func)
     def wrapper(*args, **kwargs):
-        if (os.environ["BACKEND"] != "mpi") and int(os.environ["WORLD_SIZE"]) <= 2:
+        if (os.environ["BACKEND"] != "mpi") and int(os.environ["WORLD_SIZE"]) < 8:
             sys.exit(TEST_SKIPS["small_worldsize"].exit_code)
 
         return func(*args, **kwargs)
@@ -170,6 +177,10 @@ def import_transformers_or_skip():
         return wrapper
 
     return decorator
+
+
+def at_least_x_gpu(x):
+    return torch.cuda.is_available() and torch.cuda.device_count() >= x
 
 
 def skip_if_lt_x_gpu(x):
@@ -329,9 +340,9 @@ def requires_mpi():
     )
 
 
-def skip_if_rocm(func):
+def skip_if_rocm_multiprocess(func):
     """Skips a test for ROCm"""
-    func.skip_if_rocm = True
+    func.skip_if_rocm_multiprocess = True
 
     @wraps(func)
     def wrapper(*args, **kwargs):
@@ -347,6 +358,22 @@ def skip_if_win32():
         sys.platform == "win32",
         "This unit test case is not supported on Windows platform",
     )
+
+
+def sm_is_or_higher_than(device: torch.device, major: int, minor: int) -> bool:
+    """
+    Returns True if the device's compute capability is (major, minor) or higher.
+    Error out if the device is not a CUDA device.
+    Returns False if device is a RoCM device.
+    """
+    if device.type != "cuda":
+        raise ValueError("sm_is_or_later() is only supported for CUDA devices")
+
+    if torch.version.hip is not None:
+        # ROCm devices may have different compute capability codes
+        return False
+
+    return torch.cuda.get_device_capability(device) >= (major, minor)
 
 
 @retry_on_connect_failures
@@ -550,8 +577,14 @@ class MultiProcessTestCase(TestCase):
         if methodName != "runTest":
             method_name = methodName
         super().__init__(method_name)
-        fn = getattr(self, method_name)
-        setattr(self, method_name, self.join_or_run(fn))
+        try:
+            fn = getattr(self, method_name)
+            setattr(self, method_name, self.join_or_run(fn))
+        except AttributeError as e:
+            if methodName != 'runTest':
+                # we allow instantiation with no explicit method name
+                # but not an *incorrect* or missing method name
+                raise ValueError(f"no such test method in {self.__class__}: {methodName}") from e
 
     def setUp(self) -> None:
         super().setUp()
@@ -584,6 +617,9 @@ class MultiProcessTestCase(TestCase):
                 target=self.__class__._run,
                 name="process " + str(rank),
                 args=(rank, self._current_test_name(), self.file_name, child_conn),
+                kwargs={
+                    "fake_pg": getattr(self, "fake_pg", False),
+                }
             )
             process.start()
             logger.info("Started process %s with pid %s", rank, process.pid)
@@ -629,7 +665,7 @@ class MultiProcessTestCase(TestCase):
                 return
 
     @classmethod
-    def _run(cls, rank: int, test_name: str, file_name: str, parent_pipe) -> None:
+    def _run(cls, rank: int, test_name: str, file_name: str, parent_pipe, **kwargs) -> None:
         self = cls(test_name)
         self.rank = rank
         self.file_name = file_name
@@ -660,7 +696,7 @@ class MultiProcessTestCase(TestCase):
                 "Process %s skipping test %s for following reason: %s", self.rank, test_name, str(se)
             )
             sys.exit(TEST_SKIPS["generic"].exit_code)
-        except Exception as e:
+        except Exception:
             logger.error(
                 "Caught exception: \n%s exiting "
                 "process %s with exit code: %s",
@@ -1000,8 +1036,14 @@ class MultiThreadedTestCase(TestCase):
         if methodName != "runTest":
             method_name = methodName
         super().__init__(method_name)
-        fn = getattr(self, method_name)
-        setattr(self, method_name, self.join_or_run(fn))
+        try:
+            fn = getattr(self, method_name)
+            setattr(self, method_name, self.join_or_run(fn))
+        except AttributeError as e:
+            if methodName != 'runTest':
+                # we allow instantiation with no explicit method name
+                # but not an *incorrect* or missing method name
+                raise ValueError(f"no such test method in {self.__class__}: {methodName}") from e
 
     def perThreadSetUp(self):
         # super().setUp()  # TestCase.setUp() calls torch.manual_seed()
@@ -1051,7 +1093,7 @@ class MultiThreadedTestCase(TestCase):
             self.threads.append(t)
 
     @classmethod
-    def _run(cls, test_name, rank, world_size):
+    def _run(cls, test_name, rank, world_size, **kwargs):
         self = cls(test_name)
         self.rank = rank
 
@@ -1219,14 +1261,24 @@ class SaveForwardInputsModel(nn.Module):
         return self.c2(self.c1(x))
 
 @contextmanager
-def _dynamo_dist_per_rank_init(rank, world_size, init_pg=True):
+def _dynamo_dist_per_rank_init(rank, world_size, init_pg=True, fake_pg=False):
     # To avoid multiple inheritance from _dynamo.test_case.TestCase and MultiProcessTestCase,
     # Just manually implement the most important part of the dynamo behavior to reset/clear.
-    torch.cuda.set_device(rank)
+    if not fake_pg:
+        torch.cuda.set_device(rank)
     os.environ['MASTER_ADDR'] = 'localhost'
     os.environ['MASTER_PORT'] = '6789'
     if init_pg:
-        c10d.init_process_group("nccl", rank=rank, world_size=world_size)
+        if fake_pg:
+            store = torch.testing._internal.distributed.fake_pg.FakeStore()
+            c10d.init_process_group(
+                backend="fake",
+                world_size=world_size,
+                rank=rank,
+                store=store,
+            )
+        else:
+            c10d.init_process_group("nccl", rank=rank, world_size=world_size)
     torch._dynamo.reset()
     torch._dynamo.utils.counters.clear()
     try:
@@ -1296,7 +1348,9 @@ class DynamoDistributedMultiProcTestCase(MultiProcessTestCase):
         return torch.cuda.device_count()
 
     @classmethod
-    def _run(cls, rank: int, test_name: str, file_name: str, parent_pipe) -> None:
+    def _run(cls, rank: int, test_name: str, file_name: str, parent_pipe, **kwargs) -> None:
+        trace_log.addHandler(logging.NullHandler())
+
         # The rest is copypasta from MultiProcessTestCase._run
         self = cls(test_name)
         self.rank = rank

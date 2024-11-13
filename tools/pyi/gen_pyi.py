@@ -177,14 +177,18 @@ blocklist = [
     "copy_",
 ]
 
-binary_ops = (
+shift_ops = (
+    "lshift",
+    "rshift",
+    "ilshift",
+    "irshift",  # inplace ops
+)
+arithmetic_ops = (
     "add",
     "sub",
     "mul",
     "div",
     "pow",
-    "lshift",
-    "rshift",
     "mod",
     "truediv",
     "matmul",
@@ -195,24 +199,26 @@ binary_ops = (
     "rtruediv",
     "rfloordiv",
     "rpow",  # reverse arithmetic
+    "iadd",
+    "idiv",
+    "imul",
+    "isub",
+    "ifloordiv",
+    "imod",  # inplace ops
+)
+logic_ops = (
     "and",
     "or",
     "xor",
     "rand",
     "ror",
-    "rxor",  # logic
-    "iadd",
+    "rxor",  # reverse logic
     "iand",
-    "idiv",
-    "ilshift",
-    "imul",
     "ior",
-    "irshift",
-    "isub",
-    "ixor",
-    "ifloordiv",
-    "imod",  # inplace ops
+    "ixor",  # inplace ops
 )
+binary_ops = shift_ops + arithmetic_ops + logic_ops
+
 symmetric_comparison_ops = ("eq", "ne")
 asymmetric_comparison_ops = ("ge", "gt", "lt", "le")
 comparison_ops = symmetric_comparison_ops + asymmetric_comparison_ops
@@ -232,14 +238,28 @@ def sig_for_ops(opname: str) -> list[str]:
     assert opname.endswith("__") and opname.startswith("__"), f"Unexpected op {opname}"
 
     name = opname[2:-2]
-    if name in binary_ops:
-        return [f"def {opname}(self, other: Any) -> Tensor: ..."]
-    elif name in comparison_ops:
-        sig = f"def {opname}(self, other: Any) -> Tensor: ..."
-        if name in symmetric_comparison_ops:
+    if name == "rpow":
+        return [  # somehow required to make mypy ci happy?
+            f"def {opname}(self, other: Union[Tensor, Number, _complex]) -> Tensor: ... # type: ignore[has-type]"
+        ]
+    elif name in arithmetic_ops:
+        return [
+            f"def {opname}(self, other: Union[Tensor, Number, _complex]) -> Tensor: ..."
+        ]
+    elif name in logic_ops:
+        return [f"def {opname}(self, other: Union[Tensor, _bool]) -> Tensor: ..."]
+    elif name in shift_ops:
+        return [f"def {opname}(self, other: Union[Tensor, _int]) -> Tensor: ..."]
+    elif name in symmetric_comparison_ops:
+        return [
             # unsafe override https://github.com/python/mypy/issues/5704
-            sig += "  # type: ignore[override]"
-        return [sig]
+            f"def {opname}(self, other: Union[Tensor, Number, _complex]) -> Tensor: ...  # type: ignore[override]",
+            f"def {opname}(self, other: Any) -> _bool: ...",
+        ]
+    elif name in asymmetric_comparison_ops:
+        return [
+            f"def {opname}(self, other: Union[Tensor, Number, _complex]) -> Tensor: ..."
+        ]
     elif name in unary_ops:
         return [f"def {opname}(self) -> Tensor: ..."]
     elif name in to_py_type_ops:
@@ -466,6 +486,7 @@ def gen_nn_functional(fm: FileManager) -> None:
                             "dropout_p: float = 0.0",
                             "is_causal: bool = False",
                             "scale: Optional[float] = None",
+                            "enable_gqa: bool = False",
                         ]
                     )
                 )
@@ -780,6 +801,9 @@ def gen_pyi(
             "_is_functional_tensor": [
                 "def _is_functional_tensor(t: Tensor) -> _bool: ..."
             ],
+            "_is_functional_tensor_base": [
+                "def _is_functional_tensor_base(t: Tensor) -> _bool: ..."
+            ],
             "_from_functional_tensor": [
                 "def _from_functional_tensor(t: Tensor) -> Tensor: ..."
             ],
@@ -791,6 +815,9 @@ def gen_pyi(
             ],
             "_functionalize_commit_update": [
                 "def _functionalize_commit_update(t: Tensor) -> None: ..."
+            ],
+            "_functionalize_unsafe_set": [
+                "def _functionalize_unsafe_set(dst: Tensor, src: Tensor) -> None: ..."
             ],
             "_functionalize_mark_mutation_hidden_from_autograd": [
                 "def _functionalize_mark_mutation_hidden_from_autograd(t: Tensor) -> None: ..."
@@ -807,6 +834,9 @@ def gen_pyi(
             "_functionalize_sync": ["def _functionalize_sync(t: Tensor) -> None: ..."],
             "_functionalize_was_storage_changed": [
                 "def _functionalize_was_storage_changed(tensor: Tensor) -> _bool: ..."
+            ],
+            "_functionalize_set_storage_changed": [
+                "def _functionalize_set_storage_changed(tensor: Tensor) -> _bool: ..."
             ],
             "_functionalize_has_metadata_mutation": [
                 "def _functionalize_has_metadata_mutation(tensor: Tensor) -> _bool: ..."
@@ -1186,7 +1216,7 @@ def gen_pyi(
             "is_mkldnn": ["is_mkldnn: _bool"],
             "is_vulkan": ["is_vulkan: _bool"],
             "is_ipu": ["is_ipu: _bool"],
-            "storage_offset": ["def storage_offset(self) -> _int: ..."],
+            "storage_offset": ["def storage_offset(self) -> Union[_int, SymInt]: ..."],
             "to": [
                 (
                     f"def to(self, {args}, non_blocking: _bool = False, copy: _bool = False, *, "
@@ -1204,7 +1234,7 @@ def gen_pyi(
             ],
             "set_": [
                 "def set_(self, storage: Union[Storage, TypedStorage, UntypedStorage], "
-                "offset: _int, size: _size, stride: _size) -> Tensor: ...",
+                "offset: IntLikeType, size: _symsize, stride: _symsize) -> Tensor: ...",
                 "def set_(self, storage: Union[Storage, TypedStorage, UntypedStorage]) -> Tensor: ...",
             ],
             "split": [

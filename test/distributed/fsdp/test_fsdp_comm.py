@@ -16,7 +16,7 @@ from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
-    CUDAInitMode,
+    DEVICEInitMode,
     FSDPInitMode,
     FSDPTest,
     MLP,
@@ -29,6 +29,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
 )
+
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -62,7 +63,7 @@ class TestCommunication(FSDPTest):
             model = NestedWrappedModule.init(
                 self.process_group,
                 FSDPInitMode.RECURSIVE,
-                CUDAInitMode.CUDA_AFTER,
+                DEVICEInitMode.DEVICE_AFTER,
                 fsdp_kwargs,
             )
             fsdp_model: FSDP = FSDP(
@@ -74,7 +75,7 @@ class TestCommunication(FSDPTest):
             fsdp_model: FSDP = TransformerWithSharedParams.init(
                 self.process_group,
                 FSDPInitMode.RECURSIVE,
-                CUDAInitMode.CUDA_BEFORE,
+                DEVICEInitMode.DEVICE_BEFORE,
                 fsdp_kwargs,
             )
         return fsdp_model

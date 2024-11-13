@@ -5,6 +5,7 @@ from typing import Optional
 import torch
 from torch.utils._content_store import ContentStoreReader
 
+
 LOAD_TENSOR_READER: Optional[ContentStoreReader] = None
 
 

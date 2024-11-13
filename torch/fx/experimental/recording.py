@@ -11,6 +11,9 @@ import torch.utils._pytree as pytree
 
 
 log = logging.getLogger(__name__)
+trace_shape_events_log = torch._logging.getArtifactLogger(
+    __name__, "trace_shape_events"
+)
 
 
 __all__ = [
@@ -104,8 +107,8 @@ class ShapeEnvEvent:
             return ShapeEnv(**self.kwargs)
 
         assert shape_env is not None
-        args = list(self.args or list())
-        kwargs = dict(self.kwargs or dict())
+        args = list(self.args or [])
+        kwargs = dict(self.kwargs or {})
 
         # Replace any argument of type ShapeEnv by the given one.
         args, kwargs = pytree.tree_map_only(
@@ -175,6 +178,9 @@ class ShapeEnvEvent:
         return self.name == "defer_runtime_assert"
 
 
+NEST = 0
+
+
 # Extracts a ShapeEnv instance inside args and kwargs.
 # Specifically, it looks for:
 #   1. ShapeEnv arguments
@@ -235,14 +241,26 @@ def record_shapeenv_event(*, save_tracked_fakes: bool = False) -> Callable:
 
             assert isinstance(args[0], ShapeEnv)
 
+            global NEST
+
+            trace_shape_events_log.debug(
+                "%scall %s(*%r, **%r)", " " * NEST, name, args[1:], kwargs
+            )
+            NEST += 1
+
+            def retlog(r):
+                trace_shape_events_log.debug("%s-> %s", " " * (NEST - 1), r)
+                return r
+
             try:
-                if args[0].is_recording:  # type: ignore[has-type]
+                shape_env = args[0]
+                if not shape_env.should_record_events or shape_env.is_recording:  # type: ignore[has-type]
                     # If ShapeEnv is already recording an event, call the wrapped
                     # function directly.
                     #
                     # NB: here, we skip the check of whether all ShapeEnv instances
                     # are equal, in favor of a faster dispatch.
-                    return fn(*args, **kwargs)
+                    return retlog(fn(*args, **kwargs))
 
                 # Retrieve an instance of ShapeEnv.
                 # Assumption: the collection of args and kwargs may not reference
@@ -252,7 +270,7 @@ def record_shapeenv_event(*, save_tracked_fakes: bool = False) -> Callable:
                 # If we are calling this function without any ShapeEnv instance
                 # alive in its arguments, we don't record and call the original.
                 if self is None:
-                    return fn(*args, **kwargs)
+                    return retlog(fn(*args, **kwargs))
 
                 # Otherwise, start recording and call the function.
                 with self._recording():
@@ -272,7 +290,7 @@ def record_shapeenv_event(*, save_tracked_fakes: bool = False) -> Callable:
                     # the record if an error happened
                     self.events.append(event)
                     try:
-                        return event.run(self)
+                        return retlog(event.run(self))
                     except Exception:
                         self.events.pop()
                         raise
@@ -286,6 +304,9 @@ def record_shapeenv_event(*, save_tracked_fakes: bool = False) -> Callable:
                     exc_info=log.isEnabledFor(logging.INFO),
                 )
                 raise
+
+            finally:
+                NEST -= 1
 
         return wrapper
 
@@ -311,7 +332,7 @@ def replay_shape_env_events(events):
             # We need to call create_mapping_fn every time, since the node list might
             # change after each event is replayed.
             event.run(shape_env)
-        except Exception as e:
+        except Exception:
             log.error("failed when running event: %s", event)
             raise
 

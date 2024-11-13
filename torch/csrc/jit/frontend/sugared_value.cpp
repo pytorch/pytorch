@@ -23,7 +23,7 @@ std::shared_ptr<SugaredValue> PrintValue::call(
     size_t n_binders) {
   auto& g = *m.graph();
   if (!kwargs.empty())
-    throw ErrorReport(loc) << "print doesn't accept any keyword arguments";
+    throw(ErrorReport(loc) << "print doesn't accept any keyword arguments");
 
   std::vector<Value*> lowered_inputs = toValues(*m.graph(), args);
   g.insertNode(g.create(prim::Print, lowered_inputs, 0)->setSourceRange(loc));
@@ -82,14 +82,16 @@ bool SimpleValue::hasAttr(
       }
       return false;
     } else {
-      throw ErrorReport(loc) << "hasattr's first argument must be a object "
-                             << "or NamedTuple, but got a normal Tuple "
-                             << value_->type()->repr_str() << " instead";
+      throw(
+          ErrorReport(loc) << "hasattr's first argument must be a object "
+                           << "or NamedTuple, but got a normal Tuple "
+                           << value_->type()->repr_str() << " instead");
     }
   }
-  throw ErrorReport(loc) << "hasattr's first argument must be an object or "
-                         << "NamedTuple, got " << value_->type()->repr_str()
-                         << " instead";
+  throw(
+      ErrorReport(loc) << "hasattr's first argument must be an object or "
+                       << "NamedTuple, got " << value_->type()->repr_str()
+                       << " instead");
 }
 
 // support syntax sugar for x.foo(y, z) by allowing x.foo to return a
@@ -277,7 +279,7 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
       report << " Did you forget to initialize an attribute in __init__()?";
     }
   }
-  throw report;
+  throw ErrorReport(report);
 }
 
 std::vector<std::shared_ptr<SugaredValue>> SimpleValue::asTuple(
@@ -293,20 +295,22 @@ std::vector<std::shared_ptr<SugaredValue>> SimpleValue::asTuple(
     return fmap(outputs, make_simple_value);
   } else if (value_->type()->kind() == TypeKind::ListType) {
     if (!size_hint) {
-      throw ErrorReport(loc)
-          << "cannot statically infer the expected size of a "
-          << "list in this context";
+      throw(
+          ErrorReport(loc) << "cannot statically infer the expected size of a "
+                           << "list in this context");
     }
     auto graph = value_->owningGraph();
     Node* unpack =
         graph->insertNode(graph->createListUnpack(value_, *size_hint));
     return fmap(unpack->outputs(), make_simple_value);
   } else if (value_->type()->kind() == TypeKind::AnyTupleType) {
-    throw ErrorReport(loc)
-        << "Provided tuple is not fully defined/refined including its element types, please provide a value of type like Tuple[int, int]";
+    throw(
+        ErrorReport(loc)
+        << "Provided tuple is not fully defined/refined including its element types, please provide a value of type like Tuple[int, int]");
   }
-  throw ErrorReport(loc) << value_->type()->repr_str()
-                         << " cannot be used as a tuple";
+  throw(
+      ErrorReport(loc) << value_->type()->repr_str()
+                       << " cannot be used as a tuple");
 }
 
 static bool isRecursive(const TypePtr& classType, const TypePtr& attrType) {
@@ -331,8 +335,9 @@ void SimpleValue::setAttr(
     Value* newValue) {
   const auto classType = value_->type()->cast<ClassType>();
   if (!classType) {
-    throw ErrorReport(loc) << "Tried to set an attribute: " << field
-                           << " on a non-class: " << value_->type()->repr_str();
+    throw(
+        ErrorReport(loc) << "Tried to set an attribute: " << field
+                         << " on a non-class: " << value_->type()->repr_str());
   }
   auto expectedType = classType->findAttribute(field);
   if (!expectedType) {
@@ -351,12 +356,13 @@ void SimpleValue::setAttr(
 
     if (isInitializing) {
       if (isRecursive(classType, newValue->type())) {
-        throw ErrorReport(loc)
+        throw(
+            ErrorReport(loc)
             << "Assignment to attribute '" << field
             << "' cannot be of a type that contains class "
             << "'" << classType->repr_str() << "'.\n"
             << "Classes that recursively contain instances of themselves"
-            << " are not yet supported";
+            << " are not yet supported");
       }
 
       classType->addAttribute(field, newValue->type());
@@ -365,9 +371,10 @@ void SimpleValue::setAttr(
       const auto insertPoint = m.graph()->insertPoint();
       const auto topLevelBlock = m.graph()->block();
       if (insertPoint->owningBlock() != topLevelBlock) {
-        throw ErrorReport(loc)
+        throw(
+            ErrorReport(loc)
             << "First assignment cannot be in a control-flow block. "
-            << "Initialize the field at the top level first";
+            << "Initialize the field at the top level first");
       }
     } else {
       // Check and see if it's a setter attribute.
@@ -379,12 +386,14 @@ void SimpleValue::setAttr(
       }
 
       if (prop && !prop->setter) {
-        throw ErrorReport(loc) << "Tried to set read-only attribute: " << field;
+        throw(
+            ErrorReport(loc) << "Tried to set read-only attribute: " << field);
       }
 
-      throw ErrorReport(loc)
+      throw(
+          ErrorReport(loc)
           << "Tried to set nonexistent attribute: " << field
-          << ". Did you forget to initialize it in __init__()?";
+          << ". Did you forget to initialize it in __init__()?");
     }
   }
 
@@ -393,9 +402,10 @@ void SimpleValue::setAttr(
   // Check type correctness
   const auto newType = newValue->type();
   if (!newType->isSubtypeOf(*expectedType)) {
-    throw ErrorReport(loc) << "Wrong type for attribute assignment. Expected "
-                           << expectedType->repr_str() << " but got "
-                           << newType->repr_str();
+    throw(
+        ErrorReport(loc) << "Wrong type for attribute assignment. Expected "
+                         << expectedType->repr_str() << " but got "
+                         << newType->repr_str());
   }
 
   auto& g = *m.graph();
@@ -451,8 +461,9 @@ Value* SimpleValue::len(const SourceRange& loc, GraphFunction& m) {
       val_type->isSubtypeOf(*TensorType::get())) {
     return g.insert(aten::len, {val}, {}, loc);
   } else {
-    throw ErrorReport(loc) << "'" << val_type->repr_str() << "'"
-                           << " object is not iterable";
+    throw(
+        ErrorReport(loc) << "'" << val_type->repr_str() << "'"
+                         << " object is not iterable");
   }
 }
 
@@ -490,8 +501,9 @@ SugaredValuePtr SimpleValue::getitem(
     // Defer to the __getitem__ attr on the class.
     return attr(loc, m, "__getitem__")->call(loc, m, {idx}, {}, 1);
   } else {
-    throw ErrorReport(loc) << "'" << val_type->repr_str() << "'"
-                           << " object is not subscriptable";
+    throw(
+        ErrorReport(loc) << "'" << val_type->repr_str() << "'"
+                         << " object is not subscriptable");
   }
 }
 
@@ -516,8 +528,9 @@ SugaredValuePtr SimpleValue::iter(const SourceRange& loc, GraphFunction& m) {
     }
     return std::make_shared<SugaredTupleValue>(tup_sugared);
   } else {
-    throw ErrorReport(loc) << "'" << type->repr_str() << "'"
-                           << " object is not iterable";
+    throw(
+        ErrorReport(loc) << "'" << type->repr_str() << "'"
+                         << " object is not iterable");
   }
 }
 
@@ -529,15 +542,16 @@ RangeValue::RangeValue(
   for (const auto i : c10::irange(inputs.size())) {
     auto typ = inputs[i]->type();
     if (!typ->cast<IntType>()) {
-      throw ErrorReport(loc)
-          << "all inputs of range must be ints, found " << typ->repr_str()
-          << " in argument " << std::to_string(i);
+      throw(
+          ErrorReport(loc) << "all inputs of range must be ints, found "
+                           << typ->repr_str() << " in argument "
+                           << std::to_string(i));
     }
   }
 
   Graph& g = *m.graph();
   if (inputs.empty()) {
-    throw ErrorReport(loc) << "range expected at least 1 arguments, got 0";
+    throw(ErrorReport(loc) << "range expected at least 1 arguments, got 0");
   } else if (inputs.size() == 1) {
     end_ = inputs[0];
     start_ = g.insertConstant(0, loc);
@@ -554,8 +568,9 @@ RangeValue::RangeValue(
     }
     has_only_end_ = false;
   } else {
-    throw ErrorReport(loc) << "range expected at most 3 arguments, got "
-                           << inputs.size();
+    throw(
+        ErrorReport(loc) << "range expected at most 3 arguments, got "
+                         << inputs.size());
   }
 
   static_len_ = static_len;
@@ -563,7 +578,7 @@ RangeValue::RangeValue(
 
 SugaredValuePtr RangeValue::iter(const SourceRange& loc, GraphFunction& m) {
   return shared_from_this();
-};
+}
 
 Value* RangeValue::len(const SourceRange& loc, GraphFunction& m) {
   if (static_len_) {
@@ -650,9 +665,10 @@ void IterableTree::addChild(
     unroll_length_ = child_len;
   } else {
     if ((unroll_length_ && !child_len) || (child_len && !unroll_length_)) {
-      throw ErrorReport(range)
+      throw(
+          ErrorReport(range)
           << "Can not iterate over a module list or tuple with a value "
-             "that does not have a statically determinable length\n";
+             "that does not have a statically determinable length\n");
     }
     if (unroll_length_ && child_len) {
       // iterables run for the minimum length of all its leaves
@@ -696,8 +712,9 @@ std::shared_ptr<SugaredValue> ClassValue::call(
   auto self = g.insertNode(g.createObject(type_))->output();
   self->node()->setSourceRange(loc);
   if (!type_->findMethod("__init__")) {
-    throw ErrorReport(loc) << "Class " << type_->name()->name()
-                           << " does not have an __init__ function defined";
+    throw(
+        ErrorReport(loc) << "Class " << type_->name()->name()
+                         << " does not have an __init__ function defined");
   }
 
   // Call the init function
@@ -718,8 +735,9 @@ std::shared_ptr<SugaredValue> ClassValue::attr(
   }
 
   if (field != "__new__") {
-    throw ErrorReport(loc) << "Tried to lookup unknown attribute on class "
-                           << type_->annotation_str();
+    throw(
+        ErrorReport(loc) << "Tried to lookup unknown attribute on class "
+                         << type_->annotation_str());
   }
   return SpecialFormValue::create(prim::CreateObject);
 }
@@ -781,8 +799,9 @@ std::shared_ptr<SugaredValue> SugaredEnumClass::attr(
       names_values.end(),
       [&field](const at::EnumNameValue& nv) { return nv.first == field; });
   if (it == names_values.end()) {
-    throw ErrorReport(loc) << enum_type_->repr_str() << "'"
-                           << " has no attribute '" << field << "'";
+    throw(
+        ErrorReport(loc) << enum_type_->repr_str() << "'"
+                         << " has no attribute '" << field << "'");
   }
   auto enum_holder = c10::make_intrusive<at::ivalue::EnumHolder>(
       enum_type_, it->first, it->second);

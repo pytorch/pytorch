@@ -4,11 +4,13 @@ import os
 import re
 import shutil
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
 import torch
 from torch._inductor import config, test_operators
+from torch._inductor.utils import fresh_inductor_cache
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
@@ -16,7 +18,7 @@ try:
     try:
         from . import test_torchinductor
     except ImportError:
-        import test_torchinductor
+        import test_torchinductor  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
 except unittest.SkipTest:
     if __name__ == "__main__":
         sys.exit(0)
@@ -36,10 +38,20 @@ class TestDebugTrace(test_torchinductor.TestCase):
             a = test_operators.realize(a + 1) + 2
             return torch.matmul(a, b)
 
-        with self.assertLogs(
-            logging.getLogger("torch._inductor.debug"), level=logging.WARNING
-        ) as cm:
-            fn(torch.randn(16, 16), torch.randn(16, 16))
+        # TODO(aakhundov): make this work with fresh_inductor_cache
+        # instead of force_disable_caches. currently, with the latter
+        # enabled, we get `inductor [('fxgraph_cache_hit', 1)]` in
+        # the counters: so the cache is actually hit and the test fails.
+        with config.patch(
+            {
+                "trace.debug_dir": tempfile.mkdtemp(),
+                "force_disable_caches": True,
+            }
+        ):
+            with self.assertLogs(
+                logging.getLogger("torch._inductor.debug"), level=logging.WARNING
+            ) as cm:
+                fn(torch.randn(16, 16), torch.randn(16, 16))
 
         self.assertEqual(len(cm.output), 1)
         m = re.match(r"WARNING.* debug trace: (.*)", cm.output[0])
@@ -201,10 +213,26 @@ op2.node.kernel = extern_kernels.mm""",
         # intentionally only cleanup on success so debugging test is easier
         shutil.rmtree(filename)
 
+    def test_debug_printer_const(self):
+        """Test that having a const example_input does not break the debug printer."""
+
+        class Model(torch.nn.Module):
+            def forward(self, x, ks0):
+                return x.sum()
+
+        example_inputs = (
+            torch.tensor([0, 3, 6], dtype=torch.int64),
+            70,  # const input, that will be filtered in the examples
+        )
+        _ = torch._export.aot_compile(
+            Model(),
+            example_inputs,
+        )
+
     @unittest.skipIf(not HAS_GPU, "requires GPU")
     def test_debug_multi_tempalte(self):
         class ToyModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.l = torch.nn.Linear(100, 100)
                 self.relu = torch.nn.ReLU()
@@ -213,9 +241,6 @@ op2.node.kernel = extern_kernels.mm""",
                 return self.relu(self.l(x))
 
         # no failure
-
-        from torch._inductor.utils import fresh_inductor_cache
-
         with self.assertLogs(
             logging.getLogger("torch._inductor.debug"), level=logging.WARNING
         ), fresh_inductor_cache():

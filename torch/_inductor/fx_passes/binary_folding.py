@@ -3,10 +3,11 @@ import functools
 import itertools
 
 import torch
-from ..._dynamo.utils import counters
 
+from ..._dynamo.utils import counters
 from ..pattern_matcher import Arg, CallFunction, KeywordArg
 from .freezing_patterns import register_binary_folding_pattern
+
 
 aten = torch.ops.aten
 prims = torch.ops.prims
@@ -33,10 +34,7 @@ def mark_mixed_dtype_conv(conv):
 
         conv_user = next(iter(conv_user.users.keys()))
 
-    if not (
-        conv_user.target == prims.convert_element_type.default
-        and conv_user.args[1] == conv_dtype
-    ):
+    if conv_user.target != prims.convert_element_type.default:
         return
 
     conv.meta["_allow_conv_mixed_dtype_folding"] = conv_dtype
@@ -153,17 +151,17 @@ def binary_folding_init():
             return False
         if isinstance(other, torch.fx.Node) and other.op == "get_attr":
             other_meta_value = other.meta.get("val")
-            if not other_meta_value.is_floating_point():
+            if not other_meta_value.is_floating_point():  # type: ignore[union-attr]
                 return False
             if (
-                torch.promote_types(other_meta_value.dtype, weight_meta_value.dtype)
+                torch.promote_types(other_meta_value.dtype, weight_meta_value.dtype)  # type: ignore[union-attr]
                 != weight_meta_value.dtype
             ):
                 if not conv_node.meta.get("_allow_conv_mixed_dtype_folding", False):
                     return False
 
                 if (
-                    other_meta_value.dtype != torch.float
+                    other_meta_value.dtype != torch.float  # type: ignore[union-attr]
                     and weight_meta_value.dtype not in (torch.float16, torch.bfloat16)
                 ):
                     return False

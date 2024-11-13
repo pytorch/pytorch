@@ -1,7 +1,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
 #include <ATen/native/AmpKernels.h>
-#include <math.h>
+#include <cmath>
 #include <ATen/DeviceGuard.h>
 #include <ATen/Dispatch.h>
 #include <ATen/OpMathType.h>
@@ -32,7 +32,7 @@ void _amp_foreach_non_finite_check_and_unscale_cpu_kernel(
     TensorList scaled_grads,
     at::Tensor& found_inf,
     const at::Tensor& inv_scale) {
-  if (scaled_grads.size() == 0) {
+  if (scaled_grads.empty()) {
     return;
   }
 
@@ -55,7 +55,7 @@ void _amp_foreach_non_finite_check_and_unscale_cpu_kernel(
         t.layout() == at::kStrided,
         "one of scaled_grads was not a strided tensor.");
     auto iter = at::TensorIterator::unary_op(
-        const_cast<at::Tensor&>(t), const_cast<at::Tensor&>(t));
+        const_cast<at::Tensor&>(t), t);
     if (at::isReducedFloatingType(iter.dtype())) {
       AT_DISPATCH_REDUCED_FLOATING_TYPES(
       iter.dtype(),
@@ -192,7 +192,7 @@ at::Tensor& _amp_update_scale_cpu_kernel(
 
 } // namespace
 
-REGISTER_DISPATCH(_amp_foreach_non_finite_check_and_unscale_cpu_stub, &_amp_foreach_non_finite_check_and_unscale_cpu_kernel);
-REGISTER_DISPATCH(_amp_update_scale_cpu_stub, &_amp_update_scale_cpu_kernel);
+REGISTER_DISPATCH(_amp_foreach_non_finite_check_and_unscale_cpu_stub, &_amp_foreach_non_finite_check_and_unscale_cpu_kernel)
+REGISTER_DISPATCH(_amp_update_scale_cpu_stub, &_amp_update_scale_cpu_kernel)
 
 } // namespace at::native

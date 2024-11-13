@@ -8,7 +8,7 @@ from typing import Dict, List, Optional, Tuple
 from torch._export.serde.union import _Union
 
 # NOTE: Please update this value if any modifications are made to the schema
-SCHEMA_VERSION = (5, 3)
+SCHEMA_VERSION = (8, 1)
 TREESPEC_VERSION = 1
 
 
@@ -27,6 +27,7 @@ class ScalarType(IntEnum):
     COMPLEXDOUBLE = 11
     BOOL = 12
     BFLOAT16 = 13
+    UINT16 = 28
 
 
 class Layout(IntEnum):
@@ -330,8 +331,8 @@ class GraphSignature:
 
 @dataclass
 class RangeConstraint:
-    min_val: int
-    max_val: int
+    min_val: Optional[int]
+    max_val: Optional[int]
 
 
 @dataclass
@@ -343,6 +344,10 @@ class ModuleCallSignature:
     # And deserialized by calling pytree.treespec_dumps
     in_spec: str
     out_spec: str
+
+    # This field is used to prettify the graph placeholders
+    # after we ser/der and retrace
+    forward_arg_names: Optional[List[str]] = None
 
 
 @dataclass
@@ -359,6 +364,7 @@ class GraphModule:
     # the modules in order to unflatten the modules back to the eager calling
     # conventions.
     module_call_graph: List[ModuleCallEntry]
+    metadata: Dict[str, str] = field(default_factory=dict)
 
 
 # Invariant: Every time a change is made to the schema, one of the versions
@@ -376,4 +382,5 @@ class ExportedProgram:
     opset_version: Dict[str, int]
     range_constraints: Dict[str, RangeConstraint]
     schema_version: SchemaVersion
-    dialect: str
+    verifiers: List[str] = field(default_factory=list)
+    torch_version: str = "<=2.4"

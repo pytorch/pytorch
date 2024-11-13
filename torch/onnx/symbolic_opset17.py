@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+# mypy: disable-error-code=arg-type
 """This file exports ONNX ops for opset 17.
 
 Note [ONNX Operators that are added/updated in opset 17]
@@ -22,7 +23,8 @@ from typing import Optional, Sequence
 import torch
 from torch import _C
 from torch.onnx import _type_utils, errors, symbolic_helper
-from torch.onnx._internal import _beartype, jit_utils, registration
+from torch.onnx._internal import jit_utils, registration
+
 
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in README.md
@@ -96,7 +98,6 @@ def _compute_edge_sizes(n_fft, window_size):
 
 @_onnx_symbolic("aten::stft")
 @symbolic_helper.parse_args("v", "i", "i", "i", "v", "b", "b", "b")
-@_beartype.beartype
 def stft(
     g: jit_utils.GraphContext,
     input: _C.Value,
@@ -154,7 +155,7 @@ def stft(
             signal,
             g.op("Constant", value_t=torch.tensor([0], dtype=torch.int64)),
         )
-    elif signal_rank > 2:
+    elif signal_rank is None or signal_rank > 2:
         raise errors.SymbolicValueError(
             msg="STFT can only take inputs of 1 [signal] or 2 [batch, signal] dimensions. "
             f"Current rank of signal is {signal_rank}, please reduce it.",

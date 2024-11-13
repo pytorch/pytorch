@@ -6,19 +6,24 @@ ciflow_push_tags:
 - ciflow/binaries_libtorch
 - ciflow/binaries_wheel
 - ciflow/inductor
+- ciflow/inductor-periodic
+- ciflow/inductor-rocm
 - ciflow/inductor-perf-compare
 - ciflow/inductor-micro-benchmark
+- ciflow/inductor-micro-benchmark-cpu-x86
 - ciflow/inductor-cu124
 - ciflow/linux-aarch64
 - ciflow/mps
 - ciflow/nightly
 - ciflow/periodic
 - ciflow/rocm
+- ciflow/s390
 - ciflow/slow
 - ciflow/trunk
 - ciflow/unstable
 - ciflow/xpu
 - ciflow/torchbench
+- ciflow/autoformat
 retryable_workflows:
 - pull
 - trunk

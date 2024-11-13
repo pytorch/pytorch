@@ -44,7 +44,7 @@ Load::Load(Dtype dtype, BufPtr buf, std::vector<ExprPtr> indices)
   castIndicesToInts(indices_);
 }
 
-Load::Load(BufPtr buf, const std::vector<ExprPtr>& indices)
+Load::Load(const BufPtr& buf, const std::vector<ExprPtr>& indices)
     : Load(ChooseDtype(buf->dtype(), dtypeOfIndices(indices)), buf, indices) {}
 
 ExprHandle Load::make(
@@ -136,7 +136,7 @@ Dtype Intrinsics::IntrinsicsDtype(
   return params[0]->dtype();
 }
 
-int Intrinsics::OpArgCount(IntrinsicsOp op_type) {
+size_t Intrinsics::OpArgCount(IntrinsicsOp op_type) {
   switch (op_type) {
     case kSin:
     case kCos:
@@ -276,7 +276,7 @@ bool immediateIsPositive(const ExprPtr& e) {
   if (Name##ImmPtr imm = to<Name##Imm>(e)) { \
     return imm->value() > 0;                 \
   }
-  AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE);
+  AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE)
 #undef TYPE_CASE
   return false;
 }
@@ -286,7 +286,7 @@ bool immediateIsZero(const ExprPtr& e) {
   if (Name##ImmPtr imm = to<Name##Imm>(e)) { \
     return imm->value() == 0;                \
   }
-  AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE);
+  AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE)
 #undef TYPE_CASE
   return false;
 }

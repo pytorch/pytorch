@@ -13,9 +13,7 @@ import unittest
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 import torch
-
 import torch._dynamo
-
 import torch.utils._pytree as pytree
 from torch._dynamo.utils import clone_input
 from torch._library.custom_ops import CustomOpDef
@@ -159,7 +157,7 @@ def generate_opcheck_tests(
     testcase: Any,
     namespaces: List[str],
     failures_dict_path: Optional[str] = None,
-    additional_decorators: Dict[str, Callable] = None,
+    additional_decorators: Optional[Dict[str, Callable]] = None,
     test_utils: List[str] = DEFAULT_TEST_UTILS,
 ) -> None:
     """Given an existing TestCase, use the existing tests to generate
@@ -394,9 +392,7 @@ def validate_failures_dict_structure(
 
     """
     failure_dict = failure_dict.data
-    qualnames = list(failure_dict.keys())
     for test_to_option in failure_dict.values():
-        test_names = list(test_to_option.keys())
         for test_name, test_dict in test_to_option.items():
             if set(test_dict.keys()) != set({"comment", "status"}):
                 raise RuntimeError(

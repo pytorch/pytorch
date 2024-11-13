@@ -16,7 +16,7 @@
 
 namespace torch::jit {
 
-static inline TypePtr unwrapOptional(TypePtr opt_type) {
+static TypePtr unwrapOptional(TypePtr opt_type) {
   if (auto dyn = opt_type->castRaw<c10::DynamicType>()) {
     return unwrapOptional(dyn->fallback());
   }
@@ -26,9 +26,7 @@ static inline TypePtr unwrapOptional(TypePtr opt_type) {
   return opt_type;
 }
 
-static inline bool isIntOrFloatUsedAsList(
-    const Value* value,
-    const Argument& arg) {
+static bool isIntOrFloatUsedAsList(const Value* value, const Argument& arg) {
   // Look for int[N] or float[N]
   const auto& v_type = value->type();
   if (v_type != FloatType::get() && v_type != IntType::get())
@@ -146,9 +144,7 @@ Value* tryConvertToType(
     } else if (*value->type() == *BoolType::get()) {
       if (concrete_float) {
         value = graph.insert(aten::Float, {value}, {}, loc);
-      } else if (concrete_int) {
-        value = graph.insert(aten::Int, {value}, {}, loc);
-      } else if (concrete_number) {
+      } else if (concrete_int || concrete_number) {
         value = graph.insert(aten::Int, {value}, {}, loc);
       }
     }
@@ -516,7 +512,7 @@ static std::optional<MatchedSchema> tryMatchSchema(
   // Therefore, either all or none returns has field names.
   bool return_has_field_names =
       std::all_of(returns.begin(), returns.end(), [&](const Argument& r) {
-        return r.name().length() > 0;
+        return !r.name().empty();
       });
   c10::OptNameList return_field_names = std::nullopt;
   if (return_has_field_names) {
@@ -553,7 +549,7 @@ MatchedSchema matchSchema(
           /*allow_conversions=*/true)) {
     return *result;
   }
-  throw ErrorReport(loc) << failure_messages.str();
+  throw(ErrorReport(loc) << failure_messages.str());
 }
 
 static std::string prefixLine(
@@ -612,11 +608,12 @@ std::pair<size_t, MatchedSchema> matchSchemas(
         schemas, loc, graph, args, kwargs, self, /*render_errors=*/true);
   }
 
-  throw ErrorReport(loc) << "Arguments for call are not valid.\n"
-                         << "The following variants are available:\n"
-                         << prefixLine(failure_messages.str(), "  ")
-                         << "\nThe original call is";
-  throw ErrorReport(loc) << failure_messages.str();
+  throw(
+      ErrorReport(loc) << "Arguments for call are not valid.\n"
+                       << "The following variants are available:\n"
+                       << prefixLine(failure_messages.str(), "  ")
+                       << "\nThe original call is");
+  throw(ErrorReport(loc) << failure_messages.str());
 }
 
 // pack outputs of a function following python rules. If there is a single value
@@ -688,7 +685,6 @@ Value* emitBuiltinCall(
   // first let's set the graph's version
   auto graph_version = graph.get_op_version();
 
-  std::stringstream failure_messages;
   std::vector<const FunctionSchema*> schemas;
   // we append them later to schemas because
   // parseSchema returns rvalue which can not
@@ -759,7 +755,7 @@ Value* emitBuiltinCall(
       }
       error << "\nThe original call is";
     }
-    throw error;
+    throw ErrorReport(error);
   }
 
   auto matched = matchSchemas(schemas, loc, graph, args, kwargs, self);

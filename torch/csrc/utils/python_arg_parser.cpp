@@ -47,6 +47,7 @@ static std::unordered_map<std::string, ParameterType> type_map = {
     {"Stream", ParameterType::STREAM},
     {"std::string", ParameterType::STRING},
     {"c10::string_view", ParameterType::STRING},
+    {"std::string_view", ParameterType::STRING},
     {"Dimname", ParameterType::DIMNAME},
     {"DimnameList", ParameterType::DIMNAME_LIST},
     {"ScalarList", ParameterType::SCALAR_LIST},
@@ -95,7 +96,8 @@ bool should_allow_numbers_as_tensors(const std::string& name) {
       "subtract",     "subtract_",     "subtract_out", // alias of sub
       "true_divide",  "true_divide_",  "true_divide_out",
       "to",           "_to_copy",      "copy_",
-      "floor_divide", "floor_divide_", "floor_divide_out"};
+      "floor_divide", "floor_divide_", "floor_divide_out",
+      "_conj"}; // _conj needed because mul.Tensor backward calls it
   return allowed.find(name) != allowed.end();
 }
 
@@ -214,14 +216,6 @@ static auto combine_self_args(PyObject* self, PyObject* args) -> py::tuple {
   return args_;
 }
 
-// TODO: I'm not sure if I should call this __torch_function__ or
-// torch_function.  The former makes it easier to take an existing
-// Tensor-like __torch_function__ object and turn it into a mode;
-// but in general modes don't have to be Tensor-like (and we will
-// improperly accept mode objects as arguments when they shouldn't
-// be passed around in this way).
-const char* torch_function_mode_name = "__torch_function__";
-
 auto handle_torch_function(
     PyObject* self,
     const std::string& func_name,
@@ -259,6 +253,34 @@ static PyObject* get_type_of_overloaded_arg(PyObject* obj_or_type) {
   return (PyObject*)Py_TYPE(obj_or_type);
 }
 
+static py::object maybe_get_registered_torch_dispatch_rule(
+    PyObject* torch_api_function,
+    const py::object& torch_dispatch_object) {
+  // This is a static object, so we must leak the Python object
+  // "release()" is used here to preserve 1 refcount on the
+  // object, preventing it from ever being de-allocated by CPython.
+#if IS_PYBIND_2_13_PLUS
+  PYBIND11_CONSTINIT static py::gil_safe_call_once_and_store<py::object>
+      storage;
+  py::object find_torch_dispatch_rule =
+      storage
+          .call_once_and_store_result([]() -> py::object {
+            return py::module_::import("torch._library.simple_registry")
+                .attr("find_torch_dispatch_rule");
+          })
+          .get_stored();
+#else
+  static const py::handle find_torch_dispatch_rule =
+      py::object(py::module_::import("torch._library.simple_registry")
+                     .attr("find_torch_dispatch_rule"))
+          .release();
+#endif
+  auto result = find_torch_dispatch_rule(
+      py::reinterpret_borrow<py::object>(torch_api_function),
+      torch_dispatch_object.get_type());
+  return result;
+}
+
 static py::object dispatch_on_subclass(
     PyObject* args,
     PyObject* kwargs,
@@ -291,11 +313,34 @@ static py::object dispatch_on_subclass(
         PyObject_FastGetAttrString(torch_function.ptr(), "__self__")
             .is(py::handle(arg)) &&
         torch_function.ptr() != torch::disabled_torch_function_impl()) {
-      TORCH_WARN(
+      TORCH_WARN_ONCE(
           "Defining your `",
           torch_function_name_str,
           "` as a plain method is deprecated ",
           "and will be an error in future, please define it as a classmethod.");
+    }
+
+    if (!is_torch_function) {
+      auto maybe_torch_dispatch_rule = maybe_get_registered_torch_dispatch_rule(
+          torch_api_function, py::reinterpret_borrow<py::object>(arg));
+      if (!maybe_torch_dispatch_rule.is_none()) {
+        torch_function = maybe_torch_dispatch_rule;
+        auto py_arg = py::reinterpret_borrow<py::object>(arg);
+        ret = py::reinterpret_steal<py::object>(PyObject_CallFunctionObjArgs(
+            torch_function.ptr(),
+            py_arg.get_type().ptr(),
+            torch_api_function,
+            py_types.ptr(),
+            args,
+            kwargs,
+            NULL));
+        if (ret.ptr() == nullptr) {
+          throw python_error();
+        }
+        if (ret.ptr() != Py_NotImplemented) {
+          break;
+        }
+      }
     }
 
     ret = py::reinterpret_steal<py::object>(PyObject_CallFunctionObjArgs(
@@ -354,6 +399,25 @@ static std::tuple<py::object, py::object> dispatch_on_mode(
       "Defining your mode's `",
       torch_function_name_str,
       "` as a classmethod is not supported, please make it a plain method");
+
+  if (!is_torch_function) {
+    auto maybe_torch_dispatch_rule =
+        maybe_get_registered_torch_dispatch_rule(torch_api_function, mode_obj);
+    if (!maybe_torch_dispatch_rule.is_none()) {
+      auto ret = py::reinterpret_steal<py::object>(PyObject_CallFunctionObjArgs(
+          maybe_torch_dispatch_rule.ptr(),
+          mode_obj.ptr(),
+          torch_api_function,
+          py_types.ptr(),
+          args,
+          kwargs,
+          NULL));
+      if (ret.ptr() == nullptr) {
+        throw python_error();
+      }
+      return std::make_tuple(ret, mode_obj);
+    }
+  }
 
   // Blegh.  This accidentally works in PyObject_CallFunctionObjArgs below
   // because the nullptr terminates the argument list ick ick ick.
@@ -729,7 +793,7 @@ static bool is_scalar_list(PyObject* obj) {
 bool is_tensor_list_and_append_overloaded(
     PyObject* obj,
     std::vector<PyObject*>* overloaded_args,
-    int argnum,
+    size_t argnum,
     bool throw_error) {
   auto tuple = six::isTuple(obj);
   if (!(tuple || PyList_Check(obj))) {
@@ -757,6 +821,18 @@ bool is_tensor_list_and_append_overloaded(
   return true;
 }
 
+static bool is_float_or_symfloat(PyObject* obj) {
+  if (torch::is_symfloat(py::handle(obj))) {
+    return true;
+  }
+
+  if (THPUtils_checkDouble(obj)) {
+    return true;
+  }
+
+  return false;
+}
+
 static bool is_float_or_complex_list(PyObject* obj) {
   auto tuple = six::isTuple(obj);
   if (!(tuple || PyList_Check(obj))) {
@@ -767,7 +843,7 @@ static bool is_float_or_complex_list(PyObject* obj) {
   const auto size = tuple ? PyTuple_GET_SIZE(obj) : PyList_GET_SIZE(obj);
   if (size > 0) {
     PyObject* iobj = tuple ? PyTuple_GET_ITEM(obj, 0) : PyList_GET_ITEM(obj, 0);
-    if (!THPUtils_checkDouble(iobj) && !PyComplex_Check(iobj)) {
+    if (!is_float_or_symfloat(iobj) && !PyComplex_Check(iobj)) {
       return false;
     }
   }
@@ -863,7 +939,7 @@ auto FunctionParameter::check(
       }
       [[fallthrough]];
     case ParameterType::DOUBLE: {
-      if (THPUtils_checkDouble(obj)) {
+      if (is_float_or_symfloat(obj)) {
         return true;
       }
       if (THPVariable_Check(obj)) {
@@ -925,8 +1001,10 @@ auto FunctionParameter::check(
     case ParameterType::QSCHEME:
       return THPQScheme_Check(obj);
     case ParameterType::DEVICE:
+      // Allow symint to be passed in as device, but we'll specialize and
+      // guard in this case.
       return THPUtils_checkLong(obj) || THPUtils_checkString(obj) ||
-          THPDevice_Check(obj);
+          THPDevice_Check(obj) || torch::is_symint(py::handle(obj));
     case ParameterType::STREAM:
       return THPStream_Check(obj);
     case ParameterType::STRING:
@@ -1003,7 +1081,7 @@ std::string FunctionParameter::type_name() const {
   }
 }
 
-static inline std::optional<int64_t> parse_as_integer(const std::string& s) {
+static std::optional<int64_t> parse_as_integer(const std::string& s) {
   if (s.empty())
     return std::nullopt;
   char* str_end = nullptr;
@@ -1020,7 +1098,7 @@ There are two kinds of default values:
 2. IntArrayRef x={1,2,3} (where size=3, value={1,2,3}, note that there cannot be
 space after comma since native_parse.py uses ', ' to split args)
 */
-static inline std::vector<int64_t> parse_intlist_args(
+static std::vector<int64_t> parse_intlist_args(
     const std::string& s,
     int64_t size) {
   size_t n = s.size();
@@ -1054,7 +1132,7 @@ static inline std::vector<int64_t> parse_intlist_args(
 }
 
 // Parse a string literal to remove quotes and escape sequences
-static std::string parse_string_literal(c10::string_view str) {
+static std::string parse_string_literal(std::string_view str) {
   TORCH_CHECK(str.length() >= 2, "String defaults must be quoted");
 
   if (str.front() == '"') {
@@ -1374,6 +1452,8 @@ static Py_ssize_t find_param(FunctionSignature& signature, PyObject* name) {
   PyObject* value = nullptr;
   Py_ssize_t pos = 0;
 
+  // Note that this dict traversal is NoGil safe as the kwargs dict is only
+  // accessible within this thread.
   while (PyDict_Next(kwargs, &pos, &key, &value)) {
     if (!THPUtils_checkString(key)) {
       throw TypeError("keywords must be strings");
@@ -1445,6 +1525,8 @@ bool FunctionSignature::parse(
       }
       obj = PyTuple_GET_ITEM(args, arg_pos);
     } else if (kwargs) {
+      // Note that this call is NoGil safe as it works on kwargs which are local
+      // to the current function call.
       obj = PyDict_GetItem(kwargs, param.python_name);
       for (PyObject* numpy_name : param.numpy_python_names) {
         if (obj) {

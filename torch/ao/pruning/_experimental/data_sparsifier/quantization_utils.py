@@ -1,18 +1,16 @@
 # mypy: allow-untyped-defs
-import torch
-import torch.nn as nn
-from torch.ao.pruning.sparsifier.utils import module_to_fqn, fqn_to_module
 from typing import Dict, List, Optional
 
-SUPPORTED_MODULES = {
-    nn.Embedding,
-    nn.EmbeddingBag
-}
+import torch
+import torch.nn as nn
+from torch.ao.pruning.sparsifier.utils import fqn_to_module, module_to_fqn
+
+
+SUPPORTED_MODULES = {nn.Embedding, nn.EmbeddingBag}
 
 
 def _fetch_all_embeddings(model):
-    """Fetches Embedding and EmbeddingBag modules from the model
-    """
+    """Fetches Embedding and EmbeddingBag modules from the model"""
     embedding_modules = []
     stack = [model]
     while stack:
@@ -26,11 +24,13 @@ def _fetch_all_embeddings(model):
     return embedding_modules
 
 
-def post_training_sparse_quantize(model,
-                                  data_sparsifier_class,
-                                  sparsify_first=True,
-                                  select_embeddings: Optional[List[nn.Module]] = None,
-                                  **sparse_config):
+def post_training_sparse_quantize(
+    model,
+    data_sparsifier_class,
+    sparsify_first=True,
+    select_embeddings: Optional[List[nn.Module]] = None,
+    **sparse_config,
+):
     """Takes in a model and applies sparsification and quantization to only embeddings & embeddingbags.
     The quantization step can happen before or after sparsification depending on the `sparsify_first` argument.
 
@@ -66,17 +66,23 @@ def post_training_sparse_quantize(model,
 
     else:
         embedding_modules = []
-        assert isinstance(select_embeddings, List), "the embedding_modules must be a list of embedding modules"
+        assert isinstance(
+            select_embeddings, List
+        ), "the embedding_modules must be a list of embedding modules"
         for emb in select_embeddings:
-            assert type(emb) in SUPPORTED_MODULES, "the embedding_modules list must be an embedding or embedding bags"
+            assert (
+                type(emb) in SUPPORTED_MODULES
+            ), "the embedding_modules list must be an embedding or embedding bags"
             fqn_name = module_to_fqn(model, emb)
-            assert fqn_name is not None, "the embedding modules must be part of input model"
+            assert (
+                fqn_name is not None
+            ), "the embedding modules must be part of input model"
             embedding_modules.append((fqn_name, emb))
 
     if sparsify_first:
         # sparsify
         for name, emb_module in embedding_modules:
-            valid_name = name.replace('.', '_')
+            valid_name = name.replace(".", "_")
             data_sparsifier.add_data(name=valid_name, data=emb_module)
 
         data_sparsifier.step()
@@ -98,23 +104,34 @@ def post_training_sparse_quantize(model,
         torch.ao.quantization.convert(model, inplace=True)
 
         # retrieve scale & zero_points
-        quantize_params: Dict[str, Dict] = {'scales': {}, 'zero_points': {},
-                                            'dequant_weights': {}, 'axis': {},
-                                            'dtype': {}}
+        quantize_params: Dict[str, Dict] = {
+            "scales": {},
+            "zero_points": {},
+            "dequant_weights": {},
+            "axis": {},
+            "dtype": {},
+        }
 
         for name, _ in embedding_modules:
             quantized_emb = fqn_to_module(model, name)
             assert quantized_emb is not None  # satisfy mypy
 
             quantized_weight = quantized_emb.weight()  # type: ignore[operator]
-            quantize_params['scales'][name] = quantized_weight.q_per_channel_scales()
-            quantize_params['zero_points'][name] = quantized_weight.q_per_channel_zero_points()
-            quantize_params['dequant_weights'][name] = torch.dequantize(quantized_weight)
-            quantize_params['axis'][name] = quantized_weight.q_per_channel_axis()
-            quantize_params['dtype'][name] = quantized_weight.dtype
+            quantize_params["scales"][name] = quantized_weight.q_per_channel_scales()
+            quantize_params["zero_points"][
+                name
+            ] = quantized_weight.q_per_channel_zero_points()
+            quantize_params["dequant_weights"][name] = torch.dequantize(
+                quantized_weight
+            )
+            quantize_params["axis"][name] = quantized_weight.q_per_channel_axis()
+            quantize_params["dtype"][name] = quantized_weight.dtype
 
             # attach data to sparsifier
-            data_sparsifier.add_data(name=name.replace('.', '_'), data=quantize_params['dequant_weights'][name])
+            data_sparsifier.add_data(
+                name=name.replace(".", "_"),
+                data=quantize_params["dequant_weights"][name],
+            )
 
         data_sparsifier.step()
         data_sparsifier.squash_mask()
@@ -122,10 +139,12 @@ def post_training_sparse_quantize(model,
         for name, _ in embedding_modules:
             quantized_emb = fqn_to_module(model, name)
             assert quantized_emb is not None  # satisfy mypy
-            requantized_vector = torch.quantize_per_channel(quantize_params['dequant_weights'][name],
-                                                            scales=quantize_params['scales'][name],
-                                                            zero_points=quantize_params['zero_points'][name],
-                                                            dtype=quantize_params['dtype'][name],
-                                                            axis=quantize_params['axis'][name])
+            requantized_vector = torch.quantize_per_channel(
+                quantize_params["dequant_weights"][name],
+                scales=quantize_params["scales"][name],
+                zero_points=quantize_params["zero_points"][name],
+                dtype=quantize_params["dtype"][name],
+                axis=quantize_params["axis"][name],
+            )
 
             quantized_emb.set_weight(requantized_vector)  # type: ignore[operator]

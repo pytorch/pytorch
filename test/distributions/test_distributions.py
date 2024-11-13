@@ -39,7 +39,6 @@ from packaging import version
 
 import torch
 import torch.autograd.forward_ad as fwAD
-
 from torch import inf, nan
 from torch.autograd import grad
 from torch.autograd.functional import jacobian
@@ -117,6 +116,7 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     TestCase,
 )
+
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -1526,7 +1526,7 @@ class TestDistributions(DistributionsTestCase):
 
         self._check_forward_ad(torch.bernoulli)
         self._check_forward_ad(lambda x: x.bernoulli_())
-        self._check_forward_ad(lambda x: x.bernoulli_(x.clone().detach()))
+        self._check_forward_ad(lambda x: x.bernoulli_(x.detach().clone()))
         self._check_forward_ad(lambda x: x.bernoulli_(x))
 
     def test_bernoulli_enumerate_support(self):

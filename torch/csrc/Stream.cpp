@@ -24,12 +24,12 @@ static PyObject* THPStream_pynew(
   HANDLE_TH_ERRORS
 
   int64_t stream_id = -1;
-  int64_t device_type = 0;
-  int64_t device_index = 0;
+  c10::DeviceType device_type{};
+  c10::DeviceIndex device_index{};
   int64_t priority = 0;
 
   static torch::PythonArgParser parser({
-      "Steram(Device device=None, *, int64_t priority=0)",
+      "Stream(Device device=None, *, int64_t priority=0)",
       "Stream(int64_t stream_id, int64_t device_index, int64_t device_type, *, int64_t priority=0)",
   });
 
@@ -42,27 +42,25 @@ static PyObject* THPStream_pynew(
     auto default_accelerator = at::getAccelerator(false);
     auto device = r.deviceOptional(0);
     if (device.has_value()) {
-      device_type = static_cast<int64_t>(device->type());
-      device_index = static_cast<int64_t>(device->index());
+      device_type = device->type();
+      device_index = device->index();
       // Initialize device guard if device is not None.
       device_guard_ptr = std::make_unique<c10::DeviceGuard>(device.value());
     } else {
       // If device is None, we will use the current accelerator and index.
       // If the current accelerator is not set, we will use the CPU as device
       // type.
-      device_type = static_cast<int64_t>(
-          default_accelerator.value_or(c10::DeviceType::CPU));
-      c10::impl::VirtualGuardImpl impl{
-          static_cast<c10::DeviceType>(device_type)};
+      device_type = default_accelerator.value_or(c10::DeviceType::CPU);
+      c10::impl::VirtualGuardImpl impl{device_type};
       const auto current_device = impl.getDevice();
       device_index = current_device.index();
     }
     priority = r.toInt64WithDefault(1, 0);
   } else if (r.idx == 1) {
     stream_id = r.toInt64WithDefault(0, -1);
-    device_index = r.toInt64WithDefault(1, 0);
-    device_type =
-        r.toInt64WithDefault(2, static_cast<int64_t>(c10::DeviceType::CPU));
+    device_index = static_cast<c10::DeviceIndex>(r.toInt64WithDefault(1, 0));
+    device_type = static_cast<c10::DeviceType>(
+        r.toInt64WithDefault(2, static_cast<int64_t>(c10::DeviceType::CPU)));
     priority = r.toInt64WithDefault(3, 0);
   } else {
     TORCH_CHECK(
@@ -84,19 +82,16 @@ static PyObject* THPStream_pynew(
   // manage the lifetime of streams.
   std::optional<c10::Stream> stream_opt;
   if (r.idx == 0) {
-    c10::impl::VirtualGuardImpl impl{static_cast<c10::DeviceType>(device_type)};
+    c10::impl::VirtualGuardImpl impl{device_type};
     stream_opt = impl.getNewStream(
-        c10::Device(static_cast<c10::DeviceType>(device_type), device_index),
-        static_cast<int>(priority));
+        c10::Device(device_type, device_index), static_cast<int>(priority));
   } else {
-    stream_opt = c10::Stream::unpack3(
-        stream_id,
-        static_cast<c10::DeviceIndex>(device_index),
-        static_cast<c10::DeviceType>(device_type));
+    stream_opt = c10::Stream::unpack3(stream_id, device_index, device_type);
   }
 
   TORCH_CHECK(stream_opt.has_value(), "Failed to create stream");
   self->stream_id = static_cast<int64_t>(stream_opt->id());
+  // NOLINTNEXTLINE(bugprone-signed-char-misuse)
   self->device_index = static_cast<int64_t>(stream_opt->device_index());
   self->device_type = static_cast<int64_t>(stream_opt->device_type());
 
@@ -139,7 +134,7 @@ static PyObject* THPStream_query(PyObject* _self, PyObject* noargs) {
 
   return PyBool_FromLong(c10::Stream::unpack3(
                              self->stream_id,
-                             self->device_index,
+                             static_cast<c10::DeviceIndex>(self->device_index),
                              static_cast<c10::DeviceType>(self->device_type))
                              .query());
 
@@ -153,7 +148,7 @@ static PyObject* THPStream_synchronize(PyObject* _self, PyObject* noargs) {
 
     c10::Stream::unpack3(
         self->stream_id,
-        self->device_index,
+        static_cast<c10::DeviceIndex>(self->device_index),
         static_cast<c10::DeviceType>(self->device_type))
         .synchronize();
   }
@@ -167,7 +162,7 @@ static PyObject* THPStream_wait_event(PyObject* _self, PyObject* _event) {
     auto event = (THPEvent*)_event;
     c10::Stream::unpack3(
         self->stream_id,
-        self->device_index,
+        static_cast<c10::DeviceIndex>(self->device_index),
         static_cast<c10::DeviceType>(self->device_type))
         .wait(event->event);
   }
@@ -184,11 +179,11 @@ static PyObject* THPStream_wait_stream(PyObject* _self, PyObject* _other) {
         c10::EventFlag::PYTORCH_DEFAULT);
     new_event.record(c10::Stream::unpack3(
         other_stream->stream_id,
-        other_stream->device_index,
+        static_cast<c10::DeviceIndex>(other_stream->device_index),
         static_cast<c10::DeviceType>(other_stream->device_type)));
     c10::Stream::unpack3(
         self->stream_id,
-        self->device_index,
+        static_cast<c10::DeviceIndex>(self->device_index),
         static_cast<c10::DeviceType>(self->device_type))
         .wait(new_event);
   }
@@ -202,7 +197,7 @@ static PyObject* THPStream_record_event(
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
   auto self = (THPStream*)_self;
-  PyObject* _new_event;
+  PyObject* _new_event = nullptr;
   PyObject* _event = Py_None;
 
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
@@ -229,7 +224,7 @@ static PyObject* THPStream_record_event(
   TORCH_CHECK(new_event, "event must not be null");
   new_event->event.record(c10::Stream::unpack3(
       self->stream_id,
-      self->device_index,
+      static_cast<c10::DeviceIndex>(self->device_index),
       static_cast<c10::DeviceType>(self->device_type)));
   return (PyObject*)new_event;
   END_HANDLE_TH_ERRORS
@@ -274,7 +269,7 @@ static PyObject* THPStream_richcompare(
     PyObject* self,
     PyObject* other,
     int op) {
-  PyObject* result = NULL;
+  PyObject* result = nullptr;
   if (other == Py_None) {
     result = Py_False;
   } else {
@@ -294,8 +289,7 @@ static PyObject* THPStream_richcompare(
   return result;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
-static struct PyMemberDef THPStream_members[] = {
+static const std::initializer_list<PyMemberDef> THPStream_members = {
     {"stream_id",
      T_LONGLONG,
      offsetof(THPStream, stream_id),
@@ -313,13 +307,11 @@ static struct PyMemberDef THPStream_members[] = {
      nullptr},
     {nullptr}};
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
-static struct PyGetSetDef THPStream_properties[] = {
+static const std::initializer_list<PyGetSetDef> THPStream_properties = {
     {"device", (getter)THPStream_get_device, nullptr, nullptr, nullptr},
     {nullptr}};
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
-static PyMethodDef THPStream_methods[] = {
+static const std::initializer_list<PyMethodDef> THPStream_methods = {
     {"query", THPStream_query, METH_NOARGS, nullptr},
     {"synchronize", THPStream_synchronize, METH_NOARGS, nullptr},
     {"wait_event", THPStream_wait_event, METH_O, nullptr},
@@ -331,8 +323,9 @@ static PyMethodDef THPStream_methods[] = {
     {"__eq__", (PyCFunction)THPStream_eq, METH_O, nullptr},
     {nullptr}};
 
-PyTypeObject THPStreamType = {
-    PyVarObject_HEAD_INIT(nullptr, 0) "torch.Stream", /* tp_name */
+static PyTypeObject THPStreamType = {
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "torch.Stream", /* tp_name */
     sizeof(THPStream), /* tp_basicsize */
     0, /* tp_itemsize */
     (destructor)THPStream_dealloc, /* tp_dealloc */
@@ -359,9 +352,12 @@ PyTypeObject THPStreamType = {
     0, /* tp_weaklistoffset */
     nullptr, /* tp_iter */
     nullptr, /* tp_iternext */
-    THPStream_methods, /* tp_methods */
-    THPStream_members, /* tp_members */
-    THPStream_properties, /* tp_getset */
+    // NOLINTNEXTLINE(*const-cast)
+    const_cast<PyMethodDef*>(std::data(THPStream_methods)), /* tp_methods */
+    // NOLINTNEXTLINE(*const-cast)
+    const_cast<PyMemberDef*>(std::data(THPStream_members)), /* tp_members */
+    // NOLINTNEXTLINE(*const-cast)
+    const_cast<PyGetSetDef*>(std::data(THPStream_properties)), /* tp_getset */
     nullptr, /* tp_base */
     nullptr, /* tp_dict */
     nullptr, /* tp_descr_get */

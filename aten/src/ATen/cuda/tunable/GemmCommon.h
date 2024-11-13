@@ -22,6 +22,7 @@
 #include <ATen/ops/allclose.h>
 #include <ATen/ops/from_blob.h>
 #endif
+#include <fmt/printf.h>
 
 namespace at::cuda::tunable {
 
@@ -30,15 +31,15 @@ enum class BlasOp {
   T = 1
 };
 
-inline std::string BlasOpToString(BlasOp op) {
+inline char BlasOpToString(BlasOp op) {
   switch (op) {
     case BlasOp::N:
-      return "N";
+      return 'N';
     case BlasOp::T:
-      return "T";
+      return 'T';
   }
   TORCH_CHECK(false, "unrecognized BlasOp");
-  return "N";
+  return 'N';
 }
 
 namespace detail {
@@ -74,26 +75,35 @@ static bool NumericalCheck(ScalarType dtype, void* c, void* other_c, int64_t siz
 
 }
 
+// Note on GetSizeA et al.
+// Tensors can be dense or arbitrarily strided. We only need our copies to be large enough.
+// Our copies must be at least as large as the m n k shapes dictate, but could be larger
+// depending on the lda ldb ldc values. Similarly for the batched case.
+
 template <typename T>
 struct GemmParams : OpParams {
-  GemmParams() {
-    duplicate_inputs_ = false;
-  }
+  GemmParams() = default;
 
   std::string Signature() const override {
-    return c10::str(transa, transb, "_", m, "_", n, "_", k);
+    return fmt::sprintf("%c%c_%ld_%ld_%ld", transa, transb, m, n, k);
   }
 
   size_t GetSizeA() const {
-    return sizeof(T) * lda * ((transa == 'n' || transa == 'N') ? k : m);
+    size_t size_stride = lda * ((transa == 'n' || transa == 'N') ? k : m);
+    size_t size_dense = m * k;
+    return sizeof(T) * (size_stride > size_dense ? size_stride : size_dense);
   }
 
   size_t GetSizeB() const {
-    return sizeof(T) * ldb * ((transb == 'n' || transb == 'N') ? n : k);
+    size_t size_stride = ldb * ((transb == 'n' || transb == 'N') ? n : k);
+    size_t size_dense = k * n;
+    return sizeof(T) * (size_stride > size_dense ? size_stride : size_dense);
   }
 
   size_t GetSizeC() const {
-    return sizeof(T) * ldc * n;
+    size_t size_stride = ldc * n;
+    size_t size_dense = m * n;
+    return sizeof(T) * (size_stride > size_dense ? size_stride : size_dense);
   }
 
   size_t GetSize(bool duplicate_inputs) const {
@@ -128,14 +138,16 @@ struct GemmParams : OpParams {
   void Delete() {
     c10::cuda::CUDACachingAllocator::raw_delete(c);
     if (duplicate_inputs_) {
+      // NOLINTNEXTLINE(*const-cast*)
       c10::cuda::CUDACachingAllocator::raw_delete(const_cast<T*>(a));
+      // NOLINTNEXTLINE(*const-cast*)
       c10::cuda::CUDACachingAllocator::raw_delete(const_cast<T*>(b));
     }
   }
 
   TuningStatus NumericalCheck(GemmParams<T> *other) {
     auto c_dtype = c10::CppTypeToScalarType<T>::value;
-    return detail::NumericalCheck(c_dtype, c, other->c, ldc*n) ? OK : FAIL;
+    return detail::NumericalCheck(c_dtype, c, other->c, GetSizeC()/sizeof(T)) ? OK : FAIL;
   }
 
   char transa;
@@ -152,29 +164,31 @@ struct GemmParams : OpParams {
   T* c;
   int64_t ldc;
 private:
-  bool duplicate_inputs_;
+  bool duplicate_inputs_{false};
 };
 
 template <typename T>
-struct GemmStridedBatchedParams : OpParams {
-  GemmStridedBatchedParams() {
-    duplicate_inputs_ = false;
-  }
-
+struct GemmAndBiasParams : OpParams {
   std::string Signature() const override {
-    return c10::str(transa, transb, "_", m, "_", n, "_", k, "_B_", batch);
+    return fmt::sprintf("%c%c_%ld_%ld_%ld", transa, transb, m, n, k);
   }
 
   size_t GetSizeA() const {
-    return sizeof(T) * lda * ((transa == 'n' || transa == 'N') ? k : m) * batch;
+    size_t size_stride = lda * ((transa == 'n' || transa == 'N') ? k : m);
+    size_t size_dense = m * k;
+    return sizeof(T) * (size_stride > size_dense ? size_stride : size_dense);
   }
 
   size_t GetSizeB() const {
-    return sizeof(T) * ldb * ((transb == 'n' || transb == 'N') ? n : k) * batch;
+    size_t size_stride = ldb * ((transb == 'n' || transb == 'N') ? n : k);
+    size_t size_dense = k * n;
+    return sizeof(T) * (size_stride > size_dense ? size_stride : size_dense);
   }
 
   size_t GetSizeC() const {
-    return sizeof(T) * ldc * n * batch;
+    size_t size_stride = ldc * n;
+    size_t size_dense = m * n;
+    return sizeof(T) * (size_stride > size_dense ? size_stride : size_dense);
   }
 
   size_t GetSize(bool duplicate_inputs) const {
@@ -186,8 +200,8 @@ struct GemmStridedBatchedParams : OpParams {
     return size;
   }
 
-  GemmStridedBatchedParams* DeepCopy(bool duplicate_inputs) const {
-    GemmStridedBatchedParams* copy = new GemmStridedBatchedParams;
+  GemmAndBiasParams* DeepCopy(bool duplicate_inputs) const {
+    GemmAndBiasParams* copy = new GemmAndBiasParams;
     *copy = *this;
     c10::DeviceIndex device = 0;
     AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
@@ -214,9 +228,101 @@ struct GemmStridedBatchedParams : OpParams {
     }
   }
 
+  TuningStatus NumericalCheck(GemmAndBiasParams<T> *other) {
+    auto c_dtype = c10::CppTypeToScalarType<T>::value;
+    return detail::NumericalCheck(c_dtype, c, other->c, GetSizeC()/sizeof(T)) ? OK : FAIL;
+  }
+
+  char transa;
+  char transb;
+  int64_t m;
+  int64_t n;
+  int64_t k;
+  at::opmath_type<T> alpha;
+  const T* a;
+  int64_t lda;
+  const T* b;
+  int64_t ldb;
+  T* c;
+  int64_t ldc;
+  const T* bias;
+  at::cuda::blas::GEMMAndBiasActivationEpilogue activation;
+private:
+  bool duplicate_inputs_{false};
+};
+
+template <typename T>
+struct GemmStridedBatchedParams : OpParams {
+  GemmStridedBatchedParams() = default;
+  GemmStridedBatchedParams(const GemmStridedBatchedParams&) = default;
+  GemmStridedBatchedParams& operator=(const GemmStridedBatchedParams&) = default;
+
+  std::string Signature() const override {
+    return fmt::sprintf("%c%c_%ld_%ld_%ld_B_%ld", transa, transb, m, n, k, batch);
+  }
+
+  size_t GetSizeA() const {
+    size_t size_stride = std::min(lda, stride_a) * ((transa == 'n' || transa == 'N') ? k : m) * batch;
+    size_t size_dense = m * k * batch;
+    return sizeof(T) * (size_stride > size_dense ? size_stride : size_dense);
+  }
+
+  size_t GetSizeB() const {
+    size_t size_stride = std::min(ldb, stride_b) * ((transb == 'n' || transb == 'N') ? n : k) * batch;
+    size_t size_dense = k * n * batch;
+    return sizeof(T) * (size_stride > size_dense ? size_stride : size_dense);
+  }
+
+  size_t GetSizeC() const {
+    size_t size_stride = std::min(ldc, stride_c) * n * batch;
+    size_t size_dense = m * n * batch;
+    return sizeof(T) * (size_stride > size_dense ? size_stride : size_dense);
+  }
+
+  size_t GetSize(bool duplicate_inputs) const {
+    size_t size = GetSizeC();
+    if (duplicate_inputs) {
+      size += GetSizeA();
+      size += GetSizeB();
+    }
+    return size;
+  }
+
+  GemmStridedBatchedParams* DeepCopy(bool duplicate_inputs) const {
+    GemmStridedBatchedParams* copy = new GemmStridedBatchedParams;
+    *copy = *this;
+    c10::DeviceIndex device = 0;
+    AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
+    size_t c_size = GetSizeC();
+    copy->c = static_cast<T*>(c10::cuda::CUDACachingAllocator::raw_alloc(c_size));
+    AT_CUDA_CHECK(c10::cuda::CUDACachingAllocator::memcpyAsync(
+        copy->c, device, c, device, c_size, getCurrentCUDAStream(device), true));
+    if (duplicate_inputs) {
+      size_t a_size = GetSizeA();
+      size_t b_size = GetSizeB();
+      // NOLINTNEXTLINE(*const-cast*)
+      copy->a = static_cast<const T*>(c10::cuda::CUDACachingAllocator::raw_alloc(a_size));
+      // NOLINTNEXTLINE(*const-cast*)
+      copy->b = static_cast<const T*>(c10::cuda::CUDACachingAllocator::raw_alloc(b_size));
+      copy->duplicate_inputs_ = true;
+    }
+    return copy;
+  }
+
+  // only call on object returned by DeepCopy
+  void Delete() {
+    c10::cuda::CUDACachingAllocator::raw_delete(c);
+    if (duplicate_inputs_) {
+      // NOLINTNEXTLINE(*const-cast*)
+      c10::cuda::CUDACachingAllocator::raw_delete(const_cast<T*>(a));
+      // NOLINTNEXTLINE(*const-cast*)
+      c10::cuda::CUDACachingAllocator::raw_delete(const_cast<T*>(b));
+    }
+  }
+
   TuningStatus NumericalCheck(GemmStridedBatchedParams<T> *other) {
     auto c_dtype = c10::CppTypeToScalarType<T>::value;
-    return detail::NumericalCheck(c_dtype, c, other->c, batch*stride_c) ? OK : FAIL;
+    return detail::NumericalCheck(c_dtype, c, other->c, GetSizeC()/sizeof(T)) ? OK : FAIL;
   }
 
   char transa;
@@ -237,29 +343,33 @@ struct GemmStridedBatchedParams : OpParams {
   int64_t stride_c;
   int64_t batch;
 private:
-  bool duplicate_inputs_;
+  bool duplicate_inputs_{false};
 };
 
 template <typename T>
 struct ScaledGemmParams : OpParams {
-  ScaledGemmParams() {
-    duplicate_inputs_ = false;
-  }
+  ScaledGemmParams() = default;
 
   std::string Signature() const override {
-    return c10::str(transa, transb, "_", m, "_", n, "_", k);
+    return fmt::sprintf("%c%c_%ld_%ld_%ld", transa, transb, m, n, k);
   }
 
   size_t GetSizeA() const {
-    return sizeof(T) * lda * ((transa == 'n' || transa == 'N') ? k : m);
+    size_t size_stride = lda * ((transa == 'n' || transa == 'N') ? k : m);
+    size_t size_dense = m * k;
+    return sizeof(T) * (size_stride > size_dense ? size_stride : size_dense);
   }
 
   size_t GetSizeB() const {
-    return sizeof(T) * ldb * ((transb == 'n' || transb == 'N') ? n : k);
+    size_t size_stride = ldb * ((transb == 'n' || transb == 'N') ? n : k);
+    size_t size_dense = k * n;
+    return sizeof(T) * (size_stride > size_dense ? size_stride : size_dense);
   }
 
   size_t GetSizeC() const {
-    return sizeof(T) * ldc * n;
+    size_t size_stride = ldc * n;
+    size_t size_dense = m * n;
+    return sizeof(T) * (size_stride > size_dense ? size_stride : size_dense);
   }
 
   size_t GetSize(bool duplicate_inputs) const {
@@ -294,13 +404,15 @@ struct ScaledGemmParams : OpParams {
   void Delete() {
     c10::cuda::CUDACachingAllocator::raw_delete(c);
     if (duplicate_inputs_) {
+      // NOLINTNEXTLINE(*const-cast*)
       c10::cuda::CUDACachingAllocator::raw_delete(const_cast<void*>(a));
+      // NOLINTNEXTLINE(*const-cast*)
       c10::cuda::CUDACachingAllocator::raw_delete(const_cast<void*>(b));
     }
   }
 
   TuningStatus NumericalCheck(ScaledGemmParams<T> *other) {
-    return detail::NumericalCheck(c_dtype, c, other->c, ldc*n) ? OK : FAIL;
+    return detail::NumericalCheck(c_dtype, c, other->c, GetSizeC()/sizeof(T)) ? OK : FAIL;
   }
 
   char transa;
@@ -325,7 +437,7 @@ struct ScaledGemmParams : OpParams {
   void* amax_ptr;
   bool use_fast_accum;
 private:
-  bool duplicate_inputs_;
+  bool duplicate_inputs_{false};
 };
 
 } // namespace at::cuda::tunable

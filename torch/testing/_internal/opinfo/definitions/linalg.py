@@ -11,7 +11,6 @@ import numpy as np
 from numpy import inf
 
 import torch
-
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import (
     _get_magma_version,
@@ -807,7 +806,7 @@ def sample_inputs_diagonal_diag_embed(op_info, device, dtype, requires_grad, **k
     # Shapes for 3D Tensors
     shapes_3d = ((S, S, S),)
 
-    kwargs_2d = (dict(), dict(offset=2), dict(offset=2), dict(offset=1))
+    kwargs_2d = ({}, dict(offset=2), dict(offset=2), dict(offset=1))
     kwargs_3d = (
         dict(offset=1, dim1=1, dim2=2),
         dict(offset=2, dim1=0, dim2=1),

@@ -31,10 +31,6 @@
 
 #include <ATen/core/function_schema.h>
 #include <c10/core/Stream.h>
-#ifdef USE_C10D_NCCL
-#include <c10/cuda/CUDACachingAllocator.h>
-#include <c10/cuda/CUDAStream.h>
-#endif
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 #include <optional>
@@ -184,7 +180,7 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
               PyErr_Clear();
             }
 
-            throw err;
+            throw std::runtime_error(err);
           }
         },
         PyObjectType::get()));
@@ -194,7 +190,8 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
     auto pf = std::make_shared<PythonFunctionGuard>(std::move(cb));
     // NOLINTNEXTLINE(modernize-avoid-bind)
     fut->addCallback(std::bind(
-        [pyFut(this->getPtr())](std::shared_ptr<PythonFunctionGuard> pf) {
+        [pyFut(this->getPtr())](
+            const std::shared_ptr<PythonFunctionGuard>& pf) {
           try {
             pybind11::gil_scoped_acquire ag;
             pf->func_(pyFut);
@@ -264,9 +261,10 @@ struct VISIBILITY_HIDDEN PythonAwaitWrapper
     aw_->markCompleted(toIValue(input, type));
   }
 
-  explicit PythonAwaitWrapper(py::function pf, py::tuple args) {
+  explicit PythonAwaitWrapper(py::function pf, py::tuple args)
+      : args_(std::move(args)) {
     pyfg_ = std::make_shared<torch::jit::PythonFunctionGuard>(std::move(pf));
-    args_ = std::move(args);
+
     std::function<IValue()> f = [fg(pyfg_), &args(args_)]() {
       pybind11::gil_scoped_acquire ag;
       return toIValue(fg->func_(*args), PyObjectType::get());
@@ -344,7 +342,8 @@ inline TypedIValue toDictKeyIValue(py::handle key) {
   } else if (py::isinstance<py::float_>(key)) {
     return TypedIValue(py::cast<double>(key), FloatType::get());
   } else {
-    AT_ERROR("Dictionary inputs may only have string, int, or float keys");
+    TORCH_CHECK(
+        false, "Dictionary inputs may only have string, int, or float keys");
   }
 }
 
@@ -689,8 +688,12 @@ inline IValue toTypeInferredIValue(py::handle input) {
       return c10::intrusive_ptr<c10::ivalue::Object>::reclaim_copy(
           ptr.release());
     }
-    AT_ERROR(
-        "Tracer cannot infer type of ", py::str(input), "\n:", match.reason());
+    TORCH_CHECK(
+        false,
+        "Tracer cannot infer type of ",
+        py::str(input),
+        "\n:",
+        match.reason());
   }
   return toIValue(input, match.type());
 }
@@ -750,7 +753,7 @@ inline void guardAgainstNamedTensor(const T& var) {
 template <typename T>
 c10::intrusive_ptr<T> toCustomClass(py::handle obj) {
   static_assert(
-      std::is_base_of<CustomClassHolder, T>::value, "T is not a CustomClass");
+      std::is_base_of_v<CustomClassHolder, T>, "T is not a CustomClass");
   const auto& type = c10::getCustomClassType<c10::intrusive_ptr<T>>();
   c10::IValue ivalue = toIValue(obj, type);
   return std::move(ivalue).toCustomClass<T>();
@@ -1075,7 +1078,11 @@ inline py::object createPyObjectForStack(Stack&& stack) {
     return_values[ret] = toPyObject(std::move(stack[ret]));
   }
 
+#if defined(__clang__)
   return std::move(return_values);
+#else
+  return return_values;
+#endif
 }
 
 // TODO: Remove once we clean up the GraphExecutor usage.
@@ -1084,9 +1091,10 @@ inline Stack evilDeprecatedBadCreateStackDoNotUse(
     at::ArrayRef<Value*> inputs,
     size_t reserve_extra_space = 0) {
   if (tuple.size() != inputs.size()) {
-    AT_ERROR(
+    TORCH_CHECK(
+        false,
         "expected " + std::to_string(inputs.size()) + " inputs, but got " +
-        std::to_string(tuple.size()));
+            std::to_string(tuple.size()));
   }
   Stack result;
   result.reserve(tuple.size() + reserve_extra_space);
@@ -1162,7 +1170,7 @@ inline std::optional<py::object> maybeTorchFunctionDispatch(
     const py::object& callee,
     const tuple_slice& args_no_self,
     const py::kwargs& kwargs,
-    const c10::QualifiedName qualname) {
+    const c10::QualifiedName& qualname) {
   std::vector<py::handle> args_vec;
   for (const auto& arg : args_no_self) {
     args_vec.push_back(arg);
@@ -1248,12 +1256,12 @@ inline py::object invokeScriptMethodFromPython(
 
 TORCH_PYTHON_API std::pair<std::shared_ptr<Operator>, Stack> getOpWithStack(
     const std::vector<std::shared_ptr<Operator>>& operations,
-    py::args args,
+    const py::args& args,
     const py::kwargs& kwargs);
 
 TORCH_PYTHON_API py::object invokeOperatorFromPython(
     const std::vector<std::shared_ptr<Operator>>& operations,
-    py::args args,
+    const py::args& args,
     const py::kwargs& kwargs,
     std::optional<c10::DispatchKey> dk = std::nullopt);
 
@@ -1262,18 +1270,18 @@ TORCH_PYTHON_API std::optional<py::object> _maybe_handle_torch_function(
     const std::string& method_name,
     const std::string& overload_name,
     bool is_overload,
-    py::args args,
+    const py::args& args,
     const py::kwargs& kwargs);
 
 TORCH_PYTHON_API bool checkSchemaAllowFakeScriptObject(
     const FunctionSchema& schema,
-    py::args args,
+    const py::args& args,
     const py::kwargs& kwargs);
 
 TORCH_PYTHON_API py::object _get_operation_for_overload_or_packet(
     const std::vector<std::shared_ptr<Operator>>& operations,
     Symbol symbol,
-    py::args args,
+    const py::args& args,
     const py::kwargs& kwargs,
     bool is_overload,
     std::optional<c10::DispatchKey> dk = std::nullopt);

@@ -1,8 +1,10 @@
 import operator_benchmark as op_bench
+
 import torch
 import torch.ao.nn.quantized as nnq
 import torch.ao.quantization as tq
 import torch.nn as nn
+
 
 """Microbenchmarks for general quantization operations."""
 

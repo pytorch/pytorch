@@ -6,8 +6,7 @@
 
 #include <ATen/ScalarOps.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 static void SetNumTypeToTensorType(Value* v) {
   if (v->type()->isSubtypeOf(*NumberType::get())) {
@@ -73,5 +72,4 @@ void EraseNumberTypes(const std::shared_ptr<Graph>& graph) {
   EraseNumberTypesOnBlock(graph->block());
   GRAPH_DUMP("After EraseNumberTypes: ", graph);
 }
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit
