@@ -12326,20 +12326,66 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 self.assertEqual(fp32_cast_in_code, upcast_to_fp32)
 
         @requires_gpu()
+        @parametrize(
+            "op",
+            [
+                torch.rsqrt,
+                torch.sqrt,
+                torch.isnan,
+                torch.floor,
+                torch.ceil,
+                torch.tan,
+                torch.atan,
+                torch.atanh,
+                torch.sigmoid,
+                torch.log2,
+                torch.log10,
+                torch.cosh,
+                torch.sinh,
+                torch.acosh,
+                torch.asinh,
+                torch.asin,
+                torch.acos,
+                torch.asinh,
+                torch.erf,
+                torch.lgamma,
+                torch.sin,
+                torch.cos,
+                torch.exp,
+                torch.expm1,
+                torch.exp2,
+                torch.abs,
+            ],
+        )
         @parametrize("load_upcast_to_fp32", [False, True])
         @parametrize("input_dtype", [torch.float16, torch.bfloat16])
         @config.patch("triton.use_block_ptr", True)
-        def test_dtype_aware_codegen(self, load_upcast_to_fp32, input_dtype):
+        def test_dtype_aware_codegen(
+            self, op: typing.Callable, load_upcast_to_fp32, input_dtype
+        ):
+            """
+            Test dtype aware codegen for some tl.math/libdevice calls.
+            Operands should be upcast to float32, and the output should be downcast to float16.
+            """
+
             @torch.compile
             def func(a, b, c, d):
-                return torch.sqrt(a * b * c * d)
+                return op(a * b * c * d)
 
             inps = (torch.rand((32, 32), device=GPU_TYPE, dtype=input_dtype),) * 4
+            op_str = op.__name__.removeprefix("torch.")
+            tl_dtype_str = str(input_dtype).replace("torch", "tl")
             with config.patch("triton.codegen_upcast_to_fp32", load_upcast_to_fp32):
                 func_opt = torch._dynamo.optimize("inductor")(func)
                 code = run_and_get_triton_code(func_opt, *inps)
-                libdevice_cast_in_code = "libdevice.sqrt(tmp3.to(tl.float32))" in code
-                self.assertNotEqual(libdevice_cast_in_code, load_upcast_to_fp32)
+
+                # Search for the expected string. This matches tl.math.X or libdevice.X,
+                # where X is the name of the torch op.
+                cast_in_code = (
+                    f"{op_str}(tmp3.to(tl.float32)).to({tl_dtype_str})"
+                    in code
+                )
+                self.assertNotEqual(cast_in_code, load_upcast_to_fp32)
 
         @config.patch("triton.use_block_ptr", False)
         def test_evict_last_non_coalesced_loads(self):
