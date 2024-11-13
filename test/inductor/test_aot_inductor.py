@@ -38,11 +38,9 @@ from torch.testing._internal.common_quantization import (
 )
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
-    find_library_location,
     IS_CI,
     IS_FBCODE,
     IS_MACOS,
-    IS_SANDCASTLE,
     IS_WINDOWS,
     skipIfRocm,
     TEST_WITH_ROCM,
@@ -2922,163 +2920,6 @@ class AOTInductorTestsTemplate:
         model.weight += 1
         self.check_model(model, example_inputs)
 
-    def test_custom_op_add(self) -> None:
-        class M(torch.nn.Module):
-            def forward(self, x, y):
-                return torch.ops.aoti_custom_ops.custom_add(x, y)
-
-        m = M().to(device=self.device)
-        args = (
-            torch.randn(3, 3, device=self.device),
-            torch.randn(3, 3, device=self.device),
-        )
-        self.check_model(m, args)
-
-    def test_custom_op_add_output_path(self) -> None:
-        class M(torch.nn.Module):
-            def forward(self, x, y):
-                return torch.ops.aoti_custom_ops.custom_add(x, y)
-
-        m = M().to(device=self.device)
-        args = (
-            torch.randn(3, 3, device=self.device),
-            torch.randn(3, 3, device=self.device),
-        )
-        with config.patch("aot_inductor.output_path", "model.so"):
-            with self.assertRaises(Exception):
-                self.check_model(m, args)
-
-    def test_custom_op_all_inputs(self) -> None:
-        class MyModel(torch.nn.Module):
-            # pyre-fixme[3]: Return type must be annotated.
-            def __init__(self):
-                super().__init__()
-
-            # pyre-fixme[3]: Return type must be annotated.
-            # pyre-fixme[2]: Parameter must be annotated.
-            def forward(self, x, y):
-                with torch.no_grad():
-                    x_dim0 = x.shape[0]
-                    x_dim1 = x.shape[1]
-                    y_dim0 = y.shape[0]
-                    y_dim1 = y.shape[1]
-                    symint_0 = x_dim0 + x_dim1
-                    symint_1 = y_dim0 * y_dim1
-
-                    z = torch.concat((x, x))
-
-                    _2547 = torch.ops.aoti_custom_ops.fn_with_all_inputs(
-                        tensor=x,
-                        tensors=[x, y],
-                        optional_tensors=[None, z],
-                        b8=False,
-                        b8s=[True, False],
-                        i64=42,
-                        i64s=[16, 17],
-                        symint=symint_0,
-                        symints=[symint_0, symint_1],
-                        f64=3.14,
-                        f64s=[2.2, 3.3],
-                        scalar=1.23,
-                        scalars=[45, 67],
-                        string="hello",
-                        strings=["ab", "cde"],
-                        # dtype=torch.float16,
-                        # memory_format=torch.contiguous_format,
-                        # layout=torch.strided,
-                        device=torch.device("cpu"),
-                        # optional
-                        o_tensor=None,
-                        o_tensors=[x, y],
-                        o_b8=False,
-                        o_b8s=[True, False],
-                        o_i64=None,
-                        o_i64s=[16, 17],
-                        o_symint=symint_1,
-                        o_symints=[symint_1, symint_0],
-                        o_f64=3.14,
-                        o_f64s=None,
-                        o_scalar=None,
-                        o_scalars=[89, 910],
-                        o_string="hello",
-                        o_strings=["ab", "cde"],
-                        # o_dtype=None,
-                        # o_memory_format=torch.contiguous_format,
-                        # o_layout=torch.strided,
-                        o_device=None,
-                    )
-
-                return _2547
-
-        m = MyModel().to(device=self.device)
-        x = torch.zeros(4, 8, device=self.device)
-        y = torch.ones(3, 9, device=self.device)
-        args = (x, y)
-        m(*args)
-
-        self.check_model(m, args)
-
-    def test_custom_op_with_multiple_outputs(self) -> None:
-        class Model(torch.nn.Module):
-            def forward(self, x, y):
-                out = x + y
-                # tuple of Tensor output
-                out3, out4 = torch.ops.aoti_custom_ops.fn_with_tuple_output(out, 1)
-                # TensorList output
-                out5, out6 = torch.ops.aoti_custom_ops.fn_with_list_output(
-                    [out3, out4], 1
-                )
-                # tuple of Tensor and TensorList
-                out7, [out8, out9] = torch.ops.aoti_custom_ops.fn_with_mix_outputs(
-                    out5, [out6, out4]
-                )
-                return out3, out4, out5, out6, out7, out8, out9
-
-        m = Model().to(device=self.device)
-        args = (
-            torch.randn(4, 4, device=self.device),
-            torch.randn(4, 4, device=self.device),
-        )
-        m(*args)
-
-        self.check_model(m, args)
-
-    def test_custom_op_with_reinterpret_view_inputs(self) -> None:
-        class Model(torch.nn.Module):
-            def forward(self, x):
-                out = x.permute([1, 0])
-                return torch.ops.aoti_custom_ops.fn_with_default_input(out, 1)
-
-        m = Model().to(device=self.device)
-        args = (torch.randn(2, 3, device=self.device),)
-
-        self.check_model(m, args)
-
-    def test_custom_op_with_concat_inputs(self) -> None:
-        class Model(torch.nn.Module):
-            def forward(self, x, y):
-                out = torch.concat([x, y], dim=0)
-                return torch.ops.aoti_custom_ops.fn_with_default_input(out, 1)
-
-        m = Model().to(device=self.device)
-        args = (
-            torch.randn(2, 3, device=self.device),
-            torch.randn(2, 3, device=self.device),
-        )
-
-        self.check_model(m, args)
-
-    def test_custom_op_missing_arg_with_default_value(self) -> None:
-        class Model(torch.nn.Module):
-            def forward(self, x):
-                # missing second arg
-                return torch.ops.aoti_custom_ops.fn_with_default_input(x)
-
-        m = Model().to(device=self.device)
-        args = (torch.randn(2, 3, device=self.device),)
-
-        self.check_model(m, args)
-
     def test_triton_kernel_extern_kernel_arg(self):
         if self.device != "cuda":
             raise unittest.SkipTest("requires CUDA")
@@ -4072,20 +3913,6 @@ class AOTInductorLoggingTest(LoggingTestCase):
 common_utils.instantiate_parametrized_tests(AOTInductorTestsTemplate)
 
 
-class AOTITestCase(TestCase):
-    def setUp(self):
-        if IS_SANDCASTLE or IS_FBCODE:
-            torch.ops.load_library("//caffe2/test/inductor:custom_ops")
-        elif IS_MACOS:
-            raise unittest.SkipTest("non-portable load_library call used in test")
-        else:
-            lib_file_path = find_library_location("libaoti_custom_ops.so")
-            if IS_WINDOWS:
-                lib_file_path = find_library_location("aoti_custom_ops.dll")
-            torch.ops.load_library(str(lib_file_path))
-        super().setUp()
-
-
 def fail_cpu(is_skip=False):
     return TestFailure(
         ("cpu",),
@@ -4114,7 +3941,7 @@ CUDA_TEST_FAILURES = {
 }
 
 
-class AOTInductorTestABICompatibleCpu(AOTITestCase):
+class AOTInductorTestABICompatibleCpu(TestCase):
     device = "cpu"
     device_type = "cpu"
     check_model = check_model
@@ -4133,7 +3960,7 @@ copy_tests(
 
 
 @unittest.skipIf(sys.platform == "darwin", "No CUDA on MacOS")
-class AOTInductorTestABICompatibleCuda(AOTITestCase):
+class AOTInductorTestABICompatibleCuda(TestCase):
     device = "cuda"
     device_type = "cuda"
     check_model = check_model
