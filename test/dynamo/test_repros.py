@@ -5259,19 +5259,17 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         self.assertEqual(fn(x), opt_fn(x))
 
     def test_nn_parametrize(self):
-        from torch.testing._internal.two_tensor import TwoTensor
         class Module(nn.Module):
             def __init__(self) -> None:
                 super().__init__()
-                self.param = torch.nn.Parameter(TwoTensor(torch.randn(10, 10), torch.randn(10, 10)))
+                self.param = torch.nn.Parameter(torch.randn(10, 10))
 
             def forward(self, x):
                 return self.param @ x
 
         class Parametrization(torch.nn.Module):
             def forward(self, x):
-                return x
-                # return torch.sin(x)
+                return torch.sin(x)
 
         m = Module()
         torch.nn.utils.parametrize.register_parametrization(
@@ -5287,15 +5285,15 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
                     sin_found = True
             return gm
 
-        opt_m = torch.compile(m, backend="aot_eager", fullgraph=True)
+        opt_m = torch.compile(m, backend=backend, fullgraph=True)
         inp = torch.randn(10, 10)
         self.assertEqual(m(inp), opt_m(inp))
         self.assertTrue(sin_found)
 
-        #torch.nn.utils.parametrize.remove_parametrizations(m, "param")
-        #sin_found = False
-        #self.assertEqual(m(inp), opt_m(inp))
-        #self.assertFalse(sin_found)
+        torch.nn.utils.parametrize.remove_parametrizations(m, "param")
+        sin_found = False
+        self.assertEqual(m(inp), opt_m(inp))
+        self.assertFalse(sin_found)
 
     def test_nn_module_property_closure(self):
         x = torch.randn(10, 10)

@@ -4606,6 +4606,39 @@ def forward(self, x, b, y):
         out = graph(tensor)
         self.assertEqual(out, tensor[:, 0])
 
+    def test_subclass_parameters(self):
+        from torch.testing._internal.subclasses import WrapperSubclass
+        from torch.testing._internal.two_tensor import TwoTensor
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.p1 = torch.nn.Parameter(WrapperSubclass(torch.ones(3, 4)))
+                self.p2 = torch.nn.Parameter(
+                    TwoTensor(torch.zeros(3, 4), torch.zeros(3, 4))
+                )
+
+            def forward(self, x):
+                return x + 2 * self.p1 + self.p2
+
+        m = M()
+        ref_x = torch.randn(3, 4)
+        ref_out = m(ref_x)
+
+        from torch._functorch._aot_autograd.subclass_parametrization import (
+            unwrap_tensor_subclass_parameters,
+        )
+
+        unwrap_tensor_subclass_parameters(m)
+        ref_x2 = ref_x.detach().clone()
+        ref_out2 = m(ref_x2)
+        self.assertEqual(ref_out2, ref_out)
+
+        x = ref_x.detach().clone()
+        graph, _ = torch._dynamo.export(m)(x)
+        out = graph(x)
+        self.assertEqual(ref_out, out)
+
 
 common_utils.instantiate_parametrized_tests(ExportTests)
 
