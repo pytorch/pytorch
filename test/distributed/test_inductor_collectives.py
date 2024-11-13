@@ -15,7 +15,7 @@ from torch._C import FileCheck
 from torch._dynamo.testing import CompileCounter
 from torch._dynamo.utils import same
 from torch._inductor.compile_fx import compile_fx as inductor_compile_fx
-from torch._inductor.utils import run_and_get_code, run_and_get_triton_code
+from torch._inductor.utils import run_and_get_triton_code
 from torch.distributed.distributed_c10d import GroupMember
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_distributed import (
@@ -252,6 +252,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
     @skipIfRocm
     def test_eager_async_allreduce_inductor_wait(self):
         import torch.distributed as dist
+        from torch._inductor.utils import run_and_get_code
 
         def all_reduce_non_functional_eager(x):
             y = x * x
@@ -279,41 +280,56 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             # thus guaranteeing that in the bad case `y * y` on GPU side will run in parallel with `all_reduce(y)`
             # thus will produce the wrong result that fails the unit test.
 
-            # Test: pure-eager
-            all_reduce_wait_eager = all_reduce_wait
-            for _ in range(10):
-                work, y = all_reduce_non_functional_eager(x)
-                self.assertEqual(
-                    torch._C._distributed_c10d._get_work_registry_size(), 1
-                )
-                out_ref = all_reduce_wait_eager(work, y)
-                # `work.wait()` will pop the work from the work registry immediately
-                self.assertEqual(
-                    torch._C._distributed_c10d._get_work_registry_size(), 0
-                )
+            def _run_loop_collective_wait(x, wait_fn, expected_registry_size):
+                for _ in range(10):
+                    self.assertEqual(
+                        torch._C._distributed_c10d._get_work_registry_size(), 0
+                    )
+                    work, y = all_reduce_non_functional_eager(x)
+                    self.assertEqual(
+                        torch._C._distributed_c10d._get_work_registry_size(),
+                        expected_registry_size,
+                    )
+                    out = wait_fn(work, y)
+                    self.assertEqual(
+                        torch._C._distributed_c10d._get_work_registry_size(), 0
+                    )
+                return work, y, out
 
-            # Test: issue comm in eager -> wait for comm in compile
+            # Test: Pure-eager
+            all_reduce_wait_eager = all_reduce_wait
+            work, y, out_ref = _run_loop_collective_wait(
+                x,
+                wait_fn=all_reduce_wait_eager,
+                expected_registry_size=0,
+            )
+
             all_reduce_wait_compiled = torch.compile(
                 all_reduce_wait,
                 backend="inductor",
                 fullgraph=True,
             )
-            for _ in range(10):
-                work, y = all_reduce_non_functional_eager(x)
-                self.assertEqual(
-                    torch._C._distributed_c10d._get_work_registry_size(), 1
+
+            # Test: Issue comm in eager -> wait for comm in compile. Use the context manager.
+            with _functional_collectives.allow_inflight_collective_as_graph_input_ctx():
+                work, y, out_compiled = _run_loop_collective_wait(
+                    x, wait_fn=all_reduce_wait_compiled, expected_registry_size=1
                 )
-                out_compiled, triton_codes = run_and_get_code(
-                    all_reduce_wait_compiled, work, y
-                )
-                # `wait_tensor(y)` will pop the work from the work registry immediately
-                self.assertEqual(
-                    torch._C._distributed_c10d._get_work_registry_size(), 0
-                )
-                FileCheck().check(
-                    "torch.ops._c10d_functional.wait_tensor.default("
-                ).run(triton_codes[0])
             self.assertEqual(out_ref, out_compiled)
+
+            # Check that `wait_tensor()` is in the Inductor generated code
+            _, triton_codes = run_and_get_code(all_reduce_wait_compiled, work, y)
+            FileCheck().check("torch.ops._c10d_functional.wait_tensor.default(").run(
+                triton_codes[0]
+            )
+
+            # Failure Case: Issue comm in eager -> wait for comm in compile. Doesn't use the context manager.
+            _, _, out_compiled = _run_loop_collective_wait(
+                x, wait_fn=all_reduce_wait_compiled, expected_registry_size=0
+            )
+            # In this case `.wait_tensor(y)` in compiled region will not be able to find the corresponding work object
+            # to invoke the wait, thus the result will not match eager.
+            self.assertNotEqual(out_ref, out_compiled)
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
@@ -1091,7 +1107,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         out = compiled(input)
         out.sum().backward()
 
-        correct_input = input.clone().detach().requires_grad_()
+        correct_input = input.detach().clone().requires_grad_()
         correct = func(correct_input)
         correct.sum().backward()
         self.assertTrue(same(out, correct))

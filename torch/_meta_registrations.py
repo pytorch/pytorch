@@ -520,44 +520,32 @@ def meta__cslt_sparse_mm(
     alpha: Optional[Tensor] = None,
     out_dtype: Optional[torch.dtype] = None,
     transpose_result: bool = False,
-    alg_id: int = 0,
-    split_k: int = 1,
-    split_k_one_kernel: bool = False,
 ):
     assert dense_B.dtype in {
         torch.float32,
         torch.float16,
         torch.bfloat16,
         torch.int8,
-        torch.float8_e4m3fn,
-    }, "_cslt_sparse_mm only supports fp16, bf16, int8, and fp8e4m3"
+    }, "_cslt_sparse_mm only supports fp16, bf16, and int8"
     assert compressed_A.dtype == dense_B.dtype, "inputs must have the same dtype"
     assert len(dense_B.shape) == 2, "_cslt_sparse_mm only supports 2d inputs"
 
-    is_8bit_input_type = compressed_A.dtype in [torch.int8, torch.float8_e4m3fn]
-    compression_factor = 10 if is_8bit_input_type else 9
+    is_int8_input_type = compressed_A.dtype == torch.int8
+    compression_factor = 10 if is_int8_input_type else 9
     k = dense_B.size(0)
     n = dense_B.size(1)
     m = (compressed_A.numel() * 16) // (compression_factor * k)
     if bias is not None:
         assert m == bias.size(0)
 
-    if is_8bit_input_type:
-        assert not dense_B.is_contiguous()
-
     if out_dtype is not None:
-        assert (
-            is_8bit_input_type
-            and out_dtype
-            in {
-                torch.float16,
-                torch.bfloat16,
-                torch.int32,
-                torch.float8_e4m3fn,
-            }
-        ), "out_dtype is not supported for {compressed_A.dtype} x {dense_B.dtype} -> {out_dtype} matmul!"
+        assert is_int8_input_type and out_dtype in {
+            torch.float16,
+            torch.bfloat16,
+            torch.int32,
+        }, "out_dtype is only supported for i8i8->fp16, bf16, or i32 matmul"
     output_shape = (n, m) if transpose_result else (m, n)
-    result = torch.empty(output_shape, dtype=out_dtype, device=compressed_A.device)
+    result = dense_B.new_empty(output_shape, dtype=out_dtype)
     return result
 
 
@@ -1507,7 +1495,7 @@ def linalg_solve_triangular_meta(
 
 
 @register_meta(aten.triangular_solve)
-@out_wrapper("solution", "cloned_coefficient")
+@out_wrapper("X", "M")
 def triangular_solve_meta(
     self: Tensor,
     A: Tensor,
@@ -2143,6 +2131,12 @@ def _compute_reduction_shape(self, dims, keepdim):
 def device_hint(tensor) -> "str":
     if isinstance(tensor, torch._subclasses.FakeTensor):
         return tensor.fake_device.type
+    elif (
+        hasattr(tensor, "device")
+        and hasattr(tensor.device, "type")
+        and tensor.device.type != "meta"
+    ):
+        return tensor.device.type
     else:
         return "cuda"  # default to cuda
 
@@ -3281,6 +3275,21 @@ def meta__convert_weight_to_int4pack(w, inner_k_tiles):
     )
 
 
+@register_meta([aten._convert_weight_to_int4pack_for_cpu])
+def meta__convert_weight_to_int4pack_for_cpu(w, inner_k_tiles):
+    torch._check(w.dim() == 2, lambda: "w must be a 2D tensor")
+    torch._check(
+        w.dtype is torch.int32,
+        lambda: f"expected w to be int32, got {w.dtype}",
+    )
+    n = w.size(0)
+    k = w.size(1)  # w is [n][k] int32
+    return w.new_empty(
+        (n, k // 2),
+        dtype=torch.uint8,
+    )
+
+
 @register_meta([aten._weight_int4pack_mm])
 def meta__weight_int4pack_mm(x, w, q_group_size, q_scale_and_zeros):
     torch._check(x.dim() == 2, lambda: "x must be a 2D tensor")
@@ -3294,6 +3303,21 @@ def meta__weight_int4pack_mm(x, w, q_group_size, q_scale_and_zeros):
         lambda: f"expected w to be int32, got {w.dtype}",
     )
     return x.new_empty(x.size(0), w.size(0) * 8, dtype=x.dtype)
+
+
+@register_meta([aten._weight_int4pack_mm_for_cpu])
+def meta__weight_int4pack_mm_for_cpu(x, w, q_group_size, q_scale_and_zeros):
+    torch._check(x.dim() == 2, lambda: "x must be a 2D tensor")
+    torch._check(w.dim() == 2, lambda: "w must be a 2D tensor")
+    torch._check(
+        x.dtype in [torch.float32, torch.float16, torch.bfloat16],
+        lambda: f"expected x to be f32/f16/bf16, got {x.dtype}",
+    )
+    torch._check(
+        w.dtype is torch.uint8,
+        lambda: f"expected w to be uint8, got {w.dtype}",
+    )
+    return x.new_empty(x.size(0), w.size(0), dtype=x.dtype)
 
 
 @register_meta([aten._weight_int8pack_mm])
@@ -3688,6 +3712,14 @@ def meta_relu_(self):
     return self
 
 
+@register_meta(aten._add_relu.Tensor)
+@out_wrapper()
+def meta__add_relu(self, other, alpha=1) -> Tensor:
+    return elementwise_meta(
+        self, other, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    )
+
+
 @register_meta([aten.index_put.default, aten._unsafe_index_put.default])
 def meta_index_put(self, indices, values, accumulate=False):
     return torch.empty_like(self)
@@ -3715,7 +3747,7 @@ def meta_masked_scatter_(self, mask, source):
     torch._check(
         self.dtype == source.dtype,
         lambda: "masked_scatter: expected self and source to have same "
-        "dtypes but got {self.dtype} and {source.dtype}",
+        f"dtypes but got {self.dtype} and {source.dtype}",
     )
     return self
 

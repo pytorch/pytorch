@@ -915,6 +915,7 @@ class Argument:
     kwarg_only: _bool
     is_out: _bool
     alias_info: Optional[AliasInfo]
+    is_write: _bool
 
 class FunctionSchema:
     arguments: List[Argument]
@@ -1447,9 +1448,9 @@ class PyTorchFileReader:
 
 class PyTorchFileWriter:
     @overload
-    def __init__(self, name: str) -> None: ...
+    def __init__(self, name: str, compute_crc32 = True) -> None: ...
     @overload
-    def __init__(self, buffer: BinaryIO) -> None: ...
+    def __init__(self, buffer: BinaryIO, compute_crc32 = True) -> None: ...
     def write_record(self, name: str, data: Union[Storage, bytes, _int], size: _int) -> None: ...
     def write_end_of_file(self) -> None: ...
     def set_min_version(self, version: _int) -> None: ...
@@ -2126,16 +2127,21 @@ class _XpuDeviceProperties:
     vendor: str
     driver_version: str
     version: str
-    total_memory: _int
     max_compute_units: _int
     gpu_eu_count: _int
-    gpu_subslice_count: _int
     max_work_group_size: _int
     max_num_sub_groups: _int
     sub_group_sizes: List[_int]
     has_fp16: _bool
     has_fp64: _bool
     has_atomic64: _bool
+    has_bfloat16_conversions: _bool
+    has_subgroup_matrix_multiply_accumulate: _bool
+    has_subgroup_matrix_multiply_accumulate_tensor_float32: _bool
+    has_subgroup_2d_block_io: _bool
+    total_memory: _int
+    gpu_subslice_count: _int
+    architecture: _int
     type: str
 
 # Defined in torch/csrc/xpu/Stream.cpp
@@ -2182,6 +2188,15 @@ def _set_worker_pids(
 ) -> None: ...  # THPModule_setWorkerPIDs
 def _remove_worker_pids(loader_id: _int) -> None: ...  # THPModule_removeWorkerPIDs
 def _error_if_any_worker_fails() -> None: ...  # THPModule_errorIfAnyWorkerFails
+
+# Defined in torch/csrc/DeviceAccelerator.cpp
+def _accelerator_getAccelerator() -> _device: ...
+def _accelerator_deviceCount() -> _int: ...
+def _accelerator_setDeviceIndex(device_index: _int) -> None: ...
+def _accelerator_getDeviceIndex() -> _int: ...
+def _accelerator_setStream(Stream) -> None: ...
+def _accelerator_getStream(device_index: _int) -> Stream: ...
+def _accelerator_synchronizeDevice(device_index: _int) -> None: ...
 
 # Defined in torch/csrc/jit/python/python_tracer.cpp
 class TracingState:

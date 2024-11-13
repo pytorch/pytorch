@@ -69,10 +69,12 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     parametrize,
     run_tests,
+    scoped_load_inline,
     set_warn_always_context,
     skipIfMps,
     skipIfNoLapack,
     skipIfTorchDynamo,
+    skipIfWindows,
     slowTest,
     TestCase,
     xfailIfTorchDynamo,
@@ -85,7 +87,6 @@ from torch.utils.checkpoint import (
     CheckpointPolicy,
     create_selective_checkpoint_contexts,
 )
-from torch.utils.cpp_extension import load_inline
 from torch.utils.flop_counter import FlopCounterMode
 
 
@@ -1263,7 +1264,7 @@ class TestAutograd(TestCase):
             tensor.mul_(4.0)
 
         tensor = torch.rand(3, requires_grad=True)
-        tensor_ref = tensor.clone().detach()
+        tensor_ref = tensor.detach().clone()
         tensor.register_post_accumulate_grad_hook(hook1)
         tensor.register_post_accumulate_grad_hook(hook2)
         sum = tensor.sum()
@@ -1276,9 +1277,9 @@ class TestAutograd(TestCase):
             tensor.sub_(tensor.grad)
 
         tensor1 = torch.rand(3, requires_grad=True)
-        tensor1_ref = tensor1.clone().detach()
+        tensor1_ref = tensor1.detach().clone()
         tensor2 = torch.rand(5, requires_grad=True)
-        tensor2_ref = tensor2.clone().detach()
+        tensor2_ref = tensor2.detach().clone()
         tensor1.register_post_accumulate_grad_hook(hook)
         tensor2.register_post_accumulate_grad_hook(hook)
         tensor1.sum().backward()
@@ -1334,7 +1335,7 @@ class TestAutograd(TestCase):
         params_copy = []  # freeze a copy of the params to compare later
         for p_reference, p in zip(model_copy.parameters(), model.parameters()):
             self.assertEqual(p_reference, p)
-            params_copy.append(p_reference.clone().detach())
+            params_copy.append(p_reference.detach().clone())
 
         # After removing the handle, the model should no longer update.
         for h in handles:
@@ -2351,8 +2352,8 @@ class TestAutograd(TestCase):
 
             r = a.mm(b)
             s = r.sum().backward()
-            a_grad = None if a.grad is None else a.grad.clone().detach()
-            b_grad = None if b.grad is None else b.grad.clone().detach()
+            a_grad = None if a.grad is None else a.grad.detach().clone()
+            b_grad = None if b.grad is None else b.grad.detach().clone()
 
             # Redo with only dense tensors
             a = (
@@ -4591,6 +4592,96 @@ SinBackward0, MulBackward0, torch::autograd::AccumulateGrad
             "expects the current backward to be executed with multithreading disabled",
         ):
             t.backward()
+
+    @skipIfWindows(msg="node name demangling inconsistent on windows")
+    def test_backward_hook_relative_ordering(self):
+        order = []
+
+        class MyModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        x = torch.randn(10, 10, requires_grad=True)
+        module = MyModule()
+        module.register_full_backward_hook(
+            lambda _1, _2, _3: order.append(
+                "module_full_backward_hook_BackwardHookFunctionBackward0"
+            )
+        )
+
+        def make_pre_hook(id):
+            return lambda _: order.append(f"pre_hook_{id}")
+
+        def make_post_hook(id):
+            return lambda _1, _2: order.append(f"post_hook_{id}")
+
+        count = 0
+
+        def register_hooks_on_all_nodes(nodes):
+            nonlocal count
+            for node, _ in nodes:
+                count += 1
+                id = f"{node.name()}_{count}"
+                node.register_prehook(make_pre_hook(id))
+                node.register_hook(make_post_hook(id))
+                register_hooks_on_all_nodes(node.next_functions)
+
+        loss = module(x).sum()
+        register_hooks_on_all_nodes(((loss.grad_fn, None),))
+
+        def make_tensor_pre_hook(id):
+            return lambda _: order.append(f"tensor_pre_hook_{id}")
+
+        def make_post_acc_grad_hook(id):
+            return lambda _: order.append(f"post_acc_grad_hook_{id}")
+
+        x.register_hook(make_tensor_pre_hook("x"))
+        module.linear.weight.register_hook(make_tensor_pre_hook("weight"))
+        module.linear.bias.register_hook(make_tensor_pre_hook("bias"))
+
+        x.register_post_accumulate_grad_hook(make_post_acc_grad_hook("x"))
+        module.linear.weight.register_post_accumulate_grad_hook(
+            make_post_acc_grad_hook("weight")
+        )
+        module.linear.bias.register_post_accumulate_grad_hook(
+            make_post_acc_grad_hook("bias")
+        )
+
+        loss.backward()
+
+        expected_order = [
+            "pre_hook_SumBackward0_1",
+            "post_hook_SumBackward0_1",
+            "pre_hook_BackwardHookFunctionBackward_2",
+            "post_hook_BackwardHookFunctionBackward_2",
+            "pre_hook_AddmmBackward0_3",
+            "post_hook_AddmmBackward0_3",
+            "tensor_pre_hook_bias",
+            "pre_hook_torch::autograd::AccumulateGrad_4",
+            "post_acc_grad_hook_bias",
+            "post_hook_torch::autograd::AccumulateGrad_4",
+            "pre_hook_TBackward0_7",
+            "post_hook_TBackward0_7",
+            "tensor_pre_hook_weight",
+            "pre_hook_torch::autograd::AccumulateGrad_8",
+            "post_acc_grad_hook_weight",
+            "post_hook_torch::autograd::AccumulateGrad_8",
+            "pre_hook_BackwardHookFunctionBackward_5",
+            "module_full_backward_hook_BackwardHookFunctionBackward0",
+            "post_hook_BackwardHookFunctionBackward_5",
+            "tensor_pre_hook_x",
+            "pre_hook_torch::autograd::AccumulateGrad_6",
+            "post_acc_grad_hook_x",
+            "post_hook_torch::autograd::AccumulateGrad_6",
+        ]
+
+        self.assertEqual(len(expected_order), len(order))
+        for expected, actual in zip(expected_order, order):
+            self.assertEqual(expected, actual)
 
     def test_view_replay_enabled(self):
         def f(x):
@@ -9854,7 +9945,8 @@ for shape in [(1,), ()]:
         out = x * y
         out.sum().backward()
 
-    def test_multi_grad_all_hooks(self):
+    @scoped_load_inline
+    def test_multi_grad_all_hooks(self, load_inline):
         t1 = torch.rand(2, requires_grad=True)
         t2 = torch.rand(2, requires_grad=True)
         t3 = torch.rand(2, requires_grad=True)
@@ -9899,19 +9991,19 @@ torch::Tensor custom_op_backed_by_autograd_fn(torch::Tensor x) {
   return CustomOpAutogradFunction::apply(x);
 }
 
-TORCH_LIBRARY(test_autograd_cpp_node, m) {
+TORCH_LIBRARY(test_multigrad_all_hooks, m) {
     m.def("custom_op_backed_by_autograd_fn", custom_op_backed_by_autograd_fn);
 }
         """
 
         module = load_inline(
-            name="test_autograd_cpp_node",
+            name="test_multigrad_all_hooks",
             cpp_sources=cpp_source,
             functions="custom_op_backed_by_autograd_fn",
             verbose=True,
         )
 
-        t4 = torch.ops.test_autograd_cpp_node.custom_op_backed_by_autograd_fn(t4)
+        t4 = torch.ops.test_multigrad_all_hooks.custom_op_backed_by_autograd_fn(t4)
 
         res = [None] * 4
         count = [0]
@@ -10203,20 +10295,20 @@ get_out().sum().backward()
             offsets = torch.tensor([0, 3, 6, 10])
             _test_fn(nested_view_from_values_offsets, values, offsets)
 
-            nt = nested_view_from_values_offsets(values, offsets).clone().detach()
+            nt = nested_view_from_values_offsets(values, offsets).detach().clone()
             _test_fn(
                 torch.ops.aten._nested_get_values.default, nt, use_unsafe_view_func=True
             )
 
             def chain_nt_to_dense_back_and_forth(nt):
                 # NJT1 -> dense -> NJT2 -> dense
-                offsets2 = nt.offsets().clone().detach()
+                offsets2 = nt.offsets().detach().clone()
                 return nested_view_from_values_offsets(nt.values(), offsets2).values()
 
             _test_fn(chain_nt_to_dense_back_and_forth, nt, use_unsafe_view_func=True)
 
             def chain_dense_to_nt_back_and_forth(values, offsets):
-                offsets2 = offsets.clone().detach()
+                offsets2 = offsets.detach().clone()
                 # dense -> NJT1 -> dense -> NJT2
                 return nested_view_from_values_offsets(
                     nested_view_from_values_offsets(values, offsets).values(), offsets2
@@ -13990,7 +14082,7 @@ class TestAutogradMultipleDispatch(TestCase):
         # tests that view_copy derivative formulas are also generated per dispatch key
         # from their respective view ops in derivatives.yaml
         t = torch.randn(2, 2, device=device, requires_grad=True)
-        t_ref = t.clone().detach().requires_grad_()
+        t_ref = t.detach().clone().requires_grad_()
         # _test_autograd_multiple_dispatch_view does a .view(-1) on the input
         t_view = torch._test_autograd_multiple_dispatch_view(t_ref)
         t_view_copy = torch._test_autograd_multiple_dispatch_view_copy(t)

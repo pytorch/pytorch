@@ -28,9 +28,9 @@ Tensor mkldnn_convolution(
   TORCH_CHECK(false, "mkldnn_convolution_forward: ATen not compiled with MKLDNN support");
 }
 
-REGISTER_NO_CPU_DISPATCH(mkldnn_convolution_backward_stub);
-REGISTER_NO_CPU_DISPATCH(mkldnn_convolution_transpose_stub);
-REGISTER_NO_CPU_DISPATCH(mkldnn_convolution_transpose_backward_stub);
+REGISTER_NO_CPU_DISPATCH(mkldnn_convolution_backward_stub)
+REGISTER_NO_CPU_DISPATCH(mkldnn_convolution_transpose_stub)
+REGISTER_NO_CPU_DISPATCH(mkldnn_convolution_transpose_backward_stub)
 
 }}
 
@@ -891,7 +891,7 @@ Tensor mkldnn_convolution_transpose_pointwise(
   );
 }
 
-REGISTER_ALL_CPU_DISPATCH(mkldnn_convolution_backward_stub, &mkldnn_convolution_backward);
+REGISTER_ALL_CPU_DISPATCH(mkldnn_convolution_backward_stub, &mkldnn_convolution_backward)
 
 namespace{
 Tensor mkldnn_convolution_transpose(
@@ -1044,8 +1044,8 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_convolution_transpose_backward(
 }
 }
 
-REGISTER_ALL_CPU_DISPATCH(mkldnn_convolution_transpose_stub, &mkldnn_convolution_transpose);
-REGISTER_ALL_CPU_DISPATCH(mkldnn_convolution_transpose_backward_stub, &mkldnn_convolution_transpose_backward);
+REGISTER_ALL_CPU_DISPATCH(mkldnn_convolution_transpose_stub, &mkldnn_convolution_transpose)
+REGISTER_ALL_CPU_DISPATCH(mkldnn_convolution_transpose_backward_stub, &mkldnn_convolution_transpose_backward)
 
 TORCH_LIBRARY_IMPL(mkldnn, CPU, m) {
   m.impl(

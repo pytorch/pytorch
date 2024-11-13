@@ -1526,7 +1526,7 @@ class TestDistributions(DistributionsTestCase):
 
         self._check_forward_ad(torch.bernoulli)
         self._check_forward_ad(lambda x: x.bernoulli_())
-        self._check_forward_ad(lambda x: x.bernoulli_(x.clone().detach()))
+        self._check_forward_ad(lambda x: x.bernoulli_(x.detach().clone()))
         self._check_forward_ad(lambda x: x.bernoulli_(x))
 
     def test_bernoulli_enumerate_support(self):

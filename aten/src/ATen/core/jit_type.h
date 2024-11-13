@@ -326,7 +326,7 @@ struct TORCH_API ShapeSymbol {
   // is this symbol a fixed/static dimension
   bool is_static() const {
     return value_ >= 0;
-  };
+  }
   bool operator==(const ShapeSymbol& b) const {
     return value_ == b.value_;
   }
@@ -340,15 +340,15 @@ struct TORCH_API ShapeSymbol {
   int64_t static_size() const {
     TORCH_CHECK(is_static());
     return value_;
-  };
+  }
 
   int64_t value() const {
     return value_;
-  };
+  }
 
   static ShapeSymbol newSymbol() {
     return fromStaticSize(-static_cast<int64_t>(++num_symbols));
-  };
+  }
   friend TORCH_API std::ostream& operator<<(
       std::ostream& os,
       const ShapeSymbol& s);
@@ -1961,6 +1961,12 @@ struct getTypePtr_<c10::string_view> final {
   }
 };
 template <>
+struct getTypePtr_<std::string_view> final {
+  static decltype(auto) call() {
+    return StringType::get();
+  }
+};
+template <>
 struct getTypePtr_<at::Dimname> final {
   static decltype(auto) call() {
     return StringType::get();
@@ -2198,7 +2204,7 @@ struct TORCH_API InterfaceType : public NamedType {
     return is_module_;
   }
   static const TypeKind Kind = TypeKind::InterfaceType;
-  ~InterfaceType() override;
+  ~InterfaceType() override = default;
  private:
   InterfaceType(QualifiedName name, bool is_module);
   static bool isSubTypeImpl(
