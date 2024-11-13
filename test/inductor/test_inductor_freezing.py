@@ -315,7 +315,11 @@ class OptimizeForInferenceTemplate(TestCase):
                 return mod(inp)
 
             kernel_invoke = "kernel_cpp_0" if self.device == "cpu" else "triton.jit"
-            mm_invoke = "mkl_linear.default(" if self.device == "cpu" else "mm("
+            mm_invoke = (
+                "mkl_linear.default("
+                if self.device == "cpu" and torch._C.has_mkl
+                else "mm("
+            )
 
             with torch.no_grad():
                 out_eager = mod(inp)
