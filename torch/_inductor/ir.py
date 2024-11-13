@@ -5706,6 +5706,13 @@ class ExternKernel(InputsKernel):
 
     def codegen_size_asserts(self, wrapper) -> None:  # type: ignore[no-untyped-def]
         if config.size_asserts and not V.graph.cpp_wrapper:
+            # if there is some symbol in size or stride, we couldn't generate asserts
+            from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
+
+            if has_free_unbacked_symbols(self.get_size()) or has_free_unbacked_symbols(
+                self.get_stride()
+            ):
+                return
             # comparing strides for 0 size tensor is tricky. Ignore them for now.
             if sympy_product(self.get_size()) == 0:
                 return
@@ -6973,7 +6980,23 @@ class FallbackKernel(ExternKernelAlloc):
                 unflatten_args,
                 unbacked_bindings=unbacked_bindings,
             )
-
+        # TODO: fix redundant case for dynamic_output_shape later.
+        # test case: test/inductor/test_torchinductor.py CpuTests.test_nonzero_unbacked_refinement_cpu
+        elif (
+            not isinstance(example_output, (tuple, list))
+            and hasattr(kernel, "tags")
+            and torch.Tag.dynamic_output_shape not in kernel.tags
+        ):
+            packed = cls(
+                cls.tensor_to_layout(example_output),
+                kernel,
+                tensor_args,
+                non_tensor_args,
+                unflatten_args,
+                unbacked_bindings=unbacked_bindings,
+            )
+            packed.outputs = [packed]
+            return packed
         else:
             assert device, "Not sure where to find device info"
             packed = cls(
