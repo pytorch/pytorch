@@ -595,11 +595,20 @@ static void recordOperatorStart(
     }
 
     fc.name = fn.name();
-    if (!checkFunctionInputsForLogging(fn, fn.name())) {
-      return;
-    }
     auto num_inputs = fn.num_inputs();
     const auto inputs = fn.inputs();
+
+    VLOG(2) << "inputs: " << num_inputs << " " << inputs.size() << '\n';
+    // We have two cases: for unboxed kernel, we have num_inputs ==
+    // inputs.size() for boxed kernel using stack, there could be more elements
+    // on the stack from previous ops.
+    // TORCH_INTERNAL_ASSERT(num_inputs <= inputs.size());
+    if (num_inputs > inputs.size()) {
+      LOG(WARNING) << "RecordFunction " << fc.name
+                   << " expected num_inputs=" << num_inputs
+                   << " > inputs.size()=" << inputs.size();
+      return;
+    }
     // need to account for Stack mode where the inputs are at the end.
     size_t input_start = inputs.size() - num_inputs;
 
@@ -690,11 +699,20 @@ static void onFunctionExit(const RecordFunction& fn, ObserverContext* ctx_ptr) {
       return;
     }
     auto& fc = *fc_ptr;
-    if (!checkFunctionOutputsForLogging(fn, fn.name())) {
+
+    auto const& outputs = fn.outputs();
+    auto num_outputs = fn.num_outputs();
+    // We have two cases: for unboxed kernel, we have num_outputs ==
+    // outputs.size() for boxed kernel using stack, there could be more elements
+    // on the stack from previous ops.
+    VLOG(2) << "outputs: " << num_outputs << " " << outputs.size() << '\n';
+    // TORCH_INTERNAL_ASSERT(num_outputs <= outputs.size());
+    if (num_outputs > outputs.size()) {
+      LOG(WARNING) << "RecordFunction " << fc.name
+                   << " num_outputs=" << num_outputs
+                   << " > outputs.size()=" << outputs.size();
       return;
     }
-    auto outputs = fn.outputs();
-    auto num_outputs = fn.num_outputs();
     // need to account for Stack mode where the outputs are at the end.
     size_t output_start = outputs.size() - num_outputs;
 
@@ -706,7 +724,7 @@ static void onFunctionExit(const RecordFunction& fn, ObserverContext* ctx_ptr) {
       for (const auto i : c10::irange(output_start, outputs.size())) {
         appendValueInfo(
             *ob,
-            outputs.at(i),
+            outputs[i],
             output_shapes,
             output_strides,
             output_types,
