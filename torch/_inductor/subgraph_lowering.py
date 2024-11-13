@@ -13,7 +13,6 @@ import torch
 from . import ir
 from .exc import SubgraphLoweringException
 from .ops_handler import SimpleCSEHandler
-from .sizevars import SizeVarAllocator
 from .virtualized import ops, V, WrapperHandler
 
 
@@ -26,6 +25,7 @@ class PointwiseSubgraphLowering(torch.fx.Interpreter):
     Lowers a pointwise subgraph to a single set of buffers with a separate
     lowering object. Errors if buffers are created unexpectedly
     """
+
     graph_outputs: Optional[List[ir.IRNode]]
 
     def __init__(
@@ -60,8 +60,6 @@ class PointwiseSubgraphLowering(torch.fx.Interpreter):
 
         if target is operator.getitem and isinstance(args[0], (list, tuple, dict)):
             return super().call_function(target, args, kwargs)
-
-        assert isinstance(target, torch._ops.OpOverload)
 
         if target not in lowerings:
             raise SubgraphLoweringException(
