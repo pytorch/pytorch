@@ -84,15 +84,7 @@ def rocm_get_per_process_gpu_info(handle: Any) -> list[dict[str, Any]]:
 if __name__ == "__main__":
     nvml_handle = None
     amdsmi_handle = None
-    isValid = True
-    try:
-        import gputil
 
-    except ModuleNotFoundError:
-        print("gputil not found, skipping gputil stats")
-        # no pynvml avaliable, probably because not cuda
-        isValid = False
-        pass
 
     try:
         import pynvml  # type: ignore[import]
@@ -161,11 +153,6 @@ if __name__ == "__main__":
                 stats["total_gpu_mem_utilization"] = amdsmi.amdsmi_get_gpu_activity(
                     amdsmi_handle
                 )["umc_activity"]
-            if isValid:
-                gpus = gputil.getGPUs()
-                # Print the GPU names and indices
-                for i, gpu in enumerate(gpus):
-                    stats[f"gputil-{i}"]= gpu.load*100
         except Exception as e:
             stats = {
                 "time": datetime.datetime.now(timezone.utc).isoformat("T") + "Z",
