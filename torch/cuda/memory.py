@@ -738,7 +738,9 @@ def _record_memory_history_legacy(
     )
 
 
-def _record_memory_history(enabled: Literal[None, "state", "all"] = "all", *args, **kwargs) -> None:
+def _record_memory_history(
+    enabled: Literal[None, "state", "all"] = "all", *args, **kwargs
+) -> None:
     """Enable recording of stack traces associated with memory
     allocations, so you can tell what allocated any piece of memory in
     :func:`torch.cuda.memory._snapshot()`.
