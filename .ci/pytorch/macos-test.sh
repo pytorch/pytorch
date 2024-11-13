@@ -3,7 +3,7 @@ set -x
 
 # shellcheck disable=SC2034
 # shellcheck source=./macos-common.sh
-source "$(di.rname "${BASH_SOURCE[0]}")/macos-common.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/macos-common.sh"
 
 if [[ -n "$CONDA_ENV" ]]; then
   # Use binaries under conda environment
