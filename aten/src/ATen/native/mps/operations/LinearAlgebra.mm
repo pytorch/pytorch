@@ -25,61 +25,17 @@
 #include <ATen/ops/triangular_solve_native.h>
 #endif
 
+#include <c10/util/env.h>
 #include <algorithm>
 
 namespace at::native {
 namespace mps {
 namespace {
-static MetalShaderLibrary lib(R"MATMUL_METAL(
-#include <metal_array>
-
-using namespace metal;
-template<typename T>
-T dot_product(constant T *v1, constant T* v2, ulong2 strides, uint32_t size) {
-  T rc = T(0.0);
-  for (uint32_t i = 0; i < size; ++i) {
-    rc += v1[i * strides.x] * v2[i * strides.y];
-  }
-  return rc;
-}
-
-template<typename T>
-kernel void naive_matmul(
-    constant T                 * mat1Data      [[buffer(0)]],
-    constant T                 * mat2Data      [[buffer(1)]],
-    device   T                 * outputData    [[buffer(2)]],
-    constant array<ulong2, 3>  & strides       [[buffer(3)]],
-    constant uint3             & sizes         [[buffer(4)]],
-    uint                         thread_index [[thread_position_in_grid]]) {
-    uint y = thread_index / sizes.x;
-    uint x = thread_index % sizes.x;
-    if (x >= sizes.x || y >= sizes.z) {
-        return;
-    }
-    auto rc = dot_product(mat1Data + x * strides[0].x,
-                          mat2Data + y * strides[1].y,
-                          ulong2(strides[0].y, strides[1].x),
-                          sizes.y);
-    outputData[x * strides[2].x + y * strides[2].y] = rc;
-}
-
-#define INSTANTIATE_NAIVE_MM(DTYPE)                                        \
-template                                                                   \
-[[host_name("naive_matmul_" #DTYPE)]]                                      \
-kernel void naive_matmul<DTYPE>(                                           \
-    constant DTYPE             * mat1Data      [[buffer(0)]],              \
-    constant DTYPE             * mat2Data      [[buffer(1)]],              \
-    device   DTYPE             * outputData    [[buffer(2)]],              \
-    constant array<ulong2, 3>  & strides       [[buffer(3)]],              \
-    constant uint3             & sizes         [[buffer(4)]],              \
-    uint                         thread_index [[thread_position_in_grid]])
-
-INSTANTIATE_NAIVE_MM(float);
-INSTANTIATE_NAIVE_MM(half);
-#if __METAL_VERSION__ >= 310
-INSTANTIATE_NAIVE_MM(bfloat);
+#ifndef PYTORCH_JIT_COMPILE_SHADERS
+static auto& lib = MetalShaderLibrary::getBundledLibrary();
+#else
+#include <ATen/native/mps/LinearAlgebra_metallib.h>
 #endif
-)MATMUL_METAL");
 
 Tensor& do_metal_mm(const Tensor& self, const Tensor& other, Tensor& output) {
   auto stream = getCurrentMPSStream();
@@ -123,7 +79,7 @@ std::tuple<MPSGraphTensor*, MPSGraphTensor*, MPSGraphTensor*> do_mm(MPSGraph* gr
 }
 
 bool use_metal_mm(const Tensor& self, const Tensor& other, const Tensor& output) {
-  static bool always_use_metal = std::getenv("PYTORCH_MPS_PREFER_METAL") != nullptr;
+  static bool always_use_metal = c10::utils::has_env("PYTORCH_MPS_PREFER_METAL");
   constexpr auto max_stride_size = 32768;
   static bool is_macos_14_4_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_4_PLUS);
   return always_use_metal ||
@@ -163,7 +119,7 @@ static void linalg_lu_factor_out_mps_impl(const Tensor& A, bool pivot, Tensor& L
 
   status_tensors.reserve(batchSize);
   pivots_list.reserve(batchSize);
-  for (C10_UNUSED const auto i : c10::irange(batchSize)) {
+  for ([[maybe_unused]] const auto i : c10::irange(batchSize)) {
     status_tensors.push_back(at::zeros(1, kInt, std::nullopt, kMPS, std::nullopt));
     pivots_list.push_back(at::zeros(numPivots, kInt, std::nullopt, kMPS, std::nullopt));
   }

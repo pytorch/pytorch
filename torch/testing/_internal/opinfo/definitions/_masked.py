@@ -357,7 +357,6 @@ def sample_inputs_masked_softmax(
 
 def sample_inputs_masked_cumops(op_info, device, dtype, requires_grad, **kwargs):
     """Sample inputs for masked cumsum and cumprod."""
-    inputs: List[SampleInput] = []
     for sample_input in sample_inputs_softmax_variant(
         op_info, device, dtype, requires_grad, **kwargs
     ):

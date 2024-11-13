@@ -9,7 +9,9 @@
 //
 #pragma once
 
+#include <c10/util/env.h>
 #include <c10/util/CallOnce.h>
+#include <c10/util/StringUtil.h>
 
 #include <fstream>
 #include <functional>
@@ -17,11 +19,9 @@
 #include <memory>
 #include <mutex>
 #include <string>
-#include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
-#include <vector>
 
 namespace at::cuda::tunable {
 
@@ -34,11 +34,11 @@ struct MaybeDelete {
 
 using OstreamPtr = std::unique_ptr<std::ostream, MaybeDelete>;
 
-static OstreamPtr get_stream(std::string filename) {
-  if (filename.compare("out") == 0) {
+inline OstreamPtr get_stream(const std::string& filename) {
+  if (filename == "out") {
     return OstreamPtr { &std::cout, MaybeDelete {false} };
   }
-  else if (filename.compare("err") == 0) {
+  else if (filename == "err") {
     return OstreamPtr { &std::cerr, MaybeDelete {false} };
   }
   else {
@@ -48,16 +48,20 @@ static OstreamPtr get_stream(std::string filename) {
 
 }
 
-static void TunableLog(int level, const std::string& msg) {
-  static const char *env_file = getenv("PYTORCH_TUNABLEOP_VERBOSE_FILENAME");
-  static const char *env_verbose = getenv("PYTORCH_TUNABLEOP_VERBOSE");
-  static int level_user = env_verbose ? atoi(env_verbose) : 0;
-  static auto streamptr = detail::get_stream(env_file ? env_file : "err");
+template<class... Types>
+static void TunableLog(int level, Types... args) {
+  static const auto env_file =
+      c10::utils::get_env("PYTORCH_TUNABLEOP_VERBOSE_FILENAME");
+  static const auto env_verbose =
+      c10::utils::get_env("PYTORCH_TUNABLEOP_VERBOSE");
+  static int level_user = env_verbose ? stoi(env_verbose.value()) : 0;
+  static auto streamptr =
+      detail::get_stream(env_file ? env_file.value() : "err");
   if (level_user >= level) {
-    (*streamptr) << msg <<std::endl;
+    (*streamptr) << c10::str(args...) << std::endl;
   }
 }
-#define TUNABLE_LOGV(LEVEL, ...) TunableLog(LEVEL, c10::str(__VA_ARGS__))
+#define TUNABLE_LOGV(LEVEL, ...) TunableLog(LEVEL, __VA_ARGS__)
 #define TUNABLE_LOG1(...) TUNABLE_LOGV(1, __VA_ARGS__)
 #define TUNABLE_LOG2(...) TUNABLE_LOGV(2, __VA_ARGS__)
 #define TUNABLE_LOG3(...) TUNABLE_LOGV(3, __VA_ARGS__)
@@ -71,7 +75,7 @@ enum TORCH_CUDA_CPP_API TuningStatus {
 // Mapping from params signature to kernel id
 class TORCH_CUDA_CPP_API ResultEntry {
   public:
-    explicit ResultEntry(const std::string& key, double time) : key_(key), time_(time) {}
+    explicit ResultEntry(std::string  key, double time) : key_(std::move(key)), time_(time) {}
     bool operator==(const ResultEntry& other) { return key_ == other.key_; }
     bool operator!=(const ResultEntry& other) { return key_ != other.key_; }
     operator std::string () { return key_; }
@@ -107,7 +111,7 @@ class TORCH_CUDA_CPP_API TuningResultsManager {
 
     ResultEntry Lookup(const std::string& op_signature, const std::string& params_signature);
 
-    inline void AddImpl(const std::string& op_signature,
+    void AddImpl(const std::string& op_signature,
         const std::string& params_signature,
         ResultEntry best,
         KernelMap& kernel_map);
@@ -118,7 +122,7 @@ class TORCH_CUDA_CPP_API TuningResultsManager {
 
     void Delete(const std::string& op_signature, const std::string& params_signature);
 
-    inline void DisjointMergeImpl(
+    void DisjointMergeImpl(
         const std::string& op_signature,
         const KernelMap& kernel_map,
         /*out*/ ResultsMap& results);
@@ -153,7 +157,7 @@ class TORCH_CUDA_CPP_API TuningResultsValidator {
     void RegisterValidator(const std::string& key, const GetFunc& gf, const ValidateFunc& vf);
 
   protected:
-    std::string GetPyTorchVersion() const;
+    static std::string GetPyTorchVersion() ;
     TuningStatus ValidatePyTorchVersion(const std::string& value) const;
 
   public:

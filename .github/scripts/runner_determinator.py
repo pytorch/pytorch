@@ -39,7 +39,8 @@ Example config:
     experiments:
       lf:
         rollout_percent: 25
-
+        all_branches: false
+        default: true
     ---
 
     # Opt-ins:
@@ -52,12 +53,16 @@ Example config:
     @User3,split_build
 """
 
+import json
 import logging
 import os
 import random
+import sys
 from argparse import ArgumentParser
+from functools import lru_cache
 from logging import LogRecord
-from typing import Any, Dict, Iterable, List, NamedTuple, Tuple
+from typing import Any, Dict, FrozenSet, Iterable, List, NamedTuple, Set, Tuple
+from urllib.request import Request, urlopen
 
 import yaml
 from github import Auth, Github
@@ -71,7 +76,7 @@ WORKFLOW_LABEL_LF_CANARY = "lf.c."  # use canary runners from the linux foundati
 GITHUB_OUTPUT = os.getenv("GITHUB_OUTPUT", "")
 GH_OUTPUT_KEY_AMI = "runner-ami"
 GH_OUTPUT_KEY_LABEL_TYPE = "label-type"
-
+OPT_OUT_LABEL = "no-runner-experiments"
 
 SETTING_EXPERIMENTS = "experiments"
 
@@ -85,6 +90,9 @@ class Experiment(NamedTuple):
     )
     all_branches: bool = (
         False  # If True, the experiment is also enabled on the exception branches
+    )
+    default: bool = (
+        True  # If True, the experiment is enabled by default for all queries
     )
 
     # Add more fields as needed
@@ -140,6 +148,12 @@ def set_github_output(key: str, value: str) -> None:
         f.write(f"{key}={value}\n")
 
 
+def _str_comma_separated_to_set(value: str) -> FrozenSet[str]:
+    return frozenset(
+        filter(lambda itm: itm != "", map(str.strip, value.strip(" \n\t").split(",")))
+    )
+
+
 def parse_args() -> Any:
     parser = ArgumentParser("Get dynamic rollout settings")
     parser.add_argument("--github-token", type=str, required=True, help="GitHub token")
@@ -173,6 +187,20 @@ def parse_args() -> Any:
         type=str,
         required=True,
         help="Current GitHub ref type, branch or tag",
+    )
+    parser.add_argument(
+        "--eligible-experiments",
+        type=_str_comma_separated_to_set,
+        required=False,
+        default="",
+        help="comma separated list of experiments to check, if omitted all experiments marked with default=True are checked",
+    )
+    parser.add_argument(
+        "--pr-number",
+        type=str,
+        required=False,
+        default="",
+        help="the optional PR number where this is run",
     )
 
     return parser.parse_args()
@@ -348,6 +376,7 @@ def get_runner_prefix(
     rollout_state: str,
     workflow_requestors: Iterable[str],
     branch: str,
+    eligible_experiments: FrozenSet[str] = frozenset(),
     is_canary: bool = False,
 ) -> str:
     settings = parse_settings(rollout_state)
@@ -356,11 +385,22 @@ def get_runner_prefix(
     fleet_prefix = ""
     prefixes = []
     for experiment_name, experiment_settings in settings.experiments.items():
-        enabled = False
-
         if not experiment_settings.all_branches and is_exception_branch(branch):
             log.info(
                 f"Branch {branch} is an exception branch. Not enabling experiment {experiment_name}."
+            )
+            continue
+
+        if eligible_experiments:
+            if experiment_name not in eligible_experiments:
+                exp_list = ", ".join(eligible_experiments)
+                log.info(
+                    f"Skipping experiment '{experiment_name}', as it is not in the eligible_experiments list: {exp_list}"
+                )
+                continue
+        elif not experiment_settings.default:
+            log.info(
+                f"Skipping experiment '{experiment_name}', as it is not a default experiment"
             )
             continue
 
@@ -371,11 +411,13 @@ def get_runner_prefix(
             if is_user_opted_in(requestor, user_optins, experiment_name)
         ]
 
+        enabled = False
         if opted_in_users:
             log.info(
                 f"{', '.join(opted_in_users)} have opted into experiment {experiment_name}."
             )
             enabled = True
+
         elif experiment_settings.rollout_perc:
             # If no user is opted in, then we randomly enable the experiment based on the rollout percentage
             if random.uniform(0, 100) <= experiment_settings.rollout_perc:
@@ -420,10 +462,65 @@ def get_rollout_state_from_issue(github_token: str, repo: str, issue_num: int) -
     return str(issue.get_comments()[0].body.strip("\n\t "))
 
 
+def download_json(url: str, headers: Dict[str, str], num_retries: int = 3) -> Any:
+    for _ in range(num_retries):
+        try:
+            req = Request(url=url, headers=headers)
+            content = urlopen(req, timeout=5).read().decode("utf-8")
+            return json.loads(content)
+        except Exception as e:
+            log.warning(f"Could not download {url}: {e}")
+
+    log.warning(f"All {num_retries} retries exhausted, downloading {url} failed")
+    return {}
+
+
+@lru_cache(maxsize=None)
+def get_pr_info(github_repo: str, github_token: str, pr_number: int) -> Dict[str, Any]:
+    """
+    Dynamically get PR information
+    """
+    github_api = f"https://api.github.com/repos/{github_repo}"
+    headers = {
+        "Accept": "application/vnd.github.v3+json",
+        "Authorization": f"token {github_token}",
+    }
+    json_response: Dict[str, Any] = download_json(
+        url=f"{github_api}/issues/{pr_number}",
+        headers=headers,
+    )
+
+    if not json_response:
+        log.warning(f"Failed to get the labels for #{pr_number}")
+        return {}
+
+    return json_response
+
+
+def get_labels(github_repo: str, github_token: str, pr_number: int) -> Set[str]:
+    """
+    Dynamically get the latest list of labels from the pull request
+    """
+    pr_info = get_pr_info(github_repo, github_token, pr_number)
+    return {
+        label.get("name") for label in pr_info.get("labels", []) if label.get("name")
+    }
+
+
 def main() -> None:
     args = parse_args()
 
     runner_label_prefix = DEFAULT_LABEL_PREFIX
+
+    # Check if the PR is opt-out
+    if args.pr_number:
+        labels = get_labels(args.github_repo, args.github_token, int(args.pr_number))
+        if OPT_OUT_LABEL in labels:
+            log.info(
+                f"Opt-out runner determinator because #{args.pr_number} has {OPT_OUT_LABEL} label"
+            )
+            set_github_output(GH_OUTPUT_KEY_LABEL_TYPE, runner_label_prefix)
+            sys.exit()
 
     try:
         rollout_state = get_rollout_state_from_issue(
@@ -444,6 +541,7 @@ def main() -> None:
             rollout_state,
             (args.github_issue_owner, username),
             args.github_branch,
+            args.eligible_experiments,
             is_canary,
         )
 

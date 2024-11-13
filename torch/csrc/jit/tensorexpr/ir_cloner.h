@@ -5,9 +5,7 @@
 
 #include <torch/csrc/jit/tensorexpr/ir_mutator.h>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 class TORCH_API IRCloner : public IRMutator {
  public:
@@ -27,7 +25,7 @@ class TORCH_API IRCloner : public IRMutator {
   ExprPtr mutate(const CompareSelectPtr& v) override;
 #define IMM_MUTATE_DECLARE(Type, Name) \
   ExprPtr mutate(const Name##ImmPtr& v) override;
-  AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, IMM_MUTATE_DECLARE);
+  AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, IMM_MUTATE_DECLARE)
 #undef IMM_MUTATE_DECLARE
   ExprPtr mutate(const CastPtr& v) override;
   ExprPtr mutate(const BitCastPtr& v) override;
@@ -61,6 +59,4 @@ class TORCH_API IRCloner : public IRMutator {
   StmtPtr mutate(const CondPtr& v) override;
 };
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr

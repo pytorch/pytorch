@@ -39,6 +39,17 @@ static void poison_fork() {
 
 // XPU management methods
 
+PyObject* THXPModule_getArchFlags(PyObject* self, PyObject* noargs) {
+  HANDLE_TH_ERRORS
+#ifdef XPU_ARCH_FLAGS
+  static const char* flags = C10_STRINGIZE(XPU_ARCH_FLAGS);
+  return THPUtils_packString(flags);
+#else
+  Py_RETURN_NONE;
+#endif
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THXPModule_isInBadFork_wrap(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   return PyBool_FromLong(in_bad_fork);
@@ -286,7 +297,7 @@ static void registerXpuDeviceProperties(PyObject* module) {
         break;
       default:
         stream << "unknown device type:"
-               << static_cast<typename std::underlying_type<device_type>::type>(
+               << static_cast<typename std::underlying_type_t<device_type>>(
                       prop.device_type);
         break;
     }
@@ -295,6 +306,11 @@ static void registerXpuDeviceProperties(PyObject* module) {
   auto gpu_subslice_count = [](const DeviceProp& prop) {
     return (prop.gpu_eu_count / prop.gpu_eu_count_per_subslice);
   };
+#if SYCL_COMPILER_VERSION >= 20250000
+  auto get_device_architecture = [](const DeviceProp& prop) {
+    return static_cast<int64_t>(prop.architecture);
+  };
+#endif
   auto m = py::handle(module).cast<py::module>();
 
 #define DEFINE_READONLY_MEMBER(member) \
@@ -323,6 +339,9 @@ static void registerXpuDeviceProperties(PyObject* module) {
   THXP_FORALL_DEVICE_PROPERTIES(DEFINE_READONLY_MEMBER)
       .def_readonly("total_memory", &DeviceProp::global_mem_size)
       .def_property_readonly("gpu_subslice_count", gpu_subslice_count)
+#if SYCL_COMPILER_VERSION >= 20250000
+      .def_property_readonly("architecture", get_device_architecture)
+#endif
       .def_property_readonly("type", get_device_type)
       .def(
           "__repr__",
@@ -332,8 +351,11 @@ static void registerXpuDeviceProperties(PyObject* module) {
                    << "', platform_name='" << prop.platform_name << "', type='"
                    << get_device_type(prop) << "', driver_version='"
                    << prop.driver_version << "', total_memory="
-                   << prop.global_mem_size / (1024ull * 1024)
-                   << "MB, max_compute_units=" << prop.max_compute_units
+                   << prop.global_mem_size / (1024ull * 1024) << "MB"
+#if SYCL_COMPILER_VERSION >= 20250000
+                   << ", architecture=" << get_device_architecture(prop)
+#endif
+                   << ", max_compute_units=" << prop.max_compute_units
                    << ", gpu_eu_count=" << prop.gpu_eu_count
                    << ", gpu_subslice_count=" << gpu_subslice_count(prop)
                    << ", max_work_group_size=" << prop.max_work_group_size
@@ -363,7 +385,7 @@ static PyObject* THXPModule_initExtension(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   TORCH_INTERNAL_ASSERT(!in_bad_fork); // Handled at python level
   poison_fork();
-  at::globalContext().lazyInitXPU();
+  at::globalContext().lazyInitDevice(c10::DeviceType::XPU);
 
   auto m = THPObjectPtr(PyImport_ImportModule("torch.xpu"));
   if (!m)
@@ -404,6 +426,7 @@ static struct PyMethodDef _THXPModule_methods[] = {
      THXPModule_getDeviceCount_wrap,
      METH_NOARGS,
      nullptr},
+    {"_xpu_getArchFlags", THXPModule_getArchFlags, METH_NOARGS, nullptr},
     {"_xpu_isInBadFork", THXPModule_isInBadFork_wrap, METH_NOARGS, nullptr},
     {"_xpu_getCurrentStream",
      THXPModule_getCurrentStream_wrap,

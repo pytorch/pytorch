@@ -100,11 +100,11 @@ bool SchemaInfo::is_mutable(const c10::SchemaArgument& argument) {
       });
 }
 
-bool SchemaInfo::has_argument(c10::string_view name) {
+bool SchemaInfo::has_argument(std::string_view name) {
   return schema_.argumentIndexWithName(name) != std::nullopt;
 }
 
-bool SchemaInfo::is_mutable(c10::string_view name) {
+bool SchemaInfo::is_mutable(std::string_view name) {
   std::optional<int> index = schema_.argumentIndexWithName(name);
   TORCH_INTERNAL_ASSERT(
       index.has_value(), "Schema has no argument named ", name);

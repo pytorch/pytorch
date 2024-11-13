@@ -9,6 +9,7 @@
 #include <ATen/cuda/tunable/GemmCommon.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/util/StringUtil.h>
+#include <fmt/printf.h>
 
 #include <hipblaslt/hipblaslt.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
@@ -309,7 +310,7 @@ static hipblasOperation_t _hipblasOpFromChar(char op) {
     case 'C':
       return HIPBLAS_OP_C;
   }
-  AT_ERROR(
+  TORCH_CHECK(false,
       "_hipblasOpFromChar input should be 't', 'n' or 'c' but got `", op, "`");
 }
 
@@ -322,7 +323,7 @@ static char _charFromhipblasOp(hipblasOperation_t op) {
     case HIPBLAS_OP_C:
       return 'C';
   }
-  AT_ERROR(
+  TORCH_CHECK(false,
       "_charFromhipblasOp input should be HIPBLAS_OP_N/T/C but got `", op, "`");
 }
 
@@ -334,14 +335,16 @@ static hipblasOperation_t MapLayoutToHipBlasLt(BlasOp layout) {
 }
 
 static size_t GetHipblasltWorkspaceSize() {
-  static const char * env = getenv("HIPBLASLT_WORKSPACE_SIZE");
+  static const auto env = c10::utils::get_env("HIPBLASLT_WORKSPACE_SIZE");
   // 256MB is max workspace size allowed for hipblaslt
   // hipblaslt-bench uses 32MB
   // recommendation from hipblaslt author was 76MB
-  size_t workspace_size = 32*1024;  // going with 32MB
+  // TunableOp hipBLASLt workspace size is aligned with
+  // PyTorch's default in CUDABlas.cpp (_parseChosenWorkspaceSize)
+  size_t workspace_size = 76*1024;
   if (env) {
     try {
-      workspace_size = std::stoi(env);
+      workspace_size = std::stoi(env.value());
     } catch(std::invalid_argument const& e) {
       TORCH_WARN("invalid HIPBLASLT_WORKSPACE_SIZE,",
                  " using default workspace size of ", workspace_size, " KiB.");
@@ -578,8 +581,7 @@ auto GetHipBlasLtTypeStringAndOps() {
     auto algo = heuristic_result[i].algo;
     int algo_index = hipblaslt_ext::getIndexFromAlgo(algo);
     auto callable = std::make_unique<HipblasltGemmOp<AT, BT, CT, ALayout, BLayout, ParamsT>>(algo);
-    std::string type_string = c10::str(
-        "Gemm_Hipblaslt_", _charFromhipblasOp(transa_outer), _charFromhipblasOp(transb_outer), "_", algo_index);
+    std::string type_string = fmt::sprintf("Gemm_Hipblaslt_%c%c_%d", _charFromhipblasOp(transa_outer), _charFromhipblasOp(transb_outer), algo_index);
     ret.emplace_back(type_string, std::move(callable));
   }
 

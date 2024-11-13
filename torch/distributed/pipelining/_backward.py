@@ -104,7 +104,7 @@ def get_param_groups(
     # but omits weights and any subgraphs connecting weights to this closure
     inputs_closure, _ = reverse_closure(inputs, set(), reverse_edges_dict)
     param_groups: Dict[Node, Dict[str, Set]] = dict()  # keyed on intermediates
-    for i, param in enumerate(params):
+    for param in params:
         closure, intersected = reverse_closure(
             [param], inputs_closure, reverse_edges_dict
         )
@@ -140,16 +140,23 @@ def get_param_groups(
 
 
 def stage_backward_input(
-    stage_outputs: List[torch.Tensor],
+    stage_outputs_or_loss: List[torch.Tensor],
     output_grads: Optional[List[torch.Tensor]],
     input_values: List[torch.Tensor],
     weights: Iterator[Parameter],
-):
+) -> Tuple[Tuple[Optional[torch.Tensor], ...], List[Dict[str, Any]]]:
     """
-    compute the gradients for only the stage inputs with respect to the stage outputs
+    Compute the gradients for only the stage inputs with
+    respect to the stage outputs (if non-last stage) or loss (if last stage)
+
+    After computing input gradients, we save the intermediate nodes in `param_groups`
+    for later use in stage_backward_weight. We don't need to save any other intermediate nodes
+    that aren't needed for dW because when we do dW calculation, we start from saved intermediates.
+    Detaching the stage_outputs_or_loss at the end of this function is important as
+    it frees up the memory that the autograd graph is anticipating to be used later (but doesn't actually need).
     """
     stage_output_grad_fns: List[Node] = list(
-        filter(None, map(_get_grad_fn_or_grad_acc, stage_outputs))
+        filter(None, map(_get_grad_fn_or_grad_acc, stage_outputs_or_loss))
     )
     stage_input_grad_fns: List[Node] = list(
         filter(None, map(_get_grad_fn_or_grad_acc, input_values))
@@ -163,6 +170,7 @@ def stage_backward_input(
         stage_input_grad_fns, weight_grad_fns, reverse_edges_dict
     )
 
+    handles = []
     for param_group in param_groups:
         for i, intermediate in enumerate(param_group["intermediates"]):
 
@@ -178,40 +186,47 @@ def stage_backward_input(
 
             # These are always "split" nodes that we need to recompute, so
             # save their inputs.
-            intermediate.register_prehook(get_hook(param_group, i))
+            handle = intermediate.register_prehook(get_hook(param_group, i))
+            handles.append(handle)
 
-    # Stage 0 inputs do not require grads? Should we skip in that case?
-    if all(tensor.requires_grad for tensor in input_values):
-        if output_grads is None:
-            # In case this is the loss and there are no output_grads, then we just use 1s
-            output_grads = [
-                torch.ones_like(stage_output) for stage_output in stage_outputs
-            ]
+    if output_grads is None:
+        # In case this is the loss and there are no output_grads, then we just use 1s
+        output_grads = [
+            torch.ones_like(stage_output) for stage_output in stage_outputs_or_loss
+        ]
 
-        dinputs = torch.autograd.grad(
-            stage_outputs,
-            inputs=input_values,
-            grad_outputs=output_grads,
-            retain_graph=True,
-        )
+    dinputs = torch.autograd.grad(
+        stage_outputs_or_loss,
+        inputs=input_values,
+        grad_outputs=output_grads,
+        retain_graph=True,
+    )
 
-        # update the gradients for inputs
-        for i, inp in enumerate(input_values):
-            if inp.grad is None:
-                inp.grad = dinputs[i]
-            else:
-                inp.grad += dinputs[i]
-    else:
-        dinputs = None
+    # update the gradients for inputs
+    for i, inp in enumerate(input_values):
+        if inp.grad is None:
+            inp.grad = dinputs[i]
+        else:
+            inp.grad += dinputs[i]
+
+    # stage_outputs_or_loss are not used in backwards after this point, so we can safely remove it from the autograd graph
+    # this allows autograd to clear up the graph dedicated for this tensor and free up significant memory
+    for t in stage_outputs_or_loss:
+        t.detach_()
+
+    # hooks are no longer necessary, clean up for consistency
+    for handle in handles:
+        handle.remove()
+
     return dinputs, param_groups
 
 
 def stage_backward_weight(
     weights: Iterator[Parameter], param_groups: List[Dict[str, Any]], retain_graph=False
-):
+) -> Tuple[Optional[torch.Tensor], ...]:
     # map weights to param_group_weights
     grad_acc_to_weight = {}
-    weight_grads = []
+    weight_grads: List[Optional[torch.Tensor]] = []
     for index, weight in enumerate(weights):
         grad_acc = _get_grad_fn_or_grad_acc(weight)
         grad_acc_to_weight[grad_acc] = weight, index
@@ -241,6 +256,9 @@ def stage_backward_weight(
             grad_outputs=sum(param_group["grads"], tuple()),
             retain_graph=retain_graph,
         )
+        # release grad memory early after use
+        del param_group["grads"]
+
         for grad_acc, dw in zip(param_group["params"], dweights):
             weight, index = grad_acc_to_weight[grad_acc]
             if weight.grad is None:
@@ -248,7 +266,7 @@ def stage_backward_weight(
             else:
                 weight.grad += dw
     # return grads in the original order weights were provided in
-    return weight_grads
+    return tuple(weight_grads)
 
 
 def stage_backward(
@@ -256,7 +274,7 @@ def stage_backward(
     output_grads,
     input_values,
     outputs_with_grads_idxs: Optional[List[int]] = None,  # deprecated, not used
-):
+) -> Tuple[Optional[torch.Tensor], ...]:
     """
     This is a helper function to:
     1. compute the gradients for the stage inputs, and
@@ -335,7 +353,7 @@ def stage_backward(
         )
 
         # Extract gradients wrt the input values
-        grad_inputs = []
+        grad_inputs: List[Optional[torch.Tensor]] = []
         for val in input_values:
             if isinstance(val, torch.Tensor):
                 grad_inputs.append(val.grad)
@@ -365,7 +383,7 @@ def stage_backward(
         """
         raise RuntimeError(exc_msg) from e
 
-    return grad_inputs
+    return tuple(grad_inputs)
 
 
 # TODO: handling requires_grad=False dynamically. Can we analyze this during initial

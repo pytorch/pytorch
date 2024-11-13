@@ -74,7 +74,7 @@ cudnn_frontend::Tensor getTensorDescriptorWithTypeVirtual(
   // Ubuntu-22+ if `libnvrtc.so` is not found on the system, which strictly
   // speaking is not necessary for usecases below See
   // https://github.com/pytorch/pytorch/issues/97041
-  static C10_UNUSED auto cudnn_cnn_infer_handler = [] {
+  [[maybe_unused]] static auto cudnn_cnn_infer_handler = [] {
     void* handle = dlopen("libcudnn_cnn_infer.so.8", RTLD_LAZY);
     char* err = dlerror();
     if (!handle) {
@@ -258,12 +258,12 @@ static int getLRUCacheLimit() {
   // 0 is used to indicate no limit
   // negative values are used to indicate no caching
   static int limit = [&] {
-    const char* val = getenv("TORCH_CUDNN_V8_API_LRU_CACHE_LIMIT");
+    const auto val = c10::utils::get_env("TORCH_CUDNN_V8_API_LRU_CACHE_LIMIT");
     if (!val) {
       return DEFAULT_LIMIT;
     }
     try {
-      return std::stoi(val);
+      return std::stoi(val.value());
     } catch (std::invalid_argument const& e) {
       TORCH_WARN(
           "invalid TORCH_CUDNN_V8_API_LRU_CACHE_LIMIT,",
