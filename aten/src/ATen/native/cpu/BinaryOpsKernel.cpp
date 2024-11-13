@@ -959,13 +959,7 @@ void tanh_backward_kernel(TensorIteratorBase& iter) {
 }
 
 void mse_kernel(TensorIteratorBase& iter) {
-  if (iter.dtype() == ScalarType::Half) {
-    TORCH_WARN_ONCE(
-        "Applying the CPU mse kernel on half-type tensors. "
-        "This may be slower than using float or double-type tensors.");
-  }
-
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "mse_cpu", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "mse_cpu", [&]() {
     cpu_kernel_vec(
         iter,
         [=](scalar_t a, scalar_t b) -> scalar_t {
@@ -1415,16 +1409,16 @@ REGISTER_DISPATCH(laguerre_polynomial_l_stub, &laguerre_polynomial_l_kernel)
 REGISTER_DISPATCH(legendre_polynomial_p_stub, &legendre_polynomial_p_kernel)
 REGISTER_DISPATCH(
     shifted_chebyshev_polynomial_t_stub,
-    &shifted_chebyshev_polynomial_t_kernel);
+    &shifted_chebyshev_polynomial_t_kernel)
 REGISTER_DISPATCH(
     shifted_chebyshev_polynomial_u_stub,
-    &shifted_chebyshev_polynomial_u_kernel);
+    &shifted_chebyshev_polynomial_u_kernel)
 REGISTER_DISPATCH(
     shifted_chebyshev_polynomial_v_stub,
-    &shifted_chebyshev_polynomial_v_kernel);
+    &shifted_chebyshev_polynomial_v_kernel)
 REGISTER_DISPATCH(
     shifted_chebyshev_polynomial_w_stub,
-    &shifted_chebyshev_polynomial_w_kernel);
+    &shifted_chebyshev_polynomial_w_kernel)
 // Might enable AVX512 dispatch after enabling explicit vectorization for them.
 REGISTER_DISPATCH(chebyshev_polynomial_u_stub, &chebyshev_polynomial_u_kernel)
 REGISTER_DISPATCH(hermite_polynomial_h_stub, &hermite_polynomial_h_kernel)

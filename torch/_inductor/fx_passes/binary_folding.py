@@ -199,7 +199,7 @@ def binary_folding_init():
 
             if not _op_not_broadcasting_with_conv(weight_meta_value, other_meta_value):
                 return False
-        elif not isinstance(other, (int, float)):
+        elif not isinstance(other, float):
             return False
 
         return True
@@ -255,7 +255,7 @@ def binary_folding_init():
                 weight_meta_value, other_meta_value
             ):
                 return False
-        elif not isinstance(other, (int, float)):
+        elif not isinstance(other, float):
             return False
 
         return True
@@ -275,7 +275,7 @@ def binary_folding_init():
         return False
 
     def resize_scalar_or_tensor_to_shape(graph, other, shape, weight):
-        if isinstance(other, (int, float)):
+        if isinstance(other, float):
             with torch.utils._python_dispatch._disable_current_modes():
                 other_tensor = torch.tensor(
                     other, dtype=weight.dtype, device=weight.device
