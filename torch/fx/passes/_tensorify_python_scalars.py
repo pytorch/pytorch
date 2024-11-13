@@ -255,7 +255,6 @@ def tensorify_python_scalars(
 
     # Now do one more pass that specializes all symfloats we didn't manage
     # to tensorify away.
-    should_restart = False
     for node in reversed(graph.nodes):
         if node.op == "output" or node.op == "placeholder":
             continue
@@ -281,22 +280,23 @@ def tensorify_python_scalars(
                     #
                     # It's better to guard on zf // 2 == 2.0 than zf == 5.0
 
-                    should_restart = True
                     node.replace_all_uses_with(guard_scalar(val))
                     graph.erase_node(node)
 
-    if should_restart:
-        for i, node in enumerate(graph.nodes):
-            if node.op == "placeholder" and len(node.users) == 0:
-                # At this point we've lost the back pointer to
-                # what f_local this placeholder points to. Instead,
-                # we will rely on the index to specialize when we
-                # restart analysis.
-                TensorifyState.specialize(i)
-        raise TensorifyScalarRestartAnalysis
+    should_restart = False
+    for i, node in enumerate(graph.nodes):
+        if node.op == "placeholder" and len(node.users) == 0:
+            # At this point we've lost the back pointer to
+            # what f_local this placeholder points to. Instead,
+            # we will rely on the index to specialize when we
+            # restart analysis.
+            TensorifyState.specialize(i)
+            should_restart = True
 
-    # Sledgehammer time. Restart dynamo analysis, keeping track of which input sources
-    # are no longer needed and should be specialized.
+    if should_restart:
+        # Sledgehammer time. Restart dynamo analysis, keeping track of which input sources
+        # are no longer needed and should be specialized.
+        raise TensorifyScalarRestartAnalysis
 
     graph_code_log.debug(
         "%s", lazy_format_graph_code("tensorify_python_scalars", gm, colored=True)

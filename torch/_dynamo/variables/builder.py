@@ -361,7 +361,7 @@ class VariableBuilder:
         self,
         tx,
         source: Source,
-        force_specialize: bool,
+        force_specialize: bool = False,
     ) -> None:
         assert (
             source is not None
