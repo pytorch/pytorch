@@ -13,7 +13,7 @@ from abc import abstractmethod
 from typing import Any, Callable, Dict, Generic, List, Optional, Type, TypeVar, Union
 from typing_extensions import override, TypeAlias
 
-from torch._dynamo.utils import dynamo_timed
+from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor import config
 
 
@@ -162,6 +162,7 @@ class RemoteCache(Generic[_T]):
     # See if the cache contains `key`. Returns `None` if the value is not
     # present in the cache.
     def get(self, key: str) -> Optional[_T]:
+        counters["inductor"]["cache_remote_network_access"] += 1
         sample = self._create_sample()
         try:
             result = self._get(key, sample)
@@ -177,6 +178,7 @@ class RemoteCache(Generic[_T]):
     # between `None` and a missing cache entry).
     def put(self, key: str, value: _T) -> None:
         assert value is not None
+        counters["inductor"]["cache_remote_network_access"] += 1
         sample = self._create_sample()
         try:
             self._put(key, value, sample)
