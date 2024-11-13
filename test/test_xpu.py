@@ -482,7 +482,8 @@ class TestXpuAutocast(TestAutocast):
     # These operators are not implemented on XPU backend and we can NOT fall back
     # them to CPU. So we have to skip them at this moment.
     # TODO: remove these operators from skip list when they are implemented on XPU backend.
-    skip_list = ["gru_cell"]
+    # lstm_cell: The operator 'aten::_thnn_fused_lstm_cell' is not currently implemented for the XPU device
+    skip_list = ["gru_cell", "lstm_cell"]
 
     def setUp(self):
         super().setUp()
@@ -514,6 +515,7 @@ class TestXpuAutocast(TestAutocast):
             if len(op_with_args) == 3:
                 skip_test = True  # skip cudnn op
             if not skip_test:
+                print("running op: ", op)
                 self._run_autocast_outofplace(op, args, torch.bfloat16, device="xpu")
 
     def test_autocast_torch_need_autocast_promote(self):
