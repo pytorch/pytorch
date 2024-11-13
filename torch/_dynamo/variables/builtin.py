@@ -445,7 +445,7 @@ class BuiltinVariable(VariableTracker):
         # List-like expansion (e.g. [1, 2, 3] * 3)
         def expand_list_like(tx: "InstructionTranslator", lst, const):
             if isinstance(lst, ConstantVariable):
-                lst, const = const, lst
+                lst, const = const
             return lst.__class__(
                 items=lst.items * const.as_python_constant(),
                 mutation_type=ValueMutationNew(),
@@ -2080,3 +2080,12 @@ def dynamo_disable_grad(tx):
         yield
     finally:
         gmv.exit(tx)
+
+def bool_handler(tx, args, kwargs):
+    if not kwargs and len(args) == 1:
+        arg = args[0]
+        if isinstance(arg, SymNodeVariable):
+            # Use the __bool__ implementation added in tensor.py
+            return arg.__bool__()
+    # Fall back to default bool behavior
+    return variables.base.BuiltinVariable(bool).call_function(tx, args, kwargs)

@@ -1171,6 +1171,9 @@ class SymNodeVariable(VariableTracker):
 
         return SymNodeVariable(proxy, sym_num, **options)
 
+    def __bool__(self):
+        return self.call_method(InstructionTranslator.current_tx(), 'item', [], {}) != 0
+
     def __init__(self, proxy, sym_num, **kwargs) -> None:
         super().__init__(**kwargs)
         self.proxy = proxy
