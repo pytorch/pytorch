@@ -1900,7 +1900,7 @@ Example::
 add_docstr(
     torch.chunk,
     r"""
-chunk(input, chunks, dim=0) -> List of Tensors
+chunk(input: Tensor, chunks: int, dim: int = 0) -> Tuple[Tensor, ...]
 
 Attempts to split a tensor into the specified number of chunks. Each chunk is a view of
 the input tensor.
@@ -5329,7 +5329,7 @@ Returns a new tensor with boolean elements representing if each element of
 Closeness is defined as:
 
 .. math::
-    \lvert \text{input}_i - \text{other}_i \rvert \leq \texttt{atol} + \texttt{rtol} \times \lvert \text{other}_i \rvert
+    \lvert \text{input}_i - \text{other}_i \rvert \leq \texttt{rtol} \times \lvert \text{other}_i \rvert + \texttt{atol}
 """
     + r"""
 
@@ -5341,8 +5341,8 @@ they are equal, with NaNs being considered equal to each other when
 Args:
     input (Tensor): first tensor to compare
     other (Tensor): second tensor to compare
-    atol (float, optional): absolute tolerance. Default: 1e-08
     rtol (float, optional): relative tolerance. Default: 1e-05
+    atol (float, optional): absolute tolerance. Default: 1e-08
     equal_nan (bool, optional): if ``True``, then two ``NaN`` s will be considered equal. Default: ``False``
 
 Examples::
