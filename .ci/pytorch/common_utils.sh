@@ -89,7 +89,7 @@ function pip_install() {
 
 function pip_uninstall() {
   # uninstall 2 times
-  pip uninstall -y "$@" || pip uninstall -y "$@"
+  pip3 uninstall -y "$@" || pip3 uninstall -y "$@"
 }
 
 function get_exit_code() {
