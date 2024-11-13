@@ -515,7 +515,6 @@ class TestXpuAutocast(TestAutocast):
             if len(op_with_args) == 3:
                 skip_test = True  # skip cudnn op
             if not skip_test:
-                print("running op: ", op)
                 self._run_autocast_outofplace(op, args, torch.bfloat16, device="xpu")
 
     def test_autocast_torch_need_autocast_promote(self):
