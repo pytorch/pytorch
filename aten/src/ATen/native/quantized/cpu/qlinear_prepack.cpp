@@ -314,17 +314,11 @@ inline at::Tensor pack_weight_to_fp16_onednn_tensor(
     std::optional<torch::List<int64_t>>& input_shape) {
   weight = at::_saturate_weight_to_fp16(weight);
   std::vector<int64_t> w_dims = weight.sizes().vec();
-  ideep::tensor wei = ideep::tensor({w_dims, dnnl::memory::data_type::f32}, weight.data_ptr());
-  wei.transpose_(0, 1); // oneDNN requires transposed weight
-  ideep::dims input_dims = input_shape.has_value() ? input_shape.value().vec() : ideep::dims();
+  auto weight_fp16 = weight.to(at::kHalf);
+  ideep::tensor wei = ideep::tensor({w_dims, dnnl::memory::data_type::f16}, weight_fp16.data_ptr());
+  auto expected_weight = wei.transpose(0, 1); // oneDNN requires transposed weight
   // Onednn does not support f32f16f32 matmul, so we need to convert weight to f32 before compute
-  // Therefore, we query weight layout with f32 dtype and store weight in f16 with the same layout
-  auto w_desc = ideep::matmul_forward::expected_weights_desc(
-      wei.get_dims(), input_dims, dnnl::memory::data_type::f32, dnnl::memory::data_type::f32);
-  w_desc = w_desc.to_type(ideep::data_type::f16);
-  ideep::tensor expected_weight(w_desc);
-  expected_weight.feed_from(wei);
-
+  // Therefore, we just return weight in plain format
   auto packed_weight = at::native::new_with_itensor_mkldnn(
       std::move(expected_weight),
       c10::kHalf,

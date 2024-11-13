@@ -672,7 +672,7 @@ static at::Tensor linear_dynamic_fp16_with_onednn_weight(
   auto src_desc = tensor::desc(src_dims, src_dtype, ideep::format_tag::any);
   // onednn does not support f32f16f32 matmul, so we get primitive with f32 weight desc
   // weight is stored in f16 and reordered to f32 below by `reorder_if_differ_in`
-  auto weights_desc = packed_weight.get_desc().to_type(ideep::data_type::f32);
+  auto weights_desc = tensor::desc(packed_weight.get_dims(), ideep::data_type::f32, ideep::format_tag::any);
   auto dst_dtype = dst.get_data_type();
   auto dst_desc = tensor::desc(dst_dims, dst_dtype, ideep::format_tag::any);
   auto bias_desc = with_bias ?
@@ -687,7 +687,7 @@ static at::Tensor linear_dynamic_fp16_with_onednn_weight(
       dnnl::matmul::primitive_desc(engine, src_desc, weights_desc, dst_desc, op_attr);
   auto primitive = dnnl::matmul(primitive_desc);
 
-  // Convert weight from f16 to f32 with possible layout changes
+  // Convert weight from f16 to f32 with layout changes
   auto expected_weight = packed_weight.reorder_if_differ_in(primitive_desc.weights_desc());
 
   // Prepare args and execute primitive
