@@ -571,13 +571,6 @@ void reflection_pad2d_backward_out_template(
     return;
   }
 
-  TORCH_CHECK(
-      canUse32BitIndexMath(input),
-      "input tensor must fit into 32-bit index math");
-  TORCH_CHECK(
-      canUse32BitIndexMath(grad_output_),
-      "output gradient tensor must fit into 32-bit index math");
-
   int plane_dim = 0;
   int dim_h = 1;
   int dim_w = 2;
