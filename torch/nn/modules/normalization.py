@@ -325,7 +325,7 @@ class RMSNorm(Module):
     the paper `Root Mean Square Layer Normalization <https://arxiv.org/pdf/1910.07467.pdf>`__
 
     .. math::
-        y = \frac{x}{\mathrm{RMS}[x]} * \gamma \quad
+        y_i = \frac{x_i}{\mathrm{RMS}(x)} * \gamma_i, \quad
         \text{where} \quad \text{RMS}(x) = \sqrt{\epsilon + \frac{1}{n} \sum_{i=1}^{n} x_i^2}
 
     The RMS is taken over the last ``D`` dimensions, where ``D``
