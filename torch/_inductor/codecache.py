@@ -54,10 +54,11 @@ import torch
 import torch.distributed as dist
 from torch import SymInt, Tensor
 from torch._dynamo.utils import (
+    add_remote_cache_time_saved,
+    codecache_metrics,
     counters,
     dynamo_timed,
     get_chromium_event_logger,
-    get_metrics_context,
 )
 from torch._inductor import config, exc, metrics
 from torch._inductor.codegen.cuda import cuda_env
@@ -1151,7 +1152,7 @@ class FxGraphCache:
                         "inductor_compile", cached_kernel_names=meta.cached_kernel_names
                     )
                 if len(meta.cached_kernel_names) > 0:
-                    get_metrics_context().increment("num_triton_bundles", 1)
+                    codecache_metrics["num_triton_bundles"] += 1
 
         inductor_meta = autotune_cache.inductor_meta_from_config()
         AutotuneCacheBundler.begin_compile(inductor_meta, code=code)
@@ -1448,9 +1449,7 @@ class FxGraphCache:
 
             if (time_saved_ns := compiled_graph._time_taken_ns) is not None:
                 cache_info["time_saved_ns"] = time_saved_ns
-                get_metrics_context().increment(
-                    "distributed_ephemeral_timeout_us", time_saved_ns // 1000
-                )
+                add_remote_cache_time_saved(time_saved_ns, is_backward)
                 if (
                     ephemeral_increase := add_ephemeral_timeout_increase_for_distributed(
                         time_saved_ns
@@ -1763,14 +1762,7 @@ class AotCodeCompiler:
         source_code: str,
         serialized_extern_kernel_nodes: Optional[str],
         device_type: str,
-        additional_files: List[str],
-    ) -> Union[List[str], str]:
-        """
-        Returns the .so path, or returns a list of files that were generated if
-        config.aot_inductor.package=True.
-        """
-        generated_files = additional_files
-
+    ) -> str:
         if sys.platform == "win32":
             raise RuntimeError("AotCodeCompiler not yet supported for inductor")
 
@@ -1809,10 +1801,6 @@ class AotCodeCompiler:
             extra=cpp_command,
             specified_dir=specified_output_path,
         )
-
-        if config.aot_inductor.package:
-            generated_files.append(input_path)
-
         output_code_log.info("Output code written to: %s", input_path)
         trace_structured(
             "graph_dump",
@@ -1921,9 +1909,6 @@ class AotCodeCompiler:
                 with open(extern_kernel_nodes_json, "w") as f:
                     f.write(serialized_extern_kernel_nodes)
 
-                if config.aot_inductor.package:
-                    generated_files.append(extern_kernel_nodes_json)
-
             metadata = config.aot_inductor.metadata
             metadata["AOTI_DEVICE_KEY"] = device_type
 
@@ -1936,9 +1921,6 @@ class AotCodeCompiler:
 
             with open(meta_json, "w") as f:
                 f.write(json.dumps(config.aot_inductor.metadata))
-
-            if config.aot_inductor.package:
-                generated_files.append(meta_json)
 
             output_so = (
                 config.aot_inductor.output_path
@@ -2026,10 +2008,9 @@ class AotCodeCompiler:
                 else:
                     run_command_and_check(compile_cmd)
 
-            if config.aot_inductor.package_cpp_only:
+            if config.aot_inductor.package:
                 compile_flags = os.path.splitext(input_path)[0] + "_compile_flags.json"
                 object_build_options.save_flags_to_file(compile_flags)
-                generated_files.append(compile_flags)
 
             if not use_mmap_weights:
                 aot_constants = serialized_weights
@@ -2074,11 +2055,11 @@ class AotCodeCompiler:
                 f.write(f"// Compile cmd\n// {compile_cmd}\n")
                 f.write(f"// Link cmd\n// {link_cmd}\n")
 
-            if config.aot_inductor.package_cpp_only:
+            if config.aot_inductor.package:
                 linker_flags = os.path.splitext(input_path)[0] + "_linker_flags.json"
                 so_build_options.save_flags_to_file(linker_flags)
-                generated_files.append(linker_flags)
 
+            if config.aot_inductor.package_cpp_only:
                 # If we only want to package the cpp, then we need to save the
                 # weights separately into a bin, and we also need to prevent compiling the so
 
@@ -2089,11 +2070,6 @@ class AotCodeCompiler:
                     with open(weight_file, "wb") as f_weights:
                         f_weights.write(serialized_weights)
                         f_weights.write(struct.pack("q", magic_number))
-
-                    generated_files.append(weight_file)
-
-                generated_files.append(consts_o)
-                generated_files.append(kernels_o)
 
             else:
                 if fbcode_aot_cpu_re:
@@ -2112,7 +2088,7 @@ class AotCodeCompiler:
                     consts_o,
                     os.path.splitext(consts_o)[0] + ".S",
                 ]:
-                    # Remove these as they are not needed anymore
+                    # No need to package .o or .S into the output artifact
                     os.remove(o_file)
 
                 if use_mmap_weights:
@@ -2128,14 +2104,10 @@ class AotCodeCompiler:
                         f_so.write(serialized_weights)
                         f_so.write(struct.pack("q", magic_number))
 
-                if config.aot_inductor.package:
-                    generated_files.append(output_so)
-
         if config.aot_inductor.package:
             # We want to return the directory that contains all the AOTI
             # generated files, not just the so
-            # return os.path.split(output_so)[0]
-            return generated_files
+            return os.path.split(output_so)[0]
 
         return output_so
 

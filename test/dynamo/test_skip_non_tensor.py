@@ -183,6 +183,12 @@ class SkipNonTensorTests(torch._dynamo.test_case.TestCase):
                 assert _variable == 0
                 assert _variable_2 == 0
 
+            mod = MyModule(mode=mode)
+            model = torch.compile(mod, backend="eager", fullgraph=mode != 6)
+            assert _variable == 0
+            assert _variable_2 == 0
+
+
                 model(torch.tensor([1]))
                 assert _variable == 1
                 assert _variable_2 == 0
