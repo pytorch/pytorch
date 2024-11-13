@@ -6372,7 +6372,7 @@ torch.cuda.synchronize()
 
         compile_counter = torch._dynamo.testing.CompileCounter()
 
-        compiled_fn = torch._dynamo.optimize(compile_counter, nopython=True)(fn)
+        compiled_fn = torch.compile(fn, backend=compile_counter, fullgraph=True)
         check_results(fn, compiled_fn, generate_inp(18))
         self.assertEqual(compile_counter.frame_count, 1)
 
