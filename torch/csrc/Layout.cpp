@@ -22,7 +22,7 @@ PyObject* THPLayout_New(at::Layout layout, const std::string& name) {
   return self.release();
 }
 
-PyObject* THPLayout_repr(THPLayout* self) {
+static PyObject* THPLayout_repr(THPLayout* self) {
   return THPUtils_packString(self->name);
 }
 

@@ -5,9 +5,10 @@
 #include <c10/core/CPUAllocator.h>
 
 #include <algorithm>
+#include <array>
 #include <cctype>
-#include <string>
 #include <stdexcept>
+#include <string>
 
 #include <ATen/cpu/FlushDenormal.h>
 
@@ -72,7 +73,7 @@ bool Context::deterministicAlgorithmsWarnOnly() const {
   return _deterministic_algorithms_warn_only;
 }
 
-void Context::setDeterministicAlgorithms(bool b, bool warn_only=false) {
+void Context::setDeterministicAlgorithms(bool b, bool warn_only = false) {
   _deterministic_algorithms = b;
   _deterministic_algorithms_warn_only = warn_only;
 }
@@ -177,27 +178,21 @@ bool Context::userEnabledOverrideableSDP() const {
   return enabled_overrideable;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-static const char cublas_config_var_name[] = "CUBLAS_WORKSPACE_CONFIG";
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-static const char* const cublas_deterministic_configs[] = { ":4096:8", ":16:8" };
+static constexpr const auto cublas_config_var_name = "CUBLAS_WORKSPACE_CONFIG";
+static constexpr const std::array<const char*, 2> cublas_deterministic_configs = {":4096:8", ":16:8"};
 
 bool Context::checkCuBLASConfigDeterministic() {
-  bool cublas_config_deterministic = true;
   // If using CUDA 10.2 or greater, need to make sure CuBLAS workspace config
   // is set to deterministic setting
-  if (hasCUDART() && (versionCUDART() >= 10020)) {
-    char* workspace_config = std::getenv(cublas_config_var_name);
-    cublas_config_deterministic = (workspace_config != nullptr) && (
-      (strcmp(workspace_config, cublas_deterministic_configs[0]) == 0)
-      || (strcmp(workspace_config, cublas_deterministic_configs[1]) == 0)
-    );
+  if (hasCUDART()) {
+    const auto workspace_config = c10::utils::get_env(cublas_config_var_name);
+    return (workspace_config == cublas_deterministic_configs[0] || workspace_config == cublas_deterministic_configs[1]);
   }
-  return cublas_config_deterministic;
+  return true;
 }
 
 void Context::alertCuBLASConfigNotDeterministic() const {
-  static bool cublas_config_deterministic = checkCuBLASConfigDeterministic();
+  static const bool cublas_config_deterministic = checkCuBLASConfigDeterministic();
   if (C10_LIKELY(!deterministicAlgorithms() || cublas_config_deterministic)) {
     return;
   }

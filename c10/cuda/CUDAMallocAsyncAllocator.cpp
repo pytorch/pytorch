@@ -401,7 +401,7 @@ void mallocAsync(
 
 } // anonymous namespace
 
-void local_raw_delete(void* ptr);
+static void local_raw_delete(void* ptr);
 
 // Same pattern as CUDACachingAllocator.cpp.
 struct CudaMallocAsyncAllocator : public CUDAAllocator {
@@ -901,7 +901,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
   }
 };
 
-CudaMallocAsyncAllocator device_allocator;
+static CudaMallocAsyncAllocator device_allocator;
 
 void local_raw_delete(void* ptr) {
   freeAsync(ptr);
@@ -912,7 +912,7 @@ CUDAAllocator* allocator() {
 
 #else
 CUDAAllocator* allocator() {
-  TORCH_CHECK(false, "Cannot use cudaMallocAsyncAllocator with cuda < 11.4.");
+  TORCH_CHECK(false, "Cannot use CudaMallocAsyncAllocator with cuda < 11.4.");
   return nullptr;
 }
 
