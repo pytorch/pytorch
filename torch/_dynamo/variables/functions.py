@@ -177,12 +177,6 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         fn = inspect.getattr_static(fn, "_torchdynamo_inline", fn)
         self.fn: types.FunctionType = fn
 
-    def __str__(self):
-        return f"{self.__class__.__name__}({self.fn.__name__})"
-
-    def __repr__(self):
-        return str(self)
-
     def as_python_constant(self):
         if istype(self, UserFunctionVariable):
             return self.fn
@@ -360,7 +354,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         return super().call_function(tx, args, kwargs)
 
 
-class ContextlibContextManagerFunctionVariable(BaseUserFunctionVariable):
+class FunctionDecoratedByContextlibContextManagerVariable(BaseUserFunctionVariable):
     """functions that behaves like iterators
 
     .. note::

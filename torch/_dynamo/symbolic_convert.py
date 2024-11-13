@@ -82,7 +82,7 @@ from .variables.ctx_manager import (
 from .variables.dicts import ConstDictVariable, SetVariable
 from .variables.functions import (
     BaseUserFunctionVariable,
-    ContextlibContextManagerFunctionVariable,
+    FunctionDecoratedByContextlibContextManagerVariable,
     NestedUserFunctionVariable,
     SkipFunctionVariable,
     UserFunctionVariable,
@@ -3192,7 +3192,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             (
                 UserFunctionVariable,
                 NestedUserFunctionVariable,
-                ContextlibContextManagerFunctionVariable,
+                FunctionDecoratedByContextlibContextManagerVariable,
             ),
         )
         result = InliningInstructionTranslator.check_inlineable(func)

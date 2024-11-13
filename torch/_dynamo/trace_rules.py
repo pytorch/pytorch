@@ -44,8 +44,8 @@ from .resume_execution import TORCH_DYNAMO_RESUME_IN_PREFIX
 from .utils import getfile, hashable, NP_SUPPORTED_MODULES, unwrap_if_wrapper
 from .variables import (
     BuiltinVariable,
-    ContextlibContextManagerFunctionVariable,
     FunctionalCallVariable,
+    FunctionDecoratedByContextlibContextManagerVariable,
     FunctorchHigherOrderVariable,
     NestedUserFunctionVariable,
     PolyfilledFunctionVariable,
@@ -3492,7 +3492,7 @@ def check_verbose(obj, is_inlined_call=False):
             UserFunctionVariable,
             UserMethodVariable,
             NestedUserFunctionVariable,
-            ContextlibContextManagerFunctionVariable,
+            FunctionDecoratedByContextlibContextManagerVariable,
         ),
     ):
         try:

@@ -518,24 +518,6 @@ class ConvertFrameAssert:
         if is_generator(code):
             unimplemented("generator")
 
-        f_locals = frame.f_locals
-        if (
-            frame.f_code.co_name in ("__enter__", "__exit__")
-            and len(f_locals) == 1
-            and any(
-                type(a) is contextlib._GeneratorContextManager
-                for a in f_locals.values()
-            )
-        ):
-            ctx = next(
-                a
-                for a in f_locals.values()
-                if type(a) is contextlib._GeneratorContextManager
-            )
-            assert ctx is not None
-            skip_code(frame.f_code)
-            skip_code(ctx.gen.gi_frame.f_code)
-
         if not has_tensor_in_frame(frame):
             return None
 
