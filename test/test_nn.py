@@ -2047,7 +2047,8 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             self.assertTrue(out.is_contiguous(memory_format=memory_format))
             self.assertTrue(ref_out.is_contiguous(memory_format=torch.contiguous_format))
 
-            input_grad = torch.autograd.grad(out, input, grad)[0] # can't use input.grad as it'll be converted into input's mem fmt no matter the mem format of the grad itself
+            # can't use input.grad as it's converted into input's mem fmt no matter the mem format of the grad itself
+            input_grad = torch.autograd.grad(out, input, grad)[0]
             ref_input_grad = torch.autograd.grad(ref_out, ref_input, ref_grad)[0]
             self.assertTrue(input_grad.is_contiguous(memory_format=memory_format))
             self.assertTrue(ref_input_grad.is_contiguous(memory_format=torch.contiguous_format))

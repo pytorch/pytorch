@@ -1,4 +1,3 @@
-#include "c10/core/ScalarType.h"
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/group_norm.h>
 
