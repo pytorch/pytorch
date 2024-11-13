@@ -8602,7 +8602,7 @@ static inline std::tuple<Tensor, Tensor> _betainc_der_continued_fraction(
 
   Tensor normalization = at::exp(
       at::xlogy(_a, _x) + at::special_xlog1py(_b, -_x) - at::log(_a) -
-      _lbeta(_a, _b));
+      at::special_betaln(_a, _b));
   Tensor digamma_apb = at::special_digamma(_a + _b);
   Tensor grad_a = normalization *
       (cf_grad_a +
@@ -8739,7 +8739,7 @@ static inline std::tuple<Tensor, Tensor> _betainc_der_power_series(
   const Tensor& series_grad_b = gradients.at(2);
 
   Tensor normalization =
-      at::exp(at::xlogy(safe_a, safe_x) - _lbeta(safe_a, safe_b));
+      at::exp(at::xlogy(safe_a, safe_x) - at::special_betaln(safe_a, safe_b));
   Tensor digamma_apb = at::digamma(safe_a + safe_b);
   Tensor grad_a = normalization *
       (series_grad_a +
@@ -8787,7 +8787,7 @@ static inline std::tuple<Tensor, Tensor, Tensor> _betainc_partials(
    * http://functions.wolfram.com/06.21.20.0001.01 */
   Tensor grad_x = at::exp(
       at::xlogy(_a - one, _x) + at::special_xlog1py(_b - one, -_x) -
-      _lbeta(_a, _b));
+      at::special_betaln(_a, _b));
 
   /* The partial derivatives of betainc with respect to a and b are computed
    * by using forward mode. */
@@ -8913,7 +8913,7 @@ Tensor special_betainc_backward_x(
 
   Tensor grad_x = at::exp(
       at::xlogy(_a - one, _x) + at::special_xlog1py(_b - one, -_x) -
-      _lbeta(_a, _b));
+      at::special_betaln(_a, _b));
 
   Tensor result_is_nan = (a <= zero) | (b <= zero) | (x < zero) | (x > one);
   const Tensor nan = AT_DISPATCH_FLOATING_TYPES_AND2(
