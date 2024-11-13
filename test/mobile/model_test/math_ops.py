@@ -14,6 +14,7 @@ class PointwiseOpsModule(torch.nn.Module):
         b = torch.randn(4)
         t = torch.tensor([-1, -2, 3], dtype=torch.int8)
         r = torch.tensor([0, 1, 10, 0], dtype=torch.int8)
+        t = torch.tensor([-1, -2, 3], dtype=torch.int8)
         s = torch.tensor([4, 0, 1, 0], dtype=torch.int8)
         f = torch.zeros(3)
         g = torch.tensor([-1, 0, 1])
