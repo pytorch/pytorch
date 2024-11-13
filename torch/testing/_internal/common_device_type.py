@@ -1141,7 +1141,7 @@ class ops(_TestParametrizer):
                 # Construct parameter kwargs to pass to the test.
                 param_kwargs = {"op": op}
                 _update_param_kwargs(param_kwargs, "dtype", dtype)
-                # Filter sample rules to only apply those that match the op.
+                # Filter sample rules to only those that apply to the OpInfo.
                 sample_rules = (
                     None
                     if self.sample_rules is None
