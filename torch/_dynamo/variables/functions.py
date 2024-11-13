@@ -313,9 +313,6 @@ class UserFunctionVariable(BaseUserFunctionVariable):
 
         return result, closure_cells
 
-    def export_freevars(self, parent, child):
-        pass
-
     def var_getattr(self, tx: "InstructionTranslator", name: str):
         source = self.source and AttrSource(self.source, name)
         try:
@@ -584,12 +581,6 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
                 result[name] = cell
 
         return result, closure_cells
-
-    def export_freevars(self, parent, child):
-        code = self.get_code()
-        for var in code.co_freevars:
-            if var in child.symbolic_locals:
-                parent.symbolic_locals[var] = child.symbolic_locals[var]
 
     def reconstruct(self, codegen):
         codegen.add_push_null(
