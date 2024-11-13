@@ -973,24 +973,24 @@ Either create the tensor outside the compiled region, or do not set the tensor t
             isinstance(kwargs["out"], variables.ConstantVariable)
             and kwargs["out"].as_python_constant() is None
         ):
-            # out variants of torch operators like torch.sort and
-            # torch.sigmoid mutate the tensors in the out field. Track such
-            # tensors and rewrite the symbolic locals.
+            # out variants of torch operators like torch.sort and torch.sigmoid
+            # mutate the tensors in the out field.
+            #
+            # However, it's non-trivial to update all references of the old
+            # `TensorVariable` to the new one returned (`result_var`), so we
+            # take the conservative approach to graph break on size changes, and
+            # assume other cases can fall through soundly.
+            #
+            # Note that although these tensor variablels would hold different
+            # proxies, the in-place mutation semantics is preserved in the FX
+            # graph, so we won't have correctness issues.
             if isinstance(tensor_variable, TupleVariable):
                 assert isinstance(kwargs["out"], (TupleVariable, ListVariable))
-                output_tensor_names = [
-                    tx.find_symbolic_locals_name(x) for x in kwargs["out"].items
-                ]
-                for idx, name in enumerate(output_tensor_names):
-                    if name in tx.symbolic_locals:
-                        tx.symbolic_locals[name] = tensor_variable.items[idx]
                 for out_tensor, result_tensor in zip(
                     kwargs["out"].items, tensor_variable.items
                 ):
                     if (
-                        out_tensor.source
-                        and out_tensor in tx.output.graphargs
-                        and isinstance(out_tensor, variables.TensorVariable)
+                        isinstance(out_tensor, variables.TensorVariable)
                         and isinstance(result_tensor, variables.TensorVariable)
                         and out_tensor._size
                         != result_tensor._size  # we actually want to compare None values here
@@ -1003,11 +1003,7 @@ Either create the tensor outside the compiled region, or do not set the tensor t
                 assert "example_value" in kwargs["out"].proxy.node.meta
                 fake_tensor = tensor_variable.proxy.node.meta["example_value"]
                 fake_out = kwargs["out"].proxy.node.meta["example_value"]
-                if (
-                    kwargs["out"].source
-                    and kwargs["out"] in tx.output.graphargs
-                    and fake_out_shape != fake_tensor.shape
-                ):
+                if fake_out_shape != fake_tensor.shape:
                     # It's hard to get out variants with resizing on graph inputs work
                     # properly across dynamo/aot/inductor, just fall back.
                     unimplemented("out variants with resizing on graph inputs")
@@ -1017,9 +1013,6 @@ Either create the tensor outside the compiled region, or do not set the tensor t
                     unimplemented(
                         "out= op was called where output tensor was non-contiguous"
                     )
-                name = tx.find_symbolic_locals_name(kwargs["out"])
-                if name in tx.symbolic_locals:
-                    tx.symbolic_locals[name] = tensor_variable
             elif (
                 isinstance(tensor_variable, ConstantVariable)
                 and tensor_variable.value is None

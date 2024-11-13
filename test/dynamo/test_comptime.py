@@ -35,7 +35,7 @@ class ComptimeTests(torch._dynamo.test_case.TestCase):
         class mylist(list):
             pass
 
-        @torch._dynamo.optimize(cnt, dynamic=True)
+        @torch.compile(backend=cnt, dynamic=True)
         def f(x):
             y = x * 2
             comptime_print(y)
