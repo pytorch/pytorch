@@ -4718,7 +4718,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
         for reduction in ['none', 'mean', 'sum']:
             output_sig = torch.rand(x_size, y_size) - 0.5
-            output_logits = output_sig.clone().detach()
+            output_logits = output_sig.detach().clone()
 
             output_sig.requires_grad = True
             output_logits.requires_grad = True
@@ -7867,19 +7867,19 @@ class TestNNDeviceType(NNTestCase):
 
             # fp32
             m_fp32 = deepcopy(m).to(device, torch.float)
-            x_fp32 = input.clone().detach().float().requires_grad_()
+            x_fp32 = input.detach().clone().float().requires_grad_()
             out_fp32 = m_fp32(x_fp32)
             out_fp32.sum().backward()
 
             # bf16/half
             m_bf16 = deepcopy(m)
-            x_bf16 = input.clone().detach().requires_grad_()
+            x_bf16 = input.detach().clone().requires_grad_()
             out_bf16 = m_bf16(x_bf16)
             out_bf16.sum().backward()
 
             # bf16/half mixed type
             m_mix = deepcopy(m).to(device, torch.float)
-            x_mix = input.clone().detach().requires_grad_()
+            x_mix = input.detach().clone().requires_grad_()
             out_mix = m_mix(x_mix)
             out_mix.sum().backward()
             self.assertEqual(out_fp32.to(dtype=dtype), out_bf16)
@@ -7953,7 +7953,7 @@ class TestNNDeviceType(NNTestCase):
             channels = size[1]
             input = torch.randn(size).cpu().to(dtype=dtype)
             input_bf1 = input.contiguous(memory_format=memory_format).detach().requires_grad_(True)
-            input_bf2 = input_bf1.clone().detach().requires_grad_(True)
+            input_bf2 = input_bf1.detach().clone().requires_grad_(True)
             input_f = input_bf1.float().detach().requires_grad_(True)
             m_bf = nn.GroupNorm(groups, channels).cpu().to(dtype=dtype)
             m_f = deepcopy(m_bf).float()
@@ -7968,7 +7968,7 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(out2.float(), out3, atol=5e-3, rtol=5e-3)
             grad_out = torch.randn(out2.shape).cpu().to(dtype=dtype)
             grad_out_bf1 = grad_out.contiguous(memory_format=memory_format).detach().requires_grad_(True)
-            grad_out_bf2 = grad_out_bf1.clone().detach().requires_grad_(True)
+            grad_out_bf2 = grad_out_bf1.detach().clone().requires_grad_(True)
             grad_out_f = grad_out_bf2.clone().float().detach().requires_grad_(True)
             # bfloat16/half input grad and float parameters
             out2.backward(grad_out_bf2, retain_graph=True)
@@ -8527,7 +8527,7 @@ class TestNNDeviceType(NNTestCase):
             net = copy.deepcopy(net_orig)
             x_orig = torch.rand(B, C, W, H, device=device, requires_grad=True)
             grad_orig = torch.rand(B, C, W, H, device=device)
-            x = x_orig.clone().detach().to(memory_format=input_format).requires_grad_(True)
+            x = x_orig.detach().clone().to(memory_format=input_format).requires_grad_(True)
             grad = grad_orig.detach().to(memory_format=grad_format)
 
             y = net(x)

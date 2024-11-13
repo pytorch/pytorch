@@ -1250,7 +1250,13 @@ class PythonWrapperCodegen(CodeGen):
         )
 
     def codegen_reinterpret_view(
-        self, data, size, stride, offset, writer, dtype=None
+        self,
+        data,
+        size,
+        stride,
+        offset,
+        writeline: Callable[..., None],
+        dtype=None,
     ) -> str:
         if (
             size == data.layout.size
@@ -2069,7 +2075,7 @@ class PythonWrapperCodegen(CodeGen):
             return self.codegen_exact_buffer_reuse(old_name, new_name, del_line)
 
         reinterpret_view = self.codegen_reinterpret_view(
-            old, new.get_size(), new.get_stride(), 0, self.wrapper_call
+            old, new.get_size(), new.get_stride(), 0, self.wrapper_call.writeline
         )
         return (
             f"{self.declare_maybe_reference}{new_name} = "
