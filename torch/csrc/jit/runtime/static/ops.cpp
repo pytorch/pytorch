@@ -40,6 +40,7 @@
 
 #include <ATen/CompositeExplicitAutogradFunctions.h>
 
+// clang-format off
 C10_DEFINE_bool(
     static_runtime_enable_fast_math,
     true,

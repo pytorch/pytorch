@@ -26,6 +26,7 @@
 
 #include <utility>
 
+// clang-format off
 C10_DEFINE_bool(
     torch_jit_disable_cat,
     false,
