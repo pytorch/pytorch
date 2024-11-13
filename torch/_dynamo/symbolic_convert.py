@@ -19,7 +19,7 @@ import traceback
 import types
 import typing
 import weakref
-from typing import Any, Callable, cast, Dict, List, Optional, Tuple, Type, Union
+from typing import Any, Callable, cast, Dict, List, Optional, Set, Tuple, Type, Union
 from unittest.mock import patch
 
 import torch
@@ -2838,18 +2838,18 @@ class InstructionTranslator(InstructionTranslatorBase):
                     self.one_graph
                 ), "Export without one graph - something has gone wrong."
 
-            vars = list(code_options["co_varnames"])
-            cells_and_freevars = [x for x in self.cell_and_freevars() if x not in vars]
-            vars.extend(cells_and_freevars)
-            cells_and_freevars_set = set(cells_and_freevars)
-
+            args_info = inspect.getargs(f_code)
+            input_names: Set[str] = set(args_info.args)
+            if args_info.varargs:
+                input_names.add(args_info.varargs)
+            if args_info.varkw:
+                input_names.add(args_info.varkw)
             self.symbolic_locals = {
-                k: variables.LazyVariableTracker.create(
-                    f_locals[k],
-                    source=LocalSource(k, cell_or_freevar=k in cells_and_freevars_set),
+                name: variables.LazyVariableTracker.create(
+                    f_locals[name],
+                    source=LocalSource(name, is_input=name in input_names),
                 )
-                for k in vars
-                if k in f_locals
+                for name, value in f_locals.items()
             }
 
             self.symbolic_torch_function_state = SymbolicTorchFunctionState(
