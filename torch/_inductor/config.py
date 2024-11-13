@@ -895,6 +895,12 @@ class cpp:
     # Whether to enable masked vectorization for the tail_loop.
     enable_loop_tail_vec = True
 
+    # Whether to enable concat linear for cpu device
+    # Currently concat linear on CPU not always have benefit, depends on linear'shape or
+    # computing resource. We set this default to False to avoid regressions. User and
+    # enable this feature by their need.
+    enable_concat_linear = False
+
 
 # config specific to codegen/triton.py
 class triton:
