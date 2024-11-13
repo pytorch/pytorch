@@ -274,10 +274,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 if isinstance(d, (int, sympy.Integer)):
                     self.prefix.splice(
                         f"""
-                            if ({d} != {name}_sizes[{dim_idx}]) {{
+                            if ({d} != {name}_size[{dim_idx}]) {{
                                 std::stringstream ss;
                                 ss << "{handle_kind}[{idx}]: unmatched dim value at {dim_idx}, "
-                                   << "expected: {d}, " << "but got: " << {name}_sizes[{dim_idx}]
+                                   << "expected: {d}, " << "but got: " << {name}_size[{dim_idx}]
                                    << "\\n";
                                 throw std::runtime_error(ss.str());
                             }}
@@ -290,11 +290,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     if not math.isinf(sym_range.lower):
                         self.prefix.splice(
                             f"""
-                                if ({name}_sizes[{dim_idx}] < {sym_range.lower}) {{
+                                if ({name}_size[{dim_idx}] < {sym_range.lower}) {{
                                     std::stringstream ss;
                                     ss << "{handle_kind}[{idx}]: dim value is too small at {dim_idx}, "
                                        << "expected it to be >= {sym_range.lower}, " << "but got: "
-                                       << {name}_sizes[{dim_idx}] << "\\n";
+                                       << {name}_size[{dim_idx}] << "\\n";
                                     throw std::runtime_error(ss.str());
                                 }}
                             """
@@ -302,11 +302,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     if not math.isinf(sym_range.upper):
                         self.prefix.splice(
                             f"""
-                                if ({name}_sizes[{dim_idx}] > {sym_range.upper}) {{
+                                if ({name}_size[{dim_idx}] > {sym_range.upper}) {{
                                     std::stringstream ss;
                                     ss << "{handle_kind}[{idx}]: dim value is too large at {dim_idx}, "
                                        << "expected to be <= {sym_range.upper}, " << "but got: "
-                                       << {name}_sizes[{dim_idx}] << "\\n";
+                                       << {name}_size[{dim_idx}] << "\\n";
                                     throw std::runtime_error(ss.str());
                                 }}
                             """
@@ -318,10 +318,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     continue
                 self.prefix.splice(
                     f"""
-                        if ({s} != {name}_strides[{stride_idx}]) {{
+                        if ({s} != {name}_stride[{stride_idx}]) {{
                             std::stringstream ss;
                             ss << "{handle_kind}[{idx}]: unmatched stride value at {stride_idx}, "
-                               << "expected: {s}, " << "but got: " << {name}_strides[{stride_idx}]
+                               << "expected: {s}, " << "but got: " << {name}_stride[{stride_idx}]
                                << "\\n";
                             throw std::runtime_error(ss.str());
                         }}
@@ -489,10 +489,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
         )
 
     def codegen_input_size_var_decl(self, code: IndentedBuffer, name):
-        code.writeline(f"int64_t* {name}_sizes = {name}.sizes();")
+        code.writeline(f"int64_t* {name}_size = {name}.sizes();")
 
     def codegen_input_stride_var_decl(self, code: IndentedBuffer, name):
-        code.writeline(f"int64_t* {name}_strides = {name}.strides();")
+        code.writeline(f"int64_t* {name}_stride = {name}.strides();")
 
     def codegen_model_kernels(self):
         self.prefix.writeline("namespace {")

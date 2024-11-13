@@ -1160,12 +1160,12 @@ class PythonWrapperCodegen(CodeGen):
         @functools.lru_cache(None)
         def sizeof(name):
             self.codegen_input_size_var_decl(code, name)
-            return f"{name}_sizes"
+            return f"{name}_size"
 
         @functools.lru_cache(None)
         def strideof(name):
             self.codegen_input_stride_var_decl(code, name)
-            return f"{name}_strides"
+            return f"{name}_stride"
 
         # Assign all symbolic shapes needed to local variables
         bound_vars: Set[sympy.Symbol] = set()
