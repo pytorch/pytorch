@@ -264,11 +264,10 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             # This is critical, because we must make sure the same cell object
             # is mapped to the same Dynamo representation. For regular cells we
             # ensure that by checking them against `SideEffects`, and for
-            # unboxede cells (from the root frame), we ensure that via this
-            # `match_nested_cell` call.
+            # unboxed cells from the root frame, we have this special handling.
             var = root_tx.lookup_variable_for_captured_cell(cell)
             if var is not None:
-                result[name] = var
+                closure_cells[name] = var
                 continue
 
             # TODO refactor these 3 branches.
