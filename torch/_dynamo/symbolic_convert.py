@@ -2852,10 +2852,8 @@ class InstructionTranslator(InstructionTranslatorBase):
 
             # Avoid mapping to VariableTracker to prevent holding on to tensors.
             self._captured_cell_id_to_name = {}
-            for name in self.code_options["co_freevars"]:
-                if name in f_locals:
-                    cell = f_locals[name]
-                    self._captured_cell_id_to_name[id(cell)] = name
+            for name, cell in zip(self.code_options["co_freevars"], closure):
+                self._captured_cell_id_to_name[id(cell)] = name
 
             self.symbolic_torch_function_state = SymbolicTorchFunctionState(
                 torch_function_mode_stack
