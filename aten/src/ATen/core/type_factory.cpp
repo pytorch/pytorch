@@ -43,7 +43,7 @@ const std::unordered_map<std::string, c10::TypePtr>& DynamicTypeFactory::
   static const std::unordered_map<std::string, c10::TypePtr> map = {
 #define MAP_ITEM(NAME, TYPE) \
   {#NAME, c10::DynamicTypeTrait<c10::TYPE>::getBaseType()},
-      FORALL_BASE_PYTHON_TYPES(MAP_ITEM)
+    FORALL_BASE_PYTHON_TYPES(MAP_ITEM)
 #undef MAP_ITEM
   };
   return map;

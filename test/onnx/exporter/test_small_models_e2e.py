@@ -45,7 +45,18 @@ class DynamoExporterTest(common_utils.TestCase):
         )
 
         onnx_program = torch.onnx.export(MulModule(), (x,), dynamo=True)
-        onnx_testing.assert_onnx_program(onnx_program, atol=1e-3, rtol=1)
+        onnx_testing.assert_onnx_program(onnx_program)
+
+    def test_pow_does_not_trigger_type_promotion(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return x**2.0
+
+        x = torch.tensor([1.0, 2.0, 3.0], dtype=torch.float16)
+
+        onnx_program = torch.onnx.export(Model(), (x,), dynamo=True)
+        onnx_testing.assert_onnx_program(onnx_program)
+        self.assertNotIn("Cast", [node.op_type for node in onnx_program.model.graph])
 
 
 if __name__ == "__main__":
