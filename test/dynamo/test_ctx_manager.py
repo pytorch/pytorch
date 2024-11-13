@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 import contextlib
+import sys
 import traceback
 import unittest
 from contextlib import contextmanager
@@ -8,6 +9,7 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.testing import EagerAndRecordGraphs, normalize_gm, same
+from torch._dynamo.utils import counters
 from torch.nn import functional as F
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
 from torch.testing._internal.common_utils import (
@@ -1035,6 +1037,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         cm = f(x)
         self.assertFalse(cm.mode)
 
+    @torch._dynamo.config.patch(enable_trace_contextlib_contextmanager=True)
     @parametrize(
         "Ctx",
         [CustomizedCtxManager, customized_ctx_manager],
@@ -1067,6 +1070,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(cnts.frame_count, 2)
             self.assertEqual(cnts.op_count, 12)
 
+    @torch._dynamo.config.patch(enable_trace_contextlib_contextmanager=True)
     @parametrize(
         "Ctx",
         [CustomizedCtxManager, customized_ctx_manager],
@@ -1103,6 +1107,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(cnts.frame_count, 2)
             self.assertEqual(cnts.op_count, 18)
 
+    @torch._dynamo.config.patch(enable_trace_contextlib_contextmanager=True)
     @parametrize(
         "Ctx",
         [CustomizedCtxManager, customized_ctx_manager],
@@ -1138,6 +1143,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
                 self.assertEqual(cnts.frame_count, 4)
                 self.assertEqual(cnts.op_count, 4)
 
+    @torch._dynamo.config.patch(enable_trace_contextlib_contextmanager=True)
     @parametrize(
         "Ctx",
         [CustomizedCtxManager, customized_ctx_manager],
@@ -1718,6 +1724,7 @@ class GraphModule(torch.nn.Module):
 
 
 class ContextlibContextManagerTests(torch._dynamo.test_case.TestCase):
+    @torch._dynamo.config.patch(enable_trace_contextlib_contextmanager=True)
     def test_ctx_basic0(self):
         @contextlib.contextmanager
         def set_default_dtype(dtype):
@@ -1755,6 +1762,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    @torch._dynamo.config.patch(enable_trace_contextlib_contextmanager=True)
     def test_ctx_basic1(self):
         @contextlib.contextmanager
         def compute_sin(x):
@@ -1772,13 +1780,14 @@ class GraphModule(torch.nn.Module):
         y = fn(x)
         self.assertEqual(y, x.sin().cos())
 
+    @torch._dynamo.config.patch(enable_trace_contextlib_contextmanager=True)
     def test_change_parent_nonlocal_0(self):
         # test if a nonlocal actually gets propagated
         z = 0
         k = 0
 
         def create_ctx():
-            @_contextmanager
+            @contextmanager
             def ctx(x):
                 nonlocal z
                 nonlocal k
@@ -1807,13 +1816,14 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(z, 100)
         self.assertEqual(k, 100)
 
+    @torch._dynamo.config.patch(enable_trace_contextlib_contextmanager=True)
     def test_change_parent_nonlocal_1(self):
         # test if finally is executed and it is reading the correct variable
         z = 1
         k = 2
 
         def create_ctx():
-            @_contextmanager
+            @contextmanager
             def ctx(x):
                 nonlocal z
                 nonlocal k
@@ -1842,13 +1852,14 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(k, 100)
 
     @unittest.expectedFailure
+    @torch._dynamo.config.patch(enable_trace_contextlib_contextmanager=True)
     def test_change_parent_global_0(self):
         # test if a global actually gets propagated
         global z_glb, k_glb
         z_glb, k_glb = 0, 0
 
         def create_ctx():
-            @_contextmanager
+            @contextmanager
             def ctx(x):
                 global z_glb, k_glb
                 try:
@@ -1876,13 +1887,14 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(z_glb, 100)
         self.assertEqual(k_glb, 100)
 
+    @torch._dynamo.config.patch(enable_trace_contextlib_contextmanager=True)
     def test_change_parent_global_1(self):
         # test if finally is executed and it is reading the correct variable
         global z_glb, k_glb
         z_glb, k_glb = 0, 0
 
         def create_ctx():
-            @_contextmanager
+            @contextmanager
             def ctx(x):
                 global z_glb, k_glb
                 try:
@@ -1909,6 +1921,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(z_glb, 100)
         self.assertEqual(k_glb, 100)
 
+    @torch._dynamo.config.patch(enable_trace_contextlib_contextmanager=True)
     def test_change_parent_0(self):
         def create_ctx():
             @_contextmanager
@@ -1933,6 +1946,7 @@ class GraphModule(torch.nn.Module):
         y = fn(x)
         self.assertEqual(y, x.sin().cos())
 
+    @torch._dynamo.config.patch(enable_trace_contextlib_contextmanager=True)
     def test_change_parent_1(self):
         def create_ctx(x):
             @_contextmanager
@@ -1957,6 +1971,7 @@ class GraphModule(torch.nn.Module):
         y = fn(x)
         self.assertEqual(y, x.sin().cos())
 
+    @torch._dynamo.config.patch(enable_trace_contextlib_contextmanager=True)
     def test_graph_break_inside_ctx(self):
         @contextlib.contextmanager
         def whoo(x):
@@ -1981,6 +1996,7 @@ class GraphModule(torch.nn.Module):
         # no graph will be generated as we will skip all frames due to the graph break
         self.assertEqual(len(eager.graphs), 0)
 
+    @torch._dynamo.config.patch(enable_trace_contextlib_contextmanager=True)
     def test_graph_break_inside_ctx_1(self):
         @contextlib.contextmanager
         def whoo(x):
@@ -2031,6 +2047,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    @torch._dynamo.config.patch(enable_trace_contextlib_contextmanager=True)
     def test_graph_break_inside_ctx_2(self):
         @contextlib.contextmanager
         def whoo(x):
@@ -2069,6 +2086,99 @@ class GraphModule(torch.nn.Module):
         return (add,)
 """,
         )
+
+    @torch._dynamo.config.patch(enable_trace_contextlib_contextmanager=False)
+    def test_disable_trace_contextmanager(self):
+        @contextlib.contextmanager
+        def whoo(x):
+            try:
+                yield x.cos()
+            finally:
+                pass
+
+        def g(x):
+            return x.neg() + x.acos()
+
+        def f(x):
+            y = x.sin()
+            with whoo(x) as z:
+                y += g(z)
+            y += y.tan()
+            return y
+
+        x = torch.randn(2)
+        expected = f(x)
+        eager = EagerAndRecordGraphs()
+        out = torch.compile(backend=eager, fullgraph=False)(f)(x)
+        self.assertEqual(expected, out)
+        self.assertEqual(len(eager.graphs), 1)
+        self.assertExpectedInline(
+            normalize_gm(eager.graphs[0].print_readable(False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[2]"):
+        l_x_ = L_x_
+
+        y: "f32[2]" = l_x_.sin()
+
+        z: "f32[2]" = l_x_.cos();  l_x_ = None
+
+        neg: "f32[2]" = z.neg()
+        acos: "f32[2]" = z.acos();  z = None
+        add: "f32[2]" = neg + acos;  neg = acos = None
+
+        y += add;  y_1: "f32[2]" = y;  y = add = None
+
+        tan: "f32[2]" = y_1.tan()
+        y_1 += tan;  y_2: "f32[2]" = y_1;  y_1 = tan = None
+        return (y_2,)
+""",
+        )
+
+    @torch._dynamo.config.patch(enable_trace_contextlib_contextmanager=True)
+    @parametrize("name", ("suppress", "stdout", "stderr"))
+    def test_contextlib_suppress(self, name):
+        counters.clear()
+        eager = EagerAndRecordGraphs()
+
+        def fn(t):
+            y = t.sin()
+            # ensure we graph break on the suppress call below
+            if name == "suppress":
+                ctx = contextlib.suppress(ValueError)
+            elif name == "stdout":
+                ctx = contextlib.redirect_stdout(sys.stderr)
+            else:
+                ctx = contextlib.redirect_stderr(sys.stdout)
+
+            with ctx:
+                y += t.cos()
+            return y.tan()
+
+        t = torch.randn(2)
+        expected = fn(t)
+        got = torch.compile(backend=eager, fullgraph=False)(fn)(t)
+        self.assertEqual(expected, got)
+        self.assertEqual(len(counters["graph_break"]), 1)
+        self.assertEqual(
+            {f"<class 'contextlib.{name}'> not supported": 1},
+            dict(counters["graph_break"]),
+        )
+
+    @torch._dynamo.config.patch(enable_trace_contextlib_contextmanager=True)
+    def test_contextlib_nullcontext(self):
+        counters.clear()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            with contextlib.nullcontext():
+                return t.sin()
+
+        t = torch.randn(2)
+        y = fn(t)
+        # nullcontext is correctly handled in dynamo
+        self.assertEqual(len(counters["graph_break"]), 0)
+        self.assertEqual(y, t.sin())
 
 
 class CPythonContextManagerTestCase(torch._dynamo.test_case.TestCase):
@@ -2402,6 +2512,7 @@ class CPythonContextManagerTestCase(torch._dynamo.test_case.TestCase):
 
 
 instantiate_parametrized_tests(CtxManagerTests)
+instantiate_parametrized_tests(ContextlibContextManagerTests)
 
 
 if __name__ == "__main__":
