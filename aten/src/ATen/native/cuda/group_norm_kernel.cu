@@ -28,79 +28,31 @@ constexpr int kCUDANumThreads = 256;
 constexpr int kReduceTileSize = 32;
 
 template <typename T>
-__global__ void RowwiseMomentsCUDAKernelNHWC(
-    int64_t N,
-    int64_t H,
-    int64_t W,
+__global__ void RowwiseMomentsCUDAKernel(
     int64_t C,
+    int64_t HxW,
     int64_t G,
     T eps,
     const T* X,
     T* mean,
-    T* rstd) {
+    T* rstd,
+    bool use_nchw) {
   using T_ACC = acc_type<T, true>;
   using WelfordType = WelfordData<T_ACC, int64_t>;
   using WelfordOp =
       WelfordOps<T_ACC, T_ACC, int64_t, thrust::pair<T_ACC, T_ACC>>;
 
-  const int64_t channels_per_group = C / G;
-  const int64_t batch_index = blockIdx.x / G;
-  const int64_t ng = blockIdx.x % G;
-  const int64_t batch_offset = batch_index * H * W * C;
-  const int64_t group_offset = ng * channels_per_group;
-  const int64_t start = batch_offset + group_offset;
-
   WelfordOp welford_op = {/*correction=*/0, /*take_sqrt=*/false};
   WelfordType val(0, 0, 0, 0);
-  for (int64_t j = threadIdx.x; j < H * W; j += blockDim.x) {
-    for (int64_t c = 0; c < channels_per_group; ++c) {
-      const int64_t index = start + j * C + c;
+  const int64_t n = blockIdx.x / G;
+  const int64_t g = blockIdx.x % G;
+  const int64_t D = C / G;
+  int batch_offset = n * C * HxW;
+  for (int64_t d = 0; d < D; ++d) {
+    for (int64_t hw = threadIdx.x; hw < HxW; hw += blockDim.x) {
+      const int64_t index = batch_offset + (use_nchw ? (g * D + d) * HxW + hw : hw * C + g * D + d);
       val = welford_op.reduce(val, static_cast<T_ACC>(X[index]), index);
     }
-  }
-
-  if (blockDim.x <= C10_WARP_SIZE) {
-    val = cuda_utils::WarpReduce(val, welford_op);
-  } else {
-    __shared__ typename std::aligned_storage<
-        sizeof(WelfordType),
-        alignof(WelfordType)>::type val_shared[C10_WARP_SIZE];
-    WelfordType* val_shared_ptr = reinterpret_cast<WelfordType*>(val_shared);
-    val = cuda_utils::BlockReduce(
-        val,
-        welford_op,
-        /*identity_element=*/WelfordType(0, 0, 0, 0),
-        val_shared_ptr);
-  }
-
-  if (threadIdx.x == 0) {
-    T_ACC m1;
-    T_ACC m2;
-    thrust::tie(m2, m1) = welford_op.project(val);
-    mean[blockIdx.x] = m1;
-    rstd[blockIdx.x] = c10::cuda::compat::rsqrt(m2 + static_cast<T_ACC>(eps));
-  }
-}
-
-template <typename T>
-__global__ void RowwiseMomentsCUDAKernel(
-    int64_t group_span,
-    T eps,
-    const T* X,
-    T* mean,
-    T* rstd,
-    int64_t C) {
-  using T_ACC = acc_type<T, true>;
-  using WelfordType = WelfordData<T_ACC, int64_t>;
-  using WelfordOp =
-      WelfordOps<T_ACC, T_ACC, int64_t, thrust::pair<T_ACC, T_ACC>>;
-
-  const int64_t i = blockIdx.x;
-  WelfordOp welford_op = {/*correction=*/0, /*take_sqrt=*/false};
-  WelfordType val(0, 0, 0, 0);
-  for (int64_t j = threadIdx.x; j < group_span; j += blockDim.x) {
-    const int64_t index = i * group_span + j;
-    val = welford_op.reduce(val, static_cast<T_ACC>(X[index]), index);
   }
   if (blockDim.x <= C10_WARP_SIZE) {
     val = cuda_utils::WarpReduce(val, welford_op);
@@ -121,8 +73,8 @@ __global__ void RowwiseMomentsCUDAKernel(
     T_ACC m1;
     T_ACC m2;
     thrust::tie(m2, m1) = welford_op.project(val);
-    mean[i] = m1;
-    rstd[i] = c10::cuda::compat::rsqrt(m2 + static_cast<T_ACC>(eps));
+    mean[blockIdx.x] = m1;
+    rstd[blockIdx.x] = c10::cuda::compat::rsqrt(m2 + static_cast<T_ACC>(eps));
   }
 }
 
@@ -331,17 +283,21 @@ __global__ void GammaBeta1dBackwardCUDAKernel2(
 
 template <typename T>
 __global__ void ComputeInternalGradientsCUDAKernel(
+    int64_t C,
     int64_t HxW,
     const T* dY,
     const T* X,
     acc_type<T, true>* ds,
-    acc_type<T, true>* db) {
+    acc_type<T, true>* db,
+    bool is_nchw) {
   using T_ACC = acc_type<T, true>;
   const int64_t nc = blockIdx.x;
+  const int64_t n = nc / C;
+  const int64_t c = nc % C;
   T_ACC sum1 = 0;
   T_ACC sum2 = 0;
   for (int64_t hw = threadIdx.x; hw < HxW; hw += blockDim.x) {
-    const int64_t index = nc * HxW + hw;
+    const int64_t index = is_nchw ? nc * HxW + hw: n * HxW * C + hw * C + c;
     sum1 += static_cast<T_ACC>(dY[index]) * static_cast<T_ACC>(X[index]);
     sum2 += static_cast<T_ACC>(dY[index]);
   }
@@ -357,39 +313,6 @@ __global__ void ComputeInternalGradientsCUDAKernel(
   if (threadIdx.x == 0) {
     ds[nc] = sum1;
     db[nc] = sum2;
-  }
-}
-
-template <typename T>
-__global__ void ComputeInternalGradientsCUDAKernelNHWC(
-    int64_t HxW,
-    int64_t C,
-    const T* dY,
-    const T* X,
-    acc_type<T, true>* ds,
-    acc_type<T, true>* db) {
-  using T_ACC = acc_type<T, true>;
-  const int64_t n = blockIdx.x / C;
-  const int64_t c = blockIdx.x % C;
-  T_ACC sum1 = 0;
-  T_ACC sum2 = 0;
-  for (int64_t hw = threadIdx.x; hw < HxW; hw += blockDim.x) {
-    const int64_t index = n * HxW * C + hw * C + c;
-    sum1 += static_cast<T_ACC>(dY[index]) * static_cast<T_ACC>(X[index]);
-    sum2 += static_cast<T_ACC>(dY[index]);
-  }
-  if (blockDim.x <= C10_WARP_SIZE) {
-    sum1 = cuda_utils::WarpReduceSum<T_ACC>(sum1);
-    sum2 = cuda_utils::WarpReduceSum<T_ACC>(sum2);
-  } else {
-    __shared__ T_ACC ds_shared[C10_WARP_SIZE];
-    __shared__ T_ACC db_shared[C10_WARP_SIZE];
-    sum1 = cuda_utils::BlockReduceSum<T_ACC>(sum1, ds_shared);
-    sum2 = cuda_utils::BlockReduceSum<T_ACC>(sum2, db_shared);
-  }
-  if (threadIdx.x == 0) {
-    ds[blockIdx.x] = sum1;
-    db[blockIdx.x] = sum2;
   }
 }
 
@@ -668,54 +591,38 @@ void GroupNormKernelImplInternal(
 
   at::MemoryFormat x_format = X.suggest_memory_format();
   Y.is_contiguous(x_format);
+  if (x_format != MemoryFormat::Contiguous && X.stride(1) != 1)
+    TORCH_CHECK(
+        false,
+        "Unsupported memory format for group normalization: ",
+        x_format);
 
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
   const int64_t num_threads = D * HxW < cuda_utils::kCUDABlockReduceNumThreads
       ? at::cuda::warp_size()
       : cuda_utils::kCUDABlockReduceNumThreads;
 
-  int height;
-  int width;
-
-  switch (x_format) {
-    case MemoryFormat::Contiguous: {
-      RowwiseMomentsCUDAKernel<T><<<N * G, num_threads, 0, cuda_stream>>>(
-          D * HxW, eps, X_data, mean_data, rstd_data, C);
-      break;
-    }
-    case MemoryFormat::ChannelsLast: {
-      height = X.size(2);
-      width = X.size(3);
-
-      RowwiseMomentsCUDAKernelNHWC<T><<<N * G, num_threads, 0, cuda_stream>>>(
-          N, height, width, C, G, eps, X_data, mean_data, rstd_data);
-
-      break;
-    }
-    default: {
-      TORCH_CHECK(
-          false,
-          "Unsupported memory format for group normalization: ",
-          x_format);
-    }
-  }
+  RowwiseMomentsCUDAKernel<T><<<N * G, num_threads, 0, cuda_stream>>>(
+      C, HxW, G, eps, X_data, mean_data, rstd_data, x_format == MemoryFormat::Contiguous);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
   if (HxW == 1) {
     GroupNorm1dForward<T>(X, mean, rstd, gamma, beta, N, C, G, Y);
-  } else if (!gamma.defined() && !beta.defined()) {
+  }
+  else if (!gamma.defined() && !beta.defined()) {
     auto iter = TensorIteratorConfig()
                     .resize_outputs(false)
-                    .add_owned_output(Y.view({N * G, D * HxW}))
-                    .add_owned_const_input(X.view({N * G, D * HxW}))
-                    .add_owned_input(mean.view({N * G, 1}))
-                    .add_owned_input(rstd.view({N * G, 1}))
+                    .add_owned_output(Y.view({N, G, D, HxW}))
+                    .add_owned_const_input(X.view({N, G, D, HxW}))
+                    .add_owned_input(mean.view({N, G, 1}))
+                    .add_owned_input(rstd.view({N, G, 1}))
                     .build();
 
     gpu_kernel(iter, [] GPU_LAMBDA(T x, T mean, T rstd) -> T {
       return (static_cast<T_ACC>(x) - static_cast<T_ACC>(mean)) *
           static_cast<T_ACC>(rstd);
     });
-  } else {
+  }
+  else {
     const auto kAccType =
         (X.scalar_type() == kHalf || X.scalar_type() == kBFloat16)
         ? kFloat
@@ -737,42 +644,18 @@ void GroupNormKernelImplInternal(
         N, C, G, mean_data, rstd_data, gamma_data, beta_data, a_data, b_data);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
 
-    switch (x_format) {
-      case MemoryFormat::Contiguous: {
-        TensorIterator iter =
-            TensorIteratorConfig()
-                .check_all_same_dtype(std::is_same_v<T, T_ACC>)
-                .resize_outputs(false)
-                .add_owned_output(Y.view({N * C, HxW}))
-                .add_owned_const_input(X.view({N * C, HxW}))
-                .add_owned_input(a.view({N * C, 1}))
-                .add_owned_input(b.view({N * C, 1}))
-                .build();
-        gpu_kernel(iter, [] GPU_LAMBDA(T x, T_ACC a, T_ACC b) -> T {
-          return a * static_cast<T_ACC>(x) + b;
-        });
-
-        break;
-      }
-      case MemoryFormat::ChannelsLast: {
-        TensorIterator iter =
-            TensorIteratorConfig()
-                .check_all_same_dtype(std::is_same_v<T, T_ACC>)
-                .resize_outputs(false)
-                .add_owned_output(Y)
-                .add_owned_const_input(X)
-                .add_owned_input(a.view({N, C, 1, 1}))
-                .add_owned_input(b.view({N, C, 1, 1}))
-                .build();
-        gpu_kernel(iter, [] GPU_LAMBDA(T x, T_ACC a, T_ACC b) -> T {
-          return a * static_cast<T_ACC>(x) + b;
-        });
-
-        break;
-      }
-      default:
-        break; // shouldn't hit this
-    }
+    TensorIterator iter =
+        TensorIteratorConfig()
+            .check_all_same_dtype(std::is_same_v<T, T_ACC>)
+            .resize_outputs(false)
+            .add_owned_output(Y.view({N, C, HxW}))
+            .add_owned_const_input(X.view({N, C, HxW}))
+            .add_owned_input(a.view({N, C, 1}))
+            .add_owned_input(b.view({N, C, 1}))
+            .build();
+    gpu_kernel(iter, [] GPU_LAMBDA(T x, T_ACC a, T_ACC b) -> T {
+      return a * static_cast<T_ACC>(x) + b;
+    });
   }
 
   AT_CUDA_CHECK(cudaGetLastError());
@@ -993,32 +876,20 @@ void GroupNormBackwardKernelImplInternal(
 
   at::MemoryFormat x_format = X.suggest_memory_format();
   dY.is_contiguous(x_format);
+  if (x_format != MemoryFormat::Contiguous && X.stride(1) != 1)
+      TORCH_CHECK(
+          false,
+          "Unsupported memory format for group normalization backward: ",
+          x_format);
 
   int warp_size = at::cuda::warp_size();
   int64_t num_threads = HxW < cuda_utils::kCUDABlockReduceNumThreads
       ? warp_size
       : cuda_utils::kCUDABlockReduceNumThreads;
 
-  switch (x_format) {
-    case MemoryFormat::Contiguous: {
-      ComputeInternalGradientsCUDAKernel<T><<<N * C, num_threads, 0, cuda_stream>>>(
-          HxW, dY_data, X_data, ds_data, db_data);
-      break;
-    }
-    case MemoryFormat::ChannelsLast: {
-      ComputeInternalGradientsCUDAKernelNHWC<T><<<N * C, num_threads, 0, cuda_stream>>>(
-          HxW, C, dY_data, X_data, ds_data, db_data);
-      break;
-    }
-    default: {
-      TORCH_CHECK(
-          false,
-          "Unsupported memory format for group normalization backward: ",
-          x_format);
-    }
-  }
+  ComputeInternalGradientsCUDAKernel<T><<<N * C, num_threads, 0, cuda_stream>>>(
+      C, HxW, dY_data, X_data, ds_data, db_data, x_format == MemoryFormat::Contiguous);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
-
 
   if (dX.defined()) {
     Tensor c1 = at::empty({0}, X.options().dtype(kAccType));
