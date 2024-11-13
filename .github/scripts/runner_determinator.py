@@ -375,7 +375,7 @@ def is_user_opted_in(user: str, user_optins: UserOptins, experiment_name: str) -
 
 def is_user_opted_out(user: str, user_optins: UserOptins, experiment_name: str) -> bool:
     """
-    Check if a user expliclyt opted out of an experiment
+    Check if a user explicitly opted out of an experiment
     """
     # if the experiment is prefixed with a "-", then it's an opt-out
     experiment_optout = "-" + experiment_name
@@ -414,6 +414,19 @@ def get_runner_prefix(
             )
             continue
 
+        # Is any workflow_requestor opted out to this experiment?
+        opted_out_users = [
+            requestor
+            for requestor in workflow_requestors
+            if is_user_opted_out(requestor, user_optins, experiment_name)
+        ]
+
+        if opted_out_users:
+            log.info(
+                f"{', '.join(opted_out_users)} have opted out of experiment {experiment_name}."
+            )
+            continue
+
         # Is any workflow_requestor opted in to this experiment?
         opted_in_users = [
             requestor
@@ -427,19 +440,6 @@ def get_runner_prefix(
                 f"{', '.join(opted_in_users)} have opted into experiment {experiment_name}."
             )
             enabled = True
-
-        # Is any workflow_requestor opted out to this experiment?
-        opted_out_users = [
-            requestor
-            for requestor in workflow_requestors
-            if is_user_opted_out(requestor, user_optins, experiment_name)
-        ]
-
-        if opted_out_users:
-            log.info(
-                f"{', '.join(opted_in_users)} have opted out of experiment {experiment_name}."
-            )
-            continue
 
         elif experiment_settings.rollout_perc:
             # If no user is opted in, then we randomly enable the experiment based on the rollout percentage

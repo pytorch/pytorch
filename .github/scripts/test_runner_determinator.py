@@ -178,6 +178,23 @@ class TestRunnerDeterminatorGetRunnerPrefix(TestCase):
         prefix = rd.get_runner_prefix(settings_text, ["User1"], USER_BRANCH)
         self.assertEqual("", prefix, "Runner prefix not correct for User1")
 
+    def test_explicitly_opted_in_and_out_user_should_opt_out(self) -> None:
+        settings_text = """
+        experiments:
+            lf:
+                rollout_perc: 100
+            otherExp:
+                rollout_perc: 0
+        ---
+
+        Users:
+        @User1,-lf,lf
+        @User2,lf,otherExp
+
+        """
+        prefix = rd.get_runner_prefix(settings_text, ["User1"], USER_BRANCH)
+        self.assertEqual("", prefix, "Runner prefix not correct for User1")
+
     def test_opted_in_user_two_experiments(self) -> None:
         settings_text = """
         experiments:
