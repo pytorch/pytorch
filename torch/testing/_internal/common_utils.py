@@ -378,6 +378,10 @@ class TrackedInputIter:
         self.child_iter = enumerate(child_iter)
         # Input type describes the things we're tracking (e.g. "sample input", "error input").
         self.input_type_desc = input_type_desc
+        # NB: The two types of callbacks below exist because the thing we want to track isn't
+        # always the same as the thing we want returned from the iterator. An example of this
+        # is ErrorInput, which we want returned from the iterator, but which contains a
+        # SampleInput that we want to track.
         # Item callback is run on each (iterated thing, index) to get the thing to return.
         self.item_callback = item_callback
         if self.item_callback is None:

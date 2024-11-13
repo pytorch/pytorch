@@ -1226,7 +1226,8 @@ class OpInfo:
                     sample,
                 )
 
-                # combined subtest + rule-specific context manager
+                # Provide a context for the test case to run the sample input
+                # through as a subtest AND handle skip / xfail for it as needed.
                 return lambda test_case: SubtestRuleCtx(
                     sample=sample,
                     idx=idx,
@@ -1605,9 +1606,10 @@ class SkipRule(SampleRule):
         return skipcontext()
 
 
-# A combined subTest() + rule-specific context manager. I found it difficult to combine these
-# in a less verbose way, mainly due to the skip context not behaving as a proper context manager.
-# If there's a better way to do this, please fix it!
+# A combined subTest() + rule-specific context manager. In practice, this is used to treat each
+# sample input as a subtest AND properly skip / xfail it as necessary. I found it difficult to
+# combine these in a less verbose way, mainly due to the skip context not behaving as a proper
+# context manager. If there's a better way to do this, please fix it!
 class SubtestRuleCtx:
     def __init__(self, sample, idx, rule, test_case):
         self.sample = sample
@@ -1616,8 +1618,11 @@ class SubtestRuleCtx:
         self.test_case = test_case
 
     def __enter__(self):
+        # Enter subTest() context to ensure sample is run through as a subtest
         self.subtest_ctx = self.test_case.subTest(sample=self.sample, idx=self.idx)
         self.subtest_ctx.__enter__()
+
+        # Enter rule-specific context (either skip / xfail)
         self.rule_ctx = None
         try:
             self.rule_ctx = self.rule.get_context(self.test_case)
@@ -1627,23 +1632,28 @@ class SubtestRuleCtx:
             self.rule_ctx = None
             self.subtest_ctx.__exit__(type(e), e, e.__traceback__)
             self.subtest_ctx = None
+
         return self
 
     def __exit__(self, exc_type, exc, exc_tb):
+        # NB: exit should be performed in opposite order as enter - rule then subtest
         if self.rule_ctx is not None:
             try:
                 if self.rule_ctx.__exit__(exc_type, exc, exc_tb):
+                    # indicate subtest success (i.e. the expected error was seen for an xfail)
                     self.subtest_ctx.__exit__(None, None, None)
                     return True
             except AssertionError as e:
-                # Thrown if an expected error is not raised.
+                # This is thrown if an expected error is not raised.
                 # Hack in the rule name to help out with debugging.
                 if len(e.args) >= 1:
                     e.args = (
                         f"{e.args[0]}\nAssociated {self.rule.type} rule: {self.rule.name}",
                         *e.args[1:],
                     )
+                # indicate subtest failure (i.e. the expected error was -not- seen for an xfail)
                 return self.subtest_ctx.__exit__(type(e), e, None)
+
         if self.subtest_ctx is not None:
             return self.subtest_ctx.__exit__(exc_type, exc, exc_tb)
         return True
