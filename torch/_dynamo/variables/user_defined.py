@@ -12,6 +12,7 @@ import sys
 import threading
 import types
 import warnings
+import weakref
 from typing import Dict, Generic, List, TYPE_CHECKING
 from typing_extensions import is_typeddict
 
@@ -36,14 +37,15 @@ from ..source import (
     ODictGetItemSource,
     RandomValueSource,
     UnspecializedParamBufferSource,
-    WeakRefCallSource,
 )
 from ..utils import (
     build_checkpoint_variable,
+    build_invoke_subgraph_variable,
     check_constant_args,
     get_custom_getattr,
     has_torch_function,
     is_frozen_dataclass,
+    is_invoke_subgraph,
     is_namedtuple_cls,
     is_utils_checkpoint,
     is_wrapper_or_member_descriptor,
@@ -399,6 +401,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.lists.DequeVariable(
                 items, maxlen=maxlen, mutation_type=ValueMutationNew()
             )
+        elif self.value is weakref.ref:
+            return variables.WeakRefVariable(args[0])
         elif self.value is functools.partial:
             if not args:
                 unimplemented("functools.partial malformed")
@@ -964,8 +968,14 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 for k, v in self.value.keywords.items()
             }
             partial_kwargs.update(kwargs)
+
+            # TODO(dynamo-team) - Consider calling VariableBuilder directly here
             if is_utils_checkpoint(self.value.func):
                 return build_checkpoint_variable().call_function(
+                    tx, partial_args, partial_kwargs
+                )
+            elif is_invoke_subgraph(self.value.func):
+                return build_invoke_subgraph_variable().call_function(
                     tx, partial_args, partial_kwargs
                 )
             return variables.TorchInGraphFunctionVariable(
@@ -1028,9 +1038,23 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         return key in self.value.__dict__
 
     def is_supported_nn_module_method(self, method):
-        return torch._dynamo.config.inline_inbuilt_nn_modules and method in (
-            torch.nn.Module.parameters,
-        )
+        if not torch._dynamo.config.inline_inbuilt_nn_modules:
+            return False
+        if method is not torch.nn.Module.parameters:
+            return False
+        return istype(self.value._parameters, dict)
+
+    def get_source_by_walking_mro(self, name):
+        assert self.cls_source is not None
+
+        for idx, klass in enumerate(type(self.value).__mro__):
+            if name in klass.__dict__:
+                mro_source = AttrSource(self.cls_source, "__mro__")
+                klass_source = GetItemSource(mro_source, idx)
+                dict_source = AttrSource(klass_source, "__dict__")
+                return GetItemSource(dict_source, name)
+
+        unimplemented(f"Could not find {name} in {type(self.value).__mro__}")
 
     def var_getattr(self, tx: "InstructionTranslator", name):
         from .. import trace_rules
@@ -1132,11 +1156,17 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         ):
             # Attribute has a __get__ method. Create a user defined object vt
             # for the subobj, and then trace the __get__ method.
-            descriptor_var = UserDefinedObjectVariable(subobj, source=source)
-
-            get_source = self.source
-            if self.source:
-                get_source = AttrSource(self.source, "__get__")
+            descriptor_source = None
+            descriptor_get_source = None
+            if self.cls_source:
+                # To access the method descriptor from the udf object w/o using
+                # inspect.getattr_static, we can look into the class mro
+                descriptor_source = self.get_source_by_walking_mro(name)
+                descriptor_get_source = AttrSource(descriptor_source, "__get__")
+                descriptor_var = VariableTracker.build(tx, subobj, descriptor_source)
+            else:
+                # Sourceless Builder does not support user defined objects
+                descriptor_var = UserDefinedObjectVariable(subobj)
 
             # The arguments of the __get__ function are (self, instance, owner)
             # self - descriptor_var
@@ -1144,8 +1174,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             # owner - class object
             owner_var = UserDefinedClassVariable(type(self.value))
             return variables.UserMethodVariable(
-                subobj.__get__.__func__, descriptor_var, source=get_source
-            ).call_function(tx, [descriptor_var, self, owner_var], {})
+                subobj.__get__.__func__, descriptor_var, source=descriptor_get_source
+            ).call_function(tx, [self, owner_var], {})
         elif isinstance(subobj, types.FunctionType) or (
             isinstance(subobj, types.MethodType)
             and isinstance(self.value, torch.nn.Module)
@@ -1165,7 +1195,20 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
             if isinstance(subobj, types.MethodType):
                 if dynamic_subobj.__self__ is not self.value:
-                    unimplemented("__self__ mismatch for bound method")
+                    if not isinstance(dynamic_subobj.__func__, types.FunctionType):
+                        unimplemented(
+                            f"Found a method whose __func__ is not of FunctionType - {dynamic_subobj}"
+                        )
+
+                    from .builder import SourcelessUserDefinedObjectBuilder
+
+                    # This means that we are calling a method of some other object here.
+                    object_vt = SourcelessUserDefinedObjectBuilder.create(
+                        tx, dynamic_subobj.__self__
+                    )
+                    return variables.UserMethodVariable(
+                        dynamic_subobj.__func__, object_vt
+                    )
                 func = subobj.__func__
             else:
                 assert isinstance(subobj, types.FunctionType)
@@ -1332,24 +1375,6 @@ class SourcelessGraphModuleVariable(UserDefinedObjectVariable):
             args,
             kwargs,
         )
-
-
-class WeakRefVariable(UserDefinedObjectVariable):
-    _nonvar_fields = UserDefinedObjectVariable._nonvar_fields
-
-    def __init__(self, value, **kwargs) -> None:
-        super().__init__(value, **kwargs)
-
-    def call_function(
-        self,
-        tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
-    ) -> "VariableTracker":
-        call_source = None
-        referent = self.value()
-        source = self.source and WeakRefCallSource(self.source)
-        return VariableTracker.build(tx, referent, source)
 
 
 class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
