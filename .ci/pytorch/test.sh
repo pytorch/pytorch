@@ -15,6 +15,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 TEST_REPORTS_CHECK=$(pwd)/test/test-reports/check
 LOG_FILE="gpu_utilization.log"
 MONITOR_PID=""
+
 function monitor_gpu_utilization {
     echo "Starting GPU utilization monitoring in the background..."
     echo "Timestamp, GPU Utilization (%)" > "$TEST_REPORTS_CHECK/$LOG_FILE"
@@ -48,7 +49,6 @@ function start_gpu_monitoring {
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
 
-
   monitor_gpu_utilization &
   MONITOR_PID=$!
   echo "GPU monitoring started with PID $MONITOR_PID"
@@ -61,12 +61,11 @@ function stop_gpu_monitoring {
         kill -SIGTERM "$MONITOR_PID"
         wait "$MONITOR_PID" 2>/dev/null
         echo "GPU monitoring stopped."
+        MONITOR_PID=""
     else
         echo "GPU monitoring is not running."
     fi
 }
-
-
 
 # Trap EXIT to ensure GPU monitoring stops if the script exits
 trap stop_gpu_monitoring EXIT
@@ -1608,8 +1607,4 @@ else
   test_custom_backend
   test_torch_function_benchmark
   test_benchmarks
-fi
-
-if command -v nvidia-smi &> /dev/null; then
-  stop_gpu_monitoring
 fi
