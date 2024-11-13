@@ -3,6 +3,7 @@ from __future__ import annotations
 import atexit
 import collections
 import dataclasses
+import functools
 import json
 import logging
 import os
@@ -12,6 +13,7 @@ from abc import abstractmethod
 from typing import Any, Callable, Dict, Generic, List, Optional, Type, TypeVar, Union
 from typing_extensions import override, TypeAlias
 
+from torch._dynamo.utils import dynamo_timed
 from torch._inductor import config
 
 
@@ -36,6 +38,22 @@ else:
 
 _T = TypeVar("_T")
 _U = TypeVar("_U")
+
+
+remote_fx_cache_get_timed = functools.partial(
+    dynamo_timed,
+    "FbRemoteFxGraphCache.get",
+    phase_name="remote_fx_graph_cache_get",
+    log_pt2_compile_event=False,
+    dynamo_compile_column_us="remote_fx_graph_cache_get_time_us",
+)
+remote_fx_cache_put_timed = functools.partial(
+    dynamo_timed,
+    "FbRemoteFxGraphCache.put",
+    phase_name="remote_fx_graph_cache_put",
+    log_pt2_compile_event=False,
+    dynamo_compile_column_us="remote_fx_graph_cache_put_time_us",
+)
 
 
 class RemoteCacheBackend(Generic[_T]):
@@ -292,6 +310,10 @@ class RemoteFxGraphCache(RedisRemoteCache):
 
 
 class RemoteAOTAutogradCache(RedisRemoteCache):
+    pass
+
+
+class RemoteDynamoPGOCache(RedisRemoteCache):
     pass
 
 

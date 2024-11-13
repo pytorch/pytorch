@@ -378,7 +378,7 @@ struct TORCH_API Result : public std::enable_shared_from_this<Result> {
   }
 
   template <typename T, typename Fn>
-  void visit_if_base(Fn&& fn) const {
+  void visit_if_base(const Fn& fn) const {
     visit([&](const auto& extra_fields) {
       using extra_fields_t = typename std::remove_cv_t<
           typename std::remove_reference_t<decltype(extra_fields)>>;
@@ -449,6 +449,7 @@ struct KinetoObserverContext : public at::ObserverContext {
 
     bool allow_tf32_cublas_;
     std::unique_ptr<perf_counters_t> counters_;
+    extra_meta_t* extra_meta_{};
   };
 
   explicit KinetoObserverContext(Event* event) : event_{event} {}
@@ -675,5 +676,11 @@ TORCH_API void set_fwd_bwd_enabled_val(bool);
 TORCH_API bool get_cuda_sync_enabled();
 TORCH_API void set_cuda_sync_enabled_fn(std::function<bool()>);
 TORCH_API void set_cuda_sync_enabled_val(bool);
+
+// Comms related RecordFunctions will record information about tensor storage
+// locations.
+TORCH_API bool get_record_tensor_addrs_enabled();
+TORCH_API void set_record_tensor_addrs_enabled_fn(std::function<bool()>);
+TORCH_API void set_record_tensor_addrs_enabled_val(bool);
 
 } // namespace torch::profiler::impl
