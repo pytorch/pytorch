@@ -12,7 +12,7 @@ from torch._inductor.test_case import TestCase
 from torch._inductor.utils import fresh_inductor_cache
 from torch.export import Dim
 from torch.testing._internal.common_utils import IS_FBCODE
-from torch.testing._internal.triton_utils import HAS_CUDA
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
 def compile(
@@ -53,8 +53,8 @@ def compile(
     )
     + (
         [
-            {"device": "cuda", "package_cpp_only": False},
-            {"device": "cuda", "package_cpp_only": True},
+            {"device": GPU_TYPE, "package_cpp_only": False},
+            {"device": GPU_TYPE, "package_cpp_only": True},
         ]
         if sys.platform != "darwin"
         else []
@@ -256,5 +256,5 @@ if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
     # cpp_extension N/A in fbcode
-    if HAS_CUDA or sys.platform == "darwin":
+    if HAS_GPU or sys.platform == "darwin":
         run_tests(needs="filelock")

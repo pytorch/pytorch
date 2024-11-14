@@ -92,6 +92,11 @@ AOTIModelContainerRunner::~AOTIModelContainerRunner() {
 }
 
 std::vector<at::Tensor> AOTIModelContainerRunner::run(
+    const std::vector<at::Tensor>& inputs) {
+  return run_impl(inputs);
+}
+
+std::vector<at::Tensor> AOTIModelContainerRunner::run_impl(
     const std::vector<at::Tensor>& inputs,
     AOTInductorStreamHandle cuda_stream_handle) {
   auto input_handles =

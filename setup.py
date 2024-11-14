@@ -1289,6 +1289,7 @@ def main():
         "include/torch/csrc/inductor/aoti_torch/*.h",
         "include/torch/csrc/inductor/aoti_torch/c/*.h",
         "include/torch/csrc/inductor/aoti_torch/generated/*.h",
+        "include/torch/csrc/inductor/aoti_torch/generated/extend/*.h",
         "include/torch/csrc/jit/*.h",
         "include/torch/csrc/jit/backends/*.h",
         "include/torch/csrc/jit/generated/*.h",
