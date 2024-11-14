@@ -93,7 +93,7 @@ dnnl::memory::data_type get_onednn_dtype_include_double(
 }
 
 bool is_supported_onednn_dtype(const at::Tensor& tensor) {
-  return get_onednn_dtype(tensor, /*allow_undef*/ true) ==
+  return get_onednn_dtype_include_double(tensor) ==
           dnnl::memory::data_type::undef
       ? false
       : true;
@@ -115,7 +115,10 @@ dnnl::memory::dims get_onednn_strides(const at::Tensor& tensor) {
 
 dnnl::memory::desc get_onednn_md(const at::Tensor& tensor) {
   Tensor t = tensor.sizes().size() == 0 ? tensor.unsqueeze(0) : tensor;
-  return {get_onednn_dims(t), get_onednn_dtype(t), get_onednn_strides(t)};
+  return {
+      get_onednn_dims(t),
+      get_onednn_dtype_include_double(t),
+      get_onednn_strides(t)};
 }
 
 bool onednn_strides_check(const Tensor& src) {
