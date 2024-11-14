@@ -1116,6 +1116,12 @@ def _get_amdsmi_memory_usage(device: Optional[Union[Device, int]] = None) -> int
     return amdsmi.amdsmi_get_gpu_vram_usage(handle)["vram_used"]
 
 
+def _get_amdsmi_memory_utilization(device: Optional[Union[Device, int]] = None) -> int:
+    handle = _get_amdsmi_handler()
+    device = _get_amdsmi_device_index(device)
+    return amdsmi.amdsmi_get_gpu_activity(handle)["umc_activity"]
+
+
 def _get_amdsmi_utilization(device: Optional[Union[Device, int]] = None) -> int:
     handle = _get_amdsmi_handler()
     device = _get_amdsmi_device_index(device)
@@ -1151,6 +1157,23 @@ def _get_amdsmi_clock_rate(device: Optional[Union[Device, int]] = None) -> int:
 
 
 def memory_usage(device: Optional[Union[Device, int]] = None) -> int:
+    r"""Return the amout of memory (in bytes) currently in use by the GPU.
+
+    Args:
+        device (torch.device or int, optional): selected device. Returns
+            statistic for the current device, given by :func:`~torch.cuda.current_device`,
+            if :attr:`device` is ``None`` (default).
+    """
+    if not torch.version.hip:
+        handle = _get_pynvml_handler()
+        device = _get_nvml_device_index(device)
+        handle = pynvml.nvmlDeviceGetHandleByIndex(device)
+        return pynvml.nvmlDeviceGetMemoryInfo(handle).used
+    else:
+        return _get_amdsmi_memory_usage(device)
+
+
+def memory_utilization(device: Optional[Union[Device, int]] = None) -> int:
     r"""Return the percent of time over the past sample period during which global (device)
     memory was being read or written as given by `nvidia-smi`.
 
@@ -1168,7 +1191,7 @@ def memory_usage(device: Optional[Union[Device, int]] = None) -> int:
         handle = pynvml.nvmlDeviceGetHandleByIndex(device)
         return pynvml.nvmlDeviceGetUtilizationRates(handle).memory
     else:
-        return _get_amdsmi_memory_usage(device)
+        return _get_amdsmi_memory_utilization(device)
 
 
 def utilization(device: Optional[Union[Device, int]] = None) -> int:
