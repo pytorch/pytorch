@@ -352,9 +352,6 @@ static void registerXpuDeviceProperties(PyObject* module) {
                    << get_device_type(prop) << "', driver_version='"
                    << prop.driver_version << "', total_memory="
                    << prop.global_mem_size / (1024ull * 1024) << "MB"
-#if SYCL_COMPILER_VERSION >= 20250000
-                   << ", architecture=" << get_device_architecture(prop)
-#endif
                    << ", max_compute_units=" << prop.max_compute_units
                    << ", gpu_eu_count=" << prop.gpu_eu_count
                    << ", gpu_subslice_count=" << gpu_subslice_count(prop)

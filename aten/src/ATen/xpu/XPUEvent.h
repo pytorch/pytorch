@@ -146,7 +146,7 @@ struct TORCH_XPU_API XPUEvent {
     // Block until both of the recorded events are completed.
     uint64_t end_time_ns = other.event().get_profiling_info<command_end>();
     uint64_t start_time_ns = event().get_profiling_info<command_end>();
-    // Return the eplased time in milliseconds.
+    // Return the elapsed time in milliseconds.
     return 1e-6 *
         (static_cast<double>(end_time_ns) - static_cast<double>(start_time_ns));
   }
