@@ -2,6 +2,7 @@
 import itertools
 import sys
 from typing import Union
+
 import torch
 import torch.nn as nn
 from torch import distributed as dist
@@ -14,20 +15,21 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import (
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     DEVICEInitMode,
     FSDPInitMode,
     FSDPTest,
+    get_devtype,
     NestedWrappedModule,
     TransformerWithSharedParams,
 )
-from torch.testing._internal.common_utils import (
-    run_tests,
-    TEST_HPU,
-    TEST_WITH_DEV_DBG_ASAN,
-)
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
+
+
+device_type = torch.device(get_devtype())
+
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)
@@ -37,29 +39,36 @@ if TEST_WITH_DEV_DBG_ASAN:
         file=sys.stderr,
     )
     sys.exit(0)
+
+
 class TestClipGradNorm(FSDPTest):
     """Tests :meth:`FullyShardedDataParallel.clip_grad_norm_`."""
+
     @skip_if_lt_x_gpu(2)
     def test_non_root(self, device):
         """
         Tests that calling ``clip_grad_norm_()`` on a non-root FSDP instance
         raises an error.
         """
+
         class Model(nn.Module):
             def __init__(self) -> None:
                 super().__init__()
                 self.lin1 = nn.Linear(5, 5)
                 self.lin2 = nn.Linear(5, 5)
+
             def forward(self, x: torch.Tensor) -> torch.Tensor:
                 return self.lin2(self.lin1(x))
-        device_id = device if TEST_HPU else self.rank
-        model = Model().to(device_id)
+
+        model = Model().to(device_type.type)
         model.lin2 = FSDP(model.lin2)
         fsdp_model = FSDP(model)
-        fsdp_model(torch.randn((2, 5), device=torch.device(self.device_type))).sum().backward()
+        # fsdp_model(torch.randn((2, 5), device=torch.device(self.device_type))).sum().backward()
+        fsdp_model(torch.randn((2, 5), device=device_type)).sum().backward()
         error_regex = "should only be called on the root FSDP instance"
         with self.assertRaisesRegex(RuntimeError, error_regex):
             fsdp_model.lin2.clip_grad_norm_(max_norm=2)
+
     @skip_if_lt_x_gpu(2)
     def test_ddp_parity(self, device):
         """
@@ -81,6 +90,7 @@ class TestClipGradNorm(FSDPTest):
             },
             self._test_ddp_parity,
         )
+
     def _test_ddp_parity(
         self,
         device,
@@ -96,12 +106,11 @@ class TestClipGradNorm(FSDPTest):
             DEVICEInitMode.DEVICE_BEFORE,
             deterministic=True,
         )
-        device_id = device if TEST_HPU else self.rank
-        ddp_model = DDP(local_model, device_ids=[device_id])
+        ddp_model = DDP(local_model, device_ids=[device_type])
         fsdp_kwargs = {
             "cpu_offload": CPUOffload(offload_params=offload_params),
             "use_orig_params": use_orig_params,
-            "device_id": device_id,
+            "device_id": device_type.type,
         }
         if sharding_strategy == "mixed_strategy":
             fsdp_model = TransformerWithSharedParams.init(
@@ -227,6 +236,7 @@ class TestClipGradNorm(FSDPTest):
             self.assertEqual(ddp_total_norm, fsdp_total_norm)
             ddp_optim.step()
             fsdp_optim.step()
+
     @skip_if_lt_x_gpu(2)
     def test_low_precision_grads(self, device):
         """Tests ``clip_grad_norm_()`` when using low precision gradients."""
@@ -243,6 +253,7 @@ class TestClipGradNorm(FSDPTest):
             },
             self._test_low_precision_grads,
         )
+
     def _test_low_precision_grads(
         self,
         device,
@@ -251,7 +262,6 @@ class TestClipGradNorm(FSDPTest):
         sharding_strategy: ShardingStrategy,
         use_orig_params: bool,
     ):
-        device_id = device if TEST_HPU else self.rank
         fsdp_kwargs = {
             "sharding_strategy": sharding_strategy,
             "use_orig_params": use_orig_params,
@@ -260,7 +270,7 @@ class TestClipGradNorm(FSDPTest):
                 reduce_dtype=torch.float16,
                 keep_low_precision_grads=True,
             ),
-            "device_id": device_id,
+            "device_id": device_type.type,
         }
         fsdp_model = FSDP(
             NestedWrappedModule.init(
@@ -289,6 +299,7 @@ class TestClipGradNorm(FSDPTest):
                 self.assertTrue(
                     torch.linalg.vector_norm(param.grad, norm_type).item() <= max_norm,
                 )
+
     @skip_if_lt_x_gpu(2)
     def test_no_gradients(self, device):
         """
@@ -296,11 +307,10 @@ class TestClipGradNorm(FSDPTest):
         gradients simply returns a scalar zero tensor in FP32 without erroring.
         """
         self.run_subtests(
-            {   
-                "device": [device],
-                "use_orig_params": [False, True]},
+            {"device": [device], "use_orig_params": [False, True]},
             self._test_no_gradients,
         )
+
     def _test_no_gradients(self, device, use_orig_params: bool):
         lin_module = nn.Linear(24, 24)
         mixed_precision_config = MixedPrecision(
@@ -308,12 +318,11 @@ class TestClipGradNorm(FSDPTest):
             reduce_dtype=torch.float32,
             buffer_dtype=torch.float32,
         )
-        device_id = device if TEST_HPU else self.rank
         fsdp_module = FSDP(
             lin_module,
             sharding_strategy=ShardingStrategy.SHARD_GRAD_OP,
             mixed_precision=mixed_precision_config,
-            device_id=device_id,
+            device_id=device_type.type,
             use_orig_params=use_orig_params,
         )
         inp = torch.randn(32, 24, device=self.device_type)
@@ -328,7 +337,8 @@ class TestClipGradNorm(FSDPTest):
         self.assertEqual(total_norm.dtype, torch.float32)
         self.assertEqual(total_norm, torch.tensor(0.0, device=self.device_type))
 
-devices = ("hpu" if TEST_HPU else "cuda")
+
+devices = ("cuda", "hpu")
 instantiate_device_type_tests(TestClipGradNorm, globals(), only_for=devices)
 if __name__ == "__main__":
     run_tests()
