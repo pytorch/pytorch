@@ -48,6 +48,11 @@ ENV LD_LIBRARY_PATH=/opt/rh/gcc-toolset-${GCCTOOLSET_VERSION}/root/usr/lib64:/op
 # For more details see https://github.com/pytorch/pytorch/issues/78659#issuecomment-1144107327
 RUN git config --global --add safe.directory "*"
 
+FROM base as openblas
+# Install openblas
+ADD ./common/install_openblas.sh install_openblas.sh
+RUN bash ./install_openblas.sh && rm install_openblas.sh
+
 FROM base as final
 
 # remove unncessary python versions
@@ -55,3 +60,5 @@ RUN rm -rf /opt/python/cp26-cp26m /opt/_internal/cpython-2.6.9-ucs2
 RUN rm -rf /opt/python/cp26-cp26mu /opt/_internal/cpython-2.6.9-ucs4
 RUN rm -rf /opt/python/cp33-cp33m /opt/_internal/cpython-3.3.6
 RUN rm -rf /opt/python/cp34-cp34m /opt/_internal/cpython-3.4.6
+COPY --from=openblas     /opt/OpenBLAS/  /opt/OpenBLAS/
+ENV LD_LIBRARY_PATH=/opt/OpenBLAS/lib:$LD_LIBRARY_PATH

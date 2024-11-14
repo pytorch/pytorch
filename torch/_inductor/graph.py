@@ -131,7 +131,7 @@ else:
         pass
 
 
-def supported_dtype_of_cpp_wrapper(dtype: torch.device, device_type: str) -> bool:
+def supported_dtype_of_cpp_wrapper(dtype: torch.dtype, device_type: str) -> bool:
     supported_dtype = {
         torch.float32,
         torch.float64,
@@ -193,8 +193,21 @@ def getattr_recursive(
     return attr_itr
 
 
+def get_user_visible_output_strides(g: Graph) -> Dict[Node, Tuple[int, ...]]:
+    ret: Dict[Node, Tuple[int, ...]] = {}
+    output_node = g.find_nodes(op="output")[0]
+
+    if "user_visible_output_idxs" not in output_node.meta:
+        return ret
+
+    for idx, node in enumerate(output_node.args[0]):
+        if idx in output_node.meta["user_visible_output_idxs"]:
+            ret[node] = output_node.meta["original_output_strides"][idx]
+    return ret
+
+
 def mark_nodes_dislike_padding(
-    g: Graph, user_visible_outputs: Optional[Dict[str, None]]
+    g: Graph, user_visible_output_strides: Dict[Node, Tuple[int, ...]]
 ) -> None:
     """
     Nodes like convolution/convolution_backward want its input to be dense.
@@ -238,6 +251,8 @@ def mark_nodes_dislike_padding(
             else None
         )
 
+    output_node = g.find_nodes(op="output")[0]
+
     for cur in reversed(g.nodes):
         op = _get_overload_packet(cur)
         if not op:
@@ -254,11 +269,7 @@ def mark_nodes_dislike_padding(
                 if prior_op not in ops_like_padding:
                     prior.meta["dislike_padding"] = True
         # We only want to mark output nodes. So, move it after the above prior nodes process.
-        if (
-            not config.pad_outputs
-            and user_visible_outputs
-            and cur.name in user_visible_outputs
-        ):
+        if not config.pad_outputs and cur in user_visible_output_strides:
             cur.meta["dislike_padding"] = True
 
 
@@ -320,7 +331,6 @@ class GraphLowering(torch.fx.Interpreter):
         graph_id: Optional[int] = None,
         cpp_wrapper: bool = False,
         aot_mode: bool = False,
-        user_visible_outputs: Optional[Dict[str, None]] = None,
         layout_opt: Optional[bool] = None,
         extern_node_serializer: Optional[
             Callable[[List[ir.ExternKernelNode]], Any]
@@ -440,10 +450,8 @@ class GraphLowering(torch.fx.Interpreter):
             self.find_nodes_prefer_channels_last() if self.layout_opt else OrderedSet()
         )
         self._warned_fallback = {"aten.convolution_backward"}
-        self.user_visible_outputs = (
-            user_visible_outputs if user_visible_outputs is not None else {}
-        )
-        mark_nodes_dislike_padding(gm.graph, user_visible_outputs)
+        self.user_visible_output_strides = get_user_visible_output_strides(gm.graph)
+        mark_nodes_dislike_padding(gm.graph, self.user_visible_output_strides)
         self.cache_key: str = ""  # This is the cache key for the compiled artifact
         self.cache_path: str = ""  # This is the path in the filesystem where the compiled artifact is stored
         self.cache_linemap: List[
@@ -473,8 +481,7 @@ class GraphLowering(torch.fx.Interpreter):
         # Below field is related to printing debug intermediate tensor values info for debugging
         self.all_codegen_kernel_names: OrderedSet[str] = OrderedSet()
 
-        # state used by wrapper.generate_workspace_allocation()
-        self.allocated_workspaces: Dict[str, Any] = {}
+        # state used by for Kernel.workspace
         self.workspace_id = itertools.count()
 
     def has_feature(
@@ -1151,6 +1158,10 @@ class GraphLowering(torch.fx.Interpreter):
         for r, fx_node in zip(result, fx_node_args):
             if not isinstance(r, (ir.TensorBox, ir.BaseView)):
                 result_correct_strides.append(r)
+            elif isinstance(r.get_layout(), ir.CommBufferLayout):
+                # Active references to persistent comm buffers are not allowed
+                # outside of graphs
+                result_correct_strides.append(ir.ExternKernel.copy_input(r))
             else:
                 # AOT Autograd tries to detect stride divergence of inductor from output metadata.
                 # Here, we try to avoid spurious divergence by matching insignificant strides such as
@@ -1334,7 +1345,7 @@ class GraphLowering(torch.fx.Interpreter):
         def debug(msg: str) -> None:
             log.debug("lowering %s %s", LazyString(n.format_node), msg)
 
-        from torch._inductor.bisect_helper import BisectionManager
+        from torch._inductor.compiler_bisector import CompilerBisector
 
         buffer_watermark = len(self.buffers)
         operation_watermark = len(self.operations)
@@ -1354,7 +1365,7 @@ class GraphLowering(torch.fx.Interpreter):
                 and n.target is not operator.getitem
                 and (
                     fallback_node_due_to_unsupported_type(n)
-                    or BisectionManager.disable_subsystem(
+                    or CompilerBisector.disable_subsystem(
                         "inductor", "lowerings", lambda: repr(n)
                     )
                 )
@@ -1424,6 +1435,7 @@ class GraphLowering(torch.fx.Interpreter):
                 torch.ops.aten.resize_as.default,
             ]
             is_output = any(user.op == "output" for user in n.users)
+            is_user_visible = n in self.user_visible_output_strides
             is_input_for_as_strided = any(
                 user.target in as_strided_ops for user in n.users
             )
@@ -1452,10 +1464,14 @@ class GraphLowering(torch.fx.Interpreter):
             if (is_output or is_input_for_as_strided) and isinstance(
                 n.meta["val"], torch.Tensor
             ):
-                strides = n.meta["val"].stride()
-                if len(strides):
+                if is_user_visible:
+                    strides = self.user_visible_output_strides.get(n)
+                else:
+                    strides = n.meta["val"].stride()
+
+                if strides is not None and len(strides) > 0:
                     allow_padding = (
-                        config.pad_outputs or n.name not in self.user_visible_outputs
+                        config.pad_outputs or not is_user_visible
                     ) and not is_input_for_as_strided
                     dense = torch._prims_common.is_non_overlapping_and_dense(
                         n.meta["val"]
@@ -1468,7 +1484,7 @@ class GraphLowering(torch.fx.Interpreter):
                         and dense
                         and len(result.get_size()) == 4
                         and n in self.nodes_prefer_channels_last
-                        and n.name not in self.user_visible_outputs
+                        and not is_user_visible
                         and not is_input_for_as_strided
                     ):
                         strides = ir.FlexibleLayout.stride_ordered_for_memory_format(
@@ -1576,7 +1592,7 @@ class GraphLowering(torch.fx.Interpreter):
                 curr = result.data.data
                 if isinstance(curr, Pointwise):
                     # Use inner fn as a rough proxy. Good enough.
-                    if curr.has_large_inner_fn():
+                    if curr.has_large_inner_fn(threshold=100):
                         result.realize()
 
         # This is not complete, but it doesn't have to be: origin_node
@@ -1729,7 +1745,7 @@ class GraphLowering(torch.fx.Interpreter):
             ):
                 dtype = may_get_constant_buffer_dtype(value)
 
-            if not supported_dtype_of_cpp_wrapper(dtype, self.device_type):
+            if not supported_dtype_of_cpp_wrapper(dtype, self.device_type):  # type: ignore[arg-type]
                 raise CppWrapperCodegenError(f"Unsupported input dtype {dtype}")
 
     def init_wrapper_code(
@@ -1930,7 +1946,10 @@ class GraphLowering(torch.fx.Interpreter):
 
     def compile_to_module(self) -> ModuleType:
         with dynamo_timed(
-            "GraphLowering.compile_to_module", phase_name="code_gen", fwd_only=False
+            "GraphLowering.compile_to_module",
+            phase_name="code_gen",
+            log_pt2_compile_event=True,
+            dynamo_compile_column_us="inductor_code_gen_cumulative_compile_time_us",
         ):
             return self._compile_to_module()
 
@@ -1963,17 +1982,22 @@ class GraphLowering(torch.fx.Interpreter):
                 lambda: {"filename": path},
                 payload_fn=lambda: code,
             )
-
-        mod = PyCodeCache.load_by_key_path(
-            key,
-            path,
-            linemap=linemap,  # type: ignore[arg-type]
-            attrs={**self.constants, **self.torchbind_constants},
-        )
+        with dynamo_timed(
+            "PyCodeCache.load_by_key_path", log_pt2_compile_event=True, fwd_only=False
+        ):
+            mod = PyCodeCache.load_by_key_path(
+                key,
+                path,
+                linemap=linemap,  # type: ignore[arg-type]
+                attrs={**self.constants, **self.torchbind_constants},
+            )
         self.cache_key = key
         self.cache_path = path
         self.cache_linemap = linemap  # type: ignore[assignment]
 
+        if config.profile_bandwidth_output:
+            # run the inputs code gen to get the bandwidth info
+            mod.benchmark_compiled_module(times=1, repeat=1)
         # Logged twice as per https://github.com/pytorch/pytorch/pull/99038#discussion_r1167826029
         # TODO. Revisit this once the logging API is more mature
         assert mod.__file__ is not None

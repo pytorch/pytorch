@@ -1139,7 +1139,10 @@ class GitHubPR:
             if label_base in label:
                 count += 1
                 full_label = f"{label_base}X{count}"
-        gh_add_labels(self.org, self.project, self.pr_num, [full_label], dry_run)
+        self.add_label(full_label, dry_run)
+
+    def add_label(self, label: str, dry_run: bool) -> None:
+        gh_add_labels(self.org, self.project, self.pr_num, [label], dry_run)
 
     def merge_into(
         self,
@@ -1944,6 +1947,7 @@ def do_revert_prs(
         )
 
         pr.add_numbered_label("reverted", dry_run)
+        pr.add_label("ci-no-td", dry_run)
         if not dry_run:
             gh_post_commit_comment(pr.org, pr.project, commit_sha, revert_msg)
             gh_update_pr_state(pr.org, pr.project, pr.pr_num)
@@ -2001,17 +2005,18 @@ def check_for_sev(org: str, project: str, skip_mandatory_checks: bool) -> None:
         Dict[str, Any],
         gh_fetch_json_list(
             "https://api.github.com/search/issues",
-            params={"q": f'repo:{org}/{project} is:open is:issue label:"ci: sev"'},
+            # Having two label: queries is an AND operation
+            params={
+                "q": f'repo:{org}/{project} is:open is:issue label:"ci: sev" label:"merge blocking"'
+            },
         ),
     )
     if response["total_count"] != 0:
-        for item in response["items"]:
-            if "MERGE BLOCKING" in item["body"]:
-                raise RuntimeError(
-                    "Not merging any PRs at the moment because there is a "
-                    + "merge blocking https://github.com/pytorch/pytorch/labels/ci:%20sev issue open at: \n"
-                    + f"{item['html_url']}"
-                )
+        raise RuntimeError(
+            "Not merging any PRs at the moment because there is a "
+            + "merge blocking https://github.com/pytorch/pytorch/labels/ci:%20sev issue open at: \n"
+            + f"{response['items'][0]['html_url']}"
+        )
     return
 
 

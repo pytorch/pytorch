@@ -165,9 +165,11 @@ static Tensor _mps_convolution_impl(const Tensor& input_t_,
   }
   TensorArg output{output_t, "result", 0};
 
-  // TODO: MPS convolution kernel currently does not support output channels > 2^16
-  for (auto elem : output_t.sizes()) {
-    TORCH_CHECK_NOT_IMPLEMENTED(elem <= (1 << 16), "Output channels > 65536 not supported at the MPS device. ");
+  if (!detail::getMPSHooks().isOnMacOSorNewer(15, 1)) {
+    // On macOS < 15.1, MPS convolution kernel does not support output channels > 2^16
+    for (auto elem : output_t.sizes()) {
+      TORCH_CHECK_NOT_IMPLEMENTED(elem <= (1 << 16), "Output channels > 65536 not supported at the MPS device. ");
+    }
   }
 
   convolution_shape_check(c, input, weight, output, padding, stride, dilation, groups);
@@ -371,9 +373,11 @@ static Tensor mps_convolution_backward_input(IntArrayRef input_size,
   using namespace mps;
   bool is3DConv = grad_output_t.dim() == 5;
 
-  // TODO: MPS convolution kernel currently does not support output channels > 2^16
-  for (auto elem : grad_output_t.sizes()) {
-    TORCH_CHECK_NOT_IMPLEMENTED(elem <= (1 << 16), "Output channels > 65536 not supported at the MPS device. ");
+  if (!detail::getMPSHooks().isOnMacOSorNewer(15, 1)) {
+    // On macOS < 15.1, MPS convolution kernel does not support output channels > 2^16
+    for (auto elem : grad_output_t.sizes()) {
+      TORCH_CHECK_NOT_IMPLEMENTED(elem <= (1 << 16), "Output channels > 65536 not supported at the MPS device. ");
+    }
   }
 
   TORCH_CHECK(isFloatingType(grad_output_t.scalar_type()), "Convolution is supported only for Floating types");

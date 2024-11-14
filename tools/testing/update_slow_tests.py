@@ -6,59 +6,62 @@ from pathlib import Path
 from typing import Any, cast, Dict, List, Optional, Tuple
 
 import requests
-import rockset  # type: ignore[import]
+from clickhouse import query_clickhouse  # type: ignore[import]
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 QUERY = """
 WITH most_recent_strict_commits AS (
     SELECT
-        push.head_commit.id as sha,
+        distinct push.head_commit.'id' as sha
     FROM
-        commons.push
+        -- not bothering with final
+        default.push
     WHERE
         push.ref = 'refs/heads/viable/strict'
-        AND push.repository.full_name = 'pytorch/pytorch'
+        AND push.repository.'full_name' = 'pytorch/pytorch'
     ORDER BY
-        push._event_time DESC
+        push.head_commit.'timestamp' desc
     LIMIT
         3
 ), workflows AS (
     SELECT
         id
     FROM
-        commons.workflow_run w
-        INNER JOIN most_recent_strict_commits c on w.head_sha = c.sha
+        default.workflow_run w final
     WHERE
-        w.name != 'periodic'
+        w.id in (select id from materialized_views.workflow_run_by_head_sha
+            where head_sha in (select sha from most_recent_strict_commits)
+        )
+        and w.name != 'periodic'
 ),
 job AS (
     SELECT
-        j.id
+        j.id as id
     FROM
-        commons.workflow_job j
-        INNER JOIN workflows w on w.id = j.run_id
+        default.workflow_job j final
     WHERE
-        j.name NOT LIKE '%asan%'
+        j.run_id in (select id from workflows)
+        and j.name NOT LIKE '%asan%'
 ),
 duration_per_job AS (
     SELECT
-        test_run.classname,
-        test_run.name,
-        job.id,
-        SUM(time) as time
+        test_run.classname as classname,
+        test_run.name as name,
+        job.id as id,
+        SUM(test_run.time) as time
     FROM
-        commons.test_run_s3 test_run
-        /* `test_run` is ginormous and `job` is small, so lookup join is essential */
-        INNER JOIN job ON test_run.job_id = job.id HINT(join_strategy = lookup)
+        default.test_run_s3 test_run
+        INNER JOIN job ON test_run.job_id = job.id
     WHERE
         /* cpp tests do not populate `file` for some reason. */
         /* Exclude them as we don't include them in our slow test infra */
-        test_run.file IS NOT NULL
+        test_run.file != ''
         /* do some more filtering to cut down on the test_run size */
-        AND test_run.skipped IS NULL
-        AND test_run.failure IS NULL
-        AND test_run.error IS NULL
+        AND empty(test_run.skipped)
+        AND empty(test_run.failure)
+        AND empty(test_run.error)
+        and test_run.job_id in (select id from job)
     GROUP BY
         test_run.classname,
         test_run.name,
@@ -178,11 +181,7 @@ def search_for_open_pr(
 
 
 if __name__ == "__main__":
-    rs_client = rockset.RocksetClient(
-        host="api.usw2a1.rockset.com", api_key=os.environ["ROCKSET_API_KEY"]
-    )
-
-    results = rs_client.sql(QUERY).results
+    results = query_clickhouse(QUERY, {})
     slow_tests = {row["test_name"]: row["avg_duration_sec"] for row in results}
 
     with open(REPO_ROOT / "test" / "slow_tests.json", "w") as f:
