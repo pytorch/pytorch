@@ -10,9 +10,8 @@ from torch._prims_common import is_expandable_to
 
 from torch.nested._internal.metadata_cache import (
     add_entry,
-    create_cache,
+    MetadataCache,
     try_get_cache,
-    try_get_entry,
 )
 from torch.nested._internal.nested_int import get_nested_symint
 
@@ -76,7 +75,7 @@ def construct_nested_cache_data(
     return ret
 
 
-def get_nested_cache(offsets, lengths, cpu_offsets, cpu_lengths):
+def get_nested_cache(offsets, lengths, cpu_offsets, cpu_lengths) -> MetadataCache:
     # Figure out the best way to do this.
     cache_data = construct_nested_cache_data(
         offsets=offsets,
@@ -84,7 +83,6 @@ def get_nested_cache(offsets, lengths, cpu_offsets, cpu_lengths):
         cpu_offsets=cpu_offsets,
         cpu_lengths=cpu_lengths,
     )
-
     # Look for existing caches
     caches = []
     for k in RAGGED_SOURCE_KEYS:
@@ -93,23 +91,26 @@ def get_nested_cache(offsets, lengths, cpu_offsets, cpu_lengths):
             if _cache is not None:
                 caches.append(_cache)
 
-    # Update/merge/create depending whether existing caches exist
     cache = None
-    if len(caches) == 0:
-        cache = create_cache(cache_data)
-    else:
-        # Entries already registered to cache are prioritized.
+    # Entries already registered to cache are prioritized.
+    if len(caches) > 0:
         cache = caches[0]
         for cache_ in caches[1:]:
             for k, v in cache_.data.items():
-                if try_get_entry(cache, k) is None and v is not None:
+                if cache.data.get(k) is None:
                     # view to avoid a single tensor instance shared between caches
                     add_entry(cache, k, v.view_as(v))
 
-        for k, v in cache_data.items():
-            if try_get_entry(cache, k) is None and v is not None:
-                add_entry(cache, k, v)
-
+    for k, v in cache_data.items():
+        # k needs to be part of ragged source keys?
+        if cache is None or cache.data.get(k) is None:
+            # if cache is None, add_entry implicitly creates a new cache
+            prev_cache = cache
+            cache = add_entry(cache, k, v)
+            if prev_cache:
+                # Sanity check: instance cannot change
+                assert cache is prev_cache
+    assert cache is not None
     return cache
 
 

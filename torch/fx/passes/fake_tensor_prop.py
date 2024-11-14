@@ -35,7 +35,7 @@ class FakeTensorProp(torch.fx.Interpreter):
             mode = FakeTensorMode()
         self._mode = mode
         mode.epoch += 1
-        mode.reset_cache_id_counter()
+        mode.reset_nested_cache_state()
 
     def run_node(self, n: Node):
         from torch.fx.experimental.symbolic_shapes import (

@@ -3955,7 +3955,7 @@ class ShapeEnv:
                 cache_data[cache_key] = fake_cache_value
                 fake_mode = fake_mode if fake_cache_value is None else fake_cache_value.fake_mode
 
-            cache = fake_mode.get_nested_cache(cache_data, cache_id=hint.node.nested_int())
+            cache = fake_mode.nested_cache_state.register_cache(cache_data, cache_id=hint.node.nested_int())
             coeff = hint.node.nested_int_coeff()
 
             def construct():

@@ -48,7 +48,7 @@ def _ge(lhs, rhs) -> bool:
 
 class NestedIntNode:
     def __init__(self, cache: MetadataCache, coeff):
-        self.t_id = cache.id
+        self.t_id = cache.eq_id
         self.cache: MetadataCache = cache
         self.coeff = coeff
 
@@ -72,7 +72,7 @@ class NestedIntNode:
         return False
 
     def is_nested_int(self):
-        # Do we still need this?c
+        # Do we still need this?
         return True
 
     def clone(self):

@@ -95,3 +95,56 @@ cache9 = get_nested_cache(
 
 assert cache9 is cache8
 assert cache9.data["cpu_lengths"] is lengths4
+
+
+# Interaction of global state with the FakeTensorMode
+
+
+from torch._subclasses import FakeTensorMode
+
+# Create a
+b = torch.tensor(1.0)
+c = torch.tensor(1.0)
+
+get_nested_cache(
+    offsets=b,
+    lengths=c,
+    cpu_offsets=None,
+    cpu_lengths=None,
+)
+
+# What other state should we replicate though
+
+
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+shape_env = ShapeEnv()
+
+with FakeTensorMode(
+    allow_non_fake_inputs=True, shape_env=shape_env, static_shapes=False
+):
+    # Does this automatically fakify?
+    b.sin()
+
+
+# Now I will try to compile a nested tensor
+t = torch.nested.nested_tensor(
+    [
+        torch.randn(2, 5),
+        torch.randn(3, 5),
+        torch.randn(18, 5),
+    ],
+    layout=torch.jagged,
+)
+t.requires_grad_(True)
+
+
+def fn(x):
+    return x.sin()
+
+
+# Can try with inductor afterwards
+compiled_fn = torch.compile(fn, backend="aot_eager_decomp_partition", fullgraph=True)
+
+out = compiled_fn(t)
+out.values().sum().backward()

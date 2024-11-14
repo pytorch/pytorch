@@ -1675,8 +1675,8 @@ class VariableBuilder:
             NestedTensorCacheSource,
             NestedTensorCacheListSource,
         )
-        njt_cache = torch._get_njt_cache_from_offsets(value)
-        if njt_cache is not None:
+        nested_cache = torch._get_njt_cache_from_offsets(value)
+        if nested_cache is not None:
             install_guard(
                 NestedTensorCacheListSource(source).make_guard(GuardBuilder.EQUALS_MATCH)
             )

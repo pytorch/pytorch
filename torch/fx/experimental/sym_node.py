@@ -81,6 +81,10 @@ class SymNode:
         self._expr = expr
         self.shape_env = shape_env
         self.pytype = pytype
+        import traceback
+
+        trace = traceback.extract_stack()
+        self.creation_trace = "".join(traceback.format_list(trace))
 
         # What's the difference between hint and constant?
         #

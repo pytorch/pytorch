@@ -151,11 +151,13 @@ def create_subclass_meta(
 
 
 def filter_symints(lst: Iterable[Union[int, SymInt]]):
+
     # Capture all SymInts from the iterable.
     def symint_check(s: Union[int, SymInt]) -> bool:
         return isinstance(s, SymInt) and not s.node.is_nested_int()
 
-    return [s for s in lst if symint_check(s)]
+    ret = [s for s in lst if symint_check(s)]
+    return ret
 
 
 def compute_symint_placeholders(lst: Iterable[Union[None, int, SymInt]]) -> List[bool]:
@@ -215,6 +217,7 @@ def runtime_unwrap_tensor_subclasses(
     subclass_metas: Optional[List[Union[PlainTensorMeta, SubclassCreationMeta]]] = None,
 ):
     def flatten_subclass(x: Tensor, meta: Optional[SubclassCreationMeta], *, out):
+
         if not is_traceable_wrapper_subclass(x):
             out.append(x)
             return out

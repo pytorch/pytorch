@@ -408,6 +408,7 @@ def aot_dispatch_autograd(
             fake_mode = detect_fake_mode()
             if fake_mode is not None:
                 tensorify_python_scalars(fx_g, fake_mode.shape_env, fake_mode)
+
             fw_module, bw_module = aot_config.partition_fn(
                 fx_g, joint_inputs, num_fwd_outputs=num_inner_fwd_outputs
             )

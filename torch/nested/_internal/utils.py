@@ -1,4 +1,5 @@
 import torch
+from torch.utils.weak import WeakTensorKeyDictionary
 
 
 def try_get_fake_mode(obj):
@@ -27,6 +28,52 @@ def try_get_fake_mode(obj):
         return try_get_fake_mode(obj.data)
     else:
         assert False, f"get_fake_mode: got unexpected type {type(obj)}"
+
+
+class MaybeUnwrapKeysWeakKeyDict:
+    def __init__(self, data=None):
+        self.data: WeakTensorKeyDictionary[torch.Tensor, int] = (
+            WeakTensorKeyDictionary()
+        )
+        if data:
+            self.update(data)
+
+    def _unwrap(self, tensor):
+        from torch._subclasses.functional_tensor import mb_unwrap_functional_tensor
+
+        return mb_unwrap_functional_tensor(tensor)
+
+    def get(self, tensor, default=None):
+        tensor = self._unwrap(tensor)
+        return self.data.get(tensor, default)
+
+    def __getitem__(self, tensor):
+        tensor = self._unwrap(tensor)
+        if tensor not in self.data:
+            raise KeyError(tensor)
+        return self.data[tensor]
+
+    def __setitem__(self, tensor, cache_id):
+        tensor = self._unwrap(tensor)
+        self.data[tensor] = cache_id
+
+    def __delitem__(self, tensor):
+        tensor = self._unwrap(tensor)
+        del self.data[tensor]
+
+    def copy(self):
+        return MaybeUnwrapKeysWeakKeyDict(self.data.copy())
+
+    def __contains__(self, tensor):
+        tensor = self._unwrap(tensor)
+        return tensor in self.data
+
+    def update(self, other):
+        if isinstance(other, MaybeUnwrapKeysWeakKeyDict):
+            self.data.update(other.data)
+        else:
+            for k, v in other.items():
+                self[k] = v
 
 
 def assert_not_fake(t):
