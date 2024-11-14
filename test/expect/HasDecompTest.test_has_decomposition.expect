@@ -232,9 +232,12 @@ aten::_foreach_frac_
 aten::_foreach_lerp.List
 aten::_foreach_lerp.List_out
 aten::_foreach_lerp.Scalar
+aten::_foreach_lerp.ScalarList
+aten::_foreach_lerp.ScalarList_out
 aten::_foreach_lerp.Scalar_out
 aten::_foreach_lerp_.List
 aten::_foreach_lerp_.Scalar
+aten::_foreach_lerp_.ScalarList
 aten::_foreach_lgamma
 aten::_foreach_lgamma.out
 aten::_foreach_lgamma_
@@ -303,6 +306,9 @@ aten::_foreach_reciprocal_
 aten::_foreach_round
 aten::_foreach_round.out
 aten::_foreach_round_
+aten::_foreach_rsqrt
+aten::_foreach_rsqrt.out
+aten::_foreach_rsqrt_
 aten::_foreach_sigmoid
 aten::_foreach_sigmoid.out
 aten::_foreach_sigmoid_
