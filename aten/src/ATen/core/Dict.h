@@ -83,6 +83,7 @@ public:
     static_assert(std::is_constructible_v<Value, Value_>, "Wrong type for the value argument of setValue()");
     iterator_->second = Value(std::forward<Value_>(value));
   }
+  ~DictEntryRef() = default;
 
 private:
   // allow copying and moving, but only our friends (i.e. the Dict class) can do
@@ -205,6 +206,7 @@ template<class Key, class Value> Dict<IValue, IValue> toGenericDict(Dict<Key, Va
  * for the kernel API.
  */
 template<class Key, class Value>
+// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
 class Dict final {
 private:
   static_assert((std::is_same_v<IValue, Key> && std::is_same_v<IValue, Value>) || guts::typelist::contains<impl::valid_dict_key_types, Key>::value, "Invalid Key type for Dict. We only support int64_t, double, bool, and string.");

@@ -1,14 +1,17 @@
 # Owner(s): ["module: c10d"]
 
 import os
+from unittest import skipIf
 
 import torch
 import torch.distributed as dist
 from torch._C._autograd import DeviceType
 from torch._C._distributed_c10d import _SymmetricMemory
+from torch._inductor.utils import fresh_inductor_cache, run_and_get_triton_code
 from torch.distributed._functional_collectives import all_gather_tensor
 from torch.distributed._symmetric_memory import (
     _fused_all_gather_matmul_fallback,
+    _fused_all_gather_matmul_native,
     _fused_all_gather_scaled_matmul_fallback,
     _fused_matmul_reduce_scatter_fallback,
     _fused_scaled_matmul_reduce_scatter_fallback,
@@ -16,16 +19,20 @@ from torch.distributed._symmetric_memory import (
     restride_A_for_fused_matmul_reduce_scatter,
     restride_A_shard_for_fused_all_gather_matmul,
 )
+from torch.testing._internal.common_cuda import _get_torch_cuda_version, SM90OrLater
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
+    requires_multicast_support,
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    requires_cuda,
     run_tests,
     skip_but_pass_in_sandcastle_if,
     skipIfRocm,
+    TestCase,
 )
 
 
@@ -47,17 +54,6 @@ def requires_cuda_p2p_access():
     return skip_but_pass_in_sandcastle_if(
         not cuda_p2p_access_available,
         "cuda p2p access is not available",
-    )
-
-
-def requires_multicast_support():
-    has_multicast_support = (
-        torch.cuda.is_available()
-        and _SymmetricMemory.has_multicast_support(DeviceType.CUDA, 0)
-    )
-    return skip_but_pass_in_sandcastle_if(
-        not has_multicast_support,
-        "multicast support is not available",
     )
 
 
@@ -186,6 +182,34 @@ class SymmetricMemoryTest(MultiProcessTestCase):
 
     @skipIfRocm
     @skip_if_lt_x_gpu(2)
+    def test_get_signal_pad(self) -> None:
+        self._init_process()
+
+        t = _SymmetricMemory.empty_strided_p2p(*self._get_test_alloc_args())
+        symm_mem = _SymmetricMemory.rendezvous(t)
+        peer_rank = (self.rank + 1) % self.world_size
+
+        signal_pad = symm_mem.get_signal_pad(peer_rank)
+        self.assertEqual(signal_pad.dtype, torch.uint32)
+        self.assertEqual(signal_pad.numel(), symm_mem.signal_pad_size // 4)
+
+        # Only specify sizes
+        signal_pad = symm_mem.get_signal_pad(peer_rank, (8, 8))
+        self.assertEqual(signal_pad.dtype, torch.uint32)
+        self.assertEqual(signal_pad.numel(), 64)
+
+        # Only specify dtype
+        signal_pad = symm_mem.get_signal_pad(peer_rank, dtype=torch.uint64)
+        self.assertEqual(signal_pad.dtype, torch.uint64)
+        self.assertEqual(signal_pad.numel(), symm_mem.signal_pad_size // 8)
+
+        # Specify both sizes and dtype
+        signal_pad = symm_mem.get_signal_pad(peer_rank, (8, 8), dtype=torch.uint64)
+        self.assertEqual(signal_pad.dtype, torch.uint64)
+        self.assertEqual(signal_pad.numel(), 64)
+
+    @skipIfRocm
+    @skip_if_lt_x_gpu(2)
     def test_barrier_timeout(self) -> None:
         self._init_process()
 
@@ -286,6 +310,55 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         for mm_output_0, mm_output_1 in zip(mm_outputs_0, mm_outputs_1):
             assert torch.allclose(mm_output_0, mm_output_1)
             assert mm_output_0.stride(), mm_output_1.stride()
+
+        dist.destroy_process_group()
+
+    @skipIfRocm
+    @skipIf(
+        not SM90OrLater,
+        "_fused_all_gather_matmul_native currently only supports sm>=90",
+    )
+    @skip_if_lt_x_gpu(2)
+    @parametrize("symm_mem_input", [True, False])
+    @parametrize("is_b_row_major", [True, False])
+    def test_fused_all_gather_matmul_native(
+        self, symm_mem_input: bool, is_b_row_major: bool
+    ) -> None:
+        self._init_process()
+
+        M = 1024
+        N = 1024
+        K = 1024
+        group_name = dist.group.WORLD.group_name
+
+        torch.manual_seed(42 + self.rank)
+        if symm_mem_input:
+            A_shard = _SymmetricMemory.empty_strided_p2p(
+                size=(M // self.world_size, K),
+                stride=(K, 1),
+                dtype=torch.bfloat16,
+                device=self.device,
+                group_name="0",
+            ).normal_()
+        else:
+            A_shard = torch.rand(
+                M // self.world_size, K, dtype=torch.bfloat16, device="cuda"
+            )
+
+        if is_b_row_major:
+            B = torch.rand(K, N, dtype=torch.bfloat16, device="cuda")
+        else:
+            B = torch.rand(N, K, dtype=torch.bfloat16, device="cuda").t()
+
+        ag_baseline, mm_baseline = _fused_all_gather_matmul_fallback(
+            A_shard, [B], gather_dim=0, group_name=group_name
+        )
+        ag_target, mm_target = _fused_all_gather_matmul_native(
+            A_shard, B, group_name=group_name
+        )
+
+        torch.testing.assert_close(ag_target, ag_baseline)
+        torch.testing.assert_close(mm_target, mm_baseline[0])
 
         dist.destroy_process_group()
 
@@ -541,30 +614,6 @@ class SymmetricMemoryTest(MultiProcessTestCase):
 
         dist.destroy_process_group()
 
-    @skipIfRocm
-    @skip_if_lt_x_gpu(2)
-    def test_stream_write_value(self):
-        self._init_process()
-        group_name = dist.group.WORLD.group_name
-
-        t = _SymmetricMemory.empty_strided_p2p(
-            size=(64,),
-            stride=(1,),
-            dtype=torch.float32,
-            device=self.device,
-            group_name=group_name,
-        ).fill_(self.rank + 42)
-        symm_mem = _SymmetricMemory.rendezvous(t)
-
-        tensor = torch.zeros(4, dtype=torch.uint32, device=self.device)
-        expect = torch.tril(torch.ones(4, 4, device=self.device)).to(torch.uint32)
-
-        for i in range(4):
-            symm_mem.stream_write_value32(
-                int(tensor.data_ptr()) + i * tensor.element_size(), 1
-            )
-            torch.testing.assert_close(tensor, expect[i])
-
 
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
@@ -734,6 +783,137 @@ class SymmMemAllReduceTest(MultiProcessTestCase):
         torch.testing.assert_close(
             gathered_inps.sum(dim=0), res, rtol=1e-01, atol=1e-01
         )
+
+
+@instantiate_parametrized_tests
+@requires_cuda_p2p_access()
+class LoweringTest(MultiProcessTestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self._spawn_processes()
+
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @property
+    def device(self) -> torch.device:
+        return torch.device(f"cuda:{self.rank}")
+
+    def _init_process(self):
+        torch.cuda.set_device(self.device)
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend="nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        enable_symm_mem_for_group(dist.group.WORLD.group_name)
+        torch.manual_seed(42 + self.rank)
+
+        torch._inductor.config._collective.auto_select = True
+
+    @skipIfRocm  # requires registered-buffer support
+    @skip_if_lt_x_gpu(2)
+    @fresh_inductor_cache()
+    def test_lowering_one_shot_all_reduce(self):
+        self._init_process()
+
+        arg = torch.rand(4, 4, device=self.device)
+
+        def func_0(x):
+            x = x + 1
+            x = torch.ops._c10d_functional.all_reduce(x, "sum", "0")
+            return torch.ops._c10d_functional.wait_tensor(x)
+
+        compiled_0 = torch.compile(func_0, fullgraph=True)
+        code_0 = run_and_get_triton_code(compiled_0, arg)
+
+        self.assertIn("one_shot_all_reduce", code_0)
+        self.assertNotIn("return (buf0", code_0)
+
+        # All-reduce on a slice view
+        def func_1(x):
+            x = x + 1
+            x = x[2:]
+            x = torch.ops._c10d_functional.all_reduce(x, "sum", "0")
+            return torch.ops._c10d_functional.wait_tensor(x)
+
+        compiled_1 = torch.compile(func_1, fullgraph=True)
+        code_1 = run_and_get_triton_code(compiled_1, arg)
+
+        self.assertIn("one_shot_all_reduce", code_1)
+        self.assertNotIn("return (buf0", code_1)
+
+        # All-reduce on input
+        def func_2(x):
+            x = torch.ops._c10d_functional.all_reduce(x, "sum", "0")
+            return torch.ops._c10d_functional.wait_tensor(x)
+
+        compiled_2 = torch.compile(func_2, fullgraph=True)
+        code_2 = run_and_get_triton_code(compiled_2, arg)
+
+        self.assertNotIn("one_shot_all_reduce", code_2)
+
+        # All-reduce on matmul output
+        def func_3(x):
+            x = x @ x
+            x = torch.ops._c10d_functional.all_reduce(x, "sum", "0")
+            return torch.ops._c10d_functional.wait_tensor(x)
+
+        compiled_3 = torch.compile(func_3, fullgraph=True)
+        code_3 = run_and_get_triton_code(compiled_3, arg)
+
+        self.assertIn("one_shot_all_reduce", code_3)
+        self.assertNotIn("return (buf0", code_3)
+
+
+class SymmMemSingleProcTest(TestCase):
+    @skipIfRocm
+    @requires_cuda
+    @skipIf(
+        _get_torch_cuda_version() < (12, 0),
+        "stream_write_value32 currently only supports cuda version>=12.0",
+    )
+    def test_stream_write_value32(self):
+        tensor = torch.zeros(4, dtype=torch.uint32, device="cuda")
+        expect = torch.tril(torch.ones(4, 4, device="cuda")).to(torch.uint32)
+
+        for i in range(4):
+            _SymmetricMemory.stream_write_value32(tensor, i, 1)
+            torch.testing.assert_close(tensor, expect[i])
+
+        with self.assertRaises(RuntimeError):
+            _SymmetricMemory.stream_write_value32(tensor, offset=-1, val=1)
+
+        with self.assertRaises(RuntimeError):
+            _SymmetricMemory.stream_write_value32(tensor, offset=0, val=4294967296)
+
+    @skipIfRocm
+    @requires_cuda
+    def test_memset32(self):
+        t = _SymmetricMemory.empty_strided_p2p(
+            (64,),
+            (1,),
+            dtype=torch.uint32,
+            device=torch.device("cuda:0"),
+            group_name="0",
+        ).fill_(0)
+
+        _SymmetricMemory.memset32(t, offset=32, val=1, count=16)
+        self.assertTrue(t[:32].eq(0).all())
+        self.assertTrue(t[32:48].eq(1).all())
+        self.assertTrue(t[48:].eq(0).all())
+
+        with self.assertRaises(RuntimeError):
+            _SymmetricMemory.memset32(t, offset=-1, val=1, count=16)
+
+        with self.assertRaises(RuntimeError):
+            _SymmetricMemory.memset32(t, offset=32, val=4294967296, count=16)
+
+        with self.assertRaises(RuntimeError):
+            _SymmetricMemory.memset32(t, offset=32, val=1, count=-1)
 
 
 if __name__ == "__main__":

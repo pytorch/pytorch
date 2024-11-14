@@ -198,7 +198,8 @@ struct DumpPipe {
     if (fd_ == -1) {
       return false;
     }
-    char buf[128];
+    // NOLINTNEXTLINE(*array*)
+    char buf[128]{};
     // non-blocking from O_NONBLOCK above.
     // Ignore EINTR because we already will poll this
     // again later.
@@ -339,6 +340,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     bool checkTimeout(
         std::optional<std::chrono::milliseconds> timeout = std::nullopt);
 
+    // Print the traceback of the collective at call time
+    void printTraceback() const;
+
     std::vector<at::Tensor> result() override;
 
    protected:
@@ -461,8 +465,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // NOTE: We intentionally store raw pointers so that
     // we do not attempt to destroy the event objects on process exit,
     // because cuda may be gone.
-    std::deque<at::cuda::CUDAEvent*>
-        eventsArray_[2]; // 0 for timing=false, 1 for timing=true
+    std::array<std::deque<at::cuda::CUDAEvent*>, 2>
+        eventsArray_; // 0 for timing=false, 1 for timing=true
   };
 
   struct Options : Backend::Options {
@@ -508,6 +512,40 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 #endif
     std::vector<uint64_t> global_ranks_in_group;
     std::string group_name;
+  };
+
+  // Helper class related to TORCH_NCCL_DESYNC_DEBUG
+  class DesyncDebugger {
+   public:
+    // Initialize and enable DesyncDebugger
+    void init(int rank, int size, c10::intrusive_ptr<Store> store);
+
+    // Run desync debug. This function is called by watchdog at time of timeout.
+    void run();
+
+    // Log work start to store.
+    void logWorkStart(WorkNCCL& work);
+
+    // Log work end to store.
+    void logWorkEnd(WorkNCCL& work);
+
+   private:
+    // Whether desync debug is enabled.
+    // If false, all functions are no-op.
+    bool enabled_{false};
+
+    // From ProcessGroupNCCL
+    int rank_;
+    int size_;
+
+    // Reference to the store so that we can log start/end event.
+    c10::intrusive_ptr<Store> store_;
+
+    // The store keys to trace the last NCCL collective kernel CUDA events -
+    // start event and end event respectively. These are used to do desync root
+    // cause analysis.
+    std::string traceKeyStart_;
+    std::string traceKeyEnd_;
   };
 
   // If you wish to create multiple process groups, each with a potentially
@@ -719,9 +757,13 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // If all comms on this PG are fully initialized, return true.
   bool isInitialized();
 
-  void registerUserBuffers(at::Device device);
+  // Performs NCCL user buffer registration for all buffers in
+  // the given MemPool
+  void registerMemPool(c10::cuda::MemPool* pool);
 
-  void deregisterUserBuffers(at::Device device);
+  // Performs NCCL user buffer de-registration for all buffers in
+  // the given MemPool
+  void deregisterMemPool(c10::cuda::MemPool* pool);
 
   // This method adds a temporary extension for the timeout period,
   // applying to all collectives between the calling of this API and
@@ -749,9 +791,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       const std::string& devicesKey,
       int p2pRank);
 
-  // Helper that either looks up the cached NCCL communicators or creates
-  // a new set of NCCL communicators as a cache entry
-  std::shared_ptr<NCCLComm> getNCCLComm(
+  // Helper that looks up the cached NCCL communicators only
+  std::shared_ptr<NCCLComm> getNCCLComm(const std::string& deviceKey);
+
+  std::shared_ptr<NCCLComm> initNCCLComm(
       const std::string& deviceKey,
       at::Device& device,
       OpType opType,
@@ -900,12 +943,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   void runHookLoop();
 
-  // Desync debug helper
-  void logWorkStart(WorkNCCL& work);
-
-  // Desync debug helper
-  void logWorkEnd(WorkNCCL& work);
-
   // Generates a prefix that is unique to this process group and rank, for
   // disambiguating logs
   std::string createLogPrefix() const;
@@ -927,6 +964,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       const c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>& work,
       const c10::intrusive_ptr<Options>& option);
 
+  // Broadcast flight-recorder dump signal
+  void broadcastDumpSignal();
+
  protected:
   // Function that runs as part of a separate thread aside from watchdog
   // thread because we need to check the heartbeat from watchdog thread
@@ -946,12 +986,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       bool throwException = false,
       bool log = false);
 
-  // When watchdog timeout, this function will be called and return debug info
-  // for users. For now we only get information from retrieveDesyncReport.
-  // We are working on enabling more useful debug information for watchdog
-  // timeout.
-  virtual std::string getNCCLWatchdogDebugInfo();
-
   std::string getNCCLWatchdogTimeoutErrorMsg(const std::string& extraMsg);
 
   std::string getNCCLWatchdogTimeoutExitMsg(const std::string& exitReason);
@@ -967,8 +1001,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // ProcessGroup NCCL instances and (key, value) pairs written to the store are
   // global.
   c10::intrusive_ptr<Store> globalStore_;
-
-  bool storeError_{false};
 
   // The lock which protects the write/read of
   // ephemeralTimeoutActive_/ephemeralTimeoutInflight_.
@@ -991,12 +1023,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // the lifetime of this process group. This sequence number is
   // used to scope keys used in the store.
   uint64_t ncclCommCounter_{0};
-
-  // The store keys to trace the last NCCL collective kernel CUDA events - start
-  // event and end event respectively. These are used to do desync root cause
-  // analysis.
-  const std::string traceKeyStart_;
-  const std::string traceKeyEnd_;
 
   // The NCCL communicator that the process group has cached.
   //
@@ -1077,10 +1103,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Whether or not we should terminate the heartbeat monitoring threads.
   std::atomic<bool> terminateHeartbeatMonitorThread_;
 
-  // Whether we are in the shutdown mode when we are trying to get debug info,
-  // such as desync report.
-  std::atomic<bool> collectiveDebugInfoMode_;
-
   // Whether there are hooks pending to be fired
   std::atomic<bool> hasPendingHooks_{};
 
@@ -1145,26 +1167,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Stores communicators for all collectives run inside a coalescing block
   std::shared_ptr<NCCLComm> coalescedComm_ = nullptr;
 
-  // map from the key: "group name + pg counter (ID)" to the
-  // unique NCCL ID count. This needs to be group and pg specific
-  //
-  // For each process group, we need a uniform unique NCCL ID counter to ensure
-  // that NCCL operation in this process group can be completed successfully.
-  // Since each process group ID belongs to a group name, the key to this map
-  // is a combination of group name and ProcessGroupNCCL ID.
-  static std::unordered_map<std::string, ssize_t> pgUniqueNCCLIDCnt_;
-
-  // map from group name to the pg counter (ID) within that group
-  //
-  // For each group with the "group name" (which is the key), we need to
-  // keep track of a unique process group ID when creating a new
-  // ProcessGroupNCCL for this "group name". Therefore, the value of this
-  // map keeps the unique ProcessGroupNCCL's ID for a specific group with
-  // the "group name". The reason we need a per-group process group ID counter
-  // is that different group can have different ranks and we need ensure that
-  // each group has its own uniform process group ID for all its ranks.
-  static std::unordered_map<std::string, ssize_t> processGroupCounterMap_;
-
   // Whether or not wait() and synchronize() are blocking operations that wait
   // for the operation to complete.
   bool blockingWait_ = false;
@@ -1179,13 +1181,14 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Whether or not to enable timeout root cause analysis.
   bool desyncDebug_;
+  DesyncDebugger desyncDebugger_;
 
   // Whether or not to dump debug info on exception including both watchdog
   // timeout and nccl errors.
   bool dumpOnTimeoutOrEx_;
 
   // Whether or not to sleep after an exception is thrown in the watchdog.
-  bool sleepAfterException_;
+  bool sleepAfterException_{};
 
   // Whether or not to enable nan check for input tensors to collectives.
   bool enableNanCheck_;
@@ -1207,12 +1210,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Whether the NCCL watchdog should rethrow CUDA errors.
   bool rethrowCUDAErrors_ = false;
-
-  // Set of communicators that this process group has aborted and their
-  // ncclUniqueId has been written to the store. We don't need a lock
-  // for this map since only the watchdog thread accesses this set. The
-  // set contains the string representation of ncclUniqueId.
-  std::unordered_set<std::string> abortedComms_;
 
   // The number of active ncclGroupStart() calls. This counter will be increased
   // by 1 when ncclGroupStart() is called and decreased by 1 when ncclGroupEnd()

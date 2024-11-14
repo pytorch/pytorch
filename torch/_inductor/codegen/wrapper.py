@@ -9,6 +9,7 @@ import functools
 import inspect
 import logging
 import operator
+import random
 import re
 import tempfile
 from itertools import count
@@ -237,6 +238,84 @@ def user_defined_kernel_grid_fn_code(
     return fn_name, output.getvalue()
 
 
+def user_defined_triton_kernel_transitive_closure_source_code(kernel) -> str:
+    """
+    Given a triton kernel function pointer collect the transitive closure of
+    its dependancies
+    """
+    compile_wrapper = IndentedBuffer()
+    compile_wrapper.splice(kernel.src, strip=True)
+
+    # Also include any possible kernel being called indirectly
+    from triton import JITFunction  # type: ignore[name-defined, attr-defined]
+    from triton.language import constexpr  # type: ignore[name-defined]
+
+    # global constexpr vars handled above
+    symbols_included = {kernel.__name__}
+
+    def traverse(cur_kernel):
+        # here we extract the unqualified names (i.e., not attributes and
+        # without prepended module name) loaded in the kernel code, which
+        # are matched with the co_names and __globals__ below to codegen
+        # the respective imports necessary for the kernel compilation
+        unqualified_loads = {
+            inst.argval
+            for inst in dis.Bytecode(cur_kernel.fn)
+            if inst.opname == "LOAD_GLOBAL"
+        }
+        global_annotations = cur_kernel.fn.__globals__.get("__annotations__", {})
+        for symbol_name in cur_kernel.fn.__code__.co_names:
+            if symbol_name in symbols_included:
+                continue
+            if symbol_name in cur_kernel.fn.__globals__:
+                symbol = cur_kernel.fn.__globals__[symbol_name]
+                if isinstance(symbol, JITFunction):
+                    compile_wrapper.newline()
+                    compile_wrapper.writeline("@triton.jit")
+                    compile_wrapper.splice(symbol.src, strip=True)
+                    symbols_included.add(symbol_name)
+                    traverse(symbol)
+                elif isinstance(symbol, (int, str, bool, constexpr)):
+                    compile_wrapper.newline()
+                    if isinstance(symbol, constexpr):
+                        symbol_str = f"tl.constexpr({symbol.value!r})"
+                    else:
+                        symbol_str = f"{symbol!r}"
+                    if annotation := global_annotations.get(symbol_name):
+                        annotion_code = ""
+                        if isinstance(annotation, type):
+                            annotation_code = (
+                                f": {annotation.__module__}.{annotation.__name__}"
+                            )
+                        else:
+                            annotation_code = f": {annotation!r}"
+                        compile_wrapper.writeline(
+                            f"{symbol_name}{annotation_code} = {symbol_str}"
+                        )
+                    else:
+                        compile_wrapper.writeline(f"{symbol_name} = {symbol_str}")
+                    symbols_included.add(symbol_name)
+                elif (
+                    symbol_name in unqualified_loads
+                    and symbol_name != "tl"  # already imported
+                    and hasattr(symbol, "__module__")
+                    # only codegen imports from triton; JITFunctions
+                    # imported from other modules will be codegened
+                    # in the separate branch above
+                    and symbol.__module__.startswith("triton")
+                ):
+                    # a global symbol imported from triton is referenced
+                    # without module qualification (i.e., `store` instead
+                    # of `tl.store`): need to codegen an import
+                    compile_wrapper.writeline(
+                        f"from {symbol.__module__} import {symbol.__name__} as {symbol_name}"
+                    )
+                    symbols_included.add(symbol_name)
+
+    traverse(kernel)
+    return compile_wrapper.getvalue()
+
+
 @dataclasses.dataclass
 class SymbolicCallArg:
     inner: str
@@ -442,6 +521,85 @@ class NullLine(MemoryPlanningLine):
     pass
 
 
+@dataclasses.dataclass
+class CommBufferLine(WrapperLine):
+    wrapper: PythonWrapperCodeGen  # type: ignore[name-defined] # noqa: F821
+    node: ir.Buffer
+
+    @property
+    def size(self) -> int:
+        from torch._inductor.utils import is_symbolic
+
+        numel = self.node.get_numel()
+        dtype = self.node.get_dtype()
+        if is_symbolic(numel):
+            raise AssertionError(
+                f"The size of a comm buffer can't be symbolic: {self.node}"
+            )
+        return int(numel) * dtype.itemsize
+
+    @property
+    def comm_buffer_type(self) -> ir.CommBufferType:
+        layout = self.node.get_layout()
+        assert isinstance(layout, ir.CommBufferLayout)
+        return layout.comm_buffer_type
+
+    @property
+    def group_name(self) -> str:
+        layout = self.node.get_layout()
+        assert isinstance(layout, ir.CommBufferLayout)
+        return layout.group_name
+
+
+@dataclasses.dataclass
+class CommBufferAllocateLine(CommBufferLine):
+    def codegen(self, code: IndentedBuffer) -> None:
+        assert self.node.get_name() not in V.graph.removed_buffers
+        name = self.node.get_name()
+        device = self.node.get_device()
+        dtype = self.node.get_dtype()
+        shape = tuple(self.node.get_size())
+        stride = tuple(self.node.get_stride())
+        code.writeline(
+            self.make_allocation_line(
+                self.comm_buffer_type,
+                self.group_name,
+                self.wrapper,
+                name,
+                device,
+                dtype,
+                shape,
+                stride,
+            )
+        )
+
+    @staticmethod
+    def make_allocation_line(
+        comm_buffer_type, group_name, wrapper, name, device, dtype, shape, stride
+    ):
+        if comm_buffer_type == ir.CommBufferType.SYMM_MEM:
+            return (
+                f"{name} = empty_strided_p2p("
+                f"{wrapper.codegen_shape_tuple(shape)}, "
+                f"{wrapper.codegen_shape_tuple(stride)}, "
+                f"{dtype}, "
+                f'torch.device("cuda:{device.index}"), '
+                f'group_name="{group_name}", '
+                f"alloc_id={random.randint(0, 2**64 - 1)})"
+            )
+        else:
+            raise NotImplementedError(
+                f"Unsupported comm buffer type: {comm_buffer_type}"
+            )
+
+
+@dataclasses.dataclass
+class CommBufferFreeLine(CommBufferLine):
+    def codegen(self, code: IndentedBuffer) -> None:
+        line = self.wrapper.make_buffer_free(self.node)
+        code.writeline(f"{line} # {self.comm_buffer_type.value} buffer free")
+
+
 BufferName = str
 
 
@@ -477,6 +635,8 @@ class PythonWrapperCodegen(CodeGen):
         self.none_str = "None"
         self.size = "size()"
         self.stride = "stride()"
+        self.move_begin = "std::move(" if V.graph.cpp_wrapper else ""
+        self.move_end = ")" if V.graph.cpp_wrapper else ""
         self.last_seen_device_guard_index: Optional[int] = None
         self.supports_intermediate_hooks = True
         self.expr_printer: Callable[[Any], str] = pexpr
@@ -589,6 +749,19 @@ class PythonWrapperCodegen(CodeGen):
             """,
             strip=True,
         )
+        try:
+            # Only add empty_strided_p2p() if distributed and SymmetricMemory
+            # is available
+            from torch._C._distributed_c10d import _SymmetricMemory  # noqa: F401
+
+            self.header.splice(
+                """
+                empty_strided_p2p = torch._C._distributed_c10d._SymmetricMemory.empty_strided_p2p
+                """,
+                strip=True,
+            )
+        except (AttributeError, ImportError):
+            pass
 
     def include_extra_header(self, header: str):
         pass
@@ -844,19 +1017,35 @@ class PythonWrapperCodegen(CodeGen):
             for arg in raw_args
         ]
         self.generate_kernel_call(
-            kernel_name, args, grid_fn=grid_fn, arg_types=arg_types, raw_args=raw_args
+            kernel_name,
+            args,
+            grid_fn=grid_fn,
+            arg_types=arg_types,
+            raw_args=raw_args,
         )
 
-    def generate_tma_descriptor(self, desc):
+    def _generate_tma_descriptor_call(self, desc, apply_size_hints=False):
+        dims = desc.dims
+        block_dims = desc.block_dims
+        if apply_size_hints:
+            dims = tuple(V.graph.sizevars.atomically_apply_size_hint(d) for d in dims)
+            block_dims = tuple(
+                V.graph.sizevars.atomically_apply_size_hint(d) for d in block_dims
+            )
+
         ptr = f"{desc.tensor.codegen_reference()}.data_ptr()"
-        dims = ", ".join(self.val_to_arg_str(dim) for dim in desc.dims)
-        block_dims = ", ".join(self.val_to_arg_str(dim) for dim in desc.block_dims)
+        dims = ", ".join(self.val_to_arg_str(dim) for dim in dims)
+        block_dims = ", ".join(self.val_to_arg_str(dim) for dim in block_dims)
         element_size = self.val_to_arg_str(desc.element_size)
         prefix = "triton.tools.experimental_descriptor"
-        fn_name = f"create_{desc.rank}d_tma_descriptor"
-        call = f"{prefix}.{fn_name}"
+        fn = f"{prefix}.create_{desc.rank}d_tma_descriptor"
         args = f"{ptr}, {dims}, {block_dims}, {element_size}"
-        line = f"{desc.name} = {call}({args})"
+        call = f"{fn}({args})"
+        return call
+
+    def generate_tma_descriptor(self, desc):
+        call = self._generate_tma_descriptor_call(desc)
+        line = f"{desc.name} = {call}{self.ending}"
         self.writeline(line)
 
     def generate_scatter_fallback(
@@ -883,15 +1072,12 @@ class PythonWrapperCodegen(CodeGen):
         args = [x, indices_str, values, accumulate]
         self.writeline(self.wrap_kernel_call(kernel, args))
 
-    def generate_extern_kernel_alloc_and_find_schema_if_needed(
+    def generate_fallback_kernel_with_runtime_lookup(
         self,
         buf_name: str,
         python_kernel_name: str,
         cpp_kernel_name: str,
         codegen_args: List[str],
-        cpp_op_schema: str,
-        cpp_kernel_key: str,
-        cpp_kernel_overload_name: str = "",
         op_overload: Optional[torch._ops.OpOverload] = None,
         raw_args=None,
         outputs=None,
@@ -1142,7 +1328,13 @@ class PythonWrapperCodegen(CodeGen):
         )
 
     def codegen_reinterpret_view(
-        self, data, size, stride, offset, writer, dtype=None
+        self,
+        data,
+        size,
+        stride,
+        offset,
+        writeline: Callable[..., None],
+        dtype=None,
     ) -> str:
         if (
             size == data.layout.size
@@ -1290,10 +1482,14 @@ class PythonWrapperCodegen(CodeGen):
             )
 
     def define_kernel(
-        self, name: str, kernel: str, metadata: Optional[str] = None, gpu=True
+        self,
+        kernel_name: str,
+        kernel_body: str,
+        metadata: Optional[str] = None,
+        gpu=True,
     ):
         metadata_comment = f"{metadata}\n" if metadata else ""
-        body = f"\n\n{metadata_comment}{name} = {kernel}"
+        body = f"\n\n{metadata_comment}{kernel_name} = {kernel_body}"
         self.header.splice(body)
         if config.triton.autotune_at_compile_time:
             self.kernel_autotune_defs.splice(body)
@@ -1301,7 +1497,13 @@ class PythonWrapperCodegen(CodeGen):
     def define_subgraph_launcher_fn(self, fn_code: str):
         self.subgraph_definitions.splice(fn_code)
 
-    def define_user_defined_triton_kernel(self, kernel, configs, kwargs):
+    def define_user_defined_triton_kernel(
+        self,
+        kernel,
+        configs,
+        kwargs,
+        restore_value_args,
+    ):
         from torch.utils._triton import patch_triton_dtype_repr
 
         patch_triton_dtype_repr()
@@ -1385,6 +1587,9 @@ class PythonWrapperCodegen(CodeGen):
             ],
         }
 
+        if restore_value_args:
+            triton_meta["restore_value"] = tuple(restore_value_args)
+
         # Distinguish between different functions using function id
         cache_key: List[Any] = [id(kernel.fn)]
         if len(configs) > 0:
@@ -1435,75 +1640,9 @@ class PythonWrapperCodegen(CodeGen):
             @triton.jit
             """
         )
-        compile_wrapper.splice(kernel.src, strip=True)
-
-        # Also include any possible kernel being called indirectly
-        from triton import JITFunction  # type: ignore[name-defined, attr-defined]
-        from triton.language import constexpr  # type: ignore[name-defined]
-
-        # global constexpr vars handled above
-        symbols_included = {original_name}
-
-        def traverse(cur_kernel):
-            # here we extract the unqualified names (i.e., not attributes and
-            # without prepended module name) loaded in the kernel code, which
-            # are matched with the co_names and __globals__ below to codegen
-            # the respective imports necessary for the kernel compilation
-            unqualified_loads = {
-                inst.argval
-                for inst in dis.Bytecode(cur_kernel.fn)
-                if inst.opname == "LOAD_GLOBAL"
-            }
-            global_annotations = cur_kernel.fn.__globals__.get("__annotations__", {})
-            for symbol_name in cur_kernel.fn.__code__.co_names:
-                if symbol_name in symbols_included:
-                    continue
-                if symbol_name in cur_kernel.fn.__globals__:
-                    symbol = cur_kernel.fn.__globals__[symbol_name]
-                    if isinstance(symbol, JITFunction):
-                        compile_wrapper.newline()
-                        compile_wrapper.writeline("@triton.jit")
-                        compile_wrapper.splice(symbol.src, strip=True)
-                        symbols_included.add(symbol_name)
-                        traverse(symbol)
-                    elif isinstance(symbol, (int, str, bool, constexpr)):
-                        compile_wrapper.newline()
-                        if isinstance(symbol, constexpr):
-                            symbol_str = f"tl.constexpr({symbol.value!r})"
-                        else:
-                            symbol_str = f"{symbol!r}"
-                        if annotation := global_annotations.get(symbol_name):
-                            annotion_code = ""
-                            if isinstance(annotation, type):
-                                annotation_code = (
-                                    f": {annotation.__module__}.{annotation.__name__}"
-                                )
-                            else:
-                                annotation_code = f": {annotation!r}"
-                            compile_wrapper.writeline(
-                                f"{symbol_name}{annotation_code} = {symbol_str}"
-                            )
-                        else:
-                            compile_wrapper.writeline(f"{symbol_name} = {symbol_str}")
-                        symbols_included.add(symbol_name)
-                    elif (
-                        symbol_name in unqualified_loads
-                        and symbol_name != "tl"  # already imported
-                        and hasattr(symbol, "__module__")
-                        # only codegen imports from triton; JITFunctions
-                        # imported from other modules will be codegened
-                        # in the separate branch above
-                        and symbol.__module__.startswith("triton")
-                    ):
-                        # a global symbol imported from triton is referenced
-                        # without module qualification (i.e., `store` instead
-                        # of `tl.store`): need to codegen an import
-                        compile_wrapper.writeline(
-                            f"from {symbol.__module__} import {symbol.__name__} as {symbol_name}"
-                        )
-                        symbols_included.add(symbol_name)
-
-        traverse(kernel)
+        compile_wrapper.splice(
+            user_defined_triton_kernel_transitive_closure_source_code(kernel)
+        )
 
         current_device = V.graph.get_current_device_or_throw()
         compile_wrapper.writeline(f"''', device_str='{current_device.type}')")
@@ -1660,7 +1799,11 @@ class PythonWrapperCodegen(CodeGen):
 
     def generate_example_arg_value(self, arg, arg_type, raw_arg=None, index=None):
         if isinstance(arg_type, torch_dtype):
-            if V.graph.try_get_buffer(arg) is not None:
+            if isinstance(raw_arg, ir.TMADescriptor):
+                # first we generate the underlying buffer
+                buf_name = raw_arg.tensor.get_name()
+                buf = V.graph.get_buffer(buf_name)
+            elif V.graph.try_get_buffer(arg) is not None:
                 buf_name = arg
                 buf = V.graph.get_buffer(arg)
             else:
@@ -1692,6 +1835,17 @@ class PythonWrapperCodegen(CodeGen):
             )
             value = f"generate_example_value({size}, {stride}, '{device}', {dtype}, {offset})"
             self.kernel_autotune_calls.writeline(f"{buf_name} = {value}")
+
+            if isinstance(raw_arg, ir.TMADescriptor):
+                # generate another line initializing a host-side TMA
+                # descriptor from the underlying buffer created above
+                value = self._generate_tma_descriptor_call(
+                    desc=raw_arg,
+                    apply_size_hints=True,
+                )
+                buf_name = arg
+                self.kernel_autotune_calls.writeline(f"{buf_name} = {value}")
+
             return buf_name
         elif issubclass(arg_type, sympy.Basic) or isinstance(arg, SymbolicCallArg):
             # arg is a symbol or symbolic expression
@@ -1729,7 +1883,7 @@ class PythonWrapperCodegen(CodeGen):
 
     def generate_kernel_call(
         self,
-        kernel_name,
+        kernel_name: str,
         call_args,
         grid=None,
         device_index=None,
@@ -1842,6 +1996,7 @@ class PythonWrapperCodegen(CodeGen):
             self.kernel_autotune_calls.writeline(
                 f"del {', '.join(arg for arg in tensor_args.values())}\n",
             )
+
             self.kernel_autotune_names.add(kernel_name)
 
     def writeline(self, line):
@@ -1932,16 +2087,21 @@ class PythonWrapperCodegen(CodeGen):
             return self.codegen_exact_buffer_reuse(old_name, new_name, del_line)
 
         reinterpret_view = self.codegen_reinterpret_view(
-            old, new.get_size(), new.get_stride(), 0, self.wrapper_call
+            old, new.get_size(), new.get_stride(), 0, self.wrapper_call.writeline
         )
-        return f"{self.declare_maybe_reference}{new_name} = {reinterpret_view}{del_line}  {self.comment} reuse"
+        return (
+            f"{self.declare_maybe_reference}{new_name} = "
+            f"{self.move_begin}{reinterpret_view}{self.move_end}{del_line}"
+            f"  {self.comment} reuse"
+        )
 
     def codegen_deferred_allocation(self, name, layout):
         self.writeline(
             DeferredLine(
                 name,
-                f"{self.declare_maybe_reference}{name} = {layout.view.codegen_reference()}{self.ending}  "
-                f"{self.comment} alias",
+                f"{self.declare_maybe_reference}{name} = "
+                f"{self.move_begin}{layout.view.codegen_reference()}{self.move_end}{self.ending}"
+                f"  {self.comment} alias",
             )
         )
 
@@ -1972,6 +2132,10 @@ class PythonWrapperCodegen(CodeGen):
             self.codegen_deferred_allocation(name, layout)
             return
 
+        if isinstance(layout, ir.CommBufferLayout):
+            self.writeline(CommBufferAllocateLine(self, buffer))
+            return
+
         self.writeline(AllocateLine(self, buffer))
 
     def codegen_free(self, buffer):
@@ -1980,6 +2144,12 @@ class PythonWrapperCodegen(CodeGen):
         # can be freed but not reused
         if isinstance(buffer, ir.InputBuffer):
             self.writeline(self.make_buffer_free(buffer))
+            return
+
+        if isinstance(buffer.get_layout(), ir.CommBufferLayout):
+            # Comm buffers are not eligible for in-place reuse. Their reuse is
+            # achieved exclusively via buffer planning.
+            self.writeline(CommBufferFreeLine(self, buffer))
             return
 
         if not self.can_reuse(buffer):
