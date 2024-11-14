@@ -7125,18 +7125,18 @@ def sample_inputs_scatter(op_info, device, dtype, requires_grad, **kwargs):
         (_tensor((M, S)), (0, _gather((M, S // 2), 1, M), _tensor((M, S // 2)))),
         (_tensor((M, S)), (1, _gather((M, S // 2), 0, S), _tensor((M, S // 2)))),
         (_tensor((M, S)), (-1, _gather((M, S // 2), 0, S), _tensor((M, S // 2)))),
-        (_tensor(()), (0, zero.clone().detach(), _tensor(()))),
-        (_tensor(()), (0, zero.clone().detach(), 2.5)),
+        (_tensor(()), (0, zero.detach().clone(), _tensor(()))),
+        (_tensor(()), (0, zero.detach().clone(), 2.5)),
     )
 
     for tensor, args in test_cases:
         yield SampleInput(tensor, *args)
 
         if not requires_grad:
-            yield SampleInput(tensor.clone().detach(), *args, reduce='add')
+            yield SampleInput(tensor.detach().clone(), *args, reduce='add')
 
             if dtype.is_floating_point:
-                yield SampleInput(tensor.clone().detach(), *args, reduce='multiply')
+                yield SampleInput(tensor.detach().clone(), *args, reduce='multiply')
 
 def sample_inputs_scatter_add(op_info, device, dtype, requires_grad, **kwargs):
     def _tensor(shape, dtype=dtype, low=None, high=None):
@@ -7152,7 +7152,7 @@ def sample_inputs_scatter_add(op_info, device, dtype, requires_grad, **kwargs):
     yield SampleInput(_tensor((M, S)), 0, _gather((M, S // 2), 1, M), _tensor((M, S // 2)))
     yield SampleInput(_tensor((M, S)), 1, _gather((M, S // 2), 0, S), _tensor((M, S // 2)))
     yield SampleInput(_tensor((M, S)), -1, _gather((M, S // 2), 0, S), _tensor((M, S // 2)))
-    yield SampleInput(_tensor(()), 0, zero.clone().detach(), _tensor(()))
+    yield SampleInput(_tensor(()), 0, zero.detach().clone(), _tensor(()))
 
 def sample_inputs_scatter_reduce(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
@@ -7166,7 +7166,7 @@ def sample_inputs_scatter_reduce(op_info, device, dtype, requires_grad, **kwargs
         ((M, S), 0, gather((M, S // 2), 1, M), (M, S // 2)),
         ((M, S), 1, gather((M, S // 2), 0, S), (M, S // 2)),
         ((M, S), -1, gather((M, S // 2), 0, S), (M, S // 2)),
-        ((), 0, zero.clone().detach(), ()),
+        ((), 0, zero.detach().clone(), ()),
     )
 
     reduce = op_info.variant_test_name
@@ -11287,7 +11287,7 @@ foreach_reduce_op_db: List[ForeachFuncInfo] = [
 foreach_other_op_db: List[ForeachFuncInfo] = [
     ForeachFuncInfo(
         "lerp",
-        sample_inputs_func=foreach_inputs_sample_func(3, True, False),
+        sample_inputs_func=foreach_inputs_sample_func(3, True, True),
         dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
         supports_autograd=True,
         supports_inplace_autograd=True,
@@ -11317,8 +11317,30 @@ foreach_other_op_db: List[ForeachFuncInfo] = [
                 "test_dispatch_symbolic_meta_inplace",
                 dtypes=integral_types_and(torch.bool),
             ),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace", dtypes=integral_types_and(torch.bool)),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace", dtypes=integral_types_and(torch.bool)),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestMeta",
+                "test_meta_inplace",
+                dtypes=integral_types_and(torch.bool),
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestMeta",
+                "test_meta_outplace",
+                dtypes=integral_types_and(torch.bool),
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestMeta",
+                "test_dispatch_symbolic_meta_inplace_all_strides",
+                dtypes=integral_types_and(torch.bool),
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestMeta",
+                "test_dispatch_symbolic_meta_outplace_all_strides",
+                dtypes=integral_types_and(torch.bool),
+            ),
         ),
     ),
 ]

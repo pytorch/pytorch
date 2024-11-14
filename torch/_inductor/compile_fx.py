@@ -567,7 +567,7 @@ def compile_fx_inner(
                 "compile_fx_inner",
                 phase_name="inductor_compile",
                 log_pt2_compile_event=True,
-                dynamo_compile_column_us="inductor_cumulative_compile_time_us",
+                fwd_only=False,
             )
         )
         # NB: Why is this the dynamo_compile counter?  The rule here is that
@@ -1632,7 +1632,11 @@ def compile_fx(
         def bw_compiler(
             model: GraphModule, example_inputs: List[InputType]
         ) -> Union[CompiledFxGraph, str]:
-            with dynamo_utils.dynamo_timed("compile_fx.<locals>.bw_compiler"):
+            from torch._dynamo.convert_frame import compile_lock
+
+            with dynamo_utils.dynamo_timed(
+                "compile_fx.<locals>.bw_compiler"
+            ), compile_lock:
                 model_outputs_node = output_node(model)
                 if config.bw_outputs_user_visible:
                     model_outputs = pytree.arg_tree_leaves(*model_outputs_node.args)

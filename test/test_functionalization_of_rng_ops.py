@@ -136,7 +136,7 @@ class TestFunctionalizationRngOps(TestCase):
 
         x = torch.rand(*shape, device=device, dtype=dtype, requires_grad=True)
 
-        x_clone = x.clone().detach().requires_grad_(True)
+        x_clone = x.detach().clone().requires_grad_(True)
 
         torch.cuda.manual_seed(123)
         ref = custom(x)
@@ -207,7 +207,7 @@ class TestFunctionalizationRngOps(TestCase):
         for seed in range(10):
             torch.cuda.manual_seed(seed)
             x = torch.rand(*shape, device=device, dtype=dtype, requires_grad=True)
-            x_clone = x.clone().detach().requires_grad_(True)
+            x_clone = x.detach().clone().requires_grad_(True)
 
             torch.cuda.manual_seed(seed)
             ref = fn(x)
@@ -260,7 +260,7 @@ class TestFunctionalizationRngOps(TestCase):
 
         x = torch.rand(*shape, device=device, dtype=dtype, requires_grad=True)
 
-        x_clone = x.clone().detach().requires_grad_(True)
+        x_clone = x.detach().clone().requires_grad_(True)
 
         torch.cuda.manual_seed(123)
         ref = fn(x)

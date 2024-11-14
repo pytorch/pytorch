@@ -1950,7 +1950,7 @@ class GraphLowering(torch.fx.Interpreter):
             "GraphLowering.compile_to_module",
             phase_name="code_gen",
             log_pt2_compile_event=True,
-            dynamo_compile_column_us="inductor_code_gen_cumulative_compile_time_us",
+            fwd_only=False,
         ):
             return self._compile_to_module()
 
@@ -1996,6 +1996,9 @@ class GraphLowering(torch.fx.Interpreter):
         self.cache_path = path
         self.cache_linemap = linemap  # type: ignore[assignment]
 
+        if config.profile_bandwidth_output:
+            # run the inputs code gen to get the bandwidth info
+            mod.benchmark_compiled_module(times=1, repeat=1)
         # Logged twice as per https://github.com/pytorch/pytorch/pull/99038#discussion_r1167826029
         # TODO. Revisit this once the logging API is more mature
         assert mod.__file__ is not None
