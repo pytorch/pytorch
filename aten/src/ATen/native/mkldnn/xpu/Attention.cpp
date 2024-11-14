@@ -65,7 +65,6 @@ bool use_overrideable_xpu(sdp::sdp_params const& params, bool debug) {
   // Define gate functions that determine if a flash kernel can be run
   constexpr auto constraints = c10::array_of<bool (*)(
       sdp::sdp_params const&, bool)>(
-      sdp::check_runtime_disabled_mem_efficient,
       sdp::check_nested_tensor,
       sdp::check_for_dropout,
       sdp::check_tensor_shapes,
@@ -89,10 +88,10 @@ sdp::SDPBackend select_sdp_backend_xpu(sdp::sdp_params const& kernel_params) {
   // 2. Math fallback
   auto& ctx = at::globalContext();
   // use overrideable linked to onednn graph as mem efficient implementation
-  const bool enabled_overrideable = ctx.userEnabledMemEfficientSDP();
-  if (!ctx.userEnabledMathSDP() && !enabled_overrideable) {
+  if (!ctx.userEnabledMathSDP() && !ctx.userEnabledOverrideableSDP()) {
     return sdp::SDPBackend::error;
   }
+
   // Get ideal kernel ordering
   const std::array<sdp::SDPBackend, 2> priority_order{
       sdp::SDPBackend::overrideable,
@@ -105,7 +104,8 @@ sdp::SDPBackend select_sdp_backend_xpu(sdp::sdp_params const& kernel_params) {
   for (auto& backend : priority_order) {
     switch (backend) {
       case sdp::SDPBackend::overrideable:
-        if (use_overrideable_xpu(kernel_params, print_debug)) {
+        if (ctx.userEnabledOverrideableSDP() &&
+            use_overrideable_xpu(kernel_params, print_debug)) {
           return sdp::SDPBackend::overrideable;
         }
         break;
