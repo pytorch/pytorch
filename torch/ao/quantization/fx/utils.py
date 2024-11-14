@@ -264,7 +264,7 @@ def create_getattr_from_value(
     attr_name = get_new_attr_name(module)
     device = assert_and_get_unique_device(module)
     new_value = (
-        value.clone().detach()
+        value.detach().clone()
         if isinstance(value, torch.Tensor)
         else torch.tensor(value, device=device)
     )
