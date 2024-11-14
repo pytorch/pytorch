@@ -701,18 +701,23 @@ def _test_cpp_extensions_aot(test_directory, options, use_ninja):
     # Build the test cpp extensions modules
     shell_env = os.environ.copy()
     shell_env["USE_NINJA"] = str(1 if use_ninja else 0)
-    cmd = [sys.executable, "setup.py", "install", "--root", "./install"]
-    return_code = shell(cmd, cwd=cpp_extensions_test_dir, env=shell_env)
+    install_cmd = [sys.executable, "setup.py", "install", "--root", "./install"]
+    wheel_cmd = [sys.executable, "setup.py", "bdist_wheel"]
+    return_code = shell(install_cmd, cwd=cpp_extensions_test_dir, env=shell_env)
     if return_code != 0:
         return return_code
     if sys.platform != "win32":
-        return_code = shell(
-            cmd,
-            cwd=os.path.join(cpp_extensions_test_dir, "no_python_abi_suffix_test"),
-            env=shell_env,
-        )
-        if return_code != 0:
-            return return_code
+        for cmd, extension_dir in [
+            (install_cmd, "no_python_abi_suffix_test"),
+            (wheel_cmd, "python_agnostic_extension"),
+        ]:
+            return_code = shell(
+                cmd,
+                cwd=os.path.join(cpp_extensions_test_dir, extension_dir),
+                env=shell_env,
+            )
+            if return_code != 0:
+                return return_code
 
     # "install" the test modules and run tests
     python_path = os.environ.get("PYTHONPATH", "")
