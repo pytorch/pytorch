@@ -111,6 +111,7 @@ def tensorify_python_scalars(
     tracer = fx.proxy.GraphAppendingTracer(graph)
     expr_to_sym_proxy: dict[sympy.Expr, MetaProxy] = {}
     expr_to_tensor_proxy: dict[sympy.Expr, MetaProxy] = {}
+    placeholder_to_symfloat_name: dict[fx.Node, str] = {}
 
     first_non_placeholder = None
     placeholders = set()
@@ -200,6 +201,11 @@ def tensorify_python_scalars(
                 expr_to_sym_proxy[s] = MetaProxy(
                     node, tracer=tracer, fake_mode=fake_mode
                 )
+                # We use _expr instead of expr b/c we want the symbol not the replacement
+                placeholder_to_symfloat_name[node.args[0]] = node.meta[
+                    "val"
+                ].node._expr.name
+
             elif (sym_expr := _get_sym_val(node)) is not None:
                 if sym_expr not in expr_to_sym_proxy and not isinstance(
                     sym_expr, (sympy.Number, sympy.logic.boolalg.BooleanAtom)
@@ -283,6 +289,29 @@ def tensorify_python_scalars(
                     graph.erase_node(node)
 
     should_restart = False
+    # There are sometimes when we actually didn't set any replacements but still
+    # have specializations. For these cases we scan through placeholders and specialize
+    # using node meta val. Here's an example graph where you have no replacements but
+    # still want to specialize and get rid of zf0 before inductor:
+    #
+    # def forward(self, L_tensor_: "f16[2, 3, 4][12, 4, 1]cuda:0", L_scale_factor_: "f64[][]cpu"):
+    #     l_tensor_ = L_tensor_
+    #     l_scale_factor_ = L_scale_factor_
+    #     item: "Sym(zf0)" = l_scale_factor_.item();  l_scale_factor_ = None
+    #     interpolate: "f16[2, 3, TruncToInt(4.0*zf0)][3*TruncToInt(4.0*zf0), TruncToInt(4.0*zf0), 1]cuda:0" = torch.nn.functional.interpolate(l_tensor_, size = None, scale_factor = item, mode = 'nearest-exact', align_corners = None, recompute_scale_factor = True);  l_tensor_ = item = None # noqa: B950
+    #     return (interpolate,)
+    for i, node in enumerate(graph.nodes):
+        if node.op == "placeholder":
+            name = placeholder_to_symfloat_name.get(node)
+            if len(node.users) == 0 and name is not None:
+                # At this point we've lost the back pointer to
+                # what source this placeholder points to. Instead,
+                # we will rely on the symfloat name to specialize when we
+                # restart analysis.
+                TensorifyState.specialize(name)
+                should_restart = True
+        else:
+            break
 
     # Sometimes by the time we get to tensorify, there have already been
     # specializations, eg. in python_arg_parser.h. In these cases,
