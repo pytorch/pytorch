@@ -109,7 +109,7 @@ case ${DESIRED_PYTHON} in
     ;;
 esac
 
-if [[ "$DESIRED_DEVTOOLSET" == *"cxx11-abi"* ]]; then
+if [[ "$DESIRED_DEVTOOLSET" == *"cxx11-abi"* || "$DESIRED_CUDA" == *"rocm"* ]]; then
     export _GLIBCXX_USE_CXX11_ABI=1
 else
     export _GLIBCXX_USE_CXX11_ABI=0
