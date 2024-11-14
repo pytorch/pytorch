@@ -348,7 +348,12 @@ def get_unsafe_globals_in_checkpoint(f: FILE_LIKE) -> List[str]:
     user_safe_global_strings = set(
         _weights_only_unpickler._get_user_allowed_globals().keys()
     )
-    safe_global_strings = default_safe_globals_strings.union(user_safe_global_strings)
+    lazy_safe_global_strings = set(
+        _weights_only_unpickler._get_lazy_imported_globals().keys()
+    )
+    safe_global_strings = default_safe_globals_strings.union(
+        user_safe_global_strings
+    ).union(lazy_safe_global_strings)
 
     with _open_file_like(f, "rb") as opened_file:
         if not _is_zipfile(opened_file):
