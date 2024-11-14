@@ -126,13 +126,17 @@ class TorchTensor(ir.Tensor):
         # it avoids copying to a NumPy array
         import torch._subclasses.fake_tensor
 
-        if isinstance(self.raw, torch._subclasses.fake_tensor.FakeTensor):
+        with torch._subclasses.fake_tensor.unset_fake_temporarily():
+            # Disable any fake mode so calling detach() etc. will return a real tensor
+            tensor = self.raw.detach().cpu().contiguous()
+
+        if isinstance(tensor, torch._subclasses.fake_tensor.FakeTensor):
             raise TypeError(
                 f"Cannot take content out from the FakeTensor ('{self.name}'). Please replace the tensor "
                 "with a tensor backed by real data using ONNXProgram.apply_weights() "
                 "or save the model without initializers by setting include_initializers=False."
             )
-        tensor = self.raw.detach().cpu().contiguous()
+
         return bytes(
             (ctypes.c_ubyte * tensor.element_size() * tensor.numel()).from_address(
                 tensor.data_ptr()
@@ -723,12 +727,6 @@ def _prepare_exported_program_for_export(
     registry: _registration.ONNXRegistry,
 ) -> torch.export.ExportedProgram:
     """Decompose and apply pre-export transformations to the exported program."""
-    # Before decomposing, we search for the subsequence transpose + view and insert
-    # a node flatten in between to bypass the wrong decomposition.
-    # Remove before 2.6 release and after issue https://github.com/pytorch/pytorch/issues/136543 is fixed.
-    exported_program = _fx_passes.insert_contiguous_between_transpose_and_view(
-        exported_program
-    )
 
     # Decompose the graph given the implemented torch ops in ONNX
     exported_program = _fx_passes.decompose_with_registry(exported_program, registry)
