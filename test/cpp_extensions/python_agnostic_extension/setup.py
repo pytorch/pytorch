@@ -9,14 +9,12 @@ from pathlib import Path
 
 from setuptools import setup
 
-from torch.utils.cpp_extension import (
-    BuildExtension,
-    CUDAExtension,
-)
+from torch.utils.cpp_extension import BuildExtension, CUDAExtension
 
 
 ROOT_DIR = Path(__file__).parent
 CSRC_DIR = ROOT_DIR / "python_agnostic" / "csrc"
+
 
 class clean(distutils.command.clean.clean):
     def run(self):
@@ -72,8 +70,5 @@ setup(
         "build_ext": BuildExtension.with_options(no_python_abi_suffix=True),
         "clean": clean,
     },
-    options={"bdist_wheel": {
-        "py_limited_api": "cp39"
-        }
-    },
+    options={"bdist_wheel": {"py_limited_api": "cp39"}},
 )
