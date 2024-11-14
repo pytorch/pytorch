@@ -6678,7 +6678,7 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
     def _validate(self, fn, backend, *args, skip_check=False, fullgraph=True):
         cloned_args = []
         for arg in args:
-            cloned_args.append(arg.clone().detach().requires_grad_(arg.requires_grad))
+            cloned_args.append(arg.detach().clone().requires_grad_(arg.requires_grad))
 
         torch.manual_seed(0)
         expected = fn(*args)
