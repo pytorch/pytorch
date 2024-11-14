@@ -727,12 +727,6 @@ def _prepare_exported_program_for_export(
     registry: _registration.ONNXRegistry,
 ) -> torch.export.ExportedProgram:
     """Decompose and apply pre-export transformations to the exported program."""
-    # Before decomposing, we search for the subsequence transpose + view and insert
-    # a node flatten in between to bypass the wrong decomposition.
-    # Remove before 2.6 release and after issue https://github.com/pytorch/pytorch/issues/136543 is fixed.
-    exported_program = _fx_passes.insert_contiguous_between_transpose_and_view(
-        exported_program
-    )
 
     # Decompose the graph given the implemented torch ops in ONNX
     exported_program = _fx_passes.decompose_with_registry(exported_program, registry)
