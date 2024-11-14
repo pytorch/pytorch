@@ -339,7 +339,6 @@ struct DispatchStub<rT (*)(Args...), T> {
   DispatchStub(const DispatchStub&) = delete;
   DispatchStub& operator=(const DispatchStub&) = delete;
 
-private:
   FnPtr get_call_ptr(const c10::DeviceType device_type) {
     return reinterpret_cast<FnPtr>(
       impl.get_call_ptr(device_type
@@ -387,7 +386,6 @@ private:
     );
   }
 
-public:
   template <typename... ArgTypes>
   rT operator()(c10::DeviceType device_type, ArgTypes&&... args) {
     FnPtr call_ptr = get_call_ptr(device_type);

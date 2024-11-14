@@ -85,10 +85,10 @@ extern "C" void sgemv_(char *trans, int *m, int *n, float *alpha, float *a, int 
 
 namespace at::native {
 #if !defined(C10_MOBILE)
-DEFINE_DISPATCH(fp16_dot_with_fp32_arith_stub);
 DEFINE_DISPATCH(fp16_gemv_trans_stub);
-DEFINE_DISPATCH(bf16_dot_with_fp32_arith_stub);
 DEFINE_DISPATCH(bf16_gemv_trans_stub);
+DEFINE_DISPATCH(fp16_dot_with_fp32_arith_stub);
+DEFINE_DISPATCH(bf16_dot_with_fp32_arith_stub);
 #endif // !defined(C10_MOBILE)
 
 namespace blas_impl {
@@ -104,18 +104,6 @@ void fp16_gemv_trans(
     const float beta,
     Half* y,
     const int incy);
-
-float fp16_dot_with_fp32_arith(
-    const Half* vec1,
-    const Half* vec2,
-    int64_t len);
-
-float fp16_dot_with_fp32_arith(
-  const Half* x,
-  const Half* a,
-  int64_t len) {
-  return fp16_dot_with_fp32_arith_stub.call_with_known_device_type<kCPU>(x, a, len);
-}
 
 void fp16_gemv_trans(
     const int m,
@@ -143,17 +131,6 @@ void bf16_gemv_trans(
     at::BFloat16* y,
     const int incy);
 
-float bf16_dot_with_fp32_arith(
-    const at::BFloat16* vec1,
-    const at::BFloat16* vec2,
-    int64_t len);
-
-float bf16_dot_with_fp32_arith(
-    const at::BFloat16* vec1,
-    const at::BFloat16* vec2,
-    int64_t len) {
-  return bf16_dot_with_fp32_arith_stub.call_with_known_device_type<kCPU>(vec1, vec2, len);
-}
 #endif // !defined(C10_MOBILE)
 
 #if defined(__aarch64__) && !defined(C10_MOBILE)

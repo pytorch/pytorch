@@ -2,6 +2,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/native/CPUBlas.h>
+#include <ATen/native/cpu/ReducedPrecisionFloatGemvFastPathKernel.h>
 #include <ATen/native/cpu/zmath.h>
 #include <c10/util/irange.h>
 #include <c10/util/Unroll.h>
@@ -19,16 +20,6 @@ void fp16_gemv_trans(
     const float beta,
     Half* y,
     const int incy);
-
-float fp16_dot_with_fp32_arith(
-  const Half* x,
-  const Half* a,
-  int64_t len);
-
-float bf16_dot_with_fp32_arith(
-  const at::BFloat16* x,
-  const at::BFloat16* a,
-  int64_t len);
 } // namespace at::native::blas_impl
 #endif
 #if defined(__aarch64__) && !defined(C10_MOBILE)
@@ -365,11 +356,6 @@ void gemm_notrans_(
 #endif // defined(__aarch64__) && !defined(C10_MOBILE)
 
 #if !defined(C10_MOBILE)
-static float compute_dot(const at::Half* a, const at::Half* b, int64_t len) {
-  return at::native::blas_impl::fp16_dot_with_fp32_arith(
-      a, b, len);
-}
-
 template <>
 void gemm_transa_(
     TransposeType transa,
@@ -384,12 +370,13 @@ void gemm_transa_(
     at::native::blas_impl::fp16_gemv_trans(k, m, 1.0, a, lda, b, 1, beta, c, 1);
     return;
   }
+  auto* const dot_func_ptr = at::native::fp16_dot_with_fp32_arith_stub.get_call_ptr<kCPU>();
   parallel_for(0, m, 1, [&](int64_t begin, int64_t end) {
     const auto *a_ = a + begin * lda;
     for (const auto i : c10::irange(begin, end)) {
       const auto *b_ = b;
       for (const auto j : c10::irange(n)) {
-        const auto dot = compute_dot(a_, b_, k);
+        const auto dot = dot_func_ptr(a_, b_, k);
         b_ += ldb;
         if (beta == 0) {
           c[j*ldc+i] = alpha*dot;
@@ -402,10 +389,6 @@ void gemm_transa_(
   });
 }
 
-static float compute_dot(const at::BFloat16* a, const at::BFloat16* b, int64_t len) {
-  return at::native::blas_impl::bf16_dot_with_fp32_arith(a, b, len);
-}
-
 template <>
 void gemm_transa_(
     TransposeType transa,
@@ -416,12 +399,13 @@ void gemm_transa_(
     float beta,
     at::BFloat16 *c, int64_t ldc) {
   // c = alpha * (a.T @ b) + beta * c
+  auto* const dot_func_ptr = at::native::bf16_dot_with_fp32_arith_stub.get_call_ptr<kCPU>();
   parallel_for(0, m, 1, [&](int64_t begin, int64_t end) {
     const auto *a_ = a + begin * lda;
     for (const auto i : c10::irange(begin, end)) {
       const auto *b_ = b;
       for (const auto j : c10::irange(n)) {
-        const auto dot = compute_dot(a_, b_, k);
+        const auto dot = dot_func_ptr(a_, b_, k);
         b_ += ldb;
         if (beta == 0) {
           c[j*ldc+i] = alpha*dot;
