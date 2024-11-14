@@ -665,16 +665,11 @@ class OpRecorder(evaluator.Evaluator):
                 # convert Python constants to Constant nodes
                 type_binding = _resolve_parameter_dtypes(op_signature, named_inputs)
                 try:
+                    # _process_python_sequences is not here because we want to preserve python list
+                    # properties for the function call
                     converted_named_inputs = _process_python_constants(
                         op_signature,
                         named_inputs,
-                        type_binding,
-                        self.constant_farm,
-                        self.opset,
-                    )
-                    converted_named_inputs = _process_python_sequences(
-                        op_signature,
-                        converted_named_inputs,  # type: ignore[arg-type]
                         type_binding,
                         self.constant_farm,
                         self.opset,
