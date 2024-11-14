@@ -1056,6 +1056,21 @@
 - name: special_betainc.ab_scalar(Tensor self, Scalar a, Scalar b) -> Tensor
   self: special_betainc_backward_x(grad, at::scalar_to_tensor(a, self.device()), at::scalar_to_tensor(b, self.device()), self)
 
+- name: special_betaincinv(Tensor self, Tensor a, Tensor b) -> Tensor
+  a, b, self: special_betaincinv_backward_full(grad, a, b, self)
+
+- name: special_betaincinv.x_scalar(Scalar self, Tensor a, Tensor b) -> Tensor
+  a, b: special_betaincinv_backward_ab(grad, a, b, at::scalar_to_tensor(self, a.device()))
+
+- name: special_betaincinv.a_scalar(Tensor self, Scalar a, Tensor b) -> Tensor
+  b, self: special_betaincinv_backward_by(grad, at::scalar_to_tensor(a, b.device()), b, self)
+
+- name: special_betaincinv.b_scalar(Tensor self, Tensor a, Scalar b) -> Tensor
+  a, self: special_betaincinv_backward_ay(grad, a, at::scalar_to_tensor(b, a.device()), self)
+
+- name: special_betaincinv.ab_scalar(Tensor self, Scalar a, Scalar b) -> Tensor
+  self: special_betaincinv_backward_y(grad, at::scalar_to_tensor(a, self.device()), at::scalar_to_tensor(b, self.device()), self)
+
 - name: log_normal_(Tensor(a!) self, float mean=1, float std=2, *, Generator? generator=None) -> Tensor(a!)
   self: zeros_like(grad)
   result: self_t.zero_()
