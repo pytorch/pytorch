@@ -63,6 +63,13 @@ if triton is not None:
     from . import triton_helpers
 
     try:
+        from triton.runtime.autotuner import PTXASError
+    except ImportError:
+
+        class PTXASError(Exception):  # type: ignore[no-redef]
+            pass
+
+    try:
         from triton.compiler.compiler import ASTSource
     except ImportError:
         ASTSource = None
@@ -74,9 +81,14 @@ if triton is not None:
 else:
     from types import ModuleType
 
+    class OutOfResources(Exception):  # type: ignore[no-redef]
+        pass
+
+    class PTXASError(Exception):  # type: ignore[no-redef]
+        pass
+
     Config = object
     KernelInterface = object
-    OutOfResources = object
     ASTSource = None
     GPUTarget = None
     triton_helpers = ModuleType("triton_helpers")
@@ -275,11 +287,12 @@ class CachingAutotuner(KernelInterface):
                     compiled_binary, launcher = self._precompile_config(
                         c, warm_cache_only
                     )
-                except OutOfResources as e:
+                except (OutOfResources, PTXASError) as e:
                     if len(self.configs) == 1:
                         # There are no valid Triton configs
                         raise e
-                    # Skip the config if we run out of resource
+                    # Skip the config if we run out of
+                    # resources or into a ptxas error
                     continue
                 self.launchers.append(launcher)
                 compiled_binaries.append(compiled_binary)
