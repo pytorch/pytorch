@@ -4,7 +4,7 @@ import math
 import os
 import sys
 from itertools import count
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 import sympy
 from sympy import Expr
@@ -1194,28 +1194,26 @@ class CppWrapperCpu(PythonWrapperCodegen):
     def codegen_int_array_var(
         self,
         int_array: str,
-        writer=None,
+        writeline: Callable[..., None],
         known_statically=False,
         graph=None,  # for per-graph caching
     ):
-        # This is used for size/stride declaration
+        # Used for size/stride declaration
+        #
         # Because the memory planning is done in two passes (see the implementation
         # of self.generate), the writeline behavior is different in the two passes.
         # As a result, the emitted int array declarations may appear in a later
         # position of the generated code, so the second pass codegen should not
-        # reuse int array declarations generated in the first pass
-        if writer is None:
-            # The first pass codegen uses `self` as the writer
-            writer = self
-
+        # reuse int array declarations generated in the first pass.
+        # This is why writeline needs to explicitly passed in as a parameter.
         var = f"int_array_{next(self.int_array_id)}"
         ctype = "int64_t"
         if var not in self.declared_int_array_vars:
             self.declared_int_array_vars.add(var)
             if known_statically:
-                writer.writeline(f"static constexpr {ctype} {var}[] = {int_array};")
+                writeline(f"static constexpr {ctype} {var}[] = {int_array};")
             else:
-                writer.writeline(f"const {ctype} {var}[] = {int_array};")
+                writeline(f"const {ctype} {var}[] = {int_array};")
         return var
 
     def make_buffer_allocation(self, buffer):
@@ -1235,13 +1233,13 @@ class CppWrapperCpu(PythonWrapperCodegen):
         stride = self.codegen_shape_tuple(orig_stride)
         size_array_var = self.codegen_int_array_var(
             size,
-            self.wrapper_call,
+            self.wrapper_call.writeline,
             known_statically=self.is_statically_known_list_of_ints(shape),
             graph=self.get_codegened_graph(),
         )
         stride_array_var = self.codegen_int_array_var(
             stride,
-            self.wrapper_call,
+            self.wrapper_call.writeline,
             known_statically=self.is_statically_known_list_of_ints(orig_stride),
             graph=self.get_codegened_graph(),
         )
@@ -1275,10 +1273,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
             self.codegen_dtype(dtype),
             str(len(shape)),
             self.codegen_int_array_var(
-                size, self.wrapper_call, graph=self.get_codegened_graph()
+                size, self.wrapper_call.writeline, graph=self.get_codegened_graph()
             ),
             self.codegen_int_array_var(
-                stride, self.wrapper_call, graph=self.get_codegened_graph()
+                stride, self.wrapper_call.writeline, graph=self.get_codegened_graph()
             ),
             f"&{tmp_name}",
         ]
@@ -1289,7 +1287,13 @@ class CppWrapperCpu(PythonWrapperCodegen):
         return f"RAIIAtenTensorHandle({tmp_name})"
 
     def codegen_reinterpret_view(
-        self, data, size, stride, offset, writer, dtype=None
+        self,
+        data,
+        size,
+        stride,
+        offset,
+        writeline: Callable[..., None],
+        dtype=None,
     ) -> str:
         dim = str(len(size))
         original_offset = offset
@@ -1304,13 +1308,13 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 dim,
                 self.codegen_int_array_var(
                     self.codegen_shape_tuple(size),
-                    writer,
+                    writeline,
                     known_statically=self.is_statically_known_list_of_ints(size),
                     graph=self.get_codegened_graph(),
                 ),
                 self.codegen_int_array_var(
                     self.codegen_shape_tuple(stride),
-                    writer,
+                    writeline,
                     known_statically=self.is_statically_known_list_of_ints(stride),
                     graph=self.get_codegened_graph(),
                 ),
@@ -1367,12 +1371,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 )
                 final_tmp_name = f"{final_tmp_name}_raii"
 
-        if writer is None:
-            writer = self
-
-        # Because the memory planning is done in two passes (see the implementation
-        # of self.generate), the writeline behavior is different in the two passes.
-        writer.writelines(call_strs)
+        for line in call_strs:
+            writeline(line)
 
         # NB, the return handle here represents a temporary tensor, which will be automatically
         # released.
@@ -1699,7 +1699,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         return new_tensor_args, new_int_args
 
-    def generate_extern_kernel_alloc_and_find_schema_if_needed(
+    def generate_fallback_kernel_with_runtime_lookup(
         self,
         buf_name: str,
         python_kernel_name: str,
@@ -1739,14 +1739,14 @@ class CppWrapperCpu(PythonWrapperCodegen):
             assert raw_args is not None
             assert output_args is not None
 
-            return self.generate_extern_kernel_alloc_and_find_schema_if_needed_with_proxy_executor(
+            return self.generate_fallback_kernel_with_runtime_lookup_aot(
                 op_overload,
                 raw_args,
                 output_args,
                 outputs,
             )
         else:
-            return self.generate_extern_kernel_alloc_and_find_schema_if_needed_jit(
+            return self.generate_fallback_kernel_with_runtime_lookup_jit(
                 buf_name,
                 python_kernel_name,
                 cpp_kernel_name,
@@ -1886,7 +1886,7 @@ if (custom_op_wrapper.get() == NULL) {
             )
         return "".join(lines)
 
-    def generate_extern_kernel_alloc_and_find_schema_if_needed_jit(
+    def generate_fallback_kernel_with_runtime_lookup_jit(
         self,
         buf_name: str,
         python_kernel_name: str,
@@ -1961,7 +1961,7 @@ reinterpret_cast<AtenTensorHandle>(PyCapsule_GetPointer(PyList_GET_ITEM(py_{buf_
         )
         self.writelines(scope_gil_acquire)
 
-    def generate_extern_kernel_alloc_and_find_schema_if_needed_with_proxy_executor(
+    def generate_fallback_kernel_with_runtime_lookup_aot(
         self,
         op_overload,
         raw_args,  # contains both args and flatten kwargs

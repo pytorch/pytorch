@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import os
 from itertools import count
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 import sympy
 
@@ -588,13 +588,13 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         stride = self.codegen_shape_tuple(orig_stride)
         size_array_var = self.codegen_int_array_var(
             size,
-            self.wrapper_call,
+            self.wrapper_call.writeline,
             known_statically=self.is_statically_known_list_of_ints(shape),
             graph=self.get_codegened_graph(),
         )
         stride_array_var = self.codegen_int_array_var(
             stride,
-            self.wrapper_call,
+            self.wrapper_call.writeline,
             known_statically=self.is_statically_known_list_of_ints(orig_stride),
             graph=self.get_codegened_graph(),
         )
@@ -646,7 +646,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             return self.codegen_exact_buffer_reuse(old_name, new_name, del_line)
 
         reinterpret_view = self.codegen_reinterpret_view(
-            old, new.get_size(), new.get_stride(), 0, self.wrapper_call
+            old, new.get_size(), new.get_stride(), 0, self.wrapper_call.writeline
         )
         if reinterpret_view in self.stack_allocated_buffers:
             self.stack_allocated_buffers[new_name] = new
@@ -755,7 +755,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         )  # set x as the output tensor, this fallback mutates x.
         self.writeline(self.wrap_kernel_call(kernel, args))
 
-    def generate_extern_kernel_alloc_and_find_schema_if_needed(
+    def generate_fallback_kernel_with_runtime_lookup(
         self,
         buf_name: str,
         python_kernel_name: str,
@@ -793,14 +793,14 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             assert raw_args is not None
             assert outputs is not None
 
-            return self.generate_extern_kernel_alloc_and_find_schema_if_needed_with_proxy_executor(
+            return self.generate_fallback_kernel_with_runtime_lookup_aot(
                 op_overload,
                 raw_args,
                 output_args,
                 outputs,
             )
         else:
-            return self.generate_extern_kernel_alloc_and_find_schema_if_needed_jit(
+            return self.generate_fallback_kernel_with_runtime_lookup_jit(
                 buf_name,
                 python_kernel_name,
                 cpp_kernel_name,
@@ -821,7 +821,13 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         )
 
     def codegen_reinterpret_view(
-        self, data, size, stride, offset, writer, dtype=None
+        self,
+        data,
+        size,
+        stride,
+        offset,
+        writeline: Callable[..., None],
+        dtype=None,
     ) -> str:
         dim = str(len(size))
         original_offset = offset
@@ -836,13 +842,13 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                 dim,
                 self.codegen_int_array_var(
                     self.codegen_shape_tuple(size),
-                    writer,
+                    writeline,
                     known_statically=self.is_statically_known_list_of_ints(size),
                     graph=self.get_codegened_graph(),
                 ),
                 self.codegen_int_array_var(
                     self.codegen_shape_tuple(stride),
-                    writer,
+                    writeline,
                     known_statically=self.is_statically_known_list_of_ints(stride),
                     graph=self.get_codegened_graph(),
                 ),
@@ -911,12 +917,8 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                 )
                 final_tmp_name = f"{final_tmp_name}_raii"
 
-        if writer is None:
-            writer = self
-
-        # Because the memory planning is done in two passes (see the implementation
-        # of self.generate), the writeline behavior is different in the two passes.
-        writer.writelines(call_strs)
+        for line in call_strs:
+            writeline(line)
 
         # NB, the return handle here represents a temporary tensor, which will be automatically
         # released.
