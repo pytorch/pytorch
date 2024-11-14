@@ -180,7 +180,7 @@ jobs:
       matrix:
         rocm_version: ["6.1", "6.2.4"]
     env:
-      GPU_ARCH_TYPE: rocm
+      GPU_ARCH_TYPE: rocm-manylinux_2_28
       GPU_ARCH_VERSION: ${{ matrix.rocm_version }}
     steps:
       - name: Checkout PyTorch
