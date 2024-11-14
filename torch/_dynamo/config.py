@@ -383,6 +383,9 @@ use_numpy_random_stream = False
 # Use C++ guard manager (deprecated: always true)
 enable_cpp_guard_manager = True
 
+# Use C++ guard manger for symbolic shapes
+enable_cpp_symbolic_shape_guards = False
+
 # Inline inbuilt nn modules
 inline_inbuilt_nn_modules = not is_fbcode()
 

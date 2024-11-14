@@ -23,7 +23,6 @@ from typing import (
 )
 
 import sympy
-from sympy.printing.printer import Printer
 
 import torch
 import torch.fx
@@ -31,6 +30,7 @@ from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
 from torch.utils import _pytree as pytree
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.numbers import int_oo
+from torch.utils._sympy.printers import PythonPrinter as _PythonPrinter
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRangeAnalysis, ValueRanges
 
@@ -600,12 +600,22 @@ class DataTypePropagation:
         DataTypePropagation.propagate_loopbody(node._body)
 
 
-# This printer contains rules that are supposed to be generic for both C/C++ and
-# Python
-class ExprPrinter(Printer):
+class PythonPrinter(_PythonPrinter):
+    def doprint(self, expr, *, simplify: bool = True, p=True):
+        # TODO: why are people passing strings to the printer here :think:
+        if simplify and isinstance(expr, sympy.Expr) and hasattr(V.graph, "sizevars"):
+            expr = V.graph.sizevars.simplify(expr)
+        return super().doprint(expr)
+
+
+class OpOverrides:
+    def __init__(self, parent):
+        super().__init__()
+        self._parent = parent
+
     @staticmethod
-    def paren(string):
-        def all_in_parens(string):
+    def paren(string: str) -> str:
+        def all_in_parens(string: str) -> bool:
             if string[0] != "(" or len(string) < 2:
                 return False
             count = 1
@@ -630,260 +640,6 @@ class ExprPrinter(Printer):
         if all_in_parens(string):
             return string
         return f"({string})"
-
-    def _print_Relational(self, expr):
-        return f" {expr.rel_op} ".join(map(self.paren, map(self._print, expr.args)))
-
-    def _print_Mul(self, expr):
-        return "*".join(map(self.paren, map(self._print, expr.args)))
-
-    def _print_Add(self, expr):
-        return " + ".join(map(self.paren, map(self._print, expr.args)))
-
-    # NB: this is OK to put here, because Mod is only defined for positive
-    # numbers, and so across C/Python its behavior is consistent
-    def _print_Mod(self, expr):
-        return " % ".join(map(self.paren, map(self._print, expr.args)))
-
-    def _print_FloatTrueDiv(self, expr):
-        lhs, rhs = expr.args
-        return f"{self.paren(self._print(lhs))} / {self.paren(self._print(rhs))}"
-
-    def _print_CleanDiv(self, expr):
-        return self._print_FloorDiv(expr)
-
-    def _print_Identity(self, expr):
-        return self._print(expr.args[0])
-
-    def _print_GreaterThan(self, expr):
-        # GreaterThan:          >=
-        # StrictlyGreaterThan:  >
-        # Go figure...
-        return " >= ".join(map(self.paren, map(self._print, expr.args)))
-
-    # NB: The C implementation is injected into codegen at
-    # torch/_inductor/codegen/wrapper.py
-    def _print_align(self, expr):
-        assert len(expr.args) == 1
-        return f"align({self._print(expr.args[0])})"
-
-    # This must be implemented because sympy will collect x * x into Pow(x, 2), without
-    # any explicit intervention.  We print it just like x * x, notably, we
-    # never generate sympy.Pow with floats.
-    #
-    # NB: this pow by natural, you should never have used builtin sympy.pow
-    # for FloatPow, and a symbolic exponent should be PowByNatural.  These
-    # means exp is guaranteed to be integer.
-    def _print_Pow(self, expr):
-        base, exp = expr.args
-        base = self._print(base)
-        assert exp == int(exp), exp
-        exp = int(exp)
-        assert exp >= 0
-        if exp > 0:
-            return "*".join([self.paren(base)] * exp)
-        return "1"
-
-    # Explicit NotImplemented functions are to prevent default sympy printing
-    # behavior, which will just barf out ToFloat(...) to your IR.  The error
-    # message is better here because it tells you which printer class it needs
-    # to go in.
-
-    def _print_ToFloat(self, expr):
-        raise NotImplementedError(f"_print_ToFloat not implemented for {type(self)}")
-
-    def _print_Infinity(self, expr):
-        raise NotImplementedError(f"_print_Infinity not implemented for {type(self)}")
-
-    def _print_NegativeInfinity(self, expr):
-        raise NotImplementedError(
-            f"_print_NegativeInfinity not implemented for {type(self)}"
-        )
-
-    def _print_FloorDiv(self, expr):
-        raise NotImplementedError(f"_print_FloorDiv not implemented for {type(self)}")
-
-    def _print_PythonMod(self, expr):
-        raise NotImplementedError(f"_print_PythonMod not implemented for {type(self)}")
-
-    def _print_IntTrueDiv(self, expr):
-        raise NotImplementedError(f"_print_IntTrueDiv not implemented for {type(self)}")
-
-    def _print_PowByNatural(self, expr):
-        raise NotImplementedError(
-            f"_print_PowByNatural not implemented for {type(self)}"
-        )
-
-    def _print_FloatPow(self, expr):
-        raise NotImplementedError(f"_print_FloatPow not implemented for {type(self)}")
-
-    def _print_TruncToInt(self, expr):
-        raise NotImplementedError(f"_print_TruncToInt not implemented for {type(self)}")
-
-    def _print_RoundToInt(self, expr):
-        raise NotImplementedError(f"_print_RoundToInt not implemented for {type(self)}")
-
-    def _print_RoundDecimal(self, expr):
-        raise NotImplementedError(
-            f"_print_RoundDecimal not implemented for {type(self)}"
-        )
-
-    # NB: Some float operations are INTENTIONALLY not implemented for
-    # printers.  You can implement them as a quick unblock, but it is better
-    # to ask yourself why we haven't done this computation in the Tensor
-    # universe instead
-
-    def _print_TruncToFloat(self, expr):
-        raise NotImplementedError(
-            f"_print_TruncToFloat not implemented for {type(self)}"
-        )
-
-    def doprint(self, expr, *, simplify: bool = True):
-        # TODO: why are people passing strings to the printer here :think:
-        if simplify and isinstance(expr, sympy.Expr) and hasattr(V.graph, "sizevars"):
-            expr = V.graph.sizevars.simplify(expr)
-        return super().doprint(expr)
-
-
-class PythonPrinter(ExprPrinter):
-    def _print_ToFloat(self, expr):
-        assert len(expr.args) == 1
-        return f"float({self._print(expr.args[0])})"
-
-    def _print_ModularIndexing(self, expr):
-        x, div, mod = expr.args
-        x = self.paren(self.doprint(x))
-        div = self.paren(self.doprint(div))
-        mod = self.paren(self.doprint(mod))
-        if div != "1":
-            x = f"({x} // {div})"
-        return f"{x} % {mod}"
-
-    def _print_Infinity(self, expr):
-        return "math.inf"
-
-    def _print_NegativeInfinity(self, expr):
-        return "-math.inf"
-
-    # WARNING: this is dangerous for Triton, which has C-style modulus
-    def _print_PythonMod(self, expr):
-        return " % ".join(map(self.paren, map(self._print, expr.args)))
-
-    # WARNING: this is dangerous for Triton, which has C-style modulus
-    def _print_FloorDiv(self, expr):
-        x, div = expr.args
-        x = self.paren(self.doprint(x))
-        div = self.paren(self.doprint(div))
-        return f"({x} // {div})"
-
-    # WARNING: this is dangerous for Triton, when lhs, rhs > 2**53, Python
-    # does a special algorithm
-    def _print_IntTrueDiv(self, expr):
-        lhs, rhs = expr.args
-        return f"{self.paren(self._print(lhs))} / {self.paren(self._print(rhs))}"
-
-    def _helper_sqrt(self, expr):
-        return f"math.sqrt({self._print(expr)})"
-
-    def _print_OpaqueUnaryFn_sqrt(self, expr):
-        return self._helper_sqrt(expr.args[0])
-
-    def _print_FloatPow(self, expr):
-        base, exp = expr.args
-        return f"{self.paren(self._print(base))} ** {self.paren(self._print(exp))}"
-
-    # TODO: Not sure this works with Triton, even when base/exp are integral
-    def _print_PowByNatural(self, expr):
-        base, exp = expr.args
-        return f"{self.paren(self._print(base))} ** {self.paren(self._print(exp))}"
-
-    def _print_floor(self, expr):
-        assert len(expr.args) == 1
-        return f"math.floor({self._print(expr.args[0])})"
-
-    def _print_FloorToInt(self, expr):
-        assert len(expr.args) == 1
-        return f"math.floor({self._print(expr.args[0])})"
-
-    def _print_TruncToInt(self, expr):
-        assert len(expr.args) == 1
-        # This also could have been int(), they'll do the same thing for float
-        return f"math.trunc({self._print(expr.args[0])})"
-
-    def _print_ceiling(self, expr):
-        assert len(expr.args) == 1
-        return f"math.ceil({self._print(expr.args[0])})"
-
-    def _print_CeilToInt(self, expr):
-        assert len(expr.args) == 1
-        return f"math.ceil({self._print(expr.args[0])})"
-
-    def _print_Abs(self, expr):
-        assert len(expr.args) == 1
-        return f"abs({self._print(expr.args[0])})"
-
-    # NB: It's expected that we've made explicit any promotion in the sympy
-    # expression, so it doesn't matter that Python max/min doesn't perform
-    # promotion
-    def _print_Max(self, expr):
-        assert len(expr.args) >= 2
-        return f"max({', '.join(map(self._print, expr.args))})"
-
-    def _print_Min(self, expr):
-        assert len(expr.args) >= 2
-        return f"min({', '.join(map(self._print, expr.args))})"
-
-    def _print_OpaqueUnaryFn_cos(self, expr):
-        assert len(expr.args) == 1
-        return f"math.cos({self._print(expr.args[0])})"
-
-    def _print_OpaqueUnaryFn_cosh(self, expr):
-        assert len(expr.args) == 1
-        return f"math.cosh({self._print(expr.args[0])})"
-
-    def _print_OpaqueUnaryFn_acos(self, expr):
-        assert len(expr.args) == 1
-        return f"math.acos({self._print(expr.args[0])})"
-
-    def _print_OpaqueUnaryFn_sin(self, expr):
-        assert len(expr.args) == 1
-        return f"math.sin({self._print(expr.args[0])})"
-
-    def _print_OpaqueUnaryFn_sinh(self, expr):
-        assert len(expr.args) == 1
-        return f"math.sinh({self._print(expr.args[0])})"
-
-    def _print_OpaqueUnaryFn_asin(self, expr):
-        assert len(expr.args) == 1
-        return f"math.asin({self._print(expr.args[0])})"
-
-    def _print_OpaqueUnaryFn_tan(self, expr):
-        assert len(expr.args) == 1
-        return f"math.tan({self._print(expr.args[0])})"
-
-    def _print_OpaqueUnaryFn_tanh(self, expr):
-        assert len(expr.args) == 1
-        return f"math.tanh({self._print(expr.args[0])})"
-
-    def _print_OpaqueUnaryFn_atan(self, expr):
-        assert len(expr.args) == 1
-        return f"math.atan({self._print(expr.args[0])})"
-
-    def _print_RoundToInt(self, expr):
-        assert len(expr.args) == 1
-        return f"round({self._print(expr.args[0])})"
-
-    def _print_RoundDecimal(self, expr):
-        assert len(expr.args) == 2
-        number, ndigits = expr.args
-        assert isinstance(ndigits, sympy.Integer)
-        return f"round({self._print(number)}, {ndigits})"
-
-
-class OpOverrides:
-    def __init__(self, parent):
-        super().__init__()
-        self._parent = parent
 
     def __getattr__(self, item):
         return getattr(self._parent, item)
@@ -973,31 +729,31 @@ class OpOverrides:
 
     @staticmethod
     def bitwise_not(x):
-        return f"~{ExprPrinter.paren(x)}"
+        return f"~{OpOverrides.paren(x)}"
 
     @staticmethod
     def logical_not(a):
-        return f"{ExprPrinter.paren(a)} == 0"
+        return f"{OpOverrides.paren(a)} == 0"
 
     @staticmethod
     def bitwise_and(x, y):
-        return f"{ExprPrinter.paren(x)} & {ExprPrinter.paren(y)}"
+        return f"{OpOverrides.paren(x)} & {OpOverrides.paren(y)}"
 
     @staticmethod
     def bitwise_or(x, y):
-        return f"{ExprPrinter.paren(x)} | {ExprPrinter.paren(y)}"
+        return f"{OpOverrides.paren(x)} | {OpOverrides.paren(y)}"
 
     @staticmethod
     def bitwise_xor(x, y):
-        return f"{ExprPrinter.paren(x)} ^ {ExprPrinter.paren(y)}"
+        return f"{OpOverrides.paren(x)} ^ {OpOverrides.paren(y)}"
 
     @staticmethod
     def bitwise_left_shift(x, y):
-        return f"{ExprPrinter.paren(x)} << {ExprPrinter.paren(y)}"
+        return f"{OpOverrides.paren(x)} << {OpOverrides.paren(y)}"
 
     @staticmethod
     def bitwise_right_shift(x, y):
-        return f"{ExprPrinter.paren(x)} >> {ExprPrinter.paren(y)}"
+        return f"{OpOverrides.paren(x)} >> {OpOverrides.paren(y)}"
 
     @staticmethod
     def remainder(a, b):

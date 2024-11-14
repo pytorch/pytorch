@@ -2624,8 +2624,8 @@ class TestGuardsExpressions(TestCase):
         guard_int(sym_int(s0 / 2.0))
         guards = shape_env.produce_guards_expression([s0])
 
-        self.assertIn("ToFloat", guards)
-        self.assertIn("FloatTrueDiv", guards)
+        self.assertIn("math.trunc(", guards)
+        self.assertIn("float(", guards)
         self.assertTrue(shape_env.evaluate_guards_expression(guards, [hint_int(s0)]))
         self.assertFalse(shape_env.evaluate_guards_expression(guards, [hint_int(s1)]))
 

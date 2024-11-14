@@ -27,6 +27,7 @@
 #include <ATen/xpu/EmptyTensor.h>
 #endif
 
+#include <functional>
 #include <sstream>
 #include <tuple>
 #include <utility>
@@ -1449,6 +1450,80 @@ class NO_TENSOR_ALIASING : public RelationalGuard {
   ska::flat_hash_map<PyObject*, std::nullptr_t> _unique_tensors;
 };
 
+/**
+ * Symbolic Shape Guard.
+ */
+class SYMBOLIC_SHAPE_GUARD : public RelationalGuard {
+ public:
+  SYMBOLIC_SHAPE_GUARD(
+      py::int_ nargs,
+      py::int_ py_addr,
+      py::object py_addr_keep_alive,
+      py::object verbose_code_parts)
+      : RelationalGuard(std::move(verbose_code_parts)),
+        _py_addr_keep_alive(std::move(py_addr_keep_alive)),
+        _args_seen{0} {
+    _nargs = PyLong_AsSize_t(nargs.ptr());
+    if (PyErr_Occurred()) {
+      throw py::value_error(
+          "SYMBOLIC_SHAPE_GUARD expected a non-negative number of arguments.");
+    }
+    uintptr_t addr = PyLong_AsUnsignedLongLong(py_addr.ptr());
+    if (PyErr_Occurred()) {
+      throw py::value_error(
+          "SYMBOLIC_SHAPE_GUARD expected an address to a C function.");
+    }
+    _guard_check_fn = reinterpret_cast<int64_t (*)(int64_t*)>(addr);
+    _args = std::vector<int64_t>(_nargs);
+  }
+
+  bool check_nopybind(PyObject* value) override {
+    // We know that these arguments came from IndexedSource(TensorPropertyGuard)
+    // and therefore no need to check that the value is a Tuple[int, int].
+    PyObject* py_idx = PyTuple_GET_ITEM(value, 0);
+    PyObject* py_val = PyTuple_GET_ITEM(value, 1);
+    Py_ssize_t iarg = PyLong_AsSsize_t(py_idx);
+    _args[iarg] = PyLong_AsLongLong(py_val);
+    _args_seen++;
+
+    if (_args_seen == _nargs) {
+      _args_seen = 0;
+      return _guard_check_fn(_args.data());
+    } else {
+      // We don't have all the values yet. Return true until we get all.
+      return true;
+    }
+  }
+
+  GuardDebugInfo check_verbose_nopybind(PyObject* value) override {
+    if (!PyTuple_Check(value)) {
+      return GuardDebugInfo(false, "Non tuple found!", 0);
+    } else if (PyTuple_Size(value) != 2) {
+      return GuardDebugInfo(false, "Tuple of size not 2 found!", 0);
+    } else if (!PyLong_Check(PyTuple_GET_ITEM(value, 0))) {
+      return GuardDebugInfo(false, "Non integer found!", 0);
+    } else if (!PyLong_Check(PyTuple_GET_ITEM(value, 1))) {
+      return GuardDebugInfo(false, "Non integer found!", 0);
+    }
+    bool result = check_nopybind(value);
+
+    if (!result) {
+      return GuardDebugInfo(false, verbose_code_parts(), 0);
+    }
+    return GuardDebugInfo(true, 1);
+  }
+
+  void reset_state() final {
+    _args_seen = 0;
+  }
+
+ private:
+  py::object _py_addr_keep_alive;
+  size_t _args_seen, _nargs;
+  std::vector<int64_t> _args;
+  std::function<int64_t(int64_t*)> _guard_check_fn;
+};
+
 class DYNAMIC_INDICES : public LeafGuard {
   // C++ equivalent of
   //  code.append(
@@ -1676,7 +1751,8 @@ class GuardManager {
 
     // Return the manager if the guard accessor exists
     for (const auto& accessor : _accessors) {
-      if (accessor->matches_key(accessor_key)) {
+      if (accessor->matches_key(accessor_key) &&
+          source == accessor->get_source()) {
         return accessor->get_guard_manager().get();
       }
     }
@@ -3083,6 +3159,154 @@ class TupleGetItemGuardAccessor : public GuardAccessor {
   Py_ssize_t _index;
 };
 
+enum class TensorProperty {
+  SIZE = 0,
+  STRIDE = 1,
+  STORAGE_OFFSET = 2,
+};
+
+std::string to_string(TensorProperty prop) {
+  switch (prop) {
+    case TensorProperty::SIZE:
+      return "TensorProperty::SIZE";
+    case TensorProperty::STRIDE:
+      return "TensorProperty::STRIDE";
+    case TensorProperty::STORAGE_OFFSET:
+      return "TensorProperty::STORAGE_OFFSET";
+    default:
+      return "TensorProperty::Unknown";
+  }
+}
+
+/**
+ * Represents tensor.size/shape/storage_offset acccessor.
+ */
+template <TensorProperty _prop>
+class TensorPropertyGuardAccessor : public GuardAccessor {
+ public:
+  TensorPropertyGuardAccessor(
+      RootGuardManager* root,
+      const py::object& index,
+      std::string source,
+      py::handle example_value,
+      py::handle guard_manager_enum)
+      : GuardAccessor(
+            root,
+            index,
+            std::move(source),
+            example_value,
+            guard_manager_enum) {
+    if (_prop != TensorProperty::STORAGE_OFFSET) {
+      _index = py::cast<Py_ssize_t>(index);
+    }
+  }
+  // NB: Intentional duplication between check_nopybind and
+  // check_verbose_nopybind.
+  bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
+      override { // borrowed ref
+    // check that its a tensor
+    if (!THPVariable_CheckExact(obj) && !THPVariable_Check(obj)) {
+      return false;
+    }
+    at::Tensor tensor = THPVariable_Unpack(obj);
+    int64_t value;
+    if (_prop == TensorProperty::SIZE) {
+      value = tensor.size(_index);
+    } else if (_prop == TensorProperty::STRIDE) {
+      value = tensor.stride(_index);
+    } else if (_prop == TensorProperty::STORAGE_OFFSET) {
+      value = tensor.storage_offset();
+    } else {
+      throw std::runtime_error("Unknown property");
+    }
+
+    PyObject* py_value = PyLong_FromLongLong(value); // New reference
+    bool result = _guard_manager->check_nopybind(py_value);
+    Py_DECREF(py_value);
+    return result;
+  }
+
+  GuardDebugInfo check_verbose_nopybind(
+      PyObject* obj) override { // borrowed ref
+    // check that its a tensor
+    if (!THPVariable_CheckExact(obj) && !THPVariable_Check(obj)) {
+      return GuardDebugInfo(false, "not a tensor" + get_source(), 0);
+    }
+    at::Tensor tensor = THPVariable_Unpack(obj);
+    int64_t value;
+    if (_prop == TensorProperty::SIZE) {
+      value = tensor.size(_index);
+    } else if (_prop == TensorProperty::STRIDE) {
+      value = tensor.stride(_index);
+    } else if (_prop == TensorProperty::STORAGE_OFFSET) {
+      value = tensor.storage_offset();
+    } else {
+      GuardDebugInfo(false, "unknown property", 0);
+    }
+
+    PyObject* py_value = PyLong_FromLongLong(value); // New reference
+    GuardDebugInfo result = _guard_manager->check_verbose_nopybind(py_value);
+    Py_DECREF(py_value);
+    return result;
+  }
+
+  std::string repr() const override {
+    // Helpful when priting GuardManager tree structure.
+    return "TensorPropertyGuardAccessor<" + to_string(_prop) + +">(" +
+        std::to_string(_index) + ")";
+  }
+
+ private:
+  Py_ssize_t _index;
+};
+
+/**
+ * Indexed Guard Accessor that retrieves a value from the child
+ * and sends a (index, source) to the parent.
+ */
+class IndexedGuardAccessor : public GuardAccessor {
+ public:
+  IndexedGuardAccessor(
+      RootGuardManager* root,
+      py::int_ index,
+      std::string source,
+      py::handle example_value,
+      py::handle guard_manager_enum)
+      : GuardAccessor(
+            root,
+            index,
+            std::move(source),
+            example_value,
+            guard_manager_enum),
+        _index(index) {}
+  // NB: Intentional duplication between check_nopybind and
+  // check_verbose_nopybind.
+  bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
+      override { // borrowed ref
+    PyObject* tuple = PyTuple_Pack(2, _index.ptr(), obj); // New reference
+    bool result = _guard_manager->check_nopybind(tuple);
+    Py_DECREF(tuple);
+    return result;
+  }
+
+  GuardDebugInfo check_verbose_nopybind(
+      PyObject* obj) override { // borrowed ref
+    PyObject* tuple = PyTuple_Pack(2, _index.ptr(), obj); // New reference
+    GuardDebugInfo result = _guard_manager->check_verbose_nopybind(tuple);
+    Py_DECREF(tuple);
+    return result;
+  }
+
+  std::string repr() const override {
+    // Helpful when printing GuardManager tree structure.
+    return "IndexedGuardAccesor(" +
+        std::to_string(py::cast<Py_ssize_t>(_index)) + ")";
+  }
+
+ private:
+  py::int_ _index;
+};
+
 /**
  * Represents tensor.grad acccessor.
  */
@@ -3651,7 +3875,7 @@ void install_object_aliasing_guard(
   std::shared_ptr<RelationalGuard> guard =
       std::make_shared<OBJECT_ALIASING>(std::move(verbose_code_parts));
 
-  // Register the resetter on the toor guard mananger, so that it can reset
+  // Register the resetter on the root guard mananger, so that it can reset
   // the newly added relational guard when the guard eval fails.
   x->get_root()->add_relational_guard_resetter(guard);
 
@@ -3671,7 +3895,33 @@ void install_no_tensor_aliasing_guard(
   std::shared_ptr<RelationalGuard> guard = std::make_shared<NO_TENSOR_ALIASING>(
       tensor_names, std::move(verbose_code_parts));
 
-  // Register the resetter on the toor guard mananger, so that it can reset
+  // Register the resetter on the root guard mananger, so that it can reset
+  // the newly added relational guard when the guard eval fails.
+  py::cast<GuardManager*>(guard_managers[0])
+      ->get_root()
+      ->add_relational_guard_resetter(guard);
+  for (const auto& guard_manager : guard_managers) {
+    py::cast<GuardManager*>(guard_manager)->add_leaf_guard(guard);
+  }
+}
+
+void install_symbolic_shape_guard(
+    const py::list& guard_managers,
+    py::int_ nargs,
+    py::int_ py_addr,
+    py::object py_addr_keep_alive,
+    py::object verbose_code_parts) {
+  // Adds a guard that checks symbolic shapes. This is a an example of
+  // relational guard. There is one guard object that is shared between multiple
+  // guard managers.
+  std::shared_ptr<RelationalGuard> guard =
+      std::make_shared<SYMBOLIC_SHAPE_GUARD>(
+          std::move(nargs),
+          std::move(py_addr),
+          std::move(py_addr_keep_alive),
+          std::move(verbose_code_parts));
+
+  // Register the resetter on the root guard mananger, so that it can reset
   // the newly added relational guard when the guard eval fails.
   py::cast<GuardManager*>(guard_managers[0])
       ->get_root()
@@ -3863,6 +4113,11 @@ PyObject* torch_c_dynamo_guards_init() {
       NO_TENSOR_ALIASING,
       LeafGuard,
       std::shared_ptr<NO_TENSOR_ALIASING>>(py_m, "NO_TENSOR_ALIASING");
+  // NOLINTNEXTLINE(bugprone-unused-raii)
+  py::class_<
+      SYMBOLIC_SHAPE_GUARD,
+      LeafGuard,
+      std::shared_ptr<SYMBOLIC_SHAPE_GUARD>>(py_m, "SYMBOLIC_SHAPE_GUARD");
 
   // Guard Accessors - These are present so that we can iterate over the
   // GuardManager hierarchy. We intentionally do not provide even an init
@@ -4150,6 +4405,49 @@ PyObject* torch_c_dynamo_guards_init() {
           "list_getitem_manager",
           &GuardManager::get_child_manager<ListGetItemGuardAccessor>,
           py::arg("key"),
+          py::arg("source"),
+          py::arg("example_value"),
+          py::arg("guard_manager_enum"),
+          py::return_value_policy::reference)
+      // return by reference because GuardManager has the ownership of accessors
+      // and guard managers
+      .def(
+          "indexed_manager",
+          &GuardManager::get_child_manager<IndexedGuardAccessor>,
+          py::arg("idx"),
+          py::arg("source"),
+          py::arg("example_value"),
+          py::arg("guard_manager_enum"),
+          py::return_value_policy::reference)
+      // return by reference because GuardManager has the ownership of accessors
+      // and guard managers
+      .def(
+          "tensor_property_size_manager",
+          &GuardManager::get_child_manager<
+              TensorPropertyGuardAccessor<TensorProperty::SIZE>>,
+          py::arg("idx"),
+          py::arg("source"),
+          py::arg("example_value"),
+          py::arg("guard_manager_enum"),
+          py::return_value_policy::reference)
+      // return by reference because GuardManager has the ownership of accessors
+      // and guard managers
+      .def(
+          "tensor_property_stride_manager",
+          &GuardManager::get_child_manager<
+              TensorPropertyGuardAccessor<TensorProperty::STRIDE>>,
+          py::arg("idx"),
+          py::arg("source"),
+          py::arg("example_value"),
+          py::arg("guard_manager_enum"),
+          py::return_value_policy::reference)
+      // return by reference because GuardManager has the ownership of accessors
+      // and guard managers
+      .def(
+          "tensor_property_storage_offset_manager",
+          &GuardManager::get_child_manager<
+              TensorPropertyGuardAccessor<TensorProperty::STORAGE_OFFSET>>,
+          py::arg("idx"),
           py::arg("source"),
           py::arg("example_value"),
           py::arg("guard_manager_enum"),
@@ -4506,6 +4804,7 @@ PyObject* torch_c_dynamo_guards_init() {
   py_m.def("install_object_aliasing_guard", install_object_aliasing_guard);
   py_m.def(
       "install_no_tensor_aliasing_guard", install_no_tensor_aliasing_guard);
+  py_m.def("install_symbolic_shape_guard", install_symbolic_shape_guard);
 
 // initialize dict_version_map watcher for 3.12
 #if IS_PYTHON_3_12_PLUS
