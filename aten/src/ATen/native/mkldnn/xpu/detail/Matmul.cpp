@@ -8,6 +8,7 @@
 #include <Utils.h>
 
 #include <oneapi/dnnl/dnnl.hpp>
+#include "c10/core/ScalarType.h"
 
 namespace at::native::onednn {
 
@@ -28,6 +29,9 @@ sycl::event matmul(
       dims == mat1.dim() && dims == mat2.dim(),
       "oneDNN input matrixes must have the same ranks");
   TORCH_CHECK(result.defined(), "oneDNN matmul result should be defined");
+  TORCH_CHECK(
+      mat1.scalar_type() != at::kShort,
+      "Short data type matmul is not supported in oneDNN");
 
   at::Device cur_device = at::Device(at::kXPU, c10::xpu::current_device());
   auto engine = GpuEngineManager::Instance().get_engine(cur_device);

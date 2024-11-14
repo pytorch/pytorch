@@ -126,18 +126,13 @@ class TestBasicGEMM(TestCase):
                     activation=activation,
                 )
 
-    @precisionOverride(
-        {
-            torch.float: 1e-4,
-            torch.double: 1e-8
-        }
-    )
+    @precisionOverride({torch.float: 1e-4, torch.double: 1e-8})
     @dtypes(torch.float32, torch.half, torch.double)
     def test_addmm(self, device, dtype):
         self._test_addmm_impl(torch.addmm, None, device, dtype)
 
     @precisionOverride({torch.bfloat16: 1e-0, torch.half: 1e-3, torch.float: 1e-4})
-    @dtypes(torch.bfloat16, torch.half, torch.float)
+    @dtypes(torch.bfloat16, torch.half, torch.float, torch.double)
     def test_addmv(self, device, dtype):
         # have to use torch.randn(...).to(bfloat16) instead of
         # torch.randn(..., dtype=bfloat16). randn does not support
@@ -406,23 +401,6 @@ class TestBasicGEMM(TestCase):
     def test_addbmm(self, device, dtype):
         num_batches = 2
         M, N, O = 16, 17, 18
-
-        is_supported = True
-
-        if not is_supported:
-            b1 = make_tensor(
-                (num_batches, M, N), dtype=dtype, device=device, low=-1, high=1
-            )
-            b2 = make_tensor(
-                (num_batches, N, O), dtype=dtype, device=device, low=-1, high=1
-            )
-            t = make_tensor((M, O), dtype=dtype, device=device, low=-1, high=1)
-            self.assertRaisesRegex(
-                RuntimeError,
-                "type|Type|not implemented|CUBLAS_STATUS_NOT_SUPPORTED",
-                lambda: torch.addbmm(t, b1, b2),
-            )
-            return
 
         def invert_perm(p):
             d = {x: i for i, x in enumerate(p)}
