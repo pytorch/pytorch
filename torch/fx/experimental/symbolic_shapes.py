@@ -2783,7 +2783,6 @@ class DimConstraints:
             t = transform(s)
             if t == s:
                 continue
-            print("t, s", t, s, s in self._static_results, s in self._dynamic_results)
             left, op, right = re.split(r"( == | <= | >= | < | > )", t)
             op = op.strip()
             if op == "==" and left == right:
