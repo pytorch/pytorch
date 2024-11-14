@@ -291,6 +291,41 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         os._exit(0)
 
     @skipIfRocm
+    @requires_cuda
+    def test_allow_overlapping_devices(self) -> None:
+        os.environ["TORCH_SYMM_MEM_ALLOW_OVERLAPPING_DEVICES"] = "1"
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend="nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        group_name = dist.group.WORLD.group_name
+        enable_symm_mem_for_group(group_name)
+
+        t = _SymmetricMemory.empty_strided_p2p(
+            (64,),
+            (1,),
+            dtype=torch.uint32,
+            device=torch.device("cuda:0"),
+            group_name=group_name,
+        ).fill_(0)
+        symm_mem_handle = _SymmetricMemory.rendezvous(t)
+
+        self.assertEqual(symm_mem_handle.rank, self.rank)
+        self.assertEqual(symm_mem_handle.world_size, self.world_size)
+
+        for rank in range(self.world_size):
+            buf = symm_mem_handle.get_buffer(rank, (64,), torch.float32)
+            if rank == self.rank:
+                self.assertEqual(buf.data_ptr(), t.data_ptr())
+            else:
+                self.assertEqual(buf.device, t.device)
+
+        dist.destroy_process_group()
+
+    @skipIfRocm
     @skip_if_lt_x_gpu(2)
     @parametrize("gather_dim", [0, 1])
     def test_fused_all_gather_matmul(self, gather_dim: int) -> None:
