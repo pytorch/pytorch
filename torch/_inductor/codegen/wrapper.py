@@ -241,7 +241,7 @@ def user_defined_kernel_grid_fn_code(
 def user_defined_triton_kernel_transitive_closure_source_code(kernel) -> str:
     """
     Given a triton kernel function pointer collect the transitive closure of
-    its dependancies
+    its dependencies
     """
     compile_wrapper = IndentedBuffer()
     compile_wrapper.splice(kernel.src, strip=True)
