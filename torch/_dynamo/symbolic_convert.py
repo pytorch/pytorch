@@ -1077,12 +1077,15 @@ class InstructionTranslatorBase(
         try:
             self.push(self.symbolic_locals[name].unwrap(), name=name)
         except KeyError:
-            try:
-                # This happens in dict/list comprehensions
-                new_name = name.replace(".", "implicit")
-                self.push(self.symbolic_locals[new_name], name=new_name)
-            except KeyError:
-                unimplemented("undefined LOAD_FAST (implicit)")
+            if name.startswith("."):
+                try:
+                    # This happens in dict/list comprehensions
+                    new_name = name.replace(".", "implicit")
+                    self.push(self.symbolic_locals[new_name], name=new_name)
+                except KeyError:
+                    unimplemented("undefined LOAD_FAST (implicit)")
+            else:
+                unimplemented("undefined LOAD_FAST")
 
         # for continuation functions
         if name.startswith("___stack"):
