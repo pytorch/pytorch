@@ -2111,7 +2111,7 @@ class GraphModule(torch.nn.Module):
         eager = EagerAndRecordGraphs()
         out = torch.compile(backend=eager, fullgraph=False)(f)(x)
         self.assertEqual(expected, out)
-        self.assertEqual(len(eager.graphs), 1)
+        self.assertEqual(len(eager.graphs), 3)
         self.assertExpectedInline(
             normalize_gm(eager.graphs[0].print_readable(False)),
             """\
@@ -2119,19 +2119,34 @@ class GraphModule(torch.nn.Module):
     def forward(self, L_x_: "f32[2]"):
         l_x_ = L_x_
 
-        y: "f32[2]" = l_x_.sin()
+        y: "f32[2]" = l_x_.sin();  l_x_ = None
+        return (y,)
+""",
+        )
 
-        z: "f32[2]" = l_x_.cos();  l_x_ = None
+        self.assertExpectedInline(
+            normalize_gm(eager.graphs[1].print_readable(False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_args_0_: "f32[2]"):
+        l_args_0_ = L_args_0_
 
-        neg: "f32[2]" = z.neg()
-        acos: "f32[2]" = z.acos();  z = None
+        cos: "f32[2]" = l_args_0_.cos();  l_args_0_ = None
+        return (cos,)
+""",
+        )
+
+        self.assertExpectedInline(
+            normalize_gm(eager.graphs[2].print_readable(False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[2]"):
+        l_x_ = L_x_
+
+        neg: "f32[2]" = l_x_.neg()
+        acos: "f32[2]" = l_x_.acos();  l_x_ = None
         add: "f32[2]" = neg + acos;  neg = acos = None
-
-        y += add;  y_1: "f32[2]" = y;  y = add = None
-
-        tan: "f32[2]" = y_1.tan()
-        y_1 += tan;  y_2: "f32[2]" = y_1;  y_1 = tan = None
-        return (y_2,)
+        return (add,)
 """,
         )
 
