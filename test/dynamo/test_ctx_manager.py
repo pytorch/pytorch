@@ -2160,6 +2160,7 @@ class GraphModule(torch.nn.Module):
         got = torch.compile(backend=eager, fullgraph=False)(fn)(t)
         self.assertEqual(expected, got)
         self.assertEqual(len(counters["graph_break"]), 1)
+        name = f"redirect_{name}" if name in ("stdout", "stderr") else name
         self.assertEqual(
             {f"<class 'contextlib.{name}'> not supported": 1},
             dict(counters["graph_break"]),
