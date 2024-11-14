@@ -459,7 +459,7 @@ class CKGemmTemplate(CKTemplate):
         if len(self.input_nodes) == 5:
             Bias = self.input_nodes[4]
             if 1 == scale_x.get_numel() and 1 == scale_w.get_numel():
-                op.c_elementwise_op = "Bilinear"
+                op.c_elementwise_op = "ScaleAdd"
             else:
                 op.c_elementwise_op = "MultiplyMultiplyAdd"
 
@@ -511,8 +511,8 @@ class CKGemmTemplate(CKTemplate):
         elif op.c_elementwise_op == "Scale":
             epilogue = "Scale { (inv_scale_w && inv_scale_x) ? (*inv_scale_w * *inv_scale_x) : 1.0f }"
 
-        elif op.c_elementwise_op == "Bilinear" and scale_w is not None:
-            epilogue = "Bilinear { (inv_scale_w && inv_scale_x) ? (*inv_scale_w * *inv_scale_x) : 1.0f, 1.0f }"
+        elif op.c_elementwise_op == "ScaleAdd":
+            epilogue = "ScaleAdd { (inv_scale_w && inv_scale_x) ? (*inv_scale_w * *inv_scale_x) : 1.0f }"
 
         elif op.c_elementwise_op == "MultiplyMultiply":
             epilogue = "MultiplyMultiply {}"

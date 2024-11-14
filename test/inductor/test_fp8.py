@@ -57,10 +57,7 @@ def _amax_to_scale(
 ) -> torch.Tensor:
     # To make scale dtype to be fp32 for accuracy
     amax = amax.float()
-    if float8_dtype == torch.float8_e4m3fn:
-        res = E4M3_MAX_POS / torch.clamp(amax, min=EPS)
-    else:  # e5m2
-        res = E5M2_MAX_POS / torch.clamp(amax, min=EPS)
+    res = torch.finfo(float8_dtype).max / torch.clamp(amax, min=EPS)
 
     # Ensure that the scale is representable in float16,
     # this helps when amax is small. We are assuming that we don't need
