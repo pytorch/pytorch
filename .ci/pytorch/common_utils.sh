@@ -82,9 +82,9 @@ function pip_install_whl() {
 function pip_install() {
   # retry 3 times
   pip_install_pkg="python3 -m pip install --progress-bar off"
-  ${pip_install_pkg} $@ || \
-    ${pip_install_pkg} $@ || \
-    ${pip_install_pkg} $@
+  ${pip_install_pkg} "$@" || \
+    ${pip_install_pkg} "$@" || \
+    ${pip_install_pkg} "$@"
 }
 
 function pip_uninstall() {
