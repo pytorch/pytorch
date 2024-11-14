@@ -7812,7 +7812,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         torch.compile(my_dyn_fn, backend=counter)(y)
 
         z = torch.randn([4])
-        torch.compile(my_dyn_fn, backend=counter)(y)
+        torch.compile(my_dyn_fn, backend=counter)(z)
 
         self.assertEqual(counter.frame_count, 2)
 
