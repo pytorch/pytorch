@@ -1228,7 +1228,13 @@ def flex_attention(
     if score_mod is None:
         score_mod = _identity
     elif query.is_nested:
-        score_mod = _nested_mod_func_adapter(score_mod, query, key, is_score_mod=True)  # type: ignore[assignment]
+        # use same NJT if the ragged structures for sequence lengths match between q and kv
+        kv = (
+            query
+            if query.size(query._ragged_idx) == key.size(query._ragged_idx)  # type: ignore[attr-defined]
+            else key
+        )
+        score_mod = _nested_mod_func_adapter(score_mod, query, kv, is_score_mod=True)  # type: ignore[assignment]
 
     if block_mask is None:
         block_mask = _create_empty_block_mask(query, key)
