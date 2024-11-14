@@ -4708,8 +4708,8 @@ class TestLinalg(TestCase):
         # case 5
         q = torch.randn([16, 16, 1024, 64], device=device, dtype=dtype)
         k = torch.randn([16, 16, 1024, 64], device=device, dtype=dtype)
-        q_chunks = q.split(512, dim = -2)
-        k_chunks = k.split(64, dim = -2)
+        q_chunks = q.split(512, dim=-2)
+        k_chunks = k.split(64, dim=-2)
         C = torch.matmul(q_chunks[0], k_chunks[0])
         # clean up, remove any file that was generated
         try:
