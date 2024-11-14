@@ -1069,24 +1069,15 @@ class InstructionTranslatorBase(
     def popn(self, n: int) -> List[VariableTracker]:
         return [*reversed([self.pop() for _ in range(n)])]
 
-    def _load_closure(self, name):
-        return self.symbolic_locals[name]
-
-    def _load_fast(self, name):
+    def LOAD_FAST(self, inst):
+        name = inst.argval
         if self.exec_recorder and name in self.f_locals:
             self.exec_recorder.add_local_var(name, self.f_locals[name])
 
         try:
             self.push(self.symbolic_locals[name].unwrap(), name=name)
         except KeyError:
-            if sys.version_info >= (3, 13) and name in self.cell_and_freevars():
-                # 3.13 merged LOAD_CLOSURE into LOAD_FAST
-                # If we fail to LOAD_FAST, then we probably should have done LOAD_CLOSURE.
-                # Closure variable creation is actually done in SET_FUNCTION_ATTRIBUTE,
-                # but we'll do it again here so that we don't need to push a dummy variable.
-                # We shouldn't actually be doing anything with this variable anyway.
-                self.push(self._load_closure(name), name=name)
-            elif name.startswith("."):
+            if name.startswith("."):
                 try:
                     # This happens in dict/list comprehensions
                     new_name = name.replace(".", "implicit")
@@ -1100,9 +1091,6 @@ class InstructionTranslatorBase(
         if name.startswith("___stack"):
             self.symbolic_locals.pop(name)
 
-    def LOAD_FAST(self, inst):
-        self._load_fast(inst.argval)
-
     def LOAD_DEREF(self, inst):
         assert inst.argval in self.cell_and_freevars()
         cell = self.symbolic_locals[inst.argval]
@@ -1112,18 +1100,17 @@ class InstructionTranslatorBase(
         if self.exec_recorder and inst.argval in self.f_locals:
             self.exec_recorder.add_local_var(inst.argval, self.f_locals[inst.argval])
 
-    def _store_fast(self, name):
+    def STORE_FAST(self, inst):
+        name = inst.argval
         loaded_vt = self.pop()
         loaded_vt.set_name_hint(name)
         self.symbolic_locals[name] = loaded_vt
-
-    def STORE_FAST(self, inst):
-        self._store_fast(inst.argval)
 
     def DELETE_FAST(self, inst):
         del self.symbolic_locals[inst.argval]
 
     def STORE_DEREF(self, inst):  # type: ignore[override]
+        assert inst.argval in self.cell_and_freevars()
         cell = self.symbolic_locals[inst.argval]
         val = self.pop()
         self.output.side_effects.store_cell(cell, val)
@@ -1132,8 +1119,7 @@ class InstructionTranslatorBase(
         if cell.is_root_frame_cell():
             val.set_name_hint(cell.source.local_name)  # type: ignore[attr-defined]
 
-    def LOAD_CLOSURE(self, inst):
-        self.push(self._load_closure(inst.argval))
+    LOAD_CLOSURE = LOAD_FAST
 
     def _load_const(self, inst):
         i = inst.arg
@@ -2502,9 +2488,7 @@ class InstructionTranslatorBase(
             assert isinstance(attr_names, tuple) and all(
                 isinstance(name, str) for name in attr_names
             )
-            fn.closure = TupleVariable(
-                [self._load_closure(name) for name in attr_names]
-            )
+            fn.closure = TupleVariable([self.LOAD_FAST(name) for name in attr_names])
         elif flags & 0x04:
             fn.annotations = attr
         elif flags & 0x02:
@@ -3124,7 +3108,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         result = InliningInstructionTranslator.check_inlineable(func)
         assert result.skipped is False
         try:
-            sub_locals, closure_cells = func.bind_args(parent, args, kwargs)
+            sub_locals = func.bind_args(parent, args, kwargs)
         except TypeError as e:
             # Wrap the general TypeError during bind_args() to the internal ArgsMismatchError with detailed info
             raise ArgsMismatchError(  # noqa: B904
@@ -3136,7 +3120,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 ),
             )
 
-        for v in itertools.chain(sub_locals.values(), closure_cells.values()):
+        for v in itertools.chain(sub_locals.values()):
             if not isinstance(v, VariableTracker):
                 unimplemented(f"unconverted arg {v}")
 
@@ -3186,7 +3170,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 sub_locals,
                 parent.symbolic_globals,
                 parent.symbolic_torch_function_state,
-                closure_cells,
                 func,
             )
         else:
@@ -3196,7 +3179,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 sub_locals,
                 parent.symbolic_globals,
                 parent.symbolic_torch_function_state,
-                closure_cells,
                 func,
             )
 
@@ -3248,7 +3230,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         symbolic_locals: Dict[str, VariableTracker],
         symbolic_globals: Dict[str, VariableTracker],
         symbolic_torch_function_state: SymbolicTorchFunctionState,
-        closure_cells: Dict[str, VariableTracker],
         funcvar: BaseUserFunctionVariable,
     ) -> None:
         f_globals = funcvar.get_globals()  # type: ignore[attr-defined]
@@ -3275,7 +3256,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         )
         self.parent = parent
         self.symbolic_result = None
-        self.closure_cells = closure_cells
         self.nn_module_stack = parent.nn_module_stack.copy()
         self.one_graph = parent.one_graph
 
@@ -3285,22 +3265,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
     def run_ctx_mgr(self):
         return TracingContext.current_frame(self.parent.frame_summary())
-
-    def STORE_DEREF(self, inst):  # type: ignore[override]
-        assert inst.argval in self.closure_cells
-        cell = self.closure_cells[inst.argval]
-        val = self.pop()
-        self.output.side_effects.store_cell(cell, val)
-
-    def LOAD_DEREF(self, inst):
-        assert inst.argval in self.closure_cells
-        cell = self.closure_cells[inst.argval]
-        self.push(self.output.side_effects.load_cell(cell))
-
-    def _load_closure(self, name):
-        assert name in self.cell_and_freevars()
-        assert name in self.closure_cells
-        return self.closure_cells[name]
 
     def should_compile_partial_graph(self):
         return False  # inlining functions is all-or-nothing
