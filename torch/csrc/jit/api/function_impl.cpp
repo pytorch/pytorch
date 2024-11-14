@@ -13,6 +13,7 @@
 #include <torch/csrc/jit/passes/autocast.h>
 #endif
 
+// clang-format off
 C10_DEFINE_bool(
     torch_jit_do_not_store_optimized_graph,
     false,

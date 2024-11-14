@@ -618,12 +618,21 @@ def decide_compile_threads() -> int:
     2. Set to 1 if it's win32 platform
     3. decide by the number of CPU cores
     """
+    import logging
+
+    # Defined locally so install_config_module doesn't try to parse
+    # as a config option.
+    log = logging.getLogger(__name__)
+
     if "TORCHINDUCTOR_COMPILE_THREADS" in os.environ:
-        return int(os.environ["TORCHINDUCTOR_COMPILE_THREADS"])
+        compile_threads = int(os.environ["TORCHINDUCTOR_COMPILE_THREADS"])
+        log.info("compile_threads set to %d via env", compile_threads)
     elif sys.platform == "win32":
-        return 1
+        compile_threads = 1
+        log.info("compile_threads set to 1 for win32")
     elif is_fbcode() and not parallel_compile_enabled_internally():
-        return 1
+        compile_threads = 1
+        log.info("compile_threads set to 1 in fbcode")
     else:
         cpu_count = (
             len(os.sched_getaffinity(0))
@@ -631,7 +640,10 @@ def decide_compile_threads() -> int:
             else os.cpu_count()
         )
         assert cpu_count
-        return min(32, cpu_count)
+        compile_threads = min(32, cpu_count)
+        log.info("compile_threads set to %d", compile_threads)
+
+    return compile_threads
 
 
 # TODO: Set directly after internal rollout.
@@ -882,6 +894,12 @@ class cpp:
 
     # Whether to enable masked vectorization for the tail_loop.
     enable_loop_tail_vec = True
+
+    # Whether to enable concat linear for cpu device
+    # Currently concat linear on CPU not always have benefit, depends on linear'shape or
+    # computing resource. We set this default to False to avoid regressions. User and
+    # enable this feature by their need.
+    enable_concat_linear = False
 
 
 # config specific to codegen/triton.py

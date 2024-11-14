@@ -139,7 +139,7 @@ class IntrusivePtrNoGilDestructor {
 
 } // anonymous namespace
 
-PYBIND11_DECLARE_HOLDER_TYPE(T, IntrusivePtrNoGilDestructor<T>, true);
+PYBIND11_DECLARE_HOLDER_TYPE(T, IntrusivePtrNoGilDestructor<T>, true)
 
 namespace torch::distributed::c10d {
 
@@ -1118,13 +1118,21 @@ This class does not support ``__members__`` property.)");
           py::arg("src_rank"),
           py::arg("channel") = 0,
           py::arg("timeout_ms") = 0)
-      .def(
-          "stream_write_value32",
-          &SymmetricMemory::stream_write_value32,
-          py::arg("addr"),
-          py::arg("val"))
       // Util functions that are often used together with symmetric memory but
       // not necessarily directly on symmetric memory.
+      .def_static(
+          "stream_write_value32",
+          [](at::Tensor& input, int64_t offset, int64_t val) {
+            // The range of `val` is checked inside the op
+            auto op =
+                c10::Dispatcher::singleton()
+                    .findSchemaOrThrow("symm_mem::stream_write_value32_", "")
+                    .typed<at::Tensor(at::Tensor&, int64_t, int64_t)>();
+            return op.call(input, offset, val);
+          },
+          py::arg("input"),
+          py::arg("offset"),
+          py::arg("val"))
       .def_static(
           "memset32",
           [](at::Tensor& input, int64_t offset, int64_t val, int64_t count) {

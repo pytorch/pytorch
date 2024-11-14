@@ -149,6 +149,39 @@ class DistributedPatternTests(TestCase):
         self.assertEqual(x0.grad, x2.grad)
         self.assertEqual(x1.grad, x3.grad)
 
+    def test_intermediate_hook_with_nested_closure(self):
+        @dataclasses.dataclass
+        class CustomObj:
+            val: torch.Tensor
+
+        def fn(x, obj):
+            def run():
+                y = x.sin()
+                closure_var = y + 1
+                y.register_hook(lambda grad: grad + obj.val + closure_var)
+                z = y.sin()
+                return z
+
+            return run()
+
+        opt = torch.compile(fn, fullgraph=True)
+
+        obj1 = CustomObj(torch.tensor(88))
+        obj2 = CustomObj(torch.tensor(99))
+        x0 = torch.ones(4, requires_grad=True)
+        x1 = torch.ones(4, requires_grad=True)
+        x2 = torch.ones(4, requires_grad=True)
+        x3 = torch.ones(4, requires_grad=True)
+        fn(x0, obj1).sum().backward()
+        fn(x1, obj2).sum().backward()
+
+        with compiled_autograd.enable(functools.partial(torch.compile, fullgraph=True)):
+            opt(x2, obj1).sum().backward()
+            opt(x3, obj2).sum().backward()
+
+        self.assertEqual(x0.grad, x2.grad)
+        self.assertEqual(x1.grad, x3.grad)
+
     @torch.no_grad()
     def _test_storage_resize_zero(self, device):
         @torch.compile(fullgraph=True)

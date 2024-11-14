@@ -69,7 +69,7 @@ class TestEmbeddingOp(DTensorTestBase):
 
         # Shard the parameter of local embedding and set it to sharded embedding.
         sharded_embedding.weight = torch.nn.Parameter(
-            local_embedding.weight.clone().detach()
+            local_embedding.weight.detach().clone()
         )
 
         sharded_embedding = self._apply_sharding(
