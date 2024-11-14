@@ -4107,7 +4107,7 @@ class DistributedTest:
                     self.assertGreaterAlmostEqual(
                         float(time.time()),
                         float(expected_time[0]),
-                        "destination rank: %d, my rank: %d" % (dest, rank)
+                        msg="destination rank: %d, my rank: %d" % (dest, rank)
                         + " (if you see this failure, please report in #14554)",
                     )
 
@@ -4864,6 +4864,7 @@ class DistributedTest:
             "Failing with gloo backend + torchvision due to ongoing issue https://github.com/pytorch/pytorch/issues/111834",
         )
         @skip_if_lt_x_gpu(2)
+        @skip_if_odd_worldsize
         def test_ddp_apply_optim_in_backward(self):
             for optim_cls, init_before in itertools.product(
                 [torch.optim.SGD, torch.optim.Adam], [True, False]
@@ -4880,6 +4881,7 @@ class DistributedTest:
             "Failing with gloo backend + torchvision due to ongoing issue https://github.com/pytorch/pytorch/issues/111834",
         )
         @skip_if_lt_x_gpu(2)
+        @skip_if_odd_worldsize
         def test_ddp_apply_optim_in_backward_grad_as_bucket_view_false(self):
             for init_before in [True, False]:
                 self._test_ddp_apply_optim_in_backward(
@@ -6735,7 +6737,7 @@ class DistributedTest:
 
             b = Bar()
             gather_objects = [b for _ in range(dist.get_world_size())]
-            with self.assertRaisesRegex(AttributeError, "Can't pickle local object"):
+            with self.assertRaisesRegex(AttributeError, "Can't (get|pickle) local object"):
                 dist.all_gather_object(
                     [None for _ in range(dist.get_world_size())],
                     gather_objects[self.rank],
@@ -7049,6 +7051,7 @@ class DistributedTest:
 
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_if_lt_x_gpu(2)
+        @skip_if_odd_worldsize
         @skip_but_pass_in_sandcastle_if(IS_FBCODE, "Kineto in fbcode code causes hang")
         @skip_but_pass_in_sandcastle_if(
             IS_MACOS or IS_WINDOWS,
