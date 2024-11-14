@@ -68,6 +68,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TestCase,
 )
+from torch.utils.cpp_extension import load_inline
 
 
 if TEST_WITH_DEV_DBG_ASAN:
@@ -2924,19 +2925,21 @@ class NcclUserBufferRegistrationTest(MultiProcessTestCase):
     allocator_path = None
 
     def createNcclAllocator(self):
-        from torch.utils.cpp_extension import load_inline
         nccl_allocator_source = """
         #include <torch/extension.h>
         #include <nccl.h>
         #include <iostream>
+
         extern "C" {
+
           // Note that windows needs __declspec(dllexport): https://stackoverflow.com/a/24575865
-          C10_EXPORT void* nccl_alloc(size_t size, int device, void* stream) { 
+          C10_EXPORT void* nccl_alloc(size_t size, int device, void* stream) {
             std::cout << "Using ncclMemAlloc" << std::endl;
             void* ptr;
             ncclResult_t err = ncclMemAlloc(&ptr, size);
             return ptr;
           }
+
           C10_EXPORT void nccl_free(void* ptr, size_t size, int device, void* stream) {
             std::cout << "Using ncclMemFree" << std::endl;
             ncclResult_t err = ncclMemFree(ptr);
