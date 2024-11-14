@@ -596,15 +596,16 @@ class GuardBuilder(GuardBuilderBase):
 
         # Iterate over the dicts and install a dict_getitem_manager.
         dict_source = guard.originating_source.name()
-        for key in example_value.keys():
+        for ind, key in enumerate(example_value.keys()):
+            key_source = ConstDictKeySource(guard.originating_source, ind)
             value = example_value[key]
-            value_source = GetItemSource(guard.originating_source, index=key)
+            value_source = GetItemSource(guard.originating_source, index=key_source)
             guard_manager_enum = self.get_guard_manager_type(
                 value_source, example_value
             )
             dict_mgr.dict_getitem_manager(
                 key=key,
-                source=f"{dict_source}[{key!r}]",
+                source=f"{dict_source}[{key_source.name()}]",
                 example_value=value,
                 guard_manager_enum=guard_manager_enum,
             )
