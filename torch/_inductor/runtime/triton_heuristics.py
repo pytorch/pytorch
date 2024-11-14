@@ -63,6 +63,13 @@ if triton is not None:
     from . import triton_helpers
 
     try:
+        from triton.runtime.autotuner import PTXASError
+    except ImportError:
+
+        class PTXASError(Exception):  # type: ignore[no-redef]
+            pass
+
+    try:
         from triton.compiler.compiler import ASTSource
     except ImportError:
         ASTSource = None
@@ -74,9 +81,14 @@ if triton is not None:
 else:
     from types import ModuleType
 
+    class OutOfResources(Exception):  # type: ignore[no-redef]
+        pass
+
+    class PTXASError(Exception):  # type: ignore[no-redef]
+        pass
+
     Config = object
     KernelInterface = object
-    OutOfResources = object
     ASTSource = None
     GPUTarget = None
     triton_helpers = ModuleType("triton_helpers")
@@ -275,11 +287,12 @@ class CachingAutotuner(KernelInterface):
                     compiled_binary, launcher = self._precompile_config(
                         c, warm_cache_only
                     )
-                except OutOfResources as e:
+                except (OutOfResources, PTXASError) as e:
                     if len(self.configs) == 1:
                         # There are no valid Triton configs
                         raise e
-                    # Skip the config if we run out of resource
+                    # Skip the config if we run out of
+                    # resources or into a ptxas error
                     continue
                 self.launchers.append(launcher)
                 compiled_binaries.append(compiled_binary)
@@ -1070,15 +1083,20 @@ def end_graph(output_file):
         f"SUMMARY ({cur_file})\n"
         f"{overall_time:.2f}ms   \t {overall_gb:.2f} GB\t {overall_gb / (overall_time / 1e3):.2f}GB/s"
     )
-    print(summary_str)
-    print()
+    log.info(
+        "%s",
+        summary_str,
+    )
     if output_file is not None:
         # sort perf numbers in descending order, i.e. placing the
         # most runtime-heavy kernels at the top of the list
         sorted_calls = sorted(collected_calls, key=lambda c: float(c[0]), reverse=True)
         try:
             with open(output_file, "a") as file:
-                log.debug("Save profile bandwidth results to %s", output_file)
+                log.info(
+                    "Save profile bandwidth results to %s",
+                    output_file,
+                )
                 file.write("====================\n")
                 file.write(f"TRITON KERNELS BANDWIDTH INFO ({cur_file})\n")
                 for ms, num_gb, gb_per_s, kernel_name in sorted_calls:
@@ -1103,42 +1121,68 @@ def end_graph(output_file):
 
 
 class DebugAutotuner(CachingAutotuner):
-    def __init__(self, *args, regex_filter="", with_profiler=False, **kwargs):
+    def __init__(
+        self,
+        *args,
+        regex_filter="",
+        with_profiler=False,
+        with_bandwidth_info=True,
+        **kwargs,
+    ):
         self.regex_filter = regex_filter
         self.with_profiler = with_profiler
+        self.with_bandwidth_info = with_bandwidth_info
         super().__init__(*args, **kwargs)
         self.cached = None
 
     def run(self, *args, grid, stream, **kwargs):
-        possible_names = _find_names(self)
-        kernel_name = f"{max(possible_names, key=len)}"
-        if not re.match(self.regex_filter, kernel_name):
+        if not self.with_bandwidth_info:
+            super().run(*args, grid=grid, stream=stream, **kwargs, benchmark_run=True)
             return
-        super().run(*args, grid=grid, stream=stream, **kwargs)
-        (launcher,) = self.launchers
+        else:
+            possible_names = _find_names(self)
+            kernel_name = f"{max(possible_names, key=len)}"
+            if not re.match(self.regex_filter, kernel_name):
+                return
 
-        if self.cached is None:
-            ms = self.bench(
-                launcher, *args, grid=grid, with_profiler=self.with_profiler
-            )
-            num_in_out_ptrs = len(
-                [
-                    arg_name
-                    for arg_name in self.fn.arg_names
-                    if arg_name.startswith("in_out_ptr")
-                ]
-            )
-            num_gb = self.inductor_meta.get("kernel_num_gb", None)
-            if num_gb is None:
-                num_gb = get_num_bytes(*args, num_in_out_args=num_in_out_ptrs) / 1e9
-            gb_per_s = num_gb / (ms / 1e3)
-            self.cached = ms, num_gb, gb_per_s, kernel_name
-            collected_calls.append((ms, num_gb, gb_per_s, kernel_name))
-            print(
-                create_bandwidth_info_str(
-                    ms, num_gb, gb_per_s, suffix=f" \t {kernel_name}"
+            if len(self.launchers) != 1:
+                if len(self.launchers) == 0:
+                    start_time = time.time_ns()
+                    self.precompile()
+                    self.precompile_time_taken_ns = time.time_ns() - start_time
+                if len(self.launchers) > 1:
+                    self.autotune_to_one_config(*args, grid=grid, **kwargs)
+            (launcher,) = self.launchers
+
+            if launcher.store_cubin:
+                self.save_gpu_kernel(grid, stream, launcher)
+
+            if self.cached is None:
+                ms = self.bench(
+                    launcher, *args, grid=grid, with_profiler=self.with_profiler
                 )
-            )
+                num_in_out_ptrs = len(
+                    [
+                        arg_name
+                        for arg_name in self.fn.arg_names
+                        if arg_name.startswith("in_out_ptr")
+                    ]
+                )
+                num_gb = self.inductor_meta.get("kernel_num_gb", None)
+                if num_gb is None:
+                    num_gb = get_num_bytes(*args, num_in_out_args=num_in_out_ptrs) / 1e9
+                gb_per_s = num_gb / (ms / 1e3)
+                self.cached = ms, num_gb, gb_per_s, kernel_name
+                collected_calls.append((ms, num_gb, gb_per_s, kernel_name))
+                log.info(
+                    "%s",
+                    create_bandwidth_info_str(
+                        ms, num_gb, gb_per_s, suffix=f" \t {kernel_name}"
+                    ),
+                )
+            else:
+                # in AOTI, we will call the kernel and its timing info has been cached already
+                collected_calls.append(self.cached)
 
 
 def hash_configs(configs: List[Config]):
@@ -1226,6 +1270,7 @@ def cached_autotune(
                 size_hints=size_hints,
                 custom_kernel=custom_kernel,
                 filename=filename,
+                with_bandwidth_info=True,
             )
         return CachingAutotuner(
             fn,
@@ -1809,42 +1854,29 @@ def template(num_stages, num_warps, triton_meta, filename=None, inductor_meta=No
     )
 
 
-def _pop_config_kwargs(config: Dict[str, Any]) -> Dict[str, Any]:
-    """Extract triton.Config options that should become kwargs"""
-    popped = {}
-    for key in ("num_warps", "num_stages", "num_ctas", "maxnreg"):
-        val = config.pop(key, None)
-        if val is not None:
-            popped[key] = val
-    return popped
-
-
-def fixed_config(config, filename, triton_meta, inductor_meta):
-    """
-    Used when the configuration is already decided at compile time
-    """
-    config = {**config}
-    return cached_autotune(
-        None,
-        [triton.Config(config, **_pop_config_kwargs(config))],
-        triton_meta=triton_meta,
-        inductor_meta=inductor_meta,
-        heuristic_type=HeuristicType.FIXED,
-        filename=filename,
-    )
-
-
 def user_autotune(
     configs, triton_meta, filename=None, inductor_meta=None, custom_kernel=False
 ):
     """
     Compile a user defined triton kernel
     """
+    defaults = inspect.signature(triton.Config).parameters
+    default_num_stages = defaults["num_stages"].default
+    default_num_warps = defaults["num_warps"].default
+
     if len(configs) == 0:
-        configs = [triton.Config({})]
+        configs = [
+            triton.Config(
+                {}, num_stages=default_num_stages, num_warps=default_num_warps
+            )
+        ]
     else:
         configs = [
-            triton.Config(c.get("kwargs", {}), **_pop_config_kwargs({**c}))
+            triton.Config(
+                c.get("kwargs", {}),
+                num_stages=c.get("num_stages", default_num_stages),
+                num_warps=c.get("num_warps", default_num_warps),
+            )
             for c in configs
         ]
     return cached_autotune(

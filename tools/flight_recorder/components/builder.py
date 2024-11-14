@@ -412,7 +412,7 @@ def build_collectives(
             logger.error(
                 "Too many mismatches for process_group %s: %s aborting", pg_name, desc
             )
-            sys.exit(-1)
+            break
 
     return tracebacks, collectives, nccl_calls
 
