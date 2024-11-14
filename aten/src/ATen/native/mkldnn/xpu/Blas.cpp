@@ -21,7 +21,7 @@ namespace at::native {
 namespace xpu {
 
 // result = beta * self + alpha * (mat1 * mat2)
-Tensor addmm_out(
+Tensor& addmm_out(
     const Tensor& self,
     const Tensor& mat1,
     const Tensor& mat2,
