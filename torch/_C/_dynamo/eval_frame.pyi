@@ -1,12 +1,8 @@
 # mypy: allow-untyped-defs
 import types
-from typing import NewType
+from typing import Dict, NewType
 
 from torch._dynamo.types import DynamoCallback, DynamoGuardHook
-
-# We implement our own FrameType-like type for Python >= 3.11. So it's not actually an alias of FrameType, but still
-# exposes the same interface.
-_PyInterpreterFrame = NewType("_PyInterpreterFrame", types.FrameType)
 
 # For typechecking
 SkipCodeRecursiveFlag = NewType("SkipCodeRecursiveFlag", object)
@@ -30,6 +26,17 @@ class _CacheEntry:
 
 class _ExtraState:
     def invalidate(self, cache_entry: _CacheEntry): ...
+
+# This is an object that encapsulates the Python FrameType, and exposes
+# properties Dynamo cares about for a frame.
+class _PyInterpreterFrame:
+    f_code: types.CodeType
+    f_locals: Dict[str, object]
+    f_globals: Dict[str, object]
+    f_builtins: Dict[str, object]
+    f_lasti: int
+    f_lineo: int
+    f_back: types.FrameType
 
 def _debug_get_cache_entry_list(code: types.CodeType) -> list[_CacheEntry]: ...
 

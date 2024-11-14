@@ -35,6 +35,7 @@ from .bytecode_transformation import (
     transform_code_object,
 )
 from .guards import CheckFunctionManager, CompileId, GuardedCode
+from .types import DynamoFrameType
 from .utils import same
 
 
@@ -164,7 +165,7 @@ def debug_dump(name: str, code: types.CodeType, extra: str = "") -> None:
 
 
 def debug_insert_nops(
-    frame: types.FrameType, cache_size: int, hooks: Any, _: Any, *, skip: int = 0
+    frame: DynamoFrameType, cache_size: int, hooks: Any, _: Any, *, skip: int = 0
 ) -> Optional[GuardedCode]:
     """used to debug jump updates"""
 
