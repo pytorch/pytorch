@@ -1335,6 +1335,10 @@
     "set_printoptions",
     "unique"
   ],
+  "torch.accelerator": [
+    "set_device_idx",
+    "current_device_idx"
+  ],
   "torch.ao.ns.fx.graph_matcher": [
     "Any",
     "Dict",

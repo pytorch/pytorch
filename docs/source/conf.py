@@ -158,6 +158,9 @@ coverage_ignore_functions = [
     "get_model_info",
     "get_storage_info",
     "hierarchical_pickle",
+    # torch.accelerator
+    "current_device_idx",
+    "set_device_idx",
     # torch.amp.autocast_mode
     "autocast_decorator",
     # torch.ao.nn.quantized.dynamic.modules.rnn
