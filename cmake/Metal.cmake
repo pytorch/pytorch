@@ -2,8 +2,13 @@ if(NOT APPLE)
     return()
 endif()
 
+set(METAL_CFLAGS -Wall -Wextra -fno-fast-math)
+if(WERROR)
+    string(APPEND METAL_CFLAGS -Werror)
+endif()
+
 function(metal_to_air SRC TARGET FLAGS)
-    add_custom_command(COMMAND xcrun metal -c ${SRC} -o ${TARGET} ${FLAGS} -Wall -Wextra -fno-fast-math
+    add_custom_command(COMMAND xcrun metal -c ${SRC} -o ${TARGET} ${FLAGS} ${METAL_CFLAGS}
                        DEPENDS ${SRC}
                        OUTPUT ${TARGET}
                        COMMENT "Compiling ${SRC} to ${TARGET}"

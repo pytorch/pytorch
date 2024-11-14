@@ -170,7 +170,7 @@ class TensorArg:
     name: str
     buffer: str
     dtype: torch.dtype
-    offset: sympy.Expr = sympy.Integer(0)  # c++ only
+    offset: sympy.Expr = sympy.S.Zero  # c++ only
     alias_of: Optional[str] = None  # halide only
 
 
@@ -2687,6 +2687,7 @@ class KernelTemplate:
     def maybe_append_choice(self, choices, **kwargs):
         """
         Maybe generates a new ChoiceCaller and appends it into existing choices.
+        Returns None if success, otherwise returns the error.
 
         choices: A list of ChoiceCallers.
         kwargs: Additional kwargs to be passed to self.generate() to generate a new ChoiceCaller.
@@ -2694,8 +2695,9 @@ class KernelTemplate:
 
         try:
             choices.append(self.generate(**kwargs))
+            return None
         except NotImplementedError as e:
-            pass
+            return e
 
     def generate(self, **kwargs) -> "torch._inductor.ir.ChoiceCaller":
         """

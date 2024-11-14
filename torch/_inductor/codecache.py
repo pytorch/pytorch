@@ -55,6 +55,7 @@ import torch.distributed as dist
 from torch import SymInt, Tensor
 from torch._dynamo.utils import (
     add_remote_cache_time_saved,
+    codecache_metrics,
     counters,
     dynamo_timed,
     get_chromium_event_logger,
@@ -96,7 +97,6 @@ from torch._inductor.cpp_builder import (
     CppOptions,
     CppTorchDeviceOptions,
     get_compiler_version_info,
-    get_cpp_compiler,
     get_name_and_dir_from_output_file_path,
     normalize_path_separator,
 )
@@ -1145,20 +1145,30 @@ class FxGraphCache:
             triton_bundler_meta = TritonBundler.read_and_emit(bundle)
             if (meta := triton_bundler_meta) is not None:
                 cache_info["triton_bundler_meta"] = str(meta)
-                get_chromium_event_logger().add_event_data(
-                    "inductor_compile", cached_kernel_names=meta.cached_kernel_names
-                )
+                logger = get_chromium_event_logger()
+                if "inductor_compile" in logger.get_stack():
+                    # TODO: Clean up autograd cache integration
+                    logger.add_event_data(
+                        "inductor_compile", cached_kernel_names=meta.cached_kernel_names
+                    )
+                if len(meta.cached_kernel_names) > 0:
+                    codecache_metrics["num_triton_bundles"] += 1
 
         inductor_meta = autotune_cache.inductor_meta_from_config()
         AutotuneCacheBundler.begin_compile(inductor_meta, code=code)
 
         try:
-            graph.current_callable = PyCodeCache.load_by_key_path(
-                graph.cache_key,
-                artifact_path,
-                graph.cache_linemap,
-                graph.get_constants(gm),
-            ).call
+            with dynamo_timed(
+                "PyCodeCache.load_by_key_path",
+                log_pt2_compile_event=True,
+                fwd_only=False,
+            ):
+                graph.current_callable = PyCodeCache.load_by_key_path(
+                    graph.cache_key,
+                    artifact_path,
+                    graph.cache_linemap,
+                    graph.get_constants(gm),
+                ).call
         except OSError:
             # Not expected, but in case the PyCodeCache entry is removed from
             # underneath us, treat it as a cache miss and recompile.
@@ -1329,9 +1339,9 @@ class FxGraphCache:
                 "static across runs"
             )
 
-        from torch._inductor.bisect_helper import BisectionManager
+        from torch._inductor.compiler_bisector import CompilerBisector
 
-        if BisectionManager.bisection_enabled:
+        if CompilerBisector.bisection_enabled:
             log.debug("dont cache graph when bisect enabled")
             raise BypassFxGraphCache
 
@@ -1499,13 +1509,20 @@ class FxGraphCache:
             assert compiled_graph is None
             assert key_info is not None
             start_time = cache_info["cache_event_time"]
-            compiled_graph = compile_fx_fn(
-                gm, example_inputs, inputs_to_check, fx_kwargs
-            )
-            compiled_graph._time_taken_ns = time_ns() - start_time
-            cache_key = key_info[0]
-            compiled_graph._fx_graph_cache_key = cache_key
-            compiled_graph._triton_bundle, triton_bundler_meta = TritonBundler.collect()
+            TritonBundler.begin_compile()
+            try:
+                compiled_graph = compile_fx_fn(
+                    gm, example_inputs, inputs_to_check, fx_kwargs
+                )
+                compiled_graph._time_taken_ns = time_ns() - start_time
+                cache_key = key_info[0]
+                compiled_graph._fx_graph_cache_key = cache_key
+                (
+                    compiled_graph._triton_bundle,
+                    triton_bundler_meta,
+                ) = TritonBundler.collect()
+            finally:
+                TritonBundler.end_compile()
             if triton_bundler_meta is not None:
                 cache_info["triton_bundler_meta"] = str(triton_bundler_meta)
             cache_info["time_taken_ns"] = compiled_graph._time_taken_ns
@@ -1768,19 +1785,11 @@ class AotCodeCompiler:
         # guarantee the source code hash contains ISA difference.
         cpp_command = repr(vec_isa_cmd_gen.get_command_line())
 
-        fbcode_aot_cpu_re = False
-        use_absolute_path = False
-        if config.is_fbcode():
-            ld_command = build_paths.ld
-            if device_type == "cpu" and graph.aot_mode:  # Meta internal AOTInductor CPU
-                objcopy_command = build_paths.objcopy_fallback
-                fbcode_aot_cpu_re = True
-                use_absolute_path = True
-            else:
-                objcopy_command = build_paths.objcopy
-        else:
-            ld_command = "ld -z noexecstack"
-            objcopy_command = "objcopy"
+        # Meta internal AOTInductor CPU
+        fbcode_aot_cpu_re = (
+            config.is_fbcode() and device_type == "cpu" and graph.aot_mode
+        )
+        use_absolute_path = fbcode_aot_cpu_re
 
         (
             specified_output_path,
@@ -1804,91 +1813,35 @@ class AotCodeCompiler:
         )
 
         # We use a file lock below to protect FS operations. The lock file
-        # is scoped to the 'key', so make sure the consts_path is protected
+        # is scoped to the 'key', so make sure the consts_s is protected
         # by the same lock:
         consts_specified_dir = os.path.join(os.path.split(input_path)[0], key)
 
-        def _compile_consts_linux(consts: bytes) -> str:
-            _, consts_path = write(
-                consts,
-                "bin",
-                specified_dir=consts_specified_dir,
-            )
-
-            consts_o = os.path.splitext(consts_path)[0] + ".o"
-            if fbcode_aot_cpu_re:
-                cmd = f"{ld_command} -r -b binary -o {os.path.basename(consts_o)} {os.path.basename(consts_path)}"
-                compile_file(consts_path, consts_o, cmd.split())
-                os.chmod(consts_o, 0o644)
+        def _compile_consts(consts: bytes, platform: str) -> str:
+            if platform == "linux":
+                if graph.mutated_buffers & set(graph.constants.keys()):
+                    # .data section is between .text and .bss. When the size of .data is large,
+                    # during the linking, the relocation of .text against .bss may overflow.
+                    # Rename it to .ldata so that it won't be in between the .text and .bss section
+                    if len(consts) > 2_000_000_000:
+                        raise ValueError(
+                            "Models with buffer mutation included doesn't support constants greater than 2GB!"
+                        )
+                    section_attr = '.ldata, "aw"'
+                else:
+                    section_attr = '.lrodata, "a"'
+                symbol_prefix = ""
+            elif platform == "darwin":
+                section_attr = "__DATA,__data"
+                symbol_prefix = "_"
             else:
-                cmd = f"{ld_command} -r -b binary -o {consts_o} {consts_path}"
-                run_command_and_check(cmd)
-            log.debug("aot constant binary command: %s", cmd)
-
-            if graph.mutated_buffers & set(graph.constants.keys()):
-                # .data section is between .text and .bss. When the size of .data is large,
-                # during the linking, the relocation of .text against .bss may overflow.
-                # Rename it to .ldata so that it won't be in between the .text and .bss section
-                if len(consts) > 2_000_000_000:
-                    raise ValueError(
-                        "Models with buffer mutation included doesn't support constants greater than 2GB!"
-                    )
-                rename_data = " .data=.ldata"
-            else:
-                # if no buffer mutation is needed, we could instead set the data region
-                # as read-only (i.e. .lrodata) which could accomodate larger size of data
-                # to be linked.
-                rename_data = " .data=.lrodata,alloc,load,readonly,data,contents"
-
-            assert (
-                ALIGN_BYTES & (ALIGN_BYTES - 1)
-            ) == 0 and ALIGN_BYTES >= 64, "must be power of 2 and >= 64"
-            cmd = (
-                f"{objcopy_command} --rename-section"
-                f"{rename_data}"
-                f" --set-section-alignment .data={ALIGN_BYTES}"  # following the gAlignment of CPU in c10/core/alignment.h
-                f" {consts_o} {consts_o}"
-            )
-            log.debug("aot constant rename section command: %s", cmd)
-            run_command_and_check(cmd)
-
-            cmd = f"rm {consts_path}"
-            log.debug("aot constant bin removal command: %s", cmd)
-            run_command_and_check(cmd)
-
-            if fbcode_aot_cpu_re:
-                body = re.sub(r"[\W]", "_", os.path.basename(consts_path))
-            else:
-                body = re.sub(r"[\W]", "_", consts_path)
-
-            symbol_list = []
-            symbol_list.append(
-                f"{objcopy_command} --redefine-sym _binary_{body}_start=_binary_constants_bin_start {consts_o}"
-            )
-            symbol_list.append(
-                f"{objcopy_command} --redefine-sym _binary_{body}_size=_binary_constants_bin_size {consts_o}"
-            )
-            symbol_list.append(
-                f"{objcopy_command} --redefine-sym _binary_{body}_end=_binary_constants_bin_end {consts_o}"
-            )
-            log.debug("aot constant binary redefine symbol: %s", " ".join(symbol_list))
-            for cmd in symbol_list:
-                run_command_and_check(cmd)
-            return consts_o
-
-        def _compile_consts_darwin(consts: bytes) -> str:
-            if config.aot_inductor.debug_dump_consts_bin:
-                _, _binary_constants_path = write(
-                    consts,
-                    "bin",
-                    specified_dir=consts_specified_dir,
-                )
-                log.debug("binary constants path: %s", _binary_constants_path)
+                raise RuntimeError(f"Unsupported platform: {platform}")
 
             is_large_consts = len(consts) > 1024
-            consts_asm = "\t.section\t__DATA,__data\n"
-            consts_asm += "\t.globl\t__binary_constants_bin_start\n"
-            consts_asm += "__binary_constants_bin_start:\n"
+            consts_asm = f"\t.section\t{section_attr}\n"
+            consts_asm += f"\t.balign {ALIGN_BYTES}\n"
+            consts_asm += f"\t.globl\t{symbol_prefix}_binary_constants_bin_start\n"
+            consts_asm += f"{symbol_prefix}_binary_constants_bin_start:\n"
             if not is_large_consts:
                 for c in consts:
                     consts_asm += f"\t.byte {c}\n"
@@ -1899,16 +1852,39 @@ class AotCodeCompiler:
             else:
                 consts_asm += "\t.quad 0x1234567899abcdef\n"
                 consts_asm += f"\t.space {len(consts) - 8}\n"
-            consts_asm += ".globl\t__binary_constants_bin_end\n"
-            consts_asm += "__binary_constants_bin_end:\n"
-            _, consts_path = write(
+            consts_asm += f".globl\t{symbol_prefix}_binary_constants_bin_end\n"
+            consts_asm += f"{symbol_prefix}_binary_constants_bin_end:\n"
+            _, consts_s = write(
                 consts_asm,
                 "S",
                 specified_dir=consts_specified_dir,
             )
-            consts_o = os.path.splitext(consts_path)[0] + ".o"
-            cmd = f"{get_cpp_compiler()} -c -o {consts_o} {consts_path}"
-            run_command_and_check(cmd)
+            (
+                object_output_name,
+                object_output_dir,
+            ) = get_name_and_dir_from_output_file_path(consts_s)
+            object_build_options = CppTorchDeviceOptions(
+                device_type=device_type,
+                aot_mode=graph.aot_mode,
+                compile_only=True,
+                use_absolute_path=use_absolute_path,
+            )
+            object_builder = CppBuilder(
+                name=object_output_name,
+                sources=consts_s,
+                output_dir=object_output_dir,
+                BuildOption=object_build_options,
+            )
+            compile_cmd = object_builder.get_command_line()
+            consts_o = object_builder.get_target_file_path()
+            if fbcode_aot_cpu_re:
+                # TODO: refactor fbcode_aot_cpu_re logic into CppBuilder
+                consts_o = os.path.splitext(consts_s)[0] + ".o"
+                compile_file(consts_s, consts_o, compile_cmd.split())
+                os.chmod(consts_o, 0o644)
+            else:
+                run_command_and_check(compile_cmd)
+
             if is_large_consts:
                 with open(consts_o, "r+b") as f:
                     f.seek(0)
@@ -1928,8 +1904,6 @@ class AotCodeCompiler:
         lock_dir = get_lock_dir()
         lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
         with lock:
-            # Currently, this only support serializing extern nodes in fbcode
-            # Eventually, we should also have a serializer for OSS.
             if serialized_extern_kernel_nodes:
                 extern_kernel_nodes_json = os.path.splitext(input_path)[0] + ".json"
                 with open(extern_kernel_nodes_json, "w") as f:
@@ -2047,11 +2021,7 @@ class AotCodeCompiler:
                 )
                 aot_constants = struct.pack("qq", consts_size + 8, magic_number)
 
-            consts_o = {
-                "linux": _compile_consts_linux,
-                "darwin": _compile_consts_darwin,
-            }[sys.platform](aot_constants)
-
+            consts_o = _compile_consts(aot_constants, sys.platform)
             kernels_o = []
             gpu_codecache: Union[ROCmCodeCache, CUDACodeCache] = (
                 ROCmCodeCache() if torch.version.hip else CUDACodeCache()
@@ -2112,6 +2082,14 @@ class AotCodeCompiler:
                     os.chmod(output_so, 0o755)
                 else:
                     run_command_and_check(link_cmd)
+
+                for o_file in [
+                    output_o,
+                    consts_o,
+                    os.path.splitext(consts_o)[0] + ".S",
+                ]:
+                    # No need to package .o or .S into the output artifact
+                    os.remove(o_file)
 
                 if use_mmap_weights:
                     import resource
@@ -3508,8 +3486,9 @@ class ROCmCodeCache:
                     log.info(log_duration_msg)
                 else:
                     log.debug(
-                        "Compilation skipped: %s since output already exists",
+                        "Skip compiling %s: output %s already exists",
                         input_path,
+                        output_path,
                     )
                 cls.cache[key] = ROCmCodeCache.CacheEntry(input_path, output_path)
 
