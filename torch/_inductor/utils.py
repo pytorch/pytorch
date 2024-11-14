@@ -2132,10 +2132,15 @@ def set_tracing_context_output_strides(example_inputs, compiled_graph):
             if exprs is None:
                 context.output_strides.append(None)
             else:
+                fakify_first_call = False
+                if ctx := torch._guards.TracingContext.try_get():
+                    fakify_first_call = ctx.fakify_first_call
                 context.output_strides.append(
                     tuple(
                         (
-                            shape_env.evaluate_symexpr(e)
+                            shape_env.evaluate_symexpr(
+                                e, return_symints=fakify_first_call
+                            )
                             if shape_env is not None
                             else int(e)
                         )
