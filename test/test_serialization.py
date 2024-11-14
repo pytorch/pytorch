@@ -4363,6 +4363,16 @@ class TestSerialization(TestCase, SerializationMixin):
                 with zipfile.ZipFile(f) as zip_file:
                     zip_file.extractall(path=temp_dir)
 
+    def test_serialization_with_header(self):
+        orig = torch.randn(3, 3)
+        with BytesIOContext() as f:
+            f.write(b'header')
+            torch.save(orig, f)
+            f.seek(6)
+            loaded = torch.load(f)
+            self.assertEqual(orig, loaded)
+
+
     def run(self, *args, **kwargs):
         with serialization_method(use_zip=True):
             return super().run(*args, **kwargs)
