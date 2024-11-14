@@ -4413,6 +4413,10 @@ class TestSerialization(TestCase, SerializationMixin):
             unsafe_globals = torch.serialization.get_unsafe_globals_in_checkpoint(f)
             self.assertEqual(set(unsafe_globals), expected_unsafe_global_strs)
             f.seek(0)
+            with torch.serialization.safe_globals([TwoTensor]):
+                unsafe_globals = torch.serialization.get_unsafe_globals_in_checkpoint(f)
+                self.assertEqual(set(unsafe_globals), set())
+            f.seek(0)
             try:
                 old_get_allowed_globals = torch._weights_only_unpickler._get_allowed_globals
                 torch._weights_only_unpickler._get_allowed_globals = lambda: dict()  # noqa: PIE807

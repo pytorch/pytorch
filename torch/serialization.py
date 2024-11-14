@@ -342,7 +342,13 @@ def get_unsafe_globals_in_checkpoint(f: FILE_LIKE) -> List[str]:
     Returns:
         A list of strings of pickle GLOBALs in the checkpoint that are not allowlisted for ``weights_only``.
     """
-    safe_global_strings = set(_weights_only_unpickler._get_allowed_globals().keys())
+    default_safe_globals_strings = set(
+        _weights_only_unpickler._get_allowed_globals().keys()
+    )
+    user_safe_global_strings = set(
+        _weights_only_unpickler._get_user_allowed_globals().keys()
+    )
+    safe_global_strings = default_safe_globals_strings.union(user_safe_global_strings)
 
     with _open_file_like(f, "rb") as opened_file:
         if not _is_zipfile(opened_file):
