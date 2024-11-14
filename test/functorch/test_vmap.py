@@ -4486,7 +4486,6 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail("linalg.tensorsolve"),
                 xfail("bernoulli", ""),
                 xfail("nn.functional.feature_alpha_dropout", "with_train"),
-                xfail("native_dropout_backward"),
                 xfail("nn.functional.kl_div", ""),
                 xfail("multinomial", ""),
                 xfail("pca_lowrank", ""),
