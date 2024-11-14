@@ -190,12 +190,90 @@ def _get_dynamo_dimrange():
     return _DimRange
 
 
+def _throw_distributed_not_available():
+    if not torch.distributed.is_available():
+        raise RuntimeError(
+            "A torch.distributed GLOBAL was found in the checkpoint but torch.distributed.is_avialable() was False."
+        )
+
+
+def _get_device_mesh():
+    _throw_distributed_not_available()
+    from torch.distributed.device_mesh import DeviceMesh
+
+    global _lazy_imported_globals
+    _lazy_imported_globals.add(DeviceMesh)
+    return DeviceMesh
+
+
+def _get_dtensor_spec():
+    _throw_distributed_not_available()
+    from torch.distributed.tensor._dtensor_spec import DTensorSpec
+
+    global _lazy_imported_globals
+    _lazy_imported_globals.add(DTensorSpec)
+    return DTensorSpec
+
+
+def _get_tensor_meta():
+    _throw_distributed_not_available()
+    from torch.distributed.tensor._dtensor_spec import TensorMeta
+
+    global _lazy_imported_globals
+    _lazy_imported_globals.add(TensorMeta)
+    return TensorMeta
+
+
+def _get_dtensor():
+    _throw_distributed_not_available()
+    from torch.distributed.tensor import DTensor
+
+    global _lazy_imported_globals
+    _lazy_imported_globals.add(DTensor)
+    return DTensor
+
+
+def _get_partial():
+    _throw_distributed_not_available()
+    from torch.distributed.tensor.placement_types import Partial
+
+    global _lazy_imported_globals
+    _lazy_imported_globals.add(Partial)
+    return Partial
+
+
+def _get_replicate():
+    _throw_distributed_not_available()
+    from torch.distributed.tensor.placement_types import Replicate
+
+    global _lazy_imported_globals
+    _lazy_imported_globals.add(Replicate)
+    return Replicate
+
+
+def _get_shard():
+    _throw_distributed_not_available()
+    from torch.distributed.tensor.placement_types import Shard
+
+    global _lazy_imported_globals
+    _lazy_imported_globals.add(Shard)
+    return Shard
+
+
 @_functools.lru_cache(maxsize=1)
 def _get_lazy_imported_globals():
     rc: Dict[str, Any] = {
         "torch._dynamo.decorators._DimRange": _get_dynamo_dimrange,
         "torch.nested._internal.nested_tensor.NestedTensor": _get_nested_tensor,
         "torch.nested._internal.nested_tensor._rebuild_njt": _get_rebuild_njt,
+        # DTensor related
+        "torch.distributed.device_mesh.DeviceMesh": _get_device_mesh,
+        "torch.distributed.tensor._dtensor_spec.DTensorSpec": _get_dtensor_spec,
+        "torch.distributed.tensor._dtensor_spec.TensorMeta": _get_tensor_meta,
+        "torch.distributed.tensor.DTensor": _get_dtensor,
+        "torch.distributed.tensor.placement_types.Partial": _get_partial,
+        "torch.distributed.tensor.placement_types.Replicate": _get_replicate,
+        "torch.distributed.tensor.placement_types.Shard": _get_shard,
     }
     return rc
 
@@ -215,19 +293,6 @@ def _get_allowed_globals():
         "builtins.bytearray": bytearray,  # for bytearray
         "builtins.set": set,  # for set
     }
-    # Only add the dtensor related classes if the dtensor module is available
-    if hasattr(torch.distributed, "tensor"):
-        dtensor_rc: Dict[str, Any] = {
-            # DTensor related
-            "torch.distributed.device_mesh.DeviceMesh": torch.distributed.device_mesh.DeviceMesh,
-            "torch.distributed.tensor._dtensor_spec.DTensorSpec": torch.distributed.tensor._dtensor_spec.DTensorSpec,
-            "torch.distributed.tensor._dtensor_spec.TensorMeta": torch.distributed.tensor._dtensor_spec.TensorMeta,
-            "torch.distributed.tensor.DTensor": torch.distributed.tensor.DTensor,
-            "torch.distributed.tensor.placement_types.Partial": torch.distributed.tensor.placement_types.Partial,
-            "torch.distributed.tensor.placement_types.Replicate": torch.distributed.tensor.placement_types.Replicate,
-            "torch.distributed.tensor.placement_types.Shard": torch.distributed.tensor.placement_types.Shard,
-        }
-        rc.update(dtensor_rc)
 
     # dtype
     for t in torch.storage._dtype_to_storage_type_map().keys():
