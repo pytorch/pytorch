@@ -201,7 +201,9 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         peer_rank = (self.rank + 1) % self.world_size
 
         signal_pad = symm_mem_hdl.get_signal_pad(self.rank)
-        self.assertEqual(signal_pad.data_ptr(), symm_mem_hdl.signal_pad_ptrs[symm_mem_hdl.rank])
+        self.assertEqual(
+            signal_pad.data_ptr(), symm_mem_hdl.signal_pad_ptrs[symm_mem_hdl.rank]
+        )
 
         signal_pad = symm_mem_hdl.get_signal_pad(peer_rank)
         self.assertEqual(signal_pad.dtype, torch.uint32)
@@ -223,15 +225,9 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         self.assertEqual(signal_pad.numel(), 64)
 
         # Sanity check that writes to buffer doesn't corrupt signal_pad
-        t = _SymmetricMemory.empty_strided_p2p(
-            (0,),
-            (0,),
-            torch.float32,
-            self.device,
-            dist.group.WORLD.group_name,
-        )
-        symm_mem = _SymmetricMemory.rendezvous(t)
-        signal_pad = symm_mem.get_signal_pad(self.rank)
+        t = symm_mem.empty(0, device="cuda")
+        symm_mem_hdl = symm_mem.rendezvous(t)
+        signal_pad = symm_mem_hdl.get_signal_pad(self.rank)
         signal_pad.fill_(42)
         t.fill_(0)
         self.assertTrue(signal_pad.eq(42).all())
