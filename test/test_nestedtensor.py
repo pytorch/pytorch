@@ -7830,11 +7830,11 @@ torch.cuda.synchronize()
         self.assertEqual(res.shape, (4, nt.shape[1], 6))
 
 
-# The following lists specify rules indicating how to handle particular SampleInputs: are they
-# expected to fail, should they be skipped, etc. Note that rules are attempted to be matched
-# from top to bottom and only one rule at most will be matched, so order matters! The guiding
-# general principle here should be one xfail / skip per bug if at all possible :)
-FORWARD_SAMPLE_RULES = [
+# The following lists specify skips and xfails for particular SampleInputs. Note that
+# these are attempted to be matched from top to bottom and only one at most will
+# be matched, so order matters! The guiding general principle here should be one
+# xfail / skip per bug if at all possible :)
+FORWARD_SKIPS_AND_XFAILS = [
     # not implemented
     XFailRule(
         error_type=NotImplementedError,
@@ -8051,8 +8051,8 @@ FORWARD_SAMPLE_RULES = [
     ),
 ]
 
-BACKWARD_SAMPLE_RULES = [
-    *FORWARD_SAMPLE_RULES,
+BACKWARD_SKIPS_AND_XFAILS = [
+    *FORWARD_SKIPS_AND_XFAILS,
     # I don't know why these fail in CI only and I just want to land this; investigate this later.
     SkipRule(
         op_match_fn=lambda device, op: (
@@ -8207,8 +8207,8 @@ BACKWARD_SAMPLE_RULES = [
     ),
 ]
 
-COMPILE_FORWARD_SAMPLE_RULES = [
-    *FORWARD_SAMPLE_RULES,
+COMPILE_FORWARD_SKIPS_AND_XFAILS = [
+    *FORWARD_SKIPS_AND_XFAILS,
     # Bug: cross-device conversions with to() result in new nested ints within compile only
     XFailRule(
         error_type=AssertionError,
@@ -8247,7 +8247,7 @@ COMPILE_FORWARD_SAMPLE_RULES = [
     ),
 ]
 
-COMPILE_BACKWARD_SAMPLE_RULES = [
+COMPILE_BACKWARD_SKIPS_AND_XFAILS = [
     # Bug: Something is wrongly creating an empty tensor with the jagged layout on the C++ side
     # for these binary ops
     XFailRule(
@@ -8353,8 +8353,8 @@ COMPILE_BACKWARD_SAMPLE_RULES = [
         ),
         name="clone_unbind_data_dependency_backward",
     ),
-    *COMPILE_FORWARD_SAMPLE_RULES,
-    *BACKWARD_SAMPLE_RULES,
+    *COMPILE_FORWARD_SKIPS_AND_XFAILS,
+    *BACKWARD_SKIPS_AND_XFAILS,
 ]
 
 COMPARE_TENSOR_COMPONENT_EQUALITY = {
@@ -8377,11 +8377,14 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
     @ops(
         [op for op in njt_op_db if op.supports_njt],
         allowed_dtypes=(torch.float32,),
-        sample_rules=FORWARD_SAMPLE_RULES,
+        sample_skips_and_xfails=FORWARD_SKIPS_AND_XFAILS,
     )
-    def test_forward(self, device, dtype, op, sample_rules):
+    def test_forward(self, device, dtype, op, sample_skips_and_xfails):
         for sample, subtest_ctx in op.sample_inputs(
-            device=device, dtype=dtype, requires_grad=False, sample_rules=sample_rules
+            device=device,
+            dtype=dtype,
+            requires_grad=False,
+            sample_skips_and_xfails=sample_skips_and_xfails,
         ):
             with subtest_ctx(self):
                 # compare to reference, but expect different nested int
@@ -8398,11 +8401,14 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
     @ops(
         [op for op in njt_op_db if op.supports_njt and op.supports_autograd],
         allowed_dtypes=(torch.float32,),
-        sample_rules=BACKWARD_SAMPLE_RULES,
+        sample_skips_and_xfails=BACKWARD_SKIPS_AND_XFAILS,
     )
-    def test_backward(self, device, dtype, op, sample_rules):
+    def test_backward(self, device, dtype, op, sample_skips_and_xfails):
         for sample, subtest_ctx in op.sample_inputs(
-            device=device, dtype=dtype, requires_grad=True, sample_rules=sample_rules
+            device=device,
+            dtype=dtype,
+            requires_grad=True,
+            sample_skips_and_xfails=sample_skips_and_xfails,
         ):
             with subtest_ctx(self):
                 # compare to reference, but expect different nested int
@@ -8433,11 +8439,14 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
     @ops(
         [op for op in njt_op_db if op.supports_njt],
         allowed_dtypes=(torch.float32,),
-        sample_rules=COMPILE_FORWARD_SAMPLE_RULES,
+        sample_skips_and_xfails=COMPILE_FORWARD_SKIPS_AND_XFAILS,
     )
-    def test_compile_forward(self, device, dtype, op, sample_rules):
+    def test_compile_forward(self, device, dtype, op, sample_skips_and_xfails):
         for sample, subtest_ctx in op.sample_inputs(
-            device=device, dtype=dtype, requires_grad=False, sample_rules=sample_rules
+            device=device,
+            dtype=dtype,
+            requires_grad=False,
+            sample_skips_and_xfails=sample_skips_and_xfails,
         ):
             with subtest_ctx(self):
                 torch.compiler.reset()
@@ -8489,12 +8498,15 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
     @ops(
         [op for op in njt_op_db if op.supports_njt and op.supports_autograd],
         allowed_dtypes=(torch.float32,),
-        sample_rules=COMPILE_BACKWARD_SAMPLE_RULES,
+        sample_skips_and_xfails=COMPILE_BACKWARD_SKIPS_AND_XFAILS,
     )
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
-    def test_compile_backward(self, device, dtype, op, sample_rules):
+    def test_compile_backward(self, device, dtype, op, sample_skips_and_xfails):
         for sample, subtest_ctx in op.sample_inputs(
-            device=device, dtype=dtype, requires_grad=True, sample_rules=sample_rules
+            device=device,
+            dtype=dtype,
+            requires_grad=True,
+            sample_skips_and_xfails=sample_skips_and_xfails,
         ):
             with subtest_ctx(self):
                 torch.compiler.reset()
