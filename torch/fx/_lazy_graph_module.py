@@ -176,6 +176,16 @@ class _LazyGraphModule(GraphModule):
         self.real_recompile()
         return super().code
 
+    @property
+    def _out_spec(self):
+        self.real_recompile()
+        return super()._out_spec
+
+    @property
+    def _in_spec(self):
+        self.real_recompile()
+        return super()._in_spec
+
     def __str__(self) -> str:
         """
         str(GraphModule) will access the _code attribute. Make sure recompile

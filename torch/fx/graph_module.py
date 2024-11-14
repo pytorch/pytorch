@@ -531,6 +531,8 @@ class GraphModule(torch.nn.Module):
         self._replace_hook = None
         self._create_node_hooks: List[Callable] = []
         self._erase_node_hooks: List[Callable] = []
+        self._gm_in_spec = None
+        self._gm_out_spec = None
 
     # TorchScript breaks trying to compile the graph setter because of the
     # continued string literal. Issue here: https://github.com/pytorch/pytorch/issues/44842
@@ -789,6 +791,18 @@ class {module_name}(torch.nn.Module):
             )
         return self._code
 
+    @property
+    def _out_spec(self):
+        if isinstance(self._graph._codegen, _PyTreeCodeGen):
+            self._gm_out_spec = self._graph._codegen.pytree_info.out_spec
+        return self._gm_out_spec
+
+    @property
+    def _in_spec(self):
+        if isinstance(self._graph._codegen, _PyTreeCodeGen):
+            self._gm_in_spec = self._graph._codegen.pytree_info.in_spec
+        return self._gm_in_spec
+
     @compatibility(is_backward_compatible=True)
     def recompile(self) -> PythonCode:
         """
@@ -797,8 +811,8 @@ class {module_name}(torch.nn.Module):
         code of this ``GraphModule`` will be out of date.
         """
         if isinstance(self._graph._codegen, _PyTreeCodeGen):
-            self._in_spec = self._graph._codegen.pytree_info.in_spec
-            self._out_spec = self._graph._codegen.pytree_info.out_spec
+            self._gm_in_spec = self._graph._codegen.pytree_info.in_spec
+            self._gm_out_spec = self._graph._codegen.pytree_info.out_spec
         python_code = self._graph.python_code(root_module="self")
         self._code = python_code.src
         self._lineno_map = python_code._lineno_map
