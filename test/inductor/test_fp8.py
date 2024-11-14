@@ -90,7 +90,8 @@ def _quantize_rowwise(x: Tensor, float8_dtype: torch.dtype):
 class TestFP8Types(TestCase):
     @unittest.skipIf(TEST_WITH_ROCM, "Not supported yet")
     @parametrize("float8_dtype", (torch.float8_e4m3fn, torch.float8_e5m2))
-    def test_xblock_for_small_numel(self, float8_dtype: torch.dtype):
+    @parametrize("device", ("cuda", "cpu"))
+    def test_xblock_for_small_numel(self, float8_dtype: torch.dtype, device: str):
         """
         TritonOverrides.to_dtype will set min_elem_per_thread to 2 or 4
         depends on the variant of fp8 type.
@@ -99,11 +100,13 @@ class TestFP8Types(TestCase):
 
         We should not pick a XBLOCK larger than xnumel
         """
+        if device == "cuda" and not PLATFORM_SUPPORTS_FP8:
+            raise unittest.SkipTest(f8_msg)
 
         def f(x):
             return x.to(dtype=float8_dtype)
 
-        x = torch.randn(1, device="cuda")
+        x = torch.randn(1, device=device)
         expected = f(x)
         actual = torch.compile(f)(x)
         torch.testing.assert_close(expected.half(), actual.half(), rtol=1e-2, atol=1e-2)

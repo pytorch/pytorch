@@ -47,7 +47,6 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     TEST_WITH_ROCM,
 )
-from torch.testing._internal.inductor_utils import HAS_CPU
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 from torch.testing._internal.triton_utils import HAS_CUDA, requires_cuda
 from torch.utils import _pytree as pytree
@@ -739,13 +738,13 @@ class AOTInductorTestsTemplate:
         self.check_model(Model(), example_inputs, dynamic_shapes=dynamic_shapes)
 
     @skipIfRocm  # _scaled_mm_out_cuda  is not compiled for ROCm platform
-    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled")
-    @unittest.skipIf(
-        not torch.cpu._is_amx_tile_supported(), "FP8 cannot run on the current CPU platform"
-    )
     def test_fp8(self):
         if self.device == "cuda" and not SM90OrLater:
             raise unittest.SkipTest("FP8 is only supported on H100+")
+        if self.device == "cpu" and not torch.backends.mkldnn.is_available():
+            raise unittest.SkipTest("MKL-DNN build is disabled")
+        if self.device == "cpu" and not torch.cpu._is_amx_tile_supported():
+            raise unittest.SkipTest("FP8 cannot run on the current CPU platform")
 
         class Model(torch.nn.Module):
             def __init__(self, dtype):
@@ -787,13 +786,13 @@ class AOTInductorTestsTemplate:
         )
 
     @skipIfRocm  # _scaled_mm_out_cuda  is not compiled for ROCm platform
-    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled")
-    @unittest.skipIf(
-        not torch.cpu._is_amx_tile_supported(), "FP8 cannot run on the current CPU platform"
-    )
     def test_fp8_view_of_param(self):
         if self.device == "cuda" and not SM90OrLater:
             raise unittest.SkipTest("FP8 is only supported on H100+")
+        if self.device == "cpu" and not torch.backends.mkldnn.is_available():
+            raise unittest.SkipTest("MKL-DNN build is disabled")
+        if self.device == "cpu" and not torch.cpu._is_amx_tile_supported():
+            raise unittest.SkipTest("FP8 cannot run on the current CPU platform")
 
         class Model(torch.nn.Module):
             def __init__(self, dtype, weight):
@@ -1479,7 +1478,7 @@ class AOTInductorTestsTemplate:
             example_inputs,
             dynamic_shapes=dynamic_shapes,
         )
-        aot_inductor_module = AOTIRunnerUtil.load("cuda", so_path)
+        aot_inductor_module = AOTIRunnerUtil.load(self.device, so_path)
         aot_inductor_module(*example_inputs)
 
         # Re-run where dynamic dim size is 0.
@@ -4105,5 +4104,5 @@ if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
     # cpp_extension N/A in fbcode
-    if HAS_CUDA or sys.platform == "darwin" or HAS_CPU:
+    if HAS_CUDA or sys.platform == "darwin":
         run_tests(needs="filelock")
