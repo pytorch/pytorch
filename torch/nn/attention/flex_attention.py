@@ -899,7 +899,8 @@ def _create_empty_block_mask(query: Tensor, key: Tensor) -> BlockMask:
 
 def _nested_mod_func_adapter(
     orig_mod_func: Union[_score_mod_signature, _mask_mod_signature],
-    nt: torch.Tensor,
+    q_nt: torch.Tensor,
+    kv_nt: torch.Tensor,
     is_score_mod: bool,
 ) -> Union[_score_mod_signature, _mask_mod_signature]:
     r"""Adapter to convert a score_mod / mask_mod to be NJT-compatible. The given mod func
@@ -910,8 +911,10 @@ def _nested_mod_func_adapter(
     Args:
         orig_mod_func (Callable): Function to modify attention scores. It takes four or five
             arguments, depending on whether a mask_mod or score_mod func is passed.
-        nt (torch.Tensor): Jagged layout nested tensor (NJT) that defines the sequence length
-            structure for query / key / value.
+        q_nt (torch.Tensor): Jagged layout nested tensor (NJT) that defines the sequence length
+            structure for query.
+        kv_nt (torch.Tensor): Jagged layout nested tensor (NJT) that defines the sequence length
+            structure for key / value.
         is_score_mod (bool): Indicates whether the mod function is a score_mod.
 
     Returns:
@@ -931,9 +934,14 @@ def _nested_mod_func_adapter(
         seq_idx = torch.searchsorted(offsets, range_tensor, right=True) - 1
         return seq_idx
 
-    offsets = nt._offsets  # type: ignore[attr-defined]
-    total_length = nt._values.shape[nt._ragged_idx - 1]  # type: ignore[attr-defined]
-    seq_idx = _build_seq_idx(offsets, total_length)
+    q_offsets = q_nt._offsets  # type: ignore[attr-defined]
+    kv_offsets = kv_nt._offsets  # type: ignore[attr-defined]
+    q_seq_idx = _build_seq_idx(q_offsets, q_nt._values.shape[q_nt._ragged_idx - 1])  # type: ignore[attr-defined]
+    if q_nt is kv_nt:
+        kv_seq_idx = q_seq_idx
+    else:
+        # cross attention case
+        kv_seq_idx = _build_seq_idx(kv_offsets, kv_nt._values.shape[kv_nt._ragged_idx - 1])  # type: ignore[attr-defined]
 
     # Converts q_idx / kv_idx from [0, total_length) -> [0, S), where S refers
     # to the sequence length for each sequence in the NJT, for use in given
@@ -943,9 +951,9 @@ def _nested_mod_func_adapter(
     if is_score_mod:
 
         def nt_score_mod(score, b, h, q_idx, kv_idx):
-            q_nested = q_idx - offsets[seq_idx[q_idx]]
-            kv_nested = kv_idx - offsets[seq_idx[kv_idx]]
-            is_same_sequence = seq_idx[q_idx] == seq_idx[kv_idx]
+            q_nested = q_idx - q_offsets[q_seq_idx[q_idx]]
+            kv_nested = kv_idx - kv_offsets[kv_seq_idx[kv_idx]]
+            is_same_sequence = q_seq_idx[q_idx] == kv_seq_idx[kv_idx]
             return torch.where(
                 is_same_sequence,
                 orig_mod_func(score, b, h, q_nested, kv_nested),  # type: ignore[call-arg]
@@ -957,10 +965,10 @@ def _nested_mod_func_adapter(
     else:
 
         def nt_mask_mod(b, h, q_idx, kv_idx):
-            q_nested = q_idx - offsets[seq_idx[q_idx]]
-            kv_nested = kv_idx - offsets[seq_idx[kv_idx]]
+            q_nested = q_idx - q_offsets[q_seq_idx[q_idx]]
+            kv_nested = kv_idx - kv_offsets[kv_seq_idx[kv_idx]]
             # don't allow inter-sequence attention
-            is_same_sequence = seq_idx[q_idx] == seq_idx[kv_idx]
+            is_same_sequence = q_seq_idx[q_idx] == kv_seq_idx[kv_idx]
             return orig_mod_func(b, h, q_nested, kv_nested) & is_same_sequence  # type: ignore[call-arg]
 
         return nt_mask_mod
@@ -970,7 +978,8 @@ def create_nested_block_mask(
     mask_mod: _mask_mod_signature,
     B: Optional[int],
     H: Optional[int],
-    nt: torch.Tensor,
+    q_nt: torch.Tensor,
+    kv_nt: Optional[torch.Tensor] = None,
     BLOCK_SIZE: Union[int, Tuple[int, int]] = _DEFAULT_SPARSE_BLOCK_SIZE,
     _compile=False,
 ) -> BlockMask:
@@ -985,9 +994,14 @@ def create_nested_block_mask(
             (True) or masked out (False).
         B (int): Batch size.
         H (int): Number of query heads.
-        nt (torch.Tensor): Jagged layout nested tensor (NJT) that defines the sequence length
-            structure for query / key / value. The block mask will be constructed to operate on
-            a "stacked sequence" of length ``sum(S)`` for sequence length ``S`` from the NJT.
+        q_nt (torch.Tensor): Jagged layout nested tensor (NJT) that defines the sequence length
+            structure for query. The block mask will be constructed to operate on a "stacked
+            sequence" of length ``sum(S)`` for sequence length ``S`` from the NJT.
+        kv_nt (torch.Tensor): Jagged layout nested tensor (NJT) that defines the sequence length
+            structure for key / value, allowing for cross attention. The block mask will be
+            constructed to operate on a "stacked sequence" of length ``sum(S)`` for sequence
+            length ``S`` from the NJT. If this is None, ``q_nt`` is used to define the structure
+            for key / value as well. Default: None
         BLOCK_SIZE (int or Tuple[int, int]): Block size for the block mask. If a single int is
             provided it is used for both query and key/value.
 
@@ -997,23 +1011,45 @@ def create_nested_block_mask(
     Example Usage:
         .. code-block:: python
 
-            query = torch.randn(1, 1, 8192, 64, device="cuda", dtype=torch.float16)
-            key = torch.randn(1, 1, 8192, 64, device="cuda", dtype=torch.float16)
-            value = torch.randn(1, 1, 8192, 64, device="cuda", dtype=torch.float16)
+            # shape (B, num_heads, seq_len*, D) where seq_len* varies across the batch
+            query = torch.nested.nested_tensor(..., layout=torch.jagged)
+            key = torch.nested.nested_tensor(..., layout=torch.jagged)
+            value = torch.nested.nested_tensor(..., layout=torch.jagged)
 
             def causal_mask(b, h, q_idx, kv_idx):
                 return q_idx >= kv_idx
 
             block_mask = create_nested_block_mask(causal_mask, 1, 1, query, _compile=True)
             output = flex_attention(query, key, value, block_mask=block_mask)
+
+        .. code-block:: python
+
+            # shape (B, num_heads, seq_len*, D) where seq_len* varies across the batch
+            query = torch.nested.nested_tensor(..., layout=torch.jagged)
+            key = torch.nested.nested_tensor(..., layout=torch.jagged)
+            value = torch.nested.nested_tensor(..., layout=torch.jagged)
+
+            def causal_mask(b, h, q_idx, kv_idx):
+                return q_idx >= kv_idx
+
+            # cross attention case: pass both query and key/value NJTs
+            block_mask = create_nested_block_mask(causal_mask, 1, 1, query, key, _compile=True)
+            output = flex_attention(query, key, value, block_mask=block_mask)
     """
+    # use same structure for kv as for q by default
+    if kv_nt is None:
+        kv_nt = q_nt
+    if q_nt.device != kv_nt.device:
+        raise ValueError(
+            "create_nested_block_mask(): Expected q_nt and kv_nt to be on the same device"
+        )
     return create_block_mask(
-        _nested_mod_func_adapter(mask_mod, nt, is_score_mod=False),  # type: ignore[arg-type]
+        _nested_mod_func_adapter(mask_mod, q_nt, kv_nt, is_score_mod=False),  # type: ignore[arg-type]
         B,
         H,
-        nt._values.shape[nt._ragged_idx - 1],  # type: ignore[attr-defined]
-        nt._values.shape[nt._ragged_idx - 1],  # type: ignore[attr-defined]
-        device=nt.device,  # type: ignore[arg-type]
+        q_nt._values.shape[q_nt._ragged_idx - 1],  # type: ignore[attr-defined]
+        kv_nt._values.shape[kv_nt._ragged_idx - 1],  # type: ignore[attr-defined]
+        device=q_nt.device,  # type: ignore[arg-type]
         # compile is important so we don't materialize a mask_tensor of
         # shape (1, 1, total_seqlen, total_seqlen)
         BLOCK_SIZE=BLOCK_SIZE,
@@ -1192,7 +1228,7 @@ def flex_attention(
     if score_mod is None:
         score_mod = _identity
     elif query.is_nested:
-        score_mod = _nested_mod_func_adapter(score_mod, query, is_score_mod=True)  # type: ignore[assignment]
+        score_mod = _nested_mod_func_adapter(score_mod, query, key, is_score_mod=True)  # type: ignore[assignment]
 
     if block_mask is None:
         block_mask = _create_empty_block_mask(query, key)

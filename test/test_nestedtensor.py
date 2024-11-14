@@ -7108,35 +7108,45 @@ torch.cuda.synchronize()
     # Helper function to generate random query, key, value NJTs in (B, n_heads, *, D) format.
     # If noncontig_with_holes is True, the results will be non-contiguous with holes (i.e. have
     # both offsets and lengths specified).
-    def _rand_qkv(self, device, dtype, noncontig_with_holes=False):
+    def _rand_qkv(self, device, dtype, noncontig_with_holes=False, q_and_kv_match=True):
         batch_size = 8
         n_heads = 8
         D = 16
 
-        sentence_lengths = [random.randint(2, 1023) for _ in range(batch_size - 1)]
-        total = sum(sentence_lengths)
+        def _rand_nt(noncontig_with_holes=noncontig_with_holes):
+            sentence_lengths = [random.randint(2, 1023) for _ in range(batch_size - 1)]
+            total = sum(sentence_lengths)
 
-        # shape (B, *, D_total) where D_total = n_heads * D
-        query = torch.nested.nested_tensor(
-            [
-                torch.randn(l, n_heads * D, device=device, dtype=dtype)
-                for l in sentence_lengths
-            ],
-            layout=torch.jagged,
-        )
-        if noncontig_with_holes:
-            query = torch.nested.nested_tensor_from_jagged(
-                query._values,
-                query._offsets,
-                # -1 to introduce holes
-                lengths=query._offsets.diff() - 1,
-                jagged_dim=query._ragged_idx,
-                min_seqlen=query._min_seqlen,
-                max_seqlen=query._max_seqlen,
+            # shape (B, *, D_total) where D_total = n_heads * D
+            nt = torch.nested.nested_tensor(
+                [
+                    torch.randn(l, n_heads * D, device=device, dtype=dtype)
+                    for l in sentence_lengths
+                ],
+                layout=torch.jagged,
             )
-        # NB: randn_like() doesn't propagate lengths so this doesn't preserve non-contiguity
-        key = torch.randn_like(query)
-        value = torch.randn_like(query)
+
+            if noncontig_with_holes:
+                nt = torch.nested.nested_tensor_from_jagged(
+                    nt._values,
+                    nt._offsets,
+                    # -1 to introduce holes
+                    lengths=nt._offsets.diff() - 1,
+                    jagged_dim=nt._ragged_idx,
+                    min_seqlen=nt._min_seqlen,
+                    max_seqlen=nt._max_seqlen,
+                )
+
+            return nt
+
+        query = _rand_nt()
+        if q_and_kv_match:
+            # NB: randn_like() doesn't propagate lengths so this doesn't preserve non-contiguity
+            key = torch.randn_like(query)
+            value = torch.randn_like(query)
+        else:
+            key = _rand_nt()
+            value = torch.randn_like(key)
 
         # shape (B, *, D_total) -> (B, n_heads, *, D)
         query = (
@@ -7155,15 +7165,26 @@ torch.cuda.synchronize()
     # non-contiguous with holes not supported yet
     @decorateIf(unittest.skip, lambda params: params["noncontig_with_holes"])
     @parametrize("noncontig_with_holes", [False, True])
+    @parametrize("cross_attention", [False, True])
     @skipIfRocm
-    def test_flex_attention(self, device, dtype, noncontig_with_holes):
-        query, key, value = self._rand_qkv(device, dtype, noncontig_with_holes)
+    def test_flex_attention(self, device, dtype, noncontig_with_holes, cross_attention):
+        query, key, value = self._rand_qkv(
+            device, dtype, noncontig_with_holes, q_and_kv_match=(not cross_attention)
+        )
 
         # Run FlexAttention with a causal mask
         def causal_mask(b, h, q_idx, kv_idx):
             return q_idx >= kv_idx
 
-        block_mask = create_nested_block_mask(causal_mask, 1, 1, query, _compile=True)
+        if cross_attention:
+            block_mask = create_nested_block_mask(
+                causal_mask, 1, 1, query, key, _compile=True
+            )
+        else:
+            block_mask = create_nested_block_mask(
+                causal_mask, 1, 1, query, _compile=True
+            )
+
         out_flex = flex_attention(query, key, value, block_mask=block_mask)
         grad_out = torch.randn_like(out_flex)
         grads_flex = torch.autograd.grad(
