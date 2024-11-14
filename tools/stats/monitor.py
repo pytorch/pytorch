@@ -148,7 +148,6 @@ if __name__ == "__main__":
             }
             if nvml_handle is not None:
                 # https://docs.nvidia.com/deploy/nvml-api/structnvmlUtilization__t.html
-                gpu_utilization = pynvml.nvmlDeviceGetUtilizationRates(nvml_handle)
                 gpu_count = pynvml.nvmlDeviceGetCount()
                 # Iterate over the available GPUs
                 for i in range(gpu_count):
@@ -157,8 +156,8 @@ if __name__ == "__main__":
                     # Get the message for the current GPU
                     stats["parent_pid_utilization_{i}"] = get_parent_proccess(gpu_handle)
                     stats["per_process_gpu_info_{i}"] = get_per_process_gpu_info(gpu_handle)
-                    stats[f"total_gpu_utilization_{i}"] = gpu_utilization.gpu
-                    stats[f"total_gpu_mem_utilization_{i}"] = gpu_utilization.memory
+                    stats[f"total_gpu_utilization_{i}"] = gpu_handle.gpu
+                    stats[f"total_gpu_mem_utilization_{i}"] = gpu_handle.memory
                 # Run the nvidia-smi command and capture its output
                 output = subprocess.check_output(['nvidia-smi', '--query-gpu=utilization.gpu', '--format=csv,noheader,nounits'])# Decode the output from bytes to string
                 output_str = output.decode('utf-8')
