@@ -1111,6 +1111,37 @@ def _check_tensor_list(param, param_name) -> None:
         )
 
 
+def _group_or_default_group(group: Optional[ProcessGroup] = None) -> ProcessGroup:
+    if group is None or group is GroupMember.WORLD:
+        group = _get_default_group()
+    return group
+
+
+def _canonicalize_group_rank(
+    group: ProcessGroup,
+    global_rank: Optional[int] = None,
+    group_rank: Optional[int] = None,
+) -> int:
+    """
+    Helper method to take _either_ a global rank or a group rank and produce a group rank.
+    """
+
+    if group_rank is not None:
+        assert global_rank is None, "Can't specify both group_rank and global_rank"
+    else:
+        assert global_rank is not None, "Must specify global_rank or group_rank"
+        group_rank = get_group_rank(group, global_rank)
+    return group_rank
+
+
+def _check_not_self_rank(group: ProcessGroup, rank: int, rank_type: str):
+    if group.rank() == rank:
+        raise ValueError(
+            f"Invalid {rank_type} rank: {rank_type} rank should not be the same as "
+            "the rank of the current process."
+        )
+
+
 def _as_iterable(obj) -> collections.abc.Iterable:
     return obj if isinstance(obj, list) else (obj,)
 
@@ -2305,35 +2336,6 @@ def irecv(
             return pg.recv([tensor], group_src_rank, tag)
 
 
-def _canonicalize_group_rank(
-    group: Optional[ProcessGroup] = None,
-    global_rank: Optional[int] = None,
-    group_rank: Optional[int] = None,
-) -> Tuple[ProcessGroup, int]:
-    """
-    Helper method to take _either_ a global rank or a group rank and produce a group rank.
-
-    Also returns the group, which could be the world group (if None or GroupMember.WORLD was passed in).
-    """
-    if group is None or group is GroupMember.WORLD:
-        group = _get_default_group()
-
-    if group_rank is not None:
-        assert global_rank is None, "Can't specify both group_rank and global_rank"
-    else:
-        assert global_rank is not None, "Must specify global_rank or group_rank"
-        group_rank = get_group_rank(group, global_rank)
-    return group, group_rank
-
-
-def _check_not_self_rank(group: ProcessGroup, rank: int, rank_type: str):
-    if group.rank() == rank:
-        raise ValueError(
-            f"Invalid {rank_type} rank: {rank_type} rank should not be the same as "
-            "the rank of the current process."
-        )
-
-
 @_exception_logger
 def send(
     tensor: torch.Tensor,
@@ -2358,7 +2360,8 @@ def send(
         group_dst (int, optional): Destination rank on ``group``.
 
     """
-    group, group_dst = _canonicalize_group_rank(group, dst, group_dst)
+    group = _group_or_default_group(group)
+    group_dst = _canonicalize_group_rank(group, dst, group_dst)
     _check_not_self_rank(group, group_dst, "destination")
     _check_single_tensor(tensor, "tensor")
     if _rank_not_in_group(group):
@@ -2377,6 +2380,7 @@ def recv(
     src: Optional[int] = None,
     group: Optional[ProcessGroup] = None,
     tag: int = 0,
+    group_src: Optional[int] = None,
 ) -> int:
     """
     Receives a tensor synchronously.
@@ -2391,7 +2395,7 @@ def recv(
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         tag (int, optional): Tag to match recv with remote send
-
+        group_src (int, optional): Destination rank on ``group``.  Invalid to specify both ``src`` and ``group_src``.
     Returns:
         Sender rank
         -1, if not part of the group
@@ -2405,23 +2409,17 @@ def recv(
     if tensor.is_complex():
         tensor = torch.view_as_real(tensor)
 
-    pg = group or _get_default_group()
+    group = _group_or_default_group(group)
 
-    if src is None:
-        work = pg.recv_anysource([tensor], tag)
+    if src is None and group_src is None:
+        work = group.recv_anysource([tensor], tag)
         work.wait()
         src_rank = work._source_rank()
-        if group is None or group is GroupMember.WORLD:
-            return src_rank
-        else:
-            return get_global_rank(pg, src_rank)
+        return get_global_rank(group, src_rank)
     else:
-        if group is None or group is GroupMember.WORLD:
-            pg.recv([tensor], src, tag).wait()
-        else:
-            group_src_rank = get_group_rank(pg, src)
-            pg.recv([tensor], group_src_rank, tag).wait()
-        return src
+        group_src = _canonicalize_group_rank(group, src, group_src)
+        group.recv([tensor], group_src, tag).wait()
+        return get_global_rank(group, group_src)
 
 
 class _IllegalWork(Work):
