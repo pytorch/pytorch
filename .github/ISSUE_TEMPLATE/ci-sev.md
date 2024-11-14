@@ -1,8 +1,9 @@
 ---
 name: "⚠️ CI SEV"
 about: Tracking incidents for PyTorch's CI infra.
-label: ["ci: sev"]
 ---
+
+> NOTE: Remember to label this issue with "`ci: sev`"
 
  <!-- Add the `merge blocking` label to this PR to prevent PRs from being merged while this issue is open -->
 
