@@ -37,7 +37,6 @@ kernel void weight_to_int4pack(constant int *W [[buffer(0)]],
                                device uchar *outputData [[buffer(1)]],
                                constant uint2 &sizes [[buffer(2)]],
                                uint2 thread_index [[thread_position_in_grid]]) {
-  const uint N = sizes.x;
   const uint K_int32 = sizes.y;
   const uint n = thread_index.x; // 0..N-1
   const uint k = thread_index.y; // 0..K_int32-1
@@ -271,11 +270,6 @@ template <> struct BlockType<bfloat> {
   using type4 = bfloat4;
 };
 #endif
-
-template<typename T>
-float2 get_scale_zero(constant T * scalesAndZeros, uint2 index) {
-    return float2(1.0, 0.0);
-}
 
 template<typename T>
 float2 get_scale_zero_q8(constant T * scalesAndZeros, uint2 index) {
@@ -584,8 +578,6 @@ kernel void kernel_mul_mv(
     uint                         tiisg          [[thread_index_in_simdgroup]],
     uint                         sgitg          [[simdgroup_index_in_threadgroup]]) {
 
-    using T4 = typename BlockType<T>::type4;
-
     const int nr  = N_DST;
     const int nsg = N_SIMDGROUP;
     const int nw  = N_SIMDWIDTH;
@@ -657,7 +649,7 @@ kernel void kernel_mul_mv(
         yb += NB_Q8_0 * nw;
     }
 
-    for (int row = 0; row < nr; ++row) {
+    for (unsigned row = 0; row < nr; ++row) {
         const float tot = simd_sum(sumf[row]);
         float scale = *(shared_scale + (sgitg % 2) * 4 + row);
         if (tiisg == 0 && first_row + row < N) {

@@ -1042,7 +1042,7 @@ def get_pytest_args(options, is_cpp_test=False, is_distributed_test=False):
     if RERUN_DISABLED_TESTS:
         # Distributed tests are too slow, so running them x50 will cause the jobs to timeout after
         # 3+ hours. So, let's opt for less number of reruns. We need at least 150 instances of the
-        # test every 2 weeks to satisfy the Rockset query (15 x 14 = 210). The same logic applies
+        # test every 2 weeks to satisfy the SQL query (15 x 14 = 210). The same logic applies
         # to ASAN, which is also slow
         count = 15 if is_distributed_test or TEST_WITH_ASAN else 50
         # When under rerun-disabled-tests mode, run the same tests multiple times to determine their

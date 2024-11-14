@@ -268,9 +268,9 @@ def query_key_value_clones(
     """Clones the query, key, and value tensors and moves them to the specified dtype."""
     if dtype is None:
         dtype = query.dtype
-    query_ref = query.clone().detach().to(dtype).requires_grad_(query.requires_grad)
-    key_ref = key.clone().detach().to(dtype).requires_grad_(key.requires_grad)
-    value_ref = value.clone().detach().to(dtype).requires_grad_(value.requires_grad)
+    query_ref = query.detach().clone().to(dtype).requires_grad_(query.requires_grad)
+    key_ref = key.detach().clone().to(dtype).requires_grad_(key.requires_grad)
+    value_ref = value.detach().clone().to(dtype).requires_grad_(value.requires_grad)
     return query_ref, key_ref, value_ref
 
 
@@ -2922,6 +2922,19 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             flex_attention(query, key, value)
 
     @supported_platform
+    def test_invalid_block_size(self):
+        # Create tensors on different devices
+        q, k, v = (torch.randn(1, 8, 128, 64, device="cuda") for _ in range(3))
+
+        expected_error_message = (
+            "ValueError: Q and KV block size must be divisible by BLOCK_M and BLOCK_N."
+        )
+        block_mask = create_block_mask(noop_mask, 1, 8, 128, 128, BLOCK_SIZE=96)
+
+        with self.assertRaisesRegex(RuntimeError, expected_error_message):
+            torch.compile(flex_attention)(q, k, v, block_mask=block_mask)
+
+    @supported_platform
     def test_small_q_kv_len(self):
         make_tensor = functools.partial(
             torch.ones,
@@ -3005,7 +3018,12 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 qkv = self.qkv(x).view(B, T, 3, self.n_head, self.head_dim)
                 qkv = qkv.permute(2, 0, 3, 1, 4)
                 q, k, v = qkv
-                y = flex_attention(q, k, v, block_mask=block_mask)
+                y = flex_attention(
+                    q,
+                    k,
+                    v,
+                    block_mask=block_mask,
+                )
                 return y.transpose(1, 2).contiguous().view(B, T, C)
 
         model = SimpleAttention().cuda()
@@ -3032,6 +3050,48 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             y = model(x, block_mask=block_mask)
 
         self.assertEqual(torch._dynamo.utils.counters["aot_autograd"]["ok"], 2)
+
+    @supported_platform
+    def test_symbol_closure_in_score_mod(self):
+        class SimpleAttention(torch.nn.Module):
+            def __init__(self, dim=512, n_head=8):
+                super().__init__()
+                self.qkv = torch.nn.Linear(dim, 3 * dim)
+                self.n_head = n_head
+                self.head_dim = dim // n_head
+
+            def forward(self, x, block_mask=None):
+                B, T, C = x.size()
+                qkv = self.qkv(x).view(B, T, 3, self.n_head, self.head_dim)
+                qkv = qkv.permute(2, 0, 3, 1, 4)
+                q, k, v = qkv
+                return flex_attention(
+                    q,
+                    k,
+                    v,
+                    score_mod=lambda s, b, h, q, k: s + B,
+                    block_mask=block_mask,
+                )
+
+        model = SimpleAttention().cuda()
+        from torch._dynamo.testing import EagerAndRecordGraphs
+
+        backend = EagerAndRecordGraphs()
+        model.compile(mode="default", dynamic=True, backend=backend)
+        sequence_len = 256
+
+        torch._dynamo.reset()
+        for batch_shape in [4, 16, 32]:
+            x = torch.randn(batch_shape, sequence_len, 512).cuda()
+            model(x)
+        self.assertEqual(len(backend.graphs), 1)
+        self.assertExpectedInline(
+            backend.graphs[0].score_mod_0.code.strip(),
+            """\
+def forward(self, child_4 : torch.Tensor, child_5 : torch.Tensor, child_6 : torch.Tensor, child_7 : torch.Tensor, child_8 : torch.Tensor, getitem : torch.SymInt):
+    add = child_4 + getitem;  child_4 = getitem = None
+    return add""",
+        )
 
     @supported_platform
     def test_fw_bw_graph_correctness(self):
@@ -3086,7 +3146,7 @@ class GraphModule(torch.nn.Module):
         child_7: "i32[]" = l_query_.new_empty([], dtype = torch.int32);  child_7 = None
         child_8: "i32[]" = l_query_.new_empty([], dtype = torch.int32);  child_8 = None
         mask_fn_0 = self.mask_fn_0
-        flex_attention = torch.ops.higher_order.flex_attention(l_query_, l_key_, l_value_, score_mod_0, (l_block_mask_kv_num_blocks, l_block_mask_kv_indices, l_block_mask_full_kv_num_blocks, l_block_mask_full_kv_indices, l_block_mask_q_num_blocks, l_block_mask_q_indices, l_block_mask_full_q_num_blocks, l_block_mask_full_q_indices, 128, 128, mask_fn_0), 0.5, {'ROWS_GUARANTEED_SAFE': False, 'PRESCALE_QK': False, 'OUTPUT_LOGSUMEXP': True}, (), ());  l_query_ = l_key_ = l_value_ = score_mod_0 = l_block_mask_kv_num_blocks = l_block_mask_kv_indices = l_block_mask_full_kv_num_blocks = l_block_mask_full_kv_indices = l_block_mask_q_num_blocks = l_block_mask_q_indices = l_block_mask_full_q_num_blocks = l_block_mask_full_q_indices = mask_fn_0 = None
+        flex_attention = torch.ops.higher_order.flex_attention(l_query_, l_key_, l_value_, score_mod_0, (l_block_mask_kv_num_blocks, l_block_mask_kv_indices, l_block_mask_full_kv_num_blocks, l_block_mask_full_kv_indices, l_block_mask_q_num_blocks, l_block_mask_q_indices, l_block_mask_full_q_num_blocks, l_block_mask_full_q_indices, 128, 128, mask_fn_0), 0.5, {'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'OUTPUT_LOGSUMEXP': True}, (), ());  l_query_ = l_key_ = l_value_ = score_mod_0 = l_block_mask_kv_num_blocks = l_block_mask_kv_indices = l_block_mask_full_kv_num_blocks = l_block_mask_full_kv_indices = l_block_mask_q_num_blocks = l_block_mask_q_indices = l_block_mask_full_q_num_blocks = l_block_mask_full_q_indices = mask_fn_0 = None
         out: "f64[2, 2, 128, 4]" = flex_attention[0];  flex_attention = None
         return (out,)
 
@@ -3127,7 +3187,7 @@ class GraphModule(torch.nn.Module):
         fw_graph = self.fw_graph
         joint_graph = self.joint_graph
         mask_graph = self.mask_graph
-        flex_attention_backward = torch.ops.higher_order.flex_attention_backward(primals_1, primals_2, primals_3, getitem_2, getitem_3, tangents_1, full_default_4, fw_graph, joint_graph, (full, full_default, None, None, convert_element_type, convert_element_type_1, None, None, 1073741824, 1073741824, mask_graph), 0.5, {'ROWS_GUARANTEED_SAFE': False, 'PRESCALE_QK': False, 'OUTPUT_LOGSUMEXP': True}, (), ());  primals_1 = primals_2 = primals_3 = getitem_2 = getitem_3 = tangents_1 = full_default_4 = fw_graph = joint_graph = full = full_default = convert_element_type = convert_element_type_1 = mask_graph = None
+        flex_attention_backward = torch.ops.higher_order.flex_attention_backward(primals_1, primals_2, primals_3, getitem_2, getitem_3, tangents_1, full_default_4, fw_graph, joint_graph, (full, full_default, None, None, convert_element_type, convert_element_type_1, None, None, 1073741824, 1073741824, mask_graph), 0.5, {'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'OUTPUT_LOGSUMEXP': True}, (), ());  primals_1 = primals_2 = primals_3 = getitem_2 = getitem_3 = tangents_1 = full_default_4 = fw_graph = joint_graph = full = full_default = convert_element_type = convert_element_type_1 = mask_graph = None
         getitem_4: "f64[2, 2, 128, 4]" = flex_attention_backward[0]
         getitem_5: "f64[2, 2, 128, 4]" = flex_attention_backward[1]
         getitem_6: "f64[2, 2, 128, 4]" = flex_attention_backward[2];  flex_attention_backward = None
