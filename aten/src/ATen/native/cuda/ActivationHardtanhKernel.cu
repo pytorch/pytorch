@@ -40,6 +40,6 @@ void hardtanh_backward_kernel(
 }
 } // namespace
 
-REGISTER_DISPATCH(hardtanh_backward_stub, &hardtanh_backward_kernel);
+REGISTER_DISPATCH(hardtanh_backward_stub, &hardtanh_backward_kernel)
 
 } // namespace at::native

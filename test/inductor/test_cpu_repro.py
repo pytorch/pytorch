@@ -639,6 +639,66 @@ class CPUReproTests(TestCase):
             change_input_sizes=True,
         )
 
+    def test_set_source_Tensor(self):
+        class MaskedConv2d(torch.nn.Conv2d):
+            def __init__(
+                self,
+                *,
+                in_channels: int,
+                out_channels: int,
+                kernel_size: int,
+                padding: int = 0,
+            ) -> None:
+                super().__init__(
+                    in_channels, out_channels, kernel_size, padding=padding
+                )
+                mask = torch.zeros_like(self.weight)
+
+                mask[:, :, : kernel_size // 2, :] = 1
+                mask[:, :, kernel_size // 2, : kernel_size // 2] = 1
+                self.register_buffer("mask", mask)
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                with torch.no_grad():
+                    self.weight.data *= self.mask
+                return super().forward(x)
+
+        class M(torch.nn.Module):
+            def __init__(
+                self, num_channels: int, num_colors: int, H: int, W: int
+            ) -> None:
+                super().__init__()
+                self.num_channels = num_channels
+                self.num_colors = num_colors
+                self.H = H
+                self.W = W
+                kernel_size = 7
+                padding = (kernel_size - 1) // 2
+                # 1 7x7 Mask
+                layers = [
+                    MaskedConv2d(
+                        in_channels=self.num_channels,
+                        out_channels=64,
+                        kernel_size=kernel_size,
+                        padding=padding,
+                    ),
+                ]
+                self.model = nn.Sequential(*layers)
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                x = x.permute(0, 3, 1, 2)
+                return self.model(x)
+
+        model = M(H=32, W=32, num_channels=4, num_colors=2)
+        fn_opt = torch._dynamo.optimize("inductor")(model)
+        v = (torch.rand(10, 32, 32, 4) > 0.5).to(torch.float32)
+        inps = [
+            v.clone(),
+        ]
+        result, code = run_and_get_cpp_code(fn_opt, *inps)
+        self.assertTrue("aten.set_.source_Tensor" in code)
+        self.assertEqual(model(*inps), result)
+
     @torch._dynamo.config.patch(dynamic_shapes=True)
     @torch._dynamo.config.patch(assume_static_by_default=False)
     @torch._dynamo.config.patch(allow_rnn=True)
@@ -4210,6 +4270,230 @@ class CPUReproTests(TestCase):
             eager = mod(*inputs)
             torch.manual_seed(0)
             self.assertEqual(compiler_mode(*inputs), eager)
+
+    def test_fused_node(self):
+        # https://github.com/pytorch/pytorch/issues/138550.
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(
+                self,
+                clone_50,
+                gt_scalar,
+                div_tensor,
+                convert_element_type_default_7,
+                convert_element_type_default_13,
+                convert_element_type_default_14,
+            ):
+                convert_element_type_default_4 = (
+                    torch.ops.prims.convert_element_type.default(
+                        clone_50, torch.float32
+                    )
+                )
+                clone_50 = None
+                view_default_6 = torch.ops.aten.view.default(
+                    convert_element_type_default_4, [336, 512, 64]
+                )
+                convert_element_type_default_4 = None
+                convert_element_type_default_5 = (
+                    torch.ops.prims.convert_element_type.default(
+                        view_default_6, torch.bfloat16
+                    )
+                )
+                view_default_6 = None
+                mul_tensor = torch.ops.aten.mul.Tensor(gt_scalar, div_tensor)
+                mul_tensor_1 = torch.ops.aten.mul.Tensor(mul_tensor, 1.1111111111111112)
+                mul_tensor = None
+                expand_default_2 = torch.ops.aten.expand.default(
+                    mul_tensor_1, [28, 12, 512, 512]
+                )
+                mul_tensor_1 = None
+                view_default_3 = torch.ops.aten.view.default(
+                    expand_default_2, [336, 512, 512]
+                )
+                expand_default_2 = None
+                permute_default_4 = torch.ops.aten.permute.default(
+                    view_default_3, [0, 2, 1]
+                )
+                view_default_3 = None
+                convert_element_type_default_6 = (
+                    torch.ops.prims.convert_element_type.default(
+                        permute_default_4, torch.bfloat16
+                    )
+                )
+                permute_default_4 = None
+                bmm_default_2 = torch.ops.aten.bmm.default(
+                    convert_element_type_default_6, convert_element_type_default_5
+                )
+                convert_element_type_default_6 = None
+                convert_element_type_default_10 = (
+                    torch.ops.prims.convert_element_type.default(
+                        bmm_default_2, torch.float32
+                    )
+                )
+                bmm_default_2 = None
+                view_default_7 = torch.ops.aten.view.default(
+                    convert_element_type_default_10, [28, 12, 512, 64]
+                )
+                convert_element_type_default_10 = None
+                convert_element_type_default_18 = (
+                    torch.ops.prims.convert_element_type.default(
+                        view_default_7, torch.bfloat16
+                    )
+                )
+                view_default_7 = None
+                permute_default_9 = torch.ops.aten.permute.default(
+                    convert_element_type_default_18, [0, 2, 1, 3]
+                )
+                convert_element_type_default_18 = None
+                bmm_default_3 = torch.ops.aten.bmm.default(
+                    convert_element_type_default_5, convert_element_type_default_7
+                )
+                convert_element_type_default_5 = convert_element_type_default_7 = None
+                convert_element_type_default_9 = (
+                    torch.ops.prims.convert_element_type.default(
+                        bmm_default_3, torch.float32
+                    )
+                )
+                bmm_default_3 = None
+                view_default_8 = torch.ops.aten.view.default(
+                    convert_element_type_default_9, [28, 12, 512, 512]
+                )
+                convert_element_type_default_9 = None
+                convert_element_type_default_11 = (
+                    torch.ops.prims.convert_element_type.default(
+                        gt_scalar, torch.float32
+                    )
+                )
+                gt_scalar = None
+                mul_tensor_2 = torch.ops.aten.mul.Tensor(
+                    convert_element_type_default_11, 1.1111111111111112
+                )
+                convert_element_type_default_11 = None
+                mul_tensor_3 = torch.ops.aten.mul.Tensor(view_default_8, mul_tensor_2)
+                view_default_8 = mul_tensor_2 = None
+                mul_tensor_4 = torch.ops.aten.mul.Tensor(mul_tensor_3, div_tensor)
+                mul_tensor_3 = None
+                sum_dim_int_list_1 = torch.ops.aten.sum.dim_IntList(
+                    mul_tensor_4, [-1], True
+                )
+                neg_default = torch.ops.aten.neg.default(div_tensor)
+                div_tensor = None
+                fma_default = torch.ops.prims.fma.default(
+                    neg_default, sum_dim_int_list_1, mul_tensor_4
+                )
+                neg_default = sum_dim_int_list_1 = mul_tensor_4 = None
+                view_default_9 = torch.ops.aten.view.default(
+                    fma_default, [336, 512, 512]
+                )
+                fma_default = None
+                convert_element_type_default_12 = (
+                    torch.ops.prims.convert_element_type.default(
+                        view_default_9, torch.bfloat16
+                    )
+                )
+                view_default_9 = None
+                bmm_default_4 = torch.ops.aten.bmm.default(
+                    convert_element_type_default_13, convert_element_type_default_12
+                )
+                convert_element_type_default_13 = None
+                convert_element_type_default_17 = (
+                    torch.ops.prims.convert_element_type.default(
+                        bmm_default_4, torch.float32
+                    )
+                )
+                bmm_default_4 = None
+                view_default_10 = torch.ops.aten.view.default(
+                    convert_element_type_default_17, [28, 12, 64, 512]
+                )
+                convert_element_type_default_17 = None
+                mul_scalar_2 = torch.ops.aten.mul.Scalar(
+                    view_default_10, 0.3535533905932738
+                )
+                view_default_10 = None
+                permute_default_8 = torch.ops.aten.permute.default(
+                    mul_scalar_2, [0, 1, 3, 2]
+                )
+                mul_scalar_2 = None
+                convert_element_type_default_19 = (
+                    torch.ops.prims.convert_element_type.default(
+                        permute_default_8, torch.bfloat16
+                    )
+                )
+                permute_default_8 = None
+                permute_default_10 = torch.ops.aten.permute.default(
+                    convert_element_type_default_19, [0, 2, 1, 3]
+                )
+                convert_element_type_default_19 = None
+                bmm_default_5 = torch.ops.aten.bmm.default(
+                    convert_element_type_default_12, convert_element_type_default_14
+                )
+                convert_element_type_default_12 = convert_element_type_default_14 = None
+                convert_element_type_default_16 = (
+                    torch.ops.prims.convert_element_type.default(
+                        bmm_default_5, torch.float32
+                    )
+                )
+                bmm_default_5 = None
+                view_default_11 = torch.ops.aten.view.default(
+                    convert_element_type_default_16, [28, 12, 512, 64]
+                )
+                convert_element_type_default_16 = None
+                mul_scalar_3 = torch.ops.aten.mul.Scalar(
+                    view_default_11, 0.3535533905932738
+                )
+                view_default_11 = None
+                convert_element_type_default_20 = (
+                    torch.ops.prims.convert_element_type.default(
+                        mul_scalar_3, torch.bfloat16
+                    )
+                )
+                mul_scalar_3 = None
+                permute_default_11 = torch.ops.aten.permute.default(
+                    convert_element_type_default_20, [0, 2, 1, 3]
+                )
+                convert_element_type_default_20 = None
+                clone_52 = torch.ops.aten.clone.default(
+                    permute_default_11, memory_format=torch.contiguous_format
+                )
+                permute_default_11 = None
+                view_283 = torch.ops.aten.view.default(clone_52, [28, 512, 768])
+                clone_52 = None
+                clone_53 = torch.ops.aten.clone.default(
+                    permute_default_9, memory_format=torch.contiguous_format
+                )
+                permute_default_9 = None
+                view_284 = torch.ops.aten.view.default(clone_53, [28, 512, 768])
+                clone_53 = None
+                view_285 = torch.ops.aten.view.default(view_284, [14336, 768])
+                view_284 = None
+                return view_283, view_285
+
+        clone_50 = torch.randn((28, 12, 512, 64), dtype=torch.bfloat16) / 10
+        gt_scalar = torch.randint(0, 2, (28, 12, 512, 512), dtype=torch.bool)
+        div_tensor = torch.randn((28, 12, 512, 512), dtype=torch.float) / 10
+        convert_element_type_default_7 = (
+            torch.randn((336, 64, 512), dtype=torch.bfloat16) / 10
+        )
+        convert_element_type_default_13 = (
+            torch.randn((336, 64, 512), dtype=torch.bfloat16) / 10
+        )
+        convert_element_type_default_14 = (
+            torch.randn((336, 512, 64), dtype=torch.bfloat16) / 10
+        )
+        inputs = (
+            clone_50,
+            gt_scalar,
+            div_tensor,
+            convert_element_type_default_7,
+            convert_element_type_default_13,
+            convert_element_type_default_14,
+        )
+
+        with torch.cpu.amp.autocast():
+            mod = M().to(torch.bfloat16).eval()
+            self.common(mod, inputs, atol=1e-3, rtol=1e-3)
 
     @requires_vectorization
     def test_vec_indirect_load_cse_cache(self):
