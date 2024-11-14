@@ -586,14 +586,21 @@ class TensorVariable(VariableTracker):
 
         from .builder import wrap_fx_proxy
 
-        return wrap_fx_proxy(
-            tx,
-            tx.output.create_proxy(
-                "call_method",
-                name,
-                *proxy_args_kwargs([self, *args], kwargs),
-            ),
+        # Issue #140591
+        # Create the proxy for the method call
+        proxy_result = tx.output.create_proxy(
+            "call_method",
+            name,
+            *proxy_args_kwargs([self, *args], kwargs),
         )
+
+        # Check if the proxy result is a tensor before proceeding
+        if not isinstance(proxy_result, torch.Tensor):
+            raise TypeError(f"Method {name} did not return a tensor. Instead got: {type(proxy_result)}")
+
+        # If the proxy result is a tensor, proceed with wrapping it
+        return wrap_fx_proxy(tx, proxy_result)
+
 
     def method_size(self, *args, **kwargs):
         return self._method_size_stride("size", *args, **kwargs)
