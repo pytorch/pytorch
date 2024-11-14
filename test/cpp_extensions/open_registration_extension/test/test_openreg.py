@@ -30,7 +30,7 @@ class TestOpenReg(TestCase):
                 thread_name = file.read().strip()
             all_thread_names.add(thread_name)
 
-        for i in range(pytorch_openreg._device_daemon.NUM_DEVICES):
+        for i in range(pytorch_openreg.NUM_DEVICES):
             self.assertIn(f"pt_autograd_{i}", all_thread_names)
 
     def test_factory(self):
