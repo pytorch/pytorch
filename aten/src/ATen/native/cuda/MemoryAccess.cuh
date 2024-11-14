@@ -57,11 +57,11 @@ struct static_unroll<func, end, end> {
 template<int arg_index>
 struct vectorized_load_helper {
   template <typename args_t, typename policy_t>
-  static __device__ void apply(policy_t &self, args_t *args, int idx, int block_work_size) {
+  static __device__ void apply(policy_t &self, args_t *args, int idx) {
     using arg_t = std::tuple_element_t<arg_index, args_t>;
     // `data` hold the data_ptr for tensors [output, input0, input1, ...], so we
     // need a +1 offset to get the input
-    auto ptr = reinterpret_cast<arg_t *>(self.data[arg_index + 1]) + block_work_size * idx;
+    auto ptr = reinterpret_cast<arg_t *>(self.data[arg_index + 1]) + block_work_size() * idx;
     auto args_accessor = [&args] __device__ (int thread_unroll_idx) -> arg_t & { return std::get<arg_index>(args[thread_unroll_idx]); };
     self.load_single_arg(args_accessor, ptr);
   }
@@ -181,7 +181,9 @@ __device__ aligned_vector<bool, vec_size> load_vector(const bool *base_ptr, uint
 
 namespace policies {
 
-template<typename data_t, typename inp_calc_t, typename out_calc_t, typename loader_t, typename storer_t, int elems_per_thread, int num_outputs=1>
+// Assumption:
+// all tensors are contiguous, that is: stride == sizeof(type) for all tensors
+template<typename data_t, typename inp_calc_t, typename out_calc_t, typename loader_t, typename storer_t, int num_outputs = 1>
 struct unroll {
 
   data_t data;
@@ -190,7 +192,6 @@ struct unroll {
   out_calc_t output_offset_calculator;
   loader_t loader;
   storer_t storer;
-  static constexpr int tws = elems_per_thread;
 
   __device__ unroll(data_t data, int remaining, inp_calc_t ic, out_calc_t oc, loader_t l, storer_t s):
     data(data), remaining(remaining), input_offset_calculator(ic), output_offset_calculator(oc), loader(l), storer(s) {}
@@ -204,11 +205,11 @@ struct unroll {
     constexpr int arity = std::tuple_size_v<args_t>;
     int thread_idx = threadIdx.x;
     #pragma unroll
-    for (int i = 0; i < elems_per_thread; i++) {
+    for (int i = 0; i < thread_work_size(); i++) {
       if (thread_idx >= remaining) {
         return;
       }
-      int linear_idx = thread_idx + elems_per_thread * num_threads() * idx;
+      int linear_idx = thread_idx + block_work_size() * idx;
       auto offset = input_offset_calculator.get(linear_idx);
       detail::static_unroll<detail::unroll_load_helper, arity>::with_args(*this, args, offset, loader, i, num_outputs);
       thread_idx += num_threads();
@@ -219,11 +220,11 @@ struct unroll {
   __device__ inline void store(scalar_t *from, int idx) {
     int thread_idx = threadIdx.x;
     #pragma unroll
-    for (int i = 0; i < elems_per_thread; i++) {
+    for (int i = 0; i < thread_work_size(); i++) {
       if (thread_idx >= remaining) {
         return;
       }
-      int linear_idx = thread_idx + elems_per_thread * num_threads() * idx;
+      int linear_idx = thread_idx + block_work_size() * idx;
       int offset = output_offset_calculator.get(linear_idx)[0];
       storer.store(from[i], data[0], offset);
       thread_idx += num_threads();
@@ -236,12 +237,11 @@ struct unroll {
 // Note:
 // Functions in vectorized policy does not do boundary check. It assumes the whole block
 // has its job to do. So the reminders should be handled by the caller manually.
-template <int vec_size, typename data_t, int elems_per_thread>  // vec_size: number of scalars, can be 1, 2, or 4.
+template <int vec_size, typename data_t>  // vec_size: number of scalars, can be 1, 2, or 4.
 struct vectorized {
 
-  static_assert(elems_per_thread % vec_size == 0, "The workload per thread must be a multiple of vec_size");
-  static constexpr int loop_size = elems_per_thread / vec_size;
-  static constexpr int tws = elems_per_thread;
+  static_assert(thread_work_size() % vec_size == 0, "The workload per thread must be a multiple of vec_size");
+  static constexpr int loop_size = thread_work_size() / vec_size;
 
   data_t data;
 
@@ -268,13 +268,13 @@ struct vectorized {
   template<typename args_t>
   __device__ inline void load(args_t *args, int idx) {
     constexpr int arity = std::tuple_size_v<args_t>;
-    detail::static_unroll<detail::vectorized_load_helper, arity>::with_args(*this, args, idx, elems_per_thread * num_threads());
+    detail::static_unroll<detail::vectorized_load_helper, arity>::with_args(*this, args, idx);
   }
 
   template<typename scalar_t>
   __device__ inline void store(scalar_t *from, int idx) {
     using vec_t = aligned_vector<scalar_t, vec_size>;
-    scalar_t *to = reinterpret_cast<scalar_t *>(data[0]) + elems_per_thread * num_threads() * idx;
+    scalar_t *to = reinterpret_cast<scalar_t *>(data[0]) + block_work_size() * idx;
     vec_t *to_ = reinterpret_cast<vec_t *>(to);
     int thread_idx = threadIdx.x;
     #pragma unroll
@@ -299,7 +299,6 @@ struct multi_outputs_unroll {
   out_calc_t output_offset_calculator;
   LoadWithoutCast loader;
   StoreWithoutCast storer;
-  static constexpr int tws = thread_work_size();
 
   __device__ multi_outputs_unroll(data_t data, int remaining, inp_calc_t ic, out_calc_t oc):
   data(data), remaining(remaining), input_offset_calculator(ic), output_offset_calculator(oc) {}

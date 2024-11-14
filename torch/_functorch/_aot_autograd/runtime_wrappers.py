@@ -2033,11 +2033,15 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
 
                 # not ideal but prevent the user from seeing a nasty traceback - See #138422
                 stack = torch._C._functorch.peek_interpreter_stack()
-                vmap_type = torch._C._functorch.TransformType.Vmap
+                forbidden_keys = (
+                    torch._C._functorch.TransformType.Vmap,
+                    torch._C._functorch.TransformType.Grad,
+                    torch._C._functorch.TransformType.Jvp,
+                )
                 torch._check(
-                    not (stack is not None and stack.key() == vmap_type),
+                    not (stack is not None and stack.key() in forbidden_keys),
                     lambda: (
-                        "It looks like you're trying to call a compiled backward function within vmap, "
+                        "It looks like you're trying to call a compiled backward function within vmap/grad/vjp, "
                         "which isn't supported. Try wrapping vmap inside torch.compile, or skip compiling the "
                         "backward function."
                     ),
