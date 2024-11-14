@@ -5,12 +5,14 @@ import logging
 import torch
 import torch._inductor
 from torch._dynamo.utils import counters
+from torch._inductor.fx_passes.decompose_mem_bound_mm import check_device
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    skipIfXpu,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CUDA
 from torch.testing._internal.triton_utils import requires_gpu
@@ -46,6 +48,10 @@ class MyModule3(torch.nn.Module):
 
 
 @requires_gpu
+@skipIfXpu(
+    msg="Intel GPU has not enabled decompose_mem_bound_mm PASS in "
+    "torch/_inductor/fx_passes/decompose_mem_bound_mm.py"
+)
 @torch._inductor.config.patch(
     post_grad_fusion_options={
         "decompose_mm_pass": {},
@@ -111,6 +117,29 @@ class TestDecomposeMemMM(TestCase):
         self.compare_gradients(module, traced)
 
         expected_val = 3 if should_decompose and HAS_CUDA else 0
+        self.assertEqual(
+            counters["inductor"]["decompose_bmm"],
+            expected_val,
+        )
+        counters.clear()
+
+    @parametrize(
+        "b,m,k,n,should_decompose",
+        [(1, 2, 2, 2, True), (2, 2, 2, 2, False)],
+    )
+    def test_decompose_bmm_cpu(self, b, m, n, k, should_decompose):
+        torch._logging.set_logs(inductor=logging.DEBUG)
+        mat1 = torch.randn(b, m, k)
+        mat2 = torch.randn(b, k, n)
+
+        counters.clear()
+
+        module = MyModule2()
+        traced = torch.compile(module)
+        input = [mat1, mat2]
+        self.compare_pred(module, traced, input)
+
+        expected_val = 1 if should_decompose else 0
         self.assertEqual(
             counters["inductor"]["decompose_bmm"],
             expected_val,
@@ -249,6 +278,28 @@ class TestDecomposeMemMM(TestCase):
 
     @parametrize(
         "m,k,n, should_decompose",
+        [(1, 64, 16, True), (2, 64, 16, False), (1, 64, 32, False)],
+    )
+    def test_decompose_mm_cpu(self, m, n, k, should_decompose):
+        torch._logging.set_logs(inductor=logging.DEBUG)
+        mat1 = torch.randn(m, k)
+        mat2 = torch.randn(k, n)
+        counters.clear()
+
+        module = MyModule3()
+        traced = torch.compile(module)
+        input = [mat1, mat2]
+        self.compare_pred(module, traced, input)
+
+        expected_val = 1 if should_decompose else 0
+        self.assertEqual(
+            counters["inductor"]["decompose_mm"],
+            expected_val,
+        )
+        counters.clear()
+
+    @parametrize(
+        "m,k,n, should_decompose",
         [(20480, 5, 2, True), (20480, 32, 2, False), (2048, 2, 2, False)],
     )
     @parametrize("has_bias", [True, False])
@@ -346,6 +397,29 @@ class TestDecomposeMemMM(TestCase):
         else:
             # two kernels generated
             FileCheck().check_count(".run(", 2, exactly=True).run(code[0])
+
+    def test_check_device(self):
+        m = 5
+        k = 5
+        n = 2
+        torch._logging.set_logs(inductor=logging.DEBUG)
+
+        input1 = torch.randn(m, k, device=GPU_TYPE)
+        input2 = torch.randn(k, n, device=GPU_TYPE)
+        self.assertTrue(check_device(input1, input2))
+        self.assertFalse(check_device(input1, input2, device="cpu"))
+
+        input1 = torch.randn(m, k)
+        input2 = torch.randn(k, n)
+        self.assertTrue(check_device(input1, input2, device="cpu"))
+        self.assertFalse(check_device(input1, input2))
+
+        input1 = torch.randn(m, k, device=GPU_TYPE)
+        input2 = torch.randn(k, n)
+        self.assertFalse(check_device(input1, input2, device="gpu"))
+        self.assertFalse(check_device(input1, input2, device="cpu"))
+
+        self.assertFalse(check_device(input1, input2, device="mtia"))
 
 
 if __name__ == "__main__":
