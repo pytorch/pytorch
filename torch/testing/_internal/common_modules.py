@@ -3915,7 +3915,7 @@ module_db: List[ModuleInfo] = [
                    # No channels_last support for loss functions.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
                    # See #119108: input types 'tensor<f32>' and 'tensor<15x10xf16>' are not broadcast compatible
-                   DecorateInfo(skipIfMPS, 'TestModule', 'test_non_contiguous_tensors', dtypes=[torch.float16], device_type='mps'),
+                   DecorateInfo(skipIfMPSOnMacOS13, 'TestModule', 'test_non_contiguous_tensors', dtypes=[torch.float16], device_type='mps'),
                    # See #119108: tolerance issue
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_forward",
                                 device_type='mps', dtypes=[torch.float16]),)
