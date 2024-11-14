@@ -7141,7 +7141,6 @@ torch.cuda.synchronize()
 
         query = _rand_nt()
         if q_and_kv_match:
-            # NB: randn_like() doesn't propagate lengths so this doesn't preserve non-contiguity
             key = torch.randn_like(query)
             value = torch.randn_like(query)
         else:
