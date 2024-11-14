@@ -120,13 +120,7 @@ jobs:
 
           docker exec -t "${container_name}" yum install -y zlib-devel zip
           docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}"  -m pip install -U setuptools==67.4.0 pybind11==2.13.1
-          # Triton xpu build use GCC11
-          if [[ "${BUILD_DEVICE}" == xpu ]]; then
-            docker exec -t "${container_name}" yum install -y devtoolset-11-gcc-c++
-            docker exec -t "${container_name}" bash -c "source /opt/rh/devtoolset-11/enable && ${PYTHON_EXECUTABLE} /pytorch/.github/scripts/build_triton_wheel.py --device=$BUILD_DEVICE $RELEASE"
-          else
-            docker exec -t "${container_name}" bash -c "${PYTHON_EXECUTABLE} /pytorch/.github/scripts/build_triton_wheel.py --device=$BUILD_DEVICE $RELEASE"
-          fi
+          docker exec -t "${container_name}" bash -c "${PYTHON_EXECUTABLE} /pytorch/.github/scripts/build_triton_wheel.py --device=$BUILD_DEVICE $RELEASE"
           docker exec -t "${container_name}" chown -R 1000.1000 /artifacts
 
       - uses: actions/upload-artifact@v4.4.0
