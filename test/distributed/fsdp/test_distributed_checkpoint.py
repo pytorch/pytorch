@@ -59,21 +59,21 @@ class TestDistributedCheckpoint(FSDPTest):
             new_params = list(new_model.parameters())
             self.assertNotEqual(params, new_params)
 
-            writer = FileSystemWriter(self.temp_dir)
-            reader = FileSystemReader(self.temp_dir)
-            with FSDP.state_dict_type(model, state_dict_type), FSDP.state_dict_type(
-                new_model, state_dict_type
-            ):
-                state_dict = model.state_dict()
+        writer = FileSystemWriter(self.temp_dir)
+        reader = FileSystemReader(self.temp_dir)
+        with FSDP.state_dict_type(model, state_dict_type), FSDP.state_dict_type(
+            new_model, state_dict_type
+        ):
+            state_dict = model.state_dict()
 
-            save_state_dict(state_dict, writer)
+        save(state_dict, writer)
 
-            with FSDP.state_dict_type(model, state_dict_type), FSDP.state_dict_type(
-                new_model, state_dict_type
-            ):
-                state_dict = new_model.state_dict()
-                load_state_dict(state_dict, reader)
-                new_model.load_state_dict(state_dict)
+        with FSDP.state_dict_type(model, state_dict_type), FSDP.state_dict_type(
+            new_model, state_dict_type
+        ):
+            state_dict = new_model.state_dict()
+            load(state_dict, reader)
+            new_model.load_state_dict(state_dict)
 
         with FullyShardedDataParallel.summon_full_params(
             model
