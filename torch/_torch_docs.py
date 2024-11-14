@@ -1675,7 +1675,7 @@ Example::
 add_docstr(
     torch.stack,
     r"""
-stack(tensors: Union[Tuple[Tensor, ...], List[Tensor]], dim: int = 0, *, out: Optional[Tensor] = None) -> Tensor
+stack(tensors: Sequence[Tensor], dim: int = 0, *, out: Optional[Tensor] = None) -> Tensor
 
 Concatenates a sequence of tensors along a new dimension.
 
@@ -1735,7 +1735,7 @@ Example::
 add_docstr(
     torch.hstack,
     r"""
-hstack(tensors: Union[Tuple[Tensor, ...], List[Tensor]], *, out: Optional[Tensor] = None) -> Tensor
+hstack(tensors: Sequence[Tensor], *, out: Optional[Tensor] = None) -> Tensor
 
 Stack tensors in sequence horizontally (column wise).
 
@@ -1766,7 +1766,7 @@ Example::
 add_docstr(
     torch.vstack,
     r"""
-vstack(tensors: Union[Tuple[Tensor, ...], List[Tensor]], *, out: Optional[Tensor] = None) -> Tensor
+vstack(tensors: Sequence[Tensor], *, out: Optional[Tensor] = None) -> Tensor
 
 Stack tensors in sequence vertically (row wise).
 
@@ -1802,7 +1802,7 @@ Example::
 add_docstr(
     torch.dstack,
     r"""
-dstack(tensors: Union[Tuple[Tensor, ...], List[Tensor]], *, out: Optional[Tensor] = None) -> Tensor
+dstack(tensors: Sequence[Tensor], *, out: Optional[Tensor] = None) -> Tensor
 
 Stack tensors in sequence depthwise (along third axis).
 
@@ -2277,7 +2277,7 @@ Example::
 add_docstr(
     torch.cat,
     r"""
-cat(tensors: Union[Tuple[Tensor, ...], List[Tensor]], dim: int = 0, *, out: Optional[Tensor] = None) -> Tensor
+cat(tensors: Sequence[Tensor], dim: int = 0, *, out: Optional[Tensor] = None) -> Tensor
 
 Concatenates the given sequence of tensors in :attr:`tensors` in the given dimension.
 All tensors must either have the same shape (except in the concatenating
@@ -2325,7 +2325,7 @@ Example::
 add_docstr(
     torch.concat,
     r"""
-concat(tensors: Union[Tuple[Tensor, ...], List[Tensor]], dim: int = 0, *, out: Optional[Tensor] = None) -> Tensor
+concat(tensors: Sequence[Tensor], dim: int = 0, *, out: Optional[Tensor] = None) -> Tensor
 
 Alias of :func:`torch.cat`.
 """,
@@ -2334,7 +2334,7 @@ Alias of :func:`torch.cat`.
 add_docstr(
     torch.concatenate,
     r"""
-concatenate(tensors: Union[Tuple[Tensor, ...], List[Tensor]], dim: int = 0, *, out: Optional[Tensor] = None) -> Tensor
+concatenate(tensors: Sequence[Tensor], dim: int = 0, *, out: Optional[Tensor] = None) -> Tensor
 
 Alias of :func:`torch.cat`.
 """,
@@ -2792,7 +2792,7 @@ Alias for :func:`torch.clamp`.
 add_docstr(
     torch.column_stack,
     r"""
-column_stack(tensors: Union[Tuple[Tensor, ...], List[Tensor]], *, out: Optional[Tensor] = None) -> Tensor
+column_stack(tensors: Sequence[Tensor], *, out: Optional[Tensor] = None) -> Tensor
 
 Creates a new tensor by horizontally stacking the tensors in :attr:`tensors`.
 
