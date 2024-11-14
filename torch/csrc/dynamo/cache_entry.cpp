@@ -46,10 +46,9 @@ void CacheEntry::invalidate(py::object& deleted_guard_manager) {
   // Keep the current pointer alive but make the fields as if no-op
   this->guard_manager.attr("cache_entry") = py::none();
   this->guard_manager.attr("extra_state") = py::none();
-  std::cout << "Cleaning up code " << py::repr(this->code) << "\n" << std::flush;
   this->code = py::none();
   this->compile_id = py::none();
-  // this->guard_manager = deleted_guard_manager;
+  this->guard_manager = deleted_guard_manager;
   this->root_mgr = nullptr;
   this->trace_annotation = "Invalidated";
 }

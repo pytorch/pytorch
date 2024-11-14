@@ -1288,8 +1288,12 @@ class GuardBuilder(GuardBuilderBase):
 
     def TYPE_MATCH(self, guard: Guard) -> None:
         # ___check_type_id is same as `id(type(x)) == y`
+        val = self.get(guard.name)
         t = type(self.get(guard.name))
-        obj_id = self.id_ref(t)
+        if isinstance(val, torch.fx.GraphModule):
+            obj_id = id(t)
+        else:
+            obj_id = self.id_ref(t)
         code = f"___check_type_id({self.arg_ref(guard)}, {obj_id})"
         self._set_guard_export_info(guard, [code])
 
@@ -2414,11 +2418,11 @@ class CheckFunctionManager:
             print(f"Invalidating {obj_str}", flush=True)
             assert isinstance(cache_entry, CacheEntry)
             assert isinstance(extra_state, ExtraState)
+            # breakpoint()
             extra_state.invalidate(cache_entry, deleted_guard_manager)
             # breakpoint()
-            self.guard_manager.cache_entry = None
-            self.guard_manager.extra_state = None
-            self.guard_manager = DeletedGuardFn  # type: ignore[assignment]
+            print(self.guard_manager)
+            print(self.guard_manager)
 
     def id_ref(self, obj):
         """add a weakref, return the id"""
