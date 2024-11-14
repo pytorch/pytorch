@@ -450,11 +450,11 @@ class UserDefinedClassVariable(UserDefinedVariable):
             else:
                 var_cls = GenericContextWrappingVariable
 
-            if (
-                torch._dynamo.config.enable_trace_contextlib_contextmanager
-                and self.value is contextlib._GeneratorContextManager
-                and isinstance(args[0], BaseUserFunctionVariable)
+            if self.value is contextlib._GeneratorContextManager and isinstance(
+                args[0], BaseUserFunctionVariable
             ):
+                if not torch._dynamo.config.enable_trace_contextlib_contextmanager:
+                    unimplemented("contextlib.contextmanager")
                 # Replace UserFunctionVariable by GeneratorFunction if the function
                 # was annotated with @contextlib.contextmanager
                 # This shouldn't be necessary once generator functions are fully
