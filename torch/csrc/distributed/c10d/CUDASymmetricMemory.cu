@@ -46,6 +46,11 @@ bool device_has_multicast_support(int device_idx) {
 #endif
 }
 
+bool allow_overlapping_devices() {
+  return c10::utils::check_env("TORCH_SYMM_MEM_ALLOW_OVERLAPPING_DEVICES") ==
+      true;
+}
+
 class IpcChannel {
  public:
   IpcChannel() : socket_name_(get_socket_name(getpid())) {
@@ -685,7 +690,8 @@ void validate_rendezvous_requests(
   for (auto req : reqs) {
     device_indices.insert(req.device_idx);
   }
-  if (device_indices.size() < (size_t)world_size) {
+  if (!allow_overlapping_devices() &&
+      device_indices.size() < (size_t)world_size) {
     TORCH_CHECK(
         false,
         "CUDASymmetricMemoryAllocator::rendezvous: ",
@@ -850,7 +856,7 @@ c10::intrusive_ptr<SymmetricMemory> CUDASymmetricMemoryAllocator::rendezvous(
   HandleType mc_handle{};
   void* mc_addr = nullptr;
   bool group_has_multicast_support = check_group_multicast_support(reqs);
-  if (group_has_multicast_support) {
+  if (!allow_overlapping_devices() && group_has_multicast_support) {
     init_multicast_for_block(
         mc_handle, mc_addr, block, ipc_channel, pids, store, rank, world_size);
   }
