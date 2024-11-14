@@ -77,9 +77,16 @@ class CUDAKernel(Kernel):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.layout_args: Dict[str, LayoutArg] = {}
+        # Mapping from arg name to IRNode.
         self.named_nodes: Dict[str, IRNode] = {}
 
-    def find_layout_arg(self, node: IRNode, attr: ValidAttrs, dim: int):
+    def find_symbol(self, node: IRNode, attr: ValidAttrs, dim: int) -> Optional[str]:
+        arg = self.find_layout_arg(node, attr, dim)
+        return arg.symbol if arg else None
+
+    def find_layout_arg(
+        self, node: IRNode, attr: ValidAttrs, dim: int
+    ) -> Optional[LayoutArg]:
         matches = [
             arg for arg in self.layout_args.values() if arg.matches(node, attr, dim)
         ]
@@ -163,8 +170,6 @@ class CUDATemplateKernel(CUDAKernel):
         """
         super().__init__()
         self.kernel_name = kernel_name
-        # Mapping from arg name to IRNode.
-        self.named_nodes: Dict[str, IRNode] = {}
 
     def arg_name(self, node: IRNode) -> Optional[str]:
         """
@@ -407,17 +412,14 @@ class CUDATemplateKernel(CUDAKernel):
         if end_index is None:
             end_index = start_index
         end_index = _normalize_idx(end_index, len(node.get_size()))
-        sizes = node.get_size()[start_index : end_index + 1]
+        sizes = [
+            self.find_symbol(node, "size", dim=i) or node.get_size()[i]
+            for i in range(start_index, end_index + 1)
+        ]
         if len(sizes) == 0:
             return str(default_value)
 
-        sizes = [
-            self.find_layout_arg(node, "size", i).symbol or node.get_size()[i]
-            for i in range(start_index, end_index + 1)
-        ]
-
         val = sympy_product(sizes)
-
         return val
 
     def stride(self, node: IRNode, index: int, default_value: int = 0) -> str:
@@ -437,12 +439,9 @@ class CUDATemplateKernel(CUDAKernel):
             return str(default_value)
 
         stride = node.get_stride()[index]
-
         if V.graph.sizevars.statically_known_leq(stride, 1):
             return str(stride)
-
-        layout_arg = self.find_layout_arg(node, "stride", index)
-        return layout_arg.symbol if layout_arg else str(stride)
+        return self.find_symbol(node, "stride", dim=index) or str(stride)
 
     def row_or_column_stride(self, node: IRNode, default_value: int = 0) -> str:
         """
