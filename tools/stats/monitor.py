@@ -19,7 +19,9 @@ def get_processes_running_python_tests() -> list[Any]:
     for process in psutil.process_iter():
         try:
             if "python" in process.name() and process.cmdline():
-                python_processes.append(process)
+                cmd = " ".join(process.cmdline())
+                if not cmd.startswith("/opt/conda/envs/py_3.10/bin/python"):
+                    python_processes.append(process)
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             # access denied or the process died
             pass
@@ -30,6 +32,7 @@ def get_per_process_cpu_info() -> list[dict[str, Any]]:
     per_process_info = []
     for p in processes:
         info = {
+            "name": p.name(),
             "pid": p.pid,
             "cmd": " ".join(p.cmdline()),
             "cpu_percent": p.cpu_percent(),
