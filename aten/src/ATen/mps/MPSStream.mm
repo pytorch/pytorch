@@ -82,6 +82,9 @@ void MPSStream::synchronize(SyncType syncType) {
                                        "CommitAndContinue is called but it is disabled globally!");
       commitAndContinue();
       break;
+    case SyncType::COMMIT_AND_CONTINUE_ROOT:
+      commitAndContinueRoot();
+      break;
   }
 }
 
@@ -113,6 +116,13 @@ void MPSStream::commitAndWait() {
 void MPSStream::commitAndContinue() {
   assert(_commandBuffer);
   [_commandBuffer commitAndContinue];
+}
+
+void MPSStream::commitAndContinueRoot() {
+  assert(_commandBuffer);
+  id<MTLCommandBuffer> rootCommandBuffer = [_commandBuffer rootCommandBuffer];
+  [_commandBuffer commitAndContinue];
+  [rootCommandBuffer waitUntilCompleted];
 }
 
 void MPSStream::endKernelCoalescing() {
