@@ -971,25 +971,25 @@ class GraphModule(torch.nn.Module):
             out_graph,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, s0: "Sym(s0)", s1: "Sym(s1)", L_x_: "f32[s0, s1]", s2: "Sym(s2)", L_y_: "f32[s1, s2]"):
-        l_x_ = L_x_
+    def forward(self, s0: "Sym(s0)", s1: "Sym(s1)", L_y_: "f32[s0, s1]", s2: "Sym(s2)", L_x_: "f32[s2, s0]"):
         l_y_ = L_y_
+        l_x_ = L_x_
 
         wrap_body_1 = self.wrap_body_1
-        wrap = torch.ops.higher_order.wrap(wrap_body_1, s0, s1, l_x_, s2, l_y_);  wrap_body_1 = s0 = s1 = l_x_ = s2 = l_y_ = None
-        getitem: "f32[s0, s2]" = wrap[0];  wrap = None
+        wrap = torch.ops.higher_order.wrap(wrap_body_1, s2, s0, l_x_, s1, l_y_);  wrap_body_1 = s2 = s0 = l_x_ = s1 = l_y_ = None
+        getitem: "f32[s2, s1]" = wrap[0];  wrap = None
         return (getitem,)
 
     class wrap_body_1(torch.nn.Module):
-        def forward(self, s0: "Sym(s0)", s1: "Sym(s1)", l_x_: "f32[s0, s1]", s2: "Sym(s2)", l_y_: "f32[s1, s2]"):
+        def forward(self, s2: "Sym(s2)", s0: "Sym(s0)", l_x_: "f32[s2, s0]", s1: "Sym(s1)", l_y_: "f32[s0, s1]"):
             wrap_body_0 = self.wrap_body_0
-            wrap = torch.ops.higher_order.wrap(wrap_body_0, s0, s1, l_x_, s2, l_y_);  wrap_body_0 = s0 = s1 = l_x_ = s2 = l_y_ = None
-            getitem: "f32[s0, s2]" = wrap[0];  wrap = None
+            wrap = torch.ops.higher_order.wrap(wrap_body_0, s2, s0, l_x_, s1, l_y_);  wrap_body_0 = s2 = s0 = l_x_ = s1 = l_y_ = None
+            getitem: "f32[s2, s1]" = wrap[0];  wrap = None
             return (getitem,)
 
         class wrap_body_0(torch.nn.Module):
-            def forward(self, s0: "Sym(s0)", s1: "Sym(s1)", l_x_: "f32[s0, s1]", s2: "Sym(s2)", l_y_: "f32[s1, s2]"):
-                matmul: "f32[s0, s2]" = l_x_ @ l_y_;  l_x_ = l_y_ = None
+            def forward(self, s2: "Sym(s2)", s0: "Sym(s0)", l_x_: "f32[s2, s0]", s1: "Sym(s1)", l_y_: "f32[s0, s1]"):
+                matmul: "f32[s2, s1]" = l_x_ @ l_y_;  l_x_ = l_y_ = None
                 return (matmul,)
 """,
         )

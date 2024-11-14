@@ -427,12 +427,17 @@ class SideEffects:
             if isinstance(var.mutation_type, AttributeMutationNew) and isinstance(
                 var, variables.NewCellVariable
             ):
-                cg.add_push_null(
-                    lambda: cg.load_import_from(utils.__name__, "make_cell")
-                )
-                cg.extend_output(create_call_function(0, False))
-                cg.add_cache(var)
-                var.source = LocalSource(cg.tempvars[var])  # type: ignore[attr-defined]
+                # Cells created in the root frame are created either by
+                # `MAKE_CELL` or by them being in `co_cellvars`, so we only emit
+                # `make_cell` for the non-root-frame cells here.
+                # TODO generalize this so we never need to call `make_cell`.
+                if not var.is_root_frame_cell():
+                    cg.add_push_null(
+                        lambda: cg.load_import_from(utils.__name__, "make_cell")
+                    )
+                    cg.extend_output(create_call_function(0, False))
+                    cg.add_cache(var)
+                    var.source = LocalSource(cg.tempvars[var])  # type: ignore[attr-defined]
             elif isinstance(var.mutation_type, AttributeMutationNew):
                 if isinstance(var, variables.AutogradFunctionContextVariable):
                     unimplemented("AutogradFunctionContextVariable escaped")
@@ -646,6 +651,18 @@ class SideEffects:
                 )
                 cg.call_function(1, False)
                 cg.append_output(create_instruction("POP_TOP"))
+
+            elif (
+                isinstance(var, variables.NewCellVariable) and var.is_root_frame_cell()
+            ):
+                # Emit more readable and performant bytecode.
+                # TODO generalize this for cells created during inlining.
+                if var in self.store_attr_mutations:
+                    contents_var = self.load_cell(var)
+                    cg(contents_var)
+                    cell_name = var.source.local_name  # type: ignore[attr-defined]
+                    suffixes.append([cg.create_store_deref(cell_name)])
+
             elif self.is_attribute_mutation(var):
                 # Applying mutations involves two steps: 1) Push all
                 # reconstructed objects onto the stack.  2) Call STORE_ATTR to
