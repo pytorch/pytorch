@@ -110,7 +110,7 @@ class TestPyTreeDynamicAxesShapes(common_utils.TestCase):
     @common_utils.parametrize(
         "model, args, kwargs,input_names, output_names, dynamic_axes, expected_dynamic_shapes",
         [
-            # llama-3.2-1B-Instruct
+            # llama-3.2-1B-Instruct (trimmed)
             (
                 LlamaModelTest(),
                 (),
@@ -119,18 +119,6 @@ class TestPyTreeDynamicAxesShapes(common_utils.TestCase):
                     "attention_mask": torch.randn(2, 32),
                     "position_ids": torch.randn(2, 16),
                     "past_key_values": [
-                        (torch.randn(2, 8, 16, 64), torch.randn(2, 8, 16, 64)),
-                        (torch.randn(2, 8, 16, 64), torch.randn(2, 8, 16, 64)),
-                        (torch.randn(2, 8, 16, 64), torch.randn(2, 8, 16, 64)),
-                        (torch.randn(2, 8, 16, 64), torch.randn(2, 8, 16, 64)),
-                        (torch.randn(2, 8, 16, 64), torch.randn(2, 8, 16, 64)),
-                        (torch.randn(2, 8, 16, 64), torch.randn(2, 8, 16, 64)),
-                        (torch.randn(2, 8, 16, 64), torch.randn(2, 8, 16, 64)),
-                        (torch.randn(2, 8, 16, 64), torch.randn(2, 8, 16, 64)),
-                        (torch.randn(2, 8, 16, 64), torch.randn(2, 8, 16, 64)),
-                        (torch.randn(2, 8, 16, 64), torch.randn(2, 8, 16, 64)),
-                        (torch.randn(2, 8, 16, 64), torch.randn(2, 8, 16, 64)),
-                        (torch.randn(2, 8, 16, 64), torch.randn(2, 8, 16, 64)),
                         (torch.randn(2, 8, 16, 64), torch.randn(2, 8, 16, 64)),
                         (torch.randn(2, 8, 16, 64), torch.randn(2, 8, 16, 64)),
                         (torch.randn(2, 8, 16, 64), torch.randn(2, 8, 16, 64)),
@@ -149,30 +137,6 @@ class TestPyTreeDynamicAxesShapes(common_utils.TestCase):
                     "past_key_values.2.value",
                     "past_key_values.3.key",
                     "past_key_values.3.value",
-                    "past_key_values.4.key",
-                    "past_key_values.4.value",
-                    "past_key_values.5.key",
-                    "past_key_values.5.value",
-                    "past_key_values.6.key",
-                    "past_key_values.6.value",
-                    "past_key_values.7.key",
-                    "past_key_values.7.value",
-                    "past_key_values.8.key",
-                    "past_key_values.8.value",
-                    "past_key_values.9.key",
-                    "past_key_values.9.value",
-                    "past_key_values.10.key",
-                    "past_key_values.10.value",
-                    "past_key_values.11.key",
-                    "past_key_values.11.value",
-                    "past_key_values.12.key",
-                    "past_key_values.12.value",
-                    "past_key_values.13.key",
-                    "past_key_values.13.value",
-                    "past_key_values.14.key",
-                    "past_key_values.14.value",
-                    "past_key_values.15.key",
-                    "past_key_values.15.value",
                 ],
                 [
                     "logits",
@@ -184,30 +148,6 @@ class TestPyTreeDynamicAxesShapes(common_utils.TestCase):
                     "present.2.value",
                     "present.3.key",
                     "present.3.value",
-                    "present.4.key",
-                    "present.4.value",
-                    "present.5.key",
-                    "present.5.value",
-                    "present.6.key",
-                    "present.6.value",
-                    "present.7.key",
-                    "present.7.value",
-                    "present.8.key",
-                    "present.8.value",
-                    "present.9.key",
-                    "present.9.value",
-                    "present.10.key",
-                    "present.10.value",
-                    "present.11.key",
-                    "present.11.value",
-                    "present.12.key",
-                    "present.12.value",
-                    "present.13.key",
-                    "present.13.value",
-                    "present.14.key",
-                    "present.14.value",
-                    "present.15.key",
-                    "present.15.value",
                 ],
                 {
                     "input_ids": {0: "batch_size", 1: "sequence_length"},
@@ -248,102 +188,6 @@ class TestPyTreeDynamicAxesShapes(common_utils.TestCase):
                         0: "batch_size",
                         2: "past_sequence_length",
                     },
-                    "past_key_values.4.key": {
-                        0: "batch_size",
-                        2: "past_sequence_length",
-                    },
-                    "past_key_values.4.value": {
-                        0: "batch_size",
-                        2: "past_sequence_length",
-                    },
-                    "past_key_values.5.key": {
-                        0: "batch_size",
-                        2: "past_sequence_length",
-                    },
-                    "past_key_values.5.value": {
-                        0: "batch_size",
-                        2: "past_sequence_length",
-                    },
-                    "past_key_values.6.key": {
-                        0: "batch_size",
-                        2: "past_sequence_length",
-                    },
-                    "past_key_values.6.value": {
-                        0: "batch_size",
-                        2: "past_sequence_length",
-                    },
-                    "past_key_values.7.key": {
-                        0: "batch_size",
-                        2: "past_sequence_length",
-                    },
-                    "past_key_values.7.value": {
-                        0: "batch_size",
-                        2: "past_sequence_length",
-                    },
-                    "past_key_values.8.key": {
-                        0: "batch_size",
-                        2: "past_sequence_length",
-                    },
-                    "past_key_values.8.value": {
-                        0: "batch_size",
-                        2: "past_sequence_length",
-                    },
-                    "past_key_values.9.key": {
-                        0: "batch_size",
-                        2: "past_sequence_length",
-                    },
-                    "past_key_values.9.value": {
-                        0: "batch_size",
-                        2: "past_sequence_length",
-                    },
-                    "past_key_values.10.key": {
-                        0: "batch_size",
-                        2: "past_sequence_length",
-                    },
-                    "past_key_values.10.value": {
-                        0: "batch_size",
-                        2: "past_sequence_length",
-                    },
-                    "past_key_values.11.key": {
-                        0: "batch_size",
-                        2: "past_sequence_length",
-                    },
-                    "past_key_values.11.value": {
-                        0: "batch_size",
-                        2: "past_sequence_length",
-                    },
-                    "past_key_values.12.key": {
-                        0: "batch_size",
-                        2: "past_sequence_length",
-                    },
-                    "past_key_values.12.value": {
-                        0: "batch_size",
-                        2: "past_sequence_length",
-                    },
-                    "past_key_values.13.key": {
-                        0: "batch_size",
-                        2: "past_sequence_length",
-                    },
-                    "past_key_values.13.value": {
-                        0: "batch_size",
-                        2: "past_sequence_length",
-                    },
-                    "past_key_values.14.key": {
-                        0: "batch_size",
-                        2: "past_sequence_length",
-                    },
-                    "past_key_values.14.value": {
-                        0: "batch_size",
-                        2: "past_sequence_length",
-                    },
-                    "past_key_values.15.key": {
-                        0: "batch_size",
-                        2: "past_sequence_length",
-                    },
-                    "past_key_values.15.value": {
-                        0: "batch_size",
-                        2: "past_sequence_length",
-                    },
                     "logits": {0: "batch_size", 1: "sequence_length"},
                     "present.0.key": {
                         0: "batch_size",
@@ -377,102 +221,6 @@ class TestPyTreeDynamicAxesShapes(common_utils.TestCase):
                         0: "batch_size",
                         2: "past_sequence_length + sequence_length",
                     },
-                    "present.4.key": {
-                        0: "batch_size",
-                        2: "past_sequence_length + sequence_length",
-                    },
-                    "present.4.value": {
-                        0: "batch_size",
-                        2: "past_sequence_length + sequence_length",
-                    },
-                    "present.5.key": {
-                        0: "batch_size",
-                        2: "past_sequence_length + sequence_length",
-                    },
-                    "present.5.value": {
-                        0: "batch_size",
-                        2: "past_sequence_length + sequence_length",
-                    },
-                    "present.6.key": {
-                        0: "batch_size",
-                        2: "past_sequence_length + sequence_length",
-                    },
-                    "present.6.value": {
-                        0: "batch_size",
-                        2: "past_sequence_length + sequence_length",
-                    },
-                    "present.7.key": {
-                        0: "batch_size",
-                        2: "past_sequence_length + sequence_length",
-                    },
-                    "present.7.value": {
-                        0: "batch_size",
-                        2: "past_sequence_length + sequence_length",
-                    },
-                    "present.8.key": {
-                        0: "batch_size",
-                        2: "past_sequence_length + sequence_length",
-                    },
-                    "present.8.value": {
-                        0: "batch_size",
-                        2: "past_sequence_length + sequence_length",
-                    },
-                    "present.9.key": {
-                        0: "batch_size",
-                        2: "past_sequence_length + sequence_length",
-                    },
-                    "present.9.value": {
-                        0: "batch_size",
-                        2: "past_sequence_length + sequence_length",
-                    },
-                    "present.10.key": {
-                        0: "batch_size",
-                        2: "past_sequence_length + sequence_length",
-                    },
-                    "present.10.value": {
-                        0: "batch_size",
-                        2: "past_sequence_length + sequence_length",
-                    },
-                    "present.11.key": {
-                        0: "batch_size",
-                        2: "past_sequence_length + sequence_length",
-                    },
-                    "present.11.value": {
-                        0: "batch_size",
-                        2: "past_sequence_length + sequence_length",
-                    },
-                    "present.12.key": {
-                        0: "batch_size",
-                        2: "past_sequence_length + sequence_length",
-                    },
-                    "present.12.value": {
-                        0: "batch_size",
-                        2: "past_sequence_length + sequence_length",
-                    },
-                    "present.13.key": {
-                        0: "batch_size",
-                        2: "past_sequence_length + sequence_length",
-                    },
-                    "present.13.value": {
-                        0: "batch_size",
-                        2: "past_sequence_length + sequence_length",
-                    },
-                    "present.14.key": {
-                        0: "batch_size",
-                        2: "past_sequence_length + sequence_length",
-                    },
-                    "present.14.value": {
-                        0: "batch_size",
-                        2: "past_sequence_length + sequence_length",
-                    },
-                    "present.15.key": {
-                        0: "batch_size",
-                        2: "past_sequence_length + sequence_length",
-                    },
-                    "present.15.value": {
-                        0: "batch_size",
-                        2: "past_sequence_length + sequence_length",
-                    },
                 },
                 [
                     {
@@ -488,126 +236,6 @@ class TestPyTreeDynamicAxesShapes(common_utils.TestCase):
                         1: torch.export.Dim("sequence_length"),
                     },
                     [
-                        (
-                            {
-                                0: torch.export.Dim("batch_size"),
-                                2: torch.export.Dim("past_sequence_length"),
-                            },
-                            {
-                                0: torch.export.Dim("batch_size"),
-                                2: torch.export.Dim("past_sequence_length"),
-                            },
-                        ),
-                        (
-                            {
-                                0: torch.export.Dim("batch_size"),
-                                2: torch.export.Dim("past_sequence_length"),
-                            },
-                            {
-                                0: torch.export.Dim("batch_size"),
-                                2: torch.export.Dim("past_sequence_length"),
-                            },
-                        ),
-                        (
-                            {
-                                0: torch.export.Dim("batch_size"),
-                                2: torch.export.Dim("past_sequence_length"),
-                            },
-                            {
-                                0: torch.export.Dim("batch_size"),
-                                2: torch.export.Dim("past_sequence_length"),
-                            },
-                        ),
-                        (
-                            {
-                                0: torch.export.Dim("batch_size"),
-                                2: torch.export.Dim("past_sequence_length"),
-                            },
-                            {
-                                0: torch.export.Dim("batch_size"),
-                                2: torch.export.Dim("past_sequence_length"),
-                            },
-                        ),
-                        (
-                            {
-                                0: torch.export.Dim("batch_size"),
-                                2: torch.export.Dim("past_sequence_length"),
-                            },
-                            {
-                                0: torch.export.Dim("batch_size"),
-                                2: torch.export.Dim("past_sequence_length"),
-                            },
-                        ),
-                        (
-                            {
-                                0: torch.export.Dim("batch_size"),
-                                2: torch.export.Dim("past_sequence_length"),
-                            },
-                            {
-                                0: torch.export.Dim("batch_size"),
-                                2: torch.export.Dim("past_sequence_length"),
-                            },
-                        ),
-                        (
-                            {
-                                0: torch.export.Dim("batch_size"),
-                                2: torch.export.Dim("past_sequence_length"),
-                            },
-                            {
-                                0: torch.export.Dim("batch_size"),
-                                2: torch.export.Dim("past_sequence_length"),
-                            },
-                        ),
-                        (
-                            {
-                                0: torch.export.Dim("batch_size"),
-                                2: torch.export.Dim("past_sequence_length"),
-                            },
-                            {
-                                0: torch.export.Dim("batch_size"),
-                                2: torch.export.Dim("past_sequence_length"),
-                            },
-                        ),
-                        (
-                            {
-                                0: torch.export.Dim("batch_size"),
-                                2: torch.export.Dim("past_sequence_length"),
-                            },
-                            {
-                                0: torch.export.Dim("batch_size"),
-                                2: torch.export.Dim("past_sequence_length"),
-                            },
-                        ),
-                        (
-                            {
-                                0: torch.export.Dim("batch_size"),
-                                2: torch.export.Dim("past_sequence_length"),
-                            },
-                            {
-                                0: torch.export.Dim("batch_size"),
-                                2: torch.export.Dim("past_sequence_length"),
-                            },
-                        ),
-                        (
-                            {
-                                0: torch.export.Dim("batch_size"),
-                                2: torch.export.Dim("past_sequence_length"),
-                            },
-                            {
-                                0: torch.export.Dim("batch_size"),
-                                2: torch.export.Dim("past_sequence_length"),
-                            },
-                        ),
-                        (
-                            {
-                                0: torch.export.Dim("batch_size"),
-                                2: torch.export.Dim("past_sequence_length"),
-                            },
-                            {
-                                0: torch.export.Dim("batch_size"),
-                                2: torch.export.Dim("past_sequence_length"),
-                            },
-                        ),
                         (
                             {
                                 0: torch.export.Dim("batch_size"),
