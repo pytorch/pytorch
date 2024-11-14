@@ -610,6 +610,8 @@ Example::
     ),
 )
 
+betaincinv = _add_docstr(_special.special_betaincinv, "")
+
 betaln = _add_docstr(
     _special.special_betaln,
     r"""

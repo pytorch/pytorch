@@ -1184,4 +1184,34 @@ Tensor special_betainc_backward_x(
     const Tensor& b,
     const Tensor& x);
 
+std::tuple<Tensor, Tensor, Tensor> special_betaincinv_backward_full(
+    const Tensor& grad,
+    const Tensor& a,
+    const Tensor& b,
+    const Tensor& y);
+
+std::tuple<Tensor, Tensor> special_betaincinv_backward_ab(
+    const Tensor& grad,
+    const Tensor& a,
+    const Tensor& b,
+    const Tensor& y);
+
+std::tuple<Tensor, Tensor> special_betaincinv_backward_ay(
+    const Tensor& grad,
+    const Tensor& a,
+    const Tensor& b,
+    const Tensor& y);
+
+std::tuple<Tensor, Tensor> special_betaincinv_backward_by(
+    const Tensor& grad,
+    const Tensor& a,
+    const Tensor& b,
+    const Tensor& y);
+
+Tensor special_betaincinv_backward_y(
+    const Tensor& grad,
+    const Tensor& a,
+    const Tensor& b,
+    const Tensor& y);
+
 } // namespace torch::autograd::generated::details
