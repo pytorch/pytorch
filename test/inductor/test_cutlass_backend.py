@@ -180,10 +180,10 @@ class TestCutlassBackend(TestCase):
         with config.patch(
             {
                 "max_autotune": True,
-                "autotune_in_subproc": False,
+                "autotune_in_subproc": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "cuda.cutlass_dir": _CUTLASS_DIR,
-                "cuda.cutlass_max_profiling_configs": 1,
+                "cuda.cutlass_max_profiling_configs": 3,
             }
         ):
             from torch.export import Dim
@@ -206,9 +206,7 @@ class TestCutlassBackend(TestCase):
             torch.testing.assert_close(actual[0], expected[0])
             torch.testing.assert_close(actual[1], expected[1])
 
-    # TODO: Enable dynamic test cases when dynamic support is added.
     @unittest.skipIf(not SM90OrLater, "need sm_90")
-    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     @parametrize("dynamic", (False, True))
     @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_diff_matmul_share_same_kernel(self, dynamic):
@@ -238,15 +236,12 @@ class TestCutlassBackend(TestCase):
                 "cuda.cutlass_max_profiling_configs": 1,
             }
         ):
-            Y = model(a, b, c)
-            compiled = torch.compile(model, dynamic=dynamic)
             from torch._inductor.utils import run_and_get_code
 
-            x, codes = run_and_get_code(compiled, a, b, c)
-
-            Y_compiled = compiled(a, b, c)
-            torch.testing.assert_close(Y_compiled, Y)
-
+            compiled = torch.compile(model, dynamic=dynamic)
+            expected = model(a, b, c)
+            actual, codes = run_and_get_code(compiled, a, b, c)
+            torch.testing.assert_close(actual, expected)
             FileCheck().check_count(
                 "cuda_fused_0.cuda_fused_0",
                 2,
