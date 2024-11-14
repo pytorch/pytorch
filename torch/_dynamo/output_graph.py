@@ -1149,6 +1149,10 @@ class OutputGraph:
                 )
 
     def codegen_suffix(self, tx, stack_values, cg):
+        # NOTE: `codegen_save_tempvars` must run first to update `source` fields
+        # for variables with `AttributeMutationNew`, as they don't implement
+        # `reconstruct` themselves.
+        self.side_effects.codegen_save_tempvars(cg)
         if self.backward_state:
             assert not self.export
             for name, val in self.backward_state.items():
@@ -1156,7 +1160,6 @@ class OutputGraph:
                 cg.append_output(cg.create_load(self.backward_state_var))
                 cg.store_attr(name)
         self.side_effects.codegen_hooks(cg)
-        self.side_effects.codegen_save_tempvars(cg)
 
         # Return variables used for logging at the end
         for debug_var, args in tx.debug_locals:
@@ -1645,6 +1648,7 @@ class OutputGraph:
                 isinstance(example_value, FakeTensor)
                 and example_value.item_memo is not None
                 and TensorifyState.should_specialize(
+                    # We use _expr instead of expr b/c we want the symbol not the replacement
                     example_value.item_memo.node._expr.name
                 )
             ):
@@ -2149,7 +2153,7 @@ class SubgraphTracer(fx.Tracer):
         # So we are a bit more strict about what sources can become inputs
         # in export
         if self.is_export and self.parent is None:
-            if not is_from_local_source(source, allow_cell_or_freevar=False):
+            if not is_from_local_source(source, only_allow_input=True):
                 self.output_graph.source_to_user_stacks.setdefault(source, []).append(
                     TracingContext.extract_stack()
                 )
