@@ -3533,7 +3533,7 @@ module_db: List[ModuleInfo] = [
                                 device_type='cuda', dtypes=[torch.float64]),
                    # Fails with channels last test on MPS backend
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format",
-                                device_type='mps', dtypes=[torch.float32]),
+                                device_type='mps', dtypes=[torch.float32, torch.float16]),
                    # See #119108: MPSNDArrayConvolutionA14.mm:3976: failed assertion `destination datatype must be fp32'
                    # xfail does not work due to Fatal Python error: Aborted
                    DecorateInfo(skipIfMPSOnMacOS13, "TestModule", "test_memory_format",
