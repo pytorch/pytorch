@@ -721,7 +721,7 @@ class CKGemmTemplate(CKTemplate):
     def size_args(self):
         X = self.input_nodes[0]
         W = self.input_nodes[1]
-        Bias = self.input_nodes[2] if len(self.input_nodes) == 3 else None
+        Bias = self.input_nodes[2] if len(self.input_nodes) == 3 else self.input_nodes[4] if len(self.input_nodes) == 5 else None
         Y = self.output_node
 
         M = X.get_size()[0]
@@ -732,7 +732,7 @@ class CKGemmTemplate(CKTemplate):
         LDC = Y.get_stride()[0 if Y.get_stride()[1] == 1 else 1]
         LDD = (
             0
-            if Bias is None
+            if (Bias is None or len(Bias.get_size()) == 1)
             else Bias.get_stride()[0 if Bias.get_stride()[1] == 1 else 1]
         )
 
