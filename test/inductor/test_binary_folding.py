@@ -211,7 +211,9 @@ class BinaryFoldingTemplate(TestCase):
 
     def test_linear_binary_folding(self):
         @torch.no_grad()
-        def test_linear_fusion(use_bias, op, scalar, add_tensor, expect_success):
+        def test_linear_fusion(
+            use_bias, op, scalar, add_tensor, expect_success, input_3d=False
+        ):
             class LinearOp(nn.Module):
                 __constants__ = ["use_scalar"]
 
@@ -244,7 +246,10 @@ class BinaryFoldingTemplate(TestCase):
             out_optimized = torch.compile(mod_eager)
 
             torch.manual_seed(1234)
-            inp = torch.rand([4, 3]).to(self.device)
+            if input_3d:
+                inp = torch.rand([2, 4, 3]).to(self.device)
+            else:
+                inp = torch.rand([4, 3]).to(self.device)
             out_eager = mod_eager(inp)
             out_optimized = out_optimized(inp)
             self.assertEqual(out_optimized, out_eager, atol=5e-05, rtol=5e-06)
@@ -275,6 +280,19 @@ class BinaryFoldingTemplate(TestCase):
                 scalar,
                 add_tensor=torch.rand(tensor_size).to(self.device),
                 expect_success=True,
+            )
+
+        add_tensor_size.extend([[1, 1, 32], [1, 1, 1]])
+        for use_bias, pytorch_op, scalar, tensor_size in itertools.product(
+            linear_bias, ops, use_scalar, add_tensor_size
+        ):
+            test_linear_fusion(
+                use_bias,
+                pytorch_op,
+                scalar,
+                add_tensor=torch.rand(tensor_size).to(self.device),
+                expect_success=True,
+                input_3d=True,
             )
 
         # In the following test, the shape of 'add_tensor' does not satisfy

@@ -91,7 +91,19 @@ def binary_folding_init():
     _computation_calls = [
         CallFunction(aten.convolution.default, *_conv_args, _users=1),
         CallFunction(aten.addmm.default, *_addmm_args, _users=1),
+        CallFunction(
+            aten.reshape.default,
+            CallFunction(aten.addmm.default, *_addmm_args, _users=1),
+            Arg(),
+            _users=1,
+        ),
         CallFunction(aten.mm.default, *_mm_args, _users=1),
+        CallFunction(
+            aten.reshape.default,
+            CallFunction(aten.mm.default, *_mm_args, _users=1),
+            Arg(),
+            _users=1,
+        ),
     ]
 
     """
@@ -134,10 +146,10 @@ def binary_folding_init():
                     return False
         return True
 
-    def _op_not_broadcasting_with_linear(weight_tensor, other_tensor):
+    def _op_not_broadcasting_with_linear(weight_tensor, other_tensor, has_reshape):
         weight_shape = weight_tensor.shape
         other_shape = other_tensor.shape
-        if other_shape in (
+        other_shapes = [
             torch.Size(
                 [
                     weight_shape[1],
@@ -150,7 +162,15 @@ def binary_folding_init():
                 ]
             ),
             torch.Size([1, 1]),
-        ):
+        ]
+        if has_reshape:
+            other_shapes.extend(
+                [
+                    torch.Size([1, 1, weight_shape[1]]),
+                    torch.Size([1, 1, 1]),
+                ]
+            )
+        if other_shape in other_shapes:
             return True
         else:
             return False
@@ -204,7 +224,7 @@ def binary_folding_init():
 
         return True
 
-    def _check_linear_and_broadcast_op(linear_node, other):
+    def _check_linear_and_broadcast_op(linear_node, other, has_reshape):
         weight_node = (
             linear_node.args[2]
             if linear_node.target is aten.addmm.default
@@ -252,7 +272,7 @@ def binary_folding_init():
                     return False
 
             if not _op_not_broadcasting_with_linear(
-                weight_meta_value, other_meta_value
+                weight_meta_value, other_meta_value, has_reshape
             ):
                 return False
         elif not isinstance(other, float):
@@ -262,15 +282,25 @@ def binary_folding_init():
 
     def _is_foldable_pattern(match):
         binary_node = match.output_node()
-        computation_node = binary_node.args[0]
-        other = binary_node.args[1]
-        if binary_node.args[0].target not in _computation_ops:
+        has_reshape = False
+        if binary_node.args[0].target in _computation_ops:
+            computation_node = binary_node.args[0]
+            other = binary_node.args[1]
+        elif binary_node.args[0].target == aten.reshape.default:
+            computation_node = binary_node.args[0].args[0]
+            other = binary_node.args[1]
+            has_reshape = True
+        elif binary_node.args[1].target in _computation_ops:
             computation_node = binary_node.args[1]
             other = binary_node.args[0]
-        if binary_node.args[0].target == aten.convolution.default:
+        else:
+            computation_node = binary_node.args[1].args[0]
+            other = binary_node.args[0]
+            has_reshape = False
+        if computation_node.target == aten.convolution.default:
             return _check_conv_and_broadcast_op(computation_node, other)
-        elif binary_node.args[0].target in [aten.addmm.default, aten.mm.default]:
-            return _check_linear_and_broadcast_op(computation_node, other)
+        elif computation_node.target in [aten.addmm.default, aten.mm.default]:
+            return _check_linear_and_broadcast_op(computation_node, other, has_reshape)
 
         return False
 
@@ -438,13 +468,19 @@ def binary_folding_init():
             counters["inductor"]["binary_folding"] += 1
             other = kwargs.get("other")
             binary_node = match.output_node()
-            computation_node = (
-                binary_node.args[0]
-                if binary_node.args[0].target in _computation_ops
-                else binary_node.args[1]
-            )
+            reshape_node = None
+            if binary_node.args[0].target in _computation_ops:
+                computation_node = binary_node.args[0]
+            elif binary_node.args[0].target == aten.reshape.default:
+                computation_node = binary_node.args[0].args[0]
+                reshape_node = binary_node.args[0]
+            elif binary_node.args[1].target in _computation_ops:
+                computation_node = binary_node.args[1]
+            else:
+                computation_node = binary_node.args[1].args[0]
+                reshape_node = binary_node.args[1]
             graph = match.graph
-            with graph.inserting_before(binary_node):
+            with graph.inserting_before(reshape_node if reshape_node else binary_node):
                 assert computation_node.target in _computation_ops
                 if computation_node.target == aten.convolution.default:
                     new_computation_node = _create_new_conv_node(
@@ -454,7 +490,12 @@ def binary_folding_init():
                     new_computation_node = _create_new_linear_node(
                         graph, computation_node, binary_node, other
                     )
-                binary_node.replace_all_uses_with(new_computation_node)
                 new_computation_node.meta.update(computation_node.meta)
+                if reshape_node:
+                    assert reshape_node.target == aten.reshape.default
+                    computation_node.replace_all_uses_with(new_computation_node)
+                    binary_node.replace_all_uses_with(reshape_node)
+                else:
+                    binary_node.replace_all_uses_with(new_computation_node)
                 graph.erase_node(binary_node)
                 graph.erase_node(computation_node)
