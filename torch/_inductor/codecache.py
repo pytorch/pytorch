@@ -6,8 +6,8 @@ import dataclasses
 import functools
 import hashlib
 import importlib
-import itertools
 import io
+import itertools
 import json
 import logging
 import os
