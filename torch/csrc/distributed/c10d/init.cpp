@@ -139,7 +139,7 @@ class IntrusivePtrNoGilDestructor {
 
 } // anonymous namespace
 
-PYBIND11_DECLARE_HOLDER_TYPE(T, IntrusivePtrNoGilDestructor<T>, true);
+PYBIND11_DECLARE_HOLDER_TYPE(T, IntrusivePtrNoGilDestructor<T>, true)
 
 namespace torch::distributed::c10d {
 
@@ -397,8 +397,8 @@ static PyObject* reduceopmeta___instancecheck__(
   if (Py_TYPE(self) == Py_TYPE(args)) {
     Py_RETURN_TRUE;
   }
-  if (c10::string_view(args->ob_type->tp_name).find("RedOpType") !=
-      c10::string_view::npos) {
+  if (std::string_view(args->ob_type->tp_name).find("RedOpType") !=
+      std::string_view::npos) {
     Py_RETURN_TRUE;
   }
   Py_RETURN_FALSE;
@@ -1070,9 +1070,27 @@ This class does not support ``__members__`` property.)");
       .def_property_readonly("rank", &SymmetricMemory::get_rank)
       .def_property_readonly("world_size", &SymmetricMemory::get_world_size)
       .def_property_readonly(
+          "buffer_ptrs",
+          [](const c10::intrusive_ptr<SymmetricMemory>& symm_mem) {
+            std::vector<uintptr_t> ret;
+            for (auto ptr : symm_mem->get_buffer_ptrs()) {
+              ret.push_back(reinterpret_cast<uintptr_t>(ptr));
+            }
+            return ret;
+          })
+      .def_property_readonly(
           "buffer_ptrs_dev",
           [](const c10::intrusive_ptr<SymmetricMemory>& symm_mem) {
             return reinterpret_cast<uintptr_t>(symm_mem->get_buffer_ptrs_dev());
+          })
+      .def_property_readonly(
+          "signal_pad_ptrs",
+          [](const c10::intrusive_ptr<SymmetricMemory>& symm_mem) {
+            std::vector<uintptr_t> ret;
+            for (auto ptr : symm_mem->get_signal_pad_ptrs()) {
+              ret.push_back(reinterpret_cast<uintptr_t>(ptr));
+            }
+            return ret;
           })
       .def_property_readonly(
           "signal_pad_ptrs_dev",
@@ -1096,6 +1114,13 @@ This class does not support ``__members__`` property.)");
           py::arg("dtype"),
           py::arg("storage_offset") = 0)
       .def(
+          "get_signal_pad",
+          &SymmetricMemory::get_signal_pad,
+          py::arg("rank"),
+          py::arg("sizes") = py::list(),
+          py::arg("dtype") = py::none(),
+          py::arg("storage_offset") = 0)
+      .def(
           "barrier",
           &SymmetricMemory::barrier,
           py::arg("channel") = 0,
@@ -1112,11 +1137,35 @@ This class does not support ``__members__`` property.)");
           py::arg("src_rank"),
           py::arg("channel") = 0,
           py::arg("timeout_ms") = 0)
-      .def(
+      // Util functions that are often used together with symmetric memory but
+      // not necessarily directly on symmetric memory.
+      .def_static(
           "stream_write_value32",
-          &SymmetricMemory::stream_write_value32,
-          py::arg("addr"),
-          py::arg("val"));
+          [](at::Tensor& input, int64_t offset, int64_t val) {
+            // The range of `val` is checked inside the op
+            auto op =
+                c10::Dispatcher::singleton()
+                    .findSchemaOrThrow("symm_mem::stream_write_value32_", "")
+                    .typed<at::Tensor(at::Tensor&, int64_t, int64_t)>();
+            return op.call(input, offset, val);
+          },
+          py::arg("input"),
+          py::arg("offset"),
+          py::arg("val"))
+      .def_static(
+          "memset32",
+          [](at::Tensor& input, int64_t offset, int64_t val, int64_t count) {
+            // The range of `val` is checked inside the op
+            auto op = c10::Dispatcher::singleton()
+                          .findSchemaOrThrow("symm_mem::memset32_", "")
+                          .typed<at::Tensor(
+                              at::Tensor&, int64_t, int64_t, int64_t)>();
+            return op.call(input, offset, val, count);
+          },
+          py::arg("input"),
+          py::arg("offset"),
+          py::arg("val"),
+          py::arg("count") = 1);
 
   auto store =
       py::class_<::c10d::Store, c10::intrusive_ptr<::c10d::Store>, PythonStore>(
@@ -3125,9 +3174,13 @@ such as `dist.all_reduce(tensor, async_op=True)`.
   auto fakeProcessGroup =
       intrusive_ptr_no_gil_destructor_class_<::c10d::FakeProcessGroup>(
           module, "FakeProcessGroup", backend)
-          .def(py::init([](int rank, int size) {
-            return c10::make_intrusive<::c10d::FakeProcessGroup>(rank, size);
-          }));
+          .def(
+              py::init([](int rank, int size) {
+                return c10::make_intrusive<::c10d::FakeProcessGroup>(
+                    rank, size);
+              }),
+              py::arg("rank"),
+              py::arg("world_size"));
 
   py::class_<c10::DDPLoggingData>(module, "DDPLoggingData")
       .def(py::init<>())

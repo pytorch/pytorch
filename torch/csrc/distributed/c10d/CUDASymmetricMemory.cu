@@ -46,6 +46,11 @@ bool device_has_multicast_support(int device_idx) {
 #endif
 }
 
+bool allow_overlapping_devices() {
+  return c10::utils::check_env("TORCH_SYMM_MEM_ALLOW_OVERLAPPING_DEVICES") ==
+      true;
+}
+
 class IpcChannel {
  public:
   IpcChannel() : socket_name_(get_socket_name(getpid())) {
@@ -381,6 +386,49 @@ at::Tensor CUDASymmetricMemory::get_buffer(
       .make_tensor();
 }
 
+at::Tensor CUDASymmetricMemory::get_signal_pad(
+    int rank,
+    c10::IntArrayRef sizes,
+    std::optional<c10::ScalarType> dtype,
+    int64_t storage_offset) {
+  // If the dtype is unspecified, default it to UInt32, as it
+  // is the most common type for signaling purposes.
+  if (!dtype.has_value()) {
+    dtype = c10::ScalarType::UInt32;
+  }
+
+  // If the shape is unspecified, treat the signal pad as a 1d tensor.
+  const auto element_size = c10::elementSize(*dtype);
+  std::vector<int64_t> shape;
+  if (sizes.size() != 0) {
+    shape = sizes.vec();
+  } else {
+    shape.push_back(signal_pad_size / element_size);
+  }
+
+  const size_t numel = std::accumulate(
+      shape.begin(),
+      shape.end(),
+      static_cast<size_t>(1),
+      std::multiplies<size_t>());
+  const auto req_size = (numel + storage_offset) * element_size;
+  TORCH_CHECK(
+      req_size <= signal_pad_size,
+      "CUDASymmetricMemory::get_signal_pad: the requested size (",
+      req_size,
+      " bytes) exceeds the allocated size (",
+      signal_pad_size,
+      " bytes)");
+  auto data_ptr = reinterpret_cast<uint8_t*>(signal_pads_[rank]) +
+      storage_offset * element_size;
+  auto device = c10::Device(c10::DeviceType::CUDA, local_device_idx_);
+  auto options = at::TensorOptions().dtype(*dtype).device(device);
+  return at::for_blob(data_ptr, shape)
+      .options(options)
+      .target_device(device)
+      .make_tensor();
+}
+
 void check_channel(int channel, int world_size) {
   TORCH_CHECK(
       channel >= 0,
@@ -539,24 +587,6 @@ int CUDASymmetricMemory::get_world_size() {
   return world_size_;
 }
 
-void CUDASymmetricMemory::stream_write_value32(uintptr_t addr, uint32_t val) {
-#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
-  auto driver_api = c10::cuda::DriverAPI::get();
-  // According to the documentation of CUstreamWriteValue_flags,
-  // cuStreamWriteValue32 will provide a memory fence before the write, which
-  // has similar semantics to __threadfence_system() but is scoped to the
-  // stream rather than a CUDA thread.
-  driver_api->cuStreamWriteValue32_(
-      at::cuda::getCurrentCUDAStream(),
-      reinterpret_cast<CUdeviceptr>((void*)addr),
-      val,
-      0);
-#else
-  TORCH_CHECK(
-      false, "CUDASymmetricMemory requires PYTORCH_C10_DRIVER_API_SUPPORTED");
-#endif
-}
-
 Block::Block(
   c10::intrusive_ptr<AllocationRef> alloc_ref,
   int device_idx,
@@ -655,7 +685,8 @@ void validate_rendezvous_requests(
   for (auto req : reqs) {
     device_indices.insert(req.device_idx);
   }
-  if (device_indices.size() < (size_t)world_size) {
+  if (!allow_overlapping_devices() &&
+      device_indices.size() < (size_t)world_size) {
     TORCH_CHECK(
         false,
         "CUDASymmetricMemoryAllocator::rendezvous: ",
@@ -840,7 +871,7 @@ c10::intrusive_ptr<SymmetricMemory> CUDASymmetricMemoryAllocator::rendezvous(
   HandleType mc_handle{};
   void* mc_addr = nullptr;
   bool group_has_multicast_support = check_group_multicast_support(reqs);
-  if (group_has_multicast_support) {
+  if (!allow_overlapping_devices() && group_has_multicast_support) {
     init_multicast_for_block(
         mc_handle, mc_addr, block, ipc_channel, pids, store, rank, world_size);
   }

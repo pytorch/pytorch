@@ -58,14 +58,18 @@ class CUDASymmetricMemory : public SymmetricMemory {
       c10::ScalarType dtype,
       int64_t storage_offset) override;
 
+  at::Tensor get_signal_pad(
+      int rank,
+      c10::IntArrayRef sizes,
+      std::optional<c10::ScalarType> dtype,
+      int64_t storage_offset) override;
+
   void barrier(int channel, size_t timeout_ms) override;
   void put_signal(int dst_rank, int channel, size_t timeout_ms) override;
   void wait_signal(int src_rank, int channel, size_t timeout_ms) override;
 
   int get_rank() override;
   int get_world_size() override;
-
-  void stream_write_value32(uintptr_t addr, uint32_t val) override;
 
  private:
   std::vector<c10::intrusive_ptr<AllocationRef>> alloc_refs_;

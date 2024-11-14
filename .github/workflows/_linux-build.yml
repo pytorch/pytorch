@@ -120,7 +120,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
-          no-sudo: ${{ inputs.build-environment == 'linux-s390x-binary-manywheel' }}
+          no-sudo: true
 
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
@@ -222,8 +222,6 @@ jobs:
           else
             JENKINS_USER="--user jenkins"
             USED_IMAGE="${DOCKER_IMAGE}"
-            # Fetch aws credential from IMDs
-            eval "$(python3 .github/scripts/get_aws_session_tokens.py)"
           fi
           # detached container should get cleaned up by teardown_ec2_linux
           # Used for JENKINS_USER, which can be empty
@@ -232,9 +230,6 @@ jobs:
             -e BUILD_ENVIRONMENT \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e AWS_DEFAULT_REGION \
-            -e AWS_ACCESS_KEY_ID \
-            -e AWS_SECRET_ACCESS_KEY \
-            -e AWS_SESSION_TOKEN \
             -e PR_NUMBER \
             -e SHA1 \
             -e BRANCH \
@@ -287,7 +282,7 @@ jobs:
           s3-bucket: ${{ inputs.s3-bucket }}
 
       - name: Store PyTorch Build Artifacts for s390x
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped' && !inputs.use_split_build && inputs.build-environment == 'linux-s390x-binary-manywheel'
         with:
           name: ${{ inputs.build-environment }}
@@ -296,7 +291,7 @@ jobs:
           path: artifacts.zip
 
       - name: Store PyTorch Build Artifacts for s390x for split build
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped' && inputs.use_split_build && inputs.build-environment == 'linux-s390x-binary-manywheel'
         with:
           name: ${{ inputs.build-environment }}-experimental-split-build

@@ -16,7 +16,6 @@ import math
 import re
 import sys
 import textwrap
-import time
 import types
 import warnings
 import weakref
@@ -47,6 +46,7 @@ from torch._C._dynamo.guards import (
     DictGuardManager,
     install_no_tensor_aliasing_guard,
     install_object_aliasing_guard,
+    profile_guard_manager,
     RootGuardManager,
 )
 from torch._dynamo.source import (
@@ -305,17 +305,21 @@ def from_numpy(a):
 @functools.lru_cache(None)
 def uninteresting_files():
     import torch._dynamo.external_utils
+    import torch._dynamo.polyfills
 
-    mods = [
-        torch._dynamo.external_utils,
-    ]
+    mods = [torch._dynamo.external_utils, torch._dynamo.polyfills]
+
+    from torch._dynamo.polyfills.loader import POLYFILLED_MODULES
+
+    mods.extend(POLYFILLED_MODULES)
+
     return {inspect.getfile(m) for m in mods}
 
 
 _CLOSURE_VARS: Optional[Dict[str, object]] = None
 
 
-def get_closure_vars():
+def _get_closure_vars():
     global _CLOSURE_VARS
     if _CLOSURE_VARS is None:
         _CLOSURE_VARS = {
@@ -1150,7 +1154,7 @@ class GuardBuilder(GuardBuilderBase):
         is_epilogue=True,
     ):
         if closure_vars is None:
-            closure_vars = get_closure_vars()
+            closure_vars = _get_closure_vars()
         # Adds a lambda leaf guard to the root guard manager. It wraps the
         # code_parts in a function object which is then passed on to the leaf
         # guard.
@@ -1177,7 +1181,7 @@ class GuardBuilder(GuardBuilderBase):
     # (like its type) which is what you permanently install into the
     # guard code.
     def get(self, name: str) -> Any:
-        return eval(name, self.scope, get_closure_vars())
+        return eval(name, self.scope, _get_closure_vars())
 
     # Registers the usage of the source name referenced by the
     # string (or stored in the Guard) as being guarded upon.  It's important
@@ -1497,7 +1501,7 @@ class GuardBuilder(GuardBuilderBase):
             self._set_guard_export_info(guard, code)
 
             self.get_guard_manager(guard).add_lambda_guard(
-                get_closure_vars()["__math_isnan"],
+                _get_closure_vars()["__math_isnan"],
                 get_verbose_code_parts(code, guard),
             )
             return
@@ -1510,7 +1514,7 @@ class GuardBuilder(GuardBuilderBase):
             self._set_guard_export_info(guard, code)
 
             self.get_guard_manager(guard).add_lambda_guard(
-                get_closure_vars()["__numpy_isnan"],
+                _get_closure_vars()["__numpy_isnan"],
                 get_verbose_code_parts(code, guard),
             )
             return
@@ -1786,15 +1790,10 @@ class GuardBuilder(GuardBuilderBase):
         self.add_python_lambda_leaf_guard_to_root(
             code_parts,
             verbose_code_parts,
-            closure_vars={**SYMPY_INTERP, **get_closure_vars()},
+            closure_vars={**SYMPY_INTERP, **_get_closure_vars()},
         )
 
     def TENSOR_MATCH(self, guard: Guard, value=None):
-        # For FSDP modules, we can skip guards on nn module tensors because FSDP
-        # eager assumes that the params are unchanged once the model is wrapped.
-        if guard.is_fsdp_module():
-            return
-
         # For tensors that are part of the Dynamo extracted Fx graph module, an
         # ID_MATCH suffices. Once we turn on inline_inbuilt_nn_modules, these
         # will be lifted as inputs and have a TENSOR_MATCH guard.
@@ -2215,7 +2214,10 @@ class CheckFunctionManager:
                 raise AssertionError(f"Guard check failed: {reasons}")
 
             if guards_log.isEnabledFor(logging.DEBUG):
-                self.profile_guard_eval(output_graph.local_scope)
+                latency = profile_guard_manager(
+                    self.guard_manager.root, output_graph.local_scope
+                )
+                guards_log.debug("Guard eval latency = %s us", f"{latency:.2f}")
 
         # NB - We have to very careful of cleaning up here. Because of the
         # invalidate function, we can create a weakref finalizer that keeps
@@ -2227,18 +2229,6 @@ class CheckFunctionManager:
         # e.g., not setting output_graph = None can keep hold of nn_modules.
         self._weakrefs.clear()
         self.output_graph = None
-
-    def profile_guard_eval(self, f_locals):
-        start_time = time.time()
-        iterations = 0
-        profile_duration = 1  # unit is seconds
-
-        while time.time() - start_time < profile_duration:
-            self.guard_manager.check(f_locals)
-            iterations += 1
-
-        guard_latency = 10**6 / iterations  # us
-        guards_log.debug("Guard eval latency = %s us", f"{guard_latency:.2f}")
 
     def compile_check_fn(self, builder, guards_out, guard_fail_fn):
         # see parallel handling of ".0" / "___implicit0" in _eval_frame.c
@@ -2375,7 +2365,7 @@ class CheckFunctionManager:
             "___check_global_state": global_state.check,
             "___check_torch_function_mode_stack": torch_function_mode_stack_check_fn,
             **SYMPY_INTERP,
-            **get_closure_vars(),
+            **_get_closure_vars(),
         }
 
         globals_for_guard_fn = {"G": builder.scope["G"]}
