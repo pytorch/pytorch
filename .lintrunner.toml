@@ -68,6 +68,8 @@ include_patterns = [
     'aten/src/ATen/native/cuda/Fused*.cu',
     'aten/src/ATen/native/cudnn/*.h',
     'aten/src/ATen/native/cudnn/*.cpp',
+    'aten/src/ATen/native/mkldnn/xpu/**/*.h',
+    'aten/src/ATen/native/mkldnn/xpu/**/*.cpp',
     'c10/**/*.h',
     'c10/**/*.cpp',
     'torch/csrc/**/*.h',
@@ -200,6 +202,8 @@ include_patterns = [
     'aten/src/ATen/core/*.cpp',
     'aten/src/ATen/cudnn/*.h',
     'aten/src/ATen/cudnn/*.cpp',
+    'aten/src/ATen/native/mkldnn/xpu/**/*.h',
+    'aten/src/ATen/native/mkldnn/xpu/**/*.cpp',
     'aten/src/ATen/detail/*',
     'aten/src/ATen/functorch/*.h',
     'aten/src/ATen/functorch/*.cpp',
@@ -427,6 +431,7 @@ exclude_patterns = [
     'test/cpp/jit/upgrader_models/*.ptl.ff',
     '.ci/docker/common/install_rocm_drm.sh',
     '.lintrunner.toml',
+    '.ci/magma/package_files/*.patch',
 ]
 command = [
     'python3',
@@ -438,6 +443,52 @@ command = [
     '--replace-pattern=s/\t/    /',
     """--error-description=\
         This line has tabs; please replace them with spaces.\
+    """,
+    '--',
+    '@{{PATHSFILE}}'
+]
+
+[[linter]]
+code = 'C10_UNUSED'
+include_patterns = [
+    '**/*.cpp',
+    '**/*.h',
+]
+exclude_patterns = [
+    'c10/macros/Macros.h',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/grep_linter.py',
+    '--pattern=C10_UNUSED',
+    '--linter-name=C10_UNUSED',
+    '--error-name=deprecated C10_UNUSED macro',
+    '--replace-pattern=s/C10_UNUSED/[[maybe_unused]]/',
+    """--error-description=\
+        Deprecated macro, use [[maybe_unused]] directly\
+    """,
+    '--',
+    '@{{PATHSFILE}}'
+]
+
+[[linter]]
+code = 'C10_NODISCARD'
+include_patterns = [
+    '**/*.cpp',
+    '**/*.h',
+]
+exclude_patterns = [
+    'c10/macros/Macros.h',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/grep_linter.py',
+    '--pattern=C10_NODISCARD',
+    '--linter-name=C10_NODISCARD',
+    '--error-name=deprecated C10_NODISCARD macro',
+    '--replace-pattern=s/C10_NODISCARD/[[nodiscard]]/',
+    """--error-description=\
+        Deprecated macro, use [[nodiscard]] directly\
     """,
     '--',
     '@{{PATHSFILE}}'
