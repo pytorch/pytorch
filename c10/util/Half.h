@@ -12,7 +12,6 @@
 #include <c10/macros/Export.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/bit_cast.h>
-#include <c10/util/complex.h>
 #include <c10/util/floating_point_utils.h>
 #include <type_traits>
 
@@ -383,56 +382,6 @@ struct alignas(2) Half {
   inline C10_HOST_DEVICE Half(const sycl::half& value);
   inline C10_HOST_DEVICE operator sycl::half() const;
 #endif
-};
-
-// TODO : move to complex.h
-template <>
-struct alignas(4) complex<Half> {
-  Half real_;
-  Half imag_;
-
-  // Constructors
-  complex() = default;
-  // Half constructor is not constexpr so the following constructor can't
-  // be constexpr
-  C10_HOST_DEVICE explicit inline complex(const Half& real, const Half& imag)
-      : real_(real), imag_(imag) {}
-  C10_HOST_DEVICE inline complex(const c10::complex<float>& value)
-      : real_(value.real()), imag_(value.imag()) {}
-
-  // Conversion operator
-  inline C10_HOST_DEVICE operator c10::complex<float>() const {
-    return {real_, imag_};
-  }
-
-  constexpr C10_HOST_DEVICE Half real() const {
-    return real_;
-  }
-  constexpr C10_HOST_DEVICE Half imag() const {
-    return imag_;
-  }
-
-  C10_HOST_DEVICE complex<Half>& operator+=(const complex<Half>& other) {
-    real_ = static_cast<float>(real_) + static_cast<float>(other.real_);
-    imag_ = static_cast<float>(imag_) + static_cast<float>(other.imag_);
-    return *this;
-  }
-
-  C10_HOST_DEVICE complex<Half>& operator-=(const complex<Half>& other) {
-    real_ = static_cast<float>(real_) - static_cast<float>(other.real_);
-    imag_ = static_cast<float>(imag_) - static_cast<float>(other.imag_);
-    return *this;
-  }
-
-  C10_HOST_DEVICE complex<Half>& operator*=(const complex<Half>& other) {
-    auto a = static_cast<float>(real_);
-    auto b = static_cast<float>(imag_);
-    auto c = static_cast<float>(other.real());
-    auto d = static_cast<float>(other.imag());
-    real_ = a * c - b * d;
-    imag_ = a * d + b * c;
-    return *this;
-  }
 };
 
 C10_API inline std::ostream& operator<<(std::ostream& out, const Half& value) {
