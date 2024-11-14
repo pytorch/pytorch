@@ -38,15 +38,8 @@ static void eval_frame_callback_set(PyObject* obj) {
 // https://docs.python.org/3/c-api/init.html#c._PyFrameEvalFunction
 #if IS_PYTHON_3_11_PLUS
 #define THP_EVAL_API_FRAME_OBJECT _PyInterpreterFrame
-
 #else
-// Things specific to PY < 3.11
 #define THP_EVAL_API_FRAME_OBJECT PyFrameObject
-static int
-THP_PyFrame_FastToLocalsWithError(THP_EVAL_API_FRAME_OBJECT *frame, int *free_vars_copied) {
-  return PyFrame_FastToLocalsWithError(frame);
-}
-
 #endif // IS_PYTHON_3_11_PLUS
 
 // We need to be able to return the _PyInterpreterFrame to python so create
