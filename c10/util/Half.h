@@ -54,10 +54,10 @@
 #if defined(__GNUC__) || defined(__clang__)
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386) || \
     defined(_M_IX86)
-#if defined(__AVX2__)
+#if defined(__AVX2__) && !defined(__CUDA_ARCH__) && !defined(__HIP_DEVICE_COMPILE__)
 #define X86_F16 1
 #include <immintrin.h> // import conversion ops from f16cintrin.h
-#endif // __AVX2__
+#endif // defined(__AVX2__) && !defined(__CUDA_ARCH__) && !defined(__HIP_DEVICE_COMPILE__)
 #endif // __x86_64__ || _M_X64 || __i386 || _M_IX86
 #endif // __GNUC__ || __clang__
 
