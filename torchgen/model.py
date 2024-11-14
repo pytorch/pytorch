@@ -290,6 +290,7 @@ dispatch_keys = [
     DispatchKey.CompositeExplicitAutogradNonFunctional,
     DispatchKey.NestedTensorCPU,
     DispatchKey.NestedTensorCUDA,
+    DispatchKey.NestedTensorXPU,
     # Meta is a magic key: it is automatically generated for structured
     # kernels
     DispatchKey.Meta,
