@@ -1526,6 +1526,37 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         out2 = torch.compile(f)(query, *keys, *values)
         tolerance = Tolerances(atol=2e-1, rtol=2e-1)
         torch.testing.assert_close(out, out2, atol=tolerance.atol, rtol=tolerance.rtol)
+    
+    @supported_platform
+    def test_multiple_mask_calls(self):
+        # Create inputs
+        query = torch.randn((1, 8, 512, 64), dtype=torch.float32, device="cuda")
+        key = torch.randn((1, 8, 512, 64), dtype=torch.float32, device="cuda")
+        value = torch.randn((1, 8, 512, 64), dtype=torch.float32, device="cuda")
+
+        window_size = 32
+        def causal_mask(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        def sliding_window_mask(b, h, q_idx, kv_idx):
+            return (q_idx >= kv_idx) & (q_idx <= kv_idx + window_size)
+
+        mask1 = flex_attention.create_block_mask(
+            causal_mask, 1, None, 512, 512, _compile=False
+        )
+        mask2 = flex_attention.create_block_mask(
+            sliding_window_mask, 1, None, 512, 512, _compile=False
+        )
+
+        def f(q, k, v):
+            out1 = flex_attention.flex_attention(q, k, v, block_mask=mask1)
+            return flex_attention.flex_attention(out1, k, v, block_mask=mask2)
+
+        out = f(query, key, value)
+        out2 = torch.compile(f)(query, key, value)
+        
+        tolerance = Tolerances(atol=2e-1, rtol=2e-1)
+        assert_close(out, out2, atol=tolerance.atol, rtol=tolerance.rtol)
 
     @supported_platform
     def test_multiple_score_mod_calls2(self):
