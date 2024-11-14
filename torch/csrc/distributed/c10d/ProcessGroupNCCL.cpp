@@ -1120,7 +1120,7 @@ void ProcessGroupNCCL::registerMemPool(c10::cuda::MemPool* pool) {
             << "MemPool: " << pool->id() << ", device index: " << key
             << ", i am " << this;
   auto ncclComm = getNCCLComm(key);
-  auto ctx = MemPoolContext(pool);
+  auto ctx = c10::cuda::MemPoolContext(pool);
   auto snapshot = c10::cuda::CUDACachingAllocator::snapshot();
   for (const auto& segmentInfo : snapshot.segments) {
     TORCH_INTERNAL_ASSERT(
@@ -1138,7 +1138,7 @@ void ProcessGroupNCCL::deregisterMemPool(c10::cuda::MemPool* pool) {
             << "MemPool: " << pool->id() << ", device index: " << key
             << ", i am " << this;
   auto ncclComm = getNCCLComm(key);
-  auto ctx = MemPoolContext(pool);
+  auto ctx = c10::cuda::MemPoolContext(pool);
   auto snapshot = c10::cuda::CUDACachingAllocator::snapshot();
   for (const auto& segmentInfo : snapshot.segments) {
     TORCH_INTERNAL_ASSERT(
