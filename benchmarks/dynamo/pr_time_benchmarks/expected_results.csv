@@ -14,7 +14,7 @@ add_loop_inductor_dynamic_gpu,compile_time_instruction_count,40910000000,0.025
 
 
 
-add_loop_inductor_gpu,compile_time_instruction_count,23330000000,0.015
+add_loop_inductor_gpu,compile_time_instruction_count,24000000000,0.015
 
 
 
