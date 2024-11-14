@@ -15,6 +15,8 @@
 #include <ATen/ops/_resize_output_native.h>
 #endif
 
+#include <c10/util/overflows.h>
+
 namespace at::native {
 
 // Returns true if resize is necessary
