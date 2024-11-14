@@ -162,12 +162,14 @@ class ReinplaceCounters:
     # Track sizes of known not re-inplaced tensors (exclude dynamic shapes).
     @classmethod
     def add_missed_bytes(cls, trigger: ReInplaceTrigger, bytes: int):
-        cls._values[f"missed_bytes_{trigger.name}"] += bytes
+        if bytes != 0:
+            cls._values[f"missed_bytes_{trigger.name}"] += bytes
 
     # Track number of not re-inplaced tensors.
     @classmethod
     def add_missed_opportunities(cls, trigger: ReInplaceTrigger, count: int):
-        cls._values[f"missed_tensors_{trigger}"] += count
+        if count != 0:
+            cls._values[f"missed_tensors_{trigger}"] += count
 
     @classmethod
     def clear(cls):
