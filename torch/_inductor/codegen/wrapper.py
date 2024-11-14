@@ -691,6 +691,9 @@ class PythonWrapperCodegen(CodeGen):
             debug_printer_level=config.aot_inductor.debug_intermediate_value_printer
         )
 
+        # Additional files that are dependent to the wrapper (ex. cubin files)
+        self.additional_files = []
+
     @staticmethod
     def create(
         is_subgraph: bool, subgraph_name: str, parent_wrapper: PythonWrapperCodegen
