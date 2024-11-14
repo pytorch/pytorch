@@ -53,4 +53,6 @@ Functions
 .. autofunction:: beta
 .. autofunction:: betaln
 .. autofunction:: betainc
+.. autofunction:: betaincc
 .. autofunction:: betaincinv
+.. autofunction:: betainccinv
