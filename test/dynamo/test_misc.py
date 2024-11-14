@@ -8763,7 +8763,7 @@ def ___make_guard_fn():
         }
 
         counter = CompileCounter()
-        comp_out = torch.compile(fn, backend=counter, fullgraph=True)(fn)
+        comp_out = torch.compile(fn, backend=counter, fullgraph=True)(xsl)
         real_out = fn(xsl)
         self.assertEqual(comp_out, real_out)
         self.assertEqual(counter.frame_count, 1)
