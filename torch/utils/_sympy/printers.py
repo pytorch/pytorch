@@ -16,7 +16,7 @@ class ExprPrinter(StrPrinter):
     printmethod = "_torch_sympystr"
 
     def _print_Mul(self, expr: sympy.Expr) -> str:
-        return self.stringify(expr.args, " * ", precedence(expr))
+        return self.stringify(expr.args, "*", precedence(expr))
 
     def _print_Add(self, expr: sympy.Expr, order: Optional[str] = None) -> str:
         return self.stringify(expr.args, " + ", precedence(expr))

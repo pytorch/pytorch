@@ -350,7 +350,7 @@ class Where(sympy.Function):
     """
 
     nargs: Tuple[int, ...] = (3,)
-    precedence: int = 50  # precedence of mul
+    precedence: int = 60  # precedence of pow
 
     def _eval_is_integer(self) -> Optional[bool]:
         return True if self.args[1].is_integer and self.args[2].is_integer else None  # type: ignore[attr-defined]
@@ -380,7 +380,7 @@ class Where(sympy.Function):
 class PythonMod(sympy.Function):
     nargs: Tuple[int, ...] = (2,)
 
-    precedence: int = 50  # precedence of mul
+    precedence: int = 55  # higher precedence than mul
     is_integer: bool = True
 
     @classmethod
@@ -439,7 +439,7 @@ class PythonMod(sympy.Function):
 # Generic modulus: only defined on non-negative arguments
 class Mod(sympy.Function):
     nargs = (2,)
-    precedence: int = 50  # precedence of mul
+    precedence: int = 55  # higher precedence than mul
 
     is_integer = True
     is_nonnegative = True
