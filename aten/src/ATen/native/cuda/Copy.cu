@@ -149,6 +149,8 @@ void float8_copy_kernel_cuda(TensorIteratorBase &iter) {
   }
 }
 
+// This API is for detecting whether the permute parameter of a three-dimensional tensor
+// in the copy operation from src to dst is from [0, 1, 2] to [0, 2, 1].
 bool is_permute_021(TensorIteratorBase &iter) {
   const auto& input = iter.tensor(1);
   const auto& output = iter.tensor(0);
@@ -289,6 +291,23 @@ __global__ void transpose_tile_big_kernel(const void* __restrict a, void* __rest
     }
 }
 
+void transpose_last2dim(TensorIteratorBase &iter) {
+  void* dst = iter.data_ptr(0);
+  void* src = iter.data_ptr(1);
+  const auto& input = iter.tensor(1);
+
+  int M = input.size(0);
+  int N = input.size(1);
+  int K = input.size(2);
+
+  auto stream = c10::cuda::getCurrentCUDAStream();
+  constexpr uint32_t BIG_TILE_SIZE = 64;
+  int big_tile_wg = M * ((N + BIG_TILE_SIZE - 1) / BIG_TILE_SIZE) * ((K + BIG_TILE_SIZE - 1) / BIG_TILE_SIZE);
+  const dim3 grid_dim(big_tile_wg, 1, 1);
+  const dim3 block_dim(256, 1, 1);
+  transpose_tile_big_kernel<uint16_t, 256><<<grid_dim, block_dim, 0, stream>>>(src, dst, N, K);
+}
+
 // TODO: We probably can use the opaque type trick to avoid creating duplicate
 // kernels for equivalent bit lengths
 void direct_copy_kernel_cuda(TensorIteratorBase &iter) {
@@ -313,21 +332,7 @@ void direct_copy_kernel_cuda(TensorIteratorBase &iter) {
       gpu_kernel_nocast(iter, [] GPU_LAMBDA(scalar_t x) { return x; });
     });
   } else if (is_permute_021(iter) && (dtype == kBFloat16 || dtype == kHalf)) {
-    void* dst = iter.data_ptr(0);
-    void* src = iter.data_ptr(1);
-    const auto& input = iter.tensor(1);
-
-    int M = input.size(0);
-    int N = input.size(1);
-    int K = input.size(2);
-
-    auto stream = at::cuda::getCurrentHIPStream();
-    constexpr uint32_t BIG_TILE_SIZE = 64;
-    int big_tile_wg = M * ((N + BIG_TILE_SIZE - 1) / BIG_TILE_SIZE) * ((K + BIG_TILE_SIZE - 1) / BIG_TILE_SIZE);
-    const dim3 grid_dim(big_tile_wg, 1, 1);
-    const dim3 block_dim(256, 1, 1);
-    size_t bpe = elementSize(dtype);
-    transpose_tile_big_kernel<uint16_t, 256><<<grid_dim, block_dim, 0, stream>>>(src, dst, N, K);
+    transpose_last2dim(iter);
   } else {
     AT_DISPATCH_V2(
         dtype, "copy_", AT_WRAP([&] {
