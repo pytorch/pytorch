@@ -203,3 +203,49 @@ TORCH_API bool has_multicast_support(
   return allocator->has_multicast_support(device_idx);
 }
 } // namespace c10d::symmetric_memory
+
+namespace {
+
+at::Tensor one_shot_all_reduce_meta(
+    const at::Tensor& input,
+    std::string reduce_op,
+    std::string group_name) {
+  return at::empty_like(input);
+}
+
+TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
+  m.def(
+      "multimem_all_reduce_(Tensor(a!) input, str reduce_op, str group_name) -> Tensor(a!)");
+  m.def(
+      "multimem_one_shot_all_reduce(Tensor input, str reduce_op, str group_name) -> Tensor");
+  m.def(
+      "multimem_one_shot_all_reduce_out(Tensor input, str reduce_op, str group_name, Tensor(a!) out) -> Tensor(a!)");
+  m.def(
+      "one_shot_all_reduce(Tensor input, str reduce_op, str group_name) -> Tensor");
+  m.def(
+      "one_shot_all_reduce_out(Tensor input, str reduce_op, str group_name, Tensor(a!) out) -> Tensor(a!)");
+  m.def(
+      "two_shot_all_reduce_(Tensor(a!) input, str reduce_op, str group_name) -> Tensor(a!)");
+
+  // An mm that supports consuming asynchronous input. It guarantees the
+  // following rasterization order, and that the corresponding signal arrives
+  // before an input chunk is consumed.
+  //
+  // num_chunks = a_chunks_signals.numel()
+  // for chunk_idx in range(a_chunk_pivot, num_chunks + a_chunk_pivot):
+  //     chunk_idx = chunk_idx % num_chunks
+  //     wait_signal(a_chunk_signals, chunk_idx)
+  //     # Compute output tiles that consumes the input chunk
+  m.def(
+      "_async_input_mm(Tensor a, Tensor b, Tensor a_chunk_signals, int a_chunk_pivot) -> Tensor");
+  m.def(
+      "stream_write_value32_(Tensor(a!) input, int offset, int val) -> Tensor(a!)");
+  m.def(
+      "memset32_(Tensor(a!) input, int offset, int val, int count) -> Tensor(a!)");
+}
+
+TORCH_LIBRARY_IMPL(symm_mem, Meta, m) {
+  m.impl("one_shot_all_reduce", one_shot_all_reduce_meta);
+}
+
+} // namespace
