@@ -1857,7 +1857,7 @@ def skipIfXpu(func=None, *, msg="test doesn't currently work on the XPU stack"):
         return dec_fn(func)
     return dec_fn
 
-def skipIfMps(fn):
+def skipIfMPS(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
         if TEST_MPS:
@@ -5343,6 +5343,22 @@ class NestedTensorTestCase(TestCase):
                 return x
 
         self.assertEqual(pytree.tree_map(_unbind_njts, a), pytree.tree_map(_unbind_njts, b))
+
+    def assertEqualNoncontigAware(self, a, b):
+        # assertEqual() doesn't take into account lengths, so hack around this
+        # by comparing unbound components and shapes
+        self.assertEqualIgnoringNestedInts(a, b)
+
+        def _get_njt_shapes(x):
+            return (
+                x.shape
+                if isinstance(x, torch.Tensor) and x.is_nested
+                else None
+            )
+
+        a_shapes = pytree.tree_map(_get_njt_shapes, a)
+        b_shapes = pytree.tree_map(_get_njt_shapes, b)
+        self.assertEqual(a_shapes, b_shapes)
 
     @contextlib.contextmanager
     def branch_nested_state(self):
