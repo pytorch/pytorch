@@ -2305,9 +2305,42 @@ def irecv(
             return pg.recv([tensor], group_src_rank, tag)
 
 
+def _canonicalize_group_rank(
+    group: Optional[ProcessGroup] = None,
+    global_rank: Optional[int] = None,
+    group_rank: Optional[int] = None,
+) -> Tuple[ProcessGroup, int]:
+    """
+    Helper method to take _either_ a global rank or a group rank and produce a group rank.
+
+    Also returns the group, which could be the world group (if None or GroupMember.WORLD was passed in).
+    """
+    if group is None or group is GroupMember.WORLD:
+        group = _get_default_group()
+
+    if group_rank is not None:
+        assert global_rank is None, "Can't specify both group_rank and global_rank"
+    else:
+        assert global_rank is not None, "Must specify global_rank or group_rank"
+        group_rank = get_group_rank(group, global_rank)
+    return group, group_rank
+
+
+def _check_not_self_rank(group: ProcessGroup, rank: int, rank_type: str):
+    if group.rank() == rank:
+        raise ValueError(
+            f"Invalid {rank_type} rank: {rank_type} rank should not be the same as "
+            "the rank of the current process."
+        )
+
+
 @_exception_logger
 def send(
-    tensor: torch.Tensor, dst: Optional[int] = None, group: Optional[ProcessGroup] = None, tag: int = 0, group_dst: Optional[int] = None
+    tensor: torch.Tensor,
+    dst: Optional[int] = None,
+    group: Optional[ProcessGroup] = None,
+    tag: int = 0,
+    group_dst: Optional[int] = None,
 ) -> None:
     """
     Send a tensor synchronously.
@@ -2322,26 +2355,11 @@ def send(
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         tag (int, optional): Tag to match send with remote recv
-        group_dst (int, optional): Destination rank on ``group``. 
+        group_dst (int, optional): Destination rank on ``group``.
 
     """
-    if group_dst != None:
-        assert dst is None, "Can't specify both group_dst and dst"
-        # TODO if we want to encourage migration to 'group_dst' arg and deprecate dst arg, should we support using 'group_dst'
-        # even when 'group' is None (for default group)?
-        assert group is not None, "Must specify group if using group_dst"
-        dst = get_global_rank(group, group_dst)
-    
-    else:
-        assert dst is not None, "Must specify dst or group_dst"
-
-
-    if get_rank() == dst:
-        raise ValueError(
-            "Invalid destination rank: destination rank should not be the same as "
-            "the rank of the current process."
-        )
-
+    group, group_dst = _canonicalize_group_rank(group, dst, group_dst)
+    _check_not_self_rank(group, group_dst, "destination")
     _check_single_tensor(tensor, "tensor")
     if _rank_not_in_group(group):
         _warn_not_in_group("send")
@@ -2350,12 +2368,7 @@ def send(
     if tensor.is_complex():
         tensor = torch.view_as_real(tensor)
 
-    if group is None or group is GroupMember.WORLD:
-        default_pg = _get_default_group()
-        default_pg.send([tensor], dst, tag).wait()
-    else:
-        group_dst_rank = get_group_rank(group, dst)
-        group.send([tensor], group_dst_rank, tag).wait()
+    group.send([tensor], group_dst, tag).wait()
 
 
 @_exception_logger
