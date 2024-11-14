@@ -1616,12 +1616,22 @@ class TestMPS(TestCaseMPS):
             a = torch.tensor(v, dtype=dtype, device="mps") * b
             self.compare_with_numpy(torch.exp, np.exp, a)
 
+    @xfailIf(product_version > 15.0)
     def test_conv_raises_error(self, device='mps', dtype=torch.float):
         conv = nn.Conv1d(1, 65537, 3, padding=1).to('mps')
 
         x = torch.ones([1, 1, 3])
         with self.assertRaises(NotImplementedError):
             y = conv(x.to("mps"))
+
+    @xfailIf(product_version < 15.1)
+    def test_conv_high_channel_size(self):
+        out_channels = 65537
+        weight = torch.randn(out_channels, 1, 1)
+        x = torch.ones([1, 1, 1])
+        y_cpu = F.conv1d(x.to("cpu"), weight.to("cpu"))
+        y_mps = F.conv1d(x.to("mps"), weight.to("mps"))
+        self.assertEqual(y_cpu, y_mps)
 
     def test_triu_inf(self, device="mps", dtype=torch.float):
         for diag in [-1, 0, 1]:
