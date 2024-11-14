@@ -639,11 +639,44 @@ Example::
     ),
 )
 
+
+def betaincc(
+    x: Union[TensorLikeType, NumberType],
+    a: Union[TensorLikeType, NumberType],
+    b: Union[TensorLikeType, NumberType],
+) -> TensorLikeType:
+    torch._check(
+        isinstance(x, TensorLike)
+        or isinstance(a, TensorLike)
+        or isinstance(b, TensorLike),
+        lambda: "Expected either argument x, a or b to be a Tensor",
+    )
+
+    return 1 - torch.special.betainc(x, a, b)
+
+
 betaincinv = _add_docstr(_special.special_betaincinv, "")
+
+
+def betainccinv(
+    y: Union[TensorLikeType, NumberType],
+    a: Union[TensorLikeType, NumberType],
+    b: Union[TensorLikeType, NumberType],
+) -> TensorLikeType:
+    torch._check(
+        isinstance(y, TensorLike)
+        or isinstance(a, TensorLike)
+        or isinstance(b, TensorLike),
+        lambda: "Expected either argument y, a or b to be a Tensor",
+    )
+
+    return torch.special.betaincinv(1 - y, a, b)
+
 
 betaln = _add_docstr(
     _special.special_betaln,
     r"""
+>>>>>>> bb1d1a59f41 (betaincc, betainccinv have been added to special)
 betainc(input, a, b, out=None) -> Tensor
 
 Computes the natural logarithm of absolute value of Beta function (as defined below)
