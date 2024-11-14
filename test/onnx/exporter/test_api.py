@@ -34,7 +34,13 @@ class SampleModelForDynamicShapes(torch.nn.Module):
 
 
 class NestedModelForDynamicShapes(torch.nn.Module):
-    def forward(self, x, ys, zs, c):
+    def forward(
+        self,
+        x: torch.Tensor,
+        ys: list[torch.Tensor],
+        zs: dict[str, torch.Tensor],
+        c: torch.Tensor,
+    ):
         y = ys[0] + ys[1] + zs["a"] + zs["b"]
         w = 5
         if x.shape[0] < 3 and c.shape[0] != 4:

@@ -71,6 +71,8 @@ def _from_dynamic_axes_to_dynamic_shapes(
             continue
         if isinstance(axes, dict):
             # Dim needs to pass str.isidentifier()
+            # If the max is not set, llm is going to fail, as sequence length is usually bounded within config.
+            # But we also don't want to only support llm. This kind of leaves us with this awkward position.
             dynamic_shapes[input_name] = {
                 k: torch.export.Dim(re.sub(r"[^A-Za-z_]", "", v), max=99999)
                 for k, v in axes.items()
@@ -79,6 +81,8 @@ def _from_dynamic_axes_to_dynamic_shapes(
             dynamic_shapes[input_name] = {
                 k: torch.export.Dim(f"{input_name}_dim_{k}", max=99999) for k in axes
             }
+        elif axes is None:
+            dynamic_shapes[input_name] = None
         else:
             raise ValueError(
                 "Unsupported dynamic_axes format. Please provide a dict or a list."
@@ -98,10 +102,17 @@ def _from_dynamic_axes_to_dynamic_shapes(
             inputs.append(kwargs[param_name])
 
     # We need tree structure to represent dynamic_shapes
-    _, tree_structure = _pytree.tree_flatten(inputs)
-    dynamic_shapes = _pytree.tree_unflatten(dynamic_shapes.values(), tree_structure)
+    dynamic_shapes = _unflatten_dynamic_shapes_with_inputs_tree(inputs, dynamic_shapes)
 
     return dynamic_shapes
+
+
+def _unflatten_dynamic_shapes_with_inputs_tree(
+    inputs: list[Any],
+    dynamic_shapes: dict[str, Any | None],
+) -> dict[str, Any | None]:
+    _, tree_structure = _pytree.tree_flatten(inputs)
+    return _pytree.tree_unflatten(dynamic_shapes.values(), tree_structure)
 
 
 def _get_torch_export_args(
@@ -172,6 +183,7 @@ def export_compat(
                     input_names=input_names,
                     output_names=set(output_names or ()),
                 )
+                print(f"dynamic_shapes: {dynamic_shapes}")
             except Exception as e:
                 raise RuntimeError(
                     "# Failed to convert 'dynamic_axes' to 'dynamic_shapes'. "
