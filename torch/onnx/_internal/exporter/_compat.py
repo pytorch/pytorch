@@ -183,7 +183,6 @@ def export_compat(
                     input_names=input_names,
                     output_names=set(output_names or ()),
                 )
-                print(f"dynamic_shapes: {dynamic_shapes}")
             except Exception as e:
                 raise RuntimeError(
                     "# Failed to convert 'dynamic_axes' to 'dynamic_shapes'. "
