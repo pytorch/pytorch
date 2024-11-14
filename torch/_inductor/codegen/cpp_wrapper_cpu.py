@@ -250,7 +250,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # real input/output tensor match ones provided at compile time via sample
         # input/output.
         def gen_check(handle_kind, idx, name, tensor):
-            self.prefix.writeline(f"auto {name} = {handle_kind}[{idx}];")
+            # Wrap AtenTensorHandle with ConstantHandle for cleaner utility function access
+            self.prefix.writeline(
+                f"ConstantHandle {name} = ConstantHandle({handle_kind}[{idx}]);"
+            )
             self.codegen_tensor_dtype_var_decl(self.prefix, name)
             expected_dtype_name = DTYPE_TO_ATEN[tensor.dtype]
             dtype_str = str(tensor.dtype).split(".")[-1]
@@ -486,16 +489,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
         )
 
     def codegen_input_size_var_decl(self, code: IndentedBuffer, name):
-        code.writeline(f"int64_t* {name}_size;")
-        code.writeline(
-            f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_sizes({name}, &{name}_size));"
-        )
+        code.writeline(f"int64_t* {name}_size = {name}.sizes();")
 
     def codegen_input_stride_var_decl(self, code: IndentedBuffer, name):
-        code.writeline(f"int64_t* {name}_stride;")
-        code.writeline(
-            f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_strides({name}, &{name}_stride));"
-        )
+        code.writeline(f"int64_t* {name}_stride = {name}.strides();")
 
     def codegen_model_kernels(self):
         self.prefix.writeline("namespace {")
@@ -1699,7 +1696,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         return new_tensor_args, new_int_args
 
-    def generate_extern_kernel_alloc_and_find_schema_if_needed(
+    def generate_fallback_kernel_with_runtime_lookup(
         self,
         buf_name: str,
         python_kernel_name: str,
@@ -1739,14 +1736,14 @@ class CppWrapperCpu(PythonWrapperCodegen):
             assert raw_args is not None
             assert output_args is not None
 
-            return self.generate_extern_kernel_alloc_and_find_schema_if_needed_with_proxy_executor(
+            return self.generate_fallback_kernel_with_runtime_lookup_aot(
                 op_overload,
                 raw_args,
                 output_args,
                 outputs,
             )
         else:
-            return self.generate_extern_kernel_alloc_and_find_schema_if_needed_jit(
+            return self.generate_fallback_kernel_with_runtime_lookup_jit(
                 buf_name,
                 python_kernel_name,
                 cpp_kernel_name,
@@ -1886,7 +1883,7 @@ if (custom_op_wrapper.get() == NULL) {
             )
         return "".join(lines)
 
-    def generate_extern_kernel_alloc_and_find_schema_if_needed_jit(
+    def generate_fallback_kernel_with_runtime_lookup_jit(
         self,
         buf_name: str,
         python_kernel_name: str,
@@ -1961,7 +1958,7 @@ reinterpret_cast<AtenTensorHandle>(PyCapsule_GetPointer(PyList_GET_ITEM(py_{buf_
         )
         self.writelines(scope_gil_acquire)
 
-    def generate_extern_kernel_alloc_and_find_schema_if_needed_with_proxy_executor(
+    def generate_fallback_kernel_with_runtime_lookup_aot(
         self,
         op_overload,
         raw_args,  # contains both args and flatten kwargs
