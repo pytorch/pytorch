@@ -483,7 +483,9 @@ class CKGemmTemplate(CKTemplate):
                 # bias has (M, 1) shape
                 bias_shuffle_block_transfer_scalar_per_vector_n_per_block = (1,)
             else:
-                raise AssertionError("Bias layout is neither row-major nor column-major")
+                raise AssertionError(
+                    "Bias layout is neither row-major nor column-major"
+                )
             # ...and the second tuple element corresponds to the bias
             op.c_shuffle_block_transfer_scalar_per_vector_n_per_block += (
                 bias_shuffle_block_transfer_scalar_per_vector_n_per_block
@@ -721,7 +723,13 @@ class CKGemmTemplate(CKTemplate):
     def size_args(self):
         X = self.input_nodes[0]
         W = self.input_nodes[1]
-        Bias = self.input_nodes[2] if len(self.input_nodes) == 3 else self.input_nodes[4] if len(self.input_nodes) == 5 else None
+        Bias = (
+            self.input_nodes[2]
+            if len(self.input_nodes) == 3
+            else self.input_nodes[4]
+            if len(self.input_nodes) == 5
+            else None
+        )
         Y = self.output_node
 
         M = X.get_size()[0]
