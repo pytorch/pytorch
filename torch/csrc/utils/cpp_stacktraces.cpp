@@ -9,13 +9,11 @@
 namespace torch {
 namespace {
 bool compute_cpp_stack_traces_enabled() {
-  auto envvar = c10::utils::check_env("TORCH_SHOW_CPP_STACKTRACES");
-  return envvar == true;
+  return c10::utils::check_env("TORCH_SHOW_CPP_STACKTRACES") == true;
 }
 
 bool compute_disable_addr2line() {
-  auto envvar = c10::utils::check_env("TORCH_DISABLE_ADDR2LINE");
-  return envvar == true;
+  return c10::utils::check_env("TORCH_DISABLE_ADDR2LINE") == true;
 }
 } // namespace
 
