@@ -163,6 +163,7 @@ def build_triton(
         # change built wheel name and version
         env["TRITON_WHEEL_NAME"] = triton_pkg_name
         env["TRITON_WHEEL_VERSION_SUFFIX"] = version_suffix
+        env["TRITON_BUILD_WITH_CLANG_LLD"] = 1
         patch_init_py(
             triton_pythondir / "triton" / "__init__.py",
             version=f"{version}",
@@ -209,9 +210,9 @@ def main() -> None:
 
     build_triton(
         device=args.device,
-        commit_hash=args.commit_hash
-        if args.commit_hash
-        else read_triton_pin(args.device),
+        commit_hash=(
+            args.commit_hash if args.commit_hash else read_triton_pin(args.device)
+        ),
         version=args.triton_version,
         build_conda=args.build_conda,
         py_version=args.py_version,
