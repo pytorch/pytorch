@@ -15,6 +15,9 @@ from ._meta_parser import (
 log = logging.getLogger(__name__)
 mp_context = torch.multiprocessing.get_context("spawn")
 
+# Constant properties of our device
+NUM_DEVICES = 2
+
 
 # Our allocator
 class Allocator:
@@ -56,6 +59,10 @@ class Allocator:
                         storage_offset=0,
                     )
 
+        # Might be an empty tensor
+        if found_base is None and meta.nelem_in_bytes == 0:
+            found_base = torch.tensor((), dtype=torch.uint8)
+
         # This pointer is not allocated here, segfault !
         if found_base is None:
             log.info("Currently allocated blocks:\n %s", safe_str(self.allocated))
@@ -80,8 +87,9 @@ def register(registry):
 
 
 class Driver:
-    def __init__(self):
+    def __init__(self, num_devices):
         super().__init__()
+        self.num_devices = num_devices
         self.is_initialized = False
 
     def _lazy_init(self):
@@ -97,8 +105,6 @@ class Driver:
         self.host_allocator = Allocator()
         self.event_belong = {}
 
-        # Constant properties of our device
-        self.num_devices = 2
         self.devices = []
 
         for i in range(self.num_devices):
@@ -358,4 +364,4 @@ class _Executor:
         pass
 
 
-driver = Driver()
+driver = Driver(NUM_DEVICES)
