@@ -9,6 +9,8 @@ from sympy.logic.boolalg import BooleanAtom
 
 import torch
 import torch.fx as fx
+from torch._dynamo.exc import TensorifyScalarRestartAnalysis
+from torch._dynamo.symbolic_convert import TensorifyState
 from torch._prims_common import get_computation_dtype
 from torch._subclasses import fake_tensor  # noqa: TCH001
 from torch._utils_internal import justknobs_check
@@ -198,7 +200,6 @@ def tensorify_python_scalars(
                 expr_to_sym_proxy[s] = MetaProxy(
                     node, tracer=tracer, fake_mode=fake_mode
                 )
-
             elif (sym_expr := _get_sym_val(node)) is not None:
                 if sym_expr not in expr_to_sym_proxy and not isinstance(
                     sym_expr, (sympy.Number, sympy.logic.boolalg.BooleanAtom)
@@ -280,6 +281,26 @@ def tensorify_python_scalars(
 
                     node.replace_all_uses_with(guard_scalar(val))
                     graph.erase_node(node)
+
+    should_restart = False
+
+    # Sometimes by the time we get to tensorify, there have already been
+    # specializations, eg. in python_arg_parser.h. In these cases,
+    # placeholder nodes no longer have a reference to their original
+    # symfloat and thus we need to deduce specializations have happend
+    # via shape_env.replacements. NB: there's an important invariant here
+    # that symfloats keep consistent names across restarts.
+    for k, v in shape_env.replacements.items():
+        if symbol_is_type(k, SymT.FLOAT) and isinstance(v, sympy.core.numbers.Float):
+            name = str(k)
+            if not TensorifyState.should_specialize(name):
+                TensorifyState.specialize(name)
+                should_restart = True
+
+    if should_restart:
+        # Sledgehammer time. Restart dynamo analysis, keeping track of which input sources
+        # are no longer needed and should be specialized.
+        raise TensorifyScalarRestartAnalysis
 
     graph_code_log.debug(
         "%s", lazy_format_graph_code("tensorify_python_scalars", gm, colored=True)

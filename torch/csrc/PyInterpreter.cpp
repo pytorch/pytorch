@@ -273,14 +273,14 @@ void ConcretePyInterpreterVTable::decref(PyObject* pyobj, bool has_pyobj_slot)
     }
   }
   Py_DECREF(pyobj);
-};
+}
 
 void ConcretePyInterpreterVTable::incref(PyObject* pyobj) const {
   if (!Py_IsInitialized())
     return;
   pybind11::gil_scoped_acquire gil;
   Py_INCREF(pyobj);
-};
+}
 
 bool isPythonTensor(const at::Tensor& tensor) {
   return tensor.unsafeGetTensorImpl()->key_set().has(c10::DispatchKey::Python);

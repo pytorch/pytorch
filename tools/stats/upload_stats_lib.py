@@ -26,8 +26,6 @@ def get_s3_resource() -> Any:
 # NB: In CI, a flaky test is usually retried 3 times, then the test file would be rerun
 # 2 more times
 MAX_RETRY_IN_NON_DISABLED_MODE = 3 * 3
-# NB: Rockset has an upper limit of 5000 documents in one request
-BATCH_SIZE = 5000
 
 
 def _get_request_headers() -> dict[str, str]:
@@ -119,35 +117,6 @@ def download_gha_artifacts(
     for name, url in artifact_urls.items():
         paths.append(_download_artifact(Path(name), url, workflow_run_attempt))
     return paths
-
-
-def upload_to_rockset(
-    collection: str,
-    docs: list[Any],
-    workspace: str = "commons",
-    client: Any = None,
-) -> None:
-    import rockset  # type: ignore[import]
-
-    if not client:
-        client = rockset.RocksetClient(
-            host="api.usw2a1.rockset.com", api_key=os.environ["ROCKSET_API_KEY"]
-        )
-
-    index = 0
-    while index < len(docs):
-        from_index = index
-        to_index = min(from_index + BATCH_SIZE, len(docs))
-        print(f"Writing {to_index - from_index} documents to Rockset")
-
-        client.Documents.add_documents(
-            collection=collection,
-            data=docs[from_index:to_index],
-            workspace=workspace,
-        )
-        index += BATCH_SIZE
-
-    print("Done!")
 
 
 def upload_to_dynamodb(
