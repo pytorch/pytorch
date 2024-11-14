@@ -73,5 +73,7 @@ The torch.special module, modeled after SciPy's [special](https://docs.scipy.org
 .. autofunction:: beta
 .. autofunction:: betaln
 .. autofunction:: betainc
+.. autofunction:: betaincc
 .. autofunction:: betaincinv
+.. autofunction:: betainccinv
 ```
