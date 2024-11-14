@@ -15,6 +15,8 @@ from torch._higher_order_ops.utils import (
     get_dummy_aot_autograd_config,
     prepare_fw_with_masks,
     reenter_make_fx,
+    save_tensors_and_symints_for_backward,
+    saved_tensors_and_symints,
 )
 from torch._ops import HigherOrderOperator
 from torch._subclasses import FakeTensorMode
@@ -41,8 +43,8 @@ class InvokeSubgraphHOP(HigherOrderOperator):
         subgraph: GraphModule,
         identifier: Optional[str],
         operands: Union[
-            List[Union[torch.Tensor, torch.SymInt]],
-            Tuple[Union[torch.Tensor, torch.SymInt]],
+            List[Union[torch.Tensor, int, torch.SymInt]],
+            Tuple[Union[torch.Tensor, int, torch.SymInt]],
         ],
     ):
         assert identifier is None or isinstance(
@@ -51,15 +53,42 @@ class InvokeSubgraphHOP(HigherOrderOperator):
 
         assert isinstance(
             operands, (list, tuple)
-        ), f"invoke_subgraph operands must be a list or tuple of tensors and SymInts {operands}"
+        ), f"invoke_subgraph operands must be a list or tuple of tensors/ints/SymInts {operands}"
         assert all(
-            isinstance(o, (torch.Tensor, torch.SymInt)) for o in operands
-        ), f"invoke_subgraph operands must be a list of tensors and SymInts {operands}"
+            isinstance(o, (torch.Tensor, int, torch.SymInt)) for o in operands
+        ), f"invoke_subgraph operands must be a list of tensors/ints/SymInts {operands}"
 
         return super().__call__(subgraph, identifier, operands)
 
 
 invoke_subgraph = InvokeSubgraphHOP()
+
+
+def invoke_subgraph_placeholder(subgraph, *args, **kwargs):
+    # Just a placeholder for Dynamo to replace with invoke_subgraph
+    return subgraph(*args, **kwargs)
+
+
+def mark_compile_region(fn=None):
+    """
+    This wrapper instructs torch.compile to compile the wrapped region once and
+    reuse the compiled artifact, instead of the usual way of aggressively
+    inlining the function.
+
+    Under the hood, it tells TorchDynamo to use InvokeSubgraph HOP for the
+    region. For PyTorch eager, this is a no-op.
+    """
+
+    def wrap(func):
+        def inner(*args, **kwargs):
+            return invoke_subgraph_placeholder(func, *args, **kwargs)
+
+        return inner
+
+    if fn:
+        return wrap(fn)
+    else:
+        return wrap
 
 
 def get_invoke_subgraph_cache():
@@ -78,6 +107,13 @@ def trace_joint_graph(fn, fw_inputs, fw_outputs):
 
     dummy_aot_config = get_dummy_aot_autograd_config()
 
+    # This joint_fn is inserted as the backward graph as is. This simplifies the
+    # min-cut partitioner work later on.
+    #   Input signature - (*primals, *tangents)
+    #   Output signature - (*grads, *fw_outs)
+    # The output signature is deliberately kept grads first and fw_outs second.
+    # Having grads first makes the min-cut partitioner HOP graph stitching
+    # easier.
     def joint_fn(*primals_and_tangents):
         primals = primals_and_tangents[: len(fw_inputs)]
         tangents = primals_and_tangents[len(fw_inputs) :]
@@ -88,7 +124,9 @@ def trace_joint_graph(fn, fw_inputs, fw_outputs):
 
         maybe_clone = clone_outputs_aliasing_inputs(primals_and_tangents)
 
-        return pytree.tree_map(maybe_clone, list(fw_outs) + grads)
+        # return signature is deliberately kept (*grads, *fw_outs). This
+        # simplifies partitioning work later on.
+        return pytree.tree_map(maybe_clone, grads + list(fw_outs))
 
     primals = list(fw_inputs)
     # This assumes that the tangent strides match fw_outputs strides. Check the
@@ -100,21 +138,24 @@ def trace_joint_graph(fn, fw_inputs, fw_outputs):
     return _maybe_reenter_make_fx(joint_fn)(*joint_operands)
 
 
-def create_fw_bw_graph(subgraph, operands):
+def create_fw_bw_graph(subgraph, operands, grad_outputs=None):
     with suspend_functionalization(), disable_functional_mode():
         with disable_proxy_modes_tracing():
             # args are functional tensors, generate some example tensors
             fw_inputs = pytree.tree_map(_from_fun, operands)
 
-            fw_outputs = pytree.tree_map(_from_fun, subgraph(*fw_inputs))
+            if grad_outputs is None:
+                # Infer grad_outputs to be the same properties as the fw_outputs
+                # if they're not passed in.
+                grad_outputs = pytree.tree_map(_from_fun, subgraph(*fw_inputs))
             if any(
                 not isinstance(out, torch.Tensor)
-                for out in fw_outputs
+                for out in grad_outputs
                 if out is not None
             ):
                 raise RuntimeError(
                     "Expect outputs of invoke_subgraph to only contains tensors or None. "
-                    f"Got types {[type(out) for out in fw_outputs]}."
+                    f"Got types {[type(out) for out in grad_outputs]}."
                 )
 
             # Trace the forward subgraph
@@ -124,9 +165,9 @@ def create_fw_bw_graph(subgraph, operands):
             bw_graph = trace_joint_graph(
                 subgraph,
                 fw_inputs,
-                fw_outputs,
+                grad_outputs,
             )
-            return fw_graph, bw_graph, len(fw_outputs)
+            return fw_graph, bw_graph, len(grad_outputs)
 
 
 class InvokeSubgraphAutogradOp(torch.autograd.Function):
@@ -149,14 +190,14 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
                 operands,
             )
 
-        ctx.save_for_backward(*operands)
+        save_tensors_and_symints_for_backward(ctx, operands)
         return out
 
     @staticmethod
     def backward(ctx, *grad_outs):
         bw_graph = ctx._bw_graph
         identifier = ctx._identifier
-        primals = ctx.saved_tensors
+        primals = saved_tensors_and_symints(ctx)
         num_fw_outs = ctx._num_fw_outs
 
         # While tracing we made the assumption that tangents are contiguous. So,
@@ -164,12 +205,12 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
         contiguous_grad_outs = tuple([o.contiguous() for o in grad_outs])
 
         # bw_graph is a joint graph with signature (*primals_and_tangents) and
-        # returns (*fw_outs_and_grads). To get the grads, we use the num_fw_outs
+        # returns (*grads_and_fw_outs). To get the grads, we use the num_fw_outs
         # to extract the grads.
         primals_and_tangents = primals + contiguous_grad_outs
         grads = invoke_subgraph(
             bw_graph, f"___backward_{identifier}", primals_and_tangents
-        )[num_fw_outs:]
+        )[:-num_fw_outs]
         return None, None, None, None, *grads
 
 
@@ -235,7 +276,8 @@ def _(ctx, subgraph, identifier, operands):
 @invoke_subgraph.py_impl(FakeTensorMode)
 def _(mode, subgraph, identifier, operands):
     # TODO(anijain2305) - Implement fake tensor caching.
-    return subgraph(*operands)
+    with mode:
+        return subgraph(*operands)
 
 
 @invoke_subgraph.py_impl(ProxyTorchDispatchMode)

@@ -73,7 +73,11 @@ from torch._C import (
 from torch._dispatch.python import enable_python_dispatcher
 from torch._guards import Source, TracingContext
 from torch._subclasses.meta_utils import is_sparse_compressed
-from torch._utils_internal import log_chromium_event_internal, log_compilation_event
+from torch._utils_internal import (
+    log_chromium_event_internal,
+    log_compilation_event,
+    signpost_event,
+)
 from torch.fx._utils import _format_graph_code, lazy_format_graph_code
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._triton import has_triton, has_triton_package
@@ -140,7 +144,54 @@ frame_phase_timing: Dict[str, Dict[str, float]] = collections.defaultdict(
     lambda: collections.defaultdict(float)
 )
 
+codecache_metrics: Counter[str] = collections.Counter()
+
 timer_counter = itertools.count()
+
+
+# Abstraction on top of counters.
+class ReInplaceTrigger(enum.Enum):
+    AUTO_FUNC_V1 = 1
+    AUTO_FUNC_V2 = 2
+    TRITON_OPS = 3
+
+
+class ReinplaceCounters:
+    _values: DefaultDict[str, int] = collections.defaultdict(int)
+
+    # Track sizes of known not re-inplaced tensors (exclude dynamic shapes).
+    @classmethod
+    def add_missed_bytes(cls, trigger: ReInplaceTrigger, bytes: int):
+        cls._values[f"missed_bytes_{trigger.name}"] += bytes
+
+    # Track number of not re-inplaced tensors.
+    @classmethod
+    def add_missed_opportunities(cls, trigger: ReInplaceTrigger, count: int):
+        cls._values[f"missed_tensors_{trigger}"] += count
+
+    @classmethod
+    def clear(cls):
+        cls._values.clear()
+
+    @classmethod
+    def get_total_missed(cls):
+        sum = 0
+        for trigger in ReInplaceTrigger:
+            sum += cls._values.get(f"missed_tensors_{trigger}", 0)
+        return sum
+
+    @classmethod
+    def get_total_missed_bytes(cls):
+        sum = 0
+        for trigger in ReInplaceTrigger:
+            sum += cls._values.get(f"missed_bytes_{trigger.name}", 0)
+        return sum
+
+    @classmethod
+    def log(cls):
+        # if not empty log.
+        if cls._values:
+            signpost_event("inductor", "reinplace_counters", cls._values)
 
 
 def tabulate(
@@ -269,6 +320,7 @@ def add_remote_cache_time_saved(time_saved_ns: int, is_backward: bool = False) -
 def dynamo_timed(
     key: str,
     phase_name: Optional[str] = None,
+    log_pt2_compile_event: bool = False,  # Whether or not to log it to internal pt2 compile event
     fwd_only: bool = True,
 ):
     chromium_log: ChromiumEventLogger = get_chromium_event_logger()
@@ -278,14 +330,14 @@ def dynamo_timed(
     fail_type: Optional[str] = None
     fail_reason: Optional[str] = None
     time_spent = float("-inf")
-    start = time.time_ns()
+    start_ns = time.time_ns()
     try:
         with torch.profiler.record_function(f"{key} (dynamo_timed)"):
             t0 = time.time()
             if phase_name:
-                chromium_log.log_event_start(phase_name, start, {"fn_name": key})
+                chromium_log.log_event_start(phase_name, start_ns, {"fn_name": key})
             else:
-                chromium_log.log_event_start(key, start, {})
+                chromium_log.log_event_start(key, start_ns, {})
             yield
             time_spent = time.time() - t0
         compilation_time_metrics[key].append(time_spent)
@@ -294,16 +346,18 @@ def dynamo_timed(
         fail_reason = str(e)
         raise
     finally:
+        end_ns = time.time_ns()
         # Always log the end event even on exception
         if phase_name:
             chromium_log.log_event_end(
                 phase_name,
-                time.time_ns(),
+                end_ns,
                 {},
-                start,
+                start_ns,
+                log_pt2_compile_event,
             )
         else:
-            chromium_log.log_event_end(key, time.time_ns(), {}, start)
+            chromium_log.log_event_end(key, end_ns, {}, start_ns, log_pt2_compile_event)
         # Only record backward compilation metrics if phase_name is not None!
         if phase_name:
             frame_key = str(curr_frame)
@@ -358,17 +412,44 @@ def dynamo_timed(
                             structured_logging_overhead_s = (
                                 torch._logging.get_structured_logging_overhead()
                             )
-                            metrics = BwdCompilationMetrics(
-                                compile_id,
-                                inductor_compile_time,
-                                code_gen_time,
-                                fail_type,
-                                fail_reason,
-                                remote_cache_time_saved,
-                                structured_logging_overhead_s,
-                                False,  # is_forward
-                                to_int_ms(remote_fx_graph_cache_get_time),
-                                to_int_ms(remote_fx_graph_cache_put_time),
+                            metrics = CompilationMetrics(
+                                compile_id=compile_id,
+                                inductor_compile_time_s=inductor_compile_time,
+                                code_gen_time_s=code_gen_time,
+                                fail_type=fail_type,
+                                fail_reason=fail_reason,
+                                remote_cache_time_saved_s=remote_cache_time_saved,
+                                structured_logging_overhead_s=structured_logging_overhead_s,
+                                is_forward=False,  # is_forward
+                                num_triton_bundles=codecache_metrics.get(
+                                    "num_triton_bundles", None
+                                ),
+                                remote_fx_graph_cache_get_time_ms=to_int_ms(
+                                    remote_fx_graph_cache_get_time
+                                ),
+                                remote_fx_graph_cache_put_time_ms=to_int_ms(
+                                    remote_fx_graph_cache_put_time
+                                ),
+                                start_time_us=start_ns // 1000,
+                                duration_us=(end_ns - start_ns) // 1000,
+                                inductor_cumulative_compile_time_us=to_int_us(
+                                    inductor_compile_time
+                                ),
+                                inductor_code_gen_cumulative_compile_time_us=to_int_us(
+                                    code_gen_time
+                                ),
+                                distributed_ephemeral_timeout_us=to_int_us(
+                                    remote_cache_time_saved
+                                ),  # TODO: instrument more accurately
+                                structured_logging_overhead_us=to_int_us(
+                                    structured_logging_overhead_s
+                                ),
+                                remote_fx_graph_cache_get_time_us=to_int_us(
+                                    remote_fx_graph_cache_get_time
+                                ),
+                                remote_fx_graph_cache_put_time_us=to_int_us(
+                                    remote_fx_graph_cache_put_time
+                                ),
                             )
                             record_compilation_metrics(metrics)
 
@@ -779,69 +860,76 @@ def to_int_ms(v: Optional[float]) -> Optional[int]:
     return None if v is None else int(v * 1000)
 
 
+# float64 timestamp has a quarter microsecond precision in 2024, so while
+# this is suboptimal we shouldn't meaningfully lose precision
+def to_int_us(v: Optional[float]) -> Optional[int]:
+    return None if v is None else int(v * 1_000_000)
+
+
 @dataclasses.dataclass
 class CompilationMetrics:
-    compile_id: str
-    frame_key: str
-    co_name: str
-    co_filename: str
-    co_firstlineno: int
-    cache_size: int
-    accumulated_cache_size: int
-    guard_count: Optional[int]
-    shape_env_guard_count: Optional[int]
-    graph_op_count: Optional[int]
-    graph_node_count: Optional[int]
-    graph_input_count: Optional[int]
-    start_time: float
-    entire_frame_compile_time_s: Optional[float]
-    backend_compile_time_s: Optional[float]
-    inductor_compile_time_s: Optional[float]
-    code_gen_time_s: Optional[float]
-    fail_type: Optional[str]
-    fail_reason: Optional[str]
-    fail_user_frame_filename: Optional[str]
-    fail_user_frame_lineno: Optional[int]
-    non_compliant_ops: Set[str]
-    compliant_custom_ops: Set[str]
-    restart_reasons: Set[str]
-    dynamo_time_before_restart_s: float
+    compile_id: Optional[str] = None
+    frame_key: Optional[str] = None
+    co_name: Optional[str] = None
+    co_filename: Optional[str] = None
+    co_firstlineno: Optional[int] = None
+    cache_size: Optional[int] = None
+    accumulated_cache_size: Optional[int] = None
+    guard_count: Optional[int] = None
+    shape_env_guard_count: Optional[int] = None
+    graph_op_count: Optional[int] = None
+    graph_node_count: Optional[int] = None
+    graph_input_count: Optional[int] = None
+    start_time: Optional[float] = None
+    entire_frame_compile_time_s: Optional[float] = None
+    backend_compile_time_s: Optional[float] = None
+    inductor_compile_time_s: Optional[float] = None
+    code_gen_time_s: Optional[float] = None
+    fail_type: Optional[str] = None
+    fail_reason: Optional[str] = None
+    fail_user_frame_filename: Optional[str] = None
+    fail_user_frame_lineno: Optional[int] = None
+    non_compliant_ops: Optional[Set[str]] = None
+    compliant_custom_ops: Optional[Set[str]] = None
+    restart_reasons: Optional[Set[str]] = None
+    dynamo_time_before_restart_s: Optional[float] = None
     # Sometimes, we will finish analyzing a frame but conclude we don't want
     # to install any guarded code.  True means we actually decided to install
     # a compiled frame
-    has_guarded_code: bool
-    possibly_missed_reinplacing_opportunities: Optional[int]
-    remote_cache_time_saved_s: Optional[float]
-    structured_logging_overhead_s: Optional[float]
-    config_suppress_errors: Optional[bool]
-    config_inline_inbuilt_nn_modules: Optional[bool]
-    specialize_float: Optional[bool]
-    dynamo_config: Optional[str]
-    is_forward: Optional[bool]
-    remote_fx_graph_cache_get_time_ms: Optional[int]
-    remote_fx_graph_cache_put_time_ms: Optional[int]
-
-
-@dataclasses.dataclass
-class BwdCompilationMetrics:
-    compile_id: str
-    inductor_compile_time_s: Optional[float]
-    code_gen_time_s: Optional[float]
-    fail_type: Optional[str]
-    fail_reason: Optional[str]
-    remote_cache_time_saved_s: Optional[float]
-    structured_logging_overhead_s: Optional[float]
-    is_forward: Optional[bool]
-    remote_fx_graph_cache_get_time_ms: Optional[int]
-    remote_fx_graph_cache_put_time_ms: Optional[int]
+    has_guarded_code: Optional[bool] = None
+    remote_cache_time_saved_s: Optional[float] = None
+    structured_logging_overhead_s: Optional[float] = None
+    config_suppress_errors: Optional[bool] = None
+    config_inline_inbuilt_nn_modules: Optional[bool] = None
+    specialize_float: Optional[bool] = None
+    dynamo_config: Optional[str] = None
+    is_forward: Optional[bool] = None
+    num_triton_bundles: Optional[int] = None
+    remote_fx_graph_cache_get_time_ms: Optional[int] = None
+    remote_fx_graph_cache_put_time_ms: Optional[int] = None
+    start_time_us: Optional[int] = None
+    duration_us: Optional[int] = None
+    dynamo_cumulative_compile_time_us: Optional[int] = None
+    aot_autograd_cumulative_compile_time_us: Optional[int] = None
+    inductor_cumulative_compile_time_us: Optional[int] = None
+    inductor_code_gen_cumulative_compile_time_us: Optional[int] = None
+    triton_compile_time_us: Optional[int] = None
+    runtime_cudagraphify_time_us: Optional[int] = None
+    runtime_triton_autotune_time_us: Optional[int] = None
+    dynamo_compile_time_before_restart_us: Optional[int] = None
+    cuda_synchronize_time_us: Optional[int] = None
+    distributed_ephemeral_timeout_us: Optional[int] = None
+    structured_logging_overhead_us: Optional[int] = None
+    remote_fx_graph_cache_get_time_us: Optional[int] = None
+    remote_fx_graph_cache_put_time_us: Optional[int] = None
 
 
 DEFAULT_COMPILATION_METRICS_LIMIT = 64
 
 
-_compilation_metrics: Deque[
-    Union[CompilationMetrics, BwdCompilationMetrics]
-] = collections.deque(maxlen=DEFAULT_COMPILATION_METRICS_LIMIT)
+_compilation_metrics: Deque[CompilationMetrics] = collections.deque(
+    maxlen=DEFAULT_COMPILATION_METRICS_LIMIT
+)
 
 
 def add_compilation_metrics_to_chromium(c: CompilationMetrics):
@@ -866,21 +954,25 @@ def add_compilation_metrics_to_chromium(c: CompilationMetrics):
         fail_user_frame_filename=c.fail_user_frame_filename,
         fail_user_frame_lineno=c.fail_user_frame_lineno,
         # Sets aren't JSON serializable
-        non_compliant_ops=list(c.non_compliant_ops),
-        compliant_custom_ops=list(c.compliant_custom_ops),
-        restart_reasons=list(c.restart_reasons),
+        non_compliant_ops=list(c.non_compliant_ops)
+        if c.non_compliant_ops is not None
+        else None,
+        compliant_custom_ops=list(c.compliant_custom_ops)
+        if c.compliant_custom_ops is not None
+        else None,
+        restart_reasons=list(c.restart_reasons)
+        if c.restart_reasons is not None
+        else None,
         dynamo_time_before_restart_s=c.dynamo_time_before_restart_s,
         has_guarded_code=c.has_guarded_code,
         dynamo_config=c.dynamo_config,
     )
 
 
-def record_compilation_metrics(
-    compilation_metrics: Union[CompilationMetrics, BwdCompilationMetrics]
-):
+def record_compilation_metrics(compilation_metrics: CompilationMetrics):
     global _compilation_metrics
     _compilation_metrics.append(compilation_metrics)
-    if isinstance(compilation_metrics, CompilationMetrics):
+    if compilation_metrics.is_forward:
         name = "compilation_metrics"
         add_compilation_metrics_to_chromium(compilation_metrics)
     else:
@@ -914,7 +1006,7 @@ def clear_compilation_metrics() -> None:
     _compilation_metrics.clear()
 
 
-def get_compilation_metrics() -> List[Union[CompilationMetrics, BwdCompilationMetrics]]:
+def get_compilation_metrics() -> List[CompilationMetrics]:
     return list(_compilation_metrics)
 
 
@@ -957,7 +1049,8 @@ class ChromiumEventLogger:
         """
         if event_name not in self.get_stack():
             raise RuntimeError(
-                "Cannot add metadata to events that aren't in progress."
+                f"Event {repr(event_name)} not in {self.get_stack()}. "
+                "Cannot add metadata to events that aren't in progress. "
                 "Please make sure the event has started and hasn't ended."
             )
         event_data = self.get_event_data()
@@ -986,6 +1079,8 @@ class ChromiumEventLogger:
             metadata,
         )
         self.get_stack().append(event_name)
+        # Add metadata from start event
+        self.add_event_data(event_name, **metadata)
 
     def reset(self) -> None:
         # We this on every compile in case a compile crashes or restarts and we haven't
@@ -1002,6 +1097,7 @@ class ChromiumEventLogger:
         time_ns: int,
         metadata: Dict[str, Any],
         start_time_ns: int,
+        log_pt2_compile_event: bool,
     ) -> None:
         """
         Logs the end of a single event. This function should only be
@@ -1048,8 +1144,8 @@ class ChromiumEventLogger:
                 "ChromiumEventLogger: Detected overlapping events, fixing stack"
             )
             stack.pop()
-
-        log_chromium_event_internal(event, stack, self.id_, start_time_ns)
+        if log_pt2_compile_event:
+            log_chromium_event_internal(event, stack, self.id_, start_time_ns)
         # Finally pop the actual event off the stack
         stack.pop()
 
@@ -1086,6 +1182,8 @@ class ChromiumEventLogger:
         event_name: str,
         time_ns: int,
         metadata: Optional[Dict[str, Any]] = None,
+        # By default, an instant event isn't logged internally, only to structured logging.
+        log_pt2_compile_event: bool = False,
     ) -> None:
         """
         Log an instant event with no associated duration.
@@ -1115,8 +1213,9 @@ class ChromiumEventLogger:
             suppress_context=False,
             expect_trace_id=True,
         )
-        # Log an instant event with the same start and end time
-        log_chromium_event_internal(event, self.get_stack(), self.id_, time_ns)
+        if log_pt2_compile_event:
+            # Log an instant event with the same start and end time
+            log_chromium_event_internal(event, self.get_stack(), self.id_, time_ns)
 
 
 CHROMIUM_EVENT_LOG: Optional[ChromiumEventLogger] = None
@@ -2140,6 +2239,15 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
         # no matter it's lazy module or not, we should copy to fake mode.
         nnmodule = deepcopy_to_fake_tensor(nnmodule, tx.fake_mode)
 
+    if node.name in ["interpolate", "is_integer", "wrapped_gradient"]:
+        # We need to specialize symfloats for now. Eventually we should do a tensorify pass in dynamo.
+        args = tuple(
+            float(arg)
+            if isinstance(arg, torch.SymFloat) and arg.node.hint is not None
+            else arg
+            for arg in args
+        )
+
     try:
         with tx.fake_mode, enable_python_dispatcher():
             ret_val = wrap_fake_exception(
@@ -2664,6 +2772,21 @@ def is_utils_checkpoint(obj):
     return obj is torch.utils.checkpoint.checkpoint
 
 
+def is_invoke_subgraph(obj):
+    from torch._higher_order_ops.invoke_subgraph import invoke_subgraph_placeholder
+
+    return obj is invoke_subgraph_placeholder
+
+
+def build_invoke_subgraph_variable(**options):
+    from .variables.higher_order_ops import TorchHigherOrderOperatorVariable
+
+    return TorchHigherOrderOperatorVariable.make(
+        torch._higher_order_ops.invoke_subgraph,
+        **options,
+    )
+
+
 def build_checkpoint_variable(**options):
     import torch._higher_order_ops.wrap as higher_order_ops
 
@@ -3138,7 +3261,7 @@ def flatten_graph_inputs(gm: torch.fx.GraphModule, inputs, compile_gm):
         if node.op == "placeholder" and node.meta.get("steal_arg", False)
     ]
 
-    if torch._dynamo.compiled_autograd.in_compiled_autograd_region():
+    if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
         # fast path, avoid pytree overhead
         # compiled autograd inputs are always a list of tensors, maybe followed by symints
         assert inputs_idx_to_clear == [0]
@@ -3248,6 +3371,11 @@ def set_torch_function_mode_stack(stack):
 def clear_torch_function_mode_stack():
     for i in range(_len_torch_function_stack()):
         _pop_torch_function_stack()
+
+
+# call from C dynamo in order to inspect values in pdb
+def _breakpoint_for_c_dynamo(*args):
+    breakpoint()
 
 
 def verify_guard_fn_signature(value):

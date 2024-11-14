@@ -64,14 +64,15 @@ def _staged_schema():
             elif f.default_factory is not dataclasses.MISSING:
                 value = f.default_factory()
 
-            if t.startswith("Optional[") and value is not None:
-                raise AssertionError(
-                    f"Optional field {ty.__name__}.{f.name} must have default value to be None."
-                )
-
             if value is not dataclasses.MISSING:
                 default = str(value)
                 ret["default"] = default
+
+                if t.startswith("Optional[") and value is not None:
+                    raise AssertionError(
+                        f"Optional field {ty.__name__}.{f.name} must have default value to be None."
+                    )
+
             return ret
 
         return {f.name: dump_field(f) for f in dataclasses.fields(ty)}

@@ -34,7 +34,7 @@ void bernoulli_scalar_kernel(const TensorBase &self, double p, std::optional<Gen
   at::native::templates::cuda::bernoulli_kernel(iter, p, generator);
 }
 
-REGISTER_DISPATCH(bernoulli_tensor_stub, &bernoulli_tensor_kernel);
-REGISTER_DISPATCH(bernoulli_scalar_stub, &bernoulli_scalar_kernel);
+REGISTER_DISPATCH(bernoulli_tensor_stub, &bernoulli_tensor_kernel)
+REGISTER_DISPATCH(bernoulli_scalar_stub, &bernoulli_scalar_kernel)
 
 } // namespace at::native
