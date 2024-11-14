@@ -1240,7 +1240,7 @@ class GraphModule(torch.nn.Module):
             x = test_class()
             ref0 = fn(x)
             ref1 = fn(4)
-            opt_fn = torch._dynamo.optimize("eager")(fn)
+            opt_fn = torch.compile(fn, backend="eager")
             res0 = opt_fn(x)
             res1 = opt_fn(4)
             self.assertEqual(ref0, res0)

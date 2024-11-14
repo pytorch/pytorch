@@ -30,7 +30,7 @@ class TestInputAttrTracking(torch._dynamo.test_case.TestCase):
             graph = gm
             return gm
 
-        fn = torch._dynamo.optimize(grab_graph_backend, nopython=True)(fn)
+        fn = torch.compile(fn, backend=grab_graph_backend, fullgraph=True)
         compile_result = fn(x_)
         self.assertEqual(eager_result, compile_result)
 
@@ -59,7 +59,7 @@ class TestInputAttrTracking(torch._dynamo.test_case.TestCase):
             graph = gm
             return gm
 
-        fn = torch._dynamo.optimize(grab_graph_backend, nopython=True)(fn)
+        fn = torch.compile(fn, backend=grab_graph_backend, fullgraph=True)
         compile_result = fn(x_, y_)
         self.assertEqual(eager_result, compile_result)
 
@@ -88,7 +88,7 @@ class TestInputAttrTracking(torch._dynamo.test_case.TestCase):
             graph = gm
             return gm
 
-        fn = torch._dynamo.optimize(grab_graph_backend, nopython=True)(fn)
+        fn = torch.compile(fn, backend=grab_graph_backend, fullgraph=True)
         compile_result = fn(x_)
         self.assertEqual(eager_result, compile_result)
 
@@ -110,7 +110,7 @@ class TestInputAttrTracking(torch._dynamo.test_case.TestCase):
 
         eager_result = fn(x_, y_)
 
-        fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+        fn = torch.compile(fn, backend="eager", fullgraph=True)
         compile_result = fn(x_, y_)
         self.assertEqual(eager_result, compile_result)
 
@@ -121,7 +121,7 @@ class TestInputAttrTracking(torch._dynamo.test_case.TestCase):
 
         x_ = torch.randn([2, 2])
 
-        fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+        fn = torch.compile(fn, backend="eager", fullgraph=True)
         compile_result_const = fn(x_, 4)
         self.assertEqual(compile_result_const, x_ * 4)
 
@@ -136,7 +136,7 @@ class TestInputAttrTracking(torch._dynamo.test_case.TestCase):
 
         x_ = torch.randn([2, 2])
 
-        fn = torch._dynamo.optimize("inductor", nopython=True)(fn)
+        fn = torch.compile(fn, backend="inductor", fullgraph=True)
         compile_result_const = fn(x_, 4)
         self.assertEqual(compile_result_const, x_ * 4)
 
@@ -169,7 +169,7 @@ class TestInputAttrTracking(torch._dynamo.test_case.TestCase):
         eager_result = fn(x, y, z)
 
         counter = CompileCounter()
-        fn = torch._dynamo.optimize(counter, nopython=True)(fn)
+        fn = torch.compile(fn, backend=counter, fullgraph=True)
 
         compile_result = fn(x, y, z)
         self.assertEqual(compile_result, eager_result)
@@ -216,7 +216,7 @@ class TestInputAttrTracking(torch._dynamo.test_case.TestCase):
         eager_result = fn(x, y, z)
 
         counter = CompileCounter()
-        fn = torch._dynamo.optimize(counter, nopython=False)(fn)
+        fn = torch.compile(fn, backend=counter, fullgraph=False)
 
         compile_result = fn(x, y, z)
         self.assertEqual(compile_result, eager_result)
@@ -268,7 +268,7 @@ class TestInputAttrTracking(torch._dynamo.test_case.TestCase):
 
         counter = CompileCounter()
 
-        fn = torch._dynamo.optimize(counter, nopython=False)(fn)
+        fn = torch.compile(fn, backend=counter, fullgraph=False)
 
         compile_result = fn(x, y, z)
         self.assertEqual(compile_result, eager_result)
@@ -300,7 +300,7 @@ class TestInputAttrTracking(torch._dynamo.test_case.TestCase):
 
         counter = CompileCounterWithBackend(eager_and_record)
 
-        fn = torch._dynamo.optimize(counter, nopython=True)(fn)
+        fn = torch.compile(fn, backend=counter, fullgraph=True)
 
         compile_result = fn(x, y)
 
@@ -351,7 +351,7 @@ class GraphModule(torch.nn.Module):
 
         counter = CompileCounter()
 
-        fn = torch._dynamo.optimize(counter, nopython=False)(fn)
+        fn = torch.compile(fn, backend=counter, fullgraph=False)
 
         compile_result = fn(x)
         self.assertEqual(compile_result, eager_result)
@@ -378,8 +378,8 @@ class GraphModule(torch.nn.Module):
         counter = CompileCounter()
 
         mudc_2 = MyUserDefinedClass(x, y)
-        do_some_setattr_stuff = torch._dynamo.optimize(counter, nopython=True)(
-            mudc_2.do_some_setattr_stuff
+        do_some_setattr_stuff = torch.compile(
+            mudc_2.do_some_setattr_stuff, backend=counter, fullgraph=True
         )
 
         compile_result = do_some_setattr_stuff()
