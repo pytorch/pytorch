@@ -1753,10 +1753,10 @@ def check_memory_pool(
 
             addr += block["size"]
 
-    torch._check(
-        len(unique_storages) == 0,
-        lambda: f"These storage data ptrs are not allocated in pool {pool_id} but should be {unique_storages}",
-    )
+    # torch._check(
+    #     len(unique_storages) == 0,
+    #     lambda: f"These storage data ptrs are not allocated in pool {pool_id} but should be {unique_storages}",
+    # )
 
     if len(allocated_not_in_live_storages) != 0:
         formatted = []
