@@ -28,9 +28,9 @@ jobs:
       # than our AWS macos-m1-14 runners
       test-matrix: |
         { include: [
-          { config: "mps", shard: 1, num_shards: 1, runner: "macos-m1-13" },
-          { config: "mps", shard: 1, num_shards: 1, runner: "macos-m1-14" },
-          { config: "mps", shard: 1, num_shards: 1, runner: "macos-m2-15" },
+          { config: "test_mps", shard: 1, num_shards: 1, runner: "macos-m1-13" },
+          { config: "test_mps", shard: 1, num_shards: 1, runner: "macos-m1-14" },
+          { config: "test_mps", shard: 1, num_shards: 1, runner: "macos-m2-15" },
         ]}
 
   macos-py3-arm64-mps-test:
