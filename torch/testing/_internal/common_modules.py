@@ -3387,9 +3387,9 @@ module_db: List[ModuleInfo] = [
                gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
                module_inputs_func=module_inputs_torch_nn_AdaptiveAvgPool3d,
                skips=(
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
                    # not supported on MPS backend
-                   DecorateInfo(skipMPS),)
+                   # DecorateInfo(skipMPS),)
                ),
     ModuleInfo(torch.nn.AdaptiveMaxPool1d,
                module_inputs_func=module_inputs_torch_nn_AdaptiveMaxPool1d,
@@ -3402,9 +3402,9 @@ module_db: List[ModuleInfo] = [
                gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
                module_inputs_func=module_inputs_torch_nn_AdaptiveMaxPool3d,
                skips=(
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
                    # not supported on MPS backend
-                   DecorateInfo(skipMPS),)
+                   # DecorateInfo(skipMPS),)
                ),
     ModuleInfo(torch.nn.AvgPool1d,
                module_inputs_func=module_inputs_torch_nn_AvgPool1d,
@@ -3604,7 +3604,7 @@ module_db: List[ModuleInfo] = [
                                 dtypes=[torch.float64, torch.complex128]),
                    # Fails with channels last test on MPS backend
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format",
-                                device_type='mps', dtypes=[torch.float32]),
+                                device_type='mps', dtypes=[torch.float16, torch.float32]),
                    # Not implemented for chalf on CPU
                    DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_cpu_gpu_parity',
                                 dtypes=(torch.chalf,), device_type='cuda'),
@@ -3672,7 +3672,7 @@ module_db: List[ModuleInfo] = [
                gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
                skips=(
                    # not supported on MPS backend
-                   DecorateInfo(skipMPS),
+                   # DecorateInfo(skipMPS),
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
                ),
     ModuleInfo(torch.nn.L1Loss,
@@ -3687,7 +3687,8 @@ module_db: List[ModuleInfo] = [
                    # No channels_last support for loss functions.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
                    # See #119108: input types 'tensor<f32>' and 'tensor<15x10xf16>' are not broadcast compatible
-                   DecorateInfo(skipIfMPSOnMacOS13, 'TestModule', 'test_non_contiguous_tensors',
+                   # NS: Still fails on MacOS15.1
+                   DecorateInfo(skipIfMPS, 'TestModule', 'test_non_contiguous_tensors',
                                 dtypes=[torch.float16], device_type='mps'),),
                ),
     ModuleInfo(torch.nn.LazyConv1d,
@@ -3882,8 +3883,8 @@ module_db: List[ModuleInfo] = [
                skips=(
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_grad'),
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_gradgrad'),
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
-                   DecorateInfo(unittest.expectedFailure, device_type='mps'),)
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
+                   #DecorateInfo(unittest.expectedFailure, device_type='mps'),)
                ),
     ModuleInfo(torch.nn.MaxPool1d,
                module_inputs_func=module_inputs_torch_nn_MaxPool1d,
@@ -3894,9 +3895,9 @@ module_db: List[ModuleInfo] = [
     ModuleInfo(torch.nn.MaxPool3d,
                module_inputs_func=module_inputs_torch_nn_MaxPool3d,
                gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
-               skips=(
+               skips=()
                    # not supported on MPS backend
-                   DecorateInfo(unittest.expectedFailure, device_type='mps'),)
+                   # DecorateInfo(unittest.expectedFailure, device_type='mps'),)
                ),
     ModuleInfo(torch.nn.KLDivLoss,
                module_inputs_func=module_inputs_torch_nn_KLDivLoss,
@@ -4062,7 +4063,7 @@ module_db: List[ModuleInfo] = [
                module_inputs_func=module_inputs_torch_nn_Hardshrink,
                skips=(
                    # not supported on MPS backend
-                   DecorateInfo(skipMPS),),
+                   DecorateInfo(skipIfMPS, device_type='mps'),),
                ),
     ModuleInfo(torch.nn.Hardswish,
                module_inputs_func=module_inputs_torch_nn_Hardswish,
