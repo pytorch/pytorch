@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import types
-from typing import Dict, NewType
+from typing import Dict, NewType, Tuple
 
 from torch._dynamo.types import DynamoCallback, DynamoGuardHook
 
@@ -37,6 +37,8 @@ class _PyInterpreterFrame:
     f_lasti: int
     f_lineo: int
     f_back: types.FrameType
+    # A tuple containing cell objects captured by this frame.
+    closure: Tuple[types.CellType]
 
 def _debug_get_cache_entry_list(code: types.CodeType) -> list[_CacheEntry]: ...
 
