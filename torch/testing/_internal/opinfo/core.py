@@ -1238,8 +1238,8 @@ class OpInfo:
         log.debug("matched no rules: %s %s %s", self.full_name, device, sample)
         return _subtest_fn
 
-    def _sample_callback_fn(self, sample_rules, device):
-        if sample_rules is None:
+    def _sample_callback_fn(self, sample_skips_and_xfails, device):
+        if sample_skips_and_xfails is None:
             # no rules to apply; use the default callback that just returns the sample
             return None
 
@@ -1248,13 +1248,13 @@ class OpInfo:
             idx,
             self=self,
             device=device,
-            sample_rules=sample_rules,
+            sample_skips_and_xfails=sample_skips_and_xfails,
         ):
             # if there are sample skip / xfail rules to apply, return a tuple of the sample
             # and a context manager for applying matching rules within a subtest context.
             return (
                 sample,
-                self._maybe_skip_or_xfail(sample_rules, device, sample, idx),
+                self._maybe_skip_or_xfail(sample_skips_and_xfails, device, sample, idx),
             )
 
         return _f
@@ -1267,7 +1267,7 @@ class OpInfo:
         set_seed = kwargs.pop("set_seed", True)
         samples = self.sample_inputs_func(self, device, dtype, requires_grad, **kwargs)
         conj_samples = list(samples)
-        sample_rules = kwargs.pop("sample_rules", None)
+        sample_skips_and_xfails = kwargs.pop("sample_skips_and_xfails", None)
 
         def conjugate(tensor):
             _requires_grad = tensor.requires_grad
@@ -1285,7 +1285,7 @@ class OpInfo:
         return TrackedInputIter(
             iter(conj_samples),
             "conjugate sample input",
-            item_callback=self._sample_callback_fn(sample_rules, device),
+            item_callback=self._sample_callback_fn(sample_skips_and_xfails, device),
             set_seed=set_seed,
             restrict_to_index=OPINFO_SAMPLE_INPUT_INDEX,
         )
@@ -1299,7 +1299,7 @@ class OpInfo:
         """
         set_seed = kwargs.pop("set_seed", True)
         samples = self.sample_inputs_func(self, device, dtype, requires_grad, **kwargs)
-        sample_rules = kwargs.pop("sample_rules", None)
+        sample_skips_and_xfails = kwargs.pop("sample_skips_and_xfails", None)
 
         if kwargs.get("include_conjugated_inputs", False):
             conj_samples = self.conjugate_sample_inputs(
@@ -1312,7 +1312,7 @@ class OpInfo:
         return TrackedInputIter(
             iter(samples),
             "sample input",
-            item_callback=self._sample_callback_fn(sample_rules, device),
+            item_callback=self._sample_callback_fn(sample_skips_and_xfails, device),
             set_seed=set_seed,
             restrict_to_index=OPINFO_SAMPLE_INPUT_INDEX,
         )
@@ -1326,7 +1326,7 @@ class OpInfo:
         the sample inputs.
         """
         set_seed = kwargs.pop("set_seed", True)
-        sample_rules = kwargs.pop("sample_rules", None)
+        sample_skips_and_xfails = kwargs.pop("sample_skips_and_xfails", None)
         if self.reference_inputs_func is None:
             samples = self.sample_inputs_func(
                 self, device, dtype, requires_grad, **kwargs
@@ -1334,7 +1334,7 @@ class OpInfo:
             return TrackedInputIter(
                 iter(samples),
                 "reference input",
-                item_callback=self._sample_callback_fn(sample_rules, device),
+                item_callback=self._sample_callback_fn(sample_skips_and_xfails, device),
                 set_seed=set_seed,
                 restrict_to_index=OPINFO_SAMPLE_INPUT_INDEX,
             )
@@ -1348,7 +1348,7 @@ class OpInfo:
         return TrackedInputIter(
             iter(references),
             "reference input",
-            item_callback=self._sample_callback_fn(sample_rules, device),
+            item_callback=self._sample_callback_fn(sample_skips_and_xfails, device),
             set_seed=set_seed,
             restrict_to_index=OPINFO_SAMPLE_INPUT_INDEX,
         )
@@ -1358,11 +1358,13 @@ class OpInfo:
         Returns an iterable of ErrorInputs.
         """
         set_seed = kwargs.pop("set_seed", True)
-        sample_rules = kwargs.pop("sample_rules", None)
+        sample_skips_and_xfails = kwargs.pop("sample_skips_and_xfails", None)
         errs = self.error_inputs_func(self, device, **kwargs)
 
-        def _error_item_callback(e, i, sample_rules=sample_rules, device=device):
-            cb = self._sample_callback_fn(sample_rules, device)
+        def _error_item_callback(
+            e, i, sample_skips_and_xfails=sample_skips_and_xfails, device=device
+        ):
+            cb = self._sample_callback_fn(sample_skips_and_xfails, device)
             # no rules to apply; just return the sample
             if cb is None:
                 return e
@@ -1538,7 +1540,7 @@ class OpInfo:
         return self.full_name.replace(".", "_")
 
 
-# Represents a rule matching a particular set of tests. It allows granularity
+# Represents a skip / xfail rule matching a particular set of tests. It allows granularity
 # at the device, dtype, op, and individual sample levels. This flexibility allows entire
 # bugs to be represented by a single rule, even if this corresponds with multiple conceptual
 # test cases across multiple ops.
@@ -1564,7 +1566,7 @@ class SampleRule(ABC):
     def type(self) -> str:
         ...
 
-    # returns an appropriate context that e.g. handles the xfail, skips, etc.
+    # returns an appropriate context that handles the xfail, skips, etc.
     @abstractmethod
     def get_context(self, test_case):
         ...
