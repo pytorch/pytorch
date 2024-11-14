@@ -5,7 +5,7 @@ about: Tracking incidents for PyTorch's CI infra.
 
 > NOTE: Remember to label this issue with "`ci: sev`"
 
- <!-- uncomment the below line if you don't want this SEV to block merges -->
+ <!-- uncomment the line below if you want this SEV to block merges -->
  <!--  **MERGE BLOCKING** -->
 
 ## Current Status
