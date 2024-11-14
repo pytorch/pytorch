@@ -1647,6 +1647,7 @@ class OutputGraph:
             if (
                 isinstance(example_value, FakeTensor)
                 and example_value.item_memo is not None
+                and hasattr(example_value.item_memo.node._expr, "name")
                 and TensorifyState.should_specialize(
                     # We use _expr instead of expr b/c we want the symbol not the replacement
                     example_value.item_memo.node._expr.name
