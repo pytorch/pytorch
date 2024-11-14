@@ -148,7 +148,7 @@ std::tuple<Tensor,Tensor,Tensor> batch_norm_cpu_transform_input_template(
   // inference contiguous path
   if (all_contiguous) {
     if (input.numel() != 0) {
-      batch_norm_cpu_stub(kCPU, output, input, weight, bias,
+      batch_norm_cpu_stub.call_with_known_device_type<kCPU>(output, input, weight, bias,
           save_mean, save_invstd, running_mean, running_var, train, eps);
     }
     return std::make_tuple(output, save_mean, save_invstd);
@@ -230,7 +230,7 @@ std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
     auto _var_sum_a = _var_sum.accessor<opmath_t, 1>();
     auto momentum_ = static_cast<opmath_t>(momentum);
 
-    batch_norm_cpu_collect_stats_stub(kCPU, _mean, _var_sum, input);
+    batch_norm_cpu_collect_stats_stub.call_with_known_device_type<kCPU>(_mean, _var_sum, input);
 
     parallel_for(0, n_input, 1, [&](int64_t b_begin, int64_t b_end) {
       for (const auto f : c10::irange(b_begin, b_end)) {
@@ -339,7 +339,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(
     if (grad_input_mask[0]) {
       grad_input = at::empty_like(input, suggest_memory_format_contig(input));
     }
-    batch_norm_cpu_backward_stub(kCPU, grad_input, grad_weight, grad_bias,
+    batch_norm_cpu_backward_stub.call_with_known_device_type<kCPU>(grad_input, grad_weight, grad_bias,
         grad_out_, input, weight, running_mean, running_var, save_mean, save_invstd, train, eps);
     return std::make_tuple(grad_input, grad_weight, grad_bias);
   }

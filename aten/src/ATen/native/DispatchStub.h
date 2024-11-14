@@ -33,7 +33,10 @@
 //   REGISTER_DISPATCH(stub, &kernel);
 //
 // To call:
-//   stub(kCPU, tensor);
+//   stub(device_type, tensor);
+//
+// If the device type is a compile-time constant, you can instead call like:
+//   stub.call_with_known_device_type<kCPU>(tensor);
 //
 // TODO: CPU instruction set selection should be folded into whatever
 // the main dispatch mechanism is.
@@ -142,7 +145,7 @@ struct TORCH_API DispatchStubImpl {
   );
 
 
-  void* get_call_ptr(
+  void* get_call_ptr_impl(
     c10::DeviceType device_type
     , void *DEFAULT
 #ifdef HAVE_AVX512_CPU_DEFINITION
@@ -161,6 +164,123 @@ struct TORCH_API DispatchStubImpl {
       , void *SVE256
 #endif
   );
+
+  void* get_call_ptr(
+    c10::DeviceType device_type
+    , void *DEFAULT
+#ifdef HAVE_AVX512_CPU_DEFINITION
+      , void *AVX512
+#endif
+#ifdef HAVE_AVX2_CPU_DEFINITION
+      , void *AVX2
+#endif
+#ifdef HAVE_VSX_CPU_DEFINITION
+      , void *VSX
+#endif
+#ifdef HAVE_ZVECTOR_CPU_DEFINITION
+      , void *ZVECTOR
+#endif
+#ifdef HAVE_SVE256_CPU_DEFINITION
+      , void *SVE256
+#endif
+  ) {
+    return get_call_ptr_impl(
+        device_type,
+        DEFAULT
+#ifdef HAVE_AVX512_CPU_DEFINITION
+      ,
+      AVX512
+#endif
+#ifdef HAVE_AVX2_CPU_DEFINITION
+      ,
+      AVX2
+#endif
+#ifdef HAVE_VSX_CPU_DEFINITION
+      ,
+      VSX
+#endif
+#ifdef HAVE_ZVECTOR_CPU_DEFINITION
+      ,
+      ZVECTOR
+#endif
+#ifdef HAVE_SVE256_CPU_DEFINITION
+      ,
+      SVE256
+#endif
+    );
+  }
+
+  template <c10::DeviceType device_type>
+  void* get_call_ptr(
+    void *DEFAULT
+#ifdef HAVE_AVX512_CPU_DEFINITION
+      , void *AVX512
+#endif
+#ifdef HAVE_AVX2_CPU_DEFINITION
+      , void *AVX2
+#endif
+#ifdef HAVE_VSX_CPU_DEFINITION
+      , void *VSX
+#endif
+#ifdef HAVE_ZVECTOR_CPU_DEFINITION
+      , void *ZVECTOR
+#endif
+#ifdef HAVE_SVE256_CPU_DEFINITION
+      , void *SVE256
+#endif
+  ) {
+    if constexpr (device_type == DeviceType::CPU) {
+      auto fptr = cpu_dispatch_ptr.load(std::memory_order_relaxed);
+      if (fptr != nullptr) {
+        return fptr;
+      }
+    } else if constexpr (device_type == DeviceType::CUDA) {
+      if (cuda_dispatch_ptr != nullptr) {
+        return cuda_dispatch_ptr;
+      }
+    } else if constexpr (device_type == DeviceType::HIP) {
+      if (hip_dispatch_ptr != nullptr) {
+        return hip_dispatch_ptr;
+      }
+    } else if constexpr (device_type == DeviceType::MPS) {
+      if (mps_dispatch_ptr != nullptr) {
+        return mps_dispatch_ptr;
+      }
+    } else if constexpr (device_type == DeviceType::MTIA) {
+      if (mtia_dispatch_ptr != nullptr) {
+        return mtia_dispatch_ptr;
+      }
+#if defined(USE_XPU)
+    } else if constexpr (device_type == DeviceType::XPU) {
+      if (xpu_dispatch_ptr != nullptr) {
+        return xpu_dispatch_ptr;
+      }
+#endif // defined(USE_XPU)
+    } else if constexpr (device_type == DeviceType::PrivateUse1) {
+      if (privateuse1_dispatch_ptr != nullptr) {
+        return privateuse1_dispatch_ptr;
+      }
+    }
+    return get_call_ptr(
+        device_type,
+        DEFAULT
+#ifdef HAVE_AVX512_CPU_DEFINITION
+          , AVX512
+#endif
+#ifdef HAVE_AVX2_CPU_DEFINITION
+          , AVX2
+#endif
+#ifdef HAVE_VSX_CPU_DEFINITION
+          , VSX
+#endif
+#ifdef HAVE_ZVECTOR_CPU_DEFINITION
+          , ZVECTOR
+#endif
+#ifdef HAVE_SVE256_CPU_DEFINITION
+          , SVE256
+#endif
+    );
+  }
 
   /**
    * The CPU Dispatch actual method is chosen in decreasing order of preference by
@@ -243,10 +363,40 @@ private:
     );
   }
 
+  template <c10::DeviceType device_type>
+  FnPtr get_call_ptr() {
+    return reinterpret_cast<FnPtr>(
+      impl.get_call_ptr<device_type>(
+        reinterpret_cast<void*>(DEFAULT)
+#ifdef HAVE_AVX512_CPU_DEFINITION
+      , reinterpret_cast<void*>(AVX512)
+#endif
+#ifdef HAVE_AVX2_CPU_DEFINITION
+      , reinterpret_cast<void*>(AVX2)
+#endif
+#ifdef HAVE_VSX_CPU_DEFINITION
+      , reinterpret_cast<void*>(VSX)
+#endif
+#ifdef HAVE_ZVECTOR_CPU_DEFINITION
+      , reinterpret_cast<void*>(ZVECTOR)
+#endif
+#ifdef HAVE_SVE256_CPU_DEFINITION
+      , reinterpret_cast<void*>(SVE256)
+#endif
+      )
+    );
+  }
+
 public:
   template <typename... ArgTypes>
   rT operator()(c10::DeviceType device_type, ArgTypes&&... args) {
     FnPtr call_ptr = get_call_ptr(device_type);
+    return (*call_ptr)(std::forward<ArgTypes>(args)...);
+  }
+
+  template <c10::DeviceType device_type, typename... ArgTypes>
+  rT call_with_known_device_type(ArgTypes&&... args) {
+    FnPtr call_ptr = get_call_ptr<device_type>();
     return (*call_ptr)(std::forward<ArgTypes>(args)...);
   }
 

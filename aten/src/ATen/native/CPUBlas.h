@@ -39,8 +39,8 @@ void gemm(
     at::opmath_type<scalar_t> beta,
     scalar_t *c, int64_t ldc) {
   internal::normalize_last_dims(transa, transb, m, n, k, &lda, &ldb, &ldc);
-  gemm_stub(
-    kCPU, c10::CppTypeToScalarType<scalar_t>::value,
+  gemm_stub.call_with_known_device_type<kCPU>(
+    c10::CppTypeToScalarType<scalar_t>::value,
     transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
 }
 
@@ -156,8 +156,8 @@ void axpy(int64_t n, scalar_t a, const scalar_t *x, int64_t incx, scalar_t *y, i
     incx = 1;
     incy = 1;
   }
-  axpy_stub(
-      kCPU, c10::CppTypeToScalarType<scalar_t>::value,
+  axpy_stub.call_with_known_device_type<kCPU>(
+      c10::CppTypeToScalarType<scalar_t>::value,
       n, a, x, incx, y, incy);
 }
 
@@ -177,8 +177,8 @@ void copy(int64_t n, const scalar_t *x, int64_t incx, scalar_t *y, int64_t incy)
     incx = 1;
     incy = 1;
   }
-  copy_stub(
-      kCPU, c10::CppTypeToScalarType<scalar_t>::value,
+  copy_stub.call_with_known_device_type<kCPU>(
+      c10::CppTypeToScalarType<scalar_t>::value,
       n, x, incx, y, incy);
 }
 

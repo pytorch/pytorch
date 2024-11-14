@@ -1396,12 +1396,12 @@ std::tuple<Tensor, Tensor> _sparse_mm_reduce_impl_sparse_csr_cpu(
       && (op == ReductionType::MAX || op == ReductionType::MIN);
 
   if (!need_arg_out) {
-    spmm_reduce_stub(kCPU, out, crow, col, val, other, op);
+    spmm_reduce_stub.call_with_known_device_type<kCPU>(out, crow, col, val, other, op);
   } else {
     // allocate memory and init with invalid index
     arg_out.resize_(out.sizes());
     arg_out.fill_(nnz);
-    spmm_reduce_arg_stub(kCPU, out, arg_out, crow, col, val, other, op);
+    spmm_reduce_arg_stub.call_with_known_device_type<kCPU>(out, arg_out, crow, col, val, other, op);
   }
 
   return std::make_tuple(std::move(out), std::move(arg_out));
@@ -1461,17 +1461,17 @@ std::tuple<Tensor, Tensor> _sparse_mm_reduce_impl_backward_sparse_csr_cpu(
     grad_self = at::empty_like(self);
     grad_self.values().zero_();
     if (op == ReductionType::MAX || op == ReductionType::MIN) {
-      spmm_reduce_backward_input_arg_stub(kCPU, grad_self, grad_out, col, other, arg_out, op);
+      spmm_reduce_backward_input_arg_stub.call_with_known_device_type<kCPU>(grad_self, grad_out, col, other, arg_out, op);
     } else {
-      spmm_reduce_backward_input_stub(kCPU, grad_self, grad_out, crow, col, other, row, op);
+      spmm_reduce_backward_input_stub.call_with_known_device_type<kCPU>(grad_self, grad_out, crow, col, other, row, op);
     }
   }
   if (output_mask[1]) {
     grad_other = at::zeros(other.sizes(), other.options());
     if (op == ReductionType::MAX || op == ReductionType::MIN) {
-      spmm_reduce_backward_other_arg_stub(kCPU, grad_other, grad_out, col, val, arg_out, op);
+      spmm_reduce_backward_other_arg_stub.call_with_known_device_type<kCPU>(grad_other, grad_out, col, val, arg_out, op);
     } else {
-      spmm_reduce_backward_other_stub(kCPU, grad_other, grad_out, crow, val, row, ccol, permute, op);
+      spmm_reduce_backward_other_stub.call_with_known_device_type<kCPU>(grad_other, grad_out, crow, val, row, ccol, permute, op);
     }
   }
 

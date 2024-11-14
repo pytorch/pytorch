@@ -82,9 +82,9 @@ Tensor quantized_cat_impl(
     int64_t zero_point) {
   if (is_cat_nhwc_fast_path(qxs, dim)) {
     if (ReLUFused) {
-      return qcat_relu_nhwc_stub(at::kCPU, qxs, dim, scale, zero_point);
+      return qcat_relu_nhwc_stub.call_with_known_device_type<at::kCPU>(qxs, dim, scale, zero_point);
     } else {
-      return qcat_nhwc_stub(at::kCPU, qxs, dim, scale, zero_point);
+      return qcat_nhwc_stub.call_with_known_device_type<at::kCPU>(qxs, dim, scale, zero_point);
     }
   }
 

@@ -595,7 +595,7 @@ TORCH_IMPL_FUNC(cat_out_cpu)
 
   // fast path for single thread when both inputs and result are contiguous and not empty
   if (use_serial_kernel && all_contiguous && all_same_dtype && serial_dtype) {
-    cat_serial_stub(kCPU, result, materialized, dim);
+    cat_serial_stub.call_with_known_device_type<kCPU>(result, materialized, dim);
     return;
   }
 
@@ -2712,7 +2712,7 @@ bool inline maybe_native_stack(Tensor& result, TensorList tensors, int64_t dim) 
       result.resize_(result_sizes);
     }
 
-    stack_serial_stub(kCPU, result, tensors, dim);
+    stack_serial_stub.call_with_known_device_type<kCPU>(result, tensors, dim);
     return true;
   }
   return false;

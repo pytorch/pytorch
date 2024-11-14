@@ -174,8 +174,8 @@ void gemm(
     return;
   }
 #endif
-  gemm_stub(
-      at::kCPU, at::kDouble,
+  gemm_stub.call_with_known_device_type<at::kCPU>(
+      at::kDouble,
       transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
 }
 
@@ -222,8 +222,8 @@ void gemm(
     return;
   }
 #endif
-  gemm_stub(
-      at::kCPU, at::kFloat,
+  gemm_stub.call_with_known_device_type<at::kCPU>(
+      at::kFloat,
       transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
 }
 
@@ -265,8 +265,8 @@ void gemm(
     return;
   }
 #endif
-  gemm_stub(
-      at::kCPU, at::kComplexDouble,
+  gemm_stub.call_with_known_device_type<at::kCPU>(
+      at::kComplexDouble,
       transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
 }
 
@@ -308,8 +308,8 @@ void gemm(
     return;
   }
 #endif
-  gemm_stub(
-      at::kCPU, at::kComplexFloat,
+  gemm_stub.call_with_known_device_type<at::kCPU>(
+      at::kComplexFloat,
       transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
 }
 
@@ -359,8 +359,8 @@ void gemm(
      return;
    }
 #endif
-   gemm_stub(
-      at::kCPU, at::kBFloat16,
+   gemm_stub.call_with_known_device_type<at::kCPU>(
+      at::kBFloat16,
       transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
 }
 
@@ -388,8 +388,8 @@ void gemm(
      return;
    }
 #endif
-   gemm_stub(
-      at::kCPU, at::kHalf,
+   gemm_stub.call_with_known_device_type<at::kCPU>(
+      at::kHalf,
       transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
 }
 
@@ -428,8 +428,8 @@ void gemm(
   // and then add c in full precision.
   int64_t c_size = n * m;
   std::vector<at::BFloat16> bfloat_c(c_size, 0.f);
-  gemm_stub(
-      at::kCPU, at::kBFloat16,
+  gemm_stub.call_with_known_device_type<at::kCPU>(
+      at::kBFloat16,
       transa, transb, m, n, k, alpha, a, lda, b, ldb, 0.f, bfloat_c.data(), m);
   for (const auto j : c10::irange(n)) {
     for (const auto i : c10::irange(m)) {
@@ -464,8 +464,8 @@ void gemm(
   // and then add c in full precision.
   int64_t c_size = n * m;
   std::vector<at::Half> float16_c(c_size, 0.f);
-  gemm_stub(
-      at::kCPU, at::kHalf,
+  gemm_stub.call_with_known_device_type<at::kCPU>(
+      at::kHalf,
       transa, transb, m, n, k, alpha, a, lda, b, ldb, 0.f, float16_c.data(), m);
   for (const auto j : c10::irange(n)) {
     for (const auto i : c10::irange(m)) {
@@ -518,8 +518,8 @@ void gemm(
   }
 #endif
 
-  gemm_stub(
-      kCPU, kLong,
+  gemm_stub.call_with_known_device_type<kCPU>(
+      kLong,
       transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
 }
 
@@ -688,8 +688,8 @@ void axpy(int64_t n, double a, const double *x, int64_t incx, double *y, int64_t
     return;
   }
   #endif
-  axpy_stub(
-      kCPU, at::kDouble,
+  axpy_stub.call_with_known_device_type<kCPU>(
+      at::kDouble,
       n, a, x, incx, y, incy);
 }
 
@@ -713,8 +713,8 @@ void axpy(int64_t n, float a, const float *x, int64_t incx, float *y, int64_t in
     return;
   }
   #endif
-  axpy_stub(
-      kCPU, at::kFloat,
+  axpy_stub.call_with_known_device_type<kCPU>(
+      at::kFloat,
       n, a, x, incx, y, incy);
 }
 
@@ -738,8 +738,8 @@ void axpy(int64_t n, c10::complex<double> a, const c10::complex<double> *x, int6
     return;
   }
   #endif
-  axpy_stub(
-      kCPU, at::kComplexDouble,
+  axpy_stub.call_with_known_device_type<kCPU>(
+      at::kComplexDouble,
       n, a, x, incx, y, incy);
 }
 
@@ -763,8 +763,8 @@ void axpy(int64_t n, c10::complex<float> a, const c10::complex<float> *x, int64_
     return;
   }
   #endif
-  axpy_stub(
-      kCPU, at::kComplexFloat,
+  axpy_stub.call_with_known_device_type<kCPU>(
+      at::kComplexFloat,
       n, a, x, incx, y, incy);
 }
 
@@ -789,8 +789,8 @@ void copy(int64_t n, const double *x, int64_t incx, double *y, int64_t incy) {
     return;
   }
   #endif
-  copy_stub(
-      kCPU, at::kDouble,
+  copy_stub.call_with_known_device_type<kCPU>(
+      at::kDouble,
       n, x, incx, y, incy);
 }
 
@@ -813,8 +813,8 @@ void copy(int64_t n, const float *x, int64_t incx, float *y, int64_t incy) {
     return;
   }
   #endif
-  copy_stub(
-      kCPU, at::kFloat,
+  copy_stub.call_with_known_device_type<kCPU>(
+      at::kFloat,
       n, x, incx, y, incy);
 }
 
@@ -837,8 +837,8 @@ void copy(int64_t n, const c10::complex<double> *x, int64_t incx, c10::complex<d
     return;
   }
   #endif
-  copy_stub(
-      kCPU, at::kComplexDouble,
+  copy_stub.call_with_known_device_type<kCPU>(
+      at::kComplexDouble,
       n, x, incx, y, incy);
 }
 
@@ -861,8 +861,8 @@ void copy(int64_t n, const c10::complex<float> *x, int64_t incx, c10::complex<fl
     return;
   }
   #endif
-  copy_stub(
-      kCPU, at::kComplexFloat,
+  copy_stub.call_with_known_device_type<kCPU>(
+      at::kComplexFloat,
       n, x, incx, y, incy);
 }
 

@@ -46,7 +46,7 @@ static Tensor quantized_layer_norm_impl(
     bool affine_per_channel = false;
     int num_channels = 1; // not relevant for LayerNorm
     int num_groups = 1; // not relevant for LayerNorm
-    quantized_normalize_stub(kCPU, *X, *gamma, *beta, affine_per_channel,
+    quantized_normalize_stub.call_with_known_device_type<kCPU>(*X, *gamma, *beta, affine_per_channel,
         num_channels, num_groups, M, N, eps, &Y);
   }
   return Y;
@@ -96,10 +96,10 @@ static Tensor quantized_group_norm_impl(
   if (M > 0) {
     bool affine_per_channel = true;
     if (is_channels_last) {
-      quantized_groupnorm_nhwc_stub(kCPU, qx_contig, weight_contig, bias_contig,
+      quantized_groupnorm_nhwc_stub.call_with_known_device_type<kCPU>(qx_contig, weight_contig, bias_contig,
           affine_per_channel, num_channels, num_groups, M, N, eps, &Y);
     } else {
-      quantized_normalize_stub(kCPU, qx_contig, weight_contig, bias_contig,
+      quantized_normalize_stub.call_with_known_device_type<kCPU>(qx_contig, weight_contig, bias_contig,
           affine_per_channel, num_channels, num_groups, M, N, eps, &Y);
     }
   }

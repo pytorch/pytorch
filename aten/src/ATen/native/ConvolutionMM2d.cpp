@@ -68,8 +68,7 @@ static Tensor compute_columns2d(
         for (const auto t : c10::irange(start, end)) {
           auto input_t = input_a[t];
           auto columns_t = columns_a[t];
-          unfolded2d_copy_stub(
-              kCPU,
+          unfolded2d_copy_stub.call_with_known_device_type<kCPU>(
               c10::CppTypeToScalarType<scalar_t>::value,
               columns_t.data(),
               input_t.data(),
@@ -336,8 +335,7 @@ void slow_conv2d_backward_update_grad_input_frame(
         fgrad_input, ldc);
   }
 
-  unfolded2d_acc_stub(
-      kCPU,
+  unfolded2d_acc_stub.call_with_known_device_type<kCPU>(
       c10::CppTypeToScalarType<scalar_t>::value,
       fgrad_input,
       grad_input.data(),

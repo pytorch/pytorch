@@ -145,7 +145,7 @@ Tensor& sparse_sampled_addmm_out_sparse_csr_cpu(
   // for gnn classic usage, mat2 is already stored in [b, n, k] physically,
   // so no extra memcpy is needed.
   auto mat2_t = mat2.transpose(-1, -2).contiguous();
-  sampled_addmm_sparse_csr_stub(kCPU, mat1.contiguous(), mat2_t, beta, alpha, result);
+  sampled_addmm_sparse_csr_stub.call_with_known_device_type<kCPU>(mat1.contiguous(), mat2_t, beta, alpha, result);
 
   return result;
 }

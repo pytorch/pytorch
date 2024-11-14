@@ -44,8 +44,7 @@ void _fused_sgd_kernel_cpu_(
     TORCH_CHECK(momentum_buffer_list.size() == n_tensors);
   }
   for (size_t i = 0; i < n_tensors; i++){
-    fused_sgd_stub(
-      kCPU,
+    fused_sgd_stub.call_with_known_device_type<kCPU>(
       params[i],
       grads[i],
       no_momentum_buffer ? Tensor() : momentum_buffer_list[i],

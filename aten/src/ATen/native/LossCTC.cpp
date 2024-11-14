@@ -301,7 +301,7 @@ Tensor ctc_loss_backward_cpu_template(const Tensor& grad_out, const Tensor& log_
       if (zero_infinity && nll == std::numeric_limits<scalar_t>::infinity()) {
         // grad_batch.zero_();
         fill_iter_local.unsafe_replace_operand(0, grad_a.data());
-        fill_stub(kCPU, fill_iter_local, 0);
+        fill_stub.call_with_known_device_type<kCPU>(fill_iter_local, 0);
         continue;
       }
 
@@ -319,7 +319,7 @@ Tensor ctc_loss_backward_cpu_template(const Tensor& grad_out, const Tensor& log_
         // log_beta.select(0, b).select(1, input_length-1).fill_(neginf);
         fill_log_beta_1d_iter_local.unsafe_replace_operand(
             0, log_beta_a[input_length - 1].data());
-        fill_stub(kCPU, fill_log_beta_1d_iter_local, neginf);
+        fill_stub.call_with_known_device_type<kCPU>(fill_log_beta_1d_iter_local, neginf);
 
         log_beta_a[input_length-1][2*target_length] = log_probs_a[input_length-1][BLANK];
         grad_a[input_length-1][BLANK] = log_alpha_a[input_length-1][2*target_length] + log_beta_a[input_length-1][2*target_length];
@@ -395,7 +395,7 @@ Tensor ctc_loss_backward_cpu_template(const Tensor& grad_out, const Tensor& log_
       for (auto l : c10::irange(input_length, max_input_length)) {
         // grad_batch.select(0, l).zero_();
         fill_1d_iter_local.unsafe_replace_operand(0, grad_a[l].data());
-        fill_stub(kCPU, fill_1d_iter_local, 0);
+        fill_stub.call_with_known_device_type<kCPU>(fill_1d_iter_local, 0);
       }
     }
   });

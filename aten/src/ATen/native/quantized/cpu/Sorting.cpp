@@ -36,7 +36,7 @@ static std::tuple<Tensor&, Tensor&> quantized_topk_out_cpu(
       "selected index k out of range");
   _allocate_or_resize_output_with_indices(values, indices, self, dim_, k);
 
-  qtopk_stub(kCPU, values, indices, self, k, dim, largest, sorted);
+  qtopk_stub.call_with_known_device_type<kCPU>(values, indices, self, k, dim, largest, sorted);
 
   return std::forward_as_tuple(values, indices);
 }

@@ -38,8 +38,7 @@ void _fused_adagrad_kernel_cpu_(
   TORCH_CHECK(state_sums.size() == n_tensors);
   TORCH_CHECK(state_steps.size() == n_tensors);
   for (size_t i = 0; i < n_tensors; i++){
-    fused_adagrad_stub(
-      kCPU,
+    fused_adagrad_stub.call_with_known_device_type<kCPU>(
       params[i],
       grads[i],
       state_sums[i],

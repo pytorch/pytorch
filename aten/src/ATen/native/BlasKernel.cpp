@@ -114,7 +114,7 @@ float fp16_dot_with_fp32_arith(
   const Half* x,
   const Half* a,
   int64_t len) {
-  return fp16_dot_with_fp32_arith_stub(kCPU, x, a, len);
+  return fp16_dot_with_fp32_arith_stub.call_with_known_device_type<kCPU>(x, a, len);
 }
 
 void fp16_gemv_trans(
@@ -128,7 +128,7 @@ void fp16_gemv_trans(
     const float beta,
     Half* y,
     const int incy) {
-  fp16_gemv_trans_stub(kCPU, m, n, alpha, a, lda, x, incx, beta, y, incy);
+  fp16_gemv_trans_stub.call_with_known_device_type<kCPU>(m, n, alpha, a, lda, x, incx, beta, y, incy);
 }
 
 void bf16_gemv_trans(
@@ -152,7 +152,7 @@ float bf16_dot_with_fp32_arith(
     const at::BFloat16* vec1,
     const at::BFloat16* vec2,
     int64_t len) {
-  return bf16_dot_with_fp32_arith_stub(kCPU, vec1, vec2, len);
+  return bf16_dot_with_fp32_arith_stub.call_with_known_device_type<kCPU>(vec1, vec2, len);
 }
 #endif // !defined(C10_MOBILE)
 
@@ -320,7 +320,7 @@ void bf16_gemv_trans(
   const at::BFloat16 beta,
   at::BFloat16* y,
   const int incy) {
-  return bf16_gemv_trans_stub(kCPU, m, n, alpha, a, lda, x, incx, beta, y, incy);
+  return bf16_gemv_trans_stub.call_with_known_device_type<kCPU>(m, n, alpha, a, lda, x, incx, beta, y, incy);
 }
 
 template <>

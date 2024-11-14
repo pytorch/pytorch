@@ -253,8 +253,7 @@ std::tuple<Tensor, Tensor, Tensor> transform_bias_rescale_qkv_cpu(
 
   const auto qkv_contig = qkv_->expect_contiguous();
   const auto qkv_bias_contig = qkv_bias.expect_contiguous();
-  transform_bias_rescale_qkv_stub(
-      kCPU,
+  transform_bias_rescale_qkv_stub.call_with_known_device_type<kCPU>(
       qkv_->scalar_type(),
       q_k_v.data_ptr(),
       qkv_contig->const_data_ptr(),

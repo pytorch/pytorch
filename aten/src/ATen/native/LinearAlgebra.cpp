@@ -3450,7 +3450,7 @@ Tensor _convert_weight_to_int4pack_cpu(
 
   auto weight_packed = at::empty({N, K / 2}, weight.options().dtype(at::kByte));
 
-  weight_to_int4pack_stub(kCPU, weight_packed, weight);
+  weight_to_int4pack_stub.call_with_known_device_type<kCPU>(weight_packed, weight);
   return weight_packed;
 }
 
@@ -3487,7 +3487,7 @@ Tensor _weight_int4pack_mm_cpu(
       __func__, ": expect qScaleAndZeros to be 3d tensor with sizes [:, ", N, ", 2]");
 
   auto C = at::empty({M, N}, A.options());
-  int4pack_mm_stub(kCPU, C, A, B, qGroupSize, qScaleAndZeros);
+  int4pack_mm_stub.call_with_known_device_type<kCPU>(C, A, B, qGroupSize, qScaleAndZeros);
 
   return C;
 }
@@ -3519,7 +3519,7 @@ Tensor _weight_int8pack_mm_cpu(
       __func__, " : expect scales to be 1d tensor with size ", N);
 
   auto C = at::empty({M, N}, A.options());
-  int8pack_mm_stub(kCPU, C, A, B, scales);
+  int8pack_mm_stub.call_with_known_device_type<kCPU>(C, A, B, scales);
 
   return C;
 }

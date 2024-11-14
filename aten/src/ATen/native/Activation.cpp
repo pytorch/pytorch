@@ -757,7 +757,7 @@ Tensor infinitely_differentiable_gelu_backward(
 std::tuple<Tensor, Tensor> log_sigmoid_forward_cpu(const Tensor& input) {
   auto result = at::empty_like(input, at::MemoryFormat::Contiguous);
   auto buffer = at::empty_like(input, at::MemoryFormat::Contiguous);
-  log_sigmoid_cpu_stub(kCPU, result, buffer, input.contiguous());
+  log_sigmoid_cpu_stub.call_with_known_device_type<kCPU>(result, buffer, input.contiguous());
   return std::make_tuple(result, buffer);
 }
 
@@ -766,7 +766,7 @@ std::tuple<Tensor&, Tensor&> log_sigmoid_forward_out_cpu(const Tensor& input, Te
   buffer.resize_as_(input, at::MemoryFormat::Contiguous);
   TORCH_CHECK(buffer.is_contiguous(), "Contiguous buffer required for log_sigmoid with out parameter");
   Tensor result_tmp = result.is_contiguous() ? result : at::empty_like(result, at::MemoryFormat::Contiguous);
-  log_sigmoid_cpu_stub(kCPU, result_tmp, buffer, input.contiguous());
+  log_sigmoid_cpu_stub.call_with_known_device_type<kCPU>(result_tmp, buffer, input.contiguous());
   if (!result.is_contiguous()) {
     result.copy_(result_tmp);
   }
@@ -802,7 +802,7 @@ Tensor log_sigmoid_backward_cpu(const Tensor& grad_output, const Tensor& input, 
       .add_const_input(buffer)
       .add_const_input(grad_output)
       .build();
-  log_sigmoid_backward_stub(kCPU, iter);
+  log_sigmoid_backward_stub.call_with_known_device_type<kCPU>(iter);
   return iter.output();
 }
 
@@ -827,7 +827,7 @@ Tensor& log_sigmoid_backward_cpu_out(const Tensor& grad_output,
       .add_const_input(buffer)
       .add_const_input(grad_output)
       .build();
-  log_sigmoid_backward_stub(kCPU, iter);
+  log_sigmoid_backward_stub.call_with_known_device_type<kCPU>(iter);
   return grad_input;
 }
 

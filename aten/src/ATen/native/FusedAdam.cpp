@@ -52,8 +52,7 @@ void _fused_adam_kernel_cpu_(
   at::Tensor max_exp_avg_sq = at::Tensor();
   for (size_t i = 0; i < n_tensors; i++){
     if (amsgrad) max_exp_avg_sq = max_exp_avg_sqs[i];
-    fused_adam_stub(
-      kCPU,
+    fused_adam_stub.call_with_known_device_type<kCPU>(
       params[i],
       grads[i],
       exp_avgs[i],
@@ -128,8 +127,7 @@ void _fused_adamw_kernel_cpu_(
   at::Tensor max_exp_avg_sq = at::Tensor();
   for (size_t i = 0; i < n_tensors; i++){
     if (amsgrad) max_exp_avg_sq = max_exp_avg_sqs[i];
-    fused_adam_stub(
-      kCPU,
+    fused_adam_stub.call_with_known_device_type<kCPU>(
       params[i],
       grads[i],
       exp_avgs[i],

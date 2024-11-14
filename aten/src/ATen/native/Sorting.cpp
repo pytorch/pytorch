@@ -839,7 +839,7 @@ TORCH_IMPL_FUNC(topk_out_cpu)
     values.copy_(self);
     indices.zero_();
   } else {
-    topk_stub(kCPU, values, indices, self, k, dim, largest, sorted);
+    topk_stub.call_with_known_device_type<kCPU>(values, indices, self, k, dim, largest, sorted);
   }
 }
 

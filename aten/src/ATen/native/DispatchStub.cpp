@@ -211,7 +211,7 @@ DispatchResult DispatchStubImpl::try_get_call_ptr(
   }
 }
 
-void* DispatchStubImpl::get_call_ptr(
+void* DispatchStubImpl::get_call_ptr_impl(
   const DeviceType device_type
   , void *DEFAULT
 #ifdef HAVE_AVX512_CPU_DEFINITION

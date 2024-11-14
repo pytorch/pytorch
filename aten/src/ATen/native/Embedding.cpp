@@ -165,7 +165,7 @@ Tensor embedding_dense_backward_cpu(
             iter.unsafe_replace_operand(0, gW_data + k * gW_stride);
             iter.unsafe_replace_operand(1, gW_data + k * gW_stride);
             iter.unsafe_replace_operand(2, const_cast<char*>(gO_data + i * gO_stride));
-            add_stub(kCPU, iter, scale);
+            add_stub.call_with_known_device_type<kCPU>(iter, scale);
           }
         }
       }
