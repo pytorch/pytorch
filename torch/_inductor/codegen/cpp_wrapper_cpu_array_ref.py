@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import os
 from itertools import count
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 import sympy
 
@@ -74,7 +74,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         self.scalar_to_tensor_id = count()
         self.custom_op_wrapper_loaded = False
         self.expr_printer = cexpr
-        self.allow_stack_allocation: Optional[bool] = None
+        self.allow_stack_allocation: Optional[bool] = config.allow_stack_allocation
         self.stack_allocated_buffers: Dict[BufferName, BufferLike] = {}
 
     @staticmethod
@@ -145,45 +145,32 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                 Otherwise it uses the CUDA language for codegen.
                 Only valid when cuda == True.
         """
-        if gpu:
-            return super().generate_kernel_call(
-                kernel_name,
-                call_args,
-                grid,
-                device_index,
-                gpu,
-                triton,
-                arg_types,
-                raw_args,
-                grid_fn,
-                triton_meta,
-                autotune_configs,
-                grid_extra_kwargs,
-            )
-        else:
-            assert arg_types is not None and len(call_args) == len(
-                arg_types
-            ), "Mismatch call_args and arg_types in generate_kernel_call"
-            new_args = []
-            for idx, arg in enumerate(call_args):
-                if "*" in arg_types[idx]:
-                    var_name = f"var_{next(self.arg_var_id)}"
-                    self.writeline(f"auto* {var_name} = get_data_ptr_wrapper({arg});")
-                    new_args.append(f"({arg_types[idx]})({var_name})")
-                else:
-                    # arg is a scalar
-                    new_args.append(arg)
-            # debug printer related logic for cpp kernel type.
-            debug_printer_manager = V.graph.wrapper_code.debug_printer
-            debug_printer_manager.set_printer_args(
-                call_args,
-                kernel_name,
-                None,
-                None,
-                "cpp",
-            )
-            with debug_printer_manager:
-                self.writeline(self.wrap_kernel_call(kernel_name, new_args))
+        assert (
+            not gpu
+        ), "CppWrapperCpuArrayRef.generate_kernel_call does not support GPU"
+        assert arg_types is not None and len(call_args) == len(
+            arg_types
+        ), "Mismatch call_args and arg_types in generate_kernel_call"
+        new_args = []
+        for idx, arg in enumerate(call_args):
+            if "*" in arg_types[idx]:
+                var_name = f"var_{next(self.arg_var_id)}"
+                self.writeline(f"auto* {var_name} = get_data_ptr_wrapper({arg});")
+                new_args.append(f"({arg_types[idx]})({var_name})")
+            else:
+                # arg is a scalar
+                new_args.append(arg)
+        # debug printer related logic for cpp kernel type.
+        debug_printer_manager = V.graph.wrapper_code.debug_printer
+        debug_printer_manager.set_printer_args(
+            call_args,
+            kernel_name,
+            None,
+            None,
+            "cpp",
+        )
+        with debug_printer_manager:
+            self.writeline(self.wrap_kernel_call(kernel_name, new_args))
 
     def write_wrapper_decl(self):
         inputs_len = len(V.graph.graph_inputs.keys())
@@ -601,13 +588,13 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         stride = self.codegen_shape_tuple(orig_stride)
         size_array_var = self.codegen_int_array_var(
             size,
-            self.wrapper_call,
+            self.wrapper_call.writeline,
             known_statically=self.is_statically_known_list_of_ints(shape),
             graph=self.get_codegened_graph(),
         )
         stride_array_var = self.codegen_int_array_var(
             stride,
-            self.wrapper_call,
+            self.wrapper_call.writeline,
             known_statically=self.is_statically_known_list_of_ints(orig_stride),
             graph=self.get_codegened_graph(),
         )
@@ -659,11 +646,14 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             return self.codegen_exact_buffer_reuse(old_name, new_name, del_line)
 
         reinterpret_view = self.codegen_reinterpret_view(
-            old, new.get_size(), new.get_stride(), 0, self.wrapper_call
+            old, new.get_size(), new.get_stride(), 0, self.wrapper_call.writeline
         )
         if reinterpret_view in self.stack_allocated_buffers:
             self.stack_allocated_buffers[new_name] = new
-        return f"{self.declare_maybe_reference}{new_name} = {reinterpret_view}{del_line}  {self.comment} reuse"
+        return (
+            f"{self.declare_maybe_reference}{new_name} = std::move({reinterpret_view}){del_line}"
+            f"  {self.comment} reuse"
+        )
 
     def generate_c_shim_extern_kernel_call(self, kernel, args):
         # In the abi_compatible mode, we call fallback aten ops through a C shim layer
@@ -765,7 +755,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         )  # set x as the output tensor, this fallback mutates x.
         self.writeline(self.wrap_kernel_call(kernel, args))
 
-    def generate_extern_kernel_alloc_and_find_schema_if_needed(
+    def generate_fallback_kernel_with_runtime_lookup(
         self,
         buf_name: str,
         python_kernel_name: str,
@@ -803,14 +793,14 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             assert raw_args is not None
             assert outputs is not None
 
-            return self.generate_extern_kernel_alloc_and_find_schema_if_needed_with_proxy_executor(
+            return self.generate_fallback_kernel_with_runtime_lookup_aot(
                 op_overload,
                 raw_args,
                 output_args,
                 outputs,
             )
         else:
-            return self.generate_extern_kernel_alloc_and_find_schema_if_needed_jit(
+            return self.generate_fallback_kernel_with_runtime_lookup_jit(
                 buf_name,
                 python_kernel_name,
                 cpp_kernel_name,
@@ -831,14 +821,19 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         )
 
     def codegen_reinterpret_view(
-        self, data, size, stride, offset, writer, dtype=None
+        self,
+        data,
+        size,
+        stride,
+        offset,
+        writeline: Callable[..., None],
+        dtype=None,
     ) -> str:
         dim = str(len(size))
         original_offset = offset
         offset = self.codegen_sizevar(offset)
         call_strs = []
         final_tmp_name = None
-        final_tmp_name_is_RAIIAtenTensorHandle = False
 
         def create_reinterpret_call() -> Tuple[str, str]:
             tmp_name = f"tmp_tensor_handle_{next(self.tmp_tensor_id)}"
@@ -847,13 +842,13 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                 dim,
                 self.codegen_int_array_var(
                     self.codegen_shape_tuple(size),
-                    writer,
+                    writeline,
                     known_statically=self.is_statically_known_list_of_ints(size),
                     graph=self.get_codegened_graph(),
                 ),
                 self.codegen_int_array_var(
                     self.codegen_shape_tuple(stride),
-                    writer,
+                    writeline,
                     known_statically=self.is_statically_known_list_of_ints(stride),
                     graph=self.get_codegened_graph(),
                 ),
@@ -893,7 +888,6 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                 tmp_output_name, tmp_call_strs = create_dtypeview_call(data.get_name())
                 call_strs.extend(tmp_call_strs)
                 final_tmp_name = tmp_output_name
-                final_tmp_name_is_RAIIAtenTensorHandle = True
             else:
                 return data.get_name()
         else:
@@ -905,21 +899,26 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                 # wrap it with dtypeview
                 final_tmp_name, tmp_call_strs = create_dtypeview_call(reinterpret_call)
                 call_strs.extend(tmp_call_strs)
+            elif (
+                self.can_stack_allocate_buffer(data)
+                and self.is_statically_known_list_of_ints(size)
+                and self.is_statically_known_list_of_ints(stride)
+                and ir.is_contiguous_strides_for_shape(stride, size)
+            ):
+                # No need to wrap with RAIIAtenTensorHandle when using stack allocation.
+                call_strs.append(
+                    f"auto wrap_with_raii_handle_if_needed_{final_tmp_name}"
+                    f" = wrap_with_raii_handle_if_needed({final_tmp_name});"
+                )
+                final_tmp_name = f"wrap_with_raii_handle_if_needed_{final_tmp_name}"
+            else:
+                call_strs.append(
+                    f"RAIIAtenTensorHandle {final_tmp_name}_raii({final_tmp_name});"
+                )
+                final_tmp_name = f"{final_tmp_name}_raii"
 
-        if writer is None:
-            writer = self
-
-        # Because the memory planning is done in two passes (see the implementation
-        # of self.generate), the writeline behavior is different in the two passes.
-        writer.writelines(call_strs)
-
-        if (
-            self.can_stack_allocate_buffer(data)
-            and self.is_statically_known_list_of_ints(size)
-            and self.is_statically_known_list_of_ints(stride)
-            and ir.is_contiguous_strides_for_shape(stride, size)
-        ):
-            return final_tmp_name
+        for line in call_strs:
+            writeline(line)
 
         # NB, the return handle here represents a temporary tensor, which will be automatically
         # released.
@@ -950,10 +949,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         #     }.data()
         # );
         # ```
-        if not final_tmp_name_is_RAIIAtenTensorHandle:
-            return f"wrap_with_raii_handle_if_needed({final_tmp_name})"
-        else:
-            return final_tmp_name
+        return final_tmp_name
 
     def val_to_arg_str(self, val, type_=None) -> str:
         if val is None:

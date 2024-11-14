@@ -30,6 +30,7 @@ import torch
 import torch._logging
 from torch._C._dynamo.guards import GlobalStateGuard
 from torch._dynamo.distributed import get_compile_pg
+from torch._dynamo.symbolic_convert import TensorifyState
 from torch._dynamo.utils import CompileTimeInstructionCounter
 from torch._guards import compile_context, CompileContext, CompileId, tracing
 from torch._logging import structured
@@ -652,7 +653,6 @@ def _compile(
             one_graph,
             export,
             export_constraints,
-            mutated_closure_cell_ids,
             frame_state=frame_state,
             speculation_log=speculation_log,
             distributed_state=distributed_state,
@@ -664,7 +664,11 @@ def _compile(
         except exc.UnspecializeRestartAnalysis:
             speculation_log.clear()
             raise
-        except (exc.SpeculationRestartAnalysis, exc.SkipFrame):
+        except (
+            exc.SpeculationRestartAnalysis,
+            exc.TensorifyScalarRestartAnalysis,
+            exc.SkipFrame,
+        ):
             raise
         except Exception:
             if translation_validation_enabled():
@@ -744,6 +748,8 @@ def _compile(
                 out_code = transform_code_object(code, transform)
                 break
             except exc.RestartAnalysis as e:
+                if not isinstance(e, exc.TensorifyScalarRestartAnalysis):
+                    TensorifyState.clear()
                 log.info(
                     "Restarting analysis due to %s",
                     LazyString(format_traceback_short, e.__traceback__),
@@ -755,6 +761,8 @@ def _compile(
                 if attempt > 100:
                     unimplemented("100+ RestartAnalysis() calls")
             except exc.SkipFrame as e:
+                if not isinstance(e, exc.TensorifyScalarRestartAnalysis):
+                    TensorifyState.clear()
                 log.debug(
                     "Skipping frame %s %s \
                     %s %s",
@@ -869,7 +877,6 @@ def _compile(
     ):
         restart_reasons: set[str] = set()
         # This is shared across restarts
-        mutated_closure_cell_ids: Set[int] = set()
         speculation_log = SpeculationLog()
         if compile_pg := get_compile_pg():
             distributed_state = DistributedState(compile_pg, LocalState())

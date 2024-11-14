@@ -34,6 +34,7 @@ from .eval_frame import (
 from .external_utils import is_compiling
 from .mutation_guard import GenerationTracker
 from .pgo import reset_code_state
+from .symbolic_convert import TensorifyState
 from .utils import graph_break_reasons, guard_failures, orig_code_map, reset_frame_count
 
 
@@ -109,6 +110,7 @@ def reset() -> None:
         convert_frame.FRAME_COMPILE_COUNTER.clear()
         callback_handler.clear()
         GenerationTracker.clear()
+        TensorifyState.clear()
         torch._dynamo.utils.warn_once_cache.clear()
         torch._dynamo.utils.user_obj_id_to_weakref.clear()
         torch._C._autograd._saved_tensors_hooks_set_tracing(False)
