@@ -809,6 +809,7 @@ class TestFunctionalAutogradWithDistributedBackend(DistributedTestBase):
         loss.backward()
         self.assertEqual(t.grad, torch.full_like(t, 2.0))
 
+
 # Update the supported devices in DEVICE
 instantiate_device_type_tests(
     TestCollectivesWithDistributedBackend, globals(), only_for=DEVICE
