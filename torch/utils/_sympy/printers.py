@@ -52,6 +52,18 @@ class ExprPrinter(Printer):
     def _print_Mod(self, expr: sympy.Expr) -> str:
         return " % ".join(map(self.paren, map(self._print, expr.args)))
 
+    def _print_Not(self, expr: sympy.Expr) -> str:
+        return f"~{self.paren(expr.args[0])}"
+
+    def _print_And(self, expr: sympy.Expr) -> str:
+        return " & ".join(map(self.paren, map(self._print, expr.args)))
+
+    def _print_Or(self, expr: sympy.Expr) -> str:
+        return " | ".join(map(self.paren, map(self._print, expr.args)))
+
+    def _print_Xor(self, expr: sympy.Expr) -> str:
+        return " ^ ".join(map(self.paren, map(self._print, expr.args)))
+
     def _print_FloatTrueDiv(self, expr: sympy.Expr) -> str:
         lhs, rhs = expr.args
         return f"{self.paren(self._print(lhs))} / {self.paren(self._print(rhs))}"
@@ -61,12 +73,6 @@ class ExprPrinter(Printer):
 
     def _print_Identity(self, expr: sympy.Expr) -> str:
         return self._print(expr.args[0])
-
-    def _print_GreaterThan(self, expr: sympy.Expr) -> str:
-        # GreaterThan:          >=
-        # StrictlyGreaterThan:  >
-        # Go figure...
-        return " >= ".join(map(self.paren, map(self._print, expr.args)))
 
     # NB: The C implementation is injected into codegen at
     # torch/_inductor/codegen/wrapper.py
