@@ -11,7 +11,6 @@
 
 #include <c10/macros/Export.h>
 #include <c10/macros/Macros.h>
-#include <c10/util/TypeSafeSignMath.h>
 #include <c10/util/bit_cast.h>
 #include <c10/util/complex.h>
 #include <c10/util/floating_point_utils.h>
