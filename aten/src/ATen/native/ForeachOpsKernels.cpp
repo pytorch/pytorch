@@ -498,15 +498,15 @@ std::vector<Tensor> foreach_scalar_pow_list_kernel_slow(
   return result;
 }
 
-std::vector<Tensor> foreach_tensor_where_scalar_other_slow(
-    const at::Tensor& condition,
+std::vector<Tensor> foreach_tensor_where_tensor_kernel_slow(
+    TensorList conditions,
     TensorList tensors,
     const at::Scalar& other) {
   check_foreach_api_restrictions(tensors);
   std::vector<Tensor> result;
   result.reserve(tensors.size());
-  for (const auto& self : tensors) {
-    result.emplace_back(at::where(condition, self, other));
+  for (int64_t i = 0; i < tensors.size(); i++) {
+    result.emplace_back(at::where(conditions[i], tensors[i], other));
   }
   return result;
 }

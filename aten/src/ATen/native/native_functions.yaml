@@ -10916,12 +10916,12 @@
     CUDA: foreach_tensor_abs_cuda_
   autogen: _foreach_abs.out
 
-- func: _foreach_where(Tensor condition, Tensor[] self, Scalar other) -> Tensor[]
+- func: _foreach_where(Tensor[] conditions, Tensor[] self, Scalar other) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
   variants: function
   dispatch:
-    CompositeExplicitAutograd: foreach_tensor_where_scalar_other_slow
-    CUDA: foreach_tensor_where_scalar_other_cuda
+    CompositeExplicitAutograd: foreach_tensor_where_tensor_kernel_slow
+    CUDA: foreach_tensor_where_tensor_kernel_cuda
 
 - func: _foreach_acos(Tensor[] self) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
