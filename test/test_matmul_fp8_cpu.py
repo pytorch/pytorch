@@ -42,8 +42,10 @@ class TestFP8MatmulCpu(TestCase):
 
     def test_float8_basics(self, device) -> None:
         self._test_tautological_mm(device, e4m3_type, e4m3_type, size=16)
-        self._test_tautological_mm(device, e4m3_type, e5m2_type, size=32)
-        self._test_tautological_mm(device, e5m2_type, e4m3_type, size=48)
+        # TODO: The following 2 tests are mixed dtypes between src and weight,
+        # which will be enabled in oneDNN v3.6.
+        # self._test_tautological_mm(device, e4m3_type, e5m2_type, size=32)
+        # self._test_tautological_mm(device, e5m2_type, e4m3_type, size=48)
         self._test_tautological_mm(device, e5m2_type, e5m2_type)
 
         self._test_tautological_mm(device, size=64, out_dtype=torch.float16)
@@ -55,7 +57,9 @@ class TestFP8MatmulCpu(TestCase):
     def test_float8_scale(self, device) -> None:
         size = (16, 16)
         x = torch.full(size, 0.5, device=device, dtype=e4m3_type)
-        y = torch.full(size, 0.5, device=device, dtype=e5m2_type).t()
+        # TODO: will use y = torch.full(size, 0.5, device=device, dtype=e5m2_type).t()
+        # after upgrading to oneDNN v3.6.
+        y = torch.full(size, 0.5, device=device, dtype=e4m3_type).t()
         scale_a = torch.tensor(1.5, device=device)
         scale_b = torch.tensor(0.66, device=device)
         out_fp8 = torch._scaled_mm(x, y, scale_a=scale_a, scale_b=scale_b)
