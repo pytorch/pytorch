@@ -110,6 +110,8 @@ def get_symm_mem_workspace(group_name: str, min_size: int) -> _SymmetricMemory:
         _SymmetricMemory: the symmetric memory workspace associated with the
         group.
     """
+    enable_symm_mem_for_group(group_name)
+
     tensor = _group_name_to_workspace_tensor.get(group_name)
     size = tensor.numel() * tensor.element_size() if tensor is not None else 0
     if tensor is None or size < min_size:
@@ -135,14 +137,13 @@ def get_symm_mem_workspace(group_name: str, min_size: int) -> _SymmetricMemory:
     return _SymmetricMemory.rendezvous(tensor)
 
 
-_backend_stream: Optional[torch.cuda.Stream] = None
+_backend_streams: Dict[int, torch.cuda.Stream] = {}
 
 
-def _get_backend_stream() -> torch.cuda.Stream:
-    global _backend_stream
-    if _backend_stream is None:
-        _backend_stream = torch.cuda.Stream()
-    return _backend_stream
+def _get_backend_stream(priority: int = 0) -> torch.cuda.Stream:
+    if priority not in _backend_streams:
+        _backend_streams[priority] = torch.cuda.Stream(priority=priority)
+    return _backend_streams[priority]
 
 
 def _pipelined_multi_all_gather_and_consume(
@@ -659,6 +660,54 @@ def _fused_all_gather_matmul(
             gather_dim,
             group_name,
         )
+
+
+def _fused_all_gather_matmul_native(
+    A_shard: torch.Tensor,
+    B: torch.Tensor,
+    group_name: str,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    symm_mem = _SymmetricMemory.rendezvous(A_shard)
+    if symm_mem is None:
+        symm_mem = get_symm_mem_workspace(
+            group_name, A_shard.numel() * A_shard.element_size()
+        )
+        symm_mem.barrier()
+        buf = symm_mem.get_buffer(symm_mem.rank, A_shard.shape, A_shard.dtype)
+        buf.copy_(A_shard)
+        A_shard = buf
+
+    rank = symm_mem.rank
+    world_size = symm_mem.world_size
+
+    current_stream = torch.cuda.current_stream()
+    backend_stream = _get_backend_stream(priority=-1)
+
+    symm_mem.barrier()
+    current_stream.wait_stream(backend_stream)
+    backend_stream.wait_stream(current_stream)
+
+    A = A_shard.new_empty(A_shard.shape[0] * world_size, A_shard.shape[1])
+    A_signals = torch.zeros(world_size, dtype=torch.uint32, device=A_shard.device)
+    A_shards = A.chunk(world_size)
+
+    A_shards[rank].copy_(A_shard)
+    _SymmetricMemory.stream_write_value32(A_signals, rank, 1)
+
+    out = torch.ops.symm_mem._async_input_mm(A, B, A_signals, rank)
+    for step in range(1, world_size):
+        src_rank = (rank + step) % world_size
+        src_buf = symm_mem.get_buffer(src_rank, A_shard.shape, A_shard.dtype)
+        with torch.cuda.stream(backend_stream):
+            A_shards[src_rank].copy_(src_buf)
+            # cuStreamWriteValue32 issues a system level fence before the write
+            _SymmetricMemory.stream_write_value32(A_signals, src_rank, 1)
+
+    current_stream.wait_stream(backend_stream)
+    backend_stream.wait_stream(current_stream)
+
+    symm_mem.barrier()
+    return A, out
 
 
 @torch.library.impl(lib, "fused_all_gather_scaled_matmul", "Meta")
@@ -1382,7 +1431,7 @@ def empty(  # type: ignore[misc]
 
     Similar to :func:`torch.empty()`. The returned tensor can be used by
     :func:`torch._distributed._symmetric_memory.rendezvous()` to establish a
-    symmetric memory setup among participating processes.
+    symmetric memory tensor among participating processes.
 
     Args:
         size (int...): a sequence of integers defining the shape of the output tensor.
@@ -1421,15 +1470,15 @@ def rendezvous(
     r"""
     rendezvous(tensor, group) -> _SymmetricMemory
 
-    Establish a symmetric memory arrangement among participating processes.
+    Establish a symmetric memory tensor among participating processes. This is
+    a collective operation.
 
     Args:
-        tensor (:class:`torch.Tensor`): the tensor used to establish the symmetric memory
-            setup. The shape, dtype, and device type must be identical across all the
-            participating processes.
-        group (Union[str, :class:`torch.distributed.ProcessGroup`]): The group identifying
-            the participants in the symmetric memory setup. This can be either a group
-            name or a process group object.
+        tensor (:class:`torch.Tensor`): the local tensor used to establish the symmetric memory tensor.
+            It must be allocated via :func:`torch._distributed._symmetric_memory.empty()`. The shape,
+            dtype, and device type must be identical across all participating processes.
+        group (Union[str, :class:`torch.distributed.ProcessGroup`]): The group identifying the
+            participating processes. This can be either a group name or a process group object.
     """
     from torch._C._distributed_c10d import ProcessGroup
 

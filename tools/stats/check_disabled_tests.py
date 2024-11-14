@@ -168,7 +168,7 @@ def save_results(
     all_tests: dict[str, dict[str, int]],
 ) -> None:
     """
-    Save the result to S3, so it can go to Rockset
+    Save the result to S3, which then gets put into the HUD backened database
     """
     should_be_enabled_tests = {
         name: stats
