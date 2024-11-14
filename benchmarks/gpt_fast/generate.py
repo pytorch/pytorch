@@ -11,6 +11,7 @@ from mixtral_moe_quantize import (
 )
 from model import Transformer as LLaMA
 from quantize import WeightOnlyInt8QuantHandler as LLaMAWeightOnlyInt8QuantHandler
+import torchao
 
 import torch
 import torch._inductor.config
