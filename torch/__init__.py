@@ -536,6 +536,12 @@ class SymInt:
     def __rsub__(self, other: "IntLikeType") -> "SymInt":
         raise TypeError("type stub not overridden")
 
+    def __and__(self, other) -> "SymInt":
+        raise TypeError("type stub not overridden")
+
+    def __or__(self, other) -> "SymInt":
+        raise TypeError("type stub not overridden")
+
     def __repr__(self):
         return self.node._graph_repr()
 
@@ -921,6 +927,7 @@ for __name in (
     __fn = _get_sym_math_fn(__name)
     __fn.__qualname__ = __fn.__name__ = __sym_name
     globals()[__sym_name] = __fn
+
 
 del __fn, __name, __sym_name, _get_sym_math_fn
 
@@ -2509,13 +2516,6 @@ def compile(
 
     from torch._inductor.compiler_bisector import CompilerBisector
 
-    enter_exit_hooks = []
-
-    if torch._dynamo.config.specialize_float and backend == "aot_eager":
-        enter_exit_hooks.append(
-            torch._dynamo.config._make_closure_patcher(specialize_float=False)
-        )
-
     if bisect_backend := CompilerBisector.get_backend():
         backend = bisect_backend
 
@@ -2529,7 +2529,6 @@ def compile(
         nopython=fullgraph,
         dynamic=dynamic,
         disable=disable,
-        enter_exit_hooks=enter_exit_hooks,
     )(model)  # type: ignore[return-value]
 
 
