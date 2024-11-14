@@ -324,7 +324,8 @@ class TestSDPAXpuOnly(NNTestCase):
     def test_fused_sdp_choice(self, device, type: str):
         batch_size, seq_len, num_heads, head_dim = 2, 128, 8, 64
         shape = SdpaShape(batch_size, num_heads, seq_len, head_dim)
-        make_tensor = partial(rand_sdpa_tensor, device=device, dtype=torch.float16, packed=True, requires_grad=False) # set requires_grad to False for onednn graph
+        make_tensor = partial(rand_sdpa_tensor, device=device, dtype=torch.float16, packed=True,
+                              requires_grad=False)  # set requires_grad to False for onednn graph
 
         qkv = make_tensor(shape, type=type)
         query, key, value = qkv.chunk(3, dim=-1)
@@ -364,6 +365,118 @@ class TestSDPAXpuOnly(NNTestCase):
         with use_deterministic_algorithims(True, warn_only=warn_only):
             with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION, SDPBackend.MATH]):
                 assert torch._fused_sdp_choice(query, key, value) == SDPBackend.OVERRIDEABLE.value
+
+    @parametrize("fused_kernel", [SDPBackend.MATH])
+    @parametrize("dtype", [torch.half])
+    @parametrize("batch_size,n_head,q_size,kv_size,head_dim", [
+        # (2, 5, 9216, 9216, 64),
+        # (2, 5, 9216, 77, 64),
+        # (2, 10, 2304, 2304, 64),
+        # (2, 10, 2304, 77, 64),
+        # (2, 20, 576, 576, 64),
+        # (2, 20, 576, 77, 64),
+        # (2, 20, 144, 144, 64),
+        (2, 20, 144, 77, 64),
+        # (1, 32, 1, 32, 128),
+        # (4, 32, 1, 32, 128),
+        # (1, 32, 32, 32, 128),
+        # (4, 32, 32, 32, 128),
+        # (1, 32, 2016, 2016, 128),
+        # (4, 32, 2016, 2016, 128),
+    ])
+    @parametrize("mask_type", ["float"])
+    @parametrize("train", [False])
+    def test_scaled_dot_product_fused_attention_mask_vs_math(
+        self,
+        device,
+        fused_kernel,
+        dtype,
+        batch_size,
+        q_size,
+        kv_size,
+        n_head,
+        head_dim,
+        mask_type,
+        train,
+    ):
+        tol = Tolerances(1e-5, 5e-6)
+        if dtype is torch.bfloat16:
+            tol = Tolerances(5e-2, 5e-2)
+        if dtype is torch.float16:
+            tol = Tolerances(1e-2, 1e-2)
+        mask_shape = [batch_size, 1, 1, kv_size]
+        make_tensor = partial(rand_sdpa_tensor, type="dense", device=device, dtype=dtype, requires_grad=False)
+        q_shape = SdpaShape(batch_size, n_head, q_size, head_dim)
+        kv_shape = SdpaShape(batch_size, n_head, kv_size, head_dim)
+        q = make_tensor(q_shape)
+        k = make_tensor(kv_shape)
+        v = make_tensor(kv_shape)
+        q2, k2, v2 = q.clone(), k.clone(), v.clone()
+
+        if train:
+            q.requires_grad_(True)
+            k.requires_grad_(True)
+            v.requires_grad_(True)
+            q2.requires_grad_(True)
+            k2.requires_grad_(True)
+            v2.requires_grad_(True)
+
+        q2, k2, v2 = q2.float(), k2.float(), v2.float()
+        # (B, nh, T, hs)
+        q = q.view(batch_size, q_size, n_head, head_dim).transpose(1, 2)
+        k = k.view(batch_size, kv_size, n_head, head_dim).transpose(1, 2)
+        v = v.view(batch_size, kv_size, n_head, head_dim).transpose(1, 2)
+        attn_mask = None
+        if mask_type == "bool":
+            attn_mask = torch.randint(0, 2, size=mask_shape, dtype=torch.bool, device=device)
+        elif mask_type == "float":
+            attn_mask = torch.randn(mask_shape, dtype=dtype, device=device)
+
+        q2 = q2.view(batch_size, q_size, n_head, head_dim).transpose(1, 2)
+        k2 = k2.view(batch_size, kv_size, n_head, head_dim).transpose(1, 2)
+        v2 = v2.view(batch_size, kv_size, n_head, head_dim).transpose(1, 2)
+
+        with sdpa_kernel(backends=[fused_kernel]):
+            actual = torch.nn.functional.scaled_dot_product_attention(
+                q, k, v, attn_mask=attn_mask, dropout_p=0.0, is_causal=False)
+        math_ref = torch.ops.aten._scaled_dot_product_attention_math(
+            q2, k2, v2, attn_mask=attn_mask.float(), dropout_p=0.0, is_causal=False)[0]
+
+        math_ref = math_ref.to(dtype)
+
+        self.assertEqual(actual.float(), math_ref, atol=tol.atol, rtol=tol.rtol)
+
+        iter_n = 100
+        with sdpa_kernel(backends=[fused_kernel]), torch.profiler.profile(
+                activities=[
+                    torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.XPU],
+                schedule=torch.profiler.schedule(
+                    wait=2,
+                    warmup=iter_n,
+                    active=iter_n),
+                on_trace_ready=self.trace_handler()) as prof:
+            for _ in range(iter_n * 2 + 2):
+                # actual = torch.ops.aten._scaled_dot_product_attention_math(
+                #     q, k, v, attn_mask=attn_mask, dropout_p=0.0, is_causal=False)
+                actual = torch.nn.functional.scaled_dot_product_attention(
+                    q, k, v, attn_mask=attn_mask, dropout_p=0.0, is_causal=False)
+                # actual = torch._scaled_dot_product_efficient_attention(
+                #     q, k, v, attn_bias=attn_mask, dropout_p=0.0, is_causal=False, compute_log_sumexp=False)
+                # actual = torch.ops.aten._scaled_dot_product_fused_attention_overrideable(
+                #     q, k, v, attn_bias=attn_mask, dropout_p=0.0, is_causal=False)
+                torch.xpu.synchronize()
+                prof.step()
+
+    def trace_handler(self):
+        test_name = self.id()
+
+        def h(p):
+            print()
+            print(p.key_averages().table(sort_by="self_xpu_time_total", max_name_column_width=60, row_limit=999))
+            from datetime import datetime
+            now = datetime.now().strftime('%Y%m%d_%H%M%S')
+            p.export_chrome_trace(f"trace_{test_name}_{p.step_num}_{now}.json")
+        return h
 
 
 instantiate_device_type_tests(
