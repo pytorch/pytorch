@@ -121,6 +121,9 @@ static DLDevice getDLDevice(const Tensor& tensor, c10::DeviceIndex device_id) {
     case DeviceType::MAIA:
       ctx.device_type = DLDeviceType::kDLMAIA;
       break;
+    case DeviceType::PrivateUse1:
+      ctx.device_type = DLDeviceType::kDLExtDev;
+      break;
     default:
       TORCH_CHECK(false, "Cannot pack tensors on " + tensor.device().str());
   }
@@ -149,6 +152,8 @@ static Device getATenDevice(const DLDevice& ctx, void* data) {
       return at::detail::getXPUHooks().getDeviceFromPtr(data);
     case DLDeviceType::kDLMAIA:
       return at::Device(DeviceType::MAIA, static_cast<c10::DeviceIndex>(ctx.device_id));
+    case DLDeviceType::kDLExtDev:
+      return at::Device(DeviceType::PrivateUse1, static_cast<c10::DeviceIndex>(ctx.device_id));
     default:
       TORCH_CHECK(
           false, "Unsupported device_type: ", std::to_string(ctx.device_type));
@@ -287,7 +292,7 @@ DLManagedTensor* toDLPack(const Tensor& src) {
   atDLMTensor->tensor.deleter = &deleter;
   atDLMTensor->tensor.dl_tensor.data = view.data_ptr();
   c10::DeviceIndex device_id = 0;
-  if (src.is_cuda()) {
+  if (src.is_cuda() || src.is_privateuseone()) {
     device_id = src.get_device();
   }
   atDLMTensor->tensor.dl_tensor.device = getDLDevice(src, device_id);
