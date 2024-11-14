@@ -970,14 +970,44 @@ class SymmMemSingleProcTest(TestCase):
         self.assertTrue(t[32:48].eq(1).all())
         self.assertTrue(t[48:].eq(0).all())
 
-        with self.assertRaises(RuntimeError):
-            _SymmetricMemory.memset32(t, offset=-1, val=1, count=16)
+        with self.assertRaisesRegex(
+            RuntimeError, "input must be a flat, contiguous uint32 tensor"
+        ):
+            _SymmetricMemory.memset32(t.view(8, 8), offset=0, val=1, count=1)
 
-        with self.assertRaises(RuntimeError):
-            _SymmetricMemory.memset32(t, offset=32, val=4294967296, count=16)
+        with self.assertRaisesRegex(
+            RuntimeError, "input must be a flat, contiguous uint32 tensor"
+        ):
+            _SymmetricMemory.memset32(t.view(torch.float32), offset=0, val=1, count=1)
 
-        with self.assertRaises(RuntimeError):
-            _SymmetricMemory.memset32(t, offset=32, val=1, count=-1)
+        with self.assertRaisesRegex(
+            RuntimeError, "offset must be greater than or equal to 0"
+        ):
+            _SymmetricMemory.memset32(t, offset=-1, val=1, count=1)
+
+        with self.assertRaisesRegex(
+            RuntimeError, r"val must be in the range of.*\(uint32_t\)"
+        ):
+            _SymmetricMemory.memset32(t, offset=0, val=4294967296, count=1)
+
+        with self.assertRaisesRegex(RuntimeError, "count must be a positive integer"):
+            _SymmetricMemory.memset32(t, offset=0, val=1, count=-1)
+
+        with self.assertRaisesRegex(RuntimeError, "count must be a positive integer"):
+            _SymmetricMemory.memset32(t, offset=0, val=1, count=0)
+
+        with self.assertRaisesRegex(
+            RuntimeError, r"offset \+ count.*exceeded the numel of the input"
+        ):
+            _SymmetricMemory.memset32(t, offset=64, val=1, count=1)
+
+        with self.assertRaisesRegex(
+            RuntimeError, r"offset \+ count.*exceeded the numel of the input"
+        ):
+            _SymmetricMemory.memset32(t, offset=0, val=1, count=65)
+
+        _SymmetricMemory.memset32(t, offset=0, val=1, count=64)
+        _SymmetricMemory.memset32(t, offset=63, val=1, count=1)
 
 
 if __name__ == "__main__":
