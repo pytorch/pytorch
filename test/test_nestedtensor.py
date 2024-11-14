@@ -7841,19 +7841,10 @@ FORWARD_SKIPS_AND_XFAILS = [
         op_match_fn=lambda device, op: op.full_name
         in {
             # unary
-            "nn.functional.celu",
-            "nn.functional.elu",
-            "nn.functional.hardshrink",
-            "nn.functional.hardsigmoid",
-            "nn.functional.hardtanh",
+            # needs log_sigmoid_forward, which returns a tuple
             "nn.functional.logsigmoid",
-            "nn.functional.mish",
-            "nn.functional.relu6",
+            # needs rrelu_with_noise
             "nn.functional.rrelu",
-            "nn.functional.selu",
-            "nn.functional.softplus",
-            "nn.functional.softshrink",
-            "nn.functional.threshold",
             "rad2deg",
             # binary
             "__rsub__",
@@ -8244,6 +8235,20 @@ COMPILE_FORWARD_SKIPS_AND_XFAILS = [
         op_match_fn=lambda device, op: (op.full_name == "isreal"),
         sample_match_fn=lambda device, sample: ("noncontig_transposed" in sample.name),
         name="crazy_aot_autograd_bug2",
+    ),
+    # Bug: Something is wrongly creating an empty tensor with the jagged layout on the C++ side
+    # for these activation ops
+    XFailRule(
+        error_type=torch._dynamo.exc.Unsupported,
+        error_msg="non-strided meta tensors not supported yet",
+        op_match_fn=lambda device, op: (
+            op.full_name
+            in {
+                "nn.functional.hardshrink",
+                "nn.functional.softshrink",
+            }
+        ),
+        name="empty_with_jagged_layout_activation",
     ),
 ]
 
