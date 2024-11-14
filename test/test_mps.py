@@ -1,7 +1,6 @@
 # Owner(s): ["module: mps"]
 
 import io
-import platform
 import sys
 import math
 import random
