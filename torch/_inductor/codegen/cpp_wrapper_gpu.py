@@ -202,10 +202,16 @@ class CppWrapperGpu(CppWrapperCpu):
         return name
 
     def define_kernel(
-        self, name: str, kernel: str, metadata: Optional[str] = None, gpu=True
+        self,
+        kernel_name: str,
+        kernel_body: str,
+        metadata: Optional[str] = None,
+        gpu=True,
     ):
         if not gpu:
-            return super().define_kernel(name, kernel, metadata, gpu)
+            return CppWrapperCpu.define_kernel(
+                self, kernel_name, kernel_body, metadata, gpu
+            )
 
     def generate(self, is_inference):
         self.prefix.writeline("\n")
@@ -307,7 +313,7 @@ class CppWrapperGpu(CppWrapperCpu):
         return kernel_var_name
 
     def generate_args_decl(self, call_args, arg_types, arg_signatures):
-        new_args = []
+        new_args: list[str] = []
 
         # Add more cases for other types as needed
         signature2dtype = {
@@ -330,13 +336,11 @@ class CppWrapperGpu(CppWrapperCpu):
                         var_name,
                     )
                 else:
+                    device_ptr_type = self.device_codegen.cpp_device_ptr()
                     self.writeline(
                         maybe_hipify_code_wrapper(
-                            f"{self.device_codegen.cpp_device_ptr()} {var_name};"
+                            f"{device_ptr_type} {var_name} = reinterpret_cast<{device_ptr_type}>({arg}.data_ptr());"
                         )
-                    )
-                    self.writeline(
-                        f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_data_ptr({arg}, reinterpret_cast<void**>(&{var_name})));"
                     )
             elif arg_type in (sympy.Integer, int):
                 self.writeline(f"int {var_name} = {self.expr_printer(arg)};")
@@ -405,7 +409,8 @@ class CppWrapperGpu(CppWrapperCpu):
 
         if not gpu:
             # Even in CppWrapperGpu, we may see cpp kernels
-            return super().generate_kernel_call(
+            return CppWrapperCpu.generate_kernel_call(
+                self,
                 kernel_name,
                 call_args,
                 grid,

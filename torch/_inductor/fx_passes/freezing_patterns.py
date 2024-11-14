@@ -119,6 +119,9 @@ def addmm_patterns_init():
         device = "cuda"
     else:
         device = "cpu"
+        if not config.cpp.enable_concat_linear:
+            return
+
     val = functools.partial(torch.empty, (10, 10), device=device, requires_grad=False)
 
     def check_concat_weights(match):
