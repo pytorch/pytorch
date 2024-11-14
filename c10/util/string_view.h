@@ -598,6 +598,20 @@ constexpr inline void swap(
 }
 using string_view = basic_string_view<char>;
 
+// NOTE: In C++20, this function should be replaced by str.starts_with
+constexpr bool string_view_starts_with(
+    std::string_view str,
+    std::string_view prefix) noexcept {
+  return str.size() >= prefix.size() && str.substr(0, prefix.size()) == prefix;
+}
+
+// NOTE: In C++20, this function should be replaced by str.ends_with
+constexpr bool string_view_ends_with(
+    std::string_view str,
+    std::string_view suffix) noexcept {
+  return str.size() >= suffix.size() &&
+      str.substr(str.size() - suffix.size()) == suffix;
+}
 } // namespace c10
 
 namespace std {
