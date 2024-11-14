@@ -313,7 +313,7 @@ class CppWrapperGpu(CppWrapperCpu):
         return kernel_var_name
 
     def generate_args_decl(self, call_args, arg_types, arg_signatures):
-        new_args = []
+        new_args: list[str] = []
 
         # Add more cases for other types as needed
         signature2dtype = {
@@ -336,13 +336,11 @@ class CppWrapperGpu(CppWrapperCpu):
                         var_name,
                     )
                 else:
+                    device_ptr_type = self.device_codegen.cpp_device_ptr()
                     self.writeline(
                         maybe_hipify_code_wrapper(
-                            f"{self.device_codegen.cpp_device_ptr()} {var_name};"
+                            f"{device_ptr_type} {var_name} = reinterpret_cast<{device_ptr_type}>({arg}.data_ptr());"
                         )
-                    )
-                    self.writeline(
-                        f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_data_ptr({arg}, reinterpret_cast<void**>(&{var_name})));"
                     )
             elif arg_type in (sympy.Integer, int):
                 self.writeline(f"int {var_name} = {self.expr_printer(arg)};")
