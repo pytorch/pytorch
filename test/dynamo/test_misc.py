@@ -11016,19 +11016,30 @@ fn
         # delete center of cache
         del m3
         c3 = _debug_get_cache_entry_list(fn.__code__)
-        self.assertEqual(len(c3), 2)
-        self.assertIs(c3[0], c2[0])
-        self.assertIs(c3[1], c2[2])
+        self.assertEqual(len(c3), 3)
+        self.assertTrue(
+            isinstance(
+                c3[1].guard_manager, torch._dynamo.guards.DeletedGuardManagerWrapper
+            )
+        )
 
         # delete end of cache
         del m1
         c4 = _debug_get_cache_entry_list(fn.__code__)
-        self.assertEqual(len(c4), 1)
-        self.assertIs(c4[0], c3[0])
+        self.assertEqual(len(c4), 3)
+        self.assertTrue(
+            isinstance(
+                c4[2].guard_manager, torch._dynamo.guards.DeletedGuardManagerWrapper
+            )
+        )
 
         del m2
         c5 = _debug_get_cache_entry_list(fn.__code__)
-        self.assertEqual(len(c5), 0)
+        self.assertTrue(
+            isinstance(
+                c5[0].guard_manager, torch._dynamo.guards.DeletedGuardManagerWrapper
+            )
+        )
 
     def test_inspect_signature_bind(self):
         import inspect

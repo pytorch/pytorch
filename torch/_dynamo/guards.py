@@ -1291,9 +1291,11 @@ class GuardBuilder(GuardBuilderBase):
         val = self.get(guard.name)
         t = type(self.get(guard.name))
         if isinstance(val, torch.fx.GraphModule):
+            # For some reason, GraphModuleImpl deallocation causes segfaults.
+            # So, dont put invalidate function
             obj_id = id(t)
         else:
-            obj_id = self.id_ref(t)
+            obj_id = self.id_ref(t)  # type: ignore[assignment]
         code = f"___check_type_id({self.arg_ref(guard)}, {obj_id})"
         self._set_guard_export_info(guard, [code])
 
@@ -2120,7 +2122,7 @@ class DeletedGuardFn:
 class DeletedGuardManagerWrapper(GuardManagerWrapper):
     def __init__(self):
         super().__init__()
-        self.root.add_always_false_guard("always_false")
+        self.root.add_always_false_guard(["always_false"])
 
 
 deleted_guard_manager = DeletedGuardManagerWrapper()
@@ -2418,6 +2420,7 @@ class CheckFunctionManager:
             assert isinstance(cache_entry, CacheEntry)
             assert isinstance(extra_state, ExtraState)
             extra_state.invalidate(cache_entry, deleted_guard_manager)
+            self.guard_manager = DeletedGuardFn  # type: ignore[assignment]
 
     def id_ref(self, obj):
         """add a weakref, return the id"""
