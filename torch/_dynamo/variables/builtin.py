@@ -26,7 +26,13 @@ from ..exc import (
 )
 from ..guards import GuardBuilder, install_guard
 from ..replay_record import DummyModule
-from ..source import AttrSource, GetItemSource, is_constant_source, TypeSource
+from ..source import (
+    AttrSource,
+    GetItemSource,
+    GlobalSource,
+    is_constant_source,
+    TypeSource,
+)
 from ..utils import (
     check_constant_args,
     check_numpy_ndarray_args,
@@ -1608,18 +1614,8 @@ class BuiltinVariable(VariableTracker):
         return variables.MapVariable(fn, seqs, mutation_type=ValueMutationNew())
 
     def call_filter(self, tx: "InstructionTranslator", fn, seq):
-        if seq.has_unpack_var_sequence(tx):
-            seq_unpacked = seq.unpack_var_sequence(tx)
-            try:
-                items = list(
-                    filter(
-                        lambda x: fn.call_function(tx, [x], {}).as_python_constant(),
-                        seq_unpacked,
-                    )
-                )
-                return variables.TupleVariable(items)
-            except NotImplementedError:
-                return
+        seq = seq.unpack_var_sequence(tx) if seq.has_unpack_var_sequence(tx) else seq
+        return variables.FilterVariable(fn, seq, mutation_type=ValueMutationNew())
 
     def call_getattr(
         self,
@@ -1879,6 +1875,11 @@ class BuiltinVariable(VariableTracker):
             ) from None
 
         source = obj.source and TypeSource(obj.source)
+        if py_type is torch.Tensor:
+            # In some cases torch isn't available in globals
+            name = tx.output.install_global_by_id("", torch)
+            source = AttrSource(GlobalSource(name), "Tensor")
+
         return VariableTracker.build(tx, py_type, source)
 
     def call_reversed(self, tx: "InstructionTranslator", obj: VariableTracker):
@@ -2025,6 +2026,8 @@ class BuiltinVariable(VariableTracker):
             return SetVariable(list(a.set_items & b.set_items))
         # None no-ops this handler and lets the driving function proceed
 
+    call_iand = call_and_
+
     def call_or_(self, tx: "InstructionTranslator", a, b):
         # Rely on constant_handler
         if isinstance(a, ConstantVariable) and isinstance(b, ConstantVariable):
@@ -2043,6 +2046,8 @@ class BuiltinVariable(VariableTracker):
             return SetVariable(list(a.set_items | b.set_items))
         # None no-ops this handler and lets the driving function proceed
         return None
+
+    call_ior = call_or_
 
     def call_not_(self, tx: "InstructionTranslator", a):
         if isinstance(a, SymNodeVariable):

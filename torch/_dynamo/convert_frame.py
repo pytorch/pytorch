@@ -105,6 +105,7 @@ from .symbolic_convert import (
 from .trace_rules import is_numpy
 from .utils import (
     CleanupManager,
+    codecache_metrics,
     CompilationMetrics,
     counters,
     dynamo_timed,
@@ -651,7 +652,6 @@ def _compile(
             one_graph,
             export,
             export_constraints,
-            mutated_closure_cell_ids,
             frame_state=frame_state,
             speculation_log=speculation_log,
             distributed_state=distributed_state,
@@ -868,7 +868,6 @@ def _compile(
     ):
         restart_reasons: set[str] = set()
         # This is shared across restarts
-        mutated_closure_cell_ids: Set[int] = set()
         speculation_log = SpeculationLog()
         if compile_pg := get_compile_pg():
             distributed_state = DistributedState(compile_pg, LocalState())
@@ -973,8 +972,21 @@ def _compile(
         fail_user_frame_lineno: Optional[int] = None
         torch._dynamo.utils.ReinplaceCounters.clear()
         guarded_code = None
+        codecache_metrics.clear()
         try:
             guarded_code = compile_inner(code, one_graph, hooks, transform)
+
+            # NB: We only put_code_state in success case.  Success case here
+            # does include graph breaks; specifically, if a graph break still
+            # resulted in a partially compiled graph, we WILL return here.  An
+            # Unsupported exception will only bubble to the top level if we
+            # are unable to compile the frame at all.  In this case, there's
+            # no point in uploading the code state, because we will always
+            # fail exactly the same way even without the update.  (It's useful
+            # to upload for graph break though, because this can prevent
+            # extra graph break compilations.)
+            put_code_state()
+
             return guarded_code
         except Exception as e:
             fail_type = type(e).__qualname__
@@ -1015,7 +1027,13 @@ def _compile(
                     f"{type(e).__qualname__}: {str(e)}"
                 ).with_traceback(e.__traceback__) from None
         finally:
-            put_code_state()
+            # === WARNING WARNING WARNING ===
+            # If you commit a bug here, it will suppress writing to
+            # dynamo_compile table, and we will not have telemetry.
+            # Be extra careful when making changes here!
+            #
+            # TODO to masnesral: feel free to delete these comments
+            # to resolve any merge conflict you have
 
             if tracer:
                 tracer.output.local_scope = {}
@@ -1058,6 +1076,7 @@ def _compile(
                 remote_fx_graph_cache_put_time = frame_phase_timing[frame_key].get(
                     "remote_fx_graph_cache_put", None
                 )
+                num_triton_bundles = codecache_metrics.get("num_triton_bundles", None)
                 torch._dynamo.utils.ReinplaceCounters.log()
 
             else:
@@ -1078,6 +1097,7 @@ def _compile(
                 remote_cache_time_saved = None
                 remote_fx_graph_cache_get_time = None
                 remote_fx_graph_cache_put_time = None
+                num_triton_bundles = None
 
             structured_logging_overhead_s = (
                 torch._logging.get_structured_logging_overhead()
@@ -1146,6 +1166,7 @@ def _compile(
                 config.specialize_float,
                 json.dumps(config_dict),
                 True,  # is_forward
+                num_triton_bundles,
                 to_int_ms(remote_fx_graph_cache_get_time),
                 to_int_ms(remote_fx_graph_cache_put_time),
                 start_time_us=start_time_ns // 1000,
@@ -1177,6 +1198,7 @@ def _compile(
             chromium_event_log.log_event_end(
                 "dynamo", time.time_ns(), {}, chromium_start_time, True
             )
+            # === END WARNING WARNING WARNING ===
 
 
 class ConvertFrame:
