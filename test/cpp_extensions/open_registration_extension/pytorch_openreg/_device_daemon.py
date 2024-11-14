@@ -15,6 +15,9 @@ from ._meta_parser import (
 log = logging.getLogger(__name__)
 mp_context = torch.multiprocessing.get_context("spawn")
 
+# Constant properties of our device
+NUM_DEVICES = 2
+
 
 # Our allocator
 class Allocator:
@@ -80,8 +83,9 @@ def register(registry):
 
 
 class Driver:
-    def __init__(self):
+    def __init__(self, num_devices):
         super().__init__()
+        self.num_devices = num_devices
         self.is_initialized = False
 
     def _lazy_init(self):
@@ -97,8 +101,6 @@ class Driver:
         self.host_allocator = Allocator()
         self.event_belong = {}
 
-        # Constant properties of our device
-        self.num_devices = 2
         self.devices = []
 
         for i in range(self.num_devices):
@@ -358,4 +360,4 @@ class _Executor:
         pass
 
 
-driver = Driver()
+driver = Driver(NUM_DEVICES)

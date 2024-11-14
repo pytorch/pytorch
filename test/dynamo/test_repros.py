@@ -1165,8 +1165,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         b_ref = torch.randn(2, 2, requires_grad=True)
         out_ref = f(a_ref, b_ref)
 
-        a_test = a_ref.clone().detach().requires_grad_(True)
-        b_test = b_ref.clone().detach().requires_grad_(True)
+        a_test = a_ref.detach().clone().requires_grad_(True)
+        b_test = b_ref.detach().clone().requires_grad_(True)
         out_test = torch.compile(f, backend="aot_eager")(a_test, b_test)
 
         self.assertEqual(out_ref, out_test)
@@ -2627,7 +2627,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
     def test_requires_grad_guards_with_grad_mode2(self):
         x = torch.ones(2, requires_grad=True)
-        x_ref = x.clone().detach().requires_grad_(True)
+        x_ref = x.detach().clone().requires_grad_(True)
 
         m = torch.nn.Linear(2, 2)
         m_compiled = torch.compile(m)
@@ -5620,7 +5620,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
             return out
 
         x = torch.randn(4, requires_grad=True)
-        x_test = x.clone().detach().requires_grad_(True)
+        x_test = x.detach().clone().requires_grad_(True)
 
         out = f(x)
         out_test = torch.compile(f, backend="aot_eager")(x_test)
@@ -5700,7 +5700,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
             return torch.mul(x, 2j)
 
         x_ref = torch.randn(4, 2, requires_grad=True)
-        x_test = x_ref.clone().detach().requires_grad_(True)
+        x_test = x_ref.detach().clone().requires_grad_(True)
 
         out_ref = f(torch.view_as_complex(x_ref))
         out_test = torch.compile(f, backend="aot_eager")(torch.view_as_complex(x_test))
@@ -6337,6 +6337,21 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         ref = mod(x)
         res = opt_mod(x)
         self.assertEqual(ref, res)
+
+    def test_symint_bitwise(self):
+        def fn(x):
+            z = x.shape[0]
+            z |= z >> 1
+            z |= z << 1
+            z &= z | (z > 1)
+            y = (z > 1) | (z <= 1)
+            # test composition with non-bitwise ops
+            z = (z | z) % 6
+            return y, z
+
+        opt_fn = torch.compile(fn, backend="eager", dynamic=True, fullgraph=True)
+        inp = torch.randn(3, 3)
+        self.assertEqual(fn(inp), opt_fn(inp))
 
 
 instantiate_parametrized_tests(ReproTests)
