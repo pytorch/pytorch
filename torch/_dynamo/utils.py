@@ -73,7 +73,11 @@ from torch._C import (
 from torch._dispatch.python import enable_python_dispatcher
 from torch._guards import Source, TracingContext
 from torch._subclasses.meta_utils import is_sparse_compressed
-from torch._utils_internal import log_chromium_event_internal, log_compilation_event
+from torch._utils_internal import (
+    log_chromium_event_internal,
+    log_compilation_event,
+    signpost_event,
+)
 from torch.fx._utils import _format_graph_code, lazy_format_graph_code
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._triton import has_triton, has_triton_package
@@ -140,7 +144,56 @@ frame_phase_timing: Dict[str, Dict[str, float]] = collections.defaultdict(
     lambda: collections.defaultdict(float)
 )
 
+codecache_metrics: Counter[str] = collections.Counter()
+
 timer_counter = itertools.count()
+
+
+# Abstraction on top of counters.
+class ReInplaceTrigger(enum.Enum):
+    AUTO_FUNC_V1 = 1
+    AUTO_FUNC_V2 = 2
+    TRITON_OPS = 3
+
+
+class ReinplaceCounters:
+    _values: DefaultDict[str, int] = collections.defaultdict(int)
+
+    # Track sizes of known not re-inplaced tensors (exclude dynamic shapes).
+    @classmethod
+    def add_missed_bytes(cls, trigger: ReInplaceTrigger, bytes: int):
+        if bytes != 0:
+            cls._values[f"missed_bytes_{trigger.name}"] += bytes
+
+    # Track number of not re-inplaced tensors.
+    @classmethod
+    def add_missed_opportunities(cls, trigger: ReInplaceTrigger, count: int):
+        if count != 0:
+            cls._values[f"missed_tensors_{trigger}"] += count
+
+    @classmethod
+    def clear(cls):
+        cls._values.clear()
+
+    @classmethod
+    def get_total_missed(cls):
+        sum = 0
+        for trigger in ReInplaceTrigger:
+            sum += cls._values.get(f"missed_tensors_{trigger}", 0)
+        return sum
+
+    @classmethod
+    def get_total_missed_bytes(cls):
+        sum = 0
+        for trigger in ReInplaceTrigger:
+            sum += cls._values.get(f"missed_bytes_{trigger.name}", 0)
+        return sum
+
+    @classmethod
+    def log(cls):
+        # if not empty log.
+        if cls._values:
+            signpost_event("inductor", "reinplace_counters", cls._values)
 
 
 def tabulate(
@@ -370,6 +423,9 @@ def dynamo_timed(
                                 remote_cache_time_saved_s=remote_cache_time_saved,
                                 structured_logging_overhead_s=structured_logging_overhead_s,
                                 is_forward=False,  # is_forward
+                                num_triton_bundles=codecache_metrics.get(
+                                    "num_triton_bundles", None
+                                ),
                                 remote_fx_graph_cache_get_time_ms=to_int_ms(
                                     remote_fx_graph_cache_get_time
                                 ),
@@ -843,7 +899,6 @@ class CompilationMetrics:
     # to install any guarded code.  True means we actually decided to install
     # a compiled frame
     has_guarded_code: Optional[bool] = None
-    possibly_missed_reinplacing_opportunities: Optional[int] = None
     remote_cache_time_saved_s: Optional[float] = None
     structured_logging_overhead_s: Optional[float] = None
     config_suppress_errors: Optional[bool] = None
@@ -851,6 +906,7 @@ class CompilationMetrics:
     specialize_float: Optional[bool] = None
     dynamo_config: Optional[str] = None
     is_forward: Optional[bool] = None
+    num_triton_bundles: Optional[int] = None
     remote_fx_graph_cache_get_time_ms: Optional[int] = None
     remote_fx_graph_cache_put_time_ms: Optional[int] = None
     start_time_us: Optional[int] = None
@@ -2185,6 +2241,15 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
         # no matter it's lazy module or not, we should copy to fake mode.
         nnmodule = deepcopy_to_fake_tensor(nnmodule, tx.fake_mode)
 
+    if node.name in ["interpolate", "is_integer", "wrapped_gradient"]:
+        # We need to specialize symfloats for now. Eventually we should do a tensorify pass in dynamo.
+        args = tuple(
+            float(arg)
+            if isinstance(arg, torch.SymFloat) and arg.node.hint is not None
+            else arg
+            for arg in args
+        )
+
     try:
         with tx.fake_mode, enable_python_dispatcher():
             ret_val = wrap_fake_exception(
@@ -2707,6 +2772,21 @@ def is_utils_checkpoint(obj):
     import torch.utils.checkpoint
 
     return obj is torch.utils.checkpoint.checkpoint
+
+
+def is_invoke_subgraph(obj):
+    from torch._higher_order_ops.invoke_subgraph import invoke_subgraph_placeholder
+
+    return obj is invoke_subgraph_placeholder
+
+
+def build_invoke_subgraph_variable(**options):
+    from .variables.higher_order_ops import TorchHigherOrderOperatorVariable
+
+    return TorchHigherOrderOperatorVariable.make(
+        torch._higher_order_ops.invoke_subgraph,
+        **options,
+    )
 
 
 def build_checkpoint_variable(**options):

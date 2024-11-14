@@ -1097,7 +1097,8 @@ def cudagraphify(
         nonlocal compiled_fn
         if compiled_fn is None:
             with dynamo_utils.dynamo_timed(
-                "cudagraphify"
+                "cudagraphify",
+                log_pt2_compile_event=True,
             ), dynamo_utils.preserve_rng_state():
                 compiled_fn = cudagraphify_fn(model, new_inputs, static_input_idxs)
         return compiled_fn(new_inputs)
@@ -1631,7 +1632,11 @@ def compile_fx(
         def bw_compiler(
             model: GraphModule, example_inputs: List[InputType]
         ) -> Union[CompiledFxGraph, str]:
-            with dynamo_utils.dynamo_timed("compile_fx.<locals>.bw_compiler"):
+            from torch._dynamo.convert_frame import compile_lock
+
+            with dynamo_utils.dynamo_timed(
+                "compile_fx.<locals>.bw_compiler"
+            ), compile_lock:
                 model_outputs_node = output_node(model)
                 if config.bw_outputs_user_visible:
                     model_outputs = pytree.arg_tree_leaves(*model_outputs_node.args)
