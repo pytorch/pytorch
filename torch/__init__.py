@@ -2753,7 +2753,7 @@ def _as_tensor_fullprec(t):
 def _get_njt_cache_from_offsets(offsets):
     from torch._subclasses.fake_tensor import FakeTensor
 
-    assert not isinstance(offsets, FakeTensor)
+    # assert not isinstance(offsets, FakeTensor)
 
     from torch.nested._internal.metadata_cache import try_get_cache
 

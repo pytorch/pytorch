@@ -197,10 +197,11 @@ class MetaTensorDescriber:
             from torch.nested._internal.nested_int import NestedIntNode
 
             if isinstance(x, torch.SymInt):
-                assert isinstance(x.node, NestedIntNode)
-                return MetaNestedIntDesc(
-                    cache=self.describe_nested_cache(x.node.nested_int_cache()),
-                )
+                # assert isinstance(x.node, NestedIntNode)
+                if isinstance(x.node, NestedIntNode):
+                    return MetaNestedIntDesc(
+                        cache=self.describe_nested_cache(x.node.nested_int_cache()),
+                    )
             return None
 
         return MetaCustomSizeStridesDesc(

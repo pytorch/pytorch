@@ -172,10 +172,17 @@ class TracingCacheState(GenericCacheState):
     # Any extra methods that we only need during tracing belong here.
     @staticmethod
     def init_from_eager(eager_cache_state: EagerCacheState) -> "TracingCacheState":
-        ret = TracingCacheState(eager_cache_state._keys)
-        ret._cache_registry._incrementing_id = (
-            eager_cache_state._cache_registry._incrementing_id
-        )
+        if eager_cache_state is None:
+            from torch.nested._internal.nested_tensor import RAGGED_SOURCE_KEYS
+
+            keys = RAGGED_SOURCE_KEYS
+            initial_count = 0
+        else:
+            keys = eager_cache_state._keys
+            initial_count = eager_cache_state._cache_registry._incrementing_id
+
+        ret = TracingCacheState(keys)
+        ret._cache_registry._incrementing_id = initial_count
         return ret
 
     def register_cache(self, data, cache_id):
