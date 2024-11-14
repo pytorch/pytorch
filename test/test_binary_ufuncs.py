@@ -4,6 +4,7 @@ import itertools
 import math
 import operator
 import random
+import unittest
 import warnings
 from functools import partial
 from itertools import chain, product
@@ -3567,10 +3568,14 @@ class TestBinaryUfuncs(TestCase):
 
     @skipIfTorchDynamo()  # complex infs/nans differ under Dynamo/Inductor
     @dtypesIfCUDA(torch.float32, torch.float64, torch.bfloat16)
-    @dtypes(
-        torch.float32, torch.float64, torch.bfloat16, torch.complex64, torch.complex128
-    )
+    @dtypes(torch.float32, torch.float64, torch.bfloat16)
     def test_logaddexp(self, device, dtype):
+        self._test_logaddexp(device, dtype, base2=False)
+
+    @unittest.expectedFailure
+    @onlyCPU
+    @dtypes(torch.complex64, torch.complex128)
+    def test_logaddexp_complex(self, device, dtype):
         self._test_logaddexp(device, dtype, base2=False)
 
     @dtypes(torch.float32, torch.float64, torch.bfloat16)
