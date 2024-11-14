@@ -46,6 +46,7 @@ using torch::distributed::autograd::DistAutogradContainer;
 #include <utility>
 #include <vector>
 
+// clang-format off
 C10_DEFINE_bool(
     torch_jit_enable_rethrow_caught_exception,
     false,
