@@ -51,40 +51,32 @@ def get_per_process_cpu_info() -> list[dict[str, Any]]:
         per_process_info.append(info)
     return per_process_info
 
-def get_parent_proccess(handle) -> dict[str,Any]:
+def get_parent_processes(handle) -> dict[int, list[int]]:
     processes = pynvml.nvmlDeviceGetComputeRunningProcesses(handle)
-    # Create a dictionary to store the utilization of each process
-    utilization_dict = defaultdict(dict)
+    parent_processes = {}
     for process in processes:
-        # Get the process ID and utilization
         pid = process.pid
-        utilization = process.utilization
-        # Add the pid utilization to the dictionary
-        if pid not in utilization_dict:
-            utilization_dict[pid] = {'gpu':0, 'children':[]}
-        utilization_dict[pid]['gpu'] += utilization
-
-        # Get the parent process ID
         parent_pid = psutil.Process(pid).ppid()
-        # If the parent process is not already in the dictionary, add it
-        if parent_pid not in utilization_dict:
-            utilization_dict[parent_pid] = {'gpu':0, 'children':[]}
-        # Add the utilization of the child process to the parent process
-        utilization_dict[parent_pid]['gpu'] += utilization
-        if pid not in utilization_dict[parent_pid]['children']:
-            utilization_dict[parent_pid]['children'].append(pid)
-    return utilization_dict
+        if pid not in parent_processes:
+            parent_processes[pid] = []
+        if parent_pid not in parent_processes:
+            parent_processes[parent_pid] = []
+        parent_processes[parent_pid].append(pid)
+    return parent_processes
 
 def get_per_process_gpu_info(handle: Any) -> list[dict[str, Any]]:
     processes = pynvml.nvmlDeviceGetComputeRunningProcesses(handle)
+    total_memory = pynvml.nvmlDeviceGetMemoryInfo(handle).total
     per_process_info = []
     for process in processes:
-        # Create a dictionary containing process ID, parent process ID, and used GPU memory
-        info = {
-            "utilization":process.utilization,
-            "pid": process.pid,
+        pid = process.pid
+        mem_usage = process.usedGpuMemory / 1024**2  # Convert to MB
+        memory_utilization_percent = (mem_usage * 100) / (total_memory / 1024**2)
+        info ={
+            "pid": pid,
+            "gpu_memory": mem_usage,
             "ppid": psutil.Process(process.pid).ppid(),
-            "gpu_memory": process.usedGpuMemory
+            "est": memory_utilization_percent
         }
         per_process_info.append(info)
     return per_process_info
@@ -140,6 +132,7 @@ if __name__ == "__main__":
     signal.signal(signal.SIGTERM, exit_gracefully)
 
     while not kill_now:
+        # each job does not share gpus, they will run in one ec2 instance, but each job will be assigned to one gpu,
         try:
             stats = {
                 "time": datetime.datetime.now(timezone.utc).isoformat("T") + "Z",
@@ -155,7 +148,7 @@ if __name__ == "__main__":
                     gpu_handle = pynvml.nvmlDeviceGetHandleByIndex(i)
                     gpu_utilization = pynvml.nvmlDeviceGetUtilizationRates(gpu_handle)
                     # Get the message for the current GPU
-                    stats[f"parent_pid_utilization_{i}"] = get_parent_proccess(gpu_handle)
+                    stats[f"parent_pid_utilization_{i}"] = get_parent_processes(gpu_handle)
                     stats[f"per_process_gpu_info_{i}"] = get_per_process_gpu_info(gpu_handle)
                     stats[f"total_gpu_utilization_{i}"] = gpu_utilization.gpu
                     stats[f"total_gpu_mem_utilization_{i}"] = gpu_utilization.memory
@@ -181,4 +174,4 @@ if __name__ == "__main__":
             }
         finally:
             print(json.dumps(stats))
-            time.sleep(1)
+            time.sleep(5)
