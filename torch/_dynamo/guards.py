@@ -2404,7 +2404,7 @@ class CheckFunctionManager:
         self.guard_manager.extra_state = None
         self.guard_manager.no_tensor_aliasing_sources = no_tensor_aliasing_names
 
-    def invalidate(self, obj_str=None):
+    def invalidate(self):
         # Some tests reveal that CheckFunctionManager has no attribute
         # guard_manager, but this case should not be of any concern.
         # This case doesn't seem easy to repro.
@@ -2415,14 +2415,9 @@ class CheckFunctionManager:
             and (cache_entry := self.guard_manager.cache_entry) is not None
             and (extra_state := self.guard_manager.extra_state) is not None
         ):
-            print(f"Invalidating {obj_str}", flush=True)
             assert isinstance(cache_entry, CacheEntry)
             assert isinstance(extra_state, ExtraState)
-            # breakpoint()
             extra_state.invalidate(cache_entry, deleted_guard_manager)
-            # breakpoint()
-            print(self.guard_manager)
-            print(self.guard_manager)
 
     def id_ref(self, obj):
         """add a weakref, return the id"""
@@ -2432,8 +2427,8 @@ class CheckFunctionManager:
                 # function, which will delete the callbacks as well. Therefore,
                 # we are using a finalizer which is kept alive.
                 self._weakrefs[id(obj)] = weakref.ref(obj)
-                weakref.finalize(obj, functools.partial(self.invalidate, obj_str=str(obj)))
-                # weakref.finalize(obj, self.invalidate)
+                # weakref.finalize(obj, functools.partial(self.invalidate, obj_str=str(obj)))
+                weakref.finalize(obj, self.invalidate)
         except TypeError:
             pass  # cannot weakref bool object
         return id(obj)
