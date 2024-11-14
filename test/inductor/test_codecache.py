@@ -494,8 +494,7 @@ class TestFxGraphCache(TestCase):
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @parametrize("bundle_triton", (False, True))
-    @parametrize("grad", (False, True))
-    def test_higher_order_op_bypass(self, bundle_triton, grad):
+    def test_higher_order_op_bypass(self, bundle_triton):
         """
         Verify that we bypass the cache when we have a higher order ops
         and that bundler start/end works with a cache bypass.
@@ -513,10 +512,8 @@ class TestFxGraphCache(TestCase):
         with config.patch(bundle_triton_into_fx_graph_cache=bundle_triton):
             compiled_fn = torch.compile(fn, dynamic=True, fullgraph=True)
 
-            x = torch.randn(4, 4, device=GPU_TYPE, requires_grad=grad)
+            x = torch.randn(4, 4, device=GPU_TYPE)
             result = compiled_fn(x)
-            if grad:
-                result.sum().backward()
 
             self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)

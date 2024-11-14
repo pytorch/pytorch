@@ -6,6 +6,7 @@ import dataclasses
 import functools
 import hashlib
 import importlib
+import itertools
 import io
 import json
 import logging
@@ -810,19 +811,22 @@ class FxGraphHashDetails:
             for module in gm.modules():
                 if not isinstance(module, torch.fx.GraphModule):
                     continue
-                for node in module.graph.nodes:
-                    if isinstance(
-                        node.target,
-                        (TritonKernelWrapperFunctional, TritonKernelWrapperMutation),
-                    ):
-                        data = node.meta.get(
-                            "user_defined_triton_kernel_source_and_constant_args", None
+                for node in itertools.chain(
+                    module.graph.find_nodes(
+                        op="call_function", target=TritonKernelWrapperFunctional
+                    ),
+                    module.graph.find_nodes(
+                        op="call_function", target=TritonKernelWrapperMutation
+                    ),
+                ):
+                    data = node.meta.get(
+                        "user_defined_triton_kernel_source_and_constant_args", None
+                    )
+                    if data is None:
+                        raise AssertionError(
+                            "TritonKernelWrapper does not contain source code meta"
                         )
-                        if data is None:
-                            raise AssertionError(
-                                "TritonKernelWrapper does not contain source code meta"
-                            )
-                        self.user_defined_triton_source.append(data)
+                    self.user_defined_triton_source.append(data)
 
         # Alignment checks
         self.inputs_to_check = inputs_to_check
