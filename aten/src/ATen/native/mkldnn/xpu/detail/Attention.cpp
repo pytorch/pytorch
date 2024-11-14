@@ -7,16 +7,79 @@
 #include <oneapi/dnnl/dnnl.hpp>
 
 using namespace at::native::onednn::graph;
-
 namespace {
-void alloc_graph_mem(
-    std::vector<dnnl::graph::tensor>& tensors,
-    const logical_tensor& lt,
-    const engine& eng,
-    const at::Tensor& input) {
-  dnnl::graph::tensor new_ts{lt, eng, input.data_ptr()};
-  tensors.push_back(new_ts);
-}
+struct SDPALogicalParams {
+  enum class TensorID {
+    query,
+    key,
+    scale,
+    attn_mask,
+    value,
+    output,
+    end,
+  };
+
+  logical_tensor query;
+  logical_tensor key;
+  logical_tensor scale;
+  std::optional<logical_tensor> attn_mask;
+  logical_tensor value;
+  logical_tensor output;
+
+  SDPALogicalParams(
+      const at::Tensor& query_,
+      const at::Tensor& key_,
+      const at::Tensor& value_,
+      const std::optional<at::Tensor>& attn_mask_,
+      const at::Tensor& output_,
+      data_type dtype) {
+    dims scale_shape = {1};
+    std::vector<logical_tensor> inputLogicalTensors;
+    query = {
+        static_cast<size_t>(TensorID::query),
+        dtype,
+        query_.sizes().vec(),
+        query_.strides().vec()};
+    key = {
+        static_cast<size_t>(TensorID::key),
+        dtype,
+        key_.sizes().vec(),
+        key_.strides().vec()};
+    scale = {
+        static_cast<size_t>(TensorID::scale),
+        dtype,
+        scale_shape,
+        logical_tensor::layout_type::strided,
+        logical_tensor::property_type::constant};
+    if (attn_mask_.has_value()) {
+      attn_mask = {
+          static_cast<size_t>(TensorID::attn_mask),
+          dtype,
+          attn_mask_->sizes().vec(),
+          attn_mask_->strides().vec()};
+    }
+    value = {
+        static_cast<size_t>(TensorID::value),
+        dtype,
+        value_.sizes().vec(),
+        value_.strides().vec()};
+    output = {
+        static_cast<size_t>(TensorID::output),
+        dtype,
+        output_.sizes().vec(),
+        output_.strides().vec()};
+  }
+  std::vector<logical_tensor> get_input() const {
+    if (attn_mask.has_value()) {
+      return {query, key, scale, attn_mask.value(), value};
+    } else {
+      return {query, key, scale, value};
+    }
+  }
+  std::vector<logical_tensor> get_output() const {
+    return {output};
+  }
+};
 
 partition create_sdpa_graph_partition(
     int batch_size,
@@ -24,68 +87,43 @@ partition create_sdpa_graph_partition(
     int seq_len_k,
     int num_head,
     int head_dim,
-    const at::Tensor& query,
-    const at::Tensor& key,
-    const at::Tensor& value,
-    const std::optional<at::Tensor>& attn_mask,
     bool is_causal,
-    const at::Tensor& output,
-    data_type dtype) {
+    data_type dtype,
+    const SDPALogicalParams& params) {
   // graph building and partitioning
   // currently, we assume that Q and K have same sequence length
 
-  dims q_input_shape = {batch_size, num_head, seq_len_q, head_dim};
-  dims kv_input_shape = {batch_size, num_head, seq_len_k, head_dim};
   dims qk_output_shape = {batch_size, num_head, seq_len_q, seq_len_k};
   dims scale_shape = {1};
-  size_t lt_id = 0;
+  size_t lt_id = static_cast<size_t>(SDPALogicalParams::TensorID::end);
   size_t op_id = 0;
 
-  logical_tensor query_input{
-      lt_id++, dtype, q_input_shape, query.strides().vec()};
-  logical_tensor key_input{lt_id++, dtype, kv_input_shape, key.strides().vec()};
-
-  logical_tensor matmul_qk_out{
-      lt_id++, dtype, qk_output_shape, logical_tensor::layout_type::strided};
+  logical_tensor matmul_qk_out{lt_id++, dtype};
   op matmul_qk{
       op_id++,
       op::kind::MatMul,
-      {query_input, key_input},
+      {params.query, params.key},
       {matmul_qk_out},
       "matmul_qk"};
   matmul_qk.set_attr<bool>(op::attr::transpose_b, true);
 
-  logical_tensor scale_factor{
-      lt_id++,
-      dtype,
-      scale_shape,
-      logical_tensor::layout_type::strided,
-      logical_tensor::property_type::constant};
-  logical_tensor scaled_qk_out{
-      lt_id++, dtype, qk_output_shape, logical_tensor::layout_type::strided};
+  logical_tensor scaled_qk_out{lt_id++, dtype};
   op scale_div{
       op_id++,
       op::kind::Divide,
-      {matmul_qk_out, scale_factor},
+      {matmul_qk_out, params.scale},
       {scaled_qk_out},
       "scale_div"};
 
   std::optional<op> mask_add;
-  logical_tensor masked_qk_out;
-  if (attn_mask.has_value()) {
-    dims attention_mask_shape = {attn_mask.value().sizes().vec()};
-    logical_tensor attention_mask = {
-        lt_id++,
-        dtype,
-        attention_mask_shape,
-        attn_mask.value().strides().vec()};
-    masked_qk_out = {
-        lt_id++, dtype, qk_output_shape, logical_tensor::layout_type::strided};
+  std::optional<logical_tensor> masked_qk_out;
+  if (params.attn_mask.has_value()) {
+    masked_qk_out = {lt_id++, dtype};
     mask_add = {
         op_id++,
         op::kind::Add,
-        {scaled_qk_out, attention_mask},
-        {masked_qk_out},
+        {scaled_qk_out, params.attn_mask.value()},
+        {masked_qk_out.value()},
         "mask_add"};
   } else if (is_causal) {
     TORCH_CHECK(false, "Causal mask must use fallback mask for now.");
@@ -94,32 +132,22 @@ partition create_sdpa_graph_partition(
   op softmax{op_id++, op::kind::SoftMax, "softmax"};
   softmax.set_attr<int64_t>(op::attr::axis, -1);
 
-  logical_tensor softmax_out{
-      lt_id++, dtype, qk_output_shape, logical_tensor::layout_type::strided};
-  if (mask_add.has_value()) {
-    softmax.add_input(masked_qk_out);
-  } else {
-    softmax.add_input(scaled_qk_out);
-  }
+  logical_tensor softmax_out{lt_id++, dtype};
+  softmax.add_input(masked_qk_out.value_or(scaled_qk_out));
   softmax.add_output(softmax_out);
-
-  logical_tensor value_input{
-      lt_id++, dtype, kv_input_shape, value.strides().vec()};
-  logical_tensor matmul_v_out{
-      lt_id++, dtype, q_input_shape, output.strides().vec()};
 
   op matmul_v{
       op_id++,
       op::kind::MatMul,
-      {softmax_out, value_input},
-      {matmul_v_out},
+      {softmax_out, params.value},
+      {params.output},
       "matmul_v"};
 
   engine::kind ekind = engine::kind::gpu;
   graph g(ekind);
   g.add_op(matmul_qk);
   g.add_op(scale_div);
-  if (attn_mask.has_value()) {
+  if (mask_add.has_value()) {
     g.add_op(mask_add.value());
   }
   g.add_op(softmax);
@@ -166,6 +194,8 @@ TORCH_API void gpu_float_sdpa(
       (logical_tensor_dtype != data_type::undef),
       "Only FP16 & FP32 datatypes are currently supported");
 
+  thread_local static GraphCache cache;
+
   // cache key creation
   // patternID is determined on the basis of the arguments provided
   std::bitset<32> patternID;
@@ -209,12 +239,14 @@ TORCH_API void gpu_float_sdpa(
         attn_mask->strides().begin(),
         attn_mask->strides().end());
   }
-  auto iter = cache_lookup(map_key);
 
-  cp_entry cp;
-  if (iter == cache_end()) {
-    auto graph_partition_iter = partition_map_lookup(map_key);
-    if (graph_partition_iter == partition_map_end()) {
+  auto cp_entry_ref = cache.find_kernel(map_key);
+  if (!cp_entry_ref.has_value()) {
+    SDPALogicalParams logical_params(
+        query, key, value, attn_mask, output, logical_tensor_dtype);
+
+    auto partition_ = cache.find_partition(patternID);
+    if (!partition_.has_value()) {
       // partition cache no hit
       // graph building and partitioning
       partition sdp_partition = create_sdpa_graph_partition(
@@ -223,44 +255,41 @@ TORCH_API void gpu_float_sdpa(
           seq_len_k,
           num_head,
           head_dim,
-          query,
-          key,
-          value,
-          attn_mask,
           is_causal,
-          output,
-          logical_tensor_dtype);
-
-      insert_in_partition_cache(map_key, sdp_partition);
-      graph_partition_iter = partition_map_lookup(map_key);
+          logical_tensor_dtype,
+          logical_params);
+      partition_ = cache.insert_partition_cache(patternID, sdp_partition);
     }
-
-    cp.partition_ = graph_partition_iter->second;
+    cp_entry sdp_cp_entry{
+        .partition_ = partition_->get(),
+        .input_logical_tensors = logical_params.get_input(),
+        .output_logical_tensors = logical_params.get_output(),
+    };
     // partition compilation
-    compile_partition(cp, eng);
-  } else {
-    cp = iter->second->second;
+    sdp_cp_entry.cp = sdp_cp_entry.partition_.compile(
+        sdp_cp_entry.input_logical_tensors,
+        sdp_cp_entry.output_logical_tensors,
+        eng);
+    cp_entry_ref = cache.insert_fused_kernel_cache(map_key, sdp_cp_entry);
   }
 
   // partition execution
-  auto& inputs = cp.inputLogicalTensors_;
-  auto& outputs = cp.outputLogicalTensors_;
-  cp.inputLLGATensors_.clear();
-  cp.outputLLGATensors_.clear();
-  size_t i = 0;
-  alloc_graph_mem(cp.inputLLGATensors_, inputs[i++], eng, query);
-  alloc_graph_mem(cp.inputLLGATensors_, inputs[i++], eng, key);
-  alloc_graph_mem(cp.inputLLGATensors_, inputs[i++], eng, softmax_scale1);
-  if (attn_mask.has_value()) {
-    alloc_graph_mem(cp.inputLLGATensors_, inputs[i++], eng, attn_mask.value());
-  }
-  alloc_graph_mem(cp.inputLLGATensors_, inputs[i++], eng, value);
-  alloc_graph_mem(cp.outputLLGATensors_, outputs[0], eng, output);
-  cp.cp_.execute(strm, cp.inputLLGATensors_, cp.outputLLGATensors_);
+  auto& sdp_cp_entry = cp_entry_ref->get();
+  const auto& l_inputs = sdp_cp_entry.input_logical_tensors;
+  const auto& l_outputs = sdp_cp_entry.output_logical_tensors;
 
-  if (iter == cache_end()) {
-    // cache the compiled kernel
-    insert_in_fused_kernel_cache(map_key, cp);
+  std::vector<dnnl::graph::tensor> outputs = {
+      {l_outputs[0], eng, output.data_ptr()},
+  };
+  size_t i = 0;
+  std::vector<dnnl::graph::tensor> inputs;
+  inputs.emplace_back(l_inputs[i++], eng, query.data_ptr());
+  inputs.emplace_back(l_inputs[i++], eng, key.data_ptr());
+  inputs.emplace_back(l_inputs[i++], eng, softmax_scale1.data_ptr());
+  if (attn_mask.has_value()) {
+    inputs.emplace_back(l_inputs[i++], eng, attn_mask->data_ptr());
   }
+  inputs.emplace_back(l_inputs[i++], eng, value.data_ptr());
+  sdp_cp_entry.cp.execute(strm, inputs, outputs);
 }
 } // namespace at::native::onednn::graph
