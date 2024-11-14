@@ -10902,7 +10902,7 @@ class CommonTemplate:
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
     @torch._inductor.config.patch(implicit_fallbacks=True)
     def test_custom_op_unbacked_symints(self):
-        @torch.library.custom_op("mylib::foo", mutates_args={})
+        @torch.library.custom_op("test_unbacked_symints::foo", mutates_args={})
         def foo(x: torch.Tensor) -> torch.Tensor:
             return x.clone()
 
@@ -10913,7 +10913,7 @@ class CommonTemplate:
             u2 = torch.library.get_ctx().new_dynamic_size()
             return x.new_empty(u0, u1, u2)
 
-        @torch.library.custom_op("mylib::bar", mutates_args={})
+        @torch.library.custom_op("test_unbacked_symints::bar", mutates_args={})
         def bar(x: torch.Tensor) -> torch.Tensor:
             return x.clone()
 
