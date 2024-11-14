@@ -38,18 +38,14 @@ class ConstantVariable(VariableTracker):
     @staticmethod
     def create(value, **kwargs) -> VariableTracker:
         source = kwargs.get("source", None)
-        is_literal = ConstantVariable.is_literal(value)
-        if not is_literal:
-            for disallowed_type, reason in _type_to_assert_reason.items():
-                assert not isinstance(value, disallowed_type), reason
 
-        # Routing for list and tuple literals.
-        if is_literal and isinstance(value, (set, frozenset)):
+        # Routing for supported collection literals.
+        if isinstance(value, (set, frozenset)):
             items = []
             for i, x in enumerate(value):
                 items.append(ConstantVariable.create(x))
             return variables.SetVariable(items, **kwargs)
-        elif is_literal and isinstance(value, (list, tuple)):
+        elif isinstance(value, (list, tuple)):
             items = []
             for i, x in enumerate(value):
                 item_source = GetItemSource(source, i) if source else None
@@ -67,13 +63,10 @@ class ConstantVariable(VariableTracker):
 
     def __init__(self, value, **kwargs) -> None:
         super().__init__(**kwargs)
-        if not ConstantVariable.is_literal(value):
+        if not ConstantVariable.is_base_literal(value):
             for disallowed_type, reason in _type_to_assert_reason.items():
                 assert not isinstance(value, disallowed_type), reason
 
-        assert not isinstance(
-            value, (list, tuple)
-        ), "ConstantVariable(list) is banned - please create a ListVariable(items)"
         if np is not None and isinstance(value, np.number):
             self.value = value.item()
         else:
@@ -105,13 +98,14 @@ class ConstantVariable(VariableTracker):
         )
 
     @staticmethod
+    def is_base_literal(obj):
+        return type(obj) in common_constant_types
+
+    @staticmethod
     def is_literal(obj):
-        if type(obj) in common_constant_types:
-            return True
-        # The structure within is_literal get routed to variables.BaseListVariable
         if type(obj) in (list, tuple, set, frozenset, torch.Size):
             return all(ConstantVariable.is_literal(x) for x in obj)
-        return False
+        return ConstantVariable.is_base_literal(obj)
 
     def unpack_var_sequence(self, tx):
         try:
