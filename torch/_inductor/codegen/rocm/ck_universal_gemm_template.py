@@ -201,12 +201,12 @@ class CKGemmTemplate(CKTemplate):
         {{kernel_name}}(
             static_cast<const AArgType*>(a_m_k_device_buf.GetDeviceBuffer()),
             static_cast<const BArgType*>(b_k_n_device_buf.GetDeviceBuffer()),
-            {% if has_bias %}
-            static_cast<const BiasArgType*>(d_m_n_device_buf.GetDeviceBuffer()),
-            {% endif %}
             {% if has_scale %}
             static_cast<const ScaleAArgType*>(s_a_m_n_device_buf.GetDeviceBuffer()),
             static_cast<const ScaleBArgType*>(s_b_m_n_device_buf.GetDeviceBuffer()),
+            {% endif %}
+            {% if has_bias %}
+            static_cast<const BiasArgType*>(d_m_n_device_buf.GetDeviceBuffer()),
             {% endif %}
             static_cast<CArgType*>(c_m_n_device_buf.GetDeviceBuffer()),
             M,
