@@ -1797,7 +1797,7 @@ class GuardBuilder(GuardBuilderBase):
         (
             code_parts,
             verbose_code_parts,
-            sympy_code_parts,
+            cpp_code_parts,
         ) = output_graph.shape_env.produce_guards_verbose(
             [a.fake for a in fs],
             [a.source for a in fs],
@@ -1821,54 +1821,19 @@ class GuardBuilder(GuardBuilderBase):
         if config.enable_cpp_symbolic_shape_guards:
             import ctypes
 
-            import sympy
-
             from torch._inductor.codecache import CppCodeCache
-            from torch._inductor.codegen.cpp_utils import cexpr
 
-            all_symbols = set()
-            for expr, symbols_to_sources in sympy_code_parts:
-                all_symbols.update([symbol.name for symbol in symbols_to_sources])
-
-            # Install all the symbolic guards in one SYMBOLIC_SHAPE_GUARD
-            all_sources: Dict[Source, Symbol] = {}
-            all_exprs = []
-            for expr, symbols_to_sources in sympy_code_parts:
-                replacements = {}
-                for symbol, sources in symbols_to_sources.items():
-                    existing_symbol = all_sources.get(sources[0], None)
-                    if existing_symbol is None:
-                        mangled_name = re.sub("[^0-9a-zA-Z_]+", "_", symbol.name)
-                        if symbol.name == mangled_name:
-                            all_sources[sources[0]] = symbol
-                        else:
-                            old_mangled_name = mangled_name
-                            count = 0
-                            while mangled_name in all_symbols:
-                                mangled_name = f"{old_mangled_name}_{count}"
-                                count += 1
-                            all_symbols.add(mangled_name)
-                            new_symbol = sympy.Symbol(mangled_name)
-                            all_sources[sources[0]] = new_symbol
-                            replacements[symbol] = new_symbol
-                    else:
-                        if existing_symbol != symbol:
-                            replacements[symbol] = existing_symbol
-
-                if replacements:
-                    all_exprs.append(expr.xreplace(replacements))
-                else:
-                    all_exprs.append(expr)
+            cpp_exprs, source_to_symbol = cpp_code_parts
 
             try:
                 guard_managers = [
                     self.get_guard_manager_from_source(IndexedSource(source, i))
-                    for i, source in enumerate(all_sources)
+                    for i, source in enumerate(source_to_symbol)
                 ]
 
                 values_str = ", ".join(
                     f"{symbol} = values[{i}]"
-                    for i, symbol in enumerate(all_sources.values())
+                    for i, symbol in enumerate(source_to_symbol.values())
                 )
                 func_str = textwrap.dedent(
                     f"""
@@ -1878,7 +1843,7 @@ class GuardBuilder(GuardBuilderBase):
 
                 extern "C" int64_t guard(int64_t *values) {{
                   int64_t {values_str};
-                  return ({") && (".join(cexpr(expr) for expr in all_exprs)});
+                  return ({") && (".join(cpp_exprs)});
                 }}
                 """
                 )
@@ -1894,7 +1859,7 @@ class GuardBuilder(GuardBuilderBase):
             else:
                 install_symbolic_shape_guard(
                     guard_managers,
-                    len(all_sources),
+                    len(source_to_symbol),
                     cguard,
                     clib,
                     verbose_code_parts,

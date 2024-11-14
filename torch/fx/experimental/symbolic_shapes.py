@@ -81,7 +81,7 @@ from torch.utils._sympy.functions import (
     PythonMod,
 )
 from torch.utils._sympy.numbers import int_oo
-from torch.utils._sympy.printers import PythonPrinter
+from torch.utils._sympy.printers import CppPrinter, PythonPrinter
 from torch.utils._sympy.singleton_int import SingletonInt
 from torch.utils._sympy.solve import try_solve
 from torch.utils._sympy.symbol import make_symbol, symbol_is_type, SymT
@@ -109,7 +109,6 @@ log = logging.getLogger(__name__)
 
 import sympy
 from sympy import S
-from sympy.printing.str import StrPrinter
 
 
 class GuardOnDataDependentSymNode(RuntimeError):
@@ -2042,7 +2041,7 @@ class RuntimeAssert:
 
 
 # Used for printing SymExprs in compile_fx
-class SymExprPrinter(StrPrinter):
+class SymExprPrinter(PythonPrinter):
     def _print_Float(self, expr: sympy.Float) -> str:
         return str(float(expr))
 
@@ -2080,13 +2079,46 @@ class ShapeGuardPrinter(PythonPrinter):
         )
         return self.source_ref(self.symbol_to_source[expr][0])
 
-    def _print_Eq(self, expr: sympy.Expr) -> str:
-        return "expr.args[0] == expr.args[1]"
-
 
 class LoggingShapeGuardPrinter(ShapeGuardPrinter):
     def __init__(self, var_to_sources: Mapping[sympy.Symbol, List[Source]]):
         super().__init__(var_to_sources, lambda n: n.name(), var_to_sources)
+
+
+class ShapeGuardCppPrinter:
+    def __init__(self) -> None:
+        self.printer = CppPrinter()
+        self.all_symbols: Set[str] = set()
+        self.source_to_symbol: Dict[Source, sympy.Symbol] = {}
+
+    def doprint(
+        self, expr: sympy.Expr, symbol_to_sources: Dict[sympy.Symbol, List[Source]]
+    ) -> str:
+        replacements = {}
+        for symbol, sources in symbol_to_sources.items():
+            existing_symbol = self.source_to_symbol.get(sources[0], None)
+            if existing_symbol is None:
+                mangled_name = re.sub("[^0-9a-zA-Z_]+", "_", symbol.name)
+                if symbol.name == mangled_name:
+                    self.source_to_symbol[sources[0]] = symbol
+                else:
+                    old_mangled_name = mangled_name
+                    count = 0
+                    while mangled_name in self.all_symbols:
+                        mangled_name = f"{old_mangled_name}_{count}"
+                        count += 1
+                    new_symbol = sympy.Symbol(mangled_name)
+                    self.source_to_symbol[sources[0]] = new_symbol
+                    replacements[symbol] = new_symbol
+                self.all_symbols.add(mangled_name)
+            else:
+                if existing_symbol != symbol:
+                    replacements[symbol] = existing_symbol
+
+        if replacements:
+            expr = expr.xreplace(replacements)
+
+        return self.printer.doprint(expr)
 
 
 class DynamicDimConstraintPrinter(PythonPrinter):
@@ -2751,6 +2783,7 @@ class DimConstraints:
             t = transform(s)
             if t == s:
                 continue
+            print("t, s", t, s, s in self._static_results, s in self._dynamic_results)
             left, op, right = re.split(r"( == | <= | >= | < | > )", t)
             op = op.strip()
             if op == "==" and left == right:
@@ -4368,8 +4401,8 @@ class ShapeEnv:
         # Indicates if we should produce guards for known static values.
         ignore_static: bool = True,
     ) -> Tuple[
-        List[str], List[str], List[Tuple[sympy.Expr, Dict[str, List[Source]]]]
-    ]:  # regular, verbose, sympy
+        List[str], List[str], Tuple[List[str], Dict[Source, sympy.Symbol]]
+    ]:  # python, verbose, cpp
         """
         Generates a list of guards strings which, when evaluated in a context that
         defines tensors for all the sources, returns True or False depending
@@ -4503,6 +4536,8 @@ class ShapeEnv:
             sympy.Symbol, Set[Constraint]
         ] = collections.defaultdict(set)
         constraint_violations: List[Tuple[bool, str, Callable[[], str]]] = []
+
+        cpp_printer = ShapeGuardCppPrinter()
 
         def record_constraint_violation(
             warn_only: bool,
@@ -4764,7 +4799,7 @@ class ShapeEnv:
         #    This does a lot of work: it covers duck sizing and equality guards.
         python_exprs = []
         verbose_exprs = []
-        sympy_exprs = []
+        cpp_exprs = []
         self.dim_constraints = DimConstraints(
             symbol_to_source,
             self.var_to_val,
@@ -4810,7 +4845,9 @@ class ShapeEnv:
                     extended_symbol_to_source, source_ref, self.var_to_sources
                 ).doprint(eq_expr)
                 python_exprs.append(res)
-                sympy_exprs.append((eq_expr, extended_symbol_to_source))
+                cpp_exprs.append(
+                    cpp_printer.doprint(eq_expr, extended_symbol_to_source)
+                )
 
                 if (s0 := self.source_to_var.get(srcname)) is not None:
                     if source != self.var_to_sources[s0][0]:
@@ -4905,7 +4942,7 @@ class ShapeEnv:
                 ).doprint(expr)
                 python_exprs.append(guard_expr)
                 verbose_exprs.append(f"{guard_expr}  # {guard.sloc}")
-                sympy_exprs.append((expr, symbol_to_source))
+                cpp_exprs.append(cpp_printer.doprint(expr, symbol_to_source))
                 self._add_target_expr(expr)
                 # A non-relational constraint on a single sizevar can violate
                 # a constraint
@@ -4987,8 +5024,10 @@ class ShapeEnv:
                 verbose_exprs.append(f"{rf} <= {r.upper}  # {vr_sloc.upper}")
             if len(bounds) > 1:
                 python_exprs.append(" <= ".join(bounds))
-                sympy_exprs.append(
-                    (sympy.And(*sympy_bounds, evaluate=False), {symbol: sources})
+                cpp_exprs.append(
+                    cpp_printer.doprint(
+                        sympy.And(*sympy_bounds, evaluate=False), {symbol: sources}
+                    )
                 )
                 # NB: verbose_exprs are done above
 
@@ -5029,8 +5068,10 @@ class ShapeEnv:
                 verbose_exprs.append(
                     f"{res}  # implicit guard for float input due to NaN specialization in the framework"
                 )
-                sympy_exprs.append(
-                    (expr, {sympy.Symbol(sources[0].name()): [sources[0]]})
+                cpp_exprs.append(
+                    cpp_printer.doprint(
+                        expr, {sympy.Symbol(sources[0].name()): [sources[0]]}
+                    )
                 )
 
         if constraint_violations:
@@ -5099,7 +5140,7 @@ class ShapeEnv:
         # Only run translation validation when we are not passing custom guards
         if guards is None:
             self._check_translation_validate()
-        return python_exprs, verbose_exprs, sympy_exprs
+        return python_exprs, verbose_exprs, (cpp_exprs, cpp_printer.source_to_symbol)
 
     def produce_guards_expression(
         self,
