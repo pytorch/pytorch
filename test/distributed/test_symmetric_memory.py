@@ -213,6 +213,20 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         self.assertEqual(signal_pad.dtype, torch.uint64)
         self.assertEqual(signal_pad.numel(), 64)
 
+        # Sanity check that writes to buffer doesn't corrupt signal_pad
+        t = _SymmetricMemory.empty_strided_p2p(
+            (0,),
+            (0,),
+            torch.float32,
+            self.device,
+            dist.group.WORLD.group_name,
+        )
+        symm_mem = _SymmetricMemory.rendezvous(t)
+        signal_pad = symm_mem.get_signal_pad(self.rank)
+        signal_pad.fill_(42)
+        t.fill_(0)
+        self.assertTrue(signal_pad.eq(42).all())
+
         dist.destroy_process_group()
 
     @skipIfRocm
