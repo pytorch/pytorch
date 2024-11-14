@@ -496,7 +496,7 @@ def _construct_node(
 
 
 class OpRecorder(evaluator.Evaluator):
-    """An onnxscript Evaluator that captures the graph into torchscript."""
+    """An onnxscript Evaluator that captures the graph into ONNX IR."""
 
     def __init__(
         self, opset: onnxscript.values.Opset, constant_farm: dict[Any, ir.Value]

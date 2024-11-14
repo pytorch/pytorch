@@ -35,7 +35,7 @@ if TYPE_CHECKING:
     from torch.export import ExportedProgram
     from torch.export.graph_signature import ExportGraphSignature
 
-from torch.export.graph_signature import InputKind, OutputKind
+from torch.export.graph_signature import CustomObjArgument, InputKind, OutputKind
 from torch.utils._pytree import (
     _register_pytree_node,
     Context,
@@ -634,6 +634,8 @@ def node_inline_(call_mod_node: torch.fx.Node) -> None:
     with gm.graph.inserting_before(call_mod_node):
         for node in body:
             new_node = gm.graph.node_copy(node)
+            if node.op == "get_attr":
+                setattr(gm, node.target, getattr(sub_gm, node.target))
             node_replace_(node, new_node)
 
         if len(output) > 0:
@@ -860,6 +862,10 @@ def placeholder_naming_pass(
         if node.op == "placeholder":
             assert node.name in name_map
             node.name = node.target = name_map[node.name]
+            # if the constant obj is an input, we also need to update meta["val"]
+            # because this is created before the placeholder naming pass
+            if isinstance(node.meta["val"], CustomObjArgument):
+                node.meta["val"].name = node.name
         elif node.name in name_map:
             node.name = name_map[node.name]
 
@@ -1121,15 +1127,3 @@ def _get_decomp_for_cia(op: "OperatorBase"):
             )
 
     return functools.partial(_special_op_to_decompose_cia, kernel=op)
-
-
-# This table is a stop-gap table which replicates
-# the old behaviour of post-dispatch IR.
-# This table contains all functional CIA ops mapping
-# to their default decomp. In old export, this will
-# be decomposed implicitly.
-def _decomp_table_to_post_autograd_aten():
-    decomp_table = {}
-    for k in _collect_all_valid_cia_ops_for_aten_namespace():
-        decomp_table[k] = _get_decomp_for_cia(k)
-    return decomp_table

@@ -58,6 +58,7 @@ include_patterns = [
     'aten/src/ATen/mps/**/*.mm',
     'aten/src/ATen/xpu/**/*.h',
     'aten/src/ATen/xpu/**/*.cpp',
+    'aten/src/ATen/native/mps/**/*.metal',
     'aten/src/ATen/native/mps/**/*.mm',
     'aten/src/ATen/native/vulkan/**/*.h',
     'aten/src/ATen/native/vulkan/**/*.cpp',
@@ -67,10 +68,10 @@ include_patterns = [
     'aten/src/ATen/native/cuda/Fused*.cu',
     'aten/src/ATen/native/cudnn/*.h',
     'aten/src/ATen/native/cudnn/*.cpp',
+    'aten/src/ATen/native/mkldnn/xpu/**/*.h',
+    'aten/src/ATen/native/mkldnn/xpu/**/*.cpp',
     'c10/**/*.h',
     'c10/**/*.cpp',
-    'distributed/c10d/*DMAConnectivity.*',
-    'distributed/c10d/*SymmetricMemory.*',
     'torch/csrc/**/*.h',
     'torch/csrc/**/*.hpp',
     'torch/csrc/**/*.cpp',
@@ -79,6 +80,7 @@ include_patterns = [
 ]
 exclude_patterns = [
     'aten/src/ATen/native/vulkan/api/vk_mem_alloc.h',
+    'aten/src/ATen/native/mps/kernels/Quantized.metal',
     'c10/util/strong_type.h',
     '**/fb/**',
     'torch/csrc/inductor/aoti_torch/generated/**',
@@ -200,6 +202,8 @@ include_patterns = [
     'aten/src/ATen/core/*.cpp',
     'aten/src/ATen/cudnn/*.h',
     'aten/src/ATen/cudnn/*.cpp',
+    'aten/src/ATen/native/mkldnn/xpu/**/*.h',
+    'aten/src/ATen/native/mkldnn/xpu/**/*.cpp',
     'aten/src/ATen/detail/*',
     'aten/src/ATen/functorch/*.h',
     'aten/src/ATen/functorch/*.cpp',
@@ -214,10 +218,6 @@ include_patterns = [
     'torch/csrc/*.cpp',
     'torch/csrc/**/*.h',
     'torch/csrc/**/*.cpp',
-    'torch/csrc/distributed/autograd/**/*.cpp',
-    'torch/csrc/distributed/autograd/**/*.h',
-    'torch/csrc/distributed/rpc/**/*.cpp',
-    'torch/csrc/distributed/rpc/**/*.h',
     'torch/csrc/jit/serialization/*.h',
     'torch/csrc/jit/serialization/*.cpp',
 ]
@@ -226,9 +226,17 @@ exclude_patterns = [
     # caffe2_pb.h, otherwise we'd have to build protos as part of this CI job.
     # CUDA files are also excluded.
     '**/fb/**',
+    '**/generated/**',
     '**/*pb.h',
+    '**/*inl.h',
+    'aten/src/ATen/cpu/FlushDenormal.cpp',
+    'aten/src/ATen/cpu/Utils.cpp',
+    'aten/src/ATen/cpu/vml.h',
+    'aten/src/ATen/CPUFixedAllocator.h',
+    'aten/src/ATen/Parallel*.h',
     'c10/xpu/**/*.h',
     'c10/xpu/**/*.cpp',
+    'c10/benchmark/intrusive_ptr_benchmark.cpp',
     'c10/cuda/CUDAAlgorithm.h',
     'c10/util/complex_math.h',
     'c10/util/complex_utils.h',
@@ -238,18 +246,20 @@ exclude_patterns = [
     'c10/util/strong_type.h',
     'c10/util/SmallVector.h',
     'c10/util/win32-headers.h',
-    'c10/util/*inl.h',
     'c10/test/**/*.h',
     'third_party/**/*',
     'torch/csrc/api/include/torch/nn/modules/common.h',
     'torch/csrc/api/include/torch/linalg.h',
-    'torch/csrc/api/include/torch/nn/pimpl-inl.h',
     'torch/csrc/autograd/generated/**',
-    'torch/csrc/distributed/**/*',
+    'torch/csrc/distributed/**/*.cu',
+    'torch/csrc/distributed/c10d/ProcessGroupNCCL.cpp',
+    'torch/csrc/distributed/c10d/WinSockUtils.hpp',
+    'torch/csrc/distributed/c10d/quantization/quantization_gpu.h',
     'torch/csrc/dynamo/eval_frame.h',
     'torch/csrc/inductor/aoti_torch/c/shim.h',
     'torch/csrc/jit/**/*',
     'torch/csrc/jit/serialization/mobile_bytecode_generated.h',
+    'torch/csrc/utils/pythoncapi_compat.h',
 ]
 init_command = [
     'python3',
@@ -377,17 +387,6 @@ command = [
 is_formatter = true
 
 [[linter]]
-code = 'CONSTEXPR'
-include_patterns=['aten/src/ATen/native/cuda/*.cu']
-command = [
-    'python3',
-    'tools/linter/adapters/constexpr_linter.py',
-    '--',
-    '@{{PATHSFILE}}',
-]
-is_formatter = true
-
-[[linter]]
 code = 'SPACES'
 include_patterns = ['**']
 exclude_patterns = [
@@ -432,6 +431,7 @@ exclude_patterns = [
     'test/cpp/jit/upgrader_models/*.ptl.ff',
     '.ci/docker/common/install_rocm_drm.sh',
     '.lintrunner.toml',
+    '.ci/magma/package_files/*.patch',
 ]
 command = [
     'python3',
@@ -443,6 +443,52 @@ command = [
     '--replace-pattern=s/\t/    /',
     """--error-description=\
         This line has tabs; please replace them with spaces.\
+    """,
+    '--',
+    '@{{PATHSFILE}}'
+]
+
+[[linter]]
+code = 'C10_UNUSED'
+include_patterns = [
+    '**/*.cpp',
+    '**/*.h',
+]
+exclude_patterns = [
+    'c10/macros/Macros.h',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/grep_linter.py',
+    '--pattern=C10_UNUSED',
+    '--linter-name=C10_UNUSED',
+    '--error-name=deprecated C10_UNUSED macro',
+    '--replace-pattern=s/C10_UNUSED/[[maybe_unused]]/',
+    """--error-description=\
+        Deprecated macro, use [[maybe_unused]] directly\
+    """,
+    '--',
+    '@{{PATHSFILE}}'
+]
+
+[[linter]]
+code = 'C10_NODISCARD'
+include_patterns = [
+    '**/*.cpp',
+    '**/*.h',
+]
+exclude_patterns = [
+    'c10/macros/Macros.h',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/grep_linter.py',
+    '--pattern=C10_NODISCARD',
+    '--linter-name=C10_NODISCARD',
+    '--error-name=deprecated C10_NODISCARD macro',
+    '--replace-pattern=s/C10_NODISCARD/[[nodiscard]]/',
+    """--error-description=\
+        Deprecated macro, use [[nodiscard]] directly\
     """,
     '--',
     '@{{PATHSFILE}}'
@@ -1010,6 +1056,28 @@ command = [
     'tools/linter/adapters/workflow_consistency_linter.py',
     '--',
     '@{{PATHSFILE}}'
+]
+init_command = [
+    'python3',
+    'tools/linter/adapters/pip_init.py',
+    '--dry-run={{DRYRUN}}',
+    'PyYAML==6.0.1',
+]
+
+[[linter]]
+code = 'NO_WORKFLOWS_ON_FORK'
+include_patterns = [
+    '.github/**/*.yml',
+    '.github/**/*.yaml',
+]
+exclude_patterns = [
+    '**/fb/**',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/no_workflows_on_fork.py',
+    '--',
+    '@{{PATHSFILE}}',
 ]
 init_command = [
     'python3',

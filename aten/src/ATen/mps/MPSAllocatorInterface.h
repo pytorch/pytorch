@@ -53,9 +53,9 @@ class IMpsAllocatorCallback {
 };
 
 // MPS allocator will execute every registered callback when a block of memory is freed.
-C10_DECLARE_REGISTRY(MPSAllocatorCallbacksRegistry, IMpsAllocatorCallback);
+TORCH_DECLARE_REGISTRY(MPSAllocatorCallbacksRegistry, IMpsAllocatorCallback);
 #define REGISTER_MPS_ALLOCATOR_CALLBACK(name, ...) \
-  C10_REGISTER_CLASS(MPSAllocatorCallbacksRegistry, name, __VA_ARGS__);
+  C10_REGISTER_CLASS(MPSAllocatorCallbacksRegistry, name, __VA_ARGS__)
 
 IMPSAllocator* getIMPSAllocator(bool sharedAllocator = false);
 
