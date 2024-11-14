@@ -416,7 +416,7 @@ def generate_wheels_matrix(
             if (
                 arch_version in ["12.6", "12.4", "11.8"]
                 and os == "linux"
-                or arch_version == "cuda-aarch64"
+                or arch_version in ["cuda-aarch64", "cpu-aarch64"]
             ):
                 ret.append(
                     {
@@ -428,7 +428,9 @@ def generate_wheels_matrix(
                         ),
                         "use_split_build": "True" if use_split_build else "False",
                         "devtoolset": (
-                            "cxx11-abi" if arch_version == "cuda-aarch64" else ""
+                            "cxx11-abi"
+                            if arch_version in ["cuda-aarch64", "cpu-aarch64"]
+                            else ""
                         ),
                         "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
                         "package_type": package_type,
