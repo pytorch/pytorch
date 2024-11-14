@@ -3079,7 +3079,6 @@ class PyCodeCache:
     # than once, but attach different attributes, i.e., due to different
     # constant values.
     modules: List[ModuleType] = []
-    cache: Dict[str, ModuleType] = {}
     linemaps: Dict[str, List[Tuple[Any, ...]]] = {}
 
     @classmethod
@@ -3126,13 +3125,18 @@ class PyCodeCache:
         return mod
 
     @classmethod
-    def cache_clear(cls) -> None:
-        for mod in cls.modules:
-            try:
-                assert mod.__file__
-                os.remove(mod.__file__)
-            except FileNotFoundError:
-                pass
+    def cache_clear(cls, purge: bool = False) -> None:
+        """
+        Clear the in-memory module cache. If purge=True, also delete all the
+        corresponding on-disk source files.
+        """
+        if purge:
+            for mod in cls.modules:
+                try:
+                    assert mod.__file__
+                    os.remove(mod.__file__)
+                except FileNotFoundError:
+                    pass
         cls.modules.clear()
 
     @classmethod
