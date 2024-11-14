@@ -121,6 +121,7 @@ KERNEL_COUNT_OVERRIDES = {
     "test_adamw_amsgrad_capturable_cuda": 6,
     "test_adamw_amsgrad_capturable_xpu": 6,
     "test_adamw_tensor_lr_tensor_betas_amsgrad_capturable_cuda": 6,
+    "test_adamw_tensor_lr_tensor_betas_amsgrad_capturable_xpu": 6,
     "test_adamw_tensor_lr_amsgrad_capturable_cuda": 6,
     "test_adamw_tensor_lr_amsgrad_capturable_xpu": 6,
     "test_adam_tensor_lr_amsgrad_capturable_cuda": 6,
@@ -153,7 +154,6 @@ KERNEL_COUNT_OVERRIDES = {
     "test_sgd_cuda": 4,
     "test_sgd_cpu": 4,
     "test_sgd_xpu": 4,
-    "test_rmsprop_tensor_lr_capturable_foreach_xpu": 4,
     "test_adagrad_initial_accumulator_value_weight_decay_foreach_xpu": 2,
     "test_adagrad_lr_decay_weight_decay_foreach_xpu": 2,
     "test_adagrad_weight_decay_foreach_xpu": 2,
@@ -167,14 +167,11 @@ KERNEL_COUNT_OVERRIDES = {
     "test_asgd_tensor_lr_weight_decay_maximize_capturable_xpu": 8,
     "test_nadam_tensor_lr_weight_decay_momentum_decay_decoupled_weight_decay_capturable_cuda": 6,
     "test_nadam_tensor_lr_weight_decay_momentum_decay_decoupled_weight_decay_capturable_xpu": 9,
-    "test_nadam_tensor_lr_weight_decay_momentum_decay_decoupled_weight_decay_capturable_foreach_xpu": 3,
     "test_radam_tensor_lr_capturable_weight_decay_decoupled_weight_decay_cuda": 6,
     "test_radam_tensor_lr_capturable_weight_decay_decoupled_weight_decay_xpu": 6,
-    "test_radam_tensor_lr_capturable_weight_decay_decoupled_weight_decay_foreach_xpu": 3,
     "test_sgd_tensor_lr_cpu": 2,
     "test_sgd_tensor_lr_cuda": 2,
     "test_sgd_tensor_lr_xpu": 2,
-    "test_sgd_tensor_lr_foreach_xpu": 2,
 }
 
 # also tracks currently supported optimizers
@@ -707,14 +704,14 @@ class CompiledOptimizerTests(TestCase):
     @requires_gpu
     def test_basic_shampoo(self):
         param_buf = torch.rand((1024, 128))
-        param_buf_c = param_buf.clone().detach()
+        param_buf_c = param_buf.detach().clone()
 
         params_c = [param_buf_c[0:512, :].t(), param_buf_c[512:, :].t()]
         params = [param_buf[0:512, :].t(), param_buf[512:, :].t()]
 
         for p, p_c in zip(params, params_c):
             p.grad = torch.rand_like(p)
-            p_c.grad = p.grad.clone().detach()
+            p_c.grad = p.grad.detach().clone()
 
         # note this skips the root inverse because this has a lot of internal dependencies
         # we also don't compile it regardless
@@ -778,7 +775,7 @@ class CompiledOptimizerTests(TestCase):
         param = torch.rand(
             2, 3, dtype=torch.float32, device=GPU_TYPE, requires_grad=True
         )
-        param_c = param.clone().detach().requires_grad_(True)
+        param_c = param.detach().clone().requires_grad_(True)
 
         def closure():
             param.grad = torch.ones_like(param) * 2

@@ -45,6 +45,7 @@ from torch._C._distributed_c10d import (
     Work,
 )
 from torch._utils_internal import set_pytorch_distributed_envs_from_justknobs
+from torch.monitor import _WaitCounter
 from torch.utils._typing_utils import not_none
 
 from .c10d_logger import _exception_logger, _time_logger
@@ -1776,14 +1777,9 @@ def _new_process_group_helper(
     # communicators based on pre-existing ones, which can save
     # initialization time.  Due to lazy initialization of
     # communicators in some backends, we have to be careful and only
-    # split when we *know* the backends already are connected _on all
-    # ranks_.  We can only know this if the group we are making is the
-    # entire world or if we have bound a device id to the world (which
-    # causes early connection initialization).
-    if is_initialized() and (
-        len(global_ranks_in_group) == _get_default_group().size()
-        or _get_default_group().bound_device_id
-    ):
+    # split when we *know* the default PG has already started communicator initialization.
+    # We know this if we have bound a device id to the default pg (eager initialized).
+    if is_initialized() and _get_default_group().bound_device_id:
         split_from = _get_split_source(_get_default_group())
     else:
         split_from = None
@@ -2818,35 +2814,39 @@ def reduce(tensor, dst, op=ReduceOp.SUM, group=None, async_op=False):
 
 
 def _object_to_tensor(obj, device, group):
-    f = io.BytesIO()
-    _pickler(f).dump(obj)
-    byte_storage = torch.ByteStorage._from_buffer(f.getvalue())  # type: ignore[attr-defined]
-    # Do not replace `torch.ByteTensor` or `torch.LongTensor` with torch.tensor and specifying dtype.
-    # Otherwise, it will casue 100X slowdown.
-    # See: https://github.com/pytorch/pytorch/issues/65696
-    byte_tensor = torch.ByteTensor(byte_storage).to(device)
-    if get_debug_level() == DebugLevel.DETAIL and is_nccl_available():
-        backend = get_backend(group)
-        if backend == Backend.NCCL:
-            hash = torch._C._distributed_c10d._hash_tensors([byte_tensor])
-            logger.warning(
-                "_object_to_tensor size: %s hash value: %s", byte_tensor.numel(), hash
-            )
-    local_size = torch.LongTensor([byte_tensor.numel()]).to(device)
-    return byte_tensor, local_size
+    with _WaitCounter("pytorch.wait_counter.c10d._object_to_tensor").guard():
+        f = io.BytesIO()
+        _pickler(f).dump(obj)
+        byte_storage = torch.ByteStorage._from_buffer(f.getvalue())  # type: ignore[attr-defined]
+        # Do not replace `torch.ByteTensor` or `torch.LongTensor` with torch.tensor and specifying dtype.
+        # Otherwise, it will casue 100X slowdown.
+        # See: https://github.com/pytorch/pytorch/issues/65696
+        byte_tensor = torch.ByteTensor(byte_storage).to(device)
+        if get_debug_level() == DebugLevel.DETAIL and is_nccl_available():
+            backend = get_backend(group)
+            if backend == Backend.NCCL:
+                hash = torch._C._distributed_c10d._hash_tensors([byte_tensor])
+                logger.warning(
+                    "_object_to_tensor size: %s hash value: %s",
+                    byte_tensor.numel(),
+                    hash,
+                )
+        local_size = torch.LongTensor([byte_tensor.numel()]).to(device)
+        return byte_tensor, local_size
 
 
 def _tensor_to_object(tensor, tensor_size, group):
-    if get_debug_level() == DebugLevel.DETAIL and is_nccl_available():
-        backend = get_backend(group)
-        if backend == Backend.NCCL:
-            hash = torch._C._distributed_c10d._hash_tensors([tensor])
-            logger.warning(
-                "_tensor_to_object size: %s hash value: %s", tensor.numel(), hash
-            )
-    tensor = tensor.cpu()
-    buf = tensor.numpy().tobytes()[:tensor_size]
-    return _unpickler(io.BytesIO(buf)).load()
+    with _WaitCounter("pytorch.wait_counter.c10d._tensor_to_object").guard():
+        if get_debug_level() == DebugLevel.DETAIL and is_nccl_available():
+            backend = get_backend(group)
+            if backend == Backend.NCCL:
+                hash = torch._C._distributed_c10d._hash_tensors([tensor])
+                logger.warning(
+                    "_tensor_to_object size: %s hash value: %s", tensor.numel(), hash
+                )
+        tensor = tensor.cpu()
+        buf = tensor.numpy().tobytes()[:tensor_size]
+        return _unpickler(io.BytesIO(buf)).load()
 
 
 @_exception_logger
@@ -4727,6 +4727,7 @@ def new_group(
     pg_options=None,
     use_local_synchronization=False,
     group_desc=None,
+    device_id: Optional[torch.device] = None,
 ):
     """
     Create a new distributed group.
@@ -4779,6 +4780,9 @@ def new_group(
             in that non-member ranks don't need to call into API and don't
             join the barrier.
         group_desc (str, optional): a string to describe the process group.
+        device_id (torch.device, optional): a single, specific device
+            to "bind" this process to,  The `new_group` call will try to initialize
+            a communication backend immediately for the device if this field is given.
 
     Returns:
         A handle of distributed group that can be given to collective calls or
@@ -4802,6 +4806,7 @@ def new_group(
         None,
         use_local_synchronization=use_local_synchronization,
         group_desc=group_desc,
+        device_id=device_id,
     )
 
 
@@ -4813,6 +4818,7 @@ def _new_group_with_tag(
     pg_tag=None,
     use_local_synchronization=False,
     group_desc=None,
+    device_id: Optional[torch.device] = None,
 ):
     """
     Variant of ``new_group`` that exposes tag creation.
@@ -4823,7 +4829,12 @@ def _new_group_with_tag(
     global _world
 
     default_pg = _get_default_group()
-    device_id = default_pg.bound_device_id
+    if device_id is None:
+        device_id = default_pg.bound_device_id
+    elif default_pg.bound_device_id is not None:
+        assert (
+            device_id == default_pg.bound_device_id
+        ), "Mismatched bound device between new pg and the default pg."
     default_backend, default_store = _world.pg_map[default_pg]
     global_rank = default_pg.rank()
     global_world_size = default_pg.size()
@@ -5185,31 +5196,3 @@ def _get_process_group_name(pg: ProcessGroup) -> str:
 
 def _get_process_group_store(pg: ProcessGroup) -> Store:
     return _world.pg_map[pg][1]
-
-
-# This ops are not friendly to TorchDynamo. So, we decide to disallow these ops
-# in FX graph, allowing them to run them on eager, with torch.compile.
-dynamo_unsupported_distributed_c10d_ops = [
-    recv,
-    all_gather_object,
-    all_gather_coalesced,
-    all_to_all_single,
-    all_reduce,
-    gather_object,
-    all_to_all,
-    all_reduce_coalesced,
-    gather,
-    send_object_list,
-    recv_object_list,
-    broadcast_object_list,
-    barrier,
-    scatter,
-    scatter_object_list,
-    reduce,
-    all_gather,
-    reduce_scatter,
-    all_gather_into_tensor,
-    broadcast,
-    reduce_scatter_tensor,
-    send,
-]

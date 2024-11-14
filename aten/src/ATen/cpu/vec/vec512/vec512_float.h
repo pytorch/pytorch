@@ -40,6 +40,9 @@ public:
     values = _mm512_setr_ps(val1, val2, val3, val4, val5, val6, val7, val8,
                             val9, val10, val11, val12, val13, val14, val15, val16);
   }
+  Vectorized(const float (&arr)[16])
+      : Vectorized(arr[0], arr[1], arr[2], arr[3], arr[4], arr[5], arr[6], arr[7],
+                   arr[8], arr[9], arr[10], arr[11], arr[12], arr[13], arr[14], arr[15]) {}
   operator __m512() const {
     return values;
   }
@@ -698,7 +701,7 @@ inline void transpose_mxn<float>(const float* src, int64_t ld_src, float* dst, i
 }
 
 template <typename T, int M, int N,
-          typename std::enable_if_t<std::is_same<T, float>::value, int> = 0>
+          typename std::enable_if_t<std::is_same_v<T, float>, int> = 0>
 inline void transpose_mxn(const float* src, int64_t ld_src, float* dst, int64_t ld_dst) {
   transpose_mxn<float>(src, ld_src, dst, ld_dst, M, N);
 }

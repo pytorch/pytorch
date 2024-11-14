@@ -27,6 +27,7 @@ from ..source import (
     GetItemSource,
     ODictGetItemSource,
     TypeSource,
+    WeakRefCallSource,
 )
 from ..utils import (
     check_unspec_or_constant_args,
@@ -56,11 +57,10 @@ class NO_SUCH_SUBOBJ:
 
 class SuperVariable(VariableTracker):
     _nonvar_fields = {
-        "specialized",
         *VariableTracker._nonvar_fields,
     }
 
-    def __init__(self, typevar, objvar=None, specialized=False, **kwargs) -> None:
+    def __init__(self, typevar, objvar=None, **kwargs) -> None:
         super().__init__(**kwargs)
         # typevar is the fist argument to super(). In the case where no argument
         # is provided to super(), it is the __class__ object where
@@ -71,7 +71,6 @@ class SuperVariable(VariableTracker):
         # to the current function where super() is called from (self for regular method,
         # cls for a classmethod)
         self.objvar = objvar
-        self.specialized = specialized  # directly get attr from self.typevar if true
 
     def reconstruct(self, codegen):
         codegen.add_push_null(lambda: codegen(variables.BuiltinVariable(super)))
@@ -84,8 +83,6 @@ class SuperVariable(VariableTracker):
 
     def _resolved_getattr_and_source(self, tx: "InstructionTranslator", name):
         assert self.objvar, "1-arg super not implemented"
-        if self.specialized:
-            return getattr(self.typevar.as_python_constant(), name)
         search_type = self.typevar.as_python_constant()
 
         # The rest of this function does two things:
@@ -166,7 +163,7 @@ class SuperVariable(VariableTracker):
 
             if (
                 isinstance(objvar, variables.UserDefinedObjectVariable)
-                and isinstance(objvar.mutable_local, AttributeMutationNew)
+                and isinstance(objvar.mutation_type, AttributeMutationNew)
                 and not (args or kwargs)
             ):
                 with do_not_convert_to_tracable_parameter():
@@ -348,8 +345,19 @@ class ClosureVariable(UnknownVariable):
 
 
 class NewCellVariable(VariableTracker):
-    def __init__(self, **kwargs) -> None:
+    # If the cell existed before Dynamo tracing started, this will be the
+    # VariableTracker that represents the cell content.
+    #
+    # Note that all mutation to the cell (i.e., its content) will be buffered in
+    # SideEffects, rather than being reflected here. One can think of
+    # `NewCellVariable` as a special case for `UserDefinedObjectVariable`.
+    pre_existing_contents: Optional[VariableTracker]
+
+    def __init__(
+        self, pre_existing_contents: Optional[VariableTracker] = None, **kwargs
+    ) -> None:
         super().__init__(**kwargs)
+        self.pre_existing_contents = pre_existing_contents
 
 
 class NewGlobalVariable(VariableTracker):
@@ -371,7 +379,7 @@ class InspectSignatureVariable(VariableTracker):
         if kwargs:
             unimplemented(f"inspect.signature with {kwargs}")
         return InspectSignatureVariable(
-            callable, mutable_local=variables.base.MutableLocal()
+            callable, mutation_type=variables.base.ValueMutationNew()
         )
 
     def __init__(self, inspected: VariableTracker, **kwargs) -> None:
@@ -520,7 +528,7 @@ class InspectBoundArgumentsVariable(VariableTracker):
         self.bound_arguments_var = variables.ConstDictVariable(
             arguments_dict,
             type(bound_arguments.arguments),
-            mutable_local=variables.base.MutableLocal(),
+            mutation_type=variables.base.ValueMutationNew(),
         )
         self.signature = signature
 
@@ -929,7 +937,7 @@ class AutogradEngineVariable(UserDefinedObjectVariable):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if name == "queue_callback":
-            if torch._dynamo.compiled_autograd.in_compiled_autograd_region():
+            if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
                 assert (
                     tx.one_graph
                 ), "queue_callback() is only supported when Compiled Autograd is enabled with fullgraph=True"
@@ -966,15 +974,23 @@ class LambdaVariable(VariableTracker):
 class GetAttrVariable(VariableTracker):
     _nonvar_fields = {
         "name",
+        "py_type",
         *VariableTracker._nonvar_fields,
     }
 
-    def __init__(self, obj, name, **kwargs) -> None:
+    def __init__(self, obj, name, py_type=None, **kwargs) -> None:
         super().__init__(**kwargs)
         assert isinstance(obj, VariableTracker)
         assert isinstance(name, str)
         self.obj = obj
         self.name = name
+        self.py_type = py_type  # In some cases we know the type (ex. tensor methods)
+
+    def python_type(self):
+        if self.py_type is not None:
+            return self.py_type
+        else:
+            super().python_type()
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.obj}, {self.name})"
@@ -1573,7 +1589,9 @@ class RandomClassVariable(VariableTracker):
         elif kwargs:
             unimplemented("random.Random() with kwargs")
         seed = variables.ConstantVariable.create(None) if len(args) == 0 else args[0]
-        return RandomVariable(seed=seed, mutable_local=variables.base.MutableLocal())
+        return RandomVariable(
+            seed=seed, mutation_type=variables.base.ValueMutationNew()
+        )
 
 
 class RandomVariable(VariableTracker):
@@ -1719,3 +1737,26 @@ class RandomVariable(VariableTracker):
         codegen(self.wrap_state(self.random.getstate()))
         codegen.call_function(1, True)
         codegen.pop_top()
+
+
+class WeakRefVariable(VariableTracker):
+    @staticmethod
+    def build(tx, weakref_value, **options):
+        source = options.get("source", None)
+        referent = weakref_value()
+        source = source and WeakRefCallSource(source)
+        referent_vt = VariableTracker.build(tx, referent, source)
+        options["source"] = source
+        return WeakRefVariable(referent_vt, **options)
+
+    def __init__(self, referent_vt, **options):
+        super().__init__(**options)
+        self.referent_vt = referent_vt
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        return self.referent_vt
