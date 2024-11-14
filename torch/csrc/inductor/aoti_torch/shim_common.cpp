@@ -180,6 +180,8 @@ AOTI_TORCH_ITEM_IMPL(int64, int64_t)
 AOTI_TORCH_ITEM_IMPL(bool, bool)
 AOTI_TORCH_ITEM_IMPL(bfloat16, c10::BFloat16)
 AOTI_TORCH_ITEM_IMPL(complex64, c10::complex<float>)
+AOTI_TORCH_ITEM_IMPL(float8_e4m3fn, c10::Float8_e4m3fn)
+AOTI_TORCH_ITEM_IMPL(float8_e5m2, c10::Float8_e5m2)
 #undef AOTI_TORCH_ITEM_IMPL
 
 #define AOTI_TORCH_SCALAR_TO_TENSOR_IMPL(dtype, ctype, ttype)                  \
@@ -1136,6 +1138,13 @@ AOTITorchError aoti_torch_proxy_executor_call_function(
     int num_tensors,
     AtenTensorHandle* flatten_tensor_args) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    if (!proxy_executor) {
+      throw std::runtime_error(
+          "Unable to find a proxy executor to run custom ops. Please check if "
+          "there is a json file generated in the same directory as the so, or use "
+          "torch._inductor.aoti_compile_and_package to package everything into a "
+          "PT2 artifact.");
+    }
     ProxyExecutor* executor = reinterpret_cast<ProxyExecutor*>(proxy_executor);
     executor->call_function(
         extern_node_index,

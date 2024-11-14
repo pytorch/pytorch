@@ -87,8 +87,9 @@ _scaled_mm_out_cpu(const Tensor& mat1, const Tensor& mat2,
 
   float input_scale = scale_a.item<float>();
   float weight_scale = scale_b.item<float>();
+  auto mat2_c = mat2.contiguous();
   auto src = at::native::itensor_view_from_dense(mat1);
-  auto weight_t = at::native::itensor_view_from_dense(mat2);
+  auto weight_t = at::native::itensor_view_from_dense(mat2_c);
   bool with_bias = bias.has_value();
   int64_t K = mat1_sizes[1], M = mat1_sizes[0],
           N = mat2_sizes[1];

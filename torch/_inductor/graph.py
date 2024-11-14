@@ -56,7 +56,7 @@ from torch.utils._mode_utils import no_dispatch
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.numbers import int_oo
 
-from . import config, ir
+from . import config, ir, metrics
 from .codegen.common import (
     BackendFeature,
     DeviceOpOverrides,
@@ -152,6 +152,9 @@ def supported_dtype_of_cpp_wrapper(dtype: torch.dtype, device_type: str) -> bool
         supported_dtype.add(torch.float8_e5m2)
         supported_dtype.add(torch.float8_e4m3fnuz)
         supported_dtype.add(torch.float8_e5m2fnuz)
+    if device_type == "cpu":
+        supported_dtype.add(torch.float8_e4m3fn)
+        supported_dtype.add(torch.float8_e5m2)
 
     return dtype in supported_dtype
 
@@ -1878,6 +1881,7 @@ class GraphLowering(torch.fx.Interpreter):
             self.inplaced_to_remove.clear()
             V.graph.sizevars.precomputed_replacements.clear()
             V.graph.sizevars.inv_precomputed_replacements.clear()
+            metrics.reset()
             with config.patch({"triton.autotune_at_compile_time": False}):
                 return self.codegen()
         else:
@@ -1995,6 +1999,9 @@ class GraphLowering(torch.fx.Interpreter):
         self.cache_path = path
         self.cache_linemap = linemap  # type: ignore[assignment]
 
+        if config.profile_bandwidth_output:
+            # run the inputs code gen to get the bandwidth info
+            mod.benchmark_compiled_module(times=1, repeat=1)
         # Logged twice as per https://github.com/pytorch/pytorch/pull/99038#discussion_r1167826029
         # TODO. Revisit this once the logging API is more mature
         assert mod.__file__ is not None

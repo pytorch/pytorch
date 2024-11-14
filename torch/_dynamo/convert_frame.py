@@ -652,7 +652,6 @@ def _compile(
             one_graph,
             export,
             export_constraints,
-            mutated_closure_cell_ids,
             frame_state=frame_state,
             speculation_log=speculation_log,
             distributed_state=distributed_state,
@@ -869,7 +868,6 @@ def _compile(
     ):
         restart_reasons: set[str] = set()
         # This is shared across restarts
-        mutated_closure_cell_ids: Set[int] = set()
         speculation_log = SpeculationLog()
         if compile_pg := get_compile_pg():
             distributed_state = DistributedState(compile_pg, LocalState())

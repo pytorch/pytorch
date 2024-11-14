@@ -737,15 +737,14 @@ class AOTInductorTestsTemplate:
         example_inputs = (x, y)
         self.check_model(Model(), example_inputs, dynamic_shapes=dynamic_shapes)
 
-    @unittest.skipIf(
-        not torch.cuda.is_available() or torch.cuda.get_device_capability() < (9, 0),
-        "FP8 is only supported on H100+",
-    )
     @skipIfRocm  # _scaled_mm_out_cuda  is not compiled for ROCm platform
     def test_fp8(self):
-        # cuda only
-        if self.device != "cuda":
-            return
+        if self.device == "cuda" and not SM90OrLater:
+            raise unittest.SkipTest("FP8 is only supported on H100+")
+        if self.device == "cpu" and not torch.backends.mkldnn.is_available():
+            raise unittest.SkipTest("MKL-DNN build is disabled")
+        if self.device == "cpu" and not torch.cpu._is_amx_tile_supported():
+            raise unittest.SkipTest("FP8 cannot run on the current CPU platform")
 
         class Model(torch.nn.Module):
             def __init__(self, dtype):
@@ -766,16 +765,18 @@ class AOTInductorTestsTemplate:
 
         dtype = torch.float16
 
-        a_scale = torch.Tensor([1.0]).to(device="cuda")
-        b_scale = torch.Tensor([1.0]).to(device="cuda")
-        input_bias = torch.rand(32, device="cuda", dtype=dtype)
+        a_scale = torch.Tensor([1.0]).to(device=self.device)
+        b_scale = torch.Tensor([1.0]).to(device=self.device)
+        input_bias = torch.rand(32, device=self.device, dtype=dtype)
         weight_shape = (32, 16)
-        weight = torch.rand(*weight_shape, device="cuda", dtype=dtype).T
+        weight = torch.rand(*weight_shape, device=self.device, dtype=dtype).T
         a_inverse_scale = 1 / a_scale
         b_inverse_scale = 1 / b_scale
 
         x_shape = (16, 16)
-        x = torch.rand(*x_shape, device="cuda", dtype=dtype).to(torch.float8_e4m3fn)
+        x = torch.rand(*x_shape, device=self.device, dtype=dtype).to(
+            torch.float8_e4m3fn
+        )
         dim0_x = Dim("dim0_x", min=1, max=2048)
         dynamic_shapes = ({0: dim0_x}, None, None, None, None)
         self.check_model(
@@ -784,15 +785,14 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
-    @unittest.skipIf(
-        not torch.cuda.is_available() or torch.cuda.get_device_capability() < (9, 0),
-        "FP8 is only supported on H100+",
-    )
     @skipIfRocm  # _scaled_mm_out_cuda  is not compiled for ROCm platform
     def test_fp8_view_of_param(self):
-        # cuda only
-        if self.device != "cuda":
-            return
+        if self.device == "cuda" and not SM90OrLater:
+            raise unittest.SkipTest("FP8 is only supported on H100+")
+        if self.device == "cpu" and not torch.backends.mkldnn.is_available():
+            raise unittest.SkipTest("MKL-DNN build is disabled")
+        if self.device == "cpu" and not torch.cpu._is_amx_tile_supported():
+            raise unittest.SkipTest("FP8 cannot run on the current CPU platform")
 
         class Model(torch.nn.Module):
             def __init__(self, dtype, weight):
@@ -1478,7 +1478,7 @@ class AOTInductorTestsTemplate:
             example_inputs,
             dynamic_shapes=dynamic_shapes,
         )
-        aot_inductor_module = AOTIRunnerUtil.load("cuda", so_path)
+        aot_inductor_module = AOTIRunnerUtil.load(self.device, so_path)
         aot_inductor_module(*example_inputs)
 
         # Re-run where dynamic dim size is 0.
@@ -2934,6 +2934,20 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(m, args)
 
+    def test_custom_op_add_output_path(self) -> None:
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.ops.aoti_custom_ops.custom_add(x, y)
+
+        m = M().to(device=self.device)
+        args = (
+            torch.randn(3, 3, device=self.device),
+            torch.randn(3, 3, device=self.device),
+        )
+        with config.patch("aot_inductor.output_path", "model.so"):
+            with self.assertRaises(Exception):
+                self.check_model(m, args)
+
     def test_custom_op_all_inputs(self) -> None:
         class MyModel(torch.nn.Module):
             # pyre-fixme[3]: Return type must be annotated.
@@ -3888,6 +3902,42 @@ class AOTInductorTestsTemplate:
                     2,
                 ).run(code)
 
+    def test_aoti_debug_printing_model_inputs_codegen(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, a, b, c):
+                x = a * 3.14
+                y = torch.addmm(c, x, b)
+                z = torch.nn.functional.gelu(y)
+                return z
+
+        example_inputs = (
+            torch.randn(10, 20, device="cuda"),
+            torch.randn(20, 30, device="cuda"),
+            torch.randn(10, 30, device="cuda"),
+        )
+        model = Model()
+        kernel_calls = [
+            ("aoti_model_inputs", 3),
+        ]
+
+        with config.patch({"aot_inductor.debug_intermediate_value_printer": "2"}):
+            result, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.compile, model, example_inputs
+            )
+            self.assertEqual("aoti_torch_print_tensor_handle" in code, True)
+            # check the codegen for debug printing around aoti model inputs is expected
+            for kernel_call, count in kernel_calls:
+                FileCheck().check_count(
+                    f"{kernel_call}",
+                    count,
+                ).run(code)
+
     def test_size_from_multi_output(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -3896,7 +3946,7 @@ class AOTInductorTestsTemplate:
 
             def forward(self, x):
                 _x, _i = torch.unique(x, sorted=True, return_inverse=True)
-                _x = _x.clone().detach()
+                _x = _x.detach().clone()
                 return self.relu(_x), _i
 
         example_inputs = (torch.randn(8, device=self.device),)
