@@ -326,6 +326,13 @@ jobs:
           test_config: ${{ matrix.config }}
           job_identifier: ${{ github.workflow }}_${{ inputs.build-environment }}
 
+      - name: Upload the benchmark results
+        uses: pytorch/test-infra/.github/actions/upload-benchmark-results@upload-benchmark-results-with-additional-information
+        with:
+          benchmark-results-dir: test/test-reports
+          dry-run: false
+          schema-version: v3
+
       - name: Print remaining test logs
         shell: bash
         if: always() && steps.test.conclusion
