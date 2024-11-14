@@ -8090,4 +8090,99 @@ Tensor special_betainc_backward_x(
   return grad_x * grad;
 }
 
+static inline std::tuple<Tensor, Tensor, Tensor> _betaincinv_partials(
+    const Tensor& a,
+    const Tensor& b,
+    const Tensor& y) {
+  at::ScalarType dtype_orig = at::promoteTypes(
+      at::promoteTypes(a.scalar_type(), b.scalar_type()), y.scalar_type());
+  bool should_promote_dtype = ((dtype_orig == at::ScalarType::BFloat16) |
+                               (dtype_orig == at::ScalarType::Half))
+      ? true
+      : false;
+  at::ScalarType dtype =
+      should_promote_dtype ? at::ScalarType::Float : dtype_orig;
+  Tensor _y = y.to(dtype_orig);
+  Tensor _a = a.to(dtype_orig);
+  Tensor _b = b.to(dtype_orig);
+
+  if (should_promote_dtype) {
+    _y = _y.to(dtype);
+    _a = _a.to(dtype);
+    _b = _b.to(dtype);
+  }
+
+  Tensor _x = at::special_betaincinv(_y, _a, _b);
+  std::tuple<Tensor, Tensor, Tensor> _ret_full = _betainc_partials(_a, _b, _x);
+  Tensor g_a = std::get<0>(_ret_full);
+  Tensor g_b = std::get<1>(_ret_full);
+  Tensor g_x = std::get<2>(_ret_full);
+  g_a = -g_a / g_x;
+  g_b = -g_b / g_x;
+  Tensor g_y = at::reciprocal(g_x);
+
+  if (should_promote_dtype) {
+    g_a = g_a.to(dtype_orig);
+    g_b = g_b.to(dtype_orig);
+    g_y = g_y.to(dtype_orig);
+  }
+
+  return std::make_tuple(std::move(g_a), std::move(g_b), std::move(g_y));
+}
+
+std::tuple<Tensor, Tensor, Tensor> special_betaincinv_backward_full(
+    const Tensor& grad,
+    const Tensor& a,
+    const Tensor& b,
+    const Tensor& y) {
+  std::tuple<Tensor, Tensor, Tensor> _ret_full = _betaincinv_partials(a, b, y);
+  Tensor g_a = std::get<0>(_ret_full) * grad;
+  Tensor g_b = std::get<1>(_ret_full) * grad;
+  Tensor g_y = std::get<2>(_ret_full) * grad;
+  return std::make_tuple(std::move(g_a), std::move(g_b), std::move(g_y));
+}
+
+std::tuple<Tensor, Tensor> special_betaincinv_backward_ab(
+    const Tensor& grad,
+    const Tensor& a,
+    const Tensor& b,
+    const Tensor& y) {
+  std::tuple<Tensor, Tensor, Tensor> _ret_full = _betaincinv_partials(a, b, y);
+  Tensor g_a = std::get<0>(_ret_full) * grad;
+  Tensor g_b = std::get<1>(_ret_full) * grad;
+  return std::make_tuple(std::move(g_a), std::move(g_b));
+}
+
+std::tuple<Tensor, Tensor> special_betaincinv_backward_ay(
+    const Tensor& grad,
+    const Tensor& a,
+    const Tensor& b,
+    const Tensor& y) {
+  std::tuple<Tensor, Tensor, Tensor> _ret_full = _betaincinv_partials(a, b, y);
+  Tensor g_a = std::get<0>(_ret_full) * grad;
+  Tensor g_y = std::get<2>(_ret_full) * grad;
+  return std::make_tuple(std::move(g_a), std::move(g_y));
+}
+
+std::tuple<Tensor, Tensor> special_betaincinv_backward_by(
+    const Tensor& grad,
+    const Tensor& a,
+    const Tensor& b,
+    const Tensor& y) {
+  std::tuple<Tensor, Tensor, Tensor> _ret_full = _betaincinv_partials(a, b, y);
+  Tensor g_b = std::get<1>(_ret_full) * grad;
+  Tensor g_y = std::get<2>(_ret_full) * grad;
+  return std::make_tuple(std::move(g_b), std::move(g_y));
+}
+
+Tensor special_betaincinv_backward_y(
+    const Tensor& grad,
+    const Tensor& a,
+    const Tensor& b,
+    const Tensor& y) {
+  std::tuple<Tensor, Tensor, Tensor> _ret_full = _betaincinv_partials(a, b, y);
+  Tensor g_y = std::get<2>(_ret_full) * grad;
+  return g_y;
+}
+
 } // namespace torch::autograd::generated::details
