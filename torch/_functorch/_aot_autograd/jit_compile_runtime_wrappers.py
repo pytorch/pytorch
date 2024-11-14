@@ -191,7 +191,7 @@ def aot_dispatch_base(
 
         with TracingContext.report_output_strides() as fwd_output_strides:
             fake_mode = detect_fake_mode()
-            if fake_mode is not None:
+            if fake_mode is not None and fake_mode.shape_env is not None:
                 assert isinstance(fw_module, GraphModule)
                 tensorify_python_scalars(fw_module, fake_mode.shape_env, fake_mode)
             compiled_fw = compiler(fw_module, updated_flat_args)
@@ -421,7 +421,7 @@ def aot_dispatch_autograd(
                 + num_tokens  # See Note [Side-Effectful Tokens in AOTAutograd]
             )
             fake_mode = detect_fake_mode()
-            if fake_mode is not None:
+            if fake_mode is not None and fake_mode.shape_env is not None:
                 tensorify_python_scalars(fx_g, fake_mode.shape_env, fake_mode)
             fw_module, bw_module = aot_config.partition_fn(
                 fx_g, joint_inputs, num_fwd_outputs=num_inner_fwd_outputs
