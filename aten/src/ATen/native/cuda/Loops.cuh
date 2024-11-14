@@ -46,19 +46,18 @@ __device__ inline void elementwise_kernel_helper(func_t f, policy_t policy) {
   using traits = function_traits<func_t>;
   using return_t = typename traits::result_type;
   using args_t = typename traits::ArgsTuple;
-  constexpr int elems_per_thread = policy_t::tws;
 
   int idx = blockIdx.x;
 
-  return_t results[elems_per_thread];
-  args_t args[elems_per_thread];
+  return_t results[thread_work_size()];
+  args_t args[thread_work_size()];
 
   // load
   policy.load(args, idx);
 
   // compute
   #pragma unroll
-  for (int i = 0; i < elems_per_thread; i++) {
+  for (int i = 0; i < thread_work_size(); i++) {
     if (policy.check_inbounds(i)) {
       results[i] = c10::guts::apply(f, args[i]);
     }
