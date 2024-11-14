@@ -479,8 +479,8 @@ DEFINE_DISPATCH(index_put_with_sort_stub);
 DEFINE_DISPATCH(put_stub);
 DEFINE_DISPATCH(take_stub);
 DEFINE_DISPATCH(masked_fill_stub);
-REGISTER_NO_CPU_DISPATCH(index_put_with_sort_stub);
-REGISTER_NO_CPU_DISPATCH(index_put_with_sort_quantized_stub);
+REGISTER_NO_CPU_DISPATCH(index_put_with_sort_stub)
+REGISTER_NO_CPU_DISPATCH(index_put_with_sort_quantized_stub)
 DEFINE_DISPATCH(masked_select_serial_stub);
 DEFINE_DISPATCH(masked_select_stub);
 DEFINE_DISPATCH(masked_scatter_stub);
@@ -590,9 +590,9 @@ AdvancedIndex::AdvancedIndex(const Tensor& src, TensorList indices_list)
     }
   }
 
-  // For CUDA/MPS tensors, force all index tensors to have the same striding to
-  // simplify the CUDA/MPS kernel.
-  if (indices.size() >= 2 && (this->src.device().type() == kCUDA || this->src.device().type() == kMPS)) {
+  // For CUDA/MPS/XPU tensors, force all index tensors to have the same striding to
+  // simplify the CUDA/MPS/XPU kernel.
+  if (indices.size() >= 2 && (this->src.device().type() == kCUDA || this->src.device().type() == kMPS || this->src.device().type() == kXPU)) {
     if (!all_strides_match(indices)) {
       for (auto & indice : indices) {
         indice = indice.contiguous();
@@ -662,7 +662,7 @@ Tensor _unsafe_masked_index(const Tensor& self, const Tensor& mask, const torch:
   // with the main difference being that the when the `mask` is false, the tensor
   // `self` is not indexed using `indices`. This allows `indices` to be out-of-bounds
   // when `mask` is false. When `mask` is true, the `indices` are expected to be
-  // in bounds and is not checked.
+  // in bounds and is not checked. We also assume that the `indices` are non-negative
   //
   // This function is not meant to be executed on eager mode. An unoptimized version
   // is provided here.
@@ -875,12 +875,8 @@ TORCH_IMPL_FUNC(index_copy_out)
     // See Note [Enabling Deterministic Operations]
     if (result.is_cuda() && globalContext().deterministicAlgorithms()){
         torch::List<std::optional<Tensor>> indices;
-        indices.reserve(dim + 1);
-        for (const auto i: c10::irange(dim)) {
-          (void)i;
-          indices.emplace_back();
-        }
-        indices.emplace_back(index);
+        indices.resize(dim + 1);
+        indices.set(dim, index);
         result.index_put_(indices, source, false);
         return;
     }
@@ -1435,8 +1431,8 @@ Tensor & index_select_out_cpu_(const Tensor & self, int64_t dim, const Tensor & 
         });
       });
     } else {
-      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(ScalarType::ComplexHalf, ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16,
-        self.scalar_type(), "index_select", [&index_contig, &self, &result, &dim, &numel] {
+      AT_DISPATCH_V2(
+        self.scalar_type(), "index_select", AT_WRAP([&index_contig, &self, &result, &dim, &numel] {
         auto self_stride = self.dim() == 0 ? 1 : self.stride(dim);
         auto result_stride = result.dim() == 0 ? 1 : result.stride(dim);
 
@@ -1453,7 +1449,7 @@ Tensor & index_select_out_cpu_(const Tensor & self, int64_t dim, const Tensor & 
             *(result_data_ptr + i * result_stride) = *self_ip;
           }
         });
-      });
+        }), AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), ScalarType::ComplexHalf, ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16, AT_EXPAND(AT_FLOAT8_TYPES));
     }
   }
 
@@ -1588,7 +1584,7 @@ static bool can_use_expanded_index_path(
   }
 
   const auto st = self.scalar_type();
-  if (!(c10::isFloatingType(st)) || st == ScalarType::Half) {
+  if (!(c10::isFloatingType(st))) {
     return false;
   }
 
@@ -1808,7 +1804,7 @@ void scatter_impl(
   if (index.numel() == 0) return;
 
   auto op = ReductionType::SUM;
-  bool deterministic = globalContext().deterministicAlgorithms() && self.device().type() == DeviceType::CUDA;
+  bool deterministic = globalContext().deterministicAlgorithms() && (self.device().type() == DeviceType::CUDA || self.device().type() == DeviceType::XPU);
 
   if (reduce.has_value()) {
     op = get_operator_enum(reduce.value(), use_new_options);
@@ -1901,8 +1897,8 @@ TORCH_IMPL_FUNC(scatter_add)
   if (index.numel() == 0) return;
 
   // See Note [Enabling Deterministic Operations]
-  // Avoid gpuAtomicAdd for CUDA if deterministic mode is turned on
-  if (globalContext().deterministicAlgorithms() && self.device().type() == DeviceType::CUDA) {
+  // Avoid gpuAtomicAdd for CUDA and XPU if deterministic mode is turned on
+  if (globalContext().deterministicAlgorithms() && (self.device().type() == DeviceType::CUDA || self.device().type() == DeviceType::XPU)) {
     _scatter_via_index_put(self, dim, index, src, mut_out, /*accumulate*/true);
   } else {
     if (can_use_expanded_index_path(mut_out, dim, index, src, /*is_scatter_like*/true)) {
@@ -2413,7 +2409,7 @@ Tensor& nonzero_out_cpu(const Tensor& self, Tensor& result) {
 
         for (const auto i : c10::irange(n2)) {
           const char* ptr = data[0] + i * strides[1];
-          for (C10_UNUSED const auto j : c10::irange(n1)) {
+          for ([[maybe_unused]] const auto j : c10::irange(n1)) {
             const auto& val = c10::load<scalar_t>(ptr);
             // If nonzero, write index
             if (val != scalar_t(0)) {

@@ -6,6 +6,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 import multiprocessing as mp
+import os
 import signal
 import time
 import unittest
@@ -37,7 +38,7 @@ if not (IS_WINDOWS or IS_MACOS):
         def setUp(self):
             super().setUp()
             self.max_interval = 0.01
-            self.file_path = "/tmp/test_file_path_" + str(uuid.uuid4())
+            self.file_path = f"/tmp/test_file_path_{os.getpid()}_{uuid.uuid4()}"
             self.server = timer.FileTimerServer(
                 self.file_path, "test", self.max_interval
             )
@@ -204,7 +205,7 @@ if not (IS_WINDOWS or IS_MACOS):
     class FileTimerServerTest(TestCase):
         def setUp(self):
             super().setUp()
-            self.file_path = "/tmp/test_file_path_" + str(uuid.uuid4())
+            self.file_path = f"/tmp/test_file_path_{os.getpid()}_{uuid.uuid4()}"
             self.max_interval = 0.01
             self.server = timer.FileTimerServer(
                 self.file_path, "test", self.max_interval

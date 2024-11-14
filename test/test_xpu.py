@@ -1,14 +1,14 @@
 # Owner(s): ["module: intel"]
 
-import collections
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 import torch
 import torch.xpu._gpu_trace as gpu_trace
-from torch.testing._internal.autocast_test_lists import AutocastTestLists
+from torch.testing._internal.autocast_test_lists import AutocastTestLists, TestAutocast
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyXPU,
@@ -17,6 +17,8 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_methods_invocations import ops_and_refs
 from torch.testing._internal.common_utils import (
+    find_library_location,
+    IS_LINUX,
     NoTest,
     run_tests,
     suppress_warnings,
@@ -126,6 +128,11 @@ class TestXpu(TestCase):
             device_properties.has_subgroup_2d_block_io,
             device_capability["has_subgroup_2d_block_io"],
         )
+        if int(torch.version.xpu) >= 20250000:
+            self.assertEqual(
+                device_properties.architecture,
+                device_capability["architecture"],
+            )
 
     def test_wrong_xpu_fork(self):
         stderr = TestCase.runWithPytorchAPIUsageStderr(
@@ -229,6 +236,21 @@ print(torch.xpu.device_count())
         stream.record_event(event)
         event.synchronize()
         self.assertTrue(event.query())
+        start_event = torch.xpu.Event(enable_timing=True)
+        end_event = torch.xpu.Event(enable_timing=True)
+        stream.record_event(start_event)
+        time.sleep(0.1)
+        stream.record_event(end_event)
+        torch.xpu.synchronize()
+        if int(torch.version.xpu) >= 20250000:
+            self.assertGreater(start_event.elapsed_time(end_event), 0)
+            self.assertLess(end_event.elapsed_time(start_event), 0)
+        else:
+            with self.assertRaisesRegex(
+                NotImplementedError,
+                "elapsed_time of XPUEvent requires PyTorch to be built with SYCL compiler version 2025.0.0 or newer.",
+            ):
+                start_event.elapsed_time(end_event)
 
     def test_generic_stream_event(self):
         stream = torch.Stream("xpu")
@@ -238,11 +260,14 @@ print(torch.xpu.device_count())
             device_index=stream.device_index,
             device_type=stream.device_type,
         )
+        self.assertIsInstance(xpu_stream, torch.Stream)
+        self.assertTrue(issubclass(type(xpu_stream), torch.Stream))
+        self.assertTrue(torch.Stream in type(xpu_stream).mro())
         self.assertEqual(stream.stream_id, xpu_stream.stream_id)
         self.assertNotEqual(stream.stream_id, torch.xpu.current_stream().stream_id)
 
-        event1 = torch.Event("xpu")
-        event2 = torch.Event("xpu")
+        event1 = torch.Event("xpu", enable_timing=True)
+        event2 = torch.Event("xpu", enable_timing=True)
         self.assertEqual(event1.event_id, 0)
         a = torch.randn(1000)
         b = torch.randn(1000)
@@ -259,10 +284,19 @@ print(torch.xpu.device_count())
         self.assertTrue(event2.query())
         self.assertNotEqual(event1.event_id, event2.event_id)
         self.assertEqual(c_xpu.cpu(), a + b)
-        with self.assertRaisesRegex(
-            NotImplementedError, "elapsedTime is not supported by XPU backend."
-        ):
-            event1.elapsed_time(event2)
+        if int(torch.version.xpu) >= 20250000:
+            self.assertGreater(event1.elapsed_time(event2), 0)
+            self.assertLess(event2.elapsed_time(event1), 0)
+        else:
+            with self.assertRaisesRegex(
+                NotImplementedError,
+                "elapsedTime requires PyTorch to be built with SYCL compiler version 2025.0.0 or newer.",
+            ):
+                event1.elapsed_time(event2)
+        xpu_event = torch.xpu.Event()
+        self.assertIsInstance(xpu_event, torch.Event)
+        self.assertTrue(issubclass(type(xpu_event), torch.Event))
+        self.assertTrue(torch.Event in type(xpu_event).mro())
 
     def test_generator(self):
         torch.manual_seed(2024)
@@ -367,15 +401,89 @@ print(torch.xpu.device_count())
             self.assertIs(type(copy), type(original))
             self.assertEqual(copy.get_device(), original.get_device())
 
+    def test_out_of_memory(self):
+        tensor = torch.zeros(1024, device="xpu")
+
+        with self.assertRaisesRegex(RuntimeError, "Tried to allocate 800000000.00 GiB"):
+            torch.empty(1024 * 1024 * 1024 * 800000000, dtype=torch.int8, device="xpu")
+
+        with self.assertRaisesRegex(RuntimeError, "XPU out of memory."):
+            torch.empty(1024 * 1024 * 1024 * 8000000000, dtype=torch.int8, device="xpu")
+
+    def test_raises_oom(self):
+        torch.xpu.memory.empty_cache()
+        with self.assertRaises(torch.OutOfMemoryError):
+            torch.empty(1024 * 1024 * 1024 * 1024, device="xpu")
+
+    def test_memory_allocation(self):
+        torch.xpu.empty_cache()
+        prev = torch.xpu.memory_allocated()
+        a = torch.ones(10, device="xpu")
+        self.assertGreater(torch.xpu.memory_allocated(), prev)
+        self.assertGreater(torch.xpu.memory_reserved(), 0)
+        del a
+        self.assertEqual(torch.xpu.memory_allocated(), prev)
+        torch.xpu.empty_cache()
+        self.assertEqual(torch.xpu.memory_reserved(), 0)
+        torch.xpu.reset_accumulated_memory_stats()
+        # Activate 1kB memory
+        a = torch.randn(256, device="xpu")
+        # Detect if the current active memory is 1kB
+        self.assertEqual(torch.xpu.memory_stats()["active_bytes.all.current"], 1024)
+        self.assertEqual(torch.xpu.memory_stats()["active_bytes.all.freed"], 0)
+        del a
+        self.assertEqual(torch.xpu.memory_stats()["active_bytes.all.current"], 0)
+        self.assertEqual(torch.xpu.memory_stats()["active_bytes.all.freed"], 1024)
+
+    @unittest.skipIf(not TEST_MULTIXPU, "only one GPU detected")
+    def test_device_memory_allocated(self):
+        device_count = torch.xpu.device_count()
+        current_alloc = [torch.xpu.memory_allocated(idx) for idx in range(device_count)]
+        x = torch.ones(10, device="xpu:0")
+        self.assertGreater(torch.xpu.memory_allocated(0), current_alloc[0])
+        self.assertTrue(
+            all(
+                torch.xpu.memory_allocated(idx) == current_alloc[idx]
+                for idx in range(1, device_count)
+            )
+        )
+
+    def test_get_arch_list(self):
+        arch_list = torch.xpu.get_arch_list()
+        if not arch_list:
+            return
+        flags = torch.xpu.get_gencode_flags()
+        for arch in arch_list:
+            self.assertTrue(arch in flags)
+
+    def test_torch_version_xpu(self):
+        self.assertEqual(len(torch.version.xpu), 8)
+        compiler_version = int(torch.version.xpu)
+        self.assertGreater(compiler_version, 20230000)
+        if IS_LINUX:
+            library = find_library_location("libtorch_xpu.so")
+            cmd = f"ldd {library} | grep libsycl"
+            results = subprocess.check_output(cmd, shell=True).strip().split(b"\n")
+            # There should be only one libsycl.so or libsycl-preview.so
+            self.assertEqual(len(results), 1)
+            for result in results:
+                if b"libsycl.so" in result:
+                    self.assertGreaterEqual(compiler_version, 20250000)
+                elif b"libsycl-preview.so" in result:
+                    self.assertLess(compiler_version, 20250000)
+                else:
+                    self.fail("Unexpected libsycl library")
+
 
 instantiate_device_type_tests(TestXpu, globals(), only_for="xpu", allow_xpu=True)
 
 
-class TestXpuAutocast(TestCase):
+class TestXpuAutocast(TestAutocast):
     # These operators are not implemented on XPU backend and we can NOT fall back
     # them to CPU. So we have to skip them at this moment.
     # TODO: remove these operators from skip list when they are implemented on XPU backend.
-    skip_list = ["gru_cell"]
+    # lstm_cell: The operator 'aten::_thnn_fused_lstm_cell' is not currently implemented for the XPU device
+    skip_list = ["gru_cell", "lstm_cell"]
 
     def setUp(self):
         super().setUp()
@@ -384,89 +492,6 @@ class TestXpuAutocast(TestCase):
     def tearDown(self):
         del self.autocast_lists
         super().tearDown()
-
-    def _run_autocast_outofplace(
-        self, op, args, run_as_type, out_type=None, module=torch, add_kwargs=None
-    ):
-        # helper to cast args
-        def cast(val, to_type):
-            if isinstance(val, torch.Tensor):
-                return val.to(to_type) if val.is_floating_point() else val
-            elif isinstance(val, collections.abc.Iterable):
-                return type(val)(cast(v, to_type) for v in val)
-            else:
-                return val
-
-        if add_kwargs is None:
-            add_kwargs = {}
-        fast_dtype = torch.bfloat16 if run_as_type == torch.bfloat16 else torch.float16
-        self.assertFalse(torch.is_autocast_enabled("xpu"))
-        with torch.amp.autocast("xpu", dtype=fast_dtype):
-            self.assertTrue(torch.is_autocast_enabled("xpu"))
-
-            out_type = out_type if out_type is not None else run_as_type
-            output = output_method = None
-
-            # Try module.* variant, if requested:
-            if module is not None and hasattr(module, op):
-                output = getattr(module, op)(*args, **add_kwargs)
-                if isinstance(output, torch.Tensor):
-                    self.assertTrue(
-                        out_type == output.dtype,
-                        f"autocast for torch.{op} produced {output.dtype}, should produce {out_type}",
-                    )
-
-            # Try Tensor.* variant:
-            if hasattr(torch.Tensor, op):
-                output_method = getattr(args[0], op)(*args[1:], **add_kwargs)
-                if isinstance(output_method, torch.Tensor):
-                    self.assertTrue(
-                        out_type == output_method.dtype,
-                        f"autocast for torch.{op} produced {output_method.dtype}, should produce torch.{out_type}",
-                    )
-
-            self.assertTrue(
-                (output is not None) or (output_method is not None),
-                f"{op} not found as an attribute on either Tensor or the requested module {module}",
-            )
-
-            # Accounts for ops that return Tensors, iterables, and other non-Tensors.
-            # For example, lstm_cell returns a tuple and equal returns bool.
-            def compare(first, second):
-                if isinstance(first, torch.Tensor):
-                    return torch.equal(first, second)
-                elif isinstance(first, collections.abc.Iterable):
-                    return all(compare(f, s) for f, s in zip(first, second))
-                else:
-                    return first == second
-
-            # If both torch.* and Tensor.* variants were found, check outputs are identical
-            if (output is not None) and (output_method is not None):
-                self.assertTrue(type(output) == type(output_method))
-                comparison = compare(output, output_method)
-                self.assertTrue(
-                    comparison, f"torch.{op} result did not match Tensor.{op} result"
-                )
-
-            # Compare numerics to Python-side "autocasting" that (we expect) does the same thing
-            # as the C++-side autocasting, and should be bitwise accurate.
-            output_to_compare = output if output is not None else output_method
-            with torch.amp.autocast("xpu", enabled=False):
-                self.assertFalse(torch.is_autocast_enabled("xpu"))
-
-                if module is not None and hasattr(module, op):
-                    control = getattr(module, op)(
-                        *cast(args, run_as_type), **add_kwargs
-                    )
-                else:
-                    control = getattr(args[0].to(run_as_type), op)(
-                        *cast(args[1:], run_as_type), **add_kwargs
-                    )
-                self.assertTrue(type(output_to_compare) == type(control))
-                comparison = compare(output_to_compare, control)
-                self.assertTrue(comparison, f"torch.{op} result did not match control")
-            self.assertTrue(torch.is_autocast_enabled("xpu"))
-        self.assertFalse(torch.is_autocast_enabled("xpu"))
 
     def test_autocast_torch_fp16(self):
         for op_with_args in self.autocast_lists.torch_fp16:
@@ -477,7 +502,9 @@ class TestXpuAutocast(TestCase):
             if len(op_with_args) == 3:
                 skip_test = True  # skip cudnn op
             if not skip_test:
-                self._run_autocast_outofplace(op, args, torch.float16)
+                self._run_autocast_outofplace(
+                    op, args, torch.float16, device="xpu", amp_dtype=torch.float16
+                )
 
     def test_autocast_torch_bf16(self):
         for op_with_args in self.autocast_lists.torch_fp16:
@@ -488,15 +515,24 @@ class TestXpuAutocast(TestCase):
             if len(op_with_args) == 3:
                 skip_test = True  # skip cudnn op
             if not skip_test:
-                self._run_autocast_outofplace(op, args, torch.bfloat16)
+                self._run_autocast_outofplace(op, args, torch.bfloat16, device="xpu")
 
     def test_autocast_torch_need_autocast_promote(self):
         for op, args in self.autocast_lists.torch_need_autocast_promote:
-            self._run_autocast_outofplace(op, args, torch.float32)
+            self._run_autocast_outofplace(
+                op, args, torch.float32, device="xpu", amp_dtype=torch.float16
+            )
 
     def test_autocast_torch_expect_builtin_promote(self):
         for op, args, out_type in self.autocast_lists.torch_expect_builtin_promote:
-            self._run_autocast_outofplace(op, args, torch.float32, out_type=out_type)
+            self._run_autocast_outofplace(
+                op,
+                args,
+                torch.float32,
+                device="xpu",
+                out_type=out_type,
+                amp_dtype=torch.float16,
+            )
 
     def test_autocast_checkpointing(self):
         model = torch.nn.Sequential(

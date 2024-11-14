@@ -19,9 +19,9 @@ class TORCH_API RRefMessageBase : public RpcCommandBase {
   const RRefId& rrefId();
 
  protected:
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
+  // NOLINTNEXTLINE(cppcoreguidelines*)
   const RRefId rrefId_;
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
+  // NOLINTNEXTLINE(cppcoreguidelines*)
   const MessageType type_;
 };
 
@@ -38,7 +38,7 @@ class TORCH_API ForkMessageBase : public RRefMessageBase {
       MessageType type);
 
  protected:
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
+  // NOLINTNEXTLINE(cppcoreguidelines*)
   const ForkId forkId_;
 };
 
@@ -58,6 +58,7 @@ class TORCH_API ScriptRRefFetchCall final : public RRefMessageBase {
       const Message& message);
 
  private:
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const worker_id_t fromWorkerId_;
 };
 
@@ -72,6 +73,7 @@ class TORCH_API PythonRRefFetchCall final : public RRefMessageBase {
       const Message& message);
 
  private:
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const worker_id_t fromWorkerId_;
 };
 
@@ -86,6 +88,7 @@ class TORCH_API RRefFetchRet : public RpcCommandBase {
 
  private:
   std::vector<at::IValue> values_;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const MessageType type_;
 };
 
@@ -137,6 +140,7 @@ class TORCH_API RRefChildAccept final : public RpcCommandBase {
   static std::unique_ptr<RRefChildAccept> fromMessage(const Message& message);
 
  private:
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const ForkId forkId_;
 };
 

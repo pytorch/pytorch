@@ -28,6 +28,7 @@ from torch._dynamo.utils import ifdynstaticdefault, same
 from torch._dynamo.variables import ConstantVariable
 from torch._dynamo.variables.lists import RangeVariable
 from torch.nn import functional as F
+from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_utils import (
     disable_translation_validation_if_dynamic_shapes,
     instantiate_parametrized_tests,
@@ -239,6 +240,22 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             v = v + x
         return v
 
+    def test_itertools_reconstruct(self):
+        def fn(a):
+            it1 = itertools.repeat(1)
+            it2 = itertools.count(2)
+            for _ in range(3):
+                a += next(it1)
+                a += next(it2)
+            return it1, it2, a
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        i1, i2, a = fn(torch.ones(3, 3))
+        it1, it2, b = opt_fn(torch.ones(3, 3))
+        self.assertEqual(next(i1), next(it1))
+        self.assertEqual(next(i2), next(it2))
+        self.assertEqual(a, b)
+
     @make_test
     def test_obj_eq(a, b):
         v = a + b
@@ -297,6 +314,33 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         for size in itertools.combinations((1, 2, 3, 4), 2):
             combs.append(torch.ones(size))
         return combs
+
+    @unittest.skipIf(
+        sys.version_info < (3, 10),
+        "itertools.pairwise was added at Python 3.10",
+    )
+    @make_test
+    def test_itertools_pairwise(a):
+        pairs = []
+        for size in itertools.pairwise((1, 2, 3, 4)):
+            pairs.append(torch.ones(size))
+        return pairs
+
+    def test_itertools_compress(self):
+        def fn():
+            return itertools.compress("ABCDEF", [1, 0, 1, 0, 1, 1])
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertListEqual(list(opt_fn()), list(fn()))
+
+    def test_itertools_compress_tensors(self):
+        def fn():
+            return itertools.compress(
+                [torch.tensor([0]), torch.tensor([1]), torch.tensor([2])], [1, 0, 1]
+            )
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertListEqual(list(opt_fn()), list(fn()))
 
     @make_test
     def test_np_iinfo(a):
@@ -507,8 +551,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         empty = collections.deque()
         d.extend(empty)
 
-        # dynamo same() util doesn't support deque so just return a list
-        return list(d)
+        return d
 
     @make_test
     def test_slice1(a):
@@ -671,6 +714,12 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             return x + 1
         else:
             return x - 1
+
+    @make_test
+    def test_dict_update_kwargs(x):
+        d = {"a": 2}
+        d.update(b=4)
+        return x * d["a"] * d["b"]
 
     @make_test
     def test_defaultdict_setdefault1(x):
@@ -904,6 +953,44 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             return x + 1
         else:
             return x - 1
+
+    @make_test
+    def test_tensor_size(x):
+        fn = torch.Tensor.size
+        return fn(x + 1)
+
+    @make_test
+    def test_tensor_dim(x):
+        fn = torch.Tensor.dim
+        return fn(x + 1)
+
+    @make_test
+    def test_tensor_is_inference(x):
+        if x.is_inference():
+            return x + 1
+        else:
+            return x - 1
+
+    def test_is_inference_recompilation(self):
+        def fn(x):
+            if x.is_inference():
+                return x + 1
+            else:
+                return x - 1
+
+        with torch.inference_mode():
+            x_inference = torch.randn(2, 2)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+
+        x = torch.randn(2, 2)
+
+        self.assertEqual(fn(x), opt_fn(x))
+        self.assertEqual(cnts.frame_count, 1)
+
+        self.assertEqual(fn(x_inference), opt_fn(x_inference))
+        self.assertEqual(cnts.frame_count, 2)  # Recompiles
 
     @make_test
     def test_get_privateuse1_name(x):
@@ -2300,6 +2387,89 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             opt_fn = torch.compile(fullgraph=True)(fn)
             opt_fn(inputs)
 
+    def test_filter_infinite_iterator(self):
+        def fn(x):
+            x = x + 1
+            return (
+                x,
+                list(zip(range(3), filter(lambda y: y < 10, itertools.count()))),
+                list(zip(range(10, 12), filter(lambda y: y > 10, itertools.count()))),
+            )
+
+        inputs = torch.ones(1)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertTupleEqual(opt_fn(inputs), fn(inputs))
+
+    def test_filter_reconstruct(self):
+        def fn(a):
+            return filter(lambda x: x[0] + x[1] < 10, zip([1, 2, 3], [1, 2, 3])), a + 1
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        m = opt_fn(torch.ones(3, 3))[0]
+        n = fn(torch.ones(3, 3))[0]
+        self.assertIsInstance(m, filter)
+        self.assertEqual(list(m), list(n))
+
+    def test_filter_graph_break_reconstruct(self):
+        def fn(x, y):
+            if x.sum() > 0:
+                return x + y
+            return x * y
+
+        backend = EagerAndRecordGraphs()
+        cnts = CompileCounterWithBackend(backend)
+        opt_fn = torch.compile(fn, backend=cnts)
+        a = torch.zeros(3)
+        b = torch.ones(3)
+        self.assertEqual(opt_fn(a, b), fn(a, b))
+
+        if torch._dynamo.config.assume_static_by_default:
+            self.assertExpectedInline(
+                normalize_gm(backend.graphs[0].print_readable(print_output=False)),
+                """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[3]"):
+        l_x_ = L_x_
+
+        sum_1: "f32[]" = l_x_.sum();  l_x_ = None
+        gt: "b8[]" = sum_1 > 0;  sum_1 = None
+        return (gt,)
+""",
+            )
+        else:
+            self.assertExpectedInline(
+                normalize_gm(backend.graphs[0].print_readable(print_output=False)),
+                """\
+class GraphModule(torch.nn.Module):
+    def forward(self, s0: "Sym(s0)", L_x_: "f32[s0]"):
+        l_x_ = L_x_
+
+        sum_1: "f32[]" = l_x_.sum();  l_x_ = None
+        gt: "b8[]" = sum_1 > 0;  sum_1 = None
+        return (gt,)
+""",
+            )
+
+    def test_filter_with_graph_break(self):
+        def f(a):
+            a += 1
+
+            def g(x):
+                nonlocal a
+                a += 1
+                return x > 0
+
+            m = filter(g, [1, 2, 3, 4, 5])
+            a += next(m)  # won't graph break
+            torch._dynamo.graph_break()
+            a += next(m)  # will graph break
+            return a
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_f = torch.compile(f, backend=cnts)
+        self.assertEqual(f(torch.ones(3, 3)), opt_f(torch.ones(3, 3)))
+        self.assertEqual(cnts.frame_count, 3)
+
     def test_pow_int(self):
         def fn(a, b):
             return torch.pow(a, b)
@@ -3115,6 +3285,199 @@ class GraphModule(torch.nn.Module):
             fn(arr, np.s_[..., 1], np.array([3, 3])), np.array([[1, 3], [2, 3]])
         )
 
+    def test_map_return(self):
+        def fn(a, b):
+            return map(lambda x: x + 1, [a, b])
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        m = opt_fn(torch.randn(3, 3), torch.randn(3, 3))
+        self.assertIsInstance(m, map)
+
+    @make_test
+    def test_map_max(a, b):
+        return max(map(lambda x: x.sum(), [a, b]))
+
+    # max(map(...)) graph breaks
+    @unittest.expectedFailure
+    @make_test
+    def test_map_max_const(a):
+        return max(map(lambda x: x, [1, 2, 3])), a + 1
+
+    @make_test
+    def test_map_list(a, b):
+        return list(map(lambda x: x + 1, [a, b]))
+
+    @make_test
+    def test_map_tuple(a, b):
+        return tuple(map(lambda x: x + 1, [a, b]))
+
+    @make_test
+    def test_map_iter(a, b):
+        it = iter(map(lambda x: x + 1, [a, b]))
+        return next(it)
+
+    @make_test
+    def test_map_zip_dict(a):
+        d = dict(
+            zip(
+                map(lambda x: x + 1, [0, 1, 2]),
+                [map(lambda x: x - 1, [y]) for y in [3, 4, 5]],
+            )
+        )
+        return list(d[3])[0], a + 1  # noqa: RUF015
+
+    @make_test
+    def test_map_dict_fromkeys(a):
+        return dict.fromkeys(map(lambda x: x + 1, [0, 1])), a + 1
+
+    @make_test
+    def test_map_set(a):
+        return set(map(lambda x: x + 1, [0, 1])), a + 1
+
+    # test_map_sum defined earlier
+
+    @make_test
+    def test_map_reduce(a, b):
+        return functools.reduce(lambda x, y: x + y, map(lambda x: x + 1, [a, b]))
+
+    @make_test
+    def test_map_sorted(a):
+        return sorted(map(lambda x: x + 1, [0, 4, 3, 1, 2])), a + 1
+
+    @make_test
+    def test_map_list_extend(a, b, c):
+        l = [a]
+        l.extend(map(lambda x: x + 1, [b, c]))
+        return l
+
+    @make_test
+    def test_map_list_slice_assign(a, b, c, d, e):
+        l = [a, b, c]
+        l[1:2] = map(lambda x: x + 1, [d, e])
+        return l
+
+    @make_test
+    def test_map_deque_extendleft(a, b, c):
+        d = collections.deque([a])
+        d.extendleft(map(lambda x: x + 1, [b, c]))
+        return d
+
+    @make_test
+    def test_map_str_join(a):
+        return "".join(map(lambda x: x, ["a", "b", "c"])), a + 1
+
+    def test_map_with_graph_break(self):
+        def f(a):
+            a += 1
+
+            def g(x):
+                nonlocal a
+                a += 1
+                return x + 1
+
+            m = map(g, [1, 2, 3, 4, 5])
+            a += next(m)  # won't graph break
+            torch._dynamo.graph_break()
+            a += next(m)  # will graph break
+            return a
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_f = torch.compile(f, backend=cnts)
+        self.assertEqual(f(torch.ones(3, 3)), opt_f(torch.ones(3, 3)))
+        self.assertEqual(cnts.frame_count, 3)
+
+    def test_map_reconstruct(self):
+        def fn(a):
+            return map(lambda x: x[0] + x[1], zip([1, 2, 3], [1, 2, 3])), a + 1
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        m = opt_fn(torch.ones(3, 3))[0]
+        self.assertIsInstance(m, map)
+        self.assertEqual(list(m), list(fn(torch.ones(3, 3))[0]))
+
+    def test_zip_reconstruct(self):
+        def fn(a):
+            return zip([1, 2, 3], map(lambda x: x + 1, [1, 2, 3])), a + 1
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        m = opt_fn(torch.ones(3, 3))[0]
+        self.assertIsInstance(m, zip)
+        self.assertEqual(list(m), list(fn(torch.ones(3, 3))[0]))
+
+    @make_test
+    def test_map_partial_unpack(a, b):
+        y = 1
+
+        def f(x):
+            nonlocal y
+            y += 1
+            return x
+
+        l = list(zip([a, b], map(f, [1, 2, 3, 4])))
+        return a + y
+
+    @make_test
+    def test_map_call_function_ex(a, b):
+        def f(x, y):
+            return x + y
+
+        return f(*map(lambda x: x + 1, [a, b]))
+
+    @make_test
+    def test_map_unpack_twice(a, b):
+        m = map(lambda x: x + 1, [a, b])
+        l1 = list(m)
+        l2 = list(m)
+        return l1, l2
+
+    @make_test
+    def test_enumerate(a, b):
+        return list(enumerate([a, b], start=1)), a + 1
+
+    @make_test
+    def test_map_enumerate(a, b):
+        return list(enumerate(map(lambda x: x + 1, [a, b]), start=1)), a + 1
+
+    @make_test
+    def test_map_infinite(a, b):
+        return list(map(lambda x, y: x + y, [a, b], itertools.count(3)))
+
+    @make_test
+    def test_map_unpack_vars(a, b):
+        x, y = map(lambda x: x + 1, [a, b])
+        return x + y
+
+    def test_enumerate_custom(self):
+        class MyClass:
+            def __iter__(self):
+                self.a = 1
+                return self
+
+            def __next__(self):
+                if self.a > 3:
+                    raise StopIteration
+                self.a += 1
+                return self.a
+
+        def fn(x):
+            for i, it in enumerate(MyClass()):
+                x += i + it
+            return x
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(torch.ones(3, 3)), opt_fn(torch.ones(3, 3)))
+
+    def test_enumerate_reconstruct(self):
+        def fn(a, b):
+            return enumerate([a, b], start=1)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        inps = (torch.randn(3, 3), torch.randn(3, 3))
+        it1 = fn(*inps)
+        it2 = opt_fn(*inps)
+        self.assertIsInstance(it2, enumerate)
+        self.assertEqual(list(it1), list(it2))
+
 
 def udf_mul(x, y):
     return x * y
@@ -3394,6 +3757,71 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         ref = opt_fn(x)
         self.assertEqual(ref, res)
 
+    def test_frozenset_construction(self):
+        def fn(x):
+            s = frozenset({x})
+            t = frozenset(s)
+            return len(t)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        res = fn(x)
+        ref = opt_fn(x)
+        self.assertEqual(ref, res)
+
+    def test_frozenset_reconstruction(self):
+        d = {}
+        f = frozenset()
+        d[f] = torch.randn(4)
+
+        def fn(x):
+            k = frozenset()
+            torch._dynamo.graph_break()
+            return d[k] * x
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.randn(4)
+        res = fn(x)
+        ref = opt_fn(x)
+        self.assertEqual(ref, res)
+
+    def test_frozenset_illegal_call_method(self):
+        def fn_add():
+            s = frozenset((1, 2, 3))
+            s.add({2})
+            return len(s)
+
+        def fn_pop():
+            s = frozenset((1, 2, 3))
+            s.pop()
+            return len(s)
+
+        def fn_update():
+            s = frozenset((1, 2, 3))
+            s.update({4, 5, 6})
+            return len(s)
+
+        def fn_remove():
+            s = frozenset((1, 2, 3))
+            s.remove(2)
+            return len(s)
+
+        def fn_discard():
+            s = frozenset((1, 2, 3))
+            s.discard(2)
+            return len(s)
+
+        def fn_clear():
+            s = frozenset((1, 2, 3))
+            s.clear()
+            return len(s)
+
+        for fn in [fn_add, fn_pop, fn_update, fn_remove, fn_discard, fn_clear]:
+            torch._dynamo.reset()
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            with self.assertRaises(torch._dynamo.exc.InternalTorchDynamoError):
+                opt_fn()
+
     def test_is_tensor_tensor(self):
         def fn(x, y):
             if x is y:
@@ -3605,9 +4033,35 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         with self.assertRaisesRegex(torch._dynamo.exc.UserError, "zip()"):
             nopython_fn(x, ys[:1], zs)
 
+        with self.assertRaisesRegex(torch._dynamo.exc.UserError, "zip()"):
+            nopython_fn(x, ys, zs[:1])
+
         # Should cause fallback if allow graph break
         with self.assertRaisesRegex(ValueError, "zip()"):
             opt_fn(x, ys[:1], zs)
+
+        with self.assertRaisesRegex(ValueError, "zip()"):
+            opt_fn(x, ys, zs[:1])
+
+    @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
+    def test_cuda_current_device(self):
+        def fn(x):
+            y = torch.empty(
+                (2, 3), dtype=torch.float32, device=torch.cuda.current_device()
+            )
+            y.copy_(x)
+            return torch.sin(y + y.device.index)
+
+        counter = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(backend=counter, fullgraph=True)(fn)
+
+        with torch.cuda.device(0):
+            x = torch.randn(2, 3)
+            self.assertEqual(opt_fn(x), fn(x))
+            self.assertEqual(counter.frame_count, 1)
+            with torch.cuda.device(1):
+                self.assertEqual(opt_fn(x), fn(x))
+                self.assertEqual(counter.frame_count, 2)
 
     def test_fn_with_attr(self):
         def fn(x):

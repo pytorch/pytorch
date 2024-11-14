@@ -88,7 +88,7 @@ cusparseOperation_t convertTransToCusparseOperation(char trans) {
   else if (trans == 'n') return CUSPARSE_OPERATION_NON_TRANSPOSE;
   else if (trans == 'c') return CUSPARSE_OPERATION_CONJUGATE_TRANSPOSE;
   else {
-    AT_ERROR("trans must be one of: t, n, c");
+    TORCH_CHECK(false, "trans must be one of: t, n, c");
   }
 }
 

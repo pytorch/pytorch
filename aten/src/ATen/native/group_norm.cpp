@@ -4,7 +4,6 @@
 #include <ATen/Parallel.h>
 #include <ATen/native/cpu/mixed_data_type.h>
 #include <c10/util/accumulate.h>
-
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
@@ -22,7 +21,6 @@
 #include <functional>
 #include <tuple>
 #include <vector>
-
 namespace at::native {
 
 template <typename T>
@@ -68,24 +66,23 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm(
     int64_t HxW,
     int64_t group,
     double eps) {
+
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> gamma_maybe_owned =
       at::borrow_from_optional_tensor(gamma_opt);
   const Tensor& gamma = *gamma_maybe_owned;
-  const Tensor& beta = c10::value_or_else(beta_opt, [] { return Tensor(); });
+  const Tensor& beta = beta_opt.value_or(Tensor());
 
   // repeated check so expanded weights can call native_group_norm directly but
   // save mean and variance from forward
   check_group_norm_inputs(X, gamma, beta, C, group);
-  auto memory_format = X.device().is_cpu() ?
-      X.suggest_memory_format() : at::MemoryFormat::Contiguous;
-
-  TORCH_CHECK(X.is_contiguous(memory_format));
+  auto memory_format = X.suggest_memory_format();
 
   bool mixed_type = is_mixed_type(X, gamma, beta);
   if (mixed_type) {
     check_mixed_data_type(X, gamma, beta);
   }
+
 
   Tensor Y = at::native::empty_like(
       X,
@@ -97,6 +94,8 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm(
   const auto dtype = param_scalar_type(X, mixed_type);
   Tensor mean = at::empty({N, group}, X.options().dtype(dtype));
   Tensor rstd = at::empty({N, group}, X.options().dtype(dtype));
+
+
   GroupNormKernel(
       X.device().type(), X, gamma, beta, N, C, HxW, group, eps, Y, mean, rstd);
   return std::make_tuple(Y, mean, rstd);
@@ -185,7 +184,7 @@ Tensor group_norm(
   c10::MaybeOwned<Tensor> weight_maybe_owned =
       at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
-  const Tensor& bias = c10::value_or_else(bias_opt, [] { return Tensor(); });
+  const Tensor& bias = bias_opt.value_or(Tensor());
 
   const auto N = input.sym_size(0);
   const auto C = input.sym_size(1);
@@ -194,11 +193,9 @@ Tensor group_norm(
   const auto input_shape = input.sym_sizes();
   const auto HxW =
       c10::multiply_integers(input_shape.slice(2));
-
   const Tensor kEmpty;
   auto memory_format = input.suggest_memory_format();
-  const auto& X = input.device().is_cpu() || input.device().is_xpu() ?
-      input.contiguous(memory_format) : input.contiguous();
+  const auto& X = input.contiguous(memory_format);
   const auto& gamma = weight.defined() ? weight.contiguous() : kEmpty;
   const auto& beta = bias.defined() ? bias.contiguous() : kEmpty;
   TORCH_CHECK(!gamma.defined() || gamma.sym_numel() == C);
@@ -224,7 +221,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> math_group_norm(
   c10::MaybeOwned<Tensor> weight_maybe_owned =
       at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
-  const Tensor& bias = c10::value_or_else(bias_opt, [] { return Tensor(); });
+  const Tensor& bias = bias_opt.value_or(Tensor());
 
   auto input_shape = input.sizes();
   at::Tensor input_reshaped = input.view({1, N * group, N ? -1 : 1});

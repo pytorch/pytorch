@@ -18,10 +18,8 @@ from typing import (
 
 from sympy import Integer, Symbol
 
-from torch.utils._ordered_set import OrderedSet
-
 from .. import config, metrics
-from ..runtime.hints import DeviceProperties, ReductionHint
+from ..runtime.hints import DeviceProperties
 from ..runtime.runtime_utils import next_power_of_2
 from ..runtime.triton_heuristics import grid_combo_kernels
 from ..scheduler import BaseSchedulerNode
@@ -36,6 +34,7 @@ from .common import (
     WorkspaceArg,
 )
 from .simd import SIMDScheduling
+from .simd_kernel_features import SIMDKernelFeatures
 from .triton import gen_common_triton_imports, TritonKernel
 from .triton_utils import config_of, signature_to_meta
 
@@ -90,7 +89,7 @@ def _default_custom_combo_kernel_horizontal_partition(
         # rnumel > 2048 usually has long execution time
         # BaseSchedulerNode.group[-1][-1] is rnumel for reduction nodes
         long_reduction = [
-            n for n in reduction if V.graph.sizevars.size_hint(n.group[-1][-1]) > 2048
+            n for n in reduction if V.graph.sizevars.size_hint(n.group[-1][-1]) > 2048  # type: ignore[arg-type]
         ]
         short_reduction = [n for n in reduction if n not in long_reduction]
         if long_reduction:
@@ -298,7 +297,7 @@ class ComboKernel(Kernel):
             else:
                 code.splice(f"elif pid < num_xblocks_{num}:")
                 with code.indent():
-                    code.splice(f"pid_offset = pid - num_xblocks_{num-1}")
+                    code.splice(f"pid_offset = pid - num_xblocks_{num - 1}")
 
         @classmethod
         def _calculate_xblocks(
@@ -322,7 +321,7 @@ class ComboKernel(Kernel):
                 if i == 0:
                     code.splice(f"num_xblocks_{i} = {xblock_str}")
                 else:
-                    code.splice(f"num_xblocks_{i} = num_xblocks_{i-1} + {xblock_str}")
+                    code.splice(f"num_xblocks_{i} = num_xblocks_{i - 1} + {xblock_str}")
 
         @classmethod
         def grid(
@@ -466,9 +465,7 @@ class ComboKernel(Kernel):
     @staticmethod
     def create_triton_kernel(
         *groups: Any,
-        index_dtype: str,
-        mutations: OrderedSet[str],
-        reduction_hint: ReductionHint,
+        features: SIMDKernelFeatures,
         optimize_mask: bool,
     ) -> TritonKernel:
         """
@@ -477,11 +474,11 @@ class ComboKernel(Kernel):
         """
         return TritonKernel(
             *groups,
-            index_dtype=index_dtype,
-            mutations=mutations,
+            features=features,
             pid_cache={"tl.program_id(0)": "pid_offset"},
-            reduction_hint=reduction_hint,
             optimize_mask=optimize_mask,
+            # foreach kernels don't work with cooperative reductions
+            override_cooperative_reduction=False,
         )
 
     def codegen_static_numels_sub_kernel(
@@ -660,21 +657,20 @@ class ComboKernel(Kernel):
         heuristics: str,
         size_hints: List[int],
         selected_kernel: TritonKernel,
+        signature: List[Any],
+        argdefs: List[str],
         pointwise_with_reduce: bool = False,
-        signature: Optional[List[Any]] = None,
     ) -> str:
         can_use_32bit = all(k.index_dtype == "tl.int32" for k in self.sub_kernels)
         size_dtype = "tl.int32" if can_use_32bit else "tl.int64"
-        if signature is None:
-            _, _, signature, _ = self.args.python_argdefs()
         for i, sub in enumerate(self.sub_kernels):
             self.min_x_blocks_sub_kernel(sub, i)
         self.select_dispatch_strategy()
         triton_meta = {
-            "signature": signature_to_meta(signature, size_dtype=size_dtype),
-            "device": DeviceProperties.create(
-                V.graph.scheduler.get_current_device_or_throw()
+            "signature": signature_to_meta(
+                signature, size_dtype=size_dtype, argdefs=argdefs
             ),
+            "device": DeviceProperties.create(V.graph.get_current_device_or_throw()),
             "constants": {},
         }
         triton_meta["configs"] = [config_of(signature)]
@@ -696,7 +692,7 @@ class ComboKernel(Kernel):
                 @triton.jit
             """
         elif sub_kernel.inside_reduction:
-            reduction_hint = sub_kernel.reduction_hint
+            reduction_hint = sub_kernel.features.get_reduction_hint()
             heuristics_line = f"""
                 @triton_heuristics.{heuristics}(
                     size_hints={size_hints!r},
@@ -850,6 +846,7 @@ class ComboKernel(Kernel):
                 selected_kernel,
                 pointwise_with_reduce=pointwise_with_reduction,
                 signature=signature,
+                argdefs=argdefs,
             )
         )
         code.writeline(
@@ -916,10 +913,11 @@ class ComboKernel(Kernel):
                         symval_hint = 0
                     result.writeline(f"{var_name} = {symval_hint}")
                 elif isinstance(arg_sig, WorkspaceArg):
-                    device = V.graph.scheduler.get_current_device_or_throw()
-                    nbytes = V.graph.sizevars.size_hint(arg_sig.nbytes)
+                    device = V.graph.get_current_device_or_throw()
+                    count = V.graph.sizevars.size_hint(arg_sig.count)
+                    # for benchmark harness, we ignore arg_sig.zero_mode and always zero it
                     result.writeline(
-                        f"{var_name} = torch.zeros({nbytes}, device='{device}', dtype=torch.uint8)"
+                        f"{var_name} = torch.zeros({count}, device='{device}', dtype={arg_sig.dtype})"
                     )
                 else:
                     raise KeyError(
@@ -958,7 +956,7 @@ class ComboKernel(Kernel):
             grid_arg = f"{extra_args_str}grid=grid_combo_kernels({grid_str})"
         else:
             grid_arg = f"grid={grid}"
-        index = V.graph.scheduler.get_current_device_or_throw().index
+        index = V.graph.get_current_device_or_throw().index
         with result.indent():
             result.writeline(f"with {V.graph.device_ops.device_guard(index)}:")
             with result.indent():
@@ -992,7 +990,7 @@ class ComboKernel(Kernel):
 
             result.writeline("args = get_args()")
             result.writeline(
-                "ms = benchmarker.benchmark_gpu(lambda: call(args), rep=40, fast_flush=True)"
+                "ms = benchmarker.benchmark_gpu(lambda: call(args), rep=40)"
             )
             result.writeline(f"num_gb = {num_gb}")
             result.writeline("gb_per_s = num_gb / (ms / 1e3)")
@@ -1086,8 +1084,8 @@ class ComboKernel(Kernel):
             name,
             call_args,
             grid,
-            V.graph.scheduler.get_current_device_or_throw().index,
-            cuda=True,
+            V.graph.get_current_device_or_throw().index,
+            gpu=True,
             triton=True,
             arg_types=arg_types,
             grid_fn="grid_combo_kernels",

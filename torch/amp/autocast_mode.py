@@ -322,6 +322,15 @@ class autocast:
                 raise RuntimeError(
                     "Current CUDA Device does not support bfloat16. Please switch dtype to float16."
                 )
+        elif self.device == "mps":
+            supported_dtype = [torch.float16]
+            if self.fast_dtype not in supported_dtype:
+                error_message = "In MPS autocast, but the target dtype is not supported. Disabling autocast.\n"
+                error_message += (
+                    "MPS Autocast only supports dtype of torch.float16 currently."
+                )
+                warnings.warn(error_message)
+                enabled = False
         elif self.device == "xla":
             supported_dtype = [torch.float16, torch.bfloat16]
             if self.fast_dtype not in supported_dtype:
@@ -346,6 +355,24 @@ class autocast:
         torch.autocast_increment_nesting()
         torch.set_autocast_cache_enabled(self._cache_enabled)
 
+        # only dispatch to PreDispatchTorchFunctionMode to avoid exposing this
+        # API to other functional modes. We only expose to PreDispatchTorchFunctionMode
+        # for preserving autocast in torch.export.export.
+        if torch._C._is_torch_function_mode_enabled():
+            stacks = torch.overrides._get_current_function_mode_stack()
+            for mode in stacks:
+                if isinstance(
+                    mode,
+                    torch.fx.experimental.proxy_tensor.PreDispatchTorchFunctionMode,
+                ):
+                    args = (
+                        self.device,
+                        self.fast_dtype,
+                        self._enabled,
+                        self._cache_enabled,
+                    )
+                    return mode.__torch_function__(torch.amp._enter_autocast, (), args)
+
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any):  # type: ignore[override]
         if torch._jit_internal.is_scripting():
             return
@@ -356,6 +383,18 @@ class autocast:
         torch.set_autocast_enabled(self.device, self.prev)
         torch.set_autocast_dtype(self.device, self.prev_fastdtype)
         torch.set_autocast_cache_enabled(self.prev_cache_enabled)
+
+        # only dispatch to PreDispatchTorchFunctionMode to avoid exposing this
+        # API to other functional modes. We only expose to PreDispatchTorchFunctionMode
+        # for preserving autocast in torch.export.export.
+        if torch._C._is_torch_function_mode_enabled():
+            stacks = torch.overrides._get_current_function_mode_stack()
+            for mode in stacks:
+                if isinstance(
+                    mode,
+                    torch.fx.experimental.proxy_tensor.PreDispatchTorchFunctionMode,
+                ):
+                    return mode.__torch_function__(torch.amp._exit_autocast, (), ())
         return False
 
     def __call__(self, func):

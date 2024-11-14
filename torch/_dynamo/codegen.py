@@ -23,7 +23,7 @@ from .bytecode_transformation import (
 from .exc import unimplemented
 from .source import AttrSource, Source
 from .utils import is_safe_constant, rot_n_helper
-from .variables.base import VariableTracker
+from .variables.base import ValueMutationExisting, VariableTracker
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
     NumpyNdarrayVariable,
@@ -51,30 +51,35 @@ class PyCodegen:
         root: Optional[torch.nn.Module] = None,
         graph_output_var: Optional[str] = None,
         tempvars=None,
+        overridden_sources=None,
     ) -> None:
         self.root = root
         self.top_of_stack: Optional[VariableTracker] = None
         self.uses: Counter[VariableTracker] = collections.Counter()
         self.graph_outputs: Dict[int, GraphOutputEntry] = {}
         self._output: List[Instruction] = []
+        # This determines which VariableTracker should be stored as locals, and
+        # maps the VariableTracker to the local variable name. Note that it
+        # could map to None initially, in which case we'll overwrite it to map
+        # to real temporary names via `add_cache`.
         self.tempvars = tempvars or {}
         self.tx = tx
         self.graph_output_var = graph_output_var
         self.code_options = self.tx.output.code_options
         self.cell_and_freevars = self.tx.cell_and_freevars
         self.new_var = self.tx.output.new_var
-        self.mutable_side_effects_from_source = False
         self.value_from_source: bool = True
+        # This serves as a way for codegen to use a different source; we need
+        # this because sometimes we can't easily modify the original source
+        # without affecting other components, e.g., guards.
+        self.overridden_sources: Dict[Source, Source] = overridden_sources or {}
 
     def restore_stack(self, stack_values, *, value_from_source=True):
-        prior = self.mutable_side_effects_from_source
-        self.mutable_side_effects_from_source = True
         prev = self.value_from_source
         self.value_from_source &= value_from_source
         try:
             self.foreach(stack_values)
         finally:
-            self.mutable_side_effects_from_source = prior
             self.value_from_source = prev
 
     def graph_output_vars(self):
@@ -114,9 +119,28 @@ class PyCodegen:
             self.clear_tos()
 
     def __call__(self, value, allow_cache=True):
-        """Generate code such that top-of-stack (TOS) is set to value"""
+        """
+        Generate code such that top-of-stack (TOS) is set to value.
+
+        `allow_cache` is used to determine whether the following could happen,
+        when `value` is a `VariableTracker`:
+        1. if `value` was codegen-ed previously with `allow_cache=True` and
+           without using source, reuse the generated code by loading from top
+           of stack or tempvars.
+        2. emit code based on `value.source` to handle aliasing.
+
+        Notable effects:
+        1. `self.top_of_stack` will be set to `value`, if we don't codegen
+           `value` based on source.
+        2. `self.uses[value]` will increment, if we don't codegen `value` based
+           on source or cache/top-of-stack reuse; in other words, if we codegen
+           as if `value` is modelling some brand new python value.
+        """
         if isinstance(value, Source):
-            self.call_reconstruct(value)
+            # If the source needs to be overridden, use the new one.
+            source = self.overridden_sources.get(value, value)
+            self.call_reconstruct(source)
+            # We don't support dup_top optimization for source yet.
             self.clear_tos()
             return
 
@@ -124,36 +148,41 @@ class PyCodegen:
         output = self._output
         graph_outputs = self.graph_outputs
 
-        if self.top_of_stack is value and allow_cache:
-            output.append(create_dup_top())
-            return
-
-        if self.mutable_side_effects_from_source:
-            # this is needed to get aliasing relationships right
-            # value.mutable_local.source will get mutated to hold `value`
-            # mutable_side_effects_from_source=False is used to codegen the mutation
-            # mutable_side_effects_from_source=True is used to codegen a reference
-            from .side_effects import MutableSideEffects
-
-            if isinstance(value.mutable_local, MutableSideEffects):
-                self(value.mutable_local.source)
-                return
-
         if allow_cache:
-            if value.mutable_local and value.mutable_local in self.tempvars:
-                output.append(self.create_load(self.tempvars[value.mutable_local]))
-                self.top_of_stack = value
+            if self.top_of_stack is value:
+                output.append(create_dup_top())
                 return
+
             if self.tempvars.get(value) is not None:
                 output.append(self.create_load(self.tempvars[value]))
                 self.top_of_stack = value
                 return
 
-        if value.source is not None and allow_cache and self.value_from_source:
-            self.call_reconstruct(value.source)
-        elif value.is_python_constant() and is_safe_constant(
-            value.as_python_constant()
-        ):
+        # Dynamo normally prefers codegen from source to account for aliasing.
+        if value.source is not None and allow_cache:
+            # There's a corner case for export: for instance, if the computation
+            # graph is just identity on an input tensor, Dynamo would just emit
+            # a `LOAD_FAST` from the input source, rather than generating an
+            # identity FX graph.
+            #
+            # However, export wants to maximize graph capture; in the case
+            # above, export _wants to_ obtain an identity FX graph (despite it
+            # appears unnecessarily expensive for `torch.compile`), so we have
+            # the following option to override Dynamo's preference for codegen
+            # from source. Morever, this option applies recursively, for cases
+            # like input tensor being returned in a new dictionary.
+            #
+            # And why the `ValueMutationExisting` check? Not sure, so leaving it
+            # to keep the old behavior, as when `value_from_source` was
+            # introduced. TODO sort out the invariants among side effect,
+            # codegen and export.
+            if (
+                isinstance(value.mutation_type, ValueMutationExisting)
+                or self.value_from_source
+            ):
+                return self(value.source)
+
+        if value.is_python_constant() and is_safe_constant(value.as_python_constant()):
             output.append(self.create_load_const(value.as_python_constant()))
         elif isinstance(value, TensorWithTFOverrideVariable):
             graph_outputs_key = self.add_graph_output(value)
@@ -180,7 +209,9 @@ class PyCodegen:
             # NB: It works to add_graph_output on a computed expression
             # as_tensor here, because we memoize as_tensor calls on
             # SymNodeVariable!
-            graph_outputs_key = self.add_graph_output(value.as_tensor(self.tx))
+            graph_outputs_key = self.add_graph_output(
+                value.as_tensor(self.tx, torch.float64)
+            )
 
             def gen_fn():
                 self.load_graph_output(graph_outputs[graph_outputs_key].index)
@@ -254,8 +285,6 @@ class PyCodegen:
     def add_cache(self, value):
         var = self.new_var()
         self.tempvars[value] = var
-        if value.mutable_local:
-            self.tempvars[value.mutable_local] = var
         self._output.append(self.create_store(var))
 
     def foreach(self, items):
@@ -469,7 +498,7 @@ class PyCodegen:
                     lambda: self.extend_output(
                         [
                             self.create_load_python_module(torch),
-                            self.create_load_attr("as_tensor"),
+                            self.create_load_attr("_as_tensor_fullprec"),
                         ]
                     )
                 )

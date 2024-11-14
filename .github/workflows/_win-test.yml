@@ -46,9 +46,10 @@ jobs:
         shell: bash
     steps:
       # Duplicated in win-build because this MUST go before a checkout
-      - name: Enable git symlinks on Windows and disable fsmonitor daemon
+      - name: Enable git long paths and symlinks on Windows and disable fsmonitor daemon
         shell: bash
         run: |
+          git config --global core.longpaths true
           git config --global core.symlinks true
 
           # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
@@ -95,7 +96,7 @@ jobs:
           retry_wait_seconds: 30
           command: |
             set -eu
-            python3 -m pip install rockset==1.0.3 'xdoctest>=1.1.0'
+            python3 -m pip install 'xdoctest>=1.1.0'
 
       - name: Start monitoring script
         id: monitor-script
@@ -154,7 +155,7 @@ jobs:
         env:
           USE_CUDA: ${{ inputs.cuda-version != 'cpu' && '1' || '0' }}
           INSTALL_WINDOWS_SDK: 1
-          PYTHON_VERSION: 3.8
+          PYTHON_VERSION: 3.9
           CONTINUE_THROUGH_ERROR: ${{ steps.keep-going.outputs.keep-going }}
           VERBOSE_TEST_LOGS: ${{ steps.keep-going.outputs.ci-verbose-test-logs }}
           TEST_SHOWLOCALS: ${{ steps.keep-going.outputs.ci-test-showlocals }}
@@ -189,7 +190,7 @@ jobs:
         run: |
           pushd "${PYTORCH_FINAL_PACKAGE_DIR}"
           # shellcheck disable=SC2046,SC2102
-          python3 -mpip install $(echo *.whl)[opt-einsum,optree] optree==0.12.1
+          python3 -mpip install $(echo *.whl)[opt-einsum,optree] optree==0.13.0
           popd
 
           .ci/pytorch/win-test.sh
