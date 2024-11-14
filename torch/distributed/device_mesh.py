@@ -995,7 +995,7 @@ else:
                         "dim-indices are not yet supported for unique_dims"
                     )
                 rank_seed += prev_size * dim.get_local_rank()
-                prev_size = dim.size()
+                prev_size *= dim.size()
 
             logger.debug(
                 "DeviceMesh manual_seed: global rank %d using seed %d",

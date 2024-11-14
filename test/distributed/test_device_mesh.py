@@ -270,7 +270,7 @@ class DeviceMeshTest(DTensorTestBase):
         # Fake pg only have BackendType as BackendType::CUSTOM.
         self.assertEqual(mesh.get_group(1)._get_backend_name(), "custom")
 
-    @with_comms()
+    @with_comms(eager_init=True)
     def test_manual_seed(self):
         mesh_shape = (2, self.world_size // 2)
         mesh_2d = init_device_mesh("cpu", mesh_shape, mesh_dim_names=("DP", "TP"))
@@ -444,6 +444,20 @@ class DeviceMeshTestNDim(DTensorTestBase):
             dp_mesh["dp_shard"]._dim_group_infos, ref_mesh["dp_shard"]._dim_group_infos
         ):
             self.assertEqual(ref_ranks, ranks)
+
+    @with_comms(eager_init=True)
+    def test_manual_seed(self):
+        dp_size = pp_size = tp_size = 2
+        mesh_3d = init_device_mesh(
+            "cpu", (dp_size, pp_size, tp_size), mesh_dim_names=("DP", "PP", "TP")
+        )
+        tp_rank = mesh_3d.get_local_rank("TP")
+        pp_rank = mesh_3d.get_local_rank("PP")
+
+        mesh_3d._manual_seed(123, unique_dims=("PP", "TP"))
+        self.assertEqual(torch.initial_seed(), 123 + tp_rank + tp_size * pp_rank)
+        mesh_3d._manual_seed(123, unique_dims=("TP", "PP"))
+        self.assertEqual(torch.initial_seed(), 123 + pp_rank + pp_size * tp_rank)
 
 
 class InitDeviceMeshTest(DTensorTestBase):
