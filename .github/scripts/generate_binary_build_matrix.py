@@ -157,7 +157,7 @@ DEFAULT_TAG = os.getenv("RELEASE_VERSION_TAG", "main")
 
 WHEEL_CONTAINER_IMAGES = {
     **{
-        gpu_arch: f"pytorch/manylinux-builder:cuda{gpu_arch}-{DEFAULT_TAG}"
+        gpu_arch: f"pytorch/manylinux2_28-builder:cuda{gpu_arch}-{DEFAULT_TAG}"
         for gpu_arch in CUDA_ARCHES
     },
     **{
@@ -165,7 +165,7 @@ WHEEL_CONTAINER_IMAGES = {
         for gpu_arch in ROCM_ARCHES
     },
     "xpu": f"pytorch/manylinux2_28-builder:xpu-{DEFAULT_TAG}",
-    "cpu": f"pytorch/manylinux-builder:cpu-{DEFAULT_TAG}",
+    "cpu": f"pytorch/manylinux2_28-builder:cpu-{DEFAULT_TAG}",
     "cpu-cxx11-abi": f"pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-{DEFAULT_TAG}",
     "cpu-aarch64": f"pytorch/manylinuxaarch64-builder:cpu-aarch64-{DEFAULT_TAG}",
     "cpu-s390x": f"pytorch/manylinuxs390x-builder:cpu-s390x-{DEFAULT_TAG}",
@@ -218,7 +218,7 @@ LIBTORCH_CONTAINER_IMAGES: Dict[Tuple[str, str], str] = {
     ("cpu", CXX11_ABI): f"pytorch/libtorch-cxx11-builder:cpu-{DEFAULT_TAG}",
 }
 
-FULL_PYTHON_VERSIONS = ["3.9", "3.10", "3.11", "3.12", "3.13"]
+FULL_PYTHON_VERSIONS = ["3.9", "3.10", "3.11", "3.12"]
 
 
 def translate_desired_cuda(gpu_arch_type: str, gpu_arch_version: str) -> str:
