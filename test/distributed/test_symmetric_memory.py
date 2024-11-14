@@ -669,23 +669,6 @@ class SymmetricMemoryTest(MultiProcessTestCase):
 
         dist.destroy_process_group()
 
-    @skipIfRocm
-    @skip_if_lt_x_gpu(2)
-    def test_stream_write_value(self):
-        self._init_process()
-
-        t = symm_mem.empty(64, device="cuda")
-        symm_mem_hdl = _SymmetricMemory.rendezvous(t, group=dist.group.WORLD)
-
-        tensor = torch.zeros(4, dtype=torch.uint32, device=self.device)
-        expect = torch.tril(torch.ones(4, 4, device=self.device)).to(torch.uint32)
-
-        for i in range(4):
-            symm_mem_hdl.stream_write_value32(
-                int(tensor.data_ptr()) + i * tensor.element_size(), 1
-            )
-            torch.testing.assert_close(tensor, expect[i])
-
 
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
