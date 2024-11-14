@@ -30,7 +30,11 @@ import torch
 import torch._logging
 from torch._C._dynamo.guards import GlobalStateGuard
 from torch._dynamo.distributed import get_compile_pg
-from torch._dynamo.utils import CompileTimeInstructionCounter, get_metrics_context
+from torch._dynamo.utils import (
+    add_compilation_metrics_to_chromium,
+    CompileTimeInstructionCounter,
+    get_metrics_context,
+)
 from torch._guards import compile_context, CompileContext, CompileId, tracing
 from torch._logging import structured
 from torch._utils_internal import (
@@ -1141,12 +1145,12 @@ def _compile(
                 ),
             }
             metrics_context.update_outer(metrics)
+            add_compilation_metrics_to_chromium(metrics)
+            chromium_event_log.log_event_end(
+                "dynamo", time.time_ns(), {}, chromium_start_time, True
+            )
             torch._dynamo.callback_handler.run_end_callbacks()
             # === END WARNING WARNING WARNING ===
-
-    chromium_event_log.log_event_end(
-        "dynamo", time.time_ns(), {}, chromium_start_time, True
-    )
 
 
 class ConvertFrame:
