@@ -21,8 +21,8 @@ import typing
 import warnings
 import weakref
 from pathlib import Path
-from types import CodeType, FunctionType, ModuleType
-from typing import Any, Callable, Dict, List, Optional, Set, TypeVar, Union
+from types import CellType, CodeType, FunctionType, ModuleType
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TypeVar, Union
 from typing_extensions import ParamSpec
 from weakref import ReferenceType
 
@@ -551,6 +551,7 @@ class ConvertFrameAssert:
                 frame.f_globals,
                 frame.f_locals,
                 frame.f_builtins,
+                frame.closure,
                 self._torchdynamo_orig_callable,
                 self._one_graph,
                 self._export,
@@ -602,6 +603,7 @@ def _compile(
     globals: Dict[str, object],
     locals: Dict[str, object],
     builtins: Dict[str, object],
+    closure: Tuple[CellType],
     compiler_fn: CompilerFn,
     one_graph: bool,
     export: bool,
@@ -645,6 +647,7 @@ def _compile(
             locals,
             globals,
             builtins,
+            closure,
             tf_mode_stack,
             code_options,
             compiler_fn,
@@ -1283,6 +1286,7 @@ def replay(filename: str) -> None:
             record.globals,
             record.locals,
             record.builtins,
+            record.closure,
             compiler_fn=eager,
             one_graph=False,
             export=False,

@@ -215,8 +215,8 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         - result: all other locals
         """
         assert not self.is_constant
-        tx = parent.output.root_tx
-        wrap = functools.partial(wrap_bound_arg, tx=tx)
+        root_tx = parent.output.root_tx
+        wrap = functools.partial(wrap_bound_arg, tx=root_tx)
 
         fn: types.FunctionType = self.fn
         defaults = fn.__defaults__ or []
@@ -254,17 +254,20 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         bound.apply_defaults()
         result = dict(bound.arguments.items())
 
-        wrap_args_kwargs(tx, result)
+        wrap_args_kwargs(root_tx, result)
         closure_cells = init_cellvars(parent, result, fn.__code__)
         closure = self.fn.__closure__ or ()
         assert len(closure) == len(self.fn.__code__.co_freevars)
         for idx, name, cell in zip(
             itertools.count(), self.fn.__code__.co_freevars, closure
         ):
-            var = tx.match_nested_cell(name, cell)
+            # This is critical, because we must make sure the same cell object
+            # is mapped to the same Dynamo representation. For regular cells we
+            # ensure that by checking them against `SideEffects`, and for
+            # unboxed cells from the root frame, we have this special handling.
+            var = root_tx.lookup_variable_for_captured_cell(cell)
             if var is not None:
-                # optimization for cleaner codegen
-                result[name] = var
+                closure_cells[name] = var
                 continue
 
             # TODO refactor these 3 branches.
