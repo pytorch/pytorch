@@ -203,11 +203,8 @@ class AOTInductorModelBase {
 #ifdef USE_CUDA
     AOTI_RUNTIME_DEVICE_CHECK(cudaEventRecord(*run_finished_, stream));
 #elif defined(USE_XPU)
-    sycl::queue* queue_ptr = nullptr;
-    aoti_torch_get_current_sycl_queue((void**)&queue_ptr);
-    queue_ptr->wait();
-    run_finished_ = std::make_optional<sycl::event*>(
-        new sycl::event(queue_ptr->ext_oneapi_submit_barrier()));
+    run_finished_ = std::make_optional<sycl::event*>(new sycl::event(
+        static_cast<sycl::queue*>(stream)->ext_oneapi_submit_barrier()));
 #else // !USE_CUDA && !USE_XPU
     run_finished_ = true;
 #endif // USE_CUDA
@@ -240,12 +237,10 @@ class AOTInductorModelBase {
 #ifdef USE_CUDA
     AOTI_RUNTIME_DEVICE_CHECK(cudaEventRecord(*run_finished_, stream));
 #elif defined(USE_XPU)
-    sycl::queue* queue_ptr = nullptr;
-    aoti_torch_get_current_sycl_queue((void**)&queue_ptr);
-    queue_ptr->wait();
-
-    run_finished_ = std::make_optional<sycl::event*>(
-        new sycl::event(queue_ptr->ext_oneapi_submit_barrier()));
+    // sycl::queue* queue_ptr = nullptr;
+    // aoti_torch_get_current_sycl_queue((void**)&queue_ptr);
+    run_finished_ = std::make_optional<sycl::event*>(new sycl::event(
+        static_cast<sycl::queue*>(stream)->ext_oneapi_submit_barrier()));
 
 #else // !USE_CUDA && !USE_XPU
     run_finished_ = true;
@@ -542,8 +537,9 @@ class AOTInductorModelBase {
     if (!run_finished_) {
       throw std::runtime_error{"Model XPU event was not initialized"};
     }
-    (*run_finished_)->wait_and_throw();
-    return true;
+    using namespace sycl::info;
+    return (*run_finished_)->get_info<event::command_execution_status>() ==
+        event_command_status::complete;
 
 #else // !USE_CUDA && !USE_XPU
     return run_finished_;
