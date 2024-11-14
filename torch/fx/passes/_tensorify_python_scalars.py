@@ -289,24 +289,13 @@ def tensorify_python_scalars(
                     graph.erase_node(node)
 
     should_restart = False
-    for i, node in enumerate(graph.nodes):
-        if (
-            node.op == "placeholder"
-            and len(node.users) == 0
-            and (name := placeholder_to_symfloat_name.get(node))
-        ):
-            # At this point we've lost the back pointer to
-            # what f_local this placeholder points to. Instead,
-            # we will rely on the symfloat name to specialize when we
-            # restart analysis.
-            TensorifyState.specialize(name)
-            should_restart = True
 
     # Sometimes by the time we get to tensorify, there have already been
     # specializations, eg. in python_arg_parser.h. In these cases,
     # placeholder nodes no longer have a reference to their original
-    # symfloat and thus we need to deduct specializations have happend
-    # via shape_env.replacements
+    # symfloat and thus we need to deduce specializations have happend
+    # via shape_env.replacements. NB: there's an important invariant here
+    # that symfloats keep consistent names across restarts.
     for k, v in shape_env.replacements.items():
         if symbol_is_type(k, SymT.FLOAT) and isinstance(v, sympy.core.numbers.Float):
             name = str(k)
