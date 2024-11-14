@@ -606,7 +606,8 @@ void* CUDASymmetricMemoryAllocator::alloc(
     int device_idx,
     const std::optional<std::string>& group_name) {
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
-  auto driver_api = c10::cuda::DriverAPI::get();
+  c10::cuda::CUDAGuard guard(device_idx);
+  device_idx = static_cast<int>(guard.current_device().index());
 
   CUmemAllocationProp prop = {};
   prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
@@ -619,6 +620,7 @@ void* CUDASymmetricMemoryAllocator::alloc(
   size_t block_size = signal_pad_offset + signal_pad_size;
 
   size_t granularity;
+  auto driver_api = c10::cuda::DriverAPI::get();
   C10_CUDA_DRIVER_CHECK(driver_api->cuMemGetAllocationGranularity_(
       &granularity, &prop, CU_MEM_ALLOC_GRANULARITY_RECOMMENDED));
   block_size = at::round_up(block_size, granularity);
@@ -630,7 +632,6 @@ void* CUDASymmetricMemoryAllocator::alloc(
   void* ptr = nullptr;
   map_block(&ptr, handle, block_size, device_idx);
 
-  c10::cuda::CUDAGuard guard(device_idx);
   AT_CUDA_CHECK(cudaMemset(ptr, 0, block_size));
 
   auto alloc_ref = c10::make_intrusive<AllocationRef>(ptr, handle, block_size, device_idx);
