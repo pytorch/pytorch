@@ -26,7 +26,6 @@ from ..virtualized import ops, OpsValue, V
 from .common import (
     CSEVariable,
     deduce_output_dtype_by_name,
-    ExprPrinter,
     Kernel,
     KernelArgs,
     OptimizationContext,
@@ -232,8 +231,12 @@ class CppCSEVariable(CSEVariable):
         return itervar in self.dependent_itervars
 
 
-class CppPrinter(ExprPrinter, _CppPrinter):
-    pass
+class CppPrinter(_CppPrinter):
+    def doprint(self, expr, *, simplify: bool = True, p=True):
+        # TODO: why are people passing strings to the printer here :think:
+        if simplify and isinstance(expr, sympy.Expr) and hasattr(V.graph, "sizevars"):
+            expr = V.graph.sizevars.simplify(expr)
+        return super().doprint(expr)
 
 
 # A function to print, useful for printing sympy symbols.

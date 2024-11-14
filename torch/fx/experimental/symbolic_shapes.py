@@ -109,7 +109,6 @@ log = logging.getLogger(__name__)
 
 import sympy
 from sympy import S
-from sympy.printing.str import StrPrinter
 
 
 class GuardOnDataDependentSymNode(RuntimeError):
@@ -2042,7 +2041,7 @@ class RuntimeAssert:
 
 
 # Used for printing SymExprs in compile_fx
-class SymExprPrinter(StrPrinter):
+class SymExprPrinter(PythonPrinter):
     def _print_Float(self, expr: sympy.Float) -> str:
         return str(float(expr))
 
@@ -2748,6 +2747,7 @@ class DimConstraints:
             t = transform(s)
             if t == s:
                 continue
+            print("t, s", t, s, s in self._static_results, s in self._dynamic_results)
             left, op, right = re.split(r"( == | <= | >= | < | > )", t)
             op = op.strip()
             if op == "==" and left == right:
