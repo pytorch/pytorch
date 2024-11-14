@@ -1,8 +1,9 @@
-import re
 import sys
+from typing import Optional
 
 import sympy
-from sympy.printing.printer import Printer
+from sympy.printing.precedence import PRECEDENCE, precedence
+from sympy.printing.str import StrPrinter
 
 
 INDEX_TYPE = "int64_t"
@@ -10,75 +11,32 @@ INDEX_TYPE = "int64_t"
 
 # This printer contains rules that are supposed to be generic for both C/C++ and
 # Python
-class ExprPrinter(Printer):
-    @staticmethod
-    def paren(string: str) -> str:
-        def all_in_parens(string: str) -> bool:
-            if string[0] != "(" or len(string) < 2:
-                return False
-            count = 1
-            for i, char in enumerate(string[1:]):
-                if char == "(":
-                    count += 1
-                elif char == ")":
-                    count -= 1
-                if count == 0 and i != len(string) - 2:
-                    return False
-            assert count == 0
-            return True
-
-        if (
-            re.match(r"^[a-z0-9_.]+$", string, re.IGNORECASE)
-            or re.match(r"^\([^)]*\)$", string, re.IGNORECASE)
-            or string == ""
-        ):
-            return string
-        # don't put extra parens for strings that are already wrapped in parens
-        if all_in_parens(string):
-            return string
-        return f"({string})"
-
-    def _print_Relational(self, expr: sympy.Expr) -> str:
-        return f" {expr.rel_op} ".join(map(self.paren, map(self._print, expr.args)))
+class ExprPrinter(StrPrinter):
+    # override this so that _print_FloorDiv is used
+    printmethod = "_torch_sympystr"
 
     def _print_Mul(self, expr: sympy.Expr) -> str:
-        return "*".join(map(self.paren, map(self._print, expr.args)))
+        return self.stringify(expr.args, " * ", precedence(expr))
 
-    def _print_Add(self, expr: sympy.Expr) -> str:
-        return " + ".join(map(self.paren, map(self._print, expr.args)))
+    def _print_Add(self, expr: sympy.Expr, order: Optional[str] = None) -> str:
+        return self.stringify(expr.args, " + ", precedence(expr))
+
+    def _print_Relational(self, expr: sympy.Expr) -> str:
+        return self.stringify(expr.args, f" {expr.rel_op} ", precedence(expr))
 
     # NB: this is OK to put here, because Mod is only defined for positive
     # numbers, and so across C/Python its behavior is consistent
     def _print_Mod(self, expr: sympy.Expr) -> str:
-        return " % ".join(map(self.paren, map(self._print, expr.args)))
-
-    def _print_Not(self, expr: sympy.Expr) -> str:
-        return f"~{self.paren(expr.args[0])}"
-
-    def _print_And(self, expr: sympy.Expr) -> str:
-        return " & ".join(map(self.paren, map(self._print, expr.args)))
-
-    def _print_Or(self, expr: sympy.Expr) -> str:
-        return " | ".join(map(self.paren, map(self._print, expr.args)))
-
-    def _print_Xor(self, expr: sympy.Expr) -> str:
-        return " ^ ".join(map(self.paren, map(self._print, expr.args)))
+        return self.stringify(expr.args, " % ", precedence(expr))
 
     def _print_FloatTrueDiv(self, expr: sympy.Expr) -> str:
-        lhs, rhs = expr.args
-        return f"{self.paren(self._print(lhs))} / {self.paren(self._print(rhs))}"
+        return self.stringify(expr.args, " / ", precedence(expr))
 
     def _print_CleanDiv(self, expr: sympy.Expr) -> str:
         return self._print_FloorDiv(expr)
 
     def _print_Identity(self, expr: sympy.Expr) -> str:
         return self._print(expr.args[0])
-
-    # NB: The C implementation is injected into codegen at
-    # torch/_inductor/codegen/wrapper.py
-    def _print_align(self, expr: sympy.Expr) -> str:
-        assert len(expr.args) == 1
-        return f"align({self._print(expr.args[0])})"
 
     # This must be implemented because sympy will collect x * x into Pow(x, 2), without
     # any explicit intervention.  We print it just like x * x, notably, we
@@ -89,12 +47,11 @@ class ExprPrinter(Printer):
     # means exp is guaranteed to be integer.
     def _print_Pow(self, expr: sympy.Expr) -> str:
         base, exp = expr.args
-        base = self._print(base)
         assert exp == int(exp), exp
         exp = int(exp)
         assert exp >= 0
         if exp > 0:
-            return "*".join([self.paren(base)] * exp)
+            return self.stringify([base] * exp, "*", PRECEDENCE["Mul"])
         return "1"
 
     # Explicit NotImplemented functions are to prevent default sympy printing
@@ -157,11 +114,11 @@ class PythonPrinter(ExprPrinter):
         assert len(expr.args) == 1
         return f"float({self._print(expr.args[0])})"
 
+    def _print_And(self, expr: sympy.Expr) -> str:
+        return self.stringify(expr.args, " and ", precedence(expr))
+
     def _print_ModularIndexing(self, expr: sympy.Expr) -> str:
-        x, div, mod = expr.args
-        x = self.paren(self.doprint(x))
-        div = self.paren(self.doprint(div))
-        mod = self.paren(self.doprint(mod))
+        x, div, mod = (self.parenthesize(arg, precedence(expr)) for arg in expr.args)
         if div != "1":
             x = f"({x} // {div})"
         return f"{x} % {mod}"
@@ -174,20 +131,17 @@ class PythonPrinter(ExprPrinter):
 
     # WARNING: this is dangerous for Triton, which has C-style modulus
     def _print_PythonMod(self, expr: sympy.Expr) -> str:
-        return " % ".join(map(self.paren, map(self._print, expr.args)))
+        return self.stringify(expr.args, " % ", precedence(expr))
 
     # WARNING: this is dangerous for Triton, which has C-style modulus
     def _print_FloorDiv(self, expr: sympy.Expr) -> str:
-        x, div = expr.args
-        x = self.paren(self.doprint(x))
-        div = self.paren(self.doprint(div))
+        x, div = (self.parenthesize(arg, precedence(expr)) for arg in expr.args)
         return f"({x} // {div})"
 
     # WARNING: this is dangerous for Triton, when lhs, rhs > 2**53, Python
     # does a special algorithm
     def _print_IntTrueDiv(self, expr: sympy.Expr) -> str:
-        lhs, rhs = expr.args
-        return f"{self.paren(self._print(lhs))} / {self.paren(self._print(rhs))}"
+        return self.stringify(expr.args, " / ", precedence(expr))
 
     def _helper_sqrt(self, expr: sympy.Expr) -> str:
         return f"math.sqrt({self._print(expr)})"
@@ -196,13 +150,11 @@ class PythonPrinter(ExprPrinter):
         return self._helper_sqrt(expr.args[0])
 
     def _print_FloatPow(self, expr: sympy.Expr) -> str:
-        base, exp = expr.args
-        return f"{self.paren(self._print(base))} ** {self.paren(self._print(exp))}"
+        return self.stringify(expr.args, " ** ", precedence(expr))
 
     # TODO: Not sure this works with Triton, even when base/exp are integral
     def _print_PowByNatural(self, expr: sympy.Expr) -> str:
-        base, exp = expr.args
-        return f"{self.paren(self._print(base))} ** {self.paren(self._print(exp))}"
+        return self.stringify(expr.args, " ** ", precedence(expr))
 
     def _print_floor(self, expr: sympy.Expr) -> str:
         assert len(expr.args) == 1
@@ -294,27 +246,25 @@ class CppPrinter(ExprPrinter):
         )
 
     def _print_Where(self, expr: sympy.Expr) -> str:
-        c = self.paren(self.doprint(expr.args[0]))
-        p = self.paren(self.doprint(expr.args[1]))
-        q = self.paren(self.doprint(expr.args[2]))
+        c, p, q = (self.parenthesize(arg, precedence(expr)) for arg in expr.args)
         return f"{c} ? {p} : {q}"
 
     def _print_ModularIndexing(self, expr: sympy.Expr) -> str:
         x, div, mod = expr.args
-        x = self.paren(self.doprint(x))
+        x = self.doprint(x)
         if div != 1:
-            div = self.paren(self.doprint(div))
+            div = self.doprint(div)
             if expr.is_integer:
                 x = f"c10::div_floor_integer(static_cast<int64_t>({x}), static_cast<int64_t>({div}))"
             else:
                 x = f"c10::div_floor_floating(static_cast<double>({x}), static_cast<double>({div}))"
-        mod = self.paren(self.doprint(mod))
+        mod = self.doprint(mod)
         return f"static_cast<{INDEX_TYPE}>({x}) % static_cast<{INDEX_TYPE}>({mod})"
 
     def _print_FloorDiv(self, expr: sympy.Expr) -> str:
         x, div = expr.args
-        x = self.paren(self.doprint(x))
-        div = self.paren(self.doprint(div))
+        x = self.doprint(x)
+        div = self.doprint(div)
         if expr.is_integer:
             return f"c10::div_floor_integer(static_cast<int64_t>({x}), static_cast<int64_t>({div}))"
         return f"c10::div_floor_floating(static_cast<double>({x}), static_cast<double>({div}))"
@@ -347,10 +297,7 @@ class CppPrinter(ExprPrinter):
     # they are positive, we will have used Mod instead, for which this codegen
     # is right).
     def _print_PythonMod(self, expr: sympy.Expr) -> str:
-        return " % ".join(map(self.paren, map(self._print, expr.args)))
-
-    def _print_CMod(self, expr: sympy.Expr) -> str:
-        return " % ".join(map(self.paren, map(self._print, expr.args)))
+        return self.stringify(expr.args, " % ", precedence(expr))
 
     def _print_IntTrueDiv(self, expr: sympy.Expr) -> str:
         lhs, rhs = expr.args
@@ -365,8 +312,7 @@ class CppPrinter(ExprPrinter):
         )
 
     def _print_FloatTrueDiv(self, expr: sympy.Expr) -> str:
-        lhs, rhs = expr.args
-        return f"{self.paren(self._print(lhs))} / {self.paren(self._print(rhs))}"
+        return self.stringify(expr.args, " / ", precedence(expr))
 
     def _print_FloatPow(self, expr: sympy.Expr) -> str:
         base, exp = expr.args
@@ -375,16 +321,22 @@ class CppPrinter(ExprPrinter):
     def _print_Pow(self, expr: sympy.Expr) -> str:
         # Uses float constants to perform FP div
         base, exp = expr.args
-        base = self._print(base)
 
         if exp == 0.5 or exp == -0.5:
+            base = self._print(base)
             return f"std::sqrt({base})" if exp == 0.5 else f"1.0/std::sqrt({base})"
         if exp.is_integer:
             exp = int(exp)
             if exp > 0:
-                r = "*".join([self.paren(base)] * exp)
-            elif exp < 0:
-                r = "1.0/" + self.paren("*".join([self.paren(base)] * abs(exp)))
+                return self.stringify([base] * exp, "*", PRECEDENCE["Mul"])
+            elif exp < -1:
+                r = (
+                    "1.0/("
+                    + self.stringify([base] * abs(exp), "*", PRECEDENCE["Mul"])
+                    + ")"
+                )
+            elif exp == -1:
+                r = "1.0/" + self._print(base)
             else:  # exp == 0
                 r = "1.0"
 
@@ -486,7 +438,8 @@ class CppPrinter(ExprPrinter):
             raise ValueError(
                 f"For integer inputs, only non-negative ndigits are currently supported, but got {ndigits}."
             )
-        return f"static_cast<double>(std::nearbyint(1e{ndigits} * {self.paren(self._print(number))}) * 1e{-ndigits})"
+        number_str = self.parenthesize(number, PRECEDENCE["Mul"])
+        return f"static_cast<double>(std::nearbyint(1e{ndigits} * {number_str}) * 1e{-ndigits})"
 
     def _print_BooleanTrue(self, expr: sympy.Expr) -> str:
         return "true"
