@@ -2006,7 +2006,9 @@ def check_for_sev(org: str, project: str, skip_mandatory_checks: bool) -> None:
         gh_fetch_json_list(
             "https://api.github.com/search/issues",
             # Having two label: queries is an AND operation
-            params={"q": f'repo:{org}/{project} is:open is:issue label:"ci: sev" label:"merge blocking"'},
+            params={
+                "q": f'repo:{org}/{project} is:open is:issue label:"ci: sev" label:"merge blocking"'
+            },
         ),
     )
     if response["total_count"] != 0:
