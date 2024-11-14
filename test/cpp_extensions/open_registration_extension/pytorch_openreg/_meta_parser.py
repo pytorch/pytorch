@@ -51,7 +51,7 @@ def validate_send_queue_args(cmd, args):
         if type(obj) not in VALID_QUEUE_TYPES_OUT:
             if (
                 cmd == "recv_data"
-                and type(obj) is torch.Tensor
+                and type(obj) in [torch.Tensor, OpenRegTensorData]
                 and obj.device.type == "cpu"
             ):
                 # Only HtoD copy command can send cpu Tensors over

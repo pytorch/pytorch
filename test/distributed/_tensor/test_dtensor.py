@@ -14,7 +14,6 @@ from torch.distributed._tensor import (
     DTensor,
     init_device_mesh,
 )
-from torch.distributed._tensor.debug import CommDebugMode
 from torch.distributed._tensor.experimental import implicit_replication
 from torch.distributed._tensor.placement_types import (
     DTensorSpec,
@@ -23,12 +22,12 @@ from torch.distributed._tensor.placement_types import (
     Shard,
     TensorMeta,
 )
+from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
     parallelize_module,
     RowwiseParallel,
 )
-from torch.serialization import safe_globals
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -539,11 +538,9 @@ class DTensorTest(DTensorTestBase):
         buffer.seek(0)
         reloaded_st = torch.load(buffer, weights_only=False)
         self.assertEqual(sharded_tensor, reloaded_st)
-        # Test weights_only load
-        with safe_globals([DTensor, DeviceMesh, Shard, DTensorSpec, TensorMeta]):
-            buffer.seek(0)
-            reloaded_st = torch.load(buffer, weights_only=True)
-            self.assertEqual(sharded_tensor, reloaded_st)
+        buffer.seek(0)
+        reloaded_st = torch.load(buffer, weights_only=True)
+        self.assertEqual(sharded_tensor, reloaded_st)
 
 
 class DTensorMeshTest(DTensorTestBase):
@@ -943,7 +940,7 @@ class TestDTensorPlacementTypes(DTensorTestBase):
                 ]
                 assert_array_equal(expected_pad_sizes, pad_sizes)
 
-                from torch.distributed._tensor._collective_utils import unpad_tensor
+                from torch.distributed.tensor._collective_utils import unpad_tensor
 
                 unpadded_list = [
                     unpad_tensor(tensor, shard_placement.dim, pad_sizes[i])

@@ -14,40 +14,35 @@ import traceback
 import typing
 from typing import Any, Callable, Literal, Sequence
 
-import onnx
-
 import onnxscript
 import onnxscript.evaluator
-import onnxscript.function_libs
-import onnxscript.function_libs.torch_lib
-import onnxscript.function_libs.torch_lib.registration
 from onnxscript import ir
 from onnxscript.ir import convenience as ir_convenience
 
 import torch
 import torch.fx
 from torch.export import graph_signature
+from torch.onnx._internal._lazy_import import onnxscript_apis
 from torch.onnx._internal.exporter import (
     _analysis,
     _building,
     _capture_strategies,
     _dispatching,
+    _errors,
     _fx_passes,
     _ir_passes,
-    _isolated,
     _onnx_program,
     _registration,
     _reporting,
     _tensors,
     _verification,
-    errors,
 )
 
 
 if typing.TYPE_CHECKING:
     import os
 
-    import numpy as np
+    import numpy.typing as npt
 
 
 # Define utilities to convert PyTorch data types so users do not need to specify manually
@@ -68,6 +63,9 @@ _TORCH_DTYPE_TO_ONNX: dict[torch.dtype, ir.DataType] = {
     torch.int64: ir.DataType.INT64,
     torch.int8: ir.DataType.INT8,
     torch.uint8: ir.DataType.UINT8,
+    torch.uint16: ir.DataType.UINT16,
+    torch.uint32: ir.DataType.UINT32,
+    torch.uint64: ir.DataType.UINT64,
 }
 _BLUE = "\033[96m"
 _END = "\033[0m"
@@ -102,10 +100,10 @@ class TorchTensor(ir.Tensor):
             tensor, dtype=_torch_dtype_to_onnx_dtype(tensor.dtype), name=name
         )
 
-    def __array__(self, dtype: Any = None) -> np.ndarray:
-        # numpy() calls __array__ in ir.Tensor
+    def numpy(self) -> npt.NDArray:
+        self.raw: torch.Tensor
         if self.dtype == ir.DataType.BFLOAT16:
-            return self.raw.view(torch.uint16).__array__(dtype)
+            return self.raw.view(torch.uint16).numpy(force=True)
         if self.dtype in {
             ir.DataType.FLOAT8E4M3FN,
             ir.DataType.FLOAT8E4M3FNUZ,
@@ -113,14 +111,32 @@ class TorchTensor(ir.Tensor):
             ir.DataType.FLOAT8E5M2FNUZ,
         }:
             # TODO: Use ml_dtypes
-            return self.raw.view(torch.uint8).__array__(dtype)
-        return self.raw.__array__(dtype)
+            return self.raw.view(torch.uint8).numpy(force=True)
+        return self.raw.numpy(force=True)
+
+    def __array__(self, dtype: Any = None, copy: bool | None = None) -> npt.NDArray:
+        del copy  # Unused, but needed for the signature
+        if dtype is None:
+            return self.numpy()
+        return self.numpy().__array__(dtype)
 
     def tobytes(self) -> bytes:
         # Implement tobytes to support native PyTorch types so we can use types like bloat16
         # Reading from memory directly is also more efficient because
         # it avoids copying to a NumPy array
-        tensor = self.raw.detach().cpu().contiguous()
+        import torch._subclasses.fake_tensor
+
+        with torch._subclasses.fake_tensor.unset_fake_temporarily():
+            # Disable any fake mode so calling detach() etc. will return a real tensor
+            tensor = self.raw.detach().cpu().contiguous()
+
+        if isinstance(tensor, torch._subclasses.fake_tensor.FakeTensor):
+            raise TypeError(
+                f"Cannot take content out from the FakeTensor ('{self.name}'). Please replace the tensor "
+                "with a tensor backed by real data using ONNXProgram.apply_weights() "
+                "or save the model without initializers by setting include_initializers=False."
+            )
+
         return bytes(
             (ctypes.c_ubyte * tensor.element_size() * tensor.numel()).from_address(
                 tensor.data_ptr()
@@ -165,7 +181,11 @@ def _set_shape_types(
 
 def _set_shape_type(
     value: ir.Value,
-    meta_val: torch.Tensor | tuple[torch.Tensor],
+    meta_val: torch.Tensor
+    | torch.SymBool
+    | torch.SymInt
+    | torch.SymFloat
+    | tuple[torch.Tensor],
     complex_to_float: bool,
 ) -> None:
     # TODO: Consider using meta["tensor_meta"] for this? Would it be faster?
@@ -425,7 +445,7 @@ def _handle_call_function_node_with_lowering(
 
     if onnx_function is None:
         # TODO(justinchuby): Fall back to ATen op or do something else?
-        raise errors.DispatchError(
+        raise _errors.DispatchError(
             f"No ONNX function found for {node.target!r}. Failure message: {message}"
         )
 
@@ -452,7 +472,7 @@ def _handle_call_function_node_with_lowering(
         try:
             outputs = onnx_function(*onnx_args, **onnx_kwargs)
         except Exception as e:
-            raise errors.GraphConstructionError(
+            raise _errors.GraphConstructionError(
                 f"Error when calling function '{onnx_function}' with args '{onnx_args}' and kwargs '{onnx_kwargs}'"
             ) from e
 
@@ -546,7 +566,7 @@ def _add_nodes(
                     # No lowering
                     _handle_call_function_node(model.graph, node, node_name_to_values)
         except Exception as e:
-            raise errors.OnnxConversionError(
+            raise _errors.ConversionError(
                 f"Error when translating node {node.format_node()}. See the stack trace for more information."
             ) from e
     return node_name_to_values
@@ -691,13 +711,7 @@ def exported_program_to_ir(
         registry: The registry of all ONNX Script decomposition.
     """
     if registry is None:
-        # Trigger op registration
-        from onnxscript.function_libs.torch_lib import ops  # noqa: F401
-
-        del ops
-        registry = _registration.ONNXRegistry.from_torchlib(
-            onnxscript.function_libs.torch_lib.registration.default_registry  # type: ignore[arg-type]
-        )
+        registry = _registration.ONNXRegistry.from_torchlib()
     if lower != "none":
         exported_program = _prepare_exported_program_for_export(
             exported_program, registry=registry
@@ -713,6 +727,7 @@ def _prepare_exported_program_for_export(
     registry: _registration.ONNXRegistry,
 ) -> torch.export.ExportedProgram:
     """Decompose and apply pre-export transformations to the exported program."""
+
     # Decompose the graph given the implemented torch ops in ONNX
     exported_program = _fx_passes.decompose_with_registry(exported_program, registry)
 
@@ -768,7 +783,7 @@ def _exported_program_to_onnx_program(
             },
         ),
         ir_version=9,
-        producer_name="torch",
+        producer_name="pytorch",
         producer_version=torch.__version__,
     )
 
@@ -963,7 +978,7 @@ def export(
 
     Raises:
         TorchExportError: If the export process fails with torch.export.
-        OnnxConversionError: If the ExportedProgram to ONNX translation fails.
+        ConversionError: If the ExportedProgram to ONNX translation fails.
     """
     # Set up the error reporting facilities
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S-%f")
@@ -981,6 +996,8 @@ def export(
     program: torch.export.ExportedProgram | None = None
     # Step 1: Export the model with torch.export.export if the model is not already an ExportedProgram
     if isinstance(model, torch.export.ExportedProgram):
+        # We know the model is already exported program, so the args, kwargs, and dynamic_shapes
+        # are not used.
         program = model
         export_status.torch_export = True
     else:
@@ -1042,7 +1059,7 @@ def export(
             # focus on the torch.export.export error. Errors from other strategies like
             # torch.jit.trace is due to the fallback and can be confusing to users.
             # We save all errors in the error report.
-            raise errors.TorchExportError(
+            raise _errors.TorchExportError(
                 _STEP_ONE_ERROR_MESSAGE
                 + (
                     f"\nError report has been saved to '{report_path}'."
@@ -1071,13 +1088,7 @@ def export(
     try:
         # Build the ONNX function registry
         if registry is None:
-            # Trigger op registration
-            from onnxscript.function_libs.torch_lib import ops
-
-            del ops
-            registry = _registration.ONNXRegistry.from_torchlib(
-                onnxscript.function_libs.torch_lib.registration.default_registry  # type: ignore[arg-type]
-            )
+            registry = _registration.ONNXRegistry.from_torchlib()
 
         # Process the exported program to run decompositions and type promotions etc.
         decomposed_program = _prepare_exported_program_for_export(
@@ -1108,7 +1119,7 @@ def export(
         else:
             report_path = None
 
-        raise errors.OnnxConversionError(
+        raise _errors.ConversionError(
             _STEP_TWO_ERROR_MESSAGE
             + (f"\nError report has been saved to '{report_path}'." if report else "")
             + _summarize_exception_stack(e)
@@ -1172,7 +1183,7 @@ def export(
         else:
             report_path = None
 
-        raise errors.OnnxConversionError(
+        raise _errors.ConversionError(
             _STEP_TWO_ERROR_MESSAGE
             + (f"\nError report has been saved to '{report_path}'." if report else "")
             + _summarize_exception_stack(e)
@@ -1197,11 +1208,12 @@ def export(
                     if not failed_results
                     else _format_exceptions_for_all_strategies(failed_results),
                     onnx_program.exported_program,
-                    profile_result=profile_result,
-                    export_status=export_status,
                     decomp_comparison=_reporting.format_decomp_comparison(
                         pre_decomp_unique_ops, post_decomp_unique_ops
                     ),
+                    export_status=export_status,
+                    profile_result=profile_result,
+                    model=onnx_program.model,
                     registry=registry,
                 )
                 verbose_print(f"Export report has been saved to '{report_path}'.")
@@ -1214,28 +1226,13 @@ def export(
 
     # Step 3: (verify=True) Check the ONNX model with ONNX checker
     try:
-        verbose_print("Run `onnx.checker` on the ONNX model...")
-
-        # TODO: Handle when model is >2GB
-
-        model_proto = onnx_program.model_proto
-        byte_size = model_proto.ByteSize()
-        if byte_size < 2 * 1024 * 1024 * 1024:
-            # The checker may segfault so we need to run it in a separate process
-            _isolated.safe_call(
-                onnx.checker.check_model,  # type:ignore[attr-defined]
-                onnx_program.model_proto,
-                full_check=True,
-            )
-            export_status.onnx_checker = True
-            verbose_print("Run `onnx.checker` on the ONNX model... ✅")
-        else:
-            verbose_print(
-                f"Run `onnx.checker` on the ONNX model... ⚠️  Skipped because model is too large ({byte_size})."
-            )
+        verbose_print("Check the ONNX model...")
+        onnxscript_apis.check_model(onnx_program.model)
+        export_status.onnx_checker = True
+        verbose_print("Check the ONNX model... ✅")
     except Exception as e:
         export_status.onnx_checker = False
-        verbose_print("Run `onnx.checker` on the ONNX model... ❌")
+        verbose_print("Check the ONNX model... ❌")
         if report:
             try:
                 assert pre_decomp_unique_ops is not None

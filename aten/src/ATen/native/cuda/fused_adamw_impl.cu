@@ -6,8 +6,7 @@
 #include <ATen/native/cuda/fused_adam_utils.cuh>
 #include <vector>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 void _fused_adamw_cuda_impl_(
     at::TensorList params,
@@ -38,26 +37,19 @@ void _fused_adamw_cuda_impl_(
       params[0].scalar_type(),
       "fused_adamw_kernel_cuda",
       [&]() {
-        DISPATCH_MULTI_TENSOR_APPLY([&]() {
-          multi_tensor_apply_for_fused_optimizer<4>(
-              tensor_lists,
-              state_steps,
-              FusedAdamMathFunctor<
-                  scalar_t,
-                  4,
-                  ADAM_MODE::ADAMW,
-                  false,
-                  large_kernel_arg>(),
-              lr_ptr, // unused
-              lr,
-              beta1,
-              beta2,
-              weight_decay,
-              eps,
-              maximize,
-              grad_scale_ptr,
-              found_inf_ptr);
-        });
+        multi_tensor_apply_for_fused_optimizer<4>(
+            tensor_lists,
+            state_steps,
+            FusedAdamMathFunctor<scalar_t, 4, ADAM_MODE::ADAMW, false>(),
+            lr_ptr, // unused
+            lr,
+            beta1,
+            beta2,
+            weight_decay,
+            eps,
+            maximize,
+            grad_scale_ptr,
+            found_inf_ptr);
       });
 }
 
@@ -91,28 +83,20 @@ void _fused_adamw_cuda_impl_(
       params[0].scalar_type(),
       "fused_adamw_kernel_cuda",
       [&]() {
-        DISPATCH_MULTI_TENSOR_APPLY([&]() {
-          multi_tensor_apply_for_fused_optimizer<4>(
-              tensor_lists,
-              state_steps,
-              FusedAdamMathFunctor<
-                  scalar_t,
-                  4,
-                  ADAM_MODE::ADAMW,
-                  false,
-                  large_kernel_arg>(),
-              lr_ptr,
-              1.0, // unused
-              beta1,
-              beta2,
-              weight_decay,
-              eps,
-              maximize,
-              grad_scale_ptr,
-              found_inf_ptr);
-        });
+        multi_tensor_apply_for_fused_optimizer<4>(
+            tensor_lists,
+            state_steps,
+            FusedAdamMathFunctor<scalar_t, 4, ADAM_MODE::ADAMW, false>(),
+            lr_ptr,
+            1.0, // unused
+            beta1,
+            beta2,
+            weight_decay,
+            eps,
+            maximize,
+            grad_scale_ptr,
+            found_inf_ptr);
       });
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

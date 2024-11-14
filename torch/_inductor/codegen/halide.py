@@ -34,7 +34,7 @@ from ..codecache import HalideCodeCache
 from ..ir import get_reduction_combine_fn
 from ..metrics import is_metric_table_enabled, log_kernel_metadata
 from ..ops_handler import AddParenHandler, MockHandler
-from ..runtime.hints import HalideInputSpec, HalideMeta, ReductionHint
+from ..runtime.hints import HalideInputSpec, HalideMeta
 from ..utils import (
     get_bounds_index_expr,
     get_kernel_metadata,
@@ -59,8 +59,6 @@ from .simd import constant_repr, SIMDKernel, SIMDScheduling
 
 
 if TYPE_CHECKING:
-    from torch.utils._ordered_set import OrderedSet
-
     from ..ops_handler import ReductionType, StoreMode
 
 log = logging.getLogger(__name__)
@@ -572,8 +570,13 @@ def _typecheck_HalideOverrides(h: HalideOverrides) -> OpsHandler[str]:
 class HalideCSEVariable(CSEVariable):
     undefined_re = re.compile(r"\b(tmp\d+)\[\?\]")
 
-    def __init__(self, name, bounds: ValueRanges[Any]) -> None:
-        super().__init__(name, bounds)
+    def __init__(
+        self,
+        name,
+        bounds: ValueRanges[Any],
+        dtype: Optional[torch.dtype] = None,
+    ) -> None:
+        super().__init__(name, bounds, dtype)
         self.used_dims: Optional[List[sympy.Symbol]] = None
 
     def update_on_args(self, name, args, kwargs):
@@ -671,20 +674,9 @@ class HalideKernel(SIMDKernel):
     def __init__(
         self,
         *groups,
-        index_dtype: str,
-        mutations: Optional[OrderedSet[str]] = None,
-        pid_cache=None,
-        reduction_hint=ReductionHint.DEFAULT,
-        override_persistent_reduction=None,
+        **kwargs,
     ) -> None:
-        super().__init__(
-            *groups,
-            index_dtype=index_dtype,
-            mutations=mutations,
-            reduction_hint=reduction_hint,
-            pid_cache=pid_cache,
-            override_persistent_reduction=override_persistent_reduction,
-        )
+        super().__init__(*groups, **kwargs)
         # For halide, we just write directly to the body
         self.compute = self.body
         self.loads = self.body
@@ -706,9 +698,12 @@ class HalideKernel(SIMDKernel):
         self.buffer_aliases: Dict[str, List[str]] = defaultdict(list)
         self.has_indirect_indexing = False
 
-    def create_cse_var(self, name, bounds=None):
+    def dtype_to_str(self, dtype: torch.dtype) -> str:
+        return halide_type(dtype)
+
+    def create_cse_var(self, name, bounds=None, dtype=None):
         self.body.writeline(f"{name} = hl.Func({name!r})")
-        return HalideCSEVariable(name, bounds)
+        return HalideCSEVariable(name, bounds, dtype)
 
     def finalize_indexing(self, indices: Sequence[sympy.Expr]):
         """
@@ -793,7 +788,7 @@ class HalideKernel(SIMDKernel):
             if not nodes:
                 nodes.append(tree.lookup(1, tree.numel))
             handled_count = 0
-            divisor = sympy.Integer(1)
+            divisor = sympy.S.One
             added_sym_size = []
             # decide on a minimal set of symbols and put them in self.halide_vars
             while handled_count < len(nodes) and not eq(tree.numel, divisor):
@@ -851,7 +846,7 @@ class HalideKernel(SIMDKernel):
                         idx += 1
                         divisor *= size
                     length = 1
-                    expr = sympy.Integer(0)
+                    expr = sympy.S.Zero
                     while not eq(node.length, length):
                         sym, size = added_sym_size[idx]
                         idx += 1
@@ -860,8 +855,8 @@ class HalideKernel(SIMDKernel):
                     self.index_replacements[node.symbol()] = expr
                 except IndexError:
                     assert had_fallback
-                    full_index = sympy.Integer(0)
-                    stride = sympy.Integer(1)
+                    full_index = sympy.S.Zero
+                    stride = sympy.S.One
                     for sym, size in added_sym_size:
                         full_index += stride * sym
                         stride *= size
@@ -942,8 +937,8 @@ class HalideKernel(SIMDKernel):
                 ), sym
 
         # group the expression by variables used
-        offset = sympy.Integer(0)
-        split_expr = {s: sympy.Integer(0) for s in symbols}
+        offset = sympy.S.Zero
+        split_expr = {s: sympy.S.Zero for s in symbols}
         split_failed: List[Tuple[List[sympy.Symbol], sympy.Expr]] = []
         index = sympy.expand(self.rename_indexing(index))
         for part in index.args if isinstance(index, sympy.Add) else [index]:
@@ -977,7 +972,7 @@ class HalideKernel(SIMDKernel):
             length = sympy.simplify(
                 sympy_subs(expr, {sym: self.sym_size(sym) - 1 for sym in syms}) + 1
             )
-            stride = sympy.Integer(1)
+            stride = sympy.S.One
             if isinstance(expr, sympy.Mul):
                 for term in expr.args:
                     if isinstance(term, sympy.Integer):
@@ -999,11 +994,11 @@ class HalideKernel(SIMDKernel):
         if not dims:  # scalar load/store
             if self.has_indirect_indexing:
                 # workaround https://github.com/halide/Halide/issues/8338
-                dims.append(DimensionInfo(sympy.Integer(0), 1, 1))
+                dims.append(DimensionInfo(sympy.S.Zero, 1, 1))
         elif not V.graph.sizevars.statically_known_equals(dims[0].stride, 1):
             # Halide assumes dimension 0 is stride == 1, so add a dummy dimension
             dims.insert(
-                0, DimensionInfo(sympy.Integer(0), 1 if is_store else dims[0].stride, 1)
+                0, DimensionInfo(sympy.S.Zero, 1 if is_store else dims[0].stride, 1)
             )
 
         if dims and not is_store:
@@ -1444,7 +1439,7 @@ class HalideKernel(SIMDKernel):
                 )
             )
 
-        current_device = V.graph.scheduler.get_current_device_or_throw()
+        current_device = V.graph.get_current_device_or_throw()
         if current_device.type == "cpu":
             target = [config.halide.cpu_target]
             schduler = config.halide.scheduler_cpu
@@ -1621,7 +1616,7 @@ class HalideKernel(SIMDKernel):
         if (
             len(dims) == 1
             and config.halide.scheduler_cuda == "Anderson2021"
-            and V.graph.scheduler.get_current_device_or_throw().type == "cuda"
+            and V.graph.get_current_device_or_throw().type == "cuda"
         ):
             # workaround https://github.com/halide/Halide/issues/8246
             n = max(2, n)
@@ -1631,14 +1626,15 @@ class HalideKernel(SIMDKernel):
         """Codegen a call to this kernel"""
         wrapper = V.graph.wrapper_code
         call_args = [f"{n}" for n, arg in self.halide_argdefs() if arg.alias_of is None]
-        current_device = V.graph.scheduler.get_current_device_or_throw()
+        current_device = V.graph.get_current_device_or_throw()
         if current_device.type == "cuda":
             stream_name = wrapper.write_get_raw_stream(current_device.index, V.graph)
             call_args.append(stream_name)
         wrapper.generate_kernel_call(
             name,
             call_args,
-            cuda=False,  # grid/stream is handled internally in halide
+            gpu=False,  # grid/stream is handled internally in halide
+            triton=False,
         )
 
     def generate_assert(self, check):
@@ -1651,10 +1647,7 @@ class HalideKernel(SIMDKernel):
 
 
 class HalideScheduling(SIMDScheduling):
-    int32_type = "hl.Int(32)"
-    # TODO(jansel): Halide doesn't actually support 64 bit indexing...
-    int64_type = "hl.Int(64)"
-    kernel_type = HalideKernel  # type: ignore[arg-type]
+    kernel_type = HalideKernel  # type: ignore[arg-type,assignment]
 
     @classmethod
     def get_backend_features(cls, device: torch.device):

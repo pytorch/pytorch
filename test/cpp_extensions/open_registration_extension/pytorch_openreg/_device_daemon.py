@@ -1,4 +1,6 @@
+import ctypes
 import logging
+import time
 
 import torch
 
@@ -14,11 +16,7 @@ log = logging.getLogger(__name__)
 mp_context = torch.multiprocessing.get_context("spawn")
 
 # Constant properties of our device
-NUM_DEVICES = 7
-
-# Global state of our driver
-CURR_DEVICE_IDX = 0
-CURR_STREAM = 0
+NUM_DEVICES = 2
 
 
 # Our allocator
@@ -38,6 +36,9 @@ class Allocator:
         else:
             del self.allocated[ptr]
             return True
+
+    def is_allocated(self, ptr):
+        return ptr in self.allocated
 
     def tensor_from_meta(self, meta):
         # Usual case, we're receiving a known Tensor
@@ -66,103 +67,297 @@ class Allocator:
 
         # Raw 1d uint8 data
         raw = found_base
-        # Slice the right storage part
-        raw_slice = raw.narrow(0, 0, meta.nelem_in_bytes)
         # Reinterpret cast in the right dtype
-        as_dtype = raw_slice.view(dtype=meta.dtype)
+        as_dtype = raw.view(dtype=meta.dtype)
         # View to the right shape/stride/offset
         view = as_dtype.as_strided(meta.size, meta.stride, meta.storage_offset)
         return view
 
 
-def run_op(allocator, op_name, args, kwargs):
-    op, _ = torch._C._jit_get_operation(op_name)
-    args, kwargs = receive_after_sending(allocator, args, kwargs)
-    return op(*args, **kwargs)
+def register(registry):
+    def func(fn):
+        registry[fn.__name__] = fn
+        return fn
+
+    return func
 
 
-class _Daemon:
-    def __init__(self):
+class Driver:
+    def __init__(self, num_devices):
         super().__init__()
+        self.num_devices = num_devices
         self.is_initialized = False
 
     def _lazy_init(self):
         if self.is_initialized:
             return
-        self.req_queue = mp_context.Queue()
-        self.ans_queue = mp_context.Queue()
 
-        self.runner = mp_context.Process(
-            target=self.run_forever, args=(self.req_queue, self.ans_queue), daemon=True
-        )
-        self.runner.start()
+        # State of our driver
+        self.curr_device_idx = 0
+        self.curr_streams = {}
+
+        # Allocated memory belongs to which device
+        self.memory_belong = {}
+        self.host_allocator = Allocator()
+        self.event_belong = {}
+
+        self.devices = []
+
+        for i in range(self.num_devices):
+            req_queue = mp_context.Queue()
+            ans_queue = mp_context.Queue()
+            runner = mp_context.Process(
+                target=_Executor(i).run_forever,
+                args=(req_queue, ans_queue),
+                daemon=True,
+            )
+            runner.start()
+            self.devices.append((req_queue, ans_queue, runner))
+
         self.is_initialized = True
 
     def exec(self, cmd, *args):
         self._lazy_init()
         log.info("Main process launched: %s(*%s)", cmd, safe_str(args))
-        validate_send_queue_args(cmd, args)
-        self.req_queue.put((cmd,) + args)
-        res = self.ans_queue.get()
+
+        if cmd in Driver.registry:
+            res = Driver.registry[cmd](self, *args)
+        else:
+            res = self.run_on_executor(self.curr_device_idx, cmd, *args)
+
         log.info("Main process result for %s received: %s", cmd, safe_str(res))
         if res == "ERROR":
             raise RuntimeError(f"Error in daemon while executing {cmd}, see logs")
         else:
             return res
 
-    @staticmethod
-    def run_forever(req_queue, ans_queue):
-        # Initialize our device
-        global CURR_DEVICE_IDX
-        empty_res = object()
-        allocator = Allocator()
+    def run_on_executor(self, device_idx, cmd, *args):
+        req_queue, ans_queue, _ = self.devices[device_idx]
+        stream = self.getStream(device_idx)
+        validate_send_queue_args(cmd, args)
+        req_queue.put((stream, cmd) + args)
+        return ans_queue.get()
 
+    registry = {}
+
+    @register(registry)
+    def deviceCount(self, *args):
+        assert len(args) == 0
+        return self.num_devices
+
+    @register(registry)
+    def getDevice(self):
+        return self.curr_device_idx
+
+    @register(registry)
+    def uncheckedSetDevice(self, *args):
+        assert len(args) == 1
+        self.curr_device_idx = int(args[0])
+
+    @register(registry)
+    def exchangeDevice(self, *args):
+        assert len(args) == 1
+        res = self.curr_device_idx
+        self.curr_device_idx = int(args[0])
+        return res
+
+    @register(registry)
+    def malloc(self, size):
+        ptr = self.run_on_executor(self.curr_device_idx, "malloc", size)
+        self.memory_belong[ptr] = self.curr_device_idx
+        return ptr
+
+    @register(registry)
+    def free(self, ptr):
+        device_idx = self.memory_belong.pop(ptr, None)
+        if device_idx is None:
+            return False
+        return self.run_on_executor(device_idx, "free", ptr)
+
+    @register(registry)
+    def isPinnedPtr(self, ptr):
+        return self.host_allocator.is_allocated(ptr)
+
+    @register(registry)
+    def hostMalloc(self, size):
+        return self.host_allocator.malloc(size)
+
+    @register(registry)
+    def hostFree(self, ptr):
+        return self.host_allocator.free(ptr)
+
+    @register(registry)
+    def getNewStream(self, device_idx, priority):
+        return self.run_on_executor(device_idx, "getNewStream", priority)
+
+    @register(registry)
+    def queryStream(self, stream):
+        return self.run_on_executor(
+            stream.device_index, "queryStream", stream.stream_id
+        )
+
+    @register(registry)
+    def getStream(self, device_idx):
+        return self.curr_streams.get(device_idx, 0)
+
+    @register(registry)
+    def exchangeStream(self, stream):
+        stream_id = self.curr_streams.get(stream.device_index, 0)
+        self.curr_streams[stream.device_index] = stream.stream_id
+        return stream_id
+
+    @register(registry)
+    def synchronizeStream(self, stream):
+        self.run_on_executor(stream.device_index, "synchronizeStream", stream.stream_id)
+
+    @register(registry)
+    def record(self, event, stream, device_index, flags):
+        event_ptr = ctypes.cast(event, ctypes.POINTER(ctypes.c_int64))
+        # Create event if needed
+        if event_ptr.contents.value == 0:
+            event_ptr.contents.value = self.run_on_executor(
+                stream.device_index, "eventCreateWithFlags", flags
+            )
+            self.event_belong[event_ptr.contents.value] = stream.device_index
+
+        # Record event
+        self.run_on_executor(
+            stream.device_index,
+            "eventRecord",
+            event_ptr.contents.value,
+            stream.stream_id,
+        )
+
+    @register(registry)
+    def destroyEvent(self, event, device_index):
+        self.run_on_executor(device_index, "eventDestroy", event)
+        self.event_belong.pop(event)
+
+    @register(registry)
+    def synchronizeEvent(self, event):
+        self.run_on_executor(self.event_belong[event], "eventSynchronize", event)
+
+    @register(registry)
+    def queryEvent(self, event):
+        return self.run_on_executor(self.event_belong[event], "eventQuery", event)
+
+    @register(registry)
+    def elapsedTime(self, e1, e2, device_index):
+        return self.run_on_executor(device_index, "eventElapsedTime", e1, e2)
+
+    @register(registry)
+    def block(self, event, stream):
+        self.run_on_executor(stream.device_index, "block", event, stream.stream_id)
+
+
+class _Executor:
+    def __init__(self, id):
+        self.id = id
+        self.allocator = Allocator()
+        self.stream = 0
+        self.event_incr_id = 0
+        self.events = {}
+
+    def run_forever(self, req_queue, ans_queue):
         # Serve all requests
         while True:
-            cmd, *args = req_queue.get()
+            # Ignore stream since cpu backend doesn't support asynchronous execution
+            _, cmd, *args = req_queue.get()
             log.info("Worker executing: %s", cmd)
-            res = empty_res
-            if cmd == "deviceCount":
-                assert len(args) == 0
-                res = NUM_DEVICES
-            elif cmd == "getDevice":
-                res = CURR_DEVICE_IDX
-            elif cmd == "uncheckedSetDevice":
-                assert len(args) == 1
-                CURR_DEVICE_IDX = int(args[0])
-                res = None
-            elif cmd == "exchangeDevice":
-                assert len(args) == 1
-                res = CURR_DEVICE_IDX
-                CURR_DEVICE_IDX = int(args[0])
-            elif cmd == "malloc":
-                res = allocator.malloc(*args)
-            elif cmd == "free":
-                res = allocator.free(*args)
-            elif cmd == "run_op":
-                op_name, args, kwargs = args
-                run_op(allocator, op_name, args, kwargs)
-                res = None
-            elif cmd == "send_data":
-                assert len(args) == 1
-                res = OpenRegTensorData.from_meta(allocator, args[0])
-            elif cmd == "recv_data":
-                assert len(args) == 2
-                host_tensor, dev_mem = args
-                dev_tensor = OpenRegTensorData.from_meta(allocator, dev_mem)
-                dev_tensor.copy_(host_tensor)
-                res = None
-            elif cmd == "get_op_output_shape":
-                op_name, args, kwargs = args
-                res = run_op(allocator, op_name, args, kwargs).size()
+            if cmd in _Executor.registry:
+                res = _Executor.registry[cmd](self, *args)
             else:
                 log.warning("Bad command in worker")
                 res = "ERROR"
 
-            if res == empty_res:
-                raise RuntimeError("Bad impl didn't return anything")
             log.info("Worker answering to: %s", cmd)
             ans_queue.put(res)
 
+    registry = {}
 
-daemon = _Daemon()
+    @register(registry)
+    def malloc(self, size):
+        return self.allocator.malloc(size)
+
+    @register(registry)
+    def free(self, ptr):
+        return self.allocator.free(ptr)
+
+    def _run_op(self, op_name, args, kwargs):
+        op, _ = torch._C._jit_get_operation(op_name)
+        args, kwargs = receive_after_sending(self.allocator, args, kwargs)
+        return op(*args, **kwargs)
+
+    @register(registry)
+    def run_op(self, op_name, args, kwargs):
+        self._run_op(op_name, args, kwargs)
+
+    @register(registry)
+    def get_op_output_shape(self, op_name, args, kwargs):
+        return self._run_op(op_name, args, kwargs).size()
+
+    @register(registry)
+    def send_data(self, *args):
+        assert len(args) == 1
+        return OpenRegTensorData.from_meta(self.allocator, args[0])
+
+    @register(registry)
+    def recv_data(self, host_tensor, dev_mem):
+        dev_tensor = OpenRegTensorData.from_meta(self.allocator, dev_mem)
+        dev_tensor.copy_(host_tensor)
+
+    @register(registry)
+    def getNewStream(self, priority):
+        self.stream += 1
+        return self.stream
+
+    @register(registry)
+    def queryStream(self, stream):
+        return True
+
+    @register(registry)
+    def synchronizeStream(self, stream):
+        # no-op
+        pass
+
+    @register(registry)
+    def eventCreateWithFlags(self, flags):
+        self.event_incr_id += 1
+        self.events[self.event_incr_id] = [flags, None]
+        return self.event_incr_id
+
+    @register(registry)
+    def eventRecord(self, event, stream):
+        # Only flags == 1 enables timing
+        if self.events[event][0] == 1:
+            self.events[event][1] = time.time() * 1000
+        return 0
+
+    @register(registry)
+    def eventDestroy(self, event):
+        self.events.pop(event)
+
+    @register(registry)
+    def eventSynchronize(self, event):
+        assert self.events.get(event) is not None
+        return 0
+
+    @register(registry)
+    def eventQuery(self, event):
+        assert self.events.get(event) is not None
+        return True
+
+    @register(registry)
+    def eventElapsedTime(self, e1, e2):
+        time_1 = self.events[e1][1]
+        time_2 = self.events[e2][1]
+        assert time_1 is not None and time_2 is not None
+        return time_2 - time_1
+
+    @register(registry)
+    def block(self, event, stream):
+        # no-op
+        pass
+
+
+driver = Driver(NUM_DEVICES)

@@ -23,7 +23,7 @@ class TORCH_API IRMutator {
   virtual ExprPtr mutate(const CompareSelectPtr& v);
 #define IMM_MUTATE_DECLARE(Type, Name) \
   virtual ExprPtr mutate(const Name##ImmPtr& v);
-  AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, IMM_MUTATE_DECLARE);
+  AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, IMM_MUTATE_DECLARE)
 #undef IMM_MUTATE_DECLARE
   virtual ExprPtr mutate(const CastPtr& v);
   virtual ExprPtr mutate(const BitCastPtr& v);

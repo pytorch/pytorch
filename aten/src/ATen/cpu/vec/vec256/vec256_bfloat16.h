@@ -132,7 +132,7 @@ template <typename T, typename std::enable_if_t<is_reduced_floating_point_v<T>, 
 inline void cvt_to_fp32(const __m128i& a, __m256& o);
 template <> inline void cvt_to_fp32<BFloat16>(const __m128i& a, __m256& o) {
   cvtbf16_fp32(a, o);
-};
+}
 template <> inline void cvt_to_fp32<Half>(const __m128i& a, __m256& o) {
   cvtfp16_fp32(a, o);
 }
@@ -663,6 +663,8 @@ class Vectorized<BFloat16>: public Vectorized16<BFloat16> {
 public:
   using Vectorized16::Vectorized16;
 
+  using value_type = BFloat16;
+
   Vectorized<BFloat16> frac() const;
 
   Vectorized<BFloat16> eq(const Vectorized<BFloat16>& other) const;
@@ -864,6 +866,8 @@ template <>
 class Vectorized<Half>: public Vectorized16<Half> {
 public:
   using Vectorized16::Vectorized16;
+
+  using value_type = Half;
 
   Vectorized<Half> frac() const;
 
@@ -1071,8 +1075,8 @@ inline std::tuple<Vectorized<float>, Vectorized<float>> convert_##name##_float(c
 inline Vectorized<type> convert_float_##name(const Vectorized<float>& a, const Vectorized<float>& b) { \
   return cvt_from_fp32<type>(__m256(a), __m256(b)); \
 }
-CONVERT_VECTORIZED_INIT(BFloat16, bfloat16);
-CONVERT_VECTORIZED_INIT(Half, half);
+CONVERT_VECTORIZED_INIT(BFloat16, bfloat16)
+CONVERT_VECTORIZED_INIT(Half, half)
 
 #else // defined(CPU_CAPABILITY_AVX2)
 
@@ -1096,45 +1100,9 @@ inline Vectorized<type> convert_float_##name(const Vectorized<float>& a, const V
   convert(arr, arr2, K); \
   return Vectorized<type>::loadu(arr2); \
 }
-CONVERT_NON_VECTORIZED_INIT(BFloat16, bfloat16);
-#if defined(__aarch64__) && !defined(C10_MOBILE) && !defined(__CUDACC__)
-inline std::tuple<Vectorized<float>, Vectorized<float>> convert_half_float(const Vectorized<Half>& a) {
-  static_assert(Vectorized<Half>::size() == 2 * Vectorized<float>::size());
-#if defined(__ARM_FEATURE_FP16_VECTOR_ARITHMETIC)
-  float16x8x2_t arr = a;
-  float16x8_t x = arr.val[0];
-  float16x8_t y = arr.val[1];
-#else
-  auto arr = reinterpret_cast<const float16_t*>(a.operator const Half*());
-  float16x8_t x = vld1q_f16(arr);
-  float16x8_t y = vld1q_f16(arr + Vectorized<float>::size());
-#endif
-  float32x4_t x1 = vcvt_f32_f16(vget_low_f16(x));
-  float32x4_t x2 = vcvt_f32_f16(vget_high_f16(x));
-  float32x4_t y1 = vcvt_f32_f16(vget_low_f16(y));
-  float32x4_t y2 = vcvt_f32_f16(vget_high_f16(y));
-  return { Vectorized<float>(x1, x2), Vectorized<float>(y1, y2) };
-}
-inline Vectorized<Half> convert_float_half(const Vectorized<float>& a, const Vectorized<float>& b) {
-  static_assert(Vectorized<Half>::size() == 2 * Vectorized<float>::size());
-  float32x4x2_t x = a;
-  float32x4x2_t y = b;
-  float16x4_t x1 = vcvt_f16_f32(x.val[0]);
-  float16x4_t x2 = vcvt_f16_f32(x.val[1]);
-  float16x4_t y1 = vcvt_f16_f32(y.val[0]);
-  float16x4_t y2 = vcvt_f16_f32(y.val[1]);
-#if defined(__ARM_FEATURE_FP16_VECTOR_ARITHMETIC)
-  return Vectorized<Half>(vcombine_f16(x1, x2), vcombine_f16(y1, y2));
-#else
-  Vectorized<Half> rc;
-  auto arr = reinterpret_cast<float16_t*>(rc.operator Half*());
-  vst1q_f16(arr, vcombine_f16(x1, x2));
-  vst1q_f16(arr + Vectorized<float>::size(), vcombine_f16(y1, y2));
-  return rc;
-#endif
-}
-#else
-CONVERT_NON_VECTORIZED_INIT(Half, half);
+#if !(defined(__aarch64__) && !defined(C10_MOBILE) && !defined(__CUDACC__) && !defined(CPU_CAPABILITY_SVE256))
+CONVERT_NON_VECTORIZED_INIT(BFloat16, bfloat16)
+CONVERT_NON_VECTORIZED_INIT(Half, half)
 #endif
 
 #endif // defined(CPU_CAPABILITY_AVX2)
@@ -1155,8 +1123,8 @@ inline void load_fp32_from_##name(const type *data, Vectorized<float>& out1, Vec
   out1 = out1_values; \
   out2 = out2_values; \
 }
-LOAD_FP32_VECTORIZED_INIT(BFloat16, bf16);
-LOAD_FP32_VECTORIZED_INIT(Half, fp16);
+LOAD_FP32_VECTORIZED_INIT(BFloat16, bf16)
+LOAD_FP32_VECTORIZED_INIT(Half, fp16)
 
 #else // defined(CPU_CAPABILITY_AVX2)
 #define LOAD_FP32_NON_VECTORIZED_INIT(type, name) \
@@ -1173,8 +1141,8 @@ inline void load_fp32_from_##name(const type *data, Vectorized<float>& out1, Vec
   data += Vectorized<float>::size(); \
   load_fp32_from_##name(data, out2); \
 }
-LOAD_FP32_NON_VECTORIZED_INIT(BFloat16, bf16);
-LOAD_FP32_NON_VECTORIZED_INIT(Half, fp16);
+LOAD_FP32_NON_VECTORIZED_INIT(BFloat16, bf16)
+LOAD_FP32_NON_VECTORIZED_INIT(Half, fp16)
 
 #endif
 }} // namsepace at::vec::CPU_CAPABILITY

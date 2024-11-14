@@ -1693,8 +1693,7 @@ Tensor repeat_backward(
   }
   const auto input_dims = input_shape.size();
   auto num_unsqueezed = grad.dim() - input_dims;
-  for (const auto i : c10::irange(num_unsqueezed)) {
-    (void)i; // Suppress unused variable warning
+  for ([[maybe_unused]] const auto i : c10::irange(num_unsqueezed)) {
     grad = grad.sum(0, false);
   }
 
@@ -3084,7 +3083,7 @@ Tensor softplus_double_backward(
 // This implements steps (2)~(4) of the algorithm in
 // NOTE [ Detecting Memory Overlap Within A Strided Tensor ]
 // Helper for as_strided_backward
-static inline bool _maybe_overlapping_memory(
+static bool _maybe_overlapping_memory(
     c10::SymIntArrayRef sizes,
     c10::SymIntArrayRef strides) {
   if (!sizes.empty()) {
@@ -3109,7 +3108,7 @@ static inline bool _maybe_overlapping_memory(
 
 // Returns the minimum storage size needed to contain a tensor of sizes,
 // strides, and storage_offset Helper for as_strided_backward
-static inline c10::SymInt _min_storage_size(
+static c10::SymInt _min_storage_size(
     c10::SymIntArrayRef sizes,
     c10::SymIntArrayRef strides,
     c10::SymInt storage_offset) {
@@ -4780,7 +4779,8 @@ std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
   }
 
   if (output_mask[1] && !gG.defined()) {
-    AT_ASSERTM(affine, "gamma should always be defined when it requires grad");
+    TORCH_INTERNAL_ASSERT(
+        affine, "gamma should always be defined when it requires grad");
   }
 
   return std::tuple<Tensor, Tensor, Tensor>{gI, gG, ggO};
@@ -4923,7 +4923,8 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_double_backward(
   }
 
   if (output_mask[1] && !gG.defined()) {
-    AT_ASSERTM(affine, "gamma should always be defined when it requires grad");
+    TORCH_INTERNAL_ASSERT(
+        affine, "gamma should always be defined when it requires grad");
   }
 
   return std::tuple<Tensor, Tensor, Tensor>{gI, gG, ggO};
@@ -5248,7 +5249,7 @@ static Tensor apply_simple_transformation(
       return condition_with_I ? K - transformation : -transformation;
     }
   }
-};
+}
 
 std::tuple<Tensor, Tensor> householder_product_backward(
     const Tensor& grad,
@@ -6882,7 +6883,8 @@ std::tuple<Tensor, Tensor> scatter_reduce_backward(
     grad_self = (self == result) * grad_distributed;
     grad_src = (src == value) * grad_distributed.gather(dim, index);
   } else {
-    AT_ERROR(
+    TORCH_CHECK(
+        false,
         "Expected 'reduce' to be one of 'sum', 'prod', 'mean', 'amax', 'amin' but got ",
         reduce,
         ".");
@@ -6977,7 +6979,8 @@ std::tuple<Tensor, Tensor> index_reduce_backward(
     grad_self = self_is_result * grad_distributed;
     grad_src = source_is_result * grad_distributed.index_select(dim, index);
   } else {
-    AT_ERROR(
+    TORCH_CHECK(
+        false,
         "Expected 'reduce' to be one of 'prod', 'amax', 'amin' or 'mean' but got ",
         reduce,
         ".");
@@ -7045,12 +7048,9 @@ mkldnn_rnn_layer_differentiable_backward(
     at::IntArrayRef batch_sizes,
     bool batch_first,
     const at::Tensor& workspace) {
-  const Tensor& grad_output_r =
-      c10::value_or_else(grad_output_r_opt, [] { return Tensor(); });
-  const Tensor& grad_hy_r =
-      c10::value_or_else(grad_hy_r_opt, [] { return Tensor(); });
-  const Tensor& grad_cy_r =
-      c10::value_or_else(grad_cy_r_opt, [] { return Tensor(); });
+  const Tensor& grad_output_r = grad_output_r_opt.value_or(Tensor());
+  const Tensor& grad_hy_r = grad_hy_r_opt.value_or(Tensor());
+  const Tensor& grad_cy_r = grad_cy_r_opt.value_or(Tensor());
   if (!grad_output_r.defined() && !grad_hy_r.defined() &&
       !grad_cy_r.defined()) {
     return std::make_tuple(

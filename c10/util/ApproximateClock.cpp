@@ -26,7 +26,7 @@ ApproximateClockToUnixTimeConverter::measurePair() {
 ApproximateClockToUnixTimeConverter::time_pairs
 ApproximateClockToUnixTimeConverter::measurePairs() {
   static constexpr auto n_warmup = 5;
-  for (C10_UNUSED const auto _ : c10::irange(n_warmup)) {
+  for ([[maybe_unused]] const auto _ : c10::irange(n_warmup)) {
     getApproximateTime();
     static_cast<void>(steady_clock_t::now());
   }
@@ -72,7 +72,9 @@ std::function<time_t(approx_time_t)> ApproximateClockToUnixTimeConverter::
 
   return [=](approx_time_t t_approx) {
     // See above for why this is more stable than `A * t_approx + B`.
-    return (time_t)((double)(t_approx - t0_approx) * scale_factor) + t0;
+    return t_approx > t0_approx
+        ? (time_t)((double)(t_approx - t0_approx) * scale_factor) + t0
+        : 0;
   };
 }
 

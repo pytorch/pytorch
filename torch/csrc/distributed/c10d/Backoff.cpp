@@ -1,13 +1,12 @@
 #include <torch/csrc/distributed/c10d/Backoff.hpp>
 
-#include <exception>
 #include <stdexcept>
 
 namespace c10d {
 namespace {
 constexpr std::chrono::milliseconds kZeroInterval{0};
 
-int32_t randSeed() {
+std::random_device::result_type randSeed() {
   std::random_device rd;
   return rd();
 }
@@ -47,7 +46,7 @@ std::chrono::milliseconds ExponentialBackoffWithJitter::nextBackoff() {
   std::chrono::milliseconds maxSampleInterval =
       currentInterval_ + randomization;
 
-  std::uniform_int_distribution<> dist(
+  std::uniform_int_distribution<int64_t> dist(
       minSampleInterval.count(), maxSampleInterval.count());
   std::chrono::milliseconds backoffInterval{dist(gen_)};
 

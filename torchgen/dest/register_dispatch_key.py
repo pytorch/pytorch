@@ -515,9 +515,7 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
 
                         # CUDA requires special handling
                         if is_cuda_dispatch_key(self.backend_index.dispatch_key):
-                            device_guard = (
-                                f"globalContext().lazyInitCUDA();\n{device_guard}"
-                            )
+                            device_guard = f"globalContext().lazyInitDevice(c10::DeviceType::CUDA);\n{device_guard}"
                     else:
                         # kernel is operating on existing tensors
 
@@ -613,6 +611,7 @@ void set_output_{name}(
         if self.backend_index.dispatch_key in [
             DispatchKey.CUDA,
             DispatchKey.MPS,
+            DispatchKey.XPU,
             DispatchKey.CompositeExplicitAutogradNonFunctional,
         ]:
             maybe_set_guard = """
@@ -721,6 +720,8 @@ resize_out(out, sizes, strides, options);
             guard_field = "c10::OptionalDeviceGuard guard_;"
         elif self.backend_index.dispatch_key == DispatchKey.MPS:
             # TODO: Move to OptionalMPSGuard.
+            guard_field = "c10::OptionalDeviceGuard guard_;"
+        elif self.backend_index.dispatch_key == DispatchKey.XPU:
             guard_field = "c10::OptionalDeviceGuard guard_;"
         else:
             guard_field = ""

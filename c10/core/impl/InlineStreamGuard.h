@@ -135,6 +135,7 @@ class InlineOptionalStreamGuard {
   explicit InlineOptionalStreamGuard()
       : guard_() // See Note [Explicit initialization of optional fields]
   {}
+  ~InlineOptionalStreamGuard() = default;
 
   /// Set the current device to the device associated with the passed stream,
   /// and set the current stream on that device to the passed stream,
@@ -151,6 +152,9 @@ class InlineOptionalStreamGuard {
   explicit InlineOptionalStreamGuard(Args&&... args)
       : guard_(std::in_place, std::forward<Args>(args)...) {}
 
+  InlineOptionalStreamGuard(const InlineOptionalStreamGuard<T>& other) = delete;
+  InlineOptionalStreamGuard& operator=(const InlineOptionalStreamGuard& other) =
+      delete;
   // See Note [Move construction for RAII guards is tricky]
   InlineOptionalStreamGuard(InlineOptionalStreamGuard<T>&& other) = delete;
 
