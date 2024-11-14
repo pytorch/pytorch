@@ -44,9 +44,9 @@ class NestedModelForDynamicShapes(torch.nn.Module):
         y = ys[0] + ys[1] + zs["a"] + zs["b"]
         w = 5
         if x.shape[0] < 3 and c.shape[0] != 4:
-            return x + w, x + y
+            return x + w, x + y, c
         else:
-            return x - w, x - y
+            return x - w, x - y, c
 
 
 class TestExportAPIDynamo(common_utils.TestCase):
