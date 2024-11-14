@@ -302,6 +302,18 @@ def tensorify_python_scalars(
             TensorifyState.specialize(name)
             should_restart = True
 
+    # Sometimes by the time we get to tensorify, there have already been
+    # specializations, eg. in python_arg_parser.h. In these cases,
+    # placeholder nodes no longer have a reference to their original
+    # symfloat and thus we need to deduct specializations have happend
+    # via shape_env.replacements
+    for k, v in shape_env.replacements.items():
+        if symbol_is_type(k, SymT.FLOAT) and isinstance(v, sympy.core.numbers.Float):
+            name = str(k)
+            if not TensorifyState.should_specialize(name):
+                TensorifyState.specialize(name)
+                should_restart = True
+
     if should_restart:
         # Sledgehammer time. Restart dynamo analysis, keeping track of which input sources
         # are no longer needed and should be specialized.
