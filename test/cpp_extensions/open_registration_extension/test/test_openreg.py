@@ -125,6 +125,10 @@ class TestOpenReg(TestCase):
         self.assertEqual(y.to(device="cpu"), torch.tensor([[1, 1], [2, 2], [3, 3]]))
         self.assertEqual(x.data_ptr(), y.data_ptr())
 
+    def test_empty_tensor(self):
+        empty_tensor = torch.tensor((), device="openreg")
+        self.assertEqual(empty_tensor.to(device="cpu"), torch.tensor(()))
+
 
 if __name__ == "__main__":
     run_tests()
