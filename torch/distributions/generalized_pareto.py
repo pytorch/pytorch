@@ -39,7 +39,7 @@ class GeneralizedPareto(Distribution):
         "scale": constraints.positive,
         "concentration": constraints.real,
     }
-    has_rsample = False
+    has_rsample = True
 
     def __init__(self, loc, scale, concentration, validate_args=None):
         self.loc, self.scale, self.concentration = broadcast_all(
@@ -65,11 +65,10 @@ class GeneralizedPareto(Distribution):
         new._validate_args = self._validate_args
         return new
 
-    def sample(self, sample_shape=torch.Size()):
+    def rsample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
-        with torch.no_grad():
-            u = torch.rand(shape, dtype=self.loc.dtype, device=self.loc.device)
-            return self.icdf(u)
+        u = torch.rand(shape, dtype=self.loc.dtype, device=self.loc.device)
+        return self.icdf(u)
 
     def log_prob(self, value):
         if self._validate_args:
