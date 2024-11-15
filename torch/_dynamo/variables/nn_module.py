@@ -42,7 +42,7 @@ from ..utils import (
     unpatched_nn_module_call,
     unpatched_nn_module_call_impl,
 )
-from .base import MutableLocal, typestr, VariableTracker
+from .base import typestr, ValueMutationNew, VariableTracker
 from .functions import invoke_and_store_as_constant
 from .lazy import LazyVariableTracker
 from .lists import SliceVariable
@@ -229,7 +229,7 @@ class NNModuleVariable(VariableTracker):
         base_dict = object.__getattribute__(base, "__dict__")
         return key in base_dict
 
-    def _custom_getattr_fallback(self, base, tx, name, options):
+    def _custom_getattr_fallback(self, base, tx, name, obj_source):
         """Check for a __getattr__ and handle it specially if it is implemented"""
         if object_has_getattribute(base):
             unimplemented("torch.nn.Module with a custom __getattribute__ defined")
@@ -241,6 +241,7 @@ class NNModuleVariable(VariableTracker):
         if not isinstance(getattr_fn, types.FunctionType):
             unimplemented("torch.nn.Module with a non-function custom __getattr__")
 
+        options = {"source": AttrSource(obj_source, "__getattr__")}
         return variables.UserMethodVariable(getattr_fn, self, **options).call_function(
             tx, [variables.ConstantVariable.create(name)], {}
         )
@@ -280,7 +281,7 @@ class NNModuleVariable(VariableTracker):
             except AttributeError:
                 # see if we can fallback to __getattr__, which is not checked by getattr_static
                 result = self._custom_getattr_fallback(
-                    base=base, tx=tx, name=name, options={"source": source}
+                    base=base, tx=tx, name=name, obj_source=self.source
                 )
                 if result is not None:
                     return result
@@ -550,7 +551,7 @@ class NNModuleVariable(VariableTracker):
                         source=NNModuleSource(gen_source(self.source, name)),
                     )
                 )
-            return ListIteratorVariable(result, mutable_local=MutableLocal())
+            return ListIteratorVariable(result, mutation_type=ValueMutationNew())
 
         def named_embed(name, obj):
             return TupleVariable(
@@ -580,7 +581,7 @@ class NNModuleVariable(VariableTracker):
             result = []
             for name, submod in module.named_children():
                 result.append(named_embed(name, submod))
-            return ListIteratorVariable(result, mutable_local=MutableLocal())
+            return ListIteratorVariable(result, mutation_type=ValueMutationNew())
         elif name == "named_parameters":
             tx.output.guard_on_key_order.add(
                 AttrSource(self.source, "_parameters").name()
@@ -590,7 +591,7 @@ class NNModuleVariable(VariableTracker):
                 **get_kwargs("prefix", "recurse")
             ):
                 result.append(named_embed(name, param))
-            return ListIteratorVariable(result, mutable_local=MutableLocal())
+            return ListIteratorVariable(result, mutation_type=ValueMutationNew())
         elif name == "named_buffers":
             tx.output.guard_on_key_order.add(AttrSource(self.source, "_buffers").name())
             result = []
@@ -598,7 +599,7 @@ class NNModuleVariable(VariableTracker):
                 **get_kwargs("prefix", "recurse", "remove_duplicate")
             ):
                 result.append(named_embed(name, buffer))
-            return ListIteratorVariable(result, mutable_local=MutableLocal())
+            return ListIteratorVariable(result, mutation_type=ValueMutationNew())
         elif name == "named_modules":
             tx.output.guard_on_key_order.add(AttrSource(self.source, "_modules").name())
             result = []
@@ -606,7 +607,7 @@ class NNModuleVariable(VariableTracker):
                 **get_kwargs("memo", "prefix", "remove_duplicate")
             ):
                 result.append(named_embed(name, submod))
-            return ListIteratorVariable(result, mutable_local=MutableLocal())
+            return ListIteratorVariable(result, mutation_type=ValueMutationNew())
         elif name == "children":
             tx.output.guard_on_key_order.add(AttrSource(self.source, "_modules").name())
             assert not (args or kwargs)
@@ -627,7 +628,7 @@ class NNModuleVariable(VariableTracker):
             result = []
             for name in module.keys():
                 result.append(ConstantVariable.create(name))
-            return ListIteratorVariable(result, mutable_local=MutableLocal())
+            return ListIteratorVariable(result, mutation_type=ValueMutationNew())
         elif name == "values":
             assert not (args or kwargs)
             return wrap_values(module.items())
@@ -636,7 +637,7 @@ class NNModuleVariable(VariableTracker):
             result = []
             for name, submod in module.items():
                 result.append(named_embed(name, submod))
-            return ListIteratorVariable(result, mutable_local=MutableLocal())
+            return ListIteratorVariable(result, mutation_type=ValueMutationNew())
         elif name == "__len__":
             assert not (args or kwargs)
             return ConstantVariable.create(len(module))
@@ -963,7 +964,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             deduplicated_params = list(dict.fromkeys(params_list).keys())
 
             return variables.ListIteratorVariable(
-                deduplicated_params, mutable_local=MutableLocal()
+                deduplicated_params, mutation_type=ValueMutationNew()
             )
         else:
             raise AssertionError(
@@ -1080,9 +1081,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         ):
             # For empty hooks, make an EMPTY_NN_MODULE_HOOKS_DICT. This allows us to control the installation of empty
             # hooks guard via skip_nnmodule_hook_guards
-            if not tx.output.side_effects.has_pending_mutation_of_attr(
-                self, name
-            ) and self.value.__module__.startswith(("torch.nn.", "torch.ao.")):
+            if not tx.output.side_effects.has_pending_mutation_of_attr(self, name):
                 hooks_dict = getattr(self.value, name)
                 if isinstance(hooks_dict, dict) and len(hooks_dict) == 0:
                     if self.source:

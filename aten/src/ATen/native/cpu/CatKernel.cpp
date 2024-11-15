@@ -78,6 +78,6 @@ void cat_serial_kernel(
 
 } // anonymous namespace
 
-REGISTER_DISPATCH(cat_serial_stub, &cat_serial_kernel);
+REGISTER_DISPATCH(cat_serial_stub, &cat_serial_kernel)
 
 } // namespace at::native

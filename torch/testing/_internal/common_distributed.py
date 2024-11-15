@@ -24,10 +24,13 @@ from io import StringIO
 from typing import Dict, NamedTuple, Optional, Union, List, Any, Callable, Tuple
 from unittest.mock import patch
 
+from torch._logging._internal import trace_log
 import torch
 import torch._dynamo.test_case
 import torch.cuda.nccl
 import torch.distributed as c10d
+from torch._C._autograd import DeviceType
+from torch._C._distributed_c10d import _SymmetricMemory
 import torch.nn as nn
 from torch.testing._internal.common_utils import (
     FILE_SCHEMA,
@@ -336,6 +339,17 @@ def requires_mpi():
     return skip_but_pass_in_sandcastle_if(
         not c10d.is_mpi_available(),
         "c10d was not compiled with the MPI backend",
+    )
+
+
+def requires_multicast_support():
+    has_multicast_support = (
+        torch.cuda.is_available()
+        and _SymmetricMemory.has_multicast_support(DeviceType.CUDA, 0)
+    )
+    return skip_but_pass_in_sandcastle_if(
+        not has_multicast_support,
+        "multicast support is not available",
     )
 
 
@@ -1348,6 +1362,8 @@ class DynamoDistributedMultiProcTestCase(MultiProcessTestCase):
 
     @classmethod
     def _run(cls, rank: int, test_name: str, file_name: str, parent_pipe, **kwargs) -> None:
+        trace_log.addHandler(logging.NullHandler())
+
         # The rest is copypasta from MultiProcessTestCase._run
         self = cls(test_name)
         self.rank = rank

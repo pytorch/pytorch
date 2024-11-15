@@ -5,8 +5,19 @@
 import itertools
 import sys
 from dataclasses import dataclass
-from functools import wraps
-from typing import Any, Callable, cast, Dict, Iterator, List, Sequence, Tuple, TypeVar
+from functools import partial, wraps
+from typing import (
+    Any,
+    Callable,
+    cast,
+    Dict,
+    Iterator,
+    List,
+    Sequence,
+    Tuple,
+    TypeVar,
+    Union,
+)
 
 import torch
 import torch.distributed as dist
@@ -314,9 +325,12 @@ class DTensorTestBase(MultiProcessTestCase):
         if self.backend not in ["nccl", "gloo", "mpi", "cpu:gloo,cuda:nccl"]:
             raise RuntimeError(f"Backend {self.backend} not supported!")
 
+        device_id = None
         if "nccl" in self.backend:
             # set device for nccl pg for collectives
             torch.cuda.set_device(self.rank)
+            # we only need to set device_id for nccl backend with eager init
+            device_id = torch.device(f"{self.device_type}:{self.rank}") if eager_init else None
 
         # For nccl backend, bind the device to the process if device_id is not None
         # so the nccl communicator is immediately formed and we can use `ncclCommSplit`
@@ -326,7 +340,7 @@ class DTensorTestBase(MultiProcessTestCase):
             world_size=self.world_size,
             rank=self.rank,  # pyre-ignore[16]
             init_method=f"file://{self.file_name}",  # pyre-ignore[16]
-            device_id=(torch.device(f"{self.device_type}:{self.rank}") if eager_init else None),
+            device_id=device_id,
         )
 
 
@@ -361,9 +375,9 @@ TestFunc = Callable[[object], object]
 
 
 # wrapper to initialize comms (processgroup)
-def with_comms(eager_init: bool = False) -> TestFunc:
+def with_comms(eager_init: Union[TestFunc, bool] = False) -> TestFunc:
 
-    def decorator(func):
+    def decorator(func, eager_init: bool = False):
 
         @wraps(func)  # pyre-ignore[6]
         def wrapper(
@@ -387,8 +401,7 @@ def with_comms(eager_init: bool = False) -> TestFunc:
 
         return wrapper
 
-    return decorator
-
+    return decorator(func=eager_init) if callable(eager_init) else partial(decorator, eager_init=eager_init)
 
 
 class DTensorOpTestBase(MultiThreadedTestCase):

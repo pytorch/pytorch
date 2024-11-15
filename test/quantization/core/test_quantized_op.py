@@ -23,7 +23,7 @@ hu.assert_deadline_disabled()
 
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_utils import TestCase
-from torch.testing._internal.common_utils import IS_PPC, TEST_WITH_UBSAN, IS_MACOS, IS_SANDCASTLE
+from torch.testing._internal.common_utils import IS_PPC, TEST_WITH_UBSAN, IS_MACOS, IS_SANDCASTLE, IS_FBCODE
 from torch.testing._internal.common_quantization import skipIfNoFBGEMM, skipIfNoQNNPACK, skipIfNoONEDNN
 from torch.testing._internal.common_quantized import _quantize, _dequantize, _calculate_dynamic_qparams, \
     override_quantized_engine, supported_qengines, override_qengines, _snr
@@ -1479,6 +1479,7 @@ class TestQuantizedOps(TestCase):
                          msg="ops.quantized.max_pool2d results are off")
 
 
+    @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
     def test_max_pool2d_pt2e(self):
         kernel_list = [2, 3]
         stride_list = [1, 2]
@@ -3749,6 +3750,39 @@ class TestDynamicQuantizedOps(TestCase):
             return  # TODO: fix MakeDeConvOutputShape overflowing for convT3d with qnnpack
         self._test_qconv_op_impl(q_mod, dq_op, dim, dtype)
 
+    @skipIfNoONEDNN
+    def test_linear_dynamic_fp16_onednn(self):
+
+        options = itertools.product(
+            (2, 4),         # batch_size
+            (4, 5, 12),     # input_channels
+            (4, 7, 8),      # output_channels
+            (True, False),  # use_bias
+            (True, False),  # use_relu
+        )
+        for batch_size, input_channels, output_channels, use_bias, use_relu in options:
+            qlinear_prepack = torch.ops.onednn.linear_prepack_fp16
+            if use_relu:
+                qlinear_dynamic = torch.ops.onednn.linear_relu_dynamic_fp16
+            else:
+                qlinear_dynamic = torch.ops.onednn.linear_dynamic_fp16
+
+            x = torch.randn(batch_size, input_channels)
+            w = torch.randn(output_channels, input_channels)
+            bias = torch.randn(output_channels) if use_bias else None
+
+            w_packed = qlinear_prepack(w, x.shape)
+            out = qlinear_dynamic(x, w_packed, bias)
+
+            # qlinear_dynamic_fp16 uses FP32 activation tensors and FP16 weight tensors
+            # output is FP32
+            w_fp16 = w.to(torch.float16).to(torch.float32)
+            ref = F.linear(x, w_fp16, bias)
+            if use_relu:
+                ref.relu_()
+
+            self.assertEqual(out, ref)
+
 
 class TestQuantizedLinear(TestCase):
     def _test_qlinear_impl(self, batch_size, input_channels, output_channels, use_bias,
@@ -4464,37 +4498,44 @@ class TestQuantizedLinear(TestCase):
                     y_s: {y_scale}, y_zp: {y_zp}""",
                 )
 
+    @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
     @skipIfNoONEDNN
     def test_qlinear_pt2e(self):
         qlinear = torch.ops.onednn.qlinear_pointwise
         self._test_qlinear_pt2e_helper(qlinear, "none")
 
+    @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
     @skipIfNoONEDNN
     def test_qlinear_relu_pt2e(self):
         qlinear = torch.ops.onednn.qlinear_pointwise
         self._test_qlinear_pt2e_helper(qlinear, "relu")
 
+    @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
     @skipIfNoONEDNN
     def test_qlinear_gelu_pt2e(self):
         qlinear = torch.ops.onednn.qlinear_pointwise
         post_op_algorithms = ['none', 'tanh']
         self._test_qlinear_pt2e_helper(qlinear, "gelu", post_op_algorithms=post_op_algorithms)
 
+    @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
     @skipIfNoONEDNN
     def test_qlinear_sum_pt2e(self):
         qlinear = torch.ops.onednn.qlinear_pointwise.binary
         self._test_qlinear_pt2e_helper(qlinear, "sum")
 
+    @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
     @skipIfNoONEDNN
     def test_qlinear_sum_relu_pt2e(self):
         qlinear = torch.ops.onednn.qlinear_pointwise.binary
         self._test_qlinear_pt2e_helper(qlinear, "sum_relu")
 
+    @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
     @skipIfNoONEDNN
     def test_qlinear_add_pt2e(self):
         qlinear = torch.ops.onednn.qlinear_pointwise.binary
         self._test_qlinear_pt2e_helper(qlinear, "add")
 
+    @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
     @skipIfNoONEDNN
     def test_qlinear_add_relu_pt2e(self):
         qlinear = torch.ops.onednn.qlinear_pointwise.binary
@@ -6784,12 +6825,10 @@ class TestQuantizedConv(TestCase):
                 X_q_cpu_tensor,
                 X_scale,
                 X_zero_point,
-                X2_cpu_tensor,
-                X2_scale,
-                X2_zero_point,
                 packed_weight,
                 weight_scale,
                 weight_zero_point,
+                X2_cpu_tensor,
                 bias_float,
                 strides,
                 pads,
@@ -6798,6 +6837,8 @@ class TestQuantizedConv(TestCase):
                 Y_scale,
                 Y_zero_point,
                 qconv_output_dtype,
+                X2_scale,
+                X2_zero_point,
                 post_op.binary_attr,
                 post_op.alpha,
                 post_op.unary_attr,
@@ -6857,6 +6898,7 @@ class TestQuantizedConv(TestCase):
         # Return the quantized data for later reuse
         return X_q, W_q, bias_float
 
+    @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
     @skipIfNoONEDNN
     def test_qconv1d_pt2e(self):
         groups_list = [1, 3]
@@ -6909,6 +6951,7 @@ class TestQuantizedConv(TestCase):
                 qconv_output_dtype=output_dtype,
             )
 
+    @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
     @skipIfNoONEDNN
     def test_qconv2d_pt2e(self):
         groups_list = [1, 3]
@@ -6969,6 +7012,7 @@ class TestQuantizedConv(TestCase):
                 weight_in_channel_last_format=channel_last_weight_format,
             )
 
+    @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
     @skipIfNoONEDNN
     def test_qconv3d_pt2e(self):
         input_channels_per_group = 2
@@ -7030,6 +7074,7 @@ class TestQuantizedConv(TestCase):
             )
 
     # Test qconv with post op relu
+    @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
     @skipIfNoONEDNN
     def test_qconv2d_relu_pt2e(self):
         input_channels_per_group = 2
@@ -7080,6 +7125,7 @@ class TestQuantizedConv(TestCase):
             )
 
     # Test qconv with post op hardtanh
+    @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
     @skipIfNoONEDNN
     def test_qconv2d_hardtanh_pt2e(self):
         input_channels_per_group = 2
@@ -7130,6 +7176,7 @@ class TestQuantizedConv(TestCase):
             )
 
     # Test qconv with post op silu
+    @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
     @skipIfNoONEDNN
     def test_qconv2d_silu_pt2e(self):
         input_channels_per_group = 2
@@ -7179,58 +7226,60 @@ class TestQuantizedConv(TestCase):
                 qconv_output_dtype=output_dtype,
             )
 
-        # Test qconv with post op hardswish
-        @skipIfNoONEDNN
-        def test_qconv2d_hardswish_pt2e(self):
-            input_channels_per_group = 2
-            output_channels_per_group = 2
-            groups_list = [1, 10]
-            input_feature_map_shape = (10, 10)
-            kernels = (3, 3)
-            strides = (2, 2)
-            pads = (1, 1)
-            dilations = (1, 1)
-            W_scale = [1.5]
-            W_zero_point = [0]
-            use_bias_list = [False, True]
-            use_channelwise_list = [False, True]
-            output_dtype_list = [None, torch.float32, torch.bfloat16]
-            options = itertools.product(groups_list, use_bias_list, use_channelwise_list, output_dtype_list)
+    # Test qconv with post op hardswish
+    @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
+    @skipIfNoONEDNN
+    def test_qconv2d_hardswish_pt2e(self):
+        input_channels_per_group = 2
+        output_channels_per_group = 2
+        groups_list = [1, 10]
+        input_feature_map_shape = (10, 10)
+        kernels = (3, 3)
+        strides = (2, 2)
+        pads = (1, 1)
+        dilations = (1, 1)
+        W_scale = [1.5]
+        W_zero_point = [0]
+        use_bias_list = [False, True]
+        use_channelwise_list = [False, True]
+        output_dtype_list = [None, torch.float32, torch.bfloat16]
+        options = itertools.product(groups_list, use_bias_list, use_channelwise_list, output_dtype_list)
 
-            for groups, use_bias, use_channelwise, output_dtype in options:
-                qconv = torch.ops.onednn.qconv2d_pointwise
-                qconv_prepack = torch.ops.onednn.qconv_prepack
-                conv_op = torch.nn.Conv2d(
-                    input_channels_per_group * groups,
-                    output_channels_per_group * groups,
-                    kernels,
-                    strides,
-                    pads,
-                    dilations,
-                    groups,
-                )
-                pointwise_post_op = PointwisePostOp(unary_attr="hardswish")
-                self._test_qconv_impl_cpu_tensor(
-                    qconv,
-                    qconv_prepack,
-                    conv_op,
-                    input_channels_per_group=input_channels_per_group,
-                    input_feature_map_shape=input_feature_map_shape,
-                    output_channels_per_group=output_channels_per_group,
-                    groups=groups,
-                    kernels=kernels,
-                    strides=strides,
-                    pads=pads,
-                    dilations=dilations,
-                    W_scale=W_scale,
-                    W_zero_point=W_zero_point,
-                    use_bias=use_bias,
-                    post_op=pointwise_post_op,
-                    use_channelwise=use_channelwise,
-                    qconv_output_dtype=output_dtype,
-                )
+        for groups, use_bias, use_channelwise, output_dtype in options:
+            qconv = torch.ops.onednn.qconv2d_pointwise
+            qconv_prepack = torch.ops.onednn.qconv_prepack
+            conv_op = torch.nn.Conv2d(
+                input_channels_per_group * groups,
+                output_channels_per_group * groups,
+                kernels,
+                strides,
+                pads,
+                dilations,
+                groups,
+            )
+            pointwise_post_op = PointwisePostOp(unary_attr="hardswish")
+            self._test_qconv_impl_cpu_tensor(
+                qconv,
+                qconv_prepack,
+                conv_op,
+                input_channels_per_group=input_channels_per_group,
+                input_feature_map_shape=input_feature_map_shape,
+                output_channels_per_group=output_channels_per_group,
+                groups=groups,
+                kernels=kernels,
+                strides=strides,
+                pads=pads,
+                dilations=dilations,
+                W_scale=W_scale,
+                W_zero_point=W_zero_point,
+                use_bias=use_bias,
+                post_op=pointwise_post_op,
+                use_channelwise=use_channelwise,
+                qconv_output_dtype=output_dtype,
+            )
 
     # Test qconv with post op sum
+    @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
     @skipIfNoONEDNN
     def test_qconv2d_sum_pt2e(self):
         groups_list = [1, 3]
@@ -7286,6 +7335,7 @@ class TestQuantizedConv(TestCase):
             )
 
     # Test qconv with post op sum relu
+    @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
     @skipIfNoONEDNN
     def test_qconv2d_sum_relu_pt2e(self):
         groups_list = [1, 3]
@@ -7338,6 +7388,7 @@ class TestQuantizedConv(TestCase):
             )
 
     # Test qconv with post op sum
+    @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
     @skipIfNoONEDNN
     def test_qconv2d_sum_relu_float_output_pt2e(self):
         groups = 1

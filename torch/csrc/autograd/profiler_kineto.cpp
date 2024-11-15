@@ -603,7 +603,8 @@ void prepareProfiler(
           at::hasCUDA() || at::hasXPU() || at::hasMTIA() ||
           c10::get_privateuse1_backend() != "privateuseone"),
       activities,
-      config.experimental_config);
+      config.experimental_config,
+      config.trace_id);
 
   if (!config.experimental_config.performance_events.empty()) {
     /* For now only CPU activity is supported */
@@ -684,6 +685,11 @@ void toggleCollectionDynamic(
       activities.count(torch::autograd::profiler::ActivityType::CUDA) == 0) {
     LOG(WARNING)
         << "Toggling CPU activity with CUDA activity on may result in traces with CUDA events on artibrary tracks";
+  } else if (
+      activities.count(torch::autograd::profiler::ActivityType::CUDA) > 0 &&
+      activities.count(torch::autograd::profiler::ActivityType::CPU) == 0) {
+    LOG(WARNING)
+        << "Toggling CUDA activity with CPU activity on may result in traces with incorrect correlation between CPU and CUDA events";
   }
   for (auto act : activities) {
     if (act == torch::autograd::profiler::ActivityType::CUDA) {

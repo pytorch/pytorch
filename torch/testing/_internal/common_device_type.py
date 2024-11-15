@@ -386,7 +386,7 @@ class DeviceTypeTestBase(TestCase):
         try:
             return cls.get_primary_device()
         except Exception:
-            # For CUDATestBase, XLATestBase, and possibly others, the primary device won't be available
+            # For CUDATestBase, XPUTestBase, XLATestBase, and possibly others, the primary device won't be available
             # until setUpClass() sets it. Call that manually here if needed.
             if hasattr(cls, "setUpClass"):
                 cls.setUpClass()
@@ -669,7 +669,7 @@ class XPUTestBase(DeviceTypeTestBase):
 
     @classmethod
     def setUpClass(cls):
-        cls.primary_device = "xpu:0"
+        cls.primary_device = f"xpu:{torch.xpu.current_device()}"
 
     def _should_stop_test_suite(self):
         return False
@@ -1981,12 +1981,21 @@ def get_all_device_types() -> List[str]:
     return ["cpu"] if not torch.cuda.is_available() else ["cpu", "cuda"]
 
 
+flex_attention_supported_platform = unittest.skipUnless(
+    torch.cuda.is_available()
+    and torch.utils._triton.has_triton()
+    and torch.cuda.get_device_capability() >= (8, 0),
+    "Requires CUDA and Triton",
+)
+
+
 def any_common_cpu_device_one():
     return (
         OpDTypes.any_common_cpu_xpu_one
         if TEST_XPU
         else OpDTypes.any_common_cpu_cuda_one
     )
+
 
 def is_gpu_device(devices: List[str]):
     return "cuda" in devices or "xpu" in devices
