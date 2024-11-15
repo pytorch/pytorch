@@ -16,6 +16,7 @@ from torch.testing._internal.common_quantized import override_quantized_engine
 from torch.testing._internal.common_utils import (
     set_default_dtype,
     skipCUDAMemoryLeakCheckIf,
+    skipIfRocm,
     skipIfTorchDynamo,
     TEST_WITH_ROCM,
 )
@@ -2479,6 +2480,8 @@ class TestFrozenOptimizations(JitTestCase):
             ):
                 nn.utils.fusion.fuse_linear_bn_eval(linear, bn)
 
+    # skipped on ROCm due to 'RuntimeError: miopenStatusBadParm'
+    @skipIfRocm
     @skipCUDAMemoryLeakCheckIf(True)
     @unittest.skipIf(not TEST_CUDA, "Optimization currently only run for GPU")
     def test_linear_bn_folding_autocast_scenario_cuda(self):
