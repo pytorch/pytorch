@@ -2556,7 +2556,6 @@ class InstructionTranslatorBase(
 
     def CALL_INTRINSIC_1(self, inst):
         if inst.argval == 3:
-            print('stopiteration_error')
             # INTRINSIC_STOPITERATION_ERROR
             self.STOPITERATION_ERROR(self.pop())
         elif inst.argval == 5:
@@ -3495,7 +3494,6 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
     def RETURN_CONST(self, inst):
         if self.consume_all_items:
             return super().RETURN_CONST(inst)
-        print('raise exception')
         exc.raise_observed_exception(StopIteration, self)
 
     def YIELD_FROM(self, inst):
