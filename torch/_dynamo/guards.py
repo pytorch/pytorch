@@ -2418,7 +2418,7 @@ class CheckFunctionManager:
         ):
             assert isinstance(cache_entry, CacheEntry)
             assert isinstance(extra_state, ExtraState)
-            reason = f"Cache line invalidated because of {obj_str} deallocation"
+            reason = f"Cache line invalidated {obj_str} got deallocated"
             deleted_guard_manager = DeletedGuardManagerWrapper(reason)
             extra_state.invalidate(cache_entry, deleted_guard_manager)
             self.guard_manager = deleted_guard_manager
@@ -2431,8 +2431,13 @@ class CheckFunctionManager:
                 # function, which will delete the callbacks as well. Therefore,
                 # we are using a finalizer which is kept alive.
                 self._weakrefs[id(obj)] = weakref.ref(obj)
+
+                if obj.__str__ is object.__str__ and obj.__repr__ is object.__repr__:
+                    obj_str = str(obj)
+                else:
+                    obj_str = f"object with {id(obj)}"
                 weakref.finalize(
-                    obj, functools.partial(self.invalidate, obj_str=str(obj))
+                    obj, functools.partial(self.invalidate, obj_str=obj_str)
                 )
         except TypeError:
             pass  # cannot weakref bool object
