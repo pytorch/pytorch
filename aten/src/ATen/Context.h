@@ -66,6 +66,7 @@ class TORCH_API Context {
       std::optional<c10::DeviceType> opt_device_type = std::nullopt) {
     c10::DeviceType device_type = opt_device_type.has_value()
         ? opt_device_type.value()
+        // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
         : at::getAccelerator(true).value();
     if (device_type == at::kCUDA) {
       return at::detail::getCUDAHooks();

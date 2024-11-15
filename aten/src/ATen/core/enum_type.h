@@ -49,7 +49,7 @@ struct TORCH_API EnumType : public NamedType {
 
   bool equals(const Type& rhs) const override {
     if (auto* enum_rhs = rhs.castRaw<EnumType>()) {
-      return name().value() == enum_rhs->name().value() &&
+      return name() == enum_rhs->name() &&
           *getValueType() == *(enum_rhs->getValueType()) &&
           this->compilation_unit() == enum_rhs->compilation_unit();
     }
