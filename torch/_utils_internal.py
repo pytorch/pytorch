@@ -266,3 +266,9 @@ def log_chromium_event_internal(
     start_time_ns: int,
 ):
     return None
+
+
+def record_chromium_event_internal(
+    event: Dict[str, Any],
+):
+    return None
