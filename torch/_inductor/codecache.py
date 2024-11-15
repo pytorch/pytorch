@@ -527,7 +527,10 @@ class FxGraphCachePickler(pickle.Pickler):
     """
 
     def __init__(
-        self, gm: torch.fx.GraphModule, include_non_inlined: bool = True
+        self,
+        gm: torch.fx.GraphModule,
+        include_non_inlined: bool = True,
+        has_user_defined_triton_kernels: bool = False,
     ) -> None:
         """
         Create an FX graph pickler. If include_non_inlined=True, then pickling will
@@ -549,10 +552,13 @@ class FxGraphCachePickler(pickle.Pickler):
                 torch.fx.experimental._backward_state.BackwardState: functools.partial(
                     self._reduce_unsupported
                 ),
-                # Need to use runtime type as GraphModule generates a singleton in __new__ function
-                gm.__class__: functools.partial(self._reduce_graph_module),
             }
         )
+        if has_user_defined_triton_kernels:
+            # Need to use runtime type as GraphModule generates a singleton in __new__ function
+            self.dispatch_table[gm.__class__] = functools.partial(
+                self._reduce_graph_module
+            )
 
         # Run with pickler.fast so it doesn't intern strings, making the hash result more predictable
         # TODO: pickler.fast is technically deprecated. Will this work on new python versions?
@@ -886,7 +892,10 @@ def compiled_fx_graph_hash(
     include_non_inlined = not has_frozen_params(gm)
 
     details = FxGraphHashDetails(gm, example_inputs, fx_kwargs, inputs_to_check)
-    pickler = FxGraphCachePickler(gm, include_non_inlined)
+    has_user_defined_triton_kernels = len(details.user_defined_triton_source) != 0
+    pickler = FxGraphCachePickler(
+        gm, include_non_inlined, has_user_defined_triton_kernels
+    )
     # The prefix distinguishes among the other kinds of objects we
     # cache in this module.
     key = "f" + pickler.get_hash(details)
