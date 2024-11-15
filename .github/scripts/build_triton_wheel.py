@@ -96,8 +96,8 @@ def build_triton(
                     file=meta,
                 )
                 print(
-                    "requirements:\n  host:\n    - python\n    - setuptools\n  run:\n    - python\n"
-                    "    - filelock\n    - pytorch\n",
+                    "requirements:\n  host:\n    - python\n    - setuptools\n    - pybind11\n"
+                    "  run:\n    - python\n    - filelock\n    - pytorch\n",
                     file=meta,
                 )
                 print(
