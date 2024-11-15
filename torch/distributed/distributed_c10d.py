@@ -2358,18 +2358,9 @@ def send(
         group_dst (int, optional): Destination rank on ``group``.  Invalid to specify both ``dst`` and ``group_dst``.
 
     """
-    group = _group_or_default_group(group)
-    group_dst = _canonicalize_group_rank(group, dst, group_dst)
-    _check_not_self_rank(group, group_dst, "destination")
-    _check_single_tensor(tensor, "tensor")
-    if _rank_not_in_group(group):
-        _warn_not_in_group("send")
-        return None
-
-    if tensor.is_complex():
-        tensor = torch.view_as_real(tensor)
-
-    group.send([tensor], group_dst, tag).wait()
+    work = isend(tensor, dst=dst, group=group, tag=tag, group_dst=group_dst)
+    if work is not None:
+        work.wait()
 
 
 @_exception_logger
@@ -2399,26 +2390,15 @@ def recv(
         -1, if not part of the group
 
     """
-    _check_single_tensor(tensor, "tensor")
-    if _rank_not_in_group(group):
-        _warn_not_in_group("recv")
+    work = irecv(tensor, src=src, group=group, tag=tag, group_src=group_src)
+    if work is None:
         return -1
-
-    if tensor.is_complex():
-        tensor = torch.view_as_real(tensor)
-
-    group = _group_or_default_group(group)
-
-    if src is None and group_src is None:
-        work = group.recv_anysource([tensor], tag)
-        work.wait()
-        src_rank = work._source_rank()
-        return get_global_rank(group, src_rank)
-    else:
-        group_src = _canonicalize_group_rank(group, src, group_src)
-        _check_not_self_rank(group, group_src, "source")
-        group.recv([tensor], group_src, tag).wait()
-        return get_global_rank(group, group_src)
+    work.wait()
+    if src is None:
+        if group_src is None:
+            group_src = work._source_rank()
+        src = get_global_rank(_group_or_default_group(group), group_src)
+    return src
 
 
 class _IllegalWork(Work):
