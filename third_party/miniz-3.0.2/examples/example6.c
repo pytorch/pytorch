@@ -34,27 +34,29 @@ static void hsv_to_rgb(int hue, int min, int max, rgb_t *p)
   if (!saturation) {
     p->r = p->g = p->b = 255 * (max - hue) / (max - min);
     return;
-  }
-  double h = fmod(color_rotate + 1e-4 + 4.0 * (hue - min) / (max - min), 6);
-  double c = 255.0f * saturation;
-  double X = c * (1 - fabs(fmod(h, 2) - 1));
+  } else {
+    const double h_dbl = fmod(color_rotate + 1e-4 + 4.0 * (hue - min) / (max - min), 6);
+    const double c_dbl = 255 * saturation;
+    const double X_dbl = c_dbl * (1 - fabs(fmod(h_dbl, 2) - 1));
+    const int h = (int)h_dbl;
+    const int c = (int)c_dbl;
+    const int X = (int)X_dbl;
 
-  p->r = p->g = p->b = 0;
+    p->r = p->g = p->b = 0;
 
-  switch((int)h) {
-  case 0: p->r = c; p->g = X; return;
-  case 1:	p->r = X; p->g = c; return;
-  case 2: p->g = c; p->b = X; return;
-  case 3: p->g = X; p->b = c; return;
-  case 4: p->r = X; p->b = c; return;
-  default:p->r = c; p->b = X;
+    switch(h) {
+    case 0: p->r = c; p->g = X; return;
+    case 1:	p->r = X; p->g = c; return;
+    case 2: p->g = c; p->b = X; return;
+    case 3: p->g = X; p->b = c; return;
+    case 4: p->r = X; p->b = c; return;
+    default:p->r = c; p->b = X;
+    }
   }
 }
 
 int main(int argc, char *argv[])
 {
-  (void)argc, (void)argv;
-
   // Image resolution
   const int iXmax = 4096;
   const int iYmax = 4096;
@@ -88,6 +90,8 @@ int main(int argc, char *argv[])
   double Cx,Cy;
 
   int MinIter = 9999, MaxIter = 0;
+
+  (void)argc, (void)argv;
 
   for(iY = 0; iY < iYmax; iY++)
   {
@@ -134,7 +138,7 @@ int main(int argc, char *argv[])
 
       uint Iterations = color[0] | (color[1] << 8U);
 
-      hsv_to_rgb(Iterations, MinIter, MaxIter, (rgb_t *)color);
+      hsv_to_rgb((int)Iterations, MinIter, MaxIter, (rgb_t *)color);
     }
   }
 
