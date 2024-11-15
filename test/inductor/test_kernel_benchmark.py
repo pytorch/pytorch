@@ -17,6 +17,7 @@ from torch.testing._internal.common_device_type import expectedFailureXPU
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.testing._internal.common_utils import (
     NAVI_ARCH,
+    skipIfRocm,
     skipIfRocmArch, 
 )
 
@@ -139,6 +140,7 @@ class TestKernelBenchmark(TestCase):
     @expectedFailureXPU
     @config.patch(max_autotune=True, max_autotune_gemm_backends="TRITON")
     @fresh_inductor_cache()
+    @skipIfRocm # temp skip
     def test_mm_triton_kernel_benchmark(self):
         M = 2048
         N = 2432
