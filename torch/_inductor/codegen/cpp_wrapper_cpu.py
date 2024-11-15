@@ -252,7 +252,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # real input/output tensor match ones provided at compile time via sample
         # input/output.
         def gen_check(handle_kind, idx, name, tensor):
-            self.prefix.writeline(f"auto {name} = {handle_kind}[{idx}];")
+            # Wrap AtenTensorHandle with ConstantHandle for cleaner utility function access
+            self.prefix.writeline(
+                f"ConstantHandle {name} = ConstantHandle({handle_kind}[{idx}]);"
+            )
             self.codegen_tensor_dtype_var_decl(self.prefix, name)
             expected_dtype_name = DTYPE_TO_ATEN[tensor.dtype]
             dtype_str = str(tensor.dtype).split(".")[-1]
@@ -488,16 +491,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
         )
 
     def codegen_input_size_var_decl(self, code: IndentedBuffer, name):
-        code.writeline(f"int64_t* {name}_size;")
-        code.writeline(
-            f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_sizes({name}, &{name}_size));"
-        )
+        code.writeline(f"int64_t* {name}_size = {name}.sizes();")
 
     def codegen_input_stride_var_decl(self, code: IndentedBuffer, name):
-        code.writeline(f"int64_t* {name}_stride;")
-        code.writeline(
-            f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_strides({name}, &{name}_stride));"
-        )
+        code.writeline(f"int64_t* {name}_stride = {name}.strides();")
 
     def codegen_model_kernels(self):
         self.prefix.writeline("namespace {")
@@ -1302,6 +1299,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         offset = self.codegen_sizevar(offset)
         call_strs = []
         final_tmp_name = None
+        final_tmp_name_is_RAIIAtenTensorHandle = False
 
         def create_reinterpret_call() -> Tuple[str, str]:
             tmp_name = f"tmp_tensor_handle_{next(self.tmp_tensor_id)}"
@@ -1356,6 +1354,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 tmp_output_name, tmp_call_strs = create_dtypeview_call(data.get_name())
                 call_strs.extend(tmp_call_strs)
                 final_tmp_name = tmp_output_name
+                final_tmp_name_is_RAIIAtenTensorHandle = True
             else:
                 return data.get_name()
         else:
@@ -1367,11 +1366,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 # wrap it with dtypeview
                 final_tmp_name, tmp_call_strs = create_dtypeview_call(reinterpret_call)
                 call_strs.extend(tmp_call_strs)
-            else:
-                call_strs.append(
-                    f"RAIIAtenTensorHandle {final_tmp_name}_raii({final_tmp_name});"
-                )
-                final_tmp_name = f"{final_tmp_name}_raii"
 
         for line in call_strs:
             writeline(line)
@@ -1405,7 +1399,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
         #     }.data()
         # );
         # ```
-        return final_tmp_name
+        if not final_tmp_name_is_RAIIAtenTensorHandle:
+            return f"wrap_with_raii_handle_if_needed({final_tmp_name})"
+        else:
+            return final_tmp_name
 
     def codegen_device_copy(self, src, dst, non_blocking: bool):
         self.writeline(
