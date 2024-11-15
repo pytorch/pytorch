@@ -1069,9 +1069,27 @@ This class does not support ``__members__`` property.)");
       .def_property_readonly("rank", &SymmetricMemory::get_rank)
       .def_property_readonly("world_size", &SymmetricMemory::get_world_size)
       .def_property_readonly(
+          "buffer_ptrs",
+          [](const c10::intrusive_ptr<SymmetricMemory>& symm_mem) {
+            std::vector<uintptr_t> ret;
+            for (auto ptr : symm_mem->get_buffer_ptrs()) {
+              ret.push_back(reinterpret_cast<uintptr_t>(ptr));
+            }
+            return ret;
+          })
+      .def_property_readonly(
           "buffer_ptrs_dev",
           [](const c10::intrusive_ptr<SymmetricMemory>& symm_mem) {
             return reinterpret_cast<uintptr_t>(symm_mem->get_buffer_ptrs_dev());
+          })
+      .def_property_readonly(
+          "signal_pad_ptrs",
+          [](const c10::intrusive_ptr<SymmetricMemory>& symm_mem) {
+            std::vector<uintptr_t> ret;
+            for (auto ptr : symm_mem->get_signal_pad_ptrs()) {
+              ret.push_back(reinterpret_cast<uintptr_t>(ptr));
+            }
+            return ret;
           })
       .def_property_readonly(
           "signal_pad_ptrs_dev",
@@ -2692,10 +2710,9 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
             auto options = ::c10d::ProcessGroupGloo::Options::create();
 
             // Use interfaces listed in "GLOO_SOCKET_IFNAME", if set.
-            auto ifnameEnv =
-                c10::utils::get_env(GLOO_SOCKET_IFNAME_ENV.c_str());
-            if (ifnameEnv && ifnameEnv->size() > 1) {
-              for (const auto& iface : ::c10d::split(',', ifnameEnv->c_str())) {
+            char* ifnameEnv = getenv(GLOO_SOCKET_IFNAME_ENV.c_str());
+            if (ifnameEnv && strlen(ifnameEnv) > 1) {
+              for (const auto& iface : ::c10d::split(',', ifnameEnv)) {
                 options->devices.push_back(
                     ::c10d::ProcessGroupGloo::createDeviceForInterface(iface));
               }
@@ -2749,6 +2766,7 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
 #endif
 
 #ifdef USE_C10D_NCCL
+
   auto processGroupNCCL =
       intrusive_ptr_no_gil_destructor_class_<::c10d::ProcessGroupNCCL>(
           module, "ProcessGroupNCCL", backend)
@@ -2827,6 +2845,10 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
           .def(
               "_is_initialized",
               &::c10d::ProcessGroupNCCL::isInitialized,
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "get_error",
+              &::c10d::ProcessGroupNCCL::getError,
               py::call_guard<py::gil_scoped_release>());
 
   module.def(
@@ -2974,6 +2996,12 @@ Example::
       .value("TIMEOUT", ::c10d::WorkResult::TIMEOUT)
       .value("COMM_ERROR", ::c10d::WorkResult::COMM_ERROR)
       .value("UNKNOWN", ::c10d::WorkResult::UNKNOWN);
+
+  py::enum_<::c10d::ErrorType>(module, "ErrorType")
+      .value("SUCCESS", ::c10d::ErrorType::SUCCESS)
+      .value("TIMEOUT", ::c10d::ErrorType::TIMEOUT)
+      .value("COMM_ERROR", ::c10d::ErrorType::COMM_ERROR)
+      .value("REMOTE_ERROR", ::c10d::ErrorType::REMOTE_ERROR);
 
   py::class_<::c10d::WorkInfo, std::shared_ptr<::c10d::WorkInfo>>(
       module, "WorkInfo")
