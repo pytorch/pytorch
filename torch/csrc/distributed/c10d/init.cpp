@@ -139,7 +139,7 @@ class IntrusivePtrNoGilDestructor {
 
 } // anonymous namespace
 
-PYBIND11_DECLARE_HOLDER_TYPE(T, IntrusivePtrNoGilDestructor<T>, true);
+PYBIND11_DECLARE_HOLDER_TYPE(T, IntrusivePtrNoGilDestructor<T>, true)
 
 namespace torch::distributed::c10d {
 
@@ -1069,9 +1069,27 @@ This class does not support ``__members__`` property.)");
       .def_property_readonly("rank", &SymmetricMemory::get_rank)
       .def_property_readonly("world_size", &SymmetricMemory::get_world_size)
       .def_property_readonly(
+          "buffer_ptrs",
+          [](const c10::intrusive_ptr<SymmetricMemory>& symm_mem) {
+            std::vector<uintptr_t> ret;
+            for (auto ptr : symm_mem->get_buffer_ptrs()) {
+              ret.push_back(reinterpret_cast<uintptr_t>(ptr));
+            }
+            return ret;
+          })
+      .def_property_readonly(
           "buffer_ptrs_dev",
           [](const c10::intrusive_ptr<SymmetricMemory>& symm_mem) {
             return reinterpret_cast<uintptr_t>(symm_mem->get_buffer_ptrs_dev());
+          })
+      .def_property_readonly(
+          "signal_pad_ptrs",
+          [](const c10::intrusive_ptr<SymmetricMemory>& symm_mem) {
+            std::vector<uintptr_t> ret;
+            for (auto ptr : symm_mem->get_signal_pad_ptrs()) {
+              ret.push_back(reinterpret_cast<uintptr_t>(ptr));
+            }
+            return ret;
           })
       .def_property_readonly(
           "signal_pad_ptrs_dev",
@@ -2692,10 +2710,9 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
             auto options = ::c10d::ProcessGroupGloo::Options::create();
 
             // Use interfaces listed in "GLOO_SOCKET_IFNAME", if set.
-            auto ifnameEnv =
-                c10::utils::get_env(GLOO_SOCKET_IFNAME_ENV.c_str());
-            if (ifnameEnv && ifnameEnv->size() > 1) {
-              for (const auto& iface : ::c10d::split(',', ifnameEnv->c_str())) {
+            char* ifnameEnv = getenv(GLOO_SOCKET_IFNAME_ENV.c_str());
+            if (ifnameEnv && strlen(ifnameEnv) > 1) {
+              for (const auto& iface : ::c10d::split(',', ifnameEnv)) {
                 options->devices.push_back(
                     ::c10d::ProcessGroupGloo::createDeviceForInterface(iface));
               }

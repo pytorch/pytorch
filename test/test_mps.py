@@ -69,9 +69,6 @@ def xfailIf(condition):
             return func
     return wrapper
 
-def xfailIfMacOS14_4Plus(func):
-    return unittest.expectedFailure(func) if product_version > 14.3 else func  # noqa: F821
-
 def mps_ops_grad_modifier(ops):
     XFAILLIST_GRAD = {
 
@@ -84,8 +81,6 @@ def mps_ops_grad_modifier(ops):
         '__getitem__': [torch.float16],
         '_segment_reduce': [torch.float16, torch.float32],
         '_chunk_cat': [torch.float16, torch.float32],
-        'unfold_copy': [torch.float16, torch.float32],  # unfold_backward is not implemented
-        'unfold': [torch.float16, torch.float32],
         'sparse.mmreduce': [torch.float32],  # csr not supported
         'unique_consecutive': [torch.float16, torch.float32],
         'special_modified_bessel_i0': [torch.float16, torch.float32],
@@ -1211,10 +1206,10 @@ class TestAutocastMPS(TestCase):
     def test_matmul_autocast(self):
         autocast_tensor_A = torch.rand((8, 8), device="mps")
         autocast_tensor_B = torch.rand((8, 8), device="mps")
-        tensor_A = autocast_tensor_A.clone().detach()
-        tensor_B = autocast_tensor_B.clone().detach()
+        tensor_A = autocast_tensor_A.detach().clone()
+        tensor_B = autocast_tensor_B.detach().clone()
         autocast_output_tensor = torch.empty(8, 8)
-        output_tensor = autocast_output_tensor.clone().detach()
+        output_tensor = autocast_output_tensor.detach().clone()
 
         with torch.autocast(device_type="mps"):
             autocast_output_tensor = torch.mm(autocast_tensor_A, autocast_tensor_B)
@@ -1289,7 +1284,7 @@ class TestMemoryLeak(TestCaseMPS):
         step(a)
         torch.mps.empty_cache()
         driver_after = torch.mps.driver_allocated_memory()
-        self.assertEqual(driver_before, driver_after, f"Detected {driver_after-driver_before} bytes leak of GPU memory")
+        self.assertEqual(driver_before, driver_after, f"Detected {driver_after - driver_before} bytes leak of GPU memory")
 
 
 class TestPixelShuffle(TestCaseMPS):
@@ -1621,6 +1616,7 @@ class TestMPS(TestCaseMPS):
             a = torch.tensor(v, dtype=dtype, device="mps") * b
             self.compare_with_numpy(torch.exp, np.exp, a)
 
+    @xfailIf(product_version > 15.0)
     def test_conv_raises_error(self, device='mps', dtype=torch.float):
         conv = nn.Conv1d(1, 65537, 3, padding=1).to('mps')
 
@@ -1628,10 +1624,19 @@ class TestMPS(TestCaseMPS):
         with self.assertRaises(NotImplementedError):
             y = conv(x.to("mps"))
 
+    @xfailIf(product_version < 15.1)
+    def test_conv_high_channel_size(self):
+        out_channels = 65537
+        weight = torch.randn(out_channels, 1, 1)
+        x = torch.ones([1, 1, 1])
+        y_cpu = F.conv1d(x.to("cpu"), weight.to("cpu"))
+        y_mps = F.conv1d(x.to("mps"), weight.to("mps"))
+        self.assertEqual(y_cpu, y_mps)
+
     def test_triu_inf(self, device="mps", dtype=torch.float):
         for diag in [-1, 0, 1]:
             mask = torch.full((3, 6, 6), float("-inf"))
-            mask_mps = mask.clone().detach().to('mps')
+            mask_mps = mask.detach().clone().to('mps')
             cpu_ref = torch.triu(mask, diagonal=diag)
             mps_out = torch.triu(mask_mps, diagonal=diag)
             self.assertEqual(cpu_ref, mps_out)
@@ -4899,7 +4904,7 @@ class TestMPS(TestCaseMPS):
 
         for reduction in ['none', 'mean', 'sum']:
             output_sig = torch.rand(x_size, y_size, device='mps') - 0.5
-            output_logits = output_sig.clone().detach()
+            output_logits = output_sig.detach().clone()
 
             output_sig.requires_grad = True
             output_logits.requires_grad = True
@@ -8075,7 +8080,7 @@ class TestMPS(TestCaseMPS):
 
     def test_mps_allocator_stats(self):
         max_memory = torch.mps.recommended_max_memory()
-        print(f"Recommended Max Memory : {max_memory/ 1024 ** 3} GB")
+        print(f"Recommended Max Memory : {max_memory / 1024 ** 3} GB")
         self.assertGreater(max_memory, 0)
 
     # to verify this test, run XCode Instruments "Metal System Trace" or "Logging" tool,
@@ -8531,8 +8536,8 @@ class TestLogical(TestCaseMPS):
                         A = torch.randint(0, 100, size=shape_tuple[0], device='cpu', dtype=dtype)
                         B = torch.randint(0, 100, size=shape_tuple[1], device='cpu', dtype=dtype)
 
-                    A_mps = A.clone().detach().to('mps')
-                    B_mps = B.clone().detach().to('mps')
+                    A_mps = A.detach().clone().to('mps')
+                    B_mps = B.detach().clone().to('mps')
 
                     cpu_ref = torch.isin(A, B, invert=inverted)
                     if dtype in [torch.float16, torch.bfloat16]:
@@ -10045,7 +10050,7 @@ class TestViewOpsMPS(TestCaseMPS):
     # Testing that the generated view_copy kernel and its derivative are implemented correctly
     def test_view_copy(self, device="mps"):
         a = torch.randn(4, device=device, requires_grad=True)
-        a_ref = a.clone().detach().requires_grad_()
+        a_ref = a.detach().clone().requires_grad_()
         a_view = a_ref.view(2, 2)
         a_view_copy = torch.view_copy(a, (2, 2))
 
