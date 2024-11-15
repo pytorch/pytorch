@@ -1126,9 +1126,9 @@ def _canonicalize_group_rank(
     """
     Helper method to take _either_ a global rank or a group rank and produce a group rank.
     """
-
-    if group_rank is not None and global_rank is not None:
-        raise ValueError("Can't specify both group_rank and global_rank")
+    if group_rank is not None:
+        if global_rank is not None:
+            raise ValueError("Can't specify both group_rank and global_rank")
     else:
         if global_rank is None:
             raise ValueError("Must specify global_rank or group_rank")
@@ -2271,7 +2271,7 @@ def isend(
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         tag (int, optional): Tag to match send with remote recv
-        group_dst (int, optional): Destination rank on ``group``.  Invalid to specify both ``dst`` and ``group_dst
+        group_dst (int, optional): Destination rank on ``group``.  Invalid to specify both ``dst`` and ``group_dst``
 
     Returns:
         A distributed request object.
