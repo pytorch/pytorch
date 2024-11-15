@@ -1290,12 +1290,7 @@ class GuardBuilder(GuardBuilderBase):
         # ___check_type_id is same as `id(type(x)) == y`
         val = self.get(guard.name)
         t = type(self.get(guard.name))
-        if isinstance(val, torch.fx.GraphModule):
-            # For some reason, GraphModuleImpl deallocation causes segfaults.
-            # So, dont put invalidate function
-            obj_id = id(t)
-        else:
-            obj_id = self.id_ref(t)  # type: ignore[assignment]
+        obj_id = self.id_ref(t)  # type: ignore[assignment]
         code = f"___check_type_id({self.arg_ref(guard)}, {obj_id})"
         self._set_guard_export_info(guard, [code])
 
