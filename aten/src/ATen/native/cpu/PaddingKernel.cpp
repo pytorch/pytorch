@@ -711,19 +711,19 @@ void replication_pad3d_backward_kernel_impl(
 } // anonymous namespace
 
 // reflection padding
-REGISTER_DISPATCH(reflection_pad1d_kernel, &reflection_pad1d_kernel_impl);
-REGISTER_DISPATCH(reflection_pad1d_backward_kernel, &reflection_pad1d_backward_kernel_impl);
-REGISTER_DISPATCH(reflection_pad2d_kernel, &reflection_pad2d_kernel_impl);
-REGISTER_DISPATCH(reflection_pad2d_backward_kernel, &reflection_pad2d_backward_kernel_impl);
-REGISTER_DISPATCH(reflection_pad3d_kernel, &reflection_pad3d_kernel_impl);
-REGISTER_DISPATCH(reflection_pad3d_backward_kernel, &reflection_pad3d_backward_kernel_impl);
+REGISTER_DISPATCH(reflection_pad1d_kernel, &reflection_pad1d_kernel_impl)
+REGISTER_DISPATCH(reflection_pad1d_backward_kernel, &reflection_pad1d_backward_kernel_impl)
+REGISTER_DISPATCH(reflection_pad2d_kernel, &reflection_pad2d_kernel_impl)
+REGISTER_DISPATCH(reflection_pad2d_backward_kernel, &reflection_pad2d_backward_kernel_impl)
+REGISTER_DISPATCH(reflection_pad3d_kernel, &reflection_pad3d_kernel_impl)
+REGISTER_DISPATCH(reflection_pad3d_backward_kernel, &reflection_pad3d_backward_kernel_impl)
 
 // replication padding
-REGISTER_DISPATCH(replication_pad1d_kernel, &replication_pad1d_kernel_impl);
-REGISTER_DISPATCH(replication_pad1d_backward_kernel, &replication_pad1d_backward_kernel_impl);
-REGISTER_DISPATCH(replication_pad2d_kernel, &replication_pad2d_kernel_impl);
-REGISTER_DISPATCH(replication_pad2d_backward_kernel, &replication_pad2d_backward_kernel_impl);
-REGISTER_DISPATCH(replication_pad3d_kernel, &replication_pad3d_kernel_impl);
-REGISTER_DISPATCH(replication_pad3d_backward_kernel, &replication_pad3d_backward_kernel_impl);
+REGISTER_DISPATCH(replication_pad1d_kernel, &replication_pad1d_kernel_impl)
+REGISTER_DISPATCH(replication_pad1d_backward_kernel, &replication_pad1d_backward_kernel_impl)
+REGISTER_DISPATCH(replication_pad2d_kernel, &replication_pad2d_kernel_impl)
+REGISTER_DISPATCH(replication_pad2d_backward_kernel, &replication_pad2d_backward_kernel_impl)
+REGISTER_DISPATCH(replication_pad3d_kernel, &replication_pad3d_kernel_impl)
+REGISTER_DISPATCH(replication_pad3d_backward_kernel, &replication_pad3d_backward_kernel_impl)
 
 } // at::native

@@ -89,7 +89,7 @@ int64_t get_nnz(const Tensor& nestedtensor) {
     const Tensor& tensor_strides = tensor->get_nested_strides();
 
     const int64_t n_tensors = tensor_strides.size(0);
-    constexpr int64_t n_dims = 3;
+    constexpr int n_dims = 3;
     // This is safe since head_dim is assured to be consistent
     const int64_t num_heads = tensor -> opt_size(2).value();
     const int64_t tensor_stride_0 = tensor_strides.stride(0);
@@ -120,7 +120,7 @@ int64_t get_nnz(const Tensor& nestedtensor) {
         }
       }
       // Check that each tensor i in the nested tensor has the same strides
-      for (int i{1}; i < n_tensors; i++) {
+      for (int64_t i{1}; i < n_tensors; i++) {
         for (const int64_t j : c10::irange(n_dims)) {
           if (previous_tensor_stride[j] !=
               previous_tensor_stride[i * tensor_stride_0 + j]) {

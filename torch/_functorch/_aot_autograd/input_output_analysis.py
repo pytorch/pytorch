@@ -17,6 +17,7 @@ import torch
 import torch.utils._pytree as pytree
 from torch import Tensor
 from torch._dynamo.exc import Unsupported
+from torch._functorch._aot_autograd.schemas import PlainTensorMeta
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.fx.experimental.symbolic_shapes import is_concrete_int
 
@@ -56,10 +57,11 @@ def remove_dupe_metadata(
         if keep_arg_mask[m.mutated_inp_runtime_indices[i]]
     ]
     traced_tangents = filtered_inp_traced_tangents + other_traced_tangents
-    assert m.traced_tangent_memory_formats is not None
-    traced_tangent_memory_formats = [torch.contiguous_format] * len(
-        filtered_inp_traced_tangents
-    ) + m.traced_tangent_memory_formats[num_data_mutations:]
+
+    assert m.subclass_tangent_meta is not None
+    subclass_tangent_meta = [
+        PlainTensorMeta(0, memory_format=torch.contiguous_format)
+    ] * len(filtered_inp_traced_tangents) + m.subclass_tangent_meta[num_data_mutations:]
 
     return ViewAndMutationMeta(
         input_info=[x for i, x in enumerate(m.input_info) if keep_arg_mask[i]],
@@ -79,11 +81,10 @@ def remove_dupe_metadata(
         num_intermediate_bases=m.num_intermediate_bases,
         keep_input_mutations=m.keep_input_mutations,
         traced_tangents=traced_tangents,
-        traced_tangent_memory_formats=traced_tangent_memory_formats,
         # We are guaranteed not to get here, since dupes are not supported today with subclass inputs.
         subclass_inp_meta=[],
         subclass_fw_graph_out_meta=[],
-        subclass_tangent_meta=[],
+        subclass_tangent_meta=subclass_tangent_meta,
         is_train=m.is_train,
     )
 
@@ -163,9 +164,11 @@ def create_synthetic_base_metadata(
             mutations_hidden_from_autograd=all(
                 m.input_info[x].mutations_hidden_from_autograd for x in outer_indices
             ),
-            mutates_storage_metadata=False
-            if len(outer_indices) > 1
-            else m.input_info[outer_indices[0]].mutates_storage_metadata,
+            mutates_storage_metadata=(
+                False
+                if len(outer_indices) > 1
+                else m.input_info[outer_indices[0]].mutates_storage_metadata
+            ),
             mutations_under_no_grad_or_inference_mode=mutations_under_no_grad_or_inference_mode,
             mutation_inductor_storage_resize=mutation_inductor_storage_resize,
             is_leaf=any_leaf,
@@ -245,11 +248,11 @@ def create_synthetic_base_metadata(
     traced_tangents = (
         inner_mutated_tangents + m.traced_tangents[len(inner_mutated_tangents) :]
     )
-    assert m.traced_tangent_memory_formats is not None
-    traced_tangent_memory_formats = (
-        inner_mutated_tangents_memory_formats
-        + m.traced_tangent_memory_formats[len(inner_mutated_tangents) :]
-    )
+    assert m.subclass_tangent_meta is not None
+    subclass_tangent_meta = [
+        PlainTensorMeta(0, memory_format=x)
+        for x in inner_mutated_tangents_memory_formats
+    ] + m.subclass_tangent_meta[len(inner_mutated_tangents) :]
 
     return (
         ViewAndMutationMeta(
@@ -258,11 +261,10 @@ def create_synthetic_base_metadata(
             num_intermediate_bases=m.num_intermediate_bases,
             keep_input_mutations=m.keep_input_mutations,
             traced_tangents=traced_tangents,
-            traced_tangent_memory_formats=traced_tangent_memory_formats,
             # We are guaranteed not to get here, since synthetic_base codepaths are not supported today with subclass inputs.
             subclass_inp_meta=[],
             subclass_fw_graph_out_meta=[],
-            subclass_tangent_meta=[],
+            subclass_tangent_meta=subclass_tangent_meta,
             is_train=m.is_train,
         ),
         outer_aliased_arg_idx_with_metadata_mutations,
