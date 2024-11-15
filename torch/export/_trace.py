@@ -1313,7 +1313,14 @@ def _strict_export_lower_to_aten_ir(
                 )
 
     # Fix the graph output signature to be tuple if scalar
-    out_spec = orig_out_spec = gm_torch_level._out_spec
+
+    # gm_torch_level.graph._codegen is made a _PyTreeCodeGen in rewrite_signature in eval_frame.py
+    assert isinstance(gm_torch_level.graph._codegen, torch.fx.graph._PyTreeCodeGen)
+
+    # Calling gm_torch_level._out_spec is not safe because gm_torch_level might be
+    # a _LazyGraphModule, which does not populate _out_spec when calling recompile().
+    # TODO: Fix recompile() in  _LazyGraphModule. T207713214
+    out_spec = orig_out_spec = gm_torch_level.graph._codegen.pytree_info.out_spec
 
     # Used to get rid of lint type error.
     assert out_spec is not None
