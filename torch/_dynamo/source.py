@@ -103,7 +103,9 @@ def reconstruct_getitem(
 @dataclasses.dataclass(frozen=True)
 class LocalSource(Source):
     local_name: str
-    cell_or_freevar: bool = False
+
+    # Whether this local is an input to the root frame.
+    is_input: bool = False
 
     def reconstruct(self, codegen):
         codegen.append_output(codegen.create_load(self.local_name))
@@ -722,14 +724,12 @@ class BackwardStateSource(Source):
         return GuardSource.BACKWARD_STATE
 
 
-def is_from_local_source(source: Source, *, allow_cell_or_freevar=True):
+def is_from_local_source(source: Source, *, only_allow_input=False):
     if isinstance(source, ChainedSource):
-        return is_from_local_source(
-            source.base, allow_cell_or_freevar=allow_cell_or_freevar
-        )
+        return is_from_local_source(source.base, only_allow_input=only_allow_input)
     if not isinstance(source, LocalSource):
         return False
-    if not allow_cell_or_freevar and source.cell_or_freevar:
+    if only_allow_input and not source.is_input:
         return False
     return True
 
