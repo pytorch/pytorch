@@ -985,7 +985,7 @@ class TestUnaryUfuncs(TestCase):
         )
 
         # inplace
-        inputTensorCpy = inputTensor.clone().detach()
+        inputTensorCpy = inputTensor.detach().clone()
         torch.nn.functional.hardswish(inputTensorCpy, inplace=True)
         self.assertEqual(inputTensorCpy, expectedOutputTensor)
 
@@ -1006,7 +1006,7 @@ class TestUnaryUfuncs(TestCase):
         )
 
         # inplace
-        inputTensorCpy = inputTensor.clone().detach()
+        inputTensorCpy = inputTensor.detach().clone()
         self.assertEqual(
             torch.nn.functional.hardsigmoid(inputTensorCpy, inplace=True),
             torch.tensor(expectedOutput, dtype=dtype, device=device),
