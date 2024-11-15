@@ -61,6 +61,7 @@ class TestCompat(common_utils.TestCase):
         "dynamic_shapes, input_names, expected_dynamic_axes",
         [
             (
+                # It still passes when dynamic_shapes uses input_names
                 {
                     "input_x": {
                         0: torch.export.Dim("customx_dim_0"),
@@ -68,7 +69,7 @@ class TestCompat(common_utils.TestCase):
                     },
                     "input_b": {0: torch.export.Dim("customb_dim_0")},
                 },
-                None,
+                ["input_x", "input_b"],
                 {
                     "input_x": {0: "customx_dim_0", 1: "customx_dim_1"},
                     "input_b": {0: "customb_dim_0"},

@@ -172,55 +172,28 @@ def _from_dynamic_shapes_to_dynamic_axes(
 
     flat_dynamic_shapes = _pytree.tree_leaves(dynamic_shapes, is_leaf=is_dict_axes)
 
-    # The input is not nested, so we can directly convert it to dynamic_axes
-    # if dynamic shapes is dict, use its keys as input names, as
-    # it is already corrected by `_rename_dynamic_shapes_with_model_inputs`
-    if len(flat_dynamic_shapes) == len(dynamic_shapes) and isinstance(
-        dynamic_shapes, dict
-    ):
-        dynamic_axes = {}
-        for input_name, axes in dynamic_shapes.items():
-            assert (
-                isinstance(axes, dict) or axes is None
-            ), f"dynamic_shapes value must be either a dict or None, but got {type(axes)}"
-            if axes is None:
+    if input_names is None:
+        raise ValueError(
+            "input_names must be provided, as dynamic_shapes represents model inputs"
+        )
+    if len(input_names) != len(flat_dynamic_shapes):
+        raise ValueError(
+            f"Number of input names ({len(input_names)}) should match "
+            f"the number of graph inputs(flat) ({len(flat_dynamic_shapes)})"
+        )
+
+    dynamic_axes = {}
+    # input names are assigned in order
+    for input_name, axes in zip(input_names, flat_dynamic_shapes):
+        if axes is None:
+            continue
+        converted_axes = {}
+        for axis, dim in axes.items():
+            if dim is None:
                 continue
-            converted_axes = {}
-            for axis, dim in axes.items():
-                if dim is None:
-                    continue
-                converted_axes[axis] = dim.__name__
+            converted_axes[axis] = dim.__name__
             dynamic_axes[input_name] = converted_axes
-        return dynamic_axes
-
-    # 2. if dynamic shapes is tuple/list, input_names should be provided
-    if isinstance(flat_dynamic_shapes, (tuple, list)):
-        if input_names is None:
-            raise ValueError(
-                "input_names must be provided when dynamic_shapes does not have input names assigned"
-            )
-        if len(input_names) != len(flat_dynamic_shapes):
-            raise ValueError(
-                f"Number of input names ({len(input_names)}) should match "
-                f"the number of graph inputs(flat) ({len(flat_dynamic_shapes)})"
-            )
-
-        dynamic_axes = {}
-        # input names are assigned in order
-        for input_name, axes in zip(input_names, flat_dynamic_shapes):
-            if axes is None:
-                continue
-            converted_axes = {}
-            for axis, dim in axes.items():
-                if dim is None:
-                    continue
-                converted_axes[axis] = dim.__name__
-                dynamic_axes[input_name] = converted_axes
-        return dynamic_axes
-
-    raise TypeError(
-        f"dynamic_shapes must be either a dict or a tuple, but got {type(flat_dynamic_shapes)}"
-    )
+    return dynamic_axes
 
 
 def _get_torch_export_args(
@@ -344,10 +317,16 @@ def export_compat(
             if f is None:
                 raise TypeError("f must be provided when fallback is enabled") from e
             if dynamic_shapes is not None and dynamic_axes is None:
-                dynamic_axes = _from_dynamic_shapes_to_dynamic_axes(
-                    dynamic_shapes=dynamic_shapes,
-                    input_names=input_names,
-                )
+                try:
+                    dynamic_axes = _from_dynamic_shapes_to_dynamic_axes(
+                        dynamic_shapes=dynamic_shapes,
+                        input_names=input_names,
+                    )
+                except Exception as e:
+                    raise RuntimeError(
+                        "# Failed to convert 'dynamic_shapes' to 'dynamic_axes'. "
+                        "Please provide 'dynamic_axes' directly for fallback. "
+                    ) from e
             torch.onnx.utils.export(
                 model,  # type: ignore[arg-type]
                 args,
