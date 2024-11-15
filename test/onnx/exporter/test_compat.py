@@ -1,5 +1,5 @@
 # Owner(s): ["module: onnx"]
-"""Unit tests for the _building module."""
+"""Unit tests for the _compat module."""
 
 from __future__ import annotations
 
