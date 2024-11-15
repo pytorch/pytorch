@@ -36,7 +36,6 @@ from torch.testing._internal.common_device_type import (
     skipMeta,
     skipXPU,
     is_gpu_device,
-    GPU_TYPES,
 )
 from torch.testing._internal.common_dtype import (
     all_types_and_complex_and,
@@ -80,6 +79,7 @@ from torch.testing._internal.common_utils import (
     TEST_XPU,
     TestCase,
     unMarkDynamoStrictTest,
+    GPU_TYPES,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map
