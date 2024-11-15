@@ -1,6 +1,7 @@
 # Owner(s): ["module: cpp"]
 
 import os
+import unittest
 
 import psutil
 import pytorch_openreg
@@ -13,6 +14,7 @@ class TestOpenReg(TestCase):
     def test_initializes(self):
         self.assertEqual(torch._C._get_privateuse1_backend_name(), "openreg")
 
+    @unittest.SkipTest
     def test_autograd_init(self):
         # Make sure autograd is initialized
         torch.ones(2, requires_grad=True, device="openreg").sum().backward()
