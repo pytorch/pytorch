@@ -46,6 +46,11 @@ bool device_has_multicast_support(int device_idx) {
 #endif
 }
 
+bool allow_overlapping_devices() {
+  return c10::utils::check_env("TORCH_SYMM_MEM_ALLOW_OVERLAPPING_DEVICES") ==
+      true;
+}
+
 class IpcChannel {
  public:
   IpcChannel() : socket_name_(get_socket_name(getpid())) {
@@ -413,13 +418,13 @@ at::Tensor CUDASymmetricMemory::get_signal_pad(
       std::multiplies<size_t>());
   const auto req_size = (numel + storage_offset) * element_size;
   TORCH_CHECK(
-      req_size <= buffer_size_,
+      req_size <= signal_pad_size,
       "CUDASymmetricMemory::get_signal_pad: the requested size (",
       req_size,
       " bytes) exceeds the allocated size (",
-      buffer_size_,
+      signal_pad_size,
       " bytes)");
-  auto data_ptr = reinterpret_cast<uint8_t*>(buffers_[rank]) +
+  auto data_ptr = reinterpret_cast<uint8_t*>(signal_pads_[rank]) +
       storage_offset * element_size;
   auto device = c10::Device(c10::DeviceType::CUDA, local_device_idx_);
   auto options = at::TensorOptions().dtype(*dtype).device(device);
@@ -685,7 +690,8 @@ void validate_rendezvous_requests(
   for (auto req : reqs) {
     device_indices.insert(req.device_idx);
   }
-  if (device_indices.size() < (size_t)world_size) {
+  if (!allow_overlapping_devices() &&
+      device_indices.size() < (size_t)world_size) {
     TORCH_CHECK(
         false,
         "CUDASymmetricMemoryAllocator::rendezvous: ",
@@ -850,7 +856,7 @@ c10::intrusive_ptr<SymmetricMemory> CUDASymmetricMemoryAllocator::rendezvous(
   HandleType mc_handle{};
   void* mc_addr = nullptr;
   bool group_has_multicast_support = check_group_multicast_support(reqs);
-  if (group_has_multicast_support) {
+  if (!allow_overlapping_devices() && group_has_multicast_support) {
     init_multicast_for_block(
         mc_handle, mc_addr, block, ipc_channel, pids, store, rank, world_size);
   }
