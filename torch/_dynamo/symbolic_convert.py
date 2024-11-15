@@ -2262,7 +2262,8 @@ class InstructionTranslatorBase(
         self.push(BuiltinVariable(tuple).call_function(self, [self.pop()], {}))  # type: ignore[arg-type]
 
     def STOPITERATION_ERROR(self, inst):
-        # Replaces StopIteration -> RuntimeError if the generator raises the former
+        # wrap the generator body in a try: ... except StopIteration: ... which
+        # converts the StopIteration into a RuntimeError
         # https://peps.python.org/pep-0479/
         # https://github.com/python/cpython/pull/99006
         # https://github.com/python/cpython/commit/28187141cc34063ef857976ddbca87ba09a882c2
@@ -2555,6 +2556,7 @@ class InstructionTranslatorBase(
 
     def CALL_INTRINSIC_1(self, inst):
         if inst.argval == 3:
+            print('stopiteration_error')
             # INTRINSIC_STOPITERATION_ERROR
             self.STOPITERATION_ERROR(self.pop())
         elif inst.argval == 5:
@@ -3493,6 +3495,7 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
     def RETURN_CONST(self, inst):
         if self.consume_all_items:
             return super().RETURN_CONST(inst)
+        print('raise exception')
         exc.raise_observed_exception(StopIteration, self)
 
     def YIELD_FROM(self, inst):
