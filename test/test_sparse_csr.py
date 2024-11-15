@@ -2438,6 +2438,7 @@ class TestSparseCSR(TestCase):
     def test_sampled_addmm(self, device, dtype):
         def run_test(c, a, b, op_a, op_b, *, alpha=None, beta=None):
             if dtype.is_complex:
+                # PYTORCH_TEST_WITH_DYNAMO=1 tlp python test/test_sparse_csr.py TestSparseCSRCPU.test_sampled_addmm_cpu_complex64
                 alpha = random.random() + 0.3j if alpha is None else alpha
                 beta = random.random() + 0.6j if beta is None else beta
             else:

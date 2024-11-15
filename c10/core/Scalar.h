@@ -255,6 +255,7 @@ class C10_API Scalar {
       auto val = v.z;
       return (val.real() == num) && (val.imag() == T());
     } else if (isFloatingPoint()) {
+      // PYTORCH_OPINFO_SAMPLE_INPUT_INDEX=0 python test/inductor/test_torchinductor_opinfo.py TestInductorOpInfoCUDA.test_comprehensive_nn_functional_local_response_norm_cuda_float64
       TORCH_CHECK(!isSymbolic(), "NYI SymFloat equality");
       return v.d == num;
     } else if (tag == Tag::HAS_i) {
