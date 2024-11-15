@@ -3273,7 +3273,6 @@ print(f"{torch.cuda.device_count()}")
         custom_envs = [
             {"CUDA_VISIBLE_DEVICES": "0", "HIP_VISIBLE_DEVICES": None},
             {"CUDA_VISIBLE_DEVICES": None, "HIP_VISIBLE_DEVICES": "0"},
-            {"CUDA_VISIBLE_DEVICES": "0,1,2,3", "HIP_VISIBLE_DEVICES": "0"},
         ]
 
         for env_config in custom_envs:
@@ -3323,6 +3322,21 @@ print(f"{{r1}}, {{r2}}")
         with TemporaryFileName() as f:
             with self.assertRaisesRegex(RuntimeError, error_msg):
                 file = torch.cuda.gds._GdsFile(f, os.O_CREAT | os.O_RDWR)
+
+
+@unittest.skipIf(not TEST_WITH_ROCM, "not relevant for CUDA testing")
+def test_conflicting_visible_devices(self):
+    """Test that setting both CUDA_VISIBLE_DEVICES and HIP_VISIBLE_DEVICES raises an error"""
+    test_script = """\
+import torch
+torch.cuda.device_count()
+"""
+    env = os.environ.copy()
+    env["CUDA_VISIBLE_DEVICES"] = "0"
+    env["HIP_VISIBLE_DEVICES"] = "0"
+    
+    with self.assertRaises(subprocess.CalledProcessError) as context:
+        subprocess.check_output([sys.executable, "-c", test_script], env=env)
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
