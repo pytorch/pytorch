@@ -302,6 +302,8 @@ jobs:
       - name: Upload sccache stats
         if: steps.build.outcome != 'skipped' && inputs.build-environment != 'linux-s390x-binary-manywheel'
         uses: ./.github/actions/upload-sccache-stats
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Teardown Linux
         uses: pytorch/test-infra/.github/actions/teardown-linux@main
