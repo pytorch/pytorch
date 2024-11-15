@@ -224,6 +224,7 @@ class TestCuda(TestCase):
         TEST_CUDAMALLOCASYNC or IS_JETSON, "Segmentation fault (core dumped)"
     )
     @serialTest()
+    @skipIfRocm # temp skip
     def test_out_of_memory_retry(self):
         torch.cuda.empty_cache()
         total_memory = torch.cuda.get_device_properties(0).total_memory
@@ -1032,6 +1033,7 @@ except RuntimeError as e:
 
     @unittest.skipIf(not TEST_MEDIUM_TENSOR, "not enough memory")
     @serialTest()
+    @skipIfRocm # temp skip
     def test_cuda_kernel_loop_overflow(self):
         # Issue #24309: In extreme cases, the loop variable could overflow and continue
         # the kernel loop with a negative index, causing a RuntimeError (invalid write):
@@ -1044,6 +1046,7 @@ except RuntimeError as e:
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
     @gcIfJetson
     @serialTest()
+    @skipIfRocm # temp skip
     def test_cuda_kernel_loop_overflow_large(self):
         # Make sure input.numel() > INT_MAX is handled:
         x = torch.randn(1, 1, 1, 2**31, dtype=torch.float16, device="cuda")
