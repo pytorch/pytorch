@@ -4,6 +4,11 @@ name: Upload sccache stats
 
 description: Upload sccache stats to artifacts
 
+inputs:
+  github-token:
+    description: GITHUB_TOKEN
+    required: true
+
 runs:
   using: composite
   steps:
