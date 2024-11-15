@@ -479,8 +479,8 @@ DEFINE_DISPATCH(index_put_with_sort_stub);
 DEFINE_DISPATCH(put_stub);
 DEFINE_DISPATCH(take_stub);
 DEFINE_DISPATCH(masked_fill_stub);
-REGISTER_NO_CPU_DISPATCH(index_put_with_sort_stub);
-REGISTER_NO_CPU_DISPATCH(index_put_with_sort_quantized_stub);
+REGISTER_NO_CPU_DISPATCH(index_put_with_sort_stub)
+REGISTER_NO_CPU_DISPATCH(index_put_with_sort_quantized_stub)
 DEFINE_DISPATCH(masked_select_serial_stub);
 DEFINE_DISPATCH(masked_select_stub);
 DEFINE_DISPATCH(masked_scatter_stub);
@@ -662,7 +662,7 @@ Tensor _unsafe_masked_index(const Tensor& self, const Tensor& mask, const torch:
   // with the main difference being that the when the `mask` is false, the tensor
   // `self` is not indexed using `indices`. This allows `indices` to be out-of-bounds
   // when `mask` is false. When `mask` is true, the `indices` are expected to be
-  // in bounds and is not checked.
+  // in bounds and is not checked. We also assume that the `indices` are non-negative
   //
   // This function is not meant to be executed on eager mode. An unoptimized version
   // is provided here.
@@ -1897,8 +1897,8 @@ TORCH_IMPL_FUNC(scatter_add)
   if (index.numel() == 0) return;
 
   // See Note [Enabling Deterministic Operations]
-  // Avoid gpuAtomicAdd for CUDA if deterministic mode is turned on
-  if (globalContext().deterministicAlgorithms() && self.device().type() == DeviceType::CUDA) {
+  // Avoid gpuAtomicAdd for CUDA and XPU if deterministic mode is turned on
+  if (globalContext().deterministicAlgorithms() && (self.device().type() == DeviceType::CUDA || self.device().type() == DeviceType::XPU)) {
     _scatter_via_index_put(self, dim, index, src, mut_out, /*accumulate*/true);
   } else {
     if (can_use_expanded_index_path(mut_out, dim, index, src, /*is_scatter_like*/true)) {
@@ -2409,7 +2409,7 @@ Tensor& nonzero_out_cpu(const Tensor& self, Tensor& result) {
 
         for (const auto i : c10::irange(n2)) {
           const char* ptr = data[0] + i * strides[1];
-          for (C10_UNUSED const auto j : c10::irange(n1)) {
+          for ([[maybe_unused]] const auto j : c10::irange(n1)) {
             const auto& val = c10::load<scalar_t>(ptr);
             // If nonzero, write index
             if (val != scalar_t(0)) {

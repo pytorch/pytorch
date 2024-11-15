@@ -5,7 +5,8 @@ import inspect
 import warnings
 import weakref
 from collections.abc import MutableMapping
-from typing import Any, Dict, List, Optional, Type, Union
+from types import CellType
+from typing import Any, Dict, List, Optional, Set, Type
 
 import torch.nn
 
@@ -21,47 +22,14 @@ from .exc import unimplemented
 from .source import GlobalSource, LocalSource, Source
 from .utils import is_frozen_dataclass, nn_module_new, object_new
 from .variables.base import (
+    AttributeMutation,
+    AttributeMutationExisting,
+    AttributeMutationNew,
     is_side_effect_safe,
-    MutableLocalBase,
-    MutableLocalSource,
+    ValueMutationExisting,
     VariableTracker,
 )
 from .variables.user_defined import FrozenDataClassVariable
-
-
-class MutableSideEffects(MutableLocalBase):
-    """
-    VariableTracker.mutable_local marker to indicate a list passed as
-    an input that if we mutate we need to re-apply those mutations after
-    the graph runs.
-    """
-
-    def __init__(self, source: Source, is_modified: bool = False):
-        super().__init__(MutableLocalSource.Existing)
-        self.source = source
-        self.is_modified = is_modified
-
-
-class AttributeMutation(MutableLocalBase):
-    """
-    VariableTracker.mutable_local marker to track changes to attributes
-    """
-
-    def __init__(self, typ: MutableLocalSource, source: Optional[Source]):
-        super().__init__(typ)
-        self.source = source
-
-
-class AttributeMutationExisting(AttributeMutation):
-    def __init__(self, source: Source):
-        super().__init__(MutableLocalSource.Existing, source)
-        self.source = source
-
-
-class AttributeMutationNew(AttributeMutation):
-    def __init__(self, source: Optional[Source], cls_source: Optional[Source]):
-        super().__init__(MutableLocalSource.Local, source)
-        self.cls_source = cls_source
 
 
 def _manual_update_dict(dict_from, dict_to):
@@ -76,7 +44,7 @@ class SideEffects:
     """
 
     id_to_variable: Dict[int, VariableTracker]
-    store_attr_mutations: Dict[MutableLocalBase, Dict[str, VariableTracker]]
+    store_attr_mutations: Dict[VariableTracker, Dict[str, VariableTracker]]
     keepalive: List[Any]
 
     def __init__(
@@ -167,7 +135,7 @@ class SideEffects:
             return True
         if self.should_allow_side_effects_under_checkpoint():
             return True
-        if not is_side_effect_safe(item.mutable_local):
+        if not is_side_effect_safe(item.mutation_type):
             unimplemented(
                 "HigherOrderOperator: Mutating a variable not in the current scope (SideEffects)"
             )
@@ -175,25 +143,32 @@ class SideEffects:
     def store_attr(self, item: VariableTracker, name: str, value: VariableTracker):
         assert self.is_attribute_mutation(item)
         self.check_allowed_side_effect(item)
-        if item.mutable_local not in self.store_attr_mutations:
-            self.store_attr_mutations[item.mutable_local] = {}
-        self.store_attr_mutations[item.mutable_local][name] = value
+        if item not in self.store_attr_mutations:
+            self.store_attr_mutations[item] = {}
+        self.store_attr_mutations[item][name] = value
 
-    def load_attr(self, item, name, deleted_ok=False):
-        assert self.is_attribute_mutation(item)
-        result = self.store_attr_mutations[item.mutable_local][name]
+    def load_attr(self, item, name, deleted_ok=False, check=False):
+        if check:
+            assert self.is_attribute_mutation(item)
+        result = self.store_attr_mutations[item][name]
         if not deleted_ok and isinstance(result, variables.DeletedVariable):
             unimplemented("read deleted attribute")
         return result
 
     def store_cell(self, cellvar, value):
+        if cellvar.is_immutable():
+            unimplemented("Dynamo currently doesn't support writing to such cell")
         assert isinstance(cellvar, variables.NewCellVariable)
         assert isinstance(value, variables.VariableTracker)
         self.store_attr(cellvar, "cell_contents", value)
 
     def load_cell(self, cellvar):
         assert isinstance(cellvar, variables.NewCellVariable)
-        return self.load_attr(cellvar, "cell_contents")
+        if self.has_pending_mutation_of_attr(cellvar, "cell_contents"):
+            return self.load_attr(cellvar, "cell_contents", check=False)
+        if cellvar.pre_existing_contents:
+            return cellvar.pre_existing_contents
+        unimplemented("cannot read uninitialized cell")
 
     def load_global(self, gvar: VariableTracker, name: str):
         assert isinstance(gvar, variables.VariableTracker)
@@ -212,30 +187,32 @@ class SideEffects:
         )
 
     def is_attribute_mutation(self, item):
-        return isinstance(item.mutable_local, AttributeMutation)
+        return isinstance(item.mutation_type, AttributeMutation)
 
     def has_pending_mutation(self, item):
         return self.is_attribute_mutation(item) and bool(
-            self.store_attr_mutations.get(item.mutable_local)
+            self.store_attr_mutations.get(item)
         )
 
     def has_pending_mutation_of_attr(self, item, name):
         return self.is_attribute_mutation(
             item
-        ) and name in self.store_attr_mutations.get(item.mutable_local, ())
+        ) and name in self.store_attr_mutations.get(item, ())
 
     def is_modified(self, item):
-        if isinstance(item.mutable_local, AttributeMutationNew):
+        if item.is_immutable():
+            return False
+        if isinstance(item.mutation_type, AttributeMutationNew):
             return True
         if self.is_attribute_mutation(item):
-            return item.mutable_local in self.store_attr_mutations
-        return item.mutable_local.is_modified
+            return item in self.store_attr_mutations
+        return item.mutation_type.is_modified
 
     def _track_obj(
         self,
         item: Any,
         variable: VariableTracker,
-        mutable_cls=MutableSideEffects,
+        mutation_type_cls=ValueMutationExisting,
     ):
         """Start tracking a new variable for mutation"""
         assert variable.source is not None
@@ -249,7 +226,7 @@ class SideEffects:
                 f"Source of previously tracked object: {self.id_to_variable[id(item)].source}."
             )
 
-        variable.mutable_local = mutable_cls(variable.source)
+        variable.mutation_type = mutation_type_cls()
         self.id_to_variable[id(item)] = variable
         self.keepalive.append(item)
         return variable
@@ -261,7 +238,9 @@ class SideEffects:
         item: Any,
         variable: VariableTracker,
     ):
-        return self._track_obj(item, variable, mutable_cls=AttributeMutationExisting)
+        return self._track_obj(
+            item, variable, mutation_type_cls=AttributeMutationExisting
+        )
 
     def track_object_new(
         self,
@@ -285,7 +264,7 @@ class SideEffects:
                 unimplemented(f"Unable to construct the object of type {user_cls}")
         variable = variable_cls(
             obj,
-            mutable_local=AttributeMutationNew(None, cls_source),
+            mutation_type=AttributeMutationNew(cls_source),
             **options,
         )
         self.id_to_variable[id(obj)] = variable
@@ -323,23 +302,30 @@ class SideEffects:
     ):
         obj = object()
         variable = variables.NewCellVariable(
-            mutable_local=AttributeMutationNew(None, None),
+            mutation_type=AttributeMutationNew(),
         )
         self.id_to_variable[id(obj)] = variable
         self.keepalive.append(obj)
         return variable
 
-    def track_cell_existing(self, source: Source, item: Any):
+    def track_cell_existing(
+        self, source: Optional[Source], cell: CellType, contents: VariableTracker
+    ):
         variable = variables.NewCellVariable(
-            mutable_local=AttributeMutationExisting(source),
+            # We don't support mutation to cell without source because we need
+            # source to properly codegen the mutations.
+            mutation_type=None if source is None else AttributeMutationExisting(),
+            pre_existing_contents=contents,
+            source=source,
         )
-        self.id_to_variable[id(item)] = variable
-        self.keepalive.append(item)
+        self.id_to_variable[id(cell)] = variable
+        self.keepalive.append(cell)
         return variable
 
     def track_global_existing(self, source: Source, item: Any):
         variable = variables.NewGlobalVariable(
-            mutable_local=AttributeMutationExisting(source),
+            mutation_type=AttributeMutationExisting(),
+            source=source,
         )
         self.id_to_variable[id(item)] = variable
         self.keepalive.append(item)
@@ -362,47 +348,54 @@ class SideEffects:
                 self.track_object_existing(other_item, other_variable)
 
     def prune_dead_object_new(self, tx):
-        live_new_objects = set()
+        live_new_objects: Set[VariableTracker] = set()
 
-        # use this to avoid cycles in mutable_local (though I'm not sure if that
+        # use this to avoid cycles in mutation_type (though I'm not sure if that
         # can actually happen).
-        visited: Any = set({})
+        visited: Set[VariableTracker] = set({})
 
         def visit(var: VariableTracker):
-            mutable_local = var.mutable_local
-            if mutable_local is None:
+            if var in visited:
                 return
-            if mutable_local in visited:
-                return
-            visited.add(mutable_local)
+            visited.add(var)
             # Object may have been mutated, store this mutation.
-            if isinstance(mutable_local, AttributeMutationNew):
-                live_new_objects.add(mutable_local)
+            if isinstance(var.mutation_type, AttributeMutationNew):
+                live_new_objects.add(var)
             # It's possible that we have mutated the value of this variable
             # to be another one. The new value is in store_attr_mutations.
             # Also recurse through the new value to detect alive AttributeMutationNew.
-            if var.mutable_local in self.store_attr_mutations:
+            if var in self.store_attr_mutations:
                 VariableTracker.visit(
-                    visit, self.store_attr_mutations[var.mutable_local]
+                    visit, self.store_attr_mutations[var]  # noqa: F821
                 )
 
-        def is_live(var: Union[MutableLocalBase, VariableTracker]):
-            if isinstance(var, AttributeMutationNew):
+        def is_live(var: VariableTracker):
+            if isinstance(var.mutation_type, AttributeMutationNew):
                 return var in live_new_objects
-            if isinstance(var, VariableTracker):
-                return is_live(var.mutable_local)
             return True
 
         pre_existing_vars = [
             var
             for var in self.id_to_variable.values()
-            if not isinstance(var.mutable_local, AttributeMutationNew)
+            if not isinstance(var.mutation_type, AttributeMutationNew)
         ]
 
         # The only live side effects come from returns (tx.stack), any intermediates
         # during a graph break (tx.symbolic_locals), and mutation on pre-existing variables.
         # Recursively visit Variables and see if any of them have been mutated.
-        VariableTracker.visit(visit, (tx.stack, tx.symbolic_locals, pre_existing_vars))
+        VariableTracker.visit(
+            visit,
+            (
+                tx.stack,
+                tx.symbolic_locals,
+                pre_existing_vars,
+                tx.output.backward_state,
+            ),
+        )
+        # Manually release the self-referential function, which indirectly
+        # captures certain `VariableTracker` and affects parts of PT test/logic
+        # that are sensitive to when certain objects get released.
+        del visit
 
         # NB: cell variable handling.is tricky.
         # cell variables must stay alive if any NestedUserFunctionVariable
@@ -419,15 +412,17 @@ class SideEffects:
 
     def mutation(self, var):
         self.check_allowed_side_effect(var)
-        if isinstance(var.mutable_local, MutableSideEffects):
-            var.mutable_local = MutableSideEffects(var.mutable_local.source, True)
+        if isinstance(var.mutation_type, ValueMutationExisting):
+            var.mutation_type.is_modified = True
 
     def _get_modified_vars(self):
         return [var for var in self.id_to_variable.values() if self.is_modified(var)]
 
     def codegen_save_tempvars(self, cg: PyCodegen):
+        # Make sure we codegen these modified VT to their source by default, so
+        # that mutation and aliasing are properly accounted for.
         for var in self._get_modified_vars():
-            if isinstance(var.mutable_local, AttributeMutationNew) and isinstance(
+            if isinstance(var.mutation_type, AttributeMutationNew) and isinstance(
                 var, variables.NewCellVariable
             ):
                 cg.add_push_null(
@@ -435,22 +430,21 @@ class SideEffects:
                 )
                 cg.extend_output(create_call_function(0, False))
                 cg.add_cache(var)
-                var.mutable_local.source = LocalSource(cg.tempvars[var])  # type: ignore[attr-defined]
-            elif isinstance(var.mutable_local, AttributeMutationNew):
+                var.source = LocalSource(cg.tempvars[var])  # type: ignore[attr-defined]
+            elif isinstance(var.mutation_type, AttributeMutationNew):
                 if isinstance(var, variables.AutogradFunctionContextVariable):
                     unimplemented("AutogradFunctionContextVariable escaped")
                 cg.add_push_null(
                     lambda: cg.load_import_from(utils.__name__, "object_new")
                 )
-                cg(var.mutable_local.cls_source)
+                cg(var.mutation_type.cls_source)
                 cg.extend_output(create_call_function(1, False))
                 cg.add_cache(var)
-                var.mutable_local.source = LocalSource(cg.tempvars[var])
-            elif var in cg.tempvars:
-                assert cg.tempvars.get(var) is None
-                # subsequent usage should point to the original variable
-                cg(var.mutable_local.source)
-                cg.add_cache(var)
+                var.source = LocalSource(cg.tempvars[var])
+            else:
+                # The remaning cases here are `AttributeMutationExisting` and
+                # `MutableSideEffects`, which have sources already.
+                assert var.source is not None
 
         for ctx, args in self.save_for_backward:
             cg(ctx.source)
@@ -469,7 +463,7 @@ class SideEffects:
         assert isinstance(hook, variables.VariableTracker)
         assert (
             isinstance(handle, variables.RemovableHandleVariable)
-            and handle.mutable_local
+            and handle.is_mutable()
         )
         assert hasattr(torch.Tensor, name)
         idx = len(self.tensor_hooks.keys())
@@ -538,11 +532,11 @@ class SideEffects:
             cg.add_cache(handle)
 
     def get_ca_final_callbacks_var(self):
-        from .variables.base import MutableLocal
+        from .variables.base import ValueMutationNew
 
         if self.ca_final_callbacks_var is None:
             self.ca_final_callbacks_var = variables.ListVariable(
-                [], mutable_local=MutableLocal()
+                [], mutation_type=ValueMutationNew()
             )
         return self.ca_final_callbacks_var
 
@@ -551,8 +545,8 @@ class SideEffects:
         for var in self._get_modified_vars():
             if isinstance(var, variables.ListVariable):
                 # old[:] = new
-                cg(var, allow_cache=False)
-                cg(var.mutable_local.source)  # type: ignore[attr-defined]
+                cg(var, allow_cache=False)  # Don't codegen via source
+                cg(var.source)  # type: ignore[attr-defined]
                 cg.extend_output(
                     [
                         cg.create_load_const(None),
@@ -567,17 +561,17 @@ class SideEffects:
                 for name in _manual_update_dict.__code__.co_varnames:
                     varname_map[name] = cg.tx.output.new_var()
 
-                cg(var.mutable_local.source)  # type: ignore[attr-defined]
+                cg(var.source)  # type: ignore[attr-defined]
                 cg.extend_output(
                     [create_instruction("STORE_FAST", argval=varname_map["dict_to"])]
                 )
 
-                cg(var, allow_cache=False)
+                cg(var, allow_cache=False)  # Don't codegen via source
                 cg.extend_output(
                     [create_instruction("STORE_FAST", argval=varname_map["dict_from"])]
                 )
 
-                cg(var.mutable_local.source)  # type: ignore[attr-defined]
+                cg(var.source)  # type: ignore[attr-defined]
                 cg.load_method("clear")
 
                 # unfortunately can't just use DICT_MERGE due to possible custom behaviors
@@ -602,12 +596,12 @@ class SideEffects:
                 #   + only if a key was removed from the input dict
                 # (4) update the original dictionary with the dict created in (2)
 
-                cg(var.mutable_local.source)  # type: ignore[attr-defined]
+                cg(var.source)  # type: ignore[attr-defined]
                 cg.load_method("update")
-                cg(var, allow_cache=False)
+                cg(var, allow_cache=False)  # Don't codegen via source
 
                 if var.should_reconstruct_all:
-                    cg(var.mutable_local.source)  # type: ignore[attr-defined]
+                    cg(var.source)  # type: ignore[attr-defined]
                     cg.load_method("clear")
 
                 suffixes.append(
@@ -668,21 +662,21 @@ class SideEffects:
                 # for this reversal, we iterate through the mutable attributes
                 # in reverse order.
                 for name, value in reversed(
-                    self.store_attr_mutations.get(var.mutable_local, {}).items()
+                    self.store_attr_mutations.get(var, {}).items()
                 ):
                     if isinstance(var, variables.NewGlobalVariable):
                         cg.tx.output.update_co_names(name)
                         cg(value)
-                        assert isinstance(var.mutable_local.source, GlobalSource)  # type: ignore[attr-defined]
+                        assert isinstance(var.source, GlobalSource)  # type: ignore[attr-defined]
                         suffixes.append(
                             [create_instruction("STORE_GLOBAL", argval=name)]
                         )
                     elif isinstance(value, variables.DeletedVariable):
                         if isinstance(
-                            var.mutable_local, AttributeMutationExisting
+                            var.mutation_type, AttributeMutationExisting
                         ) and hasattr(getattr(var, "value", None), name):
                             cg.tx.output.update_co_names(name)
-                            cg(var.mutable_local.source)
+                            cg(var.source)
                             suffixes.append(
                                 [create_instruction("DELETE_ATTR", argval=name)]
                             )
@@ -693,7 +687,7 @@ class SideEffects:
                         # __setattr__ is defined on this object, so call object.__setattr__ directly
                         cg.load_import_from("builtins", "object")
                         cg.load_method("__setattr__")
-                        cg(var.mutable_local.source)  # type: ignore[attr-defined]
+                        cg(var.source)  # type: ignore[attr-defined]
                         cg(variables.ConstantVariable(name))
                         cg(value)
                         suffixes.append(
@@ -702,20 +696,20 @@ class SideEffects:
                     else:
                         cg.tx.output.update_co_names(name)
                         cg(value)
-                        cg(var.mutable_local.source)
+                        cg(var.source)
                         suffixes.append([create_instruction("STORE_ATTR", argval=name)])
             elif isinstance(var, variables.TupleIteratorVariable):
                 for _ in range(var.index):
                     cg.add_push_null(
                         lambda: cg.load_import_from(utils.__name__, "iter_next")
                     )
-                    cg(var.mutable_local.source)  # type: ignore[attr-defined]
+                    cg(var.source)  # type: ignore[attr-defined]
                     cg.call_function(1, False)
                     cg.pop_top()
             elif isinstance(var, variables.RandomVariable):
                 # set correct random seed state
                 def gen_fn():
-                    cg(var.mutable_local.source)  # type: ignore[attr-defined]
+                    cg(var.source)  # type: ignore[attr-defined]
                     cg.load_attr("setstate")
 
                 cg.add_push_null(gen_fn)

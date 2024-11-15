@@ -157,7 +157,7 @@ void check_exact_values(
 TEST(OptimTest, OptimizerAccessors) {
   auto options = AdagradOptions(1.0);
   std::vector<torch::Tensor> params;
-  for (C10_UNUSED const auto i : c10::irange(3)) {
+  for ([[maybe_unused]] const auto i : c10::irange(3)) {
     params.push_back(torch::randn(10));
   }
   auto optimizer = Adagrad(params, options);

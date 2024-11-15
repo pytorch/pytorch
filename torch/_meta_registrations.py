@@ -719,8 +719,18 @@ def sym_constrain_range_for_size(size, min=None, max=None):
     # Avoid importing sympy at a module level
     from torch.fx.experimental.symbolic_shapes import _constrain_range_for_size
 
+    if min is None and max is None:
+        torch._check_is_size(size)
+        return
+
     if isinstance(size, (SymFloat, SymBool)):
         raise ValueError("Constraining SymFloat or Symbool is nyi")
+    if type(size) is int:
+        if min is not None:
+            torch._check(size >= min)
+        if max is not None:
+            torch._check(size <= max)
+        return
     _constrain_range_for_size(size, min=min, max=max)
 
 
@@ -1485,7 +1495,7 @@ def linalg_solve_triangular_meta(
 
 
 @register_meta(aten.triangular_solve)
-@out_wrapper("solution", "cloned_coefficient")
+@out_wrapper("X", "M", exact_dtype=True)
 def triangular_solve_meta(
     self: Tensor,
     A: Tensor,
@@ -2121,6 +2131,12 @@ def _compute_reduction_shape(self, dims, keepdim):
 def device_hint(tensor) -> "str":
     if isinstance(tensor, torch._subclasses.FakeTensor):
         return tensor.fake_device.type
+    elif (
+        hasattr(tensor, "device")
+        and hasattr(tensor.device, "type")
+        and tensor.device.type != "meta"
+    ):
+        return tensor.device.type
     else:
         return "cuda"  # default to cuda
 
@@ -3259,6 +3275,21 @@ def meta__convert_weight_to_int4pack(w, inner_k_tiles):
     )
 
 
+@register_meta([aten._convert_weight_to_int4pack_for_cpu])
+def meta__convert_weight_to_int4pack_for_cpu(w, inner_k_tiles):
+    torch._check(w.dim() == 2, lambda: "w must be a 2D tensor")
+    torch._check(
+        w.dtype is torch.int32,
+        lambda: f"expected w to be int32, got {w.dtype}",
+    )
+    n = w.size(0)
+    k = w.size(1)  # w is [n][k] int32
+    return w.new_empty(
+        (n, k // 2),
+        dtype=torch.uint8,
+    )
+
+
 @register_meta([aten._weight_int4pack_mm])
 def meta__weight_int4pack_mm(x, w, q_group_size, q_scale_and_zeros):
     torch._check(x.dim() == 2, lambda: "x must be a 2D tensor")
@@ -3272,6 +3303,21 @@ def meta__weight_int4pack_mm(x, w, q_group_size, q_scale_and_zeros):
         lambda: f"expected w to be int32, got {w.dtype}",
     )
     return x.new_empty(x.size(0), w.size(0) * 8, dtype=x.dtype)
+
+
+@register_meta([aten._weight_int4pack_mm_for_cpu])
+def meta__weight_int4pack_mm_for_cpu(x, w, q_group_size, q_scale_and_zeros):
+    torch._check(x.dim() == 2, lambda: "x must be a 2D tensor")
+    torch._check(w.dim() == 2, lambda: "w must be a 2D tensor")
+    torch._check(
+        x.dtype in [torch.float32, torch.float16, torch.bfloat16],
+        lambda: f"expected x to be f32/f16/bf16, got {x.dtype}",
+    )
+    torch._check(
+        w.dtype is torch.uint8,
+        lambda: f"expected w to be uint8, got {w.dtype}",
+    )
+    return x.new_empty(x.size(0), w.size(0), dtype=x.dtype)
 
 
 @register_meta([aten._weight_int8pack_mm])
@@ -3666,6 +3712,14 @@ def meta_relu_(self):
     return self
 
 
+@register_meta(aten._add_relu.Tensor)
+@out_wrapper()
+def meta__add_relu(self, other, alpha=1) -> Tensor:
+    return elementwise_meta(
+        self, other, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    )
+
+
 @register_meta([aten.index_put.default, aten._unsafe_index_put.default])
 def meta_index_put(self, indices, values, accumulate=False):
     return torch.empty_like(self)
@@ -3693,7 +3747,7 @@ def meta_masked_scatter_(self, mask, source):
     torch._check(
         self.dtype == source.dtype,
         lambda: "masked_scatter: expected self and source to have same "
-        "dtypes but got {self.dtype} and {source.dtype}",
+        f"dtypes but got {self.dtype} and {source.dtype}",
     )
     return self
 
@@ -4784,7 +4838,7 @@ def gather_shape_check(self, dim, index):
             torch._check(
                 ensure_nonempty_size(index, i) <= ensure_nonempty_size(self, i),
                 lambda: f"Size does not match at dimension {i} expected index {index.shape}"
-                + f" to be smaller than self {self.shape} apart from dimension {dim}",
+                + f" to be no larger than self {self.shape} apart from dimension {dim}",
             )
 
 
@@ -4889,13 +4943,13 @@ def scatter_shape_check(self, dim, index, src_opt=None):
         )
         torch._check(
             not is_wrong_shape,
-            lambda: f"Expected index {index.shape} to be smaller than self {self.shape}"
-            + f" apart from dimension {dim} and to be smaller than src {src_opt.shape}",
+            lambda: f"Expected index {index.shape} to be no larger than self {self.shape}"
+            + f" apart from dimension {dim} and to be no larger than src {src_opt.shape}",
         )
     else:
         torch._check(
             not is_wrong_shape,
-            lambda: f"Expected index {index.shape} to be smaller than self {self.shape}"
+            lambda: f"Expected index {index.shape} to be no larger than self {self.shape}"
             + f" apart from dimension {dim}",
         )
 

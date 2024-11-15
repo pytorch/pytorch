@@ -16,7 +16,6 @@ from torch.distributed.pipelining import (
     pipeline,
     PipelineStage,
     Schedule1F1B,
-    ScheduleFlexibleInterleaved1F1B,
     ScheduleGPipe,
     ScheduleInterleaved1F1B,
     ScheduleInterleavedZeroBubble,
@@ -423,7 +422,6 @@ class ScheduleTest(MultiProcContinousTest):
                 num_microbatches,
                 loss_fn=loss_fn,
                 stage_index_to_group_rank=old_schedule.stage_index_to_group_rank,
-                use_full_backward=old_schedule.use_full_backward,
             )
             tmp_schedule._load_actions(old_schedule.pipeline_order)
             # test that csv round-trip works for compute_comms schedule
@@ -432,7 +430,6 @@ class ScheduleTest(MultiProcContinousTest):
                 num_microbatches,
                 loss_fn=loss_fn,
                 stage_index_to_group_rank=old_schedule.stage_index_to_group_rank,
-                use_full_backward=old_schedule.use_full_backward,
             )
             with tempfile.NamedTemporaryFile() as f:
                 tmp_schedule._dump_csv(f.name)
@@ -443,7 +440,6 @@ class ScheduleTest(MultiProcContinousTest):
                 num_microbatches,
                 loss_fn=loss_fn,
                 stage_index_to_group_rank=old_schedule.stage_index_to_group_rank,
-                use_full_backward=old_schedule.use_full_backward,
             )
             one_more_schedule._load_actions(
                 schedule.pipeline_order_with_comms, format="compute_comms"
@@ -512,10 +508,10 @@ class ScheduleTest(MultiProcContinousTest):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    @parametrize("ScheduleClass", [ScheduleWithW, ScheduleFlexibleInterleaved1F1B])
+    @parametrize("ScheduleClass", [ScheduleWithW, ScheduleInterleavedZeroBubble])
     def test_schedule_with_native_zero_bubble(self, ScheduleClass):
         print(ScheduleClass)
-        if ScheduleClass is ScheduleFlexibleInterleaved1F1B:
+        if ScheduleClass is ScheduleInterleavedZeroBubble:
             n_stages = 4
             num_microbatches = 8
             rank_stages = {
@@ -559,12 +555,10 @@ class ScheduleTest(MultiProcContinousTest):
             for stage_module, stage_idx in zip(stage_modules, rank_stages[self.rank])
         ]
 
-        schedule = ScheduleClass(
-            stages, num_microbatches, loss_fn=loss_fn, enable_zero_bubble=True
-        )
+        schedule = ScheduleClass(stages, num_microbatches, loss_fn=loss_fn)
 
         # Run reference
-        ref_x = x.clone().detach().requires_grad_(x.requires_grad)
+        ref_x = x.detach().clone().requires_grad_(x.requires_grad)
         torch.testing.assert_close(x, ref_x)
         for _ in range(num_steps):
             ref_out = ref_mod(ref_x)
@@ -693,7 +687,7 @@ class ScheduleTest(MultiProcContinousTest):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    @parametrize("ScheduleClass", [ScheduleFlexibleInterleaved1F1B])
+    @parametrize("ScheduleClass", [ScheduleInterleavedZeroBubble])
     def test_schedule_with_weight_update_mlp_e2e(self, ScheduleClass):
         stages_per_rank = 2
         n_stages = stages_per_rank * self.world_size
@@ -771,9 +765,7 @@ class ScheduleTest(MultiProcContinousTest):
         ]
 
         # Attach to a schedule
-        schedule = ScheduleClass(
-            stages, chunks, loss_fn=full_loss_fn, enable_zero_bubble=True
-        )
+        schedule = ScheduleClass(stages, chunks, loss_fn=full_loss_fn)
 
         for _ in range(2):
             # Zero gradients

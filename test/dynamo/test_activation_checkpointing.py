@@ -147,7 +147,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
     ):
         cloned_args = []
         for arg in args:
-            cloned_args.append(arg.clone().detach().requires_grad_(arg.requires_grad))
+            cloned_args.append(arg.detach().clone().requires_grad_(arg.requires_grad))
 
         cloned_fn = copy.deepcopy(fn)
 
@@ -189,7 +189,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         cloned_args_orig_fn = []
         for arg in args:
             cloned_args_orig_fn.append(
-                arg.clone().detach().requires_grad_(arg.requires_grad)
+                arg.detach().clone().requires_grad_(arg.requires_grad)
             )
         torch.manual_seed(0)
         compiled_orig_fn = torch.compile(
@@ -202,7 +202,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         cloned_args_checkpointed_fn = []
         for arg in args:
             cloned_args_checkpointed_fn.append(
-                arg.clone().detach().requires_grad_(arg.requires_grad)
+                arg.detach().clone().requires_grad_(arg.requires_grad)
             )
         torch.manual_seed(0)
         compiled_checkpointed_fn = torch.compile(
@@ -519,6 +519,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
                 mod_no_hook, backend, x, fullgraph=True, compiled_autograd=True
             )
 
+        torch._dynamo.reset()
         mod_with_hook, x, backend = _factory_fn()
         mod_with_hook.submod.register_forward_hook(my_post_forward_hook)
         mod_with_hook_fwd_outputs = set()
