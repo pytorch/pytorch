@@ -540,11 +540,11 @@ class CKGroupedConvFwdTemplate(CKTemplate):
             n_d_tensors=1 if Bias is not None else 0,
             n_dim_spatial=self.n_spatial_dimensions,
             group_count=self.groups,
-            batch_size=X.shape[0],
-            n_output_channels=Y.shape[1],
-            n_input_channels=X.shape[1],
-            filter_size=", ".join(map(str, W.shape[2:])),
-            input_size=", ".join(map(str, X.shape[2:])),
+            batch_size=X.shape[0],  # type: ignore[index]
+            n_output_channels=Y.shape[1],  # type: ignore[index]
+            n_input_channels=X.shape[1],  # type: ignore[index]
+            filter_size=", ".join(map(str, W.shape[2:])),  # type: ignore[index]
+            input_size=", ".join(map(str, X.shape[2:])),  # type: ignore[index]
             convolution_strides=", ".join(map(str, self.stride)),
             dilations=", ".join(map(str, self.dilation)),
             left_pads=", ".join(map(str, self.padding)),

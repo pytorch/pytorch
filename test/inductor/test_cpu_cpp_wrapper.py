@@ -287,7 +287,7 @@ if RUN_CPU:
             condition=torch.backends.mkldnn.is_available() and not IS_WINDOWS,
             func_inputs=[
                 [
-                    "torch.ops.onednn.qconv2d_pointwise",
+                    "aoti_torch_cpu__qconv2d_pointwise_tensor",
                     "torch.ops.quantized.max_pool2d",
                     "aoti_torch_cpu__qlinear_pointwise_tensor",
                 ]

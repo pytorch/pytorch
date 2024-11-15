@@ -1998,6 +1998,14 @@ void initJITBindings(PyObject* module) {
       .def_property_readonly(
           "alias_info", [](Argument& self) { return self.alias_info(); })
       .def_property_readonly(
+          "is_write",
+          [](Argument& self) {
+            if (self.alias_info() == nullptr) {
+              return false;
+            }
+            return self.alias_info()->isWrite();
+          })
+      .def_property_readonly(
           "is_out", [](Argument& self) { return self.is_out(); })
       .def_property_readonly("kwarg_only", [](Argument& self) -> bool {
         return self.kwarg_only();

@@ -212,18 +212,8 @@ public:
     return mask;
   }
   Vectorized<float> isnan() const {
-    __at_align__ float tmp[size()];
-    __at_align__ float res[size()];
-    store(tmp);
-    for (const auto i : c10::irange(size())) {
-      if (_isnan(tmp[i])) {
-        std::memset(static_cast<void*>(&res[i]), 0xFF, sizeof(float));
-      } else {
-        std::memset(static_cast<void*>(&res[i]), 0, sizeof(float));
-      }
-    }
-    return loadu(res);
-  };
+    return vreinterpretq_f32_u32(vmvnq_u32(vceqq_f32(values, values)));
+  }
   bool has_inf_nan() const {
     __at_align__ float tmp[size()];
     store(tmp);
