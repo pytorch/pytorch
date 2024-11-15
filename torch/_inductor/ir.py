@@ -6392,7 +6392,7 @@ class FallbackKernel(ExternKernelAlloc):
             args = None
             exported_args = self.export_extern_kernel_node()
 
-            wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
+            wrapper.generate_fallback_kernel_with_runtime_lookup(
                 self.get_name(),
                 self.python_kernel_name,
                 self.cpp_kernel_name,
