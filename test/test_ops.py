@@ -36,6 +36,7 @@ from torch.testing._internal.common_device_type import (
     skipMeta,
     skipXPU,
     is_gpu_device,
+    GPU_TYPES,
 )
 from torch.testing._internal.common_dtype import (
     all_types_and_complex_and,
@@ -1388,6 +1389,7 @@ class TestCommon(TestCase):
     # Validates that each OpInfo specifies its forward and backward dtypes
     #   correctly for CPU and GPU devices
     @skipMeta
+    @skipXPU
     @onlyNativeDeviceTypesAnd(["hpu"])
     @ops(ops_and_refs, dtypes=OpDTypes.none)
     def test_dtypes(self, device, op):
@@ -1978,6 +1980,7 @@ class TestMathBits(TestCase):
                         self.assertEqual(tensor.grad, cloned1_tensor.grad)
 
     @ops(ops_and_refs, allowed_dtypes=(torch.cfloat,))
+    @skipXPU
     def test_conj_view(self, device, dtype, op):
         if not op.test_conjugated_samples:
             self.skipTest("Operation doesn't support conjugated inputs.")
@@ -2019,6 +2022,7 @@ class TestMathBits(TestCase):
         )
 
     @ops(ops_and_refs, allowed_dtypes=(torch.cdouble,))
+    @skipXPU
     def test_neg_conj_view(self, device, dtype, op):
         if not op.test_neg_view:
             self.skipTest("Operation not tested with tensors with negative bit.")
@@ -2673,12 +2677,12 @@ class TestFakeTensor(TestCase):
             self.assertEqual(strided_result.layout, torch.strided)
 
 
-instantiate_device_type_tests(TestCommon, globals(), allow_xpu=True)
-instantiate_device_type_tests(TestCompositeCompliance, globals(), allow_xpu=True)
-instantiate_device_type_tests(TestMathBits, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestCommon, globals())
+instantiate_device_type_tests(TestCompositeCompliance, globals())
+instantiate_device_type_tests(TestMathBits, globals())
 instantiate_device_type_tests(TestRefsOpsInfo, globals(), only_for="cpu")
-instantiate_device_type_tests(TestFakeTensor, globals(), allow_xpu=True)
-instantiate_device_type_tests(TestTags, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestFakeTensor, globals())
+instantiate_device_type_tests(TestTags, globals())
 
 if __name__ == "__main__":
     TestCase._default_dtype_check_enabled = True
