@@ -25,14 +25,15 @@ from torch.testing._internal.common_fsdp import (
     DEVICEInitMode,
     FSDPInitMode,
     FSDPTest,
+    get_devtype,
     NestedWrappedModule,
     TransformerWithSharedParams,
 )
-from torch.testing._internal.common_utils import run_tests, TEST_HPU, TEST_WITH_DEV_DBG_ASAN
+from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 
+device_type = torch.device(get_devtype())
 
-device_type = "hpu" if TEST_HPU else "cuda"
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)
@@ -50,10 +51,6 @@ class TestUnshardParamsBase(FSDPTest):
     This contains any methods common to both the sharded and non-sharded cases.
     """
 
-    @property
-    def device(self) -> torch.device:
-        return "hpu:0" if TEST_HPU else torch.device("cuda", self.rank)
-
     def _test_unshard_params_writeback(
         self,
         writeback: bool,
@@ -61,8 +58,8 @@ class TestUnshardParamsBase(FSDPTest):
         **fsdp_kwargs: Dict[str, Any],
     ):
         model = nn.Sequential(
-            nn.Linear(5, 5, bias=False, device=self.device),
-            nn.Linear(5, 3, bias=False, device=self.device),
+            nn.Linear(5, 5, bias=False, device=device_type.type),
+            nn.Linear(5, 3, bias=False, device=device_type.type),
         )
         model[0] = FSDP(model[0], **fsdp_kwargs)
         model = FSDP(model, **fsdp_kwargs)
@@ -128,7 +125,7 @@ class TestUnshardParamsBase(FSDPTest):
             self.process_group,
             FSDPInitMode.NO_FSDP,
             DEVICEInitMode.DEVICE_BEFORE,
-            fsdp_kwargs={"device_id": self.device} if TEST_HPU else {},
+            fsdp_kwargs={"device_id": device_type.type},
             deterministic=True,
         )
         # Apply FSDP such that the root module does not have FSDP applied,
@@ -240,7 +237,7 @@ class TestUnshardParams(TestUnshardParamsBase):
         testing that writing to padding does not persist.
         NOTE: This method depends on FSDP internals.
         """
-        model = FSDP(nn.Linear(1, 1, bias=False, device=self.device))
+        model = FSDP(nn.Linear(1, 1, bias=False, device=device_type.type))
         flat_param = model._handle.flat_param
         self.assertEqual(1, flat_param.numel())
         # Write a known value to the *sharded* `FlatParameter`
@@ -293,8 +290,8 @@ class TestUnshardParams(TestUnshardParamsBase):
         }
         model = FSDP(
             nn.Sequential(
-                FSDP(nn.Linear(5, 5, bias=False, device=self.device), **fsdp_kwargs),
-                nn.Linear(5, 3, bias=False, device=self.device),
+                FSDP(nn.Linear(5, 5, bias=False, device=device_type.type), **fsdp_kwargs),
+                nn.Linear(5, 3, bias=False, device=device_type.type),
             ),
             **fsdp_kwargs,
         )
@@ -311,7 +308,7 @@ class TestUnshardParams(TestUnshardParamsBase):
         # Validate the expected behavior: the root does not reshard after
         # forward; the non-root reshards after forward; and both reshard after
         # backward
-        output = model(torch.zeros(5, device=self.device))
+        output = model(torch.zeros(5, device=device_type.type))
         self.assertEqual(
             expected_outer_flat_param_unsharded_numel,
             _get_unsharded_storage_size(outer_flat_param),
@@ -323,7 +320,7 @@ class TestUnshardParams(TestUnshardParamsBase):
 
         # Check that with parameter unsharding in between forward and backward
         # as well as after backward, the reshard behavior matches
-        output = model(torch.zeros(5, device=self.device))
+        output = model(torch.zeros(5, device=device_type.type))
         with FSDP.summon_full_params(
             model,
             rank0_only=rank0_only,
@@ -380,8 +377,8 @@ class TestUnshardParams(TestUnshardParamsBase):
         }
         model = FSDP(
             nn.Sequential(
-                FSDP(nn.Linear(5, 5, bias=False, device=self.device), **fsdp_kwargs),
-                nn.Linear(5, 3, bias=False, device=self.device),
+                FSDP(nn.Linear(5, 5, bias=False, device=device_type.type), **fsdp_kwargs),
+                nn.Linear(5, 3, bias=False, device=device_type.type),
             ),
             **fsdp_kwargs,
         )
@@ -559,7 +556,7 @@ class TestUnshardParams(TestUnshardParamsBase):
             DEVICEInitMode.DEVICE_BEFORE,
             deterministic=True,
         )
-        ddp_model = DDP(model, device_ids=[self.device if TEST_HPU else self.rank])
+        ddp_model = DDP(model, device_ids=[device_type])
         fsdp_model = TransformerWithSharedParams.init(
             self.process_group,
             FSDPInitMode.RECURSIVE,
@@ -568,7 +565,7 @@ class TestUnshardParams(TestUnshardParamsBase):
             fsdp_kwargs={
                 "use_orig_params": use_orig_params,
                 "sharding_strategy": sharding_strategy,
-                "device_id": self.device,
+                "device_id": device_type.type,
             },
         )
         with FSDP.summon_full_params(fsdp_model):
@@ -619,7 +616,7 @@ class TestUnshardParams(TestUnshardParamsBase):
             fsdp_kwargs={
                 "use_orig_params": True,
                 "sharding_strategy": sharding_strategy,
-                "device_id": self.device,
+                "device_id": device_type.type,
             },
         )
         for fsdp_module in FSDP.fsdp_modules(fsdp_model):
@@ -634,7 +631,7 @@ class TestUnshardParams(TestUnshardParamsBase):
         model = nn.Sequential(
             nn.Sequential(nn.Linear(16, 16), nn.Linear(16, 16)),
             nn.Sequential(nn.Linear(16, 16), nn.Linear(16, 16)),
-        ).to(self.device)
+        ).to(device_type.type)
         model = FSDP(model, auto_wrap_policy=ModuleWrapPolicy((nn.Sequential,)))
         with FSDP.summon_full_params(model[0]):
             # Check that the summoned module does not have its flat parameter
@@ -688,7 +685,7 @@ class TestUnshardParamsErrors(TestUnshardParamsBase):
                 with fsdp_module.summon_full_params(fsdp_module):
                     pass
 
-        model = FSDP(MyModule()).to(self.device if TEST_HPU else self.rank)
+        model = FSDP(MyModule()).to(device_type.type)
         with self.assertRaisesRegex(
             AssertionError, "Cannot manually unshard parameters during forward/backward"
         ):
@@ -696,8 +693,8 @@ class TestUnshardParamsErrors(TestUnshardParamsBase):
 
     @skip_if_lt_x_gpu(2)
     def test_unshard_params_from_backward_raises(self):
-        model = FSDP(nn.Linear(2, 1, device=self.device))
-        output = model(torch.ones(2, device=self.device))
+        model = FSDP(nn.Linear(2, 1, device=device_type.type))
+        output = model(torch.ones(2, device=device_type.type))
 
         def invalid_backward_hook(*args, **kwargs):
             with FSDP.summon_full_params(model):
