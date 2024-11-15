@@ -6675,6 +6675,7 @@ class GraphModule(torch.nn.Module):
 
     def test_bool_conversion_symnode(self):
         import torch._dynamo.config
+
         torch._dynamo.config.capture_scalar_outputs = True
 
         class BoolConversionModule(torch.nn.Module):
