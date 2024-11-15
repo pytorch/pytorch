@@ -5,6 +5,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import unittest
 
 from numpy.testing import assert_array_equal
 
@@ -31,7 +32,7 @@ from torch.distributed.tensor.parallel import (
     parallelize_module,
     RowwiseParallel,
 )
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import IS_FBCODE, run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
@@ -546,6 +547,10 @@ class DTensorTest(DTensorTestBase):
         self.assertEqual(sharded_tensor, reloaded_st)
 
     @with_comms
+    @unittest.skipIf(
+        IS_FBCODE,
+        "subprocess import torch fails with ModuleNotFoundError: No module named 'torch' in fbcode",
+    )
     def test_dtensor_save_load_import(self):
         for should_import in [True, False]:
             device_mesh = self.build_device_mesh()
