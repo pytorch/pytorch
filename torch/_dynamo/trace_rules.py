@@ -2540,6 +2540,7 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.cuda.jiterator._create_jit_fn",
         "torch.cuda.jiterator._create_multi_output_jit_fn",
         "torch.cuda.memory_usage",
+        "torch.cuda.memory_usage_in_bytes",
         "torch.cuda.memory._dump_snapshot",
         "torch.cuda.memory._free_mutex",
         "torch.cuda.memory._get_current_allocator",
