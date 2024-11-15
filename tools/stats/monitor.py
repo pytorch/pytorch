@@ -90,9 +90,7 @@ def parse_args() -> argparse.Namespace:
 
 if __name__ == "__main__":
     args = parse_args()
-
     schedule_interval = args.time_interval
-
     # try import pynvml for Nvidia Gpu
     has_pynvml = False
     try:
@@ -109,8 +107,20 @@ if __name__ == "__main__":
     def exit_gracefully(*args: Any) -> None:
         global kill_now
         kill_now = True
-
     signal.signal(signal.SIGTERM, exit_gracefully)
+
+    num_cpus = psutil.cpu_count()
+    num_gpus = None
+    if has_pynvml:
+        num_gpus = pynvml.nvmlDeviceGetCount()
+    # log info
+    info = {
+        "log_interval": f"{schedule_interval} seconds",
+        "gpu": "pynvml" if has_pynvml else "",
+        "num_of_gpu":num_gpus,
+        "num_of_cpu": num_cpus,
+    }
+    print(json.dumps(info))
     while not kill_now:
         try:
             stats = {
