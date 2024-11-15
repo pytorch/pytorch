@@ -328,7 +328,7 @@ class CppPrinter(ExprPrinter):
         if exp.is_integer:
             exp = int(exp)
             if exp > 0:
-                return self.stringify([base] * exp, "*", PRECEDENCE["Mul"])
+                r = self.stringify([base] * exp, "*", PRECEDENCE["Mul"])
             elif exp < -1:
                 r = (
                     "1.0/("

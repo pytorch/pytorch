@@ -26,7 +26,7 @@ from typing import (
 )
 
 import sympy
-from sympy.printing.precedence import precedence, PRECEDENCE
+from sympy.printing.precedence import PRECEDENCE, precedence
 
 import torch
 import torch._inductor.metrics as metrics
@@ -503,7 +503,9 @@ class TritonPrinter(PythonPrinter):
 
     def _print_ToFloat(self, expr):
         assert len(expr.args) == 1
-        s = self.parenthesize(expr.args[0], sympy.printing.precedence.PRECEDENCE["Atom"])
+        s = self.parenthesize(
+            expr.args[0], sympy.printing.precedence.PRECEDENCE["Atom"]
+        )
         return f"{s}.to(tl.float64)"
 
     def _print_PythonMod(self, expr):
