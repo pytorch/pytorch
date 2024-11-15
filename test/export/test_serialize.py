@@ -40,6 +40,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.testing._internal.torchbind_impls import init_torchbind_implementations
+from torch.testing._internal.inductor_utils import GPU_TYPE, requires_gpu
 
 
 def get_filtered_export_db_tests():
@@ -1043,7 +1044,7 @@ def forward(self, x):
         f = Module()
         self.check_graph(f, (torch.tensor([1, 1]),))
 
-    @unittest.skipIf(not torch.cuda.is_available(), "Requires cuda")
+    @requires_gpu()
     def test_device(self) -> None:
         class MyModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -1057,8 +1058,8 @@ def forward(self, x):
                 mul = relu * 0.5
                 return mul
 
-        inp = torch.randn((1, 3, 224, 224), dtype=torch.float).to("cuda")
-        model = MyModule().eval().cuda()
+        inp = torch.randn((1, 3, 224, 224), dtype=torch.float).to(GPU_TYPE)
+        model = MyModule().eval().to(GPU_TYPE)
         self.check_graph(model, (inp,))
 
     def test_custom_obj_tuple_out(self):
