@@ -6349,8 +6349,6 @@ def multi_head_attention_forward(
             attn_output_weights = torch.bmm(q_scaled, k.transpose(-2, -1))
         attn_output_weights = softmax(attn_output_weights, dim=-1)
         if dropout_p > 0.0:
-            # Ugh, unused input pops up here
-            # python test/inductor/test_cudagraph_trees.py CudaGraphTreeTests.test_skip_if_dynamic_shape_limit_reached2
             attn_output_weights = dropout(attn_output_weights, p=dropout_p)
 
         attn_output = torch.bmm(attn_output_weights, v)
