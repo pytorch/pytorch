@@ -280,7 +280,7 @@ class ModularIndexing(sympy.Function):
 
     nargs: Tuple[int, ...] = (3,)
     is_integer: bool = True
-    precedence: int = 55  # precedence higher than mul
+    precedence: int = 65  # precedence higher than pow
 
     @classmethod
     def eval(
@@ -380,7 +380,7 @@ class Where(sympy.Function):
 class PythonMod(sympy.Function):
     nargs: Tuple[int, ...] = (2,)
 
-    precedence: int = 55  # higher precedence than mul
+    precedence: int = 65  # higher precedence than pow
     is_integer: bool = True
 
     @classmethod
@@ -439,7 +439,7 @@ class PythonMod(sympy.Function):
 # Generic modulus: only defined on non-negative arguments
 class Mod(sympy.Function):
     nargs = (2,)
-    precedence: int = 55  # higher precedence than mul
+    precedence: int = 65  # higher precedence than pow
 
     is_integer = True
     is_nonnegative = True
@@ -967,7 +967,7 @@ class FloatPow(sympy.Function):
 class FloatTrueDiv(sympy.Function):
     is_real = True
 
-    precedence: int = 55  # higher precedence than mul
+    precedence: int = 65  # higher precedence than pow
 
     @classmethod
     def eval(cls, base, divisor):
@@ -1165,6 +1165,7 @@ class Identity(sympy.Function):
     """
     Prevents expansion and other optimizations
     """
+
     precedence = 10
 
     def __repr__(self):  # type: ignore[override]
