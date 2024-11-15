@@ -83,7 +83,7 @@ def autograd_registration_check(op, args, kwargs):
 
     # Determine which AutogradBACKEND key to check
     all_device_types = {arg.device.type for arg in all_tensors}
-    if not all_device_types.issubset(["cpu", "cuda"]):
+    if not all_device_types.issubset(["cpu", "cuda", "mps"]):
         # Don't want to support other keys yet
         raise NotImplementedError(
             f"autograd_registration_check: NYI devices other than CPU/CUDA, got {all_device_types}"
@@ -92,6 +92,8 @@ def autograd_registration_check(op, args, kwargs):
         key = "AutogradCUDA"
     elif "cpu" in all_device_types:
         key = "AutogradCPU"
+    elif "mps" in all_device_types:
+        key = "AutogradMPS"
 
     if torch._C._dispatch_has_kernel_for_dispatch_key(op.name(), key):
         return
