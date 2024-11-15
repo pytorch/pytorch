@@ -501,9 +501,12 @@ class CppPackedGemmTemplate(CppTemplate):
                 assert len(blockings) == 3
                 Mc_blocks, Nc_blocks, Kc_blocks = blockings
                 return (
-                    min(Mc_blocks, Mt_blocks),
-                    min(Nc_blocks, Nt_blocks),
-                    min(Kc_blocks, Kt_blocks),
+                    GemmBlocking(
+                        min(Mc_blocks, Mt_blocks),
+                        min(Nc_blocks, Nt_blocks),
+                        min(Kc_blocks, Kt_blocks),
+                    ),
+                    value_to_cpp(horizontal_transverse, "bool"),
                 )
 
             # The ratios below are empirically determined to decide
