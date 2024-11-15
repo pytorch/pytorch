@@ -2143,7 +2143,7 @@ TORCH_LIBRARY(test_autograd_function_backed_op, m) {
         )
 
         x = torch.ones(2, 2, requires_grad=True)
-        temp = x.clone().detach()
+        temp = x.detach().clone()
         out = (
             torch.ops.test_autograd_function_backed_op.custom_op_backed_by_autograd_fn(
                 x
