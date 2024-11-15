@@ -1505,6 +1505,22 @@ def _export_to_aten_ir_make_fx(
 
                 hook.remove()  # type: ignore[possibly-undefined]
 
+            # In export, we ignore any op that is related to
+            # eager mode profiling call. The expectation is
+            # that either runtimes provide their own profiling
+            # OR user wrap the compiled region on a profiling in
+            # later stage.
+            def _is_impure(node):
+                if node.op == "call_function" and node.target in (
+                    torch.ops.profiler._record_function_enter.default,
+                    torch.ops.profiler._record_function_enter_new.default,
+                    torch.ops.profiler._record_function_exit.default,
+                ):
+                    return False
+                return True
+
+            gm.graph.eliminate_dead_code(_is_impure)
+
         # create graph signature
         input_names = _graph_input_names(gm)
         output_names = _graph_output_names(gm)
