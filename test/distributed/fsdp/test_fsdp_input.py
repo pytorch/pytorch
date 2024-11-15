@@ -10,7 +10,6 @@ from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
-    TEST_HPU,
     subtest,
     TEST_WITH_DEV_DBG_ASAN,
 )
@@ -62,7 +61,7 @@ class TestInput(FSDPTest):
             out.sum().backward()
             optim.step()
             optim.zero_grad()
-devices = ("hpu" if TEST_HPU else "cuda")
+devices = ("cuda", "hpu")
 instantiate_device_type_tests(TestInput, globals(), only_for=devices)
 if __name__ == "__main__":
     run_tests()
