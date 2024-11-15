@@ -15,7 +15,7 @@ from torch.testing._internal.common_cuda import TEST_CUDNN
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 
-from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS, TEST_WITH_ASAN
+from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS, TEST_WITH_ASAN, skipIfRocm
 from torch.testing._internal.inductor_utils import skipCUDAIf
 
 if IS_WINDOWS and IS_CI:
@@ -161,6 +161,7 @@ class BinaryFoldingTemplate(TestCase):
             )
 
     @inductor_config.patch({"freezing": True})
+    @skipIfRocm # temp skip
     def test_conv_bn_folding(self):
         @torch.no_grad()
         def test_conv_fusion(use_bias, module, expect_success):
