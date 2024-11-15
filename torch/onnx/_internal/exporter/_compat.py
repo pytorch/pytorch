@@ -103,7 +103,6 @@ def _from_dynamic_axes_to_dynamic_shapes(
 
     # We need tree structure to represent dynamic_shapes
     dynamic_shapes = _unflatten_dynamic_shapes_with_inputs_tree(inputs, dynamic_shapes)
-    print(f"dynamic_shapes: {dynamic_shapes}")
     return dynamic_shapes
 
 

@@ -9,7 +9,7 @@ from torch.testing._internal import common_utils
 from torch.utils import _pytree
 
 
-class LlamaModelTest(torch.nn.Module):
+class SingnatureOnlyLlamaModel(torch.nn.Module):
     def forward(
         self,
         input_ids: torch.LongTensor = None,
@@ -112,15 +112,13 @@ class TestPyTreeDynamicAxesShapes(common_utils.TestCase):
         [
             # llama-3.2-1B-Instruct (trimmed)
             (
-                LlamaModelTest(),
+                SingnatureOnlyLlamaModel(),
                 (),
                 {
                     "input_ids": torch.randn(2, 16),
                     "attention_mask": torch.randn(2, 32),
                     "position_ids": torch.randn(2, 16),
                     "past_key_values": [
-                        (torch.randn(2, 8, 16, 64), torch.randn(2, 8, 16, 64)),
-                        (torch.randn(2, 8, 16, 64), torch.randn(2, 8, 16, 64)),
                         (torch.randn(2, 8, 16, 64), torch.randn(2, 8, 16, 64)),
                         (torch.randn(2, 8, 16, 64), torch.randn(2, 8, 16, 64)),
                     ],
@@ -133,10 +131,6 @@ class TestPyTreeDynamicAxesShapes(common_utils.TestCase):
                     "past_key_values.0.value",
                     "past_key_values.1.key",
                     "past_key_values.1.value",
-                    "past_key_values.2.key",
-                    "past_key_values.2.value",
-                    "past_key_values.3.key",
-                    "past_key_values.3.value",
                 ],
                 [
                     "logits",
@@ -144,10 +138,6 @@ class TestPyTreeDynamicAxesShapes(common_utils.TestCase):
                     "present.0.value",
                     "present.1.key",
                     "present.1.value",
-                    "present.2.key",
-                    "present.2.value",
-                    "present.3.key",
-                    "present.3.value",
                 ],
                 {
                     "input_ids": {0: "batch_size", 1: "sequence_length"},
@@ -172,22 +162,6 @@ class TestPyTreeDynamicAxesShapes(common_utils.TestCase):
                         0: "batch_size",
                         2: "past_sequence_length",
                     },
-                    "past_key_values.2.key": {
-                        0: "batch_size",
-                        2: "past_sequence_length",
-                    },
-                    "past_key_values.2.value": {
-                        0: "batch_size",
-                        2: "past_sequence_length",
-                    },
-                    "past_key_values.3.key": {
-                        0: "batch_size",
-                        2: "past_sequence_length",
-                    },
-                    "past_key_values.3.value": {
-                        0: "batch_size",
-                        2: "past_sequence_length",
-                    },
                     "logits": {0: "batch_size", 1: "sequence_length"},
                     "present.0.key": {
                         0: "batch_size",
@@ -202,22 +176,6 @@ class TestPyTreeDynamicAxesShapes(common_utils.TestCase):
                         2: "past_sequence_length + sequence_length",
                     },
                     "present.1.value": {
-                        0: "batch_size",
-                        2: "past_sequence_length + sequence_length",
-                    },
-                    "present.2.key": {
-                        0: "batch_size",
-                        2: "past_sequence_length + sequence_length",
-                    },
-                    "present.2.value": {
-                        0: "batch_size",
-                        2: "past_sequence_length + sequence_length",
-                    },
-                    "present.3.key": {
-                        0: "batch_size",
-                        2: "past_sequence_length + sequence_length",
-                    },
-                    "present.3.value": {
                         0: "batch_size",
                         2: "past_sequence_length + sequence_length",
                     },
@@ -236,26 +194,6 @@ class TestPyTreeDynamicAxesShapes(common_utils.TestCase):
                         1: torch.export.Dim("sequence_length"),
                     },
                     [
-                        (
-                            {
-                                0: torch.export.Dim("batch_size"),
-                                2: torch.export.Dim("past_sequence_length"),
-                            },
-                            {
-                                0: torch.export.Dim("batch_size"),
-                                2: torch.export.Dim("past_sequence_length"),
-                            },
-                        ),
-                        (
-                            {
-                                0: torch.export.Dim("batch_size"),
-                                2: torch.export.Dim("past_sequence_length"),
-                            },
-                            {
-                                0: torch.export.Dim("batch_size"),
-                                2: torch.export.Dim("past_sequence_length"),
-                            },
-                        ),
                         (
                             {
                                 0: torch.export.Dim("batch_size"),
