@@ -1,4 +1,5 @@
 //  Copyright © 2022 Apple Inc.
+#include <stdexcept>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/TensorIterator.h>
 #include <ATen/mps/MPSAllocatorInterface.h>
@@ -15,6 +16,9 @@
 #else
 #include <ATen/ops/scalar_tensor.h>
 #endif
+
+#include <mach-o/dyld.h>
+#include <mach-o/getsect.h>
 
 namespace at::native::mps {
 
@@ -541,18 +545,9 @@ Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor,
     MPSShape* mpsShape = getMPSShape(_tensor);
     MPSShape* mpsStrides = getMPSShape(_tensor.strides());
 
-    IntArrayRef baseShape;
-    if (src.is_view()) {
-      baseShape = src._base().sizes();
-    } else {
-      baseShape = getIMPSAllocator()->getBufferShape(src.storage().data());
-    }
-    int flattenedShaped = 1;
-    for (const auto i : c10::irange(baseShape.size())) {
-      flattenedShaped *= baseShape[i];
-    }
-    MPSShape* mpsBaseShape = @[ @(flattenedShaped) ];
-    MPSNDArrayDescriptor* srcTensorDesc = [MPSNDArrayDescriptor descriptorWithDataType:dataType shape:mpsBaseShape];
+    auto storage_numel = src.storage().nbytes() / src.element_size();
+    MPSNDArrayDescriptor* srcTensorDesc = [MPSNDArrayDescriptor descriptorWithDataType:dataType
+                                                                                 shape:@[ @(storage_numel) ]];
     srcTensorDesc.preferPackedRows = YES;
     MPSNDArray* srcNDArray = [[[MPSNDArray alloc] initWithBuffer:srcBuf
                                                           offset:src.storage_offset() * src.element_size()
@@ -767,44 +762,6 @@ class MPSGraphCacheCallback : public IMpsAllocatorCallback {
 
 REGISTER_MPS_ALLOCATOR_CALLBACK("mps_graph_cache_callback", MPSGraphCacheCallback);
 
-id<MTLBuffer> generateKernelDataOffsets(id<MTLComputeCommandEncoder> commandEncoder,
-                                        const TensorIteratorBase& iter,
-                                        bool use_64bit_index) {
-  constexpr uint32_t nOffsets = 3;
-  uint32_t numThreads = iter.numel();
-  const uint32_t nDim = iter.ndim();
-  const IntArrayRef& iterShape = iter.shape();
-  std::vector<uint32_t> iterShapeData(iterShape.size());
-  std::vector<std::array<uint32_t, nOffsets>> strides(nDim);
-  TORCH_INTERNAL_ASSERT(iter.ntensors() >= nOffsets);
-  TORCH_CHECK(use_64bit_index || iter.can_use_32bit_indexing(), "Can't be indexed using 32-bit iterator");
-
-  for (const auto i : c10::irange(iterShape.size())) {
-    iterShapeData[i] = static_cast<uint32_t>(iterShape[i]);
-  }
-
-  for (const auto i : c10::irange(nDim)) {
-    for (const auto offset : c10::irange(nOffsets)) {
-      strides[i][offset] = static_cast<uint32_t>(iter.strides(offset)[i]);
-    }
-  }
-
-  id<MTLComputePipelineState> kernelDataOffsetsPSO = MPSDevice::getInstance()->metalIndexingPSO(
-      use_64bit_index ? "kernel_index_offsets_64" : "kernel_index_offsets_32");
-  const auto elementSize = use_64bit_index ? sizeof(simd_ulong3) : sizeof(simd_uint3);
-  id<MTLBuffer> kernelDataOffsets = (id<MTLBuffer>)getIMPSAllocator()->allocate(numThreads * elementSize).get();
-
-  [commandEncoder setComputePipelineState:kernelDataOffsetsPSO];
-  [commandEncoder setBytes:strides.data() length:sizeof(uint32_t) * nDim * nOffsets atIndex:0];
-  [commandEncoder setBuffer:kernelDataOffsets offset:0 atIndex:1];
-  [commandEncoder setBytes:iterShapeData.data() length:sizeof(uint32_t) * iterShape.size() atIndex:2];
-  [commandEncoder setBytes:&nDim length:sizeof(uint32_t) atIndex:3];
-
-  mtl_dispatch1DJob(commandEncoder, kernelDataOffsetsPSO, numThreads);
-
-  return kernelDataOffsets;
-}
-
 id<MTLLibrary> MetalShaderLibrary::getLibrary() {
   if (C10_UNLIKELY(!library)) {
     TORCH_INTERNAL_ASSERT(nparams == 0);
@@ -848,7 +805,10 @@ id<MTLLibrary> MetalShaderLibrary::getLibrary(const std::initializer_list<std::s
 }
 
 id<MTLLibrary> MetalShaderLibrary::compileLibrary(const std::string& src) {
-  static const char* fast_math = std::getenv("PYTORCH_MPS_FAST_MATH");
+  static auto fast_math = []() {
+    auto val = std::getenv("PYTORCH_MPS_FAST_MATH");
+    return val && std::stoi(val) != 0;
+  }();
   NSError* error = nil;
   MTLCompileOptions* options = compile_options;
   if (!options) {
@@ -856,7 +816,15 @@ id<MTLLibrary> MetalShaderLibrary::compileLibrary(const std::string& src) {
     // Need 3.0 for atomic oprations, 3.1 introduces bfloat support
     [options setLanguageVersion:is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS) ? MTLLanguageVersion3_1
                                                                                         : MTLLanguageVersion3_0];
-    [options setFastMathEnabled:(!fast_math || std::stoi(fast_math) == 0) ? NO : YES];
+    if (is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS)) {
+      options.mathMode = fast_math ? MTLMathModeFast : MTLMathModeSafe;
+      options.mathFloatingPointFunctions =
+          fast_math ? MTLMathFloatingPointFunctionsFast : MTLMathFloatingPointFunctionsPrecise;
+    } else {
+      C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated-declarations")
+      [options setFastMathEnabled:fast_math ? YES : NO];
+      C10_DIAGNOSTIC_POP()
+    }
   }
 
   const auto str = [NSString stringWithCString:src.c_str() encoding:NSASCIIStringEncoding];
@@ -883,6 +851,54 @@ std::pair<id<MTLComputePipelineState>, id<MTLFunction>> MetalShaderLibrary::getL
 
   cplMap[key] = std::make_pair(cpl, func);
   return cplMap[key];
+}
+
+class BundledShaderLibary : public MetalShaderLibrary {
+ public:
+  BundledShaderLibary() : MetalShaderLibrary("") {}
+
+ protected:
+  id<MTLLibrary> getLibrary() override {
+    if (C10_UNLIKELY(!library)) {
+      auto device = MPSDevice::getInstance()->device();
+      NSError* error = nil;
+      auto section_name = is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS) ? "metal_bfloat" : "metal_basic";
+      library = [device newLibraryWithData:getSectionData(section_name) error:&error];
+      TORCH_CHECK(library, "Failed to create metal library, error: ", [[error description] UTF8String]);
+    }
+    return library;
+  }
+
+  id<MTLLibrary> getLibrary(const std::initializer_list<std::string>& params) override {
+    throw std::runtime_error("Should never be called");
+  }
+
+ private:
+  static dispatch_data_t getSectionData(const std::string& name) {
+    uint32_t idx = 0;
+    for (const auto cnt : c10::irange(_dyld_image_count())) {
+      if (strstr(_dyld_get_image_name(cnt), "/libtorch_cpu.dylib")) {
+        idx = cnt;
+        break;
+      }
+    }
+    const auto* mach_header = reinterpret_cast<const struct mach_header_64*>(_dyld_get_image_header(idx));
+    unsigned long mtl_lib_size = 0;
+    const auto* mtl_lib_data = getsectiondata(mach_header, "__TEXT", name.c_str(), &mtl_lib_size);
+    if (mtl_lib_data == nullptr) {
+      throw std::runtime_error("Can't find metal library section " + name);
+    }
+    return dispatch_data_create(mtl_lib_data,
+                                mtl_lib_size,
+                                dispatch_get_main_queue(),
+                                ^(){
+                                });
+  }
+};
+
+MetalShaderLibrary& MetalShaderLibrary::getBundledLibrary() {
+  static BundledShaderLibary l;
+  return l;
 }
 
 } // namespace at::native::mps

@@ -37,8 +37,8 @@ if TYPE_CHECKING:
     import sympy
 
 
-AOT_PARTITIONER_DEBUG = config.debug_partitioner
-log = logging.getLogger(__name__)
+AOT_PARTITIONER_DEBUG: bool = config.debug_partitioner
+log: logging.Logger = logging.getLogger(__name__)
 
 aten = torch.ops.aten
 prims = torch.ops.prims
@@ -510,7 +510,7 @@ def _count_ops(graph: fx.Graph):
     for node in graph.nodes:
         if node.op == "call_function":
             cnt[node.target.__name__] += 1
-    print(sorted(cnt.items(), key=lambda x: x[1], reverse=True))
+    log.info("%s", sorted(cnt.items(), key=lambda x: x[1], reverse=True))
 
 
 @functools.lru_cache(None)
@@ -824,8 +824,7 @@ def solve_min_cut(
             if node.op == "call_function" and hasattr(node.target, "_overloadpacket")
         }
         ops_ignored = joint_module_ops - {str(i) for i in op_types.recomputable_ops}
-        print("Ops banned from re-materialization: ", ops_ignored)
-        print()
+        log.info("Ops banned from re-materialization: %s", ops_ignored)
 
     def can_fuse_into_auto_functionalized(a, b):
         if b.target != torch.ops.higher_order.auto_functionalized:
@@ -921,7 +920,7 @@ def solve_min_cut(
         if min_cut_options.ban_if_materialized_backward and is_materialized_backwards(
             node
         ):
-            log.info("materialized backwards: %s %s", node, tuple(node.users))
+            log.debug("materialized backwards: %s %s", node, tuple(node.users))
             return True
 
         # Arbitrary hack that sometimes seems to help things. The above
@@ -1171,8 +1170,8 @@ def solve_min_cut(
     try:
         cut_value, partition = nx.minimum_cut(nx_graph, "source", "sink")
     except Exception:
-        print("Failed to compute min-cut on following graph:")
-        print("\n".join(nx.readwrite.edgelist.generate_edgelist(nx_graph)))
+        log.info("Failed to compute min-cut on following graph:")
+        log.info("\n".join(nx.readwrite.edgelist.generate_edgelist(nx_graph)))
         visualize_min_cut_graph(nx_graph)
         raise
 
@@ -1209,7 +1208,7 @@ def visualize_min_cut_graph(nx_graph):
         # Color edges with weight 'inf' as red
         if weight == float("inf"):
             edge.set_color("red")
-    print("Visualizing the failed graph to min_cut_failed.svg")
+    log.info("Visualizing the failed graph to min_cut_failed.svg")
     dot_graph.write_svg("min_cut_failed.svg")
 
 
@@ -1506,9 +1505,12 @@ def dp_knapsack(
 
 
 def _optimize_runtime_with_given_memory(
+    joint_graph: fx.Graph,
     memory: List[float],
     runtimes: List[float],
     max_memory: float,
+    node_info: NodeInfo,
+    all_recomputable_banned_nodes: List[fx.Node],
 ) -> Tuple[float, List[int], List[int]]:
     SOLVER = config.activation_memory_budget_solver
     if SOLVER == "greedy":
@@ -1517,6 +1519,11 @@ def _optimize_runtime_with_given_memory(
         return ilp_knapsack(memory, runtimes, max_memory)
     elif SOLVER == "dp":
         return dp_knapsack(memory, runtimes, max_memory)
+    elif callable(SOLVER):
+        saved_node_idx, recomp_node_idx = SOLVER(
+            memory, joint_graph, max_memory, node_info, all_recomputable_banned_nodes
+        )
+        return (0.0, saved_node_idx, recomp_node_idx)
     else:
         raise RuntimeError(f"Not aware of memory budget knapsack solver: {SOLVER}")
 
@@ -1572,7 +1579,9 @@ def estimate_runtime(node):
 
 
 def choose_saved_values_set(
-    joint_graph: fx.Graph, node_info: NodeInfo, memory_budget=1
+    joint_graph: fx.Graph,
+    node_info: NodeInfo,
+    memory_budget=1,
 ) -> List[fx.Node]:
     if memory_budget > 1 or memory_budget < 0:
         raise RuntimeError(
@@ -1680,18 +1689,28 @@ def choose_saved_values_set(
     ]
     from torch.utils._mode_utils import no_dispatch
 
-    def get_saved_values_knapsack(memory_budget):
+    def get_saved_values_knapsack(memory_budget, node_info, joint_graph):
         with no_dispatch():
             (
                 expected_runtime,
                 saved_node_idxs,
                 recomputable_node_idxs,
             ) = _optimize_runtime_with_given_memory(
-                memories_banned_nodes, runtimes_banned_nodes, max(memory_budget, 0)
+                joint_graph,
+                memories_banned_nodes,
+                runtimes_banned_nodes,
+                max(memory_budget, 0),
+                node_info,
+                all_recomputable_banned_nodes,
             )
         dont_ban = set()
         for idx in recomputable_node_idxs:
-            dont_ban.add(all_recomputable_banned_nodes[idx])
+            # if idx in all_recomputable_banned_nodes:
+            try:
+                dont_ban.add(all_recomputable_banned_nodes[idx])
+            except BaseException:
+                pass
+
         assert dont_ban.issubset(all_recomputable_banned_nodes)
 
         saved_values, _ = solve_min_cut(
@@ -1706,7 +1725,7 @@ def choose_saved_values_set(
         options = []
         for sweep_memory_budget in range(100, -1, -5):
             saved_values, expected_runtime = get_saved_values_knapsack(
-                sweep_memory_budget / 100
+                sweep_memory_budget / 100, node_info=node_info, joint_graph=joint_graph
             )
             options.append(
                 (
@@ -1751,7 +1770,9 @@ def choose_saved_values_set(
     # tensors we actually banned from recompute, but there may be other
     # tensors that we choose to save.
 
-    return get_saved_values_knapsack(memory_budget=memory_budget)[0]
+    return get_saved_values_knapsack(
+        memory_budget=memory_budget, node_info=node_info, joint_graph=joint_graph
+    )[0]
 
 
 def min_cut_rematerialization_partition(
@@ -1875,9 +1896,10 @@ def min_cut_rematerialization_partition(
         if isinstance(node.meta.get("memory_budget", None), float):
             memory_budget = node.meta["memory_budget"]
             break
-    # print("Memory Budget: ", memory_budget)
     saved_values = choose_saved_values_set(
-        joint_graph, node_info, memory_budget=memory_budget
+        joint_graph,
+        node_info,
+        memory_budget=memory_budget,
     )
     # save_for_backward on tensors and stashes symints in autograd .ctx
     saved_sym_nodes = list(filter(is_sym_node, saved_values))
@@ -1899,14 +1921,15 @@ def min_cut_rematerialization_partition(
     bw_module = reordering_to_mimic_autograd_engine(bw_module)
 
     if AOT_PARTITIONER_DEBUG:
-        from torch._inductor.fx_utils import get_node_storage
-
-        storages = {get_node_storage(node) for node in saved_values}
-        print(
-            "Theoretical Activations Stored: ",
-            sum(_size_of(i) for i in saved_values) / 1e9,
-        )
+        # Calculate sorted sizes of saved values
         sorted_sizes = sorted([(_size_of(i), str(i)) for i in saved_values])
+
+        # Log total theoretical activations stored
+        total_activations_size_gb = sum(_size_of(i) for i in saved_values) / 1e9
+        log.debug("Theoretical Activations Stored: %.2f GB", total_activations_size_gb)
+
+        # Log theoretical per activation storage sizes
+        log.debug("Theoretical Per Activation Storage Sizes: %s", sorted_sizes)
         fw_module_nodes = {
             node.name for node in fw_module.graph.nodes if node.op == "call_function"
         }
@@ -1919,13 +1942,14 @@ def min_cut_rematerialization_partition(
         for node in fw_module.graph.nodes:
             if node.name in remat_nodes and hasattr(node.target, "_overloadpacket"):
                 counts[str(node.target._overloadpacket)] += 1
-        print(
-            f"# remat/fw/bw: {len(remat_nodes)}/{len(fw_module_nodes)}/{len(bw_module_nodes)}"
+        log.debug(
+            "# remat/fw/bw: %d/%d/%d",
+            len(remat_nodes),
+            len(fw_module_nodes),
+            len(bw_module_nodes),
         )
-        print(
-            "Count of Ops Rematerialized: ",
-            sorted(counts.items(), key=lambda x: x[1], reverse=True),
-        )
+        rematerialized_ops = sorted(counts.items(), key=lambda x: x[1], reverse=True)
+        log.debug("Count of Ops Rematerialized: %s", rematerialized_ops)
     return fw_module, bw_module
 
 
@@ -1946,7 +1970,7 @@ def draw_graph(
     base, ext = os.path.splitext(fname)
     if not ext:
         ext = "." + config.torch_compile_graph_format
-    print(f"Writing FX graph to file: {base}{ext}")
+    log.info("Writing FX graph to file: %s%s", base, ext)
     g = graph_drawer.FxGraphDrawer(
         traced,
         figname,

@@ -6,7 +6,7 @@ import os
 import numpy as np
 from enum import Enum
 from torch.overrides import resolve_name
-from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
+from torch.utils._pytree import tree_map, tree_map_only, tree_flatten, tree_unflatten
 from torch.utils import _pytree as pytree
 from torch._subclasses.meta_utils import MetaConverter, assert_metadata_eq, is_sparse_any
 import torch.utils._python_dispatch
@@ -17,13 +17,12 @@ from torch.testing._internal.common_utils import unMarkDynamoStrictTest
 from torch.testing._internal.common_utils import (
     TestCase,
     skipIfCrossRef,
-    skipIfTorchDynamo,
     suppress_warnings,
-    TEST_WITH_ASAN,
     TEST_WITH_TORCHDYNAMO,
     run_tests,
     dtype_abbrs,
-    parametrize
+    parametrize,
+    xfailIfTorchDynamo,
 )
 from torch.testing._internal.common_device_type import (
     ops,
@@ -294,7 +293,7 @@ class TestMetaConverter(TestCase):
         meta.set_(storage, 0, (), ())
         self.assertEqual(storage.size(), ssize)
 
-    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1991")
+    @xfailIfTorchDynamo
     def test_weakref(self):
         x = torch.randn(4, 4, 4)
         m = MetaConverter()
@@ -334,7 +333,7 @@ class TestMetaConverter(TestCase):
         self.assertEqual(len(m.tensor_memo), 0)
         self.assertEqual(len(m.storage_memo), 0)
 
-    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1991")
+    @xfailIfTorchDynamo
     def test_tensor_outlives_converter(self):
         m = MetaConverter()
         ref = weakref.ref(m)
@@ -1149,7 +1148,6 @@ class TestMeta(TestCase):
 
         return _fn
 
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @skipIfCrossRef
     @suppress_warnings
     @ops(itertools.chain(op_db, foreach_op_db))
@@ -1196,7 +1194,6 @@ class TestMeta(TestCase):
                 if op.name != "empty_like":
                     self.assertEqual(ref, meta)
 
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @skipIfCrossRef
     @suppress_warnings
     @ops(itertools.chain(op_db, foreach_op_db))
@@ -1261,21 +1258,18 @@ class TestMeta(TestCase):
                         func(*args, **kwargs, out=expected)
 
 
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @skipIfCrossRef
     @suppress_warnings
     @ops(itertools.chain(op_db, foreach_op_db))
     def test_dispatch_meta_outplace(self, device, dtype, op):
         self._run_dispatch_meta_test(device, dtype, op, symbolic_meta=False, inplace=False)
 
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @skipIfCrossRef
     @suppress_warnings
     @ops(itertools.chain(op_db, foreach_op_db))
     def test_dispatch_meta_inplace(self, device, dtype, op):
         self._run_dispatch_meta_test(device, dtype, op, symbolic_meta=False, inplace=True)
 
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @skipIfCrossRef
     @suppress_warnings
     @ops(itertools.chain(op_db, foreach_op_db))
@@ -1283,14 +1277,12 @@ class TestMeta(TestCase):
         self._run_dispatch_meta_test(device, dtype, op, symbolic_meta=True, inplace=False)
 
 
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @skipIfCrossRef
     @suppress_warnings
     @ops(itertools.chain(op_db, foreach_op_db))
     def test_dispatch_symbolic_meta_inplace(self, device, dtype, op):
         self._run_dispatch_meta_test(device, dtype, op, symbolic_meta=True, inplace=True)
 
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @skipIfCrossRef
     @suppress_warnings
     # only test one dtype, as output stride behavior is the same for all dtypes
@@ -1300,7 +1292,6 @@ class TestMeta(TestCase):
     def test_dispatch_symbolic_meta_outplace_all_strides(self, device, dtype, op):
         self._run_dispatch_meta_test(device, dtype, op, symbolic_meta=True, inplace=False, all_stride_variants=True)
 
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @skipIfCrossRef
     @suppress_warnings
     # only test one dtype, as output stride behavior is the same for all dtypes
@@ -1310,7 +1301,6 @@ class TestMeta(TestCase):
     def test_dispatch_symbolic_meta_inplace_all_strides(self, device, dtype, op):
         self._run_dispatch_meta_test(device, dtype, op, symbolic_meta=True, inplace=True, all_stride_variants=True)
 
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @skipIfCrossRef
     @suppress_warnings
     # only test one dtype, as output stride behavior is the same for all dtypes
@@ -1764,6 +1754,24 @@ class TestMeta(TestCase):
         with self.assertRaisesRegex(RuntimeError, "cannot be called on meta tensors"):
             meta_tensor = torch.randn(1, device='meta')
             meta_tensor.item()
+
+    def test_triangular_solve_out(self):
+        # Get what's the expected output for the given example.
+        A = torch.randn(2, 2).triu()
+        b = torch.randn(2, 3)
+        out = torch.triangular_solve(b, A)
+
+        # Call the function again, transforming every tensor input (including the out tensor)
+        # into a meta tensor.
+        meta_out = tree_map_only(torch.Tensor, lambda t: t.to("meta"), out)
+        torch.triangular_solve(b.to("meta"), A.to("meta"), out=meta_out)
+
+        self.assertEqual(out[0].shape, meta_out[0].shape)
+        self.assertEqual(out[0].dtype, meta_out[0].dtype)
+
+        self.assertEqual(out[1].shape, meta_out[1].shape)
+        self.assertEqual(out[1].dtype, meta_out[1].dtype)
+
 
 instantiate_device_type_tests(TestMeta, globals())
 

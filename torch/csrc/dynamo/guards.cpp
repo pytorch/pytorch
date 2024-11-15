@@ -17,6 +17,8 @@
 #include <torch/csrc/utils/pythoncapi_compat.h>
 #include <torch/extension.h>
 
+#include <torch/csrc/dynamo/debug_macros.h>
+
 #ifdef USE_CUDA
 #include <ATen/cuda/EmptyTensor.h>
 #endif
@@ -25,6 +27,7 @@
 #include <ATen/xpu/EmptyTensor.h>
 #endif
 
+#include <chrono>
 #include <sstream>
 #include <tuple>
 #include <utility>
@@ -226,7 +229,7 @@ namespace {
 typedef std::vector<TensorCheck> ChecksList;
 
 typedef struct {
-  PyObject_HEAD;
+  PyObject_HEAD
   ChecksList* checks;
 } TensorGuards;
 
@@ -507,7 +510,7 @@ static PyTypeObject TensorGuardsType = { PyVarObject_HEAD_INIT(nullptr, 0)
 // merged.
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct GlobalStateGuard {
-  PyObject_HEAD;
+  PyObject_HEAD
 
   inline void init() {
     auto& ctx = at::globalContext();
@@ -655,7 +658,7 @@ static PyObject* check_obj_id(PyObject* dummy, PyObject* args) {
 
 static std::unordered_map<PyObject*, uint64_t> dict_version_map;
 static int dict_version_watcher_id;
-static uint64_t global_dict_version_id = 0;
+static uint64_t global_dict_version_id = 1;
 static int dict_version_watch_callback(
     PyDict_WatchEvent event,
     PyObject* dict,
@@ -753,7 +756,7 @@ static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
 }
 
 template <typename T>
-inline static void unwrap_size_tuple(PyObject* obj, T& output) {
+static void unwrap_size_tuple(PyObject* obj, T& output) {
   TORCH_CHECK(PyTuple_CheckExact(obj));
   size_t len = PyTuple_GET_SIZE(obj);
   output.reserve(len);
@@ -765,7 +768,7 @@ inline static void unwrap_size_tuple(PyObject* obj, T& output) {
 }
 
 template <typename T>
-inline static void _parse_empty_strided_args(
+static void _parse_empty_strided_args(
     PyObject* args,
     T& sizes,
     T& strides,
@@ -780,7 +783,7 @@ inline static void _parse_empty_strided_args(
   dtype = reinterpret_cast<THPDtype*>(py_dtype)->scalar_type;
 }
 
-inline static PyObject* _empty_strided_device(
+static PyObject* _empty_strided_device(
     PyObject* dummy,
     PyObject* args,
     c10::DeviceType device_type) {
@@ -884,6 +887,11 @@ std::string get_exception_message() {
 }
 
 bool is_immutable_object(py::handle example_value) {
+  static py::object config_module = py::module_::import("torch._dynamo.config");
+  bool is_tensor_immutable =
+      config_module.attr("skip_tensor_guards_with_matching_dict_tags")
+          .cast<bool>();
+
   if (PyTuple_Check(example_value.ptr())) {
     // Check that each element is immutable
     for (Py_ssize_t i = 0; i < PyTuple_Size(example_value.ptr()); ++i) {
@@ -894,10 +902,11 @@ bool is_immutable_object(py::handle example_value) {
     }
     return true;
   }
+
   return PyLong_Check(example_value.ptr()) ||
       PyFloat_Check(example_value.ptr()) || PyBool_Check(example_value.ptr()) ||
       PyUnicode_Check(example_value.ptr()) ||
-      THPVariable_Check(example_value.ptr());
+      (is_tensor_immutable && THPVariable_Check(example_value.ptr()));
 }
 
 bool is_parameter(py::handle tensor) {
@@ -1619,6 +1628,7 @@ class GuardAccessor {
  * entries.
  */
 
+// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
 class GuardManager {
  public:
   GuardManager() = delete;
@@ -1693,6 +1703,15 @@ class GuardManager {
   // guards and does not change the fail count. For simplicity, we duplicate
   // the code here.
   virtual bool check_nopybind(PyObject* value) { // borrowed ref
+
+    if (!this->check_leaf_guards_nopybind(value)) {
+      return false;
+    }
+
+    return this->check_accessors_nopybind(value);
+  }
+
+  bool check_leaf_guards_nopybind(PyObject* value) {
     // Iterate over leaf guards
     for (const auto& guard : _leaf_guards) {
       if (!guard->check_nopybind(value)) { // early exit
@@ -1702,6 +1721,10 @@ class GuardManager {
       }
     }
 
+    return true;
+  }
+
+  bool check_accessors_nopybind(PyObject* value) {
     bool matches_dict_tag = false;
     uint64_t new_tag = 0;
     if (_is_dict) {
@@ -1754,6 +1777,7 @@ class GuardManager {
       // swapping).
       _dict_tag = new_tag;
     }
+
     return result;
   }
 
@@ -1762,6 +1786,19 @@ class GuardManager {
   virtual GuardDebugInfo check_verbose_nopybind(
       PyObject* value) { // borrowed ref
     int num_guards_executed = 0;
+
+    const GuardDebugInfo& debug_info =
+        check_leaf_guards_verbose_nopybind(value, num_guards_executed);
+    if (!debug_info.result) {
+      return debug_info;
+    }
+
+    return check_accessors_verbose_nopybind(value, num_guards_executed);
+  }
+
+  GuardDebugInfo check_leaf_guards_verbose_nopybind(
+      PyObject* value,
+      int& num_guards_executed) {
     // Iterate over leaf guards
     for (const auto& guard : _leaf_guards) {
       const GuardDebugInfo& debug_info = guard->check_verbose_nopybind(value);
@@ -1772,6 +1809,12 @@ class GuardManager {
       }
     }
 
+    return GuardDebugInfo(true, num_guards_executed);
+  }
+
+  GuardDebugInfo check_accessors_verbose_nopybind(
+      PyObject* value,
+      int& num_guards_executed) {
     // Iterate over accessors
     for (const auto& accessor : _accessors) {
       const GuardDebugInfo& debug_info =
@@ -1921,7 +1964,22 @@ class RootGuardManager : public GuardManager {
       _local_state = state;
     }
 
-    if (!GuardManager::check_nopybind(value)) {
+    if (!GuardManager::check_leaf_guards_nopybind(value)) {
+      _reset_relational_guard_state();
+      return false;
+    }
+
+    // Run accessor guards without TorchFunction enabled
+    // Dynamo should only be adding guards on values without
+    // torch function at this point, because if there
+    // was a torch function, we should've traced through it
+    const at::impl::TorchFunctionDisabledState old_state =
+        at::impl::PythonTorchFunctionTLS::get_disabled_state();
+    at::impl::PythonTorchFunctionTLS::set_disabled_state(
+        at::impl::TorchFunctionDisabledState::ALL_DISABLED);
+
+    if (!GuardManager::check_accessors_nopybind(value)) {
+      at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
       _reset_relational_guard_state();
       return false;
     }
@@ -1929,10 +1987,13 @@ class RootGuardManager : public GuardManager {
     // Iterate over epilogue leaf guards.
     for (const auto& guard : _epilogue_lambda_guards) {
       if (!guard->check_nopybind(value)) { // early exit
+        at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
         _reset_relational_guard_state();
         return false;
       }
     }
+
+    at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
     _reset_relational_guard_state();
     return true;
   }
@@ -1953,13 +2014,33 @@ class RootGuardManager : public GuardManager {
       _local_state = state;
     }
 
-    GuardDebugInfo debug_info = GuardManager::check_verbose_nopybind(value);
-    if (!debug_info.result) {
+    int num_guards_executed = 0;
+
+    // Run leaf guards
+    // This includes the GlobalStateGuard and the Torch Function Mode stack
+    // guard, which require Torch Function to be in its unmodified state
+    const GuardDebugInfo& debug_info_leaf =
+        GuardManager::check_leaf_guards_verbose_nopybind(
+            value, num_guards_executed);
+
+    if (!debug_info_leaf.result) {
       _reset_relational_guard_state();
-      return debug_info;
+      return debug_info_leaf;
     }
 
-    int num_guards_executed = debug_info.num_guards_executed;
+    const at::impl::TorchFunctionDisabledState old_state =
+        at::impl::PythonTorchFunctionTLS::get_disabled_state();
+    at::impl::PythonTorchFunctionTLS::set_disabled_state(
+        at::impl::TorchFunctionDisabledState::ALL_DISABLED);
+    const GuardDebugInfo& debug_info_accessors =
+        GuardManager::check_accessors_verbose_nopybind(
+            value, num_guards_executed);
+
+    if (!debug_info_accessors.result) {
+      at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
+      _reset_relational_guard_state();
+      return debug_info_accessors;
+    }
 
     // Iterate over epilogue leaf guards
     for (const auto& guard : _epilogue_lambda_guards) {
@@ -1967,11 +2048,13 @@ class RootGuardManager : public GuardManager {
           guard->check_verbose_nopybind(value);
       num_guards_executed++;
       if (!tmp_debug_info.result) {
+        at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
         _reset_relational_guard_state();
         return GuardDebugInfo(
             false, tmp_debug_info.verbose_code_parts, num_guards_executed);
       }
     }
+    at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
     _reset_relational_guard_state();
     return GuardDebugInfo(true, num_guards_executed);
   }
@@ -2884,7 +2967,7 @@ class DictGetItemGuardAccessor : public GuardAccessor {
   }
 
   std::string repr() const override {
-    return "DictGetItemGuardAccessor(" + py::str(_key).cast<std::string>() +
+    return "DictGetItemGuardAccessor(" + py::repr(_key).cast<std::string>() +
         ")";
   }
 
@@ -3361,8 +3444,19 @@ class GlobalWeakRefGuardAccessor : public GuardAccessor {
       return false;
     }
 
-    PyObject* x = PyWeakref_GetObject(weakref); // borrowed ref
-    return _guard_manager->check_nopybind(x);
+    PyObject* x = nullptr;
+    if (PyWeakref_GetRef(weakref, &x) == -1) { // strong reference
+      // error when attempting to call ref
+      PyErr_Clear();
+      return false;
+    }
+    if (x == nullptr) {
+      // weakref is dead
+      x = Py_NewRef(Py_None);
+    }
+    bool result = _guard_manager->check_nopybind(x);
+    Py_DECREF(x);
+    return result;
   }
 
   GuardDebugInfo check_verbose_nopybind(
@@ -3382,8 +3476,20 @@ class GlobalWeakRefGuardAccessor : public GuardAccessor {
           false, std::string("Not a weakref ") + get_source(), 0);
     }
 
-    PyObject* x = PyWeakref_GetObject(weakref); // borrowed ref
-    return _guard_manager->check_verbose_nopybind(x);
+    PyObject* x = nullptr;
+    if (PyWeakref_GetRef(weakref, &x) == -1) { // strong reference
+      // error when attempting to call ref
+      PyErr_Clear();
+      return GuardDebugInfo(
+          false, std::string("Weakref_GetRef failed ") + get_source(), 0);
+    }
+    if (x == nullptr) {
+      // weakref is dead
+      x = Py_NewRef(Py_None);
+    }
+    auto result = _guard_manager->check_verbose_nopybind(x);
+    Py_DECREF(x);
+    return result;
   }
 
   std::string repr() const override {
@@ -3421,8 +3527,19 @@ class WeakRefCallGuardAccessor : public GuardAccessor {
       return false;
     }
 
-    PyObject* x = PyWeakref_GetObject(obj); // borrowed ref
-    return _guard_manager->check_nopybind(x);
+    PyObject* x = nullptr;
+    if (PyWeakref_GetRef(obj, &x) == -1) { // strong reference
+      // error when attempting to call ref
+      PyErr_Clear();
+      return false;
+    }
+    if (x == nullptr) {
+      // weakref is dead
+      x = Py_NewRef(Py_None);
+    }
+    bool result = _guard_manager->check_nopybind(x);
+    Py_DECREF(x);
+    return result;
   }
 
   GuardDebugInfo check_verbose_nopybind(
@@ -3432,8 +3549,20 @@ class WeakRefCallGuardAccessor : public GuardAccessor {
           false, std::string("Not a weakref obj ") + get_source(), 0);
     }
 
-    PyObject* x = PyWeakref_GetObject(obj); // borrowed ref
-    return _guard_manager->check_verbose_nopybind(x);
+    PyObject* x = nullptr;
+    if (PyWeakref_GetRef(obj, &x) == -1) { // strong reference
+      // error when attempting to call ref
+      PyErr_Clear();
+      return GuardDebugInfo(
+          false, std::string("Weakref_GetRef failed ") + get_source(), 0);
+    }
+    if (x == nullptr) {
+      // weakref is dead
+      x = Py_NewRef(Py_None);
+    }
+    auto result = _guard_manager->check_verbose_nopybind(x);
+    Py_DECREF(x);
+    return result;
   }
 
   std::string repr() const override {
@@ -3598,6 +3727,38 @@ void install_no_tensor_aliasing_guard(
   for (const auto& guard_manager : guard_managers) {
     py::cast<GuardManager*>(guard_manager)->add_leaf_guard(guard);
   }
+}
+
+double profile_guard_manager(RootGuardManager* root, py::object f_locals) {
+  PyObject* locals = f_locals.ptr();
+
+  // Warmup
+  for (int i = 0; i < 10; i++) {
+    root->check_nopybind(locals);
+  }
+
+  int count = 0;
+  auto start = std::chrono::high_resolution_clock::now();
+  float profile_duration = 1.0;
+
+  // Run the loop for profile_duration seconds
+  while (true) {
+    root->check_nopybind(locals);
+    count++;
+    auto end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> elapsed = end - start;
+
+    // Break the loop if 1 second has passed
+    if (elapsed.count() >= 1.0) {
+      break;
+    }
+  }
+
+  auto end = std::chrono::high_resolution_clock::now();
+  std::chrono::duration<double> total_elapsed = end - start;
+
+  // Calculate the average time per iteration in microseconds
+  return (total_elapsed.count() * profile_duration * 1e6) / count;
 }
 
 } // namespace
@@ -4425,6 +4586,7 @@ PyObject* torch_c_dynamo_guards_init() {
   py_m.def("install_object_aliasing_guard", install_object_aliasing_guard);
   py_m.def(
       "install_no_tensor_aliasing_guard", install_no_tensor_aliasing_guard);
+  py_m.def("profile_guard_manager", profile_guard_manager);
 
 // initialize dict_version_map watcher for 3.12
 #if IS_PYTHON_3_12_PLUS

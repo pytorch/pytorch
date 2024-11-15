@@ -74,7 +74,7 @@ cudnn_frontend::Tensor getTensorDescriptorWithTypeVirtual(
   // Ubuntu-22+ if `libnvrtc.so` is not found on the system, which strictly
   // speaking is not necessary for usecases below See
   // https://github.com/pytorch/pytorch/issues/97041
-  static C10_UNUSED auto cudnn_cnn_infer_handler = [] {
+  [[maybe_unused]] static auto cudnn_cnn_infer_handler = [] {
     void* handle = dlopen("libcudnn_cnn_infer.so.8", RTLD_LAZY);
     char* err = dlerror();
     if (!handle) {

@@ -32,6 +32,7 @@ enum class MacOSVersion : uint32_t {
   MACOS_VER_14_0_PLUS,
   MACOS_VER_14_4_PLUS,
   MACOS_VER_15_0_PLUS,
+  MACOS_VER_15_1_PLUS,
 };
 
 //-----------------------------------------------------------------
@@ -65,15 +66,11 @@ class TORCH_API MPSDevice {
    */
   bool isMacOS13Plus(MacOSVersion version) const;
 
-  MTLComputePipelineState_t metalIndexingPSO(const std::string &kernel);
-  MTLLibrary_t getMetalIndexingLibrary();
-
   ~MPSDevice();
 
  private:
   static MPSDevice* _device;
   MTLDevice_t _mtl_device;
-  MTLLibrary_t _mtl_indexing_library;
   MPSDevice();
 };
 

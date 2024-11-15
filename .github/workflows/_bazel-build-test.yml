@@ -137,6 +137,7 @@ jobs:
           AWS_DEFAULT_REGION: us-east-1
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
+          SCCACHE_REGION: us-east-1
           TORCH_CUDA_ARCH_LIST: 5.2
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
           OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
@@ -150,6 +151,7 @@ jobs:
           # shellcheck disable=SC2086
           container_name=$(docker run \
             ${GPU_FLAG:-} \
+            -e AWS_DEFAULT_REGION \
             -e BUILD_ENVIRONMENT \
             -e GITHUB_ACTIONS \
             -e GITHUB_REPOSITORY \
@@ -163,6 +165,7 @@ jobs:
             -e NUM_TEST_SHARDS \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \
+            -e SCCACHE_REGION \
             -e SKIP_SCCACHE_INITIALIZATION=1 \
             -e REENABLED_ISSUES \
             -e TORCH_CUDA_ARCH_LIST \

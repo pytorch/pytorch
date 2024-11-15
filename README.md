@@ -160,9 +160,9 @@ They require JetPack 4.2 and above, and [@dusty-nv](https://github.com/dusty-nv)
 
 #### Prerequisites
 If you are installing from source, you will need:
-- Python 3.8 or later (for Linux, Python 3.8.1+ is needed)
+- Python 3.9 or later
 - A compiler that fully supports C++17, such as clang or gcc (gcc 9.4.0 or newer is required, on Linux)
-- Visual Studio or Visual Studio Build Tool on Windows
+- Visual Studio or Visual Studio Build Tool (Windows only)
 
 \* PyTorch CI uses Visual C++ BuildTools, which come with Visual Studio Enterprise,
 Professional, or Community Editions. You can also install the build tools from
@@ -291,19 +291,9 @@ python tools/amd_build/build_amd.py
 
 Install PyTorch
 ```bash
-export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
+export CMAKE_PREFIX_PATH="${CONDA_PREFIX:-'$(dirname $(which conda))/../'}:${CMAKE_PREFIX_PATH}"
 python setup.py develop
 ```
-
-> _Aside:_ If you are using [Anaconda](https://www.anaconda.com/distribution/#download-section), you may experience an error caused by the linker:
->
-> ```plaintext
-> build/temp.linux-x86_64-3.7/torch/csrc/stub.o: file not recognized: file format not recognized
-> collect2: error: ld returned 1 exit status
-> error: command 'g++' failed with exit status 1
-> ```
->
-> This is caused by `ld` from the Conda environment shadowing the system `ld`. You should use a newer version of Python that fixes this issue. The recommended Python version is 3.8.1+.
 
 **On macOS**
 
@@ -373,14 +363,14 @@ with such a step.
 
 On Linux
 ```bash
-export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
+export CMAKE_PREFIX_PATH="${CONDA_PREFIX:-'$(dirname $(which conda))/../'}:${CMAKE_PREFIX_PATH}"
 python setup.py build --cmake-only
 ccmake build  # or cmake-gui build
 ```
 
 On macOS
 ```bash
-export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
+export CMAKE_PREFIX_PATH="${CONDA_PREFIX:-'$(dirname $(which conda))/../'}:${CMAKE_PREFIX_PATH}"
 MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ python setup.py build --cmake-only
 ccmake build  # or cmake-gui build
 ```
