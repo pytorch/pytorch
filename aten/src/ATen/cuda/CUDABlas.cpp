@@ -394,7 +394,6 @@ inline void bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES(Dtype)) {
 #endif
 
   auto workspace = at::empty(workspaceSize, at::TensorOptions().dtype(at::kByte).device(at::kCUDA));
-  TORCH_CHECK(workspace.data_ptr() != nullptr, "OOM trying to allocate workspace for cublaslt");
 
   cublasLtMatmulHeuristicResult_t heuristicResult = {};
   int returnedResult = 0;
@@ -427,7 +426,7 @@ inline void bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES(Dtype)) {
       c,
       Cdesc.descriptor(),
       &heuristicResult.algo,
-      workspace.data_ptr(),
+      workspace.mutable_data_ptr(),
       workspaceSize,
       at::cuda::getCurrentCUDAStream());
   TORCH_CHECK(
@@ -1284,7 +1283,6 @@ void gemm_and_bias(
 #endif
 
   auto workspace = at::empty(workspaceSize, at::TensorOptions().dtype(at::kByte).device(at::kCUDA));
-  TORCH_CHECK(workspace.data_ptr() != nullptr, "OOM trying to allocate workspace for cublaslt");
 
   cublasLtMatmulHeuristicResult_t heuristicResult = {};
   int returnedResult = 0;
@@ -1318,7 +1316,7 @@ void gemm_and_bias(
       result_ptr,
       Cdesc.descriptor(),
       &heuristicResult.algo,
-      workspace.data_ptr(),
+      workspace.mutable_data_ptr(),
       workspaceSize,
       at::cuda::getCurrentCUDAStream());
   TORCH_CHECK(
@@ -1467,7 +1465,6 @@ void scaled_gemm(
   }
   size_t workspaceSize = _getWorkspaceSize();
   auto workspace = at::empty(workspaceSize, at::TensorOptions().dtype(at::kByte).device(at::kCUDA));
-  TORCH_CHECK(workspace.data_ptr() != nullptr, "OOM trying to allocate workspace for cublaslt");
 
   CuBlasLtMatmulPreference preference;
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, workspaceSize);
@@ -1551,7 +1548,7 @@ void scaled_gemm(
       result_ptr,
       Ddesc.descriptor(),
       &heuristicResult.algo,
-      workspace.data_ptr(),
+      workspace.mutable_data_ptr(),
       workspaceSize,
       at::cuda::getCurrentCUDAStream());
   TORCH_CHECK(
@@ -1661,7 +1658,7 @@ void int8_gemm(
       nullptr, // Heuristics don't seem to work for int8
 #endif
 #ifdef USE_ROCM
-      workspace.data_ptr(),
+      workspace.mutable_data_ptr(),
 #else
       nullptr, // Non-zero workspace doesn't seem to work.
 #endif
