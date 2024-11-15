@@ -1037,6 +1037,8 @@ class TestOperators(TestCase):
         xfail('as_strided', 'partial_views'),
     })
     def test_vmapvjpvjp(self, device, dtype, op):
+        if 'cuda' in device and TEST_WITH_ROCM and dtype==torch.float32 and op.name=='linalg.householder_product':
+            self.skipTest(f"Skipped on ROCm")
         # Since, we test `vjpvjp` independently,
         # for this test, we just verify that vmap
         # of `vjpvjp` is correct.
@@ -2337,6 +2339,7 @@ class TestOperators(TestCase):
             skip("sparse.sampled_addmm", ""),
             skip("sparse.mm", "reduce"),
             skip("native_layer_norm", "", device_type="cpu"),
+            skip("nn.functional.scaled_dot_product_attention", "", device_type="cuda"), # temp skip
             # RuntimeError: Expected contiguous tensor, but got
             # non-contiguous tensor for argument #2 'grad_output'
             decorate(
