@@ -565,10 +565,10 @@ def patch_object(obj: object, name: str, value: object) -> object:
     return mock.patch.object(obj, name, value)
 
 
-def get_tristate_env(name: str) -> Optional[bool]:
+def get_tristate_env(name: str, default: Any = None) -> Optional[bool]:
     value = os.environ.get(name)
     if value == "1":
         return True
     if value == "0":
         return False
-    return None
+    return default
