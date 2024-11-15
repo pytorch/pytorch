@@ -15,15 +15,17 @@ from torch.testing._internal.common_fsdp import (
     DEVICEInitMode,
     FSDPInitMode,
     FSDPTest,
+    get_devtype,
     NestedWrappedModule,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
-    TEST_CUDA,
 )
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
+device_type = torch.device(get_devtype())
+
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)
@@ -63,7 +65,7 @@ class TestPureFP16(FSDPTest):
         )
 
     @skip_if_lt_x_gpu(2)
-    def test_fp16_dtypes(self,device):
+    def test_fp16_dtypes(self):
         """
         Tests that both user-facing parameter/gradient dtypes and internal
         saved dtype attributes are as expected when using an FP16 model
@@ -71,7 +73,6 @@ class TestPureFP16(FSDPTest):
         """
         self.run_subtests(
             {
-                "device_id": [device],
                 "to_half_before_fsdp_init": [False, True],
                 "use_orig_params": [False, True],
                 "mixed_precision": [
@@ -90,28 +91,19 @@ class TestPureFP16(FSDPTest):
 
     def _test_fp16_dtypes(
         self,
-        device_id,
         to_half_before_fsdp_init: bool,
         use_orig_params: bool,
         mixed_precision: MixedPrecision,
     ):
-        if TEST_CUDA:
-            device_id=self.device_type
-            model = NestedWrappedModule.init(
-                self.process_group,
-                FSDPInitMode.NO_FSDP,
-                DEVICEInitMode.DEVICE_NEVER,
-            )
-        else:
-            model = NestedWrappedModule.init(
-                self.process_group,
-                FSDPInitMode.NO_FSDP,
-                DEVICEInitMode.DEVICE_NEVER,
-                {"device_id": device_id,},
-            )
+        model = NestedWrappedModule.init(
+            self.process_group,
+            FSDPInitMode.NO_FSDP,
+            DEVICEInitMode.DEVICE_NEVER,
+            {"device_id": device_type,},
+        )
         fsdp_kwargs = {
             "use_orig_params": use_orig_params,
-            "device_id": device_id,
+            "device_id": device_type,
             "mixed_precision": mixed_precision,
         }
         if to_half_before_fsdp_init:
