@@ -16,7 +16,7 @@ EmbeddingImpl::EmbeddingImpl(EmbeddingOptions options_)
 }
 
 void EmbeddingImpl::reset() {
-  if (options.padding_idx() != std::nullopt) {
+  if (options.padding_idx().has_value()) {
     if (*options.padding_idx() > 0) {
       TORCH_CHECK(
           *options.padding_idx() < options.num_embeddings(),
