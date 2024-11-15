@@ -154,52 +154,6 @@ def _tensor_rebuild_functions():
     }
 
 
-# The following functioons are used to lazily import globals. These globals are
-# not imported by default on ``import torch``, per the behavior of the regular
-# Unpickler, we do not want to import them unless they are needed.
-# For instance, the dynamo import is lazy and we don't want to pay the cost for import time
-# unless the global needs to be used
-
-# lazy_imported_globals is used to track which lazy globals have been imported
-# for cases where the unpickler needs to check if a global is in _get_lazy_imported_globals
-_lazy_imported_globals: Set[Any] = set()
-
-
-def _get_nested_tensor():
-    from torch.nested._internal.nested_tensor import NestedTensor
-
-    global _lazy_imported_globals
-    _lazy_imported_globals.add(NestedTensor)
-    return NestedTensor
-
-
-def _get_rebuild_njt():
-    from torch.nested._internal.nested_tensor import _rebuild_njt
-
-    global _lazy_imported_globals
-    _lazy_imported_globals.add(_rebuild_njt)
-    return _rebuild_njt
-
-
-# _dynamo import is lazy, avoid triggering lazy import unless necessary
-def _get_dynamo_dimrange():
-    from torch._dynamo.decorators import _DimRange
-
-    global _lazy_imported_globals
-    _lazy_imported_globals.add(_DimRange)
-    return _DimRange
-
-
-@_functools.lru_cache(maxsize=1)
-def _get_lazy_imported_globals():
-    rc: Dict[str, Any] = {
-        "torch._dynamo.decorators._DimRange": _get_dynamo_dimrange,
-        "torch.nested._internal.nested_tensor.NestedTensor": _get_nested_tensor,
-        "torch.nested._internal.nested_tensor._rebuild_njt": _get_rebuild_njt,
-    }
-    return rc
-
-
 # Unpickling machinery
 @_functools.lru_cache(maxsize=1)
 def _get_allowed_globals():
@@ -377,8 +331,16 @@ class Unpickler:
                     self.append(_get_allowed_globals()[full_path])
                 elif full_path in _get_user_allowed_globals():
                     self.append(_get_user_allowed_globals()[full_path])
-                elif full_path in _get_lazy_imported_globals():
-                    self.append(_get_lazy_imported_globals()[full_path]())
+                elif full_path in (
+                    [
+                        "torch.nested._internal.nested_tensor.NestedTensor",
+                        "torch.nested._internal.nested_tensor._rebuild_njt",
+                        "torch._dynamo.decorators._DimRange",
+                    ]
+                ):
+                    raise UnpicklingError(
+                        "``torch.nested`` and ``torch._dynamo`` must be imported to load nested jagged tensors (NJTs)"
+                    )
                 else:
                     raise UnpicklingError(
                         f"Unsupported global: GLOBAL {full_path} was not an allowed global by default. "
@@ -394,7 +356,6 @@ class Unpickler:
                 elif (
                     cls in _get_user_allowed_globals().values()
                     or cls in _get_allowed_globals().values()
-                    or cls in _lazy_imported_globals
                 ):
                     self.append(cls.__new__(cls, *args))
                 else:
@@ -408,7 +369,6 @@ class Unpickler:
                 if (
                     func not in _get_allowed_globals().values()
                     and func not in _get_user_allowed_globals().values()
-                    and func not in _lazy_imported_globals
                 ):
                     raise UnpicklingError(
                         f"Trying to call reduce for unrecognized function {func}"
@@ -427,7 +387,6 @@ class Unpickler:
                 elif (
                     type(inst) in _get_user_allowed_globals().values()
                     or type(inst) in _get_allowed_globals().values()
-                    or type(inst) in _lazy_imported_globals
                 ):
                     if hasattr(inst, "__setstate__"):
                         inst.__setstate__(state)
