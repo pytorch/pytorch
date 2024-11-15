@@ -4577,6 +4577,26 @@ class TestLinalg(TestCase):
         i2 = torch.randn((M, B, K), device=device, dtype=dtype)
         i2 = torch.permute(i2, (1, 2, 0))
         out = torch.bmm(i1, i2)
+        # case 4
+        input_tensor = torch.rand((1920, 1, 100), device=device, dtype=dtype)
+        input_tensor = torch.as_strided(
+            input_tensor, size=(1920, 1, 100), stride=(100, 100, 1)
+        )
+        batch1_tensor = torch.rand((1920, 256, 512), device=device, dtype=dtype)
+        batch1_tensor = torch.as_strided(
+            batch1_tensor, size=(1920, 256, 512), stride=(512, 983040, 1)
+        )
+        batch2_tensor = torch.rand((1920, 512, 100), device=device, dtype=dtype)
+        batch2_tensor = torch.as_strided(
+            batch2_tensor, size=(1920, 512, 100), stride=(51200, 100, 1)
+        )
+        out = torch.baddbmm(input_tensor, batch1_tensor, batch2_tensor)
+        # case 5
+        q = torch.randn([16, 16, 1024, 64], device=device, dtype=dtype)
+        k = torch.randn([16, 16, 1024, 64], device=device, dtype=dtype)
+        q_chunks = q.split(512, dim=-2)
+        k_chunks = k.split(64, dim=-2)
+        C = torch.matmul(q_chunks[0], k_chunks[0])
         # clean up, remove any file that was generated
         try:
             import os
