@@ -19,7 +19,6 @@ from torch.distributed.fsdp.api import (
 from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
-    TEST_CUDA,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -27,6 +26,9 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     with_comms,
 )
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_fsdp import FSDPTest, get_devtype
+
+device_type = torch.device(get_devtype())
 
 # Simple and boring model to test interface and some corner cases that do not
 # require complicated wrapping strategy.
@@ -49,7 +51,7 @@ class DenseModel(torch.nn.Module):
 # TODO: Consolidate DeviceMesh based FSDP and HSDP test cases.
 class TestHSDPWithDeviceMeshAndDTensor(DTensorTestBase):
     def _create_model(self, device, device_mesh=None):
-        device_id = self.device_type if TEST_CUDA else device
+        device_id = device_type
         if device_mesh:
             model = FSDP(
                 DenseModel().to(device_id),
@@ -75,7 +77,7 @@ class TestHSDPWithDeviceMeshAndDTensor(DTensorTestBase):
     @with_comms
     @skip_if_lt_x_gpu(4)
     def test_hsdp_init_with_device_mesh(self, device):
-        device_id = self.device_type if TEST_CUDA else device
+        device_id = device_type
         mesh_2d = init_device_mesh(self.device_type, (2, self.world_size // 2))
         model, optim = self._create_model(device_id, mesh_2d)
 
@@ -110,7 +112,7 @@ class TestHSDPWithDeviceMeshAndDTensor(DTensorTestBase):
     @skip_if_lt_x_gpu(4)
     @parametrize("offload_to_cpu", [True, False])
     def test_dtensor_sharded_tensor_state_dict_identical(self, device, offload_to_cpu):
-        device_id = self.device_type if TEST_CUDA else device
+        device_id = device_type
         mesh_2d = init_device_mesh(self.device_type, (2, self.world_size // 2))
 
         model, optim = self._create_model(device_id,mesh_2d)
@@ -181,7 +183,7 @@ class TestHSDPWithDeviceMeshAndDTensor(DTensorTestBase):
     @skip_if_lt_x_gpu(4)
     @parametrize("offload_to_cpu", [True, False])
     def test_dtensor_sharded_optim_load_state_dict(self, device, offload_to_cpu):
-        device_id = self.device_type if TEST_CUDA else device
+        device_id = device_type
         mesh_2d = init_device_mesh(self.device_type, (2, self.world_size // 2))
         model, optim = self._create_model(device_id, mesh_2d)
 
@@ -236,7 +238,7 @@ class TestHSDPWithDeviceMeshAndDTensor(DTensorTestBase):
     @skip_if_lt_x_gpu(4)
     @parametrize("offload_to_cpu", [True, False])
     def test_dtensor_sharded_model_load_state_dict(self, device, offload_to_cpu):
-        device_id = self.device_type if TEST_CUDA else device
+        device_id = device_type
         mesh_2d = init_device_mesh(self.device_type, (2, self.world_size // 2))
         model, optim = self._create_model(device_id, mesh_2d)
 
@@ -274,7 +276,7 @@ class TestHSDPWithDeviceMeshAndDTensor(DTensorTestBase):
     @with_comms
     @skip_if_lt_x_gpu(4)
     def test_root_module_is_not_FSDP(self, device):
-        device_id = self.device_type if TEST_CUDA else device
+        device_id = device_type
 
         class FakeMPModel(torch.nn.Module):
             def __init__(self, device_mesh):
