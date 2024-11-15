@@ -3180,7 +3180,7 @@ def maybe_enable_compiled_autograd(should_enable, fullgraph=True, dynamic=True):
 
 def invalid_removeable_handle():
     # need a subclass so weakref works
-    class Invalid(dict):  # type: ignore[type-arg]
+    class Invalid(collections.UserDict):  # type: ignore[type-arg]
         pass
 
     return RemovableHandle(Invalid())
