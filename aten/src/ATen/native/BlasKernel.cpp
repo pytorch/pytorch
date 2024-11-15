@@ -85,10 +85,10 @@ extern "C" void sgemv_(char *trans, int *m, int *n, float *alpha, float *a, int 
 
 namespace at::native {
 #if !defined(C10_MOBILE)
-DEFINE_DISPATCH(fp16_gemv_trans_stub);
-DEFINE_DISPATCH(bf16_gemv_trans_stub);
 DEFINE_DISPATCH(fp16_dot_with_fp32_arith_stub);
+DEFINE_DISPATCH(fp16_gemv_trans_stub);
 DEFINE_DISPATCH(bf16_dot_with_fp32_arith_stub);
+DEFINE_DISPATCH(bf16_gemv_trans_stub);
 #endif // !defined(C10_MOBILE)
 
 namespace blas_impl {

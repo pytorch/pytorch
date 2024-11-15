@@ -20,7 +20,7 @@
 //
 // In native/MyKernel.h:
 //   using fn_type = void(*)(const Tensor& x);
-//   DECLARE_DISPATCH(fn_type, stub);
+//   DECLARE_DISPATCH(fn_type, stub)
 //
 // In native/MyKernel.cpp
 //   DEFINE_DISPATCH(stub);
