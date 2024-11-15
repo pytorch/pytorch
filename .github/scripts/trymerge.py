@@ -2005,18 +2005,17 @@ def check_for_sev(org: str, project: str, skip_mandatory_checks: bool) -> None:
         Dict[str, Any],
         gh_fetch_json_list(
             "https://api.github.com/search/issues",
-            # Having two label: queries is an AND operation
-            params={
-                "q": f'repo:{org}/{project} is:open is:issue label:"ci: sev" label:"merge blocking"'
-            },
+            params={"q": f'repo:{org}/{project} is:open is:issue label:"ci: sev"'},
         ),
     )
     if response["total_count"] != 0:
-        raise RuntimeError(
-            "Not merging any PRs at the moment because there is a "
-            + "merge blocking https://github.com/pytorch/pytorch/labels/ci:%20sev issue open at: \n"
-            + f"{response['items'][0]['html_url']}"
-        )
+        for item in response["items"]:
+            if "MERGE BLOCKING" in item["body"]:
+                raise RuntimeError(
+                    "Not merging any PRs at the moment because there is a "
+                    + "merge blocking https://github.com/pytorch/pytorch/labels/ci:%20sev issue open at: \n"
+                    + f"{item['html_url']}"
+                )
     return
 
 
