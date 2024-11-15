@@ -40,7 +40,7 @@ from torch.testing._internal.common_device_type import tol, toleranceOverride
 from torch.testing._internal.common_methods_invocations import DecorateInfo
 from torch.testing._internal.common_utils import (
     _TestParametrizer,
-    skipIfMps,
+    skipIfMPS,
     skipIfTorchDynamo,
     skipIfXpu,
     TEST_WITH_TORCHDYNAMO,
@@ -1498,7 +1498,7 @@ optim_db: List[OptimizerInfo] = [
         ),
         skips=(
             DecorateInfo(
-                skipIfMps,  # addcdiv doesn't work for non-contiguous, see #118115
+                skipIfMPS,  # addcdiv doesn't work for non-contiguous, see #118115
                 "TestOptimRenewed",
                 "test_forloop_goes_right_direction",
                 active_if=lambda kwargs: not kwargs["contiguous"],
@@ -1600,7 +1600,7 @@ optim_db: List[OptimizerInfo] = [
         ),
         skips=(
             DecorateInfo(
-                skipIfMps,  # addcdiv doesn't work for non-contiguous, see #118115
+                skipIfMPS,  # addcdiv doesn't work for non-contiguous, see #118115
                 "TestOptimRenewed",
                 "test_forloop_goes_right_direction",
                 active_if=lambda kwargs: not kwargs["contiguous"],
@@ -1642,7 +1642,7 @@ optim_db: List[OptimizerInfo] = [
         has_capturable_arg=True,
         skips=(
             DecorateInfo(
-                skipIfMps,  # addcdiv doesn't work for non-contiguous, see #118115
+                skipIfMPS,  # addcdiv doesn't work for non-contiguous, see #118115
                 "TestOptimRenewed",
                 "test_forloop_goes_right_direction",
                 active_if=lambda kwargs: not kwargs["contiguous"],
@@ -1734,7 +1734,7 @@ optim_db: List[OptimizerInfo] = [
         ),
         skips=(
             DecorateInfo(
-                skipIfMps,  # addcdiv doesn't work for non-contiguous, see #118115
+                skipIfMPS,  # addcdiv doesn't work for non-contiguous, see #118115
                 "TestOptimRenewed",
                 "test_forloop_goes_right_direction",
                 active_if=lambda kwargs: not kwargs["contiguous"],
@@ -1831,7 +1831,7 @@ optim_db: List[OptimizerInfo] = [
         skips=(
             # Fails on MacOS 13.2.1 in CI https://github.com/pytorch/pytorch/issues/117094
             DecorateInfo(
-                skipIfMps, "TestOptimRenewed", "test_can_load_older_state_dict"
+                skipIfMPS, "TestOptimRenewed", "test_can_load_older_state_dict"
             ),
             DecorateInfo(
                 toleranceOverride(
@@ -1889,7 +1889,7 @@ optim_db: List[OptimizerInfo] = [
         has_capturable_arg=True,
         skips=(
             DecorateInfo(
-                skipIfMps,  # addcdiv doesn't work for non-contiguous, see #118115
+                skipIfMPS,  # addcdiv doesn't work for non-contiguous, see #118115
                 "TestOptimRenewed",
                 "test_forloop_goes_right_direction",
                 active_if=lambda kwargs: not kwargs["contiguous"],
@@ -1984,7 +1984,7 @@ optim_db: List[OptimizerInfo] = [
         has_capturable_arg=True,
         skips=(
             DecorateInfo(
-                skipIfMps,  # addcdiv doesn't work for non-contiguous, see #118115
+                skipIfMPS,  # addcdiv doesn't work for non-contiguous, see #118115
                 "TestOptimRenewed",
                 "test_forloop_goes_right_direction",
                 active_if=lambda kwargs: not kwargs["contiguous"],
@@ -2034,7 +2034,7 @@ optim_db: List[OptimizerInfo] = [
         has_capturable_arg=True,
         skips=(
             DecorateInfo(
-                skipIfMps,  # Rprop doesn't update for non-contiguous, see #118117
+                skipIfMPS,  # Rprop doesn't update for non-contiguous, see #118117
                 "TestOptimRenewed",
                 "test_forloop_goes_right_direction",
                 active_if=lambda kwargs: not kwargs["contiguous"],
@@ -2169,7 +2169,7 @@ optim_db: List[OptimizerInfo] = [
         supports_complex=False,  # Missing complex support, see #118153
         skips=(
             DecorateInfo(
-                skipIfMps,  # SparseAdam does not support MPS
+                skipIfMPS,  # SparseAdam does not support MPS
                 "TestOptimRenewed",
             ),
             DecorateInfo(
@@ -2248,7 +2248,7 @@ class TensorTracker:
         """
         Add a clone().detach()'d version of the tensor
         """
-        self.tensors.append(tensor.clone().detach())
+        self.tensors.append(tensor.detach().clone())
 
     # pops from beginning, like a queue and not a stack!
     def pop_check_set(self, tensor_to_set, testcase):

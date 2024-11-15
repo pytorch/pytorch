@@ -5,6 +5,7 @@ import inspect
 import warnings
 import weakref
 from collections.abc import MutableMapping
+from types import CellType
 from typing import Any, Dict, List, Optional, Set, Type
 
 import torch.nn
@@ -146,21 +147,28 @@ class SideEffects:
             self.store_attr_mutations[item] = {}
         self.store_attr_mutations[item][name] = value
 
-    def load_attr(self, item, name, deleted_ok=False):
-        assert self.is_attribute_mutation(item)
+    def load_attr(self, item, name, deleted_ok=False, check=False):
+        if check:
+            assert self.is_attribute_mutation(item)
         result = self.store_attr_mutations[item][name]
         if not deleted_ok and isinstance(result, variables.DeletedVariable):
             unimplemented("read deleted attribute")
         return result
 
     def store_cell(self, cellvar, value):
+        if cellvar.is_immutable():
+            unimplemented("Dynamo currently doesn't support writing to such cell")
         assert isinstance(cellvar, variables.NewCellVariable)
         assert isinstance(value, variables.VariableTracker)
         self.store_attr(cellvar, "cell_contents", value)
 
     def load_cell(self, cellvar):
         assert isinstance(cellvar, variables.NewCellVariable)
-        return self.load_attr(cellvar, "cell_contents")
+        if self.has_pending_mutation_of_attr(cellvar, "cell_contents"):
+            return self.load_attr(cellvar, "cell_contents", check=False)
+        if cellvar.pre_existing_contents:
+            return cellvar.pre_existing_contents
+        unimplemented("cannot read uninitialized cell")
 
     def load_global(self, gvar: VariableTracker, name: str):
         assert isinstance(gvar, variables.VariableTracker)
@@ -192,6 +200,8 @@ class SideEffects:
         ) and name in self.store_attr_mutations.get(item, ())
 
     def is_modified(self, item):
+        if item.is_immutable():
+            return False
         if isinstance(item.mutation_type, AttributeMutationNew):
             return True
         if self.is_attribute_mutation(item):
@@ -298,13 +308,18 @@ class SideEffects:
         self.keepalive.append(obj)
         return variable
 
-    def track_cell_existing(self, source: Source, item: Any):
+    def track_cell_existing(
+        self, source: Optional[Source], cell: CellType, contents: VariableTracker
+    ):
         variable = variables.NewCellVariable(
-            mutation_type=AttributeMutationExisting(),
+            # We don't support mutation to cell without source because we need
+            # source to properly codegen the mutations.
+            mutation_type=None if source is None else AttributeMutationExisting(),
+            pre_existing_contents=contents,
             source=source,
         )
-        self.id_to_variable[id(item)] = variable
-        self.keepalive.append(item)
+        self.id_to_variable[id(cell)] = variable
+        self.keepalive.append(cell)
         return variable
 
     def track_global_existing(self, source: Source, item: Any):
@@ -368,7 +383,15 @@ class SideEffects:
         # The only live side effects come from returns (tx.stack), any intermediates
         # during a graph break (tx.symbolic_locals), and mutation on pre-existing variables.
         # Recursively visit Variables and see if any of them have been mutated.
-        VariableTracker.visit(visit, (tx.stack, tx.symbolic_locals, pre_existing_vars))
+        VariableTracker.visit(
+            visit,
+            (
+                tx.stack,
+                tx.symbolic_locals,
+                pre_existing_vars,
+                tx.output.backward_state,
+            ),
+        )
         # Manually release the self-referential function, which indirectly
         # captures certain `VariableTracker` and affects parts of PT test/logic
         # that are sensitive to when certain objects get released.
@@ -396,6 +419,8 @@ class SideEffects:
         return [var for var in self.id_to_variable.values() if self.is_modified(var)]
 
     def codegen_save_tempvars(self, cg: PyCodegen):
+        # Make sure we codegen these modified VT to their source by default, so
+        # that mutation and aliasing are properly accounted for.
         for var in self._get_modified_vars():
             if isinstance(var.mutation_type, AttributeMutationNew) and isinstance(
                 var, variables.NewCellVariable
@@ -416,11 +441,10 @@ class SideEffects:
                 cg.extend_output(create_call_function(1, False))
                 cg.add_cache(var)
                 var.source = LocalSource(cg.tempvars[var])
-            elif var in cg.tempvars:
-                assert cg.tempvars.get(var) is None
-                # subsequent usage should point to the original variable
-                cg(var.source)
-                cg.add_cache(var)
+            else:
+                # The remaning cases here are `AttributeMutationExisting` and
+                # `MutableSideEffects`, which have sources already.
+                assert var.source is not None
 
         for ctx, args in self.save_for_backward:
             cg(ctx.source)
@@ -521,7 +545,7 @@ class SideEffects:
         for var in self._get_modified_vars():
             if isinstance(var, variables.ListVariable):
                 # old[:] = new
-                cg(var, allow_cache=False)
+                cg(var, allow_cache=False)  # Don't codegen via source
                 cg(var.source)  # type: ignore[attr-defined]
                 cg.extend_output(
                     [
@@ -542,7 +566,7 @@ class SideEffects:
                     [create_instruction("STORE_FAST", argval=varname_map["dict_to"])]
                 )
 
-                cg(var, allow_cache=False)
+                cg(var, allow_cache=False)  # Don't codegen via source
                 cg.extend_output(
                     [create_instruction("STORE_FAST", argval=varname_map["dict_from"])]
                 )
@@ -574,7 +598,7 @@ class SideEffects:
 
                 cg(var.source)  # type: ignore[attr-defined]
                 cg.load_method("update")
-                cg(var, allow_cache=False)
+                cg(var, allow_cache=False)  # Don't codegen via source
 
                 if var.should_reconstruct_all:
                     cg(var.source)  # type: ignore[attr-defined]

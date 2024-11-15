@@ -113,6 +113,7 @@ class TestFxGraphCache(TestCase):
         PatchCaches.tearDown()
 
     def reset(self):
+        PyCodeCache.cache_clear(purge=True)
         torch._dynamo.reset()
         clear_inductor_caches()
 
@@ -164,11 +165,13 @@ class TestFxGraphCache(TestCase):
             )
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
             self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 0)
-
+            # "cuda" has .ptx and .cubin file, but xpu only has .spv file
+            save_kernel_count = 6 if device == "xpu" else 7
+            read_and_emit_kernel_count = 6 if device == "xpu" else 7
             if bundle_triton and device != "cpu":
                 self.assertEqual(
                     counters["inductor"]["triton_bundler_save_kernel"],
-                    grad_multiplier * 7,
+                    grad_multiplier * save_kernel_count,
                 )
                 self.assertEqual(
                     counters["inductor"]["triton_bundler_read_and_emit_kernel"], 0
@@ -178,8 +181,7 @@ class TestFxGraphCache(TestCase):
             # don't prevent compilation).
             self.reset()
 
-            # Clean PyCodeCache and triton kernels
-            PyCodeCache.cache_clear()
+            # Clean triton kernels
             shutil.rmtree(os.path.join(cache_dir(), "triton"), ignore_errors=True)
 
             a1 = a_orig.clone().requires_grad_(grad)
@@ -208,11 +210,11 @@ class TestFxGraphCache(TestCase):
             if bundle_triton and device != "cpu":
                 self.assertEqual(
                     counters["inductor"]["triton_bundler_save_kernel"],
-                    grad_multiplier * 7,
+                    grad_multiplier * save_kernel_count,
                 )
                 self.assertEqual(
                     counters["inductor"]["triton_bundler_read_and_emit_kernel"],
-                    grad_multiplier * 7,
+                    grad_multiplier * read_and_emit_kernel_count,
                 )
 
     @requires_triton()
@@ -731,9 +733,35 @@ class TestFxGraphCache(TestCase):
             out1 = torch.compile(mod1)(x)
             self.assertEqual(out0, out1)
 
-        self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 0)
-        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
-        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+        # For mahcine that has mkldnn_fp16 support, the weight_pack in mkldnn_fusion.py
+        # wroks, which result in mkldnn format tensor, then the exception
+        # BypassFxGraphCache("mkldnn tensors unpickleable") is raised, and cause the
+        # fxgraph not cached.
+        def is_cpu_mkldnn_fp16_supported():
+            return (
+                device == "cpu"
+                and torch.backends.mkldnn.is_available()
+                and torch.ops.mkldnn._is_mkldnn_fp16_supported()
+            )
+
+        if is_cpu_mkldnn_fp16_supported():
+            fxgraph_cache_bypass_cnt = 1
+            fxgraph_cache_miss_cnt = 0
+            fxgraph_cache_hit_cnt = 0
+        else:
+            fxgraph_cache_bypass_cnt = 0
+            fxgraph_cache_miss_cnt = 1
+            fxgraph_cache_hit_cnt = 0
+
+        self.assertEqual(
+            counters["inductor"]["fxgraph_cache_bypass"], fxgraph_cache_bypass_cnt
+        )
+        self.assertEqual(
+            counters["inductor"]["fxgraph_cache_miss"], fxgraph_cache_miss_cnt
+        )
+        self.assertEqual(
+            counters["inductor"]["fxgraph_cache_hit"], fxgraph_cache_hit_cnt
+        )
 
         counters.clear()
         self.reset()
@@ -748,9 +776,24 @@ class TestFxGraphCache(TestCase):
             out1 = torch.compile(mod2)(x)
             self.assertEqual(out0, out1)
 
-        self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 0)
-        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
-        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+        if is_cpu_mkldnn_fp16_supported():
+            fxgraph_cache_bypass_cnt = 1
+            fxgraph_cache_miss_cnt = 0
+            fxgraph_cache_hit_cnt = 0
+        else:
+            fxgraph_cache_bypass_cnt = 0
+            fxgraph_cache_miss_cnt = 0
+            fxgraph_cache_hit_cnt = 1
+
+        self.assertEqual(
+            counters["inductor"]["fxgraph_cache_bypass"], fxgraph_cache_bypass_cnt
+        )
+        self.assertEqual(
+            counters["inductor"]["fxgraph_cache_miss"], fxgraph_cache_miss_cnt
+        )
+        self.assertEqual(
+            counters["inductor"]["fxgraph_cache_hit"], fxgraph_cache_hit_cnt
+        )
 
 
 class TestFxGraphCacheHashing(TestCase):
@@ -1074,6 +1117,7 @@ class TestAutotuneCache(TestCase):
         PatchCaches.tearDown()
 
     def reset(self):
+        PyCodeCache.cache_clear(purge=True)
         torch._dynamo.reset()
         clear_inductor_caches()
 
@@ -1269,6 +1313,24 @@ class TestUtils(TestCase):
 
         self.assertEqual(res1, res2)
         self.assertNotEqual(cache_dir1, cache_dir2)
+
+    # This combination of settings exposed a bug where we cleared the
+    # PyCodeCache disk artifacts while they were still needed:
+    @requires_cuda
+    @config.patch(
+        {
+            "coordinate_descent_tuning": True,
+            "force_disable_caches": True,
+        }
+    )
+    def test_force_disable_coordinate_descent(self):
+        def fn():
+            inp = torch.randn(32, 50, 768, device="cuda")
+            weight = torch.randn(768, 768, device="cuda")
+            layer = torch.nn.LayerNorm(768, device="cuda")
+            return layer(inp @ weight)
+
+        torch.compile(fn)()
 
 
 if __name__ == "__main__":
