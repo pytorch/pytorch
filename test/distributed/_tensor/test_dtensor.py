@@ -557,7 +557,6 @@ class DTensorTest(DTensorTestBase):
                 import_string = (
                     "import torch.distributed.tensor" if should_import else ""
                 )
-                # torch.nested is actually imported by default, so only torch._dynamo needs to be imported
                 script = f"""
 import torch
 {import_string}
