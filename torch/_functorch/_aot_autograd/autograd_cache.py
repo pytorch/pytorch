@@ -117,13 +117,26 @@ def check_node_safe(node: Node):
     The test suite test_aot_autograd_cache.py::AOTAutogradCachePicklerTests tries its best to fully cover/specify this behavior.
     """
     SAFE_TORCH_MODULES = ("torch.functional", "torch.nn.functional")
+    SAFE_TORCH_FUNCTIONS = (
+        "torch.Size",
+        "torch.sym_int",
+        "torch._sym_sqrt",
+        "torch.sym_float",
+        "torch.sym_sum",
+        "einops.einops.rearrange",
+    )
 
     def is_public_torch_api(target):
         # Don't blindly allow private functions in the torch namespace
         is_private = target.__name__.startswith("_")
+
         return (
             getattr(target, "__module__", None) in SAFE_TORCH_MODULES and not is_private
         )
+
+    def is_safe_torch_function(target):
+        """Allowlisted torch functions"""
+        return f"{target.__module__}.{target.__name__}" in SAFE_TORCH_FUNCTIONS
 
     def is_torch_function(target):
         if isinstance(target, (torch._ops.OpOverload, torch._ops.OpOverloadPacket)):
@@ -131,7 +144,11 @@ def check_node_safe(node: Node):
         if is_public_torch_api(target):
             return True
         is_builtin_fun_or_type = type(target).__name__ == "builtin_function_or_method"
-        return is_builtin_fun_or_type
+        if is_builtin_fun_or_type:
+            return True
+        if is_safe_torch_function(target):
+            return True
+        return False
 
     def is_tensor(target):
         # Tensors always have example values in meta field
