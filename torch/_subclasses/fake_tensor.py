@@ -1236,7 +1236,7 @@ class FakeTensorMode(TorchDispatchMode):
 
     def reset_nested_cache_state(self) -> None:
         # TODO(soulitzer): understand this better
-        self.nested_cache_state._cache_registry._incrementing_id = (
+        self.nested_cache_state.set_counter(
             self.nested_cache_initial_state._cache_registry._incrementing_id
         )
 

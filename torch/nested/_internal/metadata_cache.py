@@ -1,6 +1,5 @@
 import abc
 import weakref
-from math import e
 from typing import *
 
 import torch
@@ -36,14 +35,11 @@ from torch.nested._internal.utils import (
 # extra things?
 # Do not construct/update this directly! Search for the "Composite Cache APIs".
 class MetadataCache:
-    def __init__(self, *, data, cache_id: int):
+    def __init__(self, *, data, cache_id: int, is_mutable: bool = True):
         self.data = data
         self.id: int = cache_id
         self.eq_id: int = cache_id
-
-        # You must use the special factory function in the nested namespace which
-        # allows auxiliary arguments
-        # torch.nested.zeros((B, njt.shape[1], D), cuda_offsets=cuda_offsets))
+        self.is_mutable: bool = is_mutable
 
     def state(self):
         # TODO(soulitzer): revisit guards
@@ -56,8 +52,10 @@ class CacheRegistry(abc.ABC):
         self.is_weak = is_weak
         self._cache_id_to_cache: Dict[int, Any] = dict()
 
-    def create_cache(self, data) -> MetadataCache:
-        cache = MetadataCache(data=data, cache_id=self._incrementing_id)
+    def create_cache(self, data, is_mutable=True) -> MetadataCache:
+        cache = MetadataCache(
+            data=data, cache_id=self._incrementing_id, is_mutable=is_mutable
+        )
         self._incrementing_id += 1
         self._cache_id_to_cache[cache.id] = (
             weakref.ref(cache) if self.is_weak else cache
@@ -87,16 +85,12 @@ class CacheRegistry(abc.ABC):
 # Eager and compile subclass this to add their own logic.
 class GenericCacheState(abc.ABC):
     _cache_registry: CacheRegistry
-    _keys: List[str]
 
-    def __init__(self, keys):
-        self._keys = keys
+    def __init__(self):
         self._tensor_to_cache_id = MaybeUnwrapKeysWeakKeyDict()
 
-    def _maybe_update_tensor_to_cache_id(self, cache, k, v):
-        if k not in self._keys:
-            return
-
+    # TODO(soulitzer): maybe update this name
+    def _maybe_update_tensor_to_cache_id(self, cache, v):
         existing_cache_id = self._tensor_to_cache_id.get(v)
 
         if existing_cache_id is not None:
@@ -118,84 +112,82 @@ class GenericCacheState(abc.ABC):
         return self._cache_registry.try_get_cache(mb_cache_id)
 
     def add_entry(
-        self, key_tensor: Optional[torch.Tensor], key, value
+        self, ref_tensor: Optional[torch.Tensor], key, value
     ) -> MetadataCache:
-        cache = None
-        if key_tensor is not None:
-            cache = self.try_get_cache(key_tensor)
+        cache = self.try_get_cache(ref_tensor) if ref_tensor is not None else None
+        assert cache.is_mutable, "Cannot add to an immutable cache"
         if cache is None:
-            # See Note [ CacheState tmp refs ]
-            # The first thing add to a cache is always a "key tensor"
-            # Q: should we be making this distiction anyway?
             cache = self._cache_registry.create_cache({key: value})
         else:
             cache.data[key] = value
-        self._maybe_update_tensor_to_cache_id(cache, key, value)
+        self._maybe_update_tensor_to_cache_id(cache, value)
         return cache
 
     def copy(self) -> "GenericCacheState":
-        ret = self.__class__(self._keys)
+        ret = self.__class__()
         ret._cache_registry = self._cache_registry.copy()
         ret._tensor_to_cache_id = self._tensor_to_cache_id.copy()
         return ret
 
 
 class EagerCacheState(GenericCacheState):
-    def __init__(self, keys) -> None:
+    def __init__(self) -> None:
+        super().__init__()
         # cache_id <-> cache
         self._cache_registry = CacheRegistry(is_weak=True)
         # See Note [ CacheState tmp refs ]
         self._tmp_refs: Dict[int, MetadataCache] = {}
-        super().__init__(keys)
 
     # Eager needs extra logic to keep the cache alive via a temporary reference.
     def add_entry(
-        self, key_tensor: Optional[torch.Tensor], key, value
+        self, ref_tensor: Optional[torch.Tensor], key, value
     ) -> MetadataCache:
-        cache = super().add_entry(key_tensor, key, value)
+        cache = super().add_entry(ref_tensor, key, value)
         self._tmp_refs[cache.id] = cache
         return cache
 
-    def clear_tmp_ref(self, key_tensor: torch.Tensor) -> None:
-        assert_not_fake(key_tensor)
-        cache = self.try_get_cache(key_tensor)
+    def clear_tmp_ref(self, ref_tensor: torch.Tensor) -> None:
+        assert_not_fake(ref_tensor)
+        cache = self.try_get_cache(ref_tensor)
         assert cache is not None
         del self._tmp_refs[cache.id]
 
 
 class TracingCacheState(GenericCacheState):
-    def __init__(self, keys) -> None:
+    def __init__(self) -> None:
+        super().__init__()
         # cache_id <-> cache
         self._cache_registry = CacheRegistry(is_weak=False)
-        super().__init__(keys)
 
     # Any extra methods that we only need during tracing belong here.
     @staticmethod
     def init_from_eager(eager_cache_state: EagerCacheState) -> "TracingCacheState":
-        if eager_cache_state is None:
-            from torch.nested._internal.nested_tensor import RAGGED_SOURCE_KEYS
-
-            keys = RAGGED_SOURCE_KEYS
-            initial_count = 0
-        else:
-            keys = eager_cache_state._keys
-            initial_count = eager_cache_state._cache_registry._incrementing_id
-
-        ret = TracingCacheState(keys)
-        ret._cache_registry._incrementing_id = initial_count
+        ret = TracingCacheState()
+        ret.set_counter(
+            0
+            if eager_cache_state is None
+            else eager_cache_state._cache_registry._incrementing_id
+        )
         return ret
+
+    def set_counter(self, counter: int):
+        self._cache_registry._incrementing_id = counter
 
     def register_cache(self, data, cache_id):
         cache = MetadataCache(data=data, cache_id=cache_id)
         self._cache_registry._cache_id_to_cache[cache_id] = cache
-        for k, v in data.items():
-            if k in self._keys:
-                self._tensor_to_cache_id[v] = cache_id
+        for v in data.values():
+            self._tensor_to_cache_id[v] = cache_id
         return cache
 
     # This is used for the .detach() case.
     def maybe_alias_tensor(self, new_tensor, old_tensor):
-        # TODO(soulitzer): locally have a detach cache for aot autograd
+        # For AOT Autograd, we need to .detach() all the inner tensors in order
+        # to avoid the inputs/outputs being collapsed in the fx graph.
+        # See Note [AOT Autograd: Views to avoid tangents aliasing inputs]
+        #
+        # This is something we ordinarily do not do; ordinarily, doing a view
+        # returns new NestedTensor that shares the same offsets instance.
         if old_tensor not in self._tensor_to_cache_id:
             return
         old_cache = self._cache_registry.try_get_cache(
@@ -210,10 +202,11 @@ class TracingCacheState(GenericCacheState):
                 new_cache_data[k] = new_tensor
             else:
                 new_cache_data[k] = v.detach()
-        new_cache = self._cache_registry.create_cache(new_cache_data)
-        for k, v in new_cache.data.items():
-            self._maybe_update_tensor_to_cache_id(new_cache, k, v)
-        # Make sure the symints compare equal
+
+        new_cache = self._cache_registry.create_cache(new_cache_data, is_mutable=False)
+        for v in new_cache.data.values():
+            self._maybe_update_tensor_to_cache_id(new_cache, v)
+
         new_cache.eq_id = old_cache.eq_id
 
 
@@ -221,13 +214,10 @@ _global_cache_state = None
 
 
 def get_global_cache_state():
-    # By default use the nested tensor ragged source keys
-    from torch.nested._internal.nested_tensor import RAGGED_SOURCE_KEYS
-
     global _global_cache_state
 
     if _global_cache_state is None:
-        _global_cache_state = EagerCacheState(RAGGED_SOURCE_KEYS)
+        _global_cache_state = EagerCacheState()
 
     return _global_cache_state
 
@@ -237,34 +227,33 @@ def get_global_cache_state():
 
 lib = torch.library.Library("nested", "FRAGMENT")
 
-lib.define("_add_cache_entry(Tensor? key_tensor, Tensor val, str key) -> Tensor")
+lib.define("_add_cache_entry(Tensor? opt_ref_tensor, Tensor val, str key) -> Tensor")
 
 
 def _add_cache_entry_impl(
-    key_tensor: Optional[torch.Tensor], val: torch.Tensor, key: str
+    opt_ref_tensor: Optional[torch.Tensor], val: torch.Tensor, key: str
 ):
-    # Q: when I write a custom op, does the first argument need to be a tensor?
-    # Can I return a
-    cache = get_global_cache_state().add_entry(key_tensor, key, val)
-    if key_tensor is None:
-        key_tensor = _maybe_unpack_first(cache.data)
-    return key_tensor
+    cache = get_global_cache_state().add_entry(opt_ref_tensor, key, val)
+    ref_tensor = (
+        _get_ref_tensor(cache.data) if opt_ref_tensor is None else opt_ref_tensor
+    )
+    return ref_tensor
 
 
 def _add_cache_entry_meta(
-    key_tensor: Optional[torch.Tensor], val: torch.Tensor, key: str
+    opt_ref_tensor: Optional[torch.Tensor], val: torch.Tensor, key: str
 ):
     mb_fake_mode = try_get_fake_mode(val)
     if mb_fake_mode is not None:
-        # TODO(soulitzer): is this called for the eager path too?
-        cache = mb_fake_mode.nested_cache_state.add_entry(key_tensor, key, val)
+        cache = mb_fake_mode.nested_cache_state.add_entry(opt_ref_tensor, key, val)
     else:
-        # What is the dummy tensor story?
+        # Called with meta tensors in eager (nested dummy tensors)
         assert val.device.type == "meta"
-        cache = get_global_cache_state().add_entry(key_tensor, key, val)
-    if key_tensor is None:
-        key_tensor = _maybe_unpack_first(cache.data)
-    return key_tensor
+        cache = get_global_cache_state().add_entry(opt_ref_tensor, key, val)
+    ref_tensor = (
+        _get_ref_tensor(cache.data) if opt_ref_tensor is None else opt_ref_tensor
+    )
+    return ref_tensor
 
 
 lib.impl("_add_cache_entry", _add_cache_entry_impl, "CPU")
@@ -297,23 +286,12 @@ _register_effectful_op(torch.ops.nested._add_cache_entry.default, _EffectType.OR
 _register_effectful_op(torch.ops.nested._clear_tmp_ref.default, _EffectType.ORDERED)
 
 
-def _maybe_unpack_first(
-    data_or_tensor: Union[Dict[str, Optional[torch.Tensor]], torch.Tensor]
+def _get_ref_tensor(
+    data_or_tensor: Union[Dict[str, torch.Tensor], torch.Tensor]
 ) -> torch.Tensor:
-    # Gets the first tensor in the cache data dict according to
-    # priority in RAGGED_SOURCE_KEYS. If a tensor is directly
-    # passed in, then return as-is.
-    from torch.nested._internal.nested_tensor import RAGGED_SOURCE_KEYS
-
     if isinstance(data_or_tensor, torch.Tensor):
         return data_or_tensor
-    cached_tensor = None
-    for k in RAGGED_SOURCE_KEYS:
-        if k in data_or_tensor:
-            cached_tensor = data_or_tensor[k]
-            break
-    assert cached_tensor is not None
-    return cached_tensor
+    return next(iter(data_or_tensor.values()))
 
 
 #
@@ -326,11 +304,9 @@ def _maybe_unpack_first(
 # These are NOT public APIs, you should not call them directly.
 # Dynamo should graph break TODO(soulitzer).
 #
-def try_get_cache(
-    data_or_tensor: Union[Dict[str, Optional[torch.Tensor]], torch.Tensor]
-):
+def try_get_cache(data_or_tensor: Union[Dict[str, torch.Tensor], torch.Tensor]):
     mb_fake_mode = try_get_fake_mode(data_or_tensor)
-    cached_tensor = _maybe_unpack_first(data_or_tensor)
+    cached_tensor = _get_ref_tensor(data_or_tensor)
 
     if mb_fake_mode is not None:
         return mb_fake_mode.nested_cache_state.try_get_cache(cached_tensor)
@@ -340,19 +316,17 @@ def try_get_cache(
 
 # Are users allowed to call this directly where dynamo can see it?
 def add_entry(cache, key, value):
-    key_tensor = None
+    ref_tensor = None
     if cache is not None:
-        key_tensor = _maybe_unpack_first(cache.data)
+        ref_tensor = _get_ref_tensor(cache.data)
 
-    new_key_tensor = torch.ops.nested._add_cache_entry(key_tensor, value, key)
-    assert new_key_tensor is not None
+    new_ref_tensor = torch.ops.nested._add_cache_entry(ref_tensor, value, key)
+    assert new_ref_tensor is not None
 
-    if key_tensor is None:
+    if ref_tensor is None:
         # See Note [ CacheRegistry tmp refs ]
-        # But wait, if key is not actually the key? this wouldn't work
-        # Can I return a proper key tensor?
-        cache = try_get_cache(new_key_tensor)
+        cache = try_get_cache(new_ref_tensor)
         assert cache is not None
-        torch.ops.nested._clear_tmp_ref(new_key_tensor)
+        torch.ops.nested._clear_tmp_ref(new_ref_tensor)
 
     return cache

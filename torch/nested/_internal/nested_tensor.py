@@ -35,7 +35,8 @@ def _rebuild_njt(constructor_kwargs):
     return NestedTensor(**constructor_kwargs)
 
 
-RAGGED_SOURCE_KEYS = [
+# Write a note demonstrating how this works
+_RAGGED_SOURCE_ALIAS_PRIORITY = [
     "cpu_lengths",
     "cpu_offsets",
     "device_lengths",
@@ -85,7 +86,7 @@ def get_nested_cache(offsets, lengths, cpu_offsets, cpu_lengths) -> MetadataCach
     )
     # Look for existing caches
     caches = []
-    for k in RAGGED_SOURCE_KEYS:
+    for k in _RAGGED_SOURCE_ALIAS_PRIORITY:
         if k in cache_data:
             _cache = try_get_cache(cache_data[k])
             if _cache is not None:
