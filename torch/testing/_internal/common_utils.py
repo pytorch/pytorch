@@ -74,7 +74,6 @@ from torch import Tensor
 from torch._C import ScriptDict, ScriptList  # type: ignore[attr-defined]
 from torch._dynamo.trace_rules import _as_posix_path
 from torch._utils_internal import get_writable_path
-from torch._logging.scribe import open_source_signpost
 from torch.nn import (
     ModuleDict,
     ModuleList,
@@ -1857,7 +1856,7 @@ def skipIfXpu(func=None, *, msg="test doesn't currently work on the XPU stack"):
         return dec_fn(func)
     return dec_fn
 
-def skipIfMps(fn):
+def skipIfMPS(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
         if TEST_MPS:
@@ -2458,16 +2457,6 @@ def print_repro_on_failure(repro_parts):
             sample_isolation_prefix = f"PYTORCH_OPINFO_SAMPLE_INPUT_INDEX={tracked_input.index}"
 
         repro_str = " ".join(filter(None, (sample_isolation_prefix, *repro_parts)))
-
-        open_source_signpost(
-            subsystem="test_repros",
-            name="test_failure",
-            parameters=json.dumps(
-                {
-                    "repro": " ".join(filter(None, (sample_isolation_prefix, *repro_parts))),
-                }
-            ),
-        )
 
         repro_msg = f"""
 To execute this test, run the following from the base repo dir:

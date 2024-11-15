@@ -133,7 +133,7 @@ __global__ void unrolled_elementwise_kernel(
     out_calc_t oc,
     loader_t l,
     storer_t s) {
-  int remaining = N - block_work_size() * blockIdx.x;
+  int remaining = N - elems_per_thread * num_threads() * blockIdx.x;
   auto policy = memory::policies::
       unroll<array_t, inp_calc_t, out_calc_t, loader_t, storer_t, elems_per_thread>(
           data, remaining, ic, oc, l, s);

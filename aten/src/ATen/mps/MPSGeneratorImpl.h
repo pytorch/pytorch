@@ -37,10 +37,10 @@ struct TORCH_API MPSGeneratorImpl : public c10::GeneratorImpl {
   c10::intrusive_ptr<c10::TensorImpl> get_state() const override;
   void update_philox_counters();
 
-  void set_engine(at::Philox4_32 engine) { engine_ = engine; };
-  at::Philox4_32 engine() { return engine_; };
+  void set_engine(at::Philox4_32 engine) { engine_ = engine; }
+  at::Philox4_32 engine() { return engine_; }
   uint32_t* state_data() { return data_.state.data(); }
-  static DeviceType device_type() { return DeviceType::MPS; };
+  static DeviceType device_type() { return DeviceType::MPS; }
 
 private:
   mps::detail::rng_data_pod data_;
