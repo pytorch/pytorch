@@ -91,7 +91,7 @@ case ${GPU_ARCH_TYPE} in
         TARGET=rocm_final
         DOCKER_TAG=rocm${GPU_ARCH_VERSION}
         GPU_IMAGE=rocm/dev-centos-7:${GPU_ARCH_VERSION}-complete
-	if [ ${GPU_ARCH_TYPE} == "rocm-manylinux_2_28" ]; then
+        if [ ${GPU_ARCH_TYPE} == "rocm-manylinux_2_28" ]; then
             MANY_LINUX_VERSION="2_28"
             GPU_IMAGE=rocm/dev-almalinux-8:${GPU_ARCH_VERSION}-complete
         fi
