@@ -52,6 +52,6 @@ void sin_kernel_cuda(TensorIteratorBase& iter) {
   }
 }
 
-REGISTER_DISPATCH(sin_stub, &sin_kernel_cuda);
+REGISTER_DISPATCH(sin_stub, &sin_kernel_cuda)
 
 } // namespace at::native

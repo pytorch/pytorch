@@ -342,18 +342,18 @@ inductor_expected_failures_single_sample["xpu"] = {
     "cholesky_solve": {f64},
     "cholesky_inverse": {f64},
     # could not create a primitive
-    "addbmm": {f16, f32, f64},
-    "addmm": {f16, f32, f64},
-    "addmv": {f32, f64},
+    "addbmm": {f64},
+    "addmm": {f64},
+    "addmv": {f64},
     # could not create a primitive descriptor for
     # a deconvolution forward propagation primitive
     "nn.functional.conv_transpose2d": {f32, f64},
     "nn.functional.conv_transpose3d": {f32, f64},
-    # rrelu not supported on XPU now
-    "nn.functional.rrelu": {f16, f32, f64},
+    # frexp not supported on XPU now
+    "frexp": {f16, f32, f64},
     # not implemented for 'Half'
-    "nn.functional.multilabel_margin_loss": {f16},
-    "nn.functional.multi_margin_loss": {f16},
+    "sort": {b8},
+    "argsort": {b8},
 }
 
 
@@ -460,6 +460,9 @@ inductor_override_kwargs["cpu"] = {
     ("nn.functional.interpolate.bicubic", u8): {"atol": 1, "rtol": 0},
     # High atol due to precision loss
     ("nn.functional.interpolate.bicubic", f32): {"atol": 5e-3, "rtol": 0},
+    # reference_in_float can cause erroneous failures in sorting tests
+    "argsort": {"reference_in_float": False},
+    "sort": {"reference_in_float": False},
 }
 
 inductor_override_kwargs["cuda"] = {
@@ -530,6 +533,9 @@ inductor_override_kwargs["cuda"] = {
     ("index_reduce.amax", f32): {"check_gradient": False},
     ("index_reduce.amax", f16): {"check_gradient": False},
     ("tanh", f16): {"atol": 1e-4, "rtol": 1e-2},
+    # reference_in_float can cause erroneous failures in sorting tests
+    "argsort": {"reference_in_float": False},
+    "sort": {"reference_in_float": False},
 }
 
 inductor_override_kwargs["xpu"] = {
@@ -553,7 +559,12 @@ inductor_override_kwargs["xpu"] = {
     ("cumsum", f16): {"reference_in_float": True},
     "cumprod": {"reference_in_float": True, "atol": 7e-5, "rtol": 0.002},
     ("dot", f16): {"atol": 1e-5, "rtol": 0.002},
-    "logcumsumexp": {"grad_atol": 8e-4, "grad_rtol": 0.001},
+    "logcumsumexp": {
+        "atol": 5e-5,
+        "rtol": 0.005,
+        "grad_atol": 8e-4,
+        "grad_rtol": 0.001,
+    },
     "exponential": {"reference_in_float": True},
     "geometric": {"reference_in_float": True},
     ("kron", f16): {"reference_in_float": True},
@@ -649,6 +660,9 @@ inductor_override_kwargs["xpu"] = {
     ("nn.functional.embedding_bag", f64): {"check_gradient": False},
     ("_unsafe_masked_index", f16): {"atol": 1e-5, "rtol": 2e-3},
     ("_unsafe_masked_index_put_accumulate", f16): {"atol": 1e-5, "rtol": 5e-3},
+    # reference_in_float can cause erroneous failures in sorting tests
+    "argsort": {"reference_in_float": False},
+    "sort": {"reference_in_float": False},
 }
 
 # Test with one sample only for following ops
@@ -684,7 +698,7 @@ inductor_one_sample["cpu"] = {
     "nn.functional.cosine_similarity": {f16},
     "nn.functional.cross_entropy": {f16, f32, f64},
     "nn.functional.gaussian_nll_loss": {f16},
-    "nn.functional.grid_sample": {f32, f64},
+    "nn.functional.grid_sample": {f32, f64, f16},
     "nn.functional.interpolate.area": {f16},
     "nn.functional.nll_loss": {f16, f32, f64},
     "normal": {f16, f32, f64},

@@ -46,6 +46,6 @@ void abs_kernel_cuda(TensorIteratorBase& iter) {
   }
 }
 
-  REGISTER_DISPATCH(abs_stub, &abs_kernel_cuda);
+  REGISTER_DISPATCH(abs_stub, &abs_kernel_cuda)
 
 } // namespace at::native

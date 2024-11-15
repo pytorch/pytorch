@@ -12,6 +12,7 @@ from torch.export.graph_signature import (
     CustomObjArgument,
     InputKind,
     SymIntArgument,
+    SymBoolArgument,
     TensorArgument,
     TokenArgument,
 )
@@ -134,6 +135,7 @@ class Verifier(metaclass=_VerifierMeta):
             math.ceil,
             math.floor,
             math.trunc,
+            round,
         ]
 
     def allowed_op_types(self) -> Tuple[Type[Any], ...]:
@@ -190,6 +192,7 @@ class Verifier(metaclass=_VerifierMeta):
                 torch._C._set_grad_enabled,
                 torch.amp.autocast_mode._enter_autocast,
                 torch.amp.autocast_mode._exit_autocast,
+                torch.fx.experimental.symbolic_shapes.cast_symbool_to_symint_guardless,
             )
 
             if not isinstance(op, _allowed_op_types()):
@@ -307,7 +310,7 @@ def _verify_exported_program_signature(exported_program) -> None:
         )
 
     for input_spec, node in zip(gs.input_specs, input_node_names):
-        if isinstance(input_spec.arg, (TensorArgument, SymIntArgument)):
+        if isinstance(input_spec.arg, (TensorArgument, SymIntArgument, SymBoolArgument)):
             if input_spec.arg.name != node:
                 raise SpecViolationError(
                     f"Input spec name {input_spec.arg.name} does not match node name {node}"

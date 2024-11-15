@@ -705,7 +705,7 @@ static bool is_module(
     return module_name.value() == module_qualified_name;
   }
   return false;
-};
+}
 
 bool aten_add_alpha_is_one(
     const Match& match,
