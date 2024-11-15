@@ -261,6 +261,7 @@ exclude_patterns = [
     'torch/csrc/jit/**/*',
     'torch/csrc/jit/serialization/mobile_bytecode_generated.h',
     'torch/csrc/utils/pythoncapi_compat.h',
+    'torch/csrc/inductor/aoti_runtime/sycl_runtime_wrappers.h',
 ]
 init_command = [
     'python3',

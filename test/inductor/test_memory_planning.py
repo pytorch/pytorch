@@ -3,7 +3,6 @@
 import sys
 import unittest
 
-from torch.testing._internal.common_device_type import expectedFailureXPU
 from torch.testing._internal.common_utils import (
     IS_CI,
     IS_WINDOWS,
@@ -71,7 +70,6 @@ class TestMemoryPlanning(TestCase):
         )
         self.assertTrue(same(f(*args), result))
 
-    @expectedFailureXPU
     def test_cpp_wrapper(self):
         f, args = self._generate(device=GPU_TYPE)
         compiled = torch.compile(f, dynamic=True)
