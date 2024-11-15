@@ -253,6 +253,70 @@ if torch._C._has_mkldnn:
 
         return fn
 
+    def _is_valid_computation_mlp_silu_mul_fusion():
+        def fn(match):
+            computation_nodes = filter_nodes(
+                match.nodes, mkldnn._linear_pointwise.default
+            )
+            if len(computation_nodes) != 2:
+                return False
+            # Check for same Activation
+            act = computation_nodes[0].args[0]
+            if computation_nodes[1].args[0] != act:
+                return False
+            # Check for different wgt
+            wgt = computation_nodes[0].args[1]
+            if computation_nodes[1].args[1] == wgt:
+                return False
+            if (
+                wgt.meta.get("val").dtype != torch.bfloat16  # type: ignore[union-attr]
+                or computation_nodes[0].args[1].meta.get("val").dtype != torch.bfloat16  # type: ignore[union-attr]
+            ):
+                # TODO: Extending to support dtype other than bfloat16
+                return False
+            wgt_size = computation_nodes[0].args[1].meta.get("val").size()  # type: ignore[union-attr]
+            # Check for same weight size
+            if computation_nodes[1].args[1].meta.get("val").size() != wgt_size:  # type: ignore[union-attr]
+                return False
+            # Ensure max autotune used with CPP backend
+            if not (
+                torch._inductor.config.max_autotune
+                and "CPP" in torch._inductor.config.max_autotune_gemm_backends
+                and torch._inductor.config.cpp.enable_linear_silu_linear_mul
+            ):
+                return False
+
+            return True
+
+        return fn
+
+    def _register_mlp_silu_mul_lowering(pattern):
+        @register_lowering_pattern(
+            pattern,
+            extra_check=_is_valid_computation_mlp_silu_mul_fusion(),
+            pass_number=0,
+        )
+        def fn(match, *args, **kwargs):
+            # TODO: Should take it as a broad linear-unary?
+            unary_attr = UnaryAttr("mlp_silu_mul")
+            computation_args = list(args)[:-3] + [
+                unary_attr.op_name,
+                unary_attr.scalars_attr,
+                unary_attr.algorithm_attr,
+            ]
+
+            computation_args = [
+                args[0],
+                [args[1], kwargs["w2"]],
+                [args[2], kwargs["b2"]],
+                "mlp_silu_mul",
+                None,
+                None,
+            ]
+            return L[torch.ops.mkldnn._linear_pointwise.default](*computation_args)
+
+        return fn
+
     def _register_leaky_relu_fusion_lowering(pattern, computation_op, lowp_dtype=None):
         @register_lowering_pattern(
             pattern, extra_check=_is_single_computation_op(computation_op, lowp_dtype)
@@ -726,6 +790,31 @@ if torch._C._has_mkldnn:
                     fusion_op,
                     unary_attr=UnaryAttr("relu"),
                 )
+
+    def _register_mlp_silu_mul_fusion():
+        linear_silu_pattern = _unary_fusion_pattern(
+            _silu_fusion,
+            _linear_call,
+            2,
+            lowp_dtype=torch.bfloat16,
+        )
+        linear_mul_pattern = CallFunction(
+            aten.mul,
+            linear_silu_pattern,
+            CallFunction(
+                mkldnn._linear_pointwise.default,
+                KeywordArg("act"),
+                KeywordArg("w2"),
+                KeywordArg("b2"),
+                KeywordArg("attr2"),
+                KeywordArg("scalars2"),
+                KeywordArg("algorithm2"),
+                _users=1,
+            ),
+        )
+        _register_mlp_silu_mul_lowering(
+            linear_mul_pattern,
+        )
 
     def _recover_linear():
         # convert reshape+linear+reshape to a single linear for applying fusion path.
@@ -1268,6 +1357,7 @@ if torch._C._has_mkldnn:
             _register_binary_fusion()
             _register_quantization_lowerings()
             _register_woq_lowerings()
+            _register_mlp_silu_mul_fusion()
 
     @functools.lru_cache(None)
     def _mkldnn_weight_pack_init():

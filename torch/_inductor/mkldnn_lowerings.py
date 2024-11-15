@@ -1,7 +1,7 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import functools
-from typing import List, Optional
+from typing import List, Optional, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -9,6 +9,7 @@ from torch._inductor.kernel.mm_common import mm_args
 
 from . import ir
 from .codegen.cpp_gemm_template import CppPackedGemmTemplate
+from .codegen.cpp_mlp_template import CppPackedMLPTemplate
 from .codegen.cpp_utils import create_epilogue_with_attr
 from .ir import TensorBox
 from .lowering import (
@@ -162,11 +163,55 @@ def register_onednn_fusion_ops():
                 )
             )
 
+        def mlp_linear_silu_linear_mul(
+            x: TensorBox,
+            w: List[TensorBox],
+            b: List[TensorBox],
+            attr,
+            scalars,
+            algorithm,
+            layout=None,
+        ):
+            assert use_max_autotune()
+            b = [
+                bias if bias is None else ir.ExternKernel.realize_input(bias)
+                for bias in b
+            ]
+
+            choices: List[ChoiceCaller] = []
+            transposed_w0 = permute(w[0], [1, 0])
+            *_, layout, x, transposed_w0 = mm_args(x, transposed_w0, layout=layout)
+
+            if use_cpp_packed_gemm_template(layout, x, transposed_w0):
+                kwargs = dict(
+                    has_bias=[bias is not None for bias in b],
+                    trans_w=True,
+                )
+
+                input_nodes = [x, w[0], w[1]]
+                input_nodes.extend([bias for bias in b if bias is not None])
+
+                CppPackedMLPTemplate.add_choices(
+                    choices,
+                    layout,
+                    input_nodes,
+                    **kwargs,  # type: ignore[arg-type]
+                )
+
+                assert len(choices) != 0
+                result = autotune_select_algorithm(
+                    "linear_unary",
+                    choices,
+                    input_nodes,
+                    layout,
+                )
+                return result
+
         @register_lowering(torch.ops.mkldnn._linear_pointwise)
         def linear_unary(
             x: TensorBox,
-            w: TensorBox,
-            b: TensorBox,
+            w: Union[TensorBox, List[TensorBox]],
+            b: Union[TensorBox, List[TensorBox]],
             attr,
             scalars,
             algorithm,
@@ -176,6 +221,17 @@ def register_onednn_fusion_ops():
             if len(x_size) > 2:
                 # GEMM template needs 2D input, normalize input shape here
                 x = view(x, [-1, x_size[-1]])
+
+            if attr == "mlp_silu_mul":
+                assert isinstance(w, List)
+                assert isinstance(b, List)
+                result = mlp_linear_silu_linear_mul(
+                    x, w, b, attr, scalars, algorithm, layout
+                )
+                if len(x_size) > 2:
+                    result = view(result, (*x_size[:-1], result.get_size()[-1]))
+                return result
+
             if b is not None:
                 b = ir.ExternKernel.realize_input(b)
             choices: List[ChoiceCaller] = []
@@ -213,6 +269,7 @@ def register_onednn_fusion_ops():
                         **kwargs,
                     )
                 )
+            assert isinstance(w, TensorBox)
             assert w.get_name() in V.graph.constants
             input_gen_fns = {
                 1: lambda x: V.graph.constants[x.get_name()],
