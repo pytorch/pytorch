@@ -154,6 +154,7 @@ RUN python3 -m pip install --upgrade pip && \
     python3 -mpip install cmake==3.28.4
 ADD ./common/install_rocm_drm.sh install_rocm_drm.sh
 RUN bash ./install_rocm_drm.sh && rm install_rocm_drm.sh
+ENV MKLROOT /opt/intel
 ADD ./common/install_rocm_magma.sh install_rocm_magma.sh
 RUN bash ./install_rocm_magma.sh && rm install_rocm_magma.sh
 ADD ./common/install_miopen.sh install_miopen.sh
