@@ -28,6 +28,7 @@ torch.cuda
     is_available
     is_initialized
     memory_usage
+    memory_usage_in_bytes
     set_device
     set_stream
     set_sync_debug_mode

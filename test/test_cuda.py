@@ -3948,6 +3948,20 @@ class TestCudaMallocAsync(TestCase):
         self.assertTrue(0 <= torch.cuda.temperature() <= 150)
 
     @unittest.skipIf(TEST_PYNVML, "pynvml/amdsmi is not available")
+    def test_memory_usage_in_bytes(self):
+        """
+        Verify memory usage in bytes
+        """
+        torch.cuda.empty_cache()
+        a = torch.cuda.memory_usage_in_bytes()
+        num_bytes = 256 * 1024**2
+        _ = torch.empty(num_bytes, dtype=torch.int8, device="cuda")
+        torch.cuda.synchronize()
+        b = torch.cuda.memory_usage_in_bytes()
+        mem_bytes = b - a
+        self.assertTrue(mem_bytes > num_bytes // 2, mem_bytes < num_bytes * 8)
+
+    @unittest.skipIf(TEST_PYNVML, "pynvml/amdsmi is not available")
     def test_power_draw(self):
         self.assertTrue(torch.cuda.power_draw() >= 0)
 
