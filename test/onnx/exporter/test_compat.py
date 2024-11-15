@@ -11,6 +11,7 @@ import onnx
 import torch
 from torch.onnx._internal.exporter import _compat
 from torch.testing._internal import common_utils
+from torch.utils import _pytree
 
 
 class SampleModelForDynamicShapes(torch.nn.Module):
@@ -32,6 +33,26 @@ class NestedModelForDynamicShapes(torch.nn.Module):
             return x + w, x + y
         else:
             return x - w, x - y
+
+
+class SingnatureOnlyLlamaModel(torch.nn.Module):
+    def forward(
+        self,
+        input_ids: torch.LongTensor = None,
+        attention_mask: torch.Tensor | None = None,
+        position_ids: torch.LongTensor | None = None,
+        past_key_values: list[torch.FloatTensor] | None = None,
+        inputs_embeds: torch.FloatTensor | None = None,
+        labels: torch.LongTensor | None = None,
+        use_cache: bool | None = None,
+        output_attentions: bool | None = None,
+        output_hidden_states: bool | None = None,
+        return_dict: bool | None = None,
+        cache_position: torch.LongTensor | None = None,
+        num_logits_to_keep: int = 0,
+        **kwargs,
+    ):
+        pass
 
 
 @common_utils.instantiate_parametrized_tests
@@ -140,39 +161,6 @@ class TestCompat(common_utils.TestCase):
                 for input in onnx_model.graph.input
             )
         )
-
-
-if __name__ == "__main__":
-    common_utils.run_tests()
-# Owner(s): ["module: onnx"]
-"""Unit tests for the _compat module."""
-
-from __future__ import annotations
-
-import torch
-from torch.onnx._internal.exporter import _compat
-from torch.testing._internal import common_utils
-from torch.utils import _pytree
-
-
-class SingnatureOnlyLlamaModel(torch.nn.Module):
-    def forward(
-        self,
-        input_ids: torch.LongTensor = None,
-        attention_mask: torch.Tensor | None = None,
-        position_ids: torch.LongTensor | None = None,
-        past_key_values: list[torch.FloatTensor] | None = None,
-        inputs_embeds: torch.FloatTensor | None = None,
-        labels: torch.LongTensor | None = None,
-        use_cache: bool | None = None,
-        output_attentions: bool | None = None,
-        output_hidden_states: bool | None = None,
-        return_dict: bool | None = None,
-        cache_position: torch.LongTensor | None = None,
-        num_logits_to_keep: int = 0,
-        **kwargs,
-    ):
-        pass
 
 
 @common_utils.instantiate_parametrized_tests
