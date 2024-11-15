@@ -21,8 +21,8 @@ import typing
 import warnings
 import weakref
 from pathlib import Path
-from types import CodeType, FrameType, FunctionType, ModuleType
-from typing import Any, Callable, Dict, List, Optional, Set, TypeVar, Union
+from types import CellType, CodeType, FunctionType, ModuleType
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TypeVar, Union
 from typing_extensions import ParamSpec
 from weakref import ReferenceType
 
@@ -30,7 +30,11 @@ import torch
 import torch._logging
 from torch._C._dynamo.guards import GlobalStateGuard
 from torch._dynamo.distributed import get_compile_pg
-from torch._dynamo.utils import CompileTimeInstructionCounter, get_metrics_context
+from torch._dynamo.utils import (
+    add_compilation_metrics_to_chromium,
+    CompileTimeInstructionCounter,
+    get_metrics_context,
+)
 from torch._guards import compile_context, CompileContext, CompileId, tracing
 from torch._logging import structured
 from torch._utils_internal import (
@@ -134,7 +138,7 @@ except ModuleNotFoundError:
 if typing.TYPE_CHECKING:
     from .backends.registry import CompilerFn
     from .repro.after_dynamo import WrapBackendDebug
-    from .types import BytecodeHook, CacheEntry
+    from .types import BytecodeHook, CacheEntry, DynamoFrameType
     from .variables.builder import FrameStateSizeEntry
 
 
@@ -253,7 +257,7 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
 
 
 @TorchPatcher.suppress_torch_distributed_warnings
-def has_tensor_in_frame(frame: FrameType) -> bool:
+def has_tensor_in_frame(frame: DynamoFrameType) -> bool:
     """Check if the frame has torch.* related bits"""
     # Check if the function was decorated using torch._dynamo.optimize
     if frame.f_code in always_optimize_code_objects:
@@ -334,7 +338,7 @@ def has_tensor_in_frame(frame: FrameType) -> bool:
 def exception_handler(
     e: Exception,
     code: CodeType,
-    frame: Optional[FrameType] = None,
+    frame: Optional[DynamoFrameType] = None,
     export: bool = False,
 ) -> None:
     record_filename = None
@@ -446,7 +450,7 @@ class ConvertFrameAssert:
 
     def __call__(
         self,
-        frame: FrameType,
+        frame: DynamoFrameType,
         cache_entry: Optional[CacheEntry],
         hooks: Hooks,
         frame_state: Dict[str, Union[int, FrameStateSizeEntry]],
@@ -547,6 +551,7 @@ class ConvertFrameAssert:
                 frame.f_globals,
                 frame.f_locals,
                 frame.f_builtins,
+                frame.closure,
                 self._torchdynamo_orig_callable,
                 self._one_graph,
                 self._export,
@@ -598,6 +603,7 @@ def _compile(
     globals: Dict[str, object],
     locals: Dict[str, object],
     builtins: Dict[str, object],
+    closure: Tuple[CellType],
     compiler_fn: CompilerFn,
     one_graph: bool,
     export: bool,
@@ -605,7 +611,7 @@ def _compile(
     hooks: Hooks,
     cache_entry: Optional[CacheEntry],
     cache_size: CacheSizeRelevantForFrame,
-    frame: Optional[FrameType] = None,
+    frame: Optional[DynamoFrameType] = None,
     frame_state: Optional[Dict[str, Union[int, FrameStateSizeEntry]]] = None,
     *,
     compile_id: CompileId,
@@ -641,13 +647,13 @@ def _compile(
             locals,
             globals,
             builtins,
+            closure,
             tf_mode_stack,
             code_options,
             compiler_fn,
             one_graph,
             export,
             export_constraints,
-            mutated_closure_cell_ids,
             frame_state=frame_state,
             speculation_log=speculation_log,
             distributed_state=distributed_state,
@@ -869,7 +875,6 @@ def _compile(
     ), metrics_context:
         restart_reasons: set[str] = set()
         # This is shared across restarts
-        mutated_closure_cell_ids: Set[int] = set()
         speculation_log = SpeculationLog()
         if compile_pg := get_compile_pg():
             distributed_state = DistributedState(compile_pg, LocalState())
@@ -1144,12 +1149,12 @@ def _compile(
                 ),
             }
             metrics_context.update_outer(metrics)
+            add_compilation_metrics_to_chromium(metrics)
+            chromium_event_log.log_event_end(
+                "dynamo", time.time_ns(), {}, chromium_start_time, True
+            )
             torch._dynamo.callback_handler.run_end_callbacks()
             # === END WARNING WARNING WARNING ===
-
-    chromium_event_log.log_event_end(
-        "dynamo", time.time_ns(), {}, chromium_start_time, True
-    )
 
 
 class ConvertFrame:
@@ -1164,7 +1169,7 @@ class ConvertFrame:
 
     def __call__(
         self,
-        frame: FrameType,
+        frame: DynamoFrameType,
         cache_entry: Optional[CacheEntry],
         hooks: Hooks,
         frame_state: Dict[str, Union[int, FrameStateSizeEntry]],
@@ -1282,6 +1287,7 @@ def replay(filename: str) -> None:
             record.globals,
             record.locals,
             record.builtins,
+            record.closure,
             compiler_fn=eager,
             one_graph=False,
             export=False,
@@ -1309,7 +1315,7 @@ def first_real_inst_idx(code: CodeType) -> int:
 class ConvertFrameProtocol(typing.Protocol):
     def __call__(
         self,
-        frame: FrameType,
+        frame: DynamoFrameType,
         cache_entry: Optional[CacheEntry],
         hooks: Hooks,
         frame_state: Dict[str, Union[int, FrameStateSizeEntry]],
@@ -1327,7 +1333,7 @@ class CatchErrorsWrapper:
 
     def __call__(
         self,
-        frame: FrameType,
+        frame: DynamoFrameType,
         cache_entry: Optional[CacheEntry],
         frame_state: Dict[str, Union[int, FrameStateSizeEntry]],
     ) -> Optional[GuardedCode]:

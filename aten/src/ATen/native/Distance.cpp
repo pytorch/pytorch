@@ -230,7 +230,7 @@ Tensor _cdist_backward(const Tensor& _grad, const Tensor& _x1, const Tensor& _x2
   auto device1 = x1.device().type();
   TORCH_CHECK(device1 == kCPU || device1 == kCUDA || device1 == kXPU, "_cdist_backward only supports CPU, XPU and CUDA devices, X1 got: ", device1);
   auto device2 = x2.device().type();
-  TORCH_CHECK(device2 == kCPU || device2 == kCUDA || device1 == kXPU, "_cdist_backward only supports CPU, XPU and CUDA devices, X2 got: ", device2);
+  TORCH_CHECK(device2 == kCPU || device2 == kCUDA || device2 == kXPU, "_cdist_backward only supports CPU, XPU and CUDA devices, X2 got: ", device2);
 
   Tensor grad_x1 =
       at::empty({batch_product, n, m}, x1.options(), LEGACY_CONTIGUOUS_MEMORY_FORMAT);
