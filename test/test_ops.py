@@ -1606,6 +1606,8 @@ class TestCompositeCompliance(TestCase):
     )
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_operator(self, device, dtype, op):
+        if 'cuda' in device and TEST_WITH_ROCM and dtype==torch.float32 and op.name=='nn.functional.scaled_dot_product_attention':
+            self.skipTest(f"Failing on ROCm with float32 for {op.name}")
         samples = op.sample_inputs(device, dtype, requires_grad=False)
 
         for sample in samples:
