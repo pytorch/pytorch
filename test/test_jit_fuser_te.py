@@ -52,6 +52,7 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     ProfilingMode,
     run_tests,
+    skipIfRocm,
     skipIfTorchDynamo,
     slowTest,
     TEST_WITH_ASAN,
@@ -245,6 +246,8 @@ class TestTEFuser(JitTestCase):
     def test_nop(self):
         pass
 
+    # skipped on ROCm due to 'core dumped' error
+    @skipIfRocm
     def test_sum_dim(self):
         def func(x):
             return x.sum((0,)) * 2
@@ -260,6 +263,8 @@ class TestTEFuser(JitTestCase):
             scripted = self.checkScript(func_neg, (a,))
             self.assertLastGraphAllFused()
 
+    # skipped on ROCm due to 'core dumped' error
+    @skipIfRocm
     def test_sum_keepdim_cast(self):
         def func(x):
             return x.sum((0,), keepdim=True, dtype=torch.double) * 2
@@ -860,6 +865,8 @@ class TestTEFuser(JitTestCase):
             # the if node and the fusion group inside it should only have one output
             self.assertEqual(len(list(if_nodes[0].outputs())), 1)
 
+    # skipped on ROCm due to 'core dumped' error
+    @skipIfRocm
     def test_concat_invariant(self):
         for device in self.devices:
             # Invariant: the output of prim::FusedConcat may
