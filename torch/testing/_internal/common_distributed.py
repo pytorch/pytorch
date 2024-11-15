@@ -714,6 +714,14 @@ class MultiProcessTestCase(TestCase):
             # Close pipe after done with test.
             parent_pipe.close()
 
+        try:
+            # Many test cases init a process group but do not destroy it.
+            # Some tests do destroy the pgs, and destroy can't be called twice.
+            # This avoids spewing warnings about improperly shutting down.
+            c10d.destroy_process_group()
+        except (AssertionError, ValueError):
+            pass
+
     def _get_timedout_process_traceback(self) -> None:
         pipes = []
         for i, process in enumerate(self.processes):
