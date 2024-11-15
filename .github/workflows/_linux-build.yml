@@ -301,14 +301,7 @@ jobs:
 
       - name: Upload sccache stats
         if: steps.build.outcome != 'skipped' && inputs.build-environment != 'linux-s390x-binary-manywheel'
-        uses: seemethere/upload-artifact-s3@v5
-        with:
-          s3-prefix: |
-            ${{ github.repository }}/${{ github.run_id }}/${{ github.run_attempt }}/artifact
-          retention-days: 365
-          if-no-files-found: warn
-          path: sccache-stats-*.json
-          s3-bucket: ${{ inputs.s3-bucket }}
+        uses: ./.github/actions/upload-sccache-stats
 
       - name: Teardown Linux
         uses: pytorch/test-infra/.github/actions/teardown-linux@main

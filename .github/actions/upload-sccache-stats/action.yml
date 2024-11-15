@@ -1,0 +1,29 @@
+# Upload sccache stats to artifacts, and also as benchmark data when on an aws
+# linux or windows machine.  Does not currently handle mac builds
+name: Upload sccache stats
+
+description: Upload sccache stats to artifacts
+
+runs:
+  using: composite
+  steps:
+    - name: Upload sccache to s3
+      uses: seemethere/upload-artifact-s3@v5
+      with:
+        s3-prefix: |
+          ${{ github.repository }}/${{ github.run_id }}/${{ github.run_attempt }}/artifact
+        retention-days: 14
+        if-no-files-found: warn
+        path: sccache-stats-*.json
+
+    - name: Format sccache stats
+      run: |
+        python3 -m tools.stats.sccache_stats_to_benchmark_format
+
+    - name: Upload sccache stats as benchmark
+      uses: pytorch/test-infra/.github/actions/upload-benchmark-results@upload-benchmark-results-with-additional-information
+      with:
+        benchmark-results-dir: test/test-reports
+        dry-run: false
+        schema-version: v3
+        github-token: ${{ secrets.GITHUB_TOKEN }}
