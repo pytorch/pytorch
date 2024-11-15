@@ -183,6 +183,8 @@ jobs:
       - name: Upload sccache stats
         if: steps.build.outcome != 'skipped'
         uses: ./.github/actions/upload-sccache-stats
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Teardown Windows
         uses: ./.github/actions/teardown-win
