@@ -20,7 +20,7 @@ def get_processes_running_python_tests() -> list[Any]:
         try:
             if "python" in process.name() and process.cmdline():
                 cmd = " ".join(process.cmdline())
-                if not cmd.startswith("/opt/conda/envs/py_3.10/bin/python"):
+                if not cmd.startswith("/opt/conda/envs"):
                     python_processes.append(process)
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             # access denied or the process died
