@@ -152,7 +152,10 @@ extern "C" {{export_declaration}}
     int64_t Mc_blocks, Nc_blocks, Kc_blocks;
     uint32_t L1_cache_size = {{L1_cache_size}};
     uint32_t L2_cache_size = {{L2_cache_size}};
-    mm_get_cache_blocking<{{kernel.dtype(X)}}, {{kernel.dtype(W)}}>(
+    bool horizontal_transverse = false;
+    mm_get_cache_blocking<
+        {{kernel.dtype(X)}}, {{kernel.dtype(W)}}, {{template.try_vertical_transverse()}}, {{template.try_horizontal_transverse()}}
+    >(
         num_threads,
         M,
         N,
@@ -167,7 +170,8 @@ extern "C" {{export_declaration}}
         Nc_blocks,
         Kc_blocks,
         L1_cache_size,
-        L2_cache_size
+        L2_cache_size,
+        horizontal_transverse
     );
     const int64_t num_Mc_blocks = (Mr_blocks + Mc_blocks - 1) / Mc_blocks;
     const int64_t num_Nc_blocks = (Nr_blocks + Nc_blocks - 1) / Nc_blocks;
@@ -180,9 +184,10 @@ extern "C" {{export_declaration}}
     constexpr int64_t Mt_blocks = {{template.thread_blocking().block_m}};
     constexpr int64_t Nt_blocks = {{template.thread_blocking().block_n}};
     constexpr int64_t Kt_blocks = {{template.thread_blocking().block_k}};
-    constexpr int64_t Mc_blocks = {{template.cache_blocking().block_m}};
-    constexpr int64_t Nc_blocks = {{template.cache_blocking().block_n}};
-    constexpr int64_t Kc_blocks = {{template.cache_blocking().block_k}};
+    constexpr int64_t Mc_blocks = {{template.cache_blocking()[0].block_m}};
+    constexpr int64_t Nc_blocks = {{template.cache_blocking()[0].block_n}};
+    constexpr int64_t Kc_blocks = {{template.cache_blocking()[0].block_k}};
+    bool horizontal_transverse = {{template.cache_blocking()[1]}};
     constexpr int64_t num_Mc_blocks = (Mr_blocks + Mc_blocks - 1) / Mc_blocks;
     constexpr int64_t num_Nc_blocks = (Nr_blocks + Nc_blocks - 1) / Nc_blocks;
     constexpr int64_t num_Mt_blocks = (Mr_blocks + Mt_blocks - 1) / Mt_blocks;
@@ -238,6 +243,86 @@ extern "C" {{export_declaration}}
     {%- set acc_buf2_name = "local_acc_buf2" %}
         {{ kernel.define_buffer(acc_buf2_name, ["Mc_blocks*Mr", "Nc_blocks*Nr"], acc_buf_dtype) }}
 {%- endif %}
+    if (horizontal_transverse) {
+        for (int64_t nc = n_block_start; nc < n_block_end; nc += Nc_blocks) {
+            const int64_t n_start = nc * Nr;
+            const int64_t n_end = std::min(std::min(nc + Nc_blocks, n_block_end) * Nr, N);
+            const int64_t n_size = n_end - n_start;
+            // NB: assume we pad N, nc_block_end won't exceed padded N here.
+            const int64_t nc_block_end = std::min(nc + Nc_blocks, n_block_end);
+            for (int64_t mc_block_id = 0; mc_block_id < num_Mc_blocks_per_thread; mc_block_id++) {
+                const int64_t my_mc_block_id = (mc_block_id + n_slice_id) % num_Mc_blocks_per_thread;
+                const int64_t mc = m_block_start + my_mc_block_id * Mc_blocks;
+                const int64_t m_start = mc * Mr;
+                const int64_t m_end = std::min(std::min(mc + Mc_blocks, m_block_end) * Mr, M);
+                const int64_t m_size = m_end - m_start;
+{%- if use_local_acc %}
+    {%- set acc = kernel.local_buffers[acc_buf_name] %}
+                {{ kernel.reinit_buffer_if_null(acc_buf_name) }}
+    {%- set acc2 = kernel.local_buffers[acc_buf2_name] %}
+                {{ kernel.reinit_buffer_if_null(acc_buf2_name) }}
+{%- else %}
+    {%- set acc = kernel.slice_nd(GemmOut, [("m_start", "m_end"), ("n_start", "n_end")]) %}
+{%- endif %}
+                for (int64_t kc = k_block_start; kc < k_block_end; kc += Kc_blocks) {
+                    int64_t k_start = kc * Kr;
+                    int64_t k_end = std::min(std::min(kc + Kc_blocks, k_block_end) * Kr, K);
+                    for (int64_t mci = m_start; mci < m_end; mci+=Mr) {
+                        const int64_t m_start_i = mci;
+                        const int64_t m_end_i = m_start_i + Mr;
+{%- set tile_X = kernel.slice_nd(X, [("m_start_i", "m_end_i"), ("k_start", "k_end")]) %}
+                        for (int64_t nci = nc; nci < nc_block_end; nci++) {
+{%- set acc_slice = kernel.slice_nd(acc, [("m_start_i - m_start", "m_end_i - m_start"), ("(nci - nc)*Nr", "(nci - nc + 1)*Nr")]) %}
+{%- set acc2_slice = kernel.slice_nd(
+    acc2, [("m_start_i - m_start", "m_end_i - m_start"), ("(nci - nc)*Nr", "(nci - nc + 1)*Nr")]
+) %}
+{%- set tile_W_3d = kernel.slice_nd(W, [("nci", "nci + 1"), ("k_start", "k_end"), ()]) %}
+{%- set tile_W = kernel.view(tile_W_3d, ["k_end - k_start", micro_gemm.register_blocking.block_n]) %}
+{%- set tile_W1_3d = kernel.slice_nd(W1, [("nci", "nci + 1"), ("k_start", "k_end"), ()]) %}
+{%- set tile_W1 = kernel.view(tile_W1_3d, ["k_end - k_start", micro_gemm.register_blocking.block_n]) %}
+                            if (kc == k_block_start) {
+                                {{ micro_gemm.codegen_call(
+                                    kernel, tile_X, tile_W, acc_slice, accum=False, horizontal_transverse=True
+                                )|indent(28, false)
+                                }}
+                                {{ micro_gemm.codegen_call(
+                                    kernel, tile_X, tile_W1, acc2_slice, accum=False, horizontal_transverse=True
+                                )|indent(28, false)
+                                }}
+                            } else {
+                                {{ micro_gemm.codegen_call(
+                                    kernel, tile_X, tile_W, acc_slice, accum=True, horizontal_transverse=True
+                                )|indent(28, false)
+                                }}
+                                {{ micro_gemm.codegen_call(
+                                    kernel, tile_X, tile_W1, acc2_slice, accum=True, horizontal_transverse=True
+                                )|indent(28, false)
+                                }}
+                            }
+                        }
+                    }
+                }
+
+                {
+{%- set tile_Y = kernel.slice_nd(Y_2d, [("m_start", "m_end"), ("n_start", "n_end")]) %}
+{%- set tile_acc = kernel.slice_nd(acc, [("0", "m_end - m_start"), ("0", "n_end - n_start")]) %}
+{%- set tile_acc1 = kernel.slice_nd(acc2, [("0", "m_end - m_start"), ("0", "n_end - n_start")]) %}
+{%- if has_gate_bias %}
+{%- set tile_inp = kernel.slice_nd(inp, [("m_start", "m_end"), ("n_start", "n_end")]) %}
+{%- else %}
+{%- set tile_inp = tile_Y %}
+{%- endif %}
+{%- if has_up_bias %}
+{%- set tile_inp1 = kernel.slice_nd(inp1, [("m_start", "m_end"), ("n_start", "n_end")]) %}
+{%- else %}
+{%- set tile_inp1 = tile_Y %}
+{%- endif %}
+                    // silu-mul epilogues
+                    {{ generate_epilogue() }}
+                }
+            }
+        }
+    } else {
         for (int64_t mc_block_id = 0; mc_block_id < num_Mc_blocks_per_thread; mc_block_id++) {
             const int64_t my_mc_block_id = (mc_block_id + n_slice_id) % num_Mc_blocks_per_thread;
             const int64_t mc = m_block_start + my_mc_block_id * Mc_blocks;
@@ -270,11 +355,23 @@ extern "C" {{export_declaration}}
 {%- set tile_W1_3d = kernel.slice_nd(W1, [("nci", "nci + 1"), ("k_start", "k_end"), ()]) %}
 {%- set tile_W1 = kernel.view(tile_W1_3d, ["k_end - k_start", micro_gemm.register_blocking.block_n]) %}
                         if (kc == k_block_start) {
-                            {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, acc_slice, accum=False)|indent(28, false) }}
-                            {{ micro_gemm.codegen_call(kernel, tile_X, tile_W1, acc2_slice, accum=False)|indent(28, false) }}
+                            {{ micro_gemm.codegen_call(
+                                kernel, tile_X, tile_W, acc_slice, accum=False, horizontal_transverse=False
+                            )|indent(28, false)
+                            }}
+                            {{ micro_gemm.codegen_call(
+                                kernel, tile_X, tile_W1, acc2_slice, accum=False, horizontal_transverse=False
+                            )|indent(28, false)
+                            }}
                         } else {
-                            {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, acc_slice, accum=True)|indent(28, false) }}
-                            {{ micro_gemm.codegen_call(kernel, tile_X, tile_W1, acc2_slice, accum=True)|indent(28, false) }}
+                            {{ micro_gemm.codegen_call(
+                                kernel, tile_X, tile_W, acc_slice, accum=True, horizontal_transverse=False
+                            )|indent(28, false)
+                            }}
+                            {{ micro_gemm.codegen_call(
+                                kernel, tile_X, tile_W1, acc2_slice, accum=True, horizontal_transverse=False
+                            )|indent(28, false)
+                            }}
                         }
                     }
                 }
@@ -298,6 +395,7 @@ extern "C" {{export_declaration}}
                 }
             }
         }
+    }
         {{ micro_gemm.codegen_finalize(kernel) }}
     }
 }
