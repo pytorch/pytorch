@@ -2081,11 +2081,12 @@ def dynamo_disable_grad(tx):
     finally:
         gmv.exit(tx)
 
+
 def bool_handler(tx, args, kwargs):
     if not kwargs and len(args) == 1:
         arg = args[0]
         if isinstance(arg, SymNodeVariable):
-            # Use the __bool__ implementation added in tensor.py
-            return arg.__bool__()
+            # Handle tensor-to-bool conversion directly in the handler
+            return arg.call_method(tx, "item", [], {}) != 0
     # Fall back to default bool behavior
     return variables.base.BuiltinVariable(bool).call_function(tx, args, kwargs)
