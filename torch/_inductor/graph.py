@@ -102,6 +102,7 @@ from .utils import (
     convert_shape_to_inductor,
     gather_origins,
     get_cloned_parameter_buffer_name,
+    get_donated_idxs,
     get_sympy_Expr_dtype,
     is_same_tensor,
     maybe_get_suppress_shape_guards_ctx,
@@ -487,6 +488,8 @@ class GraphLowering(torch.fx.Interpreter):
 
         # track the current placeholder index that we are processing
         self.placeholder_idx = -1
+
+        self.bw_donated_idxs = get_donated_idxs()
 
     def has_feature(
         self, device: Union[torch._inductor.ir.IRNode, device], feature: BackendFeature
@@ -996,13 +999,10 @@ class GraphLowering(torch.fx.Interpreter):
         else:
             sizes, strides = self.symbolic_sizes_strides(example)  # type: ignore[assignment]
 
-        tracing_context = torch._guards.TracingContext.try_get()
         if (
             self.is_backward
-            and tracing_context is not None
-            and tracing_context.fw_metadata
-            and tracing_context.fw_metadata.bw_donated_idxs
-            and self.placeholder_idx in tracing_context.fw_metadata.bw_donated_idxs
+            and self.bw_donated_idxs
+            and self.placeholder_idx in self.bw_donated_idxs
         ):
             tensor = TensorBox.create(
                 DonatedBuffer(

@@ -2165,7 +2165,7 @@ class PythonWrapperCodegen(CodeGen):
             or (
                 name in V.graph.graph_inputs
                 and not isinstance(
-                    V.graph.graph_inputs[name].data.data, ir.DonatedBuffer  # type: ignore[attr-defined]
+                    V.graph.graph_inputs_original[name], ir.DonatedBuffer
                 )
             )
             or name in V.graph.constants

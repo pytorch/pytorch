@@ -73,27 +73,6 @@ loop_ordering_log = torch._logging.getArtifactLogger(__name__, "loop_ordering")
 
 
 @dataclasses.dataclass
-class SchedulerDonatedBuffer:
-    scheduler: Scheduler
-    node: ir.DonatedBuffer
-    defining_op: Optional[BaseSchedulerNode]
-    users: List[NodeUser] = dataclasses.field(default_factory=list)
-
-    def get_name(self) -> str:
-        return self.node.get_name()
-
-    def set_users(self, users: List[NodeUser]) -> None:
-        # deduplicate
-        result: Dict[int, NodeUser] = {}
-        for use in users:
-            if id(use.node) in result:
-                result[id(use.node)] = use.merge(result[id(use.node)])
-            else:
-                result[id(use.node)] = use
-        self.users = list(result.values())
-
-
-@dataclasses.dataclass
 class SchedulerBuffer:
     scheduler: Scheduler
     node: ir.Buffer
@@ -189,6 +168,11 @@ class SchedulerBuffer:
     def get_mutations(self) -> List[str]:
         assert self.node is not None
         return self.node.get_mutation_names()
+
+
+@dataclasses.dataclass
+class SchedulerDonatedBuffer(SchedulerBuffer):
+    defining_op: Optional[BaseSchedulerNode] = None  # type: ignore[assignment]
 
 
 class BaseSchedulerNode:
@@ -1818,7 +1802,7 @@ class Scheduler:
 
         self.name_to_donated_buffer: Dict[
             str, SchedulerDonatedBuffer
-        ] = self.get_donated_buffer()
+        ] = self.get_donated_buffers()
         self.name_to_node: Dict[str, BaseSchedulerNode] = {
             n.get_name(): n for n in self.nodes
         }
@@ -1902,18 +1886,15 @@ class Scheduler:
             }
         )
 
-    def get_donated_buffer(self) -> Dict[str, SchedulerDonatedBuffer]:
+    def get_donated_buffers(self) -> Dict[str, SchedulerDonatedBuffer]:
         name_to_donated_buf = {}
-        for node in self.nodes:
-            for read in node.read_writes.reads:
-                if read.name in V.graph.graph_inputs and isinstance(
-                    V.graph.graph_inputs[read.name].data.data, ir.DonatedBuffer  # type: ignore[attr-defined]
-                ):
-                    name_to_donated_buf[read.name] = SchedulerDonatedBuffer(
-                        self,
-                        V.graph.graph_inputs[read.name].data.data,  # type: ignore[attr-defined]
-                        defining_op=None,
-                    )
+        for name in V.graph.graph_inputs_original:
+            if isinstance(V.graph.graph_inputs_original[name], ir.DonatedBuffer):
+                name_to_donated_buf[name] = SchedulerDonatedBuffer(
+                    self,
+                    V.graph.graph_inputs_original[name],
+                    defining_op=None,
+                )
         return name_to_donated_buf
 
     @property
@@ -2191,18 +2172,6 @@ class Scheduler:
         for node in self.nodes:
             for buf in node.get_outputs():
                 buf.set_users(name_to_users[buf.get_name()].items)
-
-        # compute and copy user information of donated buffer
-        for node in self.nodes:
-            for read in node.read_writes.reads:
-                if (
-                    read.name in V.graph.graph_inputs
-                    and isinstance(
-                        V.graph.graph_inputs[read.name].data.data, ir.DonatedBuffer  # type: ignore[attr-defined]
-                    )
-                    and not isinstance(read, WeakDep)
-                ):
-                    add_user(read.name, node, node.can_inplace(read))
 
         for name in self.name_to_donated_buffer:
             self.name_to_donated_buffer[name].set_users(name_to_users[name].items)
