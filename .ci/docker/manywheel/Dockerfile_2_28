@@ -145,7 +145,7 @@ FROM cpu_final as rocm_final
 ARG ROCM_VERSION=6.0
 ARG PYTORCH_ROCM_ARCH
 ENV PYTORCH_ROCM_ARCH ${PYTORCH_ROCM_ARCH}
-# Somewhere in ROCm stack, we still use non-existing /opt/rocm/hip path, 
+# Somewhere in ROCm stack, we still use non-existing /opt/rocm/hip path,
 # below workaround helps avoid error
 ENV ROCM_PATH /opt/rocm
 # cmake-3.28.4 from pip to get enable_language(HIP)
