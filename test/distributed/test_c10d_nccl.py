@@ -46,6 +46,7 @@ from torch.testing._internal.common_distributed import (
     init_multigpu_helper,
     MultiProcessTestCase,
     requires_gloo,
+    requires_multicast_support,
     requires_nccl,
     requires_nccl_version,
     skip_if_lt_x_gpu,
@@ -67,6 +68,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TestCase,
 )
+from torch.utils.cpp_extension import load_inline
 
 
 if TEST_WITH_DEV_DBG_ASAN:
@@ -2994,6 +2996,105 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
                 raise ValueError(
                     f"Rank {self.rank} barrier timed out waiting for rank 0 with error: {str(e)}"
                 ) from e
+
+
+class NcclUserBufferRegistrationTest(MultiProcessTestCase):
+    def createNcclAllocator(self):
+        nccl_allocator_source = """
+        #include <torch/extension.h>
+        #include <nccl.h>
+        #include <iostream>
+
+        extern "C" {
+
+          // Note that windows needs __declspec(dllexport): https://stackoverflow.com/a/24575865
+          C10_EXPORT void* nccl_alloc(size_t size, int device, void* stream) {
+            std::cout << "Using ncclMemAlloc" << std::endl;
+            void* ptr;
+            ncclResult_t err = ncclMemAlloc(&ptr, size);
+            return ptr;
+          }
+
+          C10_EXPORT void nccl_free(void* ptr, size_t size, int device, void* stream) {
+            std::cout << "Using ncclMemFree" << std::endl;
+            ncclResult_t err = ncclMemFree(ptr);
+          }
+        }
+        """
+        nccl_allocator_libname = "nccl_allocator"
+        nccl_allocator = load_inline(
+            name=nccl_allocator_libname,
+            cpp_sources=nccl_allocator_source,
+            with_cuda=True,
+            extra_ldflags=["-lnccl"],
+            is_python_module=False,
+            keep_intermediates=False,
+            verbose=True,
+        )
+        return nccl_allocator
+
+    def setUp(self):
+        super().setUp()
+        # TORCH_NCCL_BLOCKING_WAIT overrides TORCH_NCCL_ASYNC_ERROR_HANDLING hence tests
+        # that use TORCH_NCCL_BLOCKING_WAIT will test it as expected.
+        os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "1"
+        nccl_debug_file = tempfile.NamedTemporaryFile()
+        os.environ["NCCL_ALGO"] = "NVLS"
+        os.environ["NCCL_DEBUG"] = "INFO"
+        os.environ["NCCL_DEBUG_SUBSYS"] = "NVLS"
+        os.environ["NCCL_DEBUG_FILE"] = nccl_debug_file.name
+        self._spawn_processes()
+
+    def tearDown(self):
+        super().tearDown()
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
+
+    @requires_nccl()
+    @requires_nccl_version((2, 19), "Need NCCL 2.19 for user buffer registration")
+    @skip_if_lt_x_gpu(4)
+    @requires_multicast_support()
+    def test_nccl_user_buffer_registration(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        c10d.init_process_group(
+            backend="nccl", rank=self.rank, world_size=self.world_size, store=store
+        )
+        device = torch.device(f"cuda:{self.rank}")
+        torch.cuda.set_device(self.rank)
+        pg = c10d.distributed_c10d._get_default_group()
+        backend = pg._get_backend(torch.device(device))
+        allocator_path = self.createNcclAllocator()
+        allocator = torch.cuda.memory.CUDAPluggableAllocator(
+            allocator_path,
+            "nccl_alloc",
+            "nccl_free",
+        )
+        pool = torch.cuda.MemPool(allocator.allocator())
+
+        # allocate memory with ncclMemAlloc
+        with torch.cuda.use_mem_pool(pool):
+            tensor = torch.arange(1024 * 1024 * 2, device=device)
+
+        # register buffers to NCCL
+        backend.register_mem_pool(pool)
+
+        # allreduce now should use NVIDIA Switches
+        pg.allreduce(tensor).wait()
+        torch.cuda.synchronize(device=device)
+
+        # de-register buffers from NCCL
+        backend.deregister_mem_pool(pool)
+
+        # clean up memory
+        del tensor, pool
+
+        with open(os.environ["NCCL_DEBUG_FILE"]) as f:
+            nccl_debug_file_content = f.read()
+            # if buffers were registered and NVLS reduction ran, NCCL_DEBUG
+            # should show "local-registered" in stdout
+            self.assertRegex(nccl_debug_file_content, "local-registered")
 
 
 class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):

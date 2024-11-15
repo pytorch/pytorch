@@ -3999,6 +3999,10 @@ int MemPool::use_count() {
   return CUDACachingAllocator::getPoolUseCount(device_, id_);
 }
 
+c10::DeviceIndex MemPool::device() {
+  return device_;
+}
+
 MempoolId_t MemPool::graph_pool_handle(bool is_user_created) {
   if (is_user_created) {
     return {0, uid_++};

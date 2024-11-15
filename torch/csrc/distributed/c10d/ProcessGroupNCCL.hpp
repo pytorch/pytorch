@@ -761,6 +761,14 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   ErrorType getError() override;
 
+  // Performs NCCL user buffer registration for all buffers in
+  // the given MemPool
+  void registerMemPool(c10::cuda::MemPool* pool);
+
+  // Performs NCCL user buffer de-registration for all buffers in
+  // the given MemPool
+  void deregisterMemPool(c10::cuda::MemPool* pool);
+
   // This method adds a temporary extension for the timeout period,
   // applying to all collectives between the calling of this API and
   // the completion of the first collective on the GPU. While this feature

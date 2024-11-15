@@ -22,6 +22,7 @@ from torch.distributed._symmetric_memory import (
 from torch.testing._internal.common_cuda import _get_torch_cuda_version, SM90OrLater
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
+    requires_multicast_support,
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
@@ -53,17 +54,6 @@ def requires_cuda_p2p_access():
     return skip_but_pass_in_sandcastle_if(
         not cuda_p2p_access_available,
         "cuda p2p access is not available",
-    )
-
-
-def requires_multicast_support():
-    has_multicast_support = (
-        torch.cuda.is_available()
-        and _SymmetricMemory.has_multicast_support(DeviceType.CUDA, 0)
-    )
-    return skip_but_pass_in_sandcastle_if(
-        not has_multicast_support,
-        "multicast support is not available",
     )
 
 

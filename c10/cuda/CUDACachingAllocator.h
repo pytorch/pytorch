@@ -506,6 +506,7 @@ struct C10_CUDA_API MemPool {
   MempoolId_t id();
   CUDACachingAllocator::CUDAAllocator* allocator();
   int use_count();
+  c10::DeviceIndex device();
   static MempoolId_t graph_pool_handle(bool is_user_created = true);
 
  private:

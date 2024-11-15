@@ -1118,6 +1118,59 @@ ErrorType ProcessGroupNCCL::getError() {
   return error_;
 }
 
+void ProcessGroupNCCL::registerMemPool(c10::cuda::MemPool* pool) {
+  const auto key = std::to_string(pool->device());
+  auto device = at::Device(at::DeviceType::CUDA, pool->device());
+  LOG(INFO) << logPrefix()
+            << "Performing NCCL user buffer registration for all buffers in "
+            << "MemPool: " << pool->id() << ", device index: " << key
+            << ", i am " << this;
+  auto ncclComm = getNCCLComm(key);
+  if (ncclComm == nullptr) {
+    // HACK: currently we are using this function for NVLS
+    // reductions, and that's why using OpType::ALLREDUCE.
+    // If we end up using this API for zero-copy P2P, we might
+    // need to refactor and account for different OpType.
+    ncclComm = initNCCLComm(key, device, OpType::ALLREDUCE);
+  }
+  TORCH_INTERNAL_ASSERT(ncclComm != nullptr);
+  auto ctx = c10::cuda::MemPoolContext(pool);
+  auto snapshot = c10::cuda::CUDACachingAllocator::snapshot();
+  for (const auto& segmentInfo : snapshot.segments) {
+    TORCH_INTERNAL_ASSERT(
+        segmentInfo.device == pool->device(),
+        "Mismatch between CUDA memory segment device and pool's device");
+    ncclComm->registerSegment(
+        reinterpret_cast<void*>(segmentInfo.address), segmentInfo.total_size);
+  }
+}
+
+void ProcessGroupNCCL::deregisterMemPool(c10::cuda::MemPool* pool) {
+  const auto key = std::to_string(pool->device());
+  auto device = at::Device(at::DeviceType::CUDA, pool->device());
+  LOG(INFO) << logPrefix()
+            << "Performing NCCL user buffer deregistration for all buffers in "
+            << "MemPool: " << pool->id() << ", device index: " << key
+            << ", i am " << this;
+  auto ncclComm = getNCCLComm(key);
+  if (ncclComm == nullptr) {
+    // HACK: currently we are using this function for NVLS
+    // reductions, and that's why using OpType::ALLREDUCE.
+    // If we end up using this API for zero-copy P2P, we might
+    // need to refactor and account for different OpType.
+    ncclComm = initNCCLComm(key, device, OpType::ALLREDUCE);
+  }
+  TORCH_INTERNAL_ASSERT(ncclComm != nullptr);
+  auto ctx = c10::cuda::MemPoolContext(pool);
+  auto snapshot = c10::cuda::CUDACachingAllocator::snapshot();
+  for (const auto& segmentInfo : snapshot.segments) {
+    TORCH_INTERNAL_ASSERT(
+        segmentInfo.device == pool->device(),
+        "Mismatch between CUDA memory segment device and pool's device");
+    ncclComm->deregisterSegment(reinterpret_cast<void*>(segmentInfo.address));
+  }
+}
+
 c10::intrusive_ptr<intra_node_comm::IntraNodeComm> ProcessGroupNCCL::
     initIntraNodeComm() {
   using IntraNodeComm = intra_node_comm::IntraNodeComm;
