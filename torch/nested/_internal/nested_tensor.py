@@ -419,6 +419,8 @@ def jagged_from_list(
 ) -> Tuple[NestedTensor, torch.Tensor]:
     """Constructs a NestedTensor backed by jagged layout from a list of tensors"""
 
+    if len(tensors) == 0:
+        raise RuntimeError("Cannot construct a nested tensor from an empty tensor list")
     if not len(set(t.dtype for t in tensors)) == 1:  # noqa: C401
         raise RuntimeError(
             "When constructing a nested tensor, all tensors in list must have the same dtype"
@@ -427,22 +429,40 @@ def jagged_from_list(
         raise RuntimeError(
             "When constructing a nested tensor, all tensors in list must be on the same device"
         )
-
-    # Check that the NT is representable by the jagged layout.
-    # Jagged layout represents (B, *, D_0, D_1, ..., D_N), where the only
-    # raggedness allowed is for the single dim immediately adjacent to the batch dim.
-    sizes = [t.shape for t in tensors]
-    non_first_sizes = [s[1:] for s in sizes]
-    at_most_first_ragged = all(s == non_first_sizes[0] for s in non_first_sizes)
-    if not at_most_first_ragged:
+    if not len(set(t.dim() for t in tensors)) == 1:  # noqa: C401
         raise RuntimeError(
-            "Cannot represent given tensor list as a nested tensor with the jagged layout. "
-            "Note that the jagged layout only represents shapes of the form "
-            "(B, *, D_0, D_1, ..., D_N), with only * allowed to be ragged."
+            "When constructing a nested tensor, all tensors in list must have the same dim"
+        )
+    component_dim = tensors[0].dim()
+    if component_dim == 0:
+        raise RuntimeError(
+            "Cannot construct a nested tensor from a list of zero-dim tensors"
         )
 
+    # Check that the NT is representable by the jagged layout, which
+    # allows for a single ragged dimension after the batch dim.
+    # e.g. (B, *, D_0, ..., D_N), (B, D_0, *, ..., D_N), etc.
+    sizes = [t.shape for t in tensors]
+    ragged_idx = None
+    for d in range(component_dim):
+        dim_is_ragged = any(size[d] != sizes[0][d] for size in sizes)
+        if dim_is_ragged:
+            if ragged_idx is None:
+                # add 1 to convert to outer NJT dim space
+                ragged_idx = d + 1
+            else:
+                raise RuntimeError(
+                    "Cannot represent given tensor list as a nested tensor with the jagged layout. "
+                    "Note that the jagged layout only allows for a single ragged dimension. "
+                    "For example: (B, *, D_0, D_1, ..., D_N), with ragged * dim."
+                )
+
+    # allow for a rectangular NJT and default the ragged dim next to the batch dim
+    if ragged_idx is None:
+        ragged_idx = 1
+
     # Set properties appropriately.
-    values = torch.cat(tensors, dim=0)
+    values = torch.cat(tensors, dim=(ragged_idx - 1))
     to_kwargs = {}
     if device is not None:
         to_kwargs["device"] = device
@@ -458,15 +478,21 @@ def jagged_from_list(
         offsets = torch.cat(
             [
                 torch.zeros(1, dtype=torch.int64, device=values.device),
-                torch.tensor([s[0] for s in sizes], device=values.device).cumsum(dim=0),
+                torch.tensor(
+                    [s[ragged_idx - 1] for s in sizes], device=values.device
+                ).cumsum(dim=0),
             ]
         )
 
     # compute this now since it's easy
-    min_seqlen = min(t.shape[0] for t in tensors)
-    max_seqlen = max(t.shape[0] for t in tensors)
+    min_seqlen = min(t.shape[ragged_idx - 1] for t in tensors)
+    max_seqlen = max(t.shape[ragged_idx - 1] for t in tensors)
     ret_nt = nested_view_from_values_offsets(
-        values, offsets, min_seqlen=min_seqlen, max_seqlen=max_seqlen
+        values,
+        offsets,
+        min_seqlen=min_seqlen,
+        max_seqlen=max_seqlen,
+        ragged_idx=ragged_idx,
     )
     return (ret_nt, offsets)  # type: ignore[return-value]
 
@@ -605,9 +631,6 @@ def nested_view_from_values_offsets_lengths(
 def nested_from_padded(
     padded, offsets, ragged_idx=1, min_seqlen=None, max_seqlen=None, sum_S=None
 ):
-    if ragged_idx != 1:
-        raise RuntimeError("nested_from_padded(): only ragged_idx=1 supported for now")
-
     min_seqlen_tensor = None
     if min_seqlen is not None:
         min_seqlen_tensor = _store_val_in_tensor(min_seqlen)

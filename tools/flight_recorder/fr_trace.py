@@ -41,7 +41,7 @@ def main(args: Optional[Sequence[str]] = None) -> None:
     config = JobConfig()
     args = config.parse_args(args)
     assert args.trace_dir, "Trace directory trace_dir is required"
-    details, version = read_dir(args.prefix, args.trace_dir)
+    details, version = read_dir(args)
     db = build_db(details, args, version)
     if args.output:
         with open(args.output, "wb") as f:
