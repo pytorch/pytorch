@@ -1495,7 +1495,7 @@ def linalg_solve_triangular_meta(
 
 
 @register_meta(aten.triangular_solve)
-@out_wrapper("X", "M")
+@out_wrapper("X", "M", exact_dtype=True)
 def triangular_solve_meta(
     self: Tensor,
     A: Tensor,
@@ -3710,6 +3710,14 @@ def meta_fill(self, val):
 @register_meta(aten.relu_.default)
 def meta_relu_(self):
     return self
+
+
+@register_meta(aten._add_relu.Tensor)
+@out_wrapper()
+def meta__add_relu(self, other, alpha=1) -> Tensor:
+    return elementwise_meta(
+        self, other, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    )
 
 
 @register_meta([aten.index_put.default, aten._unsafe_index_put.default])

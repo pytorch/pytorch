@@ -1,7 +1,6 @@
 # Owner(s): ["module: cpp"]
 
 import os
-import unittest
 
 import psutil
 import pytorch_openreg
@@ -14,7 +13,6 @@ class TestOpenReg(TestCase):
     def test_initializes(self):
         self.assertEqual(torch._C._get_privateuse1_backend_name(), "openreg")
 
-    @unittest.SkipTest
     def test_autograd_init(self):
         # Make sure autograd is initialized
         torch.ones(2, requires_grad=True, device="openreg").sum().backward()
@@ -30,7 +28,7 @@ class TestOpenReg(TestCase):
                 thread_name = file.read().strip()
             all_thread_names.add(thread_name)
 
-        for i in range(pytorch_openreg._device_daemon.NUM_DEVICES):
+        for i in range(pytorch_openreg.NUM_DEVICES):
             self.assertIn(f"pt_autograd_{i}", all_thread_names)
 
     def test_factory(self):
@@ -124,6 +122,10 @@ class TestOpenReg(TestCase):
         y = x.expand(3, 2)
         self.assertEqual(y.to(device="cpu"), torch.tensor([[1, 1], [2, 2], [3, 3]]))
         self.assertEqual(x.data_ptr(), y.data_ptr())
+
+    def test_empty_tensor(self):
+        empty_tensor = torch.tensor((), device="openreg")
+        self.assertEqual(empty_tensor.to(device="cpu"), torch.tensor(()))
 
 
 if __name__ == "__main__":
