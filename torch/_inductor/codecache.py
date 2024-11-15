@@ -800,8 +800,8 @@ class FxGraphHashDetails:
                     self.fx_kwargs[k] = v
 
         from torch._higher_order_ops.triton_kernel_wrap import (
-            TritonKernelWrapperFunctional,
-            TritonKernelWrapperMutation,
+            triton_kernel_wrapper_functional,
+            triton_kernel_wrapper_mutation,
         )
 
         # Node meta will not be part of gm's reduce function, so lets remember
@@ -813,10 +813,10 @@ class FxGraphHashDetails:
                     continue
                 for node in itertools.chain(
                     module.graph.find_nodes(
-                        op="call_function", target=TritonKernelWrapperFunctional
+                        op="call_function", target=triton_kernel_wrapper_functional
                     ),
                     module.graph.find_nodes(
-                        op="call_function", target=TritonKernelWrapperMutation
+                        op="call_function", target=triton_kernel_wrapper_mutation
                     ),
                 ):
                     data = node.meta.get(

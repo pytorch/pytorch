@@ -49,7 +49,7 @@ from torch.testing._internal.triton_utils import requires_cuda
 if HAS_TRITON:
     import triton  # @manual
 
-    from torch.testing._internal.triton_utils import add_kernel
+    from torch.testing._internal.triton_utils import add_kernel, sub_kernel
 
 torch._dynamo.config.fake_tensor_cache_enabled = True
 torch._dynamo.config.fake_tensor_cache_crosscheck_enabled = True
@@ -537,8 +537,17 @@ class TestFxGraphCache(TestCase):
             add_kernel[grid](x, y, x, n_elements, BLOCK_SIZE=4)
             return x
 
+        def fn2(x, y):
+            n_elements = x.numel()
+            grid = lambda meta: (  # noqa: E731
+                triton.cdiv(n_elements, meta["BLOCK_SIZE"]),
+            )
+            sub_kernel[grid](x, y, x, n_elements, BLOCK_SIZE=4)
+            return x
+
         with config.patch(bundle_triton_into_fx_graph_cache=bundle_triton):
             compiled_fn = torch.compile(fn, fullgraph=True)
+            compiled_fn2 = torch.compile(fn2, fullgraph=True)
 
             x = torch.randn(4, device=GPU_TYPE)
             y = torch.randn(4, device=GPU_TYPE)
@@ -560,6 +569,20 @@ class TestFxGraphCache(TestCase):
             result = compiled_fn(x, y)
 
             self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 0)
+
+            # A second call should hit. (First reset so in-memory guards
+            # don't prevent compilation).
+            self.reset()
+
+            # Clean PyCodeCache and triton kernels
+            PyCodeCache.cache_clear()
+            shutil.rmtree(os.path.join(cache_dir(), "triton"), ignore_errors=True)
+
+            result = compiled_fn2(x, y)
+
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
             self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 0)
 
