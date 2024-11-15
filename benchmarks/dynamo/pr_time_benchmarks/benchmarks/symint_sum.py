@@ -45,24 +45,23 @@ class Benchmark(BenchmarkBase):
 
             records.append(
                 {
-                    "benchmark": (
-                        "pr_time_benchmarks",
-                        "",  # training or inference, not use
-                        "",  # dtype, not use
-                        {
+                    "benchmark": {
+                        "name": "pr_time_benchmarks",
+                        "extra_info": {
                             "device": "cpu",
                             "description": self.description(),
+                            "fullgraph": True,
                         },
-                    ),
-                    "model": (
-                        self.name(),
-                        "symint_sum",
-                        "",  # backend, not use
-                    ),
-                    "metric": (
-                        metric_name,
-                        [value],
-                    ),
+                    },
+                    "model": {
+                        "name": self.name(),
+                        "type": "symint_sum",
+                        "backend": "inductor",
+                    },
+                    "metric": {
+                        "name": metric_name,
+                        "benchmark_values": [value],
+                    },
                 }
             )
 

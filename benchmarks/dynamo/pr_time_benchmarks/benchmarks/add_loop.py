@@ -59,25 +59,23 @@ class Benchmark(BenchmarkBase):
 
             records.append(
                 {
-                    "benchmark": (
-                        "pr_time_benchmarks",
-                        "",  # training or inference, not use
-                        "",  # dtype, not use
-                        {
+                    "benchmark": {
+                        "name": "pr_time_benchmarks",
+                        "extra_info": {
                             "is_dynamic": self._dynamic,
                             "device": self._device,
                             "description": self.description(),
                         },
-                    ),
-                    "model": (
-                        self.name(),
-                        "add_loop",
-                        self._backend,
-                    ),
-                    "metric": (
-                        metric_name,
-                        [value],
-                    ),
+                    },
+                    "model": {
+                        "name": self.name(),
+                        "type": "add_loop",
+                        "backend": self._backend,
+                    },
+                    "metric": {
+                        "name": metric_name,
+                        "benchmark_values": [value],
+                    },
                 }
             )
 

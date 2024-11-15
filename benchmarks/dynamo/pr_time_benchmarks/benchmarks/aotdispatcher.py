@@ -65,25 +65,24 @@ class Benchmark(BenchmarkBase):
 
             records.append(
                 {
-                    "benchmark": (
-                        "pr_time_benchmarks",
-                        "training" if self._training else "inference",
-                        "",  # dtype, not use
-                        {
+                    "benchmark": {
+                        "name": "pr_time_benchmarks",
+                        "mode": "training" if self._training else "inference",
+                        "extra_info": {
                             "subclass": self._subclass,
                             "device": self._device,
                             "description": self.description(),
                         },
-                    ),
-                    "model": (
-                        self.name(),
-                        "aotdispatcher",
-                        "aot_eager_decomp_partition",
-                    ),
-                    "metric": (
-                        metric_name,
-                        [value],
-                    ),
+                    },
+                    "model": {
+                        "name": self.name(),
+                        "type": "aotdispatcher",
+                        "backend": "aot_eager_decomp_partition",
+                    },
+                    "metric": {
+                        "name": metric_name,
+                        "benchmark_values": [value],
+                    },
                 }
             )
 

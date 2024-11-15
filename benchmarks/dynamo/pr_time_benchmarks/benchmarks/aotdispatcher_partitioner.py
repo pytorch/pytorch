@@ -42,24 +42,22 @@ class Benchmark(BenchmarkBase):
 
             records.append(
                 {
-                    "benchmark": (
-                        "pr_time_benchmarks",
-                        "",  # training or inference, not use
-                        "",  # dtype, not use
-                        {
+                    "benchmark": {
+                        "name": "pr_time_benchmarks",
+                        "extra_info": {
                             "device": "cpu",
                             "description": self.description(),
                         },
-                    ),
-                    "model": (
-                        self.name(),
-                        "aotdispatcher_partitioner",
-                        "aot_eager_decomp_partition",
-                    ),
-                    "metric": (
-                        metric_name,
-                        [value],
-                    ),
+                    },
+                    "model": {
+                        "name": self.name(),
+                        "type": "aotdispatcher_partitioner",
+                        "backend": "aot_eager_decomp_partition",
+                    },
+                    "metric": {
+                        "name": metric_name,
+                        "benchmark_values": [value],
+                    },
                 }
             )
 

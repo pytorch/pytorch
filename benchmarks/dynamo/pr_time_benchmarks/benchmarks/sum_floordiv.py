@@ -42,24 +42,21 @@ class Benchmark(BenchmarkBase):
 
             records.append(
                 {
-                    "benchmark": (
-                        "pr_time_benchmarks",
-                        "",  # training or inference, not use
-                        "",  # dtype, not use
-                        {
+                    "benchmark": {
+                        "name": "pr_time_benchmarks",
+                        "extra_info": {
                             "device": "cpu",
                             "description": self.description(),
                         },
-                    ),
-                    "model": (
-                        self.name(),
-                        "sum_floordiv",
-                        "",  # backend, not use
-                    ),
-                    "metric": (
-                        metric_name,
-                        [value],
-                    ),
+                    },
+                    "model": {
+                        "name": self.name(),
+                        "type": "sum_floordiv",
+                    },
+                    "metric": {
+                        "name": metric_name,
+                        "benchmark_values": [value],
+                    },
                 }
             )
 

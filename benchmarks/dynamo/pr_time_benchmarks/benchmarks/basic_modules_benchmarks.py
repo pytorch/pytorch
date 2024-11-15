@@ -70,26 +70,24 @@ class Benchmark(BenchmarkBase):
 
             records.append(
                 {
-                    "benchmark": (
-                        "pr_time_benchmarks",
-                        "",  # training or inference, not use
-                        "",  # dtype, not use
-                        {
+                    "benchmark": {
+                        "name": "pr_time_benchmarks",
+                        "extra_info": {
                             "is_dynamic": self._dynamic,
                             "device": "cuda" if self._is_gpu else "cpu",
                             "is_force_shape_pad": self._force_shape_pad,
                             "description": self.description(),
                         },
-                    ),
-                    "model": (
-                        self.name(),
-                        "basic_modules",
-                        self.backend,
-                    ),
-                    "metric": (
-                        metric_name,
-                        [value],
-                    ),
+                    },
+                    "model": {
+                        "name": self.name(),
+                        "type": "basic_modules",
+                        "backend": self.backend,
+                    },
+                    "metric": {
+                        "name": metric_name,
+                        "benchmark_values": [value],
+                    },
                 }
             )
 
