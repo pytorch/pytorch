@@ -9,7 +9,7 @@ from torch.testing._internal.common_fsdp import (
     FSDPTest,
     NestedWrappedModule,
 )
-from torch.testing._internal.common_utils import run_tests, TEST_HPU, TEST_WITH_DEV_DBG_ASAN
+from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -48,7 +48,7 @@ class TestTraversal(FSDPTest):
                 nested_wrapped_module.module.get_submodule("2"),
             ],
         )
-devices = ("hpu" if TEST_HPU else "cuda")
+devices = ("cuda", "hpu")
 instantiate_device_type_tests(TestTraversal, globals(), only_for=devices)
 if __name__ == "__main__":
     run_tests()
