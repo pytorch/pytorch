@@ -142,7 +142,8 @@ def _unflatten_dynamic_shapes_with_inputs_tree(
 
 def _from_dynamic_shapes_to_dynamic_axes(
     dynamic_shapes: dict[str, Any] | tuple[Any, ...] | list[Any],
-    input_names: Sequence[str] | None = None,
+    input_names: Sequence[str],
+    exception: Exception,
 ) -> dict[str, Any] | None:
     """
     Converts dynamic_shapes into dynamic_axes by removing torch.export.Dim wrapping
@@ -172,15 +173,12 @@ def _from_dynamic_shapes_to_dynamic_axes(
 
     flat_dynamic_shapes = _pytree.tree_leaves(dynamic_shapes, is_leaf=is_dict_axes)
 
-    if input_names is None:
+    if len(input_names) < len(flat_dynamic_shapes):
         raise ValueError(
-            "input_names must be provided, as dynamic_shapes represents model inputs"
-        )
-    if len(input_names) != len(flat_dynamic_shapes):
-        raise ValueError(
-            f"Number of input names ({len(input_names)}) should match "
+            "To construct dynamic_axes from dynamic_shapes, "
+            f"number of input names ({len(input_names)}) should be greater than or equal to "
             f"the number of graph inputs(flat) ({len(flat_dynamic_shapes)})"
-        )
+        ) from exception
 
     dynamic_axes = {}
     # input names are assigned in order
@@ -317,16 +315,15 @@ def export_compat(
             if f is None:
                 raise TypeError("f must be provided when fallback is enabled") from e
             if dynamic_shapes is not None and dynamic_axes is None:
-                try:
-                    dynamic_axes = _from_dynamic_shapes_to_dynamic_axes(
-                        dynamic_shapes=dynamic_shapes,
-                        input_names=input_names,
-                    )
-                except Exception as e:
-                    raise RuntimeError(
-                        "# Failed to convert 'dynamic_shapes' to 'dynamic_axes'. "
-                        "Please provide 'dynamic_axes' directly for fallback. "
+                if input_names is None:
+                    raise ValueError(
+                        "Failed to convert dynamic_shapes to dynamic_axes. "
+                        "Either input_names or dynamic_axes must be provided "
+                        "when dynamic is requested in fallback"
                     ) from e
+                dynamic_axes = _from_dynamic_shapes_to_dynamic_axes(
+                    dynamic_shapes=dynamic_shapes, input_names=input_names, exception=e
+                )
             torch.onnx.utils.export(
                 model,  # type: ignore[arg-type]
                 args,

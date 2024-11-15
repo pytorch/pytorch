@@ -76,6 +76,7 @@ class TestCompat(common_utils.TestCase):
                 },
             ),
             (
+                # dynamic_shapes without names is supported
                 (
                     {
                         0: torch.export.Dim("customx_dim_0"),
@@ -94,6 +95,7 @@ class TestCompat(common_utils.TestCase):
                 },
             ),
             (
+                # partial dynamic_shapes only needs partial input_names
                 (
                     {
                         0: torch.export.Dim("customx_dim_0"),
@@ -114,6 +116,23 @@ class TestCompat(common_utils.TestCase):
             dynamic_shapes=dynamic_shapes, input_names=input_names
         )
         self.assertEqual(dynamic_axes, expected_dynamic_axes)
+
+    def test_from_dynamic_shapes_to_dynamic_axes_fails_when_input_names_is_less_than_flat_dynamic_shapes(
+        self,
+    ):
+        dynamic_shapes = (
+            {0: torch.export.Dim("dim")},
+            {0: torch.export.Dim("dim")},
+            {0: torch.export.Dim("dim")},
+            {1: torch.export.Dim("dim")},
+        )
+        input_names = ["input_x", "input_y", "input_z"]
+        with self.assertRaises(ValueError):
+            _compat._from_dynamic_shapes_to_dynamic_axes(
+                dynamic_shapes=dynamic_shapes,
+                input_names=input_names,
+                exception=Exception,
+            )
 
     def test_dynamic_shapes_supports_nested_input_model_with_input_names_assigned(self):
         dim = torch.export.Dim("dim", min=3)
