@@ -1778,16 +1778,16 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
         with self.assertRaises(ValueError):
             dist.send(input_tensor, group_dst=dist.get_rank())
 
-        with self.assertRaises(AssertionError):
+        with self.assertRaises(ValueError):
             dist.send(input_tensor, dist.get_rank(), group_dst=dist.get_rank())
-        with self.assertRaises(AssertionError):
+        with self.assertRaises(ValueError):
             dist.send(input_tensor)
 
         # test recv
         input_tensor = torch.zeros(2, 2)
         dist.recv(input_tensor, (self.rank + 1) % self.world_size)
         self.assertEqual(input_tensor, torch.zeros(2, 2) + 2)
-        with self.assertRaises(AssertionError):
+        with self.assertRaises(ValueError):
             dist.recv(input_tensor, src=0, group_src=0)
 
         dist.barrier()
