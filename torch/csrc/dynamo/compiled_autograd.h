@@ -179,6 +179,7 @@ struct TensorArgs {
   std::vector<uint32_t> input_origins;
 
  private:
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const std::optional<size_t>& active_node_call_idx;
   std::unordered_map<const c10::TensorImpl*, TensorArg> _args;
   // Every TensorArg from this is actually owned by _args (or _undefined) and
@@ -221,6 +222,7 @@ struct LiftedIValueArgs {
   std::vector<uint32_t> args_origins;
 
  private:
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const std::optional<size_t>& active_node_call_idx;
 };
 
@@ -586,11 +588,14 @@ class CompiledNodeArgs {
         _specialization_key(
             // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
             (uint8_t*)std::malloc(_specialization_key_storage)) {}
+  CompiledNodeArgs(const CompiledNodeArgs&) = delete;
+  CompiledNodeArgs(CompiledNodeArgs&&) = delete;
+  CompiledNodeArgs& operator=(const CompiledNodeArgs&) = delete;
+  CompiledNodeArgs& operator=(CompiledNodeArgs&&) = delete;
   ~CompiledNodeArgs() {
     // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
     std::free(_specialization_key);
   }
-  CompiledNodeArgs(const CompiledNodeArgs&) = delete;
 
  private:
   template <typename T>
@@ -615,7 +620,7 @@ class CompiledNodeArgs {
 
 struct TraceState {
   TraceState(std::vector<std::optional<c10::SymInt>>&& ss, size_t num_outputs)
-      : sym_sizes(ss), outputs(num_outputs) {}
+      : sym_sizes(std::move(ss)), outputs(num_outputs) {}
 
   void debug_asserts() {
     TORCH_INTERNAL_ASSERT(sym_sizes_index == sym_sizes.size());
