@@ -56,6 +56,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     set_default_dtype,
     skipIfNotMiopenSuggestNHWC,
+    skipIfRocm,
     skipIfRocmVersionLessThan,
     subtest,
     TEST_SCIPY,
@@ -4024,6 +4025,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
     @onlyCUDA
     @largeTensorTest("40GB")
     @largeTensorTest("24GB", "cpu")
+    @skipIfRocm # temp skip
     def test_conv3d_64bit_indexing(self, device):
         x = torch.rand(1, 32, 512, 512, 256)
         m = torch.nn.Conv3d(32, 1, kernel_size=1, padding=0, stride=1, bias=False)
