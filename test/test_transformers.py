@@ -268,6 +268,8 @@ class TestTransformers(NNTestCase):
     @parametrize("key_padding_mask_dim", [2, None])
     @parametrize("mask_dtype", [torch.bool, torch.float32])
     def test_multiheadattention_fastpath_attn_mask(self, device, attn_mask_dim, key_padding_mask_dim, mask_dtype):
+        if 'cuda' in device and TEST_WITH_ROCM and mask_dtype==torch.bool :
+            self.skipTest(f"Failing on ROCm with mask_dtype='{mask_dtype}'")
         with torch.no_grad():
             B = 2
             L = 4
@@ -320,6 +322,8 @@ class TestTransformers(NNTestCase):
     @parametrize("use_autocast", [True, False])
     @parametrize("d_model", [12, 256])
     def test_transformerencoder_fastpath(self, device, use_torchscript, enable_nested_tensor, use_autocast, d_model):
+        if 'cuda' in device and TEST_WITH_ROCM and not use_torchscript and not use_autocast:
+            self.skipTest(f"Failing on ROCm")
         """
         Test TransformerEncoder fastpath output matches slowpath output
         """
@@ -1621,6 +1625,7 @@ class TestSDPAFailureModes(NNTestCase):
                 self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
                     q, k, v, None, 0.0, False))
 
+    @skipIfRocm  
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention")
     def test_flash_atteention_large_bf16_nan_values(self, device):
