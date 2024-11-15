@@ -56,6 +56,7 @@ struct OpenRegHooksInterface : public at::PrivateUse1HooksInterface {
   ~OpenRegHooksInterface() override = default;
 
   bool hasPrimaryContext(c10::DeviceIndex device_index) const override {
+    py::gil_scoped_acquire acquire;
     return get_method("hasPrimaryContext")(device_index).cast<bool>();
   }
 
