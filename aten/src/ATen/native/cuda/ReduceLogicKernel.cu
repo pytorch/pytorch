@@ -32,7 +32,7 @@ void or_kernel_cuda(TensorIterator& iter) {
       });
 }
 
-REGISTER_DISPATCH(and_stub, &and_kernel_cuda);
-REGISTER_DISPATCH(or_stub, &or_kernel_cuda);
+REGISTER_DISPATCH(and_stub, &and_kernel_cuda)
+REGISTER_DISPATCH(or_stub, &or_kernel_cuda)
 
 } // namespace at::native

@@ -409,9 +409,9 @@ Tensor NestedTensor_sum_dim_CPU(
     for (const auto i : c10::irange(ntensors)) {
       int64_t segments = num_segments[i].item<int64_t>();
       int64_t segment_length = segment_lengths[i].item<int64_t>();
-      for (auto j = 0; j < segments; j++) {
+      for (int64_t j = 0; j < segments; j++) {
         scalar_t res = 0;
-        for (auto k = 0; k < segment_length; k++) {
+        for (int64_t k = 0; k < segment_length; k++) {
           res += input_data[in_idx];
           in_idx += 1;
         }

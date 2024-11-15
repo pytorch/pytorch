@@ -216,9 +216,9 @@ def query_key_value_clones(
     """Clones the query, key, and value tensors and moves them to the specified dtype."""
     if dtype is None:
         dtype = query.dtype
-    query_ref = query.clone().detach().to(dtype).requires_grad_(query.requires_grad)
-    key_ref = key.clone().detach().to(dtype).requires_grad_(key.requires_grad)
-    value_ref = value.clone().detach().to(dtype).requires_grad_(value.requires_grad)
+    query_ref = query.detach().clone().to(dtype).requires_grad_(query.requires_grad)
+    key_ref = key.detach().clone().to(dtype).requires_grad_(key.requires_grad)
+    value_ref = value.detach().clone().to(dtype).requires_grad_(value.requires_grad)
     return query_ref, key_ref, value_ref
 
 
@@ -1557,6 +1557,32 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 1)
             else:
                 self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 2)
+
+    @supported_platform
+    def test_larger_block_mask_bug(self):
+        def mask_mod(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        mask_2 = create_block_mask(
+            mask_mod=mask_mod,
+            B=2,
+            H=None,
+            Q_LEN=128,
+            KV_LEN=256,
+            device="cuda",
+        )
+
+        # Compile flex attention
+        flex_attention_compiled = torch.compile(flex_attention, dynamic=False)
+
+        # Create input tensors
+        shape = (2, 1, 2, 16)
+        q = torch.normal(0.0, 3.0, shape, device="cuda", dtype=torch.float16)
+        k = torch.normal(0.0, 3.0, shape, device="cuda", dtype=torch.float16)
+        v = torch.normal(0.0, 3.0, shape, device="cuda", dtype=torch.float16)
+        eager = flex_attention(q, k, v, block_mask=mask_2)
+        out = flex_attention_compiled(q, k, v, block_mask=mask_2)
+        torch.testing.assert_close(eager, out, atol=5e-3, rtol=5e-3)
 
 
 common_utils.instantiate_parametrized_tests(TestFlexDecoding)
