@@ -112,7 +112,7 @@ def tensorify_python_scalars(
     tracer = fx.proxy.GraphAppendingTracer(graph)
     expr_to_sym_proxy: dict[sympy.Expr, MetaProxy] = {}
     expr_to_tensor_proxy: dict[sympy.Expr, MetaProxy] = {}
-    placeholder_to_symfloat_name: dict[fx.Node, str] = {}
+    tensorified_symbols: set[str] = set()
     should_restart = False
 
     first_non_placeholder = None
@@ -203,11 +203,6 @@ def tensorify_python_scalars(
                 expr_to_sym_proxy[s] = MetaProxy(
                     node, tracer=tracer, fake_mode=fake_mode
                 )
-                # We use _expr instead of expr b/c we want the symbol not the replacement
-                placeholder_to_symfloat_name[node.args[0]] = node.meta[
-                    "val"
-                ].node._expr.name
-
             elif (sym_expr := _get_sym_val(node)) is not None:
                 if sym_expr not in expr_to_sym_proxy and not isinstance(
                     sym_expr, (sympy.Number, sympy.logic.boolalg.BooleanAtom)
@@ -251,6 +246,9 @@ def tensorify_python_scalars(
                         except NotImplementedError:
                             transform = False
                             break
+
+                        # We use _expr instead of expr b/c we want the symbol not the replacement
+                        tensorified_symbols.add(str(a.meta["val"].node._expr))
 
                         if proxy.node.meta["val"].dtype != compute_dtype:
                             proxy = torch.ops.prims.convert_element_type.default(
@@ -307,40 +305,19 @@ def tensorify_python_scalars(
                     node.replace_all_uses_with(guard_scalar(val))
                     graph.erase_node(node)
 
-    # There are sometimes when we actually didn't set any replacements but still
-    # have specializations. For these cases we scan through placeholders and specialize
-    # using node meta val. Here's an example graph where you have no replacements but
-    # still want to specialize and get rid of zf0 before inductor:
-    #
-    # def forward(self, L_tensor_: "f16[2, 3, 4][12, 4, 1]cuda:0", L_scale_factor_: "f64[][]cpu"):
-    #     l_tensor_ = L_tensor_
-    #     l_scale_factor_ = L_scale_factor_
-    #     item: "Sym(zf0)" = l_scale_factor_.item();  l_scale_factor_ = None
-    #     interpolate: "f16[2, 3, TruncToInt(4.0*zf0)][3*TruncToInt(4.0*zf0), TruncToInt(4.0*zf0), 1]cuda:0" = torch.nn.functional.interpolate(l_tensor_, size = None, scale_factor = item, mode = 'nearest-exact', align_corners = None, recompute_scale_factor = True);  l_tensor_ = item = None # noqa: B950
-    #     return (interpolate,)
-    for i, node in enumerate(graph.nodes):
-        if node.op == "placeholder":
-            name = placeholder_to_symfloat_name.get(node)
-            if len(node.users) == 0 and name is not None:
-                # At this point we've lost the back pointer to
-                # what source this placeholder points to. Instead,
-                # we will rely on the symfloat name to specialize when we
-                # restart analysis.
-                TensorifyState.specialize(name)
-                should_restart = True
-        else:
-            break
-
     # Sometimes by the time we get to tensorify, there have already been
     # specializations, eg. in python_arg_parser.h. In these cases,
     # placeholder nodes no longer have a reference to their original
     # symfloat and thus we need to deduce specializations have happend
     # via shape_env.replacements. NB: there's an important invariant here
     # that symfloats keep consistent names across restarts.
-    for k, v in shape_env.replacements.items():
+    for k, v in shape_env.var_to_val.items():
         if symbol_is_type(k, SymT.FLOAT) and isinstance(v, sympy.core.numbers.Float):
             name = str(k)
-            if not TensorifyState.should_specialize(name):
+            if (
+                not TensorifyState.should_specialize(name)
+                and name not in tensorified_symbols
+            ):
                 TensorifyState.specialize(name)
                 should_restart = True
 
