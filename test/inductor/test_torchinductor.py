@@ -5263,7 +5263,6 @@ class CommonTemplate:
         if self.device != "cpu":
             assertGeneratedKernelCountEqual(self, 1)
 
-    @skip_if_cpp_wrapper
     def test_complex_fallback(self):
         def fn(x):
             return x * x + 10
@@ -5590,7 +5589,6 @@ class CommonTemplate:
         )
 
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
-    @skip_if_cpp_wrapper
     def test_nonzero_unbacked_refinement(self):
         def fn(x):
             z = x.nonzero()
@@ -5602,8 +5600,12 @@ class CommonTemplate:
             (torch.tensor([0, 1, 3, 4, 2, 0, 0]),),
         )
 
-        with self.assertRaises(RuntimeError):
-            torch.compile(fn)(torch.tensor([0, 0, 0, 0]))
+        # non-zero's output size is data-dependent, but torch.compile implicitly assumes
+        # that it will be constant.  This causes a RuntimeError below in normal mode,
+        # but creates an out-of-bounds memory access (segfault) in cpp_wrapper mode.
+        if not config.cpp_wrapper:
+            with self.assertRaises(RuntimeError):
+                torch.compile(fn)(torch.tensor([0, 0, 0, 0]))
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_unbacked_floordiv_simplify(self):
@@ -8390,8 +8392,14 @@ class CommonTemplate:
         self.common(fn, [torch.zeros([20, 20])])
 
     @config.patch(check_stack_no_cycles_TESTING_ONLY=True)
-    @skip_if_cpp_wrapper
     def test_check_stack_no_cycles(self):
+        if config.cpp_wrapper and self.device != "cpu":
+            raise unittest.SkipTest(
+                "codegen() gets called twice in cpp_wrapper GPU compilation, which "
+                "causes this test to fail.  This can be removed if GPU compilation is "
+                "done in a single pass."
+            )
+
         @torch.compile()
         def fn(x):
             return x * 3
@@ -8894,8 +8902,10 @@ class CommonTemplate:
             self.assertEqual(bw_code.count("tl.rand"), 0)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 4)
 
-    @skip_if_cpp_wrapper
     def test_randint_kernel_count(self):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("Only valid for GPU!")
+
         @torch._dynamo.optimize_assert("inductor")
         def fn1():
             random_tensor1 = torch.randint(10, [32], device=self.device)
@@ -8904,9 +8914,12 @@ class CommonTemplate:
             return random_tensor1, random_tensor2, random_tensor3
 
         _, source_codes = run_and_get_code(fn1)
-        if self.device == GPU_TYPE:
-            self.assertEqual(len(source_codes), 1)
-            self.assertEqual(source_codes[0].count("async_compile.triton"), 2)
+        # cpp_wrapper does a 2-pass generation on GPU.
+        self.assertEqual(len(source_codes), 1 if not config.cpp_wrapper else 2)
+        self.assertEqual(source_codes[0].count("async_compile.triton"), 2)
+        if config.cpp_wrapper:
+            # The second pass should not involve triton at all.
+            self.assertEqual(source_codes[1].count("async_compile.triton"), 0)
 
     def test_roll(self):
         def fn(a):
@@ -9533,6 +9546,8 @@ class CommonTemplate:
         for x in (torch.randn(2, 3), torch.randn(2, 2), torch.randn(3, 2)):
             self.common(fn, (x,))
 
+    # cpp_wrapper cannot currently handle fallback ops with return types containing
+    # list[Tensor], which will eventually need to get fixed.
     @skip_if_cpp_wrapper
     def test_kwargs(self):
         if self.device == GPU_TYPE:
@@ -10606,7 +10621,6 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn((16, 16, 16)),), check_lowp=False)
 
-    @skip_if_cpp_wrapper
     def test_searchsorted(self):
         def fn(sorted_sequence, values, out_int32, right, side, sorter):
             return torch.searchsorted(
