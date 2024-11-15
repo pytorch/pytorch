@@ -11,8 +11,10 @@ from torch.testing._internal.common_utils import (
     IS_CI,
     IS_WINDOWS,
     skipIfRocm,
+    skipIfRocmArch,
     slowTest,
     TEST_WITH_ASAN,
+    NAVI_ARCH
 )
 
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
@@ -241,6 +243,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             return code, code2
 
         @fresh_inductor_cache()
+        @skipIfRocmArch(NAVI_ARCH)
         @torch._inductor.config.patch(max_autotune_gemm_backends="TRITON")
         def test_equivalent_template_code(self):
             code, code2 = self._equivalent_output_code_impl(256)
