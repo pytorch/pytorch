@@ -797,7 +797,7 @@ void mm_get_thread_blocking(
   }
 }
 
-template<typename X_t, typename W_t>
+template<typename X_t, typename W_t, bool try_vertical_transverse, bool try_horizontal_transverse>
 void _mm_get_cache_blocking(
     int num_threads,
     int64_t M,
@@ -813,7 +813,8 @@ void _mm_get_cache_blocking(
     int64_t& Nc_blocks,
     int64_t& Kc_blocks,
     uint32_t L1_cache_size,
-    uint32_t L2_cache_size) {
+    uint32_t L2_cache_size,
+    bool& horizontal_transverse) {
   // See NOTE [CPP GEMM Cache Blocking Algorithm] for the cache blocking algorithm.
   // TODO(jgong5): cache cache blocking results
   // TODO: tune the factor here
@@ -826,34 +827,108 @@ void _mm_get_cache_blocking(
   constexpr size_t num_byte_A = sizeof(X_t);
   constexpr size_t num_byte_B = sizeof(W_t);
 
-  int64_t size_cache_B = Kr * Kt_blocks * Nr * num_byte_B;
-  Kc_blocks = Kt_blocks;
-  if (size_cache_B > L1) {
-      Kc_blocks = (int64_t)std::floor(L1 / (Kr * Nr * num_byte_B));
-  }
+  auto _get_cache_block_of_vertical_transverse = [&]() -> std::tuple<int64_t, int64_t, int64_t>
+  {
 
-  float min_Mc_ratio = 2;
-  int64_t min_Mc_blocks = std::ceil(min_Mc_ratio * Mr / Nr);
-  auto Kt_bytes = Kt_blocks * Kr * num_byte_A;
-  if (min_Mc_blocks * Mr * Kt_bytes < L2) {
-    Mc_blocks = std::min(Mt_blocks, (int64_t)std::floor(L2 / (Mr * Kt_bytes)));
-    Nc_blocks = 1;
-  } else {
-    Mc_blocks = Mt_blocks;
-    Nc_blocks = std::min((int64_t)std::ceil((float)Mc_blocks * Mr / Nr), Nt_blocks);
-    auto Nc_bytes = Nc_blocks * Nr * 4;
-    auto Kc_bytes = Kc_blocks * Kr * num_byte_A;
-    if (Mc_blocks * Mr * (Kc_bytes + Nc_bytes) > L2) {
-      auto M_max = (std::sqrt(Kc_bytes * Kc_bytes + 16 * L2) - Kc_bytes) / 8;
-      if (M_max < Mc_blocks * Mr) {
-        Mc_blocks = (int64_t)std::floor(M_max / Mr);
-        Nc_blocks = std::min((int64_t)std::ceil((float)Mc_blocks * Mr / Nr), Nt_blocks);
+    int64_t _Mc_blocks, _Nc_blocks, _Kc_blocks;
+
+    int64_t size_cache_B = Kr * Kt_blocks * Nr * num_byte_B;
+    _Kc_blocks = Kt_blocks;
+    if (size_cache_B > L1) {
+        _Kc_blocks = (int64_t)std::floor(L1 / (Kr * Nr * num_byte_B));
+    }
+
+    float min_Mc_ratio = 2;
+    int64_t min_Mc_blocks = std::ceil(min_Mc_ratio * Mr / Nr);
+    auto Kt_bytes = Kt_blocks * Kr * num_byte_A;
+    if (min_Mc_blocks * Mr * Kt_bytes < L2) {
+      _Mc_blocks = std::min(Mt_blocks, (int64_t)std::floor(L2 / (Mr * Kt_bytes)));
+      _Nc_blocks = 1;
+    } else {
+      _Mc_blocks = Mt_blocks;
+      _Nc_blocks = std::min((int64_t)std::ceil((float)_Mc_blocks * Mr / Nr), Nt_blocks);
+      auto Nc_bytes = _Nc_blocks * Nr * 4;
+      auto Kc_bytes = _Kc_blocks * Kr * num_byte_A;
+      if (_Mc_blocks * Mr * (Kc_bytes + Nc_bytes) > L2) {
+        auto M_max = (std::sqrt(Kc_bytes * Kc_bytes + 16 * L2) - Kc_bytes) / 8;
+        if (M_max < _Mc_blocks * Mr) {
+          _Mc_blocks = (int64_t)std::floor(M_max / Mr);
+          _Nc_blocks = std::min((int64_t)std::ceil((float)_Mc_blocks * Mr / Nr), Nt_blocks);
+        }
       }
     }
+    return std::make_tuple(_Mc_blocks, _Nc_blocks, _Kc_blocks);
+  };
+
+  auto _get_cache_block_of_horizontal_transverse = [&]() -> std::tuple<int64_t, int64_t, int64_t>
+  {
+
+    int64_t _Mc_blocks, _Nc_blocks, _Kc_blocks;
+
+    int64_t size_cache_A = Kr * Kt_blocks * Mr * num_byte_A;
+    _Kc_blocks = Kt_blocks;
+    if (size_cache_A > L1) {
+        _Kc_blocks = (int64_t)std::floor(L1 / (Kr * Mr * num_byte_A));
+    }
+
+    float min_Nc_ratio = 2;
+    int64_t min_Nc_blocks = std::ceil(min_Nc_ratio * Nr / Mr);
+    auto Kt_bytes = Kt_blocks * Kr * num_byte_B;
+    if (min_Nc_blocks * Nr * Kt_bytes < L2) {
+      _Nc_blocks = std::min(Nt_blocks, (int64_t)std::floor(L2 / (Nr * Kt_bytes)));
+      _Mc_blocks = 1;
+    } else {
+      _Nc_blocks = Nt_blocks;
+      _Mc_blocks = std::min((int64_t)std::ceil((float)_Nc_blocks * Nr / Mr), Mt_blocks);
+      auto Mc_bytes = _Mc_blocks * Mr * 4;
+      auto Kc_bytes = _Kc_blocks * Kr * num_byte_B;
+      if (_Nc_blocks * Nr * (Kc_bytes + Mc_bytes) > L2) {
+        auto N_max = (std::sqrt(Kc_bytes * Kc_bytes + 16 * L2) - Kc_bytes) / 8;
+        if (N_max < _Nc_blocks * Nr) {
+          _Nc_blocks = (int64_t)std::floor(N_max / Nr);
+          _Mc_blocks = std::min((int64_t)std::ceil((float)_Nc_blocks * Nr / Mr), Mt_blocks);
+        }
+      }
+    }
+    return std::make_tuple(_Mc_blocks, _Nc_blocks, _Kc_blocks);
+  };
+
+  if constexpr (try_vertical_transverse && try_horizontal_transverse) {
+    int64_t _Mc_blocks, _Nc_blocks, _Kc_blocks;
+    std::tie(Mc_blocks, Nc_blocks, Kc_blocks) = _get_cache_block_of_vertical_transverse();
+    std::tie(_Mc_blocks, _Nc_blocks, _Kc_blocks) = _get_cache_block_of_horizontal_transverse();
+    if (
+        Mr == Nr
+        && num_byte_A == num_byte_B
+        && (
+            (Mc_blocks * Mr /  Nr) == (_Nc_blocks * Nr /  Mr)
+        )
+        && (
+            (
+                (
+                    (Mt_blocks / _Nc_blocks) >= (Nt_blocks / Mc_blocks)
+                ) && (
+                    Mt_blocks / _Nc_blocks < 25
+                )
+            ) || (
+                Nt_blocks / Mc_blocks > 25
+            )
+        )
+    ) {
+      Mc_blocks = _Mc_blocks;
+      Nc_blocks = _Nc_blocks;
+      Kc_blocks = _Kc_blocks;
+      horizontal_transverse = true;
+    }
+  } else if constexpr(try_horizontal_transverse) {
+    std::tie(Mc_blocks, Nc_blocks, Kc_blocks) = _get_cache_block_of_horizontal_transverse();
+    horizontal_transverse = true;
+  } else {
+    std::tie(Mc_blocks, Nc_blocks, Kc_blocks) = _get_cache_block_of_vertical_transverse();
   }
 }
 
-template<typename X_t, typename W_t>
+template<typename X_t, typename W_t, bool try_vertical_transverse, bool try_horizontal_transverse>
 void mm_get_cache_blocking(
     int num_threads,
     int64_t M,
@@ -869,19 +944,20 @@ void mm_get_cache_blocking(
     int64_t& Nc_blocks,
     int64_t& Kc_blocks,
     uint32_t L1_cache_size,
-    uint32_t L2_cache_size) {
+    uint32_t L2_cache_size,
+    bool& horizontal_transverse) {
   thread_local std::map<
     std::tuple<int, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t>,
-    std::tuple<int64_t, int64_t, int64_t>> cache;
+    std::tuple<int64_t, int64_t, int64_t, bool>> cache;
   auto key = std::make_tuple(num_threads, M, N, K, Mr, Nr, Kr, Mt_blocks, Nt_blocks, Kt_blocks, L1_cache_size, L2_cache_size);
   auto it = cache.find(key);
   if (it != cache.end()) {
-    std::tie(Mc_blocks, Nc_blocks, Kc_blocks) = it->second;
+    std::tie(Mc_blocks, Nc_blocks, Kc_blocks, horizontal_transverse) = it->second;
     return;
   } else {
-    _mm_get_cache_blocking<X_t, W_t>(
-        num_threads, M, N, K, Mr, Nr, Kr, Mt_blocks, Nt_blocks, Kt_blocks, Mc_blocks, Nc_blocks, Kc_blocks, L1_cache_size, L2_cache_size);
-    cache[key] = std::make_tuple(Mc_blocks, Nc_blocks, Kc_blocks);
+    _mm_get_cache_blocking<X_t, W_t, try_vertical_transverse, try_horizontal_transverse>(
+        num_threads, M, N, K, Mr, Nr, Kr, Mt_blocks, Nt_blocks, Kt_blocks, Mc_blocks, Nc_blocks, Kc_blocks, L1_cache_size, L2_cache_size, horizontal_transverse);
+    cache[key] = std::make_tuple(Mc_blocks, Nc_blocks, Kc_blocks, horizontal_transverse);
   }
 }
 
