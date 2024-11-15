@@ -4135,6 +4135,7 @@ class DistributedTest:
         @skip_but_pass_in_sandcastle_if(
             BACKEND == "mpi", "MPI doesn't supports GPU barrier"
         )
+        @with_nccl_blocking_wait
         def test_barrier_group_cuda(self):
             group, group_id, rank = self._init_group_test()
             rank_to_GPU = init_multigpu_helper(dist.get_world_size(), BACKEND)
@@ -4145,6 +4146,7 @@ class DistributedTest:
         @skip_but_pass_in_sandcastle_if(
             BACKEND == "mpi", "MPI doesn't supports GPU barrier"
         )
+        @with_nccl_blocking_wait
         def test_barrier_full_group_cuda(self):
             group, group_id, rank = self._init_full_group_test()
             rank_to_GPU = init_multigpu_helper(dist.get_world_size(), BACKEND)
