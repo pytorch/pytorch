@@ -13,6 +13,7 @@ from torch._dynamo.exc import TensorifyScalarRestartAnalysis
 from torch._dynamo.symbolic_convert import TensorifyState
 from torch._prims_common import get_computation_dtype
 from torch._subclasses import fake_tensor  # noqa: TCH001
+from torch._subclasses.fake_tensor import FakeTensor
 from torch._utils_internal import justknobs_check
 from torch.fx._utils import lazy_format_graph_code
 from torch.fx.experimental.symbolic_shapes import guard_scalar, ShapeEnv  # noqa: TCH001
@@ -112,6 +113,7 @@ def tensorify_python_scalars(
     expr_to_sym_proxy: dict[sympy.Expr, MetaProxy] = {}
     expr_to_tensor_proxy: dict[sympy.Expr, MetaProxy] = {}
     placeholder_to_symfloat_name: dict[fx.Node, str] = {}
+    should_restart = False
 
     first_non_placeholder = None
     placeholders = set()
@@ -214,6 +216,23 @@ def tensorify_python_scalars(
                         node, tracer=tracer, fake_mode=fake_mode
                     )
 
+            # Specialize all dimensions that contain symfloats. Here's
+            # an example test that requires this:
+            # PYTORCH_OPINFO_SAMPLE_INPUT_INDEX=4 tlp python test/inductor/test_torchinductor_opinfo.py TestInductorOpInfoCUDA.test_comprehensive_nn_functional_interpolate_bicubic_cuda_float32 # noqa: B950
+            val = node.meta.get("val")
+            if isinstance(val, FakeTensor):
+                for dim in val.shape:
+                    if isinstance(
+                        dim,
+                        (torch.SymFloat, torch.SymInt, torch.SymBool),
+                    ):
+                        for s in dim.node.expr.free_symbols:
+                            if symbol_is_type(
+                                s, SymT.FLOAT
+                            ) and not TensorifyState.should_specialize(s):
+                                TensorifyState.specialize(str(s))
+                                should_restart = True
+
             # Look for functions to convert
             if node.op == "call_function" and node.target in SUPPORTED_OPS:
                 args: List[Any] = []
@@ -288,7 +307,6 @@ def tensorify_python_scalars(
                     node.replace_all_uses_with(guard_scalar(val))
                     graph.erase_node(node)
 
-    should_restart = False
     # There are sometimes when we actually didn't set any replacements but still
     # have specializations. For these cases we scan through placeholders and specialize
     # using node meta val. Here's an example graph where you have no replacements but
