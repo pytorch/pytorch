@@ -53,6 +53,7 @@ from torch._export.utils import (
     _collect_and_set_constant_attrs,
     _collect_param_buffer_metadata,
     _detect_fake_mode_from_gm,
+    _force_dispatch_to_orig_cia_callable,
     _get_decomp_for_cia,
     _is_preservable_cia_op,
     _name_hoo_subgraph_placeholders,
@@ -60,7 +61,6 @@ from torch._export.utils import (
     _populate_param_buffer_metadata_to_new_gm,
     _rename_without_collisions,
     _special_op_to_preserve_cia,
-    _force_dispatch_to_orig_cia_callable,
 )
 from torch._export.verifier import Verifier
 from torch._guards import detect_fake_mode
@@ -238,13 +238,13 @@ def _override_composite_implicit_decomp(cia_ops_to_callable, safe=True):
         # (2) as a FakeTensorMode registration
         # (3) as a DispatchKey::Meta registration
         #
-        # During export, we nub out most CIA ops to return NotImplemented to 
-        # avoid decomposing them during tracing. To recover the existing shape propagation behavior, 
+        # During export, we nub out most CIA ops to return NotImplemented to
+        # avoid decomposing them during tracing. To recover the existing shape propagation behavior,
         # we register these CIA decomps directly as FakeTensorMode rules as well.
-        # A valid question is: all CIA ops are also registered to the Meta key, so why 
-        # can't we just rely on running the meta tensor kernels? The issue is that when 
-        # FakeTensorMode runs a meta tensor kernel, the devices of all inputs have been 
-        # nubbed out to return "meta". If we have any CIA op impls that need to branch on 
+        # A valid question is: all CIA ops are also registered to the Meta key, so why
+        # can't we just rely on running the meta tensor kernels? The issue is that when
+        # FakeTensorMode runs a meta tensor kernel, the devices of all inputs have been
+        # nubbed out to return "meta". If we have any CIA op impls that need to branch on
         # device, we need to register them as FakeTensorMode rules to preserve any device-specific behavior.
         if not _is_op_registered_to_fake_rule(op_overload):
             register_op_impl(op_overload)(
