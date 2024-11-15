@@ -23,7 +23,6 @@ from torch._dynamo.test_case import TestCase
 from torch._dynamo.testing import normalize_gm
 from torch._export.pass_base import _ExportPassBaseDeprecatedDoNotUse
 from torch._export.utils import (
-    _decomp_table_to_post_autograd_aten,
     get_buffer,
     get_param,
     is_buffer,
@@ -1668,7 +1667,7 @@ def forward(self, p_linear_weight, p_linear_bias, x):
                 return torch.ops.aten.chunk.default(x, 3, 0)
 
         ep = torch.export.export(Foo(), (torch.randn(3, 3),))
-        decomp_table = _decomp_table_to_post_autograd_aten()
+        decomp_table = default_decompositions()
         del decomp_table[torch.ops.aten.linear.default]
         ep = ep.run_decompositions(decomp_table)
 
@@ -1680,10 +1679,10 @@ def forward(self, p_linear_weight, p_linear_bias, x):
             """\
 def forward(self, p_linear_weight, p_linear_bias, x):
     linear = torch.ops.aten.linear.default(x, p_linear_weight, p_linear_bias);  x = p_linear_weight = p_linear_bias = None
-    split = torch.ops.aten.split.Tensor(linear, 1);  linear = None
-    getitem = split[0]
-    getitem_1 = split[1]
-    getitem_2 = split[2];  split = None
+    split_with_sizes = torch.ops.aten.split_with_sizes.default(linear, [1, 1, 1]);  linear = None
+    getitem = split_with_sizes[0]
+    getitem_1 = split_with_sizes[1]
+    getitem_2 = split_with_sizes[2];  split_with_sizes = None
     return (getitem, getitem_1, getitem_2)""",
         )
 
@@ -2952,6 +2951,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         export(N(), inputs, dynamic_shapes=dynamic_shapes)
 
     @testing.expectedFailureSerDer  # no unbacked bindings after deserialization?
+    @testing.expectedFailureCppSerDes  # no unbacked bindings after deserialization?
     @testing.expectedFailureSerDerNonStrict
     def test_unbacked_bindings_for_divisible_u_symint(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
@@ -3674,6 +3674,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         self._test_export_same_as_eager(kw_func, args, kwargs)
 
     @testing.expectedFailureSerDer  # we don't save placeholder metadata
+    @testing.expectedFailureCppSerDes  # we don't save placeholder metadata
     @testing.expectedFailureSerDerNonStrict
     @testing.expectedFailureNonStrict
     @testing.expectedFailureTrainingIRToRunDecompNonStrict  # source_fn_stack failure
@@ -4603,7 +4604,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                 torch.ops.aten._assert_async.msg(torch.tensor(True), "Fail")
                 return x
 
-        decomp_table = {**_decomp_table_to_post_autograd_aten(), **decomposition_table}
+        decomp_table = {**default_decompositions(), **decomposition_table}
 
         ep = export_for_training(M(), (torch.randn(2, 2),)).run_decompositions(
             decomp_table
@@ -6036,6 +6037,21 @@ graph():
         unflattened = unflatten(ep)
         self.assertTrue(torch.allclose(unflattened(*inps), M2()(*inps)))
 
+    def test_module_dict_key(self):
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mod = torch.nn.Linear(10, 10)
+
+            def forward(self, x, d):
+                d = {m: d[name] for name, m in self.named_children()}
+                return x + d[self.mod]
+
+        m = Module()
+        sample_inputs = (torch.randn(10), {"mod": torch.randn(10)})
+        ep = export(m, sample_inputs)
+        self.assertEqual(ep.module()(*sample_inputs), m(*sample_inputs))
+
     def test_lazy_module_kwargs(self):
         class LazyModule(torch.nn.modules.lazy.LazyModuleMixin, torch.nn.Module):
             def initialize_parameters(self, *args, **kwargs):
@@ -6753,7 +6769,7 @@ graph():
         if not is_retracebility_test(self._testMethodName):
             test(
                 export(M(), inp, preserve_module_call_signature=("n",)),
-                swap={"n": N(), "n@1": N()},
+                swap={"n": N()},
             )
 
         class _N(torch.nn.Module):
@@ -6806,6 +6822,56 @@ graph():
             unflattened_result = ufm(*inp)
             self.assertTrue(torch.allclose(unflattened_result, eager_result))
 
+    def test_unflatten_multiple_graphs_dispatch(self):
+        class N(torch.nn.Module):
+            def forward(self, x, b):
+                if b:
+                    return x + 1
+                else:
+                    return x + 2
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.n = N()
+
+            def forward(self, x):
+                x = x + 3
+                x = self.n(x, True)
+                x = x + 4
+                x = self.n(x, True)
+                x = x + 5
+                x = self.n(x, False)
+                x = x + 6
+                return x
+
+        inp = (torch.ones(1),)
+        m = M()
+        eager_result = m(*inp)
+
+        def test(ep):
+            epm = ep.module()
+            ufm = torch.export.unflatten(ep)
+
+            exported_result = epm(*inp)
+            self.assertTrue(torch.allclose(exported_result, eager_result))
+
+            unflattened_result = ufm(*inp)
+            self.assertTrue(torch.allclose(unflattened_result, eager_result))
+
+        if not is_retracebility_test(self._testMethodName):
+            if is_training_ir_test(self._testMethodName):
+                test(
+                    torch.export.export_for_training(
+                        M(),
+                        inp,
+                        strict=not is_non_strict_test(self._testMethodName),
+                        preserve_module_call_signature=("n",),
+                    )
+                )
+
+            test(export(M(), inp, preserve_module_call_signature=("n",)))
+
     def test_unflatten_multiple_graphs_preserve_signature_no_error(self):
         class N(torch.nn.Module):
             def forward(self, x, b):
@@ -6831,7 +6897,7 @@ graph():
         m = M()
         eager_result = m(*inp)
 
-        def test(ep):
+        def test(ep, swap=None):
             epm = ep.module()
             ufm = torch.export.unflatten(ep)
 
@@ -6841,8 +6907,17 @@ graph():
             unflattened_result = ufm(*inp)
             self.assertTrue(torch.allclose(unflattened_result, eager_result))
 
+            if swap:
+                for fqn, mod in swap.items():
+                    ufm.set_submodule(fqn, mod)
+                unflattened_result = ufm(*inp)
+                self.assertTrue(torch.allclose(unflattened_result, eager_result))
+
         if not is_retracebility_test(self._testMethodName):
-            test(export(M(), inp, preserve_module_call_signature=("n",)))
+            test(
+                export(M(), inp, preserve_module_call_signature=("n",)),
+                swap={"n": N()},
+            )
 
         test(export(M(), inp))
 
@@ -6879,7 +6954,7 @@ graph():
         m = M()
         eager_result = m(*inp)
 
-        def test(ep):
+        def test(ep, swap=None):
             epm = ep.module()
             ufm = torch.export.unflatten(ep)
 
@@ -6889,11 +6964,20 @@ graph():
             unflattened_result = ufm(*inp)
             self.assertTrue(torch.allclose(unflattened_result, eager_result))
 
+            if swap:
+                for fqn, mod in swap.items():
+                    ufm.set_submodule(fqn, mod)
+                unflattened_result = ufm(*inp)
+                self.assertTrue(torch.allclose(unflattened_result, eager_result))
+
         if not is_retracebility_test(self._testMethodName):
-            test(export(M(), inp, preserve_module_call_signature=("n",)))
+            test(
+                export(M(), inp, preserve_module_call_signature=("n",)),
+                swap={"n": N()},
+            )
             # running decompositions again should work for all IRs
             ep = export(M(), inp, preserve_module_call_signature=("n",))
-            test(ep.run_decompositions({}))
+            test(ep.run_decompositions({}), swap={"n": N()})
             if is_training_ir_test(self._testMethodName):
                 # since we run decompositions by default when testing training IR,
                 # also test training IR without running decompositions
@@ -6904,7 +6988,7 @@ graph():
                     strict=strict,
                     preserve_module_call_signature=("n",),
                 )
-                test(ept)
+                test(ept, swap={"n": N()})
 
         test(export(M(), inp))
 
@@ -7032,6 +7116,16 @@ graph():
                     self.assertEqual(
                         id(getattr(unflattened, a)), id(getattr(unflattened, b))
                     )
+
+            if not is_retracebility_test(self._testMethodName):
+                # preserving module call signatures
+                ep = export(m, inp, preserve_module_call_signature=("n", "p"))
+                exported_result = ep.module()(*inp)
+                self.assertTrue(torch.allclose(exported_result, eager_result))
+
+                unflattened = torch.export.unflatten(ep)
+                unflattened_result = unflattened(*inp)
+                self.assertTrue(torch.allclose(unflattened_result, eager_result))
 
         test(
             gen_m(n=True, n_1=False, p=False, p_1=False),
@@ -7242,6 +7336,25 @@ def forward(self, p_bar_linear_weight, p_bar_linear_bias, x):
 
         # this doesn't work today
         gm_unflat_strict = unflatten(ep)
+
+    def test_modules_access_for_deleted_submodule(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+                self.foo = torch.nn.Linear(10, 10)
+
+            def forward(self, x):
+                for name, mod in self._modules.items():
+                    if mod is None:
+                        continue
+                    pass
+                return self.linear(x)
+
+        mod = Foo()
+        mod.foo = None
+        mod(torch.randn(10, 10))
+        export(mod, (torch.randn(10, 10),), strict=False)
 
     def test_predispatch_cond(self):
         class Model(torch.nn.Module):
@@ -7967,6 +8080,7 @@ def forward(self, x, y):
         export(f, (inputs,), dynamic_shapes=dynamic_shapes)
 
     @testing.expectedFailureRetraceabilityNonStrict
+    @testing.expectedFailureCppSerDes  # dynamic shape serialization
     def test_disable_forced_specializations_ok(self):
         # check that we don't force specialization, and defer to runtime asserts
         # with allow_complex_guards_as_runtime_asserts=True to successfully export
@@ -8087,6 +8201,7 @@ def forward(self, x, y):
 
     # TODO requires_grad doesn't seem to work with serialization.
     @testing.expectedFailureSerDer
+    @testing.expectedFailureCppSerDes
     @testing.expectedFailureSerDerNonStrict
     def test_preserve_requires_grad_placeholders(self):
         class Module(torch.nn.Module):
@@ -8425,6 +8540,7 @@ def forward(self, x, y):
             ep.graph_module.code
         )
 
+    @testing.expectedFailureCppSerDes
     def test_slice_with_floordiv(self):
         # slice operation emits runtime assert s0//2 <= s1
         class M1(torch.nn.Module):
@@ -8994,6 +9110,7 @@ def forward(self, x):
             _load_dynamic_shapes(spec, from_dict=True)
 
     @testing.expectedFailureSerDer  # TODO(pianpwk): PowByNatural valuerange deserialization
+    @testing.expectedFailureCppSerDes  # TODO(pianpwk): PowByNatural valuerange deserialization
     @testing.expectedFailureSerDerNonStrict
     @testing.expectedFailureRetraceabilityNonStrict
     def test_dim_dynamic(self):
