@@ -3724,7 +3724,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_impl(
             stream.stream());
       },
       OpType::ALLREDUCE,
-      "nccl:all_reduce");
+      "nccl:all_reduce_barrier");
 }
 
 c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce(
