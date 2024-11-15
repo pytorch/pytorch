@@ -335,9 +335,9 @@ def tensorify_python_scalars(
     # specializations, eg. in python_arg_parser.h. In these cases,
     # placeholder nodes no longer have a reference to their original
     # symfloat and thus we need to deduce specializations have happend
-    # via shape_env. NB: there's an important invariant here
+    # via shape_env.replacements. NB: there's an important invariant here
     # that symfloats keep consistent names across restarts.
-    for k, v in shape_env.var_to_val.items():
+    for k, v in shape_env.replacements.items():
         if symbol_is_type(k, SymT.FLOAT) and isinstance(v, sympy.core.numbers.Float):
             name = str(k)
             if not TensorifyState.should_specialize(name):
