@@ -2594,7 +2594,7 @@ def get_guard_fail_reason(
     compile_id: CompileId,
 ) -> str:
     if isinstance(guard_manager, DeletedGuardManagerWrapper):
-        return guard_manager.invalidation_reason
+        return f"{compile_id}: {guard_manager.invalidation_reason}"
     reason_str = get_guard_fail_reason_helper(guard_manager, f_locals, compile_id)
     guard_failures[orig_code_map[code]].append(reason_str)
 
