@@ -192,7 +192,10 @@ static const std::unordered_map<
 RowwiseKernel rowwise_heuristic_dispatch(int M, int N, int K) {
   // Apply shape heuristics to find a suitable kernel implementation.
 
-  if (M < 64 && N < 2048 && K < 2048) {
+  if (K < 1024) {
+    // Special case for small K.
+    return fp8_rowwise_256x128x128x128_32x32_2x2_8x32x1_8x32x1_1x32x1x8_8x8x1_1x1_interwave_v1;
+  } else if (M < 64 && N < 2048 && K < 2048) {
     // Kernel that generally works well on small shapes.
     return fp8_rowwise_64x16x16x128_16x16_1x1_8x8x1_8x8x1_1x16x1x4_4x4x1_1x1_interwave_v2;
   } else if (M < 64 && K < 2048) {
@@ -211,9 +214,6 @@ RowwiseKernel rowwise_heuristic_dispatch(int M, int N, int K) {
     // Kernel that is optimized for larger batch sizes but otherwise small
     // tensors.
     return fp8_rowwise_256x128x128x128_32x32_2x2_8x32x1_8x32x1_1x32x1x8_8x8x1_1x1_intrawave_v5;
-  } else if (K < 1024) {
-    // Special case for small K.
-    return fp8_rowwise_256x128x128x128_32x32_2x2_8x32x1_8x32x1_1x32x1x8_8x8x1_1x1_interwave_v1;
   } else if (M < 1024) {
     // Kernel for generic medium batch sizes.
     return fp8_rowwise_256x128x128x128_32x32_2x2_8x32x1_8x32x1_1x32x1x8_8x8x1_1x1_intrawave_v3;
