@@ -323,6 +323,7 @@ class TestCuda(TestCase):
         # ensure out of memory error doesn't disturb subsequent kernel
         tensor.fill_(1)
         self.assertTrue((tensor == 1).all())
+        torch.cuda.set_per_process_memory_fraction(1.0, 0)
 
     @serialTest()
     def test_get_per_process_memory_fraction(self):
@@ -3668,6 +3669,7 @@ class TestCudaMallocAsync(TestCase):
         del a, b, c
         # force release_cached_blocks to run with some expandable segments in the free list
         alloc(120)
+        torch.cuda.memory.set_per_process_memory_fraction(1.0)
 
     def test_garbage_collect_expandable(self):
         torch.cuda.memory.empty_cache()
@@ -3695,6 +3697,7 @@ class TestCudaMallocAsync(TestCase):
         # so GC would not attempt to free it anyway, but this at least makes sure
         # expandable_segment blocks can be in the free list when this is called.
         alloc(80)
+        torch.cuda.memory.set_per_process_memory_fraction(1.0)
 
     def test_allocator_settings(self):
         def power2_div(size, div_factor):
