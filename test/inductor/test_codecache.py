@@ -113,6 +113,7 @@ class TestFxGraphCache(TestCase):
         PatchCaches.tearDown()
 
     def reset(self):
+        PyCodeCache.cache_clear(purge=True)
         torch._dynamo.reset()
         clear_inductor_caches()
 
@@ -180,8 +181,7 @@ class TestFxGraphCache(TestCase):
             # don't prevent compilation).
             self.reset()
 
-            # Clean PyCodeCache and triton kernels
-            PyCodeCache.cache_clear()
+            # Clean triton kernels
             shutil.rmtree(os.path.join(cache_dir(), "triton"), ignore_errors=True)
 
             a1 = a_orig.clone().requires_grad_(grad)
@@ -1117,6 +1117,7 @@ class TestAutotuneCache(TestCase):
         PatchCaches.tearDown()
 
     def reset(self):
+        PyCodeCache.cache_clear(purge=True)
         torch._dynamo.reset()
         clear_inductor_caches()
 
@@ -1312,6 +1313,24 @@ class TestUtils(TestCase):
 
         self.assertEqual(res1, res2)
         self.assertNotEqual(cache_dir1, cache_dir2)
+
+    # This combination of settings exposed a bug where we cleared the
+    # PyCodeCache disk artifacts while they were still needed:
+    @requires_cuda
+    @config.patch(
+        {
+            "coordinate_descent_tuning": True,
+            "force_disable_caches": True,
+        }
+    )
+    def test_force_disable_coordinate_descent(self):
+        def fn():
+            inp = torch.randn(32, 50, 768, device="cuda")
+            weight = torch.randn(768, 768, device="cuda")
+            layer = torch.nn.LayerNorm(768, device="cuda")
+            return layer(inp @ weight)
+
+        torch.compile(fn)()
 
 
 if __name__ == "__main__":
