@@ -123,6 +123,7 @@ class _ConfigEntry:
     # The value specified by the user when they overrode the configuration
     # _UNSET_SENTINEL indicates the value is not set.
     user_override: Any = _UNSET_SENTINEL
+    hide: bool = False
 
 
 class ConfigModule(ModuleType):
@@ -150,10 +151,14 @@ class ConfigModule(ModuleType):
         else:
             self._config[name].user_override = value
             self._is_dirty = True
+            self._config[name].hide = False
 
     def __getattr__(self, name: str) -> Any:
         try:
             config = self._config[name]
+            if config.hide:
+                raise AttributeError(f"{self.__name__}.{name} does not exist")
+
             if config.user_override is not _UNSET_SENTINEL:
                 return config.user_override
 
@@ -173,6 +178,7 @@ class ConfigModule(ModuleType):
         # must support delete because unittest.mock.patch deletes
         # then recreate things
         self._config[name].user_override = _UNSET_SENTINEL
+        self._config[name].hide = True
 
     def _is_default(self, name: str) -> bool:
         return self._config[name].user_override is _UNSET_SENTINEL
