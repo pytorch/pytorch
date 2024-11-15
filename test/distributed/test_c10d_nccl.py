@@ -4131,7 +4131,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
         self.assertEqual(len(t), 10)
         first = t[0]
         last = t[-1]
-        self.assertEqual(last["profiling_name"], "nccl:all_reduce_barrier")
+        self.assertEqual(last["profiling_name"], "nccl:all_reduce")
         self.assertEqual(last["state"], "completed")
         self.assertIn("test_c10d_nccl.py", str(last["frames"]))
         self.assertEqual(last["input_sizes"], ((3, 4),))
@@ -4201,11 +4201,11 @@ class NCCLTraceTest(NCCLTraceTestBase):
                     self.assertEqual(len(t), 1)
             if not only_active:
                 if self.rank == 0:
-                    self.assertEqual(t[-1]["profiling_name"], "nccl:all_reduce_barrier")
+                    self.assertEqual(t[-1]["profiling_name"], "nccl:all_reduce")
                     self.assertEqual(t[-1]["collective_seq_id"], 1)
                     self.assertEqual(t[-1]["state"], "completed")
                 else:
-                    self.assertEqual(t[-1]["profiling_name"], "nccl:all_reduce_barrier")
+                    self.assertEqual(t[-1]["profiling_name"], "nccl:all_reduce")
                     self.assertEqual(t[-1]["collective_seq_id"], 2)
                     self.assertEqual(
                         t[-1]["state"], self.started_or_scheduled(timing_enabled)
@@ -4246,7 +4246,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
                 time.sleep(5)
                 t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
                 t = t["entries"]
-                self.assertEqual(t[-1]["profiling_name"], "nccl:all_reduce_barrier")
+                self.assertEqual(t[-1]["profiling_name"], "nccl:all_reduce")
                 if self.rank == 0:
                     self.assertEqual(t[-1]["collective_seq_id"], 1)
                     self.assertEqual(t[-1]["state"], "completed")
