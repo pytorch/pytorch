@@ -9,14 +9,15 @@ from torch import distributed as dist
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.fully_sharded_data_parallel import ShardingStrategy
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import FSDPTest
+from torch.testing._internal.common_fsdp import FSDPTest, get_devtype
 from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
-    TEST_HPU,
     TEST_WITH_DEV_DBG_ASAN,
 )
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
+
+device_type = torch.device(get_devtype())
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -109,7 +110,6 @@ class TestFSDPExecOrder(FSDPTest):
         in the first iteration."""
         # Rank 0 runs the forward pass in one order and all other ranks run in
         # different order
-        device_type = device if TEST_HPU else self.device_type
         dist.set_debug_level(dist.DebugLevel.DETAIL)
         fsdp_model = Model.wrap(sharding_strategy, device_type)
         if self.rank != 0:
@@ -137,7 +137,6 @@ class TestFSDPExecOrder(FSDPTest):
         dist.set_debug_level(dist.DebugLevel.DETAIL)
         # On the first iteration, all ranks run the same order, and on the next
         # iteration, all but rank 0 run in a different order
-        device_type = device if TEST_HPU else self.device_type
         fsdp_model = Model.wrap(sharding_strategy, device_type)
         for _ in range(iters_before_path_change):
             inp = fsdp_model.module.get_input(device_type)
@@ -179,7 +178,6 @@ class TestFSDPExecOrder(FSDPTest):
     )
     def test_train_eval(self, device, sharding_strategy: ShardingStrategy):
         dist.set_debug_level(dist.DebugLevel.DETAIL)
-        device_type = device if TEST_HPU else self.device_type
         fsdp_model = Model.wrap(sharding_strategy, device_type)
         NUM_ITERS = 3
         NUM_EPOCHS = 2
@@ -207,7 +205,7 @@ class TestFSDPExecOrder(FSDPTest):
         # If we still validate the forward execution order in eval mode, then
         # an `AssertionError` will be raised above for both sharding strategies
 
-devices = ("hpu" if TEST_HPU else "cuda")
+devices = ("cuda", "hpu")
 instantiate_device_type_tests(TestFSDPExecOrder, globals(), only_for=devices)
 if __name__ == "__main__":
     run_tests()
