@@ -582,32 +582,18 @@ class CPUReproTests(TestCase):
         batch_size,
         seq_len,
     ):
-        with torch.backends.mkldnn.verbose(torch.backends.mkldnn.VERBOSE_ON):
-            import psutil
-            import os
-            import logging
-            process = psutil.Process(os.getpid())
-            memory_info = process.memory_info()
-            logger = logging.getLogger('hz debug')
-            logger.propagate = True
-
-            logger.critical(f"RSS: {memory_info.rss / (1024 * 1024):.2f} MB")
-            logger.critical(f"VMS: {memory_info.vms / (1024 * 1024):.2f} MB")
-            logger.critical(f"virtual_memory: {psutil.virtual_memory()}")
-            logger.critical(f"available: {psutil.virtual_memory().available / (1024 * 1024):.2f} MB")
-
-            self._test_lstm_packed(
-                unbatched,
-                input_size,
-                hidden_size,
-                num_layers,
-                bidirectional,
-                bias,
-                empty_state,
-                batch_first,
-                batch_size,
-                seq_len,
-            )
+        self._test_lstm_packed(
+            unbatched,
+            input_size,
+            hidden_size,
+            num_layers,
+            bidirectional,
+            bias,
+            empty_state,
+            batch_first,
+            batch_size,
+            seq_len,
+        )
 
     @parametrize(
         "unbatched, input_size, hidden_size, num_layers, bidirectional, bias, empty_state, batch_first, batch_size, seq_len",
@@ -4441,22 +4427,22 @@ class CPUReproTests(TestCase):
 
         self.common(fn, (result,))
 
-    # @requires_vectorization
-    # @config.patch("cpp.min_chunk_size", 1)
-    # def test_for_loop_collapsed(self):
-    #     # https://github.com/pytorch/pytorch/issues/122281
-    #     def fn(x):
-    #         return x.transpose(1, 0).contiguous()
+    @requires_vectorization
+    @config.patch("cpp.min_chunk_size", 1)
+    def test_for_loop_collapsed(self):
+        # https://github.com/pytorch/pytorch/issues/122281
+        def fn(x):
+            return x.transpose(1, 0).contiguous()
 
-    #     x = torch.randn(199, 2)
-    #     opt_fn = torch._dynamo.optimize("inductor")(fn)
-    #     _, code = run_and_get_cpp_code(opt_fn, x)
-    #     self.assertTrue(same(fn(x), opt_fn(x)))
-    #     # def and use
-    #     print(code)
-    #     FileCheck().check_count("#pragma omp for collapse(2)", 1, exactly=True).run(
-    #         code
-    #     )
+        x = torch.randn(199, 2)
+        opt_fn = torch._dynamo.optimize("inductor")(fn)
+        _, code = run_and_get_cpp_code(opt_fn, x)
+        self.assertTrue(same(fn(x), opt_fn(x)))
+        # def and use
+        print(code)
+        FileCheck().check_count("#pragma omp for collapse(2)", 1, exactly=True).run(
+            code
+        )
 
 
 if __name__ == "__main__":

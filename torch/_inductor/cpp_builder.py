@@ -535,7 +535,7 @@ def _get_optimization_cflags() -> List[str]:
     if _IS_WINDOWS:
         return ["O2"]
     else:
-        cflags = ["O0", "g"] if config.aot_inductor.debug_compile else ["O3", "DNDEBUG"]
+        cflags = ["O0", "g"] if config.aot_inductor.debug_compile else ["O2", "DNDEBUG"]
         cflags += _get_ffast_math_flags()
         cflags.append("fno-finite-math-only")
 
