@@ -13,7 +13,7 @@ UnpickledPythonCall::UnpickledPythonCall(
   pythonUdf_ = pythonRpcHandler.deserialize(serializedPyObj);
 }
 
-// NOTLINTNEXTLINE(bugprone-exception-escape)
+// NOLINTNEXTLINE(bugprone-exception-escape)
 UnpickledPythonCall::~UnpickledPythonCall() {
   // explicitly setting PyObject* to nullptr to prevent py::object's dtor to
   // decref on the PyObject again.

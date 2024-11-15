@@ -40,7 +40,7 @@ from torch.testing._internal.common_device_type import tol, toleranceOverride
 from torch.testing._internal.common_methods_invocations import DecorateInfo
 from torch.testing._internal.common_utils import (
     _TestParametrizer,
-    skipIfMps,
+    skipIfMPS,
     skipIfTorchDynamo,
     skipIfXpu,
     TEST_WITH_TORCHDYNAMO,
@@ -55,7 +55,9 @@ class OptimizerInput:
 
     def __init__(
         self,
-        params: Union[List[Parameter], List[Tensor], Dict[Any, Any]],
+        params: Union[
+            List[Parameter], List[Tensor], Dict[Any, Any], List[Dict[str, Any]]
+        ],
         kwargs: Dict[str, Any],
         desc: str = "",
     ):
@@ -244,6 +246,7 @@ class optims(_TestParametrizer):
 def get_error_inputs_for_all_optims(device, dtype):
     if _get_device_type(device) == "cpu":
         sample_param = Parameter(torch.randn(1, device=device, dtype=dtype))
+        sample_param2 = Parameter(torch.randn(1, device=device, dtype=dtype))
         return [
             ErrorOptimizerInput(
                 OptimizerInput(
@@ -280,6 +283,28 @@ def get_error_inputs_for_all_optims(device, dtype):
                 ),
                 error_type=ValueError,
                 error_regex="Tensor lr must be 1-element",
+            ),
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=[("weight", sample_param), sample_param2],
+                    kwargs={},
+                    desc="all optimizer params should be with/without names",
+                ),
+                error_type=ValueError,
+                error_regex="all optimizer params should be with/without names. Some param names are missing",
+            ),
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=[
+                        {"params": [sample_param], "lr": 1e-2},
+                        {"params": [("weight", sample_param2)]},
+                    ],
+                    kwargs={},
+                    desc="all optimizer param groups should be with/without names.",
+                ),
+                error_type=ValueError,
+                error_regex="all optimizer param groups should be with/without names. "
+                "cannot add param group with names to the optimizer",
             ),
         ]
     else:
@@ -1473,7 +1498,7 @@ optim_db: List[OptimizerInfo] = [
         ),
         skips=(
             DecorateInfo(
-                skipIfMps,  # addcdiv doesn't work for non-contiguous, see #118115
+                skipIfMPS,  # addcdiv doesn't work for non-contiguous, see #118115
                 "TestOptimRenewed",
                 "test_forloop_goes_right_direction",
                 active_if=lambda kwargs: not kwargs["contiguous"],
@@ -1575,7 +1600,7 @@ optim_db: List[OptimizerInfo] = [
         ),
         skips=(
             DecorateInfo(
-                skipIfMps,  # addcdiv doesn't work for non-contiguous, see #118115
+                skipIfMPS,  # addcdiv doesn't work for non-contiguous, see #118115
                 "TestOptimRenewed",
                 "test_forloop_goes_right_direction",
                 active_if=lambda kwargs: not kwargs["contiguous"],
@@ -1617,7 +1642,7 @@ optim_db: List[OptimizerInfo] = [
         has_capturable_arg=True,
         skips=(
             DecorateInfo(
-                skipIfMps,  # addcdiv doesn't work for non-contiguous, see #118115
+                skipIfMPS,  # addcdiv doesn't work for non-contiguous, see #118115
                 "TestOptimRenewed",
                 "test_forloop_goes_right_direction",
                 active_if=lambda kwargs: not kwargs["contiguous"],
@@ -1709,7 +1734,7 @@ optim_db: List[OptimizerInfo] = [
         ),
         skips=(
             DecorateInfo(
-                skipIfMps,  # addcdiv doesn't work for non-contiguous, see #118115
+                skipIfMPS,  # addcdiv doesn't work for non-contiguous, see #118115
                 "TestOptimRenewed",
                 "test_forloop_goes_right_direction",
                 active_if=lambda kwargs: not kwargs["contiguous"],
@@ -1806,7 +1831,7 @@ optim_db: List[OptimizerInfo] = [
         skips=(
             # Fails on MacOS 13.2.1 in CI https://github.com/pytorch/pytorch/issues/117094
             DecorateInfo(
-                skipIfMps, "TestOptimRenewed", "test_can_load_older_state_dict"
+                skipIfMPS, "TestOptimRenewed", "test_can_load_older_state_dict"
             ),
             DecorateInfo(
                 toleranceOverride(
@@ -1864,7 +1889,7 @@ optim_db: List[OptimizerInfo] = [
         has_capturable_arg=True,
         skips=(
             DecorateInfo(
-                skipIfMps,  # addcdiv doesn't work for non-contiguous, see #118115
+                skipIfMPS,  # addcdiv doesn't work for non-contiguous, see #118115
                 "TestOptimRenewed",
                 "test_forloop_goes_right_direction",
                 active_if=lambda kwargs: not kwargs["contiguous"],
@@ -1959,7 +1984,7 @@ optim_db: List[OptimizerInfo] = [
         has_capturable_arg=True,
         skips=(
             DecorateInfo(
-                skipIfMps,  # addcdiv doesn't work for non-contiguous, see #118115
+                skipIfMPS,  # addcdiv doesn't work for non-contiguous, see #118115
                 "TestOptimRenewed",
                 "test_forloop_goes_right_direction",
                 active_if=lambda kwargs: not kwargs["contiguous"],
@@ -2009,7 +2034,7 @@ optim_db: List[OptimizerInfo] = [
         has_capturable_arg=True,
         skips=(
             DecorateInfo(
-                skipIfMps,  # Rprop doesn't update for non-contiguous, see #118117
+                skipIfMPS,  # Rprop doesn't update for non-contiguous, see #118117
                 "TestOptimRenewed",
                 "test_forloop_goes_right_direction",
                 active_if=lambda kwargs: not kwargs["contiguous"],
@@ -2144,7 +2169,7 @@ optim_db: List[OptimizerInfo] = [
         supports_complex=False,  # Missing complex support, see #118153
         skips=(
             DecorateInfo(
-                skipIfMps,  # SparseAdam does not support MPS
+                skipIfMPS,  # SparseAdam does not support MPS
                 "TestOptimRenewed",
             ),
             DecorateInfo(
@@ -2223,7 +2248,7 @@ class TensorTracker:
         """
         Add a clone().detach()'d version of the tensor
         """
-        self.tensors.append(tensor.clone().detach())
+        self.tensors.append(tensor.detach().clone())
 
     # pops from beginning, like a queue and not a stack!
     def pop_check_set(self, tensor_to_set, testcase):

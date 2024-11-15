@@ -11,15 +11,9 @@ from ._fsdp_common import (
     _get_dim0_padded_size,
     _raise_assert_with_print,
     _to_dtype_if_needed,
+    compiled_autograd_enabled,
 )
 from ._fsdp_param import FSDPParam, ShardedState
-
-
-if not torch._running_with_deploy():
-    import torch._dynamo.compiled_autograd as ca
-else:
-    ca = object()  # type: ignore[assignment]
-    ca.compiled_autograd_enabled = False
 
 
 class AllGatherResult(NamedTuple):
@@ -189,7 +183,7 @@ def foreach_all_gather(
 def _get_param_all_gather_inputs(
     fsdp_params: List[FSDPParam],
 ) -> List[List[torch.Tensor]]:
-    if ca.compiled_autograd_enabled:
+    if compiled_autograd_enabled():
         return [fsdp_param.all_gather_inputs for fsdp_param in fsdp_params]
 
     # Intentionally try to run a fast-path that bypasses abstractions for the
@@ -251,7 +245,7 @@ def foreach_all_gather_copy_out(
         param_all_gather_input_numels,
         all_gather_input_split_sizes,
     ) = all_gather_result
-    dtype, device = all_gather_output.dtype, all_gather_output.device
+    _dtype, device = all_gather_output.dtype, all_gather_output.device
     device_handle = _get_device_handle(device.type)
     if all_gather_event is not None:  # sync op
         device_handle.current_stream().wait_event(all_gather_event)
@@ -266,7 +260,7 @@ def foreach_all_gather_copy_out(
     ):
         # NOTE: Under compile, make sure we always recreate all_gather_outputs
         # per AllGather. See [Note: Invariants for torch.compile Traceable FSDP2].
-        force_recreate = ca.compiled_autograd_enabled
+        force_recreate = compiled_autograd_enabled()
         fsdp_param.init_all_gather_outputs(
             all_gather_input_numels,
             all_gather_input_dtypes,
@@ -336,7 +330,14 @@ def foreach_reduce(
     all_reduce_stream: torch.Stream,
     all_reduce_grads: bool,
     partial_reduce_output: Optional[torch.Tensor],  # only used for HSDP
-) -> Tuple[torch.Tensor, torch.Event, torch.Event, Optional[torch.Tensor]]:
+) -> Tuple[
+    torch.Tensor,
+    torch.Event,
+    torch.Event,
+    Optional[torch.Tensor],
+    Optional[torch.Event],
+    Optional[torch.Tensor],
+]:
     """
     ``unsharded_grads`` owns the references to the gradients computed by
     autograd, so clearing the list frees the gradients.
@@ -376,6 +377,8 @@ def foreach_reduce(
     # Only after the copy-in finishes can we free the gradients
     unsharded_grads.clear()
     reduce_scatter_stream.wait_stream(current_stream)
+    all_reduce_input = None
+    all_reduce_event = None
     with device_handle.stream(reduce_scatter_stream):
         reduce_output = reduce_scatter_input.new_empty((reduce_scatter_output_numel,))
         _div_if_needed(reduce_scatter_input, predivide_factor)
@@ -403,6 +406,8 @@ def foreach_reduce(
                     reduce_scatter_input,
                     reduce_scatter_event,
                     post_reduce_stream.record_event(),
+                    all_reduce_input,
+                    all_reduce_event,
                     partial_reduce_output,
                 )
             if partial_reduce_output is not None:
@@ -415,6 +420,8 @@ def foreach_reduce(
                     group=all_reduce_group,
                     op=ReduceOp.AVG if predivide_factor is None else ReduceOp.SUM,
                 )
+                all_reduce_input = reduce_output
+                all_reduce_event = all_reduce_stream.record_event()
     with device_handle.stream(post_reduce_stream):
         _div_if_needed(reduce_output, postdivide_factor)
         reduce_output = _to_dtype_if_needed(reduce_output, orig_dtype)
@@ -455,7 +462,7 @@ def foreach_reduce(
                     new_sharded_grad
                 )
                 fsdp_param.sharded_param.grad = new_sharded_dtensor_grad
-            if not ca.compiled_autograd_enabled:
+            if not compiled_autograd_enabled():
                 for hook in (
                     getattr(fsdp_param.sharded_param, "_post_accumulate_grad_hooks", {})
                     or {}
@@ -468,7 +475,14 @@ def foreach_reduce(
     # stream (for optimizer). To ensure its memory is not reused for later
     # RSs, we do not need extra synchronization since the sharded parameters
     # hold refs through the end of backward.
-    return reduce_scatter_input, reduce_scatter_event, post_reduce_event, None
+    return (
+        reduce_scatter_input,
+        reduce_scatter_event,
+        post_reduce_event,
+        all_reduce_input,
+        all_reduce_event,
+        None,
+    )
 
 
 def foreach_reduce_scatter_copy_in(

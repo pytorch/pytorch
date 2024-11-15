@@ -79,6 +79,7 @@ from torch.testing._internal.common_methods_invocations import (
 from torch.testing._internal.common_utils import (
     freeze_rng_state,
     IS_FBCODE,
+    scoped_load_inline,
     set_default_dtype,
     skipIfNNModuleInlined,
     skipIfWindows,
@@ -321,16 +322,17 @@ class MiscTests(torch._inductor.test_case.TestCase):
         res_compiled = add_fn(2, 3, torch.tensor(0.0))
         self.assertEqual(res, res_compiled)
 
+    @scoped_load_inline
     @skipIfNNModuleInlined("fails internal CI")
     @unittest.skipIf(IS_FBCODE, "inline cpp_extension doesn't work in fbcode")
-    def test_cpp_extension_recommends_custom_ops(self):
+    def test_cpp_extension_recommends_custom_ops(self, load_inline):
         cpp_source = """
         #include <torch/extension.h>
         at::Tensor foobar(const at::Tensor& x) {
             return x.clone();
         }
         """
-        module = torch.utils.cpp_extension.load_inline(
+        module = load_inline(
             name="mylib",
             cpp_sources=cpp_source,
             functions="foobar",
@@ -362,7 +364,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
             return x.clone();
         }
         """
-        module2 = torch.utils.cpp_extension.load_inline(
+        module2 = load_inline(
             name="mylib2",
             cpp_sources=cpp_source,
             functions="baz",
@@ -418,7 +420,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
         a = torch.randn(10, 10)
         b = torch.randn(10, 10)
         c = torch.randn(10, 10)
-        opt_fn = torch._dynamo.optimize(counter)(fn)
+        opt_fn = torch.compile(fn, backend=counter)
         self.assertRaises(AssertionError, lambda: opt_fn(a, b, c, AssertionError))
         self.assertEqual(counter.frame_count, 1)
         self.assertEqual(counter.op_count, 3)
@@ -429,7 +431,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
 
         counter = CompileCounter()
         a = torch.randn(10, 10)
-        opt_fn = torch._dynamo.optimize(counter)(fn)
+        opt_fn = torch.compile(fn, backend=counter)
         self.assertRaisesRegex(
             TypeError, "'module' object is not callable", lambda: opt_fn(a)
         )
@@ -536,10 +538,10 @@ class MiscTests(torch._inductor.test_case.TestCase):
             x = torch.randn(3)
 
             counts = torch._dynamo.testing.CompileCounter()
-            optimized_f = torch._dynamo.optimize(counts, nopython=True)(f)
+            optimized_f = torch.compile(f, backend=counts, fullgraph=True)
             _ = optimized_f(x)
 
-            optimized_g = torch._dynamo.optimize(counts, nopython=True)(f)
+            optimized_g = torch.compile(f, backend=counts, fullgraph=True)
             _ = optimized_g(x)
 
     @torch._dynamo.config.patch(only_allow_pt2_compliant_ops=True)
@@ -565,13 +567,13 @@ class MiscTests(torch._inductor.test_case.TestCase):
             with self.assertRaisesRegex(
                 torch._dynamo.exc.Unsupported, "not PT2 compliant"
             ):
-                optimized_f = torch._dynamo.optimize(counts, nopython=True)(f)
+                optimized_f = torch.compile(f, backend=counts, fullgraph=True)
                 y = optimized_f(x)
 
             with self.assertRaisesRegex(
                 torch._dynamo.exc.Unsupported, "not PT2 compliant"
             ):
-                optimized_g = torch._dynamo.optimize(counts, nopython=True)(f)
+                optimized_g = torch.compile(f, backend=counts, fullgraph=True)
                 y = optimized_g(x)
 
     @torch._dynamo.config.patch(only_allow_pt2_compliant_ops=True)
@@ -609,9 +611,9 @@ class MiscTests(torch._inductor.test_case.TestCase):
             x = torch.randn(3)
 
             counts = torch._dynamo.testing.CompileCounter()
-            optimized_f = torch._dynamo.optimize(counts, nopython=True)(f)
-            optimized_g = torch._dynamo.optimize(counts, nopython=True)(g)
-            optimized_h = torch._dynamo.optimize(counts, nopython=True)(h)
+            optimized_f = torch.compile(f, backend=counts, fullgraph=True)
+            optimized_g = torch.compile(g, backend=counts, fullgraph=True)
+            optimized_h = torch.compile(h, backend=counts, fullgraph=True)
 
             # No error: the overload is PT2 compliant
             optimized_f(x)
@@ -826,7 +828,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
 
         counts = torch._dynamo.testing.CompileCounter()
         mod = MyModule()
-        optimized_mod = torch._dynamo.optimize(counts, nopython=True)(mod)
+        optimized_mod = torch.compile(mod, backend=counts, fullgraph=True)
 
         x = torch.randn(3)
         ref = mod(x)
@@ -853,7 +855,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
             return x + y
 
         counts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(counts)(fn)
+        opt_fn = torch.compile(fn, backend=counts)
 
         x = torch.randn(3)
         c = MyClass(4)
@@ -883,7 +885,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
 
         mod = Mod()
         counts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(counts, nopython=True)(f)
+        opt_fn = torch.compile(f, backend=counts, fullgraph=True)
         ref = f(mod)
         res = opt_fn(mod)
         res = opt_fn(mod)
@@ -1002,7 +1004,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
             return abs(x) + abs(y)
 
         sample = torch.randn(10, 10)
-        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
 
         for sample in [
             (torch.randn(10, 10), torch.randn(10, 10)),
@@ -1186,6 +1188,33 @@ utils_device.CURRENT_DEVICE == None""".split(
         inp.test = None
         self.assertEqual(torch.ones(2, 2) + 2, fn(inp))
 
+    def test_mro_type_tensor_no_source(self):
+        @torch.compile(fullgraph=True)
+        def fn(x):
+            z = []
+            input_type = type(torch.ones(2, 2))
+            for cls in input_type.__mro__:
+                z.append(cls.__name__)
+
+            return x, input_type, z
+
+        inp = torch.ones(2, 2)
+        fn(inp)
+
+    def test_tensor_dynamic_method(self):
+        def add_one(x):
+            return x + 1
+
+        t = torch.nn.Parameter(torch.ones(1))
+        t.add_one = add_one
+
+        @torch.compile(fullgraph=True)
+        def fn(x):
+            return t.add_one(t) + x
+
+        result = fn(torch.ones(1))
+        self.assertEqual(torch.ones(1) + 2, result)
+
     def test_shape_unpack(self):
         def fn(x):
             a, b = x.size()
@@ -1193,7 +1222,7 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         i = torch.randn(5, 10)
         r1 = fn(i)
-        opt_fn = torch._dynamo.optimize("eager")(fn)
+        opt_fn = torch.compile(fn, backend="eager")
         r2 = opt_fn(i)
         self.assertTrue(same(r1, r2))
 
@@ -1227,7 +1256,7 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         i = torch.randn(5, 10)
         r1 = fn(i, [])
-        opt_fn = torch._dynamo.optimize("eager")(fn)
+        opt_fn = torch.compile(fn, backend="eager")
         r2 = opt_fn(i, [])
         r3 = opt_fn(i, ())
         self.assertTrue(same(r1, r2))
@@ -1359,7 +1388,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         cfg2 = Cfg()
         v = torch.zeros(1)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         v = opt_fn(v, cfg1)  # 3
         v = opt_fn(v, cfg2)  # 4.5
         cfg2.count = 1
@@ -1385,7 +1414,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         cfg1 = Cfg()
         v = torch.zeros(1)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         self.assertEqual(opt_fn(v, cfg1)[0], 5)
         self.assertEqual(opt_fn(v, cfg1)[0], 5)
         cfg1.just_add_7 = True
@@ -1403,7 +1432,7 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         v = torch.zeros(10, 20)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         self.assertEqual(opt_fn(v, v.size())[0, 0], -10)
         self.assertEqual(opt_fn(v, (10, 20))[0, 0], -10)
         self.assertEqual(opt_fn(v, [10, 20])[0, 0], -10)
@@ -1419,7 +1448,7 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         v = torch.Tensor([100])
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         self.assertIsNone(opt_fn(v, v))
         self.assertEqual(out[0], 1100)
         self.assertEqual(cnts.op_count, 2)
@@ -1434,7 +1463,7 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         v = torch.Tensor([100])
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         self.assertIsNone(opt_fn(v, v))
         self.assertEqual(out[0], 1200)
         self.assertEqual(cnts.op_count, 3)
@@ -1457,8 +1486,8 @@ utils_device.CURRENT_DEVICE == None""".split(
         v1 = torch.Tensor([100])
         v2 = torch.Tensor([200])
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
-        opt_fn_ret = torch._dynamo.optimize(cnts)(opt_fn(v1, v2))
+        opt_fn = torch.compile(fn, backend=cnts)
+        opt_fn_ret = torch.compile(opt_fn(v1, v2), backend=cnts)
         self.assertEqual(opt_fn_ret(1.5)[0], -459)
         self.assertEqual(out[0], 2100)
         self.assertEqual(cnts.frame_count, 2)
@@ -1471,7 +1500,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         v1 = torch.Tensor([100])
         v2 = torch.Tensor([200])
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
         self.assertEqual(opt_fn({"a": v1, "b": v2})[0], -200)
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
@@ -1490,7 +1519,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         v1 = torch.Tensor([100])
         v2 = torch.Tensor([200])
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
         self.assertEqual(
             opt_fn({"a": v1, "b": v2}, {"b": v1, "c": v2}),
             fn({"a": v1, "b": v2}, {"b": v1, "c": v2}),
@@ -1520,9 +1549,9 @@ utils_device.CURRENT_DEVICE == None""".split(
         v1 = torch.Tensor([100])
         v2 = torch.Tensor([200])
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn1 = torch._dynamo.optimize(cnts, nopython=True)(fn1)
-        opt_fn2 = torch._dynamo.optimize(cnts, nopython=True)(fn2)
-        opt_fn3 = torch._dynamo.optimize(cnts, nopython=True)(fn3)
+        opt_fn1 = torch.compile(fn1, backend=cnts, fullgraph=True)
+        opt_fn2 = torch.compile(fn2, backend=cnts, fullgraph=True)
+        opt_fn3 = torch.compile(fn3, backend=cnts, fullgraph=True)
         self.assertEqual(opt_fn1({"a": v1, "b": v2})[0], 300)
         self.assertEqual(opt_fn2({"a": v1, "b": v2})[0], 300)
         self.assertEqual(opt_fn3({"a": v1, "b": v2})[0], 300)
@@ -1536,7 +1565,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         v1 = torch.Tensor([100])
         v2 = torch.Tensor([200])
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn1 = torch._dynamo.optimize(cnts)(fn1)
+        opt_fn1 = torch.compile(fn1, backend=cnts)
         self.assertEqual(opt_fn1({"a": v1, "b": v2})["a"], 101)
         self.assertEqual(opt_fn1({"a": v1, "b": v2})["b"], 201)
         self.assertEqual(cnts.frame_count, 1)
@@ -1549,7 +1578,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         v1 = torch.Tensor([100])
         v2 = torch.Tensor([200])
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn2 = torch._dynamo.optimize(cnts)(fn2)
+        opt_fn2 = torch.compile(fn2, backend=cnts)
         self.assertEqual(opt_fn2({"a": v1, "b": v2}), 302)
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 4)
@@ -1592,7 +1621,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         x2 = torch.rand(2, 3)
         ref1 = fn(x1)
         ref2 = fn(x2)
-        opt_fn = torch._dynamo.optimize("eager")(fn)
+        opt_fn = torch.compile(fn, backend="eager")
         res1 = opt_fn(x1)
         res2 = opt_fn(x2)
         self.assertEqual(ref1, res1)
@@ -1635,7 +1664,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         v2 = torch.randn((10, 10))
         correct = fn(v1, v2)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         self.assertEqual(opt_fn(v1, v2), correct)
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 4)
@@ -1649,7 +1678,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         v2 = torch.randn((10, 10))
         correct = fn(v1, v2)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         self.assertEqual(opt_fn(v1, v2), correct)
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
@@ -1662,7 +1691,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         v1 = torch.Tensor([10])
         v2 = torch.Tensor([20])
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         self.assertEqual(opt_fn(v1, v2).ab, 50)
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
@@ -1679,7 +1708,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         v2 = torch.Tensor([2])
         v3 = torch.Tensor([3])
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         self.assertEqual(opt_fn(MyTuple(v1, v2, v3))[0], 7)
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 3)
@@ -1694,7 +1723,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         x = torch.rand([2, 3])
         packed = MyTuple(1, 2, 3)
         ref = fn(x, packed)
-        opt_fn = torch._dynamo.optimize("eager")(fn)
+        opt_fn = torch.compile(fn, backend="eager")
         res = opt_fn(x, packed)
         self.assertTrue(same(ref, res))
 
@@ -1771,7 +1800,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             return head_mask
 
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         self.assertEqual(opt_fn(2), [None] * 4)
         # TODO: the captured frame here is a bit goofy, because we don't
         # output anything and none of the traced operations have side
@@ -1791,7 +1820,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             return head_mask
 
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         self.assertEqual(opt_fn(2), [2, 3] * 4)
         if torch._dynamo.config.assume_static_by_default:
             self.assertExpectedInline(cnts.frame_count, """0""")
@@ -1806,7 +1835,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             return head_mask
 
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         self.assertEqual(opt_fn(2), (2, 3) * 4)
         if torch._dynamo.config.assume_static_by_default:
             self.assertExpectedInline(cnts.frame_count, """0""")
@@ -1864,7 +1893,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         a = [1, 2, 3]
         b = torch.ones(2, 2)
 
-        opt_fn = torch._dynamo.optimize("eager")(fn)
+        opt_fn = torch.compile(fn, backend="eager")
 
         exp = fn(a, b)
 
@@ -1885,7 +1914,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         x = torch.randn(10)
         cfg = MyConfig(offset=5)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         self.assertTrue(same(opt_fn(cfg, x, x), 2 * x + 5))
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
@@ -1906,7 +1935,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         x = torch.randn(10)
         cfg = MyConfig()
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         self.assertTrue(same(opt_fn(cfg, x), x + 1 - 2 + 3))
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 3)
@@ -1933,7 +1962,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             return g(x)
 
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         g = torch.Tensor.shape.__get__
 
         res = opt_fn(g, torch.ones(2, 2))
@@ -1961,7 +1990,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         obj = MyObject()
         x = torch.rand((2, 2))
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         self.assertTrue(same(opt_fn(obj, x), fn(obj, x)))
 
     def test_nn_module_getattr(self):
@@ -1983,7 +2012,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         x = torch.rand((2, 2))
         mod = MyMod()
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_mod = torch._dynamo.optimize(cnts)(mod)
+        opt_mod = torch.compile(mod, backend=cnts)
         self.assertTrue(same(opt_mod(x), mod(x)))
         self.assertTrue(cnts.frame_count, 1)
         self.assertTrue(cnts.op_count, 2)
@@ -2008,7 +2037,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         mod = MyMod()
         x = torch.rand((2, 2))
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         self.assertTrue(same(opt_fn(mod, x), fn(mod, x)))
 
     def test_constant_getattr(self):
@@ -2017,7 +2046,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             return getattr(None, "arg", 3)
 
         cnt = torch._dynamo.testing.CompileCounter()
-        optimized_fn = torch._dynamo.optimize(cnt)(fn)
+        optimized_fn = torch.compile(fn, backend=cnt)
         res = optimized_fn()
         self.assertTrue(same(res, 3))
 
@@ -2033,7 +2062,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         x = torch.randn(10)
         cfg = MyConfig()
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         self.assertTrue(same(opt_fn(cfg, x, x), 2 * x + 5))
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
@@ -2086,14 +2115,14 @@ utils_device.CURRENT_DEVICE == None""".split(
         correct2 = fn(obj2)
 
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         self.assertTrue(same(opt_fn(obj1), correct1))
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
 
         torch._dynamo.reset()
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         self.assertTrue(same(opt_fn(obj2), correct2))
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 1)
@@ -2162,7 +2191,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         val = torch.randn([1, 1, 473, 768])
         correct = fn(val)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         self.assertTrue(same(opt_fn(val), correct))
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
@@ -2174,7 +2203,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         args = [torch.randn(10), 4096, np.int64(8)]
         correct = fn(*args)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts, dynamic=True, nopython=True)(fn)
+        opt_fn = torch.compile(fn, backend=cnts, dynamic=True, fullgraph=True)
         self.assertTrue(same(opt_fn(*args), correct))
         self.assertTrue(same(opt_fn(*args), correct))
         self.assertEqual(cnts.frame_count, 1)
@@ -2187,7 +2216,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         args = [torch.randn(10), 4096]
         correct = fn(*args)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
         self.assertEqual(opt_fn(*args), correct)
         self.assertEqual(cnts.frame_count, 1)
 
@@ -2205,7 +2234,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             )
         )
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         i = 1
         for sample in samples:
             args = sample_to_args(sample)
@@ -2251,7 +2280,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             except (RuntimeError, TypeError, IndexError):
                 continue
             cnts = torch._dynamo.testing.CompileCounter()
-            opt_fn = torch._dynamo.optimize(cnts)(fn)
+            opt_fn = torch.compile(fn, backend=cnts)
             self.assertEqual(result, opt_fn(op, t1, t2), msg=f"{op=} {t1_np=} {t2_np=}")
             self.assertEqual(cnts.frame_count, 1, msg=f"{op=} {t1_np=} {t2_np=}")
             torch._dynamo.reset()
@@ -2265,7 +2294,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             return c
 
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         for _ in range(10):
             x = torch.randn(3)
             ref = fn(x)
@@ -2281,7 +2310,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             return np.add(a, 1), np.add(b, 1)
 
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         for _ in range(10):
             x = torch.randn([1, 3])
             y = torch.randn([1, 3])
@@ -2295,7 +2324,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             return x.numpy(force=False)
 
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         x = torch.randn(3)
         res = opt_fn(x)
         self.assertEqual(type(res), np.ndarray)
@@ -2305,7 +2334,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             return x.numpy(force=True)
 
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         x = torch.randn(3, requires_grad=True)
         res = opt_fn(x)
         self.assertEqual(type(res), np.ndarray)
@@ -2317,7 +2346,7 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         x = np.random.randn(8)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts, dynamic=True)(fn)
+        opt_fn = torch.compile(fn, backend=cnts, dynamic=True)
 
         ref = fn(x, 3)
         res = opt_fn(x, 3)
@@ -2339,7 +2368,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             return np.add(a, c), np.add(b, d)
 
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         for _ in range(10):
             x = torch.randn([1, 3])
             y = torch.randn([1, 3])
@@ -2354,7 +2383,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             return v
 
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
         for _ in range(10):
             x = np.random.randn(2, 3)
             ref = fn(x)
@@ -2367,7 +2396,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             return np.array([x, y])
 
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
 
         x, y = np.float64(1), np.float64(2)
         res = opt_fn(x, y)
@@ -2399,7 +2428,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             return x.tolist()
 
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
 
         x = np.arange(5)
         r = opt_fn(x)
@@ -2413,7 +2442,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             return x.size + x
 
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
 
         x = np.arange(5)
         r = opt_fn(x)
@@ -2443,7 +2472,7 @@ utils_device.CURRENT_DEVICE == None""".split(
                 print(t, t_np)  # Just a side effect so that compilation kicks in
 
         cnt = CompileCounterWithBackend("inductor")
-        fn = torch._dynamo.optimize(cnt)(fn)
+        fn = torch.compile(fn, backend=cnt)
         fn()
         self.assertEqual(cnt.frame_count, ifdynstaticdefault(2, 1))
 
@@ -2475,7 +2504,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             return mask
 
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(mandelbrot_numpy)
+        opt_fn = torch.compile(mandelbrot_numpy, backend=cnts, fullgraph=True)
         n_iter = torch._dynamo.config.cache_size_limit - 2
         for i in range(n_iter):
             x = i + 3
@@ -2532,7 +2561,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             return tensor + y
 
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         for x in range(1, 10):
             y = torch.randn([1, 2, x])
             ref = fn(x, y)
@@ -2555,7 +2584,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             return (x * 5).astype(bool).astype(float).astype(int) + 8
 
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
 
         r = opt_fn(x)
         self.assertEqual(r.dtype, int)
@@ -2568,7 +2597,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             return (x * 5).to(bool).to(float).to(int) + 8
 
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
 
         r = opt_fn(x)
         self.assertEqual(r.dtype, torch.int64)
@@ -2580,7 +2609,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             return np.unique(x)
 
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
 
         r = opt_fn()
         self.assertEqual(r.dtype, np.float16)
@@ -2591,7 +2620,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             return np.asarray(["L", "U"])
 
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
 
         r = opt_fn()
         self.assertEqual(cnts.frame_count, 0)  # graph break
@@ -2602,7 +2631,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             return np.random.choice(["L", "U"])
 
         cnts2 = torch._dynamo.testing.CompileCounter()
-        opt_fn2 = torch._dynamo.optimize(cnts2)(fn2)
+        opt_fn2 = torch.compile(fn2, backend=cnts2)
 
         r2 = fn2()
         self.assertEqual(cnts.frame_count, 0)
@@ -2615,7 +2644,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             return 2 * x
 
         counter = CompileCounter()
-        compiled_fn = torch._dynamo.optimize(counter)(fn)
+        compiled_fn = torch.compile(fn, backend=counter)
 
         x = np.arange(8)
         self.assertEqual(fn(x), compiled_fn(x))
@@ -2631,7 +2660,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             return 2 * np.arange(x)
 
         counter = CompileCounter()
-        compiled_fn = torch._dynamo.optimize(counter)(fn)
+        compiled_fn = torch.compile(fn, backend=counter)
 
         x = 8
         self.assertEqual(fn(x), compiled_fn(x))
@@ -2644,7 +2673,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             return isinstance(x, torch.Tensor)
 
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
 
         # torch does not have the `uint16` dtype
         for x in [np.array([42], dtype=np.uint16), np.uint16(42), np.dtype("uint16")]:
@@ -2659,7 +2688,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             return [bm for bm in x]
 
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
 
         proba_map = np.arange(3)[:, None]
         res = opt_fn(proba_map)
@@ -2693,7 +2722,7 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         for dtyp in dtypes:
             cnts = torch._dynamo.testing.CompileCounter()
-            opt_fn = torch._dynamo.optimize(cnts)(fn)
+            opt_fn = torch.compile(fn, backend=cnts)
 
             val = fn(dtyp)
             opt_val = opt_fn(dtyp)
@@ -2728,7 +2757,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         for func, args in func_args_map.items():
             args_clone = args.clone()
             cnts = torch._dynamo.testing.CompileCounter()
-            opt_f = torch._dynamo.optimize(cnts)(func)
+            opt_f = torch.compile(func, backend=cnts)
             self.assertTrue(same(func(args).shape, opt_f(args_clone).shape))
             self.assertEqual(cnts.frame_count, 1)
             self.assertEqual(cnts.op_count, 1)  # mul_
@@ -2797,7 +2826,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         args2 = dict(args1)
         assert fn(args1) is args1
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         self.assertIs(opt_fn(args2), args2)
         self.assertTrue(same(args1, args2))
         self.assertEqual(cnts.frame_count, 1)
@@ -2814,7 +2843,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         args1["a"] = torch.rand(10)
         args1["b"] = torch.rand(10)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         self.assertEqual(fn(args1), opt_fn(args1))
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
@@ -2834,7 +2863,7 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         args1 = {collections.namedtuple: None, 3: torch.randn(3)}
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         self.assertEqual(fn(args1), opt_fn(args1))
         self.assertEqual(cnts.frame_count, 1)
         # Test a failing namedtuple guard
@@ -2854,7 +2883,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         args1[3] = z
 
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         self.assertEqual(fn(args1, x), opt_fn(args1, x))
         self.assertEqual(cnts.frame_count, 1)
 
@@ -2881,7 +2910,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         args1[3] = z
 
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         self.assertEqual(fn(args1, x), opt_fn(args1, x))
         self.assertEqual(cnts.frame_count, 1)
 
@@ -3212,7 +3241,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         correct1 = fn(m1, v)
         correct2 = fn(m2, v)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         for _ in range(10):
             self.assertTrue(same(opt_fn(m1, v), correct1))
         for _ in range(10):
@@ -3230,7 +3259,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         correct1 = fn(args1)
         correct2 = fn(args2)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         self.assertTrue(same(opt_fn(args1), correct1))
         self.assertTrue(same(opt_fn(args2), correct2))
         self.assertIsInstance(opt_fn(args1), list)
@@ -3259,7 +3288,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         obj2 = MyObj(x1, x2)
         fn(obj2)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         self.assertIs(opt_fn(obj1), obj1)
         self.assertTrue(same(obj1.a, obj2.a))
         self.assertTrue(same(obj1.b, obj2.b))
@@ -3285,7 +3314,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         obj2 = fn(x1)
 
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         obj1 = opt_fn(x1)
         self.assertTrue(same(obj1.a, obj2.a))
         self.assertTrue(same(obj1.b, obj2.b))
@@ -3313,7 +3342,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         obj2 = fn(x1)
 
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         obj1 = opt_fn(x1)
         self.assertTrue(same(obj1, obj2))
         self.assertEqual(cnts.frame_count, 1)
@@ -3333,7 +3362,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         obj11 = fn1(x1.clone())
 
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn1 = torch._dynamo.optimize(cnts, nopython=True)(fn1)
+        opt_fn1 = torch.compile(fn1, backend=cnts, fullgraph=True)
         obj12 = opt_fn1(x1.clone())
         self.assertTrue(same(obj11.x, x1 + 2))
         self.assertTrue(same(obj12.x, x1 + 2))
@@ -3352,7 +3381,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         obj21 = fn2(x2.clone())
 
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn2 = torch._dynamo.optimize(cnts, nopython=True)(fn2)
+        opt_fn2 = torch.compile(fn2, backend=cnts, fullgraph=True)
         obj22 = opt_fn2(x2.clone())
         self.assertTrue(same(obj21.x, x2))
         self.assertTrue(same(obj22.x, x2))
@@ -3372,7 +3401,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         obj31 = fn3(x3.clone())
 
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn3 = torch._dynamo.optimize(cnts, nopython=True)(fn3)
+        opt_fn3 = torch.compile(fn3, backend=cnts, fullgraph=True)
         obj32 = opt_fn3(x3.clone())
         self.assertTrue(same(obj31.x, x3 + 2))
         self.assertTrue(same(obj32.x, x3 + 2))
@@ -3394,7 +3423,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         obj41 = fn4(x4.clone())
 
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn4 = torch._dynamo.optimize(cnts, nopython=True)(fn4)
+        opt_fn4 = torch.compile(fn4, backend=cnts, fullgraph=True)
         obj42 = opt_fn4(x4.clone())
         self.assertTrue(same(obj41.x, x4))
         self.assertTrue(same(obj42.x, x4))
@@ -3449,7 +3478,7 @@ utils_device.CURRENT_DEVICE == None""".split(
                 return x + 3
 
         x = torch.rand(3)
-        opt_fn = torch._dynamo.optimize("eager")(fn)
+        opt_fn = torch.compile(fn, backend="eager")
         for c in [MyClass1, MyClass2]:
             ref = fn(x, c)
             res = opt_fn(x, c)
@@ -3477,7 +3506,7 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         x = torch.rand(3)
         obj = MyClass2()
-        opt_fn = torch._dynamo.optimize("eager")(fn)
+        opt_fn = torch.compile(fn, backend="eager")
         ref = fn(x, obj)
         res = opt_fn(x, obj)
         self.assertTrue(same(ref, res))
@@ -3638,7 +3667,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             else:
                 cnts = torch._dynamo.testing.CompileCounter()
 
-                @torch._dynamo.optimize(cnts, nopython=True)
+                @torch.compile(backend=cnts, fullgraph=True)
                 def fn(counter):
                     return counter() + counter()
 
@@ -3663,7 +3692,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             return inner()
 
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(indirect)
+        opt_fn = torch.compile(indirect, backend=cnts)
         result1, result2 = opt_fn()
         self.assertAlmostEqual(cell1 + 1, result1)
         self.assertTrue(torch.allclose(cell2 + 3, result2))
@@ -3691,7 +3720,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             return inner()
 
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(indirect)
+        opt_fn = torch.compile(indirect, backend=cnts, fullgraph=True)
         for i in range(1, 4):
             result1, result2, _ = opt_fn()
             self.assertAlmostEqual(orig1 + 1 * i, result1)
@@ -3715,7 +3744,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             return x
 
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         expected = fn()
         actual = opt_fn()
         self.assertTrue(same(expected, actual))
@@ -3759,7 +3788,7 @@ utils_device.CURRENT_DEVICE == None""".split(
                 return cond(pred, shallow, deep, [x])
 
         mod = ModuleCondDeep()
-        opt_mod = torch._dynamo.optimize("eager")(mod)
+        opt_mod = torch.compile(mod, backend="eager")
         inp = torch.randn(3, 3)
         exp1 = mod(torch.tensor(False), inp)
         actual1 = opt_mod(torch.tensor(False), inp)
@@ -3767,6 +3796,126 @@ utils_device.CURRENT_DEVICE == None""".split(
         actual2 = opt_mod(torch.tensor(True), inp)
         self.assertTrue(torch.allclose(exp1, actual1))
         self.assertTrue(torch.allclose(exp2, actual2))
+
+    def test_closure_write_across_functions(self):
+        z = 1
+        k = 2
+
+        def create_fn():
+            def fn(x):
+                nonlocal k, z
+                k = z
+
+            return fn
+
+        def update_z_and_run_fn(fn, x):
+            nonlocal z
+            z = 3
+            fn(x)
+            return x.cos()
+
+        @torch.compile(backend="eager")
+        def foo(x):
+            fn = create_fn()
+            return update_z_and_run_fn(fn, x)
+
+        x = torch.randn(1)
+        foo(x)
+        self.assertEqual(3, z)
+        self.assertEqual(3, k)
+
+    def test_free_var_and_local_name_collision(self):
+        x = 10
+
+        def make_func():
+            def func():
+                return x
+
+            return func
+
+        @torch.compile(backend="eager")
+        def root(t):
+            x = 0
+            func = make_func()
+            res = func()
+            return t + 1, x, res
+
+        res = root(torch.ones(1))
+        self.assertTrue(torch.allclose(torch.ones(1) + 1, res[0]))
+        self.assertEqual(0, res[1])
+        self.assertEqual(10, res[2])
+
+    def test_cell_captured_by_existing_func_but_not_root_frame(self):
+        x = torch.ones(1)
+
+        def get_inner():
+            def inner():
+                return x + x
+
+            # Calling `inner` so Dynamo won't skip this frame.
+            return inner(), inner
+
+        @torch.compile
+        def root():
+            return get_inner()
+
+        res, inner = root()
+        self.assertTrue(torch.allclose(x + x, res))
+        self.assertTrue(torch.allclose(inner(), res))
+
+    def test_writes_to_cells_across_frames1(self):
+        # This regression test was added when Dynamo accidentally had both
+        # unboxed and normal modeling for pre-existing cells, and failed to
+        # account for buffered writes when we read from the unboxed value.
+        x = 0
+
+        def inc_x():
+            nonlocal x
+            x += 1
+
+        class MyObj:
+            def inc_x_then_return_x(self, fn):
+                fn()
+                return x
+
+        @torch.compile(backend="eager")
+        def root(t):
+            obj = MyObj()
+            res = obj.inc_x_then_return_x(inc_x)
+            return t + 1, res
+
+        res = root(torch.zeros(1))
+        self.assertTrue(torch.allclose(res[0], torch.ones(1)))
+        self.assertEqual(res[1], 1)
+        self.assertEqual(x, 1)
+
+    def test_writes_to_cells_across_frames2(self):
+        # This regression test was added when Dynamo didn't fully account for
+        # already established `NewCellVariable` instance for pre-existing cell,
+        # while encountering the same cell again (we should reuse the instance
+        # rather than creating a new one). This caused buffered writes to escape
+        # the newly created `NewCellVariable`.
+        x = 0
+
+        def inc_x_and_get_x(obj):
+            nonlocal x
+            x += 1
+            return obj.get_x()
+
+        class MyObj:
+            def get_x(self):
+                return x
+
+        @torch.compile(backend="eager")
+        def root(t):
+            obj = MyObj()
+            res = inc_x_and_get_x(obj)
+            return t + 1, res
+
+        res = root(torch.zeros(1))
+        self.assertTrue(torch.allclose(res[0], torch.ones(1)))
+        self.assertEqual(res[1], 1)
+        self.assertEqual(x, 1)
 
     def test_top_package_import(self):
         def fn(x):
@@ -3810,7 +3959,7 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         x = torch.randn(3)
         ref = fn(x)
-        opt_fn = torch._dynamo.optimize("eager", nopython=False)(fn)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=False)
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
 
@@ -3830,7 +3979,7 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         cnts1 = torch._dynamo.testing.CompileCounter()
         mod = MockModule()
-        optimized_mod = torch._dynamo.optimize(cnts1, nopython=True)(mod)
+        optimized_mod = torch.compile(mod, backend=cnts1, fullgraph=True)
 
         a = torch.randn(10)
         ref = mod(a)
@@ -3848,11 +3997,11 @@ utils_device.CURRENT_DEVICE == None""".split(
         def fn1(x):
             return torch.sin(x) * 10
 
-        @torch._dynamo.optimize(cnts2, nopython=True)
+        @torch.compile(backend=cnts2, fullgraph=True)
         def fn2(x):
             return fn1(x) + 1
 
-        @torch._dynamo.optimize(cnts3, nopython=True)
+        @torch.compile(backend=cnts3, fullgraph=True)
         def fn3(x):
             return torch.relu(fn2(x))
 
@@ -3864,7 +4013,7 @@ utils_device.CURRENT_DEVICE == None""".split(
     def test_nested_optimize_run(self):
         cnts = torch._dynamo.testing.CompileCounter()
 
-        @torch._dynamo.optimize(cnts, nopython=True)
+        @torch.compile(backend=cnts, fullgraph=True)
         def fn(x):
             return torch.relu(torch.cos(x) + torch.sin(x))
 
@@ -3886,8 +4035,8 @@ utils_device.CURRENT_DEVICE == None""".split(
         def fn(x):
             return torch.relu(torch.cos(x) + torch.sin(x))
 
-        fn1 = torch._dynamo.optimize(cnts1, nopython=True)(fn)
-        fn2 = torch._dynamo.optimize(cnts2, nopython=True)(fn1)
+        fn1 = torch.compile(fn, backend=cnts1, fullgraph=True)
+        fn2 = torch.compile(fn1, backend=cnts2, fullgraph=True)
 
         # The first optimize in the nesting should be ignored
         fn2(torch.randn(4))
@@ -3903,8 +4052,8 @@ utils_device.CURRENT_DEVICE == None""".split(
         torch._dynamo.reset()
         cnts1 = torch._dynamo.testing.CompileCounter()
         cnts2 = torch._dynamo.testing.CompileCounter()
-        fn1 = torch._dynamo.optimize(cnts1, nopython=True)(fn)
-        fn2 = torch._dynamo.optimize(cnts2, nopython=True)(fn1)
+        fn1 = torch.compile(fn, backend=cnts1, fullgraph=True)
+        fn2 = torch.compile(fn1, backend=cnts2, fullgraph=True)
         fn1(torch.randn(4))
         self.assertEqual(cnts1.frame_count, 1)
         torch._dynamo.run()(fn2)(torch.randn(4))
@@ -3922,7 +4071,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         x_clone = x.clone()
         ref = fn(x)
 
-        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
         res = opt_fn(x_clone)
 
         self.assertTrue(same(ref, res))
@@ -3933,7 +4082,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         def fn():
             return torch.Size([10, 8]).numel()
 
-        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
         num = torch.Size([10, 8]).numel()
         self.assertEqual(opt_fn(), num)
 
@@ -3943,7 +4092,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         def fn(x):
             return x.size().numel()
 
-        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
         x = torch.rand(10, 1, 8, 1)
         expect = fn(x)
         self.assertEqual(opt_fn(x), expect)
@@ -3954,7 +4103,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         def fn(x):
             return x + (type(x.shape) == torch.Size)
 
-        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
         x = torch.zeros(())
         self.assertEqual(opt_fn(x), fn(x))
 
@@ -3964,7 +4113,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         def fn(x, dim):
             return x.size(dim=dim)
 
-        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
         x = torch.empty([4, 9, 8])
         self.assertEqual(opt_fn(x, 1), 9)
         self.assertEqual(opt_fn(x, -2), 9)
@@ -3975,7 +4124,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         def fn(x, dim):
             return x.stride(dim=dim)
 
-        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
         x = torch.empty([4, 9, 8])
         self.assertEqual(opt_fn(x, 0), 72)
         self.assertEqual(opt_fn(x, -2), 8)
@@ -3996,7 +4145,7 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         # Python code is needed here, since torch.manual_seed graph-breaks.
         # Refs: https://github.com/pytorch/pytorch/issues/107187
-        opt_fn = torch._dynamo.optimize(cnts, nopython=False)(fn)
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=False)
         res = opt_fn(x)
 
         self.assertTrue(same(ref, res))
@@ -4017,7 +4166,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         x = torch.randn(10)
         ref0 = f(x)
         ref1 = f(4)
-        opt_f = torch._dynamo.optimize(cnts, nopython=True)(f)
+        opt_f = torch.compile(f, backend=cnts, fullgraph=True)
         res0 = opt_f(x)
         res1 = opt_f(4)
         self.assertTrue(same(ref0, res0))
@@ -4043,7 +4192,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         x = MyTensor()
         ref0 = fn(x)
         ref1 = fn(4)
-        opt_fn = torch._dynamo.optimize("eager")(fn)
+        opt_fn = torch.compile(fn, backend="eager")
         res0 = opt_fn(x)
         res1 = opt_fn(4)
         self.assertTrue(same(ref0, res0))
@@ -4056,7 +4205,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         x = torch.rand(8)
         y = torch.ones(8).to(torch.int)
         ref = fn(x, y)
-        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(x, y)
         self.assertTrue(same(ref, res))
 
@@ -4071,7 +4220,7 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         x = torch.rand(2, 3)
         ref = fn(x)
-        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
 
@@ -4095,7 +4244,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertTrue(same(ref_run1, ref_run2))
 
         torch.manual_seed(10)
-        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
         res = opt_fn()
 
         self.assertTrue(same(res, ref_run1))
@@ -4119,7 +4268,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         ref0 = getitem(layers, slice(0, 2, 1))
         ref1 = getitem(layers, 2)
         ref2 = getitem(layers, slice(3, 8, 2))
-        opt_getitem = torch._dynamo.optimize(cnts, nopython=True)(getitem)
+        opt_getitem = torch.compile(getitem, backend=cnts, fullgraph=True)
         res0 = opt_getitem(layers, slice(0, 2, 1))
         res1 = opt_getitem(layers, 2)
         res2 = opt_getitem(layers, slice(3, 8, 2))
@@ -4144,7 +4293,7 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         for inp in inps:
             inp.grad = None
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         res = opt_fn(*inps)
 
         self.assertTrue(same(ref, res))
@@ -4188,7 +4337,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         out_sum = out.sum()
         out_sum.backward()
 
-        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
         res = opt_fn(a, b)
 
         self.assertTrue(same(ref, res))
@@ -4215,7 +4364,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         # Compiled
         a = torch.ones([2, 2], requires_grad=True)
         b = torch.ones([2, 2])
-        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
         res = opt_fn(a, b)
         self.assertTrue(same(ref, res))
         self.assertEqual(cnts.frame_count, 1)
@@ -4248,7 +4397,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             output = torch.conv2d(input, weight, None, (2, 1), (1, 1), (1, 1), 1)
             return output.is_contiguous(memory_format=x)
 
-        opt_fn = torch._dynamo.optimize("eager")(fn)
+        opt_fn = torch.compile(fn, backend="eager")
         for x in [torch.contiguous_format, torch.channels_last]:
             self.assertEqual(fn(x), opt_fn(x))
 
@@ -4266,8 +4415,8 @@ utils_device.CURRENT_DEVICE == None""".split(
             return y
 
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_f1 = torch._dynamo.optimize(cnts)(f1)
-        opt_f2 = torch._dynamo.optimize(cnts)(f2)
+        opt_f1 = torch.compile(f1, backend=cnts)
+        opt_f2 = torch.compile(f2, backend=cnts)
         res1 = opt_f1([1, 2, 3, 5])
         res2 = opt_f2(torch.rand([2, 3, 4, 5]))
 
@@ -4293,7 +4442,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             return a, b
 
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         for _ in range(10):
             x = torch.rand(3)
             ref = fn(x)
@@ -4323,7 +4472,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             return a, b
 
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         for _ in range(10):
             x = torch.rand(3)
             ref = fn(x)
@@ -4436,7 +4585,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         def fn():
             return "another_fn" in str(another_fn)
 
-        opt_fn = torch._dynamo.optimize(nopython=True)(fn)
+        opt_fn = torch.compile(fn, fullgraph=True)
         self.assertTrue(opt_fn())
 
     def test_enum_no_graphbreaks(self):
@@ -4452,13 +4601,13 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         x = torch.randn(1)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
         opt_fn(x, Foo.FOO)
         self.assertEqual(cnts.op_count, 2)
 
         torch._dynamo.reset()
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
         opt_fn(x, Foo.BAR)
         self.assertEqual(cnts.op_count, 1)
 
@@ -4629,7 +4778,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             return y + len(x)
 
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
         x = torch.randn(3)
         self.assertEqual(opt_fn(x), x)
         self.assertEqual(cnts.op_count, 1)
@@ -4645,13 +4794,13 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         x = torch.randn(1)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
         opt_fn(x, torch.add)
         self.assertEqual(cnts.op_count, 2)
 
         torch._dynamo.reset()
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
         opt_fn(x, torch.mul)
         self.assertEqual(cnts.op_count, 1)
 
@@ -4769,7 +4918,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         sample = SampleInput(torch.ones(2))
         ref = fn(sample)
 
-        opt_fn = torch._dynamo.optimize("eager")(fn)
+        opt_fn = torch.compile(fn, backend="eager")
         res = opt_fn(sample)
 
         self.assertTrue(same(ref, res))
@@ -4846,7 +4995,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         x = torch.rand([2, 2, 2, 2, 2, 2])
         res1 = fn(x)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         res2 = opt_fn(x)
         self.assertTrue(same(res1, res2))
 
@@ -4861,7 +5010,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             return modules, module_dict
 
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         modules, module_dict = opt_fn()
 
         self.assertEqual(len(module_dict), len(modules))
@@ -4910,7 +5059,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         x = torch.tensor([2.3])
         res = fn(x)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         res2 = opt_fn(x)
         self.assertEqual(res, res2)
 
@@ -4922,7 +5071,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         x = torch.tensor(20)
         res = fn(x)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         res2 = opt_fn(x)
         self.assertEqual(res, res2)
         self.assertEqual(cnts.frame_count, 1)
@@ -4932,7 +5081,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             x = torch.empty(4, dtype=dtype)
             assert isinstance(x, tensor_type)
 
-        opt_fn = torch._dynamo.optimize("eager")(fn)
+        opt_fn = torch.compile(fn, backend="eager")
         opt_fn(torch.float32, torch.FloatTensor)
         opt_fn(torch.float64, torch.DoubleTensor)
         opt_fn(torch.float16, torch.HalfTensor)
@@ -5244,7 +5393,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         m = np.array([1, 2, 3])
         ref = fn(x, m)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         res = opt_fn(x, m)
         self.assertEqual(ref, res)
 
@@ -5263,7 +5412,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         a = torch.tensor([2.0, 3.0], requires_grad=True)
         b = torch.tensor([6.0, 4.0], requires_grad=True)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         _, b_grad = opt_fn(a, b)
         self.assertTrue(same(b_grad, torch.tensor([0.0, 0.0])))
         self.assertEqual(cnts.frame_count, 2)
@@ -5278,7 +5427,7 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         x = torch.tensor([2.5])
         ref = fn(x)
-        opt_fn = torch._dynamo.optimize("eager")(fn)
+        opt_fn = torch.compile(fn, backend="eager")
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
@@ -5852,7 +6001,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         fn(x, y)
 
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
         opt_fn(x, y)
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 3)
@@ -6021,7 +6170,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         x = torch.randn(2, 3)
         m = {"x": torch.randn(3)}
         ref = fn(x, m)
-        opt_fn = torch._dynamo.optimize("eager")(fn)
+        opt_fn = torch.compile(fn, backend="eager")
         res = opt_fn(x, m)
         self.assertTrue(torch.allclose(ref, res))
 
@@ -6239,7 +6388,7 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         x = torch.rand(4)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
         obj1 = A(0.5)
         obj2 = B(0.5)
         obj3 = B(-0.5)
@@ -6268,7 +6417,7 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         x = torch.rand(4)
         obj = MyObj(0.5)
-        opt_fn = torch._dynamo.optimize("eager")(fn)
+        opt_fn = torch.compile(fn, backend="eager")
         try:
             opt_fn(x, obj)
             self.assertFalse(True)
@@ -6504,7 +6653,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             y = torch.rand([2, 3])
             return x, y
 
-        opt_fn = torch._dynamo.optimize("eager")(fn)
+        opt_fn = torch.compile(fn, backend="eager")
         x, y = opt_fn()
         self.assertEqual(x, y * 2)
 
@@ -6512,7 +6661,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         def fn(x):
             return torch.distributions.Categorical(probs=x).entropy()
 
-        opt_fn = torch._dynamo.optimize("eager")(fn)
+        opt_fn = torch.compile(fn, backend="eager")
         x = torch.rand([4, 4])
         self.assertEqual(opt_fn(x), fn(x))
 
@@ -6865,7 +7014,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         x = torch.rand([4, 4])
         y = MyClass()
         ref = fn(x, y)
-        opt_fn = torch._dynamo.optimize("eager")(fn)
+        opt_fn = torch.compile(fn, backend="eager")
         res = opt_fn(x, y)
         self.assertTrue(same(ref, res))
 
@@ -6890,7 +7039,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             y = tuple(params)
             return inner_fn(*y)
 
-        opt_fn = torch._dynamo.optimize("eager")(fn)
+        opt_fn = torch.compile(fn, backend="eager")
         inputs = [torch.randn(10, 10) for _ in range(3)]
         self.assertTrue(same(fn(iter(tuple(inputs))), opt_fn(iter(tuple(inputs)))))
 
@@ -6943,7 +7092,7 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         x = torch.randn(6)
         cnt = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnt)(fn)
+        opt_fn = torch.compile(fn, backend=cnt)
         for i in range(10, 25, 3):
             y = [i, i + 1, i + 2]
             ref = fn(x, y)
@@ -7012,7 +7161,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         y = torch.rand((4, 4))
 
         ref = fn(x, y)
-        opt_fn = torch._dynamo.optimize("eager")(fn)
+        opt_fn = torch.compile(fn, backend="eager")
         res = opt_fn(x, y)
         self.assertTrue(same(ref, res))
 
@@ -7038,7 +7187,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         y = torch.rand((4, 4))
 
         ref = fn(x, y)
-        opt_fn = torch._dynamo.optimize("eager")(fn)
+        opt_fn = torch.compile(fn, backend="eager")
         res = opt_fn(x, y)
         self.assertTrue(same(ref, res))
 
@@ -7054,7 +7203,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         y = torch.rand((4, 4))
 
         ref = fn(x, y)
-        opt_fn = torch._dynamo.optimize("eager")(fn)
+        opt_fn = torch.compile(fn, backend="eager")
         res = opt_fn(x, y)
         self.assertTrue(same(ref, res))
 
@@ -7175,7 +7324,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         x = torch.rand((2, 2))
         x.custom_attr = 3.14
         ref = fn(x)
-        opt_fn = torch._dynamo.optimize("eager")(fn)
+        opt_fn = torch.compile(fn, backend="eager")
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
 
@@ -7186,7 +7335,7 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         x = torch.rand((2, 2))
         ref = fn(x)
-        opt_fn = torch._dynamo.optimize("eager")(fn)
+        opt_fn = torch.compile(fn, backend="eager")
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
 
@@ -7226,7 +7375,7 @@ utils_device.CURRENT_DEVICE == None""".split(
                 except RuntimeError as msg2:
                     raise RuntimeError("smoge")
 
-        opt_fn = torch._dynamo.optimize("eager")(fn)
+        opt_fn = torch.compile(fn, backend="eager")
         try:
             opt_fn()
         except RuntimeError:
@@ -7253,7 +7402,7 @@ utils_device.CURRENT_DEVICE == None""".split(
                     x = x + 1
                 return x
 
-        opt_fn = torch._dynamo.optimize("eager")(fn)
+        opt_fn = torch.compile(fn, backend="eager")
         self.assertEqual(opt_fn(torch.ones(1)), torch.tensor([3.0]))
 
     def test_nested_sequential_try(self):
@@ -7274,7 +7423,7 @@ utils_device.CURRENT_DEVICE == None""".split(
                 pass
             return x
 
-        opt_fn = torch._dynamo.optimize("eager")(fn)
+        opt_fn = torch.compile(fn, backend="eager")
         self.assertEqual(opt_fn(torch.ones(1)), torch.tensor([3.0]))
 
     def test_nested_sequential_try_with(self):
@@ -7291,7 +7440,7 @@ utils_device.CURRENT_DEVICE == None""".split(
                     pass
             return x
 
-        opt_fn = torch._dynamo.optimize("eager")(fn)
+        opt_fn = torch.compile(fn, backend="eager")
         self.assertEqual(opt_fn(torch.ones(1)), torch.tensor([3.0]))
 
     def test_nested_sequential_try_with_graph_break(self):
@@ -7314,13 +7463,13 @@ utils_device.CURRENT_DEVICE == None""".split(
             return x
 
         counter = CompileCounter()
-        opt_fn = torch._dynamo.optimize(counter)(fn)
+        opt_fn = torch.compile(fn, backend=counter)
         self.assertEqual(opt_fn(torch.ones(1), 0), torch.tensor([5.0]))
         self.assertEqual(counter.frame_count, 1)
 
         torch._dynamo.reset()
         counter = CompileCounter()
-        opt_fn = torch._dynamo.optimize(counter)(fn)
+        opt_fn = torch.compile(fn, backend=counter)
         self.assertEqual(opt_fn(torch.ones(1), 1), torch.tensor([5.0]))
         self.assertEqual(counter.frame_count, 3)
 
@@ -7339,7 +7488,7 @@ utils_device.CURRENT_DEVICE == None""".split(
                 return 0
 
         dis.dis(fn)
-        self.assertEqual(torch._dynamo.optimize("eager")(fn)(), 3)
+        self.assertEqual(torch.compile(fn, backend="eager")(), 3)
 
     # NOTE this test can be removed once multiline errors are in Python.
     # See https://github.com/python/cpython/issues/106922
@@ -7537,6 +7686,20 @@ utils_device.CURRENT_DEVICE == None""".split(
         torch._dynamo.mark_dynamic(y, 0)
         opt = torch._dynamo.optimize(nopython=True)(fn)
         opt(*inputs)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_symint_fold_nontrivial_product_modulo(self):
+        @torch.compile(fullgraph=True)
+        def f(x):
+            u0, u1 = x.tolist()
+            torch._check_is_size(u0)
+            # The condition should fold to true.
+            if ((u0 + 10) * (u0 + 10)) % (u0 + 10) == 0:
+                return torch.tensor(True)
+            return torch.tensor(False)
+
+        res = f(torch.tensor([20, 21]))
+        self.assertEqual(torch.tensor(True), res)
 
     # Translation validation changes the exception type, don't run with it
     @torch.fx.experimental._config.patch(translation_validation=False)
@@ -7888,7 +8051,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             "torch._guards.TracingContext.current_frame",
             side_effect=global_context_capture_fn,
         ):
-            torch._dynamo.optimize("eager")(fn)(x, y, z)
+            torch.compile(fn, backend="eager")(x, y, z)
 
         self.assertEqual(len(seen_frames), 1)
         self.assertEqual(seen_frames[0].name, "fn")
@@ -7924,7 +8087,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             "torch._guards.TracingContext.current_frame",
             side_effect=global_context_capture_fn,
         ):
-            torch._dynamo.optimize("eager")(fn)(x, y, z)
+            torch.compile(fn, backend="eager")(x, y, z)
 
         self.assertEqual(len(seen_frames), 3)
         self.assertEqual(seen_frames[0].name, "fn")
@@ -8026,7 +8189,7 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         with torch.cuda.device(0):
             counter = CompileCounter()
-            opt_fn = torch._dynamo.optimize(counter)(fn)
+            opt_fn = torch.compile(fn, backend=counter)
             res = opt_fn()
             self.assertEqual(res.device.type, "cuda")
             self.assertEqual(res.device.index, 0)
@@ -8414,7 +8577,7 @@ def ___make_guard_fn():
         def fn():
             return torch.randn(3, dtype=remap[torch.float16])
 
-        opt = torch._dynamo.optimize("eager")(fn)
+        opt = torch.compile(fn, backend="eager")
         opt()
 
     def test_tracing_py_tree(self):
@@ -8683,7 +8846,7 @@ def ___make_guard_fn():
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_runtime_assert_replacement(self):
-        @torch.compile(backend="aot_eager")
+        @torch.compile(backend="eager")
         def fn(x, y):
             z = y.item()
             torch._check(z == 3)
@@ -9048,7 +9211,7 @@ def ___make_guard_fn():
         )
         eager = fn(x)
         counter = CompileCounter()
-        compiled = torch._dynamo.optimize(counter)(fn)(x)
+        compiled = torch.compile(fn, backend=counter)(x)
         self.assertEqual(eager, compiled)
         # Nothing to compile here
         self.assertEqual(counter.frame_count, 0)
@@ -9115,7 +9278,7 @@ def ___make_guard_fn():
 
         eager = fn(d1)
         counter = CompileCounter()
-        compiled = torch._dynamo.optimize(counter)(fn)(d2)
+        compiled = torch.compile(fn, backend=counter)(d2)
         self.assertEqual(eager, compiled)
         self.assertEqual(counter.frame_count, 1)
 
@@ -9135,7 +9298,7 @@ def ___make_guard_fn():
         b = torch.randn([3, 3])
         eager = fn(d1, a, b)
         counter = CompileCounter()
-        compiled = torch._dynamo.optimize(counter)(fn)(d2, a, b)
+        compiled = torch.compile(fn, backend=counter)(d2, a, b)
         self.assertEqual(eager, compiled)
         self.assertEqual(counter.frame_count, 1)
         self.assertTrue(isinstance(compiled, torch.Tensor))
@@ -9683,7 +9846,7 @@ def ___make_guard_fn():
         eager = fn(t_list)
 
         counter = CompileCounter()
-        compiled_fn = torch._dynamo.optimize(counter)(fn)
+        compiled_fn = torch.compile(fn, backend=counter)
         compiled = compiled_fn(t_list)
 
         self.assertEqual(list(eager), list(compiled))
@@ -9920,7 +10083,7 @@ def ___make_guard_fn():
                         "c": (
                             x,
                             3.0,
-                            collections.deque([0.0, -x]),
+                            collections.deque([0.0, -x, 1, 2], maxlen=3),
                         ),
                         "d": collections.OrderedDict(
                             {
@@ -9952,7 +10115,7 @@ def ___make_guard_fn():
                         "c": (
                             x,
                             3.0,
-                            [0.0, -x],
+                            collections.deque([0.0, -x, 1, 2], maxlen=3),
                         ),
                         "d": collections.OrderedDict(
                             {
@@ -9968,6 +10131,7 @@ def ___make_guard_fn():
                         x * y,
                         3.0,
                         y - 2,
+                        1,
                         torch.zeros(2, 2),
                         2 * y,
                         -y,
@@ -10000,7 +10164,7 @@ def ___make_guard_fn():
                         "c": (
                             x,
                             3.0,
-                            [0.0, -x],
+                            collections.deque([0.0, -x, 1, 2], maxlen=3),
                         ),
                         "d": collections.OrderedDict(
                             {
@@ -10011,7 +10175,7 @@ def ___make_guard_fn():
                     }
                     tree2 = collections.OrderedDict(
                         [
-                            ("c", (y, 3.0, [-y, 10.0])),
+                            ("c", (y, 3.0, collections.deque([1, -y, 10.0]))),
                             ("a", [y, y + 1]),
                             ("b", y + 2),
                             (
@@ -10180,6 +10344,9 @@ ShapeEnv not equal: field values don't match:
             """\
 ShapeEnv not equal: field values don't match:
 
+==> axioms: values don't match.
+  >  Left: {0 < Mod(s0, 3): False, 0 <= Mod(s0, 3): True, Eq(0, Mod(s0, 3)): True, Eq(Mod(s0, 3), 0): True, Mod(s0, 3) < 0: False, Mod(s0, 3) <= 0: True, Ne(0, Mod(s0, 3)): False, Ne(Mod(s0, 3), 0): False}
+  > Right: {}
 ==> divisible: values don't match.
   >  Left: {Mod(s0, 3)}
   > Right: {}
@@ -10217,6 +10384,9 @@ ShapeEnv not equal: field values don't match:
             """\
 ShapeEnv not equal: field values don't match:
 
+==> axioms: values don't match.
+  >  Left: {False: False, True: True}
+  > Right: {}
 ==> guards: values don't match.
   >  Left: [Eq(s0, 3)]
   > Right: []
@@ -10258,6 +10428,9 @@ ShapeEnv not equal: field values don't match:
             """\
 ShapeEnv not equal: field values don't match:
 
+==> axioms: values don't match.
+  >  Left: {3 <= s0: True, s0 < 3: False}
+  > Right: {}
 ==> guards: values don't match.
   >  Left: [s0 >= 3]
   > Right: []
@@ -10290,6 +10463,9 @@ ShapeEnv not equal: field values don't match:
             """\
 ShapeEnv not equal: field values don't match:
 
+==> axioms: values don't match.
+  >  Left: {0 < PythonMod(u0, 3): False, 0 <= PythonMod(u0, 3): True, Eq(0, PythonMod(u0, 3)): True, Eq(PythonMod(u0, 3), 0): True, Ne(0, PythonMod(u0, 3)): False, Ne(PythonMod(u0, 3), 0): False, PythonMod(u0, 3) < 0: False, PythonMod(u0, 3) <= 0: True}
+  > Right: {}
 ==> deferred_runtime_asserts: values don't match.
   >  Left: {u0: [Eq(PythonMod(u0, 3), 0)]}
   > Right: {}
@@ -10846,7 +11022,7 @@ fn
             out = torch.cat([torch.randn(r, 5) for r in range(3)])
             return out
 
-        self.assertEqual(torch._dynamo.optimize("eager")(fn)().shape, (3, 5))
+        self.assertEqual(torch.compile(fn, backend="eager")().shape, (3, 5))
 
     def test_raises_importerror1(self):
         @torch.compile(backend="eager")
@@ -11110,6 +11286,26 @@ fn
         self.assertEqual(expected.stride(), actual.stride())
         self.assertEqual(expected.storage_offset(), actual.storage_offset())
 
+    def test_dynamic_shapes_as_strided(self):
+        def fn(t, new_size, new_stride):
+            tmp = t.as_strided(new_size, new_stride)
+            tmp = tmp.view(-1)
+            return t * tmp.sum()
+
+        optfn = torch.compile(backend="eager", dynamic=True)(fn)
+
+        x = torch.randn(3)
+        new_size = [0, 3]
+        new_stride = [3, 1]
+
+        expected = fn(x, new_size, new_stride)
+        actual = optfn(x, new_size, new_stride)
+
+        self.assertEqual(expected.dtype, actual.dtype)
+        self.assertEqual(expected.shape, actual.shape)
+        self.assertEqual(expected.stride(), actual.stride())
+        self.assertEqual(expected.storage_offset(), actual.storage_offset())
+
     @torch._dynamo.config.patch(guard_nn_modules=True)
     def test_hasattr_nn_module_guard(self):
         class M(torch.nn.Module):
@@ -11361,8 +11557,14 @@ fn
 
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         x = torch.randn(4)
-        self.assertEqual(fn(x), opt_fn(x))
-        self.assertEqual(fn(x), opt_fn(x))
+        # Opt_fn is deliberately called first to trigger the __get__ function.
+        # Otherwise, the setattr removes the lazy property.
+        ref = opt_fn(x)
+        res = fn(x)
+        self.assertEqual(ref, res)
+        ref = opt_fn(x)
+        res = fn(x)
+        self.assertEqual(ref, res)
 
     def test_assert_size_stride(self):
         x = torch.randn(2, 3, 4)
@@ -11534,6 +11736,41 @@ fn
         self.assertEqual(expected, actual)
         self.assertGreater(po.call_count, 0)
 
+    def test_data_ptr_graph_break_builtin(self):
+        def f(a, b):
+            # builtin + not implemented for DataPtrVariable
+            return a.data_ptr() + b.data_ptr()
+
+        a = torch.randn(4)
+        b = torch.randn(5)
+
+        # make sure there is a graph break
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            torch.compile(f, backend="eager", fullgraph=True)(a, b)
+
+        torch._dynamo.reset()
+
+        expected = f(a, b)
+        actual = torch.compile(f, backend="eager")(a, b)
+
+        self.assertEqual(expected, actual)
+
+    def test_data_ptr_graph_break_aten(self):
+        def f(a):
+            # torch.add not implemented for DataPtrVariable
+            return torch.add(a, a.data_ptr())
+
+        a = torch.randn(4)
+
+        counters.clear()
+
+        expected = f(a)
+        actual = torch.compile(f, backend="eager")(a)
+
+        self.assertEqual(expected, actual)
+        self.assertTrue(len(counters["graph_break"]) > 0)
+        counters.clear()
+
     class AssertNumOutputBackend:
         """
         A backend that checks the number of output for compiled graph, and
@@ -11653,6 +11890,14 @@ fn
         fn(ones)
         nonlocal_fn()
 
+    def test_compare_tensor_with_none(self):
+        @torch.compile()
+        def f(x):
+            return torch.tensor(x == None)
+
+        res = f(torch.tensor(1))
+        self.assertEqual(torch.tensor(False), res)
+
 
 class TestTracer(JitTestCase):
     def test_jit_save(self):
@@ -11679,7 +11924,7 @@ class TestTracer(JitTestCase):
             return torch.jit.trace(f, (torch.rand(3, 4),))
 
         fn()
-        opt_fn = torch._dynamo.optimize("eager")(fn)
+        opt_fn = torch.compile(fn, backend="eager")
         opt_fn()
 
 

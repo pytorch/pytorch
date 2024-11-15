@@ -19,8 +19,10 @@ from torch.export._tree_utils import reorder_kwargs
 from torch.export.exported_program import (
     ConstantArgument,
     ExportedProgram,
+    ExportGraphSignature,
     InputKind,
     ModuleCallSignature,
+    SymBoolArgument,
     SymIntArgument,
     TensorArgument,
 )
@@ -34,7 +36,13 @@ from ._remove_effect_tokens_pass import _remove_effect_tokens
 log = logging.getLogger(__name__)
 
 
-__all__ = ["InterpreterModule", "UnflattenedModule", "unflatten", "FlatArgsAdapter"]
+__all__ = [
+    "FlatArgsAdapter",
+    "InterpreterModule",
+    "InterpreterModuleDispatcher",
+    "UnflattenedModule",
+    "unflatten",
+]
 
 
 class _AttrKind(Enum):
@@ -193,6 +201,50 @@ class InterpreterModule(torch.nn.Module):
         )
 
 
+class InterpreterModuleDispatcher(torch.nn.Module):
+    """
+    A module that carries a sequence of InterpreterModules corresponding to
+    a sequence of calls of that module. Each call to the module dispatches
+    to the next InterpreterModule, and wraps back around after the last.
+    """
+
+    def __init__(self, call_modules: List[InterpreterModule]):
+        super().__init__()
+        assert call_modules
+        self._call_modules = call_modules
+        self._num_calls = 0
+
+    def forward(self, *args, **kwargs):
+        call_module = self._call_modules[self._num_calls]
+        self._num_calls = (self._num_calls + 1) % len(self._call_modules)
+        try:
+            return call_module(*args, **kwargs)
+        except Exception:
+            self._num_calls = 0
+            raise
+
+    def call_modules(self):
+        return self._call_modules
+
+    def print_readable(
+        self,
+        print_output=True,
+        include_stride=False,
+        include_device=False,
+        colored=False,
+    ):
+        outputs = [
+            mod.print_readable(
+                print_output,
+                include_stride,
+                include_device,
+                colored,
+            )
+            for mod in self._call_modules
+        ]
+        return "\n".join(outputs)
+
+
 class FlatArgsAdapter(abc.ABC):
     """
     Adapts input arguments with ``input_spec`` to align ``target_spec``.
@@ -232,7 +284,18 @@ class UnflattenedModule(torch.nn.Module):
         self._run_with_interpeter = RUN_WITH_INTERPRETER
 
         _inplace_buffer_mutations(export_graph, self.graph_signature)
-        seen_modules = _outline_submodules(export_graph, self)
+
+        self.ivals = _IVals()
+        # record any intermediate value x that is used, with the modules that used it,
+        # and generate instructions to read the corresponding attribute
+        seen_modules, seen_attrs = _outline_submodules(export_graph, self)
+        # for each read intermediate value x, find the module that created it,
+        # and generate instructions to update the corresponding attribute;
+        # finally, initialize all these attributes
+        self.ivals.create(seen_modules.values())
+        # move attributes that correspond to graph arguments for HOPs
+        # from exported program to unflattened submodules
+        _copy_graph_attrs(export_module._graph_module, self, seen_attrs)
 
         self.range_constraints = export_module.range_constraints
         self.equality_constraints: List = []
@@ -402,7 +465,7 @@ class UnflattenedModule(torch.nn.Module):
                 inputs_to_state[n] = targets
 
         _sink_params(self, inputs_to_state, [])
-        _deduplicate_modules(seen_modules.values())
+        redirected_call_indices = _deduplicate_modules(seen_modules.values())
 
         # Helper function to check input nodes of `module` has been processed.
         def check_module_inputs(module, scope):
@@ -432,6 +495,7 @@ class UnflattenedModule(torch.nn.Module):
 
         # Recurively check all input nodes have been processed.
         check_module_inputs(self, [])
+        self._dispatch_modules(redirected_call_indices)
 
         # Cache so we don't have to compute this every time.
         # NOTE: this needs to be kept in sync with the placeholders in
@@ -528,6 +592,49 @@ class UnflattenedModule(torch.nn.Module):
             )
         return pytree.tree_unflatten(tree_out, signature.out_spec)
 
+    def _dispatch_modules(self, redirected_call_indices):
+        """For a module whose call signatures are preserved, replace
+        multiple modules corresponding to multiple calls to that module
+        with a single dispatcher module that tracks which module to call.
+        """
+
+        # some modules were removed and their fqns redirected to other
+        # fqns during deduplication; make a consolidated fqn -> module map
+        all_modules = {}
+        for fqn, mod in self.named_modules(remove_duplicate=False):
+            all_modules[fqn] = mod
+        for fqn, fqn_ in redirected_call_indices.items():
+            all_modules[fqn] = all_modules[fqn_]
+
+        # for each fqn whose module call signature is preserved,
+        # map that fqn to a list of called modules
+        module_call_graph = {
+            entry.fqn
+            for entry in self.module_call_graph
+            if entry.fqn and entry.signature
+        }
+        called_modules = defaultdict(list)
+        for fqn, mod in sorted(all_modules.items()):
+            if fqn in module_call_graph:
+                called_modules[fqn.split("@")[0]].append(mod)
+
+        # replace multiple call modules with a single dispatcher module
+        for orig_fqn, call_modules in called_modules.items():
+            if len(call_modules) > 1:
+                for i, call_module in enumerate(call_modules):
+                    fqn = _call_name(orig_fqn, i + 1)
+                    if fqn not in redirected_call_indices:
+                        self._modules.pop(fqn)
+                self.set_submodule(orig_fqn, InterpreterModuleDispatcher(call_modules))
+
+        # elide call indices in call modules because they are
+        # tracked automatically inside the dispatcher module
+        for node in self.graph.nodes:
+            if node.op == "call_module":
+                fqn = node.target.split("@")[0]
+                if fqn in called_modules:
+                    node.target = fqn
+
     def print_readable(
         self,
         print_output=True,
@@ -571,7 +678,10 @@ def unflatten(
     return UnflattenedModule(module, flat_args_adapter)
 
 
-def _inplace_buffer_mutations(graph: torch.fx.Graph, graph_signature) -> None:
+def _inplace_buffer_mutations(
+    graph: torch.fx.Graph,
+    graph_signature: ExportGraphSignature,
+) -> None:
     """Transform buffer mutations from their functionalized form into a copy_
     node in the graph.
 
@@ -683,7 +793,13 @@ def _add_spec(gm: torch.nn.Module, spec) -> str:
     return name
 
 
-def _generate_flatten(gm: torch.nn.Module, node, spec) -> torch.fx.Node:
+def _generate_flatten(gm: torch.nn.Module, node) -> torch.fx.Node:
+    flatten = gm.graph.call_function(pytree.tree_flatten, (node,))
+    getitem_0 = gm.graph.call_function(operator.getitem, (flatten, 0))
+    return getitem_0
+
+
+def _generate_flatten_spec(gm: torch.nn.Module, node, spec) -> torch.fx.Node:
     name = _add_spec(gm, spec)
     spec_node = gm.graph.get_attr(name)
     return gm.graph.call_function(fx_pytree.tree_flatten_spec, (node, spec_node))
@@ -748,6 +864,7 @@ class _ModuleFrame:
         nodes: Tuple[torch.fx.Node, ...],
         seen_nodes,
         seen_modules,
+        seen_attrs,
         parent,
         module_stack: List[Tuple[str, int]],
         module_id,
@@ -758,6 +875,7 @@ class _ModuleFrame:
         self.nodes = nodes
         self.seen_nodes = seen_nodes
         self.seen_modules = seen_modules
+        self.seen_attrs = seen_attrs
         self.parent = parent
         self.module_stack = module_stack
         self.module_id = module_id
@@ -766,10 +884,15 @@ class _ModuleFrame:
         self.verbose = False
 
         self.fqn, num_calls = self.module_stack[-1]
+        # generate call name for self.fqn
+        self.child_fqn = _call_name(self.fqn, num_calls + 1)
+
         if module is not None:
             self.module = module
+            self.ivals = module.ivals if hasattr(module, "ivals") else {}
         else:
             self.module = InterpreterModule(torch.fx.Graph())
+            self.ivals = parent.ivals
 
         self.graph = self.module.graph
 
@@ -779,16 +902,7 @@ class _ModuleFrame:
 
         self.parent_call_module: Optional[torch.fx.Node] = None
         if parent is not None:
-            if self.fqn in module_call_graph and num_calls == 1:
-                raise ValueError(
-                    f"Cannot unflatten multiple calls to module {self.fqn} while preserving its signature "
-                    "because each of these calls might have generated a different specialized graph. "
-                    f"If the reason you want to preserve the signature is to swap {self.fqn} with another module, "
-                    "consider using _swap_modules() directly on the exported program instead of unflattening it."
-                )
-            # generate call name for self.fqn
-            child_fqn = _call_name(self.fqn, num_calls + 1)
-            accessor = _compute_accessor(parent.fqn, child_fqn)
+            accessor = _compute_accessor(parent.fqn, self.child_fqn)
             _add_submodule(parent.module, accessor, self.module)
             self.parent_call_module = parent.graph.call_module(accessor)
             self.seen_modules[self.module_id].append(
@@ -802,7 +916,7 @@ class _ModuleFrame:
                 )
             )
 
-        signature = module_call_graph.get(self.fqn)
+        signature = module_call_graph.get(self.child_fqn)
         if signature is not None and self.parent is not None:
             assert signature.in_spec.num_children == 2
             args_spec = signature.in_spec.children_specs[0]
@@ -817,7 +931,7 @@ class _ModuleFrame:
                 kwarg_nodes = {}
                 for name in kwargs_spec.context:
                     kwarg_nodes[name] = self.graph.placeholder(name)
-                flat_args = _generate_flatten(
+                flat_args = _generate_flatten_spec(
                     self.module,
                     (tuple(arg_nodes), kwarg_nodes),
                     signature.in_spec,
@@ -850,7 +964,9 @@ class _ModuleFrame:
                     elif input.name not in self.seen_nodes:
                         input_nodes.append(None)
                     else:
-                        assert isinstance(input, (TensorArgument, SymIntArgument))
+                        assert isinstance(
+                            input, (TensorArgument, SymIntArgument, SymBoolArgument)
+                        )
                         input_nodes.append(
                             self.parent.remap_input(self.seen_nodes[input.name])
                         )
@@ -941,6 +1057,10 @@ class _ModuleFrame:
             # if module call signature needs to be preserved
             self.copy_sym_call_function(x)
             return self.node_map[x]
+        elif self.module_call_graph.get(self.fqn) is not None:
+            # x is an ival that is not in placeholders, so create a
+            # get_attr node corresponding to attribute __ival__x
+            return self.ivals.read(self.fqn, self.graph, x)
         else:
             raise RuntimeError(
                 f"Could not run remap_input() on op type: {x.op} for node {x}"
@@ -949,10 +1069,12 @@ class _ModuleFrame:
     def finalize_outputs(self):
         orig_outputs = []
 
-        signature = self.module_call_graph.get(self.fqn)
+        signature = self.module_call_graph.get(self.child_fqn)
         if signature is not None and self.parent is not None:
             for output in signature.outputs:
-                if isinstance(output, (TensorArgument, SymIntArgument)):
+                if isinstance(
+                    output, (TensorArgument, SymIntArgument, SymBoolArgument)
+                ):
                     if output.name in self.seen_nodes:
                         orig_outputs.append(self.seen_nodes[output.name])
                     else:
@@ -981,7 +1103,7 @@ class _ModuleFrame:
                 tuple(get_actual_output_node(output) for output in orig_outputs),
                 signature.out_spec,
             )
-            parent_out: Optional[torch.fx.Node] = _generate_flatten(
+            parent_out: Optional[torch.fx.Node] = _generate_flatten_spec(
                 self.parent.module, self.parent_call_module, signature.out_spec
             )
             graph_outputs: Union[torch.fx.Node, List[torch.fx.Node]] = tree_out_node
@@ -1123,6 +1245,7 @@ class _ModuleFrame:
                     self.nodes,
                     self.seen_nodes,
                     self.seen_modules,
+                    self.seen_attrs,
                     self,
                     self.module_stack + [next_module],
                     next_module_key.split("@")[0],
@@ -1134,6 +1257,11 @@ class _ModuleFrame:
             # The only remaining possibility is that we are in the right stack
             # frame. Copy the node into this frame's graph and increment the node counter.
             assert node_module_stack == self.module_stack
+
+            if node.op == "get_attr":
+                # this must be a graph argument for a HOP
+                self.seen_attrs[self.child_fqn].add(node.target)
+
             self.copy_node(node)
             node_idx += 1
 
@@ -1151,11 +1279,13 @@ class _SubmoduleEntry:
 def _outline_submodules(orig_graph: torch.fx.Graph, root_module: UnflattenedModule):
     seen_nodes: Dict[str, torch.fx.Node] = {}
     seen_modules: Dict[int, List[_SubmoduleEntry]] = defaultdict(list)
+    seen_attrs: Dict[str, Set[str]] = defaultdict(set)
     _ModuleFrame(
         orig_graph,
         tuple(orig_graph.nodes),
         seen_nodes,
         seen_modules,
+        seen_attrs,
         None,
         [("", 0)],
         "",
@@ -1166,7 +1296,7 @@ def _outline_submodules(orig_graph: torch.fx.Graph, root_module: UnflattenedModu
         },
         module=root_module,
     ).run_outer()
-    return seen_modules
+    return seen_modules, seen_attrs
 
 
 def _reorder_submodules(
@@ -1191,7 +1321,120 @@ def _reorder_submodules(
         parent.register_module(name, child)
 
 
+class _IVals:
+    """
+    Collect the intermediate values of buffer mutations in a graph,
+    along with the module call fqns that create and use them. Later,
+    in each fqn associated with an intermediate value we will install
+    a corresponding attribute, so that it can be updated and read.
+
+    Example: in the following graph, suppose that buf_in and buf_out
+    are the input and output values of a buffer.
+
+        buf_in = placeholder()
+        ...
+        ival1 = f0(buf_in, ...)  # inside self.n0(...)
+        ...
+        ival2 = f1(ival1, ...)  # inside self.n1(...)
+        ...
+        buf_out = f2(ival2, ...)  # inside self.n2(...)
+        return buf_out, ...
+
+    Here ival1 and ival2 are intermediate values created inside
+    calls to n0 and n1 respectively, and used inside calls to
+    n1 and n2 respectively.
+
+    Thus our analysis will produce {ival1: {n0, n1}, ival2: {n1, n2}}.
+    """
+
+    def __init__(self):
+        # ival node name -> set of fqns that create and use it
+        self.fqns = defaultdict(set)
+        # ival node name -> tensor storage for corresponding attribute
+        self.storage = {}
+
+    def read(self, fqn, graph, node):
+        """
+        Read attribute corresponding to a given intermediate value.
+        """
+        # to read ival x, get attribute __ival__x
+        with graph.inserting_before(None):
+            ival_node = graph.get_attr("__ival__" + node.name, type_expr=node.type)
+            ival_node.meta = copy.copy(node.meta)
+
+        if node.name not in self.storage:
+            # create empty tensor matching fake, using a cache
+            # to ensure the same tensor is returned per ival_name
+            fake = node.meta["val"]
+            self.storage[node.name] = torch.empty(fake.shape, dtype=fake.dtype)
+        self.fqns[node.name].add(fqn)
+
+        return ival_node
+
+    def update(self, fqn, graph, node):
+        """
+        Update attribute corresponding to a given intermediate value.
+        """
+        self.fqns[node.name].add(fqn)
+
+        # to update ival x, get attribute __ival__x and copy x to __ival__x
+        with graph.inserting_after(node):
+            ival_node = graph.get_attr("__ival__" + node.name, type_expr=node.type)
+            ival_node.meta = copy.copy(node.meta)
+        with graph.inserting_after(ival_node):
+            new_ival_node = graph.create_node(
+                "call_function", torch.ops.aten.copy_, (ival_node, node)
+            )
+            new_ival_node.meta = copy.copy(node.meta)
+
+    def create(self, partitions):
+        """
+        Update attributes corresponding to intermediate values that were read.
+        Finally, initialize attributes in all modules that read or update
+        corresponding intermediate values.
+        """
+
+        entries = []
+        for shared_submodules in partitions:
+            for entry in shared_submodules:
+                entries.append(entry)
+                graph = entry.module.graph
+                for node in graph.nodes:
+                    if node.name in self.storage:
+                        self.update(entry.fqn, graph, node)
+
+        # fqn -> list of ival node names read or updated through it
+        ivals = defaultdict(list)
+        for name, fqns in self.fqns.items():
+            for fqn in fqns:
+                ivals[fqn].append(name)
+
+        for entry in entries:
+            for name in ivals[entry.fqn]:
+                ival_name = f"__ival__{name}"
+                # for a ival named x created in module call m,
+                # create attribute m.__ival__x, initially empty
+                setattr(
+                    entry.module,
+                    ival_name,
+                    self.storage[name],
+                )
+
+
+def _copy_graph_attrs(
+    gm: torch.fx.GraphModule,
+    root_module: UnflattenedModule,
+    seen_attrs: Dict[str, Set[str]],
+):
+    for child_fqn, names in seen_attrs.items():
+        module = _get_attr(root_module, child_fqn) if child_fqn else root_module
+        for name in names:
+            val = getattr(gm, name)
+            setattr(module, name, val)
+
+
 def _deduplicate_modules(partitions):
+    redirected_call_indices = {}
     for shared_submodules in partitions:
         for i, entry in enumerate(shared_submodules):
             child_fqn = _call_name(entry.fqn, entry.call_idx)
@@ -1216,6 +1459,7 @@ def _deduplicate_modules(partitions):
                             entry.parent_fqn, seen_child_fqn
                         )
                         entry.parent_call_module.target = seen_target  # type: ignore[union-attr]
+                        redirected_call_indices[child_fqn] = seen_child_fqn
                         break
                     elif not deduplicated:
                         # Case 2: The current module has a different fqn than the seen module.
@@ -1229,6 +1473,8 @@ def _deduplicate_modules(partitions):
                         # so we do not break out of the loop yet.
                         entry.parent_module.set_submodule(target, seen.module)
                         deduplicated = True
+
+    return redirected_call_indices
 
 
 def _sink_params(
@@ -1294,7 +1540,7 @@ def _sink_params(
         state_name = None
         for sn in inputs_to_state[node.name]:
             sn_split = sn.split(".")
-            if sn_split[: len(scope)] == scope:
+            if sn_split[: len(scope)] == [x.split("@")[0] for x in scope]:
                 state_name = sn_split
                 break
 

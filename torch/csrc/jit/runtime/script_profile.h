@@ -46,8 +46,8 @@ class TORCH_API SourceStats : public CustomClassHolder {
  public:
   using LineMap = c10::Dict<int64_t, c10::intrusive_ptr<InstructionStats>>;
 
-  SourceStats(SourceRef source, LineMap lineMap)
-      : source_(std::move(source)), lineMap_(std::move(lineMap)) {}
+  SourceStats(SourceRef source, const LineMap& lineMap)
+      : source_(std::move(source)), lineMap_(lineMap) {}
 
   const SourceRef& getSourceRef() const {
     return source_;

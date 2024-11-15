@@ -78,10 +78,6 @@ def _compare_forward_backward(data, mask, fn):
     _compare_mt_t(masked_res, tensor_res)
     _compare_mt_t(mt.grad, t.grad, atol=1e-06)
 
-    # Free up the masked tensors manually to avoid memory leak
-    del mt._masked_mask
-    del mt._masked_data
-
 def _create_random_mask(shape, device):
     return make_tensor(shape, device=device, dtype=torch.bool)
 
@@ -229,16 +225,11 @@ class TestBasics(TestCase):
         for mt, t in zip(masked_tensors, data_tensors):
             _compare_mt_t(mt.grad, t.grad, atol=1e-06)
 
-        # Free up the masked tensors manually to avoid memory leak
-        for mt in masked_tensors:
-            del mt._masked_mask
-            del mt._masked_data
-
     def test_to_sparse(self, device):
         for sample in _generate_sample_data(device=device):
             data = sample.input
             mask = sample.kwargs["mask"]
-            mt = masked_tensor(data.clone().detach(), mask, requires_grad=True)
+            mt = masked_tensor(data.detach().clone(), mask, requires_grad=True)
 
             sparse_mt = mt.to_sparse()
             data.to_sparse().to_dense().sum().backward()

@@ -103,7 +103,9 @@ def reconstruct_getitem(
 @dataclasses.dataclass(frozen=True)
 class LocalSource(Source):
     local_name: str
-    cell_or_freevar: bool = False
+
+    # Whether this local is an input to the root frame.
+    is_input: bool = False
 
     def reconstruct(self, codegen):
         codegen.append_output(codegen.create_load(self.local_name))
@@ -306,15 +308,17 @@ class TensorPropertySource(ChainedSource):
             assert self.idx is not None
 
     def reconstruct(self, codegen):
-        def gen_fn():
-            self.base.reconstruct(codegen)
-            codegen.append_output(codegen.create_load_attr(self.prop.method_name()))
+        codegen.add_push_null(
+            lambda: codegen.load_import_from(
+                utils.__name__, f"call_{self.prop.method_name()}"
+            )
+        )
+        self.base.reconstruct(codegen)
 
-        codegen.add_push_null(gen_fn)
         if self.idx is not None:
             codegen.append_output(codegen.create_load_const(self.idx))
         codegen.extend_output(
-            create_call_function(1 if self.idx is not None else 0, False)
+            create_call_function(2 if self.idx is not None else 1, False)
         )
 
     def guard_source(self):
@@ -720,14 +724,12 @@ class BackwardStateSource(Source):
         return GuardSource.BACKWARD_STATE
 
 
-def is_from_local_source(source: Source, *, allow_cell_or_freevar=True):
+def is_from_local_source(source: Source, *, only_allow_input=False):
     if isinstance(source, ChainedSource):
-        return is_from_local_source(
-            source.base, allow_cell_or_freevar=allow_cell_or_freevar
-        )
+        return is_from_local_source(source.base, only_allow_input=only_allow_input)
     if not isinstance(source, LocalSource):
         return False
-    if not allow_cell_or_freevar and source.cell_or_freevar:
+    if only_allow_input and not source.is_input:
         return False
     return True
 

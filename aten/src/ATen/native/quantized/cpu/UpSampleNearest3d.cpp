@@ -17,8 +17,7 @@
 #include <cstring>
 
 
-namespace at {
-namespace native {
+namespace at::native {
 
 // Define a typedef to dispatch to nearest_idx or nearest_exact_idx
 typedef int64_t (*nn_compute_source_index_fn_t)(const float, int64_t, int64_t);
@@ -71,7 +70,7 @@ static void upsample_nearest3d_out_frame(
         const auto* pos1 = &i_p[d1 * input_height * input_width + h1 * input_width + w1];
         auto* pos2 = &o_p[d2 * output_height * output_width + h2 * output_width + w2];
 
-        for (C10_UNUSED const auto c : c10::irange(channels)) {
+        for ([[maybe_unused]] const auto c : c10::irange(channels)) {
           pos2[0] = pos1[0];
           pos1 += input_depth * input_height * input_width;
           pos2 += output_depth * output_height * output_width;
@@ -234,5 +233,4 @@ Tensor _upsample_nearest_exact3d_quantized_cpu(
       input, osize, scale_d, scale_h, scale_w);
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

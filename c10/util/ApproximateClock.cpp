@@ -26,7 +26,7 @@ ApproximateClockToUnixTimeConverter::measurePair() {
 ApproximateClockToUnixTimeConverter::time_pairs
 ApproximateClockToUnixTimeConverter::measurePairs() {
   static constexpr auto n_warmup = 5;
-  for (C10_UNUSED const auto _ : c10::irange(n_warmup)) {
+  for ([[maybe_unused]] const auto _ : c10::irange(n_warmup)) {
     getApproximateTime();
     static_cast<void>(steady_clock_t::now());
   }
