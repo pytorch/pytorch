@@ -167,7 +167,6 @@ class CheckpointWrapper(ActivationWrapper):
                 *flat_args,
             )
         else:
-            # python test/distributed/_composable/fsdp/test_fully_shard_training.py TestFullyShard1DTrainingCompose.test_train_parity_with_activation_checkpointing
             return self.checkpoint_fn(  # type: ignore[misc]
                 self._checkpoint_wrapped_module, *args, **kwargs
             )
