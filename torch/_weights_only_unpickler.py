@@ -154,130 +154,6 @@ def _tensor_rebuild_functions():
     }
 
 
-# The following functioons are used to lazily import globals. These globals are
-# not imported by default on ``import torch``, per the behavior of the regular
-# Unpickler, we do not want to import them unless they are needed.
-# For instance, the dynamo import is lazy and we don't want to pay the cost for import time
-# unless the global needs to be used
-
-# lazy_imported_globals is used to track which lazy globals have been imported
-# for cases where the unpickler needs to check if a global is in _get_lazy_imported_globals
-_lazy_imported_globals: Set[Any] = set()
-
-
-def _get_nested_tensor():
-    from torch.nested._internal.nested_tensor import NestedTensor
-
-    global _lazy_imported_globals
-    _lazy_imported_globals.add(NestedTensor)
-    return NestedTensor
-
-
-def _get_rebuild_njt():
-    from torch.nested._internal.nested_tensor import _rebuild_njt
-
-    global _lazy_imported_globals
-    _lazy_imported_globals.add(_rebuild_njt)
-    return _rebuild_njt
-
-
-# _dynamo import is lazy, avoid triggering lazy import unless necessary
-def _get_dynamo_dimrange():
-    from torch._dynamo.decorators import _DimRange
-
-    global _lazy_imported_globals
-    _lazy_imported_globals.add(_DimRange)
-    return _DimRange
-
-
-def _throw_distributed_not_available():
-    if not torch.distributed.is_available():
-        raise RuntimeError(
-            "A torch.distributed GLOBAL was found in the checkpoint but torch.distributed.is_avialable() was False."
-        )
-
-
-def _get_device_mesh():
-    _throw_distributed_not_available()
-    from torch.distributed.device_mesh import DeviceMesh
-
-    global _lazy_imported_globals
-    _lazy_imported_globals.add(DeviceMesh)
-    return DeviceMesh
-
-
-def _get_dtensor_spec():
-    _throw_distributed_not_available()
-    from torch.distributed.tensor._dtensor_spec import DTensorSpec
-
-    global _lazy_imported_globals
-    _lazy_imported_globals.add(DTensorSpec)
-    return DTensorSpec
-
-
-def _get_tensor_meta():
-    _throw_distributed_not_available()
-    from torch.distributed.tensor._dtensor_spec import TensorMeta
-
-    global _lazy_imported_globals
-    _lazy_imported_globals.add(TensorMeta)
-    return TensorMeta
-
-
-def _get_dtensor():
-    _throw_distributed_not_available()
-    from torch.distributed.tensor import DTensor
-
-    global _lazy_imported_globals
-    _lazy_imported_globals.add(DTensor)
-    return DTensor
-
-
-def _get_partial():
-    _throw_distributed_not_available()
-    from torch.distributed.tensor.placement_types import Partial
-
-    global _lazy_imported_globals
-    _lazy_imported_globals.add(Partial)
-    return Partial
-
-
-def _get_replicate():
-    _throw_distributed_not_available()
-    from torch.distributed.tensor.placement_types import Replicate
-
-    global _lazy_imported_globals
-    _lazy_imported_globals.add(Replicate)
-    return Replicate
-
-
-def _get_shard():
-    _throw_distributed_not_available()
-    from torch.distributed.tensor.placement_types import Shard
-
-    global _lazy_imported_globals
-    _lazy_imported_globals.add(Shard)
-    return Shard
-
-
-@_functools.lru_cache(maxsize=1)
-def _get_lazy_imported_globals():
-    rc: Dict[str, Any] = {
-        "torch._dynamo.decorators._DimRange": _get_dynamo_dimrange,
-        "torch.nested._internal.nested_tensor.NestedTensor": _get_nested_tensor,
-        "torch.nested._internal.nested_tensor._rebuild_njt": _get_rebuild_njt,
-        # DTensor related
-        "torch.distributed.device_mesh.DeviceMesh": _get_device_mesh,
-        "torch.distributed.tensor._dtensor_spec.DTensorSpec": _get_dtensor_spec,
-        "torch.distributed.tensor._dtensor_spec.TensorMeta": _get_tensor_meta,
-        "torch.distributed.tensor.DTensor": _get_dtensor,
-        "torch.distributed.tensor.placement_types.Partial": _get_partial,
-        "torch.distributed.tensor.placement_types.Replicate": _get_replicate,
-        "torch.distributed.tensor.placement_types.Shard": _get_shard,
-    }
-    return rc
-
-
 # Unpickling machinery
 @_functools.lru_cache(maxsize=1)
 def _get_allowed_globals():
@@ -442,8 +318,30 @@ class Unpickler:
                     self.append(_get_allowed_globals()[full_path])
                 elif full_path in _get_user_allowed_globals():
                     self.append(_get_user_allowed_globals()[full_path])
-                elif full_path in _get_lazy_imported_globals():
-                    self.append(_get_lazy_imported_globals()[full_path]())
+                elif full_path in (
+                    [
+                        "torch.nested._internal.nested_tensor.NestedTensor",
+                        "torch.nested._internal.nested_tensor._rebuild_njt",
+                        "torch._dynamo.decorators._DimRange",
+                    ]
+                ):
+                    raise UnpicklingError(
+                        "``torch.nested`` and ``torch._dynamo`` must be imported to load nested jagged tensors (NJTs)"
+                    )
+                elif full_path in (
+                    [
+                        "torch.distributed.device_mesh.DeviceMesh",
+                        "torch.distributed.tensor._dtensor_spec.DTensorSpec",
+                        "torch.distributed.tensor._dtensor_spec.TensorMeta",
+                        "torch.distributed.tensor.DTensor",
+                        "torch.distributed.tensor.placement_types.Partial",
+                        "torch.distributed.tensor.placement_types.Replicate",
+                        "torch.distributed.tensor.placement_types.Shard",
+                    ]
+                ):
+                    raise UnpicklingError(
+                        "``torch.distributed.tensor`` must be imported to load DTensors"
+                    )
                 else:
                     raise UnpicklingError(
                         f"Unsupported global: GLOBAL {full_path} was not an allowed global by default. "
@@ -459,7 +357,6 @@ class Unpickler:
                 elif (
                     cls in _get_user_allowed_globals().values()
                     or cls in _get_allowed_globals().values()
-                    or cls in _lazy_imported_globals
                 ):
                     self.append(cls.__new__(cls, *args))
                 else:
@@ -473,7 +370,6 @@ class Unpickler:
                 if (
                     func not in _get_allowed_globals().values()
                     and func not in _get_user_allowed_globals().values()
-                    and func not in _lazy_imported_globals
                 ):
                     raise UnpicklingError(
                         f"Trying to call reduce for unrecognized function {func}"
@@ -492,7 +388,6 @@ class Unpickler:
                 elif (
                     type(inst) in _get_user_allowed_globals().values()
                     or type(inst) in _get_allowed_globals().values()
-                    or type(inst) in _lazy_imported_globals
                 ):
                     if hasattr(inst, "__setstate__"):
                         inst.__setstate__(state)

@@ -28,6 +28,7 @@ def is_available() -> bool:
 if is_available() and not torch._C._c10d_init():
     raise RuntimeError("Failed to initialize torch.distributed")
 
+
 # Custom Runtime Errors thrown from the distributed package
 DistError = torch._C._DistError
 DistBackendError = torch._C._DistBackendError
@@ -143,7 +144,6 @@ if is_available():
     )
 
     set_debug_level_from_env()
-
 else:
     # This stub is sufficient to get
     #   python test/test_public_bindings.py -k test_correct_module_names
