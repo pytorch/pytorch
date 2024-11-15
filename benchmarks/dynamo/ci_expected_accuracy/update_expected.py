@@ -46,8 +46,10 @@ WITH job as (
     WHERE
         job.name != 'ciflow_should_run'
         AND job.name != 'generate-test-matrix'
-        AND workflow.event != 'workflow_run' -- Filter out workflow_run-triggered jobs, which have nothing to do with the SHA
-        AND workflow.event != 'repository_dispatch' -- Filter out repository_dispatch-triggered jobs, which have nothing to do with the SHA
+        -- Filter out workflow_run-triggered jobs, which have nothing to do with the SHA
+        AND workflow.event != 'workflow_run'
+        -- Filter out repository_dispatch-triggered jobs, which have nothing to do with the SHA
+        AND workflow.event != 'repository_dispatch'
         AND workflow.head_sha = {sha: String}
         AND job.head_sha = {sha: String}
         AND workflow.repository.'full_name' = {repo: String}
@@ -64,7 +66,10 @@ from
 ORDER BY
     workflowName, jobName
 """
-ARTIFACTS_QUERY_URL = "https://console-api.clickhouse.cloud/.api/query-endpoints/c1cdfadc-6bb2-4a91-bbf9-3d19e1981cd4/run?format=JSON"
+ARTIFACTS_QUERY_URL = (
+    "https://console-api.clickhouse.cloud/.api/query-endpoints/"
+    "c1cdfadc-6bb2-4a91-bbf9-3d19e1981cd4/run?format=JSON"
+)
 CSV_LINTER = str(
     Path(__file__).absolute().parent.parent.parent.parent
     / "tools/linter/adapters/no_merge_conflict_csv_linter.py"
@@ -75,13 +80,16 @@ def query_job_sha(repo, sha):
     params = {
         "queryVariables": {"sha": sha, "repo": repo},
     }
+    # If you are a Meta employee, go to P1679979893 to get the id and secret.
+    # Otherwise, ask a Meta employee give you the id and secret.
+    KEY_ID = os.environ["CH_KEY_ID"]
+    KEY_SECRET = os.environ["CH_KEY_SECRET"]
 
     r = requests.post(
         url=ARTIFACTS_QUERY_URL,
         data=json.dumps(params),
         headers={"Content-Type": "application/json"},
-        # This key can only access query endpoints, specifically the url above at the moment
-        auth=("eJBpUENTBQ4MdbHPYxrl", "4b1draOBY5zwva7QXTBgAwqbYrpNKFaXGNYqASt5a9"),
+        auth=(KEY_ID, KEY_SECRET),
     )
     return r.json()["data"]
 
