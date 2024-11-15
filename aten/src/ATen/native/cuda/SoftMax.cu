@@ -465,7 +465,7 @@ ilpReduce(index_t shift,
   if(shift > 0){
     data -= shift;
     size += shift;
-    if (offset >= shift && offset < size) {
+    if(threadIdx.x >= shift){
       threadVal = r(threadVal, data[offset]);
     }
     size -= blockDim.x;
@@ -515,7 +515,7 @@ WriteFpropResultsVectorized(
     output -= shift;
     size += shift;
 
-    if (offset >= shift && offset < size) {
+    if (threadIdx.x >= shift) {
       output[offset] = epilogue(input[offset]);
     }
     size -= blockDim.x;
