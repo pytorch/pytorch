@@ -30,12 +30,12 @@ import torch
 import torch._logging
 from torch._C._dynamo.guards import GlobalStateGuard
 from torch._dynamo.distributed import get_compile_pg
+from torch._dynamo.symbolic_convert import TensorifyState
 from torch._dynamo.utils import (
     add_compilation_metrics_to_chromium,
     CompileTimeInstructionCounter,
     get_metrics_context,
 )
-from torch._dynamo.symbolic_convert import TensorifyState
 from torch._guards import compile_context, CompileContext, CompileId, tracing
 from torch._logging import structured
 from torch._utils_internal import (
