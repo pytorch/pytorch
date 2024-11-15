@@ -9,6 +9,7 @@ import os
 import pickle
 import platform
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -4424,6 +4425,43 @@ class TestSerialization(TestCase, SerializationMixin):
                 self.assertEqual(set(unsafe_all_globals), expected_all_global_strs)
             finally:
                 torch._weights_only_unpickler._get_allowed_globals = old_get_allowed_globals
+
+    @parametrize("should_import", [False, True])
+    def test_load_njt_weights_only(self, should_import):
+        with tempfile.NamedTemporaryFile() as f:
+            njt = torch.nested.nested_tensor([[1, 2, 3], [4, 5]], layout=torch.jagged)
+            torch.save(njt, f)
+            import_string = "import torch._dynamo" if should_import else ""
+            # torch.nested is actually imported by default, so only torch._dynamo needs to be imported
+            script = f"""
+import torch
+{import_string}
+x = torch.load("{f.name}", weights_only=True)
+"""
+            try:
+                subprocess.check_output(
+                    [sys.executable, "-c", script],
+                    cwd=os.path.dirname(os.path.realpath(__file__)),
+                    stderr=subprocess.STDOUT,
+                )
+                if not should_import:
+                    raise RuntimeError("Script executed successfully despite lack of import")
+            except subprocess.CalledProcessError as e:
+                if should_import:
+                    err_msg = e.output.decode("utf-8")
+                    raise RuntimeError(
+                        f"Unexpected error raised: {err_msg}"
+                    ) from e
+                else:
+                    if e.returncode < 0:
+                        self.fail("Subprocess exited with a fatal signal")
+                    else:
+                        err_msg = (
+                            "_pickle.UnpicklingError: Weights only load failed. ``torch.nested`` and ``torch._dynamo``"
+                            " must be imported to load nested jagged tensors (NJTs)"
+                        )
+                        self.assertTrue(err_msg in e.output.decode("utf-8"))
+
 
     def run(self, *args, **kwargs):
         with serialization_method(use_zip=True):
