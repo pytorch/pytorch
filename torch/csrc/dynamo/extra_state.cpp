@@ -31,6 +31,16 @@ void ExtraState::move_to_front(CacheEntry* cache_entry) {
       cache_entry->_owner_loc);
 }
 
+void ExtraState::move_to_back(CacheEntry* cache_entry) {
+  CHECK(cache_entry->_owner == this);
+  CHECK(!this->cache_entry_list.empty());
+  CHECK(cache_entry == &*cache_entry->_owner_loc);
+  this->cache_entry_list.splice(
+      this->cache_entry_list.end(),
+      this->cache_entry_list,
+      cache_entry->_owner_loc);
+}
+
 void ExtraState::invalidate(
     CacheEntry* cache_entry,
     py::object deleted_guard_manager) {
@@ -38,8 +48,9 @@ void ExtraState::invalidate(
   CHECK(!this->cache_entry_list.empty());
   CHECK(cache_entry == &*cache_entry->_owner_loc);
   cache_entry->invalidate(std::move(deleted_guard_manager));
-  // TODO (anijain2305) - Move this cache entry to end of the list.
-  // this->cache_entry_list.erase(cache_entry->_owner_loc);
+  // Move the cache entry to the end of the list because these will always
+  // return False.
+  cache_entry->_owner->move_to_back(cache_entry);
 }
 
 static bool is_extra_state_unset(ExtraState* extra_state) {
