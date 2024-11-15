@@ -30,7 +30,8 @@ class ExprPrinter(StrPrinter):
         return self.stringify(expr.args, " % ", precedence(expr))
 
     def _print_FloatTrueDiv(self, expr: sympy.Expr) -> str:
-        return self.stringify(expr.args, " / ", precedence(expr))
+        s = self.stringify(expr.args, " / ", precedence(expr))
+        return f"({s})"
 
     def _print_CleanDiv(self, expr: sympy.Expr) -> str:
         return self._print_FloorDiv(expr)
@@ -117,11 +118,14 @@ class PythonPrinter(ExprPrinter):
     def _print_And(self, expr: sympy.Expr) -> str:
         return self.stringify(expr.args, " and ", precedence(expr))
 
+    def _print_Or(self, expr: sympy.Expr) -> str:
+        return self.stringify(expr.args, " or ", precedence(expr))
+
     def _print_ModularIndexing(self, expr: sympy.Expr) -> str:
         x, div, mod = (self.parenthesize(arg, precedence(expr)) for arg in expr.args)
         if div != "1":
             x = f"({x} // {div})"
-        return f"{x} % {mod}"
+        return f"({x} % {mod})"
 
     def _print_Infinity(self, expr: sympy.Expr) -> str:
         return "math.inf"
@@ -131,7 +135,8 @@ class PythonPrinter(ExprPrinter):
 
     # WARNING: this is dangerous for Triton, which has C-style modulus
     def _print_PythonMod(self, expr: sympy.Expr) -> str:
-        return self.stringify(expr.args, " % ", precedence(expr))
+        s = self.stringify(expr.args, " % ", precedence(expr))
+        return f"({s})"
 
     # WARNING: this is dangerous for Triton, which has C-style modulus
     def _print_FloorDiv(self, expr: sympy.Expr) -> str:
@@ -259,7 +264,7 @@ class CppPrinter(ExprPrinter):
             else:
                 x = f"c10::div_floor_floating(static_cast<double>({x}), static_cast<double>({div}))"
         mod = self.doprint(mod)
-        return f"static_cast<{INDEX_TYPE}>({x}) % static_cast<{INDEX_TYPE}>({mod})"
+        return f"(static_cast<{INDEX_TYPE}>({x}) % static_cast<{INDEX_TYPE}>({mod}))"
 
     def _print_FloorDiv(self, expr: sympy.Expr) -> str:
         x, div = expr.args
@@ -310,9 +315,6 @@ class CppPrinter(ExprPrinter):
         raise NotImplementedError(
             f"_print_PowByNatural not implemented for {type(self)}"
         )
-
-    def _print_FloatTrueDiv(self, expr: sympy.Expr) -> str:
-        return self.stringify(expr.args, " / ", precedence(expr))
 
     def _print_FloatPow(self, expr: sympy.Expr) -> str:
         base, exp = expr.args
