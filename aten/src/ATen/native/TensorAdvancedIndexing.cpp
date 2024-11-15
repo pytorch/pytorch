@@ -1620,10 +1620,15 @@ static bool can_use_expanded_index_path(
   // and strides on other dims to be 0 or 1, e.g.
   //   shape [108365, 16]; strides [1, 0]
   //   shape [13264, 1, 7]; strides [1, 1, 0]
+  // Note: the size should not > 1 when the stride == 1
+  // See https://github.com/pytorch/pytorch/issues/129093
   auto index_strides = index.strides().vec();
+  auto index_sizes = index.sizes().vec();
   bool is_index_expanded = index_strides[0] == 1;
   for (const auto dim : c10::irange(1, index_strides.size())) {
-    if (index_strides[dim] > 1) { is_index_expanded = false; }
+    if (index_strides[dim] > 1 || (index_strides[dim] == 1 && index_sizes[dim] > 1)) {
+      is_index_expanded = false;
+    }
   }
 
   // index is expanded
