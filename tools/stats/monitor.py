@@ -32,7 +32,6 @@ def get_per_process_cpu_info() -> list[dict[str, Any]]:
     per_process_info = []
     for p in processes:
         info = {
-            "name": p.name(),
             "pid": p.pid,
             "cmd": " ".join(p.cmdline()),
             "cpu_percent": p.cpu_percent(),
