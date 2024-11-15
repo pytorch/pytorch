@@ -371,6 +371,7 @@ class TestFP8MatmulCuda(TestCase):
             self.assertEqual(out_fp32.amax(), amax_fp8)
         self.assertEqual(out_fp32, out_fp8.to(torch.float))
 
+    @skipIfRocm
     @unittest.skipIf(not scaled_mm_supported_device(), f8_msg)
     def test_float8_basics(self, device) -> None:
         self._test_tautological_mm(device, e4m3_type, e4m3_type, size=16)
@@ -407,6 +408,7 @@ class TestFP8MatmulCuda(TestCase):
         out_fp8_s, amax_fp8_s = torch._scaled_mm(x, y, scale_a=scale_a, scale_b=scale_b)
         self.assertEqual(out_fp8, out_fp8_s)
 
+    @skipIfRocm
     @unittest.skipIf(not scaled_mm_supported_device(), f8_msg)
     @parametrize("base_dtype", [torch.float16, torch.bfloat16, torch.float32])
     def test_scaled_mm_vs_emulated(self, base_dtype):
