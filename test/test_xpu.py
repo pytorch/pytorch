@@ -482,7 +482,8 @@ class TestXpuAutocast(TestAutocast):
     # These operators are not implemented on XPU backend and we can NOT fall back
     # them to CPU. So we have to skip them at this moment.
     # TODO: remove these operators from skip list when they are implemented on XPU backend.
-    skip_list = ["gru_cell"]
+    # lstm_cell: The operator 'aten::_thnn_fused_lstm_cell' is not currently implemented for the XPU device
+    skip_list = ["gru_cell", "lstm_cell"]
 
     def setUp(self):
         super().setUp()
