@@ -7,7 +7,6 @@
 #include <c10/core/CPUAllocator.h>
 #include <c10/util/overflows.h>
 #include <libshm.h>
-#include <torch/csrc/CudaIPCTypes.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/THP.h>

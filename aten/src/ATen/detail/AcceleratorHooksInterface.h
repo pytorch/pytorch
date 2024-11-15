@@ -78,7 +78,7 @@ struct TORCH_API AcceleratorHooksInterface {
   virtual std::tuple<size_t, size_t, ptrdiff_t, std::string, std::string, std::string, uint64_t, bool>
   StorageShareDevice(const c10::Storage& storage) const {
     TORCH_CHECK(false, "Backend doesn't support StorageShareDevice");
-  };
+  }
 
   virtual c10::DataPtr StorageNewSharedDevice(c10::DeviceIndex device,
                                               bool event_sync_required,

@@ -19,7 +19,7 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/util/irange.h>
-#include <torch/csrc/CudaIPCTypes.h>
+#include <ATen/cuda/CudaIPCTypes.h>
 
 #if AT_CUDNN_ENABLED()
 #include <ATen/cudnn/cudnn-wrapper.h>
@@ -482,11 +482,11 @@ CUDAHooks::StorageShareDevice(const c10::Storage& storage) const {
 
     // Put Storage Data behind new ref counting context
     // See Note [CUDA IPC Refcounting implementation explained]
-    at::DataPtr sent_data_ptr = torch::GetNewRefCountedSentData(
+    at::DataPtr sent_data_ptr = at::cuda::ipc::GetNewRefCountedSentData(
         storage.mutable_data(), storage.device());
     auto old_data_ptr = storage.set_data_ptr(std::move(sent_data_ptr));
     auto sent_data =
-        static_cast<torch::CudaIPCSentData*>(storage.data_ptr().get_context());
+        static_cast<at::cuda::ipc::CudaIPCSentData*>(storage.data_ptr().get_context());
     sent_data->set_original_ptr(std::move(old_data_ptr));
     std::string ref_counter(sent_data->handle().size(), '\0');
     std::memcpy(ref_counter.data(), (sent_data->handle()).c_str(), sent_data->handle().size());
@@ -541,7 +541,7 @@ c10::DataPtr CUDAHooks::StorageNewSharedDevice(c10::DeviceIndex device,
     std::string ref_counter_handle;
     ptrdiff_t ref_counter_offset{};
     c10::DeviceIndex device{-1};
-    torch::CudaIPCReceivedData received_data;
+    at::cuda::ipc::CudaIPCReceivedData received_data;
   };
 
   auto ctx = std::make_unique<IpcDeleterContext>();
@@ -581,7 +581,7 @@ c10::DataPtr CUDAHooks::StorageNewSharedDevice(c10::DeviceIndex device,
           auto sptr = at::RefcountedMapAllocator::makeDataPtr(
               ctx->ref_counter_handle.c_str(),
               flags,
-              sizeof(int64_t) * torch::CUDA_IPC_REF_COUNTER_FILE_SIZE,
+              sizeof(int64_t) * at::cuda::ipc::CUDA_IPC_REF_COUNTER_FILE_SIZE,
               nullptr);
           *(static_cast<int64_t*>(sptr.get()) + ctx->ref_counter_offset) -= 1;
         } catch (c10::Error& err) {
@@ -593,7 +593,7 @@ c10::DataPtr CUDAHooks::StorageNewSharedDevice(c10::DeviceIndex device,
 }
 
 int64_t CUDAHooks::getIpcRefCounterFileSize() const {
-  return torch::CUDA_IPC_REF_COUNTER_FILE_SIZE;
+  return at::cuda::ipc::CUDA_IPC_REF_COUNTER_FILE_SIZE;
 }
 
 // Sigh, the registry doesn't support namespaces :(

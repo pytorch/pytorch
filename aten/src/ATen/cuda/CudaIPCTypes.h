@@ -1,13 +1,11 @@
 #pragma once
-#ifdef USE_CUDA
 #include <c10/core/Allocator.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAException.h>
 #include <c10/util/Logging.h>
 #include <cuda_runtime_api.h>
-#include <torch/csrc/Export.h>
 #include <cstddef>
-namespace torch {
+namespace at::cuda::ipc {
 
 TORCH_CUDA_CU_API bool CudaIPCCollect();
 
@@ -126,18 +124,16 @@ struct CudaIPCRefCountersFile final {
 };
 
 } // namespace
-} // namespace torch
+} // namespace at::cuda::ipc
 
 namespace c10 {
 namespace {
 class CudaIPCCollectCallback : public FreeMemoryCallback {
  public:
   bool Execute() override {
-    return torch::CudaIPCCollect();
+    return at::cuda::ipc::CudaIPCCollect();
   }
 };
 } // namespace
 
 } // namespace c10
-
-#endif
