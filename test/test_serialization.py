@@ -4481,7 +4481,7 @@ x = torch.load("{f.name}", weights_only=True)
             iinfo = torch.iinfo(dtype)
             t = torch.randint(iinfo.min, iinfo.max, (10,), dtype=dtype)
             sd = MyModule(t).state_dict()
-        sd_save = {'t': t, 'sd': sd}
+        sd_save = {'t': t, 'sd': sd, 'i' : t[0].item()}
 
         with tempfile.NamedTemporaryFile() as f:
             torch.save(sd_save, f)
