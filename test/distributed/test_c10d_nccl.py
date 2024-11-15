@@ -3569,7 +3569,8 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
 
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
-    def test_gather_subgroup(self):
+    @parametrize("group_rank", [True, False])
+    def test_gather_subgroup(self, group_rank):
         world_size = 4
         if self.rank >= world_size:
             # just easier to write the test for exactly 4 gpus, even if this test class increased to 8gpu later
@@ -3580,24 +3581,42 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
         input = torch.ones((10,), device=device) * self.rank
         if self.rank == 0 or self.rank == 2:
             gather_list = [torch.empty_like(input) for _ in range(subgroup.size())]
-            torch.distributed.gather(
-                input,
-                gather_list=gather_list,
-                dst=self.rank,
-                group=subgroup,
-                async_op=False,
-            )
+            if group_rank:
+                torch.distributed.gather(
+                    input,
+                    gather_list=gather_list,
+                    group_dst=0,
+                    group=subgroup,
+                    async_op=False,
+                )
+            else:
+                torch.distributed.gather(
+                    input,
+                    gather_list=gather_list,
+                    dst=self.rank,
+                    group=subgroup,
+                    async_op=False,
+                )
             for src in range(len(gather_list)):
                 expected = (torch.ones_like(input) * self.rank) + src
                 self.assertEqual(gather_list[src], expected)
         else:
-            torch.distributed.gather(
-                input,
-                gather_list=None,
-                dst=self.rank - 1,
-                group=subgroup,
-                async_op=False,
-            )
+            if group_rank:
+                torch.distributed.gather(
+                    input,
+                    gather_list=None,
+                    group_dst=0,
+                    group=subgroup,
+                    async_op=False,
+                )
+            else:
+                torch.distributed.gather(
+                    input,
+                    gather_list=None,
+                    dst=self.rank - 1,
+                    group=subgroup,
+                    async_op=False,
+                )
 
     @requires_nccl()
     @skip_if_lt_x_gpu(4)

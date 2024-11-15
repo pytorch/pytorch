@@ -1121,17 +1121,21 @@ def _canonicalize_group_rank(
     group: ProcessGroup,
     global_rank: Optional[int] = None,
     group_rank: Optional[int] = None,
+    return_global: bool = False,
 ) -> int:
     """
     Helper method to take _either_ a global rank or a group rank and produce a group rank.
+
+    If 'return_global' is true, produce a global rank instead of a group rank.
     """
 
     if group_rank is not None:
         assert global_rank is None, "Can't specify both group_rank and global_rank"
+        global_rank = get_global_rank(group, group_rank)
     else:
         assert global_rank is not None, "Must specify global_rank or group_rank"
         group_rank = get_group_rank(group, global_rank)
-    return group_rank
+    return global_rank if return_global else group_rank
 
 
 def _check_not_self_rank(group: ProcessGroup, rank: int, rank_type: str):
@@ -3766,7 +3770,9 @@ def _validate_output_list_for_rank(my_rank, dst, gather_list):
 
 
 @_exception_logger
-def gather(tensor, gather_list=None, dst=0, group=None, async_op=False):
+def gather(
+    tensor, gather_list=None, dst=None, group=None, async_op=False, group_dst=None
+):
     """
     Gathers a list of tensors in a single process.
 
@@ -3813,26 +3819,22 @@ def gather(tensor, gather_list=None, dst=0, group=None, async_op=False):
     else:
         gather_list = []
     _ensure_all_tensors_same_dtype(tensor, gather_list)
-
+    group = _group_or_default_group(group)
     if _rank_not_in_group(group):
         _warn_not_in_group("gather")
         return
-
-    my_rank = get_rank()
-    _validate_output_list_for_rank(my_rank, dst, gather_list)
-    output_tensors = [gather_list] if dst == my_rank else []
+    if dst is None and group_dst is None:
+        dst = 0
+    global_dst = _canonicalize_group_rank(group, dst, group_dst, return_global=True)
+    group_dst = _canonicalize_group_rank(group, dst, group_dst, return_global=False)
+    my_global_rank = get_rank()
+    _validate_output_list_for_rank(my_global_rank, global_dst, gather_list)
+    output_tensors = [gather_list] if global_dst == my_global_rank else []
     input_tensors = [tensor]
 
     opts = GatherOptions()
-    opts.rootRank = dst
-
-    if group is None or group is GroupMember.WORLD:
-        default_pg = _get_default_group()
-        work = default_pg.gather(output_tensors, input_tensors, opts)
-    else:
-        group_dst_rank = get_group_rank(group, dst)
-        opts.rootRank = group_dst_rank
-        work = group.gather(output_tensors, input_tensors, opts)
+    opts.rootRank = group_dst
+    work = group.gather(output_tensors, input_tensors, opts)
 
     if async_op:
         return work
