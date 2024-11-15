@@ -4394,6 +4394,15 @@ class TestSerialization(TestCase, SerializationMixin):
                 with zipfile.ZipFile(f) as zip_file:
                     zip_file.extractall(path=temp_dir)
 
+    def test_serialization_with_header(self):
+        orig = torch.randn(3, 3)
+        with BytesIOContext() as f:
+            f.write(b'header')
+            torch.save(orig, f)
+            f.seek(6)
+            loaded = torch.load(f)
+            self.assertEqual(orig, loaded)
+
     def test_get_unsafe_globals_in_checkpoint(self):
         t = torch.randn(2, 3)
         tt = TwoTensor(t, t)
