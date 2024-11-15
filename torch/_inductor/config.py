@@ -872,6 +872,8 @@ class cpp:
         os.environ.get("TORCHINDUCTOR_CPP_ENABLE_TILING_HEURISTIC", "1") == "1"
     )
 
+    enable_linear_silu_linear_mul = False
+
     # Maximal allowed number of slices on K-dim for a GEMM kernel. This controls
     # the maximal parallelism of K-slicing. Since K-slicing requires extra thread
     # synchronization and buffers,  the maximal number of slices is limited to
@@ -891,12 +893,6 @@ class cpp:
     # For example, if the total number of threads is 56, "7,4,2" means the work is
     # decomposed into 7x4x2 thread blocks along MxNxK of a GEMM.
     gemm_thread_factors = os.environ.get("TORCHINDUCTOR_CPP_GEMM_THREAD_FACTORS", None)
-
-    # Set GEMM Transverse strategy: support VERTICAL, HORIZONTAL
-    # If both are enabled, the strategy will be selected based on the heuristic.
-    cpp_gemm_transverse_strategy = os.environ.get(
-        "TORCHINDUCTOR_CPP_GEMM_TRANSVERSE_STRATEGY", "VERTICAL"
-    ).upper()
 
     # Whether to enable masked vectorization for the tail_loop.
     enable_loop_tail_vec = True

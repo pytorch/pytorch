@@ -440,8 +440,8 @@ class CppPackedMLPTemplate(CppPackedGemmTemplate):
                 if isinstance(W, ir.IRNode):
                     new_size = [padded_n // block_n, k, block_n]
                     blocked_w = ir.Buffer(
-                        W.get_name(),  # Borrow the registered buffer name
-                        ir.FixedLayout(
+                        name=W.get_name(),  # Borrow the registered buffer name
+                        layout=ir.FixedLayout(
                             W.get_device(),
                             W.get_dtype(),
                             new_size,

@@ -282,6 +282,7 @@ if torch._C._has_mkldnn:
             if not (
                 torch._inductor.config.max_autotune
                 and "CPP" in torch._inductor.config.max_autotune_gemm_backends
+                and torch._inductor.config.cpp.enable_linear_silu_linear_mul
             ):
                 return False
 

@@ -125,6 +125,43 @@ def addmm_patterns_init():
     val = functools.partial(torch.empty, (10, 10), device=device, requires_grad=False)
 
     def check_concat_weights(match):
+        if (
+            config.cpp.enable_linear_silu_linear_mul
+            and config.max_autotune
+            and "CPP" in config.max_autotune_gemm_backends
+            and len(match.nodes) == 2
+        ):
+            # Inductor CPP GEMM Template enables Linear Silu Linear Mul Fusion
+            # If that's the pattern, use the fusion of CPP GEMM Template.
+            node0 = match.nodes[0]
+            node1 = match.nodes[1]
+            if (
+                all(len(list(node.users.keys())) == 1 for node in [node0, node1])
+                and next(iter(node0.users.keys())).target == aten.reshape.default
+                and next(iter(node1.users.keys())).target == aten.reshape.default
+            ):
+                # If input is 3D, there is a view after mm
+                node0 = next(iter(node0.users.keys()))
+                node1 = next(iter(node1.users.keys()))
+            if node0.meta.get("val").device.type == "cpu" and all(
+                len(list(node.users.keys())) == 1 for node in [node0, node1]
+            ):
+                user0 = next(iter(node0.users.keys()))
+                user1 = next(iter(node1.users.keys()))
+
+                def silu_mul_pattern(node0, node1):
+                    return node0.target == aten.mul.Tensor and (
+                        node1.target == torch.ops.prims.convert_element_type.default
+                        and len(node1.users) == 2
+                        and all(
+                            user.target in [aten.sigmoid.default, aten.mul.Tensor]
+                            for user in node1.users
+                        )
+                    )
+
+                if silu_mul_pattern(user0, user1) or silu_mul_pattern(user1, user0):
+                    return False
+
         weight_inputs = ["w1", "w2"]
         if "w3" in match.kwargs:
             weight_inputs.append("w3")
