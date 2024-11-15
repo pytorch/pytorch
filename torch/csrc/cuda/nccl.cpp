@@ -155,7 +155,7 @@ using namespace at;
 
 namespace detail {
 
-static inline void NCCL_CHECK(ncclResult_t result) {
+static void NCCL_CHECK(ncclResult_t result) {
   NCCL_CHECK(from_nccl_result(result));
 }
 
@@ -185,7 +185,7 @@ static int nccl_nonblocking_timeout() {
   return timeout;
 }
 
-static inline void NCCL_CHECK_TIMEOUT(ncclResult status, ncclComm_t comm) {
+static void NCCL_CHECK_TIMEOUT(ncclResult status, ncclComm_t comm) {
 #ifdef NCCL_HAS_COMM_NONBLOCKING
   ncclResult_t result = to_nccl_result(status);
   auto startTimepoint = std::chrono::steady_clock::now();
@@ -210,11 +210,11 @@ static inline void NCCL_CHECK_TIMEOUT(ncclResult status, ncclComm_t comm) {
 #endif
 }
 
-static inline void NCCL_CHECK_TIMEOUT(ncclResult_t result, ncclComm_t comm) {
+static void NCCL_CHECK_TIMEOUT(ncclResult_t result, ncclComm_t comm) {
   NCCL_CHECK_TIMEOUT(from_nccl_result(result), comm);
 }
 
-static inline void NCCL_CHECK_TIMEOUT(
+static void NCCL_CHECK_TIMEOUT(
     ncclResult status,
     std::vector<ncclComm_t>& comms) {
 #ifdef NCCL_HAS_COMM_NONBLOCKING
@@ -248,7 +248,7 @@ static inline void NCCL_CHECK_TIMEOUT(
 #endif
 }
 
-static inline void NCCL_CHECK_TIMEOUT(
+static void NCCL_CHECK_TIMEOUT(
     ncclResult_t result,
     std::vector<ncclComm_t>& comms) {
   NCCL_CHECK_TIMEOUT(from_nccl_result(result), comms);
@@ -310,7 +310,7 @@ ArrayRef<ncclComm_t> get_communicators(TensorList inputs) {
   return it->second.ref();
 }
 
-static inline void check_tensor(
+static void check_tensor(
     const at::Tensor& input,
     const std::optional<at::Tensor>& output,
     size_t input_multiplier,
@@ -839,7 +839,6 @@ void all2all_single_equal_split(
     ((NCCL_MAJOR > 2) || ((NCCL_MAJOR == 2) && (NCCL_MINOR >= 7)))
   using namespace torch::cuda::nccl::detail;
 
-  int numranks = 0;
   auto type = to_nccl_data_type(input);
   size_t count = input.numel() / size;
   size_t rankdiff = input.nbytes() / size;
@@ -852,6 +851,7 @@ void all2all_single_equal_split(
   // inside traditional p2p operations.
   NCCL_CHECK(ncclAllToAll(sendbuff, recvbuff, count, type, comm, stream));
 #else
+  int numranks = 0;
   NCCL_CHECK(ncclCommCount(comm, &numranks));
   NCCL_CHECK(ncclGroupStart());
   for (const auto r : c10::irange(numranks)) {

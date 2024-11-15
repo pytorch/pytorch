@@ -15,9 +15,28 @@
 
 namespace at::native {
 
-Tensor NestedTensor_abs(const Tensor& self) {
-  return map_nt(self, at::abs);
+#define DEFINE_TORCH_NESTED_TENSOR_UNARY_OP(op_name)                 \
+Tensor NestedTensor_##op_name(const Tensor& self) {      \
+  return map_nt(self, at::op_name);                      \
 }
+
+// Use the macro to define operations concisely
+DEFINE_TORCH_NESTED_TENSOR_UNARY_OP(abs)
+DEFINE_TORCH_NESTED_TENSOR_UNARY_OP(sgn)
+DEFINE_TORCH_NESTED_TENSOR_UNARY_OP(logical_not)
+DEFINE_TORCH_NESTED_TENSOR_UNARY_OP(isinf)
+DEFINE_TORCH_NESTED_TENSOR_UNARY_OP(isposinf)
+DEFINE_TORCH_NESTED_TENSOR_UNARY_OP(isneginf)
+DEFINE_TORCH_NESTED_TENSOR_UNARY_OP(isnan)
+DEFINE_TORCH_NESTED_TENSOR_UNARY_OP(relu)
+DEFINE_TORCH_NESTED_TENSOR_UNARY_OP(silu)
+DEFINE_TORCH_NESTED_TENSOR_UNARY_OP(sin)
+DEFINE_TORCH_NESTED_TENSOR_UNARY_OP(sqrt)
+DEFINE_TORCH_NESTED_TENSOR_UNARY_OP(cos)
+DEFINE_TORCH_NESTED_TENSOR_UNARY_OP(neg)
+DEFINE_TORCH_NESTED_TENSOR_UNARY_OP(tanh)
+
+#undef DEFINE_TORCH_NESTED_TENSOR_UNARY_OP
 
 Tensor& NestedTensor_abs_(Tensor& self) {
   auto self_ptr = get_nested_tensor_impl(self);
@@ -65,8 +84,35 @@ Tensor NestedTensor_where(const Tensor& condition, const Tensor& self, const Ten
   return output;
 }
 
-Tensor NestedTensor_sgn(const Tensor& self) {
-  return map_nt(self, at::sgn);
+Tensor& NestedTensor_where_out(const Tensor& condition, const Tensor& self, const Tensor& other, at::Tensor & out) {
+  TORCH_CHECK(condition.is_nested(), "condition must be nested");
+  TORCH_CHECK(other.is_nested(), "other must be nested");
+  TORCH_CHECK(!self.is_nested(), "self must not be nested");
+  TORCH_CHECK(out.is_nested(), "out must be nested");
+
+  auto condition_ptr = get_nested_tensor_impl(condition);
+  auto other_ptr = get_nested_tensor_impl(other);
+  auto out_ptr = get_nested_tensor_impl(out);
+
+  int64_t ntensors = condition_ptr->size(0);
+  TORCH_CHECK(other_ptr->size(0) == ntensors, "condition and other must have the same number of tensors");
+  TORCH_CHECK(out_ptr->size(0) == ntensors, "condition and out must have the same number of tensors");
+
+  // Unbind condition, other, and out into lists of tensors
+  std::vector<Tensor> condition_unbind = condition.unbind();
+  std::vector<Tensor> other_unbind = other.unbind();
+  std::vector<Tensor> output_unbind = out.unbind();
+
+  // Apply at::where operation on each triplet of condition, self, and other tensors
+  for (int64_t i = 0; i < ntensors; i++) {
+    at::where_out(
+      output_unbind[i],
+      condition_unbind[i],
+      self,  // Note: self is not nested, so we use it directly
+      other_unbind[i]);
+  }
+
+  return out;
 }
 
 Tensor& NestedTensor_sgn_(Tensor& self) {
@@ -85,13 +131,6 @@ Tensor& NestedTensor_logical_not_(Tensor& self){
   return self;
 }
 
-Tensor NestedTensor_logical_not(const Tensor& self) {
-  return map_nt(self, at::logical_not);
-}
-
-Tensor NestedTensor_isneginf(const Tensor& self) {
-  return map_nt(self, at::isneginf);
-}
 
 Tensor& NestedTensor_relu_(Tensor& self) {
   auto self_ptr = get_nested_tensor_impl(self);
@@ -99,10 +138,6 @@ Tensor& NestedTensor_relu_(Tensor& self) {
   auto buffer = self_ptr->get_buffer();
   at::relu_(buffer);
   return self;
-}
-
-Tensor NestedTensor_relu(const Tensor& self) {
-  return map_nt(self, at::relu);
 }
 
 Tensor& NestedTensor_gelu_(Tensor& self, c10::string_view approximate) {
@@ -129,10 +164,6 @@ Tensor& NestedTensor_tanh_(Tensor& self) {
   return self;
 }
 
-Tensor NestedTensor_tanh(const Tensor& self) {
-  return map_nt(self, at::tanh);
-}
-
 Tensor& NestedTensor_neg_(Tensor& self) {
   auto self_ptr = get_nested_tensor_impl(self);
   check_numel_equals_buffer_size(self_ptr);
@@ -141,18 +172,10 @@ Tensor& NestedTensor_neg_(Tensor& self) {
   return self;
 }
 
-Tensor NestedTensor_neg(const Tensor& self) {
-  return map_nt(self, at::neg);
-}
-
 Tensor& zero_nested_(Tensor& self) {
   const auto& self_buf = get_nested_tensor_impl(self)->get_buffer();
   self_buf.fill_(0);
   return self;
-}
-
-Tensor NestedTensor_silu(const Tensor& self){
-  return map_nt(self, at::silu);
 }
 
 Tensor& NestedTensor_silu_(Tensor& self){
@@ -161,14 +184,6 @@ Tensor& NestedTensor_silu_(Tensor& self){
   auto buffer = self_ptr->get_buffer();
   at::silu_(buffer);
   return self;
-}
-
-Tensor sin_nested(const Tensor& self) {
-  return map_nt(self, at::sin);
-}
-
-Tensor cos_nested(const Tensor& self) {
-  return map_nt(self, at::cos);
 }
 
 Tensor _pin_memory_nested(const Tensor& self, std::optional<Device> device) {
