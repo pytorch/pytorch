@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import logging
-import types
 import weakref
 from dataclasses import dataclass
 from typing import Tuple
@@ -8,6 +7,7 @@ from typing import Tuple
 from torch._guards import CompileId
 
 from . import config
+from .types import DynamoFrameType
 
 
 log = logging.getLogger(__name__)
@@ -100,7 +100,7 @@ class CacheSizeRelevantForFrame:
         return self.num_cache_entries_with_same_id_matched_objs >= limit
 
 
-def _get_weakref_from_f_locals(frame: types.FrameType, local_name: str):
+def _get_weakref_from_f_locals(frame: DynamoFrameType, local_name: str):
     obj = frame.f_locals.get(local_name, None)
     weak_id = None
     try:
@@ -110,7 +110,7 @@ def _get_weakref_from_f_locals(frame: types.FrameType, local_name: str):
     return weak_id
 
 
-def _has_same_id_matched_objs(frame: types.FrameType, cache_entry) -> bool:
+def _has_same_id_matched_objs(frame: DynamoFrameType, cache_entry) -> bool:
     """
     Checks if the ID_MATCH'd objects saved on cache_entry are same as the ones
     in frame.f_locals.
@@ -132,7 +132,7 @@ def _has_same_id_matched_objs(frame: types.FrameType, cache_entry) -> bool:
 
 
 def compute_cache_size(
-    frame: types.FrameType, cache_entry
+    frame: DynamoFrameType, cache_entry
 ) -> CacheSizeRelevantForFrame:
     # Walk the linked list to calculate the cache size
     num_cache_entries = 0
