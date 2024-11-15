@@ -32,6 +32,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skipIfTorchDynamo,
+    TEST_WITH_ROCM,
     TestCase,
 )
 from torch.utils._pytree import tree_map_only
@@ -524,6 +525,8 @@ class TestExpandedWeightFunctional(TestCase):
     @parametrize("num_dim", [1, 2, 3])
     @tf32_off()
     def test_instance_norm_model(self, num_dim, device):
+        if 'cuda' in device and TEST_WITH_ROCM and num_dim == 3:
+            self.skipTest(f"Skipped on ROCm")
         def instance_norm_model(num_classes, num_dim):
             conv_layer = (
                 nn.Conv1d if num_dim == 1 else nn.Conv2d if num_dim == 2 else nn.Conv3d
