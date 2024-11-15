@@ -19,6 +19,7 @@ import torch.utils._pytree as pytree
 from torch import Tensor
 from torch._guards import detect_fake_mode
 from torch._logging import getArtifactLogger
+from torch._subclasses import FakeTensor
 from torch._subclasses.functional_tensor import FunctionalTensor, FunctionalTensorMode
 from torch._subclasses.meta_utils import safe_is_leaf
 from torch.fx.experimental.symbolic_shapes import is_concrete_int
@@ -661,8 +662,16 @@ from a multi-output view call"
         # This analysis function returns *only* the outputs that are meant to be tangents to the backwards.
         # Anything that aliases (inputs returned in the fw due to metadata mutations, or outputs that alias inputs/intermediates)
         # are *regenerated* later, and not used directly in the autograd graph
+        def _plain_fake_tensor_like_subclass(x):
+            t = torch.empty(x.shape, dtype=x.dtype, device=x.device)
+            return FakeTensor.from_tensor(t, detect_fake_mode())
+
         f_input_tangents = [
-            inp
+            # For subclass inputs that are mutated out of graph tangent will be
+            # plain zeros tensor like subclass input.
+            _plain_fake_tensor_like_subclass(inp)
+            if is_traceable_wrapper_subclass(inp)
+            else inp
             for inp, info in zip(flat_f_args, input_info)
             if info.mutation_type == MutationType.MUTATED_OUT_GRAPH
             and info.mutates_data

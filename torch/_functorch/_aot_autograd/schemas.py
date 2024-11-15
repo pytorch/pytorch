@@ -9,18 +9,7 @@ import dataclasses
 import functools
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    Iterable,
-    List,
-    NewType,
-    Optional,
-    Set,
-    Tuple,
-    Union,
-)
+from typing import Any, Callable, Dict, Iterable, List, NewType, Optional, Set, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -168,7 +157,6 @@ class InputAliasInfo:
 @dataclass
 class PlainTensorMeta:
     unwrapped_idx: int
-    shape_dtype_device: Optional[Tuple[torch.Size, torch.dtype, torch.device]] = None
     memory_format: Optional[torch.memory_format] = None
 
 
