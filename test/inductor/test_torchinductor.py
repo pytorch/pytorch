@@ -3108,13 +3108,18 @@ class CommonTemplate:
         self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
 
     @skip_if_halide  # only 32-bit indexing
-    @skip_if_cpp_wrapper  # OOM
     def test_large_tensor_reduction(self):
-        if not _has_sufficient_memory(self.device, 4.5 * 1024**3):  # 4.5 GiB
-            raise unittest.SkipTest("insufficient memory")
-
         if self.device == "cpu":
             raise unittest.SkipTest("Fails on CPU")
+
+        # If this is running with cpp_wrapper, the auto-tuning step will generate an
+        # additional array of the same size as the input, so required memory doubles.
+        required_memory = 4.5 * 1024**3  # 4.5 GiB
+        if config.cpp_wrapper:
+            required_memory *= 2
+
+        if not _has_sufficient_memory(self.device, required_memory):
+            raise unittest.SkipTest("insufficient memory")
 
         # Test 64-bit indexing works correctly
         def fn(a):
@@ -3124,7 +3129,7 @@ class CommonTemplate:
         t[-1] = 2
 
         # self.common OOMs here because it copies inputs to check for mutations
-        compiled_fn = torch._dynamo.optimize()(fn)
+        compiled_fn = torch.compile(fn)
         actual = compiled_fn(t)
         expect = torch.tensor(2, dtype=torch.int8, device=self.device)
         self.assertEqual(actual, expect)
@@ -3147,22 +3152,27 @@ class CommonTemplate:
         t2[-1, -1] = 2
 
         # self.common OOMs here because it copies inputs to check for mutations
-        compiled_fn = torch._dynamo.optimize()(fn)
+        compiled_fn = torch.compile(fn)
         actual = compiled_fn(t1, t2)
         expect = torch.tensor(4, dtype=torch.int8, device=self.device)
         self.assertEqual(actual, expect)
 
     @skip_if_halide  # only 32-bit indexing
-    @skip_if_cpp_wrapper  # OOM
     def test_large_pointwise(self):
-        if not _has_sufficient_memory(self.device, 2 * (2**31 + 1)):
+        # If this is running with cpp_wrapper, the auto-tuning step will generate an
+        # additional array of the same size as the input, so required memory doubles.
+        required_memory = 2 * (2**31 + 1)
+        if config.cpp_wrapper:
+            required_memory *= 2
+
+        if not _has_sufficient_memory(self.device, required_memory):
             raise unittest.SkipTest("insufficient memory")
 
         def fn(a):
             return a + 1
 
         t = torch.ones(2**31 + 1, dtype=torch.int8, device=self.device)
-        compiled_fn = torch._dynamo.optimize()(fn)
+        compiled_fn = torch.compile(fn)
         actual = compiled_fn(t)
 
         # Can't use assertEqual as it expands broadcasted inputs
@@ -3177,7 +3187,14 @@ class CommonTemplate:
         # Test 64-bit indexing is used when input views a tensor that can be
         # indexed with 32-bit strides but the storage offset pushes it over
         # INT_MAX
-        if not _has_sufficient_memory(self.device, (2**31 + 1) + (2**30 + 1)):
+
+        # If this is running with cpp_wrapper, the auto-tuning step will generate an
+        # additional array of the same size as the input, so required memory doubles.
+        required_memory = (2**31 + 1) + (2**30 + 1)
+        if config.cpp_wrapper:
+            required_memory *= 2
+
+        if not _has_sufficient_memory(self.device, required_memory):
             raise unittest.SkipTest("insufficient memory")
 
         def fn(a):
@@ -3185,7 +3202,7 @@ class CommonTemplate:
 
         t = torch.ones(2**31 + 1, dtype=torch.int8, device=self.device)
         t[2**30 :] = 0
-        compiled_fn = torch._dynamo.optimize()(fn)
+        compiled_fn = torch.compile(fn)
         actual = compiled_fn(t[2**30 :])
         self.assertTrue((actual == 4).all())
 
@@ -3194,7 +3211,14 @@ class CommonTemplate:
     def test_large_strided_reduction(self):
         # Test 64-bit indexing is used when input numel is less than INT_MAX
         # but stride calculations go above INT_MAX
-        if not _has_sufficient_memory(self.device, 2**31 + 2):
+
+        # If this is running with cpp_wrapper, the auto-tuning step will generate an
+        # additional array of the same size as the input, so required memory doubles.
+        required_memory = 2**31 + 2
+        if config.cpp_wrapper:
+            required_memory *= 2
+
+        if not _has_sufficient_memory(self.device, required_memory):
             raise unittest.SkipTest("insufficient memory")
 
         def fn(a):
@@ -5239,7 +5263,6 @@ class CommonTemplate:
         if self.device != "cpu":
             assertGeneratedKernelCountEqual(self, 1)
 
-    @skip_if_cpp_wrapper
     def test_complex_fallback(self):
         def fn(x):
             return x * x + 10
@@ -5566,7 +5589,6 @@ class CommonTemplate:
         )
 
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
-    @skip_if_cpp_wrapper
     def test_nonzero_unbacked_refinement(self):
         def fn(x):
             z = x.nonzero()
@@ -5578,8 +5600,12 @@ class CommonTemplate:
             (torch.tensor([0, 1, 3, 4, 2, 0, 0]),),
         )
 
-        with self.assertRaises(RuntimeError):
-            torch.compile(fn)(torch.tensor([0, 0, 0, 0]))
+        # non-zero's output size is data-dependent, but torch.compile implicitly assumes
+        # that it will be constant.  This causes a RuntimeError below in normal mode,
+        # but creates an out-of-bounds memory access (segfault) in cpp_wrapper mode.
+        if not config.cpp_wrapper:
+            with self.assertRaises(RuntimeError):
+                torch.compile(fn)(torch.tensor([0, 0, 0, 0]))
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_unbacked_floordiv_simplify(self):
@@ -8366,8 +8392,14 @@ class CommonTemplate:
         self.common(fn, [torch.zeros([20, 20])])
 
     @config.patch(check_stack_no_cycles_TESTING_ONLY=True)
-    @skip_if_cpp_wrapper
     def test_check_stack_no_cycles(self):
+        if config.cpp_wrapper and self.device != "cpu":
+            raise unittest.SkipTest(
+                "codegen() gets called twice in cpp_wrapper GPU compilation, which "
+                "causes this test to fail.  This can be removed if GPU compilation is "
+                "done in a single pass."
+            )
+
         @torch.compile()
         def fn(x):
             return x * 3
@@ -8870,8 +8902,10 @@ class CommonTemplate:
             self.assertEqual(bw_code.count("tl.rand"), 0)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 4)
 
-    @skip_if_cpp_wrapper
     def test_randint_kernel_count(self):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("Only valid for GPU!")
+
         @torch._dynamo.optimize_assert("inductor")
         def fn1():
             random_tensor1 = torch.randint(10, [32], device=self.device)
@@ -8880,9 +8914,12 @@ class CommonTemplate:
             return random_tensor1, random_tensor2, random_tensor3
 
         _, source_codes = run_and_get_code(fn1)
-        if self.device == GPU_TYPE:
-            self.assertEqual(len(source_codes), 1)
-            self.assertEqual(source_codes[0].count("async_compile.triton"), 2)
+        # cpp_wrapper does a 2-pass generation on GPU.
+        self.assertEqual(len(source_codes), 1 if not config.cpp_wrapper else 2)
+        self.assertEqual(source_codes[0].count("async_compile.triton"), 2)
+        if config.cpp_wrapper:
+            # The second pass should not involve triton at all.
+            self.assertEqual(source_codes[1].count("async_compile.triton"), 0)
 
     def test_roll(self):
         def fn(a):
@@ -9509,6 +9546,8 @@ class CommonTemplate:
         for x in (torch.randn(2, 3), torch.randn(2, 2), torch.randn(3, 2)):
             self.common(fn, (x,))
 
+    # cpp_wrapper cannot currently handle fallback ops with return types containing
+    # list[Tensor], which will eventually need to get fixed.
     @skip_if_cpp_wrapper
     def test_kwargs(self):
         if self.device == GPU_TYPE:
