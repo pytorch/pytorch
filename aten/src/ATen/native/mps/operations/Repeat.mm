@@ -85,28 +85,11 @@ Tensor repeat_mps(const Tensor& self, IntArrayRef repeats) {
   return result;
 }
 
-static mps::MetalShaderLibrary lib(R"METAL_REPEAT(
-template<typename T>
-kernel void repeat_interleave(
-    constant T     * repeat_ptr    [[buffer(0)]],
-    constant int64_t * cumsum_ptr  [[buffer(1)]],
-    device T       * result_ptr    [[buffer(2)]],
-    uint               tid         [[thread_position_in_grid]]) {
-  int64_t end = cumsum_ptr[tid];
-  T repeat = repeat_ptr[tid];
-  int64_t start = end - repeat;
-  for (uint j = start; j < end; j++) {
-    result_ptr[j] = tid;
-  }
-}
-
-template [[host_name("repeat_interleave_int32_t")]]
-kernel void repeat_interleave<int32_t>(constant int32_t*, constant int64_t*, device int32_t*, uint);
-
-template [[host_name("repeat_interleave_int64_t")]]
-kernel void repeat_interleave<int64_t>(constant int64_t*, constant int64_t*, device int64_t*, uint);
-
-)METAL_REPEAT");
+#ifndef PYTORCH_JIT_COMPILE_SHADERS
+static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
+#else
+#include <ATen/native/mps/Repeat_metallib.h>
+#endif
 
 template <typename index_t>
 void computeRepeatIndices(const index_t* repeat_ptr,

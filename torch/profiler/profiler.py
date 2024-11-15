@@ -141,6 +141,7 @@ class _KinetoProfile:
         experimental_config: Optional[_ExperimentalConfig] = None,
         execution_trace_observer: Optional[_ITraceObserver] = None,
         acc_events: bool = False,
+        custom_trace_id_callback: Optional[Callable[[], str]] = None,
     ):
         self.activities = set(activities) if activities else supported_activities()
         self.record_shapes = record_shapes
@@ -151,6 +152,7 @@ class _KinetoProfile:
         self.experimental_config = experimental_config
         self.execution_trace_observer = execution_trace_observer
         self.acc_events = acc_events
+        self.custom_trace_id_callback = custom_trace_id_callback
         self.profiler: Optional[prof.profile] = None
         self.mem_tl: Optional[MemoryProfileTimeline] = None
         self.use_device = None
@@ -186,6 +188,7 @@ class _KinetoProfile:
                 use_kineto=True,
                 experimental_config=self.experimental_config,
                 acc_events=self.acc_events,
+                custom_trace_id_callback=self.custom_trace_id_callback,
             )
         self.profiler._prepare_trace()
 
@@ -661,6 +664,7 @@ class profile(_KinetoProfile):
         acc_events: bool = False,
         # deprecated:
         use_cuda: Optional[bool] = None,
+        custom_trace_id_callback: Optional[Callable[[], str]] = None,
     ):
         activities_set = set(activities) if activities else supported_activities()
         if use_cuda is not None:
@@ -685,6 +689,7 @@ class profile(_KinetoProfile):
             experimental_config=experimental_config,
             execution_trace_observer=execution_trace_observer,
             acc_events=acc_events,
+            custom_trace_id_callback=custom_trace_id_callback,
         )
 
         if schedule:
@@ -806,6 +811,20 @@ class profile(_KinetoProfile):
             )
             self.step_rec_fn.__enter__()
 
+    def set_custom_trace_id_callback(self, callback):
+        """
+        Sets a callback to be called when a new trace ID is generated.
+        """
+        self.custom_trace_id_callback = callback
+
+    def get_trace_id(self):
+        """
+        Returns the current trace ID.
+        """
+        if self.profiler is None:
+            return None
+        return self.profiler.trace_id
+
     def _trace_ready(self):
         if self.on_trace_ready:
             self.on_trace_ready(self)
@@ -871,7 +890,7 @@ class ExecutionTraceObserver(_ITraceObserver):
 
             kernel_files = [
                 v.__file__
-                for v in PyCodeCache.cache.values()
+                for v in PyCodeCache.modules
                 if getattr(v, "__file__", None) is not None
             ]
             work_dir, file_name = os.path.split(self._output_file_path)

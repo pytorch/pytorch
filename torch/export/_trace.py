@@ -447,6 +447,8 @@ def _produce_aten_artifact(
         graph_signature, gm, _get_non_persistent_buffers(mod)
     )
 
+    # script objects are always stored in constants no matter whether they're initial inputs or
+    # they're lifted in aot" before rewrite_script_object_meta
     constants = rewrite_script_object_meta(gm)
     constants.update(lift_constants_pass(gm, export_graph_signature, constant_attrs))
 
@@ -1311,7 +1313,14 @@ def _strict_export_lower_to_aten_ir(
                 )
 
     # Fix the graph output signature to be tuple if scalar
-    out_spec = orig_out_spec = gm_torch_level._out_spec
+
+    # gm_torch_level.graph._codegen is made a _PyTreeCodeGen in rewrite_signature in eval_frame.py
+    assert isinstance(gm_torch_level.graph._codegen, torch.fx.graph._PyTreeCodeGen)
+
+    # Calling gm_torch_level._out_spec is not safe because gm_torch_level might be
+    # a _LazyGraphModule, which does not populate _out_spec when calling recompile().
+    # TODO: Fix recompile() in  _LazyGraphModule. T207713214
+    out_spec = orig_out_spec = gm_torch_level.graph._codegen.pytree_info.out_spec
 
     # Used to get rid of lint type error.
     assert out_spec is not None
@@ -1496,8 +1505,6 @@ def _export_to_aten_ir_make_fx(
 
                 hook.remove()  # type: ignore[possibly-undefined]
 
-            gm.graph.eliminate_dead_code()
-
         # create graph signature
         input_names = _graph_input_names(gm)
         output_names = _graph_output_names(gm)
@@ -1540,6 +1547,21 @@ def _export_to_aten_ir_make_fx(
             trace_joint=False,
             kwargs=fake_kwargs,
         )
+
+        # [NOTE] In training IR, we don't run
+        # any DCE as a result we preserve constant
+        # nodes in the graph. make_fx invariant is that
+        # they don't guarantee every node gets a meta['val']
+        # field. Since the actual value is already hardcoded in
+        # graph, the node.meta here actually doesn't matter. But
+        # we do this to make spec verifier happy.
+        for node in gm.graph.nodes:
+            if (
+                node.op == "call_function"
+                and len(node.users) == 0
+                and "val" not in node.meta
+            ):
+                node.meta["val"] = None
 
         if isinstance(mod, torch.fx.GraphModule) and hasattr(mod, "meta"):
             gm.meta.update(mod.meta)
