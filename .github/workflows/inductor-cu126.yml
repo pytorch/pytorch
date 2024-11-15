@@ -1,11 +1,11 @@
 # Workflow: Inductor
-# runs all inductor cu124 tests, including both benchmark tests and unit tests.
-name: inductor-cu124
+# runs all inductor cu126 tests, including both benchmark tests and unit tests.
+name: inductor-cu126
 
 on:
   push:
     tags:
-      - ciflow/inductor-cu124/*
+      - ciflow/inductor-cu126/*
   workflow_dispatch:
   schedule:
     # Run every 4 hours during the week and every 12 hours on the weekend
@@ -22,7 +22,7 @@ jobs:
   unit-test:
     if: github.repository_owner == 'pytorch'
     name: inductor-unittest
-    uses: ./.github/workflows/inductor-cu124-unittest.yml
+    uses: ./.github/workflows/inductor-cu126-unittest.yml
 
   get-default-label-prefix:
     name: get-default-label-prefix
