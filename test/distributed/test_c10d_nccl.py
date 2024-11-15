@@ -3739,7 +3739,8 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
 
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
-    def test_reduce_subgroup(self):
+    @parametrize("group_rank", [True, False])
+    def test_reduce_subgroup(self, group_rank):
         world_size = 4
         if self.rank >= world_size:
             return
@@ -3748,10 +3749,16 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
         x = torch.ones((10,), device=device) * self.rank
         if self.rank == 0 or self.rank == 2:
             expected = x + torch.ones((10,), device=device) * (self.rank + 1)
-            c10d.reduce(x, dst=self.rank, group=subgroup, async_op=False)
+            if group_rank:
+                c10d.reduce(x, group_dst=0, group=subgroup, async_op=False)
+            else:
+                c10d.reduce(x, dst=self.rank, group=subgroup, async_op=False)
             self.assertEqual(x, expected)
         else:
-            c10d.reduce(x, dst=self.rank - 1, group=subgroup, async_op=False)
+            if group_rank:
+                c10d.reduce(x, group_dst=0, group=subgroup, async_op=False)
+            else:
+                c10d.reduce(x, dst=self.rank - 1, group=subgroup, async_op=False)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
@@ -3792,7 +3799,8 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
 
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
-    def test_broadcast_subgroup(self):
+    @parametrize("group_rank", [True, False])
+    def test_broadcast_subgroup(self, group_rank):
         world_size = 4
         if self.rank >= world_size:
             return
@@ -3800,12 +3808,18 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
         device = torch.device("cuda:%d" % self.rank)
         if self.rank == 0 or self.rank == 2:
             x = torch.empty((10,), device=device)
-            c10d.broadcast(x, src=self.rank + 1, group=subgroup)
+            if group_rank:
+                c10d.broadcast(x, group_src=1, group=subgroup)
+            else:
+                c10d.broadcast(x, src=self.rank + 1, group=subgroup)
             expected = torch.ones((10,), device=device) * (self.rank + 1)
             self.assertEqual(x, expected)
         else:
             x = torch.ones((10,), device=device) * self.rank
-            c10d.broadcast(x, src=self.rank, group=subgroup)
+            if group_rank:
+                c10d.broadcast(x, group_src=1, group=subgroup)
+            else:
+                c10d.broadcast(x, src=self.rank, group=subgroup)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
@@ -3838,7 +3852,10 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
         "set_device",
         [SetDeviceMethod.TORCH_CUDA_SET, SetDeviceMethod.COLLECTIVE_ARGUMENT],
     )
-    def test_broadcast_object_list_subgroup(self, set_device: SetDeviceMethod):
+    @parametrize("group_rank", [True, False])
+    def test_broadcast_object_list_subgroup(
+        self, set_device: SetDeviceMethod, group_rank
+    ):
         world_size = 4
         if self.rank >= world_size:
             return
@@ -3850,14 +3867,26 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
             device = torch.device("cuda:%d" % self.rank)
         if self.rank == 0 or self.rank == 2:
             x = [{}]
-            c10d.broadcast_object_list(
-                x, src=self.rank + 1, group=subgroup, device=device
-            )
+            if group_rank:
+                c10d.broadcast_object_list(
+                    x, group_src=1, group=subgroup, device=device
+                )
+            else:
+                c10d.broadcast_object_list(
+                    x, src=self.rank + 1, group=subgroup, device=device
+                )
             expected = [{"rank": self.rank + 1}]
             self.assertEqual(x, expected)
         else:
             x = [{"rank": self.rank}]
-            c10d.broadcast_object_list(x, src=self.rank, group=subgroup, device=device)
+            if group_rank:
+                c10d.broadcast_object_list(
+                    x, group_src=1, group=subgroup, device=device
+                )
+            else:
+                c10d.broadcast_object_list(
+                    x, src=self.rank, group=subgroup, device=device
+                )
 
     @requires_nccl()
     @skip_if_lt_x_gpu(4)

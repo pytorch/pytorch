@@ -2586,7 +2586,13 @@ def batch_isend_irecv(p2p_op_list):
 
 
 @_exception_logger
-def broadcast(tensor, src, group=None, async_op=False):
+def broadcast(
+    tensor: torch.Tensor,
+    src: Optional[int] = None,
+    group: Optional[ProcessGroup] = None,
+    async_op: bool = False,
+    group_src: Optional[int] = None,
+):
     """
     Broadcasts the tensor to the whole group.
 
@@ -2600,29 +2606,26 @@ def broadcast(tensor, src, group=None, async_op=False):
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         async_op (bool, optional): Whether this op should be an async op
+        group_src (int): Source rank on ``group``.  Must specify one of ``group_src``
+            and ``src`` but not both.
 
     Returns:
         Async work handle, if async_op is set to True.
         None, if not async_op or if not part of the group
 
     """
+    group = _group_or_default_group(group)
+    group_src = _canonicalize_group_rank(group, src, group_src, return_global=False)
     _check_single_tensor(tensor, "tensor")
     if _rank_not_in_group(group):
         _warn_not_in_group("broadcast")
         return
 
     opts = BroadcastOptions()
-    opts.rootRank = src
+    opts.rootRank = group_src
     opts.rootTensor = 0
     opts.asyncOp = async_op
-
-    if group is None or group is GroupMember.WORLD:
-        default_pg = _get_default_group()
-        work = default_pg.broadcast([tensor], opts)
-    else:
-        group_src_rank = get_group_rank(group, src)
-        opts.rootRank = group_src_rank
-        work = group.broadcast([tensor], opts)
+    work = group.broadcast([tensor], opts)
     if async_op:
         return work
     else:
@@ -2776,7 +2779,14 @@ def all_reduce_coalesced(tensors, op=ReduceOp.SUM, group=None, async_op=False):
 
 
 @_exception_logger
-def reduce(tensor, dst, op=ReduceOp.SUM, group=None, async_op=False):
+def reduce(
+    tensor: torch.Tensor,
+    dst: Optional[int] = None,
+    op=ReduceOp.SUM,
+    group: Optional[ProcessGroup] = None,
+    async_op: bool = False,
+    group_dst: Optional[int] = None,
+):
     """
     Reduces the tensor data across all machines.
 
@@ -2792,12 +2802,16 @@ def reduce(tensor, dst, op=ReduceOp.SUM, group=None, async_op=False):
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         async_op (bool, optional): Whether this op should be an async op
+        group_dst (int): Destination rank on ``group``.  Must specify one of ``group_dst``
+            and ``dst`` but not both.
 
     Returns:
         Async work handle, if async_op is set to True.
         None, if not async_op or if not part of the group
 
     """
+    group = _group_or_default_group(group)
+    group_dst = _canonicalize_group_rank(group, dst, group_dst, return_global=False)
     _check_single_tensor(tensor, "tensor")
     if _rank_not_in_group(group):
         _warn_not_in_group("reduce")
@@ -2805,16 +2819,8 @@ def reduce(tensor, dst, op=ReduceOp.SUM, group=None, async_op=False):
 
     opts = ReduceOptions()
     opts.reduceOp = op
-    opts.rootRank = dst
-
-    if group is None or group is GroupMember.WORLD:
-        default_pg = _get_default_group()
-        work = default_pg.reduce([tensor], opts)
-    else:
-        group_dst_rank = get_group_rank(group, dst)
-        opts.rootRank = group_dst_rank
-        work = group.reduce([tensor], opts)
-
+    opts.rootRank = group_dst
+    work = group.reduce([tensor], opts)
     if async_op:
         return work
     else:
@@ -3261,7 +3267,13 @@ def recv_object_list(object_list, src=None, group=None, device=None):
 
 
 @_exception_logger
-def broadcast_object_list(object_list, src=0, group=None, device=None):
+def broadcast_object_list(
+    object_list: List[Any],
+    src: Optional[int] = None,
+    group: Optional[ProcessGroup] = None,
+    device: Optional[torch.device] = None,
+    group_src: Optional[int] = None,
+):
     """
     Broadcasts picklable objects in ``object_list`` to the whole group.
 
@@ -3280,6 +3292,8 @@ def broadcast_object_list(object_list, src=0, group=None, device=None):
         device (``torch.device``, optional): If not None, the objects are
             serialized and converted to tensors which are moved to the
             ``device`` before broadcasting. Default is ``None``.
+        group_src (int): Source rank on ``group``.  Must not specify one of ``group_src``
+            and ``src`` but not both.
 
     Returns:
         ``None``. If rank is part of the group, ``object_list`` will contain the
@@ -3322,6 +3336,9 @@ def broadcast_object_list(object_list, src=0, group=None, device=None):
         >>> objects
         ['foo', 12, {1: 2}]
     """
+    group = _group_or_default_group(group)
+    global_src = _canonicalize_group_rank(group, src, group_src, return_global=True)
+    group_src = _canonicalize_group_rank(group, src, group_src, return_global=False)
     if _rank_not_in_group(group):
         _warn_not_in_group("broadcast_object_list")
         return
@@ -3333,9 +3350,9 @@ def broadcast_object_list(object_list, src=0, group=None, device=None):
     # case it is not ``None`` we move the size and object tensors to be
     # broadcasted to this device.
     current_device = device or _get_object_coll_device(group)
-    my_rank = get_rank()
+    my_global_rank = get_rank()
     # Serialize object_list elements to tensors on src rank.
-    if my_rank == src:
+    if my_global_rank == global_src:
         tensor_list, size_list = zip(
             *[_object_to_tensor(obj, current_device, group) for obj in object_list]
         )
@@ -3346,12 +3363,12 @@ def broadcast_object_list(object_list, src=0, group=None, device=None):
         )
 
     # Broadcast object sizes
-    broadcast(object_sizes_tensor, src=src, group=group)
+    broadcast(object_sizes_tensor, src=global_src, group=group)
 
     # Concatenate and broadcast serialized object tensors
     # Note: torch.cat will do an extra memory copy to the current device, if the tensor_list
     # has only one element, we can skip the copy.
-    if my_rank == src:
+    if my_global_rank == global_src:
         if len(tensor_list) == 1:  # type: ignore[possibly-undefined]
             object_tensor = tensor_list[0]
         else:
@@ -3363,10 +3380,10 @@ def broadcast_object_list(object_list, src=0, group=None, device=None):
             device=current_device,
         )
 
-    broadcast(object_tensor, src=src, group=group)
+    broadcast(object_tensor, src=global_src, group=group)
     # Deserialize objects using their stored sizes.
     offset = 0
-    if my_rank != src:
+    if my_global_rank != global_src:
         for i, obj_size in enumerate(object_sizes_tensor):
             obj_view = object_tensor[offset : offset + obj_size]
             obj_view = obj_view.type(torch.uint8)
