@@ -632,7 +632,7 @@ class AOTAutogradCache:
                     )
                     # TODO: should we use the same field for remote cache time saved for both
                     # FXGraphCache and AOTAutogradCache?
-                    # add_remote_cache_time_saved(time_saved_ns, is_backward=False)
+                    # get_metrics_context().increment(...)
                     if (
                         ephemeral_increase := add_ephemeral_timeout_increase_for_distributed(
                             time_saved_ns
