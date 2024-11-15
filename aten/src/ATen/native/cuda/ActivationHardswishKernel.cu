@@ -57,7 +57,7 @@ void hardswish_backward_kernel(TensorIterator& iter) {
 }
 } // namespace
 
-REGISTER_DISPATCH(hardswish_stub, &hardswish_kernel);
-REGISTER_DISPATCH(hardswish_backward_stub, &hardswish_backward_kernel);
+REGISTER_DISPATCH(hardswish_stub, &hardswish_kernel)
+REGISTER_DISPATCH(hardswish_backward_stub, &hardswish_backward_kernel)
 
 } // namespace at::native

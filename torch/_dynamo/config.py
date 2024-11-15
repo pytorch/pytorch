@@ -10,6 +10,7 @@ from typing import Any, Callable, Dict, Optional, Set, Type, TYPE_CHECKING, Unio
 
 import torch
 from torch._environment import is_fbcode
+from torch.utils._config_module import get_tristate_env, install_config_module
 
 
 # to configure logging for dynamo, aot, and inductor
@@ -330,6 +331,10 @@ skip_nnmodule_hook_guards = True
 # notice and lead to incorrect result.
 skip_no_tensor_aliasing_guards_on_parameters = True
 
+# Considers a tensor immutable if it is one of the values of a dictionary, and
+# the dictionary tag is same across invocation calls.
+skip_tensor_guards_with_matching_dict_tags = True
+
 # If True, raises exception if TorchDynamo is called with a context manager
 raise_on_ctx_manager_usage = True
 
@@ -485,6 +490,36 @@ compiled_autograd_kwargs_override: Dict[str, Any] = {}
 # NCCL timeout.
 enable_compiler_collectives = os.environ.get("TORCH_COMPILER_COLLECTIVES", "0") == "1"
 
+# Enables a local, filesystem "profile" which can be used for automatic
+# dynamic decisions, analogous to profile-guided optimization.  This config
+# ONLY has an effect if torch.compiler.config.workflow_id is specified,
+# which specifies the name of the profile we will save/load.
+#
+# The idea is that if we observe that a particular input is dynamic over
+# multiple iterations on one run, we can save a profile with this information
+# so the next time we run we can just make it dynamic the first time around,
+# skipping an unnecessary static compilation.  The profile can be soundly
+# stale, if it is wrong, it just means we may make more things dynamic than
+# was actually necessary (NB: this /can/ cause a failure if making something
+# dynamic causes the compiler to stop working because you tickled a latent
+# bug.)
+#
+# The profile is ONLY guaranteed to work if the user source code is 100%
+# unchanged.  Applying the profile if there are user code changes is only
+# best effort otherwise.  In particular, we identify particular code objects
+# by filename, line number and name of their function, so adding/removing newlines
+# will typically cause cache misses.  We continuously update the profile,
+# so if we only discover something is dynamic on the second run, we will update
+# the profile for subsequent runs.
+automatic_dynamic_local_pgo: bool = (
+    os.environ.get("TORCH_DYNAMO_AUTOMATIC_DYNAMIC_LOCAL_PGO", "0") == "1"
+)
+
+# Like above, but using remote cache
+automatic_dynamic_remote_pgo: Optional[bool] = get_tristate_env(
+    "TORCH_DYNAMO_AUTOMATIC_DYNAMIC_REMOTE_PGO"
+)
+
 # HACK: this is for testing custom ops profiling only
 _custom_ops_profile: Optional[Any] = None
 
@@ -493,9 +528,6 @@ if TYPE_CHECKING:
 
     def _make_closure_patcher(**changes):
         ...
-
-
-from torch.utils._config_module import install_config_module
 
 
 install_config_module(sys.modules[__name__])

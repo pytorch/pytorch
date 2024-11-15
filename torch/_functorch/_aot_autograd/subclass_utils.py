@@ -8,12 +8,18 @@ and this includes tensor subclasses that implement __torch_dispatch__.
 import typing
 from typing import Any, Iterable, List, Optional, Tuple, Union
 
+import torch
 import torch.utils._pytree as pytree
 from torch import SymInt, Tensor
 from torch._subclasses.fake_tensor import get_plain_tensors
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
-from .schemas import MutationType, SubclassCreationMeta, ViewAndMutationMeta
+from .schemas import (
+    MutationType,
+    PlainTensorMeta,
+    SubclassCreationMeta,
+    ViewAndMutationMeta,
+)
 from .utils import strict_zip
 
 
@@ -36,18 +42,51 @@ def requires_subclass_dispatch(args, fw_metadata: ViewAndMutationMeta) -> bool:
     return any_subclass_args or any_subclass_outputs
 
 
-def create_subclass_metadata(a: Any, start_idx: int, count_symints: bool):
+suggest_memory_format = torch._prims_common.suggest_memory_format
+
+
+def maybe_suggest_memory_format(
+    t, with_memory_format: bool
+) -> Optional[torch.memory_format]:
+    if not with_memory_format:
+        return None
+
+    return suggest_memory_format(t)
+
+
+def get_types_for_subclass(tensor_subclass):
+    if not is_traceable_wrapper_subclass(tensor_subclass):
+        return ["Tensor"]
+    inner_keys, _ = tensor_subclass.__tensor_flatten__()
+    result = []
+    for key in inner_keys:
+        inner_tensor = getattr(tensor_subclass, key)
+        result.extend(get_types_for_subclass(inner_tensor))
+    return result
+
+
+def create_subclass_metadata(
+    a: Any, start_idx: int, count_symints: bool, with_memory_format: bool = False
+):
     if not is_traceable_wrapper_subclass(a):
-        return None, start_idx + 1
+        idx = start_idx + 1
+        return (
+            PlainTensorMeta(
+                idx, memory_format=maybe_suggest_memory_format(a, with_memory_format)
+            ),
+            idx,
+        )
 
     inner_keys, metadata = a.__tensor_flatten__()
     new_start_idx = start_idx
     attrs = {}
+
     for key in inner_keys:
         new_subclass_meta, new_start_idx = create_subclass_metadata(
             getattr(a, key),
             new_start_idx,
             count_symints=count_symints,
+            with_memory_format=with_memory_format,
         )
         attrs[key] = new_subclass_meta
 
@@ -70,21 +109,10 @@ def create_subclass_metadata(a: Any, start_idx: int, count_symints: bool):
             outer_size=a.size(),  # type: ignore[attr-defined, arg-type]
             outer_stride=a.stride(),  # type: ignore[arg-type]
             original_subclass=a,
+            memory_format=maybe_suggest_memory_format(a, with_memory_format),
         ),
         new_start_idx,
     )
-
-
-# Given a real tensor subclass, returns a nested list of Plain tensor types
-def get_types_for_subclass(tensor_subclass):
-    if not is_traceable_wrapper_subclass(tensor_subclass):
-        return ["Tensor"]
-    inner_keys, _ = tensor_subclass.__tensor_flatten__()
-    result = []
-    for key in inner_keys:
-        inner_tensor = getattr(tensor_subclass, key)
-        result.extend(get_types_for_subclass(inner_tensor))
-    return result
 
 
 # Given a flat list of arguments, some of which may be tensor subclasses,
@@ -94,9 +122,10 @@ def create_subclass_meta(
     curr_args: Union[List[Any], Tuple[Any, ...]],
     *,
     count_symints: bool = True,
-) -> List[Union[int, SubclassCreationMeta]]:
+    with_memory_format: bool = False,
+) -> List[Union[PlainTensorMeta, SubclassCreationMeta]]:
     idx = 0
-    infos: List[Union[int, SubclassCreationMeta]] = []
+    infos: List[Union[PlainTensorMeta, SubclassCreationMeta]] = []
     for a in curr_args:
         if is_traceable_wrapper_subclass(a):
             assert isinstance(a, Tensor)
@@ -105,11 +134,17 @@ def create_subclass_meta(
                 a,
                 start_idx,
                 count_symints=count_symints,
+                with_memory_format=with_memory_format,
             )
             infos.append(subclass_meta)
             cnt = subclass_meta.arg_count
         else:
-            infos.append(idx)
+            infos.append(
+                PlainTensorMeta(
+                    idx,
+                    memory_format=maybe_suggest_memory_format(a, with_memory_format),
+                )
+            )
             cnt = 1
         idx += cnt
     return infos
@@ -177,7 +212,7 @@ def runtime_unwrap_tensor_subclasses(
     wrapped_args: List[Union[Tensor, int]],
     *,
     append_symints: bool,
-    subclass_metas: Optional[List[Union[int, SubclassCreationMeta]]] = None,
+    subclass_metas: Optional[List[Union[PlainTensorMeta, SubclassCreationMeta]]] = None,
 ):
     def flatten_subclass(x: Tensor, meta: Optional[SubclassCreationMeta], *, out):
         if not is_traceable_wrapper_subclass(x):
@@ -271,7 +306,7 @@ def remap_unwrapped_subclass_arg_indices(wrapped_args, static_input_indices):
 def wrap_tensor_subclasses(
     unwrapped_args: Union[Tuple[Any, ...], List[Any]],
     *,
-    subclass_metas: List[Union[int, SubclassCreationMeta]],
+    subclass_metas: List[Union[PlainTensorMeta, SubclassCreationMeta]],
     num_fw_outs_saved_for_bw: Optional[int] = None,
     included_subclass_symints: bool = False,
     is_runtime: bool = False,
@@ -279,8 +314,8 @@ def wrap_tensor_subclasses(
     wrapped_args = []
     num_args_tallied = 0
     for subclass_meta in subclass_metas:
-        if isinstance(subclass_meta, int):
-            wrapped_args.append(unwrapped_args[subclass_meta])
+        if isinstance(subclass_meta, PlainTensorMeta):
+            wrapped_args.append(unwrapped_args[subclass_meta.unwrapped_idx])
             num_args_tallied += 1
         else:
             assert isinstance(subclass_meta, SubclassCreationMeta)
@@ -364,61 +399,6 @@ def wrap_tensor_subclasses_maybe_joint(
         return wrapped_args
 
 
-# TODO: UNUSED. delete?
-def create_metadata_for_subclass(meta: ViewAndMutationMeta) -> ViewAndMutationMeta:
-    # input infos
-    input_info = []
-    for inp, subclass_meta in zip(meta.input_info, meta.subclass_inp_meta):
-        num_inps = 1 if isinstance(subclass_meta, int) else subclass_meta.arg_count
-        for _ in range(num_inps):
-            input_info.append(inp)
-
-    # output infos
-    output_info = []
-    subclass_out_meta_user_outs_only = meta.subclass_fw_graph_out_meta[
-        meta.num_mutated_inp_runtime_indices :
-    ]
-    if meta.num_intermediate_bases > 0:
-        subclass_out_meta_user_outs_only = subclass_out_meta_user_outs_only[
-            : -meta.num_intermediate_bases
-        ]
-    # sanity assert
-    assert len(meta.output_info) == len(subclass_out_meta_user_outs_only)
-    # Assume that the information on the output is shared by all of its inner tensors.
-    for out, subclass_meta in zip(meta.output_info, subclass_out_meta_user_outs_only):
-        num_outs = 1 if isinstance(subclass_meta, int) else subclass_meta.arg_count
-        for _ in range(num_outs):
-            output_info.append(out)
-
-    # A bit hacky, but we don't actually care about all of the metadata here.
-    # This metadata is used **underneath** both autograd and subclass de-sugaring,
-    # So all we really care about is stuff like:
-    # - num inputs/outputs (needed by the partitioner)
-    # - input mutations (**not** used today, since we don't handle input mutations inside the subclass,
-    #   although we should handle this eventually)
-    #   TODO: add a test case to assert we error when this happens, instead of getting silent correctness
-    num_intermediate_bases = None
-    keep_input_mutations = meta.keep_input_mutations
-    traced_tangents = None
-    traced_tangent_memory_formats = None
-    subclass_inp_meta = None
-    subclass_fw_graph_out_meta = None
-    subclass_tangent_meta = None
-
-    metadata = ViewAndMutationMeta(
-        input_info=input_info,  # type: ignore[arg-type]
-        output_info=output_info,  # type: ignore[arg-type]
-        num_intermediate_bases=num_intermediate_bases,  # type: ignore[arg-type]
-        keep_input_mutations=keep_input_mutations,  # type: ignore[arg-type]
-        traced_tangents=traced_tangents,  # type: ignore[arg-type]
-        traced_tangent_memory_formats=traced_tangent_memory_formats,
-        subclass_inp_meta=subclass_inp_meta,  # type: ignore[arg-type]
-        subclass_fw_graph_out_meta=subclass_fw_graph_out_meta,  # type: ignore[arg-type]
-        subclass_tangent_meta=subclass_tangent_meta,  # type: ignore[arg-type]
-    )
-    return metadata
-
-
 def compute_inner_mutated_inp_indices_from_subclass_meta(
     fw_metadata: ViewAndMutationMeta,
     inner_metadata: ViewAndMutationMeta,
@@ -447,7 +427,7 @@ def compute_inner_mutated_inp_indices_from_subclass_meta(
         return inner_metadata.mutated_inp_runtime_indices
     assert len(fw_metadata.subclass_inp_meta) == len(fw_metadata.input_info)
     for outer_idx, inp_meta in enumerate(fw_metadata.subclass_inp_meta):
-        if isinstance(inp_meta, int):
+        if isinstance(inp_meta, PlainTensorMeta):
             assert outer_idx < len(fw_metadata.input_info)
             if inner_metadata is not None:
                 assert inner_idx < len(inner_metadata.input_info)
