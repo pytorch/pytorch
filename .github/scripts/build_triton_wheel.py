@@ -133,7 +133,8 @@ def build_triton(
 
         # change built wheel name and version
         env["TRITON_WHEEL_NAME"] = triton_pkg_name
-        env["TRITON_BUILD_WITH_CLANG_LLD"] = "1"
+        if device == "cuda":
+            env["TRITON_BUILD_WITH_CLANG_LLD"] = "1"
         patch_init_py(
             triton_pythondir / "triton" / "__init__.py",
             version=f"{version}",
