@@ -67,8 +67,6 @@ __all__ = [
     "skip_data",
 ]
 
-IS_FBCODE = not hasattr(torch.version, "git_version")
-
 DEFAULT_PROTOCOL = 2
 
 LONG_SIZE = struct.Struct("=l").size
@@ -94,7 +92,8 @@ else:
 
 
 def _default_to_weights_only(pickle_module):
-    return pickle_module is None and not IS_FBCODE
+    is_fbcode = not hasattr(torch.version, "git_version")
+    return pickle_module is None and not is_fbcode
 
 
 # _serialization_tls is used to store thread local state specific to serialization

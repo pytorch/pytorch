@@ -348,6 +348,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             dist.all_reduce(t)
 
     @requires_nccl()
+    @skip_if_rocm_multiprocess
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_restart_pg(self):
         # Note: restart test passes steadily only for blocking mode for now.
