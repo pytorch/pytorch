@@ -261,19 +261,19 @@ struct GemmStridedBatchedParams : OpParams {
   }
 
   size_t GetSizeA() const {
-    size_t size_stride = std::min(lda, stride_a) * ((transa == 'n' || transa == 'N') ? k : m) * batch;
+    size_t size_stride = stride_a * batch;
     size_t size_dense = m * k * batch;
     return sizeof(T) * (size_stride > size_dense ? size_stride : size_dense);
   }
 
   size_t GetSizeB() const {
-    size_t size_stride = std::min(ldb, stride_b) * ((transb == 'n' || transb == 'N') ? n : k) * batch;
+    size_t size_stride = stride_b * batch;
     size_t size_dense = k * n * batch;
     return sizeof(T) * (size_stride > size_dense ? size_stride : size_dense);
   }
 
   size_t GetSizeC() const {
-    size_t size_stride = std::min(ldc, stride_c) * n * batch;
+    size_t size_stride = stride_c * batch;
     size_t size_dense = m * n * batch;
     return sizeof(T) * (size_stride > size_dense ? size_stride : size_dense);
   }
