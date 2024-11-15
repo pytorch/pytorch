@@ -584,10 +584,12 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual((1,), torch.clamp(one_d, min=0, max=1).shape)
         self.assertEqual((1,), torch.clamp(one_d, min=0).shape)
         self.assertEqual((1,), torch.clamp(one_d, max=1).shape)
-        self.assertEqual((), torch.clamp(zero_d_bool, min=torch.tensor(False, device=device), max=torch.tensor(True, device=device)).shape)
+        self.assertEqual((), torch.clamp(zero_d_bool, min=torch.tensor(False, device=device), 
+                                 max=torch.tensor(True, device=device)).shape)
         self.assertEqual((), torch.clamp(zero_d_bool, min=torch.tensor(True, device=device)).shape)
         self.assertEqual((), torch.clamp(zero_d_bool, max=torch.tensor(True, device=device)).shape)
-        self.assertEqual((1,), torch.clamp(one_d_bool, min=torch.tensor([False], device=device), max=torch.tensor([True], device=device)).shape)
+        self.assertEqual((1,), torch.clamp(one_d_bool, min=torch.tensor([False], device=device), 
+                                   max=torch.tensor([True], device=device)).shape)
         self.assertEqual((1,), torch.clamp(one_d_bool, min=torch.tensor([True], device=device)).shape)
         self.assertEqual((1,), torch.clamp(one_d_bool, max=torch.tensor([False], device=device)).shape)
 
