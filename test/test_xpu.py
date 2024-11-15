@@ -3,6 +3,7 @@
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 import torch
@@ -127,6 +128,11 @@ class TestXpu(TestCase):
             device_properties.has_subgroup_2d_block_io,
             device_capability["has_subgroup_2d_block_io"],
         )
+        if int(torch.version.xpu) >= 20250000:
+            self.assertEqual(
+                device_properties.architecture,
+                device_capability["architecture"],
+            )
 
     def test_wrong_xpu_fork(self):
         stderr = TestCase.runWithPytorchAPIUsageStderr(
@@ -230,6 +236,21 @@ print(torch.xpu.device_count())
         stream.record_event(event)
         event.synchronize()
         self.assertTrue(event.query())
+        start_event = torch.xpu.Event(enable_timing=True)
+        end_event = torch.xpu.Event(enable_timing=True)
+        stream.record_event(start_event)
+        time.sleep(0.1)
+        stream.record_event(end_event)
+        torch.xpu.synchronize()
+        if int(torch.version.xpu) >= 20250000:
+            self.assertGreater(start_event.elapsed_time(end_event), 0)
+            self.assertLess(end_event.elapsed_time(start_event), 0)
+        else:
+            with self.assertRaisesRegex(
+                NotImplementedError,
+                "elapsed_time of XPUEvent requires PyTorch to be built with SYCL compiler version 2025.0.0 or newer.",
+            ):
+                start_event.elapsed_time(end_event)
 
     def test_generic_stream_event(self):
         stream = torch.Stream("xpu")
@@ -245,8 +266,8 @@ print(torch.xpu.device_count())
         self.assertEqual(stream.stream_id, xpu_stream.stream_id)
         self.assertNotEqual(stream.stream_id, torch.xpu.current_stream().stream_id)
 
-        event1 = torch.Event("xpu")
-        event2 = torch.Event("xpu")
+        event1 = torch.Event("xpu", enable_timing=True)
+        event2 = torch.Event("xpu", enable_timing=True)
         self.assertEqual(event1.event_id, 0)
         a = torch.randn(1000)
         b = torch.randn(1000)
@@ -263,10 +284,15 @@ print(torch.xpu.device_count())
         self.assertTrue(event2.query())
         self.assertNotEqual(event1.event_id, event2.event_id)
         self.assertEqual(c_xpu.cpu(), a + b)
-        with self.assertRaisesRegex(
-            NotImplementedError, "elapsedTime is not supported by XPU backend."
-        ):
-            event1.elapsed_time(event2)
+        if int(torch.version.xpu) >= 20250000:
+            self.assertGreater(event1.elapsed_time(event2), 0)
+            self.assertLess(event2.elapsed_time(event1), 0)
+        else:
+            with self.assertRaisesRegex(
+                NotImplementedError,
+                "elapsedTime requires PyTorch to be built with SYCL compiler version 2025.0.0 or newer.",
+            ):
+                event1.elapsed_time(event2)
         xpu_event = torch.xpu.Event()
         self.assertIsInstance(xpu_event, torch.Event)
         self.assertTrue(issubclass(type(xpu_event), torch.Event))
@@ -456,7 +482,8 @@ class TestXpuAutocast(TestAutocast):
     # These operators are not implemented on XPU backend and we can NOT fall back
     # them to CPU. So we have to skip them at this moment.
     # TODO: remove these operators from skip list when they are implemented on XPU backend.
-    skip_list = ["gru_cell"]
+    # lstm_cell: The operator 'aten::_thnn_fused_lstm_cell' is not currently implemented for the XPU device
+    skip_list = ["gru_cell", "lstm_cell"]
 
     def setUp(self):
         super().setUp()
