@@ -325,7 +325,11 @@ def _get_subgraph_names(gm: GraphModule) -> Generator[str, None, None]:
 def _recursive_pre_grad_passes(
     gm: GraphModule, example_inputs: Sequence[InputType]
 ) -> GraphModule:
-    with dynamo_timed("_recursive_pre_grad_passes", log_pt2_compile_event=True):
+    with dynamo_timed(
+        "_recursive_pre_grad_passes",
+        log_pt2_compile_event=True,
+        dynamo_compile_column_us="pre_grad_pass_time_us",
+    ):
         for subgraph_name in _get_subgraph_names(gm):
             subgraph = getattr(gm, subgraph_name)
             # as we don't have recursive example inputs, passing empty set here
@@ -335,14 +339,23 @@ def _recursive_pre_grad_passes(
 
 
 def _recursive_joint_graph_passes(gm: GraphModule) -> None:
-    for subgraph_name in _get_subgraph_names(gm):
-        subgraph = getattr(gm, subgraph_name)
-        _recursive_joint_graph_passes(subgraph)
-    joint_graph_passes(gm)
+    with dynamo_timed(
+        "_recursive_joint_graph_passes",
+        log_pt2_compile_event=True,
+        dynamo_compile_column_us="joint_graph_pass_time_us",
+    ):
+        for subgraph_name in _get_subgraph_names(gm):
+            subgraph = getattr(gm, subgraph_name)
+            _recursive_joint_graph_passes(subgraph)
+        joint_graph_passes(gm)
 
 
 def _recursive_post_grad_passes(gm: GraphModule, is_inference: bool = False) -> None:
-    with dynamo_timed("_recursive_post_grad_passes", log_pt2_compile_event=True):
+    with dynamo_timed(
+        "_recursive_post_grad_passes",
+        log_pt2_compile_event=True,
+        dynamo_compile_column_us="post_grad_pass_time_us",
+    ):
         for subgraph_name in _get_subgraph_names(gm):
             subgraph = getattr(gm, subgraph_name)
             _recursive_post_grad_passes(subgraph, is_inference)
@@ -567,7 +580,7 @@ def compile_fx_inner(
                 "compile_fx_inner",
                 phase_name="inductor_compile",
                 log_pt2_compile_event=True,
-                fwd_only=False,
+                dynamo_compile_column_us="inductor_cumulative_compile_time_us",
             )
         )
         # NB: Why is this the dynamo_compile counter?  The rule here is that
@@ -1632,7 +1645,11 @@ def compile_fx(
         def bw_compiler(
             model: GraphModule, example_inputs: List[InputType]
         ) -> Union[CompiledFxGraph, str]:
-            with dynamo_utils.dynamo_timed("compile_fx.<locals>.bw_compiler"):
+            from torch._dynamo.convert_frame import compile_lock
+
+            with dynamo_utils.dynamo_timed(
+                "compile_fx.<locals>.bw_compiler"
+            ), compile_lock:
                 model_outputs_node = output_node(model)
                 if config.bw_outputs_user_visible:
                     model_outputs = pytree.arg_tree_leaves(*model_outputs_node.args)
