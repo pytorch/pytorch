@@ -15,6 +15,7 @@ from .optimizer import (
     _get_capturable_supported_devices,
     _get_scalar_dtype,
     _maximize_doc,
+    _params_doc,
     _use_grad_for_differentiable,
     _view_as_real,
     Optimizer,
@@ -201,9 +202,10 @@ RMSprop.__doc__ = (
     .. math::
        \begin{aligned}
             &\rule{110mm}{0.4pt}                                                                 \\
-            &\textbf{input}      : \alpha \text{ (alpha)},\: \gamma \text{ (lr)},
+            &\textbf{input}      : \alpha \text{ (alpha)}, \: \gamma \text{ (lr)},
                 \: \theta_0 \text{ (params)}, \: f(\theta) \text{ (objective)}                   \\
-            &\hspace{13mm}   \lambda \text{ (weight decay)},\: \mu \text{ (momentum)},\: centered\\
+            &\hspace{13mm}   \lambda \text{ (weight decay)},\: \mu \text{ (momentum)},
+                \: centered, \: \epsilon \text{ (epsilon)}                                       \\
             &\textbf{initialize} : v_0 \leftarrow 0 \text{ (square average)}, \:
                 \textbf{b}_0 \leftarrow 0 \text{ (buffer)}, \: g^{ave}_0 \leftarrow 0     \\[-1.ex]
             &\rule{110mm}{0.4pt}                                                                 \\
@@ -241,8 +243,7 @@ RMSprop.__doc__ = (
     """
     + rf"""
     Args:
-        params (iterable): iterable of parameters to optimize or dicts defining
-            parameter groups
+        {_params_doc}
         lr (float, Tensor, optional): learning rate (default: 1e-2)
         alpha (float, optional): smoothing constant (default: 0.99)
         eps (float, optional): term added to the denominator to improve

@@ -196,7 +196,7 @@ CUDAKernelLaunchRegistry::CUDAKernelLaunchRegistry()
           dsa_check_if_all_devices_support_managed_memory()),
       gather_launch_stacktrace(check_env_for_enable_launch_stacktracing()),
       enabled_at_runtime(check_env_for_dsa_enabled()) {
-  for (C10_UNUSED const auto _ : c10::irange(dsa_get_device_count())) {
+  for ([[maybe_unused]] const auto _ : c10::irange(dsa_get_device_count())) {
     uvm_assertions.emplace_back(nullptr, uvm_deleter);
   }
 

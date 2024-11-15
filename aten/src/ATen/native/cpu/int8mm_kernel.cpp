@@ -433,6 +433,6 @@ void int8pack_mm_kernel(
 
 } // anonymous namespace
 
-ALSO_REGISTER_AVX512_DISPATCH(int8pack_mm_stub, &int8pack_mm_kernel);
+ALSO_REGISTER_AVX512_DISPATCH(int8pack_mm_stub, &int8pack_mm_kernel)
 
 } // at::native

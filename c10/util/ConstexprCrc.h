@@ -98,8 +98,10 @@ constexpr uint64_t crc64_table[] = {
     0x29b7d047efec8728,
 };
 
-inline C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA uint64_t
-crc64impl(uint64_t accumulator, const char* data, size_t size) {
+inline constexpr uint64_t crc64impl(
+    uint64_t accumulator,
+    const char* data,
+    size_t size) {
   for (size_t i = 0; i < size; ++i) {
     accumulator =
         crc64_table[(accumulator ^ data[i]) & 0xFF] ^ (accumulator >> 8);
@@ -116,15 +118,14 @@ struct crc64_t final : IdWrapper<crc64_t, uint64_t> {
 };
 
 // CRC64 with Jones coefficients and an init value of 0.
-inline C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA crc64_t
-crc64(const char* str, size_t size) {
+inline constexpr crc64_t crc64(const char* str, size_t size) {
   return crc64_t{detail::crc64impl(0, str, size)};
 }
 
-inline C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA crc64_t crc64(c10::string_view str) {
+inline constexpr crc64_t crc64(c10::string_view str) {
   return crc64(str.data(), str.size());
 }
 } // namespace c10::util
 
 // Allow usage of crc64_t in std::unordered_set
-C10_DEFINE_HASH_FOR_IDWRAPPER(c10::util::crc64_t);
+C10_DEFINE_HASH_FOR_IDWRAPPER(c10::util::crc64_t)

@@ -216,6 +216,7 @@ _BlasBackends = {
     "cublas": torch._C._BlasBackend.Cublas,
     "cublaslt": torch._C._BlasBackend.Cublaslt,
     "hipblaslt": torch._C._BlasBackend.Cublaslt,  # alias
+    "ck": torch._C._BlasBackend.Ck,
 }
 _BlasBackends_str = ", ".join(_BlasBackends.keys())
 
@@ -224,16 +225,17 @@ def preferred_blas_library(
     backend: Union[None, str, torch._C._BlasBackend] = None
 ) -> torch._C._BlasBackend:
     r"""
-    Override the library PyTorch uses for BLAS operations. Choose between cuBLAS and cuBLASLt.
+    Override the library PyTorch uses for BLAS operations. Choose between cuBLAS, cuBLASLt, and CK [ROCm-only].
 
     .. warning:: This flag is experimental and subject to change.
 
     When PyTorch runs a CUDA BLAS operation it defaults to cuBLAS even if both cuBLAS and cuBLASLt are available.
-    For PyTorch built for ROCm, hipBLAS and hipBLASLt may offer different performance.
+    For PyTorch built for ROCm, hipBLAS, hipBLASLt, and CK may offer different performance.
     This flag (a :class:`str`) allows overriding which BLAS library to use.
 
     * If `"cublas"` is set then cuBLAS will be used wherever possible.
     * If `"cublaslt"` is set then cuBLASLt will be used wherever possible.
+    * If `"ck"` is set then CK will be used wherever possible.
     * When no input is given, this function returns the currently preferred library.
     * User may use the environment variable TORCH_BLAS_PREFER_CUBLASLT=1 to set the preferred library to cuBLASLt
       globally.

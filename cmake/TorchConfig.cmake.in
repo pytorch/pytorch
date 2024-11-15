@@ -75,6 +75,9 @@ else()
   if(@USE_CUDA@)
     append_wholearchive_lib_if_found(torch_cuda c10_cuda)
   endif()
+  if(@USE_XPU@)
+    append_wholearchive_lib_if_found(torch_xpu c10_xpu)
+  endif()
 
   # We need manually add dependent libraries when they are not linked into the
   # shared library.
@@ -99,11 +102,8 @@ else()
   append_torchlib_if_found(fmt)
   append_torchlib_if_found(cpuinfo clog)
 
-  if(NOT @USE_INTERNAL_PTHREADPOOL_IMPL@)
-    append_torchlib_if_found(pthreadpool)
-  endif()
-
   append_torchlib_if_found(eigen_blas)
+  append_torchlib_if_found(pthreadpool)
 
   if(@USE_FBGEMM@)
     append_torchlib_if_found(fbgemm)
@@ -136,6 +136,10 @@ if(@USE_CUDA@)
     list(APPEND TORCH_CUDA_LIBRARIES ${C10_CUDA_LIBRARY} ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
   endif()
   list(APPEND TORCH_LIBRARIES ${TORCH_CUDA_LIBRARIES})
+endif()
+
+if(@USE_XPU@ AND @BUILD_SHARED_LIBS@)
+    append_torchlib_if_found(c10_xpu torch_xpu)
 endif()
 
 # When we build libtorch with the old libstdc++ ABI, dependent libraries must too.

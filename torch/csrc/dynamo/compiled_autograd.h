@@ -470,21 +470,21 @@ class CompiledNodeArgs {
   void collect(T t) {       \
     specialize_on_bytes(t); \
   }
-  COLLECT_AS_BYTES(c10::ScalarType);
-  COLLECT_AS_BYTES(c10::DeviceType);
-  COLLECT_AS_BYTES(c10::Layout);
-  COLLECT_AS_BYTES(c10::MemoryFormat);
-  COLLECT_AS_BYTES(int8_t);
-  COLLECT_AS_BYTES(int16_t);
-  COLLECT_AS_BYTES(int32_t);
-  COLLECT_AS_BYTES(int64_t);
-  COLLECT_AS_BYTES(uint8_t);
-  COLLECT_AS_BYTES(uint16_t);
-  COLLECT_AS_BYTES(uint32_t);
-  COLLECT_AS_BYTES(uint64_t);
-  COLLECT_AS_BYTES(bool);
-  COLLECT_AS_BYTES(float);
-  COLLECT_AS_BYTES(double);
+  COLLECT_AS_BYTES(c10::ScalarType)
+  COLLECT_AS_BYTES(c10::DeviceType)
+  COLLECT_AS_BYTES(c10::Layout)
+  COLLECT_AS_BYTES(c10::MemoryFormat)
+  COLLECT_AS_BYTES(int8_t)
+  COLLECT_AS_BYTES(int16_t)
+  COLLECT_AS_BYTES(int32_t)
+  COLLECT_AS_BYTES(int64_t)
+  COLLECT_AS_BYTES(uint8_t)
+  COLLECT_AS_BYTES(uint16_t)
+  COLLECT_AS_BYTES(uint32_t)
+  COLLECT_AS_BYTES(uint64_t)
+  COLLECT_AS_BYTES(bool)
+  COLLECT_AS_BYTES(float)
+  COLLECT_AS_BYTES(double)
 #undef COLLECT_AS_BYTES
 
   void collect_hooks_from(Node* fn) {
@@ -806,18 +806,18 @@ class SwapSavedVariables {
 #define NO_OP_VISIT(T)     \
   void before(const T&) {} \
   void after(const T&) {}
-  NO_OP_VISIT(caffe2::TypeMeta);
-  NO_OP_VISIT(c10::Device);
-  NO_OP_VISIT(c10::DeviceType);
-  NO_OP_VISIT(c10::Layout);
-  NO_OP_VISIT(c10::MemoryFormat);
-  NO_OP_VISIT(c10::ScalarType);
-  NO_OP_VISIT(c10::Scalar);
-  NO_OP_VISIT(c10::TensorOptions);
-  NO_OP_VISIT(std::string);
-  NO_OP_VISIT(int64_t);
-  NO_OP_VISIT(bool);
-  NO_OP_VISIT(double);
+  NO_OP_VISIT(caffe2::TypeMeta)
+  NO_OP_VISIT(c10::Device)
+  NO_OP_VISIT(c10::DeviceType)
+  NO_OP_VISIT(c10::Layout)
+  NO_OP_VISIT(c10::MemoryFormat)
+  NO_OP_VISIT(c10::ScalarType)
+  NO_OP_VISIT(c10::Scalar)
+  NO_OP_VISIT(c10::TensorOptions)
+  NO_OP_VISIT(std::string)
+  NO_OP_VISIT(int64_t)
+  NO_OP_VISIT(bool)
+  NO_OP_VISIT(double)
 #undef NO_OP_VISIT
 
   SwapSavedVariables(

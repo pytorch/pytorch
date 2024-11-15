@@ -30,6 +30,7 @@ concurrency:
 
 jobs:
   get-label-type:
+    if: github.repository_owner == 'pytorch'
     name: get-label-type
     uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
     with:
@@ -44,7 +45,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.9xlarge.ephemeral"
     strategy:
       matrix:
-        cuda_version: ["12.4", "12.1", "11.8"]
+        cuda_version: ["12.6", "12.4", "12.1", "11.8"]
     env:
       GPU_ARCH_TYPE: cuda
       GPU_ARCH_VERSION: ${{ matrix.cuda_version }}
@@ -72,8 +73,14 @@ jobs:
           fi
       - name: Build Docker Image
         if: env.WITH_PUSH == 'true'
-        run: |
-          .ci/docker/libtorch/build.sh libtorch-cxx11-builder:cuda${{matrix.cuda_version}}
+        uses: nick-fields/retry@v3.0.0
+        with:
+          shell: bash
+          timeout_minutes: 90
+          max_attempts: 3
+          retry_wait_seconds: 90
+          command: |
+            .ci/docker/libtorch/build.sh libtorch-cxx11-builder:cuda${{matrix.cuda_version}}
   build-docker-rocm:
     environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) && 'docker-build' || '' }}
     needs: get-label-type
@@ -108,8 +115,14 @@ jobs:
           fi
       - name: Build Docker Image
         if: env.WITH_PUSH == 'true'
-        run: |
-          .ci/docker/libtorch/build.sh libtorch-cxx11-builder:rocm${{matrix.rocm_version}}
+        uses: nick-fields/retry@v3.0.0
+        with:
+          shell: bash
+          timeout_minutes: 90
+          max_attempts: 3
+          retry_wait_seconds: 90
+          command: |
+            .ci/docker/libtorch/build.sh libtorch-cxx11-builder:rocm${{matrix.rocm_version}}
   build-docker-cpu:
     environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) && 'docker-build' || '' }}
     needs: get-label-type
@@ -138,5 +151,11 @@ jobs:
           fi
       - name: Build Docker Image
         if: env.WITH_PUSH == 'true'
-        run: |
-          .ci/docker/libtorch/build.sh libtorch-cxx11-builder:cpu
+        uses: nick-fields/retry@v3.0.0
+        with:
+          shell: bash
+          timeout_minutes: 90
+          max_attempts: 3
+          retry_wait_seconds: 90
+          command: |
+            .ci/docker/libtorch/build.sh libtorch-cxx11-builder:cpu

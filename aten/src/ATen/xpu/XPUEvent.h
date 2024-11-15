@@ -85,8 +85,7 @@ struct TORCH_XPU_API XPUEvent {
   void record(const XPUStream& stream) {
     if (!isCreated()) {
       device_index_ = stream.device_index();
-      event_ = std::make_unique<sycl::event>(
-          stream.queue().ext_oneapi_submit_barrier());
+      assignEvent(stream.queue());
       const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
       if (C10_UNLIKELY(interp)) {
         (*interp)->trace_gpu_event_creation(
@@ -100,9 +99,7 @@ struct TORCH_XPU_API XPUEvent {
           " does not match recording stream's device ",
           stream.device_index(),
           ".");
-      event_.reset();
-      event_ = std::make_unique<sycl::event>(
-          stream.queue().ext_oneapi_submit_barrier());
+      reassignEvent(stream.queue());
     }
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
     if (C10_UNLIKELY(interp)) {
@@ -128,7 +125,7 @@ struct TORCH_XPU_API XPUEvent {
     }
   }
 
-  float elapsed_time(const XPUEvent& other) const {
+  double elapsed_time(const XPUEvent& other) const {
     TORCH_CHECK(
         isCreated() && other.isCreated(),
         "Both events must be recorded before calculating elapsed time.");
@@ -138,10 +135,20 @@ struct TORCH_XPU_API XPUEvent {
     TORCH_CHECK(
         enable_timing_ && other.enable_timing_,
         "Both events must be created with argument 'enable_timing=True'.");
-    // TODO: provides the ability to time the execution of commands in a SYCL
-    // queue without enabling profiling on the entire queue
+
+#if SYCL_COMPILER_VERSION < 20250000
     TORCH_CHECK_NOT_IMPLEMENTED(
-        false, "elapsed_time is not supported by XPUEvent.");
+        false,
+        "elapsed_time of XPUEvent requires PyTorch to be built with SYCL compiler version 2025.0.0 or newer.");
+#endif
+
+    using namespace sycl::info::event_profiling;
+    // Block until both of the recorded events are completed.
+    uint64_t end_time_ns = other.event().get_profiling_info<command_end>();
+    uint64_t start_time_ns = event().get_profiling_info<command_end>();
+    // Return the eplased time in milliseconds.
+    return 1e-6 *
+        (static_cast<double>(end_time_ns) - static_cast<double>(start_time_ns));
   }
 
   void synchronize() const {
@@ -156,6 +163,24 @@ struct TORCH_XPU_API XPUEvent {
   }
 
  private:
+  void assignEvent(sycl::queue& queue) {
+#if SYCL_COMPILER_VERSION >= 20250000
+    if (enable_timing_) {
+      event_ = std::make_unique<sycl::event>(
+          sycl::ext::oneapi::experimental::submit_profiling_tag(queue));
+    } else {
+      event_ = std::make_unique<sycl::event>(queue.ext_oneapi_submit_barrier());
+    }
+#else
+    event_ = std::make_unique<sycl::event>(queue.ext_oneapi_submit_barrier());
+#endif
+  }
+
+  void reassignEvent(sycl::queue& queue) {
+    event_.reset();
+    assignEvent(queue);
+  }
+
   bool enable_timing_ = false;
   DeviceIndex device_index_ = -1;
   // Only need to track the last event, as events in an in-order queue are

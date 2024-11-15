@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import contextlib
-import copy
+import dataclasses
 import functools
 import math
 import sys
@@ -16,7 +16,7 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import ValueRanges
 
-from .. import ir
+from .. import config, ir
 from ..dependencies import Dep
 from ..loop_body import LoopBody
 from ..scheduler import BaseSchedulerNode, SchedulerBuffer
@@ -176,10 +176,14 @@ def deduce_dtype_for_cpp_cse_variable(name, *args, **kwargs):
 
 
 class CppCSEVariable(CSEVariable):
-    def __init__(self, name, bounds: ValueRanges[Any]) -> None:
-        super().__init__(name, bounds)
+    def __init__(
+        self,
+        name,
+        bounds: ValueRanges[Any],
+        dtype: Optional[torch.dtype] = None,
+    ) -> None:
+        super().__init__(name, bounds, dtype)
         self.is_vec = False
-        self.dtype: Optional[torch.dtype] = None
         self.dependent_itervars: Set[sympy.Symbol] = set()
 
     def __repr__(self) -> str:
@@ -652,18 +656,19 @@ class LocalBufferContext:
         def wrap_inner_fn_for_node(node: ir.IRNode):
             loops = node.data if isinstance(node, ir.ComputedBuffer) else node
             assert isinstance(loops, ir.Loops)
-            new_loops = copy.copy(loops)
+            new_inner_fn = self.localize_function(
+                loops.inner_fn,
+                rewrite_index,
+            )
+
+            new_loops = dataclasses.replace(loops, inner_fn=new_inner_fn)
             if isinstance(node, ir.ComputedBuffer):
                 new_node = ir.ComputedBuffer(
-                    node.get_name(), node.get_layout(), new_loops
+                    name=node.get_name(), layout=node.get_layout(), data=new_loops
                 )
             else:
                 new_node = new_loops  # type: ignore[assignment]
 
-            new_loops.inner_fn = self.localize_function(
-                new_loops.inner_fn,
-                rewrite_index,
-            )
             return new_node
 
         return [wrap_inner_fn_for_node(node) for node in nodes]
@@ -987,3 +992,9 @@ def template_fusion_with_epilogues_supported(
         if n.node is not None
     ]
     return _template_fusion_supported(template_outputs, epilogue_nodes)
+
+
+def _use_cpp_gemm_strategy(strategy: str) -> bool:
+    return strategy.upper() in [
+        x.strip() for x in config.cpp.cpp_gemm_transverse_strategy.upper().split(",")
+    ]

@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 # mypy: allow-untyped-decorators
 import torch
+from torch._C import DispatchKey
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
 from .module_tracker import ModuleTracker
 from typing import List, Any, Dict, Optional, Union, Tuple, Iterator
@@ -632,6 +633,7 @@ class FlopCounterMode(TorchDispatchMode):
             **{k: v if getattr(v, "_get_raw", False) else shape_wrapper(v) for k, v in custom_mapping.items()}
         }
         self.mod_tracker = ModuleTracker()
+        self.decomposed_counter = _DecomposedCounterMode(self)
 
     def get_total_flops(self) -> int:
         return sum(self.flop_counts['Global'].values())
@@ -698,8 +700,8 @@ class FlopCounterMode(TorchDispatchMode):
         # if there are any FLOPs in there that aren't already fully contained by
         # a module.
         if 'Global' in self.flop_counts and not is_global_subsumed:
-            for idx in range(len(values)):
-                values[idx][0] = " " + values[idx][0]
+            for value in values:
+                value[0] = " " + value[0]
 
             values = process_mod('Global', 0) + values
 
@@ -722,8 +724,34 @@ class FlopCounterMode(TorchDispatchMode):
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs if kwargs else {}
-        out = func(*args, **kwargs)
-        return self._count_flops(func._overloadpacket, out, args, kwargs)
+
+        # Skip ops from non-standard dispatch_sizes_strides_policy such as NJT
+        if func in {torch.ops.aten.is_contiguous.default,
+                    torch.ops.aten.is_contiguous.memory_format,
+                    torch.ops.aten.is_strides_like_format.default,
+                    torch.ops.aten.is_non_overlapping_and_dense.default,
+                    torch.ops.aten.size.default,
+                    torch.ops.aten.sym_size.default,
+                    torch.ops.aten.stride.default,
+                    torch.ops.aten.sym_stride.default,
+                    torch.ops.aten.storage_offset.default,
+                    torch.ops.aten.sym_storage_offset.default,
+                    torch.ops.aten.numel.default,
+                    torch.ops.aten.sym_numel.default,
+                    torch.ops.aten.dim.default,
+                    torch.ops.prim.layout.default}:
+
+            return NotImplemented
+
+        dk = DispatchKey.CompositeImplicitAutograd
+        if torch._C._dispatch_has_kernel_for_dispatch_key(func.name(), dk):
+            # func can be decomposed; redispatch
+            with self.decomposed_counter:
+                return func._op_dk(dk, *args, **kwargs)
+        else:
+            # no further decomposition; execute & count flops
+            out = func(*args, **kwargs)
+            return self._count_flops(func._overloadpacket, out, args, kwargs)
 
     def _count_flops(self, func_packet, out, args, kwargs):
         if func_packet in self.flop_registry:
@@ -733,3 +761,12 @@ class FlopCounterMode(TorchDispatchMode):
                 self.flop_counts[par][func_packet] += flop_count
 
         return out
+
+class _DecomposedCounterMode(TorchDispatchMode):
+    def __init__(self, counter):
+        self.counter = counter
+
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        kwargs = kwargs if kwargs else {}
+        out = func(*args, **kwargs)
+        return self.counter._count_flops(func._overloadpacket, out, args, kwargs)

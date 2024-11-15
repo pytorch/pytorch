@@ -263,7 +263,7 @@ constexpr static int kNumUvThreads = 16;
 std::unique_ptr<ChannelRegistration> makeMultiplexedUvChannel() {
   std::vector<std::shared_ptr<tensorpipe::transport::Context>> contexts;
   std::vector<std::shared_ptr<tensorpipe::transport::Listener>> listeners;
-  for (const auto laneIdx C10_UNUSED : c10::irange(kNumUvThreads)) {
+  for ([[maybe_unused]] const auto laneIdx : c10::irange(kNumUvThreads)) {
     auto context = tensorpipe::transport::uv::create();
     std::string address = TensorPipeAgent::guessAddress();
     contexts.push_back(std::move(context));
@@ -444,8 +444,8 @@ void TensorPipeAgent::startImpl() {
       }
       // Assign priorities in reverse order of occurrence in the vector, so that
       // a transport that comes before another receives a higher priority.
-      priority =
-          opts_.transports->size() - 1 - (iter - opts_.transports->begin());
+      priority = static_cast<std::ptrdiff_t>(opts_.transports->size()) - 1 -
+          (iter - opts_.transports->begin());
     }
     std::unique_ptr<TransportRegistration> reg =
         TensorPipeTransportRegistry()->Create(key);
@@ -474,7 +474,8 @@ void TensorPipeAgent::startImpl() {
       }
       // Assign priorities in reverse order of occurrence in the vector, so
       // that a channel that comes before another receives a higher priority.
-      priority = opts_.channels->size() - 1 - (iter - opts_.channels->begin());
+      priority = static_cast<std::ptrdiff_t>(opts_.channels->size()) - 1 -
+          (iter - opts_.channels->begin());
     }
     std::unique_ptr<ChannelRegistration> reg =
         TensorPipeChannelRegistry()->Create(key);

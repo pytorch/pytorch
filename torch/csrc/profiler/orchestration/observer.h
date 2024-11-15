@@ -20,8 +20,10 @@ enum class C10_API_ENUM ActivityType {
 };
 
 inline std::string actToString(ActivityType t) {
-  const std::string ActivityTypeNames[] = {
-      "CPU", "XPU", "CUDA", "MTIA", "PrivateUse1"};
+  const std::array<
+      std::string,
+      static_cast<size_t>(ActivityType::NUM_KINETO_ACTIVITIES)>
+      ActivityTypeNames = {"CPU", "XPU", "CUDA", "MTIA", "PrivateUse1"};
   return ActivityTypeNames[static_cast<int>(t)];
 }
 
@@ -94,14 +96,15 @@ struct TORCH_API ExperimentalConfig {
 };
 
 struct TORCH_API ProfilerConfig {
-  ProfilerConfig(
+  explicit ProfilerConfig(
       ProfilerState state,
       bool report_input_shapes = false,
       bool profile_memory = false,
       bool with_stack = false,
       bool with_flops = false,
       bool with_modules = false,
-      ExperimentalConfig experimental_config = ExperimentalConfig());
+      ExperimentalConfig experimental_config = ExperimentalConfig(),
+      std::string trace_id = "");
 
   bool disabled() const;
   bool global() const;
@@ -113,6 +116,7 @@ struct TORCH_API ProfilerConfig {
   bool with_stack;
   bool with_flops;
   bool with_modules;
+  std::string trace_id;
 
   // For serialization
   at::IValue toIValue() const;
@@ -124,6 +128,10 @@ struct TORCH_API ProfilerConfig {
 // ----------------------------------------------------------------------------
 struct TORCH_API ProfilerStateBase : public c10::MemoryReportingInfoBase {
   explicit ProfilerStateBase(ProfilerConfig config);
+  ProfilerStateBase(const ProfilerStateBase&) = delete;
+  ProfilerStateBase(ProfilerStateBase&&) = delete;
+  ProfilerStateBase& operator=(const ProfilerStateBase&) = delete;
+  ProfilerStateBase& operator=(ProfilerStateBase&&) = delete;
   ~ProfilerStateBase() override;
 
   static ProfilerStateBase* get(bool global);

@@ -93,13 +93,13 @@ void clamp_max_scalar_kernel_impl(TensorIteratorBase& iter, Scalar max) {
 } // anonymous namespace
 
 
-REGISTER_DISPATCH(where_kernel, &where_kernel_impl);
-REGISTER_DISPATCH(isposinf_stub, &isposinf_kernel_impl);
-REGISTER_DISPATCH(isneginf_stub, &isneginf_kernel_impl);
-REGISTER_DISPATCH(clamp_stub, &clamp_kernel_impl);
-REGISTER_DISPATCH(clamp_scalar_stub, &clamp_scalar_kernel_impl);
-REGISTER_DISPATCH(clamp_min_scalar_stub, &clamp_min_scalar_kernel_impl);
-REGISTER_DISPATCH(clamp_max_scalar_stub, &clamp_max_scalar_kernel_impl);
+REGISTER_DISPATCH(where_kernel, &where_kernel_impl)
+REGISTER_DISPATCH(isposinf_stub, &isposinf_kernel_impl)
+REGISTER_DISPATCH(isneginf_stub, &isneginf_kernel_impl)
+REGISTER_DISPATCH(clamp_stub, &clamp_kernel_impl)
+REGISTER_DISPATCH(clamp_scalar_stub, &clamp_scalar_kernel_impl)
+REGISTER_DISPATCH(clamp_min_scalar_stub, &clamp_min_scalar_kernel_impl)
+REGISTER_DISPATCH(clamp_max_scalar_stub, &clamp_max_scalar_kernel_impl)
 
 struct Msg {
  static constexpr size_t MAX_MSG_LENGTH = 256;
