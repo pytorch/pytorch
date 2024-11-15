@@ -2247,7 +2247,11 @@ def get_world_size(group: Optional[ProcessGroup] = None) -> int:
 
 
 def isend(
-    tensor: torch.Tensor, dst: int, group: Optional[ProcessGroup] = None, tag: int = 0
+    tensor: torch.Tensor,
+    dst: Optional[int] = None,
+    group: Optional[ProcessGroup] = None,
+    tag: int = 0,
+    group_dst: Optional[int] = None,
 ) -> Optional[Work]:
     """
     Send a tensor asynchronously.
@@ -2265,12 +2269,16 @@ def isend(
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         tag (int, optional): Tag to match send with remote recv
+        group_dst (int, optional): Destination rank on ``group``.  Invalid to specify both ``dst`` and ``group_dst
 
     Returns:
         A distributed request object.
         None, if not part of the group
 
     """
+    group = _group_or_default_group(group)
+    group_dst = _canonicalize_group_rank(group, dst, group_dst)
+    _check_not_self_rank(group, group_dst, "destination")
     _check_single_tensor(tensor, "tensor")
     if _rank_not_in_group(group):
         _warn_not_in_group("isend")
@@ -2279,13 +2287,7 @@ def isend(
     if tensor.is_complex():
         tensor = torch.view_as_real(tensor)
 
-    if group is None or group is GroupMember.WORLD:
-        pg = _get_default_group()
-    else:
-        pg = group
-        dst = get_group_rank(pg, dst)
-
-    return pg.send([tensor], dst, tag)
+    return group.send([tensor], group_dst, tag)
 
 
 def irecv(
@@ -2293,6 +2295,7 @@ def irecv(
     src: Optional[int] = None,
     group: Optional[ProcessGroup] = None,
     tag: int = 0,
+    group_src: Optional[int] = None,
 ) -> Optional[Work]:
     """
     Receives a tensor asynchronously.
@@ -2307,6 +2310,7 @@ def irecv(
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         tag (int, optional): Tag to match recv with remote send
+        group_src (int, optional): Destination rank on ``group``.  Invalid to specify both ``src`` and ``group_src``.
 
     Returns:
         A distributed request object.
@@ -2321,19 +2325,13 @@ def irecv(
     if tensor.is_complex():
         tensor = torch.view_as_real(tensor)
 
-    if group is None or group is GroupMember.WORLD:
-        pg = _get_default_group()
+    group = _group_or_default_group(group)
+    if src is None and group_src is None:
+        return group.recv_anysource([tensor], tag)
     else:
-        pg = group
-
-    if src is None:
-        return pg.recv_anysource([tensor], tag)
-    else:
-        if pg is GroupMember.WORLD:
-            return pg.recv([tensor], src, tag)
-        else:
-            group_src_rank = get_group_rank(pg, src)
-            return pg.recv([tensor], group_src_rank, tag)
+        group_src = _canonicalize_group_rank(group, src, group_src)
+        _check_not_self_rank(group, group_src, "source")
+        return group.recv([tensor], group_src, tag)
 
 
 @_exception_logger
@@ -2357,7 +2355,7 @@ def send(
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         tag (int, optional): Tag to match send with remote recv
-        group_dst (int, optional): Destination rank on ``group``.
+        group_dst (int, optional): Destination rank on ``group``.  Invalid to specify both ``dst`` and ``group_dst``.
 
     """
     group = _group_or_default_group(group)
@@ -2418,6 +2416,7 @@ def recv(
         return get_global_rank(group, src_rank)
     else:
         group_src = _canonicalize_group_rank(group, src, group_src)
+        _check_not_self_rank(group, group_src, "source")
         group.recv([tensor], group_src, tag).wait()
         return get_global_rank(group, group_src)
 
