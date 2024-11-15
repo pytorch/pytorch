@@ -54,11 +54,10 @@ import torch
 import torch.distributed as dist
 from torch import SymInt, Tensor
 from torch._dynamo.utils import (
-    add_remote_cache_time_saved,
-    codecache_metrics,
     counters,
     dynamo_timed,
     get_chromium_event_logger,
+    get_metrics_context,
 )
 from torch._inductor import config, exc, metrics
 from torch._inductor.codegen.cuda import cuda_env
@@ -1152,7 +1151,7 @@ class FxGraphCache:
                         "inductor_compile", cached_kernel_names=meta.cached_kernel_names
                     )
                 if len(meta.cached_kernel_names) > 0:
-                    codecache_metrics["num_triton_bundles"] += 1
+                    get_metrics_context().increment("num_triton_bundles", 1)
 
         inductor_meta = autotune_cache.inductor_meta_from_config()
         AutotuneCacheBundler.begin_compile(inductor_meta, code=code)
@@ -1449,7 +1448,9 @@ class FxGraphCache:
 
             if (time_saved_ns := compiled_graph._time_taken_ns) is not None:
                 cache_info["time_saved_ns"] = time_saved_ns
-                add_remote_cache_time_saved(time_saved_ns, is_backward)
+                get_metrics_context().increment(
+                    "distributed_ephemeral_timeout_us", time_saved_ns // 1000
+                )
                 if (
                     ephemeral_increase := add_ephemeral_timeout_increase_for_distributed(
                         time_saved_ns
@@ -3025,7 +3026,6 @@ class PyCodeCache:
     # than once, but attach different attributes, i.e., due to different
     # constant values.
     modules: List[ModuleType] = []
-    cache: Dict[str, ModuleType] = {}
     linemaps: Dict[str, List[Tuple[Any, ...]]] = {}
 
     @classmethod
@@ -3072,13 +3072,18 @@ class PyCodeCache:
         return mod
 
     @classmethod
-    def cache_clear(cls) -> None:
-        for mod in cls.modules:
-            try:
-                assert mod.__file__
-                os.remove(mod.__file__)
-            except FileNotFoundError:
-                pass
+    def cache_clear(cls, purge: bool = False) -> None:
+        """
+        Clear the in-memory module cache. If purge=True, also delete all the
+        corresponding on-disk source files.
+        """
+        if purge:
+            for mod in cls.modules:
+                try:
+                    assert mod.__file__
+                    os.remove(mod.__file__)
+                except FileNotFoundError:
+                    pass
         cls.modules.clear()
 
     @classmethod
