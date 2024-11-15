@@ -2922,8 +2922,6 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
 
 
 class NcclUserBufferRegistrationTest(MultiProcessTestCase):
-    allocator_path = None
-
     def createNcclAllocator(self):
         nccl_allocator_source = """
         #include <torch/extension.h>
@@ -2968,7 +2966,6 @@ class NcclUserBufferRegistrationTest(MultiProcessTestCase):
         os.environ["NCCL_DEBUG"] = "INFO"
         os.environ["NCCL_DEBUG_SUBSYS"] = "NVLS"
         os.environ["NCCL_DEBUG_FILE"] = nccl_debug_file.name
-        self.allocator_path = self.createNcclAllocator()
         self._spawn_processes()
 
     def tearDown(self):
@@ -2991,8 +2988,9 @@ class NcclUserBufferRegistrationTest(MultiProcessTestCase):
         torch.cuda.set_device(self.rank)
         pg = c10d.distributed_c10d._get_default_group()
         backend = pg._get_backend(torch.device(device))
+        allocator_path = self.createNcclAllocator()
         allocator = torch.cuda.memory.CUDAPluggableAllocator(
-            self.allocator_path,
+            allocator_path,
             "nccl_alloc",
             "nccl_free",
         )
