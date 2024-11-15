@@ -2276,7 +2276,7 @@ def isend(
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         tag (int, optional): Tag to match send with remote recv
-        group_dst (int, optional): Destination rank on ``group``.  Invalid to specify both ``dst`` and ``group_dst
+        group_dst (int, optional): Destination rank on ``group``.  Invalid to specify both ``dst`` and ``group_dst``
 
     Returns:
         A distributed request object.
