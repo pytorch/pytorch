@@ -2942,7 +2942,13 @@ def all_gather_object(object_list, obj, group=None):
 
 
 @_exception_logger
-def gather_object(obj, object_gather_list=None, dst=0, group=None):
+def gather_object(
+    obj: Any,
+    object_gather_list: Optional[List[Any]] = None,
+    dst: Optional[int] = None,
+    group: Optional[ProcessGroup] = None,
+    group_dst: Optional[int] = None,
+):
     """
     Gathers picklable objects from the whole group in a single process.
 
@@ -2955,9 +2961,11 @@ def gather_object(obj, object_gather_list=None, dst=0, group=None):
             should be correctly sized as the size of the group for this
             collective and will contain the output. Must be ``None`` on non-dst
             ranks. (default is ``None``)
-        dst (int, optional): Destination rank on global process group (regardless of ``group`` argument). (default is 0)
+        dst (int, optional): Destination rank on global process group (regardless of ``group`` argument).
+            (If both ``dst`` and ``group_dst`` are None, default is global rank 0)
         group: (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used. Default is ``None``.
+        group_dst (int, optional): Destination rank on ``group``.  Invalid to specify both ``dst`` and ``group_dst``
 
     Returns:
         None. On the ``dst`` rank, ``object_gather_list`` will contain the
@@ -3001,13 +3009,15 @@ def gather_object(obj, object_gather_list=None, dst=0, group=None):
         >>> output
         ['foo', 12, {1: 2}]
     """
+    group = _group_or_default_group(group)
+    global_dst = _canonicalize_group_rank(group, dst, group_dst, return_global=True)
     if _rank_not_in_group(group):
         _warn_not_in_group("gather_object")
         return
 
     # Ensure object_gather_list is specified appropriately.
-    my_rank = get_rank()
-    _validate_output_list_for_rank(my_rank, dst, object_gather_list)
+    my_global_rank = get_rank()
+    _validate_output_list_for_rank(my_global_rank, global_dst, object_gather_list)
     current_device = _get_object_coll_device(group)
     input_tensor, local_size = _object_to_tensor(obj, current_device, group)
 
@@ -3028,7 +3038,7 @@ def gather_object(obj, object_gather_list=None, dst=0, group=None):
     # Resize tensor to max size across all ranks.
     input_tensor.resize_(max_object_size)
     # Avoid populating output tensors if the result won't be gathered on this rank.
-    if my_rank == dst:
+    if my_global_rank == global_dst:
         coalesced_output_tensor = torch.empty(
             max_object_size * group_size, dtype=torch.uint8, device=current_device
         )
@@ -3040,12 +3050,14 @@ def gather_object(obj, object_gather_list=None, dst=0, group=None):
     # All ranks call gather with equal-sized tensors.
     gather(
         input_tensor,
-        gather_list=output_tensors if my_rank == dst else None,  # type: ignore[possibly-undefined]
-        dst=dst,
+        gather_list=output_tensors if my_global_rank == global_dst else None,  # type: ignore[possibly-undefined]
+        dst=global_dst,
         group=group,
     )
-    if my_rank != dst:
+    if my_global_rank != global_dst:
         return
+    
+    assert object_gather_list is not None, "Must provide object_gather_list on dst rank"
     for i, tensor in enumerate(output_tensors):
         tensor = tensor.type(torch.uint8)
         tensor_size = object_size_list[i]
@@ -3771,7 +3783,12 @@ def _validate_output_list_for_rank(my_rank, dst, gather_list):
 
 @_exception_logger
 def gather(
-    tensor, gather_list=None, dst=None, group=None, async_op=False, group_dst=None
+    tensor: torch.Tensor,
+    gather_list: Optional[List[torch.Tensor]] = None,
+    dst: Optional[int] = None,
+    group: Optional[ProcessGroup] = None,
+    async_op: bool = False,
+    group_dst: Optional[int] = None,
 ):
     """
     Gathers a list of tensors in a single process.
@@ -3783,10 +3800,12 @@ def gather(
         gather_list (list[Tensor], optional): List of appropriately,
             same-sized tensors to use for gathered data
             (default is None, must be specified on the destination rank)
-        dst (int, optional): Destination rank on global process group (regardless of ``group`` argument). (default is 0)
+        dst (int, optional): Destination rank on global process group (regardless of ``group`` argument).
+            (If both ``dst`` and ``group_dst`` are None, default is global rank 0)
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         async_op (bool, optional): Whether this op should be an async op
+        group_dst (int, optional): Destination rank on ``group``.  Invalid to specify both ``dst`` and ``group_dst``
 
     Returns:
         Async work handle, if async_op is set to True.

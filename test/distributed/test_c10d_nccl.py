@@ -3582,6 +3582,7 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
         if self.rank == 0 or self.rank == 2:
             gather_list = [torch.empty_like(input) for _ in range(subgroup.size())]
             if group_rank:
+                # global_dst=0 group_dst=0 my_global_rank=2 gather_list is not None=True
                 torch.distributed.gather(
                     input,
                     gather_list=gather_list,
@@ -3620,7 +3621,8 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
 
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
-    def test_gather_object_subgroup(self):
+    @parametrize("group_rank", [True, False])
+    def test_gather_object_subgroup(self, group_rank):
         world_size = 4
         if self.rank >= world_size:
             # just easier to write the test for exactly 4 gpus, even if this test class increased to 8gpu later
@@ -3638,15 +3640,25 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
             # another weird thing- what's the point of making me specify some empty objects in my list?
             # empty list should be valid imo.  (but it throws an error)
             gather_list = [{}, {}]
-            torch.distributed.gather_object(
-                input, object_gather_list=gather_list, dst=self.rank, group=subgroup
-            )
+            if group_rank:
+                torch.distributed.gather_object(
+                    input, object_gather_list=gather_list, group_dst=0, group=subgroup
+                )
+            else:
+                torch.distributed.gather_object(
+                    input, object_gather_list=gather_list, dst=self.rank, group=subgroup
+                )
             for src in range(len(gather_list)):
                 self.assertEqual(gather_list[src]["rank"], self.rank + src)
         else:
-            torch.distributed.gather_object(
-                input, object_gather_list=None, dst=self.rank - 1, group=subgroup
-            )
+            if group_rank:
+                torch.distributed.gather_object(
+                    input, object_gather_list=None, group_dst=0, group=subgroup
+                )
+            else:
+                torch.distributed.gather_object(
+                    input, object_gather_list=None, dst=self.rank - 1, group=subgroup
+                )
 
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
