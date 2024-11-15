@@ -3574,6 +3574,7 @@ class TestFX(JitTestCase):
         with self.assertRaises(AssertionError):
             traced(0)
 
+    @skipIfTorchDynamo("seg fault")
     def test_pytree(self):
         # Used to test that you can use your own placeholder class
         class PHTest(PHBase):
