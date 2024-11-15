@@ -21,7 +21,7 @@ runs:
         python3 -m tools.stats.sccache_stats_to_benchmark_format
 
     - name: Upload sccache stats as benchmark
-      uses: pytorch/test-infra/.github/actions/upload-benchmark-results@upload-benchmark-results-with-additional-information
+      uses: pytorch/test-infra/.github/actions/upload-benchmark-results@main
       with:
         benchmark-results-dir: test/test-reports
         dry-run: false
