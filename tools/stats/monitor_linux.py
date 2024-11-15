@@ -13,7 +13,6 @@ from typing import Any
 
 import psutil  # type: ignore[import]
 
-
 def get_processes_running_python_tests() -> list[Any]:
     python_processes = []
     for process in psutil.process_iter():
@@ -54,17 +53,16 @@ def get_per_process_cpu_info() -> list[dict[str, Any]]:
     return per_process_info
 
 if __name__ == "__main__":
-    nvml_handle = None
+    print("use monitor_linux.py")
+    nvml_exists = False
     try:
         import pynvml  # type: ignore[import]
-        try:
-            pynvml.nvmlInit()
-            nvml_handle = pynvml.nvmlDeviceGetHandleByIndex(0)
-        except pynvml.NVMLError:
-            pass
+        pynvml.nvmlInit()
+        nvml_exists = True
     except ModuleNotFoundError:
         # no pynvml avaliable, probably because not cuda
         pass
+
     kill_now = False
     def exit_gracefully(*args: Any) -> None:
         global kill_now
@@ -80,7 +78,7 @@ if __name__ == "__main__":
                 "total_cpu_percent": psutil.cpu_percent(),
                 "per_process_cpu_info": get_per_process_cpu_info(),
             }
-            if nvml_handle is not None:
+            if nvml_exists:
                 # https://docs.nvidia.com/deploy/nvml-api/structnvmlUtilization__t.html
                 gpu_count = pynvml.nvmlDeviceGetCount()
                 # Iterate over the available GPUs
