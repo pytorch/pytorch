@@ -80,17 +80,17 @@ def parse_args() -> argparse.Namespace:
     args = parser.parse_args()
 
     parser.add_argument(
-        "--time-interval",
+        "--log-interval",
         type=int,
         default=10,
-        help="set time-interval for collecting log, default is 10 seconds",
+        help="set time interval for logging utilization data, default is 10 seconds",
     )
     args = parser.parse_args()
     return args
 
 if __name__ == "__main__":
     args = parse_args()
-    schedule_interval = args.time_interval
+    interval = args.log_interval
     # try import pynvml for Nvidia Gpu
     has_pynvml = False
     try:
@@ -115,7 +115,7 @@ if __name__ == "__main__":
         num_gpus = pynvml.nvmlDeviceGetCount()
     # log info
     info = {
-        "log_interval": f"{schedule_interval} seconds",
+        "log_interval": f"{interval} seconds",
         "gpu": "pynvml" if has_pynvml else "",
         "num_of_gpu":num_gpus,
         "num_of_cpu": num_cpus,
@@ -150,4 +150,4 @@ if __name__ == "__main__":
             }
         finally:
             print(json.dumps(stats))
-            time.sleep(schedule_interval)
+            time.sleep(interval)
