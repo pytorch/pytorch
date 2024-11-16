@@ -8217,6 +8217,11 @@ def sample_inputs_loss(op_info, device, dtype, requires_grad, **kwargs):
                           args=(_make_tensor(shape, requires_grad=rhs_requires_grad),),
                           kwargs=kwargs)
 
+    yield SampleInput(_make_tensor((S, S)),
+                      args=(_make_tensor((1, S, S), requires_grad=rhs_requires_grad),),
+                      kwargs=kwargs)
+
+
 def sample_inputs_grid_sample(op_info, device, dtype, requires_grad, **kwargs):
     # We get better tests if we change the range of the values to something like [-2,2]
     # because for grid (second tensor argument) the "useful" range is [-1,1] and this way

@@ -59,7 +59,8 @@ static Tensor& mse_loss_backward_out_impl(const Tensor& grad_output,
                                           int64_t reduction,
                                           Tensor& grad_input,
                                           const string op_name) {
-  TORCH_CHECK(target.is_same_size(input), op_name + ": target and input tensors must have identical shapes")
+  TORCH_CHECK(input.numel() == target.numel(),
+              op_name + ": target and input tensors must have the same number of elements");
   auto norm = reduction == Reduction::Mean ? 2. / static_cast<double>(input.numel()) : 2.;
 
   struct CachedGraph : public MPSCachedGraph {
@@ -198,7 +199,8 @@ static Tensor& bce_loss_out_impl(const Tensor& input,
                                  const std::optional<Tensor>& grad_output_opt,
                                  const string op_name) {
   // TODO: add sanity check for the elements of input tensor to be within [0..1]
-  TORCH_CHECK(target.is_same_size(input), op_name + ": target and input tensors must have identical shapes")
+  TORCH_CHECK(input.numel() == target.numel(),
+              op_name + ": target and input tensors must have the same number of elements");
 
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
   c10::MaybeOwned<Tensor> grad_output_maybe_owned = at::borrow_from_optional_tensor(grad_output_opt);
@@ -818,7 +820,8 @@ Tensor& huber_loss_out_mps(const Tensor& input, const Tensor& target, int64_t re
   string op_name = __func__;
   using namespace mps;
   TORCH_CHECK(delta > 0, "huber_loss does not support non-positive values for delta.")
-  TORCH_CHECK(target.is_same_size(input), op_name + ": target and input tensors must have identical shapes")
+  TORCH_CHECK(input.numel() == target.numel(),
+              op_name + ": target and input tensors must have the same number of elements");
   TORCH_CHECK(output.is_mps());
 
   if (reduction == Reduction::None)
@@ -1003,7 +1006,8 @@ TORCH_IMPL_FUNC(mse_loss_out_mps)(const Tensor& input, const Tensor& target, int
     output = output_.contiguous();
   }
 
-  TORCH_CHECK(target.is_same_size(input), op_name + ": target and input tensors must have identical shapes");
+  TORCH_CHECK(input.numel() == target.numel(),
+              op_name + ": target and input tensors must have the same number of elements");
   TORCH_CHECK(c10::isFloatingType(input.scalar_type()) && c10::isFloatingType(target.scalar_type()),
               op_name + ": only defined for floating types");
   TORCH_CHECK(output.is_mps());
