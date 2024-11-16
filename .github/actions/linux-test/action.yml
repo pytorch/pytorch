@@ -115,7 +115,7 @@ runs:
 
     - name: Start monitoring script
       id: monitor-script
-      if: inputs.disable-monitor != 'true'
+      if: !inputs.disable-monitor
       shell: bash
       continue-on-error: true
       run: |
@@ -290,7 +290,7 @@ runs:
         cat test/**/*_toprint.log || true
 
     - name: Stop monitoring script
-      if: inputs.disable-monitor != 'true' && always() && steps.monitor-script.outputs.monitor-script-pid
+      if: !inputs.disable-monitor && always() && steps.monitor-script.outputs.monitor-script-pid
       shell: bash
       continue-on-error: true
       env:

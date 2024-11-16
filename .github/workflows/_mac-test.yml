@@ -108,7 +108,7 @@ jobs:
 
       - name: Start monitoring script
         id: monitor-script
-        if: inputs.disable-monitor != 'true'
+        if: !inputs.disable-monitor
         continue-on-error: true
         run: |
           ${CONDA_RUN} python3 -m tools.stats.monitor > usage_log.txt 2>&1 &
@@ -208,7 +208,7 @@ jobs:
           cat test/**/*_toprint.log || true
 
       - name: Stop monitoring script
-        if: inputs.disable-monitor != 'true' && always() && ${{ steps.monitor-script.outputs.monitor-script-pid }}
+        if: !inputs.disable-monitor && always() && ${{ steps.monitor-script.outputs.monitor-script-pid }}
         continue-on-error: true
         env:
           MONITOR_SCRIPT_PID: ${{ steps.monitor-script.outputs.monitor-script-pid }}
