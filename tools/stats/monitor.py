@@ -125,7 +125,7 @@ if __name__ == "__main__":
     if has_pynvml:
         gpu_libs_detected.append("pynvml")
         num_of_gpu = pynvml.nvmlDeviceGetCount()
-        gpu_handles = [pynvml.nvmlDeviceGetHandleByIndex(i) for i in range(pynvml.nvmlDeviceGetCount())]
+        gpu_handles = [nvmlDevipynvmlceGetHandleByIndex(i) for i in range(pynvml.nvmlDeviceGetCount())]
     if has_amdsmi:
         gpu_libs_detected.append("amdsmi")
         gpu_handles  = amdsmi.amdsmi_get_processor_handles()
@@ -190,4 +190,4 @@ if __name__ == "__main__":
                 except pynvml.NVMLError as e:
                     pass
             print(json.dumps(stats))
-            time.sleep(5)
+            time.sleep(interval)
