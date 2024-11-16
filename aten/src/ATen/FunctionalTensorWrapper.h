@@ -62,18 +62,18 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   // functionalization.
   const Tensor& value() const {
     return value_;
-  };
+  }
   // The concept of "level" is only ever important to functorch; it's exposed
   // here as more of a hook for functorch to use.
   int64_t level() const {
     return level_;
-  };
+  }
   void set_level(int64_t level) {
     level_ = level;
   }
   bool has_metadata_mutation() const {
     return has_metadata_mutation_;
-  };
+  }
 
   void mark_mutation() {
     functional_storage_impl()->mark_mutation();
@@ -163,6 +163,12 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
 
   void set_storage_changed() {
     was_storage_changed_ = true;
+  }
+
+  // A FunctionalTensor is considered a base if its not a view of another
+  // tensor.
+  bool isBaseTensor() const {
+    return view_metas_.empty();
   }
 
   c10::SymInt get_storage_size(bool before) {
@@ -289,6 +295,8 @@ TORCH_API inline FunctionalTensorWrapper* unsafeGetFunctionalWrapper(
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(functional_impl != nullptr);
   return functional_impl;
 }
+
+TORCH_API bool isBaseTensor(const at::Tensor& tensor);
 
 TORCH_API bool isFunctionalTensor(const at::Tensor& tensor);
 TORCH_API bool isFunctionalTensor(const std::optional<Tensor>& t);

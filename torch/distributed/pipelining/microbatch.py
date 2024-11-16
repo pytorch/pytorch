@@ -86,7 +86,7 @@ class TensorChunkSpec:
         """
         args_chunk_spec = map_aggregate(
             chunk_dims,
-            lambda dim: TensorChunkSpec(dim),
+            lambda dim: TensorChunkSpec(dim),  # type: ignore[arg-type,return-value]
         )
         return args_chunk_spec
 
@@ -104,7 +104,7 @@ class TensorChunkSpec:
         """
         kwargs_chunk_spec = map_aggregate(
             chunk_dims,
-            lambda dim: TensorChunkSpec(dim),
+            lambda dim: TensorChunkSpec(dim),  # type: ignore[arg-type,return-value]
         )
         return kwargs_chunk_spec
 

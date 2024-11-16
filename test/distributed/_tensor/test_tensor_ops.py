@@ -3,8 +3,8 @@
 
 import torch
 from torch.distributed._tensor import DeviceMesh, distribute_tensor, DTensor
-from torch.distributed._tensor.debug import CommDebugMode
 from torch.distributed._tensor.placement_types import Partial, Replicate, Shard
+from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -614,7 +614,7 @@ class DistTensorOpsTest(DTensorTestBase):
         self.assertEqual(bf16_sharded_dtensor1.dtype, torch.bfloat16)
         self.assertEqual(bf16_sharded_dtensor1.to_local().dtype, torch.bfloat16)
 
-        from torch.distributed._tensor.debug import _get_sharding_prop_cache_info
+        from torch.distributed.tensor.debug import _get_sharding_prop_cache_info
 
         # by this point we only have cache misses
         hits, misses, _, _ = _get_sharding_prop_cache_info()

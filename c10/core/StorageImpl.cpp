@@ -4,11 +4,11 @@
 namespace c10 {
 
 // The array to save function pointer for custom storageImpl create.
-C10_API std::array<StorageImplCreateHelper, at::COMPILE_TIME_MAX_DEVICE_TYPES>
+static std::array<StorageImplCreateHelper, at::COMPILE_TIME_MAX_DEVICE_TYPES>
     StorageImplCreate;
 
 // A allowlist of device type, currently available is PrivateUse1
-inline ska::flat_hash_set<c10::DeviceType>& GetBackendMetaAllowlist() {
+static ska::flat_hash_set<c10::DeviceType>& GetBackendMetaAllowlist() {
   static ska::flat_hash_set<c10::DeviceType> DeviceTypeAllowList{
       DeviceType::PrivateUse1};
   return DeviceTypeAllowList;
@@ -38,6 +38,14 @@ void warnDeprecatedDataPtr() {
       "Please wrap calls to tensor.data_ptr() in an opaque custom op; "
       "If all else fails, you can guard accesses to tensor.data_ptr() on "
       "isinstance(tensor, FakeTensor).")
+}
+
+[[noreturn]] void StorageImpl::throw_data_ptr_access_error() const {
+  if (extra_meta_ && extra_meta_->custom_data_ptr_error_msg_) {
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    TORCH_CHECK(false, *extra_meta_->custom_data_ptr_error_msg_);
+  }
+  TORCH_CHECK(false, "Cannot access data pointer of Storage that is invalid.");
 }
 
 void SetStorageImplCreate(DeviceType t, StorageImplCreateHelper fptr) {

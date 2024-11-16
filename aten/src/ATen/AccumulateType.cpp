@@ -9,6 +9,8 @@ c10::ScalarType toAccumulateType(c10::ScalarType type, c10::DeviceType device) {
       switch (device) {                                                                            \
         case DeviceType::CUDA:                                                                     \
           return CppTypeToScalarType<at::acc_type_device<scalar_t, c10::DeviceType::CUDA>>::value; \
+        case DeviceType::XPU:                                                                      \
+          return CppTypeToScalarType<at::acc_type_device<scalar_t, c10::DeviceType::XPU>>::value;  \
         case DeviceType::MPS:                                                                      \
           return CppTypeToScalarType<at::acc_type_device<scalar_t, c10::DeviceType::MPS>>::value;  \
         default:                                                                                   \

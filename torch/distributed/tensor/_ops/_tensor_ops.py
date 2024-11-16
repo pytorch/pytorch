@@ -5,6 +5,7 @@ from typing import cast, List, Optional, Sequence, Tuple
 
 import torch
 from torch.distributed.device_mesh import DeviceMesh
+from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor._op_schema import (
     _is_inplace_op,
     OpSchema,
@@ -28,7 +29,6 @@ from torch.distributed.tensor._ops.utils import (
     register_prop_rule,
 )
 from torch.distributed.tensor.placement_types import (
-    DTensorSpec,
     Partial,
     Placement,
     Replicate,
@@ -367,7 +367,6 @@ def replica_only_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType
     schema_info=RuntimeSchemaInfo(1),
 )
 def scatter_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
-    input_strategy = cast(OpStrategy, op_schema.args_schema[0])
     single_mesh_dim_strategies = []
 
     # placement list stores placements of [output, input, index, src]

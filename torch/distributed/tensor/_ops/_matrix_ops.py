@@ -6,11 +6,13 @@ from typing import List
 
 import torch
 from torch.distributed.device_mesh import DeviceMesh
+from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor._op_schema import (
     OpSchema,
     OpStrategy,
     PlacementList,
     PlacementStrategy,
+    RuntimeSchemaInfo,
 )
 from torch.distributed.tensor._ops._einsum_strategy import gen_einsum_strategies
 from torch.distributed.tensor._ops.utils import (
@@ -21,12 +23,7 @@ from torch.distributed.tensor._ops.utils import (
     map_placements_after_broadcast,
     register_op_strategy,
 )
-from torch.distributed.tensor.placement_types import (
-    DTensorSpec,
-    Placement,
-    Replicate,
-    Shard,
-)
+from torch.distributed.tensor.placement_types import Placement, Replicate, Shard
 
 
 aten = torch.ops.aten
@@ -161,7 +158,9 @@ def baddmm_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
     return _addmm_like_strategy("bmk,bkn->bmn", mesh, op_schema)
 
 
-@register_op_strategy(aten._scaled_dot_product_flash_attention.default)
+@register_op_strategy(
+    aten._scaled_dot_product_flash_attention.default, schema_info=RuntimeSchemaInfo(5)
+)
 def scaled_dot_product_flash_attention_strategy(
     mesh: DeviceMesh, op_schema: OpSchema
 ) -> OpStrategy:
@@ -172,7 +171,6 @@ def scaled_dot_product_flash_attention_strategy(
     q_input_strategy = op_schema.args_schema[0]
     assert isinstance(q_input_strategy, OpStrategy)
     # assuming q/k/v have the same shape
-    qkv_shape = q_input_strategy.shape
 
     single_mesh_dim_strategies = []
 
@@ -251,7 +249,6 @@ def scaled_dot_product_flash_attention_backward_strategy(
     q_input_strategy = op_schema.args_schema[1]
     assert isinstance(q_input_strategy, OpStrategy)
     # assuming q/k/v have the same shape
-    qkv_shape = q_input_strategy.shape
 
     tensor_input_indices = [
         i
@@ -334,7 +331,10 @@ def constant_pad_nd_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrateg
     )
 
 
-@register_op_strategy(aten._scaled_dot_product_efficient_attention.default)
+@register_op_strategy(
+    aten._scaled_dot_product_efficient_attention.default,
+    schema_info=RuntimeSchemaInfo(4),
+)
 def scaled_dot_product_efficient_attention_strategy(
     mesh: DeviceMesh, op_schema: OpSchema
 ) -> OpStrategy:
@@ -342,7 +342,7 @@ def scaled_dot_product_efficient_attention_strategy(
     q_input_strategy = op_schema.args_schema[0]
     assert isinstance(q_input_strategy, OpStrategy)
     # assuming q/k/v have the same shape
-    qkv_shape = q_input_strategy.shape
+
     has_attn_bias = op_schema.args_schema[3] is not None
     compute_log_sumexp = op_schema.args_schema[4]
 
@@ -416,14 +416,7 @@ def scaled_dot_product_efficient_attention_backward_strategy(
     q_input_strategy = op_schema.args_schema[1]
     assert isinstance(q_input_strategy, OpStrategy)
     # assuming q/k/v have the same shape
-    qkv_shape = q_input_strategy.shape
     has_attn_bias = op_schema.args_schema[4] is not None
-
-    tensor_input_indices = [
-        i
-        for i, arg_spec in enumerate(op_schema.args_schema)
-        if isinstance(arg_spec, OpStrategy)
-    ]
 
     single_mesh_dim_strategies = []
 

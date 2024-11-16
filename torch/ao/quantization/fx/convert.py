@@ -6,7 +6,7 @@ import warnings
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
 
 import torch
-from torch.ao.quantization import NUMERIC_DEBUG_HANDLE_KEY
+from torch.ao.quantization import CUSTOM_KEY, NUMERIC_DEBUG_HANDLE_KEY
 from torch.ao.quantization.backend_config import (
     BackendConfig,
     get_native_backend_config,
@@ -75,6 +75,7 @@ SUPPORTED_QDTYPES = [
     torch.qint32,
     torch.uint8,
     torch.int8,
+    torch.uint16,
     torch.int16,
     torch.int32,
     torch.float8_e5m2,
@@ -229,10 +230,15 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
 
             node.replace_all_uses_with(dequantized_node)
             # propagate numeric debug handle from observer/fake_quant node to dequantize node
-            if NUMERIC_DEBUG_HANDLE_KEY in node.meta:
-                dequantized_node.meta[NUMERIC_DEBUG_HANDLE_KEY] = node.meta[
-                    NUMERIC_DEBUG_HANDLE_KEY
-                ]
+            if (
+                CUSTOM_KEY in node.meta
+                and NUMERIC_DEBUG_HANDLE_KEY in node.meta[CUSTOM_KEY]
+            ):
+                if CUSTOM_KEY not in dequantized_node.meta:
+                    dequantized_node.meta[CUSTOM_KEY] = {}
+                dequantized_node.meta[CUSTOM_KEY][NUMERIC_DEBUG_HANDLE_KEY] = node.meta[
+                    CUSTOM_KEY
+                ][NUMERIC_DEBUG_HANDLE_KEY]
             graph.erase_node(node)
     elif is_dynamic:
         # uint8/int8/fp16 dynamic quantization

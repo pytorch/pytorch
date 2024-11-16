@@ -232,9 +232,6 @@
     "urlunparse"
   ],
   "torch.distributed.rpc": [],
-  "torch.distributed.tensor": [
-    "DeviceMesh"
-  ],
   "torch.fft": [
     "Tensor",
     "fft",
@@ -265,7 +262,9 @@
     "Future"
   ],
   "torch.fx": [
+    "PH",
     "ProxyableClassMeta",
+    "CodeGen",
     "Tracer",
     "symbolic_trace",
     "wrap"

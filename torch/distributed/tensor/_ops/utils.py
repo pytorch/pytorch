@@ -6,7 +6,9 @@ import operator
 from typing import cast, Iterable, List, Optional, Sequence, Tuple, Union
 
 import torch
+from torch.distributed.tensor._api import DTensor
 from torch.distributed.tensor._collective_utils import redistribute_cost
+from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor._op_schema import (
     OpSchema,
     OpStrategy,
@@ -14,10 +16,8 @@ from torch.distributed.tensor._op_schema import (
     PlacementStrategy,
     RuntimeSchemaInfo,
 )
-from torch.distributed.tensor.api import DTensor
 from torch.distributed.tensor.device_mesh import DeviceMesh
 from torch.distributed.tensor.placement_types import (
-    DTensorSpec,
     Partial,
     Placement,
     Replicate,

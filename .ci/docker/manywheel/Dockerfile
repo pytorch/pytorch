@@ -10,6 +10,7 @@ ENV LANG en_US.UTF-8
 ENV LANGUAGE en_US.UTF-8
 
 ARG DEVTOOLSET_VERSION=9
+
 # Note: This is required patch since CentOS have reached EOL
 # otherwise any yum install setp will fail
 RUN sed -i s/mirror.centos.org/vault.centos.org/g /etc/yum.repos.d/*.repo
@@ -143,6 +144,10 @@ COPY --from=libpng             /usr/local/lib/pkgconfig              /usr/local/
 FROM common as cpu_final
 ARG BASE_CUDA_VERSION=10.1
 ARG DEVTOOLSET_VERSION=9
+# Install Anaconda
+ADD ./common/install_conda_docker.sh install_conda.sh
+RUN bash ./install_conda.sh && rm install_conda.sh
+ENV PATH /opt/conda/bin:$PATH
 RUN sed -i s/mirror.centos.org/vault.centos.org/g /etc/yum.repos.d/*.repo
 RUN sed -i s/^#.*baseurl=http/baseurl=http/g /etc/yum.repos.d/*.repo
 RUN sed -i s/^mirrorlist=http/#mirrorlist=http/g /etc/yum.repos.d/*.repo

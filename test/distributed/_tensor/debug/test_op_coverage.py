@@ -2,7 +2,7 @@
 
 import torch
 import torch.nn as nn
-from torch.distributed._tensor.debug._op_coverage import get_inductor_decomp_graphs
+from torch.distributed.tensor.debug._op_coverage import get_inductor_decomp_graphs
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 

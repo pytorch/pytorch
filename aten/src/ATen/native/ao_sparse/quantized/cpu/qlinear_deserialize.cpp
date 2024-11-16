@@ -11,18 +11,18 @@ namespace ao {
 namespace sparse {
 
 namespace {
-constexpr int64_t serialization_version_index = 0;
-constexpr int64_t bias_index = 1;
-constexpr int64_t out_features_block_size_index = 2;
-constexpr int64_t in_features_block_size_index = 3;
-constexpr int64_t weight_scales_index = 4;
-constexpr int64_t weight_zero_point_index = 5;
-constexpr int64_t quantization_scheme_index = 6;
-constexpr int64_t row_block_indices_index = 7;
-constexpr int64_t col_block_indices_index = 8;
-constexpr int64_t weight_values_index = 9;
-constexpr int64_t num_output_channels_index = 10;
-constexpr int64_t num_input_channels_index = 11;
+constexpr int64_t serialization_version_index [[maybe_unused]] = 0;
+constexpr int64_t bias_index [[maybe_unused]] = 1;
+constexpr int64_t out_features_block_size_index [[maybe_unused]] = 2;
+constexpr int64_t in_features_block_size_index [[maybe_unused]] = 3;
+constexpr int64_t weight_scales_index [[maybe_unused]] = 4;
+constexpr int64_t weight_zero_point_index [[maybe_unused]] = 5;
+constexpr int64_t quantization_scheme_index [[maybe_unused]] = 6;
+constexpr int64_t row_block_indices_index [[maybe_unused]] = 7;
+constexpr int64_t col_block_indices_index [[maybe_unused]] = 8;
+constexpr int64_t weight_values_index [[maybe_unused]] = 9;
+constexpr int64_t num_output_channels_index [[maybe_unused]] = 10;
+constexpr int64_t num_input_channels_index [[maybe_unused]] = 11;
 
 template <typename TENSOR_DTYPE, typename VEC_DTYPE>
 std::vector<VEC_DTYPE> unwrap_vector(at::Tensor tensor) {

@@ -39,6 +39,7 @@ torch._C._multiprocessing_init()
 """Add helper function to spawn N processes and wait for completion of any of
 them. This depends `mp.get_context` which was added in Python 3.4."""
 from .spawn import (
+    ENV_VAR_PARALLEL_START,
     ProcessContext,
     ProcessExitedException,
     ProcessRaisedException,

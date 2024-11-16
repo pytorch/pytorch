@@ -19,6 +19,8 @@
 #include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/mkldnn/Matmul.h>
+#include <ATen/native/mkldnn/Utils.h>
+#include <ATen/cpu/Utils.h>
 #include <c10/core/GradMode.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
@@ -30,7 +32,7 @@
 #else
 #include <ATen/ops/_addmm_activation_native.h>
 #include <ATen/ops/_compute_linear_combination_native.h>
-#include <ATen/ops/_convert_weight_to_int4pack_native.h>
+#include <ATen/ops/_convert_weight_to_int4pack_for_cpu_native.h>
 #include <ATen/ops/_int_mm_native.h>
 #include <ATen/ops/_linalg_check_errors.h>
 #include <ATen/ops/_linalg_det.h>
@@ -38,7 +40,7 @@
 #include <ATen/ops/_linalg_slogdet.h>
 #include <ATen/ops/_linalg_slogdet_native.h>
 #include <ATen/ops/_unsafe_view.h>
-#include <ATen/ops/_weight_int4pack_mm_native.h>
+#include <ATen/ops/_weight_int4pack_mm_for_cpu_native.h>
 #include <ATen/ops/_weight_int8pack_mm_native.h>
 #include <ATen/ops/abs.h>
 #include <ATen/ops/addbmm_native.h>
@@ -206,6 +208,7 @@ TORCH_META_FUNC(mm)(const Tensor & self, const Tensor & mat2) {
 
 TORCH_META_FUNC(linalg_vector_norm)(const Tensor& self, const Scalar& scalar_ord, OptionalIntArrayRef opt_dim, bool keepdim, std::optional<ScalarType> opt_dtype) {
   at::native::checkFloatingOrComplex(self, "linalg.vector_norm");
+  TORCH_CHECK(!at::isComplexType(scalar_ord.type()), "linalg.vector_norm: Expected a non-complex scalar as the order of norm.");
 
   auto dim = opt_dim.value_or(IntArrayRef{});
   // Casting a large integer to a double will just introduce an error for
@@ -1358,13 +1361,8 @@ static inline int64_t get_mkldnn_matmul_min_dim() {
   static auto value = [&] {
     const int64_t default_min_dim = [&] {
       // Minimum dimension requirement for MKLDNN; derived based on experiments.
-      // By default, it's only enabled on Neoverse V1.
-#if !defined(__s390x__)  && !defined(__powerpc__)
-      if (cpuinfo_initialize() && cpuinfo_get_uarchs_count() == 1 && cpuinfo_get_uarch(0)->uarch == cpuinfo_uarch_neoverse_v1) {
-        return 8;
-      }
-#endif
-      return 0;
+      //it's enabled on all Neoverse cpus.
+      return is_arm_neoverse() ? 8 : 0;
     }();
     const char* ptr = std::getenv("TORCH_MKLDNN_MATMUL_MIN_DIM");
     return ptr != nullptr ? std::atoi(ptr) : default_min_dim;
@@ -1377,13 +1375,8 @@ static inline int64_t get_mkldnn_matmul_min_size() {
   static auto value = [&] {
     const int64_t default_min_size = [&] {
       // Minimum size requirement for MKLDNN; derived based on experiments.
-      // By default, it's only enabled on Neoverse V1.
-#if !defined(__s390x__)  && !defined(__powerpc__)
-      if (cpuinfo_initialize() && cpuinfo_get_uarchs_count() == 1 && cpuinfo_get_uarch(0)->uarch == cpuinfo_uarch_neoverse_v1) {
-        return 8 * 1024;
-      }
-#endif
-      return 0;
+      // it's enabled on all Neoverse cpus.
+      return is_arm_neoverse() ? 8 * 1024 : 0;
     }();
     const char* ptr = std::getenv("TORCH_MKLDNN_MATMUL_MIN_SIZE");
     return ptr != nullptr ? std::atoi(ptr) : default_min_size;
@@ -2901,6 +2894,7 @@ Tensor linalg_matrix_norm(
     bool keepdim,
     std::optional<ScalarType> opt_dtype) {
   // Check ord first as it will be used in the dtype check of A
+  TORCH_CHECK(!at::isComplexType(scalar_ord.type()), "linalg.matrix_norm: Expected a non-complex scalar as the order of norm.");
   auto ord = scalar_ord.toDouble();
   auto abs_ord = std::abs(ord);
   TORCH_CHECK(abs_ord == 2. || abs_ord == 1. || abs_ord == INFINITY, "linalg.matrix_norm: Order ", ord, " not supported.");
@@ -3442,34 +3436,21 @@ Tensor _convert_weight_to_int4pack_cpu(
 
   TORCH_CHECK(in.dim() == 2,
       __func__, " : expect weight to be 2D tensor.");
-  TORCH_CHECK(in.dtype() == at::kByte,
-      __func__, " : expect weight to be kByte.");
-  TORCH_CHECK(innerKTiles == 2 || innerKTiles == 4 || innerKTiles == 8,
-      __func__, " : innerKTiles need to be 2, 4, or 8, got ", innerKTiles);
+  TORCH_CHECK(in.dtype() == at::kInt,
+      __func__, " : expect weight to be kInt.");
 
   auto weight = in.contiguous();
   auto N = weight.size(0);
-  auto K = weight.size(1) * 2;
-
-  // Create fake shapes for cpu. The meta registration in dynamo requires
-  // operator has the same output shape for each device. So creating a fake
-  // shape {N / 8, K / (16 * innerKTiles), 32, innerKTiles / 2}
-  constexpr int64_t kNTileSize = 8;
-  constexpr int64_t kKTileSize = 16;
-  auto nTiles = (N + kNTileSize - 1) / kNTileSize;
+  auto K = weight.size(1);
 
   TORCH_CHECK(N % 16 == 0,
       __func__, " : expect N to be dividable by 16");
-  const int64_t kSuperKTileSize = kKTileSize * innerKTiles;
-  TORCH_CHECK( K % kSuperKTileSize == 0,
-      __func__, " : epxect K to be dividable by ", kSuperKTileSize);
-  auto kSuperTiles = (K + kSuperKTileSize - 1) / kSuperKTileSize;
+  TORCH_CHECK(K % 2 == 0,
+      "_convert_weight_to_int4pack: expect K to be dividable by 2");
 
-  auto weight_packed = at::empty(
-      {nTiles, kSuperTiles, 32, innerKTiles / 2},
-      at::TensorOptions().dtype(at::kInt));
+  auto weight_packed = at::empty({N, K / 2}, weight.options().dtype(at::kByte));
 
-  weight_to_int4pack_stub(kCPU, weight_packed, weight, N, K);
+  weight_to_int4pack_stub(kCPU, weight_packed, weight);
   return weight_packed;
 }
 
@@ -3479,10 +3460,8 @@ Tensor _weight_int4pack_mm_cpu(
     int64_t qGroupSize,
     const Tensor& qScaleAndZeros) {
 
-  constexpr int64_t kNTileSize = 8;
-
   auto M = A.size(0);
-  auto N = B.size(0) * kNTileSize;
+  auto N = B.size(0);
   auto K = A.size(1);
 
   TORCH_CHECK(A.dtype() == kBFloat16 || A.dtype() == kHalf || A.dtype() == kFloat,
@@ -3492,12 +3471,12 @@ Tensor _weight_int4pack_mm_cpu(
   TORCH_CHECK(A.dim() == 2,
       __func__, " : expect A to be 2D tensor.");
 
-  TORCH_CHECK(B.dtype() == kInt,
-      __func__, " : expect B to be int32 tensor.");
+  TORCH_CHECK(B.dtype() == kByte,
+      __func__, " : expect B to be uint8 tensor.");
   TORCH_CHECK(B.is_contiguous(),
       __func__, " : expect B to be contiguous.");
-  TORCH_CHECK(B.dim() == 4,
-      __func__, " : expect B to 4d tensor.");
+  TORCH_CHECK(B.size(1) == K / 2,
+      __func__, " : expect B.size(1) to be K/2, got ", B.size(1));
 
   TORCH_CHECK(qGroupSize == 32 || qGroupSize == 64 || qGroupSize == 128
       || qGroupSize == 256,
@@ -3508,7 +3487,7 @@ Tensor _weight_int4pack_mm_cpu(
       __func__, ": expect qScaleAndZeros to be 3d tensor with sizes [:, ", N, ", 2]");
 
   auto C = at::empty({M, N}, A.options());
-  int4pack_mm_stub(kCPU, C, A, B, qGroupSize, qScaleAndZeros, N, K);
+  int4pack_mm_stub(kCPU, C, A, B, qGroupSize, qScaleAndZeros);
 
   return C;
 }
@@ -3565,7 +3544,7 @@ Tensor& _int_mm_out_cpu(const Tensor& self, const Tensor& mat2, Tensor& result) 
   }
 
   bool dispatched = false;
-  if (at::globalContext().userEnabledMkldnn()) {
+  if (at::globalContext().userEnabledMkldnn() && at::cpu::is_avx512_vnni_supported()) {
     try {
       mkldnn_matmul_i8i8i32(self, mat2, result);
       dispatched = true;

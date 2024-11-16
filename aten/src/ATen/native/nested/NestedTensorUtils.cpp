@@ -12,8 +12,7 @@
 #include <ATen/ops/split_with_sizes_native.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 /**
  * Thin wrapper around get_nested_sizes that is registered as a native function
@@ -167,5 +166,4 @@ std::vector<Tensor> split_with_sizes_nested(
   return splits;
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

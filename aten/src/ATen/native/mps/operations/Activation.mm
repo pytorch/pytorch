@@ -1653,6 +1653,11 @@ TORCH_IMPL_FUNC(silu_out_mps)(const Tensor& self, const Tensor& result) {
 
   MPSStream* stream = getCurrentMPSStream();
 
+  bool executeGatherOp =
+      !(self.is_contiguous(MemoryFormat::Contiguous) || self.is_contiguous(MemoryFormat::ChannelsLast) ||
+        self.is_contiguous(MemoryFormat::ChannelsLast3d));
+  Tensor result_ = at::empty_like(self, executeGatherOp ? MemoryFormat::Contiguous : MemoryFormat::Preserve);
+
   @autoreleasepool {
     string key = "silu_out_mps:" + getTensorsStringKey({self});
 
@@ -1673,11 +1678,15 @@ TORCH_IMPL_FUNC(silu_out_mps)(const Tensor& self, const Tensor& result) {
       newCachedGraph->outputTensor_ = outputTensor;
     });
 
-    Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, result);
+    Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self, nil, executeGatherOp);
+    Placeholder outputPlaceholder =
+        Placeholder(cachedGraph->outputTensor_, executeGatherOp ? result_ : result, nil, false);
 
     auto feeds = dictionaryFromPlaceholders(selfPlaceholder);
     runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
+  }
+  if (executeGatherOp) {
+    result.copy_(result_);
   }
 }
 

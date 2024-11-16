@@ -3,9 +3,9 @@ from dataclasses import dataclass
 from typing import List, Set, Tuple
 
 from torch.distributed.device_mesh import DeviceMesh
+from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor._op_schema import OpStrategy, PlacementStrategy
 from torch.distributed.tensor.placement_types import (
-    DTensorSpec,
     Partial,
     Placement,
     Replicate,
@@ -106,11 +106,6 @@ def gen_einsum_strategies(
         # first we always have replicate all for inputs and output
         placement_list: List[Placement] = [Replicate()] * (len(input_dims) + 1)
         mesh_dim_strategies.append(placement_list)
-
-        if mesh.size(mesh_dim) <= 1:
-            # only replicate strategy for mesh dim with size 1
-            # TODO: see if this is valid for the submesh case
-            continue
 
         # split batch dim
         for batch_dim in edims.batch_dims:

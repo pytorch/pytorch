@@ -626,17 +626,6 @@ coverage_ignore_functions = [
     # torch.distributed.rpc.internal
     "deserialize",
     "serialize",
-    # torch.distributed.tensor.api
-    "distribute_module",
-    "distribute_tensor",
-    # torch.distributed.tensor.random
-    "is_rng_supported_mesh",
-    # torch.distributed.tensor.experimental
-    "context_parallel",
-    "local_map",
-    "register_sharding",
-    # torch.distributed.tensor.debug
-    "visualize_sharding",
     # torch.distributed.tensor.parallel.api
     "parallelize_module",
     # torch.distributed.tensor.parallel.input_reshard
@@ -2176,6 +2165,7 @@ coverage_ignore_classes = [
     "SynchronizationError",
     "UnsynchronizedAccessError",
     # torch.cuda.memory
+    "MemPool",
     "MemPoolContext",
     # torch.distributed.elastic.multiprocessing.errors
     "ChildFailedError",
@@ -2632,15 +2622,6 @@ coverage_ignore_classes = [
     "RemoteException",
     # torch.distributed.rpc.rref_proxy
     "RRefProxy",
-    # torch.distributed.tensor.api
-    "DTensor",
-    # torch.distributed.tensor.placement_types
-    "DTensorSpec",
-    "Placement",
-    # torch.distributed.tensor.random
-    "OffsetBasedRNGTracker",
-    # torch.distributed.tensor.debug
-    "CommDebugMode",
     # torch.distributed.tensor.parallel.fsdp
     "DTensorExtensions",
     # torch.distributed.tensor.parallel.style
@@ -3372,7 +3353,7 @@ master_doc = "index"
 
 # General information about the project.
 project = "PyTorch"
-copyright = "2023, PyTorch Contributors"
+copyright = "2024, PyTorch Contributors"
 author = "PyTorch Contributors"
 torch_version = str(torch.__version__)
 
@@ -3490,9 +3471,7 @@ if RELEASE:
 # so a file named "default.css" will overwrite the builtin "default.css".
 html_static_path = ["_static"]
 
-html_css_files = [
-    "css/jit.css",
-]
+html_css_files = ["css/jit.css", "css/custom.css"]
 
 from sphinx.ext.coverage import CoverageBuilder
 

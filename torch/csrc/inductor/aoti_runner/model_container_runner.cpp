@@ -5,14 +5,23 @@
 #include <torch/csrc/inductor/aoti_torch/oss_proxy_executor.h>
 #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
 
-// TODO: Investigate why this is necessary, but fixes build problems in FRL
-#if __has_include("filesystem")
+#ifndef _WIN32
+#include <sys/stat.h>
+#else
 #include <filesystem>
 namespace fs = std::filesystem;
-#else
-#include <experimental/filesystem>
-namespace fs = std::experimental::filesystem;
 #endif
+
+namespace {
+bool file_exists(std::string& path) {
+#ifdef _WIN32
+  return fs::exists(path);
+#else
+  struct stat rc {};
+  return lstat(path.c_str(), &rc) == 0;
+#endif
+}
+} // namespace
 
 namespace torch::inductor {
 
@@ -60,11 +69,13 @@ AOTIModelContainerRunner::AOTIModelContainerRunner(
   size_t lastindex = model_so_path.find_last_of('.');
   std::string json_filename = model_so_path.substr(0, lastindex) + ".json";
 
-  if (fs::exists(json_filename)) {
+  if (file_exists(json_filename)) {
     proxy_executor_ = std::make_unique<torch::aot_inductor::OSSProxyExecutor>(
         json_filename, device_str == "cpu");
     proxy_executor_handle_ =
         reinterpret_cast<AOTIProxyExecutorHandle>(proxy_executor_.get());
+  } else {
+    proxy_executor_handle_ = nullptr;
   }
 
   AOTI_RUNTIME_ERROR_CODE_CHECK(create_func_(
@@ -81,7 +92,7 @@ AOTIModelContainerRunner::~AOTIModelContainerRunner() {
 }
 
 std::vector<at::Tensor> AOTIModelContainerRunner::run(
-    std::vector<at::Tensor>& inputs,
+    const std::vector<at::Tensor>& inputs,
     AOTInductorStreamHandle cuda_stream_handle) {
   auto input_handles =
       torch::aot_inductor::unsafe_alloc_new_handles_from_tensors(inputs);

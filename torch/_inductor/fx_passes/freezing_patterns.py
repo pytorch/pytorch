@@ -119,6 +119,9 @@ def addmm_patterns_init():
         device = "cuda"
     else:
         device = "cpu"
+        if not config.cpp.enable_concat_linear:
+            return
+
     val = functools.partial(torch.empty, (10, 10), device=device, requires_grad=False)
 
     def check_concat_weights(match):
@@ -223,5 +226,5 @@ def unnecessary_dtype_convert(match: Match, **kwargs):
     """Remove unnecessary dtype conversion op, probably left as a result of Conv-Bn folding"""
     graph = match.graph
     node = match.output_node()
-    node.replace_all_uses_with(node.args[0])
+    node.replace_all_uses_with(node.args[0])  # type: ignore[arg-type]
     graph.erase_node(node)

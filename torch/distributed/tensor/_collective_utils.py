@@ -7,7 +7,7 @@ from typing import List, Optional
 
 import torch
 import torch.distributed._functional_collectives as funcol
-import torch.distributed.tensor.placement_types as placement_types
+import torch.distributed.tensor._dtensor_spec as dtensor_spec
 from torch._C._distributed_c10d import _resolve_process_group
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh
 from torch.distributed.distributed_c10d import (
@@ -202,7 +202,7 @@ def fill_empty_tensor_to_shards(
 
 def check_tensor_meta(
     local_tensor, check_shape_stride=False
-) -> Optional["placement_types.TensorMeta"]:
+) -> Optional["dtensor_spec.TensorMeta"]:
     local_metadata = {
         "dtype": local_tensor.dtype,
         "requires_grad": local_tensor.requires_grad,
@@ -224,7 +224,7 @@ def check_tensor_meta(
     return None
 
 
-def spec_to_bytes(spec: "placement_types.DTensorSpec") -> int:
+def spec_to_bytes(spec: "dtensor_spec.DTensorSpec") -> int:
     assert spec.tensor_meta is not None, "spec should have tensor meta defined!"
     return spec.tensor_meta.dtype.itemsize * math.prod(spec.shape)
 
@@ -311,8 +311,8 @@ def reduce_scatter_cost(
 
 
 def redistribute_cost(
-    current_spec: "placement_types.DTensorSpec",
-    target_spec: "placement_types.DTensorSpec",
+    current_spec: "dtensor_spec.DTensorSpec",
+    target_spec: "dtensor_spec.DTensorSpec",
 ) -> float:
     """
     This function returns the cost of redistribute from current to target DTensorSpec.

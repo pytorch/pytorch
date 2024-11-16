@@ -235,7 +235,24 @@ def create_joint(fn: Callable, *, aot_config: AOTConfig) -> Any:
         backward_out: Tuple[Tensor, ...] = ()
         # Call the backwards pass
         if grad_primals:
-            with fx_traceback.preserve_node_meta():
+            functional_tensor_mode = torch.utils._python_dispatch._detect_infra_mode(
+                torch._C._TorchDispatchModeKey.FUNCTIONAL
+            )
+            if functional_tensor_mode is not None:
+                # Side-Effect Tokens:
+                # We want to have independent chains of tokens for forward and backward.
+                # functional_tensor_mode._tokens is used by both.
+                # We memoize the result tokens of forward in functional_tensor_mode._tokens_forward_output,
+                # to return them as joint graph outputs.
+                # We clean functional_tensor_mode._tokens before backward, to prevent reuse of forward tokens in backward.
+                # Joint graph tracing allows tokens discovery,
+                # So all the tokens in backward will be created and added as a graph inputs during tracing.
+                functional_tensor_mode._tokens_forward_output = (
+                    functional_tensor_mode._tokens
+                )
+                functional_tensor_mode._tokens = {}
+
+            with set_partitioner_tag_is_backward(), fx_traceback.preserve_node_meta():
                 # for full graph export, we always export a joint graph where we assume no tangents are needed.
                 if aot_config.no_tangents:
                     assert len(needed_tangents) == 1 and needed_tangents[0].numel() == 1
@@ -348,6 +365,14 @@ def set_partitioner_tag(tag: str):
         fx_traceback.current_meta[meta_key] = original_val
 
 
+def set_partitioner_tag_is_backward():
+    return set_partitioner_tag("is_backward")
+
+
+def set_partitioner_tag_must_be_in_backward():
+    return set_partitioner_tag("must_be_in_backward")
+
+
 # This creates the final function that we want to trace using make_fx(),
 # in both aot_dispatch_autograd and aot_dispatch_base.
 # Preconditions:
@@ -439,9 +464,7 @@ def create_functionalized_fn(
                         # Not banning here mutations on inpt_info.requires_grad -
                         # we'll check at runtime and fail only when backward is under torch.is_grad_enabled (create_graph)
                         # Add node meta for copy_ for partitioner that this node should be in backward graph.
-                        with torch.fx.traceback.preserve_node_meta(), set_partitioner_tag(
-                            "must_be_in_backward"
-                        ):
+                        with torch.fx.traceback.preserve_node_meta(), set_partitioner_tag_must_be_in_backward():
                             before.copy_(after)
                         meta.indices_of_inputs_that_requires_grad_with_mutations_in_bw.append(
                             idx
@@ -649,12 +672,12 @@ def handle_effect_tokens_fn(
             if trace_joint:
                 assert isinstance(args, tuple) and isinstance(args[0], (list, tuple))
                 tokens = args[0][:num_tokens]
+                assert all(token.numel() == 0 for token in tokens)
                 args = (args[0][num_tokens:], *args[1:])
             else:
                 tokens = args[:num_tokens]
+                assert all(token.numel() == 0 for token in tokens)
                 args = args[num_tokens:]
-
-            assert all(token.numel() == 0 for token in tokens)
 
             # Populate the current FunctionalTensorMode with the tokens per
             # operator. See Note [FunctionalTensorMode is Stateful]
@@ -671,17 +694,30 @@ def handle_effect_tokens_fn(
 
         # Return both the tokens and the outputs
         # See Note [Side-Effectful Tokens in AOTAutograd]
-        f_out_tokens = functional_tensor_mode._tokens.values()
-        out_tokens = [from_fun(t) for t in f_out_tokens]
+        if trace_joint:
+            assert len(outs) == 2
+            assert len(functional_tensor_mode._tokens_forward_output) == num_tokens
+            fwd_out_tokens = functional_tensor_mode._tokens_forward_output.values()
+
+            bwd_out_tokens = functional_tensor_mode._tokens.values()
+
+            f_fwd_out_tokens = [from_fun(t) for t in fwd_out_tokens]
+            f_bwd_out_tokens = [from_fun(t) for t in bwd_out_tokens]
+
+            meta.num_backward_tokens = len(bwd_out_tokens)
+            return ((*f_fwd_out_tokens, *outs[0]), (*outs[1], *f_bwd_out_tokens))
+
+        out_tokens = [from_fun(t) for t in functional_tensor_mode._tokens.values()]
         return (*out_tokens, *outs)
 
     # Additionally pass in tokens as inputs
     # See Note [Side-Effectful Tokens in AOTAutograd]
-    additional_token_inputs = [torch.tensor([])] * len(meta.tokens)
+    additional_fwd_token_inputs = [torch.tensor([])] * num_tokens
+
     if trace_joint:
-        args = ([*additional_token_inputs, *args[0]], *args[1:])
+        args = ([*additional_fwd_token_inputs, *args[0]], *args[1:])
     else:
-        args = [*additional_token_inputs, *args]
+        args = [*additional_fwd_token_inputs, *args]
     return inner_fn, args
 
 
@@ -739,10 +775,19 @@ def aot_dispatch_subclass(
             grad_inputs = wrapped_outs[1]
             subclass_meta.grad_input_metas = create_subclass_meta(grad_inputs)
 
+            # Add extra symints as outputs to the forward/backward graphs
+            # ignore nested ints here
+            forward_outs = unwrap_tensor_subclasses(
+                wrapped_outs[0], append_symints=True
+            )
+            # ignore nested ints here
+            backward_outs = unwrap_tensor_subclasses(
+                wrapped_outs[1], append_symints=True
+            )
+            return (forward_outs, backward_outs)
+
         # Step 3: Unwrap any subclass outputs back into dense tensors
-        unwrapped_outs = unwrap_tensor_subclasses(
-            wrapped_outs, is_joint_structure=use_trace_joint
-        )
+        unwrapped_outs = unwrap_tensor_subclasses(wrapped_outs, append_symints=True)
         return unwrapped_outs
 
     def joint_fn(primals, tangents):
@@ -758,9 +803,16 @@ def aot_dispatch_subclass(
     def metadata_fn(*primals):
         return inner_fn(fw_only, primals, use_trace_joint=False)
 
-    args_unwrapped = unwrap_tensor_subclasses(
-        args, is_joint_structure=is_joint_structure
-    )
+    if is_joint_structure:
+        args_unwrapped = (
+            # Add extra symints (size/strides) as input to the forward graph
+            unwrap_tensor_subclasses(args[0], append_symints=True),
+            # We pass append_symints=False here because the partitioner will
+            # capture and add any extra argument
+            unwrap_tensor_subclasses(args[1], append_symints=False),
+        )
+    else:
+        args_unwrapped = unwrap_tensor_subclasses(args, append_symints=True)
     remapped_static_indices = remap_unwrapped_subclass_arg_indices(
         args, meta.static_input_indices
     )
@@ -786,7 +838,7 @@ def aot_dispatch_subclass(
     # However, the original ViewAndMutationMeta that we computed was created
     # on the subclass -> subclass graph,
     # which can have a different number of outputs than the dense -> dense graph.
-    # That's why we createa a fresh metadata object on the dense -> dense function here,
+    # That's why we created a fresh metadata object on the dense -> dense function here,
     # and plumb it back up to the partitioner.
     # See Note: [Partitioner handling for Subclasses, Part 2] for more info.
     meta_updated = run_functionalized_fw_and_collect_metadata(

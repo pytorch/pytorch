@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import sympy
 
 import torch
+from torch._inductor.codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 
 from .. import config as inductor_config
 from ..ir import ChoiceCaller, Layout, StorageBox, TensorBox
@@ -15,9 +16,8 @@ from ..select_algorithm import (
     realize_inputs,
     TritonTemplate,
 )
-from ..utils import use_aten_gemm_kernels, use_triton_template
-from .mm import _is_static_problem  # TODO(yangsiyu) move to mm_common
-from .mm_common import mm_args, mm_grid, scaled_mm_configs
+from ..utils import use_aten_gemm_kernels, use_ck_gemm_template, use_triton_template
+from .mm_common import _is_static_problem, mm_args, mm_grid, scaled_mm_configs
 
 
 log = logging.getLogger(__name__)
@@ -189,7 +189,21 @@ scaled_mm_bias_template = TritonTemplate(
 )
 
 
-aten__fp8_mm = ExternKernelChoice(torch._scaled_mm, "at::_scaled_mm")
+aten__fp8_mm = ExternKernelChoice(
+    torch._scaled_mm, "at::_scaled_mm_out", op_overload=aten._scaled_mm.out
+)
+
+
+def are_compatible_scales(size_a: List[int], size_b: List[int]) -> bool:
+    # Same sized scales are compatable
+    if len(size_a) == len(size_b):
+        return True
+
+    # Both need to be scalars or len(1) tensors
+    if len(size_a) <= 1 and len(size_b) <= 1:
+        return True
+
+    return False
 
 
 def scaled_mm_options(  # type: ignore[no-untyped-def]
@@ -207,10 +221,11 @@ def scaled_mm_options(  # type: ignore[no-untyped-def]
         sympy.gcd(sym_k, config.kwargs["BLOCK_K"]) == config.kwargs["BLOCK_K"]
     )
 
-    assert len(scale_a.get_size()) == len(
-        scale_b.get_size()
-    ), "Expect inverse scale_a and scale_b to be both scalars (tensor-wise scaling) or tensors (rowwise scaling)."
-
+    size_a, size_b = scale_a.get_size(), scale_b.get_size()
+    assert are_compatible_scales(size_a, size_b), (
+        "Expect scale_a and scale_b to be either both scalars (including single-element tensors) "
+        f"or 1-dimensional tensors with the same size. Got scale_a: {len(size_a)} and scale_b: {len(size_b)}."
+    )
     return dict(
         GROUP_M=8,
         EVEN_K=even_k_symbolic,
@@ -220,7 +235,7 @@ def scaled_mm_options(  # type: ignore[no-untyped-def]
         num_stages=config.num_stages,
         num_warps=config.num_warps,
         # tensor-wise scaling if scalar scales
-        SCALING_ROWWISE=len(scale_a.get_size()) != 0,
+        SCALING_ROWWISE=len(scale_a.get_size()) == 2,
         **config.kwargs,
     )
 
@@ -263,7 +278,7 @@ def tuned_scaled_mm(
     if use_aten_gemm_kernels():
         choices.append(aten_choice)
 
-    static_shape, is_nonzero = _is_static_problem([mat_a, mat_b], layout)
+    static_shape, is_nonzero = _is_static_problem(layout)
     if is_nonzero and use_triton_template(layout, enable_float8=True):
         for config in scaled_mm_configs(m, n, k):
             if k == 16 and config.kwargs["BLOCK_M"] >= 64:
@@ -278,6 +293,9 @@ def tuned_scaled_mm(
                 layout=layout,
                 **kwargs,
             )
+
+    if is_nonzero and use_ck_gemm_template(layout, m, n, k):
+        CKGemmTemplate.add_ck_gemm_choices(choices, layout, input_nodes)
 
     if (
         len(choices) == 0

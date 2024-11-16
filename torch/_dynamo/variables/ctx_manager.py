@@ -125,6 +125,12 @@ class ContextWrappingVariable(VariableTracker):
         if isinstance(args[0], UserFunctionVariable):
             return WrappedUserFunctionVariable(args[0], self)
 
+    def supports_graph_breaks(self):
+        return True
+
+    def exit_on_graph_break(self):
+        return True
+
 
 class GenericContextWrappingVariable(UserDefinedObjectVariable):
     # Some methods in ContextWrappingVariable assumes the arguments are
@@ -182,6 +188,12 @@ class GenericContextWrappingVariable(UserDefinedObjectVariable):
 
         tx.generic_context_manager_depth -= 1
         return x
+
+    def supports_graph_breaks(self):
+        return False
+
+    def exit_on_graph_break(self):
+        return True
 
 
 class GradInplaceRequiresGradCtxManagerVariable(ContextWrappingVariable):
@@ -433,12 +445,21 @@ class VmapIncrementNestingCtxManagerVariable(ContextWrappingVariable):
     def enter(self, tx):
         install_guard(self._guards_singleton)
         batch_size, randomness = self.target_values
-        vmap_level = torch._C._functorch._vmap_increment_nesting(batch_size, randomness)
+        if isinstance(batch_size, variables.SymNodeVariable):
+            batch_size_value = batch_size.sym_num
+            batch_size_node = batch_size.as_proxy().node
+        else:
+            batch_size_value = batch_size.as_python_constant()
+            batch_size_node = batch_size.as_python_constant()
+        randomness = randomness.as_python_constant()
+        vmap_level = torch._C._functorch._vmap_increment_nesting(
+            batch_size_value, randomness
+        )
         self.set_cleanup_hook(tx, lambda: torch._C._functorch._vmap_decrement_nesting())
         self.state.proxy = tx.output.create_node(
             "call_function",
             torch._C._functorch._vmap_increment_nesting,
-            (batch_size, randomness),
+            (batch_size_node, randomness),
             {},
         )
         return variables.ConstantVariable.create(vmap_level)
@@ -637,6 +658,8 @@ class TorchFunctionDisableVariable(ContextWrappingVariable):
 
     def _call_func(self, tx: "InstructionTranslator", values):
         assert len(values) == 1
+        tx.symbolic_torch_function_state.torch_function_subclass_enabled = values[0]
+        tx.symbolic_torch_function_state.torch_function_mode_enabled = values[0]
         tx.output.set_torch_function_state(values[0])
 
 
@@ -975,6 +998,80 @@ class FSDPParamGroupUseTrainingStateVariable(ContextWrappingVariable):
 
     def fn_name(self):
         return "use_training_state"
+
+
+class SDPAKernelVariable(ContextWrappingVariable):
+    """represents torch.nn.attention.sdpa_kernel"""
+
+    @staticmethod
+    def create(tx: "InstructionTranslator", backends, **kwargs):
+        if isinstance(backends, torch.nn.attention.SDPBackend):
+            backends = [backends]
+        var = SDPAKernelVariable(
+            target_values=backends,
+            initial_values=None,
+            **kwargs,
+        )
+        return var
+
+    def __init__(
+        self,
+        target_values: List[torch.nn.attention.SDPBackend],
+        initial_values=None,
+        **kwargs,
+    ) -> None:
+        super().__init__(
+            target_values=target_values, initial_values=initial_values, **kwargs
+        )
+
+    @staticmethod
+    def _backends_to_nodes(tx, backends):
+        nodes = []
+        for backend in backends:
+            # convert to/from string in order to bake the backend into FX graph
+            nodes.append(
+                tx.output.create_node(
+                    "call_function",
+                    torch.nn.attention._backend_from_string,
+                    (backend.name,),
+                    {},
+                )
+            )
+        return nodes
+
+    def enter(self, tx):
+        self.prev_backends = torch.nn.attention._cur_sdpa_kernel_backends()
+        self.set_cleanup_hook(
+            tx, lambda: torch.nn.attention._sdpa_kernel(self.prev_backends)
+        )
+        torch.nn.attention._sdpa_kernel(self.target_values)
+        arg = self._backends_to_nodes(tx, self.target_values)
+        tx.output.create_node(
+            "call_function",
+            torch.nn.attention._sdpa_kernel,
+            (arg,),
+            {},
+        )
+        return variables.ConstantVariable.create(None)
+
+    def exit(self, tx: "InstructionTranslator", *args):
+        self.state.cleanup_assert()
+        arg = self._backends_to_nodes(tx, self.prev_backends)
+        tx.output.create_node(
+            "call_function",
+            torch.nn.attention._sdpa_kernel,
+            (arg,),
+            {},
+        )
+        return variables.ConstantVariable.create(None)
+
+    def module_name(self):
+        return "torch.nn.attention"
+
+    # use a private version of sdpa_kernel that accepts variadic arguments
+    # since dynamo reconstructs the contents of target_values one-by-one
+    def fn_name(self):
+        return "_sdpa_kernel_variadic"
 
 
 class StreamVariable(VariableTracker):

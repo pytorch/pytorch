@@ -9,13 +9,11 @@
 
 namespace F = torch::nn::functional;
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 LayerNormImpl::LayerNormImpl(LayerNormOptions options_)
     : options(std::move(options_)) {
-  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
-  reset();
+  LayerNormImpl::reset();
 }
 
 void LayerNormImpl::reset() {
@@ -121,5 +119,4 @@ void GroupNormImpl::pretty_print(std::ostream& stream) const {
          << ", affine=" << options.affine() << ")";
 }
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

@@ -264,7 +264,7 @@ def create_getattr_from_value(
     attr_name = get_new_attr_name(module)
     device = assert_and_get_unique_device(module)
     new_value = (
-        value.clone().detach()
+        value.detach().clone()
         if isinstance(value, torch.Tensor)
         else torch.tensor(value, device=device)
     )
@@ -821,7 +821,7 @@ def _reroute_tuple_getitem_pattern(graph: Graph):
         last_getitem_index = last_getitem.args[1]
         new_input = first_tuple.args[0][last_getitem_index]  # type: ignore[index]
         for user in list(last_getitem.users.keys()):
-            user.replace_input_with(last_getitem, new_input)
+            user.replace_input_with(last_getitem, new_input)  # type: ignore[arg-type]
 
 
 def _get_observer_from_activation_post_process(

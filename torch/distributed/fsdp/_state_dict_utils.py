@@ -297,7 +297,7 @@ def _full_pre_state_dict_hook(
     ``nn.Module``.
     """
     if getattr(fsdp_state, "_device_mesh", False):
-        root_mesh = _mesh_resources.get_root_mesh(fsdp_state._device_mesh)
+        _mesh_resources.get_root_mesh(fsdp_state._device_mesh)
 
     _common_pre_state_dict_hook(module, fsdp_state)
     _common_unshard_pre_state_dict_hook(
@@ -338,7 +338,7 @@ def _full_post_state_dict_hook(
         # Clone parameters before exiting the `_unshard_fsdp_state_params()` context.
         if not getattr(state_dict[fqn], "_has_been_cloned", False):
             try:
-                state_dict[fqn] = state_dict[fqn].clone().detach()
+                state_dict[fqn] = state_dict[fqn].detach().clone()
                 state_dict[fqn]._has_been_cloned = True  # type: ignore[attr-defined]
             except BaseException as e:
                 warnings.warn(
@@ -730,13 +730,18 @@ def _post_state_dict_hook(
         for key, tensor in sorted(processed_state_dict.items()):
             if key.startswith(prefix) and isinstance(tensor, torch.Tensor):
                 local_shape = tensor.shape
+                device = None
                 if isinstance(tensor, ShardedTensor):
                     local_shape = None
                     shards = tensor.local_shards()
                     if shards:
                         local_shape = shards[0].tensor.shape
+                        device = shards[0].tensor.device
                 elif isinstance(tensor, DTensor):
                     local_shape = tensor.to_local().shape
+                    device = tensor.device
+                else:
+                    device = tensor.device
                 logger.info(
                     "FQN=%s: type=%s, shape=%s, local_shape=%s, dtype=%s, device=%s",
                     key,
@@ -744,7 +749,7 @@ def _post_state_dict_hook(
                     tensor.shape,
                     local_shape,
                     tensor.dtype,
-                    tensor.device,
+                    device,
                 )
 
     return processed_state_dict

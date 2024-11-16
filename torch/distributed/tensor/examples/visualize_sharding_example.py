@@ -7,7 +7,7 @@ import os
 
 import torch
 from torch.distributed.tensor import DeviceMesh, distribute_tensor, Replicate, Shard
-from torch.distributed.tensor.debug.visualize_sharding import visualize_sharding
+from torch.distributed.tensor.debug import visualize_sharding
 
 
 world_size = int(os.environ["WORLD_SIZE"])

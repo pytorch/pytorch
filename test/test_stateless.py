@@ -738,6 +738,8 @@ class TestStatelessFunctionalAPI(TestCase):
         self.assertEqual(res, other_inp)
         res_1 = functional_call(mod, a, (), {'inp': inp, 'other_inp': other_inp})
         self.assertEqual(res, res_1)
+        res_2 = functional_call(mod, a, kwargs={'inp': inp, 'other_inp': other_inp})
+        self.assertEqual(res, res_2)
 
     def test_functional_call_tuple_dicts(self):
         mod = MockModule()

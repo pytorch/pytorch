@@ -115,7 +115,7 @@ class CommDebugModeExample:
             output_tp = model(inp)
             output_tp.sum().backward()
 
-        comm_mode.print_sharding_info()
+        print(comm_mode.get_sharding_info())
 
     def example_MLPStacked_distributed_sharding_display(self) -> None:
         """
@@ -152,7 +152,7 @@ class CommDebugModeExample:
             output_tp = model(inp)
             output_tp.sum().backward()
 
-        comm_mode.print_sharding_info()
+        print(comm_mode.get_sharding_info())
 
     def example_MLP_module_tracing(self) -> None:
         """
@@ -269,7 +269,7 @@ class CommDebugModeExample:
 
         comm_mode = CommDebugMode()
         with comm_mode:
-            output = model(inp)
+            model(inp)
 
         # print the module level collective tracing information
         print(comm_mode.generate_comm_debug_tracing_table(noise_level=0))
@@ -592,7 +592,7 @@ class CommDebugModeExample:
 
         comm_mode = CommDebugMode()
         with comm_mode:
-            output = model(inp)
+            model(inp)
 
         # print the operation level collective tracing information
         print(comm_mode.generate_comm_debug_tracing_table(noise_level=2))
@@ -628,7 +628,7 @@ class CommDebugModeExample:
 
         comm_mode = CommDebugMode()
         with comm_mode:
-            output = model(inp)
+            model(inp)
 
         comm_mode.generate_json_dump(file_name="transformer_log.json", noise_level=1)
         comm_mode.generate_json_dump(file_name="transformer_log_2.json", noise_level=2)

@@ -13,10 +13,7 @@ namespace at {
 struct DynamicLibrary;
 }
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cpu {
+namespace torch::jit::fuser::cpu {
 
 // Represents a compiled CPU kernel and the metadata necessary to run it
 struct TORCH_API FusedKernelCPU : public FusedKernel {
@@ -43,7 +40,4 @@ struct TORCH_API FusedKernelCPU : public FusedKernel {
   void (*kernel)(uint32_t, void**) = nullptr;
 };
 
-} // namespace cpu
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::fuser::cpu

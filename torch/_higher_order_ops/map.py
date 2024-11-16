@@ -7,6 +7,7 @@ from torch._functorch.aot_autograd import AOTConfig, create_joint
 from torch._higher_order_ops.utils import (
     _has_potential_branch_input_alias,
     _has_potential_branch_input_mutation,
+    _maybe_run_with_interpreter,
     reenter_make_fx,
     UnsupportedAliasMutationException,
 )
@@ -26,18 +27,32 @@ from .utils import (
     _unstack_pytree,
     clone_outputs_aliasing_inputs,
     prepare_fw_with_masks,
+    save_tensors_and_symints_for_backward,
+    saved_tensors_and_symints,
 )
 
 
 # TODO: We add this to prevent dymamo from tracing into map_wrapper,
 # remove the wrapper call when it's ready.
 class MapWrapper(HigherOrderOperator):
+    def __init__(self):
+        super().__init__("map")
+
     def __call__(self, xs, *args):
         return map_wrapper(xs, *args)
 
 
-map = MapWrapper("map")
-map_impl = HigherOrderOperator("map_impl")
+class MapImpl(HigherOrderOperator):
+    def __init__(self):
+        super().__init__("map_impl")
+
+    def __call__(self, *args, **kwargs):
+        return super().__call__(*args, **kwargs)
+
+
+map = MapWrapper()
+
+map_impl = MapImpl()
 
 dummy_aot_config = AOTConfig(
     fw_compiler=None,  # type: ignore[arg-type]
@@ -144,7 +159,7 @@ def map_wrapper(f, xs, *args):
 class MapAutogradOp(torch.autograd.Function):
     @staticmethod
     def forward(ctx, fw_graph, joint_graph, num_mapped_args, *flat_args):
-        ctx.save_for_backward(*flat_args)
+        save_tensors_and_symints_for_backward(ctx, flat_args)
         ctx._joint_graph = joint_graph
         ctx._num_mapped_args = num_mapped_args
         with torch._C._AutoDispatchBelowAutograd():
@@ -156,7 +171,7 @@ class MapAutogradOp(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, *flat_grads):
-        fw_args = ctx.saved_tensors
+        fw_args = saved_tensors_and_symints(ctx)
         fw_mapped_args = fw_args[: ctx._num_mapped_args]
         pos_args = fw_args[ctx._num_mapped_args :]
 
@@ -231,7 +246,7 @@ def map_fake_tensor_mode(mode, f, xs, args):
 def map_functionalize(ctx, f, xs, pos_args):
     unwrapped_xs = ctx.unwrap_tensors(xs)
     unwrapped_args = ctx.unwrap_tensors(pos_args)
-    wrapped_fn = ctx.functionalize(f)
+    wrapped_fn = ctx.functionalize(_maybe_run_with_interpreter(f))
 
     with ctx.redispatch_to_next():
         with disable_proxy_modes_tracing():

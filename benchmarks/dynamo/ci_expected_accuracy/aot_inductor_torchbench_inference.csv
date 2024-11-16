@@ -6,7 +6,7 @@ torchrec_dlrm,eager_fail_to_run,0
 
 
 
-BERT_pytorch,fail_to_run,0
+BERT_pytorch,pass,0
 
 
 
@@ -30,7 +30,7 @@ basic_gnn_edgecnn,pass,0
 
 
 
-basic_gnn_gcn,fail_to_run,0
+basic_gnn_gcn,pass,0
 
 
 
@@ -278,7 +278,7 @@ resnext50_32x4d,pass,0
 
 
 
-sam,fail_to_run,0
+sam,pass,0
 
 
 
@@ -346,4 +346,4 @@ vision_maskrcnn,fail_to_run,0
 
 
 
-yolov3,pass,0
+yolov3,fail_to_run,0

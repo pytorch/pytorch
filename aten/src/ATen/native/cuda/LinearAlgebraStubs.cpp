@@ -138,19 +138,19 @@ void lazy_ldl_solve(
 }
 
 REGISTER_CUDA_DISPATCH(cholesky_stub, &lazy_cholesky_kernel)
-REGISTER_CUDA_DISPATCH(cholesky_inverse_stub, &lazy_cholesky_inverse_kernel);
-REGISTER_CUDA_DISPATCH(lu_factor_stub, &lazy_lu_factor);
-REGISTER_CUDA_DISPATCH(ldl_factor_stub, &lazy_ldl_factor);
-REGISTER_CUDA_DISPATCH(ldl_solve_stub, &lazy_ldl_solve);
-REGISTER_CUDA_DISPATCH(triangular_solve_stub, &lazy_triangular_solve_kernel);
-REGISTER_CUDA_DISPATCH(orgqr_stub, &lazy_orgqr_kernel);
-REGISTER_CUDA_DISPATCH(ormqr_stub, &lazy_ormqr_kernel);
-REGISTER_CUDA_DISPATCH(geqrf_stub, &lazy_geqrf_kernel);
-REGISTER_CUDA_DISPATCH(linalg_eigh_stub, &lazy_linalg_eigh_kernel);
-REGISTER_CUDA_DISPATCH(linalg_eig_stub, &lazy_linalg_eig_kernel);
+REGISTER_CUDA_DISPATCH(cholesky_inverse_stub, &lazy_cholesky_inverse_kernel)
+REGISTER_CUDA_DISPATCH(lu_factor_stub, &lazy_lu_factor)
+REGISTER_CUDA_DISPATCH(ldl_factor_stub, &lazy_ldl_factor)
+REGISTER_CUDA_DISPATCH(ldl_solve_stub, &lazy_ldl_solve)
+REGISTER_CUDA_DISPATCH(triangular_solve_stub, &lazy_triangular_solve_kernel)
+REGISTER_CUDA_DISPATCH(orgqr_stub, &lazy_orgqr_kernel)
+REGISTER_CUDA_DISPATCH(ormqr_stub, &lazy_ormqr_kernel)
+REGISTER_CUDA_DISPATCH(geqrf_stub, &lazy_geqrf_kernel)
+REGISTER_CUDA_DISPATCH(linalg_eigh_stub, &lazy_linalg_eigh_kernel)
+REGISTER_CUDA_DISPATCH(linalg_eig_stub, &lazy_linalg_eig_kernel)
 REGISTER_CUDA_DISPATCH(svd_stub, &lazy_svd_kernel)
-REGISTER_CUDA_DISPATCH(lu_solve_stub, &lazy_lu_solve);
-REGISTER_CUDA_DISPATCH(lstsq_stub, &lazy_lstsq_kernel);
+REGISTER_CUDA_DISPATCH(lu_solve_stub, &lazy_lu_solve)
+REGISTER_CUDA_DISPATCH(lstsq_stub, &lazy_lstsq_kernel)
 } // anonymous namespace
 
 // Old style dispatches
@@ -160,12 +160,12 @@ REGISTER_CUDA_DISPATCH(lstsq_stub, &lazy_lstsq_kernel);
 // Protect from infinite recursion by initializing dispatch to self and checking
 // that values are different after linalg library were loaded
 
-namespace cuda {
-namespace detail {
+
+namespace cuda::detail {
 void registerLinalgDispatch(const LinalgDispatch& disp_) {
   disp = disp_;
 }
-}} //namespace cuda::detail
+} //namespace cuda::detail
 
 Tensor _cholesky_solve_helper_cuda(const Tensor& self, const Tensor& A, bool upper) {
     getTorchLinalgLibrary();

@@ -135,9 +135,7 @@ def _port_metadata_for_output_quant_nodes(
         return
 
     node_users = _filter_sym_size_users(node)
-    # some nodes might have side-effects, so they don't have users, but still
-    # are not removed by DCE pass
-    if len(node_users) == 0:
+    if len(node.users) == 0:
         return
     if len(node_users) != 1:
         logger.warning(f"Expecting {node} to have single user")  # noqa: G004
