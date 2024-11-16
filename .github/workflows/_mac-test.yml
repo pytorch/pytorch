@@ -208,7 +208,7 @@ jobs:
           cat test/**/*_toprint.log || true
 
       - name: Stop monitoring script
-        if: always() && !inputs.disable-monitor && ${{ steps.monitor-script.outputs.monitor-script-pid }}
+        if: ${{ always() && !inputs.disable-monitor && steps.monitor-script.outputs.monitor-script-pid }}
         continue-on-error: true
         env:
           MONITOR_SCRIPT_PID: ${{ steps.monitor-script.outputs.monitor-script-pid }}
