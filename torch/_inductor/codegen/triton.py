@@ -102,6 +102,9 @@ perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
 fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
 
+# Record upcasted ops, for test purposes.
+upcast_funcs: List[Tuple[Callable[..., Any], bool]] = []
+
 
 @lru_cache(None)
 def gen_attr_descriptor_import():
@@ -734,7 +737,10 @@ def maybe_upcast_float32(convert_output: bool = True):
     This decorates tl.math/libdevice codegen functions.
     """
 
-    def decorator(func: Callable) -> Callable:
+    def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
+        # Record that this function uses upcasts, for testing purposes.
+        upcast_funcs.append((func, convert_output))
+
         def wrapped(*args, **kwargs) -> str:
             # Optionally upcast args to float32.
             dtype = args[0].dtype
