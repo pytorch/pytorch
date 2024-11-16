@@ -179,3 +179,14 @@ if __name__ == "__main__":
         finally:
             print(json.dumps(stats))
             time.sleep(interval)
+    # CLOSE THE CONNECTION
+    if has_amdsmi:
+        try:
+            amdsmi.amdsmi_shut_down()
+        except amdsmi.AmdSmiException as e:
+            pass
+    if has_pynvml:
+        try:
+            pynvml.nvmlShutdown()
+        except pynvml.NVMLError as e:
+            pass
