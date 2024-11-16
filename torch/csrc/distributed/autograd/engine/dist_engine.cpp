@@ -4,14 +4,13 @@
 #include <c10/core/Event.h>
 #include <c10/util/DeadlockDetection.h>
 #include <c10/util/irange.h>
+#include <c10/util/thread_name.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/autograd/input_buffer.h>
 #include <torch/csrc/distributed/autograd/context/container.h>
 #include <torch/csrc/distributed/autograd/engine/dist_engine.h>
 
-namespace torch {
-namespace distributed {
-namespace autograd {
+namespace torch::distributed::autograd {
 
 using torch::autograd::AccumulateGrad;
 using torch::autograd::edge_list;
@@ -62,9 +61,9 @@ class DistAccumulateGradCaptureHook
       autogradContext_->accumulateGrad(
           accumulateGrad_->variable, inputGrads[0], 3 /* num_expected_refs */);
     }
-    const variable_list kEmptyOuput;
+    const variable_list kEmptyOutput;
     for (const auto& hook : accumulateGrad_->post_hooks()) {
-      (*hook)(kEmptyOuput, inputGrads);
+      (*hook)(kEmptyOutput, inputGrads);
     }
     return inputGrads[0];
   }
@@ -76,6 +75,7 @@ class DistAccumulateGradCaptureHook
 
 void DistEngine::globalCpuThread(
     const std::shared_ptr<ReadyQueue>& ready_queue) {
+  c10::setThreadName("pt_dist_engine");
   while (true) {
     NodeTask task = ready_queue->pop();
     if (task.isShutdownTask_) {
@@ -98,7 +98,7 @@ void DistEngine::globalCpuThread(
                     InputBuffer::variables(std::move(task.inputs_))]() mutable {
       InputBuffer inputs(variables.size());
       for (const auto i : c10::irange(variables.size())) {
-        inputs.add(i, std::move(variables[i]), c10::nullopt, c10::nullopt);
+        inputs.add(i, std::move(variables[i]), std::nullopt, std::nullopt);
       }
       execute_graph_task_until_ready_queue_empty(
           /*node_task*/ NodeTask(graphTask, graphRoot, std::move(inputs)),
@@ -219,8 +219,7 @@ void DistEngine::computeDependencies(
     queue.push(mapEntry.second.get());
   }
 
-  bool might_use_cuda = at::globalContext().hasCUDA();
-  bool will_use_cuda = false;
+  bool will_use_accelerator = false;
 
   edge_list recvBackwardEdges;
   // Traverse the graph.
@@ -229,8 +228,8 @@ void DistEngine::computeDependencies(
     auto fn = queue.front();
     queue.pop();
 
-    if (might_use_cuda && !will_use_cuda) {
-      will_use_cuda = fn->stream(c10::DeviceType::CUDA).has_value();
+    if (!will_use_accelerator) {
+      will_use_accelerator = fn->stream().has_value();
     }
 
     for (const auto& edge : fn->next_edges()) {
@@ -269,9 +268,10 @@ void DistEngine::computeDependencies(
     }
   }
 
-  if (will_use_cuda) {
-    // Collects current streams for devices where this process has a context,
-    // so graphTask::exec_post_processing can sync them with leaf_streams.
+  if (will_use_accelerator) {
+    // Collects current streams for CUDA/ROCM devices where this process has a
+    // context, so graphTask::exec_post_processing can sync them with
+    // leaf_streams.
     graphTask->stash_current_streams();
   }
 
@@ -366,7 +366,8 @@ void DistEngine::execute_graph_task_until_ready_queue_empty(
       // block and can be deallocated (release any references to grad tensors
       // as part of inputs_)
       NodeTask task = cpu_ready_queue->pop();
-      if (!(local_graph_task = task.base_.lock())) {
+      local_graph_task = task.base_.lock();
+      if (!local_graph_task) {
         continue;
       }
       if (task.fn_ && !local_graph_task->has_error_.load()) {
@@ -460,8 +461,7 @@ c10::intrusive_ptr<c10::ivalue::Future> DistEngine::executeSendFunctionAsync(
   // inputs might have been retrieved over the wire on a separate stream and the
   // sendFunction itself runs on a different stream. As a result, we need to
   // manually synchronize those two streams here.
-  const auto& send_backward_stream =
-      sendFunction->stream(c10::DeviceType::CUDA);
+  const auto& send_backward_stream = sendFunction->stream();
   if (send_backward_stream) {
     for (const auto& grad : sendFunction->getGrads()) {
       const auto guard = c10::impl::VirtualGuardImpl{c10::DeviceType::CUDA};
@@ -630,14 +630,12 @@ size_t DistEngine::numBackwardPasses() const {
   return initializedContextIds_.size();
 }
 
-std::unordered_map<std::string, int> DistEngine::getDebugInfo() const {
-  std::unordered_map<std::string, int> debugInfo;
-  debugInfo[kNumBackwardPasses] = numBackwardPasses();
-  debugInfo[kNumAutogradContexts] =
-      DistAutogradContainer::getInstance().numAutogradContexts();
+std::unordered_map<std::string, int64_t> DistEngine::getDebugInfo() const {
+  std::unordered_map<std::string, int64_t> debugInfo;
+  debugInfo[kNumBackwardPasses] = static_cast<int64_t>(numBackwardPasses());
+  debugInfo[kNumAutogradContexts] = static_cast<int64_t>(
+      DistAutogradContainer::getInstance().numAutogradContexts());
   return debugInfo;
 }
 
-} // namespace autograd
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::autograd

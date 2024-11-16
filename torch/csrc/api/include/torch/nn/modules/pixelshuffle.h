@@ -6,8 +6,7 @@
 
 #include <torch/csrc/Export.h>
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ PixelShuffle
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -15,7 +14,7 @@ namespace nn {
 /// Rearranges elements in a tensor of shape :math:`(*, C \times r^2, H, W)`
 /// to a tensor of shape :math:`(*, C, H \times r, W \times r)`, where r is an
 /// upscale factor. See
-/// https://pytorch.org/docs/master/nn.html#torch.nn.PixelShuffle to learn about
+/// https://pytorch.org/docs/main/nn.html#torch.nn.PixelShuffle to learn about
 /// the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::PixelShuffleOptions` class to learn
@@ -52,7 +51,7 @@ TORCH_MODULE(PixelShuffle);
 /// Reverses the PixelShuffle operation by rearranging elements in a tensor of
 /// shape :math:`(*, C, H \times r, W \times r)` to a tensor of shape :math:`(*,
 /// C \times r^2, H, W)`, where r is a downscale factor. See
-/// https://pytorch.org/docs/master/nn.html#torch.nn.PixelUnshuffle to learn
+/// https://pytorch.org/docs/main/nn.html#torch.nn.PixelUnshuffle to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::PixelUnshuffleOptions` class to learn
@@ -84,5 +83,4 @@ struct TORCH_API PixelUnshuffleImpl
 /// to learn about PyTorch's module storage semantics.
 TORCH_MODULE(PixelUnshuffle);
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

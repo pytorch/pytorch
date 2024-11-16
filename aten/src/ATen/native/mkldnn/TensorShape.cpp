@@ -26,7 +26,7 @@ Tensor mkldnn_reshape(const Tensor& self, IntArrayRef size) {
   TORCH_CHECK(false, "mkldnn_reshape: ATen not compiled with MKLDNN support");
 }
 
-Tensor mkldnn_clone(const Tensor& self, c10::optional<c10::MemoryFormat> optional_memory_format) {
+Tensor mkldnn_clone(const Tensor& self, std::optional<c10::MemoryFormat> optional_memory_format) {
   TORCH_CHECK(false, "mkldnn_clone: ATen not compiled with MKLDNN support");
 }
 
@@ -65,7 +65,7 @@ Tensor mkldnn_reshape(const Tensor& self, IntArrayRef size) {
                                  self.options().device_opt());
 }
 
-Tensor mkldnn_clone(const Tensor& self, c10::optional<c10::MemoryFormat> optional_memory_format) {
+Tensor mkldnn_clone(const Tensor& self, std::optional<c10::MemoryFormat> optional_memory_format) {
   TORCH_CHECK(
       !optional_memory_format.has_value(),
       "unsupported memory format option ",
@@ -99,15 +99,3 @@ Tensor& mkldnn_transpose_(Tensor& self, int64_t dim0, int64_t dim1) {
 } // namespace at
 
 #endif // AT_MKLDNN_ENABLED
-
-
-namespace at {
-namespace native {
-
-
-static Tensor mkldnn_view_symint(const Tensor& self, c10::SymIntArrayRef size) {
-  return mkldnn_view(self, C10_AS_INTARRAYREF_SLOW(size));
-}
-
-} // namespace native
-} // namespace at

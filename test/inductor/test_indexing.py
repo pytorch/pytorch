@@ -1,20 +1,35 @@
 # Owner(s): ["module: inductor"]
+import os
+import sys
+import unittest
+
 import sympy
 
+import torch
 from torch._inductor.codegen.cpp import cexpr
-from torch._inductor.codegen.triton import texpr, TritonPrinter
+from torch._inductor.codegen.triton import texpr
 from torch._inductor.codegen.wrapper import pexpr
-
+from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.sizevars import SizeVarAllocator
+from torch._inductor.test_case import TestCase as InductorTestCase
+from torch._inductor.utils import run_and_get_triton_code
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
-    TestCase as TorchTestCase,
 )
-from torch.utils._sympy.functions import FloorDiv, ModularIndexing, Round, RoundDecimal
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
+from torch.utils._sympy.functions import (
+    FloorDiv,
+    ModularIndexing,
+    RoundDecimal,
+    RoundToInt,
+)
 
 
-class TestIndexingSimplification(TorchTestCase):
+DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
+
+
+class TestIndexingSimplification(InductorTestCase):
     def test_indexing_simplification(self):
         sizevars = SizeVarAllocator()
         i0 = sympy.Symbol("i0", integer=True)
@@ -87,12 +102,12 @@ class TestIndexingSimplification(TorchTestCase):
         self.assertEqual(FloorDiv(i0 * 4, 2), i0 * 2)
 
         # Nested modular indexing is correctly simplified
-        var_ranges = {"i1": 13, "i2": 121}
+        var_ranges = {i1: 13, i2: 121}
         expr = ModularIndexing(ModularIndexing(121 * i1 + i2, 1, 784), 1, 28)
         self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expr)
         expr = ModularIndexing(ModularIndexing(121 * i1 + i2, 1, 784) + 1, 1, 28)
         self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expr)
-        var_ranges = {"i2": 784}
+        var_ranges = {i2: 784}
         expr = ModularIndexing(ModularIndexing(i2, 1, 28), 7, 4)
         expected = FloorDiv(ModularIndexing(i2, 1, 28), 7)
         self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expected)
@@ -159,8 +174,75 @@ class TestIndexingSimplification(TorchTestCase):
         self.assertEqual(simplified, FloorDiv(i0, 3))
         self.assertEqual(expr6.subs({i0: 39485}), simplified.subs({i0: 39485}))
 
+    def test_modular_indexing_pairs_merged(self):
+        sizevars = SizeVarAllocator()
+        x = sympy.Symbol("x", integer=True, positive=True)
+        a = 1024
+        b = 32
+        expr1 = ModularIndexing(x, 1, a)
+        expr2 = ModularIndexing(expr1, 1, b)
+        expected = ModularIndexing(x, 1, b)
 
-class ExprPrinterTests(TorchTestCase):
+        actual = sizevars.combine_modular_indexing_pairs(expr2)
+        self.assertEqual(expected, actual)
+        self.assertNotEqual(expr2, actual)
+
+    def test_modular_indexing_pairs_not_merged(self):
+        sizevars = SizeVarAllocator()
+        x = sympy.Symbol("x", integer=True, positive=True)
+        a = 1024
+        b = 3  # pick a 'b' that we can not merge
+        expr1 = ModularIndexing(x, 1, a)
+        expr2 = ModularIndexing(expr1, 1, b)
+
+        actual = sizevars.combine_modular_indexing_pairs(expr2)
+        self.assertEqual(expr2, actual)
+        self.assertNotEqual(ModularIndexing(x, 1, b), actual)
+
+    def test_expand_floor_div_skipped(self):
+        sizevars = SizeVarAllocator()
+        x = sympy.Symbol("x", integer=True, positive=True)
+        y = sympy.Symbol("y", integer=True, positive=True)
+
+        expr = FloorDiv(x, 2) + FloorDiv(y, 3)
+        # The expression can not be simplified since there are multiple
+        # FloorDiv. We return False in that case
+        self.assertFalse(sizevars.expand_floor_div(expr))
+
+    def test_expand_floor_div_applied(self):
+        sizevars = SizeVarAllocator()
+        x = sympy.Symbol("x", integer=True, positive=True)
+        y = sympy.Symbol("y", integer=True, positive=True)
+
+        expr = x * 5 + FloorDiv(y, 3)
+        actual, denominator = sizevars.expand_floor_div(expr)
+        self.assertNotEqual(expr, actual)
+        expected = FloorDiv(x * 15 + y, 3)
+        self.assertEqual(expected, FloorDiv(actual, denominator))
+
+    @unittest.skipUnless(HAS_GPU, "Need GPU for this test")
+    def test_int8_unpack(self):
+        @torch.compile
+        def f(x):
+            first_elements = x >> 4
+            second_elements = x & 15
+            unpacked = torch.stack([first_elements, second_elements], dim=-1).view(
+                *x.size()[:-1], -1
+            )
+            return unpacked * 2
+
+        x = torch.randint(0, 255, (2, 4096, 5504), dtype=torch.uint8, device=GPU_TYPE)
+
+        triton_code = run_and_get_triton_code(f, x)
+        # Make sure the 2 load uses simpified indexing rather than something like
+        # tl.load(in_ptr0 + ((5504*x1) + (x0 // 2)),
+        self.assertEqual(2, triton_code.count("tl.load(in_ptr0 + ((x2 // 2)),"))
+        if DO_PERF_TEST:
+            ms = benchmarker.benchmark_gpu(lambda: f(x))
+            print(f"{ms=:.03f}")
+
+
+class ExprPrinterTests(InductorTestCase):
     def test_print_pow(self):
         s1 = sympy.Symbol("foo", integer=True)
         s2 = sympy.Symbol("bar", integer=True)
@@ -168,21 +250,11 @@ class ExprPrinterTests(TorchTestCase):
 
         common_cases = [
             # expr, result
-            # Test exprs.
-            (
-                s1 / (2 * s1 - 1) - 1 / (2 * s1 - 1),
-                lambda c, L: f"((-1{L})*({c}/((-1{L}) + (2{L}*foo)))) + (foo*({c}/((-1{L}) + (2{L}*foo))))",
-            ),
-            (s1 / (s2 - s3), lambda c, L: f"foo*({c}/(bar + ((-1{L})*baz)))"),
             # Test Pow directly.
             (
                 sympy.Pow(s1 + s2, 0),
                 lambda _, L: f"1{L}",
             ),  # note: simplified before _print_Pow
-            (
-                sympy.Pow(s1 + s2, -3),
-                lambda c, _: f"{c}/((bar + foo)*(bar + foo)*(bar + foo))",
-            ),
         ]
 
         gpu_cases = common_cases + [
@@ -191,14 +263,19 @@ class ExprPrinterTests(TorchTestCase):
         cpu_cases = common_cases + [
             (
                 sympy.Pow(s1 + s2, 2),
-                lambda c, L: "static_cast<long>((bar + foo)*(bar + foo))",
+                lambda c, L: "static_cast<int64_t>((bar + foo)*(bar + foo))",
             )
         ]
         for expr, result in gpu_cases:
             self.assertEqual(texpr(expr), result(1, ""))
             self.assertEqual(pexpr(expr), result(1, ""))
         for expr, result in cpu_cases:
-            self.assertEqual(cexpr(expr), result(1.0, "L"))  # 1.0 for FP div
+            self.assertEqual(
+                cexpr(expr),
+                result(1.0, "LL")
+                if sys.platform in ["darwin", "win32"]
+                else result(1.0, "L"),
+            )  # 1.0 for FP div
 
     def test_print_floor(self):
         for integer in [True, False]:
@@ -207,12 +284,13 @@ class ExprPrinterTests(TorchTestCase):
             if integer:
                 self.assertEqual(pexpr(expr), "math.floor((1/2)*s1)")
                 self.assertEqual(
-                    cexpr(expr), "static_cast<long>(std::floor((1.0/2.0)*s1))"
+                    cexpr(expr), "static_cast<int64_t>(std::floor((1.0/2.0)*s1))"
                 )
             else:
                 self.assertExpectedInline(pexpr(expr), """math.floor((1/2)*s1)""")
                 self.assertExpectedInline(
-                    texpr(expr), """tl.math.floor((1/2)*s1).to(tl.int64)"""
+                    texpr(expr),
+                    """libdevice.floor((1/2)*s1).to(tl.int64)""",
                 )
                 self.assertExpectedInline(cexpr(expr), """std::floor((1.0/2.0)*s1)""")
 
@@ -223,19 +301,17 @@ class ExprPrinterTests(TorchTestCase):
             if integer:
                 self.assertExpectedInline(pexpr(expr), """math.ceil((1/2)*s1)""")
                 self.assertExpectedInline(
-                    cexpr(expr), """static_cast<long>(std::ceil((1.0/2.0)*s1))"""
+                    cexpr(expr), """static_cast<int64_t>(std::ceil((1.0/2.0)*s1))"""
                 )
             else:
                 self.assertExpectedInline(pexpr(expr), """math.ceil((1/2)*s1)""")
                 self.assertExpectedInline(cexpr(expr), """std::ceil((1.0/2.0)*s1)""")
 
     def test_print_round(self):
-        expr = Round(sympy.Symbol("x", integer=True) / 2)
+        expr = RoundToInt(sympy.Symbol("x", integer=True) / 2)
         self.assertExpectedInline(pexpr(expr), """round((1/2)*x)""")
         self.assertExpectedInline(cexpr(expr), """std::lrint((1.0/2.0)*x)""")
-        self.assertExpectedInline(
-            texpr(expr), """tl.math.llrint((1/2)*x).to(tl.int64)"""
-        )
+        self.assertExpectedInline(texpr(expr), """libdevice.llrint((1/2)*x)""")
 
     @parametrize("ndigits", [-1, 0, 1])
     def test_print_round_decimal(self, ndigits):
@@ -247,75 +323,64 @@ class ExprPrinterTests(TorchTestCase):
         )
         self.assertEqual(
             texpr(expr),
-            f"tl.math.nearbyint(1e{ndigits} * ((1/2)*x)) * 1e{-ndigits}",
+            f"libdevice.nearbyint(1e{ndigits} * ((1/2)*x)) * 1e{-ndigits}",
         )
 
-        expr = RoundDecimal(sympy.Symbol("x", integer=True), ndigits)
-        if ndigits >= 0:
-            for do_print in [pexpr, cexpr, texpr]:
-                self.assertEqual(do_print(expr), "x")
-        else:
-            self.assertEqual(pexpr(expr), f"round(x, {ndigits})")
-            for do_print in [cexpr, texpr]:
-                with self.assertRaisesRegex(
-                    ValueError, "only non-negative ndigits are currently supported"
-                ):
-                    do_print(expr)
-
     def test_print_floor_div(self):
-        for integer in [True, False]:
-            s1 = sympy.Symbol("s1", integer=integer)
-            s2 = sympy.Symbol("s2", integer=integer)
-            expr = FloorDiv(s1, s2)
-            self.assertEqual(pexpr(expr), "(s1 // s2)")
-            if integer:
-                self.assertEqual(cexpr(expr), "c10::div_floor_integer(s1, s2)")
-            else:
-                self.assertEqual(
-                    cexpr(expr),
-                    "c10::div_floor_floating(static_cast<double>(s1), static_cast<double>(s2))",
-                )
+        s1 = sympy.Symbol("s1", integer=True)
+        s2 = sympy.Symbol("s2", integer=True)
+        expr = FloorDiv(s1, s2)
+        self.assertEqual(pexpr(expr), "(s1 // s2)")
+        self.assertEqual(
+            cexpr(expr),
+            "c10::div_floor_integer(static_cast<int64_t>(s1), static_cast<int64_t>(s2))",
+        )
 
-        for integer in [True, False]:
-            s1 = sympy.Symbol("s1", integer=integer)
-            s2 = sympy.S(-1)
-            expr = FloorDiv(s1, s2)
-            if integer:
-                self.assertEqual(pexpr(expr), "(-1)*s1")
-                self.assertEqual(cexpr(expr), "(-1L)*s1")
-            else:
-                self.assertEqual(pexpr(expr), "(s1 // (-1))")
-                self.assertEqual(
-                    cexpr(expr),
-                    "c10::div_floor_floating(static_cast<double>(s1), static_cast<double>((-1L)))",
-                )
+        s1 = sympy.Symbol("s1", integer=True)
+        s2 = sympy.S(-1)
+        expr = FloorDiv(s1, s2)
+        self.assertEqual(pexpr(expr), "(-1)*s1")
+        self.assertEqual(cexpr(expr), "(-1LL)*s1") if sys.platform in [
+            "darwin",
+            "win32",
+        ] else "(-1L)*s1"
 
     def test_print_Min_Max(self):
         cases = (
-            (sympy.Min, "min"),
-            (sympy.Max, "max"),
+            (sympy.Min, "min", "<"),
+            (sympy.Max, "max", ">"),
         )
-        extra_arg = TritonPrinter._propagate_nan_arg()
-        for f, s in cases:
+        for f, s, cmp in cases:
             x = sympy.Symbol("x", integer=True)
             expr = f(-2, x)
-            self.assertEqual(texpr(expr), f"tl.math.{s}(-2, x{extra_arg})")
-            self.assertEqual(cexpr(expr), f"std::{s}(-2L, x)")
+            self.assertEqual(
+                texpr(expr), f"((-2) * ((-2) {cmp}= (x)) + (x) * ((x) {cmp} (-2)))"
+            )
+            self.assertEqual(
+                cexpr(expr),
+                f"std::{s}(static_cast<int64_t>(-2LL), static_cast<int64_t>(x))"
+                if sys.platform in ["darwin", "win32"]
+                else f"std::{s}(static_cast<int64_t>(-2L), static_cast<int64_t>(x))",
+            )
 
             expr = f(x, 2 * x, 3 * x)
             self.assertEqual(
                 texpr(expr),
-                f"tl.math.{s}(x, tl.math.{s}(2*x, 3*x{extra_arg}){extra_arg})",
+                f"((x) * ((x) {cmp}= (((2*x) * ((2*x) {cmp}= (3*x)) + (3*x) * ((3*x) {cmp} (2*x))))) + (((2*x) * ((2*x) {cmp}= (3*x)) + (3*x) * ((3*x) {cmp} (2*x)))) * ((((2*x) * ((2*x) {cmp}= (3*x)) + (3*x) * ((3*x) {cmp} (2*x)))) {cmp} (x)))",  # noqa: B950 line too long
             )
-            self.assertEqual(cexpr(expr), f"std::{s}({{x, 2L*x, 3L*x}})")
+            self.assertEqual(
+                cexpr(expr),
+                f"std::{s}({{x, 2LL*x, 3LL*x}})"
+                if sys.platform in ["darwin", "win32"]
+                else f"std::{s}({{x, 2L*x, 3L*x}})",
+            )
 
 
 instantiate_parametrized_tests(ExprPrinterTests)
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
-    from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+    from torch._inductor.test_case import run_tests
 
-    if HAS_CPU or HAS_CUDA:
+    if HAS_CPU or HAS_GPU:
         run_tests("sympy")

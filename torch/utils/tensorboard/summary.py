@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import json
 import logging
 import os
@@ -142,7 +143,8 @@ def _draw_single_box(
     if display_str:
         text_bottom = bottom
         # Reverse list and print from bottom to top.
-        text_width, text_height = font.getsize(display_str)
+        _left, _top, _right, _bottom = font.getbbox(display_str)
+        text_width, text_height = _right - _left, _bottom - _top
         margin = np.ceil(0.05 * text_height)
         draw.rectangle(
             [
@@ -396,7 +398,7 @@ def tensor_proto(tag, tensor):
     """Outputs a `Summary` protocol buffer containing the full tensor.
     The generated Summary has a Tensor.proto containing the input Tensor.
     Args:
-      name: A name for the generated node. Will also serve as the series name in
+      tag: A name for the generated node. Will also serve as the series name in
         TensorBoard.
       tensor: Tensor to be converted to protobuf
     Returns:
@@ -620,10 +622,7 @@ def make_image(tensor, rescale=1, rois=None, labels=None):
     image = Image.fromarray(tensor)
     if rois is not None:
         image = draw_boxes(image, rois, labels=labels)
-    try:
-        ANTIALIAS = Image.Resampling.LANCZOS
-    except AttributeError:
-        ANTIALIAS = Image.ANTIALIAS
+    ANTIALIAS = Image.Resampling.LANCZOS
     image = image.resize((scaled_width, scaled_height), ANTIALIAS)
     import io
 
@@ -666,7 +665,7 @@ def make_video(tensor, fps):
         return
     import tempfile
 
-    t, h, w, c = tensor.shape
+    _t, h, w, c = tensor.shape
 
     # encode sequence of images into gif string
     clip = mpy.ImageSequenceClip(list(tensor), fps=fps)

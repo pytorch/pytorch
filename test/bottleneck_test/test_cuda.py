@@ -5,7 +5,7 @@ import torch.nn as nn
 
 
 class Model(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.linear = nn.Linear(20, 20)
 
@@ -25,5 +25,5 @@ def main():
         optimizer.step()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

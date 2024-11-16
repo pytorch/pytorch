@@ -16,8 +16,6 @@
 #include <iterator>
 #include <sstream>
 #include <string>
-#include <unordered_map>
-#include <utility>
 #include <vector>
 
 int THPUtils_getCallable(PyObject* arg, PyObject** result) {
@@ -107,7 +105,7 @@ void THPUtils_setError(const char* format, ...) {
 
 void THPUtils_addPyMethodDefs(
     std::vector<PyMethodDef>& vector,
-    PyMethodDef* methods) {
+    const PyMethodDef* methods) {
   if (!vector.empty()) {
     // remove nullptr terminator
     vector.pop_back();
@@ -220,7 +218,7 @@ void THPPointer<THPStorage>::free() {
 
 void storage_fill(const at::Storage& self, uint8_t value) {
   auto options = c10::TensorOptions().device(self.device()).dtype(at::kByte);
-  auto self_t = at::empty({0}, {}, options).set_(self);
+  auto self_t = at::empty({0}, options).set_(self);
   self_t.fill_(value);
 }
 
@@ -229,7 +227,7 @@ void storage_set(const at::Storage& self, ptrdiff_t idx, uint8_t value) {
       (idx >= 0) && (idx < static_cast<ptrdiff_t>(self.nbytes())),
       "out of bounds");
   auto options = c10::TensorOptions().device(self.device()).dtype(at::kByte);
-  auto self_t = at::empty({0}, {}, options).set_(self);
+  auto self_t = at::empty({0}, options).set_(self);
   self_t[idx].fill_(value);
 }
 
@@ -238,7 +236,7 @@ uint8_t storage_get(const at::Storage& self, ptrdiff_t idx) {
       (idx >= 0) && (idx < static_cast<ptrdiff_t>(self.nbytes())),
       "out of bounds");
   auto options = c10::TensorOptions().device(self.device()).dtype(at::kByte);
-  auto self_t = at::empty({0}, {}, options).set_(self);
+  auto self_t = at::empty({0}, options).set_(self);
   return self_t[idx].item<uint8_t>();
 }
 
@@ -259,7 +257,7 @@ namespace torch::gdb {
 // call free than delete[] from withing gdb.
 // Currently the code for computing the repr of a tensor is written in Python,
 // so we need to wrap the Tensor into a Python object first.
-char* tensor_repr(at::Tensor tensor) {
+char* tensor_repr(const at::Tensor& tensor) {
   PyGILState_STATE gil = PyGILState_Ensure();
   PyObject* pytensor = nullptr;
   PyObject* repr = nullptr;
@@ -267,7 +265,14 @@ char* tensor_repr(at::Tensor tensor) {
   const char* buf = nullptr;
   char* result = nullptr;
 
-  pytensor = THPVariable_Wrap(std::move(tensor));
+  // NB: It's important not to move the tensor into THPVariable_Wrap,
+  // because this function is only called from our gdb macros, and
+  // we want to avoid accidentally moving out the tensor.  In principle,
+  // the Tensor signature above should induce a copy, but we've
+  // observed that sometimes gdb passes the outer Tensor address exactly as is
+  // into this function.
+  // See https://github.com/pytorch/pytorch/issues/134762
+  pytensor = THPVariable_Wrap(tensor);
   if (!pytensor)
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
     goto error;

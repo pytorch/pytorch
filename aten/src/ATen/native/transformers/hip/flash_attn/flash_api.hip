@@ -54,44 +54,26 @@
 #include <ATen/ops/pad.h>
 #endif
 
+#include <ATen/native/transformers/hip/aotriton_adapter.h>
 #include <ATen/native/transformers/hip/flash_attn/flash_api.h>
 
 #include <c10/util/Exception.h>
 #include <c10/util/CallOnce.h>
 
-// OORT headers
-#include <oort/attn_fwd.h>
-#include <oort/bwd_kernel_dk_dv.h>
-#include <oort/bwd_kernel_dq.h>
-#include <oort/bwd_preprocess.h>
+// AOTriton headers
+#include <aotriton/flash.h>
+#include <aotriton/runtime.h>
 
 namespace pytorch_flash {
 
 namespace {
 
-c10::once_flag fa_gcn_arch_override_flag;
-const char* fa_override_arch = nullptr;
-
-void init_fa_override_arch() {
-  fa_override_arch = std::getenv("PYTORCH_DEBUG_FLASH_ATTENTION_GCN_ARCH_OVERRIDE");
-  if (fa_override_arch) {
-      TORCH_WARN("ROCM flash attention backend only loads value from PYTORCH_DEBUG_FLASH_ATTENTION_GCN_ARCH_OVERRIDE once. "
-                 "Later changes to this environment variable with os.environ "
-                 "(or other methods) will not affect this backend's behavior.");
-  }
-}
-
-void check_gpu_arch() {
-  auto dprops = at::cuda::getCurrentDeviceProperties();
-
-  constexpr std::string_view mi200 = "gfx90a:sramecc+:xnack-";
-  c10::call_once(fa_gcn_arch_override_flag, init_fa_override_arch);
-  if (fa_override_arch) {
-      TORCH_CHECK(mi200 == fa_override_arch,
-                  "FlashAttention only supports MI200/MI250 GPUs (gfx90a:sramecc+:xnack-), current gcnArchName: " + std::string(dprops->gcnArchName) + " override as " + fa_override_arch);
-  } else {
-      TORCH_CHECK(mi200 == dprops->gcnArchName,
-                  "FlashAttention only supports MI200/MI250 GPUs (gfx90a:sramecc+:xnack-), current gcnArchName: " + std::string(dprops->gcnArchName));
+void check_gpu_arch(hipStream_t stream) {
+  auto ret = aotriton::v2::flash::check_gpu(stream);
+  if (hipSuccess != ret) {
+      TORCH_CHECK(false,
+                  "[AOTriton] Accelerated SDPA only supports MI200/MI300X/Navi31 GPUs"
+                  " (gfx90a:sramecc+:xnack-/gfx942:sramecc+:xnack-/gfx1100)")
   }
 }
 
@@ -105,15 +87,23 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tenso
 mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head_size
         const at::Tensor &k,         // batch_size x seqlen_k x num_heads_k x head_size
         const at::Tensor &v,         // batch_size x seqlen_k x num_heads_k x head_size
-        c10::optional<at::Tensor> &out_,             // batch_size x seqlen_q x num_heads x head_size
+        std::optional<at::Tensor> &out_,             // batch_size x seqlen_q x num_heads x head_size
+        std::optional<at::Tensor> &alibi_slopes_, // num_heads or batch_size x num_heads
         const float p_dropout,
         const float softmax_scale,
         bool is_causal,
-        const int window_size_left,
+        int window_size_left,
         int window_size_right,
         const bool return_softmax,
-        c10::optional<at::Generator> gen_) {
-  check_gpu_arch();
+        std::optional<at::Generator> gen_) {
+  // Otherwise the kernel will be launched from cuda:0 device
+  // Cast to char to avoid compiler warning about narrowing
+  // [ROCM specific]: must be at the beginning of the function
+  // Otherwise check_gpu_arch() checks cuda:0 device.
+  at::hip::HIPGuardMasqueradingAsCUDA device_guard{(char)q.get_device()};
+
+  auto stream = at::hip::getCurrentHIPStreamMasqueradingAsCUDA().stream();
+  check_gpu_arch(stream);
 
   auto q_dtype = q.dtype();
   TORCH_CHECK(q_dtype == at::kHalf || q_dtype == at::kBFloat16,
@@ -171,16 +161,14 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
   const int seqlen_q_rounded = round_multiple(seqlen_q, 128);
   const int seqlen_k_rounded = round_multiple(seqlen_k, 128);
 
-  // Otherwise the kernel will be launched from cuda:0 device
-  // Cast to char to avoid compiler warning about narrowing
-  at::hip::HIPGuardMasqueradingAsCUDA device_guard{(char)q.get_device()};
-
   // We want to checkpoint and save the RNG state for backward if dropout
   // We get the default generator and return the seed and offset which will
   // be used in the backward function
-  auto gen = at::get_generator_or_default<at::CUDAGeneratorImpl>(c10::nullopt, at::cuda::detail::getDefaultCUDAGenerator());
+  auto gen = at::get_generator_or_default<at::CUDAGeneratorImpl>(std::nullopt, at::cuda::detail::getDefaultCUDAGenerator());
   at::Tensor seed_t, offset_t;
 
+  at::PhiloxCudaState philox_state;
+  bool use_philox_state = false;
   if (p_dropout > 0.0)  {
     // number of times random will be generated per thread, to offset philox counter in thc random
     // state
@@ -188,12 +176,14 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
     int64_t counter_offset = batch_size * num_heads * 32;
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(gen->mutex_);
-    at::PhiloxCudaState philox_state = gen->philox_cuda_state(counter_offset);
+    philox_state = gen->philox_cuda_state(counter_offset);
     if (at::cuda::currentStreamCaptureStatus() == at::cuda::CaptureStatus::None) {
       auto [seed, offset] = at::cuda::philox::unpack(philox_state);
-      seed_t = at::scalar_tensor(at::Scalar(static_cast<int64_t>(seed)), at::dtype(at::kLong));
-      offset_t = at::scalar_tensor(at::Scalar(static_cast<int64_t>(offset)), at::dtype(at::kLong));
+      seed_t = at::scalar_tensor(at::Scalar(static_cast<int64_t>(seed)), at::dtype(at::kLong).device(at::kCUDA));
+      offset_t = at::scalar_tensor(at::Scalar(static_cast<int64_t>(offset)), at::dtype(at::kLong).device(at::kCUDA));
     } else {
+      // See Note [CUDA Graph-safe RNG states] about the design
+      use_philox_state = true;
       seed_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
       offset_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
     }
@@ -202,125 +192,80 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
       seed_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
       offset_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
     } else {
-      seed_t = at::empty({}, at::dtype(at::kLong));
-      offset_t = at::empty({}, at::dtype(at::kLong));
+      seed_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
+      offset_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
     }
-
   }
 
-  auto stream = at::hip::getCurrentHIPStreamMasqueradingAsCUDA().stream();
-  //reorder tensors and make contiguous
-  at::Tensor q_t = q_padded.permute({0,2,1,3}).contiguous();
-  at::Tensor k_t = k_padded.permute({0,2,1,3}).contiguous();
-  at::Tensor v_t = v_padded.permute({0,2,1,3}).contiguous();
-  at::Tensor output_t = out.permute({0,2,1,3}).contiguous();
+  // Transpose tensors to meet AOTriton's Flash API
+  at::Tensor q_t = q_padded.permute({0,2,1,3});
+  at::Tensor k_t = k_padded.permute({0,2,1,3});
+  at::Tensor v_t = v_padded.permute({0,2,1,3});
+  at::Tensor output_t = out.permute({0,2,1,3});
 
-  at::Tensor M = at::empty({batch_size, num_heads, seqlen_q}, at::dtype(at::kFloat).device(q.device())); // aka softmax_lse
+  auto opts = q.options();
+  at::Tensor M = at::empty({batch_size * num_heads, seqlen_q}, opts.dtype(at::kFloat)); // aka softmax_lse
 
-  constexpr int BLOCK_M = 16;
-  constexpr int BLOCK_N = 16;
-  dim3  grid;
-  grid.x = (q_t.sizes()[2] + BLOCK_M - 1) / BLOCK_M;
-  grid.y = q_t.sizes()[0] * q_t.sizes()[1];
-  grid.z = 1;
-  dim3 block { 64 * 4, 1, 1 };  // compiled triton kernel intrinsic
-
-  at::Tensor softmax_fa_t = at::empty({batch_size, num_heads, seqlen_q, seqlen_k},
-                                      at::dtype(q.dtype()).device(q.device()));
+  at::Tensor softmax_fa_t;
+  if (return_softmax) {
+    softmax_fa_t = at::empty({batch_size, num_heads, seqlen_q, seqlen_k}, opts);
+  } else {
+    softmax_fa_t = at::empty({ 0, 0, 0, 0 }, opts);
+  }
 
   hipError_t err; // TODO: Error handling
-#define CALL_FWD(FP, STAGE, BLOCK_M, BLOCK_DMODEL, BLOCK_N, pre_load_v, ENABLE_DROPOUT, RETURN_ENCODED_SOFTMAX)               \
-  do {                                                                                                                      \
-    oort::attn_fwd<STAGE,BLOCK_M, BLOCK_DMODEL, BLOCK_N, pre_load_v, ENABLE_DROPOUT, RETURN_ENCODED_SOFTMAX> fwd_opt;       \
-    err   = fwd_opt(grid, block,                                                                                            \
-                    (FP*)(q_t.data_ptr()), (FP*)(k_t.data_ptr()), (FP*)(v_t.data_ptr()),                                    \
-                    softmax_scale, (float*)M.data_ptr(), (FP*)output_t.data_ptr(),                                          \
-                    q_t.stride(0), q_t.stride(1), q_t.stride(2), q_t.stride(3),                                             \
-                    k_t.stride(0), k_t.stride(1), k_t.stride(2), k_t.stride(3),                                             \
-                    v_t.stride(0), v_t.stride(1), v_t.stride(2), v_t.stride(3),                                             \
-                    output_t.stride(0), output_t.stride(1), output_t.stride(2), output_t.stride(3),                         \
-                    q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, p_dropout,                                          \
-                    *(uint64_t*)(seed_t.data_ptr()), *(uint32_t*)(offset_t.data_ptr()),                                     \
-                    (FP*)(softmax_fa_t.data_ptr()),                                                                         \
-                    stream);                                                                                                \
-  } while(0)
+  using aotriton::v2::flash::attn_fwd;
+  using aotriton::TensorView;
+  using sdp::aotriton_adapter::mk_aotensor;
+  using sdp::aotriton_adapter::mk_aoscalartensor;
+  using sdp::aotriton_adapter::mk_philoxtensor;
+  using sdp::aotriton_adapter::cast_dtype;
+  aotriton::TensorView<4> empty_bias(0, {0,0,0,0}, {0,0,0,0}, cast_dtype(q.dtype()));
+  auto seed = use_philox_state ? mk_philoxtensor(philox_state.seed_.ptr) : mk_aoscalartensor(seed_t);
+  auto offset1 = use_philox_state ? mk_philoxtensor(philox_state.offset_.ptr) : mk_aoscalartensor(offset_t);
+  auto offset2 = use_philox_state ? philox_state.offset_intragraph_ : 0;
+  auto seed_output = use_philox_state ? mk_philoxtensor(seed_t.data_ptr<int64_t>()) : mk_philoxtensor(nullptr);
+  auto offset_output = use_philox_state ? mk_philoxtensor(offset_t.data_ptr<int64_t>()) : mk_philoxtensor(nullptr);
+  err = attn_fwd(mk_aotensor(q_t, "q"),
+                 mk_aotensor(k_t, "k"),
+                 mk_aotensor(v_t, "v"),
+                 empty_bias,
+                 softmax_scale,
+                 mk_aotensor<2>(M, "M"),
+                 mk_aotensor(output_t, "Out"),
+                 p_dropout,
+                 seed,
+                 offset1,
+                 offset2,
+                 seed_output,
+                 offset_output,
+                 mk_aotensor(softmax_fa_t, "encoded_softmax"),
+                 is_causal,
+                 stream);
 
-  // TODO: Ugly but works
-  constexpr int kFwdUseCausal = 3;
-  constexpr int kFwdNoCausal  = 1;
-  int d_head = q_t.sizes()[3];
-  constexpr int BM = BLOCK_M;
-  constexpr int BN = BLOCK_N;
-  if (q_dtype == at::kHalf) {
-    if (is_causal) {
-      if (d_head == 16)
-        CALL_FWD(__fp16,kFwdUseCausal,BM,16,BN,true,true,true);
-      else if (d_head == 32)
-        CALL_FWD(__fp16,kFwdUseCausal,BM,32,BN,true,true,true);
-      else if (d_head == 64)
-        CALL_FWD(__fp16,kFwdUseCausal,BM,64,BN,true,true,true);
-      else if (d_head == 128)
-        CALL_FWD(__fp16,kFwdUseCausal,BM,128,BN,true,true,true);
-    } else {
-      if (d_head == 16)
-        CALL_FWD(__fp16,kFwdNoCausal,BM,16,BN,true,true,true);
-      else if (d_head == 32)
-        CALL_FWD(__fp16,kFwdNoCausal,BM,32,BN,true,true,true);
-      else if (d_head == 64)
-        CALL_FWD(__fp16,kFwdNoCausal,BM,64,BN,true,true,true);
-      else if (d_head == 128)
-        CALL_FWD(__fp16,kFwdNoCausal,BM,128,BN,true,true,true);
-    }
-  } else if (q_dtype == at::kBFloat16) {
-    if (is_causal) {
-      if (d_head == 16)
-        CALL_FWD(__bf16,kFwdUseCausal,BM,16,BN,true,true,true);
-      else if (d_head == 32)
-        CALL_FWD(__bf16,kFwdUseCausal,BM,32,BN,true,true,true);
-      else if (d_head == 64)
-        CALL_FWD(__bf16,kFwdUseCausal,BM,64,BN,true,true,true);
-      else if (d_head == 128)
-        CALL_FWD(__bf16,kFwdUseCausal,BM,128,BN,true,true,true);
-    } else {
-      if (d_head == 16)
-        CALL_FWD(__bf16,kFwdNoCausal,BM,16,BN,true,true,true);
-      else if (d_head == 32)
-        CALL_FWD(__bf16,kFwdNoCausal,BM,32,BN,true,true,true);
-      else if (d_head == 64)
-        CALL_FWD(__bf16,kFwdNoCausal,BM,64,BN,true,true,true);
-      else if (d_head == 128)
-        CALL_FWD(__bf16,kFwdNoCausal,BM,128,BN,true,true,true);
-    }
-  }
-
-  //undo reorder tensors
-  q_padded = q_t.permute({0,2,1,3}).contiguous();
-  k_padded = k_t.permute({0,2,1,3}).contiguous();
-  v_padded = v_t.permute({0,2,1,3}).contiguous();
-  out = output_t.permute({0,2,1,3}).contiguous();
-
-  return {out, q_padded, k_padded, v_padded, M, seed_t, offset_t, softmax_fa_t};
-#undef CALL_FWD
+  return {out, q_padded, k_padded, v_padded, M.view({batch_size, num_heads, seqlen_q}), seed_t, offset_t, softmax_fa_t};
 }
 
 std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor>
 mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q := \sum_{i=0}^{b} s_i
                const at::Tensor &k,  // total_k x num_heads_k x head_size, total_k := \sum_{i=0}^{b} s_i
                const at::Tensor &v,  // total_k x num_heads_k x head_size, total_k := \sum_{i=0}^{b} s_i
-               c10::optional<at::Tensor> &out_, // total_q x num_heads x head_size, total_k := \sum_{i=0}^{b} s_i
+               std::optional<at::Tensor> &out_, // total_q x num_heads x head_size, total_k := \sum_{i=0}^{b} s_i
                const at::Tensor &cu_seqlens_q,  // b+1
                const at::Tensor &cu_seqlens_k,  // b+1
-               c10::optional<at::Tensor> &seqused_k, // b. If given, only this many elements of each batch element's keys are used.
-               const int max_seqlen_q,
+               std::optional<at::Tensor> &seqused_k, // b. If given, only this many elements of each batch element's keys are used.
+               std::optional<at::Tensor> &block_table_, // batch_size x max_num_blocks_per_seq
+               std::optional<at::Tensor> &alibi_slopes_, // num_heads or b x num_heads
+               int max_seqlen_q,
                const int max_seqlen_k,
                const float p_dropout,
                const float softmax_scale,
                const bool zero_tensors,
-               const bool is_causal,
-               const int window_size_left,
+               bool is_causal,
+               int window_size_left,
                int window_size_right,
                const bool return_softmax,
-               c10::optional<at::Generator> gen_) {
+               std::optional<at::Generator> gen_) {
 
   TORCH_CHECK(false, "mha_varlen_fwd not supported on ROCm");
 
@@ -340,20 +285,22 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
         const at::Tensor &v,   // batch_size x seqlen_k x num_heads_k x head_size
         const at::Tensor &out,   // batch_size x seqlen_q x num_heads x head_size
         const at::Tensor &softmax_lse,     // b x h x seqlen_q
-        c10::optional<at::Tensor> &dq_,   // batch_size x seqlen_q x num_heads x head_size
-        c10::optional<at::Tensor> &dk_,   // batch_size x seqlen_k x num_heads_k x head_size
-        c10::optional<at::Tensor> &dv_,   // batch_size x seqlen_k x num_heads_k x head_size
+        std::optional<at::Tensor> &dq_,   // batch_size x seqlen_q x num_heads x head_size
+        std::optional<at::Tensor> &dk_,   // batch_size x seqlen_k x num_heads_k x head_size
+        std::optional<at::Tensor> &dv_,   // batch_size x seqlen_k x num_heads_k x head_size
+        std::optional<at::Tensor> &alibi_slopes_, // num_heads or batch_size x num_heads
         const float p_dropout,         // probability to drop
         const float softmax_scale,
         const bool is_causal,
-        const int window_size_left,
+        int window_size_left,
         int window_size_right,
+        const bool deterministic,
         const at::Tensor philox_seed,
         const at::Tensor philox_offset) {
-  check_gpu_arch();
+  auto stream = at::hip::getCurrentHIPStreamMasqueradingAsCUDA().stream();
+  check_gpu_arch(stream);
 
   bool is_dropout = p_dropout > 0.0;
-  auto stream = at::hip::getCurrentHIPStreamMasqueradingAsCUDA().stream();
 
   auto q_dtype = q.dtype();
   TORCH_CHECK(q_dtype == at::kHalf || q_dtype == at::kBFloat16,
@@ -436,23 +383,12 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
 
   // const at::Tensor& dout_padded = dout;
 
-  // bool loop = seqlen_k > blocksize_c;
-  // TODO: change later, for now set to true for simplicity
-  bool loop = true;
-
   // Otherwise the kernel will be launched from cuda:0 device
   // Cast to char to avoid compiler warning about narrowing
   at::hip::HIPGuardMasqueradingAsCUDA device_guard{(char)q.get_device()};
 
   auto opts = q.options();
   auto softmax_d = at::empty({batch_size, num_heads, seqlen_q_rounded}, opts.dtype(at::kFloat));
-  at::Tensor dq_accum;
-  at::Tensor dk_accum, dv_accum;
-  if (loop) {
-    dq_accum = at::empty({batch_size, seqlen_q_rounded, num_heads, head_size_rounded}, opts.dtype(at::kFloat));
-    // dk_accum = at::empty({batch_size, num_heads_k, seqlen_k_rounded, head_size_rounded}, opts.dtype(at::kFloat));
-    // dv_accum = at::empty({batch_size, num_heads_k, seqlen_k_rounded, head_size_rounded}, opts.dtype(at::kFloat));
-  }
 
   at::Tensor dk_expanded, dv_expanded;
   if (num_heads_k != num_heads) {  // MQA / GQA
@@ -463,150 +399,46 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
     dv_expanded = dv;
   }
 
-  at::PhiloxCudaState philox_args;
-  if (is_dropout) {
-    if (at::cuda::currentStreamCaptureStatus() ==
-        at::cuda::CaptureStatus::None)
-    {
-      philox_args = at::PhiloxCudaState(*philox_seed.data_ptr<int64_t>(), *philox_offset.data_ptr<int64_t>());
-    } else { // dropout + capture
-      philox_args = at::PhiloxCudaState(
-                                        philox_seed.data_ptr<int64_t>(), philox_offset.data_ptr<int64_t>(), 0);
-    }
-  }
+  at::Tensor q_t = q.permute({0,2,1,3});
+  at::Tensor k_t = k.permute({0,2,1,3});
+  at::Tensor v_t = v.permute({0,2,1,3});
+  at::Tensor out_t = out.permute({0,2,1,3});
+  at::Tensor dq_t = dq.permute({0,2,1,3});
+  at::Tensor dk_t = dk.permute({0,2,1,3});
+  at::Tensor dv_t = dv.permute({0,2,1,3});
+  at::Tensor dout_t = dout.permute({0,2,1,3});
 
-  //JCG TODO WE GO IN HERE TODO backwards
-  //reorder tensors and make contiguous
-  at::Tensor q_t = q.permute({0,2,1,3}).contiguous();
-  at::Tensor k_t = k.permute({0,2,1,3}).contiguous();
-  at::Tensor v_t = v.permute({0,2,1,3}).contiguous();
-  at::Tensor out_t = out.permute({0,2,1,3}).contiguous();
-
-  //reorder tensors and make contiguous
-  at::Tensor dq_t = dq.permute({0,2,1,3}).contiguous();
-  at::Tensor dk_t = dk.permute({0,2,1,3}).contiguous();
-  at::Tensor dv_t = dv.permute({0,2,1,3}).contiguous();
-  at::Tensor dout_t = dout.permute({0,2,1,3}).contiguous();
-
-  dim3 block { 64 * 4, 1, 1 };
-
-  at::Tensor new_do = at::empty_like(dout_t).contiguous();
-  at::Tensor delta = at::empty_like(softmax_lse).contiguous();
+  at::Tensor softmax_lse_cont = softmax_lse.view({batch_size * num_heads, seqlen_q}).contiguous();
+  at::Tensor delta = at::empty_like(softmax_lse_cont).contiguous();
 
   int d_head = head_size_og;
   hipError_t err; // TODO: Error handling
-#define CALL_BWD_PP(FP, PP_BLOCK, PP_DMODEL)                                                                                \
-  do {                                                                                                                      \
-    dim3 pp_grid;                                                                                                           \
-    pp_grid.x = batch_size * num_heads * ((dout_t.size(2) + PP_BLOCK - 1) / PP_BLOCK);                                      \
-    pp_grid.y = 1;                                                                                                          \
-    pp_grid.z = 1;                                                                                                          \
-    oort::bwd_preprocess<PP_BLOCK, PP_DMODEL> pre_opt;                                                                      \
-    err = pre_opt(pp_grid, block,                                                                                           \
-                  (FP*)(out_t.data_ptr()),                                                                                  \
-                  (FP*)(dout_t.data_ptr()),                                                                                 \
-                  (FP*)(new_do.data_ptr()),                                                                                 \
-                  (float*)(delta.data_ptr()),                                                                               \
-                  stream);                                                                                                  \
-  } while (0)
-
-#define CALL_BWD_PP_DMODEL(FP, PP_BLOCK)                                                                                    \
-  do {                                                                                                                      \
-    if (d_head == 16)                                                                                                       \
-      CALL_BWD_PP(FP, PP_BLOCK, 16);                                                                                        \
-    else if (d_head == 32)                                                                                                  \
-      CALL_BWD_PP(FP, PP_BLOCK, 32);                                                                                        \
-    else if (d_head == 64)                                                                                                  \
-      CALL_BWD_PP(FP, PP_BLOCK, 64);                                                                                        \
-    else if (d_head == 128)                                                                                                 \
-      CALL_BWD_PP(FP, PP_BLOCK, 128);                                                                                       \
-  } while (0)
-
-  if(q_dtype == at::kHalf) {
-    if (seqlen_q >= 64)
-      CALL_BWD_PP_DMODEL(__fp16, 16);
-    else
-      CALL_BWD_PP_DMODEL(__fp16, 16);
-  } else if (q_dtype == at::kBFloat16) {
-    if (seqlen_q >= 64)
-      CALL_BWD_PP_DMODEL(__bf16, 16);
-    else
-      CALL_BWD_PP_DMODEL(__bf16, 16);
+  {
+    using aotriton::v2::flash::attn_bwd;
+    using sdp::aotriton_adapter::mk_aotensor;
+    using sdp::aotriton_adapter::mk_aoscalartensor;
+    using sdp::aotriton_adapter::cast_dtype;
+    aotriton::TensorView<4> empty_bias(0, {0,0,0,0}, {0,0,0,0}, cast_dtype(q.dtype()));
+    err = attn_bwd(mk_aotensor(q_t, "q"),
+                   mk_aotensor(k_t, "k"),
+                   mk_aotensor(v_t, "v"),
+                   empty_bias,
+                   softmax_scale,
+                   mk_aotensor(out_t, "out"),
+                   mk_aotensor(dout_t, "dout"),
+                   mk_aotensor(dq_t, "dq"),
+                   mk_aotensor(dk_t, "dk"),
+                   mk_aotensor(dv_t, "dv"),
+                   empty_bias,
+                   mk_aotensor<2>(softmax_lse_cont, "L"),
+                   mk_aotensor<2>(delta, "delta"),
+                   p_dropout,
+                   mk_aoscalartensor(philox_seed),
+                   mk_aoscalartensor(philox_offset),
+                   0,
+                   is_causal,
+                   stream);
   }
-#undef CALL_BWD_PP
-
-#define CALL_BWD(FP, BLOCK_M, BLOCK_DMODEL, BLOCK_N, CAUSAL, ENABLE_DROPOUT)                                                \
-  do {                                                                                                                      \
-    dim3  grid;                                                                                                             \
-    grid.x = (seqlen_k + BLOCK_M - 1) / BLOCK_M;                                                                            \
-    grid.y = batch_size * num_heads;                                                                                        \
-    grid.z = 1;                                                                                                             \
-    oort::bwd_kernel_dk_dv<BLOCK_M, BLOCK_DMODEL, BLOCK_N, CAUSAL, ENABLE_DROPOUT> dk_dv_opt;                               \
-    err = dk_dv_opt(grid, block,                                                                                            \
-                    (FP*)(q_t.data_ptr()), (FP*)(k_t.data_ptr()), (FP*)(v_t.data_ptr()),                                    \
-                    softmax_scale, (FP*)out_t.data_ptr(), (FP*)dout_t.data_ptr(),                                           \
-                    (FP*)dk_t.data_ptr(),(FP*)dv_t.data_ptr(),                                                              \
-                    (float*)(softmax_lse.data_ptr()),                                                                       \
-                    (float*)(delta.data_ptr()),                                                                             \
-                    q_t.stride(0), q_t.stride(1), q_t.stride(2), q_t.stride(3),                                             \
-                    k_t.stride(0), k_t.stride(1), k_t.stride(2), k_t.stride(3),                                             \
-                    v_t.stride(0), v_t.stride(1), v_t.stride(2), v_t.stride(3),                                             \
-                    q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, p_dropout,                                          \
-                    (uint64_t)(philox_args.seed_.val), (uint32_t)(philox_args.offset_.val), stream);                        \
-    grid.x = (seqlen_q + BLOCK_M - 1) / BLOCK_M;                                                                            \
-    oort::bwd_kernel_dq<BLOCK_M, BLOCK_DMODEL, BLOCK_N, CAUSAL, ENABLE_DROPOUT> dq_opt;                                     \
-    err = dq_opt(grid, block,                                                                                               \
-                 (FP*)(q_t.data_ptr()), (FP*)(k_t.data_ptr()), (FP*)(v_t.data_ptr()),                                       \
-                 softmax_scale, (FP*)out_t.data_ptr(), (FP*)dout_t.data_ptr(),                                              \
-                 (FP*)dq_t.data_ptr(),                                                                                      \
-                 (float*)(softmax_lse.data_ptr()),                                                                          \
-                 (float*)(delta.data_ptr()),                                                                                \
-                 q_t.stride(0), q_t.stride(1), q_t.stride(2), q_t.stride(3),                                                \
-                 k_t.stride(0), k_t.stride(1), k_t.stride(2), k_t.stride(3),                                                \
-                 v_t.stride(0), v_t.stride(1), v_t.stride(2), v_t.stride(3),                                                \
-                 q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, p_dropout,                                             \
-                 (uint64_t)(philox_args.seed_.val), (uint32_t)(philox_args.offset_.val), stream);                           \
-  } while(0)
-
-#define CALL_BWD_DROPOUT(FP, BLOCK_M, BLOCK_DMODEL, BLOCK_N, CAUSAL)                                                        \
-  do {                                                                                                                      \
-    if (p_dropout > 0.0) {                                                                                                  \
-      CALL_BWD(FP, BLOCK_M, BLOCK_DMODEL, BLOCK_N, CAUSAL, true);                                                           \
-    } else {                                                                                                                \
-      CALL_BWD(FP, BLOCK_M, BLOCK_DMODEL, BLOCK_N, CAUSAL, false);                                                          \
-    }                                                                                                                       \
-  } while (0)
-
-#define CALL_BWD_DROPOUT_DMODEL(FP, BLOCK_M, BLOCK_N, CAUSAL)                                                               \
-  do {                                                                                                                      \
-    if (d_head == 16)                                                                                                       \
-      CALL_BWD_DROPOUT(FP, BLOCK_M, 16, BLOCK_N, CAUSAL);                                                                   \
-    else if (d_head == 32)                                                                                                  \
-      CALL_BWD_DROPOUT(FP, BLOCK_M, 32, BLOCK_N, CAUSAL);                                                                   \
-    else if (d_head == 64)                                                                                                  \
-      CALL_BWD_DROPOUT(FP, BLOCK_M, 64, BLOCK_N, CAUSAL);                                                                   \
-    else if (d_head == 128)                                                                                                 \
-      CALL_BWD_DROPOUT(FP, BLOCK_M, 128, BLOCK_N, CAUSAL);                                                                  \
-  } while (0)
-
-  if (q_dtype == at::kHalf) {
-    if (is_causal) {
-      CALL_BWD_DROPOUT_DMODEL(__fp16, 16, 16, true);
-    } else {
-      CALL_BWD_DROPOUT_DMODEL(__fp16, 16, 16, false);
-    }
-  } else if (q_dtype == at::kBFloat16) {
-    if (is_causal) {
-      CALL_BWD_DROPOUT_DMODEL(__bf16, 16, 16, true);
-    } else {
-      CALL_BWD_DROPOUT_DMODEL(__bf16, 16, 16, false);
-    }
-  }
-
-  //undo reorder tensors for returns
-  dq = dq_t.permute({0,2,1,3}).contiguous();
-  dk = dk_t.permute({0,2,1,3}).contiguous();
-  dv = dv_t.permute({0,2,1,3}).contiguous();
 
   // For MQA/GQA we need to sum dK and dV across the groups
   if (num_heads_k != num_heads) {
@@ -625,19 +457,21 @@ mha_varlen_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
                const at::Tensor &v,   // total_k x num_heads_k x head_size, total_k := \sum_{i=0}^{b} s_i
                const at::Tensor &out,   // total_q x num_heads x head_size
                const at::Tensor &softmax_lse,     // b x h x s   softmax logsumexp
-               c10::optional<at::Tensor> &dq_,   // total_q x num_heads x head_size, total_q := \sum_{i=0}^{b} s_i
-               c10::optional<at::Tensor> &dk_,   // total_k x num_heads_k x head_size, total_k := \sum_{i=0}^{b} s_i
-               c10::optional<at::Tensor> &dv_,   // total_k x num_heads_k x head_size, total_k := \sum_{i=0}^{b} s_i
+               std::optional<at::Tensor> &dq_,   // total_q x num_heads x head_size, total_q := \sum_{i=0}^{b} s_i
+               std::optional<at::Tensor> &dk_,   // total_k x num_heads_k x head_size, total_k := \sum_{i=0}^{b} s_i
+               std::optional<at::Tensor> &dv_,   // total_k x num_heads_k x head_size, total_k := \sum_{i=0}^{b} s_i
                const at::Tensor &cu_seqlens_q,  // b+1
                const at::Tensor &cu_seqlens_k,  // b+1
+               std::optional<at::Tensor> &alibi_slopes_, // num_heads or b x num_heads
                const int max_seqlen_q,
                const int max_seqlen_k,          // max sequence length to choose the kernel
                const float p_dropout,         // probability to drop
                const float softmax_scale,
                const bool zero_tensors,
                const bool is_causal,
-               const int window_size_left,
+               int window_size_left,
                int window_size_right,
+               const bool deterministic,
                const at::Tensor philox_seed,
                const at::Tensor philox_offset) {
   TORCH_CHECK(false, "mha_varlen_bwd not supported on ROCm");

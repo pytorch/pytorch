@@ -1,3 +1,5 @@
+# mypy: allow-untyped-defs
+
 import torch
 import time
 import torch.distributed.rpc as rpc

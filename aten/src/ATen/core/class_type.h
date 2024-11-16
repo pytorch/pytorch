@@ -4,14 +4,14 @@
 
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type_base.h>
-#include <c10/util/Optional.h>
+#include <optional>
 
-namespace torch {
-namespace jit {
+
+namespace torch::jit {
 struct CompilationUnit;
 struct Function;
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit
+
 
 namespace c10 {
 
@@ -74,7 +74,7 @@ struct TORCH_API ClassType : public NamedType {
 
   // Create a class type with name `name` and its methods stored in `cu`.
   static ClassTypePtr create(
-      c10::optional<QualifiedName> qualifiedName,
+      std::optional<QualifiedName> qualifiedName,
       std::weak_ptr<CompilationUnit> cu,
       bool is_module = false,
       std::string doc_string = "",
@@ -152,7 +152,7 @@ struct TORCH_API ClassType : public NamedType {
   // Attributes are stored in a specific slot at runtime for effiency.
   // When emitting instructions we specify the slot so that attribute access is
   // a constant lookup
-  c10::optional<size_t> findAttributeSlot(const std::string& name) const {
+  std::optional<size_t> findAttributeSlot(const std::string& name) const {
     size_t slot = 0;
     for (const auto& attr : attributes_) {
       if (name == attr.getName()) {
@@ -160,7 +160,7 @@ struct TORCH_API ClassType : public NamedType {
       }
       slot++;
     }
-    return c10::nullopt;
+    return std::nullopt;
   }
   size_t getAttributeSlot(const std::string& name) const {
     if (auto r = findAttributeSlot(name)) {
@@ -239,7 +239,7 @@ struct TORCH_API ClassType : public NamedType {
   }
 
   // Get the property with the given \p name, if it exists on the class.
-  c10::optional<ClassType::Property> getProperty(const std::string& name);
+  std::optional<ClassType::Property> getProperty(const std::string& name);
   // Add a property named \p name with \p getter and \p setter as its getter and setter.
   void addProperty(const std::string& name, torch::jit::Function* getter, torch::jit::Function* setter);
   // Get a list of all properties.
@@ -257,7 +257,7 @@ struct TORCH_API ClassType : public NamedType {
 
   size_t addConstant(const std::string& name, const IValue& value);
 
-  c10::optional<size_t> findConstantSlot(const std::string& name) const;
+  std::optional<size_t> findConstantSlot(const std::string& name) const;
 
   size_t getConstantSlot(const std::string& name) const {
     if (auto r = findConstantSlot(name)) {
@@ -281,7 +281,7 @@ struct TORCH_API ClassType : public NamedType {
 
   IValue getConstant(size_t slot) const;
 
-  c10::optional<IValue> findConstant(const std::string& name) const;
+  std::optional<IValue> findConstant(const std::string& name) const;
 
   size_t numConstants() const;
 
@@ -341,10 +341,10 @@ struct TORCH_API ClassType : public NamedType {
   const std::vector<torch::jit::Function*>& getForwardPreHooks() const;
 
   void checkForwardPreHookSchema(
-      int pre_hook_idx,
+      size_t pre_hook_idx,
       const FunctionSchema& pre_hook_schema) const;
   void checkForwardHookSchema(
-      int hook_idx,
+      size_t hook_idx,
       const FunctionSchema& hook_schema) const;
 
   void addMethod(torch::jit::Function* method);
@@ -384,20 +384,21 @@ struct TORCH_API ClassType : public NamedType {
 
  private:
   ClassType(
-      c10::optional<QualifiedName> name,
+      std::optional<QualifiedName> name,
       std::weak_ptr<CompilationUnit> cu,
       bool is_module = false,
       std::string doc_string = "",
       std::vector<std::string> unresolved_class_attributes = {});
 
-  std::string annotation_str_impl(C10_UNUSED TypePrinter printer = nullptr) const override {
+  std::string annotation_str_impl(
+      [[maybe_unused]] const TypePrinter& printer = nullptr) const override {
     const auto& n = name().value();
     return n.qualifiedName();
   }
 
   void addAttribute(ClassAttribute classAttribute);
-  std::string getForwardPreHookErrorMessage(int pre_hook_idx) const;
-  std::string getForwardHookErrorMessage(int hook_idx) const;
+  std::string getForwardPreHookErrorMessage(size_t pre_hook_idx) const;
+  std::string getForwardHookErrorMessage(size_t hook_idx) const;
 
   // Mapping of attribute names -> their type.
   // NOTE: this does not contain methods, which are stored in the module

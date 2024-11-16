@@ -7,8 +7,8 @@
 #include <torch/csrc/distributed/c10d/socket.h>
 
 #include <cstring>
+#include <optional>
 #include <system_error>
-#include <thread>
 #include <utility>
 #include <vector>
 
@@ -18,6 +18,7 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #else
+#include <arpa/inet.h>
 #include <fcntl.h>
 #include <netdb.h>
 #include <netinet/tcp.h>
@@ -31,15 +32,16 @@ C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated")
 #include <fmt/chrono.h>
 C10_DIAGNOSTIC_POP()
 #include <fmt/format.h>
+#include <fmt/ranges.h>
 
 #include <torch/csrc/distributed/c10d/error.h>
 #include <torch/csrc/distributed/c10d/exception.h>
 #include <torch/csrc/distributed/c10d/logging.h>
+#include <torch/csrc/distributed/c10d/socket_fmt.h>
 
 #include <c10/util/CallOnce.h>
 
-namespace c10d {
-namespace detail {
+namespace c10d::detail {
 namespace {
 #ifdef _WIN32
 
@@ -97,12 +99,14 @@ inline void setSocketError(int val) noexcept {
 #endif
 
 // Suspends the current thread for the specified duration.
-void delay(std::chrono::seconds d) {
+void delay(std::chrono::milliseconds d) {
 #ifdef _WIN32
   std::this_thread::sleep_for(d);
 #else
   ::timespec req{};
-  req.tv_sec = d.count();
+  auto ms = d.count();
+  req.tv_sec = ms / 1000;
+  req.tv_nsec = (ms % 1000) * 1000000;
 
   // The C++ Standard does not specify whether `sleep_for()` should be signal-
   // aware; therefore, we use the `nanosleep()` syscall.
@@ -140,6 +144,8 @@ class SocketImpl {
 
   explicit SocketImpl(Handle hnd) noexcept : hnd_{hnd} {}
 
+  explicit SocketImpl(Handle hnd, const ::addrinfo& remote);
+
   SocketImpl(const SocketImpl& other) = delete;
 
   SocketImpl& operator=(const SocketImpl& other) = delete;
@@ -176,15 +182,54 @@ class SocketImpl {
     return hnd_;
   }
 
+  const std::optional<std::string>& remote() const noexcept {
+    return remote_;
+  }
+
   bool waitForInput(std::chrono::milliseconds timeout);
 
  private:
   bool setSocketFlag(int level, int optname, bool value) noexcept;
 
   Handle hnd_;
+  const std::optional<std::string> remote_;
 };
-} // namespace detail
-} // namespace c10d
+
+std::string formatSockAddr(const struct ::sockaddr* addr, socklen_t len) {
+  char host[NI_MAXHOST], port[NI_MAXSERV]; // NOLINT
+
+  if (int err = ::getnameinfo(
+          addr, len, host, NI_MAXHOST, port, NI_MAXSERV, NI_NUMERICSERV)) {
+    C10D_WARNING(
+        "The hostname of the client socket cannot be retrieved. err={}", err);
+
+    // if we can't resolve the hostname, display the IP address
+    if (addr->sa_family == AF_INET) {
+      struct sockaddr_in* psai = (struct sockaddr_in*)&addr;
+      // NOLINTNEXTLINE(*array*)
+      char ip[INET_ADDRSTRLEN];
+      if (inet_ntop(addr->sa_family, &(psai->sin_addr), ip, INET_ADDRSTRLEN) !=
+          nullptr) {
+        return fmt::format("{}:{}", ip, psai->sin_port);
+      }
+    } else if (addr->sa_family == AF_INET6) {
+      struct sockaddr_in6* psai = (struct sockaddr_in6*)&addr;
+      // NOLINTNEXTLINE(*array*)
+      char ip[INET6_ADDRSTRLEN];
+      if (inet_ntop(
+              addr->sa_family, &(psai->sin6_addr), ip, INET6_ADDRSTRLEN) !=
+          nullptr) {
+        return fmt::format("[{}]:{}", ip, psai->sin6_port);
+      }
+    }
+    return "?UNKNOWN?";
+  }
+  if (addr->sa_family == AF_INET) {
+    return fmt::format("{}:{}", host, port);
+  }
+  return fmt::format("[{}]:{}", host, port);
+}
+} // namespace c10d::detail
 
 //
 // libfmt formatters for `addrinfo` and `Socket`
@@ -199,25 +244,10 @@ struct formatter<::addrinfo> {
 
   template <typename FormatContext>
   decltype(auto) format(const ::addrinfo& addr, FormatContext& ctx) const {
-    char host[NI_MAXHOST], port[NI_MAXSERV]; // NOLINT
-
-    int r = ::getnameinfo(
-        addr.ai_addr,
-        addr.ai_addrlen,
-        host,
-        NI_MAXHOST,
-        port,
-        NI_MAXSERV,
-        NI_NUMERICSERV);
-    if (r != 0) {
-      return fmt::format_to(ctx.out(), "?UNKNOWN?");
-    }
-
-    if (addr.ai_addr->sa_family == AF_INET) {
-      return fmt::format_to(ctx.out(), "{}:{}", host, port);
-    } else {
-      return fmt::format_to(ctx.out(), "[{}]:{}", host, port);
-    }
+    return fmt::format_to(
+        ctx.out(),
+        "{}",
+        c10d::detail::formatSockAddr(addr.ai_addr, addr.ai_addrlen));
   }
 };
 
@@ -237,7 +267,9 @@ struct formatter<c10d::detail::SocketImpl> {
 
     ::socklen_t addr_len = sizeof(addr_s);
 
-    if (::getsockname(socket.handle(), addr_ptr, &addr_len) != 0) {
+    auto fd = socket.handle();
+
+    if (::getsockname(fd, addr_ptr, &addr_len) != 0) {
       return fmt::format_to(ctx.out(), "?UNKNOWN?");
     }
 
@@ -245,14 +277,24 @@ struct formatter<c10d::detail::SocketImpl> {
     addr.ai_addr = addr_ptr;
     addr.ai_addrlen = addr_len;
 
-    return fmt::format_to(ctx.out(), "{}", addr);
+    auto const& remote = socket.remote();
+    std::string remoteStr = remote ? *remote : "none";
+
+    return fmt::format_to(
+        ctx.out(),
+        "SocketImpl(fd={}, addr={}, remote={})",
+        fd,
+        addr,
+        remoteStr);
   }
 };
 
 } // namespace fmt
 
-namespace c10d {
-namespace detail {
+namespace c10d::detail {
+
+SocketImpl::SocketImpl(Handle hnd, const ::addrinfo& remote)
+    : hnd_{hnd}, remote_{fmt::format("{}", remote)} {}
 
 SocketImpl::~SocketImpl() {
 #ifdef _WIN32
@@ -301,7 +343,7 @@ std::unique_ptr<SocketImpl> SocketImpl::accept() const {
       *this,
       addr);
 
-  auto impl = std::make_unique<SocketImpl>(hnd);
+  auto impl = std::make_unique<SocketImpl>(hnd, addr);
 
   // Make sure that we do not "leak" our file descriptors to child processes.
   impl->closeOnExec();
@@ -417,22 +459,34 @@ bool SocketImpl::waitForInput(std::chrono::milliseconds timeout) {
     int res = pollFd(&pfd, 1, static_cast<int>(timeout.count()));
     if (res > 0) {
       return true;
+    } else if (res == 0) {
+      C10D_WARNING(
+          "waitForInput: poll for socket {} returned 0, likely a timeout",
+          *this);
+      continue;
     }
-    std::error_code err = getSocketError();
 
+    std::error_code err = getSocketError();
     if (err == std::errc::operation_in_progress) {
       bool timedout = Clock::now() >= deadline;
       if (timedout) {
         return false;
       }
       C10D_WARNING(
-          "pollFB for socket {} returned operation_in_progress before a timeout",
-          hnd_);
+          "waitForInput: poll for socket {} returned operation_in_progress before a timeout",
+          *this);
     } else if (err != std::errc::interrupted) {
-      C10D_WARNING("While waitForInput, poolFD failed with {}.", err);
+      C10D_WARNING(
+          "waitForInput: poll for socket {} failed with res={}, err={}.",
+          *this,
+          res,
+          err);
       return false;
     }
   } while (Clock::now() < deadline);
+
+  C10D_WARNING(
+      "waitForInput: socket {} timed out after {}ms", *this, timeout.count());
   return false;
 }
 
@@ -458,6 +512,7 @@ class SocketListenOp {
   bool tryListen(const ::addrinfo& addr);
 
   template <typename... Args>
+  // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
   void recordError(fmt::string_view format, Args&&... args) {
     auto msg = fmt::vformat(format, fmt::make_format_args(args...));
 
@@ -534,6 +589,11 @@ bool SocketListenOp::tryListen(int family) {
     }
   }
 
+  recordError(
+      "The server could not be initialized on any address for port={}, family={}",
+      port_,
+      family);
+
   return false;
 }
 
@@ -541,7 +601,7 @@ bool SocketListenOp::tryListen(const ::addrinfo& addr) {
   SocketImpl::Handle hnd =
       ::socket(addr.ai_family, addr.ai_socktype, addr.ai_protocol);
   if (hnd == SocketImpl::invalid_socket) {
-    recordError(
+    C10D_DEBUG(
         "The server socket cannot be initialized on {} {}.",
         addr,
         getSocketError());
@@ -614,7 +674,9 @@ class SocketListenFromFdOp {
   std::unique_ptr<SocketImpl> run() const;
 
  private:
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const int fd_;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const std::uint16_t expected_port_;
 };
 
@@ -624,7 +686,7 @@ SocketListenFromFdOp::SocketListenFromFdOp(int fd, std::uint16_t expected_port)
 std::unique_ptr<SocketImpl> SocketListenFromFdOp::run() const {
   C10D_DEBUG("listenFromFd: fd {}, expected port {}", fd_, expected_port_);
 
-  ::sockaddr_storage addr_storage;
+  ::sockaddr_storage addr_storage{};
   ::socklen_t addr_len = sizeof(addr_storage);
   if (::getsockname(
           fd_, reinterpret_cast<::sockaddr*>(&addr_storage), &addr_len) < 0) {
@@ -669,9 +731,7 @@ class SocketConnectOp {
   using Duration = std::chrono::steady_clock::duration;
   using TimePoint = std::chrono::time_point<std::chrono::steady_clock>;
 
-  static const std::chrono::seconds delay_duration_;
-
-  enum class ConnectResult { Success, Error, Retry };
+  enum class ConnectResult : uint8_t { Success, Error, Retry };
 
  public:
   SocketConnectOp(
@@ -691,6 +751,7 @@ class SocketConnectOp {
   [[noreturn]] void throwTimeoutError() const;
 
   template <typename... Args>
+  // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
   void recordError(fmt::string_view format, Args&&... args) {
     auto msg = fmt::vformat(format, fmt::make_format_args(args...));
 
@@ -706,8 +767,6 @@ class SocketConnectOp {
   std::vector<std::string> errors_{};
   std::unique_ptr<SocketImpl> socket_{};
 };
-
-const std::chrono::seconds SocketConnectOp::delay_duration_{1};
 
 SocketConnectOp::SocketConnectOp(
     const std::string& host,
@@ -764,9 +823,7 @@ bool SocketConnectOp::tryConnect(int family) {
 
   deadline_ = Clock::now() + opts_->connect_timeout();
 
-  std::size_t retry_attempt = 1;
-
-  bool retry; // NOLINT(cppcoreguidelines-init-variables)
+  bool retry = false;
   do {
     retry = false;
 
@@ -807,21 +864,24 @@ bool SocketConnectOp::tryConnect(int family) {
     }
 
     if (retry) {
-      if (Clock::now() < deadline_ - delay_duration_) {
+      auto connectBackoff = opts_->connect_backoff();
+      auto delayDuration = connectBackoff->nextBackoff();
+
+      if (Clock::now() < deadline_ - delayDuration) {
         // Prevent our log output to be too noisy, warn only every 30 seconds.
-        if (retry_attempt == 30) {
+        static auto lastLog = std::chrono::steady_clock::now();
+        auto now = std::chrono::steady_clock::now();
+        if ((now - lastLog) >= std::chrono::seconds(30)) {
           C10D_INFO(
               "No socket on ({}, {}) is listening yet, will retry.",
               host_,
               port_);
 
-          retry_attempt = 0;
+          lastLog = now;
         }
 
-        // Wait one second to avoid choking the server.
-        delay(delay_duration_);
-
-        retry_attempt++;
+        // Wait to avoid choking the server.
+        delay(delayDuration);
       } else {
         throwTimeoutError();
       }
@@ -848,7 +908,7 @@ SocketConnectOp::ConnectResult SocketConnectOp::tryConnect(
     return ConnectResult::Error;
   }
 
-  socket_ = std::make_unique<SocketImpl>(hnd);
+  socket_ = std::make_unique<SocketImpl>(hnd, addr);
 
   socket_->enableNonBlocking();
 
@@ -866,6 +926,11 @@ SocketConnectOp::ConnectResult SocketConnectOp::tryConnect(
           "The server socket on {} is not yet listening {}, will retry.",
           addr,
           err);
+
+      return ConnectResult::Retry;
+    } else if (err == std::errc::timed_out) {
+      C10D_WARNING(
+          "The server socket on {} has timed out, will retry.", addr, err);
 
       return ConnectResult::Retry;
     } else {
@@ -1033,6 +1098,11 @@ bool Socket::waitForInput(std::chrono::milliseconds timeout) {
   return impl_->waitForInput(timeout);
 }
 
-} // namespace detail
+std::string Socket::repr() const {
+  if (impl_) {
+    return fmt::format("{}", *impl_);
+  }
+  return "Socket(no-impl)";
+}
 
-} // namespace c10d
+} // namespace c10d::detail

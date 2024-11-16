@@ -30,9 +30,9 @@ on:
       python-version:
         required: false
         type: string
-        default: "3.8"
+        default: "3.9"
         description: |
-          The python version to be used. Will be 3.8 by default
+          The python version to be used. Will be 3.9 by default
       environment-file:
         required: false
         type: string
@@ -104,7 +104,7 @@ jobs:
           pip-requirements-file: .github/requirements/pip-requirements-${{ runner.os }}.txt
 
       - name: Install sccache (only for non-forked PRs, and pushes to trunk)
-        uses: nick-fields/retry@v2.8.2
+        uses: nick-fields/retry@v3.0.0
         if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
         with:
           timeout_minutes: 5
@@ -139,7 +139,7 @@ jobs:
             else
               # The runner has access to the S3 bucket via IAM profile without the need
               # for any credential
-              echo "SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2" >> "${GITHUB_ENV}"
+              echo "SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2" >> "${GITHUB_ENV}"0
               echo "SCCACHE_S3_KEY_PREFIX=${GITHUB_WORKFLOW}" >> "${GITHUB_ENV}"
             fi
 
@@ -186,7 +186,7 @@ jobs:
           zip -1 -r artifacts.zip dist/ build/.ninja_log build/compile_commands.json .additional_ci_files
 
       - name: Store PyTorch Build Artifacts on GHA
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped'
         with:
           name: ${{ env.BUILD_ENVIRONMENT }}
@@ -195,7 +195,7 @@ jobs:
           path: artifacts.zip
 
       - name: Upload sccache stats to GHA
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         # Only if sccache is installed, see above
         if: ${{ (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository) && steps.build.outcome != 'skipped' }}
         with:

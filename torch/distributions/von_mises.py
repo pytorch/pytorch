@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import math
 
 import torch
@@ -5,6 +6,7 @@ import torch.jit
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all, lazy_property
+
 
 __all__ = ["VonMises"]
 
@@ -175,7 +177,7 @@ class VonMises(Distribution):
             self._loc, self._concentration, self._proposal_r, x
         ).to(self.loc.dtype)
 
-    def expand(self, batch_shape):
+    def expand(self, batch_shape, _instance=None):
         try:
             return super().expand(batch_shape)
         except NotImplementedError:

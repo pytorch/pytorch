@@ -5,8 +5,7 @@
 #include <cstring>
 #include <vector>
 
-namespace torch {
-namespace profiler {
+namespace torch::profiler {
 
 /* A vector type to hold a list of performance counters */
 using perf_counters_t = std::vector<uint64_t>;
@@ -27,5 +26,4 @@ constexpr std::array<const char*, 2> ProfilerPerfEvents = {
      * be more or less invariant. Measured in uint64_t. PE can be non cpu.
      */
     "instructions"};
-} // namespace profiler
-} // namespace torch
+} // namespace torch::profiler

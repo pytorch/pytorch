@@ -3,14 +3,13 @@
 #include <functional>
 #include <memory>
 
+#include <c10/core/Device.h>
 #include <c10/util/strong_type.h>
 #include <torch/csrc/Export.h>
 
 struct CUevent_st;
 
-namespace torch {
-namespace profiler {
-namespace impl {
+namespace torch::profiler::impl {
 
 // ----------------------------------------------------------------------------
 // -- Annotation --------------------------------------------------------------
@@ -20,7 +19,7 @@ using ProfilerVoidEventStub = std::shared_ptr<void>;
 
 struct TORCH_API ProfilerStubs {
   virtual void record(
-      int* device,
+      c10::DeviceIndex* device,
       ProfilerVoidEventStub* event,
       int64_t* cpu_ns) const = 0;
   virtual float elapsed(
@@ -34,7 +33,7 @@ struct TORCH_API ProfilerStubs {
   }
   virtual void onEachDevice(std::function<void(int)> op) const = 0;
   virtual void synchronize() const = 0;
-  virtual ~ProfilerStubs();
+  virtual ~ProfilerStubs() = default;
 };
 
 TORCH_API void registerCUDAMethods(ProfilerStubs* stubs);
@@ -51,6 +50,4 @@ using vulkan_id_t = strong::type<
     strong::convertible_to<int64_t>,
     strong::hashable>;
 
-} // namespace impl
-} // namespace profiler
-} // namespace torch
+} // namespace torch::profiler::impl

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# mypy: allow-untyped-defs
 
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
@@ -11,7 +12,7 @@ from argparse import Action
 
 class env(Action):
     """
-    Get argument values from ``PET_{dest}`` before defaultingto the given ``default`` value.
+    Get argument values from ``PET_{dest}`` before defaulting to the given ``default`` value.
 
     For flags (e.g. ``--standalone``)
     use ``check_env`` instead.

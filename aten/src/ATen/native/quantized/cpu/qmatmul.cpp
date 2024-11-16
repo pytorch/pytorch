@@ -7,8 +7,7 @@
 #include <ruy/ruy.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 
@@ -84,7 +83,7 @@ Tensor qmatmul(
           .memory_format(qa.suggest_memory_format()),
       output_scale,
       output_zero_point,
-      c10::nullopt);
+      std::nullopt);
 
   const Tensor& qa_contig = qa.contiguous();
   const Tensor& qb_contig = qb.contiguous();
@@ -184,5 +183,4 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
 
 } // namespace
 
-} // namespace native
-} // namespace at
+} // namespace at::native

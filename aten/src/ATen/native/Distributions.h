@@ -254,7 +254,7 @@ C10_DEVICE scalar_t sample_binomial(scalar_t count, scalar_t prob, BaseSampler<a
  * See note [3-Clause BSD License for the Cephes Math Library] in ATen/native/Math.h.
  */
 template<typename scalar_t, typename accscalar_t>
-C10_DEVICE static inline scalar_t digamma_one(scalar_t x) {
+C10_DEVICE inline scalar_t digamma_one(scalar_t x) {
   constexpr accscalar_t PSI_10 = 2.25175258906672110764;
   if (x == 0) {
     return INFINITY;
@@ -376,7 +376,7 @@ C10_HOST_DEVICE scalar_t standard_gamma_grad_one(scalar_t alpha_, scalar_t x_) {
 // Approximate reparameterized gradient of Beta(x,alpha,beta) wrt alpha.
 // Assumes x is close to zero and uses a Taylor expansion.
 template <typename scalar_t, typename accscalar_t>
-C10_DEVICE static inline scalar_t _beta_grad_alpha_small(scalar_t x, scalar_t alpha, scalar_t beta) {
+C10_DEVICE inline scalar_t _beta_grad_alpha_small(scalar_t x, scalar_t alpha, scalar_t beta) {
   const scalar_t factor = digamma_one<scalar_t, accscalar_t>(alpha)
                         - digamma_one<scalar_t, accscalar_t>(alpha + beta) - compat_log(x);
   scalar_t numer = 1;
@@ -394,7 +394,7 @@ C10_DEVICE static inline scalar_t _beta_grad_alpha_small(scalar_t x, scalar_t al
 // Approximate reparameterized gradient of Beta(x,alpha,beta) wrt beta.
 // Assumes x is close to zero and uses a Taylor expansion.
 template <typename scalar_t, typename accscalar_t>
-C10_DEVICE static inline scalar_t _beta_grad_beta_small(scalar_t x, scalar_t alpha, scalar_t beta) {
+C10_DEVICE inline scalar_t _beta_grad_beta_small(scalar_t x, scalar_t alpha, scalar_t beta) {
   const scalar_t factor = digamma_one<scalar_t, accscalar_t>(alpha + beta) - digamma_one<scalar_t, accscalar_t>(beta);
   scalar_t numer = 1, betas = 1, dbetas = 0, series = factor / alpha;
   for (int i = 1; i <= 8; ++i) {
@@ -412,7 +412,7 @@ C10_DEVICE static inline scalar_t _beta_grad_beta_small(scalar_t x, scalar_t alp
 // Assumes alpha and beta are both large and uses a Rice saddle point expansion.
 // To ensure numerical stability, this computation is performed at higher precision.
 template<typename scalar_t, typename accscalar_t>
-C10_DEVICE static inline scalar_t _beta_grad_alpha_mid(accscalar_t x, accscalar_t alpha, accscalar_t beta) {
+C10_DEVICE inline scalar_t _beta_grad_alpha_mid(accscalar_t x, accscalar_t alpha, accscalar_t beta) {
   const accscalar_t total = alpha + beta;
   const accscalar_t mean = alpha / total;
   const accscalar_t std = compat_sqrt(alpha * beta / (total + 1)) / total;
@@ -452,7 +452,7 @@ C10_DEVICE static inline scalar_t _beta_grad_alpha_mid(accscalar_t x, accscalar_
 // This function inputs total=alpha+beta to make it easy to implement
 // Dirichlet reparameterized gradients in terms of Betas.
 template<typename scalar_t, typename accscalar_t>
-C10_HOST_DEVICE static inline scalar_t dirichlet_grad_one(scalar_t x, scalar_t alpha, scalar_t total) {
+C10_HOST_DEVICE inline scalar_t dirichlet_grad_one(scalar_t x, scalar_t alpha, scalar_t total) {
   accscalar_t x_ = static_cast<accscalar_t>(x);
   accscalar_t alpha_ = static_cast<accscalar_t>(alpha);
   accscalar_t total_ = static_cast<accscalar_t>(total);

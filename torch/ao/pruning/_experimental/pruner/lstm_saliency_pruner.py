@@ -1,7 +1,10 @@
+# mypy: allow-untyped-defs
 from typing import cast
 
 import torch
+
 from .base_structured_sparsifier import BaseStructuredSparsifier, FakeStructuredSparsity
+
 
 class LSTMSaliencyPruner(BaseStructuredSparsifier):
     """
@@ -31,7 +34,9 @@ class LSTMSaliencyPruner(BaseStructuredSparsifier):
 
                 # select weights based on magnitude
                 if weights.dim() <= 1:
-                    raise Exception("Structured pruning can only be applied to a 2+dim weight tensor!")
+                    raise Exception(  # noqa: TRY002
+                        "Structured pruning can only be applied to a 2+dim weight tensor!"
+                    )
                 # take norm over all but first dim
                 dims = tuple(range(1, weights.dim()))
                 saliency = weights.norm(dim=dims, p=1)

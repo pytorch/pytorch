@@ -2,9 +2,7 @@
 #include <c10/util/CallOnce.h>
 #include <c10/util/Exception.h>
 
-#include <cmath>
 #include <deque>
-#include <mutex>
 #include <vector>
 
 namespace at::xpu {
@@ -46,19 +44,9 @@ void initDeviceGlobalIdx(DeviceIndex device) {
   };
   auto it = std::find_if(devices.begin(), devices.end(), match_device);
   TORCH_CHECK(
-      it != devices.end(), "Cant't find the global index of XPU device.");
+      it != devices.end(), "Can't find the global index of XPU device.");
   device_global_idxs[device] =
       static_cast<int32_t>(std::distance(devices.begin(), it));
-}
-
-inline void check_device(DeviceIndex device) {
-  TORCH_CHECK(
-      device >= 0 && device < num_gpus,
-      "device is out of range, device is ",
-      static_cast<int>(device),
-      ", total number of device is ",
-      static_cast<int>(num_gpus),
-      ".");
 }
 
 } // anonymous namespace
@@ -72,7 +60,7 @@ DeviceProp* getDeviceProperties(DeviceIndex device) {
   c10::call_once(init_flag, initXPUContextVectors);
   if (device == -1)
     device = c10::xpu::current_device();
-  check_device(device);
+  check_device_index(device);
   c10::call_once(device_prop_flags[device], initDeviceProperty, device);
   return &device_properties[device];
 }
@@ -81,7 +69,7 @@ DeviceProp* getDeviceProperties(DeviceIndex device) {
 // index of a XPU device in the framework.
 int32_t getGlobalIdxFromDevice(DeviceIndex device) {
   c10::call_once(init_flag, initXPUContextVectors);
-  check_device(device);
+  check_device_index(device);
   c10::call_once(device_global_idx_flags[device], initDeviceGlobalIdx, device);
   return device_global_idxs[device];
 }

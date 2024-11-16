@@ -2,13 +2,14 @@
 #include <c10/core/TensorImpl.h>
 #include <c10/core/impl/PyInterpreter.h>
 
-namespace c10 {
-namespace impl {
+namespace c10::impl {
 
 struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
   std::string name() const override {
     return "<unloaded interpreter>";
   }
+
+  void incref(PyObject* pyobj) const override {} // do nothing
 
   void decref(PyObject* pyobj, bool has_pyobj_slot) const override {
   } // do nothing
@@ -35,7 +36,10 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
   void python_op_registration_trampoline(
       const c10::OperatorHandle& op,
       c10::DispatchKey,
-      torch::jit::Stack* stack) const override {
+      c10::DispatchKeySet keyset,
+      torch::jit::Stack* stack,
+      bool with_keyset,
+      bool with_op) const override {
     PANIC(python_op_registration_trampoline);
   }
 
@@ -95,17 +99,32 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
   }
 
   // Just swallow the event, don't do anything
-  void trace_gpu_event_creation(uintptr_t event) const override {}
-  void trace_gpu_event_deletion(uintptr_t event) const override {}
-  void trace_gpu_event_record(uintptr_t event, uintptr_t stream)
+  void trace_gpu_event_creation(c10::DeviceType device_type, uintptr_t event)
       const override {}
-  void trace_gpu_event_wait(uintptr_t event, uintptr_t stream) const override {}
-  void trace_gpu_memory_allocation(uintptr_t ptr) const override {}
-  void trace_gpu_memory_deallocation(uintptr_t ptr) const override {}
-  void trace_gpu_stream_creation(uintptr_t stream) const override {}
-  void trace_gpu_device_synchronization() const override {}
-  void trace_gpu_stream_synchronization(uintptr_t stream) const override {}
-  void trace_gpu_event_synchronization(uintptr_t event) const override {}
+  void trace_gpu_event_deletion(c10::DeviceType device_type, uintptr_t event)
+      const override {}
+  void trace_gpu_event_record(
+      c10::DeviceType device_type,
+      uintptr_t event,
+      uintptr_t stream) const override {}
+  void trace_gpu_event_wait(
+      c10::DeviceType device_type,
+      uintptr_t event,
+      uintptr_t stream) const override {}
+  void trace_gpu_memory_allocation(c10::DeviceType device_type, uintptr_t ptr)
+      const override {}
+  void trace_gpu_memory_deallocation(c10::DeviceType device_type, uintptr_t ptr)
+      const override {}
+  void trace_gpu_stream_creation(c10::DeviceType device_type, uintptr_t stream)
+      const override {}
+  void trace_gpu_device_synchronization(
+      c10::DeviceType device_type) const override {}
+  void trace_gpu_stream_synchronization(
+      c10::DeviceType device_type,
+      uintptr_t stream) const override {}
+  void trace_gpu_event_synchronization(
+      c10::DeviceType device_type,
+      uintptr_t event) const override {}
 
   void reset_backward_hooks(const TensorImpl* self) const override {
     PANIC(reset_backward_hooks);
@@ -125,5 +144,4 @@ void PyInterpreter::disarm() noexcept {
   vtable_ = &noop_vtable;
 }
 
-} // namespace impl
-} // namespace c10
+} // namespace c10::impl

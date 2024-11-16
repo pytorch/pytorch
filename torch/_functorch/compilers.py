@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import copy
 import logging
 import os
@@ -6,12 +8,14 @@ import random
 from contextlib import contextmanager
 from functools import partial
 from typing import Callable, Union
+
 import sympy
 
 import torch
-from torch import SymInt
 import torch.fx as fx
 import torch.nn as nn
+import torch.utils._pytree as pytree
+from torch import SymInt
 from torch._decomp import get_decompositions
 from torch.fx.experimental.symbolic_shapes import bind_symbols
 
@@ -22,7 +26,6 @@ from .partitioners import (
     draw_graph,
     min_cut_rematerialization_partition,
 )
-import torch.utils._pytree as pytree
 
 
 log = logging.getLogger(__name__)
@@ -31,9 +34,10 @@ log = logging.getLogger(__name__)
 # These canonicalizations are needed here (and not decompositions), as the ops
 # we're trying to canonicalize to CompositeImplicitAutograd.
 def _canonicalize(fx_g):
-    for node in fx_g.graph.nodes:
-        if node.target == torch.ops.aten._to_copy:
-            node.target = torch.ops.aten.to
+    for node in fx_g.graph.find_nodes(
+        op="call_function", target=torch.ops.aten._to_copy
+    ):
+        node.target = torch.ops.aten.to
     fx_g.recompile()
     return fx_g
 
@@ -65,13 +69,10 @@ def ts_compile(fx_g: fx.GraphModule, inps) -> Callable:
     with _disable_jit_autocast():
         strip_overloads(fx_g)
 
-        for node in fx_g.graph.nodes:
-            if (
-                node.target == torch.ops.aten._to_copy
-                and len(node.args) == 1
-                and len(node.kwargs) == 1
-                and "dtype" in node.kwargs
-            ):
+        for node in fx_g.graph.find_nodes(
+            op="call_function", target=torch.ops.aten._to_copy
+        ):
+            if len(node.args) == 1 and len(node.kwargs) == 1 and "dtype" in node.kwargs:
                 node.target = torch.ops.aten.to
 
         for node in fx_g.graph.nodes:
@@ -104,9 +105,7 @@ def _draw_graph_compile(fx_g, _, name, clear_meta=True):
 
 
 def draw_graph_compile(name):
-    return make_boxed_compiler(
-        partial(_draw_graph_compile, name=name)
-    )
+    return make_boxed_compiler(partial(_draw_graph_compile, name=name))
 
 
 @make_boxed_compiler
@@ -121,13 +120,13 @@ def nop(fx_g: fx.GraphModule, _) -> Callable:
     """
     return fx_g
 
+
 class DebugInterpreter(fx.Interpreter):
     def run(self, *args):
         self.symbol_mapping = bind_symbols(self.module, *args)
         super().run(*args)
 
     def run_node(self, n):
-
         def subst_symint(ni):
             if not isinstance(ni, SymInt):
                 return ni
@@ -141,21 +140,27 @@ class DebugInterpreter(fx.Interpreter):
         def check_significant_strides(a, b):
             if subst_symint(a.numel()) > 0:
                 for idx in range(a.ndim):
-                    if subst_symint(a.stride(idx)) != b.stride(idx) and subst_symint(a.size(idx)) > 1:
+                    if (
+                        subst_symint(a.stride(idx)) != b.stride(idx)
+                        and subst_symint(a.size(idx)) > 1
+                    ):
                         return False
             return True
 
         def check(nv, rv, desc):
             assert callable(desc)
             assert nv.dtype == rv.dtype, f"{desc()}: {nv.dtype} != {rv.dtype}"
-            assert subst_symint_tuple(nv.size()) == rv.size(), \
-                f"{desc()}: {nv.size()} aka {subst_symint_tuple(nv.size())} != {rv.size()}"
+            assert (
+                subst_symint_tuple(nv.size()) == rv.size()
+            ), f"{desc()}: {nv.size()} aka {subst_symint_tuple(nv.size())} != {rv.size()}"
             same_strides = check_significant_strides(nv, rv)
-            assert same_strides, f"{desc()}: {nv.stride()} aka {subst_symint_tuple(nv.stride())} != {rv.stride()}"
+            assert (
+                same_strides
+            ), f"{desc()}: {nv.stride()} aka {subst_symint_tuple(nv.stride())} != {rv.stride()}"
 
         r = super().run_node(n)
-        if 'val' in n.meta:
-            n_vals, n_spec = pytree.tree_flatten(n.meta['val'])
+        if "val" in n.meta:
+            n_vals, n_spec = pytree.tree_flatten(n.meta["val"])
             r_vals, r_spec = pytree.tree_flatten(r)
             # TODO: There is some sort of problem where we record that an
             # operator returned a tuple/list, and then later it turns out the
@@ -179,6 +184,7 @@ def debug_nop(fx_g: fx.GraphModule, _) -> Callable:
     strides.)
     """
     return DebugInterpreter(fx_g).run
+
 
 @make_boxed_compiler
 def simple_ts_compile(fx_g, _):
@@ -303,7 +309,7 @@ def get_inputs(input_data_path):
     Return a random input for the given inputs meta generated from _save_fx_default.
     """
     inputs = []
-    with (open(input_data_path, "rb")) as f:
+    with open(input_data_path, "rb") as f:
         inputs_meta = pickle.load(f)
         inputs = []
         for meta in inputs_meta:

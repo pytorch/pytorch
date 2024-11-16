@@ -19,9 +19,7 @@ MKL_Complex to_mkl_complex(c10::complex<scalar_t> scalar) {
 
 } // namespace
 
-// There are link errors when compiling with create_csr functions on Windows.
-// See https://github.com/pytorch/pytorch/pull/50937#issuecomment-779272492
-#if !defined(_WIN32)
+
 template <>
 void create_csr<float>(MKL_SPARSE_CREATE_CSR_ARGTYPES(float)) {
   TORCH_MKLSPARSE_CHECK(mkl_sparse_s_create_csr(
@@ -117,7 +115,6 @@ void create_bsr<c10::complex<double>>(
       col_indx,
       reinterpret_cast<MKL_Complex16*>(values)));
 }
-#endif // !defined(_WIN32)
 
 template <>
 void mv<float>(MKL_SPARSE_MV_ARGTYPES(float)) {
@@ -152,7 +149,6 @@ void mv<c10::complex<double>>(MKL_SPARSE_MV_ARGTYPES(c10::complex<double>)) {
       reinterpret_cast<MKL_Complex16*>(y)));
 }
 
-#if !defined(_WIN32)
 template <>
 void add<float>(MKL_SPARSE_ADD_ARGTYPES(float)) {
   TORCH_MKLSPARSE_CHECK(mkl_sparse_s_add(operation, A, alpha, B, C));
@@ -171,7 +167,6 @@ void add<c10::complex<double>>(MKL_SPARSE_ADD_ARGTYPES(c10::complex<double>)) {
   TORCH_MKLSPARSE_CHECK(mkl_sparse_z_add(
       operation, A, to_mkl_complex<double, MKL_Complex16>(alpha), B, C));
 }
-#endif // !defined(_WIN32)
 
 template <>
 void export_csr<float>(MKL_SPARSE_EXPORT_CSR_ARGTYPES(float)) {
@@ -251,7 +246,6 @@ void mm<c10::complex<double>>(MKL_SPARSE_MM_ARGTYPES(c10::complex<double>)) {
       ldc));
 }
 
-#if !defined(_WIN32)
 template <>
 void spmmd<float>(MKL_SPARSE_SPMMD_ARGTYPES(float)) {
   TORCH_MKLSPARSE_CHECK(mkl_sparse_s_spmmd(
@@ -282,51 +276,62 @@ void spmmd<c10::complex<double>>(MKL_SPARSE_SPMMD_ARGTYPES(c10::complex<double>)
       reinterpret_cast<MKL_Complex16*>(C),
       ldc));
 }
-#endif
 
 template <>
-void trsv<float>(MKL_SPARSE_TRSV_ARGTYPES(float)) {
-  TORCH_MKLSPARSE_CHECK(mkl_sparse_s_trsv(operation, alpha, A, descr, x, y));
+sparse_status_t trsv<float>(MKL_SPARSE_TRSV_ARGTYPES(float)) {
+  sparse_status_t status = mkl_sparse_s_trsv(operation, alpha, A, descr, x, y);
+  TORCH_MKLSPARSE_CHECK_SUCCESS_OR_INVALID(status, "mkl_sparse_s_trsv");
+  return status;
 }
 template <>
-void trsv<double>(MKL_SPARSE_TRSV_ARGTYPES(double)) {
-  TORCH_MKLSPARSE_CHECK(mkl_sparse_d_trsv(operation, alpha, A, descr, x, y));
+sparse_status_t trsv<double>(MKL_SPARSE_TRSV_ARGTYPES(double)) {
+  sparse_status_t status = mkl_sparse_d_trsv(operation, alpha, A, descr, x, y);
+  TORCH_MKLSPARSE_CHECK_SUCCESS_OR_INVALID(status, "mkl_sparse_d_trsv");
+  return status;
 }
 template <>
-void trsv<c10::complex<float>>(MKL_SPARSE_TRSV_ARGTYPES(c10::complex<float>)) {
-  TORCH_MKLSPARSE_CHECK(mkl_sparse_c_trsv(
+sparse_status_t trsv<c10::complex<float>>(MKL_SPARSE_TRSV_ARGTYPES(c10::complex<float>)) {
+  sparse_status_t status = mkl_sparse_c_trsv(
       operation,
       to_mkl_complex<float, MKL_Complex8>(alpha),
       A,
       descr,
       reinterpret_cast<const MKL_Complex8*>(x),
-      reinterpret_cast<MKL_Complex8*>(y)));
+      reinterpret_cast<MKL_Complex8*>(y));
+  TORCH_MKLSPARSE_CHECK_SUCCESS_OR_INVALID(status, "mkl_sparse_c_trsv");
+  return status;
 }
 template <>
-void trsv<c10::complex<double>>(
+sparse_status_t trsv<c10::complex<double>>(
     MKL_SPARSE_TRSV_ARGTYPES(c10::complex<double>)) {
-  TORCH_MKLSPARSE_CHECK(mkl_sparse_z_trsv(
+  sparse_status_t status = mkl_sparse_z_trsv(
       operation,
       to_mkl_complex<double, MKL_Complex16>(alpha),
       A,
       descr,
       reinterpret_cast<const MKL_Complex16*>(x),
-      reinterpret_cast<MKL_Complex16*>(y)));
+      reinterpret_cast<MKL_Complex16*>(y));
+  TORCH_MKLSPARSE_CHECK_SUCCESS_OR_INVALID(status, "mkl_sparse_z_trsv");
+  return status;
 }
 
 template <>
-void trsm<float>(MKL_SPARSE_TRSM_ARGTYPES(float)) {
-  TORCH_MKLSPARSE_CHECK(mkl_sparse_s_trsm(
-      operation, alpha, A, descr, layout, x, columns, ldx, y, ldy));
+sparse_status_t trsm<float>(MKL_SPARSE_TRSM_ARGTYPES(float)) {
+  sparse_status_t status = mkl_sparse_s_trsm(
+      operation, alpha, A, descr, layout, x, columns, ldx, y, ldy);
+  TORCH_MKLSPARSE_CHECK_SUCCESS_OR_INVALID(status, "mkl_sparse_s_trsm");
+  return status;
 }
 template <>
-void trsm<double>(MKL_SPARSE_TRSM_ARGTYPES(double)) {
-  TORCH_MKLSPARSE_CHECK(mkl_sparse_d_trsm(
-      operation, alpha, A, descr, layout, x, columns, ldx, y, ldy));
+sparse_status_t trsm<double>(MKL_SPARSE_TRSM_ARGTYPES(double)) {
+  sparse_status_t status = mkl_sparse_d_trsm(
+      operation, alpha, A, descr, layout, x, columns, ldx, y, ldy);
+  TORCH_MKLSPARSE_CHECK_SUCCESS_OR_INVALID(status, "mkl_sparse_d_trsm");
+  return status;
 }
 template <>
-void trsm<c10::complex<float>>(MKL_SPARSE_TRSM_ARGTYPES(c10::complex<float>)) {
-  TORCH_MKLSPARSE_CHECK(mkl_sparse_c_trsm(
+sparse_status_t trsm<c10::complex<float>>(MKL_SPARSE_TRSM_ARGTYPES(c10::complex<float>)) {
+  sparse_status_t status = mkl_sparse_c_trsm(
       operation,
       to_mkl_complex<float, MKL_Complex8>(alpha),
       A,
@@ -336,12 +341,14 @@ void trsm<c10::complex<float>>(MKL_SPARSE_TRSM_ARGTYPES(c10::complex<float>)) {
       columns,
       ldx,
       reinterpret_cast<MKL_Complex8*>(y),
-      ldy));
+      ldy);
+  TORCH_MKLSPARSE_CHECK_SUCCESS_OR_INVALID(status, "mkl_sparse_c_trsm");
+  return status;
 }
 template <>
-void trsm<c10::complex<double>>(
+sparse_status_t trsm<c10::complex<double>>(
     MKL_SPARSE_TRSM_ARGTYPES(c10::complex<double>)) {
-  TORCH_MKLSPARSE_CHECK(mkl_sparse_z_trsm(
+  sparse_status_t status = mkl_sparse_z_trsm(
       operation,
       to_mkl_complex<double, MKL_Complex16>(alpha),
       A,
@@ -351,7 +358,9 @@ void trsm<c10::complex<double>>(
       columns,
       ldx,
       reinterpret_cast<MKL_Complex16*>(y),
-      ldy));
+      ldy);
+  TORCH_MKLSPARSE_CHECK_SUCCESS_OR_INVALID(status, "mkl_sparse_z_trsm");
+  return status;
 }
 
 } // namespace at::mkl::sparse

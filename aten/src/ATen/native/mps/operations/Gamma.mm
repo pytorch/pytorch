@@ -24,7 +24,7 @@ namespace mps {
  * See note [3-Clause BSD License for the Cephes Math Library].
  */
 
-static const char* GAMMA_OPS_TEMPLATE = R"METAL(
+static MetalShaderLibrary lib(R"METAL(
 #include <metal_stdlib>
 using namespace metal;
 
@@ -333,7 +333,7 @@ kernel void lgamma(device {0} *input [[buffer(0)]],
                    device {1} *output [[buffer(1)]],
                    uint id [[thread_position_in_grid]])
 {{
-    output[id] = LogGamma(static_cast<float>(input[id]));
+    output[id] = static_cast<{1}>(LogGamma(static_cast<float>(input[id])));
 }}
 
 
@@ -346,24 +346,21 @@ kernel void digamma (device {0} *input [[buffer(0)]],
         if (x == trunc(x)) {{
             // As per C++ standard for gamma related functions and SciPy,
             // If the argument is a negative integer, NaN is returned
-            output[id] = NAN;
-        }}
-        else {{
+            output[id] = static_cast<{1}>(NAN);
+        }} else {{
             // Extracts the fractional part of x as r, since tan(pi * r) is more numerically
             // accurate than tan(pi * x). While these operations are mathematically equivalent
             // since both x and r are in radians and tan() has a periodicity of pi, in practice
             // the computation of pi * x is a source of error (when |x| > 1).
             float r = fract(x);
-            output[id] = calc_digamma_positive_domain(1.0f - x) - PI / tan(PI * r);
+            output[id] = static_cast<{1}>(calc_digamma_positive_domain(1.0f - x) - PI / tan(PI * r));
         }}
-    }}
-    else if (x == 0.0f) {{
+    }} else if (x == 0.0f) {{
         // As per C++ standard for gamma related functions and SciPy,
         // If the argument is ±0, ±∞ is returned
-        output[id] = copysign(INFINITY, -x);
-    }}
-    else {{
-        output[id] = calc_digamma_positive_domain(x);
+        output[id] = static_cast<{1}>(copysign(INFINITY, -x));
+    }} else {{
+        output[id] = static_cast<{1}>(calc_digamma_positive_domain(x));
     }}
 }}
 
@@ -373,7 +370,7 @@ kernel void trigamma(device {0} *input [[buffer(0)]],
                      uint id [[thread_position_in_grid]])
 {{
     float x = input[id];
-    output[id] = calc_trigamma(x);
+    output[id] = static_cast<{1}>(calc_trigamma(x));
 }}
 
 
@@ -385,48 +382,14 @@ kernel void polygamma(device {0} *input [[buffer(0)]],
   float x = input[id];
   float n = order;
   float sgn = ((order % 2) ? 1 : -1);
-  output[id] = sgn * Gamma(n + 1) * calc_zeta(n + 1, x);
+  output[id] = static_cast<{1}>(sgn * Gamma(n + 1) * calc_zeta(n + 1, x));
 }}
 
-)METAL";
+)METAL",
+                              2);
 
-static id<MTLLibrary> compileGammaOpsLibrary(id<MTLDevice> device, const std::string& t1, const std::string& t2) {
-  auto key = t1 + t2;
-  static std::unordered_map<std::string, id<MTLLibrary>> libMap;
-  auto it = libMap.find(key);
-  if (it != libMap.end()) {
-    return it->second;
-  }
-  NSError* error = nil;
-  MTLCompileOptions* options = [[MTLCompileOptions new] autorelease];
-  [options setLanguageVersion:MTLLanguageVersion2_3];
-  auto rc = [device newLibraryWithSource:[NSString stringWithUTF8String:fmt::format(GAMMA_OPS_TEMPLATE, t1, t2).c_str()]
-                                 options:options
-                                   error:&error];
-  TORCH_CHECK(rc != nil && error == nil, "Failed to compile library: ", [[error localizedDescription] UTF8String]);
-  libMap[key] = rc;
-  return rc;
-}
-
-static id<MTLComputePipelineState> getCPLState(id<MTLDevice> device,
-                                               const std::string& t1,
-                                               const std::string& t2,
-                                               const std::string& fname) {
-  auto key = t1 + t2 + fname;
-  static std::unordered_map<std::string, id<MTLComputePipelineState>> cplMap;
-  auto it = cplMap.find(key);
-  if (it != cplMap.end()) {
-    return it->second;
-  }
-  NSError* error = nil;
-  auto library = compileGammaOpsLibrary(device, t1, t2);
-  id<MTLFunction> func = [library newFunctionWithName:[NSString stringWithUTF8String:fname.c_str()]];
-  TORCH_CHECK(func != nil, "Can't get function ", fname);
-  auto rc = [device newComputePipelineStateWithFunction:func error:&error];
-  TORCH_CHECK(
-      rc != nil && error == nil, "Failed to construct pipeline state: ", [[error localizedDescription] UTF8String]);
-  cplMap[key] = rc;
-  return rc;
+static id<MTLComputePipelineState> getCPLState(const Tensor& t1, const Tensor& t2, const std::string& fname) {
+  return lib.getPipelineStateForFunc(fname, {scalarToMetalTypeString(t1), scalarToMetalTypeString(t2)});
 }
 
 } // namespace mps
@@ -441,19 +404,15 @@ TORCH_IMPL_FUNC(lgamma_out_mps)(const Tensor& self, const Tensor& output_) {
     return;
   }
 
-  if (!self.is_contiguous()) {
+  if (mps::needsGather(output_)) {
     output = output.contiguous();
     needs_output_copy = true;
   }
 
   using namespace mps;
 
-  std::string input_type = scalarToMetalTypeString(self.scalar_type());
-  std::string output_type = scalarToMetalTypeString(output.scalar_type());
-
   @autoreleasepool {
-    id<MTLDevice> device = MPSDevice::getInstance()->device();
-    id<MTLComputePipelineState> cplState = getCPLState(device, input_type, output_type, "lgamma");
+    id<MTLComputePipelineState> cplState = getCPLState(self, output, "lgamma");
 
     MPSStream* mpsStream = getCurrentMPSStream();
     dispatch_sync(mpsStream->queue(), ^() {
@@ -485,19 +444,15 @@ TORCH_IMPL_FUNC(digamma_out_mps)(const Tensor& self, const Tensor& output_) {
     return;
   }
 
-  if (!self.is_contiguous()) {
+  if (mps::needsGather(output_)) {
     output = output.contiguous();
     needs_output_copy = true;
   }
 
   using namespace mps;
 
-  std::string input_type = scalarToMetalTypeString(self.scalar_type());
-  std::string output_type = scalarToMetalTypeString(output.scalar_type());
-
   @autoreleasepool {
-    id<MTLDevice> device = MPSDevice::getInstance()->device();
-    id<MTLComputePipelineState> cplState = getCPLState(device, input_type, output_type, "digamma");
+    id<MTLComputePipelineState> cplState = getCPLState(self, output, "digamma");
 
     MPSStream* mpsStream = getCurrentMPSStream();
     dispatch_sync(mpsStream->queue(), ^() {
@@ -530,15 +485,13 @@ TORCH_IMPL_FUNC(polygamma_out_mps)(const int64_t order, const Tensor& self, cons
     return;
   }
 
-  if (!self.is_contiguous()) {
+  if (mps::needsGather(output_)) {
     output = output.contiguous();
     needs_output_copy = true;
   }
 
   using namespace mps;
 
-  std::string input_type = scalarToMetalTypeString(self.scalar_type());
-  std::string output_type = scalarToMetalTypeString(output.scalar_type());
   std::string func_name;
 
   if (order == 0) {
@@ -550,9 +503,7 @@ TORCH_IMPL_FUNC(polygamma_out_mps)(const int64_t order, const Tensor& self, cons
   }
 
   @autoreleasepool {
-    id<MTLDevice> device = MPSDevice::getInstance()->device();
-
-    id<MTLComputePipelineState> cplState = getCPLState(device, input_type, output_type, func_name);
+    id<MTLComputePipelineState> cplState = getCPLState(self, output, func_name);
 
     MPSStream* mpsStream = getCurrentMPSStream();
     dispatch_sync(mpsStream->queue(), ^() {
@@ -565,7 +516,7 @@ TORCH_IMPL_FUNC(polygamma_out_mps)(const int64_t order, const Tensor& self, cons
       mtl_setBuffer(computeEncoder, output, 1);
 
       if (func_name == "polygamma") {
-        [computeEncoder setBytes:&order length:sizeof(order) atIndex:2];
+        mtl_setBytes(computeEncoder, order, 2);
       }
 
       mtl_dispatch1DJob(computeEncoder, cplState, length);

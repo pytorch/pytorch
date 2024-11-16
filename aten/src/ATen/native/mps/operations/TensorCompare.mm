@@ -12,7 +12,10 @@
 #include <ATen/ops/clamp_max_native.h>
 #include <ATen/ops/clamp_min_native.h>
 #include <ATen/ops/clamp_native.h>
+#include <ATen/ops/eq.h>
+#include <ATen/ops/isin_native.h>
 #include <ATen/ops/nan_to_num_native.h>
+#include <ATen/ops/ones_like_native.h>
 #include <ATen/ops/where_native.h>
 #endif
 
@@ -27,44 +30,53 @@ struct CachedGraph : public MPSCachedGraph {
 
 static void clamp_mps_graph(CachedGraph* cachedGraph,
                             const Tensor& input_tensor,
-                            const Tensor& min_tensor,
-                            const Tensor& max_tensor) {
-  auto input_dtype = input_tensor.scalar_type();
-  auto min_dtype = input_dtype;
-  auto max_dtype = input_dtype;
-  if (cachedGraph->minTensor) {
-    min_dtype = min_tensor.scalar_type();
-  }
-  if (cachedGraph->maxTensor) {
-    max_dtype = max_tensor.scalar_type();
-  }
-
+                            const at::ScalarType min_type,
+                            const at::ScalarType max_type,
+                            const at::ScalarType result_type) {
   MPSGraph* mpsGraph = cachedGraph->graph();
 
   cachedGraph->inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_tensor);
 
-  MPSGraphTensor* minTensor = cachedGraph->minTensor;
-  MPSGraphTensor* maxTensor = cachedGraph->maxTensor;
-  if (input_dtype != min_dtype) {
-    minTensor = castMPSTensor(mpsGraph, cachedGraph->minTensor, input_dtype);
+  auto minTensor = cachedGraph->minTensor;
+  auto maxTensor = cachedGraph->maxTensor;
+  auto inputTensor = cachedGraph->inputTensor;
+
+  if (minTensor && min_type != result_type) {
+    minTensor = castMPSTensor(mpsGraph, minTensor, result_type);
   }
-  if (input_dtype != max_dtype) {
-    maxTensor = castMPSTensor(mpsGraph, cachedGraph->maxTensor, input_dtype);
+  if (maxTensor && max_type != result_type) {
+    maxTensor = castMPSTensor(mpsGraph, maxTensor, result_type);
   }
-  if (cachedGraph->minTensor && cachedGraph->maxTensor) {
-    cachedGraph->outputTensor = [mpsGraph clampWithTensor:cachedGraph->inputTensor
-                                           minValueTensor:minTensor
-                                           maxValueTensor:maxTensor
-                                                     name:nil];
-  } else if (cachedGraph->maxTensor) {
-    cachedGraph->outputTensor = [mpsGraph minimumWithPrimaryTensor:cachedGraph->inputTensor
-                                                   secondaryTensor:maxTensor
-                                                              name:nil];
-  } else if (cachedGraph->minTensor) {
-    cachedGraph->outputTensor = [mpsGraph maximumWithPrimaryTensor:cachedGraph->inputTensor
-                                                   secondaryTensor:minTensor
-                                                              name:nil];
+  if (input_tensor.scalar_type() != result_type) {
+    inputTensor = castMPSTensor(mpsGraph, inputTensor, result_type);
   }
+  if (c10::isIntegralType(result_type, /*includeBool=*/true)) {
+    if (minTensor && maxTensor) {
+      cachedGraph->outputTensor = [mpsGraph clampWithTensor:inputTensor
+                                             minValueTensor:minTensor
+                                             maxValueTensor:maxTensor
+                                                       name:nil];
+    } else if (maxTensor) {
+      cachedGraph->outputTensor = [mpsGraph minimumWithPrimaryTensor:inputTensor secondaryTensor:maxTensor name:nil];
+    } else if (minTensor) {
+      cachedGraph->outputTensor = [mpsGraph maximumWithPrimaryTensor:inputTensor secondaryTensor:minTensor name:nil];
+    }
+    return;
+  }
+  // clampWithTensor doesn't propagate NaN through so simulate it as composition of
+  // maximumWithNaNPropagationWithPrimaryTensor and minimumWithNaNPropagationWithPrimaryTensor
+  auto outputTensor = inputTensor;
+  if (minTensor) {
+    outputTensor = [mpsGraph maximumWithNaNPropagationWithPrimaryTensor:outputTensor
+                                                        secondaryTensor:minTensor
+                                                                   name:nil];
+  }
+  if (maxTensor) {
+    outputTensor = [mpsGraph minimumWithNaNPropagationWithPrimaryTensor:outputTensor
+                                                        secondaryTensor:maxTensor
+                                                                   name:nil];
+  }
+  cachedGraph->outputTensor = outputTensor;
 }
 
 static void check_min_max_dims(const OptionalTensorRef clamp_opt, const Tensor& input_t, string op_name) {
@@ -120,6 +132,8 @@ static void clamp_tensor_out_mps(const Tensor& input_t,
   if (output_t.numel() == 0)
     return;
 
+  auto result_type = output_t.scalar_type();
+
   IntArrayRef new_min_shape;
   IntArrayRef new_max_shape;
 
@@ -168,7 +182,7 @@ static void clamp_tensor_out_mps(const Tensor& input_t,
         ;
       }
 
-      clamp_mps_graph(newCachedGraph, input_t, min_opt_tensor, max_opt_tensor);
+      clamp_mps_graph(newCachedGraph, input_t, min_opt_tensor.scalar_type(), max_opt_tensor.scalar_type(), result_type);
     });
 
     bool gatherTensorData = true;
@@ -198,10 +212,7 @@ static void clamp_tensor_out_mps(const Tensor& input_t,
       feeds[maxPlaceholder.getMPSGraphTensor()] = maxPlaceholder.getMPSGraphTensorData();
     }
 
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-
-    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, results);
+    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, outputPlaceholder);
   }
 }
 
@@ -227,21 +238,23 @@ static void clamp_scalar_out_mps(const Tensor& input_t,
   if (output_t.numel() == 0)
     return;
 
+  auto result_type = output_t.scalar_type();
+
   @autoreleasepool {
     // the optional min/max refs could affect how we build the cached graph
-    string key = op_name + (has_min ? ("_min:" + to_string(min_scalar)) : "") +
-        (has_max ? ("_max:" + to_string(max_scalar)) : "") + "_scalar:" + getTensorsStringKey({input_t});
+    string key = op_name + (has_min ? ("_min:" + std::to_string(min_scalar)) : "") +
+        (has_max ? ("_max:" + std::to_string(max_scalar)) : "") + "_scalar:" + getTensorsStringKey({input_t});
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       if (has_min)
-        newCachedGraph->minTensor = [mpsGraph
-            constantWithScalar:min_scalar
-                         shape:(mps::getMPSShape(input_t))dataType:(mps::getMPSScalarType(input_t.scalar_type()))];
+        newCachedGraph->minTensor = [mpsGraph constantWithScalar:min_scalar
+                                                           shape:mps::getMPSShape(input_t)
+                                                        dataType:mps::getMPSScalarType(result_type)];
       if (has_max)
-        newCachedGraph->maxTensor = [mpsGraph
-            constantWithScalar:max_scalar
-                         shape:(mps::getMPSShape(input_t))dataType:(mps::getMPSScalarType(input_t.scalar_type()))];
+        newCachedGraph->maxTensor = [mpsGraph constantWithScalar:max_scalar
+                                                           shape:mps::getMPSShape(input_t)
+                                                        dataType:mps::getMPSScalarType(result_type)];
 
-      clamp_mps_graph(newCachedGraph, input_t, input_t, input_t);
+      clamp_mps_graph(newCachedGraph, input_t, result_type, result_type, result_type);
     });
 
     bool gatherTensorData = true;
@@ -254,16 +267,95 @@ static void clamp_scalar_out_mps(const Tensor& input_t,
     auto outputPlaceholder =
         Placeholder(cachedGraph->outputTensor, output_t, /*mpsShape=*/nil, /*gatherTensorData=*/false);
 
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
-      inputPlaceholder.getMPSGraphTensor() : inputPlaceholder.getMPSGraphTensorData(),
-    };
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-
-    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, results);
+    auto feeds = dictionaryFromPlaceholders(inputPlaceholder);
+    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, outputPlaceholder);
   }
 }
 
+static void isin_Tensor_Tensor_out_mps(const Tensor& elements,
+                                       const Tensor& test_elements,
+                                       bool assume_unique,
+                                       bool invert,
+                                       const Tensor& out,
+                                       string op_name) {
+  if (elements.numel() == 0) {
+    return;
+  }
+
+  if (test_elements.numel() == 0) {
+    if (invert) {
+      auto ones = ones_like(out);
+      out.copy_(ones);
+    } else {
+      auto zeros = zeros_like(out);
+      out.copy_(zeros);
+    }
+    return;
+  }
+
+  TORCH_CHECK(elements.is_mps() && test_elements.is_mps());
+  TORCH_CHECK(elements.dtype() == test_elements.dtype());
+  TORCH_CHECK(
+      !(!is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS) && !supportedFloatingType(elements.scalar_type())),
+      "isin_Tensor_Tensor_out only works on floating types on MPS for pre MacOS_14_0. Received dtype: ",
+      elements.scalar_type());
+
+  @autoreleasepool {
+    string key =
+        op_name + getTensorsStringKey({elements}) + getTensorsStringKey({test_elements}) + std::to_string(invert);
+
+    auto cachedGraph = LookUpOrCreateCachedGraph<MPSBinaryCachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
+      MPSGraphTensor* inputTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(elements.scalar_type()));
+      MPSGraphTensor* otherTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(test_elements.scalar_type()));
+
+      newCachedGraph->inputTensor_ = inputTensor;
+      newCachedGraph->otherTensor_ = otherTensor;
+
+      MPSShape* outputShape = getMPSShape(out);
+
+      MPSGraphTensor* input_flattened = [mpsGraph reshapeTensor:inputTensor withShape:@[ @-1, @1 ] name:nil];
+      MPSGraphTensor* other_flattened = [mpsGraph reshapeTensor:otherTensor withShape:@[ @1, @-1 ] name:nil];
+      MPSGraphTensor* isInTensor = [mpsGraph equalWithPrimaryTensor:input_flattened
+                                                    secondaryTensor:other_flattened
+                                                               name:nil];
+      MPSGraphTensor* output = [mpsGraph reductionOrWithTensor:isInTensor axis:1 name:nil];
+      output = [mpsGraph reshapeTensor:output withShape:outputShape name:nil];
+
+      if (invert) {
+        output = [mpsGraph notWithTensor:output name:nil];
+      }
+      newCachedGraph->outputTensor_ = output;
+    });
+
+    auto inputPlaceholder = Placeholder(cachedGraph->inputTensor_, elements);
+    auto otherPlaceholder = Placeholder(cachedGraph->otherTensor_, test_elements);
+    auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_, out);
+
+    auto feeds = dictionaryFromPlaceholders(inputPlaceholder, otherPlaceholder);
+    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, outputPlaceholder);
+  }
+}
+
+static void is_posneginf_helper(TensorIteratorBase& iter, bool is_neg) {
+  const auto& self = iter.input(0);
+  auto& out = iter.output(0);
+  @autoreleasepool {
+    auto cachedGraph = LookUpOrCreateCachedGraph<MPSUnaryCachedGraph>(
+        __func__ + std::to_string(is_neg) + getTensorsStringKey(self), [&](auto mpsGraph, auto newCachedGraph) {
+          auto infTensor = [mpsGraph constantWithScalar:is_neg ? -std::numeric_limits<float>::infinity()
+                                                               : std::numeric_limits<float>::infinity()
+                                               dataType:getMPSScalarType(self)];
+          newCachedGraph->inputTensor_ = mpsGraphRankedPlaceHolder(mpsGraph, self);
+          newCachedGraph->outputTensor_ = [mpsGraph equalWithPrimaryTensor:newCachedGraph->inputTensor_
+                                                           secondaryTensor:infTensor
+                                                                      name:nil];
+        });
+    auto selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
+    auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_, out);
+    runMPSGraph(
+        getCurrentMPSStream(), cachedGraph->graph(), dictionaryFromPlaceholders(selfPlaceholder), outputPlaceholder);
+  }
+}
 } // namespace mps
 
 // APIs exposed to at::native scope
@@ -297,7 +389,16 @@ TORCH_IMPL_FUNC(clamp_max_out_mps)
   mps::clamp_scalar_out_mps(input_t, at::OptionalScalarRef(), max, output_t, __func__);
 }
 
-Tensor& where_self_out_mps(const Tensor& condition, const Tensor& self, const Tensor& other, Tensor& out) {
+TORCH_IMPL_FUNC(isin_Tensor_Tensor_out_mps)
+(const Tensor& elements, const Tensor& test_elements, bool assume_unique, bool invert, const Tensor& out) {
+  mps::isin_Tensor_Tensor_out_mps(elements, test_elements, assume_unique, invert, out, __func__);
+}
+
+static void where_kernel_mps(TensorIterator& iter) {
+  const auto& condition = iter.input(0);
+  const auto& self = iter.input(1);
+  const auto& other = iter.input(2);
+  auto& out = iter.output(0);
   TORCH_CHECK(condition.device() == self.device() && self.device() == other.device(),
               "Expected all tensors to be on the same device, but found at least two devices.");
   TORCH_CHECK(self.dtype() == other.dtype(), "expected scalar type ", self.dtype(), " but found ", other.dtype());
@@ -316,8 +417,9 @@ Tensor& where_self_out_mps(const Tensor& condition, const Tensor& self, const Te
   MPSStream* stream = getCurrentMPSStream();
 
   // Empty output
-  if (out.numel() == 0)
-    return out;
+  if (out.numel() == 0) {
+    return;
+  }
 
   // Derive from MPSCachedGraph
   struct CachedGraph : public MPSCachedGraph {
@@ -331,19 +433,6 @@ Tensor& where_self_out_mps(const Tensor& condition, const Tensor& self, const Te
   MPSDataType conditionDataType = getMPSScalarType(condition.scalar_type());
   MPSDataType selfDataType = getMPSScalarType(self.scalar_type());
   MPSDataType otherDataType = getMPSScalarType(other.scalar_type());
-  // Workaround for `selectWithPredicateTensor` on macOS Monterey where bool data type may cause a hang
-  // The issue is fixed in macOS Ventura (13.0)
-  if (!is_macos_13_or_newer()) {
-    if (condition.scalar_type() == kBool) {
-      conditionDataType = MPSDataTypeInt8;
-    }
-    if (self.scalar_type() == kBool) {
-      selfDataType = MPSDataTypeInt8;
-    }
-    if (other.scalar_type() == kBool) {
-      otherDataType = MPSDataTypeInt8;
-    }
-  }
 
   @autoreleasepool {
     string key = "where_self_out_mps:" + getTensorsStringKey({cond_bool, self, other});
@@ -372,67 +461,15 @@ Tensor& where_self_out_mps(const Tensor& condition, const Tensor& self, const Te
         Placeholder(cachedGraph->otherTensor_, other, /*mpsShape=*/nullptr, /*gatherTensorData=*/true, otherDataType);
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, out);
 
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
-      conditionPlaceholder.getMPSGraphTensor() : conditionPlaceholder.getMPSGraphTensorData(),
-      selfPlaceholder.getMPSGraphTensor() : selfPlaceholder.getMPSGraphTensorData(),
-      otherPlaceholder.getMPSGraphTensor() : otherPlaceholder.getMPSGraphTensorData()
-    };
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    auto feeds = dictionaryFromPlaceholders(conditionPlaceholder, selfPlaceholder, otherPlaceholder);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
   }
-
-  return out;
-}
-
-Tensor where_mps(const Tensor& condition, const Tensor& self, const Tensor& other) {
-  auto max_dim = std::max(condition.dim(), std::max(self.dim(), other.dim()));
-
-  // How many leading dimensions do we broadcast across for each Tensor?
-  int cond_num_implicit_ones = (max_dim - condition.dim());
-  int self_num_implicit_ones = (max_dim - self.dim());
-  int other_num_implicit_ones = (max_dim - other.dim());
-
-  std::vector<int64_t> out_arr(max_dim);
-
-  // Broadcasted output shape
-  for (int i = 0; i < max_dim; i++) {
-    // Use up the leading broadcast dimensions for each Tensor, then continue from the start of the "actual" shape
-    int64_t cond_idx = i < cond_num_implicit_ones ? 1 : (condition.size(i - cond_num_implicit_ones));
-    int64_t self_idx = i < self_num_implicit_ones ? 1 : (self.size(i - self_num_implicit_ones));
-    int64_t other_idx = i < other_num_implicit_ones ? 1 : (other.size(i - other_num_implicit_ones));
-
-    auto max_idx = std::max({cond_idx, self_idx, other_idx});
-
-    TORCH_CHECK(cond_idx == max_idx || cond_idx == 1 || (cond_idx == 0 && max_idx == 1),
-                i,
-                "'th index ",
-                cond_idx,
-                " of condition tensor does not match the other tensors")
-    TORCH_CHECK(self_idx == max_idx || self_idx == 1 || (self_idx == 0 && max_idx == 1),
-                i,
-                "'th index ",
-                self_idx,
-                " of x tensor does not match the other tensors")
-    TORCH_CHECK(other_idx == max_idx || other_idx == 1 || (other_idx == 0 && max_idx == 1),
-                i,
-                "'th index ",
-                other_idx,
-                " of x tensor does not match the other tensors")
-
-    out_arr[i] = (cond_idx == 0 || self_idx == 0 || other_idx == 0) ? 0 : max_idx;
-  }
-
-  Tensor ret = at::empty(
-      IntArrayRef(out_arr), self.scalar_type(), c10::nullopt, kMPS, c10::nullopt, self.suggest_memory_format());
-  return where_self_out_mps(condition, self, other, ret);
 }
 
 Tensor& nan_to_num_out_mps(const Tensor& self,
-                           c10::optional<double> nan,
-                           c10::optional<double> pos_inf,
-                           c10::optional<double> neg_inf,
+                           std::optional<double> nan,
+                           std::optional<double> pos_inf,
+                           std::optional<double> neg_inf,
                            Tensor& result) {
   TORCH_CHECK(self.scalar_type() == result.scalar_type(),
               "nan_to_num: dtype of out: ",
@@ -498,7 +535,7 @@ Tensor& nan_to_num_out_mps(const Tensor& self,
                                                                     name:nil];
     });
     MPSScalar nanReplacementScalar, posInfReplacementScalar, negInfReplacementScalar;
-    AT_DISPATCH_FLOATING_TYPES_AND(kHalf, self.scalar_type(), "nan_to_num_mps", [&]() {
+    AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, self.scalar_type(), "nan_to_num_mps", [&]() {
       scalar_t nan_replacement = static_cast<scalar_t>(nan.value_or(0.));
       scalar_t pos_inf_replacement =
           pos_inf.has_value() ? static_cast<scalar_t>(pos_inf.value()) : std::numeric_limits<scalar_t>::max();
@@ -520,11 +557,21 @@ Tensor& nan_to_num_out_mps(const Tensor& self,
       cachedGraph->posInfReplacementTensor : getMPSGraphTensorFromScalar(stream, posInfReplacementScalar),
       cachedGraph->negInfReplacementTensor : getMPSGraphTensorFromScalar(stream, negInfReplacementScalar),
     };
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
   }
   return result;
 }
+
+static void isneginf_kernel_mps(TensorIteratorBase& iter) {
+  mps::is_posneginf_helper(iter, true);
+}
+
+static void isposinf_kernel_mps(TensorIteratorBase& iter) {
+  mps::is_posneginf_helper(iter, false);
+}
+
+REGISTER_DISPATCH(where_kernel, &where_kernel_mps)
+REGISTER_DISPATCH(isneginf_stub, &isneginf_kernel_mps)
+REGISTER_DISPATCH(isposinf_stub, &isposinf_kernel_mps)
 
 } // namespace at::native

@@ -1,10 +1,13 @@
+# mypy: allow-untyped-defs
 import torch
 import torch.distributed as dist
 from torch.autograd import Function
+
 # The two imports below are not always available depending on the
 # USE_DISTRIBUTED compile flag. Make sure they raise import error
 # if we're trying to use them.
 from torch.distributed import group, ReduceOp
+
 
 def broadcast(tensor, src, group=group.WORLD):
     """
@@ -115,6 +118,7 @@ def all_gather(tensor, group=group.WORLD):
     """
     return _AllGather.apply(group, tensor)
 
+
 def _all_gather_base(output_tensor, input_tensor, group=group.WORLD):
     """
     Single tensor all gather. Gathers a single tensor from all ranks, and puts them in a single output tensor.
@@ -224,7 +228,7 @@ class _Broadcast(Function):
     def forward(ctx, src, group, tensor):
         ctx.src = src
         ctx.group = group
-        ctx.rank = dist.get_rank()
+        ctx.rank = dist.get_rank(group=group)
         # torch.distributed makes all the calls in place
         # we allocate new tensors to avoid this
         tensor = tensor.clone()
@@ -328,9 +332,9 @@ class _AllGather(Function):
     @staticmethod
     def backward(ctx, *grad_outputs):
         if dist.get_backend(group=ctx.group) is dist.Backend.NCCL:
-            rank = dist.get_rank()
+            rank = dist.get_rank(group=ctx.group)
             gx = torch.empty_like(grad_outputs[rank])
-            _Reduce_Scatter.apply(ReduceOp.SUM, ctx.group, gx, *grad_outputs)
+            gx = _Reduce_Scatter.apply(ReduceOp.SUM, ctx.group, gx, *grad_outputs)
         else:
             # As many backends doesn't support ReduceScatter, we use AlltoAll with .sum()
             # to emulate the ReduceScatter behavior
@@ -338,6 +342,7 @@ class _AllGather(Function):
             gxs = _AlltoAll.apply(ctx.group, tensor_list, *grad_outputs)
             gx = torch.sum(torch.stack(gxs), dim=0)
         return (None, gx)
+
 
 class _AllGatherBase(Function):
     @staticmethod
@@ -353,15 +358,18 @@ class _AllGatherBase(Function):
             out_size = list(grad_output.size())
             if out_size[0] % world_size != 0:
                 raise RuntimeError(
-                    f'Tensor with dimensions: {out_size} does '
-                    f'not have first dimension divisible by world_size: {world_size}'
+                    f"Tensor with dimensions: {out_size} does "
+                    f"not have first dimension divisible by world_size: {world_size}"
                 )
             out_size[0] = out_size[0] // dist.get_world_size(group=ctx.group)
-            gx = torch.empty(out_size, device=grad_output.device, dtype=grad_output.dtype)
+            gx = torch.empty(
+                out_size, device=grad_output.device, dtype=grad_output.dtype
+            )
             dist._reduce_scatter_base(gx, grad_output, ReduceOp.SUM, ctx.group)
         else:
             raise RuntimeError("Backend not supported!")
         return (None, gx, None)
+
 
 class _AlltoAll(Function):
     @staticmethod
@@ -390,7 +398,9 @@ class _AlltoAll(Function):
     @staticmethod
     def backward(ctx, *grad_outputs):
         tensor_list = [
-            torch.empty(size, device=grad_outputs[0].device, dtype=grad_outputs[0].dtype)
+            torch.empty(
+                size, device=grad_outputs[0].device, dtype=grad_outputs[0].dtype
+            )
             for size in ctx.input_tensor_size_list
         ]
         return (None, None) + _AlltoAll.apply(ctx.group, tensor_list, *grad_outputs)
@@ -414,7 +424,9 @@ class _AlltoAllSingle(Function):
 
     @staticmethod
     def backward(ctx, grad_output):
-        tensor = torch.empty(ctx.input_size, device=grad_output.device, dtype=grad_output.dtype)
+        tensor = torch.empty(
+            ctx.input_size, device=grad_output.device, dtype=grad_output.dtype
+        )
         return (None, None, None, None) + (
             _AlltoAllSingle.apply(
                 ctx.group,

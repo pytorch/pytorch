@@ -1,0 +1,167 @@
+# syntax = docker/dockerfile:experimental
+ARG ROCM_VERSION=3.7
+ARG BASE_CUDA_VERSION=11.8
+ARG GPU_IMAGE=amd64/almalinux:8
+FROM quay.io/pypa/manylinux_2_28_x86_64 as base
+
+ENV LC_ALL en_US.UTF-8
+ENV LANG en_US.UTF-8
+ENV LANGUAGE en_US.UTF-8
+
+ARG DEVTOOLSET_VERSION=11
+RUN yum install -y sudo wget curl perl util-linux xz bzip2 git patch which perl zlib-devel yum-utils gcc-toolset-${DEVTOOLSET_VERSION}-toolchain
+ENV PATH=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/bin:$PATH
+ENV LD_LIBRARY_PATH=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/lib64:/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/lib:$LD_LIBRARY_PATH
+
+# cmake-3.18.4 from pip
+RUN yum install -y python3-pip && \
+    python3 -mpip install cmake==3.18.4 && \
+    ln -s /usr/local/bin/cmake /usr/bin/cmake3
+
+FROM base as openssl
+# Install openssl (this must precede `build python` step)
+# (In order to have a proper SSL module, Python is compiled
+# against a recent openssl [see env vars above], which is linked
+# statically. We delete openssl afterwards.)
+ADD ./common/install_openssl.sh install_openssl.sh
+RUN bash ./install_openssl.sh && rm install_openssl.sh
+
+
+# remove unncessary python versions
+RUN rm -rf /opt/python/cp26-cp26m /opt/_internal/cpython-2.6.9-ucs2
+RUN rm -rf /opt/python/cp26-cp26mu /opt/_internal/cpython-2.6.9-ucs4
+RUN rm -rf /opt/python/cp33-cp33m /opt/_internal/cpython-3.3.6
+RUN rm -rf /opt/python/cp34-cp34m /opt/_internal/cpython-3.4.6
+
+FROM base as cuda
+ARG BASE_CUDA_VERSION=11.8
+# Install CUDA
+ADD ./common/install_cuda.sh install_cuda.sh
+RUN bash ./install_cuda.sh ${BASE_CUDA_VERSION} && rm install_cuda.sh
+
+FROM base as intel
+# MKL
+ADD ./common/install_mkl.sh install_mkl.sh
+RUN bash ./install_mkl.sh && rm install_mkl.sh
+
+FROM base as magma
+ARG BASE_CUDA_VERSION=10.2
+# Install magma
+ADD ./common/install_magma.sh install_magma.sh
+RUN bash ./install_magma.sh ${BASE_CUDA_VERSION} && rm install_magma.sh
+
+FROM base as jni
+# Install java jni header
+ADD ./common/install_jni.sh install_jni.sh
+ADD ./java/jni.h jni.h
+RUN bash ./install_jni.sh && rm install_jni.sh
+
+FROM base as libpng
+# Install libpng
+ADD ./common/install_libpng.sh install_libpng.sh
+RUN bash ./install_libpng.sh && rm install_libpng.sh
+
+FROM ${GPU_IMAGE} as common
+ARG DEVTOOLSET_VERSION=11
+ENV LC_ALL en_US.UTF-8
+ENV LANG en_US.UTF-8
+ENV LANGUAGE en_US.UTF-8
+RUN yum -y install epel-release
+RUN yum -y update
+RUN yum install -y \
+        autoconf \
+        automake \
+        bison \
+        bzip2 \
+        curl \
+        diffutils \
+        file \
+        git \
+        make \
+        patch \
+        perl \
+        unzip \
+        util-linux \
+        wget \
+        which \
+        xz \
+        gcc-toolset-${DEVTOOLSET_VERSION}-toolchain \
+        glibc-langpack-en
+RUN yum install -y \
+    https://repo.ius.io/ius-release-el7.rpm \
+    https://ossci-linux.s3.amazonaws.com/epel-release-7-14.noarch.rpm
+
+RUN yum swap -y git git236-core
+# git236+ would refuse to run git commands in repos owned by other users
+# Which causes version check to fail, as pytorch repo is bind-mounted into the image
+# Override this behaviour by treating every folder as safe
+# For more details see https://github.com/pytorch/pytorch/issues/78659#issuecomment-1144107327
+RUN git config --global --add safe.directory "*"
+
+ENV SSL_CERT_FILE=/opt/_internal/certs.pem
+# Install LLVM version
+COPY --from=openssl            /opt/openssl                          /opt/openssl
+COPY --from=base               /opt/python                           /opt/python
+COPY --from=base               /opt/_internal                        /opt/_internal
+COPY --from=base               /usr/local/bin/auditwheel             /usr/local/bin/auditwheel
+COPY --from=intel              /opt/intel                            /opt/intel
+COPY --from=base               /usr/local/bin/patchelf               /usr/local/bin/patchelf
+COPY --from=libpng             /usr/local/bin/png*                   /usr/local/bin/
+COPY --from=libpng             /usr/local/bin/libpng*                /usr/local/bin/
+COPY --from=libpng             /usr/local/include/png*               /usr/local/include/
+COPY --from=libpng             /usr/local/include/libpng*            /usr/local/include/
+COPY --from=libpng             /usr/local/lib/libpng*                /usr/local/lib/
+COPY --from=libpng             /usr/local/lib/pkgconfig              /usr/local/lib/pkgconfig
+COPY --from=jni                /usr/local/include/jni.h              /usr/local/include/jni.h
+
+FROM common as cpu_final
+ARG BASE_CUDA_VERSION=11.8
+ARG DEVTOOLSET_VERSION=11
+# Install Anaconda
+ADD ./common/install_conda_docker.sh install_conda.sh
+RUN bash ./install_conda.sh && rm install_conda.sh
+ENV PATH /opt/conda/bin:$PATH
+# Ensure the expected devtoolset is used
+ENV PATH=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/bin:$PATH
+ENV LD_LIBRARY_PATH=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/lib64:/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/lib:$LD_LIBRARY_PATH
+# Install setuptools and wheel for python 3.12/3.13
+RUN for cpython_version in "cp312-cp312" "cp313-cp313" "cp313-cp313t"; do \
+    /opt/python/${cpython_version}/bin/python -m pip install setuptools wheel; \
+    done;
+
+
+# cmake-3.18.4 from pip
+RUN yum install -y python3-pip && \
+    python3 -mpip install cmake==3.18.4 && \
+    ln -s /usr/local/bin/cmake /usr/bin/cmake3
+
+FROM cpu_final as cuda_final
+RUN rm -rf /usr/local/cuda-${BASE_CUDA_VERSION}
+COPY --from=cuda     /usr/local/cuda-${BASE_CUDA_VERSION}  /usr/local/cuda-${BASE_CUDA_VERSION}
+COPY --from=magma    /usr/local/cuda-${BASE_CUDA_VERSION}  /usr/local/cuda-${BASE_CUDA_VERSION}
+RUN ln -sf /usr/local/cuda-${BASE_CUDA_VERSION} /usr/local/cuda
+ENV PATH=/usr/local/cuda/bin:$PATH
+
+
+FROM common as rocm_final
+ARG ROCM_VERSION=3.7
+# Install ROCm
+ADD ./common/install_rocm.sh install_rocm.sh
+RUN bash ./install_rocm.sh ${ROCM_VERSION} && rm install_rocm.sh
+# cmake is already installed inside the rocm base image, but both 2 and 3 exist
+# cmake3 is needed for the later MIOpen custom build, so that step is last.
+RUN yum install -y cmake3 && \
+    rm -f /usr/bin/cmake && \
+    ln -s /usr/bin/cmake3 /usr/bin/cmake
+ADD ./common/install_miopen.sh install_miopen.sh
+RUN bash ./install_miopen.sh ${ROCM_VERSION} && rm install_miopen.sh
+
+FROM cpu_final as xpu_final
+# XPU CD use rolling driver
+ENV XPU_DRIVER_TYPE ROLLING
+# cmake-3.28.4 from pip
+RUN python3 -m pip install --upgrade pip && \
+    python3 -mpip install cmake==3.28.4
+ADD ./common/install_xpu.sh install_xpu.sh
+RUN bash ./install_xpu.sh && rm install_xpu.sh
+RUN pushd /opt/_internal && tar -xJf static-libs-for-embedding-only.tar.xz && popd

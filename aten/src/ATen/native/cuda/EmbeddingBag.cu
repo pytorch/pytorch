@@ -6,6 +6,7 @@
 #include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/DeviceUtils.cuh>
+#include <ATen/native/EmbeddingBag.h>
 #include <ATen/TensorUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -42,10 +43,6 @@ void embedding_dense_backward_cuda_scan(Tensor &sorted_indices, Tensor &count);
 #endif
 
 namespace {
-
-constexpr int MODE_SUM = 0;
-constexpr int MODE_MEAN = 1;
-constexpr int MODE_MAX = 2;
 
 std::pair<Tensor, Tensor> promoteIndicesAndOffsets(
     const Tensor& indices,
@@ -157,7 +154,7 @@ __global__ void EmbeddingBag_updateOutputKernel_sum_mean(
           offset2bag[emb] = bag;
         }
       }
-      if (mode == MODE_MEAN) {
+      if (mode == static_cast<int64_t>(EmbeddingBagMode::MEAN)) {
         if (bag_size_ != 0) {
           weightFeatSum = weightFeatSum / static_cast<accscalar_t>(bag_size_);
         }
@@ -235,7 +232,7 @@ Tensor embedding_bag_backward_cuda_sum_avg(
 #endif
   }
   return embedding_backward_cuda_kernel(grad, orig_indices, sorted_indices,
-      count, num_weights, padding_idx, mode == MODE_MEAN, offset2bag,
+      count, num_weights, padding_idx, mode == EmbeddingBagMode::MEAN, offset2bag,
       bag_size, per_sample_weights);
 }
 
@@ -312,7 +309,7 @@ Tensor embedding_bag_backward_cuda_max(const Tensor &grad,
 std::tuple<Tensor, Tensor, Tensor, Tensor>
 _embedding_bag_forward_only_cuda(const Tensor &weight, const Tensor &indices,
                    const Tensor &offsets, const bool scale_grad_by_freq,
-                   const int64_t mode, bool sparse, const c10::optional<Tensor>& per_sample_weights_opt,
+                   const int64_t mode, bool sparse, const std::optional<Tensor>& per_sample_weights_opt,
                    bool include_last_offset, int64_t padding_idx) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> per_sample_weights_maybe_owned = at::borrow_from_optional_tensor(per_sample_weights_opt);
@@ -335,7 +332,7 @@ _embedding_bag_forward_only_cuda(const Tensor &weight, const Tensor &indices,
 std::tuple<Tensor, Tensor, Tensor, Tensor>
 _embedding_bag_cuda(const Tensor &weight, const Tensor &indices_,
                    const Tensor &offsets_, const bool scale_grad_by_freq,
-                   const int64_t mode, bool sparse, const c10::optional<Tensor>& per_sample_weights_opt,
+                   const int64_t mode, bool sparse, const std::optional<Tensor>& per_sample_weights_opt,
                    bool include_last_offset, int64_t padding_idx) {
   TORCH_CHECK(indices_.dim() == 1 || indices_.dim() == 2,
       "input has to be a 1D or 2D Tensor, but got Tensor of dimension ",
@@ -386,7 +383,7 @@ _embedding_bag_cuda(const Tensor &weight, const Tensor &indices_,
 
   Tensor max_indices;
 
-  if (mode == MODE_MAX) {
+  if (mode == EmbeddingBagMode::MAX) {
     max_indices = at::empty({numBags, featureSize}, indices.options());
   } else {
     // No need to allocate if we aren't doing a backwards pass
@@ -401,7 +398,7 @@ _embedding_bag_cuda(const Tensor &weight, const Tensor &indices_,
   int grid = 1024;
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, weight.scalar_type(), "embedding_bag_cuda", [&] {
     AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), "embedding_bag_cuda", [&] () {
-      if (mode == MODE_MAX) {
+      if (mode == EmbeddingBagMode::MAX) {
         EmbeddingBag_updateOutputKernel_max<scalar_t, index_t><<<grid, block, 0, stream>>>(
             indices.const_data_ptr<index_t>(), offsets.const_data_ptr<index_t>(),
             weight.const_data_ptr<scalar_t>(), output.mutable_data_ptr<scalar_t>(),
@@ -432,7 +429,7 @@ Tensor _embedding_bag_dense_backward_cuda(const Tensor &grad_, const Tensor &ind
                                    const Tensor &bag_size_,
                                    const Tensor &max_indices,
                                    int64_t num_weights,
-                                   bool scale_grad_by_freq, int64_t mode, const c10::optional<Tensor>& per_sample_weights_opt,
+                                   bool scale_grad_by_freq, int64_t mode, const std::optional<Tensor>& per_sample_weights_opt,
                                    int64_t padding_idx) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> per_sample_weights_maybe_owned = at::borrow_from_optional_tensor(per_sample_weights_opt);
@@ -450,22 +447,22 @@ Tensor _embedding_bag_dense_backward_cuda(const Tensor &grad_, const Tensor &ind
   checkSameGPU("embedding_bag_cuda", grad_arg, indices_arg);
 
 
-  switch (mode) {
-    case MODE_SUM:
-    case MODE_MEAN:
-      if (mode == MODE_MEAN)
+  switch (static_cast<EmbeddingBagMode>(mode)) {
+    case EmbeddingBagMode::SUM:
+    case EmbeddingBagMode::MEAN:
+      if (mode == EmbeddingBagMode::MEAN)
         AT_ASSERT(!per_sample_weights.defined());
       return embedding_bag_backward_cuda_sum_avg(grad, indices, offset2bag,
               bag_size_, num_weights, scale_grad_by_freq, mode,
               per_sample_weights, padding_idx);
 
-    case MODE_MAX:
+    case EmbeddingBagMode::MAX:
       AT_ASSERT(!per_sample_weights.defined());
       return embedding_bag_backward_cuda_max(grad, max_indices, num_weights,
               padding_idx);
 
     default:
-      AT_ERROR(
+      TORCH_CHECK(false,
           "Unknown mode for embedding_bag_backward_cuda ", mode);
   }
 }
@@ -516,7 +513,7 @@ Tensor _embedding_bag_per_sample_weights_backward_cuda(
     int64_t mode,
     int64_t padding_idx) {
   TORCH_CHECK(
-      mode == MODE_SUM,
+      mode == EmbeddingBagMode::SUM,
       "embedding_bag_backward: per_sample_weights only supported for mode='sum'");
 
   AT_ASSERT(grad.dim() == 2);
@@ -538,7 +535,7 @@ Tensor _embedding_bag_per_sample_weights_backward_cuda(
 
   auto output = at::empty({num_samples}, grad.options());
 
-  // Early return when there is no samples in the batch. This saves unnecesary kernel
+  // Early return when there is no samples in the batch. This saves unnecessary kernel
   // launch, but also prevents cudaGetLastError() to complain about invalid launch args
   if (num_samples == 0) {
     return output;

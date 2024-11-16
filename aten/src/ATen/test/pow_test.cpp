@@ -10,12 +10,6 @@
 #include <vector>
 #include <type_traits>
 
-#ifdef _WIN32
-#define DISABLED_ON_WINDOWS(x) DISABLED_##x
-#else
-#define DISABLED_ON_WINDOWS(x) x
-#endif
-
 using namespace at;
 
 namespace {
@@ -87,7 +81,7 @@ const std::vector<double> doubles {
 };
 
 template <class T,
-  typename std::enable_if<std::is_floating_point<T>::value,T>::type* = nullptr>
+  typename std::enable_if_t<std::is_floating_point_v<T>, T>* = nullptr>
 void assert_eq(T val, T act, T exp) {
   if (std::isnan(act) || std::isnan(exp)) {
     return;
@@ -96,7 +90,7 @@ void assert_eq(T val, T act, T exp) {
 }
 
 template <class T,
-  typename std::enable_if<std::is_integral<T>::value, T>::type* = nullptr>
+  typename std::enable_if_t<std::is_integral_v<T>, T>* = nullptr>
 void assert_eq(T val, T act, T exp) {
   if (val != 0 && act == 0) {
     return;
@@ -112,12 +106,12 @@ void assert_eq(T val, T act, T exp) {
 }
 
 template <class T,
-  typename std::enable_if<std::is_floating_point<T>::value,T>::type* = nullptr>
+  typename std::enable_if_t<std::is_floating_point_v<T>, T>* = nullptr>
 T typed_pow(T base, T exp) {
   return std::pow(base, exp);
 }
 template <class T,
-  typename std::enable_if<std::is_integral<T>::value,T>::type* = nullptr>
+  typename std::enable_if_t<std::is_integral_v<T>, T>* = nullptr>
 T typed_pow(T base, T exp) {
   return native::powi(base, exp);
 }
@@ -204,7 +198,7 @@ void tensor_pow_tensor(const Vals vals, c10::ScalarType vals_dtype, Pows pows, c
   std::cout.precision(dbl::max_digits10);
 
   const auto vals_tensor = torch::tensor(vals, vals_dtype);
-  for (const auto shift : c10::irange(pows.size())) {
+  for ([[maybe_unused]] const auto shirt : c10::irange(pows.size())) {
     const auto pows_tensor = torch::tensor(pows, pows_dtype);
 
     const auto actual_pow = vals_tensor.pow(pows_tensor);

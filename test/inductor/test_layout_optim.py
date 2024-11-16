@@ -5,10 +5,13 @@ import random
 
 import torch
 from torch import nn
-from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import same
 from torch._inductor import config
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch._inductor.test_case import run_tests, TestCase
+from torch.testing._internal.common_cuda import tf32_off
+from torch.testing._internal.common_utils import skipIfXpu
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+
 
 USE_DDP_WRAPPER = os.environ.get("USE_DDP_WRAPPER", "1") == "1"
 
@@ -31,6 +34,7 @@ class Model2Conv(nn.Module):
         return (torch.rand(2, 3, 16, 16),)
 
 
+@skipIfXpu(msg="ccl doesn't currently work on the XPU stack")
 class TestLayoutOptim(TestCase):
     @classmethod
     def setUpClass(cls):
@@ -43,8 +47,12 @@ class TestLayoutOptim(TestCase):
         for retry_no in range(tot_retry):
             try:
                 port = random.randint(10000, 60000)
+                if GPU_TYPE == "cuda":
+                    backend = "nccl"
+                elif GPU_TYPE == "xpu":
+                    backend = "ccl"
                 dist.init_process_group(
-                    backend="nccl",
+                    backend=backend,
                     init_method=f"tcp://localhost:{port}",
                     world_size=1,
                     rank=0,
@@ -83,8 +91,8 @@ class TestLayoutOptim(TestCase):
                 return m
 
         manual_graph_break = not use_ddp_wrapper
-        mod = model_class(manual_graph_break=manual_graph_break).cuda()
-        inp = [t.cuda() for t in mod.get_example_inputs()]
+        mod = model_class(manual_graph_break=manual_graph_break).to(GPU_TYPE)
+        inp = [t.to(GPU_TYPE) for t in mod.get_example_inputs()]
         expected_out = wrap_mod(mod)(*inp)
 
         fp64_mod = copy.deepcopy(mod).to(torch.float64)
@@ -152,7 +160,7 @@ class TestLayoutOptim(TestCase):
     @torch.no_grad()
     def test_keep_output_layout_infer(self):
         class Model(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = nn.Conv2d(
                     3, 128, kernel_size=3, padding=1, stride=1, bias=False
@@ -165,8 +173,8 @@ class TestLayoutOptim(TestCase):
             def get_example_inputs(self):
                 return (torch.randn(2, 3, 5, 5),)
 
-        mod = Model().cuda()
-        inp = [t.cuda() for t in mod.get_example_inputs()]
+        mod = Model().to(GPU_TYPE)
+        inp = [t.to(GPU_TYPE) for t in mod.get_example_inputs()]
         out = mod(*inp)
 
         opt_mod = torch.compile(mod)
@@ -204,9 +212,9 @@ class TestLayoutOptim(TestCase):
             y = x.view(3, 2)
             y.mul_(2)
 
-        x = torch.ones(2, 3).cuda()
+        x = torch.ones(2, 3).to(GPU_TYPE)
         f(x)
-        self.assertTrue(torch.equal(x, torch.ones(2, 3).cuda() * 2))
+        self.assertTrue(torch.equal(x, torch.ones(2, 3).to(GPU_TYPE) * 2))
 
     def test_mutate_base(self):
         """
@@ -223,10 +231,11 @@ class TestLayoutOptim(TestCase):
             x.mul_(2)
             return y
 
-        x = torch.ones(2, 3).cuda()
+        x = torch.ones(2, 3).to(GPU_TYPE)
         y = f(x)
-        self.assertTrue(torch.equal(y, torch.ones(3, 2).cuda() * 2))
+        self.assertTrue(torch.equal(y, torch.ones(3, 2).to(GPU_TYPE) * 2))
 
+    @tf32_off()
     def test_mutate_base_for_conv_output(self):
         class Model(nn.Module):
             def __init__(self, manual_graph_break=False):
@@ -244,6 +253,7 @@ class TestLayoutOptim(TestCase):
 
         self.verify_accuracy_for_infer(Model)
 
+    @tf32_off()
     def test_mutate_view_for_conv_output(self):
         class Model(nn.Module):
             def __init__(self, manual_graph_break=False):
@@ -275,15 +285,62 @@ class TestLayoutOptim(TestCase):
             return z
 
         for size in [4, 8, 16]:
-            a = torch.randn(2, size, requires_grad=True).cuda()
-            b = torch.randn(2, size).cuda()
+            a = torch.randn(2, size, requires_grad=True).to(GPU_TYPE)
+            b = torch.randn(2, size).to(GPU_TYPE)
             actual = torch.compile(f, dynamic=True)(a, b)
             self.assertTrue(torch.allclose(f(a, b), actual))
 
             # Trigger the compiling of the backward graph
             actual.sum().backward()
 
+    def test_nll_loss_backward(self):
+        """
+        Repro for issue https://github.com/pytorch/pytorch/issues/120759
+
+        The CUDA implementation of aten.nll_loss2d_backward.default requires
+        the self tensor (whose layout will be used to create grad_input)
+        to be contiguous. Layout optimization may change the self tensor's layout
+        and cause failure. We fix that by adding layout constaints to the
+        fallback of aten.nll_loss2d_backward.default .
+        """
+
+        class MyModel(torch.nn.Module):
+            def __init__(self, input_dim, num_classes):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(1, num_classes, 3, 1, padding="same")
+                self.out = torch.nn.Linear(input_dim * num_classes, num_classes)
+
+            def forward(self, x: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+                x = self.conv(x)
+                b, c, t, f = x.size()
+                x = self.out(x.reshape(b, t, c * f))
+                logits = x.reshape(x.size(0), x.size(2), x.size(1))
+                loss = torch.nn.functional.cross_entropy(logits, targets)
+                return loss
+
+        device = GPU_TYPE
+        batch_size = 48
+        seq_len = 144
+        input_dim = 39
+        num_classes = 111
+
+        model = MyModel(input_dim, num_classes)
+        model.to(device)
+
+        opt_model = torch.compile(model)
+
+        x = torch.ones((batch_size, 1, seq_len, input_dim), device=device)
+        targets = torch.randint(
+            0, num_classes - 1, (batch_size, seq_len), device=device, dtype=torch.int64
+        )
+
+        loss = model(x, targets)
+        loss.backward()
+
+        ref = model(x, targets)
+        self.assertTrue(torch.allclose(ref, loss))
+
 
 if __name__ == "__main__":
-    if HAS_CUDA:
+    if HAS_GPU:
         run_tests()

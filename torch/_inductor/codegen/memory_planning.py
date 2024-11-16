@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import collections
@@ -9,47 +10,18 @@ from typing import Any, Dict, Iterable, List, Optional, Protocol
 import sympy
 
 import torch
-from .. import config, ir
-from ..utils import cache_on_self, CachedMethod, IndentedBuffer
-from ..virtualized import V
 
+from .. import config
+from ..utils import _align, align, cache_on_self, CachedMethod, IndentedBuffer
+from ..virtualized import V
 from .wrapper import (
     AllocateLine,
+    BufferLike,
     FreeIfNotReusedLine,
     MemoryPlanningLine,
     NullLine,
     ReuseLine,
 )
-
-
-ALIGN_BYTES = 64
-assert (ALIGN_BYTES & (ALIGN_BYTES - 1)) == 0 and ALIGN_BYTES >= 8, "must be power of 2"
-
-
-def _align(nbytes):
-    """Round up to the nearest multiple of ALIGN_BYTES"""
-    return (nbytes + ALIGN_BYTES - 1) & -ALIGN_BYTES
-
-
-def _is_aligned(v: sympy.Expr):
-    """v can be statically proven to be a multiple of ALIGN_BYTES"""
-    if isinstance(v, (sympy.Add, sympy.Max)):
-        return all(map(_is_aligned, v.args))
-    return isinstance(v, align) or sympy.gcd(v, ALIGN_BYTES) == ALIGN_BYTES
-
-
-class align(sympy.Function):
-    """Symbolically round up to the nearest multiple of ALIGN_BYTES"""
-
-    nargs = (1,)
-    is_integer = True
-
-    @classmethod
-    def eval(cls, value):
-        if isinstance(value, (int, sympy.Integer)):
-            return _align(int(value))
-        if _is_aligned(value):
-            return value
 
 
 @dataclasses.dataclass
@@ -62,8 +34,8 @@ class LiveRange:
     Invariant: begin <= end
     """
 
-    begin: float  # int | ±inf
-    end: float  # int | ±inf
+    begin: float  # int | +/-inf
+    end: float  # int | +/-inf
 
     def contains(self, other: LiveRange):
         """Is other entirely within self"""
@@ -134,15 +106,15 @@ class AllocationTreeNode:
 
     def get_live_ranges(self) -> LiveRanges:
         """Aggregate LiveRanges for all objects below this in tree"""
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def get_size_hint(self) -> int:
         """Number of bytes used for example inputs"""
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def get_symbolic_size(self) -> sympy.Expr:
         """Number of bytes needed at runtime"""
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def finalize(self, pool, offset) -> AllocationTreeNode:
         """Called after all allocations have been made"""
@@ -158,7 +130,7 @@ class Allocation(AllocationTreeNode):
     Represents memory allocated to a given node in the allocation pool.
     """
 
-    node: ir.Buffer
+    node: BufferLike
     live_range: LiveRange
     size_hint: int
     symbolic_size: sympy.Expr
@@ -326,7 +298,7 @@ class TemporalSplit(ClearCacheOnAllocateMixin, AllocationTreeNode):
     @cache_on_self
     def get_symbolic_size(self) -> sympy.Expr:
         if not self.allocations:
-            return 0
+            return 0  # type: ignore[return-value]
         return sympy.Max(*[x.get_symbolic_size() for x in self.allocations])
 
     def is_empty(self):
@@ -535,7 +507,7 @@ class BufferGroup:
     This tracks these collections of buffers sharing underlying memory.
     """
 
-    def __init__(self, node: ir.Buffer):
+    def __init__(self, node: BufferLike):
         self.node = node
         self.names = [node.get_name()]
         self.is_output = False

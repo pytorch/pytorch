@@ -6,6 +6,7 @@ from unittest import skipIf
 from torch.package import PackageImporter
 from torch.testing._internal.common_utils import IS_FBCODE, IS_SANDCASTLE, run_tests
 
+
 try:
     from .common import PackageTestCase
 except ImportError:
@@ -32,7 +33,6 @@ class TestLoadBCPackages(PackageTestCase):
         "Tests that use temporary files are disabled in fbcode",
     )
     def test_load_bc_packages_torchscript_module(self):
-
         """Tests for backwards compatible torchscript module"""
         importer2 = PackageImporter(f"{packaging_directory}/test_torchscript_module.pt")
         loaded2 = importer2.load_pickle("torchscript_module", "torchscript_module.pkl")

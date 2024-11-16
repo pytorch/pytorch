@@ -94,7 +94,7 @@ struct Vectorized<c10::quint8> {
           vec_vsx_ld(offset0, reinterpret_cast<const value_type*>(ptr)),
           vec_vsx_ld(offset16, reinterpret_cast<const value_type*>(ptr))};
     }
-    __at_align__ value_type tmp_values[size()];
+    __at_align__ value_type tmp_values[size()] = {};
     std::memcpy(tmp_values, ptr, std::min(count, size()) * sizeof(value_type));
     return {vec_vsx_ld(offset0, tmp_values), vec_vsx_ld(offset16, tmp_values)};
   }
@@ -459,6 +459,41 @@ Vectorized<c10::quint8> inline minimum(
     const Vectorized<c10::quint8>& a,
     const Vectorized<c10::quint8>& b) {
   return a.minimum(b);
+}
+
+template <>
+Vectorized<c10::quint8> C10_ALWAYS_INLINE operator+(const Vectorized<c10::quint8>& a, const Vectorized<c10::quint8>& b) {
+  return Vectorized<c10::quint8>{vec_add(a.vec0(), b.vec0()), vec_add(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<c10::quint8> C10_ALWAYS_INLINE operator-(const Vectorized<c10::quint8>& a, const Vectorized<c10::quint8>& b) {
+  return Vectorized<c10::quint8>{vec_sub(a.vec0(), b.vec0()), vec_sub(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<c10::quint8> C10_ALWAYS_INLINE operator*(const Vectorized<c10::quint8>& a, const Vectorized<c10::quint8>& b) {
+  return Vectorized<c10::quint8>{vec_mul(a.vec0(), b.vec0()), vec_mul(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<c10::quint8> C10_ALWAYS_INLINE operator/(const Vectorized<c10::quint8>& a, const Vectorized<c10::quint8>& b) {
+  return Vectorized<c10::quint8>{a.vec0()/b.vec0(), a.vec1()/b.vec1()};
+}
+
+template <>
+Vectorized<c10::quint8> C10_ALWAYS_INLINE operator&(const Vectorized<c10::quint8>& a, const Vectorized<c10::quint8>& b) {
+  return Vectorized<c10::quint8>{vec_and(a.vec0(), b.vec0()), vec_and(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<c10::quint8> C10_ALWAYS_INLINE operator|(const Vectorized<c10::quint8>& a, const Vectorized<c10::quint8>& b) {
+  return Vectorized<c10::quint8>{vec_or(a.vec0(), b.vec0()), vec_or(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<c10::quint8> C10_ALWAYS_INLINE operator^(const Vectorized<c10::quint8>& a, const Vectorized<c10::quint8>& b) {
+  return Vectorized<c10::quint8>{vec_xor(a.vec0(), b.vec0()), vec_xor(a.vec1(), b.vec1())};
 }
 
 } // namespace

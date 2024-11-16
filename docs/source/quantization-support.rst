@@ -49,6 +49,7 @@ Utility functions
     propagate_qconfig_
     default_eval_fn
 
+
 torch.ao.quantization.quantize_fx
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -130,6 +131,34 @@ torch.ao.quantization.pt2e (quantization in pytorch 2.0 export implementation)
 
 .. automodule:: torch.ao.quantization.pt2e
 .. automodule:: torch.ao.quantization.pt2e.representation
+
+torch.ao.quantization.pt2e.export_utils
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: torch.ao.quantization.pt2e.export_utils
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
+
+    model_is_exported
+
+.. currentmodule:: torch.ao.quantization
+
+PT2 Export (pt2e) Numeric Debugger
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
+
+    generate_numeric_debug_handle
+    CUSTOM_KEY
+    NUMERIC_DEBUG_HANDLE_KEY
+    prepare_for_propagation_comparison
+    extract_results_from_loggers
+    compare_results
 
 torch (quantization related functions)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -623,4 +652,3 @@ the `custom operator mechanism <https://pytorch.org/tutorials/advanced/torch_scr
 .. automodule:: torch.nn.quantized.dynamic.modules
 .. automodule:: torch.quantization
 .. automodule:: torch.nn.intrinsic.modules
-.. automodule:: torch.ao.quantization.pt2e.generate_numeric_debug_handle

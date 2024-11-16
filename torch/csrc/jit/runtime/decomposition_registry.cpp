@@ -10,9 +10,7 @@
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/jit_decomp_interface.h>
 #include <torch/csrc/jit/ir/ir.h>
-#include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/inliner.h>
-#include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <memory>
 #include <unordered_map>
@@ -63,7 +61,7 @@ void loadDecompositionFunctions() {
       [&](const std::string& name) -> std::shared_ptr<Source> { return src; },
       1);
   compilation_unit->define(
-      c10::nullopt, GetSerializedDecompositions(), resolver, nullptr);
+      std::nullopt, GetSerializedDecompositions(), resolver, nullptr);
   loadModule(*compilation_unit);
 }
 
@@ -79,8 +77,7 @@ static void DecomposeOp(Node* n) {
     return;
   }
   WithInsertPoint guard(n);
-  auto outputs =
-      insertGraph(*n->owningGraph(), *decomposition->get(), n->inputs());
+  auto outputs = insertGraph(*n->owningGraph(), **decomposition, n->inputs());
   TORCH_INTERNAL_ASSERT(outputs.size() == n->outputs().size());
   for (size_t i : c10::irange(outputs.size())) {
     n->outputs().at(i)->replaceAllUsesWith(outputs[i]);
@@ -101,13 +98,13 @@ static void RunDecompositions(Block* block) {
 
 void RunDecompositions(std::shared_ptr<Graph> g) {
   RunDecompositions(g->block());
-  for (C10_UNUSED const auto _ : c10::irange(2)) {
+  for ([[maybe_unused]] const auto _ : c10::irange(2)) {
     PeepholeOptimize(g, /*disable_shape_peephole*/ true);
     ConstantPropagation(g);
   }
 }
 
-c10::optional<std::shared_ptr<Graph>> GetDecomposition(
+std::optional<std::shared_ptr<Graph>> GetDecomposition(
     const FunctionSchema& schema) {
   loadDecompositionFunctions();
   GRAPH_DEBUG("Trying to find schema: ", schema);
@@ -117,17 +114,17 @@ c10::optional<std::shared_ptr<Graph>> GetDecomposition(
   }
   GRAPH_DEBUG("Could not find schema: ", schema);
 
-  return c10::nullopt;
+  return std::nullopt;
 }
 
-c10::optional<GraphFunction*> GetDecompositionFunction(
+std::optional<GraphFunction*> GetDecompositionFunction(
     const FunctionSchema& schema) {
   loadDecompositionFunctions();
   auto cache_it = schema_to_function.find(&schema);
   GRAPH_DEBUG("Trying to find schema: ", schema);
   if (cache_it == schema_to_function.end()) {
     GRAPH_DEBUG("Could not find schema: ", schema);
-    return c10::nullopt;
+    return std::nullopt;
   }
   auto& func = toGraphFunction(*cache_it->second);
   // Simple Executor:
@@ -153,8 +150,8 @@ void RegisterDecomposition(
     ConstantPropagationImmutableTypes(g);
   }
 
-  std::unique_ptr<GraphFunction> new_func(new GraphFunction(
-      schema.name(), g, nullptr, ExecutorExecutionMode::SIMPLE));
+  auto new_func = std::make_unique<GraphFunction>(
+      schema.name(), g, nullptr, ExecutorExecutionMode::SIMPLE);
   user_registered_funcs.emplace(&schema, std::move(new_func));
   schema_to_function[&schema] = user_registered_funcs[&schema].get();
   schema_to_decomposition[&schema] = g;
@@ -189,7 +186,7 @@ void run_jit_decomposition(
   auto* trace_exec = torch::jit::GetDecompositionExecutor(schema);
   trace_exec->run((*stack));
   if (stack->back().isTuple()) {
-    at::IValue tup = stack->back();
+    at::IValue tup = std::move(stack->back());
     stack->pop_back();
     for (const auto& elem : tup.toTuple()->elements()) {
       stack->push_back(elem);

@@ -29,7 +29,7 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import (
 from torch.distributed.optim import _NamedOptimizer
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
-    CUDAInitMode,
+    DEVICEInitMode,
     FSDPInitMode,
     FSDPTest,
     TransformerWithSharedParams,
@@ -40,6 +40,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
 )
+
 
 STATE_DICT_TYPES = [StateDictType.FULL_STATE_DICT, StateDictType.SHARDED_STATE_DICT]
 
@@ -363,13 +364,13 @@ class TestFSDPOptimState(FSDPTest):
             # these settings are not implemented since the transformer is
             # wrapped with FSDP at the top-level, which means that there is
             # only a single flat parameter, making these booleans vacuous
-            raise NotImplementedError()
+            raise NotImplementedError
         if group is None:
             group = dist.distributed_c10d._get_default_group()
         model = TransformerWithSharedParams.init(
             group,
             FSDPInitMode.RECURSIVE if wrap else FSDPInitMode.NO_FSDP,
-            CUDAInitMode.CUDA_BEFORE,
+            DEVICEInitMode.DEVICE_BEFORE,
             deterministic=True,
         )
         optim = optim_class(model.parameters(), lr=0.01)
@@ -1436,7 +1437,7 @@ class TestFSDPOptimState(FSDPTest):
         def get_warning_context():
             warning_regex = "`optim_input` argument is deprecated"
             return self.assertWarnsRegex(
-                expected_warning=UserWarning, expected_regex=warning_regex
+                expected_warning=FutureWarning, expected_regex=warning_regex
             )
 
         self._run_on_all_optim_state_apis(
@@ -1586,7 +1587,7 @@ class TestFSDPOptimState(FSDPTest):
     @skip_if_lt_x_gpu(2)
     def test_compatible_with_trec(self):
         class DenseModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.net1 = nn.Sequential(nn.Linear(8, 16), nn.ReLU())
                 self.net2 = nn.Sequential(nn.Linear(16, 32), nn.ReLU())
@@ -1597,7 +1598,7 @@ class TestFSDPOptimState(FSDPTest):
                 return self.net4(self.net3(self.net2(self.net1(x))))
 
         class FakeMPModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 torch.manual_seed(0)
                 self.dense = FSDP(DenseModel().cuda(), use_orig_params=True)
@@ -1672,7 +1673,7 @@ class TestFSDPOptimState(FSDPTest):
     @skip_if_lt_x_gpu(2)
     def test_optim_state_without_param_groups(self):
         class SimpleModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 torch.manual_seed(0)
                 self.net1 = nn.Sequential(nn.Linear(2, 4), nn.ReLU())

@@ -129,9 +129,6 @@ endif(MSVC)
 
 target_link_libraries(test_jit PRIVATE ${JIT_TEST_DEPENDENCIES})
 target_include_directories(test_jit PRIVATE ${ATen_CPU_INCLUDE})
-if(NOT MSVC)
-  target_compile_options(test_jit PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-Wno-unused-variable>)
-endif()
 
 if(LINUX)
   #Update to target_link_options when CMake version can be upgraded
@@ -146,14 +143,15 @@ if(USE_CUDA)
   endif()
 elseif(USE_ROCM)
   target_link_libraries(test_jit PRIVATE
-    ${ROCM_HIPRTC_LIB}
-    ${PYTORCH_HIP_LIBRARIES}
+    hiprtc::hiprtc
+    hip::amdhip64
     ${TORCH_CUDA_LIBRARIES})
 
   target_compile_definitions(test_jit PRIVATE USE_ROCM)
 endif()
 
 if(INSTALL_TEST)
+  set_target_properties(test_jit PROPERTIES INSTALL_RPATH "${CMAKE_INSTALL_RPATH}:${_rpath_portable_origin}/../lib")
   install(TARGETS test_jit DESTINATION bin)
   # Install PDB files for MSVC builds
   if(MSVC AND BUILD_SHARED_LIBS)

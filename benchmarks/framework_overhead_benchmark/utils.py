@@ -3,6 +3,7 @@ from collections import namedtuple
 
 from torch.utils import ThroughputBenchmark
 
+
 NUM_LOOP_ITERS = 1000
 BenchmarkConfig = namedtuple("BenchmarkConfig", "num_warmup_iters num_iters")
 ModuleConfig = namedtuple("ModuleConfig", "pt_fn c2_op num_params graph_mode")

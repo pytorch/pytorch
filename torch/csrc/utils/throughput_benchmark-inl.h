@@ -12,9 +12,7 @@
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/util/irange.h>
 
-namespace torch {
-namespace throughput_benchmark {
-namespace detail {
+namespace torch::throughput_benchmark::detail {
 
 template <class Input, class Output, class Model>
 BenchmarkExecutionStats BenchmarkHelper<Input, Output, Model>::benchmark(
@@ -156,6 +154,4 @@ BenchmarkExecutionStats BenchmarkHelper<Input, Output, Model>::benchmark(
   return stats;
 }
 
-} // namespace detail
-} // namespace throughput_benchmark
-} // namespace torch
+} // namespace torch::throughput_benchmark::detail

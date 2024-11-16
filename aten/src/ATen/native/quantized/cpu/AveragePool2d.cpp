@@ -18,15 +18,13 @@
 #endif
 
 #include <c10/util/irange.h>
-#include <c10/util/math_compat.h>
 
 #include <algorithm>
 #include <cmath>
 #include <limits>
 #include <vector>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 DEFINE_DISPATCH(qavg_pool2d_nhwc_stub);
 
@@ -48,7 +46,7 @@ static void avg_pool2d_out_frame(
     int padW,
     int padH,
     bool count_include_pad,
-    c10::optional<int64_t> divisor_override) {
+    std::optional<int64_t> divisor_override) {
   Tensor input_contig = input.contiguous();
   auto input_data = input_contig.data_ptr<scalar_t>();
   auto output_data = output.data_ptr<scalar_t>();
@@ -186,12 +184,11 @@ Tensor q_avg_pool2d(
     IntArrayRef padding,
     bool ceil_mode,
     bool count_include_pad,
-    c10::optional<int64_t> divisor_override) {
+    std::optional<int64_t> divisor_override) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int kW, kH, dW, dH, padW, padH;
-  std::tie(kW, kH) = get_kernel(kernel_size);
-  std::tie(dW, dH) = get_stride(stride, kW, kH);
-  std::tie(padW, padH) = get_padding(padding);
+  auto [kW, kH] = get_kernel(kernel_size);
+  auto [dW, dH] = get_stride(stride, kW, kH);
+  auto [padW, padH] = get_padding(padding);
 
   const int64_t nbatch = input.ndimension() == 4 ? input.size(-4) : 1;
   const int64_t nInputPlane = input.size(-3);
@@ -212,7 +209,7 @@ Tensor q_avg_pool2d(
         input.options().memory_format(input.suggest_memory_format()),
         input.q_scale(),
         input.q_zero_point(),
-        c10::nullopt);
+        std::nullopt);
     // fast path for channel last: qavg_pool_2d_nhwc_stub
     qavg_pool2d_nhwc_stub(
         input.device().type(),
@@ -267,13 +264,10 @@ Tensor qnnpack_avg_pool2d(
     IntArrayRef padding,
     bool ceil_mode,
     bool count_include_pad,
-    c10::optional<int64_t> divisor_override) {
-  Tensor output;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int kW, kH, dW, dH, padW, padH;
-  std::tie(kW, kH) = get_kernel(kernel_size);
-  std::tie(dW, dH) = get_stride(stride, kW, kH);
-  std::tie(padW, padH) = get_padding(padding);
+    std::optional<int64_t> divisor_override) {
+  auto [kW, kH] = get_kernel(kernel_size);
+  auto [dW, dH] = get_stride(stride, kW, kH);
+  auto [padW, padH] = get_padding(padding);
   TORCH_CHECK(
       input.ndimension() == 4,
       "qnnpack_avg_pool2d(): Expected input to be 4-dimensional: got ",
@@ -304,7 +298,7 @@ Tensor qnnpack_avg_pool2d(
       oH > 0 && oW > 0,
       "qnnpack_avg_pool2d(): the resulting output Tensor size should be >= 0");
   // NHWC output
-  output = at::_empty_affine_quantized(
+  auto output = at::_empty_affine_quantized(
       output_shape,
       at::device(kCPU).dtype(kQUInt8),
       scale,
@@ -367,7 +361,7 @@ Tensor avg_pool2d_quantized_cpu(
     IntArrayRef padding,
     bool ceil_mode,
     bool count_include_pad,
-    c10::optional<int64_t> divisor_override) {
+    std::optional<int64_t> divisor_override) {
   Tensor output;
 #ifdef USE_PYTORCH_QNNPACK
   if (at::globalContext().qEngine() == at::QEngine::QNNPACK &&
@@ -395,5 +389,4 @@ Tensor avg_pool2d_quantized_cpu(
   return output;
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

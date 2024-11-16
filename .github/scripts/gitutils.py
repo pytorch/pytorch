@@ -19,6 +19,7 @@ from typing import (
     Union,
 )
 
+
 T = TypeVar("T")
 
 RE_GITHUB_URL_MATCH = re.compile("^https://.*@?github.com/(.+)/(.+)$")
@@ -155,11 +156,18 @@ class GitRepo:
         )
         return [x.strip() for x in rc.split("\n") if x.strip()] if len(rc) > 0 else []
 
-    def current_branch(self) -> str:
-        return self._run_git("symbolic-ref", "--short", "HEAD").strip()
+    def current_branch(self) -> Optional[str]:
+        try:
+            return self._run_git("symbolic-ref", "--short", "HEAD").strip()
+        except RuntimeError:
+            # we are in detached HEAD state
+            return None
 
     def checkout(self, branch: str) -> None:
         self._run_git("checkout", branch)
+
+    def create_branch_and_checkout(self, branch: str) -> None:
+        self._run_git("checkout", "-b", branch)
 
     def fetch(self, ref: Optional[str] = None, branch: Optional[str] = None) -> None:
         if branch is None and ref is None:
@@ -273,6 +281,7 @@ class GitRepo:
 
     def cherry_pick_commits(self, from_branch: str, to_branch: str) -> None:
         orig_branch = self.current_branch()
+        assert orig_branch is not None, "Must be on a branch"
         self.checkout(to_branch)
         from_commits, to_commits = self.compute_branch_diffs(from_branch, to_branch)
         if len(from_commits) == 0:
@@ -436,7 +445,6 @@ def retries_decorator(
                     print(
                         f'Attempt {idx} of {num_retries} to call {f.__name__} failed with "{e}"'
                     )
-                    pass
             return cast(T, rc)
 
         return wrapper

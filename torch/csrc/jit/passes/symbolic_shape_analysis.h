@@ -6,8 +6,7 @@
 #include <utility>
 #include <variant>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // CAUTION NOT TO BE USED, STILL A WIP, NOT STABLE
 
@@ -28,7 +27,7 @@ struct ShapeComputeGraphMapping {
         enclosing_graph_value_to_shape_graph_input_(
             std::move(enclosing_graph_value_to_shape_graph_input)),
         graph_output_to_symbolic_shape_dim_(
-            std::move(graph_output_to_symbolic_shape_dim)){};
+            std::move(graph_output_to_symbolic_shape_dim)) {}
 
   std::shared_ptr<Graph> partial_eval_shape_graph;
   std::unordered_map<Value*, Value*>
@@ -36,7 +35,7 @@ struct ShapeComputeGraphMapping {
   std::unordered_map<Value*, int64_t> graph_output_to_symbolic_shape_dim_;
 };
 
-TORCH_API c10::optional<ShapeComputeGraphMapping>
+TORCH_API std::optional<ShapeComputeGraphMapping>
 PropagateShapesAndBuildLargeShapeComputeGraph(
     std::shared_ptr<Graph>& graph,
     Node* beg,
@@ -50,9 +49,8 @@ TORCH_API bool setSymbolicShapeAnalysisTestMode(bool value);
 TORCH_API bool symbolicShapeAnalysisTestModeEnabled();
 
 using SSAInput = std::variant<IValue, c10::SymbolicShape>;
-TORCH_API c10::optional<std::vector<c10::SymbolicShape>>
+TORCH_API std::optional<std::vector<c10::SymbolicShape>>
 calculateSymbolicShapesOnOp(
     const FunctionSchema* schema,
     const std::vector<SSAInput>& inputs);
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

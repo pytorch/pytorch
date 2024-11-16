@@ -8,8 +8,7 @@
 #include <string>
 #include <vector>
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 
 TORCH_API std::vector<int64_t> ComputeArrayStrides(
     c10::ArrayRef<int64_t> sizes);
@@ -43,7 +42,7 @@ inline at::Tensor CopyTensor(
 }
 
 template <typename T, typename S>
-T OptionalOr(const c10::optional<S>& value, T defval) {
+T OptionalOr(const std::optional<S>& value, T defval) {
   return value ? static_cast<T>(*value) : defval;
 }
 
@@ -74,5 +73,4 @@ inline const at::Tensor& maybe_unwrap_functional(const at::Tensor& tensor) {
   }
 }
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

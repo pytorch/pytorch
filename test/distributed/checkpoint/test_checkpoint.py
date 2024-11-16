@@ -1,18 +1,16 @@
 # Owner(s): ["oncall: distributed"]
 
+import os
 import sys
-from typing import cast, List, Optional
+from typing import cast, List, Optional, Union
 
 import torch
 import torch.distributed as dist
 import torch.futures
 import torch.nn
-
 from torch.distributed._shard import sharded_tensor
-
 from torch.distributed._shard.sharded_tensor import ShardedTensor, state_dict_hook
 from torch.distributed._shard.sharding_spec import ChunkShardingSpec
-
 from torch.distributed.checkpoint import (
     CheckpointException,
     load_state_dict,
@@ -20,15 +18,12 @@ from torch.distributed.checkpoint import (
     StorageReader,
     StorageWriter,
 )
-
 from torch.distributed.checkpoint.default_planner import _create_default_local_metadata
-
 from torch.distributed.checkpoint.metadata import (
     BytesStorageMetadata,
     Metadata,
     TensorStorageMetadata,
 )
-
 from torch.distributed.checkpoint.planner import (
     LoadPlan,
     LoadPlanner,
@@ -38,12 +33,12 @@ from torch.distributed.checkpoint.planner import (
 from torch.distributed.checkpoint.storage import WriteResult
 from torch.futures import Future
 from torch.testing._internal.common_distributed import requires_nccl, skip_if_lt_x_gpu
-
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
 from torch.testing._internal.distributed._shard.sharded_tensor import (
     ShardedTensorTestBase,
     with_comms,
 )
+
 
 if TEST_WITH_DEV_DBG_ASAN:
     print(
@@ -174,6 +169,9 @@ class FaultyStorageWriter(TestStorageBase, StorageWriter):
     def __init__(self, fail_conf):
         super().__init__(fail_conf)
 
+    def reset(self, checkpoint_id: Union[str, os.PathLike, None] = None) -> None:
+        return
+
     def set_up_storage_writer(self, is_coordinator: bool) -> None:
         self._fail_rank("fail_set_up_storage_writer")
 
@@ -194,11 +192,18 @@ class FaultyStorageWriter(TestStorageBase, StorageWriter):
     def finish(self, metadata: Metadata, results: List[List[WriteResult]]) -> None:
         self._fail_rank("fail_finish")
 
+    @classmethod
+    def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
+        return True
+
 
 class FaultyStorageReader(TestStorageBase, StorageReader):
     def __init__(self, metadata, fail_conf):
         super().__init__(fail_conf)
         self.metadata = metadata
+
+    def reset(self, checkpoint_id: Union[str, os.PathLike, None] = None) -> None:
+        return
 
     def set_up_storage_reader(self, metadata: Metadata, is_coordinator: bool) -> None:
         self._fail_rank("fail_set_up_storage_reader")
@@ -218,6 +223,10 @@ class FaultyStorageReader(TestStorageBase, StorageReader):
     def read_metadata(self) -> Metadata:
         self._fail_rank("fail_read_metadata")
         return self.metadata
+
+    @classmethod
+    def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
+        return True
 
 
 class TestDistributedFailure(ShardedTensorTestBase):

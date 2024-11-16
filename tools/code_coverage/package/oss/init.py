@@ -1,6 +1,8 @@
+from __future__ import annotations
+
 import argparse
 import os
-from typing import cast, List, Optional, Tuple
+from typing import cast
 
 from ..util.setting import (
     CompilerType,
@@ -38,7 +40,7 @@ BLOCKED_PYTHON_TESTS = {
 }
 
 
-def initialization() -> Tuple[Option, TestList, List[str]]:
+def initialization() -> tuple[Option, TestList, list[str]]:
     # create folder if not exists
     create_folders()
     # add arguments
@@ -77,7 +79,7 @@ def add_arguments_oss(parser: argparse.ArgumentParser) -> argparse.ArgumentParse
 
 def parse_arguments(
     parser: argparse.ArgumentParser,
-) -> Tuple[Option, Optional[List[str]], Optional[List[str]], Optional[bool]]:
+) -> tuple[Option, list[str] | None, list[str] | None, bool | None]:
     # parse args
     args = parser.parse_args()
     # get option
@@ -85,9 +87,7 @@ def parse_arguments(
     return (options, args.interest_only, args.run_only, args.clean)
 
 
-def get_test_list_by_type(
-    run_only: Optional[List[str]], test_type: TestType
-) -> TestList:
+def get_test_list_by_type(run_only: list[str] | None, test_type: TestType) -> TestList:
     test_list: TestList = []
     binary_folder = get_oss_binary_folder(test_type)
     g = os.walk(binary_folder)
@@ -106,7 +106,7 @@ def get_test_list_by_type(
     return test_list
 
 
-def get_test_list(run_only: Optional[List[str]]) -> TestList:
+def get_test_list(run_only: list[str] | None) -> TestList:
     test_list: TestList = []
     # add c++ test list
     test_list.extend(get_test_list_by_type(run_only, TestType.CPP))
@@ -122,7 +122,7 @@ def get_test_list(run_only: Optional[List[str]]) -> TestList:
     return test_list
 
 
-def empty_list_if_none(arg_interested_folder: Optional[List[str]]) -> List[str]:
+def empty_list_if_none(arg_interested_folder: list[str] | None) -> list[str]:
     if arg_interested_folder is None:
         return []
     # if this argument is specified, just return itself
@@ -134,7 +134,7 @@ def gcc_export_init() -> None:
     create_folder(JSON_FOLDER_BASE_DIR)
 
 
-def get_python_run_only(args_run_only: Optional[List[str]]) -> List[str]:
+def get_python_run_only(args_run_only: list[str] | None) -> list[str]:
     # if user specifies run-only option
     if args_run_only:
         return args_run_only
@@ -144,7 +144,7 @@ def get_python_run_only(args_run_only: Optional[List[str]]) -> List[str]:
         return ["run_test.py"]
     else:
         # for clang, some tests will result in too large intermediate files that can't be merged by llvm, we need to skip them
-        run_only: List[str] = []
+        run_only: list[str] = []
         binary_folder = get_oss_binary_folder(TestType.PY)
         g = os.walk(binary_folder)
         for _, _, file_list in g:

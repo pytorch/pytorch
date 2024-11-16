@@ -3,8 +3,7 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/ir_views.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // Canonicalize a graph, renumbering it so that all structurally equivalent
 // graphs have same numbers.
@@ -142,9 +141,9 @@ bool isBeforeOrAfter(const Use& a, const Use& b, bool checking_before) {
   return checking_before ? isBefore(a, b) : isAfter(a, b);
 }
 
-c10::optional<const Use> firstOrLastUse(Value* v, bool find_first) {
+std::optional<const Use> firstOrLastUse(Value* v, bool find_first) {
   if (v->uses().empty()) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   Use extreme_use = v->uses()[0];
   for (size_t i = 1; i < v->uses().size(); ++i) {
@@ -157,9 +156,9 @@ c10::optional<const Use> firstOrLastUse(Value* v, bool find_first) {
   return extreme_use;
 }
 
-static std::vector<c10::optional<const Use>> gatherFirstUses(
+static std::vector<std::optional<const Use>> gatherFirstUses(
     at::ArrayRef<Value*> values) {
-  return fmap(values, [&](Value* v) -> c10::optional<const Use> {
+  return fmap(values, [&](Value* v) -> std::optional<const Use> {
     return firstOrLastUse(v, true);
   });
 }
@@ -169,19 +168,19 @@ static std::vector<size_t> sort_indexes(at::ArrayRef<Value*> values) {
   std::vector<size_t> idx(values.size());
   std::iota(idx.begin(), idx.end(), 0);
 
-  std::vector<c10::optional<const Use>> first_uses = gatherFirstUses(values);
+  std::vector<std::optional<const Use>> first_uses = gatherFirstUses(values);
 
   // Sort values based on canonical ordering of their first usage
   std::sort(idx.begin(), idx.end(), [&first_uses](size_t i1, size_t i2) {
     // if neither has any uses, use original ordering. Since the
     // only values that jitter are ones added by the compiler and are guaranteed
     // to have uses, original ordering is fine.
-    if (first_uses[i1] == c10::nullopt && first_uses[i2] == c10::nullopt) {
+    if (first_uses[i1] == std::nullopt && first_uses[i2] == std::nullopt) {
       return i1 < i2;
     }
-    if (first_uses[i1] == c10::nullopt) {
+    if (first_uses[i1] == std::nullopt) {
       return false;
-    } else if (first_uses[i2] == c10::nullopt) {
+    } else if (first_uses[i2] == std::nullopt) {
       return true;
     }
 
@@ -231,5 +230,4 @@ static void CanonicalizeOutputs(Block* block) {
 void CanonicalizeOutputs(std::shared_ptr<Graph>& graph) {
   CanonicalizeOutputs(graph->block());
 }
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

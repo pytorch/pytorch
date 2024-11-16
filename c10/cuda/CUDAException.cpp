@@ -6,8 +6,7 @@
 
 #include <string>
 
-namespace c10 {
-namespace cuda {
+namespace c10::cuda {
 
 void c10_cuda_check_implementation(
     const int32_t err,
@@ -24,7 +23,7 @@ void c10_cuda_check_implementation(
     return;
   }
 
-  auto error_unused C10_UNUSED = cudaGetLastError();
+  [[maybe_unused]] auto error_unused = cudaGetLastError();
   (void)error_unused;
 
   std::string check_message;
@@ -44,5 +43,4 @@ void c10_cuda_check_implementation(
   TORCH_CHECK(false, check_message);
 }
 
-} // namespace cuda
-} // namespace c10
+} // namespace c10::cuda

@@ -57,7 +57,7 @@ class RNNEltwise(benchmark.Benchmark):
         def memsize(t):
             return t.numel() * t.element_size()
 
-        input_size = sum([memsize(t) for t in self.inputs])
+        input_size = sum(memsize(t) for t in self.inputs)
         output_size = 2 * memsize(self.cx)
         io_size = input_size + output_size
         return {"sol": io_size, "algorithmic": io_size}

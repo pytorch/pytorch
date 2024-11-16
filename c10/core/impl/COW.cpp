@@ -5,6 +5,7 @@
 #include <c10/core/alignment.h>
 #include <c10/core/impl/COWDeleter.h>
 #include <c10/util/Exception.h>
+#include <c10/util/ParallelGuard.h>
 #include <c10/util/UniqueVoidPtr.h>
 
 #include <memory>
@@ -80,7 +81,7 @@ c10::intrusive_ptr<StorageImpl> lazy_clone_storage(StorageImpl& storage) {
   if (has_simple_data_ptr(storage)) {
     // Case 1) We have a simple data pointer: wrap it.
     std::unique_ptr<void, DeleterFnPtr> original_ctx =
-        storage.mutable_data_ptr().move_context();
+        storage._mutable_data_ptr_no_checks().move_context();
 
     // Save this for the result.
     new_data_ptr = make_data_ptr(
@@ -100,15 +101,19 @@ c10::intrusive_ptr<StorageImpl> lazy_clone_storage(StorageImpl& storage) {
 
   TORCH_INTERNAL_ASSERT(new_data_ptr.has_value());
 
-  return make_intrusive<StorageImpl>(
+  return make_storage_impl(
       StorageImpl::use_byte_size_t(),
       storage.sym_nbytes(),
       *std::move(new_data_ptr),
       storage.allocator(),
-      storage.resizable());
+      storage.resizable(),
+      storage.device_type());
 }
 
 C10_API void materialize_cow_storage(StorageImpl& storage) {
+  TORCH_INTERNAL_ASSERT(
+      !c10::ParallelGuard::is_enabled(),
+      "Materializing a storage in the loop function of at::parallel_for is forbidden");
   const at::DataPtr& data_ptr = storage.data_ptr();
 
   auto* ctx = data_ptr.cast_context<cow::COWDeleterContext>(cow::cow_deleter);

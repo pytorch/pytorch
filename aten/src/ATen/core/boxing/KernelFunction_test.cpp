@@ -6,7 +6,7 @@
 
 using std::vector;
 using std::tuple;
-using c10::optional;
+using std::optional;
 using c10::IValue;
 using c10::OperatorKernel;
 using c10::OperatorHandle;
@@ -180,7 +180,7 @@ void boxed_func_for_outofplace_multi_op(const OperatorHandle& /*opHandle*/, Stac
 // functional
 
 void expectBoxedCallingWithReturnWorks(const KernelFunction& func) {
-  called_with_args = c10::nullopt;
+  called_with_args = std::nullopt;
   vector<IValue> stack {3, 4};
   OperatorHandle dummy = makeDummyOperatorHandle();
 
@@ -194,7 +194,7 @@ void expectBoxedCallingWithReturnWorks(const KernelFunction& func) {
 }
 
 void expectBoxedCallingWithoutReturnWorks(const KernelFunction& func) {
-  called_with_args = c10::nullopt;
+  called_with_args = std::nullopt;
   vector<IValue> stack {3, 4};
   OperatorHandle dummy = makeDummyOperatorHandle();
 
@@ -206,7 +206,7 @@ void expectBoxedCallingWithoutReturnWorks(const KernelFunction& func) {
 }
 
 void expectBoxedCallingWithMultiReturnWorks(const KernelFunction& func) {
-  called_with_args = c10::nullopt;
+  called_with_args = std::nullopt;
   vector<IValue> stack {3, 4};
   OperatorHandle dummy = makeDummyOperatorHandle();
 
@@ -275,16 +275,6 @@ void expectOutOfPlaceMultiBoxedCallingWorks(const KernelFunction& func) {
   EXPECT_TRUE(stack[1].toTensor().is_same(t2));
 }
 
-void expectBoxedCallingFailsWith(const KernelFunction& func, const char* errorMessage) {
-  called_with_args = c10::nullopt;
-  vector<IValue> stack {3, 4};
-  OperatorHandle dummy = makeDummyOperatorHandle();
-
-  expectThrows<c10::Error>([&] {
-    func.callBoxed(dummy, CPU_TEST_SET, &stack);
-  }, errorMessage);
-}
-
 //
 // unboxed calling tests:
 //
@@ -294,7 +284,7 @@ void expectBoxedCallingFailsWith(const KernelFunction& func, const char* errorMe
 // make an unboxed call to a kernel that returns a single value.
 //
 void expectUnboxedCallingWithReturnWorks(const KernelFunction& func) {
-  called_with_args = c10::nullopt;
+  called_with_args = std::nullopt;
   OperatorHandle dummy = makeDummyOperatorHandle();
 
   int64_t result = func.call<int64_t, int64_t, int64_t>(dummy, CPU_TEST_SET, 3, 4);
@@ -307,7 +297,7 @@ void expectUnboxedCallingWithReturnWorks(const KernelFunction& func) {
 // make an unboxed call to a kernel that returns nothing.
 //
 void expectUnboxedCallingWithoutReturnWorks(const KernelFunction& func) {
-  called_with_args = c10::nullopt;
+  called_with_args = std::nullopt;
   OperatorHandle dummy = makeDummyOperatorHandle();
 
   func.call<void, int64_t, int64_t>(dummy, CPU_TEST_SET, 3, 4);
@@ -320,7 +310,7 @@ void expectUnboxedCallingWithoutReturnWorks(const KernelFunction& func) {
 // When calling unboxed, multiple values are returned as a tuple.
 //
 void expectUnboxedCallingWithMultiReturnWorks(const KernelFunction& func) {
-  called_with_args = c10::nullopt;
+  called_with_args = std::nullopt;
   OperatorHandle dummy = makeDummyOperatorHandle();
 
   auto result = func.call<std::tuple<int64_t, int64_t>, int64_t, int64_t>(dummy, CPU_TEST_SET, 3, 4);

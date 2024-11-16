@@ -1,9 +1,9 @@
+# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import copy
 import functools
-
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any, Callable, Dict, List, Optional, Set, TYPE_CHECKING
 
 import torch
 import torch._dynamo as torchdynamo
@@ -20,11 +20,8 @@ from torch.ao.quantization.observer import (
     PerChannelMinMaxObserver,
     PlaceholderObserver,
 )
-
-from torch.ao.quantization.qconfig import _ObserverOrFakeQuantizeConstructor
-
 from torch.ao.quantization.quantizer import QuantizationSpec, Quantizer
-
+from torch.ao.quantization.quantizer.utils import _get_module_name_filter
 from torch.ao.quantization.quantizer.xnnpack_quantizer_utils import (
     _convert_scalars_to_attrs,
     OP_TO_ANNOTATOR,
@@ -34,7 +31,10 @@ from torch.ao.quantization.quantizer.xnnpack_quantizer_utils import (
     QuantizationConfig,
 )
 
-from torch.fx import Node
+
+if TYPE_CHECKING:
+    from torch.ao.quantization.qconfig import _ObserverOrFakeQuantizeConstructor
+    from torch.fx import Node
 
 
 __all__ = [
@@ -76,7 +76,6 @@ def _supported_symmetric_quantized_operators() -> Dict[str, List[OperatorPattern
         ],
         "linear": [[torch.nn.Linear], [F.linear]],
         "add": [[torch.add]],
-        "max_pool2d": [[torch.nn.MaxPool2d], [F.max_pool2d]],
         "adaptive_avg_pool2d": [
             [torch.nn.AdaptiveAvgPool2d],
             [F.adaptive_avg_pool2d],
@@ -191,34 +190,6 @@ def _get_supported_config_and_operators() -> List[OperatorConfig]:
     return _get_supported_symmetric_config_and_operators()
 
 
-def _get_module_name_filter(module_name: str):
-    """Get the module_name_filter function for a given module name, the filter accepts
-    a node and checks if the node comes from a module that has certain module name
-
-    For example:
-        node: linear_op = call_function[...](...)  # comes from a module with name blocks.sub.linear1
-
-
-    >> module_name_filter = _get_module_name_filter("blocks.sub")
-    >> print(module_name_filter(node))
-    True  # the node is from "blocks.sub" based on the fully qualified name "blocks.sub.linear1"
-    """
-
-    def module_name_filter(n: Node) -> bool:
-        # example: {
-        #    'L__self___sub': ("L['self'].sub", <class '....Sub'>),
-        #    'L__self___sub_linear': ("L['self'].sub.linear", <class 'torch.nn.modules.linear.Linear'>)
-        # }
-        # get_attr nodes doesn't have nn_module_stack?
-        nn_module_stack = n.meta.get("nn_module_stack", {})
-        names = [
-            n[len("L__self___") :].replace("_", ".") for n in nn_module_stack.keys()
-        ]
-        return module_name in names
-
-    return module_name_filter
-
-
 def _get_module_type_filter(tp: Callable):
     """Get the module_type_filter function for a given module type, the filter accepts
     a node and checks if the node comes from a module that has certain module type
@@ -232,14 +203,22 @@ def _get_module_type_filter(tp: Callable):
     True  # the node is from the submodule `Sub` (same for `Block` and `Linear` as well)
     """
 
+    tp_str = tp.__module__ + "." + tp.__qualname__
+
     def module_type_filter(n: Node) -> bool:
         # example: {
         #     'L__self___sub': ("L['self'].sub", <class '....Sub'>),
         #     'L__self___sub_linear': ("L['self'].sub.linear", <class 'torch.nn.modules.linear.Linear'>)
         # }
         nn_module_stack = n.meta.get("nn_module_stack", {})
-        types = [t for _, t in nn_module_stack.values()]
-        return tp in types
+        types = []
+        for _, t in nn_module_stack.values():
+            # export() returns str, but older APIs (e.g. capture_pre_autograd_graph)
+            # return type. Handle both cases.
+            if isinstance(t, type):
+                t = t.__module__ + "." + t.__qualname__
+            types.append(t)
+        return tp_str in types
 
     return module_type_filter
 
@@ -261,6 +240,8 @@ class XNNPACKQuantizer(Quantizer):
     STATIC_QAT_ONLY_OPS = [
         "conv_bn_relu",
         "conv_bn",
+        "conv_transpose_bn_relu",
+        "conv_transpose_bn",
     ]
 
     # static quantization ops (both PTQ and QAT)
@@ -270,10 +251,10 @@ class XNNPACKQuantizer(Quantizer):
         "linear",
         "conv_relu",
         "conv",
+        "conv_transpose_relu",
         "adaptive_avg_pool2d",
         # TODO: move this to BoltNNQuantizer?
         "gru_io_only",
-        "max_pool2d",
         "add_relu",
         "add",
         "mul_relu",
@@ -285,7 +266,7 @@ class XNNPACKQuantizer(Quantizer):
         "linear",
     ]
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.global_config: Optional[QuantizationConfig] = None
         self.operator_type_config: Dict[
@@ -296,9 +277,9 @@ class XNNPACKQuantizer(Quantizer):
 
     @classmethod
     def get_supported_quantization_configs(cls) -> List[QuantizationConfig]:
-        op_configs: Set[QuantizationConfig] = set({})
-        for spec, _ in cls.supported_config_and_operators:
-            op_configs.add(spec)
+        op_configs: Set[QuantizationConfig] = {
+            spec for spec, _ in cls.supported_config_and_operators
+        }
         return list(op_configs)
 
     @classmethod

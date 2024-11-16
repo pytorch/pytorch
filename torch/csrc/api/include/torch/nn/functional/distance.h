@@ -2,9 +2,7 @@
 
 #include <torch/nn/options/distance.h>
 
-namespace torch {
-namespace nn {
-namespace functional {
+namespace torch::nn::functional {
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
@@ -19,7 +17,7 @@ inline Tensor cosine_similarity(
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.cosine_similarity
+/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.cosine_similarity
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for
@@ -55,7 +53,7 @@ inline Tensor pairwise_distance(
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.pairwise_distance
+/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.pairwise_distance
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for
@@ -83,6 +81,4 @@ inline Tensor pdist(const Tensor& input, double p = 2.0) {
   return torch::pdist(input, p);
 }
 
-} // namespace functional
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn::functional

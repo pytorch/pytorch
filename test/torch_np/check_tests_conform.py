@@ -1,6 +1,6 @@
-import pathlib
 import sys
 import textwrap
+from pathlib import Path
 
 
 def check(path):
@@ -43,7 +43,6 @@ def check(path):
             else:
                 report_violation(line, num, "off-class parametrize")
             if not src[nn - 1].startswith("@instantiate_parametrized_tests"):
-                # breakpoint()
                 report_violation(
                     line, num, f"missing instantiation of parametrized tests in {ln}?"
                 )
@@ -62,7 +61,7 @@ if __name__ == "__main__":
     if len(argv) != 2:
         raise ValueError("Usage : python check_tests_conform path/to/file/or/dir")
 
-    path = pathlib.Path(argv[1])
+    path = Path(argv[1])
 
     if path.is_dir():
         # run for all files in the directory (no subdirs)

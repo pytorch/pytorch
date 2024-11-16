@@ -11,7 +11,7 @@
 
 // Compiler Macros
 
-// Suppress an unused variable. Copied from C10_UNUSED
+// Suppress an unused variable. Copied from [[maybe_unused]]
 #if defined(_MSC_VER) && !defined(__clang__)
 #define VK_UNUSED __pragma(warning(suppress : 4100 4101))
 #else
@@ -197,7 +197,7 @@ inline constexpr To safe_downcast(const From& v) {
 
 template <typename To, typename From>
 inline constexpr bool is_signed_to_unsigned() {
-  return std::is_signed<From>::value && std::is_unsigned<To>::value;
+  return std::is_signed_v<From> && std::is_unsigned_v<To>;
 }
 
 } // namespace detail
@@ -328,14 +328,27 @@ inline ivec3 make_ivec3(uvec3 ints) {
 }
 
 /*
- * Given an vector of up to 4 int64_t representing the sizes of a tensor,
+ * Given an vector of up to 4 uint64_t representing the sizes of a tensor,
  * constructs a uvec4 containing those elements in reverse order.
  */
-inline uvec4 make_nchw_uvec4(const std::vector<int64_t>& arr) {
+inline uvec4 make_whcn_uvec4(const std::vector<int64_t>& arr) {
   uint32_t w = safe_downcast<uint32_t>(val_at(-1, arr));
   uint32_t h = safe_downcast<uint32_t>(val_at(-2, arr));
   uint32_t c = safe_downcast<uint32_t>(val_at(-3, arr));
   uint32_t n = safe_downcast<uint32_t>(val_at(-4, arr));
+
+  return {w, h, c, n};
+}
+
+/*
+ * Given an vector of up to 4 int64_t representing the sizes of a tensor,
+ * constructs an ivec4 containing those elements in reverse order.
+ */
+inline ivec4 make_whcn_ivec4(const std::vector<int64_t>& arr) {
+  int32_t w = val_at(-1, arr);
+  int32_t h = val_at(-2, arr);
+  int32_t c = val_at(-3, arr);
+  int32_t n = val_at(-4, arr);
 
   return {w, h, c, n};
 }

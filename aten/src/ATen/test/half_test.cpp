@@ -86,11 +86,11 @@ TEST(TestHalf, HalfNumericLimits) {
 // Check the declared type of members of numeric_limits<Half> matches
 // the declared type of that member on numeric_limits<float>
 
-#define ASSERT_SAME_TYPE(name)                                \
-  static_assert(                                              \
-      std::is_same<                                           \
-          decltype(std::numeric_limits<Half>::name),          \
-          decltype(std::numeric_limits<float>::name)>::value, \
+#define ASSERT_SAME_TYPE(name)                         \
+  static_assert(                                       \
+      std::is_same_v<                                  \
+          decltype(std::numeric_limits<Half>::name),   \
+          decltype(std::numeric_limits<float>::name)>, \
       "decltype(" #name ") differs")
 
 ASSERT_SAME_TYPE(is_specialized);

@@ -5,7 +5,7 @@ namespace c10 {
 
 // should this use the globalContext?  Can it get a context passed in somehow?
 UndefinedTensorImpl::UndefinedTensorImpl()
-    : TensorImpl(DispatchKey::Undefined, caffe2::TypeMeta(), c10::nullopt) {
+    : TensorImpl(DispatchKey::Undefined, caffe2::TypeMeta(), std::nullopt) {
   set_storage_access_should_throw();
   // TODO: accessing the sizes on an undefined tensor is not meaningful
   // and should error too, but empirically it does not!
@@ -38,6 +38,13 @@ const char* UndefinedTensorImpl::tensorimpl_type_name() const {
   return "UndefinedTensorImpl";
 }
 
+#ifdef _WIN32
+UndefinedTensorImpl& UndefinedTensorImpl::getInstance() {
+  static UndefinedTensorImpl instance;
+  return instance;
+}
+#else
 UndefinedTensorImpl UndefinedTensorImpl::_singleton;
+#endif
 
 } // namespace c10

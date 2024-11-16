@@ -1,10 +1,13 @@
 # Generates RegisterCodegenUnboxedKernels.cpp, UnboxingFunctions.h and UnboxingFunctions.cpp.
+
+from __future__ import annotations
+
 import argparse
 import os
-import pathlib
 import sys
 from dataclasses import dataclass
-from typing import List, Literal, Sequence, Union
+from pathlib import Path
+from typing import Literal, Sequence, TYPE_CHECKING
 
 import yaml
 
@@ -15,8 +18,11 @@ from torchgen.api.unboxing import convert_arguments
 from torchgen.context import method_with_native_function
 from torchgen.gen import cpp_string, get_custom_build_selector, parse_native_yaml
 from torchgen.model import Argument, NativeFunction, NativeFunctionsGroup, Variant
-from torchgen.selective_build.selector import SelectiveBuilder
 from torchgen.utils import FileManager, make_file_manager, mapMaybe, Target
+
+
+if TYPE_CHECKING:
+    from torchgen.selective_build.selector import SelectiveBuilder
 
 
 # Generates UnboxingFunctions.h & UnboxingFunctions.cpp.
@@ -109,7 +115,7 @@ class ComputeCodegenUnboxedKernels:
             # Using method=False faithful C++ API, so we should not see SelfArgument/TensorOptionsArgument
             assert isinstance(arg.argument, Argument)
             if not arg.argument.default:
-                arg_cpp = "c10::IValue(c10::nullopt)"
+                arg_cpp = "c10::IValue(::std::nullopt)"
             else:
                 # The unboxing code uses the faithful C++ API to avoid the overhead
                 # from wrapping/unwrapping TensorOptios.
@@ -123,7 +129,7 @@ class ComputeCodegenUnboxedKernels:
                 else:
                     arg_cpp = f"c10::IValue({arg_default})"
             args_code.append(
-                f"""c10::Argument("{arg.name}", nullptr, c10::nullopt, {arg_cpp})"""
+                f"""c10::Argument("{arg.name}", nullptr, ::std::nullopt, {arg_cpp})"""
             )
 
         returns = f.func.returns
@@ -156,7 +162,7 @@ def gen_unboxing(
     cpu_fm: FileManager,
     selector: SelectiveBuilder,
 ) -> None:
-    def key_func(fn: Union[NativeFunction, NativeFunctionsGroup]) -> str:
+    def key_func(fn: NativeFunction | NativeFunctionsGroup) -> str:
         return fn.root_name
 
     selected_op_num: int = len(selector.operators)
@@ -195,7 +201,7 @@ def gen_unboxing(
     )
 
 
-def main(args: List[str]) -> None:
+def main(args: list[str]) -> None:
     parser = argparse.ArgumentParser(description="Generate unboxing source files")
     parser.add_argument(
         "-s",
@@ -272,7 +278,7 @@ def main(args: List[str]) -> None:
     gen_unboxing(native_functions=native_functions, cpu_fm=cpu_fm, selector=selector)
 
     if options.output_dependencies:
-        depfile_path = pathlib.Path(options.output_dependencies).resolve()
+        depfile_path = Path(options.output_dependencies).resolve()
         depfile_name = depfile_path.name
         depfile_stem = depfile_path.stem
 

@@ -8,6 +8,7 @@ import torch
 from torch.package import PackageExporter, PackageImporter
 from torch.testing._internal.common_utils import IS_FBCODE, IS_SANDCASTLE, run_tests
 
+
 try:
     from .common import PackageTestCase
 except ImportError:
@@ -82,7 +83,7 @@ class TestPackageScript(PackageTestCase):
                     class UsesInterface(torch.nn.Module):
                         proxy_mod: ModuleInterface
 
-                        def __init__(self):
+                        def __init__(self) -> None:
                             super().__init__()
                             self.proxy_mod = ImplementsInterface()
 
@@ -245,7 +246,7 @@ class TestPackageScript(PackageTestCase):
                 return input
 
         class TopMod(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.modB = Submod()
 
@@ -709,7 +710,7 @@ class TestPackageScript(PackageTestCase):
         """
 
         class TorchVisionTestInline(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.tvmod = resnet18()
 
@@ -748,7 +749,7 @@ class TestPackageScript(PackageTestCase):
         """
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.foo = torch.ones(2, 3)
 

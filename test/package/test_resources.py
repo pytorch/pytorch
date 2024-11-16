@@ -8,6 +8,7 @@ from unittest import skipIf
 from torch.package import PackageExporter, PackageImporter
 from torch.testing._internal.common_utils import run_tests
 
+
 try:
     from .common import PackageTestCase
 except ImportError:
@@ -25,16 +26,16 @@ class TestResources(PackageTestCase):
         with PackageExporter(buffer) as pe:
             # Layout looks like:
             #    package
-            #    ├── one/
-            #    │   ├── a.txt
-            #    │   ├── b.txt
-            #    │   ├── c.txt
-            #    │   └── three/
-            #    │       ├── d.txt
-            #    │       └── e.txt
-            #    └── two/
-            #       ├── f.txt
-            #       └── g.txt
+            #    |-- one/
+            #    |   |-- a.txt
+            #    |   |-- b.txt
+            #    |   |-- c.txt
+            #    |   +-- three/
+            #    |       |-- d.txt
+            #    |       +-- e.txt
+            #    +-- two/
+            #       |-- f.txt
+            #       +-- g.txt
             pe.save_text("one", "a.txt", "hello, a!")
             pe.save_text("one", "b.txt", "hello, b!")
             pe.save_text("one", "c.txt", "hello, c!")

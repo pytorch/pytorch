@@ -1,7 +1,8 @@
+from __future__ import annotations
+
 import os
 import subprocess
 import time
-from typing import List
 
 from ..util.setting import (
     JSON_FOLDER_BASE_DIR,
@@ -25,7 +26,7 @@ from .utils import get_tool_path_by_platform, run_cpp_test
 
 
 def create_corresponding_folder(
-    cur_path: str, prefix_cur_path: str, dir_list: List[str], new_base_folder: str
+    cur_path: str, prefix_cur_path: str, dir_list: list[str], new_base_folder: str
 ) -> None:
     for dir_name in dir_list:
         relative_path = convert_to_relative_path(
@@ -70,11 +71,13 @@ def export_target(
     merged_file: str,
     json_file: str,
     binary_file: str,
-    shared_library_list: List[str],
+    shared_library_list: list[str],
     platform_type: TestPlatform,
 ) -> None:
     if binary_file is None:
-        raise Exception(f"{merged_file} doesn't have corresponding binary!")
+        raise Exception(  # noqa: TRY002
+            f"{merged_file} doesn't have corresponding binary!"
+        )  # noqa: TRY002
     print_log("start to export: ", merged_file)
     # run export
     cmd_shared_library = (

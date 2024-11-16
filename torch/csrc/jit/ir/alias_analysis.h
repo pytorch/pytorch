@@ -7,8 +7,7 @@
 #include <torch/csrc/jit/passes/create_functional_graphs.h>
 #include <torch/csrc/jit/passes/utils/memory_dag.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 /**
  * Alias analysis pass.
@@ -203,7 +202,7 @@ class AliasDb {
    * Wildcard methods
    */
   // Register `v` as a wildcard value.
-  c10::optional<Element*> setWildcard(const Value* v);
+  std::optional<Element*> setWildcard(const Value* v);
 
   // Is this a value which will not alias?
   bool nonAliasingValue(const Value* elem) const;
@@ -217,7 +216,7 @@ class AliasDb {
   void analyzeImpl(Node* node);
   void analyzeIf(Node* node);
   void analyzeLoop(Node* node);
-  void analyzeSubgraph(Node* node, std::shared_ptr<Graph> subgraph);
+  void analyzeSubgraph(Node* node, const std::shared_ptr<Graph>& subgraph);
   void analyzeSubgraph(Node* node);
   void analyzeCreator(Node* node);
   void analyzeExtractor(Node* node);
@@ -274,7 +273,7 @@ class AliasDb {
   // All wildcard Elements (one for each unique mutable type)
   ska::flat_hash_map<TypePtr, Element*, HashType, EqualType> wildcardIndex_;
   Element* getWildcard(const TypePtr& type) const;
-  c10::optional<Element*> tryGetOrCreateWildcard(const TypePtr& type);
+  std::optional<Element*> tryGetOrCreateWildcard(const TypePtr& type);
   void addContainedTypesToFreshElement(
       Element* container_elem,
       const AliasTypeSet& mut_types);
@@ -301,9 +300,9 @@ class AliasDb {
 
   // Map of nodes to the memory locations that they write to
   using TWriteIndex = ska::flat_hash_map<Node*, MemoryLocations>;
-  c10::optional<TWriteIndex> writeIndex_;
+  std::optional<TWriteIndex> writeIndex_;
   // Collection of all memory locations that are written to.
-  c10::optional<MemoryLocations> writtenToLocationsIndex_;
+  std::optional<MemoryLocations> writtenToLocationsIndex_;
   void buildWrittenToLocationsIndex();
 
   std::unordered_set<const Value*> wildcards_;
@@ -318,5 +317,4 @@ class AliasDb {
 // the right thing.
 TORCH_API void Lint(const AliasDb* db);
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

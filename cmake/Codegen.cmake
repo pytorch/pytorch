@@ -69,6 +69,21 @@ if(INTERN_BUILD_ATEN_OPS)
 
   file(GLOB_RECURSE all_python "${CMAKE_CURRENT_LIST_DIR}/../torchgen/*.py")
 
+  # RowwiseScaled.cu requires sm90a flags
+  if(USE_CUDA)
+    set(ROWWISE_SCALED_MM_FILE "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/cuda/RowwiseScaledMM.cu")
+
+    # Get existing arch flags
+    torch_cuda_get_nvcc_gencode_flag(EXISTING_ARCH_FLAGS)
+
+    # Check NVCC version and existing arch flags
+    if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 12.0 AND
+      EXISTING_ARCH_FLAGS MATCHES ".*compute_90.*")
+      set_source_files_properties(${ROWWISE_SCALED_MM_FILE}
+        PROPERTIES COMPILE_FLAGS "-gencode arch=compute_90a,code=sm_90a")
+    endif()
+  endif()
+
   set(GEN_ROCM_FLAG)
   if(USE_ROCM)
     set(GEN_ROCM_FLAG --rocm)
@@ -77,6 +92,11 @@ if(INTERN_BUILD_ATEN_OPS)
   set(GEN_MPS_FLAG)
   if(USE_MPS)
     set(GEN_MPS_FLAG --mps)
+  endif()
+
+  set(GEN_XPU_FLAG)
+  if(USE_XPU)
+    set(GEN_XPU_FLAG --xpu)
   endif()
 
   set(CUSTOM_BUILD_FLAGS)
@@ -114,7 +134,7 @@ if(INTERN_BUILD_ATEN_OPS)
     file(GLOB_RECURSE all_unboxing_script "${CMAKE_CURRENT_LIST_DIR}/../tools/jit/*.py")
     list(APPEND CUSTOM_BUILD_FLAGS --skip_dispatcher_op_registration)
     set(GEN_UNBOXING_COMMAND
-        "${PYTHON_EXECUTABLE}" -m tools.jit.gen_unboxing
+        "${Python_EXECUTABLE}" -m tools.jit.gen_unboxing
         --source-path ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen
         --install_dir ${CMAKE_BINARY_DIR}/aten/src/ATen
         )
@@ -158,12 +178,13 @@ if(INTERN_BUILD_ATEN_OPS)
   endif()
 
   set(GEN_COMMAND
-      "${PYTHON_EXECUTABLE}" -m torchgen.gen
+      "${Python_EXECUTABLE}" -m torchgen.gen
       --source-path ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen
       --install_dir ${CMAKE_BINARY_DIR}/aten/src/ATen
       ${GEN_PER_OPERATOR_FLAG}
       ${GEN_ROCM_FLAG}
       ${GEN_MPS_FLAG}
+      ${GEN_XPU_FLAG}
       ${CUSTOM_BUILD_FLAGS}
   )
 
@@ -202,22 +223,31 @@ if(INTERN_BUILD_ATEN_OPS)
     include("${CMAKE_BINARY_DIR}/aten/src/ATen/cpu_vec_generated_${gen_type}.cmake")
     include("${CMAKE_BINARY_DIR}/aten/src/ATen/cuda_generated_${gen_type}.cmake")
     include("${CMAKE_BINARY_DIR}/aten/src/ATen/ops_generated_${gen_type}.cmake")
-
+    if(USE_XPU)
+        include("${CMAKE_BINARY_DIR}/aten/src/ATen/xpu_generated_${gen_type}.cmake")
+    endif()
     message(STATUS "${gen_type} outputs: ${gen_outputs}")
+    set(OUTPUT_LIST
+      ${generated_${gen_type}}
+      ${cuda_generated_${gen_type}}
+      ${core_generated_${gen_type}}
+      ${cpu_vec_generated_${gen_type}}
+      ${ops_generated_${gen_type}}
+      ${CMAKE_BINARY_DIR}/aten/src/ATen/generated_${gen_type}.cmake
+      ${CMAKE_BINARY_DIR}/aten/src/ATen/ops_generated_${gen_type}.cmake
+      ${CMAKE_BINARY_DIR}/aten/src/ATen/core_generated_${gen_type}.cmake
+      ${CMAKE_BINARY_DIR}/aten/src/ATen/cpu_vec_generated_${gen_type}.cmake
+      ${CMAKE_BINARY_DIR}/aten/src/ATen/cuda_generated_${gen_type}.cmake)
+    if(USE_XPU)
+      list(APPEND OUTPUT_LIST
+        ${xpu_generated_${gen_type}}
+        ${CMAKE_BINARY_DIR}/aten/src/ATen/xpu_generated_${gen_type}.cmake
+      )
+    endif()
 
     add_custom_command(
       COMMENT "Generating ATen ${gen_type}"
-      OUTPUT
-        ${generated_${gen_type}}
-        ${cuda_generated_${gen_type}}
-        ${core_generated_${gen_type}}
-        ${cpu_vec_generated_${gen_type}}
-        ${ops_generated_${gen_type}}
-        ${CMAKE_BINARY_DIR}/aten/src/ATen/generated_${gen_type}.cmake
-        ${CMAKE_BINARY_DIR}/aten/src/ATen/ops_generated_${gen_type}.cmake
-        ${CMAKE_BINARY_DIR}/aten/src/ATen/core_generated_${gen_type}.cmake
-        ${CMAKE_BINARY_DIR}/aten/src/ATen/cpu_vec_generated_${gen_type}.cmake
-        ${CMAKE_BINARY_DIR}/aten/src/ATen/cuda_generated_${gen_type}.cmake
+      OUTPUT ${OUTPUT_LIST}
       COMMAND ${GEN_COMMAND_${gen_type}}
       DEPENDS ${all_python} ${${gen_type}_templates}
         ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/native_functions.yaml
@@ -245,6 +275,16 @@ if(INTERN_BUILD_ATEN_OPS)
     target_compile_definitions(ATEN_CUDA_FILES_GEN_LIB INTERFACE AT_PER_OPERATOR_HEADERS)
   endif()
 
+  if(USE_XPU)
+    add_custom_target(ATEN_XPU_FILES_GEN_TARGET DEPENDS
+        ${xpu_generated_headers} ${xpu_generated_sources})
+    add_library(ATEN_XPU_FILES_GEN_LIB INTERFACE)
+    add_dependencies(ATEN_XPU_FILES_GEN_LIB ATEN_XPU_FILES_GEN_TARGET)
+
+    if(USE_PER_OPERATOR_HEADERS)
+      target_compile_definitions(ATEN_XPU_FILES_GEN_LIB INTERFACE AT_PER_OPERATOR_HEADERS)
+    endif()
+  endif()
   # Handle source files that need to be compiled multiple times for
   # different vectorization options
   file(GLOB cpu_kernel_cpp_in "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/cpu/*.cpp" "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/quantized/cpu/kernels/*.cpp")
@@ -307,6 +347,18 @@ if(INTERN_BUILD_ATEN_OPS)
     LIST(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG}  ${CXX_ZVECTOR_FLAGS}")
   endif(CXX_ZVECTOR_FOUND)
 
+  if(CXX_SVE_FOUND)
+    if(CXX_SVE256_FOUND)
+      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DHAVE_SVE_CPU_DEFINITION -DHAVE_SVE256_CPU_DEFINITION")
+      list(APPEND CPU_CAPABILITY_NAMES "SVE256")
+      if("${CMAKE_C_COMPILER_ID}" MATCHES "Clang")
+        list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG} -O2 -march=armv8.2-a+sve -DCPU_CAPABILITY_SVE -msve-vector-bits=256")
+      else()
+        list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG} -march=armv8.2-a+sve -DCPU_CAPABILITY_SVE -msve-vector-bits=256")
+      endif()
+    endif(CXX_SVE256_FOUND)
+  endif(CXX_SVE_FOUND)
+
   list(LENGTH CPU_CAPABILITY_NAMES NUM_CPU_CAPABILITY_NAMES)
   math(EXPR NUM_CPU_CAPABILITY_NAMES "${NUM_CPU_CAPABILITY_NAMES}-1")
 
@@ -356,7 +408,7 @@ function(append_filelist name outputvar)
       ${PROJECT_SOURCE_DIR}/build_variables.bzl
       ${PROJECT_BINARY_DIR}/caffe2/build_variables.bzl)
   execute_process(
-    COMMAND "${PYTHON_EXECUTABLE}" -c
+    COMMAND "${Python_EXECUTABLE}" -c
             "exec(open('${PROJECT_SOURCE_DIR}/build_variables.bzl').read());print(';'.join(['${_rootdir}' + x for x in ${name}]))"
     WORKING_DIRECTORY "${_rootdir}"
     RESULT_VARIABLE _retval

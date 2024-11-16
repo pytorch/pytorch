@@ -22,7 +22,7 @@ written in Python and it marks the transition of PyTorch from C++ to Python.
 * **TorchInductor** is the default ``torch.compile`` deep learning compiler
   that generates fast code for multiple accelerators and backends. You
   need to use a backend compiler to make speedups through ``torch.compile``
-  possible. For NVIDIA and AMD GPUs, it leverages OpenAI Triton as the key
+  possible. For NVIDIA, AMD and Intel GPUs, it leverages OpenAI Triton as the key
   building block.
 
 * **AOT Autograd** captures not only the user-level code, but also backpropagation,
@@ -74,7 +74,7 @@ Some of the most commonly used backends include:
    * - ``torch.compile(m, backend="tvm")``
      - Uses Apache TVM for inference optimizations. `Read more <https://tvm.apache.org/>`__
    * - ``torch.compile(m, backend="openvino")``
-     - Uses OpenVINO for inference optimizations. `Read more <https://docs.openvino.ai/2023.1/pytorch_2_0_torch_compile.html>`__
+     - Uses OpenVINO for inference optimizations. `Read more <https://docs.openvino.ai/torchcompile>`__
 
 Read More
 ~~~~~~~~~
@@ -85,6 +85,7 @@ Read More
 
    torch.compiler_get_started
    torch.compiler_api
+   torch.compiler.config
    torch.compiler_fine_grain_apis
    torch.compiler_aot_inductor
    torch.compiler_inductor_profiling
@@ -102,8 +103,8 @@ Read More
    :caption: Deep Dive for PyTorch Developers
    :maxdepth: 1
 
-   torch.compiler_deepdive
-   torch.compiler_guards_overview
+   torch.compiler_dynamo_overview
+   torch.compiler_dynamo_deepdive
    torch.compiler_dynamic_shapes
    torch.compiler_nn_module
    torch.compiler_best_practices_for_backends

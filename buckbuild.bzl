@@ -5,13 +5,13 @@ load("@bazel_skylib//lib:paths.bzl", "paths")
 load("//tools/build_defs:fb_native_wrapper.bzl", "fb_native")
 load("//tools/build_defs:fb_xplat_cxx_library.bzl", "fb_xplat_cxx_library")
 load("//tools/build_defs:fb_xplat_genrule.bzl", "fb_xplat_genrule")
+load("//tools/build_defs/windows:windows_flag_map.bzl", "windows_convert_gcc_clang_flags")
 load("//tools/build_defs:fbsource_utils.bzl", "is_arvr_mode")
 load("//tools/build_defs:glob_defs.bzl", "subdir_glob")
 load("//tools/build_defs:platform_defs.bzl", "APPLETVOS", "IOS", "MACOSX")
 load("//tools/build_defs:type_defs.bzl", "is_list", "is_string")
 load("//tools/build_defs/android:build_mode_defs.bzl", is_production_build_android = "is_production_build")
 load("//tools/build_defs/apple:build_mode_defs.bzl", is_production_build_ios = "is_production_build")
-load("//tools/build_defs/windows:windows_flag_map.bzl", "windows_convert_gcc_clang_flags")
 load(
     ":build_variables.bzl",
     "aten_cpu_source_list",
@@ -53,7 +53,6 @@ load(
 )
 
 def read_bool(section, field, default, required = True):
-    # @lint-ignore BUCKRESTRICTEDSYNTAX
     val = read_config(section, field)
     if val != None:
         if val in ["true", "True", "1"]:
@@ -144,7 +143,9 @@ def get_glsl_paths():
         ],
     )
 
-# @lint-ignore BUCKRESTRICTEDSYNTAX
+def spv_shader_library():
+    pass
+
 IS_OSS = read_config("pt", "is_oss", "0") == "1"  # True for OSS BUCK build, and False for internal BUCK build
 
 NOT_OSS = not IS_OSS
@@ -212,7 +213,6 @@ _PT_COMPILER_FLAGS = [
 ATEN_COMPILER_FLAGS = [
     "-fexceptions",
     "-frtti",
-    "-fPIC",
     "-Os",
     "-Wno-absolute-value",
     "-Wno-deprecated-declarations",
@@ -224,10 +224,17 @@ ATEN_COMPILER_FLAGS = [
     "-Wno-unused-variable",
     "-Wno-pass-failed",
     "-Wno-shadow",
-]
+] + select({
+    # Not supported by clang on Windows
+    "DEFAULT": ["-fPIC"],
+    "ovr_config//compiler:clang-windows": [],
+})
 
 def get_aten_compiler_flags():
-    return ATEN_COMPILER_FLAGS
+    return select({
+        "DEFAULT": ATEN_COMPILER_FLAGS,
+        "ovr_config//compiler:cl": windows_convert_gcc_clang_flags(ATEN_COMPILER_FLAGS),
+    })
 
 _COMMON_PREPROCESSOR_FLAGS = [
     "-DC10_MOBILE",
@@ -258,7 +265,6 @@ def get_aten_preprocessor_flags():
         "-DPYTORCH_QNNPACK_RUNTIME_QUANTIZATION",
         "-DAT_PARALLEL_OPENMP_FBXPLAT=0",
         "-DAT_PARALLEL_NATIVE_FBXPLAT=1",
-        "-DAT_PARALLEL_NATIVE_TBB_FBXPLAT=0",
         "-DUSE_LAPACK_FBXPLAT=0",
         "-DAT_BLAS_F2C_FBXPLAT=0",
         "-DAT_BLAS_USE_CBLAS_DOT_FBXPLAT=0",
@@ -276,7 +282,6 @@ def get_pt_preprocessor_flags():
         "-D_THP_CORE",
         "-DUSE_SCALARS",
         "-DNO_CUDNN_DESTROY_HANDLE",
-        "-DBUILD_CAFFE2",
     ]
 
     if _is_build_mode_dev():
@@ -382,6 +387,7 @@ def get_aten_generated_files(enabled_backends):
         "core/TensorMethods.cpp",
         "core/aten_interned_strings.h",
         "core/enum_tag.h",
+        "torch/csrc/inductor/aoti_torch/generated/c_shim_cpu.cpp",
     ] + get_aten_derived_type_srcs(enabled_backends)
 
     # This is tiresome.  A better strategy would be to unconditionally
@@ -466,6 +472,7 @@ def gen_aten_files(
         cmd = "$(exe {}torchgen:gen) ".format(ROOT_PATH) + " ".join([
             "--source-path $(location {}:aten_src_path)/aten/src/ATen".format(ROOT),
             "--install_dir $OUT",
+            "--aoti_install_dir $OUT/torch/csrc/inductor/aoti_torch/generated"
         ] + extra_params),
         visibility = visibility,
         compatible_with = compatible_with,
@@ -700,6 +707,43 @@ def gen_aten_libtorch_files(name, extra_params = [], compatible_with = [], apple
         apple_sdks = apple_sdks,
     )
 
+def vulkan_spv_shader_library(name, spv_filegroup):
+    genrule_cmd = [
+        "$(exe //xplat/caffe2/tools:gen_aten_vulkan_spv_bin)",
+        "--glsl-paths $(location {})".format(spv_filegroup),
+        "--output-path $OUT --env FLOAT_IMAGE_FORMAT={}".format(get_glsl_image_format()),
+        "--glslc-path=$(exe //xplat/caffe2/fb/vulkan/dotslash:glslc)",
+        "--tmp-dir-path=$TMP",
+    ]
+
+    genrule_name = "gen_{}_cpp".format(name)
+    fb_xplat_genrule(
+        name = "gen_{}_cpp".format(name),
+        outs = {
+            "{}.cpp".format(name): ["spv.cpp"],
+        },
+        cmd = " ".join(genrule_cmd),
+        default_outs = ["."],
+        labels = ["uses_dotslash"],
+    )
+
+    fb_xplat_cxx_library(
+        name = name,
+        srcs = [
+            ":{}[{}.cpp]".format(genrule_name, name),
+        ],
+        # Static initialization is used to register shaders to the global shader registry,
+        # therefore link_whole must be True to make sure unused symbols are not discarded.
+        # @lint-ignore BUCKLINT: Avoid `link_whole=True`
+        link_whole = True,
+        # Define a soname that can be used for dynamic loading in Java, Python, etc.
+        soname = "lib{}.$(ext)".format(name),
+        visibility = ["PUBLIC"],
+        exported_deps = [
+            "//xplat/caffe2:torch_vulkan_api",
+        ],
+    )
+
 def copy_metal(name, apple_sdks = None):
     cmd = []
     cmd_exe = []
@@ -807,7 +851,6 @@ def define_buck_targets(
     # @lint-ignore BUCKLINT
     fb_native.filegroup(
         name = "metal_build_srcs",
-        # @lint-ignore BUCKRESTRICTEDSYNTAX
         srcs = glob(METAL_SOURCE_LIST),
         visibility = [
             "PUBLIC",
@@ -818,7 +861,6 @@ def define_buck_targets(
     fb_native.filegroup(
         name = "templated_selective_build_srcs",
         # NB: no glob here, there are generated targets in this list!
-        # @lint-ignore BUCKRESTRICTEDSYNTAX
         srcs = glob(TEMPLATE_SOURCE_LIST) + aten_ufunc_generated_all_cpu_sources(":gen_aten[{}]"),
         visibility = [
             "PUBLIC",
@@ -960,6 +1002,7 @@ def define_buck_targets(
             "Functions.h": ":gen_aten_libtorch[autograd/generated/Functions.h]",
             "VariableType.h": ":gen_aten_libtorch[autograd/generated/VariableType.h]",
             "variable_factories.h": ":gen_aten_libtorch[autograd/generated/variable_factories.h]",
+            "ViewFuncs.h": ":gen_aten_libtorch[autograd/generated/ViewFuncs.h]",
             # Don't build python bindings on mobile.
             #"python_functions.h",
         },
@@ -1003,7 +1046,6 @@ def define_buck_targets(
         srcs = [
             "aten/src/ATen/native/native_functions.yaml",
             "aten/src/ATen/native/tags.yaml",
-            # @lint-ignore BUCKRESTRICTEDSYNTAX
         ] + glob(["aten/src/ATen/templates/*"]),
         visibility = [
             "PUBLIC",
@@ -1071,9 +1113,6 @@ def define_buck_targets(
             "--replace",
             "@AT_PARALLEL_NATIVE@",
             "AT_PARALLEL_NATIVE_FBXPLAT",
-            "--replace",
-            "@AT_PARALLEL_NATIVE_TBB@",
-            "AT_PARALLEL_NATIVE_TBB_FBXPLAT",
             "--replace",
             "@AT_BUILD_WITH_LAPACK@",
             "USE_LAPACK_FBXPLAT",
@@ -1466,6 +1505,7 @@ def define_buck_targets(
             "torch/csrc/jit/mobile/train/random.cpp",
             "torch/csrc/jit/mobile/train/sequential.cpp",
             ":gen_aten_libtorch[autograd/generated/Functions.cpp]",
+            ":gen_aten_libtorch[autograd/generated/ViewFuncs.cpp]",
         ],
         compiler_flags = get_pt_compiler_flags(),
         exported_preprocessor_flags = get_pt_preprocessor_flags() + ["-DUSE_MOBILE_CLASSTYPE"],
@@ -2000,7 +2040,7 @@ def define_buck_targets(
                 ("", "torch/csrc/utils/*.h"),
                 ("", "aten/src/ATen/quantized/*.h"),
             ] + ([
-                ("third_party/miniz-2.1.0", "*.h"),
+                ("third_party/miniz-3.0.2", "*.h"),
             ] if NOT_OSS else []),
             exclude = [
                 "torch/csrc/jit/serialization/mobile_bytecode_generated.h",

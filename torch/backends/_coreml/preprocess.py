@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import hashlib
 import json
 from typing import Dict, Tuple
@@ -8,6 +9,7 @@ from coremltools.converters.mil.mil import types  # type: ignore[import]
 from coremltools.models.neural_network import quantization_utils  # type: ignore[import]
 
 import torch
+
 
 CT_METADATA_VERSION = "com.github.apple.coremltools.version"
 CT_METADATA_SOURCE = "com.github.apple.coremltools.source"

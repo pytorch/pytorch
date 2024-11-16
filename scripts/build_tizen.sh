@@ -55,9 +55,6 @@ cmake .. \
     -DRUN_HAVE_POSIX_REGEX=0 \
     -DHAVE_GNU_POSIX_REGEX=0 \
     -DUSE_MPI=OFF -DUSE_OPENMP=OFF \
-    -DUSE_ROCKSDB=OFF \
-    -DUSE_LEVELDB=OFF \
-    -DUSE_LMDB=OFF \
     -DBUILD_PYTHON=OFF \
     -DUSE_GLOO=OFF \
     -DUSE_OPENCV=OFF \
@@ -84,10 +81,7 @@ sudo zypper install \
 # Obtain optional dependencies that are usually useful to have.
 echo "Installing optional dependencies."
 sudo zypper install \
-  libleveldb-dev \
-  liblmdb-dev \
   libpython-dev \
-  libsnappy-dev \
   python-numpy \
   python-pip \
   python-protobuf
@@ -110,7 +104,6 @@ cmake "$CAFFE2_ROOT" \
     -DUSE_CUDA=OFF \
     -DUSE_ITT=OFF \
     -DUSE_OPENCV=OFF \
-    -DUSE_LMDB=OFF \
     -DCAFFE2_CPU_FLAGS="-mfpu=neon -mfloat-abi=soft" \
     || exit 1
 

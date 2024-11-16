@@ -5,7 +5,7 @@ import os
 # from . import conv           # noqa: F401
 # from . import normalization  # noqa: F401
 # from . import pooling        # noqa: F401
-from . import (  # noqa: F401  # noqa: F401  # noqa: F401  # noqa: F401  # noqa: F401  # noqa: F401  # noqa: F401  # noqa: F401  # noqa: F401
+from . import (  # noqa: F401
     attention,
     benchmark,
     broadcast,

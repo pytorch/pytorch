@@ -136,7 +136,7 @@ const Tensor& resize_as_sparse_(const Tensor& self, const Tensor& src);
 const Tensor& resize_as_(
     const Tensor& self,
     const Tensor& the_template,
-    c10::optional<MemoryFormat> optional_memory_format) {
+    std::optional<MemoryFormat> optional_memory_format) {
   if (self.is_sparse() && the_template.is_sparse()) {
     TORCH_CHECK(
         !optional_memory_format.has_value(),
@@ -231,23 +231,15 @@ TensorImpl* resize_impl_cpu_(
   return _resize_impl_(self, size, stride, resize_storage);
 }
 
-static TensorImpl* resize_impl_meta_(
-    TensorImpl* self,
-    c10::SymIntArrayRef size,
-    at::OptionalSymIntArrayRef stride,
-    bool resize_storage = true) {
-  return _resize_impl_(self, size, stride, resize_storage);
-}
-
 template <typename T>
 const Tensor& _resize_(
     const Tensor& self,
     ArrayRef<T> size,
-    c10::optional<MemoryFormat> optional_memory_format) {
+    std::optional<MemoryFormat> optional_memory_format) {
   auto* self_ = self.unsafeGetTensorImpl();
   int64_t old_storage_nbytes = self_->unsafe_storage() ? self_->unsafe_storage().sym_nbytes().maybe_as_int().value_or(-1) : 0;
   // NOLINTNEXTLINE(bugprone-argument-comment)
-  _resize_impl_<T>(self_, size, /*strides=*/c10::nullopt, true);
+  _resize_impl_<T>(self_, size, /*strides=*/std::nullopt, true);
   if (optional_memory_format.has_value()) {
     auto memory_format =
         optional_memory_format.value();
@@ -267,7 +259,7 @@ const Tensor& _resize_(
 const Tensor& resize_(
     const Tensor& self,
     IntArrayRef size,
-    c10::optional<MemoryFormat> optional_memory_format) {
+    std::optional<MemoryFormat> optional_memory_format) {
   if (self.has_names()) {
     return resize_named_tensor_(self, size, optional_memory_format);
   }
@@ -277,9 +269,55 @@ const Tensor& resize_(
 const Tensor& resize__symint(
     const Tensor& self,
     c10::SymIntArrayRef size,
-    c10::optional<MemoryFormat> optional_memory_format) {
+    std::optional<MemoryFormat> optional_memory_format) {
   TORCH_INTERNAL_ASSERT(!self.has_names())
   return _resize_(self, size, optional_memory_format);
+}
+
+void resize_bytes_nocuda(const Storage& storage, const c10::SymInt& newsize) {
+  // handles all devices except cuda (which needs to be in a different .so)
+  c10::DeviceType device_type = storage.device_type();
+  if (device_type == at::kCPU) {
+    at::native::resize_bytes_cpu(storage.unsafeGetStorageImpl(), newsize.expect_int());
+  } else if (device_type == at::kMeta) {
+    at::native::resize_bytes_meta(storage.unsafeGetStorageImpl(), newsize);
+  } else if (device_type == at::kPrivateUse1) {
+    at::detail::getPrivateUse1Hooks().resizePrivateUse1Bytes(
+        storage, newsize.expect_int());
+  } else if (device_type == at::kXPU || device_type == at::kHPU || device_type == at::kMTIA) {
+    ptrdiff_t size_bytes_i = newsize.expect_int();
+    TORCH_CHECK(
+        !c10::overflows<int64_t>(size_bytes_i),
+        "Requested storage size (",
+        size_bytes_i,
+        ") cannot be represented as a int64_t");
+    const auto size_bytes = static_cast<int64_t>(size_bytes_i);
+    void* original_data_ptr = storage.data_ptr().get();
+
+    auto src_option =
+        c10::TensorOptions().device(storage.device()).dtype(at::kByte);
+    auto src_tensor = at::empty({0}, src_option).set_(storage);
+    src_tensor.resize_({size_bytes});
+
+    // When using resize_ to replace resize_bytes_xxx, in some cases
+    // the original data_ptr is still returned, which is an inconsistent
+    // behavior when compared to resize_bytes_xxx. For these cases,
+    // an additional memory copy and update for storage are required.
+    if (original_data_ptr == src_tensor.storage().data_ptr().get()) {
+      auto new_tensor = at::empty(src_tensor.sizes(), src_tensor.options());
+      new_tensor.copy_(src_tensor);
+      storage.set_data_ptr_noswap(
+          std::move(new_tensor.storage().mutable_data_ptr()));
+      storage.unsafeGetStorageImpl()->set_allocator(
+          new_tensor.storage().unsafeGetStorageImpl()->allocator());
+      storage.set_nbytes(new_tensor.storage().nbytes());
+    }
+  } else {
+    TORCH_CHECK(
+        false,
+        "UntypedStorage.resize_: got unexpected device type ",
+        device_type);
+  }
 }
 
 } // namespace at::native

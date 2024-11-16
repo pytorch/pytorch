@@ -1,8 +1,5 @@
 #include <ATen/TensorGeometry.h>
 
-#include <limits>
-#include <cstddef>
-
 namespace at {
 
 // See TensorGeometry.h on why this is useful now that we cache is_contiguous.

@@ -123,7 +123,7 @@ void* SmallVectorBase<Size_T>::mallocForGrow(
 // Note: Moving this function into the header may cause performance regression.
 template <class Size_T>
 void SmallVectorBase<Size_T>::grow_pod(
-    void* FirstEl,
+    const void* FirstEl,
     size_t MinSize,
     size_t TSize) {
   size_t NewCapacity = getNewCapacity<Size_T>(MinSize, TSize, this->capacity());

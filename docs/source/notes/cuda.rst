@@ -1,7 +1,12 @@
+.. meta::
+   :description: A guide to torch.cuda, a PyTorch module to run CUDA operations
+   :keywords: memory management, PYTORCH_CUDA_ALLOC_CONF, optimize PyTorch, CUDA
+
 .. _cuda-semantics:
 
 CUDA semantics
 ==============
+
 
 :mod:`torch.cuda` is used to set up and run CUDA operations. It keeps track of
 the currently selected GPU, and all CUDA tensors you allocate will by default be
@@ -415,8 +420,8 @@ underlying allocation patterns produced by your code.
 
 .. _cuda-memory-envvars:
 
-Environment variables
-^^^^^^^^^^^^^^^^^^^^^
+Optimizing memory usage  with ``PYTORCH_CUDA_ALLOC_CONF``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Use of a caching allocator can interfere with memory checking tools such as
 ``cuda-memcheck``.  To debug memory errors using ``cuda-memcheck``, set
@@ -466,6 +471,13 @@ Available options:
   set the knob value to: [256:1,512:2,1024:4,>:8].
   ``roundup_power2_divisions`` is only meaningful with ``backend:native``.
   With ``backend:cudaMallocAsync``, ``roundup_power2_divisions`` is ignored.
+* ``max_non_split_rounding_mb`` will allow non-split blocks for better reuse, eg,
+   a 1024MB cached block can be re-used for a 512MB allocation request. In the default
+   case, we only allow up to 20MB of rounding of non-split blocks, so a 512MB block
+   can only be served with between 512-532 MB size block. If we set the value of this
+   option to 1024, it will alow 512-1536 MB size blocks to be used for a 512MB block
+   which increases reuse of larger blocks. This will also help in reducing the stalls
+   in avoiding expensive cudaMalloc calls.
 * ``garbage_collection_threshold`` helps actively reclaiming unused GPU memory to
   avoid triggering expensive sync-and-reclaim-all operation (release_cached_blocks),
   which can be unfavorable to latency-critical GPU applications (e.g., servers).
@@ -521,6 +533,10 @@ Available options:
   using more threads to parallelize the page mapping operations to reduce the overall
   allocation time of pinned memory. A good value for this option is 8 based on
   benchmarking results.
+
+  `pinned_use_background_threads` option is a boolean flag to enable background thread
+  for processing events. This avoids any slow path associated with querying/processing of
+  events in the fast allocation path. This feature is disabled by default.
 
 .. note::
 
@@ -971,9 +987,12 @@ Violating any of these will likely cause a runtime error:
   :class:`~torch.cuda.graph` and
   :func:`~torch.cuda.make_graphed_callables` set a side stream for you.)
 * Ops that synchronize the CPU with the GPU (e.g., ``.item()`` calls) are prohibited.
-* CUDA RNG ops are allowed, but must use default generators. For example, explicitly constructing a
-  new :class:`torch.Generator` instance and passing it as the ``generator`` argument to an RNG function
-  is prohibited.
+* CUDA RNG operations are permitted, and when using multiple :class:`torch.Generator` instances within a graph,
+  they must be registered using :meth:`CUDAGraph.register_generator_state<torch.cuda.CUDAGraph.register_generator_state>` before graph capture.
+  Avoid using :meth:`Generator.get_state<torch.get_state>` and :meth:`Generator.set_state<torch.set_state>` during capture;
+  instead, utilize :meth:`Generator.graphsafe_set_state<torch.Generator.graphsafe_set_state>` and :meth:`Generator.graphsafe_get_state<torch.Generator.graphsafe_get_state>`
+  for managing generator states safely within the graph context. This ensures proper RNG operation and generator management within CUDA graphs.
+
 
 Violating any of these will likely cause silent numerical errors or undefined behavior:
 

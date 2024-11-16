@@ -762,7 +762,12 @@ function frameFilter({name, filename}) {
 
 function format_frames(frames) {
   if (frames.length === 0) {
-    return `<block was allocated before _record_history was enabled>`;
+    return (
+      `This block has no frames. Potential causes:\n` +
+      `1) This block was allocated before _record_memory_history was enabled.\n` +
+      `2) The context or stacks passed to _record_memory_history does not include this block. Consider changing context to 'state', 'alloc', or 'all', or changing stacks to 'all'.\n` +
+      `3) This event occurred during backward, which has no python frames, and memory history did not include C++ frames. Use stacks='all' to record both C++ and python frames.`
+    );
   }
   const frame_strings = frames
     .filter(frameFilter)
@@ -901,6 +906,7 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries) {
     current_data.push(e);
     data.push(e);
     total_mem += size;
+    element_obj.max_allocated_mem = total_mem + total_summarized_mem;
   }
 
   for (const elem of initially_allocated) {
@@ -969,11 +975,17 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries) {
     elements_length: elements.length,
     context_for_id: id => {
       const elem = elements[id];
-      let text = `${formatAddr(elem)} ${formatSize(elem.size)} allocation (${
-        elem.size
-      } bytes)`;
+      let text = `Addr: ${formatAddr(elem)}`;
+      text = `${text}, Size: ${formatSize(elem.size)} allocation`;
+      text = `${text}, Total memory used after allocation: ${formatSize(
+        elem.max_allocated_mem,
+      )}`;
       if (elem.stream !== null) {
         text = `${text}, stream ${elem.stream}`;
+      }
+      if (elem.timestamp !== null) {
+        var d = new Date(elem.time_us / 1000);
+        text = `${text}, timestamp ${d}`;
       }
       if (!elem.action.includes('alloc')) {
         text = `${text}\nalloc not recorded, stack trace for free:`;
@@ -1261,6 +1273,22 @@ function create_trace_view(
     );
   const delegate = ContextViewer(context_div.append('pre').text('none'), data);
   plot.set_delegate(delegate);
+}
+
+function create_settings_view(dst, snapshot, device) {
+  dst.selectAll('svg').remove();
+  dst.selectAll('div').remove();
+  const settings_div = dst.append('div');
+  settings_div.append('p').text('CUDA Caching Allocator Settings:');
+
+  // Check if allocator_settings exists in snapshot
+  if ('allocator_settings' in snapshot) {
+    settings_div
+      .append('pre')
+      .text(JSON.stringify(snapshot.allocator_settings, null, 2));
+  } else {
+    settings_div.append('p').text('No allocator settings found.');
+  }
 }
 
 function unpickle(buffer) {
@@ -1556,6 +1584,7 @@ const kinds = {
   'Allocator State History': create_segment_view,
   'Active Cached Segment Timeline': (dst, snapshot, device) =>
     create_trace_view(dst, snapshot, device, true),
+  'Allocator Settings': create_settings_view,
 };
 
 const snapshot_cache = {};

@@ -9,12 +9,12 @@
 #include <os/signpost.h>
 #include <os/log.h>
 
+#include <atomic>
+#include <ctime>
 #include <sstream>
 #include <string>
-#include <atomic>
 #include <unordered_map>
 #include <utility>
-#include <ctime>
 
 namespace at::mps {
 
@@ -296,8 +296,14 @@ public:
   // during runtime (instead of environment variables).
   // The "mode" could be either "interval", "event", or both "interval,event"
   // for interval-based and/or event-based signpost tracing.
-  void StartTrace(const string& mode, bool waitUntilCompleted);
+  void StartTrace(const std::string& mode, bool waitUntilCompleted);
   void StopTrace();
+
+  // Abstractions for GPU trace capturing
+  bool isCaptureEnabled() const;
+  bool isCapturing() const;
+  void startCapture(const std::string& name, MPSStream* stream = nullptr);
+  void stopCapture(MPSStream* stream = nullptr);
 
   // convenience functions to indicate whether signpost tracing or
   // logging are enabled for the SignpostTypes
@@ -355,6 +361,9 @@ public:
   std::unordered_map<uint64_t, std::unique_ptr<CopyInfo>> m_copy_info_list{};
   // a short list that contains copy stats
   std::unordered_map<CopyInfo::Kind, std::unique_ptr<CopyStat>> m_copy_stat_list{};
+
+  mutable MTLCaptureManager *captureManager = nil;
+  unsigned captureCount = 0;
 
   void initialize();
   void beginProfileExecution(BaseInfo& info, bool cpuExecution = false);

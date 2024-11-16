@@ -60,7 +60,7 @@ inline vec_scalar_t<scalar_t> init_value() {
 }
 
 template <typename scalar_t, ReductionType reduce>
-inline vec_scalar_t<scalar_t> init_value(const c10::optional<Scalar>& initial) {
+inline vec_scalar_t<scalar_t> init_value(const std::optional<Scalar>& initial) {
   using acc_t = vec_scalar_t<scalar_t>;
   if (initial.has_value()) {
     return initial.value().to<acc_t>();
@@ -80,7 +80,7 @@ inline void init(scalar_t* out, int64_t size, const vec_scalar_t<scalar_t>& val)
 }
 
 template <typename scalar_t, ReductionType reduce>
-inline void init(scalar_t* out, int64_t size, const c10::optional<Scalar>& initial) {
+inline void init(scalar_t* out, int64_t size, const std::optional<Scalar>& initial) {
   using acc_t = vec_scalar_t<scalar_t>;
   acc_t val = init_value<scalar_t, reduce>(initial);
   init(out, size, val);
@@ -106,7 +106,7 @@ inline void _init(scalar_t* self_ptr, at::opmath_type<scalar_t>* buffer_ptr, int
 }
 
 template <typename scalar_t>
-inline typename std::enable_if<!std::is_same<scalar_t, Vec2>::value, scalar_t>::type
+inline std::enable_if_t<!std::is_same_v<scalar_t, Vec2>, scalar_t>
 _max(const scalar_t& x, const scalar_t& y) {
   return at::_isnan(y) ? y : std::max(x, y);
 }
@@ -118,14 +118,14 @@ inline Vectorized<scalar_t> _max(const Vectorized<scalar_t>& x, const Vectorized
 }
 
 template <typename vec_t>
-inline typename std::enable_if<std::is_same<vec_t, Vec2>::value, Vec2>::type
+inline std::enable_if_t<std::is_same_v<vec_t, Vec2>, Vec2>
 _max(const vec_t& x, const vec_t& y) {
   // vec::maximum propagates NaN
   return maximum(x, y);
 }
 
 template <typename scalar_t>
-inline typename std::enable_if<!std::is_same<scalar_t, Vec2>::value, scalar_t>::type
+inline std::enable_if_t<!std::is_same_v<scalar_t, Vec2>, scalar_t>
 _min(const scalar_t& x, const scalar_t& y) {
   return at::_isnan(y) ? y : std::min(x, y);
 }
@@ -137,7 +137,7 @@ inline Vectorized<scalar_t> _min(const Vectorized<scalar_t>& x, const Vectorized
 }
 
 template <typename vec_t>
-inline typename std::enable_if<std::is_same<vec_t, Vec2>::value, Vec2>::type
+inline std::enable_if_t<std::is_same_v<vec_t, Vec2>, Vec2>
 _min(const vec_t& x, const vec_t& y) {
   // vec::minimum propagates NaN
   return minimum(x, y);
@@ -158,8 +158,7 @@ inline void map_acc(
   constexpr int64_t kaVecSize = aVec::size();
   for (d = 0; d < size - (size % kVecSize); d += kVecSize) {
     Vec data2_vec = Vec::loadu(input_data2 + d);
-    aVec data2_avec0, data2_avec1;
-    std::tie(data2_avec0, data2_avec1) = convert_to_float<scalar_t>(data2_vec);
+    auto [data2_avec0, data2_avec1] = convert_to_float<scalar_t>(data2_vec);
     aVec input_vec0 = aVec::loadu(input_data + d);
     aVec input_vec1 = aVec::loadu(input_data + d + kaVecSize);
     vec_fun(input_vec0, data2_avec0).store(output_data + d);
@@ -168,8 +167,7 @@ inline void map_acc(
   if (size - d > 0) {
     int64_t tail_size = size - d;
     Vec data2_vec = Vec::loadu(input_data2 + d, tail_size);
-    aVec data2_avec0, data2_avec1;
-    std::tie(data2_avec0, data2_avec1) = convert_to_float<scalar_t>(data2_vec);
+    auto [data2_avec0, data2_avec1] = convert_to_float<scalar_t>(data2_vec);
     if (tail_size > kaVecSize) {
       aVec input_vec0 = aVec::loadu(input_data + d);
       aVec input_vec1 = aVec::loadu(input_data + d + kaVecSize, tail_size - kaVecSize);
@@ -199,7 +197,7 @@ inline T update(const T& x, const T& y) {
 }
 
 template <typename scalar_t, ReductionType reduce>
-inline void update(scalar_t* out, scalar_t* data, int64_t K) {
+inline void update(scalar_t* out, const scalar_t* data, int64_t K) {
   using Vec = vec::Vectorized<vec_scalar_t<scalar_t>>;
   map2<scalar_t>(
       [](Vec x, Vec y) { return update<Vec, reduce>(x, y); },
@@ -211,7 +209,7 @@ inline void update(scalar_t* out, scalar_t* data, int64_t K) {
 
 template <typename scalar_t, ReductionType reduce,
           typename std::enable_if_t<is_reduced_floating_point_v<scalar_t>, int> = 0>
-inline void update(at::opmath_type<scalar_t>* out, scalar_t* data, int64_t K) {
+inline void update(at::opmath_type<scalar_t>* out, const scalar_t* data, int64_t K) {
   using opmath_t = at::opmath_type<scalar_t>;
   using Vec = vec::Vectorized<opmath_t>;
   map_acc<scalar_t, opmath_t>(

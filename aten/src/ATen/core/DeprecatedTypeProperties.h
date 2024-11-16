@@ -94,6 +94,10 @@ class TORCH_API DeprecatedTypeProperties {
     return toBackend(Backend::HIP);
   }
 
+  DeprecatedTypeProperties & privateUser1() const {
+    return toBackend(Backend::PrivateUse1);
+  }
+
   /// Constructs the `TensorOptions` from a type and a `device_index`.
   TensorOptions options(int16_t device_index = -1) const {
     return TensorOptions().dtype(typeMeta())
@@ -103,7 +107,7 @@ class TORCH_API DeprecatedTypeProperties {
 
   /// Constructs the `TensorOptions` from a type and a Device.  Asserts that
   /// the device type matches the device type of the type.
-  TensorOptions options(c10::optional<Device> device_opt) const {
+  TensorOptions options(std::optional<Device> device_opt) const {
     if (!device_opt.has_value()) {
       return options(-1);
     } else {
@@ -125,7 +129,7 @@ class TORCH_API DeprecatedTypeProperties {
 
   Tensor unsafeTensorFromTH(void * th_pointer, bool retain) const;
   Storage unsafeStorageFromTH(void * th_pointer, bool retain) const;
-  Tensor copy(const Tensor & src, bool non_blocking=false, c10::optional<Device> to_device={}) const;
+  Tensor copy(const Tensor & src, bool non_blocking=false, std::optional<Device> to_device={}) const;
 
  private:
   Backend backend_;

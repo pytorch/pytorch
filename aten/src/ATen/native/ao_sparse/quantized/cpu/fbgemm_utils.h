@@ -14,7 +14,7 @@ namespace sparse {
 struct TORCH_API PackedLinearWeight
     : public LinearPackedParamsBase {
   PackedLinearWeight(std::unique_ptr<fbgemm::BCSRMatrix<int8_t>> w,
-                     c10::optional<at::Tensor> bias,
+                     std::optional<at::Tensor> bias,
                      std::vector<int32_t> col_offsets,
                      std::vector<float> w_scale,
                      std::vector<int32_t> w_zp,
@@ -31,7 +31,7 @@ struct TORCH_API PackedLinearWeight
         w_zp(std::move(w_zp)),
         q_scheme(q_scheme) {}
   std::unique_ptr<fbgemm::BCSRMatrix<int8_t>> w;
-  c10::optional<at::Tensor> bias_;
+  std::optional<at::Tensor> bias_;
   std::vector<int32_t> col_offsets;
   std::vector<float> w_scale;
   std::vector<int32_t> w_zp;
@@ -68,13 +68,13 @@ struct TORCH_API PackedLinearWeight
   static c10::intrusive_ptr<LinearPackedParamsBase> deserialize(
       const BCSRSerializationType& serialized);
 
-  c10::optional<at::Tensor> bias() override {
+  std::optional<at::Tensor> bias() override {
     return bias_;
   }
 
   static c10::intrusive_ptr<LinearPackedParamsBase> prepack(
       const at::Tensor& weight,
-      const c10::optional<at::Tensor>& bias,
+      const std::optional<at::Tensor>& bias,
       const int64_t out_features_block_size,
       const int64_t in_features_block_size);
 

@@ -14,9 +14,6 @@
 #include <ATen/ops/fractional_max_pool2d_native.h>
 #endif
 
-#include <tuple>
-#include <vector>
-
 namespace at {
 
 namespace meta {
@@ -61,7 +58,7 @@ TORCH_META_FUNC(fractional_max_pool2d) (
   /* sizes */
   int64_t numPlanes = input.size(planeDim);
   int64_t inputH = input.size(heightDim);
-  int inputW = input.size(widthDim);
+  auto inputW = input.size(widthDim);
 
   TORCH_CHECK(outputH + poolSizeH - 1 <= inputH,
     "fractional_max_pool2d(): pool height ", poolSizeH,
@@ -88,15 +85,15 @@ TORCH_META_FUNC(fractional_max_pool2d_backward)(
   IntArrayRef output_size,
   const at::Tensor& indices) {
 
-  int numBatch = 1;
+  int64_t numBatch = 1;
   int planeDim = 0;
   int heightDim = 1;
   int widthDim = 2;
 
-  int outputH = output_size[0];
-  int outputW = output_size[1];
+  auto outputH = output_size[0];
+  auto outputW = output_size[1];
 
-  int ndims = input.ndimension();
+  auto ndims = input.ndimension();
   if (ndims == 4) {
     numBatch = input.size(0);
     planeDim = 1;
@@ -105,9 +102,9 @@ TORCH_META_FUNC(fractional_max_pool2d_backward)(
   }
 
   /* sizes */
-  int numPlanes = input.size(planeDim);
-  int inputH = input.size(heightDim);
-  int inputW = input.size(widthDim);
+  auto numPlanes = input.size(planeDim);
+  auto inputH = input.size(heightDim);
+  auto inputW = input.size(widthDim);
 
   /* get contiguous gradOutput */
   auto gradOutput = gradOutput_.contiguous();
@@ -131,10 +128,10 @@ namespace {
 
 template <typename scalar_t>
 static void fractional_max_pool2d_out_single_batch_frame(
-  scalar_t* input,
+  const scalar_t* input,
   scalar_t* output,
   int64_t* indices,
-  scalar_t* randomSamples,
+  const scalar_t* randomSamples,
   int numPlanes,
   int inputW, int inputH,
   int outputW, int outputH,
@@ -142,7 +139,7 @@ static void fractional_max_pool2d_out_single_batch_frame(
   at::parallel_for(0, numPlanes, 0, [&](int64_t start, int64_t end) {
     for (const auto plane : c10::irange(start, end)) {
       /* each plane contains 2 random samples, one for W and one for H */
-      scalar_t* randomSamplesForPlane = randomSamples + plane * 2;
+      const scalar_t* randomSamplesForPlane = randomSamples + plane * 2;
 
       /* Generate interval sequence */
       auto sequenceW = generate_intervals<scalar_t>(
@@ -154,7 +151,7 @@ static void fractional_max_pool2d_out_single_batch_frame(
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int h, w;
 
-      scalar_t* inputForPlane = input + plane * inputW * inputH;
+      const scalar_t* inputForPlane = input + plane * inputW * inputH;
       scalar_t* outputForPlane = output + plane * outputW * outputH;
       int64_t* indicesForPlane = indices + plane * outputW * outputH;
 
@@ -192,10 +189,10 @@ static void fractional_max_pool2d_out_single_batch_frame(
 
 template <typename scalar_t>
 static void fractional_max_pool2d_out_frame(
-  scalar_t* input,
+  const scalar_t* input,
   scalar_t* output,
   int64_t* indices,
-  scalar_t* randomSamples,
+  const scalar_t* randomSamples,
   int numBatch, int numPlanes,
   int inputW, int inputH,
   int outputW, int outputH,
@@ -225,24 +222,22 @@ static void fractional_max_pool2d_out_frame(
 template <typename scalar_t>
 static void fractional_max_pool2d_backward_out_single_batch_frame(
   scalar_t* gradInput,
-  scalar_t* gradOutput,
-  int64_t* indices,
+  const scalar_t* gradOutput,
+  const int64_t* indices,
   int numPlanes,
   int inputW, int inputH,
   int outputW, int outputH) {
   at::parallel_for(0, numPlanes, 0, [&](int64_t start, int64_t end) {
     for (const auto plane : c10::irange(start, end)) {
       scalar_t* gradInputForPlane = gradInput + plane * inputW * inputH;
-      scalar_t* gradOutputForPlane = gradOutput + plane * outputW * outputH;
-      int64_t* indicesForPlane = indices + plane * outputW * outputH;
+      const scalar_t* gradOutputForPlane = gradOutput + plane * outputW * outputH;
+      const int64_t* indicesForPlane = indices + plane * outputW * outputH;
 
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      int h, w;
-      for (h = 0; h < outputH; ++h) {
-        for (w = 0; w < outputW; ++w) {
+      for (int h = 0; h < outputH; ++h) {
+        for (int w = 0; w < outputW; ++w) {
           int outputIndex = h * outputW + w;
           int64_t index = indicesForPlane[outputIndex];
-          AT_ASSERT(index >= 0 && index < inputW * inputH);
+          AT_ASSERT(index >= 0 && index < static_cast<int64_t>(inputW) * inputH);
 
           gradInputForPlane[index] += gradOutputForPlane[outputIndex];
         }
@@ -254,8 +249,8 @@ static void fractional_max_pool2d_backward_out_single_batch_frame(
 template <typename scalar_t>
 static void fractional_max_pool2d_backward_out_frame(
   scalar_t* gradInput,
-  scalar_t* gradOutput,
-  int64_t* indices,
+  const scalar_t* gradOutput,
+  const int64_t* indices,
   int numBatch, int numPlanes,
   int inputW, int inputH,
   int outputW, int outputH) {
@@ -326,10 +321,10 @@ TORCH_IMPL_FUNC(fractional_max_pool2d_out_cpu) (
     kHalf,
     input.scalar_type(),
     "fractional_max_pool2d_out_frame", [&] {
-      auto input_data = input.data_ptr<scalar_t>();
+      auto input_data = input.const_data_ptr<scalar_t>();
       auto output_data = output.data_ptr<scalar_t>();
       auto indices_data = indices.data_ptr<int64_t>();
-      auto randomSamples_data = randomSamples.data_ptr<scalar_t>();
+      auto randomSamples_data = randomSamples.const_data_ptr<scalar_t>();
       fractional_max_pool2d_out_frame<scalar_t>(
         input_data,
         output_data,
@@ -353,15 +348,15 @@ TORCH_IMPL_FUNC(fractional_max_pool2d_backward_cpu) (
 
   gradInput.zero_();
 
-  int numBatch = 1;
+  int64_t numBatch = 1;
   int planeDim = 0;
   int heightDim = 1;
   int widthDim = 2;
 
-  int outputH = output_size[0];
-  int outputW = output_size[1];
+  auto outputH = output_size[0];
+  auto outputW = output_size[1];
 
-  int ndims = input.ndimension();
+  auto ndims = input.ndimension();
   if (ndims == 4) {
     numBatch = input.size(0);
     planeDim = 1;
@@ -370,9 +365,9 @@ TORCH_IMPL_FUNC(fractional_max_pool2d_backward_cpu) (
   }
 
   /* sizes */
-  int numPlanes = input.size(planeDim);
-  int inputH = input.size(heightDim);
-  int inputW = input.size(widthDim);
+  auto numPlanes = input.size(planeDim);
+  auto inputH = input.size(heightDim);
+  auto inputW = input.size(widthDim);
 
   /* get contiguous gradOutput */
   auto gradOutput = gradOutput_.contiguous();
@@ -383,8 +378,8 @@ TORCH_IMPL_FUNC(fractional_max_pool2d_backward_cpu) (
     kHalf,
     input.scalar_type(), "fractional_max_pool2d_backward_out_frame", [&] {
       auto gradInput_data = gradInput.data_ptr<scalar_t>();
-      auto gradOutput_data = gradOutput.data_ptr<scalar_t>();
-      auto indices_data = indices.data_ptr<int64_t>();
+      auto gradOutput_data = gradOutput.const_data_ptr<scalar_t>();
+      auto indices_data = indices.const_data_ptr<int64_t>();
       fractional_max_pool2d_backward_out_frame<scalar_t>(
         gradInput_data,
         gradOutput_data,

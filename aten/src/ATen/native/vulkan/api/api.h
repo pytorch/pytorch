@@ -10,6 +10,7 @@
 #include <ATen/native/vulkan/api/Resource.h>
 #include <ATen/native/vulkan/api/Runtime.h>
 #include <ATen/native/vulkan/api/Shader.h>
+#include <ATen/native/vulkan/api/ShaderRegistry.h>
 #include <ATen/native/vulkan/api/Tensor.h>
 #include <ATen/native/vulkan/api/Utils.h>
 

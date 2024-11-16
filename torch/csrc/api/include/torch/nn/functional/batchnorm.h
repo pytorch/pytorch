@@ -4,9 +4,7 @@
 #include <torch/nn/options/batchnorm.h>
 #include <torch/types.h>
 
-namespace torch {
-namespace nn {
-namespace functional {
+namespace torch::nn::functional {
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
@@ -17,7 +15,7 @@ inline Tensor batch_norm(
     Tensor weight,
     Tensor bias,
     bool training,
-    c10::optional<double> momentum,
+    std::optional<double> momentum,
     double eps) {
   TORCH_CHECK(
       input.dim() >= 2,
@@ -50,7 +48,7 @@ inline Tensor batch_norm(
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.batch_norm
+/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.batch_norm
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::BatchNormFuncOptions`
@@ -78,6 +76,4 @@ inline Tensor batch_norm(
       options.eps());
 }
 
-} // namespace functional
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn::functional

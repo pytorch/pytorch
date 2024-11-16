@@ -12,7 +12,7 @@ from torch.distributed.fsdp import (
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
-    CUDAInitMode,
+    DEVICEInitMode,
     FSDPInitMode,
     FSDPTest,
     NestedWrappedModule,
@@ -22,6 +22,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
 )
+
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -59,7 +60,7 @@ class TestPureFP16(FSDPTest):
         self._test_fsdp_parity(
             NestedWrappedModule,
             FSDPInitMode.RECURSIVE,
-            cuda_init_mode=CUDAInitMode.CUDA_BEFORE,
+            device_init_mode=DEVICEInitMode.DEVICE_BEFORE,
             # Run one iteration to avoid NaN without a gradient scaler
             num_iters=1,
             cpu_offload=cpu_offload,
@@ -100,7 +101,7 @@ class TestPureFP16(FSDPTest):
         model = NestedWrappedModule.init(
             self.process_group,
             FSDPInitMode.NO_FSDP,
-            CUDAInitMode.CUDA_NEVER,
+            DEVICEInitMode.DEVICE_NEVER,
             {},
         )
         fsdp_kwargs = {

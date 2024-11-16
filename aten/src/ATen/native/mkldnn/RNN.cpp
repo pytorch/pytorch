@@ -41,7 +41,7 @@ const Tensor& input,
     bool bidirectional,
     bool batch_first,
     bool train) {
-      AT_ERROR("mkldnn_rnn_layer: ATen not compiled with MKLDNN support");
+      TORCH_CHECK(false, "mkldnn_rnn_layer: ATen not compiled with MKLDNN support");
   }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_layer_backward(
@@ -55,9 +55,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_la
     const Tensor& output,
     const Tensor& hy_,
     const Tensor& cy_,
-    const c10::optional<Tensor>& grad_output_r_opt,
-    const c10::optional<Tensor>& grad_hy_r_opt,
-    const c10::optional<Tensor>& grad_cy_r_opt,
+    const std::optional<Tensor>& grad_output_r_opt,
+    const std::optional<Tensor>& grad_hy_r_opt,
+    const std::optional<Tensor>& grad_cy_r_opt,
     bool reverse,
     int64_t mode,
     int64_t hidden_size,
@@ -68,14 +68,14 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_la
     at::IntArrayRef batch_sizes,
     bool batch_first,
     const at::Tensor& workspace) {
-      AT_ERROR("mkldnn_rnn_layer_backward: ATen not compiled with MKLDNN support");
+      TORCH_CHECK(false, "mkldnn_rnn_layer_backward: ATen not compiled with MKLDNN support");
     }
 
-REGISTER_NO_CPU_DISPATCH(lstm_mkldnn_stub);
+REGISTER_NO_CPU_DISPATCH(lstm_mkldnn_stub)
 
 } // namespace at::native
 
-#else // AT_MKLDNN_EBABLED
+#else // AT_MKLDNN_ENABLED
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
@@ -167,10 +167,6 @@ struct RNNParams {
     return {{1, 1, mini_batch, hidden_size}, dtype, format::ldnc};
   }
 };
-
-static std::vector<int64_t> _hidden_size(const RNNParams& rnn) {
-  return {rnn.num_layers * rnn.num_directions, rnn.mini_batch, rnn.hidden_size};
-}
 
 template<bool is_single_direction>
 std::vector<int64_t> _output_size(const RNNParams& rnn) {
@@ -306,9 +302,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_la
     const Tensor& output,
     const Tensor& hy_,
     const Tensor& cy_,
-    const c10::optional<Tensor>& grad_output_r_opt,
-    const c10::optional<Tensor>& grad_hy_r_opt,
-    const c10::optional<Tensor>& grad_cy_r_opt,
+    const std::optional<Tensor>& grad_output_r_opt,
+    const std::optional<Tensor>& grad_hy_r_opt,
+    const std::optional<Tensor>& grad_cy_r_opt,
     bool reverse,
     int64_t mode,
     int64_t hidden_size,
@@ -319,9 +315,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_la
     at::IntArrayRef batch_sizes,
     bool batch_first,
     const at::Tensor& workspace) {
-  const Tensor& grad_output_r = c10::value_or_else(grad_output_r_opt, [] {return Tensor();});
-  const Tensor& grad_hy_r = c10::value_or_else(grad_hy_r_opt, [] {return Tensor();});
-  const Tensor& grad_cy_r = c10::value_or_else(grad_cy_r_opt, [] {return Tensor();});
+  const Tensor& grad_output_r = grad_output_r_opt.value_or(Tensor());
+  const Tensor& grad_hy_r = grad_hy_r_opt.value_or(Tensor());
+  const Tensor& grad_cy_r = grad_cy_r_opt.value_or(Tensor());
   if (!grad_output_r.defined() && !grad_hy_r.defined() && !grad_cy_r.defined()) {
       return std::make_tuple(Tensor(), Tensor(), Tensor(), Tensor(), Tensor(), Tensor(), Tensor());
   }
@@ -527,8 +523,7 @@ std::tuple<Tensor, Tensor> unpack_hidden(const std::tuple<Tensor, Tensor>& hidde
 
 template<typename hidden_type>
 hidden_type pack_hidden(const Tensor& hx, const Tensor& cx) {
-  static_assert(std::is_same<hidden_type, void>::value, "pack_hidden not implemented for this type");
-  AT_ERROR("NOT IMPLEMENTED");
+  static_assert(false && sizeof(hidden_type), "pack_hidden not implemented for this type");
 }
 
 template<>
@@ -541,8 +536,7 @@ std::pair<Tensor, hidden_type> mkldnn_impl(
     const Tensor& input, const hidden_type& hidden,
     TensorList params, bool has_biases, ideep::rnn_kind mode,
     int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) {
-  Tensor hx, cx;
-  std::tie(hx, cx) = unpack_hidden(hidden);
+  auto [hx, cx] = unpack_hidden(hidden);
   int64_t hidden_size = hx.size(2);
 
   auto mkldnn_output = mkldnn_rnn(
@@ -565,8 +559,8 @@ void lstm_mkldnn(Tensor& output, Tensor& hy, Tensor& cy,
 }
 } // anonymous namespace
 
-REGISTER_ALL_CPU_DISPATCH(lstm_mkldnn_stub, &lstm_mkldnn);
+REGISTER_ALL_CPU_DISPATCH(lstm_mkldnn_stub, &lstm_mkldnn)
 
 } // namespace at::native
 
-#endif // AT_MKLDNN_EBABLED
+#endif // AT_MKLDNN_ENABLED

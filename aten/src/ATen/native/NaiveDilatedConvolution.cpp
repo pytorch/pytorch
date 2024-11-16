@@ -524,7 +524,7 @@ void slow_conv_dilated_all_cpu_template(
 Tensor slow_conv_dilated2d_cpu(
     const Tensor& input,
     const Tensor& weight,
-    IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt,
+    IntArrayRef kernel_size, const std::optional<Tensor>& bias_opt,
     IntArrayRef stride_size,
     IntArrayRef pad_size,
     IntArrayRef dilation_size) {
@@ -579,7 +579,7 @@ Tensor slow_conv_dilated2d_cpu(
 Tensor slow_conv_dilated3d_cpu(
     const Tensor& input,
     const Tensor& weight,
-    IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt,
+    IntArrayRef kernel_size, const std::optional<Tensor>& bias_opt,
     IntArrayRef stride_size,
     IntArrayRef pad_size,
     IntArrayRef dilation_size) {
@@ -741,7 +741,7 @@ static std::tuple<Tensor, Tensor, Tensor> slow_conv_dilated3d_backward_cpu(
   return std::tie(grad_input, grad_weight, grad_bias);
 }
 
-REGISTER_ALL_CPU_DISPATCH(slow_conv_dilated2d_backward_stub, &slow_conv_dilated2d_backward_cpu);
-REGISTER_ALL_CPU_DISPATCH(slow_conv_dilated3d_backward_stub, &slow_conv_dilated3d_backward_cpu);
+REGISTER_ALL_CPU_DISPATCH(slow_conv_dilated2d_backward_stub, &slow_conv_dilated2d_backward_cpu)
+REGISTER_ALL_CPU_DISPATCH(slow_conv_dilated3d_backward_stub, &slow_conv_dilated3d_backward_cpu)
 
 } // namespace at::native

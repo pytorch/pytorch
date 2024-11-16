@@ -17,7 +17,7 @@ at::Tensor empty_with_tail_padding(
     IntArrayRef size,
     const caffe2::TypeMeta dtype,
     c10::MemoryFormat memory_format,
-    c10::optional<DimnameList> maybe_names);
+    std::optional<DimnameList> maybe_names);
 
 } // namespace mobile
 } // namespace native

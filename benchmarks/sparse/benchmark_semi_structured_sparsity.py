@@ -2,11 +2,12 @@ import argparse
 import random
 
 import pandas as pd
+from tqdm import tqdm
+
 import torch
 import torch.utils.benchmark as benchmark
 from torch import nn
 from torch.sparse import SparseSemiStructuredTensor, to_sparse_semi_structured
-from tqdm import tqdm
 
 
 torch.set_printoptions(

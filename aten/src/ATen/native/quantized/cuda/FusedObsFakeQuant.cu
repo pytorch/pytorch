@@ -7,7 +7,7 @@
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #else
-#include <ATen/ops/_aminmax.h>
+#include <ATen/ops/aminmax.h>
 #include <ATen/ops/_fake_quantize_per_tensor_affine_cachemask_tensor_qparams.h>
 #include <ATen/ops/fake_quantize_per_channel_affine.h>
 #include <ATen/ops/fake_quantize_per_channel_affine_cachemask.h>
@@ -18,8 +18,7 @@
 
 #include <cmath>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 __global__ void ChooseQuantizationParamsKernelImpl(
@@ -148,7 +147,7 @@ void _calculate_moving_average(
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
 
   if (per_row_fq) {
-    std::tie(x_min, x_max) = at::_aminmax(x, 1);
+    std::tie(x_min, x_max) = at::aminmax(x, 1);
     float* x_min_data = x_min.data_ptr<float>();
     float* x_max_data = x_max.data_ptr<float>();
     int num_threads = std::min(size, (int64_t)512);
@@ -165,7 +164,7 @@ void _calculate_moving_average(
         size);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else {
-    std::tie(x_min, x_max) = at::_aminmax(x);
+    std::tie(x_min, x_max) = at::aminmax(x);
     float* x_min_data = x_min.data_ptr<float>();
     float* x_max_data = x_max.data_ptr<float>();
     // Moving Average Min/Max observer for activations
@@ -320,5 +319,4 @@ std::tuple<at::Tensor, at::Tensor> fused_moving_avg_obs_fake_quant_cuda(
         x, scale, zero_point, fake_quant_on, qmin, qmax);
   }
 }
-} // namespace native
-} // namespace at
+} // namespace at::native

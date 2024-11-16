@@ -4,11 +4,7 @@
 #include <torch/csrc/profiler/perf-inl.h>
 #include <torch/csrc/profiler/perf.h>
 
-namespace torch {
-namespace profiler {
-namespace impl {
-
-namespace linux_perf {
+namespace torch::profiler::impl::linux_perf {
 
 #if defined(__ANDROID__) || defined(__linux__)
 
@@ -123,13 +119,13 @@ uint64_t PerfEvent::ReadCounter() const {
  * value
  */
 
-PerfEvent::~PerfEvent(){};
+PerfEvent::~PerfEvent() {}
 
-void PerfEvent::Init(){};
+void PerfEvent::Init() {}
 
 uint64_t PerfEvent::ReadCounter() const {
   return 0;
-};
+}
 
 #endif /* __ANDROID__ || __linux__ */
 
@@ -193,7 +189,4 @@ void PerfProfiler::Disable(perf_counters_t& vals) {
     StartCounting();
   }
 }
-} // namespace linux_perf
-} // namespace impl
-} // namespace profiler
-} // namespace torch
+} // namespace torch::profiler::impl::linux_perf

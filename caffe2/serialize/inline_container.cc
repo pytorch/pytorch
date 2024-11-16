@@ -29,7 +29,7 @@
 
 namespace caffe2 {
 namespace serialize {
-constexpr c10::string_view kDebugPklSuffix(".debug_pkl");
+constexpr std::string_view kDebugPklSuffix(".debug_pkl");
 
 struct MzZipReaderIterWrapper {
   MzZipReaderIterWrapper(mz_zip_reader_extract_iter_state* iter) : impl(iter) {}
@@ -93,7 +93,15 @@ static std::string parentdir(const std::string& name) {
     end = name.find_last_of('\\');
   }
 
-  if(end == std::string::npos) {
+  #ifdef WIN32
+  if (end != std::string::npos && end > 1 && name[end - 1] == ':') {
+    // This is a Windows root directory, so include the slash in
+    // the parent directory
+    end++;
+  }
+  #endif
+
+  if (end == std::string::npos) {
     return "";
   }
 
@@ -139,7 +147,7 @@ void PyTorchStreamReader::init() {
     char buf[kMagicValueLength];
     read(0, buf, kMagicValueLength);
     valid("checking magic number");
-    AT_ASSERTM(
+    TORCH_INTERNAL_ASSERT(
         memcmp("PYTORCH1", buf, kMagicValueLength) != 0,
         "File is an unsupported archive format from the preview release.");
   }
@@ -205,9 +213,9 @@ void PyTorchStreamReader::init() {
   if (version_ < static_cast<decltype(version_)>(kMinSupportedFileFormatVersion)) {
     CAFFE_THROW(
         "Attempted to read a PyTorch file with version ",
-        c10::to_string(version_),
+        std::to_string(version_),
         ", but the minimum supported version for reading is ",
-        c10::to_string(kMinSupportedFileFormatVersion),
+        std::to_string(kMinSupportedFileFormatVersion),
         ". Your PyTorch script module file is too old. Please regenerate it",
         " with latest version of PyTorch to mitigate this issue.");
   }
@@ -275,7 +283,7 @@ size_t getPadding(
 bool PyTorchStreamReader::hasRecord(const std::string& name) {
   std::lock_guard<std::mutex> guard(reader_lock_);
 
-  if ((!load_debug_symbol_) && c10::string_view(name).ends_with(kDebugPklSuffix)) {
+  if ((!load_debug_symbol_) && c10::string_view_ends_with(std::string_view(name), kDebugPklSuffix)) {
     return false;
   }
   std::string ss = archive_name_plus_slash_ + name;
@@ -312,7 +320,7 @@ std::vector<std::string> PyTorchStreamReader::getAllRecords() {
           buf);
     }
     if ((load_debug_symbol_) ||
-        (!c10::string_view(buf + archive_name_plus_slash_.size()).ends_with(kDebugPklSuffix))) {
+        (!c10::string_view_ends_with(std::string_view(buf + archive_name_plus_slash_.size()),kDebugPklSuffix))) {
       // NOLINTNEXTLINE(modernize-use-emplace)
       out.push_back(buf + archive_name_plus_slash_.size());
     }
@@ -335,7 +343,7 @@ size_t PyTorchStreamReader::getRecordID(const std::string& name) {
 // return dataptr, size
 std::tuple<at::DataPtr, size_t> PyTorchStreamReader::getRecord(const std::string& name) {
   std::lock_guard<std::mutex> guard(reader_lock_);
-  if ((!load_debug_symbol_) && c10::string_view(name).ends_with(kDebugPklSuffix)) {
+  if ((!load_debug_symbol_) && c10::string_view_ends_with(name, kDebugPklSuffix)) {
     at::DataPtr retval;
     return std::make_tuple(std::move(retval), 0);
   }
@@ -416,7 +424,7 @@ PyTorchStreamReader::getRecord(const std::string& name,
     return getRecord(name);
   }
 
-  if ((!load_debug_symbol_) && c10::string_view(name).ends_with(kDebugPklSuffix)) {
+  if ((!load_debug_symbol_) && c10::string_view_ends_with(name, kDebugPklSuffix)) {
     at::DataPtr retval;
     return std::make_tuple(std::move(retval), 0);
   }
@@ -440,7 +448,7 @@ PyTorchStreamReader::getRecord(const std::string& name,
 size_t
 PyTorchStreamReader::getRecord(const std::string& name, void* dst, size_t n) {
   std::lock_guard<std::mutex> guard(reader_lock_);
-  if ((!load_debug_symbol_) && c10::string_view(name).ends_with(kDebugPklSuffix)) {
+  if ((!load_debug_symbol_) && c10::string_view_ends_with(name, kDebugPklSuffix)) {
     return 0;
   }
   size_t key = getRecordID(name);
@@ -500,7 +508,7 @@ size_t PyTorchStreamReader::getRecord(
     void* buf,
     const std::function<void(void*, const void*, size_t)>& memcpy_func) {
   std::lock_guard<std::mutex> guard(reader_lock_);
-  if ((!load_debug_symbol_) && c10::string_view(name).ends_with(kDebugPklSuffix)) {
+  if ((!load_debug_symbol_) && c10::string_view_ends_with(name, kDebugPklSuffix)) {
     return 0;
   }
   if (chunk_size <= 0) {
@@ -602,7 +610,8 @@ size_t ostream_write_func(
 
   // Get the CRC32 of uncompressed data from the data descriptor, if the written
   // data is identified as the data descriptor block.
-  if (n >= 8 && MZ_READ_LE32(pBuf) == MZ_ZIP_DATA_DESCRIPTOR_ID) {
+  // See [Note: write_record_metadata] for why we check for non-null pBuf here
+  if (pBuf && n >= 8 && MZ_READ_LE32(pBuf) == MZ_ZIP_DATA_DESCRIPTOR_ID) {
     const int8_t* pInt8Buf = (const int8_t*)pBuf;
     const uint32_t uncomp_crc32 = MZ_READ_LE32(pInt8Buf + 4);
     self->combined_uncomp_crc32_ =
@@ -612,15 +621,17 @@ size_t ostream_write_func(
   return ret;
 }
 
-PyTorchStreamWriter::PyTorchStreamWriter(const std::string& file_name)
-    : archive_name_(basename(file_name)) {
+PyTorchStreamWriter::PyTorchStreamWriter(const std::string& file_name, bool compute_crc32)
+    : archive_name_(basename(file_name)),
+      compute_crc32_(compute_crc32) {
   setup(file_name);
 }
 
 PyTorchStreamWriter::PyTorchStreamWriter(
-    const std::function<size_t(const void*, size_t)> writer_func)
+    const std::function<size_t(const void*, size_t)> writer_func, bool compute_crc32)
     : archive_name_("archive"),
-      writer_func_(writer_func) {
+      writer_func_(writer_func),
+      compute_crc32_(compute_crc32) {
   setup(archive_name_);
 }
 
@@ -646,7 +657,12 @@ void PyTorchStreamWriter::setup(const string& file_name) {
     }
     TORCH_CHECK(file_stream_, "File ", file_name, " cannot be opened.");
     writer_func_ = [this](const void* buf, size_t nbytes) -> size_t {
-      file_stream_.write(static_cast<const char*>(buf), nbytes);
+      if (!buf) {
+        // See [Note: write_record_metadata]
+        file_stream_.seekp(nbytes, std::ios_base::cur);
+      } else {
+        file_stream_.write(static_cast<const char*>(buf), nbytes);
+      }
       return !file_stream_ ? 0 : nbytes;
     };
   }
@@ -681,21 +697,26 @@ void PyTorchStreamWriter::writeRecord(
   size_t padding_size =
       detail::getPadding(ar_->m_archive_size, full_name.size(), size, padding_);
   uint32_t flags = compress ? MZ_BEST_COMPRESSION : 0;
+  if (!compute_crc32_) {
+#if (!defined(FBCODE_CAFFE2))
+    flags |= MZ_ZIP_FLAG_DO_NOT_COMPUTE_CRC32;
+#endif
+  }
   mz_zip_writer_add_mem_ex_v2(
-      ar_.get(),
-      full_name.c_str(),
-      data,
-      size,
-      nullptr,
-      0,
-      flags,
-      0,
-      0,
-      nullptr,
-      padding_.c_str(),
-      padding_size,
-      nullptr,
-      0);
+      /*pZip=*/ar_.get(),
+      /*pArchive_name=*/full_name.c_str(),
+      /*pBuf=*/data,
+      /*buf_size=*/size,
+      /*pComment=*/nullptr,
+      /*comment_size=*/0,
+      /*level_and_flags=*/flags,
+      /*uncomp_size=*/0,
+      /*uncomp_crc32=*/0,
+      /*last_modified=*/nullptr,
+      /*user_extra_data=*/padding_.c_str(),
+      /*user_extra_data_len=*/padding_size,
+      /*user_extra_data_central=*/nullptr,
+      /*user_extra_data_central_len=*/0);
   valid("writing file ", name.c_str());
   files_written_.insert(name);
 }
@@ -719,7 +740,7 @@ void PyTorchStreamWriter::writeEndOfFile() {
   auto allRecords = getAllWrittenRecords();
   // If no ".data/version" or "version" record in the output model, rewrites version info
   if(allRecords.find(".data/version") == allRecords.end() && allRecords.find("version") == allRecords.end()) {
-    std::string version = c10::to_string(version_);
+    std::string version = std::to_string(version_);
     version.push_back('\n');
     if (version_ >= 0x6L) {
       writeRecord(".data/version", version.c_str(), version.size());

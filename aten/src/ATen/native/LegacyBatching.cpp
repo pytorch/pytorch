@@ -115,10 +115,7 @@ Tensor _remove_batch_dim(const Tensor& self, int64_t level, int64_t batch_size, 
   const auto* batched = maybeGetBatchedImpl(self);
   TORCH_INTERNAL_ASSERT(batched != nullptr);
 
-  Tensor self_without_bdim;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int64_t newly_exposed_logical_dim;
-  std::tie(self_without_bdim, newly_exposed_logical_dim) = remove_existing_batch_dim(batched, level);
+  auto [self_without_bdim, newly_exposed_logical_dim] = remove_existing_batch_dim(batched, level);
   return maybe_movedim(self_without_bdim, newly_exposed_logical_dim, out_dim);
 }
 

@@ -9,23 +9,31 @@ appropriate file under the `torch/ao/nn/quantized/reference`,
 while adding an import statement here.
 """
 
+from torch.ao.nn.quantized.reference.modules.conv import (
+    Conv1d,
+    Conv2d,
+    Conv3d,
+    ConvTranspose1d,
+    ConvTranspose2d,
+    ConvTranspose3d,
+)
 from torch.ao.nn.quantized.reference.modules.linear import Linear
-from torch.ao.nn.quantized.reference.modules.conv import Conv1d, Conv2d, Conv3d, ConvTranspose1d, ConvTranspose2d, ConvTranspose3d
-from torch.ao.nn.quantized.reference.modules.rnn import RNNCell, LSTMCell, GRUCell, LSTM
+from torch.ao.nn.quantized.reference.modules.rnn import GRUCell, LSTM, LSTMCell, RNNCell
 from torch.ao.nn.quantized.reference.modules.sparse import Embedding, EmbeddingBag
 
+
 __all__ = [
-    'Linear',
-    'Conv1d',
-    'Conv2d',
-    'Conv3d',
-    'ConvTranspose1d',
-    'ConvTranspose2d',
-    'ConvTranspose3d',
-    'RNNCell',
-    'LSTMCell',
-    'GRUCell',
-    'LSTM',
-    'Embedding',
-    'EmbeddingBag',
+    "Linear",
+    "Conv1d",
+    "Conv2d",
+    "Conv3d",
+    "ConvTranspose1d",
+    "ConvTranspose2d",
+    "ConvTranspose3d",
+    "RNNCell",
+    "LSTMCell",
+    "GRUCell",
+    "LSTM",
+    "Embedding",
+    "EmbeddingBag",
 ]

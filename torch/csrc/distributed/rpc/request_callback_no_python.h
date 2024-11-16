@@ -7,9 +7,7 @@
 #include <torch/csrc/distributed/rpc/script_call.h>
 #include <torch/csrc/distributed/rpc/script_remote_call.h>
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace torch::distributed::rpc {
 
 // RequestCallback implementation with no Python dependencies.
 class TORCH_API RequestCallbackNoPython : public RequestCallback {
@@ -25,24 +23,24 @@ class TORCH_API RequestCallbackNoPython : public RequestCallback {
 
   virtual c10::intrusive_ptr<JitFuture> processScriptCall(
       RpcCommandBase& rpc,
-      std::vector<c10::Stream> streams) const;
+      const std::vector<c10::Stream>& streams) const;
 
   virtual c10::intrusive_ptr<JitFuture> processPythonCall(
       RpcCommandBase& rpc,
-      std::vector<c10::Stream> streams) const;
+      const std::vector<c10::Stream>& streams) const;
 
   c10::intrusive_ptr<JitFuture> assignOwnerRRef(
       const RRefId& rrefId,
       const RRefId& forkId,
-      c10::intrusive_ptr<JitFuture> valueFuture) const;
+      const c10::intrusive_ptr<JitFuture>& valueFuture) const;
 
   virtual c10::intrusive_ptr<JitFuture> processScriptRemoteCall(
       RpcCommandBase& rpc,
-      std::vector<c10::Stream> streams) const;
+      const std::vector<c10::Stream>& streams) const;
 
   virtual c10::intrusive_ptr<JitFuture> processPythonRemoteCall(
       RpcCommandBase& rpc,
-      std::vector<c10::Stream> streams) const;
+      const std::vector<c10::Stream>& streams) const;
 
   c10::intrusive_ptr<JitFuture> retrieveOwnerRRef(const RRefId& rrefId) const;
 
@@ -63,11 +61,11 @@ class TORCH_API RequestCallbackNoPython : public RequestCallback {
 
   c10::intrusive_ptr<JitFuture> processForwardAutogradReq(
       RpcCommandBase& rpc,
-      std::vector<c10::Stream> streams) const;
+      const std::vector<c10::Stream>& streams) const;
 
   c10::intrusive_ptr<JitFuture> processBackwardAutogradReq(
       RpcCommandBase& rpc,
-      std::vector<c10::Stream> streams) const;
+      const std::vector<c10::Stream>& streams) const;
 
   c10::intrusive_ptr<JitFuture> processCleanupAutogradContextReq(
       RpcCommandBase& rpc) const;
@@ -80,12 +78,12 @@ class TORCH_API RequestCallbackNoPython : public RequestCallback {
   c10::intrusive_ptr<JitFuture> processRpc(
       RpcCommandBase& rpc,
       const MessageType& messageType,
-      std::vector<c10::Stream> streams) const;
+      const std::vector<c10::Stream>& streams) const;
 
   virtual c10::intrusive_ptr<JitFuture> processRpcWithErrors(
       RpcCommandBase& rpc,
       const MessageType& messageType,
-      std::vector<c10::Stream> streams) const;
+      const std::vector<c10::Stream>& streams) const;
 
   c10::intrusive_ptr<Message> handleError(
       const std::exception& e,
@@ -102,7 +100,7 @@ class TORCH_API RequestCallbackNoPython : public RequestCallback {
   c10::intrusive_ptr<JitFuture> runJitOperator(
       const jit::Operator& op,
       std::vector<at::IValue>& stack,
-      std::vector<c10::Stream> streams) const;
+      const std::vector<c10::Stream>& streams) const;
 
   // Helpers to convert various kinds of objects into already-completed futures.
 
@@ -114,6 +112,4 @@ class TORCH_API RequestCallbackNoPython : public RequestCallback {
   c10::intrusive_ptr<JitFuture> asFuture(std::exception_ptr err) const;
 };
 
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc

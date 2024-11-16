@@ -3,8 +3,8 @@
 import textwrap
 import types
 
-from torch.utils._freeze import Freezer, PATH_MARKER
 from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.utils._freeze import Freezer, PATH_MARKER
 
 
 class TestFreezer(TestCase):
@@ -15,7 +15,7 @@ class TestFreezer(TestCase):
         code_str = textwrap.dedent(
             """
             class MyCls:
-                def __init__(self):
+                def __init__(self) -> None:
                     pass
             """
         )

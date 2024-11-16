@@ -1,9 +1,11 @@
+# mypy: allow-untyped-defs
 import logging
 
 import torch
 import torch.distributed as dist
 
 from . import default_hooks as default
+
 
 logger = logging.getLogger(__name__)
 
@@ -61,9 +63,8 @@ class PostLocalSGDState:
             self.iter += 1
 
         if self.iter == self.start_localSGD_iter:
-            logger.info(
-                "Start to apply local SGD after %s iterations.", self.iter
-            )
+            logger.info("Start to apply local SGD after %s iterations.", self.iter)
+
 
 def post_localSGD_hook(
     state: PostLocalSGDState, bucket: dist.GradBucket

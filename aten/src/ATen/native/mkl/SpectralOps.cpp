@@ -165,6 +165,7 @@ REGISTER_AVX2_DISPATCH(fft_fill_with_conjugate_symmetry_stub, &_fft_fill_with_co
 REGISTER_AVX512_DISPATCH(fft_fill_with_conjugate_symmetry_stub, &_fft_fill_with_conjugate_symmetry_cpu_)
 REGISTER_ZVECTOR_DISPATCH(fft_fill_with_conjugate_symmetry_stub, &_fft_fill_with_conjugate_symmetry_cpu_)
 REGISTER_VSX_DISPATCH(fft_fill_with_conjugate_symmetry_stub, &_fft_fill_with_conjugate_symmetry_cpu_)
+REGISTER_SVE256_DISPATCH(fft_fill_with_conjugate_symmetry_stub, &_fft_fill_with_conjugate_symmetry_cpu_)
 
 // _out variants can be shared between PocketFFT and MKL
 Tensor& _fft_r2c_mkl_out(const Tensor& self, IntArrayRef dim, int64_t normalization,
@@ -200,7 +201,7 @@ Tensor& _fft_c2c_mkl_out(const Tensor& self, IntArrayRef dim, int64_t normalizat
 }
 
 }} // namespace at::native
-#endif /* AT_MKL_ENALED() || AT_POCKETFFT_ENABLED() */
+#endif /* AT_MKL_ENABLED() || AT_POCKETFFT_ENABLED() */
 
 #if AT_POCKETFFT_ENABLED()
 #include <pocketfft_hdronly.h>
@@ -229,7 +230,7 @@ inline std::complex<T> *tensor_cdata(Tensor& t) {
 
 template<typename T>
 inline const std::complex<T> *tensor_cdata(const Tensor& t) {
-  return reinterpret_cast<const std::complex<T>*>(t.data_ptr<c10::complex<T>>());
+  return reinterpret_cast<const std::complex<T>*>(t.const_data_ptr<c10::complex<T>>());
 }
 
 template<typename T>
@@ -240,7 +241,7 @@ T compute_fct(int64_t size, int64_t normalization) {
     case fft_norm_mode::by_n: return one / static_cast<T>(size);
     case fft_norm_mode::by_root_n: return one / std::sqrt(static_cast<T>(size));
   }
-  AT_ERROR("Unsupported normalization type", normalization);
+  TORCH_CHECK(false, "Unsupported normalization type", normalization);
 }
 
 template<typename T>
@@ -291,11 +292,11 @@ Tensor _fft_r2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, 
   pocketfft::shape_t axes(dim.begin(), dim.end());
   if (self.scalar_type() == kFloat) {
     pocketfft::r2c(shape_from_tensor(self), stride_from_tensor(self), stride_from_tensor(out), axes, true,
-                   self.data_ptr<float>(),
+                   self.const_data_ptr<float>(),
                    tensor_cdata<float>(out), compute_fct<float>(self, dim, normalization));
   } else {
     pocketfft::r2c(shape_from_tensor(self), stride_from_tensor(self), stride_from_tensor(out), axes, true,
-                   self.data_ptr<double>(),
+                   self.const_data_ptr<double>(),
                    tensor_cdata<double>(out), compute_fct<double>(self, dim, normalization));
   }
 
@@ -484,9 +485,9 @@ static Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_sizes,
 
   // run the FFT
   if (forward) {
-    MKL_DFTI_CHECK(DftiComputeForward(descriptor.get(), input.data_ptr(), out.data_ptr()));
+    MKL_DFTI_CHECK(DftiComputeForward(descriptor.get(), const_cast<void*>(input.const_data_ptr()), out.data_ptr()));
   } else {
-    MKL_DFTI_CHECK(DftiComputeBackward(descriptor.get(), input.data_ptr(), out.data_ptr()));
+    MKL_DFTI_CHECK(DftiComputeBackward(descriptor.get(), const_cast<void*>(input.const_data_ptr()), out.data_ptr()));
   }
 
   // Inplace reshaping to original batch shape and inverting the dimension permutation
@@ -574,33 +575,33 @@ Tensor _fft_c2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, 
 #else
 
 namespace at { namespace native {
-REGISTER_NO_CPU_DISPATCH(fft_fill_with_conjugate_symmetry_stub);
+REGISTER_NO_CPU_DISPATCH(fft_fill_with_conjugate_symmetry_stub)
 
 Tensor _fft_c2r_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, int64_t last_dim_size) {
-  AT_ERROR("fft: ATen not compiled with FFT support");
+  TORCH_CHECK(false, "fft: ATen not compiled with FFT support");
 }
 
 Tensor _fft_r2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, bool onesided) {
-  AT_ERROR("fft: ATen not compiled with FFT support");
+  TORCH_CHECK(false, "fft: ATen not compiled with FFT support");
 }
 
 Tensor _fft_c2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, bool forward) {
-  AT_ERROR("fft: ATen not compiled with FFT support");
+  TORCH_CHECK(false, "fft: ATen not compiled with FFT support");
 }
 
 Tensor& _fft_r2c_mkl_out(const Tensor& self, IntArrayRef dim, int64_t normalization,
                          bool onesided, Tensor& out) {
-  AT_ERROR("fft: ATen not compiled with FFT support");
+  TORCH_CHECK(false, "fft: ATen not compiled with FFT support");
 }
 
 Tensor& _fft_c2r_mkl_out(const Tensor& self, IntArrayRef dim, int64_t normalization,
                          int64_t last_dim_size, Tensor& out) {
-  AT_ERROR("fft: ATen not compiled with FFT support");
+  TORCH_CHECK(false, "fft: ATen not compiled with FFT support");
 }
 
 Tensor& _fft_c2c_mkl_out(const Tensor& self, IntArrayRef dim, int64_t normalization,
                          bool forward, Tensor& out) {
-  AT_ERROR("fft: ATen not compiled with FFT support");
+  TORCH_CHECK(false, "fft: ATen not compiled with FFT support");
 }
 
 }} // namespace at::native

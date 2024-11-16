@@ -26,8 +26,7 @@
 
 #include <algorithm>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 DEFINE_DISPATCH(qmul_relu_stub);
 DEFINE_DISPATCH(qmul_stub);
@@ -79,9 +78,9 @@ Tensor _mul_out_xnnpack(
   Tensor out = at::native::empty_affine_quantized(
       at::infer_size_dimvector(self_contig.sizes(), other_contig.sizes()),
       self.scalar_type(),
-      c10::nullopt /* layout */,
+      std::nullopt /* layout */,
       kCPU,
-      c10::nullopt /* pin_memory */,
+      std::nullopt /* pin_memory */,
       output_scale,
       output_zero_point,
       qa_mem_format);
@@ -100,8 +99,8 @@ Tensor _mul_out_xnnpack(
 
   if(ReLUFused) {
     /*
-     * FIXME: use acticationLimits<T>()
-     * With <T>, MSVC runs into "error C3862: indetifier activationLimits not
+     * FIXME: use activationLimits<T>()
+     * With <T>, MSVC runs into "error C3862: identifier activationLimits not
      * found".
      */
     constexpr int64_t qmin = std::numeric_limits<underlying_t>::min();
@@ -370,4 +369,4 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
 }
 
 }  // namespace
-}}  // namespace at::native
+}  // namespace at::native

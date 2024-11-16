@@ -3,10 +3,13 @@
 
 #include <c10/macros/Export.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/Backtrace.h>
+#include <c10/util/Lazy.h>
 #include <c10/util/StringUtil.h>
 
 #include <cstdint>
 #include <exception>
+#include <memory>
 #include <string>
 #include <variant>
 #include <vector>
@@ -25,6 +28,7 @@ namespace c10 {
 /// NB: c10::Error is handled specially by the default torch to suppress the
 /// backtrace, see torch/csrc/Exceptions.h
 class C10_API Error : public std::exception {
+ private:
   // The actual error message.
   std::string msg_;
 
@@ -36,14 +40,14 @@ class C10_API Error : public std::exception {
   // The C++ backtrace at the point when this exception was raised.  This
   // may be empty if there is no valid backtrace.  (We don't use optional
   // here to reduce the dependencies this file has.)
-  std::string backtrace_;
+  Backtrace backtrace_;
 
   // These two are derived fields from msg_stack_ and backtrace_, but we need
   // fields for the strings so that we can return a const char* (as the
   // signature of std::exception requires).  Currently, the invariant
   // is that these fields are ALWAYS populated consistently with respect
   // to msg_stack_ and backtrace_.
-  std::string what_;
+  mutable OptimisticLazy<std::string> what_;
   std::string what_without_backtrace_;
 
   // This is a little debugging trick: you can stash a relevant pointer
@@ -64,11 +68,14 @@ class C10_API Error : public std::exception {
       const uint32_t line,
       const char* condition,
       const std::string& msg,
-      const std::string& backtrace,
+      Backtrace backtrace,
       const void* caller = nullptr);
 
   // Base constructor
-  Error(std::string msg, std::string backtrace, const void* caller = nullptr);
+  Error(
+      std::string msg,
+      Backtrace backtrace = nullptr,
+      const void* caller = nullptr);
 
   // Add some new context to the message stack.  The last added context
   // will be formatted at the end of the context list upon printing.
@@ -84,16 +91,12 @@ class C10_API Error : public std::exception {
     return context_;
   }
 
-  const std::string& backtrace() const {
-    return backtrace_;
-  }
+  const Backtrace& backtrace() const;
 
   /// Returns the complete error message, including the source location.
   /// The returned pointer is invalidated if you call add_context() on
   /// this object.
-  const char* what() const noexcept override {
-    return what_.c_str();
-  }
+  const char* what() const noexcept override;
 
   const void* caller() const noexcept {
     return caller_;
@@ -202,6 +205,10 @@ class C10_API WarningHandlerGuard {
       : prev_handler_(c10::WarningUtils::get_warning_handler()) {
     c10::WarningUtils::set_warning_handler(new_handler);
   }
+  WarningHandlerGuard(WarningHandlerGuard&& other) = delete;
+  WarningHandlerGuard(const WarningHandlerGuard&) = delete;
+  WarningHandlerGuard& operator=(const WarningHandlerGuard&) = delete;
+  WarningHandlerGuard& operator=(WarningHandlerGuard&&) = delete;
   ~WarningHandlerGuard() {
     c10::WarningUtils::set_warning_handler(prev_handler_);
   }
@@ -517,6 +524,43 @@ namespace c10::detail {
 
 } // namespace c10::detail
 
+#ifdef STANDALONE_TORCH_HEADER
+
+// TORCH_CHECK throws std::runtime_error instead of c10::Error which is
+// useful when certain headers are used in a libtorch-independent way,
+// e.g. when Vectorized<T> is used in AOTInductor generated code.
+#ifdef STRIP_ERROR_MESSAGES
+#define TORCH_CHECK(cond, ...)                \
+  if (C10_UNLIKELY_OR_CONST(!(cond))) {       \
+    throw std::runtime_error(TORCH_CHECK_MSG( \
+        cond,                                 \
+        "",                                   \
+        __func__,                             \
+        ", ",                                 \
+        __FILE__,                             \
+        ":",                                  \
+        __LINE__,                             \
+        ", ",                                 \
+        __VA_ARGS__));                        \
+  }
+#else
+#define TORCH_CHECK(cond, ...)                \
+  if (C10_UNLIKELY_OR_CONST(!(cond))) {       \
+    throw std::runtime_error(TORCH_CHECK_MSG( \
+        cond,                                 \
+        "",                                   \
+        __func__,                             \
+        ", ",                                 \
+        __FILE__,                             \
+        ":",                                  \
+        __LINE__,                             \
+        ", ",                                 \
+        ##__VA_ARGS__));                      \
+  }
+#endif
+
+#else
+
 #ifdef STRIP_ERROR_MESSAGES
 #define TORCH_CHECK(cond, ...)                   \
   if (C10_UNLIKELY_OR_CONST(!(cond))) {          \
@@ -535,6 +579,8 @@ namespace c10::detail {
         static_cast<uint32_t>(__LINE__),           \
         TORCH_CHECK_MSG(cond, "", ##__VA_ARGS__)); \
   }
+#endif
+
 #endif
 
 // An utility macro that does what `TORCH_CHECK` does if compiled in the host
@@ -616,12 +662,12 @@ namespace c10::detail {
 // Report a warning to the user only once.  Accepts an arbitrary number of extra
 // arguments which are concatenated into the warning message using operator<<
 //
-#define _TORCH_WARN_ONCE(...)                                             \
-  C10_UNUSED static const auto C10_ANONYMOUS_VARIABLE(torch_warn_once_) = \
-      [&] {                                                               \
-        TORCH_WARN(__VA_ARGS__);                                          \
-        return true;                                                      \
-      }()
+#define _TORCH_WARN_ONCE(...)                                \
+  [[maybe_unused]] static const auto C10_ANONYMOUS_VARIABLE( \
+      torch_warn_once_) = [&] {                              \
+    TORCH_WARN(__VA_ARGS__);                                 \
+    return true;                                             \
+  }()
 
 #ifdef DISABLE_WARN
 #define TORCH_WARN_ONCE(...) ((void)0);

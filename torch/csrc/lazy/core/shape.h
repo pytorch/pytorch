@@ -7,10 +7,9 @@
 #include <torch/csrc/jit/passes/symbolic_shape_analysis.h>
 #include <torch/csrc/lazy/core/hash.h>
 
-C10_DECLARE_bool(ltc_enable_symbolic_shapes);
+TORCH_DECLARE_bool(ltc_enable_symbolic_shapes);
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 
 class TORCH_API Shape {
  public:
@@ -19,7 +18,7 @@ class TORCH_API Shape {
   Shape(
       at::ScalarType scalar_type,
       c10::ArrayRef<int64_t> sizes,
-      c10::optional<std::vector<bool>> is_symbolic = c10::nullopt);
+      std::optional<std::vector<bool>> is_symbolic = std::nullopt);
 
   std::string to_string() const;
 
@@ -31,7 +30,7 @@ class TORCH_API Shape {
   }
 
   int64_t dim() const {
-    return sizes_.size();
+    return static_cast<int64_t>(sizes_.size());
   }
   c10::ArrayRef<int64_t> sizes() const {
     return sizes_;
@@ -43,13 +42,13 @@ class TORCH_API Shape {
     sizes_.at(dim) = size;
   }
 
-  const c10::optional<std::vector<bool>>& is_symbolic() const {
+  const std::optional<std::vector<bool>>& is_symbolic() const {
     return is_symbolic_;
   }
 
   // Makes a copy with symbolic dims applied
   Shape with_symbolic_dims(
-      c10::optional<std::vector<bool>> symbolic_dims) const;
+      std::optional<std::vector<bool>> symbolic_dims) const;
 
   size_t numel() const;
   hash_t hash(bool bakeInSizes) const;
@@ -64,7 +63,7 @@ class TORCH_API Shape {
   // Stores which dimmensions are symbolic
   // If nullopt, either it hasn't been initialized or the symbolic
   // dimmensions are not calculatable
-  c10::optional<std::vector<bool>> is_symbolic_ = c10::nullopt;
+  std::optional<std::vector<bool>> is_symbolic_ = std::nullopt;
 };
 
 TORCH_API std::ostream& operator<<(std::ostream& out, const Shape& shape);
@@ -76,5 +75,4 @@ TORCH_API void applySymbolicShapesOnLT(
     const char* schema_str,
     std::vector<c10::IValue> args,
     std::vector<Shape>& result_shapes);
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

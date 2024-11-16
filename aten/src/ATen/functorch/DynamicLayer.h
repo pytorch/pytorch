@@ -8,7 +8,7 @@
 #include <ATen/functorch/Macros.h>
 #include <c10/core/DispatchKey.h>
 #include <ATen/core/function_schema.h>
-#include <c10/util/Optional.h>
+#include <optional>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <ATen/functorch/Interpreter.h>
 #include <ATen/functorch/VmapInterpreter.h>
@@ -43,11 +43,11 @@ struct TORCH_API DynamicLayer {
   explicit DynamicLayer(
       TransformType transform_type,
       int64_t layerId,
-      optional<c10::SymInt> batchSize = nullopt,
-      optional<RandomnessType> randomness = nullopt,
-      optional<bool> prev_grad_mode = nullopt,
-      optional<bool> pre_fwd_grad_mode = nullopt,
-      optional<bool> functionalize_add_back_views = nullopt);
+      std::optional<c10::SymInt> batchSize = std::nullopt,
+      std::optional<RandomnessType> randomness = std::nullopt,
+      std::optional<bool> prev_grad_mode = std::nullopt,
+      std::optional<bool> pre_fwd_grad_mode = std::nullopt,
+      std::optional<bool> functionalize_add_back_views = std::nullopt);
 
   TransformType key() const;
   int64_t layerId() const;
@@ -65,13 +65,13 @@ struct TORCH_API DynamicLayer {
 
 TORCH_API int64_t initAndPushDynamicLayer(
     TransformType transform_type,
-    optional<c10::SymInt> batch_size = nullopt,
-    optional<RandomnessType> randomness = nullopt,
-    optional<bool> prev_grad_mode = nullopt,
-    optional<bool> prev_fwd_grad_mode = nullopt,
-    optional<bool> functionalize_add_back_views = nullopt);
+    std::optional<c10::SymInt> batch_size = std::nullopt,
+    std::optional<RandomnessType> randomness = std::nullopt,
+    std::optional<bool> prev_grad_mode = std::nullopt,
+    std::optional<bool> prev_fwd_grad_mode = std::nullopt,
+    std::optional<bool> functionalize_add_back_views = std::nullopt);
 TORCH_API DynamicLayer popDynamicLayerAndDeleteMetadata();
-TORCH_API c10::optional<DynamicLayer> maybeCurrentDynamicLayer();
+TORCH_API std::optional<DynamicLayer> maybeCurrentDynamicLayer();
 TORCH_API const std::vector<DynamicLayer>& getDynamicLayerStack();
 TORCH_API void setDynamicLayerStack(const std::vector<DynamicLayer>& stack);
 TORCH_API void setDynamicLayerFrontBackKeysIncluded(bool included);
@@ -95,7 +95,7 @@ TORCH_API const std::shared_ptr<bool>& getLifeHandleForLevel(int64_t level);
 TORCH_API bool isInplaceOp(const c10::FunctionSchema& schema);
 
 // Given the indices of unwrapped inputs and the schema, this returns the indices of any outputs that should remain unwrapped
-TORCH_API c10::optional<size_t> findAliasedOutput(const FunctionSchema& schema, const int64_t immutable_input);
+TORCH_API std::optional<size_t> findAliasedOutput(const FunctionSchema& schema, const int64_t immutable_input);
 
 TORCH_API Tensor unwrapIfDead(const Tensor& tensor);
 TORCH_API bool isDeadTensorWrapper(const Tensor& tensor);

@@ -1,13 +1,25 @@
+# mypy: allow-untyped-defs
 import dataclasses
 import traceback
-from typing import Any, Callable, Container, Dict, List, Optional, OrderedDict, Tuple, TypeVar, overload
+from typing import (
+    Any,
+    Callable,
+    Container,
+    Dict,
+    List,
+    Optional,
+    OrderedDict,
+    overload,
+    Set,
+    Tuple,
+    TypeVar,
+)
 
 import torch
 import torch.distributed as dist
 from torch import nn
-from torch.nn.parallel._functions import _get_stream
-from torch.nn.parallel.scatter_gather import _is_namedtuple
 from torch.nn.utils.rnn import PackedSequence
+
 
 __all__ = []  # type: ignore[var-annotated]
 
@@ -40,6 +52,7 @@ def _pack_kwargs(*args: Any, **kwargs: Any) -> Tuple[Tuple[Any, ...], Tuple[str,
 
     return tuple(flat_args), tuple(kwarg_keys)
 
+
 def _cast_forward_inputs(
     dtype: Optional[torch.dtype],
     *args: Any,
@@ -60,7 +73,10 @@ def _cast_forward_inputs(
 
     return (_apply_to_tensors(cast_fn, args), _apply_to_tensors(cast_fn, kwargs))
 
-def _unpack_kwargs(flat_args: Tuple[Any, ...], kwarg_keys: Tuple[str, ...]) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
+
+def _unpack_kwargs(
+    flat_args: Tuple[Any, ...], kwarg_keys: Tuple[str, ...]
+) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
     """See _pack_kwargs."""
     assert len(kwarg_keys) <= len(
         flat_args
@@ -77,12 +93,16 @@ T = TypeVar("T", torch.Tensor, PackedSequence)
 
 
 @overload
-def _recursive_to(inputs: S, target_device: torch.device, use_side_stream_for_tensor_copies: bool) -> List[S]:
+def _recursive_to(
+    inputs: S, target_device: torch.device, use_side_stream_for_tensor_copies: bool
+) -> List[S]:
     ...
 
 
 @overload
-def _recursive_to(inputs: T, target_device: torch.device, use_side_stream_for_tensor_copies: bool) -> Tuple[T]:
+def _recursive_to(
+    inputs: T, target_device: torch.device, use_side_stream_for_tensor_copies: bool
+) -> Tuple[T]:
     ...
 
 
@@ -101,6 +121,9 @@ def _recursive_to(inputs, target_device, use_side_stream_for_tensor_copies):
                 device_mod = getattr(torch, device.type, None)
                 if device.type == "cpu" or device_mod is None:
                     return (obj.to(target_device),)
+
+                from torch.nn.parallel._functions import _get_stream
+
                 # Perform CPU -> target_device copies in a background stream. This code is
                 # motivated from similar logic in torch/nn/parallel/_functions.py
                 stream = _get_stream(target_device)
@@ -119,6 +142,9 @@ def _recursive_to(inputs, target_device, use_side_stream_for_tensor_copies):
                         assert isinstance(output, torch.Tensor)
                         output.record_stream(current_stream)  # type: ignore[arg-type]
                 return (output,)
+
+        from torch.nn.parallel.scatter_gather import _is_namedtuple
+
         if _is_namedtuple(obj):
             return [type(obj)(*args) for args in zip(*map(to_map, obj))]
         if isinstance(obj, tuple) and len(obj) > 0:
@@ -155,9 +181,7 @@ def _alloc_storage(tensor: torch.Tensor, size: torch.Size) -> None:
         storage was already allocated.
     """
     with torch.no_grad():
-        if (
-            not torch.distributed._functional_collectives.is_torchdynamo_compiling()
-        ):
+        if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
             already_allocated = tensor._typed_storage()._size() == size.numel()
             if not already_allocated:
                 tensor_storage_size = tensor._typed_storage()._size()
@@ -177,9 +201,7 @@ def _free_storage(tensor: torch.Tensor):
         storage was already freed.
     """
     with torch.no_grad():
-        if (
-            not torch.distributed._functional_collectives.is_torchdynamo_compiling()
-        ):
+        if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
             already_freed = tensor._typed_storage()._size() == 0
             if not already_freed:
                 _p_assert(
@@ -190,7 +212,6 @@ def _free_storage(tensor: torch.Tensor):
                     f"tensor shape: {tensor.shape}",
                 )
                 tensor._typed_storage()._resize_(0)
-
 
 
 Q = TypeVar("Q")
@@ -211,14 +232,16 @@ def _apply_to_tensors(fn, container):
     """Recursively apply to all tensor in different kinds of container types."""
 
     def apply(x):
+        from torch.nn.parallel.scatter_gather import _is_namedtuple
+
         if isinstance(x, torch.Tensor):
             return fn(x)
         elif hasattr(x, "__dataclass_fields__"):
             dc = dataclasses.replace(x)
-            for f in dataclasses.fields(dc):
-                name = f.name
-                setattr(dc, name, apply(getattr(dc, name)))
-            return dc
+            changes = {
+                f.name: apply(getattr(dc, f.name)) for f in dataclasses.fields(dc)
+            }
+            return dataclasses.replace(dc, **changes)
         elif isinstance(x, OrderedDict):
             od = x.__class__()
             for key, value in x.items():
@@ -264,7 +287,9 @@ def _to_kwargs(
 
 
 def _verify_param_shape_across_processes(
-    process_group: dist.ProcessGroup, tensors: List[torch.Tensor], logger: Optional[dist.Logger] = None
+    process_group: dist.ProcessGroup,
+    tensors: List[torch.Tensor],
+    logger: Optional["dist.Logger"] = None,
 ):
     return dist._verify_params_across_processes(process_group, tensors, logger)
 
@@ -337,3 +362,28 @@ def _replace_by_prefix(
 
 def _data_ptr_allocated(tensor: torch.Tensor) -> bool:
     return tensor.untyped_storage().data_ptr() > 0
+
+
+def _get_root_modules(modules: List[nn.Module]) -> List[nn.Module]:
+    """
+    Returns the modules in ``modules`` that are root modules (i.e.
+    parent-less) with respect to the set ``modules``. In other words, these
+    are the modules in ``modules`` that are the not child of any other
+    module in ``modules``.
+    """
+    root_modules: List[nn.Module] = []
+    module_to_modules: Dict[nn.Module, Set[nn.Module]] = {
+        module: set(module.modules()) for module in modules
+    }
+    for candidate_module in modules:
+        is_root_module = True
+        for module, _modules in module_to_modules.items():
+            is_child_module = (
+                candidate_module is not module and candidate_module in _modules
+            )
+            if is_child_module:
+                is_root_module = False
+                break
+        if is_root_module:
+            root_modules.append(candidate_module)
+    return root_modules

@@ -11,9 +11,7 @@
 #include <utility>
 #include <vector>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 namespace registerizer {
 
 /* The Registerizer performs scalar replacement by looking for common Stores and
@@ -48,11 +46,9 @@ class Scope;
  buffer, including the number of loads and stores and the lowest common parent
  Block.
  */
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class AccessInfo {
  public:
   AccessInfo() = default;
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   AccessInfo(
       SimplifierHashType h,
       BufPtr b,
@@ -66,14 +62,14 @@ class AccessInfo {
         accessOrder_(accessOrder) {}
 
   // Adds a Store to this access, which is in the provided scope.
-  void addStore(StorePtr store, const std::shared_ptr<Scope>& scope);
+  void addStore(const StorePtr& store, const std::shared_ptr<Scope>& scope);
 
   // Adds a Load to this access, which occurs in the usage Stmt in the provided
   // scope.
   void addLoad(
-      LoadPtr load,
+      const LoadPtr& load,
       const std::shared_ptr<Scope>& scope,
-      StmtPtr usage);
+      const StmtPtr& usage);
 
   // Merge another AccessInfo into this one.
   void merge(const std::shared_ptr<AccessInfo>& other);
@@ -82,7 +78,7 @@ class AccessInfo {
   bool overlaps(const std::shared_ptr<AccessInfo>& other);
 
   // Returns true if the indices of this access depend on the provided Var.
-  bool dependsOnVar(VarPtr v);
+  bool dependsOnVar(const VarPtr& v);
 
   // Clone this AccessInfo, and set this as the new accesses' hiddenAccess.
   static std::shared_ptr<AccessInfo> cloneWithHiddenInfo(
@@ -108,7 +104,7 @@ class AccessInfo {
   }
 
   void setEnclosingBlock(BlockPtr b) {
-    block_ = b;
+    block_ = std::move(b);
   }
 
   StmtPtr first_usage() const {
@@ -119,8 +115,8 @@ class AccessInfo {
   }
 
   void setUsageMarks(StmtPtr first, StmtPtr last) {
-    first_usage_ = first;
-    last_usage_ = last;
+    first_usage_ = std::move(first);
+    last_usage_ = std::move(last);
   }
 
   bool firstUsageOverlapped() const {
@@ -143,7 +139,7 @@ class AccessInfo {
     return loads_;
   }
 
-  void hoistCosts(ExprPtr extent) {
+  void hoistCosts(const ExprPtr& extent) {
     store_cost_ = IRSimplifier::simplify(alloc<Mul>(store_cost_, extent));
     load_cost_ = IRSimplifier::simplify(alloc<Mul>(load_cost_, extent));
   }
@@ -222,13 +218,12 @@ using AccessHashMap =
 // Represents a scope block and holds all accesses contained within it.
 class Scope {
  public:
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Scope(BlockPtr b, std::shared_ptr<Scope> parent, size_t conditionId = 0)
       : block_(std::move(b)),
         parent_(std::move(parent)),
         conditionId_(conditionId) {}
 
-  AccessHashMap& getAccessMapByBuf(BufPtr b);
+  AccessHashMap& getAccessMapByBuf(const BufPtr& b);
 
   std::unordered_map<BufPtr, AccessHashMap>& openAccesses() {
     return openAccesses_;
@@ -254,7 +249,7 @@ class Scope {
     return localVars_;
   }
   void addLocalVar(VarPtr v) {
-    localVars_.insert(v);
+    localVars_.insert(std::move(v));
   }
 
   void closeAccess(const std::shared_ptr<AccessInfo>& info);
@@ -326,30 +321,30 @@ class TORCH_API RegisterizerAnalysis : public IRVisitor {
       : currentScope_(std::make_shared<Scope>(nullptr, nullptr, 0)) {}
   ~RegisterizerAnalysis() override = default;
 
-  void visit(ForPtr v) override;
+  void visit(const ForPtr& v) override;
 
-  void visit(CondPtr v) override;
+  void visit(const CondPtr& v) override;
 
-  void visit(BlockPtr v) override;
+  void visit(const BlockPtr& v) override;
 
-  void visit(StorePtr v) override;
+  void visit(const StorePtr& v) override;
 
-  void visit(LoadPtr v) override;
+  void visit(const LoadPtr& v) override;
 
-  void visit(IfThenElsePtr v) override;
+  void visit(const IfThenElsePtr& v) override;
 
-  void visit(LetPtr v) override;
+  void visit(const LetPtr& v) override;
 
-#define STMT_ON_STACK(Op)          \
-  void visit(Op##Ptr v) override { \
-    stmtStack_.push_front(v);      \
-    IRVisitor::visit(v);           \
-    stmtStack_.pop_front();        \
+#define STMT_ON_STACK(Op)                 \
+  void visit(const Op##Ptr& v) override { \
+    stmtStack_.push_front(v);             \
+    IRVisitor::visit(v);                  \
+    stmtStack_.pop_front();               \
   }
 
-  STMT_ON_STACK(AtomicAdd);
-  STMT_ON_STACK(Allocate);
-  STMT_ON_STACK(Free);
+  STMT_ON_STACK(AtomicAdd)
+  STMT_ON_STACK(Allocate)
+  STMT_ON_STACK(Free)
 
 #undef STMT_ON_STACK
 
@@ -381,17 +376,16 @@ class TORCH_API RegisterizerAnalysis : public IRVisitor {
  */
 class TORCH_API RegisterizerReplacer : public IRMutator {
  public:
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   RegisterizerReplacer(std::vector<std::shared_ptr<AccessInfo>>& vec)
       : infoSet_(vec) {
     buildReplacements();
   }
 
-  ExprPtr mutate(LoadPtr v) override;
+  ExprPtr mutate(const LoadPtr& v) override;
 
-  StmtPtr mutate(StorePtr v) override;
+  StmtPtr mutate(const StorePtr& v) override;
 
-  StmtPtr mutate(BlockPtr v) override;
+  StmtPtr mutate(const BlockPtr& v) override;
 
  private:
   struct ReplacerScope {
@@ -405,6 +399,7 @@ class TORCH_API RegisterizerReplacer : public IRMutator {
   void buildReplacements();
 
   // State relating to the accesses yet to be replaced.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   std::vector<std::shared_ptr<AccessInfo>>& infoSet_;
   std::unordered_map<StorePtr, std::shared_ptr<AccessInfo>> storeToAccess_;
   std::unordered_map<LoadPtr, std::shared_ptr<AccessInfo>> loadToAccess_;
@@ -417,7 +412,7 @@ class TORCH_API RegisterizerReplacer : public IRMutator {
   // Tracks the number of times we've seen each buffer, so we can name the
   // scalar Vars appropriately.
   std::unordered_map<BufPtr, unsigned int> bufferAccessCounts_;
-  unsigned int getBufferAccessCount(BufPtr b) {
+  unsigned int getBufferAccessCount(const BufPtr& b) {
     return ++bufferAccessCounts_[b];
   }
 };
@@ -428,6 +423,4 @@ class TORCH_API RegisterizerReplacer : public IRMutator {
 // atomics.
 TORCH_API StmtPtr registerize(StmtPtr s);
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr

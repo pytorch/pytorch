@@ -17,8 +17,7 @@
 #include <utility>
 #include <vector>
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 namespace {
 
@@ -184,8 +183,7 @@ static void basicAutogradNotImplementedFallbackImpl(
             // users typically call .backward() and backprop through
             // the entire program).
             if (t.is_view() && is_mutable_output) {
-              // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-              auto& base = const_cast<at::TensorBase&>(t._base());
+              const auto& base = t._base();
               if (base.requires_grad()) {
                 // Can only register_hook on tensors that require grad.
                 base.register_hook([op_name](const at::TensorBase& grad) {
@@ -210,8 +208,7 @@ static void basicAutogradNotImplementedFallbackImpl(
           // rebase_history assumes single Tensor(a!) return, and in general
           // custom ops don't have a good in-place story.
           if (!is_mutable_output) {
-            // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-            set_history(const_cast<at::Tensor&>(t), grad_fn);
+            set_history(t, grad_fn);
           }
         },
         stack,
@@ -301,11 +298,26 @@ static void autogradNotImplementedFallbackImpl(
       num_arguments);
 
   const bool any_requires_grad = !tensors_requiring_grad_on_stack.empty();
+  const bool has_out_arg = std::any_of(
+      schema.arguments().begin(),
+      schema.arguments().end(),
+      [](const c10::Argument& arg) { return arg.is_out(); });
 
   _foreach_tensor(
       [&](size_t _, size_t i, const at::Tensor& t) {
         if (schema.is_mutable({c10::SchemaArgType::input, i})) {
-          check_inplace(t, any_requires_grad);
+          if (has_out_arg) {
+            // Normally out argument overloads would not support any arguments
+            // that require grad. However, we loosen this check to maintain
+            // backward compatibility.
+            // See https://github.com/pytorch/pytorch/issues/120988
+            if (can_mutate_inplace(t, any_requires_grad) !=
+                can_mutate_inplace_result::success) {
+              throw_error_out_requires_grad(schema.name().c_str());
+            }
+          } else {
+            check_inplace(t, any_requires_grad);
+          }
         }
       },
       stack,
@@ -326,13 +338,13 @@ static void autogradNotImplementedFallbackImpl(
       std::vector<c10::IValue>(stack->begin() + stack_start, stack->end());
   std::vector<c10::intrusive_ptr<c10::TensorImpl>> impl_saved;
   impl_saved.reserve(num_tensor_inputs);
-  std::vector<c10::optional<c10::Storage>> storage_saved;
+  std::vector<std::optional<c10::Storage>> storage_saved;
   storage_saved.reserve(num_tensor_inputs);
   _foreach_tensor(
       [&](size_t idx, size_t _, const at::Tensor& t) {
         storage_saved.push_back(
-            t.has_storage() ? c10::optional<c10::Storage>(t.storage())
-                            : c10::nullopt);
+            t.has_storage() ? std::optional<c10::Storage>(t.storage())
+                            : std::nullopt);
         impl_saved.push_back(t.getIntrusivePtr());
       },
       &stack_args_copy,
@@ -351,11 +363,14 @@ static void autogradNotImplementedFallbackImpl(
 #ifndef NDEBUG
   _foreach_tensor(
       [&](size_t idx_tensor, size_t _, const at::Tensor& t) {
-        if (storage_saved.at(idx_tensor).has_value())
+        // Skip next two for chunk_cat, see
+        // https://github.com/pytorch/pytorch/issues/130073
+        if (storage_saved.at(idx_tensor).has_value() &&
+            op_name != "aten::_chunk_cat")
           TORCH_INTERNAL_ASSERT(
               storage_saved.at(idx_tensor).value().is_alias_of(t.storage()),
               op_name);
-        if (impl_saved.at(idx_tensor))
+        if (impl_saved.at(idx_tensor) && op_name != "aten::_chunk_cat")
           TORCH_INTERNAL_ASSERT(
               impl_saved.at(idx_tensor) == t.getIntrusivePtr(), op_name);
       },
@@ -365,7 +380,16 @@ static void autogradNotImplementedFallbackImpl(
   _foreach_tensor(
       [&](size_t idx_tensor, size_t idx_ret, const at::Tensor& t) {
         if (at::impl::tensor_has_dispatch(t) ||
-            at::impl::dispatch_mode_enabled())
+            at::impl::dispatch_mode_enabled() ||
+            // NJT components are expected to be reused; skip use_count() check
+            op_name.rfind("aten::_nested_get", 0) == 0)
+          return;
+        // Skip test_parallel_materialize
+        // For details see https://github.com/pytorch/pytorch/issues/130073
+        if (op_name == "aten::_test_parallel_materialize" ||
+            op_name == "aten::_test_optional_intlist" ||
+            op_name == "aten::_test_optional_filled_intlist" ||
+            op_name == "aten::_test_optional_floatlist")
           return;
         if (!is_inplace_output[idx_ret])
           TORCH_INTERNAL_ASSERT(
@@ -377,8 +401,12 @@ static void autogradNotImplementedFallbackImpl(
         // where each element represents the norm of corresponding input Tensor,
         // here I want to return the same number of Tensors as the input
         // TensorList, see https://github.com/pytorch/pytorch/issues/93940
+        // Skip native_channel_shuffle as well as transformer_encoder
+        // For details see https://github.com/pytorch/pytorch/issues/130073
         if (!is_aliased_output[idx_ret] && t.has_storage() &&
-            op_name != "aten::_foreach_norm")
+            op_name != "aten::_foreach_norm" &&
+            op_name != "aten::_transformer_encoder_layer_fwd" &&
+            op_name != "aten::native_channel_shuffle")
           TORCH_INTERNAL_ASSERT(t.storage().use_count() == 1);
       },
       stack,
@@ -398,15 +426,27 @@ static void autogradNotImplementedFallbackImpl(
     if (aliased_input.has_storage()) {
       if (aliased_output_iv.isTensor()) {
         const at::Tensor& aliased_output = aliased_input_iv.toTensor();
-        TORCH_INTERNAL_ASSERT(
-            aliased_input.storage().is_alias_of(aliased_output.storage()),
-            op_name);
-      } else {
-        const auto aliased_output_vec = aliased_output_iv.toTensorVector();
-        for (const auto& aliased_output : aliased_output_vec) {
+        // for now, skip asserts for subclasses
+        // TODO: Fix the aliasing situation involving subclasses
+        if (!at::impl::dispatch_mode_enabled() &&
+            !at::impl::tensor_has_dispatch(aliased_input) &&
+            !at::impl::tensor_has_dispatch(aliased_output)) {
           TORCH_INTERNAL_ASSERT(
               aliased_input.storage().is_alias_of(aliased_output.storage()),
               op_name);
+        }
+      } else {
+        const auto aliased_output_vec = aliased_output_iv.toTensorVector();
+        for (const auto& aliased_output : aliased_output_vec) {
+          // for now, skip asserts for subclasses
+          // TODO: Fix the aliasing situation involving subclasses
+          if (!at::impl::dispatch_mode_enabled() &&
+              !at::impl::tensor_has_dispatch(aliased_input) &&
+              !at::impl::tensor_has_dispatch(aliased_output)) {
+            TORCH_INTERNAL_ASSERT(
+                aliased_input.storage().is_alias_of(aliased_output.storage()),
+                op_name);
+          }
         }
       }
     }
@@ -418,11 +458,9 @@ static void autogradNotImplementedFallbackImpl(
         [&](size_t idx_tensor, size_t idx_ret, const at::Tensor& t) {
           if (isDifferentiableType(t.scalar_type())) {
             if (is_inplace_output[idx_ret]) {
-              // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-              rebase_history(const_cast<at::Tensor&>(t), grad_fn);
+              rebase_history(t, grad_fn);
             } else {
-              // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-              set_history(const_cast<at::Tensor&>(t), grad_fn);
+              set_history(t, grad_fn);
             }
           }
         },
@@ -530,18 +568,14 @@ static void autogradNotImplementedInplaceOrViewFallbackImpl(
         (*stack)[stack->size() - num_returns + aliased_output_idx];
 
     // See NOTE [ View + Inplace detection ] for more details about this logic
-    const auto erroring_view_func = [op_name = op_name](const at::Tensor&) {
-      // We always need this view_func because otherwise if we do in-place
-      // on this view, we would implicitly use AsStridedBackward instead
-      // of the NotImplemented node. For the cross-dtype/non-strided
-      // cases, we would create something like this anyway
-      TORCH_CHECK(
-          false,
-          "Mutating the view ",
-          op_name,
-          " which does not have a derivative implemented is forbidden.");
-      return at::Tensor();
-    };
+    // We always need this view_func because otherwise if we do in-place
+    // on this view, we would implicitly use AsStridedBackward instead
+    // of the NotImplemented node. For the cross-dtype/non-strided
+    // cases, we would create something like this anyway
+    auto error_msg =
+        ("Mutating the view " + op_name +
+         "which does not have a derivative implemented is forbidden.");
+    auto erroring_view_func = std::make_unique<ErroringViewFunc>(error_msg);
 
     const auto erroring_rev_view_func = [op_name = op_name](const at::Tensor&) {
       TORCH_CHECK(
@@ -560,7 +594,7 @@ static void autogradNotImplementedInplaceOrViewFallbackImpl(
             /* tensor=*/sub_output,
             /* is_bw_differentiable=*/true,
             /* is_fw_differentiable=*/true,
-            /* view_func=*/erroring_view_func,
+            /* view_func=*/std::move(erroring_view_func),
             /* rev_view_func=*/erroring_rev_view_func,
             /* creation_meta=*/
             InferenceMode::is_enabled()
@@ -577,7 +611,7 @@ static void autogradNotImplementedInplaceOrViewFallbackImpl(
           /* tensor=*/std::move(aliased_output_iv).toTensor(),
           /* is_bw_differentiable=*/true,
           /* is_fw_differentiable=*/true,
-          /* view_func=*/erroring_view_func,
+          /* view_func=*/std::move(erroring_view_func),
           /* rev_view_func=*/erroring_rev_view_func,
           /* creation_meta=*/
           InferenceMode::is_enabled()
@@ -595,5 +629,4 @@ torch::CppFunction autogradNotImplementedInplaceOrViewFallback() {
       &autogradNotImplementedInplaceOrViewFallbackImpl>();
 }
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

@@ -1,18 +1,23 @@
+# mypy: allow-untyped-defs
 import inspect
+import itertools
 import logging
+from typing import Optional
 
-import torch
+from torch._logging import warning_once
 from torch._ops import HigherOrderOperator
-from torch.utils.checkpoint import checkpoint, uid
-import torch._dynamo.config
+from torch.types import _dtype
+from torch.utils.checkpoint import checkpoint, CheckpointPolicy
+
 
 log = logging.getLogger(__name__)
 
+uid = itertools.count(1)
 
 
 # Used for testing the HigherOrderOperator mechanism
 class Wrap(HigherOrderOperator):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("wrap")
 
     def __call__(self, func, *args, **kwargs):
@@ -28,7 +33,60 @@ class Wrap(HigherOrderOperator):
 
         return wrapper()
 
+
 wrap = Wrap()
+
+
+class WrapWithSetGradEnabled(HigherOrderOperator):
+    def __init__(self) -> None:
+        super().__init__("wrap_with_set_grad_enabled")
+
+    def __call__(self, enable_grad, wrapped_func, *args, **kwargs):
+        # Dynamo already traces the body of HigherOrderOp beforehand when it
+        # so no need to trace into it.
+        import torch._dynamo  # noqa: F401
+        from torch._dynamo import disable
+
+        @disable
+        def wrapper():
+            with torch.set_grad_enabled(enable_grad):
+                return wrapped_func(*args, **kwargs)
+
+        return wrapper()
+
+
+wrap_with_set_grad_enabled = WrapWithSetGradEnabled()
+
+
+class WrapWithAutocast(HigherOrderOperator):
+    def __init__(self):
+        super().__init__("wrap_with_autocast")
+
+    def __call__(
+        self,
+        device_type: str,
+        dtype: Optional[_dtype],
+        enabled: bool,
+        cache_enabled: Optional[bool],
+        wrapped_func,
+        *args,
+        **kwargs,
+    ):
+        # Dynamo already traces the body of HigherOrderOp beforehand when it
+        # so no need to trace into it.
+        import torch._dynamo  # noqa: F401
+        from torch._dynamo import disable
+
+        @disable
+        def wrapper():
+            with torch.autocast(device_type, dtype, enabled, cache_enabled):
+                return wrapped_func(*args, **kwargs)
+
+        return wrapper()
+
+
+wrap_with_autocast = WrapWithAutocast()
+
 
 class WrapActivationCheckpoint(HigherOrderOperator):
     """
@@ -47,8 +105,9 @@ class WrapActivationCheckpoint(HigherOrderOperator):
     that duplication/recomputation is done as a compiler pass in the
     partitioners. See TagActivationCheckpoint for more information.
     """
-    def __init__(self):
-        super().__init__("wrap_activation_checkpoint")
+
+    def __init__(self) -> None:
+        super().__init__("wrap_activation_checkpoint", cacheable=False)
 
     def __call__(self, function, *args, **kwargs):
         # use_reentrant is set to False because this op is going to be traced.
@@ -56,13 +115,16 @@ class WrapActivationCheckpoint(HigherOrderOperator):
         # version of checkpointing.
         import torch.fx.traceback as fx_traceback
         from torch.fx import Interpreter
+
         kwargs["use_reentrant"] = False
         kwargs["preserve_rng_state"] = False
         # Using interpreter allows preservation of metadata through torch.compile stack.
         with fx_traceback.preserve_node_meta():
             return checkpoint(Interpreter(function).run, *args, **kwargs)
 
+
 wrap_activation_checkpoint = WrapActivationCheckpoint()
+
 
 class TagActivationCheckpoint(HigherOrderOperator):
     """
@@ -83,8 +145,8 @@ class TagActivationCheckpoint(HigherOrderOperator):
     the forward and recomputed forward in backward.
     """
 
-    def __init__(self):
-        super().__init__("tag_activation_checkpoint")
+    def __init__(self) -> None:
+        super().__init__("tag_activation_checkpoint", cacheable=False)
 
     @staticmethod
     def divide_kwargs(kwargs):
@@ -115,27 +177,39 @@ class TagActivationCheckpoint(HigherOrderOperator):
         # `preserve_rng_state` is not a regular kwarg
         checkpoint_keys.add("preserve_rng_state")
 
-        checkpoint_kwargs = {name: kwargs[name] for name in kwargs.keys() if name in checkpoint_keys}
-        gmod_kwargs = {name: kwargs[name] for name in kwargs.keys() if name not in checkpoint_keys}
+        checkpoint_kwargs = {
+            name: kwargs[name] for name in kwargs.keys() if name in checkpoint_keys
+        }
+        gmod_kwargs = {
+            name: kwargs[name] for name in kwargs.keys() if name not in checkpoint_keys
+        }
         return checkpoint_kwargs, gmod_kwargs
 
-    def tag_nodes(self, gmod):
+    def tag_nodes(self, gmod, is_sac):
         unique_graph_id = next(uid)
         for node in gmod.graph.nodes:
             if node.op in ("call_function", "call_method", "call_module"):
-                node.meta["recompute"] = unique_graph_id
+                node.meta["ac_graph_id"] = unique_graph_id
+                if is_sac:
+                    # For selective checkpointing, we will populate this tag later in _CachingTorchDispatchMode.
+                    node.meta["recompute"] = None
+                else:
+                    # Under vanilla activation checkpointing, all nodes should be recomputed.
+                    node.meta["recompute"] = CheckpointPolicy.PREFER_RECOMPUTE
         return gmod
 
     def __call__(self, gmod, *args, **kwargs):
         import torch.fx.traceback as fx_traceback
         from torch.fx import Interpreter
+
         if "_checkpoint_context_fn" in gmod.meta:
-            assert torch._dynamo.config._experimental_support_context_fn_in_torch_utils_checkpoint, \
-                "Passing context_fn to torch.utils.checkpoint is currently not supported under torch.compile"
-            log.warning("""
+            warning_once(
+                log,
+                """
 Detected that context_fn is passed to torch.utils.checkpoint under torch.compile.
 Please make sure the checkpointed region does not contain in-place ops (e.g. torch.relu_).
-""")
+""",
+            )
             # use_reentrant is set to False because this op is going to be traced.
             # And we ensure that AOT Autograd traces through the non reentrant
             # version of checkpointing.
@@ -149,17 +223,18 @@ Please make sure the checkpointed region does not contain in-place ops (e.g. tor
             kwargs["context_fn"] = gmod.meta["_checkpoint_context_fn"]
             # We first tag all nodes as "recompute" in this graph, and then we undo the "recompute" tag
             # for specific nodes in _CachingTorchDispatchMode in torch/utils/checkpoint.py.
-            gmod = self.tag_nodes(gmod)
+            gmod = self.tag_nodes(gmod, is_sac=True)
             # Using interpreter allows preservation of metadata through torch.compile stack.
             with fx_traceback.preserve_node_meta():
                 return checkpoint(Interpreter(gmod).run, *args, **kwargs)
         else:
-            gmod = self.tag_nodes(gmod)
+            gmod = self.tag_nodes(gmod, is_sac=False)
             # Using interpreter allows preservation of metadata through torch.compile stack.
             # TODO: We want to use the same `checkpoint(Interpreter(gmod).run, *args, **kwargs)` here
             # as the `context_fn != None` case, but that depends on in-place op support in TorchDispatchMode + torch.compile.
             # (for details on in-place op issue, run `test_compile_selective_checkpoint_inplace_op` unit test)
             with fx_traceback.preserve_node_meta():
                 return Interpreter(gmod).run(*args)
+
 
 tag_activation_checkpoint = TagActivationCheckpoint()

@@ -37,8 +37,9 @@ static void set_kernel_params(int64_t isizeH,
 
   if (isizeH >= osizeH) {
     if (check_avg_pooling) {
-      TORCH_CHECK((isizeH % osizeH == 0 && isizeW % osizeW == 0),
-                  "Adaptive pool MPS: input sizes must be divisible by output sizes.");
+      TORCH_CHECK(
+          (isizeH % osizeH == 0 && isizeW % osizeW == 0),
+          "Adaptive pool MPS: input sizes must be divisible by output sizes. Non-divisible input sizes are not implemented on MPS device yet. For now, you can manually transfer tensor to cpu in this case. Please refer to [this issue](https://github.com/pytorch/pytorch/issues/96056)");
     }
     strideH = (int64_t)(isizeH / osizeH);
     strideW = (int64_t)(isizeW / osizeW);
@@ -46,8 +47,9 @@ static void set_kernel_params(int64_t isizeH,
     kernel_sizeW = isizeW - (osizeW - 1) * strideW;
   } else {
     if (check_avg_pooling) {
-      TORCH_CHECK((osizeH % isizeH == 0 && osizeW % isizeW == 0),
-                  "Adaptive pool MPS: output sizes must be divisible by input sizes.");
+      TORCH_CHECK(
+          (osizeH % isizeH == 0 && osizeW % isizeW == 0),
+          "Adaptive pool MPS: output sizes must be divisible by input sizes. Non-divisible input sizes are not implemented on MPS device yet. For now, you can manually transfer tensor to cpu in this case. Please refer to [this issue](https://github.com/pytorch/pytorch/issues/96056)");
     }
     strideH = (int64_t)(osizeH / isizeH);
     strideW = (int64_t)(osizeW / isizeW);
@@ -86,7 +88,7 @@ Tensor& adaptive_avg_pool2d_out_mps(const Tensor& input, IntArrayRef output_size
                             IntArrayRef({0, 0}),
                             false,
                             true,
-                            c10::nullopt);
+                            std::nullopt);
   } else {
     Tensor phony_grad = at::ones_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     auto input_sizes = input.sizes();
@@ -101,7 +103,7 @@ Tensor& adaptive_avg_pool2d_out_mps(const Tensor& input, IntArrayRef output_size
                                      IntArrayRef({0, 0}),
                                      false,
                                      true,
-                                     c10::nullopt);
+                                     std::nullopt);
     // Multiply output by kernel size
     output = at::mul(output, kernel_sizeH * kernel_sizeW);
   }
@@ -135,7 +137,7 @@ Tensor adaptive_avg_pool2d_mps(at::Tensor const& input, IntArrayRef output_size)
   }
 
   const auto memory_format = input.suggest_memory_format();
-  Tensor output = at::empty(output_shape, input.scalar_type(), c10::nullopt, kMPS, c10::nullopt, memory_format);
+  Tensor output = at::empty(output_shape, input.scalar_type(), std::nullopt, kMPS, std::nullopt, memory_format);
   return adaptive_avg_pool2d_out_mps(input, output_size, output);
 }
 
@@ -160,7 +162,7 @@ Tensor adaptive_avg_pool2d_backward_mps(const Tensor& gradOutput, const Tensor& 
                                           IntArrayRef({0, 0}),
                                           false,
                                           true,
-                                          c10::nullopt);
+                                          std::nullopt);
     } else {
       gradInput = at::avg_pool2d(gradOutput,
                                  IntArrayRef({kernel_sizeH, kernel_sizeW}),
@@ -168,7 +170,7 @@ Tensor adaptive_avg_pool2d_backward_mps(const Tensor& gradOutput, const Tensor& 
                                  IntArrayRef({0, 0}),
                                  false,
                                  true,
-                                 c10::nullopt);
+                                 std::nullopt);
       gradInput = at::mul(gradInput, kernel_sizeH * kernel_sizeW);
     }
   }

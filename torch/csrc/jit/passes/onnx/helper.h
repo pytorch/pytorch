@@ -3,8 +3,7 @@
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // Utility functions for PyTorch to ONNX conversion.
 
@@ -40,7 +39,7 @@ TORCH_API Node* addNodeToBlock(
 
 TORCH_API Value* addInputToBlock(Block* block);
 
-TORCH_API c10::optional<at::ScalarType> ONNXTypeToATenType(int32_t onnx_type);
+TORCH_API std::optional<at::ScalarType> ONNXTypeToATenType(int32_t onnx_type);
 
 // Use int return type as no sable way exists to forward declare protobuf enum
 TORCH_API int ATenTypeToOnnxType(at::ScalarType at_type);
@@ -73,5 +72,4 @@ class ScalarTypeHashFunction {
   }
 };
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

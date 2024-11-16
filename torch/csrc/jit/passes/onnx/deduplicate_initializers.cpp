@@ -4,8 +4,7 @@
 
 #include <c10/util/irange.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace onnx {
 using namespace ::c10::onnx;
@@ -99,5 +98,4 @@ void DeduplicateInitializers(
   buildParamsMapFromValueToParamsMap(valsToParamsMap, paramsDict);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

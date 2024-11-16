@@ -43,7 +43,7 @@
 namespace cutlass {
 
 // This converter is meant to be used with data interleaved in a 32-bit register where the even elements are in the low
-// bits and the odd elemeents are in the high bits of the register. In addition, it assumes elements were originally
+// bits and the odd elements are in the high bits of the register. In addition, it assumes elements were originally
 // signed and had a bias of 2**(b-1) added (where b is the number of bits in the type) to make all numbers unsigned.
 // This converter will uninterleave the data and subtract the bias while converting to the result type.
 template<typename T, typename S, int N>

@@ -28,12 +28,10 @@
 //     return;
 // }
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 TORCH_API bool opt_limit(const char* pass_name);
 
 #define JIT_OPT_ALLOWED opt_limit(__FILE__)
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

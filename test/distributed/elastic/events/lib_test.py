@@ -13,12 +13,12 @@ from dataclasses import asdict
 from unittest.mock import patch
 
 from torch.distributed.elastic.events import (
+    _get_or_create_logger,
+    construct_and_record_rdzv_event,
     Event,
     EventSource,
     NodeState,
     RdzvEvent,
-    _get_or_create_logger,
-    construct_and_record_rdzv_event,
 )
 from torch.testing._internal.common_utils import run_tests, TestCase
 
@@ -58,6 +58,7 @@ class EventLibTest(TestCase):
         deser_event = Event.deserialize(json_event)
         self.assert_event(event, deser_event)
 
+
 class RdzvEventLibTest(TestCase):
     @patch("torch.distributed.elastic.events.record_rdzv_event")
     @patch("torch.distributed.elastic.events.get_logging_handler")
@@ -72,7 +73,9 @@ class RdzvEventLibTest(TestCase):
 
     @patch("torch.distributed.elastic.events.record_rdzv_event")
     @patch("torch.distributed.elastic.events.get_logging_handler")
-    def test_construct_and_record_rdzv_event_does_not_run_if_invalid_dest(self, get_mock, record_mock):
+    def test_construct_and_record_rdzv_event_does_not_run_if_invalid_dest(
+        self, get_mock, record_mock
+    ):
         get_mock.return_value = logging.NullHandler()
         construct_and_record_rdzv_event(
             run_id="test_run_id",
@@ -119,7 +122,6 @@ class RdzvEventLibTest(TestCase):
         self.assertEqual(event.rank, 3)
         self.assertEqual(event.local_id, 4)
         self.assertEqual(event.error_trace, "test_error_trace")
-
 
     def test_rdzv_event_deserialize(self):
         event = self.get_test_rdzv_event()

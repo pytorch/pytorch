@@ -6,7 +6,8 @@
 #include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/cpu/vec/vec_base.h>
 #include <c10/util/irange.h>
-#if (defined(CPU_CAPABILITY_AVX512)) && !defined(_MSC_VER)
+#if (defined(CPU_CAPABILITY_AVX512))
+#define SLEEF_STATIC_LIBS
 #include <sleef.h>
 #endif
 
@@ -15,7 +16,7 @@ namespace vec {
 // See Note [CPU_CAPABILITY namespace]
 inline namespace CPU_CAPABILITY {
 
-#if defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
+#if defined(CPU_CAPABILITY_AVX512)
 
 template <> class Vectorized<double> {
 private:
@@ -148,6 +149,9 @@ public:
   }
   Vectorized<double> acos() const {
     return Vectorized<double>(Sleef_acosd8_u10(values));
+  }
+  Vectorized<double> acosh() const {
+    return Vectorized<double>(Sleef_acoshd8_u10(values));
   }
   Vectorized<double> asin() const {
     return Vectorized<double>(Sleef_asind8_u10(values));
@@ -439,11 +443,15 @@ inline Vectorized<double> Vectorized<double>::le(const Vectorized<double>& other
 template <>
 inline void convert(const double* src, double* dst, int64_t n) {
   int64_t i;
+#ifndef __msvc_cl__
 #pragma unroll
+#endif
   for (i = 0; i <= (n - Vectorized<double>::size()); i += Vectorized<double>::size()) {
     _mm512_storeu_pd(dst + i, _mm512_loadu_pd(src + i));
   }
+#ifndef __msvc_cl__
 #pragma unroll
+#endif
   for (; i < n; i++) {
     dst[i] = src[i];
   }

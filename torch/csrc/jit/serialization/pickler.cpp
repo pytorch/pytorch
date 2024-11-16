@@ -65,25 +65,27 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
   } else if (ivalue.isNone()) {
     push<PickleOpCode>(PickleOpCode::NONE);
   } else if (ivalue.isIntList()) {
-    pushSpecializedList(ivalue, "build_intlist", [=](const IValue& ivalue) {
+    pushSpecializedList(ivalue, "build_intlist", [this](const IValue& ivalue) {
       for (const int64_t item : ivalue.toIntVector()) {
         pushInt(item);
       }
     });
   } else if (ivalue.isTensorList()) {
-    pushSpecializedList(ivalue, "build_tensorlist", [=](const IValue& ivalue) {
-      for (const at::Tensor& item : ivalue.toTensorVector()) {
-        pushIValue(item);
-      }
-    });
+    pushSpecializedList(
+        ivalue, "build_tensorlist", [this](const IValue& ivalue) {
+          for (const at::Tensor& item : ivalue.toTensorVector()) {
+            pushIValue(item);
+          }
+        });
   } else if (ivalue.isDoubleList()) {
-    pushSpecializedList(ivalue, "build_doublelist", [=](const IValue& ivalue) {
-      for (double item : ivalue.toDoubleVector()) {
-        pushDouble(item);
-      }
-    });
+    pushSpecializedList(
+        ivalue, "build_doublelist", [this](const IValue& ivalue) {
+          for (double item : ivalue.toDoubleVector()) {
+            pushDouble(item);
+          }
+        });
   } else if (ivalue.isBoolList()) {
-    pushSpecializedList(ivalue, "build_boollist", [=](const IValue& ivalue) {
+    pushSpecializedList(ivalue, "build_boollist", [this](const IValue& ivalue) {
       for (bool item : ivalue.toBoolList()) {
         pushBool(item);
       }
@@ -133,7 +135,7 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
     }
     err << ". Please define serialization methods via def_pickle() for "
            "this class.";
-    AT_ERROR(err.str());
+    TORCH_CHECK(false, err.str());
   } else if (ivalue.isRRef()) {
 #ifdef USE_RPC
     TORCH_CHECK(
@@ -152,7 +154,7 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
     pushIValue(enum_holder->value());
     push<PickleOpCode>(PickleOpCode::REDUCE);
   } else {
-    AT_ERROR("Unknown IValue type for pickling: ", ivalue.tagKind());
+    TORCH_CHECK(false, "Unknown IValue type for pickling: ", ivalue.tagKind());
   }
 }
 
@@ -310,7 +312,8 @@ void Pickler::pushStorageOfTensor(const at::Tensor& tensor) {
   // location
   pushString(tensor.device().str());
   // size
-  pushInt(tensor.storage().nbytes() / tensor.element_size());
+  pushInt(
+      static_cast<int64_t>(tensor.storage().nbytes() / tensor.element_size()));
 
   push<PickleOpCode>(PickleOpCode::TUPLE);
   push<PickleOpCode>(PickleOpCode::BINPERSID);
@@ -335,8 +338,8 @@ void Pickler::pushBytes(const std::string& string) {
 }
 
 void Pickler::pushGlobal(
-    c10::string_view module_name,
-    c10::string_view class_name) {
+    std::string_view module_name,
+    std::string_view class_name) {
   std::string key;
   key.reserve(module_name.size() + class_name.size() + 2);
   key.append(module_name.data(), module_name.size());
@@ -368,10 +371,10 @@ void Pickler::pushLiteralSparseTensor(const at::Tensor& tensor) {
   pushGlobal("torch._utils", "_rebuild_sparse_tensor");
   push<PickleOpCode>(PickleOpCode::MARK);
   // layout
-  auto layout = static_cast<int>(tensor.layout());
-  pushInt(layout);
+  auto layout = tensor.layout();
+  pushInt(static_cast<int>(layout));
   switch (layout) {
-    case static_cast<int>(c10::Layout::Sparse):
+    case c10::Layout::Sparse:
       // size
       push<PickleOpCode>(PickleOpCode::MARK);
       for (auto size : tensor.sizes()) {
@@ -385,7 +388,7 @@ void Pickler::pushLiteralSparseTensor(const at::Tensor& tensor) {
       // values
       pushTensor(tensor._values());
       break;
-    case static_cast<int>(c10::Layout::SparseCsr):
+    case c10::Layout::SparseCsr:
       push<PickleOpCode>(PickleOpCode::MARK);
       for (auto size : tensor.sizes()) {
         pushInt(size);
@@ -401,7 +404,7 @@ void Pickler::pushLiteralSparseTensor(const at::Tensor& tensor) {
       TORCH_CHECK(
           false,
           "Unsupported sparse tensor layout type in serialization ",
-          static_cast<c10::Layout>(layout));
+          layout);
       break;
   }
   // backward_hooks
@@ -536,16 +539,17 @@ void Pickler::pushSpecializedList(
   push<PickleOpCode>(PickleOpCode::REDUCE);
 }
 
-static inline double swapDouble(double value) {
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+static double swapDouble(double value) {
   const char* bytes = reinterpret_cast<const char*>(&value);
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  double flipped;
+  double flipped = 0;
   char* out_bytes = reinterpret_cast<char*>(&flipped);
   for (const auto i : c10::irange(sizeof(double))) {
     out_bytes[i] = bytes[sizeof(double) - i - 1];
   }
   return *reinterpret_cast<double*>(out_bytes);
 }
+#endif
 
 void Pickler::pushDouble(double value) {
   push<PickleOpCode>(PickleOpCode::BINFLOAT);
@@ -581,11 +585,11 @@ void Pickler::pushLong(const std::string& data) {
 void Pickler::pushTensorReference(const IValue& ivalue) {
   pushGlobal("torch.jit._pickle", "build_tensor_from_id");
   tensor_table_->push_back(ivalue.toTensor());
-  int64_t tensor_id = tensor_table_->size() - 1;
+  auto tensor_id = tensor_table_->size() - 1;
   // Reduce arguments are spread (e.g. `*args`) before calling the global,
   // so wrap in a tuple
   push<PickleOpCode>(PickleOpCode::MARK);
-  pushIValue(tensor_id);
+  pushIValue(static_cast<int64_t>(tensor_id));
   push<PickleOpCode>(PickleOpCode::TUPLE);
 
   push<PickleOpCode>(PickleOpCode::REDUCE);
@@ -601,11 +605,11 @@ void Pickler::startTypeTag() {
   }
 }
 namespace {
-c10::optional<std::string> type_printer(const c10::Type& type) {
+std::optional<std::string> type_printer(const c10::Type& type) {
   if (auto dyn = type.castRaw<c10::DynamicType>()) {
     return dyn->fallback()->annotation_str(type_printer);
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 } // namespace
 
@@ -638,7 +642,7 @@ void Pickler::pushDict(const IValue& ivalue) {
   push<PickleOpCode>(PickleOpCode::EMPTY_DICT);
 
   static_assert(
-      std::is_unsigned<decltype(dict.size())>::value,
+      std::is_unsigned_v<decltype(dict.size())>,
       "Expected size to be non-negative.");
   push<PickleOpCode>(PickleOpCode::MARK);
 

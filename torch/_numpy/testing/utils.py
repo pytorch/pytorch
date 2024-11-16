@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 """
 Utility function to facilitate testing.
 
@@ -19,6 +21,7 @@ from warnings import WarningMessage
 
 import torch._numpy as np
 from torch._numpy import arange, asarray as asanyarray, empty, float32, intp, ndarray
+
 
 __all__ = [
     "assert_equal",
@@ -245,7 +248,7 @@ def assert_equal(actual, desired, err_msg="", verbose=True):
             assert_equal(actualr, desiredr)
             assert_equal(actuali, desiredi)
         except AssertionError:
-            raise AssertionError(msg)  # noqa: TRY200
+            raise AssertionError(msg)  # noqa: B904
 
     # isscalar test to check cases such as [np.nan] != np.nan
     if isscalar(desired) != isscalar(actual):
@@ -277,7 +280,7 @@ def assert_equal(actual, desired, err_msg="", verbose=True):
     except (DeprecationWarning, FutureWarning) as e:
         # this handles the case when the two types are not even comparable
         if "elementwise == comparison" in e.args[0]:
-            raise AssertionError(msg)  # noqa: TRY200
+            raise AssertionError(msg)  # noqa: B904
         else:
             raise
 
@@ -424,7 +427,7 @@ def assert_almost_equal(actual, desired, decimal=7, err_msg="", verbose=True):
             assert_almost_equal(actualr, desiredr, decimal=decimal)
             assert_almost_equal(actuali, desiredi, decimal=decimal)
         except AssertionError:
-            raise AssertionError(_build_err_msg())  # noqa: TRY200
+            raise AssertionError(_build_err_msg())  # noqa: B904
 
     if isinstance(actual, (ndarray, tuple, list)) or isinstance(
         desired, (ndarray, tuple, list)
@@ -597,7 +600,7 @@ def assert_array_compare(
         if (x_id == y_id).all().item() is not True:
             msg = build_err_msg(
                 [x, y],
-                err_msg + "\nx and y %s location mismatch:" % (hasval),
+                err_msg + f"\nx and y {hasval} location mismatch:",
                 verbose=verbose,
                 header=header,
                 names=("x", "y"),
@@ -724,7 +727,7 @@ def assert_array_compare(
             names=("x", "y"),
             precision=precision,
         )
-        raise ValueError(msg)  # noqa: TRY200
+        raise ValueError(msg)  # noqa: B904
 
 
 def assert_array_equal(x, y, err_msg="", verbose=True, *, strict=False):
@@ -1166,7 +1169,7 @@ def decorate_methods(cls, decorator, testmatch=None):
 
     """
     if testmatch is None:
-        testmatch = re.compile(r"(?:^|[\\b_\\.%s-])[Tt]est" % os.sep)
+        testmatch = re.compile(rf"(?:^|[\\b_\\.{os.sep}-])[Tt]est")
     else:
         testmatch = re.compile(testmatch)
     cls_attr = cls.__dict__
@@ -1964,11 +1967,11 @@ class suppress_warnings:
                 self._clear_registries()
 
             self._tmp_suppressions.append(
-                (category, message, re.compile(message, re.I), module, record)
+                (category, message, re.compile(message, re.IGNORECASE), module, record)
             )
         else:
             self._suppressions.append(
-                (category, message, re.compile(message, re.I), module, record)
+                (category, message, re.compile(message, re.IGNORECASE), module, record)
             )
 
         return record
@@ -2270,7 +2273,7 @@ def check_free_memory(free_bytes):
         try:
             mem_free = _parse_size(env_value)
         except ValueError as exc:
-            raise ValueError(  # noqa: TRY200
+            raise ValueError(  # noqa: B904
                 f"Invalid environment variable {env_var}: {exc}"
             )
 
@@ -2316,7 +2319,8 @@ def _parse_size(size_str):
     }
 
     size_re = re.compile(
-        r"^\s*(\d+|\d+\.\d+)\s*({})\s*$".format("|".join(suffixes.keys())), re.I
+        r"^\s*(\d+|\d+\.\d+)\s*({})\s*$".format("|".join(suffixes.keys())),
+        re.IGNORECASE,
     )
 
     m = size_re.match(size_str.lower())

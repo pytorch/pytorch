@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# mypy: allow-untyped-defs
 """
 model_dump: a one-stop shop for TorchScript model inspection.
 
@@ -63,21 +64,18 @@ Possible improvements:
       (they probably don't work at all right now).
 """
 
-import sys
-import os
-import io
-import pathlib
-import re
 import argparse
-import zipfile
+import io
 import json
+import os
 import pickle
 import pprint
+import re
+import sys
 import urllib.parse
-
-from typing import (
-    Dict,
-)
+import zipfile
+from pathlib import Path
+from typing import Dict
 
 import torch.utils.show_pickle
 
@@ -132,15 +130,12 @@ def hierarchical_pickle(data):
             }
         if typename == "torch._utils._rebuild_tensor_v2":
             assert data.state is None
-            if len(data.args) == 6:
-                storage, offset, size, stride, requires_grad, hooks = data.args
-            else:
-                storage, offset, size, stride, requires_grad, hooks, metadata = data.args
+            storage, offset, size, stride, requires_grad, *_ = data.args
             storage_info = get_storage_info(storage)
             return {"__tensor_v2__": [storage_info, offset, size, stride, requires_grad]}
         if typename == "torch._utils._rebuild_qtensor":
             assert data.state is None
-            storage, offset, size, stride, quantizer, requires_grad, hooks = data.args
+            storage, offset, size, stride, quantizer, requires_grad, *_ = data.args
             storage_info = get_storage_info(storage)
             assert isinstance(quantizer, tuple)
             assert isinstance(quantizer[0], torch.utils.show_pickle.FakeClass)
@@ -181,8 +176,8 @@ def hierarchical_pickle(data):
                 "__module_type__": typename,
                 "state": hierarchical_pickle((msg,)),
             }
-        raise Exception(f"Can't prepare fake object of type for JS: {typename}")
-    raise Exception(f"Can't prepare data of type for JS: {type(data)}")
+        raise Exception(f"Can't prepare fake object of type for JS: {typename}")  # noqa: TRY002
+    raise Exception(f"Can't prepare data of type for JS: {type(data)}")  # noqa: TRY002
 
 
 def get_model_info(
@@ -200,7 +195,7 @@ def get_model_info(
         file_size = path_or_file.stat().st_size  # type: ignore[attr-defined]
     elif isinstance(path_or_file, str):
         default_title = path_or_file
-        file_size = pathlib.Path(path_or_file).stat().st_size
+        file_size = Path(path_or_file).stat().st_size
     else:
         default_title = "buffer"
         path_or_file.seek(0, io.SEEK_END)
@@ -217,7 +212,7 @@ def get_model_info(
             if path_prefix is None:
                 path_prefix = prefix
             elif prefix != path_prefix:
-                raise Exception(f"Mismatched prefixes: {path_prefix} != {prefix}")
+                raise Exception(f"Mismatched prefixes: {path_prefix} != {prefix}")  # noqa: TRY002
             zip_files.append(dict(
                 filename=zi.filename,
                 compression=zi.compress_type,
@@ -411,4 +406,4 @@ def main(argv, *, stdout=None):
         page = burn_in_info(skeleton, info)
         output.write(page)
     else:
-        raise Exception("Invalid style")
+        raise Exception("Invalid style")  # noqa: TRY002

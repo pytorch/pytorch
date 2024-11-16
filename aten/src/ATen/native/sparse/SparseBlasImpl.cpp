@@ -28,6 +28,7 @@ namespace at::native::sparse::impl {
 
 namespace {
 
+#ifndef USE_ROCM
 bool operands_support_triton_mm_kernel(const Tensor& compressed, const Tensor& strided) {
   // Triton works only with blocksizes which are powers of 2.
   const auto is_power_of_2 = [](int64_t v) -> bool {
@@ -49,7 +50,7 @@ bool operands_support_triton_mm_kernel(const Tensor& compressed, const Tensor& s
                && strided.size(-1) % blocksize[0] == 0);
      });
 }
-
+#endif
 }
 
 Tensor& _compressed_row_strided_mm_out(const Tensor& compressed, const Tensor& strided, Tensor& result) {
@@ -174,10 +175,9 @@ Tensor& _compressed_row_strided_mm_out(const Tensor& compressed, const Tensor& s
     values.unsqueeze_(-1).unsqueeze_(-1);
   }
 
-  Tensor compressed_indices, plain_indices;
-  std::tie(compressed_indices, plain_indices) = at::sparse_csr::getCompressedPlainIndices(compressed);
+  auto [compressed_indices, plain_indices] = at::sparse_csr::getCompressedPlainIndices(compressed);
 
-  // Select block rows of the strided input that intersect with the block colums of the sparse input.
+  // Select block rows of the strided input that intersect with the block columns of the sparse input.
   auto strided_tiled_selected_rows = strided_tiled.index_select(-4, plain_indices);
 
   // Promote to float if output is half or bfloat16 for better precision
@@ -200,7 +200,7 @@ Tensor& _compressed_row_strided_mm_out(const Tensor& compressed, const Tensor& s
       compressed_indices.scalar_type() == kInt).select(0, 0);
 
   // Reduction step.
-  // If result is neither half nor bfloat16, do everyting in-place.
+  // If result is neither half nor bfloat16, do everything in-place.
   if (result.scalar_type() == mm_dtype) {
     // Zero out and sum over the blocks that share the same row indices.
     result_tiled.zero_();
@@ -411,6 +411,9 @@ void addmv_out_sparse_csr(
     const Tensor& result) {
 #if !AT_USE_MKL_SPARSE()
   TORCH_CHECK(mat.layout() == kSparseBsr || mat.layout() == kSparseCsr, "Unexpected layout", mat.layout());
+  if (beta.toComplexDouble() == 0.) {
+    result.zero_();
+  }
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
       result.scalar_type(), "addmv_out_sparse_csr_impl_reference", [&] {
         if (mat.crow_indices().scalar_type() == kLong) {

@@ -85,7 +85,7 @@ try:
     from quantization.pt2e.test_graph_utils import TestGraphUtils  # noqa: F401
     from quantization.pt2e.test_duplicate_dq import TestDuplicateDQPass  # noqa: F401
     from quantization.pt2e.test_metadata_porting import TestMetaDataPorting  # noqa: F401
-    from quantization.pt2e.test_generate_numeric_debug_handle import TestGenerateNumericDebugHandle  # noqa: F401
+    from quantization.pt2e.test_numeric_debugger import TestNumericDebugger  # noqa: F401
     from quantization.pt2e.test_quantize_pt2e import TestQuantizePT2E  # noqa: F401
     from quantization.pt2e.test_representation import TestPT2ERepresentation  # noqa: F401
     from quantization.pt2e.test_xnnpack_quantizer import TestXNNPACKQuantizer  # noqa: F401

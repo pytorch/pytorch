@@ -1,5 +1,3 @@
-import sys
-
 import torch
 from torch._C import _add_docstr, _linalg  # type: ignore[attr-defined]
 
@@ -86,7 +84,7 @@ Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
 the output has the same batch dimensions.
 
 """ + fr"""
-.. note:: {common_notes["sync_note"]}
+.. note:: {common_notes["sync_note_has_ex"].format("torch.linalg.cholesky_ex")}
 """ + r"""
 
 .. seealso::
@@ -222,7 +220,7 @@ Also supports batches of matrices, and if :attr:`A` is a batch of matrices
 then the output has the same batch dimensions.
 
 """ + fr"""
-.. note:: {common_notes["sync_note"]}
+.. note:: {common_notes["sync_note_has_ex"].format("torch.linalg.inv_ex")}
 """ + r"""
 
 .. note::
@@ -457,6 +455,8 @@ Supports input of float, double, cfloat and cdouble dtypes.
 Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
 the output has the same batch dimensions.
 
+The returned eigenvalues are not guaranteed to be in any specific order.
+
 .. note:: The eigenvalues and eigenvectors of a real matrix may be complex.
 
 """ + fr"""
@@ -558,6 +558,8 @@ where :math:`\mathrm{I}_n` is the `n`-dimensional identity matrix.
 Supports input of float, double, cfloat and cdouble dtypes.
 Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
 the output has the same batch dimensions.
+
+The returned eigenvalues are not guaranteed to be in any specific order.
 
 .. note:: The eigenvalues of a real matrix may be complex, as the roots of a real polynomial may be complex.
 
@@ -781,18 +783,18 @@ householder_product(A, tau, *, out=None) -> Tensor
 Computes the first `n` columns of a product of Householder matrices.
 
 Let :math:`\mathbb{K}` be :math:`\mathbb{R}` or :math:`\mathbb{C}`, and
-let :math:`V \in \mathbb{K}^{m \times n}` be a matrix with columns :math:`v_i \in \mathbb{K}^m`
-for :math:`i=1,\ldots,m` with :math:`m \geq n`. Denote by :math:`w_i` the vector resulting from
-zeroing out the first :math:`i-1` components of :math:`v_i` and setting to `1` the :math:`i`-th.
+let :math:`A \in \mathbb{K}^{m \times n}` be a matrix with columns :math:`a_i \in \mathbb{K}^m`
+for :math:`i=1,\ldots,m` with :math:`m \geq n`. Denote by :math:`b_i` the vector resulting from
+zeroing out the first :math:`i-1` components of :math:`a_i` and setting to `1` the :math:`i`-th.
 For a vector :math:`\tau \in \mathbb{K}^k` with :math:`k \leq n`, this function computes the
 first :math:`n` columns of the matrix
 
 .. math::
 
-    H_1H_2 ... H_k \qquad\text{with}\qquad H_i = \mathrm{I}_m - \tau_i w_i w_i^{\text{H}}
+    H_1H_2 ... H_k \qquad\text{with}\qquad H_i = \mathrm{I}_m - \tau_i b_i b_i^{\text{H}}
 
-where :math:`\mathrm{I}_m` is the `m`-dimensional identity matrix and :math:`w^{\text{H}}` is the
-conjugate transpose when :math:`w` is complex, and the transpose when :math:`w` is real-valued.
+where :math:`\mathrm{I}_m` is the `m`-dimensional identity matrix and :math:`b^{\text{H}}` is the
+conjugate transpose when :math:`b` is complex, and the transpose when :math:`b` is real-valued.
 The output matrix is the same size as the input matrix :attr:`A`.
 
 See `Representation of Orthogonal or Unitary Matrices`_ for further details.
@@ -811,7 +813,7 @@ the output has the same batch dimensions.
         However, that function is not supported by autograd.
 
 .. warning::
-    Gradient computations are only well-defined if :math:`tau_i \neq \frac{1}{||v_i||^2}`.
+    Gradient computations are only well-defined if :math:`\tau_i \neq \frac{1}{||a_i||^2}`.
     If this condition is not met, no error will be thrown, but the gradient produced may contain `NaN`.
 
 Args:
@@ -1115,7 +1117,7 @@ Examples::
     tensor([2])
 
 .. _condition number:
-    https://pytorch.org/docs/master/linalg.html#torch.linalg.cond
+    https://pytorch.org/docs/main/linalg.html#torch.linalg.cond
 .. _full description of these drivers:
     https://www.netlib.org/lapack/lug/node27.html
 """)
@@ -1438,7 +1440,8 @@ but it is faster in some cases.
 
 Args:
     x (Tensor): tensor, flattened by default, but this behavior can be
-        controlled using :attr:`dim`.
+        controlled using :attr:`dim`.  (Note: the keyword argument
+        `input` can also be used as an alias for `x`.)
     ord (int, float, inf, -inf, 'fro', 'nuc', optional): order of norm. Default: `2`
     dim (int, Tuple[int], optional): dimensions over which to compute
         the norm. See above for the behavior when :attr:`dim`\ `= None`.
@@ -1450,7 +1453,7 @@ Keyword args:
     out (Tensor, optional): output tensor. Ignored if `None`. Default: `None`.
     dtype (:class:`torch.dtype`, optional): type used to perform the accumulation and the return.
         If specified, :attr:`x` is cast to :attr:`dtype` before performing the operation,
-        and the returned tensor’s type will be :attr:`dtype` if real and of its real counterpart if complex.
+        and the returned tensor's type will be :attr:`dtype` if real and of its real counterpart if complex.
         :attr:`dtype` may be complex if :attr:`x` is complex, otherwise it must be real.
         :attr:`x` should be convertible without narrowing to :attr:`dtype`. Default: None
 
@@ -1773,7 +1776,7 @@ Examples::
     tensor(3.0957e-06)
 
 .. _condition number:
-    https://pytorch.org/docs/master/linalg.html#torch.linalg.cond
+    https://pytorch.org/docs/main/linalg.html#torch.linalg.cond
 .. _the resulting vectors will span the same subspace:
     https://en.wikipedia.org/wiki/Singular_value_decomposition#Singular_values,_singular_vectors,_and_their_relation_to_the_SVD
 """)
@@ -2130,8 +2133,11 @@ Letting `*` be zero or more batch dimensions,
     It is possible to compute the solution of the system :math:`XA = B` by passing the inputs
     :attr:`A` and :attr:`B` transposed and transposing the output returned by this function.
 
+.. note::
+    :attr:`A` is allowed to be a non-batched `torch.sparse_csr_tensor`, but only with `left=True`.
+
 """ + fr"""
-.. note:: {common_notes["sync_note"]}
+.. note:: {common_notes["sync_note_has_ex"].format("torch.linalg.solve_ex")}
 """ + r"""
 
 .. seealso::
@@ -2227,7 +2233,7 @@ the output has the same batch dimensions.
         equations with a unique solution.
 
 Args:
-    A (Tensor): tensor of shape `(*, n, n)` (or `(*, k, k)` if :attr:`left`\ `= True`)
+    A (Tensor): tensor of shape `(*, n, n)` (or `(*, k, k)` if :attr:`left`\ `= False`)
                 where `*` is zero or more batch dimensions.
     B (Tensor): right-hand side tensor of shape `(*, n, k)`.
 
@@ -2332,9 +2338,9 @@ Examples::
     >>> A = torch.randn(2, 3, 3)
     >>> B1 = torch.randn(2, 3, 4)
     >>> B2 = torch.randn(2, 3, 7)
-    >>> A_factor = torch.linalg.lu_factor(A)
-    >>> X1 = torch.linalg.lu_solve(A_factor, B1)
-    >>> X2 = torch.linalg.lu_solve(A_factor, B2)
+    >>> LU, pivots = torch.linalg.lu_factor(A)
+    >>> X1 = torch.linalg.lu_solve(LU, pivots, B1)
+    >>> X2 = torch.linalg.lu_solve(LU, pivots, B2)
     >>> torch.allclose(A @ X1, B1)
     True
     >>> torch.allclose(A @ X2, B2)
@@ -2392,7 +2398,7 @@ If :attr:`left`\ `= False`, this function returns the matrix :math:`X \in \mathb
 
     XA = B\mathrlap{\qquad A \in \mathbb{K}^{k \times k}, B \in \mathbb{K}^{n \times k}.}
 
-If  :attr:`adjoint`\ `= True` (and :attr:`left`\ `= True), given an LU factorization of :math:`A`
+If  :attr:`adjoint`\ `= True` (and :attr:`left`\ `= True`), given an LU factorization of :math:`A`
 this function function returns the :math:`X \in \mathbb{K}^{n \times k}` that solves the system
 
 .. math::

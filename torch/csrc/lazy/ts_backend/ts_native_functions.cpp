@@ -20,15 +20,16 @@
 #include <torch/csrc/lazy/ts_backend/ts_eager_fallback.h>
 #include <torch/library.h>
 
+#include <utility>
+
 using at::Tensor;
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 namespace {
 
 at::Tensor CreateLtcTensor(
     const at::Tensor& tensor,
-    const c10::optional<torch::lazy::BackendDevice>& device) {
+    const std::optional<torch::lazy::BackendDevice>& device) {
   if (tensor.defined() && device) {
     return torch::lazy::CreateAtenFromLtcTensor(
         torch::lazy::LazyTensor::Create(tensor, *device));
@@ -36,13 +37,13 @@ at::Tensor CreateLtcTensor(
   return tensor;
 }
 
-c10::optional<torch::lazy::BackendDevice> GetLtcDevice(
-    const c10::optional<c10::Device>& device) {
+std::optional<torch::lazy::BackendDevice> GetLtcDevice(
+    const std::optional<c10::Device>& device) {
   if (!device) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   if (device->type() != at::kLazy) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   return torch::lazy::atenDeviceToBackendDevice(*device);
 }
@@ -53,7 +54,7 @@ c10::optional<torch::lazy::BackendDevice> GetLtcDevice(
 // This should be safe to do, because every operator in the LT is functional.
 at::Tensor LazyNativeFunctions::clone(
     const at::Tensor& self,
-    c10::optional<at::MemoryFormat> memory_format) {
+    std::optional<at::MemoryFormat> memory_format) {
   auto self_lt = torch::lazy::TryGetLtcTensor(self);
   return torch::lazy::CreateAtenFromLtcTensor(
       self_lt->Create(self_lt->GetIrValue(), self_lt->GetDevice()));
@@ -130,6 +131,7 @@ at::Tensor LazyNativeFunctions::_copy_from_and_resize(
     // at this point we know dst is a lazy tensor
     auto* dest_impl =
         dynamic_cast<torch::lazy::LTCTensorImpl*>(dst.unsafeGetTensorImpl());
+    TORCH_CHECK(dest_impl);
     dest_impl->tensor()->UpdateFromTensorOut(self_tensor);
     dest_impl->force_refresh_sizes();
   }
@@ -138,12 +140,12 @@ at::Tensor LazyNativeFunctions::_copy_from_and_resize(
 
 at::Tensor LazyNativeFunctions::_to_copy(
     const at::Tensor& self,
-    c10::optional<at::ScalarType> dtype,
-    c10::optional<at::Layout> layout,
-    c10::optional<at::Device> device,
-    c10::optional<bool> pin_memory,
+    std::optional<at::ScalarType> dtype,
+    std::optional<at::Layout> layout,
+    std::optional<at::Device> device,
+    std::optional<bool> pin_memory,
     bool non_blocking,
-    c10::optional<at::MemoryFormat> memory_format) {
+    std::optional<at::MemoryFormat> memory_format) {
   if (force_eager_fallback(at::aten::_to_copy)) {
     TORCH_INTERNAL_ASSERT(
         false,
@@ -235,7 +237,7 @@ at::Tensor LazyNativeFunctions::_to_copy(
     // captured IR, or we will try to convert an eager tensor back to a lazy one
     // inside the torchscript executor lazy:0 -> lazy:1 is handled in case3, so
     // we can safely drop the device argument
-    device = c10::nullopt;
+    device = std::nullopt;
 
     torch::lazy::NodePtr node = torch::lazy::ReuseNode<ToCopy>(
         lazy_self->GetIrValue(),
@@ -266,15 +268,15 @@ at::Tensor LazyNativeFunctions::_to_copy(
             std::move(node), lazy_self->GetDevice()));
     return result;
   }
-};
+}
 
 at::Tensor LazyNativeFunctions::empty_symint(
     at::SymIntArrayRef sym_size,
-    c10::optional<at::ScalarType> dtype,
-    c10::optional<at::Layout> layout,
-    c10::optional<at::Device> device,
-    c10::optional<bool> pin_memory,
-    c10::optional<at::MemoryFormat> memory_format) {
+    std::optional<at::ScalarType> dtype,
+    std::optional<at::Layout> layout,
+    std::optional<at::Device> device,
+    std::optional<bool> pin_memory,
+    std::optional<at::MemoryFormat> memory_format) {
   // TODO: support this directly
   auto size = C10_AS_INTARRAYREF_SLOW(sym_size);
   const auto device_type = torch::lazy::getBackend()->EagerFallbackDeviceType();
@@ -301,13 +303,13 @@ at::Tensor LazyNativeFunctions::empty_symint(
 at::Tensor LazyNativeFunctions::empty_strided_symint(
     at::SymIntArrayRef sym_size,
     at::SymIntArrayRef sym_stride,
-    c10::optional<at::ScalarType> dtype,
-    c10::optional<at::Layout> layout,
-    c10::optional<at::Device> device,
-    c10::optional<bool> pin_memory) {
+    std::optional<at::ScalarType> dtype,
+    std::optional<at::Layout> layout,
+    std::optional<at::Device> device,
+    std::optional<bool> pin_memory) {
   TORCH_LAZY_FN_COUNTER("lazy::");
   at::Tensor t =
-      empty_symint(sym_size, dtype, layout, device, pin_memory, c10::nullopt);
+      empty_symint(sym_size, dtype, layout, device, pin_memory, std::nullopt);
   auto size = C10_AS_INTARRAYREF_SLOW(sym_size);
   auto stride = C10_AS_INTARRAYREF_SLOW(sym_stride);
   return t.as_strided(size, stride, /*storage_offset=*/0);
@@ -406,10 +408,10 @@ at::Tensor LazyNativeFunctions::new_empty_strided_symint(
     const at::Tensor& self,
     c10::SymIntArrayRef size,
     c10::SymIntArrayRef stride,
-    c10::optional<at::ScalarType> dtype,
-    c10::optional<at::Layout> layout,
-    c10::optional<at::Device> device,
-    c10::optional<bool> pin_memory) {
+    std::optional<at::ScalarType> dtype,
+    std::optional<at::Layout> layout,
+    std::optional<at::Device> device,
+    std::optional<bool> pin_memory) {
   return at::functionalization::
       functionalize_aten_op_symint<ATEN_OP(new_empty_strided)>::call(
           self, size, stride, dtype, layout, device, pin_memory);
@@ -421,7 +423,7 @@ at::Tensor LazyNativeFunctions::narrow_copy_symint(
     c10::SymInt start,
     c10::SymInt length) {
   return at::functionalization::functionalize_aten_op_symint<ATEN_OP(
-      narrow_copy)>::call(self, dim, start, length);
+      narrow_copy)>::call(self, dim, std::move(start), std::move(length));
 }
 at::Tensor LazyNativeFunctions::pixel_shuffle(
     const at::Tensor& self,
@@ -441,7 +443,7 @@ at::Tensor LazyNativeFunctions::select_backward_symint(
     int64_t dim,
     c10::SymInt index) {
   return at::functionalization::functionalize_aten_op_symint<ATEN_OP(
-      select_backward)>::call(grad_output, input_sizes, dim, index);
+      select_backward)>::call(grad_output, input_sizes, dim, std::move(index));
 }
 at::Tensor LazyNativeFunctions::_trilinear(
     const at::Tensor& i1,
@@ -457,8 +459,8 @@ at::Tensor LazyNativeFunctions::_trilinear(
 }
 at::Tensor LazyNativeFunctions::linalg_pinv(
     const at::Tensor& self,
-    const c10::optional<at::Tensor>& atol,
-    const c10::optional<at::Tensor>& rtol,
+    const std::optional<at::Tensor>& atol,
+    const std::optional<at::Tensor>& rtol,
     bool hermitian) {
   return at::functionalization::functionalize_aten_op<ATEN_OP2(
       linalg_pinv, atol_rtol_tensor)>::call(self, atol, rtol, hermitian);
@@ -517,16 +519,22 @@ at::Tensor LazyNativeFunctions::slice_backward_symint(
     c10::SymInt start,
     c10::SymInt end,
     c10::SymInt step) {
-  return at::functionalization::functionalize_aten_op_symint<ATEN_OP(
-      slice_backward)>::call(grad_output, input_sizes, dim, start, end, step);
+  return at::functionalization::
+      functionalize_aten_op_symint<ATEN_OP(slice_backward)>::call(
+          grad_output,
+          input_sizes,
+          dim,
+          std::move(start),
+          std::move(end),
+          std::move(step));
 }
 
 // re-use the composite kernel from core, that way we don't need to provide a
 // backwards formula for native_group_norm
 std::tuple<Tensor, Tensor, Tensor> LazyNativeFunctions::native_group_norm(
     const at::Tensor& input,
-    const c10::optional<at::Tensor>& weight,
-    const c10::optional<at::Tensor>& bias,
+    const std::optional<at::Tensor>& weight,
+    const std::optional<at::Tensor>& bias,
     int64_t N,
     int64_t C,
     int64_t HxW,
@@ -536,5 +544,4 @@ std::tuple<Tensor, Tensor, Tensor> LazyNativeFunctions::native_group_norm(
       input, weight, bias, N, C, HxW, group, eps);
 }
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

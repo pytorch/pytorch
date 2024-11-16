@@ -355,7 +355,7 @@ properties on the nodes as we see them at runtime. That might look like:
                 attr_itr = self.mod
                 for i, atom in enumerate(target_atoms):
                     if not hasattr(attr_itr, atom):
-                        raise RuntimeError(f"Node referenced nonexistant target {'.'.join(target_atoms[:i])}")
+                        raise RuntimeError(f"Node referenced nonexistent target {'.'.join(target_atoms[:i])}")
                     attr_itr = getattr(attr_itr, atom)
                 return attr_itr
 
@@ -1143,12 +1143,10 @@ API Reference
 .. py:module:: torch.fx.experimental.normalize
 .. py:module:: torch.fx.experimental.optimization
 .. py:module:: torch.fx.experimental.partitioner_utils
-.. py:module:: torch.fx.experimental.proxy_tensor
 .. py:module:: torch.fx.experimental.recording
 .. py:module:: torch.fx.experimental.refinement_types
 .. py:module:: torch.fx.experimental.rewriter
 .. py:module:: torch.fx.experimental.schema_type_annotation
-.. py:module:: torch.fx.experimental.symbolic_shapes
 .. py:module:: torch.fx.experimental.sym_node
 .. py:module:: torch.fx.experimental.unification.core
 .. py:module:: torch.fx.experimental.unification.dispatch
@@ -1176,6 +1174,7 @@ API Reference
 .. py:module:: torch.fx.passes.fake_tensor_prop
 .. py:module:: torch.fx.passes.graph_drawer
 .. py:module:: torch.fx.passes.graph_manipulation
+.. py:module:: torch.fx.passes.graph_transform_observer
 .. py:module:: torch.fx.passes.infra.partitioner
 .. py:module:: torch.fx.passes.infra.pass_base
 .. py:module:: torch.fx.passes.infra.pass_manager
@@ -1184,6 +1183,7 @@ API Reference
 .. py:module:: torch.fx.passes.param_fetch
 .. py:module:: torch.fx.passes.pass_manager
 .. py:module:: torch.fx.passes.reinplace
+.. py:module:: torch.fx.passes.runtime_assert
 .. py:module:: torch.fx.passes.shape_prop
 .. py:module:: torch.fx.passes.split_module
 .. py:module:: torch.fx.passes.split_utils

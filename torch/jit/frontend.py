@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import ast
 import dataclasses
 import inspect
@@ -71,6 +72,7 @@ from torch._sources import (
 )
 from torch.jit._dataclass_impls import DATACLASS_MAGIC_METHODS
 from torch.jit._monkeytype_config import get_qualified_name, monkeytype_trace
+
 
 _IS_ASTUNPARSE_INSTALLED = False
 try:
@@ -249,7 +251,16 @@ def get_class_assigns(ctx, cls_ast):
 
 
 def get_jit_class_def(cls, self_name):
-    # Get defs for each method within the current class independently
+    """Get definitions for each method within the current class independently.
+
+    Args:
+        cls: The class to get definition of.
+        self_name: The name of the class that the properties should belong to.
+
+    Returns:
+        torch._C._jit_tree_views.ClassDef: A representation of the class,
+            the methods in the class and their definition as a tree.
+    """
     # TODO: proper overriding analysis when implementing class inheritance
     methods = inspect.getmembers(
         cls,
@@ -365,7 +376,7 @@ def get_jit_def(fn, def_name, self_name=None, is_classmethod=False):
     # for the arguments from type_trace_db
     type_trace_db = torch.jit._script._get_type_trace_db()
     pdt_arg_types = None
-    if monkeytype_trace and not isinstance(fn, _ParsedDef):
+    if monkeytype_trace and not isinstance(fn, _ParsedDef):  # type: ignore[truthy-function]
         qualname = get_qualified_name(fn)
         pdt_arg_types = type_trace_db.get_args_types(qualname)
 
@@ -593,6 +604,15 @@ def build_ignore_context_manager(ctx, stmt):
 
 
 def get_default_args(fn):
+    """
+    Get a dictionary of default arguments for a function.
+
+    Args:
+        fn: Callable - The function to inspect for default arguments.
+    Returns:
+        (Dict[str, Any]): mapping argument names to their default values if
+        :attr:`fn` is not None, else empty dictionary.
+    """
     if fn is None:
         return {}
 
@@ -1072,7 +1092,7 @@ class ExprBuilder(Builder):
                     sub_exprs.append(build_Index(ctx, base, expr))
                 elif sub_type is ast.Slice:
                     sub_exprs.append(build_SliceExpr(ctx, base, expr))
-                elif sub_type is ast.Ellipsis:
+                elif sub_type is ast.Constant and expr.value is Ellipsis:
                     sub_exprs.append(Dots(base.range()))
                 else:
                     raise NotSupportedError(
@@ -1206,8 +1226,8 @@ class ExprBuilder(Builder):
                     raise NotSupportedError(r, "Don't support formatting in JoinedStr")
                 s += "{}"
                 args.append(build_expr(ctx, value.value))
-            elif isinstance(value, ast.Str):
-                s += value.s
+            elif isinstance(value, ast.Constant):
+                s += value.value
             else:
                 raise NotSupportedError(r, "Unsupported value in JoinedStr")
 

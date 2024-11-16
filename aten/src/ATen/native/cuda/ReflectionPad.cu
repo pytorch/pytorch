@@ -160,10 +160,10 @@ __global__ void reflection_pad2d_backward_out_kernel(
     gpuAtomicAddNoReturn(&grad_input[index_pair.first], grad_output[index_pair.second]);
   }
 }
-template <typename scalar_t, typename F>
+template <typename input_scalar_t, typename output_scalar_t, typename F>
 __device__ inline void parallel_reflection_pad3d(
-    PackedTensorAccessor64<scalar_t, 5> input,
-    PackedTensorAccessor64<scalar_t, 5> output,
+    PackedTensorAccessor64<input_scalar_t, 5> input,
+    PackedTensorAccessor64<output_scalar_t, 5> output,
     int64_t pad_left,
     int64_t pad_top,
     int64_t pad_front,
@@ -211,7 +211,7 @@ __device__ inline void parallel_reflection_pad3d(
 
 template<typename scalar_t>
 __global__ void reflection_pad3d_out_kernel(
-    PackedTensorAccessor64<scalar_t, 5> input,
+    PackedTensorAccessor64<const scalar_t, 5> input,
     PackedTensorAccessor64<scalar_t, 5> output,
     int64_t pad_left,  int64_t pad_top, int64_t pad_front,
     int64_t y_shift, int64_t z_shift
@@ -241,7 +241,7 @@ __global__ void reflection_pad3d_out_kernel(
 template <typename scalar_t>
 __global__ void reflection_pad3d_backward_out_kernel(
     PackedTensorAccessor64<scalar_t, 5> grad_input,
-    PackedTensorAccessor64<scalar_t, 5> grad_output,
+    PackedTensorAccessor64<const scalar_t, 5> grad_output,
     int64_t pad_left,  int64_t pad_top, int64_t pad_front,
     int64_t y_shift, int64_t z_shift
 ) {
@@ -595,7 +595,7 @@ TORCH_IMPL_FUNC(reflection_pad3d_out_cuda) (
           output_inner = output.unsqueeze(0);
         }
 
-        auto input_packed = input_inner.packed_accessor64<scalar_t, 5>();
+        auto input_packed = input_inner.packed_accessor64<const scalar_t, 5>();
         auto output_packed = output_inner.packed_accessor64<scalar_t, 5>();
 
         int64_t output_plane_size = output_packed.size(2) * output_packed.size(3) * output_packed.size(4);
@@ -648,7 +648,7 @@ TORCH_IMPL_FUNC(reflection_pad3d_backward_out_cuda) (
         }
 
         auto grad_input_packed = grad_input_.packed_accessor64<scalar_t, 5>();
-        auto grad_output_packed = grad_output_.packed_accessor64<scalar_t, 5>();
+        auto grad_output_packed = grad_output_.packed_accessor64<const scalar_t, 5>();
 
         int64_t output_plane_size = grad_output_packed.size(2) *
             grad_output_packed.size(3) * grad_output_packed.size(4);

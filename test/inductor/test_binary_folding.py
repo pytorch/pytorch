@@ -4,35 +4,34 @@ import importlib
 import itertools
 import os
 import sys
-import unittest
 
 import torch
 from torch import nn
 from torch._inductor import config as inductor_config
 from torch.testing._internal.common_cuda import TEST_CUDNN
 
+
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 
-from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS, TEST_WITH_ASAN
+from inductor.test_inductor_freezing import (  # @manual=fbcode//caffe2/test/inductor:inductor_freezing-library
+    TestCase,
+)
+from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
+    check_model,
+    check_model_gpu,
+    copy_tests,
+)
+from torch.testing._internal.common_utils import TEST_WITH_ASAN
 from torch.testing._internal.inductor_utils import skipCUDAIf
 
-if IS_WINDOWS and IS_CI:
-    sys.stderr.write(
-        "Windows CI does not have necessary dependencies for test_torchinductor yet\n"
-    )
-    if __name__ == "__main__":
-        sys.exit(0)
-    raise unittest.SkipTest("requires sympy/functorch/filelock")
-
-from inductor.test_inductor_freezing import TestCase
-from inductor.test_torchinductor import check_model, check_model_cuda, copy_tests
 
 importlib.import_module("functorch")
 importlib.import_module("filelock")
 
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
+
 
 aten = torch.ops.aten
 
@@ -56,7 +55,7 @@ class BinaryFoldingTemplate(TestCase):
                     self.use_scalar = scalar
                     tensor_size = [1 for _ in range(self.conv.weight.ndim)]
                     tensor_size[1] = self.conv.weight.size(0)
-                    self.tensor = (
+                    self.tensor = torch.nn.Parameter(
                         add_tensor
                         if add_tensor is not None
                         else torch.rand(tensor_size).to(device)
@@ -136,7 +135,11 @@ class BinaryFoldingTemplate(TestCase):
                 nn.Conv2d,
                 pytorch_op,
                 False,
-                add_tensor=torch.rand(32, 1, 32).to(self.device),
+                add_tensor=torch.rand(
+                    32,
+                    1,
+                    32,
+                ).to(self.device),
                 expect_success=False,
             )
 
@@ -156,7 +159,7 @@ class BinaryFoldingTemplate(TestCase):
                 nn.Conv2d,
                 pytorch_op,
                 False,
-                add_tensor=torch.tensor([2]).to(torch.int).to(self.device),
+                add_tensor=torch.tensor([2]).to(torch.float64).to(self.device),
                 expect_success=False,
             )
 
@@ -239,20 +242,20 @@ if HAS_CPU and not torch.backends.mps.is_available():
 
     copy_tests(BinaryFoldingTemplate, FreezingCpuTests, "cpu")
 
-if HAS_CUDA and not TEST_WITH_ASAN:
+if HAS_GPU and not TEST_WITH_ASAN:
 
-    class FreezingCudaTests(TestCase):
-        common = check_model_cuda
-        device = "cuda"
-        autocast = torch.cuda.amp.autocast
+    class FreezingGpuTests(TestCase):
+        common = check_model_gpu
+        device = GPU_TYPE
+        autocast = torch.amp.autocast(device_type=GPU_TYPE)
 
-    copy_tests(BinaryFoldingTemplate, FreezingCudaTests, "cuda")
+    copy_tests(BinaryFoldingTemplate, FreezingGpuTests, GPU_TYPE)
 
 
 del BinaryFoldingTemplate
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch._inductor.test_case import run_tests
 
-    if HAS_CPU or HAS_CUDA:
+    if HAS_CPU or HAS_GPU:
         run_tests(needs="filelock")

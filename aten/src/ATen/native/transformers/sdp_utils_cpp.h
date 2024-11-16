@@ -22,13 +22,14 @@
 
 namespace sdp {
 
-constexpr int32_t num_backends = 4;
+constexpr int32_t num_backends = 5;
 enum class SDPBackend {
   error = -1,
   math = 0,
   flash_attention = 1,
   efficient_attention = 2,
-  cudnn_attention = 3
+  cudnn_attention = 3,
+  overrideable = 4
 };
 
 // Note that if this changed make sure to update
@@ -44,16 +45,17 @@ struct sdp_params {
   at::Tensor query;
   at::Tensor key;
   at::Tensor value;
-  c10::optional<at::Tensor> attn_mask;
+  std::optional<at::Tensor> attn_mask;
   double dropout;
   bool is_causal;
+  bool enable_gqa;
 };
 
 SDPBackend select_sdp_backend_cpp(sdp_params const& kernel_params);
 
 inline c10::SymFloat calculate_scale(
     const at::Tensor& query,
-    c10::optional<double> scale) {
+    std::optional<double> scale) {
   const auto softmax_scale = scale.has_value()
       ? scale.value()
       : (c10::SymFloat(1.0) / (c10::SymFloat(query.sym_size(-1)).sqrt()));
@@ -266,7 +268,7 @@ inline bool check_requires_grad_and_nested(sdp_params const& params, bool debug)
 inline bool check_for_attn_mask(sdp_params const& params, bool debug) {
   if (params.attn_mask.has_value()) {
     if (debug) {
-      TORCH_WARN("Both fused kernels do not support non-null attn_mask.");
+      TORCH_WARN("Flash Attention does not support non-null attn_mask.");
     }
     return false;
   }
@@ -313,7 +315,7 @@ inline bool check_tensor_shapes(sdp_params const& params, bool debug) {
         (query_dim == 4))) {
     if (debug) {
       TORCH_WARN(
-          "Both fused kernels requires query, key and value to be 4 dimensional, but got Query dim: ",
+          "All fused kernels requires query, key and value to be 4 dimensional, but got Query dim: ",
           query_dim,
           ", Key dim: ",
           params.key.dim(),
@@ -341,6 +343,46 @@ inline bool check_safe_kv_broadcast(at::Tensor const& param, bool debug) {
   return true;
 }
 
+inline bool check_grouped_query_attention(sdp_params const& params, bool debug) {
+  const auto q_num_heads = params.query.sym_size(-3);
+  const auto k_num_heads = params.key.sym_size(-3);
+  const auto v_num_heads = params.value.sym_size(-3);
+  const bool same_kv_heads = k_num_heads == v_num_heads;
+
+  if (!(same_kv_heads)){
+    if (debug) {
+      TORCH_WARN(
+          "Both fused kernels require key and value to have the same num_heads and batch_size but got: ",
+          "Key sizes: ",
+          params.key.sizes(),
+          ", Value sizes: ",
+          params.value.sizes(),
+          ", Query sizes: ",
+          params.query.sizes(),
+          " instead.");
+    }
+    return false;
+  }
+  // Check if grouped query attention is supported and validate the number of
+  // heads
+  if (q_num_heads % k_num_heads != 0) {
+    if (debug) {
+      TORCH_WARN(
+          "FlashAttentionV2 only supports grouped query attention, where the number of heads in key/value must divide number of heads in query.",
+          "Got input Key sizes(): ",
+          params.key.sym_size(-3),
+          ", Value sizes(): ",
+          params.value.sym_size(-3),
+          ", Query sizes(): ",
+          params.query.sym_size(-3),
+          " instead.");
+    }
+    return false;
+  }
+  return true;
+}
+
+template <bool supports_gqa>
 inline bool check_batch_size_and_num_heads_dense(sdp_params const& params, bool debug) {
   // This is expected to be called after check_tensor_shapes ensuring that the
   // size() calls won't error since the inputs are all 4 dimensional
@@ -352,16 +394,36 @@ inline bool check_batch_size_and_num_heads_dense(sdp_params const& params, bool 
   bool same_batch_size =
       q_batch_size == k_batch_size && q_batch_size == v_batch_size;
 
-  auto q_num_heads = params.query.sym_size(1);
-  auto k_num_heads = params.key.sym_size(1);
-  auto v_num_heads = params.value.sym_size(1);
+  auto q_num_heads = params.query.sym_size(-3);
+  auto k_num_heads = params.key.sym_size(-3);
+  auto v_num_heads = params.value.sym_size(-3);
+
   bool same_num_heads =
       q_num_heads == k_num_heads && q_num_heads == v_num_heads;
 
-  if (!(same_batch_size && same_num_heads)) {
+  if (!same_batch_size){
+    if(debug) {
+      TORCH_WARN(
+          "For dense inputs, both fused kernels require query, key and value to have the same batch_size. ",
+          "Query.sizes(): ",
+          params.query.sizes(),
+          ", Key.sizes(): ",
+          params.key.sizes(),
+          ", Value.sizes(): ",
+          params.value.sizes(),
+          " instead. To broadcast dense inputs, try using unsqueeze and expand_to before passing them into the kernel.");
+    }
+    return false;
+  }
+
+  if(params.enable_gqa && supports_gqa){
+    return check_grouped_query_attention(params, debug);
+  }
+
+  if (!same_num_heads){
     if (debug) {
       TORCH_WARN(
-          "For dense inputs, both fused kernels require query, key and value to have the same batch_size and num_heads. ",
+          "For dense input, both fused kernels require query, key and value to have the same num_heads. ",
           "Query.sizes(): ",
           params.query.sizes(),
           ", Key sizes(): ",
@@ -372,6 +434,7 @@ inline bool check_batch_size_and_num_heads_dense(sdp_params const& params, bool 
     }
     return false;
   }
+  // If all checks pass, return true
   return true;
 }
 
@@ -425,7 +488,7 @@ inline bool check_nonzero_sequence_lengths_dense(sdp_params const& params, bool 
   if (zero_seq_len_q || zero_seq_len_k) {
     if (debug) {
       TORCH_WARN(
-          "Both fused kernels do not support zero seq_len_q or seq_len_kv.");
+          "All fused kernels do not support zero seq_len_q or seq_len_kv.");
     }
     return false;
   }
@@ -460,7 +523,7 @@ inline bool check_last_dim_stride_equals_1_dense(sdp_params const& params, bool 
       }
       epilogue_message << " instead.";
       TORCH_WARN(
-          "Both fused kernels require the last dimension of the input to have stride 1. ",
+          "All fused kernels require the last dimension of the input to have stride 1. ",
           "Got Query.stride(-1): ",
           params.query.sym_stride(-1),
           ", Key.stride(-1): ",

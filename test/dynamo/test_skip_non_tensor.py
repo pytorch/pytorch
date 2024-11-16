@@ -2,10 +2,10 @@
 from unittest.mock import patch
 
 import torch
-
 import torch._dynamo
 import torch._dynamo.test_case
 from torch._dynamo.testing import CompileCounter
+
 
 _variable = 0
 _variable_2 = 0
@@ -147,10 +147,10 @@ class SkipNonTensorTests(torch._dynamo.test_case.TestCase):
 
         class Foo(list):
             def __iter__(self):
-                raise Exception()
+                raise Exception  # noqa: TRY002
 
             def __len__(self):
-                raise Exception()
+                raise Exception  # noqa: TRY002
 
         x = Foo()
         x.append(torch.randn(4))
@@ -170,11 +170,13 @@ class SkipNonTensorTests(torch._dynamo.test_case.TestCase):
         global _variable, _variable_2
 
         for mode in range(1, 7):
+            torch._dynamo.reset()
+
             _variable = 0
             _variable_2 = 0
 
             mod = MyModule(mode=mode)
-            model = torch._dynamo.optimize(backend="eager", nopython=mode != 6)(mod)
+            model = torch.compile(mod, backend="eager", fullgraph=mode != 6)
             assert _variable == 0
             assert _variable_2 == 0
 

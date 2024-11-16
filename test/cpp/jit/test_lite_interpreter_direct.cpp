@@ -471,7 +471,7 @@ TEST(LiteInterpreterDirectTest, FindWrongMethodName) {
   )");
   CompilationOptions options;
   mobile::Module bc = jitModuleToMobile(m, options);
-  ASSERT_TRUE(bc.find_method("forward") == c10::nullopt);
+  ASSERT_TRUE(bc.find_method("forward") == std::nullopt);
 }
 
 TEST(LiteInterpreterDirectTest, FindAndRunMethod) {
@@ -494,7 +494,7 @@ TEST(LiteInterpreterDirectTest, FindAndRunMethod) {
   for (int i = 0; i < 3; ++i) {
     auto bcinputs = inputs;
     auto method = bc.find_method("add_it");
-    AT_ASSERT(method != c10::nullopt);
+    AT_ASSERT(method != std::nullopt);
     res = (*method)(std::move(bcinputs));
   }
 

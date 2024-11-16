@@ -1,11 +1,12 @@
 # Represents all kernels used by an Executorch model.
 # It maintains a Dict[OperatorName, Dict[ETKernelKey, BackendMetadata]] structure.
 
+from __future__ import annotations
+
 import itertools
 from collections import defaultdict, namedtuple
 from dataclasses import dataclass
 from enum import IntEnum
-from typing import Dict, List, Tuple, Union
 
 from torchgen.model import (
     BackendIndex,
@@ -16,6 +17,7 @@ from torchgen.model import (
     OperatorName,
 )
 from torchgen.utils import assert_never
+
 
 KERNEL_KEY_VERSION = 1
 
@@ -40,7 +42,7 @@ class ETKernelKeyOpArgMeta:
     arg_name: str
     dtype: str
     # The order of the dimensions if entry is a Tensor
-    dim_order: Tuple[int, ...]
+    dim_order: tuple[int, ...]
 
     def to_native_string(self) -> str:
         dtype_str = ScalarType[self.dtype].value
@@ -51,7 +53,7 @@ class ETKernelKeyOpArgMeta:
 @dataclass(frozen=True)
 class ETKernelKey:
     # Field undefined is default = True
-    arg_meta: Tuple[ETKernelKeyOpArgMeta, ...] = ()
+    arg_meta: tuple[ETKernelKeyOpArgMeta, ...] = ()
 
     # Indicator for this kernel being used as a catch all
     default: bool = False
@@ -60,10 +62,10 @@ class ETKernelKey:
 
     @staticmethod
     def gen_from_yaml(
-        args: Dict[str, Tuple[str, str]],
-        type_alias_map: Dict[str, List[str]],  # TODO: Support unwrapped str val
-        dim_order_alias_map: Dict[str, List[int]],
-    ) -> List["ETKernelKey"]:
+        args: dict[str, tuple[str, str]],
+        type_alias_map: dict[str, list[str]],  # TODO: Support unwrapped str val
+        dim_order_alias_map: dict[str, list[int]],
+    ) -> list[ETKernelKey]:
         """Generate ETKernelKeys from arg kernel specs
         Multiple ETKernelKeys are returned due to dtype permutations from utilizing
         type_alias_map (actualizing each potential type permutation as a KernelKey)
@@ -94,7 +96,7 @@ class ETKernelKey:
             )
             assert (
                 dim_order in dim_order_alias_map
-            ), "Undefined dim_order alias: " + str(dim_order)
+            ), f"Undefined dim_order alias: {dim_order}"
             dtype_alias_used.add(type_alias)
 
         # Generate all permutations of dtype alias values
@@ -136,15 +138,15 @@ class ETKernelKey:
 
 @dataclass(frozen=True)
 class ETKernelIndex:
-    index: Dict[OperatorName, Dict[ETKernelKey, BackendMetadata]]
+    index: dict[OperatorName, dict[ETKernelKey, BackendMetadata]]
 
-    def has_kernels(self, g: Union[NativeFunction, NativeFunctionsGroup]) -> bool:
+    def has_kernels(self, g: NativeFunction | NativeFunctionsGroup) -> bool:
         m = self.get_kernels(g)
         return m is not None
 
     def get_kernels(
-        self, g: Union[NativeFunction, NativeFunctionsGroup]
-    ) -> Dict[ETKernelKey, BackendMetadata]:
+        self, g: NativeFunction | NativeFunctionsGroup
+    ) -> dict[ETKernelKey, BackendMetadata]:
         if isinstance(g, NativeFunction):
             f = g
         elif isinstance(g, NativeFunctionsGroup):
@@ -157,8 +159,8 @@ class ETKernelIndex:
 
     @staticmethod
     def grow_from_backend_indices(
-        kernel_index: Dict[OperatorName, Dict[ETKernelKey, BackendMetadata]],
-        backend_indices: Dict[DispatchKey, Dict[OperatorName, BackendMetadata]],
+        kernel_index: dict[OperatorName, dict[ETKernelKey, BackendMetadata]],
+        backend_indices: dict[DispatchKey, dict[OperatorName, BackendMetadata]],
     ) -> None:
         for dk in backend_indices:
             index = backend_indices[dk]
@@ -170,17 +172,17 @@ class ETKernelIndex:
 
     @staticmethod
     def from_backend_indices(
-        backend_indices: Dict[DispatchKey, Dict[OperatorName, BackendMetadata]]
-    ) -> "ETKernelIndex":
-        kernel_index: Dict[
-            OperatorName, Dict[ETKernelKey, BackendMetadata]
-        ] = defaultdict(dict)
+        backend_indices: dict[DispatchKey, dict[OperatorName, BackendMetadata]],
+    ) -> ETKernelIndex:
+        kernel_index: dict[OperatorName, dict[ETKernelKey, BackendMetadata]] = (
+            defaultdict(dict)
+        )
         ETKernelIndex.grow_from_backend_indices(kernel_index, backend_indices)
         return ETKernelIndex(kernel_index)
 
     def grow(
-        self, backend_indices: Dict[DispatchKey, Dict[OperatorName, BackendMetadata]]
-    ) -> "ETKernelIndex":
+        self, backend_indices: dict[DispatchKey, dict[OperatorName, BackendMetadata]]
+    ) -> ETKernelIndex:
         ETKernelIndex.grow_from_backend_indices(self.index, backend_indices)
         return self
 
@@ -188,7 +190,7 @@ class ETKernelIndex:
         """
         WARNING: this will be deprecated once all the codegen places know how to handle ETKernelIndex.
         """
-        index: Dict[OperatorName, BackendMetadata] = {}
+        index: dict[OperatorName, BackendMetadata] = {}
         for op in self.index:
             kernel_dict = self.index[op]
             assert (
@@ -208,9 +210,7 @@ class ETKernelIndex:
 
     # Note duplicate ETKernelKey from index_b will clobber the metadata from index_a
     @staticmethod
-    def merge_indices(
-        index_a: "ETKernelIndex", index_b: "ETKernelIndex"
-    ) -> "ETKernelIndex":
+    def merge_indices(index_a: ETKernelIndex, index_b: ETKernelIndex) -> ETKernelIndex:
         combined = defaultdict(dict, index_a.index.copy())
 
         for op, entry in index_b.index.items():

@@ -8,6 +8,7 @@ cpu_supported_platforms = [
     "ovr_config//os:macos",
     "ovr_config//os:windows-x86_64",
     "ovr_config//runtime:arm64-linux-ubuntu-neon",
+    "ovr_config//os:linux-arm64",
 ]
 
 cuda_supported_platforms = [
@@ -48,6 +49,7 @@ def define_c10_ovrsource(name, is_mobile):
             "-DC10_BUILD_MAIN_LIB=1",
             "-DSUPPORTS_BACKTRACE=0",
         ],
+        fbobjc_compiler_flags = ["-Wno-error=global-constructors", "-Wno-error=missing-prototypes"],
         public_include_directories = [".."],
         public_preprocessor_flags = pp_flags,
         public_raw_headers = native.glob([

@@ -49,7 +49,7 @@ struct uint128_pod;
 #endif
 
 class uint128;
-static inline uint128& operator<<=(uint128& self, int amount);
+inline uint128& operator<<=(uint128& self, int amount);
 
 // An unsigned 128-bit integer type. Thread-compatible.
 class C10_API uint128 {
@@ -277,7 +277,7 @@ inline uint128 operator>>(const uint128& val, int amount) {
   }
 }
 
-static inline uint128& operator<<=(uint128& self, int amount) {
+inline uint128& operator<<=(uint128& self, int amount) {
   // uint64_t shifts of >= 64 are undefined, so we will need some
   // special-casing.
   if (amount < 64) {

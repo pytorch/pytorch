@@ -1,5 +1,6 @@
 import pandas
 
+
 df = pandas.read_csv("perf.csv")
 
 ops = pandas.unique(df["operator"])
@@ -10,6 +11,7 @@ pivot_op_shape = df.pivot_table(
 pivot_speedups = (pivot_op_shape.T / pivot_op_shape["eager"]).T
 
 import matplotlib.pyplot as plt
+
 
 plt.rcParams["figure.figsize"] = (20, 100)
 fig, axs = plt.subplots(nops)

@@ -2,7 +2,6 @@
 #include <c10/core/DispatchKey.h>
 #include <c10/macros/Export.h>
 #include <c10/macros/Macros.h>
-#include <c10/util/C++17.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/TypeList.h>
@@ -80,6 +79,7 @@ C10_ALWAYS_INLINE static const std::
 // we have:
 // - "Dense":     CPU, CUDA, XLA, ... (~12 keys)
 // - "Sparse":    SparseCPU, SparseCUDA, ...
+// - "SparseCsr": SparseCsrCPU, SparseCsrCUDA, ...
 // - "Quantized": QuantizedCPU, QuantizedCUDA, QuantizedXLA, ...
 // - "Autograd":  AutogradCPU, AutogradCUDA, Autograd XLA, ...
 // The problem is that total number of keys grows quadratically with [#
@@ -93,7 +93,7 @@ C10_ALWAYS_INLINE static const std::
 // (1) "Building block" keys
 //    (a) backends: Everything in the BackendComponent enum (e.g. CPUBit,
 //    CUDABit) (b) functionalities: (per-backend) functionality-bit DispatchKeys
-//    (e.g. AutogradFunctionality, Sparse, Dense)
+//    (e.g. AutogradFunctionality, SparseCsr, Sparse, Dense)
 // (2) "Runtime" keys
 //    (a) "non-customizable backends" (e.g. FPGA)
 //    (b) "non-customizable functionalities" (e.g. Functionalize)
@@ -117,14 +117,16 @@ C10_ALWAYS_INLINE static const std::
 // Backend keys and functionality keys that count as "building blocks" will
 // contribute to a full cross product of functionality that can be overriden.
 //
-// For example, right now we have at least 12 "backend" building blocks (CPU,
-// CUDA, XLA, ...) and at least 4 "functionality" building blocks (Dense,
-// Sparse, Quantized, AutogradFunctionality, ...). These keys together allow
-// every dispatcher operator to be customized in up to 12*4 different ways. Each
-// of those requires a slot in the operator table of every dispatcher operator.
-// Not every piece of functionality necessarily needs to be customizable
-// per-backend, and not every backend necessarily needs to be able to customize
-// every type of functionality.
+// For example, right now we have at least 12 "backend" building
+// blocks (CPU, CUDA, XLA, ...) and at least 5 "functionality"
+// building blocks (Dense, Sparse, SparseCsr, Quantized,
+// AutogradFunctionality, ...). These keys together allow every
+// dispatcher operator to be customized in up to 12*4 different
+// ways. Each of those requires a slot in the operator table of every
+// dispatcher operator.  Not every piece of functionality necessarily
+// needs to be customizable per-backend, and not every backend
+// necessarily needs to be able to customize every type of
+// functionality.
 //
 //
 // (2) Every runtime key corresponds directly to a slot in an operator's runtime
@@ -308,6 +310,7 @@ class DispatchKeySet final {
                              DispatchKey::Dense,
                              DispatchKey::Quantized,
                              DispatchKey::Sparse,
+                             DispatchKey::SparseCsr,
                              DispatchKey::AutogradFunctionality,
                          })
               .repr_) == 0));
@@ -346,10 +349,10 @@ class DispatchKeySet final {
   }
   // Add a DispatchKey to the DispatchKey set.  Does NOT mutate,
   // returns the extended DispatchKeySet!
-  C10_NODISCARD constexpr DispatchKeySet add(DispatchKey t) const {
+  [[nodiscard]] constexpr DispatchKeySet add(DispatchKey t) const {
     return *this | DispatchKeySet(t);
   }
-  C10_NODISCARD constexpr DispatchKeySet add(DispatchKeySet ks) const {
+  [[nodiscard]] constexpr DispatchKeySet add(DispatchKeySet ks) const {
     return *this | ks;
   }
 
@@ -377,7 +380,7 @@ class DispatchKeySet final {
   //
   // Instead, remove(DispatchKey.AutogradCPU) will only remove the "Autograd"
   // bit from the bitset.
-  C10_NODISCARD constexpr DispatchKeySet remove(DispatchKey t) const {
+  [[nodiscard]] constexpr DispatchKeySet remove(DispatchKey t) const {
     return DispatchKeySet(
         repr_ & ~(DispatchKeySet(t).repr_ & ~full_backend_mask));
   }
@@ -652,6 +655,7 @@ constexpr DispatchKeySet autograd_dispatch_keyset = DispatchKeySet({
 
 constexpr DispatchKeySet autocast_dispatch_keyset = DispatchKeySet({
     DispatchKey::AutocastCPU,
+    DispatchKey::AutocastMPS,
     DispatchKey::AutocastCUDA,
     DispatchKey::AutocastXPU,
     DispatchKey::AutocastIPU,
@@ -668,6 +672,7 @@ constexpr DispatchKeySet default_included_set = DispatchKeySet({
 
 constexpr DispatchKeySet default_excluded_set = DispatchKeySet({
     DispatchKey::AutocastCPU,
+    DispatchKey::AutocastMPS,
     DispatchKey::AutocastCUDA,
     DispatchKey::AutocastXPU,
     DispatchKey::AutocastIPU,
@@ -686,8 +691,7 @@ constexpr DispatchKeySet python_ks = DispatchKeySet({
 
 constexpr DispatchKeySet sparse_ks = DispatchKeySet(DispatchKey::Sparse);
 
-constexpr DispatchKeySet sparse_csr_ks =
-    DispatchKeySet({DispatchKey::SparseCsrCPU, DispatchKey::SparseCsrCUDA});
+constexpr DispatchKeySet sparse_csr_ks = DispatchKeySet(DispatchKey::SparseCsr);
 
 constexpr DispatchKeySet mkldnn_ks = DispatchKeySet(DispatchKey::MkldnnCPU);
 
@@ -700,15 +704,14 @@ constexpr DispatchKeySet autogradother_backends =
         // Technically, HIP will now redispatch to its own custom AutogradHIP
         // slot in the runtime table.
         {DispatchKey::FPGA,
-         DispatchKey::ORT,
+         DispatchKey::MAIA,
          DispatchKey::Vulkan,
          DispatchKey::Metal,
-         DispatchKey::SparseCsrCPU,
-         DispatchKey::SparseCsrCUDA,
          DispatchKey::CustomRNGKeyId,
          DispatchKey::MkldnnCPU,
          // Sparse and Quantized backends also live here.
          DispatchKey::Sparse,
+         DispatchKey::SparseCsr,
          DispatchKey::Quantized})
     // Including the backend bits because this keyset is used during op
     // registration, which requires looping over all runtime autogradother
@@ -786,6 +789,7 @@ constexpr DispatchKeySet backend_functionality_keys =
         DispatchKey::Dense,
         DispatchKey::Quantized,
         DispatchKey::Sparse,
+        DispatchKey::SparseCsr,
     }) |
     DispatchKeySet(DispatchKeySet::RAW, full_backend_mask);
 
@@ -817,7 +821,7 @@ C10_API DispatchKeySet getBackendKeySetFromAutograd(DispatchKey t);
 // for a given backend key, use the associated autograd key.
 // for non-backend keys, use AutogradOther as a default.
 // Note: it's convenient and fast to return a default here rather than (say)
-// returning an optional<DispatchKey>, or throwing. But it makes callers
+// returning an std::optional<DispatchKey>, or throwing. But it makes callers
 // responsible for either a) enforcing the invariant that only backend keys
 // be passed as arguments, or b) interpreting our return value carefully.
 inline DispatchKeySet getAutogradRelatedKeySetFromBackend(BackendComponent t) {
@@ -861,6 +865,7 @@ inline DispatchKeySet getAutocastRelatedKeySetFromBackend(BackendComponent t) {
   constexpr auto autocast_xla_ks = DispatchKeySet(DispatchKey::AutocastXLA);
   constexpr auto autocast_privateuse1_ks =
       DispatchKeySet(DispatchKey::AutocastPrivateUse1);
+  constexpr auto autocast_mps_ks = DispatchKeySet(DispatchKey::AutocastMPS);
   switch (t) {
     case BackendComponent::CPUBit:
       return autocast_cpu_ks;
@@ -876,6 +881,8 @@ inline DispatchKeySet getAutocastRelatedKeySetFromBackend(BackendComponent t) {
       return autocast_xla_ks;
     case BackendComponent::PrivateUse1Bit:
       return autocast_privateuse1_ks;
+    case BackendComponent::MPSBit:
+      return autocast_mps_ks;
     default:
       return DispatchKeySet();
   }
@@ -899,7 +906,7 @@ C10_API bool isIncludedInAlias(DispatchKey k, DispatchKey alias);
 // legacy code that is still using DispatchKey for things like instanceof
 // checks; if at all possible, refactor the code to stop using DispatchKey in
 // those cases.
-static inline DispatchKey legacyExtractDispatchKey(DispatchKeySet s) {
+inline DispatchKey legacyExtractDispatchKey(DispatchKeySet s) {
   // NB: If you add any extra keys that can be stored in TensorImpl on
   // top of existing "backend" keys like CPU/CUDA, you need to add it
   // here.  At the moment, autograd keys and ADInplaceOrView key need this
@@ -909,12 +916,15 @@ static inline DispatchKey legacyExtractDispatchKey(DispatchKeySet s) {
           DispatchKeySet(
               {DispatchKey::Functionalize,
                DispatchKey::PythonTLSSnapshot,
+               DispatchKey::FuncTorchGradWrapper,
+               DispatchKey::FuncTorchVmapMode,
+               DispatchKey::FuncTorchBatched,
                DispatchKey::Python}))
       .highestPriorityTypeId();
 }
 
 template <class T>
-using is_not_DispatchKeySet = guts::negation<std::is_same<DispatchKeySet, T>>;
+using is_not_DispatchKeySet = std::negation<std::is_same<DispatchKeySet, T>>;
 
 // Given a function type, constructs a function_traits type that drops the first
 // parameter type if the first parameter is of type DispatchKeySet. NB:

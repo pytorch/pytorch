@@ -59,10 +59,22 @@ on:
         required: false
         type: string
         description: Desired python version
+      runner_prefix:
+        required: false
+        default: ""
+        type: string
+        description: prefix for runner label
       runs_on:
         required: true
         type: string
         description: Hardware to run this job on. Valid values are linux.4xlarge, linux.4xlarge.nvidia.gpu, linux.arm64.2xlarge, and linux.rocm.gpu
+      use_split_build:
+        description: |
+          [Experimental] Build a libtorch only wheel and build pytorch such that
+          are built from the libtorch wheel.
+        required: false
+        type: boolean
+        default: false
     secrets:
       github-token:
         required: true
@@ -70,7 +82,7 @@ on:
 
 jobs:
   test:
-    runs-on: ${{ inputs.runs_on }}
+    runs-on: ${{ inputs.runner_prefix}}${{ inputs.runs_on }}
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ inputs.PYTORCH_ROOT }}
@@ -97,6 +109,7 @@ jobs:
       PR_NUMBER: ${{ github.event.pull_request.number }}
       PYTORCH_FINAL_PACKAGE_DIR: /artifacts
       SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+      USE_SPLIT_BUILD: ${{ inputs.use_split_build }}
     steps:
       - name: Make the env permanent during this workflow (but not the secrets)
         shell: bash
@@ -124,9 +137,11 @@ jobs:
             echo "PR_NUMBER=${{ env.PR_NUMBER }}"
             echo "PYTORCH_FINAL_PACKAGE_DIR=${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
             echo "SHA1=${{ env.SHA1 }}"
+            echo "USE_SPLIT_BUILD=${{ env.USE_SPLIT_BUILD }}"
           } >> "${GITHUB_ENV} }}"
 
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        if: inputs.build_environment != 'linux-s390x-binary-manywheel'
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
         continue-on-error: true
         with:
@@ -136,12 +151,14 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
-          no-sudo: ${{ inputs.build_environment == 'linux-aarch64-binary-manywheel' }}
+          no-sudo: ${{ inputs.build_environment == 'linux-aarch64-binary-manywheel' || inputs.build_environment == 'linux-s390x-binary-manywheel' }}
 
       - name: Setup Linux
+        if: inputs.build_environment != 'linux-s390x-binary-manywheel'
         uses: ./.github/actions/setup-linux
 
       - name: Chown workspace
+        if: inputs.build_environment != 'linux-s390x-binary-manywheel'
         uses: ./.github/actions/chown-workspace
         with:
           ALPINE_IMAGE: ${{ inputs.ALPINE_IMAGE }}
@@ -193,7 +210,7 @@ jobs:
 
       - name: Download Build Artifacts
         if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' }}
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4.1.7
         with:
           name: ${{ inputs.build_name }}
           path: "${{ runner.temp }}/artifacts/"
@@ -203,7 +220,7 @@ jobs:
         if: ${{ inputs.GPU_ARCH_TYPE == 'cuda' && steps.filter.outputs.is-test-matrix-empty == 'False' }}
 
       - name: Pull Docker image
-        if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' }}
+        if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' && inputs.build_environment != 'linux-s390x-binary-manywheel' }}
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ inputs.DOCKER_IMAGE }}
@@ -213,11 +230,11 @@ jobs:
         uses: ./pytorch/.github/actions/test-pytorch-binary
 
       - name: Teardown Linux
-        if: always()
+        if: always() && inputs.build_environment != 'linux-s390x-binary-manywheel'
         uses: pytorch/test-infra/.github/actions/teardown-linux@main
 
       - name: Chown workspace
-        if: always()
+        if: always() && inputs.build_environment != 'linux-s390x-binary-manywheel'
         uses: ./pytorch/.github/actions/chown-workspace
         with:
           ALPINE_IMAGE: ${{ inputs.ALPINE_IMAGE }}

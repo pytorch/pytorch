@@ -18,8 +18,8 @@ class LayernormPackedContext final : virtual public VulkanPackedContext,
 
  public:
   LayernormPackedContext(
-      const c10::optional<Tensor>& weight,
-      const c10::optional<Tensor>& bias,
+      const std::optional<Tensor>& weight,
+      const std::optional<Tensor>& bias,
       double eps);
 
   /*
@@ -43,8 +43,8 @@ class LayernormPackedContext final : virtual public VulkanPackedContext,
 };
 
 c10::intrusive_ptr<LayernormPackedContext> create_layernorm_context(
-    c10::optional<Tensor>&& weight,
-    c10::optional<Tensor>&& bias,
+    std::optional<Tensor>&& weight,
+    std::optional<Tensor>&& bias,
     double eps);
 
 Tensor run_layernorm_context(

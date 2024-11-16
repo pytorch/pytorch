@@ -12,6 +12,7 @@ These backends include:
 - ``torch.backends.cpu``
 - ``torch.backends.cuda``
 - ``torch.backends.cudnn``
+- ``torch.backends.cusparselt``
 - ``torch.backends.mha``
 - ``torch.backends.mps``
 - ``torch.backends.mkl``
@@ -66,9 +67,9 @@ torch.backends.cuda
 
         Clears a cuFFT plan cache.
 
-.. autofunction:: torch.backends.cuda.preferred_linalg_library
+.. autofunction:: torch.backends.cuda.preferred_blas_library
 
-.. autoclass:: torch.backends.cuda.SDPBackend
+.. autofunction:: torch.backends.cuda.preferred_linalg_library
 
 .. autoclass:: torch.backends.cuda.SDPAParams
 
@@ -84,13 +85,21 @@ torch.backends.cuda
 
 .. autofunction:: torch.backends.cuda.enable_math_sdp
 
+.. autofunction:: torch.backends.cuda.fp16_bf16_reduction_math_sdp_allowed
+
+.. autofunction:: torch.backends.cuda.allow_fp16_bf16_reduction_math_sdp
+
 .. autofunction:: torch.backends.cuda.cudnn_sdp_enabled
 
 .. autofunction:: torch.backends.cuda.enable_cudnn_sdp
 
+.. autofunction:: torch.backends.cuda.is_flash_attention_available
+
 .. autofunction:: torch.backends.cuda.can_use_flash_attention
 
 .. autofunction:: torch.backends.cuda.can_use_efficient_attention
+
+.. autofunction:: torch.backends.cuda.can_use_cudnn_attention
 
 .. autofunction:: torch.backends.cuda.sdp_kernel
 
@@ -131,6 +140,13 @@ torch.backends.cudnn
 
 .. py:module:: torch.backends.cudnn.rnn
 
+torch.backends.cusparselt
+^^^^^^^^^^^^^^^^^^^^^^^^^
+.. automodule:: torch.backends.cusparselt
+
+.. autofunction:: torch.backends.cusparselt.version
+
+.. autofunction:: torch.backends.cusparselt.is_available
 
 torch.backends.mha
 ^^^^^^^^^^^^^^^^^^
@@ -199,7 +215,7 @@ torch.backends.opt_einsum
 
 .. attribute::  enabled
 
-    A :class:``bool`` that controls whether opt_einsum is enabled (``True`` by default). If so,
+    A :class:`bool` that controls whether opt_einsum is enabled (``True`` by default). If so,
     torch.einsum will use opt_einsum (https://optimized-einsum.readthedocs.io/en/stable/path_finding.html)
     if available to calculate an optimal path of contraction for faster performance.
 
@@ -208,7 +224,7 @@ torch.backends.opt_einsum
 
 .. attribute::  strategy
 
-    A :class:``str`` that specifies which strategies to try when ``torch.backends.opt_einsum.enabled``
+    A :class:`str` that specifies which strategies to try when ``torch.backends.opt_einsum.enabled``
     is ``True``. By default, torch.einsum will try the "auto" strategy, but the "greedy" and "optimal"
     strategies are also supported. Note that the "optimal" strategy is factorial on the number of
     inputs as it tries all possible paths. See more details in opt_einsum's docs

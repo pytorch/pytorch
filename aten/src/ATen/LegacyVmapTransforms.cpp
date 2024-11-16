@@ -35,7 +35,7 @@ static Tensor permuteBatchDimsToFront(BatchedTensorImpl* batched) {
     if (is_bdim[ptr]) {
       continue;
     }
-    permutation[idx++] = ptr;
+    permutation[idx++] = static_cast<int64_t>(ptr);
   }
   return physical_tensor.permute(permutation);
 }
@@ -49,7 +49,7 @@ VmapPhysicalView MultiBatchVmapTransform::logicalToPhysical(const Tensor& logica
 }
 
 int64_t VmapPhysicalView::numBatchDims() const {
-  return levels_.count();
+  return static_cast<int64_t>(levels_.count());
 }
 
 int64_t VmapPhysicalView::numLogicalDims() const {
@@ -135,9 +135,7 @@ static Tensor alignBatchDimsAtFront(
     const Tensor& self,
     std::bitset<kVmapNumLevels> requested_levels,
     int64_t requested_example_dim) {
-  Tensor physical_tensor;
-  std::bitset<kVmapNumLevels> tensor_levels;
-  std::tie(physical_tensor, tensor_levels) = getPhysicalTensorAndLevels(self);
+  auto [physical_tensor, tensor_levels] = getPhysicalTensorAndLevels(self);
 
   TORCH_INTERNAL_ASSERT(
     (tensor_levels | requested_levels) == requested_levels,
@@ -204,7 +202,7 @@ MultiBatchVmapTransform::logicalToPhysical(ITensorListRef logical_tensors) {
   // batch dims have been moved to the front of the tensor. Any previously
   // non-existing batch dims get added to the tensors as new dimensions of size 1.
   std::vector<Tensor> physical_tensors;
-  int64_t num_batch_dims = collective_levels.count();
+  auto num_batch_dims = collective_levels.count();
   for (const auto& logical_tensor : logical_tensors) {
     auto requested_example_dim = /*logical_dim*/logical_tensor.dim();
     auto physical_tensor = alignBatchDimsAtFront(
@@ -263,10 +261,7 @@ VmapPhysicalViewVec BroadcastingVmapTransform::logicalToPhysical(TensorList logi
 
   VmapPhysicalViewVec result;
 
-  std::bitset<kVmapNumLevels> levels;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int64_t largest_logical_dim;
-  std::tie(levels, largest_logical_dim) = getLevelsAndLargestLogicalDim(logical_tensors);
+  auto [levels, largest_logical_dim] = getLevelsAndLargestLogicalDim(logical_tensors);
 
   for (const auto& tensor : logical_tensors) {
     // NB: It's possible that we didn't actually need to align `tensor`.

@@ -167,7 +167,7 @@ struct CUDAValueSelectionIntersectionKernel {
   }
 };
 
-using OptTensor = c10::optional<Tensor>;
+using OptTensor = std::optional<Tensor>;
 
 void mul_sparse_sparse_out_cuda_kernel(
     Tensor& result,
@@ -183,7 +183,7 @@ void sparse_mask_intersection_out_cuda_kernel(
     Tensor& result,
     const Tensor& x,
     const Tensor& y,
-    const OptTensor& x_hash_opt = c10::nullopt) {
+    const OptTensor& x_hash_opt = std::nullopt) {
   using CUDAValueRhsProjKernel = CUDAValueSelectionIntersectionKernel<RhsProjOp>;
   _sparse_binary_op_intersection_kernel_out<CUDAKernelLauncher, CUDAValueRhsProjKernel>(
       result, x, y, x_hash_opt
@@ -198,14 +198,14 @@ void sparse_mask_projection_out_cuda_kernel(
     bool accumulate_matches) {
   using CUDAValueLhsProjKernel = CUDAValueSelectionIntersectionKernel<LhsProjOp>;
   _sparse_binary_op_intersection_kernel_out<CUDAKernelLauncher, CUDAValueLhsProjKernel>(
-      result, x, y, x_hash_opt, c10::nullopt, accumulate_matches
+      result, x, y, x_hash_opt, std::nullopt, accumulate_matches
   );
 }
 
 }
 
-REGISTER_CUDA_DISPATCH(mul_sparse_sparse_out_stub, &mul_sparse_sparse_out_cuda_kernel);
-REGISTER_CUDA_DISPATCH(sparse_mask_intersection_out_stub, &sparse_mask_intersection_out_cuda_kernel);
-REGISTER_CUDA_DISPATCH(sparse_mask_projection_out_stub, &sparse_mask_projection_out_cuda_kernel);
+REGISTER_CUDA_DISPATCH(mul_sparse_sparse_out_stub, &mul_sparse_sparse_out_cuda_kernel)
+REGISTER_CUDA_DISPATCH(sparse_mask_intersection_out_stub, &sparse_mask_intersection_out_cuda_kernel)
+REGISTER_CUDA_DISPATCH(sparse_mask_projection_out_stub, &sparse_mask_projection_out_cuda_kernel)
 
 } // namespace at::native

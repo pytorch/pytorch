@@ -24,11 +24,11 @@ std::string typeString(py::handle h) {
   return py::str(h.get_type().attr("__name__"));
 }
 
-c10::optional<StrongFunctionPtr> as_function(const py::object& obj) {
+std::optional<StrongFunctionPtr> as_function(const py::object& obj) {
   if (py::isinstance<StrongFunctionPtr>(obj)) {
     return py::cast<StrongFunctionPtr>(obj);
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 FunctionSchema PythonValue::getSchema(
@@ -51,8 +51,9 @@ FunctionSchema PythonValue::getSchema(
   auto names_it = param_names.begin();
   if (moduleSelf_) {
     if (param_names.empty()) {
-      throw ErrorReport(loc)
-          << "Non-static method does not have a self argument";
+      throw(
+          ErrorReport(loc)
+          << "Non-static method does not have a self argument");
     }
 
     // If there is a `self` parameter on the callable, skip it on the names list
@@ -66,8 +67,8 @@ FunctionSchema PythonValue::getSchema(
       args.emplace_back(
           /*name=*/*names_it,
           /*type=*/TensorType::get(),
-          /*N=*/c10::nullopt,
-          /*default_value=*/c10::nullopt,
+          /*N=*/std::nullopt,
+          /*default_value=*/std::nullopt,
           /*kwarg_only=*/false);
     }
 
@@ -82,9 +83,7 @@ FunctionSchema PythonValue::getSchema(
     rets.emplace_back(Argument("0", ret_type, {}, {}, false));
   } else {
     // Use the provided type signature
-    std::vector<TypePtr> arg_types;
-    TypePtr ret_type;
-    std::tie(arg_types, ret_type) =
+    auto [arg_types, ret_type] =
         py::cast<std::pair<std::vector<TypePtr>, TypePtr>>(signature);
 
     // arg_types does not include self but param_names does, so adjust for that
@@ -97,11 +96,11 @@ FunctionSchema PythonValue::getSchema(
       args.emplace_back(
           /*name=*/*names_it,
           /*type=*/std::move(*types_it),
-          /*N=*/c10::nullopt,
-          /*default_value=*/c10::nullopt,
+          /*N=*/std::nullopt,
+          /*default_value=*/std::nullopt,
           /*kwarg_only=*/false);
     }
-    rets.push_back(Argument("0", std::move(ret_type), {}, {}, false));
+    rets.push_back(Argument("0", ret_type, {}, {}, false));
   }
 
   std::string name;
@@ -171,23 +170,21 @@ std::string PythonValue::kind() const {
 std::vector<std::shared_ptr<SugaredValue>> PythonValue::asTuple(
     const SourceRange& loc,
     GraphFunction& m,
-    const c10::optional<size_t>& size_hint) {
-  const std::string type_str = typeString(self);
+    const std::optional<size_t>& size_hint) {
   std::stringstream ss;
   ss << kind() << " cannot be used as a tuple";
   checkForAddToConstantsError(ss);
-  throw ErrorReport(loc) << ss.str();
+  throw(ErrorReport(loc) << ss.str());
 }
 
 std::shared_ptr<SugaredValue> PythonValue::attr(
     const SourceRange& loc,
     GraphFunction& m,
     const std::string& field) {
-  const std::string type_str = typeString(self);
   std::stringstream ss;
   ss << "attribute lookup is not defined on " << kind();
   checkForAddToConstantsError(ss);
-  throw ErrorReport(loc) << ss.str();
+  throw(ErrorReport(loc) << ss.str());
 }
 
 py::object PythonValue::getattr(
@@ -196,7 +193,7 @@ py::object PythonValue::getattr(
   try {
     return py::getattr(self, name.c_str());
   } catch (py::error_already_set& e) {
-    throw ErrorReport(loc) << "object has no attribute " << name;
+    throw(ErrorReport(loc) << "object has no attribute " << name);
   }
 }
 
@@ -242,10 +239,10 @@ std::shared_ptr<SugaredValue> CUDAPythonModuleValue::attr(
     // these APIs.
     if (field == "current_device" || field == "set_device") {
       return std::make_shared<BuiltinFunction>(
-          Symbol::cuda("_" + field), c10::nullopt);
+          Symbol::cuda("_" + field), std::nullopt);
     } else {
       return std::make_shared<BuiltinFunction>(
-          Symbol::cuda(field), c10::nullopt);
+          Symbol::cuda(field), std::nullopt);
     }
   }
 
@@ -273,8 +270,9 @@ SugaredValuePtr ModuleValue::asTupleValue(
     auto mods = dict->getModules();
     return mods;
   }
-  throw ErrorReport(loc)
-      << "Only ModuleList or Sequential modules can be used as tuple";
+  throw(
+      ErrorReport(loc)
+      << "Only ModuleList or Sequential modules can be used as tuple");
 }
 
 bool ModuleValue::areAllSubmodulesSubtypeOf(
@@ -310,7 +308,7 @@ SugaredValuePtr ModuleValue::getitem(
       // Check that all submodules comply with the type hint.
       std::stringstream ss;
       if (!areAllSubmodulesSubtypeOf(type_hint, &ss)) {
-        throw ErrorReport(loc) << ss.str();
+        throw(ErrorReport(loc) << ss.str());
       }
 
       // Emit a prim::ModuleContainerIndex operator. This is needed because
@@ -352,12 +350,12 @@ SugaredValuePtr ModuleValue::getitem(
           return module_values_iter->tup_.at(i);
         }
       }
-      throw ErrorReport(loc) << "Key Error, " << idx_str;
+      throw(ErrorReport(loc) << "Key Error, " << idx_str);
     } else if (type_hint) {
       // Check that all submodules comply with the type hint.
       std::stringstream ss;
       if (!areAllSubmodulesSubtypeOf(type_hint, &ss)) {
-        throw ErrorReport(loc) << ss.str();
+        throw(ErrorReport(loc) << ss.str());
       }
 
       // Emit a prim::ModuleContainerIndex operator. This is needed because
@@ -370,15 +368,17 @@ SugaredValuePtr ModuleValue::getitem(
       getitem_node->output(0)->setType(type_hint);
       return std::make_shared<SimpleValue>(getitem_node->output(0));
     }
-    throw ErrorReport(loc)
+    throw(
+        ErrorReport(loc)
         << "Unable to extract string literal index. "
         << "ModuleDict indexing is only supported with string literals. "
         << "For example, 'i = \"a\"; self.layers[i](x)' will fail because i is not a literal. "
-        << "Enumeration of ModuleDict is supported, e.g. 'for k, v in self.items(): out = v(inp)'";
+        << "Enumeration of ModuleDict is supported, e.g. 'for k, v in self.items(): out = v(inp)'");
   }
-  throw ErrorReport(loc)
+  throw(
+      ErrorReport(loc)
       << "Only ModuleList, Sequential, ModuleDict, "
-      << "ParameterList, and ParameterDict modules are subscriptable";
+      << "ParameterList, and ParameterDict modules are subscriptable");
 }
 
 void checkInterface(
@@ -387,9 +387,10 @@ void checkInterface(
     const std::shared_ptr<ModuleValue>& self,
     const std::string& field) {
   if (self->asValue(loc, m)->type()->cast<InterfaceType>()) {
-    throw ErrorReport(loc)
+    throw(
+        ErrorReport(loc)
         << "Could not compile " << field
-        << "() because module is an interface type. Please file issue.";
+        << "() because module is an interface type. Please file issue.");
   }
 }
 
@@ -675,7 +676,7 @@ std::shared_ptr<SugaredValue> ModuleValue::tryGetAttr(
   if (const auto fnAttr = concreteType_->findFunctionAttribute(field)) {
     return std::make_shared<FunctionValue>(*fnAttr);
   } else if (const auto builtin = concreteType_->findBuiltinFunction(field)) {
-    return std::make_shared<BuiltinFunction>(*builtin, /*self=*/c10::nullopt);
+    return std::make_shared<BuiltinFunction>(*builtin, /*self=*/std::nullopt);
   }
 
   // 5. Check if it's an attribute of the original Python class that this
@@ -855,19 +856,21 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
     hint = "attribute was ignored during compilation";
   }
 
-  throw ErrorReport(loc)
+  throw(
+      ErrorReport(loc)
       << "Module '"
       << concreteType_->getJitType()->expectRef<ClassType>().name()->name()
       << "'"
-      << " has no attribute '" << field << "' " << hint;
+      << " has no attribute '" << field << "' " << hint);
 }
 
 SugaredValuePtr ModuleValue::iter(const SourceRange& loc, GraphFunction& m) {
   const auto iterableModuleKind = concreteType_->getIterableModuleKind();
   if (iterableModuleKind == IterableModuleKind::NONE) {
-    throw ErrorReport(loc)
+    throw(
+        ErrorReport(loc)
         << "Only constant Sequential, ModuleList, ModuleDict, or "
-        << "ParameterList can be used as an iterable";
+        << "ParameterList can be used as an iterable");
   }
 
   if (iterableModuleKind == IterableModuleKind::DICT) {
@@ -929,7 +932,7 @@ std::shared_ptr<SugaredValue> BooleanDispatchValue::call(
     at::ArrayRef<NamedValue> args,
     at::ArrayRef<NamedValue> kwargs,
     size_t n_binders) {
-  c10::optional<bool> result;
+  std::optional<bool> result;
   Graph& graph = *(caller.graph());
 
   auto index = py::cast<size_t>(dispatched_fn_["index"]);
@@ -953,7 +956,7 @@ std::shared_ptr<SugaredValue> BooleanDispatchValue::call(
   }
 
   if (!result.has_value()) {
-    throw error;
+    throw ErrorReport(error);
   }
 
   std::shared_ptr<SugaredValue> value;
@@ -1022,12 +1025,7 @@ TypePtr registerNamedTuple(
       py::module::import("torch._jit_internal")
           .attr("_get_named_tuple_properties")(obj, loc, py::cpp_function(rcb));
 
-  std::string unqualName;
-  std::vector<std::string> field_names;
-  std::vector<TypePtr> field_types;
-  std::vector<py::object> objects;
-
-  std::tie(unqualName, field_names, field_types, objects) = py::cast<std::tuple<
+  auto [unqualName, field_names, field_types, objects] = py::cast<std::tuple<
       std::string,
       std::vector<std::string>,
       std::vector<TypePtr>,
@@ -1089,7 +1087,7 @@ std::shared_ptr<SugaredValue> PythonSliceClass::call(
     at::ArrayRef<NamedValue> kwargs,
     size_t /*n_binders*/) {
   if (!kwargs.empty()) {
-    throw ErrorReport(loc) << "Slice does not accept any keyword arguments";
+    throw(ErrorReport(loc) << "Slice does not accept any keyword arguments");
   }
 
   static constexpr int64_t default_start = 0;
@@ -1125,8 +1123,9 @@ std::shared_ptr<SugaredValue> PythonSliceClass::call(
     stop = ValOr(args[1].value(graph), default_stop);
     step = ValOr(args[2].value(graph), default_step);
   } else {
-    throw ErrorReport(loc) << "slice accepts exactly 1, 2 or 3 arguments, got: "
-                           << n;
+    throw(
+        ErrorReport(loc) << "slice accepts exactly 1, 2 or 3 arguments, got: "
+                         << n);
   }
 
   return std::make_shared<SliceValue>(start, stop, step);
@@ -1243,8 +1242,9 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     return SpecialFormValue::create(prim::rpc_remote);
 #endif
   } else if (auto callee = as_module(obj)) {
-    throw ErrorReport(loc) << "Cannot call a ScriptModule that is not"
-                           << " a submodule of the caller";
+    throw(
+        ErrorReport(loc) << "Cannot call a ScriptModule that is not"
+                         << " a submodule of the caller");
   }
   std::vector<std::pair<const char*, at::ScalarType>> tensor_names = {
       {"BoolTensor", at::ScalarType::Bool},
@@ -1270,7 +1270,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
       py::module::import("torch.jit._builtins").attr("_find_builtin")(obj);
   if (!builtin_name.is_none()) {
     return std::make_shared<BuiltinFunction>(
-        Symbol::fromQualString(py::str(builtin_name)), c10::nullopt);
+        Symbol::fromQualString(py::str(builtin_name)), std::nullopt);
   }
 
   if (py::cast<bool>(py::module::import("torch._jit_internal")
@@ -1280,8 +1280,9 @@ std::shared_ptr<SugaredValue> toSugaredValue(
 
   if (py::isinstance<py::function>(obj)) {
     if (typeString(obj) == "builtin_function_or_method") {
-      throw ErrorReport(loc) << "Python builtin " << py::str(obj)
-                             << " is currently not supported in Torchscript";
+      throw(
+          ErrorReport(loc) << "Python builtin " << py::str(obj)
+                           << " is currently not supported in Torchscript");
     }
   }
 

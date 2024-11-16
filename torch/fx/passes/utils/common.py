@@ -1,8 +1,8 @@
+# mypy: allow-untyped-defs
 from typing import Dict, Tuple
 
 from torch.fx._compatibility import compatibility
 from torch.fx.graph import Graph
-
 from torch.fx.graph_module import GraphModule
 from torch.fx.passes.utils.matcher_utils import SubgraphMatcher
 from torch.nn import Module

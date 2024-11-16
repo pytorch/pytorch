@@ -9,16 +9,14 @@ import itertools
 import mmap
 import operator
 import os
-
-import pathlib
 import sys
 import tempfile
 import warnings
 import weakref
 from contextlib import contextmanager
 from decimal import Decimal
+from pathlib import Path
 from tempfile import mkstemp
-
 from unittest import expectedFailure as xfail, skipIf as skipif, SkipTest
 
 import numpy
@@ -37,13 +35,14 @@ from torch.testing._internal.common_utils import (
     xpassIfTorchDynamo,
 )
 
+
 # If we are going to trace through these, we should use NumPy
 # If testing on eager mode, we use torch._numpy
 if TEST_WITH_TORCHDYNAMO:
     import numpy as np
     from numpy.testing import (
         assert_,
-        assert_allclose,  # IS_PYPY, IS_PYSTON, HAS_REFCOUNT,
+        assert_allclose,
         assert_almost_equal,
         assert_array_almost_equal,
         assert_array_equal,
@@ -51,15 +50,14 @@ if TEST_WITH_TORCHDYNAMO:
         assert_equal,
         assert_raises_regex,
         assert_warns,
-        # runstring, temppath,
-        suppress_warnings,  # break_cycles,
+        suppress_warnings,
     )
 
 else:
     import torch._numpy as np
     from torch._numpy.testing import (
         assert_,
-        assert_allclose,  # IS_PYPY, IS_PYSTON, HAS_REFCOUNT,
+        assert_allclose,
         assert_almost_equal,
         assert_array_almost_equal,
         assert_array_equal,
@@ -67,8 +65,7 @@ else:
         assert_equal,
         assert_raises_regex,
         assert_warns,
-        # runstring, temppath,
-        suppress_warnings,  # break_cycles,
+        suppress_warnings,
     )
 
 
@@ -78,7 +75,12 @@ IS_PYPY = False
 IS_PYSTON = False
 HAS_REFCOUNT = True
 
-from numpy.core.tests._locales import CommaDecimalPointLocale
+if numpy.__version__ > "2":
+    # numpy 2.0 +, see https://numpy.org/doc/stable/release/2.0.0-notes.html#renamed-numpy-core-to-numpy-core
+    from numpy._core.tests._locales import CommaDecimalPointLocale
+else:
+    from numpy.core.tests._locales import CommaDecimalPointLocale
+
 from numpy.testing._private.utils import _no_tracing, requires_memory
 
 
@@ -291,6 +293,7 @@ class TestFlag(TestCase):
         assert_equal(self.a.flags["X"], False)
         assert_equal(self.a.flags["WRITEBACKIFCOPY"], False)
 
+    @xfail  # invalid dtype
     def test_string_align(self):
         a = np.zeros(4, dtype=np.dtype("|S4"))
         assert_(a.flags.aligned)
@@ -298,6 +301,7 @@ class TestFlag(TestCase):
         a = np.zeros(5, dtype=np.dtype("|S4"))
         assert_(a.flags.aligned)
 
+    @xfail  # structured dtypes
     def test_void_align(self):
         a = np.zeros(4, dtype=np.dtype([("a", "i4"), ("b", "i4")]))
         assert_(a.flags.aligned)
@@ -374,7 +378,7 @@ class TestAttributes(TestCase):
 
     def test_dtypeattr(self):
         assert_equal(self.one.dtype, np.dtype(np.int_))
-        assert_equal(self.three.dtype, np.dtype(np.float_))
+        assert_equal(self.three.dtype, np.dtype(np.float64))
         assert_equal(self.one.dtype.char, "l")
         assert_equal(self.three.dtype.char, "d")
         assert_(self.three.dtype.str[0] in "<>")
@@ -409,7 +413,7 @@ class TestAttributes(TestCase):
             try:
                 r = np.ndarray([size], dtype=int, buffer=x, offset=offset * x.itemsize)
             except Exception as e:
-                raise RuntimeError(e)  # noqa: TRY200
+                raise RuntimeError(e)  # noqa: B904
             r.strides = strides = strides * x.itemsize
             return r
 
@@ -691,12 +695,15 @@ class TestAssignment(TestCase):
         assert_raises(ValueError, operator.setitem, u, 0, bad_sequence())
         assert_raises(ValueError, operator.setitem, b, 0, bad_sequence())
 
-    @skip(reason="longdouble")
+    @skipif(
+        "torch._numpy" == np.__name__,
+        reason="torch._numpy does not support extended floats and complex dtypes",
+    )
     def test_longdouble_assignment(self):
         # only relevant if longdouble is larger than float
         # we're looking for loss of precision
 
-        for dtype in (np.longdouble, np.longcomplex):
+        for dtype in (np.longdouble, np.clongdouble):
             # gh-8902
             tinyb = np.nextafter(np.longdouble(0), 1).astype(dtype)
             tinya = np.nextafter(np.longdouble(0), -1).astype(dtype)
@@ -965,7 +972,7 @@ class TestCreation(TestCase):
         nstr = ["123", "123"]
         result = np.array([123, 123], dtype=int)
         for type in types:
-            msg = "String conversion for %s" % type
+            msg = f"String conversion for {type}"
             assert_equal(np.array(nstr, dtype=type), result, err_msg=msg)
 
     def test_void(self):
@@ -1136,14 +1143,14 @@ class TestCreation(TestCase):
                 return 1
 
             def __getitem__(self, index):
-                raise ValueError()
+                raise ValueError
 
         class Map:
             def __len__(self):
                 return 1
 
             def __getitem__(self, index):
-                raise KeyError()
+                raise KeyError
 
         a = np.array([Map()])
         assert_(a.shape == (1,))
@@ -1153,14 +1160,14 @@ class TestCreation(TestCase):
     def test_no_len_object_type(self):
         # gh-5100, want object array from iterable object without len()
         class Point2:
-            def __init__(self):
+            def __init__(self) -> None:
                 pass
 
             def __getitem__(self, ind):
                 if ind in [0, 1]:
                     return ind
                 else:
-                    raise IndexError()
+                    raise IndexError
 
         d = np.array([Point2(), Point2(), Point2()])
         assert_equal(d.dtype, np.dtype(object))
@@ -1181,7 +1188,7 @@ class TestCreation(TestCase):
         # Special case where a bad __getitem__ makes us fall back on __iter__:
         class C:
             def __getitem__(self, x):
-                raise Exception
+                raise Exception  # noqa: TRY002
 
             def __iter__(self):
                 return iter(())
@@ -1397,7 +1404,7 @@ class TestBool(TestCase):
 
     @xfail  # (reason="See gh-9847")
     def test_cast_from_unicode(self):
-        self._test_cast_from_flexible(np.unicode_)
+        self._test_cast_from_flexible(np.str_)
 
     @xfail  # (reason="See gh-9847")
     def test_cast_from_bytes(self):
@@ -1621,7 +1628,7 @@ class TestMethods(TestCase):
         a = np.arange(101, dtype=dtype)
         b = np.flip(a)
         for kind in self.sort_kinds:
-            msg = "scalar sort, kind=%s" % kind
+            msg = f"scalar sort, kind={kind}"
             c = a.copy()
             c.sort(kind=kind)
             assert_equal(c, a, msg)
@@ -1637,7 +1644,7 @@ class TestMethods(TestCase):
         a = np.arange(-50, 51, dtype=dtype)
         b = np.flip(a)
         for kind in self.sort_kinds:
-            msg = "scalar sort, kind=%s" % (kind)
+            msg = f"scalar sort, kind={kind}"
             c = a.copy()
             c.sort(kind=kind)
             assert_equal(c, a, msg)
@@ -1777,13 +1784,13 @@ class TestMethods(TestCase):
         ai = a * 1j + 1
         bi = b * 1j + 1
         for kind in self.sort_kinds:
-            msg = "complex argsort, kind=%s" % kind
+            msg = f"complex argsort, kind={kind}"
             assert_equal(ai.copy().argsort(kind=kind), a, msg)
             assert_equal(bi.copy().argsort(kind=kind), b, msg)
         ai = a + 1j
         bi = b + 1j
         for kind in self.sort_kinds:
-            msg = "complex argsort, kind=%s" % kind
+            msg = f"complex argsort, kind={kind}"
             assert_equal(ai.copy().argsort(kind=kind), a, msg)
             assert_equal(bi.copy().argsort(kind=kind), b, msg)
 
@@ -1828,7 +1835,7 @@ class TestMethods(TestCase):
         a = np.array(["aaaaaaaaa" for i in range(100)])
         assert_equal(a.argsort(kind="m"), r)
         # unicode
-        a = np.array(["aaaaaaaaa" for i in range(100)], dtype=np.unicode_)
+        a = np.array(["aaaaaaaaa" for i in range(100)], dtype=np.str_)
         assert_equal(a.argsort(kind="m"), r)
 
     @xpassIfTorchDynamo  # (reason="TODO: searchsorted with nans differs in pytorch")
@@ -1844,10 +1851,10 @@ class TestMethods(TestCase):
         # test for floats arrays containing nans. Explicitly test
         # half, single, and double precision floats to verify that
         # the NaN-handling is correct.
-        msg = "Test real (%s) searchsorted with nans, side='l'" % a.dtype
+        msg = f"Test real ({a.dtype}) searchsorted with nans, side='l'"
         b = a.searchsorted(a, side="left")
         assert_equal(b, np.arange(3), msg)
-        msg = "Test real (%s) searchsorted with nans, side='r'" % a.dtype
+        msg = f"Test real ({a.dtype}) searchsorted with nans, side='r'"
         b = a.searchsorted(a, side="right")
         assert_equal(b, np.arange(1, 4), msg)
         # check keyword arguments
@@ -1856,7 +1863,7 @@ class TestMethods(TestCase):
         y = np.searchsorted(x, x[-1])
         assert_equal(y, 2)
 
-    @xpassIfTorchDynamo  # (
+    @xfail  # (
     #    reason="'searchsorted_out_cpu' not implemented for 'ComplexDouble'"
     # )
     def test_searchsorted_complex(self):
@@ -3318,20 +3325,20 @@ class TestArgmax(TestCase):
             sup.filter(RuntimeWarning, "invalid value encountered in reduce")
             val = np.max(arr)
 
-        assert_equal(np.argmax(arr), pos, err_msg="%r" % arr)
-        assert_equal(arr[np.argmax(arr)], val, err_msg="%r" % arr)
+        assert_equal(np.argmax(arr), pos, err_msg=f"{arr!r}")
+        assert_equal(arr[np.argmax(arr)], val, err_msg=f"{arr!r}")
 
         # add padding to test SIMD loops
         rarr = np.repeat(arr, 129)
         rpos = pos * 129
-        assert_equal(np.argmax(rarr), rpos, err_msg="%r" % rarr)
-        assert_equal(rarr[np.argmax(rarr)], val, err_msg="%r" % rarr)
+        assert_equal(np.argmax(rarr), rpos, err_msg=f"{rarr!r}")
+        assert_equal(rarr[np.argmax(rarr)], val, err_msg=f"{rarr!r}")
 
         padd = np.repeat(np.min(arr), 513)
         rarr = np.concatenate((arr, padd))
         rpos = pos
-        assert_equal(np.argmax(rarr), rpos, err_msg="%r" % rarr)
-        assert_equal(rarr[np.argmax(rarr)], val, err_msg="%r" % rarr)
+        assert_equal(np.argmax(rarr), rpos, err_msg=f"{rarr!r}")
+        assert_equal(rarr[np.argmax(rarr)], val, err_msg=f"{rarr!r}")
 
     def test_maximum_signed_integers(self):
         a = np.array([1, 2**7 - 1, -(2**7)], dtype=np.int8)
@@ -3427,20 +3434,20 @@ class TestArgmin(TestCase):
             sup.filter(RuntimeWarning, "invalid value encountered in reduce")
             min_val = np.min(arr)
 
-        assert_equal(np.argmin(arr), pos, err_msg="%r" % arr)
-        assert_equal(arr[np.argmin(arr)], min_val, err_msg="%r" % arr)
+        assert_equal(np.argmin(arr), pos, err_msg=f"{arr!r}")
+        assert_equal(arr[np.argmin(arr)], min_val, err_msg=f"{arr!r}")
 
         # add padding to test SIMD loops
         rarr = np.repeat(arr, 129)
         rpos = pos * 129
-        assert_equal(np.argmin(rarr), rpos, err_msg="%r" % rarr)
-        assert_equal(rarr[np.argmin(rarr)], min_val, err_msg="%r" % rarr)
+        assert_equal(np.argmin(rarr), rpos, err_msg=f"{rarr!r}")
+        assert_equal(rarr[np.argmin(rarr)], min_val, err_msg=f"{rarr!r}")
 
         padd = np.repeat(np.max(arr), 513)
         rarr = np.concatenate((arr, padd))
         rpos = pos
-        assert_equal(np.argmin(rarr), rpos, err_msg="%r" % rarr)
-        assert_equal(rarr[np.argmin(rarr)], min_val, err_msg="%r" % rarr)
+        assert_equal(np.argmin(rarr), rpos, err_msg=f"{rarr!r}")
+        assert_equal(rarr[np.argmin(rarr)], min_val, err_msg=f"{rarr!r}")
 
     def test_minimum_signed_integers(self):
         a = np.array([1, -(2**7), -(2**7) + 1, 2**7 - 1], dtype=np.int8)
@@ -3487,6 +3494,16 @@ class TestNewaxis(TestCase):
         assert_almost_equal(res.ravel(), 250 * sk)
 
 
+_sctypes = {
+    "int": [np.int8, np.int16, np.int32, np.int64],
+    "uint": [np.uint8, np.uint16, np.uint32, np.uint64],
+    "float": [np.float32, np.float64],
+    "complex": [np.complex64, np.complex128]
+    # no complex256 in torch._numpy
+    + ([np.clongdouble] if hasattr(np, "clongdouble") else []),
+}
+
+
 class TestClip(TestCase):
     def _check_range(self, x, cmin, cmax):
         assert_(np.all(x >= cmin))
@@ -3507,7 +3524,7 @@ class TestClip(TestCase):
         if expected_max is None:
             expected_max = clip_max
 
-        for T in np.sctypes[type_group]:
+        for T in _sctypes[type_group]:
             if sys.byteorder == "little":
                 byte_orders = ["=", ">"]
             else:
@@ -3613,8 +3630,9 @@ class TestPutmask(TestCase):
     def test_mask_size(self):
         assert_raises(ValueError, np.putmask, np.array([1, 2, 3]), [True], 5)
 
-    @parametrize("dtype", (">i4", "<i4"))
-    def test_byteorder(self, dtype):
+    @parametrize("greater", (True, False))
+    def test_byteorder(self, greater):
+        dtype = ">i4" if greater else "<i4"
         x = np.array([1, 2, 3], dtype)
         np.putmask(x, [True, False, True], -1)
         assert_array_equal(x, [-1, 2, -1])
@@ -3863,7 +3881,7 @@ class TestIO(TestCase):
         assert_array_equal(y, x.flat)
 
     def test_roundtrip_dump_pathlib(self, x, tmp_filename):
-        p = pathlib.Path(tmp_filename)
+        p = Path(tmp_filename)
         x.dump(p)
         y = np.load(p, allow_pickle=True)
         assert_array_equal(y, x)
@@ -5456,8 +5474,6 @@ class TestMatmul(MatmulCommon, TestCase):
         out = np.zeros((5, 2), dtype=np.complex128)
         c = self.matmul(a, b, out=out)
         assert_(c is out)
-        #      with suppress_warnings() as sup:
-        #          sup.filter(np.ComplexWarning, '')
         c = c.astype(tgt.dtype)
         assert_array_equal(c, tgt)
 
@@ -5639,6 +5655,7 @@ class TestMatmulOperator(MatmulCommon, TestCase):
         )
 
     @xpassIfTorchDynamo  # (reason="torch supports inplace matmul, and so do we")
+    @skipif(numpy.__version__ >= "1.26", reason="This is fixed in numpy 1.26")
     def test_matmul_inplace(self):
         # It would be nice to support in-place matmul eventually, but for now
         # we don't have a working implementation, so better just to error out
@@ -5838,9 +5855,16 @@ class TestWarnings(TestCase):
         x = np.array([1, 2])
         y = np.array([1 - 2j, 1 + 2j])
 
+        # np.ComplexWarning moved to np.exceptions in numpy>=2.0.0
+        # np.exceptions only available in numpy>=1.25.0
+        has_exceptions_ns = hasattr(np, "exceptions")
+        ComplexWarning = (
+            np.exceptions.ComplexWarning if has_exceptions_ns else np.ComplexWarning
+        )
+
         with warnings.catch_warnings():
-            warnings.simplefilter("error", np.ComplexWarning)
-            assert_raises(np.ComplexWarning, x.__setitem__, slice(None), y)
+            warnings.simplefilter("error", ComplexWarning)
+            assert_raises(ComplexWarning, x.__setitem__, slice(None), y)
             assert_equal(x, [1, 2])
 
 
@@ -5981,6 +6005,11 @@ class TestPEP3118Dtype(TestCase):
         self._check("i:f0:", [("f0", "i")])
 
 
+# NOTE: xpassIfTorchDynamo below
+# 1. TODO: torch._numpy does not handle/model _CopyMode
+# 2. order= keyword not supported (probably won't be)
+# 3. Under TEST_WITH_TORCHDYNAMO many of these make it through due
+#    to a graph break leaving the _CopyMode to only be handled by numpy.
 @skipif(numpy.__version__ < "1.23", reason="CopyMode is new in NumPy 1.22")
 @xpassIfTorchDynamo
 @instantiate_parametrized_tests
@@ -6009,6 +6038,7 @@ class TestArrayCreationCopyArgument(TestCase):
             with pytest.raises(ValueError):
                 np.array(pyscalar, dtype=np.int64, copy=np._CopyMode.NEVER)
 
+    @xfail  # TODO: handle `_CopyMode` properly in torch._numpy
     def test_compatible_cast(self):
         # Some types are compatible even though they are different, no
         # copy is necessary for them. This is mostly true for some integers
@@ -6302,7 +6332,7 @@ class TestDelMisc(TestCase):
         except TypeError:
             pass
         except Exception:
-            raise AssertionError
+            raise AssertionError from None
 
 
 class TestConversion(TestCase):
@@ -6403,7 +6433,7 @@ class TestConversion(TestCase):
             # gh-9972
             assert_equal(4, int_func(np.array("4")))
             assert_equal(5, int_func(np.bytes_(b"5")))
-            assert_equal(6, int_func(np.unicode_("6")))
+            assert_equal(6, int_func(np.str_("6")))
 
             # The delegation of int() to __trunc__ was deprecated in
             # Python 3.11.

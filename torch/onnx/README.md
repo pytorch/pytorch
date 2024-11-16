@@ -2,7 +2,7 @@
 
 Torch->ONNX converter / exporter.
 
-- User-facing docs: https://pytorch.org/docs/master/onnx.html
+- User-facing docs: https://pytorch.org/docs/main/onnx.html
 - Developer docs: https://github.com/pytorch/pytorch/wiki/PyTorch-ONNX-exporter
 
 > Read the following if you are contributing to `torch.onnx`
@@ -35,10 +35,6 @@ Checkout topk in symbolic_opset10.py, and upsample_nearest2d in symbolic_opset8.
   `_jit_pass_onnx_remove_inplace_ops_for_onnx`, and
   transparently dispatched to their non inplace versions in
   "run_symbolic_function". See Note [Export inplace](#export-inplace)
-- Required: Annotate new symbolic functions with type annotations and decorate
-  with `@_beartype.beartype` to enable runtime type checking.
-  `@_beartype.beartype` should typically be the closest to the function to
-  ensure proper type checking.
 
 ### A note on Tensor types
 

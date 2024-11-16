@@ -45,7 +45,7 @@ std::vector<StackEntry> _pythonCallstack() {
 
 SourceRange getPythonInterpreterSourceRange() {
   auto cs = pythonCallstack();
-  c10::optional<std::string> source_filename;
+  std::optional<std::string> source_filename;
   size_t source_line = 0;
   std::stringstream stack_trace;
   for (const auto& entry : cs) {
@@ -74,7 +74,7 @@ SourceRange getPythonInterpreterSourceRange() {
 std::pair<std::shared_ptr<Graph>, Stack> createGraphByTracingWithDict(
     const py::function& func,
     const py::dict& inputs_dict,
-    Stack trace_inputs,
+    const Stack& trace_inputs,
     const py::function& var_name_lookup_fn,
     bool strict,
     bool force_outplace,
@@ -110,12 +110,13 @@ std::pair<std::shared_ptr<Graph>, Stack> createGraphByTracingWithDict(
 
   auto outs = tracer::trace(
       std::move(compact_trace_inputs),
-      [&](Stack inputs) -> Stack {
+      [&](const Stack& inputs) -> Stack {
         // We just leave the inputs_dict as it was and pass it to forward
         // method.
         auto out = func(**inputs_dict);
         if (out.ptr() == Py_None) {
-          AT_ERROR(
+          TORCH_CHECK(
+              false,
               "The traced function didn't return any values! Side-effects are not "
               "captured in traces, so it would be a no-op.");
         }
@@ -155,7 +156,8 @@ std::pair<std::shared_ptr<Graph>, Stack> createGraphByTracing(
         }
         auto out = func(*py_inputs);
         if (out.ptr() == Py_None) {
-          AT_ERROR(
+          TORCH_CHECK(
+              false,
               "The traced function didn't return any values! Side-effects are not "
               "captured in traces, so it would be a no-op.");
         }

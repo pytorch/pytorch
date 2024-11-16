@@ -1,0 +1,41 @@
+name: inductor-micro-benchmark-x86
+
+on:
+  schedule:
+    - cron: 0 7 * * *
+  push:
+    tags:
+      - ciflow/inductor-micro-benchmark-cpu-x86/*
+  workflow_dispatch:
+
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
+  cancel-in-progress: true
+
+permissions: read-all
+
+jobs:
+  linux-jammy-cpu-py3_9-gcc11-inductor-build:
+    if: ${{ (github.event_name != 'schedule' || github.repository == 'pytorch/pytorch') && github.repository_owner == 'pytorch' }}
+    name: linux-jammy-cpu-py3.9-gcc11-inductor
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-jammy-py3.9-gcc11
+      docker-image-name: pytorch-linux-jammy-py3.9-gcc11-inductor-benchmarks
+      # Use metal host for benchmark jobs
+      test-matrix: |
+        { include: [
+          { config: "inductor-micro-benchmark-cpu-x86", shard: 1, num_shards: 1, runner: "linux.24xl.spr-metal" },
+        ]}
+
+  linux-jammy-cpu-py3_9-gcc11-inductor-micro-benchmark-test:
+    name: linux-jammy-cpu-py3.9-gcc11-inductor
+    uses: ./.github/workflows/_linux-test.yml
+    needs: linux-jammy-cpu-py3_9-gcc11-inductor-build
+    with:
+      build-environment: linux-jammy-py3.9-gcc11
+      docker-image: ${{ needs.linux-jammy-cpu-py3_9-gcc11-inductor-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-cpu-py3_9-gcc11-inductor-build.outputs.test-matrix }}
+      use-gha: anything-non-empty-to-use-gha
+      timeout-minutes: 720

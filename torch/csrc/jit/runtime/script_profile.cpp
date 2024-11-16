@@ -102,27 +102,23 @@ auto initBindings() {
   return nullptr;
 }
 
-const auto C10_UNUSED torchBindInitializer = initBindings();
+[[maybe_unused]] const auto torchBindInitializer = initBindings();
 
 } // namespace
 
 namespace profiling {
 
 InstructionSpan::InstructionSpan(Node& node) {
-  if (getProfilesRegistry().empty()) {
-    return;
-  }
-
   datapoint_ = std::make_unique<Datapoint>(node.sourceRange());
 }
 
 InstructionSpan::~InstructionSpan() {
-  if (!datapoint_) {
-    return;
-  }
-
   datapoint_->end = std::chrono::steady_clock::now();
   getProfilesRegistry().send(std::move(datapoint_));
+}
+
+bool isProfilingOngoing() {
+  return !getProfilesRegistry().empty();
 }
 
 } // namespace profiling
@@ -151,7 +147,7 @@ const ScriptProfile::SourceMap& ScriptProfile::dumpStats() {
   for (const auto& datapoint : datapoints_) {
     if (const auto& source = datapoint->sourceRange.source()) {
       if (auto fileLineCol = datapoint->sourceRange.file_line_col()) {
-        auto it = sourceMap_.find(*source.get());
+        auto it = sourceMap_.find(*source);
         if (it == sourceMap_.end()) {
           it = sourceMap_.emplace(SourceRef{source}, LineMap{}).first;
         }

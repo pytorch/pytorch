@@ -119,6 +119,6 @@ void _fft_fill_with_conjugate_symmetry_cuda_(
     });
 }
 
-REGISTER_DISPATCH(fft_fill_with_conjugate_symmetry_stub, &_fft_fill_with_conjugate_symmetry_cuda_);
+REGISTER_DISPATCH(fft_fill_with_conjugate_symmetry_stub, &_fft_fill_with_conjugate_symmetry_cuda_)
 
 } // at::native

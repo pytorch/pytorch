@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from tensorboard.compat.proto.graph_pb2 import GraphDef
 from tensorboard.compat.proto.node_def_pb2 import NodeDef
 from tensorboard.compat.proto.versions_pb2 import VersionDef

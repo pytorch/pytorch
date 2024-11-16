@@ -11,6 +11,7 @@ _DNNL_RUNTIME_OMP = {
     "#cmakedefine DNNL_SYCL_CUDA": "/* #undef DNNL_SYCL_CUDA */",
     "#cmakedefine DNNL_SYCL_HIP": "/* #undef DNNL_SYCL_HIP */",
     "#cmakedefine DNNL_ENABLE_STACK_CHECKER": "#undef DNNL_ENABLE_STACK_CHECKER",
+    "#cmakedefine DNNL_EXPERIMENTAL_UKERNEL": "/* undef DNNL_EXPERIMENTAL_UKERNEL */",
     "#cmakedefine DNNL_EXPERIMENTAL": "#undef DNNL_EXPERIMENTAL",
     "#cmakedefine DNNL_EXPERIMENTAL_SPARSE": "#undef DNNL_EXPERIMENTAL_SPARSE",
     "#cmakedefine ONEDNN_BUILD_GRAPH": "#undef ONEDNN_BUILD_GRAPH",
@@ -50,6 +51,7 @@ _DNNL_RUNTIME_OMP = {
     "#cmakedefine01 BUILD_XEHPG": "#define BUILD_XEHPG 0",
     "#cmakedefine01 BUILD_XEHPC": "#define BUILD_XEHPC 0",
     "#cmakedefine01 BUILD_XEHP": "#define BUILD_XEHP 0",
+    "#cmakedefine01 BUILD_XE2": "#define BUILD_XE2 0",
     "#cmakedefine01 BUILD_GEMM_KERNELS_ALL": "#define BUILD_GEMM_KERNELS_ALL 0",
     "#cmakedefine01 BUILD_GEMM_KERNELS_NONE": "#define BUILD_GEMM_KERNELS_NONE 0",
     "#cmakedefine01 BUILD_GEMM_SSE41": "#define BUILD_GEMM_SSE41 0",
@@ -63,9 +65,9 @@ template_rule(
     out = "include/oneapi/dnnl/dnnl_version.h",
     substitutions = {
         "@DNNL_VERSION_MAJOR@": "3",
-        "@DNNL_VERSION_MINOR@": "3",
-        "@DNNL_VERSION_PATCH@": "2",
-        "@DNNL_VERSION_HASH@": "2dc95a2ad0841e29db8b22fbccaf3e5da7992b01",
+        "@DNNL_VERSION_MINOR@": "5",
+        "@DNNL_VERSION_PATCH@": "3",
+        "@DNNL_VERSION_HASH@": "66f0cb9eb66affd2da3bf5f8d897376f04aae6af",
     },
 )
 
@@ -130,15 +132,13 @@ cc_library(
     ],
     deps = [
         "@mkl",
-    ] + select({
-        "@pytorch//tools/config:thread_sanitizer": [],
-        "//conditions:default": ["@tbb"],
-    }),
+    ],
     defines = [
         "DNNL_ENABLE_MAX_CPU_ISA",
         "DNNL_ENABLE_CONCURRENT_EXEC",
         "DNNL_ENABLE_PRIMITIVE_CACHE",
         "DNNL_ENABLE_CPU_ISA_HINTS",
+        "DNNL_EXPERIMENTAL_UKERNEL",
         "ONEDNN_BUILD_GRAPH",
     ],
 )

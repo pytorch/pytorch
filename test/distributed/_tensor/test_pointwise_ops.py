@@ -5,18 +5,15 @@ from typing import Any, Callable, Dict, Optional, Sequence
 from unittest import skip
 
 import torch
-
 import torch.utils._pytree as pytree
 from torch import Tensor
-
 from torch.distributed._tensor import DeviceMesh, distribute_tensor, DTensor
 from torch.distributed._tensor.placement_types import (
-    _Partial,
+    Partial,
     Placement,
     Replicate,
     Shard,
 )
-from torch.distributed.distributed_c10d import ReduceOp
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorOpTestBase,
@@ -77,7 +74,7 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         placements: Sequence[Placement],
         op: Callable,
         pre_op_fn: Optional[Callable] = None,
-        args: Sequence[Any] = tuple(),
+        args: Sequence[Any] = (),
         kwargs: Optional[Dict[str, Any]] = None,
     ):
         if pre_op_fn is None:
@@ -142,15 +139,15 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
 
     def test_partial_add(self):
         device_mesh = self.build_device_mesh()
-        d_1 = DTensor.from_local(torch.rand(2, 2), device_mesh, [_Partial()])
-        d_2 = DTensor.from_local(torch.rand(2, 2), device_mesh, [_Partial()])
+        d_1 = DTensor.from_local(torch.rand(2, 2), device_mesh, [Partial()])
+        d_2 = DTensor.from_local(torch.rand(2, 2), device_mesh, [Partial()])
         d_3 = d_1 + d_2
         self.assertTrue(d_3._spec.placements[0].is_partial())
 
-    def test_partial_mul_failure(self):
+    def test_partial_mul(self):
         device_mesh = self.build_device_mesh()
-        d_1 = DTensor.from_local(torch.ones(2, 2), device_mesh, [_Partial()])
-        d_2 = DTensor.from_local(torch.ones(2, 2), device_mesh, [_Partial()])
+        d_1 = DTensor.from_local(torch.ones(2, 2), device_mesh, [Partial()])
+        d_2 = DTensor.from_local(torch.ones(2, 2), device_mesh, [Partial()])
         d_3 = d_1 * d_2
         self.assertTrue(d_3._spec.placements[0].is_replicate())
         self.assertEqual(d_3.to_local(), torch.ones(2, 2) * (self.world_size**2))
@@ -257,7 +254,7 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         with self.assertRaisesRegex(RuntimeError, "supported"):
             self._run_sharded_elementwise_ops(
                 device_mesh=device_mesh,
-                placements=[_Partial(ReduceOp.SUM)],
+                placements=[Partial("sum")],
                 input_size=(8, 5),
                 op=torch.nn.functional.dropout,
             )

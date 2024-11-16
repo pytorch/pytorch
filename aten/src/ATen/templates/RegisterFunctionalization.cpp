@@ -56,15 +56,15 @@ inline bool has_internal_overlap_helper(const at::Tensor t) {
 inline Tensor to_meta(const Tensor& t) {
     if (!t.defined()) return t;
     return at::native::empty_strided_meta_symint(t.sym_sizes(), t.sym_strides(),
-/*dtype=*/c10::make_optional(t.scalar_type()), /*layout=*/c10::make_optional(t.layout()),
-/*device=*/c10::make_optional(c10::Device(kMeta)), /*pin_memory=*/c10::nullopt);
+/*dtype=*/std::make_optional(t.scalar_type()), /*layout=*/std::make_optional(t.layout()),
+/*device=*/std::make_optional(c10::Device(kMeta)), /*pin_memory=*/std::nullopt);
 }
 
-inline c10::optional<Tensor> to_meta(const c10::optional<Tensor>& t) {
+inline std::optional<Tensor> to_meta(const std::optional<Tensor>& t) {
   if (t.has_value()) {
-    return c10::make_optional<Tensor>(to_meta(*t));
+    return std::make_optional<Tensor>(to_meta(*t));
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 inline std::vector<Tensor> to_meta(at::ITensorListRef t_list) {
@@ -85,8 +85,8 @@ inline c10::List<Tensor> to_meta(const c10::List<Tensor>& t_list) {
   return outputs;
 }
 
-inline c10::List<c10::optional<Tensor>> to_meta(const c10::List<c10::optional<Tensor>>& t_list) {
-  c10::List<c10::optional<Tensor>> outputs;
+inline c10::List<::std::optional<Tensor>> to_meta(const c10::List<::std::optional<Tensor>>& t_list) {
+  c10::List<::std::optional<Tensor>> outputs;
   outputs.reserve(t_list.size());
   for (const auto i : c10::irange(t_list.size())) {
     outputs.push_back(to_meta(t_list[i]));

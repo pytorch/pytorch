@@ -3,9 +3,7 @@
 #include <torch/csrc/distributed/rpc/rpc_command_base.h>
 #include <torch/csrc/distributed/rpc/types.h>
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace torch::distributed::rpc {
 
 // RPC call representing calling a Python function over RPC.
 class TORCH_API PythonCall final : public RpcCommandBase {
@@ -24,9 +22,8 @@ class TORCH_API PythonCall final : public RpcCommandBase {
 
  private:
   SerializedPyObj serializedPyObj_;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const bool isAsyncExecution_;
 };
 
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc

@@ -1,16 +1,22 @@
 # Owner(s): ["oncall: distributed"]
 
 from collections import OrderedDict
+from typing import TYPE_CHECKING
 
 import torch
-
 import torch.distributed.checkpoint._traverse as _traverse
-from torch.distributed.checkpoint.metadata import STATE_DICT_TYPE
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
-# TODO: add comments for TestTraverse
+if TYPE_CHECKING:
+    from torch.distributed.checkpoint.metadata import STATE_DICT_TYPE
+
+
 class TestTraverse(TestCase):
+    """
+    Test class for util methods of _traverse
+    """
+
     def test_traverse_shallow(self) -> None:
         state_dict = {
             "key0": 1,
@@ -33,8 +39,10 @@ class TestTraverse(TestCase):
         self.assertIn(("key1",), data)
         self.assertEqual(data[("key1",)], [1, 2])
 
-        self.assertIn(("key2",), data)
-        self.assertEqual(data[("key2",)], {1: 2, 2: 3})
+        self.assertIn(("key2", "1"), data)
+        self.assertEqual(data[("key2", "1")], 2)
+        self.assertIn(("key2", "2"), data)
+        self.assertEqual(data[("key2", "2")], 3)
 
         self.assertIn(("key3",), data)
         self.assertEqual(data[("key3",)], torch.tensor([1]))

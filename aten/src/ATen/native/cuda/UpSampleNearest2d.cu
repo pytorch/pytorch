@@ -122,7 +122,7 @@ __global__ void upsample_nearest2d_backward_out_frame(
     scalar_t* grad_i,
     float height_scale,
     float width_scale) {
-  int dst_idx = blockIdx.x * blockDim.x + threadIdx.x;
+  int64_t dst_idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (dst_idx >= dim_c * dst_dim_h * dst_dim_w)
     return;
 
@@ -151,7 +151,7 @@ __global__ void upsample_nearest2d_backward_out_frame(
     accscalar_t grad = 0;
     for (int y = src_y; y < src_y_up; y++) {
       for (int x = src_x; x < src_x_up; x++) {
-        int src_idx =
+        int64_t src_idx =
             b * dim_c * src_c_stride + c * src_c_stride + y * src_dim_w + x;
         grad += grad_o[src_idx];
       }
@@ -207,8 +207,8 @@ static void upsample_nearest2d_out_cuda_template(
     const Tensor& output,
     const Tensor& input_,
     IntArrayRef output_size,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w) {
+    std::optional<double> scales_h,
+    std::optional<double> scales_w) {
   TensorArg input_arg{input_, "input_", 1}, output_arg{output, "output", 2};
   checkAllSameGPU(__func__, {input_arg, output_arg});
 
@@ -240,9 +240,9 @@ static void upsample_nearest2d_out_cuda_template(
     at::Tensor input = input_.contiguous(at::MemoryFormat::ChannelsLast);
 
     TORCH_CHECK(input.numel() < std::numeric_limits<int64_t>::max(),
-      "upsample_nearest_nhwc only supports input tensors with less than 2^63 - 1 elements");
+      "upsample_nearest_nhwc only supports input tensors with less than 2^63 - 1 elements, but got ", input.sizes());
     TORCH_CHECK(output.numel() < std::numeric_limits<int64_t>::max(),
-      "upsample_nearest_nhwc only supports output tensors with less than 2^63 - 1 elements");
+      "upsample_nearest_nhwc only supports output tensors with less than 2^63 - 1 elements, but got ", output.sizes());
 
     const int64_t num_kernels = output.numel();
     const int64_t num_threads = std::min(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
@@ -337,8 +337,8 @@ static void upsample_nearest2d_backward_out_cuda_template(
     const Tensor& grad_output_,
     IntArrayRef output_size,
     IntArrayRef input_size,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w) {
+    std::optional<double> scales_h,
+    std::optional<double> scales_w) {
   TensorArg grad_input_arg{grad_input, "grad_input", 1},
       grad_output_arg{grad_output_, "grad_output_", 2};
   checkAllSameGPU(__func__, {grad_output_arg, grad_input_arg});
@@ -370,9 +370,9 @@ static void upsample_nearest2d_backward_out_cuda_template(
     Tensor grad_output = grad_output_.contiguous(at::MemoryFormat::ChannelsLast);
 
     TORCH_CHECK(grad_input.numel() < std::numeric_limits<int>::max(),
-      "upsample_nearest_nhwc only supports grad_input tensors with less than INT_MAX elements");
+      "upsample_nearest_nhwc only supports grad_input tensors with less than INT_MAX elements, but got ", grad_input.sizes());
     TORCH_CHECK(grad_output.numel() < std::numeric_limits<int>::max(),
-      "upsample_nearest_nhwc only supports grad_output tensors with less than INT_MAX elements");
+      "upsample_nearest_nhwc only supports grad_output tensors with less than INT_MAX elements, but got ", grad_output.sizes());
 
     const int num_kernels = grad_input.numel();
     const int num_threads = std::min(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
@@ -408,9 +408,9 @@ static void upsample_nearest2d_backward_out_cuda_template(
     dim3 bdim{std::min<unsigned int>(
         at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, MAX_THREADS)};
     dim3 gdim{ceil_div(n, bdim.x)};
-    // safe check for int32 indexing; implicitly restrict launch config for kernel
-    TORCH_CHECK(grad_input.numel() <= std::numeric_limits<int32_t>::max());
-    TORCH_CHECK(grad_output.numel() <= std::numeric_limits<int32_t>::max());
+    // safe check for int64 indexing; implicitly restrict launch config for kernel
+    TORCH_CHECK(grad_input.numel() <= std::numeric_limits<int64_t>::max(), "upsample2d grad_input.numel() <= std::numeric_limits<int64_t>::max(), but got ", grad_input.sizes());
+    TORCH_CHECK(grad_output.numel() <= std::numeric_limits<int64_t>::max(), "upsample2d grad_output.numel() <= std::numeric_limits<int64_t>::max(), but got ", grad_output.sizes());
 
     cudaStream_t stream = at::cuda::getCurrentCUDAStream();
     AT_DISPATCH_FLOATING_TYPES_AND3(ScalarType::Half, ScalarType::BFloat16, ScalarType::Byte, grad_output.scalar_type(), "upsample_nearest2d_backward_out_frame", [&] {
@@ -446,8 +446,8 @@ static void upsample_nearest2d_backward_out_cuda_template(
 TORCH_IMPL_FUNC(upsample_nearest2d_out_cuda) (
     const Tensor& input,
     IntArrayRef output_size,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w,
+    std::optional<double> scales_h,
+    std::optional<double> scales_w,
     const Tensor& output) {
   upsample_nearest2d_out_cuda_template<nearest_neighbor_compute_source_index>(
       output, input, output_size, scales_h, scales_w);
@@ -456,8 +456,8 @@ TORCH_IMPL_FUNC(upsample_nearest2d_out_cuda) (
 TORCH_IMPL_FUNC(_upsample_nearest_exact2d_out_cuda) (
     const Tensor& input,
     IntArrayRef output_size,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w,
+    std::optional<double> scales_h,
+    std::optional<double> scales_w,
     const Tensor& output) {
   upsample_nearest2d_out_cuda_template<nearest_neighbor_exact_compute_source_index>(
       output, input, output_size, scales_h, scales_w);
@@ -467,8 +467,8 @@ TORCH_IMPL_FUNC(upsample_nearest2d_backward_out_cuda) (
     const Tensor& grad_output,
     IntArrayRef output_size,
     IntArrayRef input_size,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w,
+    std::optional<double> scales_h,
+    std::optional<double> scales_w,
     const Tensor& grad_input) {
   upsample_nearest2d_backward_out_cuda_template<nearest_neighbor_bw_compute_source_index>(
       grad_input, grad_output, output_size, input_size, scales_h, scales_w);
@@ -478,8 +478,8 @@ TORCH_IMPL_FUNC(_upsample_nearest_exact2d_backward_out_cuda) (
     const Tensor& grad_output,
     IntArrayRef output_size,
     IntArrayRef input_size,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w,
+    std::optional<double> scales_h,
+    std::optional<double> scales_w,
     const Tensor& grad_input) {
   upsample_nearest2d_backward_out_cuda_template<nearest_neighbor_exact_bw_compute_source_index>(
       grad_input, grad_output, output_size, input_size, scales_h, scales_w);

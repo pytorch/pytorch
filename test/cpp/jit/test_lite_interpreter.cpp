@@ -893,7 +893,7 @@ TEST(LiteInterpreterTest, FindWrongMethodName) {
   std::stringstream ss;
   m._save_for_mobile(ss);
   mobile::Module bc = _load_for_mobile(ss);
-  ASSERT_TRUE(bc.find_method("forward") == c10::nullopt);
+  ASSERT_TRUE(bc.find_method("forward") == std::nullopt);
 }
 
 TEST(LiteInterpreterTest, FindAndRunMethod) {
@@ -917,7 +917,7 @@ TEST(LiteInterpreterTest, FindAndRunMethod) {
   for (int i = 0; i < 3; ++i) {
     auto bcinputs = inputs;
     auto method = bc.find_method("add_it");
-    AT_ASSERT(method != c10::nullopt);
+    AT_ASSERT(method != std::nullopt);
     res = (*method)(std::move(bcinputs));
   }
 
@@ -1098,7 +1098,7 @@ TEST(RunTimeTest, ParseBytecode) {
 
   //  class Module(torch.nn.Module):
   //
-  //    def __init__(self):
+  //    def __init__(self) -> None:
   //      super().__init__()
   //
   //    def forward(self, x: int, h: int, xfirst: bool):
@@ -1169,7 +1169,7 @@ TEST(RunTimeTest, ParseOperator) {
   // PyTorch program:
 
   // class Add(torch.nn.Module):
-  //     def __init__(self):
+  //     def __init__(self) -> None:
   //         super().__init__()
 
   //     def forward(self, a, b):

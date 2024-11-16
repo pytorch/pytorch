@@ -1,9 +1,10 @@
-from typing import List, Optional, Sequence, Set, Union
+from __future__ import annotations
+
+from typing import Sequence
 
 from torchgen import local
 from torchgen.api.types import (
     ArgName,
-    ArrayCType,
     BaseCType,
     Binding,
     ConstRefCType,
@@ -14,6 +15,14 @@ from torchgen.api.types import (
     TupleCType,
     VectorCType,
     voidT,
+)
+from torchgen.executorch.api.types import (
+    ArrayRefCType,
+    BaseTypeToCppMapping,
+    OptionalCType,
+    scalarT,
+    tensorListT,
+    tensorT,
 )
 from torchgen.model import (
     Argument,
@@ -29,14 +38,7 @@ from torchgen.model import (
     Type,
 )
 from torchgen.utils import assert_never
-from .types import (
-    ArrayRefCType,
-    BaseTypeToCppMapping,
-    OptionalCType,
-    scalarT,
-    tensorListT,
-    tensorT,
-)
+
 
 """
 This file describes the translation of JIT schema to the public C++ API, which is what people use when they call
@@ -62,7 +64,7 @@ def valuetype_type(
     *,
     binds: ArgName,
     remove_non_owning_ref_types: bool = False,
-) -> Optional[NamedCType]:
+) -> NamedCType | None:
     if isinstance(t, BaseType):
         if t.name == BaseTy.Tensor or t.name == BaseTy.Scalar:
             return None
@@ -85,7 +87,7 @@ def valuetype_type(
         if str(t.elem) == "bool":
             assert t.size is not None
             return NamedCType(
-                binds, ArrayCType(BaseCType(BaseTypeToCppMapping[BaseTy.bool]), t.size)
+                binds, ArrayRefCType(BaseCType(BaseTypeToCppMapping[BaseTy.bool]))
             )
         else:
             return None
@@ -182,9 +184,7 @@ def returntype_type(t: Type, *, mutable: bool) -> CType:
         elif t.name == BaseTy.Scalar:
             return BaseCType(scalarT)
     elif isinstance(t, ListType):
-        assert (
-            not mutable
-        ), "Native functions should never return a mutable tensor list. They should return void."
+        assert not mutable, "Native functions should never return a mutable tensor list. They should return void."
         elem = returntype_type(t.elem, mutable=False)
         assert t.size is None, f"fixed size list returns not supported: {t}"
         return VectorCType(elem)
@@ -208,7 +208,7 @@ def returns_type(rs: Sequence[Return]) -> CType:
 
 
 def return_names(f: NativeFunction, *, fallback_name: str = "result") -> Sequence[str]:
-    returns: List[str] = []
+    returns: list[str] = []
     for i, r in enumerate(f.func.returns):
         # If we have an inplace function, the return argument is
         # implicitly named self.
@@ -242,7 +242,7 @@ def return_names(f: NativeFunction, *, fallback_name: str = "result") -> Sequenc
 JIT_TO_CPP_DEFAULT = {
     "False": "false",
     "True": "true",
-    "None": "torch::executorch::nullopt",  # UGH this one is type directed
+    "None": "torch::execustd::nullopt",  # UGH this one is type directed
     "[]": "{}",
     "contiguous_format": "torch::executorch::MemoryFormat::Contiguous",
     "long": "torch::executorch::kLong",
@@ -294,16 +294,16 @@ def default_expr(d: str, t: Type) -> str:
 
 
 def argument(
-    a: Union[Argument, TensorOptionsArguments, SelfArgument],
+    a: Argument | TensorOptionsArguments | SelfArgument,
     *,
-    cpp_no_default_args: Set[str],
+    cpp_no_default_args: set[str],
     method: bool,
     faithful: bool,
     has_tensor_options: bool,
-) -> List[Binding]:
+) -> list[Binding]:
     def sub_argument(
-        a: Union[Argument, TensorOptionsArguments, SelfArgument]
-    ) -> List[Binding]:
+        a: Argument | TensorOptionsArguments | SelfArgument,
+    ) -> list[Binding]:
         return argument(
             a,
             cpp_no_default_args=cpp_no_default_args,
@@ -318,7 +318,7 @@ def argument(
             binds = SpecialArgName.possibly_redundant_memory_format
         else:
             binds = a.name
-        default: Optional[str] = None
+        default: str | None = None
         if a.name not in cpp_no_default_args and a.default is not None:
             default = default_expr(a.default, a.type)
         return [
@@ -346,9 +346,9 @@ def arguments(
     *,
     faithful: bool,
     method: bool,
-    cpp_no_default_args: Set[str],
-) -> List[Binding]:
-    args: List[Union[Argument, TensorOptionsArguments, SelfArgument]] = []
+    cpp_no_default_args: set[str],
+) -> list[Binding]:
+    args: list[Argument | TensorOptionsArguments | SelfArgument] = []
     if faithful:
         args.extend(arguments.non_out)
         args.extend(arguments.out)

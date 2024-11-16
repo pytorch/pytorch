@@ -9,7 +9,7 @@ append_cxx_flag_if_supported("-Wno-unused-private-field" CMAKE_CXX_FLAGS)
 
 # Generate unboxing kernels
 set(GEN_COMMAND
-        "${PYTHON_EXECUTABLE}" -m torchgen.gen_executorch
+        "${Python_EXECUTABLE}" -m torchgen.gen_executorch
         --source-path=${TEST_ROOT}
         --install-dir=${OUTPUT_DIRECTORY}
         --tags-path=${TORCH_ROOT}/aten/src/ATen/native/tags.yaml
@@ -73,5 +73,6 @@ elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
           )
 endif()
 if(INSTALL_TEST)
+  set_target_properties(test_edge_op_registration PROPERTIES INSTALL_RPATH "${CMAKE_INSTALL_RPATH}:${_rpath_portable_origin}/../lib")
   install(TARGETS test_edge_op_registration DESTINATION bin)
 endif()

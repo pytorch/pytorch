@@ -11,6 +11,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+
 # String representing the host platform (e.g. Linux, Darwin).
 HOST_PLATFORM = platform.system()
 HOST_PLATFORM_ARCH = platform.system() + "-" + platform.processor()

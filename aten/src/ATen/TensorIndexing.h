@@ -5,8 +5,8 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/core/TensorBody.h>
 #include <c10/core/SymInt.h>
-#include <c10/util/Optional.h>
 #include <c10/util/irange.h>
+#include <optional>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -24,12 +24,12 @@
 
 namespace at::indexing {
 
-const int64_t INDEX_MIN = c10::SymInt::min_representable_int();
-const int64_t INDEX_MAX = -(INDEX_MIN + 1);
+constexpr int64_t INDEX_MIN = c10::SymInt::min_representable_int();
+constexpr int64_t INDEX_MAX = -(INDEX_MIN + 1);
 
 enum class TensorIndexType { None, Ellipsis, SymInt, Boolean, Slice, Tensor };
 
-constexpr c10::nullopt_t None = c10::nullopt;
+constexpr std::nullopt_t None = std::nullopt;
 
 struct TORCH_API EllipsisIndexType final {
   EllipsisIndexType() = default;
@@ -39,16 +39,18 @@ TORCH_API extern const EllipsisIndexType Ellipsis;
 struct TORCH_API Slice final {
  public:
   Slice(
-      c10::optional<c10::SymInt> start_index = c10::nullopt,
-      c10::optional<c10::SymInt> stop_index = c10::nullopt,
-      c10::optional<c10::SymInt> step_index = c10::nullopt) {
+      std::optional<c10::SymInt> start_index = std::nullopt,
+      std::optional<c10::SymInt> stop_index = std::nullopt,
+      std::optional<c10::SymInt> step_index = std::nullopt) {
     if (!step_index.has_value()) {
       step_ = c10::SymInt(1);
     } else {
       step_ = std::move(step_index).value();
     }
 
-    TORCH_CHECK_VALUE(step_ != 0, "slice step cannot be zero");
+    TORCH_CHECK_VALUE(
+        step_.sym_ne(0).expect_true(__FILE__, __LINE__),
+        "slice step cannot be zero");
 
     if (!start_index.has_value()) {
       start_ = c10::SymInt(step_ < 0 ? INDEX_MAX : 0);
@@ -110,7 +112,7 @@ TORCH_API std::ostream& operator<<(std::ostream& stream, const Slice& slice);
 // `torch.tensor([1, 2])`) | `torch::tensor({1, 2})`
 struct TORCH_API TensorIndex final {
   // Case 1: `at::indexing::None`
-  TensorIndex(c10::nullopt_t) : type_(TensorIndexType::None) {}
+  TensorIndex(std::nullopt_t) : type_(TensorIndexType::None) {}
 
   // Case 2: "..." / `at::indexing::Ellipsis`
   TensorIndex(at::indexing::EllipsisIndexType)
@@ -130,9 +132,7 @@ struct TORCH_API TensorIndex final {
   TensorIndex(int integer) : TensorIndex(SymInt(integer)) {}
 
   // Case 4: Boolean value
-  template <
-      class T,
-      class = typename std::enable_if<std::is_same<bool, T>::value>::type>
+  template <class T, class = std::enable_if_t<std::is_same_v<bool, T>>>
   TensorIndex(T boolean) : boolean_(boolean), type_(TensorIndexType::Boolean) {}
 
   // Case 5: Slice represented in `at::indexing::Slice` form
@@ -199,7 +199,7 @@ TORCH_API std::ostream& operator<<(
     const std::vector<TensorIndex>& tensor_indices);
 
 namespace impl {
-static inline Tensor applySlice(
+inline Tensor applySlice(
     const Tensor& self,
     int64_t dim,
     c10::SymInt start,
@@ -207,9 +207,11 @@ static inline Tensor applySlice(
     c10::SymInt step,
     bool disable_slice_optimization,
     const at::Device& self_device,
-    const c10::optional<SymIntArrayRef>& self_sizes) {
+    const std::optional<SymIntArrayRef>& self_sizes) {
   // TODO: implement negative step
-  TORCH_CHECK_VALUE(step > 0, "step must be greater than zero");
+  TORCH_CHECK_VALUE(
+      step.sym_gt(0).expect_true(__FILE__, __LINE__),
+      "step must be greater than zero");
 
   // See NOTE [nested tensor size for indexing]
   if (self_sizes.has_value()) {
@@ -219,8 +221,9 @@ static inline Tensor applySlice(
     SymInt length = (self_device == at::kCPU || self_device == at::kCUDA)
         ? (*self_sizes)[dim]
         : self.sym_size(dim);
-    if (!disable_slice_optimization && start == 0 && length == stop &&
-        step == 1) {
+    if (!disable_slice_optimization &&
+        TORCH_GUARD_SIZE_OBLIVIOUS(start.sym_eq(0)) &&
+        TORCH_GUARD_SIZE_OBLIVIOUS(length.sym_eq(stop)) && step == 1) {
       return self;
     }
   }
@@ -228,13 +231,13 @@ static inline Tensor applySlice(
       dim, std::move(start), std::move(stop), std::move(step));
 }
 
-static inline Tensor applySelect(
+inline Tensor applySelect(
     const Tensor& self,
     int64_t dim,
     SymInt index,
     int64_t real_dim,
     const at::Device& /*self_device*/,
-    const c10::optional<SymIntArrayRef>& self_sizes) {
+    const std::optional<SymIntArrayRef>& self_sizes) {
   // See NOTE [nested tensor size for indexing]
   if (self_sizes.has_value()) {
     auto maybe_index = index.maybe_as_int();
@@ -252,7 +255,9 @@ static inline Tensor applySelect(
     // the other hand, indexing wraping is valid for all negative int64_t
     // values, as x[INT64_MIN] is the same as x[INT64_MAX]
     TORCH_CHECK_INDEX(
-        size > -1 - index && size > index,
+        size.sym_gt(-1 - index)
+            .sym_and(size.sym_gt(index))
+            .expect_true(__FILE__, __LINE__),
         "index ",
         index,
         " is out of bounds for dimension ",
@@ -267,31 +272,29 @@ static inline Tensor applySelect(
   return self.select_symint(dim, std::move(index));
 }
 
-static inline Tensor boolToIndexingTensorCPUOrCUDA(
+inline Tensor boolToIndexingTensorCPUOrCUDA(const Tensor& self, bool value) {
+  // booleans add a dimension of size 1. true indexes this dimension as if 0:,
+  // false as empty.
+  if (value) {
+    return at::empty({1}, self.options().dtype(kLong)).fill_(0.);
+  } else {
+    return at::empty({0}, self.options().dtype(kLong));
+  }
+}
+
+inline Tensor boolToIndexingTensorNonNativeDeviceType(
     const Tensor& self,
     bool value) {
   // booleans add a dimension of size 1. true indexes this dimension as if 0:,
   // false as empty.
   if (value) {
-    return at::empty({1}, {}, self.options().dtype(kLong)).fill_(0.);
+    return at::zeros({1}, self.options().dtype(kLong));
   } else {
-    return at::empty({0}, {}, self.options().dtype(kLong));
+    return at::empty({0}, self.options().dtype(kLong));
   }
 }
 
-static inline Tensor boolToIndexingTensorNonNativeDeviceType(
-    const Tensor& self,
-    bool value) {
-  // booleans add a dimension of size 1. true indexes this dimension as if 0:,
-  // false as empty.
-  if (value) {
-    return at::zeros({1}, {}, self.options().dtype(kLong));
-  } else {
-    return at::empty({0}, {}, self.options().dtype(kLong));
-  }
-}
-
-static inline Tensor boolToIndexingTensor(
+inline Tensor boolToIndexingTensor(
     const Tensor& self,
     bool value,
     const at::Device& self_device) {
@@ -302,13 +305,13 @@ static inline Tensor boolToIndexingTensor(
   }
 }
 
-static inline Tensor scalarToTensorNonNativeDeviceType(
+inline Tensor scalarToTensorNonNativeDeviceType(
     const Scalar& v,
     const TensorOptions& options) {
   return at::scalar_tensor(v, options);
 }
 
-static inline void recordTensorIndex(
+inline void recordTensorIndex(
     const Tensor& tensor,
     std::vector<Tensor>& outIndices,
     int64_t* dim_ptr) {
@@ -316,14 +319,14 @@ static inline void recordTensorIndex(
   outIndices.resize(*dim_ptr + 1);
   outIndices[*dim_ptr] = tensor;
   (*dim_ptr)++;
-};
+}
 
-static inline c10::List<c10::optional<Tensor>> typeConvertIndices(
+inline c10::List<::std::optional<Tensor>> typeConvertIndices(
     const Tensor& /*self*/,
     std::vector<Tensor>&& indices) {
-  c10::List<c10::optional<Tensor>> converted_inds;
+  c10::List<::std::optional<Tensor>> converted_inds;
   converted_inds.reserve(indices.size());
-  for (const auto& i : indices) {
+  for (auto&& i : std::move(indices)) {
     converted_inds.push_back(std::move(i));
   }
   return converted_inds;
@@ -339,7 +342,7 @@ static inline c10::List<c10::optional<Tensor>> typeConvertIndices(
 // construct a `std::vector` container to be consumed by the C++
 // `count_specified_dimensions` function, which adds 100s of nanoseconds
 // overhead and is undesirable.
-static inline int64_t count_specified_dimensions(
+inline int64_t count_specified_dimensions(
     const ArrayRef<TensorIndex>& indices) {
   // Count the number of indexed dimensions (everything but ellipsis and None)
   int64_t count = 0;
@@ -373,7 +376,7 @@ static inline int64_t count_specified_dimensions(
 //
 // The rest of the functions are in `at::indexing::impl` namespace, signifying
 // that they shouldn't be used from Python indexing implementation.
-static inline Tensor scalarToTensor(
+inline Tensor scalarToTensor(
     const Scalar& v,
     const TensorOptions& options,
     const at::Device& self_device) {
@@ -388,7 +391,7 @@ static inline Tensor scalarToTensor(
 // To match numpy semantics:
 // As a special case for backwards compatibility,
 // strip away unit dimensions from the left of 'src'
-static inline SymIntArrayRef slicePrefix1sSize(const SymIntArrayRef& sizes) {
+inline SymIntArrayRef slicePrefix1sSize(const SymIntArrayRef& sizes) {
   size_t first_non1_src = sizes.size();
   for (const auto i : c10::irange(sizes.size())) {
     // Unbacked SymInt has different behavior, but this is sound because
@@ -403,7 +406,7 @@ static inline SymIntArrayRef slicePrefix1sSize(const SymIntArrayRef& sizes) {
   return sizes.slice(first_non1_src);
 }
 
-static inline void copy_to(const Tensor& dst, const Tensor& src) {
+inline void copy_to(const Tensor& dst, const Tensor& src) {
   if (dst.sym_sizes().equals(src.sym_sizes())) {
     // A shortcut to avoid generating hard-coded constant sizes during tracing.
     // This is not a perfect solution: when src & dst have different shapes,
@@ -422,7 +425,7 @@ static inline void copy_to(const Tensor& dst, const Tensor& src) {
 
 // See NOTE [ Setting `disable_slice_optimization` when calling C++ tensor
 // indexing functions from Python ]
-static inline Tensor handleDimInMultiDimIndexing(
+inline Tensor handleDimInMultiDimIndexing(
     const Tensor& prev_dim_result,
     const Tensor& original_tensor,
     const TensorIndex& index,
@@ -432,7 +435,7 @@ static inline Tensor handleDimInMultiDimIndexing(
     std::vector<Tensor>& outIndices,
     bool disable_slice_optimization,
     const at::Device& original_tensor_device,
-    const c10::optional<SymIntArrayRef>& prev_dim_result_sizes) {
+    const std::optional<SymIntArrayRef>& prev_dim_result_sizes) {
   if (index.is_integer()) {
     return impl::applySelect(
         prev_dim_result,
@@ -510,13 +513,13 @@ static inline Tensor handleDimInMultiDimIndexing(
 namespace impl {
 // This mirrors `applySlicing` in
 // torch/csrc/autograd/python_variable_indexing.cpp
-static inline Tensor applySlicing(
+inline Tensor applySlicing(
     const Tensor& self,
     const ArrayRef<TensorIndex>& indices,
     std::vector<Tensor>& outIndices,
     bool disable_slice_optimization,
     const at::Device& self_device,
-    const c10::optional<SymIntArrayRef>& self_sizes) {
+    const std::optional<SymIntArrayRef>& self_sizes) {
   int64_t dim = 0;
   int64_t specified_dims = impl::count_specified_dimensions(indices);
 
@@ -532,16 +535,16 @@ static inline Tensor applySlicing(
   for (const auto i : c10::irange(indices.size())) {
     auto& obj = indices[i];
     // See NOTE [nested tensor size for indexing]
-    c10::optional<SymIntArrayRef> result_sizes = result.is_nested()
-        ? c10::optional<SymIntArrayRef>(c10::nullopt)
-        : c10::optional<SymIntArrayRef>(result.sym_sizes());
+    std::optional<SymIntArrayRef> result_sizes = result.is_nested()
+        ? std::optional<SymIntArrayRef>(std::nullopt)
+        : std::optional<SymIntArrayRef>(result.sym_sizes());
     result = handleDimInMultiDimIndexing(
         /*prev_dim_result=*/result,
         /*original_tensor=*/self,
         /*index=*/obj,
-        /*dim=*/&dim,
+        /*dim_ptr=*/&dim,
         /*specified_dims_ptr=*/&specified_dims,
-        /*real_dim=*/i,
+        /*real_dim=*/static_cast<int64_t>(i),
         /*outIndices=*/outIndices,
         /*disable_slice_optimization=*/disable_slice_optimization,
         /*original_tensor_device=*/self_device,
@@ -551,13 +554,13 @@ static inline Tensor applySlicing(
 }
 } // namespace impl
 
-static inline Tensor dispatch_index(
+inline Tensor dispatch_index(
     const Tensor& self,
     std::vector<Tensor>&& indices) {
   return self.index(impl::typeConvertIndices(self, std::move(indices)));
 }
 
-static inline Tensor dispatch_index_put_(
+inline Tensor dispatch_index_put_(
     Tensor& self,
     std::vector<Tensor>&& indices,
     const Tensor& value) {
@@ -599,7 +602,7 @@ static inline Tensor dispatch_index_put_(
 // torch/csrc/autograd/python_variable_indexing.cpp See NOTE [ Setting
 // `disable_slice_optimization` when calling C++ tensor indexing functions from
 // Python ]
-static inline Tensor get_item(
+inline Tensor get_item(
     const Tensor& self,
     const ArrayRef<TensorIndex>& indices,
     bool disable_slice_optimization = false) {
@@ -608,9 +611,9 @@ static inline Tensor get_item(
   // nested tensor does not have a size (yet) so for now we represent its size
   // as null may need to be changed after we reach a better solution for nested
   // tensor size
-  c10::optional<SymIntArrayRef> self_sizes = self.is_nested()
-      ? c10::optional<SymIntArrayRef>(c10::nullopt)
-      : c10::optional<SymIntArrayRef>(self.sym_sizes());
+  std::optional<SymIntArrayRef> self_sizes = self.is_nested()
+      ? std::optional<SymIntArrayRef>(std::nullopt)
+      : std::optional<SymIntArrayRef>(self.sym_sizes());
 
   // handle simple types: integers, slices, none, ellipsis, bool
   if (indices.size() == 1) {
@@ -665,7 +668,7 @@ static inline Tensor get_item(
 // torch/csrc/autograd/python_variable_indexing.cpp for "the assigned value is a
 // Tensor" case See NOTE [ Setting `disable_slice_optimization` when calling C++
 // tensor indexing functions from Python ]
-static inline void set_item(
+inline void set_item(
     const Tensor& self,
     const ArrayRef<TensorIndex>& indices,
     const Tensor& value,

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """Trivial use of Timer API:
 
 $ python -m examples.simple_timeit

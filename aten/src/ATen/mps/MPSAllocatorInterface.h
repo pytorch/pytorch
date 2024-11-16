@@ -33,6 +33,7 @@ public:
   virtual size_t getTotalAllocatedMemory() const = 0;
   virtual size_t getCurrentAllocatedMemory() const = 0;
   virtual size_t getDriverAllocatedMemory() const = 0;
+  virtual size_t getRecommendedMaxMemory() const = 0;
   virtual std::pair<const void*, uint32_t> getSharedBufferPtr(const void* ptr) const = 0;
   virtual bool recordEvents(c10::ArrayRef<const void*> buffers) const = 0;
   virtual bool waitForEvents(c10::ArrayRef<const void*> buffers) const = 0;
@@ -52,10 +53,12 @@ class IMpsAllocatorCallback {
 };
 
 // MPS allocator will execute every registered callback when a block of memory is freed.
-C10_DECLARE_REGISTRY(MPSAllocatorCallbacksRegistry, IMpsAllocatorCallback);
+TORCH_DECLARE_REGISTRY(MPSAllocatorCallbacksRegistry, IMpsAllocatorCallback);
 #define REGISTER_MPS_ALLOCATOR_CALLBACK(name, ...) \
-  C10_REGISTER_CLASS(MPSAllocatorCallbacksRegistry, name, __VA_ARGS__);
+  C10_REGISTER_CLASS(MPSAllocatorCallbacksRegistry, name, __VA_ARGS__)
 
 IMPSAllocator* getIMPSAllocator(bool sharedAllocator = false);
+
+bool isMPSPinnedPtr(const void* data);
 
 } // namespace at::mps

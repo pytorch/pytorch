@@ -3,10 +3,7 @@
 import logging
 
 from torch.distributed._shard.sharded_tensor.logger import _get_or_create_logger
-from torch.testing._internal.common_utils import (
-    TestCase,
-    run_tests,
-)
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 class ShardingSpecLoggerTest(TestCase):

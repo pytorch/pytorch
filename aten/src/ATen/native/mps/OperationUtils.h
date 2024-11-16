@@ -2,15 +2,14 @@
 
 #pragma once
 
+#include <initializer_list>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Tensor.h>
 #include <ATen/Utils.h>
 #include <ATen/mps/MPSStream.h>
 #include <ATen/native/mps/TensorFactory.h>
-#include <c10/util/Optional.h>
 #include <c10/core/ScalarType.h>
 #include <torch/library.h>
-#include <exception>
 #include <unordered_map>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -46,47 +45,55 @@ struct MPSScalar {
     at::Half h;
     int64_t i;
     bool b;
+    c10::complex<float> cf;
+    c10::complex<at::Half> ch;
+    at::BFloat16 bf16;
   } value {};
 };
 
-void runMPSGraph(
-    MPSStream* mpsStream,
+void runMPSGraph(MPSStream* mpsStream,
     MPSGraph* mpsGraph,
     NSDictionary* feeds,
     NSDictionary* results);
 
 MPSDataType getMPSDataType(ScalarType scalar_type);
-static inline MPSDataType getMPSDataType(const Tensor& t) {
+static inline MPSDataType getMPSDataType(const TensorBase& t) {
   return getMPSDataType(t.scalar_type());
 }
 MPSDataType getMPSScalarType(ScalarType scalar_type);
-static inline MPSDataType getMPSScalarType(const Tensor& t) {
+static inline MPSDataType getMPSScalarType(const TensorBase& t) {
   return getMPSScalarType(t.scalar_type());
 }
 MPSScalar   getMPSScalar(const Scalar& scalar, ScalarType type);
 std::string getMPSTypeString(ScalarType scalar_type, bool short_name = false);
-static inline std::string getMPSTypeString(const Tensor& t, bool short_name = false) {
+static inline std::string getMPSTypeString(const TensorBase& t, bool short_name = false) {
   return getMPSTypeString(t.scalar_type(), short_name);
 }
 std::string scalarToMetalTypeString(const c10::ScalarType& scalar_type);
-NSArray<NSNumber*>* getTensorAxes(const Tensor& t);
+static inline std::string scalarToMetalTypeString(const TensorBase& t) {
+  return scalarToMetalTypeString(t.scalar_type());
+}
+NSArray<NSNumber*>* getTensorAxes(const TensorBase& t);
 NSArray<NSNumber*>* getTensorAxes(const IntArrayRef& sizes, at::OptionalIntArrayRef dim);
 std::string getMPSShapeString(MPSShape* shape);
-std::string getTensorsStringKey(const TensorList& tensors, bool short_dtype = true);
+std::string getTensorsStringKey(const TensorList& tensors, bool short_dtype = true, bool exclude_shape = false);
 std::string getArrayRefString(const IntArrayRef s);
 // use has_storage() on the returned tensor to determine if src actually is a view
-Tensor gatherViewTensor(const at::Tensor& src, at::Tensor& dst);
-Tensor& scatterViewTensor(const at::Tensor& src, at::Tensor& output);
-bool canSliceViewTensor(const Tensor& src, MPSShape *mpsShape);
-MPSGraphTensorData* getMPSGraphTensorDataForView(const Tensor& src, MPSShape *mpsShape, const MPSDataType mpsDataType);
-MPSGraphTensor* castToIHFTypes(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor, const Tensor& input, bool includesInt64 = false);
-MPSGraphTensor* castFromIHFTypes(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor, const Tensor& input, bool includesInt64 = false);
+Tensor gatherViewTensor(const Tensor& src, Tensor& dst);
+Tensor& scatterViewTensor(const Tensor& src, Tensor& output);
+bool canSliceViewTensor(const TensorBase& src, MPSShape *mpsShape);
+MPSGraphTensorData* getMPSGraphTensorDataForView(const TensorBase& src, MPSShape *mpsShape, const MPSDataType mpsDataType);
+MPSGraphTensor* castToIHFTypes(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor, const TensorBase& input, bool includesInt64 = false);
+MPSGraphTensor* castFromIHFTypes(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor, const TensorBase& input, bool includesInt64 = false);
 
+MPSNDArray* getMPSNDArray(const TensorBase& t, const IntArrayRef& sizes = {}, const IntArrayRef& strides = {});
+MPSNDArray* getMPSNDArray(const TensorBase& t, MPSShape* sizes = nil, MPSShape* strides = nil);
 // The MPSShape could vary based on memory format
-MPSShape* getMPSShape(const Tensor& t, c10::MemoryFormat memory_format = MemoryFormat::Contiguous);
+Tensor getTensorView(const Tensor& t, MPSShape* shape);
+MPSShape* getMPSShape(const TensorBase& t, c10::MemoryFormat memory_format = MemoryFormat::Contiguous);
 MPSShape* getMPSShape(IntArrayRef sizes, c10::MemoryFormat memory_format = MemoryFormat::Contiguous);
 
-static inline id<MTLBuffer> getMTLBufferStorage(const at::Tensor& tensor) {
+static inline id<MTLBuffer> getMTLBufferStorage(const TensorBase& tensor) {
   return __builtin_bit_cast(id<MTLBuffer>, tensor.storage().data());
 }
 
@@ -94,8 +101,9 @@ class Placeholder {
  public:
   Placeholder() : _placeholder(nullptr), _value(nullptr), _tensor(Tensor()) {}
   Placeholder(MPSGraphTensor* mpsGraphTensor) : _placeholder(mpsGraphTensor), _value(nullptr), _tensor(Tensor()) {}
+  Placeholder(MPSGraphTensor* mpsGraphTensor, MPSNDArray* mpsNDArray);
   Placeholder(MPSGraphTensor* mpsGraphTensor, const Tensor& self, MPSShape *mpsShape = nullptr,
-              bool gatherTensorData = true, MPSDataType dataType = MPSDataTypeInvalid);
+              bool gatherTensorData = true, MPSDataType dataType = MPSDataTypeInvalid, bool useMPSStridedAPI = true);
   MPSGraphTensor* getMPSGraphTensor() {
     return _placeholder;
   }
@@ -118,16 +126,16 @@ MPSGraphTensor* trunc_tensor(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor);
 MPSGraphTensor* convertNHWCtoNCHW(MPSGraph *mpsGraph, MPSGraphTensor* tensor);
 MPSGraphTensor* castMPSTensor(MPSGraph *mpsGraph, MPSGraphTensor* tensor, ScalarType toType);
 MPSGraphTensor* castMPSTensor(MPSGraph *mpsGraph, MPSGraphTensor* tensor, MPSDataType toType);
-MPSGraphTensorData *getMPSGraphTensorData(MPSGraph* mpsGraph, MPSStream* mpsStream, const Tensor& tensor);
+MPSGraphTensorData *getMPSGraphTensorData(MPSGraph* mpsGraph, MPSStream* mpsStream, const TensorBase& tensor);
 MPSGraphTensorData* getMPSGraphTensorFromScalar(MPSStream* mpsStream, MPSScalar& scalar);
 
 MPSGraph* make_mps_graph();
-void printTensorNDArray(const Tensor& t);
-MPSNDArray* ndArrayFromTensor(const Tensor& tensor, MPSShape *shape, MPSDataType mpsType);
+void printTensorNDArray(const TensorBase& t);
+MPSNDArray* ndArrayFromTensor(const TensorBase& tensor, MPSShape *shape, MPSDataType mpsType);
 
 MPSGraphTensor* mpsGraphUnrankedPlaceHolder(MPSGraph *mpsGraph, MPSDataType dataType);
 MPSGraphTensor* mpsGraphRankedPlaceHolder(MPSGraph *mpsGraph, MPSDataType dataType, MPSShape* mpsShape);
-MPSGraphTensor* mpsGraphRankedPlaceHolder(MPSGraph *mpsGraph, const Tensor& tensor);
+MPSGraphTensor* mpsGraphRankedPlaceHolder(MPSGraph *mpsGraph, const TensorBase& tensor);
 MPSGraphTensor* mpsGraphScalarPlaceHolder(MPSGraph *mpsGraph, MPSDataType dataType);
 MPSGraphTensor* mpsGraphScalarPlaceHolder(MPSGraph *mpsGraph, const Scalar& scalar);
 
@@ -318,19 +326,68 @@ MPSGraphTensor* log1p(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor);
 /**
  * Returns distance from lowest to highest element offset in given tensor.
  */
-size_t compute_storage_numel_distance(const at::Tensor& t);
+size_t compute_storage_numel_distance(const TensorBase& t);
 
 /**
  * Checks whether tensor is mapped to a contiguous area in the storage.
  */
-inline bool is_dense_in_storage(const at::Tensor& t) {
+inline bool is_dense_in_storage(const TensorBase& t) {
   return compute_storage_numel_distance(t) == static_cast<size_t>(t.numel());
 }
 
-static inline void mtl_setBuffer(id<MTLComputeCommandEncoder> encoder, const Tensor& t, unsigned idx) {
+
+class MetalShaderLibrary {
+public:
+  MetalShaderLibrary(const std::string& src): shaderSource(src), nparams(0), compile_options(nullptr){}
+  MetalShaderLibrary(const std::string& src, unsigned nparams_): shaderSource(src), nparams(nparams_), compile_options(nullptr){}
+  MetalShaderLibrary(const std::string& src, unsigned nparams_, MTLCompileOptions* compile_options_): shaderSource(src), nparams(nparams_), compile_options(compile_options_) {}
+  MetalShaderLibrary(const MetalShaderLibrary&) = delete;
+  inline id<MTLComputePipelineState> getPipelineStateForFunc(const std::string& fname) {
+    return getLibraryPipelineState(getLibrary(), fname).first;
+  }
+  id<MTLComputePipelineState> getPipelineStateForFunc(const std::string& fname, const std::initializer_list<std::string>& params) {
+    return getLibraryPipelineState(getLibrary(params), fname).first;
+  }
+  inline id<MTLFunction> getMTLFunction(const std::string& fname) {
+    return getLibraryPipelineState(getLibrary(), fname).second;
+  }
+  id<MTLFunction> getMTLFunction(const std::string& fname, const std::initializer_list<std::string>& params) {
+    return getLibraryPipelineState(getLibrary(params), fname).second;
+  }
+  static MetalShaderLibrary& getBundledLibrary();
+protected:
+  virtual id<MTLLibrary> getLibrary();
+  virtual id<MTLLibrary> getLibrary(const std::initializer_list<std::string>& params);
+  id<MTLLibrary> library = nil;
+private:
+  std::pair<id<MTLComputePipelineState>, id<MTLFunction>> getLibraryPipelineState(id<MTLLibrary> lib, const std::string& fname);
+
+  id<MTLLibrary> compileLibrary(const std::string& src);
+  std::string shaderSource;
+  unsigned nparams;
+  MTLCompileOptions* compile_options;
+  std::unordered_map<std::string, id<MTLLibrary>> libMap;
+  std::unordered_map<std::string, std::pair<id<MTLComputePipelineState>, id<MTLFunction>>> cplMap;
+};
+
+template<typename encoder_t,
+         typename = std::enable_if_t<std::is_same_v<id<MTLComputeCommandEncoder>, encoder_t> || std::is_same_v<id<MTLArgumentEncoder>, encoder_t>>>
+static inline void mtl_setBuffer(encoder_t encoder, const TensorBase& t, unsigned idx) {
   [encoder setBuffer:getMTLBufferStorage(t)
               offset:t.storage_offset() * t.element_size()
              atIndex:idx];
+}
+
+template<typename T,
+         typename = std::enable_if_t<std::is_integral_v<T> || std::is_same_v<T, float>>>
+static inline void mtl_setBytes(id<MTLComputeCommandEncoder> encoder, const T val, unsigned idx) {
+  [encoder setBytes:&val length:sizeof(T) atIndex: idx];
+}
+
+template<typename Container,
+         typename = std::enable_if_t<std::is_integral_v<typename Container::size_type>>>
+static inline void mtl_setBytes(id<MTLComputeCommandEncoder> encoder, const Container& values, unsigned idx) {
+  [encoder setBytes:values.data() length:sizeof(typename Container::value_type) * values.size() atIndex: idx];
 }
 
 static inline void mtl_dispatch1DJob(id<MTLComputeCommandEncoder> encoder,
@@ -343,5 +400,70 @@ static inline void mtl_dispatch1DJob(id<MTLComputeCommandEncoder> encoder,
 }
 
 id<MTLBuffer> generateKernelDataOffsets(id<MTLComputeCommandEncoder> commandEncoder, const TensorIteratorBase& iter, bool use_64bit_index = false);
+
+inline NSDictionary* dictionaryFromPlaceholders(Placeholder& p1) {
+        return @{ p1.getMPSGraphTensor(): p1.getMPSGraphTensorData() };
+}
+
+inline NSDictionary* dictionaryFromPlaceholders(Placeholder& p1, Placeholder& p2) {
+        return @{
+                p1.getMPSGraphTensor(): p1.getMPSGraphTensorData(),
+                p2.getMPSGraphTensor(): p2.getMPSGraphTensorData(),
+         };
+}
+
+inline NSDictionary* dictionaryFromPlaceholders(Placeholder& p1, Placeholder& p2, Placeholder& p3) {
+        return @{
+                p1.getMPSGraphTensor(): p1.getMPSGraphTensorData(),
+                p2.getMPSGraphTensor(): p2.getMPSGraphTensorData(),
+                p3.getMPSGraphTensor(): p3.getMPSGraphTensorData(),
+         };
+}
+
+inline NSDictionary* dictionaryFromPlaceholders(Placeholder& p1, Placeholder& p2, Placeholder& p3, Placeholder& p4) {
+        return @{
+                p1.getMPSGraphTensor(): p1.getMPSGraphTensorData(),
+                p2.getMPSGraphTensor(): p2.getMPSGraphTensorData(),
+                p3.getMPSGraphTensor(): p3.getMPSGraphTensorData(),
+                p4.getMPSGraphTensor(): p4.getMPSGraphTensorData(),
+         };
+}
+
+inline void runMPSGraph(MPSStream* stream, MPSGraph* graph, NSDictionary* feeds, Placeholder& result) {
+        runMPSGraph(stream, graph, feeds, dictionaryFromPlaceholders(result));
+}
+
+inline bool supportsComplex() {
+  return is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS);
+}
+
+// MPS yet to support double types, but starting from MacOS 14, supports bfloat16
+inline bool supportedFloatingType(ScalarType dtype) {
+  return dtype == kFloat || dtype == kHalf || dtype == kBFloat16;
+}
+
+inline bool supportedFloatingType(const TensorBase& t) {
+  return supportedFloatingType(t.scalar_type());
+}
+
+inline bool supportedFloatingOrComplexType(ScalarType dtype) {
+  if (dtype == kComplexFloat || dtype == kComplexHalf) {
+    return supportsComplex();
+  }
+  return supportedFloatingType(dtype);
+}
+inline bool supportedFloatingOrComplexType(const TensorBase& t) {
+  return supportedFloatingOrComplexType(t.scalar_type());
+}
+
+inline void checkSupportsBFloat16() {
+  TORCH_CHECK_TYPE(is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS),
+                   "MPS bfloat16 type is supported on MacOS 14.0 or newer.");
+}
+
+inline bool needsGather(const TensorBase& t) {
+  static const bool is_macOS_15_0_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
+  return !is_macOS_15_0_or_newer && (!t.is_contiguous() || t.storage_offset()) ;
+}
 
 } // namespace at::native::mps

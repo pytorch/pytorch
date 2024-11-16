@@ -7,10 +7,35 @@
 
 #include <c10/cuda/CUDACachingAllocator.h>
 
-#include <array>
 #include <mutex>
 
 namespace torch::cuda::CUDAPluggableAllocator {
+
+using MallocFuncType = void*(size_t, int, cudaStream_t);
+using FreeFuncType = void(void*, size_t, int, cudaStream_t);
+
+// A CUDAPluggableAllocatorDeleterContext object is used as the `ctx`
+// argument for DataPtr. We need context because a user can use
+// multiple allocators in the same PyTorch program, and
+// the allocators can have different free functions, such as:
+// free, cudaFree, cudaFreeAsync, ncclMemFree etc.
+struct TORCH_CUDA_CPP_API CUDAPluggableAllocatorDeleterContext {
+  explicit CUDAPluggableAllocatorDeleterContext(
+      std::function<FreeFuncType> free_fn,
+      void* data,
+      size_t size,
+      int device,
+      cudaStream_t stream);
+
+  void free();
+
+ private:
+  std::function<FreeFuncType> free_fn_;
+  void* data_;
+  size_t size_;
+  int device_;
+  cudaStream_t stream_;
+};
 
 #if defined(TORCH_HIP_VERSION)
 using streamType = c10::hip::HIPStream;
@@ -18,31 +43,41 @@ using streamType = c10::hip::HIPStream;
 using streamType = c10::cuda::CUDAStream;
 #endif
 
-std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>
+TORCH_CUDA_CPP_API std::shared_ptr<
+    c10::cuda::CUDACachingAllocator::CUDAAllocator>
 getCurrentAllocator();
-std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>
+TORCH_CUDA_CPP_API std::shared_ptr<
+    c10::cuda::CUDACachingAllocator::CUDAAllocator>
 createCustomAllocator(
-    std::function<void*(size_t, int, cudaStream_t)> alloc_fn,
-    std::function<void(void*, size_t, int, cudaStream_t)> free_fn);
-void changeCurrentAllocator(
+    std::function<MallocFuncType> alloc_fn,
+    std::function<FreeFuncType> free_fn);
+TORCH_CUDA_CPP_API void changeCurrentAllocator(
     const std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>&
         allocator);
 
 struct _AllocationMetadata {
   _AllocationMetadata();
-  _AllocationMetadata(size_t size, int device_idx, cudaStream_t stream);
+  _AllocationMetadata(
+      size_t size,
+      c10::DeviceIndex device_idx,
+      cudaStream_t stream);
   size_t size;
-  int device_idx;
+  c10::DeviceIndex device_idx;
   cudaStream_t stream;
 };
 
-struct CUDAPluggableAllocator
+struct TORCH_CUDA_CPP_API CUDAPluggableAllocator
     : public c10::cuda::CUDACachingAllocator::CUDAAllocator {
   CUDAPluggableAllocator(
-      std::function<void*(size_t, int, cudaStream_t)> alloc_fn,
-      std::function<void(void*, size_t, int, cudaStream_t)> free_fn);
+      std::function<MallocFuncType> alloc_fn,
+      std::function<FreeFuncType> free_fn);
 
   CUDAPluggableAllocator(CUDAPluggableAllocator& other);
+  CUDAPluggableAllocator(CUDAPluggableAllocator&& other) = delete;
+  CUDAPluggableAllocator& operator=(const CUDAPluggableAllocator& other) =
+      delete;
+  CUDAPluggableAllocator& operator=(CUDAPluggableAllocator&& other) = delete;
+  ~CUDAPluggableAllocator() override = default;
 
   void set_init_fn(std::function<void(int)> init_fn);
 
@@ -67,9 +102,9 @@ struct CUDAPluggableAllocator
   void set_release_pool(
       std::function<void(int, c10::cuda::MempoolId_t)> capture_destroy_fn);
 
-  void* malloc(size_t size, int device, cudaStream_t stream);
+  void* malloc(size_t size, c10::DeviceIndex device, cudaStream_t stream);
 
-  c10::DataPtr allocate(size_t size) const override;
+  c10::DataPtr allocate(size_t size) override;
   c10::DeleterFnPtr raw_deleter() const override;
 
   void* raw_alloc(size_t nbytes) override;
@@ -77,26 +112,34 @@ struct CUDAPluggableAllocator
   void raw_delete(void* ptr) override;
   void init(int device_count) override;
   bool initialized() override;
-  void setMemoryFraction(double fraction, int device) override;
+  void setMemoryFraction(double fraction, c10::DeviceIndex device) override;
   void emptyCache() override;
-  void cacheInfo(int dev_id, size_t* largestBlock) override;
+  void enable(bool) override {}
+  bool isEnabled() const override {
+    return true;
+  }
+  void cacheInfo(c10::DeviceIndex device, size_t* largestBlock) override;
   void* getBaseAllocation(void* ptr, size_t* size) override;
 
   void recordStream(const c10::DataPtr&, streamType stream) override;
 
-  c10::cuda::CUDACachingAllocator::DeviceStats getDeviceStats(
-      int device) override;
-  void resetAccumulatedStats(int device) override;
-  void resetPeakStats(int device) override;
+  c10::CachingDeviceAllocator::DeviceStats getDeviceStats(
+      c10::DeviceIndex device) override;
+  void resetAccumulatedStats(c10::DeviceIndex device) override;
+  void resetPeakStats(c10::DeviceIndex device) override;
   c10::cuda::CUDACachingAllocator::SnapshotInfo snapshot() override;
   void beginAllocateToPool(
-      int device,
+      c10::DeviceIndex device,
       c10::cuda::MempoolId_t mempool_id,
       std::function<bool(cudaStream_t)>) override;
-  void endAllocateToPool(int device, c10::cuda::MempoolId_t mempool_id)
+  void endAllocateToPool(
+      c10::DeviceIndex device,
+      c10::cuda::MempoolId_t mempool_id) override;
+  void releasePool(c10::DeviceIndex device, c10::cuda::MempoolId_t mempool_id)
       override;
-  void releasePool(int device, c10::cuda::MempoolId_t mempool_id) override;
   std::shared_ptr<void> getIpcDevPtr(std::string handle) override;
+  c10::cuda::CUDACachingAllocator::ShareableHandle shareIpcHandle(
+      void*) override;
   void recordHistory(
       bool enabled,
       c10::cuda::CUDACachingAllocator::CreateContextFn context_recorder,
@@ -107,12 +150,14 @@ struct CUDAPluggableAllocator
   void attachAllocatorTraceTracker(
       c10::cuda::CUDACachingAllocator::AllocatorTraceTracker tracker) override;
   std::shared_ptr<c10::cuda::CUDACachingAllocator::AllocatorState>
-  getCheckpointState(int device, at::cuda::MempoolId_t id) override;
+  getCheckpointState(c10::DeviceIndex device, at::cuda::MempoolId_t id)
+      override;
   c10::cuda::CUDACachingAllocator::CheckpointDelta setCheckpointPoolState(
-      int device,
+      c10::DeviceIndex device,
       std::shared_ptr<c10::cuda::CUDACachingAllocator::AllocatorState> pps)
       override;
-  void enablePeerAccess(int dev, int dev_to_access) override;
+  void enablePeerAccess(c10::DeviceIndex dev, c10::DeviceIndex dev_to_access)
+      override;
   cudaError_t memcpyAsync(
       void* dst,
       int dstDevice,
@@ -125,8 +170,8 @@ struct CUDAPluggableAllocator
   void copy_data(void* dest, const void* src, std::size_t count) const final;
 
  protected:
-  std::function<void*(size_t, int, cudaStream_t)> alloc_fn_;
-  std::function<void(void*, size_t, int, cudaStream_t)> free_fn_;
+  std::function<MallocFuncType> alloc_fn_;
+  std::function<FreeFuncType> free_fn_;
   std::function<void(int)> init_fn_;
   std::function<void()> reset_fn_;
   std::function<void(double, int)> memory_fraction_fn_;

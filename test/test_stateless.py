@@ -15,10 +15,10 @@ from torch.testing._internal.common_utils import run_tests, TestCase, parametriz
 
 
 class MockModule(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.l1 = torch.nn.Linear(1, 1)
-        self.register_buffer('buffer', torch.ones(1))
+        self.buffer = torch.nn.Buffer(torch.ones(1))
         self.foo = 0.0
 
     def forward(self, x):
@@ -26,12 +26,12 @@ class MockModule(torch.nn.Module):
 
 
 class MockTiedModule(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.l1 = torch.nn.Linear(1, 1)
         self.tied_bias = self.l1.bias
-        self.register_buffer('buffer', torch.ones(1))
-        self.register_buffer('tied_buffer', self.buffer)
+        self.buffer = torch.nn.Buffer(torch.ones(1))
+        self.tied_buffer = self.buffer
 
     def forward(self, x):
         return self.l1(x) + self.tied_bias + self.buffer + self.tied_buffer
@@ -253,9 +253,13 @@ class TestStatelessFunctionalAPI(TestCase):
         parameters = {'l1.parametrizations.weight.original': torch.nn.Parameter(torch.tensor([[1.0]])),
                       'l1.bias': torch.tensor([0.0]),
                       'buffer': torch.tensor([0.0])}
+
         with self.assertRaisesRegex(RuntimeError, "shapes cannot be multiplied"):
-            x = torch.rand((4, 5))  # to work, it should be of size (1, 1)
-            functional_call(module, parameters, x)  # this call will fail because x is the wrong size
+            @torch._dynamo.disable
+            def _error_case():
+                x = torch.rand((4, 5))  # to work, it should be of size (1, 1)
+                functional_call(module, parameters, x)  # this call will fail because x is the wrong size
+            _error_case()
 
         # verify that the spectral normalization is still applied
         self.assertTrue('l1.parametrizations.weight.original' in dict(module.named_parameters()))
@@ -423,7 +427,7 @@ class TestStatelessFunctionalAPI(TestCase):
     def test_tied_weights_warns(self, functional_call):
         module = MockModule()
         module.tied_bias = module.l1.bias
-        module.register_buffer("tied_buffer", module.buffer)
+        module.tied_buffer = torch.nn.Buffer(module.buffer)
 
     @parametrize("functional_call", [
         subtest(torch.func.functional_call, "torch_func"),
@@ -626,9 +630,9 @@ class TestStatelessFunctionalAPI(TestCase):
     ])
     def test_setattr(self, functional_call):
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
-                self.register_buffer('foo', torch.tensor([0.0]))
+                self.foo = torch.nn.Buffer(torch.tensor([0.0]))
 
             def forward(self, x):
                 self.foo = self.foo + 1
@@ -650,9 +654,9 @@ class TestStatelessFunctionalAPI(TestCase):
     ])
     def test_in_place_operator(self, functional_call):
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
-                self.register_buffer('foo', torch.tensor([0.0]))
+                self.foo = torch.nn.Buffer(torch.tensor([0.0]))
 
             def forward(self, x):
                 self.foo.add_(1)
@@ -674,7 +678,7 @@ class TestStatelessFunctionalAPI(TestCase):
     ])
     def test_setattr_strict(self, functional_call):
         class Bar(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 assert not hasattr(self, 'extra')
 
@@ -734,6 +738,8 @@ class TestStatelessFunctionalAPI(TestCase):
         self.assertEqual(res, other_inp)
         res_1 = functional_call(mod, a, (), {'inp': inp, 'other_inp': other_inp})
         self.assertEqual(res, res_1)
+        res_2 = functional_call(mod, a, kwargs={'inp': inp, 'other_inp': other_inp})
+        self.assertEqual(res, res_2)
 
     def test_functional_call_tuple_dicts(self):
         mod = MockModule()
@@ -771,10 +777,10 @@ class TestStatelessFunctionalAPI(TestCase):
     ])
     def test_functional_call_member_reference(self, functional_call):
         class Module(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.l1 = torch.nn.Linear(1, 1)
-                self.register_buffer('buffer', torch.ones(1))
+                self.buffer = torch.nn.Buffer(torch.ones(1))
 
             def forward(self, x):
                 parameters = tuple(self.parameters())
@@ -883,7 +889,7 @@ exit(len(w))
 """
         try:
             subprocess.check_output(
-                [sys.executable, '-W', 'all', '-c', script],
+                [sys.executable, '-W', 'always', '-c', script],
                 stderr=subprocess.STDOUT,
                 # On Windows, opening the subprocess with the default CWD makes `import torch`
                 # fail, so just set CWD to this script's directory
@@ -897,7 +903,7 @@ exit(len(w))
         m = torch.nn.Linear(1, 1)
         params = dict(m.named_parameters())
         x = torch.randn(3, 1)
-        with self.assertWarnsRegex(UserWarning, "Please use torch.func.functional_call"):
+        with self.assertWarnsRegex(FutureWarning, "Please use `torch.func.functional_call`"):
             stateless.functional_call(m, params, x)
 
 class TestPythonOptimizeMode(TestCase):

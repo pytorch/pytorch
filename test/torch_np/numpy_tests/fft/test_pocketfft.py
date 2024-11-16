@@ -16,6 +16,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 
+
 if TEST_WITH_TORCHDYNAMO:
     import numpy as np
     from numpy.random import random
@@ -342,7 +343,7 @@ class TestFFT1D(TestCase):
                 Y_res = fft(Y, axes=ax)
                 assert_allclose(X_res, Y_res, atol=_tol, rtol=_tol)
         else:
-            raise ValueError()
+            raise ValueError
 
 
 @skipif(IS_WASM, reason="Cannot start thread")

@@ -2,8 +2,7 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // Converts operators & their parameters to mkldnn if it is profitable
 // Currently encompassing Conv2d and Conv3d, and Linear
@@ -11,5 +10,4 @@ namespace jit {
 // This pass only works on frozen graph
 TORCH_API void ConvertFrozenOpsToMKLDNN(std::shared_ptr<Graph>& graph);
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

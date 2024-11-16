@@ -10,8 +10,8 @@ from functools import partial, wraps
 
 import torch
 import torch.distributed as dist
-
 from torch.distributed.c10d_logger import _c10d_logger, _exception_logger, _time_logger
+
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -19,6 +19,7 @@ if not dist.is_available():
 
 from torch.testing._internal.common_distributed import MultiProcessTestCase, TEST_SKIPS
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
+
 
 if TEST_WITH_DEV_DBG_ASAN:
     print(
@@ -117,15 +118,13 @@ class C10dErrorLoggerTest(MultiProcessTestCase):
                 re.search("({.+})", captured.output[0]).group(0).replace("'", '"')
             )
 
-            self.assertEqual(len(error_msg_dict), 10)
+            self.assertEqual(len(error_msg_dict), 9)
 
             self.assertIn("pg_name", error_msg_dict.keys())
             self.assertEqual("None", error_msg_dict["pg_name"])
 
             self.assertIn("func_name", error_msg_dict.keys())
             self.assertEqual("broadcast", error_msg_dict["func_name"])
-
-            self.assertIn("args", error_msg_dict.keys())
 
             self.assertIn("backend", error_msg_dict.keys())
             self.assertEqual("nccl", error_msg_dict["backend"])
@@ -161,15 +160,13 @@ class C10dErrorLoggerTest(MultiProcessTestCase):
             msg_dict = json.loads(
                 re.search("({.+})", captured.output[0]).group(0).replace("'", '"')
             )
-            self.assertEqual(len(msg_dict), 10)
+            self.assertEqual(len(msg_dict), 9)
 
             self.assertIn("pg_name", msg_dict.keys())
             self.assertEqual("None", msg_dict["pg_name"])
 
             self.assertIn("func_name", msg_dict.keys())
             self.assertEqual("_dummy_sleep", msg_dict["func_name"])
-
-            self.assertIn("args", msg_dict.keys())
 
             self.assertIn("backend", msg_dict.keys())
             self.assertEqual("nccl", msg_dict["backend"])

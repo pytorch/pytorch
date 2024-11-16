@@ -2,8 +2,8 @@
 #include <ATen/core/ivalue.h>
 
 // Functions that are used in both import and export processes
-namespace torch {
-namespace jit {
+
+namespace torch::jit {
 using c10::IValue;
 IValue expect_field(
     c10::ivalue::TupleElements& elements,
@@ -12,5 +12,4 @@ IValue expect_field(
 std::string operator_str(
     const std::string& name,
     const std::string& overloadname);
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

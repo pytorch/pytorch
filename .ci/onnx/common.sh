@@ -1,4 +1,8 @@
+#!/bin/bash
+
 set -ex
+
+source "$(dirname "${BASH_SOURCE[0]}")/../pytorch/common_utils.sh"
 
 LOCAL_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 ROOT_DIR=$(cd "$LOCAL_DIR"/../.. && pwd)

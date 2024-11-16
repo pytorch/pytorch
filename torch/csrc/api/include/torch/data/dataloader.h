@@ -12,46 +12,43 @@
 #include <type_traits>
 #include <utility>
 
-namespace torch {
-namespace data {
+namespace torch::data {
 
 /// Creates a `DataLoader` instance for a stateless `dataset`, a `sampler` and
 /// some `options`.
 template <typename Dataset, typename Sampler>
-torch::disable_if_t<
-    Dataset::is_stateful,
+std::enable_if_t<
+    !Dataset::is_stateful,
     std::unique_ptr<StatelessDataLoader<Dataset, Sampler>>>
 make_data_loader(Dataset dataset, Sampler sampler, DataLoaderOptions options) {
   return std::make_unique<StatelessDataLoader<Dataset, Sampler>>(
-      std::move(dataset), std::move(sampler), std::move(options));
+      std::move(dataset), std::move(sampler), options);
 }
 
 /// Creates a `DataLoader` instance for a stateless `dataset` and some
 /// `options`. A sampler (by default a `RandomSampler`) will be constructed from
 /// the size of the dataset.
 template <typename Sampler = samplers::RandomSampler, typename Dataset>
-torch::disable_if_t<
-    Dataset::is_stateful || !std::is_constructible<Sampler, size_t>::value,
+std::enable_if_t<
+    !Dataset::is_stateful && std::is_constructible_v<Sampler, size_t>,
     std::unique_ptr<StatelessDataLoader<Dataset, Sampler>>>
 make_data_loader(
     Dataset dataset,
     DataLoaderOptions options = DataLoaderOptions()) {
-  const optional<size_t> size = dataset.size();
+  const std::optional<size_t> size = dataset.size();
   TORCH_CHECK(
       size.has_value(),
       "Expected the dataset to be sized in "
       "order to construct the Sampler");
-  return make_data_loader(
-      std::move(dataset), Sampler(*size), std::move(options));
+  return make_data_loader(std::move(dataset), Sampler(*size), options);
 }
 
 /// Creates a `DataLoader` for a stateful `dataset` and some `options`.
-template <typename Dataset, typename = torch::enable_if_t<Dataset::is_stateful>>
+template <typename Dataset, typename = std::enable_if_t<Dataset::is_stateful>>
 std::unique_ptr<StatefulDataLoader<Dataset>> make_data_loader(
     Dataset dataset,
     DataLoaderOptions options = DataLoaderOptions()) {
   return std::make_unique<StatefulDataLoader<Dataset>>(
-      std::move(dataset), std::move(options));
+      std::move(dataset), options);
 }
-} // namespace data
-} // namespace torch
+} // namespace torch::data

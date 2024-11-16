@@ -19,6 +19,8 @@ from torch.testing._internal.common_dtype import (
 )
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, skipIfNoSciPy, slowTest, torch_to_numpy_dtype_dict,
+    parametrize,
+    skipIfTorchDynamo,
     IS_WINDOWS)
 from torch.testing._internal.common_device_type import (
     OpDTypes, expectedFailureMeta, instantiate_device_type_tests, onlyCPU, dtypes, dtypesIfCUDA, dtypesIfCPU,
@@ -486,10 +488,14 @@ class TestReductions(TestCase):
             self.assertEqual(y, y2)
 
     @skipIfNoSciPy
-    def test_logsumexp(self, device):
+    @dtypes(torch.float32, torch.double, torch.complex64, torch.complex128)
+    def test_logsumexp(self, device, dtype):
         from scipy.special import logsumexp
-        a = torch.randn(5, 4, device=device)
-        a[0, 0] = inf
+        a = torch.randn(5, 4, device=device, dtype=dtype)
+        # torch.exp(complex(inf, 0)) yields inf+nan*j instead of inf+0*j on CPU which disagrees with CUDA, C++ std::exp,
+        # numpy and scipy. Skip inf testing on CPU. Related to https://github.com/pytorch/pytorch/issues/95740
+        if torch.device(device) != torch.device('cpu'):
+            a[0, 0] = inf
         a[1, :] = -inf
         actual = a.logsumexp(1)
         expected = logsumexp(a.cpu().numpy(), 1)
@@ -497,11 +503,14 @@ class TestReductions(TestCase):
         self.assertEqual(expected, actual)
 
         # check that out is actually inplace
-        b = torch.zeros(5, 2, device=device)
+        b = torch.zeros(5, 2, device=device, dtype=dtype)
         c = b[:, 0]
         torch.logsumexp(a, 1, out=c)
         self.assertEqual(expected, b[:, 0])
 
+    @skipIfNoSciPy
+    def test_logsumexp_integral_promotion(self, device):
+        from scipy.special import logsumexp
         # check integral inputs is promoted to floating point
         e = torch.randint(-100, 100, [5, 4], device=device)
         actual = e.logsumexp(1).to(torch.float64)
@@ -876,6 +885,18 @@ class TestReductions(TestCase):
         a_float = a.to(torch.float32)
         self.assertEqual(a_float.mean(), a.mean(dtype=torch.float32))
 
+    @onlyCPU
+    @dtypes(torch.half, torch.bfloat16, torch.float, torch.double)
+    def test_mean_out_is_alias_of_return(self, dtype, device):
+        a = torch.tensor([[[1.0, 1.0, 1.0, 1.0]], [[2.0, 2.0, 2.0, 2.0]], [[3.0, 3.0, 3.0, 3.0]]],
+                         dtype=dtype, device=device)
+        out = torch.empty((1, 1, 4), dtype=dtype, device=device)
+
+        return_out = torch.mean(a, dim=0, keepdim=True, out=out)
+        target = torch.tensor([[[2.0, 2.0, 2.0, 2.0]]], dtype=dtype, device=device)
+        self.assertTrue(torch._C._is_alias_of(out, return_out))
+        self.assertTrue(torch.allclose(out, target))
+
     # TODO: update this and tests that use it to handle device properly
     def _test_reduce_integer_upcast(self, fn, has_out=True, test_complex=True):
         shape = (3, 4, 5)
@@ -1024,7 +1045,6 @@ class TestReductions(TestCase):
             a[:, (shape[1] - 1) // 2:] = True
             values, indices = a.mode(-1)
             self.assertEqual(values, torch.ones(shape[0], dtype=torch.bool))
-            print(indices)
             indexed = a.gather(1, indices.unsqueeze(1)).squeeze(1)
             self.assertEqual(values, indexed)
 
@@ -1114,6 +1134,13 @@ class TestReductions(TestCase):
         x = torch.BoolTensor().to(device)
         self.assertTrue(x.all())
         self.assertFalse(x.any())
+
+    def test_all_issue117215(self, device):
+        info = torch.iinfo(torch.uint8)
+        a = torch.randint(info.min, info.max, (73, 11, 3, 17), dtype=torch.uint8)
+        b = torch.all(a, dim=0)
+        c = a.to(torch.bool).all(dim=0)
+        self.assertEqual(torch.ne(b, c).sum(), 0)
 
     @dtypesIfCUDA(torch.half, torch.bfloat16, torch.float, torch.double)
     @dtypes(torch.half, torch.bfloat16, torch.float, torch.double)
@@ -1212,21 +1239,19 @@ class TestReductions(TestCase):
     def test_aminmax(self, device, dtype):
 
         def _amin_wrapper(x, dim=None, keepdims=False):
-            with self.assertWarnsOnceRegex(UserWarning, "_aminmax is deprecated"):
-                if dim is None:
-                    return torch._aminmax(x)[0]
-                else:
-                    return torch._aminmax(x, dim, keepdims)[0]
+            return torch.aminmax(x, dim=dim, keepdim=keepdims)[0]
 
         def _amax_wrapper(x, dim=None, keepdims=False):
-            with self.assertWarnsOnceRegex(UserWarning, "_aminmax is deprecated"):
-                if dim is None:
-                    return torch._aminmax(x)[1]
-                else:
-                    return torch._aminmax(x, dim, keepdims)[1]
+            return torch.aminmax(x, dim=dim, keepdim=keepdims)[1]
 
         self._test_minmax_helper(_amin_wrapper, np.amin, device, dtype)
         self._test_minmax_helper(_amax_wrapper, np.amax, device, dtype)
+
+    @onlyNativeDeviceTypes
+    @dtypes(*complex_types())
+    def test_invalid_0dim_aminmax(self, device, dtype):
+        with self.assertRaisesRegex(RuntimeError, 'not implemented'):
+            torch.aminmax(torch.tensor(1., dtype=dtype, device=device), dim=0)
 
     # TODO: bincount isn't a classic reduction -- maybe this test suite is
     #   reductions and summary ops?
@@ -1335,6 +1360,50 @@ class TestReductions(TestCase):
         # Stability for outer dimensions
         tensor = tensor.unsqueeze(1)
         self.assertEqual(tensor.var(0), 0.03125)
+
+    @onlyCPU
+    @dtypes(torch.bfloat16, torch.float16)
+    def test_sum_noncontig_lowp(self, device, dtype) -> None:
+        dim_sequences = {
+            2: [0, 1],
+            3: [0, 1, 2],
+            4: [0, 1, 2, 3],
+            5: [0, 1, 2, 3, 4],
+        }
+
+        def create_noncontig_inputs(x, ndim):
+            if ndim == 2:
+                return x[::2, ::2]
+            elif ndim == 3:
+                return x[::2, ::2, ::2]
+            elif ndim == 4:
+                return x[::2, ::2, ::2, ::2]
+            elif ndim == 5:
+                return x[::2, ::2, ::2, ::2, ::2]
+
+        def helper(self, shape, reduce_dims, device, dtype):
+            for permute_list in list(permutations(dim_sequences[len(shape)], len(shape))):
+                x = torch.ones(shape, device=device, dtype=dtype)
+                x = create_noncontig_inputs(x, len(shape))
+                x_trans = x.permute(permute_list)
+                x_sum = torch.sum(x_trans, reduce_dims)
+                x_trans_ref = x_trans.float()
+                x_sum_ref = torch.sum(x_trans_ref, reduce_dims)
+                self.assertEqual(x_sum, x_sum_ref.to(dtype=dtype))
+
+        shapes = [
+            (50, 50),
+            (50, 50, 50),
+            (10, 50, 30, 30),
+            (10, 5, 10, 50, 7),
+        ]
+
+        for shape in shapes:
+            for i in range(1, len(shape) + 1):
+                reduce_dims = list(combinations(dim_sequences[len(shape)], i))
+                for reduce_dim in reduce_dims:
+                    helper(self, shape, reduce_dim, device, dtype)
+
 
     @onlyCPU
     @dtypes(torch.bool, torch.double)
@@ -1448,7 +1517,13 @@ class TestReductions(TestCase):
         self.assertEqual(res1, res2.to(dtype=dtype))
 
     def test_prod_bool(self, device):
-        vals = [[True, True], [True, False], [False, False], []]
+        vals = [
+            [True, True],
+            [True, False],
+            [False, False],
+            [],
+            [False] * 256,  # https://github.com/pytorch/pytorch/issues/127866
+        ]
         for val in vals:
             result = torch.prod(torch.tensor(val, device=device), dtype=torch.bool).item()
             expect = np.prod(np.array(val), dtype=bool)
@@ -1662,6 +1737,20 @@ class TestReductions(TestCase):
         self._test_reduction_function_with_numpy(torch.count_nonzero, np.count_nonzero, device, dtype)
         self._test_reduction_function_with_numpy(torch.count_nonzero, np.count_nonzero, device, dtype, True)
 
+    # TODO: Investigate why the output is not close to numpy.
+    def _get_relaxed_tolerances_for(self, dtype):
+        if dtype == torch.float16:
+            atol = 0.4
+            rtol = 1e-2
+        elif dtype == torch.float32:
+            atol = 7e-05
+            rtol = 3e-06
+        else:
+            # Default values
+            atol = None
+            rtol = None
+        return atol, rtol
+
     def _test_sum_reduction_vs_numpy(self, torch_fn, np_fn, device, dtype, with_keepdim=False, with_extremal=False):
         def is_integral(dtype):
             return dtype in integral_types()
@@ -1680,16 +1769,7 @@ class TestReductions(TestCase):
             exact_dtype = False
 
         # TODO: Investigate why the output is not close to numpy.
-        if dtype == torch.float16:
-            atol = 0.4
-            rtol = 1e-2
-        elif dtype == torch.float32:
-            atol = 7e-05
-            rtol = 3e-06
-        else:
-            # Default values
-            atol = None
-            rtol = None
+        atol, rtol = self._get_relaxed_tolerances_for(dtype)
         self._test_reduction_function_with_numpy(torch_fn, np_fn, device, dtype,
                                                  atol=atol, rtol=rtol, exact_dtype=exact_dtype,
                                                  with_keepdim=with_keepdim, with_extremal=with_extremal)
@@ -1720,12 +1800,14 @@ class TestReductions(TestCase):
         out_dtype = dtype
         inp_dtypes = all_types_and(torch.half) if out_dtype.is_floating_point else integral_types()
         for inp_dtype in inp_dtypes:
+            # TODO: Investigate why the output is not close to numpy.
+            atol, rtol = self._get_relaxed_tolerances_for(dtype)
             shape = _rand_shape(random.randint(2, 5), min_size=5, max_size=10)
             x = _generate_input(shape, inp_dtype, device, with_extremal=False)
             torch_fn = partial(torch.nansum, dtype=out_dtype)
             np_out_dtype = torch_to_numpy_dtype_dict[out_dtype]
             np_fn = partial(np.nansum, dtype=np_out_dtype)
-            self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None)
+            self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None, atol=atol, rtol=rtol)
 
     @dtypes(*all_types_and(torch.half))
     def test_argminmax_multiple(self, device, dtype):
@@ -2169,65 +2251,94 @@ class TestReductions(TestCase):
         self.assertEqual(x[:, :2].amax().item(), 5)
         self.assertEqual(x[:, :2].argmax().item(), 2)
 
-        dim_red_fns = [
-            "mean", "median", "nanmedian", "mode", "norm", "prod",
-            "std", "sum", "var", "max", "min", "amax", "amin"]
+    @onlyCPU
+    @dtypes(*integral_types_and(torch.bool))
+    def test_nanmean_integral_types(self, device, dtype):
 
+        # List of tensor shapes to test
+        shapes = [
+            (),
+            (0,),
+            (1,),
+            (3, 4, 5),
+            (2, 0, 3),
+            (10, 10, 10),
+            (2, 3, 0, 4),
+            (100,),
+            (1, 1, 1),
+            (5, 5, 5, 5, 5),
+        ]
+
+        for shape in shapes:
+            # Tensor of the specified shape and dtype
+            t = make_tensor(shape, dtype=dtype, device=device)
+            # Attempt to call torch.nanmean and expect a RuntimeError
+            with self.assertRaisesRegex(
+                RuntimeError,
+                r"nanmean\(\): expected input to have floating point or complex dtype but got \w+"
+            ):
+                torch.nanmean(t)
+
+    @precisionOverride({torch.float16: 1e-2, torch.bfloat16: 1e-2})
+    @dtypes(*set(all_types_and(torch.half, torch.bfloat16)) - {torch.uint8})
+    @parametrize("fn_name", [
+        "mean", "median", "nanmedian", "mode", "norm", "prod",
+        "std", "sum", "var", "max", "min", "amax", "amin"])
+    def test_dim_reduction_fns(self, device, dtype, fn_name):
         def normfn_attr(t, dim, keepdim=False, out=None):
             attr = torch.norm
             return attr(t, 2, dim, keepdim, out=out)
 
-        for fn_name in dim_red_fns:
-            fn_attr = getattr(torch, fn_name) if fn_name != "norm" else normfn_attr
+        fn_attr = getattr(torch, fn_name) if fn_name != "norm" else normfn_attr
 
-            def fn(x, dim, keepdim=False, out=None):
-                ans = fn_attr(x, dim, keepdim=keepdim, out=out)
-                return ans if not isinstance(ans, tuple) else ans[0]
+        def fn(x, dim, keepdim=False, out=None):
+            ans = fn_attr(x, dim, keepdim=keepdim, out=out)
+            return ans if not isinstance(ans, tuple) else ans[0]
 
-            def fn_tuple(x, dim, keepdim=False, out=None):
-                return fn_attr(x, dim, keepdim=keepdim, out=out)
+        def fn_tuple(x, dim, keepdim=False, out=None):
+            return fn_attr(x, dim, keepdim=keepdim, out=out)
 
-            def test_multidim(x, dim):
-                self.assertEqual(fn(x, dim).unsqueeze(dim), fn(x, dim, keepdim=True))
-                self.assertEqual(x.ndimension() - 1, fn(x, dim).ndimension())
-                self.assertEqual(x.ndimension(), fn(x, dim, keepdim=True).ndimension())
+        def test_multidim(x, dim):
+            self.assertEqual(fn(x, dim).unsqueeze(dim), fn(x, dim, keepdim=True))
+            self.assertEqual(x.ndimension() - 1, fn(x, dim).ndimension())
+            self.assertEqual(x.ndimension(), fn(x, dim, keepdim=True).ndimension())
 
-            # general case
-            x = torch.randn(3, 4, 5, device=device)
-            dim = random.randint(0, 2)
-            test_multidim(x, dim)
+        # general case
+        x = torch.randn(3, 4, 5, device=device)
+        dim = random.randint(0, 2)
+        test_multidim(x, dim)
 
-            # check 1-d behavior
-            x = torch.randn(1, device=device)
-            dim = 0
-            self.assertEqual(fn(x, dim).shape, ())
-            self.assertEqual(fn(x, dim, keepdim=True).shape, (1,))
+        # check 1-d behavior
+        x = torch.randn(1, device=device)
+        dim = 0
+        self.assertEqual(fn(x, dim).shape, ())
+        self.assertEqual(fn(x, dim, keepdim=True).shape, (1,))
 
-            # check reducing of a singleton dimension
-            dims = [3, 4, 5]
-            singleton_dim = random.randint(0, 2)
-            dims[singleton_dim] = 1
-            x = torch.randn(dims, device=device)
-            test_multidim(x, singleton_dim)
+        # check reducing of a singleton dimension
+        dims = [3, 4, 5]
+        singleton_dim = random.randint(0, 2)
+        dims[singleton_dim] = 1
+        x = torch.randn(dims, device=device)
+        test_multidim(x, singleton_dim)
 
-            # check reducing with output kwargs
-            if fn_name in ['median', 'nanmedian', 'mode', 'max', 'min']:
-                y = torch.randn(5, 3, device=device)
-                values = torch.randn(5, 3, device=device)
-                indices = torch.zeros(5, 3, device=device).long() - 1
-                fn_tuple(y, 1, keepdim=False, out=(values[:, 1], indices[:, 1]))
-                values_expected, indices_expected = fn_tuple(y, 1, keepdim=False)
-                self.assertEqual(values[:, 1], values_expected,
-                                 msg=f'{fn_name} values with out= kwarg')
-                self.assertEqual(indices[:, 1], indices_expected,
-                                 msg=f'{fn_name} indices with out= kwarg')
-                continue
-
-            x = torch.randn(5, 3, device=device)
+        # check reducing with output kwargs
+        if fn_name in ['median', 'nanmedian', 'mode', 'max', 'min']:
             y = torch.randn(5, 3, device=device)
-            fn(y, 1, keepdim=False, out=x[:, 1])
-            expected = fn(y, 1, keepdim=False)
-            self.assertEqual(x[:, 1], expected, msg=f'{fn_name} with out= kwarg')
+            values = torch.randn(5, 3, device=device)
+            indices = torch.zeros(5, 3, device=device).long() - 1
+            fn_tuple(y, 1, keepdim=False, out=(values[:, 1], indices[:, 1]))
+            values_expected, indices_expected = fn_tuple(y, 1, keepdim=False)
+            self.assertEqual(values[:, 1], values_expected,
+                             msg=f'{fn_name} values with out= kwarg')
+            self.assertEqual(indices[:, 1], indices_expected,
+                             msg=f'{fn_name} indices with out= kwarg')
+            return
+
+        x = torch.randn(5, 3, device=device)
+        y = torch.randn(5, 3, device=device)
+        fn(y, 1, keepdim=False, out=x[:, 1])
+        expected = fn(y, 1, keepdim=False)
+        self.assertEqual(x[:, 1], expected, msg=f'{fn_name} with out= kwarg')
 
     @onlyCUDA
     @largeTensorTest('10GB')
@@ -2505,7 +2616,7 @@ class TestReductions(TestCase):
         self.assertEqual(a[:, ::2, :].median(-1)[0], torch.tensor([[0, 4], [6, 10]], device=device))
         self.assertEqual(a[:, ::2, :].nanmedian(-1)[0], torch.tensor([[0, 4], [6, 10]], device=device))
 
-
+    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/pull/138657 discovers a latent bug")
     @onlyNativeDeviceTypes
     @dtypes(torch.float, torch.double)
     def test_quantile(self, device, dtype):
@@ -3005,30 +3116,68 @@ class TestReductions(TestCase):
             actual)
         self.assertEqual(actual.dtype, dtype)
 
+    @dtypes(torch.uint8, torch.int8, torch.int, torch.long, torch.float, torch.double)
+    def test_histc_min_max_errors(self, device, dtype):
+        with self.assertRaisesRegex(RuntimeError, "max must be larger than min"):
+            torch.histc(torch.tensor([1., 2., 3.], dtype=dtype, device=device), bins=4, min=5, max=1)
+
+    @dtypes(torch.float, torch.double)
+    def test_histc_min_max_corner_cases(self, device, dtype):
+        actual = torch.histc(
+            torch.tensor([1., 2, 1], dtype=dtype, device=device),
+            bins=4, min=5, max=5)
+        self.assertEqual(
+            torch.tensor([2, 0, 0, 1], dtype=dtype, device=device),
+            actual)
+
+    @onlyCUDA
+    @dtypes(torch.uint8, torch.int8, torch.int, torch.long)
+    def test_histc_min_max_corner_cases_cuda(self, device, dtype):
+        actual = torch.histc(
+            torch.tensor([1., 2, 1], dtype=dtype, device=device),
+            bins=4, min=5, max=5)
+        self.assertEqual(
+            torch.tensor([2, 0, 0, 1], dtype=dtype, device=device),
+            actual)
+
     """
     Runs torch.histogram and numpy.histogram on the specified input parameters
     and asserts that their output is equal.
     """
-    def _test_histogram_numpy(self, t, bins, bin_range, weights, density):
+    def _test_histogram_numpy(self, t, bins, bin_range, weights, density, eq_func=None):
         def to_np(t):
             if not torch.is_tensor(t):
                 return t
-            else:
-                return t.cpu().numpy()
+            return t.cpu().numpy()
 
         # Wrapper around numpy.histogram performing conversions between torch tensors and numpy arrays.
-        def reference_histogram(self, t, bins, bin_range, weights, density, dtype):
-            (np_t, np_bins, np_weights) = map(to_np, [t, bins, weights])
-            (np_hist, np_bin_edges) = np.histogram(np_t, np_bins, range=bin_range, weights=np_weights, density=density)
-            return (torch.from_numpy(np_hist).to(dtype), torch.from_numpy(np_bin_edges).to(dtype))
+        def reference_histogram(t, bins, bin_range, weights, density, dtype):
+            np_t, np_bins, np_weights = map(to_np, [t, bins, weights])
+            np_hist, np_bin_edges = np.histogram(
+                np_t, np_bins, range=bin_range, weights=np_weights, density=density
+            )
+            return (
+                torch.from_numpy(np_hist).to(dtype),
+                torch.from_numpy(np_bin_edges).to(dtype),
+            )
 
-        # Doesn't pass a 'range' kwarg unless necessary because the override of histogram with Tensor bins doesn't accept one
+        if eq_func is None:
+            eq_func = self.assertEqual
+
+        # Doesn't pass a 'range' kwarg unless necessary because the override of
+        # histogram with Tensor bins doesn't accept one.
         if bin_range:
-            (actual_hist, actual_bin_edges) = torch.histogram(t, bins, range=bin_range, weight=weights, density=density)
+            actual_hist, actual_bin_edges = torch.histogram(
+                t, bins, range=bin_range, weight=weights, density=density
+            )
         else:
-            (actual_hist, actual_bin_edges) = torch.histogram(t, bins, weight=weights, density=density)
+            actual_hist, actual_bin_edges = torch.histogram(
+                t, bins, weight=weights, density=density
+            )
 
-        (expected_hist, expected_bin_edges) = reference_histogram(self, t, bins, bin_range, weights, density, actual_hist.dtype)
+        expected_hist, expected_bin_edges = reference_histogram(
+            t, bins, bin_range, weights, density, actual_hist.dtype
+        )
 
         """
         Works around linspace discrepancies by passing torch's constructed bin_edges to numpy.
@@ -3038,28 +3187,48 @@ class TestReductions(TestCase):
         Issue: https://github.com/pytorch/pytorch/issues/58758
         """
         if not torch.is_tensor(bins):
-            self.assertEqual(actual_bin_edges, expected_bin_edges, atol=1e-5, rtol=1e-5)
-            # Calls numpy.histogram again, passing torch's actual_bin_edges as the bins argument
-            (expected_hist, expected_bin_edges) = reference_histogram(
-                self, t, actual_bin_edges, bin_range, weights, density, actual_hist.dtype)
+            eq_func(actual_bin_edges, expected_bin_edges, atol=1e-5, rtol=1e-5)
+            # Calls numpy.histogram again, passing torch's actual_bin_edges as the bins
+            # argument.
+            expected_hist, expected_bin_edges = reference_histogram(
+                t, actual_bin_edges, bin_range, weights, density, actual_hist.dtype,
+            )
 
-        self.assertEqual(actual_hist, expected_hist)
-        self.assertEqual(actual_bin_edges, expected_bin_edges)
+        eq_func(actual_hist, expected_hist)
+        eq_func(actual_bin_edges, expected_bin_edges)
 
         # Test passing non-contiguous output tensors
-        hist_out = make_tensor(expected_hist.shape, device=expected_hist.device, dtype=expected_hist.dtype,
-                               noncontiguous=True)
-        bin_edges_out = make_tensor(expected_bin_edges.shape, device=expected_bin_edges.device, dtype=expected_bin_edges.dtype,
-                                    noncontiguous=True)
+        hist_out = make_tensor(
+            expected_hist.shape,
+            device=expected_hist.device,
+            dtype=expected_hist.dtype,
+            noncontiguous=True,
+        )
+        bin_edges_out = make_tensor(
+            expected_bin_edges.shape,
+            device=expected_bin_edges.device,
+            dtype=expected_bin_edges.dtype,
+            noncontiguous=True,
+        )
 
-        # Doesn't pass a 'range' kwarg unless necessary because the override of histogram with Tensor bins doesn't accept one
+        # Doesn't pass a 'range' kwarg unless necessary because the override of
+        # histogram with Tensor bins doesn't accept one.
         if bin_range:
-            torch.histogram(t, bins, range=bin_range, weight=weights, density=density, out=(hist_out, bin_edges_out))
+            torch.histogram(
+                t,
+                bins,
+                range=bin_range,
+                weight=weights,
+                density=density,
+                out=(hist_out, bin_edges_out),
+            )
         else:
-            torch.histogram(t, bins, weight=weights, density=density, out=(hist_out, bin_edges_out))
+            torch.histogram(
+                t, bins, weight=weights, density=density, out=(hist_out, bin_edges_out)
+            )
 
-        self.assertEqual(hist_out, expected_hist)
-        self.assertEqual(bin_edges_out, expected_bin_edges)
+        eq_func(hist_out, expected_hist)
+        eq_func(bin_edges_out, expected_bin_edges)
 
     @onlyCPU
     @dtypes(torch.float32)
@@ -3087,7 +3256,19 @@ class TestReductions(TestCase):
 
             # Tests with range min=max
             bin_range[1] = bin_range[0]
-            self._test_histogram_numpy(values, bin_ct, bin_range, weights, density)
+            self._test_histogram_numpy(
+                values,
+                bin_ct,
+                bin_range,
+                weights,
+                density,
+                # TODO: investigate why torch.histogram differs from numpy.histogram
+                # so strongly on this particular test.  There seems to be more
+                # differences here than the linspace issue, which is itself fairly
+                # easily patched around.  Likely, the other tests also differ
+                # significantly, but below the default threshold for assertEqual.
+                eq_func=partial(self.assertEqual, rtol=3e-5, atol=0.0),
+            )
 
             # Tests with caller-specified bin edges
             bin_edges = make_tensor(bin_ct + 1, dtype=dtype, device=device, low=-9, high=9).msort()

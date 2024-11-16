@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """
 This module is responsible for transforming functions to be traced into a form
 that is easier for the downstream infra (e.g. Autograd, FX, AOTAutograd analysis)
@@ -11,7 +12,7 @@ It does so by:
 """
 
 import warnings
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from functools import wraps
 from typing import Any, Callable, List, Tuple, Union
 from unittest.mock import patch
@@ -23,9 +24,15 @@ from torch import Tensor
 from torch._decomp.decompositions_for_rng import PhiloxStateTracker
 from torch._guards import detect_fake_mode
 from torch._prims_common import CUDARngStateHelper
-from torch._subclasses.functional_tensor import FunctionalTensorMode
-from torch.fx import Interpreter
-from torch.fx.experimental.symbolic_shapes import definitely_false, sym_eq
+from torch.fx.experimental.proxy_tensor import (
+    maybe_disable_thunkify,
+    maybe_enable_thunkify,
+)
+from torch.fx.experimental.symbolic_shapes import (
+    definitely_false,
+    PropagateUnbackedSymInts,
+    sym_eq,
+)
 from torch.nn.utils import stateless
 
 from .. import config
@@ -37,6 +44,7 @@ from .functional_utils import (
     is_fun,
     sync_functional_tensor,
     to_fun,
+    was_inductor_storage_resized,
 )
 from .logging_utils import setup_stacktrace_preservation_hooks
 from .schemas import (
@@ -49,6 +57,7 @@ from .schemas import (
 )
 from .subclass_utils import (
     create_subclass_meta,
+    remap_unwrapped_subclass_arg_indices,
     requires_subclass_dispatch,
     unwrap_tensor_subclasses,
     wrap_tensor_subclasses_maybe_joint,
@@ -183,6 +192,7 @@ def fn_prepped_for_autograd(
 def create_joint(fn: Callable, *, aot_config: AOTConfig) -> Any:
     def inner_fn(primals: List[Any], tangents: List[Any]):
         outs, tangent_mask = fn(*primals)
+
         assert len(tangent_mask) == len(outs)
         outs_to_grad = [
             o for needs_tangent, o in zip(tangent_mask, outs) if needs_tangent
@@ -222,10 +232,27 @@ def create_joint(fn: Callable, *, aot_config: AOTConfig) -> Any:
 
         if config.functionalize_rng_ops:
             PhiloxStateTracker.mark_beginning_of_backward()
-        backward_out: Tuple[Tensor, ...] = tuple()
+        backward_out: Tuple[Tensor, ...] = ()
         # Call the backwards pass
         if grad_primals:
-            with fx_traceback.preserve_node_meta():
+            functional_tensor_mode = torch.utils._python_dispatch._detect_infra_mode(
+                torch._C._TorchDispatchModeKey.FUNCTIONAL
+            )
+            if functional_tensor_mode is not None:
+                # Side-Effect Tokens:
+                # We want to have independent chains of tokens for forward and backward.
+                # functional_tensor_mode._tokens is used by both.
+                # We memoize the result tokens of forward in functional_tensor_mode._tokens_forward_output,
+                # to return them as joint graph outputs.
+                # We clean functional_tensor_mode._tokens before backward, to prevent reuse of forward tokens in backward.
+                # Joint graph tracing allows tokens discovery,
+                # So all the tokens in backward will be created and added as a graph inputs during tracing.
+                functional_tensor_mode._tokens_forward_output = (
+                    functional_tensor_mode._tokens
+                )
+                functional_tensor_mode._tokens = {}
+
+            with set_partitioner_tag_is_backward(), fx_traceback.preserve_node_meta():
                 # for full graph export, we always export a joint graph where we assume no tangents are needed.
                 if aot_config.no_tangents:
                     assert len(needed_tangents) == 1 and needed_tangents[0].numel() == 1
@@ -325,6 +352,27 @@ def create_functionalized_rng_ops_wrapper(func, args, trace_joint=True) -> Any:
         return traced_forward, (*args, fwd_seed, fwd_base_offset)
 
 
+@contextmanager
+def set_partitioner_tag(tag: str):
+    meta_key = "partitioner_tag"
+    assert fx_traceback.has_preserved_node_meta()
+
+    original_val = fx_traceback.current_meta.get(meta_key, None)
+    fx_traceback.current_meta[meta_key] = tag
+    try:
+        yield
+    finally:
+        fx_traceback.current_meta[meta_key] = original_val
+
+
+def set_partitioner_tag_is_backward():
+    return set_partitioner_tag("is_backward")
+
+
+def set_partitioner_tag_must_be_in_backward():
+    return set_partitioner_tag("must_be_in_backward")
+
+
 # This creates the final function that we want to trace using make_fx(),
 # in both aot_dispatch_autograd and aot_dispatch_base.
 # Preconditions:
@@ -347,118 +395,247 @@ def create_functionalized_fn(
 ) -> Any:
     @wraps(fn)
     def _functionalized_f_helper(*args):
-        # See Note [Disabling Functionalize TLS Above Python Functionalization]
-        disable_above = torch._C._ExcludeDispatchKeyGuard(
-            torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
-        )
-        with disable_above, FunctionalTensorMode(aot_config.pre_dispatch):
-            # Wrap inputs into functional wrappers
-            f_args = pytree.tree_map(to_fun, args)
-            # Run the joint
-            f_outs = fn(*f_args)
-
-        if trace_joint:
-            # We support a limited amount of mutation of graph inputs during the backward pass.
-            # (This is used e.g. by Float8, which needs to update buffers during the backward pass)
-            # Here, we perform extra checks for primals that were mutated in the **backward**
-            # We're doing the checks here instead of doing them with the rest of the input mutation handling because:
-            # - We need to detect inputs that were mutated in the backward **separately** from mutations that happened
-            #   during the forward, because the handling is different: some input mutations from the the forward
-            #   can be only handled in a fw-only runtime epilogue, and in theory if we wanted to handle those same
-            #   types of mutations in the backward we would need a bw-only runtime epilogue.
-            # - We could in theory have our analysis pass differentiate mutations in the fw from mutations in
-            #   the bw by running our analysis first on the fw-only graph, and then on the joint graph. This would
-            #   require an extra round of tracing though, so it's more efficient to do in-line here.
-            assert (
-                isinstance(args, tuple)
-                and len(args) == 2
-                and isinstance(args[0], (list, tuple))
+        with maybe_enable_thunkify():
+            # See Note [Disabling Functionalize TLS Above Python Functionalization]
+            disable_above = torch._C._ExcludeDispatchKeyGuard(
+                torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
             )
-            # Only look at mutations that happened to forward inputs (e.g. fw buffers that were saved for bw)
-            primals_before = args[0]
-            primals_after = pytree.tree_map(from_fun, f_args[0])
-            for f_inpt, before, after, inpt_info in zip(
-                f_args[0], primals_before, primals_after, meta.input_info
-            ):
-                # Ban metadata mutations on fw inputs during the bw
-                if not inpt_info.mutates_metadata:
+
+            with disable_above:
+                # The functionalization code here can potentially trigger traces
+                # into the graph, but we'd prefer to NOT do this, because if we
+                # trace them now, we will end up with FX nodes that don't have
+                # module stack annotations, which makes unflattener unhappy.
+                # Wrap inputs into functional wrappers
+                f_args = pytree.tree_map(to_fun, args)
+
+                # Run the joint
+                f_outs = fn(*f_args)
+
+            if trace_joint:
+                # We support a limited amount of mutation of graph inputs during the backward pass.
+                # (This is used e.g. by Float8, which needs to update buffers during the backward pass)
+                # Here, we perform extra checks for primals that were mutated in the **backward**
+                # We're doing the checks here instead of doing them with the rest of the input mutation handling because:
+                # - We need to detect inputs that were mutated in the backward **separately** from mutations that happened
+                #   during the forward, because the handling is different: some input mutations from the the forward
+                #   can be only handled in a fw-only runtime epilogue, and in theory if we wanted to handle those same
+                #   types of mutations in the backward we would need a bw-only runtime epilogue.
+                # - We could in theory have our analysis pass differentiate mutations in the fw from mutations in
+                #   the bw by running our analysis first on the fw-only graph, and then on the joint graph. This would
+                #   require an extra round of tracing though, so it's more efficient to do in-line here.
+                assert (
+                    isinstance(args, tuple)
+                    and len(args) == 2
+                    and isinstance(args[0], (list, tuple))
+                )
+                # Only look at mutations that happened to forward inputs (e.g. fw buffers that were saved for bw)
+                primals_before = args[0]
+                primals_after = pytree.tree_map(from_fun, f_args[0])
+                for idx, (f_inpt, before, after, inpt_info) in enumerate(
+                    zip(f_args[0], primals_before, primals_after, meta.input_info)
+                ):
+                    # Store information about mutations in joint(for backward analysis)
+                    joint_mutates_data = has_data_mutation(f_inpt)
+
+                    joint_mutates_metadata = has_metadata_mutation(
+                        f_inpt, before, check_only_storage_mutation=False
+                    )
+
+                    # Ban metadata mutations on fw inputs during the bw
+                    if not inpt_info.mutates_metadata:
+                        assert (
+                            not joint_mutates_metadata
+                        ), "Found a graph input that had its metadata mutated in the backward. This is not supported"
+
+                    # Ban storage resizing on fw inputs during the bw
+                    if not inpt_info.mutation_inductor_storage_resize:
+                        assert not was_inductor_storage_resized(
+                            f_inpt
+                        ), "Found a graph input that had storage resizing in the backward. This is not supported"
+
+                    # Allow data mutations on fw inputs during the bw, but only if they do not require grad
+                    # So we can guarantee that we can keep the mutations in the graph
+                    if (
+                        joint_mutates_data
+                        and not inpt_info.mutates_data
+                        and not inpt_info.mutates_storage_metadata
+                    ):
+                        # Not banning here mutations on inpt_info.requires_grad -
+                        # we'll check at runtime and fail only when backward is under torch.is_grad_enabled (create_graph)
+                        # Add node meta for copy_ for partitioner that this node should be in backward graph.
+                        with torch.fx.traceback.preserve_node_meta(), set_partitioner_tag_must_be_in_backward():
+                            before.copy_(after)
+                        meta.indices_of_inputs_that_requires_grad_with_mutations_in_bw.append(
+                            idx
+                        )
+                # Now that we covered mutations to *forward* inputs during the backward,
+                # we also need to cover mutations to *backward-only* inputs during the backward (e.g. mutation to a grad_out).
+                # Today, we will just error in all cases of this happening unless someone needs us to support it.
+                tangents_before = args[1]
+                tangents_after = pytree.tree_map(from_fun, f_args[1])
+                for f_inpt, before, after in zip(
+                    f_args[1], tangents_before, tangents_after
+                ):
                     assert not has_metadata_mutation(
                         f_inpt, before, check_only_storage_mutation=False
-                    ), "Found a graph input that had its metadata mutated in the backward. This is not supported"
-                # Allow data mutations on fw inputs during the bw, but only if they do not require grad
-                # So we can guarantee that we can keep the mutations in the graph
-                if has_data_mutation(f_inpt) and not inpt_info.mutates_data:
-                    assert (
-                        not inpt_info.requires_grad
-                    ), "Found a graph input that requires_grad and was mutated in the backward. This is not supported"
-                    # Otherwise, put the mutation in the graph
-                    before.copy_(after)
-            # Now that we covered mutations to *forward* inputs during the backward,
-            # we also need to cover mutations to *backward-only* inputs during the backward (e.g. mutation to a grad_out).
-            # Today, we will just error in all cases of this happening unless someone needs us to support it.
-            tangents_before = args[1]
-            tangents_after = pytree.tree_map(from_fun, f_args[1])
-            for f_inpt, before, after in zip(
-                f_args[1], tangents_before, tangents_after
-            ):
-                assert not has_metadata_mutation(
-                    f_inpt, before, check_only_storage_mutation=False
-                ) and not has_data_mutation(
-                    f_inpt
-                ), "Found an input to the backward that was mutated during the backward pass. This is not supported"
+                    ) and not has_data_mutation(
+                        f_inpt
+                    ), "Found an input to the backward that was mutated during the backward pass. This is not supported"
 
-        if aot_config.keep_inference_input_mutations:
-            # Note: This is a bit annoying. There's a layering issue here, where:
-            # (1) functionalization needs to operate on **synthetic base** inputs, before unpacking them into the "real" inputs.
-            # (2) For keep_input_mutations, we support tracing a call to copy_() directly on mutated inputs.
-            #     However, we **only** want to support this for inputs that have data-only (and no metadata) mutations,
-            #     because inductor (and backends in generally) would prefer not to see these (e.g. as_strided_(), resize_()).
-            #     This makes it pretty difficult for this logic to operate on synthetic bases.
-            # (3) In addition, there are cases where it's significantly cheaper to perform the copy on the individual
-            #     (unpacked) input aliases, instead of the synthetic base.
-            # Example case where (3) could be important:
-            #
-            #     def f(x, y):
-            #         x.mul_(2)
-            #         y.mul_(3)
-            #         return x, y
-            #    a = torch.ones(1'000'000)
-            #    x, y = out(a[0:9], a[1:10])
-            #
-            # It would be much better to add copy_() calls into the graph for the two tiny slices, instead of materializing
-            # a giant "updated synthetic base" and copying into a's entire storage.
-            #
-            # For now, we are pessimistically not performing the optimization from (3);
-            # we will materialize an "updated" synthetic base, and copy it back to the synthetic input base.
-            # This allows us to factor aot autograd much more nicely, since only one area of the code needs to worry
-            # about synthetic bases.
-            for i, (inpt_old, inpt_f) in enumerate(
-                zip(args, f_args) if not trace_joint else zip(args[0], f_args[0])
-            ):
-                if not isinstance(inpt_f, torch.Tensor):
-                    continue
-                assert is_fun(inpt_f)
-                inpt_new = from_fun(inpt_f)
-                if meta.input_info[i].mutation_type == MutationType.MUTATED_IN_GRAPH:
-                    # We found an input that had a (data-only) mutation.
-                    # Since keep_input_mutations is set, we need to faithfully apply a copy_()
-                    # so the compiler will see the input mutation in the graph.
-                    if meta.input_info[i].mutations_hidden_from_autograd:
-                        # Hidden from autograd = run under no_grad, **and** don't bump VC
-                        with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(
-                            inpt_old
+            if aot_config.keep_inference_input_mutations:
+                # Note: This is a bit annoying. There's a layering issue here, where:
+                # (1) functionalization needs to operate on **synthetic base** inputs, before unpacking them into the "real" inputs.
+                # (2) For keep_input_mutations, we support tracing a call to copy_() directly on mutated inputs.
+                #     However, we **only** want to support this for inputs that have data-only (and no metadata) mutations,
+                #     because inductor (and backends in generally) would prefer not to see these (e.g. as_strided_(), resize_()).
+                #     This makes it pretty difficult for this logic to operate on synthetic bases.
+                # (3) In addition, there are cases where it's significantly cheaper to perform the copy on the individual
+                #     (unpacked) input aliases, instead of the synthetic base.
+                # Example case where (3) could be important:
+                #
+                #     def f(x, y):
+                #         x.mul_(2)
+                #         y.mul_(3)
+                #         return x, y
+                #    a = torch.ones(1'000'000)
+                #    x, y = out(a[0:9], a[1:10])
+                #
+                # It would be much better to add copy_() calls into the graph for the two tiny slices, instead of materializing
+                # a giant "updated synthetic base" and copying into a's entire storage.
+                #
+                # For now, we are pessimistically not performing the optimization from (3);
+                # we will materialize an "updated" synthetic base, and copy it back to the synthetic input base.
+                # This allows us to factor aot autograd much more nicely, since only one area of the code needs to worry
+                # about synthetic bases.
+                for i, (inpt_old, inpt_f) in enumerate(
+                    zip(args, f_args) if not trace_joint else zip(args[0], f_args[0])
+                ):
+                    if not isinstance(inpt_f, torch.Tensor):
+                        continue
+                    assert is_fun(inpt_f)
+                    inpt_new = from_fun(inpt_f)
+                    if (
+                        meta.input_info[i].mutation_type
+                        == MutationType.MUTATED_IN_GRAPH
+                    ):
+                        # See Note [set_() Input Mutations in AOTAutograd]
+                        # all mutations on the input must be under no_grad, so it is safe to put in the graph
+                        # Here, we're saying that if an input experienced a set call, inp.set_(other),
+                        # then we can effectively not have to worry about whether its data was mutated.
+                        # There are 3 cases:
+                        # (1) We mutate inp *after* the set_() call. other is a graph intermediate.
+                        #     In this case, we're not really mutating the input storage of "inp";
+                        #     we're mutating the storage of an intermdiate value (other),
+                        #     and slamming that storage into the input tensor. So no data mutation is necessary.
+                        # (2) We mutate inp *after* the set_() call. other is a graph *input*.
+                        #     In this case, the data mutation will be properly handled in the runtime
+                        #     epilogue during the processing of "other"
+                        # (3) We mutate inp *before* the set_() call.
+                        #     This case is *not* currently handled.
+                        if meta.input_info[i].mutates_storage_metadata:
+                            with torch.no_grad():
+                                inpt_old.set_(inpt_new)
+
+                        # Note [Ordering of resize_() and set_()]
+                        # Importantly: the common usage in FSDP is that we have a dummy parameter
+                        # that sees a set_() and **Then** a resize_().
+                        # We must put those mutations into the graph in the same order,
+                        # Since running them in the opposite order will have different behavior.
+                        # We fully ban resize_() followed by set_() for now, although in principal
+                        # we could support this
+                        if meta.input_info[i].mutation_inductor_storage_resize:
+                            # resizing is not supported on subclasses (we error earlier if this happens)
+                            from torch._subclasses.functional_tensor import (
+                                FunctionalTensor,
+                            )
+
+                            assert isinstance(inpt_f, FunctionalTensor)
+                            old_storage_size = torch._functionalize_get_storage_size(  # type: ignore[attr-defined]
+                                inpt_f.elem, before=True
+                            )
+                            new_storage_size = torch._functionalize_get_storage_size(  # type: ignore[attr-defined]
+                                inpt_f.elem, before=False
+                            )
+                            if old_storage_size != new_storage_size:
+                                assert (
+                                    old_storage_size == 0 or new_storage_size == 0
+                                ), f"""\
+    Encountered a storage resize during tracing on input {i}. Old nbytes={old_storage_size}, new nbytes={new_storage_size}
+    We only support storage resizing on graph inputs as long as the input either starts or ends with a storage size of 0
+    (the case for FSDP)"""
+                                torch.ops.inductor.resize_storage_bytes_(
+                                    inpt_old, new_storage_size
+                                )
+                            if new_storage_size == 0:
+                                # Even if we marked the input as having a data mutation (thus needing a copy_()),
+                                # We should **ignore** it if our input has no storage
+                                # (this can happen if, e.g. we temporarily resize our input, copy data into it,
+                                #  and resize it back down to zero)
+                                continue
+                        # Optimization: if the copy_() is a no-op then don't include it in the graph.
+                        # In theory inductor could optimize this away, however in fsdp, we end up with
+                        # param.copy_(param), where param is a zero-storage-size tensor,
+                        # and running this op in eager mode (using the aot_eager backend) will result in a segfault.
+                        # So we may as well optimize it away here.
+                        if inpt_old is inpt_new:
+                            # (This check needs to be done after putting resize_() in the graph,
+                            # since a resize_(0) doesn't actually change the FunctionalTensor's inner tensor)
+                            continue
+                        # We found an input that had a (data-only) mutation.
+                        # Since keep_input_mutations is set, we need to faithfully apply a copy_()
+                        # so the compiler will see the input mutation in the graph.
+                        if (
+                            meta.input_info[i].mutates_data
+                            and meta.input_info[i].mutations_hidden_from_autograd
                         ):
+                            # Hidden from autograd = run under no_grad, **and** don't bump VC
+                            # (although if the tensor was created in inference mode, it has no VC)
+                            if inpt_old.is_inference():
+                                maybe_preserve_vc = nullcontext()
+                            else:
+                                maybe_preserve_vc = torch.autograd._unsafe_preserve_version_counter(
+                                    inpt_old  # type: ignore[assignment]
+                                )
+                            with torch.no_grad(), maybe_preserve_vc:
+                                inpt_old.copy_(inpt_new)
+                        elif (
+                            meta.input_info[i].mutates_data
+                            and meta.input_info[
+                                i
+                            ].mutations_under_no_grad_or_inference_mode
+                        ):
+                            # Under no_grad = run under no_grad (we still bump the VC though)
+                            # (inference_mode will also bump the VC, as long as the tensor in question
+                            # was created outside of inference_mode)
+                            with torch.no_grad():
+                                inpt_old.copy_(inpt_new)
+                        elif meta.input_info[i].mutates_data:
                             inpt_old.copy_(inpt_new)
-                    elif meta.input_info[i].mutations_under_no_grad_or_inference_mode:
-                        # Under no_grad = run under no_grad (we still bump the VC though)
-                        # (inference_mode will also bump the VC, as long as the tensor in question
-                        # was created outside of inference_mode)
-                        with torch.no_grad():
-                            inpt_old.copy_(inpt_new)
-                    else:
-                        inpt_old.copy_(inpt_new)
 
-        return pytree.tree_map(from_fun, f_outs)
+                # When an output tensor is a functionalized mutated input, and we
+                # were able to move the mutation in to the graph then we can return
+                # the mutated input directly. This prevents duplicating the
+                # tensors contents.
+                flat_outs, outs_spec = pytree.tree_flatten(f_outs)
+                flat_outs = [from_fun(o) for o in flat_outs]
+                num_outs = len(meta.output_info)
+
+                for i, outp in enumerate(flat_outs[:num_outs]):
+                    info = meta.output_info[i]
+                    if info.output_type != OutputType.is_input:
+                        continue
+
+                    assert info.base_idx is not None
+                    if (
+                        meta.input_info[info.base_idx].mutation_type
+                        == MutationType.MUTATED_IN_GRAPH
+                    ):
+                        fw_args = args[0] if trace_joint else args
+                        flat_outs[i] = fw_args[info.base_idx]
+                return pytree.tree_unflatten(flat_outs, outs_spec)
+
+            return pytree.tree_map(from_fun, f_outs)
 
     # Kinda annoying, but needed to make sure that the fx graph we trace out has "primals"
     # and "tangents" as its input names (which are special-cased by the partitioner)
@@ -472,6 +649,76 @@ def create_functionalized_fn(
         helper, args = create_functionalized_rng_ops_wrapper(helper, args, trace_joint)
 
     return helper, args
+
+
+def handle_effect_tokens_fn(
+    fn,
+    args,
+    *,
+    meta: ViewAndMutationMeta,
+    trace_joint: bool,
+) -> Any:
+    num_tokens = len(meta.tokens)
+
+    @wraps(fn)
+    def inner_fn(*args):
+        # See Note [Disabling Functionalize TLS Above Python Functionalization]
+        disable_above = torch._C._ExcludeDispatchKeyGuard(
+            torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
+        )
+
+        with disable_above:
+            # See Note [Side-Effectful Tokens in AOTAutograd]
+            if trace_joint:
+                assert isinstance(args, tuple) and isinstance(args[0], (list, tuple))
+                tokens = args[0][:num_tokens]
+                assert all(token.numel() == 0 for token in tokens)
+                args = (args[0][num_tokens:], *args[1:])
+            else:
+                tokens = args[:num_tokens]
+                assert all(token.numel() == 0 for token in tokens)
+                args = args[num_tokens:]
+
+            # Populate the current FunctionalTensorMode with the tokens per
+            # operator. See Note [FunctionalTensorMode is Stateful]
+            functional_tensor_mode = torch.utils._python_dispatch._detect_infra_mode(
+                torch._C._TorchDispatchModeKey.FUNCTIONAL
+            )
+            assert functional_tensor_mode is not None
+            f_tokens = pytree.tree_map(to_fun, tokens)
+            for i, k in enumerate(meta.tokens.keys()):
+                functional_tensor_mode._tokens[k] = f_tokens[i]
+
+            # Run the joint
+            outs = fn(*args)
+
+        # Return both the tokens and the outputs
+        # See Note [Side-Effectful Tokens in AOTAutograd]
+        if trace_joint:
+            assert len(outs) == 2
+            assert len(functional_tensor_mode._tokens_forward_output) == num_tokens
+            fwd_out_tokens = functional_tensor_mode._tokens_forward_output.values()
+
+            bwd_out_tokens = functional_tensor_mode._tokens.values()
+
+            f_fwd_out_tokens = [from_fun(t) for t in fwd_out_tokens]
+            f_bwd_out_tokens = [from_fun(t) for t in bwd_out_tokens]
+
+            meta.num_backward_tokens = len(bwd_out_tokens)
+            return ((*f_fwd_out_tokens, *outs[0]), (*outs[1], *f_bwd_out_tokens))
+
+        out_tokens = [from_fun(t) for t in functional_tensor_mode._tokens.values()]
+        return (*out_tokens, *outs)
+
+    # Additionally pass in tokens as inputs
+    # See Note [Side-Effectful Tokens in AOTAutograd]
+    additional_fwd_token_inputs = [torch.tensor([])] * num_tokens
+
+    if trace_joint:
+        args = ([*additional_fwd_token_inputs, *args[0]], *args[1:])
+    else:
+        args = [*additional_fwd_token_inputs, *args]
+    return inner_fn, args
 
 
 # Given a function operating on Subclass -> Subclass, returns an function that operates on Tensor -> Tensor
@@ -528,23 +775,46 @@ def aot_dispatch_subclass(
             grad_inputs = wrapped_outs[1]
             subclass_meta.grad_input_metas = create_subclass_meta(grad_inputs)
 
+            # Add extra symints as outputs to the forward/backward graphs
+            # ignore nested ints here
+            forward_outs = unwrap_tensor_subclasses(
+                wrapped_outs[0], append_symints=True
+            )
+            # ignore nested ints here
+            backward_outs = unwrap_tensor_subclasses(
+                wrapped_outs[1], append_symints=True
+            )
+            return (forward_outs, backward_outs)
+
         # Step 3: Unwrap any subclass outputs back into dense tensors
-        unwrapped_outs = unwrap_tensor_subclasses(
-            wrapped_outs, is_joint_structure=use_trace_joint
-        )
+        unwrapped_outs = unwrap_tensor_subclasses(wrapped_outs, append_symints=True)
         return unwrapped_outs
 
     def joint_fn(primals, tangents):
-        return inner_fn(flat_fn_maybe_joint, (primals, tangents), use_trace_joint=True)
+        with maybe_enable_thunkify():
+            return inner_fn(
+                flat_fn_maybe_joint, (primals, tangents), use_trace_joint=True
+            )
 
     def fw_fn(*primals):
-        return inner_fn(flat_fn_maybe_joint, primals, use_trace_joint=False)
+        with maybe_enable_thunkify():
+            return inner_fn(flat_fn_maybe_joint, primals, use_trace_joint=False)
 
     def metadata_fn(*primals):
         return inner_fn(fw_only, primals, use_trace_joint=False)
 
-    args_unwrapped = unwrap_tensor_subclasses(
-        args, is_joint_structure=is_joint_structure
+    if is_joint_structure:
+        args_unwrapped = (
+            # Add extra symints (size/strides) as input to the forward graph
+            unwrap_tensor_subclasses(args[0], append_symints=True),
+            # We pass append_symints=False here because the partitioner will
+            # capture and add any extra argument
+            unwrap_tensor_subclasses(args[1], append_symints=False),
+        )
+    else:
+        args_unwrapped = unwrap_tensor_subclasses(args, append_symints=True)
+    remapped_static_indices = remap_unwrapped_subclass_arg_indices(
+        args, meta.static_input_indices
     )
 
     if is_joint_structure:
@@ -568,14 +838,14 @@ def aot_dispatch_subclass(
     # However, the original ViewAndMutationMeta that we computed was created
     # on the subclass -> subclass graph,
     # which can have a different number of outputs than the dense -> dense graph.
-    # That's why we createa a fresh metadata object on the dense -> dense function here,
+    # That's why we created a fresh metadata object on the dense -> dense function here,
     # and plumb it back up to the partitioner.
     # See Note: [Partitioner handling for Subclasses, Part 2] for more info.
     meta_updated = run_functionalized_fw_and_collect_metadata(
         metadata_fn,
+        static_input_indices=remapped_static_indices,
         keep_input_mutations=meta.keep_input_mutations,
         is_train=meta.is_train,
-        requires_subclass_dispatch=True,
     )(*primals_unwrapped)
 
     subclass_meta.fw_metadata = meta_updated
@@ -594,20 +864,23 @@ def create_functional_call(mod, params_spec, params_len, store_orig_mod=False):
     def functional_call(*args, **kwargs):
         with stateless._reparametrize_module(
             mod, pytree.tree_unflatten(args[:params_len], params_spec)
-        ):
+        ), maybe_disable_thunkify():
             if isinstance(mod, torch.fx.GraphModule):
                 with fx_traceback.preserve_node_meta(), warnings.catch_warnings():
                     warnings.filterwarnings(
                         "ignore", "Anomaly Detection has been enabled."
                     )
                     with torch.autograd.detect_anomaly(check_nan=False):
-                        out = Interpreter(mod).run(*args[params_len:], **kwargs)
+                        detect_fake_mode().epoch += 1
+                        out = PropagateUnbackedSymInts(mod).run(
+                            *args[params_len:], **kwargs
+                        )
             else:
                 out = mod(*args[params_len:], **kwargs)
 
         if not isinstance(out, (tuple, list)):
             raise RuntimeError(
-                "Graph output must be a tuple(). This is so that we can avoid "
+                "Graph output must be a (). This is so that we can avoid "
                 "pytree processing of the outputs. Please change the module to "
                 "have tuple outputs or use aot_module instead."
             )

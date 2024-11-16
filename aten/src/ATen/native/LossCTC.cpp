@@ -2,9 +2,9 @@
 // Licensed under the BSD-3-Clause license
 // This is the CPU implementation of the Connectionist Temporal Loss.
 // We mostly follow Graves.
-// 1. Graves et al: http://www.cs.toronto.edu/~graves/icml_2006.pdf
+// 1. Graves et al.: http://www.cs.toronto.edu/~graves/icml_2006.pdf
 // We use the equations from above link, but note that [1] has 1-based indexing and we (of course) use 0-based.
-// Graves et al call the probabilities y, we use log_probs (also calling them inputs)
+// Graves et al. call the probabilities y, we use log_probs (also calling them inputs)
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
 #include <ATen/core/Tensor.h>
@@ -77,6 +77,9 @@ std::tuple<Tensor, Tensor, size_t, std::vector<int64_t>> ctc_loss_allocate_outpu
   if (targets.dim() == 1) { // concatenated targets
     int64_t pos = 0;
     for (const auto i : c10::irange(batch_size)) {
+      TORCH_CHECK(target_lengths[i] >= 0,
+                  "Expected target_lengths to have value at least ", 0, ", but got value ", target_lengths[i],
+                  " (while checking arguments for ", c, ")");
       tg_batch_offsets[i] = pos;
       pos += target_lengths[i];
       if (max_target_length < target_lengths[i])
@@ -89,6 +92,9 @@ std::tuple<Tensor, Tensor, size_t, std::vector<int64_t>> ctc_loss_allocate_outpu
     // dim is 2
     int64_t tg_batch_stride = targets.stride(0);
     for (const auto i : c10::irange(batch_size)) {
+      TORCH_CHECK(target_lengths[i] >= 0,
+                  "Expected target_lengths to have value at least ", 0, ", but got value ", target_lengths[i],
+                  " (while checking arguments for ", c, ")");
       tg_batch_offsets[i] = i * tg_batch_stride;
       if (max_target_length < target_lengths[i])
         max_target_length = target_lengths[i];
@@ -101,6 +107,9 @@ std::tuple<Tensor, Tensor, size_t, std::vector<int64_t>> ctc_loss_allocate_outpu
   }
   int64_t max_input_length = log_probs.size(0);
   for (const auto b : c10::irange(batch_size)) {
+    TORCH_CHECK(input_lengths[b] >= 0,
+             "Expected input_lengths to have value at least ", 0, ", but got value ", input_lengths[b],
+             " (while checking arguments for ", c, ")");
     TORCH_CHECK(input_lengths[b] <= max_input_length,
              "Expected input_lengths to have value at most ", max_input_length, ", but got value ", input_lengths[b],
              " (while checking arguments for ", c, ")");
@@ -121,7 +130,7 @@ std::tuple<Tensor, Tensor> ctc_loss_cpu_template(const Tensor& log_probs, const 
   // log_probs: input_len x batch_size x num_labels
   // targets [int64]: batch_size x target_length OR sum(target_lengths)
   constexpr scalar_t neginf = -std::numeric_limits<scalar_t>::infinity();
-  using target_t = typename std::conditional<target_scalar_type == kInt, int, int64_t>::type;
+  using target_t = typename std::conditional_t<target_scalar_type == kInt, int, int64_t>;
 
   Tensor neg_log_likelihood, log_alpha;
   size_t tg_target_stride;
@@ -139,9 +148,9 @@ std::tuple<Tensor, Tensor> ctc_loss_cpu_template(const Tensor& log_probs, const 
 
   int64_t batch_size = log_probs.size(1);
   auto lpp  = log_probs.permute({1,0,2});
-  auto log_probs_a_global = lpp.accessor<scalar_t, 3>();
+  auto log_probs_a_global = lpp.accessor<const scalar_t, 3>();
   auto log_alpha_a_global = log_alpha.accessor<scalar_t, 3>();
-  auto targets_data = targets.data_ptr<target_t>();
+  auto targets_data = targets.const_data_ptr<target_t>();
   auto neg_log_likelihood_a = neg_log_likelihood.accessor<scalar_t, 1>();
 
   // alpha calculation for the first row, the three equations for alpha_1 above eq (6)
@@ -154,6 +163,12 @@ std::tuple<Tensor, Tensor> ctc_loss_cpu_template(const Tensor& log_probs, const 
       auto log_probs_a = log_probs_a_global[b];
       auto log_alpha_a = log_alpha_a_global[b];
       int64_t tg_batch_offset = tg_batch_offsets[b];
+
+      if (input_length == 0) {
+        scalar_t log_likelihood = target_length == 0 ? 0 : neginf;
+        neg_log_likelihood_a[b] = -log_likelihood;
+        continue;
+      }
 
       // the first two items of alpha_t above eq (6)
       log_alpha_a[0][0] = log_probs_a[0][BLANK];
@@ -218,7 +233,7 @@ template<typename scalar_t, ScalarType target_scalar_type>
 Tensor ctc_loss_backward_cpu_template(const Tensor& grad_out, const Tensor& log_probs, const Tensor& targets, IntArrayRef input_lengths, IntArrayRef target_lengths,
                                       const Tensor& neg_log_likelihood, const Tensor& log_alpha, int64_t BLANK, bool zero_infinity) {
   constexpr scalar_t neginf = -std::numeric_limits<scalar_t>::infinity();
-  using target_t = typename std::conditional<target_scalar_type == kInt, int, int64_t>::type;
+  using target_t = typename std::conditional_t<target_scalar_type == kInt, int, int64_t>;
   int64_t max_input_length = log_probs.size(0);
   int64_t batch_size = log_probs.size(1);
   int64_t num_labels = log_probs.size(2);
@@ -254,12 +269,13 @@ Tensor ctc_loss_backward_cpu_template(const Tensor& grad_out, const Tensor& log_
 
   Tensor log_beta = at::empty_like(log_alpha, LEGACY_CONTIGUOUS_MEMORY_FORMAT);  // could be optimized to use only 2 rows
   auto lpp  = log_probs.permute({1,0,2});
-  auto log_probs_a_global = lpp.accessor<scalar_t, 3>();
-  auto log_alpha_a_global = log_alpha.accessor<scalar_t, 3>();
+  auto log_probs_a_global = lpp.accessor<const scalar_t, 3>();
+  auto log_alpha_a_global = log_alpha.accessor<const scalar_t, 3>();
   auto log_beta_a_global = log_beta.accessor<scalar_t, 3>();
   auto gp = grad.permute({1,0,2});
   auto grad_a_global = gp.accessor<scalar_t, 3>();
-  auto targets_data = targets.data_ptr<target_t>();
+  auto targets_data = targets.const_data_ptr<target_t>();
+  auto grad_out_a = grad_out.accessor<const scalar_t, 1>();
 
   auto create_fill_iterator = [](const Tensor& tensor, IntArrayRef squash_dims) {
     return TensorIteratorConfig()
@@ -366,7 +382,7 @@ Tensor ctc_loss_backward_cpu_template(const Tensor& grad_out, const Tensor& log_
       // now we wrap up the calculation by adding in the remaining items of eq (16)
       // this could be a great target for further vectorization.
       // grad is the output gradient, nll is the loss. Note that the likelihood -nll is the Z of eq (16)
-      scalar_t gr = grad_out.accessor<scalar_t, 1>()[b];
+      scalar_t gr = grad_out_a[b];
       for (const auto t : c10::irange(input_length)) { // or go for the full thing?
         for (const auto c : c10::irange(num_labels)) {
           scalar_t& res = grad_a[t][c];
@@ -422,8 +438,8 @@ std::tuple<Tensor, Tensor> ctc_loss_tensor(const Tensor& log_probs, const Tensor
 
   Tensor ilc = input_lengths.to(Device(at::kCPU), at::kLong).contiguous();
   Tensor tlc = target_lengths.to(Device(at::kCPU), at::kLong).contiguous();
-  IntArrayRef il(ilc.data_ptr<int64_t>(), ilc.numel());
-  IntArrayRef tl(tlc.data_ptr<int64_t>(), tlc.numel());
+  IntArrayRef il(ilc.const_data_ptr<int64_t>(), ilc.numel());
+  IntArrayRef tl(tlc.const_data_ptr<int64_t>(), tlc.numel());
 
   return at::_ctc_loss(log_probs, targets, il, tl, BLANK, zero_infinity);
 }
@@ -523,12 +539,16 @@ Tensor ctc_loss(const Tensor& log_probs_, const Tensor& targets, IntArrayRef inp
 
 // Convenience function accepting Tensors
 Tensor ctc_loss(const Tensor& log_probs, const Tensor& targets, const Tensor& input_lengths, const Tensor& target_lengths, int64_t BLANK, int64_t reduction, bool zero_infinity) {
+  // we don't want to convert to IntArrayRef if we can dispatch to cuDNN (this allows graph-capturable ctc_loss)
+  bool use_cudnn =
+      (log_probs.device().type() == at::kCUDA) &&
+      at::_use_cudnn_ctc_loss(
+          log_probs, targets, input_lengths, target_lengths, BLANK);
   if (at::areAnyTensorSubclassLike(
-          {log_probs, targets, input_lengths, target_lengths})) {
+          {log_probs, targets, input_lengths, target_lengths}) || use_cudnn) {
     // Composite Compliant path for TensorSubclasses
     return ctc_loss_impl(log_probs, targets, input_lengths, target_lengths, BLANK, reduction, zero_infinity);
   }
-
   // Fast path (which accesses data_ptr) and less operator dispatches for
   // regular tensors
   TORCH_CHECK(isIntegralType(input_lengths.scalar_type(), /*includeBool=*/false), "input_lengths must be integral");
@@ -536,8 +556,8 @@ Tensor ctc_loss(const Tensor& log_probs, const Tensor& targets, const Tensor& in
 
   Tensor ilc = input_lengths.to(Device(at::kCPU), at::kLong).contiguous();
   Tensor tlc = target_lengths.to(Device(at::kCPU), at::kLong).contiguous();
-  IntArrayRef il(ilc.data_ptr<int64_t>(), ilc.numel());
-  IntArrayRef tl(tlc.data_ptr<int64_t>(), tlc.numel());
+  IntArrayRef il(ilc.const_data_ptr<int64_t>(), ilc.numel());
+  IntArrayRef tl(tlc.const_data_ptr<int64_t>(), tlc.numel());
   return at::native::ctc_loss(log_probs, targets, il, tl, BLANK, reduction, zero_infinity);
 }
 

@@ -14,7 +14,7 @@ from torch.distributed.fsdp._common_utils import _get_module_fsdp_state
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy, transformer_auto_wrap_policy
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
-    CUDAInitMode,
+    DEVICEInitMode,
     FSDPInitMode,
     FSDPTest,
     TransformerWithSharedParams,
@@ -25,6 +25,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
 )
+
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -146,7 +147,7 @@ class TestFSDPIgnoredModules(FSDPTest):
         model: nn.Module = TransformerWithSharedParams.init(
             self.process_group,
             FSDPInitMode.NO_FSDP,
-            CUDAInitMode.CUDA_BEFORE,
+            DEVICEInitMode.DEVICE_BEFORE,
             deterministic=True,
         )
         fsdp_kwargs = {"process_group": self.process_group}
@@ -168,7 +169,7 @@ class TestFSDPIgnoredModules(FSDPTest):
         nonwrapped_model: nn.Module = TransformerWithSharedParams.init(
             self.process_group,
             FSDPInitMode.NO_FSDP,
-            CUDAInitMode.CUDA_BEFORE,
+            DEVICEInitMode.DEVICE_BEFORE,
             deterministic=True,
         )
         if use_auto_wrap:

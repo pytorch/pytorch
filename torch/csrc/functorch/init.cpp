@@ -6,6 +6,7 @@
 
 #include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/WrapDimUtils.h>
+#include <torch/csrc/utils/python_raii.h>
 #include <torch/python.h>
 
 #include <ATen/functorch/BatchRulesHelper.h>
@@ -22,9 +23,7 @@
 
 // This file contains functorch's Python bindings.
 
-namespace torch {
-namespace functorch {
-namespace impl {
+namespace torch::functorch::impl {
 
 using namespace at::functorch;
 
@@ -144,17 +143,17 @@ static Tensor _movedim(const Tensor& self, int64_t src, int64_t dst) {
 Tensor _remove_batch_dim(
     const Tensor& self,
     int64_t level,
-    int64_t batch_size,
+    const c10::SymInt& batch_size,
     int64_t out_dim) {
   TORCH_CHECK(
       out_dim == 0 || !self.key_set().has(DispatchKey::BatchedNestedTensor),
       "Nested tensors can only be vmapped over dim=0, but got dim=",
       out_dim);
   if (!has_level(self, level)) {
-    auto self_sizes = self.sizes();
-    VmapDimVector expanded_sizes(self_sizes.begin(), self_sizes.end());
+    auto self_sizes = self.sym_sizes();
+    VmapSymDimVector expanded_sizes(self_sizes.begin(), self_sizes.end());
     expanded_sizes.insert(expanded_sizes.begin() + out_dim, batch_size);
-    auto result = self.expand(expanded_sizes);
+    auto result = self.expand_symint(expanded_sizes);
     return result;
   }
 
@@ -243,7 +242,7 @@ int64_t _grad_increment_nesting() {
   // See NOTE [grad and vjp interaction with no_grad]
   bool prev_grad_mode = c10::GradMode::is_enabled();
   return initAndPushDynamicLayer(
-      TransformType::Grad, c10::nullopt, c10::nullopt, prev_grad_mode);
+      TransformType::Grad, std::nullopt, std::nullopt, prev_grad_mode);
 }
 
 int64_t _grad_decrement_nesting() {
@@ -258,9 +257,9 @@ int64_t _jvp_increment_nesting() {
       c10::AutogradState::get_tls_state().get_fw_grad_mode();
   return initAndPushDynamicLayer(
       TransformType::Jvp,
-      c10::nullopt,
-      c10::nullopt,
-      c10::nullopt,
+      std::nullopt,
+      std::nullopt,
+      std::nullopt,
       prev_fwd_grad_mode);
 }
 
@@ -288,10 +287,10 @@ int64_t _vmap_decrement_nesting() {
 int64_t _func_increment_nesting(bool reapply_views) {
   return initAndPushDynamicLayer(
       TransformType::Functionalize,
-      c10::nullopt,
-      c10::nullopt,
-      c10::nullopt,
-      c10::nullopt,
+      std::nullopt,
+      std::nullopt,
+      std::nullopt,
+      std::nullopt,
       /*functionalize_add_back_views=*/reapply_views);
 }
 
@@ -304,6 +303,10 @@ int64_t _func_decrement_nesting() {
 static bool is_batchedtensor(const Tensor& tensor) {
   auto* batched = maybeGetBatchedImpl(tensor);
   return batched != nullptr;
+}
+
+static bool is_legacy_batchedtensor(const Tensor& tensor) {
+  return tensor.unsafeGetTensorImpl()->key_set().has(DispatchKey::Batched);
 }
 
 static bool is_gradtrackingtensor(const Tensor& tensor) {
@@ -370,6 +373,15 @@ static int64_t currentLevel() {
   return current_level;
 }
 
+static std::optional<int64_t> maybe_current_level() {
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  if (maybe_layer.has_value()) {
+    int64_t current_level = maybe_layer->layerId();
+    return current_level;
+  }
+  return std::nullopt;
+}
+
 static void tls_set_vmap_excluded(bool excluded) {
   c10::impl::tls_set_dispatch_key_excluded(
       c10::DispatchKey::FuncTorchBatched, excluded);
@@ -380,26 +392,54 @@ static void _set_dynamic_layer_keys_included(bool value) {
 }
 
 static void dump_dls() {
-  std::cout << getDynamicLayerStack() << std::endl;
+  std::cout << getDynamicLayerStack() << '\n';
 }
 
 static void dump_local_tls() {
   auto tls = c10::impl::tls_local_dispatch_key_set();
-  std::cout << "[Local Include] " << tls.included_ << std::endl;
-  std::cout << "[Local Exclude] " << tls.excluded_ << std::endl;
+  std::cout << "[Local Include] " << tls.included_ << '\n';
+  std::cout << "[Local Exclude] " << tls.excluded_ << '\n';
 }
 
-static std::tuple<Tensor, c10::optional<int64_t>> unwrapBatched(
+namespace {
+
+// Pop the DynamicLayer stack until it's at the given depth.
+void popDynamicLayerStackToDepth(size_t depth) {
+  while (at::functorch::getDynamicLayerStack().size() > depth) {
+    const auto top = popDynamicLayer();
+    switch (top.key()) {
+      case at::functorch::TransformType::Vmap:
+        _vmap_decrement_nesting();
+        break;
+      case at::functorch::TransformType::Grad:
+        _grad_decrement_nesting();
+        break;
+      case at::functorch::TransformType::Jvp:
+        _jvp_decrement_nesting();
+        break;
+      case at::functorch::TransformType::Functionalize:
+        _func_decrement_nesting();
+        break;
+      case at::functorch::TransformType::Torch:
+        popDynamicLayerAndDeleteMetadata();
+        break;
+    }
+  }
+}
+
+} // anonymous namespace
+
+static std::tuple<Tensor, std::optional<int64_t>> unwrapBatched(
     const Tensor& tensor,
     int64_t level) {
   auto* batched = maybeGetBatchedImpl(tensor);
   if (!batched) {
-    return std::make_tuple(tensor, nullopt);
+    return std::make_tuple(tensor, std::nullopt);
   }
   if (batched->level() == level) {
     return std::make_tuple(batched->value(), batched->bdim());
   }
-  return std::make_tuple(tensor, nullopt);
+  return std::make_tuple(tensor, std::nullopt);
 }
 
 void initFuncTorchBindings(PyObject* module) {
@@ -469,11 +509,13 @@ void initFuncTorchBindings(PyObject* module) {
   // various debugging things. Maybe we should offer these as first-class APIs
   // on Tensors?
   m.def("is_batchedtensor", &is_batchedtensor);
+  m.def("is_legacy_batchedtensor", &is_legacy_batchedtensor);
   m.def("is_gradtrackingtensor", &is_gradtrackingtensor);
   m.def("is_functionaltensor", &is_functionaltensor);
   m.def("get_unwrapped", &get_unwrapped);
   m.def("maybe_get_level", &maybe_get_level);
   m.def("maybe_get_bdim", &maybe_get_bdim);
+  m.def("maybe_current_level", &maybe_current_level);
   m.def("current_level", &currentLevel);
   m.def("tls_set_vmap_excluded", &tls_set_vmap_excluded);
   m.def("_set_dynamic_layer_keys_included", &_set_dynamic_layer_keys_included);
@@ -482,14 +524,33 @@ void initFuncTorchBindings(PyObject* module) {
   m.def("is_functorch_wrapped_tensor", [](const Tensor& tensor) {
     return maybe_get_level(tensor) != -1;
   });
-  m.def("peek_interpreter_stack", []() -> c10::optional<Interpreter> {
+  m.def(
+      "get_interpreter_stack", []() -> std::optional<std::vector<Interpreter>> {
+        const auto& stack = getDynamicLayerStack();
+        if (stack.empty()) {
+          return std::nullopt;
+        }
+        std::vector<Interpreter> result;
+        result.reserve(stack.size());
+        for (auto i : stack) {
+          result.push_back(i.interpreter());
+        }
+        return result;
+      });
+  m.def("peek_interpreter_stack", []() -> std::optional<Interpreter> {
     const auto& stack = getDynamicLayerStack();
     if (stack.empty()) {
-      return c10::nullopt;
+      return std::nullopt;
     }
     auto result = stack.back().interpreter();
     return result;
   });
+  m.def("get_dynamic_layer_stack_depth", []() -> size_t {
+    return getDynamicLayerStack().size();
+  });
+  m.def(
+      "pop_dynamic_layer_stack_and_undo_to_depth",
+      &popDynamicLayerStackToDepth);
   m.def("pop_dynamic_layer_stack", &popDynamicLayer);
   m.def("push_dynamic_layer_stack", [](DynamicLayer layer) -> int64_t {
     return pushDynamicLayer(std::move(layer));
@@ -537,6 +598,4 @@ void initFuncTorchBindings(PyObject* module) {
           &FunctionalizeInterpreterPtr::functionalizeAddBackViews);
 }
 
-} // namespace impl
-} // namespace functorch
-} // namespace torch
+} // namespace torch::functorch::impl

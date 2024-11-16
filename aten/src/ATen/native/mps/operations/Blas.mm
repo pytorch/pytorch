@@ -58,7 +58,7 @@ Tensor dot_mps(const Tensor& self, const Tensor& other) {
 
   dot_check(self, other);
 
-  auto output = at::empty({}, self.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+  auto output = at::empty({}, self.scalar_type(), std::nullopt, kMPS, std::nullopt, std::nullopt);
 
   MPSStream* stream = at::mps::getCurrentMPSStream();
 
@@ -102,15 +102,8 @@ Tensor dot_mps(const Tensor& self, const Tensor& other) {
     Placeholder otherPlaceholder = Placeholder(cachedGraph->otherTensor_, other);
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
 
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
-      selfPlaceholder.getMPSGraphTensor() : selfPlaceholder.getMPSGraphTensorData(),
-      otherPlaceholder.getMPSGraphTensor() : otherPlaceholder.getMPSGraphTensorData(),
-    };
-
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    auto feeds = dictionaryFromPlaceholders(selfPlaceholder, otherPlaceholder);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
   }
 
   return output;
@@ -143,8 +136,8 @@ static Tensor& addmv_out_mps_impl(const Tensor& self,
   Tensor matMulVec = at::mm(mat, vec.unsqueeze(1)).squeeze(1);
 
   @autoreleasepool {
-    string key = "addmv_out_mps_impl" + getTensorsStringKey({self, matMulVec}) + ":" + to_string(beta_.toDouble()) +
-        ":" + to_string(alpha_.toDouble());
+    string key = "addmv_out_mps_impl" + getTensorsStringKey({self, matMulVec}) + ":" +
+        std::to_string(beta_.toDouble()) + ":" + std::to_string(alpha_.toDouble());
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSGraphTensor* matMulVecTensor = mpsGraphRankedPlaceHolder(mpsGraph, matMulVec);
       MPSGraphTensor* selfTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
@@ -188,10 +181,7 @@ static Tensor& addmv_out_mps_impl(const Tensor& self,
       feeds[selfPlaceholder.getMPSGraphTensor()] = selfPlaceholder.getMPSGraphTensorData();
     }
 
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
   }
 
   return result;

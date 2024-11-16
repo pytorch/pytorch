@@ -1,14 +1,10 @@
 #include <torch/csrc/distributed/autograd/context/context.h>
 
-#include <functional>
-
 #include <c10/core/StreamGuard.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 
-namespace torch {
-namespace distributed {
-namespace autograd {
+namespace torch::distributed::autograd {
 
 using torch::autograd::AccumulateGrad;
 
@@ -25,7 +21,7 @@ std::unordered_set<rpc::worker_id_t> DistAutogradContext::getKnownWorkerIds()
     const {
   std::lock_guard<std::mutex> guard(lock_);
   return knownWorkerIds_;
-};
+}
 
 void DistAutogradContext::addKnownWorkerId(const rpc::worker_id_t workerId) {
   std::lock_guard<std::mutex> guard(lock_);
@@ -90,8 +86,7 @@ void DistAutogradContext::accumulateGrad(
   // CUDA stream restoration from autograd function. Hence, we manually
   // call it here to get the streams correct.
   auto forward_stream =
-      torch::autograd::impl::grad_accumulator(variable)->stream(
-          grad.device().type());
+      torch::autograd::impl::grad_accumulator(variable)->stream();
   c10::OptionalStreamGuard stream_guard(forward_stream);
 
   // No higher order gradients supported in distributed autograd.
@@ -248,7 +243,7 @@ const c10::Dict<torch::Tensor, torch::Tensor> DistAutogradContext::
 
 void DistAutogradContext::runGradCallbackForVariable(
     const torch::autograd::Variable& variable,
-    GradCallback&& cb) {
+    const GradCallback& cb) {
   torch::Tensor grad;
   {
     std::lock_guard<std::mutex> guard(lock_);
@@ -286,6 +281,4 @@ ContextPtr ThreadLocalDistAutogradContext::getContextPtr() {
   return tl_context_ptr;
 }
 
-} // namespace autograd
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::autograd

@@ -6,9 +6,9 @@ import unittest
 import onnx_test_common
 import parameterized
 import PIL
+import torchvision
 
 import torch
-import torchvision
 from torch import nn
 
 

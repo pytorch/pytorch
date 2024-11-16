@@ -1,15 +1,13 @@
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/operators/matmul.h>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 Tensor computeMatmul(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides,
-    const c10::optional<ScalarType>& outputType,
+    const std::optional<ScalarType>& outputType,
     at::Device device) {
   Dtype dtype = kFloat;
   if (outputType) {
@@ -56,7 +54,7 @@ Tensor computeAddMM(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides,
-    const c10::optional<ScalarType>& outputType,
+    const std::optional<ScalarType>& outputType,
     at::Device device) {
   Dtype dtype = kFloat;
   if (outputType) {
@@ -76,6 +74,4 @@ Tensor computeAddMM(
                inputs[4])})); // TODO: handle other dtypes of alpha and beta
 }
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr

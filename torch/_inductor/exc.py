@@ -4,23 +4,25 @@ import os
 import tempfile
 import textwrap
 from functools import lru_cache
+from typing import Any, List
+
 
 if os.environ.get("TORCHINDUCTOR_WRITE_MISSING_OPS") == "1":
 
     @lru_cache(None)
-    def _record_missing_op(target):
+    def _record_missing_op(target: Any) -> None:
         with open(f"{tempfile.gettempdir()}/missing_ops.txt", "a") as fd:
             fd.write(str(target) + "\n")
 
 else:
 
-    def _record_missing_op(target):  # type: ignore[misc]
+    def _record_missing_op(target: Any) -> None:  # type: ignore[misc]
         pass
 
 
 class OperatorIssue(RuntimeError):
     @staticmethod
-    def operator_str(target, args, kwargs):
+    def operator_str(target: Any, args: List[Any], kwargs: dict[str, Any]) -> str:
         lines = [f"target: {target}"] + [
             f"args[{i}]: {arg}" for i, arg in enumerate(args)
         ]
@@ -30,13 +32,13 @@ class OperatorIssue(RuntimeError):
 
 
 class MissingOperatorWithoutDecomp(OperatorIssue):
-    def __init__(self, target, args, kwargs):
+    def __init__(self, target: Any, args: List[Any], kwargs: dict[str, Any]) -> None:
         _record_missing_op(target)
         super().__init__(f"missing lowering\n{self.operator_str(target, args, kwargs)}")
 
 
 class MissingOperatorWithDecomp(OperatorIssue):
-    def __init__(self, target, args, kwargs):
+    def __init__(self, target: Any, args: List[Any], kwargs: dict[str, Any]) -> None:
         _record_missing_op(target)
         super().__init__(
             f"missing decomposition\n{self.operator_str(target, args, kwargs)}"
@@ -45,21 +47,27 @@ class MissingOperatorWithDecomp(OperatorIssue):
 
                 There is a decomposition available for {target} in
                 torch._decomp.get_decompositions().  Please add this operator to the
-                `decompositions` list in torch._inductor.decompositions
+                `decompositions` list in torch._inductor.decomposition
                 """
             )
         )
 
 
 class LoweringException(OperatorIssue):
-    def __init__(self, exc: Exception, target, args, kwargs):
+    def __init__(
+        self, exc: Exception, target: Any, args: List[Any], kwargs: dict[str, Any]
+    ) -> None:
         super().__init__(
             f"{type(exc).__name__}: {exc}\n{self.operator_str(target, args, kwargs)}"
         )
 
 
+class SubgraphLoweringException(RuntimeError):
+    pass
+
+
 class InvalidCxxCompiler(RuntimeError):
-    def __init__(self):
+    def __init__(self) -> None:
         from . import config
 
         super().__init__(
@@ -67,13 +75,13 @@ class InvalidCxxCompiler(RuntimeError):
         )
 
 
-class CppWrapperCodeGenError(RuntimeError):
-    def __init__(self, msg: str):
+class CppWrapperCodegenError(RuntimeError):
+    def __init__(self, msg: str) -> None:
         super().__init__(f"C++ wrapper codegen error: {msg}")
 
 
 class CppCompileError(RuntimeError):
-    def __init__(self, cmd: list[str], output: str):
+    def __init__(self, cmd: list[str], output: str) -> None:
         if isinstance(output, bytes):
             output = output.decode("utf-8")
 

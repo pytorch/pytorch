@@ -1,8 +1,11 @@
+# mypy: allow-untyped-defs
 from typing import List, Tuple
 
 import torch
 from torch._vmap_internals import _vmap
+
 from . import forward_ad as fwAD
+
 
 __all__ = ["vjp", "jvp", "jacobian", "hessian", "hvp", "vhp"]
 
@@ -178,8 +181,8 @@ def _autograd_grad(
     assert isinstance(grad_outputs, tuple)
     assert len(outputs) == len(grad_outputs)
 
-    new_outputs: Tuple[torch.Tensor, ...] = tuple()
-    new_grad_outputs: Tuple[torch.Tensor, ...] = tuple()
+    new_outputs: Tuple[torch.Tensor, ...] = ()
+    new_grad_outputs: Tuple[torch.Tensor, ...] = ()
     for out, grad_out in zip(outputs, grad_outputs):
         if out is not None and out.requires_grad:
             new_outputs += (out,)
@@ -208,7 +211,7 @@ def _fill_in_zeros(grads, refs, strict, create_graph, stage):
     if stage not in ["back", "back_trick", "double_back", "double_back_trick"]:
         raise RuntimeError(f"Invalid stage argument '{stage}' to _fill_in_zeros")
 
-    res: Tuple[torch.Tensor, ...] = tuple()
+    res: Tuple[torch.Tensor, ...] = ()
     for i, grads_i in enumerate(grads):
         if grads_i is None:
             if strict:
@@ -777,7 +780,7 @@ def jacobian(
                 jacobian_output_input, (is_outputs_tuple, is_inputs_tuple)
             )
 
-        jacobian: Tuple[torch.Tensor, ...] = tuple()
+        jacobian: Tuple[torch.Tensor, ...] = ()
 
         for i, out in enumerate(outputs):
             # mypy complains that expression and variable have different types due to the empty list
