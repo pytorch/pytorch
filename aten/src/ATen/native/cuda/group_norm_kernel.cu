@@ -30,8 +30,8 @@ constexpr int kReduceTileSize = 32;
 
 typedef struct BlockParams {
   int64_t t; // threads per block
-  int64_t d; // dimensionality (number of rows of data that each threadblock proceesses in parallel)
-  int64_t f; // factor (number of different threadblocks needed to represent one row of data)
+  int64_t rows_per_block; // dimensionality (number of rows of data that each threadblock proceesses in parallel)
+  int64_t blocks_per_row; // factor (number of different threadblocks needed to represent one row of data)
 } BlockParams_t;
 
 inline BlockParams_t CalcBlockParams(const int64_t ideal_num_threads, const int64_t threads_per_row, const int64_t snap = -1) {
@@ -40,21 +40,21 @@ inline BlockParams_t CalcBlockParams(const int64_t ideal_num_threads, const int6
   threads_per_row: determines the user-specified upper limit on the size of blockDim.x
     - meant to be set to the size of the last dimension, e.g. a kernel operating on tensor sized (N, R, C) would have threads_per_row=C
   snap: an optional constraint for threads per block. If set, the returned TPB % snap = 0 or snap % TPB = 0.
-    - ex: D=1280, C=2560 -> threads_per_row=2560 -> f=5, TPB=512 (each group consists of 1280/512=2.5 blocks - will have to deal with nasty padding)
-      - ex: D=1280, C=2560 -> threads_per_row=2560, snap=1280 -> f=8, TPB=320 (each group consists of exactly four blocks)
+    - ex: D=1280, C=2560 -> threads_per_row=2560 -> blocks_per_row=5, TPB=512 (each group consists of 1280/512=2.5 blocks - will have to deal with nasty padding)
+      - ex: D=1280, C=2560 -> threads_per_row=2560, snap=1280 -> blocks_per_row=8, TPB=320 (each group consists of exactly four blocks)
   */
-  int64_t TPB = -1, d = 1, f = 1;
+  int64_t TPB = -1, rows_per_block = 1, blocks_per_row = 1;
   TPB = std::min(kCUDANumThreads, (int)ideal_num_threads);
   if (threads_per_row < TPB)
-    d = TPB / threads_per_row;
+    rows_per_block = TPB / threads_per_row;
   else {
-    f = ceil_div(threads_per_row, TPB); // lower bound for f
-    TPB = ceil_div(threads_per_row * d, f);
+    blocks_per_row = ceil_div(threads_per_row, TPB); // lower bound for blocks_per_row
+    TPB = ceil_div(threads_per_row * rows_per_block, blocks_per_row);
     while (TPB % snap != 0 && snap % TPB != 0)
-      TPB = ceil_div(threads_per_row * d, ++f);
+      TPB = ceil_div(threads_per_row * rows_per_block, ++blocks_per_row);
   }
-  TPB = ceil_div(threads_per_row * d, f);
-  return {TPB, d, f};
+  TPB = ceil_div(threads_per_row * rows_per_block, blocks_per_row);
+  return {TPB, rows_per_block, blocks_per_row};
 }
 
 __device__ int inline NextPow2(unsigned int x) {
@@ -131,24 +131,25 @@ __global__ void RowwiseMomentsCUDAKernelNHWC1(
     WelfordData<acc_type<T, true>, int64_t> *welford_data) {
   /*
     Computes means and rstds of X on the W (width) dimension.
-    grid: (x=N, y=H, z=f); block: (x=TPB/d, y=d)
-    - TPB = Cd/f
-    if TPB < C (f > 1, d=1)
-      TPB = ceil(C/f) (aka f*TPB >= C)
-      X shape: (N, R, C) -view-> (N, H, W, C) -view-> (N, H, W, 1, f, TPB); X stride: (HWC, WC, C, C, TPB, 1)
+    grid: (x=N, y=H, z=blocks_per_row); block: (x=TPB/rows_per_block, y=rows_per_block)
+    - reduce_n = TPB / groups_per_block; // number of inputs that gets reduced to a single output
+    - TPB = Cd/blocks_per_row
+    if TPB < C (blocks_per_row > 1, rows_per_block=1)
+      TPB = ceil(C/blocks_per_row) (aka blocks_per_row*TPB >= C)
+      X shape: (N, R, C) -view-> (N, H, W, C) -view-> (N, H, W, 1, blocks_per_row, TPB); X stride: (HWC, WC, C, C, TPB, 1)
       dram reduction (per block): (W, 1, TPB) -reduce-> (1, TPB)
-    else (block.x=C, block.y=d)
+    else (block.x=C, block.y=rows_per_block)
       TPB = Cd
-      X shape: (N, H, W, C) -view-> (N, H, W/d, d, 1, C); X stride: (HWC, WC, dC, C, C, 1)
-      dram reduction (per block): (W/d, d, C) -reduce-> (d, C)
+      X shape: (N, H, W, C) -view-> (N, H, W/rows_per_block, rows_per_block, 1, C); X stride: (HWC, WC, dC, C, C, 1)
+      dram reduction (per block): (W/rows_per_block, rows_per_block, C) -reduce-> (rows_per_block, C)
     shmem reduction (per block):
-      if G/f >= 1
-        (TPB,) -view-> (d, G/f, D) -permute-> (d, D, G/f) -reduce-> G/f
+      if G/blocks_per_row >= 1
+        (TPB,) -view-> (rows_per_block, G/blocks_per_row, D) -permute-> (rows_per_block, D, G/blocks_per_row) -reduce-> G/blocks_per_row
         output buffer: (N, G, H)
-      else (e.g. f/G > 1 aka more than one thread-block reduces one group)
-        snap constraints require that D % TPB = 0 in this case so f/G = CDIV(f, G)
+      else (e.g. blocks_per_row/G > 1 aka more than one thread-block reduces one group)
+        snap constraints require that D % TPB = 0 in this case so blocks_per_row/G = CDIV(blocks_per_row, G)
         (TPB,) -view-> (1, 1, D) -permute-> (1, D, 1) -reduce-> 1
-        output buffer: (N, f*CDIV(G/f), H) = (N, f, H)
+        output buffer: (N, blocks_per_row*CDIV(G/blocks_per_row), H) = (N, blocks_per_row, H)
   */
   using T_ACC = acc_type<T, true>;
   using WelfordType = WelfordData<T_ACC, int64_t>;
@@ -157,14 +158,14 @@ __global__ void RowwiseMomentsCUDAKernelNHWC1(
 
   const int64_t TPB = (int64_t)(blockDim.y * blockDim.x);
   const int64_t c = (blockIdx.z * blockDim.x + threadIdx.x);
-  const int64_t d = blockDim.y;
+  const int64_t rows_per_block = blockDim.y;
 
   WelfordOp welford_op = {/*correction=*/0, /*take_sqrt=*/false};
   WelfordType val(0, 0, 0, 0);
 
   if (c >= C) return;
-  for (int64_t i = 0; i < ceil_div(W, d); ++i) {
-    int64_t w = i * d + threadIdx.y;
+  for (int64_t i = 0; i < ceil_div(W, rows_per_block); ++i) {
+    int64_t w = i * rows_per_block + threadIdx.y;
     if (w >= W) continue; // handle indices which overflow width
     int64_t reduce_idx = 0;
     reduce_idx += (int64_t)blockIdx.x * H * W * C;
@@ -179,12 +180,12 @@ __global__ void RowwiseMomentsCUDAKernelNHWC1(
   // shmem reduction
   const int64_t tid = (threadIdx.y * blockDim.x + threadIdx.x);
   const int64_t D = C / G;
-  const int64_t f = gridDim.z;
-  const int64_t gf = (int64_t)ceil_div(G, f); // cdiv in case G < f -> ceil(G/f) = 1
-  const int64_t d_idx = threadIdx.y;
-  const int64_t gf_idx = threadIdx.x / D;
+  const int64_t blocks_per_row = gridDim.z;
+  const int64_t groups_per_block = (int64_t)ceil_div(G, blocks_per_row); // cdiv in case G < blocks_per_row -> ceil(G/blocks_per_row) = 1
+  const int64_t block_row_idx = threadIdx.y;
+  const int64_t block_group_idx = threadIdx.x / D;
   const int64_t D_idx = threadIdx.x % D;
-  const int64_t reduce_n = TPB / gf; // number of inputs that gets reduced to a single output
+  const int64_t reduce_n = TPB / groups_per_block; // number of inputs that gets reduced to a single output
 
   __shared__ typename std::aligned_storage<
         sizeof(WelfordType),
@@ -192,34 +193,34 @@ __global__ void RowwiseMomentsCUDAKernelNHWC1(
   WelfordType *vals_reduced = reinterpret_cast<WelfordType*>(vals_reduced_arr);
 
   int64_t idx = 0;
-  idx += d_idx * D * gf;
-  idx += D_idx * gf;
-  idx += gf_idx;
+  idx += block_row_idx * D * groups_per_block;
+  idx += D_idx * groups_per_block;
+  idx += block_group_idx;
   vals_reduced[idx] = val;
   __syncthreads();
 
-  for (int64_t stride = gf * NextPow2(reduce_n) / 2; stride >= gf; stride >>= 1) {
+  for (int64_t stride = groups_per_block * NextPow2(reduce_n) / 2; stride >= groups_per_block; stride >>= 1) {
     if (tid < stride && (tid + stride) < TPB)
       vals_reduced[tid] = welford_op.combine(vals_reduced[tid], vals_reduced[tid + stride]);
     __syncthreads();
   }
 
   // put reduced outputs into return buffers
-  const int64_t fgf = (gf > 1) ? G : f;
-  const int64_t fgf_idx = blockIdx.z * gf + gf_idx;
-  if (fgf_idx >= fgf) return;
+  const int64_t partial_groups = (groups_per_block > 1) ? G : blocks_per_row;
+  const int64_t partial_group_idx = blockIdx.z * groups_per_block + block_group_idx;
+  if (partial_group_idx >= partial_groups) return;
   int64_t out_idx = 0;
-  out_idx += blockIdx.x * fgf * H;
-  out_idx += fgf_idx * H;
+  out_idx += blockIdx.x * partial_groups * H;
+  out_idx += partial_group_idx * H;
   out_idx += blockIdx.y;
-  welford_data[out_idx] = vals_reduced[gf_idx];
+  welford_data[out_idx] = vals_reduced[block_group_idx];
 }
 
 template <typename T>
 __global__ void RowwiseMomentsCUDAKernelNHWC2(
     const int64_t H,
     const int64_t G,
-    const int64_t fg,
+    const int64_t partials_per_group,
     const T eps,
     WelfordData<acc_type<T, true>, int64_t> *welford_data,
     T *mean,
@@ -227,12 +228,14 @@ __global__ void RowwiseMomentsCUDAKernelNHWC2(
   /*
     Computes means and rstds of X on the H (height) dimension.
     grid: (x=N, y=G); block: (x=TPB)
-    - l = ceil(f/G) * H / TPB (l = number of times to loop a block to reduce the H dimension as well as any partially reduced group sections)
-    if G/f (from RowwiseMomentsCUDAKernelNHWC_pt1) > 1
-      welford_data shape: (N, G, H) -view-> (N, G, f, H/f); X stride: (GH, H, H/f, 1)
-    else (i.e. f/G > 1)
-      welford_data shape: (N, f, H) -view-> (N, G, f/G, H/f); X stride: (GH*gf, gf*H, gf*H/f, 1)
-    dram reduction (per block): (CDIV(fg*H, TPB), TPB) -reduce-> (TPB,)
+    - partials_per_group = number of thread-blocks in compute_stats1 needed to reduce a single group; equal to the number of elements per group per row that will be reduced into a single element
+    - R = partials_per_group * H (R = number of reduced elements per block)
+    - l = partials_per_group * H / TPB (l = number of times to loop a block to reduce the H dimension as well as any partially reduced group sections)
+    if blocks_per_group = 1 (i.e. partial_groups = G)
+      welford_data shape: (N, G, H) -view-> (N, G, H/TPB, TPB); X stride: (GH, H, TPB, 1)
+    else (i.e. blocks_per_group > 1 aka partial_groups > G)
+      welford_data shape: (N, partial_groups, H) -view-> (N, G, partials_per_group*H/TPB, TPB); X stride: (G*partials_per_group*H, partials_per_group*H, TPB, 1)
+    dram reduction (per block): (CDIV(partials_per_group*H, TPB), TPB) -reduce-> (TPB,)
     shmem reduction (per block): (TPB,) -reduce-> (1,)
     output buffer: (N, G)
   */
@@ -245,7 +248,7 @@ __global__ void RowwiseMomentsCUDAKernelNHWC2(
   WelfordType val(0, 0, 0, 0);
   const int64_t TPB = blockDim.x;
 
-  const int64_t R = fg * H; // R for num "R"educe elements per block
+  const int64_t R = partials_per_group * H; // R for num "R"educe elements per block
   const int64_t l = ceil_div(R, TPB);
   for (int64_t i = 0; i < l; ++i) {
     int64_t r = i * TPB + threadIdx.x;
@@ -278,12 +281,13 @@ __global__ void RowwiseMomentsCUDAKernelNHWC2(
   thrust::pair<T_ACC, T_ACC> var_mean = welford_op.project(vals_reduced[tid]);
   T_ACC var = var_mean.first;
   T_ACC mu = var_mean.second;
-  int64_t out_idx = 0;
-  out_idx += blockIdx.x * G;
-  out_idx += blockIdx.y;
-  mean[out_idx] = mu;
-  rstd[out_idx] = rsqrt(var + static_cast<T_ACC>(eps));
+  int64_t ng = 0;
+  ng += blockIdx.x * G;
+  ng += blockIdx.y;
+  mean[ng] = mu;
+  rstd[ng] = rsqrt(var + static_cast<T_ACC>(eps));
 }
+
 
 template <typename T>
 __global__ void ComputeFusedParamsCUDAKernel(
@@ -546,25 +550,25 @@ __global__ void ComputeInternalGradientsCUDAKernelNHWC1(
     acc_type<T, true> *xdy_dy_sum_data) {
   /*
     Loops over W (width) dimension, loading and summing dy, X, and the activation derivative of Y. Outputs stored in xdy_dy_sum_data. Spatial dimension H is processed in a separate kernel.
-    grid: (x=N, y=H, z=f); blockdim: (x=TPB/d, y=d)
-      TPB = Cd/f
-    if TPB < C (f > 1, d=1)
-      C = f*TPB
-      X shape: (N, H, W, C) -view-> (N, H, W, 1, f, TPB); X stride: (HWC, WC, C, C, TPB, 1)
+    grid: (x=N, y=H, z=blocks_per_row); blockdim: (x=TPB/rows_per_block, y=rows_per_block)
+      TPB = C*rows_per_block/blocks_per_row
+    if TPB < C (blocks_per_row > 1, rows_per_block=1)
+      C = blocks_per_row*TPB
+      X shape: (N, H, W, C) -view-> (N, H, W, 1, blocks_per_row, TPB); X stride: (HWC, WC, C, C, TPB, 1)
       dram reduction (per block): (W, 1, TPB) -reduce-> (TPB,)
-    else (block.x=C, block.y=d)
-      TPB = Cd
-      X shape: (N, H, W, C) -view-> (N, H, W/d, d, 1, C); X stride: (HWC, WC, dC, C, C, 1)
-      dram reduction (per block): (W/d, d, C) -reduce-> (d, C)
-    shmem reduction (per block): (TPB, 2) -> (d, C/f, 2) -reduce-> (C/f, 2) (the 2 comes from storing both xdy_sum and dy_sum in the same buffer)
-    output buffer: (N, f, C/f, H, 2) -view-> (N, C, H, 2)
+    else (block.x=C, block.y=rows_per_block)
+      TPB = C*rows_per_block
+      X shape: (N, H, W, C) -view-> (N, H, W/rows_per_block, rows_per_block, 1, C); X stride: (HWC, WC, dC, C, C, 1)
+      dram reduction (per block): (cdiv(W, rows_per_block), rows_per_block, C) -reduce-> (rows_per_block, C)
+    shmem reduction (per block): (TPB, 2) -> (rows_per_block, C/blocks_per_row, 2) -reduce-> (C/blocks_per_row, 2) (the 2 comes from storing both xdy_sum and dy_sum in the same buffer)
+    output buffer: (N, blocks_per_row, C/blocks_per_row, H, 2) -view-> (N, C, H, 2)
       xdy_dy_sum_data[:, :, :, 0] = x * dy * activation_derivative((x-mean)*rstd*weight+bias)
       xdy_dy_sum_data[:, :, :, 1] = dy * activation_derivative((x-mean)*rstd*weight+bias)
    */
   using T_ACC = acc_type<T, true>;
 
   const int64_t TPB = (int64_t)blockDim.y * blockDim.x;
-  const int64_t d = blockDim.y;
+  const int64_t rows_per_block = blockDim.y;
   T_ACC xdy_sum = 0;
   T_ACC dy_sum = 0;
 
@@ -572,8 +576,8 @@ __global__ void ComputeInternalGradientsCUDAKernelNHWC1(
   int64_t c = blockIdx.z * blockDim.x + threadIdx.x;
   if (c >= C) return;
 
-  for (int64_t i = 0; i < (int64_t)ceil_div(W, d); ++i) {
-    int64_t w = i * d + threadIdx.y;
+  for (int64_t i = 0; i < (int64_t)ceil_div(W, rows_per_block); ++i) {
+    int64_t w = i * rows_per_block + threadIdx.y;
     if (w >= W) continue; // handle overflowing indices
     int64_t reduce_idx = 0;
     reduce_idx += n * H * W * C;
@@ -597,7 +601,7 @@ __global__ void ComputeInternalGradientsCUDAKernelNHWC1(
     vals_reduced[2 * tid] = xdy_sum;
     vals_reduced[2 * tid + 1] = dy_sum;
     __syncthreads();
-    SumReduce(vals_reduced, 2 * TPB, 2 * C); // does nothing if d=1
+    SumReduce(vals_reduced, 2 * TPB, 2 * C); // does nothing if rows_per_block=1
     xdy_sum = vals_reduced[2 * tid];
     dy_sum = vals_reduced[2 * tid + 1];
   }
@@ -622,10 +626,10 @@ __global__ void ComputeInternalGradientsCUDAKernelNHWC2(
     T *db_data) {
   /*
     Same thing as ComputeInternalGradientsCUDAKernelNHWC1 but over the H (height) instead of the width dimension.
-    grid: (x=N, y=C); block: (x=2H/f)
-    X shape: (N, C, H, 2) -view-> (N, C, f, H/f, 2); X stride: (2CH, 2H, 2H/f, H/f, 1)
-    dram reduction (per block): (f, H/f, 2) -reduce-> (H/f, 2)
-    shmem reduction (per block): (H/f, 2) -reduce-> (2,)
+    grid: (x=N, y=C); block: (x=2H/blocks_per_row)
+    X shape: (N, C, H, 2) -view-> (N, C, cdiv(2H, TPB), TPB); X stride: (2CH, 2H, TPB, 1)
+    dram reduction (per block): (cdiv(2H, TPB), TPB) -reduce-> (TPB,)
+    shmem reduction (per block): (TPB,) -view-> (TPB/2, 2) -reduce-> (2,)
     output buffer: (N, C, 2)
    */
   const int TPB = (int)blockDim.x;
@@ -656,6 +660,7 @@ __global__ void ComputeInternalGradientsCUDAKernelNHWC2(
   ds_data[out_idx] = vals_reduced[0];
   db_data[out_idx] = vals_reduced[1];
 }
+
 
 template <typename T>
 __global__ void ComputeBackwardFusedParamsCUDAKernel(
@@ -948,23 +953,23 @@ void GroupNormKernelImplInternal(
     case MemoryFormat::ChannelsLast: {
       const int64_t H = ClosestFactor(HxW);
       const int64_t W = HxW / H;
-      auto [TPB, d, f1] = CalcBlockParams(W * C, C, C / G);
-      const int64_t gf = ceil_div(G, f1); // number of groups processed per block in RowwiseMomentsCUDAKernelNHWC_pt1, needed here because it determines size of welford_data
-      const int64_t fgf = (gf == 1) ? f1 : G; // f1 * gf but in case gf > 1, return G (e.g. G=1031, f1=6, gf=172, f1*gf=1032 != 1031; if fgf > G, we know for certain it is because each group needs multiple blocks)
+      auto [TPB, rows_per_block, blocks_per_row] = CalcBlockParams(W * C, C, C / G);
+      const int64_t groups_per_block = ceil_div(G, blocks_per_row); // number of groups processed per block in RowwiseMomentsCUDAKernelNHWC_pt1, needed here because it determines size of welford_data
+      const int64_t partial_groups = (groups_per_block == 1) ? blocks_per_row : G; // blocks_per_row * groups_per_block but in case groups_per_block > 1, return G (e.g. G=1031, blocks_per_row=6, groups_per_block=172, blocks_per_row*groups_per_block=1032 != 1031; if partial_groups > G, we know for certain it is because each group needs multiple blocks)
 
       using WelfordType = WelfordData<T_ACC, int64_t>;
 
       WelfordType *welford_data = reinterpret_cast<WelfordType*>(
         at::empty(
-          {N, fgf, H, sizeof(WelfordType)},
+          {N, partial_groups, H, sizeof(WelfordType)},
           X.options().dtype(at::ScalarType::Byte)
         ).data_ptr<uint8_t>()
       );
 
       // compute means/rstds over width dimension
       {
-        auto [TPB, d, f] = CalcBlockParams(W * C, C, C / G); // same fn + args as the one a couple lines up but repeated for clarity
-        RowwiseMomentsCUDAKernelNHWC1<T><<<dim3(N, H, f), dim3(TPB / d, d), 0, cuda_stream>>>(
+        auto [TPB, rows_per_block, blocks_per_row] = CalcBlockParams(W * C, C, C / G); // same fn + args as the one a couple lines up but repeated for clarity
+        RowwiseMomentsCUDAKernelNHWC1<T><<<dim3(N, H, blocks_per_row), dim3(TPB / rows_per_block, rows_per_block), 0, cuda_stream>>>(
           C, H, W, G,
           X_data,
           welford_data
@@ -974,10 +979,10 @@ void GroupNormKernelImplInternal(
 
       // compute means/rstds over height dimension
       {
-        const int64_t fg = ceil_div(f1, G); // number of blocks to process one group
-        auto [TPB, d, f] = CalcBlockParams(fg * H, fg * H);
+        const int64_t partials_per_group = partial_groups / G; // number of blocks to process one group
+        auto [TPB, rows_per_block, blocks_per_row] = CalcBlockParams(partials_per_group * H, partials_per_group * H);
         RowwiseMomentsCUDAKernelNHWC2<T><<<dim3(N, G), TPB, 0, cuda_stream>>>(
-          H, G, fg, eps,
+          H, G, partials_per_group, eps,
           welford_data,
           mean_data, rstd_data
         );
@@ -1287,16 +1292,16 @@ void GroupNormBackwardKernelImplInternal(
 
       // sum over width dimension
       {
-        auto [TPB, d, f] = CalcBlockParams(W * C, C);
+        auto [TPB, rows_per_block, blocks_per_row] = CalcBlockParams(W * C, C);
         ComputeInternalGradientsCUDAKernelNHWC1<T>
-          <<<dim3(N, H, f), dim3(TPB / d, d), sizeof(T_ACC) * 2*TPB, cuda_stream>>>(
+          <<<dim3(N, H, blocks_per_row), dim3(TPB / rows_per_block, rows_per_block), sizeof(T_ACC) * 2*TPB, cuda_stream>>>(
             C, H, W, dY_data, X_data, xdy_dy_sum_data);
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       }
 
       // sum over height dimension
       {
-        auto [TPB, d, f] = CalcBlockParams(2 * H, 2);
+        auto [TPB, rows_per_block, blocks_per_row] = CalcBlockParams(2 * H, 2);
         ComputeInternalGradientsCUDAKernelNHWC2<T_ACC>
           <<<dim3(N, C), TPB, sizeof(T_ACC) * TPB, cuda_stream>>>(
             H, C, xdy_dy_sum_data,
