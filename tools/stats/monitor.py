@@ -141,14 +141,15 @@ if __name__ == "__main__":
         "log_interval": f"{interval} seconds",
         "gpu":  gpu_libs_detected,
     }
-
     print(json.dumps(info))
     while not kill_now:
         try:
+            memory_info = psutil.virtual_memory()
             stats = {
                 "time": datetime.datetime.now(timezone.utc).isoformat("T") + "Z",
                 "total_cpu_percent": psutil.cpu_percent(),
                 "per_process_cpu_info": get_per_process_cpu_info(),
+                "total_used_memeory":memory_info.used,
             }
             if has_pynvml:
                 # Iterate over the available GPUs
