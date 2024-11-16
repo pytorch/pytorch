@@ -251,7 +251,7 @@ jobs:
           cat test/**/*_toprint.log || true
 
       - name: Stop monitoring script
-        if: !inputs.disable-monitor && always() && steps.monitor-script.outputs.monitor-script-pid
+        if: always() && !inputs.disable-monitor && steps.monitor-script.outputs.monitor-script-pid
         shell: bash
         continue-on-error: true
         env:
