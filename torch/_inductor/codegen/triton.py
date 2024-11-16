@@ -26,7 +26,7 @@ from typing import (
 )
 
 import sympy
-from sympy.printing.precedence import PRECEDENCE, precedence
+from sympy.printing.precedence import PRECEDENCE
 
 import torch
 import torch._inductor.metrics as metrics
@@ -503,15 +503,13 @@ class TritonPrinter(PythonPrinter):
 
     def _print_ToFloat(self, expr):
         assert len(expr.args) == 1
-        s = self.parenthesize(
-            expr.args[0], sympy.printing.precedence.PRECEDENCE["Atom"]
-        )
+        s = self.parenthesize(expr.args[0], PRECEDENCE["Atom"])
         return f"{s}.to(tl.float64)"
 
     def _print_PythonMod(self, expr):
         quot, div = expr.args
         if quot.is_nonnegative and div.is_nonnegative:
-            return self.stringify(expr.args, " % ", precedence(expr))
+            return self.stringify(expr.args, " % ", PRECEDENCE["Atom"])
         quot_s = self._print(quot)
         div_s = self._print(div)
         return f"triton_helpers.remainder_integer({quot_s}, {div_s})"
@@ -520,7 +518,7 @@ class TritonPrinter(PythonPrinter):
         assert expr.is_integer
         quot, div = expr.args
         if quot.is_nonnegative and div.is_nonnegative:
-            return self.stringify(expr.args, " // ", precedence(expr))
+            return self.stringify(expr.args, " // ", PRECEDENCE["Atom"])
         quot_s = self._print(quot)
         div_s = self._print(div)
         return f"triton_helpers.div_floor_integer({quot_s},  {div_s})"
@@ -528,7 +526,7 @@ class TritonPrinter(PythonPrinter):
     # TODO: This is wrong, when lhs, rhs > 2**53, Python does a higher
     # precision algorithm, which we would need to replicate here
     def _print_IntTrueDiv(self, expr):
-        return self.stringify(expr.args, " / ", precedence(expr))
+        return self.stringify(expr.args, " / ", PRECEDENCE["Atom"])
 
     # NB: sympy.floor/ceiling produce integers, so we have to do the
     # conversion to index dtype
