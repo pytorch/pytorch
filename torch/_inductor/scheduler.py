@@ -2166,7 +2166,16 @@ class Scheduler:
                 else:
                     active_buffers = True
 
-            can_eliminate = not node.has_side_effects() and not active_buffers
+            # Node's read_writes doesn't contain unbacked symbols, so if the output buffer defines an unbacked symint,
+            # don't clean this node.
+            defines_unbacked_symbol = (
+                node.node is not None and len(node.node.get_unbacked_symbol_defs()) > 0
+            )
+            can_eliminate = (
+                not node.has_side_effects()
+                and not active_buffers
+                and not defines_unbacked_symbol
+            )
 
             if not can_eliminate:
                 updated_nodes.append(node)
