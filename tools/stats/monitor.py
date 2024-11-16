@@ -129,7 +129,6 @@ if __name__ == "__main__":
     if has_amdsmi:
         gpu_libs_detected.append("amdsmi")
         gpu_handles  = amdsmi.amdsmi_get_processor_handles()
-
     num_cpus = psutil.cpu_count()
 
     # log info
@@ -152,7 +151,6 @@ if __name__ == "__main__":
             info["error"] = errors
         if len(names)>0:
             info["gpu_names"] = names
-
     print(json.dumps(info))
     while not kill_now:
         try:
@@ -179,15 +177,5 @@ if __name__ == "__main__":
                 "error": str(e),
             }
         finally:
-            if has_amdsmi:
-                try:
-                    amdsmi.amdsmi_shut_down()
-                except amdsmi.AmdSmiException as e:
-                    pass
-            if has_pynvml:
-                try:
-                    pynvml.nvmlShutdown()
-                except pynvml.NVMLError as e:
-                    pass
             print(json.dumps(stats))
             time.sleep(interval)
