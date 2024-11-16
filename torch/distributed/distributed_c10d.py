@@ -2270,6 +2270,8 @@ def isend(
     .. warning::
         ``tag`` is not supported with the NCCL backend.
 
+    Unlike send, which is blocking, isend allows src == dst rank, i.e. send to self.
+
     Args:
         tensor (Tensor): Tensor to send.
         dst (int): Destination rank on global process group (regardless of ``group`` argument)
@@ -2285,7 +2287,6 @@ def isend(
     """
     group = _group_or_default_group(group)
     group_dst = _canonicalize_group_rank(group, dst, group_dst)
-    _check_not_self_rank(group, group_dst, "destination")
     _check_single_tensor(tensor, "tensor")
     if _rank_not_in_group(group):
         _warn_not_in_group("isend")
@@ -2309,6 +2310,8 @@ def irecv(
 
     .. warning::
         ``tag`` is not supported with the NCCL backend.
+
+    Unlike recv, which is blocking, irecv allows src == dst rank, i.e. recv from self.
 
     Args:
         tensor (Tensor): Tensor to fill with received data.
@@ -2337,7 +2340,6 @@ def irecv(
         return group.recv_anysource([tensor], tag)
     else:
         group_src = _canonicalize_group_rank(group, src, group_src)
-        _check_not_self_rank(group, group_src, "source")
         return group.recv([tensor], group_src, tag)
 
 
@@ -2365,7 +2367,10 @@ def send(
         group_dst (int, optional): Destination rank on ``group``.  Invalid to specify both ``dst`` and ``group_dst``.
 
     """
-    work = isend(tensor, dst=dst, group=group, tag=tag, group_dst=group_dst)
+    group = _group_or_default_group(group)
+    group_dst = _canonicalize_group_rank(group, dst, group_dst)
+    _check_not_self_rank(group, group_dst, "destination")
+    work = isend(tensor, group=group, tag=tag, group_dst=group_dst)
     if work is not None:
         work.wait()
 
@@ -2404,7 +2409,9 @@ def recv(
     if src is None:
         if group_src is None:
             group_src = work._source_rank()
-        src = get_global_rank(_group_or_default_group(group), group_src)
+        group = _group_or_default_group(group)
+        _check_not_self_rank(group, group_src, "source")
+        src = get_global_rank(group, group_src)
     return src
 
 
@@ -3394,7 +3401,7 @@ def broadcast_object_list(
 @_exception_logger
 def scatter_object_list(
     scatter_object_output_list: List[Any],
-    scatter_object_input_list: List[Any],
+    scatter_object_input_list: Optional[List[Any]] = None,
     src: Optional[int] = None,
     group: Optional[ProcessGroup] = None,
     group_src: Optional[int] = None,
@@ -3410,12 +3417,12 @@ def scatter_object_list(
     Args:
         scatter_object_output_list (List[Any]): Non-empty list whose first
             element will store the object scattered to this rank.
-        scatter_object_input_list (List[Any]): List of input objects to scatter.
+        scatter_object_input_list (List[Any], optional): List of input objects to scatter.
             Each object must be picklable. Only objects on the ``src`` rank will
             be scattered, and the argument can be ``None`` for non-src ranks.
         src (int): Source rank from which to scatter ``scatter_object_input_list``.
             Source rank is based on global process group (regardless of ``group`` argument).
-             (If both ``src`` and ``group_src`` are None, default is global rank 0)
+            (If both ``src`` and ``group_src`` are None, default is global rank 0)
         group: (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used. Default is ``None``.
         group_src (int, optional): Source rank on ``group``.  Invalid to specify both ``src`` and ``group_src``
@@ -3472,6 +3479,10 @@ def scatter_object_list(
     my_global_rank = get_rank()
     pg_device = _get_object_coll_device(group)
     if my_global_rank == global_src:
+        if scatter_object_input_list is None:
+            raise ValueError(
+                "source rank must provide non-None scatter_object_input_list"
+            )
         tensor_list, tensor_sizes = zip(
             *[
                 _object_to_tensor(obj, pg_device, group)
@@ -3949,17 +3960,17 @@ def scatter(
 
     """
     _check_single_tensor(tensor, "tensor")
-    group = _group_or_default_group(group)
-    global_src = _canonicalize_group_rank(group, src, group_src, return_global=True)
-    group_src = _canonicalize_group_rank(group, src, group_src, return_global=False)
-
     # Parameter ``scatter_list`` may be left unspecified on non-src ranks.
     if scatter_list:
         _check_tensor_list(scatter_list, "scatter_list")
     else:
         scatter_list = []
     _ensure_all_tensors_same_dtype(tensor, scatter_list)
-
+    group = _group_or_default_group(group)
+    if src is None and group_src is None:
+        src = 0
+    global_src = _canonicalize_group_rank(group, src, group_src, return_global=True)
+    group_src = _canonicalize_group_rank(group, src, group_src, return_global=False)
     if _rank_not_in_group(group):
         _warn_not_in_group("scatter")
         return
