@@ -88,7 +88,6 @@ def prefill(
 def decode_one_token(
     model: torch.nn.Module, x: torch.Tensor, input_pos: torch.Tensor, **sampling_kwargs
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-    x = x.clone()
     # input_pos: [B, 1]
     assert input_pos.shape[-1] == 1
     logits = model(x, input_pos)
@@ -234,9 +233,11 @@ def run_experiment(
         )
         model.finalize_autoquant()
 
+    print("model:", model)
     global decode_one_token, prefill
-    prefill = torch.compile(prefill, fullgraph=True)
     decode_one_token = torch.compile(decode_one_token, mode="reduce-overhead", fullgraph=True)
+    prefill = torch.compile(prefill, fullgraph=True, dynamic=True)
+    print("after compile")
 
     for i in range(start, num_samples):
         device_sync(device=device)  # MKG
