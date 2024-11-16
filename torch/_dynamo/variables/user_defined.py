@@ -1013,9 +1013,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         return key in self.value.__dict__
 
     def is_supported_nn_module_method(self, method):
-        return torch._dynamo.config.inline_inbuilt_nn_modules and method in (
-            torch.nn.Module.parameters,
-        )
+        if not torch._dynamo.config.inline_inbuilt_nn_modules:
+            return False
+        if method is not torch.nn.Module.parameters:
+            return False
+        return istype(self.value._parameters, dict)
 
     def get_source_by_walking_mro(self, name):
         assert self.cls_source is not None
