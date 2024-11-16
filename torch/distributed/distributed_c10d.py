@@ -3950,6 +3950,8 @@ def scatter(
         scatter_list = []
     _ensure_all_tensors_same_dtype(tensor, scatter_list)
     group = _group_or_default_group(group)
+    if src is None and group_src is None:
+        src = 0
     global_src = _canonicalize_group_rank(group, src, group_src, return_global=True)
     group_src = _canonicalize_group_rank(group, src, group_src, return_global=False)
     if _rank_not_in_group(group):
