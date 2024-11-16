@@ -109,7 +109,7 @@ jobs:
       - name: Start monitoring script
         id: monitor-script
         shell: bash
-        if: !inputs.disable-monitor
+        if: ${{ !inputs.disable-monitor }}
         continue-on-error: true
         run: |
           # Windows conda doesn't have python3 binary, only python, but it's python3
@@ -222,7 +222,7 @@ jobs:
           cat test/**/*_toprint.log || true
 
       - name: Stop monitoring script
-        if: always() && !inputs.disable-monitor && steps.monitor-script.outputs.monitor-script-pid
+        if: ${{ always() && !inputs.disable-monitor && steps.monitor-script.outputs.monitor-script-pid }}
         shell: bash
         continue-on-error: true
         env:
