@@ -273,7 +273,7 @@ class BFGS(Optimizer):
         line_search_fn (str): either 'strong_wolfe' or None (default: None).
     """
 
-    def _init_(
+    def __init__(
         self,
         params: ParamsT,
         lr: Union[float, Tensor] = 1,
@@ -297,7 +297,7 @@ class BFGS(Optimizer):
             tolerance_change=tolerance_change,
             line_search_fn=line_search_fn,
         )
-        super()._init_(params, defaults)
+        super().__init__(params, defaults)
 
         if len(self.param_groups) != 1:
             raise ValueError(
@@ -463,9 +463,7 @@ class BFGS(Optimizer):
             ls_func_evals = 0
             if line_search_fn is not None:
                 # perform line search, using user function
-                if line_search_fn != "strong_wolfe":
-                    raise RuntimeError("only 'strong_wolfe' is supported")
-                else:
+                if line_search_fn == "strong_wolfe":
                     x_init = self._clone_param()
 
                     def obj_func(x, t, d):
@@ -474,6 +472,18 @@ class BFGS(Optimizer):
                     loss, flat_grad, t, ls_func_evals = _strong_wolfe(
                         obj_func, x_init, t, d, loss, flat_grad, gtd
                     )
+                elif line_search_fn == "hager_zhang":
+                    x_init = self._clone_param()
+
+                    def obj_func(x, t, d):
+                        return self._directional_evaluate(closure, x, t, d)
+
+                    loss, flat_grad, t, ls_func_evals = _hager_zhang(
+                        obj_func, x_init, t, d, loss, flat_grad, gtd
+                    )
+                else:
+                    raise RuntimeError("only 'strong_wolfe' and 'hager_zhang' are supported")
+
                 self._add_grad(t, d)
                 opt_cond = flat_grad.abs().max() <= tolerance_grad
             else:
