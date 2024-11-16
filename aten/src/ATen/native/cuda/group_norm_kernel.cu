@@ -288,7 +288,6 @@ __global__ void RowwiseMomentsCUDAKernelNHWC2(
   rstd[ng] = rsqrt(var + static_cast<T_ACC>(eps));
 }
 
-
 template <typename T>
 __global__ void ComputeFusedParamsCUDAKernel(
     int64_t N,
@@ -626,7 +625,7 @@ __global__ void ComputeInternalGradientsCUDAKernelNHWC2(
     T *db_data) {
   /*
     Same thing as ComputeInternalGradientsCUDAKernelNHWC1 but over the H (height) instead of the width dimension.
-    grid: (x=N, y=C); block: (x=2H/blocks_per_row)
+    grid: (x=N, y=C); block: (x=TPB)
     X shape: (N, C, H, 2) -view-> (N, C, cdiv(2H, TPB), TPB); X stride: (2CH, 2H, TPB, 1)
     dram reduction (per block): (cdiv(2H, TPB), TPB) -reduce-> (TPB,)
     shmem reduction (per block): (TPB,) -view-> (TPB/2, 2) -reduce-> (2,)
@@ -1301,7 +1300,7 @@ void GroupNormBackwardKernelImplInternal(
 
       // sum over height dimension
       {
-        auto [TPB, rows_per_block, blocks_per_row] = CalcBlockParams(2 * H, 2);
+        const int TPB = std::min(static_cast<int>(2 * H), kCUDANumThreads);
         ComputeInternalGradientsCUDAKernelNHWC2<T_ACC>
           <<<dim3(N, C), TPB, sizeof(T_ACC) * TPB, cuda_stream>>>(
             H, C, xdy_dy_sum_data,
