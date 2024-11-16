@@ -5634,7 +5634,6 @@ class CommonTemplate:
             (torch.randn([1, 3, 3, 16]).to(memory_format=torch.channels_last),),
         )
 
-    @skip_if_cpp_wrapper
     def test_cat_uint8(self):
         def fn(x):
             batch_shape = x.shape[:1]
