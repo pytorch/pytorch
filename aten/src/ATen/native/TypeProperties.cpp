@@ -56,11 +56,11 @@ bool is_neg(const Tensor& self) {
   return self.is_neg();
 }
 
-// True if `self` and `from` have compatible tensor type so that `from`'s
+// True if `self` and `source` have compatible tensor type so that `source`'s
 // TensorImpl can be copied to `self`.
-bool _has_compatible_shallow_copy_type(const Tensor& self, const Tensor& from) {
+bool _has_compatible_shallow_copy_type(const Tensor& self, const Tensor& source) {
   return self.unsafeGetTensorImpl()->has_compatible_shallow_copy_type(
-      from.key_set());
+      source.key_set());
 }
 
 Tensor type_as(const Tensor& self, const Tensor& other) {
