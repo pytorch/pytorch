@@ -2265,6 +2265,8 @@ def isend(
     .. warning::
         ``tag`` is not supported with the NCCL backend.
 
+    Unlike send, which is blocking, isend allows src == dst rank, i.e. send to self.
+
     Args:
         tensor (Tensor): Tensor to send.
         dst (int): Destination rank on global process group (regardless of ``group`` argument)
@@ -2280,7 +2282,6 @@ def isend(
     """
     group = _group_or_default_group(group)
     group_dst = _canonicalize_group_rank(group, dst, group_dst)
-    _check_not_self_rank(group, group_dst, "destination")
     _check_single_tensor(tensor, "tensor")
     if _rank_not_in_group(group):
         _warn_not_in_group("isend")
@@ -2304,6 +2305,8 @@ def irecv(
 
     .. warning::
         ``tag`` is not supported with the NCCL backend.
+
+    Unlike recv, which is blocking, irecv allows src == dst rank, i.e. recv from self.
 
     Args:
         tensor (Tensor): Tensor to fill with received data.
@@ -2332,7 +2335,6 @@ def irecv(
         return group.recv_anysource([tensor], tag)
     else:
         group_src = _canonicalize_group_rank(group, src, group_src)
-        _check_not_self_rank(group, group_src, "source")
         return group.recv([tensor], group_src, tag)
 
 
@@ -2360,7 +2362,10 @@ def send(
         group_dst (int, optional): Destination rank on ``group``.  Invalid to specify both ``dst`` and ``group_dst``.
 
     """
-    work = isend(tensor, dst=dst, group=group, tag=tag, group_dst=group_dst)
+    group = _group_or_default_group(group)
+    group_dst = _canonicalize_group_rank(group, dst, group_dst)
+    _check_not_self_rank(group, group_dst, "destination")
+    work = isend(tensor, group=group, tag=tag, group_dst=group_dst)
     if work is not None:
         work.wait()
 
@@ -2399,7 +2404,9 @@ def recv(
     if src is None:
         if group_src is None:
             group_src = work._source_rank()
-        src = get_global_rank(_group_or_default_group(group), group_src)
+        group = _group_or_default_group(group)
+        _check_not_self_rank(group, group_src, "source")
+        src = get_global_rank(group, group_src)
     return src
 
 
