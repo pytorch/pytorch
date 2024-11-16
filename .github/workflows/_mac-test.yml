@@ -38,6 +38,7 @@ on:
         required: false
         type: boolean
         default: true
+
 jobs:
   test:
     # Don't run on forked repos or empty test matrix
