@@ -948,7 +948,7 @@ class SplitCatSimplifier:
 
     def replace_cat(
         self,
-        graph: torch.fx.GraphModule,
+        graph: torch.fx.Graph,
         split_node: torch.fx.Node,
         next_users: List[torch.fx.Node],
         user_inputs_list_new,
@@ -1081,7 +1081,7 @@ class SplitCatSimplifier:
 
     def erase_old_nodes(
         self,
-        graph: torch.fx.GraphModule,
+        graph: torch.fx.Graph,
         split_node: torch.fx.Node,
         next_users: List[torch.fx.Node],
     ):
