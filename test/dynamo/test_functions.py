@@ -982,7 +982,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             x_inference = torch.randn(2, 2)
 
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
 
         x = torch.randn(2, 2)
 
@@ -2386,6 +2386,89 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         with self.assertRaises(torch._dynamo.exc.Unsupported):
             opt_fn = torch.compile(fullgraph=True)(fn)
             opt_fn(inputs)
+
+    def test_filter_infinite_iterator(self):
+        def fn(x):
+            x = x + 1
+            return (
+                x,
+                list(zip(range(3), filter(lambda y: y < 10, itertools.count()))),
+                list(zip(range(10, 12), filter(lambda y: y > 10, itertools.count()))),
+            )
+
+        inputs = torch.ones(1)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertTupleEqual(opt_fn(inputs), fn(inputs))
+
+    def test_filter_reconstruct(self):
+        def fn(a):
+            return filter(lambda x: x[0] + x[1] < 10, zip([1, 2, 3], [1, 2, 3])), a + 1
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        m = opt_fn(torch.ones(3, 3))[0]
+        n = fn(torch.ones(3, 3))[0]
+        self.assertIsInstance(m, filter)
+        self.assertEqual(list(m), list(n))
+
+    def test_filter_graph_break_reconstruct(self):
+        def fn(x, y):
+            if x.sum() > 0:
+                return x + y
+            return x * y
+
+        backend = EagerAndRecordGraphs()
+        cnts = CompileCounterWithBackend(backend)
+        opt_fn = torch.compile(fn, backend=cnts)
+        a = torch.zeros(3)
+        b = torch.ones(3)
+        self.assertEqual(opt_fn(a, b), fn(a, b))
+
+        if torch._dynamo.config.assume_static_by_default:
+            self.assertExpectedInline(
+                normalize_gm(backend.graphs[0].print_readable(print_output=False)),
+                """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[3]"):
+        l_x_ = L_x_
+
+        sum_1: "f32[]" = l_x_.sum();  l_x_ = None
+        gt: "b8[]" = sum_1 > 0;  sum_1 = None
+        return (gt,)
+""",
+            )
+        else:
+            self.assertExpectedInline(
+                normalize_gm(backend.graphs[0].print_readable(print_output=False)),
+                """\
+class GraphModule(torch.nn.Module):
+    def forward(self, s0: "Sym(s0)", L_x_: "f32[s0]"):
+        l_x_ = L_x_
+
+        sum_1: "f32[]" = l_x_.sum();  l_x_ = None
+        gt: "b8[]" = sum_1 > 0;  sum_1 = None
+        return (gt,)
+""",
+            )
+
+    def test_filter_with_graph_break(self):
+        def f(a):
+            a += 1
+
+            def g(x):
+                nonlocal a
+                a += 1
+                return x > 0
+
+            m = filter(g, [1, 2, 3, 4, 5])
+            a += next(m)  # won't graph break
+            torch._dynamo.graph_break()
+            a += next(m)  # will graph break
+            return a
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_f = torch.compile(f, backend=cnts)
+        self.assertEqual(f(torch.ones(3, 3)), opt_f(torch.ones(3, 3)))
+        self.assertEqual(cnts.frame_count, 3)
 
     def test_pow_int(self):
         def fn(a, b):

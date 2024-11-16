@@ -1,19 +1,20 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/group_norm.h>
 
+#include <type_traits>
+
+#include <thrust/tuple.h>
+
+#include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
-#include <ATen/core/Tensor.h>
 #include <ATen/native/SharedReduceOps.h>
 #include <ATen/native/TensorIterator.h>
-#include <c10/core/MemoryFormat.h>
 #include <c10/cuda/CUDAMathCompat.h>
-#include <thrust/tuple.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/block_reduce.cuh>
 #include <ATen/ceil_div.h>
-#include <type_traits>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -80,21 +81,21 @@ int64_t ClosestFactor(int64_t n) {
 
 template <typename T>
 __global__ void RowwiseMomentsCUDAKernel(
-    int64_t group_span,
+    int64_t N,
     T eps,
     const T* X,
     T* mean,
-    T* rstd,
-    int64_t C) {
+    T* rstd) {
   using T_ACC = acc_type<T, true>;
   using WelfordType = WelfordData<T_ACC, int64_t>;
   using WelfordOp =
       WelfordOps<T_ACC, T_ACC, int64_t, thrust::pair<T_ACC, T_ACC>>;
+
   const int64_t i = blockIdx.x;
   WelfordOp welford_op = {/*correction=*/0, /*take_sqrt=*/false};
   WelfordType val(0, 0, 0, 0);
-  for (int64_t j = threadIdx.x; j < group_span; j += blockDim.x) {
-    const int64_t index = i * group_span + j;
+  for (int64_t j = threadIdx.x; j < N; j += blockDim.x) {
+    const int64_t index = i * N + j;
     val = welford_op.reduce(val, static_cast<T_ACC>(X[index]), index);
   }
   if (blockDim.x <= C10_WARP_SIZE) {
@@ -926,25 +927,22 @@ void GroupNormKernelImplInternal(
   if (N == 0) {
     return;
   }
-
   const int64_t G = group;
   const int64_t D = C / G;
   const T* X_data = X.const_data_ptr<T>();
   T* mean_data = mean.mutable_data_ptr<T>();
   T* rstd_data = rstd.mutable_data_ptr<T>();
 
-  at::MemoryFormat x_format = X.suggest_memory_format();
-  Y.is_contiguous(x_format);
-
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
   const int64_t num_threads = D * HxW < cuda_utils::kCUDABlockReduceNumThreads
       ? at::cuda::warp_size()
       : cuda_utils::kCUDABlockReduceNumThreads;
 
+  MemoryFormat x_format = X.suggest_memory_format();
   switch (x_format) {
     case MemoryFormat::Contiguous: {
       RowwiseMomentsCUDAKernel<T><<<N * G, num_threads, 0, cuda_stream>>>(
-        D * HxW, eps, X_data, mean_data, rstd_data, C);
+        D * HxW, eps, X_data, mean_data, rstd_data);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
       break;
     }
@@ -1008,7 +1006,6 @@ void GroupNormKernelImplInternal(
                     .add_owned_input(mean.view({N, G, 1, 1}))
                     .add_owned_input(rstd.view({N, G, 1, 1}))
                     .build();
-
     gpu_kernel(iter, [] GPU_LAMBDA(T x, T mean, T rstd) -> T {
       return (static_cast<T_ACC>(x) - static_cast<T_ACC>(mean)) *
           static_cast<T_ACC>(rstd);
@@ -1021,7 +1018,6 @@ void GroupNormKernelImplInternal(
         : X.scalar_type();
     Tensor a = at::empty({N, C}, X.options().dtype(kAccType));
     Tensor b = at::empty({N, C}, X.options().dtype(kAccType));
-
     const T* gamma_data = gamma.defined() ? gamma.const_data_ptr<T>() : nullptr;
     const T* beta_data = beta.defined() ? beta.const_data_ptr<T>() : nullptr;
     T_ACC* a_data = a.mutable_data_ptr<T_ACC>();
@@ -1031,7 +1027,6 @@ void GroupNormKernelImplInternal(
     // using manual kernel here. Make it using gpu_kernel_multiple_outputs once
     // the issue fixed.
     const int64_t B = (N * C + kCUDANumThreads - 1) / kCUDANumThreads;
-
     ComputeFusedParamsCUDAKernel<T><<<B, kCUDANumThreads, 0, cuda_stream>>>(
         N, C, G, mean_data, rstd_data, gamma_data, beta_data, a_data, b_data);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
@@ -1049,7 +1044,6 @@ void GroupNormKernelImplInternal(
       return a * static_cast<T_ACC>(x) + b;
     });
   }
-
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
