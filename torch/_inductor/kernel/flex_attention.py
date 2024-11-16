@@ -162,13 +162,18 @@ def build_subgraph_buffer(
 # Inner Triton functions shared by flex_attention & split-k decoding kernels.
 compute_next_offset_func = r"""
 @triton.jit
-def get_offset_for_next_block(loop_iter, col_indices, total_blocks, SPARSE_BLOCK, SPARSE_BLOCK_MULTIPLE, BLOCK):
+def get_offset_for_next_block(
+    loop_iter, col_indices, total_blocks,
+    SPARSE_BLOCK, SPARSE_BLOCK_MULTIPLE, BLOCK,
+    BLOCKS_ARE_CONTIGUOUS: tl.constexpr
+):
+    if BLOCKS_ARE_CONTIGUOUS:
+        return BLOCK
     cur_block_idx = loop_iter // SPARSE_BLOCK_MULTIPLE
     cur_block = tl.load(col_indices + cur_block_idx, eviction_policy="evict_last")
     next_block = tl.load(col_indices + cur_block_idx + 1, eviction_policy="evict_last", mask=cur_block_idx + 1 < total_blocks)
     needs_jump = (loop_iter + 1) % SPARSE_BLOCK_MULTIPLE == 0
     jump_to_block = (next_block - cur_block ) * SPARSE_BLOCK - (SPARSE_BLOCK_MULTIPLE - 1) * BLOCK
-
     offset = jump_to_block * needs_jump + (1 - needs_jump) * BLOCK
     return offset
 """
@@ -202,6 +207,8 @@ compute_flex_attention = r"""
     # about 20% more numerical error, but slightly faster.
     # ROWS_GUARANTEED_SAFE: Is it guaranteed that at least one value in each row
     # is not masked out? If so, we can skip an extra safety check
+    # BLOCKS_ARE_CONTIGUOUS: Is it guaranteed that all blocks in the mask are
+    # contiguous? If so, we don't need to do an indirect jump for every block
 
     tl.static_assert(SPARSE_Q_BLOCK_SIZE >= BLOCK_M and SPARSE_Q_BLOCK_SIZE % BLOCK_M == 0)
     tl.static_assert(SPARSE_KV_BLOCK_SIZE >= BLOCK_N and SPARSE_KV_BLOCK_SIZE % BLOCK_N == 0)
@@ -440,7 +447,7 @@ def forward_inner(
         # update pointers
         offset = get_offset_for_next_block(
             start_n, kv_indices, kv_num_blocks,
-            SPARSE_KV_BLOCK_SIZE, SPARSE_KV_MULTIPLE, BLOCK_N
+            SPARSE_KV_BLOCK_SIZE, SPARSE_KV_MULTIPLE, BLOCK_N, BLOCKS_ARE_CONTIGUOUS
         )
 
         V_block_ptr = tl.advance(V_block_ptr, (offset, 0))
@@ -610,67 +617,95 @@ _rocm_default_config = {
 }
 
 
-def _get_default_config_fwd(query) -> Tuple[int, int, int, int]:
+def _get_rocm_config(query, mode: str) -> Tuple[int, int, int, int]:
     dtype = query.get_dtype()
     head_dim = query.get_size()[-1]
-    default_config = None
+    fwd_config = None
 
-    if head_dim <= 256 and torch.cuda.get_device_capability() >= (9, 0):  # H100
+    if mode == "fwd":
+        if head_dim <= 256:
+            if dtype == torch.float32:
+                fwd_config = (64, 64, 4, 1)
+            else:
+                fwd_config = (128, 64, 8, 1)
+            fwd_config = _rocm_default_config.get((dtype, head_dim), fwd_config)
+        else:  # modest hardware or extremely large head_dim
+            if dtype == torch.float32:
+                fwd_config = (32, 16, 4, 1)
+            else:
+                fwd_config = (64, 32, 4, 1)
+        return fwd_config
+    else:  # bwd
         if dtype == torch.float32:
-            default_config = (64, 64, 4, 3)
-        else:
-            default_config = (128, 64, 4, 3)
-        default_config = _h100_default_config.get((dtype, head_dim), default_config)
-    elif head_dim <= 256 and torch.cuda.get_device_capability() >= (8, 0):  # A100
-        if dtype == torch.float32:
-            default_config = (64, 64, 4, 3)
-        else:
-            default_config = (128, 64, 4, 3)
-        default_config = _a100_default_config.get((dtype, head_dim), default_config)
-    elif head_dim <= 256 and torch.version.hip:
-        if dtype == torch.float32:
-            default_config = (64, 64, 4, 1)
-        else:
-            default_config = (128, 64, 8, 1)
-        default_config = _rocm_default_config.get((dtype, head_dim), default_config)
-    else:  # modest hardware or extremely large head_dim
-        if dtype == torch.float32:
-            default_config = (32, 16, 4, 3)
-        else:
-            default_config = (64, 32, 4, 3)
+            return (16, 16, 4, 1)
+        elif head_dim <= 256:
+            if head_dim == 64:
+                return (64, 64, 4, 1)
+            elif head_dim == 128:
+                return (64, 128, 8, 1)
+            else:
+                return (64, 64, 4, 1)
+        else:  # modest hardware or extremely large head_dim
+            return (16, 16, 4, 1)
 
-    return default_config
+
+def _get_nv_config(query, mode: str) -> Tuple[int, int, int, int]:
+    dtype = query.get_dtype()
+    head_dim = query.get_size()[-1]
+    fwd_config = None
+
+    capability = torch.cuda.get_device_capability()
+
+    if mode == "fwd":
+        if head_dim <= 256:
+            if dtype == torch.float32:
+                fwd_config = (64, 64, 4, 3)
+            else:
+                fwd_config = (128, 64, 4, 3)
+            if capability >= (9, 0):
+                fwd_config = _h100_default_config.get((dtype, head_dim), fwd_config)
+            elif capability >= (8, 0):
+                fwd_config = _a100_default_config.get((dtype, head_dim), fwd_config)
+        else:  # modest hardware or extremely large head_dim
+            if dtype == torch.float32:
+                fwd_config = (32, 16, 4, 3)
+            else:
+                fwd_config = (64, 32, 4, 3)
+        return fwd_config
+
+    else:  # bwd
+        if dtype == torch.float32:
+            return (16, 16, 4, 1)
+        elif head_dim <= 256 and capability >= (9, 0):  # H100
+            if head_dim == 64:
+                return (64, 64, 4, 3)
+            elif head_dim == 128:
+                return (64, 128, 8, 3)
+            else:
+                return (64, 64, 4, 2)
+        elif capability >= (8, 0):  # A100
+            if head_dim == 64:
+                return (32, 128, 4, 3)
+            elif head_dim == 128:
+                return (64, 128, 8, 3)
+            else:
+                return (64, 64, 4, 2)
+        else:  # modest hardware or extremely large head_dim
+            return (16, 16, 4, 1)
+
+
+def _get_default_config_fwd(query) -> Tuple[int, int, int, int]:
+    if torch.version.hip is None:
+        return _get_nv_config(query, "fwd")
+    else:
+        return _get_rocm_config(query, "fwd")
 
 
 def _get_default_config_bwd(query) -> Tuple[int, int, int, int]:
-    head_dim = query.get_size()[-1]
-    dtype = query.get_dtype()
-
-    if dtype == torch.float32:
-        return (16, 16, 4, 1)
-    if head_dim <= 256 and torch.version.hip:
-        if head_dim == 64:
-            return (64, 64, 4, 1)
-        elif head_dim == 128:
-            return (64, 128, 4, 1)
-        else:
-            return (64, 64, 4, 1)
-    elif head_dim <= 256 and torch.cuda.get_device_capability() >= (9, 0):  # H100
-        if head_dim == 64:
-            return (64, 64, 4, 3)
-        elif head_dim == 128:
-            return (64, 128, 8, 3)
-        else:
-            return (64, 64, 4, 2)
-    elif torch.cuda.get_device_capability() >= (8, 0):  # A100
-        if head_dim == 64:
-            return (32, 128, 4, 3)
-        elif head_dim == 128:
-            return (64, 128, 8, 3)
-        else:
-            return (64, 64, 4, 2)
-    else:  # modest hardware or extremely large head_dim
-        return (16, 16, 4, 1)
+    if torch.version.hip is None:
+        return _get_nv_config(query, "bwd")
+    else:
+        return _get_rocm_config(query, "bwd")
 
 
 def create_num_blocks_fake_generator(sparse_indices):
@@ -890,6 +925,11 @@ def flex_attention(
     original_kernel_options = kernel_options.copy()
     for BLOCK_M, BLOCK_N, num_warps, num_stages in configs:
         if SPARSE_KV_BLOCK_SIZE % BLOCK_N != 0 or SPARSE_Q_BLOCK_SIZE % BLOCK_M != 0:
+            if len(configs) == 1:
+                raise ValueError(
+                    f"Q and KV block size must be divisible by BLOCK_M and BLOCK_N. We"
+                    f"got Q_BLOCK_SIZE={SPARSE_Q_BLOCK_SIZE} and KV_BLOCK_SIZE={SPARSE_KV_BLOCK_SIZE}."
+                )
             continue
         # Work around https://github.com/pytorch/pytorch/issues/129625
         if num_stages == 2:
@@ -903,7 +943,7 @@ def flex_attention(
         cur_kernel_options.setdefault("SPARSE_Q_BLOCK_SIZE", SPARSE_Q_BLOCK_SIZE)
         cur_kernel_options.setdefault("SPARSE_KV_BLOCK_SIZE", SPARSE_KV_BLOCK_SIZE)
 
-        flex_attention_template.maybe_append_choice(
+        error = flex_attention_template.maybe_append_choice(
             choices=choices,
             input_nodes=[
                 query,
@@ -928,6 +968,8 @@ def flex_attention(
             call_sizes=query.get_size(),
             **cur_kernel_options,
         )
+        if error is not None and len(configs) == 1:
+            raise error
     inputs_for_autotuning = (
         [
             query,
@@ -1315,7 +1357,7 @@ def bwd_dq_inner(
                 # Increment pointers.
                 offset = get_offset_for_next_block(
                     start_n, kv_indices, sparse_kv_num_blocks,
-                    SPARSE_KV_BLOCK_SIZE, SPARSE_KV_MULTIPLE, BLOCK_N2
+                    SPARSE_KV_BLOCK_SIZE, SPARSE_KV_MULTIPLE, BLOCK_N2, BLOCKS_ARE_CONTIGUOUS
                 )
 
                 kT_ptrs += offset * stride_kn
@@ -1347,7 +1389,7 @@ def bwd_dq_inner(
             # Increment pointers.
             offset = get_offset_for_next_block(
                 start_n, kv_indices, sparse_kv_num_blocks,
-                SPARSE_KV_BLOCK_SIZE, SPARSE_KV_MULTIPLE, BLOCK_N2
+                SPARSE_KV_BLOCK_SIZE, SPARSE_KV_MULTIPLE, BLOCK_N2, BLOCKS_ARE_CONTIGUOUS
             )
 
             kT_ptrs += offset * stride_kn
@@ -1496,7 +1538,7 @@ def bwd_dkdv_inner(
                 # Increment pointers.
                 offset = get_offset_for_next_block(
                     start_m, q_indices, sparse_q_num_blocks,
-                    SPARSE_Q_BLOCK_SIZE, SPARSE_Q_MULTIPLE, BLOCK_M1
+                    SPARSE_Q_BLOCK_SIZE, SPARSE_Q_MULTIPLE, BLOCK_M1, BLOCKS_ARE_CONTIGUOUS
                 )
 
                 qT_ptrs += offset * stride_qm
@@ -1527,7 +1569,7 @@ def bwd_dkdv_inner(
             # Increment pointers.
             offset = get_offset_for_next_block(
                 start_m, q_indices, sparse_q_num_blocks,
-                SPARSE_Q_BLOCK_SIZE, SPARSE_Q_MULTIPLE, BLOCK_M1
+                SPARSE_Q_BLOCK_SIZE, SPARSE_Q_MULTIPLE, BLOCK_M1, BLOCKS_ARE_CONTIGUOUS
             )
 
             qT_ptrs += offset * stride_qm

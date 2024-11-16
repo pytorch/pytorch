@@ -4394,6 +4394,15 @@ class TestSerialization(TestCase, SerializationMixin):
                 with zipfile.ZipFile(f) as zip_file:
                     zip_file.extractall(path=temp_dir)
 
+    def test_serialization_with_header(self):
+        orig = torch.randn(3, 3)
+        with BytesIOContext() as f:
+            f.write(b'header')
+            torch.save(orig, f)
+            f.seek(6)
+            loaded = torch.load(f)
+            self.assertEqual(orig, loaded)
+
     def test_get_unsafe_globals_in_checkpoint(self):
         t = torch.randn(2, 3)
         tt = TwoTensor(t, t)
@@ -4412,6 +4421,10 @@ class TestSerialization(TestCase, SerializationMixin):
             f.seek(0)
             unsafe_globals = torch.serialization.get_unsafe_globals_in_checkpoint(f)
             self.assertEqual(set(unsafe_globals), expected_unsafe_global_strs)
+            f.seek(0)
+            with torch.serialization.safe_globals([TwoTensor]):
+                unsafe_globals = torch.serialization.get_unsafe_globals_in_checkpoint(f)
+                self.assertEqual(set(unsafe_globals), set())
             f.seek(0)
             try:
                 old_get_allowed_globals = torch._weights_only_unpickler._get_allowed_globals

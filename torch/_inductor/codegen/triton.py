@@ -21,6 +21,7 @@ from typing import (
     Optional,
     Sequence,
     Tuple,
+    Type,
     TYPE_CHECKING,
     Union,
 )
@@ -3591,7 +3592,7 @@ class TritonScheduling(SIMDScheduling):
         is_split_scan = is_scan and any(
             node.is_split_scan() for node in kernel_features.scheduler_nodes()
         )
-        kernel_type = TritonKernel
+        kernel_type: Type[TritonKernel] = self.kernel_type
         if is_split_scan:
             from .triton_split_scan import TritonSplitScanKernel
 
