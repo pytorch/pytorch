@@ -4,6 +4,7 @@
 name: inductor-unittest
 
 on:
+  pull_request:
   workflow_call:
   schedule:
     - cron: 29 8 * * * # about 1:29am PDT, for mem leak check and rerun disabled tests.
@@ -51,6 +52,7 @@ jobs:
       build-environment: linux-focal-cuda12.1-py3.10-gcc9-sm86
       docker-image: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-inductor-build.outputs.test-matrix }}
+      disable-monitor: False
     secrets: inherit
 
   linux-focal-cuda12_1-py3_12-gcc9-inductor-build:
