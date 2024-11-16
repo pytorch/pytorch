@@ -96,7 +96,7 @@ ExtraState* init_and_set_extra_state(PyCodeObject* code) {
   return extra_state;
 }
 
-bool backend_match(PyObject* saved_backend, PyObject* backend) {
+static bool backend_match(PyObject* saved_backend, PyObject* backend) {
   // Pointer equality check for common case
   if (saved_backend != backend) {
     // The Py_TYPE check should not be required but there is a pre-existing
