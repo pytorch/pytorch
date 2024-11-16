@@ -1,6 +1,7 @@
 name: trunk
 
 on:
+  pull-request:
   push:
     branches:
       - main
@@ -73,6 +74,7 @@ jobs:
       build-environment: linux-focal-cuda12.4-py3.10-gcc9-sm86
       docker-image: ${{ needs.linux-focal-cuda12_4-py3_10-gcc9-sm86-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-cuda12_4-py3_10-gcc9-sm86-build.outputs.test-matrix }}
+      disable-monitor: False
 
   libtorch-linux-focal-cuda12_1-py3_7-gcc9-debug-build:
     name: libtorch-linux-focal-cuda12.1-py3.7-gcc9-debug
