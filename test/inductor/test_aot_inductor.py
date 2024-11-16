@@ -312,7 +312,9 @@ class AOTInductorTestsTemplate:
     def test_multi_device(self):
         if self.device == "cpu" and GPU_TYPE == "xpu":
             raise unittest.SkipTest(
-                "In this scenario, the test case will run XPU code in AOTIModelContainerRunnerCpu, which is not reasonable, See issue #140805"
+                "In this scenario, the test case will run XPU code in "
+                "AOTIModelContainerRunnerCpu, which is not reasonable,"
+                "See issue #140805"
             )
 
         class Model(torch.nn.Module):
