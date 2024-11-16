@@ -45,6 +45,7 @@ from torch._C._distributed_c10d import (
     Work,
 )
 from torch._utils_internal import set_pytorch_distributed_envs_from_justknobs
+from torch.monitor import _WaitCounter
 from torch.utils._typing_utils import not_none
 
 from .c10d_logger import _exception_logger, _time_logger
@@ -1108,6 +1109,38 @@ def _check_tensor_list(param, param_name) -> None:
         raise TypeError(
             f"""Invalid function argument. Expected parameter `{param_name}` of type List[torch.Tensor]
              but got {type(param)} with elements of type {[type(p) for p in param]}."""
+        )
+
+
+def _group_or_default_group(group: Optional[ProcessGroup] = None) -> ProcessGroup:
+    if group is None or group is GroupMember.WORLD:
+        group = _get_default_group()
+    return group
+
+
+def _canonicalize_group_rank(
+    group: ProcessGroup,
+    global_rank: Optional[int] = None,
+    group_rank: Optional[int] = None,
+) -> int:
+    """
+    Helper method to take _either_ a global rank or a group rank and produce a group rank.
+    """
+    if group_rank is not None:
+        if global_rank is not None:
+            raise ValueError("Can't specify both group_rank and global_rank")
+    else:
+        if global_rank is None:
+            raise ValueError("Must specify global_rank or group_rank")
+        group_rank = get_group_rank(group, global_rank)
+    return group_rank
+
+
+def _check_not_self_rank(group: ProcessGroup, rank: int, rank_type: str):
+    if group.rank() == rank:
+        raise ValueError(
+            f"Invalid {rank_type} rank: {rank_type} rank should not be the same as "
+            "the rank of the current process."
         )
 
 
@@ -2216,7 +2249,11 @@ def get_world_size(group: Optional[ProcessGroup] = None) -> int:
 
 
 def isend(
-    tensor: torch.Tensor, dst: int, group: Optional[ProcessGroup] = None, tag: int = 0
+    tensor: torch.Tensor,
+    dst: Optional[int] = None,
+    group: Optional[ProcessGroup] = None,
+    tag: int = 0,
+    group_dst: Optional[int] = None,
 ) -> Optional[Work]:
     """
     Send a tensor asynchronously.
@@ -2228,18 +2265,23 @@ def isend(
     .. warning::
         ``tag`` is not supported with the NCCL backend.
 
+    Unlike send, which is blocking, isend allows src == dst rank, i.e. send to self.
+
     Args:
         tensor (Tensor): Tensor to send.
         dst (int): Destination rank on global process group (regardless of ``group`` argument)
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         tag (int, optional): Tag to match send with remote recv
+        group_dst (int, optional): Destination rank on ``group``.  Invalid to specify both ``dst`` and ``group_dst``
 
     Returns:
         A distributed request object.
         None, if not part of the group
 
     """
+    group = _group_or_default_group(group)
+    group_dst = _canonicalize_group_rank(group, dst, group_dst)
     _check_single_tensor(tensor, "tensor")
     if _rank_not_in_group(group):
         _warn_not_in_group("isend")
@@ -2248,13 +2290,7 @@ def isend(
     if tensor.is_complex():
         tensor = torch.view_as_real(tensor)
 
-    if group is None or group is GroupMember.WORLD:
-        pg = _get_default_group()
-    else:
-        pg = group
-        dst = get_group_rank(pg, dst)
-
-    return pg.send([tensor], dst, tag)
+    return group.send([tensor], group_dst, tag)
 
 
 def irecv(
@@ -2262,12 +2298,15 @@ def irecv(
     src: Optional[int] = None,
     group: Optional[ProcessGroup] = None,
     tag: int = 0,
+    group_src: Optional[int] = None,
 ) -> Optional[Work]:
     """
     Receives a tensor asynchronously.
 
     .. warning::
         ``tag`` is not supported with the NCCL backend.
+
+    Unlike recv, which is blocking, irecv allows src == dst rank, i.e. recv from self.
 
     Args:
         tensor (Tensor): Tensor to fill with received data.
@@ -2276,6 +2315,7 @@ def irecv(
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         tag (int, optional): Tag to match recv with remote send
+        group_src (int, optional): Destination rank on ``group``.  Invalid to specify both ``src`` and ``group_src``.
 
     Returns:
         A distributed request object.
@@ -2290,24 +2330,21 @@ def irecv(
     if tensor.is_complex():
         tensor = torch.view_as_real(tensor)
 
-    if group is None or group is GroupMember.WORLD:
-        pg = _get_default_group()
+    group = _group_or_default_group(group)
+    if src is None and group_src is None:
+        return group.recv_anysource([tensor], tag)
     else:
-        pg = group
-
-    if src is None:
-        return pg.recv_anysource([tensor], tag)
-    else:
-        if pg is GroupMember.WORLD:
-            return pg.recv([tensor], src, tag)
-        else:
-            group_src_rank = get_group_rank(pg, src)
-            return pg.recv([tensor], group_src_rank, tag)
+        group_src = _canonicalize_group_rank(group, src, group_src)
+        return group.recv([tensor], group_src, tag)
 
 
 @_exception_logger
 def send(
-    tensor: torch.Tensor, dst: int, group: Optional[ProcessGroup] = None, tag: int = 0
+    tensor: torch.Tensor,
+    dst: Optional[int] = None,
+    group: Optional[ProcessGroup] = None,
+    tag: int = 0,
+    group_dst: Optional[int] = None,
 ) -> None:
     """
     Send a tensor synchronously.
@@ -2322,28 +2359,15 @@ def send(
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         tag (int, optional): Tag to match send with remote recv
+        group_dst (int, optional): Destination rank on ``group``.  Invalid to specify both ``dst`` and ``group_dst``.
 
     """
-    if get_rank() == dst:
-        raise ValueError(
-            "Invalid destination rank: destination rank should not be the same as "
-            "the rank of the current process."
-        )
-
-    _check_single_tensor(tensor, "tensor")
-    if _rank_not_in_group(group):
-        _warn_not_in_group("send")
-        return None
-
-    if tensor.is_complex():
-        tensor = torch.view_as_real(tensor)
-
-    if group is None or group is GroupMember.WORLD:
-        default_pg = _get_default_group()
-        default_pg.send([tensor], dst, tag).wait()
-    else:
-        group_dst_rank = get_group_rank(group, dst)
-        group.send([tensor], group_dst_rank, tag).wait()
+    group = _group_or_default_group(group)
+    group_dst = _canonicalize_group_rank(group, dst, group_dst)
+    _check_not_self_rank(group, group_dst, "destination")
+    work = isend(tensor, group=group, tag=tag, group_dst=group_dst)
+    if work is not None:
+        work.wait()
 
 
 @_exception_logger
@@ -2352,6 +2376,7 @@ def recv(
     src: Optional[int] = None,
     group: Optional[ProcessGroup] = None,
     tag: int = 0,
+    group_src: Optional[int] = None,
 ) -> int:
     """
     Receives a tensor synchronously.
@@ -2366,37 +2391,23 @@ def recv(
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         tag (int, optional): Tag to match recv with remote send
-
+        group_src (int, optional): Destination rank on ``group``.  Invalid to specify both ``src`` and ``group_src``.
     Returns:
         Sender rank
         -1, if not part of the group
 
     """
-    _check_single_tensor(tensor, "tensor")
-    if _rank_not_in_group(group):
-        _warn_not_in_group("recv")
+    work = irecv(tensor, src=src, group=group, tag=tag, group_src=group_src)
+    if work is None:
         return -1
-
-    if tensor.is_complex():
-        tensor = torch.view_as_real(tensor)
-
-    pg = group or _get_default_group()
-
+    work.wait()
     if src is None:
-        work = pg.recv_anysource([tensor], tag)
-        work.wait()
-        src_rank = work._source_rank()
-        if group is None or group is GroupMember.WORLD:
-            return src_rank
-        else:
-            return get_global_rank(pg, src_rank)
-    else:
-        if group is None or group is GroupMember.WORLD:
-            pg.recv([tensor], src, tag).wait()
-        else:
-            group_src_rank = get_group_rank(pg, src)
-            pg.recv([tensor], group_src_rank, tag).wait()
-        return src
+        if group_src is None:
+            group_src = work._source_rank()
+        group = _group_or_default_group(group)
+        _check_not_self_rank(group, group_src, "source")
+        src = get_global_rank(group, group_src)
+    return src
 
 
 class _IllegalWork(Work):
@@ -2813,35 +2824,39 @@ def reduce(tensor, dst, op=ReduceOp.SUM, group=None, async_op=False):
 
 
 def _object_to_tensor(obj, device, group):
-    f = io.BytesIO()
-    _pickler(f).dump(obj)
-    byte_storage = torch.ByteStorage._from_buffer(f.getvalue())  # type: ignore[attr-defined]
-    # Do not replace `torch.ByteTensor` or `torch.LongTensor` with torch.tensor and specifying dtype.
-    # Otherwise, it will casue 100X slowdown.
-    # See: https://github.com/pytorch/pytorch/issues/65696
-    byte_tensor = torch.ByteTensor(byte_storage).to(device)
-    if get_debug_level() == DebugLevel.DETAIL and is_nccl_available():
-        backend = get_backend(group)
-        if backend == Backend.NCCL:
-            hash = torch._C._distributed_c10d._hash_tensors([byte_tensor])
-            logger.warning(
-                "_object_to_tensor size: %s hash value: %s", byte_tensor.numel(), hash
-            )
-    local_size = torch.LongTensor([byte_tensor.numel()]).to(device)
-    return byte_tensor, local_size
+    with _WaitCounter("pytorch.wait_counter.c10d._object_to_tensor").guard():
+        f = io.BytesIO()
+        _pickler(f).dump(obj)
+        byte_storage = torch.ByteStorage._from_buffer(f.getvalue())  # type: ignore[attr-defined]
+        # Do not replace `torch.ByteTensor` or `torch.LongTensor` with torch.tensor and specifying dtype.
+        # Otherwise, it will casue 100X slowdown.
+        # See: https://github.com/pytorch/pytorch/issues/65696
+        byte_tensor = torch.ByteTensor(byte_storage).to(device)
+        if get_debug_level() == DebugLevel.DETAIL and is_nccl_available():
+            backend = get_backend(group)
+            if backend == Backend.NCCL:
+                hash = torch._C._distributed_c10d._hash_tensors([byte_tensor])
+                logger.warning(
+                    "_object_to_tensor size: %s hash value: %s",
+                    byte_tensor.numel(),
+                    hash,
+                )
+        local_size = torch.LongTensor([byte_tensor.numel()]).to(device)
+        return byte_tensor, local_size
 
 
 def _tensor_to_object(tensor, tensor_size, group):
-    if get_debug_level() == DebugLevel.DETAIL and is_nccl_available():
-        backend = get_backend(group)
-        if backend == Backend.NCCL:
-            hash = torch._C._distributed_c10d._hash_tensors([tensor])
-            logger.warning(
-                "_tensor_to_object size: %s hash value: %s", tensor.numel(), hash
-            )
-    tensor = tensor.cpu()
-    buf = tensor.numpy().tobytes()[:tensor_size]
-    return _unpickler(io.BytesIO(buf)).load()
+    with _WaitCounter("pytorch.wait_counter.c10d._tensor_to_object").guard():
+        if get_debug_level() == DebugLevel.DETAIL and is_nccl_available():
+            backend = get_backend(group)
+            if backend == Backend.NCCL:
+                hash = torch._C._distributed_c10d._hash_tensors([tensor])
+                logger.warning(
+                    "_tensor_to_object size: %s hash value: %s", tensor.numel(), hash
+                )
+        tensor = tensor.cpu()
+        buf = tensor.numpy().tobytes()[:tensor_size]
+        return _unpickler(io.BytesIO(buf)).load()
 
 
 @_exception_logger
