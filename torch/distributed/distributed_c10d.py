@@ -468,19 +468,21 @@ class P2POp:
             The type of ``op`` is either ``torch.distributed.isend`` or
             ``torch.distributed.irecv``.
         tensor (Tensor): Tensor to send or receive.
-        peer (int): Destination or source rank.
+        peer (int, optional): Destination or source rank.
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         tag (int, optional): Tag to match send with recv.
+        group_peer (int, optional): Destination or source rank.
     """
 
     def __init__(
         self,
         op: Callable,
         tensor: torch.Tensor,
-        peer: int,
+        peer: Optional[int]=None,
         group: Optional[ProcessGroup] = None,
         tag: int = 0,
+        group_peer: Optional[int]=None
     ):
         """Init."""
         self.op = op
@@ -488,22 +490,27 @@ class P2POp:
         self.peer = peer
         self.group = group
         self.tag = tag
+        self.group_peer = group_peer
 
     def __new__(
         cls,
         op: Callable,
         tensor: torch.Tensor,
-        peer: int,
+        peer: Optional[int] = None,
         group: Optional[ProcessGroup] = None,
         tag: int = 0,
+        group_peer: Optional[int] = None,
     ):
         """Create and return a new instance of the class."""
         _check_op(op)
         _check_single_tensor(tensor, "tensor")
+
+        # TODO- validate peer/group_peer at this time? or when
         return object.__new__(cls)
 
     def __repr__(self):
         my_group_rank = get_rank(self.group)
+        # TODO- make repr handle peer/global ranks
         peer_group_rank = (
             get_group_rank(self.group, self.peer) if self.group else self.peer
         )
