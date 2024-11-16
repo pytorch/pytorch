@@ -1783,7 +1783,7 @@ def _cat_meta(tensors: Sequence[TensorLikeType], dim: int) -> TensorLikeType:
                 torch._check(
                     length == common_length,
                     lambda: f"Sizes of tensors must match except in dimension {dim}. "
-                    f"Expected {common_length} but got {length} for tensor number "
+                    f"Expected {common_length} in dimension {idx} but got {length} for tensor number "
                     f"{tensor_idx} in the list",
                 )
 
