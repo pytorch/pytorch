@@ -684,7 +684,7 @@ class MultiProcessTestCase(TestCase):
         self.file_name = file_name
         self.run_test(test_name, parent_pipe)
 
-    def run_test(self, test_name: str, parent_pipe, destroy_process_group=True) -> None:
+    def run_test(self, test_name: str, parent_pipe) -> None:
         # Start event listener thread.
         signal_recv_pipe, signal_send_pipe = torch.multiprocessing.Pipe(duplex=False)
         event_listener_thread = threading.Thread(
@@ -726,15 +726,6 @@ class MultiProcessTestCase(TestCase):
             event_listener_thread.join()
             # Close pipe after done with test.
             parent_pipe.close()
-
-        if destroy_process_group:
-            try:
-                # Many test cases init a process group but do not destroy it.
-                # Some tests do destroy the pgs, and destroy can't be called twice.
-                # This avoids spewing warnings about improperly shutting down.
-                c10d.destroy_process_group()
-            except (AssertionError, ValueError):
-                pass
 
     def _get_timedout_process_traceback(self) -> None:
         pipes = []
