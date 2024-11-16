@@ -113,12 +113,6 @@ if __name__ == "__main__":
         # no amdsmi is available
         pass
 
-    try:
-        import pyrocm
-        has_pyrom = True
-    except ModuleNotFoundError:
-        pass
-
     gpu_handles = []
 
     kill_now = False
@@ -130,6 +124,7 @@ if __name__ == "__main__":
     gpu_libs_detected = []
     if has_pynvml:
         gpu_libs_detected.append("pynvml")
+        num_of_gpu = pynvml.nvmlDeviceGetCount()
         gpu_handles = [pynvml.nvmlDeviceGetHandleByIndex(i) for i in range(pynvml.nvmlDeviceGetCount())]
     if has_amdsmi:
         gpu_libs_detected.append("amdsmi")
@@ -140,6 +135,7 @@ if __name__ == "__main__":
     info = {
         "log_interval": f"{interval} seconds",
         "gpu":  gpu_libs_detected,
+        "num_of_gpus":len(gpu_handles)，
     }
     print(json.dumps(info))
     while not kill_now:
@@ -161,7 +157,6 @@ if __name__ == "__main__":
                 for idx,handle in enumerate(gpu_handles):
                     stats[r"total_gpu_utilization_{idx}"] = amdsmi.amdsmi_get_gpu_activity(handle)["gfx_activity"]
                     stats[r"total_gpu_mem_utilization_{idx}"] = amdsmi.amdsmi_get_gpu_activity(handle)["umc_activity"]
-
         except Exception as e:
             stats = {
                 "time": datetime.datetime.now(timezone.utc).isoformat("T") + "Z",
