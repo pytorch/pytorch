@@ -263,7 +263,8 @@ print(torch.xpu.device_count())
         event1.synchronize()
         self.assertTrue(event1.query())
         c_xpu = a_xpu + b_xpu
-        event2.record(stream)
+        # Here intendionly records another stream.
+        event2.record()
         event2.synchronize()
         self.assertTrue(event2.query())
         self.assertNotEqual(event1.event_id, event2.event_id)
