@@ -297,7 +297,7 @@ runs:
         cat test/**/*_toprint.log || true
 
     - name: Stop monitoring script
-      if: ${{ always() && !inputs.disable-monitor && steps.monitor-script.outputs.monitor-script-pid }}
+      if: ${{ always() && steps.monitor-script.outputs.monitor-script-pid }}
       shell: bash
       continue-on-error: true
       env:
