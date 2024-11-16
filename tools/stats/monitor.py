@@ -120,11 +120,17 @@ if __name__ == "__main__":
         kill_now = True
     signal.signal(signal.SIGTERM, exit_gracefully)
 
+    gpu_libs_detected = []
+    if has_amdsmi:
+        gpu_libs_detected.append("amdsmi")
+    if has_pynvml:
+        gpu_libs_detected.append("pynvml")
+
     num_cpus = psutil.cpu_count()
     # log info
     info = {
         "log_interval": f"{interval} seconds",
-        "gpu": "pynvml" if has_pynvml else "amdsmi",
+        "gpu":  gpu_libs_detected,
     }
 
     print(json.dumps(info))
