@@ -59,6 +59,10 @@ class Allocator:
                         storage_offset=0,
                     )
 
+        # Might be an empty tensor
+        if found_base is None and meta.nelem_in_bytes == 0:
+            found_base = torch.tensor((), dtype=torch.uint8)
+
         # This pointer is not allocated here, segfault !
         if found_base is None:
             log.info("Currently allocated blocks:\n %s", safe_str(self.allocated))
