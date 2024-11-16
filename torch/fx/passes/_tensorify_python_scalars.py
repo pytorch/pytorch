@@ -222,10 +222,11 @@ def tensorify_python_scalars(
                         (torch.SymFloat, torch.SymInt, torch.SymBool),
                     ):
                         for s in dim.node.expr.free_symbols:
+                            name = str(s)
                             if symbol_is_type(
                                 s, SymT.FLOAT
-                            ) and not TensorifyState.should_specialize(s):
-                                TensorifyState.specialize(str(s))
+                            ) and not TensorifyState.should_specialize(name):
+                                TensorifyState.specialize(name)
                                 should_restart = True
 
             # Look for functions to convert
