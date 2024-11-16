@@ -91,7 +91,6 @@ if __name__ == "__main__":
     interval = args.log_interval
     has_pynvml = False
     has_amdsmi = False
-    has_pyrom = False
 
     try:
         import pynvml  # type: ignore[import]
