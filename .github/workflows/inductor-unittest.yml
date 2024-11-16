@@ -4,6 +4,7 @@
 name: inductor-unittest
 
 on:
+  pull_request:
   workflow_call:
   schedule:
     - cron: 29 8 * * * # about 1:29am PDT, for mem leak check and rerun disabled tests.
@@ -51,6 +52,7 @@ jobs:
       build-environment: linux-focal-cuda12.1-py3.10-gcc9-sm86
       docker-image: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-inductor-build.outputs.test-matrix }}
+      disable-monitor: False
     secrets: inherit
 
   linux-focal-cuda12_1-py3_12-gcc9-inductor-build:
@@ -77,6 +79,7 @@ jobs:
       build-environment: linux-focal-cuda12.1-py3.12-gcc9-sm86
       docker-image: ${{ needs.linux-focal-cuda12_1-py3_12-gcc9-inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-cuda12_1-py3_12-gcc9-inductor-build.outputs.test-matrix }}
+      disable-monitor: False
     secrets: inherit
 
   linux-jammy-cpu-py3_12-inductor-halide-build:
@@ -101,6 +104,7 @@ jobs:
       build-environment: linux-jammy-py3.12-gcc11
       docker-image: ${{ needs.linux-jammy-cpu-py3_12-inductor-halide-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-cpu-py3_12-inductor-halide-build.outputs.test-matrix }}
+      disable-monitor: False
     secrets: inherit
 
   linux-jammy-cpu-py3_12-inductor-triton-cpu-build:
@@ -124,6 +128,7 @@ jobs:
       build-environment: linux-jammy-py3.12-gcc11
       docker-image: ${{ needs.linux-jammy-cpu-py3_12-inductor-triton-cpu-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-cpu-py3_12-inductor-triton-cpu-build.outputs.test-matrix }}
+      disable-monitor: False
 
   linux-jammy-cpu-py3_9-gcc11-inductor-build:
     name: linux-jammy-cpu-py3.9-gcc11-inductor
@@ -150,4 +155,5 @@ jobs:
       build-environment: linux-jammy-py3.9-gcc11-build
       docker-image: ${{ needs.linux-jammy-cpu-py3_9-gcc11-inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-cpu-py3_9-gcc11-inductor-build.outputs.test-matrix }}
+      disable-monitor: False
     secrets: inherit
