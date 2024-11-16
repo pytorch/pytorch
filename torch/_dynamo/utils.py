@@ -2202,9 +2202,7 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
         # no matter it's lazy module or not, we should copy to fake mode.
         nnmodule = deepcopy_to_fake_tensor(nnmodule, tx.fake_mode)
 
-    if node.name in ["interpolate", "is_integer", "wrapped_gradient"] or any(
-        isinstance(a, complex) for a in args
-    ):
+    if node.name in ["interpolate", "is_integer", "wrapped_gradient"]:
         # We need to specialize symfloats for now. Eventually we should do a tensorify pass in dynamo.
         args = tuple(
             float(arg)
