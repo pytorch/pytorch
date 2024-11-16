@@ -791,7 +791,7 @@ def _check_graph_equivalence(x: torch.nn.Module, y: torch.nn.Module):
 
     assert isinstance(x.graph, torch.fx.Graph)
     assert isinstance(y.graph, torch.fx.Graph)
-    assert graph_dump(x.graph) == graph_dump(y.graph)
+    return graph_dump(x.graph) == graph_dump(y.graph)
 
 
 def _add_spec(gm: torch.nn.Module, spec) -> str:
