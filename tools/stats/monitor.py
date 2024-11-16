@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import argparse
 import datetime
 import json
 import signal
@@ -32,7 +31,10 @@ def get_per_process_cpu_info() -> list[dict[str, Any]]:
         info = {
             "pid": p.pid,
             "cmd": " ".join(p.cmdline()),
+            "cpu_percent": p.cpu_percent(),
+            "rss_memory": p.memory_info().rss,
         }
+
         # https://psutil.readthedocs.io/en/latest/index.html?highlight=memory_full_info
         # requires higher user privileges and could throw AccessDenied error, i.e. mac
         try:
@@ -50,6 +52,7 @@ def get_per_process_cpu_info() -> list[dict[str, Any]]:
         per_process_info.append(info)
     return per_process_info
 
+
 def get_per_process_gpu_info(handle: Any) -> list[dict[str, Any]]:
     processes = pynvml.nvmlDeviceGetComputeRunningProcesses(handle)
     per_process_info = []
@@ -57,6 +60,7 @@ def get_per_process_gpu_info(handle: Any) -> list[dict[str, Any]]:
         info = {"pid": p.pid, "gpu_memory": p.usedGpuMemory}
         per_process_info.append(info)
     return per_process_info
+
 
 def rocm_get_per_process_gpu_info(handle: Any) -> list[dict[str, Any]]:
     processes = amdsmi.amdsmi_get_gpu_process_list(handle)
@@ -75,52 +79,40 @@ def rocm_get_per_process_gpu_info(handle: Any) -> list[dict[str, Any]]:
         per_process_info.append(info)
     return per_process_info
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=" Test Utilization Monitoring")
-    args = parser.parse_args()
-
-    parser.add_argument(
-        "--log-interval",
-        type=int,
-        default=10,
-        help="set time interval for logging utilization data, default is 10 seconds",
-    )
-    args = parser.parse_args()
-    return args
 
 if __name__ == "__main__":
-    args = parse_args()
-    interval = args.log_interval
-    # try import pynvml for Nvidia Gpu
-    has_pynvml = False
+    handle = None
     try:
         import pynvml  # type: ignore[import]
+
         try:
             pynvml.nvmlInit()
-            has_pynvml = True
+            handle = pynvml.nvmlDeviceGetHandleByIndex(0)
         except pynvml.NVMLError:
             pass
     except ModuleNotFoundError:
+        # no pynvml avaliable, probably because not cuda
         pass
+    try:
+        import amdsmi  # type: ignore[import]
+
+        try:
+            amdsmi.amdsmi_init()
+            amdsmi_handle = amdsmi.amdsmi_get_processor_handles()[0]
+        except amdsmi.AmdSmiException:
+            pass
+    except ModuleNotFoundError:
+        # no amdsmi is available
+        pass
+
     kill_now = False
 
     def exit_gracefully(*args: Any) -> None:
         global kill_now
         kill_now = True
+
     signal.signal(signal.SIGTERM, exit_gracefully)
 
-    num_cpus = psutil.cpu_count()
-    num_gpus = None
-    if has_pynvml:
-        num_gpus = pynvml.nvmlDeviceGetCount()
-    # log info
-    info = {
-        "log_interval": f"{interval} seconds",
-        "gpu": "pynvml" if has_pynvml else "",
-        "num_of_gpu":num_gpus,
-        "num_of_cpu": num_cpus,
-    }
-    print(json.dumps(info))
     while not kill_now:
         try:
             stats = {
@@ -128,21 +120,22 @@ if __name__ == "__main__":
                 "total_cpu_percent": psutil.cpu_percent(),
                 "per_process_cpu_info": get_per_process_cpu_info(),
             }
-            if has_pynvml:
+            if handle is not None:
+                stats["per_process_gpu_info"] = get_per_process_gpu_info(handle)
                 # https://docs.nvidia.com/deploy/nvml-api/structnvmlUtilization__t.html
-                gpu_count = pynvml.nvmlDeviceGetCount()
-                stats["num_of_gpu"]=gpu_count
-                # Iterate over the available GPUs
-                for i in (gpu_count):
-                    # Get the handle to the current GPU
-                    gpu_handle = pynvml.nvmlDeviceGetHandleByIndex(i)
-                    gpu_utilization = pynvml.nvmlDeviceGetUtilizationRates(gpu_handle)
-                    # Get the rangemessage for the current GPU
-                    stats[f"total_gpu_utilization_{i}"] = gpu_utilization.gpu
-                    stats[f"total_gpu_mem_utilization_{i}"] = gpu_utilization.memory
-                # Run the nvidia-smi command and capture its output
-                output = subprocess.check_output(['nvidia-smi', '--query-gpu=utilization.gpu', '--format=csv,noheader,nounits'])# Decode the output from bytes to string
-                output_str = output.decode('utf-8')
+                gpu_utilization = pynvml.nvmlDeviceGetUtilizationRates(handle)
+                stats["total_gpu_utilization"] = gpu_utilization.gpu
+                stats["total_gpu_mem_utilization"] = gpu_utilization.memory
+            if amdsmi_handle is not None:
+                stats["per_process_gpu_info"] = rocm_get_per_process_gpu_info(
+                    amdsmi_handle
+                )
+                stats["total_gpu_utilization"] = amdsmi.amdsmi_get_gpu_activity(
+                    amdsmi_handle
+                )["gfx_activity"]
+                stats["total_gpu_mem_utilization"] = amdsmi.amdsmi_get_gpu_activity(
+                    amdsmi_handle
+                )["umc_activity"]
         except Exception as e:
             stats = {
                 "time": datetime.datetime.now(timezone.utc).isoformat("T") + "Z",
@@ -150,4 +143,4 @@ if __name__ == "__main__":
             }
         finally:
             print(json.dumps(stats))
-            time.sleep(interval)
+            time.sleep(1)
