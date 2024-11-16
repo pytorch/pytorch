@@ -2838,6 +2838,10 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
           .def(
               "perform_nocolor_split",
               &::c10d::ProcessGroupNCCL::performNocolorSplit)
+          .def("register_mem_pool", &::c10d::ProcessGroupNCCL::registerMemPool)
+          .def(
+              "deregister_mem_pool",
+              &::c10d::ProcessGroupNCCL::deregisterMemPool)
           .def(
               "abort",
               &::c10d::ProcessGroupNCCL::abort,
