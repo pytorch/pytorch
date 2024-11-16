@@ -161,8 +161,8 @@ class TestCase(InductorTestCase):
             op_str = override
 
         # Get the number of args for the op.
-        signature = get_signature_for_torch_op(op)
-        num_args = len(signature[0].parameters)
+        signatures = get_signature_for_torch_op(op)
+        num_args = len(signatures[0].parameters)
 
         # Test codegen and check for casts.
         inps = (torch.rand((32, 32), device=GPU_TYPE, dtype=input_dtype),) * num_args
