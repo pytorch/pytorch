@@ -643,7 +643,6 @@ def set_stream(stream: Stream):
 def _parse_visible_devices() -> Union[List[int], List[str]]:
     r"""Parse CUDA_VISIBLE_DEVICES environment variable."""
     var = os.getenv("CUDA_VISIBLE_DEVICES")
-    max_length = None
 
     if torch.version.hip:
         hip_devices = os.getenv("HIP_VISIBLE_DEVICES")
@@ -653,15 +652,18 @@ def _parse_visible_devices() -> Union[List[int], List[str]]:
             # Mostly required for ROCm to make sure ROCr visible devices
             # is respected, this ensures we do not return a list of devices
             # that exceeds the total available supplied via ROCR_VISIBLE_DEVICES
-            max_length = len(rocr_devices.split(","))
+            var = rocr_devices
 
         if hip_devices is not None:
-            var = hip_devices
-        else:
-            # If rocr visible devices is set without HIP_VISIBLE_DEVICES
-            # Then form an ordered list of max_length 0,1,...
+            # If ROCr devices have been set, the hip visible devices would
+            # be a subset of those. HIP_VISIBLE_DEVICES can only contain
+            # integer indices so we can use the ROCr visible devices as a key
             if rocr_devices is not None:
-                var = ",".join(str(i) for i in range(max_length))
+                hip_device_list = [int(dev) for dev in hip_devices.split(",")]
+                rocr_device_list = rocr_devices.split(",")
+                var = ",".join(rocr_device_list[dev] for dev in hip_device_list)
+            else:
+                var = hip_devices
 
     if var is None:
         return list(range(64))
@@ -697,8 +699,6 @@ def _parse_visible_devices() -> Union[List[int], List[str]]:
     # which makes `1gpu2,2ampere` is equivalent to `1,2`
     rc: List[int] = []
     for elem in var.split(","):
-        if len(rc) == max_length:
-            break
         x = _strtoul(elem.strip())
         # Repeated ordinal results in empty set
         if x in rc:
