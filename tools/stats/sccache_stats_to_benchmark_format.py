@@ -1,7 +1,9 @@
-from pathlib import Path
-from typing import Any, Dict
 import glob
 import json
+import os
+from pathlib import Path
+from typing import Any, Dict
+
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -50,7 +52,9 @@ def main() -> None:
                     },
                 }
             )
-    with open(REPO_ROOT / "test" / "test-reports" / "sccache-stats.json", "w") as f:
+    output_file = REPO_ROOT / "test" / "test-reports" / "sccache-stats.json"
+    os.makedirs(output_file.parent, exist_ok=True)
+    with open(output_file, "w") as f:
         json.dump(records, f)
 
 
