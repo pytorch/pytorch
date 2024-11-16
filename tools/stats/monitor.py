@@ -91,7 +91,7 @@ if __name__ == "__main__":
     interval = args.log_interval
     has_pynvml = False
     has_amdsmi = False
-
+    has_pyrom = False
 
     try:
         import pynvml  # type: ignore[import]
@@ -114,6 +114,14 @@ if __name__ == "__main__":
         # no amdsmi is available
         pass
 
+    try:
+        import pyrocm
+        has_pyrom = True
+    except ModuleNotFoundError:
+        pass
+
+    gpu_handles = []
+
     kill_now = False
     def exit_gracefully(*args: Any) -> None:
         global kill_now
@@ -121,10 +129,12 @@ if __name__ == "__main__":
     signal.signal(signal.SIGTERM, exit_gracefully)
 
     gpu_libs_detected = []
-    if has_amdsmi:
-        gpu_libs_detected.append("amdsmi")
     if has_pynvml:
         gpu_libs_detected.append("pynvml")
+        gpu_handles = [pynvml.nvmlDeviceGetHandleByIndex(i) for i in range(pynvml.nvmlDeviceGetCount())]
+    if has_amdsmi:
+        gpu_libs_detected.append("amdsmi")
+        gpu_handles  = amdsmi.amdsmi_get_processor_handles()
 
     num_cpus = psutil.cpu_count()
     # log info
@@ -142,22 +152,16 @@ if __name__ == "__main__":
                 "per_process_cpu_info": get_per_process_cpu_info(),
             }
             if has_pynvml:
-                # https://docs.nvidia.com/deploy/nvml-api/structnvmlUtilization__t.html
-                gpu_count = pynvml.nvmlDeviceGetCount()
-                stats["num_of_gpu"]=gpu_count
                 # Iterate over the available GPUs
-                for i in (gpu_count):
-                    # Get the handle to the current GPU
-                    gpu_handle = pynvml.nvmlDeviceGetHandleByIndex(i)
+                for idx,gpu_handle in enumerate(gpu_handles):
                     gpu_utilization = pynvml.nvmlDeviceGetUtilizationRates(gpu_handle)
-                    # Get the rangemessage for the current GPU
-                    stats[f"total_gpu_utilization_{i}"] = gpu_utilization.gpu
-                    stats[f"total_gpu_mem_utilization_{i}"] = gpu_utilization.memory
+                    stats[f"total_gpu_utilization_{idx}"] = gpu_utilization.gpu
+                    stats[f"total_gpu_mem_utilization_{idx}"] = gpu_utilization.memory
             if has_amdsmi:
-                amd_handles  = amdsmi.amdsmi_get_processor_handles()
-                for handle in amd_handles:
-                    stats["total_gpu_utilization"] = amdsmi.amdsmi_get_gpu_activity(handle)["gfx_activity"]
-                    stats["total_gpu_mem_utilization"] = amdsmi.amdsmi_get_gpu_activity(handle)["umc_activity"]
+                for idx,handle in enumerate(gpu_handles):
+                    stats[r"total_gpu_utilization_{idx}"] = amdsmi.amdsmi_get_gpu_activity(handle)["gfx_activity"]
+                    stats[r"total_gpu_mem_utilization_{idx}"] = amdsmi.amdsmi_get_gpu_activity(handle)["umc_activity"]
+
         except Exception as e:
             stats = {
                 "time": datetime.datetime.now(timezone.utc).isoformat("T") + "Z",
