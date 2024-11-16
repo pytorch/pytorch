@@ -94,7 +94,7 @@ jobs:
         shell: bash
         continue-on-error: true
         run: |
-          python3 -m pip install psutil==5.9.1 nvidia-ml-py==11.525.84
+          python3 -m pip install psutil==5.9.1 amdsmi=6.2.4
           python3 -m tools.stats.monitor > usage_log.txt 2>&1 &
           echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
 
