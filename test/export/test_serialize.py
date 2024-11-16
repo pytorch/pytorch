@@ -32,15 +32,16 @@ from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.export import Dim, export_for_training, load, save
 from torch.fx.experimental.symbolic_shapes import is_concrete_int, ValueRanges
 from torch.testing._internal.common_utils import (
+    GPU_TYPE,
     instantiate_parametrized_tests,
     IS_WINDOWS,
     parametrize,
+    requires_gpu,
     run_tests,
     TemporaryFileName,
     TestCase,
 )
 from torch.testing._internal.torchbind_impls import init_torchbind_implementations
-from torch.testing._internal.inductor_utils import GPU_TYPE, requires_gpu
 
 
 def get_filtered_export_db_tests():
@@ -1044,7 +1045,7 @@ def forward(self, x):
         f = Module()
         self.check_graph(f, (torch.tensor([1, 1]),))
 
-    @requires_gpu()
+    @requires_gpu
     def test_device(self) -> None:
         class MyModule(torch.nn.Module):
             def __init__(self) -> None:

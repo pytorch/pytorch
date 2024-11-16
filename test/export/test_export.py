@@ -61,6 +61,7 @@ from torch.testing._internal.common_cuda import (
 from torch.testing._internal.common_device_type import onlyCPU, onlyCUDA
 from torch.testing._internal.common_utils import (
     find_library_location,
+    GPU_TYPE,
     IS_FBCODE,
     IS_MACOS,
     IS_SANDCASTLE,
@@ -98,8 +99,6 @@ except ImportError:
 # will invalidate the patch.
 from torch.export import export
 
-
-GPU_TYPE = "xpu" if torch.xpu.is_available() else GPU_TYPE
 
 torch.library.define("testlib::returns_tensor_symint", "(Tensor x) -> (Tensor, SymInt)")
 torch.library.define(

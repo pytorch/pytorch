@@ -10,8 +10,12 @@ from torch._dynamo.test_case import TestCase
 from torch._export.converter import TS2EPConverter
 from torch.export import ExportedProgram
 from torch.testing._internal.common_quantized import override_quantized_engine
-from torch.testing._internal.common_utils import IS_WINDOWS, run_tests
-from torch.testing._internal.inductor_utils import GPU_TYPE, requires_gpu
+from torch.testing._internal.common_utils import (
+    GPU_TYPE,
+    IS_WINDOWS,
+    requires_gpu,
+    run_tests,
+)
 from torch.testing._internal.torchbind_impls import (
     _empty_tensor_queue,
     init_torchbind_implementations,
@@ -375,7 +379,7 @@ class TestConverter(TestCase):
         inp = (torch.rand(3, 4),)
         self._check_equal_ts_ep_converter(Module(), inp)
 
-    @requires_gpu()
+    @requires_gpu
     def test_prim_device_gpu(self):
         class Module(torch.nn.Module):
             def forward(self, x):

@@ -46,11 +46,13 @@ from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.fx.passes.infra.partitioner import Partition
 from torch.fx.passes.operator_support import OperatorSupport
 from torch.library import _scoped_library, impl
-from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import (
+    GPU_TYPE,
     IS_WINDOWS,
+    requires_gpu,
     run_tests,
     skipIfTorchDynamo,
+    skipIfXpu,
     TestCase,
 )
 from torch.testing._internal.torchbind_impls import init_torchbind_implementations
@@ -1180,7 +1182,8 @@ default](args = (%x, %b_state), kwargs = {})
     return (b_state, getitem_3, getitem_4)""",
             )
 
-    @unittest.skipIf(not TEST_CUDA, "requires cuda")
+    @skipIfXpu(msg="_thnn_fused_gru_cell not implemented for XPU yet")
+    @requires_gpu
     def test_move_to_device_pass(self):
         class Model(torch.nn.Module):
             def __init__(self, size=4, h_dim=10):
@@ -1191,16 +1194,16 @@ default](args = (%x, %b_state), kwargs = {})
                 _, states = self.rnn(x)
                 return states
 
-        # move the exported program from cpu to cuda:0
+        # move the exported program from cpu to gpu:0
         mod = Model()
         example_inputs = (torch.rand(1, 10, 4),)
         ep = export(mod, example_inputs)
-        location = torch.device("cuda:0")
+        location = torch.device(f"{GPU_TYPE}:0")
         ep = move_to_device_pass(ep, location=location)
         gm = ep.module()
-        test_inputs = (torch.rand(1, 10, 4).to("cuda:0"),)
+        test_inputs = (torch.rand(1, 10, 4).to(f"{GPU_TYPE}:0"),)
         outputs = gm(*test_inputs)
-        self.assertEqual(outputs.device, torch.device("cuda:0"))
+        self.assertEqual(outputs.device, torch.device(f"{GPU_TYPE}:0"))
         # move it back to cpu
         location = "cpu"
         ep = move_to_device_pass(ep, location=location)
@@ -1208,13 +1211,13 @@ default](args = (%x, %b_state), kwargs = {})
         test_inputs = (torch.rand(1, 10, 4).to("cpu"),)
         outputs = gm(*test_inputs)
         self.assertEqual(outputs.device, torch.device("cpu"))
-        # move it to cuda:0 again
-        location = {"cpu": "cuda:0"}
+        # move it to gpu:0 again
+        location = {"cpu": f"{GPU_TYPE}:0"}
         ep = move_to_device_pass(ep, location=location)
         gm = ep.module()
-        test_inputs = (torch.rand(1, 10, 4).to("cuda:0"),)
+        test_inputs = (torch.rand(1, 10, 4).to(f"{GPU_TYPE}:0"),)
         outputs = gm(*test_inputs)
-        self.assertEqual(outputs.device, torch.device("cuda:0"))
+        self.assertEqual(outputs.device, torch.device(f"{GPU_TYPE}:0"))
 
 
 if __name__ == "__main__":

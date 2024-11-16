@@ -1517,7 +1517,11 @@ if TEST_CUDA and 'NUM_PARALLEL_PROCS' in os.environ:
     # other libraries take up about a little under 1 GB of space per process
     torch.cuda.set_per_process_memory_fraction(round((gb_available - num_procs * .85) / gb_available / num_procs, 2))
 
+
+GPU_TYPE = "xpu" if torch.xpu.is_available() else "cuda"
 requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "Requires CUDA")
+requires_gpu = unittest.skipUnless(torch.cuda.is_available()
+                or torch.xpu.is_available(), "Requires GPU")
 
 def skipIfCrossRef(fn):
     @wraps(fn)
