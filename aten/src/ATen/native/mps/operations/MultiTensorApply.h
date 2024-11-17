@@ -3,8 +3,7 @@
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/mps/operations/FusedOptimizerOps.h>
 
-namespace at::native {
-namespace mps {
+namespace at::native::mps {
 
 static constexpr int64_t kChunkSize = 65536;
 static constexpr int64_t kmaxThreadGroups = 32;
@@ -278,5 +277,4 @@ static void multi_tensor_apply_for_fused_optimizer(
   });
 }
 
-} // namespace mps
-} // namespace at::native
+} // namespace at::native::mps
