@@ -1003,6 +1003,14 @@ class ChromiumEventLogger:
         # TODO: log to init/id tlparse after I add support for it
         log.info("ChromiumEventLogger initialized with id %s", self.id_)
 
+    def try_add_event_data(self, event_name: str, **kwargs) -> None:
+        """
+        Same as add_event_data, but will silently not log if the event isn't in the stack.
+        """
+        if event_name not in self.get_stack():
+            return
+        self.add_event_data(event_name, **kwargs)
+
     def add_event_data(
         self,
         event_name: str,
