@@ -34,33 +34,69 @@ class DynamoExporterTest(common_utils.TestCase):
         onnx_testing.assert_onnx_program(onnx_program, atol=1e-3, rtol=1)
 
     def test_onnx_export_controlflow(self):
-        class Bad1Fixed(torch.nn.Module):
+        class CondModel(torch.nn.Module):
             def forward(self, x):
                 def true_fn(x):
-                    return torch.sin(x)
+                    return x + 1.0
 
                 def false_fn(x):
-                    return torch.cos(x)
+                    return x - 42.0
 
                 y = torch.cond(x.sum() > 0, true_fn, false_fn, [x])
                 return y
 
-        x = torch.rand(5, 3)
-        model = Bad1Fixed()
-        assert torch.export.export(model, (x,))
         onnx_program = torch.onnx.export(
-            model,
-            (x,),
-            input_names=["x"],
-            opset_version=18,
+            CondModel(),
+            (torch.tensor([1, 2]),),
             dynamo=True,
             fallback=False,
         )
-        proto = onnx_program.model_proto
-        fct_names = {f.name for f in proto.functions}
-        self.assertIn("true_graph_0", fct_names)
-        self.assertIn("false_graph_0", fct_names)
-        onnx_testing.assert_onnx_program(onnx_program, atol=1e-3, rtol=1)
+        onnx_model = onnx_program.model
+        # TODO: Preserve the subgraph names
+        self.assertIn("true_graph_0", onnx_model.functions)
+        self.assertIn("false_graph_0", onnx_model.functions)
+        onnx_testing.assert_onnx_program(onnx_program)
+
+    def test_onnx_export_nested_controlflow_and_nested_weights(self):
+        class Submodule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                # Nested weight
+                self.weight = torch.nn.Parameter(torch.tensor([100.0]))
+
+            def forward(self, x):
+                def true_fn(x):
+                    return x * self.weight
+
+                def false_fn(x):
+                    return x / self.weight
+
+                y = torch.cond(x.sum() <= 0, true_fn, false_fn, [x])
+                return y
+
+        class CondModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.submodule = Submodule()
+                self.weight = torch.nn.Parameter(torch.tensor([42.0]))
+
+            def forward(self, x):
+                def true_fn(x):
+                    return self.submodule(x)
+
+                def false_fn(x):
+                    return x - self.weight
+
+                y = torch.cond(x.sum() > 0, true_fn, false_fn, [x])
+                return y
+
+        onnx_program = torch.onnx.export(
+            CondModel(),
+            (torch.tensor([1, 2]),),
+            dynamo=True,
+            fallback=False,
+        )
+        onnx_testing.assert_onnx_program(onnx_program)
 
     def test_constant_complex(self):
         class MulModule(torch.nn.Module):
