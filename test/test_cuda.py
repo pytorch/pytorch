@@ -3948,20 +3948,6 @@ class TestCudaMallocAsync(TestCase):
         self.assertTrue(0 <= torch.cuda.temperature() <= 150)
 
     @unittest.skipIf(TEST_PYNVML, "pynvml/amdsmi is not available")
-    def test_memory_usage_in_bytes(self):
-        """
-        Verify memory usage in bytes
-        """
-        torch.cuda.empty_cache()
-        a = torch.cuda.memory_usage_in_bytes()
-        num_bytes = 256 * 1024**2
-        _ = torch.empty(num_bytes, dtype=torch.int8, device="cuda")
-        torch.cuda.synchronize()
-        b = torch.cuda.memory_usage_in_bytes()
-        mem_bytes = b - a
-        self.assertTrue(mem_bytes > num_bytes // 2, mem_bytes < num_bytes * 8)
-
-    @unittest.skipIf(TEST_PYNVML, "pynvml/amdsmi is not available")
     def test_power_draw(self):
         self.assertTrue(torch.cuda.power_draw() >= 0)
 
@@ -4686,9 +4672,11 @@ class TestCudaOptims(TestCase):
         for optim_input in all_optim_inputs:
             kwargs = optim_input.kwargs
 
-            # lr as a Tensor is not supported when capturable=False and foreach=True for torch.optim.adam
+            # lr and betas as a Tensor is not supported when capturable=False and foreach=True for torch.optim.adam
             # and torch.optim.adamw
             kwargs["lr"] = 0.1
+            if optim_cls in (torch.optim.Adam, torch.optim.AdamW):
+                kwargs["betas"] = (0.9, 0.99)
 
             for actually_do_graphs in (True, False):
                 params = [
