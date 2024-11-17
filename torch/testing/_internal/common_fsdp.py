@@ -1217,7 +1217,7 @@ class FSDPTest(MultiProcessTestCase):
         dist.barrier(device_ids=device_ids)
 
         torch._dynamo.reset()
-        self.run_test(test_name, pipe)
+        self.run_test(test_name, pipe, destroy_process_group=False)
         torch._dynamo.reset()
 
         dist.barrier(device_ids=device_ids)
