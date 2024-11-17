@@ -49,6 +49,7 @@ from .ir import (
     DtypeView,
     ExpandView,
     IndexingConstant,
+    IRNode,
     is_triton,
     ops_wrapper,
     PermuteView,
@@ -225,7 +226,6 @@ def get_promoted_dtype(*args, type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KI
         if isinstance(inp, (Number, sympy.Basic)):
             return inp
         else:
-            assert hasattr(inp, "get_dtype")
             dim = len(inp.get_size())
             # construct a tmp tensor to feed into torch.result_type
             return torch.zeros([1] * dim, dtype=inp.get_dtype())
@@ -513,8 +513,10 @@ def make_pointwise(
     allow_alpha=False,
     triton_fallback=None,
 ):
-    def inner(*inputs: List[TensorBox], alpha=None):
-        if triton_fallback is not None and any(map(is_triton, inputs)):
+    def inner(*inputs: TensorBox, alpha=None):
+        if triton_fallback is not None and any(
+            isinstance(inp, IRNode) and is_triton(inp) for inp in inputs
+        ):
             assert not allow_alpha  # not implemented
             return triton_fallback(*inputs)
 
