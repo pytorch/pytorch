@@ -93,7 +93,8 @@ class TORCH_API DistAutogradContext {
 
   // Set the appropriate graph task for the backward pass. Can be called only
   // once.
-  void setGraphTask(std::shared_ptr<torch::autograd::GraphTask> graphTask);
+  void setGraphTask(
+      const std::shared_ptr<torch::autograd::GraphTask>& graphTask);
 
   // Resets the graph task to ensure we can run another distributed backward
   // pass for the same autograd context.

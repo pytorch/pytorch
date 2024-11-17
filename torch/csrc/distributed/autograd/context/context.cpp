@@ -115,7 +115,7 @@ std::shared_ptr<torch::autograd::GraphTask> DistAutogradContext::
 }
 
 void DistAutogradContext::setGraphTask(
-    std::shared_ptr<torch::autograd::GraphTask> graphTask) {
+    const std::shared_ptr<torch::autograd::GraphTask>& graphTask) {
   std::lock_guard<std::mutex> guard(lock_);
   TORCH_INTERNAL_ASSERT(
       !graphTask_,

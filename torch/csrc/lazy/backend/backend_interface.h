@@ -7,7 +7,6 @@
 #include <torch/csrc/lazy/core/lazy_graph_executor.h>
 #include <torch/csrc/lazy/core/shape.h>
 #include <torch/csrc/lazy/core/tensor.h>
-#include <atomic>
 
 namespace torch::lazy {
 
@@ -87,7 +86,7 @@ class TORCH_API BackendImplInterface {
       std::vector<ComputationPtr> instances) const = 0;
 
   virtual std::vector<BackendDataPtr> ExecuteComputation(
-      torch::lazy::ComputationPtr computation,
+      const torch::lazy::ComputationPtr& computation,
       c10::ArrayRef<BackendDataPtr> arguments,
       const BackendDevice& device) const = 0;
 
