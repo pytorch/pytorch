@@ -313,7 +313,7 @@ AT_DISPATCH_CASE(at::ScalarType::{dtype},
 {ufunctors}
 
 {stub_sig.type_defn()};
-{stub_sig.dispatch_decl()};
+{stub_sig.dispatch_decl()}
 
 {stub_sig.kernel_defn()} {{
   AT_DISPATCH_SWITCH(iter.common_dtype(), "{sig.name}",
@@ -386,7 +386,7 @@ def compute_ufunc_cpu(g: NativeFunctionsGroup) -> str:
 
     return f"""
 {stub_sig.type_defn()};
-{stub_sig.dispatch_decl()};
+{stub_sig.dispatch_decl()}
 {stub_sig.dispatch_defn()};
 
 {sig.defn()} {{
@@ -546,6 +546,6 @@ namespace {{
 }} // anonymous namespace
 
 {stub_sig.type_defn()};
-{stub_sig.dispatch_decl()};
+{stub_sig.dispatch_decl()}
 REGISTER_DISPATCH({stub_sig.name}, &{stub_sig.kernel_name})
 """
