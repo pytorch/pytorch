@@ -9,7 +9,7 @@ import operator
 import os
 import warnings
 from collections import defaultdict
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple, Union
 from unittest.mock import patch
 
 import sympy
@@ -4113,6 +4113,7 @@ def max_pool2d_with_indices_backward(
     # we will read this many times, so make sure it is computed
     grad_output.realize_hint()
     gO_stride = grad_output.maybe_get_stride()
+    x_stride: Optional[Sequence[Any]]
     if isinstance(x, TensorBox) and isinstance(x.data.data, Pointwise):  # type: ignore[attr-defined]
         data = x.data.data  # type: ignore[attr-defined]
         x_buffer = ir.ComputedBuffer(
@@ -4127,10 +4128,7 @@ def max_pool2d_with_indices_backward(
         x_buffer.decide_layout()
         x_stride = x_buffer.get_stride()
     else:
-        try:
-            x_stride = x.get_stride()
-        except AttributeError:
-            x_stride = None
+        x_stride = x.maybe_get_stride()
 
     is_channels_last = (x_stride is not None and x_stride[1] == 1) or (
         gO_stride is not None and gO_stride[1] == 1
