@@ -143,7 +143,7 @@ class InterpreterModule(torch.nn.Module):
             # GraphModule codegen in this instance.
             # Patch the codegened forward to run with this InterpreterModule,
             # so attribute accesses, etc. are on this module instead.
-            return type(self.graph_module).forward(self, *args, **kwargs)  # type: ignore[operator]
+            return type(self.graph_module).forward(self, *args, **kwargs)  # type: ignore[operator, union-attr]
         else:
             if kwargs:
                 # Handle **kwargs. FX only natively supports positional
@@ -804,8 +804,8 @@ def _add_spec(gm: torch.nn.Module, spec) -> str:
 
 
 def _generate_flatten(gm: torch.nn.Module, node) -> torch.fx.Node:
-    flatten = gm.graph.call_function(pytree.tree_flatten, (node,))
-    getitem_0 = gm.graph.call_function(operator.getitem, (flatten, 0))
+    flatten = gm.graph.call_function(pytree.tree_flatten, (node,))  # type: ignore[operator, union-attr]
+    getitem_0 = gm.graph.call_function(operator.getitem, (flatten, 0))  # type: ignore[operator, union-attr]
     return getitem_0
 
 
@@ -899,7 +899,7 @@ class _ModuleFrame:
 
         if module is not None:
             self.module = module
-            self.ivals = module.ivals if hasattr(module, "ivals") else {}
+            self.ivals = module.ivals if hasattr(module, "ivals") else {}  # type: ignore[var-annotated]
         else:
             self.module = InterpreterModule(torch.fx.Graph())
             self.ivals = parent.ivals
@@ -1027,7 +1027,7 @@ class _ModuleFrame:
         # should not be deduplicated in the first place.
         args = pytree.tree_map_only(torch.fx.Node, self.remap_input, x.args)
         kwargs = pytree.tree_map_only(torch.fx.Node, self.remap_input, x.kwargs)
-        node = self.graph.call_function(x.target, args, kwargs)
+        node = self.graph.call_function(x.target, args, kwargs)  # type: ignore[operator, union-attr]
         node.meta = copy.copy(x.meta)
         self.node_map[x] = node
         return node
@@ -1070,7 +1070,7 @@ class _ModuleFrame:
         elif self.module_call_graph.get(self.fqn) is not None:
             # x is an ival that is not in placeholders, so create a
             # get_attr node corresponding to attribute __ival__x
-            return self.ivals.read(self.fqn, self.graph, x)
+            return self.ivals.read(self.fqn, self.graph, x)  # type: ignore[operator, union-attr]
         else:
             raise RuntimeError(
                 f"Could not run remap_input() on op type: {x.op} for node {x}"
@@ -1524,11 +1524,11 @@ def _sink_params(
         return module_id_to_inputs_removed
 
     graph = module.graph
-    inputs = list(filter(lambda n: n.op == "placeholder", graph.nodes))  # type: ignore[union-attr, arg-type]
+    inputs = list(filter(lambda n: n.op == "placeholder", graph.nodes))  # type: ignore[arg-type, union-attr, var-annotated]
     the_last_input = inputs[-1]
 
     # Also remove from call_module nodes
-    call_module_nodes = filter(lambda n: n.op == "call_module", graph.nodes)  # type: ignore[union-attr, arg-type]
+    call_module_nodes = filter(lambda n: n.op == "call_module", graph.nodes)  # type: ignore[arg-type, union-attr, var-annotated]
     for node in call_module_nodes:
         submodule = _get_attr(module, node.target)
         # remove placeholder from call_module node arguments, only if we've

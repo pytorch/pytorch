@@ -1073,12 +1073,12 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
 
     def transform(self):
         result_gm = super().transform()
-        if "dynamo_flat_name_to_original_fqn" in self.module.meta:
-            result_gm.meta["dynamo_flat_name_to_original_fqn"] = self.module.meta[
-                "dynamo_flat_name_to_original_fqn"
+        if "dynamo_flat_name_to_original_fqn" in self.module.meta:  # type: ignore[operator]
+            result_gm.meta["dynamo_flat_name_to_original_fqn"] = self.module.meta[  # type: ignore[index]
+                "dynamo_flat_name_to_original_fqn"  # type: ignore[index]
             ]
-        if "dynamo_compile_id" in self.module.meta:
-            result_gm.meta["dynamo_compile_id"] = self.module.meta["dynamo_compile_id"]
+        if "dynamo_compile_id" in self.module.meta:  # type: ignore[operator]
+            result_gm.meta["dynamo_compile_id"] = self.module.meta["dynamo_compile_id"]  # type: ignore[index]
         return result_gm
 
 
