@@ -97,7 +97,7 @@ class SymmetricMemoryTest(MultiProcessTestCase):
 
         buf = symm_mem.get_buffer(0, (symm_mem.buffer_size // 4,), torch.float32)
         self.assertEqual(buf.storage_offset(), 0)
-        self.assertEqual(buf.storage().size(), symm_mem.buffer_size // 4)
+        self.assertEqual(buf.untyped_storage().size(), symm_mem.buffer_size)
 
         if symm_mem.rank == 0:
             symm_mem.wait_signal(src_rank=1)
@@ -168,16 +168,8 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         t = _SymmetricMemory.empty_strided_p2p(*alloc_args, alloc_id=42)
         self.assertEqual(t.data_ptr(), data_ptr)
 
-        # Verify that get_symmetric_memory would fail if called before
-        # rendezvous.
-        with self.assertRaises(RuntimeError):
-            _SymmetricMemory.get_symmetric_memory(t)
-
-        symm_mem_0 = _SymmetricMemory.rendezvous(t)
-        symm_mem_1 = _SymmetricMemory.get_symmetric_memory(t)
-        self.assertEqual(id(symm_mem_0), id(symm_mem_1))
-
-        self._verify_symmetric_memory(symm_mem_0)
+        symm_mem = _SymmetricMemory.rendezvous(t)
+        self._verify_symmetric_memory(symm_mem)
         dist.destroy_process_group()
 
     @skipIfRocm
@@ -667,6 +659,79 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         self.assertTrue(res.eq(expect).all())
 
         dist.destroy_process_group()
+
+
+@instantiate_parametrized_tests
+@requires_cuda_p2p_access()
+class SubgroupTest(MultiProcessTestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self._spawn_processes()
+
+    @property
+    def world_size(self) -> int:
+        return 4
+
+    @property
+    def device(self) -> torch.device:
+        return torch.device(f"cuda:{self.rank}")
+
+    def _init_process(self):
+        torch.cuda.set_device(self.device)
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend="nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        enable_symm_mem_for_group(dist.group.WORLD.group_name)
+        torch.manual_seed(42 + self.rank)
+
+    @skipIfRocm
+    @skip_if_lt_x_gpu(4)
+    def test_subgroup(self) -> None:
+        self._init_process()
+
+        ranks = list(range(self.world_size))
+        subgroup_0 = dist.new_group(ranks[: len(ranks) // 2])
+        subgroup_1 = dist.new_group(ranks[len(ranks) // 2 :])
+
+        world = dist.group.WORLD
+        subgroup = subgroup_0 if world.rank() < world.size() // 2 else subgroup_1
+        enable_symm_mem_for_group(subgroup.group_name)
+
+        t = _SymmetricMemory.empty_strided_p2p(
+            size=(64,),
+            stride=(1,),
+            dtype=torch.float32,
+            device=self.device,
+        )
+        symm_mem_world = _SymmetricMemory.rendezvous(t, group_name=world.group_name)
+        symm_mem_subgroup = _SymmetricMemory.rendezvous(
+            t, group_name=subgroup.group_name
+        )
+
+        self.assertEqual(symm_mem_world.world_size, world.size())
+        self.assertEqual(symm_mem_world.rank, world.rank())
+        self.assertEqual(symm_mem_subgroup.world_size, world.size() // 2)
+        self.assertEqual(symm_mem_subgroup.rank, world.rank() % subgroup.size())
+
+        t.fill_(world.rank())
+        symm_mem_world.barrier()
+
+        # Observe a peer buffer via the world group
+        peer_rank = (world.rank() + 1) % world.size()
+        buf = symm_mem_world.get_buffer(peer_rank, (64,), torch.float32)
+        self.assertTrue(buf.eq(peer_rank).all())
+
+        # Observe a peer buffer via the subgroup
+        peer_rank = (subgroup.rank() + 1) % subgroup.size()
+        buf = symm_mem_subgroup.get_buffer(peer_rank, (64,), torch.float32)
+        if world.rank() < world.size() // 2:
+            self.assertTrue(buf.eq(peer_rank).all())
+        else:
+            self.assertTrue(buf.eq(peer_rank + world.size() // 2).all())
 
 
 @instantiate_parametrized_tests
