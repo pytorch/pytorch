@@ -112,7 +112,7 @@ def tensorify_python_scalars(
     tracer = fx.proxy.GraphAppendingTracer(graph)
     expr_to_sym_proxy: dict[sympy.Expr, MetaProxy] = {}
     expr_to_tensor_proxy: dict[sympy.Expr, MetaProxy] = {}
-    tensorified_symbols: set[sympy.Symbol] = set()
+    tensorified_symbols: set[str] = set()
     should_restart = False
 
     first_non_placeholder = None
@@ -213,29 +213,21 @@ def tensorify_python_scalars(
 
             # Specialize all dimensions that contain symfloats. Here's
             # an example test that requires this:
-            # PYTORCH_OPINFO_SAMPLE_INPUT_INDEX=4 python test/inductor/test_torchinductor_opinfo.py TestInductorOpInfoCUDA.test_comprehensive_nn_functional_interpolate_bicubic_cuda_float32 # noqa: B950
+            # PYTORCH_OPINFO_SAMPLE_INPUT_INDEX=4 tlp python test/inductor/test_torchinductor_opinfo.py TestInductorOpInfoCUDA.test_comprehensive_nn_functional_interpolate_bicubic_cuda_float32 # noqa: B950
             val = node.meta.get("val")
             if isinstance(val, FakeTensor):
                 for dim in val.shape:
-                    if not isinstance(dim, torch.SymInt):
-                        continue
-
-                    for symbol in dim.node.expr.free_symbols:
-                        if not symbol_is_type(symbol, SymT.FLOAT):
-                            continue
-
-                        sources = shape_env.var_to_sources.get(symbol)
-                        for source in sources:
-                            if TensorifyState.should_specialize(source):
-                                continue
-
-                            # In principle, we could support float input that
-                            # is used to do size compute. The problem is that
-                            # we don't actually want to tensorify the compute
-                            # in this case, which means we need codegen support
-                            # for all symfloats.
-                            TensorifyState.specialize(source)
-                            should_restart = True
+                    if isinstance(
+                        dim,
+                        (torch.SymFloat, torch.SymInt, torch.SymBool),
+                    ):
+                        for s in dim.node.expr.free_symbols:
+                            name = str(s)
+                            if symbol_is_type(
+                                s, SymT.FLOAT
+                            ) and not TensorifyState.should_specialize(name):
+                                TensorifyState.specialize(name)
+                                should_restart = True
 
             # Look for functions to convert
             if node.op == "call_function" and node.target in SUPPORTED_OPS:
@@ -257,7 +249,7 @@ def tensorify_python_scalars(
                             break
 
                         # We use _expr instead of expr b/c we want the symbol not the replacement
-                        tensorified_symbols.add(a.meta["val"].node._expr)
+                        tensorified_symbols.add(str(a.meta["val"].node._expr))
 
                         if proxy.node.meta["val"].dtype != compute_dtype:
                             proxy = torch.ops.prims.convert_element_type.default(
@@ -314,17 +306,25 @@ def tensorify_python_scalars(
                     node.replace_all_uses_with(guard_scalar(val))
                     graph.erase_node(node)
 
-    for symbol, sources in shape_env.var_to_sources.items():
-        if symbol_is_type(symbol, SymT.FLOAT) and symbol not in tensorified_symbols:
-            for source in sources:
-                if not TensorifyState.should_specialize(source):
-                    TensorifyState.specialize(source)
-                    should_restart = True
+    # Sometimes by the time we get to tensorify, there have already been
+    # specializations, eg. in python_arg_parser.h. In these cases,
+    # placeholder nodes no longer have a reference to their original
+    # symfloat and thus we need to deduce specializations have happend
+    # via shape_env.replacements. NB: there's an important invariant here
+    # that symfloats keep consistent names across restarts.
+    for k, v in shape_env.var_to_val.items():
+        if symbol_is_type(k, SymT.FLOAT) and isinstance(v, sympy.core.numbers.Float):
+            name = str(k)
+            if (
+                not TensorifyState.should_specialize(name)
+                and name not in tensorified_symbols
+            ):
+                TensorifyState.specialize(name)
+                should_restart = True
 
     if should_restart:
         # Sledgehammer time. Restart dynamo analysis, keeping track of which input sources
-        # are no longer needed and should be specialized. Restarting analysis is necessary
-        # because we need to instruct Dynamo to NOT make these as inputs.
+        # are no longer needed and should be specialized.
         raise TensorifyScalarRestartAnalysis
 
     graph_code_log.debug(
