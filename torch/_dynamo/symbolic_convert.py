@@ -247,16 +247,14 @@ class DistributedState:
 
 
 class TensorifyState:
-    # These are the set of source that we collect from the tensorify_python_scalars.py joint
-    # fx pass to inform us about which float inputs we should specialize when we restart analysis.
-    force_specializations: Set[Source] = set()
+    force_specializations: Set[str] = set()
 
     @classmethod
-    def specialize(cls, index: Source) -> None:
+    def specialize(cls, index: str) -> None:
         cls.force_specializations.add(index)
 
     @classmethod
-    def should_specialize(cls, index: Source) -> bool:
+    def should_specialize(cls, index: str) -> bool:
         return index in cls.force_specializations
 
     @classmethod

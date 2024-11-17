@@ -663,11 +663,12 @@ def _compile(
         try:
             with tracing(tracer.output.tracing_context), tracer.set_current_tx():
                 tracer.run()
-        except (exc.UnspecializeRestartAnalysis, exc.TensorifyScalarRestartAnalysis):
+        except exc.UnspecializeRestartAnalysis:
             speculation_log.clear()
             raise
         except (
             exc.SpeculationRestartAnalysis,
+            exc.TensorifyScalarRestartAnalysis,
             exc.SkipFrame,
         ):
             raise
