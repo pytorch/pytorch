@@ -87,7 +87,8 @@ class CUDASymmetricMemory : public SymmetricMemory {
   void** signal_pads_dev_;
 };
 
-// Metadata associated with each allocation performed by `CUDASymmetricMemoryAllocator`.
+// Metadata associated with each allocation performed by
+// `CUDASymmetricMemoryAllocator`.
 struct Block : public c10::intrusive_ptr_target {
   c10::intrusive_ptr<AllocationRef> alloc_ref;
   int device_idx;
