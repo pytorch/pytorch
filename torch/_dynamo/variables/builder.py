@@ -1919,10 +1919,15 @@ class VariableBuilder:
 
         wrapped_value = torch.tensor(value, dtype=torch.float64)
 
-        # We don't support specializing floats for grad checking tensors
-        # See https://github.com/pytorch/pytorch/pull/140828 for more
-        # context.
-        if torch._C._functorch.is_gradtrackingtensor(wrapped_value):
+        if (
+            # We don't support XLA for now. test_dynamic_shape_decoder_mark_dynamic
+            # seems to break and it's quite cumbersome to test.
+            wrapped_value.is_xla()
+            or
+            # We don't support specializing floats for grad checking tensors
+            # See https://github.com/pytorch/pytorch/pull/140828 for more context.
+            torch._C._functorch.is_gradtrackingtensor(wrapped_value)
+        ):
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
             return ConstantVariable.create(value=value, source=self.source)
 
