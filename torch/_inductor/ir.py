@@ -555,6 +555,9 @@ class IRNode:
     def is_no_op(self) -> bool:
         raise NotImplementedError(type(self).__name__)
 
+    def constant_to_device(self, device: torch.device) -> IRNode:
+        raise NotImplementedError(type(self).__name__)
+
     if TYPE_CHECKING:
 
         @property
@@ -6741,6 +6744,9 @@ class MutableBox(IRNode):
 
     def is_no_op(self) -> bool:
         return self.data.is_no_op()
+
+    def constant_to_device(self, device: torch.device) -> IRNode:
+        return self.data.constant_to_device(device)
 
     def realize(self):  # type: ignore[no-untyped-def]
         return self.data.realize()
