@@ -331,6 +331,7 @@ class _SplitterBase:
         settings: _SplitterSettingBase,
         non_acc_submodule_name: str = "_run_on_cpu_",
         return_tuple: bool = False,
+        nodes_finder: Optional[FxNetAccNodesFinder] = None,
     ):
         """
         Preprocesses graph before splitting:
@@ -348,9 +349,11 @@ class _SplitterBase:
         self.settings = settings
         self.operator_support = operator_support
         self.sample_input = sample_input
-        self.acc_nodes = FxNetAccNodesFinder(
-            self.module, self.operator_support, self.settings.allow_non_tensor
-        )()
+        if nodes_finder is None:
+            nodes_finder = FxNetAccNodesFinder(
+                self.module, self.operator_support, self.settings.allow_non_tensor
+            )
+        self.acc_nodes = nodes_finder()
 
         if self.settings.skip_fusion:
             self.fusions = {}
