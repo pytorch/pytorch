@@ -379,13 +379,13 @@ static inline void mtl_setBuffer(encoder_t encoder, const TensorBase& t, unsigne
 }
 
 template<typename T,
-         typename = std::enable_if_t<std::is_integral_v<T> || std::is_same_v<T, float>>>
+         typename = std::enable_if_t<std::is_integral_v<T> || std::is_same_v<T, float> || (std::is_class_v<T> && std::is_trivially_copyable_v<T>)>>
 static inline void mtl_setBytes(id<MTLComputeCommandEncoder> encoder, const T val, unsigned idx) {
   [encoder setBytes:&val length:sizeof(T) atIndex: idx];
 }
 
 template<typename Container,
-         typename = std::enable_if_t<std::is_integral_v<typename Container::size_type>>>
+         typename = std::enable_if_t<std::is_integral_v<typename Container::size_type> && !std::is_trivially_copyable_v<Container>>>
 static inline void mtl_setBytes(id<MTLComputeCommandEncoder> encoder, const Container& values, unsigned idx) {
   [encoder setBytes:values.data() length:sizeof(typename Container::value_type) * values.size() atIndex: idx];
 }
