@@ -429,11 +429,21 @@ __global__ void calc_block_sums(const T * d_in, T * agg, int64_t nelem, int iter
 
 }
 
+template<int size>
+constexpr int block_threads(){
+  if constexpr (size >=16) {
+    return 128;
+  } else if constexpr (size >=8) {
+    return 256;
+  } else {
+    return 512;
+  }
+}
 
 template<typename scalar_t, typename ScanOpT>
 inline void inclusive_deterministic_scan(const scalar_t *  input, scalar_t * output, ScanOpT scan_op, int64_t num_items) {
   static_assert(std::is_same<ScanOpT, std::plus<scalar_t>>::value, "");
-  constexpr int BLOCK_THREADS = 512;
+  constexpr int BLOCK_THREADS = block_threads<sizeof(scalar_t)>();
   constexpr int ITEMS_PER_THREAD = 16;
   auto grid_size = std::max(1l, (num_items + BLOCK_THREADS * ITEMS_PER_THREAD - 1) / (BLOCK_THREADS * ITEMS_PER_THREAD));
   const int64_t num_sms = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
