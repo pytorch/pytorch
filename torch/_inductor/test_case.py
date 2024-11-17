@@ -29,7 +29,6 @@ class TestCase(DynamoTestCase):
             functorch_config.patch(
                 {
                     "enable_autograd_cache": True,
-                    "view_replay_for_aliased_outputs": False,
                 }
             )
         )

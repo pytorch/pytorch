@@ -220,6 +220,7 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
             # TODO: example_inputs causes more cache misses than necessary
             # with dynamic shapes, because this is before we add
             # symints to tensor metadata. Improve this later.
+            FxGraphCache._check_can_cache(gm)
             super().__init__(gm, example_inputs, fx_config, [])
         except BypassFxGraphCache as e:
             # Sometimes inductor configs are unpickleable and can fail

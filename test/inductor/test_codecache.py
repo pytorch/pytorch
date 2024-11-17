@@ -10,6 +10,7 @@ from unittest import mock
 import torch
 from torch._dynamo import reset
 from torch._dynamo.utils import counters
+from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
 from torch._inductor import config, metrics
 from torch._inductor.async_compile import AsyncCompile
 from torch._inductor.codecache import (
@@ -113,6 +114,7 @@ class TestFxGraphCache(TestCase):
         PatchCaches.tearDown()
 
     def reset(self):
+        AOTAutogradCache.clear()
         PyCodeCache.cache_clear(purge=True)
         torch._dynamo.reset()
         clear_inductor_caches()
