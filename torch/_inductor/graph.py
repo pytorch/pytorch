@@ -808,13 +808,11 @@ class GraphLowering(torch.fx.Interpreter):
         raise KeyError(f"could not find {buffer_name}")
 
     def get_numel(self, buffer_name: str) -> Union[int, Expr]:
-        from .ir import MultiOutputLayout
-
         if buffer_name in self.constants:
             return self.constants[buffer_name].numel()
         if buffer_name in self.name_to_buffer:
             buf = self.name_to_buffer[buffer_name]
-            if isinstance(getattr(buf, "layout", None), MultiOutputLayout):
+            if not buf.has_tensor_output():
                 return 1
             return buf.get_numel()
         if buffer_name in self.graph_inputs:
