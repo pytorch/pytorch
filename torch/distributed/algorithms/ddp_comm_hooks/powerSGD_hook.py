@@ -399,6 +399,7 @@ def powerSGD_hook(
     """  # noqa: B950
     process_group = state.process_group
     group_to_use = process_group if process_group is not None else dist.group.WORLD
+    assert group_to_use is not None
     world_size = group_to_use.size()
 
     # The input tensor is a flattened 1D tensor.

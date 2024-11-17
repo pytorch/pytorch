@@ -769,7 +769,7 @@ def split_rule(op_schema: OpSchema) -> OutputSharding:
             ),
         )
 
-    def size_split(N, i):
+    def size_split(N, i) -> List:
         # Last chunk will be smaller if the tensor size N
         # along the given dimension dim is not divisible by i.
         assert i > 0

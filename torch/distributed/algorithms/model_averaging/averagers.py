@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import warnings
 from abc import ABC, abstractmethod
-from typing import Dict, Iterable, Union
+from typing import Dict, Iterable, Optional, Union
 
 import torch
 import torch.distributed as dist
@@ -21,7 +21,7 @@ class ModelAverager(ABC):
                        will be used. (default: ``None``)
     """
 
-    def __init__(self, process_group=None):
+    def __init__(self, process_group: Optional[dist.ProcessGroup] = None):
         self.process_group = (
             process_group if process_group is not None else dist.group.WORLD
         )
@@ -85,7 +85,9 @@ class PeriodicModelAverager(ModelAverager):
         >>>    averager.average_parameters(model.parameters())
     """
 
-    def __init__(self, period, warmup_steps=0, process_group=None):
+    def __init__(
+        self, period, warmup_steps=0, process_group: Optional[dist.ProcessGroup] = None
+    ):
         super().__init__(process_group)
         if warmup_steps < 0:
             raise ValueError("Arg ``warmup_steps`` must be a non-negative number.")
@@ -120,5 +122,6 @@ class PeriodicModelAverager(ModelAverager):
             self.step >= self.warmup_steps
             and (self.step - self.warmup_steps) % self.period == 0
         ):
+            assert self.process_group is not None
             utils.average_parameters_or_parameter_groups(params, self.process_group)
         self.step += 1
