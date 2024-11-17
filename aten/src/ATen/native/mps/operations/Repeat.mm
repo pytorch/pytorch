@@ -121,10 +121,7 @@ void computeRepeatIndices(const index_t* repeat_ptr,
       getMPSProfiler().beginProfileKernel(pipelineState, "repeat_interleave:" + scalar_type, false);
 
       [computeEncoder setComputePipelineState:pipelineState];
-      [computeEncoder setBuffer:repeatBuffer offset:0 atIndex:0];
-      [computeEncoder setBuffer:cumsumBuffer offset:0 atIndex:1];
-      [computeEncoder setBuffer:resultBuffer offset:0 atIndex:2];
-      mps::mtl_setBytes(computeEncoder, size, 3);
+      mps::mtl_setArgs(computeEncoder, repeatBuffer, cumsumBuffer, resultBuffer, size);
       mps::mtl_dispatch1DJob(computeEncoder, pipelineState, size);
 
       getMPSProfiler().endProfileKernel(pipelineState);
