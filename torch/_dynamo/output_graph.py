@@ -996,6 +996,8 @@ class OutputGraph:
         for value in stack_values:
             value.realize()
 
+        # self.dedup_pass()
+
         # Use nn.Module "proxies" in the constructed GraphModule so that
         # the resulting GM does not hold additional strong references to the original modules.
         # This prevents a strong ref cycle where Dynamo created code holds on to references
@@ -1393,9 +1395,6 @@ class OutputGraph:
         return [node.meta["grapharg"] for node in self.placeholders]
 
     def call_user_compiler(self, gm: fx.GraphModule) -> CompiledFn:
-        print(self.region_tracker)
-        print(self.region_tracker.get_identical_regions(gm))
-
         with dynamo_timed(
             "OutputGraph.call_user_compiler",
             phase_name="backend_compile",
@@ -1467,6 +1466,26 @@ class OutputGraph:
         )
 
         return compiled_fn
+
+    def dedup_pass(self):
+        pass
+
+    def install_subgraph(self, name, sub_gm):
+        next_name = None
+        i = 0
+        while not next_name:
+            candidate = f"{name}_{i}"
+            if candidate in self.nn_modules:
+                i += 1
+            else:
+                next_name = candidate
+
+        sub_gm.__name__ = next_name
+        sub_gm.torchdynamo_force_dynamic = False
+        # This graph module is not present in the user space, so it can't be
+        # accessed by a source. Set source=None.
+        self.register_attr_or_module(sub_gm, next_name, source=None)
+        return next_name
 
     def example_inputs(self) -> List[torch.Tensor]:
         result = []

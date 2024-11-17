@@ -625,12 +625,7 @@ def speculate_subgraph(
 
 
 def make_attr(tx: "InstructionTranslator", name):
-    node = tx.output.create_proxy(
-        "get_attr",
-        name,
-        (),
-        {},
-    )
+    node = tx.output.create_proxy("get_attr", name, (), {})
     return node
 
 
