@@ -493,10 +493,10 @@ class IRNode:
     def has_exceeded_max_reads(self) -> bool:
         raise NotImplementedError(type(self).__name__)
 
-    def make_loader(self) -> Callable[[Sequence[_IntLike]], OpsValue]:
+    def make_loader(self) -> Callable[[Sequence[Expr]], OpsValue]:
         raise NotImplementedError(type(self).__name__)
 
-    def make_indexer(self) -> Callable[[Sequence[_IntLike]], _IntLike]:
+    def make_indexer(self) -> Callable[[Sequence[Expr]], Expr]:
         raise NotImplementedError(type(self).__name__)
 
     def get_stride(self) -> Sequence[_IntLike]:
@@ -603,7 +603,7 @@ class Operation:
         assert hasattr(self, "origin_node")
         return self.origin_node
 
-    def get_origins(self):  # type: ignore[no-untyped-def]
+    def get_origins(self) -> OrderedSet[Any]:
         assert hasattr(self, "origins")
         return self.origins
 
@@ -664,7 +664,7 @@ class Operation:
 class Loops(IRNode):
     device: torch.device
     dtype: torch.dtype
-    inner_fn: Callable[..., OpsValue]
+    inner_fn: Callable[..., Any]
     ranges: Sequence[_IntLike]
 
     def get_unbacked_symbol_uses(self) -> OrderedSet[Symbol]:
@@ -801,7 +801,7 @@ def nop_loader_fn(idx: Union[Expr, Sequence[Expr]], *, dtype: torch.dtype) -> Op
 
 @ir_dataclass
 class Pointwise(Loops):
-    def make_loader(self) -> Callable[[Sequence[_IntLike]], OpsValue]:
+    def make_loader(self) -> Callable[[Sequence[Expr]], OpsValue]:
         # Make zero-element loops into a no-op
         if self.is_zero_elements():
             return partial(nop_loader_fn, dtype=self.dtype)
@@ -1403,7 +1403,7 @@ class Reduction(Loops):
         if split == -1:
             assert input_node is not None
             new_ranges, new_reduction_ranges = extract_input_node_reduction_ranges(
-                input_node  # type: ignore[arg-type]
+                input_node
             )
             assert new_ranges is not None
             assert new_reduction_ranges is not None
@@ -1536,15 +1536,14 @@ class Reduction(Loops):
         return wrapper_fn
 
     @classmethod
-    def _multilayer_wrap_loader_existing_ranges(  # type: ignore[no-untyped-def]
+    def _multilayer_wrap_loader_existing_ranges(
         cls,
-        loader,
-        original_ranges,
-        original_reduction_ranges,
-        new_ranges,
-        new_reduction_ranges,
-        default,
-    ):
+        loader: Callable[[Sequence[sympy.Expr], Sequence[sympy.Expr]], OpsValue],
+        original_ranges: Sequence[Expr],
+        original_reduction_ranges: Sequence[Expr],
+        new_ranges: Sequence[Integer],
+        new_reduction_ranges: Sequence[Integer],
+    ) -> Callable[[Sequence[sympy.Expr], Sequence[sympy.Expr]], OpsValue]:
         assert all(
             r == 1 for r in original_ranges
         ), f"Only enabled for numel_hint == 1, found {original_ranges=}"
@@ -1552,7 +1551,10 @@ class Reduction(Loops):
             original_reduction_ranges, tuple(new_ranges) + tuple(new_reduction_ranges)
         )
 
-        def wrapper_fn(merged_index, new_reduction_index):  # type: ignore[no-untyped-def]
+        def wrapper_fn(
+            merged_index: Sequence[sympy.Expr],
+            new_reduction_index: Sequence[sympy.Expr],
+        ) -> OpsValue:
             original_idx = merged_index[: len(original_ranges)]
             new_index = merged_index[len(original_ranges) :]
             return loader(
@@ -1666,7 +1668,7 @@ class Reduction(Loops):
         )
 
     @classmethod
-    def create_multilayer_existing_ranges(  # type: ignore[no-untyped-def]
+    def create_multilayer_existing_ranges(
         cls,
         device: torch.device,
         dst_dtype: torch.dtype,
@@ -1678,19 +1680,17 @@ class Reduction(Loops):
         new_reduction_ranges: List[Integer],
         reduction_type: str,
         reduction_hint: ReductionHint,
-    ):
+    ) -> TensorBox:
         """
         Break a large reduction up into multiple smaller reductions
         recursively
         """
-        default = cls.default_value(reduction_type, dst_dtype)
         wrapper_fn = cls._multilayer_wrap_loader_existing_ranges(
             inner_fn,
             original_ranges,
             original_reduction_ranges,
             new_ranges,
             new_reduction_ranges,
-            default,
         )
         return cls.create_multilayer_helper(
             device,
@@ -1714,18 +1714,21 @@ class WelfordReduction(Reduction):
         self,
         device: torch.device,
         dtype: torch.dtype,
-        inner_fns: Sequence[Callable[..., Any]],
+        inner_fns: Sequence[Callable[[Sequence[Expr], Sequence[Expr]], OpsValue]],
         ranges: Sequence[Integer],
         reduction_ranges: Sequence[Integer],
         reduction_type: str,
         reduction_hint: ReductionHint,
         output_index: int,
     ) -> None:
+        loader: Callable[[Sequence[Expr], Sequence[Expr]], Any]
         if len(inner_fns) == 1:
             loader = inner_fns[0]
         else:
 
-            def loader(idx, reduction_idx):  # type: ignore[no-untyped-def]
+            def loader(
+                idx: Sequence[Expr], reduction_idx: Sequence[Expr]
+            ) -> Tuple[OpsValue, ...]:
                 return tuple(fn(idx, reduction_idx) for fn in inner_fns)
 
         super().__init__(
@@ -1771,8 +1774,8 @@ class WelfordReduction(Reduction):
 
         reduction_numel = V.graph.sizevars.simplify(sympy_product(reduction_ranges))
 
-        def const(val):  # type: ignore[no-untyped-def]
-            def inner_fn(idx):  # type: ignore[no-untyped-def]
+        def const(val: int) -> TensorBox:
+            def inner_fn(idx: Sequence[Expr]) -> OpsValue:
                 return ops.constant(
                     val,
                     dtype,
@@ -1793,8 +1796,10 @@ class WelfordReduction(Reduction):
 
         if reduction_numel == 1:
 
-            def copy(loader):  # type: ignore[no-untyped-def]
-                def inner_fn(idx):  # type: ignore[no-untyped-def]
+            def copy(
+                loader: Callable[[Sequence[Expr], Sequence[Expr]], OpsValue]
+            ) -> TensorBox:
+                def inner_fn(idx: Sequence[Expr]) -> OpsValue:
                     reduction_index = [sympy.S.Zero for _ in reduction_ranges]
                     return loader(idx, reduction_index)
 
@@ -1905,7 +1910,9 @@ class WelfordReduction(Reduction):
             # If we need mask, then "welford_reduce" doesn't work because
             # masked inputs shouldn't count towards the welford weight
 
-            def constant(idx, reduction_idx, value):  # type: ignore[no-untyped-def]
+            def constant(
+                idx: Sequence[Expr], reduction_idx: Sequence[Expr], value: int
+            ) -> OpsValue:
                 return ops.constant(value, dtype)
 
             return cls.create_multilayer(
@@ -1946,9 +1953,11 @@ class WelfordReduction(Reduction):
         for i in intermediates:
             i.realize()
 
-        i_loaders = [i.make_loader() for i in intermediates]
-
-        def intermediate_loader_fn(index, reduction_index, loader):  # type: ignore[no-untyped-def]
+        def intermediate_loader_fn(
+            index: Sequence[Expr],
+            reduction_index: Sequence[Expr],
+            loader: Callable[[Sequence[Expr]], OpsValue],
+        ) -> OpsValue:
             return loader([*index, *reduction_index])
 
         numel_hint = V.graph.sizevars.size_hint(sympy_product(ranges))
@@ -2043,7 +2052,7 @@ class Scan(Loops):
         cls,
         device: torch.device,
         dtypes: Tuple[torch.dtype, ...],
-        inner_fns: Tuple[Callable[[List[Expr]], Any], ...],
+        inner_fns: Tuple[Callable[[Sequence[Expr]], Any], ...],
         size: List[Integer],
         axis: int,
         combine_fn: Callable[[Tuple[Any, ...], Tuple[Any, ...]], Tuple[Any, ...]],
@@ -2103,7 +2112,7 @@ class Scan(Loops):
             else:
                 scan_type = SplitScan
 
-        def reindex(index, scan_index):  # type: ignore[no-untyped-def]
+        def reindex(index: Sequence[Expr], scan_index: Sequence[Expr]) -> List[Expr]:
             assert len(scan_index) == len(scan_ranges)
             assert len(index) == len(pointwise_ranges)
             return [*index[:axis], *scan_index, *index[axis:]]
@@ -2135,19 +2144,19 @@ class Scan(Loops):
         return results
 
     @classmethod
-    def num_splits(  # type: ignore[no-untyped-def]
+    def num_splits(
         cls,
         device: torch.device,
         dtype: torch.dtype,
-        inner_fn: Callable[[List[Expr]], Any],
+        inner_fn: Callable[[Sequence[Expr]], OpsValue],
         axis: int,
         pointwise_ranges: List[Integer],
         scan_ranges: List[Integer],
         combine_fn: Callable[[Tuple[Any, ...], Tuple[Any, ...]], Tuple[Any, ...]],
         scan_numel: Expr,
-    ):
+    ) -> Tuple[ReductionHint, _IntLike]:
         # TODO: custom splitting heuristic for scan
-        def wrapper_fn(idx, reduction_idx):  # type: ignore[no-untyped-def]
+        def wrapper_fn(idx: Sequence[Expr], reduction_idx: Sequence[Expr]) -> OpsValue:
             return inner_fn([*idx[:axis], *reduction_idx, *idx[axis:]])
 
         return Reduction.num_splits(
@@ -2196,8 +2205,14 @@ class Sort(Loops):
         assert len(self.ranges) + len(self.sort_ranges) == len(self.size)
         super().__post_init__()
 
-    def store_reduction(self, output_name, indexer, vars, sort_vars):  # type: ignore[no-untyped-def]
-        idx = self.reindex(vars, sort_vars)
+    def store_reduction(
+        self,
+        output_name: Optional[str],
+        indexer: Callable[[Sequence[Expr]], Expr],
+        vars: Sequence[Expr],
+        reduction_vars: Sequence[Expr],
+    ) -> OpsValue:
+        idx = self.reindex(vars, reduction_vars)
         values = [inner_fn(idx) for inner_fn in self.inner_fns]
         result = ops.sort(self.dtypes, values, self.stable, self.descending)
         return ops.store(output_name, indexer(idx), result[self.output_index])
@@ -2276,7 +2291,7 @@ class Sort(Loops):
                 for output_index in range(len(dtypes))
             ]
 
-        def reindex(index, sort_index):  # type: ignore[no-untyped-def]
+        def reindex(index: Sequence[Expr], sort_index: Sequence[Expr]) -> List[Expr]:
             assert len(sort_index) == len(sort_ranges)
             assert len(index) == len(pointwise_ranges)
             return [*index[:axis], *sort_index, *index[axis:]]
@@ -2398,13 +2413,13 @@ def is_stride_order_storage_and_layout(
 class BaseView(IRNode):
     data: IRNode
 
-    def get_unbacked_symbol_uses(self):  # type: ignore[no-untyped-def]
+    def get_unbacked_symbol_uses(self) -> OrderedSet[Symbol]:
         return self.data.get_unbacked_symbol_uses()
 
-    def make_reindexer(self):  # type: ignore[no-untyped-def]
+    def make_reindexer(self) -> Callable[[Sequence[Expr]], Sequence[Expr]]:
         raise NotImplementedError(f"make_reindexer NYI on {self}")
 
-    def make_indexer(self):  # type: ignore[no-untyped-def]
+    def make_indexer(self) -> Callable[[Sequence[Expr]], Expr]:
         inner = self.data.make_indexer()
         reindex = self.make_reindexer()
 
@@ -2413,11 +2428,11 @@ class BaseView(IRNode):
 
         return indexer
 
-    def make_loader(self):  # type: ignore[no-untyped-def]
+    def make_loader(self) -> Callable[[Sequence[Expr]], OpsValue]:
         inner = self.data.make_loader()
         reindex = self.make_reindexer()
 
-        def loader(idx):  # type: ignore[no-untyped-def]
+        def loader(idx: Sequence[Expr]) -> OpsValue:
             return inner(reindex(idx))
 
         return loader
@@ -2890,8 +2905,8 @@ class ReinterpretView(BaseView):
     def get_stride(self):  # type: ignore[no-untyped-def]
         return list(self.layout.stride)
 
-    def make_loader(self):  # type: ignore[no-untyped-def]
-        def loader(index):  # type: ignore[no-untyped-def]
+    def make_loader(self) -> Callable[[Sequence[Expr]], OpsValue]:
+        def loader(index: Sequence[Expr]) -> OpsValue:
             indexer = self.layout.make_indexer()
             tmp_loader = ops.load(self.get_name(), indexer(index))
             if self.layout.dtype != self.data.dtype:
@@ -2901,7 +2916,7 @@ class ReinterpretView(BaseView):
 
         return loader
 
-    def make_indexer(self):  # type: ignore[no-untyped-def]
+    def make_indexer(self) -> Callable[[Sequence[Expr]], Expr]:
         return self.layout.make_indexer()
 
     def get_layout(self) -> Layout:
@@ -2966,7 +2981,7 @@ class DtypeView(BaseView):
     def get_size(self):  # type: ignore[no-untyped-def]
         return self.data.get_size()
 
-    def make_loader(self):  # type: ignore[no-untyped-def]
+    def make_loader(self) -> Callable[[Sequence[Expr]], OpsValue]:
         inner = self.data.make_loader()
 
         def loader(idx):  # type: ignore[no-untyped-def]
@@ -3083,8 +3098,8 @@ class Constant(BaseConstant):
     dtype: torch.dtype
     device: torch.device
 
-    def make_loader(self):  # type: ignore[no-untyped-def]
-        def loader(index):  # type: ignore[no-untyped-def]
+    def make_loader(self) -> Callable[[Sequence[Expr]], OpsValue]:
+        def loader(index: Sequence[Expr]) -> OpsValue:
             return ops.constant(self.value, self.dtype)
 
         return loader
@@ -3102,8 +3117,8 @@ class IndexingConstant(BaseConstant):
     dtype: torch.dtype
     device: torch.device
 
-    def make_loader(self):  # type: ignore[no-untyped-def]
-        def loader(index):  # type: ignore[no-untyped-def]
+    def make_loader(self) -> Callable[[Sequence[Expr]], OpsValue]:
+        def loader(index: Sequence[Expr]) -> OpsValue:
             return ops.index_expr(self.index, self.dtype)
 
         return loader
@@ -3321,7 +3336,7 @@ class Layout(OutputSpec):
             self.offset,
         )
 
-    def make_indexer(self):  # type: ignore[no-untyped-def]
+    def make_indexer(self) -> Callable[[Sequence[Expr]], Expr]:
         assert (
             FlexibleLayout.allow_indexing
         ), f"convert {type(self).__name__} to FixedLayout first"
@@ -3343,7 +3358,7 @@ class Layout(OutputSpec):
 class FixedLayout(Layout):
     """A Tensor layout we cannot change"""
 
-    def make_indexer(self):  # type: ignore[no-untyped-def]
+    def make_indexer(self) -> Callable[[Sequence[Expr]], Expr]:
         """A closure containing math to read a given element"""
 
         def indexer(index):  # type: ignore[no-untyped-def]
@@ -3511,7 +3526,7 @@ class NonOwningLayout(Layout):
         )
         self.view = view
 
-    def make_indexer(self):  # type: ignore[no-untyped-def]
+    def make_indexer(self) -> Callable[[Sequence[Expr]], Expr]:
         return self.as_fixed().make_indexer()
 
     def maybe_guard_aligned(self):  # type: ignore[no-untyped-def]
@@ -3670,7 +3685,7 @@ class MutationLayoutSHOULDREMOVE(Layout):
     def as_fixed(self):  # type: ignore[no-untyped-def]
         return self
 
-    def make_indexer(self):  # type: ignore[no-untyped-def]
+    def make_indexer(self) -> Callable[[Sequence[Expr]], Expr]:
         return self.target.make_indexer()
 
 
@@ -3688,7 +3703,7 @@ class Buffer(IRNode):
         super().__post_init__()
         self._post_init_setattr("origin_node", None)
 
-    def make_indexer(self):  # type: ignore[no-untyped-def]
+    def make_indexer(self) -> Callable[[Sequence[Expr]], Expr]:
         return self.get_layout().make_indexer()
 
     def get_name(self) -> str:
@@ -3755,7 +3770,7 @@ class Buffer(IRNode):
     def is_zero_elements(self):  # type: ignore[no-untyped-def]
         return V.graph.sizevars.is_expr_static_and_true(sympy.Eq(self.get_numel(), 0))
 
-    def make_loader(self):  # type: ignore[no-untyped-def]
+    def make_loader(self) -> Callable[[Sequence[Expr]], OpsValue]:
         # Loading from a zero-element buffer is a no-op
         if self.is_zero_elements():
             return partial(nop_loader_fn, dtype=self.get_dtype())
@@ -3824,8 +3839,8 @@ class InputBuffer(Buffer):
 class ConstantBuffer(InputBuffer):
     override_device: Optional[torch.device] = None
 
-    def make_loader(self):  # type: ignore[no-untyped-def]
-        def loader(index):  # type: ignore[no-untyped-def]
+    def make_loader(self) -> Callable[[Sequence[Expr]], OpsValue]:
+        def loader(index: Sequence[Expr]) -> OpsValue:
             indexer = self.get_layout().make_indexer()
             return ops.load(
                 V.graph.constant_name(self.get_name(), self.override_device),
@@ -3926,7 +3941,7 @@ class ComputedBuffer(OperationBuffer):
             | self.data.get_unbacked_symbol_uses()
         )
 
-    def make_loader(self) -> Callable[[Sequence[_IntLike]], OpsValue]:
+    def make_loader(self) -> Callable[[Sequence[Expr]], OpsValue]:
         if (
             not self.get_reduction_type()
             and self.name not in V.graph.mutated_buffers
@@ -6735,10 +6750,10 @@ class MutableBox(IRNode):
     def get_device(self) -> torch.device:
         return self.data.get_device()
 
-    def make_loader(self) -> Callable[[Sequence[_IntLike]], OpsValue]:
+    def make_loader(self) -> Callable[[Sequence[Expr]], OpsValue]:
         return self.data.make_loader()
 
-    def make_indexer(self) -> Callable[[Sequence[_IntLike]], _IntLike]:
+    def make_indexer(self) -> Callable[[Sequence[Expr]], Expr]:
         return self.data.make_indexer()
 
     def get_stride(self) -> Sequence[_IntLike]:

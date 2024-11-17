@@ -645,7 +645,7 @@ def extract_read_writes(
 
 
 def extract_input_node_reduction_ranges(
-    input_node: "torch._inductor.ir.TensorBox",
+    input_node: "torch._inductor.ir.IRNode",
 ) -> Tuple[Optional[List[sympy.Expr]], Optional[List[sympy.Expr]]]:
     """
     Returns the size and reduction size of all inputs, if the sizes and reduction_sizes (if exist) are all the same.
@@ -659,7 +659,7 @@ def extract_input_node_reduction_ranges(
     size: Optional[List[sympy.Expr]]
     reduction_size: Optional[List[sympy.Expr]]
 
-    if isinstance(input_node.data, ComputedBuffer):
+    if isinstance(input_node.get_defining_op(), ComputedBuffer):
         # Input node has already been realized. Return its size and reduction_size.
         size = [*input_node.get_size()]
         reduction_size = [*input_node.get_reduction_size()]
