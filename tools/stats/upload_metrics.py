@@ -78,7 +78,7 @@ def emit_metric(
     metrics: dict[str, Any],
 ) -> None:
     """
-    Upload a metric to DynamoDB (and from there, Rockset).
+    Upload a metric to DynamoDB (and from there, the HUD backend database).
 
     Even if EMIT_METRICS is set to False, this function will still run the code to
     validate and shape the metrics, skipping just the upload.
