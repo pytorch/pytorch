@@ -595,7 +595,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
                     device=device,
                     requires_grad=True,
                 )
-                weights_check = weights.clone().detach().requires_grad_(True)
+                weights_check = weights.detach().clone().requires_grad_(True)
 
                 bag = torch.nn.functional.embedding_bag(
                     indices_1D,
@@ -714,7 +714,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
                     device=device,
                     requires_grad=True,
                 )
-                weights_check = weights.clone().detach().requires_grad_(True)
+                weights_check = weights.detach().clone().requires_grad_(True)
 
                 msg = (
                     f"mode: '{mode}', sparse: {sparse}, padding_idx: {padding_idx}, "

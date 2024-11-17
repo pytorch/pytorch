@@ -202,9 +202,9 @@ def query_key_value_clones(query: torch.Tensor, key: torch.Tensor, value: torch.
     """ Clones the query, key, and value tensors and moves them to the specified dtype. """
     if dtype is None:
         dtype = query.dtype
-    query_ref = query.clone().detach().to(dtype).requires_grad_(query.requires_grad)
-    key_ref = key.clone().detach().to(dtype).requires_grad_(key.requires_grad)
-    value_ref = value.clone().detach().to(dtype).requires_grad_(value.requires_grad)
+    query_ref = query.detach().clone().to(dtype).requires_grad_(query.requires_grad)
+    key_ref = key.detach().clone().to(dtype).requires_grad_(key.requires_grad)
+    value_ref = value.detach().clone().to(dtype).requires_grad_(value.requires_grad)
     return query_ref, key_ref, value_ref
 
 def get_platform_specific_sdpa():
@@ -3738,13 +3738,13 @@ class TestSDPACudaOnly(NNTestCase):
         value = rand_nt(seq_lens_kv, n_heads, head_dim)
 
         # Run the math kernel on low precision references
-        query_ref_lp = query.clone().detach().requires_grad_(True)
-        key_ref_lp = key.clone().detach().requires_grad_(True)
-        value_ref_lp = value.clone().detach().requires_grad_(True)
+        query_ref_lp = query.detach().clone().requires_grad_(True)
+        key_ref_lp = key.detach().clone().requires_grad_(True)
+        value_ref_lp = value.detach().clone().requires_grad_(True)
 
-        query_ref = query.clone().detach().to(torch.float32).requires_grad_(True)
-        key_ref = key.clone().detach().to(torch.float32).requires_grad_(True)
-        value_ref = value.clone().detach().to(torch.float32).requires_grad_(True)
+        query_ref = query.detach().clone().to(torch.float32).requires_grad_(True)
+        key_ref = key.detach().clone().to(torch.float32).requires_grad_(True)
+        value_ref = value.detach().clone().to(torch.float32).requires_grad_(True)
 
         is_dropout = dropout_p > 0.0
 
