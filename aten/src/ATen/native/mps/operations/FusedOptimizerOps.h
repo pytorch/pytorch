@@ -436,10 +436,12 @@ REGISTER_FUSED_SGD_MOMENTUM_OP(half);
 
 )METAL";
 
-static std::pair<id<MTLComputePipelineState>, id<MTLFunction>> getCPLState(const std::string& fname) {
+static std::pair<id<MTLComputePipelineState>, id<MTLFunction>> getCPLState(
+    const std::string& fname) {
   static MetalShaderLibrary lib(FUSED_ADAM_OPS, 0);
-  return std::make_pair(lib.getPipelineStateForFunc(fname), lib.getMTLFunction(fname));
+  return std::make_pair(
+      lib.getPipelineStateForFunc(fname), lib.getMTLFunction(fname));
 }
 
-} //namespace mps
+} // namespace mps
 } // namespace at::native
