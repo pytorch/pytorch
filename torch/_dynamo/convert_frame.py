@@ -18,7 +18,6 @@ import threading
 import time
 import traceback
 import typing
-import warnings
 import weakref
 from pathlib import Path
 from types import CodeType, FrameType, FunctionType, ModuleType
