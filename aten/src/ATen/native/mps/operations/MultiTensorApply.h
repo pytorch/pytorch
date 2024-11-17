@@ -36,18 +36,7 @@ struct FusedAdamEncodingFunctor {
     float eps_lv = eps;
     uint8_t maximize_lv = maximize;
 
-    [computeEncoder setBuffer:tensorArgumentBuffer
-                                  offset:0
-                                  atIndex:0];
-    [computeEncoder setBytes:&metadata_arguments
-                                  length:sizeof(MetadataArguments)
-                                  atIndex:1];
-    mtl_setBytes(computeEncoder, lr_lv, 2);
-    mtl_setBytes(computeEncoder, beta1_lv, 3);
-    mtl_setBytes(computeEncoder, beta2_lv, 4);
-    mtl_setBytes(computeEncoder, weight_decay_lv, 5);
-    mtl_setBytes(computeEncoder, eps_lv, 6);
-    mtl_setBytes(computeEncoder, maximize_lv, 7);
+    mtl_setArgs(computeEncoder, tensorArgumentBuffer, metadata_arguments, lr_lv, beta1_lv, beta2_lv, weight_decay_lv, eps_lv, maximize_lv);
   }
 
   void operator()(
@@ -67,18 +56,7 @@ struct FusedAdamEncodingFunctor {
     float eps_lv = eps;
     uint8_t maximize_lv = maximize;
 
-    [computeEncoder setBuffer:tensorArgumentBuffer
-                                  offset:0
-                                  atIndex:0];
-    [computeEncoder setBytes:&metadata_arguments
-                                  length:sizeof(MetadataArguments)
-                                  atIndex:1];
-    mtl_setBuffer(computeEncoder, lr, 2);
-    mtl_setBytes(computeEncoder, beta1_lv, 3);
-    mtl_setBytes(computeEncoder, beta2_lv, 4);
-    mtl_setBytes(computeEncoder, weight_decay_lv, 5);
-    mtl_setBytes(computeEncoder, eps_lv, 6);
-    mtl_setBytes(computeEncoder, maximize_lv, 7);
+    mtl_setArgs(computeEncoder, tensorArgumentBuffer, metadata_arguments, lr, beta1_lv, beta2_lv, weight_decay_lv, eps_lv, maximize_lv);
   }
 };
 
@@ -107,19 +85,7 @@ struct FusedSgdEncodingFunctor<true> {
       uint8_t maximize_lv = maximize;
       uint8_t is_first_step_lv = is_first_step;
 
-      [computeEncoder setBuffer:tensorArgumentBuffer
-                                  offset:0
-                                  atIndex:0];
-      [computeEncoder setBytes:&metadata_arguments
-                                  length:sizeof(MetadataArguments)
-                                  atIndex:1];
-      mtl_setBytes(computeEncoder, weight_decay_lv, 2);
-      mtl_setBytes(computeEncoder, momentum_lv, 3);
-      mtl_setBytes(computeEncoder, lr_lv, 4);
-      mtl_setBytes(computeEncoder, dampening_lv, 5);
-      mtl_setBytes(computeEncoder, nesterov_lv, 6);
-      mtl_setBytes(computeEncoder, maximize_lv, 7);
-      mtl_setBytes(computeEncoder, is_first_step_lv, 8);
+      mtl_setArgs(computeEncoder, tensorArgumentBuffer, metadata_arguments, weight_decay_lv, momentum_lv, lr_lv, dampening_lv, nesterov_lv, maximize_lv, is_first_step_lv);
   }
 
   void operator()(
@@ -141,19 +107,7 @@ struct FusedSgdEncodingFunctor<true> {
       uint8_t maximize_lv = maximize;
       uint8_t is_first_step_lv = is_first_step;
 
-      [computeEncoder setBuffer:tensorArgumentBuffer
-                                  offset:0
-                                  atIndex:0];
-      [computeEncoder setBytes:&metadata_arguments
-                                  length:sizeof(MetadataArguments)
-                                  atIndex:1];
-      mtl_setBytes(computeEncoder, weight_decay_lv, 2);
-      mtl_setBytes(computeEncoder, momentum_lv, 3);
-      mtl_setBuffer(computeEncoder, lr, 4);
-      mtl_setBytes(computeEncoder, dampening_lv, 5);
-      mtl_setBytes(computeEncoder, nesterov_lv, 6);
-      mtl_setBytes(computeEncoder, maximize_lv, 7);
-      mtl_setBytes(computeEncoder, is_first_step_lv, 8);
+      mtl_setArgs(computeEncoder, tensorArgumentBuffer, metadata_arguments, weight_decay_lv, momentum_lv, lr, dampening_lv, nesterov_lv, maximize_lv, is_first_step_lv);
   }
 };
 
@@ -171,15 +125,7 @@ struct FusedSgdEncodingFunctor<false> {
       float lr_lv = lr;
       uint8_t maximize_lv = maximize;
 
-      [computeEncoder setBuffer:tensorArgumentBuffer
-                                  offset:0
-                                  atIndex:0];
-      [computeEncoder setBytes:&metadata_arguments
-                                  length:sizeof(MetadataArguments)
-                                  atIndex:1];
-      mtl_setBytes(computeEncoder, weight_decay_lv, 2);
-      mtl_setBytes(computeEncoder, lr_lv, 3);
-      mtl_setBytes(computeEncoder, maximize_lv, 4);
+      mtl_setArgs(computeEncoder, tensorArgumentBuffer, metadata_arguments, weight_decay_lv, lr_lv, maximize_lv);
   }
 
   void operator()(
@@ -193,15 +139,7 @@ struct FusedSgdEncodingFunctor<false> {
       float weight_decay_lv = weight_decay;
       uint8_t maximize_lv = maximize;
 
-      [computeEncoder setBuffer:tensorArgumentBuffer
-                                  offset:0
-                                  atIndex:0];
-      [computeEncoder setBytes:&metadata_arguments
-                                  length:sizeof(MetadataArguments)
-                                  atIndex:1];
-      mtl_setBytes(computeEncoder, weight_decay_lv, 2);
-      mtl_setBuffer(computeEncoder, lr, 3);
-      mtl_setBytes(computeEncoder, maximize_lv, 4);
+      mtl_setArgs(computeEncoder, tensorArgumentBuffer, metadata_arguments, weight_decay_lv, lr, maximize_lv);
   }
 };
 
