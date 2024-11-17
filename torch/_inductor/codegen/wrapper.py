@@ -20,6 +20,7 @@ from typing import (
     Iterator,
     List,
     Optional,
+    Sequence,
     Set,
     Tuple,
     TYPE_CHECKING,
@@ -43,7 +44,7 @@ from torch.utils._sympy.symbol import symbol_is_type, SymT
 
 from .. import async_compile, config, ir
 from ..codecache import output_code_log
-from ..ir import ReinterpretView
+from ..ir import IRNode, ReinterpretView
 from ..runtime import triton_heuristics
 from ..runtime.hints import DeviceProperties
 from ..utils import (
@@ -85,7 +86,7 @@ def buffer_reuse_key(node: BufferLike) -> ReuseKey:
         # NB: this is symbolic so that we don't try to reuse a buffer
         # for s0 for s1, just because they happen to share the same
         # size hint
-        sympy_str(V.graph.sizevars.simplify(node.layout.storage_size())),
+        sympy_str(V.graph.sizevars.simplify(node.get_layout().storage_size())),
     )
 
 
@@ -540,13 +541,13 @@ class CommBufferLine(WrapperLine):
 
     @property
     def comm_buffer_type(self) -> ir.CommBufferType:
-        layout = self.node.get_layout()
+        layout = self.node.get_output_spec()
         assert isinstance(layout, ir.CommBufferLayout)
         return layout.comm_buffer_type
 
     @property
     def group_name(self) -> str:
-        layout = self.node.get_layout()
+        layout = self.node.get_output_spec()
         assert isinstance(layout, ir.CommBufferLayout)
         return layout.group_name
 
@@ -1014,7 +1015,7 @@ class PythonWrapperCodegen(CodeGen):
 
         args = [self.val_to_arg_str(v) for v in raw_args]
         arg_types = [
-            arg.get_dtype() if hasattr(arg, "get_dtype") else type(arg)
+            arg.get_dtype() if isinstance(arg, IRNode) else type(arg)
             for arg in raw_args
         ]
         self.generate_kernel_call(
@@ -1304,15 +1305,15 @@ class PythonWrapperCodegen(CodeGen):
     def codegen_tuple_access(self, basename: str, name: str, index: str) -> str:
         return f"{basename}[{index}]"
 
-    def codegen_python_shape_tuple(self, shape: Tuple[Expr, ...]) -> str:
-        parts = list(map(self.codegen_python_sizevar, shape))
+    def codegen_python_shape_tuple(self, shape: Sequence[Expr]) -> str:
+        parts = [*map(self.codegen_python_sizevar, shape)]
         if len(parts) == 0:
             return "()"
         if len(parts) == 1:
             return f"({parts[0]}, )"
         return f"({', '.join(parts)})"
 
-    def codegen_shape_tuple(self, shape: Tuple[Expr, ...]) -> str:
+    def codegen_shape_tuple(self, shape: Sequence[Expr]) -> str:
         return self.codegen_python_shape_tuple(shape)
 
     def codegen_alloc_from_pool(self, name, offset, dtype, shape, stride) -> str:
@@ -1831,7 +1832,7 @@ class PythonWrapperCodegen(CodeGen):
             device = buf.get_device()
             dtype = buf.get_dtype()
             offset = V.graph.sizevars.size_hint(
-                buf.layout.offset,
+                buf.get_layout().offset,
                 fallback=config.unbacked_symint_fallback,
             )
             value = f"generate_example_value({size}, {stride}, '{device}', {dtype}, {offset})"
@@ -2113,7 +2114,7 @@ class PythonWrapperCodegen(CodeGen):
         ):
             return
 
-        layout = buffer.get_layout()
+        layout = buffer.get_output_spec()
         if isinstance(layout, ir.MutationLayoutSHOULDREMOVE):
             return
         if isinstance(layout, ir.NoneLayout):
@@ -2142,7 +2143,7 @@ class PythonWrapperCodegen(CodeGen):
             self.writeline(self.make_buffer_free(buffer))
             return
 
-        if isinstance(buffer.get_layout(), ir.CommBufferLayout):
+        if isinstance(buffer.get_output_spec(), ir.CommBufferLayout):
             # Comm buffers are not eligible for in-place reuse. Their reuse is
             # achieved exclusively via buffer planning.
             self.writeline(CommBufferFreeLine(self, buffer))

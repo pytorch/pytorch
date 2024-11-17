@@ -116,7 +116,7 @@ class SchedulerBuffer:
         if (
             self.node.get_inputs_that_alias_output()
             or self.node.get_mutation_names()
-            or isinstance(self.node.get_layout(), ir.CommBufferLayout)
+            or isinstance(self.node.get_output_spec(), ir.CommBufferLayout)
         ):
             V.graph.wrapper_code.codegen_allocation(self.node)
             return
@@ -159,7 +159,7 @@ class SchedulerBuffer:
         assert self.node is not None
         return self.node.get_inputs_that_alias_output()
 
-    def get_mutations(self) -> List[str]:
+    def get_mutations(self) -> Sequence[str]:
         assert self.node is not None
         return self.node.get_mutation_names()
 
@@ -451,8 +451,9 @@ class BaseSchedulerNode:
                         and remaining_uses[0].node is self
                         and input_buf.node is not None
                         and not isinstance(
-                            input_buf.node.get_layout(),
+                            input_buf.node.get_output_spec(),
                             (
+                                ir.NoneLayout,
                                 ir.MultiOutputLayout,
                                 ir.MutationLayoutSHOULDREMOVE,
                             ),
@@ -639,12 +640,12 @@ class BaseSchedulerNode:
         Returns estimated op runtime in nanoseconds (ns)
         """
         buf = self.get_nodes()[0].get_outputs()[0]
-        layout = buf.node.get_layout()
-        dtype = buf.node.get_dtype()
-
-        if layout.device is not None and not is_gpu(layout.device.type):
+        layout = buf.node.get_output_spec()
+        if not (isinstance(layout, ir.Layout) and is_gpu(layout.device.type)):
             # default to no reordering based on runtime
             return 0
+
+        dtype = buf.node.get_dtype()
 
         # Collective kernels
         if is_collective(self.node):
@@ -1580,8 +1581,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
         raise NotImplementedError
 
     def codegen(self) -> None:
-        assert isinstance(self.node, ir.ComputedBuffer), f"{type(self.node)=}"
-        self.node.get_store_function()(self.node.make_loader()())
+        raise NotImplementedError
 
     def is_foreach(self) -> bool:
         return True
