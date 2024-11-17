@@ -82,7 +82,11 @@ extern "C" {{export_declaration}}
     uint32_t L2_cache_size = {{L2_cache_size}};
     bool horizontal_transverse = false;
     mm_get_cache_blocking<
-        {{kernel.dtype(X)}}, {{kernel.dtype(W)}}, {{template.try_vertical_transverse()}}, {{template.try_horizontal_transverse()}}
+        {{kernel.dtype(X)}},
+        {{kernel.dtype(W)}},
+        {{template.try_vertical_transverse()}},
+        {{template.try_horizontal_transverse()}},
+        {{template.is_silu_mul_fusion()}}
     >(
         num_threads,
         M,
@@ -372,12 +376,16 @@ class CppPackedGemmTemplate(CppTemplate):
         self.m, self.n, self.k = m, n, k
         self.padded_n = get_padded_n(n, self.register_blocking.block_n)
         self.is_dynamic_M = has_free_symbols((m,))
+        self.silu_mul_fusion = False
 
     def try_vertical_transverse(self) -> str:
         return value_to_cpp(_use_cpp_gemm_strategy("VERTICAL"), "bool")
 
     def try_horizontal_transverse(self) -> str:
         return value_to_cpp(_use_cpp_gemm_strategy("HORIZONTAL"), "bool")
+
+    def is_silu_mul_fusion(self) -> str:
+        return value_to_cpp(self.silu_mul_fusion, "bool")
 
     @cache_on_self
     def thread_blocking(self) -> GemmBlocking:
@@ -602,7 +610,11 @@ class CppPackedGemmTemplate(CppTemplate):
                 min_Nc_ratio = 2  # same as vertical transverse, something to tune
                 min_Nc_blocks = math.ceil(min_Nc_ratio * Nr / Mr)
                 assert min_Nc_blocks >= 1
-                Kt_bytes = Kt_blocks * Kr * num_byte_B
+                Kt_bytes = (
+                    Kt_blocks
+                    * Kr
+                    * ((num_byte_B * 2) if self.silu_mul_fusion else num_byte_B)
+                )
                 if min_Nc_blocks * Nr * Kt_bytes < L2:
                     Nc_blocks = min(Nt_blocks, math.floor(L2 / (Nr * Kt_bytes)))
                     Mc_blocks = 1
@@ -610,7 +622,11 @@ class CppPackedGemmTemplate(CppTemplate):
                     Nc_blocks = Nt_blocks
                     Mc_blocks = min(math.ceil(Nc_blocks * Nr / Mr), Mt_blocks)
                     Mc_bytes = Mc_blocks * Mr * 4  # assume C or acc is float32/int32
-                    Kc_bytes = Kc_blocks * Kr * num_byte_B
+                    Kc_bytes = (
+                        Kc_blocks
+                        * Kr
+                        * ((num_byte_B * 2) if self.silu_mul_fusion else num_byte_B)
+                    )
                     if Nc_blocks * Nr * (Kc_bytes + Mc_bytes) > L2:
                         N_max = (
                             math.sqrt(Kc_bytes * Kc_bytes + 16 * L2) - Kc_bytes

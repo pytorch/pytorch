@@ -154,7 +154,11 @@ extern "C" {{export_declaration}}
     uint32_t L2_cache_size = {{L2_cache_size}};
     bool horizontal_transverse = false;
     mm_get_cache_blocking<
-        {{kernel.dtype(X)}}, {{kernel.dtype(W)}}, {{template.try_vertical_transverse()}}, {{template.try_horizontal_transverse()}}
+        {{kernel.dtype(X)}},
+        {{kernel.dtype(W)}},
+        {{template.try_vertical_transverse()}},
+        {{template.try_horizontal_transverse()}},
+        {{template.is_silu_mul_fusion()}}
     >(
         num_threads,
         M,
@@ -424,6 +428,7 @@ class CppPackedMLPTemplate(CppPackedGemmTemplate):
             has_bias,
             epilogue_creator,
         )
+        self.silu_mul_fusion = True
 
     @staticmethod
     def add_choices(
