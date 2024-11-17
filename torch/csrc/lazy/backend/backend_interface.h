@@ -86,7 +86,7 @@ class TORCH_API BackendImplInterface {
       std::vector<ComputationPtr> instances) const = 0;
 
   virtual std::vector<BackendDataPtr> ExecuteComputation(
-      const torch::lazy::ComputationPtr& computation,
+      torch::lazy::ComputationPtr computation,
       c10::ArrayRef<BackendDataPtr> arguments,
       const BackendDevice& device) const = 0;
 
