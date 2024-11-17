@@ -441,10 +441,10 @@ inline void inclusive_deterministic_scan(const scalar_t *  input, scalar_t * out
   static_assert(std::is_same<ScanOpT, std::plus<scalar_t>>::value, "");
   constexpr int BLOCK_THREADS = block_threads<sizeof(scalar_t)>();
   constexpr int ITEMS_PER_THREAD = 16;
-  auto grid_size = std::max(1l, (num_items + BLOCK_THREADS * ITEMS_PER_THREAD - 1) / (BLOCK_THREADS * ITEMS_PER_THREAD));
+  auto grid_size = (num_items + BLOCK_THREADS * ITEMS_PER_THREAD - 1) / (BLOCK_THREADS * ITEMS_PER_THREAD);
   const int64_t num_sms = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
 
-  const int iters_per_cta = grid_size <= num_sms ? 1 : (grid_size + num_sms - 1)/num_sms;
+  const int iters_per_cta = (grid_size + num_sms - 1)/num_sms;
   grid_size = std::min(num_sms, grid_size);
   auto& allocator = *c10::cuda::CUDACachingAllocator::get();
   auto agg = allocator.allocate(grid_size * sizeof(scalar_t));
