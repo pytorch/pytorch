@@ -86,7 +86,7 @@ def buffer_reuse_key(node: BufferLike) -> ReuseKey:
         # NB: this is symbolic so that we don't try to reuse a buffer
         # for s0 for s1, just because they happen to share the same
         # size hint
-        sympy_str(V.graph.sizevars.simplify(node.layout.storage_size())),
+        sympy_str(V.graph.sizevars.simplify(node.get_layout().storage_size())),
     )
 
 
@@ -541,13 +541,13 @@ class CommBufferLine(WrapperLine):
 
     @property
     def comm_buffer_type(self) -> ir.CommBufferType:
-        layout = self.node.get_layout()
+        layout = self.node.get_output_spec()
         assert isinstance(layout, ir.CommBufferLayout)
         return layout.comm_buffer_type
 
     @property
     def group_name(self) -> str:
-        layout = self.node.get_layout()
+        layout = self.node.get_output_spec()
         assert isinstance(layout, ir.CommBufferLayout)
         return layout.group_name
 
@@ -1832,7 +1832,7 @@ class PythonWrapperCodegen(CodeGen):
             device = buf.get_device()
             dtype = buf.get_dtype()
             offset = V.graph.sizevars.size_hint(
-                buf.layout.offset,
+                buf.get_layout().offset,
                 fallback=config.unbacked_symint_fallback,
             )
             value = f"generate_example_value({size}, {stride}, '{device}', {dtype}, {offset})"
@@ -2114,7 +2114,7 @@ class PythonWrapperCodegen(CodeGen):
         ):
             return
 
-        layout = buffer.get_layout()
+        layout = buffer.get_output_spec()
         if isinstance(layout, ir.MutationLayoutSHOULDREMOVE):
             return
         if isinstance(layout, ir.NoneLayout):
@@ -2143,7 +2143,7 @@ class PythonWrapperCodegen(CodeGen):
             self.writeline(self.make_buffer_free(buffer))
             return
 
-        if isinstance(buffer.get_layout(), ir.CommBufferLayout):
+        if isinstance(buffer.get_output_spec(), ir.CommBufferLayout):
             # Comm buffers are not eligible for in-place reuse. Their reuse is
             # achieved exclusively via buffer planning.
             self.writeline(CommBufferFreeLine(self, buffer))
