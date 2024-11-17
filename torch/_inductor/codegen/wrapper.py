@@ -241,7 +241,7 @@ def user_defined_kernel_grid_fn_code(
 def user_defined_triton_kernel_transitive_closure_source_code(kernel) -> str:
     """
     Given a triton kernel function pointer collect the transitive closure of
-    its dependancies
+    its dependencies
     """
     compile_wrapper = IndentedBuffer()
     compile_wrapper.splice(kernel.src, strip=True)
@@ -688,6 +688,9 @@ class PythonWrapperCodegen(CodeGen):
         self.debug_printer = DebugPrinterManager(
             debug_printer_level=config.aot_inductor.debug_intermediate_value_printer
         )
+
+        # Additional files that are dependent to the wrapper (ex. cubin files)
+        self.additional_files = []
 
     @staticmethod
     def create(
