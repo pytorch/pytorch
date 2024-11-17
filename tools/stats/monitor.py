@@ -114,7 +114,6 @@ if __name__ == "__main__":
         pass
 
     gpu_handles = []
-
     kill_now = False
     def exit_gracefully(*args: Any) -> None:
         global kill_now
