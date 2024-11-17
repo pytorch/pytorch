@@ -3024,6 +3024,8 @@ def gather_object(
         ['foo', 12, {1: 2}]
     """
     group = _group_or_default_group(group)
+    if dst is None and group_dst is None:
+        dst = 0
     global_dst = _canonicalize_group_rank(group, dst, group_dst, return_global=True)
     if _rank_not_in_group(group):
         _warn_not_in_group("gather_object")
