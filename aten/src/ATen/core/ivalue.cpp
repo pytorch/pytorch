@@ -574,10 +574,7 @@ static std::ostream& printMaybeAnnotatedDict(
 static std::ostream& printComplex(std::ostream & out, const IValue & v) {
   c10::complex<double> d = v.toComplexDouble();
   IValue real(d.real()), imag(std::abs(d.imag()));
-  auto sign = '-';
-  if (d.imag() >= 0) {
-    sign = '+';
-  }
+  auto sign = d.imag() >= 0 ? '+' : '-';
   return out << real << sign << imag << "j";
 }
 
