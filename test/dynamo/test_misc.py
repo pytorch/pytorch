@@ -1491,7 +1491,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual(opt_fn_ret(1.5)[0], -459)
         self.assertEqual(out[0], 2100)
         self.assertEqual(cnts.frame_count, 2)
-        self.assertEqual(cnts.op_count, 7)
+        self.assertEqual(cnts.op_count, 9)
 
     def test_tensor_dict1(self):
         def fn(inputs):
