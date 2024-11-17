@@ -82,7 +82,7 @@ __global__ void vectorized_copy(scalar_t *dst, scalar_t *src) {
   data[0] = reinterpret_cast<char *>(dst);
   data[1] = reinterpret_cast<char *>(src);
   int idx = blockIdx.x;
-  using vectorized = policies::vectorized<vec_size, array_t>;
+  using vectorized = policies::vectorized<vec_size, array_t, thread_work_size()>;
   auto policy = vectorized(data);
   scalar_t buf[thread_work_size()];
 #if !defined(USE_ROCM)
