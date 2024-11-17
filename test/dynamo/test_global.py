@@ -56,7 +56,7 @@ class TestGlobals(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(10)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         res1 = opt_fn(x)
         res2 = fn(x)
         self.assertTrue(same(res2 - res1, torch.ones(10)))
@@ -71,10 +71,10 @@ class TestGlobals(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(10)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         res1 = opt_fn(x)
         """Wrap the second call with torch._dynamo as well"""
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         res2 = opt_fn(x)
         self.assertTrue(same(res2 - res1, 2 * torch.ones(10)))
 
@@ -87,7 +87,7 @@ class TestGlobals(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(10)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         res1 = opt_fn(x)
         self.assertTrue(same(res1, x + x + 1))
 
@@ -104,7 +104,7 @@ class TestGlobals(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(10)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         res1 = opt_fn(x)
         res2 = fn(x)
         self.assertTrue(same(res2 - res1, torch.ones(10)))
@@ -118,7 +118,7 @@ class TestGlobals(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(10)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         res1 = opt_fn(x)
         res2 = fn(x)
         self.assertTrue(same(res2 - res1, torch.ones(10)))
@@ -136,7 +136,7 @@ class TestGlobals(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(10)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         res1 = opt_fn(x)
         res2 = fn(x)
         self.assertTrue(same(res2 - res1, torch.ones(10)))
@@ -150,7 +150,7 @@ class TestGlobals(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(10)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         res1 = opt_fn(x)
         res2 = fn(x)
         self.assertTrue(same(res2 - res1, torch.ones(10)))
@@ -164,7 +164,7 @@ class TestGlobals(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(10)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         res1 = opt_fn(x)
         res2 = fn(x)
         self.assertTrue(same(res2 - res1, torch.ones(10)))
@@ -177,7 +177,7 @@ class TestGlobals(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(10)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         res1 = opt_fn(x)
         res2 = fn(x)
         self.assertTrue(same(res2 - res1, torch.ones(10)))
@@ -197,7 +197,7 @@ class TestGlobals(torch._dynamo.test_case.TestCase):
         a = torch.randn(10)
         b = torch.randn(10)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         v0, s0 = opt_fn(a, b)
         self.assertEqual(s0, "v0v1")
         reset_name()
@@ -221,7 +221,7 @@ class TestGlobals(torch._dynamo.test_case.TestCase):
         a = torch.randn(10)
         b = torch.randn(10)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         v0, s0 = opt_fn(a, b)
         self.assertEqual(s0, "v0v1")
         reset_name()
