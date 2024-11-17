@@ -32,7 +32,8 @@ static void unary_kernel_mps(TensorIteratorBase& iter, const std::string& name) 
     @autoreleasepool {
       auto computeEncoder = stream->commandEncoder();
       [computeEncoder setComputePipelineState:i0PSO];
-      mtl_setArgs(computeEncoder, input, output);
+      mtl_setBuffer(computeEncoder, input, 0);
+      mtl_setBuffer(computeEncoder, output, 1);
       mtl_dispatch1DJob(computeEncoder, i0PSO, output.numel());
     }
   });
