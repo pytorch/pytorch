@@ -10,7 +10,6 @@ from sympy.logic.boolalg import BooleanAtom
 import torch
 import torch.fx as fx
 from torch._dynamo.exc import TensorifyScalarRestartAnalysis
-from torch._dynamo.source import LocalSource
 from torch._dynamo.symbolic_convert import TensorifyState
 from torch._prims_common import get_computation_dtype
 from torch._subclasses import fake_tensor  # noqa: TCH001
@@ -222,9 +221,7 @@ def tensorify_python_scalars(
                         for symbol in dim.node.expr.free_symbols:
                             sources = shape_env.var_to_sources.get(symbol)
                             for source in sources:
-                                if isinstance(
-                                    source, LocalSource
-                                ) and not TensorifyState.should_specialize(source):
+                                if not TensorifyState.should_specialize(source):
                                     TensorifyState.specialize(source)
                                     should_restart = True
 
@@ -308,9 +305,7 @@ def tensorify_python_scalars(
     for symbol, sources in shape_env.var_to_sources.items():
         if symbol_is_type(symbol, SymT.FLOAT) and symbol not in tensorified_symbols:
             for source in sources:
-                if isinstance(
-                    source, LocalSource
-                ) and not TensorifyState.should_specialize(source):
+                if not TensorifyState.should_specialize(source):
                     TensorifyState.specialize(source)
                     should_restart = True
 
