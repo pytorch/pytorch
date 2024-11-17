@@ -305,9 +305,12 @@ class StarDep(Dep):
         return self
 
     def numbytes_hint(self):
-        return V.graph.sizevars.size_hint(self.get_numel()) * get_dtype_size(
-            V.graph.get_dtype(self.name)
-        )
+        try:
+            return V.graph.sizevars.size_hint(self.get_numel()) * get_dtype_size(
+                V.graph.get_dtype(self.name)
+            )
+        except NotImplementedError:
+            return 0  # NoneLayout, MultiOutputLayout, etc
 
     def has_unbacked_symbols(self):
         return len(free_unbacked_symbols(self.get_numel())) > 0
@@ -651,7 +654,7 @@ def extract_input_node_reduction_ranges(
     Otherwise returns (None, None).
     """
 
-    from .ir import ComputedBuffer, Loops
+    from .ir import ComputedBuffer, ExternKernel, Loops
 
     size: Optional[List[sympy.Expr]]
     reduction_size: Optional[List[sympy.Expr]]
@@ -688,7 +691,7 @@ def extract_input_node_reduction_ranges(
             if buffer is None:
                 continue
             op = buffer.get_defining_op()
-            if op is None:
+            if op is None or isinstance(op, ExternKernel):
                 continue
 
             if isinstance(op, ComputedBuffer) and len(op.get_reduction_size()) > 0:
