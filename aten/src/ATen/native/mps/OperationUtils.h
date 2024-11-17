@@ -392,8 +392,9 @@ static inline void mtl_setBytes(id<MTLComputeCommandEncoder> encoder, const Cont
 
 static inline void mtl_dispatch1DJob(id<MTLComputeCommandEncoder> encoder,
                                      id<MTLComputePipelineState> cplState,
-                                     uint32_t length) {
-  const uint32_t maxThreadsPerGroup = [cplState maxTotalThreadsPerThreadgroup];
+                                     NSUInteger length) {
+  static_assert(sizeof(NSUInteger) == sizeof(uint64_t));
+  const auto maxThreadsPerGroup = [cplState maxTotalThreadsPerThreadgroup];
   auto size = MTLSizeMake(length, 1, 1);
   auto threadGroupSize = MTLSizeMake(std::min(maxThreadsPerGroup, length), 1, 1);
   [encoder dispatchThreads:size threadsPerThreadgroup:threadGroupSize];
