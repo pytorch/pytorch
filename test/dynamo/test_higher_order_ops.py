@@ -361,7 +361,7 @@ class GraphModule(torch.nn.Module):
             f,
             default_args_generator((x, y)),
             ifdynstaticdefault(2, 3),
-            expected_opcount=2,
+            expected_opcount=3,
             return_graph=True,
         )
         if torch._dynamo.config.assume_static_by_default:

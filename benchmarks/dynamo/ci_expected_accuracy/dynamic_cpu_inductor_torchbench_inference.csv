@@ -70,7 +70,7 @@ detectron2_fasterrcnn_r_50_dc5,pass,42
 
 
 
-detectron2_fasterrcnn_r_50_fpn,pass,46
+detectron2_fasterrcnn_r_50_fpn,pass,44
 
 
 
@@ -322,7 +322,7 @@ vgg16,pass,0
 
 
 
-vision_maskrcnn,pass,29
+vision_maskrcnn,pass,28
 
 
 
