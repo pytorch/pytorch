@@ -432,7 +432,7 @@ class IRNode:
 
     def maybe_get_layout(self) -> Optional[_AnyLayout]:
         try:
-            self.get_layout()
+            return self.get_layout()
         except NotImplementedError:
             return None
 
