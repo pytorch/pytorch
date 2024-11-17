@@ -854,24 +854,25 @@ class _PyTreeCodeGen(CodeGen):
         fn_definition = super().gen_fn_def(fn_args[:], maybe_return_annotation)
 
         if len(free_vars) > 0:  # pytree has placeholders in it
+            in_spec = self.pytree_info.in_spec
             # when kwargs is present, in_spec is tuple(args, kwargs)
             has_args_kwargs_tuple = (
-                self.pytree_info.in_spec.type == tuple
-                and self.pytree_info.in_spec.num_children == 2
-                and self.pytree_info.in_spec.children_specs[0].type == tuple
-                and self.pytree_info.in_spec.children_specs[1].type == dict
+                in_spec.type is tuple
+                and in_spec.num_children == 2
+                and in_spec.child(0).type is tuple
+                and in_spec.child(1).type is dict
             )
             fn_kwargs = "{}"
             fn_signature = f"[{', '.join(fn_args)}], self._in_spec"
             if has_args_kwargs_tuple:
-                count_args = self.pytree_info.in_spec.children_specs[0].num_children
+                count_args = in_spec.child(0).num_children
                 fn_args = self.pytree_info.orig_args[:count_args]
                 fn_kwargs = (
                     "{"
                     + ", ".join(
                         f"'{k}':{v}"
                         for k, v in zip(
-                            self.pytree_info.in_spec.children_specs[1].context,
+                            in_spec.child(1).context,
                             self.pytree_info.orig_args[count_args:],
                         )
                     )
