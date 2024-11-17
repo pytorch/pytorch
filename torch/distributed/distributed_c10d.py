@@ -3346,6 +3346,8 @@ def broadcast_object_list(
         ['foo', 12, {1: 2}]
     """
     group = _group_or_default_group(group)
+    if src is None and group_src is None:
+        src = 0
     global_src = _canonicalize_group_rank(group, src, group_src, return_global=True)
     group_src = _canonicalize_group_rank(group, src, group_src, return_global=False)
     if _rank_not_in_group(group):
@@ -3465,6 +3467,8 @@ def scatter_object_list(
         [{1: 2}]
     """
     group = _group_or_default_group(group)
+    if src is None and group_src is None:
+        src = 0
     global_src = _canonicalize_group_rank(group, src, group_src, return_global=True)
     if _rank_not_in_group(group):
         _warn_not_in_group("scatter_object_list")
