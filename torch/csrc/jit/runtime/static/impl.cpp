@@ -47,6 +47,7 @@
 #endif
 
 // used in test only
+// clang-format off
 C10_DEFINE_bool(
     static_runtime_disable_debug_memory_overlap_check,
     false,

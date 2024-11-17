@@ -229,7 +229,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
             for i in range(1, 5):
                 torch._dynamo.reset()
                 model = globals()[f"Module{i}"]()
-                opt_model = torch._dynamo.optimize("eager")(model)
+                opt_model = torch.compile(model, backend="eager")
                 self.assertTrue(
                     torch.allclose(
                         opt_model(torch.ones(2, 3, requires_grad=grad)),
@@ -243,7 +243,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
             for model in [Module5(), Module6()]:
                 torch._dynamo.reset()
                 cnts = torch._dynamo.testing.CompileCounter()
-                opt_model = torch._dynamo.optimize(cnts)(model)
+                opt_model = torch.compile(model, backend=cnts)
                 for _ in range(3):
                     ref = model(x)
                     res = opt_model(x)
@@ -252,7 +252,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
 
     def test_linear_setup_context(self):
         model = ModuleLinear()
-        opt_model = torch._dynamo.optimize("eager", nopython=True)(model)
+        opt_model = torch.compile(model, backend="eager", fullgraph=True)
         input = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
         weight = torch.randn(3, 2, dtype=torch.double, requires_grad=True)
         eager_result = model(input, weight)
@@ -261,7 +261,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
 
     def test_materialize_grad(self):
         model = MaterializingGradModule()
-        opt_model = torch._dynamo.optimize("eager")(model)
+        opt_model = torch.compile(model, backend="eager")
         x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
         optim_result = opt_model(x)
         eager_result = model(x)
@@ -269,7 +269,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
 
     def test_print_in_bwd(self):
         model = CustomFuncBwdPrintModule()
-        opt_model = torch._dynamo.optimize("eager", nopython=True)(model)
+        opt_model = torch.compile(model, backend="eager", fullgraph=True)
         x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
         with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "builtin: print"):
             opt_model(x)
@@ -323,7 +323,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
 
     def test_save_for_bwd(self):
         model = SaveForBwdModule()
-        opt_model = torch._dynamo.optimize("eager", nopython=True)(model)
+        opt_model = torch.compile(model, backend="eager", fullgraph=True)
         x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
         opt_model(x)
 
@@ -402,7 +402,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         before = mod(*args, **kwargs)
 
         torch._dynamo.reset()
-        compiled_model = torch._dynamo.optimize("eager")(mod)
+        compiled_model = torch.compile(mod, backend="eager")
         after = compiled_model(*args, **kwargs)
         self.assertEqual(before, after)
 
@@ -412,7 +412,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         before = mod(*args, **kwargs)
 
         torch._dynamo.reset()
-        compiled_model = torch._dynamo.optimize("eager")(mod)
+        compiled_model = torch.compile(mod, backend="eager")
         after = compiled_model(*args, **kwargs)
         self.assertEqual(before, after)
 
@@ -691,7 +691,7 @@ class GraphModule(torch.nn.Module):
         args, kwargs = ([torch.rand([4, 128, 32, 32])], {})
         before = mod(*args, **kwargs)
 
-        compiled_model = torch._dynamo.optimize("eager")(mod)
+        compiled_model = torch.compile(mod, backend="eager")
         after = compiled_model(*args, **kwargs)
         self.assertEqual(before, after)
 
@@ -859,7 +859,7 @@ class GraphModule(torch.nn.Module):
             foo = MyFn3.apply(base, False)
 
         test()
-        opt_test = torch._dynamo.optimize("eager")(test)
+        opt_test = torch.compile(test, backend="eager")
         opt_test()
 
     def test_tensor_subclass_intermediary_input(self):
@@ -1018,8 +1018,8 @@ class GraphModule(torch.nn.Module):
 
         x_ref = torch.randn(2, requires_grad=True)
         y_ref = torch.randn(2, requires_grad=True)
-        x_test = x_ref.clone().detach().requires_grad_()
-        y_test = y_ref.clone().detach().requires_grad_()
+        x_test = x_ref.detach().clone().requires_grad_()
+        y_test = y_ref.detach().clone().requires_grad_()
 
         out_ref = foo(x_ref, y_ref)
         out_ref.sum().backward()
