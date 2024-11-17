@@ -564,6 +564,9 @@ class IRNode:
     def constant_to_device(self, device: torch.device) -> IRNode:
         raise NotImplementedError(type(self).__name__)
 
+    def get_mutation_names(self) -> Sequence[str]:
+        raise NotImplementedError(type(self).__name__)
+
     def get_operation_name(self) -> str:
         raise NotImplementedError(type(self).__name__)
 
@@ -3747,7 +3750,7 @@ class Buffer(IRNode):
             return [self.layout.view.get_name()]
         return ()
 
-    def get_mutation_names(self):  # type: ignore[no-untyped-def]
+    def get_mutation_names(self) -> Sequence[str]:
         if isinstance(self.layout, MutationLayoutSHOULDREMOVE):
             return [self.layout.target.get_name()]
         return ()
@@ -6765,6 +6768,9 @@ class MutableBox(IRNode):
 
     def constant_to_device(self, device: torch.device) -> IRNode:
         return self.data.constant_to_device(device)
+
+    def get_mutation_names(self) -> Sequence[str]:
+        return self.data.get_mutation_names()
 
     def get_operation_name(self) -> str:
         return self.data.get_operation_name()
