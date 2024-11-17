@@ -1,4 +1,5 @@
 import dataclasses
+import sys
 import types
 from typing import Any, Callable, Dict, List, NamedTuple, Optional, Protocol, Union
 
@@ -6,9 +7,14 @@ from typing import Any, Callable, Dict, List, NamedTuple, Optional, Protocol, Un
 from torch._C._dynamo.eval_frame import (
     _CacheEntry as CacheEntry,
     _ExtraState as ExtraState,
-    _PyInterpreterFrame as DynamoFrameType,
 )
 from torch._guards import CompileId
+
+
+if sys.version_info >= (3, 11):
+    from torch._C._dynamo.eval_frame import _PyInterpreterFrame as DynamoFrameType
+else:
+    from types import FrameType as DynamoFrameType
 
 
 # We use a dict to store additional data per frame.

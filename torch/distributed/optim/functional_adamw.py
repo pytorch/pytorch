@@ -4,7 +4,7 @@ from typing import Dict, List, Optional, Tuple
 import torch
 import torch.optim._functional as F
 from torch import Tensor
-from torch.distributed.optim.deprecation_warning import (
+from torch.distributed.optim._deprecation_warning import (
     _scripted_functional_optimizer_deprecation_warning,
 )
 
