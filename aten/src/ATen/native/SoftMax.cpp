@@ -410,9 +410,9 @@ TORCH_IMPL_FUNC(softmax_backward_cpu_out)
   }
 
   if (grad_.ndimension() > 0 && dim_ == grad_.ndimension() - 1) {
-    softmax_backward_lastdim_kernel(kCPU, grad_input, grad_, output_);
+    softmax_backward_lastdim_kernel(kCPU, grad_input, grad_, output);
   } else {
-    softmax_backward_kernel(kCPU, grad_input, grad_, output_, dim_);
+    softmax_backward_kernel(kCPU, grad_input, grad_, output, dim_);
   }
 }
 

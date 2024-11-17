@@ -25,7 +25,7 @@ from torch.testing._internal.common_nn import (
     marginrankingloss_reference, multimarginloss_reference, multilabelmarginloss_reference,
     nllloss_reference, nlllossNd_reference, smoothl1loss_reference, softmarginloss_reference, get_reduction)
 from torch.testing._internal.common_utils import (
-    freeze_rng_state, skipIfMPS, skipIfMPSOnMacOS13, GRADCHECK_NONDET_TOL, TEST_WITH_ROCM, IS_WINDOWS,
+    freeze_rng_state, skipIfMPS, GRADCHECK_NONDET_TOL, TEST_WITH_ROCM, IS_WINDOWS,
     skipIfTorchDynamo)
 from types import ModuleType
 from typing import List, Tuple, Type, Set, Dict
@@ -3423,7 +3423,7 @@ module_db: List[ModuleInfo] = [
                        device_type='cuda',
                    ),
                    # error: input types 'tensor<f32>' and 'tensor<15x10xf16>' are not broadcast compatible
-                   DecorateInfo(skipIfMPSOnMacOS13, 'TestModule', dtypes=[torch.float16], device_type='mps',),),
+                   DecorateInfo(skipIfMPS, 'TestModule', dtypes=[torch.float16]),),
                ),
     ModuleInfo(torch.nn.AvgPool3d,
                module_inputs_func=module_inputs_torch_nn_AvgPool3d,
@@ -3510,9 +3510,9 @@ module_db: List[ModuleInfo] = [
                    DecorateInfo(skipCUDAIfRocm, 'TestModule', 'test_memory_format', dtypes=[torch.float32]),
                    # See #119108: MPSNDArrayConvolutionA14.mm:3976: failed assertion `destination datatype must be fp32'
                    # xfail does not work due to Fatal Python error: Aborted
-                   DecorateInfo(skipIfMPSOnMacOS13, "TestModule", "test_memory_format",
+                   DecorateInfo(skipIfMPS, "TestModule", "test_memory_format",
                                 device_type='mps', dtypes=[torch.float16]),
-                   DecorateInfo(skipIfMPSOnMacOS13, "TestModule", "test_non_contiguous_tensors",
+                   DecorateInfo(skipIfMPS, "TestModule", "test_non_contiguous_tensors",
                                 device_type='mps', dtypes=[torch.float16]),
                ),
                decorators=(
@@ -3533,12 +3533,12 @@ module_db: List[ModuleInfo] = [
                                 device_type='cuda', dtypes=[torch.float64]),
                    # Fails with channels last test on MPS backend
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format",
-                                device_type='mps', dtypes=[torch.float32, torch.float16]),
+                                device_type='mps', dtypes=[torch.float32]),
                    # See #119108: MPSNDArrayConvolutionA14.mm:3976: failed assertion `destination datatype must be fp32'
                    # xfail does not work due to Fatal Python error: Aborted
-                   DecorateInfo(skipIfMPSOnMacOS13, "TestModule", "test_memory_format",
+                   DecorateInfo(skipIfMPS, "TestModule", "test_memory_format",
                                 device_type='mps', dtypes=[torch.float16]),
-                   DecorateInfo(skipIfMPSOnMacOS13, "TestModule", "test_non_contiguous_tensors",
+                   DecorateInfo(skipIfMPS, "TestModule", "test_non_contiguous_tensors",
                                 device_type='mps', dtypes=[torch.float16]),
                ),
                decorators=(
@@ -3554,7 +3554,7 @@ module_db: List[ModuleInfo] = [
                    # Failure on ROCM for float32 issue #70125
                    DecorateInfo(skipCUDAIfRocm, 'TestModule', 'test_memory_format', dtypes=[torch.float32]),
                    # Conv3d is not supported on MPS backend
-                   DecorateInfo(skipMPS, device_type="mps"),
+                   DecorateInfo(skipMPS),
                    # This was wrongly being skipped before and needs investigation.
                    # See https://github.com/pytorch/pytorch/issues/80247
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format"),
@@ -3577,9 +3577,9 @@ module_db: List[ModuleInfo] = [
                                 dtypes=(torch.chalf,), device_type='cuda'),
                    # See #119108: MPSNDArrayConvolutionA14.mm:3976: failed assertion `destination datatype must be fp32'
                    # xfail does not work due to Fatal Python error: Aborted
-                   DecorateInfo(skipIfMPSOnMacOS13, "TestModule", "test_memory_format",
+                   DecorateInfo(skipIfMPS, "TestModule", "test_memory_format",
                                 device_type='mps', dtypes=[torch.float16]),
-                   DecorateInfo(skipIfMPSOnMacOS13, "TestModule", "test_non_contiguous_tensors",
+                   DecorateInfo(skipIfMPS, "TestModule", "test_non_contiguous_tensors",
                                 device_type='mps', dtypes=[torch.float16]),),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
@@ -3604,15 +3604,15 @@ module_db: List[ModuleInfo] = [
                                 dtypes=[torch.float64, torch.complex128]),
                    # Fails with channels last test on MPS backend
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format",
-                                device_type='mps', dtypes=[torch.float16, torch.float32]),
+                                device_type='mps', dtypes=[torch.float32]),
                    # Not implemented for chalf on CPU
                    DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_cpu_gpu_parity',
                                 dtypes=(torch.chalf,), device_type='cuda'),
                    # See #119108: MPSNDArrayConvolutionA14.mm:3976: failed assertion `destination datatype must be fp32'
                    # xfail does not work due to Fatal Python error: Aborted
-                   DecorateInfo(skipIfMPSOnMacOS13, "TestModule", "test_memory_format",
+                   DecorateInfo(skipIfMPS, "TestModule", "test_memory_format",
                                 device_type='mps', dtypes=[torch.float16]),
-                   DecorateInfo(skipIfMPSOnMacOS13, "TestModule", "test_non_contiguous_tensors",
+                   DecorateInfo(skipIfMPS, "TestModule", "test_non_contiguous_tensors",
                                 device_type='mps', dtypes=[torch.float16]),
                ),
                decorators=(
@@ -3687,9 +3687,7 @@ module_db: List[ModuleInfo] = [
                    # No channels_last support for loss functions.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
                    # See #119108: input types 'tensor<f32>' and 'tensor<15x10xf16>' are not broadcast compatible
-                   # NS: Still fails on MacOS15.1
-                   DecorateInfo(skipIfMPS, 'TestModule', 'test_non_contiguous_tensors',
-                                dtypes=[torch.float16], device_type='mps'),),
+                   DecorateInfo(skipIfMPS, 'TestModule', 'test_non_contiguous_tensors', dtypes=[torch.float16]),)
                ),
     ModuleInfo(torch.nn.LazyConv1d,
                module_inputs_func=partial(module_inputs_torch_nn_ConvNd, N=1, lazy=True),
@@ -3705,9 +3703,9 @@ module_db: List[ModuleInfo] = [
                    DecorateInfo(skipMeta),
                    # See #119108: MPSNDArrayConvolutionA14.mm:3976: failed assertion `destination datatype must be fp32'
                    # xfail does not work due to Fatal Python error: Aborted
-                   DecorateInfo(skipIfMPSOnMacOS13, "TestModule", "test_memory_format",
+                   DecorateInfo(skipIfMPS, "TestModule", "test_memory_format",
                                 device_type='mps', dtypes=[torch.float16]),
-                   DecorateInfo(skipIfMPSOnMacOS13, "TestModule", "test_non_contiguous_tensors",
+                   DecorateInfo(skipIfMPS, "TestModule", "test_non_contiguous_tensors",
                                 device_type='mps', dtypes=[torch.float16]),
                ),
                decorators=(
@@ -3731,12 +3729,12 @@ module_db: List[ModuleInfo] = [
                                 device_type='cuda', dtypes=[torch.float64]),
                    # Fails with channels last test on MPS backend
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format",
-                                device_type='mps', dtypes=[torch.float32, torch.float16]),
+                                device_type='mps', dtypes=[torch.float32]),
                    # See #119108: MPSNDArrayConvolutionA14.mm:3976: failed assertion `destination datatype must be fp32'
                    # xfail does not work due to Fatal Python error: Aborted
-                   DecorateInfo(skipIfMPSOnMacOS13, "TestModule", "test_memory_format",
+                   DecorateInfo(skipIfMPS, "TestModule", "test_memory_format",
                                 device_type='mps', dtypes=[torch.float16]),
-                   DecorateInfo(skipIfMPSOnMacOS13, "TestModule", "test_non_contiguous_tensors",
+                   DecorateInfo(skipIfMPS, "TestModule", "test_non_contiguous_tensors",
                                 device_type='mps', dtypes=[torch.float16]),
                ),
                decorators=(
@@ -3777,9 +3775,9 @@ module_db: List[ModuleInfo] = [
                    DecorateInfo(skipMeta),
                    # See #119108: MPSNDArrayConvolutionA14.mm:3976: failed assertion `destination datatype must be fp32'
                    # xfail does not work due to Fatal Python error: Aborted
-                   DecorateInfo(skipIfMPSOnMacOS13, "TestModule", "test_memory_format",
+                   DecorateInfo(skipIfMPS, "TestModule", "test_memory_format",
                                 device_type='mps', dtypes=[torch.float16]),
-                   DecorateInfo(skipIfMPSOnMacOS13, "TestModule", "test_non_contiguous_tensors",
+                   DecorateInfo(skipIfMPS, "TestModule", "test_non_contiguous_tensors",
                                 device_type='mps', dtypes=[torch.float16]),
                ),
                decorators=(
@@ -3803,12 +3801,12 @@ module_db: List[ModuleInfo] = [
                                 dtypes=[torch.float64]),
                    # Fails with channels last test on MPS backend
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format",
-                                device_type='mps', dtypes=[torch.float32, torch.float16]),
+                                device_type='mps', dtypes=[torch.float32]),
                    # See #119108: MPSNDArrayConvolutionA14.mm:3976: failed assertion `destination datatype must be fp32'
                    # xfail does not work due to Fatal Python error: Aborted
-                   DecorateInfo(skipIfMPSOnMacOS13, "TestModule", "test_memory_format",
+                   DecorateInfo(skipIfMPS, "TestModule", "test_memory_format",
                                 device_type='mps', dtypes=[torch.float16]),
-                   DecorateInfo(skipIfMPSOnMacOS13, "TestModule", "test_non_contiguous_tensors",
+                   DecorateInfo(skipIfMPS, "TestModule", "test_non_contiguous_tensors",
                                 device_type='mps', dtypes=[torch.float16]),
                ),
                decorators=(
@@ -3884,7 +3882,7 @@ module_db: List[ModuleInfo] = [
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_grad'),
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_gradgrad'),
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
-                   DecorateInfo(skipIfMPS, device_type='mps'),)
+                   DecorateInfo(skipIfMPS),)
                ),
     ModuleInfo(torch.nn.MaxPool1d,
                module_inputs_func=module_inputs_torch_nn_MaxPool1d,
@@ -3897,7 +3895,7 @@ module_db: List[ModuleInfo] = [
                gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
                skips=(
                    # not supported on MPS backend
-                   DecorateInfo(skipIfMPS, device_type='mps'),)
+                   DecorateInfo(skipMPS),)
                ),
     ModuleInfo(torch.nn.KLDivLoss,
                module_inputs_func=module_inputs_torch_nn_KLDivLoss,
@@ -3915,8 +3913,7 @@ module_db: List[ModuleInfo] = [
                    # No channels_last support for loss functions.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
                    # See #119108: input types 'tensor<f32>' and 'tensor<15x10xf16>' are not broadcast compatible
-                   DecorateInfo(skipIfMPSOnMacOS13, 'TestModule', 'test_non_contiguous_tensors',
-                                device_type='mps', dtypes=[torch.float16],),
+                   DecorateInfo(skipIfMPS, 'TestModule', 'test_non_contiguous_tensors', dtypes=[torch.float16]),
                    # See #119108: tolerance issue
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_forward",
                                 device_type='mps', dtypes=[torch.float16]),)
@@ -3933,7 +3930,7 @@ module_db: List[ModuleInfo] = [
                    # No channels_last support for loss functions.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
                    # 'aten::multilabel_margin_loss_forward' is not currently implemented for the MPS device.
-                   DecorateInfo(skipIfMPS, 'TestModule', device_type='mps'),
+                   DecorateInfo(skipIfMPS, 'TestModule'),
                    # derivative for aten::multilabel_margin_loss_backward is not implemented
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_gradgrad'),)
                ),
@@ -3943,7 +3940,7 @@ module_db: List[ModuleInfo] = [
                    # No channels_last support for loss functions.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
                    # 'aten::multi_margin_loss' is not currently implemented for the MPS device.
-                   DecorateInfo(skipIfMPS, 'TestModule', device_type='mps'),
+                   DecorateInfo(skipIfMPS, 'TestModule'),
                    # RuntimeError: derivative for aten::multi_margin_loss_backward is not implemented
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_gradgrad'),)
                ),
@@ -4002,7 +3999,7 @@ module_db: List[ModuleInfo] = [
                    # No channels_last support for loss functions.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
                    # error: input types 'tensor<f32>' and 'tensor<15x10xf16>' are not broadcast compatible
-                   DecorateInfo(skipIfMPS, 'TestModule', dtypes=[torch.float16], device_type='mps'),)
+                   DecorateInfo(skipIfMPS, 'TestModule', dtypes=[torch.float16]),)
                ),
     ModuleInfo(torch.nn.BCEWithLogitsLoss,
                module_inputs_func=module_inputs_torch_nn_BCEWithLogitsLoss,
@@ -4010,7 +4007,7 @@ module_db: List[ModuleInfo] = [
                    # No channels_last support for loss functions.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
                    # see #119108: tolerance issue
-                   DecorateInfo(skipIfMPS, 'TestModule', dtypes=[torch.float16], device_type='mps'),)
+                   DecorateInfo(skipIfMPS, 'TestModule', dtypes=[torch.float16]),)
                ),
     ModuleInfo(torch.nn.CrossEntropyLoss,
                module_inputs_func=module_inputs_torch_nn_CrossEntropyLoss,
@@ -4029,7 +4026,7 @@ module_db: List[ModuleInfo] = [
                    # No channels_last support for loss functions.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
                    # The operator aten::_ctc_loss is not currently implemented for the MPS device.
-                   DecorateInfo(skipIfMPS, 'TestModule', device_type='mps',),
+                   DecorateInfo(skipIfMPS, 'TestModule'),
                    # derivative for aten::_ctc_loss_backward is not implemented
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_grad'),
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_gradgrad'),
@@ -4064,11 +4061,7 @@ module_db: List[ModuleInfo] = [
                module_inputs_func=module_inputs_torch_nn_Hardshrink,
                skips=(
                    # not supported on MPS backend
-                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_forward', device_type='mps'),
-                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_if_train_and_eval_modes_differ', device_type='mps'),
-                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_memory_format', device_type='mps'),
-                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_non_contiguous_tensors', device_type='mps'),
-                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_save_load', device_type='mps'),),
+                   DecorateInfo(skipMPS),),
                ),
     ModuleInfo(torch.nn.Hardswish,
                module_inputs_func=module_inputs_torch_nn_Hardswish,
@@ -4105,11 +4098,7 @@ module_db: List[ModuleInfo] = [
                train_and_eval_differ=True,
                skips=(
                    # not supported on MPS backend
-                   DecorateInfo(expectedFailureMPS, 'TestModuleMPS', 'test_memory_format'),
-                   DecorateInfo(expectedFailureMPS, 'TestModuleMPS', 'test_non_contiguous_tensors'),
-                   DecorateInfo(expectedFailureMPS, 'TestModuleMPS', 'test_forward'),
-                   DecorateInfo(expectedFailureMPS, 'TestModuleMPS', 'test_non_contiguous'),
-                   DecorateInfo(expectedFailureMPS, 'TestModuleMPS', 'test_save_load'),
+                   DecorateInfo(skipMPS),
                    # No channels_last support for InstanceNorm3d currently.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
                ),
@@ -4117,12 +4106,7 @@ module_db: List[ModuleInfo] = [
                module_inputs_func=module_inputs_torch_nn_LocalResponseNorm,
                skips=(
                    # uses avg_pool3d which is not supported on MPS backend
-                   DecorateInfo(expectedFailureMPS, 'TestModule', 'test_memory_format'),
-                   DecorateInfo(expectedFailureMPS, 'TestModule', 'test_non_contiguous_tensors'),
-                   DecorateInfo(expectedFailureMPS, 'TestModule', 'test_forward'),
-                   DecorateInfo(expectedFailureMPS, 'TestModule', 'test_if_train_and_eval_modes_differ'),
-                   DecorateInfo(expectedFailureMPS, 'TestModule', 'test_non_contiguous'),
-                   DecorateInfo(expectedFailureMPS, 'TestModule', 'test_save_load'),)
+                   DecorateInfo(skipMPS),)
                ),
     ModuleInfo(torch.nn.LayerNorm,
                module_inputs_func=module_inputs_torch_nn_LayerNorm,

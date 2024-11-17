@@ -280,22 +280,13 @@ class TestCKBackend(TestCase):
     @parametrize("dtype", (torch.bfloat16,))
     @parametrize("use_fast_accum", (True,))
     @parametrize("quantize_type", ("tensorwise", "rowwise"))
-    @parametrize("has_bias", (True, False))
     def test_max_autotune_scaled_mm(
-        self, max_autotune_gemm_backends, dtype, use_fast_accum, quantize_type, has_bias
+        self, max_autotune_gemm_backends, dtype, use_fast_accum, quantize_type
     ):
         tensor_options = {"device": "cuda", "dtype": dtype}
 
-        M = 2240
-        N = 2048
-        K = 256
-
-        x = torch.randn(M, K, **tensor_options)
-        w = torch.randn(N, K, **tensor_options)
-
-        bias = None
-        if has_bias:
-            bias = torch.randn(N, **tensor_options)
+        x = torch.randn(2240, 256, **tensor_options)
+        w = torch.randn(2048, 256, **tensor_options)
 
         dtype_float8 = torch.float8_e4m3fnuz
 
@@ -312,6 +303,8 @@ class TestCKBackend(TestCase):
         x_fp8, x_inverse_scale = f_quantize(x, dtype_float8)
 
         assert "rocm" in dir(config)
+
+        bias = None
 
         def linear(x_fp8, x_inverse_scale, w_t_fp8, w_inverse_scale, bias):
             y = torch._scaled_mm(
