@@ -4112,12 +4112,7 @@ def max_pool2d_with_indices_backward(
 
     # we will read this many times, so make sure it is computed
     grad_output.realize_hint()
-    try:
-        gO_stride = grad_output.get_stride()
-    except AttributeError:
-        # some classes don't have `get_stride`
-        # TODO will need a better way of determining if inputs are channels-last
-        gO_stride = None
+    gO_stride = grad_output.maybe_get_stride()
     if isinstance(x, TensorBox) and isinstance(x.data.data, Pointwise):  # type: ignore[attr-defined]
         data = x.data.data  # type: ignore[attr-defined]
         x_buffer = ir.ComputedBuffer(
@@ -6400,7 +6395,7 @@ def triton_kernel_wrap_(
 
 @register_lowering(torch.ops.higher_order.cond)
 def cond(pred, true_fn, false_fn, operands):
-    if is_triton(pred) or any(map(is_triton, operands)):
+    if any(isinstance(x, IRNode) and is_triton(x) for x in [pred, *operands]):
         msg = "control flow operator: torch.cond."
         if stack_trace := V.graph.current_node.meta.get("stack_trace", None):
             msg = f"{msg} Found from : \n {stack_trace}"
@@ -6412,7 +6407,10 @@ def cond(pred, true_fn, false_fn, operands):
 
 @register_lowering(torch.ops.higher_order.while_loop)
 def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs):
-    if any(map(is_triton, carried_inputs + additional_inputs)):
+    if any(
+        isinstance(x, IRNode) and is_triton(x)
+        for x in carried_inputs + additional_inputs
+    ):
         msg = "control flow operator: torch.while_loop."
         if stack_trace := V.graph.current_node.meta.get("stack_trace", None):
             msg = f"{msg} Found from : \n {stack_trace}"

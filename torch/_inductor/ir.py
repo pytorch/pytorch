@@ -439,6 +439,12 @@ class IRNode:
     def get_size(self) -> Sequence[_IntLike]:
         raise NotImplementedError(f"get_size() is not implemented by {type(self)}!")
 
+    def maybe_get_size(self) -> Optional[Sequence[_IntLike]]:
+        try:
+            return self.get_size()
+        except NotImplementedError:
+            return None
+
     @property
     def shape(self) -> Union[_IntLike, sympy.Rel, Sequence[_IntLike]]:
         return self.get_size()
@@ -556,6 +562,12 @@ class IRNode:
         raise NotImplementedError(type(self).__name__)
 
     def constant_to_device(self, device: torch.device) -> IRNode:
+        raise NotImplementedError(type(self).__name__)
+
+    def get_operation_name(self) -> str:
+        raise NotImplementedError(type(self).__name__)
+
+    def get_inputs_that_alias_output(self) -> Sequence[str]:
         raise NotImplementedError(type(self).__name__)
 
     if TYPE_CHECKING:
@@ -3730,7 +3742,7 @@ class Buffer(IRNode):
     def decide_layout(self):  # type: ignore[no-untyped-def]
         pass
 
-    def get_inputs_that_alias_output(self):  # type: ignore[no-untyped-def]
+    def get_inputs_that_alias_output(self) -> Sequence[str]:
         if isinstance(self.layout, NonOwningLayout):
             return [self.layout.view.get_name()]
         return ()
@@ -3765,6 +3777,9 @@ class OperationBuffer(Buffer, Operation):
 
     def get_defining_op(self) -> Operation:
         return self
+
+    # Skip implementation in Buffer
+    get_operation_name = Operation.get_operation_name
 
     def __post_init__(self) -> None:
         Buffer.__post_init__(self)
@@ -3832,6 +3847,9 @@ class ComputedBuffer(OperationBuffer):
 
     def num_reads(self):  # type: ignore[no-untyped-def]
         return self.data.num_reads()
+
+    def get_reads(self) -> OrderedSet[Dep]:
+        return self.data.get_reads()
 
     def get_read_names(self) -> OrderedSet[str]:
         return self.data.get_read_names()
@@ -5876,7 +5894,7 @@ class SetSourceTensorKernel(ExternKernelAlloc):
             MutationOutput(NoneLayout(device=device), storage_tensor, self),
         ]
 
-    def get_inputs_that_alias_output(self):  # type: ignore[no-untyped-def]
+    def get_inputs_that_alias_output(self) -> Sequence[str]:
         return [self.inputs[0].get_name(), self.inputs[1].get_name()]
 
 
@@ -6587,7 +6605,7 @@ class ComplexView(FallbackKernel):
     def should_allocate(self) -> bool:
         return False
 
-    def get_inputs_that_alias_output(self):  # type: ignore[no-untyped-def]
+    def get_inputs_that_alias_output(self) -> Sequence[str]:
         # Signal to codegen that our output buffer isn't safe to reuse
         return [self.inputs[0].get_name()]
 
@@ -6656,7 +6674,7 @@ class MultiOutput(ExternKernel):
     def should_allocate(self) -> bool:
         return False
 
-    def get_inputs_that_alias_output(self):  # type: ignore[no-untyped-def]
+    def get_inputs_that_alias_output(self) -> Sequence[str]:
         return [
             inp.get_name()
             for inp in self.inputs
@@ -6747,6 +6765,12 @@ class MutableBox(IRNode):
 
     def constant_to_device(self, device: torch.device) -> IRNode:
         return self.data.constant_to_device(device)
+
+    def get_operation_name(self) -> str:
+        return self.data.get_operation_name()
+
+    def get_inputs_that_alias_output(self) -> Sequence[str]:
+        return self.data.get_inputs_that_alias_output()
 
     def realize(self):  # type: ignore[no-untyped-def]
         return self.data.realize()
