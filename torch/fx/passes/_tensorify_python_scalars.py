@@ -217,18 +217,25 @@ def tensorify_python_scalars(
             val = node.meta.get("val")
             if isinstance(val, FakeTensor):
                 for dim in val.shape:
-                    if isinstance(dim, torch.SymInt):
-                        for symbol in dim.node.expr.free_symbols:
-                            sources = shape_env.var_to_sources.get(symbol)
-                            for source in sources:
-                                if not TensorifyState.should_specialize(source):
-                                    # In principle, we could support float input that
-                                    # is used to do size compute. The problem is that
-                                    # we don't actually want to tensorify the compute
-                                    # in this case, which means we need codegen support
-                                    # for all symfloats.
-                                    TensorifyState.specialize(source)
-                                    should_restart = True
+                    if not isinstance(dim, torch.SymInt):
+                        continue
+
+                    for symbol in dim.node.expr.free_symbols:
+                        if not symbol_is_type(symbol, SymT.FLOAT):
+                            continue
+
+                        sources = shape_env.var_to_sources.get(symbol)
+                        for source in sources:
+                            if TensorifyState.should_specialize(source):
+                                continue
+
+                            # In principle, we could support float input that
+                            # is used to do size compute. The problem is that
+                            # we don't actually want to tensorify the compute
+                            # in this case, which means we need codegen support
+                            # for all symfloats.
+                            TensorifyState.specialize(source)
+                            should_restart = True
 
             # Look for functions to convert
             if node.op == "call_function" and node.target in SUPPORTED_OPS:
