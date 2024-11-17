@@ -95,7 +95,7 @@ if (SYCL_COMPILER_VERSION VERSION_LESS_EQUAL PYTORCH_2_5_SYCL_TOOLKIT_VERSION)
   elseif(CMAKE_SYSTEM_NAME MATCHES "Windows")
     # On Windows, the SYCL library is named sycl7.lib until PYTORCH_2_5_SYCL_TOOLKIT_VERSION.
     # sycl.lib is supported in the later version.
-    set(sycl_lib_sufix "7")
+    set(sycl_lib_suffix "7")
   endif()
 endif()
 
