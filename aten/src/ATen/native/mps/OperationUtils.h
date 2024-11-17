@@ -390,6 +390,46 @@ static inline void mtl_setBytes(id<MTLComputeCommandEncoder> encoder, const Cont
   [encoder setBytes:values.data() length:sizeof(typename Container::value_type) * values.size() atIndex: idx];
 }
 
+namespace details {
+template<typename T>
+inline void mtl_setArg(id<MTLComputeCommandEncoder> encoder, const T& val, unsigned idx) {
+  mtl_setBytes(encoder, val, idx);
+}
+
+inline void mtl_setArg(id<MTLComputeCommandEncoder> encoder, id<MTLBuffer> val, unsigned idx) {
+  [encoder setBuffer:val offset:0 atIndex:idx];
+}
+
+template<>
+inline void mtl_setArg(id<MTLComputeCommandEncoder> encoder, const Tensor& val, unsigned idx) {
+  mtl_setBuffer(encoder, val, idx);
+}
+
+template<>
+inline void mtl_setArg(id<MTLComputeCommandEncoder> encoder, const std::optional<Tensor>& val, unsigned idx) {
+  if (val.has_value()) {
+    mtl_setBuffer(encoder, val.value(), idx);
+  }
+}
+
+template<>
+inline void mtl_setArg(id<MTLComputeCommandEncoder> encoder, const TensorBase& val, unsigned idx) {
+  mtl_setBuffer(encoder, val, idx);
+}
+} // namespace details
+
+template<unsigned idx = 0, typename T>
+static inline void mtl_setArgs(id<MTLComputeCommandEncoder> encoder, const T& val) {
+  details::mtl_setArg(encoder, val, idx);
+}
+
+template<unsigned idx = 0, typename T, typename... Args>
+static inline void mtl_setArgs(id<MTLComputeCommandEncoder> encoder, const T& val, Args... args) {
+  details::mtl_setArg(encoder, val, idx);
+  mtl_setArgs<idx+1>(encoder, args...);
+}
+
+
 static inline void mtl_dispatch1DJob(id<MTLComputeCommandEncoder> encoder,
                                      id<MTLComputePipelineState> cplState,
                                      uint32_t length) {

@@ -42,12 +42,7 @@ struct FusedAdamEncodingFunctor {
     [computeEncoder setBytes:&metadata_arguments
                                   length:sizeof(MetadataArguments)
                                   atIndex:1];
-    mtl_setBytes(computeEncoder, lr_lv, 2);
-    mtl_setBytes(computeEncoder, beta1_lv, 3);
-    mtl_setBytes(computeEncoder, beta2_lv, 4);
-    mtl_setBytes(computeEncoder, weight_decay_lv, 5);
-    mtl_setBytes(computeEncoder, eps_lv, 6);
-    mtl_setBytes(computeEncoder, maximize_lv, 7);
+    mtl_setArgs<2>(computeEncoder, lr_lv, beta1_lv, beta2_lv, weight_decay_lv, eps_lv, maximize_lv);
   }
 
   void operator()(
@@ -73,12 +68,7 @@ struct FusedAdamEncodingFunctor {
     [computeEncoder setBytes:&metadata_arguments
                                   length:sizeof(MetadataArguments)
                                   atIndex:1];
-    mtl_setBuffer(computeEncoder, lr, 2);
-    mtl_setBytes(computeEncoder, beta1_lv, 3);
-    mtl_setBytes(computeEncoder, beta2_lv, 4);
-    mtl_setBytes(computeEncoder, weight_decay_lv, 5);
-    mtl_setBytes(computeEncoder, eps_lv, 6);
-    mtl_setBytes(computeEncoder, maximize_lv, 7);
+    mtl_setArgs<2>(computeEncoder, lr, beta1_lv, beta2_lv, weight_decay_lv, eps_lv, maximize_lv);
   }
 };
 
@@ -113,13 +103,7 @@ struct FusedSgdEncodingFunctor<true> {
       [computeEncoder setBytes:&metadata_arguments
                                   length:sizeof(MetadataArguments)
                                   atIndex:1];
-      mtl_setBytes(computeEncoder, weight_decay_lv, 2);
-      mtl_setBytes(computeEncoder, momentum_lv, 3);
-      mtl_setBytes(computeEncoder, lr_lv, 4);
-      mtl_setBytes(computeEncoder, dampening_lv, 5);
-      mtl_setBytes(computeEncoder, nesterov_lv, 6);
-      mtl_setBytes(computeEncoder, maximize_lv, 7);
-      mtl_setBytes(computeEncoder, is_first_step_lv, 8);
+      mtl_setArgs<2>(computeEncoder, weight_decay_lv, momentum_lv, lr_lv, dampening_lv, nesterov_lv, maximize_lv, is_first_step_lv);
   }
 
   void operator()(
@@ -147,13 +131,7 @@ struct FusedSgdEncodingFunctor<true> {
       [computeEncoder setBytes:&metadata_arguments
                                   length:sizeof(MetadataArguments)
                                   atIndex:1];
-      mtl_setBytes(computeEncoder, weight_decay_lv, 2);
-      mtl_setBytes(computeEncoder, momentum_lv, 3);
-      mtl_setBuffer(computeEncoder, lr, 4);
-      mtl_setBytes(computeEncoder, dampening_lv, 5);
-      mtl_setBytes(computeEncoder, nesterov_lv, 6);
-      mtl_setBytes(computeEncoder, maximize_lv, 7);
-      mtl_setBytes(computeEncoder, is_first_step_lv, 8);
+      mtl_setArgs<2>(computeEncoder, weight_decay_lv, momentum_lv, lr, dampening_lv, nesterov_lv, maximize_lv, is_first_step_lv);
   }
 };
 
@@ -177,9 +155,7 @@ struct FusedSgdEncodingFunctor<false> {
       [computeEncoder setBytes:&metadata_arguments
                                   length:sizeof(MetadataArguments)
                                   atIndex:1];
-      mtl_setBytes(computeEncoder, weight_decay_lv, 2);
-      mtl_setBytes(computeEncoder, lr_lv, 3);
-      mtl_setBytes(computeEncoder, maximize_lv, 4);
+      mtl_setArgs<2>(computeEncoder, weight_decay_lv, lr_lv, maximize_lv);
   }
 
   void operator()(
@@ -199,9 +175,7 @@ struct FusedSgdEncodingFunctor<false> {
       [computeEncoder setBytes:&metadata_arguments
                                   length:sizeof(MetadataArguments)
                                   atIndex:1];
-      mtl_setBytes(computeEncoder, weight_decay_lv, 2);
-      mtl_setBuffer(computeEncoder, lr, 3);
-      mtl_setBytes(computeEncoder, maximize_lv, 4);
+      mtl_setArgs<2>(computeEncoder, weight_decay_lv, lr, maximize_lv);
   }
 };
 
