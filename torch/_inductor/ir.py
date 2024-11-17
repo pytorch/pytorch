@@ -443,6 +443,10 @@ class IRNode:
         except NotImplementedError:
             return None
 
+    def has_tensor_output(self) -> bool:
+        """True for single tensor output (excludes MultiOutput)"""
+        return isinstance(self.get_output_spec(), Layout)
+
     def get_size(self) -> Sequence[_IntLike]:
         raise NotImplementedError(f"get_size() is not implemented by {type(self)}!")
 
@@ -3833,6 +3837,9 @@ class NoneAsConstantBuffer(IRNode):
 
     def codegen_reference(self, writer=None):  # type: ignore[no-untyped-def]
         return V.graph.wrapper_code.none_str
+
+    def get_output_spec(self) -> OutputSpec:
+        return NoneLayout(device=torch.device("meta"))
 
 
 @ir_dataclass

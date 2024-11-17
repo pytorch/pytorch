@@ -1131,7 +1131,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
         op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]  # noqa: F821
     ) -> bool:
         X, W = self.input_nodes[0], self.input_nodes[1]
-        return X.layout.size[1] == W.layout.size[0]
+        return X.get_size()[1] == W.get_size()[0]
 
     def _alignment_match(
         self,
@@ -1392,9 +1392,9 @@ class CUTLASS2xGemmTemplate(CUTLASSGemmTemplate):
         X, W = self.input_nodes[0], self.input_nodes[1]
 
         if op.gemm_kind == cutlass_lib.GemmKind.Sparse:
-            return X.layout.size[1] * 2 == W.layout.size[0]
+            return X.get_size()[1] * 2 == W.get_size()[0]
 
-        return X.layout.size[1] == W.layout.size[0]
+        return X.get_size()[1] == W.get_size()[0]
 
     def _alignment_match(
         self,
@@ -1411,7 +1411,7 @@ class CUTLASS2xGemmTemplate(CUTLASSGemmTemplate):
         # https://github.com/NVIDIA/cutlass/blob/e01b9b5029b7caca5a43c29f7d2714d7cf1dcae8/include/cutlass/gemm/kernel/sparse_gemm.h#L198-L200  # noqa: B950
         # So, let's skip these choices if that would be the case.
         X = self.input_nodes[0]
-        return (X.layout.size[1] * 2) % op.tile_description.tile_shape[2] == 0
+        return (X.get_size()[1] * 2) % op.tile_description.tile_shape[2] == 0
 
     def _set_bias_layout_and_alignment(
         self,
