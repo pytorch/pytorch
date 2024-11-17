@@ -222,6 +222,11 @@ def tensorify_python_scalars(
                             sources = shape_env.var_to_sources.get(symbol)
                             for source in sources:
                                 if not TensorifyState.should_specialize(source):
+                                    # In principle, we could support float input that
+                                    # is used to do size compute. The problem is that
+                                    # we don't actually want to tensorify the compute
+                                    # in this case, which means we need codegen support
+                                    # for all symfloats.
                                     TensorifyState.specialize(source)
                                     should_restart = True
 
