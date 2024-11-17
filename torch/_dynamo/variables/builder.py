@@ -1887,6 +1887,9 @@ class VariableBuilder:
         return unspec_var
 
     def wrap_symfloat(self, value):
+        # To prevent circular import
+        from ..symbolic_convert import TensorifyState
+
         # SymFloat wrapping is special.  We first wrap it in the same way we
         # do an unspecialized primitive, and then we item() it into a
         # SymFloat.  Removal of the item() call is left to a later FX pass,
@@ -1903,6 +1906,7 @@ class VariableBuilder:
             or is_constant_source(self.get_source())
             or math.isnan(value)
             or math.isinf(value)
+            or TensorifyState.should_specialize(self.source)
         ):
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
             return ConstantVariable.create(value=value, source=self.source)
