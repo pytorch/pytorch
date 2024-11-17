@@ -808,13 +808,11 @@ class GraphLowering(torch.fx.Interpreter):
         raise KeyError(f"could not find {buffer_name}")
 
     def get_numel(self, buffer_name: str) -> Union[int, Expr]:
-        from .ir import MultiOutputLayout
-
         if buffer_name in self.constants:
             return self.constants[buffer_name].numel()
         if buffer_name in self.name_to_buffer:
             buf = self.name_to_buffer[buffer_name]
-            if isinstance(getattr(buf, "layout", None), MultiOutputLayout):
+            if not buf.has_tensor_output():
                 return 1
             return buf.get_numel()
         if buffer_name in self.graph_inputs:
@@ -1158,7 +1156,7 @@ class GraphLowering(torch.fx.Interpreter):
         for r, fx_node in zip(result, fx_node_args):
             if not isinstance(r, (ir.TensorBox, ir.BaseView)):
                 result_correct_strides.append(r)
-            elif isinstance(r.get_layout(), ir.CommBufferLayout):
+            elif isinstance(r.get_output_spec(), ir.CommBufferLayout):
                 # Active references to persistent comm buffers are not allowed
                 # outside of graphs
                 result_correct_strides.append(ir.ExternKernel.copy_input(r))
@@ -1262,7 +1260,7 @@ class GraphLowering(torch.fx.Interpreter):
             return tensor
 
         storage, old_layout = torch._inductor.ir.as_storage_and_layout(tensor)
-        new_stride = list(old_layout.stride)
+        new_stride = [*old_layout.stride]
         for i, s in enumerate(tensor.get_size()):
             if self.sizevars.statically_known_leq(s, 1):  # type: ignore[arg-type]
                 new_stride[i] = meta_strides[i]
@@ -1446,11 +1444,7 @@ class GraphLowering(torch.fx.Interpreter):
                 result.realize()
                 strides = n.meta["val"].stride()
                 sym_strides = torch._inductor.utils.any_is_symbolic(*strides)
-                if (
-                    not hasattr(result, "get_stride")
-                    or result.get_stride() != strides
-                    and not sym_strides
-                ):
+                if result.maybe_get_stride() != strides and not sym_strides:
                     stride_order = ir.get_stride_order(strides)
                     result = ir.ExternKernel.require_stride_order(result, stride_order)
             if (
