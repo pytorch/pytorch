@@ -139,7 +139,7 @@ class TSBackendImpl : public torch::lazy::BackendImplInterface {
       std::vector<torch::lazy::ComputationPtr> instances) const override;
 
   std::vector<torch::lazy::BackendDataPtr> ExecuteComputation(
-      const torch::lazy::ComputationPtr& computation,
+      torch::lazy::ComputationPtr computation,
       c10::ArrayRef<torch::lazy::BackendDataPtr> arguments,
       const torch::lazy::BackendDevice& device) const override;
 
@@ -204,7 +204,7 @@ std::vector<torch::lazy::ComputationPtr> TSBackendImpl::Compile(
 }
 
 std::vector<torch::lazy::BackendDataPtr> TSBackendImpl::ExecuteComputation(
-    const torch::lazy::ComputationPtr& computation,
+    torch::lazy::ComputationPtr computation,
     c10::ArrayRef<torch::lazy::BackendDataPtr> arguments,
     const torch::lazy::BackendDevice& device) const {
   auto ts_computation =

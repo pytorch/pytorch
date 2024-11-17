@@ -34,7 +34,7 @@ void StreamTimer::End() {
 }
 
 float StreamTimer::Duration() {
-  float time = NAN;
+  auto time = std::numeric_limits<float>::quiet_NaN();
   // time is in ms with a resolution of 1 us
   AT_CUDA_CHECK(cudaEventElapsedTime(&time, start_, end_));
   return time;
