@@ -1912,6 +1912,9 @@ class Module:
         if "_backward_pre_hooks" not in self.__dict__:
             self._backward_pre_hooks = OrderedDict()
 
+    # It is crucial that the return type is not annotated as `Any`, otherwise type checking
+    # on `torch.nn.Module` and all its subclasses is largely disabled as a result. See:
+    # https://github.com/pytorch/pytorch/pull/115074
     def __getattr__(self, name: str) -> Union[Tensor, "Module"]:
         if "_parameters" in self.__dict__:
             _parameters = self.__dict__["_parameters"]
