@@ -1638,7 +1638,9 @@ class OutputGraph:
         # save the state of what inputs we should have specialized in dynamo and
         # restart analysis. This function incorporates this "view from the future"
         # state and specializes inputs that we know we won't be able to tensorify
-        # away in the joint pass.
+        # away in the joint pass. In principle we shouldn't choke on unused inputs
+        # and so this shouldn't be necessary. In practice CUDA graphs choke on
+        # unused inputs so we need this for now.
 
         # Import here to prevent circular import
         from torch._dynamo.symbolic_convert import TensorifyState
