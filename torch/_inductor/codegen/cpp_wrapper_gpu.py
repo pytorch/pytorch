@@ -11,6 +11,7 @@ from torch._inductor.codecache import get_cpp_wrapper_cubin_path_name
 from torch._inductor.runtime.triton_heuristics import grid as default_grid_fn
 
 from ..codecache import CudaKernelParamCache
+from ..ir import IRNode
 from ..utils import DeferredLineBase, get_gpu_type
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
@@ -261,7 +262,7 @@ class CppWrapperGpu(CppWrapperCpu):
         ]
         args = [self.val_to_arg_str(v) for v in raw_args]
         arg_types = [
-            arg.get_dtype() if hasattr(arg, "get_dtype") else type(arg)
+            arg.get_dtype() if isinstance(arg, IRNode) else type(arg)
             for arg in raw_args
         ]
         self.generate_kernel_call(

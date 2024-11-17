@@ -338,20 +338,28 @@ def may_convert_to_optional(
     return value
 
 
-def get_device_type(x: object) -> Optional[str]:
-    if get_device := getattr(x, "get_device", None):
-        return get_device_type(get_device())
-    if isinstance(x, torch.device):
+def get_device_type(x: Union[IRNode, torch.device, None, str]) -> Optional[str]:
+    if isinstance(x, str) or x is None:
+        return x
+    elif isinstance(x, torch.device):
         return x.type
-    return None
+    elif isinstance(x, IRNode):
+        try:
+            return x.get_device().type
+        except NoDevice:
+            return None
+    raise NotImplementedError(f"get_device_type({x}: {type(x).__name__})")
 
 
-def is_triton(x: object) -> bool:
-    dtype = get_device_type(x)
-    return bool(dtype and is_gpu(dtype))
+class NoDevice(NotImplementedError):
+    pass
 
 
-def is_cpu(x: object) -> bool:
+def is_triton(x: Union[IRNode, torch.device, None, str]) -> bool:
+    return is_gpu(get_device_type(x))
+
+
+def is_cpu(x: Union[IRNode, torch.device, None, str]) -> bool:
     return get_device_type(x) == "cpu"
 
 
@@ -422,8 +430,20 @@ class IRNode:
     def get_layout(self) -> _AnyLayout:
         raise NotImplementedError(f"get_layout() is not implemented by {type(self)}!")
 
+    def maybe_get_layout(self) -> Optional[_AnyLayout]:
+        try:
+            return self.get_layout()
+        except NotImplementedError:
+            return None
+
     def get_size(self) -> Sequence[_IntLike]:
         raise NotImplementedError(f"get_size() is not implemented by {type(self)}!")
+
+    def maybe_get_size(self) -> Optional[Sequence[_IntLike]]:
+        try:
+            return self.get_size()
+        except NotImplementedError:
+            return None
 
     @property
     def shape(self) -> Union[_IntLike, sympy.Rel, Sequence[_IntLike]]:
@@ -456,28 +476,107 @@ class IRNode:
     def codegen_reference(self, writer: Optional[IndentedBuffer] = None) -> str:
         raise NotImplementedError(f"codegen_reference NYI on {type(self)}")
 
-    # The abstract method declarations below serve to convince mypy that all IRNode instances have these functions
-    # defined, while having no effect at runtime. We cannot create stub implementations here because other parts of
-    # the code dynamically check for defined attributes.
-    get_device: Callable[[], torch.device]
-    get_name: Callable[[], str]
-    get_reads: Callable[[], Any]
-    num_reads: Callable[[], int]
-    get_stride: Callable[[], Any]
-    get_storage_numel: Callable[[], _IntLike]
-    has_exceeded_max_reads: Callable[[], bool]
-    make_loader: Callable[[], Callable[[Sequence[_IntLike]], OpsValue]]
-    make_indexer: Callable[[], Callable[[Sequence[_IntLike]], _IntLike]]
-    realize_hint: Callable[[], None]
-    get_unbacked_symbol_uses: Callable[[], OrderedSet[Symbol]]
+    def get_device(self) -> torch.device:
+        raise NoDevice(f"{self.__class__.__name__} does not implement get_device()")
+
+    def has_exceeded_max_reads(self) -> bool:
+        raise NotImplementedError(type(self).__name__)
+
+    def make_loader(self) -> Callable[[Sequence[_IntLike]], OpsValue]:
+        raise NotImplementedError(type(self).__name__)
+
+    def make_indexer(self) -> Callable[[Sequence[_IntLike]], _IntLike]:
+        raise NotImplementedError(type(self).__name__)
+
+    def get_stride(self) -> Sequence[_IntLike]:
+        raise NotImplementedError(type(self).__name__)
+
+    def maybe_get_stride(self) -> Optional[Sequence[_IntLike]]:
+        try:
+            return self.get_stride()
+        except NotImplementedError:
+            return None
+
+    def get_name(self) -> str:
+        raise NotImplementedError(type(self).__name__)
+
+    def maybe_get_name(self) -> Optional[str]:
+        try:
+            return self.get_name()
+        except NotImplementedError:
+            return None
+
+    def has_large_inner_fn(self, threshold: Optional[int] = None) -> bool:
+        raise NotImplementedError(type(self).__name__)
+
+    def mark_reuse(self, users: int) -> None:
+        raise NotImplementedError(type(self).__name__)
+
+    def realize_hint(self) -> None:
+        raise NotImplementedError(type(self).__name__)
+
+    def unwrap_view(self) -> IRNode:
+        raise NotImplementedError(type(self).__name__)
+
+    def freeze_layout(self) -> None:
+        raise NotImplementedError(type(self).__name__)
+
+    def freeze_layout_with_stride_order(
+        self, order: List[int], allow_padding: bool = False
+    ) -> None:
+        raise NotImplementedError(type(self).__name__)
+
+    def freeze_layout_with_fill_order(self, order: List[int]) -> None:
+        raise NotImplementedError(type(self).__name__)
+
+    def freeze_layout_with_same_order(self, stride: List[_IntLike]) -> None:
+        raise NotImplementedError(type(self).__name__)
+
+    def freeze_layout_with_exact_strides(
+        self, exact_strides: List[_IntLike], allow_padding: bool = False
+    ) -> None:
+        raise NotImplementedError(type(self).__name__)
+
+    def get_reads(self) -> OrderedSet[Dep]:
+        raise NotImplementedError(type(self).__name__)
+
+    def num_reads(self) -> int:
+        raise NotImplementedError(type(self).__name__)
+
+    def get_storage_numel(self) -> _IntLike:
+        raise NotImplementedError(type(self).__name__)
+
+    def get_unbacked_symbol_uses(self) -> OrderedSet[Symbol]:
+        raise NotImplementedError(type(self).__name__)
+
+    def get_reduction_type(self) -> Optional[str]:
+        raise NotImplementedError(type(self).__name__)
+
+    def get_reduction_size(self) -> Sequence[sympy.Expr]:
+        raise NotImplementedError(type(self).__name__)
+
+    def is_extern(self) -> bool:
+        raise NotImplementedError(type(self).__name__)
+
+    def is_no_op(self) -> bool:
+        raise NotImplementedError(type(self).__name__)
+
+    def constant_to_device(self, device: torch.device) -> IRNode:
+        raise NotImplementedError(type(self).__name__)
+
+    def get_mutation_names(self) -> Sequence[str]:
+        raise NotImplementedError(type(self).__name__)
+
+    def get_operation_name(self) -> str:
+        raise NotImplementedError(type(self).__name__)
+
+    def get_inputs_that_alias_output(self) -> Sequence[str]:
+        raise NotImplementedError(type(self).__name__)
 
     if TYPE_CHECKING:
 
         @property
         def dtype(self) -> torch.dtype:
-            ...
-
-        def mark_reuse(self, users: int) -> None:
             ...
 
 
@@ -486,7 +585,7 @@ class Operation:
     def __post_init__(self) -> None:
         self.operation_name: Optional[str] = None
 
-    def get_device(self):  # type: ignore[no-untyped-def]
+    def get_device(self) -> torch.device:
         raise NotImplementedError
 
     def get_origin_node(self):  # type: ignore[no-untyped-def]
@@ -643,7 +742,7 @@ class Loops(IRNode):
         index = self._index(self.ranges)
         return extract_free_unbacked_symbols(self.inner_fn, index)
 
-    def get_reads(self) -> Set[Dep]:
+    def get_reads(self) -> OrderedSet[Dep]:
         with patch.object(FlexibleLayout, "allow_indexing", True):
             if self.get_reduction_type():
                 return extract_read_writes(
@@ -663,7 +762,7 @@ class Loops(IRNode):
     def num_reads(self):  # type: ignore[no-untyped-def]
         return len(self.inner_fn_opcount().read_buffers)
 
-    def get_reduction_size(self) -> Sequence[_IntLike]:
+    def get_reduction_size(self) -> Sequence[sympy.Expr]:
         raise NotImplementedError(
             f"get_reduction_size() is not implemented by {type(self)}!"
         )
@@ -695,7 +794,7 @@ class Pointwise(Loops):
 
         return self.inner_fn
 
-    def get_reduction_size(self) -> Sequence[_IntLike]:
+    def get_reduction_size(self) -> Sequence[sympy.Expr]:
         return []
 
     def get_reduction_type(self) -> Optional[str]:
@@ -862,7 +961,7 @@ class Reduction(Loops):
             *(free_unbacked_symbols(e) for e in self.reduction_ranges)
         )
 
-    def get_reduction_size(self) -> Sequence[_IntLike]:
+    def get_reduction_size(self) -> Sequence[sympy.Expr]:
         return self.reduction_ranges
 
     def get_reduction_type(self) -> Optional[str]:
@@ -2311,7 +2410,7 @@ class BaseView(IRNode):
     def get_layout(self):  # type: ignore[no-untyped-def]
         return self.data.get_layout()
 
-    def get_device(self):  # type: ignore[no-untyped-def]
+    def get_device(self) -> torch.device:
         return self.data.get_device()
 
     def get_origin_node(self):  # type: ignore[no-untyped-def]
@@ -2326,7 +2425,7 @@ class BaseView(IRNode):
     def mark_reuse(self, users):  # type: ignore[no-untyped-def]
         return self.data.mark_reuse(users)
 
-    def has_exceeded_max_reads(self):  # type: ignore[no-untyped-def]
+    def has_exceeded_max_reads(self) -> bool:
         return self.data.has_exceeded_max_reads()
 
     def realize(self):  # type: ignore[no-untyped-def]
@@ -2756,7 +2855,7 @@ class ReinterpretView(BaseView):
     def get_name(self):  # type: ignore[no-untyped-def]
         return self.data.get_name()
 
-    def get_device(self):  # type: ignore[no-untyped-def]
+    def get_device(self) -> torch.device:
         return self.layout.device
 
     def get_origin_node(self):  # type: ignore[no-untyped-def]
@@ -2940,7 +3039,7 @@ class BaseConstant(IRNode):
     def get_size(self):  # type: ignore[no-untyped-def]
         return ()
 
-    def get_device(self):  # type: ignore[no-untyped-def]
+    def get_device(self) -> torch.device:
         return self.device
 
     def get_origin_node(self):  # type: ignore[no-untyped-def]
@@ -3576,7 +3675,7 @@ class Buffer(IRNode):
         assert self.name, self
         return self.name
 
-    def get_device(self):  # type: ignore[no-untyped-def]
+    def get_device(self) -> torch.device:
         return self.layout.device
 
     def get_defining_op(self) -> Optional[Operation]:
@@ -3646,12 +3745,12 @@ class Buffer(IRNode):
     def decide_layout(self):  # type: ignore[no-untyped-def]
         pass
 
-    def get_inputs_that_alias_output(self):  # type: ignore[no-untyped-def]
+    def get_inputs_that_alias_output(self) -> Sequence[str]:
         if isinstance(self.layout, NonOwningLayout):
             return [self.layout.view.get_name()]
         return ()
 
-    def get_mutation_names(self):  # type: ignore[no-untyped-def]
+    def get_mutation_names(self) -> Sequence[str]:
         if isinstance(self.layout, MutationLayoutSHOULDREMOVE):
             return [self.layout.target.get_name()]
         return ()
@@ -3681,6 +3780,9 @@ class OperationBuffer(Buffer, Operation):
 
     def get_defining_op(self) -> Operation:
         return self
+
+    # Skip implementation in Buffer
+    get_operation_name = Operation.get_operation_name
 
     def __post_init__(self) -> None:
         Buffer.__post_init__(self)
@@ -3749,6 +3851,9 @@ class ComputedBuffer(OperationBuffer):
     def num_reads(self):  # type: ignore[no-untyped-def]
         return self.data.num_reads()
 
+    def get_reads(self) -> OrderedSet[Dep]:
+        return self.data.get_reads()
+
     def get_read_names(self) -> OrderedSet[str]:
         return self.data.get_read_names()
 
@@ -3791,14 +3896,13 @@ class ComputedBuffer(OperationBuffer):
             | self.data.get_unbacked_symbol_uses()
         )
 
-    def make_loader(self):  # type: ignore[no-untyped-def]
-        # Inline constants and index_expressions
+    def make_loader(self) -> Callable[[Sequence[_IntLike]], OpsValue]:
         if (
-            hasattr(self.data, "make_loader")
+            not self.get_reduction_type()
             and self.name not in V.graph.mutated_buffers
             and self.num_reads() == 0
         ):
-            # can be inlined
+            # inline this op rather than generating ops.load()
             return self.data.make_loader()
         return super().make_loader()
 
@@ -4356,6 +4460,9 @@ class InputsKernel(OperationBuffer):
 
     def is_extern(self) -> bool:
         return True
+
+    def is_no_op(self) -> bool:
+        return False
 
     def num_reads(self) -> int:
         return 1
@@ -5001,7 +5108,7 @@ class ExternKernel(InputsKernel):
             and isinstance(x.data, BaseView)
             and not isinstance(x.data, ReinterpretView)
             and is_storage_and_layout(x.unwrap_view())
-            and not isinstance(x.unwrap_view().data, ExternKernelAlloc)
+            and not isinstance(x.unwrap_view().data, ExternKernelAlloc)  # type: ignore[attr-defined]
         ):
             try:
                 x.data = cls.convert_to_reinterpret_view(x.data)
@@ -5790,7 +5897,7 @@ class SetSourceTensorKernel(ExternKernelAlloc):
             MutationOutput(NoneLayout(device=device), storage_tensor, self),
         ]
 
-    def get_inputs_that_alias_output(self):  # type: ignore[no-untyped-def]
+    def get_inputs_that_alias_output(self) -> Sequence[str]:
         return [self.inputs[0].get_name(), self.inputs[1].get_name()]
 
 
@@ -6501,7 +6608,7 @@ class ComplexView(FallbackKernel):
     def should_allocate(self) -> bool:
         return False
 
-    def get_inputs_that_alias_output(self):  # type: ignore[no-untyped-def]
+    def get_inputs_that_alias_output(self) -> Sequence[str]:
         # Signal to codegen that our output buffer isn't safe to reuse
         return [self.inputs[0].get_name()]
 
@@ -6570,7 +6677,7 @@ class MultiOutput(ExternKernel):
     def should_allocate(self) -> bool:
         return False
 
-    def get_inputs_that_alias_output(self):  # type: ignore[no-untyped-def]
+    def get_inputs_that_alias_output(self) -> Sequence[str]:
         return [
             inp.get_name()
             for inp in self.inputs
@@ -6589,11 +6696,87 @@ class MutableBox(IRNode):
 
     data: IRNode
 
-    def __getattr__(self, name):  # type: ignore[no-untyped-def]
-        fn = getattr(self.data, name)
-        if callable(fn):
-            return fn
-        raise AttributeError(f"{type(self.data).__name__}.{name} not callable")
+    def has_exceeded_max_reads(self) -> bool:
+        return self.data.has_exceeded_max_reads()
+
+    def get_device(self) -> torch.device:
+        return self.data.get_device()
+
+    def make_loader(self) -> Callable[[Sequence[_IntLike]], OpsValue]:
+        return self.data.make_loader()
+
+    def make_indexer(self) -> Callable[[Sequence[_IntLike]], _IntLike]:
+        return self.data.make_indexer()
+
+    def get_stride(self) -> Sequence[_IntLike]:
+        return self.data.get_stride()
+
+    def get_name(self) -> str:
+        return self.data.get_name()
+
+    def has_large_inner_fn(self, threshold: Optional[int] = None) -> bool:
+        return self.data.has_large_inner_fn(threshold)
+
+    def mark_reuse(self, users: int) -> None:
+        return self.data.mark_reuse(users)
+
+    def realize_hint(self) -> None:
+        return self.data.realize_hint()
+
+    def unwrap_view(self) -> IRNode:
+        return self.data.unwrap_view()
+
+    def freeze_layout(self) -> None:
+        return self.data.freeze_layout()
+
+    def freeze_layout_with_stride_order(
+        self, order: List[int], allow_padding: bool = False
+    ) -> None:
+        return self.data.freeze_layout_with_stride_order(order, allow_padding)
+
+    def freeze_layout_with_fill_order(self, order: List[int]) -> None:
+        return self.data.freeze_layout_with_fill_order(order)
+
+    def freeze_layout_with_same_order(self, stride: List[_IntLike]) -> None:
+        return self.data.freeze_layout_with_same_order(stride)
+
+    def freeze_layout_with_exact_strides(
+        self, exact_strides: List[_IntLike], allow_padding: bool = False
+    ) -> None:
+        return self.data.freeze_layout_with_exact_strides(exact_strides, allow_padding)
+
+    def get_reads(self) -> OrderedSet[Dep]:
+        return self.data.get_reads()
+
+    def num_reads(self) -> int:
+        return self.data.num_reads()
+
+    def get_storage_numel(self) -> _IntLike:
+        return self.data.get_storage_numel()
+
+    def get_reduction_type(self) -> Optional[str]:
+        return self.data.get_reduction_type()
+
+    def get_reduction_size(self) -> Sequence[_IntLike]:
+        return self.data.get_reduction_size()
+
+    def is_extern(self) -> bool:
+        return self.data.is_extern()
+
+    def is_no_op(self) -> bool:
+        return self.data.is_no_op()
+
+    def constant_to_device(self, device: torch.device) -> IRNode:
+        return self.data.constant_to_device(device)
+
+    def get_mutation_names(self) -> Sequence[str]:
+        return self.data.get_mutation_names()
+
+    def get_operation_name(self) -> str:
+        return self.data.get_operation_name()
+
+    def get_inputs_that_alias_output(self) -> Sequence[str]:
+        return self.data.get_inputs_that_alias_output()
 
     def realize(self):  # type: ignore[no-untyped-def]
         return self.data.realize()
@@ -6612,10 +6795,10 @@ class MutableBox(IRNode):
 
     @property
     def layout(self):  # type: ignore[no-untyped-def]
-        return self.data.get_layout()
+        return self.get_layout()
 
     def get_layout(self):  # type: ignore[no-untyped-def]
-        return self.layout
+        return self.data.get_layout()
 
     def get_size(self):  # type: ignore[no-untyped-def]
         return self.data.get_size()
@@ -6705,7 +6888,7 @@ class StorageBox(MutableBox):
         ):
             self.realize()
 
-    def has_exceeded_max_reads(self):  # type: ignore[no-untyped-def]
+    def has_exceeded_max_reads(self) -> bool:
         return isinstance(self.data, Pointwise) and (
             self.num_reads() > config.realize_acc_reads_threshold
             or self.has_large_inner_fn()
@@ -7143,9 +7326,6 @@ class TorchBindObject(IRNode):
 
     def get_name(self):  # type: ignore[no-untyped-def]
         return self.name
-
-    def get_device(self):  # type: ignore[no-untyped-def]
-        return None  # is there a device??
 
     def codegen_reference(self, writer=None):  # type: ignore[no-untyped-def]
         return self.name
