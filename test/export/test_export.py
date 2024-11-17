@@ -7356,6 +7356,17 @@ def forward(self, p_bar_linear_weight, p_bar_linear_bias, x):
         mod(torch.randn(10, 10))
         export(mod, (torch.randn(10, 10),), strict=False)
 
+    def test_profiling_code(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                with torch.profiler.record_function("foo"):
+                    return x.sin()
+
+        ep = export(Foo(), (torch.randn(5, 5),))
+        FileCheck().check_count(
+            "torch.ops.profiler._record_function_enter_new.default", 0, exactly=True
+        ).run(ep.graph_module.code)
+
     def test_predispatch_cond(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
