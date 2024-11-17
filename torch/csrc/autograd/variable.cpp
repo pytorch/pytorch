@@ -269,7 +269,7 @@ void create_cpp_hook(const at::TensorBase& self, bool is_retains_grad_hook) {
 
 void set_grad_accumulator(
     const Variable& self,
-    std::weak_ptr<Node> grad_accumulator) {
+    const std::weak_ptr<Node>& grad_accumulator) {
   materialize_autograd_meta(self)->grad_accumulator_ =
       std::move(grad_accumulator);
 }

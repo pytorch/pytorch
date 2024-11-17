@@ -122,7 +122,7 @@ TORCH_API AutogradMeta* materialize_autograd_meta(const at::TensorBase&);
 /// leaf variables. Interior variables should call `set_gradient_edge()`.
 TORCH_API void set_grad_accumulator(
     const Variable&,
-    std::weak_ptr<Node> grad_accumulator);
+    const std::weak_ptr<Node>& grad_accumulator);
 
 /// Attempts to get a pointer to the gradient accumulator of the `Variable`,
 /// if it still exists. If the gradient accumulator function has been
