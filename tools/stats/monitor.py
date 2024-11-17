@@ -125,7 +125,7 @@ if __name__ == "__main__":
     if has_pynvml:
         gpu_libs_detected.append("pynvml")
         num_of_gpu = pynvml.nvmlDeviceGetCount()
-        gpu_handles = [nvmlDevipynvmlceGetHandleByIndex(i) for i in range(pynvml.nvmlDeviceGetCount())]
+        gpu_handles = [pynvml.nvmlDevipynvmlceGetHandleByIndex(i) for i in range(pynvml.nvmlDeviceGetCount())]
     if has_amdsmi:
         gpu_libs_detected.append("amdsmi")
         gpu_handles  = amdsmi.amdsmi_get_processor_handles()
@@ -137,20 +137,6 @@ if __name__ == "__main__":
         "gpu":  gpu_libs_detected,
         "num_of_gpus":len(gpu_handles)
     }
-
-    if has_pynvml:
-        errors = []
-        names  = []
-        for gpu_handle in gpu_handles:
-            try:
-                device_name = pynvml.nvmlDeviceGetName(gpu_handle)
-                names.append(device_name)
-            except pynvml.NVMLError as handle_error:
-                errors.append(f"Handle issue detected: {handle_error}")
-        if len(errors)>0:
-            info["error"] = errors
-        if len(names)>0:
-            info["gpu_names"] = names
     print(json.dumps(info))
     while not kill_now:
         try:
