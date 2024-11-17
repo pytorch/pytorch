@@ -389,63 +389,21 @@ static inline void mtl_setBuffer(encoder_t encoder, const TensorBase& t, unsigne
   [encoder setBuffer:getMTLBufferStorage(t) offset:t.storage_offset() * t.element_size() atIndex:idx];
 }
 
-template <typename T,
-          typename = std::enable_if_t<std::is_integral_v<T> || std::is_same_v<T, float> ||
-                                      (std::is_class_v<T> && std::is_trivially_copyable_v<T>)>>
+template <typename T, typename = std::enable_if_t<std::is_integral_v<T> || std::is_same_v<T, float>>>
 static inline void mtl_setBytes(id<MTLComputeCommandEncoder> encoder, const T val, unsigned idx) {
   [encoder setBytes:&val length:sizeof(T) atIndex:idx];
 }
 
-template <typename Container,
-          typename = std::enable_if_t<std::is_integral_v<typename Container::size_type> &&
-                                      !std::is_trivially_copyable_v<Container>>>
+template <typename Container, typename = std::enable_if_t<std::is_integral_v<typename Container::size_type>>>
 static inline void mtl_setBytes(id<MTLComputeCommandEncoder> encoder, const Container& values, unsigned idx) {
   [encoder setBytes:values.data() length:sizeof(typename Container::value_type) * values.size() atIndex:idx];
 }
 
-namespace details {
-template <typename T>
-inline void mtl_setArg(id<MTLComputeCommandEncoder> encoder, const T& val, unsigned idx) {
-  mtl_setBytes(encoder, val, idx);
-}
-
-inline void mtl_setArg(id<MTLComputeCommandEncoder> encoder, id<MTLBuffer> val, unsigned idx) {
-  [encoder setBuffer:val offset:0 atIndex:idx];
-}
-
-template <>
-inline void mtl_setArg(id<MTLComputeCommandEncoder> encoder, const Tensor& val, unsigned idx) {
-  mtl_setBuffer(encoder, val, idx);
-}
-
-template <>
-inline void mtl_setArg(id<MTLComputeCommandEncoder> encoder, const std::optional<Tensor>& val, unsigned idx) {
-  if (val.has_value()) {
-    mtl_setBuffer(encoder, val.value(), idx);
-  }
-}
-
-template <>
-inline void mtl_setArg(id<MTLComputeCommandEncoder> encoder, const TensorBase& val, unsigned idx) {
-  mtl_setBuffer(encoder, val, idx);
-}
-} // namespace details
-
-template <unsigned idx = 0, typename T>
-static inline void mtl_setArgs(id<MTLComputeCommandEncoder> encoder, const T& val) {
-  details::mtl_setArg(encoder, val, idx);
-}
-
-template <unsigned idx = 0, typename T, typename... Args>
-static inline void mtl_setArgs(id<MTLComputeCommandEncoder> encoder, const T& val, Args... args) {
-  details::mtl_setArg(encoder, val, idx);
-  mtl_setArgs<idx + 1>(encoder, args...);
-}
-
 static inline void mtl_dispatch1DJob(id<MTLComputeCommandEncoder> encoder,
                                      id<MTLComputePipelineState> cplState,
-                                     uint32_t length) {
-  const uint32_t maxThreadsPerGroup = [cplState maxTotalThreadsPerThreadgroup];
+                                     NSUInteger length) {
+  static_assert(sizeof(NSUInteger) == sizeof(uint64_t));
+  const auto maxThreadsPerGroup = [cplState maxTotalThreadsPerThreadgroup];
   auto size = MTLSizeMake(length, 1, 1);
   auto threadGroupSize = MTLSizeMake(std::min(maxThreadsPerGroup, length), 1, 1);
   [encoder dispatchThreads:size threadsPerThreadgroup:threadGroupSize];
