@@ -232,10 +232,13 @@ class MemoryDep(Dep):
             )
         return self
 
-    def numbytes_hint(self):
-        return V.graph.sizevars.size_hint(self.get_numel()) * get_dtype_size(
-            V.graph.get_dtype(self.name)
-        )
+    def numbytes_hint(self) -> int:
+        try:
+            return V.graph.sizevars.size_hint(self.get_numel()) * get_dtype_size(
+                V.graph.get_dtype(self.name)
+            )
+        except NotImplementedError:  # NoneLayout
+            return 0
 
     def has_unbacked_symbols(self):
         return len(free_unbacked_symbols(self.get_numel())) > 0

@@ -3157,7 +3157,7 @@ class Layout(OutputSpec):
 
     __repr__ = __str__
 
-    def get_device(self):
+    def get_device(self) -> torch.device:
         return self.device
 
     def is_contiguous(self):  # type: ignore[no-untyped-def]

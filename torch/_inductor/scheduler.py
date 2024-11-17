@@ -453,6 +453,7 @@ class BaseSchedulerNode:
                         and not isinstance(
                             input_buf.node.get_output_spec(),
                             (
+                                ir.NoneLayout,
                                 ir.MultiOutputLayout,
                                 ir.MutationLayoutSHOULDREMOVE,
                             ),
