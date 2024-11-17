@@ -316,15 +316,15 @@ __global__ void final_scan_kernel(const T* d_in, T* d_out, T* agg, int64_t nelem
   d_in += BLOCK_THREADS * ITEMS_PER_THREAD * iters_per_cta * blockIdx.x;
   d_out += BLOCK_THREADS * ITEMS_PER_THREAD * iters_per_cta * blockIdx.x;
 
-  using BlockLoadT = ::at_cuda_detail::cub::BlockLoad<T, BLOCK_THREADS, ITEMS_PER_THREAD, ::at_cuda_detail::cub::BLOCK_LOAD_WARP_TRANSPOSE>;
+  using BlockLoadT = ROCM_HIPCUB(at_cuda_detail::cub)::BlockLoad<T, BLOCK_THREADS, ITEMS_PER_THREAD, ROCM_HIPCUB(at_cuda_detail::cub)::BLOCK_LOAD_WARP_TRANSPOSE>;
 
   // Specialize BlockStore type for our thread block (uses warp-striped loads for coalescing, then transposes in shared
   // memory to a blocked arrangement)
-  using BlockStoreT = ::at_cuda_detail::cub::BlockStore<T, BLOCK_THREADS, ITEMS_PER_THREAD, ::at_cuda_detail::cub::BLOCK_STORE_WARP_TRANSPOSE>;
+  using BlockStoreT = ROCM_HIPCUB(at_cuda_detail::cub)::BlockStore<T, BLOCK_THREADS, ITEMS_PER_THREAD, ROCM_HIPCUB(at_cuda_detail::cub)::BLOCK_STORE_WARP_TRANSPOSE>;
 
   // Specialize BlockScan type for our thread block
-  using BlockScanT = ::at_cuda_detail::cub::BlockScan<T, BLOCK_THREADS, ::at_cuda_detail::cub::BLOCK_SCAN_WARP_SCANS>;
-  using BlockReduceT = ::at_cuda_detail::cub::BlockReduce<T, BLOCK_THREADS>;
+  using BlockScanT = ROCM_HIPCUB(at_cuda_detail::cub)::BlockScan<T, BLOCK_THREADS, ROCM_HIPCUB(at_cuda_detail::cub)::BLOCK_SCAN_WARP_SCANS>;
+  using BlockReduceT = ROCM_HIPCUB(at_cuda_detail::cub)::BlockReduce<T, BLOCK_THREADS>;
 
 
   // Shared memory
@@ -340,10 +340,6 @@ __global__ void final_scan_kernel(const T* d_in, T* d_out, T* agg, int64_t nelem
   T agg_data;
   agg_data = threadIdx.x >= blockIdx.x ? T(0) : agg[threadIdx.x];
   T aggregate = BlockReduceT(temp_storage.reduce).Sum(agg_data);
-  __shared__ T agg_sh;
-  if (threadIdx.x == 0) {
-    agg_sh = aggregate;
-  }
   __syncthreads();
   BlockPrefixCallbackOp prefix_op(aggregate);
 
@@ -395,8 +391,8 @@ __global__ void calc_block_sums(const T * d_in, T * agg, int64_t nelem, int iter
     if (BLOCK_THREADS * ITEMS_PER_THREAD * iters_per_cta * blockIdx.x >= nelem) return;
     d_in += BLOCK_THREADS * ITEMS_PER_THREAD * iters_per_cta * blockIdx.x;
 
-    using BlockLoadT = ::at_cuda_detail::cub::BlockLoad<T, BLOCK_THREADS, ITEMS_PER_THREAD, ::at_cuda_detail::cub::BLOCK_LOAD_STRIPED>;
-    using BlockReduceT = ::at_cuda_detail::cub::BlockReduce<T, BLOCK_THREADS>;
+    using BlockLoadT = ROCM_HIPCUB(at_cuda_detail::cub)::BlockLoad<T, BLOCK_THREADS, ITEMS_PER_THREAD, ROCM_HIPCUB(at_cuda_detail::cub)::BLOCK_LOAD_STRIPED>;
+    using BlockReduceT = ROCM_HIPCUB(at_cuda_detail::cub)::BlockReduce<T, BLOCK_THREADS>;
     // Shared memory
     __shared__ union TempStorage
     {
