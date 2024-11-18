@@ -99,6 +99,7 @@ from .variables.lists import (
     TupleVariable,
 )
 from .variables.misc import (
+    ExceptionVariable,
     GetAttrVariable,
     NewCellVariable,
     NullVariable,
@@ -2163,9 +2164,9 @@ class InstructionTranslatorBase(
         # https://peps.python.org/pep-0479/
         # https://github.com/python/cpython/pull/99006
         # https://github.com/python/cpython/commit/28187141cc34063ef857976ddbca87ba09a882c2
-        # exc.raise_observed_exception(RuntimeError, self)
-        # TODO: Figure out why RuntimeError crashes Dynamo
-        exc.raise_observed_exception(StopIteration, self)
+        assert isinstance(inst, ExceptionVariable)
+        if inst.exc_type is StopIteration:
+            exc.raise_observed_exception(RuntimeError, self)
 
     def DICT_MERGE(self, inst):
         v = self.pop()
@@ -3228,11 +3229,14 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
         if is_generator(code):
             assert isinstance(self, InliningGeneratorInstructionTranslator)
-            assert self.symbolic_result.as_python_constant() is None
-            return ListIteratorVariable(
-                self.generated_items,
-                mutation_type=ValueMutationNew(),
-            )
+            if not self.consume_all_items and self.generator_exhausted:
+                # When the generator returns None, we raise StopIteration
+                exc.raise_observed_exception(StopIteration, self)
+            else:
+                return ListIteratorVariable(
+                    self.generated_items,
+                    mutation_type=ValueMutationNew(),
+                )
         else:
             return self.symbolic_result
 
@@ -3354,9 +3358,11 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
         super().__init__(*args, **kwargs)
         self.generated_items = []
         self.consume_all_items = True
+        self.generator_exhausted = False
 
     def YIELD_VALUE(self, inst: Instruction):
-        self.generated_items.append(self.pop())
+        top = self.pop()
+        self.generated_items.append(top)
         if len(self.generated_items) > MAX_ITERATOR_LIMIT:
             unimplemented(
                 "Too many yield values in generator. Maybe you are inlining an infinite generator. "
@@ -3364,7 +3370,7 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
             )
         self.push(ConstantVariable.create(None))
         if not self.consume_all_items:
-            self.symbolic_result = self.stack[-1]
+            self.symbolic_result = top
             # Stop tracing
             raise YieldValueOp
 
@@ -3376,16 +3382,12 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
             self.push(res)
 
     def RETURN_VALUE(self, inst):
-        if self.consume_all_items:
-            return super().RETURN_VALUE(inst)
-        # RETURN_VALUE in a generator raises StopIteration instead of actually
-        # returning a value
-        exc.raise_observed_exception(StopIteration, self)
+        self.generator_exhausted = True
+        return super().RETURN_VALUE(inst)
 
     def RETURN_CONST(self, inst):
-        if self.consume_all_items:
-            return super().RETURN_CONST(inst)
-        exc.raise_observed_exception(StopIteration, self)
+        self.generator_exhausted = True
+        return super().RETURN_CONST(inst)
 
     def YIELD_FROM(self, inst):
         assert len(self.stack) >= 2
