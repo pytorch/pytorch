@@ -1262,8 +1262,6 @@ def cached_autotune(
     if "reset_to_zero" in triton_meta:
         reset_to_zero_arg_names.extend(triton_meta.pop("reset_to_zero"))
 
-    mutated_arg_names.extend(reset_to_zero_arg_names)
-
     def decorator(fn):
         # Remove XBLOCK from config if it's not a function argument.
         # This way, coordinate descent tuning will not try to tune it.
