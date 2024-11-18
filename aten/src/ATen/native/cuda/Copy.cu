@@ -150,7 +150,7 @@ void float8_copy_kernel_cuda(TensorIteratorBase &iter) {
 }
 
 // This API is for detecting whether the permute parameter of a three-dimensional tensor
-// in the copy operation from src to dst is from [0, 1, 2] to [0, 2, 1].
+// in the Copy operation from src to dst is from [0, 1, 2] to [0, 2, 1].
 bool is_permute_021(TensorIteratorBase &iter) {
   const auto& input = iter.tensor(1);
   const auto& output = iter.tensor(0);
