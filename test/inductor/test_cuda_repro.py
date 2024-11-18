@@ -1478,7 +1478,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         )
 
     def test_repeated_masked_load(self):
-        target_size = (8, 2) 
+        target_size = (8, 2)
         mem_eff_temporal_upsampling_interp_chunks = 2
         from functorch.einops import rearrange
 
@@ -1498,11 +1498,11 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
                 )
             out_chunked = torch.cat(r, dim=1)
             return out_chunked
-        
+
         out_eager = interpolate_chunked(x)
         out_compiled = torch.compile(interpolate_chunked)(x)
         self.assertEqual(out_eager, out_compiled)
-        
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
