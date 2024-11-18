@@ -3,7 +3,7 @@ import sys
 import unittest
 
 from torch._inductor.test_case import TestCase
-from torch.testing._internal.common_utils import IS_CI, IS_FBCODE, IS_WINDOWS
+from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS
 
 
 if IS_WINDOWS and IS_CI:
@@ -61,10 +61,6 @@ def fail_minimal_arrayref_interface(is_skip=False):
 
 # test_failures, xfail by default, set is_skip=True to skip
 CPU_TEST_FAILURES = {
-    # TODO: error: ‘complex64’ was not declared in this scope
-    "test_add_complex": fail_minimal_arrayref_interface(is_skip=True),
-    "test_conv_freezing": fail_minimal_arrayref_interface(is_skip=True),
-    "test_deconv_freezing": fail_minimal_arrayref_interface(is_skip=True),
     "test_addmm_multiple_dynamic": fail_minimal_arrayref_interface(),
     "test_bmm_multiple_dynamic": fail_minimal_arrayref_interface(),
     "test_cond_nested": fail_minimal_arrayref_interface(),
@@ -81,32 +77,25 @@ CPU_TEST_FAILURES = {
     "test_while_loop_with_parameters": fail_minimal_arrayref_interface(),
     # FIXME: failed with Segfault while exiting the Python runtime
     "test_duplicate_constant_folding": fail_stack_allocation(is_skip=True),
-    "test_stride_with_unbacked_expr": fail_minimal_arrayref_interface(is_skip=True),
     # TODO: use of deleted function RAIIAtenTensorHandle
-    "test_dup_unbacked_sym_decl": fail_minimal_arrayref_interface(is_skip=True),
+    "test_dup_unbacked_sym_decl": fail_minimal_arrayref_interface(),
     # TODO: use of deleted function RAIIAtenTensorHandle
-    "test_dup_unbacked_sym_decl_with_refinement": fail_minimal_arrayref_interface(
-        is_skip=True
-    ),
+    "test_dup_unbacked_sym_decl_with_refinement": fail_minimal_arrayref_interface(),
     # TODO:  error: cannot convert ArrayRefTensor<float> to AtenTensorHandle
     "test_dynamic_cat": fail_minimal_arrayref_interface(),
     # https://github.com/pytorch/pytorch/issues/129550
     # https://github.com/pytorch/pytorch/issues/123691
-    "test_dynamic_scalar": fail_minimal_arrayref_interface(is_skip=True),
+    "test_dynamic_scalar": fail_minimal_arrayref_interface(),
     # https://github.com/pytorch/pytorch/issues/122980
     "test_fft_c2c": fail_stack_allocation(is_skip=True),
-    "test_freezing": fail_minimal_arrayref_interface(is_skip=True),
-    "test_linear_freezing": fail_minimal_arrayref_interface(is_skip=True),
+    "test_linear_freezing": fail_minimal_arrayref_interface(),
     # FIXME: failed with Segfault while exiting the Python runtime
     "test_missing_cubin": fail_stack_allocation(is_skip=True),
-    # minimal arrayref interface only works with CPU; test crashes.
-    # https://github.com/pytorch/pytorch/issues/122983
-    "test_multi_device": fail_minimal_arrayref_interface(is_skip=True),
     # TODO: AssertionError: unsupported Optional type in convert_arg_type: Generator
     "test_normal_functional": fail_stack_allocation(is_skip=True),
     # TODO: The same issue as https://github.com/pytorch/pytorch/issues/122978
     # error: cannot convert ArrayRefTensor<float> to AtenTensorHandle
-    "test_reuse_kernel_dynamic": fail_minimal_arrayref_interface(is_skip=True),
+    "test_reuse_kernel_dynamic": fail_minimal_arrayref_interface(),
     # the test segfaults
     "test_repeat_output": fail_stack_allocation(is_skip=True),
     # TODO: failed internally
@@ -125,23 +114,11 @@ CPU_TEST_FAILURES = {
     "test_zero_size_buffer": fail_stack_allocation(is_skip=True),
     # FIXME: failed with Segfault while exiting the Python runtime
     "test_scatter_fallback": fail_stack_allocation(is_skip=True),
-    # Looks like the same issue as https://github.com/pytorch/pytorch/issues/122978
-    "test_scatter_reduce_fallback": fail_minimal_arrayref_interface(is_skip=True),
-    # Looks like the same issue as https://github.com/pytorch/pytorch/issues/122978
-    "test_index_put_fallback": fail_minimal_arrayref_interface(is_skip=True),
-    # https://github.com/pytorch/pytorch/issues/122984
-    "test_index_put_with_none_index": fail_minimal_arrayref_interface(is_skip=True),
     # FIXME: failed with Segfault while exiting the Python runtime
     "test_constant": fail_stack_allocation(is_skip=True),
     # Looks like the same issue as https://github.com/pytorch/pytorch/issues/122978
     "test_shifted_constraint_ranges": fail_stack_allocation(is_skip=True),
-    # https://github.com/pytorch/pytorch/issues/123691
-    "test_amp_fallback_random": fail_minimal_arrayref_interface(is_skip=True),
     "test_simple_dynamic": fail_minimal_arrayref_interface(),
-    # https://github.com/pytorch/pytorch/issues/123691
-    "test_zero_grid_with_unbacked_symbols": fail_minimal_arrayref_interface(
-        is_skip=True
-    ),
     # failed on MacOS
     "test_zero_grid_with_backed_symbols": fail_stack_allocation(is_skip=True),
     # https://github.com/pytorch/pytorch/issues/122990
@@ -159,26 +136,24 @@ CPU_TEST_FAILURES = {
     # TODO: error: cannot convert ArrayRefTensor<float> to AtenTensorHandle
     "test_while_loop_with_outer_buffers": fail_stack_allocation(is_skip=True),
     # TODO: use of undeclared identifier 'float8_e4m3fn' and 'half'
-    "test_fp8": fail_minimal_arrayref_interface(is_skip=True),
-    "test_custom_op_add": fail_minimal_arrayref_interface(is_skip=True),
-    "test_custom_op_all_inputs": fail_minimal_arrayref_interface(is_skip=True),
-    "test_custom_op_with_multiple_outputs": fail_minimal_arrayref_interface(
-        is_skip=True
-    ),
-    "test_custom_op_with_reinterpret_view_inputs": fail_minimal_arrayref_interface(
-        is_skip=True
-    ),
-    "test_custom_op_with_concat_inputs": fail_minimal_arrayref_interface(is_skip=True),
-    "test_custom_op_missing_arg_with_default_value": fail_minimal_arrayref_interface(
-        is_skip=True
-    ),
+    "test_fp8": fail_minimal_arrayref_interface(),
+    "test_custom_op_add": fail_minimal_arrayref_interface(),
+    "test_custom_op_all_inputs": fail_minimal_arrayref_interface(),
+    "test_custom_op_with_multiple_outputs": fail_minimal_arrayref_interface(),
+    "test_custom_op_with_reinterpret_view_inputs": fail_minimal_arrayref_interface(),
+    "test_custom_op_with_concat_inputs": fail_minimal_arrayref_interface(),
+    "test_custom_op_missing_arg_with_default_value": fail_minimal_arrayref_interface(),
     "test_size_from_multi_output": fail_stack_allocation(is_skip=True),
     "test_masked_select_dynamic": fail_stack_allocation(is_skip=True),
     "test_torchvision_transforms_functional_tensor_resize": fail_minimal_arrayref_interface(),
     # TODO: AttributeError: 'ShapeAsConstantBuffer' object has no attribute 'dtype'
-    "test_symint_item": fail_minimal_arrayref_interface(is_skip=True),
+    "test_symint_item": fail_minimal_arrayref_interface(),
     # TODO: AttributeError: 'ShapeAsConstantBuffer' object has no attribute 'dtype'
-    "test_symbool_item": fail_minimal_arrayref_interface(is_skip=True),
+    "test_symbool_item": fail_minimal_arrayref_interface(),
+    # TODO: compilation fails
+    "test_buffer_mutation_and_force_mmap_weights": fail_minimal_arrayref_interface(),
+    # TODO: incorrect results
+    "test_model_modified_weights": fail_minimal_arrayref_interface(),
 }
 
 
@@ -212,17 +187,13 @@ class AOTInductorTestABICompatibleCpuWithStackAllocationAndMinimalArrayRefInterf
     use_minimal_arrayref_interface = True
 
 
-if IS_FBCODE:
-    # The following tests look like they pass in both pytest and unittest (xml
-    # and terminal output say pass), but the process will segfault.  This only
-    # happens in OSS CI and is fine internally.
-    # See https://github.com/pytorch/pytorch/issues/123691
-    copy_tests(
-        AOTInductorTestsTemplate,
-        AOTInductorTestABICompatibleCpuWithStackAllocationAndMinimalArrayRefInterface,
-        "cpu_with_stack_allocation_and_minimal_arrayref_interface",
-        CPU_TEST_FAILURES,
-    )
+copy_tests(
+    AOTInductorTestsTemplate,
+    AOTInductorTestABICompatibleCpuWithStackAllocationAndMinimalArrayRefInterface,
+    "cpu_with_stack_allocation_and_minimal_arrayref_interface",
+    CPU_TEST_FAILURES,
+)
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
