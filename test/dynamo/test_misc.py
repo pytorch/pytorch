@@ -1396,7 +1396,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         cfg2.val = 2.0
         v = opt_fn(v, cfg2)  # 7
         self.assertEqual(v[0], 7)
-        self.assertEqual(cnts.op_count, 8)
+        self.assertEqual(cnts.op_count, 6)
 
     def test_config_getattr_default(self):
         class Cfg:
