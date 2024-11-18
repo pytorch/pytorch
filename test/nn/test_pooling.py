@@ -1549,7 +1549,7 @@ torch.cuda.synchronize()
             .view(2, 2, *repeat(4, num_dim))
             .to(device, dtype=dtype)
         )
-        input_var = input.clone().detach().requires_grad_()
+        input_var = input.detach().clone().requires_grad_()
 
         # Check forward
         output, indices = module(input_var)
