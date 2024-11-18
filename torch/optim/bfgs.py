@@ -335,15 +335,6 @@ def _strong_wolfe(
     return f_new, g_new, t, ls_func_evals
 
 
-# mypy: allow-untyped-defs
-from typing import Optional, Union
-
-import torch
-from torch import Tensor
-
-from .optimizer import Optimizer, ParamsT
-
-
 class BFGS(Optimizer):
     """Implements BFGS algorithm.
     
