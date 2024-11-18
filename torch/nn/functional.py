@@ -3781,7 +3781,7 @@ def l1_loss(
     reduction: str = "mean",
     weight: Optional[Tensor] = None,
 ) -> Tensor:  # noqa: D400,D402
-    r"""l1_loss(input, target, size_average=None, reduce=None, reduction='mean') -> Tensor
+    r"""l1_loss(input, target, reduction='mean') -> Tensor
 
     Function that takes the mean element-wise absolute value difference.
 
@@ -3840,15 +3840,13 @@ def mse_loss(
     reduction: str = "mean",
     weight: Optional[Tensor] = None,
 ) -> Tensor:
-    r"""mse_loss(input, target, size_average=None, reduce=None, reduction='mean', weight=None) -> Tensor
+    r"""mse_loss(input, target, reduction='mean', weight=None) -> Tensor
 
     Measures the element-wise mean squared error, with optional weighting.
 
     Args:
         input (Tensor): Predicted values.
         target (Tensor): Ground truth values.
-        size_average (bool, optional): Deprecated (use reduction).
-        reduce (bool, optional): Deprecated (use reduction).
         reduction (str, optional): Specifies the reduction to apply to the output:
                                    'none' | 'mean' | 'sum'. 'mean': the mean of the output is taken.
                                    'sum': the output will be summed. 'none': no reduction will be applied.
@@ -3916,7 +3914,7 @@ def margin_ranking_loss(
     reduce: Optional[bool] = None,
     reduction: str = "mean",
 ) -> Tensor:  # noqa: D400,D402
-    r"""margin_ranking_loss(input1, input2, target, margin=0, size_average=None, reduce=None, reduction='mean') -> Tensor
+    r"""margin_ranking_loss(input1, input2, target, margin=0, reduction='mean') -> Tensor
 
     See :class:`~torch.nn.MarginRankingLoss` for details.
     """
@@ -3952,7 +3950,7 @@ def hinge_embedding_loss(
     reduce: Optional[bool] = None,
     reduction: str = "mean",
 ) -> Tensor:  # noqa: D400,D402
-    r"""hinge_embedding_loss(input, target, margin=1.0, size_average=None, reduce=None, reduction='mean') -> Tensor
+    r"""hinge_embedding_loss(input, target, margin=1.0, reduction='mean') -> Tensor
 
     See :class:`~torch.nn.HingeEmbeddingLoss` for details.
     """
@@ -3981,7 +3979,7 @@ def multilabel_margin_loss(
     reduce: Optional[bool] = None,
     reduction: str = "mean",
 ) -> Tensor:  # noqa: D400,D402
-    r"""multilabel_margin_loss(input, target, size_average=None, reduce=None, reduction='mean') -> Tensor
+    r"""multilabel_margin_loss(input, target, reduction='mean') -> Tensor
 
     See :class:`~torch.nn.MultiLabelMarginLoss` for details.
     """
@@ -4010,7 +4008,7 @@ def soft_margin_loss(
     reduction: str = "mean",
 ) -> Tensor:  # noqa: D400,D402
     r"""
-    soft_margin_loss(input, target, size_average=None, reduce=None, reduction='mean') -> Tensor
+    soft_margin_loss(input, target, reduction='mean') -> Tensor
 
     See :class:`~torch.nn.SoftMarginLoss` for details.
     """
@@ -4039,7 +4037,7 @@ def multilabel_soft_margin_loss(
     reduce: Optional[bool] = None,
     reduction: str = "mean",
 ) -> Tensor:  # noqa: D400,D402
-    r"""multilabel_soft_margin_loss(input, target, weight=None, size_average=None, reduce=None, reduction='mean') -> Tensor
+    r"""multilabel_soft_margin_loss(input, target, weight=None, reduction='mean') -> Tensor
 
     See :class:`~torch.nn.MultiLabelSoftMarginLoss` for details.
     """
@@ -4087,7 +4085,7 @@ def cosine_embedding_loss(
     reduce: Optional[bool] = None,
     reduction: str = "mean",
 ) -> Tensor:  # noqa: D400,D402
-    r"""cosine_embedding_loss(input1, input2, target, margin=0, size_average=None, reduce=None, reduction='mean') -> Tensor
+    r"""cosine_embedding_loss(input1, input2, target, margin=0, reduction='mean') -> Tensor
 
     See :class:`~torch.nn.CosineEmbeddingLoss` for details.
     """
@@ -4120,7 +4118,7 @@ def multi_margin_loss(
     reduce: Optional[bool] = None,
     reduction: str = "mean",
 ) -> Tensor:  # noqa: D400,D402
-    r"""multi_margin_loss(input, target, p=1, margin=1, weight=None, size_average=None, reduce=None, reduction='mean') -> Tensor
+    r"""multi_margin_loss(input, target, p=1, margin=1, weight=None, reduction='mean') -> Tensor
 
     See :class:`~torch.nn.MultiMarginLoss` for details.
     """
