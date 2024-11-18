@@ -755,7 +755,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         )  # set x as the output tensor, this fallback mutates x.
         self.writeline(self.wrap_kernel_call(kernel, args))
 
-    def generate_extern_kernel_alloc_and_find_schema_if_needed(
+    def generate_fallback_kernel_with_runtime_lookup(
         self,
         buf_name: str,
         python_kernel_name: str,
@@ -793,14 +793,14 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             assert raw_args is not None
             assert outputs is not None
 
-            return self.generate_extern_kernel_alloc_and_find_schema_if_needed_with_proxy_executor(
+            return self.generate_fallback_kernel_with_runtime_lookup_aot(
                 op_overload,
                 raw_args,
                 output_args,
                 outputs,
             )
         else:
-            return self.generate_extern_kernel_alloc_and_find_schema_if_needed_jit(
+            return self.generate_fallback_kernel_with_runtime_lookup_jit(
                 buf_name,
                 python_kernel_name,
                 cpp_kernel_name,
@@ -899,23 +899,13 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                 # wrap it with dtypeview
                 final_tmp_name, tmp_call_strs = create_dtypeview_call(reinterpret_call)
                 call_strs.extend(tmp_call_strs)
-            elif (
-                self.can_stack_allocate_buffer(data)
-                and self.is_statically_known_list_of_ints(size)
-                and self.is_statically_known_list_of_ints(stride)
-                and ir.is_contiguous_strides_for_shape(stride, size)
-            ):
+            else:
                 # No need to wrap with RAIIAtenTensorHandle when using stack allocation.
                 call_strs.append(
                     f"auto wrap_with_raii_handle_if_needed_{final_tmp_name}"
                     f" = wrap_with_raii_handle_if_needed({final_tmp_name});"
                 )
                 final_tmp_name = f"wrap_with_raii_handle_if_needed_{final_tmp_name}"
-            else:
-                call_strs.append(
-                    f"RAIIAtenTensorHandle {final_tmp_name}_raii({final_tmp_name});"
-                )
-                final_tmp_name = f"{final_tmp_name}_raii"
 
         for line in call_strs:
             writeline(line)
