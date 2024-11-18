@@ -47,7 +47,7 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import TypeAlias, TypeGuard
+from typing_extensions import deprecated, TypeAlias, TypeGuard
 
 import torch
 import torch.fx
@@ -2093,6 +2093,15 @@ class ShapeGuardPythonPrinter(_ShapeGuardPrinter, PythonPrinter):
         return self.source_ref(source)
 
 
+@deprecated(
+    "`torch.fx.experimental.symbolic_shapes.ShapeGuardPrinter` is deprecated, "
+    "please use `torch.fx.experimental.symbolic_shapes.ShapeGuardPythonPrinter` instead.",
+    category=FutureWarning,
+)
+class ShapeGuardPrinter(ShapeGuardPythonPrinter):
+    pass
+
+
 class ShapeGuardCppPrinter(_ShapeGuardPrinter, CppPrinter):
     def __init__(self, *args: Any) -> None:
         self.all_symbols: Set[str] = set()
@@ -2117,7 +2126,7 @@ class ShapeGuardCppPrinter(_ShapeGuardPrinter, CppPrinter):
 
 # A dataclass for storing C++ expressions and helper variables
 @dataclass(frozen=True)
-class CppShapeGuardsHelper:
+class _CppShapeGuardsHelper:
     exprs: List[str]
     source_to_symbol: Dict[Source, sympy.Symbol]
 
@@ -4405,7 +4414,7 @@ class ShapeEnv:
         _simplified: bool = False,
         # Indicates if we should produce guards for known static values.
         ignore_static: bool = True,
-    ) -> Tuple[List[str], List[str], CppShapeGuardsHelper]:  # python, verbose, cpp
+    ) -> Tuple[List[str], List[str], _CppShapeGuardsHelper]:  # python, verbose, cpp
         """
         Generates a list of guards strings which, when evaluated in a context that
         defines tensors for all the sources, returns True or False depending
@@ -5126,7 +5135,7 @@ class ShapeEnv:
         if guards is None:
             self._check_translation_validate()
 
-        cpp_exprs_helper = CppShapeGuardsHelper(cpp_exprs, cpp_printer.source_to_symbol)
+        cpp_exprs_helper = _CppShapeGuardsHelper(cpp_exprs, cpp_printer.source_to_symbol)
         return python_exprs, verbose_exprs, cpp_exprs_helper
 
     def produce_guards_expression(
