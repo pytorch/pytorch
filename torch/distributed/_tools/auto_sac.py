@@ -1,11 +1,26 @@
 import logging
 from copy import deepcopy
 from enum import StrEnum
-from typing import Dict, List, Optional, Set
+from typing import (
+    Any,
+    Callable,
+    ContextManager,
+    Dict,
+    List,
+    NamedTuple,
+    Optional,
+    Set,
+    Tuple,
+    Union,
+)
 
 import torch
 from torch.distributed._tools import MemTracker, RuntimeEstimator, SACEstimator
-from torch.distributed._tools.ilp_utils import aggregate_stats, parse_module_info
+from torch.distributed._tools.ilp_utils import (
+    aggregate_stats,
+    get_module_name_dict,
+    parse_module_info,
+)
 from torch.distributed._tools.sac_estimator import (
     OPS_TO_ALWAYS_SKIP,
     SACGreedyOrderMeta,
@@ -15,7 +30,14 @@ from torch.distributed._tools.sac_ilp import (
     get_optimal_checkpointing_policy_per_module,
     sac_milp,
 )
-from torch.utils.checkpoint import CheckpointPolicy
+from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
+    checkpoint_wrapper,
+    CheckpointImpl,
+)
+from torch.utils.checkpoint import (
+    CheckpointPolicy,
+    create_selective_checkpoint_contexts,
+)
 
 
 # Create a logger object
@@ -23,6 +45,34 @@ logger = logging.getLogger(__name__)
 
 # Set the logging level to INFO
 logger.setLevel(logging.INFO)
+
+
+class AutoSACResult(NamedTuple):
+    """
+    Represents the results of a SAC (Selective Activation Checkpointing) optimization.
+
+    Attributes:
+        sac_policies (Dict[str, List[int]]):
+            A dictionary mapping each module's Fully Qualified Name (FQN) to its SAC policy.
+            The policy determines whether each operator in the module should be saved (1)
+            or recomputed (0).
+
+        ac_decisions (Dict[str, float]):
+            A dictionary mapping each module's FQN to the percentage of activation
+            memory to discard in the optimal SAC solution.
+
+        recomputation_time (float):
+            The total recomputation time for the optimal SAC solution.
+
+        peak_mem (int):
+            The upper bound on the peak memory of the optimal SAC solution. A value of -1
+            indicates that the ILP solver failed to find a solution.
+    """
+
+    sac_policies: Dict[str, List[int]]
+    ac_decisions: Dict[str, float]
+    recomputation_time: float
+    peak_mem: int
 
 
 class SACAlgorithm(StrEnum):
@@ -38,34 +88,55 @@ class SACAlgorithm(StrEnum):
     OPTIMAL = "optimal"
 
 
-class SACPolicy:
+class _SACPolicy:
     """
-    SAC Policy class.
+    Represents a Selective Activation Checkpointing (SAC) policy for managing
+    operator save or recompute decisions.
+
+    Args:
+        policy_output (List[int]):
+            A list of integers where 1 indicates saving an operator and
+            0 indicates recomputing it.
 
     Attributes:
-        counter (int): Counter for tracking policy output.
-        policy_output (List[int]): Policy output as a list of integers (1: save, 0: discard).
+        forward_counter (int):
+            Tracks the number of forward calls made for policy evaluation.
+
+        recompute_counter (int):
+            Tracks the number of recomputation calls made for policy evaluation.
+
+        policy_output (List[int]):
+            The policy decision list provided during initialization.
 
     Methods:
-        __call__: Evaluates the checkpoint policy for a given function.
+        __call__(ctx, func, *args, **kwargs) -> CheckpointPolicy:
+            Evaluates the checkpoint policy for a given function based on
+            the SAC policy and context.
     """
 
     def __init__(self, policy_output: List[int]):
-        self.counter = 0
+        self.forward_counter = 0
+        self.recompute_counter = 0
         self.policy_output = policy_output
 
     def __call__(self, ctx, func, *args, **kwargs) -> CheckpointPolicy:  # type: ignore[no-untyped-def]
         if func in OPS_TO_ALWAYS_SKIP:
             return CheckpointPolicy.MUST_RECOMPUTE
-        count = self.counter
-        self.counter += 1
+
+        if ctx.is_recompute:
+            count = self.recompute_counter
+            self.recompute_counter += 1
+        else:
+            count = self.forward_counter
+            self.forward_counter += 1
+
         if self.policy_output[count] == 1:
             return CheckpointPolicy.PREFER_SAVE
         else:
             return CheckpointPolicy.MUST_RECOMPUTE
 
 
-def get_greedy_checkpoint_policy_per_module(
+def get_greedy_checkpointing_policy_per_module(
     sac_stats: SACStats, sac_greedy_order_meta: SACGreedyOrderMeta, memory_budget: float
 ) -> List[int]:
     """
@@ -168,29 +239,48 @@ def get_auto_sac_policies(
     shard_degree: int = 1,
     ac_units: Optional[Set[str]] = None,
     fsdp_units: Optional[Set[str]] = None,
-) -> Dict[str, SACPolicy]:
+) -> AutoSACResult:
     """
-    Compute auto-SAC policies for a given model.
+    Computes auto-SAC (Selective Activation Checkpointing) policies for the given model.
 
     Args:
-        model (torch.nn.Module): Input model.
-        sac_estimator (SACEstimator): `SACEstimator` instance.
-        mem_tracker (MemTracker): `MemTracker` instance.
-        runtime_estimator (RuntimeEstimator): `RuntimeEstimator` instance.
-        dev (torch.device): Device for which stats were captured.
-        memory_budget (float): Memory budget in GiB.
-        sac_algo (SACAlgorithm, optional): `SACAlgorithm`. Defaults to `SACAlgorithm.GREEDY`.
-        shard_degree: number of GPUs across which the model is sharded. In the case of FSDP,
-            shard_degree will be used to compute the amount of parameter, gradient and optimizer
-            memory on each rank. Defaults to 1.
-        ac_units: a set of user-specified AC unit FQNs.
-        fsdp_units: a set of FSDP units. AC units cannot be supermodules of FSDP unit FQNs.
+        model (torch.nn.Module):
+            The input model for which SAC policies are to be computed.
+
+        sac_estimator (SACEstimator):
+            Instance of `SACEstimator` containing SAC statistics.
+
+        mem_tracker (MemTracker):
+            Instance of `MemTracker` with tracked memory usage.
+
+        runtime_estimator (RuntimeEstimator):
+            Instance of `RuntimeEstimator` populated with runtime performance.
+
+        dev (torch.device):
+            The device on which the statistics were collected.
+
+        memory_budget (float):
+            The memory budget in GiB for which SAC policies are optimized.
+
+        sac_algo (SACAlgorithm, optional):
+            The SAC algorithm to use for policy computation. Defaults to `SACAlgorithm.GREEDY`.
+
+        shard_degree (int, optional):
+            Number of GPUs across which the model is sharded. Used to calculate
+            parameter, gradient, and optimizer memory for FSDP. Defaults to 1.
+
+        ac_units (Optional[Set[str]], optional):
+            A set of user-specified Activation Checkpointing (AC) unit Fully Qualified Names (FQNs).
+            Defaults to `None`.
+
+        fsdp_units (Optional[Set[str]], optional):
+            A set of Fully Sharded Data Parallel (FSDP) units. AC units cannot be supermodules
+            of FSDP unit FQNs. Defaults to `None`.
 
     Returns:
-        Dict[str, SACPolicy]: Dictionary of Module FQN to `SACPolicy` for each module.
-
-    Raises:
-        ValueError: If sac_algo is not a valid SAC algorithm.
+        AutoSACResult:
+            The computed SAC policies, activation memory decisions, recomputation time,
+            and peak memory estimates.
     """
 
     # Aggregate model statistics
@@ -200,26 +290,110 @@ def get_auto_sac_policies(
     # Parse module information into a graph
     graph = parse_module_info(mod_info)
     # Solve SAC MILP problem
-    ac_decisions, _, _ = sac_milp(
+    ac_decisions, est_recomp_time, est_peak_mem = sac_milp(
         graph, memory_budget, shard_degree, ac_units, fsdp_units
     )
-    sac_policies: Dict[str, SACPolicy] = {}
 
-    # Compute SAC policies for each module
-    for mod_name, discard_ratio in ac_decisions.items():
-        sac_stats = sac_estimator.sac_mod_stats[mod_name]
-        budget = 1 - discard_ratio
-        sac_greedy_order_meta = sac_estimator.sac_mod_greedy_order_meta[mod_name]
-        if sac_algo == SACAlgorithm.GREEDY:
-            policy_output = get_greedy_checkpoint_policy_per_module(
-                sac_stats, sac_greedy_order_meta, budget
+    sac_policies: Dict[str, List[int]] = {}
+    if est_peak_mem != -1:
+        # Solver succeeded Compute SAC policies for each module
+        for mod_name, discard_ratio in ac_decisions.items():
+            sac_stats = sac_estimator.sac_mod_stats[mod_name]
+            budget = 1 - discard_ratio
+            sac_greedy_order_meta = sac_estimator.sac_mod_greedy_order_meta[mod_name]
+            if sac_algo == SACAlgorithm.GREEDY:
+                policy_output = get_greedy_checkpointing_policy_per_module(
+                    sac_stats, sac_greedy_order_meta, budget
+                )
+            else:
+                policy_output = get_optimal_checkpointing_policy_per_module(
+                    sac_stats, budget
+                )
+            # Create and store SAC policy in dictionary
+            sac_policies[mod_name] = policy_output
+
+    return AutoSACResult(sac_policies, ac_decisions, est_recomp_time, est_peak_mem)
+
+
+def apply_auto_sac(
+    model: torch.nn.Module,
+    sac_policies: Dict[str, List[int]],
+    checkpoint_impl: CheckpointImpl = CheckpointImpl.NO_REENTRANT,
+    checkpoint_fn: Optional[Callable] = None,
+    **checkpoint_fn_kwargs: Dict[str, Any],
+) -> None:
+    """
+    Applies auto-SAC (Selective Activation Checkpointing) policies to the specified model.
+
+    Args:
+        model (torch.nn.Module):
+            The target model to which SAC policies are to be applied.
+
+        sac_policies (Dict[str, List[int]]):
+            A dictionary mapping module Fully Qualified Names (FQNs) to SAC policies.
+            Each policy is a list of integers where 1 indicates saving an operator
+            and 0 indicates recomputation.
+
+        checkpoint_impl (CheckpointImpl, optional):
+            The checkpointing implementation to use. Defaults to `CheckpointImpl.NO_REENTRANT`.
+
+        checkpoint_fn (callable, optional):
+            Functional checkpoint implementation to use. If this is specified,
+            it will be used over the default ``torch.utils.checkpoint.checkpoint``
+            implementation and the `checkpoint_impl` argument will be ignored.
+
+        **checkpoint_fn_kwargs (Dict[str, Any]):
+            Keyword arguments to pass into `checkpoint_fn`.
+
+            Note:
+                The `context_fn` key is not allowed in `checkpoint_fn_kwargs` as it is
+                automatically populated by the Auto SAC wrapper. If you require this
+                functionality, please file a GitHub issue.
+
+    Notes:
+        - This function modifies the model in place, wrapping applicable modules with
+          checkpointing contexts based on the provided SAC policies.
+        - Modules without a corresponding policy in `sac_policies` are left unchanged.
+
+    Returns:
+        None
+    """
+
+    checkpoint_fn_kwargs = checkpoint_fn_kwargs if checkpoint_fn_kwargs else {}
+    if checkpoint_fn_kwargs and "context_fn" in checkpoint_fn_kwargs:
+        raise ValueError(
+            "`context_fn` will be automatically populated by the Auto SAC wrapper. "
+            "If you require this functionality, please file a GitHub issue."
+        )
+    mod_names = get_module_name_dict(model)
+
+    def _sac_wrapper(mod: torch.nn.Module) -> Union[torch.nn.Module, None]:
+        """
+        Wraps a module with selective checkpointing based on its SAC policy.
+
+        Args:
+            mod (torch.nn.Module): The module to be wrapped.
+
+        Returns:
+            torch.nn.Module or None: The wrapped module if a policy exists, otherwise None.
+        """
+        if policy_output := sac_policies.get(mod_names[mod], None):
+
+            def selective_checkpointing_context_fn() -> (
+                Tuple[ContextManager, ContextManager]
+            ):
+                return create_selective_checkpoint_contexts(_SACPolicy(policy_output))
+
+            return checkpoint_wrapper(
+                mod,
+                checkpoint_impl=checkpoint_impl,
+                checkpoint_fn=checkpoint_fn,
+                context_fn=selective_checkpointing_context_fn,
+                **checkpoint_fn_kwargs,
             )
         else:
-            policy_output = get_optimal_checkpointing_policy_per_module(
-                sac_stats, budget
-            )
-        # Create and store SAC policy in dictionary
-        sac_policy = SACPolicy(policy_output)
-        sac_policies[mod_name] = sac_policy
+            return None
 
-    return sac_policies
+    from torch.distributed.fsdp._wrap_utils import _post_order_apply
+
+    _post_order_apply(model, fn=_sac_wrapper)

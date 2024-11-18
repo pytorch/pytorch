@@ -60,12 +60,16 @@ class TestSACEstimator(TestCase):
                 super().__init__()
                 self.fc1 = torch.nn.Linear(5, 10)
                 self.relu1 = torch.nn.ReLU(inplace=True)
+                self.fc2 = torch.nn.Linear(10, 5)
+                self.dropout = torch.nn.Dropout(inplace=True)
 
             def forward(self, x):
                 x = self.fc1(x)
                 x = self.relu1(x)
                 x = torch.cos_(x)
                 x = torch.sin_(x)
+                x = self.fc2(x)
+                x = self.dropout(x)
                 return x
 
         dev = torch.cuda.current_device()
@@ -78,11 +82,19 @@ class TestSACEstimator(TestCase):
             with sac_estimator(estimate_mode_type="operator-level-benchmark"):
                 loss = model(x).sum()
             loss.backward()
-
-            self.assertEqual(sac_estimator.sac_mod_stats["Foo"].view_like_ops, [0])
-            self.assertEqual(sac_estimator.sac_mod_stats["Foo"].rand_ops, [])
+            self.assertEqual(sac_estimator.sac_mod_stats["Foo"].view_like_ops, [0, 5])
+            self.assertEqual(sac_estimator.sac_mod_stats["Foo"].rand_ops, [8])
             self.assertEqual(
-                sac_estimator.sac_mod_stats["Foo"].inplace_ops, [(2, 1), (3, 1), (4, 1)]
+                sac_estimator.sac_mod_stats["Foo"].inplace_ops,
+                [(2, 1), (3, 1), (4, 1), (8, 7), (9, 7), (10, 6)],
+            )
+            self.assertEqual(
+                sac_estimator.sac_mod_greedy_order_meta["Foo"].random_inplace_ops,
+                {8, 9, 7},
+            )
+            self.assertEqual(
+                sac_estimator.sac_mod_greedy_order_meta["Foo"].inplace_op_groups,
+                {1: {1, 2, 3, 4}, 6: {10, 6}},
             )
 
 

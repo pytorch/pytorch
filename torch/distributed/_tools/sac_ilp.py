@@ -3,7 +3,7 @@ import math
 from enum import IntEnum
 from typing import Dict, List, Optional, Set, Tuple
 
-from torch.distributed._tools.ilp_utils import Graph, is_self_or_submodule, is_submodule
+from torch.distributed._tools.ilp_utils import Graph, is_submodule
 from torch.distributed._tools.sac_estimator import SACStats
 
 
@@ -94,9 +94,8 @@ def sac_milp(
     # Add constraints
     # [Constraint] User specified AC units
     if ac_units:
-        ac_units_set = set(ac_units)
         for i in range(num_nodes):
-            if graph.nodes[i]["fqn"] not in ac_units_set:
+            if graph.nodes[i]["fqn"] not in ac_units:
                 prob += y[i] == 0
 
     # [Constraint] AC units cannot be supmodules of user specified FSDP units
@@ -108,49 +107,28 @@ def sac_milp(
             ):
                 prob += y[i] == 0
 
-        # Extract FQNs of leaf nodes from the graph
-        leaf_fqns = {node["fqn"] for node in graph.nodes if node["is_leaf"]}
-        # Dictionary to store leaf FQNs for each FSDP unit
-        fsdp_unit_leaves: Dict[str, Set[str]] = {}
-        # Dictionary to store parameter count for each FSDP unit
-        fsdp_params_per_unit: Dict[str, int] = {}
-        # Populate leaf FQNs for FSDP units
-        for fsdp_unit in fsdp_units:
-            fsdp_unit_leaves[fsdp_unit] = {
-                leaf_fqn
-                for leaf_fqn in leaf_fqns
-                if is_self_or_submodule(leaf_fqn, fsdp_unit)
-            }
-        # Calculate parameter counts for FSDP units
-        for fsdp_unit in fsdp_units:
-            # Find sub-FSDP units
-            sub_fsdp_units = {
-                cand_unit
-                for cand_unit in fsdp_units
-                if is_submodule(cand_unit, fsdp_unit)
-            }
-            # Union of leaf FQNs from sub-FSDP units
-            sub_fsdp_unit_leaves: Set[str] = set.union(
-                *tuple(fsdp_unit_leaves[sub_unit] for sub_unit in sub_fsdp_units)
-            )
-            # Sum parameters from sub-FSDP unit leaves
-            sub_fsdp_unit_params = sum(
-                graph.name2node[leaf]["param_per_module"]
-                for leaf in sub_fsdp_unit_leaves
-            )
-            # Calculate FSDP unit parameters
-            fsdp_unit_params = (
-                graph.name2node[fsdp_unit]["param_per_module"] - sub_fsdp_unit_params
-            )
-            assert (
-                fsdp_unit_params >= 0
-            ), f"The param size handled by {fsdp_unit} cannot be negative"
+        node_to_param_size: Dict[str, int] = {
+            node["fqn"]: node["param_per_module"] for node in graph.nodes
+        }
 
-            # Store FSDP unit parameter count
-            fsdp_params_per_unit[fsdp_unit] = fsdp_unit_params
+        for (
+            fqn
+        ) in graph.fw_post_order:  # using post order so that children are visited first
+            if fqn in fsdp_units:
+                node = graph.name2node[fqn]
+                j = node["index"]
+                # its ancestor nodes will no longer need to take care of these parameters, so subtracting for them
+                for i in range(node["index"]):
+                    if graph.ad_matrix[i][j]:
+                        node_to_param_size[graph.nodes[i]["fqn"]] -= node_to_param_size[
+                            fqn
+                        ]
 
         # Find maximum parameter count among FSDP units
-        max_fsdp_unit_memory = max(fsdp_params_per_unit.values()) / MEM_MULTIPLIER
+        max_fsdp_unit_memory = (
+            max(node_to_param_size[fsdp_unit] for fsdp_unit in fsdp_units)
+            / MEM_MULTIPLIER
+        )
 
     # [Constraint] No nested AC units
     for i in range(num_nodes):
@@ -204,7 +182,7 @@ def sac_milp(
         ACM_i = graph.nodes[i]["sac_memory"] / MEM_MULTIPLIER
         IA_i = graph.nodes[i]["act_fw_per_module"] / MEM_MULTIPLIER
         prob += r[i] >= (ACM_i - IA_i) / ACM_i * y[i]
-        prob += r[i] <= (ACM_i - SAV_i) / ACM_i * y[i]
+        prob += r[i] <= (ACM_i - SAV_i) / ACM_i
 
     # [Constraint] Express total activation memory in the backward pass
     for i in range(num_nodes):

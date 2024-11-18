@@ -1,6 +1,6 @@
 import copy
 import weakref
-from typing import cast, Dict, List, OrderedDict, Set, Tuple, TypedDict
+from typing import cast, Dict, List, OrderedDict, Set, TypedDict
 
 import numpy as np
 
@@ -204,7 +204,7 @@ def aggregate_stats(
                 "fqn": mod_mem_stat.mod_fqn,
                 "param_per_module": mod_mem_stat.parameter_mem,
                 "grad_per_module": mod_mem_stat.parameter_mem,
-                "grad_total": mod_mem_stat.snapshots[_ModState.PRE_BW][-1][dev][
+                "grad_total": mod_mem_stat.snapshots[_ModState.POST_BW][-1][dev][
                     _MemRefType.GRAD
                 ],
                 "act_fw_per_module": max(
@@ -326,29 +326,3 @@ def display_bytes(b: int, unit: str = "MiB") -> str:
     if unit == "GiB":
         return f"{b/2**30:.2f} GiB"
     return f"{b:.2f} bytes"
-
-
-def get_peak_memory_runtime_baseline(graph: Graph) -> Tuple[int, float]:
-    """
-    Get the baseline peak memory and runtime.
-    Baseline here means there is no FSDP or AC.
-    Memory includes the parameters, gradients, activations, and activation gradients.
-    Memory does not include e.g., optimizer states, embedding tables, etc.
-
-    Returns:
-        int: peak memory in bytes
-        float: compute time in ms
-    """
-    P_1 = graph.nodes[0]["param_per_module"]
-    num_nodes = len(graph.nodes)
-    peak_mem = 0
-    for i in range(num_nodes):
-        TG_i = graph.nodes[i]["grad_total"]
-        AG_i = graph.nodes[i]["act_grad_per_module"]
-        TA_i = graph.nodes[i]["act_total"]
-        peak_mem = max(peak_mem, P_1 + TG_i + AG_i + TA_i)
-    compute_time = (
-        graph.nodes[0]["fw_runtime_per_module"]
-        + graph.nodes[0]["bw_runtime_per_module"]
-    )
-    return (peak_mem, compute_time)

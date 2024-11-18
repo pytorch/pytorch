@@ -4,7 +4,7 @@ import sys
 import warnings
 from collections import OrderedDict
 from dataclasses import astuple, dataclass
-from typing import Any, Dict, List, NamedTuple, Optional, Set, Tuple
+from typing import Any, Dict, List, NamedTuple, Optional, Set, Tuple, TYPE_CHECKING
 from typing_extensions import Self
 
 import torch
@@ -13,6 +13,10 @@ from torch._guards import active_fake_mode
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.distributed._tools.mod_tracker import ModTracker
 from torch.distributed._tools.runtime_estimator import RuntimeEstimator
+from torch.optim.optimizer import (
+    register_optimizer_step_post_hook,
+    register_optimizer_step_pre_hook,
+)
 from torch.testing._internal.composite_compliance import (
     is_inplace,
     is_inplace_view_fn,
@@ -24,6 +28,10 @@ from torch.utils._python_dispatch import (
 )
 from torch.utils._pytree import tree_flatten
 from torch.utils.checkpoint import SAC_IGNORED_OPS
+
+
+if TYPE_CHECKING:
+    from torch.utils.hooks import RemovableHandle
 
 
 __all__ = ["SACEstimator", "SACStats", "MSPS", "SACTradeOffStats", "SACGreedyOrderMeta"]
@@ -263,6 +271,13 @@ class SACEstimator(TorchDispatchMode):
         )
         self._saved_tensor_ids: Set[int] = set()
         self._estimate_runtime = RuntimeEstimator._roofline_estimate
+        self._in_opt = False
+        self._optimizer_hook_handles: Optional[
+            Tuple[RemovableHandle, RemovableHandle]
+        ] = None
+
+    def _update_opt_flag(self, val: bool = False) -> None:
+        self._in_opt = val
 
     def _pack_hook(self, x: torch.Tensor) -> torch.Tensor:
         # Hook function to track underlying storage IDs of tensors
@@ -427,68 +442,71 @@ class SACEstimator(TorchDispatchMode):
     def __torch_dispatch__(  # type: ignore[no-untyped-def]
         self, func, types, args=..., kwargs=None
     ):
-        # 1. Get the runtime estimate
-        out, op_time = self._estimate_runtime(func, args, kwargs)
-        flat_outs, _ = tree_flatten(out)
-        out_storages_cuda: Set[UntypedStorage] = set()
-        out_storages_cpu: Set[UntypedStorage] = set()
-        cuda_devices: Set[torch.device] = set()
-        for o in flat_outs:
-            if isinstance(o, torch.Tensor):
-                if o.device.type == "cuda":
-                    out_storages_cuda.update(_get_untyped_storages(o))
-                    cuda_devices.add(o.device)
-                else:
-                    out_storages_cpu.update(_get_untyped_storages(o))
+        if self._mod_tracker.is_bw or self._in_opt:
+            kwargs = kwargs if kwargs else {}
+            out = func(*args, **kwargs)
+        else:
+            # 1. Get the runtime estimate
+            out, op_time = self._estimate_runtime(func, args, kwargs)
+            flat_outs, _ = tree_flatten(out)
+            out_storages_cuda: Set[UntypedStorage] = set()
+            out_storages_cpu: Set[UntypedStorage] = set()
+            cuda_devices: Set[torch.device] = set()
+            for o in flat_outs:
+                if isinstance(o, torch.Tensor):
+                    if o.device.type == "cuda":
+                        out_storages_cuda.update(_get_untyped_storages(o))
+                        cuda_devices.add(o.device)
+                    else:
+                        out_storages_cpu.update(_get_untyped_storages(o))
 
-        # Check if there's more than 1 CUDA device
-        assert (
-            len(cuda_devices) <= 1
-        ), f"{func.__name__}'s output has more than 1 CUDA devices {cuda_devices}"
+            # Check if there's more than 1 CUDA device
+            assert (
+                len(cuda_devices) <= 1
+            ), f"{func.__name__}'s output has more than 1 CUDA devices {cuda_devices}"
 
-        # 2. Get the memory consumed by output
-        nbytes_cuda = sum(
-            math.ceil(st.nbytes() / _PYTORCH_MIN_ALLOCATE) * _PYTORCH_MIN_ALLOCATE
-            for st in out_storages_cuda
-        )
-        nbytes_cpu = sum(st.nbytes() for st in out_storages_cpu)
-        nbytes = nbytes_cuda + nbytes_cpu
-        # 3. Get the current operator index, output storage identifiers and inplace metadata
-        out_storages = out_storages_cuda | out_storages_cpu
-        curr_idx, output_ids, mod_inplace_info = self._get_inplace_metadata(
-            func, out_storages
-        )
-        # 4. Determine if the function is in-place, random-op or a view-like
-        is_view_like = is_view_fn(func) or is_inplace_view_fn(func)
-        is_rand_op = torch.Tag.nondeterministic_seeded in func.tags
-        if is_view_like:
-            nbytes = 0
-        # sdpa has non-deterministic seed, but might be deterministic
-        # if no dropout is applied
-        if func.overloadpacket.__name__ == "_scaled_dot_product_flash_attention":
-            is_rand_op = kwargs.get("dropout_p", 0) != 0
-        # 5. Create metadata information per active non-leaf module
-        for mod_fqn in self._mod_tracker.parents:
-            if mod_fqn in self._leaf_modules:
-                continue
-            acm = _SACMetadata(
-                func=func,
-                time_taken=op_time,
-                memory_used=nbytes,
-                curr_idx=curr_idx,
-                output_ids=output_ids,
-                inplace_info=mod_inplace_info[mod_fqn],
-                is_view_like=is_view_like,
-                is_rand_op=is_rand_op,
+            # 2. Get the memory consumed by output
+            nbytes_cuda = sum(
+                math.ceil(st.nbytes() / _PYTORCH_MIN_ALLOCATE) * _PYTORCH_MIN_ALLOCATE
+                for st in out_storages_cuda
             )
-            if acm_stats := self._sac_mod_metadata.get(mod_fqn, None):
-                acm_stats.sac_metadata.append(acm)
-            else:
-                assert (
-                    mod_fqn == "Global"
-                ), f"Module {mod_fqn} not found in AC Mod Stats"
-                self._sac_metadata.append(acm)
-
+            nbytes_cpu = sum(st.nbytes() for st in out_storages_cpu)
+            nbytes = nbytes_cuda + nbytes_cpu
+            # 3. Get the current operator index, output storage identifiers and inplace metadata
+            out_storages = out_storages_cuda | out_storages_cpu
+            curr_idx, output_ids, mod_inplace_info = self._get_inplace_metadata(
+                func, out_storages
+            )
+            # 4. Determine if the function is in-place, random-op or a view-like
+            is_view_like = is_view_fn(func) or is_inplace_view_fn(func)
+            is_rand_op = torch.Tag.nondeterministic_seeded in func.tags
+            if is_view_like:
+                nbytes = 0
+            # sdpa has non-deterministic seed, but might be deterministic
+            # if no dropout is applied
+            if func.overloadpacket.__name__ == "_scaled_dot_product_flash_attention":
+                is_rand_op = kwargs.get("dropout_p", 0) != 0
+            # 5. Create metadata information per active non-leaf module
+            for mod_fqn in self._mod_tracker.parents:
+                if mod_fqn in self._leaf_modules:
+                    continue
+                acm = _SACMetadata(
+                    func=func,
+                    time_taken=op_time,
+                    memory_used=nbytes,
+                    curr_idx=curr_idx,
+                    output_ids=output_ids,
+                    inplace_info=mod_inplace_info[mod_fqn],
+                    is_view_like=is_view_like,
+                    is_rand_op=is_rand_op,
+                )
+                if acm_stats := self._sac_mod_metadata.get(mod_fqn, None):
+                    acm_stats.sac_metadata.append(acm)
+                else:
+                    assert (
+                        mod_fqn == "Global"
+                    ), f"Module {mod_fqn} not found in AC Mod Stats"
+                    self._sac_metadata.append(acm)
         return out
 
     @classmethod
@@ -515,10 +533,13 @@ class SACEstimator(TorchDispatchMode):
 
         # If there are some in-place op-groups that contain random ops, they all will be treated as single group.
         if random_ops:
+            heads_to_pop = set()
             for group_head_idx, op_group in inplace_op_groups.items():
                 if len(op_group & random_ops) > 0:
-                    group = inplace_op_groups.pop(group_head_idx)
-                    random_inplace_ops.update(group)
+                    heads_to_pop.add(group_head_idx)
+                    random_inplace_ops.update(inplace_op_groups[group_head_idx])
+            for head in heads_to_pop:
+                inplace_op_groups.pop(head)
         random_inplace_ops.update(random_ops)
 
         # 1. Random or Random-In-place ops are stored if force_store_random is set
@@ -580,7 +601,7 @@ class SACEstimator(TorchDispatchMode):
         self,
         sac_stats: SACStats,
         greedy_order_meta: SACGreedyOrderMeta,
-        n_segments: int = 2,
+        n_segments: int = 3,
         save_tradeoff_graph: bool = False,
         filename: str = "ac_tradeoff",
     ) -> SACTradeOffStats:
@@ -671,6 +692,7 @@ class SACEstimator(TorchDispatchMode):
                 os.makedirs(folder_name)
             # Save the plots in the folder
             plt.savefig(os.path.join(folder_name, f"{filename}.png"))
+            plt.close()
 
         if save_tradeoff_graph:
             save_prediction_graph(tradeoff_pwlf, x, y, filename)
@@ -885,7 +907,7 @@ class SACEstimator(TorchDispatchMode):
 
     def pwlf_sac_tradeoff_curve(
         self,
-        n_segments: int = 2,
+        n_segments: int = 3,
         save_tradeoff_graphs: bool = False,
     ) -> None:
         """
@@ -894,7 +916,7 @@ class SACEstimator(TorchDispatchMode):
 
         Args:
             n_segments (int, optional): The number of segments to be used for fitting the piecewise linear function to
-                the trade-off curve. Defaults to 2.
+                the trade-off curve. Defaults to 3.
             save_tradeoff_graphs (bool, optional): Whether to save the trade-off graphs to file. Defaults to False.
 
         If save_tradeoff_graphs is True, the trade-off graphs are saved to file using the module FQN as the filename.
@@ -937,22 +959,28 @@ class SACEstimator(TorchDispatchMode):
                 self.sac_mod_greedy_order_meta[mod_fqn], sac_stats, print_tabular
             )
 
-    def __call__(self, estimate_mode_type: str) -> Self:
+    def __call__(self, estimate_mode_type: str, gpu_type: str = "") -> Self:
         """
-        Sets the estimate mode type.
+        Configures the runtime estimation mode and initializes GPU-specific settings.
 
-        Currently supported modes:
-            - "operator-level-benchmark": Estimates runtime using operator benchmarking.
-            - "operator-level-cost-model": Estimates runtime using roofline cost model.
+        Supported Modes:
+            - "operator-level-benchmark": Uses operator benchmarking to estimate runtime.
+            - "operator-level-cost-model": Uses a roofline cost model to estimate runtime.
 
         Args:
-            estimate_mode_type (str): The type of estimate mode to use.
+            estimate_mode_type (str):
+                The type of runtime estimation mode to configure. Must be one of the supported modes.
+            gpu_type (str, optional):
+                The GPU type to configure specific settings (e.g., "H100_SXM_80GB").
+                Defaults to an empty string for automatic configurations.
 
         Returns:
-            SACEstimator: The SAC estimator instance.
+            Self:
+                The instance of the `SACEstimator` class with the configured runtime estimation mode.
 
         Raises:
-            NotImplementedError: If the estimate mode type is not supported.
+            NotImplementedError:
+                If `estimate_mode_type` is not a supported runtime estimation mode.
         """
         if estimate_mode_type == "operator-level-benchmark":
             self._estimate_runtime = RuntimeEstimator._benchmark_estimate
@@ -962,6 +990,7 @@ class SACEstimator(TorchDispatchMode):
             raise NotImplementedError(
                 f"estimate_mode_type {estimate_mode_type} not supported"
             )
+        RuntimeEstimator.init_configs(gpu_type)
         return self
 
     def __enter__(self) -> Self:  # type: ignore[no-untyped-def]
@@ -974,6 +1003,15 @@ class SACEstimator(TorchDispatchMode):
             pre_fw_hook=self._pre_fw_hook,
             post_fw_hook=self._post_fw_hook,
         )
+        self._optimizer_hook_handles = (
+            register_optimizer_step_pre_hook(
+                hook=lambda opt, args, kwargs: self._update_opt_flag(True)
+            ),
+            register_optimizer_step_post_hook(
+                hook=lambda opt, args, kwargs: self._update_opt_flag(False)
+            ),
+        )
+        self._in_opt = False
         self._mod_tracker.__enter__()
         self._saved_tensor_hook_ctx.__enter__()
         return super().__enter__()
@@ -981,4 +1019,8 @@ class SACEstimator(TorchDispatchMode):
     def __exit__(self, *args: Any) -> None:  # type: ignore[no-untyped-def]
         self._saved_tensor_hook_ctx.__exit__()
         self._mod_tracker.__exit__(*args)
+        if self._optimizer_hook_handles is not None:
+            for handle in self._optimizer_hook_handles:
+                handle.remove()
+            self._optimizer_hook_handles = None
         super().__exit__(*args)
