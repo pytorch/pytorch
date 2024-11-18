@@ -30,6 +30,55 @@ from .utils import use_aten_gemm_kernels, use_cpp_packed_gemm_template, use_max_
 from .virtualized import ops, V
 
 
+def mlp_linear_silu_linear_mul(
+    x: TensorBox,
+    w: List[TensorBox],
+    b: List[TensorBox],
+    attr,
+    scalars,
+    algorithm,
+    layout=None,
+):
+    x_size = x.get_size()
+    if len(x_size) > 2:
+        # GEMM template needs 2D input, normalize input shape here
+        x = view(x, [-1, x_size[-1]])
+
+    assert use_max_autotune()
+    b = [bias if bias is None else ir.ExternKernel.realize_input(bias) for bias in b]
+
+    choices: List[ChoiceCaller] = []
+    transposed_w0 = permute(w[0], [1, 0])
+    *_, layout, x, transposed_w0 = mm_args(x, transposed_w0, layout=layout)
+
+    assert use_cpp_packed_gemm_template(layout, x, transposed_w0)
+    kwargs = dict(
+        has_bias=[bias is not None for bias in b],
+        trans_w=True,
+    )
+
+    input_nodes = [x, w[0], w[1]]
+    input_nodes.extend([bias for bias in b if bias is not None])
+
+    CppPackedMLPTemplate.add_choices(
+        choices,
+        layout,
+        input_nodes,
+        **kwargs,  # type: ignore[arg-type]
+    )
+
+    assert len(choices) != 0
+    result = autotune_select_algorithm(
+        "linear_unary",
+        choices,
+        input_nodes,
+        layout,
+    )
+    if len(x_size) > 2:
+        result = view(result, (*x_size[:-1], result.get_size()[-1]))
+    return result
+
+
 def register_onednn_fusion_ops():
     if torch._C._has_mkldnn:
         from . import mkldnn_ir
@@ -163,50 +212,6 @@ def register_onednn_fusion_ops():
                 )
             )
 
-        def mlp_linear_silu_linear_mul(
-            x: TensorBox,
-            w: List[TensorBox],
-            b: List[TensorBox],
-            attr,
-            scalars,
-            algorithm,
-            layout=None,
-        ):
-            assert use_max_autotune()
-            b = [
-                bias if bias is None else ir.ExternKernel.realize_input(bias)
-                for bias in b
-            ]
-
-            choices: List[ChoiceCaller] = []
-            transposed_w0 = permute(w[0], [1, 0])
-            *_, layout, x, transposed_w0 = mm_args(x, transposed_w0, layout=layout)
-
-            if use_cpp_packed_gemm_template(layout, x, transposed_w0):
-                kwargs = dict(
-                    has_bias=[bias is not None for bias in b],
-                    trans_w=True,
-                )
-
-                input_nodes = [x, w[0], w[1]]
-                input_nodes.extend([bias for bias in b if bias is not None])
-
-                CppPackedMLPTemplate.add_choices(
-                    choices,
-                    layout,
-                    input_nodes,
-                    **kwargs,  # type: ignore[arg-type]
-                )
-
-                assert len(choices) != 0
-                result = autotune_select_algorithm(
-                    "linear_unary",
-                    choices,
-                    input_nodes,
-                    layout,
-                )
-                return result
-
         @register_lowering(torch.ops.mkldnn._linear_pointwise)
         def linear_unary(
             x: TensorBox,
@@ -221,16 +226,6 @@ def register_onednn_fusion_ops():
             if len(x_size) > 2:
                 # GEMM template needs 2D input, normalize input shape here
                 x = view(x, [-1, x_size[-1]])
-
-            if attr == "mlp_silu_mul":
-                assert isinstance(w, List)
-                assert isinstance(b, List)
-                result = mlp_linear_silu_linear_mul(
-                    x, w, b, attr, scalars, algorithm, layout
-                )
-                if len(x_size) > 2:
-                    result = view(result, (*x_size[:-1], result.get_size()[-1]))
-                return result
 
             if b is not None:
                 b = ir.ExternKernel.realize_input(b)
