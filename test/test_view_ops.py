@@ -996,7 +996,7 @@ class TestViewOps(TestCase):
     # Testing that the generated view_copy kernel and its derivative are implemented correctly
     def test_view_copy(self, device):
         a = torch.randn(4, device=device, requires_grad=True)
-        a_ref = a.clone().detach().requires_grad_()
+        a_ref = a.detach().clone().requires_grad_()
         a_view = a_ref.view(2, 2)
         a_view_copy = torch.view_copy(a, (2, 2))
 

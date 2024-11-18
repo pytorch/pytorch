@@ -54,7 +54,7 @@ from torch.testing._internal.common_utils import (
     GRADCHECK_NONDET_TOL,
     gradgradcheck,
     instantiate_parametrized_tests,
-    IS_MACOS,
+    MACOS_VERSION,
     parametrize as parametrize_test,
     run_tests,
     set_default_dtype,
@@ -72,13 +72,6 @@ AMPERE_OR_ROCM = TEST_WITH_ROCM or tf32_is_not_fp32()
 if TEST_SCIPY:
     import scipy.ndimage
     import scipy.signal
-
-if IS_MACOS:
-    import platform
-
-    product_version = float(".".join(platform.mac_ver()[0].split(".")[:2]) or -1)
-else:
-    product_version = 0.0
 
 
 class TestConvolutionNN(NNTestCase):
@@ -1692,7 +1685,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
 
     @dtypes(torch.float, torch.cfloat)
     @dtypesIfMPS(
-        *([torch.float] if product_version < 14.0 else [torch.float, torch.cfloat])
+        *([torch.float] if MACOS_VERSION < 14.0 else [torch.float, torch.cfloat])
     )  # Complex not supported on MacOS13
     @torch.backends.cudnn.flags(enabled=True, benchmark=False)
     def test_conv1d_same_padding(self, device, dtype):
@@ -1734,7 +1727,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         self.assertEqual(expect, actual)
 
     @dtypesIfMPS(
-        *([torch.float] if product_version < 14.0 else [torch.float, torch.cfloat])
+        *([torch.float] if MACOS_VERSION < 14.0 else [torch.float, torch.cfloat])
     )  # Complex not supported on MacOS13
     @dtypes(torch.float, torch.cfloat)
     def test_conv2d_same_padding(self, device, dtype):
@@ -1789,7 +1782,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
 
     @dtypes(torch.float, torch.cfloat)
     @dtypesIfMPS(
-        *([torch.float] if product_version < 14.0 else [torch.float, torch.cfloat])
+        *([torch.float] if MACOS_VERSION < 14.0 else [torch.float, torch.cfloat])
     )  # Complex not supported on MacOS13
     def test_conv1d_valid_padding(self, device, dtype):
         # Test F.conv1d padding='valid' is the same as no padding
@@ -1801,7 +1794,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
 
     @dtypes(torch.float, torch.cfloat)
     @dtypesIfMPS(
-        *([torch.float] if product_version < 14.0 else [torch.float, torch.cfloat])
+        *([torch.float] if MACOS_VERSION < 14.0 else [torch.float, torch.cfloat])
     )  # Complex not supported on MacOS13
     def test_conv2d_valid_padding(self, device, dtype):
         # Test F.conv2d padding='valid' is the same as no padding
@@ -1852,7 +1845,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
 
     @dtypes(torch.float, torch.cfloat)
     @dtypesIfMPS(
-        *([torch.float] if product_version < 14.0 else [torch.float, torch.cfloat])
+        *([torch.float] if MACOS_VERSION < 14.0 else [torch.float, torch.cfloat])
     )  # Complex not supported on MacOS13
     @tf32_on_and_off(0.001)
     def test_conv2d_same_padding_backward(self, device, dtype):
@@ -1950,7 +1943,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
 
     @dtypes(torch.float, torch.cfloat)
     @dtypesIfMPS(
-        *([torch.float] if product_version < 14.0 else [torch.float, torch.cfloat])
+        *([torch.float] if MACOS_VERSION < 14.0 else [torch.float, torch.cfloat])
     )  # Complex not supported on MacOS13
     def test_conv1d_valid_padding_backward(self, device, dtype):
         # Test F.conv1d gradients work with padding='valid'
@@ -1968,7 +1961,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
     @unittest.skipIf(not TEST_SCIPY, "Scipy required for the test.")
     @dtypes(torch.float, torch.cfloat)
     @dtypesIfMPS(
-        *([torch.float] if product_version < 14.0 else [torch.float, torch.cfloat])
+        *([torch.float] if MACOS_VERSION < 14.0 else [torch.float, torch.cfloat])
     )  # Complex not supported on MacOS13
     @parametrize_test("mode", ("valid", "same"))
     def test_conv1d_vs_scipy(self, device, dtype, mode):
@@ -2010,7 +2003,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
     @unittest.skipIf(not TEST_SCIPY, "Scipy required for the test.")
     @dtypes(torch.float, torch.cfloat)
     @dtypesIfMPS(
-        *([torch.float] if product_version < 14.0 else [torch.float, torch.cfloat])
+        *([torch.float] if MACOS_VERSION < 14.0 else [torch.float, torch.cfloat])
     )  # Complex not supported on MacOS13
     @parametrize_test("mode", ("valid", "same"))
     def test_conv2d_vs_scipy(self, device, dtype, mode):
@@ -2106,7 +2099,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
 
     @dtypes(torch.float, torch.complex64)
     @dtypesIfMPS(
-        *([torch.float] if product_version < 14.0 else [torch.float, torch.cfloat])
+        *([torch.float] if MACOS_VERSION < 14.0 else [torch.float, torch.cfloat])
     )  # Complex not supported on MacOS13
     def test_conv2d_valid_padding_backward(self, device, dtype):
         # Test F.conv2d gradients work with padding='valid'

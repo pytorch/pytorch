@@ -788,7 +788,7 @@ class TestDynamoAOT(JitTestCase):
         mod = Seq()
 
         import torch._dynamo
-        aot_mod = torch._dynamo.optimize("aot_ts", nopython=True)(mod)
+        aot_mod = torch.compile(mod, backend="aot_ts", fullgraph=True)
 
         for _ in range(10):
             with torch.jit.fuser("fuser3"):

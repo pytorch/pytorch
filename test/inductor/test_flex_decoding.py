@@ -216,9 +216,9 @@ def query_key_value_clones(
     """Clones the query, key, and value tensors and moves them to the specified dtype."""
     if dtype is None:
         dtype = query.dtype
-    query_ref = query.clone().detach().to(dtype).requires_grad_(query.requires_grad)
-    key_ref = key.clone().detach().to(dtype).requires_grad_(key.requires_grad)
-    value_ref = value.clone().detach().to(dtype).requires_grad_(value.requires_grad)
+    query_ref = query.detach().clone().to(dtype).requires_grad_(query.requires_grad)
+    key_ref = key.detach().clone().to(dtype).requires_grad_(key.requires_grad)
+    value_ref = value.detach().clone().to(dtype).requires_grad_(value.requires_grad)
     return query_ref, key_ref, value_ref
 
 
