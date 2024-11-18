@@ -450,6 +450,18 @@ class UserDefinedClassVariable(UserDefinedVariable):
             else:
                 var_cls = GenericContextWrappingVariable
 
+            # graph break on any contextlib.* that it is not contextlib.contextmanager
+            if self.value in (
+                contextlib._AsyncGeneratorContextManager,
+                contextlib.closing,
+                contextlib.redirect_stdout,
+                contextlib.redirect_stderr,
+                contextlib.suppress,
+                contextlib.ExitStack,
+                contextlib.AsyncExitStack,
+            ):
+                unimplemented(f"{self.value} not supported")
+
             if self.value is contextlib._GeneratorContextManager and isinstance(
                 args[0], BaseUserFunctionVariable
             ):
@@ -462,14 +474,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 args[0] = FunctionDecoratedByContextlibContextManagerVariable(
                     args[0], source=self.source
                 )
-
-            # graph break on any contextlib.* that it is not contextlib.contextmanager
-            if self.value in (
-                contextlib.suppress,
-                contextlib.redirect_stdout,
-                contextlib.redirect_stderr,
-            ):
-                unimplemented(f"{self.value} not supported")
 
             cm_obj = tx.output.side_effects.track_object_new(
                 self.source, self.value, var_cls, {}
