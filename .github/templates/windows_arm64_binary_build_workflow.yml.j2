@@ -81,7 +81,12 @@ jobs:
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: !{{ config.pytorch_extra_install_requirements }}
     {%- endif %}
     steps:
-      !{{ common.checkout(deep_clone=False, directory="builder", repository="ozanMSFT/builder", branch="users/ozanMSFT/win-arm64") }}
+      - name: Git checkout workflow
+        uses: actions/checkout@v4
+        with:
+          repository:  "ozanMSFT/builder"
+          ref: "users/ozanMSFT/win-arm64"
+          path: "builder"
       - name: Bootstrap Git
         shell: cmd
         run: |

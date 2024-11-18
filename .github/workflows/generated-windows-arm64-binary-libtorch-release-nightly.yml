@@ -68,19 +68,12 @@ jobs:
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.9"
     steps:
-      - name: Checkout ozanMSFT/builder
-        uses: malfet/checkout@silent-checkout
+      - name: Git checkout workflow
+        uses: actions/checkout@v4
         with:
-          ref: users/ozanMSFT/win-arm64
-          submodules: recursive
-          repository: ozanMSFT/builder
-          path: builder
-          quiet-checkout: true
-      - name: Clean ozanMSFT/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
+          repository:  "ozanMSFT/builder"
+          ref: "users/ozanMSFT/win-arm64"
+          path: "builder"
       - name: Bootstrap Git
         shell: cmd
         run: |
