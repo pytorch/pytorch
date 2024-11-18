@@ -165,7 +165,7 @@ static Tensor _mps_convolution_impl(const Tensor& input_t_,
   }
   TensorArg output{output_t, "result", 0};
 
-  if (!detail::getMPSHooks().isOnMacOSorNewer(15, 1)) {
+  if (!::at::detail::getMPSHooks().isOnMacOSorNewer(15, 1)) {
     // On macOS < 15.1, MPS convolution kernel does not support output channels > 2^16
     for (auto elem : output_t.sizes()) {
       TORCH_CHECK_NOT_IMPLEMENTED(elem <= (1 << 16), "Output channels > 65536 not supported at the MPS device. ");
@@ -373,7 +373,7 @@ static Tensor mps_convolution_backward_input(IntArrayRef input_size,
   using namespace mps;
   bool is3DConv = grad_output_t.dim() == 5;
 
-  if (!detail::getMPSHooks().isOnMacOSorNewer(15, 1)) {
+  if (!::at::detail::getMPSHooks().isOnMacOSorNewer(15, 1)) {
     // On macOS < 15.1, MPS convolution kernel does not support output channels > 2^16
     for (auto elem : grad_output_t.sizes()) {
       TORCH_CHECK_NOT_IMPLEMENTED(elem <= (1 << 16), "Output channels > 65536 not supported at the MPS device. ");

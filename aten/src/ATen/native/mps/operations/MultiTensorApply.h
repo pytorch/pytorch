@@ -25,21 +25,11 @@ struct FusedAdamEncodingFunctor {
                   const double weight_decay,
                   const double eps,
                   const bool maximize) const {
-    float lr_lv = lr;
-    float beta1_lv = beta1;
-    float beta2_lv = beta2;
-    float weight_decay_lv = weight_decay;
     float eps_lv = eps;
     uint8_t maximize_lv = maximize;
 
-    [computeEncoder setBuffer:tensorArgumentBuffer offset:0 atIndex:0];
-    [computeEncoder setBytes:&metadata_arguments length:sizeof(MetadataArguments) atIndex:1];
-    mtl_setBytes(computeEncoder, lr_lv, 2);
-    mtl_setBytes(computeEncoder, beta1_lv, 3);
-    mtl_setBytes(computeEncoder, beta2_lv, 4);
-    mtl_setBytes(computeEncoder, weight_decay_lv, 5);
-    mtl_setBytes(computeEncoder, eps_lv, 6);
-    mtl_setBytes(computeEncoder, maximize_lv, 7);
+    mtl_setArgs(
+        computeEncoder, tensorArgumentBuffer, metadata_arguments, lr, beta1, beta2, weight_decay, eps, maximize_lv);
   }
 
   void operator()(id<MTLComputeCommandEncoder>& computeEncoder,
@@ -51,20 +41,10 @@ struct FusedAdamEncodingFunctor {
                   const double weight_decay,
                   const double eps,
                   const bool maximize) const {
-    float beta1_lv = beta1;
-    float beta2_lv = beta2;
-    float weight_decay_lv = weight_decay;
-    float eps_lv = eps;
     uint8_t maximize_lv = maximize;
 
-    [computeEncoder setBuffer:tensorArgumentBuffer offset:0 atIndex:0];
-    [computeEncoder setBytes:&metadata_arguments length:sizeof(MetadataArguments) atIndex:1];
-    mtl_setBuffer(computeEncoder, lr, 2);
-    mtl_setBytes(computeEncoder, beta1_lv, 3);
-    mtl_setBytes(computeEncoder, beta2_lv, 4);
-    mtl_setBytes(computeEncoder, weight_decay_lv, 5);
-    mtl_setBytes(computeEncoder, eps_lv, 6);
-    mtl_setBytes(computeEncoder, maximize_lv, 7);
+    mtl_setArgs(
+        computeEncoder, tensorArgumentBuffer, metadata_arguments, lr, beta1, beta2, weight_decay, eps, maximize_lv);
   }
 };
 
@@ -83,23 +63,19 @@ struct FusedSgdEncodingFunctor<true> {
                   const bool nesterov,
                   const bool maximize,
                   const bool is_first_step) const {
-    float weight_decay_lv = weight_decay;
-    float momentum_lv = momentum;
-    float lr_lv = lr;
-    float dampening_lv = dampening;
     uint8_t nesterov_lv = nesterov;
     uint8_t maximize_lv = maximize;
     uint8_t is_first_step_lv = is_first_step;
-
-    [computeEncoder setBuffer:tensorArgumentBuffer offset:0 atIndex:0];
-    [computeEncoder setBytes:&metadata_arguments length:sizeof(MetadataArguments) atIndex:1];
-    mtl_setBytes(computeEncoder, weight_decay_lv, 2);
-    mtl_setBytes(computeEncoder, momentum_lv, 3);
-    mtl_setBytes(computeEncoder, lr_lv, 4);
-    mtl_setBytes(computeEncoder, dampening_lv, 5);
-    mtl_setBytes(computeEncoder, nesterov_lv, 6);
-    mtl_setBytes(computeEncoder, maximize_lv, 7);
-    mtl_setBytes(computeEncoder, is_first_step_lv, 8);
+    mtl_setArgs(computeEncoder,
+                tensorArgumentBuffer,
+                metadata_arguments,
+                weight_decay,
+                momentum,
+                lr,
+                dampening,
+                nesterov_lv,
+                maximize_lv,
+                is_first_step_lv);
   }
 
   void operator()(id<MTLComputeCommandEncoder>& computeEncoder,
@@ -112,22 +88,20 @@ struct FusedSgdEncodingFunctor<true> {
                   const bool nesterov,
                   const bool maximize,
                   const bool is_first_step) const {
-    float weight_decay_lv = weight_decay;
-    float momentum_lv = momentum;
-    float dampening_lv = dampening;
     uint8_t nesterov_lv = nesterov;
     uint8_t maximize_lv = maximize;
     uint8_t is_first_step_lv = is_first_step;
 
-    [computeEncoder setBuffer:tensorArgumentBuffer offset:0 atIndex:0];
-    [computeEncoder setBytes:&metadata_arguments length:sizeof(MetadataArguments) atIndex:1];
-    mtl_setBytes(computeEncoder, weight_decay_lv, 2);
-    mtl_setBytes(computeEncoder, momentum_lv, 3);
-    mtl_setBuffer(computeEncoder, lr, 4);
-    mtl_setBytes(computeEncoder, dampening_lv, 5);
-    mtl_setBytes(computeEncoder, nesterov_lv, 6);
-    mtl_setBytes(computeEncoder, maximize_lv, 7);
-    mtl_setBytes(computeEncoder, is_first_step_lv, 8);
+    mtl_setArgs(computeEncoder,
+                tensorArgumentBuffer,
+                metadata_arguments,
+                weight_decay,
+                momentum,
+                lr,
+                dampening,
+                nesterov_lv,
+                maximize_lv,
+                is_first_step_lv);
   }
 };
 
@@ -139,15 +113,9 @@ struct FusedSgdEncodingFunctor<false> {
                   const double weight_decay,
                   const double lr,
                   const bool maximize) const {
-    float weight_decay_lv = weight_decay;
-    float lr_lv = lr;
     uint8_t maximize_lv = maximize;
 
-    [computeEncoder setBuffer:tensorArgumentBuffer offset:0 atIndex:0];
-    [computeEncoder setBytes:&metadata_arguments length:sizeof(MetadataArguments) atIndex:1];
-    mtl_setBytes(computeEncoder, weight_decay_lv, 2);
-    mtl_setBytes(computeEncoder, lr_lv, 3);
-    mtl_setBytes(computeEncoder, maximize_lv, 4);
+    mtl_setArgs(computeEncoder, tensorArgumentBuffer, metadata_arguments, weight_decay, lr, maximize_lv);
   }
 
   void operator()(id<MTLComputeCommandEncoder>& computeEncoder,
@@ -156,14 +124,9 @@ struct FusedSgdEncodingFunctor<false> {
                   const double weight_decay,
                   const at::Tensor& lr,
                   const bool maximize) const {
-    float weight_decay_lv = weight_decay;
     uint8_t maximize_lv = maximize;
 
-    [computeEncoder setBuffer:tensorArgumentBuffer offset:0 atIndex:0];
-    [computeEncoder setBytes:&metadata_arguments length:sizeof(MetadataArguments) atIndex:1];
-    mtl_setBytes(computeEncoder, weight_decay_lv, 2);
-    mtl_setBuffer(computeEncoder, lr, 3);
-    mtl_setBytes(computeEncoder, maximize_lv, 4);
+    mtl_setArgs(computeEncoder, tensorArgumentBuffer, metadata_arguments, weight_decay, lr, maximize_lv);
   }
 };
 

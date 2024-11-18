@@ -382,6 +382,23 @@ class MetalShaderLibrary {
   std::unordered_map<std::string, std::pair<id<MTLComputePipelineState>, id<MTLFunction>>> cplMap;
 };
 
+namespace detail {
+template <typename T>
+class has_size_type {
+  template <typename U>
+  static constexpr std::true_type check(typename U::size_type*);
+  template <typename>
+  static constexpr std::false_type check(...);
+
+ public:
+  static constexpr bool value = decltype(check<T>(nullptr))::value;
+};
+
+template <typename T>
+constexpr bool has_size_type_v = has_size_type<T>::value;
+
+} // namespace detail
+
 template <typename encoder_t,
           typename = std::enable_if_t<std::is_same_v<id<MTLComputeCommandEncoder>, encoder_t> ||
                                       std::is_same_v<id<MTLArgumentEncoder>, encoder_t>>>
@@ -389,14 +406,66 @@ static inline void mtl_setBuffer(encoder_t encoder, const TensorBase& t, unsigne
   [encoder setBuffer:getMTLBufferStorage(t) offset:t.storage_offset() * t.element_size() atIndex:idx];
 }
 
-template <typename T, typename = std::enable_if_t<std::is_integral_v<T> || std::is_same_v<T, float>>>
+// Implementation of setBytes for containers vs trivially copiable types must be separate
+// Containers like `std::array` could have been uploaded directly, but `c10::ArrayRef`,
+// while trivially copiable, includes padding  which if copied as Metal shader parameters
+// might overwrite other values
+template <
+    typename T,
+    typename = std::enable_if_t<std::is_integral_v<T> || std::is_same_v<T, float> ||
+                                (std::is_class_v<T> && std::is_trivially_copyable_v<T> && !detail::has_size_type_v<T>)>>
 static inline void mtl_setBytes(id<MTLComputeCommandEncoder> encoder, const T val, unsigned idx) {
   [encoder setBytes:&val length:sizeof(T) atIndex:idx];
 }
 
-template <typename Container, typename = std::enable_if_t<std::is_integral_v<typename Container::size_type>>>
+template <typename Container, typename = std::enable_if_t<detail::has_size_type_v<Container>>>
 static inline void mtl_setBytes(id<MTLComputeCommandEncoder> encoder, const Container& values, unsigned idx) {
   [encoder setBytes:values.data() length:sizeof(typename Container::value_type) * values.size() atIndex:idx];
+}
+
+namespace detail {
+template <typename T>
+inline void mtl_setArg(id<MTLComputeCommandEncoder> encoder, const T& val, unsigned idx) {
+  mtl_setBytes(encoder, val, idx);
+}
+
+inline void mtl_setArg(id<MTLComputeCommandEncoder> encoder, id<MTLBuffer> val, unsigned idx) {
+  [encoder setBuffer:val offset:0 atIndex:idx];
+}
+
+template <>
+inline void mtl_setArg(id<MTLComputeCommandEncoder> encoder, const Tensor& val, unsigned idx) {
+  mtl_setBuffer(encoder, val, idx);
+}
+
+template <>
+inline void mtl_setArg(id<MTLComputeCommandEncoder> encoder, const std::optional<Tensor>& val, unsigned idx) {
+  if (val.has_value()) {
+    mtl_setBuffer(encoder, val.value(), idx);
+  }
+}
+
+template <>
+inline void mtl_setArg(id<MTLComputeCommandEncoder> encoder, const TensorBase& val, unsigned idx) {
+  mtl_setBuffer(encoder, val, idx);
+}
+// MPS does not support doubles, so cast it down to float before passing as an argument
+template <>
+inline void mtl_setArg(id<MTLComputeCommandEncoder> encoder, const double& val, unsigned idx) {
+  float val_f = static_cast<float>(val);
+  mtl_setBytes(encoder, val_f, idx);
+}
+} // namespace detail
+
+template <unsigned idx = 0, typename T>
+static inline void mtl_setArgs(id<MTLComputeCommandEncoder> encoder, const T& val) {
+  detail::mtl_setArg(encoder, val, idx);
+}
+
+template <unsigned idx = 0, typename T, typename... Args>
+static inline void mtl_setArgs(id<MTLComputeCommandEncoder> encoder, const T& val, Args... args) {
+  detail::mtl_setArg(encoder, val, idx);
+  mtl_setArgs<idx + 1>(encoder, args...);
 }
 
 static inline void mtl_dispatch1DJob(id<MTLComputeCommandEncoder> encoder,
