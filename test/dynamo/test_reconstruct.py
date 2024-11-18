@@ -48,7 +48,7 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
         f(d, t)
 
         with self.register_bytecode_hook(hook):
-            opt_f = torch._dynamo.optimize("eager", nopython=True)(f)
+            opt_f = torch.compile(f, backend="eager", fullgraph=True)
             opt_f(d_opt, t)
             self.assertEqual(d, d_opt)
 
@@ -74,7 +74,7 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
         f(d, t)
 
         with self.register_bytecode_hook(hook):
-            opt_f = torch._dynamo.optimize("eager", nopython=True)(f)
+            opt_f = torch.compile(f, backend="eager", fullgraph=True)
             opt_f(d_opt, t)
             self.assertEqual(d, d_opt)
 
@@ -100,7 +100,7 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
         f(d, t)
 
         with self.register_bytecode_hook(hook):
-            opt_f = torch._dynamo.optimize("eager", nopython=True)(f)
+            opt_f = torch.compile(f, backend="eager", fullgraph=True)
             opt_f(d_opt, t)
             self.assertEqual(d, d_opt)
 
@@ -145,7 +145,7 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
         f(d, t)
 
         with self.register_bytecode_hook(hook):
-            opt_f = torch._dynamo.optimize("eager", nopython=True)(f)
+            opt_f = torch.compile(f, backend="eager", fullgraph=True)
             opt_f(d_opt, t)
             self.assertEqual(d, d_opt)
 
@@ -171,7 +171,7 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
         f(d, t)
 
         with self.register_bytecode_hook(hook):
-            opt_f = torch._dynamo.optimize("eager", nopython=True)(f)
+            opt_f = torch.compile(f, backend="eager", fullgraph=True)
             opt_f(d_opt, t)
             self.assertEqual(d, d_opt)
 
@@ -197,7 +197,7 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
         f(d, t)
 
         with self.register_bytecode_hook(hook):
-            opt_f = torch._dynamo.optimize("eager", nopython=True)(f)
+            opt_f = torch.compile(f, backend="eager", fullgraph=True)
             opt_f(d_opt, t)
             self.assertEqual(d, d_opt)
 
@@ -219,7 +219,7 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
         d = f(t)
 
         with self.register_bytecode_hook(hook):
-            opt_f = torch._dynamo.optimize("eager", nopython=True)(f)
+            opt_f = torch.compile(f, backend="eager", fullgraph=True)
             d_opt = opt_f(t)
             self.assertEqual(d, d_opt)
 
@@ -249,7 +249,7 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
         x = torch.randn(2, 3)
         expected = torch.nn.functional.linear(x, new_weight, new_bias)
         with self.register_bytecode_hook(hook):
-            opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
             got = opt_fn(new_weight, new_bias, x)
             self.assertEqual(expected, got)
 
