@@ -179,8 +179,8 @@ cuda::blas::GEMMAndBiasActivationEpilogue activation_to_gemm_and_blas_arg(Activa
 }
 
 static bool getDisableAddmmCudaLt() {
-    static const auto env_value = c10::utils::get_env("DISABLE_ADDMM_CUDA_LT");
-    if (env_value == "1") {
+    static const char* env_value = std::getenv("DISABLE_ADDMM_CUDA_LT");
+    if (env_value != nullptr && strcmp(env_value, "1") == 0) {
       return true;
     }
     return false;
@@ -298,7 +298,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
            scalar_type == at::ScalarType::Half ||
            scalar_type == at::ScalarType::BFloat16) &&
 #endif
-#if (defined(CUDA_VERSION) && CUDA_VERSION >= 12010 && !defined(USE_ROCM))
+#if (defined(CUDA_VERSION) && CUDA_VERSION >= 12010 || defined(USE_ROCM))
           mat2_sizes[0] > 1 && mat2_sizes[1] > 1;
 #else
           mat2_sizes[0] > 1 && mat2_sizes[1] > 1 &&
@@ -1015,9 +1015,9 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
       mat1.sizes()[0],
       "x",
       mat1.sizes()[1],
-      ".");
+      ").");
   TORCH_CHECK(mat2.sizes()[0] % 16 == 0 && mat2.sizes()[1] % 16 == 0, "mat2 shape (", mat2.sizes()[0], "x",
-       mat2.sizes()[1], " must be divisible by 16");
+       mat2.sizes()[1], ") must be divisible by 16");
   // Check types
   TORCH_CHECK(!out_dtype || *out_dtype == out.scalar_type(), "out_dtype must match output matrix type");
   TORCH_CHECK(isFloat8Type(mat1.scalar_type()), "Expected mat1 to be Float8 matrix got ", mat1.scalar_type());
