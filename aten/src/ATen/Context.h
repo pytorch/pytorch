@@ -44,21 +44,9 @@ class TORCH_API Context {
 
     if (device_type == at::kCPU) {
       return at::detail::getDefaultCPUGenerator();
-    } else if (device_type == at::kCUDA) {
-      return at::detail::getCUDAHooks().getDefaultCUDAGenerator(device.index());
-    } else if (device_type == at::kMPS) {
-      return at::detail::getMPSHooks().getDefaultMPSGenerator();
-    } else if (device_type == at::kXPU) {
-      return at::detail::getXPUHooks().getDefaultXPUGenerator(device.index());
-    } else if (device_type == at::kIPU) {
-      return at::detail::getIPUHooks().getDefaultIPUGenerator(device.index());
-    } else if (device_type == at::kHPU) {
-      return at::detail::getHPUHooks().getDefaultHPUGenerator(device.index());
-    } else if (device_type == at::kPrivateUse1) {
-      return at::detail::getPrivateUse1Hooks().getDefaultGenerator(
-          device.index());
     } else {
-      AT_ERROR(c10::DeviceTypeName(device_type), " device type not enabled.");
+      return getAcceleratorHooksInterface(device_type)
+          .getDefaultGenerator(device.index());
     }
   }
 
@@ -604,6 +592,10 @@ inline void manual_seed(uint64_t seed) {
 //     NoTF32Guard disable_tf32;
 struct TORCH_API NoTF32Guard {
   NoTF32Guard();
+  NoTF32Guard(NoTF32Guard&& other) = delete;
+  NoTF32Guard(const NoTF32Guard&) = delete;
+  NoTF32Guard& operator=(const NoTF32Guard&) = delete;
+  NoTF32Guard& operator=(NoTF32Guard&&) = delete;
   ~NoTF32Guard();
   static bool should_disable_tf32();
 
@@ -613,6 +605,10 @@ struct TORCH_API NoTF32Guard {
 
 struct TORCH_API ROCmBackwardPassGuard {
   ROCmBackwardPassGuard();
+  ROCmBackwardPassGuard(ROCmBackwardPassGuard&& other) = delete;
+  ROCmBackwardPassGuard(const ROCmBackwardPassGuard&) = delete;
+  ROCmBackwardPassGuard& operator=(const ROCmBackwardPassGuard&) = delete;
+  ROCmBackwardPassGuard& operator=(ROCmBackwardPassGuard&&) = delete;
   ~ROCmBackwardPassGuard();
   static bool is_backward_pass();
 };

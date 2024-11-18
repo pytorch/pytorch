@@ -7,6 +7,7 @@ import functools
 import hashlib
 import importlib
 import io
+import itertools
 import json
 import logging
 import os
@@ -54,10 +55,10 @@ import torch
 import torch.distributed as dist
 from torch import SymInt, Tensor
 from torch._dynamo.utils import (
-    add_remote_cache_time_saved,
     counters,
     dynamo_timed,
     get_chromium_event_logger,
+    get_metrics_context,
 )
 from torch._inductor import config, exc, metrics
 from torch._inductor.codegen.cuda import cuda_env
@@ -96,7 +97,6 @@ from torch._inductor.cpp_builder import (
     CppOptions,
     CppTorchDeviceOptions,
     get_compiler_version_info,
-    get_cpp_compiler,
     get_name_and_dir_from_output_file_path,
     normalize_path_separator,
 )
@@ -526,7 +526,12 @@ class FxGraphCachePickler(pickle.Pickler):
     data that allow us to compute a stable, but safe hash.
     """
 
-    def __init__(self, include_non_inlined: bool = True) -> None:
+    def __init__(
+        self,
+        gm: torch.fx.GraphModule,
+        include_non_inlined: bool = True,
+        has_user_defined_triton_kernels: bool = False,
+    ) -> None:
         """
         Create an FX graph pickler. If include_non_inlined=True, then pickling will
         include the _values_ for all Tensors. (Note that any tensors are constants
@@ -549,6 +554,11 @@ class FxGraphCachePickler(pickle.Pickler):
                 ),
             }
         )
+        if has_user_defined_triton_kernels:
+            # Need to use runtime type as GraphModule generates a singleton in __new__ function
+            self.dispatch_table[gm.__class__] = functools.partial(
+                self._reduce_graph_module
+            )
 
         # Run with pickler.fast so it doesn't intern strings, making the hash result more predictable
         # TODO: pickler.fast is technically deprecated. Will this work on new python versions?
@@ -614,6 +624,25 @@ class FxGraphCachePickler(pickle.Pickler):
         raise to bypass caching.
         """
         raise BypassFxGraphCache("Reduce unsupported")
+
+    def _reduce_graph_module(
+        self, gm: torch.fx.GraphModule
+    ) -> Tuple[Any, Tuple[Dict[str, Any], str]]:
+        """
+        Custom reducer for graph module to handle irrelevant data for user
+        defined triton kernels
+        Essentially what we are doing here is a huge hack where user defined
+        triton kernel contain a dynamo time side table and the arguments to the
+        call_function are indicies into this side table. These arguments are not
+        for hashing purposes since we included the source code into the cache
+        key and the numbers are prone to give false negatives due to ordering.
+        """
+        fn, (data, imports) = gm.__reduce__()
+        code = data["_code"]
+        code = re.sub(r"kernel_idx = \d+", "", code)
+        code = re.sub(r"constant_args_idx = \d+", "", code)
+        data["_code"] = code
+        return fn, (data, imports)
 
     def dumps(self, obj: Any) -> bytes:
         """
@@ -776,6 +805,35 @@ class FxGraphHashDetails:
                 else:
                     self.fx_kwargs[k] = v
 
+        from torch._higher_order_ops.triton_kernel_wrap import (
+            triton_kernel_wrapper_functional,
+            triton_kernel_wrapper_mutation,
+        )
+
+        # Node meta will not be part of gm's reduce function, so lets remember
+        # the kernel source code separately
+        self.user_defined_triton_source: List[Any] = []
+        if gm is not None:
+            for module in gm.modules():
+                if not isinstance(module, torch.fx.GraphModule):
+                    continue
+                for node in itertools.chain(
+                    module.graph.find_nodes(
+                        op="call_function", target=triton_kernel_wrapper_functional
+                    ),
+                    module.graph.find_nodes(
+                        op="call_function", target=triton_kernel_wrapper_mutation
+                    ),
+                ):
+                    data = node.meta.get(
+                        "user_defined_triton_kernel_source_and_constant_args", None
+                    )
+                    if data is None:
+                        raise AssertionError(
+                            "TritonKernelWrapper does not contain source code meta"
+                        )
+                    self.user_defined_triton_source.append(data)
+
         # Alignment checks
         self.inputs_to_check = inputs_to_check
 
@@ -834,7 +892,10 @@ def compiled_fx_graph_hash(
     include_non_inlined = not has_frozen_params(gm)
 
     details = FxGraphHashDetails(gm, example_inputs, fx_kwargs, inputs_to_check)
-    pickler = FxGraphCachePickler(include_non_inlined)
+    has_user_defined_triton_kernels = len(details.user_defined_triton_source) != 0
+    pickler = FxGraphCachePickler(
+        gm, include_non_inlined, has_user_defined_triton_kernels
+    )
     # The prefix distinguishes among the other kinds of objects we
     # cache in this module.
     key = "f" + pickler.get_hash(details)
@@ -1151,6 +1212,8 @@ class FxGraphCache:
                     logger.add_event_data(
                         "inductor_compile", cached_kernel_names=meta.cached_kernel_names
                     )
+                if len(meta.cached_kernel_names) > 0:
+                    get_metrics_context().increment("num_triton_bundles", 1)
 
         inductor_meta = autotune_cache.inductor_meta_from_config()
         AutotuneCacheBundler.begin_compile(inductor_meta, code=code)
@@ -1447,7 +1510,9 @@ class FxGraphCache:
 
             if (time_saved_ns := compiled_graph._time_taken_ns) is not None:
                 cache_info["time_saved_ns"] = time_saved_ns
-                add_remote_cache_time_saved(time_saved_ns, is_backward)
+                get_metrics_context().increment(
+                    "distributed_ephemeral_timeout_us", time_saved_ns // 1000
+                )
                 if (
                     ephemeral_increase := add_ephemeral_timeout_increase_for_distributed(
                         time_saved_ns
@@ -1760,7 +1825,14 @@ class AotCodeCompiler:
         source_code: str,
         serialized_extern_kernel_nodes: Optional[str],
         device_type: str,
-    ) -> str:
+        additional_files: List[str],
+    ) -> Union[List[str], str]:
+        """
+        Returns the .so path, or returns a list of files that were generated if
+        config.aot_inductor.package=True.
+        """
+        generated_files = additional_files
+
         if sys.platform == "win32":
             raise RuntimeError("AotCodeCompiler not yet supported for inductor")
 
@@ -1783,19 +1855,11 @@ class AotCodeCompiler:
         # guarantee the source code hash contains ISA difference.
         cpp_command = repr(vec_isa_cmd_gen.get_command_line())
 
-        fbcode_aot_cpu_re = False
-        use_absolute_path = False
-        if config.is_fbcode():
-            ld_command = build_paths.ld
-            if device_type == "cpu" and graph.aot_mode:  # Meta internal AOTInductor CPU
-                objcopy_command = build_paths.objcopy_fallback
-                fbcode_aot_cpu_re = True
-                use_absolute_path = True
-            else:
-                objcopy_command = build_paths.objcopy
-        else:
-            ld_command = "ld -z noexecstack"
-            objcopy_command = "objcopy"
+        # Meta internal AOTInductor CPU
+        fbcode_aot_cpu_re = (
+            config.is_fbcode() and device_type == "cpu" and graph.aot_mode
+        )
+        use_absolute_path = fbcode_aot_cpu_re
 
         (
             specified_output_path,
@@ -1807,6 +1871,10 @@ class AotCodeCompiler:
             extra=cpp_command,
             specified_dir=specified_output_path,
         )
+
+        if config.aot_inductor.package:
+            generated_files.append(input_path)
+
         output_code_log.info("Output code written to: %s", input_path)
         trace_structured(
             "graph_dump",
@@ -1819,7 +1887,7 @@ class AotCodeCompiler:
         )
 
         # We use a file lock below to protect FS operations. The lock file
-        # is scoped to the 'key', so make sure the consts_path is protected
+        # is scoped to the 'key', so make sure the consts_s is protected
         # by the same lock:
         consts_specified_dir = os.path.join(os.path.split(input_path)[0], key)
 
@@ -1860,14 +1928,37 @@ class AotCodeCompiler:
                 consts_asm += f"\t.space {len(consts) - 8}\n"
             consts_asm += f".globl\t{symbol_prefix}_binary_constants_bin_end\n"
             consts_asm += f"{symbol_prefix}_binary_constants_bin_end:\n"
-            _, consts_path = write(
+            _, consts_s = write(
                 consts_asm,
                 "S",
                 specified_dir=consts_specified_dir,
             )
-            consts_o = os.path.splitext(consts_path)[0] + ".o"
-            cmd = f"{get_cpp_compiler()} -c -o {consts_o} {consts_path}"
-            run_command_and_check(cmd)
+            (
+                object_output_name,
+                object_output_dir,
+            ) = get_name_and_dir_from_output_file_path(consts_s)
+            object_build_options = CppTorchDeviceOptions(
+                device_type=device_type,
+                aot_mode=graph.aot_mode,
+                compile_only=True,
+                use_absolute_path=use_absolute_path,
+            )
+            object_builder = CppBuilder(
+                name=object_output_name,
+                sources=consts_s,
+                output_dir=object_output_dir,
+                BuildOption=object_build_options,
+            )
+            compile_cmd = object_builder.get_command_line()
+            consts_o = object_builder.get_target_file_path()
+            if fbcode_aot_cpu_re:
+                # TODO: refactor fbcode_aot_cpu_re logic into CppBuilder
+                consts_o = os.path.splitext(consts_s)[0] + ".o"
+                compile_file(consts_s, consts_o, compile_cmd.split())
+                os.chmod(consts_o, 0o644)
+            else:
+                run_command_and_check(compile_cmd)
+
             if is_large_consts:
                 with open(consts_o, "r+b") as f:
                     f.seek(0)
@@ -1892,6 +1983,9 @@ class AotCodeCompiler:
                 with open(extern_kernel_nodes_json, "w") as f:
                     f.write(serialized_extern_kernel_nodes)
 
+                if config.aot_inductor.package:
+                    generated_files.append(extern_kernel_nodes_json)
+
             metadata = config.aot_inductor.metadata
             metadata["AOTI_DEVICE_KEY"] = device_type
 
@@ -1904,6 +1998,9 @@ class AotCodeCompiler:
 
             with open(meta_json, "w") as f:
                 f.write(json.dumps(config.aot_inductor.metadata))
+
+            if config.aot_inductor.package:
+                generated_files.append(meta_json)
 
             output_so = (
                 config.aot_inductor.output_path
@@ -1991,9 +2088,10 @@ class AotCodeCompiler:
                 else:
                     run_command_and_check(compile_cmd)
 
-            if config.aot_inductor.package:
+            if config.aot_inductor.package_cpp_only:
                 compile_flags = os.path.splitext(input_path)[0] + "_compile_flags.json"
                 object_build_options.save_flags_to_file(compile_flags)
+                generated_files.append(compile_flags)
 
             if not use_mmap_weights:
                 aot_constants = serialized_weights
@@ -2038,11 +2136,11 @@ class AotCodeCompiler:
                 f.write(f"// Compile cmd\n// {compile_cmd}\n")
                 f.write(f"// Link cmd\n// {link_cmd}\n")
 
-            if config.aot_inductor.package:
+            if config.aot_inductor.package_cpp_only:
                 linker_flags = os.path.splitext(input_path)[0] + "_linker_flags.json"
                 so_build_options.save_flags_to_file(linker_flags)
+                generated_files.append(linker_flags)
 
-            if config.aot_inductor.package_cpp_only:
                 # If we only want to package the cpp, then we need to save the
                 # weights separately into a bin, and we also need to prevent compiling the so
 
@@ -2053,6 +2151,11 @@ class AotCodeCompiler:
                     with open(weight_file, "wb") as f_weights:
                         f_weights.write(serialized_weights)
                         f_weights.write(struct.pack("q", magic_number))
+
+                    generated_files.append(weight_file)
+
+                generated_files.append(consts_o)
+                generated_files.append(kernels_o)
 
             else:
                 if fbcode_aot_cpu_re:
@@ -2071,7 +2174,7 @@ class AotCodeCompiler:
                     consts_o,
                     os.path.splitext(consts_o)[0] + ".S",
                 ]:
-                    # No need to package .o or .S into the output artifact
+                    # Remove these as they are not needed anymore
                     os.remove(o_file)
 
                 if use_mmap_weights:
@@ -2087,10 +2190,14 @@ class AotCodeCompiler:
                         f_so.write(serialized_weights)
                         f_so.write(struct.pack("q", magic_number))
 
+                if config.aot_inductor.package:
+                    generated_files.append(output_so)
+
         if config.aot_inductor.package:
             # We want to return the directory that contains all the AOTI
             # generated files, not just the so
-            return os.path.split(output_so)[0]
+            # return os.path.split(output_so)[0]
+            return generated_files
 
         return output_so
 
@@ -3008,7 +3115,6 @@ class PyCodeCache:
     # than once, but attach different attributes, i.e., due to different
     # constant values.
     modules: List[ModuleType] = []
-    cache: Dict[str, ModuleType] = {}
     linemaps: Dict[str, List[Tuple[Any, ...]]] = {}
 
     @classmethod
@@ -3055,13 +3161,18 @@ class PyCodeCache:
         return mod
 
     @classmethod
-    def cache_clear(cls) -> None:
-        for mod in cls.modules:
-            try:
-                assert mod.__file__
-                os.remove(mod.__file__)
-            except FileNotFoundError:
-                pass
+    def cache_clear(cls, purge: bool = False) -> None:
+        """
+        Clear the in-memory module cache. If purge=True, also delete all the
+        corresponding on-disk source files.
+        """
+        if purge:
+            for mod in cls.modules:
+                try:
+                    assert mod.__file__
+                    os.remove(mod.__file__)
+                except FileNotFoundError:
+                    pass
         cls.modules.clear()
 
     @classmethod
@@ -3469,8 +3580,9 @@ class ROCmCodeCache:
                     log.info(log_duration_msg)
                 else:
                     log.debug(
-                        "Compilation skipped: %s since output already exists",
+                        "Skip compiling %s: output %s already exists",
                         input_path,
+                        output_path,
                     )
                 cls.cache[key] = ROCmCodeCache.CacheEntry(input_path, output_path)
 

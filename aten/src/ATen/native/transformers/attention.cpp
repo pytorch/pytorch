@@ -5,6 +5,7 @@
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
 #include <ATen/OpMathType.h>
+#include <ATen/mps/MPSDevice.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/NestedTensorImpl.h>
 #include <ATen/TensorIndexing.h>
@@ -524,35 +525,29 @@ inline void validate_sdpa_input(
 // the math and memory efficient attn_mask implementation
 //  Args:
 //    attn_mask: attn_mask of shape (B, L, S) or (L, S) or (B, N_heads, L, S)
-std::optional<Tensor> convert_boolean_attn_mask(const std::optional<Tensor>& attn_mask, caffe2::TypeMeta dtype) {
+std::optional<Tensor> convert_boolean_attn_mask_(const std::optional<Tensor>& attn_mask, caffe2::TypeMeta dtype, double neg_inf) {
   // Pass through
-  if(!attn_mask.has_value()){
+  if (!attn_mask.has_value()) {
     return std::nullopt;
   }
   // Convert boolean mask to additive mask; need to invert mask to indicate what
   // to mask *out*.
   if (attn_mask->dtype() == at::kBool) {
-    return at::where(attn_mask->logical_not(), -std::numeric_limits<double>::infinity(), at::scalar_tensor(0.0, at::TensorOptions().dtype(dtype).device(attn_mask->device())));
+    return at::where(*attn_mask, 0.0, at::scalar_tensor(neg_inf, at::TensorOptions().dtype(dtype).device(attn_mask->device())));
   }
   // Otherwise, attn_mask represents an additive attention tensor
   return attn_mask;
 }
 
+std::optional<Tensor> convert_boolean_attn_mask(const std::optional<Tensor>& attn_mask, caffe2::TypeMeta dtype) {
+  return convert_boolean_attn_mask_(attn_mask, dtype, -std::numeric_limits<double>::infinity());
+}
+
 // alternate version to workaround -inf issue with cuDNN
 // TODO(eqy): delete this when cuDNN -inf issue is resolved
 std::optional<Tensor> convert_boolean_attn_mask_cudnn(const std::optional<Tensor>& attn_mask, caffe2::TypeMeta dtype) {
-  // Pass through
-  if(!attn_mask.has_value()){
-    return std::nullopt;
-  }
-  // Convert boolean mask to additive mask; need to invert mask to indicate what
-  // to mask *out*.
-  if (attn_mask->dtype() == at::kBool) {
-    // TODO Use the max type of the input and output
-    return at::where(attn_mask->logical_not(), -65504.0, at::scalar_tensor(0.0, at::TensorOptions().dtype(dtype).device(attn_mask->device())));
-  }
-  // Otherwise, attn_mask represents an additive attention tensor
-  return attn_mask;
+  // TODO Use the max type of the input and output
+  return convert_boolean_attn_mask_(attn_mask, dtype, -65504.0);
 }
 
 // Memory Efficient Attention requires a padded attn mask bias
@@ -666,11 +661,11 @@ Tensor _safe_softmax(
     int64_t dim,
     std::optional<ScalarType> dtype) {
   auto out = at::softmax(self, dim, dtype);
-  const auto neg_inf = at::scalar_tensor(-std::numeric_limits<float>::infinity(), at::TensorOptions().dtype(out.dtype()).device(out.device()));
-  const auto masked = self.eq(neg_inf);
+  const auto masked = self.isneginf();
   const auto masked_rows = all(masked, dim, true);
   const auto zero = at::scalar_tensor(0.0, at::TensorOptions().dtype(out.dtype()).device(out.device()));
-  return at::where(masked_rows, zero, out);
+  // reuse storage for out
+  return at::where_out(out, masked_rows, zero, out);
 }
 // Computes scaled dot product attention on query, key and value tensors, using
 // an optional attention mask if passed, and applying dropout if a probability
@@ -759,12 +754,13 @@ Tensor scaled_dot_product_attention(
       return std::get<0>(out_lse_softmax);
     }
     case SDPBackend::math: {
+#ifdef USE_MPS
       const auto any_nested = query_.is_nested() || key.is_nested() || value.is_nested();
       const bool any_inputs_require_grad = query_.requires_grad() || key.requires_grad() || value.requires_grad();
       const auto all_contiguous = query_.is_contiguous() && key.is_contiguous() && value.is_contiguous();
       if (query_device_type == DeviceType::MPS && dropout_p == 0.0
           && !(GradMode::is_enabled() && any_inputs_require_grad)
-          && all_contiguous
+          && (all_contiguous || mps::is_macos_13_or_newer(mps::MacOSVersion::MACOS_VER_15_0_PLUS))
           && !any_nested) {
         return std::get<0>(at::_scaled_dot_product_attention_math_for_mps(
             query_,
@@ -776,6 +772,7 @@ Tensor scaled_dot_product_attention(
             std::nullopt, /*dropout_mask*/
             scale));
       }
+#endif
       return std::get<0>(at::_scaled_dot_product_attention_math(
           query_,
           key,
