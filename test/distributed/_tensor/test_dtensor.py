@@ -2,8 +2,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import os
-import subprocess
-import sys
+import pathlib
 import tempfile
 import unittest
 
@@ -560,36 +559,18 @@ class DTensorTest(DTensorTestBase):
             with tempfile.NamedTemporaryFile() as f:
                 torch.save(sharded_tensor, f)
                 import_string = (
-                    "import torch.distributed.tensor" if should_import else ""
+                    "import torch.distributed.tensor;" if should_import else ""
                 )
-                script = f"""
-import torch
-{import_string}
-x = torch.load("{f.name}", weights_only=True)
-"""
-                try:
-                    subprocess.check_output(
-                        [sys.executable, "-c", script],
-                        cwd=os.path.dirname(os.path.realpath(__file__)),
-                        stderr=subprocess.STDOUT,
+                filename = pathlib.Path(f.name)
+                err_msg = (
+                    (
+                        "_pickle.UnpicklingError: Weights only load failed. "
+                        "``torch.distributed.tensor`` must be imported to load DTensors"
                     )
-                    if not should_import:
-                        raise RuntimeError(
-                            "Script executed successfully despite lack of import"
-                        )
-                except subprocess.CalledProcessError as e:
-                    if should_import:
-                        err_msg = e.output.decode("utf-8")
-                        raise RuntimeError(f"Unexpected error raised: {err_msg}") from e
-                    else:
-                        if e.returncode < 0:
-                            self.fail("Subprocess exited with a fatal signal")
-                        else:
-                            err_msg = (
-                                "_pickle.UnpicklingError: Weights only load failed. "
-                                "``torch.distributed.tensor`` must be imported to load DTensors"
-                            )
-                            self.assertTrue(err_msg in e.output.decode("utf-8"))
+                    if not should_import
+                    else None
+                )
+                self._attempt_load_from_subprocess(filename, import_string, err_msg)
 
 
 class DTensorMeshTest(DTensorTestBase):
@@ -992,9 +973,11 @@ class TestDTensorPlacementTypes(DTensorTestBase):
                 from torch.distributed.tensor._collective_utils import unpad_tensor
 
                 unpadded_list = [
-                    unpad_tensor(tensor, shard_placement.dim, pad_sizes[i])
-                    if pad_sizes[i] > 0
-                    else tensor
+                    (
+                        unpad_tensor(tensor, shard_placement.dim, pad_sizes[i])
+                        if pad_sizes[i] > 0
+                        else tensor
+                    )
                     for i, tensor in enumerate(splitted_tensor_list)
                 ]
                 expected_is_tensor_empty = [

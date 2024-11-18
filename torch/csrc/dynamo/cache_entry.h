@@ -59,6 +59,10 @@ typedef struct VISIBILITY_HIDDEN CacheEntry {
   std::string trace_annotation;
 
   CacheEntry(const py::handle& guarded_code, PyObject* backend);
+  CacheEntry(const CacheEntry&) = default;
+  CacheEntry(CacheEntry&&) = default;
+  CacheEntry& operator=(const CacheEntry&) = default;
+  CacheEntry& operator=(CacheEntry&&) = default;
   ~CacheEntry();
 
   // Warning: returns a reference whose lifetime is controlled by C++
