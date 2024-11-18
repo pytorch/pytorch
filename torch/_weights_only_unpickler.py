@@ -168,6 +168,7 @@ def _get_allowed_globals():
         "_codecs.encode": encode,  # for bytes
         "builtins.bytearray": bytearray,  # for bytearray
         "builtins.set": set,  # for set
+        "builtins.complex": complex,  # for complex
     }
 
     # dtype
