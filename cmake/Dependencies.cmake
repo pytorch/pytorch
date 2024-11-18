@@ -95,11 +95,10 @@ if(USE_XPU)
     message(WARNING "Not compiling with XPU. Could NOT find SYCL."
     "Suppress this warning with -DUSE_XPU=OFF.")
     caffe2_update_option(USE_XPU OFF)
-  else()
-    if(LINUX)
-      string(APPEND CMAKE_CXX_FLAGS " -D__INTEL_PREVIEW_BREAKING_CHANGES")
-    endif()
   endif()
+  foreach(flag ${XPU_HOST_CXX_FLAGS})
+    add_definitions(${flag})
+  endforeach()
 endif()
 
 # ---[ Custom Protobuf
@@ -1182,20 +1181,23 @@ if(USE_GLOO)
       endif()
       set(GLOO_USE_CUDA_TOOLKIT ON CACHE BOOL "" FORCE)
       add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/gloo)
+      # Here is a little bit hacky. We have to put PROJECT_BINARY_DIR in front
+      # of PROJECT_SOURCE_DIR with/without conda system. The reason is that
+      # gloo generates a new config.h in the binary diretory.
+      include_directories(BEFORE SYSTEM ${CMAKE_CURRENT_LIST_DIR}/../third_party/gloo)
+      include_directories(BEFORE SYSTEM ${PROJECT_BINARY_DIR}/third_party/gloo)
     else()
-      add_library(gloo SHARED IMPORTED)
-      find_library(GLOO_LIBRARY gloo)
-      if(NOT GLOO_LIBRARY)
+      find_package(Gloo)
+      if(NOT Gloo_FOUND)
         message(FATAL_ERROR "Cannot find gloo")
       endif()
-      message("Found gloo: ${GLOO_LIBRARY}")
-      set_target_properties(gloo PROPERTIES IMPORTED_LOCATION ${GLOO_LIBRARY})
+      message("Found gloo: ${Gloo_LIBRARY}")
+      message("Found gloo include directories: ${Gloo_INCLUDE_DIRS}")
+      add_library(gloo SHARED IMPORTED)
+      set_target_properties(gloo PROPERTIES IMPORTED_LOCATION ${Gloo_LIBRARY})
+      # need to use Gloo_INCLUDE_DIRS over third_party/gloo to find Gloo's auto-generated config.h
+      include_directories(BEFORE SYSTEM ${Gloo_INCLUDE_DIRS})
     endif()
-    # Here is a little bit hacky. We have to put PROJECT_BINARY_DIR in front
-    # of PROJECT_SOURCE_DIR with/without conda system. The reason is that
-    # gloo generates a new config.h in the binary diretory.
-    include_directories(BEFORE SYSTEM ${CMAKE_CURRENT_LIST_DIR}/../third_party/gloo)
-    include_directories(BEFORE SYSTEM ${PROJECT_BINARY_DIR}/third_party/gloo)
     set(BUILD_TEST ${__BUILD_TEST})
     set(BUILD_BENCHMARK ${__BUILD_BENCHMARK})
 

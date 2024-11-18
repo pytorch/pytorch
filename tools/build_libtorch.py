@@ -9,7 +9,7 @@ from os.path import abspath, dirname
 pytorch_root = dirname(dirname(abspath(__file__)))
 sys.path.append(pytorch_root)
 
-from tools.build_pytorch_libs import build_caffe2
+from tools.build_pytorch_libs import build_pytorch
 from tools.setup_helpers.cmake import CMake
 
 
@@ -24,7 +24,7 @@ if __name__ == "__main__":
     )
     options = parser.parse_args()
 
-    build_caffe2(
+    build_pytorch(
         version=None,
         cmake_python_library=None,
         build_python=False,
