@@ -18,10 +18,7 @@ import torch
 import torch._prims as prims
 import torch.utils._pytree as pytree
 from torch._prims.context import TorchRefsMode
-from torch._prims_common.wrappers import (
-    _maybe_remove_out_wrapper,
-    is_cpu_scalar,
-)
+from torch._prims_common.wrappers import _maybe_remove_out_wrapper
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch._subclasses.fake_utils import outputs_alias_inputs
 from torch.testing import make_tensor
@@ -1085,17 +1082,14 @@ class TestCommon(TestCase):
                     )
 
             # Case 3: out= with correct shape and dtype, but wrong device.
-            wrong_device = None
+            #   Expected behavior: throws an error.
+            #   This case is ignored on CPU to allow some scalar operations to succeed.
             if torch.device(device).type != "cpu":
                 wrong_device = "cpu"
-            elif torch.cuda.is_available():
-                wrong_device = "cuda"
-
-            factory_fn_msg = (
-                "\n\nNOTE: If your op is a factory function (i.e., it accepts TensorOptions) you should mark its "
-                "OpInfo with `is_factory_function=True`."
-            )
-            if wrong_device is not None:
+                factory_fn_msg = (
+                    "\n\nNOTE: If your op is a factory function (i.e., it accepts TensorOptions) you should mark its "
+                    "OpInfo with `is_factory_function=True`."
+                )
 
                 def _case_three_transform(t):
                     return make_tensor(t.shape, dtype=t.dtype, device=wrong_device)
@@ -1103,8 +1097,6 @@ class TestCommon(TestCase):
                 out = _apply_out_transform(_case_three_transform, expected)
 
                 if op.is_factory_function and sample.kwargs.get("device", None) is None:
-                    op_out(out=out)
-                elif is_cpu_scalar(sample.input):
                     op_out(out=out)
                 else:
                     msg_fail = (
