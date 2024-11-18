@@ -2023,7 +2023,7 @@ class Scan(Loops):
         # return self.scan_op
         return "custom"
 
-    def get_reduction_size(self) -> Sequence[_IntLike]:
+    def get_reduction_size(self) -> Sequence[sympy.Expr]:
         return self.scan_ranges
 
     def get_size(self) -> Sequence[_IntLike]:
@@ -2220,7 +2220,7 @@ class Sort(Loops):
     def get_reduction_type(self) -> Optional[str]:
         return "sort"
 
-    def get_reduction_size(self) -> Sequence[_IntLike]:
+    def get_reduction_size(self) -> Sequence[sympy.Expr]:
         return self.sort_ranges
 
     def get_size(self) -> Sequence[_IntLike]:
@@ -2438,8 +2438,8 @@ class BaseView(IRNode):
         return loader
 
     @property
-    def dtype(self):  # type: ignore[no-untyped-def]
-        return self.data.dtype
+    def dtype(self) -> torch.dtype:
+        return self.data.get_dtype()
 
     def get_layout(self) -> Layout:
         return self.data.get_layout()
@@ -2450,19 +2450,19 @@ class BaseView(IRNode):
     def get_origin_node(self) -> Optional[torch.fx.Node]:
         return None
 
-    def get_name(self):  # type: ignore[no-untyped-def]
+    def get_name(self) -> str:
         return self.data.get_name()
 
     def get_pointwise_size(self):  # type: ignore[no-untyped-def]
         return self.get_size()
 
-    def mark_reuse(self, users):  # type: ignore[no-untyped-def]
+    def mark_reuse(self, users: int) -> None:
         return self.data.mark_reuse(users)
 
     def has_exceeded_max_reads(self) -> bool:
         return self.data.has_exceeded_max_reads()
 
-    def realize(self):  # type: ignore[no-untyped-def]
+    def realize(self) -> Optional[str]:
         return self.data.realize()
 
     def realize_hint(self):  # type: ignore[no-untyped-def]
@@ -2471,16 +2471,16 @@ class BaseView(IRNode):
     def get_storage_numel(self):  # type: ignore[no-untyped-def]
         return self.data.get_storage_numel()
 
-    def is_extern(self):  # type: ignore[no-untyped-def]
+    def is_extern(self) -> bool:
         return self.data.is_extern()  # type: ignore[attr-defined]
 
-    def is_module_buffer(self):  # type: ignore[no-untyped-def]
+    def is_module_buffer(self) -> bool:
         return self.data.is_module_buffer()  # type: ignore[attr-defined]
 
     def get_read_names(self) -> OrderedSet[str]:
         return self.data.get_read_names()
 
-    def get_reads(self):  # type: ignore[no-untyped-def]
+    def get_reads(self) -> OrderedSet[Dep]:
         with patch.object(FlexibleLayout, "allow_indexing", True):
             return extract_read_writes(
                 self.make_loader(),
@@ -2493,7 +2493,7 @@ class BaseView(IRNode):
             x = x.data
         return x
 
-    def constant_to_device(self, device):  # type: ignore[no-untyped-def]
+    def constant_to_device(self, device: torch.device) -> IRNode:
         """Move this to a given device. Requires that all reads are to constants."""
         loader = self.make_loader()
         loader = patch.object(ConstantBuffer, "override_device", device)(loader)
@@ -2932,7 +2932,7 @@ class ReinterpretView(BaseView):
             | free_unbacked_symbols(self.layout.offset)
         )
 
-    def codegen_reference(self, writer=None):  # type: ignore[no-untyped-def]
+    def codegen_reference(self, writer: Optional[IndentedBuffer] = None) -> str:
         # reinterpret_tensor is similar to as_strided except:
         # - offset is added to the existing offset (rather than replacing it)
         # - view tracking is disabled similar to unsafe_view
@@ -3079,14 +3079,14 @@ class BaseConstant(IRNode):
     def get_origin_node(self) -> Optional[torch.fx.Node]:
         return None
 
-    def mark_reuse(self, users) -> None:  # type: ignore[no-untyped-def]
+    def mark_reuse(self, users: int) -> None:
         pass
 
     def has_exceeded_max_reads(self) -> bool:
         return False
 
-    def get_reads(self):  # type: ignore[no-untyped-def]
-        return ()
+    def get_reads(self) -> OrderedSet[Dep]:
+        return OrderedSet()
 
     def is_extern(self) -> bool:
         return False
@@ -3104,10 +3104,10 @@ class Constant(BaseConstant):
 
         return loader
 
-    def realize(self):  # type: ignore[no-untyped-def]
+    def realize(self) -> Optional[str]:
         pass
 
-    def constant_to_device(self, device):  # type: ignore[no-untyped-def]
+    def constant_to_device(self, device: torch.device) -> IRNode:
         return Constant(value=self.value, dtype=self.dtype, device=device)
 
 
@@ -3123,7 +3123,7 @@ class IndexingConstant(BaseConstant):
 
         return loader
 
-    def constant_to_device(self, device):  # type: ignore[no-untyped-def]
+    def constant_to_device(self, device: torch.device) -> IRNode:
         return IndexingConstant(index=self.index, dtype=self.dtype, device=device)
 
 
@@ -3781,7 +3781,7 @@ class Buffer(IRNode):
 
         return loader
 
-    def codegen_reference(self, writer=None):  # type: ignore[no-untyped-def]
+    def codegen_reference(self, writer: Optional[IndentedBuffer] = None) -> str:
         return self.get_name()
 
     def decide_layout(self):  # type: ignore[no-untyped-def]
@@ -3806,7 +3806,7 @@ class Buffer(IRNode):
     def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
         return OrderedSet()
 
-    def realize(self):  # type: ignore[no-untyped-def]
+    def realize(self) -> Optional[str]:
         pass
 
     def should_allocate(self) -> bool:
@@ -3849,7 +3849,7 @@ class ConstantBuffer(InputBuffer):
 
         return loader
 
-    def constant_to_device(self, device):  # type: ignore[no-untyped-def]
+    def constant_to_device(self, device: torch.device) -> IRNode:
         return ConstantBuffer(
             name=V.graph.constant_name(self.get_name(), device), layout=self.layout
         )
@@ -3860,7 +3860,7 @@ class NoneAsConstantBuffer(IRNode):
     def get_unbacked_symbol_uses(self) -> OrderedSet[sympy.Symbol]:
         return OrderedSet()
 
-    def codegen_reference(self, writer=None):  # type: ignore[no-untyped-def]
+    def codegen_reference(self, writer: Optional[IndentedBuffer] = None) -> str:
         return V.graph.wrapper_code.none_str
 
     def get_output_spec(self) -> OutputSpec:
@@ -3877,7 +3877,7 @@ class ShapeAsConstantBuffer(IRNode):
     def get_unbacked_symbol_uses(self) -> OrderedSet[sympy.Symbol]:
         return free_unbacked_symbols(self.expr)
 
-    def codegen_reference(self, writer=None):  # type: ignore[no-untyped-def]
+    def codegen_reference(self, writer: Optional[IndentedBuffer] = None) -> str:
         return V.graph.wrapper_code.expr_printer(V.graph.sizevars.simplify(self.expr))
 
     def has_tensor_output(self) -> bool:
@@ -3888,7 +3888,7 @@ class ShapeAsConstantBuffer(IRNode):
 class ComputedBuffer(OperationBuffer):
     data: Loops
 
-    def get_computed_buffer_name(self):  # type: ignore[no-untyped-def]
+    def get_computed_buffer_name(self) -> Optional[str]:
         """
         Returns self.name if it exists, otherwise returns the name of the data node if that exists.
         If neither exist, returns None.
@@ -3899,7 +3899,7 @@ class ComputedBuffer(OperationBuffer):
             return self.data.name
         return None
 
-    def num_reads(self):  # type: ignore[no-untyped-def]
+    def num_reads(self) -> int:
         return self.data.num_reads()
 
     def get_reads(self) -> OrderedSet[Dep]:
@@ -3908,7 +3908,7 @@ class ComputedBuffer(OperationBuffer):
     def get_read_names(self) -> OrderedSet[str]:
         return self.data.get_read_names()
 
-    def get_read_writes(self):  # type: ignore[no-untyped-def]
+    def get_read_writes(self) -> dependencies.ReadWrites:
         with patch.object(FlexibleLayout, "allow_indexing", True):
             if self.data.get_reduction_type():
                 return extract_read_writes(
@@ -3957,7 +3957,7 @@ class ComputedBuffer(OperationBuffer):
             return self.data.make_loader()
         return super().make_loader()
 
-    def get_store_function(self):  # type: ignore[no-untyped-def]
+    def get_store_function(self) -> Callable[..., OpsValue]:
         indexer = self.get_layout().as_fixed().make_indexer()
         if isinstance(self.data, (Reduction, Scan, Sort)):
             return partial(self.data.store_reduction, self.name, indexer)
@@ -3965,7 +3965,7 @@ class ComputedBuffer(OperationBuffer):
             assert isinstance(self.data, Pointwise)
             return partial(self.data.store_output, self.name, indexer)
 
-    def get_fill_order(self):  # type: ignore[no-untyped-def]
+    def get_fill_order(self) -> Optional[List[int]]:
         """
         If our layout is still flexible, try to determine the stride order based on stride orders of reads.
 
@@ -3975,7 +3975,7 @@ class ComputedBuffer(OperationBuffer):
         """
         if isinstance(self.layout, FlexibleLayout):
             (index_vars, reduction_vars), _ = dependencies.index_vars_squeeze(
-                self.data.get_pointwise_size(), self.data.get_reduction_size()  # type: ignore[arg-type]
+                self.data.get_pointwise_size(), self.data.get_reduction_size()
             )
             reads = self.get_read_writes().reads
             # only consider reads to buffer of same size
@@ -4004,7 +4004,7 @@ class ComputedBuffer(OperationBuffer):
 
         return None
 
-    def decide_layout(self):  # type: ignore[no-untyped-def]
+    def decide_layout(self) -> None:
         if isinstance(self.layout, FlexibleLayout):
             order = self.get_fill_order()
             if order:
@@ -4013,9 +4013,11 @@ class ComputedBuffer(OperationBuffer):
                 self.freeze_layout()
 
     @cache_on_self
-    def get_default_sizes_body(self):  # type: ignore[no-untyped-def]
+    def get_default_sizes_body(
+        self,
+    ) -> Tuple[Tuple[sympy.Expr, sympy.Expr], LoopBody, Tuple[sympy.Expr, sympy.Expr]]:
         args, var_ranges = dependencies.index_vars_squeeze(
-            self.data.get_pointwise_size(), self.data.get_reduction_size(), prefix="q"  # type: ignore[arg-type]
+            self.data.get_pointwise_size(), self.data.get_reduction_size(), prefix="q"
         )
         with patch.object(ConstantBuffer, "override_device", self.get_device()):
             body = LoopBody(
@@ -4039,11 +4041,11 @@ class ComputedBuffer(OperationBuffer):
                 reduce_size.append(s)
         return (index_size, reduce_size), body, (index_vars, reduce_vars)
 
-    def simplify_and_reorder(  # type: ignore[no-untyped-def]
+    def simplify_and_reorder(
         self,
         extra_indexing_constraints: Optional[Tuple[Dict[Any, Any], List[Any]]] = None,
         recompute_sizes_body_func: Optional[Callable[..., Any]] = None,
-    ):
+    ) -> Tuple[Tuple[sympy.Expr, sympy.Expr], LoopBody]:
         """
         This is a main place where we do loop transformations in a
         backend-agnostic way.
@@ -4190,10 +4192,10 @@ class ComputedBuffer(OperationBuffer):
         sizes = [sizes[i] for i in order]
         return sizes, same_reorder(order), inverse_reorder(order)
 
-    def get_reduction_size(self):  # type: ignore[no-untyped-def]
+    def get_reduction_size(self) -> Sequence[sympy.Expr]:
         return self.data.get_reduction_size()
 
-    def get_reduction_type(self):  # type: ignore[no-untyped-def]
+    def get_reduction_type(self) -> Optional[str]:
         return self.data.get_reduction_type()
 
     def is_no_op(self):  # type: ignore[no-untyped-def]
@@ -4202,7 +4204,7 @@ class ComputedBuffer(OperationBuffer):
     def should_allocate(self) -> bool:
         return True
 
-    def constant_to_device(self, device):  # type: ignore[no-untyped-def]
+    def constant_to_device(self, device: torch.device) -> IRNode:
         """Move this to a given device. Requires that all reads are to constants."""
         return self.data.constant_to_device(device)
 
@@ -4220,7 +4222,7 @@ class TemplateBuffer(OperationBuffer):
         self.name = V.graph.register_buffer(self)
         V.graph.register_operation(self)
 
-    def get_read_writes(self):  # type: ignore[no-untyped-def]
+    def get_read_writes(self) -> dependencies.ReadWrites:
         return self.extract_read_writes(normalize=True)
 
     def extract_read_writes(self, normalize):  # type: ignore[no-untyped-def]
@@ -4237,10 +4239,10 @@ class TemplateBuffer(OperationBuffer):
         deps.reads = OrderedSet(dependencies.StarDep(x.get_name()) for x in self.inputs)
         return deps
 
-    def get_reduction_size(self):  # type: ignore[no-untyped-def]
-        return 1
+    def get_reduction_size(self) -> Sequence[sympy.Expr]:
+        return sympy.S.One
 
-    def get_reduction_type(self):  # type: ignore[no-untyped-def]
+    def get_reduction_type(self) -> Optional[str]:
         return None
 
     def is_no_op(self) -> bool:
@@ -4457,7 +4459,7 @@ class CppTemplateBuffer(TemplateBuffer):
 class InputsKernel(OperationBuffer):
     inputs: List[Buffer]
 
-    def get_read_writes(self):  # type: ignore[no-untyped-def]
+    def get_read_writes(self) -> dependencies.ReadWrites:
         reads: OrderedSet[dependencies.Dep] = OrderedSet()
         StarDep = dependencies.StarDep
         for input in self.inputs:
@@ -6115,8 +6117,8 @@ class DynamicScalar(ExternKernel):
     The result of a call to aten._local_scalar_dense.
     """
 
-    def get_reads(self):  # type: ignore[no-untyped-def]
-        return ()
+    def get_reads(self) -> OrderedSet[Dep]:
+        return OrderedSet()
 
     def should_allocate(self) -> bool:
         return False
@@ -6141,8 +6143,8 @@ class AssertScalar(ExternKernel):
     The result of a call to aten._assert_scalar
     """
 
-    def get_reads(self):  # type: ignore[no-untyped-def]
-        return ()
+    def get_reads(self) -> OrderedSet[Dep]:
+        return OrderedSet()
 
     def should_allocate(self) -> bool:
         return False
@@ -6811,7 +6813,7 @@ class MutableBox(IRNode):
     def get_reduction_type(self) -> Optional[str]:
         return self.data.get_reduction_type()
 
-    def get_reduction_size(self) -> Sequence[_IntLike]:
+    def get_reduction_size(self) -> Sequence[sympy.Expr]:
         return self.data.get_reduction_size()
 
     def is_extern(self) -> bool:
@@ -6832,7 +6834,7 @@ class MutableBox(IRNode):
     def get_inputs_that_alias_output(self) -> Sequence[str]:
         return self.data.get_inputs_that_alias_output()
 
-    def realize(self):  # type: ignore[no-untyped-def]
+    def realize(self) -> Optional[str]:
         return self.data.realize()
 
     def get_unbacked_symbol_uses(self) -> OrderedSet[sympy.Symbol]:
@@ -6844,7 +6846,7 @@ class MutableBox(IRNode):
     def get_defining_op(self) -> Optional[Operation]:
         return self.data.get_defining_op()
 
-    def codegen_reference(self, writer=None):  # type: ignore[no-untyped-def]
+    def codegen_reference(self, writer: Optional[IndentedBuffer] = None) -> str:
         return self.data.codegen_reference(writer)
 
     @property
@@ -6903,7 +6905,7 @@ class StorageBox(MutableBox):
             and self.data.get_name() in V.graph.constants
         )
 
-    def realize(self):  # type: ignore[no-untyped-def]
+    def realize(self) -> Optional[str]:
         if isinstance(
             self.data,
             (
@@ -6970,7 +6972,7 @@ class StorageBox(MutableBox):
             )
         return False
 
-    def mark_reuse(self, users) -> None:  # type: ignore[no-untyped-def]
+    def mark_reuse(self, users: int) -> None:
         if self.should_realize_on_reuse(users):
             self.realize()
 
@@ -7363,7 +7365,7 @@ class EffectfulKernel(FallbackKernel):
         self.prev_effect_buffer = V.graph.effectful_ops.get(effect_type, None)
         V.graph.effectful_ops[effect_type] = self
 
-    def get_read_writes(self):  # type: ignore[no-untyped-def]
+    def get_read_writes(self) -> dependencies.ReadWrites:
         read_writes = super().get_read_writes()
 
         if self.prev_effect_buffer is not None:
@@ -7385,7 +7387,7 @@ class TorchBindObject(IRNode):
     def get_name(self):  # type: ignore[no-untyped-def]
         return self.name
 
-    def codegen_reference(self, writer=None):  # type: ignore[no-untyped-def]
+    def codegen_reference(self, writer: Optional[IndentedBuffer] = None) -> str:
         return self.name
 
 
@@ -7566,7 +7568,7 @@ class _WaitKernel(_CollectiveKernel):
             MutationOutput(NoneLayout(device=inp.get_device()), inp, packed)
         )
 
-    def get_read_writes(self):  # type: ignore[no-untyped-def]
+    def get_read_writes(self) -> dependencies.ReadWrites:
         read_writes = super().get_read_writes()
         # See [Out-of-Place Collective Safety].
         volatile_reads = self.get_volatile_reads()
