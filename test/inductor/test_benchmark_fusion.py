@@ -9,7 +9,7 @@ from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.test_operators import realize
 from torch._inductor.utils import fresh_inductor_cache, is_big_gpu, run_and_get_code
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import slowTest, TEST_WITH_ASAN
+from torch.testing._internal.common_utils import slowTest, TEST_WITH_ASAN, skip_if_async_compile
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
 
@@ -123,6 +123,7 @@ class BenchmarkFusionTestTemplate:
 
         self.common(f, (a, b))
 
+    @skip_if_async_compile
     @torch._inductor.config.patch(max_autotune_gemm_backends="TRITON")
     def test_avoid_register_spilling(self):
         if self.device != "cuda":

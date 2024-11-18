@@ -64,3 +64,39 @@ FAILED [0.1237s] test/inductor/test_torchinductor.py::GPUTests::test_split_with_
 FAILED [7.8272s] test/inductor/test_torchinductor.py::GPUTests::test_transpose_add_cuda - AssertionError: TODO: Bad async compile (disable this test)
 FAILED [0.3358s] test/inductor/test_torchinductor.py::TritonCodeGenTests::test_numpy_autograd - torch._dynamo.exc.BackendCompilerFailed: backend='inductor' raised:
 ====================================================================================================== 9 failed, 2 passed in 86.85s (0:01:26) ======================================================================================================
+
+CI FAILURES:
+ModuleNotFoundError: No module named 'boto3'
+RuntimeError: There is no current event loop in thread 'MainThread'.
+detectron2_fcos_r_50_fpn
+detectron2_maskrcnn_r_50_fpn
+distributed/_tensor/test_dtensor_compile.py::TestDTensorCompile::test_tp_compile_comm_reordering
+distributed/test_c10d_functional_native.py::TestWithNCCL::test_inductor_dtypeview_memory_leak
+distributed/test_dynamo_distributed.py::TestMultiProc::test_asymmetric_compilation_with_fx_cache
+distributed/test_functional_api.py::TestFunctionalAutograd::test_all_to_all_single_inductor
+distributed/test_inductor_collectives.py::TestCollectivesMultiProc::test_all_to_all_single_inductor
+functorch/test_eager_transforms.py::TestCompileTransformsCPU::test_compile_vmap_hessian_cpu
+hf_BigBird
+hf_Reformer
+inductor/test_benchmark_fusion.py::BenchmarkFusionCudaTest::test_avoid_register_spilling_cuda
+inductor/test_cpu_repro.py::CPUReproTests::test_argmax_argmin_with_nan_value
+inductor/test_cpu_repro.py::CPUReproTests::test_full_bits_lowp
+inductor/test_cpu_repro.py::CPUReproTests::test_int64_reduction_vec
+inductor/test_halide.py::CpuHalideTests::test_avg_pool3d_backward4_cpu
+inductor/test_max_autotune.py::TestMaxAutotune::test_autotune_conv1x1
+inductor/test_torchinductor.py::CpuTests::test_AllenaiLongformerBase_repro_cpu
+inductor/test_torchinductor.py::CpuTests::test_adaptive_max_pool2d2_cpu
+inductor/test_torchinductor.py::CpuTests::test_add_complex4_cpu
+inductor/test_torchinductor_codegen_dynamic_shapes.py::DynamicShapesCodegenCpuTests::test__unsafe_masked_index_dynamic_shapes_cpu
+inductor/test_torchinductor_codegen_dynamic_shapes.py::DynamicShapesCodegenCpuTests::test_adaptive_max_pool2d1_dynamic_shapes_cpu
+inductor/test_torchinductor_dynamic_shapes.py::DynamicShapesCpuTests::test_adaptive_avg_pool2d1_dynamic_shapes_cpu
+inductor/test_torchinductor_dynamic_shapes.py::DynamicShapesCpuTests::test_adaptive_max_pool2d1_dynamic_shapes_cpu
+inductor/test_torchinductor_dynamic_shapes.py::DynamicShapesCpuTests::test_add_complex4_dynamic_shapes_cpu
+inductor/test_torchinductor_dynamic_shapes.py::DynamicShapesCpuTests::test_avg_pool2d_backward4_dynamic_shapes_cpu
+inductor/test_torchinductor_dynamic_shapes.py::DynamicShapesCpuTests::test_avg_pool3d_backward3_dynamic_shapes_cpu
+lennard_jones
+mixer_b16_224
+speech_transformer
+test_public_bindings.py::TestPublicBindings::test_correct_module_names
+vision_maskrcnn
+vit_base_patch16_224

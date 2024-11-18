@@ -14,6 +14,7 @@ from functorch import make_fx
 from torch._inductor.utils import run_and_get_code
 from torch.testing import FileCheck
 from torch.testing._internal.distributed.fake_pg import FakeStore
+from torch.testing._internal.common_utils import skip_if_async_compile
 from torch.testing._internal.inductor_utils import HAS_GPU
 
 
@@ -688,6 +689,7 @@ class TestFunctionalAutograd(MultiThreadedTestCase):
         loss.backward()
         self.assertEqual(t.grad, torch.full_like(t, 2.0))
 
+    @skip_if_async_compile
     def test_all_to_all_single_inductor(self) -> None:
         group = dist.group.WORLD.group_name
 

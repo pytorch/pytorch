@@ -29,6 +29,7 @@ from torch._prims_common import is_float_dtype
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import (
+    skip_if_async_compile,
     instantiate_parametrized_tests,
     IS_FBCODE,
     IS_MACOS,
@@ -4621,6 +4622,7 @@ class CPUReproTests(TestCase):
             n_veckernel = 6 if op is torch.masked.mean else 3
             check_metrics_vec_kernel_count(n_veckernel)
 
+    @skip_if_async_compile
     @requires_vectorization
     def test_full_bits_lowp(self):
         def check_use_full_bits(func, shapes, dtype, mixed, check_vecn):

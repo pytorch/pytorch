@@ -31,6 +31,7 @@ from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
+    skip_if_async_compile,
     instantiate_parametrized_tests,
     parametrize,
     skipIfRocm,
@@ -330,6 +331,7 @@ class TestMaxAutotune(TestCase):
             torch.compile(addmm, dynamic=dynamic)(x, a, b)
 
     @skipIfRocm
+    @skip_if_async_compile
     def test_autotune_conv1x1(self):
         # Assuming input has 3 channels and we want to produce 16 channels as output
         conv1x1 = (

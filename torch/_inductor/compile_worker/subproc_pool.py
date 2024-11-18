@@ -161,7 +161,7 @@ class SubprocPool:
     ) -> Future[_T]:
         if args or kwargs:
             job_fn = functools.partial(job_fn, *args, **kwargs)
-        from torch.fx.graph_pickler import _SubprocPickler
+        from torch.fx._graph_pickler import _SubprocPickler
         job_data = _SubprocPickler.dumps(job_fn)
         future: Future[_T]
         with self.futures_lock:
@@ -185,7 +185,7 @@ class SubprocPool:
                 return
 
             try:
-                from torch.fx.graph_pickler import _SubprocUnpickler, _UnpickleState
+                from torch.fx._graph_pickler import _SubprocUnpickler, _UnpickleState
                 unpickle_state = _UnpickleState(None)  # type: ignore[arg-type]
                 result = _SubprocUnpickler.loads(data, unpickle_state)
             except Exception as e:
@@ -288,7 +288,7 @@ class SubprocMain:
                 result = future.result()
             except Exception as e:
                 log.exception("Error in subprocess")
-                from torch.fx.graph_pickler import _SubprocPickler
+                from torch.fx._graph_pickler import _SubprocPickler
                 result = _SubprocPickler.dumps(e)
             assert isinstance(result, bytes)
             with self.write_lock:
@@ -306,7 +306,7 @@ class SubprocMain:
         shape_env = ShapeEnv()
         fake_mode = FakeTensorMode(shape_env=shape_env)
 
-        from torch.fx.graph_pickler import _SubprocUnpickler, _UnpickleState
+        from torch.fx._graph_pickler import _SubprocUnpickler, _UnpickleState
         unpickle_state = _UnpickleState(fake_mode)
 
         job = typing.cast(
@@ -317,7 +317,7 @@ class SubprocMain:
             result = job()
         except Exception as e:
             result = _SubprocExceptionInfo(traceback.format_exc())
-        from torch.fx.graph_pickler import _SubprocPickler
+        from torch.fx._graph_pickler import _SubprocPickler
         return _SubprocPickler.dumps(result)
 
 
