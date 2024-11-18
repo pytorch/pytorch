@@ -1728,6 +1728,15 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             self.common(mod, (v,), atol=atol, rtol=rtol)
         self.assertEqual(counters["inductor"]["cpp_mlp_template"], 1)
 
+    @inductor_config.patch({"freezing": True})
+    @inductor_config.patch({"cpp.enable_concat_linear": True})
+    @inductor_config.patch({"cpp.enable_linear_silu_linear_mul": True})
+    @patches
+    @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @parametrize("batch_size", (16,))
+    @parametrize("in_features", (52,))
+    @parametrize("out_features", (32,))
     @parametrize("input_3d", (True, False))
     @dtypes(
         torch.bfloat16,
