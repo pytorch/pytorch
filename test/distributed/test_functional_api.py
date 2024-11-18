@@ -579,10 +579,10 @@ class TestCollectivesWithDistributedBackend(DistributedTestBase):
             return ft_c.all_reduce(t, "sum", pg)
 
         compiled_allreduce = torch.compile(allreduce, fullgraph=True)
-        compiled_allreduce(torch.randn(8, device=device), self.process_group)
+        compiled_allreduce(torch.randn(8, device=device), self.pg)
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    def test_tracing_with_fakepg(self, device):
+    def test_tracing_with_fakepg(self, device=DEVICE):
         exit_if_lt_x_accelerators(self.world_size)
 
         def allreduce(t, pg):
