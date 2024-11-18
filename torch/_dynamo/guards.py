@@ -44,6 +44,7 @@ from torch._C._dynamo.guards import (
     check_type_id,
     dict_version,
     DictGuardManager,
+    GuardManager,
     install_no_tensor_aliasing_guard,
     install_object_aliasing_guard,
     profile_guard_manager,
@@ -81,6 +82,7 @@ from .eval_frame import set_guard_error_hook
 from .source import (
     AttrProxySource,
     AttrSource,
+    AutoDerefLocalSource,
     CallFunctionNoArgsSource,
     ChainedSource,
     ConstDictKeySource,
@@ -108,7 +110,14 @@ from .source import (
     UnspecializedParamBufferSource,
     WeakRefCallSource,
 )
-from .types import CacheEntry, ExtraState, GuardedCode, GuardFail, GuardFn  # noqa: F401
+from .types import (  # noqa: F401
+    CacheEntry,
+    DynamoFrameType,
+    ExtraState,
+    GuardedCode,
+    GuardFail,
+    GuardFn,
+)
 from .utils import (
     common_constant_types,
     dict_keys_repr,
@@ -877,6 +886,14 @@ class GuardBuilder(GuardBuilderBase):
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
             )
+        elif istype(source, AutoDerefLocalSource):
+            # Guard checks run on f_locals, in which the python level
+            # auto-dereferenced cell objects are also dereferenced (e.g., rather
+            # than `f_locals` being `{ 'cell' : <cell object of int> }`, it'll
+            # be `{ 'cell' : <int> }`. So the guard manager is the same as the
+            # base guard manager.
+            assert isinstance(base_guard_manager, GuardManager)  # tame mypy
+            out = base_guard_manager
         elif istype(source, GlobalSource):
             # Global manager accepts a dict but it is not a DictGuardManager
             # because globals dict is big and we typically guard on a very
@@ -2600,7 +2617,7 @@ def get_guard_fail_reason(
 
 
 def get_and_maybe_log_recompilation_reason(
-    cache_entry, frame: types.FrameType
+    cache_entry, frame: DynamoFrameType
 ) -> List[str]:
     """
     Return the list of guard failure reasons using cache_entry.
