@@ -5523,6 +5523,6 @@ HAS_MULTIGPU = any(
     for gpu in GPU_TYPES
 )
 
-def get_gpu_autocast()
+def get_gpu_autocast():
     return torch.cuda.amp.autocast if HAS_CUDA else torch.xpu.amp.autocast
 
