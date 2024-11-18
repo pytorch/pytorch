@@ -182,6 +182,7 @@ def _get_allowed_globals():
             "torch.distributed.tensor.placement_types.Shard": torch.distributed.tensor.placement_types.Shard,
         }
         rc.update(dtensor_rc)
+
     # dtype
     for t in torch.storage._dtype_to_storage_type_map().keys():
         rc[str(t)] = t
@@ -330,6 +331,16 @@ class Unpickler:
                     self.append(_get_allowed_globals()[full_path])
                 elif full_path in _get_user_allowed_globals():
                     self.append(_get_user_allowed_globals()[full_path])
+                elif full_path in (
+                    [
+                        "torch.nested._internal.nested_tensor.NestedTensor",
+                        "torch.nested._internal.nested_tensor._rebuild_njt",
+                        "torch._dynamo.decorators._DimRange",
+                    ]
+                ):
+                    raise UnpicklingError(
+                        "``torch.nested`` and ``torch._dynamo`` must be imported to load nested jagged tensors (NJTs)"
+                    )
                 else:
                     raise UnpicklingError(
                         f"Unsupported global: GLOBAL {full_path} was not an allowed global by default. "
