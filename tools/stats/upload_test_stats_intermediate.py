@@ -6,7 +6,7 @@ from tools.stats.upload_test_stats import get_tests
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Upload test stats to Rockset")
+    parser = argparse.ArgumentParser(description="Upload test stats to s3")
     parser.add_argument(
         "--workflow-run-id",
         required=True,
@@ -24,7 +24,7 @@ if __name__ == "__main__":
 
     test_cases = get_tests(args.workflow_run_id, args.workflow_run_attempt)
 
-    # Flush stdout so that any errors in Rockset upload show up last in the logs.
+    # Flush stdout so that any errors in the upload show up last in the logs.
     sys.stdout.flush()
 
     upload_additional_info(args.workflow_run_id, args.workflow_run_attempt, test_cases)

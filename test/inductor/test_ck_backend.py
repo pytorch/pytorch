@@ -280,13 +280,22 @@ class TestCKBackend(TestCase):
     @parametrize("dtype", (torch.bfloat16,))
     @parametrize("use_fast_accum", (True,))
     @parametrize("quantize_type", ("tensorwise", "rowwise"))
+    @parametrize("has_bias", (True, False))
     def test_max_autotune_scaled_mm(
-        self, max_autotune_gemm_backends, dtype, use_fast_accum, quantize_type
+        self, max_autotune_gemm_backends, dtype, use_fast_accum, quantize_type, has_bias
     ):
         tensor_options = {"device": "cuda", "dtype": dtype}
 
-        x = torch.randn(2240, 256, **tensor_options)
-        w = torch.randn(2048, 256, **tensor_options)
+        M = 2240
+        N = 2048
+        K = 256
+
+        x = torch.randn(M, K, **tensor_options)
+        w = torch.randn(N, K, **tensor_options)
+
+        bias = None
+        if has_bias:
+            bias = torch.randn(N, **tensor_options)
 
         dtype_float8 = torch.float8_e4m3fnuz
 
@@ -303,8 +312,6 @@ class TestCKBackend(TestCase):
         x_fp8, x_inverse_scale = f_quantize(x, dtype_float8)
 
         assert "rocm" in dir(config)
-
-        bias = None
 
         def linear(x_fp8, x_inverse_scale, w_t_fp8, w_inverse_scale, bias):
             y = torch._scaled_mm(
@@ -363,6 +370,44 @@ class TestCKBackend(TestCase):
             self.assertEqual(y_compiled.dtype, dtype)
 
             torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.05)
+
+    @unittest.skipIf(not torch.version.hip, "ROCM only")
+    @unittest.mock.patch.dict(
+        os.environ,
+        {"PATH": _get_path_without_sccache(), "PYTORCH_MIOPEN_SUGGEST_NHWC": "1"},
+    )
+    @parametrize("max_autotune_conv_backends", ("CK", "ATEN,CK,TRITON"))
+    def test_max_autotune_conv2d(self, max_autotune_conv_backends):
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
+
+        tensor_options = {"device": "cuda", "dtype": torch.float32}
+
+        x = torch.randn(1, 8, 224, 224, **tensor_options)
+        w = torch.randn(64, 8, 7, 7, **tensor_options)
+        x_cl = x.to(memory_format=torch.channels_last)
+        w_cl = w.to(memory_format=torch.channels_last)
+
+        assert "rocm" in dir(config)
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "autotune_in_subproc": False,
+                "max_autotune_conv_backends": max_autotune_conv_backends,
+                "compile_threads": 4,
+                "rocm.ck_dir": self.ck_dir,
+                "rocm.n_max_profiling_configs": 4,
+            }
+        ):
+
+            @torch.compile(dynamic=False)
+            def conv2d(x, w):
+                return torch.conv2d(x, w)
+
+            Y_eager = torch.conv2d(x_cl, w_cl)
+            Y_compiled = conv2d(x_cl, w_cl)
+
+            torch.testing.assert_close(Y_compiled, Y_eager, atol=2e-4, rtol=2e-4)
 
 
 if __name__ == "__main__":
