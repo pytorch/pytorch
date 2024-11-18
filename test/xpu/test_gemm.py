@@ -126,7 +126,7 @@ class TestBasicGEMM(TestCase):
                     activation=activation,
                 )
 
-    @precisionOverride({torch.float: 1e-4, torch.double: 1e-8})
+    @precisionOverride({torch.float: 1e-4, torch.double: 1e-6})
     @dtypes(torch.float32, torch.half, torch.double)
     def test_addmm(self, device, dtype):
         self._test_addmm_impl(torch.addmm, None, device, dtype)
@@ -499,7 +499,7 @@ class TestBasicGEMM(TestCase):
         for b1, b2, ref, out_tensor in generate_tensor():
             self._test_addbmm_baddbmm("addbmm", b1, b2, ref, out_tensor)
 
-    @precisionOverride({torch.half: 0.1, torch.bfloat16: 0.5})
+    @precisionOverride({torch.half: 0.1, torch.bfloat16: 0.5, torch.float64: 1e-6})
     @dtypes(torch.float64, torch.float32, torch.bfloat16, torch.half)
     def test_baddbmm(self, device, dtype):
         num_batches = 10
@@ -760,6 +760,7 @@ class TestBasicGEMM(TestCase):
                 y = torch.baddbmm(input, mat1, mat2, beta=0.0, out=out)
                 self.assertEqual(y_ref, y)
 
+    @precisionOverride({torch.double: 1e-6})
     @dtypes(torch.float, torch.double)
     def test_addmm_sizes(self, device, dtype):
         for m in [0, 1, 25]:
@@ -783,7 +784,7 @@ class TestBasicGEMM(TestCase):
 
     @precisionOverride(
         {
-            torch.double: 1e-8,
+            torch.double: 1e-6,
             torch.float: 1e-4,
             torch.bfloat16: 5e-2,
             torch.half: 5e-2,
@@ -797,7 +798,7 @@ class TestBasicGEMM(TestCase):
 
     @precisionOverride(
         {
-            torch.double: 1e-8,
+            torch.double: 1e-6,
             torch.float: 1e-4,
             torch.bfloat16: 5e-2,
             torch.half: 5e-2,

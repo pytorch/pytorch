@@ -7,8 +7,8 @@
 #include <Attr.h>
 #include <Utils.h>
 
+#include <c10/core/ScalarType.h>
 #include <oneapi/dnnl/dnnl.hpp>
-#include "c10/core/ScalarType.h"
 
 namespace at::native::onednn {
 

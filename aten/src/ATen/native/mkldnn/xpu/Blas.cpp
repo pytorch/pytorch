@@ -51,9 +51,8 @@ Tensor& addmm_out(
       " != ",
       mat2.dtype())
   // complex case
-  if (mat1.is_complex()) {
-    AT_ERROR("Complex datatype matmul is not supported in oneDNN");
-  }
+  TORCH_CHECK(
+      !mat1.is_complex(), "Complex datatype matmul is not supported in oneDNN");
 
   bool is_inplace = result.is_same(self);
 
@@ -93,6 +92,8 @@ Tensor& addmm_out(
           1.f, alpha.to<float>(), 0.f, attr.kind_with_linear);
     }
   } else {
+    // We use post_binary here for adding self matrix.
+    // To avoid wrong write, here we clone self for inplace case.
     if (alpha.to<float>() == 1.f && beta_ == 1.f) {
       bias = is_inplace ? self.clone() : self;
     } else {
@@ -164,23 +165,11 @@ Tensor& mm_out(const Tensor& self, const Tensor& mat2, Tensor& result) {
     return result;
   }
 
-  if (self.is_complex()) {
-    AT_ERROR("Complex datatype matmul is not supported in oneDNN");
-  }
+  TORCH_CHECK(
+      !self.is_complex(), "Complex datatype matmul is not supported in oneDNN");
 
   onednn::matmul(result, self, mat2, Tensor(), true, onednn::Attr());
   return result;
-}
-
-Tensor mm(const Tensor& self, const Tensor& mat2) {
-  auto result = at::empty({0}, self.options());
-  xpu::mm_out(self, mat2, result);
-  return result;
-}
-
-Tensor mv(const Tensor& self, const Tensor& vec) {
-  Tensor result = at::empty({self.size(0)}, self.options());
-  return at::addmv_(result, self, vec, 0, 1);
 }
 
 // result = beta * input + alpha * (batch1 @ batch2)
@@ -194,6 +183,8 @@ Tensor& baddbmm_out(
   checkBackend("baddbmm_out", {input, batch1, batch2}, Backend::XPU);
   TORCH_CHECK(batch1.dim() == 3, "expected 3D tensor");
   TORCH_CHECK(batch2.dim() == 3, "expected 3D tensor");
+
+  bool is_inplace = result.is_same(input);
 
   std::vector<int64_t> result_shape = {
       batch1.size(0), batch1.size(1), batch2.size(2)};
@@ -217,9 +208,9 @@ Tensor& baddbmm_out(
       input.sizes());
 
   // complex case
-  if (batch1.is_complex()) {
-    AT_ERROR("Complex datatype matmul is not supported in oneDNN");
-  }
+  TORCH_CHECK(
+      !batch1.is_complex(),
+      "Complex datatype matmul is not supported in oneDNN");
 
   // general case
   onednn::Attr attr;
@@ -231,7 +222,12 @@ Tensor& baddbmm_out(
           1.f, alpha.to<float>(), 0.f, attr.kind_with_linear);
     }
   } else {
-    binary = input.dim() < 3 ? input.unsqueeze(0) : input;
+    // We use post_binary here for adding self matrix.
+    // To avoid wrong write, here we clone input for inplace case.
+    if (is_inplace)
+      binary = input.dim() < 3 ? input.unsqueeze(0).clone() : input.clone();
+    else
+      binary = input.dim() < 3 ? input.unsqueeze(0) : input;
     binary = binary.dim() < 3 ? binary.unsqueeze_(0) : binary;
     float alpha_ = alpha.to<float>() / beta_;
     if (alpha_ != 1.f)
@@ -242,42 +238,6 @@ Tensor& baddbmm_out(
   }
   onednn::matmul(result, batch1, batch2, at::Tensor(), true, attr);
   return result;
-}
-
-Tensor& baddbmm_(
-    Tensor& self,
-    const Tensor& batch1,
-    const Tensor& batch2,
-    const Scalar& beta,
-    const Scalar& alpha) {
-  TORCH_CHECK(
-      self.dtype() == batch1.dtype(),
-      "Input dtypes must be the same, got: input ",
-      self.dtype(),
-      ", batch1: ",
-      batch1.dtype(),
-      ", batch2: ",
-      batch2.dtype());
-  return at::native::xpu::baddbmm_out(self, batch1, batch2, beta, alpha, self);
-}
-
-Tensor baddbmm(
-    const Tensor& input,
-    const Tensor& batch1,
-    const Tensor& batch2,
-    const Scalar& beta,
-    const Scalar& alpha) {
-  Tensor r = at::empty({0}, input.options());
-  TORCH_CHECK(
-      input.dtype() == batch1.dtype(),
-      "Input dtypes must be the same, got: input ",
-      input.dtype(),
-      ", batch1: ",
-      batch1.dtype(),
-      ", batch2: ",
-      batch2.dtype());
-  r = at::native::xpu::baddbmm_out(input, batch1, batch2, beta, alpha, r);
-  return r;
 }
 
 Tensor& bmm_out(const Tensor& self, const Tensor& batch2, Tensor& result) {
@@ -292,9 +252,8 @@ Tensor& bmm_out(const Tensor& self, const Tensor& batch2, Tensor& result) {
     return result;
   }
 
-  if (self.is_complex()) {
-    AT_ERROR("Complex datatype matmul is not supported in oneDNN");
-  }
+  TORCH_CHECK(
+      !self.is_complex(), "Complex datatype matmul is not supported in oneDNN");
   onednn::matmul(result, self, batch2, at::Tensor(), true, onednn::Attr());
   return result;
 }
