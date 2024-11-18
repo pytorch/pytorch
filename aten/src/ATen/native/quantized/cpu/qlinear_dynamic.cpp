@@ -7,6 +7,7 @@
 #include <ATen/native/quantized/cpu/QnnpackUtils.h>
 #include <ATen/native/quantized/cpu/OnednnUtils.h>
 #include <ATen/native/quantized/cpu/QuantUtils.h>
+#include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 #include <torch/library.h>
 
@@ -616,6 +617,92 @@ at::Tensor PackedLinearWeightsOnednn::apply_dynamic_relu(
       std::move(input), reduce_range);
 }
 
+static at::Tensor linear_dynamic_fp16_with_onednn_weight(
+    at::Tensor input,
+    at::Tensor onednn_weight, // fp16 tensor from MkldnnCPU
+    std::optional<at::Tensor> bias,
+    bool relu_fused) {
+  using ideep::tensor;
+  const int64_t dim = input.dim();
+  TORCH_CHECK(input.scalar_type() == c10::ScalarType::Float,
+      "onednn linear dynamic fp16: data type of input should be float.");
+  TORCH_CHECK(onednn_weight.scalar_type() == c10::ScalarType::Half,
+      "onednn linear dynamic fp16: data type of weight should be half.");
+
+  // If the input has more than two dimensions, we will reshape it to a 2-dimensional form
+  // for calculation and subsequently reshape the output back.
+  auto input_contig =
+      dim == 2 ? input.contiguous() : input.reshape({-1, input.size(dim - 1)}).contiguous();
+
+  auto src = at::native::itensor_from_tensor(input_contig);
+  auto packed_weight = at::native::itensor_from_mkldnn(onednn_weight);
+  int64_t K = input.size(dim - 1), M = input.numel() / K, N = packed_weight.get_dim(1);
+
+  auto output_size = input.sizes().vec();
+  output_size[dim - 1] = N;
+
+  std::optional<ideep::tensor> onednn_bias{std::nullopt};
+  bool with_bias = bias.has_value();
+  at::Tensor bias_val_float;
+  if (with_bias) {
+    bias_val_float = bias.value().to(at::kFloat);
+    if (bias_val_float.dim() == 1) {
+      auto b_reshape = bias_val_float.reshape({1, bias_val_float.size(0)});
+      onednn_bias = at::native::itensor_view_from_dense(b_reshape);
+    } else {
+      onednn_bias = at::native::itensor_view_from_dense(bias_val_float);
+    }
+  }
+  std::vector<int64_t> src_dims = {M, K};
+  std::vector<int64_t> dst_dims = {M, N};
+  at::Tensor output = at::empty(
+        dst_dims,
+        device(c10::kCPU)
+            .dtype(c10::kFloat)
+      );
+  if (output.numel() == 0) {
+    return output;
+  }
+  tensor dst = at::native::itensor_view_from_dense(output);
+  static tensor empty_tensor;
+  static tensor::desc empty_tensor_desc;
+
+  // Create matmul primitive
+  auto src_dtype = ideep::data_type::f32;
+  auto src_desc = tensor::desc(src_dims, src_dtype, ideep::format_tag::any);
+  // onednn does not support f32f16f32 matmul, so we get primitive with f32 weight desc
+  // weight is stored in f16 and reordered to f32 below by `reorder_if_differ_in`
+  auto weights_desc = tensor::desc(packed_weight.get_dims(), ideep::data_type::f32, ideep::format_tag::any);
+  auto dst_dtype = dst.get_data_type();
+  auto dst_desc = tensor::desc(dst_dims, dst_dtype, ideep::format_tag::any);
+  auto bias_desc = with_bias ?
+      tensor::desc(onednn_bias.value().get_dims(), ideep::data_type::f32, ideep::format_tag::any) :
+      empty_tensor_desc;
+  // Get op attr for primitive
+  auto op_attr = relu_fused ? ideep::attr_t::fuse_relu() : ideep::attr_t();
+  op_attr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
+  auto engine = ideep::engine::cpu_engine();
+  auto primitive_desc = with_bias ?
+      dnnl::matmul::primitive_desc(engine, src_desc, weights_desc, bias_desc, dst_desc, op_attr) :
+      dnnl::matmul::primitive_desc(engine, src_desc, weights_desc, dst_desc, op_attr);
+  auto primitive = dnnl::matmul(primitive_desc);
+
+  // Convert weight from f16 to f32 with layout changes
+  auto expected_weight = packed_weight.reorder_if_differ_in(primitive_desc.weights_desc());
+
+  // Prepare args and execute primitive
+  tensor scratchpad(primitive_desc.scratchpad_desc());
+  ideep::exec_args args;
+  args.insert({DNNL_ARG_SRC, src});
+  args.insert({DNNL_ARG_WEIGHTS, expected_weight});
+  args.insert({DNNL_ARG_DST, dst});
+  args.insert({DNNL_ARG_SCRATCHPAD, scratchpad});
+  if (with_bias) {
+    args.insert({DNNL_ARG_BIAS, onednn_bias.value()});
+  }
+  primitive.execute(ideep::stream::default_stream(), args);
+  return dim == 2 ? output : output.reshape(output_size);
+}
 #endif // #if AT_MKLDNN_ENABLED()
 
 namespace at::native {
@@ -786,6 +873,32 @@ at::Tensor wrapped_fbgemm_linear_fp16_weight_meta(const at::Tensor& input, const
 #endif // USE_FBGEMM
 }
 
+class LinearDynamicFp16Onednn final {
+ public:
+  static Tensor run(
+      Tensor act, // int8 CPU tensor, not QTensor
+      Tensor onednn_weight, // int8 tensor from MkldnnCPU
+      std::optional<Tensor> bias) {
+#if AT_MKLDNN_ENABLED()
+    return linear_dynamic_fp16_with_onednn_weight(
+        act, onednn_weight, bias, /*relu_fused*/false);
+#endif
+    TORCH_CHECK(false, "Unimplemented (linear_dynamic_fp16_with_onednn_weight)");
+  }
+
+  static Tensor run_relu(
+      Tensor act, // int8 CPU tensor, not QTensor
+      Tensor onednn_weight, // int8 tensor from MkldnnCPU
+      std::optional<Tensor> bias) {
+#if AT_MKLDNN_ENABLED()
+    return linear_dynamic_fp16_with_onednn_weight(
+        act, onednn_weight, bias, /*relu_fused*/true);
+#endif
+    TORCH_CHECK(false, "Unimplemented (linear_dynamic_fp16_with_onednn_weight)");
+  }
+
+};
+
 
 TORCH_LIBRARY_IMPL(quantized, CPU, m) {
   register_linear_params();
@@ -834,5 +947,11 @@ TORCH_LIBRARY_IMPL(_quantized, Meta, m) {
       wrapped_fbgemm_linear_fp16_weight_meta);
 }
 
+TORCH_LIBRARY_IMPL(onednn, MkldnnCPU, m) {
+  m.impl(TORCH_SELECTIVE_NAME("onednn::linear_dynamic_fp16"),
+      TORCH_FN(LinearDynamicFp16Onednn::run));
+  m.impl(TORCH_SELECTIVE_NAME("onednn::linear_relu_dynamic_fp16"),
+      TORCH_FN(LinearDynamicFp16Onednn::run_relu));
+}
 } // namespace
 } // namespace at::native
