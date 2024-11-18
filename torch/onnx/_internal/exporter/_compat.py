@@ -35,6 +35,16 @@ def _rename_dynamic_shapes_with_model_inputs(
     dynamic_shapes: dict[str, Any] | tuple[Any] | list[Any],
     input_names: Sequence[str],
 ) -> dict[str, Any] | tuple[Any] | list[Any]:
+    """
+
+    This function renames the dynamic_shapes with the paramters of the model, since
+    torch.export.export requires the dynamic_shapes to be named with the model's input names.
+
+    NOTE: If the model input is nested, this function does nothing, and the users are responsible
+    for providing the correct dynamic_shapes with the correct model parameters as keys. However,
+    dynamic_shapes is usually defined as a tuple when the input is nested.
+
+    """
     if isinstance(dynamic_shapes, (tuple, list)):
         # It doesn not specify input names if it's a tuple
         return dynamic_shapes
@@ -159,6 +169,9 @@ def _from_dynamic_shapes_to_dynamic_axes(
 
     NOTE: If the model input is nested, so is the dynamic_shapes, we need to flatten the dynamic_shapes,
     and then assign the axes to the input names in the order they are provided.
+
+    NOTE: input_names are used to assign the axes to the correct input names. If the input names are not
+    provided, or less than the dynamic inputs/axes, it raises an error.
     """
 
     # 0. flatten the dynamic_shapes
