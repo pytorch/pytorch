@@ -2,6 +2,7 @@
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/control_plane/Handlers.hpp>
 
+#include <c10/util/WaitCounter.h>
 #include <c10/util/env.h>
 #include <fstream>
 
@@ -843,6 +844,7 @@ std::string NCCLTraceBuffer::dump(
     bool includeCollectives,
     bool includeStackTraces,
     bool onlyActive) {
+  STATIC_SCOPED_WAIT_COUNTER(pytorch.wait_counter.NCCLTraceBuffer__dump);
   auto result = new_dict();
   // common values
   result.insert(version_key, version_val);
