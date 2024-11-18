@@ -988,7 +988,7 @@ static Tensor sparse_compressed_tensor_ctor_worker(
              : r.layoutOptional(ARG_LAYOUT));
     if (required_layout.has_value()) {
       TORCH_CHECK(
-          layout == required_layout,
+          layout.has_value() && layout == required_layout,
           name,
           ": layout must be ",
           required_layout.value(),
