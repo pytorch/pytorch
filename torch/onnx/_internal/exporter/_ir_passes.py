@@ -31,6 +31,9 @@ def add_torchlib_common_imports(model: ir.Model) -> None:
         from onnxscript.function_libs.torch_lib.ops import common as common_ops
 
         model.opset_imports["pkg.onnxscript.torch_lib.common"] = 1
+        for function in model.functions.values():
+            if function.domain == "pkg.torch.__subgraph__":
+                function.opset_imports["pkg.onnxscript.torch_lib.common"] = 1
         rank_func = ir.serde.deserialize_function(common_ops.Rank.to_function_proto())
         is_scalar_func = ir.serde.deserialize_function(
             common_ops.IsScalar.to_function_proto()

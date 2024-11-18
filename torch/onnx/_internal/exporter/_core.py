@@ -93,7 +93,8 @@ _STEP_THREE_ERROR_MESSAGE = textwrap.dedent(
     - Create an error report with `torch.onnx.export(..., report=True)`, and save the ExportedProgram as a pt2 file. Create an issue in the PyTorch GitHub repository against the {_BLUE}*onnx*{_END} component. Attach the error report and the pt2 model."""
 )
 
-_LOCAL_FUNCTION_DOMAIN: str = "__torch_subgraph__"
+# Domain used for functions translated from subgraphs
+_LOCAL_FUNCTION_DOMAIN: str = "pkg.torch.__subgraph__"
 
 logger = logging.getLogger(__name__)
 
@@ -947,7 +948,8 @@ def _exported_program_to_onnx_program(
     scoped_subgraphs: dict[str, dict[str, ir.Function]] = {}
     values = None
 
-    # 1. Add all nodes to the graph and create a dictionary of values
+    # 1. Translate all nodes in all subgraphs and the main graph
+    # Create a dictionary of values for the main graph for step 2-3 to add inputs and outputs
     for name, module in reversed(
         tuple(exported_program.graph_module.named_modules(remove_duplicate=False))
     ):
@@ -974,8 +976,6 @@ def _exported_program_to_onnx_program(
         values = _translate_fx_graph(
             fx_graph,
             model,
-            current_scope=scope,
-            graph_name=subgraph_name,
             graph=graph,
             owned_graphs=owned_graphs,
             lower=lower,
