@@ -1217,15 +1217,8 @@ class TritonKernelOverrides(TritonOverrides):
                     need_where = True
 
         value = None if need_where else other
-
-        # keys is a view, need to copy it
-        keys = set(V.kernel.cse.cache.keys())
-
         with V.kernel.mask_loads(mask, value=value) as new_mask:
             result = body()
-
-        # TODO - could potentially only invalidate variables which are dependent on loads
-        V.kernel.cse.invalidate(keep_vars=keys)
 
         if need_where:
             # Remove once CSEVariables track the dtype
