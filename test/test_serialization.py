@@ -6,10 +6,10 @@ import gc
 import gzip
 import io
 import os
+import pathlib
 import pickle
 import platform
 import shutil
-import subprocess
 import sys
 import tempfile
 import unittest
@@ -4395,6 +4395,15 @@ class TestSerialization(TestCase, SerializationMixin):
                 with zipfile.ZipFile(f) as zip_file:
                     zip_file.extractall(path=temp_dir)
 
+    def test_serialization_with_header(self):
+        orig = torch.randn(3, 3)
+        with BytesIOContext() as f:
+            f.write(b'header')
+            torch.save(orig, f)
+            f.seek(6)
+            loaded = torch.load(f)
+            self.assertEqual(orig, loaded)
+
     def test_get_unsafe_globals_in_checkpoint(self):
         t = torch.randn(2, 3)
         tt = TwoTensor(t, t)
@@ -4431,36 +4440,13 @@ class TestSerialization(TestCase, SerializationMixin):
         with tempfile.NamedTemporaryFile() as f:
             njt = torch.nested.nested_tensor([[1, 2, 3], [4, 5]], layout=torch.jagged)
             torch.save(njt, f)
-            import_string = "import torch._dynamo" if should_import else ""
-            # torch.nested is actually imported by default, so only torch._dynamo needs to be imported
-            script = f"""
-import torch
-{import_string}
-x = torch.load("{f.name}", weights_only=True)
-"""
-            try:
-                subprocess.check_output(
-                    [sys.executable, "-c", script],
-                    cwd=os.path.dirname(os.path.realpath(__file__)),
-                    stderr=subprocess.STDOUT,
-                )
-                if not should_import:
-                    raise RuntimeError("Script executed successfully despite lack of import")
-            except subprocess.CalledProcessError as e:
-                if should_import:
-                    err_msg = e.output.decode("utf-8")
-                    raise RuntimeError(
-                        f"Unexpected error raised: {err_msg}"
-                    ) from e
-                else:
-                    if e.returncode < 0:
-                        self.fail("Subprocess exited with a fatal signal")
-                    else:
-                        err_msg = (
-                            "_pickle.UnpicklingError: Weights only load failed. ``torch.nested`` and ``torch._dynamo``"
-                            " must be imported to load nested jagged tensors (NJTs)"
-                        )
-                        self.assertTrue(err_msg in e.output.decode("utf-8"))
+            filename = pathlib.Path(f.name)
+            import_string = "import torch._dynamo;" if should_import else ""
+            err_msg = (
+                "_pickle.UnpicklingError: Weights only load failed. ``torch.nested`` and ``torch._dynamo``"
+                " must be imported to load nested jagged tensors (NJTs)"
+            ) if not should_import else None
+            self._attempt_load_from_subprocess(filename, import_string, err_msg)
 
     @parametrize("dtype", all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
     @parametrize("weights_only", [True, False])
