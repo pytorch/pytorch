@@ -535,8 +535,10 @@ class CppMicroGemmAMX(CppMicroGemm):
         // first element of a subsequent [K, block_n] block would be right after the last
         // element of the previous block sized [K x block_n] elements.
         // This is implicitly being ensured by the current weight-packing implementation.
-        // Since [K, block_n] blocks are to be cached, the details of the weight-packing
-        // implementation can't be made transparent to the dequantization & cahing logic.
+        // Since blocks sized [K, block_n] corresponding to each block_n sized segment of N
+        // are to be cached, the details of the weight-packing implementation can't be made
+        // transparent to the dequantization & caching logic here.
+        // It's worth noting that ldb doesn't matter in this context.
         const int base_idx = K * n;
         for (int idx = 0; idx < buf_size; idx += 32) {
             auto b_int8 = at::vec::Vectorized<int8_t>::loadu(
