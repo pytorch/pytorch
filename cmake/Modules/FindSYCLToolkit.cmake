@@ -99,6 +99,7 @@ if (SYCL_COMPILER_VERSION VERSION_LESS_EQUAL PYTORCH_2_5_SYCL_TOOLKIT_VERSION)
   endif()
 endif()
 
+# dummy PR
 # Find SYCL library fullname.
 find_library(
   SYCL_LIBRARY
