@@ -482,12 +482,12 @@ def _handle_call_function_node_with_lowering(
 
     # Replace the input FX nodes with ONNX values
     onnx_args = [
-        _convert_fx_arg_to_onnx_arg(input_, node_name_to_values) for input_ in fx_args
+        _convert_fx_arg_to_onnx_arg(input_, node_name_to_values, node_name_to_local_functions) for input_ in fx_args
     ]
 
     onnx_kwargs = {}
     for key, value in fx_kwargs.items():
-        onnx_kwargs[key] = _convert_fx_arg_to_onnx_arg(value, node_name_to_values)
+        onnx_kwargs[key] = _convert_fx_arg_to_onnx_arg(value, node_name_to_values, node_name_to_local_functions)
         if key == "dtype" and onnx_kwargs[key] is None:
             # Set dtype to -1 if it is None
             onnx_kwargs[key] = -1
