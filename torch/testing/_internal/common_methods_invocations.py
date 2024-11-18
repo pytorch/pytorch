@@ -38,7 +38,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM, IS_FBCODE, IS_WINDOWS, IS_MACOS, TEST_SCIPY,
     torch_to_numpy_dtype_dict, numpy_to_torch_dtype, TEST_WITH_ASAN,
     GRADCHECK_NONDET_TOL, slowTest, TEST_WITH_SLOW,
-    TEST_WITH_TORCHINDUCTOR, TEST_XPU, get_backend_ops,
+    TEST_WITH_TORCHINDUCTOR, 
 )
 from torch.testing._utils import wrapper_set_seed
 
@@ -12258,7 +12258,6 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
                # https://github.com/pytorch/pytorch/issues/55907
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager'),
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_numpy_ref', device_type='xpu', dtypes=[torch.float64, torch.complex128,]),
            ),
            sample_inputs_func=sample_inputs_addbmm),
     OpInfo('baddbmm',
@@ -20685,7 +20684,7 @@ op_db: List[OpInfo] = [
             # AssertionError: Tensor-likes are not close!
             # Fails in cuda11.7
             # Error Log: https://github.com/pytorch/pytorch/actions/runs/3440108478/jobs/5738475757
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_compare_cpu', device_type=['cuda', 'xpu']),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_compare_cpu', device_type=['cuda']),
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),),),
     # In training mode, feature_alpha_dropout currently doesn't support inputs of complex dtype
     # unlike when `train=False`, it supports complex inputs, hence 2 OpInfos to cover all cases
