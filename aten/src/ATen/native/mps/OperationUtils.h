@@ -406,6 +406,10 @@ static inline void mtl_setBuffer(encoder_t encoder, const TensorBase& t, unsigne
   [encoder setBuffer:getMTLBufferStorage(t) offset:t.storage_offset() * t.element_size() atIndex:idx];
 }
 
+// Implementation of setBytes for containers vs trivially copiable types must be separate
+// Containers like `std::array` could have been uploaded directly, but `c10::ArrayRef`,
+// while trivially copiable, includes padding  which if copied as Metal shader parameters
+// might overwrite other values
 template <
     typename T,
     typename = std::enable_if_t<std::is_integral_v<T> || std::is_same_v<T, float> ||
@@ -419,7 +423,7 @@ static inline void mtl_setBytes(id<MTLComputeCommandEncoder> encoder, const Cont
   [encoder setBytes:values.data() length:sizeof(typename Container::value_type) * values.size() atIndex:idx];
 }
 
-namespace details {
+namespace detail {
 template <typename T>
 inline void mtl_setArg(id<MTLComputeCommandEncoder> encoder, const T& val, unsigned idx) {
   mtl_setBytes(encoder, val, idx);
@@ -445,16 +449,16 @@ template <>
 inline void mtl_setArg(id<MTLComputeCommandEncoder> encoder, const TensorBase& val, unsigned idx) {
   mtl_setBuffer(encoder, val, idx);
 }
-} // namespace details
+} // namespace detail
 
 template <unsigned idx = 0, typename T>
 static inline void mtl_setArgs(id<MTLComputeCommandEncoder> encoder, const T& val) {
-  details::mtl_setArg(encoder, val, idx);
+  detail::mtl_setArg(encoder, val, idx);
 }
 
 template <unsigned idx = 0, typename T, typename... Args>
 static inline void mtl_setArgs(id<MTLComputeCommandEncoder> encoder, const T& val, Args... args) {
-  details::mtl_setArg(encoder, val, idx);
+  detail::mtl_setArg(encoder, val, idx);
   mtl_setArgs<idx + 1>(encoder, args...);
 }
 
