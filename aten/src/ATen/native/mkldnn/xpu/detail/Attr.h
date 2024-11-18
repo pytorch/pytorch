@@ -306,8 +306,7 @@ class Attr {
     // if output is quantized, then append the eltwise linear to adjust the
     // output scale/zero_point
     if (is_quantized && int8_output) {
-      dnnl_post_ops_.append_eltwise(
-          kind_with_linear,  q_scale_, q_zero_point_);
+      dnnl_post_ops_.append_eltwise(kind_with_linear, q_scale_, q_zero_point_);
     }
     return dnnl_post_ops_;
   }
