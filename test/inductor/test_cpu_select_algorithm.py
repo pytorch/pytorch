@@ -1728,6 +1728,37 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             self.common(mod, (v,), atol=atol, rtol=rtol)
         self.assertEqual(counters["inductor"]["cpp_mlp_template"], 1)
 
+    @parametrize("input_3d", (True, False))
+    @dtypes(
+        torch.bfloat16,
+    )
+    def test_linear_silu_linear_mul_with_concat_linear(
+        self, batch_size, in_features, out_features, input_3d, dtype
+    ):
+        class Linear_Gate_Up(torch.nn.Module):
+            def __init__(self, in_feature, out_feature, bias_gate=False, bias_up=False):
+                super().__init__()
+                self.gate_proj = torch.nn.Linear(
+                    in_feature, out_feature, bias=bias_gate
+                )
+                self.up_proj = torch.nn.Linear(in_feature, out_feature, bias=bias_up)
+
+            def forward(self, x):
+                return torch.nn.functional.silu(self.gate_proj(x)) * self.up_proj(x)
+
+        torch._dynamo.reset()
+        torch._inductor.metrics.reset()
+        counters.clear()
+        assert dtype == torch.bfloat16
+        mod = Linear_Gate_Up(in_features, out_features).eval()
+        B = (2, batch_size) if input_3d else (batch_size,)
+        v = torch.randn(*B, in_features).to(torch.bfloat16)
+        with verify(dtype) as (atol, rtol), torch.autocast(
+            device_type="cpu"
+        ), torch.no_grad():
+            self.common(mod, (v,), atol=atol, rtol=rtol)
+        self.assertEqual(counters["inductor"]["cpp_mlp_template"], 1)
+
     @inductor_config.patch({"freezing": False})
     @patches
     @torch.no_grad
@@ -1839,6 +1870,9 @@ class TestSelectAlgorithmDynamicShapes(_DynamicShapesTestBase):
     )
     test_linear_silu_linear_mul_dynamic_shapes = (
         TestSelectAlgorithm.test_linear_silu_linear_mul
+    )
+    test_linear_silu_linear_mul_with_concat_linear_dynamic_shapes = (
+        TestSelectAlgorithm.test_linear_silu_linear_mul_with_concat_linear
     )
     test_linear_k_slicing_dynamic_shapes = TestSelectAlgorithm.test_linear_k_slicing
     test_linear_cache_blocking_dynamic_shapes = (
