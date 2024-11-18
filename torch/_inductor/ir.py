@@ -5483,6 +5483,7 @@ class UserDefinedTritonKernel(ExternKernel):
         kernel = kernel_side_table.get_kernel(self.kernel_idx)
         configs = []
         restore_value_args = []
+        reset_to_zero_args = []
         if isinstance(kernel, Autotuner):
             # https://github.com/triton-lang/triton/pull/5083
             # changes kernel.restore_idx to kernel.restore_value
@@ -5492,16 +5493,28 @@ class UserDefinedTritonKernel(ExternKernel):
             else:
                 assert hasattr(kernel, "restore_value")
                 restore_value_args.extend(kernel.restore_value)
+
+            if hasattr(kernel, "reset_idx"):
+                for i in kernel.reset_idx:
+                    reset_to_zero_args.append(kernel.fn.arg_names[i])
+            elif hasattr(kernel, "reset_to_zero"):
+                reset_to_zero_args.extend(kernel.reset_to_zero)
+
             configs = kernel.configs
             kernel = kernel.fn
-        return kernel, configs, restore_value_args
+        return kernel, configs, restore_value_args, reset_to_zero_args
 
     def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
-        kernel, configs, restore_value_args = self.get_kernel_and_metadata()
+        (
+            kernel,
+            configs,
+            restore_value_args,
+            reset_to_zero_args,
+        ) = self.get_kernel_and_metadata()
 
         # Definition of kernel
         new_name, triton_meta = wrapper.define_user_defined_triton_kernel(
-            kernel, configs, self.kwargs, restore_value_args
+            kernel, configs, self.kwargs, restore_value_args, reset_to_zero_args
         )
         raw_args = [
             self.get_kwargs_value(k) for k in self.ordered_kwargs_for_cpp_kernel
@@ -5608,7 +5621,7 @@ class UserDefinedTritonKernel(ExternKernel):
         self.kernel_idx = kernel_idx
         self.grid = grid
 
-        kernel, configs, _ = self.get_kernel_and_metadata()
+        kernel, configs, _, _ = self.get_kernel_and_metadata()
 
         # If we are autotuning, not all arguments will be passed
         self.ordered_kwargs_for_cpp_kernel = [
