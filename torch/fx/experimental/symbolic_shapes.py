@@ -47,7 +47,7 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import TypeAlias, TypeGuard
+from typing_extensions import deprecated, TypeAlias, TypeGuard
 
 import torch
 import torch.fx
@@ -2091,6 +2091,15 @@ class ShapeGuardPythonPrinter(_ShapeGuardPrinter, PythonPrinter):
 
     def print_source(self, source: Source) -> str:
         return self.source_ref(source)
+
+
+@deprecated(
+    "`torch.fx.experimental.symbolic_shapes.ShapeGuardPrinter` is deprecated, "
+    "please use `torch.fx.experimental.symbolic_shapes.ShapeGuardPythonPrinter` instead.",
+    category=FutureWarning,
+)
+class ShapeGuardPrinter(ShapeGuardPythonPrinter):
+    pass
 
 
 class LoggingShapeGuardPrinter(ShapeGuardPythonPrinter):

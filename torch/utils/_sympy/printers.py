@@ -305,7 +305,7 @@ class CppPrinter(ExprPrinter):
     # they are positive, we will have used Mod instead, for which this codegen
     # is right).
     def _print_PythonMod(self, expr: sympy.Expr) -> str:
-        return self.stringify(expr.args, " % ", precedence(expr))
+        return self.stringify(expr.args, " % ", PRECEDENCE["Atom"] - 0.5)
 
     def _print_IntTrueDiv(self, expr: sympy.Expr) -> str:
         lhs, rhs = expr.args
