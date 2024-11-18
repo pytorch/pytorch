@@ -93,6 +93,7 @@ from .fx_passes.joint_graph import joint_graph_passes
 from .fx_passes.post_grad import post_grad_passes, view_to_reshape
 from .fx_passes.pre_grad import pre_grad_passes
 from .graph import GraphLowering
+from .ir import get_device_type, IRNode
 from .utils import (
     align_inputs_from_check_idxs,
     clone_preserve_strides,
@@ -1818,24 +1819,19 @@ def _check_triton_bf16_support(graph: GraphLowering) -> None:
         )
         raise SkipFrame("BF16 is not supported")
 
-    for inp in graph.graph_inputs.values():
-        device = getattr(inp, "get_device", lambda: torch.device("meta"))()
-        if (not is_gpu(device.type)) or inp.get_dtype() != torch.bfloat16:
+    for node in itertools.chain(graph.graph_inputs.values(), graph.graph_outputs):
+        if not isinstance(node, IRNode):
+            continue
+        device_type = get_device_type(node)
+        if (
+            not device_type
+            or not is_gpu(device_type)
+            or node.get_dtype() != torch.bfloat16
+        ):
             continue
         # Print warning and skip frame if attempting to compile for bfloat16
         # on device without hardware support for dtype
-        device_interface = get_interface_for_device(device.type)
+        device_interface = get_interface_for_device(device_type)
         if device_interface.is_bf16_supported(including_emulation=False):
             return
-        warn_and_skip(device)
-
-    for out in graph.graph_outputs:
-        device = getattr(out, "get_device", lambda: torch.device("meta"))()
-        if (not is_gpu(device.type)) or out.get_dtype() != torch.bfloat16:
-            continue
-        # Print warning and skip frame if attempting to compile for bfloat16
-        # on device without hardware support for dtype
-        device_interface = get_interface_for_device(device.type)
-        if device_interface.is_bf16_supported(including_emulation=False):
-            return
-        warn_and_skip(device)
+        warn_and_skip(node.get_device())

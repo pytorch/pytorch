@@ -159,7 +159,7 @@ class SchedulerBuffer:
         assert self.node is not None
         return self.node.get_inputs_that_alias_output()
 
-    def get_mutations(self) -> List[str]:
+    def get_mutations(self) -> Sequence[str]:
         assert self.node is not None
         return self.node.get_mutation_names()
 
@@ -1580,8 +1580,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
         raise NotImplementedError
 
     def codegen(self) -> None:
-        assert isinstance(self.node, ir.ComputedBuffer), f"{type(self.node)=}"
-        self.node.get_store_function()(self.node.make_loader()())
+        raise NotImplementedError
 
     def is_foreach(self) -> bool:
         return True

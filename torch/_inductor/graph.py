@@ -1446,11 +1446,7 @@ class GraphLowering(torch.fx.Interpreter):
                 result.realize()
                 strides = n.meta["val"].stride()
                 sym_strides = torch._inductor.utils.any_is_symbolic(*strides)
-                if (
-                    not hasattr(result, "get_stride")
-                    or result.get_stride() != strides
-                    and not sym_strides
-                ):
+                if result.maybe_get_stride() != strides and not sym_strides:
                     stride_order = ir.get_stride_order(strides)
                     result = ir.ExternKernel.require_stride_order(result, stride_order)
             if (

@@ -1795,8 +1795,6 @@ def get_promoted_dtype(*args, type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KI
         if isinstance(inp, torch._prims_common.Number):
             return inp
         else:
-            assert hasattr(inp, "dtype")
-
             # construct a tmp tensor to use dtype promotion util function
             return torch.empty([1], dtype=inp.dtype)
 
