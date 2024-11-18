@@ -118,7 +118,9 @@ bmm_template = TritonTemplate(
 )
 
 aten_bmm = ExternKernelChoice(torch.bmm, "at::bmm_out")
-aten_baddbmm = ExternKernelChoice(torch.baddbmm, "at::baddbmm_out")
+aten_baddbmm = ExternKernelChoice(
+    torch.baddbmm, "at::baddbmm_out", op_overload=aten.baddbmm.out
+)
 
 
 @L.register_lowering(aten.bmm)
