@@ -528,16 +528,13 @@ class CppMicroGemmAMX(CppMicroGemm):
     alignas(4096) {{input_t}} dequantized_B_buf[buf_size];
     {%- endif %}
 
-    auto load_dequantized_B = [&](int tile_idx) {
+    auto load_dequantized_B = [&](int base_idx) {
         // Load a tile of B & cache it in L1D.
-        // The assumption here is that if N would be a multiple of block_n,
-        // then B would be some consecutive tiles sized [k, block_n] elements each, so the
-        // first element of a subsequent [K, block_n] tile would be right after the last
-        // element of the previous tile sized [K x block_n] elements.
-        const int base_idx = tile_idx * K * 32;
-        for (int idx = 0; idx < buf_size; idx += 32) {
+        // The assumption here is that if N would be a multiple of block_n.
+        {{input2_t}}* base_addr = const_cast<{{input2_t}}*>(B) + base_idx;
+        for (int idx = 0; idx < buf_size; idx += ldb) {
             auto b_int8 = at::vec::Vectorized<int8_t>::loadu(
-                const_cast<{{input2_t}}*>(B) + base_idx + idx,
+                base_addr + idx,
                 static_cast<int64_t>(32)
             );
             auto b_bf16 = at::vec::convert<{{input_t}}>(b_int8);
@@ -549,7 +546,7 @@ class CppMicroGemmAMX(CppMicroGemm):
     for (int64_t n = 0; n < N; n += {{block_n}}) {
 {%- if use_cached_dequantized_B %}
         // Dequantize K * block_n int8 B elements into BF16
-        load_dequantized_B(n / {{block_n}});
+        load_dequantized_B(n);
 {%- endif %}
         for (int64_t m = 0; m < M; m += {{block_m}}) {
             int64_t block_m = std::min<int64_t>(M - m, {{block_m}});
