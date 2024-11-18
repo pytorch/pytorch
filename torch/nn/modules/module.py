@@ -1038,7 +1038,7 @@ class Module:
         r"""Move all model parameters and buffers to the GPU.
 
         This also makes associated parameters and buffers different objects. So
-        it should be called before constructing optimizer if the module will
+        it should be called before constructing the optimizer if the module will
         live on GPU while being optimized.
 
         .. note::
@@ -1057,7 +1057,7 @@ class Module:
         r"""Move all model parameters and buffers to the IPU.
 
         This also makes associated parameters and buffers different objects. So
-        it should be called before constructing optimizer if the module will
+        it should be called before constructing the optimizer if the module will
         live on IPU while being optimized.
 
         .. note::
@@ -1095,7 +1095,7 @@ class Module:
         r"""Move all model parameters and buffers to the MTIA.
 
         This also makes associated parameters and buffers different objects. So
-        it should be called before constructing optimizer if the module will
+        it should be called before constructing the optimizer if the module will
         live on MTIA while being optimized.
 
         .. note::
