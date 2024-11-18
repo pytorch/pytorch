@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import ctypes
-import dataclasses
 import datetime
 import inspect
 import itertools
@@ -13,7 +12,7 @@ import pathlib
 import textwrap
 import traceback
 import typing
-from typing import Any, Callable, Literal, Sequence
+from typing import Any, Callable, Literal, Mapping, Sequence
 
 import onnxscript
 import onnxscript.evaluator
@@ -172,50 +171,6 @@ class TorchTensor(ir.Tensor):
 #     GRADIENT_TO_USER_INPUT = auto()
 #     USER_INPUT_MUTATION = auto()
 #     TOKEN = auto()
-
-@dataclasses.dataclass
-class _NodeNameToIrObjectsMapping:
-    """A mapping of FX node names to their produced ONNX ``Value`` or ``Graph``.
-
-    This class is used to store the mapping of FX node names to their produced ONNX ``Value`` or ``Graph``.
-    The mapping is scoped to a specific graph or subgraph.
-    """
-    scope: str
-    node_name_to_values: dict[str, ir.Value | Sequence[ir.Value]] = dataclasses.field(
-        default_factory=dict
-    )
-    node_name_to_graphs: dict[str, ir.Graph] = dataclasses.field(default_factory=dict)
-
-class _ScopedNodeNameToIrObjectsMappings:
-    def __init__(self) -> None:
-        self._scoped_node_name_to_ir_objects: list[_NodeNameToIrObjectsMapping] = []
-
-    def get(self, node_name: str) -> tuple[str, ir.Value | Sequence[ir.Value] | None]:
-        for mapping in reversed(self._scoped_node_name_to_ir_objects):
-            if node_name in mapping.node_name_to_values:
-                return mapping.scope, mapping.node_name_to_values[node_name]
-        return "", None
-
-    def get_value(self, node_name: str) -> ir.Value | Sequence[ir.Value] | None:
-        return self.get(node_name)[1]
-
-    def get_graph(self, node_name: str) -> ir.Graph | None:
-        return self._scoped_node_name_to_ir_objects[-1].node_name_to_graphs.get(node_name)
-
-    def enter_scope(self, scope: str) -> None:
-        self._scoped_node_name_to_ir_objects.append(_NodeNameToIrObjectsMapping(scope))
-
-    def exit_scope(self) -> None:
-        self._scoped_node_name_to_ir_objects.pop()
-
-    def add_value(self, node_name: str, value: ir.Value | Sequence[ir.Value]) -> None:
-        self._scoped_node_name_to_ir_objects[-1].node_name_to_values[node_name] = value
-
-    def add_graph(self, node_name: str, graph: ir.Graph) -> None:
-        self._scoped_node_name_to_ir_objects[-1].node_name_to_graphs[node_name] = graph
-
-    def __len__(self) -> int:
-        return len(self._scoped_node_name_to_ir_objects)
 
 
 def _set_shape_types(
@@ -480,7 +435,7 @@ def _handle_call_function_node_with_lowering(
     constant_farm: dict[Any, ir.Value],
     registry: _registration.ONNXRegistry,
     opset: onnxscript.values.Opset,
-    node_name_to_local_functions: dict[str, torch.fx.Graph],
+    node_name_to_local_functions: dict[str, ir.Function],
 ) -> None:
     """Translate a call_function node to an ONNX node.
 
@@ -504,114 +459,43 @@ def _handle_call_function_node_with_lowering(
             # use SequenceAt to get the value. This is handled by torchlib
             pass
 
+    # Find the matching ONNX overload for the node
+    # NOTE: Create different registries for different ONNX opset versions
+    # TODO: Log the message here to expose false positives
+    onnx_function, message = _dispatching.dispatch(node, registry)
 
-    if node.target.__class__.__name__ == "CondOp":
-        # TODO: The condition should be replaced by something more relevant.
-        # Controlflow is handled in the exporter and not in torchlib
-        # as subgraph are only available in this code.
-        cond, true_graph, false_graph, graph_args = node.args
-        assert (
-            true_graph.name in local_functions
-        ), f"Unable to find {true_graph.name!r} in local_functions={local_functions}"
-        assert (
-            false_graph.name in local_functions
-        ), f"Unable to find {false_graph.name!r} in local_functions={local_functions}"
-        # builds local functions
-        val_args = tuple(n.meta["val"] for n in graph_args)
-        # Expected `mod` to be an instance of `torch.nn.Module`, got <class 'torch.fx.graph.Graph'>.
-        # But this scenario should be supported.
-        true_program = export(
-            local_functions[true_graph.name], val_args, registry=registry
-        )
-        false_program = export(
-            local_functions[false_graph.name], val_args, registry=registry
-        )
-        true_function = ir.Function(
-            LOCAL_FUNCTION_DOMAIN,
-            true_graph.name,
-            graph=true_program.model.graph,
-            attributes={},
-        )
-        false_function = ir.Function(
-            LOCAL_FUNCTION_DOMAIN,
-            false_graph.name,
-            graph=false_program.model.graph,
-            attributes={},
+    if onnx_function is None:
+        # TODO(justinchuby): Fall back to ATen op or do something else?
+        raise _errors.DispatchError(
+            f"No ONNX function found for {node.target!r}. Failure message: {message}"
         )
 
-        inputs = [node_name_to_values[n.name] for n in graph_args]
+    # Map FX inputs to ONNX inputs and fill optional inputs.
+    # torch_args and torch_kwargs are for op-level validation
+    fx_args = node.args
+    fx_kwargs = node.kwargs
 
-        onnx_outputs_then = [ir.Value(name=node.name)]
-        onnx_outputs_else = [ir.Value(name=node.name)]
+    # Replace the input FX nodes with ONNX values
+    onnx_args = [
+        _convert_fx_arg_to_onnx_arg(input_, node_name_to_values) for input_ in fx_args
+    ]
 
-        then_node = ir.Node(
-            LOCAL_FUNCTION_DOMAIN, true_graph.name, inputs, outputs=onnx_outputs_then
-        )
-        then_graph = ir.Graph(
-            [], onnx_outputs_then, nodes=[then_node], name="then_graph"
-        )
-        else_node = ir.Node(
-            LOCAL_FUNCTION_DOMAIN, false_graph.name, inputs, outputs=onnx_outputs_else
-        )
-        else_graph = ir.Graph(
-            [], onnx_outputs_else, nodes=[else_node], name="else_graph"
-        )
-        if_node = ir.Node(
-            "",
-            "If",
-            [ir.Value(name=cond.name)],
-            outputs=[ir.Value(name=node.name)],
-            attributes=[
-                ir.Attr("then_branch", ir.AttributeType.GRAPH, then_graph),
-                ir.Attr("else_branch", ir.AttributeType.GRAPH, else_graph),
-            ],
-        )
+    onnx_kwargs = {}
+    for key, value in fx_kwargs.items():
+        onnx_kwargs[key] = _convert_fx_arg_to_onnx_arg(value, node_name_to_values)
+        if key == "dtype" and onnx_kwargs[key] is None:
+            # Set dtype to -1 if it is None
+            onnx_kwargs[key] = -1
 
-        outputs = if_node.outputs
-
-        tracer = _building.OpRecorder(opset, constant_farm)
-        tracer.nodes.append(if_node)
-        tracer.functions[LOCAL_FUNCTION_DOMAIN, true_graph.name, ""] = true_function
-        tracer.functions[LOCAL_FUNCTION_DOMAIN, false_graph.name, ""] = false_function
-
-    else:
-        # Find the matching ONNX overload for the node
-        # NOTE: Create different registries for different ONNX opset versions
-        # TODO: Log the message here to expose false positives
-        onnx_function, message = _dispatching.dispatch(node, registry)
-
-        if onnx_function is None:
-            # TODO(justinchuby): Fall back to ATen op or do something else?
-            raise _errors.DispatchError(
-                f"No ONNX function found for {node.target!r}. Failure message: {message}"
-            )
-
-        # Map FX inputs to ONNX inputs and fill optional inputs.
-        # torch_args and torch_kwargs are for op-level validation
-        fx_args = node.args
-        fx_kwargs = node.kwargs
-
-        # Replace the input FX nodes with ONNX values
-        onnx_args = [
-            _convert_fx_arg_to_onnx_arg(input_, node_name_to_values) for input_ in fx_args
-        ]
-
-        onnx_kwargs = {}
-        for key, value in fx_kwargs.items():
-            onnx_kwargs[key] = _convert_fx_arg_to_onnx_arg(value, node_name_to_values)
-            if key == "dtype" and onnx_kwargs[key] is None:
-                # Set dtype to -1 if it is None
-                onnx_kwargs[key] = -1
-
-        with onnxscript.evaluator.default_as(
-            tracer := _building.OpRecorder(opset, constant_farm)
-        ):
-            try:
-                outputs = onnx_function(*onnx_args, **onnx_kwargs)
-            except Exception as e:
-                raise _errors.GraphConstructionError(
-                    f"Error when calling function '{onnx_function}' with args '{onnx_args}' and kwargs '{onnx_kwargs}'"
-                ) from e
+    with onnxscript.evaluator.default_as(
+        tracer := _building.OpRecorder(opset, constant_farm)
+    ):
+        try:
+            outputs = onnx_function(*onnx_args, **onnx_kwargs)
+        except Exception as e:
+            raise _errors.GraphConstructionError(
+                f"Error when calling function '{onnx_function}' with args '{onnx_args}' and kwargs '{onnx_kwargs}'"
+            ) from e
 
     # NOTE: Instead of using the output names from node.target._schema,
     # we always use the index if there are more than one outputs so the
@@ -674,9 +558,10 @@ def _handle_placeholder_node(
 def _handle_get_attr_node(
     node: torch.fx.Node,
     *,
+    owned_graphs: Mapping[str, ir.Function],
     node_name_to_local_functions: dict[str, ir.Function],
 ) -> None:
-    """Handle a get_attr node by translating a single GraphModule object as ONNX function.
+    """Handle a get_attr node by assigning the corresponding ONNX function to the node name.
 
     An example ExportedProgram that has uses get_attr nodes is:
 
@@ -699,64 +584,60 @@ def _handle_get_attr_node(
                     sin: "f32[5]" = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
                     return (sin,)
 
-    Here, we first see `true_graph_0` and `false_graph_0` as get_attr nodes that obtain the subgraphs
-    as GraphModule objects, which are later used in the HOP `torch.ops.higher_order.cond` call_function
-    node.
-
-    In this function, we handle the get_attr node by translating the underlying subgraph to an
-    ONNX function, then store it in a lookup table for later use.
-
     Args:
         node: The FX node to translate.
+        owned_graphs: A mapping of subgraph names to the corresponding ONNX functions.
         node_name_to_local_functions: A mapping of local function names to their corresponding ONNX functions.
     """
-    # NOTE: This assumes we don't have HOPs that consumes graphs that include other HOPs
-    # If we do this logic needs to be extended.
-
-    # Get the GraphModule object
-    graph_module: torch.fx.GraphModule = getattr(node.graph.owning_module, node.target)
-    # Get the subgraph from the GraphModule
-    subgraph = graph_module.graph
-
-    # Export the subgraph to an ONNX function
-    # The subgraph is a torch.fx.Graph object
-    # We need to convert it to an ONNX function
-    # and store it in the lookup table
-    local_function = export(subgraph)
-    node_name_to_local_functions[node.name] = local_function
+    if not isinstance(node.target, str):
+        logger.warning(
+            "Expected node.target for the node %s to be a string, but got '%s'. There may be an internal error.",
+            node,
+            type(node.target),
+        )
+        return
+    function = owned_graphs[node.target]
+    node_name_to_local_functions[node.name] = function
 
 
-def _add_nodes(
-    graph_module: torch.fx.GraphModule,
+def _translate_fx_graph(
+    fx_graph: torch.fx.Graph,
     model: ir.Model,
     *,
-    current_graph: ir.Graph,
-    scoped_node_name_to_ir_objects_mappings: _ScopedNodeNameToIrObjectsMappings,
-    lower: Literal["at_conversion", "post_conversion", "none"],
+    current_scope: str,
+    graph_name: str,
+    graph: ir.Graph | ir.Function,
+    owned_graphs: Mapping[str, ir.Function],
+    lower: Literal["at_conversion", "none"],
     registry: _registration.ONNXRegistry,
 ) -> dict[str, ir.Value | Sequence[ir.Value]]:
-    """Add nodes to the ONNX graph.
+    """Translate a submodule to an ONNX function.
+
+    Any functions used by the traced functions will be added to the model.
 
     Args:
-        graph_module: The FX graph module to translate.
+        fx_graph: The FX graph module to translate.
         model: The ONNX model at construction.
-        current_graph: The ONNX graph at construction.
-        namespaces: The namespaces of the nodes.
+        current_scope: The current name scope of the submodule, excluding the current module name.
+            E.g. "true_graph_0.false_graph_0".
+        graph_name: The name of the submodule. E.g. "true_graph_0".
+        graph: The ONNX graph at construction.
+        owned_graphs: The subgraphs owned by the current graph.
         lower: The lowering strategy to use.
         registry: The registry of all aten to ONNX decomposition functions.
 
     Returns:
         A mapping of FX node names to their produced ONNX ``Value``.
     """
-    scoped_node_name_to_values: list[dict[str, ir.Value | Sequence[ir.Value]]] = [{}]
+    node_name_to_values: dict[str, ir.Value | Sequence[ir.Value]] = {}
+    # The reason we need node_name_to_local_functions in addition to owned_graphs
+    # is because the get_attr nodes may assign a different name than the GraphModule name
+    # to the subgraph. This is not typical but is valid Python.
+    node_name_to_local_functions: dict[str, ir.Function] = {}
     constant_farm: dict[Any, ir.Value] = {}
     opset = _get_onnxscript_opset(registry.opset_version)
-    node_name_to_local_functions: dict[str, ir.Function] = {}
 
-    for name, module in graph_module.named_modules():
-        # The named modules are [<this module>, ...<all submodules>]
-
-    for node in graph_module.graph.nodes:
+    for node in fx_graph.nodes:
         logger.debug(
             "%s", (node.name, node.args, node.target, node.op, node.type, node.kwargs)
         )
@@ -785,7 +666,9 @@ def _add_nodes(
             elif node.op == "get_attr":
                 if hasattr(node, "graph"):
                     _handle_get_attr_node(
-                        node, node_name_to_local_functions=node_name_to_local_functions
+                        node,
+                        owned_graphs=owned_graphs,
+                        node_name_to_local_functions=node_name_to_local_functions,
                     )
         except Exception as e:
             raise _errors.ConversionError(
@@ -917,7 +800,7 @@ def exported_program_to_ir(
     exported_program: torch.export.ExportedProgram,
     *,
     registry: _registration.ONNXRegistry | None = None,
-    lower: Literal["at_conversion", "post_conversion", "none"] = "at_conversion",
+    lower: Literal["at_conversion", "none"] = "at_conversion",
 ) -> ir.Model:
     """Convert an exported program to an ONNX IR model.
 
@@ -928,7 +811,6 @@ def exported_program_to_ir(
         exported_program: The exported program to convert.
         lower: Whether to lower the graph to core ONNX operators.
             at_conversion: Lower whe translating the FX graph to ONNX IR.
-            post_conversion: Use an IR pass to lower the graph.
             none: Do not lower the graph.
         registry: The registry of all ONNX Script decomposition.
     """
@@ -963,11 +845,27 @@ def _prepare_exported_program_for_export(
     return exported_program
 
 
+def _get_scope_name(scoped_name: str) -> tuple[str, str]:
+    """Get the scope and name of a node.
+
+    Args:
+        scoped_name: The scoped name of the node.
+
+    Returns:
+        (scope, name)
+    """
+    if "." in scoped_name:
+        scope, name = scoped_name.rsplit(".", 1)
+    else:
+        scope, name = "", scoped_name
+    return scope, name
+
+
 def _exported_program_to_onnx_program(
     exported_program: torch.export.ExportedProgram,
     *,
     registry: _registration.ONNXRegistry,
-    lower: Literal["at_conversion", "post_conversion", "none"] = "at_conversion",
+    lower: Literal["at_conversion", "none"] = "at_conversion",
 ) -> _onnx_program.ONNXProgram:
     """Convert an exported program to an ONNX Program.
 
@@ -982,7 +880,6 @@ def _exported_program_to_onnx_program(
             should be the one that is after decompositions have been applied.
         lower: Whether to lower the graph to core ONNX operators.
             at_conversion: Lower whe translating the FX graph to ONNX IR.
-            post_conversion: Use an IR pass to lower the graph.
             none: Do not lower the graph.
         registry: The registry of all ONNX Script decomposition.
     """
@@ -991,9 +888,7 @@ def _exported_program_to_onnx_program(
             [],
             [],
             nodes=[],
-            opset_imports={
-                "": registry.opset_version,
-            },
+            # opset_imports set in _translate_fx_graph
             name="main_graph",
             metadata_props={
                 "pkg.torch.export.ExportedProgram.graph_signature": str(
@@ -1014,9 +909,53 @@ def _exported_program_to_onnx_program(
         model.opset_imports["pkg.torch.ops"] = _torch_version_integer()
     # NOTE: Function domains are added when translating nodes when lower="at_conversion"
 
+    # A dictionary storing the translated subgraphs as ONNX functions made available to outer graphs
+    # {<subgraph_scope>: {<subgraph_name>: <IR function>}}
+    scoped_subgraphs: dict[str, dict[str, ir.Function]] = {}
+    values = None
+
     # 1. Add all nodes to the graph and create a dictionary of values
-    scoped_node_name_to_ir_objects_mappings = _ScopedNodeNameToIrObjectsMappings
-    values = _add_nodes(exported_program.graph_module, model, lower=lower, registry=registry)
+    for name, module in reversed(
+        tuple(exported_program.graph_module.named_modules(remove_duplicate=False))
+    ):
+        module: torch.fx.GraphModule
+        # Reverse the order of the modules so that the innermost module is processed first
+        # and made available to the outer module
+        scope, subgraph_name = _get_scope_name(name)
+        owned_graphs = scoped_subgraphs.setdefault(scope, {})
+        fx_graph = module.graph
+        if name == "":
+            # Root graph
+            graph = model.graph
+        else:
+            function_name = name.replace(".", "__")
+            # Inputs and outputs will be created within _translate_fx_graph
+            # FIXME(justinchuby): Handle opset import
+            graph = ir.Function(
+                domain=_LOCAL_FUNCTION_DOMAIN,
+                name=function_name,
+                graph=ir.Graph((), (), nodes=()),
+                attributes=(),
+            )
+            owned_graphs[subgraph_name] = graph
+        values = _translate_fx_graph(
+            fx_graph,
+            model,
+            current_scope=scope,
+            graph_name=subgraph_name,
+            graph=graph,
+            owned_graphs=owned_graphs,
+            lower=lower,
+            registry=registry,
+        )
+
+    assert name == "", "The last module processed should be the root module"
+    assert values is not None
+
+    # Clear the input/output of the main graph and add them back in step 2-3
+    # using the more accurate graph signature
+    model.graph.inputs.clear()
+    model.graph.outputs.clear()
 
     # 2. Add user inputs and all parameters/buffers to the graph.
     # Since the node names and the tensor names are different, we need to rename
