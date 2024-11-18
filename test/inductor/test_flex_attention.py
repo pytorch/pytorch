@@ -1529,6 +1529,10 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     def test_multiple_mask_calls(self):
+        if TEST_WITH_ROCM:
+            self.skipTest(
+                "ROCM BUG SEE: https://github.com/pytorch/pytorch/issues/140855"
+            )
         # Create inputs
         query = torch.randn(
             (1, 4, 512, 64), dtype=torch.float32, device="cuda", requires_grad=True
