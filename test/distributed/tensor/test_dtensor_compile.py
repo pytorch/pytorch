@@ -39,9 +39,8 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
-    skipIfTorchDynamo,
     TEST_CUDA,
-    TEST_HPU,
+    skipIfTorchDynamo,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -52,7 +51,9 @@ from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils.checkpoint import checkpoint
+from torch.testing._internal.common_fsdp import get_devtype
 
+dev_type = torch.device(get_devtype())
 
 class SimpleModel(nn.Module):
     def __init__(self, device):
@@ -85,8 +86,7 @@ aot_eager_graph = aot_autograd(
     partition_fn=min_cut_rematerialization_partition,
 )
 
-device_type="hpu" if TEST_HPU else "cuda"
-@instantiate_parametrized_tests
+
 class TestDTensorCompile(torch._dynamo.test_case.TestCase):
     def setUp(self):
         super(
@@ -460,8 +460,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         self.assertEqual(
             tmp_dt._local_tensor.stride(), tmp_dt_fake._local_tensor.stride()
         )
-    
-    @unittest.skipIf(TEST_HPU, "Inductor not supported on HPU")
+
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_dtensor_contiguous_dtensor_noncontiguous_local_as_tangent(self):
         # Partial -> Shard on an unbalanced tensor results in:
@@ -538,7 +537,6 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         out_test = opt_mod(dt)
         self.assertEqual(out_ref, out_test)
 
-    @unittest.skipIf(TEST_HPU, "Inductor not supported on HPU")
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_dtensor_different_gradient_placement(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
@@ -897,7 +895,7 @@ class TestDTensorCompileE2E(DTensorTestBase):
 
         # 2-D mesh is [dp, tp]
         twod_mesh = init_device_mesh(
-            device_type,
+            "cuda",
             (data_parallel_size, self.world_size // data_parallel_size),
             mesh_dim_names=["dp", "tp"],
         )
@@ -910,10 +908,9 @@ class TestDTensorCompileE2E(DTensorTestBase):
             "mlp_1.net2": RowwiseParallel(),
         }
         tp_model = parallelize_module(model, twod_mesh["tp"], parallelize_plan)
-        device_id = "hpu:0" if TEST_HPU else self.rank
         eager_2d = FSDP(
             tp_model,
-            device_id=device_id,
+            device_id=dev_type.type,
             use_orig_params=True,
             device_mesh=twod_mesh["dp"],
         )
@@ -925,7 +922,7 @@ class TestDTensorCompileE2E(DTensorTestBase):
         )
         fsdp_2d = FSDP(
             tp_model2,
-            device_id=device_id,
+            device_id=dev_type.type,
             use_orig_params=True,
             device_mesh=twod_mesh["dp"],
         )
@@ -948,7 +945,7 @@ class TestDTensorCompileE2E(DTensorTestBase):
 
         # 2-D mesh is [dp, tp]
         mesh_2d = init_device_mesh(
-            device_type, mesh_shape=(dp_degree, tp_degree), mesh_dim_names=("dp", "tp")
+            "cuda", mesh_shape=(dp_degree, tp_degree), mesh_dim_names=("dp", "tp")
         )
 
         inp = torch.rand(20, 10, device=self.device_type)
@@ -992,7 +989,7 @@ class TestDTensorCompileE2E(DTensorTestBase):
     @with_comms
     @skip_if_lt_x_gpu(4)
     def test_compile_dtensor_redistribute_backward(self):
-        mesh = DeviceMesh(device_type=device_type, mesh=torch.arange(self.world_size))
+        mesh = DeviceMesh(device_type="cuda", mesh=torch.arange(self.world_size))
 
         def fn(x, y):
             dt = DTensor.from_local(x.reshape(2, 4), mesh, [Shard(0)], run_check=False)
