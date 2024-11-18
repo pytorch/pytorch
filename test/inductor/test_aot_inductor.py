@@ -2934,6 +2934,20 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(m, args)
 
+    def test_custom_op_add_output_path(self) -> None:
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.ops.aoti_custom_ops.custom_add(x, y)
+
+        m = M().to(device=self.device)
+        args = (
+            torch.randn(3, 3, device=self.device),
+            torch.randn(3, 3, device=self.device),
+        )
+        with config.patch("aot_inductor.output_path", "model.so"):
+            with self.assertRaises(Exception):
+                self.check_model(m, args)
+
     def test_custom_op_all_inputs(self) -> None:
         class MyModel(torch.nn.Module):
             # pyre-fixme[3]: Return type must be annotated.
@@ -3932,7 +3946,7 @@ class AOTInductorTestsTemplate:
 
             def forward(self, x):
                 _x, _i = torch.unique(x, sorted=True, return_inverse=True)
-                _x = _x.clone().detach()
+                _x = _x.detach().clone()
                 return self.relu(_x), _i
 
         example_inputs = (torch.randn(8, device=self.device),)
