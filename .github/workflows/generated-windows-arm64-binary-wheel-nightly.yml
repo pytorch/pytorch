@@ -18,7 +18,6 @@ on:
   workflow_dispatch:
 
 env:
-  # Needed for conda builds
   BUILD_ENVIRONMENT: windows-arm64-binary-wheel
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -28,13 +27,10 @@ env:
   PYTORCH_ROOT: /pytorch
   DOWNLOADS_DIR: c:\temp\downloads
   DEPENDENCIES_DIR: c:\temp\dependencies
-  MSVC_VERSION : '14.36'
-  PYTORCH_SOURCES_DIR: src
-  ENABLE_BUILD_WHEEL: 1
   ENABLE_APL: 1
-concurrency:
-  group: windows-arm64-binary-wheel-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
-  cancel-in-progress: true
+  MSVC_VERSION : '14.36'
+  BUILD_TYPE: Release
+  PYTORCH_SOURCES_DIR: src
 
 # dummy comment
 
@@ -75,26 +71,26 @@ jobs:
         shell: cmd
         run: |
           "builder/windows/arm64/bootstrap_git.bat"
-      - name: Verify Git installation
+      - name: Bootstrap Python
         shell: cmd
         run: |
-          git --version
-      # - name: Bootstrap Python
-      #   shell: cmd
-      #   run: |
-      #     "builder/windows/arm64/bootstrap_python.bat"
-      # - name: Bootstrap Build Tools
-      #   shell: cmd
-      #   run: |
-      #     "builder/windows/arm64/bootstrap_buildtools.bat"
-      # - name: Bootstrap APL
-      #   shell: cmd
-      #   run: |
-      #     "builder/windows/arm64/bootstrap_apl.bat"
-      # - name: Bootstrap Rust
-      #   shell: cmd
-      #   run: |
-      #     "builder/windows/arm64/bootstrap_rust.bat"
+          "builder/windows/arm64/bootstrap_python.bat"
+      - name: Bootstrap Build Tools
+        shell: cmd
+        run: |
+          "builder/windows/arm64/bootstrap_buildtools.bat"
+      - name: Bootstrap APL
+        shell: cmd
+        run: |
+          "builder/windows/arm64/bootstrap_apl.bat"
+      - name: Bootstrap Rust
+        shell: cmd
+        run: |
+          "builder/windows/arm64/bootstrap_rust.bat"
+      - name: Bootstrap sccache
+        shell: cmd
+        run: |
+          "builder/windows/arm64/bootstrap_sccache.bat"
       - name: Git checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -102,3 +98,7 @@ jobs:
           ref: "nightly-for-win-arm64"
           path: "pytorch"
           submodules: recursive
+      - name: Build PyTorch
+        shell: cmd
+        run: |
+          "builder/windows/arm64/build_pytorch.bat"
