@@ -148,13 +148,16 @@ class TestDynamoTimed(TestCase):
         self.assertExpectedInline(
             pprint.pformat(utils.compilation_time_metrics),
             """\
-{'GraphLowering.compile_to_module': [0.0, 0.0],
+{'GraphLowering.codegen': [0.0, 0.0],
+ 'GraphLowering.compile_to_fn': [0.0, 0.0],
+ 'GraphLowering.compile_to_module': [0.0, 0.0],
  'GraphLowering.run': [0.0, 0.0],
  'OutputGraph.call_user_compiler': [0.0],
  'PyCodeCache.load_by_key_path': [0.0, 0.0],
  'PythonWrapperCodegen.generate': [0.0, 0.0],
  'Scheduler.__init__': [0.0, 0.0],
  'Scheduler.codegen': [0.0, 0.0],
+ 'Scheduler.fused_nodes': [0.0, 0.0],
  '_compile.compile_inner': [0.0],
  '_recursive_joint_graph_passes': [0.0],
  '_recursive_post_grad_passes': [0.0, 0.0],
