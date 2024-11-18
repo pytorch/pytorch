@@ -36,6 +36,7 @@ from torch.export.graph_signature import (
     OutputKind,
     OutputSpec,
     SymIntArgument,
+    SymBoolArgument,
     TensorArgument,
 )
 from torch.fx import traceback as fx_traceback
@@ -275,7 +276,7 @@ def aot_compile(
     remove_runtime_assertions: bool = False,
     disable_constraint_solver: bool = False,
     same_signature: bool = True,
-) -> str:
+) -> Union[List[str], str]:
     """
     Note: this function is not stable yet
 

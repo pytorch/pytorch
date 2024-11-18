@@ -23,6 +23,6 @@ Tensor flatten_indices_cuda_kernel(const Tensor& indices, IntArrayRef size) {
 
 }
 
-REGISTER_CUDA_DISPATCH(flatten_indices_stub, &flatten_indices_cuda_kernel);
+REGISTER_CUDA_DISPATCH(flatten_indices_stub, &flatten_indices_cuda_kernel)
 
 } // namespace at::native
