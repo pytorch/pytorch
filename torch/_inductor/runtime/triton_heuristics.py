@@ -63,6 +63,13 @@ if triton is not None:
     from . import triton_helpers
 
     try:
+        from triton.runtime.autotuner import PTXASError
+    except ImportError:
+
+        class PTXASError(Exception):  # type: ignore[no-redef]
+            pass
+
+    try:
         from triton.compiler.compiler import ASTSource
     except ImportError:
         ASTSource = None
@@ -74,9 +81,14 @@ if triton is not None:
 else:
     from types import ModuleType
 
+    class OutOfResources(Exception):  # type: ignore[no-redef]
+        pass
+
+    class PTXASError(Exception):  # type: ignore[no-redef]
+        pass
+
     Config = object
     KernelInterface = object
-    OutOfResources = object
     ASTSource = None
     GPUTarget = None
     triton_helpers = ModuleType("triton_helpers")
@@ -275,11 +287,12 @@ class CachingAutotuner(KernelInterface):
                     compiled_binary, launcher = self._precompile_config(
                         c, warm_cache_only
                     )
-                except OutOfResources as e:
+                except (OutOfResources, PTXASError) as e:
                     if len(self.configs) == 1:
                         # There are no valid Triton configs
                         raise e
-                    # Skip the config if we run out of resource
+                    # Skip the config if we run out of
+                    # resources or into a ptxas error
                     continue
                 self.launchers.append(launcher)
                 compiled_binaries.append(compiled_binary)
@@ -1841,29 +1854,42 @@ def template(num_stages, num_warps, triton_meta, filename=None, inductor_meta=No
     )
 
 
+def _pop_config_kwargs(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract triton.Config options that should become kwargs"""
+    popped = {}
+    for key in ("num_warps", "num_stages", "num_ctas", "maxnreg"):
+        val = config.pop(key, None)
+        if val is not None:
+            popped[key] = val
+    return popped
+
+
+def fixed_config(config, filename, triton_meta, inductor_meta):
+    """
+    Used when the configuration is already decided at compile time
+    """
+    config = {**config}
+    return cached_autotune(
+        None,
+        [triton.Config(config, **_pop_config_kwargs(config))],
+        triton_meta=triton_meta,
+        inductor_meta=inductor_meta,
+        heuristic_type=HeuristicType.FIXED,
+        filename=filename,
+    )
+
+
 def user_autotune(
     configs, triton_meta, filename=None, inductor_meta=None, custom_kernel=False
 ):
     """
     Compile a user defined triton kernel
     """
-    defaults = inspect.signature(triton.Config).parameters
-    default_num_stages = defaults["num_stages"].default
-    default_num_warps = defaults["num_warps"].default
-
     if len(configs) == 0:
-        configs = [
-            triton.Config(
-                {}, num_stages=default_num_stages, num_warps=default_num_warps
-            )
-        ]
+        configs = [triton.Config({})]
     else:
         configs = [
-            triton.Config(
-                c.get("kwargs", {}),
-                num_stages=c.get("num_stages", default_num_stages),
-                num_warps=c.get("num_warps", default_num_warps),
-            )
+            triton.Config(c.get("kwargs", {}), **_pop_config_kwargs({**c}))
             for c in configs
         ]
     return cached_autotune(
