@@ -445,7 +445,7 @@ class IRNode:
 
     def has_tensor_output(self) -> bool:
         """True for single tensor output (excludes MultiOutput)"""
-        return isinstance(self.get_output_spec(), Layout)
+        return isinstance(self.maybe_get_output_spec(), Layout)
 
     def get_size(self) -> Sequence[Expr]:
         raise NotImplementedError(f"get_size() is not implemented by {type(self)}!")
