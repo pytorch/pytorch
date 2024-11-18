@@ -69,7 +69,7 @@ def mlp_linear_silu_linear_mul(
 
     assert len(choices) != 0
     result = autotune_select_algorithm(
-        "linear_unary",
+        "mlp_silu_mul",
         choices,
         input_nodes,
         layout,
