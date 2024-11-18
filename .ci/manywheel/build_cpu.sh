@@ -63,32 +63,18 @@ DEPS_SONAME=(
 if [[ "$GPU_ARCH_TYPE" == "xpu" ]]; then
     echo "Bundling with xpu support package libs."
     DEPS_LIST+=(
-        "/opt/intel/oneapi/compiler/latest/lib/libsycl.so.8"
         "/opt/intel/oneapi/compiler/latest/lib/libOpenCL.so.1"
-        "/opt/intel/oneapi/compiler/latest/lib/libur_loader.so.0"
-        "/opt/intel/oneapi/compiler/latest/lib/libur_adapter_level_zero.so.0"
-        "/opt/intel/oneapi/compiler/latest/lib/libur_adapter_opencl.so.0"
         "/opt/intel/oneapi/compiler/latest/lib/libsvml.so"
         "/opt/intel/oneapi/compiler/latest/lib/libirng.so"
         "/opt/intel/oneapi/compiler/latest/lib/libimf.so"
         "/opt/intel/oneapi/compiler/latest/lib/libintlc.so.5"
-        "/opt/intel/oneapi/pti/latest/lib/libpti_view.so.0.10"
-        "/opt/intel/oneapi/umf/latest/lib/libumf.so.0"
-        "/opt/intel/oneapi/tcm/latest/lib/libhwloc.so.15"
     )
     DEPS_SONAME+=(
-        "libsycl.so.8"
         "libOpenCL.so.1"
-        "libur_loader.so.0"
-        "libur_adapter_level_zero.so.0"
-        "libur_adapter_opencl.so.0"
         "libsvml.so"
         "libirng.so"
         "libimf.so"
         "libintlc.so.5"
-        "libpti_view.so.0.10"
-        "libumf.so.0"
-        "libhwloc.so.15"
     )
 fi
 
