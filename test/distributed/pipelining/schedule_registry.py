@@ -172,3 +172,50 @@ class ScheduleWithW(PipelineScheduleMulti):
                 _Action(1, W, 1),
             ],
         }
+
+
+class ScheduleWithReorderedB(PipelineScheduleMulti):
+    n_stages = 4
+    num_microbatches = 2
+    rank_stages = {
+        0: [0, 2],
+        1: [1, 3],
+    }
+
+    def __init__(
+        self,
+        stages: List[_PipelineStageBase],
+        n_microbatches: int,
+        loss_fn: Optional[Callable] = None,
+    ):
+        super().__init__(
+            stages=stages,
+            n_microbatches=n_microbatches,
+            loss_fn=loss_fn,
+        )
+        # Go through two microbatches
+        self.pipeline_order = {
+            0: [
+                _Action(0, F, 0),
+                _Action(0, F, 1),
+                _Action(2, F, 0),
+                _Action(2, F, 1),
+                None,
+                None,
+                _Action(2, B, 0),
+                _Action(2, B, 1),
+                _Action(0, B, 0),
+                _Action(0, B, 1),
+            ],
+            1: [
+                None,
+                _Action(1, F, 0),
+                _Action(1, F, 1),
+                _Action(3, F, 0),
+                _Action(3, F, 1),
+                _Action(3, B, 0),
+                _Action(3, B, 1),
+                _Action(1, B, 0),
+                _Action(1, B, 1),
+            ],
+        }

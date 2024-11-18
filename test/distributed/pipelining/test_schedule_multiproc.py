@@ -7,7 +7,12 @@ import sys
 import tempfile
 
 from model_registry import ModelWithKwargs, MultiMLP, MultiMLPWithDw
-from schedule_registry import ScheduleUnbalanced, ScheduleVShaped, ScheduleWithW
+from schedule_registry import (
+    ScheduleUnbalanced,
+    ScheduleVShaped,
+    ScheduleWithReorderedB,
+    ScheduleWithW,
+)
 
 import torch
 import torch.distributed as dist
@@ -362,7 +367,12 @@ class ScheduleTest(MultiProcContinousTest):
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     @parametrize(
         "ScheduleClass",
-        [ScheduleInterleaved1F1B, ScheduleLoopedBFS, ScheduleInterleavedZeroBubble],
+        [
+            ScheduleInterleaved1F1B,
+            ScheduleLoopedBFS,
+            ScheduleInterleavedZeroBubble,
+            ScheduleWithReorderedB,
+        ],
     )
     @parametrize("use_new_runtime", [False, True])
     def test_grad_with_manual_interleaved(self, ScheduleClass, use_new_runtime):
