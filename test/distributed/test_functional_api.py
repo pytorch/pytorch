@@ -574,12 +574,12 @@ class TestCollectivesWithDistributedBackend(DistributedTestBase):
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @requires_nccl()
     @with_comms()
-    def test_tracing(self):
+    def test_tracing(self, device):
         def allreduce(t, pg):
             return ft_c.all_reduce(t, "sum", pg)
 
         compiled_allreduce = torch.compile(allreduce, fullgraph=True)
-        compiled_allreduce(torch.randn(8, device=self.device), self.process_group)
+        compiled_allreduce(torch.randn(8, device=device), self.process_group)
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_tracing_with_fakepg(self, device):
