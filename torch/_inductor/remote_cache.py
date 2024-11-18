@@ -3,6 +3,7 @@ from __future__ import annotations
 import atexit
 import collections
 import dataclasses
+import functools
 import json
 import logging
 import os
@@ -37,6 +38,22 @@ else:
 
 _T = TypeVar("_T")
 _U = TypeVar("_U")
+
+
+remote_fx_cache_get_timed = functools.partial(
+    dynamo_timed,
+    "FbRemoteFxGraphCache.get",
+    phase_name="remote_fx_graph_cache_get",
+    log_pt2_compile_event=False,
+    fwd_only=False,
+)
+remote_fx_cache_put_timed = functools.partial(
+    dynamo_timed,
+    "FbRemoteFxGraphCache.put",
+    phase_name="remote_fx_graph_cache_put",
+    log_pt2_compile_event=False,
+    fwd_only=False,
+)
 
 
 class RemoteCacheBackend(Generic[_T]):
@@ -145,39 +162,29 @@ class RemoteCache(Generic[_T]):
     # See if the cache contains `key`. Returns `None` if the value is not
     # present in the cache.
     def get(self, key: str) -> Optional[_T]:
-        with dynamo_timed(
-            "RemoteFxGraphCache.get",
-            phase_name="remote_fx_graph_cache_get",
-            fwd_only=False,
-        ):
-            sample = self._create_sample()
-            try:
-                result = self._get(key, sample)
-                cache_stats.get(type(self).__name__, result)
-            except Exception:
-                cache_stats.exception(type(self).__name__)
-                raise
-            self._log_sample(sample)
-            return result
+        sample = self._create_sample()
+        try:
+            result = self._get(key, sample)
+            cache_stats.get(type(self).__name__, result)
+        except Exception:
+            cache_stats.exception(type(self).__name__)
+            raise
+        self._log_sample(sample)
+        return result
 
     # Add `value` to the cache with the key `key`. Note that `None` is not a
     # valid value even if _T supports it (because you can't tell the difference
     # between `None` and a missing cache entry).
     def put(self, key: str, value: _T) -> None:
-        with dynamo_timed(
-            "RemoteFxGraphCache.put",
-            phase_name="remote_fx_graph_cache_put",
-            fwd_only=False,
-        ):
-            assert value is not None
-            sample = self._create_sample()
-            try:
-                self._put(key, value, sample)
-                cache_stats.put(type(self).__name__)
-            except Exception:
-                cache_stats.exception(type(self).__name__)
-                raise
-            self._log_sample(sample)
+        assert value is not None
+        sample = self._create_sample()
+        try:
+            self._put(key, value, sample)
+            cache_stats.put(type(self).__name__)
+        except Exception:
+            cache_stats.exception(type(self).__name__)
+            raise
+        self._log_sample(sample)
 
     # Used to convert data from the cache into structured data.
     def _decode(self, data: _U, sample: Optional[Sample]) -> _T:  # type: ignore[override]

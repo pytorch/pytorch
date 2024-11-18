@@ -43,7 +43,7 @@ class SourceRangeSerializer {
   int64_t store_text_and_get_index(const std::string& text_view);
 
   std::vector<c10::IValue> texts_;
-  std::unordered_map<c10::string_view, int64_t> text_to_idx_;
+  std::unordered_map<std::string_view, int64_t> text_to_idx_;
 };
 
 SourceRange SourceRangeDeserializer::deserialize(const c10::IValue& iv) {

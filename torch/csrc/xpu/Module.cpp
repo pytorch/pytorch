@@ -306,6 +306,11 @@ static void registerXpuDeviceProperties(PyObject* module) {
   auto gpu_subslice_count = [](const DeviceProp& prop) {
     return (prop.gpu_eu_count / prop.gpu_eu_count_per_subslice);
   };
+#if SYCL_COMPILER_VERSION >= 20250000
+  auto get_device_architecture = [](const DeviceProp& prop) {
+    return static_cast<int64_t>(prop.architecture);
+  };
+#endif
   auto m = py::handle(module).cast<py::module>();
 
 #define DEFINE_READONLY_MEMBER(member) \
@@ -334,6 +339,9 @@ static void registerXpuDeviceProperties(PyObject* module) {
   THXP_FORALL_DEVICE_PROPERTIES(DEFINE_READONLY_MEMBER)
       .def_readonly("total_memory", &DeviceProp::global_mem_size)
       .def_property_readonly("gpu_subslice_count", gpu_subslice_count)
+#if SYCL_COMPILER_VERSION >= 20250000
+      .def_property_readonly("architecture", get_device_architecture)
+#endif
       .def_property_readonly("type", get_device_type)
       .def(
           "__repr__",
@@ -343,8 +351,11 @@ static void registerXpuDeviceProperties(PyObject* module) {
                    << "', platform_name='" << prop.platform_name << "', type='"
                    << get_device_type(prop) << "', driver_version='"
                    << prop.driver_version << "', total_memory="
-                   << prop.global_mem_size / (1024ull * 1024)
-                   << "MB, max_compute_units=" << prop.max_compute_units
+                   << prop.global_mem_size / (1024ull * 1024) << "MB"
+#if SYCL_COMPILER_VERSION >= 20250000
+                   << ", architecture=" << get_device_architecture(prop)
+#endif
+                   << ", max_compute_units=" << prop.max_compute_units
                    << ", gpu_eu_count=" << prop.gpu_eu_count
                    << ", gpu_subslice_count=" << gpu_subslice_count(prop)
                    << ", max_work_group_size=" << prop.max_work_group_size
