@@ -1057,12 +1057,13 @@ This class does not support ``__members__`` property.)");
           py::arg("stride"),
           py::arg("dtype"),
           py::arg("device"),
-          py::arg("group_name"),
+          py::arg("group_name") = py::none(),
           py::arg("alloc_id") = py::none())
-      .def_static("rendezvous", &::c10d::symmetric_memory::rendezvous)
       .def_static(
-          "get_symmetric_memory",
-          &::c10d::symmetric_memory::get_symmetric_memory)
+          "rendezvous",
+          &::c10d::symmetric_memory::rendezvous,
+          py::arg("tensor"),
+          py::arg("group_name") = py::none())
       .def_static(
           "has_multicast_support",
           &::c10d::symmetric_memory::has_multicast_support)
