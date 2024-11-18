@@ -17,31 +17,7 @@ name: !{{ build_environment }}
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-          echo "c:/temp/dependencies/git/cmd" >> "${GITHUB_PATH}"
-          echo "c:/temp/dependencies/git/bin" >> "${GITHUB_PATH}"
 {%- endmacro %}
-
-{%- macro checkout(submodules="recursive", deep_clone=True, directory="", repository="pytorch/pytorch", branch="", checkout_pr_head=True) -%}
-      - name: Checkout !{{ 'PyTorch' if repository == "pytorch/pytorch" else repository }}
-        uses: malfet/checkout@silent-checkout
-        with:
-      {%- if branch %}
-          ref: !{{ branch }}
-      {%- elif checkout_pr_head %}
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-      {%- endif %}
-      {%- if deep_clone %}
-          # deep clone, to allow use of git merge-base
-          fetch-depth: 0
-      {%- endif %}
-      {%- if repository != "pytorch/pytorch" %}
-          repository: !{{ repository }}
-      {%- endif %}
-      {%- if directory %}
-          path: !{{ directory }}
-      {%- endif %}
-          quiet-checkout: true
-{%- endmacro -%}
 
 on:
   push:
@@ -105,8 +81,8 @@ jobs:
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: !{{ config.pytorch_extra_install_requirements }}
     {%- endif %}
     steps:
-      !{{ checkout(deep_clone=False, directory="builder", repository="ozanMSFT/builder", branch="users/ozanMSFT/win-arm64") }}
-      - name: Install Git
+      !{{ common.checkout(deep_clone=False, directory="builder", repository="ozanMSFT/builder", branch="users/ozanMSFT/win-arm64") }}
+      - name: Bootstrap Git
         shell: cmd
         run: |
           "builder/windows/arm64/bootstrap_git.bat"

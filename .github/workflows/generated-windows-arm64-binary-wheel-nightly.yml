@@ -3,6 +3,7 @@
 # Template is at:    .github/templates/windows_arm64_binary_build_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
 name: windows-arm64-binary-wheel
+
 on:
   push:
     # NOTE: Meta Employees can trigger new nightlies using: https://fburl.com/trigger_pytorch_nightly_build
@@ -68,10 +69,16 @@ jobs:
         uses: malfet/checkout@silent-checkout
         with:
           ref: users/ozanMSFT/win-arm64
+          submodules: recursive
           repository: ozanMSFT/builder
           path: builder
           quiet-checkout: true
-      - name: Install Git
+      - name: Clean ozanMSFT/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
+      - name: Bootstrap Git
         shell: cmd
         run: |
           "builder/windows/arm64/bootstrap_git.bat"
