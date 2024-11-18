@@ -1003,18 +1003,20 @@ class CppVecOverrides(CppOverrides):
                 if scalars and vectors:
                     assert isinstance(V.kernel, CppVecKernel)
                     new_args = [
-                        V.kernel.broadcast(new_arg)
-                        if (
-                            isinstance(new_arg, CppCSEVariable)
-                            and not new_arg.is_vec
-                            and func
-                            not in [
-                                CppVecOverrides.rand,
-                                CppVecOverrides.randn,
-                                CppVecOverrides.randint64,
-                            ]
+                        (
+                            V.kernel.broadcast(new_arg)
+                            if (
+                                isinstance(new_arg, CppCSEVariable)
+                                and not new_arg.is_vec
+                                and func
+                                not in [
+                                    CppVecOverrides.rand,
+                                    CppVecOverrides.randn,
+                                    CppVecOverrides.randint64,
+                                ]
+                            )
+                            else new_arg
                         )
-                        else new_arg
                         for new_arg in new_args
                     ]
 
@@ -3968,11 +3970,34 @@ class CppScheduling(BaseScheduling):
 
                 ref_node = node2 if len(vars1) < len(vars2) else node1
 
-                extra_indexing_constraints = get_indexing_ranges_exprs(ref_node)
+                ref_indexing_constraints = get_indexing_ranges_exprs(ref_node)
 
                 node_to_recomp.recompute_size_and_body(
-                    extra_indexing_constraints=extra_indexing_constraints
+                    extra_indexing_constraints=ref_indexing_constraints
                 )
+
+                _, (vars1, _) = node1.group
+                _, (vars2, _) = node2.group
+
+                if vars1 == vars2:
+                    return FusedSchedulerNode.fuse(node1, node2)
+
+                # recompute ref_node if its ranges are also changed
+                node_to_recomp_indexing_constraints = get_indexing_ranges_exprs(
+                    node_to_recomp
+                )
+                if isinstance(ref_node, SchedulerNode):
+                    ref_node.recompute_size_and_body(
+                        extra_indexing_constraints=node_to_recomp_indexing_constraints
+                    )
+                else:
+                    assert isinstance(ref_node, FusedSchedulerNode)
+                    for snode in ref_node.snodes:
+                        assert isinstance(snode, SchedulerNode)
+                        snode.recompute_size_and_body(
+                            extra_indexing_constraints=node_to_recomp_indexing_constraints
+                        )
+                    ref_node = FusedSchedulerNode(ref_node.scheduler, ref_node.snodes)
 
                 _, (vars1, _) = node1.group
                 _, (vars2, _) = node2.group
@@ -4047,7 +4072,7 @@ class CppScheduling(BaseScheduling):
         else:
             assert isinstance(ref_node, SchedulerNode)
             assert isinstance(ref_node.node, ir.ComputedBuffer)
-            ranges1 = ref_node.node.data.get_size()
+            ranges1 = ref_node.node.data.get_size()  # type: ignore[assignment]
 
         if ranges1 != ranges2:
             return False
