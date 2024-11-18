@@ -1363,14 +1363,14 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
             with self.assertRaisesRegex(RuntimeError, "Local rank at save time was"):
                 with load_with_process_group(pg):
                     # ShardedTensor weights_only is already tested in TestFSDPStateDict.test_torch_save_load
-                    state_dict_deser = torch.load(buffer, weights_only=False)
+                    torch.load(buffer, weights_only=False)
         else:
             with self.assertRaisesRegex(
                 RuntimeError, "Local world size at save time was"
             ):
                 with load_with_process_group(pg):
                     # ShardedTensor weights_only is already tested in TestFSDPStateDict.test_torch_save_load
-                    state_dict_deser = torch.load(buffer, weights_only=False)
+                    torch.load(buffer, weights_only=False)
 
         dist.destroy_process_group()
         buffer.seek(0)
