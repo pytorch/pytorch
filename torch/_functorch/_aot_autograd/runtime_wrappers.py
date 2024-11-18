@@ -1731,6 +1731,19 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 return CompiledFunctionBackward.apply(*all_args)
 
             @staticmethod
+            def _raise_if_functorch_active():
+                # not ideal but prevent the user from seeing a nasty traceback - See #138422
+                stack = torch._C._functorch.peek_interpreter_stack()
+                torch._check(
+                    stack is None,
+                    lambda: (
+                        "It looks like you're trying to call a compiled backward function within vmap/grad/vjp, "
+                        "which isn't supported. Try wrapping vmap inside torch.compile, or skip compiling the "
+                        "backward function."
+                    ),
+                )
+
+            @staticmethod
             def _backward_prologue(ctx, *flat_args):
                 # Calling convention: we expect a grad_out passed to the backward:
                 # - for every output of the fw that does *not* alias an input or graph intermediate
@@ -1741,6 +1754,8 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 # - updated inputs due to metadata-only mutations.
                 # We need to return them in the forward, but ensure that they all do not get gradients in the backward,
                 # and we filter them out here before passing the remaining grad_outputs into the compiled backward.
+                CompiledFunction._raise_if_functorch_active()
+
                 num_intermediate_bases = (
                     CompiledFunction.metadata.num_intermediate_bases
                 )
@@ -2030,22 +2045,6 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                             "donated buffer."
                         ),
                     )
-
-                # not ideal but prevent the user from seeing a nasty traceback - See #138422
-                stack = torch._C._functorch.peek_interpreter_stack()
-                forbidden_keys = (
-                    torch._C._functorch.TransformType.Vmap,
-                    torch._C._functorch.TransformType.Grad,
-                    torch._C._functorch.TransformType.Jvp,
-                )
-                torch._check(
-                    not (stack is not None and stack.key() in forbidden_keys),
-                    lambda: (
-                        "It looks like you're trying to call a compiled backward function within vmap/grad/vjp, "
-                        "which isn't supported. Try wrapping vmap inside torch.compile, or skip compiling the "
-                        "backward function."
-                    ),
-                )
 
                 out = call_func_at_runtime_with_args(
                     CompiledFunction.compiled_bw,
