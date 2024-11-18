@@ -9439,6 +9439,34 @@ def ___make_guard_fn():
         self.assertEqual(eager, compiled)
         self.assertEqual(counter.frame_count, 0)
 
+    # just to be sure in case anyone tries to run this in older versions of Python
+    @unittest.skipIf(sys.version_info < (3, 7), "Made default on Python 3.7")
+    def test_pep0479_convert_stopiteration(self):
+        # https://peps.python.org/pep-0479/
+        def generator_with_stop_iteration():
+            yield 1
+            # Explicitly raising StopIteration inside the generator
+            raise StopIteration("StopIteration raised within generator")
+            yield 2  # This should never be reached
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            try:
+                # Try to consume the generator
+                gen = generator_with_stop_iteration()
+                next(gen)
+                next(gen)
+            except RuntimeError as e:
+                # Check that StopIteration was converted to RuntimeError
+                # See STOPITERATION_ERROR opcode in symbolic_convert.py
+                return 100
+            except StopIteration:
+                return 200
+
+        t = torch.randn(2)
+        y = fn(t)
+        self.assertEqual(y, 100)
+
     def test_yield_send_to_subgenerator_graph_break(self):
         def subgenerator(tensor):
             multiplier = yield
