@@ -4644,7 +4644,10 @@ class ShapeEnv:
         # tensors that never actually become graph arguments (they are
         # pruned).  In this case, only Dynamo knows about these arguments.
         def track_symint(
-            source: Source, val: Union[SymInt, int], constraint: DimConstraint = None
+            source: Source,
+            val: Union[SymInt, int],
+            constraint: DimConstraint = None,
+            source_to_symbol_cache: Optional[Dict[str, sympy.Expr]] = None,
         ) -> None:
             log.debug("track_symint %s %s %s", LazyString(source.name), val, constraint)
             assert not isinstance(val, SymInt) or is_symbolic(val)
@@ -4717,6 +4720,24 @@ class ShapeEnv:
                         constraint_violated = True
                 if constraint_violated:
                     assert constraint is not None
+
+                    def hint_specialization() -> str:
+                        if (
+                            source_to_symbol_cache
+                            and self.guards
+                            and self._debug_name(source) in source_to_symbol_cache
+                        ):
+                            result = (
+                                "Specialization may came from the following guards:"
+                            )
+                            symbol = source_to_symbol_cache[self._debug_name(source)]
+                            # print every guard that involved the symbol
+                            for g in self.guards:
+                                if symbol in g.expr.free_symbols:
+                                    result += f"\n {g.expr} {str(g.sloc)}"
+                            return result
+                        return ""
+
                     var_with_range = self._render_range_for_constraint_violation(
                         source, constraint
                     )
@@ -4724,8 +4745,12 @@ class ShapeEnv:
                         f"Not all values of {var_with_range} are valid because "
                         f"{self._debug_name(source)} was inferred to be a constant ({val})."
                     )
+
                     record_constraint_violation(
-                        constraint.warn_only, self._debug_name(source), msg
+                        constraint.warn_only,
+                        self._debug_name(source),
+                        msg,
+                        hint_specialization,
                     )
 
         def track_symfloat(source: Source, val: Union[float, SymFloat]) -> None:
@@ -4787,6 +4812,9 @@ class ShapeEnv:
                     (source, t, context.constraint_sizes, context.constraint_strides)  # type: ignore[attr-defined]
                 ]
 
+            source_to_symbol_cache = context.shape_env_to_source_to_symbol_cache[  # type: ignore[attr-defined]
+                id(self)
+            ]
             for (
                 src,
                 curr_t,
@@ -4798,18 +4826,33 @@ class ShapeEnv:
                         property_source = TensorPropertySource(
                             src, TensorProperty.SIZE, i
                         )
-                        track_symint(property_source, ss, constraint_size[i])
+                        track_symint(
+                            property_source,
+                            ss,
+                            constraint_size[i],
+                            source_to_symbol_cache,
+                        )
                 else:
                     for i, ss in enumerate(curr_t.size()):
                         property_source = TensorPropertySource(
                             src, TensorProperty.SIZE, i
                         )
-                        track_symint(property_source, ss, constraint_size[i])
+                        track_symint(
+                            property_source,
+                            ss,
+                            constraint_size[i],
+                            source_to_symbol_cache,
+                        )
                     for i, ss in enumerate(curr_t.stride()):
                         property_source = TensorPropertySource(
                             src, TensorProperty.STRIDE, i
                         )
-                        track_symint(property_source, ss, constraint_stride[i])
+                        track_symint(
+                            property_source,
+                            ss,
+                            constraint_stride[i],
+                            source_to_symbol_cache,
+                        )
                     track_symint(
                         TensorPropertySource(src, TensorProperty.STORAGE_OFFSET),
                         curr_t.storage_offset(),
