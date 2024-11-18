@@ -1150,11 +1150,10 @@ def _compile(
             }
             metrics_context.update_outer(metrics)
             torch._dynamo.callback_handler.run_end_callbacks()
+            chromium_event_log.log_event_end(
+                "dynamo", time.time_ns(), {}, chromium_start_time, True
+            )
             # === END WARNING WARNING WARNING ===
-
-    chromium_event_log.log_event_end(
-        "dynamo", time.time_ns(), {}, chromium_start_time, True
-    )
 
 
 class ConvertFrame:
