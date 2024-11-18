@@ -584,6 +584,19 @@ class TensorVariable(VariableTracker):
             except TypeError as e:
                 unimplemented(f"unhandled args for {name}: {e}")        
 
+        from .builder import wrap_fx_proxy
+
+        try:
+            return wrap_fx_proxy(
+                tx,
+                tx.output.create_proxy(
+                    "call_method",
+                    name,
+                    *proxy_args_kwargs([self, *args], kwargs),
+                ),
+            )
+        except TypeError as e:
+            unimplemented(f"unhandled args for {name}: {e}")           
 
     def method_size(self, *args, **kwargs):
         return self._method_size_stride("size", *args, **kwargs)
