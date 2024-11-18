@@ -3929,7 +3929,9 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
         [SetDeviceMethod.TORCH_CUDA_SET, SetDeviceMethod.COLLECTIVE_ARGUMENT],
     )
     @parametrize("group_rank", [True, False])
-    def test_send_recv_object_list_subgroup(self, set_device: SetDeviceMethod, group_rank):
+    def test_send_recv_object_list_subgroup(
+        self, set_device: SetDeviceMethod, group_rank
+    ):
         world_size = 4
         if self.rank >= world_size:
             return
@@ -3944,7 +3946,9 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
             if group_rank:
                 c10d.recv_object_list(x, group_src=1, group=subgroup, device=device)
             else:
-                c10d.recv_object_list(x, src=self.rank + 1, group=subgroup, device=device)
+                c10d.recv_object_list(
+                    x, src=self.rank + 1, group=subgroup, device=device
+                )
             expected = [{"rank": self.rank + 1}]
             self.assertEqual(x, expected)
         else:
@@ -3952,7 +3956,9 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
             if group_rank:
                 c10d.send_object_list(x, group_dst=0, group=subgroup, device=device)
             else:
-                c10d.send_object_list(x, dst=self.rank - 1, group=subgroup, device=device)
+                c10d.send_object_list(
+                    x, dst=self.rank - 1, group=subgroup, device=device
+                )
 
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
