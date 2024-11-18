@@ -449,6 +449,12 @@ template <>
 inline void mtl_setArg(id<MTLComputeCommandEncoder> encoder, const TensorBase& val, unsigned idx) {
   mtl_setBuffer(encoder, val, idx);
 }
+// MPS does not support doubles, so cast it down to float before passing as an argument
+template <>
+inline void mtl_setArg(id<MTLComputeCommandEncoder> encoder, const double& val, unsigned idx) {
+  float val_f = static_cast<float>(val);
+  mtl_setBytes(encoder, val_f, idx);
+}
 } // namespace detail
 
 template <unsigned idx = 0, typename T>
