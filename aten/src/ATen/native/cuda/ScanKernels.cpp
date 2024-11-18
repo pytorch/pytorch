@@ -109,7 +109,7 @@ void cumprod_cuda_kernel(const Tensor& result, const Tensor& self, int64_t dim) 
   }
 }
 
-REGISTER_CUDA_DISPATCH(cumsum_stub, &cumsum_cuda_kernel);
-REGISTER_CUDA_DISPATCH(cumprod_stub, &cumprod_cuda_kernel);
+REGISTER_CUDA_DISPATCH(cumsum_stub, &cumsum_cuda_kernel)
+REGISTER_CUDA_DISPATCH(cumprod_stub, &cumprod_cuda_kernel)
 
 } // namespace at::native

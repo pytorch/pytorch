@@ -173,7 +173,7 @@ class DataLoaderBase {
     } else if (auto batch_request = get_batch_request()) {
       return this->main_thread_dataset_->get_batch(std::move(*batch_request));
     }
-    return nullopt;
+    return std::nullopt;
   }
 
   /// The function that worker threads run.

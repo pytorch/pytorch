@@ -1216,6 +1216,36 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
     )
     test_module_comparison = make_test(ModuleComparison())
 
+    def test_inject_module_parameters(self):
+        from collections import OrderedDict
+
+        class ZeROOrderedDict(OrderedDict):
+            def __init__(self, parent_module=None, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self._parent_module = parent_module
+
+            def __getitem__(self, key):
+                param = super().__getitem__(key)
+                return param
+
+        def inject_parameters(module, cls):
+            for m in module.modules():
+                if cls == ZeROOrderedDict:
+                    new_param = cls(parent_module=m)
+                else:
+                    new_param = cls()
+
+                for key, param in m._parameters.items():
+                    new_param[key] = param
+                m._parameters = new_param
+
+        model = ParametersModule5()
+        inject_parameters(model, ZeROOrderedDict)
+        model = torch.compile(model, backend="inductor")
+        x = torch.ones(10)
+        # model can be compiled without error
+        y = model(x)
+
     def test_module_forward_has_graph_break(self):
         m = ModuleForwardHasGraphBreak()
         x = torch.rand([10, 10])
@@ -3002,7 +3032,10 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
         with tempfile.TemporaryDirectory() as tmpdirname:
             torch.save(opt_mod, os.path.join(tmpdirname, "model.pt"))
-            loaded_model = torch.load(os.path.join(tmpdirname, "model.pt"))
+            # weights_only=False as this is a legacy use case that loads a module
+            loaded_model = torch.load(
+                os.path.join(tmpdirname, "model.pt"), weights_only=False
+            )
         loaded_model(inp)
         self.assertTrue(same_two_models(loaded_model, mod, [inp]))
         self.assertTrue(same_two_models(loaded_model, opt_mod, [inp]))
@@ -3020,7 +3053,10 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
                 opt_mod = torch.compile(mod, backend=backend)
                 with tempfile.TemporaryDirectory() as tmpdirname:
                     torch.save(opt_mod, os.path.join(tmpdirname, "model.pt"))
-                    loaded_model = torch.load(os.path.join(tmpdirname, "model.pt"))
+                    # weights_only=False as this is a legacy use case that loads a module
+                    loaded_model = torch.load(
+                        os.path.join(tmpdirname, "model.pt"), weights_only=False
+                    )
                 torch._dynamo.reset()  # force recompiles
                 torch._inductor.metrics.generated_kernel_count = 0
                 opt_mod(inp)
@@ -3133,6 +3169,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
     @patch.object(
         torch._dynamo.config, "skip_tensor_guards_with_matching_dict_tags", False
     )
+    @patch.object(torch._dynamo.config, "inline_inbuilt_nn_modules", True)
     def test_param_requires_grad(self):
         def adjust_model(model):
             to_freeze = model.num_iter % 2 == 0
