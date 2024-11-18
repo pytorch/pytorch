@@ -658,6 +658,8 @@ def _optimize_graph(
                 graph, params_dict, GLOBALS.export_onnx_opset_version
             )
         except RuntimeError as e:
+            # NOTE: shape type inference error should not stop the export process
+            # https://github.com/pytorch/pytorch/issues/132205
             pass
 
     return graph
