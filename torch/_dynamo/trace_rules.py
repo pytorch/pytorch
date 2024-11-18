@@ -2523,6 +2523,7 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.cuda.current_stream",
         "torch.cuda.default_stream",
         "torch.cuda.device_count",
+        "torch.cuda.device_memory_used",
         "torch.cuda.get_arch_list",
         "torch.cuda.get_device_capability",
         "torch.cuda.get_device_name",
