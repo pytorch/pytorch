@@ -1254,8 +1254,10 @@ class Reduction(Loops):
             isinstance(reduction_numel, Integer)
             and V.graph.sizevars.size_hint(reduction_numel)
             < config.unroll_reductions_threshold
-            and sympy_product(ranges) != 1
+            and (sympy_product(ranges) != 1 or device.type == "cuda")
         ):
+            # NB: This works around https://github.com/pytorch/pytorch/issues/140457
+            # since turning reductions into pointwise ops can exacerbate this problem
             return Pointwise.create(
                 device=device,
                 dtype=dst_dtype,
@@ -2808,7 +2810,7 @@ class ReinterpretView(BaseView):
             self.layout.size,
             self.layout.stride,
             self.layout.offset,
-            writer,
+            writer.writeline if writer is not None else V.graph.wrapper_code.writeline,
             dtype=self.layout.dtype,
         )
 
@@ -6392,7 +6394,7 @@ class FallbackKernel(ExternKernelAlloc):
             args = None
             exported_args = self.export_extern_kernel_node()
 
-            wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
+            wrapper.generate_fallback_kernel_with_runtime_lookup(
                 self.get_name(),
                 self.python_kernel_name,
                 self.cpp_kernel_name,
