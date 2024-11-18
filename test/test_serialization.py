@@ -4436,6 +4436,7 @@ class TestSerialization(TestCase, SerializationMixin):
                 torch._weights_only_unpickler._get_allowed_globals = old_get_allowed_globals
 
     @parametrize("should_import", [False, True])
+    @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
     def test_load_njt_weights_only(self, should_import):
         with tempfile.NamedTemporaryFile() as f:
             njt = torch.nested.nested_tensor([[1, 2, 3], [4, 5]], layout=torch.jagged)
