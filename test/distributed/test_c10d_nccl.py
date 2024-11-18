@@ -213,6 +213,48 @@ class ProcessGroupNCCLNoGPUTest(TestCase):
             c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
 
+class ProcessGroupNCCLInitTest(MultiProcessTestCase):
+    device_type = "cuda"
+
+    def setUp(self):
+        super().setUp()
+        self._spawn_processes()
+
+    def tearDown(self):
+        super().tearDown()
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
+
+    @property
+    def world_size(self):
+        dm = torch.get_device_module(self.device_type)
+        return dm.device_count()
+
+    @property
+    def device(self):
+        return torch.device(self.device_type, self.rank % self.world_size)
+
+    # A helper with the must-needed init args for test infra.
+    # kwargs can be filled in by individual init tests.
+    def _init_process_group(self, **kwargs):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        c10d.init_process_group(
+            rank=self.rank,
+            world_size=self.world_size,
+            store=store,
+            **kwargs,
+        )
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(1)
+    def test_init_wo_backend_str(self):
+        self._init_process_group(device_id=self.device)
+        x = torch.empty(1, device=self.device)
+        c10d.all_reduce(x)
+
+
 class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
     def _create_process_group_nccl(self, store, opts, device_id=None):
         # create nccl processgroup with opts
