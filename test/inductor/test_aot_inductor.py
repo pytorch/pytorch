@@ -1370,10 +1370,10 @@ class AOTInductorTestsTemplate:
 
                 return torch.cond(x.shape[0] > 5, true_fn, false_fn, (x,))
 
-        input1 = (torch.ones(3, 3), torch.ones(5), torch.ones(3, 3))
-        input2 = (torch.ones(10, 3), torch.ones(6), torch.ones(10, 3))
+        input1 = (torch.ones(3, 3), torch.ones(5), torch.ones(1))
+        input2 = (torch.ones(10, 3), torch.ones(6), torch.ones(1))
         inputs = (input1, input2)
-        dynamic_shapes = {"x": {0: Dim("d")}, "y": {0: Dim("d1")}, "z": {0: Dim("d")}}
+        dynamic_shapes = {"x": {0: Dim("d")}, "y": {0: Dim("d1")}, "z": {}}
         self.check_model_with_multiple_inputs(
             M(),
             inputs,
