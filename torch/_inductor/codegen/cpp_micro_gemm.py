@@ -532,13 +532,30 @@ class CppMicroGemmAMX(CppMicroGemm):
         // Load a tile of B & cache it in L1D.
         // The assumption here is that if N would be a multiple of block_n.
         {{input2_t}}* base_addr = const_cast<{{input2_t}}*>(B) + base_idx;
-        for (int idx = 0; idx < buf_size; idx += ldb) {
+        for (int idx_dq = 0, idx_q = 0; idx_dq < buf_size; idx_q += ldb, idx_dq += {{block_n}}) {
+        {%- if block_n in [16, 32] %}
             auto b_int8 = at::vec::Vectorized<int8_t>::loadu(
-                base_addr + idx,
-                static_cast<int64_t>(32)
+                base_addr + idx_q,
+                static_cast<int64_t>({{block_n}})
             );
             auto b_bf16 = at::vec::convert<{{input_t}}>(b_int8);
-            b_bf16.store(dequantized_B_buf + idx);
+            b_bf16.store(dequantized_B_buf + idx_dq);
+        {%- elif block_n == 48 %}
+            // first 32 elements
+            auto b_int8_32 = at::vec::Vectorized<int8_t>::loadu(
+                base_addr + idx_q,
+                static_cast<int64_t>(32)
+            );
+            auto b_bf16_32 = at::vec::convert<{{input_t}}>(b_int8_32);
+            b_bf16_32.store(dequantized_B_buf + idx_dq);
+            // next 16 elements
+            auto b_int8_16 = at::vec::Vectorized<int8_t>::loadu(
+                base_addr + idx_q + 32,
+                static_cast<int64_t>(16)
+            );
+            auto b_bf16_16 = at::vec::convert<{{input_t}}>(b_int8_16);
+            b_bf16_16.store(dequantized_B_buf + idx_dq + 32);
+        {%- endif %}
         }
     };
 {%- endif %}
