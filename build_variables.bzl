@@ -661,7 +661,6 @@ def libtorch_sources(gencode_pattern = ":generate-code[{}]"):
     )
 
 libtorch_cuda_core_sources = [
-    "torch/csrc/CudaIPCTypes.cpp",
     "torch/csrc/cuda/comm.cpp",
     "torch/csrc/cuda/memory_snapshot.cpp",
     "torch/csrc/cuda/CUDAPluggableAllocator.cpp",
@@ -1450,6 +1449,7 @@ aten_native_source_list = sorted(aten_native_source_non_codegen_list + aten_nati
 # These are cpp files which need to go in the torch_cuda_cu library
 # .cu files can be found via glob
 aten_cuda_cu_source_list = [
+    "aten/src/ATen/cuda/CudaIPCTypes.cpp",
     "aten/src/ATen/cuda/CUDABlas.cpp",
     "aten/src/ATen/cuda/CUDASparseBlas.cpp",
     "aten/src/ATen/cuda/CublasHandlePool.cpp",
