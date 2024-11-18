@@ -170,10 +170,7 @@ def binary_folding_init():
                     torch.Size([1, 1, 1]),
                 ]
             )
-        if other_shape in other_shapes:
-            return True
-        else:
-            return False
+        return other_shape in other_shapes
 
     def _check_conv_and_broadcast_op(conv_node, other):
         # According to checkConvAndBroadcastingOpPreConditions of frozen_conv_folding.cpp.
