@@ -12,9 +12,13 @@ from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
 T = TypeVar("T")
 
 
-class DTypeArg(Protocol):
+class DTypeVar(Protocol):
     @property
-    def dtype(self) -> torch.dtype: ...
+    def dtype(self) -> torch.dtype:
+        ...
+
+
+DTypeArg = Union[DTypeVar, torch.types.Number, str]
 
 
 # Inputs need to be cacheable (e.g., not a CSEVar) in order for the cache to be effective
@@ -45,7 +49,7 @@ def get_promoted_dtype(
 
 
 def promote_types(
-    args: Sequence[Union[DTypeArg, torch.types.Number, str]],
+    args: Sequence[DTypeArg],
     type_promotion_kind: Optional[ELEMENTWISE_TYPE_PROMOTION_KIND] = None,
 ):
     dtype_prop_candidates = []
@@ -258,9 +262,9 @@ class DtypePropagationOpsHandler:
         return promote_types([x])
 
     @staticmethod
-    def frexp(x: DTypeArg):
+    def frexp(x: DTypeArg) -> Tuple[torch.dtype, torch.dtype]:
         # TODO - need to handle multiple outputs
-        return (x.dtype, torch.int32)
+        return (promote_types([x]), torch.int32)
 
     @staticmethod
     def sort(
