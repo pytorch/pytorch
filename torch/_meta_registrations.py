@@ -5598,13 +5598,16 @@ def meta_scaled_mm(
         def is_col_major(stride):
             return stride[0] == 1 and stride[1] > 1
 
+        def has_zero_dim(tensor_2d):
+            return tensor_2d.size(0) == 0 or tensor_2d.size(1) == 0
+
         torch._check(
-            is_row_major(self.stride()),
-            lambda: "self must be row_major",
+            is_row_major(self.stride()) or has_zero_dim(self),
+            lambda: f"self must be row_major, got stride {self.stride()}",
         )
         torch._check(
-            is_col_major(mat2.stride()),
-            lambda: "mat2 must be col_major",
+            is_col_major(mat2.stride()) or has_zero_dim(mat2),
+            lambda: f"mat2 must be col_major, got stride {mat2.stride()}",
         )
         torch._check(
             self.size(1) % 16 == 0,
