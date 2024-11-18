@@ -382,6 +382,23 @@ class MetalShaderLibrary {
   std::unordered_map<std::string, std::pair<id<MTLComputePipelineState>, id<MTLFunction>>> cplMap;
 };
 
+namespace detail {
+template <typename T>
+class has_size_type {
+  template <typename U>
+  static constexpr std::true_type check(typename U::size_type*);
+  template <typename>
+  static constexpr std::false_type check(...);
+
+ public:
+  static constexpr bool value = decltype(check<T>(nullptr))::value;
+};
+
+template <typename T>
+constexpr bool has_size_type_v = has_size_type<T>::value;
+
+} // namespace detail
+
 template <typename encoder_t,
           typename = std::enable_if_t<std::is_same_v<id<MTLComputeCommandEncoder>, encoder_t> ||
                                       std::is_same_v<id<MTLArgumentEncoder>, encoder_t>>>
@@ -389,16 +406,15 @@ static inline void mtl_setBuffer(encoder_t encoder, const TensorBase& t, unsigne
   [encoder setBuffer:getMTLBufferStorage(t) offset:t.storage_offset() * t.element_size() atIndex:idx];
 }
 
-template <typename T,
-          typename = std::enable_if_t<std::is_integral_v<T> || std::is_same_v<T, float> ||
-                                      (std::is_class_v<T> && std::is_trivially_copyable_v<T>)>>
+template <
+    typename T,
+    typename = std::enable_if_t<std::is_integral_v<T> || std::is_same_v<T, float> ||
+                                (std::is_class_v<T> && std::is_trivially_copyable_v<T> && !detail::has_size_type_v<T>)>>
 static inline void mtl_setBytes(id<MTLComputeCommandEncoder> encoder, const T val, unsigned idx) {
   [encoder setBytes:&val length:sizeof(T) atIndex:idx];
 }
 
-template <typename Container,
-          typename = std::enable_if_t<std::is_integral_v<typename Container::size_type> &&
-                                      !std::is_trivially_copyable_v<Container>>>
+template <typename Container, typename = std::enable_if_t<detail::has_size_type_v<Container>>>
 static inline void mtl_setBytes(id<MTLComputeCommandEncoder> encoder, const Container& values, unsigned idx) {
   [encoder setBytes:values.data() length:sizeof(typename Container::value_type) * values.size() atIndex:idx];
 }
