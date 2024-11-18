@@ -3692,7 +3692,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         with self.assertRaises(
             torch._dynamo.exc.Unsupported,
         ):
-            torch.compile(f, backend="eager", nopython=True)(torch.zeros(1))
+            torch.compile(f, backend="eager", fullgraph=True)(torch.zeros(1))
 
     def test_list_index_tensor_unsupported(self):
         for index in ([], [2], [0, 3]):
