@@ -78,7 +78,7 @@ class TransposeFrozenLinear {
       node->replaceAllUsesWith(bias_result);
     }
     node->destroy();
-  };
+  }
 
   void handleBlockAndSubblocks(Block* block) {}
 

@@ -73,10 +73,10 @@ def gh_fetch_url(
     headers: Optional[Dict[str, str]] = None,
     data: Union[Optional[Dict[str, Any]], str] = None,
     method: Optional[str] = None,
-    reader: Callable[[Any], Any] = lambda x: x.read(),
+    reader: Callable[[Any], Any] = json.load,
 ) -> Any:
     return gh_fetch_url_and_headers(
-        url, headers=headers, data=data, reader=json.load, method=method
+        url, headers=headers, data=data, reader=reader, method=method
     )[1]
 
 
@@ -178,7 +178,7 @@ def gh_close_pr(org: str, repo: str, pr_num: int, dry_run: bool = False) -> None
 
 def gh_delete_comment(org: str, repo: str, comment_id: int) -> None:
     url = f"{GITHUB_API_URL}/repos/{org}/{repo}/issues/comments/{comment_id}"
-    gh_fetch_url(url, method="DELETE")
+    gh_fetch_url(url, method="DELETE", reader=lambda x: x.read())
 
 
 def gh_fetch_merge_base(org: str, repo: str, base: str, head: str) -> str:

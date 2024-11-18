@@ -56,9 +56,18 @@ namespace {
 // TODO(eqy): more benchmarking to determine whether this should include sm86/89
 // Needs to be kept in-sync with test_fused_chocie in test_transformers.py
 bool check_prefer_cudnn_attention() {
-#if defined(CUDNN_VERSION) && CUDNN_VERSION >= 90000
+  // TODO(eqy): Re-enable by default after upgrading to a release later than 9.5.0
+  // see context: https://github.com/pytorch/pytorch/issues/138340
+  // return false;
+#if defined(CUDNN_VERSION)
+
+#if CUDNN_VERSION > 90000
   auto dprops = at::cuda::getCurrentDeviceProperties();
   return dprops->major >= 9;
+#else
+  return false;
+#endif
+
 #else
   return false;
 #endif
