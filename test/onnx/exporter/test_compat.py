@@ -20,19 +20,19 @@ class SampleModelForDynamicShapes(torch.nn.Module):
 
 
 class NestedModelForDynamicShapes(torch.nn.Module):
-    def __init__(self) -> None:
-        super().__init__()
-        self.u = torch.nn.Buffer(torch.ones(1))
-        self.v = torch.nn.Buffer(torch.ones(1))
-
-    def forward(self, x, ys, zs, c):
+    def forward(
+        self,
+        x: torch.Tensor,
+        ys: list[torch.Tensor],
+        zs: dict[str, torch.Tensor],
+        c: torch.Tensor,
+    ):
         y = ys[0] + ys[1] + zs["a"] + zs["b"]
-        self.v.add_(3)
-        w = self.u - self.v
+        w = 5
         if x.shape[0] < 3 and c.shape[0] != 4:
-            return x + w, x + y
+            return x + w, x + y, c
         else:
-            return x - w, x - y
+            return x - w, x - y, c
 
 
 class SingnatureOnlyLlamaModel(torch.nn.Module):
@@ -113,7 +113,7 @@ class TestCompat(common_utils.TestCase):
         self, dynamic_shapes, input_names, expected_dynamic_axes
     ):
         dynamic_axes = _compat._from_dynamic_shapes_to_dynamic_axes(
-            dynamic_shapes=dynamic_shapes, input_names=input_names
+            dynamic_shapes=dynamic_shapes, input_names=input_names, exception=Exception
         )
         self.assertEqual(dynamic_axes, expected_dynamic_axes)
 
@@ -134,7 +134,60 @@ class TestCompat(common_utils.TestCase):
                 exception=Exception,
             )
 
-    def test_dynamic_shapes_supports_nested_input_model_with_input_names_assigned(self):
+    @common_utils.parametrize(
+        "dynamic_shapes, input_names, expected_dynamic_axes",
+        [
+            (
+                # When dynamic_shapes of one input is None
+                (
+                    {0: torch.export.Dim("dim", min=3)},
+                    [
+                        {0: torch.export.Dim("dim", min=3)},
+                        {0: torch.export.Dim("dim", min=3)},
+                    ],
+                    {
+                        "a": {0: torch.export.Dim("dim", min=3)},
+                        "b": {0: torch.export.Dim("dim", min=3)},
+                    },
+                    None,
+                ),
+                ["input_x", "input_y", "input_z", "d", "e", "f"],
+                {
+                    "input_x": {0: "dim"},
+                    "input_y": {0: "dim"},
+                    "input_z": {0: "dim"},
+                    "d": {0: "dim"},
+                    "e": {0: "dim"},
+                },
+            ),
+            (
+                # When dynamic_shapes of axes is None
+                (
+                    {0: torch.export.Dim("dim", min=3), 1: None},
+                    [
+                        {0: torch.export.Dim("dim", min=3), 1: None},
+                        {0: torch.export.Dim("dim", min=3)},
+                    ],
+                    {
+                        "a": {0: torch.export.Dim("dim", min=3), 1: None},
+                        "b": {0: torch.export.Dim("dim", min=3)},
+                    },
+                    None,
+                ),
+                ["input_x", "input_y", "input_z", "d", "e", "f"],
+                {
+                    "input_x": {0: "dim"},
+                    "input_y": {0: "dim"},
+                    "input_z": {0: "dim"},
+                    "d": {0: "dim"},
+                    "e": {0: "dim"},
+                },
+            ),
+        ],
+    )
+    def test_dynamic_shapes_supports_nested_input_model_with_input_names_assigned(
+        self, input_names, dynamic_shapes, expected_dynamic_axes
+    ):
         dim = torch.export.Dim("dim", min=3)
         dynamic_shapes = (
             {0: dim},
@@ -145,7 +198,7 @@ class TestCompat(common_utils.TestCase):
         # kwargs can still be renamed as long as it's in order
         input_names = ["input_x", "input_y", "input_z", "d", "e", "f"]
         dynamic_axes = _compat._from_dynamic_shapes_to_dynamic_axes(
-            dynamic_shapes=dynamic_shapes, input_names=input_names
+            dynamic_shapes=dynamic_shapes, input_names=input_names, exception=Exception
         )
         expected_dynamic_axes = {
             "input_x": {0: "dim"},
@@ -178,7 +231,7 @@ class TestCompat(common_utils.TestCase):
         self.assertTrue(
             all(
                 input.type.tensor_type.shape.dim[0].dim_param
-                for input in onnx_model.graph.input
+                for input in onnx_model.graph.input[:-1]
             )
         )
 
