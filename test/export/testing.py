@@ -288,6 +288,7 @@ def expectedFailurePreDispatchRunDecomp(fn):
 
 def expectedFailureCppSerDes(fn):
     fn._expected_failure_cpp_serdes = True
+    return fn
 
 
 # Controls tests generated in test/export/test_export_legacy.py
