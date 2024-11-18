@@ -946,9 +946,14 @@ def trace_flex_attention_backward(
         )
     assert isinstance(proxy_mode.tracer, torch.fx.Tracer)
     block_mask = block_mask[:-1] + (mask_graph,)
-    proxy_mode.tracer.root.register_module("fw_graph", fw_graph)  # type: ignore[arg-type]
-    proxy_mode.tracer.root.register_module("joint_graph", joint_graph)
-    proxy_mode.tracer.root.register_module("mask_graph", mask_graph)
+
+    qualname = proxy_mode.tracer.get_fresh_qualname("fw_graph")
+    proxy_mode.tracer.root.register_module(qualname, fw_graph)  # type: ignore[arg-type]
+    qualname = proxy_mode.tracer.get_fresh_qualname("joint_graph")
+    proxy_mode.tracer.root.register_module(qualname, joint_graph)
+    qualname = proxy_mode.tracer.get_fresh_qualname("mask_graph")
+    proxy_mode.tracer.root.register_module(qualname, mask_graph)
+
     node_args = (
         query,
         key,
