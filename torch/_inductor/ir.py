@@ -447,7 +447,7 @@ class IRNode:
         """True for single tensor output (excludes MultiOutput)"""
         return isinstance(self.get_output_spec(), Layout)
 
-    def get_size(self) -> Sequence[_IntLike]:
+    def get_size(self) -> Sequence[Expr]:
         raise NotImplementedError(f"get_size() is not implemented by {type(self)}!")
 
     def maybe_get_size(self) -> Optional[Sequence[_IntLike]]:
@@ -698,10 +698,10 @@ class Loops(IRNode):
     def get_origin_node(self) -> Optional[torch.fx.Node]:
         return self.origin_node
 
-    def get_size(self) -> Sequence[_IntLike]:
+    def get_size(self) -> Sequence[Expr]:
         return self.ranges
 
-    def get_pointwise_size(self) -> Sequence[_IntLike]:
+    def get_pointwise_size(self) -> Sequence[Expr]:
         return self.ranges
 
     def is_extern(self) -> bool:
@@ -2026,10 +2026,10 @@ class Scan(Loops):
     def get_reduction_size(self) -> Sequence[sympy.Expr]:
         return self.scan_ranges
 
-    def get_size(self) -> Sequence[_IntLike]:
+    def get_size(self) -> Sequence[Expr]:
         return self.size
 
-    def get_pointwise_size(self) -> Sequence[_IntLike]:
+    def get_pointwise_size(self) -> Sequence[Expr]:
         return self.ranges
 
     def index_length(self) -> int:
@@ -2223,10 +2223,10 @@ class Sort(Loops):
     def get_reduction_size(self) -> Sequence[sympy.Expr]:
         return self.sort_ranges
 
-    def get_size(self) -> Sequence[_IntLike]:
+    def get_size(self) -> Sequence[Expr]:
         return self.size
 
-    def get_pointwise_size(self) -> Sequence[_IntLike]:
+    def get_pointwise_size(self) -> Sequence[Expr]:
         return self.ranges
 
     def index_length(self) -> int:
@@ -2423,7 +2423,7 @@ class BaseView(IRNode):
         inner = self.data.make_indexer()
         reindex = self.make_reindexer()
 
-        def indexer(idx):  # type: ignore[no-untyped-def]
+        def indexer(idx: Sequence[Expr]) -> Expr:
             return inner(reindex(idx))
 
         return indexer
@@ -2453,7 +2453,7 @@ class BaseView(IRNode):
     def get_name(self) -> str:
         return self.data.get_name()
 
-    def get_pointwise_size(self):  # type: ignore[no-untyped-def]
+    def get_pointwise_size(self) -> Sequence[Expr]:
         return self.get_size()
 
     def mark_reuse(self, users: int) -> None:
@@ -2564,7 +2564,7 @@ class ExpandView(BaseView):
 
         return ExpandView(data=x, size=new_size)
 
-    def get_size(self):  # type: ignore[no-untyped-def]
+    def get_size(self) -> Sequence[Expr]:
         return self.size
 
     def make_reindexer(self):  # type: ignore[no-untyped-def]
@@ -2610,7 +2610,7 @@ class PermuteView(BaseView):
     def _map_neg_dims(cls, dims):  # type: ignore[no-untyped-def]
         return [dim if dim >= 0 else len(dims) + dim for dim in dims]
 
-    def get_size(self):  # type: ignore[no-untyped-def]
+    def get_size(self) -> Sequence[Expr]:
         assert OrderedSet(self._map_neg_dims(self.dims)) == OrderedSet(
             range(len(self.dims))
         )
@@ -2713,7 +2713,7 @@ class GenericView(BaseView):
     def create(cls, x, new_size, reindex):  # type: ignore[no-untyped-def]
         return cls(data=x, size=list(new_size), reindex=reindex)
 
-    def get_size(self):  # type: ignore[no-untyped-def]
+    def get_size(self) -> Sequence[Expr]:
         return self.size
 
 
@@ -2899,7 +2899,7 @@ class ReinterpretView(BaseView):
     def dtype(self):  # type: ignore[no-untyped-def]
         return self.layout.dtype
 
-    def get_size(self):  # type: ignore[no-untyped-def]
+    def get_size(self) -> Sequence[Expr]:
         return list(self.layout.size)
 
     def get_stride(self):  # type: ignore[no-untyped-def]
@@ -2978,7 +2978,7 @@ class DtypeView(BaseView):
     def dtype(self):  # type: ignore[no-untyped-def]
         return self.target_dtype
 
-    def get_size(self):  # type: ignore[no-untyped-def]
+    def get_size(self) -> Sequence[Expr]:
         return self.data.get_size()
 
     def make_loader(self) -> Callable[[Sequence[Expr]], OpsValue]:
@@ -3070,7 +3070,7 @@ class BaseConstant(IRNode):
     dtype: torch.dtype
     device: torch.device
 
-    def get_size(self):  # type: ignore[no-untyped-def]
+    def get_size(self) -> Sequence[Expr]:
         return ()
 
     def get_device(self) -> torch.device:
@@ -3720,7 +3720,7 @@ class Buffer(IRNode):
     def dtype(self) -> torch.dtype:
         return self.get_layout().dtype
 
-    def get_size(self) -> List[Expr]:
+    def get_size(self) -> Sequence[Expr]:
         return [*self.get_layout().size]
 
     def get_stride(self) -> List[Expr]:
@@ -4015,7 +4015,11 @@ class ComputedBuffer(OperationBuffer):
     @cache_on_self
     def get_default_sizes_body(
         self,
-    ) -> Tuple[Tuple[sympy.Expr, sympy.Expr], LoopBody, Tuple[sympy.Expr, sympy.Expr]]:
+    ) -> Tuple[
+        Tuple[List[sympy.Expr], List[sympy.Expr]],
+        LoopBody,
+        Tuple[List[sympy.Expr], List[sympy.Expr]],
+    ]:
         args, var_ranges = dependencies.index_vars_squeeze(
             self.data.get_pointwise_size(), self.data.get_reduction_size(), prefix="q"
         )
@@ -4045,7 +4049,7 @@ class ComputedBuffer(OperationBuffer):
         self,
         extra_indexing_constraints: Optional[Tuple[Dict[Any, Any], List[Any]]] = None,
         recompute_sizes_body_func: Optional[Callable[..., Any]] = None,
-    ) -> Tuple[Tuple[sympy.Expr, sympy.Expr], LoopBody]:
+    ) -> Tuple[Tuple[List[sympy.Expr], List[sympy.Expr]], LoopBody]:
         """
         This is a main place where we do loop transformations in a
         backend-agnostic way.
@@ -4198,7 +4202,7 @@ class ComputedBuffer(OperationBuffer):
     def get_reduction_type(self) -> Optional[str]:
         return self.data.get_reduction_type()
 
-    def is_no_op(self):  # type: ignore[no-untyped-def]
+    def is_no_op(self) -> bool:
         return self.data.is_zero_elements()
 
     def should_allocate(self) -> bool:
@@ -4215,7 +4219,12 @@ class TemplateBuffer(OperationBuffer):
     that we can fuse an epilogue onto.
     """
 
-    def __init__(self, layout, inputs, make_kernel_render) -> None:  # type: ignore[no-untyped-def]
+    def __init__(
+        self,
+        layout: Layout,
+        inputs: List[IRNode],
+        make_kernel_render: Callable[..., Any],
+    ) -> None:
         super().__init__(name=None, layout=layout)
         self.inputs = InputsKernel.unwrap_storage(inputs)
         self.make_kernel_render = make_kernel_render
@@ -4482,7 +4491,7 @@ class InputsKernel(OperationBuffer):
         )
 
     @classmethod
-    def unwrap_storage_for_input(cls, x):  # type: ignore[no-untyped-def]
+    def unwrap_storage_for_input(cls, x: IRNode) -> IRNode:
         if isinstance(x, TensorBox):
             x = x.data
         if isinstance(x, StorageBox):
@@ -5575,7 +5584,7 @@ class TMADescriptor(ExternKernel):
     @classmethod
     def create(  # type: ignore[no-untyped-def]
         cls,
-        tensor: TensorBox,
+        tensor: IRNode,
         dims: List[Union[int, torch.SymInt]],
         block_dims: List[Union[int, torch.SymInt]],
         element_size: Optional[int] = None,
@@ -5587,7 +5596,7 @@ class TMADescriptor(ExternKernel):
 
     def __init__(
         self,
-        tensor: TensorBox,
+        tensor: IRNode,
         dims: List[Union[int, torch.SymInt]],
         block_dims: List[Union[int, torch.SymInt]],
         element_size: Optional[int] = None,
@@ -6860,7 +6869,7 @@ class MutableBox(IRNode):
     def get_output_spec(self) -> OutputSpec:
         return self.data.get_output_spec()
 
-    def get_size(self):  # type: ignore[no-untyped-def]
+    def get_size(self) -> Sequence[Expr]:
         return self.data.get_size()
 
     @property
