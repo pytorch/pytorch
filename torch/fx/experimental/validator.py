@@ -139,6 +139,22 @@ try:
         string = op + " " + " ".join(args)
         return f"({string.rstrip()})"
 
+    # We need to convert to/from BitVec in order to use z3 bitwise ops.
+    # We assume that integers are 64 bit.
+    # If all args are boolean, then use the boolean bitwise op implementation instead, if provided.
+    def _bitwise_op(bitwise_func, bool_func):
+        @functools.wraps(bitwise_func)
+        def wrapper(self, *args):
+            if bool_func is not None and all(
+                isinstance(arg, z3.BoolRef) for arg in args
+            ):
+                return bool_func(*args)
+
+            wrapped_args = tuple(z3.Int2BV(a, 64) for a in args)
+            return z3.BV2Int(bitwise_func(*wrapped_args))
+
+        return wrapper
+
     # Implementation of Python semantics as Z3 expressions.
     #
     # Z3 Real-Int theory has operators with semantics that differ that of
@@ -234,6 +250,11 @@ try:
                 self.floor(number + 0.5),
             )
 
+        bitwise_and = _bitwise_op(operator.and_, z3.And)
+        bitwise_or = _bitwise_op(operator.or_, z3.Or)
+        lshift = _bitwise_op(operator.lshift, None)
+        rshift = _bitwise_op(operator.rshift, None)
+
     # Lifts a callable to be used in Z3.
     #
     # This function replaces the given 'op' by a function that:
@@ -247,7 +268,7 @@ try:
         # This is needed because the argument of some FX nodes were
         # literal integers, instead of booleans. So, whenever this flag
         # is set, we also convert ints to booleans.
-        boolean_ops = {operator.not_, operator.and_, operator.or_}
+        boolean_ops = {operator.not_}
         as_bool = op in boolean_ops
 
         # Lifts the function into 'z3.ExprRef' domain.
@@ -281,8 +302,10 @@ try:
         replacement_map = {
             # Operator module.
             operator.not_: lift(z3.Not),
-            operator.and_: lift(z3.And),
-            operator.or_: lift(z3.Or),
+            operator.and_: lift(ops.bitwise_and),
+            operator.or_: lift(ops.bitwise_or),
+            operator.lshift: lift(ops.lshift),
+            operator.rshift: lift(ops.rshift),
             operator.floordiv: lift(ops.floordiv),
             operator.truediv: lift(ops.div),
             operator.mod: lift(ops.mod),
@@ -416,6 +439,10 @@ try:
                 "and_": z3.And,
                 "or_": z3.Or,
                 "not_": z3.Not,
+                "bitwise_and": self._ops.bitwise_and,
+                "bitwise_or": self._ops.bitwise_or,
+                "lshift": self._ops.lshift,
+                "rshift": self._ops.rshift,
                 "floor": self._ops.floor,
                 "ceil": self._ops.ceil,
                 "minimum": self._ops.min,
@@ -726,6 +753,8 @@ def bisect(shape_env):
             return fake
         if isinstance(fake, torch.SymInt):
             return torch.SymInt(fake.node.with_shape_env(shape_env))
+        if isinstance(fake, torch.SymFloat):
+            return torch.SymFloat(fake.node.with_shape_env(shape_env))
         assert isinstance(fake, FakeTensorMeta)
         return FakeTensorMeta(
             tuple(new_with_shape_env(shape_env, s) for s in fake.size()),

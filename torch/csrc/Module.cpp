@@ -2456,7 +2456,7 @@ Call this whenever a new thread is created in order to propagate values from
 // Checks that the _C shared library isn't initialized multiple times. This
 // can happen if the same csrc files are compiled into multiple shared
 // libraries.
-inline static void pytorch_duplicate_guard() {
+static void pytorch_duplicate_guard() {
   static int initialized = 0;
   if (initialized) {
     fmt::print(stderr, "pytorch: _C shared library re-initialized\n");
