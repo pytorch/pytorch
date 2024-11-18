@@ -43,7 +43,6 @@ from torch.testing._internal.common_dtype import (
     integral_types_and,
 )
 from torch.testing._internal.common_methods_invocations import (
-    apply_op_db_for,
     BinaryUfuncInfo,
     op_db,
     ops_and_refs,
@@ -86,10 +85,6 @@ from torch.utils._pytree import tree_map
 
 
 assert torch.get_default_dtype() == torch.float32
-
-# if TEST_XPU:
-#     apply_op_db_for(op_db, device="xpu")
-#     apply_op_db_for(python_ref_db, device="xpu")
 
 # variant testing is only done with torch.float and torch.cfloat to avoid
 #   excessive test times and maximize signal to noise ratio

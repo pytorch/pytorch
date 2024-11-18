@@ -27,7 +27,7 @@ from torch.testing._internal.common_device_type import \
     (onlyCPU, onlyCUDA, onlyNativeDeviceTypes, disablecuDNN, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver,
      skipCUDAIfNoCusolver, skipCPUIfNoLapack, skipCPUIfNoFFT, skipCUDAIf, precisionOverride,
      skipCPUIfNoMklSparse,
-     toleranceOverride, tol, skipXPU)
+     toleranceOverride, tol)
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION, PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
     SM53OrLater, SM80OrLater, SM90OrLater, with_tf32_off, TEST_CUDNN, _get_torch_cuda_version,
@@ -12173,7 +12173,6 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            sample_inputs_func=sample_inputs_addmm,
-           decorators=[skipXPU,],
            skips=(
                # Issue with conj and torch dispatch, see https://github.com/pytorch/pytorch/issues/82479
                DecorateInfo(
@@ -12215,7 +12214,6 @@ op_db: List[OpInfo] = [
                DecorateInfo(
                    toleranceOverride({torch.half: tol(atol=1e-5, rtol=3e-3)}),
                    'TestInductorOpInfo', 'test_comprehensive', device_type='cpu'),
-               skipXPU,
            ],
            sample_inputs_func=sample_inputs_addmv),
     OpInfo('addbmm',
@@ -13522,7 +13520,7 @@ op_db: List[OpInfo] = [
                skipCUDAIf(not ((_get_torch_cuda_version() >= (11, 3))
                                or (_get_torch_rocm_version() >= (5, 2))),
                           "cusparseSDDMM was added in 11.2.1"),
-               skipCPUIfNoMklSparse, skipXPU, ],
+               skipCPUIfNoMklSparse, ],
            skips=(
                # NotImplementedError: Tensors of type SparseCsrTensorImpl do not have is_contiguous
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_noncontiguous_samples'),
@@ -20034,7 +20032,6 @@ op_db: List[OpInfo] = [
            supports_sparse_csc=True,
            check_batched_grad=False,
            check_batched_gradgrad=False,
-           decorators=[skipXPU,],
            skips=(
                # NotImplementedError: Could not run 'aten::normal_' with arguments from the 'SparseCPU' backend
                DecorateInfo(unittest.skip(""), 'TestCommon', 'test_noncontiguous_samples'),
@@ -21378,7 +21375,6 @@ op_db: List[OpInfo] = [
         supports_gradgrad=False,
         skips=(
             DecorateInfo(unittest.skip("Unsupported on MPS for now"), 'TestCommon', 'test_numpy_ref_mps'),
-            DecorateInfo(unittest.skip("Skipped!"), None, None, device_type='xpu', dtypes=[torch.float64,]),
         )
     ),
     OpInfo(
@@ -22923,20 +22919,6 @@ python_ref_db = [
                 'test_python_ref_torch_fallback',
                 dtypes=(torch.float32,),
                 device_type='cpu',
-            ),
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                None,
-                None, 
-                device_type='xpu',
-                dtypes=[torch.float64,],
-            ),
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                'TestCommon',
-                'test_dtypes',
-                device_type='xpu',
-                dtypes=None,
             ),
         )),
     PythonRefInfo(
@@ -24792,19 +24774,3 @@ def skipOps(test_case_name, base_test_name, to_skip):
     def wrapped(fn):
         return fn
     return wrapped
-
-def apply_op_db_for_xpu(op_db_list: List[OpInfo]):
-    # Get the supported op from yaml file.
-    supported_op_list = get_backend_ops(device='xpu')['supported_ops']
-
-    for op in op_db_list:
-        # For refs ops get the name of the related torch_opinfo.
-        torch_opinfo = op.torch_opinfo if hasattr(op, "torch_opinfo") else None
-        name = torch_opinfo.name if torch_opinfo is not None else op.name
-        if name not in supported_op_list:
-            # Update op_db, add unittest.skip decorators to skip the op for the backend.
-            op.decorators = (*op.decorators, DecorateInfo(unittest.skip, device_type='xpu', dtypes=None))
-
-def apply_op_db_for(op_db_list: List[OpInfo], device='xpu'):
-    if TEST_XPU and device == 'xpu':
-        apply_op_db_for_xpu(op_db_list)
