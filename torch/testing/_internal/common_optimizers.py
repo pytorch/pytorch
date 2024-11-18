@@ -566,6 +566,11 @@ def optim_inputs_func_adam(device, dtype=None):
                 kwargs={"weight_decay": 0.1, "amsgrad": True},
                 desc="amsgrad",
             ),
+            OptimizerInput(
+                params=None,
+                kwargs={"betas": (0.0, 0.99)},
+                desc="zero-beta1",
+            )
         ]
         + (cuda_supported_configs if _get_device_type(device) == "cuda" else [])
         + (mps_supported_configs if _get_device_type(device) == "mps" else [])

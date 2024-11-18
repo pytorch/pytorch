@@ -3,6 +3,7 @@ import functools
 import math
 import tempfile
 import unittest
+
 from copy import deepcopy
 from typing import Any, Dict, Tuple
 from unittest.mock import patch
@@ -10,6 +11,7 @@ from unittest.mock import patch
 from optim.test_lrscheduler import TestLRScheduler  # noqa: F401
 from optim.test_optim import TestDifferentiableOptimizer  # noqa: F401
 from optim.test_swa_utils import TestSWAUtils  # noqa: F401
+from torch.profiler import profile, record_function, ProfilerActivity # YOUSSEF
 
 import torch
 from torch.nn import Parameter
@@ -2100,6 +2102,7 @@ class TestOptimRenewed(TestCase):
                 inpts.append(inpt)
                 models.append(model)
                 optimizers.append(optimizer)
+                
         self._compare_between(inpts, models, optimizers)
 
     @onlyCUDA
@@ -2162,7 +2165,51 @@ class TestOptimRenewed(TestCase):
 
             for state in optim.state.values():
                 self.assertGreater(len(state), 0)
+    
+    
+    # YOUSSEF
+    @optims([optim for optim in optim_db if optim.optim_cls.__name__ == "Adam"], dtypes=[torch.float32]) 
+    def test_less_mem_beta1_zero_adam(self, device, dtype, optim_info): 
+        # print("Testing Adam uses less memory when beta1 is zero") 
+        # print("optimizer ", optim_info.optim_cls)
+        # print("device ", device) 
+        # print("dtype ", dtype)
+        # print("input function ", optim_info.optim_inputs_func.__name__) 
+        
+        model = torch.nn.Linear(5, 5)
+        model.to(dtype=dtype, device=device)
+        inpt = torch.rand(2, 5, dtype=dtype, device=device)
 
+        optim_inputs = optim_info.optim_inputs_func(device=device) 
+        case_to_mem_usage = {}
+        for optim_input in optim_inputs: 
+            beta_zero = ( "betas" in optim_input.kwargs and optim_input.kwargs["betas"][0] == 0.0 ) 
+            if beta_zero or optim_input.desc == "default" : 
+                
+                activities =  [ProfilerActivity.CUDA] if device == "cuda" else [ProfilerActivity.CPU] 
+    
+                with profile(
+                    activities=activities,
+                    profile_memory=True, 
+                    record_shapes=True
+                ) as prof:
+                    optim = optim_info.optim_cls(model.parameters(), **optim_input.kwargs)
+                    optim.zero_grad()
+                    output = model(inpt)
+                    loss = output.sum()
+                    loss.backward()
+                    
+                    optim.step() 
+                
+                case_to_mem_usage["beta1-zero" if beta_zero else "default"] = sum([item.cpu_memory_usage for item in prof.key_averages()])
+                
+        self.assertGreater(case_to_mem_usage["default"], case_to_mem_usage["beta1-zero"])
+        print("inpt_config_to_mem ", case_to_mem_usage) 
+                
+        # measure size used by state of optimizer 
+        # and add it the dictionary inpt_config_to_mem 
+        # assert that the memory used by the state of the optimizer when beta1 is zero is less than when beta1 is not zero 
+        
 
 instantiate_device_type_tests(TestOptimRenewed, globals(), allow_mps=True)
 
