@@ -313,7 +313,10 @@ if torch._C._has_mkldnn:
                 None,
                 None,
             ]
-            return L[torch.ops.mkldnn._linear_pointwise.default](*computation_args)
+
+            from ..mkldnn_lowerings import mlp_linear_silu_linear_mul
+
+            return mlp_linear_silu_linear_mul(*computation_args)
 
         return fn
 
