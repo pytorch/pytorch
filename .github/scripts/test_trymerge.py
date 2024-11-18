@@ -559,8 +559,8 @@ class TestTryMerge(TestCase):
                 "expected": "lintrunner / linux-job",
             },
             {
-                "name": "Test `run_test.py` is usable without boto3/rockset",
-                "expected": "Test `run_test.py` is usable without boto3/rockset",
+                "name": "Test `run_test.py` is usable without boto3",
+                "expected": "Test `run_test.py` is usable without boto3",
             },
         ]
 
