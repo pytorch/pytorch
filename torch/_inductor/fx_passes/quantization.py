@@ -1783,6 +1783,7 @@ def _is_valid_dequant_conv2d_pattern(dtype):
                 or (meta_value.device.type == "xpu" and match.kwargs["groups"] != 1)
             ):
                 # Only support conv2d now
+                # Grouped quantized convolution is not supported at XPU backend
                 return False
 
         assert dtype in [torch.float32, torch.bfloat16]

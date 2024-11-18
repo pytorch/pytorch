@@ -112,7 +112,10 @@ at::Tensor quantized_convolution(
   dnnl::memory::dims _dilation = compatible_dilation(dilation);
   dnnl::post_ops po;
   // extract post ops
-  po = attr.extract_post_ops(output, /*is_quantized*/ true, output.scalar_type() == at::kByte || output.scalar_type() == at::kChar);
+  po = attr.extract_post_ops(
+      output,
+      /*is_quantized*/ true,
+      output.scalar_type() == at::kByte || output.scalar_type() == at::kChar);
   int mask_ac = 0, mask_weight;
   // [Note: Per-channel quantization mask setting]
   // Per-channel quantization is on weight output channel mostly, mask_weight=
