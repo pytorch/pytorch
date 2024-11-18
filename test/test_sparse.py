@@ -1865,7 +1865,7 @@ class TestSparse(TestSparseBase):
         empty_S.requires_grad_(True)
         empty_S_sum = torch.sparse.sum(empty_S)
         empty_S_sum.backward()
-        self.assertEqual(empty_S.grad.to_dense(), empty_S.clone().detach().to_dense())
+        self.assertEqual(empty_S.grad.to_dense(), empty_S.detach().clone().to_dense())
 
         # test values().sum()
         S = self._gen_sparse(sparse_dims, nnz, with_size, dtype, device, coalesced)[0]
@@ -4822,7 +4822,7 @@ class TestSparseAny(TestCase):
             if batch_dim > 0:
                 # TODO: implement batch support in _convert_indices_from_csr_to_coo
                 continue
-            t = t.clone().detach().requires_grad_(True)
+            t = t.detach().clone().requires_grad_(True)
             r = gradcheck(lambda x: torch.Tensor.to_dense(x, masked_grad=gradcheck.masked), t)
             self.assertTrue(r)
 

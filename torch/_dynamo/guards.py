@@ -16,7 +16,6 @@ import math
 import re
 import sys
 import textwrap
-import time
 import types
 import warnings
 import weakref
@@ -45,8 +44,10 @@ from torch._C._dynamo.guards import (
     check_type_id,
     dict_version,
     DictGuardManager,
+    GuardManager,
     install_no_tensor_aliasing_guard,
     install_object_aliasing_guard,
+    profile_guard_manager,
     RootGuardManager,
 )
 from torch._dynamo.source import (
@@ -81,6 +82,7 @@ from .eval_frame import set_guard_error_hook
 from .source import (
     AttrProxySource,
     AttrSource,
+    AutoDerefLocalSource,
     CallFunctionNoArgsSource,
     ChainedSource,
     ConstDictKeySource,
@@ -108,7 +110,14 @@ from .source import (
     UnspecializedParamBufferSource,
     WeakRefCallSource,
 )
-from .types import CacheEntry, ExtraState, GuardedCode, GuardFail, GuardFn  # noqa: F401
+from .types import (  # noqa: F401
+    CacheEntry,
+    DynamoFrameType,
+    ExtraState,
+    GuardedCode,
+    GuardFail,
+    GuardFn,
+)
 from .utils import (
     common_constant_types,
     dict_keys_repr,
@@ -876,6 +885,14 @@ class GuardBuilder(GuardBuilderBase):
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
             )
+        elif istype(source, AutoDerefLocalSource):
+            # Guard checks run on f_locals, in which the python level
+            # auto-dereferenced cell objects are also dereferenced (e.g., rather
+            # than `f_locals` being `{ 'cell' : <cell object of int> }`, it'll
+            # be `{ 'cell' : <int> }`. So the guard manager is the same as the
+            # base guard manager.
+            assert isinstance(base_guard_manager, GuardManager)  # tame mypy
+            out = base_guard_manager
         elif istype(source, GlobalSource):
             # Global manager accepts a dict but it is not a DictGuardManager
             # because globals dict is big and we typically guard on a very
@@ -1789,11 +1806,6 @@ class GuardBuilder(GuardBuilderBase):
         )
 
     def TENSOR_MATCH(self, guard: Guard, value=None):
-        # For FSDP modules, we can skip guards on nn module tensors because FSDP
-        # eager assumes that the params are unchanged once the model is wrapped.
-        if guard.is_fsdp_module():
-            return
-
         # For tensors that are part of the Dynamo extracted Fx graph module, an
         # ID_MATCH suffices. Once we turn on inline_inbuilt_nn_modules, these
         # will be lifted as inputs and have a TENSOR_MATCH guard.
@@ -2214,7 +2226,10 @@ class CheckFunctionManager:
                 raise AssertionError(f"Guard check failed: {reasons}")
 
             if guards_log.isEnabledFor(logging.DEBUG):
-                self.profile_guard_eval(output_graph.local_scope)
+                latency = profile_guard_manager(
+                    self.guard_manager.root, output_graph.local_scope
+                )
+                guards_log.debug("Guard eval latency = %s us", f"{latency:.2f}")
 
         # NB - We have to very careful of cleaning up here. Because of the
         # invalidate function, we can create a weakref finalizer that keeps
@@ -2226,18 +2241,6 @@ class CheckFunctionManager:
         # e.g., not setting output_graph = None can keep hold of nn_modules.
         self._weakrefs.clear()
         self.output_graph = None
-
-    def profile_guard_eval(self, f_locals):
-        start_time = time.time()
-        iterations = 0
-        profile_duration = 1  # unit is seconds
-
-        while time.time() - start_time < profile_duration:
-            self.guard_manager.check(f_locals)
-            iterations += 1
-
-        guard_latency = 10**6 / iterations  # us
-        guards_log.debug("Guard eval latency = %s us", f"{guard_latency:.2f}")
 
     def compile_check_fn(self, builder, guards_out, guard_fail_fn):
         # see parallel handling of ".0" / "___implicit0" in _eval_frame.c
@@ -2609,7 +2612,7 @@ def get_guard_fail_reason(
 
 
 def get_and_maybe_log_recompilation_reason(
-    cache_entry, frame: types.FrameType
+    cache_entry, frame: DynamoFrameType
 ) -> List[str]:
     """
     Return the list of guard failure reasons using cache_entry.
