@@ -48,18 +48,17 @@ from torch.testing._internal.common_distributed import (
 from torch.utils._pytree import tree_flatten, tree_unflatten, TreeSpec
 from torch._utils import _get_device_module
 
-DEVICE_COUNT = _get_device_module("cuda").device_count() if TEST_CUDA else _get_device_module("hpu").device_count()
-
-DEVICE_TYPE = (
-    "cuda"
-    if TEST_CUDA and DEVICE_COUNT > 1
-    else "hpu"
-    if TEST_HPU and DEVICE_COUNT > 1
-    else "cpu"
-)
-PG_BACKEND = (
-    "nccl" if DEVICE_TYPE == "cuda" else "hccl" if DEVICE_TYPE == "hpu" else "gloo"
-)
+if TEST_CUDA:
+    DEVICE_TYPE = "cuda"
+    PG_BACKEND = "nccl"
+    DEVICE_COUNT = _get_device_module("cuda").device_count()
+elif TEST_HPU:
+    DEVICE_TYPE = "hpu"
+    PG_BACKEND = "hccl"
+    DEVICE_COUNT = _get_device_module("hpu").device_count()
+else:
+    DEVICE_TYPE = "cpu"
+    PG_BACKEND = "gloo"
 
 NUM_DEVICES = 4
 
@@ -324,23 +323,18 @@ class DTensorTestBase(MultiProcessTestCase):
     def world_size(self) -> int:
         return NUM_DEVICES
 
-    @property
-    def backend(self) -> str:
-        backend = "nccl" if self.device_type == "cuda" else "hccl" if self.device_type == "hpu" else "gloo"
-        return backend
-
     def build_device_mesh(self) -> DeviceMesh:
         return DeviceMesh(self.device_type, list(range(self.world_size)))
 
     def init_pg(self, eager_init) -> None:
-        if "nccl" in self.backend and DEVICE_COUNT < self.world_size:
+        if "nccl" in PG_BACKEND and DEVICE_COUNT < self.world_size:
             sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
 
-        if self.backend not in ["nccl", "gloo", "mpi", "cpu:gloo,cuda:nccl", "hccl"]:
-            raise RuntimeError(f"Backend {self.backend} not supported!")
+        if PG_BACKEND not in ["nccl", "gloo", "mpi", "cpu:gloo,cuda:nccl", "hccl"]:
+            raise RuntimeError(f"Backend {PG_BACKEND} not supported!")
 
         device_id = None
-        if "nccl" in self.backend:
+        if "nccl" in PG_BACKEND:
             # set device for nccl pg for collectives
             torch.cuda.set_device(self.rank)
             # we only need to set device_id for nccl backend with eager init
@@ -349,7 +343,7 @@ class DTensorTestBase(MultiProcessTestCase):
         # so the nccl communicator is immediately formed and we can use `ncclCommSplit`
         # for form subgroup to avoid unnecesssary overhead.
         dist.init_process_group(
-            backend=self.backend,
+            backend=PG_BACKEND,
             world_size=self.world_size,
             rank=self.rank,  # pyre-ignore[16]
             init_method=f"file://{self.file_name}",  # pyre-ignore[16]
