@@ -682,6 +682,11 @@ class VariableBuilder:
         elif istype(value, frozenset) and (
             ConstantVariable.is_literal(x) for x in value
         ):
+            # TODO: the `is_literal` check above is futile, because we are
+            # missing a `all` call around this generator object; this means we
+            # always wrap a fronzent with 1 layer of `ConstantVariable`, which
+            # interacts in a subtle way with `ConstantVariable.create`.
+            #
             # For frozenset, we can guard by object ID instead of value
             # equality, this allows us to handle non-literal values
             self.install_guards(GuardBuilder.ID_MATCH)

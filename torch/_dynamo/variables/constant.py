@@ -8,7 +8,6 @@ from torch._dynamo.source import GetItemSource
 
 from .. import variables
 from ..exc import unimplemented, UserError, UserErrorType
-from ..guards import GuardBuilder, install_guard
 from ..utils import common_constant_types, istype, np
 from .base import typestr, VariableTracker
 
@@ -37,9 +36,22 @@ _type_to_assert_reason = {
 class ConstantVariable(VariableTracker):
     @staticmethod
     def create(value, **kwargs) -> VariableTracker:
+        """
+        Create a `ConstantVariable` based on the given value.
+
+        NOTE: the caller must install the proper guards if needed; most often
+        the guard will be `CONSTANT_MATCH`.
+        """
         source = kwargs.get("source", None)
 
         # Routing for supported collection literals.
+        #
+        # TODO for the items, we should probably use
+        # `LazyVariableTracker.create` or `VariableTracker.build` here rather
+        # than `ConstantVariable.create`, which could be too restrictive, e.g.,
+        # say the item is a function that gets loaded and called elsewhere
+        # later (`ConstantVariable` doesn't implement `call_function`). This
+        # interacts in a subtle way with `VariableBuilder._wrap`.
         if isinstance(value, (set, frozenset)):
             items = [ConstantVariable.create(x) for x in value]
             return variables.SetVariable(items, **kwargs)
@@ -47,8 +59,6 @@ class ConstantVariable(VariableTracker):
             items = []
             for i, x in enumerate(value):
                 item_source = GetItemSource(source, i) if source else None
-                if item_source:
-                    install_guard(item_source.make_guard(GuardBuilder.CONSTANT_MATCH))
                 items.append(
                     ConstantVariable.create(
                         x,

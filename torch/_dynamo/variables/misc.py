@@ -145,8 +145,7 @@ class SuperVariable(VariableTracker):
             return GetAttrVariable(self, name)
         if source:
             install_guard(source.make_guard(GuardBuilder.CONSTANT_MATCH))
-            return variables.ConstantVariable.create(value, source=source)
-        return variables.ConstantVariable.create(value)
+        return variables.ConstantVariable.create(value, source=source)
 
     def call_method(
         self,
