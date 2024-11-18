@@ -2812,11 +2812,8 @@ class Scheduler:
         ) -> List[ir.Buffer]:
             output = []
             for rd in node.read_writes.reads:
-                name = rd.name
-                if name not in self.name_to_buf:
-                    continue
-                buf = self.name_to_buf[name]
-                if len(buf.users) == 1:
+                buf = self.name_to_buf.get(rd.name)
+                if buf and len(buf.users) == 1 and buf.node.has_tensor_output():
                     output.append(buf.node)
             return output
 
