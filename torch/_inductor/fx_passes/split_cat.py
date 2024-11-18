@@ -1120,7 +1120,9 @@ class UnbindCatRemover(SplitCatSimplifier):
             return
         # we need to check if the getitem indices from unbind are consecutive and all go to the same cat node
         # before we do the unbind remove, otherwise it will hit the error when we unbind part of them
-        getitem_indices = [getitem_node.args[1] for getitem_node in unbind_node.users.keys()]
+        getitem_indices = [
+            getitem_node.args[1] for getitem_node in unbind_node.users.keys()
+        ]
         if not is_sorted_and_consecutive(getitem_indices) or len(  # type: ignore[arg-type]
             getitem_indices
         ) != len(

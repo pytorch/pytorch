@@ -1116,7 +1116,9 @@ def convert(
     # for dynamic quant ops or weight only quant ops
     _run_weight_observers(model, backend_config)
 
-    graph_inputs: List[str] = [node.name for node in model.graph.nodes if node.op == "placeholder"]
+    graph_inputs: List[str] = [
+        node.name for node in model.graph.nodes if node.op == "placeholder"
+    ]
 
     # additional state to override inputs to be quantized, if specified
     # by the user

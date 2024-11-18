@@ -45,12 +45,15 @@ def default_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     assert isinstance(select_strategy, OpStrategy)
     # we create new DTensorSpecs even for default strategy to assure that
     # the tensor metas are distinct between the arguments and outputs
-    default_strategy = [PlacementStrategy(
-                output_specs=DTensorSpec(
-                    mesh=strategy.output_spec.mesh,
-                    placements=strategy.output_spec.placements,
-                )
-            ) for strategy in select_strategy.strategies]
+    default_strategy = [
+        PlacementStrategy(
+            output_specs=DTensorSpec(
+                mesh=strategy.output_spec.mesh,
+                placements=strategy.output_spec.placements,
+            )
+        )
+        for strategy in select_strategy.strategies
+    ]
     return OpStrategy(default_strategy)
 
 

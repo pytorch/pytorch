@@ -2106,7 +2106,11 @@ class AotCodeCompiler:
             gpu_codecache: Union[ROCmCodeCache, CUDACodeCache] = (
                 ROCmCodeCache() if torch.version.hip else CUDACodeCache()
             )
-            kernels_o = [entry.output_path for entry in gpu_codecache.cache.values() if entry.output_path.endswith(".o")]
+            kernels_o = [
+                entry.output_path
+                for entry in gpu_codecache.cache.values()
+                if entry.output_path.endswith(".o")
+            ]
             kernels_o = " ".join(kernels_o)
 
             output_name, output_dir = get_name_and_dir_from_output_file_path(output_so)

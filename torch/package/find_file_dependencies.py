@@ -60,7 +60,9 @@ class _ExtractModuleReferences(ast.NodeVisitor):
                 elif hasattr(node, "keywords"):
                     for keyword in node.keywords:
                         if keyword.arg == "fromlist":
-                            fromlist.extend(self._grab_node_str(v) for v in keyword.value.elts)
+                            fromlist.extend(
+                                self._grab_node_str(v) for v in keyword.value.elts
+                            )
                 if len(node.args) > 4:
                     level = self._grab_node_int(node.args[4])
                 elif hasattr(node, "keywords"):

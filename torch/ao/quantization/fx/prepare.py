@@ -1219,9 +1219,12 @@ def _maybe_insert_observers_before_graph_output(
             else:
                 return maybe_node
         elif isinstance(maybe_node, (list, tuple)):
-            results = [_recursive_maybe_replace_node_with_obs(
-                        inner_node, model, named_modules, graph
-                    ) for inner_node in maybe_node]
+            results = [
+                _recursive_maybe_replace_node_with_obs(
+                    inner_node, model, named_modules, graph
+                )
+                for inner_node in maybe_node
+            ]
             if isinstance(maybe_node, list):
                 return results
             else:
@@ -1240,7 +1243,10 @@ def _maybe_insert_observers_before_graph_output(
                 "Unhandled type for returned node:", maybe_node
             )
 
-    new_args = [_recursive_maybe_replace_node_with_obs(old_arg, model, named_modules, graph) for old_arg in graph_output_node.args]
+    new_args = [
+        _recursive_maybe_replace_node_with_obs(old_arg, model, named_modules, graph)
+        for old_arg in graph_output_node.args
+    ]
 
     graph_output_node.args = tuple(new_args)  # type: ignore[assignment]
 

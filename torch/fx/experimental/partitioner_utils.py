@@ -303,7 +303,9 @@ def get_latency_of_partitioned_graph(
         as the starting points of all the paths
         """
         # If a partition has no parents, then it is a top partition
-        top_partitions = [partition for partition in partitions if len(partition.parents) == 0]
+        top_partitions = [
+            partition for partition in partitions if len(partition.parents) == 0
+        ]
         return top_partitions
 
     top_partitions = get_top_partitions(partitions)

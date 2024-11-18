@@ -72,7 +72,11 @@ def _get_tensor_ops():
     for elem in dir(torch.Tensor):
         if not _hidden(elem):
             schemas = torch._C._jit_get_schemas_for_operator("aten::" + elem)
-            methods.extend(_emit_schema("Tensor", elem, schema, arg_start=1) for schema in schemas if is_tensor_method(schema))
+            methods.extend(
+                _emit_schema("Tensor", elem, schema, arg_start=1)
+                for schema in schemas
+                if is_tensor_method(schema)
+            )
 
     return "Supported Tensor Methods", methods
 
@@ -114,7 +118,11 @@ def _get_nn_functional_ops():
             if builtin is not None:
                 schemas = torch._C._jit_get_schemas_for_operator(builtin)
                 # remove _tan but not __and__
-                functions.extend(_emit_schema(name, elem, schema) for schema in schemas if not _hidden(elem))
+                functions.extend(
+                    _emit_schema(name, elem, schema)
+                    for schema in schemas
+                    if not _hidden(elem)
+                )
     return "Supported PyTorch Functions", functions
 
 
@@ -160,7 +168,9 @@ def _get_torchscript_builtins():
         builtin = _find_builtin(fn)
         if builtin is not None:
             schemas = torch._C._jit_get_schemas_for_operator(builtin)
-            functions.extend(_emit_schema(mod.__name__, fn.__name__, schema) for schema in schemas)
+            functions.extend(
+                _emit_schema(mod.__name__, fn.__name__, schema) for schema in schemas
+            )
 
     return "TorchScript Builtin Functions", functions
 

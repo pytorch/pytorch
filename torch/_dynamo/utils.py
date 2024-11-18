@@ -1458,7 +1458,10 @@ def checkpoint_params(gm):
         rng_state = torch.clone(torch.random.get_rng_state())
         if torch.cuda.is_available():
             cuda_rng_state = torch.clone(torch.cuda.get_rng_state())
-        saved_state = [(param, param._version, torch.clone(param)) for param in itertools.chain(gm.parameters(), gm.buffers())]
+        saved_state = [
+            (param, param._version, torch.clone(param))
+            for param in itertools.chain(gm.parameters(), gm.buffers())
+        ]
 
     def restore():
         with torch.no_grad():

@@ -952,7 +952,10 @@ class PatternPrettyPrinter:
         assert hasattr(obj, "pretty_print")
         out_str = obj.pretty_print(pp=pp)
 
-        output = [f"{pp.memoized_objs_names[key]} = {pp.memoized_objs_pp[key]}" for key in pp.memoized_objs_names]
+        output = [
+            f"{pp.memoized_objs_names[key]} = {pp.memoized_objs_pp[key]}"
+            for key in pp.memoized_objs_names
+        ]
 
         output.append(f"{output_name} = {out_str}")
 

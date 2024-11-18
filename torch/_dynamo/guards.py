@@ -2518,7 +2518,9 @@ def recompilation_reason_for_no_tensor_aliasing_guard(guard_manager, scope):
         tensor_id = id(eval(tensor_source, global_scope, scope))
         ids_to_source[tensor_id].append(tensor_source)
 
-    duplicate_tensors = [f"{ids_to_source[key]}" for key in ids_to_source if len(ids_to_source[key]) > 1]
+    duplicate_tensors = [
+        f"{ids_to_source[key]}" for key in ids_to_source if len(ids_to_source[key]) > 1
+    ]
 
     reason = ", ".join(duplicate_tensors)
     return [f"Duplicate tensors found: {reason}"]

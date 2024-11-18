@@ -1706,7 +1706,10 @@ class ScheduleLoopedBFS(PipelineScheduleMulti):
         rank_ops: List[Optional[_Action]] = [None for _ in range(rank)]
 
         for stage_index in stage_indices:
-            rank_ops.extend(_Action(stage_index, _ComputationType.FORWARD, mb_index) for mb_index in range(self._n_microbatches))
+            rank_ops.extend(
+                _Action(stage_index, _ComputationType.FORWARD, mb_index)
+                for mb_index in range(self._n_microbatches)
+            )
 
         # wait for the first backward to trickle up
         # which is 2 for every hop away
@@ -1714,7 +1717,10 @@ class ScheduleLoopedBFS(PipelineScheduleMulti):
         rank_ops.extend([None] * post_warmup_ops)
 
         for stage_index in reversed(stage_indices):
-            rank_ops.extend(_Action(stage_index, _ComputationType.FULL_BACKWARD, mb_index) for mb_index in reversed(range(self._n_microbatches)))
+            rank_ops.extend(
+                _Action(stage_index, _ComputationType.FULL_BACKWARD, mb_index)
+                for mb_index in reversed(range(self._n_microbatches))
+            )
         return rank_ops
 
 

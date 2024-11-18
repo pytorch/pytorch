@@ -957,7 +957,10 @@ def interface_script(mod_interface, nn_module):
 
         It is used to know which methods need to act as starting points for compilation.
         """
-        stubs = [make_stub_from_method(nn_module, method) for method in mod_interface.getMethodNames()]
+        stubs = [
+            make_stub_from_method(nn_module, method)
+            for method in mod_interface.getMethodNames()
+        ]
         return stubs
 
     return create_script_module(nn_module, infer_interface_methods_to_compile)

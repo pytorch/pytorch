@@ -648,7 +648,6 @@ def generate_reshape(constraint, counter):
 
     # then there must be exactly one occurrence of dyn
     else:
-
         new_target = [n for n in target if n != Dyn]
 
         # tensor 1
@@ -1038,9 +1037,11 @@ def apply_padding(
 
         assert len(simulate_padding + d1) == len(d2)
 
-
         # for every padding size, we also consider broadcasting
-        broadcast_padding = [broadcast_dim(simulate_padding, d2, d11, d12, j, True) for j in range(len(d2) - i)]
+        broadcast_padding = [
+            broadcast_dim(simulate_padding, d2, d11, d12, j, True)
+            for j in range(len(d2) - i)
+        ]
 
         # we consider the possibilities for broadcasting for every dimension. Since we already
         # padded d1, we do not consider it while broadcasting

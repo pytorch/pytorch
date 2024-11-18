@@ -308,7 +308,13 @@ class BaseSchedulerNode:
             dep = deps.pop()
             used_names.add(dep)
             if V.graph.name_to_buffer.get(dep):
-                deps.extend(alias for alias in V.graph.name_to_buffer[dep].get_inputs_that_alias_output() if alias not in used_names)
+                deps.extend(
+                    alias
+                    for alias in V.graph.name_to_buffer[
+                        dep
+                    ].get_inputs_that_alias_output()
+                    if alias not in used_names
+                )
         return used_names
 
     def prune_deps(self) -> None:
@@ -3319,7 +3325,11 @@ class Scheduler:
                 node1 = node2
                 node2 = tmp
 
-            deps = [dep for dep in node1.read_writes.reads | node1.read_writes.writes if dep in node2.read_writes.reads or dep in node2.read_writes.writes]
+            deps = [
+                dep
+                for dep in node1.read_writes.reads | node1.read_writes.writes
+                if dep in node2.read_writes.reads or dep in node2.read_writes.writes
+            ]
 
             return sum(self.dep_size_hint(dep) for dep in deps)
 

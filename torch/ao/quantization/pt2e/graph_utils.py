@@ -109,5 +109,9 @@ def find_sequential_partitions(
     typed_partitions_list = list(typed_partitions.values())
     fusion_candidates = itertools.product(*typed_partitions_list)
     # type: ignore[arg-type]
-    fused_partitions = [candidate for candidate in fusion_candidates if _partitions_sequential(candidate)]
+    fused_partitions = [
+        candidate
+        for candidate in fusion_candidates
+        if _partitions_sequential(candidate)
+    ]
     return fused_partitions

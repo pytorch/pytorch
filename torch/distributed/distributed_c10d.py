@@ -1370,7 +1370,9 @@ def _get_all_pg_configs() -> List[Dict[str, Any]]:
     Return the pg configuration of all the process groups.
 
     """
-    config_info: List[Dict[str, Any]] = [_get_pg_config(pg) for pg in _world.pg_map.keys()]
+    config_info: List[Dict[str, Any]] = [
+        _get_pg_config(pg) for pg in _world.pg_map.keys()
+    ]
     return config_info
 
 

@@ -155,11 +155,14 @@ def _get_binary_op_configs(
             (op_with_quantized_bop_scalar_variant, torch.relu),
             op_with_quantized_bop_scalar_variant,
         ]
-        binary_op_configs.extend(BackendPatternConfig(bop_pattern)
-                .set_dtype_configs(dtype_configs)  # noqa: E131
-                ._set_num_tensor_args_to_observation_type(
-                    num_tensor_args_to_observation_type_mapping
-                ) for bop_pattern in bop_patterns)
+        binary_op_configs.extend(
+            BackendPatternConfig(bop_pattern)
+            .set_dtype_configs(dtype_configs)  # noqa: E131
+            ._set_num_tensor_args_to_observation_type(
+                num_tensor_args_to_observation_type_mapping
+            )
+            for bop_pattern in bop_patterns
+        )
     # matmul
     binary_op_configs.append(
         BackendPatternConfig(torch.matmul).set_dtype_configs(
@@ -513,11 +516,14 @@ def _get_default_op_configs(
         torch.nn.functional.leaky_relu,
         torch.nn.functional.dropout,
     ]
-    configs = [BackendPatternConfig(op)
-            .set_observation_type(
-                ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT
-            )  # noqa: E131
-            .set_dtype_configs(dtype_configs) for op in default_ops]
+    configs = [
+        BackendPatternConfig(op)
+        .set_observation_type(
+            ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT
+        )  # noqa: E131
+        .set_dtype_configs(dtype_configs)
+        for op in default_ops
+    ]
 
     configs.append(
         BackendPatternConfig(torch.nn.functional.group_norm)

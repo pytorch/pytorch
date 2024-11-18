@@ -856,7 +856,9 @@ def _build_table(
     flops_column_width = DEFAULT_COLUMN_WIDTH
 
     src_column_width = None
-    stacks = [evt.stack for evt in events if evt.stack is not None and len(evt.stack) > 0]
+    stacks = [
+        evt.stack for evt in events if evt.stack is not None and len(evt.stack) > 0
+    ]
     has_stack = len(stacks) > 0
     if has_stack:
         src_column_width = (

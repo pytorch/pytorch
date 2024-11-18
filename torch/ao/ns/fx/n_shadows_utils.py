@@ -568,7 +568,9 @@ def create_one_transformed_and_logged_copy_of_subgraph(
                     and len(arg)
                     and isinstance(arg[0], Node)
                 ):
-                    new_args.extend(inner_arg for inner_arg in arg if isinstance(inner_arg, Node))
+                    new_args.extend(
+                        inner_arg for inner_arg in arg if isinstance(inner_arg, Node)
+                    )
 
             new_kwargs = {}
             for name, old_kwarg in first_node.kwargs.items():

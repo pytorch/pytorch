@@ -338,7 +338,10 @@ def split_args_kwargs_into_chunks(
             f"{len(args_split_dict)}, {len(kwargs_split)}"
         )
 
-    args_split = [tuple(chunk_args[i] for i in range(len(chunk_args))) for chunk_args in args_split_dict]
+    args_split = [
+        tuple(chunk_args[i] for i in range(len(chunk_args)))
+        for chunk_args in args_split_dict
+    ]
 
     return args_split, kwargs_split
 

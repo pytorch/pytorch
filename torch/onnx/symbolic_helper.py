@@ -360,7 +360,10 @@ def quantized_args(
             for descriptor, arg in descriptor_args:
                 # ListConstruct
                 if _is_packed_list(arg):
-                    is_quantized.extend(_is_arg_quantized(descriptor, arg_input) for arg_input in arg.node().inputs())
+                    is_quantized.extend(
+                        _is_arg_quantized(descriptor, arg_input)
+                        for arg_input in arg.node().inputs()
+                    )
                 else:
                     is_quantized.append(_is_arg_quantized(descriptor, arg))
 
