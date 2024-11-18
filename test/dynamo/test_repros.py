@@ -6338,6 +6338,30 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         res = opt_mod(x)
         self.assertEqual(ref, res)
 
+    def test_symnode_is_op(self):
+        @torch.compile(backend="eager", fullgraph=True, dynamic=True)
+        def f(x, xs):
+            if x.size(0) is xs:
+                return x + 1
+            else:
+                return x * 2
+
+        t = torch.randn(2)
+        res = f(t, [1, 2])
+        self.assertEqual(t * 2, res)
+
+    def test_symnode_is_not_op(self):
+        @torch.compile(backend="eager", fullgraph=True, dynamic=True)
+        def f(x, xs):
+            if x.size(0) is not xs:
+                return x + 1
+            else:
+                return x * 2
+
+        t = torch.randn(2)
+        res = f(t, [1, 2])
+        self.assertEqual(t + 1, res)
+
 
 instantiate_parametrized_tests(ReproTests)
 
