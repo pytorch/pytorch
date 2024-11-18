@@ -819,7 +819,7 @@ class CppMicroBrgemm(CppMicroGemm):
     at::native::cpublas::brgemm(
       M, N, K,
       lda, ldb, ldc,
-      1.f, accum ? 1.f : 0.f,
+      accum,
       A,
       B,
       C);
