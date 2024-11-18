@@ -27,10 +27,10 @@ class ExprPrinter(StrPrinter):
     # NB: this is OK to put here, because Mod is only defined for positive
     # numbers, and so across C/Python its behavior is consistent
     def _print_Mod(self, expr: sympy.Expr) -> str:
-        return self.stringify(expr.args, " % ", precedence(expr))
+        return self.stringify(expr.args, " % ", PRECEDENCE["Atom"] - 0.5)
 
     def _print_FloatTrueDiv(self, expr: sympy.Expr) -> str:
-        s = self.stringify(expr.args, " / ", PRECEDENCE["Atom"])
+        s = self.stringify(expr.args, " / ", PRECEDENCE["Atom"] - 0.5)
         return f"({s})"
 
     def _print_CleanDiv(self, expr: sympy.Expr) -> str:
@@ -122,7 +122,9 @@ class PythonPrinter(ExprPrinter):
         return self.stringify(expr.args, " or ", precedence(expr))
 
     def _print_ModularIndexing(self, expr: sympy.Expr) -> str:
-        x, div, mod = (self.parenthesize(arg, PRECEDENCE["Atom"]) for arg in expr.args)
+        x, div, mod = (
+            self.parenthesize(arg, PRECEDENCE["Atom"] - 0.5) for arg in expr.args
+        )
         if div != "1":
             x = f"({x} // {div})"
         return f"({x} % {mod})"
@@ -135,17 +137,17 @@ class PythonPrinter(ExprPrinter):
 
     # WARNING: this is dangerous for Triton, which has C-style modulus
     def _print_PythonMod(self, expr: sympy.Expr) -> str:
-        return self.stringify(expr.args, " % ", PRECEDENCE["Atom"])
+        return self.stringify(expr.args, " % ", PRECEDENCE["Atom"] - 0.5)
 
     # WARNING: this is dangerous for Triton, which has C-style modulus
     def _print_FloorDiv(self, expr: sympy.Expr) -> str:
-        x, div = (self.parenthesize(arg, PRECEDENCE["Atom"]) for arg in expr.args)
+        x, div = (self.parenthesize(arg, PRECEDENCE["Atom"] - 0.5) for arg in expr.args)
         return f"{x} // {div}"
 
     # WARNING: this is dangerous for Triton, when lhs, rhs > 2**53, Python
     # does a special algorithm
     def _print_IntTrueDiv(self, expr: sympy.Expr) -> str:
-        return self.stringify(expr.args, " / ", PRECEDENCE["Atom"])
+        return self.stringify(expr.args, " / ", PRECEDENCE["Atom"] - 0.5)
 
     def _helper_sqrt(self, expr: sympy.Expr) -> str:
         return f"math.sqrt({self._print(expr)})"
@@ -250,7 +252,9 @@ class CppPrinter(ExprPrinter):
         )
 
     def _print_Where(self, expr: sympy.Expr) -> str:
-        c, p, q = (self.parenthesize(arg, PRECEDENCE["Atom"]) for arg in expr.args)
+        c, p, q = (
+            self.parenthesize(arg, PRECEDENCE["Atom"] - 0.5) for arg in expr.args
+        )
         return f"{c} ? {p} : {q}"
 
     def _print_ModularIndexing(self, expr: sympy.Expr) -> str:
