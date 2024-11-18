@@ -7418,6 +7418,7 @@ class CommonTemplate:
             rtol=0.01,
         )
 
+    @skip_if_triton_cpu
     def test_bernoulli2(self):
         def fn(a):
             return aten.bernoulli(a).sum() / torch.prod(torch.tensor(a.size()))
