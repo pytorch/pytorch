@@ -25,6 +25,11 @@ from typing import (
 
 from torch._higher_order_ops.utils import autograd_not_implemented
 from torch._library.fake_class_registry import FakeScriptObject, maybe_to_fake_obj
+from torch._subclasses.fake_impls import (
+    _deregister_op_impl,
+    _is_op_registered_to_fake_rule,
+    register_op_impl,
+)
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx._utils import first_call_function_nn_module_stack
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
@@ -224,6 +229,31 @@ def _override_composite_implicit_decomp(cia_ops_to_callable, safe=True):
                 decomp_callable
             )
 
+        # [NOTE] Directly registering fake tensor rule to CIA ops
+        # The problem we are facing here is if your CIA custom rule
+        # says we want to preserve the op, we will return NotImplemented.
+        # Unfortunately, this will invoke meta device tracing in fake tensor
+        # resulting in divergent behaviour for CIA kernels that has device based
+        # branching (one case is torch.ops.aten.scaled_dot_product.attention)
+        # To get around this issue, we register direct fake impl so that we
+        # run the kernel before we actually try to decompose the op in FakeTensorMode.
+        # Note that is a no-op in most cases, because:
+        #   1) In post dispatch tracing, CIA would have already decomposed
+        #   2) Most CIA impl are device agnostic.
+        def _force_dispatch_to_orig_cia_callable(fake_tensor_mode, op, *args, **kwargs):
+            orig_cia_callable = kwargs["original_callable"]
+            del kwargs["original_callable"]
+            with fake_tensor_mode:
+                return orig_cia_callable(*args, **kwargs)
+
+        if not _is_op_registered_to_fake_rule(op_overload):
+            register_op_impl(op_overload)(
+                functools.partial(
+                    _force_dispatch_to_orig_cia_callable,
+                    original_callable=orig_cia_callable,
+                )
+            )
+
         for key in _BACKEND_KEYS_TO_OVERRIDE:
             if key not in op_overload.py_kernels:
                 # [NOTE] Registering old CIA to Backend kernel
@@ -250,6 +280,7 @@ def _override_composite_implicit_decomp(cia_ops_to_callable, safe=True):
             op.py_kernels.clear()
             op.py_kernels.update(saved_tables[op])
             op._dispatch_cache.clear()
+            _deregister_op_impl(op)
 
 
 @contextmanager

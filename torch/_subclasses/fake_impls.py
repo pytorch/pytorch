@@ -142,6 +142,19 @@ def register_op_impl(run_impl_check: Union[Callable[[OpOverload], bool], OpOverl
     return impl_decorator
 
 
+def _is_op_registered_to_fake_rule(op):
+    return op in op_implementations_dict
+
+
+def _deregister_op_impl(op):
+    if op in op_implementations_dict:
+        del op_implementations_dict[op]
+    for check, impl in op_implementations_checks:
+        if check is op:
+            op_implementations_checks.remove((check, impl))
+            break
+
+
 @register_op_impl(op_implementations_dict.__contains__)
 def dispatch_to_op_implementations_dict(fake_mode, func, *args, **kwargs):
     return op_implementations_dict[func](fake_mode, func, *args, **kwargs)
