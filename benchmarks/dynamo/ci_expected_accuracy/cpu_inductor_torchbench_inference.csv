@@ -58,7 +58,7 @@ detectron2_fasterrcnn_r_101_dc5,pass,42
 
 
 
-detectron2_fasterrcnn_r_101_fpn,pass,46
+detectron2_fasterrcnn_r_101_fpn,pass,44
 
 
 
@@ -82,7 +82,7 @@ detectron2_maskrcnn_r_101_c4,fail_accuracy,57
 
 
 
-detectron2_maskrcnn_r_101_fpn,pass,63
+detectron2_maskrcnn_r_101_fpn,pass,61
 
 
 
