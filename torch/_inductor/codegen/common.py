@@ -152,6 +152,10 @@ class WorkspaceArg:
     def layout(self):
         return self.get_layout()
 
+    get_output_spec = get_layout
+    maybe_get_output_spec = get_layout
+    maybe_get_layout = get_layout
+
     def get_size(self):
         return [self.count]
 
