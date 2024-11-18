@@ -21,9 +21,8 @@ CacheEntry* ExtraState::get_first_entry() {
   return &this->cache_entry_list.front();
 }
 
-ExtraState::ExtraState(PyCodeObject* orig_code_arg) {
-  orig_code = orig_code_arg;
-}
+ExtraState::ExtraState(PyCodeObject* orig_code_arg)
+    : orig_code(orig_code_arg) {}
 
 void ExtraState::move_to_front(CacheEntry* cache_entry) {
   CHECK(cache_entry->_owner == this);
