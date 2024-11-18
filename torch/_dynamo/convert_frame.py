@@ -859,6 +859,14 @@ def _compile(
 
     chromium_event_log.reset()
     chromium_start_time = time.time_ns()
+    if ca_metrics := torch._dynamo.utils.consume_compiled_autograd_metrics(
+        locals.get("self")
+    ):
+        ca_start, ca_end = ca_metrics
+        chromium_event_log.log_event_start("compiled_autograd", ca_start, {})
+        chromium_event_log.log_event_end(
+            "compiled_autograd", ca_end, {}, ca_start, True
+        )
     chromium_event_log.log_event_start("dynamo", chromium_start_time, {})
 
     metrics_context = get_metrics_context()
