@@ -30,7 +30,7 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import Never, TypeAlias
+from typing_extensions import assert_never, Never, TypeAlias
 from unittest.mock import patch
 
 import sympy
@@ -346,7 +346,7 @@ def get_device_type(x: Union[IRNode, torch.device, None, str]) -> Optional[str]:
             return x.get_device().type
         except NoDevice:
             return None
-    raise NotImplementedError(f"get_device_type({x}: {type(x).__name__})")
+    assert_never(f"get_device_type({x}: {type(x).__name__})")
 
 
 class NoDevice(NotImplementedError):
