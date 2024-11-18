@@ -20,7 +20,9 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 from torch.utils._sympy.functions import (
     FloorDiv,
+    Mod,
     ModularIndexing,
+    PythonMod,
     RoundDecimal,
     RoundToInt,
 )
@@ -314,10 +316,37 @@ class ExprPrinterTests(InductorTestCase):
         self.assertExpectedInline(texpr(expr), """libdevice.llrint((1/2)*x)""")
 
     def test_print_mod(self):
-        expr = (sympy.Symbol("x", integer=True) - 1) % 2
-        self.assertExpectedInline(pexpr(expr), """(1 + x) % 2""")
-        self.assertExpectedInline(cexpr(expr), """(1L + x) % 2L""")
-        self.assertExpectedInline(texpr(expr), """(1 + x) % 2""")
+        x = sympy.Symbol("x", integer=True)
+        expr = Mod(x - 1, 2)
+        self.assertExpectedInline(pexpr(expr), """((-1) + x) % 2""")
+        self.assertExpectedInline(cexpr(expr), """((-1L) + x) % 2L""")
+        self.assertExpectedInline(texpr(expr), """((-1) + x) % 2""")
+
+        expr = (x - 10) % x
+        self.assertExpectedInline(pexpr(expr), """(-10) % x""")
+        self.assertExpectedInline(cexpr(expr), """(-10L) % x""")
+        self.assertExpectedInline(texpr(expr), """(-10) % x""")
+
+    def test_print_mod_index(self):
+        x = sympy.Symbol("x", integer=True)
+        ks = sympy.Symbol("ks", integer=True)
+        expr = ModularIndexing(x - 10, ks, ks)
+        self.assertExpectedInline(pexpr(expr), """((((-10) + x) // ks) % ks)""")
+        self.assertExpectedInline(
+            cexpr(expr),
+            """(static_cast<int64_t>(c10::div_floor_integer("""
+            """static_cast<int64_t>((-10L) + x), static_cast<int64_t>(ks))) % static_cast<int64_t>(ks))""",
+        )
+        self.assertExpectedInline(texpr(expr), """((((-10) + x) // ks) % ks)""")
+
+    def test_print_python_mod(self):
+        x = sympy.Symbol("x", integer=True)
+        expr = PythonMod(x - 10, x)
+        self.assertExpectedInline(pexpr(expr), """((-10) + x) % x""")
+        self.assertExpectedInline(cexpr(expr), """((-10L) + x) % x""")
+        self.assertExpectedInline(
+            texpr(expr), """triton_helpers.remainder_integer((-10) + x, x)"""
+        )
 
     @parametrize("ndigits", [-1, 0, 1])
     def test_print_round_decimal(self, ndigits):
