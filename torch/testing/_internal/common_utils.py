@@ -1403,6 +1403,7 @@ TEST_FAIRSEQ = _check_module_exists('fairseq')
 TEST_SCIPY = _check_module_exists('scipy')
 TEST_MKL = torch.backends.mkl.is_available()
 TEST_MPS = torch.backends.mps.is_available()
+MACOS_VERSION = float('.'.join(platform.mac_ver()[0].split('.')[:2]) or -1)
 TEST_XPU = torch.xpu.is_available()
 TEST_HPU = True if (hasattr(torch, "hpu") and torch.hpu.is_available()) else False
 TEST_CUDA = torch.cuda.is_available()
@@ -1857,7 +1858,7 @@ def skipIfXpu(func=None, *, msg="test doesn't currently work on the XPU stack"):
         return dec_fn(func)
     return dec_fn
 
-def skipIfMps(fn):
+def skipIfMPS(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
         if TEST_MPS:
@@ -1865,6 +1866,17 @@ def skipIfMps(fn):
         else:
             fn(*args, **kwargs)
     return wrapper
+
+
+def skipIfMPSOnMacOS13(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if TEST_MPS and int(MACOS_VERSION) == 13:
+            raise unittest.SkipTest("Test crashes MPSGraph on MacOS13")
+        else:
+            fn(*args, **kwargs)
+    return wrapper
+
 
 def skipIfHpu(fn):
     @wraps(fn)

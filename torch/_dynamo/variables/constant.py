@@ -41,9 +41,7 @@ class ConstantVariable(VariableTracker):
 
         # Routing for supported collection literals.
         if isinstance(value, (set, frozenset)):
-            items = []
-            for i, x in enumerate(value):
-                items.append(ConstantVariable.create(x))
+            items = [ConstantVariable.create(x) for x in value]
             return variables.SetVariable(items, **kwargs)
         elif isinstance(value, (list, tuple)):
             items = []
