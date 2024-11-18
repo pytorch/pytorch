@@ -315,7 +315,9 @@ extern "C" {{export_declaration}}
 {%- set tile_inp1 = tile_Y %}
 {%- endif %}
                     // silu-mul epilogues
-                    {{ generate_epilogue() }}
+                    {{ kernel.silu_mul(
+                        tile_acc, tile_acc1, tile_inp, tile_inp1, tile_Y, has_gate_bias, has_up_bias, micro_gemm.name
+                    ) }}
                 }
             }
         }
