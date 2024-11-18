@@ -59,9 +59,6 @@ _scaled_mm_out_cpu(const Tensor& mat1, const Tensor& mat2,
       mat1.sizes()[0], "x", mat1.sizes()[1], " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")");
 
   TORCH_INTERNAL_ASSERT((scale_a.numel() == 1 && scale_b.numel() == 1), "Now _scaled_mm only supports per-tensor scaling for CPU backend.");
-
-  // TORCH_CHECK(!scale_result || (scale_result->numel() == 1 && scale_result->scalar_type() == kFloat),
-  //      "scale_result must be a float scalar");
   TORCH_CHECK(!bias || bias->numel() == mat2.sizes()[1], "Bias must be size ", mat2.sizes()[1],
        " but got ", bias->numel());
 
@@ -137,8 +134,6 @@ _scaled_mm_out_cpu(const Tensor& mat1, const Tensor& mat2,
 
   op_attr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
   auto engine = ideep::engine::cpu_engine();
-  // TODO: Remove this try/catch when oneDNN provides API to notify
-  // framework whether current platform can run FP8 primitives.
   dnnl::matmul::primitive_desc primitive_desc;
   try {
     primitive_desc = with_bias

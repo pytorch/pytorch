@@ -444,10 +444,11 @@ class TestFP8Lowering(TestCase):
     @parametrize("shape", ("16,16,32", "1024,1024,512"))
     @parametrize("has_bias", (False, True))
     @parametrize("use_fast_accum", (False, True))
-    @parametrize("device", ("cuda", "cpu"))
     def test_tensorwise_scaling(
         self, dtype: torch.dtype, shape: str, has_bias: bool, use_fast_accum: bool
     ):
+        if dtype is torch.float32 and has_bias:
+            self.skipTest("bias is not supported when output dtype is float32")
 
         device = "cuda"
         dtype_float8 = torch.float8_e4m3fn
