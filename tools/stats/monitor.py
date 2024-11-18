@@ -10,7 +10,6 @@ from typing import Any
 
 import psutil  # type: ignore[import]
 
-
 def get_processes_running_python_tests() -> list[Any]:
     python_processes = []
     for process in psutil.process_iter():
@@ -84,8 +83,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--log-interval",
         type=int,
-        default=10,
-        help="set time interval for logging utilization data, default is 10 seconds",
+        default=5,
+        help="set time interval for logging utilization data, default is 5 seconds",
     )
     args = parser.parse_args()
     return args
@@ -158,8 +157,8 @@ if __name__ == "__main__":
                     stats[f"total_gpu_mem_utilization_{idx}"] = gpu_utilization.memory
             if has_amdsmi:
                 for idx,handle in enumerate(gpu_handles):
-                    stats[r"total_gpu_utilization_{idx}"] = amdsmi.amdsmi_get_gpu_activity(handle)["gfx_activity"]
-                    stats[r"total_gpu_mem_utilization_{idx}"] = amdsmi.amdsmi_get_gpu_activity(handle)["umc_activity"]
+                    stats[f"total_gpu_utilization_{idx}"] = amdsmi.amdsmi_get_gpu_activity(handle)["gfx_activity"]
+                    stats[f"total_gpu_mem_utilization_{idx}"] = amdsmi.amdsmi_get_gpu_activity(handle)["umc_activity"]
         except Exception as e:
             stats = {
                 "time": datetime.datetime.now(timezone.utc).isoformat("T") + "Z",
