@@ -1,6 +1,9 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import contextlib
 import logging
+import warnings
+from typing import Any, Callable, List, Tuple, Union
 
 import torch
 import torch._subclasses.functional_tensor
@@ -25,6 +28,7 @@ from torch._higher_order_ops.utils import (
     saved_tensors_and_symints,
     unique_graph_id,
     UnsupportedAliasMutationException,
+    validate_subgraph_args_types,
 )
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -55,6 +59,7 @@ class CondOp(HigherOrderOperator):
         super().__init__("cond")
 
     def __call__(self, pred, true_fn, false_fn, operands):
+        validate_subgraph_args_types(operands)
         return super().__call__(pred, true_fn, false_fn, operands)
 
 
@@ -62,7 +67,12 @@ cond_op = CondOp()
 
 
 @exposed_in("torch")
-def cond(pred, true_fn, false_fn, operands):
+def cond(
+    pred: Union[bool, int, float, torch.Tensor],
+    true_fn: Callable,
+    false_fn: Callable,
+    operands: Union[Tuple, List] = (),
+) -> Any:
     r"""
     Conditionally applies `true_fn` or `false_fn`.
 
@@ -95,7 +105,8 @@ def cond(pred, true_fn, false_fn, operands):
           have consistent input and outputs, meaning the inputs have to be
           the same, and the outputs have to be the same type and shape.
 
-        operands (Tuple of possibly nested dict/list/tuple of torch.Tensor): A tuple of inputs to the true/false functions.
+        operands (Tuple of possibly nested dict/list/tuple of torch.Tensor): A tuple of inputs to the
+          true/false functions. It can be empty if true_fn/false_fn doesn't require input. Defaults to ().
 
     Example::
 
@@ -137,10 +148,15 @@ def cond(pred, true_fn, false_fn, operands):
     )
 
     if isinstance(pred, (bool, int, float)):
-        log.warning(
-            "Pred is a Python constant. When used with torch.cond, it executes only one of the branches."
-            " If you want torch.cond to perserve two branches, please make the predicate a boolean tensor or a SymBool."
-        )
+        # This is the non-strict export case. Strict export and torch.compile are
+        # handled above in dynamo.
+        if torch.compiler.is_compiling():
+            warnings.warn(
+                "Pred is a Python constant. When used with torch.cond, it specializes on one of the branches."
+                " If you want torch.cond to preserve two branches, please make the predicate a boolean tensor or a SymBool.",
+                UserWarning,
+            )
+        # This is the eager case. We can just run the true or false branch.
         if pred:
             return true_fn(*operands)
         else:
@@ -156,7 +172,7 @@ def cond(pred, true_fn, false_fn, operands):
             )
 
         if not callable(true_fn) or not callable(false_fn):
-            raise RuntimeError("Expect both branches to be callbale.")
+            raise RuntimeError("Expect both branches to be callable.")
 
         if not isinstance(operands, (tuple, list)) or pytree.tree_any(
             lambda t: not isinstance(t, torch.Tensor), operands
@@ -232,9 +248,6 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
     assert isinstance(
         operands, (list, tuple)
     ), f"Cond operands must be a list or tuple of tensors and SymInts {operands}"
-    assert all(
-        isinstance(o, (torch.Tensor, torch.SymInt)) for o in operands
-    ), f"Cond operands must be a list of tensors and SymInts {operands}"
 
     true_graph = reenter_make_fx(true_fn)(*operands)
     false_graph = reenter_make_fx(false_fn)(*operands)
@@ -352,6 +365,9 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
 
 @cond_op.py_impl(DispatchKey.CompositeExplicitAutograd)
 def cond_op_dense(pred, true_fn, false_fn, operands):
+    assert all(
+        isinstance(o, (torch.Tensor, int)) for o in operands
+    ), f"Dense implementation operands must be a list of tensors and ints {operands}"
     mode = _get_current_dispatch_mode()
     assert mode is None, "Mode should never be enabled for CPU/CUDA key"
     if pred:
@@ -444,6 +460,14 @@ def cond_fake_tensor_mode(mode, pred, true_fn, false_fn, operands):
         raise RuntimeError("Unmatched number of outputs from cond() branches.")
 
     for true_out, false_out in zip(flat_true_outs, flat_false_outs):
+        if true_out is None or false_out is None:
+            if true_out is None and false_out is None:
+                continue
+            raise torch._dynamo.exc.CondOpArgsMismatchError(
+                f"Expected both branches to return None:"
+                f"\n  {true_fn.__name__} returns {true_out}"
+                f"\n  {false_fn.__name__} returns {false_out}"
+            )
         true_meta = _extract_tensor_metadata(true_out)
         false_meta = _extract_tensor_metadata(false_out)
         if true_meta != false_meta:

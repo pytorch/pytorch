@@ -1,7 +1,6 @@
 # mypy: ignore-errors
 
 import collections
-import os
 import copy
 import dis
 import enum
@@ -561,7 +560,6 @@ class Proxy:
 
     @classmethod
     def __torch_function__(cls, orig_method, types, args=None, kwargs=None):
-        print(f"{os.getpid()}:     Proxy.__torch_function__", file=sys.stderr)
         args = args if args else ()
         kwargs = kwargs if kwargs else {}
 
@@ -591,7 +589,6 @@ class Proxy:
         else:
             if isinstance(orig_method, torch._ops.HigherOrderOperator):
                 # TODO: Define how to symbolically trace HigherOrderOperators
-                print(f"{os.getpid()}: *** orig_method:", repr(orig_method), file=sys.stderr)
                 raise RuntimeError("Unable to symbolically trace HigherOrderOperators")
             return tracer.create_proxy(
                 "call_function",

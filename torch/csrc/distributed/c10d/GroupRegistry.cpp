@@ -11,6 +11,7 @@ class GroupRegistry {
  public:
   void register_group(
       std::string group_name,
+      // NOLINTNEXTLINE(performance-unnecessary-value-param)
       c10::intrusive_ptr<c10d::ProcessGroup> group) {
     std::unique_lock write_lock(lock_);
     auto [_, inserted] =

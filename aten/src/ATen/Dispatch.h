@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/core/DeprecatedTypeProperties.h>
+#include <c10/core/ScalarType.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Half.h>
@@ -101,24 +101,6 @@ namespace detail {
 inline at::ScalarType scalar_type(at::ScalarType s) {
   return s;
 }
-
-C10_DEPRECATED_MESSAGE(
-    "passing at::DeprecatedTypeProperties to an AT_DISPATCH macro is deprecated, "
-    "pass an at::ScalarType instead")
-inline at::ScalarType scalar_type(const at::DeprecatedTypeProperties& t) {
-  return t.scalarType();
-}
-
-C10_DEPRECATED_MESSAGE(
-    "AT_DISPATCH_ALL_TYPES_AND_HALF is deprecated, "
-    "use AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, ...) instead")
-inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF() {}
-
-C10_DEPRECATED_MESSAGE(
-    "AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX is deprecated, "
-    "use AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(at::ScalarType::Half, ...) "
-    "instead")
-inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
 
 } // namespace detail
 
@@ -824,14 +806,3 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
           at::ScalarType::Int, index_t, __VA_ARGS__) \
           AT_PRIVATE_CASE_TYPE_USING_HINT(           \
               at::ScalarType::Long, index_t, __VA_ARGS__))
-
-// ----------------------------------------------------------------------------
-// DEPRECATED MACROS, DON'T USE THESE
-// ----------------------------------------------------------------------------
-
-#define AT_DISPATCH_ALL_TYPES_AND_HALF(TYPE, NAME, ...) \
-  detail::deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF();  \
-  AT_DISPATCH_SWITCH(                                   \
-      TYPE,                                             \
-      NAME,                                             \
-      AT_DISPATCH_CASE_ALL_TYPES_AND(at::ScalarType::Half, __VA_ARGS__))

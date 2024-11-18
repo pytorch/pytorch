@@ -1131,8 +1131,14 @@
   result: other_t + (self_p > other_p).logical_or_(other_p.isnan()) * (self_t - other_t)
 
 - name: mean(Tensor self, *, ScalarType? dtype=None) -> Tensor
-  self: grad.expand_symint(self.sym_sizes()) / self.sym_numel()
-  result: auto_linear
+  dispatch:
+    Default:
+      self: grad.expand_symint(self.sym_sizes()) / self.sym_numel()
+      result: auto_linear
+    AutogradNestedTensor:
+      # TODO: replace this with grad.expand_as(self) / self.sym_numel() when that is supported
+      self: (ones_like(self) * grad) / self.sym_numel()
+      result: auto_linear
 
 - name: mean.dim(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   self: mean_backward(grad, self.sym_sizes(), dim, self.sym_numel(), keepdim)
@@ -1669,8 +1675,14 @@
   result: auto_element_wise
 
 - name: sum(Tensor self, *, ScalarType? dtype=None) -> Tensor
-  self: grad.expand_symint(self.sym_sizes())
-  result: auto_linear
+  dispatch:
+    Default:
+      self: grad.expand_symint(self.sym_sizes())
+      result: auto_linear
+    AutogradNestedTensor:
+      # TODO: replace this with grad.expand_as(self) when that is supported
+      self: ones_like(self) * grad
+      result: auto_linear
 
 - name: sum.dim_IntList(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   dispatch:

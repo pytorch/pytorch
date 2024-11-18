@@ -87,7 +87,7 @@ class FrameInitTests(torch._dynamo.test_case.TestCase):
             target_with_varkwargs.__code__: varkwargs_code2.__code__,
         }
 
-        empty_guard_manager = torch._dynamo.guards.GuardManager()
+        empty_guard_manager = torch._dynamo.guards.GuardManagerWrapper()
 
         def callback1(frame, cache_entry, frame_state):
             if frame.f_code in code_map1:

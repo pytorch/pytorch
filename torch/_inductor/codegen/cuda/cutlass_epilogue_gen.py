@@ -265,7 +265,7 @@ class CutlassEVTEpilogueArgumentFormatter:
                 result = pnode.inner_fn(index)
                 # each epilogue node results in a single "using" statement and may refer to the previous steps by name
                 if node.name is not None:
-                    formatter.aliases[node.name] = result
+                    formatter.aliases[node.name] = result  # type: ignore[assignment]
 
             res: str = formatter.getvalue(result)  # type: ignore[possibly-undefined]
             if _MAGIC_SYMPY_ERROR_STRING in res:

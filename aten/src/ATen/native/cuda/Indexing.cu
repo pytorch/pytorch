@@ -684,7 +684,7 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<std::optional<Ten
   }
 }
 
-REGISTER_CUDA_DISPATCH(index_put_with_sort_stub, &index_put_with_sort_kernel);
+REGISTER_CUDA_DISPATCH(index_put_with_sort_stub, &index_put_with_sort_kernel)
 
 void index_put_with_sort_quantized(Tensor & self, const c10::List<std::optional<Tensor>>& indices, const Tensor & value, double scale, int zero_point, bool unsafe) {
   if (indices.size() > (size_t)self.dim()) {
@@ -784,7 +784,7 @@ void index_put_with_sort_quantized(Tensor & self, const c10::List<std::optional<
   }
 }
 
-REGISTER_CUDA_DISPATCH(index_put_with_sort_quantized_stub, &index_put_with_sort_quantized);
+REGISTER_CUDA_DISPATCH(index_put_with_sort_quantized_stub, &index_put_with_sort_quantized)
 } //anonymous
 
 
@@ -1687,7 +1687,7 @@ void masked_fill_kernel_quantized(TensorIterator& iter, const Scalar& value, dou
     });
 }
 
-REGISTER_CUDA_DISPATCH(masked_fill_kernel_quantized_stub, &masked_fill_kernel_quantized);
+REGISTER_CUDA_DISPATCH(masked_fill_kernel_quantized_stub, &masked_fill_kernel_quantized)
 
 } // anonymous namespace
 

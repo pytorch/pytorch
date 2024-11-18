@@ -1,14 +1,11 @@
 # mypy: allow-untyped-defs
 import functools
-from typing import Optional
 
-import torch._inductor.runtime.hints
 from torch._inductor import config
 from torch._inductor.codegen.simd import IterationRangesRoot
 from torch._inductor.codegen.triton import triton_compute_type, TritonKernel
 from torch._inductor.runtime.triton_heuristics import split_scan_grid
 from torch._prims_common import prod
-from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import CeilDiv
 
 
@@ -31,22 +28,20 @@ class TritonSplitScanKernel(TritonKernel):
     def __init__(
         self,
         *groups,
-        index_dtype: str,
-        mutations: Optional[OrderedSet[str]] = None,
-        reduction_hint=torch._inductor.runtime.hints.ReductionHint.DEFAULT,
-        min_elem_per_thread=0,
+        pid_cache=None,
+        **kwargs,
     ) -> None:
+        assert pid_cache is None, "not supported"
         super().__init__(
             *groups,
-            index_dtype=index_dtype,
-            mutations=mutations,
-            pid_cache=None,
-            reduction_hint=reduction_hint,
-            min_elem_per_thread=min_elem_per_thread,
+            **kwargs,
         )
         self.no_x_dim = True
 
     def should_use_persistent_reduction(self) -> bool:
+        return False
+
+    def should_use_cooperative_reduction(self) -> bool:
         return False
 
     def initialize_range_tree(self, pid_cache):
