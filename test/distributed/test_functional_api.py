@@ -596,6 +596,7 @@ class TestCollectivesWithDistributedBackend(DistributedTestBase):
             store=FakeStore(),
         )
         allreduce(torch.randn(8, device=device), pg=dist.group.WORLD)
+        dist.destroy_process_group()
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @requires_nccl()
