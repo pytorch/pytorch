@@ -75,10 +75,10 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_TORCHDYNAMO,
     TEST_WITH_TORCHINDUCTOR,
     TEST_WITH_UBSAN,
-    TEST_XPU,
     TestCase,
     unMarkDynamoStrictTest,
     GPU_TYPES,
+    HAS_GPU,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map
