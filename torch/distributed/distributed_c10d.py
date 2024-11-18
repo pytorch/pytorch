@@ -3361,7 +3361,6 @@ def broadcast_object_list(
     if src is None and group_src is None:
         src = 0
     global_src = _canonicalize_group_rank(group, src, group_src, return_global=True)
-    group_src = _canonicalize_group_rank(group, src, group_src, return_global=False)
     if _rank_not_in_group(group):
         _warn_not_in_group("broadcast_object_list")
         return
