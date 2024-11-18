@@ -165,18 +165,16 @@ def get_all_run_attempts(workflow_run_id: int) -> list[int]:
     # artifacts
     bucket = get_s3_resource().Bucket("gha-artifacts")
     prefix = f"pytorch/pytorch/{workflow_run_id}/"
-    objs = bucket.objects.filter(
-        Prefix=prefix
-    )
+    objs = bucket.objects.filter(Prefix=prefix)
     run_attempts = set()
     for obj in objs:
-        no_prefix = obj.key[len(prefix):]
+        no_prefix = obj.key[len(prefix) :]
         try:
             run_attempt = int(no_prefix.split("/")[0])
             run_attempts.add(run_attempt)
         except ValueError:
             continue
-    return sorted(list(run_attempts))
+    return sorted(run_attempts)
 
 
 def upload_additional_info(

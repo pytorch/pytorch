@@ -1,7 +1,7 @@
 import argparse
 import sys
 
-from tools.stats.test_dashboard import upload_additional_info
+from tools.stats.test_dashboard import get_all_run_attempts, upload_additional_info
 from tools.stats.upload_test_stats import get_tests
 
 
