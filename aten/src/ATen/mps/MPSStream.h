@@ -39,11 +39,11 @@ namespace at::mps {
 //-----------------------------------------------------------------
 
 enum class SyncType {
-  NONE,                // no commit to command buffer
-  COMMIT,              // commit and flush the command buffer
-  COMMIT_AND_WAIT,     // flush and wait for command buffer execution to finish
+  NONE, // no commit to command buffer
+  COMMIT, // commit and flush the command buffer
+  COMMIT_AND_WAIT, // flush and wait for command buffer execution to finish
   COMMIT_AND_CONTINUE, // commit and continue with a new underlying command buffer
-  COMMIT_ADAPTIVE,     // commit adaptively based on available memory
+  COMMIT_ADAPTIVE, // commit adaptively based on available memory
   COMMIT_AND_CONTINUE_ROOT, // commit and continue, but also wait for the root command buffer to finish
 };
 

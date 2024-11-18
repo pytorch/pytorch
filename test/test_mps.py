@@ -1633,7 +1633,7 @@ class TestAvgPool(TestCaseMPS):
 
 class TestMPS(TestCaseMPS):
 
-    def test_sync(self, device="mps", dtype=torch.float):
+    def test_sync(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/139550#issuecomment-2468860559
         a = torch.arange(1000)
         b = torch.arange(1000)
