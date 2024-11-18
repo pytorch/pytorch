@@ -290,12 +290,23 @@ def error_check_native_functions(funcs: Sequence[NativeFunction]) -> None:
                 f"{f.structured_delegate}, but {f.structured_delegate} is not marked as structured. "
                 f"Consider adding 'structured=True' to the delegated operator"
             )
+
         # Check for reserved Python keywords
+        PYTHON_RESERVED_KEYWORDS = set(keyword.kwlist + keyword.softkwlist)
+        # List of pre-existing operators that are known to have reserved keywords
+        # Exclusion list is used to suppress the assertion for these operators
+        EXCLUSION_LIST = {
+            ("_has_compatible_shallow_copy_type", "from"),
+            ("random_.from", "from"),
+            ("uniform_", "from"),
+        }
+        
         for arg in f.func.arguments.flat_all:
-            if keyword.iskeyword(arg.name):
-                raise AssertionError(
-                    f"Argument name '{arg.name}' in function '{f.func.name}' is a reserved Python keyword."
-                )
+            if arg.name in PYTHON_RESERVED_KEYWORDS:
+                if (str(f.func.name), arg.name) not in EXCLUSION_LIST:
+                    raise AssertionError(
+                        f"Argument name '{arg.name}' in function '{f.func.name}' is a reserved Python keyword."
+                    )
         # See Note [resize_ in Functionalization]
         # resize_() is technically an inplace view op (and therefore needs the tag),
         # but it would be overkill to add a true "view" variant of resize.
@@ -1499,7 +1510,9 @@ def get_native_function_declarations_from_ns_grouped_kernels(
 {ns_helper.prologue}
 {newline.join(ordered_kernels)}
 {ns_helper.epilogue}
-        """.split(newline)
+        """.split(
+                newline
+            )
         )
     return declarations
 
@@ -1629,15 +1642,17 @@ TORCH_LIBRARY_IMPL({namespace}, {dispatch_key}, m) {{
                 lambda: {
                     "ns_prologue": ns_helper.prologue,
                     "ns_epilogue": ns_helper.epilogue,
-                    "dispatch_helpers": dest.gen_registration_helpers(backend_idx)
-                    if gen_dispatch_helpers
-                    else [],
+                    "dispatch_helpers": (
+                        dest.gen_registration_helpers(backend_idx)
+                        if gen_dispatch_helpers
+                        else []
+                    ),
                     "dispatch_anonymous_definitions": anonymous_definitions[
                         kernel_namespace
                     ],
-                    "static_init_dispatch_registrations": ""
-                    if skip_dispatcher_op_registration
-                    else registration_body,
+                    "static_init_dispatch_registrations": (
+                        "" if skip_dispatcher_op_registration else registration_body
+                    ),
                     "deferred_dispatch_registrations": "",
                     "dispatch_namespace": dispatch_key.lower(),
                     "dispatch_namespaced_definitions": ns_definitions[kernel_namespace],
@@ -1692,7 +1707,9 @@ def get_namespaced_declaration(
 {ns_helper.prologue}
 {newline.join(ordered_kernels)}
 {ns_helper.epilogue}
-        """.split(newline)
+        """.split(
+                newline
+            )
         )
     return declarations
 
@@ -2310,9 +2327,9 @@ def gen_source_files(
             f"Register{dispatch_key}.cpp",
             "RegisterDispatchKey.cpp",
             lambda: {
-                "extra_cuda_headers": extra_cuda_headers
-                if is_cuda_dispatch_key(dispatch_key)
-                else "",
+                "extra_cuda_headers": (
+                    extra_cuda_headers if is_cuda_dispatch_key(dispatch_key) else ""
+                ),
                 "external_backend_headers": "",
                 "dispatch_headers": dest.gen_registration_headers(
                     backend_index, per_operator_headers, rocm
@@ -2407,7 +2424,9 @@ def gen_source_files(
                         os.path.join(aoti_fm.install_dir, header_file_name)
                     ) as old_file:
                         old_header = old_file.read()
-                        assert old_header == new_header, """
+                        assert (
+                            old_header == new_header
+                        ), """
 
 WARNING: The generated AOTInductor C shim header files have unexpectedly changed. This
 indicates an AOTInductor fallback operator ABI backward compatibility breakage!!!
@@ -2499,12 +2518,12 @@ codegen to generate the correct cpp call for this op. Contact AOTInductor team f
     cpu_fm.write(
         "RegisterSchema.cpp",
         lambda: {
-            "aten_schema_registrations": []
-            if skip_dispatcher_op_registration
-            else aten_schema_registrations,
-            "schema_registrations": []
-            if skip_dispatcher_op_registration
-            else schema_registrations,
+            "aten_schema_registrations": (
+                [] if skip_dispatcher_op_registration else aten_schema_registrations
+            ),
+            "schema_registrations": (
+                [] if skip_dispatcher_op_registration else schema_registrations
+            ),
         },
     )
 
