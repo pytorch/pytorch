@@ -4328,7 +4328,7 @@ class TestCase(expecttest.TestCase):
             exected_failure_message (str, optional): The expected failure message if the
                 checkpoint fails to load. If None, the test will pass
         """
-        script = f"import torch;{import_string}torch.load('{file}', weights_only=True)"
+        script = f"import torch;{import_string}torch.load(r'{file}', weights_only=True)"
         cm = (
             self.assertRaisesRegex(RuntimeError, re.escape(expected_failure_message))
             if expected_failure_message else contextlib.nullcontext()
