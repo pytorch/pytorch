@@ -75,6 +75,10 @@ at::Tensor quantized_convolution(
   Attr attr =
       Attr(/*q_scale=*/1.0 / inv_output_scale, /*zp=*/output_zero_point);
 
+  auto ndim = act.ndimension();
+  if (bias.has_value()) {
+    attr = attr.append_bias(bias.value(), ndim - 2);
+  }
   construct_attr_by_post_op(
       binary_attr.has_value() ? binary_attr.value() : "none",
       binary_alpha.has_value() ? binary_alpha.value().to<double>() : 1.0,
@@ -85,10 +89,6 @@ at::Tensor quantized_convolution(
       unary_algorithm.has_value() ? unary_algorithm.value() : "",
       attr);
 
-  auto ndim = act.ndimension();
-  if (bias.has_value()) {
-    attr.append_bias(bias.value(), ndim - 2);
-  }
   TORCH_CHECK(
       3 == ndim || 4 == ndim || 5 == ndim,
       "Quantized convolution only supports 3D, 4D, 5D tensor");
@@ -112,9 +112,7 @@ at::Tensor quantized_convolution(
   dnnl::memory::dims _dilation = compatible_dilation(dilation);
   dnnl::post_ops po;
   // extract post ops
-  po = attr.extract_post_ops(output, /*is_quantized*/ true);
-  // set conv primitive scale and zero_point
-  std::vector<float> conv_scale = {1};
+  po = attr.extract_post_ops(output, /*is_quantized*/ true, output.scalar_type() == at::kByte || output.scalar_type() == at::kChar);
   int mask_ac = 0, mask_weight;
   // [Note: Per-channel quantization mask setting]
   // Per-channel quantization is on weight output channel mostly, mask_weight=
@@ -165,7 +163,6 @@ at::Tensor quantized_convolution(
       dnnl::convolution_forward(conv_fwd_pd);
 
   dnnl::memory src_m, weight_m, output_m;
-  Tensor src_blocked, weight_blocked, output_blocked = output;
 
   src_m = make_onednn_memory(src_md, engine, act.data_ptr());
   output_m = make_onednn_memory(output_md, engine, output.data_ptr());
@@ -185,8 +182,6 @@ at::Tensor quantized_convolution(
   src_zp_m = dnnl_memory_from_host_scalar(
       static_cast<int32_t>(act_zero_point), src_zp_tensor, engine);
   args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC, src_sc_m});
-
-  dnnl::memory::desc src_zp_md;
   if (src_need_zp) {
     args.insert({DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_SRC, src_zp_m});
   }
@@ -202,6 +197,7 @@ at::Tensor quantized_convolution(
   args.insert({DNNL_ARG_SCRATCHPAD, scratchpad_m});
 
   // Weight scale is now tensor in nature, directly create dnnl::memory from it
+  weight_scales = weight_scales.to(at::kFloat);
   dnnl::memory::desc weight_sc_md = dnnl::memory::desc(
       get_onednn_dims(weight_scales),
       dnnl::memory::data_type::f32,
