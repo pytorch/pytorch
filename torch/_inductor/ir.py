@@ -3866,6 +3866,9 @@ class NoneAsConstantBuffer(IRNode):
     def get_output_spec(self) -> OutputSpec:
         return NoneLayout(device=torch.device("meta"))
 
+    def has_tensor_output(self) -> bool:
+        return False
+
 
 @ir_dataclass
 class ShapeAsConstantBuffer(IRNode):
@@ -3876,6 +3879,9 @@ class ShapeAsConstantBuffer(IRNode):
 
     def codegen_reference(self, writer=None):  # type: ignore[no-untyped-def]
         return V.graph.wrapper_code.expr_printer(V.graph.sizevars.simplify(self.expr))
+
+    def has_tensor_output(self) -> bool:
+        return False
 
 
 @ir_dataclass(frozen=False)
