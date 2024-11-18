@@ -111,12 +111,9 @@ def _default_custom_combo_kernel_horizontal_partition(
                 len(large_pointwise),
             )
             not_reduction = [n for n in not_reduction if n not in large_pointwise]
-            for node in large_pointwise:
-                nodes_per_ndim.append([node])
+            nodes_per_ndim.extend([node] for node in large_pointwise)
 
-        for g in (not_reduction, short_reduction, long_reduction):
-            if g:
-                nodes_per_ndim.append(g)
+        nodes_per_ndim.extend(g for g in (not_reduction, short_reduction, long_reduction) if g)
 
     assert sum(len(p) for p in nodes_per_ndim) == len(nodes)
     return nodes_per_ndim

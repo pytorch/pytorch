@@ -1392,9 +1392,7 @@ class HalideKernel(SIMDKernel):
             result.append((call_str, arg))
             if isinstance(arg, TensorArg):
                 assert arg.offset == 0 and arg.alias_of is None
-                for alias in self.buffer_aliases.get(arg.name, ()):
-                    result.append(
-                        (
+                result.extend((
                             None,
                             TensorArg(
                                 alias,
@@ -1403,8 +1401,7 @@ class HalideKernel(SIMDKernel):
                                 arg.offset,
                                 alias_of=arg.name,
                             ),
-                        )
-                    )
+                        ) for alias in self.buffer_aliases.get(arg.name, ()))
         return result
 
     def halide_kernel_meta(self) -> HalideMeta:

@@ -247,8 +247,7 @@ class _TorchDispatchModeKey(Enum):
 def codegen_per_backend_entries() -> str:
     r = []
     for fk in FUNCTIONALITY_KEYS:
-        for bc in BACKEND_COMPONENTS:
-            r.append(f"    {fk}{bc} = auto()")
+        r.extend(f"    {fk}{bc} = auto()" for bc in BACKEND_COMPONENTS)
     return "\n".join(r)
 
 

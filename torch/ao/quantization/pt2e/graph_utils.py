@@ -108,8 +108,6 @@ def find_sequential_partitions(
 
     typed_partitions_list = list(typed_partitions.values())
     fusion_candidates = itertools.product(*typed_partitions_list)
-    fused_partitions = []
-    for candidate in fusion_candidates:
-        if _partitions_sequential(candidate):  # type: ignore[arg-type]
-            fused_partitions.append(candidate)
+    # type: ignore[arg-type]
+    fused_partitions = [candidate for candidate in fusion_candidates if _partitions_sequential(candidate)]
     return fused_partitions

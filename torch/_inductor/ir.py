@@ -5489,8 +5489,7 @@ class UserDefinedTritonKernel(ExternKernel):
             # https://github.com/triton-lang/triton/pull/5083
             # changes kernel.restore_idx to kernel.restore_value
             if hasattr(kernel, "restore_idx"):
-                for i in kernel.restore_idx:
-                    restore_value_args.append(kernel.fn.arg_names[i])
+                restore_value_args.extend(kernel.fn.arg_names[i] for i in kernel.restore_idx)
             else:
                 assert hasattr(kernel, "restore_value")
                 restore_value_args.extend(kernel.restore_value)

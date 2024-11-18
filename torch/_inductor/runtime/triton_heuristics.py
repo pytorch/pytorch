@@ -138,16 +138,13 @@ def autotune_hints_to_configs(
                     (1, block_size // 4, 1),
                     (1, 1, block_size // 4),
                 )
-            for xyz in xyz_options:
-                configs.append(
-                    triton_config(
+            configs.extend(triton_config(
                         size_hints,
                         *xyz,
                         num_elements_per_warp=(
                             device_props.warp_size if device_props.warp_size else 32
                         ),
-                    )
-                )
+                    ) for xyz in xyz_options)
 
     return configs
 

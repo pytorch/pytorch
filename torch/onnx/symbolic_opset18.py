@@ -69,8 +69,7 @@ def col2im(
     # convert [i0, i1, ..., in] into [i0, i0, i1, i1, ..., in, in]
     adjusted_padding = []
     for pad in padding:
-        for _ in range(2):
-            adjusted_padding.append(pad)
+        adjusted_padding.extend(pad for _ in range(2))
 
     num_dimensional_axis = symbolic_helper._get_tensor_sizes(output_size)[0]
     if not adjusted_padding:
