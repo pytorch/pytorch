@@ -270,7 +270,7 @@ jobs:
           docker stop "${{ env.CONTAINER_NAME }}"
 
       - name: Store Core dumps on GitHub
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         if: failure()
         with:
           name: coredumps-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}
