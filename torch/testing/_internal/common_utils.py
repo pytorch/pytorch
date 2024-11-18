@@ -4316,7 +4316,7 @@ class TestCase(expecttest.TestCase):
         self,
         file: pathlib.Path,
         import_string: str,
-        expected_failure_message: str | None = None
+        expected_failure_message: Optional[str] = None
     ) -> None:
         """
         Attempts weights_only `torch.load` in a subprocess. This is used to test that
