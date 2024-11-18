@@ -52,6 +52,7 @@ def construct_strides(
         strides[dim] = current_stride
         current_stride *= sizes[dim]
 
+
     return strides
 
 
