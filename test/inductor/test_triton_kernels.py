@@ -1408,46 +1408,6 @@ def forward(self, x_1, output_1):
         self.assertEqual(compiled_out, eager_out)
 
     @requires_gpu
-    def test_triton_kernel_reset_to_zero(self):
-        @triton.autotune(
-            configs=[
-                triton.Config({"BLOCK_SIZE": 128}, num_stages=3, num_warps=8),
-                triton.Config({"BLOCK_SIZE": 64}, num_stages=3, num_warps=8),
-            ],
-            key=["n_elements"],
-            reset_to_zero=["out_ptr"],
-        )
-        @triton.jit
-        def add_kernel_autotuned_reset(
-            in_ptr0,
-            in_ptr1,
-            out_ptr,
-            n_elements,
-            BLOCK_SIZE: "tl.constexpr",
-        ):
-            pid = tl.program_id(axis=0)
-            block_start = pid * BLOCK_SIZE
-            offsets = block_start + tl.arange(0, BLOCK_SIZE)
-            mask = offsets < n_elements
-            x = tl.load(in_ptr0 + offsets, mask=mask)
-            y = tl.load(in_ptr1 + offsets, mask=mask)
-            output = x + y
-            tl.store(out_ptr + offsets, output, mask=mask)
-
-        @torch.compile(fullgraph=True)
-        def f(x, y):
-            output = torch.zeros_like(x)
-            n_elements = output.numel()
-            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
-            add_kernel_autotuned_reset[grid](x, y, output, n_elements)
-            return output
-
-        x = torch.randn(4, device=GPU_TYPE)
-        msg = "Only configs, keys, and restore_value are supported for triton.autotune"
-        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
-            f(x, x)
-
-    @requires_gpu
     @common_utils.parametrize("dynamic", [False, True])
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_triton_kernel_triton_dtype(self, dynamic, backend):
@@ -2009,6 +1969,67 @@ def forward(self, arg0_1, arg1_1):
 
         # make sure x was restored after autotuning
         torch.testing.assert_close(x, prev + 1)
+
+    # we have to enable autotune at compile time for this test
+    @requires_gpu
+    @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
+    @common_utils.parametrize("autotune_at_compile_time", [True])
+    def test_triton_kernel_reset_to_zero(self, backend, autotune_at_compile_time):
+        if autotune_at_compile_time and backend != "inductor":
+            raise unittest.SkipTest("compile-time autotuning only exists in inductor")
+
+        @triton.autotune(
+            configs=[
+                triton.Config(
+                    {"BLOCK_SIZE": 64, "COND": 1234}, num_stages=3, num_warps=8
+                ),
+                triton.Config(
+                    {"BLOCK_SIZE": 32, "COND": 1234}, num_stages=3, num_warps=8
+                ),
+                triton.Config(
+                    {"BLOCK_SIZE": 16, "COND": 1234}, num_stages=3, num_warps=8
+                ),
+            ],
+            key=[],
+            reset_to_zero=["counter"],
+        )
+        @triton.jit
+        def increment_kernel(
+            in_ptr0,
+            counter,  # reset this to zero every time
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+            COND: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+
+            in_ptr_vals = tl.load(in_ptr0 + offsets, mask=mask)
+            count = tl.load(counter + offsets, mask=mask)
+            # count should always be zero
+            tl.store(in_ptr0 + offsets, in_ptr_vals + count, mask=mask)
+
+        @torch.compile(fullgraph=True, backend=backend)
+        def f(x, y):
+            n_elements = x.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            increment_kernel[grid](x, y, n_elements=n_elements)
+            return x
+
+        x = torch.rand(4, device=GPU_TYPE)
+        y = torch.clone(x)
+        rand = torch.rand(4, device=GPU_TYPE)
+
+        # during autotuning, x should not change in value
+        with torch._inductor.config.patch(
+            {"triton.autotune_at_compile_time": autotune_at_compile_time}
+        ):
+            # we will add rand a single time to x
+            f(x, rand)
+
+        self.assertEqual(y + rand, x)
 
     @requires_gpu
     @parametrize("dtype", (torch.float16, torch.float32, torch.float64))

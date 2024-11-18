@@ -1503,6 +1503,7 @@ class PythonWrapperCodegen(CodeGen):
         configs,
         kwargs,
         restore_value_args,
+        reset_to_zero_args,
     ):
         from torch.utils._triton import patch_triton_dtype_repr
 
@@ -1589,6 +1590,9 @@ class PythonWrapperCodegen(CodeGen):
 
         if restore_value_args:
             triton_meta["restore_value"] = tuple(restore_value_args)
+
+        if reset_to_zero_args:
+            triton_meta["reset_to_zero"] = tuple(reset_to_zero_args)
 
         # Distinguish between different functions using function id
         cache_key: List[Any] = [id(kernel.fn)]
