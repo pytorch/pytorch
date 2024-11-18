@@ -126,7 +126,7 @@ def get_view_test_cases():
     def mk_dense_subclass_dense_subclass():
         values = torch.randn(10, 5)
         offsets = torch.tensor([0, 3, 6, 10])
-        offsets2 = offsets.clone().detach()
+        offsets2 = offsets.detach().clone()
         return nested_view_from_values_offsets(
             nested_view_from_values_offsets(values, offsets).values(), offsets
         )
@@ -135,7 +135,7 @@ def get_view_test_cases():
 
     def mk_subclass_dense_subclass_dense():
         x = get_jagged_tensor(((2, 3, 4), 3), None, requires_grad=True)[0].clone()
-        offsets2 = x.offsets().clone().detach()
+        offsets2 = x.offsets().detach().clone()
         nt_view = nested_view_from_values_offsets(x.values(), offsets2).values()
 
     yield mk_subclass_dense_subclass_dense, "subclass_dense_subclass_dense"
@@ -1240,7 +1240,7 @@ class GraphModule(torch.nn.Module):
             x = test_class()
             ref0 = fn(x)
             ref1 = fn(4)
-            opt_fn = torch._dynamo.optimize("eager")(fn)
+            opt_fn = torch.compile(fn, backend="eager")
             res0 = opt_fn(x)
             res1 = opt_fn(4)
             self.assertEqual(ref0, res0)
@@ -1932,7 +1932,7 @@ class GraphModule(torch.nn.Module):
             return tt * tt.size()[0]
 
         a = torch.ones(3, 4, requires_grad=True)
-        b = a.clone().detach().requires_grad_(True)
+        b = a.detach().clone().requires_grad_(True)
         tt = TwoTensor(a, b)
 
         fw, bw = self._compile_check(f, [(tt,)], dynamic=True, call_backward=True)
@@ -2365,9 +2365,9 @@ class GraphModule(torch.nn.Module):
 
         out = f(x, i, y)
 
-        x_test = x.clone().detach().requires_grad_(True)
-        i_test = i.clone().detach().requires_grad_(True)
-        y_test = y.clone().detach().requires_grad_(True)
+        x_test = x.detach().clone().requires_grad_(True)
+        i_test = i.detach().clone().requires_grad_(True)
+        y_test = y.detach().clone().requires_grad_(True)
 
         out_test = f(x_test, i_test, y_test)
         torch.allclose(out, out_test)
