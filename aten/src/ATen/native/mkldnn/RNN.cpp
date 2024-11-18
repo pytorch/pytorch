@@ -71,7 +71,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_la
       TORCH_CHECK(false, "mkldnn_rnn_layer_backward: ATen not compiled with MKLDNN support");
     }
 
-REGISTER_NO_CPU_DISPATCH(lstm_mkldnn_stub);
+REGISTER_NO_CPU_DISPATCH(lstm_mkldnn_stub)
 
 } // namespace at::native
 
