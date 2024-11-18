@@ -52,7 +52,6 @@ env:
   DEPENDENCIES_DIR: c:\temp\dependencies
   ENABLE_APL: 1
   MSVC_VERSION : '14.36'
-  BUILD_TYPE: Release
   PYTORCH_SOURCES_DIR: src
 
 # dummy comment
@@ -116,8 +115,19 @@ jobs:
           ref: "nightly-for-win-arm64"
           path: "pytorch"
           submodules: recursive
+      {%- if config["package_type"] == 'libtorch' %}
+      - name: Build LibTorch
+        shell: cmd
+        env:
+          BUILD_TYPE: !{{ config["libtorch_config"] }}
+        run: |
+          "builder/windows/arm64/build_libtorch.bat"
+      {%- else %}
       - name: Build PyTorch
         shell: cmd
+        env:
+          BUILD_TYPE: Release
         run: |
           "builder/windows/arm64/build_pytorch.bat"
+      {%- endif %}
 {%- endfor %}

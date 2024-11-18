@@ -29,7 +29,6 @@ env:
   DEPENDENCIES_DIR: c:\temp\dependencies
   ENABLE_APL: 1
   MSVC_VERSION : '14.36'
-  BUILD_TYPE: Release
   PYTORCH_SOURCES_DIR: src
 
 # dummy comment
@@ -101,7 +100,9 @@ jobs:
           ref: "nightly-for-win-arm64"
           path: "pytorch"
           submodules: recursive
-      - name: Build PyTorch
+      - name: Build LibTorch
         shell: cmd
+        env:
+          BUILD_TYPE: debug
         run: |
-          "builder/windows/arm64/build_pytorch.bat"
+          "builder/windows/arm64/build_libtorch.bat"
