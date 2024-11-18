@@ -20684,7 +20684,7 @@ op_db: List[OpInfo] = [
             # AssertionError: Tensor-likes are not close!
             # Fails in cuda11.7
             # Error Log: https://github.com/pytorch/pytorch/actions/runs/3440108478/jobs/5738475757
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_compare_cpu', device_type=['cuda']),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_compare_cpu', device_type='cuda'),
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),),),
     # In training mode, feature_alpha_dropout currently doesn't support inputs of complex dtype
     # unlike when `train=False`, it supports complex inputs, hence 2 OpInfos to cover all cases
