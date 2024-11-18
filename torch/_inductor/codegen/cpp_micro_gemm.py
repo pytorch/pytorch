@@ -528,34 +528,23 @@ class CppMicroGemmAMX(CppMicroGemm):
     alignas(4096) {{input_t}} dequantized_B_buf[buf_size];
     {%- endif %}
 
-    auto load_dequantized_B = [&](int base_idx) {
+    auto load_dequantized_B = [&](int n) {
         // Load a tile of B & cache it in L1D.
-        // The assumption here is that if N would be a multiple of block_n.
-        {{input2_t}}* base_addr = const_cast<{{input2_t}}*>(B) + base_idx;
-        for (int idx_dq = 0, idx_q = 0; idx_dq < buf_size; idx_q += ldb, idx_dq += {{block_n}}) {
-        {%- if block_n in [16, 32] %}
+        // The assumption here is that if N would be a multiple of block_n,
+        // then B would be some consecutive blocks sized [k, block_n] elements each, so the
+        // first element of a subsequent [K, block_n] block would be right after the last
+        // element of the previous block sized [K x block_n] elements.
+        // This is implicitly being ensured by the current weight-packing implementation.
+        // Since [K, block_n] blocks are to be cached, the details of the weight-packing
+        // implementation can't be made transparent to the dequantization & cahing logic.
+        const int base_idx = K * n;
+        for (int idx = 0; idx < buf_size; idx += 32) {
             auto b_int8 = at::vec::Vectorized<int8_t>::loadu(
-                base_addr + idx_q,
-                static_cast<int64_t>({{block_n}})
-            );
-            auto b_bf16 = at::vec::convert<{{input_t}}>(b_int8);
-            b_bf16.store(dequantized_B_buf + idx_dq);
-        {%- elif block_n == 48 %}
-            // first 32 elements
-            auto b_int8_32 = at::vec::Vectorized<int8_t>::loadu(
-                base_addr + idx_q,
+                const_cast<{{input2_t}}*>(B) + base_idx + idx,
                 static_cast<int64_t>(32)
             );
-            auto b_bf16_32 = at::vec::convert<{{input_t}}>(b_int8_32);
-            b_bf16_32.store(dequantized_B_buf + idx_dq);
-            // next 16 elements
-            auto b_int8_16 = at::vec::Vectorized<int8_t>::loadu(
-                base_addr + idx_q + 32,
-                static_cast<int64_t>(16)
-            );
-            auto b_bf16_16 = at::vec::convert<{{input_t}}>(b_int8_16);
-            b_bf16_16.store(dequantized_B_buf + idx_dq + 32);
-        {%- endif %}
+            auto b_bf16 = at::vec::convert<{{input_t}}>(b_int8);
+            b_bf16.store(dequantized_B_buf + idx);
         }
     };
 {%- endif %}
