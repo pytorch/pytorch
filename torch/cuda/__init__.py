@@ -1110,9 +1110,7 @@ def _get_amdsmi_device_index(device: Optional[Union[int, Device]]) -> int:
     return idx_map[idx]
 
 
-def _get_amdsmi_memory_usage_in_bytes(
-    device: Optional[Union[Device, int]] = None
-) -> int:
+def _get_amdsmi_device_memory_used(device: Optional[Union[Device, int]] = None) -> int:
     handle = _get_amdsmi_handler()
     device = _get_amdsmi_device_index(device)
     # amdsmi_get_gpu_vram_usage returns mem usage in megabytes
@@ -1161,8 +1159,8 @@ def _get_amdsmi_clock_rate(device: Optional[Union[Device, int]] = None) -> int:
         return clock_info["clk"]
 
 
-def memory_usage_in_bytes(device: Optional[Union[Device, int]] = None) -> int:
-    r"""Return global (device) memory usage in bytes as given by `nvidia-smi` or `amd-smi`.
+def device_memory_used(device: Optional[Union[Device, int]] = None) -> int:
+    r"""Return used global (device) memory in bytes as given by `nvidia-smi` or `amd-smi`.
 
     Args:
         device (torch.device or int, optional): selected device. Returns
@@ -1176,7 +1174,7 @@ def memory_usage_in_bytes(device: Optional[Union[Device, int]] = None) -> int:
         handle = pynvml.nvmlDeviceGetHandleByIndex(device)
         return pynvml.nvmlDeviceGetMemoryInfo(handle).used
     else:
-        return _get_amdsmi_memory_usage_in_bytes(device)
+        return _get_amdsmi_device_memory_used(device)
 
 
 def memory_usage(device: Optional[Union[Device, int]] = None) -> int:
@@ -1638,6 +1636,7 @@ __all__ = [
     "default_stream",
     "device",
     "device_count",
+    "device_memory_used",
     "device_of",
     "empty_cache",
     "get_allocator_backend",
@@ -1681,7 +1680,6 @@ __all__ = [
     "memory_stats_as_nested_dict",
     "memory_summary",
     "memory_usage",
-    "memory_usage_in_bytes",
     "MemPool",
     "MemPoolContext",
     "use_mem_pool",

@@ -1529,6 +1529,10 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     def test_multiple_mask_calls(self):
+        if TEST_WITH_ROCM:
+            self.skipTest(
+                "ROCM BUG SEE: https://github.com/pytorch/pytorch/issues/140855"
+            )
         # Create inputs
         query = torch.randn(
             (1, 4, 512, 64), dtype=torch.float32, device="cuda", requires_grad=True
@@ -2964,6 +2968,61 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         with self.assertRaisesRegex(ValueError, expected_error_message):
             flex_attention(query, key, value)
+
+    @supported_platform
+    def test_captured_wrong_device_error_message(self):
+        means = torch.randn(64, 3).cuda()
+        length_scales = torch.logspace(0.001, 0.1, 8)
+
+        def euclidean_dist_pos_embed(score, b, h, q_idx, k_idx):
+            q_pos = means[q_idx]
+            k_pos = means[k_idx]
+            dist = (q_pos - k_pos).pow(2).sum(-1).sqrt()
+            scale = length_scales[h]
+            inv_dist = torch.exp(-dist / scale)
+            return inv_dist * score
+
+        expected_error_message = "Buffers cannot be created"
+
+        q, k, v = (torch.randn(1, 8, 64, 64, device="cuda") for _ in range(3))
+        with self.assertRaisesRegex(RuntimeError, expected_error_message):
+            torch.compile(flex_attention)(q, k, v, score_mod=euclidean_dist_pos_embed)
+
+    @supported_platform
+    def test_cant_lower_error_message(self):
+        # We can't lower a 256-element reduction inside a pointwise reduction
+        means = torch.randn(64, 256).cuda()
+        length_scales = torch.logspace(0.001, 0.1, 8).cuda()
+
+        def euclidean_dist_pos_embed(score, b, h, q_idx, k_idx):
+            q_pos = means[q_idx]
+            k_pos = means[k_idx]
+            dist = (q_pos - k_pos).pow(2).sum(-1).sqrt()
+            scale = length_scales[h]
+            inv_dist = torch.exp(-dist / scale)
+            return inv_dist * score
+
+        expected_error_message = "Buffers cannot be created"
+
+        q, k, v = (torch.randn(1, 8, 64, 64, device="cuda") for _ in range(3))
+        with self.assertRaisesRegex(RuntimeError, expected_error_message):
+            torch.compile(flex_attention)(q, k, v, score_mod=euclidean_dist_pos_embed)
+
+    @supported_platform
+    def test_reduction_unrolled(self):
+        # We can't lower a 256-element reduction inside a pointwise reduction
+        means = torch.randn(S, 3).cuda()
+        length_scales = torch.logspace(0.001, 0.1, H).cuda()
+
+        def euclidean_dist_pos_embed(score, b, h, q_idx, k_idx):
+            q_pos = means[q_idx]
+            k_pos = means[k_idx]
+            dist = (q_pos - k_pos).pow(2).sum(-1).sqrt()
+            scale = length_scales[h]
+            inv_dist = torch.exp(-dist / scale)
+            return inv_dist * score
+
+        self.run_test(euclidean_dist_pos_embed, torch.bfloat16)
 
     @supported_platform
     def test_invalid_block_size(self):
