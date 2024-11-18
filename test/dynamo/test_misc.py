@@ -10225,7 +10225,7 @@ ShapeEnv not equal: field values don't match:
 ShapeEnv not equal: field values don't match:
 
 ==> axioms: values don't match.
-  >  Left: {0 < Mod(s0, 3): False, Eq(0, Mod(s0, 3)): True, Eq(Mod(s0, 3), 0): True, False: False, Mod(s0, 3) <= 0: True, Ne(0, Mod(s0, 3)): False, Ne(Mod(s0, 3), 0): False, True: True}
+  >  Left: {(Mod(s0, 3)) <= 0: True, 0 < (Mod(s0, 3)): False, Eq(0, Mod(s0, 3)): True, Eq(Mod(s0, 3), 0): True, False: False, Ne(0, Mod(s0, 3)): False, Ne(Mod(s0, 3), 0): False, True: True}
   > Right: {}
 ==> divisible: values don't match.
   >  Left: {Mod(s0, 3)}
