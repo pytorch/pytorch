@@ -3,7 +3,7 @@ import sys
 import types
 from typing import Any, Callable, Dict, List, NamedTuple, Optional, Protocol, Union
 
-# CacheEntry has a `check_fn` field for the guard, and a `code` field for the code object.
+# CacheEntry has a `guard_manager` field for the guard, and a `code` field for the code object.
 from torch._C._dynamo.eval_frame import (
     _CacheEntry as CacheEntry,
     _ExtraState as ExtraState,
@@ -46,7 +46,7 @@ class GuardFn(Protocol):
 @dataclasses.dataclass
 class GuardedCode:
     code: types.CodeType
-    check_fn: GuardFn
+    guard_manager: GuardFn
     compile_id: CompileId
     trace_annotation: str = "Unknown"
 
@@ -67,7 +67,7 @@ DynamoCallback = Union[DynamoCallbackFn, None, bool]
 class DynamoGuardHook(Protocol):
     def __call__(
         self,
-        guard_fn: GuardFn,
+        guard_manager: GuardFn,
         code: types.CodeType,
         f_locals: Dict[str, object],
         index: int,

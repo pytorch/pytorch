@@ -13,10 +13,7 @@
  * Registration is done in torch/csrc/jit/codegen/cuda/register_interface.cpp
  */
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace torch::jit::fuser::cuda {
 
 TORCH_API std::atomic<bool>& getCudaFusionGuardMode();
 
@@ -52,7 +49,4 @@ TORCH_API bool isEnabled();
 TORCH_API bool setEnabled(bool is_enabled);
 TORCH_API bool canBeEnabled();
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::fuser::cuda

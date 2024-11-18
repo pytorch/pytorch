@@ -279,6 +279,7 @@ dispatch_keys = [
     DispatchKey.CUDA,
     DispatchKey.MPS,
     DispatchKey.XPU,
+    DispatchKey.SparseXPU,
     DispatchKey.SparseCUDA,
     DispatchKey.SparseCsrCUDA,
     DispatchKey.QuantizedCPU,
@@ -344,6 +345,9 @@ def is_structured_dispatch_key(dk: DispatchKey) -> bool:
 def is_ufunc_dispatch_key(dk: DispatchKey) -> bool:
     # For now, ufunc dispatch keys coincide with structured keys
     return dk in UFUNC_DISPATCH_KEYS
+
+
+dispatch_device_map = {is_cuda_dispatch_key: "cuda", is_xpu_dispatch_key: "xpu"}
 
 
 # This is oddly named ScalarType and not DType for symmetry with C++
