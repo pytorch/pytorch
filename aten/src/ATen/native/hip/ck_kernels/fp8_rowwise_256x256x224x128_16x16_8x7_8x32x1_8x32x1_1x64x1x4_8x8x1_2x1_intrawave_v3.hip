@@ -6,7 +6,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-#include "fp8_rowwise_common.h"
+#include <ATen/native/hip/ck_kernels/fp8_rowwise_common.h>
 
 at::Tensor
 fp8_rowwise_256x256x224x128_16x16_8x7_8x32x1_8x32x1_1x64x1x4_8x8x1_2x1_intrawave_v3(
