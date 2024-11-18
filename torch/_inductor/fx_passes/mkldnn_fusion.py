@@ -297,14 +297,6 @@ if torch._C._has_mkldnn:
             pass_number=0,
         )
         def fn(match, *args, **kwargs):
-            # TODO: Should take it as a broad linear-unary?
-            unary_attr = UnaryAttr("mlp_silu_mul")
-            computation_args = list(args)[:-3] + [
-                unary_attr.op_name,
-                unary_attr.scalars_attr,
-                unary_attr.algorithm_attr,
-            ]
-
             computation_args = [
                 args[0],
                 [args[1], kwargs["w2"]],
