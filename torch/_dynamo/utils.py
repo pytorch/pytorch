@@ -859,6 +859,9 @@ class CompilationMetrics:
     remote_fx_graph_cache_put_time_us: Optional[int] = None
     backward_cumulative_compile_time_us: Optional[int] = None
     end_time_us: Optional[int] = None
+    pre_grad_pass_time_us: Optional[int] = None
+    post_grad_pass_time_us: Optional[int] = None
+    joint_graph_pass_time_us: Optional[int] = None
     log_format_version: int = LOG_FORMAT_VERSION
 
 
@@ -1403,21 +1406,32 @@ def is_namedtuple_cls(cls):
     """Test if an object is a namedtuple or a (torch.return_types|torch.autograd.forward_ad).* quasi-namedtuple"""
     try:
         if issubclass(cls, tuple):
-            bases = getattr(cls, "__bases__", []) or [None]
             module = getattr(cls, "__module__", None)
-            return module in ("torch.return_types", "torch.autograd.forward_ad") or (
-                bases[0] is tuple and hasattr(cls, "_make") and hasattr(cls, "_fields")
-            )
+            if module in ("torch.return_types", "torch.autograd.forward_ad"):
+                return True
+            if isinstance(getattr(cls, "_fields", None), tuple) and callable(
+                getattr(cls, "_make", None)
+            ):
+                if cls.__bases__ == (tuple,):
+                    # This is a namedtuple type directly created by `collections.namedtuple(...)`
+                    return True
+                if (
+                    # Subclass of namedtuple
+                    is_namedtuple_cls(cls.__bases__[0])
+                    # For subclasses of namedtuple, the __new__ method should not be customized
+                    and cls.__new__ is cls.__bases__[0].__new__
+                ):
+                    return True
     except TypeError:
         pass
     return False
 
 
 @functools.lru_cache(1)
-def namedtuple_fields(cls):
+def namedtuple_fields(cls) -> Tuple[str, ...]:
     """Get the fields of a namedtuple or a torch.return_types.* quasi-namedtuple"""
     if cls is slice:
-        return ["start", "stop", "step"]
+        return ("start", "stop", "step")
 
     assert issubclass(cls, tuple)
     if hasattr(cls, "_fields"):
@@ -1431,11 +1445,12 @@ def namedtuple_fields(cls):
     # frustrating ones e.g. torch.return_types.max
     assert cls.__module__ == "torch.return_types"
     obj = cls(map(Marker, range(cls.n_fields)))
-    fields: List[Optional[str]] = [None] * cls.n_fields
+    fields: Dict[str, int] = {}
     for name in dir(obj):
         if name[0] != "_" and isinstance(getattr(obj, name), Marker):
-            fields[getattr(obj, name).index] = name
-    return fields
+            fields[name] = getattr(obj, name).index
+    assert len(fields) == cls.n_fields
+    return tuple(sorted(fields, key=fields.get))  # type: ignore[arg-type]
 
 
 def checkpoint_params(gm):
@@ -2202,7 +2217,9 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
         # no matter it's lazy module or not, we should copy to fake mode.
         nnmodule = deepcopy_to_fake_tensor(nnmodule, tx.fake_mode)
 
-    if node.name in ["interpolate", "is_integer", "wrapped_gradient"]:
+    if node.name in ["interpolate", "is_integer", "wrapped_gradient"] or any(
+        isinstance(a, complex) for a in args
+    ):
         # We need to specialize symfloats for now. Eventually we should do a tensorify pass in dynamo.
         args = tuple(
             float(arg)
