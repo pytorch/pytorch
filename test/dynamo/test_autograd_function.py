@@ -1018,8 +1018,8 @@ class GraphModule(torch.nn.Module):
 
         x_ref = torch.randn(2, requires_grad=True)
         y_ref = torch.randn(2, requires_grad=True)
-        x_test = x_ref.clone().detach().requires_grad_()
-        y_test = y_ref.clone().detach().requires_grad_()
+        x_test = x_ref.detach().clone().requires_grad_()
+        y_test = y_ref.detach().clone().requires_grad_()
 
         out_ref = foo(x_ref, y_ref)
         out_ref.sum().backward()
