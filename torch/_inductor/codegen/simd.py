@@ -1215,7 +1215,7 @@ class SIMDScheduling(BaseScheduling):
         buf_sizes = [
             buf.get_layout().storage_size()
             for buf in buffers
-            if not isinstance(buf.get_output_spec(), ir.MultiOutputLayout)
+            if buf.has_tensor_output()
         ]
 
         if not all(expr_fits_within_32bit(size) for size in buf_sizes):
