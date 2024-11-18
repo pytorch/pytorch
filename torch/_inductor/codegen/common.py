@@ -2687,6 +2687,7 @@ class KernelTemplate:
     def maybe_append_choice(self, choices, **kwargs):
         """
         Maybe generates a new ChoiceCaller and appends it into existing choices.
+        Returns None if success, otherwise returns the error.
 
         choices: A list of ChoiceCallers.
         kwargs: Additional kwargs to be passed to self.generate() to generate a new ChoiceCaller.
@@ -2694,8 +2695,9 @@ class KernelTemplate:
 
         try:
             choices.append(self.generate(**kwargs))
+            return None
         except NotImplementedError as e:
-            pass
+            return e
 
     def generate(self, **kwargs) -> "torch._inductor.ir.ChoiceCaller":
         """
