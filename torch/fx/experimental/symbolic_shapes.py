@@ -5014,7 +5014,7 @@ class ShapeEnv:
             # if you have something like an equality guard, nan will play
             # merry hell with the reasoning.
             if symbol_is_type(symbol, SymT.FLOAT):
-                res = "not __math_isnan({py_printer.print_source(sources[0])})"
+                res = f"not __math_isnan({py_printer.print_source(sources[0])})"
                 python_exprs.append(res)
                 verbose_exprs.append(
                     f"{res}  # implicit guard for float input due to NaN specialization in the framework"
