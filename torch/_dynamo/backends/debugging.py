@@ -337,14 +337,14 @@ def test_subclasses(gm, inputs, **kwargs):
         TensorToSubclassTransform(
             factory_fn=lambda t: TwoTensor(t, t),
         ),
-        TensorToSubclassTransform(
-            factory_fn=lambda t: F32_QI32QuantRWTensor.from_src(t),
-            precondition=lambda t: t.ndim <= 2,
-        ),
     ]
     if bool(os.getenv("PYTORCH_TEST_WITH_SUBCLASSES_NONTRIVIAL", default=0)):
         TRANSFORMATIONS.extend(
             [
+                TensorToSubclassTransform(
+                    factory_fn=lambda t: F32_QI32QuantRWTensor.from_src(t),
+                    precondition=lambda t: t.ndim <= 2,
+                ),
                 # TODO: NestedTensor transformation can have many false-positive failures
                 # as NT does not support many of the operations
                 TensorToSubclassTransform(
@@ -354,7 +354,7 @@ def test_subclasses(gm, inputs, **kwargs):
                     precondition=lambda t: t.ndim >= 2,
                 ),
                 # TODO(ivankobzarev): DTensor
-            ]
+            ],
         )
 
     def _is_tensor(t):
@@ -451,6 +451,7 @@ aot_eager(gm, inputs)"""
                 repro_py,
                 "".join(traceback.format_exception(type(ex), ex, ex.__traceback__)),
             )
+            raise ex
 
     return gm
 

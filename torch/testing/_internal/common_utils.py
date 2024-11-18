@@ -2583,6 +2583,8 @@ def check_if_enable(test: unittest.TestCase):
                     "dynamo_wrapped": TEST_WITH_TORCHDYNAMO,
                     "inductor": TEST_WITH_TORCHINDUCTOR,
                     "slow": TEST_WITH_SLOW,
+                    "subclasses_wrapped": TEST_WITH_SUBCLASSES,
+                    "aot_eager_wrapped": TEST_WITH_AOT_EAGER,
                 }
 
                 invalid_platforms = list(filter(lambda p: p not in platform_to_conditional, platforms))
