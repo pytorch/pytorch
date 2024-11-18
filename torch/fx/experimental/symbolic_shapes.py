@@ -453,7 +453,6 @@ def rebind_unbacked(
     has the old binding information) and the new result (which we can extract the
     new unbacked SymInts out from).
     """
-    from torch._dynamo.tensor_version_op import _tensor_version
 
     # Inputs never need rebinding
     if n.op == "placeholder":
@@ -468,9 +467,13 @@ def rebind_unbacked(
             # tensor_version ops get specialized after AOTAutograd, it's OK,
             # we don't actually want to do asserts on them.  This is all a bit
             # questionable though
-            if isinstance(u1, int) and n.target is _tensor_version:
+            #
+            # Update (Nov 18, 2024): Updated this to unconditionally bodge
+            # you past all int, not just in the case of tensor_version
+            if isinstance(u1, int):
                 log.info(
-                    "rebind_unbacked: discard _tensor_version %s %s -> %s",
+                    "rebind_unbacked: discard %s %s %s -> %s",
+                    n.target,
                     raw_u0,
                     path,
                     u1,
