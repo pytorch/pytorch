@@ -263,7 +263,8 @@ class Attr {
 
   dnnl::post_ops extract_post_ops(
       const at::Tensor& dst,
-      bool is_quantized = false) {
+      bool is_quantized = false,
+      bool int8_output = false) {
     // this function is used to extract post ops params from the ops_params_
     // and put them into onednn post ops
     for (size_t i = 0; i < ops_params_.size(); ++i) {
@@ -304,9 +305,9 @@ class Attr {
 
     // if output is quantized, then append the eltwise linear to adjust the
     // output scale/zero_point
-    if (is_quantized) {
+    if (is_quantized && int8_output) {
       dnnl_post_ops_.append_eltwise(
-          kind_with_linear, 1.f / q_scale_, q_zero_point_);
+          kind_with_linear,  q_scale_, q_zero_point_);
     }
     return dnnl_post_ops_;
   }
