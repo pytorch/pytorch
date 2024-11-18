@@ -1,8 +1,6 @@
 {% import 'common.yml.j2' as common %}
 {% import 'upload.yml.j2' as upload %}
 
-# dummy comment
-
 {%- block name -%}
 # Template is at:    .github/templates/windows_arm64_binary_build_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
@@ -82,6 +80,8 @@ env:
   ENABLE_BUILD_WHEEL: 1
   ENABLE_APL: 1
 !{{ common.concurrency(build_environment) }}
+
+# dummy comment
 
 jobs:
   get-label-type:

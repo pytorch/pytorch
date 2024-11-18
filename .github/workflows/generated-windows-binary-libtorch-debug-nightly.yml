@@ -55,7 +55,6 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       SKIP_ALL_TESTS: 1
-      LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
@@ -183,7 +182,6 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       SKIP_ALL_TESTS: 1
-      LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
@@ -307,7 +305,6 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
@@ -333,7 +330,6 @@ jobs:
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
-      LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
@@ -462,7 +458,6 @@ jobs:
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
-      LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
@@ -587,7 +582,6 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
@@ -613,7 +607,6 @@ jobs:
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
-      LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
@@ -742,7 +735,6 @@ jobs:
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
-      LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
@@ -867,7 +859,6 @@ jobs:
       DESIRED_CUDA: cu124
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
-      LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
