@@ -36,7 +36,6 @@ import time
 import types
 import unittest
 import warnings
-import yaml
 from collections.abc import Mapping, Sequence
 from contextlib import closing, contextmanager
 from copy import deepcopy
