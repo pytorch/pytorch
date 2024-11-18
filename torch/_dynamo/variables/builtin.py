@@ -1740,6 +1740,7 @@ class BuiltinVariable(VariableTracker):
             (
                 variables.CustomizedDictVariable,
                 variables.PlacementVariable,
+                variables.NamedTupleVariable,
                 variables.UserDefinedObjectVariable,
             ),
         ):
