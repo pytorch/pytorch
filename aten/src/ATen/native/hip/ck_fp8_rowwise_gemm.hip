@@ -18,7 +18,7 @@
 #include <c10/hip/HIPStream.h>
 #include <torch/torch.h>
 
-#include "ck_kernels/fp8_rowwise_kernel_manifest.h"
+#include <ATen/native/hip/ck_kernels/fp8_rowwise_kernel_manifest.h>
 
 namespace at::cuda::detail {
 
