@@ -104,7 +104,7 @@ jobs:
         { include: [
           { config: "default", shard: 1, num_shards: 1 },
         ]}
-      
+
   macos-py3-arm64-build:
     if: github.repository_owner == 'pytorch'
     name: macos-py3-arm64
