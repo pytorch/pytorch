@@ -61,7 +61,7 @@ std::unique_ptr<Stack> MTensorArgumentCreator(Node* n) {
     }
   }
   return stack;
-};
+}
 
 bool MTensorNodeArgValid(Value* value) {
   auto tensor_type = value->type()->cast<TensorType>();

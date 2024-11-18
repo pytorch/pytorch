@@ -25,6 +25,7 @@ from ..source import (
     AttrSource,
     DefaultsSource,
     GetItemSource,
+    LocalSource,
     ODictGetItemSource,
     TypeSource,
     WeakRefCallSource,
@@ -330,23 +331,32 @@ class ComptimeVariable(VariableTracker):
         return variables.ConstantVariable.create(None)
 
 
-class ClosureVariable(UnknownVariable):
-    _nonvar_fields = {
-        "name",
-        *UnknownVariable._nonvar_fields,
-    }
-
-    def __init__(self, name, **kwargs) -> None:
-        super().__init__(**kwargs)
-        self.name = name
-
-    def reconstruct(self, codegen):
-        codegen.append_output(codegen.create_load_closure(self.name))
-
-
 class NewCellVariable(VariableTracker):
-    def __init__(self, **kwargs) -> None:
+    # If the cell existed before Dynamo tracing started, this will be the
+    # VariableTracker that represents the cell content.
+    #
+    # Note that all mutation to the cell (i.e., its content) will be buffered in
+    # SideEffects, rather than being reflected here. One can think of
+    # `NewCellVariable` as a special case for `UserDefinedObjectVariable`.
+    pre_existing_contents: Optional[VariableTracker]
+
+    def __init__(
+        self, pre_existing_contents: Optional[VariableTracker] = None, **kwargs
+    ) -> None:
         super().__init__(**kwargs)
+        self.pre_existing_contents = pre_existing_contents
+
+    def is_root_frame_cell(self):
+        """
+        Return true if this variable models a cell that is native to the root
+        frame, i.e., a part of its `co_cellvars` or `co_freevars`.
+        """
+        source = self.source
+        return (
+            source is not None
+            and isinstance(source, LocalSource)
+            and source.is_root_frame_cell
+        )
 
 
 class NewGlobalVariable(VariableTracker):
@@ -963,15 +973,23 @@ class LambdaVariable(VariableTracker):
 class GetAttrVariable(VariableTracker):
     _nonvar_fields = {
         "name",
+        "py_type",
         *VariableTracker._nonvar_fields,
     }
 
-    def __init__(self, obj, name, **kwargs) -> None:
+    def __init__(self, obj, name, py_type=None, **kwargs) -> None:
         super().__init__(**kwargs)
         assert isinstance(obj, VariableTracker)
         assert isinstance(name, str)
         self.obj = obj
         self.name = name
+        self.py_type = py_type  # In some cases we know the type (ex. tensor methods)
+
+    def python_type(self):
+        if self.py_type is not None:
+            return self.py_type
+        else:
+            super().python_type()
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.obj}, {self.name})"
