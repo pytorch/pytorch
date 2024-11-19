@@ -2030,9 +2030,15 @@ class GraphLowering(torch.fx.Interpreter):
                     serialized_extern_kernel_nodes,
                 )
 
+            additional_files = self.wrapper_code.additional_files
+
             # Directly return the file path with the compiled code
             return AotCodeCompiler.compile(
-                self, code, serialized_extern_kernel_nodes, device_type=self.device_type
+                self,
+                code,
+                serialized_extern_kernel_nodes,
+                device_type=self.device_type,
+                additional_files=additional_files,
             )
         else:
             return self.compile_to_module().call
