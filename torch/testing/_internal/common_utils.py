@@ -22,6 +22,7 @@ import logging
 import math
 import operator
 import os
+import pathlib
 import platform
 import random
 import re
@@ -1403,6 +1404,7 @@ TEST_FAIRSEQ = _check_module_exists('fairseq')
 TEST_SCIPY = _check_module_exists('scipy')
 TEST_MKL = torch.backends.mkl.is_available()
 TEST_MPS = torch.backends.mps.is_available()
+MACOS_VERSION = float('.'.join(platform.mac_ver()[0].split('.')[:2]) or -1)
 TEST_XPU = torch.xpu.is_available()
 TEST_HPU = True if (hasattr(torch, "hpu") and torch.hpu.is_available()) else False
 TEST_CUDA = torch.cuda.is_available()
@@ -1865,6 +1867,17 @@ def skipIfMPS(fn):
         else:
             fn(*args, **kwargs)
     return wrapper
+
+
+def skipIfMPSOnMacOS13(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if TEST_MPS and int(MACOS_VERSION) == 13:
+            raise unittest.SkipTest("Test crashes MPSGraph on MacOS13")
+        else:
+            fn(*args, **kwargs)
+    return wrapper
+
 
 def skipIfHpu(fn):
     @wraps(fn)
@@ -4298,6 +4311,39 @@ class TestCase(expecttest.TestCase):
         env.pop("TEST_SHOWLOCALS", None)
         _stdout, stderr = TestCase.run_process_no_exception(code, env=env)
         return stderr.decode('ascii')
+
+    def _attempt_load_from_subprocess(
+        self,
+        file: pathlib.Path,
+        import_string: str,
+        expected_failure_message: Optional[str] = None
+    ) -> None:
+        """
+        Attempts weights_only `torch.load` in a subprocess. This is used to test that
+        weights_only `torch.load` works as expected without global imports.
+
+        Args:
+            file (pathlib.Path): The path to the checkpoint to load.
+            import_string (str): import string to add to the script
+            exected_failure_message (str, optional): The expected failure message if the
+                checkpoint fails to load. If None, the test will pass
+        """
+        script = f"import torch;{import_string}torch.load(r'{file}', weights_only=True)"
+        cm = (
+            self.assertRaisesRegex(RuntimeError, re.escape(expected_failure_message))
+            if expected_failure_message else contextlib.nullcontext()
+        )
+        with cm:
+            try:
+                subprocess.check_output(
+                    [sys.executable, "-c", script],
+                    # On Windows, opening the subprocess with the default CWD makes `import torch`
+                    # fail, so just set CWD to this script's directory
+                    cwd=os.path.dirname(os.path.realpath(__file__)),
+                    stderr=subprocess.STDOUT,
+                )
+            except subprocess.CalledProcessError as e:
+                raise RuntimeError(e.output.decode("utf-8")) from None
 
 
 class TestCaseBase(TestCase):
