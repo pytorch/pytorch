@@ -349,6 +349,10 @@ inline uint16_t fp16_ieee_from_fp32_value(float f) {
 #endif // C10_X86_F16
 }
 
+#ifdef C10_X86_F16
+#undef C10_X86_F16
+#endif // C10_X86_F16
+
 #if defined(__aarch64__) && !defined(__CUDACC__)
 inline float16_t fp16_from_bits(uint16_t h) {
   return c10::bit_cast<float16_t>(h);
