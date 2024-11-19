@@ -1694,11 +1694,26 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @parametrize("bias_gate", (True, False))
     @parametrize("bias_up", (True, False))
     @parametrize("input_3d", (True, False))
+    @parametrize(
+        "epilogue",
+        (
+            "none",
+            "relu",
+        ),
+    )
     @dtypes(
         torch.bfloat16,
     )
     def test_linear_silu_linear_mul(
-        self, batch_size, in_features, out_features, bias_gate, bias_up, input_3d, dtype
+        self,
+        batch_size,
+        in_features,
+        out_features,
+        bias_gate,
+        bias_up,
+        input_3d,
+        epilogue,
+        dtype,
     ):
         class Linear_Gate_Up(torch.nn.Module):
             def __init__(self, in_feature, out_feature, bias_gate=False, bias_up=False):
@@ -1707,9 +1722,11 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                     in_feature, out_feature, bias=bias_gate
                 )
                 self.up_proj = torch.nn.Linear(in_feature, out_feature, bias=bias_up)
+                self.epilogue = _get_epilogue(epilogue)
 
             def forward(self, x):
-                return torch.nn.functional.silu(self.gate_proj(x)) * self.up_proj(x)
+                tmp = torch.nn.functional.silu(self.gate_proj(x)) * self.up_proj(x)
+                return self.epilogue(tmp)
 
         if input_3d and bias_gate and bias_up:
             # Reduce the redundant test combination
