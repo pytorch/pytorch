@@ -9,7 +9,7 @@ class Benchmark(BenchmarkBase):
     N = 100
 
     def __init__(self):
-        super().__init__(category="sum_floordiv", bakend="export", device="cpu")
+        super().__init__(category="sum_floordiv", backend="export", device="cpu")
 
     def name(self):
         return f"{self.category()}_regression"
