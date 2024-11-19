@@ -1440,6 +1440,23 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
+    def test_while_loop_with_pytree_inputs(self):
+        inputs = (
+            torch.tensor(0, device=self.device),
+            (
+                [torch.randn(10, 20, device=self.device)],
+                {
+                    "x": torch.randn(10, 20, device=self.device),
+                    "y": torch.randn(10, 20, device=self.device),
+                },
+            ),
+        )
+        self.check_model_with_multiple_inputs(
+            WhileLoopModels.PytreeCarry(),
+            [inputs],
+            dynamic_shapes=None,
+        )
+
     @config.patch({"is_predispatch": True})
     def test_constant(self):
         class M(torch.nn.Module):
