@@ -78,6 +78,7 @@ from torch._subclasses.meta_utils import is_sparse_compressed
 from torch._utils_internal import (
     log_chromium_event_internal,
     log_compilation_event,
+    record_chromium_event_internal,
     signpost_event,
 )
 from torch.fx._utils import _format_graph_code, lazy_format_graph_code
@@ -162,12 +163,14 @@ class ReinplaceCounters:
     # Track sizes of known not re-inplaced tensors (exclude dynamic shapes).
     @classmethod
     def add_missed_bytes(cls, trigger: ReInplaceTrigger, bytes: int):
-        cls._values[f"missed_bytes_{trigger.name}"] += bytes
+        if bytes != 0:
+            cls._values[f"missed_bytes_{trigger.name}"] += bytes
 
     # Track number of not re-inplaced tensors.
     @classmethod
     def add_missed_opportunities(cls, trigger: ReInplaceTrigger, count: int):
-        cls._values[f"missed_tensors_{trigger}"] += count
+        if count != 0:
+            cls._values[f"missed_tensors_{trigger}"] += count
 
     @classmethod
     def clear(cls):
@@ -355,7 +358,9 @@ def dynamo_timed(
 
     chromium_log: ChromiumEventLogger = get_chromium_event_logger()
     start_ns = time.time_ns()
-    chromium_log.log_event_start(event_name, start_ns, event_metadata)
+    chromium_log.log_event_start(
+        event_name, start_ns, event_metadata, log_pt2_compile_event
+    )
 
     try:
         with torch.profiler.record_function(f"{key} (dynamo_timed)"):
@@ -795,7 +800,7 @@ def to_int_us(v: Optional[float]) -> Optional[int]:
 
 # Version field added to every log. Increment to make it easier to distinguish new
 # vs. old entries when you make a substantive change to how the logs are populated.
-LOG_FORMAT_VERSION = 2
+LOG_FORMAT_VERSION = 3
 
 
 @dataclasses.dataclass
@@ -856,6 +861,9 @@ class CompilationMetrics:
     remote_fx_graph_cache_put_time_us: Optional[int] = None
     backward_cumulative_compile_time_us: Optional[int] = None
     end_time_us: Optional[int] = None
+    pre_grad_pass_time_us: Optional[int] = None
+    post_grad_pass_time_us: Optional[int] = None
+    joint_graph_pass_time_us: Optional[int] = None
     log_format_version: int = LOG_FORMAT_VERSION
 
 
@@ -867,40 +875,40 @@ _compilation_metrics: Deque[CompilationMetrics] = collections.deque(
 )
 
 
-def add_compilation_metrics_to_chromium(c: CompilationMetrics):
+def add_compilation_metrics_to_chromium(c: Dict[str, Any]) -> None:
     event_logger = get_chromium_event_logger()
     # The following compilation metrics are related to
     # dynamo, so go with the "entire frame compile" event
     event_logger.add_event_data(
         event_name="dynamo",
-        frame_key=c.frame_key,
-        co_name=c.co_name,
-        co_filename=c.co_filename,
-        co_firstlineno=c.co_firstlineno,
-        cache_size=c.cache_size,
-        accumulated_cache_size=c.accumulated_cache_size,
-        guard_count=c.guard_count,
-        shape_env_guard_count=c.shape_env_guard_count,
-        graph_op_count=c.graph_op_count,
-        graph_node_count=c.graph_node_count,
-        graph_input_count=c.graph_input_count,
-        fail_type=c.fail_type,
-        fail_reason=c.fail_reason,
-        fail_user_frame_filename=c.fail_user_frame_filename,
-        fail_user_frame_lineno=c.fail_user_frame_lineno,
+        frame_key=c["frame_key"],
+        co_name=c["co_name"],
+        co_filename=c["co_filename"],
+        co_firstlineno=c["co_firstlineno"],
+        cache_size=c["cache_size"],
+        accumulated_cache_size=c["accumulated_cache_size"],
+        guard_count=c["guard_count"],
+        shape_env_guard_count=c["shape_env_guard_count"],
+        graph_op_count=c["graph_op_count"],
+        graph_node_count=c["graph_node_count"],
+        graph_input_count=c["graph_input_count"],
+        fail_type=c["fail_type"],
+        fail_reason=c["fail_reason"],
+        fail_user_frame_filename=c["fail_user_frame_filename"],
+        fail_user_frame_lineno=c["fail_user_frame_lineno"],
         # Sets aren't JSON serializable
-        non_compliant_ops=list(c.non_compliant_ops)
-        if c.non_compliant_ops is not None
+        non_compliant_ops=list(c["non_compliant_ops"])
+        if c["non_compliant_ops"] is not None
         else None,
-        compliant_custom_ops=list(c.compliant_custom_ops)
-        if c.compliant_custom_ops is not None
+        compliant_custom_ops=list(c["compliant_custom_ops"])
+        if c["compliant_custom_ops"] is not None
         else None,
-        restart_reasons=list(c.restart_reasons)
-        if c.restart_reasons is not None
+        restart_reasons=list(c["restart_reasons"])
+        if c["restart_reasons"] is not None
         else None,
-        dynamo_time_before_restart_s=c.dynamo_time_before_restart_s,
-        has_guarded_code=c.has_guarded_code,
-        dynamo_config=c.dynamo_config,
+        dynamo_time_before_restart_s=c["dynamo_time_before_restart_s"],
+        has_guarded_code=c["has_guarded_code"],
+        dynamo_config=c["dynamo_config"],
     )
 
 
@@ -933,7 +941,6 @@ def record_compilation_metrics(metrics: Dict[str, Any]):
     _compilation_metrics.append(compilation_metrics)
     if compilation_metrics.is_forward:
         name = "compilation_metrics"
-        add_compilation_metrics_to_chromium(compilation_metrics)
     else:
         name = "bwd_compilation_metrics"
     torch._logging.trace_structured(
@@ -978,11 +985,26 @@ class ChromiumEventLogger:
     """
 
     def get_stack(self):
+        """
+        The main event stack, with every chromium event.
+        Logged to tlparse.
+        """
         if hasattr(self.tls, "stack"):
             return self.tls.stack
         else:
-            self.tls.stack = ["__start__"]
+            self.tls.stack = []
             return self.tls.stack
+
+    def get_pt2_compile_substack(self):
+        """
+        A smaller subset of the main stack that gets used to log
+        PT2 Compile Events internally.
+        """
+        if hasattr(self.tls, "pt2_compile_substack"):
+            return self.tls.pt2_compile_substack
+        else:
+            self.tls.pt2_compile_substack = []
+            return self.tls.pt2_compile_substack
 
     def get_event_data(self) -> Dict[str, Any]:
         if not hasattr(self.tls, "event_data"):
@@ -1023,6 +1045,7 @@ class ChromiumEventLogger:
         event_name: str,
         time_ns: int,
         metadata: Dict[str, Any],
+        log_pt2_compile_event: bool = False,
     ) -> None:
         """
         Logs the start of a single event.
@@ -1041,13 +1064,16 @@ class ChromiumEventLogger:
         self.get_stack().append(event_name)
         # Add metadata from start event
         self.add_event_data(event_name, **metadata)
+        if log_pt2_compile_event:
+            self.get_pt2_compile_substack().append(event_name)
 
     def reset(self) -> None:
         # We this on every compile in case a compile crashes or restarts and we haven't
         # cleared the stack.
         stack = self.get_stack()
+        substack = self.get_pt2_compile_substack()
         stack.clear()
-        stack.append("__start__")
+        substack.clear()
         event_data = self.get_event_data()
         event_data.clear()
 
@@ -1086,28 +1112,39 @@ class ChromiumEventLogger:
             event_metadata,
         )
 
+        def pop_stack(stack):
+            while event_name != stack[-1]:
+                # If the event isn't the most recent one to end, pop
+                # off the stack until it is.
+                # Since event_name in self.stack, this pop is always safe
+                log.warning(
+                    "ChromiumEventLogger: Detected overlapping events, fixing stack"
+                )
+                stack.pop()
+
+        event_stack = self.get_stack()
         # These stack health checks currently never happen,
         # but they're written this way to future proof any weird event
         # overlaps in the future.
-        stack = self.get_stack()
-        if event_name not in stack:
+        if event_name not in event_stack:
             # Something went wrong, we never called start on this event,
             # or it was skipped due to overlapping events below
             log.warning("ChromiumEventLogger: Start event not in stack, ignoring")
             return
 
-        while event_name != stack[-1]:
-            # If the event isn't the most recent one to end, pop
-            # off the stack until it is.
-            # Since event_name in self.stack, this pop is always safe
-            log.warning(
-                "ChromiumEventLogger: Detected overlapping events, fixing stack"
-            )
-            stack.pop()
+        pop_stack(event_stack)
+
         if log_pt2_compile_event:
-            log_chromium_event_internal(event, stack, self.id_, start_time_ns)
+            pt2_compile_substack = self.get_pt2_compile_substack()
+            pop_stack(pt2_compile_substack)
+            log_chromium_event_internal(
+                event, pt2_compile_substack, self.id_, start_time_ns
+            )
+            # Pop actual event off of stack
+            pt2_compile_substack.pop()
+
         # Finally pop the actual event off the stack
-        stack.pop()
+        event_stack.pop()
 
     def _log_timed_event(
         self,
@@ -1135,6 +1172,7 @@ class ChromiumEventLogger:
             suppress_context=False,
             expect_trace_id=False,  # Not every chromium event will have a trace_id
         )
+        record_chromium_event_internal(event)
         return event
 
     def log_instant_event(
@@ -1175,7 +1213,9 @@ class ChromiumEventLogger:
         )
         if log_pt2_compile_event:
             # Log an instant event with the same start and end time
-            log_chromium_event_internal(event, self.get_stack(), self.id_, time_ns)
+            log_chromium_event_internal(
+                event, self.get_pt2_compile_substack(), self.id_, time_ns
+            )
 
 
 CHROMIUM_EVENT_LOG: Optional[ChromiumEventLogger] = None
@@ -1400,21 +1440,32 @@ def is_namedtuple_cls(cls):
     """Test if an object is a namedtuple or a (torch.return_types|torch.autograd.forward_ad).* quasi-namedtuple"""
     try:
         if issubclass(cls, tuple):
-            bases = getattr(cls, "__bases__", []) or [None]
             module = getattr(cls, "__module__", None)
-            return module in ("torch.return_types", "torch.autograd.forward_ad") or (
-                bases[0] is tuple and hasattr(cls, "_make") and hasattr(cls, "_fields")
-            )
+            if module in ("torch.return_types", "torch.autograd.forward_ad"):
+                return True
+            if isinstance(getattr(cls, "_fields", None), tuple) and callable(
+                getattr(cls, "_make", None)
+            ):
+                if cls.__bases__ == (tuple,):
+                    # This is a namedtuple type directly created by `collections.namedtuple(...)`
+                    return True
+                if (
+                    # Subclass of namedtuple
+                    is_namedtuple_cls(cls.__bases__[0])
+                    # For subclasses of namedtuple, the __new__ method should not be customized
+                    and cls.__new__ is cls.__bases__[0].__new__
+                ):
+                    return True
     except TypeError:
         pass
     return False
 
 
 @functools.lru_cache(1)
-def namedtuple_fields(cls):
+def namedtuple_fields(cls) -> Tuple[str, ...]:
     """Get the fields of a namedtuple or a torch.return_types.* quasi-namedtuple"""
     if cls is slice:
-        return ["start", "stop", "step"]
+        return ("start", "stop", "step")
 
     assert issubclass(cls, tuple)
     if hasattr(cls, "_fields"):
@@ -1428,11 +1479,12 @@ def namedtuple_fields(cls):
     # frustrating ones e.g. torch.return_types.max
     assert cls.__module__ == "torch.return_types"
     obj = cls(map(Marker, range(cls.n_fields)))
-    fields: List[Optional[str]] = [None] * cls.n_fields
+    fields: Dict[str, int] = {}
     for name in dir(obj):
         if name[0] != "_" and isinstance(getattr(obj, name), Marker):
-            fields[getattr(obj, name).index] = name
-    return fields
+            fields[name] = getattr(obj, name).index
+    assert len(fields) == cls.n_fields
+    return tuple(sorted(fields, key=fields.get))  # type: ignore[arg-type]
 
 
 def checkpoint_params(gm):
@@ -2199,7 +2251,9 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
         # no matter it's lazy module or not, we should copy to fake mode.
         nnmodule = deepcopy_to_fake_tensor(nnmodule, tx.fake_mode)
 
-    if node.name in ["interpolate", "is_integer", "wrapped_gradient"]:
+    if node.name in ["interpolate", "is_integer", "wrapped_gradient"] or any(
+        isinstance(a, complex) for a in args
+    ):
         # We need to specialize symfloats for now. Eventually we should do a tensorify pass in dynamo.
         args = tuple(
             float(arg)
