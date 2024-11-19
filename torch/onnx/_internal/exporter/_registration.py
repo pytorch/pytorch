@@ -185,9 +185,9 @@ class ONNXRegistry:
             for impl in implementations:
                 onnx_decomposition = OnnxDecompMeta(
                     onnx_function=impl,
-                    fx_target=target,
+                    fx_target=target,  # type: ignore[arg-type]
                 )
-                registry._register(target, onnx_decomposition)
+                registry._register(target, onnx_decomposition)  # type: ignore[arg-type]
 
         return registry
 

@@ -4,43 +4,21 @@
 
 from __future__ import annotations
 
-
 __all__ = ["registry", "onnx_impl"]
 
+import collections
 from typing import Callable, TypeVar
-
 
 _T = TypeVar("_T", bound=Callable)
 
 
-class Registry:
+class Registry(collections.UserDict[Callable, list[Callable]]):
     """Registry for aten functions."""
-
-    def __init__(self):
-        self._registry: dict[Callable, list[Callable]] = {}
 
     def register(self, target: Callable, impl: Callable) -> None:
         """Register a function."""
 
-        self._registry.setdefault(target, []).append(impl)
-
-    def __getitem__(self, name):
-        return self._registry[name]
-
-    def __contains__(self, name):
-        return name in self._registry
-
-    def __iter__(self):
-        return iter(self._registry)
-
-    def __repr__(self):
-        return repr(self._registry)
-
-    def items(self):
-        return self._registry.items()
-
-    def values(self):
-        return self._registry.values()
+        self.data.setdefault(target, []).append(impl)
 
 
 # Default registry
