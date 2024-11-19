@@ -195,7 +195,7 @@ class BenchmarkBase(ABC):
                     },
                     "model": {
                         "name": self.name(),
-                        "type": self.model_type(),
+                        "type": self.category(),
                         "backend": self.backend(),
                     },
                     "metric": {
