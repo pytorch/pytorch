@@ -56,7 +56,7 @@ from torch.utils._mode_utils import no_dispatch
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.numbers import int_oo
 
-from . import config, ir
+from . import config, ir, metrics
 from .codegen.common import (
     BackendFeature,
     DeviceOpOverrides,
@@ -1446,11 +1446,7 @@ class GraphLowering(torch.fx.Interpreter):
                 result.realize()
                 strides = n.meta["val"].stride()
                 sym_strides = torch._inductor.utils.any_is_symbolic(*strides)
-                if (
-                    not hasattr(result, "get_stride")
-                    or result.get_stride() != strides
-                    and not sym_strides
-                ):
+                if result.maybe_get_stride() != strides and not sym_strides:
                     stride_order = ir.get_stride_order(strides)
                     result = ir.ExternKernel.require_stride_order(result, stride_order)
             if (
@@ -1878,6 +1874,7 @@ class GraphLowering(torch.fx.Interpreter):
             self.inplaced_to_remove.clear()
             V.graph.sizevars.precomputed_replacements.clear()
             V.graph.sizevars.inv_precomputed_replacements.clear()
+            metrics.reset()
             with config.patch({"triton.autotune_at_compile_time": False}):
                 return self.codegen()
         else:
@@ -2029,9 +2026,15 @@ class GraphLowering(torch.fx.Interpreter):
                     serialized_extern_kernel_nodes,
                 )
 
+            additional_files = self.wrapper_code.additional_files
+
             # Directly return the file path with the compiled code
             return AotCodeCompiler.compile(
-                self, code, serialized_extern_kernel_nodes, device_type=self.device_type
+                self,
+                code,
+                serialized_extern_kernel_nodes,
+                device_type=self.device_type,
+                additional_files=additional_files,
             )
         else:
             return self.compile_to_module().call

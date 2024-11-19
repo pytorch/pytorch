@@ -20,6 +20,7 @@ from typing import (
     Iterator,
     List,
     Optional,
+    Sequence,
     Set,
     Tuple,
     TYPE_CHECKING,
@@ -43,7 +44,7 @@ from torch.utils._sympy.symbol import symbol_is_type, SymT
 
 from .. import async_compile, config, ir
 from ..codecache import output_code_log
-from ..ir import ReinterpretView
+from ..ir import IRNode, ReinterpretView
 from ..runtime import triton_heuristics
 from ..runtime.hints import DeviceProperties
 from ..utils import (
@@ -241,7 +242,7 @@ def user_defined_kernel_grid_fn_code(
 def user_defined_triton_kernel_transitive_closure_source_code(kernel) -> str:
     """
     Given a triton kernel function pointer collect the transitive closure of
-    its dependancies
+    its dependencies
     """
     compile_wrapper = IndentedBuffer()
     compile_wrapper.splice(kernel.src, strip=True)
@@ -635,6 +636,8 @@ class PythonWrapperCodegen(CodeGen):
         self.none_str = "None"
         self.size = "size()"
         self.stride = "stride()"
+        self.move_begin = "std::move(" if V.graph.cpp_wrapper else ""
+        self.move_end = ")" if V.graph.cpp_wrapper else ""
         self.last_seen_device_guard_index: Optional[int] = None
         self.supports_intermediate_hooks = True
         self.expr_printer: Callable[[Any], str] = pexpr
@@ -688,6 +691,9 @@ class PythonWrapperCodegen(CodeGen):
         self.debug_printer = DebugPrinterManager(
             debug_printer_level=config.aot_inductor.debug_intermediate_value_printer
         )
+
+        # Additional files that are dependent to the wrapper (ex. cubin files)
+        self.additional_files = []
 
     @staticmethod
     def create(
@@ -1011,7 +1017,7 @@ class PythonWrapperCodegen(CodeGen):
 
         args = [self.val_to_arg_str(v) for v in raw_args]
         arg_types = [
-            arg.get_dtype() if hasattr(arg, "get_dtype") else type(arg)
+            arg.get_dtype() if isinstance(arg, IRNode) else type(arg)
             for arg in raw_args
         ]
         self.generate_kernel_call(
@@ -1301,15 +1307,15 @@ class PythonWrapperCodegen(CodeGen):
     def codegen_tuple_access(self, basename: str, name: str, index: str) -> str:
         return f"{basename}[{index}]"
 
-    def codegen_python_shape_tuple(self, shape: Tuple[Expr, ...]) -> str:
-        parts = list(map(self.codegen_python_sizevar, shape))
+    def codegen_python_shape_tuple(self, shape: Sequence[Expr]) -> str:
+        parts = [*map(self.codegen_python_sizevar, shape)]
         if len(parts) == 0:
             return "()"
         if len(parts) == 1:
             return f"({parts[0]}, )"
         return f"({', '.join(parts)})"
 
-    def codegen_shape_tuple(self, shape: Tuple[Expr, ...]) -> str:
+    def codegen_shape_tuple(self, shape: Sequence[Expr]) -> str:
         return self.codegen_python_shape_tuple(shape)
 
     def codegen_alloc_from_pool(self, name, offset, dtype, shape, stride) -> str:
@@ -2087,14 +2093,19 @@ class PythonWrapperCodegen(CodeGen):
         reinterpret_view = self.codegen_reinterpret_view(
             old, new.get_size(), new.get_stride(), 0, self.wrapper_call.writeline
         )
-        return f"{self.declare_maybe_reference}{new_name} = {reinterpret_view}{del_line}  {self.comment} reuse"
+        return (
+            f"{self.declare_maybe_reference}{new_name} = "
+            f"{self.move_begin}{reinterpret_view}{self.move_end}{del_line}"
+            f"  {self.comment} reuse"
+        )
 
     def codegen_deferred_allocation(self, name, layout):
         self.writeline(
             DeferredLine(
                 name,
-                f"{self.declare_maybe_reference}{name} = {layout.view.codegen_reference()}{self.ending}  "
-                f"{self.comment} alias",
+                f"{self.declare_maybe_reference}{name} = "
+                f"{self.move_begin}{layout.view.codegen_reference()}{self.move_end}{self.ending}"
+                f"  {self.comment} alias",
             )
         )
 

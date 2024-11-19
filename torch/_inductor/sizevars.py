@@ -555,7 +555,6 @@ class SizeVarAllocator:
             return fallback
 
         try:
-            import fbvscode; fbvscode.set_trace()
             return int(out)
         except Exception:
             log.debug("failed on: %s", out)
