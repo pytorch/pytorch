@@ -458,7 +458,9 @@ def xfailIf(op_name, fail_fn, variant_name="", *, device_type=None, dtypes=None)
         decorator=sample_skips_and_xfails(
             [
                 XFailRule(
-                    op_match_fn=lambda device, op: op.full_name == op_name,
+                    # op matching is already handled by DecorateMeta
+                    op_match_fn=lambda device, op: True,
+                    # device matching is already handled by DecorateMeta
                     sample_match_fn=lambda device, sample: fail_fn(sample),
                 )
             ]
