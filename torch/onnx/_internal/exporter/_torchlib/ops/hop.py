@@ -66,6 +66,13 @@ def higher_order_cond(
         false_func.domain, false_func.name, inputs, num_outputs=len(false_func.outputs)
     )
 
+    # ONNX Runtime complains about duplicate output names if we don't rename them.
+    # But the doesn't seem to be an actual violation of SSA form without renaming.
+    for out in then_node.outputs:
+        out.name = f"{out.name}_{true_func.name}"
+    for out in else_node.outputs:
+        out.name = f"{out.name}_{false_func.name}"
+
     return call_op(
         "If",
         cond,

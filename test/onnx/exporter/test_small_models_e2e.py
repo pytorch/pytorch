@@ -58,7 +58,7 @@ class DynamoExporterTest(common_utils.TestCase):
         onnx_testing.assert_onnx_program(onnx_program)
         self.assertNotIn("Cast", [node.op_type for node in onnx_program.model.graph])
 
-    def test_onnx_export_controlflow(self):
+    def test_onnx_export_control_flow(self):
         class CondModel(torch.nn.Module):
             def forward(self, x):
                 def true_fn(x):
@@ -86,7 +86,7 @@ class DynamoExporterTest(common_utils.TestCase):
         )
         onnx_testing.assert_onnx_program(onnx_program)
 
-    def test_onnx_export_nested_controlflow_and_nested_weights(self):
+    def test_onnx_export_nested_control_flow_and_nested_weights(self):
         class Submodule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
