@@ -251,7 +251,6 @@ class GuardManagerWrapper:
 
     def populate_diff_guard_manager(self):
         self.diff_guard_root = self.clone_with_chosen_sources(self.diff_guard_sources)
-        print(GuardManagerWrapper(self.diff_guard_root))
 
     def clone_with_chosen_sources(self, chosen_sources):
         def filter_fn(node_mgr):
@@ -2205,6 +2204,9 @@ class DeletedGuardManagerWrapper(GuardManagerWrapper):
     def __init__(self, reason):
         super().__init__()
         self.invalidation_reason = reason
+
+    def populate_diff_guard_manager(self):
+        self.diff_guard_root = None
 
 
 # NB: Naively, you'd expect this to only be a function that produces
