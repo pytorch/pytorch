@@ -552,7 +552,7 @@ cc_library(
         ":caffe2_headers",
         ":caffe2_perfkernels_avx",
         ":caffe2_perfkernels_avx2",
-        "//third_party/miniz-2.1.0:miniz",
+        "//third_party/miniz-3.0.2:miniz",
         "@com_google_protobuf//:protobuf",
         "@eigen",
         "@fbgemm//:fbgemm_src_headers",
