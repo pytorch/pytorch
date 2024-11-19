@@ -1132,22 +1132,19 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
 
         torch.testing.assert_close(sparse_result, dense_result, rtol=1e-3, atol=1e-3)
 
-    # @unittest.skip("cuSPARSELt v0.6.x does not support bfloat/float16 alpha scaling")
-    @parametrize("dtype", [torch.int8])
-    def test_cslt_sparse_mm_alpha_compile_autotune(self, dtype, device):
-        A = torch.Tensor([0, 0, 1, 1]).tile((128, 64)).to(dtype).cuda()
-        B = torch.ones((128, 256), device=device).to(dtype).t()
+    def test_cslt_sparse_mm_alpha_compile_autotune(self, device):
+        A = torch.Tensor([0, 0, 1, 1]).tile((128, 64)).to(torch.int8).cuda()
+        B = torch.ones((128, 256), device=device).to(torch.int8).t()
         alpha = torch.Tensor([2**(-i) for i in range(128)]).cuda()
-        # bias = torch.ones(128, device=device).to(dtype)
 
         A_compressed = torch._cslt_compress(A)
-        sparse_result = torch.compile(torch._cslt_sparse_mm, mode="max-autotune")(A_compressed, B, alpha=alpha)
+        sparse_result = torch.compile(torch._cslt_sparse_mm, mode="max-autotune")(A_compressed, B, alpha=alpha, out_dtype=torch.int32)
 
-        alpha_scaled = torch.stack([alpha] * 128).t()
-        dense_result = alpha_scaled * torch.mm(A.to(torch.float32), B.to(torch.float32))
-        dense_result = dense_result.to(dtype)
+        alpha_scaled = torch.stack([alpha] * 128).t().cpu().float()
+        dense_result = alpha_scaled * torch.mm(A.to(torch.int64).cpu(), B.to(torch.int64).cpu())
+        dense_result = dense_result.to(torch.int32)
 
-        torch.testing.assert_close(sparse_result, dense_result, rtol=1e-3, atol=1e-3)
+        torch.testing.assert_close(sparse_result.cpu(), dense_result, rtol=1e-3, atol=1e-3)
 
     @parametrize("out_dtype", [torch.float16, torch.bfloat16, torch.int32])
     def test_cslt_sparse_mm_alpha_mixed_dtype(self, out_dtype, device):

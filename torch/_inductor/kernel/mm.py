@@ -550,7 +550,7 @@ def tuned_cslt_sparse_mm(
     compression_factor = 10 if is_8bit_input_type else 9
     m = (mat1_compressed.get_numel() * 16) // (compression_factor * k)
 
-    from torch._inductor.ir import FixedLayout
+    from torch._inductor.ir import FixedLayout, NoneAsConstantBuffer
 
     if transpose_result:
         layout = FixedLayout(
@@ -572,10 +572,13 @@ def tuned_cslt_sparse_mm(
         input_nodes = input_nodes + (bias, alpha)
     elif bias is not None and alpha is None:
         bias = realize_inputs(bias)
-        input_nodes =  input_nodes + (bias,)
+        input_nodes = input_nodes + (bias,)
     elif alpha is not None and bias is None:
         alpha = realize_inputs(alpha)
-        input_nodes =  input_nodes + (None, alpha,)
+        input_nodes = input_nodes + (
+            NoneAsConstantBuffer(),
+            alpha,
+        )
 
     # cuSPARSELt alg_id search, not that we cannot use
     # AlgorithmSelectorCache.benchmark_example_value() because this will return the base view
@@ -600,8 +603,12 @@ def tuned_cslt_sparse_mm(
             mat2.dtype,
             mat2.layout.offset,
         ),
-        AlgorithmSelectorCache.benchmark_example_value(bias),
-        AlgorithmSelectorCache.benchmark_example_value(alpha),
+        AlgorithmSelectorCache.benchmark_example_value(bias)
+        if bias is not None
+        else None,
+        AlgorithmSelectorCache.benchmark_example_value(alpha)
+        if alpha is not None
+        else None,
         out_dtype,
         transpose_result,
     )
