@@ -177,6 +177,43 @@ SubgraphInfo = namedtuple(
 )
 
 
+class ModificationWrapper(V.WrapperHandler):
+    """Handles placeholder substitutions during subgraph processing."""
+
+    def __init__(self, kernel, subgraph_number: int, fixed_inputs: Dict[str, Any]):
+        super().__init__(V.ops)
+        self.name = f"PlaceholderSubstitution_{subgraph_number}"
+        self.kernel = kernel
+        self.fixed_inputs = fixed_inputs
+
+    def load(self, name: str, index: sympy.Expr):
+        """Handle loading from tensor or fixed input."""
+        if name not in self.fixed_inputs:
+            index_str = self._process_indexing(index)
+            var = self._add_kernel_input(name)
+            return f"tl.load({var} + {index_str})"
+        return f"({self.fixed_inputs[name]})"
+
+    def indirect_indexing(self, index_var, size, check, wrap_neg=True):
+        """Convert index variable to symbolic form."""
+        return sympy_index_symbol(str(index_var))
+
+    def store(self, name, index, value, mode):
+        """Store value with input tracking.
+        This is needed for grads of captured buffers that need to be added as inputs to the kernel
+        """
+        self.kernel.args.input(name)
+        return self._inner.store(name, index, value, mode)
+
+    def _add_kernel_input(self, name: str):
+        """Add name as input to kernel and return input ref."""
+        return self.kernel.args.input(name)
+
+    def _process_indexing(self, index):
+        """Process and rename indexing, adding symbols as kernel inputs."""
+        return self.kernel.kexpr(self.kernel.rename_indexing(index))
+
+
 class TritonTemplateKernel(TritonKernel):
     def __init__(
         self,
@@ -411,6 +448,34 @@ class TritonTemplateKernel(TritonKernel):
             return texpr(self.rename_indexing(val[index]))
         return ", ".join([texpr(self.rename_indexing(i)) for i in val])
 
+    def _get_subgraph(self, subgraph_number: int):
+        assert isinstance(subgraph_number, int)
+        assert isinstance(self.subgraphs, list)
+        assert subgraph_number < len(
+            self.subgraphs
+        ), f"Invalid subgraph number provided to create_modification, {subgraph_number} must be < {len(self.subgraphs)}"
+        assert (
+            self.body.getvalue() == ""
+        ), "Body should be clear before adding a modification"
+        return self.subgraphs[subgraph_number]
+
+    def _handle_scatter_graph(self, scatter_graph):
+        """Handle processing for a single scatter graph.
+
+        Args:
+            scatter_graph: The scatter graph to process
+        """
+        assert isinstance(
+            scatter_graph, ir.ComputedBuffer
+        ), "Expected a scatter if subgraph is a list"
+
+        def funx(x, strides):
+            # We always create a fresh contiguous grad for scattering into
+            return sum(x_i * stride for x_i, stride in zip(x, strides))
+
+        my_funx = functools.partial(funx, strides=scatter_graph.get_stride())
+        scatter_graph.data.store_output(scatter_graph.name, my_funx, [])  # type: ignore[attr-defined]
+
     def modification(
         self,
         subgraph_number: int,
@@ -428,68 +493,18 @@ class TritonTemplateKernel(TritonKernel):
         while f"mod_{subgraph_number}_{num}" in self.subgraph_bodies:
             num += 1
         with self.create_subgraph_body(f"mod_{subgraph_number}_{num}"):
-            assert isinstance(subgraph_number, int)
-            assert isinstance(self.subgraphs, list)
-            assert (
-                self.body.getvalue() == ""
-            ), "Body should be clear before adding a modification"
-            assert subgraph_number < len(
-                self.subgraphs
-            ), f"Invalid subgraph number provided to create_modification, {subgraph_number} must be < {len(self.subgraphs)}"
-
-            subgraph = self.subgraphs[subgraph_number]
-
-            def add_input(name):
-                # This also implicitly adds name as an input to the kernel
-                return self.args.input(name)
-
-            def print_and_rename_indexing(index):
-                # This also implicitly adds the indexing symbols as an input to
-                # the kernel
-                return self.kexpr(self.rename_indexing(index))
-
-            name = f"PlaceholderSubstitution_{subgraph_number}"
-
-            class PlaceholderSubstitution(V.WrapperHandler):  # type: ignore[name-defined]
-                self.name = name
-
-                def load(self, name: str, index: sympy.Expr):
-                    if name not in fixed_inputs:
-                        # If it's not a fixed input, it's a load from a captured
-                        # tensor
-                        index_str = print_and_rename_indexing(index)
-                        var = add_input(name)
-                        return f"tl.load({var} + {index_str})"
-
-                    return f"({fixed_inputs[name]})"
-
-                def indirect_indexing(self, index_var, size, check, wrap_neg=True):
-                    return sympy_index_symbol(str(index_var))
-
-                def store(self, name, index, value, mode):
-                    add_input(name)
-                    return self._inner.store(name, index, value, mode)
-
-            with V.set_ops_handler(PlaceholderSubstitution(V.ops)):
+            subgraph = self._get_subgraph(subgraph_number)
+            modification_handler = ModificationWrapper(
+                self, subgraph_number, fixed_inputs
+            )
+            with V.set_ops_handler(modification_handler):
                 assert isinstance(
                     subgraph, (ir.ComputedBuffer, List)
                 ), f"Expected the subgraph to be a ComputedBuffer, got {type(subgraph)}"
                 # Handle scatter stores
                 if isinstance(subgraph, list):
                     for scatter_graph in subgraph:
-                        assert isinstance(
-                            scatter_graph, ir.ComputedBuffer
-                        ), "Expected a scatter if subgraph is a list"
-
-                        def funx(x, strides):
-                            # We always create a fresh contiguous grad for scattering into
-                            return sum(x_i * stride for x_i, stride in zip(x, strides))
-
-                        my_funx = functools.partial(
-                            funx, strides=scatter_graph.get_stride()
-                        )
-                        scatter_graph.data.store_output(scatter_graph.name, my_funx, [])  # type: ignore[attr-defined]
-
+                        self._handle_scatter_graph(scatter_graph)
                 elif isinstance(subgraph.data, ir.InputBuffer):
                     out = subgraph.data.make_loader()(())
                 else:
