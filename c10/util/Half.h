@@ -54,8 +54,8 @@
 #if defined(__GNUC__) || defined(__clang__)
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386) || \
     defined(_M_IX86)
-#if defined(__F16C__)
-#define X86_F16 1
+#if defined(__F16C__) && !(defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__))
+#define C10_X86_F16 1
 #include <immintrin.h> // import conversion ops from f16cintrin.h
 #endif // defined(__F16C__)
 #endif // __x86_64__ || _M_X64 || __i386 || _M_IX86
@@ -171,7 +171,7 @@ inline uint32_t fp16_ieee_to_fp32_bits(uint16_t h) {
  * between integer and floating-point variables.
  */
 C10_HOST_DEVICE inline float fp16_ieee_to_fp32_value(uint16_t h) {
-#ifdef X86_F16
+#ifdef C10_X86_F16
   return _cvtsh_ss(h);
 #else
   /*
@@ -296,7 +296,7 @@ C10_HOST_DEVICE inline float fp16_ieee_to_fp32_value(uint16_t h) {
       (two_w < denormalized_cutoff ? fp32_to_bits(denormalized_value)
                                    : fp32_to_bits(normalized_value));
   return fp32_from_bits(result);
-#endif // X86_F16
+#endif // C10_X86_F16
 }
 
 /*
@@ -309,7 +309,7 @@ C10_HOST_DEVICE inline float fp16_ieee_to_fp32_value(uint16_t h) {
  * between integer and floating-point variables.
  */
 inline uint16_t fp16_ieee_from_fp32_value(float f) {
-#ifdef X86_F16
+#ifdef C10_X86_F16
   return _cvtss_sh(f, _MM_FROUND_TO_NEAREST_INT);
 #else
   // const float scale_to_inf = 0x1.0p+112f;
@@ -345,12 +345,8 @@ inline uint16_t fp16_ieee_from_fp32_value(float f) {
   return static_cast<uint16_t>(
       (sign >> 16) |
       (shl1_w > UINT32_C(0xFF000000) ? UINT16_C(0x7E00) : nonsign));
-#endif // X86_F16
+#endif // C10_X86_F16
 }
-
-#ifdef X86_F16
-#undef X86_F16
-#endif // X86_F16
 
 #if defined(__aarch64__) && !defined(__CUDACC__)
 inline float16_t fp16_from_bits(uint16_t h) {
