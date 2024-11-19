@@ -967,14 +967,15 @@ def _exported_program_to_onnx_program(
     # 1. Translate all nodes in all subgraphs and the main graph
     # Create a dictionary of values for the main graph for step 2-3 to add inputs and outputs
     module: torch.fx.GraphModule
+    # Reverse the order of the modules so that the innermost module is processed first
+    # and made available to the outer module
     for name, module in reversed(
         tuple(exported_program.graph_module.named_modules(remove_duplicate=False))
     ):
-        # Reverse the order of the modules so that the innermost module is processed first
-        # and made available to the outer module
-        scope, subgraph_name = _get_scope_name(name)
-        owned_graphs = scoped_subgraphs.setdefault(scope, {})
+        # Obtain the graphs (previously built) owned by the current module
+        owned_graphs = scoped_subgraphs.setdefault(name, {})
         fx_graph = module.graph
+
         graph_like: ir.Graph | ir.Function
         if name == "":
             # Root graph
@@ -988,7 +989,9 @@ def _exported_program_to_onnx_program(
                 graph=ir.Graph((), (), nodes=()),
                 attributes=(),
             )
-            owned_graphs[subgraph_name] = func
+            # Make this function available to the outer graph
+            scope, subgraph_name = _get_scope_name(name)
+            scoped_subgraphs.setdefault(scope, {})[subgraph_name] = func
             model.functions[func.identifier()] = func
             graph_like = func
 
