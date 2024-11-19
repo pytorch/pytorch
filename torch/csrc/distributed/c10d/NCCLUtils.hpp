@@ -389,7 +389,7 @@ class NCCLComm {
     return commFailureReason_;
   }
 
-  void ncclCommAbort(
+  void abort(
       std::optional<std::string> commFailureReason = std::nullopt) {
     LockType lock(mutex_);
 #ifdef ENABLE_NCCL_ERROR_CHECKING
