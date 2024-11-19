@@ -3755,7 +3755,7 @@ class TestLinalg(TestCase):
                 b = torch.sum(r)
                 if mode == 'complete' and m > n:
                     with self.assertRaisesRegex(RuntimeError,
-                                                "The QR decomposition is not differentiable when mode='complete' and"
+                                                "The QR decomposition is not differentiable when mode='complete' and "
                                                 "nrows > ncols"):
                         b.backward()
                 elif mode == 'r':
