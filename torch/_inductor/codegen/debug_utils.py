@@ -169,6 +169,15 @@ class DebugPrinterManager:
         self.arg_signatures = arg_signatures
         self.kernel = kernel
 
+    def codegen_model_inputs_value_print(self, input_args_to_print: List[str]) -> None:
+        if self.debug_printer_level != IntermediateValueDebuggingLevel.PRINT_ONLY:
+            return
+        for arg in input_args_to_print:
+            if V.graph.cpp_wrapper:
+                V.graph.wrapper_code.prefix.writeline(
+                    f'aoti_torch_print_tensor_handle({arg}, "aoti_model_inputs - {arg}");'
+                )
+
     def codegen_intermediate_tensor_value_save(
         self,
         args_to_save,

@@ -285,7 +285,7 @@ struct PythonArgs {
   inline std::string_view stringViewWithDefault(
       int i,
       const std::string_view default_str);
-  inline std::optional<c10::string_view> stringViewOptional(int i);
+  inline std::optional<std::string_view> stringViewOptional(int i);
   inline PyObject* pyobject(int i);
   inline int64_t toInt64(int i);
   inline c10::SymInt toSymInt(int i);
@@ -947,7 +947,7 @@ inline std::string_view PythonArgs::stringViewWithDefault(
   return THPUtils_unpackStringView(args[i]);
 }
 
-inline std::optional<c10::string_view> PythonArgs::stringViewOptional(int i) {
+inline std::optional<std::string_view> PythonArgs::stringViewOptional(int i) {
   if (!args[i])
     return std::nullopt;
   return THPUtils_unpackStringView(args[i]);

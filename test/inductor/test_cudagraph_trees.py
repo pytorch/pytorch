@@ -2007,7 +2007,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
         def _run_iter(self, param, fn):
             fwd_output = fn(torch.ones(2, 2), param)
             fwd_output.sum().backward()
-            grad_output = param.grad.clone().detach()
+            grad_output = param.grad.detach().clone()
             param.grad = None
             return fwd_output, grad_output
 
@@ -2044,7 +2044,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 def run_test_iter(mod, fn):
                     fwd_output = fn(torch.ones(2, 2), mod)
                     fwd_output.sum().backward()
-                    grad_output = mod.weight.grad.clone().detach()
+                    grad_output = mod.weight.grad.detach().clone()
                     mod.zero_grad()
                     return fwd_output, grad_output
 

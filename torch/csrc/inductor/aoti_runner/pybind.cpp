@@ -45,7 +45,7 @@ void initAOTIRunnerBindings(PyObject* module) {
 
   m.def(
       "unsafe_alloc_void_ptrs_from_tensors",
-      [](std::vector<at::Tensor>& tensors) {
+      [](const std::vector<at::Tensor>& tensors) {
         std::vector<AtenTensorHandle> handles =
             torch::aot_inductor::unsafe_alloc_new_handles_from_tensors(tensors);
         std::vector<void*> result(
