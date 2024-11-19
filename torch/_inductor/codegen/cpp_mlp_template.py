@@ -203,9 +203,15 @@ extern "C" {{export_declaration}}
 {%- set tile_inp1 = tile_Y %}
 {%- endif %}
                     // silu-mul epilogues
-                    {{ kernel.silu_mul(
-                        tile_acc, tile_acc1, tile_inp, tile_inp1, tile_Y, has_gate_bias, has_up_bias, micro_gemm.name
-                    ) }}
+                    {{ kernel.store_output(
+                        tile_Y,
+                        (tile_acc, tile_acc1),
+                        (GemmOut, GemmOut1),
+                        epilogue_nodes,
+                        offsets=("m_start", "n_start"),
+                        reindexers=reindexers
+                    )|indent(20, false)
+                    }}
                 }
             }
         }
