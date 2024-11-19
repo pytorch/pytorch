@@ -1844,7 +1844,10 @@ class GuardBuilder(GuardBuilderBase):
 
             from torch._inductor.codecache import CppCodeCache
 
-            cpp_exprs, source_to_symbol = cpp_code_parts.exprs, cpp_code_parts.source_to_symbol
+            cpp_exprs, source_to_symbol = (
+                cpp_code_parts.exprs,
+                cpp_code_parts.source_to_symbol,
+            )
 
             try:
                 guard_managers = [
