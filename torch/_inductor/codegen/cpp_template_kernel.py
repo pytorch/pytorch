@@ -331,7 +331,8 @@ class CppTemplateKernel(CppKernel):
                     dst, epilogue_nodes, offsets, reindexers  # type: ignore[arg-type]
                 )
         else:
-            assert isinstance(src, ir.Buffer)
+            assert isinstance(src, ir.IRNode)
+            assert isinstance(dst, ir.IRNode)
             if dst.get_name() != src.get_name():
                 # src is local
                 copy = L.copy(dst, src).data.data
@@ -339,7 +340,7 @@ class CppTemplateKernel(CppKernel):
                     scope.add_local_buffer(src)
                     return self.store_pointwise_nodes(dst, [copy])
             else:
-                assert dst.layout == src.layout, f"{dst=}, {src=}"
+                assert dst.get_layout() == src.get_layout(), f"{dst=}, {src=}"
                 return ""
 
 
