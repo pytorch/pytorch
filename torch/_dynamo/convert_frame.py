@@ -841,6 +841,7 @@ def _compile(
 
         assert output.guards is not None
         CleanupManager.instance[out_code] = output.cleanups
+
         check_fn = CheckFunctionManager(
             output,
             hooks.guard_fail_fn if hooks else None,
