@@ -1220,7 +1220,7 @@ def _softmax(x: Tensor, dim: int, half_to_float: bool):
 
 
 @register_decomposition(aten._log_softmax)
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 def _log_softmax(x: Tensor, dim: int, half_to_float: bool):
     # eager log_softmax returns a contiguous tensor. Ensure that decomp also
     # returns a contiguous tensor.
@@ -1431,7 +1431,7 @@ def split(self: Tensor, split_size: int, dim: int = 0) -> Tuple[Tensor, ...]:
     dim_size = input_sizes[dim]
     if split_size == 0:
         assert dim_size == 0
-        return (self,)
+        return (self.detach(),)
     chunks = (dim_size + split_size - 1) // split_size
 
     # Avoid importing sympy at a module level
@@ -2291,7 +2291,8 @@ def native_batch_norm_backward(
     mean = save_mean_cast
     invstd = save_invstd_cast
     if train:
-        assert save_mean_cast is not None and save_invstd_cast is not None
+        assert mean is not None and invstd is not None
+
     else:
         assert running_mean_cast is not None and running_var_cast is not None
         mean = running_mean_cast
