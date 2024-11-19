@@ -200,7 +200,7 @@ with torch.no_grad():
         model, example_inputs
     )
     torch._inductor.aoti_compile_and_package(
-        ep, example_inputs
+        ep
     )
 """
         return self._run_full_test(run_code, None, expected_error, isolate=True)
