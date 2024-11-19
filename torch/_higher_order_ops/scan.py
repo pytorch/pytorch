@@ -16,6 +16,7 @@ from torch._higher_order_ops.utils import (
     reenter_make_fx,
     unique_graph_id,
     UnsupportedAliasMutationException,
+    validate_subgraph_args_types,
 )
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -191,7 +192,7 @@ doesn't match the length of the pytree of the init {len(leaves_init)}"
             combine_fn, leaves_init, leaves_xs, dim, reverse, additional_inputs=[]
         )
 
-    if not torch.compiler.is_compiling():
+    if not torch._dynamo.is_compiling():
         from torch._dynamo.backends.debugging import (
             make_eager_backend_with_torch_function_mode,
         )
@@ -230,6 +231,7 @@ class ScanOp(HigherOrderOperator):
 
     def __call__(self, combine_fn, init, xs, dim, reverse, additional_inputs):
         assert isinstance(additional_inputs, list), "additional_inputs must be a list."
+        validate_subgraph_args_types(additional_inputs)
         return super().__call__(combine_fn, init, xs, dim, reverse, additional_inputs)
 
 
@@ -335,10 +337,15 @@ def trace_scan(
     reverse: bool,
     additional_inputs: List[torch.Tensor],
 ):
+    from torch._dynamo.utils import clone_input
+
     with disable_proxy_modes_tracing():
-        sample_inits = [x_init.clone() for x_init in init]
+        sample_inits = [clone_input(x_init) for x_init in init]
         sample_inputs = [first_slice_copy(x, dim) for x in xs]
-        sample_additional_inputs = [x.clone() for x in additional_inputs]
+        sample_additional_inputs = [
+            clone_input(x) if isinstance(x, torch.Tensor) else x
+            for x in additional_inputs
+        ]
         combine_graph = reenter_make_fx(combine_fn)(
             *sample_inits, *sample_inputs, *sample_additional_inputs
         )

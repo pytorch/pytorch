@@ -107,7 +107,7 @@ def run_and_compare_activation(self, fn, inps):
             torch.randn(shape, device=device, dtype=dtype, requires_grad=True)
             for shape in inps
         ]
-        res_args = [i.clone().detach().requires_grad_(True) for i in ref_args]
+        res_args = [i.detach().clone().requires_grad_(True) for i in ref_args]
 
         ref = fn(*ref_args)
         ref.sum().backward()
@@ -278,7 +278,7 @@ class NoChangeTestCase(TestCase):
         # Test to repro issue with fx_graph_cse when
         # hash((primals_2, 1.0)) == hash((primals_2, 1))
 
-        if torch.compiler.is_compiling():
+        if torch._dynamo.is_compiling():
             self.skipTest("Unsupported if test run is compiled")
 
         def f(inpt, osize):
