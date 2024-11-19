@@ -137,7 +137,7 @@ ATTENTION_TEMPLATE = r"""
               kvBlockSize,
               qBlockSize,
               headSize,
-              static_cast<accum_t>(1),
+              scaling_factor,
               k_addr,
               kStrideN,
               q_data + i * qStrideB + j * qStrideH +
@@ -147,13 +147,49 @@ ATTENTION_TEMPLATE = r"""
               qk_data,
               kvBlockSize);
 
+            // apply score mod function
+            for (int64_t row = 0; row < qBlockSize; ++row) {
+              for(int col = 0; col< rkvBlockSize; col++){
+                std::vector<int64_t> b_ = {i};
+                std::vector<int64_t> h_ = {j};
+                std::vector<int64_t> q_ = {k*qBlockSize+row};
+                std::vector<int64_t> k_ = {n+col};
+                accum_t* in_ptr0 = qk_data + row * rkvBlockSize + col;
+                auto in_ptr1 = b_.data();
+                auto in_ptr2 = h_.data();
+                auto in_ptr3 = q_.data();
+                auto in_ptr4 = k_.data();
+                accum_t* out_ptr0 = in_ptr0;
+                {{template.modification(score_mod)}}
+                }
+            }
+
+            // Apply block mask, fill unused with -inf
+            for (int64_t row = 0; row < qBlockSize; ++row) {
+              for(int col = 0; col< rkvBlockSize; col++){
+                std::vector<int64_t> b_ = {i};
+                std::vector<int64_t> h_ = {j};
+                std::vector<int64_t> q_ = {k*qBlockSize+row};
+                std::vector<int64_t> k_ = {n+col};
+                accum_t* qk_block = qk_data + row * rkvBlockSize + col;
+                auto in_ptr0 = b_.data();
+                auto in_ptr1 = h_.data();
+                auto in_ptr2 = q_.data();
+                auto in_ptr3 = k_.data();
+                std::vector<int64_t> temp = {0};
+                int64_t* out_ptr0 = temp.data();
+                {{template.modification(mask_mod)}}
+                *qk_block = *out_ptr0!=0 ?  *qk_block : -std::numeric_limits<accum_t>::infinity();
+                }
+            }
+
             // Update coefficients with Softmax
             accum_t tmp_max = 0, tmp_sum = 0, exp_tmp = 0;
             for (int64_t row = 0; row < qBlockSize; ++row) {
               // apply scaling factor and max per row in fusion
               _mul_reduce_max_fusion_kernel(
                   qk_data + row * rkvBlockSize,
-                  scaling_factor,
+                  static_cast<accum_t>(1),
                   kvBlockSize,
                   qk_data + row * rkvBlockSize,
                   tmp_max);
@@ -226,7 +262,6 @@ ATTENTION_TEMPLATE = r"""
 }
 """
 
-
 class CppMHATemplate(CppTemplate):
     def __init__(
         self,
@@ -234,7 +269,7 @@ class CppMHATemplate(CppTemplate):
         layout: ir.Layout,
         scale,
         score_mod,
-        block_mask,
+        mask_mod,
         kv_block_size,
         kv_num_blocks,
     ) -> None:
@@ -242,10 +277,56 @@ class CppMHATemplate(CppTemplate):
         super().__init__("mha", input_nodes, layout, parallel_num_threads())
         self.scale = scale
         self.score_mod = score_mod
-        self.block_mask = block_mask
+        self.mask_mod = mask_mod
         self.kv_block_size = kv_block_size
         self.kv_num_blocks = kv_num_blocks
 
+    def modification(self, subgraph_buffer):
+        assert isinstance(subgraph_buffer, ir.ComputedBuffer)
+        subgraph_buffer_data = subgraph_buffer.data
+        assert isinstance(subgraph_buffer_data, ir.Pointwise), subgraph_buffer_data
+
+        from ..loop_body import LoopBody
+        from ..utils import sympy_index_symbol_with_prefix, SymT
+        from ..virtualized import ops, V
+
+
+        # TODO: what should be the output name??
+        output_name = "arg0_1"
+
+        from .cpp import CppKernel, CppKernelProxy, KernelGroup
+        kernel_group = KernelGroup()
+        cpp_kernel_proxy = CppKernelProxy(kernel_group)
+        bodies = []
+        var_sizes_list = []
+
+        var_sizes = (tuple([]))
+        output_index = 0
+        var_ranges = {
+            sympy_index_symbol_with_prefix(SymT.INDEX, i): sz
+            for i, sz in enumerate(var_sizes)
+        }        
+        def fn(*args):
+            V.ops.store(
+                output_name,
+                output_index,
+                subgraph_buffer_data.make_loader()(args).value,
+            )
+
+        body = LoopBody(
+            fn,
+            (list(var_ranges.keys())),
+            var_ranges,
+            list(var_ranges.keys()),
+            tuple(),
+        )
+
+        bodies.append(body)
+        var_sizes_list.append((var_sizes, ()))
+
+        cpp_kernel_proxy.codegen_loop_bodies(bodies, var_sizes_list)
+        kernel_group.finalize_kernel(cpp_kernel_proxy, [])
+        return kernel_group.loops_code.getvalue()    
     @staticmethod
     def add_choices(
         choices,
@@ -253,7 +334,7 @@ class CppMHATemplate(CppTemplate):
         layout,
         scale,
         score_mod,
-        block_mask,
+        mask_mod,
         kv_block_size,
         kv_num_blocks,
     ):
@@ -271,7 +352,7 @@ class CppMHATemplate(CppTemplate):
             layout=layout,
             scale=scale,
             score_mod=score_mod,
-            block_mask=block_mask,
+            mask_mod=mask_mod,
             kv_block_size=kv_block_size,
             kv_num_blocks=kv_num_blocks.layout.size[-1],
         )
@@ -335,6 +416,8 @@ class CppMHATemplate(CppTemplate):
             output=buf_out,
             kernel=kernel,
             num_thread=num_threads,
+            score_mod=self.score_mod,
+            mask_mod=self.mask_mod,
         )
         with contextlib.ExitStack() as stack:
             return self._template_from_string(ATTENTION_TEMPLATE).render(**options)

@@ -745,6 +745,31 @@ def flex_attention(
     if query.get_device().type == "cpu":
         score_mod_other_buffers = maybe_realize(score_mod_other_buffers)
         mask_mod_other_buffers = maybe_realize(mask_mod_other_buffers)
+        placeholder_inps = [
+            create_placeholder(name, dtype, query.get_device())
+            for name, dtype in [
+                ("arg0_1", query.get_dtype()),
+                ("arg1_1", torch.int32),
+                ("arg2_1", torch.int32),
+                ("arg3_1", torch.int32),
+                ("arg4_1", torch.int32),
+            ]
+        ]
+        subgraph_buffer = build_subgraph_buffer(
+            placeholder_inps + list(score_mod_other_buffers), subgraph
+        )
+        mask_graph_placeholder_inps = [
+            create_placeholder(name, dtype, query.get_device())
+            for name, dtype in [
+                ("arg0_1", torch.int32),
+                ("arg1_1", torch.int32),
+                ("arg2_1", torch.int32),
+                ("arg3_1", torch.int32),
+            ]
+        ]
+        mask_graph_buffer = build_subgraph_buffer(
+            mask_graph_placeholder_inps + list(mask_mod_other_buffers), mask_graph
+        )
 
         Bq, Hq, seq_len_q, qk_head_dim = query.get_size()
         Bkv, Hkv, seq_len_kv, v_head_dim = value.get_size()
@@ -768,8 +793,8 @@ def flex_attention(
             input_nodes=[query, key, value, kv_indices],
             layout=layout,
             scale=scale,
-            score_mod=subgraph,
-            block_mask=block_mask,
+            score_mod=subgraph_buffer,
+            mask_mod=mask_graph_buffer,
             kv_block_size=SPARSE_KV_BLOCK_SIZE,
             kv_num_blocks=kv_num_blocks,
         )
