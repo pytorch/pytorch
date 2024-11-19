@@ -1408,7 +1408,6 @@ def forward(self, x_1, output_1):
 
         self.assertEqual(compiled_out, eager_out)
 
-
     @requires_gpu
     @common_utils.parametrize("dynamic", [False, True])
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
