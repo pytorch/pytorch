@@ -67,6 +67,22 @@ class BenchmarkBase(ABC):
     # number of iterations used to run when collecting instruction_count or compile_time_instruction_count.
     _num_iterations = 5
 
+    def __init__(
+        self,
+        model_type: str,
+        device: str,
+        backend: str = "",
+        mode: str = "",
+        dynamic=False,
+        fullgraph=False,
+    ):
+        self._model_type = model_type
+        self._device = device
+        self._backend = backend
+        self._mode = mode  # Training or inference
+        self._dynamic = dynamic
+        self._fullgraph = fullgraph
+
     def with_iterations(self, value):
         self._num_iterations = value
         return self
@@ -83,22 +99,22 @@ class BenchmarkBase(ABC):
         return ""
 
     def backend(self):
-        return ""
+        return self._backend
 
     def mode(self):
-        return ""
+        return self._mode
 
     def model_type(self):
-        return ""
+        return self._model_type
 
     def device(self):
-        return ""
+        return self._device
 
     def is_dynamic(self):
-        return False
+        return self._dynamic
 
     def is_fullgraph(self):
-        return False
+        return self._fullgraph
 
     def description(self):
         return ""

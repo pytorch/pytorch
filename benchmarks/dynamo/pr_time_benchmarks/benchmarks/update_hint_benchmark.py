@@ -9,24 +9,15 @@ class Benchmark(BenchmarkBase):
     N = 20
 
     def __init__(self):
-        self._model_type = "update_hint"
-        self._backend = "inductor"
-        self._device = "cpu"
+        super().__init__(
+            model_type="update_hint",
+            backend="inductor",
+            device="cpu",
+            fullgraph=True,
+        )
 
     def name(self):
         return f"{self.model_type()}_regression"
-
-    def backend(self):
-        return self._backend
-
-    def model_type(self):
-        return self._model_type
-
-    def device(self):
-        return self._device
-
-    def is_fullgraph(self):
-        return True
 
     def description(self):
         return "information at https://github.com/pytorch/pytorch/pull/129893"

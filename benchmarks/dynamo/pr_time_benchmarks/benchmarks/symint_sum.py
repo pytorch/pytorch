@@ -9,24 +9,15 @@ class Benchmark(BenchmarkBase):
     N = 200
 
     def __init__(self):
-        self._model_type = "symint_sum"
-        self._backend = "inductor"
-        self._device = "cpu"
+        super().__init__(
+            model_type="symint_sum",
+            backend="inductor",
+            device="cpu",
+            fullgraph=True,
+        )
 
     def name(self):
         return self.model_type()
-
-    def backend(self):
-        return self._backend
-
-    def model_type(self):
-        return self._model_type
-
-    def device(self):
-        return self._device
-
-    def is_fullgraph(self):
-        return True
 
     def description(self):
         return "see https://docs.google.com/document/d/11xJXl1etSmefUxPiVyk885e0Dl-4o7QwxYcPiMIo2iY/edit"

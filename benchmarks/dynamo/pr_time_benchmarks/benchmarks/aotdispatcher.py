@@ -8,47 +8,32 @@ from torch.testing._internal.two_tensor import TwoTensor
 
 class Benchmark(BenchmarkBase):
     def __init__(self, *, training, subclass):
-        self._model_type = "aotdispatcher"
-        self._backend = "aot_eager_decomp_partition"
         self._training = training
         self._subclass = subclass
-        self._device = "cpu"
+        super().__init__(
+            model_type="aotdispatcher",
+            backend="aot_eager_decomp_partition",
+            device="cpu",
+            mode="training" if self._training else "inference",
+            fullgraph=True,
+        )
 
     def name(self):
-        prefix = self.model_type()
-        if self._training:
-            prefix += "_training"
-        else:
-            prefix += "_inference"
+        prefix = f"{self.model_type()}_{self.mode()}"
         if self._subclass:
             prefix += "_subclass"
         else:
             prefix += "_nosubclass"
-        if self._device == "cpu":
+        if self.device() == "cpu":
             prefix += "_cpu"
         return prefix
-
-    def backend(self):
-        return self._backend
-
-    def mode(self):
-        return ("training" if self._training else "inference",)
-
-    def model_type(self):
-        return self._model_type
-
-    def device(self):
-        return self._device
-
-    def is_fullgraph(self):
-        return True
 
     def description(self):
         return "100 inputs, 100 outputs, each input is added once"
 
     def _prepare_once(self):
         _args = [
-            torch.ones(100, requires_grad=self._training, device=self._device)
+            torch.ones(100, requires_grad=self._training, device=self.device())
             for _ in range(100)
         ]
         if self._subclass:

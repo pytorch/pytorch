@@ -8,43 +8,38 @@ from torch._inductor.utils import fresh_inductor_cache
 
 class Benchmark(BenchmarkBase):
     def __init__(self, backend, dynamic=False, is_gpu=False):
-        self._model_type = "add_loop"
-        self._backend = backend
-        self._dynamic = dynamic
-        self._device = "cuda" if is_gpu else "cpu"
+        super().__init__(
+            model_type="add_loop",
+            backend=backend,
+            device="cuda" if is_gpu else "cpu",
+            dynamic=dynamic,
+            fullgraph=True,
+        )
 
     def name(self):
-        prefix = f"{self._model_type}_{self._backend}"
-        if self._dynamic:
+        prefix = f"{self.model_type()}_{self.backend()}"
+        if self.is_dynamic():
             prefix += "_dynamic"
-        if self._device == "cuda":
+        if self.device() == "cuda":
             prefix += "_gpu"
         return prefix
-
-    def backend(self):
-        return self._backend
-
-    def model_type(self):
-        return self._model_type
-
-    def device(self):
-        return self._device
-
-    def is_dynamic(self):
-        return self._dynamic
 
     def description(self):
         return "a loop over 100 add node"
 
     def _prepare_once(self):
-        self.a = torch.ones(1000, device=self._device)
-        self.b = torch.torch.ones(1000, device=self._device)
+        self.a = torch.ones(1000, device=self.device())
+        self.b = torch.torch.ones(1000, device=self.device())
 
     def _prepare(self):
         torch._dynamo.reset()
 
     def _work(self):
-        @torch.compile(backend=self._backend, fullgraph=True, dynamic=self._dynamic)
+        @torch.compile(
+            backend=self.backend(),
+            fullgraph=self.is_fullgraph(),
+            dynamic=self.is_dynamic(),
+        )
         def f(a, b):
             result = a.clone()
             for i in range(1000):
