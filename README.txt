@@ -66,40 +66,46 @@ FAILED [0.3358s] test/inductor/test_torchinductor.py::TritonCodeGenTests::test_n
 ====================================================================================================== 9 failed, 2 passed in 86.85s (0:01:26) ======================================================================================================
 
 CI FAILURES:
-▶ FAILED  test/distributed/test_dynamo_distributed.py::TestMultiProc::test_asymmetric_compilation_with_fx_cache - RuntimeError: Process 0 exited with error code 10 and exception:
-▶ FAILED  test/distributed/test_inductor_collectives.py::TestCollectivesMultiProc::test_all_to_all_single_inductor - RuntimeError: Process 0 exited with error code 10 and exception:
-▶ FAILED  test/functorch/test_eager_transforms.py::TestCompileTransformsCPU::test_compile_vmap_hessian_cpu - torch._dynamo.exc.BackendCompilerFailed: backend='inductor' raised:
-▶ FAILED  test/inductor/test_benchmark_fusion.py::BenchmarkMultiTemplateFusionCudaTest::test_equivalent_extern_code - AssertionError: TODO: Bad async compile - run_and_get_code (disable this test)
-▶ FAILED  test/inductor/test_cpu_repro.py::CPUReproTests::test_argmin - AssertionError
-▶ FAILED  test/inductor/test_cpu_repro.py::CPUReproTests::test_argmin - AssertionError
-▶ FAILED  test/inductor/test_cpu_repro.py::CPUReproTests::test_argmin - AssertionError
-▶ FAILED  test/inductor/test_cpu_repro.py::CPUReproTests::test_argmin - AssertionError
-▶ FAILED  test/inductor/test_cpu_repro.py::CPUReproTests::test_bool_reduction_vec - AssertionError
-▶ FAILED  test/inductor/test_cpu_repro.py::CPUReproTests::test_constant_bool_vec - AssertionError
-▶ FAILED  test/inductor/test_cpu_repro.py::CPUReproTests::test_dequant_quant_lowering_int8 - AssertionError
-▶ FAILED  test/inductor/test_cpu_repro.py::CPUReproTests::test_dequant_quant_lowering_uint8 - AssertionError
-▶ FAILED  test/inductor/test_cpu_repro.py::CPUReproTests::test_dequant_quant_lowering_uint8 - AssertionError
-▶ FAILED  test/inductor/test_cpu_repro.py::CPUReproTests::test_dequant_quant_lowering_uint8 - AssertionError
-▶ FAILED  test/inductor/test_cpu_repro.py::CPUReproTests::test_do_not_insert_to_dtype_for_memory_copy_only_kernel - AssertionError
-▶ FAILED  test/inductor/test_cpu_repro.py::CPUReproTests::test_do_not_insert_to_dtype_for_memory_copy_only_kernel - AssertionError
-▶ FAILED  test/inductor/test_cpu_repro.py::CPUReproTests::test_int64_pointwise_vec - AssertionError
-▶ FAILED  test/inductor/test_cpu_repro.py::CPUReproTests::test_int64_pointwise_vec - AssertionError
-▶ FAILED  test/inductor/test_cpu_repro.py::CPUReproTests::test_int64_pointwise_vec - AssertionError
-▶ FAILED  test/inductor/test_cpu_repro.py::CPUReproTests::test_ir_node_str - AssertionError: 0 not greater than 3
-▶ FAILED  test/inductor/test_max_autotune.py::TestMaxAutotune::test_cat_max_autotune_extern - AssertionError: TODO: Bad async compile - run_and_get_code (disable this test)
-▶ FAILED  test/inductor/test_torchinductor_codegen_dynamic_shapes.py::DynamicShapesCodegenCpuTests::test__unsafe_masked_index_dynamic_shapes_cpu - AssertionError: TODO: Bad async compile - run_and_get_cpp_code (disable this test)
-▶ FAILED  test/inductor/test_torchinductor_codegen_dynamic_shapes.py::DynamicShapesCodegenCpuTests::test_abs_dynamic_shapes_cpu - AssertionError: TODO: Bad async compile - run_and_get_cpp_code (disable this test)
-▶ FAILED  test/inductor/test_torchinductor_codegen_dynamic_shapes.py::DynamicShapesCodegenCpuTests::test_abs_dynamic_shapes_cpu - AssertionError: TODO: Bad async compile - run_and_get_cpp_code (disable this test)
-▶ FAILED  test/inductor/test_torchinductor_codegen_dynamic_shapes.py::DynamicShapesCodegenCpuTests::test_abs_dynamic_shapes_cpu - AssertionError: TODO: Bad async compile - run_and_get_cpp_code (disable this test)
-▶ FAILED  test/inductor/test_torchinductor_codegen_dynamic_shapes.py::DynamicShapesCodegenCpuTests::test_adaptive_avg_pool2d1_dynamic_shapes_cpu - AssertionError: TODO: Bad async compile - run_and_get_cpp_code (disable this test)
-▶ FAILED  test/inductor/test_torchinductor_codegen_dynamic_shapes.py::DynamicShapesCodegenCpuTests::test_adaptive_max_pool2d1_dynamic_shapes_cpu - AssertionError: TODO: Bad async compile - run_and_get_cpp_code (disable this test)
-▶ FAILED  test/inductor/test_torchinductor_codegen_dynamic_shapes.py::DynamicShapesCodegenCpuTests::test_add_complex5_dynamic_shapes_cpu - AssertionError: TODO: Bad async compile - run_and_get_cpp_code (disable this test)
-▶ FAILED  test/inductor/test_torchinductor_codegen_dynamic_shapes.py::DynamicShapesCodegenCpuTests::test_add_inplace_permuted_dynamic_shapes_cpu - AssertionError: TODO: Bad async compile - run_and_get_cpp_code (disable this test)
-▶ FAILED  test/inductor/test_torchinductor_dynamic_shapes.py::DynamicShapesCpuTests::test_adaptive_avg_pool2d1_dynamic_shapes_cpu - AssertionError: expected size 2==2, stride 36==1024 at dim=0; expected size 4==4, stride 9==256 at dim=1; expected size 3==16, stride 3==16 at dim=2; expected size 3==16, stride 1==1 at dim=3
-▶ FAILED  test/inductor/test_torchinductor_dynamic_shapes.py::DynamicShapesCpuTests::test_adaptive_avg_pool2d1_dynamic_shapes_cpu - AssertionError: expected size 2==2, stride 36==1024 at dim=0; expected size 4==4, stride 9==256 at dim=1; expected size 3==16, stride 3==16 at dim=2; expected size 3==16, stride 1==1 at dim=3
-▶ FAILED  test/inductor/test_torchinductor_dynamic_shapes.py::DynamicShapesCpuTests::test_adaptive_avg_pool2d1_dynamic_shapes_cpu - AssertionError: expected size 2==2, stride 36==1024 at dim=0; expected size 4==4, stride 9==256 at dim=1; expected size 3==16, stride 3==16 at dim=2; expected size 3==16, stride 1==1 at dim=3
-▶ FAILED  test/inductor/test_torchinductor_dynamic_shapes.py::DynamicShapesCpuTests::test_adaptive_avg_pool2d1_dynamic_shapes_cpu - AssertionError: expected size 2==2, stride 36==1024 at dim=0; expected size 4==4, stride 9==256 at dim=1; expected size 3==16, stride 3==16 at dim=2; expected size 3==16, stride 1==1 at dim=3
-▶ FAILED  test/test_nestedtensor.py::TestNestedTensorSubclassCPU::test_to_padded_tensor_compile_nt_dim_2_requires_grad_False_cpu_float16 - AssertionError: TODO: Bad async compile - run_and_get_code (disable this test)
-▶ FAILED  test/test_nestedtensor.py::TestNestedTensorSubclassCPU::test_to_padded_tensor_compile_nt_dim_2_requires_grad_False_cpu_float16 - AssertionError: TODO: Bad async compile - run_and_get_code (disable this test)
-▶ FAILED  test/test_nestedtensor.py::TestNestedTensorSubclassCPU::test_to_padded_tensor_compile_nt_dim_2_requires_grad_False_cpu_float32 - AssertionError: TODO: Bad async compile - run_and_get_code (disable this test)
-▶ FAILED  test/test_nestedtensor.py::TestNestedTensorSubclassCPU::test_to_padded_tensor_compile_nt_dim_2_requires_grad_False_cpu_float32 - AssertionError: TODO: Bad async compile - run_and_get_code (disable this test)
+test/distributed/test_c10d_functional_native.py::CompileTest::test_inductor_all_gather_into_tensor_coalesced
+test/distributed/test_c10d_functional_native.py::CompileTest::test_inductor_all_gather_into_tensor_coalesced
+test/distributed/test_dynamo_distributed.py::TestMultiProc::test_asymmetric_compilation_with_fx_cache
+test/dynamo/test_dynamic_shapes.py::DynamicShapesFunctionTests::test_filter_fallback_dynamic_shapes
+test/dynamo/test_dynamic_shapes.py::DynamicShapesFunctionTests::test_filter_fallback_dynamic_shapes
+test/functorch/test_eager_transforms.py::TestCompileTransformsCPU::test_compile_vmap_hessian_cpu
+test/inductor/test_benchmark_fusion.py::BenchmarkMultiTemplateFusionCudaTest::test_equivalent_template_code
+test/inductor/test_cpu_repro.py::CPUReproTests::test_channel_shuffle_cl_output
+test/inductor/test_cpu_repro.py::CPUReproTests::test_channel_shuffle_cl_output
+test/inductor/test_cpu_repro.py::CPUReproTests::test_channel_shuffle_cl_output
+test/inductor/test_cpu_repro.py::CPUReproTests::test_channel_shuffle_cl_output
+test/inductor/test_cpu_repro.py::CPUReproTests::test_embedding_vec_bf16
+test/inductor/test_cpu_repro.py::CPUReproTests::test_expr_vec_non_contiguous
+test/inductor/test_cpu_repro.py::CPUReproTests::test_group_norm_vec
+test/inductor/test_cpu_repro.py::CPUReproTests::test_ir_node_str
+test/inductor/test_cpu_repro.py::CPUReproTests::test_local_buffer_in_outer_loop_fusion
+test/inductor/test_cpu_repro.py::CPUReproTests::test_local_buffer_in_outer_loop_fusion
+test/inductor/test_cpu_repro.py::CPUReproTests::test_local_buffer_in_outer_loop_fusion
+test/inductor/test_cpu_repro.py::CPUReproTests::test_lstm_packed_unbatched_False_input_size_1_hidden_size_2_num_layers_1_bidirectional_False_bias_False_empty_state_False_batch_first_False_batch_size_2_seq_len_1
+test/inductor/test_cpu_repro.py::CPUReproTests::test_lstm_packed_unbatched_False_input_size_1_hidden_size_2_num_layers_1_bidirectional_False_bias_False_empty_state_False_batch_first_True_batch_size_2_seq_len_1
+test/inductor/test_max_autotune.py::TestMaxAutotune::test_cat_max_autotune_triton
+test/inductor/test_torchinductor_codegen_dynamic_shapes.py::DynamicShapesCodegenCpuTests::test__unsafe_masked_index_put_accumulate_dynamic_shapes_cpu
+test/inductor/test_torchinductor_codegen_dynamic_shapes.py::DynamicShapesCodegenCpuTests::test__unsafe_masked_index_put_accumulate_dynamic_shapes_cpu
+test/inductor/test_torchinductor_codegen_dynamic_shapes.py::DynamicShapesCodegenCpuTests::test__unsafe_masked_index_put_accumulate_dynamic_shapes_cpu
+test/inductor/test_torchinductor_codegen_dynamic_shapes.py::DynamicShapesCodegenCpuTests::test__unsafe_masked_index_put_accumulate_dynamic_shapes_cpu
+test/inductor/test_torchinductor_codegen_dynamic_shapes.py::DynamicShapesCodegenCpuTests::test_adaptive_avg_pool1d_argmax_dynamic_shapes_cpu
+test/inductor/test_torchinductor_codegen_dynamic_shapes.py::DynamicShapesCodegenCpuTests::test_add_const_int_dynamic_shapes_cpu
+test/inductor/test_torchinductor_codegen_dynamic_shapes.py::DynamicShapesCodegenCpuTests::test_add_const_int_dynamic_shapes_cpu
+test/inductor/test_torchinductor_codegen_dynamic_shapes.py::DynamicShapesCodegenCpuTests::test_add_const_int_dynamic_shapes_cpu
+test/inductor/test_torchinductor_codegen_dynamic_shapes.py::DynamicShapesCodegenCpuTests::test_add_const_int_dynamic_shapes_cpu
+test/inductor/test_torchinductor_codegen_dynamic_shapes.py::DynamicShapesCodegenCpuTests::test_add_const_int_dynamic_shapes_cpu
+test/inductor/test_torchinductor_codegen_dynamic_shapes.py::DynamicShapesCodegenCpuTests::test_angle_dynamic_shapes_cpu
+
+lennard_jones
+mixer_b16_224
+speech_transformer
+vision_maskrcnn
+vision_maskrcnn
+vit_base_patch16_224
+##[error]Process completed with exit code 1.
+Process completed with exit code 255.
+detectron2_fcos_r_50_fpn
+detectron2_maskrcnn_r_50_fpn

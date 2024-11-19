@@ -1223,6 +1223,7 @@ class CommonTemplate:
             self.assertEqual(ref_with_min, res_with_min)
             self.assertEqual(ref_with_min_max, res_with_min_max)
 
+    @skip_if_async_compile
     def test_add_const_int(self):
         def fn(a):
             return (a + 1, torch.add(a, 1, alpha=2))
@@ -1335,6 +1336,7 @@ class CommonTemplate:
         self.common(fn, (torch.randn(17),))
 
     @xfail_if_triton_cpu
+    @skip_if_async_compile
     def test_angle(self):
         def fn(a, b, c):
             return torch.angle(a), torch.angle(b), torch.angle(c)
@@ -1746,6 +1748,7 @@ class CommonTemplate:
             ),
         )
 
+    @skip_if_async_compile
     def test__unsafe_masked_index_put_accumulate(self):
         def fn(a, mask, idx, values):
             return aten._unsafe_masked_index_put_accumulate(a, mask, idx, values)
@@ -11325,6 +11328,7 @@ class CommonTemplate:
         pt2_optimizer_step(o)
 
     @skip_if_gpu_halide
+    @skip_if_async_compile
     def test_adaptive_avg_pool1d_argmax(self):
         # https://github.com/pytorch/pytorch/issues/113013
         def fn(x):

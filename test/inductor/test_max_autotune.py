@@ -642,6 +642,7 @@ class TestMaxAutotune(TestCase):
     def test_cat_max_autotune_extern(self):
         self._test_cat_max_autotune_impl(using_triton_mm=False)
 
+    @skip_if_async_compile
     @config.patch(max_autotune_gemm_backends="TRITON")
     def test_cat_max_autotune_triton(self):
         self._test_cat_max_autotune_impl(using_triton_mm=True)

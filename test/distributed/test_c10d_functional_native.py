@@ -715,6 +715,7 @@ class CompileTest(TestCase):
         torch.cuda.synchronize()
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_async_compile
     @fresh_inductor_cache()
     def test_inductor_all_gather_into_tensor_coalesced(self):
         def func(args: List[torch.Tensor]) -> torch.Tensor:

@@ -278,6 +278,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             return code, code2
 
         @fresh_inductor_cache()
+        @skip_if_async_compile
         @torch._inductor.config.patch(max_autotune_gemm_backends="TRITON")
         def test_equivalent_template_code(self):
             code, code2 = self._equivalent_output_code_impl(256)

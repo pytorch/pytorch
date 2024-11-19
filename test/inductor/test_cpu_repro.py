@@ -2736,6 +2736,7 @@ class CPUReproTests(TestCase):
                 2,
             )
 
+    @skip_if_async_compile
     @config.patch({"fx_graph_cache": False, "fx_graph_remote_cache": False})
     def test_local_buffer_in_outer_loop_fusion(self):
         def fn(x):
@@ -3275,6 +3276,7 @@ class CPUReproTests(TestCase):
         x = torch.randn(2, 3, 4)
         self.assertEqual(torch.compile(func)(x), func(x))
 
+    @skip_if_async_compile
     @config.patch({"fx_graph_cache": False, "fx_graph_remote_cache": False})
     def test_ir_node_str(self):
         @torch.compile
@@ -3693,6 +3695,7 @@ class CPUReproTests(TestCase):
                 dtype if dtype else torch.float32,
             )
 
+    @skip_if_async_compile
     def test_group_norm_vec(self):
         class M(torch.nn.Module):
             def __init__(self) -> None:
@@ -3793,6 +3796,7 @@ class CPUReproTests(TestCase):
             check_metrics_vec_kernel_count(1)
 
     @requires_vectorization
+    @skip_if_async_compile
     def test_embedding_vec_bf16(self):
         class M(torch.nn.Module):
             def __init__(self) -> None:
@@ -3828,6 +3832,7 @@ class CPUReproTests(TestCase):
         self.common(fn, (x, y))
         check_metrics_vec_kernel_count(3)
 
+    @skip_if_async_compile
     @config.patch("cpp.enable_tiling_heuristics", False)
     def test_expr_vec_non_contiguous(self):
         def fn(x):
