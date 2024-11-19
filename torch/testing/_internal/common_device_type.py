@@ -1135,6 +1135,16 @@ class ops(_TestParametrizer):
             # See [Note: device and dtype suffix placement]
             test_name = op.formatted_name
 
+            # Filter sample skips / xfails to only those that apply to the OpInfo.
+            # These are defined on the test function via decorators.
+            sample_skips_and_xfails = getattr(test, "sample_skips_and_xfails", None)
+            if sample_skips_and_xfails is not None:
+                sample_skips_and_xfails = [
+                    rule
+                    for rule in sample_skips_and_xfails
+                    if rule.op_match_fn(device_cls.device_type, op)
+                ]
+
             for dtype in dtypes:
                 # Construct parameter kwargs to pass to the test.
                 param_kwargs = {"op": op}
@@ -1183,6 +1193,9 @@ class ops(_TestParametrizer):
                         device_cls.device_type,
                         dtype,
                     )
+
+                    if sample_skips_and_xfails is not None:
+                        test_wrapper.sample_skips_and_xfails = sample_skips_and_xfails
 
                     yield (test_wrapper, test_name, param_kwargs, decorator_fn)
                 except Exception as ex:
