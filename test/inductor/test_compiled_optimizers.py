@@ -178,6 +178,7 @@ KERNEL_COUNT_OVERRIDES = {
     "test_rmsprop_weight_decay_cpu": 6,
     "test_rmsprop_weight_decay_centered_cpu": 6,
     "test_radam_weight_decay_maximize_cpu": 7,
+    "test_rmsprop_maximize_weight_decay_cpu": 6,
 }
 
 # also tracks currently supported optimizers
