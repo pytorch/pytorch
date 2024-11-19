@@ -4,6 +4,9 @@
 
 from __future__ import annotations
 
+
+__all__ = ["registry", "onnx_impl"]
+
 from typing import Callable, TypeVar
 
 
@@ -21,9 +24,27 @@ class Registry:
 
         self._registry.setdefault(target, []).append(impl)
 
+    def __getitem__(self, name):
+        return self._registry[name]
+
+    def __contains__(self, name):
+        return name in self._registry
+
+    def __iter__(self):
+        return iter(self._registry)
+
+    def __repr__(self):
+        return repr(self._registry)
+
+    def items(self):
+        yield from self._registry.items()
+
+    def values(self):
+        yield from self._registry.values()
+
 
 # Default registry
-default_registry = Registry()
+registry = Registry()
 
 
 def onnx_impl(
@@ -34,7 +55,7 @@ def onnx_impl(
     def wrapper(
         func: _T,
     ) -> _T:
-        default_registry.register(target, func)
+        registry.register(target, func)
         return func
 
     return wrapper

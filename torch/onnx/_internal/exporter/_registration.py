@@ -24,6 +24,7 @@ import torch
 import torch._ops
 from torch.onnx._internal._lazy_import import onnxscript, onnxscript_apis
 from torch.onnx._internal.exporter import _schemas
+from torch.onnx._internal.exporter._torchlib import _torchlib_registry
 
 
 _DEFAULT_OPSET_VERSION = 18
@@ -168,6 +169,20 @@ class ONNXRegistry:
             except Exception:
                 logger.exception("Failed to register '%s'. Skipped", qualified_name)
                 continue
+
+        # Gather HOP ops
+        # Trigger registration
+        from torch.onnx._internal.exporter._torchlib import ops
+
+        del ops
+        for target, impls in _torchlib_registry.registry.values():
+            for impl in impls:
+                onnx_decomposition = OnnxDecompMeta(
+                    onnx_function=impl,
+                    fx_target=target,
+                )
+                registry._register(target, onnx_decomposition)
+
         return registry
 
     def _register(
