@@ -24,6 +24,7 @@ def higher_order_cond(
         else_func.domain, else_func.name, inputs, num_outputs=len(else_func.outputs)
     )
 
+    # FIXME(justinchuby): Set the output number of the If node and make it traceable by onnxscript
     return op.If(
         cond,
         then_branch=ir.Graph((), then_node.outputs, nodes=[then_node]),
