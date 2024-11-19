@@ -344,11 +344,6 @@ class TestFP8MatmulCuda(TestCase):
         out_fp8 = torch._scaled_mm(x_fp8, y_fp8, scale_a, scale_b, out_dtype=out_dtype)
         if out_dtype is not None:
             self.assertEqual(out_dtype, out_fp8.dtype)
-        print(out_fp32)
-        print("===========}")
-        print(out_fp8.to(torch.float))
-        print("===========")
-        print(out_fp8)
         self.assertEqual(out_fp32, out_fp8.to(torch.float))
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
