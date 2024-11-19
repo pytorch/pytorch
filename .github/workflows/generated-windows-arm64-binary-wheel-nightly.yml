@@ -25,6 +25,7 @@ env:
   SKIP_ALL_TESTS: 1
   BUILDER_ROOT: /builder
   PYTORCH_ROOT: /pytorch
+  NIGHTLIES_PYTORCH_ROOT: ./pytorch
   DOWNLOADS_DIR: c:\temp\downloads
   DEPENDENCIES_DIR: c:\temp\dependencies
   ENABLE_APL: 1
@@ -61,11 +62,10 @@ jobs:
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
       - name: Populate binary env
-        shell: cmd
+        shell: bash
         run: |
-          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"  \
-          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}" \
-          echo "NIGHTLIES_PYTORCH_ROOT: ./pytorch" >> "${GITHUB_ENV}" \
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Git checkout workflow
         uses: actions/checkout@v4
@@ -73,10 +73,19 @@ jobs:
           repository:  "ozanMSFT/builder"
           ref: "users/ozanMSFT/win-arm64"
           path: "builder"
+      - name: Print variables 1
+        shell: cmd
+        run: |
+          echo "BINARY_ENV_FILE: ${{ env.BINARY_ENV_FILE }}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR: ${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
+          echo "WIN_PACKAGE_WORK_DIR: ${{ env.WIN_PACKAGE_WORK_DIR }}"
+          echo "PYTORCH_ROOT: ${{ env.PYTORCH_ROOT }}"
+          echo "BUILDER_ROOT: ${{ env.BUILDER_ROOT }}"
+          echo "NIGHTLIES_PYTORCH_ROOT": ${{ env.NIGHTLIES_PYTORCH_ROOT }}
       - name: Bootstrap folders
         shell: cmd
         run: |
-          mkdir "%NIGHTLIES_PYTORCH_ROOT%" \
+          mkdir "%NIGHTLIES_PYTORCH_ROOT%"
           mkdir "%PYTORCH_FINAL_PACKAGE_DIR%"
       - name: Bootstrap Git
         shell: cmd
@@ -113,7 +122,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
-      - name: Print variables
+      - name: Print variables 2
         shell: cmd
         run: |
           echo "PYTORCH_ROOT: ${{ env.PYTORCH_ROOT }}"
