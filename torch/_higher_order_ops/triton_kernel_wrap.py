@@ -1116,7 +1116,7 @@ class TritonHOPifier:
                 )
             ):
                 self.raise_unsupported(
-                    "pre_hook and post_hook are not supported in triton.Autotune"
+                    "pre_hook and post_hook are not supported in triton.Autotune or triton.Config"
                 )
 
     def call_getitem(
