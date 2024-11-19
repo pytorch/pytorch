@@ -40,15 +40,20 @@ typedef struct CacheEntry CacheEntry;
 #ifdef __cplusplus
 
 typedef struct VISIBILITY_HIDDEN ExtraState {
+  // A pointer to the orig_code object to prevent race conditions in invalidate
+  // function.
+  PyCodeObject* orig_code;
   // List of cache entries for compiled code objects
   std::list<CacheEntry> cache_entry_list;
   // Frame state to detect dynamic shape dims
   py::dict frame_state;
   bool cache_limit_hit{false};
 
+  ExtraState(PyCodeObject* orig_code_arg);
   CacheEntry* get_first_entry();
   void move_to_front(CacheEntry* cache_entry);
-  void invalidate(CacheEntry* cache_entry);
+  void move_to_back(CacheEntry* cache_entry);
+  void invalidate(CacheEntry* cache_entry, py::object deleted_guard_manager);
 } ExtraState;
 
 #else

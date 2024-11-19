@@ -652,7 +652,7 @@ class TestModule(TestCase):
                 d = obj.dim()
                 if ((mem_format == torch.channels_last and d != 4)
                    or (mem_format == torch.channels_last_3d and d != 5)):
-                    return obj.clone().detach().requires_grad_(obj.requires_grad)
+                    return obj.detach().clone().requires_grad_(obj.requires_grad)
                 return obj.clone().to(memory_format=mem_format).detach().requires_grad_(obj.requires_grad)
 
             return self._traverse_obj(obj, inner_to_mem_format)
