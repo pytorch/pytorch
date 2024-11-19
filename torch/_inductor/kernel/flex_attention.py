@@ -1874,15 +1874,18 @@ def flex_attention_backward(*args, **kwargs):
         joint_placeholder_inps + list(score_mod_other_buffers), joint_graph
     )
     assert isinstance(all_joint_outputs, List)
-    joint_subgraph_buffer = all_joint_outputs[0]
-    joint_subgraph_buffer = joint_subgraph_buffer.compute_buffer
+    assert (
+        all_joint_outputs[0] is not None
+    ), "joint_subgraph_buffer is None this is a bug!"
+    joint_subgraph_buffer = all_joint_outputs[0].compute_buffer
+
     score_mod_other_buffer_grads = all_joint_outputs[len(joint_placeholder_inps) - 1 :]
 
     score_mod_other_buffer_grads_compute = [
-        buf.compute_buffer for buf in score_mod_other_buffer_grads
+        buf.compute_buffer for buf in score_mod_other_buffer_grads if buf is not None
     ]
     score_mod_other_buffer_grads_out = [
-        buf.output_node for buf in score_mod_other_buffer_grads
+        buf.output_node for buf in score_mod_other_buffer_grads if buf is not None
     ]
 
     mutated_other_buffer_grads = [
