@@ -117,9 +117,18 @@ COPY --from=jni                /usr/local/include/jni.h              /usr/local/
 FROM common as cpu_final
 ARG BASE_CUDA_VERSION=11.8
 ARG DEVTOOLSET_VERSION=11
+# Install Anaconda
+ADD ./common/install_conda_docker.sh install_conda.sh
+RUN bash ./install_conda.sh && rm install_conda.sh
+ENV PATH /opt/conda/bin:$PATH
 # Ensure the expected devtoolset is used
 ENV PATH=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/bin:$PATH
 ENV LD_LIBRARY_PATH=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/lib64:/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/lib:$LD_LIBRARY_PATH
+# Install setuptools and wheel for python 3.12/3.13
+RUN for cpython_version in "cp312-cp312" "cp313-cp313" "cp313-cp313t"; do \
+    /opt/python/${cpython_version}/bin/python -m pip install setuptools wheel; \
+    done;
+
 
 # cmake-3.18.4 from pip
 RUN yum install -y python3-pip && \
@@ -132,6 +141,7 @@ COPY --from=cuda     /usr/local/cuda-${BASE_CUDA_VERSION}  /usr/local/cuda-${BAS
 COPY --from=magma    /usr/local/cuda-${BASE_CUDA_VERSION}  /usr/local/cuda-${BASE_CUDA_VERSION}
 RUN ln -sf /usr/local/cuda-${BASE_CUDA_VERSION} /usr/local/cuda
 ENV PATH=/usr/local/cuda/bin:$PATH
+
 
 FROM common as rocm_final
 ARG ROCM_VERSION=3.7
@@ -152,8 +162,6 @@ ENV XPU_DRIVER_TYPE ROLLING
 # cmake-3.28.4 from pip
 RUN python3 -m pip install --upgrade pip && \
     python3 -mpip install cmake==3.28.4
-# Install setuptools and wheel for python 3.13
-RUN /opt/python/cp313-cp313/bin/python -m pip install setuptools wheel
 ADD ./common/install_xpu.sh install_xpu.sh
 RUN bash ./install_xpu.sh && rm install_xpu.sh
 RUN pushd /opt/_internal && tar -xJf static-libs-for-embedding-only.tar.xz && popd
