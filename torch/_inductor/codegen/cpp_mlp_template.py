@@ -122,116 +122,17 @@ extern "C" {{export_declaration}}
 {{kernel.def_kernel(inputs=kernel_args, outputs={"Y": Y}, aliases=aliases)}}
 {
     {{kernel.maybe_codegen_profile()}}
-    constexpr int64_t num_threads = {{num_threads}};
-    constexpr int64_t N = {{N}};
-    constexpr int64_t K = {{K}};
-    constexpr int64_t Mr = {{micro_gemm.register_blocking.block_m}};
-    constexpr int64_t Nr = {{micro_gemm.register_blocking.block_n}};
-    constexpr int64_t Kr = {{micro_gemm.register_blocking.block_k}};
-    constexpr int64_t Nr_blocks = (N + Nr - 1) / Nr;
-    constexpr int64_t Kr_blocks = (K + Kr - 1) / Kr;
-
-{%- if is_dynamic_M %}
-    const int64_t M = {{kernel.size(GemmOut, 0)}};
-    const int64_t Mr_blocks = (M + Mr - 1) / Mr;
-    {%- if num_threads > 1 %}
-    int64_t Mt_blocks, Nt_blocks, Kt_blocks;
-    mm_get_thread_blocking(num_threads, {{config.cpp.gemm_max_k_slices}}, M, N, K, Mr, Nr, Kr, Mt_blocks, Nt_blocks, Kt_blocks);
-    {%- else %}
-    const auto Mt_blocks = Mr_blocks;
-    const auto Nt_blocks = Nr_blocks;
-    const auto Kt_blocks = Kr_blocks;
-    {%- endif %}
-    int64_t Mc_blocks, Nc_blocks, Kc_blocks;
-    uint32_t L1_cache_size = {{L1_cache_size}};
-    uint32_t L2_cache_size = {{L2_cache_size}};
-    bool horizontal_transverse = false;
-    mm_get_cache_blocking<
-        {{kernel.dtype(X)}},
-        {{kernel.dtype(W)}},
-        {{template.try_vertical_transverse()}},
-        {{template.try_horizontal_transverse()}},
-        {{template.is_silu_mul_fusion()}}
-    >(
-        num_threads,
-        M,
-        N,
-        K,
-        Mr,
-        Nr,
-        Kr,
-        Mt_blocks,
-        Nt_blocks,
-        Kt_blocks,
-        Mc_blocks,
-        Nc_blocks,
-        Kc_blocks,
-        L1_cache_size,
-        L2_cache_size,
-        horizontal_transverse
-    );
-    const int64_t num_Mc_blocks = (Mr_blocks + Mc_blocks - 1) / Mc_blocks;
-    const int64_t num_Nc_blocks = (Nr_blocks + Nc_blocks - 1) / Nc_blocks;
-    const int64_t num_Mt_blocks = (Mr_blocks + Mt_blocks - 1) / Mt_blocks;
-    const int64_t num_Nt_blocks = (Nr_blocks + Nt_blocks - 1) / Nt_blocks;
-    const int64_t num_Kt_blocks = (Kr_blocks + Kt_blocks - 1) / Kt_blocks;
-{%- else %}
-    constexpr int64_t M = {{kernel.size(GemmOut, 0)}};
-    constexpr int64_t Mr_blocks = (M + Mr - 1) / Mr;
-    constexpr int64_t Mt_blocks = {{template.thread_blocking().block_m}};
-    constexpr int64_t Nt_blocks = {{template.thread_blocking().block_n}};
-    constexpr int64_t Kt_blocks = {{template.thread_blocking().block_k}};
-    constexpr int64_t Mc_blocks = {{template.cache_blocking()[0].block_m}};
-    constexpr int64_t Nc_blocks = {{template.cache_blocking()[0].block_n}};
-    constexpr int64_t Kc_blocks = {{template.cache_blocking()[0].block_k}};
-    bool horizontal_transverse = {{template.cache_blocking()[1]}};
-    constexpr int64_t num_Mc_blocks = (Mr_blocks + Mc_blocks - 1) / Mc_blocks;
-    constexpr int64_t num_Nc_blocks = (Nr_blocks + Nc_blocks - 1) / Nc_blocks;
-    constexpr int64_t num_Mt_blocks = (Mr_blocks + Mt_blocks - 1) / Mt_blocks;
-    constexpr int64_t num_Nt_blocks = (Nr_blocks + Nt_blocks - 1) / Nt_blocks;
-    constexpr int64_t num_Kt_blocks = (Kr_blocks + Kt_blocks - 1) / Kt_blocks;
-{%- endif %}
-
-    // make sure all partitions are assigned
-    {{kernel.assert_function}}(
-        Mt_blocks * Nt_blocks * Kt_blocks * {{num_threads}} >= Mr_blocks * Nr_blocks * Kr_blocks,
-        "Not all partitions are assigned."
-    );
+    {{ template.codegen_blocks(
+        num_threads, N, K, micro_gemm, is_dynamic_M, kernel, GemmOut, config, L1_cache_size, L2_cache_size
+    ) }}
 
 {%- if num_threads > 1 %}
     #pragma omp parallel num_threads({{num_threads}})
     {
-        const int tid = omp_get_thread_num();
-        const int64_t k_group_id = tid / num_Kt_blocks;
-        const int64_t k_slice_id = tid % num_Kt_blocks;
-        const int64_t n_group_id = k_group_id / num_Nt_blocks;
-        const int64_t n_slice_id = k_group_id % num_Nt_blocks;
-        const int64_t k_block_start = k_slice_id * Kt_blocks;
-        const int64_t k_block_end = std::min(k_block_start + Kt_blocks, Kr_blocks);
-        const int64_t n_block_start = n_slice_id * Nt_blocks;
-        const int64_t n_block_end = std::min(n_block_start + Nt_blocks, Nr_blocks);
-        const int64_t m_block_start = std::min(n_group_id * Mt_blocks, Mr_blocks);
-        const int64_t m_block_end = std::min(m_block_start + Mt_blocks, Mr_blocks);
-        const int64_t num_Mc_blocks_per_thread = (m_block_end - m_block_start + Mc_blocks - 1) / Mc_blocks;
+        {{ template.codegen_multi_threads_param()|indent(8, false) }}
 {%- else %}
     {
-        constexpr int tid = 0;
-        constexpr int64_t k_group_id = 0;
-        constexpr int64_t k_slice_id = 0;
-        constexpr int64_t n_group_id = 0;
-        constexpr int64_t n_slice_id = 0;
-        constexpr int64_t m_block_start = 0;
-        constexpr int64_t n_block_start = 0;
-        constexpr int64_t n_block_end = Nr_blocks;
-        constexpr int64_t k_block_start = 0;
-        constexpr int64_t k_block_end = Kr_blocks;
-    {%- if is_dynamic_M %}
-        const int64_t num_Mc_blocks_per_thread = num_Mc_blocks;
-        const int64_t m_block_end = Mr_blocks;
-    {%- else %}
-        constexpr int64_t num_Mc_blocks_per_thread = num_Mc_blocks;
-        constexpr int64_t m_block_end = Mr_blocks;
-    {%- endif %}
+        {{ template.codegen_single_thread_param(is_dynamic_M)|indent(8, false) }}
 {%- endif %}
         {{ micro_gemm.codegen_init(kernel) }}
 {%- if use_local_acc %}
@@ -323,17 +224,9 @@ extern "C" {{export_declaration}}
         }
     } else {
         for (int64_t mc_block_id = 0; mc_block_id < num_Mc_blocks_per_thread; mc_block_id++) {
-            const int64_t my_mc_block_id = (mc_block_id + n_slice_id) % num_Mc_blocks_per_thread;
-            const int64_t mc = m_block_start + my_mc_block_id * Mc_blocks;
-            const int64_t m_start = mc * Mr;
-            const int64_t m_end = std::min(std::min(mc + Mc_blocks, m_block_end) * Mr, M);
-            const int64_t m_size = m_end - m_start;
+            {{ template.codegen_m_loop_param()|indent(12, false) }}
             for (int64_t nc = n_block_start; nc < n_block_end; nc += Nc_blocks) {
-                const int64_t n_start = nc * Nr;
-                const int64_t n_end = std::min(std::min(nc + Nc_blocks, n_block_end) * Nr, N);
-                const int64_t n_size = n_end - n_start;
-                // NB: assume we pad N, nc_block_end won't exceed padded N here.
-                const int64_t nc_block_end = std::min(nc + Nc_blocks, n_block_end);
+                {{ template.codegen_n_loop_param()|indent(16, false) }}
 {%- if use_local_acc %}
     {%- set acc = kernel.local_buffers[acc_buf_name] %}
                 {{ kernel.reinit_buffer_if_null(acc_buf_name) }}
