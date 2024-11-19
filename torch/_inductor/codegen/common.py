@@ -1795,8 +1795,6 @@ def get_promoted_dtype(*args, type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KI
         if isinstance(inp, torch._prims_common.Number):
             return inp
         else:
-            assert hasattr(inp, "dtype")
-
             # construct a tmp tensor to use dtype promotion util function
             return torch.empty([1], dtype=inp.dtype)
 
@@ -2687,6 +2685,7 @@ class KernelTemplate:
     def maybe_append_choice(self, choices, **kwargs):
         """
         Maybe generates a new ChoiceCaller and appends it into existing choices.
+        Returns None if success, otherwise returns the error.
 
         choices: A list of ChoiceCallers.
         kwargs: Additional kwargs to be passed to self.generate() to generate a new ChoiceCaller.
@@ -2694,8 +2693,9 @@ class KernelTemplate:
 
         try:
             choices.append(self.generate(**kwargs))
+            return None
         except NotImplementedError as e:
-            pass
+            return e
 
     def generate(self, **kwargs) -> "torch._inductor.ir.ChoiceCaller":
         """
