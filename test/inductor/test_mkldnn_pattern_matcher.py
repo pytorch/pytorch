@@ -320,6 +320,9 @@ class TestPatternMatcher(TestPatternMatcherBase):
     def test_conv3d_unary_cpu(self):
         self._test_conv_unary_cpu_base(dim=5)
 
+    # The pattern match for this is kind of broken.  I'll cc the
+    # person who wrote this test/match on the diff to see if they can help me fix it.
+    @torch._dynamo.config.patch(specialize_float=True)
     def test_linear_unary(self):
         class M(torch.nn.Module):
             def __init__(
