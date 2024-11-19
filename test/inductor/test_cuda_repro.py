@@ -1382,6 +1382,23 @@ class CudaReproTests(TestCase):
         self.assertEqual(graph.disable_cudagraphs_reason, None)
         self.assertEqual(graph.device_types, {"cuda"})
 
+    def test_triton_interpret(self):
+        import subprocess
+
+        script = """
+import os
+os.environ["TRITON_INTERPRET"] = "1"
+import torch
+
+@torch.compile()
+def foo(x):
+    return x + 1
+
+# somehow gives different results.. still, check that it doesnt error
+foo(torch.rand([256], device="cuda"))
+"""
+        subprocess.run([sys.executable, "-c", script], check=True)
+
     def test_reflection_pad_loop_order(self):
         def fn(x, y):
             a = torch.nn.functional.pad(x, (5, 5, 5, 5), mode="reflect")

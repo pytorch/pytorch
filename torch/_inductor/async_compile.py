@@ -212,6 +212,11 @@ class AsyncCompile:
         _compile_start()
         _set_triton_ptxas_path()
 
+        if os.environ.get("TRITON_INTERPRET", "0") == "1":
+            return getattr(
+                torch._inductor.codecache.PyCodeCache.load(source_code), kernel_name
+            )
+
         kernel = TritonCodeCache.load(kernel_name, source_code)
         if self._use_process_pool():
             # We want to support changing these env vars after (and while) the
