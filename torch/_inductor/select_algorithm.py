@@ -480,7 +480,9 @@ class TritonTemplateKernel(TritonKernel):
                         assert isinstance(
                             scatter_graph, ir.ComputedBuffer
                         ), "Expected a scatter if subgraph is a list"
+
                         def funx(x, strides):
+                            # We always create a fresh contiguous grad for scattering into
                             return sum(x_i * stride for x_i, stride in zip(x, strides))
 
                         my_funx = functools.partial(

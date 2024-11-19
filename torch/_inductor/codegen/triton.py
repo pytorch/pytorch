@@ -2073,6 +2073,8 @@ class TritonKernel(SIMDKernel):
         elif mode is None:
             line = f"tl.store({var} + ({indexing.index_str}), {value}, {indexing.mask_str})"
         elif mode == "atomic_add":
+            if isinstance(index, sympy.core.symbol.Symbol) and "(idx_m)" == index.name:
+                indexing.index_str = f"tl.broadcast_to(idx_m, {value}.shape)"
             line = f"tl.atomic_add({var} + ({indexing.index_str}), {value}, {indexing.mask_str}, sem='relaxed')"
         else:
             raise NotImplementedError(f"store mode={mode}")
