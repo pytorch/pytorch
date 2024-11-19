@@ -202,7 +202,6 @@ class CachingAutotuner(KernelInterface):
         configs,
         save_cache_hook,
         mutated_arg_names: List[str],  # see [Note: clone mutated buffers]
-        reset_to_zero_arg_names: List[str],
         optimize_mem,
         heuristic_type,
         size_hints=None,
@@ -227,7 +226,6 @@ class CachingAutotuner(KernelInterface):
         self.inductor_meta = {} if inductor_meta is None else inductor_meta
         self.save_cache_hook = save_cache_hook
         self.mutated_arg_names = mutated_arg_names
-        self.reset_to_zero_arg_names = reset_to_zero_arg_names
         self.optimize_mem = optimize_mem
         self.configs = configs
         self.heuristic_type = heuristic_type
@@ -738,7 +736,7 @@ class CachingAutotuner(KernelInterface):
 
     def bench(self, launcher, *args, grid, with_profiler=False, **kwargs):
         """Measure the performance of a given launcher"""
-        # we don't skip configs with spilled registers when auto-tuning custom
+        # we don't skip configs wiht spilled registers when auto-tuning custom
         # (user-written) Triton kernels, as (i) we don't have any knowledge or
         # control over the kernel code; (ii) there is empirical evidence that
         # for some (complicated) custom Triton kernels, a register-spilling
@@ -762,9 +760,6 @@ class CachingAutotuner(KernelInterface):
             cloned_args, cloned_kwargs = self.maybe_clone_args(
                 cpu_copies, *args, **kwargs
             )
-
-            # reset to zero before evaluating any config
-            self.reset_to_zero_args(*args, **kwargs)
             launcher(
                 *cloned_args,
                 **cloned_kwargs,
@@ -828,17 +823,6 @@ class CachingAutotuner(KernelInterface):
             arg, cpu_arg = pair
             arg.copy_(cpu_arg, non_blocking=True)
 
-    def reset_to_zero_args(self, *args, **kwargs):
-        for i, arg in enumerate(args):
-            if self.fn.arg_names[i] in self.reset_to_zero_arg_names:
-                assert isinstance(arg, torch.Tensor)
-                arg.zero_()
-
-        for name, arg in kwargs.items():
-            if name in self.reset_to_zero_arg_names:
-                assert isinstance(arg, torch.Tensor)
-                arg.zero_()
-
     def maybe_clone_args(
         self, exclude: Container[str], *args, **kwargs
     ) -> Tuple[List[Any], Dict[str, Any]]:
@@ -891,7 +875,6 @@ class CachingAutotuner(KernelInterface):
                         k.shared,
                     )
 
-            self.reset_to_zero_args(*args, **kwargs)
             return timings
 
     def autotune_to_one_config(self, *args, **kwargs):
@@ -1251,10 +1234,9 @@ def cached_autotune(
         if disabled:
             log.debug("autotune caching is disabled by config.force_disable_caches")
 
-    mutated_arg_names = inductor_meta.pop("mutated_arg_names", [])
+    mutated_arg_names = inductor_meta.pop("mutated_arg_names", ())
     optimize_mem = inductor_meta.pop("optimize_mem", True)
 
-    # Anything that will be reset or set to zero is mutated
     if "restore_value" in triton_meta:
         mutated_arg_names += triton_meta.pop("restore_value")
 
@@ -1287,7 +1269,6 @@ def cached_autotune(
                 configs=configs,
                 save_cache_hook=autotune_cache and autotune_cache.save,
                 mutated_arg_names=mutated_arg_names,
-                reset_to_zero_arg_names=reset_to_zero_arg_names,
                 optimize_mem=optimize_mem,
                 heuristic_type=heuristic_type,
                 size_hints=size_hints,
@@ -1302,7 +1283,6 @@ def cached_autotune(
             configs=configs,
             save_cache_hook=autotune_cache and autotune_cache.save,
             mutated_arg_names=mutated_arg_names,
-            reset_to_zero_arg_names=reset_to_zero_arg_names,
             optimize_mem=optimize_mem,
             heuristic_type=heuristic_type,
             size_hints=size_hints,
