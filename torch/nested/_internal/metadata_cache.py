@@ -406,3 +406,18 @@ def add_entry(cache, key, value):
         torch.ops.nested._clear_tmp_ref(new_ref_tensor)
 
     return cache
+
+
+def merge_caches(cache_a, cache_b):
+    if cache_a is None:
+        return cache_b
+    if cache_b is None:
+        return cache_a
+    # Can we ban accessing .data directly?
+    ref_tensor_a = _get_ref_tensor(cache_a.data)
+    ref_tensor_b = _get_ref_tensor(cache_b.data)
+    # breakpoint()
+    if ref_tensor_a is ref_tensor_b:
+        return cache_a.find()
+    torch.ops.nested._merge_caches(ref_tensor_a, ref_tensor_b)
+    return cache_a.find()
