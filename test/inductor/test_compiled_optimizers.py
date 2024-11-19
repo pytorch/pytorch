@@ -176,6 +176,8 @@ KERNEL_COUNT_OVERRIDES = {
     "test_sgd_tensor_lr_cuda": 2,
     "test_sgd_tensor_lr_xpu": 2,
     "test_rmsprop_weight_decay_cpu": 6,
+    "test_rmsprop_weight_decay_centered_cpu": 6,
+    "test_radam_weight_decay_maximize_cpu": 7,
 }
 
 # also tracks currently supported optimizers
