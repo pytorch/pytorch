@@ -3512,19 +3512,19 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             self.assertExpectedInline(
                 backend.graphs[0].code.strip(),
                 """\
-    def forward(self, L_it_ : torch.Tensor, L_pytree_input_0_0_ : torch.Tensor, L_pytree_input_1_x_ : torch.Tensor, L_pytree_input_1_y_ : torch.Tensor):
-        l_it_ = L_it_
-        l_pytree_input_0_0_ = L_pytree_input_0_0_
-        l_pytree_input_1_x_ = L_pytree_input_1_x_
-        l_pytree_input_1_y_ = L_pytree_input_1_y_
-        cond_fn_0 = self.cond_fn_0
-        body_fn_0 = self.body_fn_0
-        while_loop = torch.ops.higher_order.while_loop(cond_fn_0, body_fn_0, (l_it_, l_pytree_input_0_0_, l_pytree_input_1_x_, l_pytree_input_1_y_), ());  cond_fn_0 = body_fn_0 = l_it_ = l_pytree_input_0_0_ = l_pytree_input_1_x_ = l_pytree_input_1_y_ = None
-        getitem = while_loop[0]
-        getitem_1 = while_loop[1]
-        getitem_2 = while_loop[2]
-        getitem_3 = while_loop[3];  while_loop = None
-        return (getitem, getitem_1, getitem_2, getitem_3)""",  # noqa: B950
+def forward(self, L_it_ : torch.Tensor, L_pytree_input_0_0_ : torch.Tensor, L_pytree_input_1_x_ : torch.Tensor, L_pytree_input_1_y_ : torch.Tensor):
+    l_it_ = L_it_
+    l_pytree_input_0_0_ = L_pytree_input_0_0_
+    l_pytree_input_1_x_ = L_pytree_input_1_x_
+    l_pytree_input_1_y_ = L_pytree_input_1_y_
+    cond_fn_0 = self.cond_fn_0
+    body_fn_0 = self.body_fn_0
+    while_loop = torch.ops.higher_order.while_loop(cond_fn_0, body_fn_0, (l_it_, l_pytree_input_0_0_, l_pytree_input_1_x_, l_pytree_input_1_y_), ());  cond_fn_0 = body_fn_0 = l_it_ = l_pytree_input_0_0_ = l_pytree_input_1_x_ = l_pytree_input_1_y_ = None
+    getitem = while_loop[0]
+    getitem_1 = while_loop[1]
+    getitem_2 = while_loop[2]
+    getitem_3 = while_loop[3];  while_loop = None
+    return (getitem, getitem_1, getitem_2, getitem_3)""",  # noqa: B950
             )
 
     def _wrap_with_functionalize(self, fn, func_type):
