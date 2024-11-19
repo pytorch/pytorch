@@ -29,6 +29,7 @@ from torch.testing._internal.common_dtype import (
     get_all_dtypes,
 )
 from torch.testing._internal.common_utils import (
+    extract_test_fn,
     IS_FBCODE,
     is_iterable_of_tensors,
     noncontiguous_like,
@@ -1238,9 +1239,28 @@ class OpInfo:
         log.debug("matched no rules: %s %s %s", self.full_name, device, sample)
         return _subtest_fn
 
-    def _sample_callback_fn(self, sample_skips_and_xfails, device):
-        if sample_skips_and_xfails is None:
-            # no rules to apply; use the default callback that just returns the sample
+    def _sample_callback_fn(self, use_subtests, device):
+        # Get sample-specific skips / xfails.
+        sample_skips_and_xfails = getattr(
+            extract_test_fn(), "sample_skips_and_xfails", None
+        )
+
+        if sample_skips_and_xfails is not None and not use_subtests:
+            raise RuntimeError(
+                """Sample-specific skips / xfails require use_subtests=True.
+Please pass this to the sample generation function and run the test logic within the
+returned subtest context. For example:
+
+def test_foo(self, device, dtype, op):
+    for sample, subtest_ctx in op.sample_inputs(..., use_subtests=True):
+        # the subtest context handles skips / xfails
+        with subtest_ctx(self):
+            # test logic here
+            ..."""
+            )
+
+        if not use_subtests:
+            # use the default callback that returns the sample without a subtest context
             return None
 
         def _f(
@@ -1249,9 +1269,10 @@ class OpInfo:
             self=self,
             device=device,
             sample_skips_and_xfails=sample_skips_and_xfails,
+            use_subtests=use_subtests,
         ):
-            # if there are sample skip / xfail rules to apply, return a tuple of the sample
-            # and a context manager for applying matching rules within a subtest context.
+            # When subtests are enabled, also return a subtest context. This is required
+            # for xfails / skips to work properly.
             return (
                 sample,
                 self._maybe_skip_or_xfail(sample_skips_and_xfails, device, sample, idx),
@@ -1265,9 +1286,9 @@ class OpInfo:
         """
 
         set_seed = kwargs.pop("set_seed", True)
+        use_subtests = kwargs.pop("use_subtests", False)
         samples = self.sample_inputs_func(self, device, dtype, requires_grad, **kwargs)
         conj_samples = list(samples)
-        sample_skips_and_xfails = kwargs.pop("sample_skips_and_xfails", None)
 
         def conjugate(tensor):
             _requires_grad = tensor.requires_grad
@@ -1285,7 +1306,7 @@ class OpInfo:
         return TrackedInputIter(
             iter(conj_samples),
             "conjugate sample input",
-            item_callback=self._sample_callback_fn(sample_skips_and_xfails, device),
+            item_callback=self._sample_callback_fn(use_subtests, device),
             set_seed=set_seed,
             restrict_to_index=OPINFO_SAMPLE_INPUT_INDEX,
         )
@@ -1298,8 +1319,8 @@ class OpInfo:
         with autograd, TorchScript, etc.
         """
         set_seed = kwargs.pop("set_seed", True)
+        use_subtests = kwargs.pop("use_subtests", False)
         samples = self.sample_inputs_func(self, device, dtype, requires_grad, **kwargs)
-        sample_skips_and_xfails = kwargs.pop("sample_skips_and_xfails", None)
 
         if kwargs.get("include_conjugated_inputs", False):
             conj_samples = self.conjugate_sample_inputs(
@@ -1312,7 +1333,7 @@ class OpInfo:
         return TrackedInputIter(
             iter(samples),
             "sample input",
-            item_callback=self._sample_callback_fn(sample_skips_and_xfails, device),
+            item_callback=self._sample_callback_fn(use_subtests, device),
             set_seed=set_seed,
             restrict_to_index=OPINFO_SAMPLE_INPUT_INDEX,
         )
@@ -1326,7 +1347,7 @@ class OpInfo:
         the sample inputs.
         """
         set_seed = kwargs.pop("set_seed", True)
-        sample_skips_and_xfails = kwargs.pop("sample_skips_and_xfails", None)
+        use_subtests = kwargs.pop("use_subtests", False)
         if self.reference_inputs_func is None:
             samples = self.sample_inputs_func(
                 self, device, dtype, requires_grad, **kwargs
@@ -1334,7 +1355,7 @@ class OpInfo:
             return TrackedInputIter(
                 iter(samples),
                 "reference input",
-                item_callback=self._sample_callback_fn(sample_skips_and_xfails, device),
+                item_callback=self._sample_callback_fn(use_subtests, device),
                 set_seed=set_seed,
                 restrict_to_index=OPINFO_SAMPLE_INPUT_INDEX,
             )
@@ -1348,7 +1369,7 @@ class OpInfo:
         return TrackedInputIter(
             iter(references),
             "reference input",
-            item_callback=self._sample_callback_fn(sample_skips_and_xfails, device),
+            item_callback=self._sample_callback_fn(use_subtests, device),
             set_seed=set_seed,
             restrict_to_index=OPINFO_SAMPLE_INPUT_INDEX,
         )
@@ -1358,13 +1379,11 @@ class OpInfo:
         Returns an iterable of ErrorInputs.
         """
         set_seed = kwargs.pop("set_seed", True)
-        sample_skips_and_xfails = kwargs.pop("sample_skips_and_xfails", None)
+        use_subtests = kwargs.pop("use_subtests", False)
         errs = self.error_inputs_func(self, device, **kwargs)
 
-        def _error_item_callback(
-            e, i, sample_skips_and_xfails=sample_skips_and_xfails, device=device
-        ):
-            cb = self._sample_callback_fn(sample_skips_and_xfails, device)
+        def _error_item_callback(e, i, use_subtests=use_subtests, device=device):
+            cb = self._sample_callback_fn(use_subtests, device)
             # no rules to apply; just return the sample
             if cb is None:
                 return e
@@ -1606,6 +1625,22 @@ class SkipRule(SampleRule):
             yield
 
         return skipcontext()
+
+
+# Decorator that defines skip / xfail rules for a given test function. If these are
+# present, the @ops decorator will apply these for each op and place them onto the
+# parametrized test functions for use by e.g. OpInfo.sample_inputs().
+class sample_skips_and_xfails:
+    def __init__(self, rules):
+        self.rules = rules
+
+    def __call__(self, fn):
+        rules = getattr(fn, "sample_skips_and_xfails", None)
+        if rules is not None:
+            raise RuntimeError("Multiple sets of sample_skips_and_xfails defined")
+
+        fn.sample_skips_and_xfails = self.rules
+        return fn
 
 
 # A combined subTest() + rule-specific context manager. In practice, this is used to treat each
