@@ -16,6 +16,8 @@ inductor_fallback_ops = {
     "aten.adaptive_max_pool2d.default",
     "aten.adaptive_max_pool3d.default",
     "aten.adaptive_max_pool3d_backward.default",
+    "aten.add.Scalar",
+    "aten.add.Tensor",
     "aten.addbmm.default",
     "aten._addmm_activation.default",
     "aten.addmm.out",
