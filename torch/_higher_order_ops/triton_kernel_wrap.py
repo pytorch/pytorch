@@ -1092,7 +1092,7 @@ class TritonHOPifier:
                 )
             ):
                 self.raise_unsupported(
-                    "Only configs, keys, and restore_value are supported for triton.autotune"
+                    "Only configs, keys, restore_value, and reset_to_zero are supported for triton.autotune"
                 )
             if (
                 not torch._inductor.config.unsafe_ignore_unsupported_triton_autotune_args
