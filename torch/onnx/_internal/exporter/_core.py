@@ -97,6 +97,9 @@ _STEP_THREE_ERROR_MESSAGE = textwrap.dedent(
 _LOCAL_FUNCTION_DOMAIN: str = "pkg.torch.__subgraph__"
 
 logger = logging.getLogger(__name__)
+# The current tracer that is being used to trace the operators,
+# used by torch/onnx/_internal/exporter/_torchlib/ops/hop.py
+current_tracer = None
 
 
 def _torch_dtype_to_onnx_dtype(dtype: torch.dtype) -> ir.DataType:
@@ -511,12 +514,16 @@ def _handle_call_function_node_with_lowering(
     with onnxscript.evaluator.default_as(
         tracer := _building.OpRecorder(opset, constant_farm)
     ):
+        global current_tracer
+        current_tracer = tracer
         try:
             outputs = onnx_function(*onnx_args, **onnx_kwargs)
         except Exception as e:
             raise _errors.GraphConstructionError(
                 f"Error when calling function '{onnx_function}' with args '{onnx_args}' and kwargs '{onnx_kwargs}'"
             ) from e
+        finally:
+            current_tracer = None
 
     # NOTE: Instead of using the output names from node.target._schema,
     # we always use the index if there are more than one outputs so the
