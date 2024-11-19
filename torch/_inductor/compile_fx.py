@@ -5,7 +5,6 @@ import functools
 import io
 import itertools
 import logging
-import os
 import sys
 import time
 import warnings
@@ -94,6 +93,7 @@ from .fx_passes.joint_graph import joint_graph_passes
 from .fx_passes.post_grad import post_grad_passes, view_to_reshape
 from .fx_passes.pre_grad import pre_grad_passes
 from .graph import GraphLowering
+from .ir import get_device_type, IRNode
 from .utils import (
     align_inputs_from_check_idxs,
     clone_preserve_strides,
@@ -662,7 +662,7 @@ def _compile_fx_inner(
         """
         with _WaitCounter("pytorch.wait_counter.actual_codegen_and_compile").guard():
             compiled_graph = fx_codegen_and_compile(gm, example_inputs, **fx_kwargs)
-            if isinstance(compiled_graph, str):
+            if isinstance(compiled_graph, str) or fx_kwargs["aot_mode"]:
                 # We only return a string in aot mode, in which case we don't
                 # need to do any post-compilation steps: we just return the string,
                 # which is the filename of the compiled code.
@@ -1235,17 +1235,25 @@ def compile_fx_aot(
     example_inputs_: List[InputType],
     inner_compile: _CompileFxCallableEx = compile_fx_inner,
     config_patches: Optional[Dict[str, str]] = None,
-) -> str:
+) -> Union[List[str], str]:
     config_patches: Dict[str, Any] = (
         {"cpp_wrapper": True}
         if config_patches is None
         else {**config_patches, "cpp_wrapper": True}
     )
 
-    if (
-        "aot_inductor.output_path" not in config_patches
-        and not config.aot_inductor.output_path
-    ):
+    output_path = config_patches.get(
+        "aot_inductor.output_path", config.aot_inductor.output_path
+    )
+
+    if output_path:
+        assert not output_path.endswith(".pt2"), (
+            "The output path for aot_compile should not have an extension with .pt2 "
+            "this is for specifying the output path for the .so in AOTInductor. "
+            "If you would like to package the AOTInductor generated files "
+            "into a pt2, please call `torch._inductor.aoti_compile_and_package`."
+        )
+    else:
         config_patches = {
             **config_patches,
             "aot_inductor.output_path": code_hash(model_.code),
@@ -1257,7 +1265,7 @@ def compile_fx_aot(
     with V.set_aot_compilation(True), torch._guards.compile_context(
         saved_compile_context
     ):
-        compiled_lib_path = compile_fx(
+        compiled_artifacts = compile_fx(
             model_,
             example_inputs_,
             inner_compile=functools.partial(
@@ -1267,11 +1275,12 @@ def compile_fx_aot(
             ),
             config_patches=config_patches,
         )
-        assert isinstance(compiled_lib_path, str)
-        assert os.path.exists(
-            compiled_lib_path
-        ), f"AOTInductor compiled library does not exist at {compiled_lib_path}"
-        return compiled_lib_path
+
+        assert isinstance(compiled_artifacts, str) or (
+            isinstance(compiled_artifacts, list)
+            and isinstance(compiled_artifacts[0], str)
+        )
+        return compiled_artifacts
 
 
 _graph_counter = count(0)
@@ -1431,7 +1440,7 @@ def compile_fx(
     inner_compile: Callable[..., Any] = compile_fx_inner,
     config_patches: Optional[Dict[str, Any]] = None,
     decompositions: Optional[Dict[OpOverload, Callable[..., Any]]] = None,
-) -> Union[Callable[[List[object]], Sequence[torch.Tensor]], str]:
+) -> Union[Callable[[List[object]], Sequence[torch.Tensor]], str, List[str]]:
     with _use_lazy_graph_module(
         dynamo_config.use_lazy_graph_module
     ), enable_python_dispatcher():
@@ -1810,24 +1819,19 @@ def _check_triton_bf16_support(graph: GraphLowering) -> None:
         )
         raise SkipFrame("BF16 is not supported")
 
-    for inp in graph.graph_inputs.values():
-        device = getattr(inp, "get_device", lambda: torch.device("meta"))()
-        if (not is_gpu(device.type)) or inp.get_dtype() != torch.bfloat16:
+    for node in itertools.chain(graph.graph_inputs.values(), graph.graph_outputs):
+        if not isinstance(node, IRNode):
+            continue
+        device_type = get_device_type(node)
+        if (
+            not device_type
+            or not is_gpu(device_type)
+            or node.get_dtype() != torch.bfloat16
+        ):
             continue
         # Print warning and skip frame if attempting to compile for bfloat16
         # on device without hardware support for dtype
-        device_interface = get_interface_for_device(device.type)
+        device_interface = get_interface_for_device(device_type)
         if device_interface.is_bf16_supported(including_emulation=False):
             return
-        warn_and_skip(device)
-
-    for out in graph.graph_outputs:
-        device = getattr(out, "get_device", lambda: torch.device("meta"))()
-        if (not is_gpu(device.type)) or out.get_dtype() != torch.bfloat16:
-            continue
-        # Print warning and skip frame if attempting to compile for bfloat16
-        # on device without hardware support for dtype
-        device_interface = get_interface_for_device(device.type)
-        if device_interface.is_bf16_supported(including_emulation=False):
-            return
-        warn_and_skip(device)
+        warn_and_skip(node.get_device())
