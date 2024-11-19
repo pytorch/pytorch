@@ -5,7 +5,7 @@ import io
 import os
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Generator, Optional, Union, TYPE_CHECKING
+from typing import Generator, Optional, TYPE_CHECKING, Union
 
 from fsspec.core import url_to_fs
 
@@ -14,6 +14,7 @@ from torch.distributed.checkpoint.filesystem import (
     FileSystemReader,
     FileSystemWriter,
 )
+
 
 if TYPE_CHECKING:
     from fsspec import AbstractFileSystem
