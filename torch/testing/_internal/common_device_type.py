@@ -1064,7 +1064,6 @@ class ops(_TestParametrizer):
         dtypes: Union[OpDTypes, Sequence[torch.dtype]] = OpDTypes.supported,
         allowed_dtypes: Optional[Sequence[torch.dtype]] = None,
         skip_if_dynamo=True,
-        sample_skips_and_xfails=None,
     ):
         self.op_list = list(op_list)
         self.opinfo_dtypes = dtypes
@@ -1072,7 +1071,6 @@ class ops(_TestParametrizer):
             set(allowed_dtypes) if allowed_dtypes is not None else None
         )
         self.skip_if_dynamo = skip_if_dynamo
-        self.sample_skips_and_xfails = sample_skips_and_xfails
 
     def _parametrize_test(self, test, generic_cls, device_cls):
         """Parameterizes the given test function across each op and its associated dtypes."""
@@ -1137,22 +1135,20 @@ class ops(_TestParametrizer):
             # See [Note: device and dtype suffix placement]
             test_name = op.formatted_name
 
+            # Filter sample skips / xfails to only those that apply to the OpInfo.
+            # These are defined on the test function via decorators.
+            sample_skips_and_xfails = getattr(test, "sample_skips_and_xfails", None)
+            if sample_skips_and_xfails is not None:
+                sample_skips_and_xfails = [
+                    rule
+                    for rule in sample_skips_and_xfails
+                    if rule.op_match_fn(device_cls.device_type, op)
+                ]
+
             for dtype in dtypes:
                 # Construct parameter kwargs to pass to the test.
                 param_kwargs = {"op": op}
                 _update_param_kwargs(param_kwargs, "dtype", dtype)
-                # Filter sample skips / xfails to only those that apply to the OpInfo.
-                sample_skips_and_xfails = (
-                    None
-                    if self.sample_skips_and_xfails is None
-                    else [
-                        rule
-                        for rule in self.sample_skips_and_xfails
-                        if rule.op_match_fn(device_cls.device_type, op)
-                    ]
-                )
-                if sample_skips_and_xfails is not None:
-                    param_kwargs["sample_skips_and_xfails"] = sample_skips_and_xfails
 
                 # NOTE: test_wrapper exists because we don't want to apply
                 #   op-specific decorators to the original test.
@@ -1197,6 +1193,9 @@ class ops(_TestParametrizer):
                         device_cls.device_type,
                         dtype,
                     )
+
+                    if sample_skips_and_xfails is not None:
+                        test_wrapper.sample_skips_and_xfails = sample_skips_and_xfails
 
                     yield (test_wrapper, test_name, param_kwargs, decorator_fn)
                 except Exception as ex:
