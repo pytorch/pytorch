@@ -5400,12 +5400,12 @@ class ShapeEnv:
 
         # Pattern matching
         if axioms is None:
-            subst = self.axioms
-        else:
-            subst = {}
-            for e in axioms:
-                if e.free_symbols.issubset(expr.free_symbols):
-                    subst.update(dict(self.get_implications(self.simplify(e))))
+            axioms = self.axioms
+
+        subst = {}
+        for e in axioms:
+            if e.free_symbols.issubset(expr.free_symbols):
+                subst.update(dict(self.get_implications(self.simplify(e))))
 
         expr = expr.xreplace(subst)
         # TODO: compute hint might have gotten broken here
