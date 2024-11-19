@@ -1070,6 +1070,8 @@ class DistributedDataParallelTest(
     def _test_nccl_backend(
         self, devices, device_ids, multi_device=False, gradient_as_bucket_view=False
     ):
+        if multi_device:
+            os.environ["TORCH_NCCL_CUDA_EVENT_CACHE"] = "0"
         process_group = self._get_process_group()
         self._test_ddp_with_process_group(
             process_group, devices, device_ids, multi_device, gradient_as_bucket_view
