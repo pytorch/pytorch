@@ -20,7 +20,7 @@ class ConfigTests(torch._dynamo.test_case.TestCase):
         with torch._dynamo.config.patch(
             automatic_dynamic_shapes=False, assume_static_by_default=True
         ):
-            opt_fn = torch._dynamo.optimize(cnt_static)(fn)
+            opt_fn = torch.compile(fn, backend=cnt_static)
             for i in range(2, 12):
                 opt_fn(torch.randn(i), torch.randn(i))
         self.assertEqual(cnt_static.frame_count, 10)
@@ -35,7 +35,7 @@ class ConfigTests(torch._dynamo.test_case.TestCase):
         with torch._dynamo.config.patch(
             automatic_dynamic_shapes=True, assume_static_by_default=True
         ):
-            opt_fn = torch._dynamo.optimize(cnt_dynamic)(fn)
+            opt_fn = torch.compile(fn, backend=cnt_dynamic)
             # NB: must not do 0, 1 as they specialized
             for i in range(2, 12):
                 opt_fn(torch.randn(i), torch.randn(i))
@@ -52,7 +52,7 @@ class ConfigTests(torch._dynamo.test_case.TestCase):
         with torch._dynamo.config.patch(
             automatic_dynamic_shapes=True, assume_static_by_default=False
         ):
-            opt_fn = torch._dynamo.optimize(cnt_dynamic)(fn)
+            opt_fn = torch.compile(fn, backend=cnt_dynamic)
             # NB: must not do 0, 1 as they specialized
             for i in range(2, 12):
                 opt_fn(torch.randn(i), torch.randn(i))
