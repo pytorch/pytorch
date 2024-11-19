@@ -934,6 +934,29 @@ class IncByTwo:
 
 
 class ReproTests(torch._dynamo.test_case.TestCase):
+    def setUp(self) -> None:
+        try:
+            from .utils import install_guard_manager_testing_hook
+        except ImportError:
+            from utils import install_guard_manager_testing_hook
+
+        self.exit_stack = contextlib.ExitStack()
+        self.exit_stack.enter_context(
+            install_guard_manager_testing_hook(self.guard_manager_clone_hook_fn)
+        )
+        super().setUp()
+
+    def tearDown(self) -> None:
+        self.exit_stack.close()
+        super().tearDown()
+
+    def guard_manager_clone_hook_fn(self, guard_manager_wrapper, f_locals):
+        root = guard_manager_wrapper.root
+        cloned_root = root.clone_manager(lambda x: True)
+        cloned_wrapper = torch._dynamo.guards.GuardManagerWrapper(cloned_root)
+        self.assertEqual(str(guard_manager_wrapper), str(cloned_wrapper))
+        self.assertTrue(cloned_root.check(f_locals))
+
     def test_do_paste_mask(self):
         torch._dynamo.utils.counters.clear()
         cnt = torch._dynamo.testing.CompileCounter()
