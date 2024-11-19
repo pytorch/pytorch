@@ -53,7 +53,7 @@ class _ExtractModuleReferences(ast.NodeVisitor):
         if hasattr(node.func, "id") and node.func.id == "__import__":
             try:
                 name = self._grab_node_str(node.args[0])
-                fromlist = []
+                fromlist: List[str] = []
                 level = 0
                 if len(node.args) > 3:
                     fromlist.extend(self._grab_node_str(v) for v in node.args[3].elts)

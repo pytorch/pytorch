@@ -1038,11 +1038,13 @@ class RpcTestCommon:
         n = self.rank + 1
         dst_rank1 = n % self.world_size
         dst_rank2 = (n + 1) % self.world_size
-        all_rrefs = [rpc.remote(
-                    worker_name(dst_rank1),
-                    f,
-                    args=(worker_name(dst_rank2),),
-                ) for _ in range(20)]
+        all_rrefs = [
+            rpc.remote(
+                worker_name(dst_rank1),
+                f,
+                args=(worker_name(dst_rank2),),
+            ) for _ in range(20)
+        ]
 
         for i in range(20):
             rref_of_rrefs = all_rrefs[i]
@@ -1069,14 +1071,15 @@ class RpcTestCommon:
 
     def _my_parameter_server(self, sparse):
         ps_rref = RRef(MyParameterServer(self.world_size - 1))
-        futures = [rpc.rpc_async(
-                    worker_name((self.rank + index) % self.world_size),
-                    self._trainer_func,
-                    args=(
-                        ps_rref,
-                        sparse
-                    ),
-                ) for index in range(1, self.world_size)]
+        futures = [
+            rpc.rpc_async(
+                worker_name((self.rank + index) % self.world_size),
+                self._trainer_func,
+                args=(
+                    ps_rref,
+                    sparse
+                ),
+            ) for index in range(1, self.world_size)]
         torch.futures.wait_all(futures)
 
     def _test_cuda_future_extraction(self, wrapper, unwrapper, sparse_tensor):
@@ -6198,11 +6201,13 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
             rpc_backend_options=options,
         )
 
-        futs = [rpc.rpc_async(
+        futs = [
+            rpc.rpc_async(
                 dst,
                 TensorPipeAgentCudaRpcTest._return_tensor_view,
                 args=(i,)
-            ) for i in range(5)]
+            ) for i in range(5)
+        ]
 
         for i in range(5):
             self.assertEqual(torch.ones(100, 200) * i, futs[i].wait())

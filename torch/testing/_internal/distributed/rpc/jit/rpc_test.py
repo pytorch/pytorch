@@ -1356,9 +1356,13 @@ class JitRpcTest(
         dst2 = worker_name((self.rank + 2) % self.world_size)
 
         num = 20
-        rrefs = [rpc.remote(
-                    dst1, async_add, args=(dst2, torch.ones(2, 2), torch.ones(2, 2) * i)
-                ) for i in range(num)]
+        rrefs = [
+            rpc.remote(
+                dst1,
+                async_add,
+                args=(dst2, torch.ones(2, 2), torch.ones(2, 2) * i)
+            ) for i in range(num)
+        ]
 
         for i in range(num):
             self.assertEqual(rrefs[i].to_here(), torch.ones(2, 2) + i)

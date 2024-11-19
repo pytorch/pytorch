@@ -120,7 +120,7 @@ def autotune_hints_to_configs(
     configs to try.
     """
     xyz_options: Tuple[Tuple[int, Optional[int], Optional[int]], ...]
-    configs = []
+    configs: List[Config] = []
     warp_size = device_props.warp_size
     # CPU target has no concept of "warp"
     if warp_size is None:

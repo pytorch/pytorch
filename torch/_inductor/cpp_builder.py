@@ -741,8 +741,8 @@ def _setup_standard_sys_libs(
 
 
 def _get_build_args_of_chosen_isa(vec_isa: VecISA) -> Tuple[List[str], List[str]]:
-    macros = []
-    build_flags = []
+    macros: List[str] = []
+    build_flags: List[str] = []
     if vec_isa != invalid_vec_isa:
         # Add Windows support later.
         macros.extend(copy.deepcopy(x) for x in vec_isa.build_macro())

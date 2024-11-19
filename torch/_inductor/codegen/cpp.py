@@ -4800,7 +4800,7 @@ class LoopLevel:
 
     def split_with_tiling(self, depth, factor):
         def clone_inner():
-            inner = []
+            inner: List[LoopLevel] = []
             if self.inner:
                 inner.extend(loop.clone() for loop in self.inner)
             return inner

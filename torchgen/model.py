@@ -5,7 +5,7 @@ import itertools
 import re
 from dataclasses import dataclass
 from enum import auto, Enum
-from typing import Callable, Iterator, Sequence
+from typing import Callable, Iterator, List, Sequence
 
 from torchgen.utils import assert_never, NamespaceHelper, OrderedSet
 
@@ -245,7 +245,7 @@ class _TorchDispatchModeKey(Enum):
 
 
 def codegen_per_backend_entries() -> str:
-    r = []
+    r: List[str] = []
     for fk in FUNCTIONALITY_KEYS:
         r.extend(f"    {fk}{bc} = auto()" for bc in BACKEND_COMPONENTS)
     return "\n".join(r)

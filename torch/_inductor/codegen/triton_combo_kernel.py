@@ -76,7 +76,7 @@ def _default_custom_combo_kernel_horizontal_partition(
     tilings = [node_info_map[n][1] for n in nodes]
 
     max_dims = max(len(t) for t in tilings)
-    nodes_per_ndim = []
+    nodes_per_ndim: List[List[BaseSchedulerNode]] = []
     for i in range(2, max_dims + 1):
         group_per_dim = [n for n, t in zip(nodes, tilings) if len(t) == i]
         reduction = [

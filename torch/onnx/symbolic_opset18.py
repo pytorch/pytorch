@@ -67,7 +67,7 @@ def col2im(
     stride: Sequence[int],
 ):
     # convert [i0, i1, ..., in] into [i0, i0, i1, i1, ..., in, in]
-    adjusted_padding = []
+    adjusted_padding: List[int] = []
     for pad in padding:
         adjusted_padding.extend(pad for _ in range(2))
 
