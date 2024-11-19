@@ -148,6 +148,9 @@ def fully_expand_region_group(
     current_arg_name, current_node = region_iters[0].next()
     assert current_node is not None
     seen_nodes.add(current_node)
+    # Loop incrementally adding new nodes to each region
+    # regions are only expanded if the node to add is valid
+    # for ALL regions
     while current_node:
         add_node = True
         nodes_to_add.clear()
