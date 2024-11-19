@@ -261,8 +261,8 @@ class CppTemplateKernel(CppKernel):
     def store_output(
         self,
         dst: ir.Buffer,
-        src: Union[ir.Buffer, Tuple[ir.Buffer]],
-        orig_src: Optional[Union[ir.Buffer, Tuple[ir.Buffer]]] = None,
+        src: Union[ir.IRNode, Tuple[ir.IRNode]],
+        orig_src: Optional[Union[ir.IRNode, Tuple[ir.IRNode]]] = None,
         epilogue_nodes: Optional[List[ir.IRNode]] = None,
         offsets: Optional[List[Any]] = None,
         reindexers: Optional[List[Optional[Callable[[List[Any]], List[Any]]]]] = None,
@@ -316,8 +316,8 @@ class CppTemplateKernel(CppKernel):
                         )
                     epilogue_nodes = scope.localize_nodes(epilogue_nodes)
                 elif (
-                    isinstance(src, ir.Buffer)
-                    and isinstance(orig_src, ir.Buffer)
+                    isinstance(src, ir.IRNode)
+                    and isinstance(orig_src, ir.IRNode)
                     and orig_src.get_name() != src.get_name()
                 ):
                     scope.add_local_buffer(
