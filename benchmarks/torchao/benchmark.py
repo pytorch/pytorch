@@ -267,7 +267,7 @@ DEFAULT_OUTPUT_FILE = "gpt_fast_benchmark.csv"
 
 all_experiments = {
     # A list of GPT models: LlaMa, Mixtral, etc.
-    # run_llama2_7b_bf16,
+    run_llama2_7b_bf16,
     # run_llama2_7b_int8,
     run_llama2_7b_autoquant,
     # run_mixtral_8x7b_int8,

@@ -241,6 +241,7 @@ def run_experiment(
 
     for i in range(start, num_samples):
         device_sync(device=device)  # MKG
+        torch.compiler.cudagraph_mark_step_begin()
 
         t0 = time.perf_counter()
         y = generate(
