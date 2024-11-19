@@ -31,7 +31,6 @@ __all__ = [
     "register_decomposition",
     "get_decompositions",
     "core_aten_decompositions",
-    "_special_op_to_preserve_cia",
     "_should_decompose_because_unsafe_op",
 ]
 
@@ -60,7 +59,8 @@ def _should_decompose_because_unsafe_op(op: torch._ops.OperatorBase) -> bool:
     native_batch_norm is a prim op which has a wrong schema and it needs to be replaced
     with correct schema. But until then, we will force decompose it
     """
-    assert isinstance(op, torch._ops.OpOverload)
+    if not isinstance(op, torch._ops.OpOverload):
+        return False
     if torch.Tag.maybe_aliasing_or_mutating in op.tags:
         return True
     return op == torch.ops.aten.native_batch_norm.default
