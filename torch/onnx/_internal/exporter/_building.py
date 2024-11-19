@@ -492,7 +492,7 @@ def _construct_node(
         inputs=inputs,
         attributes=attributes,
         outputs=outputs,
-        version=signature.version,
+        version=signature.opset_version,
     )
 
 
