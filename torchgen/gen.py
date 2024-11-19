@@ -2876,14 +2876,7 @@ def main() -> None:
         if DispatchKey.MPS in dispatch_keys:
             del dispatch_keys[dispatch_keys.index(DispatchKey.MPS)]
 
-    xpu_in_whitelist = (
-        options.backend_whitelist and str(DispatchKey.XPU) in options.backend_whitelist
-    )
-    # Only generate RegisterXPU.cpp when there is "--xpu" with torhgen/gen.py
-    # Before this change, torchgen always generates RegisterXPU.cpp for out-of-tree
-    # torch-xpu-ops native_functions.yaml which use --backend_whitelist=XPU and without "--xpu".
-    # After this change is landed, we will add --xpu in torch-xpu-ops and remove the check of "xpu_in_whitelist".
-    if (not options.xpu) and (not xpu_in_whitelist):
+    if not options.xpu:
         ignore_keys.add(DispatchKey.XPU)
 
         if DispatchKey.XPU in dispatch_keys:
