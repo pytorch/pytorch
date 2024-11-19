@@ -4577,10 +4577,6 @@ class ExternKernel(InputsKernel):
         self.op_overload = op_overload
         self.set_cpp_kernel_name(cpp_kernel_name)
         self.set_python_kernel_name(python_kernel_name)
-        if not ordered_kwargs_for_cpp_kernel and op_overload is not None:
-            ordered_kwargs_for_cpp_kernel = tuple(
-                arg.name for arg in op_overload._schema.arguments if arg.kwarg_only
-            )
         self.ordered_kwargs_for_cpp_kernel = ordered_kwargs_for_cpp_kernel
         self.collect_arg_kwarg_properties()
         self.unbacked_bindings = {}
