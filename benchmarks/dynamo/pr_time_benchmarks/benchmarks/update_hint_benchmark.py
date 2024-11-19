@@ -1,5 +1,3 @@
-import json
-import os
 import sys
 
 from benchmark_base import BenchmarkBase
@@ -10,8 +8,25 @@ import torch
 class Benchmark(BenchmarkBase):
     N = 20
 
+    def __init__(self):
+        self._model_type = "update_hint"
+        self._backend = "inductor"
+        self._device = "cpu"
+
     def name(self):
-        return "update_hint_regression"
+        return f"{self.model_type()}_regression"
+
+    def backend(self):
+        return self._backend
+
+    def model_type(self):
+        return self._model_type
+
+    def device(self):
+        return self._device
+
+    def is_fullgraph(self):
+        return True
 
     def description(self):
         return "information at https://github.com/pytorch/pytorch/pull/129893"
@@ -37,40 +52,6 @@ class Benchmark(BenchmarkBase):
             return a.split(xs)
 
         f(self.input, self.splits)
-
-    def _write_to_json(self, output_dir: str):
-        records = []
-        for entry in self.results:
-            metric_name = entry[1]
-            value = entry[2]
-
-            if not metric_name or value is None:
-                continue
-
-            records.append(
-                {
-                    "benchmark": {
-                        "name": "pr_time_benchmarks",
-                        "extra_info": {
-                            "device": "cpu",
-                            "description": self.description(),
-                            "fullgraph": True,
-                        },
-                    },
-                    "model": {
-                        "name": self.name(),
-                        "type": "update_hint",
-                        "backend": "inductor",
-                    },
-                    "metric": {
-                        "name": metric_name,
-                        "benchmark_values": [value],
-                    },
-                }
-            )
-
-        with open(os.path.join(output_dir, f"{self.name()}.json"), "w") as f:
-            json.dump(records, f)
 
 
 def main():

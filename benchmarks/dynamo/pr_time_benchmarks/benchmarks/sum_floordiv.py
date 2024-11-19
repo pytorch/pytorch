@@ -1,5 +1,3 @@
-import json
-import os
 import sys
 
 from benchmark_base import BenchmarkBase
@@ -10,8 +8,18 @@ import torch
 class Benchmark(BenchmarkBase):
     N = 100
 
+    def __init__(self):
+        self._model_type = "sum_floordiv"
+        self._device = "cpu"
+
     def name(self):
-        return "sum_floordiv_regression"
+        return f"{self.model_type()}_regression"
+
+    def model_type(self):
+        return self._model_type
+
+    def device(self):
+        return self._device
 
     def description(self):
         return "information at https://github.com/pytorch/pytorch/issues/134133"
@@ -30,38 +38,6 @@ class Benchmark(BenchmarkBase):
 
     def _work(self):
         torch.export.export(self.m, (self.input,))
-
-    def _write_to_json(self, output_dir: str):
-        records = []
-        for entry in self.results:
-            metric_name = entry[1]
-            value = entry[2]
-
-            if not metric_name or value is None:
-                continue
-
-            records.append(
-                {
-                    "benchmark": {
-                        "name": "pr_time_benchmarks",
-                        "extra_info": {
-                            "device": "cpu",
-                            "description": self.description(),
-                        },
-                    },
-                    "model": {
-                        "name": self.name(),
-                        "type": "sum_floordiv",
-                    },
-                    "metric": {
-                        "name": metric_name,
-                        "benchmark_values": [value],
-                    },
-                }
-            )
-
-        with open(os.path.join(output_dir, f"{self.name()}.json"), "w") as f:
-            json.dump(records, f)
 
 
 def main():

@@ -1,5 +1,3 @@
-import json
-import os
 import sys
 
 from benchmark_base import BenchmarkBase
@@ -10,12 +8,14 @@ from torch.testing._internal.two_tensor import TwoTensor
 
 class Benchmark(BenchmarkBase):
     def __init__(self, *, training, subclass):
+        self._model_type = "aotdispatcher"
+        self._backend = "aot_eager_decomp_partition"
         self._training = training
         self._subclass = subclass
         self._device = "cpu"
 
     def name(self):
-        prefix = "aotdispatcher"
+        prefix = self.model_type()
         if self._training:
             prefix += "_training"
         else:
@@ -27,6 +27,21 @@ class Benchmark(BenchmarkBase):
         if self._device == "cpu":
             prefix += "_cpu"
         return prefix
+
+    def backend(self):
+        return self._backend
+
+    def mode(self):
+        return ("training" if self._training else "inference",)
+
+    def model_type(self):
+        return self._model_type
+
+    def device(self):
+        return self._device
+
+    def is_fullgraph(self):
+        return True
 
     def description(self):
         return "100 inputs, 100 outputs, each input is added once"
@@ -47,47 +62,12 @@ class Benchmark(BenchmarkBase):
         torch._dynamo.reset()
 
     def _work(self):
-        @torch.compile(backend="aot_eager_decomp_partition", fullgraph=True)
+        @torch.compile(backend=self.backend(), fullgraph=True)
         def f(*args):
             outs = [torch.add(x, x) for x in args]
             return outs
 
         f(*self._args)
-
-    def _write_to_json(self, output_dir: str):
-        records = []
-        for entry in self.results:
-            metric_name = entry[1]
-            value = entry[2]
-
-            if not metric_name or value is None:
-                continue
-
-            records.append(
-                {
-                    "benchmark": {
-                        "name": "pr_time_benchmarks",
-                        "mode": "training" if self._training else "inference",
-                        "extra_info": {
-                            "subclass": self._subclass,
-                            "device": self._device,
-                            "description": self.description(),
-                        },
-                    },
-                    "model": {
-                        "name": self.name(),
-                        "type": "aotdispatcher",
-                        "backend": "aot_eager_decomp_partition",
-                    },
-                    "metric": {
-                        "name": metric_name,
-                        "benchmark_values": [value],
-                    },
-                }
-            )
-
-        with open(os.path.join(output_dir, f"{self.name()}.json"), "w") as f:
-            json.dump(records, f)
 
 
 def main():

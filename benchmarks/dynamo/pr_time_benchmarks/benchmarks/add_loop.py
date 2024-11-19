@@ -1,5 +1,3 @@
-import json
-import os
 import sys
 
 from benchmark_base import BenchmarkBase
@@ -10,17 +8,30 @@ from torch._inductor.utils import fresh_inductor_cache
 
 class Benchmark(BenchmarkBase):
     def __init__(self, backend, dynamic=False, is_gpu=False):
+        self._model_type = "add_loop"
         self._backend = backend
         self._dynamic = dynamic
         self._device = "cuda" if is_gpu else "cpu"
 
     def name(self):
-        prefix = f"add_loop_{self._backend}"
+        prefix = f"{self._model_type}_{self._backend}"
         if self._dynamic:
             prefix += "_dynamic"
         if self._device == "cuda":
             prefix += "_gpu"
         return prefix
+
+    def backend(self):
+        return self._backend
+
+    def model_type(self):
+        return self._model_type
+
+    def device(self):
+        return self._device
+
+    def is_dynamic(self):
+        return self._dynamic
 
     def description(self):
         return "a loop over 100 add node"
@@ -47,40 +58,6 @@ class Benchmark(BenchmarkBase):
 
         with fresh_inductor_cache():
             f(self.a, self.b)
-
-    def _write_to_json(self, output_dir: str):
-        records = []
-        for entry in self.results:
-            metric_name = entry[1]
-            value = entry[2]
-
-            if not metric_name or value is None:
-                continue
-
-            records.append(
-                {
-                    "benchmark": {
-                        "name": "pr_time_benchmarks",
-                        "extra_info": {
-                            "is_dynamic": self._dynamic,
-                            "device": self._device,
-                            "description": self.description(),
-                        },
-                    },
-                    "model": {
-                        "name": self.name(),
-                        "type": "add_loop",
-                        "backend": self._backend,
-                    },
-                    "metric": {
-                        "name": metric_name,
-                        "benchmark_values": [value],
-                    },
-                }
-            )
-
-        with open(os.path.join(output_dir, f"{self.name()}.json"), "w") as f:
-            json.dump(records, f)
 
 
 def main():

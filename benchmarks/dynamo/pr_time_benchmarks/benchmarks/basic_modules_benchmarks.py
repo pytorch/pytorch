@@ -1,5 +1,3 @@
-import json
-import os
 import sys
 
 from benchmark_base import BenchmarkBase
@@ -26,15 +24,15 @@ class Benchmark(BenchmarkBase):
         self, ModuleClass, backend, is_gpu=False, dynamic=False, force_shape_pad=False
     ):
         self.ModuleClass = ModuleClass
-        self.backend = backend
-        self._name = ModuleClass.__name__
+        self._backend = backend
+        self._model_type = ModuleClass.__name__
         self._is_gpu = is_gpu
         self._dynamic = dynamic
         self._force_shape_pad = force_shape_pad
 
     def name(self):
-        prefix = f"basic_modules_{self._name}_{self.backend}"
-        if self._dynamic:
+        prefix = f"basic_modules_{self.model_type()}_{self.backend()}"
+        if self.is_dynamic():
             prefix += "_dynamic"
         if self._is_gpu:
             prefix += "_gpu"
@@ -42,10 +40,22 @@ class Benchmark(BenchmarkBase):
             prefix += "_force_shape_pad"
         return prefix
 
+    def backend(self):
+        return self._backend
+
+    def model_type(self):
+        return self._model_type
+
+    def device(self):
+        return "cuda" if self._is_gpu else "cpu"
+
+    def is_dynamic(self):
+        return self._dynamic
+
     def _prepare_once(self):
         self.m = self.ModuleClass()
         torch.set_float32_matmul_precision("high")
-        self.input = torch.ones(10, device="cuda" if self._is_gpu else "cpu")
+        self.input = torch.ones(10, device=self.device())
 
     def _prepare(self):
         torch._dynamo.reset()
@@ -54,45 +64,10 @@ class Benchmark(BenchmarkBase):
         with fresh_inductor_cache(), torch._inductor.config.patch(
             force_shape_pad=self._force_shape_pad
         ):
-            opt_m = torch.compile(backend=self.backend, dynamic=self._dynamic)(
+            opt_m = torch.compile(backend=self.backend(), dynamic=self.is_dynamic())(
                 self.m.cuda() if self._is_gpu else self.m
             )
             opt_m(self.input)
-
-    def _write_to_json(self, output_dir: str):
-        records = []
-        for entry in self.results:
-            metric_name = entry[1]
-            value = entry[2]
-
-            if not metric_name or value is None:
-                continue
-
-            records.append(
-                {
-                    "benchmark": {
-                        "name": "pr_time_benchmarks",
-                        "extra_info": {
-                            "is_dynamic": self._dynamic,
-                            "device": "cuda" if self._is_gpu else "cpu",
-                            "is_force_shape_pad": self._force_shape_pad,
-                            "description": self.description(),
-                        },
-                    },
-                    "model": {
-                        "name": self.name(),
-                        "type": "basic_modules",
-                        "backend": self.backend,
-                    },
-                    "metric": {
-                        "name": metric_name,
-                        "benchmark_values": [value],
-                    },
-                }
-            )
-
-        with open(os.path.join(output_dir, f"{self.name()}.json"), "w") as f:
-            json.dump(records, f)
 
 
 def main():
