@@ -3768,11 +3768,19 @@ static void* _torchinductor_pyobject_tensor_data_ptr(PyObject* obj) {
 }
 
 void* convert_to_root_guard_manager(py::object root) {
+  // For invalidated guards, return nullptr
+  if (root.is(py::none())) {
+    return nullptr;
+  }
   RootGuardManager* root_mgr = std::move(root).cast<RootGuardManager*>();
   return (void*)root_mgr;
 }
 
 bool run_root_guard_manager(void* root, PyObject* f_locals) {
+  // for invalidated guards, return false
+  if (root == nullptr) {
+    return false;
+  }
   return ((RootGuardManager*)root)->check_nopybind(f_locals);
 }
 
