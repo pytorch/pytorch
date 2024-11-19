@@ -202,7 +202,6 @@ class CachingAutotuner(KernelInterface):
         configs,
         save_cache_hook,
         mutated_arg_names: List[str],  # see [Note: clone mutated buffers]
-        reset_to_zero_arg_names: List[str],
         optimize_mem,
         heuristic_type,
         reset_to_zero_arg_names: Optional[List[str]] = None,
