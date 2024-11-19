@@ -1377,24 +1377,11 @@ class TritonCSE(CSE):
     variables across separate masked blocks.
     """
 
-    @staticmethod
-    def mask_key(cache_key: object) -> object:
+    def augment_key(self, cache_key: object) -> object:
         if mask := V.kernel._load_mask:
             return (cache_key, mask.name)
         else:
             return cache_key
-
-    def put(self, cache_key: object, val: CSEVariable) -> None:
-        self._cache[self.mask_key(cache_key)] = val
-
-    def contains(self, cache_key) -> bool:
-        return self.mask_key(cache_key) in self._cache
-
-    def try_get(self, cache_key: object) -> Optional[CSEVariable]:
-        return self._cache.get(self.mask_key(cache_key), None)
-
-    def get(self, cache_key: object) -> CSEVariable:
-        return self._cache[self.mask_key(cache_key)]
 
 
 class TritonKernel(SIMDKernel):

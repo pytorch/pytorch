@@ -1719,17 +1719,21 @@ class CSE:
             varname_map=self.varname_map,
         )
 
+    def augment_key(self, cache_key: object) -> object:
+        "Override this method to augment cache key with backend specifics"
+        return cache_key
+
     def put(self, cache_key: object, val: CSEVariable) -> None:
-        self._cache[cache_key] = val
+        self._cache[self.augment_key(cache_key)] = val
 
     def contains(self, cache_key) -> bool:
-        return cache_key in self._cache
+        return self.augment_key(cache_key) in self._cache
 
     def try_get(self, cache_key: object) -> Optional[CSEVariable]:
-        return self._cache.get(cache_key, None)
+        return self._cache.get(self.augment_key(cache_key), None)
 
     def get(self, cache_key: object) -> CSEVariable:
-        return self._cache[cache_key]
+        return self._cache[self.augment_key(cache_key)]
 
     def generate(
         self,
