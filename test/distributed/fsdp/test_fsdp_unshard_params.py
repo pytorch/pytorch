@@ -30,7 +30,7 @@ from torch.testing._internal.common_fsdp import (
     TransformerWithSharedParams,
 )
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+
 
 device_type = torch.device(get_devtype())
 
@@ -290,7 +290,9 @@ class TestUnshardParams(TestUnshardParamsBase):
         }
         model = FSDP(
             nn.Sequential(
-                FSDP(nn.Linear(5, 5, bias=False, device=device_type.type), **fsdp_kwargs),
+                FSDP(
+                    nn.Linear(5, 5, bias=False, device=device_type.type), **fsdp_kwargs
+                ),
                 nn.Linear(5, 3, bias=False, device=device_type.type),
             ),
             **fsdp_kwargs,
@@ -377,7 +379,9 @@ class TestUnshardParams(TestUnshardParamsBase):
         }
         model = FSDP(
             nn.Sequential(
-                FSDP(nn.Linear(5, 5, bias=False, device=device_type.type), **fsdp_kwargs),
+                FSDP(
+                    nn.Linear(5, 5, bias=False, device=device_type.type), **fsdp_kwargs
+                ),
                 nn.Linear(5, 3, bias=False, device=device_type.type),
             ),
             **fsdp_kwargs,
@@ -733,6 +737,7 @@ class TestUnshardParamsErrors(TestUnshardParamsBase):
                 nested_wrapped_module, rank0_only=True, writeback=True
             ):
                 pass
+
 
 if __name__ == "__main__":
     run_tests()
