@@ -3282,6 +3282,7 @@ MOD_INLINELIST = [
     "torch._functorch.vmap",
     "torch._higher_order_ops.associative_scan",
     "torch._higher_order_ops.invoke_subgraph",
+    "torch._higher_order_ops.prim_hop_base",
     "torch._higher_order_ops.scan",
     "torch._higher_order_ops.strict_mode",
     "torch._higher_order_ops.while_loop",
