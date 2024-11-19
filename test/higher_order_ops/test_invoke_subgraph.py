@@ -52,8 +52,8 @@ class TestInvokeSubgraph(TestCase):
         y = torch.randn(8, requires_grad=True)
         ref = gn(x, y)
 
-        x_clone = x.clone().detach().requires_grad_(True)
-        y_clone = y.clone().detach().requires_grad_(True)
+        x_clone = x.detach().clone().requires_grad_(True)
+        y_clone = y.detach().clone().requires_grad_(True)
         res = fn(x_clone, y_clone)
 
         # Run backward
@@ -75,8 +75,8 @@ class TestInvokeSubgraph(TestCase):
         y = torch.randn(8, requires_grad=True)
         ref = gn(x, y)
 
-        x_clone = x.clone().detach().requires_grad_(True)
-        y_clone = y.clone().detach().requires_grad_(True)
+        x_clone = x.detach().clone().requires_grad_(True)
+        y_clone = y.detach().clone().requires_grad_(True)
         aot_fn = aot_function(fn, nop)
         res = aot_fn(x_clone, y_clone)
 
@@ -133,8 +133,8 @@ class TestInvokeSubgraphCompile(TestCase):
         y = torch.randn(8, requires_grad=True)
         ref = gn(x, y)
 
-        x_clone = x.clone().detach().requires_grad_(True)
-        y_clone = y.clone().detach().requires_grad_(True)
+        x_clone = x.detach().clone().requires_grad_(True)
+        y_clone = y.detach().clone().requires_grad_(True)
         res = torch.compile(fn, backend="inductor", fullgraph=True)(x_clone, y_clone)
 
         # Run backward
@@ -277,8 +277,8 @@ class TestInvokeSubgraphCompile(TestCase):
         y = torch.randn(8, requires_grad=True)
         ref = fn(x, y)
 
-        x_clone = x.clone().detach().requires_grad_(True)
-        y_clone = y.clone().detach().requires_grad_(True)
+        x_clone = x.detach().clone().requires_grad_(True)
+        y_clone = y.detach().clone().requires_grad_(True)
         backend = AotEagerAndRecordGraphs()
         res = torch.compile(fn, backend=backend, fullgraph=True)(x_clone, y_clone)
 
@@ -369,8 +369,8 @@ class GraphModule(torch.nn.Module):
         y = torch.randn(8, requires_grad=True)
         ref = fn(x, y)
 
-        x_clone = x.clone().detach().requires_grad_(True)
-        y_clone = y.clone().detach().requires_grad_(True)
+        x_clone = x.detach().clone().requires_grad_(True)
+        y_clone = y.detach().clone().requires_grad_(True)
         res = torch.compile(fn, backend="inductor", fullgraph=True)(x_clone, y_clone)
 
         # Run backward
