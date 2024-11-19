@@ -298,8 +298,6 @@ def dynamo_timed(
     # TODO(masneral): Deprecate this param.
     phase_name: Optional[str] = None,
     log_pt2_compile_event: bool = False,
-    # TODO(masnesral): fwd_only is ignored. Remove it.
-    fwd_only: bool = True,
     metadata: Optional[Dict[str, object]] = None,
     dynamo_compile_column_us: Optional[str] = None,
 ) -> Generator[Any, None, None]:
