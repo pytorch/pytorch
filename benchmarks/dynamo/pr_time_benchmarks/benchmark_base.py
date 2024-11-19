@@ -188,7 +188,6 @@ class BenchmarkBase(ABC):
                         "mode": self.mode(),
                         "extra_info": {
                             "is_dynamic": self.is_dynamic(),
-                            "is_fullgraph": self.is_fullgraph(),
                             "device": self.device(),
                             "description": self.description(),
                         },
