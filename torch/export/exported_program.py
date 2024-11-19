@@ -781,20 +781,36 @@ class ExportedProgram:
     def graph_module(self):
         return self._graph_module
 
+    @graph_module.setter
+    def graph_module(self, value):
+        raise RuntimeError("Unable to set ExportedProgram's graph_module attribute.")
+
     @property
     @compatibility(is_backward_compatible=False)
     def graph(self):
         return self.graph_module.graph
+
+    @graph.setter
+    def graph(self, value):
+        raise RuntimeError("Unable to set ExportedProgram's graph attribute.")
 
     @property
     @compatibility(is_backward_compatible=False)
     def graph_signature(self):
         return self._graph_signature
 
+    @graph_signature.setter
+    def graph_signature(self, value):
+        raise RuntimeError("Unable to set ExportedProgram's graph_signature attribute.")
+
     @property
     @compatibility(is_backward_compatible=False)
     def state_dict(self):
         return self._state_dict
+
+    @state_dict.setter
+    def state_dict(self, value):
+        raise RuntimeError("Unable to set ExportedProgram's state_dict attribute.")
 
     @compatibility(is_backward_compatible=False)
     def parameters(self) -> Iterator[torch.nn.Parameter]:
@@ -839,15 +855,48 @@ class ExportedProgram:
     def range_constraints(self):
         return self._range_constraints
 
+    @range_constraints.setter
+    def range_constraints(self, value):
+        raise RuntimeError(
+            "Unable to set ExportedProgram's range_constraints attribute."
+        )
+
     @property
     @compatibility(is_backward_compatible=False)
     def module_call_graph(self):
         return self._module_call_graph
 
+    @module_call_graph.setter
+    def module_call_graph(self, value):
+        raise RuntimeError(
+            "Unable to set ExportedProgram's module_call_graph attribute."
+        )
+
     @property
     @compatibility(is_backward_compatible=False)
     def example_inputs(self):
         return self._example_inputs
+
+    @example_inputs.setter
+    def example_inputs(self, value):
+        # This is allowed
+        if not (
+            isinstance(value, tuple)
+            and len(value) == 2
+            and isinstance(value[0], tuple)
+            and isinstance(value[1], dict)
+        ):
+            raise ValueError(
+                "Example inputs should be a tuple containing example arguments (as "
+                "a tuple), and example kwargs (as a dictionary)."
+            )
+
+        args, kwargs = value
+        from ._unlift import _check_inputs_match
+
+        _check_inputs_match(args, kwargs, self.call_spec.in_spec)
+
+        self._example_inputs = value
 
     @property
     @compatibility(is_backward_compatible=False)
@@ -862,10 +911,18 @@ class ExportedProgram:
             out_spec=self.module_call_graph[0].signature.out_spec,
         )
 
+    @call_spec.setter
+    def call_spec(self, value):
+        raise RuntimeError("Unable to set ExportedProgram's call_spec attribute.")
+
     @property
     @compatibility(is_backward_compatible=False)
     def verifier(self) -> Any:
         return self._verifiers[0]
+
+    @verifier.setter
+    def verifier(self, value):
+        raise RuntimeError("Unable to set ExportedProgram's verifier attribute.")
 
     @property
     @compatibility(is_backward_compatible=False)
@@ -873,20 +930,38 @@ class ExportedProgram:
         assert self._verifiers is not None
         return self._verifiers[0].dialect
 
+    @dialect.setter
+    def dialect(self, value):
+        raise RuntimeError("Unable to set ExportedProgram's dialect attribute.")
+
     @property
     @compatibility(is_backward_compatible=False)
     def verifiers(self):
         return self._verifiers
+
+    @verifiers.setter
+    def verifiers(self, value):
+        raise RuntimeError("Unable to set ExportedProgram's verifiers attribute.")
 
     @property
     @compatibility(is_backward_compatible=False)
     def tensor_constants(self):
         return self._constants
 
+    @tensor_constants.setter
+    def tensor_constants(self, value):
+        raise RuntimeError(
+            "Unable to set ExportedProgram's tensor_constants attribute."
+        )
+
     @property
     @compatibility(is_backward_compatible=False)
     def constants(self):
         return self._constants
+
+    @constants.setter
+    def constants(self, value):
+        raise RuntimeError("Unable to set ExportedProgram's constants attribute.")
 
     def _get_flat_args_with_check(self, args, kwargs):
         """Flatten args, kwargs using pytree, then, check specs.
