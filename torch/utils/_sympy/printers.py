@@ -156,11 +156,11 @@ class PythonPrinter(ExprPrinter):
         return self._helper_sqrt(expr.args[0])
 
     def _print_FloatPow(self, expr: sympy.Expr) -> str:
-        return self.stringify(expr.args, " ** ", precedence(expr))
+        return self.stringify(expr.args, " ** ", PRECEDENCE["Pow"])
 
     # TODO: Not sure this works with Triton, even when base/exp are integral
     def _print_PowByNatural(self, expr: sympy.Expr) -> str:
-        return self.stringify(expr.args, " ** ", precedence(expr))
+        return self.stringify(expr.args, " ** ", PRECEDENCE["Pow"])
 
     def _print_floor(self, expr: sympy.Expr) -> str:
         assert len(expr.args) == 1
