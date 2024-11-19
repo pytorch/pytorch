@@ -194,9 +194,11 @@ class ModificationWrapper(V.WrapperHandler):
             return f"tl.load({var} + {index_str})"
         return f"({self.fixed_inputs[name]})"
 
-    def indirect_indexing(self, index_var, size, check, wrap_neg=True):
+    def indirect_indexing(self, index_var: str, size, check, wrap_neg=True):
         """Convert index variable to symbolic form."""
-        return sympy_index_symbol(str(index_var))
+        var = str(index_var)
+        var = var.strip("()")
+        return sympy_index_symbol(str(var))
 
     def store(self, name, index, value, mode):
         """Store value with input tracking.
@@ -469,12 +471,13 @@ class TritonTemplateKernel(TritonKernel):
             scatter_graph, ir.ComputedBuffer
         ), "Expected a scatter if subgraph is a list"
 
-        def funx(x, strides):
+        def contiguous_strides(x):
             # We always create a fresh contiguous grad for scattering into
-            return sum(x_i * stride for x_i, stride in zip(x, strides))
+            return sum(
+                x_i * stride for x_i, stride in zip(x, scatter_graph.get_stride())
+            )
 
-        my_funx = functools.partial(funx, strides=scatter_graph.get_stride())
-        scatter_graph.data.store_output(scatter_graph.name, my_funx, [])  # type: ignore[attr-defined]
+        scatter_graph.data.store_output(scatter_graph.name, contiguous_strides, [])  # type: ignore[attr-defined]
 
     def modification(
         self,
@@ -490,6 +493,7 @@ class TritonTemplateKernel(TritonKernel):
         """
         outer_self = self
         num = 0
+        out = None
         while f"mod_{subgraph_number}_{num}" in self.subgraph_bodies:
             num += 1
         with self.create_subgraph_body(f"mod_{subgraph_number}_{num}"):
@@ -513,6 +517,7 @@ class TritonTemplateKernel(TritonKernel):
             self.codegen_body()
             if output_name is not None:
                 assert isinstance(output_name, str)
+                assert out is not None
                 self.body.writeline(f"{output_name} = {out.value}")
 
             body_val = self.body.getvalue()
