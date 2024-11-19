@@ -681,6 +681,7 @@ def _translate_fx_graph(
     node_name_to_local_functions: dict[str, ir.Function] = {}
     constant_farm: dict[Any, ir.Value] = {}
     opset = _get_onnxscript_opset(registry.opset_version)
+    graph.opset_imports[""] = registry.opset_version
 
     for node in fx_graph.nodes:
         logger.debug(
@@ -983,7 +984,6 @@ def _exported_program_to_onnx_program(
         else:
             function_name = name.replace(".", "__")
             # Inputs and outputs will be created within _translate_fx_graph
-            # FIXME(justinchuby): Handle opset import
             graph = ir.Function(
                 domain=_LOCAL_FUNCTION_DOMAIN,
                 name=function_name,
