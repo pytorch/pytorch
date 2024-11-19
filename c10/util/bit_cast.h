@@ -8,7 +8,8 @@
 #define C10_HAVE_STD_BIT_CAST 1
 #else
 #define C10_HAVE_STD_BIT_CAST 0
-#endif // __has_include(<bit>) && (__cplusplus >= 202002L || (defined(__cpp_lib_bit_cast) && __cpp_lib_bit_cast >= 201806L))
+#endif // __has_include(<bit>) && (__cplusplus >= 202002L ||
+       // (defined(__cpp_lib_bit_cast) && __cpp_lib_bit_cast >= 201806L))
 
 namespace c10 {
 
