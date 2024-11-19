@@ -386,7 +386,9 @@ def _handle_call_function_node(
 
 
 def _convert_fx_arg_to_onnx_arg(
-    arg, node_name_to_values: dict[str, ir.Value | Sequence[ir.Value]]
+    arg,
+    node_name_to_values: dict[str, ir.Value | Sequence[ir.Value]],
+    node_name_to_local_functions: dict[str, ir.Function],
 ) -> Any:
     """Convert an FX argument to an ONNX compatible argument.
 
@@ -395,6 +397,7 @@ def _convert_fx_arg_to_onnx_arg(
     - Converts a torch device/memory_format/layout to a string
     - Converts a torch.fx.Node to an ir.Value
     - Converts a sequence of torch.fx.Node to a sequence of ir.Value
+    - Converts a get_attr node to an ir.Function
     """
     if arg is None:
         # None arguments are not modified because when the arg is an ONNX input
@@ -413,10 +416,17 @@ def _convert_fx_arg_to_onnx_arg(
                 # `source_outputs` is a sequence(tensor()) value and we need to
                 # use SequenceAt to get the value. This is handled by torchlib
                 pass
+        if isinstance(arg, torch.fx.Node) and arg.op == "get_attr":
+            return node_name_to_local_functions[arg.name]
         # If the input is a node, get the value from the mapping
         return node_name_to_values[arg.name]
     if isinstance(arg, (list, tuple)):
-        return [_convert_fx_arg_to_onnx_arg(elem, node_name_to_values) for elem in arg]
+        return [
+            _convert_fx_arg_to_onnx_arg(
+                elem, node_name_to_values, node_name_to_local_functions
+            )
+            for elem in arg
+        ]
     if isinstance(arg, (torch.device, torch.memory_format, torch.layout)):
         return str(arg)
     if isinstance(arg, torch.dtype):
@@ -482,14 +492,20 @@ def _handle_call_function_node_with_lowering(
 
     # Replace the input FX nodes with ONNX values
     onnx_args = [
-        _convert_fx_arg_to_onnx_arg(input_, node_name_to_values, node_name_to_local_functions) for input_ in fx_args
+        _convert_fx_arg_to_onnx_arg(
+            input_, node_name_to_values, node_name_to_local_functions
+        )
+        for input_ in fx_args
     ]
 
     onnx_kwargs = {}
     for key, value in fx_kwargs.items():
-        onnx_kwargs[key] = _convert_fx_arg_to_onnx_arg(value, node_name_to_values, node_name_to_local_functions)
+        onnx_kwargs[key] = _convert_fx_arg_to_onnx_arg(
+            value, node_name_to_values, node_name_to_local_functions
+        )
         if key == "dtype" and onnx_kwargs[key] is None:
             # Set dtype to -1 if it is None
+            # TODO(justinchuby): Maybe keep it as None?
             onnx_kwargs[key] = -1
 
     with onnxscript.evaluator.default_as(
@@ -620,8 +636,10 @@ def _handle_output_node(
         node_name_to_values: A mapping of FX node names to their produced ONNX ``Value``.
         graph: The ONNX graph at construction.
     """
-    output_value_name = node.args[0][0]
-    assert isinstance(output_value_name, str)
+    output_value_name = node.args[0][0].name
+    assert isinstance(
+        output_value_name, str
+    ), f"Bug: Expected {output_value_name!r} to be a string"
     values = node_name_to_values[output_value_name]
     if isinstance(values, Sequence):
         graph.outputs.extend(values)
@@ -871,7 +889,7 @@ def _prepare_exported_program_for_export(
 
     graph_module = exported_program.graph_module
     # Include explicit type promotion nodes
-    graph_module = _fx_passes.insert_type_promotion_nodes(graph_module)
+    _fx_passes.insert_type_promotion_nodes(graph_module)
     graph_module = _fx_passes.remove_assertion_nodes(graph_module)
     # TODO(justinchuby): Reassigning the graph module to save some runtime.
     # If this does not work, we need to retrace the module with torch.export
