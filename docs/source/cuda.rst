@@ -16,6 +16,7 @@ torch.cuda
     default_stream
     device
     device_count
+    device_memory_used
     device_of
     get_arch_list
     get_device_capability
