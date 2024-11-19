@@ -221,6 +221,7 @@ class AttrSource(ChainedSource):
             return f"getattr({self.base.name()}, {self.member!r})"
         return f"{self.base.name()}.{self.member}"
 
+
 @dataclasses.dataclass(frozen=True)
 class SymNodePropertySource(ChainedSource):
     prop: str
@@ -233,9 +234,13 @@ class SymNodePropertySource(ChainedSource):
 
 
 @dataclasses.dataclass(frozen=True)
-class NestedTensorCacheSource(ChainedSource):
+class NestedTensorCacheAttrSource(ChainedSource):
+    prop: str
+
     def name(self) -> str:
-        return f"torch._get_njt_cache_from_offsets({self.base.name()})"
+        return (
+            f"torch._get_njt_cache_from_offsets({self.base.name()}).data['{self.prop}']"
+        )
 
     def guard_source(self):
         return self.base.guard_source()

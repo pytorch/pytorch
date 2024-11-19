@@ -4,7 +4,7 @@
 import torch
 from typing import *
 from torch.fx.experimental.sym_node import SymNode
-from torch.nested._internal.metadata_cache import MetadataCache
+from torch.nested._internal.metadata_cache import TreeCache
 from torch.nested._internal.utils import try_get_fake_mode
 
 
@@ -47,9 +47,9 @@ def _ge(lhs, rhs) -> bool:
 
 
 class NestedIntNode:
-    def __init__(self, cache: MetadataCache, coeff):
-        self.t_id = cache.eq_id
-        self.cache: MetadataCache = cache
+    def __init__(self, cache: TreeCache, coeff):
+        self.t_id = cache.id
+        self.cache: TreeCache = cache
         self.coeff = coeff
 
     def nested_int_cache(self):
@@ -134,7 +134,7 @@ class NestedIntNode:
         return self.str()
 
 
-def get_nested_symint(cache: MetadataCache, *, coeff=1):
+def get_nested_symint(cache: TreeCache, *, coeff=1):
     mb_fake_mode = try_get_fake_mode(cache)
     if mb_fake_mode is not None:
         # In compile, keep the same instance of nested int around

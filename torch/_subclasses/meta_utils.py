@@ -210,14 +210,16 @@ class MetaTensorDescriber:
         )
 
     def describe_nested_cache(self, nested_cache):
-        def process(x):
+        def process(attr_name, x):
             if x is None:
                 return None
-            return self.describe_tensor(x, recurse=False)
+            return self.describe_tensor(x, recurse=False, nested_cache_attr=attr_name)
 
         return MetaNestedCacheDesc(
             keys=tuple(nested_cache.data.keys()),
-            values=tuple(process(x) for x in nested_cache.data.values()),
+            values=tuple(
+                process(attr_name, x) for attr_name, x in nested_cache.data.items()
+            ),
             cache_id=nested_cache.id,
         )
 
@@ -238,7 +240,12 @@ class MetaTensorDescriber:
         return r
 
     def describe_tensor(
-        self, t: torch.Tensor, *, recurse: bool = True, trace: bool = False
+        self,
+        t: torch.Tensor,
+        *,
+        recurse: bool = True,
+        trace: bool = False,
+        nested_cache_attr: str = None,
     ):
         is_leaf = safe_is_leaf(t)
         is_view = t._is_view()
@@ -338,13 +345,17 @@ class MetaTensorDescriber:
         from torch.nested._internal.metadata_cache import get_global_cache_state
 
         nested_cache_desc = None
+        # Do I still need to recurse through here? It shouldn't hurt
+        # but might be redundant - check why subclasses need to recurse through both dynamo and here.
         nested_cache_state = get_global_cache_state()
         nested_cache_id = nested_cache_state._tensor_to_cache_id.get(t)
-        # The other ones will have nested_cache_id still?
-        # If you fakify another one afterwards it will already be cached?
+
         if nested_cache_id is not None:
+            # Recursively fakify the canonical cache
             nested_cache = nested_cache_state.try_get_cache(t)
             if nested_cache is not None and recurse:
+                # Reusing this existing recurse arg may be problematic, e.g.
+                # I won't recurse to the base for views of the cache entries.
                 nested_cache_desc = self.describe_nested_cache(nested_cache)
 
         # TODO: Is it important to enable torch.inference_mode before querying
@@ -377,6 +388,7 @@ class MetaTensorDescriber:
             is_nested=is_nested,
             nested_cache_id=nested_cache_id,
             nested_cache=nested_cache_desc,
+            nested_cache_attr=nested_cache_attr,
             # We may be able to remove nested_int in favor of this.
             custom_size_strides=self.describe_custom_size_strides(t),
             is_functional=is_functional,
@@ -537,6 +549,7 @@ class MetaTensorDesc:
     # MetaTensorDesc may only have nested_cache_id and not nested_cache in the case
     # where we have multiple keys in a cache.
     nested_cache_id: Optional[int] = None
+    nested_cache_attr: str = None
     custom_size_strides: MetaCustomSizeStridesDesc = None
     is_traceable_wrapper_subclass: bool = False
     is_functional: bool = False
@@ -799,18 +812,25 @@ class MetaConverter:
 
         # Capture everything needed to recursively call meta_tensor where we need it
         def metafy_fn(t: MetaTensorDesc, src) -> torch.Tensor:
+            context = all_dynamic_symbolic_context(t, src, shape_env, callback)
+
+            # TODO(soulitzer): improve this check
+            if t.nested_cache_attr is not None and hasattr(
+                symbolic_context, "inner_contexts"
+            ):
+                key = (
+                    "_host_" + t.nested_cache_attr
+                    if t.nested_cache_attr != "_values"
+                    else t.nested_cache_attr
+                )
+                context = symbolic_context.inner_contexts[key]
+
             return self.meta_tensor(
                 t,
                 shape_env,
                 callback,
                 source=src,
-                # We could also look up the inner symbolic context, but that is more work
-                symbolic_context=None,
-                # This... is breaking something. Don't know why yet. Need to make sure things are dynamic.
-                # How does mark-dynamic work AFTER you've fakified?
-                # all_dynamic_symbolic_context(
-                #    t, src, shape_env, callback
-                # ),
+                symbolic_context=context,
             )
 
         if shape_env is not None:
@@ -1663,7 +1683,10 @@ class MetaConverter:
             nested_cache = None
 
             if t.nested_cache is not None:
-                from torch._dynamo.source import GetItemSource, NestedTensorCacheSource
+                from torch._dynamo.source import (
+                    GetItemSource,
+                    NestedTensorCacheAttrSource,
+                )
 
                 cache_data = {}
                 # It's important that we recurse AFTER memoization.
@@ -1674,19 +1697,22 @@ class MetaConverter:
                         metafy_fn(
                             cache_value,
                             # Make sure to use the NestedTensorCacheSource directly
-                            src=GetItemSource(
-                                NestedTensorCacheSource(source), cache_key
-                            ),
+                            src=NestedTensorCacheAttrSource(source, cache_key),
                         )
                         if cache_value is not None
                         else None
                     )
                     cache_data[cache_key] = fake_cache_value
 
+                # How do I reuse the existing stuff?
+                # Extract out something?
+                # symbolicize the nested int
+                #
                 nested_cache = r.fake_mode.nested_cache_state.register_cache(
                     cache_data, t.nested_cache.cache_id
                 )
                 # See Note: [Creating symbolic nested int]
+                # this should get the existing one if it already exists.
                 r.fake_mode.get_nested_symint(nested_cache, coeff=1)
 
         return self.get_tensor_memo(t)

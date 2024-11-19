@@ -900,30 +900,9 @@ class FakeTensor(Tensor):
             return [elem.tolist() for elem in self]
 
     def detach(self) -> torch.Tensor:  # type: ignore[override]
-        if _DETACH_CACHE is not None:
-            if self not in _DETACH_CACHE:
-                _DETACH_CACHE[self] = torch.ops.aten.detach.default(self)
-            out = _DETACH_CACHE[self]
-            self.fake_mode.nested_cache_state.maybe_alias_tensor(out, self)
-        else:
-            out = torch.ops.aten.detach.default(self)
-
+        out = torch.ops.aten.detach.default(self)
+        self.fake_mode.nested_cache_state.register_detached_tensor(out, self)
         return out
-
-
-# Global storage for detach cache
-_DETACH_CACHE = None
-
-class CacheDetachCalls:
-    """Context manager that provides global storage for caching detach calls."""
-    def __enter__(self):
-        global _DETACH_CACHE
-        _DETACH_CACHE = {}
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        global _DETACH_CACHE
-        _DETACH_CACHE = None
 
 
 _MetadataIntLike = Union[IntLikeType, "_PySymInputStub", "_SymIntOutputStub"]
@@ -1117,7 +1096,7 @@ class FakeTensorMode(TorchDispatchMode):
     shape_env: Optional[ShapeEnv]
     _stack: Optional[str]
     allow_meta: bool
-
+    # TODO(soulitzer): update this
     # NestedTensor uses a tensor_id_counter to uniquely identify offsets.
     # This counter is incremented when an offsets is used to create an NJT
     # for the first time. To avoid mutating eager state if we construct NJT
@@ -1125,14 +1104,10 @@ class FakeTensorMode(TorchDispatchMode):
     # The initial count is set to the current eager tensor_id_counter value
     # upon initialization, and every time you retrace using the same fake tensor
     # mode, you should reset the counter to the initial count.
-    cache_id_counter: int = -1
-    cache_id_initial_count: int = -1
     # keeps the cache alive for the duration of the mode
-    # TODO(soulitzer): Should this be reset if the id is also reset?
-    cache_id_to_fake_cache = {}
     cache_id_to_symint = {}
-    nested_meta_to_cache_id = {}
     nested_cache_state = None
+
 
     def __init__(
         self,
@@ -1215,6 +1190,8 @@ class FakeTensorMode(TorchDispatchMode):
 
         self.shape_env = shape_env
 
+        import traceback
+
         self._stack_trace = traceback.extract_stack()
         self._stack = None
 
@@ -1235,11 +1212,10 @@ class FakeTensorMode(TorchDispatchMode):
         self.cache_id_to_symint = {}
 
     def reset_nested_cache_state(self) -> None:
-        # TODO(soulitzer): understand this better
-        self.nested_cache_state.set_counter(
-            self.nested_cache_initial_state._cache_registry._incrementing_id
+        # TODO(soulitzer): write down what's supposed to happen here.
+        self.nested_cache_state.set_next_id(
+            self.nested_cache_initial_state.get_next_id()
         )
-
 
     # Typically, there is only one fake tensor mode and you test for it by
     # doing an isinstance test.  However, in some situations, there might be

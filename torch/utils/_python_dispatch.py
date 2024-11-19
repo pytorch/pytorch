@@ -2,10 +2,22 @@
 import contextlib
 
 import warnings
-from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Set, Union, Protocol, Tuple, Sequence, overload, Deque, Type
-from typing_extensions import TypeIs
 from collections import deque
+from dataclasses import dataclass
+from typing import (
+    Any,
+    Deque,
+    Dict,
+    List,
+    Optional,
+    overload,
+    Protocol,
+    Sequence,
+    Set,
+    Tuple,
+    Type,
+    Union,
+)
 
 import torch
 import torchgen
@@ -17,6 +29,7 @@ from torch._C import (
     _push_on_torch_dispatch_stack,
     DispatchKey,
 )
+from typing_extensions import TypeIs
 
 
 # TODO: Limitations and things about enable_torch_dispatch_mode we should fix before exposing it:
@@ -28,8 +41,13 @@ from torch._C import (
 _is_in_torch_dispatch_mode = False
 _is_in_non_infra_torch_dispatch_mode = False
 
+
 def is_in_torch_dispatch_mode(include_infra_modes=True) -> bool:
-    return _is_in_torch_dispatch_mode if include_infra_modes else _is_in_non_infra_torch_dispatch_mode
+    return (
+        _is_in_torch_dispatch_mode
+        if include_infra_modes
+        else _is_in_non_infra_torch_dispatch_mode
+    )
 
 
 class TorchDispatchMode:
@@ -78,7 +96,6 @@ class TorchDispatchMode:
         if not hasattr(self, "old_non_infra_dispatch_mode_flags"):
             self.old_non_infra_dispatch_mode_flags: Deque[bool] = deque()  # type: ignore[no-redef]
 
-
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         raise NotImplementedError
 
@@ -92,8 +109,12 @@ class TorchDispatchMode:
         self._lazy_init_old_dispatch_mode_flags()
         self.old_dispatch_mode_flags.append(_is_in_torch_dispatch_mode)
         _is_in_torch_dispatch_mode = True
-        self.old_non_infra_dispatch_mode_flags.append(_is_in_non_infra_torch_dispatch_mode)
-        _is_in_non_infra_torch_dispatch_mode = _is_in_non_infra_torch_dispatch_mode or not self.is_infra_mode()
+        self.old_non_infra_dispatch_mode_flags.append(
+            _is_in_non_infra_torch_dispatch_mode
+        )
+        _is_in_non_infra_torch_dispatch_mode = (
+            _is_in_non_infra_torch_dispatch_mode or not self.is_infra_mode()
+        )
         _push_mode(self)
         return self
 

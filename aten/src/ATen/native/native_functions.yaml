@@ -6213,12 +6213,12 @@
     CompositeExplicitAutogradNonFunctional: _nested_view_from_buffer_copy
   autogen: _nested_view_from_buffer_copy.out
 
-- func: _nested_view_from_jagged(Tensor(a) self, Tensor offsets, Tensor dummy, Tensor? lengths=None, int ragged_idx=1, Tensor? min_seqlen=None, Tensor? max_seqlen=None) -> Tensor(a)
+- func: _nested_view_from_jagged(Tensor(a) self, Tensor offsets, Tensor dummy, Tensor dummy_entry, Tensor? lengths=None, int ragged_idx=1, Tensor? min_seqlen=None, Tensor? max_seqlen=None) -> Tensor(a)
   variants: function
   device_check: NoCheck
   dispatch: {}
 
-- func: _nested_view_from_jagged_copy(Tensor self, Tensor offsets, Tensor dummy, Tensor? lengths=None, int ragged_idx=1, Tensor? min_seqlen=None, Tensor? max_seqlen=None) -> Tensor
+- func: _nested_view_from_jagged_copy(Tensor self, Tensor offsets, Tensor dummy, Tensor dummy_entry, Tensor? lengths=None, int ragged_idx=1, Tensor? min_seqlen=None, Tensor? max_seqlen=None) -> Tensor
   variants: function
   device_check: NoCheck
   tags: view_copy
@@ -6266,6 +6266,10 @@
   dispatch: {}
 
 - func: _nested_get_jagged_dummy(Tensor any) -> Tensor
+  category_override: dummy
+  dispatch: {}
+
+- func: _nested_get_jagged_dummy_entry(Tensor any) -> Tensor
   category_override: dummy
   dispatch: {}
 

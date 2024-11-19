@@ -1672,9 +1672,9 @@ class VariableBuilder:
                 )
 
         from torch._dynamo.source import (
-            NestedTensorCacheSource,
             NestedTensorCacheListSource,
         )
+        # Update this so that it participates in the aliasing guards
         nested_cache = torch._get_njt_cache_from_offsets(value)
         if nested_cache is not None:
             install_guard(
@@ -2699,7 +2699,7 @@ def _automatic_dynamic(
 
 # See note [Tensor Fakification and Symbol Caching]
 def wrap_to_fake_tensor_and_record(
-    e, tx, *, source: Optional[Source], is_tensor: bool, parent_context=None
+    e, tx, *, source: Optional[Source], is_tensor: bool, parent_context=None, recurse_cache=True
 ):
     if (
         type(e) in (torch.Tensor, torch.nn.Parameter, FakeTensor)
@@ -2726,6 +2726,20 @@ def wrap_to_fake_tensor_and_record(
             assert isinstance(source, AttrSource)
             inner_context_name = source.member
             symbolic_context = parent_context.inner_contexts[inner_context_name]
+
+        from torch._dynamo.source import NestedTensorCacheAttrSource
+
+        nested_cache = torch._get_njt_cache_from_offsets(e)
+        if nested_cache is not None and recurse_cache:
+            for k, v in nested_cache.data.items():
+                inner_source = NestedTensorCacheAttrSource(source, k)
+                wrap_to_fake_tensor_and_record(
+                    v,
+                    tx,
+                    source=inner_source,
+                    is_tensor=True,
+                    recurse_cache=False,
+                )
 
         log.debug(
             "wrap_to_fake %s %s %s %s",

@@ -6,7 +6,7 @@ def try_get_fake_mode(obj):
     from torch._subclasses.fake_tensor import FakeTensor
     from torch._subclasses.functional_tensor import mb_unwrap_functional_tensor
 
-    from torch.nested._internal.metadata_cache import MetadataCache
+    from torch.nested._internal.metadata_cache import TreeCache
 
     if isinstance(obj, dict):
         for v in obj.values():
@@ -20,11 +20,11 @@ def try_get_fake_mode(obj):
             return t.fake_mode
         else:
             return None
-    elif isinstance(obj, MetadataCache):
+    elif isinstance(obj, TreeCache):
         # TODO(soulitzer): revisit assumptions
         # Assume that I have a cache that is registered somewhere.
         # Assume that anything in the cache has been registered.
-        # Every MetadataCache must contain at least one tensor
+        # Every TreeCache must contain at least one tensor
         return try_get_fake_mode(obj.data)
     else:
         assert False, f"get_fake_mode: got unexpected type {type(obj)}"

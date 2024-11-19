@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
-import re
 from typing import *  # noqa: F403
-import weakref
+import functools
 from typing import Tuple
 
 import torch
@@ -10,7 +9,8 @@ from torch._prims_common import is_expandable_to
 
 from torch.nested._internal.metadata_cache import (
     add_entry,
-    MetadataCache,
+    merge_caches,
+    TreeCache,
     try_get_cache,
 )
 from torch.nested._internal.nested_int import get_nested_symint
@@ -35,90 +35,42 @@ def _rebuild_njt(constructor_kwargs):
     return NestedTensor(**constructor_kwargs)
 
 
-# Write a note demonstrating how this works
-_RAGGED_SOURCE_ALIAS_PRIORITY = [
-    "cpu_lengths",
-    "cpu_offsets",
-    "device_lengths",
-    "device_offsets",
+# The order of these keys determines the priority for merging
+_METADATA_KEYS = [
+    "lengths",
+    "offsets",
+    "max_seqlen_tensor",
+    "min_seqlen_tensor",
+    "dummy_entry",
 ]
 
 
-# If we accept the input in the form of offsets/lengths/cpu_offsets/cpu_lengtsh
-# we need to do some normalization at some point. Where should it be done?
-def construct_nested_cache_data(
-    *, offsets=None, lengths=None, cpu_offsets=None, cpu_lengths=None
-):
-    # The device of offsets/lengths determines the device of the NestedTensor.
-    # CPU NestedTensor cannot have device offsets/lengths cached.
-    device_offsets, device_lengths = None, None
-    if offsets is not None:
-        if offsets.is_cpu:
-            cpu_offsets = offsets
-        else:
-            device_offsets = offsets
-    if lengths is not None:
-        if lengths.is_cpu:
-            cpu_lengths = lengths
-        else:
-            device_lengths = lengths
-    raw_ret = {
-        # Duplicate :(
-        "cpu_offsets": cpu_offsets,
-        "cpu_lengths": cpu_lengths,
-        "device_offsets": device_offsets,
-        "device_lengths": device_lengths,
-    }
-    ret = dict()
-    for k, v in raw_ret.items():
-        if v is not None:
-            ret[k] = v
-    return ret
-
-
-def get_nested_cache(offsets, lengths, cpu_offsets, cpu_lengths) -> MetadataCache:
-    # Figure out the best way to do this.
-    cache_data = construct_nested_cache_data(
-        offsets=offsets,
-        lengths=lengths,
-        cpu_offsets=cpu_offsets,
-        cpu_lengths=cpu_lengths,
-    )
-    # Look for existing caches
+def get_nested_cache(cache_data) -> TreeCache:
+    # Collect existing caches
     caches = []
-    for k in _RAGGED_SOURCE_ALIAS_PRIORITY:
+    for k in _METADATA_KEYS:
         if k in cache_data:
             _cache = try_get_cache(cache_data[k])
             if _cache is not None:
                 caches.append(_cache)
-
+    # Merge them
     cache = None
-    # Entries already registered to cache are prioritized.
     if len(caches) > 0:
-        cache = caches[0]
-        for cache_ in caches[1:]:
-            for k, v in cache_.data.items():
-                if cache.data.get(k) is None:
-                    # view to avoid a single tensor instance shared between caches
-                    add_entry(cache, k, v.view_as(v))
+        cache = functools.reduce(merge_caches, caches)
 
+    # Add new entries
     for k, v in cache_data.items():
-        # k needs to be part of ragged source keys?
         if cache is None or cache.data.get(k) is None:
-            # if cache is None, add_entry implicitly creates a new cache
-            prev_cache = cache
+            # Creates a new cache if None if cache=None
             cache = add_entry(cache, k, v)
-            if prev_cache:
-                # Sanity check: instance cannot change
-                assert cache is prev_cache
-    assert cache is not None
+
     return cache
 
 
 class NestedTensor(torch.Tensor):
     _values: torch.Tensor  # type: ignore[assignment]
-    _offsets: torch.Tensor
-    _lengths: Optional[torch.Tensor]
+    _device_metadata: Dict[str, Any]
+    _host_metadata: Dict[str, Any]
     # NOTE [ Nested ints for ragged sizes and strides ]
     #
     # Jagged layout tensors are tensors that represent a n-dim tensor with a
@@ -137,35 +89,41 @@ class NestedTensor(torch.Tensor):
     _strides: Tuple[int, ...]
     # Indicates that the nth dimension is ragged
     _ragged_idx: int
-    _metadata_cache: Dict[str, Any]
 
     @staticmethod
     def __new__(
         cls,
         values,
-        offsets,
-        *,
-        lengths=None,
-        cpu_offsets=None,
-        cpu_lengths=None,
+        device_meta,
+        host_meta,
         **kwargs,
     ):
         ks = DispatchKeySet(DispatchKey.NestedTensor)
         ks = ks.add(DispatchKey.AutogradNestedTensor)
 
+        offsets = (
+            device_meta.get("offsets")
+            if device_meta.get("offsets") is not None
+            else host_meta.get("offsets")
+        )
+        lengths = (
+            device_meta.get("lengths")
+            if device_meta.get("lengths") is not None
+            else host_meta.get("lengths")
+        )
+
         # Only support jagged for now.
+        # TODO(soulitzer): we don't actually run these checks on both device/host
+        # if both are provided.
         assert offsets is not None
         assert offsets.ndim == 1
         assert not isinstance(values, NestedTensor)
         assert values.device == offsets.device
 
-        # Figure out the best way to do this.
-        cache = get_nested_cache(
-            offsets=offsets,
-            lengths=lengths,
-            cpu_offsets=cpu_offsets,
-            cpu_lengths=cpu_lengths,
-        )
+        # Always have something in the host_meta.
+        assert "dummy_entry" in host_meta
+
+        cache = get_nested_cache(host_meta)
         ragged_size = get_nested_symint(cache, coeff=1)
 
         _ragged_idx = kwargs.get("_ragged_idx", 1)
@@ -203,27 +161,102 @@ class NestedTensor(torch.Tensor):
 
         return r
 
-    def __init__(self, values, offsets, *, lengths=None, **kwargs):
+    def __init__(self, values, device_meta, host_meta, **kwargs):
         super().__init__()
 
         self._values = values
-        self._offsets = offsets
-        self._lengths = lengths
-
-        # holds properties that are computed lazily
-        self._metadata_cache = kwargs.get("_metadata_cache") or {}
+        self._host_meta = host_meta
+        self._device_meta = device_meta
 
         # collapsed ragged dim must always be dynamic
         torch._dynamo.maybe_mark_dynamic(self, self._ragged_idx)
         torch._dynamo.maybe_mark_dynamic(self._values, self._ragged_idx - 1)
 
         # min / max sequence length should be dynamic if present
-        max_seqlen_tensor = self._metadata_cache.get("max_seqlen", None)
-        if max_seqlen_tensor is not None:
-            torch._dynamo.mark_dynamic(max_seqlen_tensor, 0)
-        min_seqlen_tensor = self._metadata_cache.get("min_seqlen", None)
-        if min_seqlen_tensor is not None:
-            torch._dynamo.mark_dynamic(min_seqlen_tensor, 0)
+        for meta in (host_meta, device_meta):
+            for key in ("max_seqlen_tensor", "min_seqlen_tensor"):
+                if meta.get(key) is not None:
+                    print("marking as dynamic: ", key)
+                    torch._dynamo.mark_dynamic(meta[key], 0)
+
+    # Private accessors used for treating min / max seqlen as inner tensors for
+    # flatten / unflatten. These must be properties to work with the traceable wrapper
+    # subclass logic. These do not compute / cache if not present.
+    @property
+    def _device_offsets(self):
+        return self._device_meta.get("offsets")
+
+    @property
+    def _host_offsets(self):
+        return self._host_meta.get("offsets")
+
+    @property
+    def _device_lengths(self):
+        return self._device_meta.get("lengths")
+
+    @property
+    def _host_lengths(self):
+        return self._host_meta.get("lengths")
+
+    @property
+    def _device_max_seqlen_tensor(self):
+        return self._device_meta.get("max_seqlen_tensor")
+
+    @property
+    def _host_max_seqlen_tensor(self):
+        return self._host_meta.get("max_seqlen_tensor")
+
+    @property
+    def _device_min_seqlen_tensor(self):
+        return self._device_meta.get("min_seqlen_tensor")
+
+    @property
+    def _host_min_seqlen_tensor(self):
+        return self._host_meta.get("min_seqlen_tensor")
+
+    @property
+    def _host_dummy_entry(self):
+        return self._host_meta.get("dummy_entry")
+
+    # Wrappers on top of the private accessors to abstract over device / host
+    # For these APIs, device metadata is preferred if present.
+    # What happens in the cuda case vs cpu case.
+    # For the cuda case: values devices is cuda
+    # The NJT always at least has the offsets on cuda, it may also have the host offsets
+    # cached, but not always, this means when we return _offsets
+
+    # Ban cpu NJT from caching device offsets for simplicitly
+    @property
+    def _offsets(self):
+        return (
+            self._device_offsets
+            if self._device_offsets is not None
+            else self._host_offsets
+        )
+
+    @property
+    def _lengths(self):
+        return (
+            self._device_lengths
+            if self._device_lengths is not None
+            else self._host_lengths
+        )
+
+    @property
+    def _max_seqlen_tensor(self) -> Optional[torch.Tensor]:
+        return (
+            self._device_max_seqlen_tensor
+            if self._device_max_seqlen_tensor is not None
+            else self._host_max_seqlen_tensor
+        )
+
+    @property
+    def _min_seqlen_tensor(self) -> Optional[torch.Tensor]:
+        return (
+            self._device_min_seqlen_tensor
+            if self._device_min_seqlen_tensor is not None
+            else self._host_min_seqlen_tensor
+        )
 
     def values(self):
         # dispatch to get proper view relationship
@@ -235,6 +268,19 @@ class NestedTensor(torch.Tensor):
     def lengths(self):
         return self._lengths
 
+    # Helper for _get_{max,min}_seqlen
+    def _compute_and_store_max_min_seqlen(self, func, name):
+        val = _get_sdpa_extreme_seqlen(
+            func,
+            self._offsets.diff() if self._lengths is None else self._lengths,
+        )
+        val_tensor = _store_val_in_tensor(val)
+        meta = (
+            self._device_meta if self._device_offsets is not None else self._host_meta
+        )
+        meta[name] = val_tensor
+        return val_tensor
+
     # Private accessor functions for min / max sequence length. They're
     # purposefully not @properties because those don't work with PT2 (yet).
     # These compute / cache if not present.
@@ -242,39 +288,21 @@ class NestedTensor(torch.Tensor):
     # state would be to have public @properties for min / max sequence length that compile
     # (including setters).
     def _get_max_seqlen(self):
+        # Prefer device metadata if present
         max_seqlen_tensor = self._max_seqlen_tensor
         if max_seqlen_tensor is None:
-            # compute & cache
-            max_val = _get_sdpa_extreme_seqlen(
-                torch.max,
-                self._offsets.diff() if self._lengths is None else self._lengths,
+            max_seqlen_tensor = self._compute_and_store_max_min_seqlen(
+                torch.max, "max_seqlen_tensor"
             )
-            max_seqlen_tensor = _store_val_in_tensor(max_val)
-            self._metadata_cache["max_seqlen"] = max_seqlen_tensor
         return _load_val_from_tensor(max_seqlen_tensor)
 
     def _get_min_seqlen(self):
         min_seqlen_tensor = self._min_seqlen_tensor
         if min_seqlen_tensor is None:
-            # compute & cache
-            min_val = _get_sdpa_extreme_seqlen(
-                torch.min,
-                self._offsets.diff() if self._lengths is None else self._lengths,
+            min_seqlen_tensor = self._compute_and_store_max_min_seqlen(
+                torch.min, "min_seqlen_tensor"
             )
-            min_seqlen_tensor = _store_val_in_tensor(min_val)
-            self._metadata_cache["min_seqlen"] = min_seqlen_tensor
         return _load_val_from_tensor(min_seqlen_tensor)
-
-    # Private accessors used for treating min / max seqlen as inner tensors for
-    # flatten / unflatten. These must be properties to work with the traceable wrapper
-    # subclass logic. These do not compute / cache if not present.
-    @property
-    def _max_seqlen_tensor(self) -> Optional[torch.Tensor]:
-        return self._metadata_cache.get("max_seqlen", None)
-
-    @property
-    def _min_seqlen_tensor(self) -> Optional[torch.Tensor]:
-        return self._metadata_cache.get("min_seqlen", None)
 
     # These are old private @property accessors that are kept around for internal BC
     # reasons. TODO: Remove these!
@@ -324,10 +352,9 @@ class NestedTensor(torch.Tensor):
         func = _rebuild_njt
         constructor_kwargs = {
             "values": self._values,
-            "offsets": self._offsets,
-            "lengths": self._lengths,
+            "_host_meta": self._host_meta,
+            "_device_meta": self._device_meta,
             "_ragged_idx": self._ragged_idx,
-            "_metadata_cache": self._metadata_cache,
             "requires_grad": self.requires_grad,
         }
         args = (constructor_kwargs,)
@@ -338,39 +365,38 @@ class NestedTensor(torch.Tensor):
             "requires_grad": self.requires_grad,
             "ragged_idx": self._ragged_idx,
         }
-        inner_tensors = ["_values", "_offsets"]
-        if self._lengths is not None:
-            inner_tensors.append("_lengths")
-        if self._min_seqlen_tensor is not None:
-            inner_tensors.append("_min_seqlen_tensor")
-        if self._max_seqlen_tensor is not None:
-            inner_tensors.append("_max_seqlen_tensor")
+        inner_tensors = ["_values"]
+        for x_name, x_meta in (
+            ("device", self._device_meta),
+            ("host", self._host_meta),
+        ):
+            for k in _METADATA_KEYS:
+                if k in x_meta:
+                    inner_tensors.append(f"_{x_name}_{k}")
         return inner_tensors, ctx
 
     @staticmethod
-    def __tensor_unflatten__(inner_tensors: Dict, meta, outer_size, outer_stride):
+    def __tensor_unflatten__(inner_tensors: Dict, ctx, outer_size, outer_stride):
         # inner tensors: _values, _offsets, [_lengths], [_min_seqlen], [_max_seqlen]
         assert len(inner_tensors) >= 2 and len(inner_tensors) <= 5
-        values = inner_tensors["_values"]
-        offsets = inner_tensors["_offsets"]
-        lengths = inner_tensors.get("_lengths", None)
-        min_seqlen_tensor = inner_tensors.get("_min_seqlen_tensor", None)
-        max_seqlen_tensor = inner_tensors.get("_max_seqlen_tensor", None)
 
-        metadata_cache = {}
-        if min_seqlen_tensor is not None:
-            metadata_cache["min_seqlen"] = min_seqlen_tensor
-        if max_seqlen_tensor is not None:
-            metadata_cache["max_seqlen"] = max_seqlen_tensor
-        ragged_idx = meta["ragged_idx"]
+        print("__tensor_unflatten__: ", inner_tensors)
+
+        device_meta, host_meta = {}, {}
+        for suffix in _METADATA_KEYS:
+            if (device_k := "_device_" + suffix) in inner_tensors:
+                device_meta[suffix] = inner_tensors[device_k]
+            if (host_k := "_host_" + suffix) in inner_tensors:
+                host_meta[suffix] = inner_tensors[host_k]
+
+        print("__tensor_unflatten__: ", device_meta, host_meta)
 
         return NestedTensor(
-            values,
-            offsets=offsets,
-            lengths=lengths,
-            requires_grad=meta["requires_grad"],
-            _ragged_idx=ragged_idx,
-            _metadata_cache=metadata_cache,
+            inner_tensors["_values"],
+            device_meta=device_meta,
+            host_meta=host_meta,
+            requires_grad=ctx["requires_grad"],
+            _ragged_idx=ctx["ragged_idx"],
         )
 
     @classmethod
@@ -424,18 +450,19 @@ class NestedTensor(torch.Tensor):
 class ViewBufferFromNested(torch.autograd.Function):
     @staticmethod
     def forward(ctx, x: NestedTensor):  # type: ignore[override]
-        ctx.save_for_backward(x.offsets())
-        ctx.metadata_cache = x._metadata_cache
+        # In theory tensors should be saved via ctx.save_for_backward, but
+        # we'd have to annoyingly explode/rebuild the metadata.
+        ctx.device_meta = x._device_meta
+        ctx.host_meta = x._host_meta
         ctx.ragged_idx = x._ragged_idx
         return x._values
 
     @staticmethod
     def backward(ctx, gO: torch.Tensor):  # type: ignore[override]
-        (offsets,) = ctx.saved_tensors
         return NestedTensor(
             gO,
-            offsets=offsets,
-            _metadata_cache=ctx.metadata_cache,
+            device_meta=ctx.device_meta,
+            host_meta=ctx.host_meta,
             _ragged_idx=ctx.ragged_idx,
         )
 
@@ -447,6 +474,7 @@ class ViewNestedFromBuffer(torch.autograd.Function):
         ctx,
         values: torch.Tensor,
         offsets: torch.Tensor,
+        # This is public API?
         metadata_cache: Optional[Dict[str, Any]] = None,
     ):  # type: ignore[override]
         # maintain BC with this usages of this where the seqlens are stuffed
@@ -458,10 +486,22 @@ class ViewNestedFromBuffer(torch.autograd.Function):
                 metadata_cache["min_seqlen"] = _store_val_in_tensor(min_seqlen)
             if max_seqlen is not None and not isinstance(max_seqlen, torch.Tensor):
                 metadata_cache["max_seqlen"] = _store_val_in_tensor(max_seqlen)
+
+        device_meta, host_meta = {}, {}
+        for prefix in ("min", "max"):
+            key = f"{prefix}_seqlen"
+            if key in metadata_cache:
+                name, meta = (
+                    ("device", device_meta)
+                    if metadata_cache[key].is_cpu
+                    else ("host", host_meta)
+                )
+                meta[f"_{name}_{key}_tensor"] = metadata_cache[key]
+
         return NestedTensor(
             values.detach(),
-            offsets=offsets,
-            _metadata_cache=metadata_cache,
+            device_meta=device_meta,
+            host_meta=host_meta,
         )
 
     @staticmethod
@@ -614,9 +654,11 @@ _dummy_instance: Optional[torch.Tensor] = None
 def _nt_view_dummy() -> torch.Tensor:
     global _dummy_instance
     if _dummy_instance is None:
+        device_meta = {"offsets": torch.zeros(3, device="meta", dtype=torch.int64)}
         _dummy_instance = NestedTensor(
             values=torch.zeros(3, 3, device="meta"),
-            offsets=torch.zeros(3, device="meta", dtype=torch.int64),
+            device_meta=device_meta,
+            host_meta={"dummy_entry": torch.empty((0,), device="cpu")},
         ).detach()
     return _dummy_instance
 
@@ -624,6 +666,10 @@ def _nt_view_dummy() -> torch.Tensor:
 def nested_view_from_values_offsets(
     values, offsets, ragged_idx=1, min_seqlen=None, max_seqlen=None
 ):
+    # Where do we add to the cache? inside the torch dispatch right?
+    # It's inside the custom op, then its fine?
+    # If it is in the torch dispatch, then we have to still accept the
+    # exploded metadata as argument in dynamo, which is fine?
     min_seqlen_tensor = None
     if min_seqlen is not None:
         min_seqlen_tensor = _store_val_in_tensor(min_seqlen)
@@ -632,10 +678,12 @@ def nested_view_from_values_offsets(
     if max_seqlen is not None:
         max_seqlen_tensor = _store_val_in_tensor(max_seqlen)
 
+    # Just explode doesn't seem too bad.
     return torch._nested_view_from_jagged(  # type: ignore[attr-defined]
         values,
         offsets,
         _nt_view_dummy(),
+        torch.empty((0,), device="cpu"),  # dummy cache entry
         None,
         ragged_idx,
         min_seqlen_tensor,
@@ -658,6 +706,7 @@ def nested_view_from_values_offsets_lengths(
         values,
         offsets,
         _nt_view_dummy(),
+        torch.empty((0,), device="cpu"),
         lengths,
         ragged_idx,
         min_seqlen_tensor,

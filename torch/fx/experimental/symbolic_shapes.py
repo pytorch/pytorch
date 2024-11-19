@@ -3953,12 +3953,25 @@ class ShapeEnv:
                     GetItemSource(cache_src, cache_key),
                 ) if cache_value is not None else None
                 cache_data[cache_key] = fake_cache_value
+                # Fakifying: 
+                print("fakifying: ", cache_key, hint.node.nested_int())
+                # Grab the fake_mode so we can explicitly call into fake-only APIs
                 fake_mode = fake_mode if fake_cache_value is None else fake_cache_value.fake_mode
 
-            cache = fake_mode.nested_cache_state.register_cache(cache_data, cache_id=hint.node.nested_int())
+            cache_id = hint.node.nested_int()
+    
+            if fake_mode.nested_cache_state.is_registered(cache_id):
+                from torch.nested._internal.metadata_cache import try_get_cache
+
+                cache = try_get_cache(cache_data)
+                assert cache is not None
+            else:    
+                cache = fake_mode.nested_cache_state.register_cache(cache_data, cache_id=cache_id)
+
             coeff = hint.node.nested_int_coeff()
 
             def construct():
+                print("construct with: ", cache.id)
                 return SymInt(
                     SymNode(
                         sym, self, int,
