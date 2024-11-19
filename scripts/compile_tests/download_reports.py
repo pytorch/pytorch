@@ -24,20 +24,14 @@ CONFIGS = {
         "linux-focal-py3.11-clang10 / test (default, 3, 3, linux.2xlarge)",
     },
     "aot_eager311": {  # Checking aot_eager compilation pass rate
-        "linux-focal-py3.11-clang10 / test (dynamo_wrapped, 1, 3, linux.2xlarge)",
-        "linux-focal-py3.11-clang10 / test (dynamo_wrapped, 2, 3, linux.2xlarge)",
-        "linux-focal-py3.11-clang10 / test (dynamo_wrapped, 3, 3, linux.2xlarge)",
+        "linux-focal-py3.11-clang10 / test (dynamo_wrapped, 1, 3, lf.linux.2xlarge)",
+        "linux-focal-py3.11-clang10 / test (dynamo_wrapped, 2, 3, lf.linux.2xlarge)",
+        "linux-focal-py3.11-clang10 / test (dynamo_wrapped, 3, 3, lf.linux.2xlarge)",
     },
     "subclasses311": {  # Checking aot_eager compilation pass rate
-        "linux-focal-py3.11-clang10 / test (subclasses_wrapped, 1, 3, linux.2xlarge)",
-        "linux-focal-py3.11-clang10 / test (subclasses_wrapped, 2, 3, linux.2xlarge)",
-        "linux-focal-py3.11-clang10 / test (subclasses_wrapped, 3, 3, linux.2xlarge)",
-    },
-    # test only, remove
-    "debug": {
-        # "linux-focal-cpu-py3.10-gcc9-bazel-test / filter",
-        # "linux-focal-py3.11-clang10 / test (dynamo_wrapped, 1, 3, lf.linux.2xlarge)",
-        "linux-focal-py3.11-clang10 / test (crossref, 2, 2, lf.linux.2xlarge)",
+        "linux-focal-py3.11-clang10 / test (subclasses_wrapped, 1, 3, lf.linux.2xlarge)",
+        "linux-focal-py3.11-clang10 / test (subclasses_wrapped, 2, 3, lf.linux.2xlarge)",
+        "linux-focal-py3.11-clang10 / test (subclasses_wrapped, 3, 3, lf.linux.2xlarge)",
     },
 }
 
@@ -109,7 +103,6 @@ def download_reports(commit_sha, configs=("dynamo39", "dynamo311", "eager311")):
             print(f"XXX dir_name:{dir_name}")
             subprocess.run(["unzip", path_to_zip, "-d", dir_name], check=True)
             return
-        # breakpoint()
         # raise AssertionError("should not be hit")
 
     if not os.path.exists(log_dir):
