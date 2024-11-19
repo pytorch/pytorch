@@ -577,6 +577,7 @@ def _sfdp_params_check(match):
                 or attn_mask.dtype == torch.float
             )
             or query.device != attn_mask.device
+            or query.shape != attn_mask.shape
         ):
             return False
     return True
