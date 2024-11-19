@@ -39,7 +39,7 @@ def get_promoted_dtype(
 
 def promote_types(
     args: Sequence[Union[DTypeArg, torch.types.Number, str]],
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND,
+    type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND = ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 ):
     dtype_prop_candidates = []
 
