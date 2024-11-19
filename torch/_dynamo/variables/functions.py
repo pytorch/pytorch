@@ -330,6 +330,31 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         return super().call_function(tx, args, kwargs)
 
 
+class GeneratorFunctionVariable(UserFunctionVariable):
+    def call_function(self, tx, args, kwargs):
+        from torch._dynamo.symbolic_convert import InliningInstructionTranslator
+
+        self.inline_tracer = InliningInstructionTranslator.build_inline_tracer(
+            tx, self, args, kwargs
+        )
+        self.inline_tracer.consume_all_items = False
+        return self
+
+    def next_variable(self, tx):
+        from torch._dynamo import exc
+
+        tracer = self.inline_tracer
+
+        try:
+            # inline_call_ has a try/except block that does the same thing
+            # TODO: figure it out why it is not working for this usecase
+            with patch.dict(counters, {"unimplemented": counters["inline_call"]}):
+                return tracer.inline_call_().next_variable(tx)
+        except exc.ObservedException as e:
+            tx.exn_vt_stack.extend(tracer.exn_vt_stack)
+            raise e
+
+
 class FunctionDecoratedByContextlibContextManagerVariable(BaseUserFunctionVariable):
     """functions that behaves like iterators
 
