@@ -14,7 +14,7 @@ from typing import Any, Callable, Dict, List, Optional, Set, TYPE_CHECKING
 
 import torch
 from torch._dynamo.device_interface import get_registered_device_interfaces
-from torch._dynamo.utils import dynamo_timed
+from torch._dynamo.utils import dynamo_timed, set_feature_use
 from torch._inductor import config
 from torch._inductor.codecache import (
     CodeCacheFuture,
@@ -219,6 +219,7 @@ class AsyncCompile:
 
         kernel = TritonCodeCache.load(kernel_name, source_code)
         if self._use_process_pool():
+            set_feature_use("pytorch/inductor:enable_parallel_compile_version", True)
             # We want to support changing these env vars after (and while) the
             # process pool is running, so pass them to the subprocess to reset.
             env_vars = ["TORCHINDUCTOR_CACHE_DIR", "TRITON_CACHE_DIR"]
@@ -232,6 +233,7 @@ class AsyncCompile:
                 ),
             )
         else:
+            set_feature_use("pytorch/inductor:enable_parallel_compile_version", False)
             kernel.precompile()
             return kernel
 
