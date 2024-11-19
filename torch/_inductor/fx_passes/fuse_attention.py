@@ -579,7 +579,7 @@ def _sfdp_params_check(match):
             or query.device != attn_mask.device
             # When we tensorify floats we end up turning floats
             # into 0d scalar tensors. It doesn't make any sense
-            # to ahve a 0d scalar tensor attention mask so
+            # to have a 0d scalar tensor attention mask so
             # coveniently we can insert this check to get
             # tests that erroneously passing in a float
             # attention mask to fail as expected.
