@@ -47,7 +47,9 @@ def freezing_passes(gm: torch.fx.GraphModule, aot_example_inputs):
     binary_folding = counters["inductor"]["binary_folding"]
     fake_tensor_prop(gm, aot_example_inputs, True)
 
-    torch._inductor.fx_passes.binary_folding.mark_mixed_dtype_allowed_convs(gm)
+    torch._inductor.fx_passes.binary_folding.mark_mixed_dtype_allowed_computation_ops(
+        gm
+    )
     for _ in range(4):
         constant_fold(gm)
         # Make sure meta['val'] is properly set for all nodes
@@ -59,7 +61,9 @@ def freezing_passes(gm: torch.fx.GraphModule, aot_example_inputs):
             break
         binary_folding = counters["inductor"]["binary_folding"]
 
-    torch._inductor.fx_passes.binary_folding.recover_original_precision_folded_convs(gm)
+    torch._inductor.fx_passes.binary_folding.recover_original_precision_folded_computation_ops(
+        gm
+    )
 
     constant_fold(gm)
     fake_tensor_prop(gm, aot_example_inputs, True)
