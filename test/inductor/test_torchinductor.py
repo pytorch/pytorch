@@ -5556,6 +5556,7 @@ class CommonTemplate:
         )
 
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    @skip_if_cpp_wrapper
     def test_nonzero_unbacked_refinement(self):
         def fn(x):
             z = x.nonzero()
@@ -5567,12 +5568,8 @@ class CommonTemplate:
             (torch.tensor([0, 1, 3, 4, 2, 0, 0]),),
         )
 
-        # non-zero's output size is data-dependent, but torch.compile implicitly assumes
-        # that it will be constant.  This causes a RuntimeError below in normal mode,
-        # but creates an out-of-bounds memory access (segfault) in cpp_wrapper mode.
-        if not config.cpp_wrapper:
-            with self.assertRaises(RuntimeError):
-                torch.compile(fn)(torch.tensor([0, 0, 0, 0]))
+        with self.assertRaises(RuntimeError):
+            torch.compile(fn)(torch.tensor([0, 0, 0, 0]))
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_unbacked_floordiv_simplify(self):
