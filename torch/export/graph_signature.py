@@ -45,6 +45,7 @@ class SymIntArgument:
 class SymFloatArgument:
     name: str
 
+
 @dataclasses.dataclass
 class SymBoolArgument:
     name: str
@@ -281,7 +282,13 @@ class ExportGraphSignature:
 
             if isinstance(
                 s.arg,
-                (TensorArgument, SymIntArgument, SymFloatArgument, SymBoolArgument, CustomObjArgument),
+                (
+                    TensorArgument,
+                    SymIntArgument,
+                    SymFloatArgument,
+                    SymBoolArgument,
+                    CustomObjArgument,
+                ),
             ):
                 user_inputs.append(s.arg.name)
             elif isinstance(s.arg, ConstantArgument):
@@ -298,7 +305,10 @@ class ExportGraphSignature:
             if s.kind != OutputKind.USER_OUTPUT:
                 continue
 
-            if isinstance(s.arg, (TensorArgument, SymIntArgument, SymFloatArgument, SymBoolArgument)):
+            if isinstance(
+                s.arg,
+                (TensorArgument, SymIntArgument, SymFloatArgument, SymBoolArgument),
+            ):
                 user_outputs.append(s.arg.name)
             elif isinstance(s.arg, ConstantArgument):
                 user_outputs.append(s.arg.value)

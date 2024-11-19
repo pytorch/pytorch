@@ -2630,7 +2630,7 @@ def _canonicalize_graph(
         elif a.type == "as_sym_float":
             return a.as_sym_float
         elif a.type == "as_sym_floats":
-            return a.as_sym_floats            
+            return a.as_sym_floats
         elif a.type == "as_scalar_type":
             return None
         elif a.type == "as_memory_format":

@@ -75,8 +75,8 @@ from .graph_signature import (  # noqa: F401
     OutputKind,
     OutputSpec,
     SymBoolArgument,
-    SymIntArgument,
     SymFloatArgument,
+    SymIntArgument,
     TensorArgument,
     TokenArgument,
 )

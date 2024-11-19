@@ -6484,8 +6484,6 @@ graph():
         ep = export(m, inputs)
         self.assertEqual(ep.module()(*inputs), m(*inputs))
 
-    @testing.expectedFailureSerDer  # symfloat nyi
-    @testing.expectedFailureSerDerNonStrict
     def test_sym_sqrt(self):
         import math
 

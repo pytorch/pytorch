@@ -346,6 +346,7 @@ def forward(self, x):
         )
         dim0_ac = Dim("dim0_ac")
         dim1_bc = Dim("dim1_b")
+
     def test_serialize_infinite_sym_int(self) -> None:
         class DynamicShapeSimpleModel(torch.nn.Module):
             def __init__(self):
