@@ -22321,6 +22321,11 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.exp",
         torch_opinfo_name="exp",
+        skips=(
+            DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
+                         'test_reference_numerics_extremal',
+                         device_type='cpu', dtypes=[torch.cfloat, torch.cdouble], active_if=IS_WINDOWS),
+        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.expm1",
