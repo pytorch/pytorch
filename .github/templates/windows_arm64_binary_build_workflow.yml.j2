@@ -16,7 +16,6 @@ name: !{{ build_environment }}
         run: |
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
-          echo "NIGHTLIES_PYTORCH_ROOT=/pytorch" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
 {%- endmacro %}
 
@@ -49,6 +48,7 @@ env:
   SKIP_ALL_TESTS: 1
   BUILDER_ROOT: /builder
   PYTORCH_ROOT: /pytorch
+  NIGHTLIES_PYTORCH_ROOT: /pytorch
   DOWNLOADS_DIR: c:\temp\downloads
   DEPENDENCIES_DIR: c:\temp\dependencies
   ENABLE_APL: 1
