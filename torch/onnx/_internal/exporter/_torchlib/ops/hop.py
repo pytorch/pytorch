@@ -25,12 +25,14 @@ def higher_order_cond(
     )
 
     # FIXME(justinchuby): Set the output number of the If node and make it traceable by onnxscript
-    return op.If(
-        cond,
-        then_branch=ir.Graph(
-            (), then_node.outputs, nodes=[then_node], name=true_func.name
-        ),
-        else_branch=ir.Graph(
-            (), else_node.outputs, nodes=[else_node], name=false_func.name
+    return (
+        op.If(
+            cond,
+            then_branch=ir.Graph(
+                (), then_node.outputs, nodes=[then_node], name=true_func.name
+            ),
+            else_branch=ir.Graph(
+                (), else_node.outputs, nodes=[else_node], name=false_func.name
+            ),
         ),
     )
