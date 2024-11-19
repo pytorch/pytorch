@@ -140,7 +140,6 @@ CPU_TEST_FAILURES = {
     "test_custom_op_add": fail_minimal_arrayref_interface(),
     "test_custom_op_all_inputs": fail_minimal_arrayref_interface(),
     "test_custom_op_with_multiple_outputs": fail_minimal_arrayref_interface(),
-    "test_custom_op_with_reinterpret_view_inputs": fail_minimal_arrayref_interface(),
     "test_custom_op_with_concat_inputs": fail_minimal_arrayref_interface(),
     "test_custom_op_missing_arg_with_default_value": fail_minimal_arrayref_interface(),
     "test_size_from_multi_output": fail_stack_allocation(is_skip=True),
