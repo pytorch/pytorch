@@ -425,7 +425,7 @@ struct StealOrDefault {
 };
 } // namespace
 
-std::string profilerStepString = "ProfilerStep#";
+static constexpr std::string_view profilerStepString = "ProfilerStep#";
 
 void ThreadLocalSubqueue::TorchOpStorage::materialize(
     std::vector<std::shared_ptr<Result>>& out,
@@ -503,7 +503,7 @@ void ThreadLocalSubqueue::TorchOpStorage::materialize(
 }
 
 template <size_t BlockSize>
-void materialize_vulkan(
+static void materialize_vulkan(
     std::vector<std::shared_ptr<Result>>& out,
     AppendOnlyList<ExtraFields<EventType::Vulkan>::raw_event_t, BlockSize>&
         raw_events,
@@ -736,7 +736,7 @@ void mark_finished(std::shared_ptr<Result>& r) {
 #ifdef USE_KINETO
 // Assumption: Total threads number will not exceed 2^16-1, and total ops will
 // not exceed 2^48 -1.
-static inline uint64_t getForwardThreadKey(uint64_t tid, uint64_t seqNr) {
+static uint64_t getForwardThreadKey(uint64_t tid, uint64_t seqNr) {
   return (((tid) << 48) | ((seqNr) & (((uint64_t)1 << 48) - 1)));
 }
 
@@ -1495,7 +1495,7 @@ RecordQueue::getRecords(
         // annotation to the event start time
         if (right_intersection_only(step, i->start_time_ns_, i->endTimeNS())) {
           // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
-          auto currStepRes = out[step.out_idx];
+          auto const& currStepRes = out[step.out_idx];
           currStepRes->start_time_ns_ = i->start_time_ns_ + 1;
           step_idx++;
           step =

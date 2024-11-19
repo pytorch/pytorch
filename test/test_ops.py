@@ -121,7 +121,6 @@ _ops_and_refs_with_no_numpy_ref = [op for op in ops_and_refs if op.ref is None]
 aten = torch.ops.aten
 
 meta_consistency_out_dtype_mismatch_xfails = {
-    xfail("abs"),
     xfail("addbmm"),
     xfail("addmv"),
     xfail("alias_copy"),
@@ -133,7 +132,6 @@ meta_consistency_out_dtype_mismatch_xfails = {
     xfail("as_strided_copy"),
     xfail("baddbmm"),
     xfail("bucketize"),
-    xfail("ceil"),
     xfail("conj_physical"),
     xfail("cross"),
     xfail("cummax"),
@@ -144,8 +142,6 @@ meta_consistency_out_dtype_mismatch_xfails = {
     xfail("expand_copy"),
     xfail("fft.ihfft2"),
     xfail("fft.ihfftn"),
-    xfail("floor"),
-    xfail("frac"),
     xfail("frexp"),
     xfail("geqrf"),
     xfail("heaviside"),
@@ -154,8 +150,6 @@ meta_consistency_out_dtype_mismatch_xfails = {
     xfail("index_copy"),
     xfail("index_select"),
     xfail("isin"),
-    xfail("isneginf"),
-    xfail("isposinf"),
     xfail("kthvalue"),
     xfail("lerp"),
     xfail("linalg.cross"),
@@ -174,7 +168,6 @@ meta_consistency_out_dtype_mismatch_xfails = {
     xfail("linalg.solve"),
     xfail("linalg.solve_ex"),
     xfail("linalg.solve_triangular"),
-    xfail("log_softmax"),
     xfail("logcumsumexp"),
     xfail("lu_solve"),
     xfail("lu_unpack"),
@@ -209,9 +202,6 @@ meta_consistency_out_dtype_mismatch_xfails = {
     xfail("scatter_reduce", "prod"),
     xfail("scatter_reduce", "sum"),
     xfail("searchsorted"),
-    xfail("sgn"),
-    xfail("sign"),
-    xfail("signbit"),
     xfail("slice_scatter"),
     xfail("softmax"),
     xfail("sort"),
@@ -223,7 +213,6 @@ meta_consistency_out_dtype_mismatch_xfails = {
     xfail("transpose_copy"),
     xfail("tril"),
     xfail("triu"),
-    xfail("trunc"),
     xfail("unfold_copy"),
     xfail("unsqueeze_copy"),
     xfail("vdot"),
@@ -1898,22 +1887,22 @@ class TestCompositeCompliance(TestCase):
             # all inputs
             for idx, arg in enumerate(args_raw):
                 if is_strided_tensor(arg):
-                    args_copy.append(arg.clone().detach())
+                    args_copy.append(arg.detach().clone())
                     args.append(torch._lazy_clone(arg))
                 else:
                     if torch.is_tensor(arg):
-                        args_copy.append(arg.clone().detach())
+                        args_copy.append(arg.detach().clone())
                     else:
                         args_copy.append(copy.deepcopy(arg))
                     args.append(arg)
 
             for kw, arg in kwargs_raw.items():
                 if is_strided_tensor(arg):
-                    kwargs_copy[kw] = arg.clone().detach()
+                    kwargs_copy[kw] = arg.detach().clone()
                     kwargs[kw] = torch._lazy_clone(arg)
                 else:
                     if torch.is_tensor(arg):
-                        kwargs_copy[kw] = arg.clone().detach()
+                        kwargs_copy[kw] = arg.detach().clone()
                     else:
                         kwargs_copy[kw] = copy.deepcopy(arg)
                     kwargs[kw] = arg
@@ -1962,7 +1951,7 @@ class TestCompositeCompliance(TestCase):
 
                     # Convert output grads to COW tensors and make copies
                     for output_grad in output_grads_raw:
-                        output_grads_copy.append(output_grad.clone().detach())
+                        output_grads_copy.append(output_grad.detach().clone())
                         output_grads.append(torch._lazy_clone(output_grad))
 
                     input_grads = torch.autograd.grad(
