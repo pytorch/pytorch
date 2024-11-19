@@ -886,6 +886,35 @@ std::string get_exception_message() {
   return std::string(exc_message);
 }
 
+static bool is_frozen_dataclass(py::handle example_value) {
+  // Don't let Dynamo trace this call.
+  PyThreadState* cur_tstate = PyThreadState_Get();
+  _PyFrameEvalFunction prev_eval_frame =
+      _debug_set_eval_frame(cur_tstate, &_PyEval_EvalFrameDefault);
+
+  // Get the util module.
+  PyObject* dynamo_utils_module = PyImport_ImportModule("torch._dynamo.utils");
+  NULL_CHECK(dynamo_utils_module);
+
+  // Get the function.
+  PyObject* is_frozen_dataclass_func =
+      PyObject_GetAttrString(dynamo_utils_module, "is_frozen_dataclass");
+  NULL_CHECK(is_frozen_dataclass_func);
+
+  // Call the function.
+  PyObject* result = PyObject_CallFunctionObjArgs(
+      is_frozen_dataclass_func, example_value.ptr(), NULL);
+  bool is_frozen = PyObject_IsTrue(result);
+
+  // Teardown.
+  _debug_set_eval_frame(cur_tstate, prev_eval_frame);
+  Py_DECREF(is_frozen_dataclass_func);
+  Py_DECREF(dynamo_utils_module);
+  Py_DECREF(result);
+
+  return is_frozen;
+}
+
 bool is_immutable_object(py::handle example_value) {
   static py::object config_module = py::module_::import("torch._dynamo.config");
   bool is_tensor_immutable =
@@ -903,6 +932,7 @@ bool is_immutable_object(py::handle example_value) {
     return true;
   }
 
+  // TODO check for frozen class, and recursively its attributes.
   return PyLong_Check(example_value.ptr()) ||
       PyFloat_Check(example_value.ptr()) || PyBool_Check(example_value.ptr()) ||
       PyUnicode_Check(example_value.ptr()) ||
@@ -1560,9 +1590,11 @@ class GuardAccessor {
     return _source;
   }
 
-  // matches_dict_tag is used by the DictGetItemGuardAccessor to skip the guard
-  // subtree on immutable dict getitems.
-  virtual bool check_nopybind(PyObject* obj, bool matches_dict_tag = false) = 0;
+  // `obj_matches_parent_example` is set to true when `obj` shallow-equals the
+  // example value of the parent `GuardManager`, which invoked this function.
+  virtual bool check_nopybind(
+      PyObject* obj,
+      bool obj_matches_parent_example = false) = 0;
   virtual GuardDebugInfo check_verbose_nopybind(PyObject* obj) = 0;
   virtual std::string repr() const = 0;
 
@@ -1644,6 +1676,9 @@ class GuardManager {
         _is_dict(py::isinstance<py::dict>(example_value)) {
     if (_is_dict) {
       _dict_tag = get_dict_version_unchecked(example_value.ptr());
+    } else if (is_frozen_dataclass(example_value)) {
+      _is_frozen_dataclass = true;
+      _frozen_dataclass_example = example_value.ptr();
     }
   }
 
@@ -1725,21 +1760,25 @@ class GuardManager {
   }
 
   bool check_accessors_nopybind(PyObject* value) {
-    bool matches_dict_tag = false;
+    bool obj_matches_parent_example = false;
     uint64_t new_tag = 0;
     if (_is_dict) {
       // Check if the dict tag matches. If it does, propagate to the child
       // accessors. This will pass to the child manager via
       // DictGetItemGuardManager.
       new_tag = get_dict_version_unchecked(value);
-      matches_dict_tag = new_tag == _dict_tag;
+      obj_matches_parent_example = new_tag == _dict_tag;
+
+    } else if (_is_frozen_dataclass) {
+      obj_matches_parent_example = value == _frozen_dataclass_example;
     }
 
     // Iterate over accessors.
     bool result = true;
     bool failed_on_first = true;
     for (const auto& accessor : _accessors) {
-      if (!accessor->check_nopybind(value, matches_dict_tag)) { // early exit
+      if (!accessor->check_nopybind(
+              value, obj_matches_parent_example)) { // early exit
         _fail_count += 1;
         result = false;
         // need to sort, so break the loop.
@@ -1917,8 +1956,11 @@ class GuardManager {
   // to enable fail fast for the next check.
   std::vector<std::unique_ptr<GuardAccessor>> _accessors;
 
+  // TODO use enum and union.
   bool _is_dict;
   uint64_t _dict_tag{0};
+  bool _is_frozen_dataclass{false};
+  PyObject* _frozen_dataclass_example{nullptr};
 };
 
 /**
@@ -2577,6 +2619,10 @@ std::unique_ptr<GuardManager> make_guard_manager(
   static py::object dict_subclass_guard_manager_enum =
       guard_manager_enum_class.attr("DICT_SUBCLASS_GUARD_MANAGER");
 #endif
+  if (guard_manager_enum.is(base_guard_manager_enum)) {
+    return std::make_unique<GuardManager>(
+        root, std::move(source), example_value);
+  }
   if (py::isinstance<py::dict>(example_value)) {
     // The purpose of having both DictGuardManager and DictSubclassGuardManager
     // is to handle the variability in how dictionaries and their subclasses
@@ -2601,12 +2647,7 @@ std::unique_ptr<GuardManager> make_guard_manager(
     // overridden keys method, we still optimize for the common case with
     // DictGuardManager by relying on PyDict_Next.
 
-    if (guard_manager_enum.is(base_guard_manager_enum)) {
-      // For dicts that don't need to guard on keys, we can just rely on the
-      // base GuardManager.
-      return std::make_unique<GuardManager>(
-          root, std::move(source), example_value);
-    } else if (guard_manager_enum.is(dict_guard_manager_enum)) {
+    if (guard_manager_enum.is(dict_guard_manager_enum)) {
       return std::make_unique<DictGuardManager>(
           root, std::move(source), example_value);
     } else if (guard_manager_enum.is(dict_subclass_guard_manager_enum))
@@ -2761,12 +2802,21 @@ class GetAttrGuardAccessor : public GuardAccessor {
             std::move(source),
             example_value,
             guard_manager_enum),
-        _attr_name(name.ptr()) {}
+        _attr_name(name.ptr()),
+        _is_immutable_object(is_immutable_object(example_value)) {}
 
   // NB: Intentional duplication between check_nopybind and
   // check_verbose_nopybind.
-  bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
+  bool check_nopybind(PyObject* obj, bool obj_matches_parent_example = false)
       override { // borrowed ref
+    if (obj_matches_parent_example && _is_immutable_object) {
+      // This handles cases when `obj` is the same frozen dataclass as the
+      // example value given the parent `GuardManager` during construction.
+      // Since the accessed item is also a deeply immutable object (e.g., not a
+      // mutable list/dict), we don't need to recursively check anymore.
+      return true;
+    }
+
     PyObject* x = PyObject_GetAttr(obj, _attr_name); // new ref
     if (x == nullptr) {
       // Attribute absent, clear the exception and return false.
@@ -2802,6 +2852,10 @@ class GetAttrGuardAccessor : public GuardAccessor {
   // no need of py::object here because the attr_name is already passed on to
   // the base class as accessor_key which is a py::object.
   PyObject* _attr_name;
+
+  // Whether the example value (the original result of this attribute access) is
+  // an immutable object.
+  bool _is_immutable_object;
 };
 
 /**
@@ -2824,7 +2878,7 @@ class GetGenericDictGuardAccessor : public GuardAccessor {
 
   // NB: Intentional duplication between check_nopybind and
   // check_verbose_nopybind.
-  bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
+  bool check_nopybind(PyObject* obj, bool obj_matches_parent_example = false)
       override { // borrowed ref
     PyObject* x = PyObject_GenericGetDict(obj, nullptr); // new ref
     if (x == nullptr) {
@@ -2878,7 +2932,7 @@ class GetItemGuardAccessor : public GuardAccessor {
 
   // NB: Intentional duplication between check_nopybind and
   // check_verbose_nopybind.
-  bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
+  bool check_nopybind(PyObject* obj, bool obj_matches_parent_example = false)
       override { // borrowed ref
     PyObject* x = PyObject_GetItem(obj, _attr_name); // new ref
     if (x == nullptr) {
@@ -2939,9 +2993,9 @@ class DictGetItemGuardAccessor : public GuardAccessor {
 
   // NB: Intentional duplication between check_nopybind and
   // check_verbose_nopybind.
-  bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
+  bool check_nopybind(PyObject* obj, bool obj_matches_parent_example = false)
       override { // borrowed ref
-    if (matches_dict_tag && _is_immutable_object) {
+    if (obj_matches_parent_example && _is_immutable_object) {
       // immutable object and dict tag matches, we can skip the guard subtree.
       return true;
     }
@@ -3001,7 +3055,7 @@ class ListGetItemGuardAccessor : public GuardAccessor {
 
   // NB: Intentional duplication between check_nopybind and
   // check_verbose_nopybind.
-  bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
+  bool check_nopybind(PyObject* obj, bool obj_matches_parent_example = false)
       override { // borrowed ref
     PyObject* x = PyList_GetItem(obj, _index); // borrowed ref
     if (x == nullptr) {
@@ -3054,7 +3108,7 @@ class TupleGetItemGuardAccessor : public GuardAccessor {
 
   // NB: Intentional duplication between check_nopybind and
   // check_verbose_nopybind.
-  bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
+  bool check_nopybind(PyObject* obj, bool obj_matches_parent_example = false)
       override { // borrowed ref
     PyObject* x = PyTuple_GetItem(obj, _index); // borrowed ref
     if (x == nullptr) {
@@ -3105,7 +3159,7 @@ class GradGuardAccessor : public GuardAccessor {
 
   // NB: Intentional duplication between check_nopybind and
   // check_verbose_nopybind.
-  bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
+  bool check_nopybind(PyObject* obj, bool obj_matches_parent_example = false)
       override { // borrowed ref
     // check that its a tensor
     if (!THPVariable_CheckExact(obj) && !THPVariable_Check(obj)) {
@@ -3162,7 +3216,7 @@ class FuncDefaultsGuardAccessor : public GuardAccessor {
 
   // NB: Intentional duplication between check_nopybind and
   // check_verbose_nopybind.
-  bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
+  bool check_nopybind(PyObject* obj, bool obj_matches_parent_example = false)
       override { // borrowed ref
     PyObject* func = obj;
     if (PyMethod_Check(obj)) {
@@ -3223,7 +3277,7 @@ class FuncKwDefaultsGuardAccessor : public GuardAccessor {
 
   // NB: Intentional duplication between check_nopybind and
   // check_verbose_nopybind.
-  bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
+  bool check_nopybind(PyObject* obj, bool obj_matches_parent_example = false)
       override { // borrowed ref
     PyObject* func = obj;
     if (PyMethod_Check(obj)) {
@@ -3286,7 +3340,7 @@ class GlobalsGuardAccessor : public GuardAccessor {
 
   // NB: Intentional duplication between check_nopybind and
   // check_verbose_nopybind.
-  bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
+  bool check_nopybind(PyObject* obj, bool obj_matches_parent_example = false)
       override { // borrowed ref
     // Ignore the obj arg. This is required to satisfy the function signature.
     // Just pass on the globals dict to the child manager.
@@ -3331,7 +3385,7 @@ class TypeGuardAccessor : public GuardAccessor {
 
   // NB: Intentional duplication between check_nopybind and
   // check_verbose_nopybind.
-  bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
+  bool check_nopybind(PyObject* obj, bool obj_matches_parent_example = false)
       override { // borrowed ref
     PyObject* x = (PyObject*)Py_TYPE(obj); // borrowed ref
     return _guard_manager->check_nopybind(x);
@@ -3369,7 +3423,7 @@ class TupleIteratorGetItemAccessor : public GuardAccessor {
 
   // NB: Intentional duplication between check_nopybind and
   // check_verbose_nopybind.
-  bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
+  bool check_nopybind(PyObject* obj, bool obj_matches_parent_example = false)
       override { // borrowed ref
     _PyTupleIterObject* it = (_PyTupleIterObject*)obj;
     PyObject* x =
@@ -3429,7 +3483,7 @@ class GlobalWeakRefGuardAccessor : public GuardAccessor {
 
   // NB: Intentional duplication between check_nopybind and
   // check_verbose_nopybind.
-  bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
+  bool check_nopybind(PyObject* obj, bool obj_matches_parent_example = false)
       override { // borrowed ref
     // obj is globals dict because GlobalWeakRefGuardAccessor has to be a
     // child of GlobalsGuardAccessor.
@@ -3521,7 +3575,7 @@ class WeakRefCallGuardAccessor : public GuardAccessor {
 
   // NB: Intentional duplication between check_nopybind and
   // check_verbose_nopybind.
-  bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
+  bool check_nopybind(PyObject* obj, bool obj_matches_parent_example = false)
       override { // borrowed ref
     if (!PyWeakref_Check(obj)) {
       return false;
@@ -3590,7 +3644,7 @@ class CallFunctionNoArgsGuardAccessor : public GuardAccessor {
 
   // NB: Intentional duplication between check_nopybind and
   // check_verbose_nopybind.
-  bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
+  bool check_nopybind(PyObject* obj, bool obj_matches_parent_example = false)
       override { // borrowed ref
     if (!PyCallable_Check(obj)) {
       return false;
@@ -3655,7 +3709,7 @@ class PythonLambdaGuardAccessor : public GuardAccessor {
 
   // NB: Intentional duplication between check_nopybind and
   // check_verbose_nopybind.
-  bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
+  bool check_nopybind(PyObject* obj, bool obj_matches_parent_example = false)
       override { // borrowed ref
     PyObject* x = PyObject_CallOneArg(_accessor_fn.ptr(), obj); // new ref
     if (x == nullptr) {
