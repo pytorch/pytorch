@@ -176,7 +176,7 @@ extern "C" {{export_declaration}}
 {
     {{ kernel.maybe_codegen_profile() }}
     {{ template.codegen_blocks(
-        num_threads, N, K, micro_gemm, is_dynamic_M, kernel, GemmOut, config, L1_cache_size, L2_cache_size
+        num_threads, N, K, micro_gemm, is_dynamic_M, kernel, GemmOut, config, L1_cache_size, L2_cache_size, X, W
     ) }}
 
 {%- if maybe_k_slicing %}
@@ -1158,6 +1158,8 @@ class CppPackedGemmTemplate(CppTemplate):
         config,
         L1_cache_size,
         L2_cache_size,
+        X,
+        W,
     ):
         options = dict(
             num_threads=num_threads,
@@ -1171,6 +1173,8 @@ class CppPackedGemmTemplate(CppTemplate):
             L1_cache_size=L1_cache_size,
             L2_cache_size=L2_cache_size,
             template=self,
+            X=X,
+            W=W,
         )
         return self._template_from_string(GEMM_TEMPLATE_BLOCKS).render(options)
 
