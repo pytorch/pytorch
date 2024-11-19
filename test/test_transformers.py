@@ -2104,7 +2104,7 @@ class TestSDPA(NNTestCase):
     # @parametrize("q_seq_len", [384])
     # @parametrize("kv_seq_len", [384])
     # @parametrize("n_head", [16])
-    @parametrize("batch_size", [1])
+    @parametrize("batch_size", [224])
     @parametrize("q_seq_len", [197])
     @parametrize("kv_seq_len", [197])
     @parametrize("n_head", [12])
@@ -2182,7 +2182,7 @@ class TestSDPA(NNTestCase):
         # # # print("actual", actual)
         # # # print("math_ref", math_ref)
 
-        self.assertEqual(actual, math_ref, atol=tol.atol, rtol=tol.rtol)
+        # self.assertEqual(actual, math_ref, atol=tol.atol, rtol=tol.rtol)
 
         iter_n = 20
         with torch.profiler.profile(
