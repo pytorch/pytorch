@@ -11,15 +11,14 @@ class Benchmark(BenchmarkBase):
         self._training = training
         self._subclass = subclass
         super().__init__(
-            model_type="aotdispatcher",
+            category="aotdispatcher",
             backend="aot_eager_decomp_partition",
             device="cpu",
             mode="training" if self._training else "inference",
-            fullgraph=True,
         )
 
     def name(self):
-        prefix = f"{self.model_type()}_{self.mode()}"
+        prefix = f"{self.category()}_{self.mode()}"
         if self._subclass:
             prefix += "_subclass"
         else:

@@ -24,18 +24,19 @@ class Benchmark(BenchmarkBase):
         self, ModuleClass, backend, is_gpu=False, dynamic=False, force_shape_pad=False
     ):
         self.ModuleClass = ModuleClass
+        self._name = ModuleClass.__name__
         self._is_gpu = is_gpu
         self._force_shape_pad = force_shape_pad
 
         super().__init__(
-            model_type=ModuleClass.__name__,
+            category="basic_modules",
             backend=backend,
             device="cuda" if self._is_gpu else "cpu",
             dynamic=dynamic,
         )
 
     def name(self):
-        prefix = f"basic_modules_{self.model_type()}_{self.backend()}"
+        prefix = f"{self.category()}_{self._name}_{self.backend()}"
         if self.is_dynamic():
             prefix += "_dynamic"
         if self._is_gpu:

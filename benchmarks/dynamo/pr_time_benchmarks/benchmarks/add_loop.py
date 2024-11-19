@@ -9,15 +9,14 @@ from torch._inductor.utils import fresh_inductor_cache
 class Benchmark(BenchmarkBase):
     def __init__(self, backend, dynamic=False, is_gpu=False):
         super().__init__(
-            model_type="add_loop",
+            categor="add_loop",
             backend=backend,
             device="cuda" if is_gpu else "cpu",
             dynamic=dynamic,
-            fullgraph=True,
         )
 
     def name(self):
-        prefix = f"{self.model_type()}_{self.backend()}"
+        prefix = f"{self.category()}_{self.backend()}"
         if self.is_dynamic():
             prefix += "_dynamic"
         if self.device() == "cuda":
@@ -37,7 +36,7 @@ class Benchmark(BenchmarkBase):
     def _work(self):
         @torch.compile(
             backend=self.backend(),
-            fullgraph=self.is_fullgraph(),
+            fullgraph=True,
             dynamic=self.is_dynamic(),
         )
         def f(a, b):

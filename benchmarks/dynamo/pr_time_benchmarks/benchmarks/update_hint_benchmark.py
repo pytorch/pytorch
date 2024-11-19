@@ -10,14 +10,13 @@ class Benchmark(BenchmarkBase):
 
     def __init__(self):
         super().__init__(
-            model_type="update_hint",
+            category="update_hint",
             backend="inductor",
             device="cpu",
-            fullgraph=True,
         )
 
     def name(self):
-        return f"{self.model_type()}_regression"
+        return f"{self.category()}_regression"
 
     def description(self):
         return "information at https://github.com/pytorch/pytorch/pull/129893"

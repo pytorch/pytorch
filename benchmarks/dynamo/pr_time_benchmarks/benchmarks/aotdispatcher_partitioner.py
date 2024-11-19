@@ -8,14 +8,13 @@ import torch
 class Benchmark(BenchmarkBase):
     def __init__(self):
         super().__init__(
-            model_type="aotdispatcher_partitioner",
+            category="aotdispatcher_partitioner",
             backend="aot_eager_decomp_partition",
             device="cpu",
-            fullgraph=True,
         )
 
     def name(self):
-        return f"{self.model_type()}_{self.device()}"
+        return f"{self.category()}_{self.device()}"
 
     def description(self):
         return "partitioner benchmark 1 input and 100 weights, mix of recompute and non-recompute ops"

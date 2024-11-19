@@ -10,14 +10,13 @@ class Benchmark(BenchmarkBase):
 
     def __init__(self):
         super().__init__(
-            model_type="symint_sum",
+            category="symint_sum",
             backend="inductor",
             device="cpu",
-            fullgraph=True,
         )
 
     def name(self):
-        return self.model_type()
+        return self.category()
 
     def description(self):
         return "see https://docs.google.com/document/d/11xJXl1etSmefUxPiVyk885e0Dl-4o7QwxYcPiMIo2iY/edit"

@@ -69,19 +69,19 @@ class BenchmarkBase(ABC):
 
     def __init__(
         self,
-        model_type: str,
+        category: str,
         device: str,
         backend: str = "",
         mode: str = "",
-        dynamic=False,
-        fullgraph=False,
+        dynamic=None,
     ):
-        self._model_type = model_type
+        # These individual attributes are used to support different filters on the
+        # dashboard later
+        self._category = category
         self._device = device
         self._backend = backend
         self._mode = mode  # Training or inference
         self._dynamic = dynamic
-        self._fullgraph = fullgraph
 
     def with_iterations(self, value):
         self._num_iterations = value
@@ -104,17 +104,14 @@ class BenchmarkBase(ABC):
     def mode(self):
         return self._mode
 
-    def model_type(self):
-        return self._model_type
+    def category(self):
+        return self._category
 
     def device(self):
         return self._device
 
     def is_dynamic(self):
         return self._dynamic
-
-    def is_fullgraph(self):
-        return self._fullgraph
 
     def description(self):
         return ""
@@ -219,6 +216,8 @@ class BenchmarkBase(ABC):
             for entry in self.results:
                 writer.writerow(entry)
 
+        # TODO (huydhn) This requires the path to write to, so it needs to be in the same place
+        # as the CSV writer for now
         self._write_to_json(os.path.dirname(os.path.abspath(path)))
 
     def print(self):

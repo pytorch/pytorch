@@ -9,10 +9,10 @@ class Benchmark(BenchmarkBase):
     N = 100
 
     def __init__(self):
-        super().__init__(model_type="sum_floordiv", device="cpu")
+        super().__init__(category="sum_floordiv", bakend="export", device="cpu")
 
     def name(self):
-        return f"{self.model_type()}_regression"
+        return f"{self.category()}_regression"
 
     def description(self):
         return "information at https://github.com/pytorch/pytorch/issues/134133"
