@@ -57,13 +57,13 @@ function install_ubuntu() {
 function install_rhel() {
     . /etc/os-release
     if [[ "${ID}" == "rhel" ]]; then
-        if [[ ! " 8.6 8.8 8.9 9.0 9.2 9.3 " =~ " ${VERSION_ID} " ]]; then
+        if [[ ! " 8.8 8.9 9.0 9.2 9.3 " =~ " ${VERSION_ID} " ]]; then
             echo "RHEL version ${VERSION_ID} not supported"
             exit
         fi
     elif [[ "${ID}" == "almalinux" ]]; then
         # Workaround for almalinux8 which used by quay.io/pypa/manylinux_2_28_x86_64
-        VERSION_ID="8.6"
+        VERSION_ID="8.8"
     fi
 
     dnf install -y 'dnf-command(config-manager)'
@@ -81,6 +81,8 @@ repo_gpgcheck=1
 gpgkey=https://yum.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB
 EOF
 
+    # Install Intel Support Packages
+    yum install -y ${XPU_PACKAGES}
     # The xpu-smi packages
     dnf install -y xpu-smi
     # Compute and Media Runtimes
@@ -95,8 +97,6 @@ EOF
     dnf install -y --refresh \
         intel-igc-opencl-devel level-zero-devel intel-gsc-devel libmetee-devel \
         level-zero-devel
-    # Install Intel Support Packages
-    yum install -y ${XPU_PACKAGES}
 
     # Cleanup
     dnf clean all
