@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import contextlib
 import logging
-from typing import Callable, List, Optional, Set, Union
+from typing import Any, Callable, cast, List, Optional, Set, Union
 from unittest.mock import patch
 
 import torch
@@ -28,92 +28,6 @@ log = logging.getLogger(__name__)
 
 GEMM_TEMPLATE = r"""
 {{template.header().getvalue()}}
-
-template <bool has_gate_bias, bool has_up_bias>
-inline void {{micro_gemm.name}}_silu_mul_epilogue_fusion(
-    float* in_ptr0,
-    float* in_ptr1,
-    const bfloat16* inp0,
-    const bfloat16* inp1,
-    bfloat16* out_ptr,
-    int64_t M,
-    int64_t N,
-    int64_t in_lda,
-    int64_t out_lda) {
-    int64_t n_scalar_start = 0;
-#if defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
-    using Vectorized_fp32 = at::vec::Vectorized<float>;
-    using Vectorized_bf16 = at::vec::Vectorized<bfloat16>;
-    int64_t N1 = N / 32 * 32;
-    int64_t N2 = N / 16 * 16;
-    n_scalar_start = N2;
-#endif
-    for (int64_t m = 0; m < M; m += 1) {
-#if defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
-        for (int64_t n = 0; n < N1; n += 32) {
-            Vectorized_fp32 tmp0 = Vectorized_fp32::loadu(in_ptr0 + (m * in_lda + n));
-            Vectorized_fp32 tmp0_1 = Vectorized_fp32::loadu(in_ptr0 + (m * in_lda + n + 16));
-            Vectorized_fp32 tmp1 = Vectorized_fp32::loadu(in_ptr1 + (m * in_lda + n));
-            Vectorized_fp32 tmp1_1 = Vectorized_fp32::loadu(in_ptr1 + (m * in_lda + n + 16));
-            if constexpr (has_gate_bias) {
-                const auto inp_bf16_vec = Vectorized_bf16::loadu(inp0 + n);
-                at::vec::VectorizedN<float, 2> inp_fp32_vecs = at::vec::convert<float, 2, bfloat16, 1>(inp_bf16_vec);
-                tmp0 = tmp0 + Vectorized_fp32(inp_fp32_vecs[0]);
-                tmp0_1 = tmp0_1 + Vectorized_fp32(inp_fp32_vecs[1]);
-            }
-            if constexpr (has_up_bias) {
-                const auto inp_bf16_vec = Vectorized_bf16::loadu(inp1 + n);
-                at::vec::VectorizedN<float, 2> inp_fp32_vecs = at::vec::convert<float, 2, bfloat16, 1>(inp_bf16_vec);
-                tmp1 = tmp1 + Vectorized_fp32(inp_fp32_vecs[0]);
-                tmp1_1 = tmp1_1 + Vectorized_fp32(inp_fp32_vecs[1]);
-            }
-            tmp0 = tmp0 * (decltype(tmp0)(1)/(decltype(tmp0)(1) + tmp0.neg().exp()));
-            tmp0_1 = tmp0_1 * (decltype(tmp0_1)(1)/(decltype(tmp0_1)(1) + tmp0_1.neg().exp()));
-            tmp0 = tmp0 * tmp1;
-            tmp0_1 = tmp0_1 * tmp1_1;
-            at::vec::VectorizedN<float, 2> out_fp32_vec(tmp0, tmp0_1);
-            Vectorized_bf16 out_bf16_vec = at::vec::convert<bfloat16, 1, float, 2>(out_fp32_vec);
-            out_bf16_vec.store(out_ptr + (m * out_lda + n));
-        }
-        for (int64_t n = N1; n < N2; n += 16) {
-            Vectorized_fp32 tmp0 = Vectorized_fp32::loadu(in_ptr0 + (m * in_lda + n));
-            Vectorized_fp32 tmp1 = Vectorized_fp32::loadu(in_ptr1 + (m * in_lda + n));
-            if constexpr (has_gate_bias) {
-                const auto inp_bf16_vec = Vectorized_bf16::loadu(inp0 + n, 16);
-                Vectorized_fp32 inp_fp32_vec = at::vec::convert<float, 1, bfloat16, 1>(inp_bf16_vec);
-                tmp0 = tmp0 + inp_fp32_vec;
-            }
-            if constexpr (has_up_bias) {
-                const auto inp_bf16_vec = Vectorized_bf16::loadu(inp1 + n, 16);
-                Vectorized_fp32 inp_fp32_vec = at::vec::convert<float, 1, bfloat16, 1>(inp_bf16_vec);
-                tmp1 = tmp1 + inp_fp32_vec;
-            }
-            tmp0 = tmp0 * (decltype(tmp0)(1)/(decltype(tmp0)(1) + tmp0.neg().exp()));
-            tmp0 = tmp0 * tmp1;
-            Vectorized_bf16 out_bf16_vec = at::vec::convert<bfloat16, 1, float, 1>(tmp0);
-            out_bf16_vec.store(out_ptr + (m * out_lda + n), 16);
-        }
-#endif
-        for (int64_t n = n_scalar_start; n < N; n += 1) {
-            float tmp0 = in_ptr0[m * in_lda + n];
-            float tmp1 = in_ptr1[m * in_lda + n];
-            // Bias add
-            if constexpr (has_gate_bias) {
-                tmp0 = tmp0 + (float)inp0[n];
-            }
-            if constexpr (has_up_bias) {
-                tmp1 = tmp1 + (float)inp1[n];
-            }
-            // Silu
-            tmp0 = tmp0 * (1.0 / ( 1.0 + std::exp(-tmp0)));
-            // Mul
-            tmp0 = tmp0 * tmp1;
-            // Store output
-            out_ptr[m * out_lda + n] = (bfloat16)tmp0;
-        }
-    }
-}
-
 {{micro_gemm.codegen_define(kernel)}}
 
 {%- set kernel_args = {"X": X, "W": W, "W1": W1, "inp": inp, "inp1": inp1} %}
@@ -189,9 +103,15 @@ extern "C" {{export_declaration}}
 {%- set tile_inp1 = tile_Y %}
 {%- endif %}
                     // silu-mul epilogues
-                    {{ kernel.silu_mul(
-                        tile_acc, tile_acc1, tile_inp, tile_inp1, tile_Y, has_gate_bias, has_up_bias, micro_gemm.name
-                    ) }}
+                    {{ kernel.store_output(
+                        tile_Y,
+                        (tile_acc, tile_acc1),
+                        (GemmOut, GemmOut1),
+                        epilogue_nodes,
+                        offsets=("m_start", "n_start"),
+                        reindexers=reindexers
+                    )|indent(20, false)
+                    }}
                 }
             }
         }
@@ -459,10 +379,12 @@ class CppPackedMLPTemplate(CppPackedGemmTemplate):
         X, W = self.input_nodes[0], self.input_nodes[1]
         W1 = self.input_nodes[2]
         Y = self.output_node
-        inp = self.input_nodes[3] if self.has_bias[0] else None
+        has_gate_bias = self.has_bias[0]
+        has_up_bias = self.has_bias[1]
+        inp = self.input_nodes[3] if has_gate_bias else None
         inp1 = None
-        if self.has_bias[1]:
-            inp1 = self.input_nodes[4] if self.has_bias[0] else self.input_nodes[3]
+        if has_up_bias:
+            inp1 = self.input_nodes[4] if has_gate_bias else self.input_nodes[3]
 
         if template_buffer_node is not None:
             # Use the updated prepacked weight buffer
@@ -509,6 +431,123 @@ class CppPackedMLPTemplate(CppPackedGemmTemplate):
         L2_cache_size = torch._C._cpu._L2_cache_size()  # per core cache size in Bytes
         assert L2_cache_size > 0, f"Expect L2_cache_size > 0 but got {L2_cache_size}"
 
+        # Hardcode the in-template epilogue
+        # Bias-add for each linear if applicable
+        # Silu and Mul post op
+        epilogues: List[ir.IRNode] = []
+        reindexers: List[Optional[Callable[[List[Any]], List[Any]]]] = []
+
+        def epilogue_creator(buf, buf1):
+            from ..virtualized import ops
+
+            input_loader = buf.make_loader()
+            input_loader1 = buf1.make_loader()
+            if has_gate_bias:
+                assert inp is not None
+                inp_loader = inp.make_loader()
+            if has_up_bias:
+                assert inp1 is not None
+                inp_loader1 = inp1.make_loader()
+            dtype = buf.get_dtype()
+
+            def inner_fn(index):
+                input = input_loader(index)
+                input1 = input_loader1(index)
+                if has_gate_bias:
+                    input = input + inp_loader(index)
+                if has_up_bias:
+                    input1 = input1 + inp_loader1(index)
+                input = ops.mul(ops.sigmoid(input), input)
+                return ops.mul(input, input1)
+
+            return ir.Pointwise(
+                device=buf.get_device(),
+                dtype=dtype,
+                inner_fn=inner_fn,
+                ranges=buf.get_size(),
+            )
+
+        gemm_output_name = f"{template_buffer.get_name()}_GemmOut"
+        gemm_output_buffer = ir.Buffer(
+            name=gemm_output_name, layout=template_buffer.layout
+        )
+        current_input_buffer = gemm_output_buffer
+
+        gemm_output_name1 = f"{template_buffer.get_name()}_GemmOut1"
+        gemm_output_buffer1 = ir.Buffer(
+            name=gemm_output_name1, layout=template_buffer.layout
+        )
+        current_input_buffer1 = gemm_output_buffer1
+
+        buffer_name = template_buffer.get_name()
+        epilogues.append(
+            ir.ComputedBuffer(
+                name=buffer_name,
+                layout=template_buffer.layout,
+                data=epilogue_creator(current_input_buffer, current_input_buffer1),
+            )
+        )
+        reindexers.append(None)
+
+        if epilogue_nodes:
+            epilogues.extend(epilogue_nodes)
+            assert Y.get_numel() == epilogues[-1].get_numel()
+            Y = cast(ir.Buffer, epilogues[-1])
+            if (
+                Y.get_size() == template_buffer.get_size()
+                and Y.get_stride() == template_buffer.get_stride()
+            ):
+                reindexers.extend([None] * len(epilogue_nodes))
+                Y_2d = Y
+            else:
+
+                def get_reindexer(epilogue_node):
+                    # From template_buffer to epilogue_node_ordered (ordered by stride decreasingly, in dense format), for example:
+                    #   template_buffer:
+                    #       size (324, 512), stride (512, 1)
+                    #   epilogue_node_ordered (ordered by stride decreasingly, in dense format):
+                    #       size (1, 18, 18, 512), stride (165888, 9216, 512, 1)
+                    stride_order = list(
+                        ir.get_stride_order(
+                            V.graph.sizevars.size_hints(epilogue_node.get_stride())
+                        )
+                    )
+                    fill_order = ir.stride_order2fill_order(stride_order)
+                    reversed_fill_order = list(reversed(fill_order))
+                    size_with_stride_ordered_decreasingly = [
+                        epilogue_node.get_size()[i] for i in reversed_fill_order
+                    ]
+                    reshape_reindex = ir.View.dynamic_reshape_indexer(
+                        size_with_stride_ordered_decreasingly,
+                        template_buffer.get_size(),
+                    )
+
+                    # From epilogue_node_ordered (ordered by stride decreasingly, in dense format) to epilogue_node, for example:
+                    #   epilogue_node_ordered (ordered by stride decreasingly, in dense format):
+                    #       size (1, 18, 18, 512), stride (165888, 9216, 512, 1)
+                    #   epilogue_node:
+                    #       size (1, 18, 18, 512), stride (165888, 1, 9216, 512)
+                    from_stride_ordered_decreasingly_to_epilogue_node_order = [
+                        (len(stride_order) - 1) - stride_order[i]
+                        for i in range(len(stride_order))
+                    ]
+                    stride_reindex = ir.same_reorder(
+                        from_stride_ordered_decreasingly_to_epilogue_node_order
+                    )
+
+                    reindexer = ir.fuse_reindexing(stride_reindex, reshape_reindex)
+                    return reindexer
+
+                reindexers.extend([get_reindexer(epilogue_node) for epilogue_node in epilogue_nodes])  # type: ignore[list-item]
+                if isinstance(Y, ir.BaseView):
+                    storage = ir.StorageBox(Y.unwrap_view())
+                else:
+                    assert isinstance(Y, ir.Buffer)
+                    storage = ir.StorageBox(Y)
+                Y_2d = ir.ReinterpretView(
+                    data=storage, layout=template_buffer.get_layout()
+                )
+
         options = dict(
             X=X,
             W=W,
@@ -536,8 +575,11 @@ class CppPackedMLPTemplate(CppPackedGemmTemplate):
             config=config,
             W1=W1,
             inp1=inp1,
-            has_gate_bias=self.has_bias[0],
-            has_up_bias=self.has_bias[1],
+            has_gate_bias=has_gate_bias,
+            has_up_bias=has_up_bias,
+            epilogue_nodes=epilogues,
+            GemmOut1=gemm_output_buffer1,
+            reindexers=reindexers,
         )
         with contextlib.ExitStack() as stack:
             for buf in fake_buffers:
