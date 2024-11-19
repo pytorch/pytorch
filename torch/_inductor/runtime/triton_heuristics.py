@@ -921,7 +921,7 @@ class CachingAutotuner(KernelInterface):
                 else launcher.bin.metadata["name"]
             ),
             "grid_x": grid_x,
-            "grid   _y": grid_y,
+            "grid_y": grid_y,
             "grid_z": grid_z,
             "x_block": launcher.config.kwargs.get("XBLOCK", 1),
             "y_block": launcher.config.kwargs.get("YBLOCK", None),
