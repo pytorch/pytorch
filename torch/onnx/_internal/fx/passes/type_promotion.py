@@ -31,6 +31,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# TODO(bowbao): move to type utils.
 _SCALAR_TYPE_TENSOR_DTYPE_MAP: Mapping[type, torch.dtype] = {
     bool: torch.bool,
     int: torch.int64,
