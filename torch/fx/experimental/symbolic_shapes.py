@@ -389,12 +389,6 @@ def is_concrete_float(a: Union[float, SymFloat]) -> bool:
     return False
 
 
-# In obscure Meta only situations, sympy.logic.boolalg doesn't exist at runtime.
-# So make sure only type checker evaluates this alias.
-# Xref: https://www.internalfb.com/diff/D53324783
-SympyBoolean: TypeAlias = "sympy.logic.boolalg.Boolean"
-
-
 def guard_size_oblivious(expr: Union[torch.SymBool, bool]) -> bool:
     """
     Perform a guard on a symbolic boolean expression in a size oblivious way.
