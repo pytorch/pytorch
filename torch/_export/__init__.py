@@ -45,6 +45,7 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 
 from .wrappers import _wrap_submodules
+from .utils import _materialize_cpp_cia_ops
 
 log = logging.getLogger(__name__)
 
@@ -170,13 +171,17 @@ def capture_pre_autograd_graph(
         # op disappears from the graph, which makes it difficult to switch to train mode.
         # See https://github.com/pytorch/pytorch/pull/115258#issuecomment-1900755832.
 
-        maybe_aliasing_or_mutating_ops = []
+        maybe_aliasing_or_mutating_ops = [torch.ops.aten.native_batch_norm.default]
+
+        _materialize_cpp_cia_ops()
+
         for op in torch.ops.aten:
             op_obj = getattr(torch.ops.aten, op)
             for overload in op_obj.overloads():
                 op_overload = getattr(op_obj, overload)
                 if torch.Tag.maybe_aliasing_or_mutating in op_overload.tags:
                     maybe_aliasing_or_mutating_ops.append(op_overload)
+
         decomp_table = {
             op: op.decompose
             for op in maybe_aliasing_or_mutating_ops
