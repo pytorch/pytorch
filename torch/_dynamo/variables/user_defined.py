@@ -435,6 +435,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
             from torch.overrides import TorchFunctionMode
 
             from .ctx_manager import GenericContextWrappingVariable
+            from .functions import (
+                BaseUserFunctionVariable,
+                FunctionDecoratedByContextlibContextManagerVariable,
+            )
             from .torch_function import TorchFunctionModeVariable
 
             if issubclass(
@@ -445,6 +449,31 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 var_cls = TorchFunctionModeVariable
             else:
                 var_cls = GenericContextWrappingVariable
+
+            # graph break on any contextlib.* that it is not contextlib.contextmanager
+            if self.value in (
+                contextlib._AsyncGeneratorContextManager,
+                contextlib.closing,
+                contextlib.redirect_stdout,
+                contextlib.redirect_stderr,
+                contextlib.suppress,
+                contextlib.ExitStack,
+                contextlib.AsyncExitStack,
+            ):
+                unimplemented(f"{self.value} not supported")
+
+            if self.value is contextlib._GeneratorContextManager and isinstance(
+                args[0], BaseUserFunctionVariable
+            ):
+                if not torch._dynamo.config.enable_trace_contextlib_contextmanager:
+                    unimplemented("contextlib.contextmanager")
+                # Replace UserFunctionVariable by GeneratorFunction if the function
+                # was annotated with @contextlib.contextmanager
+                # This shouldn't be necessary once generator functions are fully
+                # supported in dynamo
+                args[0] = FunctionDecoratedByContextlibContextManagerVariable(
+                    args[0], source=self.source
+                )
 
             cm_obj = tx.output.side_effects.track_object_new(
                 self.source, self.value, var_cls, {}
