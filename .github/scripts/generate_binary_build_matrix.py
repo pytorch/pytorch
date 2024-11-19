@@ -172,13 +172,6 @@ WHEEL_CONTAINER_IMAGES = {
     "cuda-aarch64": f"pytorch/manylinuxaarch64-builder:cuda12.4-{DEFAULT_TAG}",
 }
 
-CONDA_CONTAINER_IMAGES = {
-    **{
-        gpu_arch: f"pytorch/conda-builder:cuda{gpu_arch}-{DEFAULT_TAG}"
-        for gpu_arch in CUDA_ARCHES
-    },
-    "cpu": f"pytorch/conda-builder:cpu-{DEFAULT_TAG}",
-}
 
 PRE_CXX11_ABI = "pre-cxx11"
 CXX11_ABI = "cxx11-abi"
@@ -236,40 +229,6 @@ def translate_desired_cuda(gpu_arch_type: str, gpu_arch_version: str) -> str:
 
 def list_without(in_list: List[str], without: List[str]) -> List[str]:
     return [item for item in in_list if item not in without]
-
-
-def generate_conda_matrix(os: str) -> List[Dict[str, str]]:
-    ret: List[Dict[str, str]] = []
-    arches = ["cpu"]
-    python_versions = FULL_PYTHON_VERSIONS
-    if os == "linux" or os == "windows":
-        arches += CUDA_ARCHES
-        # skip CUDA 12.6 builds on Windows
-        if os == "windows" and "12.6" in arches:
-            arches.remove("12.6")
-    for python_version in python_versions:
-        # We don't currently build conda packages for rocm
-        for arch_version in arches:
-            if arch_version == "12.6":
-                continue
-            gpu_arch_type = arch_type(arch_version)
-            gpu_arch_version = "" if arch_version == "cpu" else arch_version
-            ret.append(
-                {
-                    "python_version": python_version,
-                    "gpu_arch_type": gpu_arch_type,
-                    "gpu_arch_version": gpu_arch_version,
-                    "desired_cuda": translate_desired_cuda(
-                        gpu_arch_type, gpu_arch_version
-                    ),
-                    "container_image": CONDA_CONTAINER_IMAGES[arch_version],
-                    "package_type": "conda",
-                    "build_name": f"conda-py{python_version}-{gpu_arch_type}{gpu_arch_version}".replace(
-                        ".", "_"
-                    ),
-                }
-            )
-    return ret
 
 
 def generate_libtorch_matrix(
