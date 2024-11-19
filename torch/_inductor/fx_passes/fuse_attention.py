@@ -577,7 +577,13 @@ def _sfdp_params_check(match):
                 or attn_mask.dtype == torch.float
             )
             or query.device != attn_mask.device
-            or query.shape != attn_mask.shape
+            # When we tensorify floats we end up turning floats
+            # into 0d scalar tensors. It doesn't make any sense
+            # to ahve a 0d scalar tensor attention mask so
+            # coveniently we can insert this check to get
+            # tests that erroneously passing in a float
+            # attention mask to fail as expected.
+            or attn_mask.dim() == 0
         ):
             return False
     return True
