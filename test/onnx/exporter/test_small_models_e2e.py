@@ -121,7 +121,10 @@ class DynamoExporterTest(common_utils.TestCase):
             dynamo=True,
             fallback=False,
         )
+        print(onnx_program.model)
         onnx_testing.assert_onnx_program(onnx_program)
+
+    # TODO(justinchuby): Test multi-output HOPs
 
 
 if __name__ == "__main__":
