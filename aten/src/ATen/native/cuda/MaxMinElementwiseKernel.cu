@@ -90,9 +90,9 @@ void fmin_kernel_cuda(TensorIteratorBase& iter) {
   }
 }
 
-REGISTER_DISPATCH(maximum_stub, &maximum_kernel_cuda);
-REGISTER_DISPATCH(minimum_stub, &minimum_kernel_cuda);
-REGISTER_DISPATCH(fmax_stub, &fmax_kernel_cuda);
-REGISTER_DISPATCH(fmin_stub, &fmin_kernel_cuda);
+REGISTER_DISPATCH(maximum_stub, &maximum_kernel_cuda)
+REGISTER_DISPATCH(minimum_stub, &minimum_kernel_cuda)
+REGISTER_DISPATCH(fmax_stub, &fmax_kernel_cuda)
+REGISTER_DISPATCH(fmin_stub, &fmin_kernel_cuda)
 
 } // namespace at::native

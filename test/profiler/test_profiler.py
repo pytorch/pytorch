@@ -1687,7 +1687,7 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
                 ]
                 for e in op_events:
                     if e["name"] == "add_test_kwinputs":
-                        print(e["args"])
+                        # print(e["args"])
                         args = e["args"]
                         self.assertTrue("stream" in args)
                         self.assertTrue("grid" in args)
@@ -1715,7 +1715,7 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
                 ]
                 for e in op_events:
                     if e["name"] == "add_test_kwinputs":
-                        print(e["args"])
+                        # print(e["args"])
                         args = e["args"]
                         self.assertTrue("stream" not in args)
                         self.assertTrue("grid" not in args)

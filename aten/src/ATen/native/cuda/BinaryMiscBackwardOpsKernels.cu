@@ -124,8 +124,8 @@ void tanh_backward_kernel_cuda(TensorIteratorBase& iter) {
   }
 }
 
-REGISTER_DISPATCH(sigmoid_backward_stub, &sigmoid_backward_kernel_cuda);
-REGISTER_DISPATCH(logit_backward_stub, &logit_backward_kernel_cuda);
-REGISTER_DISPATCH(tanh_backward_stub, &tanh_backward_kernel_cuda);
+REGISTER_DISPATCH(sigmoid_backward_stub, &sigmoid_backward_kernel_cuda)
+REGISTER_DISPATCH(logit_backward_stub, &logit_backward_kernel_cuda)
+REGISTER_DISPATCH(tanh_backward_stub, &tanh_backward_kernel_cuda)
 
 } // namespace at::native

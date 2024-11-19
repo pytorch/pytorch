@@ -149,7 +149,7 @@ _set_stance._dynamo_forbidden = True  # type: ignore[attr-defined]
 def _callback_from_stance(callback):
     if _stance.stance == "default":
         # force_backend
-        if _stance.backend is not None:
+        if _stance.backend is not None and callback not in (False, None):
             hooks = Hooks()
             callback = convert_frame.catch_errors_wrapper(
                 convert_frame.convert_frame(  # type: ignore[arg-type]
@@ -167,6 +167,8 @@ def _callback_from_stance(callback):
         # run mode
         return False
     elif _stance.stance == "fail_on_recompile":
+        if callback in (False, None):
+            return callback
 
         def fail_callback(*args, **kwargs):
             raise RuntimeError(
@@ -1071,6 +1073,8 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
             result_gm.meta["dynamo_flat_name_to_original_fqn"] = self.module.meta[
                 "dynamo_flat_name_to_original_fqn"
             ]
+        if "dynamo_compile_id" in self.module.meta:
+            result_gm.meta["dynamo_compile_id"] = self.module.meta["dynamo_compile_id"]
         return result_gm
 
 
@@ -1332,6 +1336,7 @@ def export(
     ] = None,
     tracing_mode: str = "symbolic",
     dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]] = None,
+    specialize_float: bool = True,
     assume_static_by_default: bool = False,
     same_signature: bool = True,
     disable_constraint_solver: bool = False,
@@ -1398,12 +1403,14 @@ def export(
 
     # Deal with "local variable referenced before assignment"
     _f = f
+    _specialize_float = specialize_float
     _assume_static_by_default = assume_static_by_default
 
     def inner(*args, **kwargs):
         combined_args = _combine_args(_f, args, kwargs)
         constraints = _process_dynamic_shapes(combined_args, dynamic_shapes)
         f = _f
+        specialize_float = _specialize_float
         assume_static_by_default = _assume_static_by_default
         check_if_dynamo_supported()
         torch._C._log_api_usage_once("torch._dynamo.export")
@@ -1510,6 +1517,7 @@ def export(
             assume_static_by_default = True
         with config.patch(
             specialize_int=True,
+            specialize_float=specialize_float,
             assume_static_by_default=assume_static_by_default,
             automatic_dynamic_shapes=False,
             capture_dynamic_output_shape_ops=True,

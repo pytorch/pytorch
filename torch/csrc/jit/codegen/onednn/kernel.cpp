@@ -126,7 +126,7 @@ std::tuple<RunArgs, RunArgs> LlgaKernel::prepareRunArgs(
   auto numInputs = runArgsIdx_.size();
   for (const auto i : c10::irange(numInputs)) {
     auto spec = inputSpecs_[i];
-    auto input = inputs[runArgsIdx_[i]];
+    const auto& input = inputs[runArgsIdx_[i]];
     runInputs.push_back(
         {spec.logical_tensor(), Engine::getEngine(), input.data_ptr()});
   }

@@ -19,7 +19,10 @@ namespace at::jit {
 struct TemplateEnv {
   TemplateEnv() = default;
   TemplateEnv(TemplateEnv& parent) : parent(&parent) {}
+  TemplateEnv(TemplateEnv&&) = delete;
   TemplateEnv& operator=(const TemplateEnv& parent) = delete;
+  TemplateEnv& operator=(TemplateEnv&& parent) = delete;
+  ~TemplateEnv() = default;
 
   using string_list = std::vector<std::string>;
 

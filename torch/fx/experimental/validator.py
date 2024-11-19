@@ -191,6 +191,9 @@ try:
                 self.floor(number) < number, self.floor(number + 1), number
             )  # type: ignore[return-value]
 
+        def trunc(self, number: z3.ArithRef) -> z3.ArithRef:
+            return z3.If(number >= 0, self.floor(number), self.ceil(number))  # type: ignore[return-value]
+
         def max(self, a: z3.ArithRef, b: z3.ArithRef) -> z3.ArithRef:
             return z3.If(a > b, a, b)  # type: ignore[return-value]
 
@@ -291,6 +294,7 @@ try:
             # Math module.
             math.ceil: lift(ops.ceil),
             math.floor: lift(ops.floor),
+            math.trunc: lift(ops.trunc),
             # Torch module.
             torch.sym_float: lift(ops.to_real),
             torch.sym_max: lift(ops.max),
@@ -726,6 +730,8 @@ def bisect(shape_env):
             return fake
         if isinstance(fake, torch.SymInt):
             return torch.SymInt(fake.node.with_shape_env(shape_env))
+        if isinstance(fake, torch.SymFloat):
+            return torch.SymFloat(fake.node.with_shape_env(shape_env))
         assert isinstance(fake, FakeTensorMeta)
         return FakeTensorMeta(
             tuple(new_with_shape_env(shape_env, s) for s in fake.size()),

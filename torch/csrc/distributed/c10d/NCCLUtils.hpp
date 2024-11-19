@@ -370,7 +370,7 @@ class NCCLComm {
   NCCLComm& operator=(NCCLComm&& other) = delete;
 
   // Move constructable
-  // NOLINTNEXTLINE(.*-noexcept-move-.*)
+  // NOLINTNEXTLINE(*-noexcept-move-*)
   NCCLComm(NCCLComm&& other) {
     // Using other's lock, as it reads other's states
     // Can not use this.mutex_, as this object is being constructed.
@@ -389,8 +389,7 @@ class NCCLComm {
     return commFailureReason_;
   }
 
-  void ncclCommAbort(
-      std::optional<std::string> commFailureReason = std::nullopt) {
+  void abort(std::optional<std::string> commFailureReason = std::nullopt) {
     LockType lock(mutex_);
 #ifdef ENABLE_NCCL_ERROR_CHECKING
     if (aborted_ && !initialized_) {
@@ -663,6 +662,9 @@ struct NCCLTraceBuffer {
     c10::SmallVector<int64_t, 8> sizes_; // flattened from inputs, outputs
     bool retired_ = false; // is this work entry no longer in the workMetaList_?
                            // a retired but not completed event has timed out
+
+    // Returns the traceback of current entry, in string form.
+    std::string getTraceback();
   };
 
   bool enabled_ = false;
@@ -698,6 +700,10 @@ struct NCCLTraceBuffer {
   void update_state(Entry& r);
 
   std::vector<Entry> dump_entries();
+
+  // Returns the entry with the given id, if it exists. Otherwise, returns
+  // std::nullopt.
+  std::optional<Entry> getEntry(std::optional<size_t> id);
 
   /*
   Mark an Event as completed and free its events.

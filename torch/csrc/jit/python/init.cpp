@@ -1514,7 +1514,7 @@ void initJITBindings(PyObject* module) {
       // Jump to the end of the buffer to get its size
       auto current = buffer.attr("tell")();
       start_offset_ = py::cast<size_t>(current);
-      buffer.attr("seek")(current, py::module::import("os").attr("SEEK_END"));
+      buffer.attr("seek")(0, py::module::import("os").attr("SEEK_END"));
       size_ = py::cast<size_t>(buffer.attr("tell")()) - start_offset_;
       buffer.attr("seek")(current);
       // If we can read directly into a buffer, do that instead of an extra copy
@@ -1732,7 +1732,7 @@ void initJITBindings(PyObject* module) {
           bool allow_numbers_as_tensors = opAllowsNumbersAsTensors(symbol);
           ToIValueAllowNumbersAsTensors g(allow_numbers_as_tensors);
           const auto overloads = getAllSortedOperatorsFor(symbol);
-          auto opWithStack = getOpWithStack(overloads, std::move(args), kwargs);
+          auto opWithStack = getOpWithStack(overloads, args, kwargs);
           std::shared_ptr<Operator> overload = std::get<0>(opWithStack);
           auto result = overload->schema().overload_name();
           if (result.empty()) {
@@ -1997,6 +1997,14 @@ void initJITBindings(PyObject* module) {
           })
       .def_property_readonly(
           "alias_info", [](Argument& self) { return self.alias_info(); })
+      .def_property_readonly(
+          "is_write",
+          [](Argument& self) {
+            if (self.alias_info() == nullptr) {
+              return false;
+            }
+            return self.alias_info()->isWrite();
+          })
       .def_property_readonly(
           "is_out", [](Argument& self) { return self.is_out(); })
       .def_property_readonly("kwarg_only", [](Argument& self) -> bool {
