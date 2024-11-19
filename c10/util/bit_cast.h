@@ -38,5 +38,6 @@ bit_cast(const From& src) noexcept {
   return dst;
 }
 #endif // C10_HAVE_STD_BIT_CAST
+#undef C10_HAVE_STD_BIT_CAST
 
 } // namespace c10
