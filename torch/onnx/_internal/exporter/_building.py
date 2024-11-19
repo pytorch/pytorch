@@ -650,7 +650,7 @@ class OpRecorder(evaluator.Evaluator):
                     function,
                     function.function_ir.domain,
                     function.name,
-                    version=function.opset.version,
+                    opset_version=function.opset.version,
                 )
 
             named_inputs, named_attrs = _construct_named_inputs_and_attrs(
