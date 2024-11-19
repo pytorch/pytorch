@@ -82,7 +82,7 @@ class TestMetricsContext(TestCase):
             context.set_key_value("feature_usage", "k2", True)
             context.set_key_value("feature_usage", "k2", False)
 
-        self.assertEqual(self.metrics, {"feature_usage": {"k":True, "k2":False}})
+        self.assertEqual(self.metrics, {"feature_usage": {"k": True, "k2": False}})
 
 
 if __name__ == "__main__":

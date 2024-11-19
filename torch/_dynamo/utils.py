@@ -3561,6 +3561,7 @@ class CompileTimeInstructionCounter:
             if config.record_compile_time_instruction_count:
                 cls.end()
 
+
 def set_feature_use(feature: str, usage: bool):
     """
     Records whether we are using a feature
