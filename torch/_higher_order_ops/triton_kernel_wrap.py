@@ -1077,14 +1077,6 @@ class TritonHOPifier:
                         and defaults["prune_configs_by"].default
                         != kernel.early_config_prune
                     )
-                    # Set via reset_to_zero argument
-                    # https://github.com/triton-lang/triton/pull/5083
-                    # changes kernel.reset_idx to kernel.reset_to_zero
-                    or (hasattr(kernel, "reset_idx") and len(kernel.reset_idx) != 0)
-                    or (
-                        hasattr(kernel, "reset_to_zero")
-                        and len(kernel.reset_to_zero) != 0
-                    )
                     or (
                         "use_cuda_graph" in defaults
                         and defaults["use_cuda_graph"].default != kernel.use_cuda_graph
