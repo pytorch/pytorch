@@ -554,9 +554,7 @@ def _handle_call_function_node_with_lowering(
             proto = onnxscript_function.to_function_proto()
             ir_function = ir.serde.deserialize_function(proto)
         model.functions[identifier] = ir_function
-        if ir_function.domain not in model.opset_imports:
-            # FIXME(justinchuby): Record the correct opset version of the function
-            graph.opset_imports[ir_function.domain] = 1
+        # Opset imports are added to the model in the final add_opset_imports pass
 
 
 def _handle_placeholder_node(
@@ -681,7 +679,7 @@ def _translate_fx_graph(
     node_name_to_local_functions: dict[str, ir.Function] = {}
     constant_farm: dict[Any, ir.Value] = {}
     opset = _get_onnxscript_opset(registry.opset_version)
-    graph.opset_imports[""] = registry.opset_version
+    # Opset imports are added to the model in the final add_opset_imports pass
 
     for node in fx_graph.nodes:
         logger.debug(
@@ -941,7 +939,7 @@ def _exported_program_to_onnx_program(
             [],
             [],
             nodes=[],
-            # opset_imports set in _translate_fx_graph
+            # Opset imports are added to the model in the final add_opset_imports pass
             name="main_graph",
             metadata_props={
                 "pkg.torch.export.ExportedProgram.graph_signature": str(
@@ -957,10 +955,7 @@ def _exported_program_to_onnx_program(
         producer_version=torch.__version__,
     )
 
-    if lower == "none":
-        # Add the opset import for the torch ops
-        model.opset_imports["pkg.torch.ops"] = _torch_version_integer()
-    # NOTE: Function domains are added when translating nodes when lower="at_conversion"
+    # Opset imports are added to the model in the final add_opset_imports pass
 
     # A dictionary storing the translated subgraphs as ONNX functions made available to outer graphs
     # {<subgraph_scope>: {<subgraph_name>: <IR function>}}
@@ -1136,8 +1131,8 @@ def _exported_program_to_onnx_program(
 
     # TODO: Decide if we should keep mutated buffers as inputs/outputs
 
-    # TODO(justinchuby): Remove the hack
-    _ir_passes.add_torchlib_common_imports(model)
+    # Collect and add opset imports to the model
+    _ir_passes.add_opset_imports(model)
 
     return _onnx_program.ONNXProgram(model, exported_program)
 
@@ -1363,9 +1358,6 @@ def export(
             _ir_passes.rename_inputs(onnx_program.model, input_names)
         if output_names:
             _ir_passes.rename_outputs(onnx_program.model, output_names)
-
-        # TODO(justinchuby): Remove the hack
-        _ir_passes.add_torchlib_common_imports(onnx_program.model)
 
         export_status.onnx_translation = True
         verbose_print("Translate the graph into ONNX... ✅")
