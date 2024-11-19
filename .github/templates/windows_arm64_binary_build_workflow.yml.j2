@@ -54,8 +54,6 @@ env:
   MSVC_VERSION : '14.36'
   PYTORCH_SOURCES_DIR: src
 
-# dummy comment
-
 jobs:
   get-label-type:
     if: github.repository_owner == 'pytorch'
@@ -78,6 +76,7 @@ jobs:
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: !{{ config.pytorch_extra_install_requirements }}
     {%- endif %}
     steps:
+      !{{ set_runner_specific_vars() }}
       - name: Git checkout workflow
         uses: actions/checkout@v4
         with:
@@ -128,6 +127,13 @@ jobs:
         env:
           BUILD_TYPE: Release
         run: |
-          "builder/windows/arm64/build_pytorch.bat"
+          "builder/windows/arm64/build_pytorch.bat"   
       {%- endif %}
+      - uses: !{{ common.upload_artifact_action }}
+        if: always()
+        with:
+          name: !{{ config["build_name"] }}
+          retention-days: 14
+          if-no-files-found: error
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"   
 {%- endfor %}
