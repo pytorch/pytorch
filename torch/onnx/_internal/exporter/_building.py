@@ -503,7 +503,9 @@ class OpRecorder(evaluator.Evaluator):
     ):
         self.nodes: list[ir.Node] = []
         self.opset = opset
-        self.functions: dict[ir.OperatorIdentifier, onnxscript.OnnxFunction] = {}
+        self.functions: dict[
+            ir.OperatorIdentifier, onnxscript.OnnxFunction | ir.Function
+        ] = {}
         self.constant_farm = constant_farm
 
     def _call_op(
