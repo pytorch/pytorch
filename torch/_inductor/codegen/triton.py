@@ -1218,9 +1218,6 @@ class TritonKernelOverrides(TritonOverrides):
 
         value = None if need_where else other
 
-        tmp = V.kernel
-        tmp_cse = tmp.cse
-
         with V.kernel.mask_loads(mask, value=value) as new_mask:
             result = body()
 
@@ -1366,7 +1363,7 @@ class CooperativeReductionWorkspaceCache:
 
 class TritonCSE(CSE):
     """
-    Subclasses CSE to applies the current mask to the  cache key to avoid CSEing
+    Subclasses CSE to apply the current load mask to the cache key to avoid CSEing
     variables across separate masked blocks.
     """
 
