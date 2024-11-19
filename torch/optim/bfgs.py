@@ -337,6 +337,8 @@ def _strong_wolfe(
 
 class BFGS(Optimizer):
     """Implements BFGS algorithm.
+
+    Heavily inspired from the pytorch implementation of L-BFGS.
     
     Note: This version stores the full inverse Hessian approximation,
     unlike L-BFGS which uses limited memory.
