@@ -17,12 +17,10 @@
 #include <exception>
 #include <memory>
 #include <thread>
-#include <type_traits>
 #include <utility>
 #include <vector>
 
-namespace torch {
-namespace data {
+namespace torch::data {
 template <typename Dataset, typename Batch, typename BatchRequest>
 class DataLoaderBase {
  public:
@@ -35,7 +33,7 @@ class DataLoaderBase {
   DataLoaderBase(
       DataLoaderOptions options,
       std::unique_ptr<Dataset> main_thread_dataset = nullptr)
-      : options_(std::move(options)),
+      : options_(options),
         main_thread_dataset_(std::move(main_thread_dataset)),
         sequencer_(new_sequencer()) {}
 
@@ -82,8 +80,7 @@ class DataLoaderBase {
     // Send one 'quit' message per worker. Since a worker dies (exits its
     // thread) after receiving this message, each `QuitWorker()` message will be
     // read by exactly one worker.
-    for (const auto w : c10::irange(options_.workers)) {
-      (void)w; // Suppress unused variable warning
+    for ([[maybe_unused]] const auto w : c10::irange(options_.workers)) {
       push_job(QuitWorker());
     }
     for (auto& worker : workers_) {
@@ -121,7 +118,7 @@ class DataLoaderBase {
   /// The finished result of a job.
   struct Result : Sequenced {
     Result() = default;
-    Result(optional<Batch>&& b, size_t sqn)
+    Result(std::optional<Batch>&& b, size_t sqn)
         : Sequenced(sqn), batch(std::move(b)) {}
     Result(std::exception_ptr exception, size_t sqn)
         : Sequenced(sqn), exception(std::move(exception)) {}
@@ -146,8 +143,7 @@ class DataLoaderBase {
   /// Schedules `requested_jobs` many new batches to be fetched. The actual
   /// number of jobs scheduled may be less if the DataLoader exhausts.
   void prefetch(size_t requested_jobs) {
-    for (const auto r : c10::irange(requested_jobs)) {
-      (void)r; // Suppress unused variable
+    for ([[maybe_unused]] const auto r : c10::irange(requested_jobs)) {
       if (auto batch_request = get_batch_request()) {
         this->push_job(std::move(*batch_request));
       } else {
@@ -166,7 +162,7 @@ class DataLoaderBase {
   /// is still expected.
   std::optional<BatchType> next() {
     if (options_.workers > 0) {
-      while (optional<Result> result = this->pop_result()) {
+      while (std::optional<Result> result = this->pop_result()) {
         if (result->exception) {
           throw WorkerException(result->exception);
         } else if (result->batch) {
@@ -177,7 +173,7 @@ class DataLoaderBase {
     } else if (auto batch_request = get_batch_request()) {
       return this->main_thread_dataset_->get_batch(std::move(*batch_request));
     }
-    return nullopt;
+    return std::nullopt;
   }
 
   /// The function that worker threads run.
@@ -220,7 +216,7 @@ class DataLoaderBase {
   }
 
   /// The options the DataLoader was configured with.
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const FullDataLoaderOptions options_;
 
   /// The dataset for the main thread, only has a value if the number of
@@ -251,5 +247,4 @@ class DataLoaderBase {
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   bool joined_ = false;
 };
-} // namespace data
-} // namespace torch
+} // namespace torch::data

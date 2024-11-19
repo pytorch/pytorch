@@ -74,10 +74,6 @@
     ignore = dirty
     path = third_party/fbgemm
     url = https://github.com/pytorch/fbgemm
-[submodule "third_party/foxi"]
-    ignore = dirty
-    path = third_party/foxi
-    url = https://github.com/houseroad/foxi.git
 [submodule "android/libs/fbjni"]
     ignore = dirty
     path = android/libs/fbjni
@@ -128,3 +124,13 @@
 	path = third_party/cpp-httplib
 	url = https://github.com/yhirose/cpp-httplib.git
 	branch = v0.15.3
+[submodule "third_party/NVTX"]
+	path = third_party/NVTX
+	url = https://github.com/NVIDIA/NVTX.git
+[submodule "third_party/composable_kernel"]
+	path = third_party/composable_kernel
+	url = https://github.com/ROCm/composable_kernel.git
+	branch = develop
+[submodule "third_party/x86-simd-sort"]
+	path = third_party/x86-simd-sort
+	url = https://github.com/intel/x86-simd-sort.git

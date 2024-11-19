@@ -629,7 +629,7 @@ MatchTypeReturn matchTypeVariables(
     }
   }
 
-  AT_ERROR("Unhandled free variable container: ", formal->repr_str());
+  TORCH_CHECK(false, "Unhandled free variable container: ", formal->repr_str());
 }
 
 // change return types like List[List[t]] into List[List[int]]
@@ -1036,8 +1036,6 @@ InterfaceType::InterfaceType(QualifiedName name, bool is_module)
     : NamedType(InterfaceType::Kind, std::move(name)),
       methods_(std::make_shared<std::vector<FunctionSchema>>()),
       is_module_(is_module) {}
-
-InterfaceType::~InterfaceType() = default;
 
 bool containsAnyType(const TypePtr& type) {
   std::vector<TypePtr> to_scan = { type };

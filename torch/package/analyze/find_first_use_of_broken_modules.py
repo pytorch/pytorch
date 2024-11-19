@@ -1,6 +1,7 @@
 from typing import Dict, List
 
-from ..package_exporter import PackagingError
+from torch.package.package_exporter import PackagingError
+
 
 __all__ = ["find_first_use_of_broken_modules"]
 

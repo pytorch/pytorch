@@ -14,8 +14,7 @@
 
 #include <c10/util/irange.h>
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 // NB: This code duplicates existing logic at torch/autograd/__init__.py and
 // torch._C._EngineBase.run_backward in torch/csrc/autograd/python_engine.cpp
@@ -215,5 +214,4 @@ void exit_dual_level(uint64_t level) {
 
 } // namespace forward_ad
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

@@ -2,8 +2,7 @@
 # mypy: allow-untyped-defs
 import math
 from functools import wraps
-from typing import Callable, Optional, TypeVar, Union
-from typing_extensions import Concatenate, ParamSpec
+from typing import Callable, Optional, Union
 
 import torch
 import torch._prims as prims
@@ -23,6 +22,7 @@ from torch._prims_common.wrappers import (
     out_wrapper,
 )
 from torch._refs import _make_inplace
+
 
 __all__ = [
     "alpha_dropout",
@@ -66,9 +66,6 @@ __all__ = [
     "threshold_",
     "triplet_margin_loss",
 ]
-
-_T = TypeVar("_T")
-_P = ParamSpec("_P")
 
 Tensor = torch.Tensor
 aten = torch._ops.ops.aten
@@ -132,27 +129,22 @@ def alpha_dropout(
     return self * dropout_mask + b
 
 
-def _inplace_wrapper(fn: Callable[_P, _T]) -> Callable[_P, _T]:
+def _inplace_wrapper(fn):
     """
     Given a nn.functional non-linearity, implements its `inplace: bool` argument
     """
 
     # nb. We use the name of the first argument used in the unary references
     @wraps(fn)
-    def _fn(*args: _P.args, **kwargs: _P.kwargs) -> _T:
-        a = args[0]
-        if "inplace" not in kwargs:
-            kwargs["inplace"] = False
-        if kwargs["inplace"]:
+    def _fn(a, *args, inplace=False, **kwargs):
+        if inplace:
             torch._check(
                 "out" not in kwargs,
                 lambda: "Cannot set inplace=True and pass out= at the same time",
             )
-            kwargs["inplace"] = False
-            kwargs["out"] = a
-            return fn(*args, **kwargs)
+            return fn(a, *args, inplace=False, out=a, **kwargs)
         else:
-            return fn(*args, **kwargs)
+            return fn(a, *args, inplace=False, **kwargs)
 
     return _fn
 

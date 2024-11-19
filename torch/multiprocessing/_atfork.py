@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import sys
 
+
 __all__ = ["register_after_fork"]
 
 if sys.platform == "win32":

@@ -9,7 +9,6 @@ import torch
 import torch._C
 from torch.jit.mobile import _load_for_lite_interpreter
 from torch.testing import FileCheck
-
 from torch.testing._internal.common_utils import (
     find_library_location,
     IS_FBCODE,
@@ -20,6 +19,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.jit_utils import JitTestCase
+
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -114,19 +114,16 @@ class JitBackendTestCase(JitTestCase):
         """
         Stub for correctness tests.
         """
-        pass
 
     def test_save_load(self):
         """
         Stub for serialization tests.
         """
-        pass
 
     def test_errors(self):
         """
         Stub for testing error checking.
         """
-        pass
 
 
 class BasicModuleTest(JitBackendTestCase):
@@ -559,13 +556,11 @@ class JitBackendTestCaseWithCompiler(JitTestCase):
         """
         Stub for correctness tests.
         """
-        pass
 
     def test_errors(self):
         """
         Stub for testing error checking.
         """
-        pass
 
 
 class BasicModuleTestWithCompiler(JitBackendTestCaseWithCompiler):
@@ -751,7 +746,7 @@ class CompModuleTestSameNameWithCompiler(JitBackendTestCase):
         A module with two lowered submodules.
         """
 
-        def __init__(self):
+        def __init__(self) -> None:
             super().__init__()
             compile_spec = {
                 "forward": {

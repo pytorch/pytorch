@@ -1,10 +1,10 @@
 # mypy: allow-untyped-defs
 import contextlib
-
 from typing import Union
 from typing_extensions import deprecated
 
 import torch
+
 
 __all__ = [
     "is_built",
@@ -25,6 +25,9 @@ __all__ = [
     "mem_efficient_sdp_enabled",
     "math_sdp_enabled",
     "enable_math_sdp",
+    "allow_fp16_bf16_reduction_math_sdp",
+    "fp16_bf16_reduction_math_sdp_allowed",
+    "is_flash_attention_available",
     "can_use_flash_attention",
     "can_use_efficient_attention",
     "can_use_cudnn_attention",
@@ -213,6 +216,7 @@ _BlasBackends = {
     "cublas": torch._C._BlasBackend.Cublas,
     "cublaslt": torch._C._BlasBackend.Cublaslt,
     "hipblaslt": torch._C._BlasBackend.Cublaslt,  # alias
+    "ck": torch._C._BlasBackend.Ck,
 }
 _BlasBackends_str = ", ".join(_BlasBackends.keys())
 
@@ -221,16 +225,17 @@ def preferred_blas_library(
     backend: Union[None, str, torch._C._BlasBackend] = None
 ) -> torch._C._BlasBackend:
     r"""
-    Override the library PyTorch uses for BLAS operations. Choose between cuBLAS and cuBLASLt.
+    Override the library PyTorch uses for BLAS operations. Choose between cuBLAS, cuBLASLt, and CK [ROCm-only].
 
     .. warning:: This flag is experimental and subject to change.
 
     When PyTorch runs a CUDA BLAS operation it defaults to cuBLAS even if both cuBLAS and cuBLASLt are available.
-    For PyTorch built for ROCm, hipBLAS and hipBLASLt may offer different performance.
+    For PyTorch built for ROCm, hipBLAS, hipBLASLt, and CK may offer different performance.
     This flag (a :class:`str`) allows overriding which BLAS library to use.
 
     * If `"cublas"` is set then cuBLAS will be used wherever possible.
     * If `"cublaslt"` is set then cuBLASLt will be used wherever possible.
+    * If `"ck"` is set then CK will be used wherever possible.
     * When no input is given, this function returns the currently preferred library.
     * User may use the environment variable TORCH_BLAS_PREFER_CUBLASLT=1 to set the preferred library to cuBLASLt
       globally.
@@ -260,6 +265,7 @@ def preferred_blas_library(
 
 
 from torch._C import _SDPAParams as SDPAParams, _SDPBackend as SDPBackend
+
 
 # Set the __module__ attribute
 SDPAParams.__module__ = "torch.backends.cuda"
@@ -318,6 +324,37 @@ def enable_math_sdp(enabled: bool):
     Enables or disables math scaled dot product attention.
     """
     torch._C._set_sdp_use_math(enabled)
+
+
+def allow_fp16_bf16_reduction_math_sdp(enabled: bool):
+    r"""
+    .. warning:: This flag is beta and subject to change.
+
+    Enables or disables fp16/bf16 reduction in math scaled dot product attention.
+    """
+    torch._C._set_math_sdp_allow_fp16_bf16_reduction(enabled)
+
+
+def fp16_bf16_reduction_math_sdp_allowed():
+    r"""
+    .. warning:: This flag is beta and subject to change.
+
+    Returns whether fp16/bf16 reduction in math scaled dot product attention is enabled or not.
+    """
+    return torch._C._get_math_sdp_allow_fp16_bf16_reduction()
+
+
+def is_flash_attention_available() -> bool:
+    r"""Check if PyTorch was built with FlashAttention for scaled_dot_product_attention.
+
+    Returns:
+        True if FlashAttention is built and available; otherwise, False.
+
+    Note:
+        This function is dependent on a CUDA-enabled build of PyTorch. It will return False
+        in non-CUDA environments.
+    """
+    return torch._C._is_flash_attention_available()
 
 
 def can_use_flash_attention(params: SDPAParams, debug: bool = False) -> bool:

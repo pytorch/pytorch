@@ -24,8 +24,6 @@ SUPPORTED_MODULES = {nn.Linear}
 
 KEYS_NOT_IN_STATE_DICT = ["module", "module_fqn", "tensor_name"]
 
-__all__ = ["BaseSparsifier"]
-
 
 # TODO update desc with new config args
 class BaseSparsifier(abc.ABC):

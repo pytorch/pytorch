@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 
 import functools
+import inspect
 import itertools
 import warnings
 import weakref
@@ -24,7 +25,7 @@ from typing_extensions import Self
 import torch
 from torch import device, dtype, Tensor
 from torch._prims_common import DeviceLikeType
-from torch.nn.parameter import Parameter
+from torch.nn.parameter import Buffer, Parameter
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils.hooks import BackwardHook, RemovableHandle
 
@@ -125,6 +126,7 @@ _global_is_full_backward_hook: Optional[bool] = None
 _global_forward_pre_hooks: Dict[int, Callable] = OrderedDict()
 _global_forward_hooks: Dict[int, Callable] = OrderedDict()
 _global_forward_hooks_always_called: Dict[int, bool] = OrderedDict()
+_global_forward_hooks_with_kwargs: Dict[int, bool] = OrderedDict()
 
 _EXTRA_STATE_KEY_SUFFIX = "_extra_state"
 
@@ -242,6 +244,7 @@ def register_module_forward_pre_hook(hook: Callable[..., None]) -> RemovableHand
 def register_module_forward_hook(
     hook: Callable[..., None],
     *,
+    with_kwargs: bool = False,
     always_call: bool = False,
 ) -> RemovableHandle:
     r"""Register a global forward hook for all the modules.
@@ -279,6 +282,8 @@ def register_module_forward_hook(
         _global_forward_hooks, extra_dict=_global_forward_hooks_always_called
     )
     _global_forward_hooks[handle.id] = hook
+    if with_kwargs:
+        _global_forward_hooks_with_kwargs[handle.id] = True
     if always_call:
         _global_forward_hooks_always_called[handle.id] = True
     return handle
@@ -407,7 +412,7 @@ class Module:
         import torch.nn.functional as F
 
         class Model(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv1 = nn.Conv2d(1, 20, 5)
                 self.conv2 = nn.Conv2d(20, 20, 5)
@@ -1745,9 +1750,11 @@ class Module:
                 or _global_forward_hooks or _global_forward_pre_hooks):
             return forward_call(*args, **kwargs)
 
-        try:
-            result = None
-            called_always_called_hooks = set()
+        result = None
+        called_always_called_hooks = set()
+
+        def inner():
+            nonlocal result, args, kwargs
 
             full_backward_hooks, non_full_backward_hooks = [], []
             backward_pre_hooks = []
@@ -1794,7 +1801,7 @@ class Module:
                     if hook_id in self._forward_hooks_always_called or hook_id in _global_forward_hooks_always_called:
                         called_always_called_hooks.add(hook_id)
 
-                    if hook_id in self._forward_hooks_with_kwargs:
+                    if hook_id in self._forward_hooks_with_kwargs or hook_id in _global_forward_hooks_with_kwargs:
                         hook_result = hook(self, args, kwargs, result)
                     else:
                         hook_result = hook(self, args, result)
@@ -1825,6 +1832,20 @@ class Module:
 
             return result
 
+        from torch.compiler import is_compiling
+
+        # This is technically not behavior equivalent when compiling, but it's
+        # incredibly unlikely we will ever support throwing an exception in NN
+        # module, and then catching it here, and then reraising it, and then
+        # catching it again, and expecting the resulting frame to be compiled.
+        # The reraise here just gunks up our exception handling for no good
+        # reason.  Don't try to run the always called hooks in event of
+        # exception.
+        if is_compiling():
+            return inner()
+
+        try:
+            return inner()
         except Exception:
             # run always called hooks if they have not already been run
             # For now only forward hooks have the always_call option but perhaps
@@ -1975,17 +1996,42 @@ class Module:
                 modules[name] = value
             else:
                 buffers = self.__dict__.get("_buffers")
-                if buffers is not None and name in buffers:
+                if isinstance(value, Buffer) or buffers is not None and name in buffers:
                     if value is not None and not isinstance(value, torch.Tensor):
                         raise TypeError(
                             f"cannot assign '{torch.typename(value)}' as buffer '{name}' "
-                            "(torch.Tensor or None expected)"
+                            "(torch.nn.Buffer, torch.Tensor or None expected)"
                         )
-                    for hook in _global_buffer_registration_hooks.values():
-                        output = hook(self, name, value)
-                        if output is not None:
-                            value = output
-                    buffers[name] = value
+                    if isinstance(value, Buffer):
+                        persistent = value.persistent
+                    else:
+                        persistent = name not in self._non_persistent_buffers_set
+                    # === HACK ===
+                    # This whole block below should just be:
+                    # self.register_buffer(name, value, persistent)
+
+                    # But to support subclasses of nn.Module that (wrongfully) implement a
+                    # register_buffer() method that doesn't have the "persistent"
+                    # argument. Only pass it in if it is accepted otherwise assume
+                    # it is always true
+                    if self.register_buffer is torch.nn.Module.register_buffer:
+                        self.register_buffer(name, value, persistent)
+                    else:
+                        sign = inspect.signature(self.register_buffer)
+                        if "persistent" in sign.parameters:
+                            self.register_buffer(name, value, persistent)
+                        else:
+                            if not persistent:
+                                raise RuntimeError(
+                                    "Registering a non-persistent buffer "
+                                    "on a Module subclass that implements "
+                                    "register_buffer() without the persistent "
+                                    "argument is not allowed."
+                                )
+                            # Assume that the implementation without the argument has the
+                            # behavior from before the argument was added: persistent=True
+                            self.register_buffer(name, value)
+                    # === HACK END ===
                 else:
                     super().__setattr__(name, value)
 
@@ -2588,7 +2634,7 @@ class Module:
             <class 'torch.Tensor'> (20L, 1L, 5L, 5L)
 
         """
-        for name, param in self.named_parameters(recurse=recurse):
+        for _name, param in self.named_parameters(recurse=recurse):
             yield param
 
     def named_parameters(
@@ -2683,7 +2729,7 @@ class Module:
         Yields:
             Module: a child module
         """
-        for name, module in self.named_children():
+        for _name, module in self.named_children():
             yield module
 
     def named_children(self) -> Iterator[Tuple[str, "Module"]]:

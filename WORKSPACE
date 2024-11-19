@@ -90,12 +90,6 @@ new_local_repository(
     path = "third_party/onnx",
 )
 
-new_local_repository(
-    name = "foxi",
-    build_file = "//third_party:foxi.BUILD",
-    path = "third_party/foxi",
-)
-
 local_repository(
     name = "com_google_protobuf",
     path = "third_party/protobuf",

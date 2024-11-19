@@ -56,16 +56,15 @@ namespace torch::profiler::impl {
 // JSON output utility functions. To be merged with PyTorch profiler.
 //******************************************************************************
 template <typename T>
-inline std::string vectorToString(const std::vector<T>& v) {
+static std::string vectorToString(const std::vector<T>& v) {
   return fmt::format("[{}]", fmt::join(v, ","));
 }
 
-std::string json_str_escape(const std::string& str);
+static std::string json_str_escape(const std::string& str);
 
 constexpr size_t kMaxNumElements = 4096;
-constexpr size_t kMaxStrLength = 8192;
 
-inline std::string getScalarValue(const c10::IValue& val) {
+static std::string getScalarValue(const c10::IValue& val) {
   if (val.isDouble()) {
     double d_val = val.toDouble();
     if (std::isinf(d_val) || std::isnan(d_val)) {
@@ -79,13 +78,6 @@ inline std::string getScalarValue(const c10::IValue& val) {
     return val.toBool() ? "true" : "false";
   } else if (val.isString()) {
     const std::string& str_val = val.toStringRef();
-    if (str_val.size() > kMaxStrLength) {
-      LOG(WARNING) << "string size=" << str_val.size()
-                   << " exceeded kMaxStrLength=" << kMaxStrLength;
-      return fmt::format(
-          "\"{}\"", json_str_escape(str_val.substr(0, kMaxStrLength)));
-    }
-
     return fmt::format("\"{}\"", json_str_escape(str_val));
   } else if (val.isDevice()) {
     return fmt::format("\"{}\"", val.toDevice().str());
@@ -93,7 +85,7 @@ inline std::string getScalarValue(const c10::IValue& val) {
   return fmt::format("\"<{}>\"", val.tagKind());
 }
 
-inline int32_t processId() {
+static int32_t processId() {
 #ifndef _WIN32
   return static_cast<int32_t>(getpid());
 #else
@@ -212,7 +204,7 @@ static std::ofstream openOutputFile(const std::string& name) {
 }
 
 #ifdef USE_DISTRIBUTED
-static inline std::string getAttrJson(
+static std::string getAttrJson(
     const std::string& name,
     const std::string& type,
     const std::string& value) {
@@ -280,7 +272,7 @@ static void writeJsonNode(
       additiona_attrs);
 }
 
-inline std::string timeString(const std::time_t timepoint) {
+static std::string timeString(const std::time_t timepoint) {
   std::ostringstream oss;
   oss << std::put_time(std::localtime(&timepoint), "%Y-%m-%d %X"); // NOLINT
   return oss.str();
@@ -344,9 +336,11 @@ static void finalizeExecutionTraceOutput(ExecutionTraceObserver& ob) {
   VLOG(1) << "PyTorch Execution Trace: written to file " << ob.fileName;
 }
 
-inline ExecutionTraceObserver::ID getObjectID(
+static ExecutionTraceObserver::ID getObjectID(
     ExecutionTraceObserver& ob,
     const void* t) {
+  const std::lock_guard<std::recursive_mutex> lock(ob.gMutex);
+
   auto iter = ob.objectId.find(t);
   if (iter == ob.objectId.end()) {
     ExecutionTraceObserver::ID objectId = ob.getNewID();
@@ -357,7 +351,7 @@ inline ExecutionTraceObserver::ID getObjectID(
   return iter->second;
 }
 
-inline std::tuple<std::string, std::string, std::string, std::string>
+static std::tuple<std::string, std::string, std::string, std::string>
 convertIValue(
     ExecutionTraceObserver& ob,
     const c10::IValue& val,
@@ -466,7 +460,7 @@ convertIValue(
   }
 }
 
-inline void appendValueInfo(
+static void appendValueInfo(
     ExecutionTraceObserver& ob,
     const c10::IValue& val,
     std::vector<std::string>& shapes,
@@ -481,7 +475,7 @@ inline void appendValueInfo(
   values.push_back(std::get<3>(tuple));
 }
 
-inline void handleKernelBackendInfo(
+static void handleKernelBackendInfo(
     FunctionCallContext& fc,
     const RecordFunction& fn) {
   // triton kernel related information are in kwinputs
@@ -577,26 +571,29 @@ static void recordOperatorStart(
   auto tid = fn.threadId();
 
   try {
-    const std::lock_guard<std::recursive_mutex> lock(ob.gMutex);
+    {
+      const std::lock_guard<std::recursive_mutex> lock(ob.gMutex);
 
-    // if current thread stack is empty, push the root node to the stack first
-    if (ob.opStack[tid].empty()) {
-      auto thread_node_id = ob.getNewID();
-      ob.opStack[tid].push(thread_node_id);
-      writeJsonNode(
-          ob.out,
-          "[pytorch|profiler|execution_trace|thread]",
-          thread_node_id,
-          0, // rf_id
-          kRootId,
-          0, // fw_parent
-          -1, // seq_id
-          static_cast<std::underlying_type_t<RecordScope>>(
-              RecordScope::USER_SCOPE),
-          tid,
-          0); // fw_tid
-      ob.out << ",";
+      // if current thread stack is empty, push the root node to the stack first
+      if (ob.opStack[tid].empty()) {
+        auto thread_node_id = ob.getNewID();
+        ob.opStack[tid].push(thread_node_id);
+        writeJsonNode(
+            ob.out,
+            "[pytorch|profiler|execution_trace|thread]",
+            thread_node_id,
+            0, // rf_id
+            kRootId,
+            0, // fw_parent
+            -1, // seq_id
+            static_cast<std::underlying_type_t<RecordScope>>(
+                RecordScope::USER_SCOPE),
+            tid,
+            0); // fw_tid
+        ob.out << ",";
+      }
     }
+
     fc.name = fn.name();
     auto num_inputs = fn.num_inputs();
     const auto inputs = fn.inputs();
@@ -627,17 +624,21 @@ static void recordOperatorStart(
 
     handleKernelBackendInfo(fc, fn);
 
-    fc.parentId = ob.opStack[tid].top();
-    // get parent id from the forward stack, this can be different for
-    // autograd ops, which may execute on a different thread than the original
-    // thread (which should have the parent op on the stack).
-    auto fw_tid = fn.forwardThreadId();
-    if (fw_tid != 0) {
-      fc.fwParentId = ob.opStack[fw_tid].top();
+    {
+      const std::lock_guard<std::recursive_mutex> lock(ob.gMutex);
+
+      fc.parentId = ob.opStack[tid].top();
+      // get parent id from the forward stack, this can be different for
+      // autograd ops, which may execute on a different thread than the original
+      // thread (which should have the parent op on the stack).
+      auto fw_tid = fn.forwardThreadId();
+      if (fw_tid != 0) {
+        fc.fwParentId = ob.opStack[fw_tid].top();
+      }
+      // all input nodes should have id > opId
+      fc.opId = ob.getNewID();
+      ob.opStack[tid].push(fc.opId);
     }
-    // all input nodes should have id > opId
-    fc.opId = ob.getNewID();
-    ob.opStack[tid].push(fc.opId);
 
   } catch (const std::exception& e) {
     LOG(WARNING) << "Exception in execution trace observer: " << e.what();
@@ -657,7 +658,7 @@ static std::unique_ptr<ObserverContext> onFunctionEnter(
   return nullptr;
 }
 
-inline std::string json_str_escape(const std::string& str) {
+static std::string json_str_escape(const std::string& str) {
   std::ostringstream ostream;
   for (char ch : str) {
     if (ch == '"') {
@@ -699,7 +700,7 @@ static void onFunctionExit(const RecordFunction& fn, ObserverContext* ctx_ptr) {
     }
     auto& fc = *fc_ptr;
 
-    auto outputs = fn.outputs();
+    auto const& outputs = fn.outputs();
     auto num_outputs = fn.num_outputs();
     // We have two cases: for unboxed kernel, we have num_outputs ==
     // outputs.size() for boxed kernel using stack, there could be more elements
@@ -720,10 +721,6 @@ static void onFunctionExit(const RecordFunction& fn, ObserverContext* ctx_ptr) {
     std::vector<std::string> output_shapes;
     std::vector<std::string> output_values;
     try {
-      const std::lock_guard<std::recursive_mutex> lock(ob->gMutex);
-      // remove current op id from stack
-
-      ob->opStack[fn.threadId()].pop();
       for (const auto i : c10::irange(output_start, outputs.size())) {
         appendValueInfo(
             *ob,
@@ -742,31 +739,37 @@ static void onFunctionExit(const RecordFunction& fn, ObserverContext* ctx_ptr) {
 
       const std::string additiona_attrs =
           fn.isNcclMeta() ? getCommsNodeAttrs(fn) : "";
+      {
+        const std::lock_guard<std::recursive_mutex> lock(ob->gMutex);
 
-      writeJsonNode(
-          ob->out,
-          fc.name,
-          fc.opId,
-          fn.handle(),
-          fc.parentId,
-          fc.fwParentId,
-          fn.seqNr(),
-          static_cast<std::underlying_type_t<RecordScope>>(fn.scope()),
-          fn.threadId(),
-          fn.forwardThreadId(),
-          vectorToString(fc.inputValues),
-          vectorToString(fc.inputShapes),
-          vectorToString(fc.inputStrides),
-          vectorToString(fc.inputTypes),
-          vectorToString(output_values),
-          vectorToString(output_shapes),
-          vectorToString(output_strides),
-          vectorToString(output_types),
-          op_schema_str,
-          fc.kernelBackend,
-          fc.kernelFile,
-          additiona_attrs);
-      ob->out << ",";
+        // remove current op id from stack
+        ob->opStack[fn.threadId()].pop();
+
+        writeJsonNode(
+            ob->out,
+            fc.name,
+            fc.opId,
+            fn.handle(),
+            fc.parentId,
+            fc.fwParentId,
+            fn.seqNr(),
+            static_cast<std::underlying_type_t<RecordScope>>(fn.scope()),
+            fn.threadId(),
+            fn.forwardThreadId(),
+            vectorToString(fc.inputValues),
+            vectorToString(fc.inputShapes),
+            vectorToString(fc.inputStrides),
+            vectorToString(fc.inputTypes),
+            vectorToString(output_values),
+            vectorToString(output_shapes),
+            vectorToString(output_strides),
+            vectorToString(output_types),
+            op_schema_str,
+            fc.kernelBackend,
+            fc.kernelFile,
+            additiona_attrs);
+        ob->out << ",";
+      }
     } catch (const std::exception& e) {
       LOG(WARNING) << "Exception in execution trace observer: [" << fc.name
                    << " (" << fc.opId << ")] " << e.what();

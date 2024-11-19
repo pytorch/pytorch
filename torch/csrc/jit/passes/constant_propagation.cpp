@@ -16,8 +16,7 @@
 
 #include <utility>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 std::optional<std::vector<IValue>> runNodeIfInputsAreConstant(
     const Node* n,
@@ -348,8 +347,7 @@ struct ConstantPropagator {
   }
 
   bool supportedNode(Node* n) {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    bool no_mutation;
+    bool no_mutation = false;
     if (aliasing_types_) {
       no_mutation = !getOrCreateAliasDb()->hasWriters(n);
     } else {
@@ -434,5 +432,4 @@ bool ConstantPropagationImmutableTypes(std::shared_ptr<Graph>& graph) {
   return made_change;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

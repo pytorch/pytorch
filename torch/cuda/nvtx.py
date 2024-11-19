@@ -3,6 +3,7 @@ r"""This package adds support for NVIDIA Tools Extension (NVTX) used in profilin
 
 from contextlib import contextmanager
 
+
 try:
     from torch._C import _nvtx
 except ImportError:

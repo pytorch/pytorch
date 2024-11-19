@@ -2,6 +2,7 @@
 #include <torch/csrc/jit/frontend/source_range.h>
 #include <torch/csrc/jit/serialization/source_range_serialization.h>
 #include <iostream>
+#include <regex>
 
 namespace torch::jit {
 

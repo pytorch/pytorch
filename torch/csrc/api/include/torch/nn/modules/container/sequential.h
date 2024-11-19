@@ -18,8 +18,7 @@
 #include <utility>
 #include <vector>
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 /// A list of `Module`s that acts as a `Module` itself.
 ///
@@ -125,7 +124,7 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
   /// Special cloning function for `Sequential` because it does not use
   /// `reset()`.
   std::shared_ptr<Module> clone(
-      const std::optional<Device>& device = nullopt) const override {
+      const std::optional<Device>& device = std::nullopt) const override {
     auto clone = std::make_shared<SequentialImpl>();
     for (const auto& module : modules_) {
       clone->push_back(module.clone(device));
@@ -185,7 +184,8 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
     if (auto* return_value = input.template try_get<ReturnType>()) {
       return std::move(*return_value);
     }
-    AT_ERROR(
+    TORCH_CHECK(
+        false,
         "The type of the return value is ",
         c10::demangle(input.type_info().name()),
         ", but you asked for type ",
@@ -384,5 +384,4 @@ class Sequential : public torch::nn::ModuleHolder<SequentialImpl> {
   Sequential(std::initializer_list<NamedAnyModule> named_modules)
       : ModuleHolder(std::make_shared<SequentialImpl>(named_modules)) {}
 };
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

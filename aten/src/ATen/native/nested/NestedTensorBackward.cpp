@@ -9,12 +9,11 @@
 #include <ATen/NestedTensorImpl.h>
 #include <c10/core/DispatchKey.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
-#include <ATen/native/nested/NestedTensorMath.h>
-#include <ATen/native/layer_norm.h>
 #include <c10/core/DeviceType.h>
 
-namespace at {
-namespace native {
+#include <utility>
+
+namespace at::native {
 
 // See Note [nested tensor matmul] in NestedTensorMath.cpp
 std::tuple<Tensor, Tensor> matmul_backward_nested(
@@ -142,9 +141,9 @@ Tensor _nested_sum_backward_cpu(
     for (const auto i : c10::irange(ntensors)) {
       int64_t segments = num_segments[i].item<int64_t>();
       int64_t segment_length = segment_lengths[i].item<int64_t>();
-      for (auto j = 0; j < segments; j++) {
+      for (int64_t j = 0; j < segments; j++) {
         scalar_t output_grad = output_grad_data[out_idx];
-        for (auto k = 0; k < segment_length; k++) {
+        for (int64_t k = 0; k < segment_length; k++) {
           self_grad_data[in_idx] = output_grad;
           in_idx += 1;
         }
@@ -162,6 +161,7 @@ Tensor _nested_select_backward_symint(
   const Tensor& grad,
   const Tensor& nested_self,
   int64_t dim,
+  // NOLINTNEXTLINE(performance-unnecessary-value-param)
   c10::SymInt index) {
   auto nt_self = get_nested_tensor_impl(nested_self);
   const Tensor& self_buffer = nt_self->get_buffer();
@@ -169,7 +169,7 @@ Tensor _nested_select_backward_symint(
   const Tensor& self_grad_buffer = self_buffer.new_zeros(self_buffer.sizes());
 
   auto nt_grad = wrap_buffer(self_grad_buffer, self_sizes);
-  nt_grad.select_symint(dim, index).copy_(grad);
+  nt_grad.select_symint(dim, std::move(index)).copy_(grad);
 
   return nt_grad;
 }
@@ -219,6 +219,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_nested(
   Tensor dbeta;
   auto input_buffer = nt_impl_input->get_buffer();
   auto grad_buffer = nt_impl_grad->get_buffer();
+  // NOLINTNEXTLINE(bugprone-branch-clone)
   if (grad_input_mask[0]) {
     dInput = at::native::empty_like(
         input_buffer,
@@ -286,5 +287,4 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_nested(
       wrap_buffer(dInput, sizes), std::move(dgamma), std::move(dbeta));
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

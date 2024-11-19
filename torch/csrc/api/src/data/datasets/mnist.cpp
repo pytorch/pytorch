@@ -8,11 +8,8 @@
 #include <cstddef>
 #include <fstream>
 #include <string>
-#include <vector>
 
-namespace torch {
-namespace data {
-namespace datasets {
+namespace torch::data::datasets {
 namespace {
 constexpr uint32_t kTrainSize = 60000;
 constexpr uint32_t kTestSize = 10000;
@@ -37,18 +34,20 @@ constexpr uint32_t flip_endianness(uint32_t value) {
 
 uint32_t read_int32(std::ifstream& stream) {
   static const bool is_little_endian = check_is_little_endian();
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  uint32_t value;
+  uint32_t value = 0;
   AT_ASSERT(stream.read(reinterpret_cast<char*>(&value), sizeof value));
   return is_little_endian ? flip_endianness(value) : value;
 }
 
 uint32_t expect_int32(std::ifstream& stream, uint32_t expected) {
   const auto value = read_int32(stream);
-  // clang-format off
-  TORCH_CHECK(value == expected,
-      "Expected to read number ", expected, " but found ", value, " instead");
-  // clang-format on
+  TORCH_CHECK(
+      value == expected,
+      "Expected to read number ",
+      expected,
+      " but found ",
+      value,
+      " instead");
   return value;
 }
 
@@ -102,14 +101,15 @@ MNIST::MNIST(const std::string& root, Mode mode)
       targets_(read_targets(root, mode == Mode::kTrain)) {}
 
 Example<> MNIST::get(size_t index) {
-  return {images_[index], targets_[index]};
+  return {
+      images_[static_cast<int64_t>(index)],
+      targets_[static_cast<int64_t>(index)]};
 }
 
-optional<size_t> MNIST::size() const {
+std::optional<size_t> MNIST::size() const {
   return images_.size(0);
 }
 
-// NOLINTNEXTLINE(bugprone-exception-escape)
 bool MNIST::is_train() const noexcept {
   return images_.size(0) == kTrainSize;
 }
@@ -122,6 +122,4 @@ const Tensor& MNIST::targets() const {
   return targets_;
 }
 
-} // namespace datasets
-} // namespace data
-} // namespace torch
+} // namespace torch::data::datasets

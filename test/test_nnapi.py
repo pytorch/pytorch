@@ -367,7 +367,7 @@ class TestNNAPI(TestCase):
 
     def test_to(self):
         class ToCPU(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.prelu = torch.nn.PReLU()
 

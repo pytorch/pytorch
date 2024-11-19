@@ -32,7 +32,7 @@ class PreDispatchSchemaCheckMode(SchemaCheckMode):
     later decompose and become functional.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._dispatch_key = torch._C.DispatchKey.PreDispatch
         super().__init__()
 

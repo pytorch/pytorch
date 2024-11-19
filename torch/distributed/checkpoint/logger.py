@@ -2,12 +2,12 @@
 import functools
 import time
 from typing import Any, Callable, Dict, List, TypeVar
-
 from typing_extensions import ParamSpec
 from uuid import uuid4
 
 import torch.distributed.c10d_logger as c10d_logger
 from torch.distributed.checkpoint.logging_handlers import DCP_LOGGER_NAME
+
 
 __all__: List[str] = []
 
@@ -54,7 +54,7 @@ def _msg_dict_from_dcp_method_args(*args, **kwargs) -> Dict[str, Any]:
 
 def _get_msg_dict(func_name, *args, **kwargs) -> Dict[str, Any]:
     msg_dict = _msg_dict_from_dcp_method_args(*args, **kwargs)
-    msg_dict.update(c10d_logger._get_msg_dict(func_name, **msg_dict))
+    msg_dict.update(c10d_logger._get_msg_dict(func_name, *args, **kwargs))
 
     return msg_dict
 

@@ -84,7 +84,7 @@ FUSION_CONV_LINEAR_EXAMPLE = torch.nn.Sequential(
 # Test class
 # example model to use for tests
 class ThreeOps(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.linear = nn.Linear(3, 3)
         self.bn = nn.BatchNorm2d(3)
@@ -100,7 +100,7 @@ class ThreeOps(nn.Module):
         return (torch.randn(1, 3, 3, 3),)
 
 class TwoThreeOps(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.block1 = ThreeOps()
         self.block2 = ThreeOps()
@@ -233,7 +233,7 @@ class TestFxModelReportDetector(QuantizationTestCase):
 
             # we need to design the model
             class ConvLinearModel(torch.nn.Module):
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
                     self.conv1 = torch.nn.Conv2d(3, 3, 2, 1)
                     self.fc1 = torch.nn.Linear(9, 27)
@@ -433,7 +433,7 @@ class TestFxModelReportDetector(QuantizationTestCase):
 
         # first we want a QAT model
         class QATConvLinearReluModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 # QuantStub converts tensors from floating point to quantized
                 self.quant = torch.ao.quantization.QuantStub()
@@ -505,7 +505,7 @@ Partition on Output
 
 class TestFxModelReportObserver(QuantizationTestCase):
     class NestedModifiedSingleLayerLinear(torch.nn.Module):
-        def __init__(self):
+        def __init__(self) -> None:
             super().__init__()
             self.obs1 = ModelReportObserver()
             self.mod1 = SingleLayerLinearModel()
@@ -636,7 +636,7 @@ class TestFxModelReportObserver(QuantizationTestCase):
 
         # model specific to this test
         class NestedModifiedObserverAfterRelu(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.obs1 = ModelReportObserver()
                 self.mod1 = SingleLayerLinearModel()
@@ -673,7 +673,7 @@ class TestFxModelReportObserver(QuantizationTestCase):
 
         # set up a basic model
         class TinyNestModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.obs1 = ModelReportObserver()
                 self.fc1 = torch.nn.Linear(5, 5).to(dtype=torch.float)
@@ -688,7 +688,7 @@ class TestFxModelReportObserver(QuantizationTestCase):
                 return x
 
         class LargerIncludeNestModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.obs1 = ModelReportObserver()
                 self.nested = TinyNestModule()
@@ -727,7 +727,7 @@ class TestFxModelReportObserver(QuantizationTestCase):
                 return x
 
         class HighDimensionNet(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.obs1 = ModelReportObserver()
                 self.fc1 = torch.nn.Linear(3, 7)
@@ -786,7 +786,7 @@ class TestFxModelReportDetectDynamicStatic(QuantizationTestCase):
     @skipIfNoFBGEMM
     def test_nested_detection_case(self):
         class SingleLinear(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(3, 3)
 
@@ -795,7 +795,7 @@ class TestFxModelReportDetectDynamicStatic(QuantizationTestCase):
                 return x
 
         class TwoBlockNet(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.block1 = SingleLinear()
                 self.block2 = SingleLinear()
@@ -1266,7 +1266,7 @@ class TestFxDetectInputWeightEqualization(QuantizationTestCase):
             return x
 
     class TwoBlockComplexNet(torch.nn.Module):
-        def __init__(self):
+        def __init__(self) -> None:
             super().__init__()
             self.block1 = TestFxDetectInputWeightEqualization.SimpleConv((3, 32))
             self.block2 = TestFxDetectInputWeightEqualization.SimpleConv((3, 3))
@@ -1292,7 +1292,7 @@ class TestFxDetectInputWeightEqualization(QuantizationTestCase):
             return (torch.randn((1, 3, 28, 28)),)
 
     class ReluOnly(torch.nn.Module):
-        def __init__(self):
+        def __init__(self) -> None:
             super().__init__()
             self.relu = torch.nn.ReLU()
 

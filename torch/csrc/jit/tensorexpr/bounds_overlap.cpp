@@ -81,7 +81,7 @@ bool Bound::operator<(const Bound& other) const {
   return mustBeNegative(ret_expr);
 }
 
-OverlapKind boundOverlap(Bound a, Bound b) {
+OverlapKind boundOverlap(const Bound& a, const Bound& b) {
   // If they're equal they're equal.
   bool startEqual = exprEquals(a.start, b.start);
   bool endEqual = exprEquals(a.end, b.end);
@@ -237,7 +237,7 @@ OverlapKind overlaps(const IndexBounds& a, const IndexBounds& b) {
   return overlap;
 }
 
-std::vector<Bound> subtractBound(Bound a, Bound b) {
+std::vector<Bound> subtractBound(const Bound& a, const Bound& b) {
   OverlapKind overlap = boundOverlap(a, b);
   if (overlap == OverlapKind::NoOverlap) {
     return {a};

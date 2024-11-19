@@ -27,7 +27,7 @@ static at::Tensor flatten_logical(const Tensor& tensor, std::optional<int64_t> b
 
 // Useful for many loss functions
 template <typename Func>
-static std::tuple<at::Tensor,optional<int64_t>>
+static std::tuple<at::Tensor, std::optional<int64_t>>
 loss_batch_rule_helper(const at::Tensor& self, std::optional<int64_t> self_bdim, const at::Tensor& target,
           std::optional<int64_t> target_bdim, int64_t reduction,
           Func loss_fn) {
@@ -47,34 +47,34 @@ loss_batch_rule_helper(const at::Tensor& self, std::optional<int64_t> self_bdim,
     return std::make_tuple(result.mean(-1), 0);
   }
   TORCH_INTERNAL_ASSERT(false);
-};
+}
 
-static std::tuple<at::Tensor,optional<int64_t>>
+static std::tuple<at::Tensor, std::optional<int64_t>>
 mse_loss_batch_rule(const at::Tensor& self, std::optional<int64_t> self_bdim, const at::Tensor& target,
           std::optional<int64_t> target_bdim, int64_t reduction) {
   return loss_batch_rule_helper(self, self_bdim, target, target_bdim,
                                 reduction, [](const at::Tensor& self, const at::Tensor& target, int64_t reduction) {
                                   return at::mse_loss(self, target, reduction);
                                 });
-};
+}
 
-static std::tuple<at::Tensor,optional<int64_t>>
+static std::tuple<at::Tensor, std::optional<int64_t>>
 huber_loss_batch_rule(const at::Tensor& self, std::optional<int64_t> self_bdim, const at::Tensor& target,
           std::optional<int64_t> target_bdim, int64_t reduction, double delta) {
   return loss_batch_rule_helper(self, self_bdim, target, target_bdim,
                                 reduction, [delta](const at::Tensor& self, const at::Tensor& target, int64_t reduction) {
                                   return at::huber_loss(self, target, reduction, delta);
                                 });
-};
+}
 
-static std::tuple<at::Tensor,optional<int64_t>>
+static std::tuple<at::Tensor, std::optional<int64_t>>
 smooth_l1_loss_batch_rule(const at::Tensor& self, std::optional<int64_t> self_bdim, const at::Tensor& target,
           std::optional<int64_t> target_bdim, int64_t reduction, double beta) {
   return loss_batch_rule_helper(self, self_bdim, target, target_bdim,
                                 reduction, [beta](const at::Tensor& self, const at::Tensor& target, int64_t reduction) {
                                   return at::smooth_l1_loss(self, target, reduction, beta);
                                 });
-};
+}
 
 static Tensor apply_loss_reduction(const at::Tensor& unreduced, int64_t reduction) {
   if (reduction == at::Reduction::Mean) {
@@ -109,11 +109,11 @@ static Tensor binary_cross_entropy_plumbing(
     auto target_ = moveBatchDimToFront(target_value, target_bdim);
     self_ = ensure_has_bdim(self_, self_bdim.has_value(), bdim_size);
     target_ = ensure_has_bdim(target_, target_bdim.has_value(), bdim_size);
-    result = at::binary_cross_entropy(self_, target_, nullopt, Reduction::None);
+    result = at::binary_cross_entropy(self_, target_, std::nullopt, Reduction::None);
     result = makeBatched(result, 0, cur_level);
   } else {
     c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
-    result = at::binary_cross_entropy(self_value, target_value, nullopt, Reduction::None);
+    result = at::binary_cross_entropy(self_value, target_value, std::nullopt, Reduction::None);
   }
   if (weight.has_value() && weight->defined()) {
     result = result * weight.value();
@@ -153,12 +153,12 @@ static Tensor binary_cross_entropy_backward_plumbing(
     target_ = ensure_has_bdim(target_, target_bdim.has_value(), bdim_size);
 
     grad_input = at::binary_cross_entropy_backward(
-        grad_, input_, target_, nullopt, Reduction::None);
+        grad_, input_, target_, std::nullopt, Reduction::None);
     grad_input = makeBatched(grad_input, 0, cur_level);
   } else {
     c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
     grad_input = at::binary_cross_entropy_backward(
-        grad_value, input_value, target_value, nullopt, Reduction::None);
+        grad_value, input_value, target_value, std::nullopt, Reduction::None);
   }
   if (weight_opt.has_value() && weight_opt->defined()) {
     grad_input = grad_input * weight_opt.value();

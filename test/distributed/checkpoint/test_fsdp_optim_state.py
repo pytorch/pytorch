@@ -28,7 +28,7 @@ class FsdpOptimStateCheckpoint(DTensorTestBase):
         layer3_weight_dim = self.world_size * 3
 
         class TestDummyModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.net1 = nn.Sequential(nn.Linear(8, layer1_weight_dim), nn.ReLU())
                 self.net2 = nn.Sequential(

@@ -9,9 +9,9 @@ namespace at {
 namespace native {
 
 using fused_sdp_choice_fn = int64_t (*)(const Tensor& query_, const Tensor& key, const Tensor& value,
-        const std::optional<Tensor>& attn_mask_, double dropout_p, bool is_causal, std::optional<double> scale);
+        const std::optional<Tensor>& attn_mask_, double dropout_p, bool is_causal, std::optional<double> scale, bool enable_gqa);
 
-DECLARE_DISPATCH(fused_sdp_choice_fn, _fused_sdp_choice_stub);
+DECLARE_DISPATCH(fused_sdp_choice_fn, _fused_sdp_choice_stub)
 
 TORCH_API Tensor bmm_nt(const Tensor& a, const Tensor& b);
 TORCH_API Tensor masked_softmax(
@@ -30,7 +30,7 @@ using transform_bias_rescale_qkv_fn = void(*)(
     int64_t D,
     int64_t num_head);
 
-DECLARE_DISPATCH(transform_bias_rescale_qkv_fn, transform_bias_rescale_qkv_stub);
+DECLARE_DISPATCH(transform_bias_rescale_qkv_fn, transform_bias_rescale_qkv_stub)
 
 TORCH_API Tensor transform0213_gemm_nt_bias(
     const Tensor& a,
@@ -65,8 +65,8 @@ using flash_attention_backward_fn = void (*)(
     std::optional<Tensor> attn_mask,
     std::optional<double> scale);
 
-DECLARE_DISPATCH(flash_attention_fn, flash_attention_kernel);
-DECLARE_DISPATCH(flash_attention_backward_fn, flash_attention_backward_kernel);
+DECLARE_DISPATCH(flash_attention_fn, flash_attention_kernel)
+DECLARE_DISPATCH(flash_attention_backward_fn, flash_attention_backward_kernel)
 
 } // namespace native
 } // namespace at

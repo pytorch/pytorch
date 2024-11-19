@@ -136,7 +136,7 @@ mkldnn_gemm(
   if (beta != 0.0f) {
     op_attr = ideep::attr_t::fuse_sum();
   }
-  if (std::is_same_v<scalar_t, float>) op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16); // bf32 path
+  if (bf32_usable) op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16); // bf32 path
 
   // NOTE: View as c-contiguous to avoid extra reordering in mkldnn
   // Use identity: C = AB <=> C^T = B^T A^T
@@ -270,13 +270,14 @@ void mkldnn_matmul(
   auto mat1_unsqueezed = mat1.dim() == 1 ? mat1.unsqueeze(0) : mat1;
   auto mat2_unsqueezed = mat2.dim() == 1 ? mat2.unsqueeze(1) : mat2;
   auto result_unsqueezed = result.dim() == 1 ? result.unsqueeze(1) : result;
+  bool bf32_usable = mat1.scalar_type() == at::kFloat && use_mkldnn_bf32_matmul();
 
   ideep::attr_t op_attr;
   // "addmm", "addbmm" "baddbmm" in pytorch allow bias to be 2-D or 3-D tensor
   // but mkldnn matmul primitive only support bias be 1-D tensors
   // to address their differences, we use mkldnn post ops to perform a fused "add" after matrix multiplication is over
   if (beta != 0.0f) op_attr = ideep::attr_t::fuse_sum();
-  if (mat1.scalar_type() == at::kFloat) op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16); // bf32 path
+  if (bf32_usable) op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16); // bf32 path
   // If alpha = 0, dose not need actually do gemm computation
   if (alpha == 0)
     return;

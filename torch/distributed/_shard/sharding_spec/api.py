@@ -31,8 +31,6 @@ class PlacementSpec(ABC):  # noqa: B024
     covered by existing APIs.
     """
 
-    pass
-
 
 @dataclass
 class DevicePlacementSpec(PlacementSpec):

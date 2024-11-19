@@ -154,8 +154,7 @@ struct CollectiveFingerPrint {
       // tensor>]
       std::vector<at::Tensor> outputs;
       outputs.reserve(backend->getSize());
-      for (const auto i : c10::irange(backend->getSize())) {
-        std::ignore = i; // Suppress unused variable warning
+      for ([[maybe_unused]] const auto i : c10::irange(backend->getSize())) {
         outputs.emplace_back(at::zeros_like(tensor_shape));
       }
       output_tensors.emplace_back(outputs);

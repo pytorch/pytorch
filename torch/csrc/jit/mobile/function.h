@@ -7,8 +7,7 @@
 #include <ATen/core/ivalue.h>
 #include <torch/csrc/jit/mobile/code.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 enum OpCode : uint8_t;
 struct Instruction;
 struct OperatorString;
@@ -32,8 +31,8 @@ class TORCH_API Function : public torch::jit::Function {
   // NOTE: the APIs below is dangerous: if you call append_instruction with
   // dbg_handle and then call it without; then the dbg_handle will become
   // misaligned. Therefore only use ONE variant at time.
-  void append_instruction(OpCode op, int X, int N, int64_t dbg_handle);
-  void append_instruction(OpCode op, int X, int N);
+  void append_instruction(OpCode op, int64_t X, int64_t N, int64_t dbg_handle);
+  void append_instruction(OpCode op, int64_t X, int64_t N);
   void append_operator(
       const std::string& name,
       const std::string& overload_name,
@@ -76,11 +75,10 @@ class TORCH_API Function : public torch::jit::Function {
 };
 
 std::optional<std::function<void(Stack&)>> makeOperatorFunction(
-    c10::OperatorName opname,
+    const c10::OperatorName& opname,
     std::optional<int> num_specified_args);
 
 TORCH_API std::string operator_str(const c10::OperatorName& opname);
 
 } // namespace mobile
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

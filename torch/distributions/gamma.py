@@ -5,6 +5,8 @@ import torch
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import broadcast_all
+from torch.types import _size
+
 
 __all__ = ["Gamma"]
 
@@ -27,8 +29,8 @@ class Gamma(ExponentialFamily):
     Args:
         concentration (float or Tensor): shape parameter of the distribution
             (often referred to as alpha)
-        rate (float or Tensor): rate = 1 / scale of the distribution
-            (often referred to as beta)
+        rate (float or Tensor): rate parameter of the distribution
+            (often referred to as beta), rate = 1 / scale
     """
     arg_constraints = {
         "concentration": constraints.positive,
@@ -67,7 +69,7 @@ class Gamma(ExponentialFamily):
         new._validate_args = self._validate_args
         return new
 
-    def rsample(self, sample_shape=torch.Size()):
+    def rsample(self, sample_shape: _size = torch.Size()) -> torch.Tensor:
         shape = self._extended_shape(sample_shape)
         value = _standard_gamma(self.concentration.expand(shape)) / self.rate.expand(
             shape

@@ -4,7 +4,7 @@
 #include <vector>
 
 #include <torch/csrc/inductor/aoti_runner/model_container_runner_cpu.h>
-#ifdef USE_CUDA
+#if defined(USE_CUDA) || defined(USE_ROCM)
 #include <torch/csrc/inductor/aoti_runner/model_container_runner_cuda.h>
 #endif
 #include <torch/script.h>
@@ -29,22 +29,23 @@ void test_aoti(const std::string& device, bool use_runtime_constant_folding) {
   std::string inputs_attr = "inputs_" + suffix;
   std::string outputs_attr = "outputs_" + suffix;
   const auto& model_so_path = data_loader.attr(path_attr.c_str()).toStringRef();
-  auto input_tensors =
-      data_loader.attr(inputs_attr.c_str()).toTensorList().vec();
   const auto& ref_output_tensors =
       data_loader.attr(outputs_attr.c_str()).toTensorList().vec();
 
   std::unique_ptr<torch::inductor::AOTIModelContainerRunner> runner;
-  if (device == "cuda") {
-    runner = std::make_unique<torch::inductor::AOTIModelContainerRunnerCuda>(
-        model_so_path);
-  } else if (device == "cpu") {
+  if (device == "cpu") {
     runner = std::make_unique<torch::inductor::AOTIModelContainerRunnerCpu>(
         model_so_path);
+#if defined(USE_CUDA) || defined(USE_ROCM)
+  } else if (device == "cuda") {
+    runner = std::make_unique<torch::inductor::AOTIModelContainerRunnerCuda>(
+        model_so_path);
+#endif
   } else {
     testing::AssertionFailure() << "unsupported device: " << device;
   }
-  auto actual_output_tensors = runner->run(input_tensors);
+  auto actual_output_tensors =
+      runner->run(data_loader.attr(inputs_attr.c_str()).toTensorList().vec());
   ASSERT_TRUE(torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
 }
 
@@ -111,12 +112,14 @@ void test_aoti_constants_update(
   real_map.emplace("L__self___w_add", new at::Tensor(add_tensors));
 
   std::unique_ptr<torch::inductor::AOTIModelContainerRunner> runner;
-  if (device == "cuda") {
-    runner = std::make_unique<torch::inductor::AOTIModelContainerRunnerCuda>(
-        model_so_path);
-  } else if (device == "cpu") {
+  if (device == "cpu") {
     runner = std::make_unique<torch::inductor::AOTIModelContainerRunnerCpu>(
         model_so_path);
+#if defined(USE_CUDA) || defined(USE_ROCM)
+  } else if (device == "cuda") {
+    runner = std::make_unique<torch::inductor::AOTIModelContainerRunnerCuda>(
+        model_so_path);
+#endif
   } else {
     testing::AssertionFailure() << "unsupported device: " << device;
   }
@@ -197,12 +200,14 @@ void test_aoti_double_buffering(
   real_map.emplace("L__self___w_add", new at::Tensor(add_tensors));
 
   std::unique_ptr<torch::inductor::AOTIModelContainerRunner> runner;
-  if (device == "cuda") {
-    runner = std::make_unique<torch::inductor::AOTIModelContainerRunnerCuda>(
-        model_so_path.c_str());
-  } else if (device == "cpu") {
+  if (device == "cpu") {
     runner = std::make_unique<torch::inductor::AOTIModelContainerRunnerCpu>(
-        model_so_path.c_str());
+        model_so_path);
+#if defined(USE_CUDA) || defined(USE_ROCM)
+  } else if (device == "cuda") {
+    runner = std::make_unique<torch::inductor::AOTIModelContainerRunnerCuda>(
+        model_so_path);
+#endif
   } else {
     testing::AssertionFailure() << "unsupported device: " << device;
   }
@@ -241,6 +246,7 @@ void test_aoti_double_buffering(
   ASSERT_TRUE(torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
 }
 
+#if defined(USE_CUDA) || defined(USE_ROCM)
 void test_aoti_double_buffering_with_tensor_constants() {
   torch::NoGradGuard no_grad;
 
@@ -279,6 +285,7 @@ void test_aoti_double_buffering_with_tensor_constants() {
   actual_output_tensors = runner->run(input_tensors);
   ASSERT_TRUE(torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
 }
+#endif
 
 } // namespace
 

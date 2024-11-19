@@ -2,7 +2,6 @@
 
 import functools
 import sys
-
 from unittest import expectedFailure as xfail, skipIf as skipif
 
 from pytest import raises as assert_raises
@@ -38,7 +37,6 @@ if TEST_WITH_TORCHDYNAMO:
         vsplit,
     )
     from numpy.random import rand, randint
-
     from numpy.testing import assert_, assert_array_equal, assert_equal
 
 else:

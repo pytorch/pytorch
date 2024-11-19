@@ -18,8 +18,7 @@
 #include <unordered_map>
 #include <utility>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 
@@ -830,8 +829,7 @@ struct GraphFuser {
     }
 
     bchunk->removeInput(producer_index);
-    for (const auto i : c10::irange(nchunks)) {
-      (void)i; // Suppress unused variable warning
+    for ([[maybe_unused]] const auto i : c10::irange(nchunks)) {
       bchunk->eraseOutput(nchunks * producer_index);
     }
 
@@ -1157,9 +1155,8 @@ struct GraphFuser {
     while (any_changed) {
       any_changed = false;
       for (auto it = block_->nodes().rbegin(); it != block_->nodes().rend();) {
-        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-        bool changed;
-        std::tie(it, changed) = scanNode(*it);
+        auto [tmp_it, changed] = scanNode(*it);
+        it = tmp_it;
         any_changed |= changed;
       }
     }
@@ -1284,5 +1281,4 @@ void CustomFuseGraph(
   Lint(&db);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

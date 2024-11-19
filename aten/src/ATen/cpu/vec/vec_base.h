@@ -1,4 +1,8 @@
 #pragma once
+#if defined(__GNUC__) && __GNUC__ == 10 && __GNUC_MINOR__ <= 2 && defined(__ARM_FEATURE_SVE)
+// Workaround for https: //gcc.gnu.org/bugzilla/show_bug.cgi?id=117161
+#pragma GCC optimize("no-tree-vectorize")
+#endif
 
 // DO NOT DEFINE STATIC DATA IN THIS HEADER!
 // See Note [Do not compile initializers with AVX]
@@ -62,6 +66,16 @@ Windows llvm will not have this defination.
 #endif
 #define VECTOR_WIDTH 64
 #define int_vector __m512i
+#elif defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE) // CPU_CAPABILITY_AVX512
+// SVE code expects 256-vectors; leave that set for SVE?
+#if defined(__GNUC__)
+#define __at_align__ __attribute__((aligned(16)))
+#elif defined(_WIN32)
+#define __at_align__ __declspec(align(16))
+#else
+#define __at_align__
+#endif
+#define VECTOR_WIDTH 16
 #else // CPU_CAPABILITY_AVX512
 #if defined(__GNUC__)
 #define __at_align__ __attribute__((aligned(32)))
@@ -138,40 +152,10 @@ private:
 public:
   using value_type = T;
   using size_type = int;
-  // Note [constexpr static function to avoid odr-usage compiler bug]
-  // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  // Why, you might ask, is size defined to be a static constexpr function,
-  // rather than a more ordinary 'static constexpr int size;' variable?
-  // The problem lies within ODR rules for static constexpr members versus
-  // static constexpr functions.  First, recall that this class (along with all
-  // of its derivations) live in an anonymous namespace: they are intended to be
-  // *completely* inlined at their use-sites, because we need to compile it
-  // multiple times for different instruction sets.
-  //
-  // Because of this constraint, we CANNOT provide a single definition for
-  // any static members in this class; since we want to compile the class
-  // multiple times, there wouldn't actually be any good place to put the
-  // definition.  Now here is the problem: if we ODR-use a static constexpr
-  // member, we are *obligated* to provide a definition.  Without the
-  // definition, you get a compile error like:
-  //
-  //    relocation R_X86_64_PC32 against undefined symbol
-  //    `_ZN2at6vec25612_GLOBAL__N_16VectorizedIdE4sizeE' can not be used when making
-  //    a shared object; recompile with -fPIC
-  //
-  // If this were C++17, we could replace a static constexpr variable with
-  // an inline variable which doesn't require one definition. But we are not
-  // C++17.  So the next best thing is to replace the member with a static
-  // constexpr (and therefore inline) function, which does not require ODR
-  // either.
-  //
-  // Also, technically according to the C++ standard, we don't have to define
-  // a constexpr variable if we never odr-use it.  But it seems that some
-  // versions GCC/Clang have buggy determinations on whether or not an
-  // identifier is odr-used or not, and in any case it's hard to tell if
-  // a variable is odr-used or not.  So best to just cut the problem at the root.
+
+  static constexpr size_type kSize = VECTOR_WIDTH / sizeof(T);
   static constexpr size_type size() {
-    return VECTOR_WIDTH / sizeof(T);
+    return kSize;
   }
   Vectorized() : values{static_cast<T>(0)} {}
   Vectorized(T val) {
@@ -182,6 +166,9 @@ public:
   template<typename... Args,
            typename = std::enable_if_t<(sizeof...(Args) == size())>>
   Vectorized(Args... vals) : values{vals...}{
+  }
+  Vectorized(const T(&arr)[kSize]) {
+    std::memcpy(values, arr, sizeof(values));
   }
   // This also implies const T& operator[](int idx) const
   inline operator const T*() const {
@@ -209,8 +196,13 @@ public:
     }
     return vector;
   }
-  static Vectorized<T> blendv(const Vectorized<T>& a, const Vectorized<T>& b,
-                          const Vectorized<T>& mask) {
+// Workaround for https: //gcc.gnu.org/bugzilla/show_bug.cgi?id=117001
+#if __GNUC__ <= 12 && defined(__ARM_FEATURE_SVE)
+  static Vectorized<T>  __attribute__ ((optimize("-fno-tree-loop-vectorize"))) blendv(const Vectorized<T>& a,
+#else
+  static Vectorized<T> blendv(const Vectorized<T>& a,
+#endif
+    const Vectorized<T>& b, const Vectorized<T>& mask) {
     Vectorized vector;
     int_same_size_t<T> buffer[size()];
     mask.store(buffer);
@@ -290,6 +282,19 @@ public:
     }
     return false;
   }
+// TODO: Remove this once the issue with MSVC is fixed
+//       See https://developercommunity.visualstudio.com/t/MSVC-loop-unrolling-problem-194033813-/10720692
+#if defined(_WIN32) && defined(__aarch64__)
+  Vectorized<T> map(T (*const f)(T)) const {
+    Vectorized<T> ret;
+    for (int64_t i = 0; i < size(); i++) {
+      ret[i] = f(values[i]);
+      if (++i < size())
+        ret[i] = f(values[i]);
+    }
+    return ret;
+  }
+#else
   Vectorized<T> map(T (*const f)(T)) const {
     Vectorized<T> ret;
     for (int64_t i = 0; i != size(); i++) {
@@ -297,6 +302,7 @@ public:
     }
     return ret;
   }
+#endif
   Vectorized<T> map(T (*const f)(const T &)) const {
     Vectorized<T> ret;
     for (int64_t i = 0; i != size(); i++) {
@@ -848,22 +854,22 @@ static inline Vectorized<T> bitwise_binary_op(const Vectorized<T> &a, const Vect
   return Vectorized<T>::loadu(buffer);
 }
 
-template<class T, typename std::enable_if_t<!std::is_base_of<Vectorizedi, Vectorized<T>>::value, int> = 0>
+template<class T, typename std::enable_if_t<!std::is_base_of_v<Vectorizedi, Vectorized<T>>, int> = 0>
 inline Vectorized<T> operator&(const Vectorized<T>& a, const Vectorized<T>& b) {
   return bitwise_binary_op(a, b, std::bit_and<intmax_t>());
 }
-template<class T, typename std::enable_if_t<!std::is_base_of<Vectorizedi, Vectorized<T>>::value, int> = 0>
+template<class T, typename std::enable_if_t<!std::is_base_of_v<Vectorizedi, Vectorized<T>>, int> = 0>
 inline Vectorized<T> operator|(const Vectorized<T>& a, const Vectorized<T>& b) {
   return bitwise_binary_op(a, b, std::bit_or<intmax_t>());
 }
-template<class T, typename std::enable_if_t<!std::is_base_of<Vectorizedi, Vectorized<T>>::value, int> = 0>
+template<class T, typename std::enable_if_t<!std::is_base_of_v<Vectorizedi, Vectorized<T>>, int> = 0>
 inline Vectorized<T> operator^(const Vectorized<T>& a, const Vectorized<T>& b) {
   return bitwise_binary_op(a, b, std::bit_xor<intmax_t>());
 }
 
 #endif // defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512)
 
-template<class T, typename std::enable_if_t<!std::is_base_of<Vectorizedi, Vectorized<T>>::value, int> = 0>
+template<class T, typename std::enable_if_t<!std::is_base_of_v<Vectorizedi, Vectorized<T>>, int> = 0>
 inline Vectorized<T> operator~(const Vectorized<T>& a) {
   using int_t = int_same_size_t<T>;
   Vectorized<T> ones(c10::bit_cast<T>((int_t)(~(int_t)0)));  // All bits are 1
@@ -947,6 +953,17 @@ inline Vectorized<T> fmsub(const Vectorized<T>& a, const Vectorized<T>& b, const
   return a * b - c;
 }
 
+template <typename T>
+Vectorized<T> inline operator&&(
+    const Vectorized<T>& a,
+    const Vectorized<T>& b) {
+  Vectorized<T> ret;
+  for (int i = 0; i != Vectorized<T>::size(); i++) {
+    ret[i] = a[i] && b[i];
+  }
+  return ret;
+}
+
 template <int64_t scale = 1, typename T = void>
 std::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vectorized<T>>
 inline gather(T const* base_addr, const Vectorized<int_same_size_t<T>>& vindex) {
@@ -979,7 +996,7 @@ inline mask_gather(const Vectorized<T>& src, T const* base_addr,
       buffer[i] = src_arr[i];
     }
   }
-  mask = Vectorized<T>();  // "zero out" mask
+  mask = Vectorized<T>(static_cast<T>(0));  // "zero out" mask
   return Vectorized<T>::loadu(static_cast<void*>(buffer));
 }
 
@@ -1105,7 +1122,7 @@ inline void convert(const src_T *src, dst_T *dst, int64_t n) {
 #ifndef _MSC_VER
 # pragma unroll
 #endif
-  for (C10_UNUSED const auto i : c10::irange(n)) {
+  for ([[maybe_unused]] const auto i : c10::irange(n)) {
     *dst = c10::convert<dst_T>(c10::load(src));
     src++;
     dst++;
@@ -1126,13 +1143,18 @@ inline Vectorized<T> flip(const Vectorized<T> & data) {
 
 // Transpose the `src` buffer of type `T` and size (M,N) into the `dst` buffer. `ld_src` is the leading
 // dimension of `src` and `ld_dst` is the leading dimension of `dst`.
-template <typename T, int M, int N>
-inline void transpose_mxn(const T* src, int64_t ld_src, T* dst, int64_t ld_dst) {
+template <typename T>
+inline void transpose_mxn(const T* src, int64_t ld_src, T* dst, int64_t ld_dst, int M, int N) {
   for (int i = 0; i < M; i++) {
     for (int j = 0; j < N; j++) {
       dst[j*ld_dst + i] = src[i*ld_src + j];
     }
   }
+}
+
+template <typename T, int M, int N>
+inline void transpose_mxn(const T* src, int64_t ld_src, T* dst, int64_t ld_dst) {
+  transpose_mxn<T>(src, ld_src, dst, ld_dst, M, N);
 }
 
 }} // namespace at::vec::CPU_CAPABILITY

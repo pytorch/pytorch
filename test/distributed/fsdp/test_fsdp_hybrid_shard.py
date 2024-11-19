@@ -26,7 +26,7 @@ from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
-    CUDAInitMode,
+    DEVICEInitMode,
     FSDPInitMode,
     FSDPTest,
     TransformerWithSharedParams,
@@ -79,7 +79,7 @@ def patch_reduce_scatter(new_reduce_scatter):
 
 
 class MyModel(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.lin1 = nn.Linear(10, 10)
         self.lin2 = nn.Linear(10, 10)
@@ -384,7 +384,7 @@ class TestFSDPHybridShard(FSDPTest):
         fsdp_model = TransformerWithSharedParams.init(
             self.process_group,
             FSDPInitMode.RECURSIVE,
-            CUDAInitMode.CUDA_BEFORE,
+            DEVICEInitMode.DEVICE_BEFORE,
             hsdp_kwargs,
             deterministic=True,
         )
@@ -415,7 +415,7 @@ class TestFSDPHybridShard(FSDPTest):
             hsdp_model = TransformerWithSharedParams.init(
                 hsdp_process_groups or self.process_group,
                 FSDPInitMode.RECURSIVE,
-                CUDAInitMode.CUDA_BEFORE,
+                DEVICEInitMode.DEVICE_BEFORE,
                 hsdp_kwargs,
                 deterministic=True,
             )
@@ -423,7 +423,7 @@ class TestFSDPHybridShard(FSDPTest):
             model = TransformerWithSharedParams.init(
                 hsdp_process_groups or self.process_group,
                 FSDPInitMode.NO_FSDP,
-                CUDAInitMode.CUDA_BEFORE,
+                DEVICEInitMode.DEVICE_BEFORE,
                 {},
                 deterministic=True,
             )

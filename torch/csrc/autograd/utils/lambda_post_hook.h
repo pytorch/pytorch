@@ -1,10 +1,9 @@
 #pragma once
 
 #include <torch/csrc/autograd/function_hook.h>
+#include <torch/csrc/dynamo/compiled_autograd.h>
 
-namespace torch {
-namespace autograd {
-namespace utils {
+namespace torch::autograd::utils {
 
 // Turns lambda into a torch::autograd::FunctionPostHook.
 class LambdaPostHook : public torch::autograd::FunctionPostHook {
@@ -32,9 +31,7 @@ class LambdaPostHook : public torch::autograd::FunctionPostHook {
 
  protected:
   std::function<variable_list(const variable_list&, const variable_list&)> fn_;
-  compiled_fn_type compiled_fn_;
+  compiled_fn_type compiled_fn_{};
 };
 
-} // namespace utils
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd::utils

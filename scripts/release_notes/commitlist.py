@@ -512,9 +512,7 @@ The categories below are as follows:
 * Developers: All commits that are not end-user facing but still impact people that compile from source, develop into pytorch, extend pytorch, etc
 """
 
-    return [
-        header,
-    ]
+    return [header]
 
 
 def main():

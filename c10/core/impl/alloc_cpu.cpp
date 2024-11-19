@@ -3,6 +3,7 @@
 #include <c10/core/alignment.h>
 #include <c10/util/Flags.h>
 #include <c10/util/Logging.h>
+#include <c10/util/env.h>
 #include <c10/util/irange.h>
 #include <c10/util/numa.h>
 
@@ -53,8 +54,8 @@ void memset_junk(void* data, size_t num) {
 #if defined(__linux__) && !defined(__ANDROID__)
 static inline bool is_thp_alloc_enabled() {
   static bool value = [&] {
-    const char* ptr = std::getenv("THP_MEM_ALLOC_ENABLE");
-    return ptr != nullptr ? std::atoi(ptr) : 0;
+    auto env = c10::utils::check_env("THP_MEM_ALLOC_ENABLE");
+    return env.has_value() ? env.value() : 0;
   }();
   return value;
 }
@@ -71,11 +72,11 @@ inline bool is_thp_alloc(size_t nbytes) {
   return (is_thp_alloc_enabled() && (nbytes >= gAlloc_threshold_thp));
 }
 #elif !defined(__ANDROID__) && !defined(_MSC_VER)
-constexpr size_t c10_compute_alignment(C10_UNUSED size_t nbytes) {
+constexpr size_t c10_compute_alignment([[maybe_unused]] size_t nbytes) {
   return gAlignment;
 }
 
-constexpr bool is_thp_alloc(C10_UNUSED size_t nbytes) {
+constexpr bool is_thp_alloc([[maybe_unused]] size_t nbytes) {
   return false;
 }
 #endif
@@ -92,8 +93,7 @@ void* alloc_cpu(size_t nbytes) {
       "alloc_cpu() seems to have been called with negative number: ",
       nbytes);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  void* data;
+  void* data = nullptr;
 #ifdef __ANDROID__
   data = memalign(gAlignment, nbytes);
   CAFFE_ENFORCE(
@@ -163,4 +163,27 @@ void free_cpu(void* data) {
 #endif
 }
 
+#ifdef USE_MIMALLOC_ON_MKL
+namespace mi_malloc_wrapper {
+void* c10_mi_malloc(size_t size) {
+  return mi_malloc(size);
+}
+
+void* c10_mi_calloc(size_t count, size_t size) {
+  return mi_calloc(count, size);
+}
+
+void* c10_mi_realloc(void* p, size_t newsize) {
+  return mi_realloc(p, newsize);
+}
+
+void* c10_mi_malloc_aligned(size_t size, size_t alignment) {
+  return mi_malloc_aligned(size, alignment);
+}
+
+void c10_mi_free(void* p) {
+  mi_free(p);
+}
+} // namespace mi_malloc_wrapper
+#endif
 } // namespace c10

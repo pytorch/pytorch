@@ -140,6 +140,7 @@ from torch.distributed.elastic.multiprocessing import (
     Std,
 )
 
+
 format_str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 logging.basicConfig(level=logging.INFO, format=format_str)
 logger = logging.getLogger(__name__)
@@ -266,7 +267,7 @@ class _Launcher:
 or /.local/lib/ or /usr/local/lib/ or /usr/local/lib64/ or /usr/lib or /usr/lib64 or \
 {expanduser('~')}/.local/lib/ so the LD_PRELOAD environment variable will not be set."
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.cpuinfo = _CPUinfo()
 
     def add_lib_preload(self, lib_type):

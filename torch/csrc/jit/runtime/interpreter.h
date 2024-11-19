@@ -9,8 +9,8 @@
 #include <torch/csrc/Export.h>
 #include <torch/csrc/jit/frontend/source_range.h>
 
-C10_DECLARE_bool(torch_jit_disable_warning_prints);
-C10_DECLARE_bool(torch_jit_enable_rethrow_caught_exception);
+TORCH_DECLARE_bool(torch_jit_disable_warning_prints);
+TORCH_DECLARE_bool(torch_jit_enable_rethrow_caught_exception);
 
 namespace at {
 class Tensor;
@@ -39,6 +39,8 @@ struct Instruction;
 using Stack = std::vector<c10::IValue>;
 using c10::ivalue::Future;
 using TaskLauncher = std::function<void(std::function<void()>)>;
+
+bool TORCH_API in_torchscript_runtime();
 
 struct TORCH_API Code {
   Code() = default;

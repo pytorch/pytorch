@@ -3856,7 +3856,7 @@ class TestIterDataPipeCountSampleYielded(TestCase):
     def test_iterdatapipe_sample_yielded_return_self(self):
         class _CustomGeneratorDataPipe(IterDataPipe):
             # This class's `__iter__` is not a generator function
-            def __init__(self):
+            def __init__(self) -> None:
                 self.source = iter(range(10))
 
             def __iter__(self):
@@ -3871,7 +3871,7 @@ class TestIterDataPipeCountSampleYielded(TestCase):
     def test_iterdatapipe_sample_yielded_next(self):
         class _CustomNextDataPipe(IterDataPipe):
             # This class's `__iter__` returns `self` and has a `__next__`
-            def __init__(self):
+            def __init__(self) -> None:
                 self.source = iter(range(10))
 
             def __iter__(self):
@@ -3889,7 +3889,7 @@ class TestIterDataPipeCountSampleYielded(TestCase):
     def test_iterdatapipe_sample_yielded_next_exception(self):
         class _CustomNextDataPipe(IterDataPipe):
             # This class's `__iter__` returns `self` and has a `__next__`
-            def __init__(self):
+            def __init__(self) -> None:
                 self.source = iter(range(10))
                 self.count = 0
 
@@ -3924,7 +3924,7 @@ class TestIterDataPipeCountSampleYielded(TestCase):
 
 
 class _CustomNonGeneratorTestDataPipe(IterDataPipe):
-    def __init__(self):
+    def __init__(self) -> None:
         self.n = 10
         self.source = list(range(self.n))
 
@@ -3937,7 +3937,7 @@ class _CustomNonGeneratorTestDataPipe(IterDataPipe):
 
 
 class _CustomSelfNextTestDataPipe(IterDataPipe):
-    def __init__(self):
+    def __init__(self) -> None:
         self.n = 10
         self.iter = iter(range(self.n))
 

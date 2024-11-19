@@ -72,7 +72,7 @@ class QConfigMultiMapping:
 
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         # initialize this with 1 QConfigMapping to avoid corner cases
         self.qconfig_mappings_list: List[QConfigMapping] = [QConfigMapping()]
 

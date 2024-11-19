@@ -10,7 +10,7 @@
 #include <ATen/cpu/vec/vec.h>
 #include <c10/util/irange.h>
 
-namespace at { namespace native { namespace detail {
+namespace at::native::detail {
 
 struct InputMeta {
   void* data_ptr;
@@ -143,4 +143,4 @@ struct CanUseNativeSerialStack<TensorListType, true> {
   }
 };
 
-}}}  // namespace at::native::detail
+} // namespace at::native::detail

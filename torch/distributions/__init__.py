@@ -71,6 +71,7 @@ derivative would be as follows::
     loss.backward()
 """
 
+from . import transforms
 from .bernoulli import Bernoulli
 from .beta import Beta
 from .binomial import Binomial
@@ -111,11 +112,11 @@ from .relaxed_categorical import RelaxedOneHotCategorical
 from .studentT import StudentT
 from .transformed_distribution import TransformedDistribution
 from .transforms import *  # noqa: F403
-from . import transforms
 from .uniform import Uniform
 from .von_mises import VonMises
 from .weibull import Weibull
 from .wishart import Wishart
+
 
 _add_kl_info()
 del _add_kl_info

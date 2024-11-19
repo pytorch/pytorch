@@ -15,7 +15,7 @@ struct AbsFunctor {
   }
 };
 
-CONSTEXPR_EXCEPT_WIN_CUDA char abs_name[] = "abs_kernel";
+constexpr char abs_name[] = "abs_kernel";
 void abs_kernel_cuda(TensorIteratorBase& iter) {
   auto dtype = iter.dtype();
   if (at::isComplexType(dtype)) {
@@ -46,6 +46,6 @@ void abs_kernel_cuda(TensorIteratorBase& iter) {
   }
 }
 
-  REGISTER_DISPATCH(abs_stub, &abs_kernel_cuda);
+  REGISTER_DISPATCH(abs_stub, &abs_kernel_cuda)
 
 } // namespace at::native

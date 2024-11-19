@@ -3437,7 +3437,8 @@ class ModuleTest(TestBase):
                     test_case._forward(module, input)
                     torch.save(module, f)
                     f.seek(0)
-                    module_copy = torch.load(f)
+                    # weights_only=False as this is legacy code that saves the model
+                    module_copy = torch.load(f, weights_only=False)
                     test_case.assertEqual(test_case._forward(module, input), test_case._forward(module_copy, input))
 
             self._do_test(test_case, module, input)
@@ -3967,17 +3968,17 @@ def _test_module_empty_input(test_case, module, inp, check_size=True, inference=
 
 def _create_basic_net():
     class Layer(nn.Module):
-        def __init__(self):
+        def __init__(self) -> None:
             super().__init__()
             self.layer_dummy_param = nn.Parameter(torch.empty(3, 5))
-            self.register_buffer('layer_dummy_buf', torch.zeros(1, 3, 3, 7))
+            self.layer_dummy_buf = nn.Buffer(torch.zeros(1, 3, 3, 7))
 
     class Net(nn.Module):
-        def __init__(self):
+        def __init__(self) -> None:
             super().__init__()
             self.l1 = Layer()
             self.dummy_param = nn.Parameter(torch.empty(3, 5))
-            self.register_buffer('dummy_buf', torch.zeros(7, 3, 3, 1))
+            self.dummy_buf = nn.Buffer(torch.zeros(7, 3, 3, 1))
 
     l = Layer()
     n = Net()

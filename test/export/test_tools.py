@@ -44,7 +44,7 @@ class TestExportTools(TestCase):
                 return x.sin()
 
         class Module(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.unsupported = Unsupported()
                 self.supported = Supported()

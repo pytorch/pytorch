@@ -17,33 +17,11 @@ namespace {
 
 using namespace mps;
 
-static MetalShaderLibrary lib(R"RENORM_METAL(
-
-#include <metal_stdlib>
-using namespace metal;
-
-template<typename T>
-kernel void renorm(constant T* norm [[buffer(0)]],
-                   device T* factor [[buffer(1)]],
-                   constant float& maxnorm [[buffer(2)]],
-                   uint index [[thread_position_in_grid]]) {
-  constexpr T eps = 1e-7;
-  constexpr T one = 1;
-  factor[index] = norm[index] > maxnorm ? maxnorm / (norm[index] + eps) : one;
-}
-
-#define REGISTER_RENORM_OP(DTYPE)                                  \
-template                                                           \
-[[host_name("renorm_" #DTYPE)]]                                    \
-kernel void renorm<DTYPE>(constant DTYPE* norm [[buffer(0)]],      \
-                          device DTYPE* factor [[buffer(1)]],      \
-                          constant float& maxnorm [[buffer(2)]],   \
-                          uint index [[thread_position_in_grid]]);
-
-REGISTER_RENORM_OP(float);
-REGISTER_RENORM_OP(half);
-
-)RENORM_METAL");
+#ifndef PYTORCH_JIT_COMPILE_SHADERS
+static auto& lib = MetalShaderLibrary::getBundledLibrary();
+#else
+#include <ATen/native/mps/RenormKernel_metallib.h>
+#endif
 
 void renorm_out_mps(const Tensor& self, const Scalar& p, int64_t dim, const Scalar& maxnorm, const Tensor& out) {
   auto self_sizes = self.sizes();

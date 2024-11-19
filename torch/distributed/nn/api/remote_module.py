@@ -156,7 +156,7 @@ class _RemoteModule(nn.Module):
         created outside of remote modules, rather than as submodules of any remote module (by calling ``add_module``).
         Hybrid Example:
                 >>> class HybridModel(nn.Module):
-                >>>     def __init__(self):
+                >>>     def __init__(self) -> None:
                 >>>         nn.Module.__init__(self)
                 >>>         self.remote_embedding = RemoteModule(...)
                 >>>         self.local_linear = nn.Linear(...)

@@ -1,6 +1,5 @@
 #include <ATen/native/quantized/AffineQuantizerBase.h>
 #include <c10/util/irange.h>
-#include <cfenv>
 #include <climits>
 
 #ifdef USE_FBGEMM
@@ -10,8 +9,8 @@
 #include <arm_neon.h>
 #endif
 
-namespace at {
-namespace native {
+
+namespace at::native {
 
 namespace {
 
@@ -45,10 +44,8 @@ T quantize_val(double scale, int64_t zero_point, float value) {
   // cases away from zero, and can be consistent with SIMD implementations for
   // example in x86 using _mm512_cvtps_epi32 or mm512_round_ps with
   // _MM_FROUND_CUR_DIRECTION option that also follow the current rounding mode.
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int32_t qvalue;
   // NOLINTNEXTLINE(bugprone-signed-char-misuse)
-  qvalue = fbgemm::Quantize<typename T::underlying, false /*LEGACY*/>(
+  auto qvalue = fbgemm::Quantize<typename T::underlying, false /*LEGACY*/>(
       value,
       static_cast<int32_t>(zero_point),
       static_cast<float>(scale),
@@ -100,8 +97,7 @@ template int8_t quantize_val_arm<int8_t>(
 
 template <typename T>
 inline float dequantize_val(double scale, int64_t zero_point, T value) {
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  fbgemm::TensorQuantizationParams qparams;
+  fbgemm::TensorQuantizationParams qparams{};
   qparams.scale = static_cast<float>(scale);
   qparams.zero_point = static_cast<int32_t>(zero_point);
   return fbgemm::Dequantize<typename T::underlying>(value.val_, qparams);
@@ -202,12 +198,9 @@ TORCH_API float dequantize_val(double scale, int64_t zero_point, T value) {
 * to (-Xmin/scale), where Xmin is the min value in input tensor row.
 */
 int quantize_val_float_qparams(float scale, float zero_point, float value, int qmin, int qmax) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int qvalue;
 
   float inv_scale = scale == 0 ? 1.0f : 1.0f / scale;
-  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
-  qvalue = lrintf(value * inv_scale + zero_point);
+  auto qvalue = static_cast<int>(lrintf(value * inv_scale + zero_point));
   qvalue = std::max(qmin, std::min(qvalue, qmax));
   return qvalue;
 }
@@ -226,7 +219,7 @@ DST_T requantize_val(
 template <typename DST_T>
 DST_T requantize_from_int(double multiplier, int64_t zero_point, int64_t src) {
   int64_t quantize_down =
-      zero_point + lrintf(src * static_cast<float>(multiplier));
+      zero_point + lrintf(static_cast<float>(static_cast<double>(src) * multiplier));
   // NOLINTNEXTLINE(bugprone-signed-char-misuse)
   int32_t min = std::numeric_limits<typename DST_T::underlying>::min();
   int32_t max = std::numeric_limits<typename DST_T::underlying>::max();
@@ -297,5 +290,4 @@ requantize_from_int<quint8>(double, int64_t, int64_t);
 template TORCH_API qint32
 requantize_from_int<qint32>(double, int64_t, int64_t);
 
-} // namespace native
-} // namespace at
+} // namespace at::native

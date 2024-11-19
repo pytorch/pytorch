@@ -6,9 +6,7 @@
 #include <set>
 #include <string>
 
-namespace torch {
-namespace jit {
-namespace mobile {
+namespace torch::jit::mobile {
 /* The KernelDTypeTracer class handles the attachment and removal of a recording
  * callback that traces the invocation of code that handles specific dtypes in
  * kernel function implementations that are tagged with specific tags.
@@ -36,6 +34,4 @@ struct KernelDTypeTracer final {
     at::removeCallback(handle_);
   }
 };
-} // namespace mobile
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::mobile

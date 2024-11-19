@@ -9,9 +9,9 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch.nn.functional as F
-
 from torch._dynamo.comptime import comptime
-from torch._dynamo.testing import CompileCounter, same
+from torch._dynamo.testing import CompileCounter, CompileCounterWithBackend, same
+from torch.testing._internal.common_utils import skipIfWindows
 from torch.testing._internal.logging_utils import logs_to_string
 
 
@@ -170,6 +170,89 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         random.seed(10)
         res2 = opt_fn(x)
         self.assertTrue(same(res1, res2))
+
+    def test_random_object(self):
+        # test argument passing, mutation, reconstruction, state correctness
+        def fn(x, rand2):
+            r1 = random.randint(1, 9)
+            r2 = rand2.randint(1, 9)
+            rand3 = random.Random(42)
+            r3 = rand3.randint(1, 9)
+
+            y = x + r1 + r2 + r3
+            return y, rand2, rand3
+
+        inp = torch.randn(3, 3)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        random.seed(0)
+        y_1, rand2_1, rand3_1 = fn(inp, random.Random(12))
+        state_1 = random.getstate()
+        random.seed(0)
+        y_2, rand2_2, rand3_2 = opt_fn(inp, random.Random(12))
+        state_2 = random.getstate()
+        self.assertEqual(y_1, y_2)
+        self.assertEqual(state_1, state_2)
+        self.assertEqual(rand2_1.getstate(), rand2_2.getstate())
+        self.assertEqual(rand3_1.getstate(), rand3_2.getstate())
+
+    def test_random_object_methods(self):
+        def fn(x, rand1, rand2, rand3):
+            rand1.seed(42)
+            rand4 = random.Random(9002)
+            rand2.setstate(rand4.getstate())
+            r1 = rand1.random()
+            r2 = rand2.randint(1, 10)
+            r3 = rand3.randrange(10)
+            r4 = rand4.uniform(0, 1)
+            return x + r1 + r2 + r3 + r4
+
+        inp = torch.randn(3, 3)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        rand1_1 = random.Random(1)
+        rand2_1 = random.Random(2)
+        rand3_1 = random.Random(3)
+        rand1_2 = random.Random(1)
+        rand2_2 = random.Random(2)
+        rand3_2 = random.Random(3)
+        y1 = fn(inp, rand1_1, rand2_1, rand3_1)
+        y2 = opt_fn(inp, rand1_2, rand2_2, rand3_2)
+        self.assertEqual(y1, y2)
+        self.assertEqual(rand1_1.getstate(), rand1_2.getstate())
+        self.assertEqual(rand2_1.getstate(), rand2_2.getstate())
+        self.assertEqual(rand3_1.getstate(), rand3_2.getstate())
+
+    def test_random_object_overriden_methods(self):
+        # these will result in graph breaks, but we shouldn't crash
+        def get_rng():
+            rand1 = random.Random(1)
+            rand2 = random.Random(2)
+
+            orig_random = rand1.random
+
+            def custom_random():
+                return orig_random()
+
+            orig_getstate = rand2.getstate
+
+            def custom_getstate():
+                return orig_getstate()
+
+            rand1.random = custom_random
+            rand2.getstate = custom_getstate
+            return rand1, rand2
+
+        def fn(x, rand1, rand2):
+            r1 = rand1.random()
+            rand3 = random.Random()
+            rand3.setstate(rand2.getstate())
+            r2 = rand3.random()
+            return x + r1 + r2
+
+        inp = torch.randn(3, 3)
+        opt_fn = torch.compile(fn, backend="eager")
+        y1 = fn(inp, *get_rng())
+        y2 = opt_fn(inp, *get_rng())
+        self.assertEqual(y1, y2)
 
     def test_builtin_getitem(self):
         # builtin getitem args[0] is python list and args[1] is unspec
@@ -393,6 +476,9 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(f3(r), optimize(f3)(r))
         self.assertEqual(f4(r), optimize(f4)(r))
 
+    @skipIfWindows(
+        msg="AssertionError: The values for attribute 'dtype' do not match: torch.int32 != torch.int64."
+    )
     def test_to_tensor(self):
         def f1():
             a = np.random.uniform(low=-1, high=1, size=(20, 1))
@@ -515,6 +601,33 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         compl_fn = torch.compile(fn, dynamic=True, backend="eager")
         self.assertEqual(compl_fn(inputs), fn(inputs))
 
+    @torch._dynamo.config.patch(specialize_float=False)
+    def test_symfloat_no_replacement(self):
+        # See https://github.com/pytorch/pytorch/pull/139250 for more context
+        # The high level idea is if we don't want to set a replacement where a
+        # symbol is on both the right and left side, otherwise we'll end up
+        # in an infinite self._find recursion.
+        def fn(t, m):
+            return 2 * t if m.is_integer() else t
+
+        t = torch.tensor([1])
+        compl_fn = torch.compile(fn, dynamic=True, backend="eager")
+        self.assertEqual(fn(t, 1.0), compl_fn(t, 1.0))
+
+    @torch._dynamo.config.patch(specialize_float=False)
+    def test_unspec_roundtrip_float_input(self):
+        def f(x, y):
+            if y == 5.0:
+                return x + 2
+            else:
+                return x + y
+            return (x, y)
+
+        cf = torch.compile(backend="eager", fullgraph=True)(f)
+        x = 1.1234567891234568
+        y = 1.1234567891234569
+        self.assertAlmostEqual(f(x, y), cf(x, y))
+
     @torch._dynamo.config.patch(specialize_float=False, assume_static_by_default=True)
     def test_unspec_float_input(self):
         cnts = torch._dynamo.testing.CompileCounter()
@@ -535,6 +648,38 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         self.assertExpectedInline(cnts.frame_count, """2""")  # guard worked
         self.assertEqual(f(x, math.nan), cf(x, math.nan))
         self.assertExpectedInline(cnts.frame_count, """3""")  # nan always recompiles
+
+    @torch._dynamo.config.patch(specialize_float=False, capture_scalar_outputs=True)
+    def test_unspecialized_float_multiply_precision(self):
+        dtypes = [torch.bfloat16, torch.float16, torch.float32, torch.float64]
+        for dtype in dtypes:
+
+            def fn(x, y):
+                return x * y
+
+            cnt = CompileCounterWithBackend("aot_eager")
+            fn_opt = torch._dynamo.optimize(cnt)(fn)
+            x = torch.tensor(9.734375, dtype=dtype, requires_grad=True)
+            y1 = 1.00048828125
+            y2 = 1.00048828126
+
+            self.assertEqual(fn_opt(x, y1), fn(x, y1))
+            self.assertEqual(fn_opt(x, y2), fn(x, y2))
+            self.assertEqual(cnt.frame_count, 1)
+
+    @torch._dynamo.config.patch(specialize_float=False, assume_static_by_default=False)
+    def test_unspec_float_input_f64(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def f(x, y):
+            return x + y
+
+        cf = torch.compile(backend=cnts, fullgraph=True)(f)
+
+        x = torch.zeros(3, dtype=torch.float64)
+        # 17 digits of precision so unrepresentable in float32
+        flt = 1.2345678901234567
+        self.assertEqual(f(x, flt), cf(x, flt))
 
     @torch._dynamo.config.patch(specialize_float=False, assume_static_by_default=True)
     def test_unspec_float_output(self):

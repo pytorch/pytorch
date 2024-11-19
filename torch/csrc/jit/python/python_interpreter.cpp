@@ -12,8 +12,6 @@
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
-#include <typeinfo>
-
 #include <pybind11/pybind11.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/autograd/python_engine.h>

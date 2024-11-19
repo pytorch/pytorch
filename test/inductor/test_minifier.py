@@ -6,7 +6,12 @@ import torch._dynamo.config as dynamo_config
 import torch._inductor.config as inductor_config
 from torch._dynamo.test_minifier_common import MinifierTestBase
 from torch._inductor import config
-from torch.testing._internal.common_utils import IS_JETSON, IS_MACOS, TEST_WITH_ASAN
+from torch.testing._internal.common_utils import (
+    IS_JETSON,
+    IS_MACOS,
+    skipIfXpu,
+    TEST_WITH_ASAN,
+)
 from torch.testing._internal.inductor_utils import GPU_TYPE
 from torch.testing._internal.triton_utils import requires_gpu
 
@@ -122,7 +127,7 @@ inner(torch.randn(20))
             res.repro_module(),
             """\
 class Repro(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
 
     def forward(self, arg0_1):
@@ -138,7 +143,7 @@ class Repro(torch.nn.Module):
             res.repro_module(),
             """\
 class Repro(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
 
     def forward(self, arg0_1):
@@ -168,6 +173,79 @@ inner(torch.randn(20, 20))
             "AccuracyError",
             isolate=False,
             minifier_args=["--offload-to-disk"],
+        )
+
+    # Test that compile errors in AOTInductor can be repro'd (both CPU and CUDA)
+    def _test_aoti(self, device, expected_error):
+        # NB: The program is intentionally quite simple, just enough to
+        # trigger one minification step, no more (dedicated minifier tests
+        # should exercise minifier only)
+        run_code = f"""\
+class Model(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.fc1 = torch.nn.Linear(10, 16)
+        self.relu = torch.nn.ReLU()
+        self.sigmoid = torch.nn.Sigmoid()
+
+    def forward(self, x):
+        x = self.fc1(x)
+        x = self.relu(x)
+        x = self.sigmoid(x)
+        return x
+with torch.no_grad():
+    model = Model().to("{device}")
+    example_inputs = (torch.randn(8, 10).to("{device}"),)
+    ep = torch.export.export(
+        model, example_inputs
+    )
+    torch._inductor.aoti_compile_and_package(
+        ep, example_inputs
+    )
+"""
+        return self._run_full_test(run_code, None, expected_error, isolate=True)
+
+    @unittest.skipIf(IS_JETSON, "Fails on Jetson")
+    @inductor_config.patch(
+        {
+            "cpp.inject_relu_bug_TESTING_ONLY": "compile_error",
+            "aot_inductor.dump_aoti_minifier": True,
+        }
+    )
+    def test_aoti_cpu_compile_error(self):
+        res = self._test_aoti("cpu", "CppCompileError")
+        self.assertExpectedInline(
+            res.repro_module(),
+            """\
+class Repro(torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+
+    def forward(self, linear):
+        relu = torch.ops.aten.relu.default(linear);  linear = None
+        return (relu,)""",
+        )
+
+    @requires_gpu
+    @skipIfXpu(msg="AOTI for XPU not enabled yet")
+    @inductor_config.patch(
+        {
+            "triton.inject_relu_bug_TESTING_ONLY": "compile_error",
+            "aot_inductor.dump_aoti_minifier": True,
+        }
+    )
+    def test_aoti_gpu_compile_error(self):
+        res = self._test_aoti(GPU_TYPE, "SyntaxError")
+        self.assertExpectedInline(
+            res.repro_module(),
+            """\
+class Repro(torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+
+    def forward(self, linear):
+        relu = torch.ops.aten.relu.default(linear);  linear = None
+        return (relu,)""",
         )
 
 

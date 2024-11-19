@@ -14,13 +14,10 @@
 #include <ATen/native/layer_norm.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
 
-#include <tuple>
-
-namespace at {
-namespace native {
+namespace at::native {
 
 DEFINE_DISPATCH(nested_dense_elementwise_stub);
-REGISTER_NO_CPU_DISPATCH(nested_dense_elementwise_stub);
+REGISTER_NO_CPU_DISPATCH(nested_dense_elementwise_stub)
 
 std::pair<NestedTensorImpl*, NestedTensorImpl*>
 static get_elementwise_nested_tensor_impl(
@@ -154,7 +151,7 @@ Tensor NestedTensor_elementwise_Tensor(
         other.size(2) == 1);
     if (is_broadcastable_4d_3d) {
       std::vector<Tensor> results;
-      for (auto t : self.unbind()) {
+      for (const auto& t : self.unbind()) {
         results.push_back(f(t, other));
       }
       return at::_nested_tensor_from_tensor_list(results);
@@ -322,5 +319,13 @@ Tensor eq_scalar_nested(const Tensor& self, const Scalar& other) {
       });
 }
 
-} // namespace native
-} // namespace at
+Tensor eq_tensor_nested(const Tensor& self, const Tensor& other) {
+  TORCH_CHECK(!other.is_nested(), "eq does not support nested tensor as other value.");
+  return NestedTensor_elementwise_Tensor(
+      self, other, "eq", false /*supports_striding*/,
+      [](const Tensor& b1, const Tensor& b2) {
+        return b1.eq(b2);
+      });
+}
+
+} // namespace at::native

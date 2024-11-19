@@ -5,9 +5,7 @@
 #include <algorithm>
 #include <iterator>
 #include <memory>
-#include <numeric>
 #include <ostream>
-#include <regex>
 #include <sstream>
 #include <unordered_map>
 
@@ -57,7 +55,7 @@ struct TORCH_API StringCordView {
 
   bool operator==(const StringCordView& rhs) const;
 
-  c10::string_view piece(size_t index) const {
+  std::string_view piece(size_t index) const {
     return pieces_[index];
   }
 
@@ -140,12 +138,12 @@ struct TORCH_API StringCordView {
     }
 
     // returns rest of the line of the current iterator
-    c10::string_view rest_line() const {
+    std::string_view rest_line() const {
       if (line_ >= str_->pieces_.size()) {
         return "";
       }
 
-      c10::string_view cur_line = str_->pieces_[line_];
+      std::string_view cur_line = str_->pieces_[line_];
       return cur_line.substr(pos_, std::string::npos);
     }
 
@@ -189,7 +187,7 @@ struct TORCH_API Source {
   enum CopiesString { COPIES_STRING, DONT_COPY };
 
   explicit Source(
-      c10::string_view text_view,
+      std::string_view text_view,
       std::optional<std::string> filename = std::nullopt,
       size_t starting_line_no = 0,
       std::shared_ptr<SourceRangeUnpickler> gen_ranges = nullptr,
@@ -322,7 +320,7 @@ struct TORCH_API SourceRange {
         end_(end_),
         start_iter_(start_iter) {}
 
-  const c10::string_view token_text() const {
+  const std::string_view token_text() const {
     size_t size = end() - start();
     return start_iter_.rest_line().substr(0, size);
   }

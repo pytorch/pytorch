@@ -7,16 +7,12 @@
 
 #include <cstddef>
 
-namespace torch {
-namespace serialize {
+namespace torch::serialize {
 class InputArchive;
 class OutputArchive;
-} // namespace serialize
-} // namespace torch
+} // namespace torch::serialize
 
-namespace torch {
-namespace data {
-namespace samplers {
+namespace torch::data::samplers {
 
 /// A wrapper around a batch size value, which implements the
 /// `CustomBatchRequest` interface.
@@ -39,7 +35,7 @@ class TORCH_API StreamSampler : public Sampler<BatchSize> {
   explicit StreamSampler(size_t epoch_size);
 
   /// Resets the internal state of the sampler.
-  void reset(optional<size_t> new_size = nullopt) override;
+  void reset(std::optional<size_t> new_size = std::nullopt) override;
 
   /// Returns a `BatchSize` object with the number of elements to fetch in the
   /// next batch. This number is the minimum of the supplied `batch_size` and
@@ -58,6 +54,4 @@ class TORCH_API StreamSampler : public Sampler<BatchSize> {
   size_t epoch_size_;
 };
 
-} // namespace samplers
-} // namespace data
-} // namespace torch
+} // namespace torch::data::samplers

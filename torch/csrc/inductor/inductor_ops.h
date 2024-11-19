@@ -2,8 +2,7 @@
 
 #include <ATen/Tensor.h>
 
-namespace torch {
-namespace inductor {
+namespace torch::inductor {
 
 TORCH_API at::Tensor _mm_plus_mm_out(
     at::Tensor& out,
@@ -37,5 +36,4 @@ TORCH_API at::Tensor _reinterpret_tensor(
     at::IntArrayRef stride,
     int64_t offset_increment = 0);
 
-} // namespace inductor
-} // namespace torch
+} // namespace torch::inductor

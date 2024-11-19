@@ -10,7 +10,7 @@ from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, T
 
 
 class ToyModel(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.seq1 = nn.Sequential(*[nn.Linear(10, 10) for _ in range(2)])
         self.seq2 = nn.Sequential(*[nn.Linear(10, 10) for _ in range(2)])

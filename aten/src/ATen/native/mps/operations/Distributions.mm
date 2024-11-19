@@ -5,6 +5,7 @@
 #include <ATen/native/DistributionTemplates.h>
 #include <ATen/native/Distributions.h>
 #include <ATen/native/TensorFactories.h>
+#include <ATen/native/mps/MPSGraphSonomaOps.h>
 #include <ATen/native/mps/MPSGraphVenturaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
 
@@ -68,13 +69,28 @@ Tensor& random_mps_impl(Tensor& self,
       newCachedGraph->stateTensor =
           mpsGraphRankedPlaceHolder(mpsGraph, MPSDataTypeInt32, @[ @(at::mps::detail::PHILOX_STATE_N) ]);
 
-      // FP16, FP32 and Int32 are the only data types supported for distributions on MPS backend.
+      // BF16, FP16, FP32 and Int32 are the only data types supported for distributions on MPS backend.
       const MPSDataType inputDataType = [&] {
         // only for random_mps, we pass interval range of type int64_t
         if constexpr (std::is_same_v<scalar_t, int64_t>) {
           return MPSDataTypeInt32;
         }
-        return (self.scalar_type() == ScalarType::Half) ? MPSDataTypeFloat16 : MPSDataTypeFloat32;
+        // for bernoully always use float32
+        if constexpr (std::is_same_v<scalar_t, bool>) {
+          return MPSDataTypeFloat32;
+        }
+        switch (self.scalar_type()) {
+          case kHalf:
+            return MPSDataTypeFloat16;
+          case kFloat:
+            return MPSDataTypeFloat32;
+          case kBFloat16: {
+            checkSupportsBFloat16();
+            return MPSDataTypeBFloat16;
+          }
+          default:
+            TORCH_CHECK_TYPE(false, "Unsupported type ", self.scalar_type(), " for operation ", op_name);
+        }
       }();
       const MPSDataType outputDataType = std::is_same_v<scalar_t, bool> ? MPSDataTypeBool : inputDataType;
 
@@ -406,17 +422,6 @@ Tensor& exponential_mps_(Tensor& self, double lambda, std::optional<Generator> g
 }
 
 Tensor& randperm_out_mps(int64_t n, std::optional<Generator> generator, Tensor& result) {
-  if (!is_macos_13_or_newer()) {
-    TORCH_WARN_ONCE("MPS: randperm op is supported natively starting from macOS 13.0. ",
-                    "Falling back on CPU. This may have performance implications.");
-
-    auto result_cpu = result.to("cpu");
-    at::randperm_out(result_cpu, n);
-    result.resize_as_(result_cpu);
-    result.copy_(result_cpu);
-    return result;
-  }
-
   TORCH_CHECK(n >= 0, "n must be non-negative, got", n);
   TORCH_CHECK(!generator.has_value() || (generator.has_value() && result.device() == generator->device()),
               "Expected a '",
