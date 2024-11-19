@@ -145,9 +145,7 @@ class TritonBundler:
             cls.end_compile()
             return [], None
 
-        with dynamo_timed(
-            key="TritonBundler.collect", fwd_only=False, log_pt2_compile_event=True
-        ):
+        with dynamo_timed(key="TritonBundler.collect", log_pt2_compile_event=True):
             entries = cls._entries
             if entries is not None:
                 result: List[TritonKernelArtifacts] = []
@@ -221,9 +219,7 @@ class TritonBundler:
             return None
 
         with dynamo_timed(
-            key="TritonBundler.read_and_emit",
-            fwd_only=False,
-            log_pt2_compile_event=True,
+            key="TritonBundler.read_and_emit", log_pt2_compile_event=True
         ):
             kernel_names: List[str] = []
 

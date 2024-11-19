@@ -1985,9 +1985,7 @@ class GraphLowering(torch.fx.Interpreter):
                 lambda: {"filename": path},
                 payload_fn=lambda: code,
             )
-        with dynamo_timed(
-            "PyCodeCache.load_by_key_path", log_pt2_compile_event=True, fwd_only=False
-        ):
+        with dynamo_timed("PyCodeCache.load_by_key_path", log_pt2_compile_event=True):
             mod = PyCodeCache.load_by_key_path(
                 key,
                 path,
