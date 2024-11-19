@@ -515,7 +515,8 @@ class CppMicroGemmAMX(CppMicroGemm):
     // Create a stack-allocated buffer for tiles of B.
     // Except maybe for the tail-case, an AMX tile of B has 16x32 BF16 elements.
     // we cache K * {{block_n}} elements of dequantized B
-    const auto buf_size = K * {{block_n}};
+    const auto block_n = {{block_n}};
+    const auto buf_size = K * block_n;
     {%- if is_msvc_compiler %}
     // MSVC doesn't support stack-allocated dynamic-sized arrays, so using heap memory here.
     std::unique_ptr<{{input_t}}[]> heap_deq_b_buf_ptr(new {{input_t}}[buf_size]);
@@ -531,16 +532,16 @@ class CppMicroGemmAMX(CppMicroGemm):
     auto load_dequantized_B = [&](int base_idx) {
         // Load a tile of B & cache it in L1D.
         {{input2_t}}* base_addr = const_cast<{{input2_t}}*>(B) + base_idx;
-        for (int idx_dq = 0, idx_q = 0; idx_dq < buf_size; idx_q += ldb, idx_dq += {{block_n}}) {
+        for (int idx_dq = 0, idx_q = 0; idx_dq < buf_size; idx_q += ldb, idx_dq += block_n) {
         {%- if block_n in [16, 32] %}
             auto b_int8 = at::vec::Vectorized<int8_t>::loadu(
                 base_addr + idx_q,
-                static_cast<int64_t>({{block_n}})
+                static_cast<int64_t>(block_n)
             );
             auto b_bf16 = at::vec::convert<{{input_t}}>(b_int8);
             b_bf16.store(
                 dequantized_B_buf + idx_dq,
-                static_cast<int64_t>({{block_n}})
+                static_cast<int64_t>(block_n)
             );
         {%- elif block_n == 48 %}
             // first 32 elements
@@ -565,7 +566,7 @@ class CppMicroGemmAMX(CppMicroGemm):
     };
 {%- endif %}
     // TODO(jgong5): loop unroll for M and N
-    for (int64_t n = 0; n < N; n += {{block_n}}) {
+    for (int64_t n = 0; n < N; n += block_n) {
 {%- if use_cached_dequantized_B %}
         // Dequantize K * block_n int8 B elements into BF16
         load_dequantized_B(n);
