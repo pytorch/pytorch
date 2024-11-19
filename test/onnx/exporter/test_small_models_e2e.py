@@ -77,12 +77,7 @@ class DynamoExporterTest(common_utils.TestCase):
             fallback=False,
         )
         onnx_model = onnx_program.model
-        self.assertIn(
-            ("pkg.torch.__subgraph__", "true_graph_0", ""), onnx_model.functions
-        )
-        self.assertIn(
-            ("pkg.torch.__subgraph__", "false_graph_0", ""), onnx_model.functions
-        )
+        self.assertIn("If", [node.op_type for node in onnx_model.graph])
         onnx_testing.assert_onnx_program(onnx_program)
 
     def test_onnx_export_nested_control_flow_and_nested_weights(self):
