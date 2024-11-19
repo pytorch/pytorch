@@ -18,10 +18,12 @@ c10::Allocator* GetCPUAllocatorMaybePinned(bool pin_memory) {
     // To properly support this, see https://github.com/pytorch/pytorch/issues/14560
     if (at::globalContext().hasCUDA()) {
       return at::detail::getCUDAHooks().getPinnedMemoryAllocator();
+    } else if (at::globalContext().hasMTIA()) {
+      return at::detail::getMTIAHooks().getPinnedMemoryAllocator();
     } else if (at::globalContext().hasXPU()) {
       return at::detail::getXPUHooks().getPinnedMemoryAllocator();
     } else if(at::isPrivateUse1HooksRegistered()) {
-      return at::GetPrivateUse1HooksInterface()->getPinnedMemoryAllocator();
+      return at::detail::getPrivateUse1Hooks().getPinnedMemoryAllocator();
     } else {
       TORCH_CHECK(false, "Need to provide pin_memory allocator to use pin memory.")
     }
@@ -341,7 +343,7 @@ struct MetaAllocator final : public at::Allocator {
 
 static MetaAllocator g_meta_alloc;
 
-REGISTER_ALLOCATOR(kMeta, &g_meta_alloc);
+REGISTER_ALLOCATOR(kMeta, &g_meta_alloc)
 
 TensorBase empty_meta(IntArrayRef size, ScalarType dtype,
                      std::optional<c10::MemoryFormat> memory_format_opt) {

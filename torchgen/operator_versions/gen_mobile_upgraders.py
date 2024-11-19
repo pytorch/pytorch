@@ -263,7 +263,7 @@ def construct_register_size(register_size_from_yaml: int) -> str:
 
 
 def construct_version_maps(
-    upgrader_bytecode_function_to_index_map: dict[str, Any]
+    upgrader_bytecode_function_to_index_map: dict[str, Any],
 ) -> str:
     version_map = torch._C._get_operator_version_map()
     sorted_version_map_ = sorted(version_map.items(), key=itemgetter(0))  # type: ignore[no-any-return]
@@ -305,7 +305,7 @@ def construct_version_maps(
 
 
 def get_upgrader_bytecode_function_to_index_map(
-    upgrader_dict: list[dict[str, Any]]
+    upgrader_dict: list[dict[str, Any]],
 ) -> dict[str, Any]:
     upgrader_bytecode_function_to_index_map = {}
     index = 0

@@ -329,7 +329,7 @@ class LLVMCodeGenImpl : public IRVisitor {
   void visit(const CompareSelectPtr& v) override;
 
 #define IMM_VISIT_DECLARE(_1, Name) void visit(const Name##ImmPtr& v) override;
-  AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, IMM_VISIT_DECLARE);
+  AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, IMM_VISIT_DECLARE)
 #undef IMM_VISIT_DECLARE
 
   void visit(const CastPtr& v) override;
@@ -625,6 +625,20 @@ void LLVMCodeGenImpl::emitWrapper(const std::vector<llvm::Type*>& params) {
       kernel_func_name_,
       module_.get());
 #endif
+
+  {
+    // Work around UBSAN crashes which reads 8 byte in front of every function.
+    // Otherwise, if the function was placed at the beginning of a page, reading
+    // 8B before the page could trigger a wild-addr-read ASAN failure if the
+    // page before this function was not mapped.
+    // - https://reviews.llvm.org/D148665
+    // - https://github.com/llvm/llvm-project/issues/65253
+    // Place the variable just before the function,
+    // the optimizer might otherwise disable this workaround.
+    // https://llvm.org/docs/LangRef.html#prefix-data
+    wrapper->setPrefixData(llvm::Constant::getNullValue(
+        llvm::ArrayType::get(llvm::Type::getInt8Ty(getContext()), 8)));
+  }
 
   auto wrapBB = llvm::BasicBlock::Create(getContext(), "wrapBB", wrapper);
   irb_.SetInsertPoint(wrapBB);
@@ -1061,14 +1075,16 @@ void LLVMCodeGenImpl::visit(const CompareSelectPtr& v) {
 }
 
 template <typename T>
-typename std::enable_if<std::is_integral<T>::value, llvm::Value*>::type
-getFromType(llvm::Type* type, T value) {
-  return llvm::ConstantInt::get(type, value, std::is_signed<T>::value);
+std::enable_if_t<std::is_integral_v<T>, llvm::Value*> getFromType(
+    llvm::Type* type,
+    T value) {
+  return llvm::ConstantInt::get(type, value, std::is_signed_v<T>);
 }
 
 template <typename T>
-typename std::enable_if<std::is_floating_point<T>::value, llvm::Value*>::type
-getFromType(llvm::Type* type, T value) {
+std::enable_if_t<std::is_floating_point_v<T>, llvm::Value*> getFromType(
+    llvm::Type* type,
+    T value) {
   return llvm::ConstantFP::get(type, value);
 }
 

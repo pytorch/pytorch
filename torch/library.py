@@ -81,6 +81,9 @@ class Library:
                 ns,
                 " is a reserved namespace. Please try creating a library with another name.",
             )
+        if torch._running_with_deploy():
+            _library.utils.warn_deploy()
+            return
 
         frame = traceback.extract_stack(limit=3)[0]
         filename, lineno = frame.filename, frame.lineno
@@ -129,6 +132,10 @@ class Library:
             >>> my_lib = Library("mylib", "DEF")
             >>> my_lib.define("sum(Tensor self) -> Tensor")
         """
+        if torch._running_with_deploy():
+            _library.utils.warn_deploy()
+            return
+
         # This is added because we also want to disallow PURE_FUNCTION alias analysis which is a valid
         # AliasAnalysis type in C++
         if alias_analysis not in ["", "FROM_SCHEMA", "CONSERVATIVE"]:
@@ -160,6 +167,10 @@ class Library:
 
     def _register_fake(self, op_name, fn, _stacklevel=1):
         r"""Registers the fake impl for an operator defined in the library."""
+        if torch._running_with_deploy():
+            _library.utils.warn_deploy()
+            return
+
         source = torch._library.utils.get_source(_stacklevel + 1)
         frame = sys._getframe(_stacklevel)
         caller_module = inspect.getmodule(frame)
@@ -200,6 +211,10 @@ class Library:
         If it is a TorchDispatchMode, we expect fn to have the following signature:
         (mode, func: OpOverload, types: Tuple[type, ...], args, kwargs) -> Any
         """
+        if torch._running_with_deploy():
+            _library.utils.warn_deploy()
+            return
+
         qualname = f"{self.ns}::{op_name}"
         entry = torch._library.simple_registry.singleton.find(qualname)
         handle = entry.torch_dispatch_rules.register(torch_dispatch_class, fn)
@@ -217,6 +232,10 @@ class Library:
             >>> my_lib = Library("aten", "IMPL")
             >>> my_lib._impl_with_aoti_compile("div.Tensor", "CPU")
         """
+        if torch._running_with_deploy():
+            _library.utils.warn_deploy()
+            return
+
         if dispatch_key == "":
             dispatch_key = self.dispatch_key
         assert torch.DispatchKeySet(dispatch_key).has(torch._C.DispatchKey.Dense)
@@ -270,6 +289,10 @@ class Library:
             >>>     return self * (1 / other)
             >>> my_lib.impl("div.Tensor", div_cpu, "CPU")
         """
+        if torch._running_with_deploy():
+            _library.utils.warn_deploy()
+            return
+
         if not callable(fn):
             raise TypeError(
                 f"Input function is required to be a callable but found type {type(fn)}"
@@ -350,6 +373,10 @@ class Library:
             >>>     # ...
             >>> my_lib.fallback(fallback_kernel, "Autocast")
         """
+        if torch._running_with_deploy():
+            _library.utils.warn_deploy()
+            return
+
         if dispatch_key == "":
             dispatch_key = self.dispatch_key
 
@@ -387,6 +414,7 @@ class Library:
             if not hasattr(namespace, name):
                 continue
             delattr(namespace, name)
+            namespace._dir.remove(name)
 
 
 def _del_library(
@@ -631,11 +659,13 @@ def register_kernel(
     This API may be used as a decorator.
 
     Args:
-        fn (Callable): The function to register as the implementation for
-            the given device types.
+        op (str | OpOverload): The operator to register an impl to.
         device_types (None | str | Sequence[str]): The device_types to register an impl to.
             If None, we will register to all device types -- please only use
             this option if your implementation is truly device-type-agnostic.
+        func (Callable): The function to register as the implementation for
+            the given device types.
+        lib (Optional[Library]): If provided, the lifetime of this registration
 
     Examples::
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
@@ -1228,17 +1258,35 @@ def opcheck(
     ``opcheck`` tests these metadata and properties.
 
     Concretely, we test the following:
-    - test_schema: if the operator's schema is correct.
-    - test_autograd_registration: if autograd was registered correctly.
+
+    - test_schema: If the schema matches the implementation of
+      the operator. For example: if the schema specifies a Tensor is mutated,
+      then we check the implementation mutates the Tensor. If the schema
+      specifies that we return a new Tensor, then we check that the
+      implementation returns a new Tensor (instead of an existing one or
+      a view of an existing one).
+    - test_autograd_registration: If the operator supports training
+      (autograd): we check that its autograd formula is registered via
+      torch.library.register_autograd or a manual registration to one
+      or more DispatchKey::Autograd keys. Any other DispatchKey-based
+      registrations may lead to undefined behavior.
     - test_faketensor: If the operator has a FakeTensor kernel
-    (and if it is correct). The FakeTensor kernel is necessary (
-    but not sufficient) for the operator to work with PyTorch compilation
-    APIs (torch.compile/export/FX).
+      (and if it is correct). The FakeTensor kernel is necessary (
+      but not sufficient) for the operator to work with PyTorch compilation
+      APIs (torch.compile/export/FX). We check that a FakeTensor kernel
+      (also sometimes known as a meta kernel) was registered for the
+      operator and that it is correct. This test takes the result of
+      running the operator on real tensors and the result of running
+      the operator on FakeTensors and checks that they have the same
+      Tensor metadata (sizes/strides/dtype/device/etc).
     - test_aot_dispatch_dynamic: If the operator has correct behavior
-    with PyTorch compilation APIs (torch.compile/export/FX).
-    This checks that the outputs (and gradients, if applicable) are the
-    same under eager-mode PyTorch and torch.compile.
-    This test is a superset of ``test_faketensor``.
+      with PyTorch compilation APIs (torch.compile/export/FX).
+      This checks that the outputs (and gradients, if applicable) are the
+      same under eager-mode PyTorch and torch.compile.
+      This test is a superset of ``test_faketensor`` and is an e2e test;
+      other things it tests are that the operator supports
+      functionalization and that the backward pass (if it exists) also
+      supports FakeTensor and functionalization.
 
     For best results, please call ``opcheck`` multiple times with a
     representative set of inputs. If your operator supports

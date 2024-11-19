@@ -35,6 +35,8 @@ public:
          float val5, float val6, float val7, float val8) {
     values = _mm256_setr_ps(val1, val2, val3, val4, val5, val6, val7, val8);
   }
+  Vectorized(const float (&arr)[8])
+      : Vectorized(arr[0], arr[1], arr[2], arr[3], arr[4], arr[5], arr[6], arr[7]) {}
   operator __m256() const {
     return values;
   }
@@ -216,27 +218,27 @@ public:
   }
   Vectorized<float> exp_u20() const {
     // A faster version of exp with ULP=20
-    static __m256 vec_factorial_1 =
+    const __m256 vec_factorial_1 =
         _mm256_set1_ps(0.999999701f); // 1/factorial(1)
-    static __m256 vec_factorial_2 =
+    const __m256 vec_factorial_2 =
         _mm256_set1_ps(0.499991506f); // 1/factorial(2)
-    static __m256 vec_factorial_3 =
+    const __m256 vec_factorial_3 =
         _mm256_set1_ps(0.166676521f); // 1/factorial(3)
-    static __m256 vec_factorial_4 =
+    const __m256 vec_factorial_4 =
         _mm256_set1_ps(0.0418978221f); // 1/factorial(4)
-    static __m256 vec_factorial_5 =
+    const __m256 vec_factorial_5 =
         _mm256_set1_ps(0.00828929059f); // 1/factorial(5)
-    static __m256 vec_exp_log2ef =
+    const __m256 vec_exp_log2ef =
         _mm256_castsi256_ps(_mm256_set1_epi32(0x3fb8aa3b)); // log2(e)
-    static __m256 vec_half = _mm256_set1_ps(0.5f);
-    static __m256 vec_one = _mm256_set1_ps(1.f);
-    static __m256 vec_zero = _mm256_set1_ps(0.f);
-    static __m256 vec_two = _mm256_set1_ps(2.f);
-    static __m256 vec_ln2f = _mm256_castsi256_ps(_mm256_set1_epi32(0x3f317218)); // ln(2)
-    static __m256 vec_ln_flt_min = _mm256_castsi256_ps(_mm256_set1_epi32(0xc2aeac50));
-    static __m256 vec_ln_flt_max = _mm256_castsi256_ps(_mm256_set1_epi32(0x42b17218));
-    static __m256i vec_127 = _mm256_set1_epi32(0x0000007f);
-    static int n_mantissa_bits = 23;
+    const __m256 vec_half = _mm256_set1_ps(0.5f);
+    const __m256 vec_one = _mm256_set1_ps(1.f);
+    const __m256 vec_zero = _mm256_set1_ps(0.f);
+    const __m256 vec_two = _mm256_set1_ps(2.f);
+    const __m256 vec_ln2f = _mm256_castsi256_ps(_mm256_set1_epi32(0x3f317218)); // ln(2)
+    const __m256 vec_ln_flt_min = _mm256_castsi256_ps(_mm256_set1_epi32(0xc2aeac50));
+    const __m256 vec_ln_flt_max = _mm256_castsi256_ps(_mm256_set1_epi32(0x42b17218));
+    const __m256i vec_127 = _mm256_set1_epi32(0x0000007f);
+    const int n_mantissa_bits = 23;
 
     // exp(x) =
     // = exp(n * ln(2) + r) // divide x by ln(2) and get quot and rem
@@ -636,6 +638,21 @@ inline void transpose_mxn<float, 8, 8>(
   _mm256_storeu_ps(&dst[7 * ld_dst], th);
 }
 
+template<>
+inline void transpose_mxn<float, 16, 16>(
+    const float* src,
+    int64_t ld_src,
+    float* dst,
+    int64_t ld_dst) {
+  transpose_mxn<float, 8, 8>(
+          src , ld_src, dst, ld_dst);
+  transpose_mxn<float, 8, 8>(
+          src + 8, ld_src, dst + 8 * ld_dst, ld_dst);
+  transpose_mxn<float, 8, 8>(
+          src + 8 * ld_src, ld_src, dst + 8, ld_dst);
+  transpose_mxn<float, 8, 8>(
+          src + 8 * ld_src + 8, ld_src, dst + 8 * ld_dst + 8, ld_dst);
+}
 #endif
 
 }} // namespace at::vec::CPU_CAPABILITY

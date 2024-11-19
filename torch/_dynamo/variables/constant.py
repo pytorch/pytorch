@@ -38,18 +38,12 @@ class ConstantVariable(VariableTracker):
     @staticmethod
     def create(value, **kwargs) -> VariableTracker:
         source = kwargs.get("source", None)
-        is_literal = ConstantVariable.is_literal(value)
-        if not is_literal:
-            for disallowed_type, reason in _type_to_assert_reason.items():
-                assert not isinstance(value, disallowed_type), reason
 
-        # Routing for list and tuple literals.
-        if is_literal and isinstance(value, (set, frozenset)):
-            items = []
-            for i, x in enumerate(value):
-                items.append(ConstantVariable.create(x))
+        # Routing for supported collection literals.
+        if isinstance(value, (set, frozenset)):
+            items = [ConstantVariable.create(x) for x in value]
             return variables.SetVariable(items, **kwargs)
-        elif is_literal and isinstance(value, (list, tuple)):
+        elif isinstance(value, (list, tuple)):
             items = []
             for i, x in enumerate(value):
                 item_source = GetItemSource(source, i) if source else None
@@ -67,13 +61,10 @@ class ConstantVariable(VariableTracker):
 
     def __init__(self, value, **kwargs) -> None:
         super().__init__(**kwargs)
-        if not ConstantVariable.is_literal(value):
+        if not ConstantVariable.is_base_literal(value):
             for disallowed_type, reason in _type_to_assert_reason.items():
                 assert not isinstance(value, disallowed_type), reason
 
-        assert not isinstance(
-            value, (list, tuple)
-        ), "ConstantVariable(list) is banned - please create a ListVariable(items)"
         if np is not None and isinstance(value, np.number):
             self.value = value.item()
         else:
@@ -82,11 +73,8 @@ class ConstantVariable(VariableTracker):
     def as_proxy(self):
         return self.value
 
-    def __str__(self) -> str:
+    def __repr__(self) -> str:
         return f"ConstantVariable({type(self.value).__name__}: {repr(self.value)})"
-
-    def python_type(self):
-        return type(self.value)
 
     def as_python_constant(self):
         return self.value
@@ -108,13 +96,14 @@ class ConstantVariable(VariableTracker):
         )
 
     @staticmethod
+    def is_base_literal(obj):
+        return type(obj) in common_constant_types
+
+    @staticmethod
     def is_literal(obj):
-        if type(obj) in common_constant_types:
-            return True
-        # The structure within is_literal get routed to variables.BaseListVariable
         if type(obj) in (list, tuple, set, frozenset, torch.Size):
             return all(ConstantVariable.is_literal(x) for x in obj)
-        return False
+        return ConstantVariable.is_base_literal(obj)
 
     def unpack_var_sequence(self, tx):
         try:
@@ -148,6 +137,14 @@ class ConstantVariable(VariableTracker):
             return variables.BuiltinVariable(str.format).call_function(
                 tx, [self, *args], kwargs
             )
+        elif name == "join" and istype(self.value, str):
+            assert len(args) == 1 and len(kwargs) == 0
+            arg_unpacked = args[0].force_unpack_var_sequence(tx)
+            try:
+                arg_const = [x.as_python_constant() for x in arg_unpacked]
+                return ConstantVariable.create(self.value.join(arg_const))
+            except NotImplementedError:
+                return super().call_method(tx, name, args, kwargs)
 
         if any(isinstance(x, SymNodeVariable) for x in args):
             # Promote to SymNodeVariable for operations involving dynamic shapes.
@@ -190,6 +187,10 @@ class ConstantVariable(VariableTracker):
 
         if name == "__len__" and not (args or kwargs):
             return ConstantVariable.create(len(self.value))
+        elif name == "__round__" and len(args) == 1 and args[0].is_python_constant():
+            return ConstantVariable.create(
+                round(self.value, args[0].is_python_constant())
+            )
         elif name == "__contains__" and len(args) == 1 and args[0].is_python_constant():
             assert not kwargs
             search = args[0].as_python_constant()
@@ -217,13 +218,12 @@ class EnumVariable(VariableTracker):
         unimplemented("Enum variable is constructed with non constant values")
 
     def as_proxy(self):
+        if isinstance(self.value, int):
+            return int(self.value)  # convert IntEnum to a normal int
         return self.value
 
-    def __str__(self) -> str:
+    def __repr__(self) -> str:
         return f"EnumVariable({type(self.value)})"
-
-    def python_type(self):
-        return type(self.value)
 
     def as_python_constant(self):
         return self.value

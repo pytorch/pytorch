@@ -3,6 +3,7 @@ import unittest
 from torchgen import local
 from torchgen.api.types import (
     BaseCType,
+    boolT,
     ConstRefCType,
     CType,
     longT,
@@ -63,6 +64,10 @@ class ExecutorchCppTest(unittest.TestCase):
             (
                 "int[]? dims",
                 NamedCType("dims", OptionalCType(ArrayRefCType(BaseCType(longT)))),
+            ),
+            (
+                "bool[3] output_mask",
+                NamedCType("output_mask", ArrayRefCType(BaseCType(boolT))),
             ),
         ]
         for d in data:

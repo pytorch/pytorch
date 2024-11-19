@@ -16,8 +16,7 @@
 #include <memory>
 #include <vector>
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 namespace detail {
 /// Base class for all RNN implementations (intended for code sharing).
@@ -159,17 +158,17 @@ class TORCH_API LSTMImpl : public detail::RNNImplBase<LSTMImpl> {
 
   std::tuple<Tensor, std::tuple<Tensor, Tensor>> forward(
       const Tensor& input,
-      torch::optional<std::tuple<Tensor, Tensor>> hx_opt = {});
+      std::optional<std::tuple<Tensor, Tensor>> hx_opt = {});
 
  protected:
   FORWARD_HAS_DEFAULT_ARGS(
-      {1, AnyValue(torch::optional<std::tuple<Tensor, Tensor>>())})
+      {1, AnyValue(std::optional<std::tuple<Tensor, Tensor>>())})
 
  public:
   std::tuple<torch::nn::utils::rnn::PackedSequence, std::tuple<Tensor, Tensor>>
   forward_with_packed_input(
       const torch::nn::utils::rnn::PackedSequence& packed_input,
-      torch::optional<std::tuple<Tensor, Tensor>> hx_opt = {});
+      std::optional<std::tuple<Tensor, Tensor>> hx_opt = {});
 
   LSTMOptions options;
 
@@ -192,7 +191,7 @@ class TORCH_API LSTMImpl : public detail::RNNImplBase<LSTMImpl> {
       const Tensor& batch_sizes,
       const Tensor& sorted_indices,
       int64_t max_batch_size,
-      torch::optional<std::tuple<Tensor, Tensor>> hx_opt);
+      std::optional<std::tuple<Tensor, Tensor>> hx_opt);
 };
 
 /// A `ModuleHolder` subclass for `LSTMImpl`.
@@ -303,7 +302,7 @@ class TORCH_API RNNCellImpl : public detail::RNNCellImplBase<RNNCellImpl> {
       : RNNCellImpl(RNNCellOptions(input_size, hidden_size)) {}
   explicit RNNCellImpl(const RNNCellOptions& options_);
 
-  Tensor forward(const Tensor& input, Tensor hx = {});
+  Tensor forward(const Tensor& input, const Tensor& hx = {});
 
  protected:
   FORWARD_HAS_DEFAULT_ARGS({1, AnyValue(Tensor())})
@@ -344,11 +343,11 @@ class TORCH_API LSTMCellImpl : public detail::RNNCellImplBase<LSTMCellImpl> {
 
   std::tuple<Tensor, Tensor> forward(
       const Tensor& input,
-      torch::optional<std::tuple<Tensor, Tensor>> hx_opt = {});
+      std::optional<std::tuple<Tensor, Tensor>> hx_opt = {});
 
  protected:
   FORWARD_HAS_DEFAULT_ARGS(
-      {1, AnyValue(torch::optional<std::tuple<Tensor, Tensor>>())})
+      {1, AnyValue(std::optional<std::tuple<Tensor, Tensor>>())})
 
  public:
   LSTMCellOptions options;
@@ -381,7 +380,7 @@ class TORCH_API GRUCellImpl : public detail::RNNCellImplBase<GRUCellImpl> {
       : GRUCellImpl(GRUCellOptions(input_size, hidden_size)) {}
   explicit GRUCellImpl(const GRUCellOptions& options_);
 
-  Tensor forward(const Tensor& input, Tensor hx = {});
+  Tensor forward(const Tensor& input, const Tensor& hx = {});
 
  protected:
   FORWARD_HAS_DEFAULT_ARGS({1, AnyValue(Tensor())})
@@ -397,5 +396,4 @@ class TORCH_API GRUCellImpl : public detail::RNNCellImplBase<GRUCellImpl> {
 /// learn about PyTorch's module storage semantics.
 TORCH_MODULE(GRUCell);
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

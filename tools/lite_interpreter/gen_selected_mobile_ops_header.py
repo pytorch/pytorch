@@ -33,9 +33,9 @@ inline constexpr bool should_include_kernel_dtype(
   const char *kernel_tag_str,
   at::ScalarType scalar_type
 ) {
-  c10::string_view kernel_tag_sv C10_UNUSED = c10::string_view(kernel_tag_str);
-  $body
-  return false;
+  [[maybe_unused]] c10::string_view kernel_tag_sv =
+      c10::string_view(kernel_tag_str);
+  $body return false;
 }
 }
 """

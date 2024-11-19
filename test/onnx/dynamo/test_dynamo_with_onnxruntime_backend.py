@@ -51,17 +51,19 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
         OrtBackend.clear_cached_instances()
 
     def test_get_ort_device_type(self):
+        from onnxruntime.capi import _pybind_state as ORTC
+
         self.assertEqual(
             torch.onnx._internal.onnxruntime._get_ort_device_type("cuda"),
-            torch.onnx._internal.onnxruntime.ORTC.OrtDevice.cuda(),
+            ORTC.OrtDevice.cuda(),
         )
         self.assertEqual(
             torch.onnx._internal.onnxruntime._get_ort_device_type("cpu"),
-            torch.onnx._internal.onnxruntime.ORTC.OrtDevice.cpu(),
+            ORTC.OrtDevice.cpu(),
         )
         self.assertEqual(
             torch.onnx._internal.onnxruntime._get_ort_device_type("maia"),
-            torch.onnx._internal.onnxruntime.ORTC.OrtDevice.npu(),
+            ORTC.OrtDevice.npu(),
         )
 
     def test_torch_compile_backend_registration(self):

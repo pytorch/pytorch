@@ -358,10 +358,12 @@ struct TORCH_API ViewFunc {
   /// Sets the values of any SymInts in the saved state. The input vector size
   /// must match the number of SymInts in the saved state (i.e. the size of the
   /// list returned by get_symints()).
+  /// NOLINTNEXTLINE(performance-unnecessary-value-param)
   virtual void set_symints(std::vector<c10::SymInt>) {}
   /// Sets the values of any Tensors in the saved state. The input vector size
   /// must match the number of Tensors in the saved state (i.e. the size of the
   /// list returned by get_tensors()).
+  /// NOLINTNEXTLINE(performance-unnecessary-value-param)
   virtual void set_tensors(std::vector<at::Tensor>) {}
 };
 

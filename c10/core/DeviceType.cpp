@@ -1,5 +1,6 @@
 #include <c10/core/DeviceType.h>
 #include <c10/util/Exception.h>
+#include <array>
 #include <atomic>
 #include <mutex>
 
@@ -144,6 +145,13 @@ void register_privateuse1_backend(const std::string& backend_name) {
           privateuse1_backend_name == backend_name,
       "torch.register_privateuse1_backend() has already been set! Current backend: ",
       privateuse1_backend_name);
+
+  static const std::array<std::string, 6> types = {
+      "cpu", "cuda", "hip", "mps", "xpu", "mtia"};
+  TORCH_CHECK(
+      std::find(types.begin(), types.end(), backend_name) == types.end(),
+      "Cannot register privateuse1 backend with in-tree device name: ",
+      backend_name);
 
   privateuse1_backend_name = backend_name;
   // Invariant: once this flag is set, privateuse1_backend_name is NEVER written

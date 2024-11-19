@@ -195,7 +195,7 @@ class ConstantFolder(torch.fx.Interpreter):
     def add_node_replacement(self, node: torch.fx.Node, tensor: torch.Tensor) -> None:
         self.node_replacements[node] = tensor
 
-    def run(self):
+    def run(self):  # type: ignore[override]
         env = {}
         for n in self.module.graph.find_nodes(op="placeholder"):
             env[n] = self.unknown_value

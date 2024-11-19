@@ -18,6 +18,7 @@ from .flex_attention import (
     compute_next_offset_func,
     create_indices_fake,
     create_num_blocks_fake_generator,
+    maybe_realize,
 )
 
 
@@ -82,6 +83,7 @@ flex_decoding_template = TritonTemplate(
 
 
     Z = {{size("Q", 0)}}
+    ZKV = {{size("K", 0)}}
     HKV = {{size("Q", 1)}}
     G: tl.constexpr = GQA_SHARED_HEADS
     HQ = HKV * G
@@ -96,12 +98,13 @@ flex_decoding_template = TritonTemplate(
     TILE_KV_MULTIPLE: tl.constexpr = (TILE_KV // BLOCK_N)
 
     off_z = tl.program_id(0) // HKV
+    off_zkv = off_z % ZKV
     off_hkv = tl.program_id(0) % HKV
     off_t = tl.program_id(1)
 
     q_offset = off_z * stride_qz + off_hkv * stride_qh
-    k_offset = off_z * stride_kz + off_hkv * stride_kh
-    v_offset = off_z * stride_vz + off_hkv * stride_vh
+    k_offset = off_zkv * stride_kz + off_hkv * stride_kh
+    v_offset = off_zkv * stride_vz + off_hkv * stride_vh
 
     SPARSE_Z = {{size("KV_NUM_BLKS", 0)}}
     SPARSE_HQ = {{size("KV_NUM_BLKS", 1)}}
@@ -130,8 +133,11 @@ flex_decoding_template = TritonTemplate(
     offs_d = tl.arange(0, QK_HEAD_DIM)
     offs_vd = tl.arange(0, V_HEAD_DIM)
 
-    # KV_IDX / FULL_KV_IDX and KV_NUM_BLKS / FULL_KV_NUM_BLKS are always contiguous.
-    sparse_hz_offset = sparse_idx_z * SPARSE_HQ + sparse_idx_h
+    # Get HZ offsets for KV_NUM_BLKS and KV_IDX
+    stride_block_z, stride_block_h, stride_block_row, stride_block_col = {{stride("KV_NUM_BLKS")}}
+    sparse_block_hz_offset = sparse_idx_z * stride_block_z + sparse_idx_h * stride_block_h
+    stride_kv_z, stride_kv_h, stride_kv_row, stride_kv_col = {{stride("KV_IDX")}}
+    sparse_idx_hz_offset = sparse_idx_z * stride_kv_z + sparse_idx_h * stride_kv_h
 
     # Calculate KV blocks that belong this CTA.
     block_n_start = off_t * TILE_KV_MULTIPLE                        # n_offset inside sparse block
@@ -152,15 +158,16 @@ flex_decoding_template = TritonTemplate(
     # Apply both score_mod and mask_mod
 
     # find first kv block we are loading and the number of blocks we are loading
-    kv_indices = KV_IDX + sparse_hz_offset * SPARSE_KV_BLOCK_CNT
-    kv_num_blocks = tl.load(KV_NUM_BLKS + sparse_hz_offset)
+    # Offset the kv_indices tensor by the correct batch and head
+    kv_indices = KV_IDX + sparse_idx_hz_offset
+    kv_num_blocks = tl.load(KV_NUM_BLKS + sparse_block_hz_offset)
     indices_idx = block_n_start // SPARSE_KV_MULTIPLE
     off_n_block_in_sparse = block_n_start % SPARSE_KV_MULTIPLE
     off_n = tl.load(kv_indices + indices_idx) * SPARSE_KV_BLOCK_SIZE + off_n_block_in_sparse * BLOCK_N
     # first kv block we're loading
 
     # last valid block according to sparse mask
-    block_n_last_valid = tl.minimum(kv_num_blocks * SPARSE_KV_MULTIPLE, tl.maximum(KV_LEN // BLOCK_N, 1))
+    block_n_last_valid = tl.minimum(kv_num_blocks * SPARSE_KV_MULTIPLE, tl.maximum(tl.cdiv(KV_LEN, BLOCK_N), 1))
 
     K_block_ptr = tl.make_block_ptr(
         base=K + k_offset,
@@ -199,22 +206,22 @@ flex_decoding_template = TritonTemplate(
     # We know these blocks are guaranteed to be "full", so we don't need to
     # apply mask_mod to them - only score_mod
     if HAS_FULL_BLOCKS:
-        kv_indices = FULL_KV_IDX + sparse_hz_offset * SPARSE_KV_BLOCK_CNT
-        kv_num_blocks = tl.load(FULL_KV_NUM_BLKS + sparse_hz_offset)
+        kv_indices = FULL_KV_IDX + sparse_idx_hz_offset
+        kv_num_blocks = tl.load(FULL_KV_NUM_BLKS + sparse_block_hz_offset)
         indices_idx = block_n_start // SPARSE_KV_MULTIPLE
         off_n_block_in_sparse = block_n_start % SPARSE_KV_MULTIPLE
         off_n = tl.load(kv_indices + indices_idx) * SPARSE_KV_BLOCK_SIZE + off_n_block_in_sparse * BLOCK_N
 
         # last valid block according to sparse mask
-        block_n_last_valid = tl.minimum(kv_num_blocks * SPARSE_KV_MULTIPLE, tl.maximum(KV_LEN // BLOCK_N, 1))
+        block_n_last_valid = tl.minimum(kv_num_blocks * SPARSE_KV_MULTIPLE, tl.maximum(tl.cdiv(KV_LEN, BLOCK_N), 1))
 
         K_block_ptr = tl.make_block_ptr(
-        base=K + k_offset,
-        shape=(QK_HEAD_DIM, KV_LEN),                # (d, N)
-        strides=(stride_kk, stride_kn),
-        offsets=(0, off_n),
-        block_shape=(QK_HEAD_DIM, BLOCK_N),
-        order=(0, 1)
+            base=K + k_offset,
+            shape=(QK_HEAD_DIM, KV_LEN),                # (d, N)
+            strides=(stride_kk, stride_kn),
+            offsets=(0, off_n),
+            block_shape=(QK_HEAD_DIM, BLOCK_N),
+            order=(0, 1)
         )
         V_block_ptr = tl.make_block_ptr(
             base=V + v_offset,
@@ -276,7 +283,7 @@ flex_decoding_template = TritonTemplate(
     idx_hq = off_hkv*G + off_g[:, None, None]
     idx_m = off_m[None, :, None]
     idx_d = offs_vd[None, None, :]
-    # TODO generalize and add proper mask support
+
     mask = (idx_m < Q_LEN)
     acc = acc.reshape(G, BLOCK_M_PER_HQ, V_HEAD_DIM)
     {{store_output(("idx_z", "idx_t", "idx_hq", "idx_m", "idx_d"), "acc", "mask")}}
@@ -304,7 +311,10 @@ def _get_decoding_default_config(key) -> Tuple[int, int, int]:
     if sm_version >= (9, 0):
         if head_dim > 128 and dtype == torch.float32:
             return default_config
-        return (64, 2, 3)
+        if torch.version.hip is None:
+            return (64, 2, 3)
+        else:
+            return (64, 2, 1)
     return default_config
 
 
@@ -330,16 +340,26 @@ def create_flex_decoding_kernel(*args, **kwargs):
         _,  # q_indices
         _,  # full_q_num_blocks,
         _,  # full_q_indices,
-        SPARSE_KV_BLOCK_SIZE,
         _,  # SPARSE_Q_BLOCK_SIZE,
+        SPARSE_KV_BLOCK_SIZE,
         _,
     ) = block_mask
 
     Bq, Hq, seq_len_q, qk_head_dim = query.get_size()
     Bkv, Hkv, seq_len_kv, v_head_dim = value.get_size()
-    assert Bq == Bkv, "Batch dimension must match"
+
+    assert V.graph.sizevars.evaluate_expr(
+        sympy.Eq(Bq, Bkv) | sympy.Eq(Bkv, 1)
+    ), f"Bq and Bkv must broadcastable. Got Bq={Bq} and Bkv={Bkv}"
+
     B = Bq
     kernel_options = dict(kernel_options)
+
+    # TODO: Fix flex decoding non-divisible case!
+    if seq_len_q % 128 != 0 or seq_len_kv % 128 != 0:
+        kernel_options.setdefault("IS_DIVISIBLE", False)
+    else:
+        kernel_options.setdefault("IS_DIVISIBLE", True)
 
     # Calculate GQA head sharing
     gqa_shared_heads = Hq // Hkv
@@ -347,18 +367,18 @@ def create_flex_decoding_kernel(*args, **kwargs):
         raise ValueError(
             "Number of shared query heads sharing the same KV head must be power of 2. "
         )
-    kernel_options["GQA_SHARED_HEADS"] = gqa_shared_heads
+    kernel_options.setdefault("GQA_SHARED_HEADS", gqa_shared_heads)
 
     # Determine if there are "full" blocks where we only need to apply score_mod, and can skip mask_mod
-    kernel_options["HAS_FULL_BLOCKS"] = full_kv_num_blocks is not None
-    if (
-        full_kv_num_blocks is None
-    ):  # Create a plackeholder full block list in case it is empty
+    has_full_blocks = full_kv_num_blocks is not None
+    kernel_options.setdefault("HAS_FULL_BLOCKS", has_full_blocks)
+    if not has_full_blocks:
+        # Create a plackeholder full block list in case it is empty
         full_kv_num_blocks, full_kv_indices = (
             empty(0, device=query.get_device()) for _ in range(2)
         )
 
-    for buf in [
+    (
         query,
         key,
         value,
@@ -366,8 +386,19 @@ def create_flex_decoding_kernel(*args, **kwargs):
         kv_indices,
         full_kv_num_blocks,
         full_kv_indices,
-    ]:
-        buf.realize()
+    ) = maybe_realize(
+        [
+            query,
+            key,
+            value,
+            kv_num_blocks,
+            kv_indices,
+            full_kv_num_blocks,
+            full_kv_indices,
+        ]
+    )
+    score_mod_other_buffers = maybe_realize(score_mod_other_buffers)
+    mask_mod_other_buffers = maybe_realize(mask_mod_other_buffers)
 
     choices: List[Any] = []
     configs: List[Tuple[int, int, int]] = []
@@ -379,10 +410,15 @@ def create_flex_decoding_kernel(*args, **kwargs):
             (32, 2, 3),
             (128, 2, 3),
         ]
+
+        # Use num_stages=1 on ROCm to avoid shmem limitation
+        if torch.version.hip:
+            configs = [(c[0], c[1], 1) for c in configs]
+
     # TODO: fix autotuning.
 
-    kernel_options["SM_SCALE"] = scale
-    kernel_options["SPLIT_KV"] = get_split_k(B, Hkv, seq_len_kv)
+    kernel_options.setdefault("SM_SCALE", scale)
+    kernel_options.setdefault("SPLIT_KV", get_split_k(B, Hkv, seq_len_kv))
     MAX_SPLIT_KV = kernel_options["SPLIT_KV"]
 
     # create config dependent intermediate buffers
@@ -408,22 +444,25 @@ def create_flex_decoding_kernel(*args, **kwargs):
         FlexibleLayout.contiguous_strides(buf_ACC_shape),
     )
 
-    kernel_options["QK_HEAD_DIM"] = qk_head_dim
-    kernel_options["V_HEAD_DIM"] = v_head_dim
+    kernel_options.setdefault("QK_HEAD_DIM", qk_head_dim)
+    kernel_options.setdefault("V_HEAD_DIM", v_head_dim)
 
-    kernel_options["BLOCK_M"] = (
-        # m
-        # if V.graph.sizevars.evaluate_expr(sympy.Lt(query.get_size()[-2], 0))
-        # else  # Always use a BLOCK_M > 16 before Triton fix https://github.com/triton-lang/triton/pull/4061 is in pin
-        max(
-            next_power_of_2(
-                V.graph.sizevars.size_hint(
-                    seq_len_q, fallback=torch._inductor.config.unbacked_symint_fallback  # type: ignore[arg-type]
-                )
-                * gqa_shared_heads
-            ),
-            16,
-        )
+    kernel_options.setdefault(
+        "BLOCK_M",
+        (
+            # m
+            # if V.graph.sizevars.evaluate_expr(sympy.Lt(query.get_size()[-2], 0))
+            # else  # Always use a BLOCK_M > 16 before Triton fix https://github.com/triton-lang/triton/pull/4061 is in pin
+            max(
+                next_power_of_2(
+                    V.graph.sizevars.size_hint(
+                        seq_len_q, fallback=torch._inductor.config.unbacked_symint_fallback  # type: ignore[arg-type]
+                    )
+                    * gqa_shared_heads
+                ),
+                16,
+            )
+        ),
     )
 
     query = ir.ExternKernel.realize_input(query)
@@ -444,12 +483,16 @@ def create_flex_decoding_kernel(*args, **kwargs):
         seq_len_q * gqa_shared_heads, sympy.Integer(kernel_options["BLOCK_M"])
     )
 
-    kernel_options["SAFE_M_BOUNDARY"] = (
-        (seq_len_q * gqa_shared_heads) % kernel_options["BLOCK_M"]
-    ) == 0
+    kernel_options.setdefault(
+        "SAFE_M_BOUNDARY",
+        ((seq_len_q * gqa_shared_heads) % kernel_options["BLOCK_M"]) == 0,
+    )
     # TODO: This feels sketchy
-    kernel_options["SAFE_N_BOUNDARY"] = True
+    kernel_options.setdefault("SAFE_N_BOUNDARY", True)
+    # Mark SPARSE_KV_BLOCK_SIZE as static shapes and add guards.
+    SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_KV_BLOCK_SIZE)
 
+    original_kernel_options = kernel_options.copy()
     # Note, we don't need to pass in the captured buffers explicitly
     # because they're implicitly added by the score_mod function
     # We do need to explicitly pass it in for autotuning though.
@@ -457,9 +500,10 @@ def create_flex_decoding_kernel(*args, **kwargs):
         if SPARSE_KV_BLOCK_SIZE % BLOCK_N != 0:
             continue
 
+        cur_kernel_options = original_kernel_options.copy()
         # Performance tuning
-        kernel_options["BLOCK_N"] = BLOCK_N
-        kernel_options["SPARSE_KV_BLOCK_SIZE"] = SPARSE_KV_BLOCK_SIZE
+        cur_kernel_options.setdefault("BLOCK_N", BLOCK_N)
+        cur_kernel_options.setdefault("SPARSE_KV_BLOCK_SIZE", SPARSE_KV_BLOCK_SIZE)
 
         # Work around https://github.com/pytorch/pytorch/issues/129625
         if num_stages == 2:
@@ -486,7 +530,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
             num_stages=num_stages,
             num_warps=num_warps,
             call_sizes=query.get_size(),
-            **kernel_options,
+            **cur_kernel_options,
         )
 
     inputs_for_flex_decoding = (
@@ -526,8 +570,8 @@ def create_flex_decoding_kernel(*args, **kwargs):
     # See [Note] Handle fully masked out rows:
     # g_M Is the global max among split kv blocks.
     masked_rows = lowerings[aten.eq](g_M, -float("inf"))
-    g_M = lowerings[aten.where](masked_rows, 0.0, g_M)
     adj_M = lowerings[aten.sub](buf_M, g_M)
+    adj_M = lowerings[aten.where](masked_rows, 0, adj_M)
     alpha = lowerings[aten.exp2](adj_M)
 
     buf_L = lowerings[aten.mul](buf_L, alpha)

@@ -198,7 +198,7 @@ class ShadowLogger(Logger):
         self.stats["float"] = []
         self.stats["quantized"] = []
 
-    def forward(self, x, y):
+    def forward(self, x, y):  # type: ignore[override]
         # fmt: off
         """
         """  # blank docblock to make autodoc happy

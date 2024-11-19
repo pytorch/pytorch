@@ -35,6 +35,10 @@ public:
   StashTLSOnEntryGuard(): saved_(tls_on_entry.value()) {
     tls_on_entry = std::nullopt;
   }
+  StashTLSOnEntryGuard(const StashTLSOnEntryGuard&) = delete;
+  StashTLSOnEntryGuard(StashTLSOnEntryGuard&&) = delete;
+  StashTLSOnEntryGuard& operator=(const StashTLSOnEntryGuard&) = delete;
+  StashTLSOnEntryGuard& operator=(StashTLSOnEntryGuard&&) = delete;
 
   ~StashTLSOnEntryGuard() {
     TORCH_INTERNAL_ASSERT(!tls_on_entry.has_value());
@@ -45,7 +49,7 @@ private:
   c10::impl::LocalDispatchKeySet saved_;
 };
 
-void pythonFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
+void pythonFallback(const c10::OperatorHandle& op, c10::DispatchKeySet dispatch_keys, torch::jit::Stack* stack) {
   TORCH_INTERNAL_ASSERT(tls_on_entry.has_value());
   // c10::impl::ForceDispatchKeyGuard dispatcher_guard(tls_on_entry.value());
   // StashTLSOnEntryGuard stash_guard;
@@ -68,12 +72,20 @@ void pythonFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   // we actually run dispatch(), we will take out PyObjects in the context
   // of that interpreter, and this will ensure that everyone is on the same
   // interpreter.
+  bool tensors_with_python_key_present = false;
+  c10::impl::PyInterpreter* interpreter = nullptr;
   for (const auto& ivalue : torch::jit::last(*stack, num_arguments)) {
     if (ivalue.isTensor()) {
-      auto* interpreter = ivalue.unsafeToTensorImpl()->pyobj_slot()->pyobj_interpreter();
-      if (interpreter) {
-        (*interpreter)->dispatch(op, stack);
-        return;
+      auto* t = ivalue.unsafeToTensorImpl();
+      if (t->key_set().has(c10::DispatchKey::Python)) {
+        tensors_with_python_key_present = true;
+      }
+
+      if (!interpreter) {
+        auto* t_interpreter = t->pyobj_slot()->pyobj_interpreter();
+        if (t_interpreter) {
+          interpreter = t_interpreter;
+        }
       }
     } else if (ivalue.isTensorList() || ivalue.isOptionalTensorList()) {
       // NB: use toListRef as it doesn't induce refcount bumps (toTensorListRef
@@ -82,14 +94,43 @@ void pythonFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
         if (nv.isNone()) {
           continue;
         }
-        auto* interpreter = nv.unsafeToTensorImpl()->pyobj_slot()->pyobj_interpreter();
-        if (interpreter) {
-          (*interpreter)->dispatch(op, stack);
-          return;
+
+        auto* t = nv.unsafeToTensorImpl();
+        if (t->key_set().has(c10::DispatchKey::Python)) {
+          tensors_with_python_key_present = true;
+        }
+
+        if (!interpreter) {
+          auto* t_interpreter = t->pyobj_slot()->pyobj_interpreter();
+          if (t_interpreter) {
+            interpreter = t_interpreter;
+          }
         }
       }
     }
   }
+
+  if (interpreter) {
+    if (tensors_with_python_key_present) {
+      (*interpreter)->dispatch(op, stack);
+    } else {
+      // At this point, there are no modes in the stack and no tensors with the python key.
+      // so disable the python key before redispatching.
+      // See https://github.com/pytorch/pytorch/issues/136565
+      c10::DispatchKeySet keyset = dispatch_keys.remove(c10::DispatchKey::Python);
+
+      // Remove Python key from the included set as well (modes add it there).
+      c10::impl::LocalDispatchKeySet local_keyset = c10::impl::tls_local_dispatch_key_set();
+      c10::impl::ForceDispatchKeyGuard no_python_guard(
+        local_keyset.included_.remove(c10::DispatchKey::Python),
+        local_keyset.excluded_
+      );
+
+      op.redispatchBoxed(keyset, stack);
+    }
+    return;
+  }
+
   TORCH_INTERNAL_ASSERT(0, "Hit Python dispatch key but no arguments had PyInterpreter (no tensor args?)");
 }
 

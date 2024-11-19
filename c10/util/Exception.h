@@ -205,6 +205,10 @@ class C10_API WarningHandlerGuard {
       : prev_handler_(c10::WarningUtils::get_warning_handler()) {
     c10::WarningUtils::set_warning_handler(new_handler);
   }
+  WarningHandlerGuard(WarningHandlerGuard&& other) = delete;
+  WarningHandlerGuard(const WarningHandlerGuard&) = delete;
+  WarningHandlerGuard& operator=(const WarningHandlerGuard&) = delete;
+  WarningHandlerGuard& operator=(WarningHandlerGuard&&) = delete;
   ~WarningHandlerGuard() {
     c10::WarningUtils::set_warning_handler(prev_handler_);
   }
@@ -520,6 +524,43 @@ namespace c10::detail {
 
 } // namespace c10::detail
 
+#ifdef STANDALONE_TORCH_HEADER
+
+// TORCH_CHECK throws std::runtime_error instead of c10::Error which is
+// useful when certain headers are used in a libtorch-independent way,
+// e.g. when Vectorized<T> is used in AOTInductor generated code.
+#ifdef STRIP_ERROR_MESSAGES
+#define TORCH_CHECK(cond, ...)                \
+  if (C10_UNLIKELY_OR_CONST(!(cond))) {       \
+    throw std::runtime_error(TORCH_CHECK_MSG( \
+        cond,                                 \
+        "",                                   \
+        __func__,                             \
+        ", ",                                 \
+        __FILE__,                             \
+        ":",                                  \
+        __LINE__,                             \
+        ", ",                                 \
+        __VA_ARGS__));                        \
+  }
+#else
+#define TORCH_CHECK(cond, ...)                \
+  if (C10_UNLIKELY_OR_CONST(!(cond))) {       \
+    throw std::runtime_error(TORCH_CHECK_MSG( \
+        cond,                                 \
+        "",                                   \
+        __func__,                             \
+        ", ",                                 \
+        __FILE__,                             \
+        ":",                                  \
+        __LINE__,                             \
+        ", ",                                 \
+        ##__VA_ARGS__));                      \
+  }
+#endif
+
+#else
+
 #ifdef STRIP_ERROR_MESSAGES
 #define TORCH_CHECK(cond, ...)                   \
   if (C10_UNLIKELY_OR_CONST(!(cond))) {          \
@@ -538,6 +579,8 @@ namespace c10::detail {
         static_cast<uint32_t>(__LINE__),           \
         TORCH_CHECK_MSG(cond, "", ##__VA_ARGS__)); \
   }
+#endif
+
 #endif
 
 // An utility macro that does what `TORCH_CHECK` does if compiled in the host
@@ -619,12 +662,12 @@ namespace c10::detail {
 // Report a warning to the user only once.  Accepts an arbitrary number of extra
 // arguments which are concatenated into the warning message using operator<<
 //
-#define _TORCH_WARN_ONCE(...)                                             \
-  C10_UNUSED static const auto C10_ANONYMOUS_VARIABLE(torch_warn_once_) = \
-      [&] {                                                               \
-        TORCH_WARN(__VA_ARGS__);                                          \
-        return true;                                                      \
-      }()
+#define _TORCH_WARN_ONCE(...)                                \
+  [[maybe_unused]] static const auto C10_ANONYMOUS_VARIABLE( \
+      torch_warn_once_) = [&] {                              \
+    TORCH_WARN(__VA_ARGS__);                                 \
+    return true;                                             \
+  }()
 
 #ifdef DISABLE_WARN
 #define TORCH_WARN_ONCE(...) ((void)0);

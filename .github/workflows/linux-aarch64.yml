@@ -2,8 +2,12 @@ name: linux-aarch64
 
 on:
   push:
+    branches:
+      - main
+      - release/*
     tags:
       - ciflow/linux-aarch64/*
+      - ciflow/trunk/*
   workflow_dispatch:
 
 concurrency:
@@ -11,10 +15,23 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+
+  get-label-type:
+    if: github.repository_owner == 'pytorch'
+    name: get-label-type
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+
   linux-jammy-aarch64-py3_10-build:
     name: linux-jammy-aarch64-py3.10
     uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
     with:
+      runner_prefix: ${{ needs.get-label-type.outputs.label-type }}
       build-environment: linux-jammy-aarch64-py3.10
       docker-image-name: pytorch-linux-jammy-aarch64-py3.10-gcc11
       runner: linux.arm64.2xlarge

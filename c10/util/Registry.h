@@ -57,6 +57,7 @@ class Registry {
   typedef std::function<ObjectPtrType(Args...)> Creator;
 
   Registry(bool warning = true) : registry_(), priority_(), warning_(warning) {}
+  ~Registry() = default;
 
   void Register(
       const SrcType& key,
@@ -152,6 +153,10 @@ class Registry {
     terminate_ = terminate;
   }
 
+  C10_DISABLE_COPY_AND_ASSIGN(Registry);
+  Registry(Registry&&) = delete;
+  Registry& operator=(Registry&&) = delete;
+
  private:
   std::unordered_map<SrcType, Creator> registry_;
   std::unordered_map<SrcType, RegistryPriority> priority_;
@@ -159,8 +164,6 @@ class Registry {
   const bool warning_;
   std::unordered_map<SrcType, std::string> help_message_;
   std::mutex register_mutex_;
-
-  C10_DISABLE_COPY_AND_ASSIGN(Registry);
 };
 
 template <class SrcType, class ObjectPtrType, class... Args>

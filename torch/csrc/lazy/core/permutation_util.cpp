@@ -4,15 +4,14 @@
 #include <algorithm>
 #include <numeric>
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 
 std::vector<int64_t> InversePermutation(
     c10::ArrayRef<int64_t> input_permutation) {
   TORCH_CHECK(IsPermutation(input_permutation));
   std::vector<int64_t> output_permutation(input_permutation.size(), -1);
   for (const auto i : c10::irange(input_permutation.size())) {
-    output_permutation.at(input_permutation.at(i)) = i;
+    output_permutation.at(input_permutation.at(i)) = static_cast<int64_t>(i);
   }
   return output_permutation;
 }
@@ -24,5 +23,4 @@ bool IsPermutation(c10::ArrayRef<int64_t> permutation) {
       permutation.begin(), permutation.end(), trivial_permutation.begin());
 }
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

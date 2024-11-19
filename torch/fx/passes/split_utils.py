@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import copy
 from dataclasses import dataclass, field
@@ -10,6 +9,7 @@ from torch.fx.graph import map_arg
 from torch.fx.passes.utils import HolderModule, lift_subgraph_as_module
 
 from .tools_common import NodeList
+
 
 __all__ = ["getattr_recursive", "setattr_recursive", "Component", "split_by_tags"]
 

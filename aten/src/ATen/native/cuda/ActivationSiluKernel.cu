@@ -54,7 +54,7 @@ void silu_backward_kernel(TensorIteratorBase& iter) {
 }
 } // namespace
 
-REGISTER_DISPATCH(silu_stub, &silu_kernel);
-REGISTER_DISPATCH(silu_backward_stub, &silu_backward_kernel);
+REGISTER_DISPATCH(silu_stub, &silu_kernel)
+REGISTER_DISPATCH(silu_backward_stub, &silu_backward_kernel)
 
 } // namespace at::native

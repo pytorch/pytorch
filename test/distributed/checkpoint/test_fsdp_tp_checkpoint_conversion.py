@@ -40,7 +40,7 @@ class TestFsdpTpCheckpointConversion(DTensorTestBase):
         fsdp_state_dict = fsdp_model.state_dict()
 
         # save fsdp_state_dict to storage
-        dist_cp.save_state_dict(
+        dist_cp.save(
             state_dict=fsdp_state_dict,
             storage_writer=dist_cp.FileSystemWriter(CHECKPOINT_DIR),
         )
@@ -79,7 +79,7 @@ class TestFsdpTpCheckpointConversion(DTensorTestBase):
                 ).to_local()
                 self.assertNotEqual(fsdp_redistributed, tp_redistributed)
 
-        dist_cp.load_state_dict(
+        dist_cp.load(
             state_dict=tp_state_dict,
             storage_reader=dist_cp.FileSystemReader(CHECKPOINT_DIR),
         )

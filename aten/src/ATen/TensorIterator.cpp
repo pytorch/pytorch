@@ -1483,8 +1483,6 @@ FastSetupType TensorIteratorBase::compute_fast_setup_type(const TensorIteratorCo
   return FastSetupType::NONE;
 }
 
-TensorIteratorBase::TensorIteratorBase() = default;
-
 void TensorIteratorBase::build(TensorIteratorConfig& config) {
   // populate some persistent configuration fields
   is_reduction_ = config.is_reduction_;

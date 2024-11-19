@@ -1743,8 +1743,8 @@ struct OperatorMap {
 
   // TODO: return iterator
   std::vector<OpMapType> getAllKeysAndValues() const {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<OpMapType> keys_values;
+    keys_values.reserve(map.size());
     for (auto& symbol_mapping : map) {
       auto& vec = symbol_mapping.second;
       for (auto& pair : vec) {
@@ -1819,8 +1819,8 @@ struct FunctionSchemaMap {
 
   // TODO: return iterator
   std::vector<FuncSchemaMapType> getAllKeysAndValues() const {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<FuncSchemaMapType> keys_values;
+    keys_values.reserve(map.size());
     for (auto& symbol_mapping : map) {
       auto& vec = symbol_mapping.second;
       for (auto& pair : vec) {

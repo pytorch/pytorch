@@ -5,7 +5,6 @@ from typing import Sequence
 from torchgen import local
 from torchgen.api.types import (
     ArgName,
-    ArrayCType,
     BaseCType,
     Binding,
     ConstRefCType,
@@ -88,7 +87,7 @@ def valuetype_type(
         if str(t.elem) == "bool":
             assert t.size is not None
             return NamedCType(
-                binds, ArrayCType(BaseCType(BaseTypeToCppMapping[BaseTy.bool]), t.size)
+                binds, ArrayRefCType(BaseCType(BaseTypeToCppMapping[BaseTy.bool]))
             )
         else:
             return None
@@ -185,9 +184,7 @@ def returntype_type(t: Type, *, mutable: bool) -> CType:
         elif t.name == BaseTy.Scalar:
             return BaseCType(scalarT)
     elif isinstance(t, ListType):
-        assert (
-            not mutable
-        ), "Native functions should never return a mutable tensor list. They should return void."
+        assert not mutable, "Native functions should never return a mutable tensor list. They should return void."
         elem = returntype_type(t.elem, mutable=False)
         assert t.size is None, f"fixed size list returns not supported: {t}"
         return VectorCType(elem)
@@ -245,7 +242,7 @@ def return_names(f: NativeFunction, *, fallback_name: str = "result") -> Sequenc
 JIT_TO_CPP_DEFAULT = {
     "False": "false",
     "True": "true",
-    "None": "torch::executorch::nullopt",  # UGH this one is type directed
+    "None": "torch::execustd::nullopt",  # UGH this one is type directed
     "[]": "{}",
     "contiguous_format": "torch::executorch::MemoryFormat::Contiguous",
     "long": "torch::executorch::kLong",

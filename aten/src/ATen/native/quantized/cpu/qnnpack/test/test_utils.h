@@ -23,10 +23,10 @@ enum class Mode {
   }
 
 #define _STATIC_TEST(TestClass, test_name, test_body)                   \
-  _MAKE_TEST(TestClass, test_name##_static, test_body, Mode::Static)
+  _MAKE_TEST(TestClass, test_name##_static, test_body, qnnpack::testing::Mode::Static)
 
 #define _RUNTIME_TEST(TestClass, test_name, test_body)                  \
-  _MAKE_TEST(TestClass, test_name##_runtime, test_body, Mode::Runtime)
+  _MAKE_TEST(TestClass, test_name##_runtime, test_body, qnnpack::testing::Mode::Runtime)
 
 #define _STATIC_AND_RUNTIME_TEST(TestClass, test_name, test_body) \
   _STATIC_TEST(TestClass, test_name, test_body)                   \

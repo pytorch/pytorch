@@ -10,7 +10,12 @@ import torch._dynamo.test_case
 from torch._dynamo.comptime import comptime
 from torch._dynamo.exc import Unsupported
 from torch.testing._internal.common_device_type import skipIf
-from torch.testing._internal.common_utils import IS_FBCODE, munge_exc, TEST_Z3
+from torch.testing._internal.common_utils import (
+    IS_FBCODE,
+    munge_exc,
+    skipIfWindows,
+    TEST_Z3,
+)
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 
 
@@ -102,7 +107,7 @@ due to:
 Traceback (most recent call last):
   File "test_exc.py", line N, in f
     raise NotImplementedError
-torch._dynamo.exc.InternalTorchDynamoError:
+torch._dynamo.exc.InternalTorchDynamoError: NotImplementedError:
 
 from user code:
    File "test_exc.py", line N, in fn001
@@ -158,20 +163,35 @@ from user code:
 
         torch.compile(fn001, backend="eager")(torch.randn(1))
 
-        record = self.getRecord(records, "Graph break:")
+        record = self.getRecord(records, "Graph break in user code")
 
         # TODO: This should also report the enclosing frames; need to plumb
         # frame object to it
         self.assertExpectedInline(
             munge_exc(record.getMessage()),
             """\
-Graph break: from user code at:
+Graph break in user code at test_exc.py:N
+Reason: Unsupported: 'skip function graph_break in file _dynamo/decorators.py'
+User code traceback:
   File "test_exc.py", line N, in fn001
     return fn002(x)
   File "test_exc.py", line N, in fn002
     torch._dynamo.graph_break()
 """,  # noqa: B950
         )
+
+    @make_logging_test(graph_breaks=True)
+    def test_graph_break_log_generic_jump(self, records):
+        def fn(x):
+            if x.sum() > 0:
+                return x + 1
+            else:
+                return x - 1
+
+        torch.compile(fn, backend="eager")(torch.ones(3, 3))
+
+        # check for record existence
+        self.getRecord(records, "Graph break in user code")
 
     @torch._dynamo.config.patch(suppress_errors=False)
     def test_backend_suppress_line(self):
@@ -199,6 +219,10 @@ ReluCompileError:""",
         inject_EVALUATE_EXPR_flip_equality_TESTING_ONLY=True,
         translation_validation=True,
         translation_validation_no_bisect=True,
+    )
+    @skipIfWindows(
+        msg='AssertionError: "tran[551 chars]s1 s2 s3) s0)\n  ==> (<= (+ s1 s2) (+ s0 (* -1[511 chars][0])'  # noqa: PLR0133
+        != 'tran[551 chars]s1 s2) (+ s0 (* -1 s3)))\n  ==> (<= (+ s1 s2) [483 chars][0])"'
     )
     def test_trigger_on_error(self):
         from torch.fx.experimental.validator import ValidationException
