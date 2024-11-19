@@ -205,6 +205,7 @@ class CachingAutotuner(KernelInterface):
         reset_to_zero_arg_names: List[str],
         optimize_mem,
         heuristic_type,
+        reset_to_zero_arg_names: Optional[List[str]] = None,
         size_hints=None,
         inductor_meta=None,  # metadata not relevant to triton
         custom_kernel=False,  # whether the kernel is inductor-generated or custom
@@ -227,7 +228,7 @@ class CachingAutotuner(KernelInterface):
         self.inductor_meta = {} if inductor_meta is None else inductor_meta
         self.save_cache_hook = save_cache_hook
         self.mutated_arg_names = mutated_arg_names
-        self.reset_to_zero_arg_names = reset_to_zero_arg_names
+        self.reset_to_zero_arg_names = [] if reset_to_zero_arg_names is None else reset_to_zero_arg_names
         self.optimize_mem = optimize_mem
         self.configs = configs
         self.heuristic_type = heuristic_type
@@ -828,14 +829,16 @@ class CachingAutotuner(KernelInterface):
             arg.copy_(cpu_arg, non_blocking=True)
 
     def reset_to_zero_args(self, *args, **kwargs):
+        if not self.reset_to_zero_arg_names:
+            return
         for i, arg in enumerate(args):
             if self.fn.arg_names[i] in self.reset_to_zero_arg_names:
-                assert isinstance(arg, torch.Tensor)
+                assert isinstance(arg, torch.Tensor, "self.reset_to_zero_arg_names should only contain valid argument names")
                 arg.zero_()
 
         for name, arg in kwargs.items():
             if name in self.reset_to_zero_arg_names:
-                assert isinstance(arg, torch.Tensor)
+                assert isinstance(arg, torch.Tensor, "self.reset_to_zero_arg_names should only contain valid argument names")
                 arg.zero_()
 
     def maybe_clone_args(
