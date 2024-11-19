@@ -99,7 +99,7 @@ _LOCAL_FUNCTION_DOMAIN: str = "pkg.torch.__subgraph__"
 logger = logging.getLogger(__name__)
 # The current tracer that is being used to trace the operators,
 # used by torch/onnx/_internal/exporter/_torchlib/ops/hop.py
-current_tracer = None
+current_tracer: _building.OpRecorder | None = None
 
 
 def _torch_dtype_to_onnx_dtype(dtype: torch.dtype) -> ir.DataType:
@@ -641,7 +641,7 @@ def _handle_output_node(
         node_name_to_values: A mapping of FX node names to their produced ONNX ``Value``.
         graph_like: The ONNX graph at construction.
     """
-    output_value_name = node.args[0][0].name
+    output_value_name = node.args[0][0].name  # type: ignore[index,union-attr]
     assert isinstance(
         output_value_name, str
     ), f"Bug: Expected {output_value_name!r} to be a string"
@@ -966,15 +966,16 @@ def _exported_program_to_onnx_program(
 
     # 1. Translate all nodes in all subgraphs and the main graph
     # Create a dictionary of values for the main graph for step 2-3 to add inputs and outputs
+    module: torch.fx.GraphModule
     for name, module in reversed(
         tuple(exported_program.graph_module.named_modules(remove_duplicate=False))
     ):
-        module: torch.fx.GraphModule
         # Reverse the order of the modules so that the innermost module is processed first
         # and made available to the outer module
         scope, subgraph_name = _get_scope_name(name)
         owned_graphs = scoped_subgraphs.setdefault(scope, {})
         fx_graph = module.graph
+        graph_like: ir.Graph | ir.Function
         if name == "":
             # Root graph
             graph_like = model.graph

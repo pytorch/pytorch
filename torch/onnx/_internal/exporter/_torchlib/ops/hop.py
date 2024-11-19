@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import typing
 from typing import Sequence
 
 import torch
 from torch.onnx._internal._lazy_import import onnxscript_ir as ir
-from torch.onnx._internal.exporter import _building, _core
+from torch.onnx._internal.exporter import _core
 from torch.onnx._internal.exporter._torchlib._torchlib_registry import onnx_impl
 
 
@@ -16,7 +15,7 @@ def call_op(
     *args: ir.Value,
     _num_outputs: int = 1,
     **kwargs: int | float | str | bool | ir.Graph | ir.TensorProtocol,
-) -> Sequence[ir.Value]:
+) -> ir.Value | Sequence[ir.Value]:
     """Call an operator with the given arguments and keyword arguments.
 
     Arguments are always inputs, while keyword arguments are attributes.
@@ -24,7 +23,7 @@ def call_op(
     from onnxscript.ir import convenience as ir_convenience
 
     assert _core.current_tracer is not None
-    tracer = typing.cast(_building.OpRecorder, _core.current_tracer)
+    tracer = _core.current_tracer
 
     inputs = list(args)
 
@@ -38,7 +37,7 @@ def call_op(
     attributes = [
         attr
         for attr in ir_convenience.convert_attributes(kwargs)
-        if attr.value is not None
+        if attr.value is not None  # type: ignore[union-attr]
     ]
     tracer.nodes.append(
         node := ir.Node(
@@ -50,6 +49,8 @@ def call_op(
             version=tracer.opset.version,
         )
     )
+    if _num_outputs == 1:
+        return node.outputs[0]
     return node.outputs
 
 
@@ -59,7 +60,7 @@ def higher_order_cond(
     true_func: ir.Function,
     false_func: ir.Function,
     inputs: Sequence[ir.Value],
-):
+) -> Sequence[ir.Value]:
     then_node = ir.Node(
         true_func.domain, true_func.name, inputs, num_outputs=len(true_func.outputs)
     )
