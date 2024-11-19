@@ -166,7 +166,7 @@ def invalidate_eager_modules():
                     e_t = ErasedTensor(tensor, attr_name, mod)
                 if isinstance(tensor, torch.nn.Parameter):
                     e_t.requires_grad_(True)
-                    e_t._is_param = True  # type: ignore[attr-defined]
+                    e_t._is_param = True
                 setattr(mod, attr_name, e_t)
 
 
@@ -181,7 +181,7 @@ def discard_traced_gm_params(mod: torch.fx.GraphModule):
                 e_t = ErasedTensor(tensor, attr_name, mod)
             if isinstance(tensor, torch.nn.Parameter):
                 e_t.requires_grad_(True)
-                e_t._is_param = True  # type: ignore[attr-defined]
+                e_t._is_param = True
             setattr(mod, attr_name, e_t)
 
 
