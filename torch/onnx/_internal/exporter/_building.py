@@ -492,6 +492,7 @@ def _construct_node(
         inputs=inputs,
         attributes=attributes,
         outputs=outputs,
+        version=signature.version,
     )
 
 
@@ -646,7 +647,10 @@ class OpRecorder(evaluator.Evaluator):
                 op_signature = function.signature
             else:
                 op_signature = _schemas.OpSignature.from_function(
-                    function, function.function_ir.domain, function.name
+                    function,
+                    function.function_ir.domain,
+                    function.name,
+                    version=function.opset.version,
                 )
 
             named_inputs, named_attrs = _construct_named_inputs_and_attrs(
@@ -685,7 +689,12 @@ class OpRecorder(evaluator.Evaluator):
 
                 return function.function(**converted_named_inputs, **named_attrs)
 
-            outputs = self._call_op(op_signature, named_inputs, named_attrs)
+            outputs = self._call_op(
+                op_signature,
+                named_inputs,
+                named_attrs,
+                opset_version=function.opset.version,
+            )
 
             self.functions[(function.function_ir.domain, function.name, "")] = function
             if len(outputs) == 1:

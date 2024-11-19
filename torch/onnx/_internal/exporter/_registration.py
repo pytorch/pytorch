@@ -154,10 +154,16 @@ class ONNXRegistry:
                 if target is None:
                     continue
 
+                if isinstance(overload_func, onnxscript.OnnxFunction):
+                    version = overload_func.opset.version
+                else:
+                    version = 1
+
                 overload_func.signature = _schemas.OpSignature.from_function(  # type: ignore[attr-defined]
                     overload_func,
                     domain,
                     name,
+                    version=version,
                 )
                 onnx_decomposition = OnnxDecompMeta(
                     onnx_function=overload_func,
@@ -226,7 +232,10 @@ class ONNXRegistry:
                 # TODO(justinchuby): Use the op_signature attribute when onnxscript is updated in CI
                 if isinstance(function, onnxscript.OnnxFunction):
                     function.signature = _schemas.OpSignature.from_function(  # type: ignore[attr-defined]
-                        function, function.function_ir.domain, function.name
+                        function,
+                        function.function_ir.domain,
+                        function.name,
+                        version=function.opset.version,
                     )
                 else:
                     function.signature = _schemas.OpSignature.from_function(  # type: ignore[attr-defined]
