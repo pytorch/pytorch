@@ -2016,7 +2016,8 @@ class _MakefxTracer:
         # TODO: We need to explicitly import torch._dynamo before calling dispatch_trace,
         # because dispatch_trace will introduce the lazy import of torch._dynamo,
         # and some contexts set before calling dispatch_trace will cause problems with the import of torch._dynamo,
-        # such as some torch API(torch.ones and so on) in populate_builtin_to_tensor_fn_map() will be affected by the context set before dispatch_trace.
+        # such as some torch API(torch.ones and so on) in populate_builtin_to_tensor_fn_map() will be affected
+        # by the context set before dispatch_trace.
         import torch._dynamo
 
         phs = pytree.tree_map(lambda _: torch.fx._symbolic_trace.PH, args)
