@@ -2074,7 +2074,6 @@ def flex_attention_backward(*args, **kwargs):
         grad_key = lowerings[aten.sum](broadcasted_grad_key, axis=0, keepdims=True)
         grad_value = lowerings[aten.sum](broadcasted_grad_value, axis=0, keepdims=True)
 
-    # import fbvscode; fbvscode.set_trace()
     return (
         grad_query,
         grad_key,

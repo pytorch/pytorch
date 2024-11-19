@@ -197,8 +197,9 @@ class ModificationWrapper(V.WrapperHandler):
     def indirect_indexing(self, index_var: str, size, check, wrap_neg=True):
         """Convert index variable to symbolic form."""
         var = str(index_var)
-        var = var.strip("()")
-        return sympy_index_symbol(str(var))
+        if "idx" in var:
+            var = var.strip("()")
+        return sympy_index_symbol(var)
 
     def store(self, name, index, value, mode):
         """Store value with input tracking.

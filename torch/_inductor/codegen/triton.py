@@ -2073,8 +2073,10 @@ class TritonKernel(SIMDKernel):
         elif mode is None:
             line = f"tl.store({var} + ({indexing.index_str}), {value}, {indexing.mask_str})"
         elif mode == "atomic_add":
-            if isinstance(index, sympy.core.symbol.Symbol) and symbol_is_type(
-                index, SymT.TEMPLATE_INDEX
+            if (
+                isinstance(index, sympy.core.symbol.Symbol)
+                and symbol_is_type(index, SymT.TEMPLATE_INDEX)
+                or "idx" in indexing.index_str
             ):
                 # We manually add broadcasting for tempalte indexes
                 indexing.index_str = (
