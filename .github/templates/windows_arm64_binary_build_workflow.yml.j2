@@ -16,6 +16,7 @@ name: !{{ build_environment }}
         run: |
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
+          echo "NIGHTLIES_PYTORCH_ROOT=/pytorch" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
 {%- endmacro %}
 
@@ -83,6 +84,10 @@ jobs:
           repository:  "ozanMSFT/builder"
           ref: "users/ozanMSFT/win-arm64"
           path: "builder"
+      - name: Bootstrap nightlies folder
+        shell: cmd
+        run: |
+          mkdir "%NIGHTLIES_PYTORCH_ROOT%"
       - name: Bootstrap Git
         shell: cmd
         run: |
@@ -107,6 +112,21 @@ jobs:
         shell: cmd
         run: |
           "builder/windows/arm64/bootstrap_sccache.bat"
+      - name: Populate binary env
+        shell: bash
+        run: |
+          "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh" \
+      - name: Print variables
+        shell: cmd
+        run: |
+          echo "PYTORCH_ROOT: ${{ env.PYTORCH_ROOT }}"
+          echo "BUILDER_ROOT: ${{ env.BUILDER_ROOT }}"
+          echo "BINARY_ENV_FILE: ${{ env.BINARY_ENV_FILE }}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR: ${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
+          echo "NIGHTLIES_PYTORCH_ROOT": ${{ env.NIGHTLIES_PYTORCH_ROOT }}
+          echo "WIN_PACKAGE_WORK_DIR: ${{ env.WIN_PACKAGE_WORK_DIR }}"
+          echo "PYTORCH_BUILD_VERSION: ${{ env.PYTORCH_BUILD_VERSION }}"
+          echo "PYTORCH_BUILD_NUMBER: ${{ env.PYTORCH_BUILD_NUMBER }}"
       - name: Git checkout PyTorch
         uses: actions/checkout@v4
         with:
