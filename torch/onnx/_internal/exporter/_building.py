@@ -693,7 +693,6 @@ class OpRecorder(evaluator.Evaluator):
                 op_signature,
                 named_inputs,
                 named_attrs,
-                opset_version=function.opset.version,
             )
 
             self.functions[(function.function_ir.domain, function.name, "")] = function

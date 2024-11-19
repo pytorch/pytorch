@@ -7,6 +7,9 @@ from typing import Sequence
 from onnxscript import ir
 
 
+_MIN_ONNX_OPSET_VERSION = 18
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -28,7 +31,9 @@ def add_opset_imports(model: ir.Model) -> None:
     for node in ir.traversal.RecursiveGraphIterator(model.graph):
         domain = node.domain
         version = node.version if node.version is not None else 1
-        if domain in model.opset_imports:
+        if domain == "":
+            version = max(version, _MIN_ONNX_OPSET_VERSION)
+        elif domain in model.opset_imports:
             # Heuristic to use the latest version seen
             version = max(version, model.opset_imports[domain])
         model.opset_imports[domain] = version

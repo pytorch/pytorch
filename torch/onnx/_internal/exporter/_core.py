@@ -1359,9 +1359,6 @@ def export(
         if output_names:
             _ir_passes.rename_outputs(onnx_program.model, output_names)
 
-        # TODO(justinchuby): Remove the hack
-        _ir_passes.add_torchlib_common_imports(onnx_program.model)
-
         export_status.onnx_translation = True
         verbose_print("Translate the graph into ONNX... ✅")
     except Exception as e:
