@@ -567,34 +567,15 @@ def tuned_cslt_sparse_mm(
             [n, 1],
         )
     # workaround for Inductor not supporting optional tensor input arguments
-    # if bias is not None and alpha is not None:
-    #     bias, alpha = realize_inputs(bias, alpha)
-    #     input_nodes = input_nodes + (bias, alpha)
-
-    if bias is not None:
+    if bias is not None and alpha is not None:
+        bias, alpha = realize_inputs(bias, alpha)
+        input_nodes = input_nodes + (bias, alpha)
+    elif bias is not None and alpha is None:
         bias = realize_inputs(bias)
-        bias_example = AlgorithmSelectorCache.generate_example_value(
-            V.graph.sizevars.size_hints(bias.get_size()),
-            V.graph.sizevars.size_hints(bias.get_stride()),
-            bias.get_device(),
-            bias.dtype,
-            bias.layout.offset,
-        )
-    else:
-        bias_example = None
-
-    if alpha is not None:
+        input_nodes =  input_nodes + (bias,)
+    elif alpha is not None and bias is None:
         alpha = realize_inputs(alpha)
-        alpha_example = AlgorithmSelectorCache.generate_example_value(
-            V.graph.sizevars.size_hints(alpha.get_size()),
-            V.graph.sizevars.size_hints(alpha.get_stride()),
-            alpha.get_device(),
-            alpha.dtype,
-            alpha.layout.offset,
-        )
-    else:
-        alpha_example = None
-
+        input_nodes =  input_nodes + (None, alpha,)
 
     # cuSPARSELt alg_id search, not that we cannot use
     # AlgorithmSelectorCache.benchmark_example_value() because this will return the base view
@@ -619,8 +600,8 @@ def tuned_cslt_sparse_mm(
             mat2.dtype,
             mat2.layout.offset,
         ),
-        bias_example,
-        alpha_example,
+        AlgorithmSelectorCache.benchmark_example_value(bias),
+        AlgorithmSelectorCache.benchmark_example_value(alpha),
         out_dtype,
         transpose_result,
     )
@@ -628,8 +609,6 @@ def tuned_cslt_sparse_mm(
     baseline = aten__cslt_sparse_mm.bind(
         input_nodes,
         layout,
-        bias=bias,
-        alpha=alpha,
         out_dtype=out_dtype,
         alg_id=0,
         split_k=1,
@@ -640,8 +619,6 @@ def tuned_cslt_sparse_mm(
     searched = aten__cslt_sparse_mm.bind(
         input_nodes,
         layout,
-        bias=bias,
-        alpha=alpha,
         out_dtype=out_dtype,
         alg_id=searched_alg_id,
         split_k=searched_split_k,
