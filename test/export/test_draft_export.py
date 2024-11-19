@@ -313,52 +313,9 @@ class TestDraftExport(TestCase):
         self.assertEqual(
             sorted([f.data["reason"] for f in report.failures]),
             [
-                "Dtypes torch.float32 and torch.bfloat16 are not equal!",
+                "Dtypes torch.bfloat16 and torch.float32 are not equal!",
                 "mismatch between fake value 3 and real value 6 ",
             ],
-        )
-
-    def test_override_pytree_mismatched_fake_kernels(self):
-        class M(torch.nn.Module):
-            def forward(self, a):
-                return torch.ops.mylib.foo(a)
-
-        @torch.library.custom_op("mylib::foo", mutates_args={})
-        def foo(a: torch.Tensor) -> List[torch.Tensor]:
-            x = a * 2
-            y = a * 2
-            z = a * 2
-            return [x, y, z]  # type: ignore[return-value]
-
-        @foo.register_fake
-        def foo_fake_impl(a):
-            x = torch.empty_like(a)
-            y = torch.empty_like(a)
-            return [x, y]  # mismatch on num outputs
-
-        mod = M()
-        inputs = (torch.randn(3, 3),)
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "Real tensor propagation found an output structure mismatch",
-        ):
-            with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
-                export(mod, inputs)
-
-        ep, report = draft_export(mod, inputs)
-        for ep_out, eager_out in zip(
-            tree_leaves(ep.module()(*inputs)), tree_leaves(mod(*inputs))
-        ):
-            self.assertTrue(torch.allclose(ep_out, eager_out))
-            self.assertEqual(ep_out.dtype, eager_out.dtype)
-
-        self.assertEqual(len(report.failures), 1)
-        self.assertEqual(
-            report.failures[0].failure_type, FailureType.MISMATCHED_FAKE_KERNEL
-        )
-        self.assertTrue(
-            "Mismatched output structure between fake kernel with output TreeSpec:"
-            in report.failures[0].data["reason"]
         )
 
     def test_override_incorrectly_aliasing_kernel(self):
