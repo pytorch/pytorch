@@ -237,6 +237,7 @@ elif [[ $CUDA_VERSION == "11.8" ]]; then
             '$ORIGIN/../../nvidia/cusolver/lib'
             '$ORIGIN/../../nvidia/cusparse/lib'
             '$ORIGIN/../../nvidia/nccl/lib'
+            '$ORIGIN/../../nvidia/nvjitlink/lib'
             '$ORIGIN/../../nvidia/nvtx/lib'
         )
         CUDA_RPATHS=$(IFS=: ; echo "${CUDA_RPATHS[*]}")
