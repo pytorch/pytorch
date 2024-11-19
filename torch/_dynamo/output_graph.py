@@ -53,7 +53,7 @@ from .exc import (
     unimplemented,
     unimplemented_with_warning,
 )
-from .graph_region_tracker import GraphRegionTracker
+from .graph_region_tracker import apply_graph_deduplication, GraphRegionTracker
 from .guards import GuardBuilder, install_guard
 from .mutation_guard import is_dynamic_nn_module
 from .side_effects import AttributeMutationExisting, SideEffects
@@ -996,7 +996,7 @@ class OutputGraph:
         for value in stack_values:
             value.realize()
 
-        # self.dedup_pass()
+        self.dedup_pass()
 
         # Use nn.Module "proxies" in the constructed GraphModule so that
         # the resulting GM does not hold additional strong references to the original modules.
@@ -1468,7 +1468,7 @@ class OutputGraph:
         return compiled_fn
 
     def dedup_pass(self):
-        pass
+        apply_graph_deduplication(self)
 
     def install_subgraph(self, name, sub_gm):
         next_name = None

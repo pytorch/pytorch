@@ -1,14 +1,14 @@
-import itertools
 import math
 import operator
 from collections import defaultdict, deque
 from typing import Any, Callable, DefaultDict, Deque, Dict, List, Optional, Set, Tuple
 
 import torch.fx
+from torch.utils._pytree import tree_flatten
 
 
 Node = torch.fx.Node
-Region = Set[Node]
+Region = List[Node]
 IdenticalNodes = Set[Node]
 
 
@@ -74,8 +74,8 @@ class GraphRegionTracker:
             and self.node_to_duplicates[n0] == self.node_to_duplicates[n1]
         )
 
-    def get_identical_regions(self, gm: torch.fx.GraphModule) -> List[List[Region]]:
-        topological_ranking = {node: i for i, node in enumerate(gm.graph.nodes)}
+    def get_identical_regions(self, graph: torch.fx.Graph) -> List[List[Region]]:
+        topological_ranking = {node: i for i, node in enumerate(graph.nodes)}
         group_ranking = {}
         region_groups = []
 
@@ -91,7 +91,7 @@ class GraphRegionTracker:
                 min_rank = math.inf
                 for node in group:
                     min_rank = min(min_rank, topological_ranking[node])
-                    region_group.append({node})
+                    region_group.append([node])
 
                 region_groups.append(region_group)
                 group_ranking[id(region_group)] = min_rank
@@ -105,10 +105,9 @@ class GraphRegionTracker:
         for region_group in region_groups:
             fully_expand_region_group(region_group, seen_nodes, self.has_same_loc)
 
-        region = region_group[0]
-        graph = create_graph_from_region(region)
-
-        return region_groups
+        return [
+            region_group for region_group in region_groups if len(region_group[0]) > 1
+        ]
 
     def __str__(self) -> str:
         return f"GraphRegionTracker(loc_to_duplicates={self.loc_to_duplicates}, node_to_duplicates={self.node_to_duplicates})"
@@ -127,6 +126,11 @@ def fully_expand_region_group(
         region_iters.append(BfsRegionIter.create(origin))
 
     nodes_to_add: List[Node] = []
+
+    # we already have the origin node in each region
+    for region_it in region_iters:
+        _, node = region_it.next()
+        region_it.add_children(node)
 
     # arg_name is set for kwargs, None for args
     current_arg_name, current_node = region_iters[0].next()
@@ -152,29 +156,37 @@ def fully_expand_region_group(
 
         if add_node:
             for region, region_it, node in zip(regions, region_iters, nodes_to_add):
-                region.add(node)
+                region.append(node)
                 region_it.add_children(node)
 
         current_arg_name, current_node = region_iters[0].next()
 
 
 def apply_graph_deduplication(output_graph) -> None:  # type: ignore[no-untyped-def]
-    duplicated_region_groups = output_graph.graph_region_tracker.get_identical_regions(
-        output_graph.nn_modules
+    duplicated_region_groups = output_graph.region_tracker.get_identical_regions(
+        output_graph.graph
     )
+
     for region_group in duplicated_region_groups:
         region = region_group[0]
-        subgraph, node_to_subgraph_output = create_graph_from_region(region)
+        (
+            subgraph,
+            arg_inds_to_placeholder_ind,
+            inds_with_external_users,
+        ) = create_subgraph(region)
         sub_gm = torch.fx.GraphModule(output_graph.nn_modules, subgraph)
         subgraph_name = output_graph.install_subgraph("subgraph", sub_gm)
-        subgraph_node = output_graph.create_proxy("get_attr", subgraph_name, (), {})
+        get_subgraph_node = output_graph.graph.create_node(
+            "get_attr", subgraph_name, (), {}
+        )
+        print(output_graph.graph)
         for region in region_group:
             replace_region_with_subgraph(
                 output_graph.graph,
                 region,
-                subgraph_node,
-                node_to_subgraph_output,
-                subgraph_name,
+                get_subgraph_node,
+                arg_inds_to_placeholder_ind,
+                inds_with_external_users,
                 subgraph,
             )
 
@@ -182,16 +194,24 @@ def apply_graph_deduplication(output_graph) -> None:  # type: ignore[no-untyped-
 def replace_region_with_subgraph(
     graph: torch.fx.Graph,
     region: Region,
-    subgraph_node: Node,
-    node_to_subgraph_output: Dict[Node, Tuple[int, Node]],
-    subgraph_name: str,
+    get_subgraph_node: Node,
+    arg_inds_to_placeholder_ind: Dict[Tuple[int, int], int],
+    inds_with_external_users: List[int],
     subgraph: torch.fx.Graph,
 ) -> None:
-    # need to fill in inputs properly here
+    call_args = [get_subgraph_node]
+    for (node_ind, arg_ind), placeholder_ind in arg_inds_to_placeholder_ind.items():
+        node = region[node_ind]
+        flattened_args_kwargs, _ = tree_flatten((node.args, node.kwargs))
+        call_args.append(flattened_args_kwargs[arg_ind])
+
+    graph.inserting_after(region[0])
+
     invoke_subgraph_node = graph.create_node(
-        "call_function", torch.ops.higher_order.invoke_subgraph, (subgraph_node,), {}
+        "call_function", torch.ops.higher_order.invoke_subgraph, tuple(call_args), {}
     )
-    for node, (ind, _) in node_to_subgraph_output.items():
+    for ind, external_user_ind in enumerate(inds_with_external_users):
+        node = region[external_user_ind]
         subgraph_output = graph.create_node(
             "call_function", operator.getitem, (invoke_subgraph_node, ind), {}
         )
@@ -201,74 +221,69 @@ def replace_region_with_subgraph(
         graph.erase_node(node)
 
 
-def get_node_to_external_inputs(
+def get_external_inputs(
     region: Region,
-) -> Tuple[DefaultDict[Node, List[Node]], Set[Node]]:
-    node_to_inputs = defaultdict(list)
+) -> Tuple[DefaultDict[Node, List[Tuple[int, int]]], Set[Node]]:
+    external_node_to_indices = defaultdict(list)
+    nodes_unique = set(region)
     external_nodes = set()
-    for node in region:
-        for in_node in itertools.chain(node.args, node.kwargs.values()):
-            if in_node not in region:
-                node_to_inputs[node].append(in_node)
+    for node_ind, node in enumerate(region):
+        flattened_args_kwargs, _ = tree_flatten((node.args, node.kwargs))
+        for arg_ind, in_node in enumerate(flattened_args_kwargs):
+            if in_node not in nodes_unique and isinstance(in_node, Node):
+                external_node_to_indices[in_node].append((node_ind, arg_ind))
                 external_nodes.add(in_node)
 
-    return node_to_inputs, external_nodes  # type: ignore[return-value]
+    return external_node_to_indices, external_nodes  # type: ignore[return-value]
 
 
-def get_node_to_external_users(
-    region: Region,
-) -> Tuple[DefaultDict[Node, List[Node]], Set[Node]]:
-    outputs_to_users = defaultdict(list)
-    external_nodes = set()
-    for node in region:
+def get_inds_with_external_users(region: Region) -> List[int]:
+    inds_to_output = []
+    for ind, node in enumerate(region):
         for user in node.users:
             if user not in region:
-                outputs_to_users[node].append(user)
-                external_nodes.add(user)
+                inds_to_output.append(ind)
+                break
 
-    return outputs_to_users, external_nodes
+    return inds_to_output
 
 
 def copy_nodes_and_remap_inputs(
     subgraph: torch.fx.Graph, region: Region
-) -> Dict[Node, Node]:
-    node_to_inputs, external_inputs = get_node_to_external_inputs(region)
-    arg_remap = {}
-    for node in external_inputs:
-        arg_remap[node] = subgraph.placeholder(f"subgraph_input_{node.name}")
+) -> Dict[Tuple[int, int], Node]:
+    external_inputs_to_indices, external_inputs = get_external_inputs(region)
+    indices_to_placeholder_ind = {}
+    region_arg_to_placeholder = {}
+    for arg_ind, node in enumerate(external_inputs):
+        placeholder = subgraph.placeholder(f"subgraph_input_{node.name}")
+        region_arg_to_placeholder[node] = placeholder
+        arg_indices = external_inputs_to_indices[node]
+        for index_pair in arg_indices:
+            indices_to_placeholder_ind[index_pair] = arg_ind
 
     def map_arg(node: Node) -> Node:
-        if node in arg_remap:
-            return arg_remap[node]
+        if node in region_arg_to_placeholder:
+            return region_arg_to_placeholder[node]
         else:
             return node
 
-    old_to_new_node = {}
     for node in region:
-        old_to_new_node[node] = subgraph.node_copy(node, lambda old: map_arg(old))
+        subgraph.node_copy(node, lambda old: map_arg(old))
 
-    return old_to_new_node
-
-
-def create_outputs(
-    subgraph: torch.fx.Graph, old_to_new_nodes: Dict[Node, Node], region: Region
-) -> Dict[Node, Tuple[int, Node]]:
-    outputs_to_users, external_users = get_node_to_external_users(region)
-    output_node_to_subgraph_output = {}
-
-    for ind, (output_node, _) in enumerate(outputs_to_users.items()):
-        output_node_to_subgraph_output[output_node] = (
-            ind,
-            subgraph.output(old_to_new_nodes[output_node]),
-        )
-
-    return output_node_to_subgraph_output
+    return indices_to_placeholder_ind
 
 
-def create_graph_from_region(
+def create_subgraph_outputs(subgraph: torch.fx.Graph, inds_to_output: List[int]):
+    node_list = [n for n in subgraph.nodes if n.op not in ("placeholder", "output")]
+    out_tup = tuple(node_list[ind] for ind in inds_to_output)
+    subgraph.output(out_tup)
+
+
+def create_subgraph(
     region: Region,
-) -> Tuple[torch.fx.Graph, Dict[Node, Tuple[int, Node]]]:
+) -> Tuple[torch.fx.Graph, Dict[Tuple[int, int], int], List[int]]:
     subgraph: torch.fx.Graph = torch.fx.Graph()
-    old_to_new_nodes = copy_nodes_and_remap_inputs(subgraph, region)
-    output_node_to_subgraph_output = create_outputs(subgraph, old_to_new_nodes, region)
-    return subgraph, output_node_to_subgraph_output
+    indices_to_placeholder_ind = copy_nodes_and_remap_inputs(subgraph, region)
+    inds_with_external_users = get_inds_with_external_users(region)
+    create_subgraph_outputs(subgraph, inds_with_external_users)
+    return subgraph, indices_to_placeholder_ind, inds_with_external_users
