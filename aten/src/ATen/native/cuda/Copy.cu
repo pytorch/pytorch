@@ -319,6 +319,7 @@ static bool copy_requires_temporaries(TensorIterator& iter, bool p2p_enabled) {
   }
 
   bool same_dtype = iter.dtype(0) == iter.dtype(1);
+#ifndef __HIP_PLATFORM_HCC__
   bool is_complex = at::isComplexType(iter.dtype(1));
   bool broadcast =  broadcast_required(iter.tensor(0), iter.tensor(1));
 
@@ -361,7 +362,7 @@ static bool copy_requires_temporaries(TensorIterator& iter, bool p2p_enabled) {
     }
 
   }
-
+#endif
   if (same_dtype && iter.is_contiguous()) {
     // Contiguous same-dtype copies can always use cudaMemcpyAsync
     return false;
@@ -564,7 +565,7 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
   void* src = iter.data_ptr(1);
   int64_t nbytes = iter.numel() * iter.element_size(0);
   CUDAStream stream = getCurrentCUDAStream();
-
+#ifndef __HIP_PLATFORM_HCC__
   // Try optimized 1D/2D non-contiguous path first for both blocking and non-blocking
   if (iter.ndim() == 2 && !iter.is_contiguous()) {       
     if (copy_non_contiguous_2d(dst, src, iter, kind, stream, non_blocking)) {
@@ -577,7 +578,7 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
       return; 
     }
   } 
-
+#endif
   if (non_blocking) {
     AT_CUDA_CHECK(cudaMemcpyAsync(dst, src, nbytes, kind, stream));
     // we use both the storage context and the tensor data pointer as the key
