@@ -14,12 +14,16 @@ def call_op(
     op_type: str,
     *args: ir.Value,
     _num_outputs: int = 1,
+    _domain: str = "",
     **kwargs: int | float | str | bool | ir.Graph | ir.TensorProtocol,
 ) -> Sequence[ir.Value]:
     """Call an operator with the given arguments and keyword arguments.
 
     Arguments are always inputs, while keyword arguments are attributes.
     """
+    # This is a wrapper around the IR node creation that hooks into the _builder.OpRecorder
+    # tracer so that all nodes created are recorded the same way as if we were to use
+    # onnxscript ops directly.
     from onnxscript.ir import convenience as ir_convenience
 
     assert _core.current_tracer is not None
@@ -41,7 +45,7 @@ def call_op(
     ]
     tracer.nodes.append(
         node := ir.Node(
-            "",
+            _domain,
             op_type,
             inputs=inputs,
             attributes=attributes,

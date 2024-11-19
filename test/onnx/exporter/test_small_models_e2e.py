@@ -77,7 +77,6 @@ class DynamoExporterTest(common_utils.TestCase):
             fallback=False,
         )
         onnx_model = onnx_program.model
-        # TODO: Preserve the subgraph names
         self.assertIn(
             ("pkg.torch.__subgraph__", "true_graph_0", ""), onnx_model.functions
         )
