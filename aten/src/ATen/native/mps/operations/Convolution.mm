@@ -537,9 +537,10 @@ static Tensor mps_convolution_backward_weights(IntArrayRef weight_size,
   TORCH_CHECK(isFloatingType(grad_output_t.scalar_type()), "Convolution is supported only for Floating types");
   CheckedFrom c = "mps_convolution_backward_weights";
   auto memory_format = grad_output_t.suggest_memory_format();
-  bool is_channels_last = (memory_format == at::MemoryFormat::ChannelsLast) && !is3DConv;
+  const bool supports_strided_api = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
+  const bool is_channels_last = (memory_format == MemoryFormat::ChannelsLast) && !is3DConv && !supports_strided_api;
 
-  MPSShape* gradOutputShape = mps::getMPSShape(grad_output_t, memory_format);
+  auto gradOutputShape = getMPSShape(grad_output_t, supports_strided_api ? MemoryFormat::Contiguous : memory_format);
 
   // For uniformity with everything else, although it seems grad_weight
   // would be unambiguous too.
