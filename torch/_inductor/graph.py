@@ -1886,24 +1886,25 @@ class GraphLowering(torch.fx.Interpreter):
             return self.codegen()
 
     def codegen(self) -> Tuple[str, List[Tuple[int, Node]]]:
-        from .scheduler import Scheduler
+        with dynamo_timed("GraphLowering.codegen", log_pt2_compile_event=True):
+            from .scheduler import Scheduler
 
-        self.init_wrapper_code()
+            self.init_wrapper_code()
 
-        self.scheduler = Scheduler(self.operations)
-        V.debug.draw_orig_fx_graph(self.orig_gm, self.scheduler.nodes)
+            self.scheduler = Scheduler(self.operations)
+            V.debug.draw_orig_fx_graph(self.orig_gm, self.scheduler.nodes)
 
-        self.wrapper_code.push_codegened_graph(self)
-        self.scheduler.codegen()
+            self.wrapper_code.push_codegened_graph(self)
+            self.scheduler.codegen()
 
-        log.debug(
-            "Finished codegen for all nodes. The list of kernel names available: %s",
-            V.graph.all_codegen_kernel_names,
-        )
+            log.debug(
+                "Finished codegen for all nodes. The list of kernel names available: %s",
+                V.graph.all_codegen_kernel_names,
+            )
 
-        result = self.wrapper_code.generate(self.is_inference)
-        self.wrapper_code.pop_codegened_graph()
-        return result
+            result = self.wrapper_code.generate(self.is_inference)
+            self.wrapper_code.pop_codegened_graph()
+            return result
 
     def codegen_subgraph(self, parent_graph: "GraphLowering") -> None:
         """
@@ -1915,14 +1916,15 @@ class GraphLowering(torch.fx.Interpreter):
         kerenls). The wrapper code is not finalized (via `.generate()`
         call), as this will be done in the parent graph's `codegen()`.
         """
-        from .scheduler import Scheduler
+        with dynamo_timed("GraphLowering.codegen_subgraph", log_pt2_compile_event=True):
+            from .scheduler import Scheduler
 
-        self.wrapper_code = parent_graph.wrapper_code
-        self.device_ops = parent_graph.device_ops
-        self.cpp_wrapper = parent_graph.cpp_wrapper
+            self.wrapper_code = parent_graph.wrapper_code
+            self.device_ops = parent_graph.device_ops
+            self.cpp_wrapper = parent_graph.cpp_wrapper
 
-        self.scheduler = Scheduler(self.operations)
-        self.scheduler.codegen()
+            self.scheduler = Scheduler(self.operations)
+            self.scheduler.codegen()
 
     def count_bytes(
         self,
@@ -2013,6 +2015,10 @@ class GraphLowering(torch.fx.Interpreter):
         return mod
 
     def compile_to_fn(self) -> Any:
+        with dynamo_timed("GraphLowering.compile_to_fn", log_pt2_compile_event=True):
+            return self._compile_to_fn()
+
+    def _compile_to_fn(self) -> Any:
         if self.aot_mode:
             from .codecache import AotCodeCompiler
 
@@ -2032,14 +2038,15 @@ class GraphLowering(torch.fx.Interpreter):
 
             additional_files = self.wrapper_code.additional_files
 
-            # Directly return the file path with the compiled code
-            return AotCodeCompiler.compile(
-                self,
-                code,
-                serialized_extern_kernel_nodes,
-                device_type=self.device_type,
-                additional_files=additional_files,
-            )
+            with dynamo_timed("AotCodeCompiler.compile", log_pt2_compile_event=True):
+                # Directly return the file path with the compiled code
+                return AotCodeCompiler.compile(
+                    self,
+                    code,
+                    serialized_extern_kernel_nodes,
+                    device_type=self.device_type,
+                    additional_files=additional_files,
+                )
         else:
             return self.compile_to_module().call
 
