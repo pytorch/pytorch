@@ -29,7 +29,7 @@
 #include <ATen/hip/HIPGeneratorImpl.h>
 #endif
 
-#include <ATen/native/transformers/hip/flash_attn/flash_api.hpp>
+#include <ATen/native/transformers/hip/flash_attn/flash_api.h>
 
 #define CHECK_DEVICE(x) TORCH_CHECK(x.is_cuda(), #x " must be on CUDA")
 #define CHECK_SHAPE(x, ...) TORCH_CHECK(x.sizes() == at::IntArrayRef({__VA_ARGS__}), #x " must have shape (" #__VA_ARGS__ ")")

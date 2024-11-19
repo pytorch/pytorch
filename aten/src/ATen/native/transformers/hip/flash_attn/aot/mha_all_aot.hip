@@ -55,7 +55,7 @@
 #endif
 
 #include <ATen/native/transformers/hip/aotriton_adapter.h>
-#include <ATen/native/transformers/hip/flash_attn/flash_api.hpp>
+#include <ATen/native/transformers/hip/flash_attn/flash_api.h>
 
 #include <c10/util/Exception.h>
 #include <c10/util/CallOnce.h>

@@ -6,8 +6,8 @@
 #include <ostream>
 #include <string>
 
-#include "ck_tile/core.hpp"
-#include "ck_tile/ops/fmha.hpp"
+#include <ck_tile/core.hpp>
+#include <ck_tile/ops/fmha.hpp>
 
 // keep this in sync with ck_tile::GenericAttentionMaskEnum
 enum class mask_enum
