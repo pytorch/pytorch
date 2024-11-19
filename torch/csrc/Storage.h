@@ -10,7 +10,7 @@
 #define THPStorageStr "torch.UntypedStorage"
 
 struct THPStorage {
-  PyObject_HEAD;
+  PyObject_HEAD
   c10::MaybeOwned<c10::Storage> cdata;
   bool is_hermetic;
 };

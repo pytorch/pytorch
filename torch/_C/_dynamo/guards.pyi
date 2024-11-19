@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any
+from typing import Any, Dict
 
 import torch
 
@@ -139,6 +139,10 @@ def install_symbolic_shape_guard(
     py_addr_keep_alive: Any,
     verbose_code_parts: list[str],
 ): ...
+def profile_guard_manager(
+    guard_manager: GuardManager,
+    f_locals: Dict[str, Any],
+) -> float: ...
 
 class TensorGuards:
     def __init__(
