@@ -37,10 +37,10 @@ class Registry:
         return repr(self._registry)
 
     def items(self):
-        yield from self._registry.items()
+        return self._registry.items()
 
     def values(self):
-        yield from self._registry.values()
+        return self._registry.values()
 
 
 # Default registry

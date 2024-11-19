@@ -175,8 +175,8 @@ class ONNXRegistry:
         from torch.onnx._internal.exporter._torchlib import ops
 
         del ops
-        for target, impls in _torchlib_registry.registry.values():
-            for impl in impls:
+        for target, implementations in _torchlib_registry.registry.values():
+            for impl in implementations:
                 onnx_decomposition = OnnxDecompMeta(
                     onnx_function=impl,
                     fx_target=target,
