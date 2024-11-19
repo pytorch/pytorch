@@ -345,7 +345,7 @@ class OpSignature:
     params_map: Mapping[str, Parameter | AttributeParameter] = dataclasses.field(
         init=False, repr=False
     )
-    version: int | None = None
+    opset_version: int | None = None
 
     def __post_init__(self):
         self.params_map = {param.name: param for param in self.params}
@@ -425,7 +425,7 @@ class OpSignature:
             overload="",
             params=params,
             outputs=outputs,
-            version=opschema.since_version,
+            opset_version=opschema.since_version,
         )
 
     @classmethod
@@ -436,7 +436,7 @@ class OpSignature:
         name: str | None = None,
         overload: str = "",
         *,
-        version: int = 1,
+        opset_version: int = 1,
     ) -> OpSignature:
         """Produce an OpSignature from a function using type annotation."""
 
@@ -566,5 +566,5 @@ class OpSignature:
             overload=overload,
             params=params,
             outputs=outputs,
-            version=version,
+            opset_version=opset_version,
         )

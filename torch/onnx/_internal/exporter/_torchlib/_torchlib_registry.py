@@ -4,10 +4,12 @@
 
 from __future__ import annotations
 
+
 __all__ = ["registry", "onnx_impl"]
 
 import collections
 from typing import Callable, TypeVar
+
 
 _T = TypeVar("_T", bound=Callable)
 

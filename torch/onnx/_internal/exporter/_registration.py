@@ -155,15 +155,15 @@ class ONNXRegistry:
                     continue
 
                 if isinstance(overload_func, onnxscript.OnnxFunction):
-                    version = overload_func.opset.version
+                    opset_version = overload_func.opset.version
                 else:
-                    version = 1
+                    opset_version = 1
 
                 overload_func.signature = _schemas.OpSignature.from_function(  # type: ignore[attr-defined]
                     overload_func,
                     domain,
                     name,
-                    version=version,
+                    opset_version=opset_version,
                 )
                 onnx_decomposition = OnnxDecompMeta(
                     onnx_function=overload_func,
@@ -176,12 +176,13 @@ class ONNXRegistry:
                 logger.exception("Failed to register '%s'. Skipped", qualified_name)
                 continue
 
-        # Gather HOP ops
+        # Gather ops from the internal torchlib registry
+        # TODO(justinchuby): Make this the main registry after torchlib is migrated to PyTorch
         # Trigger registration
         from torch.onnx._internal.exporter._torchlib import ops
 
         del ops
-        for target, implementations in _torchlib_registry.registry.items():
+        for target, implementations in _torchlib_registry.registry.items():  # type: ignore[assignment]
             for impl in implementations:
                 onnx_decomposition = OnnxDecompMeta(
                     onnx_function=impl,
@@ -235,7 +236,7 @@ class ONNXRegistry:
                         function,
                         function.function_ir.domain,
                         function.name,
-                        version=function.opset.version,
+                        opset_version=function.opset.version,
                     )
                 else:
                     function.signature = _schemas.OpSignature.from_function(  # type: ignore[attr-defined]

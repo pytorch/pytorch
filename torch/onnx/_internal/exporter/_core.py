@@ -686,7 +686,6 @@ def _translate_fx_graph(
     node_name_to_local_functions: dict[str, ir.Function] = {}
     constant_farm: dict[Any, ir.Value] = {}
     opset = _get_onnxscript_opset(registry.opset_version)
-    # Opset imports are added to the model in the final add_opset_imports pass
 
     for node in fx_graph.nodes:
         logger.debug(
@@ -901,6 +900,16 @@ def _prepare_exported_program_for_export(
 def _get_scope_name(scoped_name: str) -> tuple[str, str]:
     """Get the scope and name of a node.
 
+    Examples::
+        >>> _get_scope_name('')
+        ('', '')
+        >>> _get_scope_name('true_graph')
+        ('', 'true_graph')
+        >>> _get_scope_name('true_graph.false_graph')
+        ('true_graph', 'false_graph')
+        >>> _get_scope_name('true_graph.false_graph.some_graph')
+        ('true_graph.false_graph', 'some_graph')
+
     Args:
         scoped_name: The scoped name of the node.
 
@@ -956,8 +965,6 @@ def _exported_program_to_onnx_program(
         producer_name="pytorch",
         producer_version=torch.__version__,
     )
-
-    # Opset imports are added to the model in the final add_opset_imports pass
 
     # A dictionary storing the translated subgraphs as ONNX functions made available to outer graphs
     # {<subgraph_scope>: {<subgraph_name>: <IR function>}}
