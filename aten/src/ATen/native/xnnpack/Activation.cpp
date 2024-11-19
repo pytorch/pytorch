@@ -19,46 +19,84 @@ bool use_hardswish(
 
 static Tensor& hardswish_impl(Tensor& input, Tensor& output) {
   using namespace internal;
-
-  xnn_operator_t hardswish_op{};
-  const xnn_status create_status = xnn_create_hardswish_nc_f32(
-    0, // flags
-    &hardswish_op);
-
+  // Create XNNPACK Subgraph
+  xnn_subgraph_t subgraph_ptr = nullptr;
+  xnn_status status = xnn_create_subgraph(
+    /*external_value_ids=*/2,
+    /*flags=*/0,
+    &subgraph_ptr);
   TORCH_CHECK(
-    xnn_status_success == create_status,
-    "xnn_create_hardswish_nc_f32 failed!");
+      status == xnn_status_success,
+      "xnn create subgraph failed(", status,")!");
+  std::unique_ptr<xnn_subgraph, decltype(&xnn_delete_subgraph)> subgraph(
+      subgraph_ptr, &xnn_delete_subgraph);
+  uint32_t input_id = XNN_INVALID_VALUE_ID, output_id = XNN_INVALID_VALUE_ID;
+  std::vector<size_t> input_output_shape(input.sizes().begin(), input.sizes().end());
 
-  Operator hardswish_scoped_op(hardswish_op);
-
-  const xnn_status reshape_status = xnn_reshape_hardswish_nc_f32(
-    hardswish_op,
-    input.numel(),  // Batch
-    1, // channels
-    1, // input stride
-    1, // output stride
-    caffe2::pthreadpool_());  // threadpool
-
+  status = xnn_define_tensor_value(
+    subgraph_ptr,
+    xnn_datatype_fp32,
+    input_output_shape.size(),
+    input_output_shape.data(),
+    nullptr,
+    0,
+    XNN_VALUE_FLAG_EXTERNAL_INPUT,
+    &input_id
+  );
   TORCH_CHECK(
-    xnn_status_success == reshape_status,
-    "xnn_reshape_hardswish_nc_f32 failed!");
+      status == xnn_status_success,
+      "defining xnn input failed(", status,")!");
 
-  const xnn_status setup_status = xnn_setup_hardswish_nc_f32(
-    hardswish_op,
-    input.data_ptr<float>(),
-    output.data_ptr<float>());
-
+  status = xnn_define_tensor_value(
+    subgraph_ptr,
+    xnn_datatype_fp32,
+    input_output_shape.size(),
+    input_output_shape.data(),
+    nullptr,
+    1,
+    XNN_VALUE_FLAG_EXTERNAL_OUTPUT,
+    &output_id
+  );
   TORCH_CHECK(
-    xnn_status_success == setup_status,
-    "xnn_setup_hardswish_nc_f32 failed!");
+      status == xnn_status_success,
+      "defining xnn output failed(", status,")!");
 
-  const xnn_status run_status = xnn_run_operator(
-    hardswish_op,
-    caffe2::pthreadpool_());  // threadpool
+  status = xnn_define_unary(
+    subgraph_ptr,
+    xnn_unary_hardswish,
+    nullptr,
+    input_id,
+    output_id,
+    0
+  );
 
-  TORCH_INTERNAL_ASSERT(
-    xnn_status_success == run_status,
-    "xnn_run_operator failed!");
+  // create runtime
+  xnn_runtime_t runtime_ptr = nullptr;
+  status = xnn_create_runtime_v2(subgraph_ptr, caffe2::pthreadpool_(), 0, &runtime_ptr);
+  TORCH_CHECK(
+      status == xnn_status_success,
+      "xnn create runtime failed(", status,")!");
+  TORCH_CHECK(
+      runtime_ptr != nullptr,
+      "xnn create runtime failed because runtime_ptr is null");
+  std::unique_ptr<xnn_runtime, decltype(&xnn_delete_runtime)> auto_runtime(
+      runtime_ptr, &xnn_delete_runtime);
+
+  std::array<xnn_external_value, 2> external = {
+    xnn_external_value{input_id, input.data_ptr<float>()},
+    xnn_external_value{output_id, output.data_ptr<float>()}};
+
+  status = xnn_setup_runtime(
+    runtime_ptr,
+    external.size(),
+    external.data());
+  TORCH_CHECK(
+      status == xnn_status_success,
+      "xnn setup runtime failed(", status,")!");
+  status = xnn_invoke_runtime(runtime_ptr);
+  TORCH_CHECK(
+      status == xnn_status_success,
+      "xnn invoke runtime failed(", status,")!");
 
   return output;
 }
