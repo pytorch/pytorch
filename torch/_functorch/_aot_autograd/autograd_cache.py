@@ -217,6 +217,11 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
         self.disable_amp = torch._C._is_any_autocast_enabled()
         self.deterministic_algorithms = torch.are_deterministic_algorithms_enabled()
         self.autograd_config = config.save_config()
+        sym_floats = [isinstance(x, torch.SymFloat) for x in example_inputs]
+        if sym_floats:
+            raise BypassAOTAutogradCache(
+                "AOTAutogradCache does not support symbolic floats(temporarily)"
+            )
         try:
             # TODO: example_inputs causes more cache misses than necessary
             # with dynamic shapes, because this is before we add
@@ -645,6 +650,7 @@ class AOTAutogradCache:
                 if entry is not None:
                     compiled_fn = entry.wrap_post_compile(args, aot_config, fx_config)
                     log.info("AOTAutograd cache hit for key %s", cache_key)
+                    breakpoint()
                     counters["aot_autograd"]["autograd_cache_hit"] += 1
                     cache_state = "hit"
                     cache_event_time = time.time_ns()
