@@ -1061,12 +1061,12 @@ def _validate_embed_dim(query: Tensor, key: Tensor, value: Tensor):
 
 
 def _validate_device(query: Tensor, key: Tensor, value: Tensor):
-    """TODO: Remove once non cuda device support is added
+    """TODO: Remove once non cuda/cpu devices support is added
     We only need to check query since we have already that q,k,v are on the same device
     """
-    if query.device.type != "cuda":
+    if query.device.type != "cuda" and query.device.type != "cpu":
         raise ValueError(
-            "FlexAttention is only supported on CUDA devices. "
+            "FlexAttention is only supported on CUDA or CPU devices. "
             f"Found input tensors on {query.device.type} device."
         )
 
@@ -1174,6 +1174,7 @@ def flex_attention(
                 f"Expect number of query heads to be a multiple of kv heads for GQA "
                 f"but got Hq={Hq} and Hkv={Hkv}."
             )
+
     if query.size(0) != key.size(0):
         if block_mask is None:
             raise ValueError(
@@ -1239,6 +1240,16 @@ def flex_attention(
     )
 
     if torch.compiler.is_dynamo_compiling():
+        if return_lse:
+            if query.device.type == "cpu":
+                raise NotImplementedError(
+                    "`return_lse` is not supported yet on CPU device when using torch.compile."
+                )
+
+        if query.requires_grad:
+            raise NotImplementedError(
+                "FlexAttention only supports inference on CPU device when using torch.compile."
+            )
         # mark head_dim and number of heads to be static
         for x in [query, key, value]:
             torch._dynamo.mark_static(x, -3)

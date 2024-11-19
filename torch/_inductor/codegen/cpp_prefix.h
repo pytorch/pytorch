@@ -42,6 +42,7 @@
 #include <ATen/native/Math.h>
 #endif
 
+#include <ATen/native/cpu/utils.h>
 typedef at::Half half;
 typedef at::BFloat16 bfloat16;
 
@@ -57,6 +58,162 @@ struct Welford {
   T weight = T(0);
   uint64_t index = 0;
 };
+
+// out = val * a + b
+// is_b_stride_zero: If the stride of b is 0 (mask broadcasting case),
+//                take b as a scalar pointer.
+#if __GNUC__ == 11 && defined(__ARM_FEATURE_SVE)
+template <typename T1, typename T2>
+inline void _scale_attn_mask_fusion_kernel(
+    T1* a,
+    T2* b,
+    const int& size,
+    T1* out,
+    T1& val,
+    bool is_b_stride_zero) {
+#else
+template <bool is_b_stride_zero, typename T1, typename T2>
+inline void _scale_attn_mask_fusion_kernel(
+    T1* a,
+    T2* b,
+    const int& size,
+    T1* out,
+    T1& val) {
+#endif
+  const auto vec_size1 = at::vec::Vectorized<T1>::size();
+  const auto vec_size2 = at::vec::Vectorized<T2>::size();
+  constexpr int64_t T1_n =
+      (vec_size2 == vec_size1 * 2 && std::is_reduced_floating_point_v<T2>) ? 2 : 1;
+  constexpr int64_t T2_n = 1;
+  auto vec_scale = at::vec::VectorizedN<T1, T1_n>(val);
+  int64_t i = 0;
+  for (; i < size - (size % vec_size2); i += vec_size2) {
+    auto a_n = at::vec::VectorizedN<T1, T1_n>::loadu(a + i);
+    at::vec::VectorizedN<T2, T2_n> b_n;
+#if __GNUC__ == 11 && defined(__ARM_FEATURE_SVE)
+    if (is_b_stride_zero) {
+#else
+    if constexpr(is_b_stride_zero) {
+#endif
+      b_n = at::vec::VectorizedN<T2, T2_n>((T1)b[0]);
+    } else {
+      b_n = at::vec::VectorizedN<T2, T2_n>::loadu(b + i);
+    }
+    auto b_n_convert = at::vec::convert<T1, T1_n, T2, T2_n, true>(b_n);
+    auto res = a_n * vec_scale + b_n_convert;
+    res.store(out + i);
+  }
+  for (; i < size; i++) {
+    auto tmp0 = a[i];
+    T1 tmp1;
+#if __GNUC__ == 11 && defined(__ARM_FEATURE_SVE)
+    if (is_b_stride_zero) {
+#else
+    if constexpr(is_b_stride_zero) {
+#endif
+      tmp1 = (T1)b[0];
+    } else {
+      tmp1 = (T1)b[i];
+    }
+    out[i] = tmp0 * val + tmp1;
+  }
+}
+
+// 1) out = exp(a - val)
+// 2) val = sum(out)
+template <typename T1, typename T2>
+inline void _exp_reduce_sum_fusion_kernel(
+    T1* a,
+    const int& size,
+    T2* out,
+    T1& val) {
+  auto vec_size = at::vec::Vectorized<T1>::size();
+  auto vec_max = at::vec::Vectorized<T1>(val);
+  T1 tmp_sum = 0;
+  auto vec_tmp_sum = at::vec::Vectorized<T1>(tmp_sum);
+  for (long i = 0; i < vec_size * (size / vec_size); i += vec_size) {
+    auto tmp0 = at::vec::Vectorized<T1>::loadu(a + i);
+    auto tmp1 = tmp0 - vec_max;
+    auto tmp2 = tmp1.exp_u20();
+    vec_tmp_sum += tmp2;
+    at::native::_store(out + i, tmp2);
+  }
+  tmp_sum = at::vec::vec_reduce_all<T1>(
+      [](at::vec::Vectorized<T1>& x, at::vec::Vectorized<T1>& y) {
+        return x + y;
+      },
+      vec_tmp_sum);
+  for (long i = vec_size * (size / vec_size); i < size; i++) {
+    auto tmp0 = a[i];
+    auto tmp1 = tmp0 - val;
+    auto tmp2 = exp(tmp1);
+    tmp_sum += tmp2;
+    out[i] = tmp2;
+  }
+  val = tmp_sum;
+}
+
+// 1) out = a * scale
+// 2) max = max(out)
+template <typename scalar_t>
+inline void _mul_reduce_max_fusion_kernel(
+    const scalar_t* a,
+    const scalar_t& scale,
+    const int& size,
+    scalar_t* out,
+    scalar_t& max) {
+  auto vec_size = at::vec::Vectorized<scalar_t>::size();
+  auto vec_scale = at::vec::Vectorized<scalar_t>(scale);
+  scalar_t tmp_max = -std::numeric_limits<scalar_t>::infinity();
+  auto vec_tmp_max = at::vec::Vectorized<scalar_t>(tmp_max);
+  for (long i = 0; i < vec_size * (size / vec_size); i += vec_size) {
+    auto tmp0 = at::vec::Vectorized<scalar_t>::loadu(a + i);
+    auto tmp1 = tmp0 * vec_scale;
+    vec_tmp_max = at::vec::maximum(vec_tmp_max, tmp1);
+    at::native::_store(out + i, tmp1);
+  }
+  for (long i = vec_size * (size / vec_size); i < size; i++) {
+    auto tmp0 = a[i];
+    auto tmp1 = tmp0 * scale;
+    tmp_max = std::max(tmp_max, tmp1);
+    out[i] = tmp1;
+  }
+  max = std::max(
+      tmp_max,
+      at::vec::vec_reduce_all<scalar_t>(
+          [](at::vec::Vectorized<scalar_t>& x, at::vec::Vectorized<scalar_t>& y) {
+            return at::vec::maximum(x, y);
+          },
+          vec_tmp_max));
+}
+
+template <typename scalar_t>
+static inline scalar_t* conditional_data_ptr(scalar_t* ptr, scalar_t* ptr2) {
+  TORCH_CHECK(ptr2 == nullptr);
+  return ptr;
+}
+
+template <typename scalar_t,
+          typename std::enable_if_t<std::is_reduced_floating_point_v<scalar_t>, int> = 0>
+static inline scalar_t* conditional_data_ptr(float* ptr, scalar_t* ptr2) {
+  return ptr2;
+}
+
+template <typename scalar_t>
+inline void fill_stub(scalar_t* data, scalar_t val, int64_t size) {
+  using Vec = at::vec::Vectorized<scalar_t>;
+  Vec data_vec = Vec(val);
+  int64_t d = 0;
+  for (; d < size - (size % Vec::size()); d += Vec::size()) {
+    data_vec.store(data + d);
+  }
+  #if !defined(_MSC_VER) && !defined(COMPILING_FOR_MIN_SIZE)
+  # pragma unroll
+  #endif
+  for (; d < size; d++) {
+    data[d] = val;
+  }
+}
 
 
 template <typename T>

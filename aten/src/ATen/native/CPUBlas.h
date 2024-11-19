@@ -30,7 +30,7 @@ using gemm_fn = void(*)(
 DECLARE_DISPATCH(gemm_fn, gemm_stub)
 
 template <typename scalar_t>
-void gemm(
+TORCH_API void gemm(
     TransposeType transa, TransposeType transb,
     int64_t m, int64_t n, int64_t k,
     at::opmath_type<scalar_t> alpha,
@@ -44,7 +44,7 @@ void gemm(
     transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
 }
 
-void gemm(
+TORCH_API void gemm(
     TransposeType transa, TransposeType transb,
     int64_t m, int64_t n, int64_t k,
     double alpha,
@@ -53,7 +53,7 @@ void gemm(
     double beta,
     double *c, int64_t ldc);
 
-void gemm(
+TORCH_API void gemm(
     TransposeType transa, TransposeType transb,
     int64_t m, int64_t n, int64_t k,
     float alpha,
@@ -62,7 +62,7 @@ void gemm(
     float beta,
     float *c, int64_t ldc);
 
-void gemm(
+TORCH_API void gemm(
     TransposeType transa, TransposeType transb,
     int64_t m, int64_t n, int64_t k,
     float alpha,
@@ -71,7 +71,7 @@ void gemm(
     float beta,
     at::BFloat16 *c, int64_t ldc);
 
-void gemm(
+TORCH_API void gemm(
     TransposeType transa, TransposeType transb,
     int64_t m, int64_t n, int64_t k,
     const float alpha,
@@ -80,7 +80,7 @@ void gemm(
     const float beta,
     float *c, int64_t ldc);
 
-void gemm(
+TORCH_API void gemm(
     TransposeType transa, TransposeType transb,
     int64_t m, int64_t n, int64_t k,
     float alpha,
@@ -89,7 +89,7 @@ void gemm(
     float beta,
     at::Half *c, int64_t ldc);
 
-void gemm(
+TORCH_API void gemm(
     TransposeType transa, TransposeType transb,
     int64_t m, int64_t n, int64_t k,
     const float alpha,
@@ -98,7 +98,7 @@ void gemm(
     const float beta,
     float *c, int64_t ldc);
 
-void gemm(
+TORCH_API void gemm(
     TransposeType transa, TransposeType transb,
     int64_t m, int64_t n, int64_t k,
     c10::complex<double> alpha,
@@ -107,7 +107,7 @@ void gemm(
     c10::complex<double> beta,
     c10::complex<double> *c, int64_t ldc);
 
-void gemm(
+TORCH_API void gemm(
     TransposeType transa, TransposeType transb,
     int64_t m, int64_t n, int64_t k,
     c10::complex<float> alpha,
@@ -116,7 +116,7 @@ void gemm(
     c10::complex<float> beta,
     c10::complex<float> *c, int64_t ldc);
 
-void gemm(
+TORCH_API void gemm(
     TransposeType transa, TransposeType transb,
     int64_t m, int64_t n, int64_t k,
     int64_t alpha,

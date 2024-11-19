@@ -713,6 +713,7 @@ def create_indices_fake(x) -> torch.Tensor:
 
 from torch._inductor.kernel.flex_decoding import create_flex_decoding_kernel
 
+from ..codegen.cpp_mha_template import CppMHATemplate
 
 # TODO: We probably also need a layout constraint?
 @register_lowering(torch.ops.higher_order.flex_attention, type_promotion_kind=None)
@@ -740,6 +741,52 @@ def flex_attention(
         SPARSE_KV_BLOCK_SIZE,
         mask_graph,
     ) = block_mask
+
+    if query.get_device().type == "cpu":
+        score_mod_other_buffers = maybe_realize(score_mod_other_buffers)
+        mask_mod_other_buffers = maybe_realize(mask_mod_other_buffers)
+
+        Bq, Hq, seq_len_q, qk_head_dim = query.get_size()
+        Bkv, Hkv, seq_len_kv, v_head_dim = value.get_size()
+        B = Bq
+
+        # Construct output layout with strides matching the query.
+        out_size = [B, Hq, seq_len_q, v_head_dim]
+        fill_order = get_fill_order(query.get_stride())
+        out_strides = construct_strides(out_size, fill_order)
+
+        layout = FixedLayout(
+            query.get_device(),
+            query.get_dtype(),
+            [B, Hq, seq_len_q, v_head_dim],
+            stride=out_strides,
+        )
+
+        choices: List[Any] = []
+        CppMHATemplate.add_choices(
+            choices=choices,
+            input_nodes=[query, key, value, kv_indices],
+            layout=layout,
+            scale=scale,
+            score_mod=subgraph,
+            block_mask=block_mask,
+            kv_block_size=SPARSE_KV_BLOCK_SIZE,
+            kv_num_blocks=kv_num_blocks,
+        )
+        inputs_for_autotuning = [
+            query,
+            key,
+            value,
+        ]
+        res = autotune_select_algorithm(
+            "flex_attention",
+            choices,
+            inputs_for_autotuning,
+            layout,
+        )
+        return (res,)
+
+    # below is cuda path if device is not cpu
     placeholder_inps = [
         create_placeholder(name, dtype, query.get_device())
         for name, dtype in [
