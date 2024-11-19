@@ -637,15 +637,12 @@ def extract_input_node_reduction_ranges(
     Otherwise returns (None, None).
     """
 
-    from .ir import ComputedBuffer, ExternKernel, Loops
-
-    size: Optional[List[sympy.Expr]]
-    reduction_size: Optional[List[sympy.Expr]]
+    from .ir import ComputedBuffer, Loops
 
     if isinstance(input_node.data, ComputedBuffer):
         # Input node has already been realized. Return its size and reduction_size.
-        size = [*input_node.get_size()]
-        reduction_size = [*input_node.get_reduction_size()]
+        size = input_node.get_size()
+        reduction_size = input_node.get_reduction_size()
         if len(reduction_size) > 0:
             return (size, reduction_size)
         else:
@@ -663,7 +660,7 @@ def extract_input_node_reduction_ranges(
     size = None
     while reduction_size is None and len(reads) > 0:
         seen: OrderedSet[str] = OrderedSet()
-        new_reads: List[Dep] = []
+        new_reads = []
         for read in reads:
             if not isinstance(read, MemoryDep):
                 continue
@@ -674,7 +671,7 @@ def extract_input_node_reduction_ranges(
             if buffer is None:
                 continue
             op = buffer.get_defining_op()
-            if op is None or isinstance(op, ExternKernel):
+            if op is None:
                 continue
 
             if isinstance(op, ComputedBuffer) and len(op.get_reduction_size()) > 0:
@@ -688,7 +685,7 @@ def extract_input_node_reduction_ranges(
         if reads == new_reads:
             return (size, reduction_size)
         else:
-            reads = OrderedSet(new_reads)
+            reads = new_reads
     return (size, reduction_size)
 
 
