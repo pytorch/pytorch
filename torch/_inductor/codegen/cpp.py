@@ -6,7 +6,6 @@ import itertools
 import math
 import re
 import sys
-import warnings
 from copy import copy, deepcopy
 from enum import Enum
 from typing import cast, Dict, List, Optional, Sequence, Set, Tuple, Union

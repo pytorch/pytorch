@@ -31,9 +31,9 @@ from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
-    skip_if_async_compile,
     instantiate_parametrized_tests,
     parametrize,
+    skip_if_async_compile,
     skipIfRocm,
     TEST_WITH_ROCM,
 )
@@ -637,6 +637,7 @@ class TestMaxAutotune(TestCase):
         f_c = torch.compile(mode="max-autotune-no-cudagraphs")(f)
         self.assertEqual(f_c(*inps), f(*inps), atol=0.03, rtol=0.25)
 
+    @skip_if_async_compile
     @config.patch({"test_configs.force_extern_kernel_in_multi_template": True})
     def test_cat_max_autotune_extern(self):
         self._test_cat_max_autotune_impl(using_triton_mm=False)

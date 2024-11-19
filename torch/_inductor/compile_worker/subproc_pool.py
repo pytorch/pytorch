@@ -1,10 +1,8 @@
 import functools
-import io
 import itertools
 import logging
 import multiprocessing
 import os
-import pickle
 import struct
 import subprocess
 import sys
@@ -13,9 +11,8 @@ import traceback
 import typing
 from concurrent.futures import Future, ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
-from dataclasses import dataclass
-from typing import Any, BinaryIO, Callable, Dict, Optional, Tuple, TypeVar
-from typing_extensions import Never, override, ParamSpec
+from typing import Any, BinaryIO, Callable, Dict, Tuple, TypeVar
+from typing_extensions import Never, ParamSpec
 
 import torch
 
@@ -23,20 +20,9 @@ import torch
 # justknobs, e.g., in the Triton compiler. For internal, the import installs
 # functionality to destroy singletons before forking and re-enable them after.
 import torch._thread_safe_fork  # noqa: F401
-import torch.utils._pytree as pytree
 from torch._inductor import config
 from torch._inductor.compile_worker.watchdog import _async_compile_initializer
-from torch._subclasses.fake_tensor import (  # extract_tensor_metadata,
-    FakeTensor,
-    FakeTensorMode,
-    Tensor,
-)
-from torch._subclasses.meta_utils import (
-    MetaConverter,
-    MetaTensorDesc,
-    MetaTensorDescriber,
-)
-from torch.fx.experimental.sym_node import SymNode
+from torch._subclasses.fake_tensor import FakeTensorMode  # extract_tensor_metadata,
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
 
@@ -162,6 +148,7 @@ class SubprocPool:
         if args or kwargs:
             job_fn = functools.partial(job_fn, *args, **kwargs)
         from torch.fx._graph_pickler import _SubprocPickler
+
         job_data = _SubprocPickler.dumps(job_fn)
         future: Future[_T]
         with self.futures_lock:
@@ -186,6 +173,7 @@ class SubprocPool:
 
             try:
                 from torch.fx._graph_pickler import _SubprocUnpickler, _UnpickleState
+
                 unpickle_state = _UnpickleState(None)  # type: ignore[arg-type]
                 result = _SubprocUnpickler.loads(data, unpickle_state)
             except Exception as e:
@@ -289,6 +277,7 @@ class SubprocMain:
             except Exception as e:
                 log.exception("Error in subprocess")
                 from torch.fx._graph_pickler import _SubprocPickler
+
                 result = _SubprocPickler.dumps(e)
             assert isinstance(result, bytes)
             with self.write_lock:
@@ -300,13 +289,12 @@ class SubprocMain:
 
     @staticmethod
     def do_job(data: bytes) -> bytes:
-        from torch._subclasses.fake_tensor import FakeTensorMode
-
         # do the pickle/unpickle in the sub-subproc
         shape_env = ShapeEnv()
         fake_mode = FakeTensorMode(shape_env=shape_env)
 
         from torch.fx._graph_pickler import _SubprocUnpickler, _UnpickleState
+
         unpickle_state = _UnpickleState(fake_mode)
 
         job = typing.cast(
@@ -318,6 +306,7 @@ class SubprocMain:
         except Exception as e:
             result = _SubprocExceptionInfo(traceback.format_exc())
         from torch.fx._graph_pickler import _SubprocPickler
+
         return _SubprocPickler.dumps(result)
 
 

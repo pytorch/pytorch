@@ -7,7 +7,6 @@ import logging
 import math
 import operator
 import os
-import warnings
 from collections import defaultdict
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 from unittest.mock import patch
@@ -1782,6 +1781,7 @@ def _warn_complex_not_supported():
     # "Torchinductor does not support code generation for complex operators. Performance may be worse than eager."
     # )
     pass
+
 
 # There are some types (CPU) which we accept as input but not as
 # output.

@@ -1,18 +1,17 @@
 from __future__ import annotations
 
-import os
 import asyncio
 import contextlib
-import dataclasses
-from dataclasses import dataclass
 import functools
 import io
 import itertools
 import logging
+import os
 import sys
 import time
 import warnings
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from itertools import count
 from typing import (
     Any,
@@ -28,7 +27,6 @@ from typing import (
     TYPE_CHECKING,
     TypeVar,
     Union,
-    NewType,
 )
 from typing_extensions import Never, override, ParamSpec, Protocol, TypedDict, Unpack
 from unittest import mock
@@ -72,6 +70,7 @@ from torch._inductor.cudagraph_utils import (
     PlaceholderInfo,
 )
 from torch._inductor.debug import save_args_for_compile_fx_inner
+from torch._inductor.metrics import CachedMetricsDeltas, CachedMetricsHelper
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.utils import (
     BoxedBool,
@@ -91,6 +90,7 @@ from torch.fx import GraphModule
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, SymExprPrinter
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 from torch.monitor import _WaitCounter
+from torch.testing._internal.common_utils import DeterministicGuard
 from torch.utils._ordered_set import OrderedSet
 
 from .._dynamo.backends.common import aot_autograd
@@ -115,7 +115,7 @@ from .utils import (
     shape_env_from_inputs,
 )
 from .virtualized import V
-from torch.testing._internal.common_utils import DeterministicGuard
+
 
 if TYPE_CHECKING:
     from torch._ops import OpOverload
@@ -1114,9 +1114,8 @@ class _WireProtocolInput:
     deterministic_guard: DeterministicGuard
 
     def serialize(self) -> _WireProtocolPickledInput:
-        from torch.fx._graph_pickler import (
-            _SubprocPickler,
-        )
+        from torch.fx._graph_pickler import _SubprocPickler
+
         return _WireProtocolPickledInput(_SubprocPickler.dumps(self))
 
 
@@ -1125,10 +1124,7 @@ class _WireProtocolPickledInput:
     value: bytes
 
     def deserialize(self) -> _WireProtocolInput:
-        from torch.fx._graph_pickler import (
-            _SubprocUnpickler,
-            _UnpickleState,
-        )
+        from torch.fx._graph_pickler import _SubprocUnpickler, _UnpickleState
 
         fake_mode = _current_fake_mode()
         state = _UnpickleState(fake_mode)
@@ -1141,11 +1137,11 @@ class _WireProtocolPickledInput:
 @dataclass
 class _WireProtocolOutput:
     graph: Union[CompiledFxGraph, str]
+    metrics: CachedMetricsDeltas
 
-    def serialize(self) -> "_WireProtocolPickledOutput":
-        from torch.fx._graph_pickler import (
-            _SubprocPickler,
-        )
+    def serialize(self) -> _WireProtocolPickledOutput:
+        from torch.fx._graph_pickler import _SubprocPickler
+
         if isinstance(self.graph, CompiledFxGraph):
             self.graph.prepare_for_serialization()
         return _WireProtocolPickledOutput(_SubprocPickler.dumps(self))
@@ -1156,10 +1152,7 @@ class _WireProtocolPickledOutput:
     value: bytes
 
     def deserialize(self, gm: Optional[GraphModule]) -> _WireProtocolOutput:
-        from torch.fx._graph_pickler import (
-            _SubprocUnpickler,
-            _UnpickleState,
-        )
+        from torch.fx._graph_pickler import _SubprocUnpickler, _UnpickleState
 
         fake_mode = _current_fake_mode()
         state = _UnpickleState(fake_mode)
@@ -1200,25 +1193,41 @@ class _FxCompileSerialized(FxCompile):
             log.debug("Unable to pickle input graph or example inputs", exc_info=True)
 
             # Fallback to in-process
-            return _InProcessFxCompile().codegen_and_compile_sync(gm, example_inputs, **kwargs)
+            return _InProcessFxCompile().codegen_and_compile_sync(
+                gm, example_inputs, **kwargs
+            )
 
         output = (await self._send_to_child(input)).deserialize(gm)
+
+        self._postprocess(output)
 
         # TODO: Do we need to figure out what changed in TracingContext in the child and plumb that back up to the parent?
 
         return output.graph
 
     @abstractmethod
-    async def _send_to_child(self, pickled_input: _WireProtocolPickledInput) -> _WireProtocolPickledOutput:
+    async def _send_to_child(
+        self, pickled_input: _WireProtocolPickledInput
+    ) -> _WireProtocolPickledOutput:
         # The implementation of this should transfer `input` to the child, call
         # `_run_in_child(input)` and transfer the result back.
         ...
 
+    def _postprocess(self, output: _WireProtocolOutput) -> None:
+        pass
+
     @classmethod
-    def _run_in_child(cls, pickled_input: _WireProtocolPickledInput, extra_env: Optional[Mapping[str, str]] = None) -> _WireProtocolPickledOutput:
+    def _run_in_child(
+        cls,
+        pickled_input: _WireProtocolPickledInput,
+        extra_env: Optional[Mapping[str, str]] = None,
+    ) -> _WireProtocolPickledOutput:
+        metrics = CachedMetricsHelper()
+
         with contextlib.ExitStack() as stack:
             if extra_env is not None:
                 import unittest
+
                 stack.enter_context(unittest.mock.patch.dict("os.environ", extra_env))
 
             # TODO: Should we split the input into multiple sections where each
@@ -1236,19 +1245,23 @@ class _FxCompileSerialized(FxCompile):
                 input.gm, input.example_inputs, **input.kwargs
             )
 
-            return _WireProtocolOutput(output_graph).serialize()
+            return _WireProtocolOutput(output_graph, metrics.get_deltas()).serialize()
 
 
 class _DebugFxCompile(_FxCompileSerialized):
     @override
-    async def _send_to_child(self, pickled_input: _WireProtocolPickledInput) -> _WireProtocolPickledOutput:
+    async def _send_to_child(
+        self, pickled_input: _WireProtocolPickledInput
+    ) -> _WireProtocolPickledOutput:
         # For debugging just serde the input and output but don't run in a subprocess.
         return self._run_in_child(pickled_input)
 
 
 class _SubprocessFxCompile(_FxCompileSerialized):
     @override
-    async def _send_to_child(self, input: _WireProtocolPickledInput) -> _WireProtocolPickledOutput:
+    async def _send_to_child(
+        self, input: _WireProtocolPickledInput
+    ) -> _WireProtocolPickledOutput:
         # TODO: Do we need to copy across some kind of logging IDs? (ChromiumEventLogger)
 
         pool = torch._inductor.async_compile.AsyncCompile.process_pool()
@@ -1259,11 +1272,7 @@ class _SubprocessFxCompile(_FxCompileSerialized):
         extra_env = {v: os.environ[v] for v in env_vars if v in os.environ}
 
         start = time.time()
-        f = pool.submit(
-            _SubprocessFxCompile._run_in_child_subprocess,
-            input,
-            extra_env
-        )
+        f = pool.submit(_SubprocessFxCompile._run_in_child_subprocess, input, extra_env)
         last = time.time()
         while not f.done():
             # DEBUG: To print status updates...
@@ -1272,12 +1281,22 @@ class _SubprocessFxCompile(_FxCompileSerialized):
             now = time.time()
             if now - last > 1:
                 last = now
-        graph = f.result()
+        output = f.result()
         end = time.time()
-        return graph
+
+        return output
+
+    def _postprocess(self, output: _WireProtocolOutput) -> None:
+        # Since our metrics were gathered in a subprocess make sure to add them
+        # here.
+        CachedMetricsHelper.apply_deltas(output.metrics)
 
     @classmethod
-    def _run_in_child_subprocess(cls, pickled_input: _WireProtocolPickledInput, extra_env: Optional[Mapping[str, str]]) -> _WireProtocolPickledOutput:
+    def _run_in_child_subprocess(
+        cls,
+        pickled_input: _WireProtocolPickledInput,
+        extra_env: Optional[Mapping[str, str]],
+    ) -> _WireProtocolPickledOutput:
         # TODO: In subprocess mode we need to clear the inductor caches.
         # The problem:
         #   1. We compile in worker A which fills stuff in tmpdir
@@ -1296,8 +1315,10 @@ class _SubprocessFxCompile(_FxCompileSerialized):
         # only clear caches if the clock changed since last time.
         #
         clear_inductor_caches()
+        torch._inductor.metrics.reset()
         # TODO: turn off config.fx_graph_async_compile
         return cls._run_in_child(pickled_input, extra_env)
+
 
 # For debugging - create a _FxCompile which writes the serialized data to a file
 # and then exits.
@@ -1319,7 +1340,9 @@ class _DebugFileFxCompile(_FxCompileSerialized):
     file_index = 0
 
     @override
-    async def _send_to_child(self, pickled_input: _WireProtocolPickledInput) -> _WireProtocolPickledOutput:
+    async def _send_to_child(
+        self, pickled_input: _WireProtocolPickledInput
+    ) -> _WireProtocolPickledOutput:
         idx = _DebugFileFxCompile.file_index
         _DebugFileFxCompile.file_index += 1
 
@@ -1377,7 +1400,7 @@ def fx_codegen_and_compile(
             # scheme = _DebugFxCompile()
             scheme = _SubprocessFxCompile()
         except BypassFxGraphCache as e:
-            log.debug("Skipping async compile:", str(e))
+            log.debug("Skipping async compile: %s", e)
 
     if isinstance(scheme, _FxCompileSync):
         return scheme.codegen_and_compile_sync(

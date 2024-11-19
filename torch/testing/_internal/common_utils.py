@@ -58,6 +58,7 @@ from typing import (
     TypeVar,
     Union,
 )
+from typing_extensions import ParamSpec
 from unittest.mock import MagicMock
 
 import expecttest
@@ -107,6 +108,9 @@ except ImportError:
 
 
 MI300_ARCH = ("gfx940", "gfx941", "gfx942")
+
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
 
 
 def freeze_rng_state(*args, **kwargs):
@@ -1965,8 +1969,8 @@ class DeterministicGuard:
     def _current_state(cls):
         return cls(
             torch.are_deterministic_algorithms_enabled(),
-            warn_only = torch.is_deterministic_algorithms_warn_only_enabled(),
-            fill_uninitialized_memory = torch.utils.deterministic.fill_uninitialized_memory,
+            warn_only=torch.is_deterministic_algorithms_warn_only_enabled(),
+            fill_uninitialized_memory=torch.utils.deterministic.fill_uninitialized_memory,
         )
 
     def _update(self):
@@ -5504,12 +5508,12 @@ def scoped_load_inline(func):
     return wrapper
 
 
-def skip_if_async_compile(fn):
+def skip_if_async_compile(fn: Callable[_P, _R]) -> Callable[_P, _R]:
     @functools.wraps(fn)
-    def wrapper(self, *args, **kwargs):
+    def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
         import torch._inductor.utils
         if torch._inductor.utils.should_use_fx_graph_async_compile():
             raise unittest.SkipTest("this test doesn't work on async compile")
-        return fn(self, *args, **kwargs)
+        return fn(*args, **kwargs)
 
     return wrapper

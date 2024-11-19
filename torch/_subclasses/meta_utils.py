@@ -1709,6 +1709,7 @@ class MetaConverter(Generic[_TensorT]):
             # that advertises a real size, but has a storage that actually has zero bytes.
             # Need to reflect this in the generated FakeTensor.
             from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
             if t.storage is not None and guard_size_oblivious(t.storage.size == 0):
                 r.untyped_storage().resize_(0)
 

@@ -1364,7 +1364,9 @@ class DebugDirManager:
 
 
 def run_and_get_code(fn, *args, **kwargs) -> Tuple[Any, List[str]]:
-    assert not torch._inductor.utils.should_use_fx_graph_async_compile(), "TODO: Bad async compile - run_and_get_code (disable this test)"
+    assert (
+        not torch._inductor.utils.should_use_fx_graph_async_compile()
+    ), "TODO: Bad async compile - run_and_get_code (disable this test)"
     from .graph import GraphLowering
 
     source_codes: List[str] = []
@@ -2011,7 +2013,9 @@ def maybe_get_suppress_shape_guards_ctx():
 
 
 def run_and_get_cpp_code(fn, *args, **kwargs):
-    assert not torch._inductor.utils.should_use_fx_graph_async_compile(), "TODO: Bad async compile - run_and_get_cpp_code (disable this test)"
+    assert (
+        not torch._inductor.utils.should_use_fx_graph_async_compile()
+    ), "TODO: Bad async compile - run_and_get_cpp_code (disable this test)"
     # We use the patch context manager instead of using it as a decorator.
     # In this way, we can ensure that the attribute is patched and unpatched correctly
     # even if this run_and_get_cpp_code function is called multiple times.

@@ -36,10 +36,10 @@ from torch.distributed.tensor.parallel import (
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
-    skip_if_async_compile,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    skip_if_async_compile,
     skipIfTorchDynamo,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (

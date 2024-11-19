@@ -1,15 +1,14 @@
-import io
 import importlib
+import io
 import pickle
 import typing
-from dataclasses import dataclass
-from typing import Any, Callable, Dict, Optional, Tuple, Union, Type
-from typing_extensions import override
 from abc import abstractmethod
+from typing import Any, Callable, Dict, Optional, Tuple, Type, Union
+from typing_extensions import override
 
 import torch
-
 import torch.utils._pytree as pytree
+from torch._guards import TracingContext
 from torch._subclasses.fake_tensor import (  # extract_tensor_metadata,
     FakeTensor,
     FakeTensorMode,
@@ -22,7 +21,7 @@ from torch._subclasses.meta_utils import (
 )
 from torch.fx.experimental.sym_node import SymNode
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
-from torch._guards import TracingContext
+
 
 class _ShapeEnvPickleData:
     data: Dict[str, object]
@@ -37,8 +36,6 @@ class _ShapeEnvPickleData:
         del self.data["fake_tensor_cache"]
 
     def unpickle(self, unpickle_state: "_UnpickleState") -> ShapeEnv:
-        from torch._guards import detect_fake_mode
-
         # Fill in the existing ShapeEnv rather than creating a new one
         assert unpickle_state.fake_mode
         assert unpickle_state.fake_mode.shape_env
@@ -129,7 +126,7 @@ class _TorchNumpyPickleData:
         return torch._dynamo.variables.misc.get_np_to_tnp_map()[np]
 
     @staticmethod
-    def from_object(tnp: Callable[..., object]) -> Optional["_TorchNumpyPickleData"]:
+    def from_object(tnp: object) -> Optional["_TorchNumpyPickleData"]:
         if not callable(tnp):
             return None
 
@@ -148,7 +145,6 @@ class _TorchNumpyPickleData:
 
         assert np == getattr(importlib.import_module(mod), name)
         return _TorchNumpyPickleData(mod, name)
-
 
 
 class _GraphModulePickleData:
@@ -207,7 +203,9 @@ class _NodePickleData:
 
 class _OpPickleData:
     @classmethod
-    def reduce_helper(cls, pickler: "_SubprocPickler", op: object) -> Tuple[Callable[..., Any], Tuple[Any, ...]]:
+    def reduce_helper(
+        cls, pickler: "_SubprocPickler", op: object
+    ) -> Tuple[Callable[..., Any], Tuple[Any, ...]]:
         result = cls.pickle(op)
         return (result.unpickle, (pickler._unpickle_state,))
 
@@ -221,7 +219,7 @@ class _OpPickleData:
             return cls._pickle_op(name, _OpOverloadPickleData)
         elif isinstance(op, torch._ops.OpOverloadPacket):
             return cls._pickle_op(name, _OpOverloadPacketPickleData)
-        elif name.startswith("builtins.") or name.startswith("math.") or name.startswith("torch."):
+        elif name.startswith(("builtins.", "math.", "torch.")):
             root, detail = name.split(".", 1)
             return _OpBuiltinPickleData(root, detail)
         elif name.startswith("operator."):
@@ -229,20 +227,24 @@ class _OpPickleData:
             return _OpOperatorPickleData(detail)
         else:
             # TODO: raise a BypassFxGraphCache so we will just bypass this one...
-            assert False, f"TARGET: {type(op)} {op} {name}"
+            raise NotImplementedError(f"TARGET: {type(op)} {op} {name}")
 
     @staticmethod
-    def _pickle_op(name: str, datacls: Union[Type["_OpOverloadPickleData"], Type["_OpOverloadPacketPickleData"]]) -> "_OpPickleData":
+    def _pickle_op(
+        name: str,
+        datacls: Union[
+            Type["_OpOverloadPickleData"], Type["_OpOverloadPacketPickleData"]
+        ],
+    ) -> "_OpPickleData":
         if not name.startswith("torch.ops.aten"):  # TODO: What's the full list?
             from torch._inductor.codecache import BypassFxGraphCache
+
             raise BypassFxGraphCache(f"Unable to pickle non-standard op: {name}")
         return datacls(name)
-
 
     @abstractmethod
     def unpickle(self, unpickle_state: "_UnpickleState") -> object:
         pass
-
 
     @staticmethod
     def _lookup_by_name(name: str) -> object:
@@ -271,6 +273,7 @@ class _OpOverloadPickleData(_OpPickleData):
         assert isinstance(obj, torch._ops.OpOverload)
         return obj
 
+
 class _OpOverloadPacketPickleData(_OpPickleData):
     def __init__(self, name: str) -> None:
         self.name = name
@@ -279,6 +282,7 @@ class _OpOverloadPacketPickleData(_OpPickleData):
         obj = self._lookup_by_name(self.name)
         assert isinstance(obj, torch._ops.OpOverloadPacket)
         return obj
+
 
 class _OpBuiltinPickleData(_OpPickleData):
     def __init__(self, root: str, name: str) -> None:
@@ -290,11 +294,12 @@ class _OpBuiltinPickleData(_OpPickleData):
             return __builtins__.get(self.name)  # type: ignore[attr-defined]
         elif self.root == "math":
             import math
+
             return getattr(math, self.name)
         elif self.root == "torch":
             return getattr(torch, self.name)
         else:
-            raise NotImplemented
+            raise NotImplementedError
 
 
 class _OpOperatorPickleData(_OpPickleData):
@@ -303,6 +308,7 @@ class _OpOperatorPickleData(_OpPickleData):
 
     def unpickle(self, unpickle_state: "_UnpickleState") -> object:
         import operator
+
         return getattr(operator, self.name)
 
 
@@ -336,6 +342,7 @@ class _GraphPickleData:
 
         return graph
 
+
 class _TracingContextPickleData:
     def __init__(self, context: TracingContext) -> None:
         # TODO: Do we really need all of this?
@@ -347,7 +354,9 @@ class _TracingContextPickleData:
         self.params_flat_unwrap_subclasses = context.params_flat_unwrap_subclasses
         self.params_unwrapped_to_flat_index = context.params_unwrapped_to_flat_index
         self.output_strides = context.output_strides
-        self.force_unspec_int_unbacked_size_like = context.force_unspec_int_unbacked_size_like
+        self.force_unspec_int_unbacked_size_like = (
+            context.force_unspec_int_unbacked_size_like
+        )
         # Not saved (because it's difficult and maybe not needed?):
         #   self.fw_metadata = context.fw_metadata
         #   self.guards_context = None
@@ -356,7 +365,6 @@ class _TracingContextPickleData:
         #   self.fakify_first_call = None
         #   self.hop_dispatch_set_cache = None
         #   self.tensor_to_context = context.tensor_to_context
-        pass
 
     def unpickle(self, unpickle_state: "_UnpickleState") -> TracingContext:
         context = TracingContext(unpickle_state.fake_mode)
@@ -368,7 +376,9 @@ class _TracingContextPickleData:
         context.params_flat_unwrap_subclasses = self.params_flat_unwrap_subclasses
         context.params_unwrapped_to_flat_index = self.params_unwrapped_to_flat_index
         context.output_strides = self.output_strides
-        context.force_unspec_int_unbacked_size_like = self.force_unspec_int_unbacked_size_like
+        context.force_unspec_int_unbacked_size_like = (
+            self.force_unspec_int_unbacked_size_like
+        )
         return context
 
 
@@ -413,13 +423,16 @@ class _SubprocPickler(pickle.Pickler):
                 (_SymNodePickleData(obj.node), self._unpickle_state),
             )
         elif isinstance(obj, torch._guards.TracingContext):
-            return (_TracingContextPickleData.unpickle, (_TracingContextPickleData(obj), self._unpickle_state))
+            return (
+                _TracingContextPickleData.unpickle,
+                (_TracingContextPickleData(obj), self._unpickle_state),
+            )
         else:
             # We should never get a raw Node!
             assert not isinstance(obj, torch.fx.Node)
 
             if data := _TorchNumpyPickleData.from_object(obj):
-                assert data.unpickle(self._unpickle_state) == obj
+                assert data.unpickle(self._unpickle_state) == obj  # type: ignore[arg-type]
                 return (_TorchNumpyPickleData.unpickle, (data, self._unpickle_state))
 
             # returning `NotImplemented` causes pickle to revert to the default

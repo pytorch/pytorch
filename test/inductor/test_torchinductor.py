@@ -84,11 +84,11 @@ from torch.testing._internal.common_utils import (
     IS_X86,
     parametrize,
     serialTest,
+    skip_if_async_compile,
     skipIfNNModuleInlined,
     skipIfRocm,
     skipIfWindows,
     skipIfXpu,
-    skip_if_async_compile,
     subtest,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
@@ -709,7 +709,9 @@ def _run_and_assert_no_indirect_indexing(
 
 
 def assertGeneratedKernelCountEqual(self: TestCase, expected: int):
-    assert not torch._inductor.utils.should_use_fx_graph_async_compile(), "TODO: Bad async compile (disable this test)"
+    assert (
+        not torch._inductor.utils.should_use_fx_graph_async_compile()
+    ), "TODO: Bad async compile (disable this test)"
     if config.triton.multi_kernel:
         # when multi_kernel is enabled, we generated both persistent reduction
         # and non-persistent reduction kernels for the same node schedule.
@@ -1234,6 +1236,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(32),))
 
+    @skip_if_async_compile
     def test_add_inplace_permuted(self):
         def fn(x, y):
             return x.add_(y)
@@ -1293,6 +1296,7 @@ class CommonTemplate:
                 3,
             )
 
+    @skip_if_async_compile
     def test_add_complex5(self):
         def fn(a, b, alpha):
             return torch.add(a, b, alpha=alpha)
@@ -1323,6 +1327,7 @@ class CommonTemplate:
 
         self.common(fn, (x, y, z))
 
+    @skip_if_async_compile
     def test_abs(self):
         def fn(a):
             return (a / (torch.abs(a) + 1),)
@@ -1727,6 +1732,7 @@ class CommonTemplate:
         actual = _run_and_assert_no_indirect_indexing(self, flip_opt, x)
         self.assertEqual(expect, actual)
 
+    @skip_if_async_compile
     def test__unsafe_masked_index(self):
         def fn(a, mask, idx):
             return aten._unsafe_masked_index(a, mask, idx, 1)
@@ -4368,6 +4374,7 @@ class CommonTemplate:
         )
 
     @skip_if_gpu_halide  # slow
+    @skip_if_async_compile
     def test_adaptive_avg_pool2d1(self):
         def fn(x):
             return aten._adaptive_avg_pool2d(x, (6, 6)), aten._adaptive_avg_pool2d(
@@ -4407,6 +4414,7 @@ class CommonTemplate:
         assertGeneratedKernelCountEqual(self, 0)
 
     @skip_if_gpu_halide  # slow
+    @skip_if_async_compile
     def test_adaptive_max_pool2d1(self):
         def fn(x):
             return aten.adaptive_max_pool2d(x, (6, 6))

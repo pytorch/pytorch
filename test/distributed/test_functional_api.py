@@ -13,8 +13,8 @@ import torch.distributed.distributed_c10d as c10d
 from functorch import make_fx
 from torch._inductor.utils import run_and_get_code
 from torch.testing import FileCheck
-from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.testing._internal.common_utils import skip_if_async_compile
+from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.testing._internal.inductor_utils import HAS_GPU
 
 

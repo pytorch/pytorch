@@ -59,6 +59,7 @@ from torch.testing._internal.common_utils import (
     NestedTensorTestCase,
     parametrize,
     run_tests,
+    skip_if_async_compile,
     skipIfRocm,
     skipIfSlowGradcheckEnv,
     skipIfTorchDynamo,
@@ -7643,6 +7644,7 @@ torch.cuda.synchronize()
     # blows up due to test parametrization otherwise
     @torch._dynamo.utils.disable_cache_limit()
     @skipIfTorchDynamo("SDPA test compiles internally")
+    @skip_if_async_compile
     @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     @skipCUDAIfRocm
