@@ -607,7 +607,7 @@ class GuardManagerType(enum.Enum):
 class GuardBuilder(GuardBuilderBase):
     def __init__(
         self,
-        id_ref: Callable[[Any], str],
+        id_ref: Callable[[Any, str], str],
         source_ref: Callable[[Source], str],
         lookup_weakrefs: Callable[[object], ReferenceType[object]],
         local_scope: Dict[str, object],
@@ -710,7 +710,7 @@ class GuardBuilder(GuardBuilderBase):
             )
             if key_is_id(key):
                 # Install ID_MATCH guard
-                id_val = self.id_ref(key)
+                id_val = self.id_ref(key, key_source)
                 key_manager.add_id_match_guard(
                     id_val,
                     get_verbose_code_parts(
@@ -1377,7 +1377,7 @@ class GuardBuilder(GuardBuilderBase):
     def TYPE_MATCH(self, guard: Guard) -> None:
         # ___check_type_id is same as `id(type(x)) == y`
         t = type(self.get(guard.name))
-        obj_id = self.id_ref(t)
+        obj_id = self.id_ref(t, f"type({guard.name})")
         code = f"___check_type_id({self.arg_ref(guard)}, {obj_id})"
         self._set_guard_export_info(guard, [code])
 
@@ -1420,7 +1420,7 @@ class GuardBuilder(GuardBuilderBase):
 
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
-        id_val = self.id_ref(val)
+        id_val = self.id_ref(val, guard.name)
         code = f"___check_obj_id({ref}, {id_val})"
         self._set_guard_export_info(guard, [code])
 
@@ -1693,7 +1693,7 @@ class GuardBuilder(GuardBuilderBase):
         self._set_guard_export_info(guard, code)
 
         t = type(value)
-        obj_id = self.id_ref(t)
+        obj_id = self.id_ref(t, f"type({guard.name})")
 
         self.get_guard_manager(guard).add_tuple_iterator_length_guard(
             tuple_iterator_len(value), obj_id, get_verbose_code_parts(code, guard)
@@ -2513,7 +2513,7 @@ class CheckFunctionManager:
             extra_state.invalidate(cache_entry, deleted_guard_manager)
             self.guard_manager = deleted_guard_manager
 
-    def id_ref(self, obj):
+    def id_ref(self, obj, obj_str):
         """add a weakref, return the id"""
         try:
             if id(obj) not in self._weakrefs:
@@ -2521,8 +2521,6 @@ class CheckFunctionManager:
                 # function, which will delete the callbacks as well. Therefore,
                 # we are using a finalizer which is kept alive.
                 self._weakrefs[id(obj)] = weakref.ref(obj)
-
-                obj_str = object.__str__(obj)
                 weakref.finalize(
                     obj, functools.partial(self.invalidate, obj_str=obj_str)
                 )
