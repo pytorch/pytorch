@@ -1444,7 +1444,7 @@ def forward(self, x_1, output_1):
             return output
 
         x = torch.randn(4, device=GPU_TYPE)
-        msg = "Only configs, keys, and restore_value are supported for triton.autotune"
+        msg = "Only configs, keys, restore_value, and reset_to_zero are supported for triton.autotune"
         with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
             f(x, x)
 
