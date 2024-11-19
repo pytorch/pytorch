@@ -1094,19 +1094,21 @@ class TritonHOPifier:
                     # we can't support pre_hook or post_hook in user defined triton kernels at the moment,
                     # as they require the ability to execute code at runtime (AOTI can't support this)
                     (
-                        "user_defined_pre_hook" in defaults
-                        and defaults["user_defined_pre_hook"].default
-                        != kernel.user_defined_pre_hook
+                        hasattr(kernel, "user_defined_pre_hook")
+                        and kernel.user_defined_pre_hook is not None
                     )
                     or (
-                        "user_defined_post_hook" in defaults
-                        and defaults["user_defined_post_hook"].default
-                        != kernel.user_defined_post_hook
+                        hasattr(kernel, "user_defined_post_hook")
+                        and kernel.user_defined_post_hook is not None
+                    )
+                    or (
+                        # Check Config passed to autotuner in configs
+                        any(cfg.pre_hook is not None for cfg in kernel.configs)
                     )
                 )
             ):
                 self.raise_unsupported(
-                    "pre_hook and post_hook are not supported in triton.Autotune Configs"
+                    "pre_hook and post_hook are not supported in triton.Autotune"
                 )
 
     def call_getitem(
