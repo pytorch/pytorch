@@ -16,7 +16,7 @@ from ..utils import sympy_index_symbol, sympy_index_symbol_with_prefix
 from ..virtualized import V
 from .common import CppWrapperKernelArgs
 from .cpp import CppKernel, CppKernelProxy, KernelGroup
-from .cpp_utils import cexpr_index, DTYPE_TO_CPP, LocalBufferContext
+from .cpp_utils import cexpr_index, DTYPE_TO_CPP, LocalBufferContext, value_to_cpp
 from .cpp_wrapper_cpu import CppWrapperCpu
 
 
@@ -197,6 +197,30 @@ class CppTemplateKernel(CppKernel):
         ctype = f"{DTYPE_TO_CPP[buf.layout.dtype]}"
         numel = f"{cexpr_index(buf.get_numel())}"
         return f"if (_{name} == nullptr) {{ _{name} = std::make_unique<{ctype}[]>({numel}); {name} = _{name}.get(); }}"
+
+    def silu_mul(
+        self,
+        in_buf0,
+        in_buf1,
+        inp0,
+        inp1,
+        out_buf,
+        has_gate_bias,
+        has_up_bias,
+        name_prefix,
+    ):
+        in_ptr0 = f"&({self.index(in_buf0, [0, 0])})"
+        in_ptr1 = f"&({self.index(in_buf1, [0, 0])})"
+        out_ptr = f"&({self.index(out_buf, [0, 0])})"
+        M = self.size(in_buf0, 0)
+        N = self.size(in_buf0, 1)
+        in_lda = self.stride(in_buf0, 0)
+        out_lda = self.stride(out_buf, 0)
+        inp_ptr0 = f"&({self.index(inp0, [0, 0])})"
+        inp_ptr1 = f"&({self.index(inp1, [0, 0])})"
+        template = f"{value_to_cpp(has_gate_bias, 'bool')}, {value_to_cpp(has_up_bias, 'bool')}"
+        arguments = f"{in_ptr0}, {in_ptr1}, {inp_ptr0}, {inp_ptr1}, {out_ptr}, {M}, {N}, {in_lda}, {out_lda}"
+        return f"{name_prefix}_silu_mul_epilogue_fusion<{template}>({arguments});"
 
     def release_buffer(self, name):
         """Codegen the code to release the ownership of a local buffer to others"""
