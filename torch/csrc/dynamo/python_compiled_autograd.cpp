@@ -69,13 +69,17 @@ static PyObject* convert_hook_list(std::vector<c10::SafePyObject>& inputs) {
   return pyinput;
 }
 
+// see https://github.com/pytorch/pytorch/pull/34845
+static void throw_python_error() {
+  python_error err;
+  err.persist();
+  // NOLINTNEXTLINE(misc-throw-by-value-catch-by-reference)
+  throw err;
+}
+
 static PyObject* check(PyObject* pyresult) {
   if (C10_UNLIKELY(pyresult == nullptr)) {
-    // see https://github.com/pytorch/pytorch/pull/34845
-    python_error err;
-    err.persist();
-    // NOLINTNEXTLINE(misc-throw-by-value-catch-by-reference)
-    throw err;
+    throw_python_error();
   }
   return pyresult;
 }
@@ -87,18 +91,58 @@ static void check(bool result) {
 
 // snapshot of python verbose logging toggle
 static PyObject* python_verbose_logger = nullptr;
-struct VerboseLogger {
+
+struct PythonLogger {
+  PythonLogger() = delete;
+  explicit PythonLogger(PyObject* logger) : logger_(logger) {
+    TORCH_INTERNAL_ASSERT(logger_ != nullptr);
+  }
+
+  enum Level : unsigned int {
+    DEBUG = 0,
+    INFO = 1,
+    WARNING = 2,
+    ERROR = 3,
+    CRITICAL = 4,
+    COUNT // Keep this as the last enum
+  };
+
+  // must be called while GIL is held
+  void log(Level level, std::string_view msg) const {
+    THPObjectPtr pymethod(PyUnicode_FromString(levelNames_[level].data()));
+    TORCH_INTERNAL_ASSERT(pymethod != nullptr);
+    THPObjectPtr pyfunc(PyObject_GetAttr(logger_, pymethod.get()));
+    if (pyfunc == nullptr) {
+      throw_python_error();
+    }
+    PyObject* result = PyObject_CallFunction(pyfunc.get(), "s", msg.data());
+    if (result == nullptr) {
+      throw_python_error();
+    }
+  }
+
+ private:
+  static constexpr std::array<std::string_view, COUNT> levelNames_ = {
+      "debug", // Level::DEBUG
+      "info", // Level::INFO
+      "warning", // Level::WARNING
+      "error", // Level::ERROR
+      "critical" // Level::CRITICAL
+  };
+
+  // Note: logger_ must stay valid for the lifetime of this object
+  PyObject* logger_;
+};
+
+struct VerboseLogger : public PythonLogger {
   static std::optional<VerboseLogger> maybe_create() {
     if (python_verbose_logger == nullptr) {
       return std::nullopt;
     }
-    return VerboseLogger();
+    return VerboseLogger(python_verbose_logger);
   }
 
-  void verbose_log_fn(std::string_view msg) const {
-    TORCH_CHECK(python_verbose_logger != nullptr);
-    check(PyObject_CallFunction(python_verbose_logger, "s", msg.data()));
-  }
+  VerboseLogger(PyObject* vlogger) : PythonLogger(vlogger) {}
 
   void log_node_check(
       const Node& fn,
@@ -137,7 +181,7 @@ struct VerboseLogger {
       }
     }
     oss << "]";
-    verbose_log_fn(oss.str());
+    log(PythonLogger::DEBUG, oss.str());
   }
 
   void log_dynamic_shapes_check(size_t size_idx) const {
@@ -149,10 +193,10 @@ struct VerboseLogger {
     TORCH_CHECK(it != cumulative_sizes_per_node.end());
     size_t start_idx =
         it == cumulative_sizes_per_node.begin() ? 0 : std::prev(it)->first;
-    verbose_log_fn(
+    log(PythonLogger::DEBUG,
         "Cache miss due to changed shapes: marking size idx " +
-        std::to_string(size_idx - start_idx) + " of " + it->second +
-        " as dynamic");
+            std::to_string(size_idx - start_idx) + " of " + it->second +
+            " as dynamic");
   }
 
   // track which size index belongs to which node
@@ -347,7 +391,7 @@ static PyObject* set_verbose_logger(PyObject* dummy, PyObject* args) {
   HANDLE_TH_ERRORS;
   PyObject* logger = nullptr;
   if (!PyArg_ParseTuple(args, "O", &logger)) {
-    Py_RETURN_FALSE;
+    throw_python_error();
   }
 
   if (logger == Py_None) {
@@ -499,6 +543,10 @@ static PyObject* call_end_capture(PyObject* self, const variable_list& inputs) {
 
 struct ClosingTHPObjectPtr : public THPObjectPtr {
   ClosingTHPObjectPtr(PyObject* o) : THPObjectPtr(o) {}
+  ClosingTHPObjectPtr(ClosingTHPObjectPtr&& other) = default;
+  ClosingTHPObjectPtr(const ClosingTHPObjectPtr&) = delete;
+  ClosingTHPObjectPtr& operator=(const ClosingTHPObjectPtr&) = delete;
+  ClosingTHPObjectPtr& operator=(ClosingTHPObjectPtr&&) = default;
   ~ClosingTHPObjectPtr() {
     if (PyErr_Occurred()) {
       // do nothing, do not attempt to close
@@ -607,6 +655,19 @@ CacheNode* _compiled_autograd_impl(
 
     for (size_t i = 0; i < calls.size(); i++) {
       NodeCall& call = *calls[i];
+
+      std::string _node_name = call.node->name();
+      THPObjectPtr node_name(PyUnicode_FromString(_node_name.data()));
+      TORCH_INTERNAL_ASSERT(node_name != nullptr);
+      THPObjectPtr set_node_origin(
+          PyObject_GetAttrString(py_compiler.get(), "set_node_origin"));
+      PyObject* pyobj = Py_None;
+      if (auto pynode = std::dynamic_pointer_cast<PyNode>(call.node)) {
+        pyobj = pynode->obj;
+      }
+      check(PyObject_CallFunction(
+          set_node_origin, "OIO", node_name.get(), i, pyobj, nullptr));
+
       // TODO(jansel): consider adding some of this stuff:
       // guard(local_graph_task); NodeGuard ndguard(task.fn_); const auto
       // opt_parent_stream = (*func).stream(c10::DeviceType::CUDA);
@@ -651,20 +712,6 @@ CacheNode* _compiled_autograd_impl(
         }
         inputs = THPVariable_UnpackList(pyinputs);
       }
-
-      std::string _node_name = call.node->name();
-      THPObjectPtr node_name(PyUnicode_FromString(_node_name.data()));
-      TORCH_INTERNAL_ASSERT(node_name != nullptr);
-      THPObjectPtr set_node_origin(
-          PyObject_GetAttrString(py_compiler.get(), "set_node_origin"));
-
-      PyObject* pyobj = Py_None;
-      if (auto pynode = std::dynamic_pointer_cast<PyNode>(call.node)) {
-        pyobj = pynode->obj;
-      }
-
-      check(PyObject_CallFunction(
-          set_node_origin, "OIO", node_name.get(), i, pyobj, nullptr));
 
       SwapSavedVariables saved(compiler_call, state, py_compiler.get(), call);
       variable_list outputs = call.node->apply_with_saved(inputs, saved);
@@ -737,6 +784,7 @@ CacheNode* _compiled_autograd_impl(
   return cache;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
 struct LockGuardWithErrorLogs {
   LockGuardWithErrorLogs(std::mutex& mtx) : mtx_(mtx) {
     // Note: the standard allows try_lock to fail spuriously during races for

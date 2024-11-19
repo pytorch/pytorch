@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import functools
 import logging
 import os
 import pathlib
@@ -8,11 +9,16 @@ from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
 from torch.utils._ordered_set import OrderedSet
 
 from .. import config
-from ..codecache import get_path, TritonFuture
+from ..codecache import code_hash, get_path, TritonFuture
 from ..runtime.benchmarking import benchmarker
+from ..runtime.triton_heuristics import (
+    cooperative_reduction_grid,
+    grid,
+    maybe_cooperative_reduction_grid,
+)
 from ..utils import cache_on_self, IndentedBuffer
 from ..virtualized import V
-from .common import TensorArg
+from .common import TensorArg, WorkspaceArg
 
 
 log = logging.getLogger(__name__)
@@ -114,6 +120,7 @@ class MultiKernelState:
             return multi_kernel_name
 
         buf = IndentedBuffer()
+        buf.writeline("")
         buf.writeline(
             f"{multi_kernel_name} = async_compile.multi_kernel({multi_kernel_name!r}, ["
         )
@@ -155,6 +162,46 @@ class MultiKernel:
         # attribute to decide if it's a non-null kernel.
         self.args = object()
 
+    @staticmethod
+    def _merge_workspace_args(left: List[WorkspaceArg], right: List[WorkspaceArg]):
+        if left == right:
+            return left
+        result = {x.inner_name: x for x in left}
+        for arg in right:
+            if arg.inner_name in result:
+                result[arg.inner_name] = WorkspaceArg.maximum(
+                    result[arg.inner_name], arg
+                )
+            else:
+                result[arg.inner_name] = arg
+        return [*result.values()]
+
+    @staticmethod
+    def merge_workspaces_inplace(kernels):
+        if len(kernels) < 2:
+            return
+        # All kernels must share the same workspace
+        workspace_args = functools.reduce(
+            MultiKernel._merge_workspace_args,
+            [kernel.args.workspace_args for kernel in kernels],
+        )
+        for kernel in kernels:
+            kernel.args.workspace_args = workspace_args
+        return workspace_args
+
+    def get_grid_fn(self):
+        fns = {kernel._get_grid_fn() for kernel in self.kernels}
+        if len(fns) == 1:
+            return next(iter(fns))
+        elif len(fns) == 2:
+            assert fns == {cooperative_reduction_grid, grid}
+            V.graph.wrapper_code.add_import_once(
+                f"from {maybe_cooperative_reduction_grid.__module__} import maybe_cooperative_reduction_grid"
+            )
+            return maybe_cooperative_reduction_grid
+        else:
+            raise NotImplementedError(fns)
+
     def call_kernel(self, kernel_name):
         """
         Collect the union of arguments from all subkernels as the arguments
@@ -165,7 +212,7 @@ class MultiKernel:
         _, call_args, _, arg_types = self.kernels[0].args.python_argdefs()
         for kernel in self.kernels[1:]:
             _, other_call_args, _, other_arg_types = kernel.args.python_argdefs()
-            assert call_args == other_call_args
+            assert call_args == other_call_args, (call_args, other_call_args)
             assert arg_types == other_arg_types
 
         grid: List[Any] = []
@@ -181,13 +228,23 @@ class MultiKernel:
             kernel_name, call_args, arg_types, grid
         )
 
-        grid = V.graph.wrapper_code.generate_default_grid(kernel_name, grid)
+        for ws in self.kernels[0].args.workspace_args:
+            V.graph.wrapper_code.generate_workspace_allocation(ws)
+
+        grid_fn = self.get_grid_fn()
+        grid = V.graph.wrapper_code.generate_default_grid(
+            kernel_name, grid, grid_callable=grid_fn
+        )
         V.graph.wrapper_code.generate_kernel_call(
             kernel_name,
             call_args,
             grid,
             arg_types=arg_types,
+            grid_fn=grid_fn.__name__,
         )
+
+        for ws in reversed(self.kernels[0].args.workspace_args):
+            V.graph.wrapper_code.generate_workspace_deallocation(ws)
 
     def codegen_nan_check(self):
         wrapper = V.graph.wrapper_code
@@ -252,7 +309,8 @@ class MultiKernelCall:
         self._recorded = False
 
     def cache_file_path(self):
-        _, _, path = get_path(self.kernels[0].fn.cache_key, "picked_kernel")
+        key = code_hash(",".join([k.fn.cache_key for k in self.kernels]))
+        _, _, path = get_path(key, "picked_kernel")
         return pathlib.Path(path)
 
     def load_cache(self):
@@ -359,22 +417,9 @@ class MultiKernelCall:
                 k0.inductor_meta.get("reduction_hint"),
                 timings,
             )
-
-            def get_kernel_path(k):
-                return k.fn.fn.__code__.co_filename
-
             get_metric_table("persistent_red_perf").add_row(
-                lambda: {
-                    "kernel1_name": get_kernel_path(self.kernels[0]),
-                    "kernel2_name": get_kernel_path(self.kernels[1]),
-                    "kernel1_latency": timings[0],
-                    "kernel2_latency": timings[1],
-                    "size_hints": k0.size_hints,
-                    "reduction_hint": k0.inductor_meta.get("reduction_hint"),
-                    "speedup": timings[1] / timings[0],
-                }
+                functools.partial(self._metrics_table_row, timings)
             )
-
             if not self.disable_cache:
                 self.store_cache()
 
@@ -383,3 +428,23 @@ class MultiKernelCall:
             self.record_choice(self.multi_kernel_name, self.picked_kernel)
         self.run = self.kernels[self.picked_kernel].run  # type: ignore[method-assign]
         self.run(*args, **kwargs)
+
+    def _metrics_table_row(self, timings):
+        def get_kernel_path(k):
+            return k.fn.fn.__code__.co_filename
+
+        k0 = self.kernels[0]
+        row = {
+            "size_hints": k0.size_hints,
+            "reduction_hint": k0.inductor_meta.get("reduction_hint"),
+        }
+        max_kernels = 4
+        assert len(timings) <= max_kernels
+        for i in range(max_kernels):
+            if i < len(self.kernels):
+                row[f"kernel{i}_path"] = get_kernel_path(self.kernels[i])
+                row[f"kernel{i}_latency"] = timings[i]
+            else:
+                row[f"kernel{i}_path"] = ""
+                row[f"kernel{i}_latency"] = ""
+        return row

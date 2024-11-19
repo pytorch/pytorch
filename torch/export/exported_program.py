@@ -24,7 +24,12 @@ from typing import (
 )
 
 from torch._higher_order_ops.utils import autograd_not_implemented
-from torch._library.fake_class_registry import FakeScriptObject
+from torch._library.fake_class_registry import FakeScriptObject, maybe_to_fake_obj
+from torch._subclasses.fake_impls import (
+    _deregister_op_impl,
+    _is_op_registered_to_fake_rule,
+    register_op_impl,
+)
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx._utils import first_call_function_nn_module_stack
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
@@ -47,7 +52,6 @@ from torch._export.utils import (
     _collect_all_valid_cia_ops,
     _collect_and_set_constant_attrs,
     _collect_param_buffer_metadata,
-    _decomp_table_to_post_autograd_aten,
     _detect_fake_mode_from_gm,
     _get_decomp_for_cia,
     _is_preservable_cia_op,
@@ -75,6 +79,7 @@ from .graph_signature import (  # noqa: F401
     InputSpec,
     OutputKind,
     OutputSpec,
+    SymBoolArgument,
     SymIntArgument,
     TensorArgument,
     TokenArgument,
@@ -224,6 +229,31 @@ def _override_composite_implicit_decomp(cia_ops_to_callable, safe=True):
                 decomp_callable
             )
 
+        # [NOTE] Directly registering fake tensor rule to CIA ops
+        # The problem we are facing here is if your CIA custom rule
+        # says we want to preserve the op, we will return NotImplemented.
+        # Unfortunately, this will invoke meta device tracing in fake tensor
+        # resulting in divergent behaviour for CIA kernels that has device based
+        # branching (one case is torch.ops.aten.scaled_dot_product.attention)
+        # To get around this issue, we register direct fake impl so that we
+        # run the kernel before we actually try to decompose the op in FakeTensorMode.
+        # Note that is a no-op in most cases, because:
+        #   1) In post dispatch tracing, CIA would have already decomposed
+        #   2) Most CIA impl are device agnostic.
+        def _force_dispatch_to_orig_cia_callable(fake_tensor_mode, op, *args, **kwargs):
+            orig_cia_callable = kwargs["original_callable"]
+            del kwargs["original_callable"]
+            with fake_tensor_mode:
+                return orig_cia_callable(*args, **kwargs)
+
+        if not _is_op_registered_to_fake_rule(op_overload):
+            register_op_impl(op_overload)(
+                functools.partial(
+                    _force_dispatch_to_orig_cia_callable,
+                    original_callable=orig_cia_callable,
+                )
+            )
+
         for key in _BACKEND_KEYS_TO_OVERRIDE:
             if key not in op_overload.py_kernels:
                 # [NOTE] Registering old CIA to Backend kernel
@@ -250,6 +280,7 @@ def _override_composite_implicit_decomp(cia_ops_to_callable, safe=True):
             op.py_kernels.clear()
             op.py_kernels.update(saved_tables[op])
             op._dispatch_cache.clear()
+            _deregister_op_impl(op)
 
 
 @contextmanager
@@ -346,18 +377,24 @@ def _decompose_and_get_gm_with_new_signature_constants(
 
     if not _is_joint_ir_decomp(ep, joint_loss_index):
         mod = ep.module()
-
-        fake_args = []
-        for node in mod.graph.nodes:
-            if node.op == "placeholder":
-                fake_args.append(node.meta["val"])
-
-        fake_args_unwrapped = pytree.tree_unflatten(fake_args, mod._in_spec)
         # TODO T204030333
         fake_mode = _detect_fake_mode_from_gm(ep.graph_module)
         if fake_mode is None:
             fake_mode = FakeTensorMode(shape_env=ShapeEnv(), export=True)
+        fake_args = []
+        for node in mod.graph.nodes:
+            if node.op == "placeholder":
+                if isinstance(node.meta["val"], CustomObjArgument):
+                    real_script_obj = None
+                    if node.meta["val"].fake_val is None:
+                        real_script_obj = ep.constants[node.meta["val"].name]
+                    else:
+                        real_script_obj = node.meta["val"].fake_val.real_obj
+                    fake_args.append(maybe_to_fake_obj(fake_mode, real_script_obj))
+                else:
+                    fake_args.append(node.meta["val"])
 
+        fake_args_unwrapped = pytree.tree_unflatten(fake_args, mod._in_spec)
         # Fix the graph output signature to be tuple if scalar
         out_spec = mod._out_spec
 
@@ -461,6 +498,8 @@ def _decompose_and_get_gm_with_new_signature_constants(
             return TensorArgument(name=new_ph.name)
         elif isinstance(old_arg, SymIntArgument):
             return SymIntArgument(name=new_ph.name)
+        elif isinstance(old_arg, SymBoolArgument):
+            return SymBoolArgument(name=new_ph.name)
         raise RuntimeError(f"Type of old_arg not supported: {type(old_arg)}")
 
     new_placeholders = [node for node in gm.graph.nodes if node.op == "placeholder"]
@@ -643,6 +682,30 @@ def _common_getitem_elimination_pass(
                     node_id[node] = node.name
 
 
+def _get_updated_module_call_graph(
+    gm: torch.fx.GraphModule,
+    old_module_call_graph: List[ModuleCallEntry],
+):
+    new_module_call_graph = copy.deepcopy(old_module_call_graph)
+
+    # use node-level provenance metadata to create a map
+    # from old node names to new node names
+    provenance: Dict[str, str] = {}
+    for node in gm.graph.nodes:
+        if history := node.meta.get("from_node", []):
+            provenance[history[-1][0]] = node.name
+
+    # map old names to new names in module call signatures
+    for entry in new_module_call_graph:
+        signature = entry.signature
+        if signature is None:
+            continue
+        for x in [*signature.inputs, *signature.outputs]:
+            x.name = provenance.get(x.name, x.name)
+
+    return new_module_call_graph
+
+
 def _decompose_exported_program(
     ep,
     *,
@@ -655,6 +718,15 @@ def _decompose_exported_program(
         cia_to_decomp=cia_to_decomp,
         python_decomp_table=python_decomp_table,
         joint_loss_index=joint_loss_index,
+    )
+
+    # The signatures of ep.module_call_graph refer to input / output nodes of
+    # the original graph module. However, the new graph module may have
+    # new nodes due to decompositions. So we need to update these signatures
+    # in the decomposed exported program's module_call_graph.
+    new_module_call_graph = _get_updated_module_call_graph(
+        gm,
+        ep.module_call_graph,
     )
 
     # TODO unfortunately preserving graph-level metadata is not
@@ -673,7 +745,7 @@ def _decompose_exported_program(
         graph_signature=new_graph_signature,
         state_dict=ep.state_dict,
         range_constraints=new_range_constraints,
-        module_call_graph=copy.deepcopy(ep.module_call_graph),
+        module_call_graph=new_module_call_graph,
         example_inputs=ep.example_inputs,
         constants=ep.constants,
     )
@@ -1021,7 +1093,6 @@ class ExportedProgram:
     def run_decompositions(
         self,
         decomp_table: Optional[Dict[torch._ops.OperatorBase, Callable]] = None,
-        _preserve_ops: Tuple[torch._ops.OpOverload, ...] = (),
     ) -> "ExportedProgram":
         """
         Run a set of decompositions on the exported program and returns a new
@@ -1056,30 +1127,9 @@ class ExportedProgram:
             decomp_table[your_op] = your_custom_decomp
             ep = ep.run_decompositions(decomp_table=decomp_table)
         """
-        from torch._inductor import config
-
-        # FIXME delete this option after PTC, Executorch syncing is
-        # bit annoying so can't get rid of it easily
-        if _preserve_ops != ():
-            warnings.warn(
-                "This API is deprecated and soon will be removed. "
-                "Please look at the docstring to see how to preserve "
-                "an operator."
-            )
-
         _decomp_table = (
             default_decompositions() if decomp_table is None else dict(decomp_table)
         )
-
-        if config.is_fbcode():
-            # This means the decomp_table would only be containing post-autograd ops
-            # We should manually add CIA decomps
-            for k, v in _decomp_table_to_post_autograd_aten().items():
-                _decomp_table[k] = v
-
-        for op in _preserve_ops:
-            if op in _decomp_table:
-                del _decomp_table[op]
 
         if isinstance(_decomp_table, CustomDecompTable):
             _decomp_table = _decomp_table.materialize()

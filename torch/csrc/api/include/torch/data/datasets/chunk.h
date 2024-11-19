@@ -50,7 +50,7 @@ template <
 class BatchDataBuffer {
  public:
   using UnwrappedBatchType = UnwrappedBatch;
-  using BatchType = torch::optional<UnwrappedBatchType>;
+  using BatchType = std::optional<UnwrappedBatchType>;
   using BatchRequestType = typename ExampleSampler::BatchRequestType;
 
   BatchDataBuffer(
@@ -74,7 +74,7 @@ class BatchDataBuffer {
     if (batch_queue_.empty()) {
       AT_ASSERT(stop_);
       // All batches have been retrieved. Return an empty batch.
-      return nullopt;
+      return std::nullopt;
     }
 
     UnwrappedBatchData batch = std::move(batch_queue_.front());
@@ -137,7 +137,6 @@ class BatchDataBuffer {
 
     // If we still have data remaining after filling the last pushed batch, add
     // them to the queue too.
-    // NOLINTNEXTLINE(bugprone-infinite-loop)
     while (remaining_size > 0) {
       UnwrappedBatchType current_batch;
 
@@ -317,7 +316,7 @@ class ChunkDataset final
           typename ChunkReader::BatchType,
           size_t> {
  public:
-  using BatchType = torch::optional<typename ChunkReader::BatchType>;
+  using BatchType = std::optional<typename ChunkReader::BatchType>;
   using UnwrappedBatchType = typename ChunkReader::BatchType;
   using BatchRequestType = size_t;
   using ChunkSamplerType = ChunkSampler;
@@ -405,7 +404,7 @@ class ChunkDataset final
 
   /// size is not used for chunk dataset.
   std::optional<size_t> size() const override {
-    return torch::nullopt;
+    return std::nullopt;
   }
 
   // provide a references to chunk sampler. Used mainly in distributed data

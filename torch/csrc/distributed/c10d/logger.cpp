@@ -61,7 +61,7 @@ Logger::Logger(std::shared_ptr<c10d::Reducer> reducer)
   ddp_logging_data_ = std::make_unique<at::DDPLoggingData>();
 }
 
-c10::once_flag log_graph_static_flag;
+static c10::once_flag log_graph_static_flag;
 
 void Logger::log_if_graph_static(bool is_static) {
   c10::call_once(log_graph_static_flag, [this, is_static]() {
@@ -116,7 +116,7 @@ void Logger::set_env_variables() {
 void Logger::set_parameter_stats() {
   // The number of parameter tensors
   ddp_logging_data_->ints_map["num_parameter_tensors"] =
-      reducer_->params_.size();
+      static_cast<int64_t>(reducer_->params_.size());
   // Total parameters size (Bytes)
   ddp_logging_data_->ints_map["total_parameter_size_bytes"] = 0;
   // Parameters' data types, there may be multiple data

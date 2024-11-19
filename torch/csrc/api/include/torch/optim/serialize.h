@@ -40,6 +40,7 @@ void serialize(
     archive.read(tensorimpl_key, param_state_archive);
     DerivedOptimizerParamState param_state;
     param_state.serialize(param_state_archive);
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
     state[reinterpret_cast<void*>(std::stoull(tensorimpl_key))] =
         std::make_unique<DerivedOptimizerParamState>(param_state);
   }
@@ -192,6 +193,7 @@ void serialize(serialize::InputArchive& archive, Optimizer& optimizer) {
 
     for (const auto idx : c10::irange(params.size())) {
       auto param_group_old_key =
+          // NOLINTNEXTLINE(performance-no-int-to-ptr)
           reinterpret_cast<void*>(std::stoull(param_group_old_keys[idx]));
       if (saved_state.find(param_group_old_key) != saved_state.end()) {
         optimizer.state()[params[idx].unsafeGetTensorImpl()] =

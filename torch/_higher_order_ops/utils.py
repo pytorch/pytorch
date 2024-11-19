@@ -2,7 +2,7 @@
 import functools
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Callable, List
+from typing import Any, Callable, List, Tuple, Union
 
 import torch
 import torch.fx.traceback as fx_traceback
@@ -99,7 +99,23 @@ def _maybe_reenter_make_fx(fn):
     if _CURRENT_MAKE_FX_TRACER is not None:
         return reenter_make_fx(fn)
     else:
-        return make_fx(fn)
+
+        def _maybe_make_fx_with_fake_mode(fn):
+            @functools.wraps(fn)
+            def wrapped(*args):
+                from torch._guards import detect_fake_mode
+
+                fake_mode = detect_fake_mode(args)
+                if fake_mode is None:
+                    # we creaeta a fake_mode here to make sure we could
+                    # trace the graph with data-dependent calls e.g. .item()
+                    return make_fx(fn, tracing_mode="fake")(*args)
+                # Tracing with real if all inputs have been fakfied
+                return make_fx(fn)(*args)
+
+            return wrapped
+
+        return _maybe_make_fx_with_fake_mode(fn)
 
 
 @contextmanager
@@ -415,7 +431,9 @@ def _stack_pytree(pytrees):
 # iterating over the pos list and pop one item from the front of paritioned_args[pos[i]].
 # We use t_idx and s_idx to keep track of the next index of the item we are going to pop for the two lists.
 def save_tensors_and_symints_for_backward(ctx, args):
-    assert all(isinstance(arg, (torch.Tensor, torch.SymInt, int)) for arg in args), args
+    assert all(
+        isinstance(arg, (torch.Tensor, torch.SymInt, int, type(None))) for arg in args
+    ), args
     partitioned_args: List[Any] = [[], []]
     pos = []
     for i, arg in enumerate(args):
@@ -444,3 +462,38 @@ def saved_tensors_and_symints(ctx):
             s_idx += 1
     assert t_idx + s_idx == len(ctx.pos)
     return tuple(args)
+
+
+def get_dummy_aot_autograd_config():
+    from torch._functorch.aot_autograd import AOTConfig
+
+    return AOTConfig(
+        fw_compiler=None,  # type: ignore[arg-type]
+        bw_compiler=None,  # type: ignore[arg-type]
+        partition_fn=None,  # type: ignore[arg-type]
+        decompositions={},
+        num_params_buffers=0,
+        aot_id=0,
+        keep_inference_input_mutations=False,
+    )
+
+
+# Slices off the first element of a given dimension
+def first_slice_copy(t: torch.Tensor, dim: int = 0) -> torch.Tensor:
+    return torch.select_copy(t, dim, 0)
+
+
+# Note [lifted arg types in hop]
+# For dynamoed hops, we automatically lift the free symbols in tensors as arguments.
+# This has implications for the types of lifted args for different dispatch keys:
+#   1. functionalization, FakeTensorMode, ProxyTorchDispatchMode, Autograd need to support torch.Symint
+#      lifted args because it's on the path of torch.compile(dynamic=True).
+#   2. functionalization, FakeTensorMode, ProxyTorchDispatchMode, Autograd, CompositeExplicitAutograd need
+#      to support int arguments. In the eager run case, we re-trace the subgraph in AutogradKey, so inner
+#      hops may receive int inputs from the shape of outer tensor inputs.
+#      However, CompositeExplicitAutograd won't receive SymInt inputs because it only accepts real tensor inputs.
+def validate_subgraph_args_types(lifted_args: Union[Tuple[Any], List[Any]]):
+    allowed_types = (torch.Tensor, int, torch.SymInt)
+    assert all(
+        isinstance(arg, (torch.Tensor, int, torch.SymInt)) for arg in lifted_args
+    ), f"{lifted_args} can only be of {allowed_types} but got {tuple(type(arg) for arg in lifted_args)}"
