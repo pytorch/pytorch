@@ -155,6 +155,7 @@ def get_ignored_functions() -> Set[Callable]:
         torch.has_cuda,
         torch.has_cudnn,
         torch.has_lapack,
+        torch.has_kleidiai,
         torch.device,
         torch.dtype,
         torch.finfo,
