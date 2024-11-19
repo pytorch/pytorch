@@ -2,7 +2,6 @@
 from unittest.mock import patch
 
 import torch
-
 import torch._dynamo.test_case
 import torch._dynamo.testing
 
@@ -176,24 +175,24 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
         y = torch.randn([3])
         z = torch.randn([3])
         cmp_result = compiled_foo(
-            x.clone().detach(), y.clone().detach(), z.clone().detach()
+            x.detach().clone(), y.detach().clone(), z.detach().clone()
         )
-        eager_result = foo(x.clone().detach(), y.clone().detach(), z.clone().detach())
+        eager_result = foo(x.detach().clone(), y.detach().clone(), z.detach().clone())
         self.assertEqual(cmp_result, eager_result)
         self.assertEqual(cnt.frame_count, 1)
 
         cmp_result = compiled_foo(
-            z.clone().detach(), y.clone().detach(), x.clone().detach()
+            z.detach().clone(), y.detach().clone(), x.detach().clone()
         )
-        eager_result = foo(z.clone().detach(), y.clone().detach(), x.clone().detach())
+        eager_result = foo(z.detach().clone(), y.detach().clone(), x.detach().clone())
         self.assertEqual(cmp_result, eager_result)
         # No recompile, alias preserved
         self.assertEqual(cnt.frame_count, 1)
 
-        x_clone = x.clone().detach()
-        cmp_result = compiled_foo(x_clone, y.clone().detach(), x_clone)
-        x_clone = x.clone().detach()
-        eager_result = compiled_foo(x_clone, y.clone().detach(), x_clone)
+        x_clone = x.detach().clone()
+        cmp_result = compiled_foo(x_clone, y.detach().clone(), x_clone)
+        x_clone = x.detach().clone()
+        eager_result = compiled_foo(x_clone, y.detach().clone(), x_clone)
         self.assertEqual(cmp_result, eager_result)
         # Recompile, alias changed
         self.assertEqual(cnt.frame_count, 2)
@@ -210,14 +209,14 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
         compiled_foo = torch._dynamo.optimize(cnt, nopython=True)(foo)
 
         z = torch.randn([3])
-        cmp_result = compiled_foo(z.clone().detach())
-        eager_result = foo(z.clone().detach())
+        cmp_result = compiled_foo(z.detach().clone())
+        eager_result = foo(z.detach().clone())
         self.assertEqual(cmp_result, eager_result)
         self.assertEqual(cnt.frame_count, 1)
 
-        g1 = g1.clone().detach()
+        g1 = g1.detach().clone()
         cmp_result = compiled_foo(g1)
-        g1 = g1.clone().detach()
+        g1 = g1.detach().clone()
         eager_result = compiled_foo(g1)
         self.assertEqual(cmp_result, eager_result)
         # Recompile, alias changed
@@ -297,7 +296,7 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
 
     def test_simple_module_recompile(self):
         class SimpleDropout(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.dropout = torch.nn.Dropout(0.5)
                 self.linear = torch.nn.Linear(10, 1)
@@ -314,6 +313,69 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
             model(x)
             model.train()
             model(x)
+        self.assertEqual(counter.frame_count, 2)
+
+    @patch.object(torch._dynamo.config, "cache_size_limit", 2)
+    def test_no_recursive_compile_after_cache_limit_hit(self):
+        def f(x, n):
+            x = x + n
+            return g(x, n)
+
+        def g(x, n):
+            x = x + n
+            return h(x, n)
+
+        def h(x, n):
+            return x + n
+
+        counter = torch._dynamo.testing.CompileCounter()
+        opt_f = torch.compile(f, backend=counter, dynamic=False)
+        for i in range(10):
+            opt_f(torch.ones(3), i)
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_automatic_dynamic_on_closed_ints(self):
+        def f(x):
+            def g(y):
+                return y + x
+
+            return g
+
+        counter = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=counter)
+        def h(x, g):
+            return g(x)
+
+        for i in range(10):
+            h(torch.randn(5), f(i))
+        self.assertEqual(counter.frame_count, 2)
+
+    @patch.object(torch._dynamo.config, "cache_size_limit", 2)
+    def test_run_mode_after_cache_limit_hit(self):
+        def f(x, n):
+            x = x + n
+            if torch._dynamo.is_compiling():
+                x = x + 1
+            return g(x, n)
+
+        def g(x, n):
+            x = x + n
+            if torch._dynamo.is_compiling():
+                x = x + 2
+            return x
+
+        counter = torch._dynamo.testing.CompileCounter()
+        opt_f = torch.compile(f, backend=counter, dynamic=False)
+        # compiles
+        self.assertEqual(opt_f(torch.ones(3), 0), torch.ones(3) + 3)
+        self.assertEqual(opt_f(torch.ones(3), 1), torch.ones(3) + 5)
+        # cache limit hit
+        self.assertEqual(opt_f(torch.ones(3), 2), torch.ones(3) + 4)
+        self.assertEqual(opt_f(torch.ones(3), 3), torch.ones(3) + 6)
+        # run mode
+        self.assertEqual(opt_f(torch.ones(3), 0), torch.ones(3) + 3)
+        self.assertEqual(opt_f(torch.ones(3), 1), torch.ones(3) + 5)
         self.assertEqual(counter.frame_count, 2)
 
 

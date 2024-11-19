@@ -6,7 +6,6 @@ from textwrap import dedent
 from unittest.mock import patch
 
 import torch
-
 import torch._dynamo
 import torch._dynamo.test_case
 import torch.fx.traceback as fx_traceback
@@ -44,7 +43,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
     def test_LSTM(self):
         # https://github.com/pytorch/torchdynamo/issues/1147
         class Repro(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.self_mod_model_lstm_lstm = torch.nn.LSTM(
                     64, 64, num_layers=2, bidirectional=True
@@ -56,7 +55,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
 
         mod = Repro()
 
-        aot_mod = torch._dynamo.optimize("aot_eager")(mod)
+        aot_mod = torch.compile(mod, backend="aot_eager")
 
         args = [((92, 4, 64), (1, 5888, 92), torch.float32, "cpu", False)]
         args = [
@@ -81,7 +80,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
 
         y = torch.randn(4)
         x = torch.nn.Parameter(torch.randn(4))
-        aot_fn = torch._dynamo.optimize("aot_eager")(fn)
+        aot_fn = torch.compile(fn, backend="aot_eager")
         # This should not error: we mutated an autograd leaf under no_grad mode.
         aot_fn(x, y)
 
@@ -108,7 +107,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(torch.Size([12, 4, 256, 513]))
         y = torch.randn(torch.Size([12, 3, 512, 513]))
-        aot_fn = torch._dynamo.optimize("aot_eager")(fn)
+        aot_fn = torch.compile(fn, backend="aot_eager")
         aot_fn(x, y)
 
     def test_negative_testing_mutation(self):
@@ -135,7 +134,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(torch.Size([12, 4, 256, 513]))
         y = torch.randn(torch.Size([12, 3, 512, 513]))
-        aot_fn = torch._dynamo.optimize("aot_eager")(fn)
+        aot_fn = torch.compile(fn, backend="aot_eager")
         aot_fn(x, y)
 
     def test_negative_testing(self):
@@ -144,12 +143,12 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
 
         y = torch.randn(4)
         x = torch.randn(4)
-        aot_fn = torch._dynamo.optimize("aot_eager")(fn)
+        aot_fn = torch.compile(fn, backend="aot_eager")
         aot_fn(x, y)
 
     def test_call_fn_with_non_const_inputs_aot_safe(self):
         class ModuleSpecialFwd(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(
                     in_channels=3, out_channels=20, kernel_size=(5, 5)
@@ -174,7 +173,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         # Run exported graph with AOT
         self.assertTrue(torch._dynamo.testing.same(real, graph(rx)))
 
-        aot_fn = torch._dynamo.optimize("aot_eager")(graph)
+        aot_fn = torch.compile(graph, backend="aot_eager")
         aot_fn(rx)
 
     def test_call_fn_with_non_const_inputs_aot_unsafe(self):
@@ -206,7 +205,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(torch._dynamo.testing.same(real, graph(x, y)))
 
         # Run exported graph with AOT
-        aot_fn = torch._dynamo.optimize("aot_eager")(graph)
+        aot_fn = torch.compile(graph, backend="aot_eager")
         # This should not error: we mutated an autograd leaf under no_grad mode.
         aot_fn(x, y)
 
@@ -241,7 +240,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
             gms.append(gm)
             return counter(gm, inputs)
 
-        optimized_mod = torch._dynamo.optimize(capturing_fn)(mod)
+        optimized_mod = torch.compile(mod, backend=capturing_fn)
 
         # Assert equal
         self.assertTrue(torch._dynamo.testing.same(real, optimized_mod(x, y)))
@@ -278,7 +277,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         # Run fn with AOT
         torch._dynamo.reset()
 
-        aot_fn = torch._dynamo.optimize("aot_eager")(optimized_mod)
+        aot_fn = torch.compile(optimized_mod, backend="aot_eager")
         aot_fn(x, y)
 
     # Note: Dynamo recompilation guarding invalid grad
@@ -435,7 +434,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
     @patch("torch._functorch.config.debug_assert", True)
     def test_arg_dupe_via_dynamo_recompiles_many_args_param_non_tensor_arg(self):
         class F(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.mean = torch.nn.Parameter(torch.randn(3, 3))
 
@@ -488,7 +487,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         z = None
 
         class F(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.mean = torch.nn.Parameter(torch.randn(3, 3))
 
@@ -525,7 +524,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
     @patch("torch._functorch.config.debug_assert", True)
     def test_arg_dupe_via_dynamo_recompiles_many_args_param_non_tensor_arg_list(self):
         class F(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.mean = torch.nn.Parameter(torch.randn(3, 3))
 
@@ -575,7 +574,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
     @patch("torch._functorch.config.debug_assert", True)
     def test_arg_dupe_via_dynamo_recompiles_many_args_param(self):
         class F(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.mean = torch.nn.Parameter(torch.randn(3, 3))
 
@@ -684,7 +683,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
             return b
 
         ref_output = fn()
-        aot_fn = torch._dynamo.optimize("aot_eager")(fn)
+        aot_fn = torch.compile(fn, backend="aot_eager")
         actual_output = aot_fn()
         self.assertEqual(ref_output, actual_output)
 
@@ -731,7 +730,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
             from torch._functorch.aot_autograd import aot_module_simplified
 
             class WrapperModule(torch.nn.Module):
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
                     self.original = input_mod
                     self.submod = aot_module_simplified(input_mod, args, nop)
@@ -754,7 +753,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
             )
             return split_gm
 
-        @torch._dynamo.optimize(test_compile)
+        @torch.compile(backend=test_compile)
         def f(a):
             b, c = torch.ops.custom.maybe_dupe_op(a)
             return (b.mul_(c),)
@@ -771,12 +770,12 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
 
         x = torch.rand((4, 4))
 
-        opt_fn = torch._dynamo.optimize("aot_eager")(fn)
+        opt_fn = torch.compile(fn, backend="aot_eager")
         self.assertTrue(torch._dynamo.testing.same(fn(x), opt_fn(x)))
 
     def test_aot_sequence_nr(self):
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv1 = torch.nn.Conv2d(
                     in_channels=16,
@@ -843,7 +842,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         # Walk all the nodes in fx graph.
         # Write the resulting ops to a table
         min_seq_nr = -1
-        seq_table = "SeqNr|OrigAten|SrcFn\n"
+        seq_table = "SeqNr|OrigAten|SrcFn|FwdSrcFn\n"
         for node in fx_g.graph.nodes:
             if "call_" in node.op and "getitem" not in str(node.target):
                 seq_nr = node.meta.get("seq_nr", -1)
@@ -858,51 +857,59 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
                     mod_name = source_fn_stack[-1][0]
                 # Make all seq_nr relative so it starts at 0
                 seq_nr = seq_nr - min_seq_nr
-                seq_table = seq_table + f"{seq_nr}|{orig_aten}|{mod_name}\n"
+                # For backward nodes, also test that metadata from the corresponding
+                # forward node is copied over.
+                fwd_source_fn_stack = node.meta.get("fwd_source_fn_stack", [])
+                fwd_mod_name = ""
+                if len(fwd_source_fn_stack):
+                    fwd_mod_name = fwd_source_fn_stack[-1][0]
+                seq_table = (
+                    seq_table + f"{seq_nr}|{orig_aten}|{mod_name}|{fwd_mod_name}\n"
+                )
 
         self.maxDiff = None
         self.assertExpectedInline(
             seq_table,
             dedent(
                 """\
-SeqNr|OrigAten|SrcFn
-0|aten.convolution.default|l__self___conv1
-0|aten.add.Tensor|l__self___bn1
-1|aten._native_batch_norm_legit_functional.default|l__self___bn1
-2|aten.relu.default|l__self___relu1
-2|aten.detach.default|l__self___relu1
-2|aten.detach.default|l__self___relu1
-3|aten.add.Tensor|add
-4|aten.view.default|flatten
-5|aten.view.default|l__self___fc1
-6|aten.t.default|l__self___fc1
-7|aten.addmm.default|l__self___fc1
-8|aten.view.default|l__self___fc1
-9|aten.sub.Tensor|l__self___loss_fn
-10|aten.abs.default|l__self___loss_fn
-11|aten.mean.default|l__self___loss_fn
-11|aten.ones_like.default|
-11|aten.expand.default|
-11|aten.div.Scalar|
-10|aten.sgn.default|
-10|aten.mul.Tensor|
-8|aten.view.default|
-7|aten.t.default|
-7|aten.mm.default|
-7|aten.t.default|
-7|aten.mm.default|
-7|aten.t.default|
-7|aten.sum.dim_IntList|
-7|aten.view.default|
-6|aten.t.default|
-5|aten.view.default|
-4|aten.view.default|
-2|aten.detach.default|
-2|aten.detach.default|
-2|aten.threshold_backward.default|
-1|aten.native_batch_norm_backward.default|
-0|aten.convolution_backward.default|
-11|aten.add.Tensor|
+SeqNr|OrigAten|SrcFn|FwdSrcFn
+0|aten.convolution.default|l__self___conv1|
+0|aten.add.Tensor|l__self___bn1|
+1|aten._native_batch_norm_legit_functional.default|l__self___bn1|
+2|aten.relu.default|l__self___relu1|
+2|aten.detach.default|l__self___relu1|
+2|aten.detach.default|l__self___relu1|
+3|aten.add.Tensor|add|
+4|aten.view.default|flatten|
+5|aten.view.default|l__self___fc1|
+6|aten.t.default|l__self___fc1|
+7|aten.addmm.default|l__self___fc1|
+8|aten.view.default|l__self___fc1|
+9|aten.sub.Tensor|l__self___loss_fn|
+10|aten.abs.default|l__self___loss_fn|
+11|aten.mean.default|l__self___loss_fn|
+11|aten.ones_like.default||l__self___loss_fn
+11|aten.expand.default||l__self___loss_fn
+11|aten.div.Scalar||l__self___loss_fn
+10|aten.sgn.default||l__self___loss_fn
+10|aten.mul.Tensor||l__self___loss_fn
+8|aten.view.default||l__self___fc1
+7|aten.t.default||l__self___fc1
+7|aten.mm.default||l__self___fc1
+7|aten.t.default||l__self___fc1
+7|aten.mm.default||l__self___fc1
+7|aten.t.default||l__self___fc1
+7|aten.sum.dim_IntList||l__self___fc1
+7|aten.view.default||l__self___fc1
+6|aten.t.default||l__self___fc1
+5|aten.view.default||l__self___fc1
+4|aten.view.default||
+2|aten.detach.default||l__self___relu1
+2|aten.detach.default||l__self___relu1
+2|aten.threshold_backward.default||l__self___relu1
+1|aten.native_batch_norm_backward.default||l__self___bn1
+0|aten.convolution_backward.default||l__self___conv1
+11|aten.add.Tensor||l__self___loss_fn
 """
             ),
         )
@@ -952,9 +959,11 @@ SeqNr|OrigAten|SrcFn
         out_test = m_compiled(*sample_inputs)
         self.assertEqual(out_ref, out_test)
 
+    # set donated_buffer=False due to create_graph=True
+    @torch._functorch.config.patch("donated_buffer", False)
     def test_eager_sequence_nr(self):
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv1 = torch.nn.Conv2d(
                     in_channels=16,
@@ -1072,7 +1081,7 @@ SeqNr|OrigAten|SrcFn
         opt_fn = torch.compile(fn, backend="aot_eager")
 
         x = torch.arange(6)
-        x_opt = x.clone().detach()
+        x_opt = x.detach().clone()
         self.assertEqual(fn(x), opt_fn(x_opt))
         self.assertEqual(x, x_opt)
 
@@ -1086,9 +1095,9 @@ SeqNr|OrigAten|SrcFn
         opt_fn = torch.compile(fn, backend="aot_eager")
 
         x = torch.arange(6, dtype=torch.float)
-        z = x.clone().detach()
-        x_opt = x.clone().detach()
-        z_opt = x.clone().detach()
+        z = x.detach().clone()
+        x_opt = x.detach().clone()
+        z_opt = x.detach().clone()
 
         z.requires_grad = True
         z_opt.requires_grad = True
@@ -1189,7 +1198,7 @@ SeqNr|OrigAten|SrcFn
         opt_fn = torch.compile(fn, backend="aot_eager")
 
         x = torch.arange(6)
-        x_opt = x.clone().detach()
+        x_opt = x.detach().clone()
         with self.assertRaises(Exception):
             fn(x)
         with self.assertRaises(Exception):
@@ -1265,7 +1274,7 @@ SeqNr|OrigAten|SrcFn
         logger_name = "torch._functorch._aot_autograd.jit_compile_runtime_wrappers"
 
         class Mod(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.param = torch.nn.Parameter(torch.zeros([2, 2]))
 
@@ -1326,7 +1335,7 @@ SeqNr|OrigAten|SrcFn
     def test_donated_buffer_with_retain_or_create_graph1(self):
         # Gives non-empty bw_donated_idxs
         class Mod(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.param = torch.nn.Parameter(torch.zeros([3, 3]))
 
@@ -1343,7 +1352,7 @@ SeqNr|OrigAten|SrcFn
     def test_donated_buffer_with_retain_or_create_graph2(self):
         # Gives non-empty bw_donated_idxs
         class Mod(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.param = torch.nn.Parameter(torch.zeros([3, 3]))
 
@@ -1362,7 +1371,7 @@ SeqNr|OrigAten|SrcFn
     def test_donated_buffer_with_retain_or_create_graph3(self):
         # Gives non-empty bw_donated_idxs
         class Mod(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.param = torch.nn.Parameter(torch.zeros([3, 3]))
 
@@ -1382,7 +1391,7 @@ SeqNr|OrigAten|SrcFn
     def test_donated_buffer_with_retain_or_create_graph4(self):
         # Gives non-empty bw_donated_idxs
         class Mod(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.param = torch.nn.Parameter(torch.zeros([3, 3]))
 

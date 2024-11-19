@@ -16,8 +16,7 @@
 #include <unordered_map>
 #include <utility>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 c10::AliasAnalysisKind aliasAnalysisIsSpecialCase() {
@@ -244,7 +243,8 @@ struct TreeToken {
         queue.push_back(n->inputs()[0]->node());
         queue.push_back(n->inputs()[1]->node());
       } else {
-        AT_ASSERTM(false, "Unsupported node found in a BatchMM tree!");
+        TORCH_INTERNAL_ASSERT(
+            false, "Unsupported node found in a BatchMM tree!");
       }
     }
     return matmuls;
@@ -490,5 +490,4 @@ void BatchMM(std::shared_ptr<Graph>& graph) {
   PeepholeOptimize(graph, /*disable_shape_peepholes*/ true);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

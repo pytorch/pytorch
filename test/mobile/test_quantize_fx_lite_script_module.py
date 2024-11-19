@@ -21,7 +21,7 @@ class TestLiteFuseFx(QuantizationLiteTestCase):
 
     def test_embedding(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.emb = torch.nn.Embedding(num_embeddings=10, embedding_dim=12)
 
@@ -50,7 +50,7 @@ class TestLiteFuseFx(QuantizationLiteTestCase):
 
     def test_conv2d(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv1 = nn.Conv2d(1, 1, 1)
                 self.conv2 = nn.Conv2d(1, 1, 1)

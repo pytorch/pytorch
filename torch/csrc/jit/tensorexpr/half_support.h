@@ -5,9 +5,7 @@
 #include <torch/csrc/jit/tensorexpr/ir_visitor.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 // Walk the Statement looking for Half size loads/stores.
 class HalfChecker : public IRVisitor {
@@ -26,27 +24,27 @@ class HalfChecker : public IRVisitor {
     return hasBFloat16_;
   }
 
-  void visit(LoadPtr v) override {
+  void visit(const LoadPtr& v) override {
     hasHalf_ |= v->dtype().scalar_type() == ScalarType::Half;
     hasBFloat16_ |= v->dtype().scalar_type() == ScalarType::BFloat16;
     IRVisitor::visit(v);
   }
 
-  void visit(StorePtr v) override {
+  void visit(const StorePtr& v) override {
     hasHalf_ |= v->buf()->dtype().scalar_type() == ScalarType::Half;
     hasBFloat16_ |= v->buf()->dtype().scalar_type() == ScalarType::BFloat16;
     IRVisitor::visit(v);
   }
 
-  void visit(HalfImmPtr v) override {
+  void visit(const HalfImmPtr& v) override {
     hasHalf_ = true;
   }
 
-  void visit(BFloat16ImmPtr v) override {
+  void visit(const BFloat16ImmPtr& v) override {
     hasBFloat16_ = true;
   }
 
-  void visit(CastPtr v) override {
+  void visit(const CastPtr& v) override {
     hasHalf_ |= v->dtype().scalar_type() == ScalarType::Half;
     hasBFloat16_ |= v->dtype().scalar_type() == ScalarType::BFloat16;
     IRVisitor::visit(v);
@@ -57,9 +55,8 @@ class HalfChecker : public IRVisitor {
   bool hasBFloat16_{false};
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class HalfRewriter : public IRMutator {
-  ExprPtr mutate(LoadPtr v) override {
+  ExprPtr mutate(const LoadPtr& v) override {
     ExprPtr child = IRMutator::mutate(v);
     if (!isHalf(child)) {
       return child;
@@ -72,7 +69,7 @@ class HalfRewriter : public IRMutator {
     return ret;
   }
 
-  StmtPtr mutate(StorePtr v) override {
+  StmtPtr mutate(const StorePtr& v) override {
     // Since mutation changes the `value()` expression in-place, we need to
     // get the dtype of the `value()` before that is mutated.
     auto newType = v->value()->dtype();
@@ -95,15 +92,15 @@ class HalfRewriter : public IRMutator {
     return v;
   }
 
-  ExprPtr mutate(HalfImmPtr v) override {
+  ExprPtr mutate(const HalfImmPtr& v) override {
     return alloc<Cast>(kFloat, v);
   }
 
-  ExprPtr mutate(BFloat16ImmPtr v) override {
+  ExprPtr mutate(const BFloat16ImmPtr& v) override {
     return alloc<Cast>(kFloat, v);
   }
 
-  ExprPtr mutate(CastPtr v) override {
+  ExprPtr mutate(const CastPtr& v) override {
     ExprPtr child = v->src_value()->accept_mutator(this);
 
     // just don't allow half casts we didn't insert.
@@ -136,7 +133,7 @@ class HalfRewriter : public IRMutator {
     return alloc<Cast>(v->dtype(), child);
   }
 
-  StmtPtr mutate(LetPtr v) override {
+  StmtPtr mutate(const LetPtr& v) override {
     if (isHalf(v->var()->dtype().scalar_type())) {
       VarPtr load_new_var = alloc<Var>(v->var()->name_hint(), kFloat);
       ExprPtr new_value = alloc<Cast>(
@@ -150,7 +147,7 @@ class HalfRewriter : public IRMutator {
     return IRMutator::mutate(v);
   }
 
-  ExprPtr mutate(VarPtr v) override {
+  ExprPtr mutate(const VarPtr& v) override {
     auto it = var_map.find(v);
     if (it != var_map.end()) {
       return it->second;
@@ -168,34 +165,34 @@ class HalfRewriter : public IRMutator {
     return v;
   }
 
-  ExprPtr mutate(AddPtr v) override {
+  ExprPtr mutate(const AddPtr& v) override {
     return mutateArithmetic(v);
   }
-  ExprPtr mutate(SubPtr v) override {
+  ExprPtr mutate(const SubPtr& v) override {
     return mutateArithmetic(v);
   }
-  ExprPtr mutate(MulPtr v) override {
+  ExprPtr mutate(const MulPtr& v) override {
     return mutateArithmetic(v);
   }
-  ExprPtr mutate(DivPtr v) override {
+  ExprPtr mutate(const DivPtr& v) override {
     return mutateArithmetic(v);
   }
-  ExprPtr mutate(MaxPtr v) override {
+  ExprPtr mutate(const MaxPtr& v) override {
     return mutateArithmetic(v);
   }
-  ExprPtr mutate(MinPtr v) override {
+  ExprPtr mutate(const MinPtr& v) override {
     return mutateArithmetic(v);
   }
-  ExprPtr mutate(CompareSelectPtr v) override {
+  ExprPtr mutate(const CompareSelectPtr& v) override {
     return mutateArithmetic(v);
   }
-  ExprPtr mutate(BroadcastPtr v) override {
+  ExprPtr mutate(const BroadcastPtr& v) override {
     return mutateArithmetic(v);
   }
-  ExprPtr mutate(IfThenElsePtr v) override {
+  ExprPtr mutate(const IfThenElsePtr& v) override {
     return mutateArithmetic(v);
   }
-  ExprPtr mutate(IntrinsicsPtr v) override {
+  ExprPtr mutate(const IntrinsicsPtr& v) override {
     return mutateArithmetic(v);
   }
 
@@ -204,7 +201,7 @@ class HalfRewriter : public IRMutator {
     return st == ScalarType::Half || st == ScalarType::BFloat16;
   }
 
-  static bool isHalf(ExprPtr v) {
+  static bool isHalf(const ExprPtr& v) {
     return isHalf(v->dtype().scalar_type());
   }
 
@@ -212,6 +209,4 @@ class HalfRewriter : public IRMutator {
   std::unordered_map<VarPtr, VarPtr> var_map;
 };
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr

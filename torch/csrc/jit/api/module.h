@@ -278,8 +278,10 @@ struct TORCH_API Module : public Object {
   // A set of functions to maintain input shapes through torch.jit.save and
   // torch.jit.load. It only works on tensors and lists/dicts of tensors
   // because tracing is only supported by these types.
-  void store_traced_inputs(std::string func_name, std::vector<IValue> inputs) {
-    if (inputs.size() == 0) {
+  void store_traced_inputs(
+      const std::string& func_name,
+      std::vector<IValue> inputs) {
+    if (inputs.empty()) {
       return;
     }
     auto c10_inputs = c10::impl::GenericList(AnyType::get());
@@ -591,7 +593,7 @@ struct TORCH_API ModulePolicy {
   }
   // are we going to return everything? If so, we can optimize the calculate
   // of the size of the list.
-  static CONSTEXPR_EXCEPT_WIN_CUDA bool all_slots = false;
+  static constexpr bool all_slots = false;
 };
 
 struct TORCH_API ParameterPolicy {
@@ -604,7 +606,7 @@ struct TORCH_API ParameterPolicy {
   static bool valid(const ClassTypePtr& typ, size_t i, const IValue& v) {
     return typ->is_parameter(i) && v.isTensor();
   }
-  static CONSTEXPR_EXCEPT_WIN_CUDA bool all_slots = false;
+  static constexpr bool all_slots = false;
 };
 
 struct TORCH_API BufferPolicy {
@@ -618,7 +620,7 @@ struct TORCH_API BufferPolicy {
     return typ->getAttribute(i)->isSubtypeOf(*TensorType::get()) &&
         typ->is_buffer(i);
   }
-  static CONSTEXPR_EXCEPT_WIN_CUDA bool all_slots = false;
+  static constexpr bool all_slots = false;
 };
 
 struct TORCH_API AttributePolicy {
@@ -631,7 +633,7 @@ struct TORCH_API AttributePolicy {
   static bool valid(const ClassTypePtr& typ, size_t i, const IValue& v) {
     return true;
   }
-  static CONSTEXPR_EXCEPT_WIN_CUDA bool all_slots = true;
+  static constexpr bool all_slots = true;
 };
 
 // take a Policy object, and make a version of it that returns the slot.

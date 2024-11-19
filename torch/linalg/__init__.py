@@ -1,5 +1,3 @@
-import sys
-
 import torch
 from torch._C import _add_docstr, _linalg  # type: ignore[attr-defined]
 
@@ -785,18 +783,18 @@ householder_product(A, tau, *, out=None) -> Tensor
 Computes the first `n` columns of a product of Householder matrices.
 
 Let :math:`\mathbb{K}` be :math:`\mathbb{R}` or :math:`\mathbb{C}`, and
-let :math:`V \in \mathbb{K}^{m \times n}` be a matrix with columns :math:`v_i \in \mathbb{K}^m`
-for :math:`i=1,\ldots,m` with :math:`m \geq n`. Denote by :math:`w_i` the vector resulting from
-zeroing out the first :math:`i-1` components of :math:`v_i` and setting to `1` the :math:`i`-th.
+let :math:`A \in \mathbb{K}^{m \times n}` be a matrix with columns :math:`a_i \in \mathbb{K}^m`
+for :math:`i=1,\ldots,m` with :math:`m \geq n`. Denote by :math:`b_i` the vector resulting from
+zeroing out the first :math:`i-1` components of :math:`a_i` and setting to `1` the :math:`i`-th.
 For a vector :math:`\tau \in \mathbb{K}^k` with :math:`k \leq n`, this function computes the
 first :math:`n` columns of the matrix
 
 .. math::
 
-    H_1H_2 ... H_k \qquad\text{with}\qquad H_i = \mathrm{I}_m - \tau_i w_i w_i^{\text{H}}
+    H_1H_2 ... H_k \qquad\text{with}\qquad H_i = \mathrm{I}_m - \tau_i b_i b_i^{\text{H}}
 
-where :math:`\mathrm{I}_m` is the `m`-dimensional identity matrix and :math:`w^{\text{H}}` is the
-conjugate transpose when :math:`w` is complex, and the transpose when :math:`w` is real-valued.
+where :math:`\mathrm{I}_m` is the `m`-dimensional identity matrix and :math:`b^{\text{H}}` is the
+conjugate transpose when :math:`b` is complex, and the transpose when :math:`b` is real-valued.
 The output matrix is the same size as the input matrix :attr:`A`.
 
 See `Representation of Orthogonal or Unitary Matrices`_ for further details.
@@ -815,7 +813,7 @@ the output has the same batch dimensions.
         However, that function is not supported by autograd.
 
 .. warning::
-    Gradient computations are only well-defined if :math:`tau_i \neq \frac{1}{||v_i||^2}`.
+    Gradient computations are only well-defined if :math:`\tau_i \neq \frac{1}{||a_i||^2}`.
     If this condition is not met, no error will be thrown, but the gradient produced may contain `NaN`.
 
 Args:
@@ -1442,7 +1440,8 @@ but it is faster in some cases.
 
 Args:
     x (Tensor): tensor, flattened by default, but this behavior can be
-        controlled using :attr:`dim`.
+        controlled using :attr:`dim`.  (Note: the keyword argument
+        `input` can also be used as an alias for `x`.)
     ord (int, float, inf, -inf, 'fro', 'nuc', optional): order of norm. Default: `2`
     dim (int, Tuple[int], optional): dimensions over which to compute
         the norm. See above for the behavior when :attr:`dim`\ `= None`.
@@ -2134,6 +2133,9 @@ Letting `*` be zero or more batch dimensions,
     It is possible to compute the solution of the system :math:`XA = B` by passing the inputs
     :attr:`A` and :attr:`B` transposed and transposing the output returned by this function.
 
+.. note::
+    :attr:`A` is allowed to be a non-batched `torch.sparse_csr_tensor`, but only with `left=True`.
+
 """ + fr"""
 .. note:: {common_notes["sync_note_has_ex"].format("torch.linalg.solve_ex")}
 """ + r"""
@@ -2231,7 +2233,7 @@ the output has the same batch dimensions.
         equations with a unique solution.
 
 Args:
-    A (Tensor): tensor of shape `(*, n, n)` (or `(*, k, k)` if :attr:`left`\ `= True`)
+    A (Tensor): tensor of shape `(*, n, n)` (or `(*, k, k)` if :attr:`left`\ `= False`)
                 where `*` is zero or more batch dimensions.
     B (Tensor): right-hand side tensor of shape `(*, n, k)`.
 

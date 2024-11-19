@@ -3,7 +3,6 @@ import sys
 from typing import Dict, Optional
 
 import torch
-
 from torch._logging import LazyString
 
 
@@ -56,7 +55,7 @@ def get_node_context(node, num_nodes=2) -> str:
     """
     node_contexts = []
     cur = node
-    for i in range(num_nodes):
+    for _ in range(num_nodes):
         node_contexts.append(cur.format_node())
         if cur.op == "root":
             break

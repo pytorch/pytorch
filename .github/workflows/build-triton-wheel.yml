@@ -13,7 +13,6 @@ on:
       - .github/scripts/build_triton_wheel.py
       - .github/ci_commit_pins/triton.txt
       - .ci/docker/ci_commit_pins/triton.txt
-      - .ci/docker/ci_commit_pins/triton-rocm.txt
       - .ci/docker/ci_commit_pins/triton-xpu.txt
   pull_request:
     paths:
@@ -21,7 +20,6 @@ on:
       - .github/scripts/build_triton_wheel.py
       - .github/ci_commit_pins/triton.txt
       - .ci/docker/ci_commit_pins/triton.txt
-      - .ci/docker/ci_commit_pins/triton-rocm.txt
       - .ci/docker/ci_commit_pins/triton-xpu.txt
 
 concurrency:
@@ -29,22 +27,33 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  get-label-type:
+    if: github.repository_owner == 'pytorch'
+    name: get-label-type
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+
   build-wheel:
     name: "Build Triton Wheel"
-    runs-on: [self-hosted, linux.2xlarge]
+    needs: get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge"
     strategy:
       fail-fast: false
       matrix:
-        py_vers: [ "3.8", "3.9", "3.10", "3.11", "3.12" ]
+        py_vers: [ "3.9", "3.10", "3.11", "3.12", "3.13" ]
         device: ["cuda", "rocm", "xpu"]
         include:
           - device: "rocm"
-            rocm_version: "6.1"
+            rocm_version: "6.2"
           - device: "cuda"
             rocm_version: ""
     timeout-minutes: 40
     env:
-      DOCKER_IMAGE: ${{ matrix.device == 'rocm' && format('pytorch/manylinux-rocm:{0}', matrix.rocm_version) || 'pytorch/manylinux-builder:cpu' }}
+      DOCKER_IMAGE: ${{ matrix.device == 'rocm' && format('pytorch/manylinux-builder:rocm{0}', matrix.rocm_version) || 'pytorch/manylinux-builder:cpu' }}
       PY_VERS: ${{ matrix.py_vers }}
       BUILD_DEVICE: ${{ matrix.device }}
     steps:
@@ -83,9 +92,6 @@ jobs:
 
           # Determine python executable for given version
           case $PY_VERS in
-          3.8)
-            PYTHON_EXECUTABLE=/opt/python/cp38-cp38/bin/python
-            ;;
           3.9)
             PYTHON_EXECUTABLE=/opt/python/cp39-cp39/bin/python
             ;;
@@ -97,6 +103,9 @@ jobs:
             ;;
           3.12)
             PYTHON_EXECUTABLE=/opt/python/cp312-cp312/bin/python
+            ;;
+          3.13)
+            PYTHON_EXECUTABLE=/opt/python/cp313-cp313/bin/python
             ;;
           *)
             echo "Unsupported python version ${PY_VERS}"
@@ -120,7 +129,7 @@ jobs:
           fi
           docker exec -t "${container_name}" chown -R 1000.1000 /artifacts
 
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4.4.0
         with:
           name: pytorch-triton-wheel-${{ matrix.py_vers }}-${{ matrix.device }}
           if-no-files-found: error
@@ -157,7 +166,7 @@ jobs:
           aws-region: us-east-1
 
       - name: Download Build Artifacts
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4.1.7
         with:
           # Download all available artifacts
           path: ${{ runner.temp }}/artifacts-all
@@ -201,11 +210,12 @@ jobs:
 
   build-conda:
     name: "Build Triton Conda"
-    runs-on: [self-hosted, linux.2xlarge]
+    needs: get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
     strategy:
       fail-fast: false
       matrix:
-        py_vers: [ "3.8", "3.9", "3.10", "3.11", "3.12" ]
+        py_vers: [ "3.9", "3.10", "3.11", "3.12" ]
     timeout-minutes: 40
     env:
       DOCKER_IMAGE: pytorch/conda-builder:cpu
@@ -253,7 +263,7 @@ jobs:
           docker exec -t "${container_name}" python /pytorch/.github/scripts/build_triton_wheel.py --build-conda --py-version="${PY_VERS}" $RELEASE
           docker exec -t "${container_name}" chown -R 1000.1000 /artifacts
 
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4.4.0
         with:
           name: pytorch-triton-conda-${{ matrix.py_vers }}
           if-no-files-found: error
@@ -273,7 +283,7 @@ jobs:
       - uses: actions/checkout@v3
 
       - name: Download Build Artifacts
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4.1.7
         with:
           # Download all available artifacts
           path: ${{ runner.temp }}/artifacts-all

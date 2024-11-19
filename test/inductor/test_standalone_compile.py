@@ -9,7 +9,7 @@ from torch.testing._internal.inductor_utils import HAS_CPU
 
 
 class MyModule(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.a = torch.nn.Linear(10, 10)
         self.b = torch.nn.Linear(10, 10)

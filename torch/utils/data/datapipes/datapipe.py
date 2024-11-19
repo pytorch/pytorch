@@ -233,7 +233,6 @@ class IterDataPipe(IterableDataset[_T_co], metaclass=_IterDataPipeMeta):
         may clear the buffers and reset pointers of the DataPipe.
         The `reset` method is always called when `__iter__` is called as part of `hook_iterator`.
         """
-        pass
 
 
 class DFIterDataPipe(IterDataPipe):

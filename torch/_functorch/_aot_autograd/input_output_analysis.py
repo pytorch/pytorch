@@ -16,10 +16,13 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import torch
 import torch.utils._pytree as pytree
 from torch import Tensor
+from torch._dynamo.exc import Unsupported
+from torch._functorch._aot_autograd.schemas import PlainTensorMeta
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.fx.experimental.symbolic_shapes import is_concrete_int
+
 from .. import config
-from .collect_metadata_analysis import coerce_tangent
+from .collect_metadata_analysis import coerce_tangent_and_suggest_memory_format
 from .schemas import (
     BackwardSignature,
     GraphSignature,
@@ -29,6 +32,7 @@ from .schemas import (
     ViewAndMutationMeta,
 )
 from .utils import strict_zip
+
 
 zip = strict_zip
 
@@ -47,12 +51,17 @@ def remove_dupe_metadata(
     other_traced_tangents = m.traced_tangents[num_data_mutations:]
     inp_traced_tangents = m.traced_tangents[:num_data_mutations]
     filtered_inp_traced_tangents = [
-        # See Note [Tangents must be contiguous]
+        # See Note [Tangents memory format]
         x
         for i, x in enumerate(inp_traced_tangents)
         if keep_arg_mask[m.mutated_inp_runtime_indices[i]]
     ]
     traced_tangents = filtered_inp_traced_tangents + other_traced_tangents
+
+    assert m.subclass_tangent_meta is not None
+    subclass_tangent_meta = [
+        PlainTensorMeta(0, memory_format=torch.contiguous_format)
+    ] * len(filtered_inp_traced_tangents) + m.subclass_tangent_meta[num_data_mutations:]
 
     return ViewAndMutationMeta(
         input_info=[x for i, x in enumerate(m.input_info) if keep_arg_mask[i]],
@@ -75,21 +84,9 @@ def remove_dupe_metadata(
         # We are guaranteed not to get here, since dupes are not supported today with subclass inputs.
         subclass_inp_meta=[],
         subclass_fw_graph_out_meta=[],
-        subclass_tangent_meta=[],
+        subclass_tangent_meta=subclass_tangent_meta,
         is_train=m.is_train,
     )
-
-
-# Given our ViewAndMutation metadata, this fn constructs a new set of metadata,
-# after adding synthetic base arguments to the function.
-# Most of the work in this fn is slogging through all of the metadata corresponding to inputs,
-# and updating it with our synthetic base calling convention.
-#
-# When config.debug_assert is set, we automatically regenerate the metadata
-# and compare it to this output for sanity.
-#
-# In addition to the updated metadata, also return the list of input indices
-# that will need to be updated in the synthetic base epilogue
 
 
 # Given our ViewAndMutation metadata, this fn constructs a new set of metadata,
@@ -167,9 +164,11 @@ def create_synthetic_base_metadata(
             mutations_hidden_from_autograd=all(
                 m.input_info[x].mutations_hidden_from_autograd for x in outer_indices
             ),
-            mutates_storage_metadata=False
-            if len(outer_indices) > 1
-            else m.input_info[outer_indices[0]].mutates_storage_metadata,
+            mutates_storage_metadata=(
+                False
+                if len(outer_indices) > 1
+                else m.input_info[outer_indices[0]].mutates_storage_metadata
+            ),
             mutations_under_no_grad_or_inference_mode=mutations_under_no_grad_or_inference_mode,
             mutation_inductor_storage_resize=mutation_inductor_storage_resize,
             is_leaf=any_leaf,
@@ -233,11 +232,15 @@ def create_synthetic_base_metadata(
             )
         )
 
-    inner_mutated_tangents = [
-        # See Note [Tangents must be contiguous]
-        coerce_tangent(x)
+    inner_mutated_tangents_and_memory_formats = [
+        # See Note [Tangents memory format]
+        coerce_tangent_and_suggest_memory_format(x)
         for inner_idx, x in enumerate(inner_args)
         if input_infos[inner_idx].mutates_data and input_infos[inner_idx].requires_grad
+    ]
+    inner_mutated_tangents = [x[0] for x in inner_mutated_tangents_and_memory_formats]
+    inner_mutated_tangents_memory_formats = [
+        x[1] for x in inner_mutated_tangents_and_memory_formats
     ]
 
     output_info = existing_output_infos + input_metadata_output_info
@@ -245,6 +248,11 @@ def create_synthetic_base_metadata(
     traced_tangents = (
         inner_mutated_tangents + m.traced_tangents[len(inner_mutated_tangents) :]
     )
+    assert m.subclass_tangent_meta is not None
+    subclass_tangent_meta = [
+        PlainTensorMeta(0, memory_format=x)
+        for x in inner_mutated_tangents_memory_formats
+    ] + m.subclass_tangent_meta[len(inner_mutated_tangents) :]
 
     return (
         ViewAndMutationMeta(
@@ -256,7 +264,7 @@ def create_synthetic_base_metadata(
             # We are guaranteed not to get here, since synthetic_base codepaths are not supported today with subclass inputs.
             subclass_inp_meta=[],
             subclass_fw_graph_out_meta=[],
-            subclass_tangent_meta=[],
+            subclass_tangent_meta=subclass_tangent_meta,
             is_train=m.is_train,
         ),
         outer_aliased_arg_idx_with_metadata_mutations,
@@ -370,9 +378,7 @@ def compute_overlapping_inputs(fwd_inputs, aliased_input_indices):
                 )
             ):
                 dynamic_shape_indices.add(j_)
-        assert (
-            len(dynamic_shape_indices) == 0
-        ), f"""\
+        err_message = f"""\
 Encountered a graph where:
 - {num_aliases} graph inputs all share the same storage (input indices: {str(aliased_input_indices)})
 - at least one of these aliased inputs was mutated
@@ -392,6 +398,11 @@ torch._dynamo.mark_static(param, 0) # (1, 2, ... for every dimension on the para
 If you are running into this issue in a situation where your parameters are static but some other inputs
 are aliased and mutated, and they should be dynamic, please file an issue.
 """
+        if len(dynamic_shape_indices) != 0:
+            raise Unsupported(
+                err_message,
+                case_name="dynamic_shapes_validation",
+            )
     for j in range(num_aliases):
         for i in range(j):
             j_ = aliased_input_indices[j]

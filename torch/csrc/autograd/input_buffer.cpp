@@ -17,8 +17,7 @@
 #include <utility>
 #include <vector>
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 namespace {
 // look what you made me do >.<
@@ -223,28 +222,9 @@ void InputBuffer::add(
   }
 }
 
-auto InputBuffer::device() const -> at::Device {
-  // Since we pick the first non-CPU tensor, this won't work with
-  // mixed device-type operations (e.g., an op that is both CUDA
-  // and XLA).  This is *incredibly* unlikely, so we don't worry
-  // about it.
-  for (auto& var : buffer) {
-    if (var.defined()) {
-      auto device = var.device();
-      if (device.type() != at::kCPU) {
-        return device;
-      }
-    }
-  }
-  // Only report to the CPU thread if there really were no tensors
-  // from other devices.
-  return at::kCPU;
-}
-
 auto InputBuffer::variables(InputBuffer&& g) -> std::vector<Variable> {
   std::vector<Variable> result = std::move(g.buffer);
   return result;
 }
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

@@ -29,7 +29,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 # Simple and boring model to test interface and some corner cases that do not
 # require complicated wrapping strategy.
 class TestDummyModel(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         torch.manual_seed(0)
         self.net1 = nn.Sequential(nn.Linear(8, 16), nn.ReLU())
@@ -45,7 +45,7 @@ class TestDummyModel(torch.nn.Module):
 
 
 class TestDummyModelUneven(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         torch.manual_seed(0)
         self.net1 = nn.Sequential(nn.Linear(5, 10), nn.ReLU())
@@ -247,7 +247,7 @@ class TestFSDPWithDeviceMeshAndDTensor(DTensorTestBase):
                     self.assertEqual(type(v1), DTensor)
                     self.assertEqual(type(v2), DTensor)
 
-    @with_comms
+    @with_comms()
     @skip_if_lt_x_gpu(2)
     @parametrize("offload_to_cpu", [True, False])
     @parametrize("is_even_sharded_model", [True, False])

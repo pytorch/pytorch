@@ -74,7 +74,7 @@ def _create_model(compute_cycles, has_params: bool):
 
 
 class Min10:
-    def __init__(self):
+    def __init__(self) -> None:
         self.data = []
 
     def add(self, new_data):

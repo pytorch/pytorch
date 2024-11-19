@@ -3,6 +3,7 @@ import contextlib
 
 import torch
 
+
 __all__ = [
     "fallback_dispatcher",
     "semi_sparse_values",
@@ -13,6 +14,7 @@ __all__ = [
     "semi_sparse_mm",
     "semi_sparse_addmm",
     "semi_sparse_linear",
+    "semi_sparse_scaled_mm",
 ]
 
 
@@ -71,9 +73,11 @@ def semi_sparse_t(func, types, args=(), kwargs=None) -> torch.Tensor:
         meta=self.meta_t,
         packed_t=self.packed,
         meta_t=self.meta,
-        compressed_swizzled_bitmask=self.compressed_swizzled_bitmask.transpose(0, 1)
-        if self.compressed_swizzled_bitmask is not None
-        else None,
+        compressed_swizzled_bitmask=(
+            self.compressed_swizzled_bitmask.transpose(0, 1)
+            if self.compressed_swizzled_bitmask is not None
+            else None
+        ),
         fuse_transpose_cusparselt=args[0].fuse_transpose_cusparselt,
         alg_id_cusparselt=args[0].alg_id_cusparselt,
     )
@@ -141,7 +145,7 @@ def semi_sparse_addmm(func, types, args=(), kwargs=None) -> torch.Tensor:
         )
     B_t = B.t()
     assert isinstance(B_t, torch.sparse.SparseSemiStructuredTensor)
-    row, col = A.shape
+    row, _col = A.shape
     A_padded = B_t._pad_dense_input(A)
     result = B_t._mm(A_padded.t(), bias=bias).t()
     return result[:row, :]
@@ -165,3 +169,27 @@ def semi_sparse_linear(func, types, args=(), kwargs=None) -> torch.Tensor:
         )
 
     return res.view(*shape[:-1], -1)
+
+
+def semi_sparse_scaled_mm(func, types, args=(), kwargs=None) -> torch.Tensor:
+    # pull all args, excluding use_fast_accum flag if set.
+    A, B, A_scale, B_scale, bias, scale_result, out_dtype = args[:7]
+
+    assert A.dtype == torch.float8_e4m3fn
+    assert B.dtype == torch.float8_e4m3fn
+    # only cuSPARSELt supports float8_e4m3fn currentl
+    assert isinstance(A, torch.sparse.SparseSemiStructuredTensorCUSPARSELT)
+    assert A.packed is not None
+    # Currently we only support per-tensor scaling, with float32 scales
+    assert A_scale.numel() == 1 and B_scale.numel() == 1
+    assert A_scale.dtype == torch.float32 and B_scale.dtype == torch.float32
+
+    # cuSPARSELt lacks the A and B operand scaling support, so instead we use alpha to scale the result.
+    # Note that this limits us to per-tensor scalig only.
+    sparse_result = torch._cslt_sparse_mm(
+        A.packed,
+        B,
+        alpha=A_scale * B_scale,
+        out_dtype=out_dtype,
+    )
+    return sparse_result

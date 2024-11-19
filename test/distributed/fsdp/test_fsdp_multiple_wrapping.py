@@ -25,7 +25,7 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 
 class InnerModel(Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.layers = Sequential(FSDP(Linear(5, 5)))
 

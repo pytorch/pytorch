@@ -1,19 +1,19 @@
 # Owner(s): ["module: dynamo"]
+import contextlib
 import copy
 import functools
 import math
 import unittest  # noqa: F811
 from importlib import import_module
+from typing import Set
 
 import torch
 import torch._dynamo.config
-
 import torch._dynamo.test_case
 import torch._functorch.config
 import torch.distributed as dist
 import torch.nn as nn
 import torch.utils.checkpoint
-
 from functorch.compile import min_cut_rematerialization_partition
 from torch._dynamo.backends.common import aot_autograd
 from torch._dynamo.testing import CompileCounterWithBackend
@@ -30,6 +30,7 @@ from torch.utils.checkpoint import (
     CheckpointPolicy,
     create_selective_checkpoint_contexts,
 )
+
 
 requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 requires_distributed = functools.partial(
@@ -84,8 +85,16 @@ def count_ops(
     return gm
 
 
+def collect_fwd_graph_outputs(graph: torch.fx.Graph, *, fwd_outputs: Set[str]):
+    if not torch._dynamo.compiled_autograd.in_compiled_autograd_region:  # fwd graph
+        return_node = list(graph.nodes)[-1]
+        assert return_node.target == "output"
+        for x in return_node.args[0]:
+            fwd_outputs.add(str(x))
+
+
 class _InvalidContext:
-    def __init__(self):
+    def __init__(self) -> None:
         pass
 
     def __enter__(self):
@@ -127,18 +136,35 @@ def _get_custom_policy(no_recompute_list=None, must_recompute_list=None):
 
 
 class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
-    def _validate(self, fn, backend, *args, skip_check=False, fullgraph=True):
+    def _validate(
+        self,
+        fn,
+        backend,
+        *args,
+        skip_check=False,
+        fullgraph=True,
+        compiled_autograd=False,
+    ):
         cloned_args = []
         for arg in args:
-            cloned_args.append(arg.clone().detach().requires_grad_(arg.requires_grad))
+            cloned_args.append(arg.detach().clone().requires_grad_(arg.requires_grad))
+
+        cloned_fn = copy.deepcopy(fn)
 
         torch.manual_seed(0)
         expected = fn(*args)
         expected.sum().backward()
 
         torch.manual_seed(0)
-        result = torch.compile(fn, fullgraph=fullgraph, backend=backend)(*cloned_args)
-        result.sum().backward()
+        compiled_fn = torch.compile(cloned_fn, fullgraph=fullgraph, backend=backend)
+        ctx = contextlib.nullcontext()
+        if compiled_autograd:
+            ctx = torch._dynamo.compiled_autograd.enable(
+                lambda gm: torch.compile(gm, fullgraph=fullgraph, backend=backend)
+            )
+        with ctx:
+            result = compiled_fn(*cloned_args)
+            result.sum().backward()
 
         if not skip_check:
             self.assertEqual(
@@ -163,7 +189,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         cloned_args_orig_fn = []
         for arg in args:
             cloned_args_orig_fn.append(
-                arg.clone().detach().requires_grad_(arg.requires_grad)
+                arg.detach().clone().requires_grad_(arg.requires_grad)
             )
         torch.manual_seed(0)
         compiled_orig_fn = torch.compile(
@@ -176,7 +202,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         cloned_args_checkpointed_fn = []
         for arg in args:
             cloned_args_checkpointed_fn.append(
-                arg.clone().detach().requires_grad_(arg.requires_grad)
+                arg.detach().clone().requires_grad_(arg.requires_grad)
             )
         torch.manual_seed(0)
         compiled_checkpointed_fn = torch.compile(
@@ -309,7 +335,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
     @requires_cuda
     def test_tags_module(self):
         class MockModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(10, 10)
 
@@ -338,7 +364,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
     def test_tags_decomps(self):
         # Ensures that tags are passed on through decompositions as well
         class MockModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(10, 10)
 
@@ -425,7 +451,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
     def test_tags_dropout(self):
         # Figure out a way to test the number of inductor_random calls
         class MockModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(10, 10)
                 self.dropout = torch.nn.Dropout(0.2)
@@ -442,6 +468,90 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         backend = "inductor"
         # rand decomps do not have have numerical results as eager
         self._validate(fn, backend, x, skip_check=True)
+
+    @torch._functorch.config.patch(recompute_views=True)
+    @torch._inductor.config.patch(fx_graph_cache=False)
+    def test_tags_must_save_tensor_that_has_backward_hook(self):
+        def my_post_forward_hook(submod, args, output):
+            output.register_hook(my_backward_hook)
+            return output
+
+        def my_backward_hook(grad):
+            return grad
+
+        class MySubmod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                y = torch.matmul(x, x)
+                z = y * y
+                return z
+
+        class MyMod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.submod = MySubmod()
+                self.norm = torch.nn.LayerNorm(4)
+
+            def forward(self, x):
+                out = torch.utils.checkpoint.checkpoint(
+                    self.submod, x, use_reentrant=False
+                )
+                norm_out = self.norm(out)
+                return norm_out
+
+        def _factory_fn():
+            mod = MyMod()
+            x = torch.ones(4, 4, dtype=torch.float32, requires_grad=True)
+            backend = "inductor"
+            return mod, x, backend
+
+        mod_no_hook, x, backend = _factory_fn()
+        mod_no_hook_fwd_outputs = set()
+
+        with torch._inductor.config.patch(
+            post_grad_custom_pre_pass=functools.partial(
+                collect_fwd_graph_outputs, fwd_outputs=mod_no_hook_fwd_outputs
+            )
+        ):
+            self._validate(
+                mod_no_hook, backend, x, fullgraph=True, compiled_autograd=True
+            )
+
+        torch._dynamo.reset()
+        mod_with_hook, x, backend = _factory_fn()
+        mod_with_hook.submod.register_forward_hook(my_post_forward_hook)
+        mod_with_hook_fwd_outputs = set()
+
+        with torch._inductor.config.patch(
+            post_grad_custom_pre_pass=functools.partial(
+                collect_fwd_graph_outputs, fwd_outputs=mod_with_hook_fwd_outputs
+            )
+        ):
+            self._validate(
+                mod_with_hook, backend, x, fullgraph=True, compiled_autograd=True
+            )
+
+        # If `z` has a backward hook, result of `z = y * y` should also be saved in addition to the usual saved tensors.
+        mod_no_hook_fwd_outputs_no_primal = {
+            x for x in mod_no_hook_fwd_outputs if not x.startswith("primals_")
+        }
+        mod_with_hook_fwd_outputs_no_primal = {
+            x for x in mod_with_hook_fwd_outputs if not x.startswith("primals_")
+        }
+        additional_saved_tensors = (
+            mod_with_hook_fwd_outputs_no_primal - mod_no_hook_fwd_outputs_no_primal
+        )
+        expected_additional_saved_tensors = {"mul"}
+        self.assertEqual(
+            additional_saved_tensors,
+            expected_additional_saved_tensors,
+            f"""
+Expected additional saved tensors: {expected_additional_saved_tensors} but got: {additional_saved_tensors}.
+Non-primal fwd outputs from model w/ backward hook: {mod_with_hook_fwd_outputs_no_primal}.
+Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no_primal}.""",
+        )
 
     @requires_cuda
     def test_fallback(self):
@@ -1022,7 +1132,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
             return create_selective_checkpoint_contexts(_recomp_policy())
 
         class Parametrization(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def parametrization(self, x):
@@ -1047,7 +1157,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
             return model
 
         class MLPModule(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 torch.manual_seed(5)
                 self.net1 = nn.Linear(16, 16, bias=False)
@@ -1105,7 +1215,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         def gn(*args):
             return torch.utils.checkpoint.checkpoint(fn, *args, use_reentrant=True)
 
-        with torch.cuda.amp.autocast():
+        with torch.autocast(device_type="cuda"):
             x = torch.randn(4, 2, 16, 32, device="cuda", requires_grad=True)
             y = torch.randn(4, 2, 16, 32, device="cuda", requires_grad=True)
             z = torch.randn(4, 2, 16, 32, device="cuda", requires_grad=True)
@@ -1122,7 +1232,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
     @requires_cuda
     def test_error_msg(self):
         class MockModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x):
@@ -1146,7 +1256,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
     @requires_cuda
     def test_list_inputs(self):
         class MockModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x, ys):
@@ -1246,7 +1356,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         )
 
         class MockModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(4, 4)
                 self.c = 2

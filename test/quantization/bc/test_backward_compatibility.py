@@ -12,7 +12,6 @@ import torch.ao.nn.quantized as nnq
 import torch.ao.nn.quantized.dynamic as nnqd
 import torch.ao.quantization.quantize_fx as quantize_fx
 import torch.nn as nn
-
 from torch.ao.quantization import MinMaxObserver, PerChannelMinMaxObserver
 from torch.fx import GraphModule
 from torch.testing._internal.common_quantization import skipIfNoFBGEMM
@@ -114,7 +113,8 @@ class TestSerialization(TestCase):
             torch.save(qmodule(input_tensor), expected_file)
 
         input_tensor = torch.load(input_file)
-        qmodule.load_state_dict(torch.load(state_dict_file))
+        # weights_only = False as sometimes get ScriptObject here
+        qmodule.load_state_dict(torch.load(state_dict_file, weights_only=False))
         qmodule_scripted = torch.jit.load(scripted_module_file)
         qmodule_traced = torch.jit.load(traced_module_file)
         expected = torch.load(expected_file)
@@ -267,7 +267,7 @@ class TestSerialization(TestCase):
         # load input tensor
         input_tensor = torch.load(input_file)
         expected_output_tensor = torch.load(expected_file)
-        expected_get_attrs = torch.load(get_attr_targets_file)
+        expected_get_attrs = torch.load(get_attr_targets_file, weights_only=False)
 
         # load model from package and verify output and get_attr targets match
         imp = torch.package.PackageImporter(package_file)
@@ -515,7 +515,7 @@ class TestSerialization(TestCase):
     )
     def test_lstm(self):
         class LSTMModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.lstm = nnqd.LSTM(input_size=3, hidden_size=7, num_layers=1).to(
                     dtype=torch.float
@@ -545,7 +545,7 @@ class TestSerialization(TestCase):
 
     def test_default_qat_qconfig(self):
         class Model(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = nn.Linear(5, 5)
                 self.relu = nn.ReLU()

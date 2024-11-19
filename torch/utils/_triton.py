@@ -11,19 +11,56 @@ def has_triton_package() -> bool:
         return triton_key is not None
     except ImportError:
         return False
+    except RuntimeError:
+        return False
+
+
+@functools.lru_cache(None)
+def has_triton_tma():
+    if has_triton_package():
+        import torch
+
+        if (
+            torch.cuda.is_available()
+            and torch.cuda.get_device_capability() >= (9, 0)
+            and not torch.version.hip
+        ):
+            try:
+                from triton.tools.experimental_descriptor import (  # noqa: F401
+                    create_1d_tma_descriptor,
+                    create_2d_tma_descriptor,
+                )
+
+                return True
+            except ImportError:
+                pass
+
+    return False
 
 
 @functools.lru_cache(None)
 def has_triton() -> bool:
+    if not has_triton_package():
+        return False
+
     from torch._dynamo.device_interface import get_interface_for_device
 
     def cuda_extra_check(device_interface):
         return device_interface.Worker.get_device_properties().major >= 7
 
+    def cpu_extra_check(device_interface):
+        import triton.backends
+
+        return "cpu" in triton.backends.backends
+
     def _return_true(device_interface):
         return True
 
-    triton_supported_devices = {"cuda": cuda_extra_check, "xpu": _return_true}
+    triton_supported_devices = {
+        "cuda": cuda_extra_check,
+        "xpu": _return_true,
+        "cpu": cpu_extra_check,
+    }
 
     def is_device_compatible_with_triton():
         for device, extra_check in triton_supported_devices.items():
@@ -32,17 +69,11 @@ def has_triton() -> bool:
                 return True
         return False
 
-    return is_device_compatible_with_triton() and has_triton_package()
+    return is_device_compatible_with_triton()
 
 
 @functools.lru_cache(None)
 def triton_backend():
-    import torch
-
-    if torch.version.hip:
-        # Does not work with ROCm
-        return None
-
     from triton.compiler.compiler import make_backend
     from triton.runtime.driver import driver
 
@@ -52,12 +83,6 @@ def triton_backend():
 
 @functools.lru_cache(None)
 def triton_hash_with_backend():
-    import torch
-
-    if torch.version.hip:
-        # Does not work with ROCm
-        return None
-
     from triton.compiler.compiler import triton_key
 
     backend = triton_backend()

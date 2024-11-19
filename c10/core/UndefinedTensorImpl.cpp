@@ -38,6 +38,13 @@ const char* UndefinedTensorImpl::tensorimpl_type_name() const {
   return "UndefinedTensorImpl";
 }
 
+#ifdef _WIN32
+UndefinedTensorImpl& UndefinedTensorImpl::getInstance() {
+  static UndefinedTensorImpl instance;
+  return instance;
+}
+#else
 UndefinedTensorImpl UndefinedTensorImpl::_singleton;
+#endif
 
 } // namespace c10

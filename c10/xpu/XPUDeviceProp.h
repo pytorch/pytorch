@@ -136,6 +136,26 @@ namespace c10::xpu {
   /* 64-bit atomic operation is supported on device. */ \
   _(atomic64)
 
+#define AT_FORALL_XPU_EXP_CL_ASPECT(_)                                         \
+  /* conversion between single-precision 32-bit floating-point values and      \
+   * 16-bit bfloat16 values is supported on device. */                         \
+  _(bfloat16_conversions)                                                      \
+                                                                               \
+  /* specialized hardware to compute MMA is supported on device. */            \
+  _(subgroup_matrix_multiply_accumulate)                                       \
+                                                                               \
+  /* specialized hardware to compute MMA for 32-bit floating-point is          \
+   * supported on device. */                                                   \
+  _(subgroup_matrix_multiply_accumulate_tensor_float32)                        \
+                                                                               \
+  /* block read operations for efficient matrix multiplication is supported on \
+   * device. */                                                                \
+  _(subgroup_2d_block_io)
+
+#define AT_FORALL_XPU_EXP_DEVICE_PROPERTIES(_)       \
+  /* the device architecture of this SYCL device. */ \
+  _(architecture)
+
 #define _DEFINE_SYCL_PROP(ns, property, member) \
   ns::property::return_type member;
 
@@ -150,6 +170,10 @@ namespace c10::xpu {
 
 #define DEFINE_DEVICE_ASPECT(member) bool has_##member;
 
+#define DEFINE_EXP_DEVICE_PROP(property) \
+  _DEFINE_SYCL_PROP(                     \
+      sycl::ext::oneapi::experimental::info::device, property, property)
+
 struct C10_XPU_API DeviceProp {
   AT_FORALL_XPU_DEVICE_PROPERTIES(DEFINE_DEVICE_PROP);
 
@@ -159,6 +183,12 @@ struct C10_XPU_API DeviceProp {
   AT_FORALL_XPU_EXT_DEVICE_PROPERTIES(DEFINE_EXT_DEVICE_PROP);
 
   AT_FORALL_XPU_DEVICE_ASPECT(DEFINE_DEVICE_ASPECT);
+
+  AT_FORALL_XPU_EXP_CL_ASPECT(DEFINE_DEVICE_ASPECT);
+
+#if SYCL_COMPILER_VERSION >= 20250000
+  AT_FORALL_XPU_EXP_DEVICE_PROPERTIES(DEFINE_EXP_DEVICE_PROP);
+#endif
 };
 
 #undef _DEFINE_SYCL_PROP
@@ -166,5 +196,6 @@ struct C10_XPU_API DeviceProp {
 #undef DEFINE_PLATFORM_PROP
 #undef DEFINE_EXT_DEVICE_PROP
 #undef DEFINE_DEVICE_ASPECT
+#undef DEFINE_EXP_DEVICE_PROP
 
 } // namespace c10::xpu

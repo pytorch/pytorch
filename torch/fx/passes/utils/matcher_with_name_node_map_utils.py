@@ -1,9 +1,10 @@
 from typing import Dict, List, Tuple
 
 from torch.fx import Graph, GraphModule, Node
-
 from torch.fx._compatibility import compatibility
+
 from .matcher_utils import InternalMatch, SubgraphMatcher
+
 
 __all__ = ["SubgraphMatcherWithNameNodeMap"]
 
@@ -60,8 +61,8 @@ class SubgraphMatcherWithNameNodeMap(SubgraphMatcher):
             relu *= 2
             return relu
 
-        pattern_gm = capture_pre_autograd_graph(pattern, example_inputs)
-        target_gm = capture_pre_autograd_graph(target_graph, example_inputs)
+        pattern_gm = export_for_training(pattern, example_inputs).module()
+        target_gm = export_for_training(target_graph, example_inputs).module()
         matcher = SubgraphMatcherWithNameNodeMap(pattern_gm)
         matches = matcher.match(target_gm)
         for match in matches:

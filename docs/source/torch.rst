@@ -149,7 +149,7 @@ alongside a CPU to speed up computation. These device use an asynchronous execut
 using :class:`torch.Stream` and :class:`torch.Event` as their main way to perform synchronization.
 We also assume that only one such accelerator can be available at once on a given host. This allows
 us to use the current accelerator as the default device for relevant concepts such as pinned memory,
-Stream device_type, etc.
+Stream device_type, FSDP, etc.
 
 As of today, accelerator devices are (in no particular order) :doc:`"CUDA" <cuda>`, :doc:`"MTIA" <mtia>`,
 :doc:`"XPU" <xpu>`, and PrivateUse1 (many device not in the PyTorch repo itself).
@@ -302,6 +302,14 @@ Examples::
 
 Math operations
 ---------------
+
+Constants
+~~~~~~~~~~~~~~~~~~~~~~
+
+======================================= ===========================================
+``inf``                                     A floating-point positive infinity. Alias for :attr:`math.inf`.
+``nan``                                     A floating-point "not a number" value. This value is not a legal number. Alias for :attr:`math.nan`.
+======================================= ===========================================
 
 Pointwise Ops
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -731,6 +739,7 @@ Symbolic Numbers
     sym_min
     sym_not
     sym_ite
+    sym_sum
 
 Export Path
 -------------

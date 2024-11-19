@@ -11,15 +11,16 @@ from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 
 import torch
 import torch.nn as nn
-
 from torch import Tensor
 from torch.testing import FileCheck
+
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch.testing._internal.common_utils import skipIfTorchDynamo, TEST_CUDA
 from torch.testing._internal.jit_utils import JitTestCase, make_global
+
 
 if __name__ == "__main__":
     raise RuntimeError(
@@ -2190,7 +2191,7 @@ class TestNamedTuple(JitTestCase):
             t: int
 
         class MyModule(types.ModuleType):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__("MyModule")
 
             def __getattr__(self, attr):
@@ -2345,7 +2346,7 @@ class TestNamedTuple(JitTestCase):
             t: "int"
 
         class MyModule(types.ModuleType):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__("MyModule")
 
             def __getattr__(self, attr):
@@ -2849,7 +2850,6 @@ class TestScriptList(JitTestCase):
         with self.assertRaises(TypeError):
             script_data.append("str")
 
-    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1991")
     def test_clear(self):
         """
         Test clear.
@@ -2975,7 +2975,7 @@ class TestScriptList(JitTestCase):
         class Test(torch.nn.Module):
             segments_groupby_col: Dict[str, List[str]]
 
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.segments_groupby_col = get_dict()
                 self.col1 = "a"

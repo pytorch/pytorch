@@ -53,7 +53,6 @@ def _get_msg_dict(func_name, *args, **kwargs) -> Dict[str, Any]:
         group = kwargs.get("group") or kwargs.get("process_group")
         msg_dict = {
             "func_name": f"{func_name}",
-            "args": f"{args}, {kwargs}",
             "pg_name": f"{dist._get_process_group_name(kwargs.get('pg'))}",  # type: ignore[arg-type]
             "backend": f"{dist.get_backend(group)}",
             "world_size": f"{dist.get_world_size()}",
@@ -67,7 +66,6 @@ def _get_msg_dict(func_name, *args, **kwargs) -> Dict[str, Any]:
     else:
         msg_dict = {
             "func_name": f"{func_name}",
-            "args": f"{args}, {kwargs}",
         }
     return msg_dict
 

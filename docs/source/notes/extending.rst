@@ -13,8 +13,7 @@ and have it behave like PyTorch's built-in operators. In order to do so, you mus
 register the custom operation with PyTorch via the Python :ref:`torch-library-docs` or C++ TORCH_LIBRARY
 APIs.
 
-
-Please see :ref:`custom-ops-landing-page` for more details.
+Please see `PyTorch Custom Operators Landing Page <https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html>`_ for more details.
 
 .. _extending-autograd:
 
@@ -638,10 +637,10 @@ keyword arguments like :func:`torch.add` does::
 
 For speed and flexibility the ``__torch_function__`` dispatch mechanism does not
 check that the signature of an override function matches the signature of the
-function being overrided in the :mod:`torch` API. For some applications ignoring
+function being overridden in the :mod:`torch` API. For some applications ignoring
 optional arguments would be fine but to ensure full compatibility with
 :class:`Tensor`, user implementations of torch API functions should take care to
-exactly emulate the API of the function that is being overrided.
+exactly emulate the API of the function that is being overridden.
 
 Functions in the :mod:`torch` API that do not have explicit overrides will
 return ``NotImplemented`` from ``__torch_function__``. If all operands with
@@ -860,7 +859,7 @@ signature of the original ``PyTorch`` function::
   <Signature (input, other, out=None)>
 
 Finally, ``torch.overrides.get_ignored_functions`` returns a tuple of functions
-that explicitly cannot be overrided by ``__torch_function__``. This list can be
+that explicitly cannot be overridden by ``__torch_function__``. This list can be
 useful to confirm that a function that isn't present in the dictionary returned
 by ``get_overridable_functions`` cannot be overridden.
 
@@ -906,7 +905,7 @@ Some important implications of this implementation are:
 - When calling back to Python and when wrapping the results, the same conversions are used as the regular PyTorch Python/C++ binding. In particular, some objects cannot be represented in Python and need special handling (undefined Tensors for example become None).
 - Our native functions are lazily populated as ``torch.ops.{namespace}.{func_name}.{overload_name}`` as callable Python objects to enable easily interacting with them from Python. The ``func`` object given to ``__torch_dispatch__`` is always an entry from this namespace. This namespace can be used to directly call native ops and bypass the usual Python API and binding code.
 
-In a similar way where ``__torch_function__`` is able to interpose on all of torch's Python API and Tensor methods, ``__torch_dispatch__`` is able intercepting all calls into the aten native API. Note that all methods on Tensors are converted into function calls before entering the dispatcher and thus will appear as function calls here: ``torch.add(a, 2)`` and ``a + 2`` will lead to exactly the same aten call.
+In a similar way where ``__torch_function__`` is able to interpose on all of torch's Python API and Tensor methods, ``__torch_dispatch__`` is able to intercept all calls into the aten native API. Note that all methods on Tensors are converted into function calls before entering the dispatcher and thus will appear as function calls here: ``torch.add(a, 2)`` and ``a + 2`` will lead to exactly the same aten call.
 Most of these functions are defined in ``native_functions.yaml`` which specifies the properties of these functions as well as their backend implementation. Their implementation alongside specified features are then automatically registered via codegen.
 Some more exotic functions or features are also registered in other places in the C++ codebase or in user-defined C++ extensions.
 

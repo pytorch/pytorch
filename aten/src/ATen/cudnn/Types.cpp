@@ -2,10 +2,10 @@
 
 #include <ATen/ATen.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 cudnnDataType_t getCudnnDataTypeFromScalarType(const at::ScalarType dtype) {
-  if (dtype == c10::kQInt8) {
+  if (dtype == c10::kQInt8 || dtype == at::kChar) {
     return CUDNN_DATA_INT8;
   } else if (dtype == at::kFloat) {
     return CUDNN_DATA_FLOAT;
@@ -19,8 +19,6 @@ cudnnDataType_t getCudnnDataTypeFromScalarType(const at::ScalarType dtype) {
     return CUDNN_DATA_INT32;
   } else if (dtype == at::kByte) {
     return CUDNN_DATA_UINT8;
-  } else if (dtype == at::kChar) {
-    return CUDNN_DATA_INT8;
   }
   std::string msg("getCudnnDataTypeFromScalarType() not supported for ");
   msg += toString(dtype);
@@ -35,4 +33,4 @@ int64_t cudnn_version() {
   return CUDNN_VERSION;
 }
 
-}}  // namespace at::cudnn
+} // namespace at::native

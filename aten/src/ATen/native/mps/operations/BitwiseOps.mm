@@ -356,7 +356,7 @@ TORCH_IMPL_FUNC(bitwise_not_out_mps)(const Tensor& self, const Tensor& output) {
   mps::_bitwise_not_out_mps(self, output);
 }
 
-REGISTER_MPS_DISPATCH(lshift_stub, &lshift_kernel_mps);
-REGISTER_MPS_DISPATCH(rshift_stub, &rshift_kernel_mps);
+REGISTER_MPS_DISPATCH(lshift_stub, &lshift_kernel_mps)
+REGISTER_MPS_DISPATCH(rshift_stub, &rshift_kernel_mps)
 
 } // namespace at::native

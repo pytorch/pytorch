@@ -19,7 +19,7 @@
 
 #include <ATen/native/cuda/jit_utils.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 using at::detail::Array;
 
@@ -346,8 +346,8 @@ struct ReduceOp {
   using OutputCalculator = OffsetCalculator<2, index_t>;
 
   static constexpr bool can_accumulate_in_output =
-    std::is_convertible<arg_t, out_scalar_t>::value
-    && std::is_convertible<out_scalar_t, arg_t>::value;
+    std::is_convertible_v<arg_t, out_scalar_t>
+    && std::is_convertible_v<out_scalar_t, arg_t>;
 
   static constexpr int input_vec_size = ReduceConfig::input_vec_size;
 
@@ -704,7 +704,7 @@ struct ReduceOp {
   C10_DEVICE at::detail::Array<arg_t, output_vec_size> accumulate_in_output(
     at::detail::Array<out_scalar_t*, output_vec_size> out,
     at::detail::Array<arg_t, output_vec_size> value,
-    typename std::enable_if<can_acc>::type* = nullptr
+    typename std::enable_if_t<can_acc>* = nullptr
   ) const {
     at::detail::Array<arg_t, output_vec_size> ret;
     #pragma unroll
@@ -717,7 +717,7 @@ struct ReduceOp {
   template <bool can_acc>
   C10_DEVICE out_scalar_t get_accumulated_output(
     out_scalar_t* out, arg_t value,
-    typename std::enable_if<can_acc>::type* = nullptr
+    typename std::enable_if_t<can_acc>* = nullptr
   ) const {
     CUDA_KERNEL_ASSERT(!final_output);
     return (out_scalar_t)value;
@@ -730,7 +730,7 @@ struct ReduceOp {
   C10_DEVICE at::detail::Array<arg_t, output_vec_size> accumulate_in_output(
     at::detail::Array<out_scalar_t*, output_vec_size>,
     at::detail::Array<arg_t, output_vec_size>,
-    typename std::enable_if<!can_acc>::type* = nullptr
+    typename std::enable_if_t<!can_acc>* = nullptr
   ) const {
     CUDA_KERNEL_ASSERT(false);
     return arg_t {};
@@ -742,7 +742,7 @@ struct ReduceOp {
   template <bool can_acc>
   C10_DEVICE out_scalar_t get_accumulated_output(
     out_scalar_t* out, arg_t value,
-    typename std::enable_if<!can_acc>::type* = nullptr
+    typename std::enable_if_t<!can_acc>* = nullptr
   ) const {
     CUDA_KERNEL_ASSERT(false);
     return *out;
@@ -1104,7 +1104,18 @@ ReduceConfig setReduceConfig(const TensorIterator& iter){
     config.output_mult[1] = config.split_output(block_height);
   }
 
-  const int blocks_per_sm = at::cuda::getCurrentDeviceProperties()->maxThreadsPerMultiProcessor / config.num_threads;
+  int max_threads_per_mp =
+      at::cuda::getCurrentDeviceProperties()->maxThreadsPerMultiProcessor;
+#ifdef USE_ROCM
+  // Control the number of threadblocks by adjusting the maximum number of
+  // threads per multi-processor. These numbers better reflect the maximum
+  // theoretical achievable threads per MP for the reduction operation.
+  if (iter.ndim() == 1)
+    max_threads_per_mp = 512;
+  if (iter.ndim() == 2)
+    max_threads_per_mp = 256;
+#endif
+  const int blocks_per_sm = max_threads_per_mp / config.num_threads;
   const int num_mp = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
   const int target_grid_size = num_mp * blocks_per_sm;
   int grid = config.grid().x;
@@ -1122,6 +1133,23 @@ ReduceConfig setReduceConfig(const TensorIterator& iter){
     // a large number of values to deal with. But we don't want values_per_thread to be larger than
     // max_values_per_thread
     config.ctas_per_output = std::max(std::min<int>(ctas_per_output1, ctas_per_output2), ctas_per_output3);
+#ifdef USE_ROCM
+    // In cases where a number of threadblocks along the y direction of the grid
+    // is needed then make sure they are reduced to the number of MPs. For
+    // smaller sizes, use half the number of MPs. For smaller sizes than half
+    // the number of MPs use the original value unless the value is less than 16
+    // blocks in which case it is more profitable to use just 1 block.
+    if (config.ctas_per_output > num_mp)
+      if (num_mp < 128)
+        config.ctas_per_output =
+            num_mp * (config.ctas_per_output > 512 ? 4 : 2);
+      else
+        config.ctas_per_output = num_mp;
+    else if (config.ctas_per_output > div_up(num_mp, 2))
+      config.ctas_per_output = div_up(num_mp, 2);
+    else if (config.ctas_per_output < 16)
+      config.ctas_per_output = 1;
+#endif
     if (config.ctas_per_output > 1) {
       config.input_mult[2] = config.split_input(config.ctas_per_output);
     }
@@ -1140,18 +1168,18 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
   // So when scalar_t and out_scalar_t are at::Half/at::ComplexHalf, we
   // set can_accumulate_in_output to False.
   static constexpr bool is_inp_out_type_half_or_chalf =
-      (std::is_same<at::Half, scalar_t>::value &&
-       std::is_same<at::Half, out_scalar_t>::value) ||
-      (std::is_same<c10::complex<Half>, scalar_t>::value &&
-       std::is_same<c10::complex<Half>, out_scalar_t>::value);
+      (std::is_same_v<at::Half, scalar_t> &&
+       std::is_same_v<at::Half, out_scalar_t>) ||
+      (std::is_same_v<c10::complex<Half>, scalar_t> &&
+       std::is_same_v<c10::complex<Half>, out_scalar_t>);
   // at::BFloat16 has lower precision and can lead to rounding errors.
   // So when scalar_t and out_scalar_t are at::BFloat16, we
   // set can_accumulate_in_output to False.
   static constexpr bool is_inp_out_type_bfloat16 =
-      (std::is_same<at::BFloat16, scalar_t>::value &&
-       std::is_same<at::BFloat16, out_scalar_t>::value);
+      (std::is_same_v<at::BFloat16, scalar_t> &&
+       std::is_same_v<at::BFloat16, out_scalar_t>);
   static constexpr bool can_accumulate_in_output =
-      std::is_convertible<arg_t, out_scalar_t>::value &&
+      std::is_convertible_v<arg_t, out_scalar_t> &&
       !(is_inp_out_type_half_or_chalf || is_inp_out_type_bfloat16);
 
   bool can_use_32bit_indexing = iter.can_use_32bit_indexing();
@@ -1194,7 +1222,7 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
   if (noutputs > 1) {
     out_data_extra = (char*)iter.data_ptr(1);
   } else {
-    out_data_extra = nullopt;
+    out_data_extra = std::nullopt;
   }
   char* acc_data = acc_buf_ptr->get_acc_slice(out_data);
 
@@ -1247,18 +1275,18 @@ inline void jitted_gpu_reduce_kernel(TensorIterator& iter, const std::string& fu
   // So when scalar_t and out_scalar_t are at::Half/at::ComplexHalf, we
   // set can_accumulate_in_output to False.
   static constexpr bool is_inp_out_type_half_or_chalf =
-      (std::is_same<at::Half, scalar_t>::value &&
-       std::is_same<at::Half, out_scalar_t>::value) ||
-      (std::is_same<c10::complex<Half>, scalar_t>::value &&
-       std::is_same<c10::complex<Half>, out_scalar_t>::value);
+      (std::is_same_v<at::Half, scalar_t> &&
+       std::is_same_v<at::Half, out_scalar_t> ) ||
+      (std::is_same_v<c10::complex<Half>, scalar_t> &&
+       std::is_same_v<c10::complex<Half>, out_scalar_t>);
   // at::BFloat16 has lower precision and can lead to rounding errors.
   // So when scalar_t and out_scalar_t are at::BFloat16, we
   // set can_accumulate_in_output to False.
   static constexpr bool is_inp_out_type_bfloat16 =
-      (std::is_same<at::BFloat16, scalar_t>::value &&
-       std::is_same<at::BFloat16, out_scalar_t>::value);
+      (std::is_same_v<at::BFloat16, scalar_t> &&
+       std::is_same_v<at::BFloat16, out_scalar_t>);
   static constexpr bool can_accumulate_in_output =
-      std::is_convertible<arg_t, out_scalar_t>::value &&
+      std::is_convertible_v<arg_t, out_scalar_t> &&
       !(is_inp_out_type_half_or_chalf || is_inp_out_type_bfloat16);
 
   bool can_use_32bit_indexing = iter.can_use_32bit_indexing();
@@ -1303,7 +1331,7 @@ inline void jitted_gpu_reduce_kernel(TensorIterator& iter, const std::string& fu
   if (noutputs > 1) {
     out_data_extra = (char*)iter.data_ptr(1);
   } else {
-    out_data_extra = nullopt;
+    out_data_extra = std::nullopt;
   }
   char* acc_data = acc_buf_ptr->get_acc_slice(out_data);
 
@@ -1352,4 +1380,4 @@ inline void jitted_gpu_reduce_kernel(TensorIterator& iter, const std::string& fu
       jiterator_mutex, cache, desc, vt0, config, &reduce);
 }
 
-}} // namespace at::native
+} // namespace at::native

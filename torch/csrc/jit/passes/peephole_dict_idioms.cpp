@@ -1,8 +1,7 @@
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/passes/peephole_dict_idioms.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 
@@ -268,5 +267,4 @@ bool PeepholeOptimizeDictIdioms(const std::shared_ptr<Graph>& graph) {
   return opt.run();
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

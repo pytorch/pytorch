@@ -29,30 +29,45 @@ __all__ = [
 _device_t = Union[_device, str, int, None]
 
 
-def _is_cpu_support_avx2() -> bool:
+def _is_avx2_supported() -> bool:
     r"""Returns a bool indicating if CPU supports AVX2."""
-    return torch._C._cpu._is_cpu_support_avx2()
+    return torch._C._cpu._is_avx2_supported()
 
 
-def _is_cpu_support_avx512() -> bool:
+def _is_avx512_supported() -> bool:
     r"""Returns a bool indicating if CPU supports AVX512."""
-    return torch._C._cpu._is_cpu_support_avx512()
+    return torch._C._cpu._is_avx512_supported()
 
 
-def _is_cpu_support_vnni() -> bool:
+def _is_avx512_bf16_supported() -> bool:
+    r"""Returns a bool indicating if CPU supports AVX512_BF16."""
+    return torch._C._cpu._is_avx512_bf16_supported()
+
+
+def _is_vnni_supported() -> bool:
     r"""Returns a bool indicating if CPU supports VNNI."""
     # Note: Currently, it only checks avx512_vnni, will add the support of avx2_vnni later.
-    return torch._C._cpu._is_cpu_support_avx512_vnni()
+    return torch._C._cpu._is_avx512_vnni_supported()
 
 
-def _is_cpu_support_amx_tile() -> bool:
+def _is_amx_tile_supported() -> bool:
     r"""Returns a bool indicating if CPU supports AMX_TILE."""
-    return torch._C._cpu._is_cpu_support_amx_tile()
+    return torch._C._cpu._is_amx_tile_supported()
+
+
+def _is_amx_fp16_supported() -> bool:
+    r"""Returns a bool indicating if CPU supports AMX FP16."""
+    return torch._C._cpu._is_amx_fp16_supported()
 
 
 def _init_amx() -> bool:
     r"""Initializes AMX instructions."""
     return torch._C._cpu._init_amx()
+
+
+def _is_arm_sve_supported() -> bool:
+    r"""Returns a bool indicating if CPU supports Arm SVE."""
+    return torch._C._cpu._is_arm_sve_supported()
 
 
 def is_available() -> bool:

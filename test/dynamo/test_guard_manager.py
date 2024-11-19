@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 import functools
+import unittest
 import weakref
 
 import torch
@@ -8,6 +9,7 @@ import torch._dynamo.test_case
 from torch._C._dynamo import guards
 from torch._dynamo.convert_frame import GlobalStateGuard
 from torch.testing._internal.common_utils import set_default_dtype
+
 
 RootGuardManager = guards.RootGuardManager
 DictGuardManager = guards.DictGuardManager
@@ -213,13 +215,13 @@ num_guards_executed=0)
 
     def test_no_hasattr_guard(self):
         class Bar:
-            def __init__(self):
+            def __init__(self) -> None:
                 self.bar = 2
 
         bar = Bar()
 
         class Foo:
-            def __init__(self):
+            def __init__(self) -> None:
                 self.foo = 2
 
         foo = Foo()
@@ -371,6 +373,14 @@ num_guards_executed=0)
         self.assertTrue(guard(weakref_x()))
         del x
         self.assertFalse(guard(weakref_x()))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_call_function_no_args_guard(self):
+        x = torch.cuda.current_device()
+        guard = guards.EQUALS_MATCH(x, [0])
+        self.assertTrue(guard(0))
+        self.assertFalse(guard(1))
+        self.assertFalse(guard(2))
 
     def test_guard_manager_leaf_guard(self):
         guard_manager = RootGuardManager()

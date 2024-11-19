@@ -175,9 +175,7 @@ def _init_test_roi_heads_faster_rcnn():
 
     resolution = box_roi_pool.output_size[0]
     representation_size = 1024
-    box_head = faster_rcnn.TwoMLPHead(
-        out_channels * resolution**2, representation_size
-    )
+    box_head = faster_rcnn.TwoMLPHead(out_channels * resolution**2, representation_size)
 
     representation_size = 1024
     box_predictor = faster_rcnn.FastRCNNPredictor(representation_size, num_classes)
@@ -347,7 +345,7 @@ class TestModelsONNXRuntime(onnx_test_common._TestONNXRuntime):
     @skipScriptTest()
     def test_roi_heads(self):
         class RoIHeadsModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.transform = _init_test_generalized_rcnn_transform()
                 self.rpn = _init_test_rpn()

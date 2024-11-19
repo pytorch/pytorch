@@ -2,8 +2,7 @@
 
 #include <torch/csrc/jit/jit_log.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 void unprofileGraphInputs(const std::shared_ptr<Graph>& graph) {
   for (auto i : graph->inputs()) {
@@ -45,5 +44,4 @@ void ClearProfilingInformation(const std::shared_ptr<Graph>& graph) {
   GRAPH_DUMP("After ClearProfilingInformation: ", graph);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

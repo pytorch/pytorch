@@ -1,9 +1,6 @@
 #include <torch/csrc/profiler/orchestration/python_tracer.h>
 
-namespace torch {
-namespace profiler {
-namespace impl {
-namespace python_tracer {
+namespace torch::profiler::impl::python_tracer {
 namespace {
 MakeFn make_fn;
 
@@ -12,6 +9,7 @@ struct NoOpPythonTracer : public PythonTracerBase {
   ~NoOpPythonTracer() override = default;
 
   void stop() override {}
+  void restart() override {}
   std::vector<std::shared_ptr<Result>> getEvents(
       std::function<c10::time_t(c10::approx_time_t)>,
       std::vector<CompressedEvent>&,
@@ -31,7 +29,4 @@ std::unique_ptr<PythonTracerBase> PythonTracerBase::make(RecordQueue* queue) {
   }
   return make_fn(queue);
 }
-} // namespace python_tracer
-} // namespace impl
-} // namespace profiler
-} // namespace torch
+} // namespace torch::profiler::impl::python_tracer

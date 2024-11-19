@@ -8,6 +8,7 @@ import torch._decomp
 from torch import Tensor
 from torch._prims_common.wrappers import _maybe_remove_out_wrapper
 
+
 decomposition_table = torch._decomp.decomposition_table
 decomposition_table_for_jvp: Dict[torch._ops.OperatorBase, Callable] = {}
 register_decomposition = torch._decomp.register_decomposition

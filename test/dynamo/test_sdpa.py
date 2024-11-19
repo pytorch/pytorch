@@ -31,7 +31,7 @@ class TestSDPA(torch._dynamo.test_case.TestCase):
 
             @torch.compile(fullgraph=True, backend=counter)
             def fn(q, k, v, m):
-                return SDPAParams(q, k, v, m, 0.1, True)
+                return SDPAParams(q, k, v, m, 0.1, True, False)
 
             q = torch.randn(10)
             k = torch.randn(10)
@@ -39,7 +39,7 @@ class TestSDPA(torch._dynamo.test_case.TestCase):
             m = torch.randn(10)
             o = fn(q, k, v, m)
             self.assertTrue(isinstance(o, SDPAParams))
-            self.assert_ref_equals_params(o, SDPAParams(q, k, v, m, 0.1, True))
+            self.assert_ref_equals_params(o, SDPAParams(q, k, v, m, 0.1, True, False))
             self.assertEqual(counter.frame_count, 1)
 
     def test_graph_break_SDPAParams(self):
@@ -48,7 +48,7 @@ class TestSDPA(torch._dynamo.test_case.TestCase):
 
             @torch.compile(backend=counter)
             def fn(q, k, v, m):
-                z = SDPAParams(q, k, v, m, 0.1, True)
+                z = SDPAParams(q, k, v, m, 0.1, True, False)
                 torch._dynamo.graph_break()
                 return z, q + 1
 
@@ -58,7 +58,7 @@ class TestSDPA(torch._dynamo.test_case.TestCase):
             m = torch.randn(10)
             o, _ = fn(q, k, v, m)
             self.assertTrue(isinstance(o, SDPAParams))
-            self.assert_ref_equals_params(o, SDPAParams(q, k, v, m, 0.1, True))
+            self.assert_ref_equals_params(o, SDPAParams(q, k, v, m, 0.1, True, False))
             self.assertEqual(counter.frame_count, 2)
 
     def test_input_SDPAParams(self):
@@ -74,7 +74,7 @@ class TestSDPA(torch._dynamo.test_case.TestCase):
             k = torch.randn(10)
             v = torch.randn(10)
             m = torch.randn(10)
-            s = SDPAParams(q, k, v, m, 0.1, True)
+            s = SDPAParams(q, k, v, m, 0.1, True, False)
             o, _ = fn(s, q)
             self.assertIs(o, s)
             self.assertEqual(counter.frame_count, 1)
@@ -86,7 +86,7 @@ class TestSDPA(torch._dynamo.test_case.TestCase):
             @torch.compile(fullgraph=True, backend=counter)
             def fn(q, k, v, m):
                 q += 1
-                z = SDPAParams(q, k, v, m, 0.1, True)
+                z = SDPAParams(q, k, v, m, 0.1, True, False)
                 a = z.query
                 return a + 1, z, q
 
@@ -95,7 +95,7 @@ class TestSDPA(torch._dynamo.test_case.TestCase):
             v = torch.randn(10)
             m = torch.randn(10)
             _, o, _ = fn(q, k, v, m)
-            expected = SDPAParams(q, k, v, m, 0.1, True)
+            expected = SDPAParams(q, k, v, m, 0.1, True, False)
             self.assert_ref_equals_params(o, expected)
             self.assertEqual(counter.frame_count, 1)
 

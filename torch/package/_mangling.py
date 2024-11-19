@@ -4,6 +4,7 @@ See mangling.md for details.
 """
 import re
 
+
 _mangle_index = 0
 
 
@@ -12,7 +13,7 @@ class PackageMangler:
     Used on import, to ensure that all modules imported have a shared mangle parent.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         global _mangle_index
         self._mangle_index = _mangle_index
         # Increment the global index
@@ -52,7 +53,7 @@ def demangle(name: str) -> str:
     mangled name, irrespective of which PackageMangler created it.
     """
     if is_mangled(name):
-        first, sep, last = name.partition(".")
+        _first, sep, last = name.partition(".")
         # If there is only a base mangle prefix, e.g. '<torch_package_0>',
         # then return an empty string.
         return last if len(sep) != 0 else ""

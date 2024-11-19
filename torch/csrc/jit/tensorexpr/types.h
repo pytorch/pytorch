@@ -9,9 +9,7 @@
 
 #include <torch/csrc/jit/tensorexpr/exceptions.h>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 using int32 = std::int32_t;
 
@@ -36,16 +34,16 @@ class TORCH_API Dtype {
   explicit Dtype(int8_t type)
       : scalar_type_(static_cast<ScalarType>(type)), lanes_(1) {}
   explicit Dtype(ScalarType type) : scalar_type_(type), lanes_(1) {}
-  Dtype(int8_t type, int lanes)
+  Dtype(int8_t type, int64_t lanes)
       : scalar_type_(static_cast<ScalarType>(type)), lanes_(lanes) {}
-  Dtype(ScalarType type, int lanes) : scalar_type_(type), lanes_(lanes) {}
-  Dtype(Dtype type, int lanes)
+  Dtype(ScalarType type, int64_t lanes) : scalar_type_(type), lanes_(lanes) {}
+  Dtype(Dtype type, int64_t lanes)
       : scalar_type_(type.scalar_type_), lanes_(lanes) {
     if (type.lanes() != 1) {
       throw malformed_input("dtype lanes dont match");
     }
   }
-  int lanes() const {
+  int64_t lanes() const {
     return lanes_;
   }
   ScalarType scalar_type() const {
@@ -80,7 +78,7 @@ class TORCH_API Dtype {
       std::ostream& stream,
       const Dtype& dtype);
   ScalarType scalar_type_;
-  int lanes_; // the width of the element for a vector time
+  int64_t lanes_; // the width of the element for a vector time
 };
 
 extern TORCH_API Dtype kHandle;
@@ -88,8 +86,8 @@ extern TORCH_API Dtype kHandle;
 #define NNC_DTYPE_DECLARATION(ctype, name) extern TORCH_API Dtype k##name;
 
 AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, NNC_DTYPE_DECLARATION)
-NNC_DTYPE_DECLARATION(c10::quint8, QUInt8);
-NNC_DTYPE_DECLARATION(c10::qint8, QInt8);
+NNC_DTYPE_DECLARATION(c10::quint8, QUInt8)
+NNC_DTYPE_DECLARATION(c10::qint8, QInt8)
 #undef NNC_DTYPE_DECLARATION
 
 template <typename T>
@@ -101,8 +99,8 @@ TORCH_API Dtype ToDtype();
     return k##name;                          \
   }
 AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, NNC_TODTYPE_DECLARATION)
-NNC_TODTYPE_DECLARATION(c10::quint8, QUInt8);
-NNC_TODTYPE_DECLARATION(c10::qint8, QInt8);
+NNC_TODTYPE_DECLARATION(c10::quint8, QUInt8)
+NNC_TODTYPE_DECLARATION(c10::qint8, QInt8)
 #undef NNC_TODTYPE_DECLARATION
 
 TORCH_API Dtype ToDtype(ScalarType type);
@@ -133,7 +131,7 @@ inline Dtype BinaryOpDtype(
   if (op1_dtype.lanes() != op2_dtype.lanes()) {
     throw malformed_input("lanes dont match");
   }
-  int lanes = op1_dtype.lanes();
+  int64_t lanes = op1_dtype.lanes();
 
   Dtype resultType = promoteTypes(op1_dtype, op2_dtype);
   if (resultType.scalar_type() == ScalarType::Undefined) {
@@ -148,9 +146,7 @@ inline Dtype BinaryOpDtype(
   return resultType;
 }
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr
 
 namespace std {
 

@@ -3,9 +3,7 @@
 import warnings
 
 from torch import nn
-
 from torch.ao.pruning import BaseScheduler, CubicSL, LambdaSL, WeightNormSparsifier
-
 from torch.testing._internal.common_utils import TestCase
 
 

@@ -9,6 +9,7 @@ import torch
 from torch.testing._internal.common_utils import IS_WINDOWS
 from torch.testing._internal.jit_utils import JitTestCase, make_global
 
+
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
@@ -679,7 +680,7 @@ class TestTyping(JitTestCase):
                 return self.x + x + do_something_with_list(self.state)
 
         class LowestModule(Submodule):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__(123)
 
         mod = LowestModule()

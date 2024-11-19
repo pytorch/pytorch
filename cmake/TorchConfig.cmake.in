@@ -75,6 +75,9 @@ else()
   if(@USE_CUDA@)
     append_wholearchive_lib_if_found(torch_cuda c10_cuda)
   endif()
+  if(@USE_XPU@)
+    append_wholearchive_lib_if_found(torch_xpu c10_xpu)
+  endif()
 
   # We need manually add dependent libraries when they are not linked into the
   # shared library.
@@ -96,14 +99,11 @@ else()
   append_torchlib_if_found(caffe2_protos protobuf-lite protobuf protoc)
   append_torchlib_if_found(onnx onnx_proto)
 
-  append_torchlib_if_found(foxi_loader fmt)
+  append_torchlib_if_found(fmt)
   append_torchlib_if_found(cpuinfo clog)
 
-  if(NOT @USE_INTERNAL_PTHREADPOOL_IMPL@)
-    append_torchlib_if_found(pthreadpool)
-  endif()
-
   append_torchlib_if_found(eigen_blas)
+  append_torchlib_if_found(pthreadpool)
 
   if(@USE_FBGEMM@)
     append_torchlib_if_found(fbgemm)
@@ -123,15 +123,23 @@ endif()
 if(@USE_CUDA@)
   if(MSVC)
     find_library(CAFFE2_NVRTC_LIBRARY caffe2_nvrtc PATHS "${TORCH_INSTALL_PREFIX}/lib")
-    list(APPEND TORCH_CUDA_LIBRARIES ${CAFFE2_NVRTC_LIBRARY} torch::nvtoolsext)
+    list(APPEND TORCH_CUDA_LIBRARIES ${CAFFE2_NVRTC_LIBRARY})
   else()
-    set(TORCH_CUDA_LIBRARIES ${CUDA_NVRTC_LIB} torch::nvtoolsext)
+    set(TORCH_CUDA_LIBRARIES ${CUDA_NVRTC_LIB})
   endif()
+  if(TARGET torch::nvtoolsext)
+    list(APPEND TORCH_CUDA_LIBRARIES torch::nvtoolsext)
+  endif()
+
   if(@BUILD_SHARED_LIBS@)
     find_library(C10_CUDA_LIBRARY c10_cuda PATHS "${TORCH_INSTALL_PREFIX}/lib")
     list(APPEND TORCH_CUDA_LIBRARIES ${C10_CUDA_LIBRARY} ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
   endif()
   list(APPEND TORCH_LIBRARIES ${TORCH_CUDA_LIBRARIES})
+endif()
+
+if(@USE_XPU@ AND @BUILD_SHARED_LIBS@)
+    append_torchlib_if_found(c10_xpu torch_xpu)
 endif()
 
 # When we build libtorch with the old libstdc++ ABI, dependent libraries must too.

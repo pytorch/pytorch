@@ -89,7 +89,7 @@ if _IS_MONKEYTYPE_INSTALLED:
             self.traces.append(trace)
 
     class JitTypeTraceStore(CallTraceStore):
-        def __init__(self):
+        def __init__(self) -> None:
             super().__init__()
             # A dictionary keeping all collected CallTrace
             # key is fully qualified name of called function
@@ -159,15 +159,15 @@ else:
     # When MonkeyType is not installed, we provide dummy class definitions
     # for the below classes.
     class JitTypeTraceStoreLogger:  # type:  ignore[no-redef]
-        def __init__(self):
+        def __init__(self) -> None:
             pass
 
     class JitTypeTraceStore:  # type:  ignore[no-redef]
-        def __init__(self):
+        def __init__(self) -> None:
             self.trace_records = None
 
     class JitTypeTraceConfig:  # type:  ignore[no-redef]
-        def __init__(self):
+        def __init__(self) -> None:
             pass
 
     monkeytype_trace = None  # type: ignore[assignment]  # noqa: F811

@@ -611,8 +611,6 @@ using SizeType = uint64_t;
 // Since SOCKET_ERROR = -1 in MSVC, so also leverage SYSCHECK_ERR_RETURN_NEG1
 #define SYSCHECK_ERR_RETURN_NEG1(expr) SYSCHECK(expr, __output != -1)
 
-void checkForNan(const at::Tensor& tensor);
-
 namespace tcputil {
 
 // Send and receive

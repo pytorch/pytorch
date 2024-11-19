@@ -67,11 +67,11 @@ void printValueRef(std::ostream& out, const Value* n) {
   out << "%" << n->debugName();
 }
 
-bool isNumber(c10::string_view str) {
+bool isNumber(std::string_view str) {
   return str.find_first_not_of("0123456789") == std::string::npos;
 }
 
-std::string normalizeAttrName(c10::string_view field) {
+std::string normalizeAttrName(std::string_view field) {
   if (isNumber(field)) {
     return "_" + std::string{field};
   }
@@ -292,8 +292,7 @@ SourceRange Node::sourceRange() const {
 }
 
 static std::ostream& indent(std::ostream& out, size_t level) {
-  for (const auto i : c10::irange(level)) {
-    (void)i; // Suppress unused variable warning
+  for ([[maybe_unused]] const auto i : c10::irange(level)) {
     out << "  ";
   }
   return out;
@@ -577,7 +576,7 @@ void Graph::lint() const {
     void check_node(const Node* n) {
       for (auto input : n->inputs_) {
         if (!scope->contains(input)) {
-          AT_ASSERTM(0, input->unique(), " not in scope");
+          TORCH_INTERNAL_ASSERT(0, input->unique(), " not in scope");
         }
       }
       AT_ASSERT(anticipated_uses[n] == static_cast<int64_t>(n->inputs_.size()));
@@ -747,9 +746,10 @@ void Block::destroy() {
 
 void Graph::cloneFrom(Graph& src) {
   auto env = [](Value* v) -> Value* {
-    AT_ERROR(
+    TORCH_CHECK(
+        false,
         "Graph::copy() encountered a use of a value " + v->debugName() +
-        " not in scope. Run lint!");
+            " not in scope. Run lint!");
   };
   block()->cloneFrom(src.block(), env);
 }
@@ -1298,8 +1298,7 @@ Node::Node(Graph* graph_, NodeKind kind_)
       owning_block_(nullptr),
       scope_(graph_->current_scope_),
       callstack_(std::nullopt),
-      op_(nullptr),
-      topo_position_(0) {
+      op_(nullptr) {
   graph_->all_nodes.emplace(this);
 }
 
@@ -1512,7 +1511,7 @@ Node* Node::insertBefore(Node* n) {
 Node* Node::insertAfter(Node* n) {
   AT_ASSERT(!inBlockList() && n->inBlockList());
   AT_ASSERT(n->owningBlock());
-  AT_ASSERTM(
+  TORCH_INTERNAL_ASSERT(
       n->kind() != prim::Return,
       "Attempting to insert a Node after the Return node or before the Param node. Tried to insert",
       *this,
@@ -1573,7 +1572,8 @@ void Node::permuteInputs(const std::vector<size_t>& new_order) {
   std::vector<Value*> new_inputs;
   new_inputs.reserve(new_order.size());
   for (const auto i : c10::irange(new_order.size())) {
-    AT_ASSERTM(inputs_.at(new_order[i]) != nullptr, "Repeated index");
+    TORCH_INTERNAL_ASSERT(
+        inputs_.at(new_order[i]) != nullptr, "Repeated index");
     new_inputs.push_back(inputs_.at(new_order[i]));
     auto it = findUseForInput(new_order[i]);
     it->offset = i;
@@ -1588,7 +1588,8 @@ void Node::permuteOutputs(const std::vector<size_t>& new_order) {
   std::vector<Value*> new_outputs;
   new_outputs.reserve(new_order.size());
   for (const auto i : c10::irange(new_order.size())) {
-    AT_ASSERTM(outputs_.at(new_order[i]) != nullptr, "Repeated index");
+    TORCH_INTERNAL_ASSERT(
+        outputs_.at(new_order[i]) != nullptr, "Repeated index");
     new_outputs.push_back(outputs_.at(new_order[i]));
     outputs_.at(new_order[i])->setOffset(i);
     outputs_.at(new_order[i]) = nullptr;
@@ -1769,8 +1770,7 @@ Node* Graph::createTupleSlice(
   new_vals.reserve(num_values);
 
   int64_t i = beg;
-  for (const auto j : c10::irange(num_values)) {
-    (void)j; // Suppress unused variable warning
+  for ([[maybe_unused]] const auto j : c10::irange(num_values)) {
     auto idx = insertConstant(IValue(static_cast<int64_t>(i)));
     auto tupleIndex = insertNode(createTupleIndex(tup, idx, tt->elements()[i]));
 
@@ -1818,8 +1818,7 @@ Node* Graph::createListUnpack(Value* v, size_t size) {
   ListTypePtr list_type = v->type()->expect<ListType>();
   TypePtr elem_type = list_type->getElementType();
   auto n = create(prim::ListUnpack, {v}, 0);
-  for (const auto i : c10::irange(size)) {
-    (void)i; // Suppress unused variable warning
+  for ([[maybe_unused]] const auto i : c10::irange(size)) {
     n->addOutput()->setType(elem_type);
   }
   return n;
@@ -2044,14 +2043,14 @@ void inlineCallStackOfNode(
     std::unordered_map<InlinedCallStack*, InlinedCallStackPtr>& new_cs_entries,
     Function* callee,
     Node* to_replace,
-    std::optional<ModuleInstanceInfo> m_info);
+    const std::optional<ModuleInstanceInfo>& m_info);
 
 static void inlineCallStackOfBlock(
     Block* b,
     std::unordered_map<InlinedCallStack*, InlinedCallStackPtr>& new_cs_entries,
     Function* callee,
     Node* to_replace,
-    std::optional<ModuleInstanceInfo> m_info) {
+    const std::optional<ModuleInstanceInfo>& m_info) {
   for (auto n : b->nodes()) {
     inlineCallStackOfNode(n, new_cs_entries, callee, to_replace, m_info);
   }
@@ -2062,7 +2061,7 @@ void inlineCallStackOfNode(
     std::unordered_map<InlinedCallStack*, InlinedCallStackPtr>& new_cs_entries,
     Function* callee,
     Node* to_replace,
-    std::optional<ModuleInstanceInfo> m_info) {
+    const std::optional<ModuleInstanceInfo>& m_info) {
   auto new_node_cs = new_node->callstack();
 
   InlinedCallStack* raw_callstack_ptr =

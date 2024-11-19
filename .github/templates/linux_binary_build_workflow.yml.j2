@@ -52,19 +52,34 @@ env:
 !{{ common.concurrency(build_environment) }}
 
 jobs:
+  get-label-type:
+    if: github.repository_owner == 'pytorch'
+    name: get-label-type
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+
 {%- for config in build_configs %}
   !{{ config["build_name"] }}-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:!{{ upload.binary_env_as_input(config) }}
       {%- if "aarch64" in build_environment %}
-      runs_on: linux.arm64.m7g.4xlarge
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runs_on: linux.arm64.m7g.4xlarge.ephemeral
       ALPINE_IMAGE: "arm64v8/alpine"
       {%- elif "s390x" in build_environment %}
       runs_on: linux.s390x
       ALPINE_IMAGE: "docker.io/s390x/alpine"
       {%- elif "conda" in build_environment and config["gpu_arch_type"] == "cuda" %}
-      runs_on: linux.24xlarge
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runs_on: linux.24xlarge.ephemeral
+      {%- else %}
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       {%- endif %}
       build_name: !{{ config["build_name"] }}
       build_environment: !{{ build_environment }}
@@ -80,13 +95,16 @@ jobs:
   {%- if config["gpu_arch_type"] != "cuda-aarch64" %}
   !{{ config["build_name"] }}-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: !{{ config["build_name"] }}-build
+    needs:
+      - !{{ config["build_name"] }}-build
+      - get-label-type
     {%- if config["gpu_arch_type"] not in ["rocm", "xpu"] %}
     uses: ./.github/workflows/_binary-test-linux.yml
     with:!{{ upload.binary_env_as_input(config) }}
       build_name: !{{ config["build_name"] }}
       build_environment: !{{ build_environment }}
       {%- if "aarch64" in build_environment %}
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.arm64.2xlarge
       ALPINE_IMAGE: "arm64v8/alpine"
       {%- elif "s390x" in build_environment %}
@@ -95,8 +113,10 @@ jobs:
       {%- elif config["gpu_arch_type"] == "rocm" %}
       runs_on: linux.rocm.gpu
       {%- elif config["gpu_arch_type"] == "cuda" %}
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.4xlarge.nvidia.gpu
       {%- else %}
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.4xlarge
       {%- endif %}
     secrets:

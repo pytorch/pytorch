@@ -153,13 +153,16 @@ static void reduction_out_mps(const Tensor& input_t,
                               const std::string& func_name) {
   bool macOS13_3_plus = is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_3_PLUS);
   MPS_CHECK_INT64_OP_SUPPORTED(input_t, macOS13_3_plus, func_name);
+  // NS: TODO: get rid of all those shenanigans and just call reduction_op with view tensor
   bool canSqueezeLastDim = true;
   IntArrayRef input_shape = input_t.sizes();
   if (opt_dim.has_value()) {
     IntArrayRef dim = opt_dim.value();
     for (const auto dim_val : dim) {
       auto wrap_dim = maybe_wrap_dim(dim_val, input_shape.size());
-      if (wrap_dim >= 4) {
+      // canSqueeze logic is broken when dim is negative, it introduces off-by-one-erros or crashes
+      // See https://github.com/pytorch/pytorch/issues/136132#issuecomment-2354482608
+      if (wrap_dim >= 4 || dim_val < 0) {
         canSqueezeLastDim = false;
       }
       TORCH_CHECK(
@@ -193,10 +196,27 @@ static void reduction_out_mps(const Tensor& input_t,
   NSArray<NSNumber*>* wrappedAxes = getTensorAxes(input_shape, opt_dim);
 
   if (output_t.numel() == 0 || input_t.numel() == 0) {
-    if (reduction_type == MPSReductionType::PROD) {
-      output_t.fill_(1);
-    } else if (reduction_type == MPSReductionType::SUM) {
-      output_t.zero_();
+    switch (reduction_type) {
+      case MPSReductionType::PROD:
+        output_t.fill_(1);
+        break;
+      case MPSReductionType::MEAN:
+        output_t.fill_(std::numeric_limits<float>::quiet_NaN());
+        break;
+      case MPSReductionType::SUM:
+      case MPSReductionType::NANSUM:
+      case MPSReductionType::COUNT_NONZERO:
+        output_t.zero_();
+        break;
+      case MPSReductionType::AMAX:
+      case MPSReductionType::AMIN:
+      case MPSReductionType::MAX:
+      case MPSReductionType::MIN:
+        TORCH_CHECK(opt_dim.has_value(), "Expected reduction dim to be specified for input.numel() == 0");
+        break;
+      default:
+        TORCH_INTERNAL_ASSERT(false, "Unexpected reduction type ", reduction_type);
+        break;
     }
     return;
   }
@@ -222,8 +242,6 @@ static void reduction_out_mps(const Tensor& input_t,
                  inputScalarType != kComplexFloat && inputScalarType != kComplexHalf &&
                  (inputScalarType != kLong || !macOS13_3_plus)) {
         inputCastType = getMPSDataType(kFloat);
-      } else if (!is_macos_13_or_newer() && inputScalarType == kHalf) {
-        inputCastType = getMPSDataType(kFloat);
       }
 
       if (inputCastType != MPSDataTypeInvalid) {
@@ -245,9 +263,9 @@ static void reduction_out_mps(const Tensor& input_t,
 
         castOutputTensor = [mpsGraph reductionSumWithTensor:nonZeros axes:wrappedAxes name:nil];
       } else if (reduction_type == MPSReductionType::AMAX) {
-        castOutputTensor = [mpsGraph reductionMaximumWithTensor:castInputTensor axes:wrappedAxes name:nil];
+        castOutputTensor = [mpsGraph reductionMaximumPropagateNaNWithTensor:castInputTensor axes:wrappedAxes name:nil];
       } else if (reduction_type == MPSReductionType::AMIN) {
-        castOutputTensor = [mpsGraph reductionMinimumWithTensor:castInputTensor axes:wrappedAxes name:nil];
+        castOutputTensor = [mpsGraph reductionMinimumPropagateNaNWithTensor:castInputTensor axes:wrappedAxes name:nil];
       } else if (reduction_type == MPSReductionType::TRACE) {
         MPSGraphTensor* bandPartWithTensor = [mpsGraph bandPartWithTensor:castInputTensor
                                                                  numLower:0
@@ -343,21 +361,13 @@ static void impl_func_norm_mps(const Tensor& input_tensor,
     return;
   }
 
-  // Cast FP16 to FP32 on macOS Monterey due to precision issues.
-  // This is fixed starting with macOS Ventura.
-  bool castInputData = false;
-  if (!is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_0_PLUS) && mps_input_dtype == MPSDataTypeFloat16) {
-    castInputData = true;
-    mps_input_dtype = MPSDataTypeFloat32;
-  }
-
   auto stream = getCurrentMPSStream();
   @autoreleasepool {
     NSString* ns_key = [[wrappedAxes valueForKey:@"description"] componentsJoinedByString:@","];
     string keepdim_info = (keepdim) ? "keepdim=1" : "keepdim=0";
     string tensor_key = cdist ? getTensorsStringKey({input_tensor, other_tensor}) : getTensorsStringKey({input_t});
     string key = string("norm_out_mps:") + [ns_key UTF8String] + ":" + tensor_key + ":p" + std::to_string(p) + ":" +
-        keepdim_info + ":" + toString(in_dtype) + ":" + std::to_string(castInputData);
+        keepdim_info + ":" + toString(in_dtype);
 
     auto cachedGraph = LookUpOrCreateCachedGraph<MPSBinaryCachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       newCachedGraph->inputTensor_ = mpsGraphRankedPlaceHolder(mpsGraph, input_tensor);
@@ -370,7 +380,7 @@ static void impl_func_norm_mps(const Tensor& input_tensor,
           ? normOpBlock(newCachedGraph, newCachedGraph->inputTensor_, newCachedGraph->otherTensor_)
           : newCachedGraph->inputTensor_;
 
-      if (opt_dtype.has_value() || castInputData) {
+      if (opt_dtype.has_value()) {
         inputTensor = castMPSTensor(mpsGraph, inputTensor, mps_input_dtype);
       }
 
@@ -412,8 +422,7 @@ static void impl_func_norm_mps(const Tensor& input_tensor,
         outputTensor = [mpsGraph reshapeTensor:outputTensor withShape:getMPSShape(output_t) name:nil];
       }
 
-      newCachedGraph->outputTensor_ =
-          castInputData ? castMPSTensor(mpsGraph, outputTensor, output_t.scalar_type()) : outputTensor;
+      newCachedGraph->outputTensor_ = outputTensor;
     });
 
     auto otherPlaceholder = Placeholder();
@@ -630,9 +639,9 @@ static Tensor min_max_mps_impl(const Tensor& input_t, MPSReductionType reduction
 
       NSArray<NSNumber*>* axes = getTensorAxes(input_t);
       if (reduction_type == MPSReductionType::MAX) {
-        castOutputTensor = [mpsGraph reductionMaximumWithTensor:castInputTensor axes:axes name:nil];
+        castOutputTensor = [mpsGraph reductionMaximumPropagateNaNWithTensor:castInputTensor axes:axes name:nil];
       } else if (reduction_type == MPSReductionType::MIN) {
-        castOutputTensor = [mpsGraph reductionMinimumWithTensor:castInputTensor axes:axes name:nil];
+        castOutputTensor = [mpsGraph reductionMinimumPropagateNaNWithTensor:castInputTensor axes:axes name:nil];
       }
 
       MPSGraphTensor* outputTensor = castOutputTensor;
@@ -705,9 +714,9 @@ static void min_max_out_mps(const Tensor& input_t,
           castToIHFTypes(mpsGraph, inputTensor, input_t, /*includesInt64=*/macOS13_3_plus);
 
       if (reduction_type == MPSReductionType::MAX) {
-        outputTensor = [mpsGraph reductionMaximumWithTensor:castInputTensor axis:(NSInteger)dim_ name:nil];
+        outputTensor = [mpsGraph reductionMaximumPropagateNaNWithTensor:castInputTensor axis:(NSInteger)dim_ name:nil];
       } else if (reduction_type == MPSReductionType::MIN) {
-        outputTensor = [mpsGraph reductionMinimumWithTensor:castInputTensor axis:(NSInteger)dim_ name:nil];
+        outputTensor = [mpsGraph reductionMinimumPropagateNaNWithTensor:castInputTensor axis:(NSInteger)dim_ name:nil];
       }
 
       MPSGraphTensor* argreduceOutTensor = nil;
@@ -1415,12 +1424,6 @@ static std::tuple<Tensor, Tensor> min_mps(const Tensor& input_t, int64_t dim, bo
 
 // Median of entire tensor into scalar result
 Tensor median_mps(const Tensor& input_t) {
-  if (!is_macos_13_or_newer()) {
-    TORCH_WARN_ONCE("MPS: median op is supported natively starting from macOS 13.0. ",
-                    "Falling back on CPU. This may have performance implications.");
-    return at::median(input_t.to("cpu"));
-  }
-
   bool macOS13_3_plus = is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_3_PLUS);
   MPS_CHECK_INT64_OP_SUPPORTED(input_t, macOS13_3_plus, "median");
 
@@ -1624,18 +1627,6 @@ TORCH_API ::std::tuple<at::Tensor&, at::Tensor&> median_out_mps(const at::Tensor
 
   if (values.numel() == 0 || input_t.numel() == 0) {
     return std::tuple<Tensor&, Tensor&>{values, indices};
-  }
-
-  if (!is_macos_13_or_newer()) {
-    TORCH_WARN_ONCE("MPS: median op is supported natively starting from macOS 13.0.",
-                    "Falling back on CPU. This may have performance implications.");
-    return median_from_cpu(input_t.to("cpu"),
-                           dim,
-                           keepdim,
-                           values,
-                           indices,
-                           IntArrayRef(vec_out_shape),
-                           IntArrayRef(vec_apparent_out_shape));
   }
 
   median_out_mps(input_t, dim, keepdim, values, indices, "median_out_mps");

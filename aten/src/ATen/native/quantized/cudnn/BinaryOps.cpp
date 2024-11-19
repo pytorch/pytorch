@@ -25,14 +25,14 @@
 
 #include <unordered_map>
 
-namespace at {
-namespace native {
+
+namespace at::native {
 namespace {
 constexpr uint8_t max_num_input_dim = 5;
 struct AddParams {
   c10::DeviceIndex device_id;
-  int input_a_size[max_num_input_dim];
-  int input_b_size[max_num_input_dim];
+  int64_t input_a_size[max_num_input_dim];
+  int64_t input_b_size[max_num_input_dim];
   uint8_t input_dim; // we currently assume both inputs are given as the same size (i.e., no broadcasting)
   at::MemoryFormat memory_format;
   bool deterministic;
@@ -120,9 +120,9 @@ Tensor add(Tensor qa, Tensor qb, double output_scale, int64_t output_zero_point)
   rhs_multiplier_tensor.fill_(qb.q_scale() / qa.q_scale());
 
   cudnnHandle_t handle = at::native::getCudnnHandle();
-  CacheKey key;
+  CacheKey key{};
   // memset is needed here because there is implicit packing added for CacheKey, and this can result in uninitialized padded values that are
-  // used for hashing (see how at::native::ParamsHash is defined). without memset, we can potentially come across a situation where two
+  // used for hashing (see how at::native::ParamsHash is defined). Without memset, we can potentially come across a situation where two
   // CacheKey objects have the same user defined parameters, but
   // different padded values, resulting in different hash outputs.
   memset(&key, 0, sizeof(key));
@@ -134,7 +134,7 @@ Tensor add(Tensor qa, Tensor qb, double output_scale, int64_t output_zero_point)
   key.input_b_alignment = cudnn_utils::getAlignment(qb);
   key.output_alignment = cudnn_utils::getAlignment(add_output);
 
-  auto run = [&](cudnn_frontend::ManagedOpaqueDescriptor plan_desc) {
+  auto run = [&](const cudnn_frontend::ManagedOpaqueDescriptor& plan_desc) {
     auto workspace_size = 0;
     auto workspace = at::empty({workspace_size}, qa.options().dtype(at::kByte));
     std::vector<void *> data_ptrs;
@@ -145,15 +145,15 @@ Tensor add(Tensor qa, Tensor qb, double output_scale, int64_t output_zero_point)
                  qa.data_ptr<int8_t>(), add_output.data_ptr(), requantize_multiplier_tensor.data_ptr(),
                  quantized_output.data_ptr<int8_t>()};
     uids = {'b', 'm', 'c', 'a', 'p', 'r', 'q'};
-    if (kReluFused) {
+    if constexpr (kReluFused) {
         data_ptrs.emplace_back(add_output.data_ptr()),
         uids.emplace_back('f');
     }
 
     auto variantPack = cudnn_frontend::VariantPackBuilder()
       .setWorkspacePointer(workspace.data_ptr())
-      .setDataPointers(uids.size(), data_ptrs.data())
-      .setUids(uids.size(), uids.data())
+      .setDataPointers(static_cast<int64_t>(uids.size()), data_ptrs.data())
+      .setUids(static_cast<int64_t>(uids.size()), uids.data())
       .build();
     auto variant_pack_desc = variantPack.get_raw_desc();
     AT_CUDNN_CHECK(cudnnBackendExecute(handle, plan_desc->get_backend_descriptor(), variant_pack_desc));
@@ -187,7 +187,7 @@ Tensor add(Tensor qa, Tensor qb, double output_scale, int64_t output_zero_point)
   // relu( (qa_int8 + qb_int8 * ( qb_scale/qa_scale ) )  )
   // output is a fp32 tensor
   std::optional<cudnn_frontend::Operation> relu_op;
-  if (kReluFused) {
+  if constexpr (kReluFused) {
     // we use inplace operation here where the output is assigned to the input
     relu_op.emplace(cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR)
       .setxDesc(add_op.getOutputTensor())
@@ -206,14 +206,14 @@ Tensor add(Tensor qa, Tensor qb, double output_scale, int64_t output_zero_point)
     .build();
 
   std::vector<cudnn_frontend::Operation const *> ops{&rhs_mult_op, &add_op};
-  if (kReluFused) {
+  if constexpr (kReluFused) {
     ops.emplace_back(&(relu_op.value()));
   }
   ops.emplace_back(&requant_op);
 
   auto opGraph = cudnn_frontend::OperationGraphBuilder()
       .setHandle(handle)
-      .setOperationGraph(ops.size(), ops.data())
+      .setOperationGraph(static_cast<int64_t>(ops.size()), ops.data())
       .build();
   // std::cout << "opGraph: " << opGraph.describe() << std::endl;
 
@@ -242,7 +242,7 @@ Tensor add(Tensor qa, Tensor qb, double output_scale, int64_t output_zero_point)
       run(plan_desc);
       execution_plan_cache[key] = plan_desc;
       return quantized_output.view(orig_sizes);
-    } catch (cudnn_frontend::cudnnException &e) {std::cout << "cudnn error:" << e.what() << std::endl;} catch(c10::CuDNNError &e) { std::cout << "other error" << e.what() << std::endl;}
+    } catch (cudnn_frontend::cudnnException &e) {std::cout << "cudnn error:" << e.what() << '\n';} catch(c10::CuDNNError &e) { std::cout << "other error" << e.what() << '\n';}
   }
 
   TORCH_CHECK(false, "Unable to find an engine to execute this computation in Quantized Add Cudnn");
@@ -254,8 +254,7 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCUDA, m) {
 }
 
 } // namespace
-} // namespace native
-} // namespace at
+} // namespace at::native
 
 #endif  // AT_CUDNN_ENABLED
 #endif  // USE_CUDA

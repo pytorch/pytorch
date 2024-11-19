@@ -3,10 +3,8 @@
 #include <torch/csrc/Export.h>
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 TORCH_API void inlineForkedClosures(std::shared_ptr<Graph>& to_clean);
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

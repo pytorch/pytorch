@@ -14,7 +14,7 @@ struct NewBlahBatchRuleHelperSymInt;
 
 template <typename F, F Func, typename A, typename B, typename... T>
 struct NewBlahBatchRuleHelperSymInt<F, Func, typelist<A, B, T...>> {
-  static std::tuple<Tensor,optional<int64_t>> apply(
+  static std::tuple<Tensor, std::optional<int64_t>> apply(
       const Tensor& tensor,
       std::optional<int64_t> batch_dim,
       SymIntArrayRef shape,
@@ -33,7 +33,7 @@ struct NewBlahBatchRuleHelper;
 
 template <typename F, F Func, typename A, typename B, typename... T>
 struct NewBlahBatchRuleHelper<F, Func, typelist<A, B, T...>> {
-  static std::tuple<Tensor,optional<int64_t>> apply(
+  static std::tuple<Tensor, std::optional<int64_t>> apply(
       const Tensor& tensor,
       std::optional<int64_t> batch_dim,
       IntArrayRef shape,
@@ -62,7 +62,7 @@ struct NewBlahBatchRuleHelper<F, Func, typelist<A, B, T...>> {
       &fn,\
       c10::guts::function_traits<decltype(fn)>::parameter_types>::apply)
 
-static std::tuple<Tensor,optional<int64_t>> _new_zeros_with_same_feature_meta_batch_rule(
+static std::tuple<Tensor, std::optional<int64_t>> _new_zeros_with_same_feature_meta_batch_rule(
     const Tensor& self, std::optional<int64_t> self_bdim,
     const Tensor& other, std::optional<int64_t> other_bdim,
     int64_t self_num_batch_dims) {
@@ -103,7 +103,7 @@ static std::tuple<Tensor,optional<int64_t>> _new_zeros_with_same_feature_meta_ba
   return std::make_tuple(result, 0);
 }
 
-static std::tuple<Tensor,optional<int64_t>> linspace_logspace_batch_rule_helper(
+static std::tuple<Tensor, std::optional<int64_t>> linspace_logspace_batch_rule_helper(
     const at::Tensor& start, std::optional<int64_t> start_bdim,
     const at::Tensor& end, std::optional<int64_t> end_bdim,
     int64_t steps,
@@ -141,7 +141,7 @@ static std::tuple<Tensor,optional<int64_t>> linspace_logspace_batch_rule_helper(
   return std::make_tuple(result, 0);
 }
 
-static std::tuple<Tensor,optional<int64_t>> linspace_Tensor_Tensor_batch_rule(
+static std::tuple<Tensor, std::optional<int64_t>> linspace_Tensor_Tensor_batch_rule(
     const at::Tensor& start, std::optional<int64_t> start_bdim,
     const at::Tensor& end, std::optional<int64_t> end_bdim,
     int64_t steps,
@@ -152,7 +152,7 @@ static std::tuple<Tensor,optional<int64_t>> linspace_Tensor_Tensor_batch_rule(
   return linspace_logspace_batch_rule_helper(start, start_bdim, end, end_bdim, steps, std::nullopt, dtype, layout, device, pin_memory);
 }
 
-static std::tuple<Tensor,optional<int64_t>> linspace_Tensor_Scalar_batch_rule(
+static std::tuple<Tensor, std::optional<int64_t>> linspace_Tensor_Scalar_batch_rule(
     const at::Tensor& start, std::optional<int64_t> start_bdim,
     const at::Scalar& end,
     int64_t steps,
@@ -165,7 +165,7 @@ static std::tuple<Tensor,optional<int64_t>> linspace_Tensor_Scalar_batch_rule(
   return linspace_logspace_batch_rule_helper(start, start_bdim, end_t, std::nullopt, steps, std::nullopt, dtype, layout, device, pin_memory);
 }
 
-static std::tuple<Tensor,optional<int64_t>> linspace_Scalar_Tensor_batch_rule(
+static std::tuple<Tensor, std::optional<int64_t>> linspace_Scalar_Tensor_batch_rule(
     const at::Scalar& start,
     const at::Tensor& end, std::optional<int64_t> end_bdim,
     int64_t steps,
@@ -178,7 +178,7 @@ static std::tuple<Tensor,optional<int64_t>> linspace_Scalar_Tensor_batch_rule(
   return linspace_logspace_batch_rule_helper(start_t, std::nullopt, end, end_bdim, steps, std::nullopt, dtype, layout, device, pin_memory);
 }
 
-static std::tuple<Tensor,optional<int64_t>> logspace_Tensor_Tensor_batch_rule(
+static std::tuple<Tensor, std::optional<int64_t>> logspace_Tensor_Tensor_batch_rule(
     const at::Tensor& start, std::optional<int64_t> start_bdim,
     const at::Tensor& end, std::optional<int64_t> end_bdim,
     int64_t steps,
@@ -190,7 +190,7 @@ static std::tuple<Tensor,optional<int64_t>> logspace_Tensor_Tensor_batch_rule(
   return linspace_logspace_batch_rule_helper(start, start_bdim, end, end_bdim, steps, std::make_optional(base), dtype, layout, device, pin_memory);
 }
 
-static std::tuple<Tensor,optional<int64_t>> logspace_Tensor_Scalar_batch_rule(
+static std::tuple<Tensor, std::optional<int64_t>> logspace_Tensor_Scalar_batch_rule(
     const at::Tensor& start, std::optional<int64_t> start_bdim,
     const at::Scalar& end,
     int64_t steps,
@@ -204,7 +204,7 @@ static std::tuple<Tensor,optional<int64_t>> logspace_Tensor_Scalar_batch_rule(
   return linspace_logspace_batch_rule_helper(start, start_bdim, end_t, std::nullopt, steps, std::make_optional(base), dtype, layout, device, pin_memory);
 }
 
-static std::tuple<Tensor,optional<int64_t>> logspace_Scalar_Tensor_batch_rule(
+static std::tuple<Tensor, std::optional<int64_t>> logspace_Scalar_Tensor_batch_rule(
     const at::Scalar& start,
     const at::Tensor& end, std::optional<int64_t> end_bdim,
     int64_t steps,

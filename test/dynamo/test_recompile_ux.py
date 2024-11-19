@@ -3,13 +3,12 @@ import unittest
 import weakref
 
 import torch
-
 import torch._dynamo
 import torch._dynamo.config
 import torch._dynamo.test_case
 import torch._dynamo.testing
-
 import torch._logging
+from torch._dynamo.exc import FailOnCacheLimitHit
 from torch.testing._internal.logging_utils import kwargs_to_settings, log_settings
 
 
@@ -204,6 +203,19 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
             logs,
             "expected type of 'L['b']' to be a tensor type, ' but found <class 'int'>",
         )
+
+    @torch._dynamo.config.patch(cache_size_limit=1, fail_on_cache_limit_hit=True)
+    def test_fail_on_cache_limit_hit(self):
+        @torch.compile(backend="eager")
+        def func(b, a):
+            if a:
+                return b * 2
+            else:
+                return b + 1
+
+        func(torch.randn(5), True)
+        with self.assertRaises(FailOnCacheLimitHit):
+            func(torch.randn(5), False)
 
     @torch._dynamo.config.patch("cache_size_limit", 32)
     def test_multiple_guard_fails(self):

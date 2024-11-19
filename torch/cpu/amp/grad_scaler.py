@@ -2,6 +2,7 @@ from typing_extensions import deprecated
 
 import torch
 
+
 __all__ = ["GradScaler"]
 
 

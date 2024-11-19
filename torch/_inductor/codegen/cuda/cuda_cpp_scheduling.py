@@ -24,7 +24,7 @@ class CUDACPPScheduling(BaseScheduling):
     It handles fusion decisions and CUDA C++ specific template code generation.
     """
 
-    def __init__(self, scheduler: Scheduler):
+    def __init__(self, scheduler: Scheduler) -> None:
         super().__init__()
         self.scheduler = scheduler
 
@@ -66,7 +66,9 @@ class CUDACPPScheduling(BaseScheduling):
             compile_wrapper = IndentedBuffer()
             compile_wrapper.writeline("async_compile.cuda(r'''")
             compile_wrapper.splice(src_code, strip=True)
-            compile_wrapper.writeline("''', 'so')")
+            compile_wrapper.writeline(
+                f"''', 'so', aot_compile={str(V.graph.aot_mode)})"
+            )
 
             metadata_comment = f"# kernel path: {kernel_path}"
             origins, detailed_origins = get_kernel_metadata(node_schedule, wrapper)
@@ -100,6 +102,15 @@ class CUDACPPScheduling(BaseScheduling):
         with V.set_kernel_handler(kernel):
             node_schedule = [template_node]
             kernel_name = self.define_kernel(src_code, node_schedule)
-        kernel.call_kernel(kernel_name, ctb)
+
+        # debug printing values of intermediate tensors
+        _, call_args, arg_signatures, _ = kernel.args.python_argdefs()
+        debug_printer_manager = V.graph.wrapper_code.debug_printer
+        debug_printer_manager.set_printer_args(
+            call_args, kernel_name, arg_signatures, kernel
+        )
+        with debug_printer_manager:
+            kernel.call_kernel(kernel_name, ctb)
+
         V.graph.removed_buffers |= kernel.removed_buffers
         self.scheduler.free_buffers()

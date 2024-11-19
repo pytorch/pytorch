@@ -24,7 +24,7 @@ void DispatchParallel(
   }
 }
 
-void nnc_aten_free(int64_t bufs_num, void** ptrs) noexcept {
+void nnc_aten_free(size_t bufs_num, void** ptrs) noexcept {
   for (const auto i : c10::irange(bufs_num)) {
     c10::raw::intrusive_ptr::decref((c10::TensorImpl*)ptrs[i]);
   }

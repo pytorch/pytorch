@@ -15,6 +15,23 @@ from torch.testing._internal.common_utils import IS_JETSON, run_tests, TestCase
 from torch.utils.dlpack import from_dlpack, to_dlpack
 
 
+# Wraps a tensor, exposing only DLPack methods:
+#    - __dlpack__
+#    - __dlpack_device__
+#
+# This is used for guaranteeing we are going through the DLPack method, and not
+# something else, e.g.: CUDA array interface, buffer protocol, etc.
+class TensorDLPackWrapper:
+    def __init__(self, tensor):
+        self.tensor = tensor
+
+    def __dlpack__(self, *args, **kwargs):
+        return self.tensor.__dlpack__(*args, **kwargs)
+
+    def __dlpack_device__(self, *args, **kwargs):
+        return self.tensor.__dlpack_device__(*args, **kwargs)
+
+
 class TestTorchDlPack(TestCase):
     exact_dtype = True
 
@@ -250,6 +267,19 @@ class TestTorchDlPack(TestCase):
         self.assertEqual(z.shape, (1,))
         # gh-83069, make sure __dlpack__ normalizes strides
         self.assertEqual(z.stride(), (1,))
+
+    @skipMeta
+    @onlyNativeDeviceTypes
+    def test_automatically_select_in_creation(self, device):
+        # Create a new tensor, and wrap it using TensorDLPackWrapper.
+        tensor = torch.rand(10)
+        wrap = TensorDLPackWrapper(tensor)
+        # Create a new tensor from the wrapper.
+        # This should identify that the wrapper class provides the DLPack methods
+        # and use them for creating the new tensor, instead of iterating element
+        # by element.
+        new_tensor = torch.tensor(wrap)
+        self.assertEqual(tensor, new_tensor)
 
 
 instantiate_device_type_tests(TestTorchDlPack, globals())
