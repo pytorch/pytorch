@@ -1,6 +1,5 @@
 #ifdef USE_C10D_NCCL
 
-#include <dlfcn.h>
 #include <exception>
 #include <map>
 #include <mutex>
@@ -370,74 +369,9 @@ static std::
   }
   return ncclDumpMap;
 #else
-  /*
-  The following code is designed to work with NCCL versions above 2.23.4, which
-  support the profiler plugin.
-  For information on the NCCL profiler plugin, please refer to
-  https://github.com/NVIDIA/nccl/tree/v2.23.4-1/ext-profiler/example.
-  The plugin is a shared library (.so file) that is loaded by NCCL and PyTorch.
-  Users must define the dump function in the plugin, which should dump the
-  internal buffers of the profiler plugin.
-
-  env variables:
-  1. TORCH_NCCL_ENABLE_PROFILER_PLUGIN is a boolean flag to enable the plugin.
-  2. NCCL_PROFILER_PLUGIN is the path to the plugin.
-  3. NCCL_PROFILER_PLUGIN_FUN is the name of the dump function in the plugin.
-
-  Hint:
-  1. The function name would be mangled in C++. Use readelf -s -W <plugin>.so to
-  find the mangled name.
-  */
-  std::unordered_map<std::string, std::unordered_map<std::string, std::string>>
-      ncclDumpMap;
-
-  const bool isProfilerPluginEnabled =
-      getCvarBool({"TORCH_NCCL_ENABLE_PROFILER_PLUGIN"}, false);
-  if (!isProfilerPluginEnabled) {
-    return ncclDumpMap;
-  }
-
-  const std::string profilerPluginPath = getCvarString(
-      {"NCCL_PROFILER_PLUGIN"},
-      "/packages/training_platform/libnccl_profiler_plugin.so");
-  LOG(INFO) << "NCCL_PROFILER_PLUGIN: " << profilerPluginPath;
-  if (profilerPluginPath.empty()) {
-    return ncclDumpMap;
-  }
-
-  void* handle = dlopen(profilerPluginPath.c_str(), RTLD_LAZY | RTLD_LOCAL);
-  if (handle == nullptr) {
-    LOG(WARNING) << "Failed to open handle to process: ";
-    LOG(WARNING) << "dlopen failed:" << dlerror();
-    return ncclDumpMap;
-  }
-
-  const std::string profilerPluginFun = getCvarString(
-      {"NCCL_PROFILER_PLUGIN_FUN"}, "_Z22ncclProfilerPluginDumpB5cxx11v");
-  if (profilerPluginFun.empty()) {
-    LOG(WARNING) << "NCCL_PROFILER_PLUGIN_FUN is empty";
-    return ncclDumpMap;
-  }
-  std::
-      unordered_map<std::string, std::unordered_map<std::string, std::string>> (
-          *dumpFn)() =
-          (std::unordered_map<
-              std::string,
-              std::unordered_map<std::string, std::string>>(*)())
-              dlsym(handle, profilerPluginFun.c_str());
-  if (dumpFn == nullptr) {
-    LOG(WARNING) << "Failed to find " << profilerPluginFun;
-    return ncclDumpMap;
-  }
-
-  try {
-    // nonblocking call
-    ncclDumpMap = (*dumpFn)();
-  } catch (const std::exception& e) {
-    LOG(WARNING) << "Failed to call " << profilerPluginFun << ": " << e.what();
-  }
-
-  return ncclDumpMap;
+  return std::unordered_map<
+      std::string,
+      std::unordered_map<std::string, std::string>>();
 #endif
 }
 
@@ -855,7 +789,7 @@ bool ProcessGroupNCCL::WorkNCCL::wait(std::chrono::milliseconds timeout) {
 
 void ProcessGroupNCCL::WorkNCCL::abort() {
   // Abort all communicators of this work
-  ncclComm_->ncclCommAbort();
+  ncclComm_->abort();
 
   ncclCommDevIdxMapMutex.lock();
   ncclCommDevIdxMap.erase(ncclComm_);
@@ -1179,6 +1113,64 @@ bool ProcessGroupNCCL::isInitialized() {
   return initialized;
 }
 
+ErrorType ProcessGroupNCCL::getError() {
+  std::lock_guard<std::mutex> lock(errorMutex_);
+  return error_;
+}
+
+void ProcessGroupNCCL::registerMemPool(c10::cuda::MemPool* pool) {
+  const auto key = std::to_string(pool->device());
+  auto device = at::Device(at::DeviceType::CUDA, pool->device());
+  LOG(INFO) << logPrefix()
+            << "Performing NCCL user buffer registration for all buffers in "
+            << "MemPool: " << pool->id() << ", device index: " << key
+            << ", i am " << this;
+  auto ncclComm = getNCCLComm(key);
+  if (ncclComm == nullptr) {
+    // HACK: currently we are using this function for NVLS
+    // reductions, and that's why using OpType::ALLREDUCE.
+    // If we end up using this API for zero-copy P2P, we might
+    // need to refactor and account for different OpType.
+    ncclComm = initNCCLComm(key, device, OpType::ALLREDUCE);
+  }
+  TORCH_INTERNAL_ASSERT(ncclComm != nullptr);
+  auto ctx = c10::cuda::MemPoolContext(pool);
+  auto snapshot = c10::cuda::CUDACachingAllocator::snapshot();
+  for (const auto& segmentInfo : snapshot.segments) {
+    TORCH_INTERNAL_ASSERT(
+        segmentInfo.device == pool->device(),
+        "Mismatch between CUDA memory segment device and pool's device");
+    ncclComm->registerSegment(
+        reinterpret_cast<void*>(segmentInfo.address), segmentInfo.total_size);
+  }
+}
+
+void ProcessGroupNCCL::deregisterMemPool(c10::cuda::MemPool* pool) {
+  const auto key = std::to_string(pool->device());
+  auto device = at::Device(at::DeviceType::CUDA, pool->device());
+  LOG(INFO) << logPrefix()
+            << "Performing NCCL user buffer deregistration for all buffers in "
+            << "MemPool: " << pool->id() << ", device index: " << key
+            << ", i am " << this;
+  auto ncclComm = getNCCLComm(key);
+  if (ncclComm == nullptr) {
+    // HACK: currently we are using this function for NVLS
+    // reductions, and that's why using OpType::ALLREDUCE.
+    // If we end up using this API for zero-copy P2P, we might
+    // need to refactor and account for different OpType.
+    ncclComm = initNCCLComm(key, device, OpType::ALLREDUCE);
+  }
+  TORCH_INTERNAL_ASSERT(ncclComm != nullptr);
+  auto ctx = c10::cuda::MemPoolContext(pool);
+  auto snapshot = c10::cuda::CUDACachingAllocator::snapshot();
+  for (const auto& segmentInfo : snapshot.segments) {
+    TORCH_INTERNAL_ASSERT(
+        segmentInfo.device == pool->device(),
+        "Mismatch between CUDA memory segment device and pool's device");
+    ncclComm->deregisterSegment(reinterpret_cast<void*>(segmentInfo.address));
+  }
+}
+
 c10::intrusive_ptr<intra_node_comm::IntraNodeComm> ProcessGroupNCCL::
     initIntraNodeComm() {
   using IntraNodeComm = intra_node_comm::IntraNodeComm;
@@ -1355,7 +1347,7 @@ void ProcessGroupNCCL::abortCommsFromMap(
 
     VLOG(2) << logPrefix() << "ProcessGroupNCCL destroying ncclComm_ "
             << ncclComm->repr() << " on CUDA device: " << devName;
-    ncclComm->ncclCommAbort(abortReason);
+    ncclComm->abort(abortReason);
     // Note that we don't remove the aborted communicators from the
     // cache. The reason is that if we do remove the communicator
     // from the cache, it is possible that a new collective operation
@@ -1598,7 +1590,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
         bool checkExceptionDump = false;
         try {
           checkExceptionDump =
-              globalStore_->check({std::string(EXCEPTION_DUMP)});
+              globalStore_->check({std::string(kStoreDumpKey)});
         } catch (const std::exception& e) {
           LOG(WARNING)
               << logPrefix()
@@ -1618,7 +1610,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
           }
           shouldDump_.store(true);
           try {
-            auto vec = globalStore_->get(std::string(EXCEPTION_DUMP));
+            auto vec = globalStore_->get(std::string(kStoreDumpKey));
             TORCH_CHECK_WITH(
                 DistBackendError,
                 vec.size() == sizeof(int),
@@ -1948,38 +1940,91 @@ bool ProcessGroupNCCL::verifyWorkTimeoutForTest(
       DistBackendError, "Non c10d::WorkNCCL object returned from collective");
 }
 
-// Broadcast flight-recorder dump signal
-void ProcessGroupNCCL::broadcastDumpSignal() {
+void ProcessGroupNCCL::broadcastSignal(
+    c10::intrusive_ptr<Store>& store,
+    const std::string& signal,
+    int srcRank) {
   try {
-    auto rank = globalRank();
     auto vec = std::vector<uint8_t>(
-        reinterpret_cast<uint8_t*>(&rank),
-        reinterpret_cast<uint8_t*>(&rank) + sizeof(rank));
-    globalStore_->set(std::string(EXCEPTION_DUMP), vec);
-    if (!shouldDump_.load()) {
-      LOG(ERROR)
-          << logPrefix()
-          << "Broadcasting flight-recorder dump signal to other processes via TCPStore.";
-    }
-    // signal the monitor thread on PG0 to start dumping
-    shouldDump_.store(true);
-    // Give time for dumping before throwing exception
-    auto start = std::chrono::steady_clock::now();
-    auto status = promiseFlightRecorderDump_.get_future().wait_for(
-        std::chrono::milliseconds(waitTimeoutDumpInMilSec_));
-    if (status == std::future_status::timeout) {
-      LOG(WARNING) << logPrefix() << "timed out after waiting for "
-                   << waitTimeoutDumpInMilSec_ << "ms"
-                   << " flight recorder dumps to finish.";
-    } else if (status == std::future_status::ready) {
-      auto end = std::chrono::steady_clock::now();
-      LOG(INFO) << logPrefix() << "slept for " << computeDeltaMS(start, end)
-                << "ms"
-                << " giving time for flight recorder dumps to finish.";
-    }
+        reinterpret_cast<uint8_t*>(&srcRank),
+        reinterpret_cast<uint8_t*>(&srcRank) + sizeof(srcRank));
+    store->set(signal, vec);
+    LOG(ERROR) << logPrefix() << "Broadcasting signal " << signal
+               << " to other ranks via TCPStore.";
   } catch (const std::exception& e) {
-    LOG(ERROR) << logPrefix() << "Failed to set dump signal in tcpstore. "
-               << "Error: " << e.what();
+    LOG(ERROR) << logPrefix() << "Failed to broadcast signal " << signal
+               << " through TCPStore. Error: " << e.what();
+  }
+}
+
+int ProcessGroupNCCL::getSignalSrcRank(
+    c10::intrusive_ptr<Store>& store,
+    const std::string& signal) {
+  // This function is 'non blocking'. We first 'check' if the key exists in the
+  // store, then read/get the value only if the key exists.
+  int srcRank = -1;
+  bool signalExists = false;
+  try {
+    signalExists = store->check({signal});
+  } catch (const std::exception& e) {
+    LOG(WARNING) << logPrefix() << "Failed to check the signal " << signal
+                 << " on TCPStore, " << e.what();
+  }
+
+  if (signalExists) {
+    // key exists, now read and parse the value (source rank)
+    try {
+      auto vec = store->get(std::string(signal));
+      TORCH_CHECK_WITH(
+          DistBackendError,
+          vec.size() == sizeof(int),
+          "Invalid size for the timeout rank ID");
+      std::memcpy(&srcRank, vec.data(), vec.size());
+    } catch (const std::exception& e) {
+      LOG(ERROR) << logPrefix() << "Failed to get source rank of the signal "
+                 << signal << " from TCPStore." << e.what();
+    }
+  }
+  return srcRank;
+}
+
+void ProcessGroupNCCL::broadcastDumpSignal() {
+  // broadcast dump signal to all other global ranks.
+  broadcastSignal(globalStore_, std::string(kStoreDumpKey), globalRank());
+  // signal the local rank to start dumping
+  if (!shouldDump_.load()) {
+    LOG(ERROR) << logPrefix() << "First PG on this rank to signal dumping.";
+  }
+  // signal the monitor thread on PG0 to start dumping
+  shouldDump_.store(true);
+  // Give time for dumping before throwing exception
+  auto start = std::chrono::steady_clock::now();
+  auto status = promiseFlightRecorderDump_.get_future().wait_for(
+      std::chrono::milliseconds(waitTimeoutDumpInMilSec_));
+  if (status == std::future_status::timeout) {
+    LOG(WARNING) << logPrefix() << "timed out after waiting for "
+                 << waitTimeoutDumpInMilSec_ << "ms"
+                 << " flight recorder dumps to finish.";
+  } else if (status == std::future_status::ready) {
+    auto end = std::chrono::steady_clock::now();
+    LOG(INFO) << logPrefix() << "slept for " << computeDeltaMS(start, end)
+              << "ms"
+              << " giving time for flight recorder dumps to finish.";
+  }
+}
+
+void ProcessGroupNCCL::checkAndSetRemoteError() {
+  // if the error is already set, no need to check again
+  if (getError() != ErrorType::SUCCESS) {
+    return;
+  }
+  int remoteErrorRank =
+      getSignalSrcRank(store_, std::string(kStoreErrorSignalKey));
+  if (remoteErrorRank != -1) {
+    std::lock_guard<std::mutex> lock(errorMutex_);
+    error_ = ErrorType::REMOTE_ERROR;
+    LOG(ERROR) << c10::str(
+        logPrefix(), " remote error detected from rank: ", remoteErrorRank);
   }
 }
 
@@ -2046,6 +2091,9 @@ void ProcessGroupNCCL::watchdogHandler() {
       lastStatusUpdateTime = std::chrono::steady_clock::now();
     }
 
+    // Check and set remote error if it has not been set before
+    checkAndSetRemoteError();
+
     for (auto it = workMetaList_.begin(); it != workMetaList_.end();
          /* no increment */) {
       auto& work = *it;
@@ -2058,6 +2106,13 @@ void ProcessGroupNCCL::watchdogHandler() {
       if (!terminateProcessGroup_.load()) {
         work.checkAndSetException();
       }
+      if (work.exception()) {
+        // set the error to the first error found
+        std::lock_guard<std::mutex> lock(errorMutex_);
+        if (error_ == ErrorType::SUCCESS) {
+          error_ = ErrorType::COMM_ERROR;
+        }
+      }
       // Then check if work has timed out
       // Skip if work has encountered an error
       bool timedout = !work.exception() && work.checkTimeout();
@@ -2065,6 +2120,10 @@ void ProcessGroupNCCL::watchdogHandler() {
       // Report desync state in case of timeout (if TORCH_NCCL_DESYNC_DEBUG is
       // turned on; otherwise, run() is no-op)
       if (timedout) {
+        std::lock_guard<std::mutex> lock(errorMutex_);
+        if (error_ == ErrorType::SUCCESS) {
+          error_ = ErrorType::TIMEOUT;
+        }
         desyncDebugger_.run();
       }
 
@@ -2078,6 +2137,9 @@ void ProcessGroupNCCL::watchdogHandler() {
             pgStatus_->lastEnqueuedSeq,
             ", last completed work: ",
             pgStatus_->lastCompletedSeq);
+
+        // broadcast remote error signal to all other ranks in this specific PG.
+        broadcastSignal(store_, std::string(kStoreErrorSignalKey), rank_);
 
         // Print the traceback of the collective at call time
         work.printTraceback();
@@ -2353,7 +2415,7 @@ void ProcessGroupNCCL::destroyNCCLComms(const std::string& devNCCLCommMapKey) {
   std::shared_ptr<NCCLComm>& ncclComm = devNCCLCommMap_[devNCCLCommMapKey];
   // ncclCommDestroy(comm->getNcclComm()) results in segfault when PG is being
   // destroyed, so using ncclCommAbort here.
-  ncclComm->ncclCommAbort();
+  ncclComm->abort();
   // Remove communicators from the cache.
   devNCCLCommMap_.erase(devNCCLCommMapKey);
   // Clear used device indices.
