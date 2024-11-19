@@ -528,25 +528,39 @@ class CppMicroGemmAMX(CppMicroGemm):
     alignas(4096) {{input_t}} dequantized_B_buf[buf_size];
     {%- endif %}
 
-    auto load_dequantized_B = [&](int n) {
+    auto load_dequantized_B = [&](int base_idx) {
         // Load a tile of B & cache it in L1D.
-        // The assumption here is that if N would be a multiple of block_n,
-        // then B would be some consecutive blocks sized [k, block_n] elements each, so the
-        // first element of a subsequent [K, block_n] block would be right after the last
-        // element of the previous block sized [K x block_n] elements.
-        // This is implicitly being ensured by the current weight-packing implementation.
-        // Since blocks sized [K, block_n] corresponding to each block_n sized segment of N
-        // are to be cached, the details of the weight-packing implementation can't be made
-        // transparent to the dequantization & caching logic here.
-        // It's worth noting that ldb doesn't matter in this context.
-        const int base_idx = K * n;
-        for (int idx = 0; idx < buf_size; idx += 32) {
+        {{input2_t}}* base_addr = const_cast<{{input2_t}}*>(B) + base_idx;
+        for (int idx_dq = 0, idx_q = 0; idx_dq < buf_size; idx_q += ldb, idx_dq += {{block_n}}) {
+        {%- if block_n in [16, 32] %}
             auto b_int8 = at::vec::Vectorized<int8_t>::loadu(
-                const_cast<{{input2_t}}*>(B) + base_idx + idx,
-                static_cast<int64_t>(32)
+                base_addr + idx_q,
+                static_cast<int64_t>({{block_n}})
             );
             auto b_bf16 = at::vec::convert<{{input_t}}>(b_int8);
-            b_bf16.store(dequantized_B_buf + idx);
+            b_bf16.store(
+                dequantized_B_buf + idx_dq,
+                static_cast<int64_t>({{block_n}})
+            );
+        {%- elif block_n == 48 %}
+            // first 32 elements
+            auto b_int8_32 = at::vec::Vectorized<int8_t>::loadu(
+                base_addr + idx_q,
+                static_cast<int64_t>(32)
+            );
+            auto b_bf16_32 = at::vec::convert<{{input_t}}>(b_int8_32);
+            b_bf16_32.store(dequantized_B_buf + idx_dq);
+            // next 16 elements
+            auto b_int8_16 = at::vec::Vectorized<int8_t>::loadu(
+                base_addr + idx_q + 32,
+                static_cast<int64_t>(16)
+            );
+            auto b_bf16_16 = at::vec::convert<{{input_t}}>(b_int8_16);
+            b_bf16_16.store(
+                dequantized_B_buf + idx_dq + 32,
+                static_cast<int64_t>(16)
+            );
+        {%- endif %}
         }
     };
 {%- endif %}
@@ -575,7 +589,11 @@ class CppMicroGemmAMX(CppMicroGemm):
                     C + m * ldc + n,
                     K,
                     lda,
+{%- if not use_cached_dequantized_B %}
                     ldb,
+{%- else %}
+                    block_n,
+{%- endif %}
                     ldc,
                     16
                 );
@@ -595,7 +613,11 @@ class CppMicroGemmAMX(CppMicroGemm):
                     C + m_tail * ldc + n,
                     K,
                     lda,
+{%- if not use_cached_dequantized_B %}
                     ldb,
+{%- else %}
+                    block_n,
+{%- endif %}
                     ldc,
                     block_m
                 );
