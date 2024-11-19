@@ -241,6 +241,10 @@ class TestPatternMatcherBase(TestCase):
 
 
 class TestPatternMatcher(TestPatternMatcherBase):
+    # The pattern match for this is kind of broken. It'll match if negative_slope
+    # is either a float or a tensor. I'll cc the person who wrote this test/match
+    # on the diff to see if they can help me fix it.
+    @torch._dynamo.config.patch(specialize_float=True)
     def _test_conv_unary_cpu_base(self, dim=4):
         assert dim == 4 or dim == 5
 
