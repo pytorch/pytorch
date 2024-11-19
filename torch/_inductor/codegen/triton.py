@@ -1537,11 +1537,8 @@ class TritonKernel(SIMDKernel):
                 # indirect indexing
                 cse_var = self.cse.varname_map[var.name]
                 mask_vars.update(cse_var.mask_vars)
-            elif "(" in var.name:
-                pass
             elif symbol_is_type(var, SymT.TEMPLATE_INDEX):
-                # TODO check for scatter + masks
-                # Hmm why is this '(idx_m)'?
+                # Needed for scatters in flexattention
                 pass
             elif symbol_is_type(
                 var,
