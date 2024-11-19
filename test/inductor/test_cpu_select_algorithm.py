@@ -296,6 +296,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             )
             and epilogue != "mul"
             and epilogue != "div"
+            and dynamo_config.specialize_float
             or (
                 dtype in (torch.float16, torch.bfloat16)
                 and epilogue == "add"
