@@ -13,7 +13,15 @@ from torch.fx.experimental.symbolic_shapes import has_free_symbols
 from torch.fx.node import map_arg
 
 from ..lowering import lowerings as L, require_channels_last
-from ..pattern_matcher import Arg, CallFunction, filter_nodes, KeywordArg, ListOf, Match
+from ..pattern_matcher import (
+    Arg,
+    CallFunction,
+    filter_nodes,
+    Ignored,
+    KeywordArg,
+    ListOf,
+    Match,
+)
 from ..utils import pad_listlike
 from .freezing_patterns import register_freezing_graph_pattern
 from .post_grad import register_lowering_pattern
@@ -84,7 +92,7 @@ def _may_generate_pattern_with_dtype_convert(
 def _may_generate_pattern_with_reshape(pattern, reshape_size=Arg(), with_reshape=True):
     if with_reshape:
         return CallFunction(
-            torch.ops.aten.reshape.default,
+            aten.reshape.default,
             pattern,
             reshape_size,
         )
@@ -1486,6 +1494,100 @@ def _register_woq_lowering(pattern, computation_woq, computation_reshape):
     return woq
 
 
+def _register_da8w8_mm_pattern(pattern):
+    @register_freezing_graph_pattern(pattern, pass_number=0)
+    def da8w8(match: Match, *args, **kwargs):
+        x = kwargs["x_int8"]
+        x_scales = kwargs["x_scales"]
+        weight = kwargs["weight"]
+        weight_scales = kwargs["weight_scales"]
+        weight_zps = kwargs["weight_zps"]
+
+        out_node = match.output_node()
+        with match.graph.inserting_before(out_node):
+            permuted_weight = match.graph.call_function(
+                aten.permute.default, args=(weight, [1, 0])
+            )
+            contiguous_weight = match.graph.call_function(
+                aten.contiguous.default, args=(permuted_weight,)
+            )
+            gemm_node = match.graph.call_function(
+                quantized_decomposed.da8w8_gemm,
+                args=(x, contiguous_weight, x_scales, weight_scales, weight_zps),
+            )
+            out_node.replace_all_uses_with(gemm_node)
+            gemm_node.meta.update(out_node.meta)
+
+
+def da8w8_float_pattern():
+    # Symmetrically int8 quantized activation (dynamically)
+    # int8 asymmetrically statically quantized weights
+    _weight_pattern = CallFunction(
+        aten.permute.default,
+        CallFunction(
+            aten.slice.Tensor,
+            CallFunction(
+                aten.slice.Tensor,
+                CallFunction(
+                    aten.mul.Tensor,
+                    CallFunction(
+                        prims.convert_element_type.default,
+                        CallFunction(
+                            aten.sub.Tensor,
+                            CallFunction(
+                                prims.convert_element_type.default,
+                                KeywordArg("weight"),
+                                torch.int32,
+                            ),
+                            KeywordArg("weight_zps"),  # int32
+                        ),
+                        torch.float32,
+                    ),
+                    KeywordArg("weight_scales"),
+                ),
+                0,
+                0,
+                Ignored(),
+            ),
+            1,
+            0,
+            Ignored(),
+        ),
+        [1, 0],
+    )
+
+    _x_scaled_fp32_pattern = CallFunction(
+        aten.slice.Tensor,
+        CallFunction(
+            aten.slice.Tensor,
+            CallFunction(
+                aten.mul.Tensor,
+                CallFunction(
+                    prims.convert_element_type.default,
+                    CallFunction(
+                        prims.convert_element_type.default,
+                        KeywordArg("x_int8"),
+                        torch.int32,
+                    ),
+                    torch.float32,
+                ),
+                KeywordArg("x_scales"),
+            ),
+            0,
+            0,
+            Ignored(),
+        ),
+        1,
+        0,
+        Ignored(),
+    )
+
+    _da8w8_pattern = CallFunction(
+        aten.mm.default, _x_scaled_fp32_pattern, _weight_pattern
+    )
+    return _da8w8_pattern
+
+
 def _register_woq_mm_int8_pattern1():
     # F.linear(x, weight.to(dtype=x.dtype)) * scales
     # case of dispatching to mm, with x reshape
@@ -2518,6 +2620,9 @@ def _register_quantization_weight_pack_pass():
 
     # Step 3: QLinear weight prepack
     _register_qlinear_weight_prepack()
+
+    # Step 4 : da8w8 linear
+    _register_da8w8_mm_pattern(da8w8_float_pattern())
 
 
 def quant_lift_up(graph_module: torch.fx.GraphModule):

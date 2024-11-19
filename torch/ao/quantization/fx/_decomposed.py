@@ -47,6 +47,52 @@ quantized_decomposed_lib.define(
 )
 
 
+quantized_decomposed_lib.define(
+    "da8w8_gemm(Tensor input, Tensor weight, Tensor input_scales, Tensor weight_scales, Tensor weight_zp) -> Tensor"
+)
+
+
+@impl(quantized_decomposed_lib, "da8w8_gemm", "CPU")
+def da8w8_gemm(
+    input: torch.Tensor,
+    weight: torch.Tensor,
+    input_scales: torch.Tensor,
+    weight_scales: torch.Tensor,
+    weight_zp: torch.Tensor,
+) -> torch.Tensor:
+    compensation = input.to(torch.int32).sum(-1).mul(weight_zp).to(torch.float32)
+    return (
+        torch.sub(torch._int_mm(input, weight).to(torch.float32), compensation.T)
+        .mul(weight_scales.view(-1))
+        .mul(input_scales.view(-1, 1))
+    )
+
+
+@impl(quantized_decomposed_lib, "da8w8_gemm", "Meta")
+def da8w8_gemm_meta(
+    input: torch.Tensor,
+    weight: torch.Tensor,
+    input_scales: torch.Tensor,
+    weight_scales: torch.Tensor,
+    weight_zp: torch.Tensor,
+) -> torch.Tensor:
+    torch._check(input.dim() == 2, lambda: "x must be a 2D tensor")
+    torch._check(weight.dim() == 2, lambda: "w must be a 2D tensor")
+    input_outer_dim = input.shape[0]
+    torch._check(input_scales.shape[0] == input_outer_dim, lambda: "shapes must match")
+    torch._check(weight_scales.shape[0] == input_outer_dim, lambda: "shapes must match")
+    torch._check(weight_zp.shape[0] == input_outer_dim, lambda: "shapes must match")
+    torch._check(
+        input.dtype == torch.int8,
+        lambda: f"expected x to be int8, got {input.dtype}",
+    )
+    torch._check(
+        weight.dtype is torch.int8,
+        lambda: f"expected w to be int8, got {weight.dtype}",
+    )
+    return input.new_empty(input.size(0), weight.size(1), dtype=torch.float32)
+
+
 @impl(quantized_decomposed_lib, "quantize_per_tensor", "CompositeExplicitAutograd")
 def quantize_per_tensor(
     input: torch.Tensor,
