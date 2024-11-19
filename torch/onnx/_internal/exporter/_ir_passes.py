@@ -23,22 +23,21 @@ def rename_outputs(model: ir.Model, new_names: Sequence[str]) -> None:
         output.name = new_name
 
 
-def add_torchlib_common_imports(model: ir.Model) -> None:
-    """Hack to add torchlib common imports to the model."""
+def add_opset_imports(model: ir.Model) -> None:
+    """Collect all opsets used and add opset imports to the model and functions."""
+    for node in ir.traversal.RecursiveGraphIterator(model.graph):
+        domain = node.domain
+        version = node.version if node.version is not None else 1
+        if domain in model.opset_imports:
+            # Heuristic to use the latest version seen
+            version = max(version, model.opset_imports[domain])
+        model.opset_imports[domain] = version
 
-    try:
-        # TODO(justinchuby): Remove this hack and improved onnxscript
-        from onnxscript.function_libs.torch_lib.ops import common as common_ops
-
-        model.opset_imports["pkg.onnxscript.torch_lib.common"] = 1
-        for function in model.functions.values():
-            if function.domain == "pkg.torch.__subgraph__":
-                function.opset_imports["pkg.onnxscript.torch_lib.common"] = 1
-        rank_func = ir.serde.deserialize_function(common_ops.Rank.to_function_proto())
-        is_scalar_func = ir.serde.deserialize_function(
-            common_ops.IsScalar.to_function_proto()
-        )
-        model.functions[rank_func.identifier()] = rank_func
-        model.functions[is_scalar_func.identifier()] = is_scalar_func
-    except Exception:
-        logger.exception("Failed to add torchlib common imports to the model.")
+    for function in model.functions.values():
+        for node in ir.traversal.RecursiveGraphIterator(function):
+            domain = node.domain
+            version = node.version if node.version is not None else 1
+            if domain in function.opset_imports:
+                # Heuristic to use the latest version seen
+                version = max(version, function.opset_imports[domain])
+            function.opset_imports[domain] = version
