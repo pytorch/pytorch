@@ -3947,7 +3947,7 @@ class TestCudaMallocAsync(TestCase):
     def test_temperature(self):
         self.assertTrue(0 <= torch.cuda.temperature() <= 150)
 
-    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "flaky for async malloc")
+    @unittest.skipIf(TEST_WITH_ROCM, "flaky for AMD gpu")
     @unittest.skipIf(TEST_PYNVML, "pynvml/amdsmi is not available")
     def test_device_memory_used(self):
         """
