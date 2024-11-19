@@ -204,9 +204,8 @@ def generate_ttir(
     # ignore backend-specific kwargs same way as in the native Triton code
     # https://github.com/triton-lang/triton/blob/a6bb57d6285e723c58e87dd7cba263db6efff789/python/triton/runtime/jit.py#L594-L596
     # why this is important for user-defined Triton kernels on AMD: https://github.com/pytorch/pytorch/issues/140800
-    excess_kwargs = {name for name in kwargs if name not in kernel.arg_names}
-    for name in excess_kwargs:
-        if name in options.__dict__:
+    for name in list(kwargs):
+        if name not in kernel.arg_names and name in options.__dict__:
             kwargs.pop(name)
 
     if len(kwargs) != len(kernel.arg_names):
