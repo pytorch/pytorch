@@ -1218,14 +1218,11 @@ class TritonKernelOverrides(TritonOverrides):
 
         value = None if need_where else other
 
-        # keys is a view, need to copy it
-        keys = set(V.kernel.cse.cache.keys())
+        tmp = V.kernel
+        tmp_cse = tmp.cse
 
         with V.kernel.mask_loads(mask, value=value) as new_mask:
             result = body()
-
-        # TODO - could potentially only invalidate variables which are dependent on loads
-        V.kernel.cse.invalidate(keep_vars=keys)
 
         if need_where:
             # Remove once CSEVariables track the dtype
@@ -1255,15 +1252,15 @@ class TritonKernelOverrides(TritonOverrides):
     @staticmethod
     def frexp(x):
         cache_key = f"frexp({x})"
-        if cache_key in V.kernel.cse.cache:
-            return V.kernel.cse.cache[cache_key]
+        if cse_val := V.kernel.cse.try_get(cache_key):
+            return cse_val
 
         mantissa = V.kernel.cse.newvar(dtype=x.dtype)
         exponent = V.kernel.cse.newvar(dtype=x.dtype)
         V.kernel.compute.writeline(
             f"{mantissa}, {exponent} = triton_helpers.frexp({x})"
         )
-        V.kernel.cse.cache[cache_key] = (mantissa, exponent)
+        V.kernel.cse.put(cache_key, (mantissa, exponent))
         return (mantissa, exponent)
 
 
@@ -1367,6 +1364,32 @@ class CooperativeReductionWorkspaceCache:
         return prior
 
 
+class TritonCSE(CSE):
+    """
+    Subclasses CSE to applies the current mask to the  cache key to avoid CSEing
+    variables across separate masked blocks.
+    """
+
+    @staticmethod
+    def mask_key(cache_key: object) -> object:
+        if mask := V.kernel._load_mask:
+            return (cache_key, mask.name)
+        else:
+            return cache_key
+
+    def put(self, cache_key: object, val: CSEVariable) -> None:
+        self._cache[self.mask_key(cache_key)] = val
+
+    def contains(self, cache_key) -> bool:
+        return self.mask_key(cache_key) in self._cache
+
+    def try_get(self, cache_key: object) -> Optional[CSEVariable]:
+        return self._cache.get(self.mask_key(cache_key), None)
+
+    def get(self, cache_key: object) -> CSEVariable:
+        return self._cache[self.mask_key(cache_key)]
+
+
 class TritonKernel(SIMDKernel):
     overrides = TritonKernelOverrides  # type: ignore[assignment]
     helper_functions: HelperFunctions
@@ -1382,6 +1405,7 @@ class TritonKernel(SIMDKernel):
     ) -> None:
         self.optimize_mask: bool = optimize_mask
         super().__init__(*groups, **kwargs)
+        self.cse = TritonCSE(self.newvar_prefix, self.suffix)
         self.post_loop_combine: IndentedBuffer = IndentedBuffer()
         self.post_loop_store: IndentedBuffer = IndentedBuffer()
         self.outside_loop_vars: OrderedSet[Any] = OrderedSet()
@@ -2636,8 +2660,8 @@ class TritonKernel(SIMDKernel):
         def cse_multiple(line, values, masks, dtypes):
             n = len(values)
             cache_keys = [f"{line}, {i}, {masks}" for i in range(n)]
-            if all(cache_key in self.cse.cache for cache_key in cache_keys):
-                return [self.cse.cache[cache_key] for cache_key in cache_keys]
+            if all(self.cse.contains(cache_key) for cache_key in cache_keys):
+                return [self.cse.get(cache_key) for cache_key in cache_keys]
             result_vars = [self.cse.newvar(dtype=_dtype) for _dtype in dtypes]
             self.compute.writeline(
                 f"{csv(result_vars)} = {line}",
@@ -2645,7 +2669,7 @@ class TritonKernel(SIMDKernel):
             for result_var, cache_key in zip(result_vars, cache_keys):
                 if masks:
                     result_var.mask_vars = masks  # type: ignore[attr-defined]
-                self.cse.cache[cache_key] = result_var
+                self.cse.put(cache_key, result_var)
             return tuple(result_vars)
 
         partial_scan_vars = cse_multiple(
@@ -2723,8 +2747,8 @@ class TritonKernel(SIMDKernel):
 
         def cse_multiple(line, n, masks, dtypes):
             cache_keys = [f"{line}, {i}, {masks}" for i in range(n)]
-            if all(cache_key in self.cse.cache for cache_key in cache_keys):
-                return [self.cse.cache[cache_key] for cache_key in cache_keys]
+            if all(self.cse.contains(cache_key) for cache_key in cache_keys):
+                return [self.cse.get(cache_key) for cache_key in cache_keys]
             result_vars = [self.cse.newvar(dtype=dtypes[i]) for i in range(n)]  # type: ignore[attr-defined]
             self.compute.writeline(
                 f"{csv(result_vars)} = {line}",
@@ -2732,7 +2756,7 @@ class TritonKernel(SIMDKernel):
             for result_var, cache_key in zip(result_vars, cache_keys):
                 if masks:
                     result_var.mask_vars = masks  # type: ignore[attr-defined]
-                self.cse.cache[cache_key] = result_var
+                self.cse.put(cache_key, result_var)
             return tuple(result_vars)
 
         assert self.range_trees[-1].prefix == "r"

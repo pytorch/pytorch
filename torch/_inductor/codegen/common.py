@@ -1693,7 +1693,7 @@ class CSE:
     ):
         self.prefix = prefix
         self.suffix = suffix
-        self.cache = {}
+        self._cache = {}
         self.name_prefix = name_prefix
         self.store_cache = store_cache or {}
         self.reduction_cache = reduction_cache or {}
@@ -1706,11 +1706,11 @@ class CSE:
             if tmp not in keep_vars:
                 del self.store_cache[name]
                 self.invalidated_stores.add(name)
-        self.cache = {k: v for k, v in self.cache.items() if v in keep_vars}
+        self._cache = {k: v for k, v in self._cache.items() if v in keep_vars}
 
     def clone(self):
         # Note(fdrocha): reduction_cache is not being cloned, not sure if this is intentional
-        return CSE(
+        return type(self)(
             prefix=self.prefix,
             suffix=self.suffix,
             name_prefix=self.name_prefix,
@@ -1718,6 +1718,18 @@ class CSE:
             store_cache=self.store_cache,
             varname_map=self.varname_map,
         )
+
+    def put(self, cache_key: object, val: CSEVariable) -> None:
+        self._cache[cache_key] = val
+
+    def contains(self, cache_key) -> bool:
+        return cache_key in self._cache
+
+    def try_get(self, cache_key: object) -> Optional[CSEVariable]:
+        return self._cache.get(cache_key, None)
+
+    def get(self, cache_key: object) -> CSEVariable:
+        return self._cache[cache_key]
 
     def generate(
         self,
@@ -1747,10 +1759,10 @@ class CSE:
         else:
             assert isinstance(expr, str)
             cache_key = expr
-        var = self.cache.get(cache_key, None)
+        var = self.try_get(cache_key)
         if not var:
             var = self.newvar(bounds, dtype)
-            self.cache[cache_key] = var
+            self.put(cache_key, var)
             if write:
                 if V.kernel.current_node:
                     V.kernel.current_node.codegen_originating_info(
@@ -2078,7 +2090,7 @@ class Kernel(CodeGen):
     def swap_buffers(self, lb, cb=None, sb=None):
         def scope_cse(cse):
             new_cse = cse.clone()
-            new_cse.cache = ScopedDict(cse.cache)
+            new_cse._cache = ScopedDict(cse._cache)
             new_cse.reduction_cache = ScopedDict(cse.reduction_cache)
             new_cse.store_cache = ScopedDict(cse.store_cache)
             return new_cse
