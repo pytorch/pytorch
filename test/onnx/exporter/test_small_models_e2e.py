@@ -78,8 +78,12 @@ class DynamoExporterTest(common_utils.TestCase):
         )
         onnx_model = onnx_program.model
         # TODO: Preserve the subgraph names
-        self.assertIn("true_graph_0", onnx_model.functions)
-        self.assertIn("false_graph_0", onnx_model.functions)
+        self.assertIn(
+            ("pkg.torch.__subgraph__", "true_graph_0", ""), onnx_model.functions
+        )
+        self.assertIn(
+            ("pkg.torch.__subgraph__", "false_graph_0", ""), onnx_model.functions
+        )
         onnx_testing.assert_onnx_program(onnx_program)
 
     def test_onnx_export_nested_controlflow_and_nested_weights(self):
@@ -121,7 +125,6 @@ class DynamoExporterTest(common_utils.TestCase):
             dynamo=True,
             fallback=False,
         )
-        print(onnx_program.model)
         onnx_testing.assert_onnx_program(onnx_program)
 
     # TODO(justinchuby): Test multi-output HOPs
