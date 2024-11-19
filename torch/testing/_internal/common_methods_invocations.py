@@ -7125,18 +7125,18 @@ def sample_inputs_scatter(op_info, device, dtype, requires_grad, **kwargs):
         (_tensor((M, S)), (0, _gather((M, S // 2), 1, M), _tensor((M, S // 2)))),
         (_tensor((M, S)), (1, _gather((M, S // 2), 0, S), _tensor((M, S // 2)))),
         (_tensor((M, S)), (-1, _gather((M, S // 2), 0, S), _tensor((M, S // 2)))),
-        (_tensor(()), (0, zero.clone().detach(), _tensor(()))),
-        (_tensor(()), (0, zero.clone().detach(), 2.5)),
+        (_tensor(()), (0, zero.detach().clone(), _tensor(()))),
+        (_tensor(()), (0, zero.detach().clone(), 2.5)),
     )
 
     for tensor, args in test_cases:
         yield SampleInput(tensor, *args)
 
         if not requires_grad:
-            yield SampleInput(tensor.clone().detach(), *args, reduce='add')
+            yield SampleInput(tensor.detach().clone(), *args, reduce='add')
 
             if dtype.is_floating_point:
-                yield SampleInput(tensor.clone().detach(), *args, reduce='multiply')
+                yield SampleInput(tensor.detach().clone(), *args, reduce='multiply')
 
 def sample_inputs_scatter_add(op_info, device, dtype, requires_grad, **kwargs):
     def _tensor(shape, dtype=dtype, low=None, high=None):
@@ -7152,7 +7152,7 @@ def sample_inputs_scatter_add(op_info, device, dtype, requires_grad, **kwargs):
     yield SampleInput(_tensor((M, S)), 0, _gather((M, S // 2), 1, M), _tensor((M, S // 2)))
     yield SampleInput(_tensor((M, S)), 1, _gather((M, S // 2), 0, S), _tensor((M, S // 2)))
     yield SampleInput(_tensor((M, S)), -1, _gather((M, S // 2), 0, S), _tensor((M, S // 2)))
-    yield SampleInput(_tensor(()), 0, zero.clone().detach(), _tensor(()))
+    yield SampleInput(_tensor(()), 0, zero.detach().clone(), _tensor(()))
 
 def sample_inputs_scatter_reduce(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
@@ -7166,7 +7166,7 @@ def sample_inputs_scatter_reduce(op_info, device, dtype, requires_grad, **kwargs
         ((M, S), 0, gather((M, S // 2), 1, M), (M, S // 2)),
         ((M, S), 1, gather((M, S // 2), 0, S), (M, S // 2)),
         ((M, S), -1, gather((M, S // 2), 0, S), (M, S // 2)),
-        ((), 0, zero.clone().detach(), ()),
+        ((), 0, zero.detach().clone(), ()),
     )
 
     reduce = op_info.variant_test_name
@@ -14587,7 +14587,6 @@ op_db: List[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         supports_out=False,
         skips=(
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='cpu'),
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
         ),
     ),
@@ -22322,6 +22321,11 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.exp",
         torch_opinfo_name="exp",
+        skips=(
+            DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
+                         'test_reference_numerics_extremal',
+                         device_type='cpu', dtypes=[torch.cfloat, torch.cdouble], active_if=IS_WINDOWS),
+        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.expm1",
@@ -22334,6 +22338,9 @@ python_ref_db = [
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
                          'test_reference_numerics_large',
                          dtypes=[torch.cdouble]),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
+                         'test_reference_numerics_extremal',
+                         device_type='cpu', dtypes=[torch.cfloat, torch.cdouble], active_if=IS_WINDOWS),
         ),
     ),
     ElementwiseUnaryPythonRefInfo(
