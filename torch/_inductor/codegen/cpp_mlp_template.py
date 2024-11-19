@@ -37,7 +37,7 @@ extern "C" {{export_declaration}}
 {
     {{kernel.maybe_codegen_profile()}}
     {{ template.codegen_blocks(
-        num_threads, N, K, micro_gemm, is_dynamic_M, kernel, GemmOut, config, L1_cache_size, L2_cache_size
+        num_threads, N, K, micro_gemm, is_dynamic_M, kernel, GemmOut, config, L1_cache_size, L2_cache_size, X, W
     ) }}
 
 {%- if num_threads > 1 %}
