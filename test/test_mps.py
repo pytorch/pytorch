@@ -1608,6 +1608,16 @@ class TestAvgPool(TestCaseMPS):
 
 
 class TestMPS(TestCaseMPS):
+
+    def test_sync(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/139550#issuecomment-2468860559
+        a = torch.arange(1000)
+        b = torch.arange(1000)
+        a = a.to('mps', non_blocking=True)
+        b = b.to('mps', non_blocking=True)
+        torch.mps.synchronize()
+        assert (a == b).all()
+
     def test_exp(self, device="mps", dtype=torch.float):
         for v in (2, -2) + ((1j, 1 + 1j) if dtype.is_complex else ()):
             b = torch.arange(18, dtype=dtype, device=device) / 3 * math.pi
