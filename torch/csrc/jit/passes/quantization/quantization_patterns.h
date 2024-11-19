@@ -25,7 +25,9 @@ std::string getExtraArgList(std::vector<std::string> extra_args) {
       extra_args.begin(),
       extra_args.end(),
       std::string(),
-      [](std::string acc, const std::string& arg) { return acc + ", " + arg; });
+      [](const std::string& acc, const std::string& arg) {
+        return acc + ", " + arg;
+      });
 }
 
 // Get the pattern we want to replace the match with

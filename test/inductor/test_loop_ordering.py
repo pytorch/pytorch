@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 
 import contextlib
+import os
 import unittest
 
 import numpy as np
@@ -18,10 +19,12 @@ from torch._inductor.test_operators import realize
 from torch._inductor.utils import sympy_index_symbol
 from torch._inductor.virtualized import ops, V
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
-from torch.testing._internal.common_device_type import expectedFailureXPU
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.utils._pytree import tree_map
 from torch.utils._sympy.functions import ModularIndexing
+
+
+DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
 
 
 if HAS_GPU:
@@ -237,8 +240,6 @@ class LoopOrderingTest(TestCase):
         expected_num_bytes *= x.itemsize
         self.assertEqual(expected_num_bytes, metrics.num_bytes_accessed)
 
-    # xpu generate 2 kernels
-    @expectedFailureXPU
     def test_apbt_realize(self):
         M = 1024
         N = 2048
@@ -258,8 +259,6 @@ class LoopOrderingTest(TestCase):
         self.do_acc_test(f, x, y)
         self.assertEqual(1, metrics.generated_kernel_count)
 
-    # xpu generate 2 kernels
-    @expectedFailureXPU
     def test_sum_and_t(self):
         N = 1024
 
@@ -270,8 +269,6 @@ class LoopOrderingTest(TestCase):
         self.do_acc_test(f, x)
         self.assertEqual(1, metrics.generated_kernel_count)
 
-    # xpu generate 2 kernels
-    @expectedFailureXPU
     def test_pw_outer_red(self):
         def f(x):
             x = realize(x + 1)
@@ -282,8 +279,6 @@ class LoopOrderingTest(TestCase):
         self.do_acc_test(f, x)
         self.assertEqual(1, metrics.generated_kernel_count)
 
-    # xpu generate 2 kernels
-    @expectedFailureXPU
     def test_pw_outer_red_2(self):
         """
         The pointwise kernel is a fused kernel
@@ -357,8 +352,6 @@ class LoopOrderingTest(TestCase):
         # some buffer is used before being defined.
         f(input_ids, labels, position_ids)
 
-    # xpu generate 2 kernels
-    @expectedFailureXPU
     def test_different_broadcast_shapes(self):
         def f(x, y, c):
             return x + c, y + c
@@ -451,6 +444,50 @@ class LoopOrderingTest(TestCase):
         expected_numbytes += input_tensor.nbytes  # input
         expected_numbytes += tensor_fp8.nbytes + tensor_fp8_t.nbytes  # output
         self.assertEqual(expected_numbytes, metrics.num_bytes_accessed)
+
+    # Disable split reduction to make it easier to calculate the expected
+    # number of bytes accessed. In this case, split reduction does not
+    # help perf much.
+    @inductor_config.patch(split_reductions=False)
+    def test_fuse_reduction_with_tiled_pw(self):
+        def f(x):
+            y = torch.sum(torch.sum(x, dim=-1))
+
+            z = x / 10.0
+            z_t = z.t().contiguous().t()
+            return y, z, z_t
+
+        # use this input sizes to test for perf
+        if DO_PERF_TEST:
+            M, N = 1024 * 32, 1024 * 8
+        else:
+            M, N = 200, 100
+        x = torch.randn(M, N, device=GPU_TYPE)
+        actual = f(x)
+        opt_f = torch.compile(f)
+        expected = opt_f(x)
+        self.assertTrue(same(actual, expected, tol=1e-3))
+
+        # We should fuse the first sum with the two pointwise.
+        # Overall we read x once for all these three kernels and write
+        # out 2 buffers with the same size as x.
+        # This should be sort of 'optimal' for this workload.
+        expected_numbytes = x.nbytes * 3
+
+        # A small amount of extra memory access for:
+        # - store output for the first reduction
+        # - load input for the second redution
+        # - store output for the second reduction
+        expected_numbytes += (M * 2 + 1) * x.itemsize
+
+        print(expected_numbytes)
+        self.assertEqual(expected_numbytes, metrics.num_bytes_accessed)
+
+        if DO_PERF_TEST:
+            from triton.testing import do_bench
+
+            ms = do_bench(lambda: opt_f(x))
+            print(f"{ms=:.3f}")
 
 
 if __name__ == "__main__":

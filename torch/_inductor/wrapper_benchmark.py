@@ -77,7 +77,8 @@ def benchmark_all_kernels(benchmark_name, benchmark_all_configs):
     from torch._inductor.codecache import PyCodeCache
 
     nfound = 0
-    for kernel_key, kernel_mod in PyCodeCache.cache.items():
+    for kernel_mod in PyCodeCache.modules:
+        kernel_key = kernel_mod.key
         if not hasattr(kernel_mod, "get_args") or not hasattr(kernel_mod, "call"):
             continue
 
@@ -262,6 +263,34 @@ def parse_profile_event_list(
     report()
 
 
+def perf_profile(
+    wall_time_ms, times, repeat, benchmark_name, benchmark_compiled_module_fn
+):
+    with torch.profiler.profile(record_shapes=True) as p:
+        benchmark_compiled_module_fn(times=times, repeat=repeat)
+
+    path = f"{tempfile.gettempdir()}/compiled_module_profile.json"
+    p.export_chrome_trace(path)
+    print(f"Profiling result for a compiled module of benchmark {benchmark_name}:")
+    print(f"Chrome trace for the profile is written to {path}")
+    event_list = p.key_averages(group_by_input_shape=True)
+    print(event_list.table(sort_by="self_device_time_total", row_limit=10))
+    parse_profile_event_list(
+        benchmark_name, event_list, wall_time_ms, times * repeat, p.use_device
+    )
+
+
+def collect_memory_snapshot(benchmark_compiled_module_fn):
+    assert torch.cuda.is_available()
+
+    torch.cuda.memory._record_memory_history(max_entries=100000)
+    benchmark_compiled_module_fn(times=10, repeat=1)  # run 10 times
+    snapshot_path = f"{tempfile.gettempdir()}/memory_snapshot.pickle"
+    torch.cuda.memory._dump_snapshot(snapshot_path)
+    torch.cuda.memory._record_memory_history(enabled=None)
+    print(f"The collect memory snapshot has been written to {snapshot_path}")
+
+
 def compiled_module_main(benchmark_name, benchmark_compiled_module_fn):
     """
     This is the function called in __main__ block of a compiled module.
@@ -287,6 +316,15 @@ def compiled_module_main(benchmark_name, benchmark_compiled_module_fn):
         action="store_true",
         help="Whether to profile the compiled module",
     )
+    parser.add_argument(
+        "--cuda-memory-snapshot",
+        action="store_true",
+        help="""
+            Whether to collect CUDA memory snapshot. Refer to
+            "https://pytorch.org/blog/understanding-gpu-memory-1/
+            for details about how to visualize the collected snapshot
+        """,
+    )
     args = parser.parse_args()
 
     if args.benchmark_kernels:
@@ -294,20 +332,23 @@ def compiled_module_main(benchmark_name, benchmark_compiled_module_fn):
     else:
         times = 10
         repeat = 10
+
+        if torch.cuda.is_available():
+            torch.cuda.reset_peak_memory_stats()
         wall_time_ms = benchmark_compiled_module_fn(times=times, repeat=repeat) * 1000
 
-        if not args.profile:
-            return
+        if torch.cuda.is_available():
+            peak_mem = torch.cuda.max_memory_allocated()
+            print(f"Peak GPU memory usage {peak_mem/1e6:.3f} MB")
 
-        with torch.profiler.profile(record_shapes=True) as p:
-            benchmark_compiled_module_fn(times=times, repeat=repeat)
+        if torch.cuda.is_available() and args.cuda_memory_snapshot:
+            collect_memory_snapshot(benchmark_compiled_module_fn)
 
-        path = f"{tempfile.gettempdir()}/compiled_module_profile.json"
-        p.export_chrome_trace(path)
-        print(f"Profiling result for a compiled module of benchmark {benchmark_name}:")
-        print(f"Chrome trace for the profile is written to {path}")
-        event_list = p.key_averages(group_by_input_shape=True)
-        print(event_list.table(sort_by="self_device_time_total", row_limit=10))
-        parse_profile_event_list(
-            benchmark_name, event_list, wall_time_ms, times * repeat, p.use_device
-        )
+        if args.profile:
+            perf_profile(
+                wall_time_ms,
+                times,
+                repeat,
+                benchmark_name,
+                benchmark_compiled_module_fn,
+            )

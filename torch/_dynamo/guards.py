@@ -16,8 +16,8 @@ import math
 import re
 import sys
 import textwrap
-import time
 import types
+import warnings
 import weakref
 from contextlib import contextmanager
 from copy import deepcopy
@@ -44,8 +44,10 @@ from torch._C._dynamo.guards import (
     check_type_id,
     dict_version,
     DictGuardManager,
+    GuardManager,
     install_no_tensor_aliasing_guard,
     install_object_aliasing_guard,
+    profile_guard_manager,
     RootGuardManager,
 )
 from torch._dynamo.source import (
@@ -80,6 +82,7 @@ from .eval_frame import set_guard_error_hook
 from .source import (
     AttrProxySource,
     AttrSource,
+    AutoDerefLocalSource,
     CallFunctionNoArgsSource,
     ChainedSource,
     ConstDictKeySource,
@@ -107,7 +110,14 @@ from .source import (
     UnspecializedParamBufferSource,
     WeakRefCallSource,
 )
-from .types import CacheEntry, ExtraState, GuardedCode, GuardFail, GuardFn  # noqa: F401
+from .types import (  # noqa: F401
+    CacheEntry,
+    DynamoFrameType,
+    ExtraState,
+    GuardedCode,
+    GuardFail,
+    GuardFn,
+)
 from .utils import (
     common_constant_types,
     dict_keys_repr,
@@ -304,10 +314,14 @@ def from_numpy(a):
 @functools.lru_cache(None)
 def uninteresting_files():
     import torch._dynamo.external_utils
+    import torch._dynamo.polyfills
 
-    mods = [
-        torch._dynamo.external_utils,
-    ]
+    mods = [torch._dynamo.external_utils, torch._dynamo.polyfills]
+
+    from torch._dynamo.polyfills.loader import POLYFILLED_MODULES
+
+    mods.extend(POLYFILLED_MODULES)
+
     return {inspect.getfile(m) for m in mods}
 
 
@@ -555,23 +569,10 @@ class GuardBuilder(GuardBuilderBase):
         # tensor match guards make sure we actually have tensors)
         self.shape_env_code: List[GuardCodeList] = []
 
-        # [Note - On Eager Tensor Guards]
-        # Most of the time, we generate Python code in a guard to directly
-        # check various properties.  However, tensors are a bit special;
-        # it is too slow to check their properties one-by-one in Python.
-        # Instead, there is a C++ function TensorGuards.check which takes
-        # all of the tensor arguments and checks them all against compile-time
-        # examples entirely in C++.  Thus, every time we process a
-        # TENSOR_MATCH guard, we just add another entry to
-        # tensor_check_names/tensor_check_examples, saying "for this local,
-        # check it against this example", and it all ends up getting
-        # swept up into a single call to ___check_tensors.  Invariant:
-        # len(tensor_check_names) == len(tensor_check_examples).
-        # TODO: something here
-        self.tensor_check_names: List[str] = []
-        self.tensor_check_examples: List[torch.Tensor] = []
-        self.tensor_check_guards: List[Guard] = []
-        self.tensor_check_guard_managers: List[GuardManagerWrapper] = []
+        # Collect the guard managers and debug info to insert no tensor aliasing
+        # guards.
+        self.no_tensor_aliasing_names: List[str] = []
+        self.no_tensor_aliasing_guard_managers: List[GuardManagerWrapper] = []
 
         self.check_fn_manager: CheckFunctionManager = check_fn_manager
 
@@ -650,6 +651,20 @@ class GuardBuilder(GuardBuilderBase):
                 key_manager.add_equals_match_guard(
                     key, get_verbose_code_parts(f"{key_source} == {key!r}", guard)
                 )
+
+    @staticmethod
+    def _get_generic_dict_manager_example_value(example_value):
+        # due to a bug in 3.13.0 (introduced by https://github.com/python/cpython/pull/116115,
+        # reported in https://github.com/python/cpython/issues/125608,
+        # fixed by https://github.com/python/cpython/pull/125611), we cannot take
+        # advantage of __dict__ versions to speed up guard checks.
+        if sys.version_info >= (3, 13) and sys.version_info < (3, 13, 1):
+            warnings.warn(
+                "Guards may run slower on Python 3.13.0. Consider upgrading to Python 3.13.1+.",
+                RuntimeWarning,
+            )
+            return None
+        return example_value
 
     def getattr_on_nn_module(
         self,
@@ -776,7 +791,7 @@ class GuardBuilder(GuardBuilderBase):
             # Guard Manager
             mod_generic_dict_manager = base_guard_manager.get_generic_dict_manager(
                 source=mod_dict_source,
-                example_value=mod_dict,
+                example_value=self._get_generic_dict_manager_example_value(mod_dict),
                 guard_manager_enum=GuardManagerType.GUARD_MANAGER,
             )
 
@@ -871,6 +886,14 @@ class GuardBuilder(GuardBuilderBase):
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
             )
+        elif istype(source, AutoDerefLocalSource):
+            # Guard checks run on f_locals, in which the python level
+            # auto-dereferenced cell objects are also dereferenced (e.g., rather
+            # than `f_locals` being `{ 'cell' : <cell object of int> }`, it'll
+            # be `{ 'cell' : <int> }`. So the guard manager is the same as the
+            # base guard manager.
+            assert isinstance(base_guard_manager, GuardManager)  # tame mypy
+            out = base_guard_manager
         elif istype(source, GlobalSource):
             # Global manager accepts a dict but it is not a DictGuardManager
             # because globals dict is big and we typically guard on a very
@@ -1271,7 +1294,7 @@ class GuardBuilder(GuardBuilderBase):
         mod_dict_source = f"{guard.name}.__dict__"
         mod_generic_dict_manager = base_manager.get_generic_dict_manager(
             source=mod_dict_source,
-            example_value=val.__dict__,
+            example_value=self._get_generic_dict_manager_example_value(val.__dict__),
             guard_manager_enum=GuardManagerType.GUARD_MANAGER,
         )
 
@@ -1788,11 +1811,6 @@ class GuardBuilder(GuardBuilderBase):
         )
 
     def TENSOR_MATCH(self, guard: Guard, value=None):
-        # For FSDP modules, we can skip guards on nn module tensors because FSDP
-        # eager assumes that the params are unchanged once the model is wrapped.
-        if guard.is_fsdp_module():
-            return
-
         # For tensors that are part of the Dynamo extracted Fx graph module, an
         # ID_MATCH suffices. Once we turn on inline_inbuilt_nn_modules, these
         # will be lifted as inputs and have a TENSOR_MATCH guard.
@@ -1850,14 +1868,23 @@ class GuardBuilder(GuardBuilderBase):
                     else:
                         code.append(f"{tensor_name}.{term} == {real_value}")
             else:
-                self.tensor_check_examples.append(value)
-                self.tensor_check_names.append(tensor_name)
-                self.tensor_check_guards.append(guard)
-
                 guard_manager = self.get_guard_manager(guard)
-                # Keep track of all the tensor guard managers to insert
-                # NoAliasing check at the end.
-                self.tensor_check_guard_managers.append(guard_manager)
+
+                # skip_no_tensor_aliasing_guards_on_parameters bring
+                # unsoundness. If you compile a function with two different
+                # parameters, but later on you pass on same tensor as two
+                # different outputs (aliasing), Dynamo will not detect this.
+                # But we deliberately take this soundness hit because this
+                # usecase is quite rare and there is substantial reduction in
+                # guard overhead.
+                if not (
+                    config.skip_no_tensor_aliasing_guards_on_parameters
+                    and istype(value, torch.nn.Parameter)
+                ):
+                    # Keep track of all the tensor guard managers to insert
+                    # NoAliasing check at the end.
+                    self.no_tensor_aliasing_names.append(tensor_name)
+                    self.no_tensor_aliasing_guard_managers.append(guard_manager)
 
                 output_graph = self.check_fn_manager.output_graph
                 metadata = output_graph.input_source_to_sizes_strides[
@@ -2204,7 +2231,10 @@ class CheckFunctionManager:
                 raise AssertionError(f"Guard check failed: {reasons}")
 
             if guards_log.isEnabledFor(logging.DEBUG):
-                self.profile_guard_eval(output_graph.local_scope)
+                latency = profile_guard_manager(
+                    self.guard_manager.root, output_graph.local_scope
+                )
+                guards_log.debug("Guard eval latency = %s us", f"{latency:.2f}")
 
         # NB - We have to very careful of cleaning up here. Because of the
         # invalidate function, we can create a weakref finalizer that keeps
@@ -2216,18 +2246,6 @@ class CheckFunctionManager:
         # e.g., not setting output_graph = None can keep hold of nn_modules.
         self._weakrefs.clear()
         self.output_graph = None
-
-    def profile_guard_eval(self, f_locals):
-        start_time = time.time()
-        iterations = 0
-        profile_duration = 1  # unit is seconds
-
-        while time.time() - start_time < profile_duration:
-            self.guard_manager.check(f_locals)
-            iterations += 1
-
-        guard_latency = 10**6 / iterations  # us
-        guards_log.debug("Guard eval latency = %s us", f"{guard_latency:.2f}")
 
     def compile_check_fn(self, builder, guards_out, guard_fail_fn):
         # see parallel handling of ".0" / "___implicit0" in _eval_frame.c
@@ -2261,12 +2279,16 @@ class CheckFunctionManager:
             structured_guard_fns.append(
                 lambda: {
                     "code": code_part,
-                    "stack": structured.from_traceback(guard.stack.summary())
-                    if guard.stack
-                    else None,
-                    "user_stack": structured.from_traceback(guard.user_stack)
-                    if guard.user_stack
-                    else None,
+                    "stack": (
+                        structured.from_traceback(guard.stack.summary())
+                        if guard.stack
+                        else None
+                    ),
+                    "user_stack": (
+                        structured.from_traceback(guard.user_stack)
+                        if guard.user_stack
+                        else None
+                    ),
                 }
             )
 
@@ -2300,17 +2322,17 @@ class CheckFunctionManager:
                     add_code_part(code, gcl.guard, True)
                     seen.add(code)
 
-        tensor_check_names = builder.tensor_check_names
+        no_tensor_aliasing_names = builder.no_tensor_aliasing_names
         check_tensors_fn = None
         check_tensors_verbose_fn = None
 
-        if len(tensor_check_names) > 1:
+        if len(no_tensor_aliasing_names) > 1:
             # Install tensor aliasing guard. TENSOR_MATCH guards are already
             # installed for cpp guard manager.
             install_no_tensor_aliasing_guard(
-                builder.tensor_check_guard_managers,
-                tensor_check_names,
-                ["check_no_aliasing(" + ", ".join(tensor_check_names) + ")"],
+                builder.no_tensor_aliasing_guard_managers,
+                no_tensor_aliasing_names,
+                ["check_no_aliasing(" + ", ".join(no_tensor_aliasing_names) + ")"],
             )
 
         aotautograd_guards: List[GuardEnvExpr] = (
@@ -2359,7 +2381,6 @@ class CheckFunctionManager:
             "___check_tensors_verbose": check_tensors_verbose_fn,
             "___check_global_state": global_state.check,
             "___check_torch_function_mode_stack": torch_function_mode_stack_check_fn,
-            "tensor_check_names": tensor_check_names,
             **SYMPY_INTERP,
             **_get_closure_vars(),
         }
@@ -2380,7 +2401,7 @@ class CheckFunctionManager:
         # when the CacheEntry is constructed
         self.guard_manager.cache_entry = None
         self.guard_manager.extra_state = None
-        self.guard_manager.no_tensor_aliasing_sources = tensor_check_names
+        self.guard_manager.no_tensor_aliasing_sources = no_tensor_aliasing_names
 
     def invalidate(self):
         # Some tests reveal that CheckFunctionManager has no attribute
@@ -2596,7 +2617,7 @@ def get_guard_fail_reason(
 
 
 def get_and_maybe_log_recompilation_reason(
-    cache_entry, frame: types.FrameType
+    cache_entry, frame: DynamoFrameType
 ) -> List[str]:
     """
     Return the list of guard failure reasons using cache_entry.

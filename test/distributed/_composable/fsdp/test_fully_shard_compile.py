@@ -22,6 +22,7 @@ from torch.distributed._composable.fsdp import fully_shard
 from torch.distributed._composable.fsdp._fsdp_common import TrainingState
 from torch.distributed._composable.fsdp._fsdp_param_group import FSDPParamGroup
 from torch.distributed._tensor import init_device_mesh
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP, ShardingStrategy
 from torch.testing import FileCheck
 from torch.testing._internal.common_distributed import (
     at_least_x_gpu,
@@ -49,6 +50,20 @@ def _is_fallback_op_in_snodes(snodes, op):
 
 
 orig_F_scaled_dot_product_attention = F.scaled_dot_product_attention
+
+
+class Mod(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+
+        self.encoder = torch.nn.Sequential(
+            torch.nn.Linear(28 * 28, 1024, device="cuda"),
+            torch.nn.Linear(1024, 1024, device="cuda"),
+            torch.nn.Linear(1024, 4096, device="cuda"),
+        )
+
+    def forward(self, x):
+        return self.encoder(x)
 
 
 class TestFullyShardCompileCompute(FSDPTest):
@@ -171,6 +186,16 @@ class TestFullyShardCompile(FSDPTest):
         torch.compile(f, backend="aot_eager")(x)
         self.assertEqual(x, ref_x)
 
+    def _get_resize_count_in_fx_graph(self, graph: torch.fx.Graph):
+        resize_count = 0
+        for node in graph.nodes:
+            if (
+                node.op == "call_function"
+                and node.target == torch.ops.inductor.resize_storage_bytes_.default
+            ):
+                resize_count += 1
+        return resize_count
+
     def _assert_no_aliased_unsharded_params_in_graph_inputs(
         self, model, graph: torch.fx.Graph
     ) -> None:
@@ -212,9 +237,17 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
         self.assertTrue(no_aliased_unsharded_params_in_graph_inputs, err_msg)
 
     def _remove_fsdp2_unsharded_param_graph_input_usage_with_optional_checks(
-        self, model, fwd_fullgraph
+        self, model, *, bwd_resize_count_before_pass=None, fwd_fullgraph=False
     ):
         def _run_with_checks(graph, orig_fn):
+            if (
+                self._is_bwd_fx_graph(graph)
+                and bwd_resize_count_before_pass is not None
+            ):
+                self.assertEqual(
+                    bwd_resize_count_before_pass,
+                    self._get_resize_count_in_fx_graph(graph),
+                )
             self._assert_no_aliased_unsharded_params_in_graph_inputs(model, graph)
             orig_fn(graph)
 
@@ -256,7 +289,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                 f"Unexpected number of `inductor.resize_storage_bytes_` ops (expected {resize_count}, got {actual_resize_count}) in graph: {graph}",  # noqa: B950
             )
 
-        if not torch._dynamo.compiled_autograd.in_compiled_autograd_region():
+        if not torch._dynamo.compiled_autograd.in_compiled_autograd_region:
             _check_count(fwd_copy_count, fwd_resize_count)  # fwd graph
         else:
             _check_count(bwd_copy_count, bwd_resize_count)  # bwd graph
@@ -312,6 +345,16 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
             return True
         else:
             return False
+
+    def _is_bwd_fx_graph(self, graph):
+        for node in graph.nodes:
+            if (
+                node.op == "call_function"
+                and node.target
+                == torch.ops._c10d_functional.reduce_scatter_tensor.default
+            ):
+                return True
+        return False
 
     def _maybe_run_decide_global_ordering_of_comms_with_checks(self, fwd_fullgraph):
         def _check_fsdp_ops_in_snodes(snodes, is_fwd_graph, expect=True):
@@ -443,6 +486,8 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
         input_creation_fn,
         backend,
         fwd_fullgraph,
+        *,
+        bwd_resize_count_before_inductor=None,
     ):
         def fwd_bwd(model, inp):
             out = model(inp)
@@ -474,7 +519,9 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
 
             counters.clear()
             with self._remove_fsdp2_unsharded_param_graph_input_usage_with_optional_checks(
-                model, fwd_fullgraph
+                model,
+                bwd_resize_count_before_pass=bwd_resize_count_before_inductor,
+                fwd_fullgraph=fwd_fullgraph,
             ):
                 fwd_bwd_fn_compiled = torch.compile(
                     fwd_bwd_fn,
@@ -619,8 +666,11 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
             def forward(self, x):
                 # Intentionally reusing all layers a few times,
                 # to test "multiple all-gathers for the same parameter" case.
-                for layer in self.layers:
-                    x = layer(x)
+                # Case 1: rerun the same layer twice
+                for layer_id in range(len(self.layers)):
+                    for _ in range(2):
+                        x = self.layers[layer_id](x)
+                # Case 2: iterate through all layers twice
                 for layer in self.layers:
                     x = layer(x)
                 for layer in self.layers:
@@ -700,6 +750,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                         ),
                         "inductor",
                         fwd_fullgraph=fwd_fullgraph,
+                        bwd_resize_count_before_inductor=48 if fwd_fullgraph else None,
                     )
                 )
             if fwd_fullgraph:
@@ -925,6 +976,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                         ),
                         "inductor",
                         fwd_fullgraph=fwd_fullgraph,
+                        bwd_resize_count_before_inductor=76 if fwd_fullgraph else None,
                     )
                 )
             if fwd_fullgraph:
@@ -1024,6 +1076,16 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                 2,
                 "Expected at least 3 separate lowerings to Triton code, which means at least 1 graph break in FWD graph",
             )
+
+    def test_dynamo_recompiles_on_fsdp_layers(self):
+        m = Mod()
+        for name, child in m.encoder.named_children():
+            if isinstance(child, torch.nn.Linear):
+                new_child = torch.compile(child)
+                setattr(m.encoder, name, new_child)
+        m = FSDP(m, sharding_strategy=ShardingStrategy.FULL_SHARD, use_orig_params=True)
+        inp = torch.randn(32, 784, device="cuda")
+        out = m(inp)
 
 
 if __name__ == "__main__":

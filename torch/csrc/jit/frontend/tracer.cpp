@@ -347,7 +347,7 @@ static IValue addInput(
   value->setType(type);
   if (type->isSubtypeOf(*TensorType::get())) {
     auto input_tensor = input.toTensor();
-    auto name = Variable(input_tensor).name();
+    auto const& name = input_tensor.name();
     if (state->hasValue(input)) {
       input_tensor = input_tensor.view(input_tensor.sizes());
     }

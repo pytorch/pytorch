@@ -69,7 +69,7 @@ jobs:
   get-label-type:
     name: get-label-type
     uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
-    if: github.event_name != 'schedule' || github.repository == 'pytorch/pytorch'
+    if: ${{ (github.event_name != 'schedule' || github.repository == 'pytorch/pytorch') && github.repository_owner == 'pytorch' }}
     with:
       triggering_actor: ${{ github.triggering_actor }}
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
@@ -87,18 +87,18 @@ jobs:
       cuda-arch-list: '8.0'
       test-matrix: |
         { include: [
-          { config: "inductor_huggingface_perf", shard: 1, num_shards: 3, runner: "linux.gcp.a100.large" },
-          { config: "inductor_huggingface_perf", shard: 2, num_shards: 3, runner: "linux.gcp.a100.large" },
-          { config: "inductor_huggingface_perf", shard: 3, num_shards: 3, runner: "linux.gcp.a100.large" },
-          { config: "inductor_timm_perf", shard: 1, num_shards: 5, runner: "linux.gcp.a100.large" },
-          { config: "inductor_timm_perf", shard: 2, num_shards: 5, runner: "linux.gcp.a100.large" },
-          { config: "inductor_timm_perf", shard: 3, num_shards: 5, runner: "linux.gcp.a100.large" },
-          { config: "inductor_timm_perf", shard: 4, num_shards: 5, runner: "linux.gcp.a100.large" },
-          { config: "inductor_timm_perf", shard: 5, num_shards: 5, runner: "linux.gcp.a100.large" },
-          { config: "inductor_torchbench_perf", shard: 1, num_shards: 4, runner: "linux.gcp.a100.large" },
-          { config: "inductor_torchbench_perf", shard: 2, num_shards: 4, runner: "linux.gcp.a100.large" },
-          { config: "inductor_torchbench_perf", shard: 3, num_shards: 4, runner: "linux.gcp.a100.large" },
-          { config: "inductor_torchbench_perf", shard: 4, num_shards: 4, runner: "linux.gcp.a100.large" },
+          { config: "inductor_huggingface_perf", shard: 1, num_shards: 3, runner: "linux.aws.a100" },
+          { config: "inductor_huggingface_perf", shard: 2, num_shards: 3, runner: "linux.aws.a100" },
+          { config: "inductor_huggingface_perf", shard: 3, num_shards: 3, runner: "linux.aws.a100" },
+          { config: "inductor_timm_perf", shard: 1, num_shards: 5, runner: "linux.aws.a100" },
+          { config: "inductor_timm_perf", shard: 2, num_shards: 5, runner: "linux.aws.a100" },
+          { config: "inductor_timm_perf", shard: 3, num_shards: 5, runner: "linux.aws.a100" },
+          { config: "inductor_timm_perf", shard: 4, num_shards: 5, runner: "linux.aws.a100" },
+          { config: "inductor_timm_perf", shard: 5, num_shards: 5, runner: "linux.aws.a100" },
+          { config: "inductor_torchbench_perf", shard: 1, num_shards: 4, runner: "linux.aws.a100" },
+          { config: "inductor_torchbench_perf", shard: 2, num_shards: 4, runner: "linux.aws.a100" },
+          { config: "inductor_torchbench_perf", shard: 3, num_shards: 4, runner: "linux.aws.a100" },
+          { config: "inductor_torchbench_perf", shard: 4, num_shards: 4, runner: "linux.aws.a100" },
         ]}
       selected-test-configs: ${{ inputs.benchmark_configs }}
     secrets:

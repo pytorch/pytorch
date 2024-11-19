@@ -133,8 +133,11 @@ flex_decoding_template = TritonTemplate(
     offs_d = tl.arange(0, QK_HEAD_DIM)
     offs_vd = tl.arange(0, V_HEAD_DIM)
 
-    # KV_IDX / FULL_KV_IDX and KV_NUM_BLKS / FULL_KV_NUM_BLKS are always contiguous.
-    sparse_hz_offset = sparse_idx_z * SPARSE_HQ + sparse_idx_h
+    # Get HZ offsets for KV_NUM_BLKS and KV_IDX
+    stride_block_z, stride_block_h, stride_block_row, stride_block_col = {{stride("KV_NUM_BLKS")}}
+    sparse_block_hz_offset = sparse_idx_z * stride_block_z + sparse_idx_h * stride_block_h
+    stride_kv_z, stride_kv_h, stride_kv_row, stride_kv_col = {{stride("KV_IDX")}}
+    sparse_idx_hz_offset = sparse_idx_z * stride_kv_z + sparse_idx_h * stride_kv_h
 
     # Calculate KV blocks that belong this CTA.
     block_n_start = off_t * TILE_KV_MULTIPLE                        # n_offset inside sparse block
@@ -155,8 +158,9 @@ flex_decoding_template = TritonTemplate(
     # Apply both score_mod and mask_mod
 
     # find first kv block we are loading and the number of blocks we are loading
-    kv_indices = KV_IDX + sparse_hz_offset * SPARSE_KV_BLOCK_CNT
-    kv_num_blocks = tl.load(KV_NUM_BLKS + sparse_hz_offset)
+    # Offset the kv_indices tensor by the correct batch and head
+    kv_indices = KV_IDX + sparse_idx_hz_offset
+    kv_num_blocks = tl.load(KV_NUM_BLKS + sparse_block_hz_offset)
     indices_idx = block_n_start // SPARSE_KV_MULTIPLE
     off_n_block_in_sparse = block_n_start % SPARSE_KV_MULTIPLE
     off_n = tl.load(kv_indices + indices_idx) * SPARSE_KV_BLOCK_SIZE + off_n_block_in_sparse * BLOCK_N
@@ -202,8 +206,8 @@ flex_decoding_template = TritonTemplate(
     # We know these blocks are guaranteed to be "full", so we don't need to
     # apply mask_mod to them - only score_mod
     if HAS_FULL_BLOCKS:
-        kv_indices = FULL_KV_IDX + sparse_hz_offset * SPARSE_KV_BLOCK_CNT
-        kv_num_blocks = tl.load(FULL_KV_NUM_BLKS + sparse_hz_offset)
+        kv_indices = FULL_KV_IDX + sparse_idx_hz_offset
+        kv_num_blocks = tl.load(FULL_KV_NUM_BLKS + sparse_block_hz_offset)
         indices_idx = block_n_start // SPARSE_KV_MULTIPLE
         off_n_block_in_sparse = block_n_start % SPARSE_KV_MULTIPLE
         off_n = tl.load(kv_indices + indices_idx) * SPARSE_KV_BLOCK_SIZE + off_n_block_in_sparse * BLOCK_N
@@ -307,7 +311,10 @@ def _get_decoding_default_config(key) -> Tuple[int, int, int]:
     if sm_version >= (9, 0):
         if head_dim > 128 and dtype == torch.float32:
             return default_config
-        return (64, 2, 3)
+        if torch.version.hip is None:
+            return (64, 2, 3)
+        else:
+            return (64, 2, 1)
     return default_config
 
 
@@ -341,8 +348,9 @@ def create_flex_decoding_kernel(*args, **kwargs):
     Bq, Hq, seq_len_q, qk_head_dim = query.get_size()
     Bkv, Hkv, seq_len_kv, v_head_dim = value.get_size()
 
-    if not ((Bq == Bkv) or (Bq > 1 and Bkv == 1)):
-        raise RuntimeError(f"Bq and Bkv must broadcast. Got Bq={Bq} and Bkv={Bkv}")
+    assert V.graph.sizevars.evaluate_expr(
+        sympy.Eq(Bq, Bkv) | sympy.Eq(Bkv, 1)
+    ), f"Bq and Bkv must broadcastable. Got Bq={Bq} and Bkv={Bkv}"
 
     B = Bq
     kernel_options = dict(kernel_options)
@@ -402,6 +410,11 @@ def create_flex_decoding_kernel(*args, **kwargs):
             (32, 2, 3),
             (128, 2, 3),
         ]
+
+        # Use num_stages=1 on ROCm to avoid shmem limitation
+        if torch.version.hip:
+            configs = [(c[0], c[1], 1) for c in configs]
+
     # TODO: fix autotuning.
 
     kernel_options.setdefault("SM_SCALE", scale)

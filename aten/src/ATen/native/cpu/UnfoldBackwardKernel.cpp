@@ -147,6 +147,6 @@ void unfold_backward_cpu_kernel(
 
 }
 
-REGISTER_DISPATCH(unfold_backward_stub, &unfold_backward_cpu_kernel);
+REGISTER_DISPATCH(unfold_backward_stub, &unfold_backward_cpu_kernel)
 
 } // namespace at::native
