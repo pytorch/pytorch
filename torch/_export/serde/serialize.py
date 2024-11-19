@@ -875,10 +875,6 @@ class GraphModuleSerializer(metaclass=Final):
                     as_sym_ints=[SymIntArgument.create(as_name=str(a)) for a in arg]
                 )
             elif all(isinstance(a, torch.SymFloat) for a in arg):
-                # This is a special branch for handling SymFloat args in inductor's
-                # ExternalFallbackNode.
-                # For regular FX graph, SymFloat arg should be a fx.Node with
-                # self.is_sym_float_arg(arg) being true
                 return Argument.create(
                     as_sym_floats=[SymFloatArgument.create(as_name=str(a)) for a in arg]
                 )
