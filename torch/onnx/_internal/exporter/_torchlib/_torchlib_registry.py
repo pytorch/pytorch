@@ -4,11 +4,8 @@
 
 from __future__ import annotations
 
-import functools
-import re
-from typing import Any, Callable, Generator, Optional, TypeVar
+from typing import Callable, TypeVar
 
-import onnxscript
 
 _T = TypeVar("_T", bound=Callable)
 
@@ -22,7 +19,7 @@ class Registry:
     def register(self, target: Callable, impl: Callable) -> None:
         """Register a function."""
 
-        self._registry.setdefault(target, []).append((impl))
+        self._registry.setdefault(target, []).append(impl)
 
 
 # Default registry
