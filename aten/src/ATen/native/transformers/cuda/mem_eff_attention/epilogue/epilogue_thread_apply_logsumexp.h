@@ -35,6 +35,7 @@
 
 #pragma once
 
+#include <array>
 #include <cuda_fp16.h>
 
 #include <cutlass/array.h>
@@ -57,9 +58,9 @@ namespace detail {
 template <typename Element, int ElementsPerAccess>
 struct ArrayExponential {
   CUTLASS_HOST_DEVICE
-  Array<Element, ElementsPerAccess> operator()(
-      Array<Element, ElementsPerAccess> const& input) const {
-    Array<Element, ElementsPerAccess> result;
+  std::array<Element, ElementsPerAccess> operator()(
+      std::array<Element, ElementsPerAccess> const& input) const {
+    std::array<Element, ElementsPerAccess> result;
 
     CUTLASS_PRAGMA_UNROLL
     for (int i = 0; i < ElementsPerAccess; ++i) {
@@ -73,9 +74,9 @@ struct ArrayExponential {
 template <int ElementsPerAccess>
 struct ArrayExponential<half_t, ElementsPerAccess> {
   CUTLASS_DEVICE
-  Array<half_t, ElementsPerAccess> operator()(
-      Array<half_t, ElementsPerAccess> const& input) const {
-    Array<half_t, ElementsPerAccess> result;
+  std::array<half_t, ElementsPerAccess> operator()(
+      std::array<half_t, ElementsPerAccess> const& input) const {
+    std::array<half_t, ElementsPerAccess> result;
 
     int const kVectorCount = ElementsPerAccess / 2;
 
@@ -115,10 +116,10 @@ class ApplyLogSumExp {
   static const ScaleType::Kind kScale =
       cutlass::epilogue::thread::ScaleType::NoBetaScaling;
 
-  using FragmentOutput = Array<ElementOutput, kCount>;
-  using FragmentAccumulator = Array<ElementAccumulator, kElementsPerAccess>;
-  using FragmentCompute = Array<ElementCompute, kElementsPerAccess>;
-  using FragmentLSE = Array<ElementLSE, kElementsPerAccess>;
+  using FragmentOutput = std::array<ElementOutput, kCount>;
+  using FragmentAccumulator = std::array<ElementAccumulator, kElementsPerAccess>;
+  using FragmentCompute = std::array<ElementCompute, kElementsPerAccess>;
+  using FragmentLSE = std::array<ElementLSE, kElementsPerAccess>;
   using FragmentScaleBias = FragmentLSE; // Used by epilogue_smem_accumulator.h
 
  public:

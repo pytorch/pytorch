@@ -12,6 +12,7 @@
 
 #pragma once
 
+#include <array>
 #if defined(__CUDACC_RTC__)
 #include <cuda/std/cassert>
 #else
@@ -82,10 +83,10 @@ class MemoryEfficientAttentionNormalize {
 
   static int const kCount = Count;
 
-  using FragmentOutput = Array<ElementOutput, kCount>;
-  using FragmentSource = Array<ElementSource, kCount>;
-  using FragmentAccumulator = Array<ElementAccumulator, kCount>;
-  using ComputeFragment = Array<ElementCompute, kCount>;
+  using FragmentOutput = std::array<ElementOutput, kCount>;
+  using FragmentSource = std::array<ElementSource, kCount>;
+  using FragmentAccumulator = std::array<ElementAccumulator, kCount>;
+  using ComputeFragment = std::array<ElementCompute, kCount>;
   using FragmentAlphaBeta = FragmentAlphaBeta_;
 
   static FloatRoundStyle const kRound = Round;

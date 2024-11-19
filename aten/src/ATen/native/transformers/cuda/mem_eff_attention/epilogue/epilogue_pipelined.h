@@ -44,6 +44,7 @@
 
 #pragma once
 
+#include <array>
 #if defined(__CUDACC_RTC__)
 #include <cuda/std/cassert>
 #else
@@ -173,15 +174,15 @@ class EpiloguePipelined : public EpilogueBase<
   using ConstTensorRef = typename OutputTileIterator::ConstTensorRef;
 
   /// Array type used to output
-  using OutputAccessType = Array<
+  using OutputAccessType = std::array<
       typename OutputTileIterator::Element,
       OutputTileIterator::kElementsPerAccess>;
-  using SourceAccessType = Array<
+  using SourceAccessType = std::array<
       typename OutputTileSourceIterator::Element,
       OutputTileSourceIterator::kElementsPerAccess>;
 
   /// Array type used by output functor
-  using AccumulatorAccessType = Array<
+  using AccumulatorAccessType = std::array<
       typename WarpTileIterator::Element,
       OutputTileIterator::kElementsPerAccess>;
 
