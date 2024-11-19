@@ -3,8 +3,8 @@
 
 #pragma once
 
-#include "ck_tile/core.hpp"
-#include "ck_tile/host/host_tensor.hpp"
+#include <ck_tile/core.hpp>
+#include <ck_tile/host/host_tensor.hpp>
 
 #include <cassert>
 #include <cmath>
