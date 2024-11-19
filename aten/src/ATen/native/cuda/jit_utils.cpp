@@ -1471,7 +1471,7 @@ std::optional<std::string> get_cache_dir() {
     } else {
       // Falls back to HOME/.cache
       ptkcp = c10::utils::get_env("HOME");
-      if (ptkcp.has_value()) {
+      if (!ptkcp.has_value()) {
         TORCH_WARN_ONCE("No PYTORCH_KERNEL_CACHE_PATH or HOME environment variable set!",
                         " This disables kernel caching.");
         return {};
