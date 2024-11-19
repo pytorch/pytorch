@@ -80,7 +80,7 @@ def zeros_and_scatter_lowering(shape: List[int], indices, values):
     )
 
     buffer = ComputedBuffer(
-        name=grad.data.data.name,
+        name=grad.data.data.name,  # type: ignore[attr-defined]
         layout=MutationLayoutSHOULDREMOVE(grad),
         data=scatter,
     )
@@ -207,7 +207,7 @@ def build_subgraph_buffer(
                     if node.target._opname != "zeros_and_scatter"
                     else zeros_and_scatter_lowering
                 )
-                env[node] = flex_lowering(*args, **kwargs)
+                env[node] = flex_lowering(*args, **kwargs)  # type: ignore[operator]
             elif node.op == "output":
 
                 def convert_output_node_to_buffer(output):

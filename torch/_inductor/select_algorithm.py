@@ -488,7 +488,7 @@ class TritonTemplateKernel(TritonKernel):
                         my_funx = functools.partial(
                             funx, strides=scatter_graph.get_stride()
                         )
-                        scatter_graph.data.store_output(scatter_graph.name, my_funx, [])
+                        scatter_graph.data.store_output(scatter_graph.name, my_funx, [])  # type: ignore[attr-defined]
 
                 elif isinstance(subgraph.data, ir.InputBuffer):
                     out = subgraph.data.make_loader()(())
