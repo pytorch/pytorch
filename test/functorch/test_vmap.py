@@ -4380,6 +4380,7 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail("torch.ops.aten._efficient_attention_forward"),  # outputs ints
                 # TypeError: expected Tensor as element 0 in argument 0, but got float
                 xfail("item"),
+                # RuntimeError: required rank 4 tensor to use channels_last format
                 xfailIf(
                     "to",
                     lambda sample: (
