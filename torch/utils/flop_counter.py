@@ -739,6 +739,7 @@ class FlopCounterMode(TorchDispatchMode):
                     torch.ops.aten.numel.default,
                     torch.ops.aten.sym_numel.default,
                     torch.ops.aten.dim.default,
+                    torch.ops.prim.device.default,
                     torch.ops.prim.layout.default}:
 
             return NotImplemented

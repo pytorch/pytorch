@@ -92,6 +92,7 @@ from .lowering import (
     maybe_layout_constraints,
     needs_realized_inputs,
     unsupported_output_tensor,
+    require_contiguous,
 )
 from .runtime import autotune_cache
 from .runtime.autotune_cache import AutotuneCacheBundler
@@ -1048,7 +1049,12 @@ class GraphLowering(torch.fx.Interpreter):
                     "Creating implicit fallback for:\n%s",
                     error.operator_str(target, args, kwargs),
                 )
-                make_fallback(target)
+
+                # for implicitly fallback ops, we conservatively requires
+                # contiguous input since some eager kernels does not
+                # support non-contiguous inputs. They may silently cause
+                # accuracy problems. Check https://github.com/pytorch/pytorch/issues/140452
+                make_fallback(target, layout_constraint=require_contiguous)
 
             elif get_decompositions([target]):
                 # There isn't a good way to dynamically patch this in
@@ -1060,7 +1066,21 @@ class GraphLowering(torch.fx.Interpreter):
 
         try:
             log.debug("  via %s", lowerings[target])  # type: ignore[index]
+
+            n = self.current_node
+            layout_constraints = maybe_layout_constraints(target)
+            if layout_constraints:
+                old_args, old_kwargs = args, kwargs
+                args, kwargs = layout_constraints(n, *args, **kwargs)
+
             out = lowerings[target](*args, **kwargs)  # type: ignore[index]
+
+            if layout_constraints:
+                # layout_constraints are allowed to make new copies of the inputs.
+                # if they do, and if the target is mutable, then we need to
+                # write the new values back into the original inputs.
+                self.propagate_mutation(n, old_args, old_kwargs, args, kwargs)  # type: ignore[possibly-undefined]
+
             return out
         except Exception as e:
             raise LoweringException(e, target, args, kwargs).with_traceback(
@@ -1374,18 +1394,6 @@ class GraphLowering(torch.fx.Interpreter):
                 result = fallback_handler(n.target, add_to_fallback_set=False)(
                     *args, **kwargs  # type: ignore[possibly-undefined]
                 )
-            elif n.op == "call_function" and (
-                layout_constraints := maybe_layout_constraints(n.target)  # type: ignore[arg-type]
-            ):
-                debug("layout_constraints")
-                old_args = args  # type: ignore[possibly-undefined]
-                old_kwargs = kwargs  # type: ignore[possibly-undefined]
-                args, kwargs = layout_constraints(n, *args, **kwargs)  # type: ignore[index]
-                result = self.call_function(n.target, args, kwargs)  # type: ignore[arg-type]
-                # layout_constraints are allowed to make new copies of the inputs.
-                # if they do, and if the target is mutable, then we need to
-                # write the new values back into the original inputs.
-                self.propagate_mutation(n, old_args, old_kwargs, args, kwargs)  # type: ignore[possibly-undefined]
             elif (
                 n.op == "call_function"
                 and n.target is torch.ops.higher_order.triton_kernel_wrapper_mutation
