@@ -1395,13 +1395,10 @@ def _low_contention_reduce_scatter(
 # =============================================================================
 
 
-from typing import Any, overload, Sequence, TYPE_CHECKING, Union
+from typing import Any, overload, Sequence, Union
 
+from torch._C._distributed_c10d import ProcessGroup
 from torch.types import _device, _dtype, _int
-
-
-if TYPE_CHECKING:
-    from torch._C._distributed_c10d import ProcessGroup
 
 
 @overload
@@ -1427,17 +1424,15 @@ def empty(  # type: ignore[misc]
     device: Optional[_device] = None,
 ) -> torch.Tensor:
     r"""
-    empty(*size, *, dtype=None, device=None) -> Tensor
-
     Similar to :func:`torch.empty()`. The returned tensor can be used by
-    :func:`torch._distributed._symmetric_memory.rendezvous()` to establish a
+    :func:`torch.distributed._symmetric_memory.rendezvous()` to establish a
     symmetric memory tensor among participating processes.
 
-    Args:
+    Arguments:
         size (int...): a sequence of integers defining the shape of the output tensor.
             Can be a variable number of arguments or a collection like a list or tuple.
 
-    Keyword args:
+    Keyword arguments:
         dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
             Default: if ``None``, uses a global default (see :func:`torch.set_default_dtype`).
         device (:class:`torch.device`, optional): the desired device of returned tensor.
@@ -1473,12 +1468,12 @@ def rendezvous(
     Establish a symmetric memory tensor among participating processes. This is
     a collective operation.
 
-    Args:
+    Arguments:
         tensor (:class:`torch.Tensor`): the local tensor used to establish the symmetric memory tensor.
-            It must be allocated via :func:`torch._distributed._symmetric_memory.empty()`. The shape,
+            It must be allocated via :func:`torch.distributed._symmetric_memory.empty()`. The shape,
             dtype, and device type must be identical across all participating processes.
-        group (Union[str, :class:`torch.distributed.ProcessGroup`]): The group identifying the
-            participating processes. This can be either a group name or a process group object.
+        group (Union[str, ProcessGroup]): the group identifying the participating processes. This can
+            be either a group name or a process group object.
     """
     from torch._C._distributed_c10d import ProcessGroup
 
@@ -1493,4 +1488,192 @@ def rendezvous(
     return _SymmetricMemory.rendezvous(tensor, group_name)
 
 
-__all__ = ["empty", "rendezvous"]
+@overload
+def all_gather_scaled_matmul(
+    A_shard: torch.Tensor,
+    B: torch.Tensor,
+    A_scale: torch.Tensor,
+    B_scale: torch.Tensor,
+    *,
+    group: Union[str, "ProcessGroup"],
+    gather_dim: int = 0,
+    bias: Optional[torch.Tensor] = None,
+    result_scale: Optional[torch.Tensor] = None,
+    out_dtype: Optional[torch.dtype] = None,
+    use_fast_accum: bool = False,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    ...
+
+
+@overload
+def all_gather_scaled_matmul(
+    A_shard: torch.Tensor,
+    B: List[torch.Tensor],
+    A_scale: torch.Tensor,
+    B_scale: List[torch.Tensor],
+    *,
+    group: Union[str, "ProcessGroup"],
+    gather_dim: int = 0,
+    bias: Optional[List[Optional[torch.Tensor]]] = None,
+    result_scale: List[torch.Tensor | None] | None = None,
+    out_dtype: List[torch.dtype | None] | None = None,
+    use_fast_accum: List[bool] | None = None,
+) -> Tuple[List[torch.Tensor], torch.Tensor]:
+    ...
+
+
+def all_gather_scaled_matmul(  # type: ignore[no-untyped-def]
+    A_shard,
+    B,
+    A_scale,
+    B_scale,
+    *,
+    group: Union[str, "ProcessGroup"],
+    gather_dim: int = 0,
+    bias=None,
+    result_scale=None,
+    out_dtype=None,
+    use_fast_accum=None,
+):
+    r"""
+    All-gather :attr:`A_shard` along :attr:`gather_dim`, and then perform scaled matmul
+    on the all-gather result and :attr:`B`. When applicable, this function
+    micro-pipelines the all-gather communication and the scaled matmul computation. This
+    function is semantically equivalent to the following pseudocode::
+
+        A = all_gather_tensor(A_shard, ...)
+        if need_to_all_gather_A_scale:
+            A_scale = all_gather_tensor(A_scale, ...)
+        torch._scaled_mm(A, B, A_scale, B_scale, ...)
+
+    Whether :attr:`A_scale` needs to be all-gathered depends on the scaling mode, which
+    is inferred from the shape of :attr:`A_shard` and :attr:`A_scale`.
+
+    - If the leading dimensions of :attr:`A_scale` match those of :attr:`A_shard`,
+      :attr:`A_scale` is considered 'row-wise-sharded' and will be all-gathered.
+
+    - If the leading dimensions of :attr:`A_scale` match those of the all-gather result,
+      :attr:`A_scale` is considered 'row-wise-replicated' and will not be all-gathered.
+
+    - If :attr:`A_scale` is a scalar tensor, it is considered 'tensor-wise' and will not
+      be all-gathered.
+
+    :attr:`B` can be either a tensor or a list. When :attr:`B` is a list, this function
+    computes scaled matmul on the all-gather result and each tensor in :attr:`B`.
+    Supplying multiple :attr:`B` matrices allows for more computation to hide the
+    communication latency. When :attr:`B` is a list, :attr:`B_scale` must be a list of
+    the same size. Additionally, :attr:`bias`, :attr:`result_scale`, :attr:`out_dtype`
+    and :attr:`use_fast_accum` must either be ``None`` or a list of the same size as
+    :attr:`B`.
+
+    Arguments:
+        A_shard (Tensor): the shard to be all-gathered as the lhs tensor of the scaled
+            matmul.
+
+        B (Tensor or List[Tensor]): the rhs tensor(s) of the scaled matmul(s).
+
+        A_scale (Tensor): the lhs scale of the scaled matmul.
+
+        B_scale (Tensor or List[Tensor]): the rhs scale(s) of the scaled matmul(s).
+
+    Keyword args:
+        group (str | ProcessGroup): the process group with which ``A_shard`` is
+            all-gathered. This can be either a group name or a process group object.
+            Devices in the group must be connected via interconnects supported by
+            symmetric memory (e.g. NVLink).
+
+        gather_dim (int, optional): the dimension along which :attr:`A_shard` is
+            all-gathered.
+
+        bias (Tensor or List[Tensor | None], optional): the :attr:`bias` argument of
+            :func:`torch._scaled_mm`. Must be a tensor, ``None``, or a list of the same
+            size as :attr:`B`.
+
+        result_scale (Tensor or List[Tensor | None], optional): the :attr:`result_scale`
+            argument of :func:`torch._scaled_mm`. Must be a tensor, ``None``, or a list
+            of the same size as :attr:`B`.
+
+        out_dtype (torch.dtype or List[torch.dtype | None], optional): the
+            :attr:`out_dtype` argument of :func:`torch._scaled_mm`. Must be a
+            :class:`torch.dtype`, ``None``, or a list of the same size as :attr:`B`.
+
+        use_fast_accum (bool or List[bool]), optional): the :attr:`use_fast_accum`
+            argument of :func:`torch._scaled_mm`. Must be a ``bool``, ``None``, or a
+            list of the same size as :attr:`B`.
+
+    Returns:
+        A tuple containing the scaled matmul result(s) and the all-gather result. The
+        scaled matmul result(s) has the same type as ``B``.
+    """
+    # B must be a Tensor or a list of Tensor
+    if not isinstance(B, torch.Tensor) and not (
+        isinstance(B, Sequence) and all(isinstance(b, torch.Tensor) for b in B)
+    ):
+        raise TypeError("B must be a tensor or a list of tensors")
+
+    B_is_list = True
+    if isinstance(B, torch.Tensor):
+        B = [B]
+        B_is_list = False
+
+    def check_and_normalize_arg(
+        arg: Any, arg_name: str, arg_type: type, default: Any
+    ) -> Any:
+        if B_is_list:
+            if arg is None:
+                return [default] * len(B)
+            elif not isinstance(arg, Sequence):
+                raise ValueError(f"{arg_name} must be a list or None when B is a list")
+            else:
+                return arg
+        else:
+            if arg is None:
+                return [default]
+            elif not isinstance(arg, arg_type):
+                raise TypeError(
+                    f"{arg_name} must be a {arg_type} or None when B is a tensor."
+                )
+            else:
+                return [arg]
+
+    if isinstance(B, torch.Tensor):
+        B = [B]
+
+    B_scale = check_and_normalize_arg(B_scale, "B_scale", torch.Tensor, None)
+    bias = check_and_normalize_arg(bias, "bias", torch.Tensor, None)
+    result_scale = check_and_normalize_arg(
+        result_scale, "result_scale", torch.Tensor, None
+    )
+    out_dtype = check_and_normalize_arg(out_dtype, "out_dtype", torch.dtype, None)
+    use_fast_accum = check_and_normalize_arg(
+        use_fast_accum, "use_fast_accum", bool, False
+    )
+    if isinstance(group, str):
+        group_name = group
+    elif isinstance(group, ProcessGroup):
+        group_name = group.group_name
+    else:
+        raise TypeError(f"Invalid group type: {type(group)}.")
+
+    all_gather_res, matmul_res = torch.ops.symm_mem.fused_all_gather_scaled_matmul(
+        A_shard,
+        B,
+        A_scale,
+        B_scale,
+        gather_dim=gather_dim,
+        group_name=group_name,
+        biases=bias,
+        result_scales=result_scale,
+        out_dtypes=out_dtype,
+        use_fast_accum=use_fast_accum,
+    )
+    assert isinstance(all_gather_res, torch.Tensor)
+    assert isinstance(matmul_res, list)
+
+    if B_is_list:
+        return all_gather_res, matmul_res
+    else:
+        return all_gather_res, matmul_res[0]
+
+
+__all__ = ["empty", "rendezvous", "all_gather_scaled_matmul"]

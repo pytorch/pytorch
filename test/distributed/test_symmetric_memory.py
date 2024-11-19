@@ -13,9 +13,10 @@ from torch.distributed._functional_collectives import all_gather_tensor
 from torch.distributed._symmetric_memory import (
     _fused_all_gather_matmul_fallback,
     _fused_all_gather_matmul_native,
-    _fused_all_gather_scaled_matmul_fallback,
     _fused_matmul_reduce_scatter_fallback,
     _fused_scaled_matmul_reduce_scatter_fallback,
+    _test_mode,
+    all_gather_scaled_matmul,
     enable_symm_mem_for_group,
     restride_A_for_fused_matmul_reduce_scatter,
     restride_A_shard_for_fused_all_gather_matmul,
@@ -413,8 +414,9 @@ class SymmetricMemoryTest(MultiProcessTestCase):
     @parametrize(
         "scale_mode", ["tensor-wise", "row-wise-replicated", "row-wise-sharded"]
     )
+    @parametrize("multi_B", [True, False])
     def test_fused_all_gather_scaled_matmul(
-        self, gather_dim: int, scale_mode: str
+        self, gather_dim: int, scale_mode: str, multi_B: bool
     ) -> None:
         self._init_process()
 
@@ -435,48 +437,48 @@ class SymmetricMemoryTest(MultiProcessTestCase):
 
         torch.manual_seed(42 + rank)
         A_shard = torch.rand(*leading_dims, K, device="cuda").to(torch.float8_e4m3fn)
-        Bs = [
+        B = [
             torch.rand(N, K, device="cuda").to(torch.float8_e4m3fn).T for _ in range(3)
         ]
 
         if scale_mode == "tensor-wise":
             A_scale = torch.tensor(0.1, device="cuda")
-            B_scales = [torch.tensor(0.1, device="cuda") for _ in range(3)]
-            out_dtypes = [None, torch.bfloat16, torch.float32]
+            B_scale = [torch.tensor(0.1, device="cuda") for _ in range(3)]
+            out_dtype = [None, torch.bfloat16, torch.float32]
         elif scale_mode == "row-wise-sharded":
             A_scale = torch.full((*leading_dims, 1), 0.1, device="cuda")
-            B_scales = [torch.full((1, N), 0.1, device="cuda") for _ in range(3)]
-            out_dtypes = [torch.bfloat16] * 3
+            B_scale = [torch.full((1, N), 0.1, device="cuda") for _ in range(3)]
+            out_dtype = [torch.bfloat16] * 3
         elif scale_mode == "row-wise-replicated":
             A_scale = torch.full((BATCH, M, 1), 0.1, device="cuda")
-            B_scales = [torch.full((1, N), 0.1, device="cuda") for _ in range(3)]
-            out_dtypes = [torch.bfloat16] * 3
+            B_scale = [torch.full((1, N), 0.1, device="cuda") for _ in range(3)]
+            out_dtype = [torch.bfloat16] * 3
         else:
             raise AssertionError(f"Invalid scale_mode: {scale_mode}")
 
-        ag_output_0, mm_outputs_0 = _fused_all_gather_scaled_matmul_fallback(
+        if not multi_B:
+            B = B[0]
+            B_scale = B_scale[0]
+            out_dtype = out_dtype[0]
+
+        with _test_mode():
+            ag_output_0, mm_outputs_0 = all_gather_scaled_matmul(
+                A_shard,
+                B,
+                A_scale,
+                B_scale,
+                gather_dim=gather_dim,
+                group_name=group.group_name,
+                out_dtype=out_dtype,
+            )
+        ag_output_1, mm_outputs_1 = all_gather_scaled_matmul(
             A_shard,
-            Bs,
+            B,
             A_scale,
-            B_scales,
+            B_scale,
             gather_dim=gather_dim,
             group_name=group.group_name,
-            biases=[None] * len(Bs),
-            result_scales=[None] * len(Bs),
-            out_dtypes=out_dtypes,
-            use_fast_accum=[None] * len(Bs),
-        )
-        ag_output_1, mm_outputs_1 = torch.ops.symm_mem.fused_all_gather_scaled_matmul(
-            A_shard,
-            Bs,
-            A_scale,
-            B_scales,
-            gather_dim=gather_dim,
-            group_name=group.group_name,
-            biases=[None] * len(Bs),
-            result_scales=[None] * len(Bs),
-            out_dtypes=out_dtypes,
-            use_fast_accum=[None] * len(Bs),
+            out_dtype=out_dtype,
         )
 
         self.assertTrue(
