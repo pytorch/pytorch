@@ -36,6 +36,7 @@ torch.fx.experimental.symbolic_shapes
     is_concrete_int
     is_concrete_bool
     has_free_symbols
+    has_free_unbacked_symbols
     definitely_true
     definitely_false
     guard_size_oblivious
