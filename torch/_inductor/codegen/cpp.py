@@ -776,8 +776,8 @@ class CppOverrides(OpOverrides):
     @staticmethod
     def frexp(x):
         cache_keys = f"frexp({x})[0]", f"frexp({x})[1]"
-        if all(cache_key in V.kernel.cse.cache for cache_key in cache_keys):
-            return tuple(V.kernel.cse.cache[cache_key] for cache_key in cache_keys)
+        if all(V.kernel.cse.try_get(cache_key) is not None for cache_key in cache_keys):
+            return tuple(V.kernel.cse.try_get(cache_key) for cache_key in cache_keys)
 
         code = BracesBuffer()
         exponent = V.kernel.cse.newvar()
@@ -787,7 +787,7 @@ class CppOverrides(OpOverrides):
         V.kernel.compute.splice(code)
         cse_vars = (mantissa, exponent)
         for cache_key, cse_var in zip(cache_keys, cse_vars):
-            V.kernel.cse.cache[cache_key] = cse_var
+            V.kernel.cse.put(cache_key, cse_var)
         return mantissa, exponent
 
     @staticmethod
@@ -1574,8 +1574,8 @@ class CppVecOverrides(CppOverrides):
     @staticmethod
     def frexp(x):
         cache_keys = f"frexp({x})[0]", f"frexp({x})[1]"
-        if all(cache_key in V.kernel.cse.cache for cache_key in cache_keys):
-            return tuple(V.kernel.cse.cache[cache_key] for cache_key in cache_keys)
+        if all(V.kernel.cse.try_get(cache_key) is not None for cache_key in cache_keys):
+            return tuple(V.kernel.cse.try_get(cache_key) for cache_key in cache_keys)
 
         cdtype = DTYPE_TO_CPP[x.dtype]
         size = V.kernel.tail_size if V.kernel.tail_size else V.kernel.tiling_factor
@@ -1625,7 +1625,7 @@ class CppVecOverrides(CppOverrides):
         V.kernel.compute.splice(code)
         cse_vars = (mantissa, exponent)
         for cache_key, cse_var in zip(cache_keys, cse_vars):
-            V.kernel.cse.cache[cache_key] = cse_var
+            V.kernel.cse.put(cache_key, cse_var)
         return mantissa, exponent
 
     @classmethod
@@ -2198,7 +2198,7 @@ class CppKernel(Kernel):
 
     def cache_dtype_convert(self, dst, dst_dtype, src, src_dtype):
         expr = self.get_to_dtype_expr(src, dst_dtype, src_dtype)
-        self.cse.cache[expr] = dst
+        self.cse.put(expr, dst)
 
 
 class CppVecKernel(CppKernel):
@@ -3086,11 +3086,11 @@ class CppTile2DKernel(CppVecKernel):
             )
         if is_store:
             tile_var = self.cse.newvar()
-        elif load_or_store not in self.cse.cache:
+        elif not self.cse.contains(load_or_store):
             tile_var = self.cse.generate(self.preloads, load_or_store, write=False)
         else:
             need_define = False
-            tile_var = self.cse.cache[load_or_store]
+            tile_var = self.cse.get(load_or_store)
 
         if need_define:
             cpp_dtype = DTYPE_TO_CPP[dtype]
