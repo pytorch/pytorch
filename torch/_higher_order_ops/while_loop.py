@@ -114,7 +114,10 @@ def while_loop(cond_fn, body_fn, carried_inputs):
     # parameters and buffers accessed in cond_fn or body_fn or tensor closures will become additional_inputs.
     additional_inputs: Tuple = ()
 
-    # See NOTE: []
+    # The reason we flatten the output before calling into dynamo is that
+    # we want to create a consistent input ordering for cond_fn and body_fn.
+    # and we also want to the input ordering matches the output ordering.
+    # Also see NOTE: [why we cannot use "automatic" for while_loop]
     # Construct flat cond_fn and flat_body_fn, which takes flattened inputs
     flat_inputs, in_spec = pytree.tree_flatten((carried_inputs, additional_inputs))
 
