@@ -119,13 +119,13 @@ def addmm_patterns_init():
     device = next(
         (gpu for gpu in GPU_TYPES if getattr(torch, gpu).is_available()), "cpu"
     )
-
-    if device == "cpu" and not config.cpp.enable_concat_linear:
-        return
-
     val = functools.partial(torch.empty, (10, 10), device=device, requires_grad=False)
 
     def check_concat_weights(match):
+        is_cpu = match.kwargs["inp"].meta["val"].is_cpu
+        if is_cpu and not config.cpp.enable_concat_linear:
+            return False
+
         weight_inputs = ["w1", "w2"]
         if "w3" in match.kwargs:
             weight_inputs.append("w3")
