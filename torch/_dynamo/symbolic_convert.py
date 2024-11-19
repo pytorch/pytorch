@@ -98,6 +98,7 @@ from .variables.lists import (
     TupleVariable,
 )
 from .variables.misc import (
+    ExceptionVariable,
     GetAttrVariable,
     NewCellVariable,
     NullVariable,
