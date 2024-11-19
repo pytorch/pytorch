@@ -991,6 +991,8 @@ def _exported_program_to_onnx_program(
                 attributes=(),
             )
             owned_graphs[subgraph_name] = graph
+            model.functions[graph.identifier()] = graph
+
         values = _translate_fx_graph(
             fx_graph,
             model,
