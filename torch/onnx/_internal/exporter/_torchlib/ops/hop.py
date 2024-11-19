@@ -15,7 +15,7 @@ def call_op(
     *args: ir.Value,
     _num_outputs: int = 1,
     **kwargs: int | float | str | bool | ir.Graph | ir.TensorProtocol,
-) -> ir.Value | Sequence[ir.Value]:
+) -> Sequence[ir.Value]:
     """Call an operator with the given arguments and keyword arguments.
 
     Arguments are always inputs, while keyword arguments are attributes.
@@ -49,8 +49,6 @@ def call_op(
             version=tracer.opset.version,
         )
     )
-    if _num_outputs == 1:
-        return node.outputs[0]
     return node.outputs
 
 
