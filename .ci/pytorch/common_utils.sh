@@ -105,9 +105,9 @@ function get_bazel() {
   # version of Bazelisk to fetch the platform specific version of
   # Bazel to use from .bazelversion.
   retry curl --location --output tools/bazel \
-    https://raw.githubusercontent.com/bazelbuild/bazelisk/v1.16.0/bazelisk.py
+    https://raw.githubusercontent.com/bazelbuild/bazelisk/v1.23.0/bazelisk.py
   shasum --algorithm=1 --check \
-    <(echo 'd4369c3d293814d3188019c9f7527a948972d9f8  tools/bazel')
+    <(echo '01df9cf7f08dd80d83979ed0d0666a99349ae93c  tools/bazel')
   chmod u+x tools/bazel
 }
 
