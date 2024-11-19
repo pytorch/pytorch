@@ -217,7 +217,9 @@ using namespace c10::xpu;
 // Unlike C10_ALWAYS_INLINE, C10_ALWAYS_INLINE_ATTRIBUTE can be used
 // on a lambda.
 #if defined(_MSC_VER)
-#define C10_ALWAYS_INLINE_ATTRIBUTE [[msvc::forceinline]]
+// MSVC 14.39 is reasonably recent and doesn't like
+// [[msvc::forceinline]] on a lambda, so don't try to use it.
+#define C10_ALWAYS_INLINE_ATTRIBUTE
 #elif __has_attribute(always_inline) || defined(__GNUC__)
 #define C10_ALWAYS_INLINE_ATTRIBUTE __attribute__((__always_inline__))
 #else
@@ -445,66 +447,14 @@ __host__ __device__
 #define C10_ALWAYS_INLINE_UNLESS_MOBILE C10_ALWAYS_INLINE
 #endif
 
-#if defined(__CUDA_ARCH__)
-#if defined(_MSC_VER) && defined(__CUDACC__)
-#define CONSTEXPR_EXCEPT_WIN_CUDA const
-#define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA __host__
-
-// Note [static constexpr char* members for windows NVCC]
-// The Windows NVCC compiler doesn't handle static constexpr class members,
-// although it's fixed in a later version.
-// (see
-// https://developercommunity.visualstudio.com/t/intellisense-error-c11-static-constexpr-member-ini/245425)
-//
-// If we want to ensure that our field is static under all builds, then we need
-// to work around it specifically for windows NVCC by making it (a) const, (b)
-// defined outside of the class definition We need to define it outside of the
-// class definition because of the C++ standard; char* is not an integral type
-// (see
-// https://stackoverflow.com/questions/24278473/intellisense-a-member-of-type-const-char-const-cannot-have-an-in-class-in)
-//
-// So instead of this:
-// struct Foo {
-//     static constexpr const char* name = "foo";
-// }
-// In Windows NVCC, we end up with this:
-// struct Foo {
-//     static const char* name;
-// }
-// const char* Foo::name = "foo";
-//
-// This gives us a small perf hit for any code that wants to access these field
-// members, but right now it isn't used in any perf-critical code paths.
-#define STATIC_CONSTEXPR_STR_INL_EXCEPT_WIN_CUDA(field, val) \
-  static const char* field;
-#define STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA(cls, field, val) \
-  const char* cls::field = val;
-#else
-#define CONSTEXPR_EXCEPT_WIN_CUDA constexpr
-#define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA __host__
-
-#define STATIC_CONSTEXPR_STR_INL_EXCEPT_WIN_CUDA(field, val) \
-  static constexpr const char* field = val;
-#define STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA(cls, field, val)
-#endif
-#else
-#if defined(_MSC_VER) && defined(__CUDACC__)
-#define CONSTEXPR_EXCEPT_WIN_CUDA const
-#define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA
-
-#define STATIC_CONSTEXPR_STR_INL_EXCEPT_WIN_CUDA(field, val) \
-  static const char* field;
-#define STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA(cls, field, val) \
-  const char* cls::field = val;
-#else
+#if !defined(FBCODE_CAFFE2) && !defined(C10_NODEPRECATED)
 #define CONSTEXPR_EXCEPT_WIN_CUDA constexpr
 #define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA constexpr
 
 #define STATIC_CONSTEXPR_STR_INL_EXCEPT_WIN_CUDA(field, val) \
-  static constexpr const char* field = val;
+  static constexpr const char field[] = val;
 #define STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA(cls, field, val)
-#endif
-#endif
+#endif // !defined(FBCODE_CAFFE2) && !defined(C10_NODEPRECATED)
 
 #ifndef HAS_DEMANGLE
 #if defined(__ANDROID__) || defined(_WIN32) || defined(__EMSCRIPTEN__)

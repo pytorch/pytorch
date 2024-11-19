@@ -71,7 +71,7 @@ class C10_API TypeIdentifier final
    * is generated during run-time. Do NOT serialize the id for storage.
    */
   template <typename T>
-  static C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA TypeIdentifier Get() noexcept {
+  static constexpr TypeIdentifier Get() noexcept {
     return TypeIdentifier(c10::util::get_type_index<T>());
   }
 
@@ -425,7 +425,7 @@ class C10_API TypeMeta final {
   // Below are static functions that can be called by passing a specific type.
 
   template <class T>
-  static C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA TypeIdentifier Id() noexcept {
+  static constexpr TypeIdentifier Id() noexcept {
     return TypeIdentifier::Get<T>();
   }
 
@@ -705,7 +705,7 @@ using _guard_long_unique = std::conditional_t<
 
 CAFFE_DECLARE_KNOWN_TYPE(
     detail::_guard_long_unique<long>,
-    detail_guard_long_unique_long);
+    detail_guard_long_unique_long)
 CAFFE_DECLARE_KNOWN_TYPE(
     detail::_guard_long_unique<std::vector<long>>,
     detail_guard_long_unique_std_vector_long)

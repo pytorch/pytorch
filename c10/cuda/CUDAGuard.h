@@ -34,6 +34,7 @@ struct CUDAGuard {
   // Move is not allowed (there is no uninitialized state)
   CUDAGuard(CUDAGuard&& other) = delete;
   CUDAGuard& operator=(CUDAGuard&& other) = delete;
+  ~CUDAGuard() = default;
 
   /// Sets the CUDA device to the given device.  Errors if the given device
   /// is not a CUDA device.
@@ -93,6 +94,7 @@ struct OptionalCUDAGuard {
 
   // See Note [Move assignment for RAII guards is tricky]
   OptionalCUDAGuard& operator=(OptionalCUDAGuard&& other) = delete;
+  ~OptionalCUDAGuard() = default;
 
   /// Sets the CUDA device to the given device, initializing the guard if it
   /// is not already initialized.  Errors if the given device is not a CUDA
@@ -228,6 +230,7 @@ struct OptionalCUDAStreamGuard {
 
   // See Note [Move assignment for RAII guards is tricky]
   OptionalCUDAStreamGuard& operator=(OptionalCUDAStreamGuard&& other) = delete;
+  ~OptionalCUDAStreamGuard() = default;
 
   /// Resets the currently set CUDA stream to the original stream and
   /// the currently set device to the original device.  Then,
@@ -285,6 +288,7 @@ struct CUDAMultiStreamGuard {
 
   // See Note [Move assignment for RAII guards is tricky]
   CUDAMultiStreamGuard& operator=(CUDAMultiStreamGuard&& other) = delete;
+  ~CUDAMultiStreamGuard() = default;
 
  private:
   c10::impl::InlineMultiStreamGuard<impl::CUDAGuardImpl> guard_;

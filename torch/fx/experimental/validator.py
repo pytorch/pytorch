@@ -163,6 +163,9 @@ try:
         def to_int(x: z3.ArithRef) -> z3.ArithRef:
             return x if x.is_int() else z3.ToInt(x)
 
+        def sym_sum(self, args: z3.ArithRef) -> z3.ArithRef:
+            return sum(args)
+
         # Implements Python division semantics.
         def div(self, numerator: z3.ArithRef, denominator: z3.ArithRef) -> z3.ArithRef:
             self.validator.add_assertion(denominator != 0)  # type: ignore[arg-type]
@@ -187,6 +190,9 @@ try:
             return z3.If(
                 self.floor(number) < number, self.floor(number + 1), number
             )  # type: ignore[return-value]
+
+        def trunc(self, number: z3.ArithRef) -> z3.ArithRef:
+            return z3.If(number >= 0, self.floor(number), self.ceil(number))  # type: ignore[return-value]
 
         def max(self, a: z3.ArithRef, b: z3.ArithRef) -> z3.ArithRef:
             return z3.If(a > b, a, b)  # type: ignore[return-value]
@@ -265,7 +271,10 @@ try:
             @functools.wraps(func)
             def wrapper(*args):
                 # Lifts the arguments into a list of Z3 inhabitants.
-                wrapped_args = (wrap(a) for a in args)
+                if len(args) == 1 and isinstance(args[0], (list, tuple)):
+                    wrapped_args = (tuple(wrap(a) for a in args[0]),)
+                else:
+                    wrapped_args = tuple(wrap(a) for a in args)
                 # Run the function on the Z3 expressions.
                 return func(*wrapped_args)
 
@@ -285,10 +294,12 @@ try:
             # Math module.
             math.ceil: lift(ops.ceil),
             math.floor: lift(ops.floor),
+            math.trunc: lift(ops.trunc),
             # Torch module.
             torch.sym_float: lift(ops.to_real),
             torch.sym_max: lift(ops.max),
             torch.sym_min: lift(ops.min),
+            torch.sym_sum: lift(ops.sym_sum),
             torch.sym_ite: lift(lambda b, t, f: t if b else f),
             torch._sym_sqrt: lift(ops.sqrt),  # type: ignore[attr-defined]
             # Not lifted because we only use this function as a
@@ -719,6 +730,8 @@ def bisect(shape_env):
             return fake
         if isinstance(fake, torch.SymInt):
             return torch.SymInt(fake.node.with_shape_env(shape_env))
+        if isinstance(fake, torch.SymFloat):
+            return torch.SymFloat(fake.node.with_shape_env(shape_env))
         assert isinstance(fake, FakeTensorMeta)
         return FakeTensorMeta(
             tuple(new_with_shape_env(shape_env, s) for s in fake.size()),

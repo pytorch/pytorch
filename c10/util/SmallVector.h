@@ -842,7 +842,7 @@ class SmallVectorImpl : public SmallVectorTemplateBase<T> {
     // If we just moved the element we're inserting, be sure to update
     // the reference (never happens if TakesParamByValue).
     static_assert(
-        !TakesParamByValue || std::is_same<ArgType, T>::value,
+        !TakesParamByValue || std::is_same_v<ArgType, T>,
         "ArgType must be 'T' when taking by value!");
     if (!TakesParamByValue && this->isReferenceToRange(EltPtr, I, this->end()))
       ++EltPtr;

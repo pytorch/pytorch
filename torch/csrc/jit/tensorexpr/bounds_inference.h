@@ -6,9 +6,7 @@
 #include <torch/csrc/Export.h>
 #include <torch/csrc/jit/tensorexpr/mem_dependency_checker.h>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 class Expr;
 class Buf;
@@ -74,6 +72,4 @@ TORCH_API bool isOverlapping(
     const StorePtr& S,
     const LoadPtr& L);
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr

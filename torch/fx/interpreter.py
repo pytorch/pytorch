@@ -50,13 +50,13 @@ class Interpreter:
                 def call_function(self, target: Target, args: Tuple, kwargs: Dict) -> Any:
                     if target == torch.sigmoid:
                         return torch.neg(*args, **kwargs)
-                    return super().call_function(n)
+                    return super().call_function(target, args, kwargs)
 
                 def call_method(self, target: Target, args: Tuple, kwargs: Dict) -> Any:
                     if target == "neg":
                         call_self, *args_tail = args
                         return call_self.sigmoid(*args_tail, **kwargs)
-                    return super().call_method(n)
+                    return super().call_method(target, args, kwargs)
 
 
             def fn(x):
@@ -460,7 +460,7 @@ class Transformer(Interpreter):
                 ) -> Any:
                     if target == torch.sigmoid:
                         return torch.neg(*args, **kwargs)
-                    return super().call_function(n)
+                    return super().call_function(target, args, kwargs)
 
                 def call_method(
                     self, target: "Target", args: Tuple[Argument, ...], kwargs: Dict[str, Any]
@@ -468,7 +468,7 @@ class Transformer(Interpreter):
                     if target == "neg":
                         call_self, *args_tail = args
                         return call_self.sigmoid(*args_tail, **kwargs)
-                    return super().call_method(n)
+                    return super().call_method(target, args, kwargs)
 
 
             def fn(x):

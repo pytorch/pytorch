@@ -13,10 +13,10 @@ namespace c10 {
 
 class C10_API SymBool {
  public:
-  /*implicit*/ SymBool(bool b) : data_(b){};
+  /*implicit*/ SymBool(bool b) : data_(b) {}
   SymBool(SymNode ptr) : data_(false), ptr_(std::move(ptr)) {
     TORCH_CHECK(ptr_->is_bool());
-  };
+  }
   SymBool() : data_(false) {}
 
   SymNodeImpl* toSymNodeImplUnowned() const {

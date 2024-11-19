@@ -536,10 +536,10 @@ _scaled_dot_product_flash_attention_batch_rule(
 }
 
 fourOutputs _scaled_dot_product_efficient_attention_batch_rule(
-  const Tensor& query, optional<int64_t> query_bdim,
-  const Tensor& key, optional<int64_t> key_bdim,
-  const Tensor& value, optional<int64_t> value_bdim,
-  const std::optional<Tensor>& attn_bias, optional<int64_t> attn_bias_bdim,
+  const Tensor& query, std::optional<int64_t> query_bdim,
+  const Tensor& key, std::optional<int64_t> key_bdim,
+  const Tensor& value, std::optional<int64_t> value_bdim,
+  const std::optional<Tensor>& attn_bias, std::optional<int64_t> attn_bias_bdim,
   bool compute_log_sumexp,
   double dropout_p,
   bool is_causal,
@@ -686,65 +686,65 @@ _scaled_dot_product_cudnn_attention_batch_rule(
 #endif
 
 #define LINALG_CHECK_MATRIX_UNARY_ONE_OUT(fn, op_name) \
-  LINALG_STRING_CONST(fn, op_name);\
+  LINALG_STRING_CONST(fn, op_name)\
   TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {\
     VMAP_SUPPORT(fn, LINALG_CHECK_MATRIX_UNARY_BATCH_RULE(fn, one));\
   }
 
 #define LINALG_CHECK_MATRIX_UNARY_ONE_OUT2(fn, overload, op_name) \
-  LINALG_STRING_CONST2(fn, overload, op_name);\
+  LINALG_STRING_CONST2(fn, overload, op_name)\
   TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {\
     VMAP_SUPPORT2(fn, overload, LINALG_CHECK_MATRIX_UNARY_BATCH_RULE2(fn, overload, one));\
   }
 
 #define LINALG_CHECK_MATRIX_UNARY_TWO_OUT(fn, op_name) \
-  LINALG_STRING_CONST(fn, op_name);\
+  LINALG_STRING_CONST(fn, op_name)\
   TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {\
     VMAP_SUPPORT(fn, LINALG_CHECK_MATRIX_UNARY_BATCH_RULE(fn, two));\
   }
 
 #define LINALG_CHECK_MATRIX_UNARY_THREE_OUT(fn, op_name) \
-  LINALG_STRING_CONST(fn, op_name);\
+  LINALG_STRING_CONST(fn, op_name)\
   TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {\
     VMAP_SUPPORT(fn, LINALG_CHECK_MATRIX_UNARY_BATCH_RULE(fn, three));\
   }
 
 #define LINALG_CHECK_MATRIX_UNARY_FOUR_OUT(fn, op_name) \
-  LINALG_STRING_CONST(fn, op_name);\
+  LINALG_STRING_CONST(fn, op_name)\
   TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {\
     VMAP_SUPPORT(fn, LINALG_CHECK_MATRIX_UNARY_BATCH_RULE(fn, four));\
   }
 
 #define LINALG_CHECK_MATRIX_BINARY_ONE_OUT(fn, op_name) \
-  LINALG_STRING_CONST(fn, op_name);\
+  LINALG_STRING_CONST(fn, op_name)\
   TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {\
     VMAP_SUPPORT(fn, LINALG_CHECK_MATRIX_BINARY_BATCH_RULE(fn, one));\
   }
 
 #define LINALG_CHECK_MATRIX_BINARY_TWO_OUT(fn, op_name) \
-  LINALG_STRING_CONST(fn, op_name);\
+  LINALG_STRING_CONST(fn, op_name)\
   TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {\
     VMAP_SUPPORT(fn, LINALG_CHECK_MATRIX_BINARY_BATCH_RULE(fn, two));\
   }
 
 // These need to be outside. String constant must be declared outside of a macro to be used as template param
 // NOLINTBEGIN(*array*)
-LINALG_CHECK_MATRIX_UNARY_ONE_OUT(cholesky, cholesky);
-LINALG_CHECK_MATRIX_UNARY_ONE_OUT(cholesky_inverse, cholesky_inverse);
-LINALG_CHECK_MATRIX_UNARY_TWO_OUT(linalg_cholesky_ex, linalg.cholesky);
-LINALG_CHECK_MATRIX_UNARY_TWO_OUT(linalg_eig, linalg.eig);
-LINALG_CHECK_MATRIX_UNARY_TWO_OUT(linalg_inv_ex, linalg.inv_ex);
-LINALG_CHECK_MATRIX_UNARY_THREE_OUT(linalg_ldl_factor_ex, torch.linalg.ldl_factor_ex);
-LINALG_CHECK_MATRIX_UNARY_TWO_OUT(linalg_qr, linalg.qr);
-LINALG_CHECK_MATRIX_UNARY_TWO_OUT(linalg_slogdet, linalg.slogdet);
-LINALG_CHECK_MATRIX_BINARY_ONE_OUT(linalg_solve_triangular, linalg.solve_triangular);
+LINALG_CHECK_MATRIX_UNARY_ONE_OUT(cholesky, cholesky)
+LINALG_CHECK_MATRIX_UNARY_ONE_OUT(cholesky_inverse, cholesky_inverse)
+LINALG_CHECK_MATRIX_UNARY_TWO_OUT(linalg_cholesky_ex, linalg.cholesky)
+LINALG_CHECK_MATRIX_UNARY_TWO_OUT(linalg_eig, linalg.eig)
+LINALG_CHECK_MATRIX_UNARY_TWO_OUT(linalg_inv_ex, linalg.inv_ex)
+LINALG_CHECK_MATRIX_UNARY_THREE_OUT(linalg_ldl_factor_ex, torch.linalg.ldl_factor_ex)
+LINALG_CHECK_MATRIX_UNARY_TWO_OUT(linalg_qr, linalg.qr)
+LINALG_CHECK_MATRIX_UNARY_TWO_OUT(linalg_slogdet, linalg.slogdet)
+LINALG_CHECK_MATRIX_BINARY_ONE_OUT(linalg_solve_triangular, linalg.solve_triangular)
 
-LINALG_CHECK_MATRIX_UNARY_TWO_OUT(geqrf, geqrf);
-LINALG_CHECK_MATRIX_BINARY_TWO_OUT(triangular_solve, triangular_solve);
-LINALG_CHECK_MATRIX_UNARY_THREE_OUT(_linalg_det, linalg.det);
-LINALG_CHECK_MATRIX_UNARY_TWO_OUT(_linalg_eigh, linalg.eigh);
-LINALG_CHECK_MATRIX_UNARY_FOUR_OUT(_linalg_slogdet, linalg.slogdet);
-LINALG_CHECK_MATRIX_UNARY_THREE_OUT(_linalg_svd, linalg.svd);
+LINALG_CHECK_MATRIX_UNARY_TWO_OUT(geqrf, geqrf)
+LINALG_CHECK_MATRIX_BINARY_TWO_OUT(triangular_solve, triangular_solve)
+LINALG_CHECK_MATRIX_UNARY_THREE_OUT(_linalg_det, linalg.det)
+LINALG_CHECK_MATRIX_UNARY_TWO_OUT(_linalg_eigh, linalg.eigh)
+LINALG_CHECK_MATRIX_UNARY_FOUR_OUT(_linalg_slogdet, linalg.slogdet)
+LINALG_CHECK_MATRIX_UNARY_THREE_OUT(_linalg_svd, linalg.svd)
 // NOLINTEND(*array*)
 
 TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
