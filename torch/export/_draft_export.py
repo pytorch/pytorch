@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import torch
 import torch._logging._internal
+from torch._export.passes.insert_custom_op_guards import insert_custom_op_guards
 from torch.export import ExportedProgram
 from torch.export._trace import _export
 from torch.export.dynamic_shapes import refine_dynamic_shapes_from_suggested_fixes
@@ -297,6 +298,9 @@ def draft_export(
             )
 
         report = DraftExportReport(failures, str_to_filename)
+
+        # Add asserts around custom ops
+        insert_custom_op_guards(ep.graph_module, list(custom_ops_logs.keys()))
 
     ep._report = report
     if not report.successful():
