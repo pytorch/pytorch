@@ -1311,7 +1311,6 @@ class GuardBuilder(GuardBuilderBase):
 
     def TYPE_MATCH(self, guard: Guard) -> None:
         # ___check_type_id is same as `id(type(x)) == y`
-        val = self.get(guard.name)
         t = type(self.get(guard.name))
         obj_id = self.id_ref(t)
         code = f"___check_type_id({self.arg_ref(guard)}, {obj_id})"
@@ -2429,7 +2428,7 @@ class CheckFunctionManager:
         ):
             assert isinstance(cache_entry, CacheEntry)
             assert isinstance(extra_state, ExtraState)
-            reason = f"Cache line invalidated {obj_str} got deallocated"
+            reason = f"Cache line invalidated because {obj_str} got deallocated"
             deleted_guard_manager = DeletedGuardManagerWrapper(reason)
             extra_state.invalidate(cache_entry, deleted_guard_manager)
             self.guard_manager = deleted_guard_manager
@@ -2443,10 +2442,7 @@ class CheckFunctionManager:
                 # we are using a finalizer which is kept alive.
                 self._weakrefs[id(obj)] = weakref.ref(obj)
 
-                if obj.__str__ is object.__str__ and obj.__repr__ is object.__repr__:
-                    obj_str = str(obj)
-                else:
-                    obj_str = f"object with {id(obj)}"
+                obj_str = object.__str__(obj)
                 weakref.finalize(
                     obj, functools.partial(self.invalidate, obj_str=obj_str)
                 )
