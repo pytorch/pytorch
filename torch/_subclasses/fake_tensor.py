@@ -2807,7 +2807,7 @@ def inferred_fake_kernel_from_real_out(
         }
 
     dtrace_structured(
-        "generated_fake_kernel",
+        "missing_fake_kernel",
         metadata_fn=lambda: {"op": str(op), "op_profile": get_profile()},
     )
 

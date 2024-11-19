@@ -3,7 +3,7 @@ import logging
 import sys
 from collections import defaultdict
 from dataclasses import dataclass
-from enum import IntEnum
+from enum import Enum, IntEnum
 from functools import lru_cache
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
@@ -15,6 +15,13 @@ from torch.export.dynamic_shapes import refine_dynamic_shapes_from_suggested_fix
 
 
 log = logging.getLogger(__name__)
+
+
+class MonitoredLogKeys(str, Enum):
+    FILENAME = "str"
+    PROPAGATE_REAL_TENSORS = "propagate_real_tensors"
+    GUARD_ADDED = "guard_added"
+    MISSING_FAKE_KERNEL = "missing_fake_kernel"
 
 
 class FailureType(IntEnum):
@@ -99,18 +106,57 @@ class FailureReport:
                 return [idx for _, idx in strides]
 
             op_module, op_name, op_overload = op.split(".")
-            call_str = '\n            get_fake_out({dim}, {sorted_strides}, {dtype}, "{device}", {layout}),'
-            call_get_fake_out_str = [
-                call_str.format(
-                    dim=len(profile.shape),
-                    sorted_strides=get_sorted_strides(profile.strides),
-                    dtype=profile.dtype,
-                    device=profile.device,
-                    layout=profile.layout,
-                )
-                for profile in op_profiles[0].flat_out_profile
+
+            profile_casing = ""
+
+            for i, op_profile in enumerate(op_profiles):
+                check_arg_string = '            and match(flat_args[{idx}], {dim}, {dtype}, torch.device("{device}"), {layout})'
+                check_args_list = [
+                    check_arg_string.format(
+                        idx=idx,
+                        dim=len(profile.shape),
+                        dtype=profile.dtype,
+                        device=profile.device,
+                        layout=profile.layout,
+                    )
+                    for idx, profile in enumerate(op_profile.flat_args_profile)
+                ]
+                check_args_str = "\n".join(check_args_list)
+
+                call_str = '                get_fake_out({dim}, {sorted_strides}, {dtype}, torch.device("{device}"), {layout}),'
+                call_get_fake_out_list = [
+                    call_str.format(
+                        dim=len(profile.shape),
+                        sorted_strides=get_sorted_strides(profile.strides),
+                        dtype=profile.dtype,
+                        device=profile.device,
+                        layout=profile.layout,
+                    )
+                    for profile in op_profile.flat_out_profile
+                ]
+                call_get_fake_out_str = "\n".join(call_get_fake_out_list)
+
+                profile_casing += f"""
+        {"if" if i == 0 else "elif"} (
+            args_spec == pytree.treespec_loads(\'{op_profile.args_spec}\')
+{check_args_str}
+        ):
+
+            # Loop through all the flat outputs from the profiling
+            flat_fake_out = [
+{call_get_fake_out_str}
             ]
-            call_get_fake_out_str = "\n".join(call_get_fake_out_str)
+
+            # Unflatten the outputs to be the same output structure as the eager model
+            return pytree.tree_unflatten(
+                flat_fake_out, pytree.treespec_loads(\'{op_profile.out_spec}\')
+            )
+"""
+
+            profile_casing += """
+        else:
+            raise NotImplementedError("Input type not seen before")
+"""
 
             return f"""Missing fake kernel.
     torch.ops.{op} is missing a fake kernel implementation.
@@ -122,8 +168,17 @@ class FailureReport:
     import torch.utils._pytree as pytree
 
     @torch.library.register_fake("{op_module}::{op_name}")
-    def {op.replace(".", "_")}_fake(*args, **kwargs):
+    def _(*args, **kwargs):
         ctx = torch.library.get_ctx()
+
+        def match(tensor, dim, dtype, device, layout):
+            # TODO: check strides
+            return (
+                tensor.dim() == dim
+                and tensor.dtype == dtype
+                and tensor.device == device
+                and tensor.layout == layout
+            )
 
         # Generate fake tensor for each output
         def get_fake_out(dim, sorted_strides, dtype, device, layout):
@@ -139,14 +194,8 @@ class FailureReport:
                 size=fake_shape, stride=fake_strides, dtype=dtype, device=device, layout=layout
             )
 
-        # Loop through all the flat outputs from the profiling
-        flat_fake_out = [{call_get_fake_out_str}
-        ]
-
-        # Unflatten the outputs to be the same output structure as the eager model
-        return pytree.tree_unflatten(
-            flat_fake_out, pytree.treespec_loads(\'{op_profiles[0].out_spec}\')
-        )
+        flat_args, args_spec = pytree.tree_flatten((args, kwargs))
+        {profile_casing}
     ```
 """  # noqa: B950
 
@@ -296,7 +345,12 @@ def draft_export(
     dynamic_shapes = dynamic_shapes or {}
 
     capture_structured_log = CaptureStructuredTrace(
-        ["str", "propagate_real_tensors", "guard_added", "generated_fake_kernel"]
+        [
+            MonitoredLogKeys.FILENAME.value,
+            MonitoredLogKeys.PROPAGATE_REAL_TENSORS.value,
+            MonitoredLogKeys.GUARD_ADDED.value,
+            MonitoredLogKeys.MISSING_FAKE_KERNEL.value,
+        ]
     )
 
     with torch._functorch.config.patch(
@@ -339,7 +393,7 @@ def draft_export(
         for log_name, log_contents in capture_structured_log.logs:
             failure_type = None
 
-            if log_name == "propagate_real_tensors":
+            if log_name == MonitoredLogKeys.PROPAGATE_REAL_TENSORS.value:
                 log_contents["stack"] = filter_stack(
                     log_contents["stack"], str_to_filename
                 )
@@ -349,12 +403,12 @@ def draft_export(
                 data_dependent_logs[hash_stack(log_contents["stack"])] = log_contents
                 failure_type = FailureType.DATA_DEPENDENT_ERROR
 
-            elif log_name == "str":
+            elif log_name == MonitoredLogKeys.FILENAME.value:
                 filename, idx = log_contents
                 str_to_filename[str(idx)] = filename
                 continue
 
-            elif log_name == "guard_added":
+            elif log_name == MonitoredLogKeys.GUARD_ADDED.value:
                 if new_shapes is None:
                     continue
 
@@ -370,7 +424,7 @@ def draft_export(
                 )
                 log_contents["new_dynamic_shapes"] = new_shapes
 
-            elif log_name == "generated_fake_kernel":
+            elif log_name == MonitoredLogKeys.MISSING_FAKE_KERNEL.value:
                 custom_ops_logs[log_contents["op"]].append(log_contents["op_profile"])
                 continue
             else:
