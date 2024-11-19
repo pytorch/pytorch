@@ -22,8 +22,8 @@ AT_FORALL_SCALAR_TYPES_AND7(
     Float8_e4m3fn,
     Float8_e4m3fnuz,
     DTYPE_DEFINE)
-DTYPE_DEFINE(c10::quint8, QUInt8);
-DTYPE_DEFINE(c10::qint8, QInt8);
+DTYPE_DEFINE(c10::quint8, QUInt8)
+DTYPE_DEFINE(c10::qint8, QInt8)
 
 #undef DTYPE_DEFINE
 
