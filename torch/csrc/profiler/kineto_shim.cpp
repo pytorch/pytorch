@@ -222,7 +222,7 @@ bool collectivesProfilerExists() {
 
 #ifdef USE_KINETO
 static const std::string setTraceID(const std::string& trace_id) {
-  if (trace_id == "") {
+  if (trace_id.empty()) {
     return "";
   }
   std::stringstream configss;

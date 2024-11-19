@@ -651,6 +651,7 @@ class TritonBenchmarkRequest(BenchmarkRequest):
 
         run_method = getattr(mod, self.kernel_name).run
         extra_args = list(self.extra_args)
+        run_method.__self__.with_bandwidth_info = False
 
         # Newer version of triton add warmup argument to JITFunction.run.
         # This code handles backward-compatibility.
@@ -689,8 +690,8 @@ class TritonBenchmarkRequest(BenchmarkRequest):
                 run_method(
                     *input_tensors,
                     output_tensor,
-                    workspace_tensor,
                     *extra_args,
+                    workspace_tensor,
                     grid=self.grid,
                     **warmup_arg,
                     stream=stream,
@@ -698,6 +699,19 @@ class TritonBenchmarkRequest(BenchmarkRequest):
                 )
 
             return run_with_workspace
+        if isinstance(
+            getattr(mod, self.kernel_name),
+            torch._inductor.runtime.triton_heuristics.DebugAutotuner,
+        ):
+            return functools.partial(
+                run_method,
+                *input_tensors,
+                output_tensor,
+                *extra_args,
+                grid=self.grid,
+                **warmup_arg,
+                stream=stream,
+            )
         else:
             return functools.partial(
                 run_method,
