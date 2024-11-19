@@ -8,6 +8,7 @@ import torch._dynamo.config as dynamo_config
 import torch._inductor.config as inductor_config
 from torch._dynamo import utils
 from torch._inductor.test_case import TestCase
+from torch._dynamo.metrics_context import MetricsContext
 
 
 class TestUtils(TestCase):
@@ -74,7 +75,6 @@ class TestUtils(TestCase):
                 tol=tol,
             )
         )
-
 
 class TestModel(torch.nn.Module):
     def __init__(self):
@@ -230,6 +230,7 @@ class TestDynamoTimed(TestCase):
  'fail_type': None,
  'fail_user_frame_filename': None,
  'fail_user_frame_lineno': None,
+ 'feature_usage': {'pytorch/remote_cache:bundle_triton_into_fx_graph_cache_v2': False},
  'frame_key': '1',
  'graph_input_count': 1,
  'graph_node_count': 3,
@@ -294,6 +295,7 @@ class TestDynamoTimed(TestCase):
  'fail_type': None,
  'fail_user_frame_filename': None,
  'fail_user_frame_lineno': None,
+ 'feature_usage': {'pytorch/remote_cache:bundle_triton_into_fx_graph_cache_v2': False},
  'frame_key': None,
  'graph_input_count': None,
  'graph_node_count': None,
