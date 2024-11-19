@@ -9,7 +9,7 @@ from torch._inductor.utils import fresh_inductor_cache
 class Benchmark(BenchmarkBase):
     def __init__(self, backend, dynamic=False, is_gpu=False):
         super().__init__(
-            categor="add_loop",
+            category="add_loop",
             backend=backend,
             device="cuda" if is_gpu else "cpu",
             dynamic=dynamic,
