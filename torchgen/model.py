@@ -279,6 +279,7 @@ dispatch_keys = [
     DispatchKey.CUDA,
     DispatchKey.MPS,
     DispatchKey.XPU,
+    DispatchKey.SparseXPU,
     DispatchKey.SparseCUDA,
     DispatchKey.SparseCsrCUDA,
     DispatchKey.QuantizedCPU,
@@ -289,6 +290,7 @@ dispatch_keys = [
     DispatchKey.CompositeExplicitAutogradNonFunctional,
     DispatchKey.NestedTensorCPU,
     DispatchKey.NestedTensorCUDA,
+    DispatchKey.NestedTensorXPU,
     # Meta is a magic key: it is automatically generated for structured
     # kernels
     DispatchKey.Meta,

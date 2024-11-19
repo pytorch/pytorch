@@ -74,6 +74,8 @@ AOTIModelContainerRunner::AOTIModelContainerRunner(
         json_filename, device_str == "cpu");
     proxy_executor_handle_ =
         reinterpret_cast<AOTIProxyExecutorHandle>(proxy_executor_.get());
+  } else {
+    proxy_executor_handle_ = nullptr;
   }
 
   AOTI_RUNTIME_ERROR_CODE_CHECK(create_func_(
