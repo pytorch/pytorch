@@ -1537,6 +1537,12 @@ class TritonKernel(SIMDKernel):
                 # indirect indexing
                 cse_var = self.cse.varname_map[var.name]
                 mask_vars.update(cse_var.mask_vars)
+            elif "(" in var.name:
+                pass
+            elif symbol_is_type(var, SymT.TEMPLATE_INDEX):
+                # TODO check for scatter + masks
+                # Hmm why is this '(idx_m)'?
+                pass
             elif symbol_is_type(
                 var,
                 (
@@ -1551,15 +1557,10 @@ class TritonKernel(SIMDKernel):
                 pass
             else:
                 # var is one of xN, yN or rN
-                try:
-                    assert symbol_is_type(
-                        var, (SymT.RINDEX, SymT.XBLOCK, SymT.YBLOCK)
-                    ), var.name
-                except AssertionError:
-                    # TODO: failing for type <class 'sympy.core.symbol.Symbol'>
-                    print(f"TODO: failing for type {type(var)}")
+                assert symbol_is_type(
+                    var, (SymT.RINDEX, SymT.XBLOCK, SymT.YBLOCK)
+                ), var.name
                 mask_vars.add(f"{var.name[0]}mask")
-
         need_dense = (
             config.triton.dense_indexing
             or dense_indexing

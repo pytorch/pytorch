@@ -480,10 +480,13 @@ class TritonTemplateKernel(TritonKernel):
                         assert isinstance(
                             scatter_graph, ir.ComputedBuffer
                         ), "Expected a scatter if subgraph is a list"
-                        out_name = scatter_graph.get_name()
-                        scatter_graph.data.store_output(
-                            scatter_graph.name, lambda x: x[0], []
+                        def funx(x, strides):
+                            return sum(x_i * stride for x_i, stride in zip(x, strides))
+
+                        my_funx = functools.partial(
+                            funx, strides=scatter_graph.get_stride()
                         )
+                        scatter_graph.data.store_output(scatter_graph.name, my_funx, [])
 
                 elif isinstance(subgraph.data, ir.InputBuffer):
                     out = subgraph.data.make_loader()(())
@@ -803,24 +806,13 @@ class TritonTemplate(KernelTemplate):
             mod = PyCodeCache.load(code, extra)
 
         input_call_args = tuple(kernel.args.input_buffers.keys())
-        output_call_args = tuple(kernel.args.output_buffers.keys())
 
         # We expect the input_buffer order to be [*input_nodes, *captured_buffers]
         expected_input_args = tuple(unique(x.get_name() for x in input_nodes))
-        expected_output_args = (fake_out.get_name(),)
         assert input_call_args[: len(expected_input_args)] == expected_input_args, (
             input_call_args,
             expected_input_args,
         )
-        try: 
-            # TODO FIX
-            assert output_call_args == expected_output_args, (
-                output_call_args,
-                expected_output_args,
-            )
-        except:
-            print("output_call_args", output_call_args)
-            print("expected_output_args", expected_output_args)
 
         full_input_nodes = tuple([V.graph.get_buffer(k) for k in input_call_args])
         extra_args = V.graph.sizevars.size_hints(
