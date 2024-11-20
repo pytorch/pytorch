@@ -177,6 +177,17 @@ C10_XPU_API std::ostream& operator<<(std::ostream& stream, const XPUStream& s);
  */
 C10_XPU_API void syncStreamsOnDevice(DeviceIndex device = -1);
 
+/**
+ * Get an XPUStream from an external SYCL queue.
+ *
+ * This function allows interoperability with other libraries by enabling
+ * the use of an external SYCL queue that was not created by PyTorch. This
+ * can be useful for data exchange or other operations where integration
+ * with non-PyTorch queues is required.
+ */
+C10_XPU_API XPUStream
+getStreamFromExternal(sycl::queue ext_queue, DeviceIndex device_index);
+
 } // namespace c10::xpu
 
 namespace std {
