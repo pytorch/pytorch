@@ -4,6 +4,9 @@ import torch
 from torch.fx.experimental.constant_symnode import ConstantIntNode
 
 
+__all__ = ["NestedIntNode"]
+
+
 # Python version of aten/src/ATen/core/NestedIntSymNodeImpl.cpp
 def _eq(lhs: Any, rhs: Any) -> bool:
     return (
