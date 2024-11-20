@@ -557,15 +557,15 @@ class CPUReproTests(TestCase):
         itertools.product(
             *[
                 [True, False],
-                [1, 2],
-                [2],
-                [1, 2],
+                [1, 7],
+                [7],
+                [1, 7],
                 [False, True],
                 [False, True],
                 [False, True],
                 [True, False],
-                [1, 2],
-                [1, 2],
+                [1, 7],
+                [1, 7],
             ]
         ),
     )
