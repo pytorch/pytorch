@@ -11802,6 +11802,8 @@ class CommonTemplate:
         def f(x):
             return x.chunk(4)
 
+        # Runs f and its torch.compile-d version with a fresh 1D tensor
+        # of a specific size, and checks that the result is correct.
         def run(size):
             input = torch.randn(size)
             expected_out = f(input)
@@ -11823,11 +11825,24 @@ class CommonTemplate:
             run(4 * i)
         self.assertEqual(cnts.frame_count, 2)
 
+        # Input size: 11
+        # Not a multiple of 4, but still generates 4 output tensors,
+        # where the last one has size > 1.
+        run(11)
+        self.assertEqual(cnts.frame_count, 2)
+
+        # Input size: 10
+        # Even though it still generates 4 output tensors, the last
+        # one has size 1, falling into our 0/1 specialization. Thus,
+        # this one also triggers recompilation.
+        run(10)
+        self.assertEqual(cnts.frame_count, 3)
+
         # Input size: 9
         # Yields one less output tensor, which should trigger a
         # recompilation.
         run(9)
-        self.assertEqual(cnts.frame_count, 3)
+        self.assertEqual(cnts.frame_count, 4)
 
 
 @dataclasses.dataclass
