@@ -89,4 +89,6 @@ runs:
       shell: bash
       run: |
         # All GPUs are visible to the runner; visibility, if needed, will be set by run_test.py.
-        echo "GPU_FLAG=--privileged --device=/dev/mem:/dev/mem:rw --volume /dev/mem:/dev/mem:rw --device=/dev/kfd:/dev/kfd:rw --volume /dev/kfd:/dev/kfd:rw --device /dev/dri:/dev/dri:rw --volume /dev/dri:/dev/dri:rw --group-add video --group-add render --group-add daemon --security-opt seccomp=unconfined" >> "${GITHUB_ENV}"
+        # Add render group for container creation.
+        render_gid=`cat /etc/group | grep render | cut -d: -f3`
+        echo "GPU_FLAG=--privileged --device=/dev/mem:/dev/mem:rw --volume /dev/mem:/dev/mem:rw --device=/dev/kfd:/dev/kfd:rw --volume /dev/kfd:/dev/kfd:rw --device /dev/dri:/dev/dri:rw --volume /dev/dri:/dev/dri:rw --group-add video --group-add $render_gid --group-add daemon --security-opt seccomp=unconfined" >> "${GITHUB_ENV}"
