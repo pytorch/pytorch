@@ -743,6 +743,8 @@ void run_cudnn_SDP_bprop(
   }
 
   Tensor dO_ = dO;
+// cuDNN < 9.5.1 assumes gradOutput has same strides as Output
+#if defined(CUDNN_VERSION) && CUDNN_VERSION < 90501
   if (!same_strides(o, dO)) {
     TORCH_WARN_ONCE(
         "cuDNN SDPA backward got grad_output.strides() != output.strides(), "
@@ -754,6 +756,16 @@ void run_cudnn_SDP_bprop(
       "cuDNN SDPA expected grad_output.strides() == output.strides(), "
       "the previous step probably failed to materialize a grad_output "
       "with matching strides...");
+#else
+  const auto innermost_dO_stride = dO.strides()[dO.strides().size() - 1];
+  if (innermost_dO_stride != 1) {
+    TORCH_WARN_ONCE(
+        "cuDNN SDPA backward got grad_output with an innermost stride != 1 "
+        "(likely due to e.g., .sum().backward()),"
+	"materializing a grad_output for innermost stride 1 for cuDNN...");
+    permute_to_matching_layout(o, dO_);
+  }
+#endif
   cudnnHandle_t handle = getCudnnHandle();
   auto key = MHACacheKeyWrapper(
       b,
