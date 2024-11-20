@@ -900,7 +900,7 @@ class SchedulerNode(BaseSchedulerNode):
             recompute_sizes_body_func=recompute_sizes_body_func,
         )
 
-    def refresh_dependencies(self, normalize: bool) -> None:
+    def refresh_dependencies(self, normalize: bool, need_clear_tiling_cache) -> None:
         # Fake dependencies are added manually. They can not be analyzed from
         # extract_read_writes. Find them out and apply manually.
         fake_deps = {
@@ -915,22 +915,26 @@ class SchedulerNode(BaseSchedulerNode):
             ).with_read(fake_deps)
         )
 
+        self.pointwise_read_writes.clear_cache(self)
+
+        if need_clear_tiling_cache:
+            from .codegen.simd import SIMDScheduling
+
+            # TODO(shunting) if this cause compilation time increase when
+            # enabling LOAF by default, try just clearing the specific cache
+            # entry by using a customized cache implemetation rather than
+            # lru_cache.
+            SIMDScheduling.candidate_tilings.cache_clear()
+
+
     def apply_new_loop_order(self, new_order: Sequence[int]) -> None:
         self._body = self._body.reorder_iter_loops(
             new_order,
         )
         self._sizes = self._body.sizes
 
-        self.refresh_dependencies(normalize=False)
+        self.refresh_dependencies(normalize=False, need_clear_tiling_cache=True)
 
-        from .codegen.simd import SIMDScheduling
-
-        # TODO(shunting) if this cause compilation time increase when
-        # enabling LOAF by default, try just clearing the specific cache
-        # entry by using a customized cache implemetation rather than
-        # lru_cache.
-        SIMDScheduling.candidate_tilings.cache_clear()
-        self.pointwise_read_writes.clear_cache(self)
 
     def reorder_loops_by_dep_pair(
         self, self_dep: MemoryDep, other_dep: MemoryDep
@@ -2300,7 +2304,10 @@ class Scheduler:
                 # merge_loops is called after loop reordering.
                 # We still need retain fake dependencies since codegen the
                 # estimated amount of memory access rely on them.
-                snode.refresh_dependencies(normalize=True)
+                #
+                # Merge loops does not affect the tiling decision. So we
+                # don't need clear the tiling cache.
+                snode.refresh_dependencies(normalize=True, need_clear_tiling_cache=False)
 
                 # Note that for CPU backend, merging loops will change
                 # snode.group. It's fine for Triton backend.
