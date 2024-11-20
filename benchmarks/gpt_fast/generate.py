@@ -4,6 +4,7 @@ import platform
 import time
 from typing import Optional, Tuple
 
+import torchao
 from mixtral_moe_model import ConditionalFeedForward, Transformer as MixtralMoE
 from mixtral_moe_quantize import (
     ConditionalFeedForwardInt8,
@@ -11,7 +12,6 @@ from mixtral_moe_quantize import (
 )
 from model import Transformer as LLaMA
 from quantize import WeightOnlyInt8QuantHandler as LLaMAWeightOnlyInt8QuantHandler
-import torchao
 
 import torch
 import torch._inductor.config
@@ -225,13 +225,13 @@ def run_experiment(
     if x.mode == "autoquant":
         print("Using autoquant")
         model = torchao.autoquant(model, manual=True, error_on_unseen=False)
-        generate(
-            model, prompt, max_new_tokens, temperature=temperature, top_k=top_k
-        )
+        generate(model, prompt, max_new_tokens, temperature=temperature, top_k=top_k)
         model.finalize_autoquant()
 
     global decode_one_token, prefill
-    decode_one_token = torch.compile(decode_one_token, mode="reduce-overhead", fullgraph=True)
+    decode_one_token = torch.compile(
+        decode_one_token, mode="reduce-overhead", fullgraph=True
+    )
     prefill = torch.compile(prefill, fullgraph=True)
 
     for i in range(start, num_samples):
