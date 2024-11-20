@@ -171,6 +171,8 @@ def capture_pre_autograd_graph(
         # op disappears from the graph, which makes it difficult to switch to train mode.
         # See https://github.com/pytorch/pytorch/pull/115258#issuecomment-1900755832.
 
+        # We force create native_batch_norm because the below materialization logic
+        # only applies to CIA ops.
         maybe_aliasing_or_mutating_ops = [torch.ops.aten.native_batch_norm.default]
 
         _materialize_cpp_cia_ops()

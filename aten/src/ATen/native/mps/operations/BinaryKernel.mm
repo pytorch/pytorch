@@ -54,7 +54,9 @@ static void binary_mps_impl(TensorIteratorBase& iter, const std::string func_nam
       getMPSProfiler().beginProfileKernel(binaryPSO, kernel, {input, other});
 
       [computeEncoder setComputePipelineState:binaryPSO];
-      mtl_setArgs(computeEncoder, input, other, out);
+      mtl_setBuffer(computeEncoder, input, 0);
+      mtl_setBuffer(computeEncoder, other, 1);
+      mtl_setBuffer(computeEncoder, out, 2);
       [computeEncoder setBuffer:kernelDataOffsets offset:0 atIndex:3];
       mtl_dispatch1DJob(computeEncoder, binaryPSO, numThreads);
 

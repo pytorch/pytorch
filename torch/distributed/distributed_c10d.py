@@ -251,7 +251,6 @@ class Backend(str):
 
     backend_list = [UNDEFINED, GLOO, NCCL, UCC, MPI]
 
-    # 3rd-party devices can register the default backend support here
     default_device_backend_map: Dict[str, str] = {
         "cpu": GLOO,
         "cuda": NCCL,
@@ -1601,22 +1600,10 @@ def init_process_group(
     elif init_method is None:
         init_method = "env://"
 
-    # If user did not provide a backend string but provided a device id, e.g.
-    # >>> init_process_group(device_id=device)
-    # we try to figure out the backend name based on the device type.
-    if backend is None and device_id is not None:
-        # Note: 3rd-party devices can register default backend through the
-        # default map below.
-        backend = Backend.default_device_backend_map.get(device_id.type)
-
-    # If we still cannot figure it out, e.g.
-    # >>> init_process_group()
-    # we set it to `undefined` and rely on lazy init.
-    if backend is None:
-        backend = "undefined"
-
-    # Convert string into `Backend` type
-    backend = Backend(backend)
+    if backend:
+        backend = Backend(backend)
+    else:
+        backend = Backend("undefined")
 
     if timeout is None:
         timeout = _get_default_timeout(backend)
@@ -2606,13 +2593,7 @@ def batch_isend_irecv(p2p_op_list):
 
 
 @_exception_logger
-def broadcast(
-    tensor: torch.Tensor,
-    src: Optional[int] = None,
-    group: Optional[ProcessGroup] = None,
-    async_op: bool = False,
-    group_src: Optional[int] = None,
-):
+def broadcast(tensor, src, group=None, async_op=False):
     """
     Broadcasts the tensor to the whole group.
 
@@ -2626,26 +2607,29 @@ def broadcast(
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         async_op (bool, optional): Whether this op should be an async op
-        group_src (int): Source rank on ``group``.  Must specify one of ``group_src``
-            and ``src`` but not both.
 
     Returns:
         Async work handle, if async_op is set to True.
         None, if not async_op or if not part of the group
 
     """
-    group = _group_or_default_group(group)
-    group_src = _canonicalize_group_rank(group, src, group_src, return_global=False)
     _check_single_tensor(tensor, "tensor")
     if _rank_not_in_group(group):
         _warn_not_in_group("broadcast")
         return
 
     opts = BroadcastOptions()
-    opts.rootRank = group_src
+    opts.rootRank = src
     opts.rootTensor = 0
     opts.asyncOp = async_op
-    work = group.broadcast([tensor], opts)
+
+    if group is None or group is GroupMember.WORLD:
+        default_pg = _get_default_group()
+        work = default_pg.broadcast([tensor], opts)
+    else:
+        group_src_rank = get_group_rank(group, src)
+        opts.rootRank = group_src_rank
+        work = group.broadcast([tensor], opts)
     if async_op:
         return work
     else:
@@ -2799,14 +2783,7 @@ def all_reduce_coalesced(tensors, op=ReduceOp.SUM, group=None, async_op=False):
 
 
 @_exception_logger
-def reduce(
-    tensor: torch.Tensor,
-    dst: Optional[int] = None,
-    op=ReduceOp.SUM,
-    group: Optional[ProcessGroup] = None,
-    async_op: bool = False,
-    group_dst: Optional[int] = None,
-):
+def reduce(tensor, dst, op=ReduceOp.SUM, group=None, async_op=False):
     """
     Reduces the tensor data across all machines.
 
@@ -2822,16 +2799,12 @@ def reduce(
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         async_op (bool, optional): Whether this op should be an async op
-        group_dst (int): Destination rank on ``group``.  Must specify one of ``group_dst``
-            and ``dst`` but not both.
 
     Returns:
         Async work handle, if async_op is set to True.
         None, if not async_op or if not part of the group
 
     """
-    group = _group_or_default_group(group)
-    group_dst = _canonicalize_group_rank(group, dst, group_dst, return_global=False)
     _check_single_tensor(tensor, "tensor")
     if _rank_not_in_group(group):
         _warn_not_in_group("reduce")
@@ -2839,8 +2812,16 @@ def reduce(
 
     opts = ReduceOptions()
     opts.reduceOp = op
-    opts.rootRank = group_dst
-    work = group.reduce([tensor], opts)
+    opts.rootRank = dst
+
+    if group is None or group is GroupMember.WORLD:
+        default_pg = _get_default_group()
+        work = default_pg.reduce([tensor], opts)
+    else:
+        group_dst_rank = get_group_rank(group, dst)
+        opts.rootRank = group_dst_rank
+        work = group.reduce([tensor], opts)
+
     if async_op:
         return work
     else:
@@ -3100,13 +3081,7 @@ def gather_object(
 
 
 @_exception_logger
-def send_object_list(
-    object_list: List[Any],
-    dst: Optional[int] = None,
-    group: Optional[ProcessGroup] = None,
-    device: Optional[torch.device] = None,
-    group_dst: Optional[int] = None,
-):
+def send_object_list(object_list, dst, group=None, device=None):
     """
     Sends picklable objects in ``object_list`` synchronously.
 
@@ -3124,8 +3099,7 @@ def send_object_list(
         device (``torch.device``, optional): If not None, the objects are
             serialized and converted to tensors which are moved to the
             ``device`` before sending. Default is ``None``.
-        group_dst (int, optional): Destination rank on ``group``.
-            Must specify one of ``dst`` and ``group_dst`` but not both
+
     Returns:
         ``None``.
 
@@ -3163,9 +3137,11 @@ def send_object_list(
         >>> objects
         ['foo', 12, {1: 2}]
     """
-    group = _group_or_default_group(group)
-    group_dst = _canonicalize_group_rank(group, dst, group_dst)
-    _check_not_self_rank(group, group_dst, "destination")
+    if get_rank() == dst:
+        raise ValueError(
+            "Invalid destination rank: destination rank should not be the same as "
+            "the rank of the current process."
+        )
 
     if _rank_not_in_group(group):
         _warn_not_in_group("send_object_list")
@@ -3185,7 +3161,7 @@ def send_object_list(
     object_sizes_tensor = torch.cat(size_list)
 
     # Send object sizes
-    send(object_sizes_tensor, group_dst=group_dst, group=group)
+    send(object_sizes_tensor, dst=dst, group=group)
 
     # Concatenate and send serialized object tensors
     # Note: torch.cat will do an extra memory copy to the current device, if the tensor_list
@@ -3195,17 +3171,11 @@ def send_object_list(
     else:
         object_tensor = torch.cat(tensor_list)
 
-    send(object_tensor, group_dst=group_dst, group=group)
+    send(object_tensor, dst=dst, group=group)
 
 
 @_exception_logger
-def recv_object_list(
-    object_list: List[Any],
-    src: Optional[int] = None,
-    group: Optional[ProcessGroup] = None,
-    device: Optional[torch.device] = None,
-    group_src: Optional[int] = None,
-):
+def recv_object_list(object_list, src=None, group=None, device=None):
     """
     Receives picklable objects in ``object_list`` synchronously.
 
@@ -3221,7 +3191,6 @@ def recv_object_list(
             the default process group will be used. Default is ``None``.
         device (``torch.device``, optional): If not None, receives on this device.
             Default is ``None``.
-        group_src (int, optional): Destination rank on ``group``.  Invalid to specify both ``src`` and ``group_src``.
 
     Returns:
         Sender rank. -1 if rank is not part of the group. If rank is part of the group,
@@ -3277,7 +3246,7 @@ def recv_object_list(
     )
 
     # Receive object sizes
-    rank_sizes = recv(object_sizes_tensor, src=src, group=group, group_src=group_src)
+    rank_sizes = recv(object_sizes_tensor, src=src, group=group)
 
     # Tensor to receive serialized objects into.
     object_tensor = torch.empty(  # type: ignore[call-overload]
@@ -3286,7 +3255,7 @@ def recv_object_list(
         device=current_device,
     )
 
-    rank_objects = recv(object_tensor, src=src, group=group, group_src=group_src)
+    rank_objects = recv(object_tensor, src=src, group=group)
     assert (
         rank_sizes == rank_objects
     ), "Mismatch in return ranks for object sizes and objects."
@@ -3301,13 +3270,7 @@ def recv_object_list(
 
 
 @_exception_logger
-def broadcast_object_list(
-    object_list: List[Any],
-    src: Optional[int] = None,
-    group: Optional[ProcessGroup] = None,
-    device: Optional[torch.device] = None,
-    group_src: Optional[int] = None,
-):
+def broadcast_object_list(object_list, src=0, group=None, device=None):
     """
     Broadcasts picklable objects in ``object_list`` to the whole group.
 
@@ -3326,8 +3289,6 @@ def broadcast_object_list(
         device (``torch.device``, optional): If not None, the objects are
             serialized and converted to tensors which are moved to the
             ``device`` before broadcasting. Default is ``None``.
-        group_src (int): Source rank on ``group``.  Must not specify one of ``group_src``
-            and ``src`` but not both.
 
     Returns:
         ``None``. If rank is part of the group, ``object_list`` will contain the
@@ -3370,10 +3331,6 @@ def broadcast_object_list(
         >>> objects
         ['foo', 12, {1: 2}]
     """
-    group = _group_or_default_group(group)
-    if src is None and group_src is None:
-        src = 0
-    global_src = _canonicalize_group_rank(group, src, group_src, return_global=True)
     if _rank_not_in_group(group):
         _warn_not_in_group("broadcast_object_list")
         return
@@ -3385,9 +3342,9 @@ def broadcast_object_list(
     # case it is not ``None`` we move the size and object tensors to be
     # broadcasted to this device.
     current_device = device or _get_object_coll_device(group)
-    my_global_rank = get_rank()
+    my_rank = get_rank()
     # Serialize object_list elements to tensors on src rank.
-    if my_global_rank == global_src:
+    if my_rank == src:
         tensor_list, size_list = zip(
             *[_object_to_tensor(obj, current_device, group) for obj in object_list]
         )
@@ -3398,12 +3355,12 @@ def broadcast_object_list(
         )
 
     # Broadcast object sizes
-    broadcast(object_sizes_tensor, src=global_src, group=group)
+    broadcast(object_sizes_tensor, src=src, group=group)
 
     # Concatenate and broadcast serialized object tensors
     # Note: torch.cat will do an extra memory copy to the current device, if the tensor_list
     # has only one element, we can skip the copy.
-    if my_global_rank == global_src:
+    if my_rank == src:
         if len(tensor_list) == 1:  # type: ignore[possibly-undefined]
             object_tensor = tensor_list[0]
         else:
@@ -3415,10 +3372,10 @@ def broadcast_object_list(
             device=current_device,
         )
 
-    broadcast(object_tensor, src=global_src, group=group)
+    broadcast(object_tensor, src=src, group=group)
     # Deserialize objects using their stored sizes.
     offset = 0
-    if my_global_rank != global_src:
+    if my_rank != src:
         for i, obj_size in enumerate(object_sizes_tensor):
             obj_view = object_tensor[offset : offset + obj_size]
             obj_view = obj_view.type(torch.uint8)

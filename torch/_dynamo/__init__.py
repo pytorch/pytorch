@@ -68,9 +68,6 @@ __all__ = [
     "lookup_backend",
 ]
 
-# allowlist this for weights_only load of NJTs
-torch.serialization.add_safe_globals([torch._dynamo.decorators._DimRange])
-
 if torch.manual_seed is torch.random.manual_seed:
     import torch.jit._builtins
 

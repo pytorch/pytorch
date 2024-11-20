@@ -57,13 +57,13 @@ def _should_decompose_because_unsafe_op(op: torch._ops.OperatorBase) -> bool:
     mutating or not. But these CIA ops could have different behaviour in runtime.
 
     native_batch_norm is a prim op which has a wrong schema and it needs to be replaced
-    with correct schema. But until then, we will force decompose it
+    with correct schema. But until then, we will force decompose it via this tag.
     """
     if not isinstance(op, torch._ops.OpOverload):
         return False
     if torch.Tag.maybe_aliasing_or_mutating in op.tags:
         return True
-    return op == torch.ops.aten.native_batch_norm.default
+    return False
 
 
 def _add_op_to_registry(registry, op, fn):

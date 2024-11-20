@@ -4,7 +4,6 @@
 // This source code is licensed under the BSD-style license found in the
 // LICENSE file in the root directory of this source tree.
 
-#include <c10/util/error.h>
 #include <torch/csrc/distributed/c10d/socket.h>
 
 #include <cstring>
@@ -116,7 +115,7 @@ void delay(std::chrono::milliseconds d) {
     // We don't care about error conditions other than EINTR since a failure
     // here is not critical.
     if (err == std::errc::interrupted) {
-      C10_THROW_ERROR(DistNetworkError, c10::utils::str_error(err.value()));
+      C10_THROW_ERROR(DistNetworkError, std::strerror(err.value()));
     }
   }
 #endif
@@ -316,7 +315,7 @@ std::unique_ptr<SocketImpl> SocketImpl::accept() const {
   if (hnd == invalid_socket) {
     std::error_code err = getSocketError();
     if (err == std::errc::interrupted) {
-      C10_THROW_ERROR(DistNetworkError, c10::utils::str_error(err.value()));
+      C10_THROW_ERROR(DistNetworkError, std::strerror(err.value()));
     }
 
     std::string msg{};
@@ -917,7 +916,7 @@ SocketConnectOp::ConnectResult SocketConnectOp::tryConnect(
   if (cr == ConnectResult::Error) {
     std::error_code err = getSocketError();
     if (err == std::errc::interrupted) {
-      C10_THROW_ERROR(DistNetworkError, c10::utils::str_error(err.value()));
+      C10_THROW_ERROR(DistNetworkError, std::strerror(err.value()));
     }
 
     // Retry if the server is not yet listening or if its backlog is exhausted.

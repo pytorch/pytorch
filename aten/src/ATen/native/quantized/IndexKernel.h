@@ -1,5 +1,4 @@
 #pragma once
-#include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorIterator.h>
 
 namespace at {

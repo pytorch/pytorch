@@ -1,4 +1,3 @@
-#include <c10/util/error.h>
 #include <pybind11/pybind11.h>
 #include <torch/csrc/utils/pybind.h>
 
@@ -17,7 +16,7 @@ template <
 std::string cuGDSFileGetErrorString(T status) {
   status = std::abs(status);
   return IS_CUFILE_ERR(status) ? std::string(CUFILE_ERRSTR(status))
-                               : std::string(c10::utils::str_error(errno));
+                               : std::string(std::strerror(errno));
 }
 
 // To get error message for Buf/Handle registeration APIs that return

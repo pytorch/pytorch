@@ -1539,8 +1539,7 @@ Example::
       .def(
           py::init<const std::string&, int>(),
           py::arg("file_name"),
-          py::arg("world_size") = -1,
-          R"(Creates a new FileStore.)")
+          py::arg("world_size") = -1)
       .def_property_readonly(
           "path",
           &::c10d::FileStore::getPath,
@@ -1562,7 +1561,7 @@ Example::
     >>> # Use any of the store methods after initialization
     >>> store.set("first_key", "first_value")
       )")
-      .def(py::init<>(), R"(Creates a new HashStore.)");
+      .def(py::init<>());
 #endif
 
   intrusive_ptr_class_<::c10d::TCPStore>(
@@ -1640,8 +1639,7 @@ Example::
           py::arg("multi_tenant") = false,
           py::arg("master_listen_fd") = py::none(),
           py::arg("use_libuv") = true,
-          py::call_guard<py::gil_scoped_release>(),
-          R"(Creates a new TCPStore.)")
+          py::call_guard<py::gil_scoped_release>())
       .def_property_readonly(
           "host",
           &::c10d::TCPStore::getHost,
@@ -1682,8 +1680,7 @@ Arguments:
             return new ::c10d::PrefixStore(prefix, std::move(store));
           }),
           py::arg("prefix"),
-          py::arg("store"),
-          R"(Creates a new PrefixStore.)")
+          py::arg("store"))
       .def_property_readonly(
           "underlying_store",
           &::c10d::PrefixStore::getUnderlyingStore,
@@ -1903,31 +1900,17 @@ communication mechanism.
       py::class_<
           ::c10d::ProcessGroup,
           c10::intrusive_ptr<::c10d::ProcessGroup>,
-          ::c10d::PyProcessGroup>(module, "ProcessGroup",
-          R"(A ProcessGroup is a communication primitive that allows for
-          collective operations across a group of processes.
-
-          This is a base class that provides the interface for all
-          ProcessGroups. It is not meant to be used directly, but rather
-          extended by subclasses.)")
-          .def(
-              py::init<int, int>(),
-              py::arg("rank"),
-              py::arg("size"),
-              R"(Create a new ProcessGroup instance.)")
+          ::c10d::PyProcessGroup>(module, "ProcessGroup")
+          .def(py::init<int, int>())
           .def(
               py::init<
                   const c10::intrusive_ptr<::c10d::Store>&,
                   int,
                   int>(),
-              py::arg("store"),
-              py::arg("rank"),
-              py::arg("size"),
-              py::call_guard<py::gil_scoped_release>(),
-              R"(Create a new ProcessGroup instance.)")
-          .def("rank", &::c10d::ProcessGroup::getRank, R"(Get the rank of this process group.)")
-          .def("size", &::c10d::ProcessGroup::getSize, R"(Get the size of this process group.)")
-          .def("name", &::c10d::ProcessGroup::getBackendName, R"(Get the name of this process group.)")
+              py::call_guard<py::gil_scoped_release>())
+          .def("rank", &::c10d::ProcessGroup::getRank)
+          .def("size", &::c10d::ProcessGroup::getSize)
+          .def("name", &::c10d::ProcessGroup::getBackendName)
           .def("_id", &::c10d::ProcessGroup::getID)
           .def(
               "_backend_id",
@@ -1938,10 +1921,7 @@ communication mechanism.
               &::c10d::ProcessGroup::broadcast,
               py::arg("tensors"),
               py::arg("opts") = ::c10d::BroadcastOptions(),
-              py::call_guard<py::gil_scoped_release>(),
-              R"(Broadcasts the tensor to all processes in the process group.
-
-              See :func:`torch.distributed.broadcast for more details.)")
+              py::call_guard<py::gil_scoped_release>())
           .def(
               "broadcast",
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
@@ -1954,19 +1934,13 @@ communication mechanism.
               },
               py::arg("tensor"),
               py::arg("root"),
-              py::call_guard<py::gil_scoped_release>(),
-              R"(Broadcasts the tensor to all processes in the process group.
-
-              See :func:`torch.distributed.broadcast` for more details.)")
+              py::call_guard<py::gil_scoped_release>())
           .def(
               "allreduce",
               &::c10d::ProcessGroup::allreduce,
               py::arg("tensors"),
               py::arg("opts") = ::c10d::AllreduceOptions(),
-              py::call_guard<py::gil_scoped_release>(),
-              R"(Allreduces the provided tensors across all processes in the process group.
-
-              See :func:`torch.distributed.all_reduce` for more details.)")
+              py::call_guard<py::gil_scoped_release>())
           .def(
               "allreduce",
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
@@ -1978,10 +1952,7 @@ communication mechanism.
               },
               py::arg("tensors"),
               py::arg("op") = ::c10d::ReduceOp::SUM,
-              py::call_guard<py::gil_scoped_release>(),
-              R"(Allreduces the provided tensors across all processes in the process group.
-
-              See :func:`torch.distributed.all_reduce` for more details.)")
+              py::call_guard<py::gil_scoped_release>())
 
           .def(
               "allreduce",
@@ -1995,29 +1966,20 @@ communication mechanism.
               },
               py::arg("tensor"),
               py::arg("op") = ::c10d::ReduceOp::SUM,
-              py::call_guard<py::gil_scoped_release>(),
-              R"(Allreduces the provided tensors across all processes in the process group.
-
-              See :func:`torch.distributed.all_reduce` for more details.)")
+              py::call_guard<py::gil_scoped_release>())
           .def(
               "allreduce_coalesced",
               &::c10d::ProcessGroup::allreduce_coalesced,
               py::arg("tensors"),
               py::arg("opts") = ::c10d::AllreduceCoalescedOptions(),
-              py::call_guard<py::gil_scoped_release>(),
-              R"(Allreduces the provided tensors across all processes in the process group.
-
-              See :func:`torch.distributed.all_reduce` for more details.)")
+              py::call_guard<py::gil_scoped_release>())
 
           .def(
               "reduce",
               &::c10d::ProcessGroup::reduce,
               py::arg("tensors"),
               py::arg("opts") = ::c10d::ReduceOptions(),
-              py::call_guard<py::gil_scoped_release>(),
-              R"(Reduces the provided tensors across all processes in the process group.
-
-              See :func:`torch.distributed.reduce` for more details.)")
+              py::call_guard<py::gil_scoped_release>())
 
           .def(
               "reduce",
@@ -2034,20 +1996,14 @@ communication mechanism.
               py::arg("tensor"),
               py::arg("root"),
               py::arg("op") = ::c10d::ReduceOp::SUM,
-              py::call_guard<py::gil_scoped_release>(),
-              R"(Reduces the provided tensors across all processes in the process group.
-
-              See :func:`torch.distributed.reduce` for more details.)")
+              py::call_guard<py::gil_scoped_release>())
           .def(
               "allgather",
               &::c10d::ProcessGroup::allgather,
               py::arg("output_tensors"),
               py::arg("input_tensors"),
               py::arg("opts") = ::c10d::AllgatherOptions(),
-              py::call_guard<py::gil_scoped_release>(),
-              R"(Allgathers the input tensors from all processes across the process group.
-
-              See :func:`torch.distributed.all_gather` for more details.)")
+              py::call_guard<py::gil_scoped_release>())
           .def(
               "allgather",
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
@@ -2060,10 +2016,7 @@ communication mechanism.
               },
               py::arg("output_tensors"),
               py::arg("input_tensor"),
-              py::call_guard<py::gil_scoped_release>(),
-              R"(Allgathers the input tensors from all processes across the process group.
-
-              See :func:`torch.distributed.all_gather: for more details.)")
+              py::call_guard<py::gil_scoped_release>())
           .def(
               "_allgather_base",
               &::c10d::ProcessGroup::_allgather_base,
@@ -2077,30 +2030,21 @@ communication mechanism.
               py::arg("output_lists"),
               py::arg("input_list"),
               py::arg("opts") = ::c10d::AllgatherOptions(),
-              py::call_guard<py::gil_scoped_release>(),
-              R"(Allgathers the input tensors from all processes across the process group.
-
-              See :func:`torch.distributed.all_gather` for more details.)")
+              py::call_guard<py::gil_scoped_release>())
           .def(
               "allgather_into_tensor_coalesced",
               &::c10d::ProcessGroup::allgather_into_tensor_coalesced,
               py::arg("outputs"),
               py::arg("inputs"),
               py::arg("opts") = ::c10d::AllgatherOptions(),
-              py::call_guard<py::gil_scoped_release>(),
-              R"(Allgathers the input tensors from all processes across the process group.
-
-              See :func:`torch.distributed.all_gather` for more details.)")
+              py::call_guard<py::gil_scoped_release>())
           .def(
               "gather",
               &::c10d::ProcessGroup::gather,
               py::arg("output_tensors"),
               py::arg("input_tensors"),
               py::arg("opts") = ::c10d::GatherOptions(),
-              py::call_guard<py::gil_scoped_release>(),
-              R"(Gathers the input tensors from all processes across the process group.
-
-              See :func:`torch.distributed.gather` for more details.)")
+              py::call_guard<py::gil_scoped_release>())
 
           .def(
               "gather",
@@ -2117,20 +2061,14 @@ communication mechanism.
               py::arg("output_tensors"),
               py::arg("input_tensor"),
               py::arg("root"),
-              py::call_guard<py::gil_scoped_release>(),
-              R"(Gathers the input tensors from all processes across the process group.
-
-              See :func:`torch.distributed.gather` for more details.)")
+              py::call_guard<py::gil_scoped_release>())
           .def(
               "scatter",
               &::c10d::ProcessGroup::scatter,
               py::arg("output_tensors"),
               py::arg("input_tensors"),
               py::arg("opts") = ::c10d::ScatterOptions(),
-              py::call_guard<py::gil_scoped_release>(),
-              R"(Scatters the input tensors from all processes across the process group.
-
-              See :func:`torch.distributed.scatter` for more details.)")
+              py::call_guard<py::gil_scoped_release>())
           .def(
               "scatter",
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
@@ -2146,20 +2084,14 @@ communication mechanism.
               py::arg("output_tensor"),
               py::arg("input_tensors"),
               py::arg("root"),
-              py::call_guard<py::gil_scoped_release>(),
-              R"(Scatters the input tensors from all processes across the process group.
-
-              See :func:`torch.distributed.scatter` for more details.)")
+              py::call_guard<py::gil_scoped_release>())
           .def(
               "reduce_scatter",
               &::c10d::ProcessGroup::reduce_scatter,
               py::arg("output_tensors"),
               py::arg("input_tensors"),
               py::arg("opts") = ::c10d::ReduceScatterOptions(),
-              py::call_guard<py::gil_scoped_release>(),
-              R"(Reduces and scatters the input tensors from all processes across the process group.
-
-              See :func:`torch.distributed.reduce_scatter` for more details.)")
+              py::call_guard<py::gil_scoped_release>())
           .def(
               "reduce_scatter",
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
@@ -2175,10 +2107,7 @@ communication mechanism.
               py::arg("output"),
               py::arg("input"),
               py::arg("op") = ::c10d::ReduceOp::SUM,
-              py::call_guard<py::gil_scoped_release>(),
-              R"(Reduces and scatters the input tensors from all processes across the process group.
-
-              See :func:`torch.distributed.reduce_scatter` for more details.)")
+              py::call_guard<py::gil_scoped_release>())
           .def(
               "_reduce_scatter_base",
               &::c10d::ProcessGroup::_reduce_scatter_base,
@@ -2192,10 +2121,7 @@ communication mechanism.
               py::arg("outputs"),
               py::arg("inputs"),
               py::arg("opts") = ::c10d::ReduceScatterOptions(),
-              py::call_guard<py::gil_scoped_release>(),
-              R"(Reduces and scatters the input tensors from all processes across the process group.
-
-              See :func:`torch.distributed.reduce_scatter` for more details.)")
+              py::call_guard<py::gil_scoped_release>())
           .def(
               "alltoall_base",
               &::c10d::ProcessGroup::alltoall_base,
@@ -2204,56 +2130,37 @@ communication mechanism.
               py::arg("output_split_sizes"),
               py::arg("input_split_sizes"),
               py::arg("opts") = ::c10d::AllToAllOptions(),
-              py::call_guard<py::gil_scoped_release>(),
-              R"(Alltoalls the input tensors from all processes across the process group.
-
-              See :func:`torch.distributed.all_to_all for more details.)")
+              py::call_guard<py::gil_scoped_release>())
           .def(
               "alltoall",
               &::c10d::ProcessGroup::alltoall,
               py::arg("output_tensors"),
               py::arg("input_tensors"),
               py::arg("opts") = ::c10d::AllToAllOptions(),
-              py::call_guard<py::gil_scoped_release>(),
-              R"(Alltoalls the input tensors from all processes across the process group.
-
-              See :func:`torch.distributed.all_to_all` for more details.)")
+              py::call_guard<py::gil_scoped_release>())
           .def(
               "send",
               &::c10d::ProcessGroup::send,
               py::arg("tensors"),
               py::arg("dstRank"),
               py::arg("tag"),
-              py::call_guard<py::gil_scoped_release>(),
-              R"(Sends the tensor to the specified rank.
-
-              See :func:`torch.distributed.send` for more details.)")
+              py::call_guard<py::gil_scoped_release>())
           .def(
               "recv",
               &::c10d::ProcessGroup::recv,
               py::arg("tensors"),
               py::arg("srcRank"),
               py::arg("tag"),
-              py::call_guard<py::gil_scoped_release>(),
-              R"(Receives the tensor from the specified rank.
-
-              See :func:`torch.distributed.recv` for more details.)")
+              py::call_guard<py::gil_scoped_release>())
           .def(
               "recv_anysource",
               &::c10d::ProcessGroup::recvAnysource,
-              py::call_guard<py::gil_scoped_release>(),
-              R"(Receives the tensor from any source.
-
-              See :func:`torch.distributed.recv` for more details.)")
+              py::call_guard<py::gil_scoped_release>())
           .def(
               "barrier",
               &::c10d::ProcessGroup::barrier,
               py::arg("opts") = ::c10d::BarrierOptions(),
-              py::call_guard<py::gil_scoped_release>(),
-              R"(Blocks until all processes in the group enter the call, and
-              then all leave the call together.
-
-              See :func:`torch.distributed.barrier` for more details.)")
+              py::call_guard<py::gil_scoped_release>())
           .def(
               "_set_sequence_number_for_group",
               &::c10d::ProcessGroup::setSequenceNumberForGroup,
@@ -2273,11 +2180,7 @@ communication mechanism.
               },
               py::arg("timeout") = ::c10d::kUnsetTimeout,
               py::arg("wait_all_ranks") = false,
-              py::call_guard<py::gil_scoped_release>(),
-              R"(Blocks until all processes in the group enter the call, and
-              then all leave the call together.
-
-              See :func:`torch.distributed.monitored_barrier` for more details.)")
+              py::call_guard<py::gil_scoped_release>())
           .def_property_readonly(
               "_device_types", &::c10d::ProcessGroup::getDeviceTypes)
           .def(
@@ -2423,10 +2326,7 @@ Arguments:
               return ivalue.toCustomClass<::c10d::ProcessGroup>();
           });
 
-  py::enum_<::c10d::ProcessGroup::BackendType>(
-      processGroup,
-      "BackendType",
-      R"(The type of the backend used for the process group.)")
+  py::enum_<::c10d::ProcessGroup::BackendType>(processGroup, "BackendType")
       .value("UNDEFINED", ::c10d::ProcessGroup::BackendType::UNDEFINED)
       .value("GLOO", ::c10d::ProcessGroup::BackendType::GLOO)
       .value("NCCL", ::c10d::ProcessGroup::BackendType::NCCL)
@@ -2802,12 +2702,7 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               int,
               int,
               c10::intrusive_ptr<::c10d::ProcessGroupGloo::Options>>(),
-          py::call_guard<py::gil_scoped_release>(),
-          py::arg("store"),
-          py::arg("rank"),
-          py::arg("size"),
-          py::arg("options"),
-          R"(Create a new ProcessGroupGloo instance.)")
+          py::call_guard<py::gil_scoped_release>())
       .def(
           py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
                       int rank,
@@ -2840,8 +2735,7 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
           py::arg("rank"),
           py::arg("size"),
           py::arg("timeout") = kProcessGroupDefaultTimeout,
-          py::call_guard<py::gil_scoped_release>(),
-          R"(Create a new ProcessGroupGloo instance.)")
+          py::call_guard<py::gil_scoped_release>())
       .def(
           "_set_default_timeout",
           [](const c10::intrusive_ptr<::c10d::ProcessGroupGloo>& self,
@@ -2850,10 +2744,7 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
           },
           py::arg("timeout"),
           py::call_guard<py::gil_scoped_release>())
-      .def_property_readonly(
-          "options",
-          &::c10d::ProcessGroupGloo::getOptions,
-          R"(Return the options used to create this ProcessGroupGloo instance.)");
+      .def_property_readonly("options", &::c10d::ProcessGroupGloo::getOptions);
 
   // ProcessGroupWrapper is a wrapper pg that includes a helper gloo process
   // group. It can be used to validate collective calls across processes by
@@ -2886,12 +2777,7 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
                   int,
                   int,
                   c10::intrusive_ptr<::c10d::ProcessGroupNCCL::Options>>(),
-              py::call_guard<py::gil_scoped_release>(),
-              py::arg("store"),
-              py::arg("rank"),
-              py::arg("size"),
-              py::arg("options"),
-              R"(Create a new ProcessGroupNCCL instance.)")
+              py::call_guard<py::gil_scoped_release>())
           .def(
               py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
                           int rank,
@@ -2907,8 +2793,7 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               py::arg("rank"),
               py::arg("size"),
               py::arg("timeout") = ::c10d::kProcessGroupNCCLDefaultTimeout,
-              py::call_guard<py::gil_scoped_release>(),
-              R"(Create a new ProcessGroupNCCL instance.)")
+              py::call_guard<py::gil_scoped_release>())
           .def(
               "_shutdown",
               [](const c10::intrusive_ptr<::c10d::ProcessGroupNCCL>& self) {
@@ -2945,16 +2830,12 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               py::arg("work"),
               py::arg("timeout"))
           .def_property_readonly(
-              "options",
-              &::c10d::ProcessGroupNCCL::getOptions,
-              R"(Return the options used to create this ProcessGroupNCCL instance.)")
-          .def_property_readonly(
-              "uid", &::c10d::ProcessGroupNCCL::getUid, R"(Return the uid.)")
+              "options", &::c10d::ProcessGroupNCCL::getOptions)
+          .def_property_readonly("uid", &::c10d::ProcessGroupNCCL::getUid)
           .def_property(
               "bound_device_id",
               &::c10d::ProcessGroupNCCL::getBoundDeviceId,
-              &::c10d::ProcessGroupNCCL::setBoundDeviceId,
-              R"(Return the bound device id.)")
+              &::c10d::ProcessGroupNCCL::setBoundDeviceId)
           .def(
               "perform_nocolor_split",
               &::c10d::ProcessGroupNCCL::performNocolorSplit)
@@ -2965,8 +2846,7 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
           .def(
               "abort",
               &::c10d::ProcessGroupNCCL::abort,
-              py::call_guard<py::gil_scoped_release>(),
-              R"(Abort the process group.)")
+              py::call_guard<py::gil_scoped_release>())
           .def(
               "_is_initialized",
               &::c10d::ProcessGroupNCCL::isInitialized,

@@ -6,7 +6,6 @@
 
 #pragma once
 
-#include <c10/util/error.h>
 #include <elf.h>
 #include <fcntl.h>
 #include <fmt/format.h>
@@ -42,19 +41,12 @@ struct MemFile {
   explicit MemFile(const char* filename_)
       : fd_(open(filename_, O_RDONLY)), name_(filename_) {
     UNWIND_CHECK(
-        fd_ != -1,
-        "failed to open {}: {}",
-        filename_,
-        c10::utils::str_error(errno));
+        fd_ != -1, "failed to open {}: {}", filename_, strerror(errno));
     // NOLINTNEXTLINE
     struct stat s;
     if (-1 == fstat(fd_, &s)) {
       close(fd_); // destructors don't run during exceptions
-      UNWIND_CHECK(
-          false,
-          "failed to stat {}: {}",
-          filename_,
-          c10::utils::str_error(errno));
+      UNWIND_CHECK(false, "failed to stat {}: {}", filename_, strerror(errno));
     }
     n_bytes_ = s.st_size;
     UNWIND_CHECK(
@@ -62,11 +54,7 @@ struct MemFile {
     mem_ = (char*)mmap(nullptr, n_bytes_, PROT_READ, MAP_SHARED, fd_, 0);
     if (MAP_FAILED == mem_) {
       close(fd_);
-      UNWIND_CHECK(
-          false,
-          "failed to mmap {}: {}",
-          filename_,
-          c10::utils::str_error(errno));
+      UNWIND_CHECK(false, "failed to mmap {}: {}", filename_, strerror(errno));
     }
     ehdr_ = (Elf64_Ehdr*)mem_;
 #define ELF_CHECK(cond) UNWIND_CHECK(cond, "not an ELF file: {}", filename_)

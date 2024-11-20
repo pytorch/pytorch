@@ -2,7 +2,6 @@
 #include <cstring>
 #include <string>
 #include <unordered_map>
-#include <c10/util/error.h>
 
 #include <libshm/err.h>
 #include <libshm/libshm.h>
@@ -37,7 +36,7 @@ void start_manager() {
     execl(manager_executable_path.c_str(), "torch_shm_manager", NULL);
 
     std::string msg("ERROR: execl failed: ");
-    msg += c10::utils::str_error(errno);
+    msg += std::strerror(errno);
     msg += '\n';
     auto res = write(1, msg.c_str(), msg.size());
     (void)res;
