@@ -12571,6 +12571,51 @@ if HAS_GPU and not TEST_WITH_ASAN:
             )
             self.assertEqual(fn(x, 8), fn_opt(x, 8))
 
+        @config.patch("triton.prefer_nd_tiling", True)
+        @config.patch("triton.max_tiles", 3)
+        @parametrize(
+            "block_multiple, ynumel_exceed_ygrid_size",
+            [
+                # xdim has constant mask, ydim does not
+                [True, True],
+                # xdim, ydim both have a constant mask
+                [True, False],
+                # if numel not a block multiple, no constant mask
+                [False, False],
+                # TODO: test zdim too
+            ],
+        )
+        def test_has_constant_mask(self, block_multiple, ynumel_exceed_ygrid_size):
+            from torch._inductor.runtime.hints import TRITON_MAX_BLOCK
+            from torch._inductor.runtime.runtime_utils import get_max_y_grid
+
+            shape = [TRITON_MAX_BLOCK["Y"], TRITON_MAX_BLOCK["X"]]
+
+            if not block_multiple:
+                shape = [s + 1 for s in shape]
+
+            if ynumel_exceed_ygrid_size:
+                shape[0] = (
+                    shape[0] * (math.ceil(get_max_y_grid() / shape[0])) + shape[0]
+                )
+
+            a = torch.zeros(shape, device=GPU_TYPE, dtype=torch.bool)
+            b = torch.zeros((shape[0], 1), device=GPU_TYPE, dtype=torch.bool)
+
+            opt_fn = torch.compile(torch.add)
+            code = run_and_get_triton_code(opt_fn, a, b)
+
+            if block_multiple:
+                breakpoint()
+                self.assertTrue("xmask = tl.full" in code)
+                if ynumel_exceed_ygrid_size:
+                    self.assertTrue("ymask = yindex < ynumel" in code)
+                else:
+                    self.assertTrue("ymask = tl.full" in code)
+            else:
+                self.assertTrue("ymask = yindex < ynumel" in code)
+                self.assertTrue("xmask = xindex < xnumel" in code)
+
         def test_kernel_names_descriptive(self):
             @torch._dynamo.optimize("inductor")
             def fn1(x):
