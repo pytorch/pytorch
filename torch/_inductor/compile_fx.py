@@ -1953,17 +1953,6 @@ def _check_triton_bf16_support(graph: GraphLowering) -> None:
             return
         warn_and_skip(node.get_device())
 
-    for out in graph.graph_outputs:
-        device = getattr(out, "get_device", lambda: torch.device("meta"))()
-        if (not is_gpu(device.type)) or out.get_dtype() != torch.bfloat16:
-            continue
-        # Print warning and skip frame if attempting to compile for bfloat16
-        # on device without hardware support for dtype
-        device_interface = get_interface_for_device(device.type)
-        if device_interface.is_bf16_supported(including_emulation=False):
-            return
-        warn_and_skip(device)
-
 
 def _flatten_inputs(
     gm: torch.fx.GraphModule,
