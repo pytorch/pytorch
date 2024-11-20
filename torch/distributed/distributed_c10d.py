@@ -251,6 +251,7 @@ class Backend(str):
 
     backend_list = [UNDEFINED, GLOO, NCCL, UCC, MPI]
 
+    # 3rd-party devices can register the default backend support here
     default_device_backend_map: Dict[str, str] = {
         "cpu": GLOO,
         "cuda": NCCL,
@@ -1600,10 +1601,22 @@ def init_process_group(
     elif init_method is None:
         init_method = "env://"
 
-    if backend:
-        backend = Backend(backend)
-    else:
-        backend = Backend("undefined")
+    # If user did not provide a backend string but provided a device id, e.g.
+    # >>> init_process_group(device_id=device)
+    # we try to figure out the backend name based on the device type.
+    if backend is None and device_id is not None:
+        # Note: 3rd-party devices can register default backend through the
+        # default map below.
+        backend = Backend.default_device_backend_map.get(device_id.type)
+
+    # If we still cannot figure it out, e.g.
+    # >>> init_process_group()
+    # we set it to `undefined` and rely on lazy init.
+    if backend is None:
+        backend = "undefined"
+
+    # Convert string into `Backend` type
+    backend = Backend(backend)
 
     if timeout is None:
         timeout = _get_default_timeout(backend)
