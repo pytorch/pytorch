@@ -1,7 +1,9 @@
 #pragma once
 #include <ATen/core/Tensor.h>
 #include <ATen/mps/MPSProfiler.h>
-#include <ATen/native/mps/operations/FusedOptimizerOps.h>
+#include <ATen/native/mps/OperationUtils.h>
+
+static_assert(sizeof(bool) == 1);
 
 namespace at::native::mps {
 
@@ -25,11 +27,8 @@ struct FusedAdamEncodingFunctor {
                   const double weight_decay,
                   const double eps,
                   const bool maximize) const {
-    float eps_lv = eps;
-    uint8_t maximize_lv = maximize;
-
     mtl_setArgs(
-        computeEncoder, tensorArgumentBuffer, metadata_arguments, lr, beta1, beta2, weight_decay, eps, maximize_lv);
+        computeEncoder, tensorArgumentBuffer, metadata_arguments, lr, beta1, beta2, weight_decay, eps, maximize);
   }
 
   void operator()(id<MTLComputeCommandEncoder>& computeEncoder,
@@ -41,10 +40,8 @@ struct FusedAdamEncodingFunctor {
                   const double weight_decay,
                   const double eps,
                   const bool maximize) const {
-    uint8_t maximize_lv = maximize;
-
     mtl_setArgs(
-        computeEncoder, tensorArgumentBuffer, metadata_arguments, lr, beta1, beta2, weight_decay, eps, maximize_lv);
+        computeEncoder, tensorArgumentBuffer, metadata_arguments, lr, beta1, beta2, weight_decay, eps, maximize);
   }
 };
 
@@ -63,9 +60,6 @@ struct FusedSgdEncodingFunctor<true> {
                   const bool nesterov,
                   const bool maximize,
                   const bool is_first_step) const {
-    uint8_t nesterov_lv = nesterov;
-    uint8_t maximize_lv = maximize;
-    uint8_t is_first_step_lv = is_first_step;
     mtl_setArgs(computeEncoder,
                 tensorArgumentBuffer,
                 metadata_arguments,
@@ -73,9 +67,9 @@ struct FusedSgdEncodingFunctor<true> {
                 momentum,
                 lr,
                 dampening,
-                nesterov_lv,
-                maximize_lv,
-                is_first_step_lv);
+                nesterov,
+                maximize,
+                is_first_step);
   }
 
   void operator()(id<MTLComputeCommandEncoder>& computeEncoder,
@@ -88,10 +82,6 @@ struct FusedSgdEncodingFunctor<true> {
                   const bool nesterov,
                   const bool maximize,
                   const bool is_first_step) const {
-    uint8_t nesterov_lv = nesterov;
-    uint8_t maximize_lv = maximize;
-    uint8_t is_first_step_lv = is_first_step;
-
     mtl_setArgs(computeEncoder,
                 tensorArgumentBuffer,
                 metadata_arguments,
@@ -99,9 +89,9 @@ struct FusedSgdEncodingFunctor<true> {
                 momentum,
                 lr,
                 dampening,
-                nesterov_lv,
-                maximize_lv,
-                is_first_step_lv);
+                nesterov,
+                maximize,
+                is_first_step);
   }
 };
 
@@ -113,9 +103,7 @@ struct FusedSgdEncodingFunctor<false> {
                   const double weight_decay,
                   const double lr,
                   const bool maximize) const {
-    uint8_t maximize_lv = maximize;
-
-    mtl_setArgs(computeEncoder, tensorArgumentBuffer, metadata_arguments, weight_decay, lr, maximize_lv);
+    mtl_setArgs(computeEncoder, tensorArgumentBuffer, metadata_arguments, weight_decay, lr, maximize);
   }
 
   void operator()(id<MTLComputeCommandEncoder>& computeEncoder,
@@ -124,12 +112,11 @@ struct FusedSgdEncodingFunctor<false> {
                   const double weight_decay,
                   const at::Tensor& lr,
                   const bool maximize) const {
-    uint8_t maximize_lv = maximize;
-
-    mtl_setArgs(computeEncoder, tensorArgumentBuffer, metadata_arguments, weight_decay, lr, maximize_lv);
+    mtl_setArgs(computeEncoder, tensorArgumentBuffer, metadata_arguments, weight_decay, lr, maximize);
   }
 };
 
+std::pair<id<MTLComputePipelineState>, id<MTLFunction>> getFusedAdamCPLState(const std::string& fname);
 template <int depth, uint32_t kThreadGroupSize, typename encoder_func_t, typename... ArgTypes>
 static void multi_tensor_apply_for_fused_optimizer(const std::string& kernel_name,
                                                    std::vector<std::vector<at::Tensor>>& tensor_lists,
@@ -165,7 +152,7 @@ static void multi_tensor_apply_for_fused_optimizer(const std::string& kernel_nam
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
-      auto [fusedOptimizerPSO, fusedOptimizerFunc] = getCPLState(kernel_name);
+      auto [fusedOptimizerPSO, fusedOptimizerFunc] = getFusedAdamCPLState(kernel_name);
 
       // this function call is a no-op if MPS Profiler is not enabled
       getMPSProfiler().beginProfileKernel(fusedOptimizerPSO, kernel_name, {tensor_lists[0]});
