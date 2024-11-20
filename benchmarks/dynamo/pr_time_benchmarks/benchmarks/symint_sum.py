@@ -8,8 +8,15 @@ import torch
 class Benchmark(BenchmarkBase):
     N = 200
 
+    def __init__(self):
+        super().__init__(
+            category="symint_sum",
+            backend="inductor",
+            device="cpu",
+        )
+
     def name(self):
-        return "symint_sum"
+        return self.category()
 
     def description(self):
         return "see https://docs.google.com/document/d/11xJXl1etSmefUxPiVyk885e0Dl-4o7QwxYcPiMIo2iY/edit"
