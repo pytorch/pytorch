@@ -487,7 +487,9 @@ class GraphLowering(torch.fx.Interpreter):
         self.workspace_id = itertools.count()
 
     def has_feature(
-        self, device: Union[torch._inductor.ir.IRNode, device], feature: BackendFeature
+        self,
+        device: Union[torch._inductor.ir.IRNode, device, None],
+        feature: BackendFeature,
     ) -> bool:
         assert isinstance(feature, BackendFeature), feature
         return feature in self.get_backend_features(get_device_type(device))
@@ -840,12 +842,13 @@ class GraphLowering(torch.fx.Interpreter):
         name = self.qualify_name(f"buf{len(self.buffers)}")
         self.buffers.append(buffer)
         self.name_to_buffer[name] = buffer
+        device = buffer.get_device()
         if (
             # Skip empty CPU tensor so that CUDA graphs can succeed, see https://github.com/pytorch/pytorch/pull/114144
             not (isinstance(buffer, ir.ComputedBuffer) and buffer.is_zero_elements())
-            and buffer.get_device() is not None
+            and device is not None
         ):
-            self.add_device_info(buffer.get_device())
+            self.add_device_info(device)
 
         if set_name:
             buffer.name = name
@@ -1474,11 +1477,7 @@ class GraphLowering(torch.fx.Interpreter):
                 result.realize()
                 strides = n.meta["val"].stride()
                 sym_strides = torch._inductor.utils.any_is_symbolic(*strides)
-                if (
-                    not hasattr(result, "get_stride")
-                    or result.get_stride() != strides
-                    and not sym_strides
-                ):
+                if result.maybe_get_stride() != strides and not sym_strides:
                     stride_order = ir.get_stride_order(strides)
                     result = ir.ExternKernel.require_stride_order(result, stride_order)
             if (
@@ -1657,15 +1656,14 @@ class GraphLowering(torch.fx.Interpreter):
             new_unbacked_defs |= op.get_unbacked_symbol_defs()
 
         def format_new_defs() -> str:
-            r = []
-            for buf in self.buffers[buffer_watermark:]:
-                r.append(
-                    f"unbacked_symbol_defs={buf.get_unbacked_symbol_defs()} in:\n{buf}\n"
-                )
-            for op in self.operations[operation_watermark:]:
-                r.append(
-                    f"unbacked_symbol_defs={op.get_unbacked_symbol_defs()} in:\n{op}\n"
-                )
+            r = [
+                f"unbacked_symbol_defs={buf.get_unbacked_symbol_defs()} in:\n{buf}\n"
+                for buf in self.buffers[buffer_watermark:]
+            ]
+            r.extend(
+                f"unbacked_symbol_defs={op.get_unbacked_symbol_defs()} in:\n{op}\n"
+                for op in self.operations[operation_watermark:]
+            )
             return "***\n".join(r)
 
         if n.op != "placeholder":
@@ -1824,7 +1822,9 @@ class GraphLowering(torch.fx.Interpreter):
         if any(device in self.device_types for device in ["cuda", "xpu"]):
             # first pass
             self.cpp_wrapper = False
-            compiled = self.compile_to_module().call
+            # disable output saving, to un-break some tests that can't handle two-pass
+            # GPU codegen
+            compiled = self.compile_to_module(save_output=False).call
 
             if not config.triton.autotune_at_compile_time:
 
@@ -1975,23 +1975,24 @@ class GraphLowering(torch.fx.Interpreter):
         # No-op to be patched for unit tests
         pass
 
-    def compile_to_module(self) -> ModuleType:
+    def compile_to_module(self, *, save_output: bool = True) -> ModuleType:
         with dynamo_timed(
             "GraphLowering.compile_to_module",
             phase_name="code_gen",
             log_pt2_compile_event=True,
             dynamo_compile_column_us="inductor_code_gen_cumulative_compile_time_us",
         ):
-            return self._compile_to_module()
+            return self._compile_to_module(save_output=save_output)
 
-    def _compile_to_module(self) -> ModuleType:
+    def _compile_to_module(self, *, save_output: bool = True) -> ModuleType:
         from .codecache import PyCodeCache
 
         code, linemap = (
             self.codegen_with_cpp_wrapper() if self.cpp_wrapper else self.codegen()
         )
 
-        GraphLowering.save_output_code(code)
+        if save_output:
+            GraphLowering.save_output_code(code)
         output_code_log.debug("Output code: \n%s", code)
 
         inductor_meta = autotune_cache.inductor_meta_from_config()
@@ -2091,7 +2092,7 @@ class GraphLowering(torch.fx.Interpreter):
             name in self.graph_inputs.keys()
             and self.graph_inputs[name].get_numel() == 1
             and len(self.graph_inputs[name].get_size()) == 0
-            and self.graph_inputs[name].get_device().type == "cpu"
+            and get_device_type(self.graph_inputs[name]) == "cpu"
         ) or name in self.zero_dim_cpu_tensor_list
 
 
