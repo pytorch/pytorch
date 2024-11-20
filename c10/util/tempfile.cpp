@@ -1,6 +1,5 @@
 #include <c10/util/Exception.h>
 #include <c10/util/env.h>
-#include <c10/util/error.h>
 #include <c10/util/tempfile.h>
 #include <fmt/format.h>
 
@@ -75,8 +74,7 @@ TempFile make_tempfile(std::string_view name_prefix) {
   if (auto tempfile = try_make_tempfile(name_prefix)) {
     return std::move(*tempfile);
   }
-  TORCH_CHECK(
-      false, "Error generating temporary file: ", c10::utils::str_error(errno));
+  TORCH_CHECK(false, "Error generating temporary file: ", std::strerror(errno));
 }
 
 /// Attempts to return a temporary directory or returns `nullopt` if an error
@@ -158,9 +156,7 @@ TempDir make_tempdir(std::string_view name_prefix) {
   }
 #if !defined(_WIN32)
   TORCH_CHECK(
-      false,
-      "Error generating temporary directory: ",
-      c10::utils::str_error(errno));
+      false, "Error generating temporary directory: ", std::strerror(errno));
 #else // defined(_WIN32)
   TORCH_CHECK(false, "Error generating temporary directory");
 #endif // defined(_WIN32)

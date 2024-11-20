@@ -274,8 +274,6 @@ class CachingAutotuner(KernelInterface):
             os.environ.get("TORCHINDUCTOR_DUMP_LAUNCH_PARAMS", "0") == "1"
         )
 
-        self.triton_interpret = os.environ.get("TRITON_INTERPRET", "0") == "1"
-
     def precompile(self, warm_cache_only=False):
         with self.lock:
             if self.launchers:
@@ -992,13 +990,6 @@ class CachingAutotuner(KernelInterface):
     def run(
         self, *args, grid, stream, benchmark_run=False, **kwargs
     ):  # type:ignore[override]
-        if self.triton_interpret:
-            return self.fn[grid](
-                *args,
-                **kwargs,
-                **self.configs[0].kwargs,
-            )
-
         if len(self.launchers) != 1:
             if len(self.launchers) == 0:
                 start_time = time.time_ns()
@@ -1231,7 +1222,6 @@ def cached_autotune(
         not disabled
         and filename is not None
         and (len(configs) > 1 or inductor_meta.get("coordinate_descent_tuning"))
-        and not os.environ.get("TRITON_INTERPRET", "0") == "1"
     ):
         configs_hash = hash_configs(configs)
 

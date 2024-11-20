@@ -552,10 +552,7 @@ def test_save_load_transform():
     stream = io.BytesIO()
     torch.save(dist, stream)
     stream.seek(0)
-    with torch.serialization.safe_globals(
-        [TransformedDistribution, AffineTransform, Normal]
-    ):
-        other = torch.load(stream)
+    other = torch.load(stream)
     assert torch.allclose(log_prob, other.log_prob(x))
 
 

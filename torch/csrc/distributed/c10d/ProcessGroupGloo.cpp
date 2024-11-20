@@ -1,5 +1,4 @@
 #include <c10/util/Exception.h>
-#include <c10/util/error.h>
 #include <torch/csrc/distributed/c10d/ProcessGroupGloo.hpp>
 
 #ifdef USE_C10D_GLOO
@@ -714,7 +713,7 @@ std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
   std::array<char, HOST_NAME_MAX> hostname{};
   auto rv = gethostname(hostname.data(), HOST_NAME_MAX);
   if (rv != 0) {
-    C10_THROW_ERROR(DistBackendError, c10::utils::str_error(errno));
+    C10_THROW_ERROR(DistBackendError, std::strerror(errno));
   }
 
   // Use this machine's hostname if it resolves to an address.
@@ -741,7 +740,7 @@ std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
   auto hostname = std::unique_ptr<char[]>(new char[hostNameMax]);
   auto rv = gethostname(hostname.get(), hostNameMax);
   if (rv != 0) {
-    C10_THROW_ERROR(DistBackendError, c10::utils::str_error(errno));
+    C10_THROW_ERROR(DistBackendError, std::strerror(errno));
   }
 
   // Use this machine's hostname if it resolves to an address.

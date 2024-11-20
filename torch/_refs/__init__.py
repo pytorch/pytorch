@@ -476,13 +476,12 @@ def _make_elementwise_unary_reference(
     *,
     aten_op=infer_aten_op,
     extra_meta=None,
-    exact_dtype=False,
 ) -> Callable:
     def inner(prim: Callable):
         nonlocal aten_op
 
         @wraps(prim)
-        @out_wrapper(exact_dtype=exact_dtype)
+        @out_wrapper()
         @elementwise_unary_scalar_wrapper
         @elementwise_type_promotion_wrapper(
             type_promoting_args=("a",),
@@ -546,10 +545,7 @@ def _make_inplace(fn):
     return _fn
 
 
-@_make_elementwise_unary_reference(
-    ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT,
-    exact_dtype=True,
-)
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT)
 def abs(a):
     return prims.abs(a)
 
@@ -589,10 +585,7 @@ def bitwise_not(a):
     return prims.bitwise_not(a)
 
 
-@_make_elementwise_unary_reference(
-    ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
-    exact_dtype=True,
-)
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
 def ceil(a):
     return prims.ceil(a)
 
@@ -686,18 +679,12 @@ def zero(input: TensorLikeType) -> TensorLikeType:
     return torch.zeros_like(input)
 
 
-@_make_elementwise_unary_reference(
-    ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
-    exact_dtype=True,
-)
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
 def floor(a):
     return prims.floor(a)
 
 
-@_make_elementwise_unary_reference(
-    ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
-    exact_dtype=True,
-)
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
 def frac(x: TensorLikeType) -> TensorLikeType:
     trunc_x = torch.mul(torch.floor(torch.abs(x)), torch.sign(x))
     return torch.sub(x, trunc_x)
@@ -732,10 +719,7 @@ def isinf(a: TensorLikeType) -> TensorLikeType:
     return torch.zeros_like(a, dtype=torch.bool)
 
 
-@_make_elementwise_unary_reference(
-    ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
-    exact_dtype=True,
-)
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL)
 def isposinf(a: TensorLikeType) -> TensorLikeType:
     torch._check(
         not utils.is_complex_dtype(a.dtype),
@@ -746,10 +730,7 @@ def isposinf(a: TensorLikeType) -> TensorLikeType:
     return torch.zeros_like(a, dtype=torch.bool)
 
 
-@_make_elementwise_unary_reference(
-    ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
-    exact_dtype=True,
-)
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL)
 def isneginf(a: TensorLikeType) -> TensorLikeType:
     torch._check(
         not utils.is_complex_dtype(a.dtype),
@@ -939,10 +920,7 @@ def sigmoid(a: TensorLikeType) -> TensorLikeType:
     return true_divide(1, add(1, exp(neg(a))))
 
 
-@_make_elementwise_unary_reference(
-    ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
-    exact_dtype=True,
-)
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
 def sgn(a):
     if utils.is_complex_dtype(a.dtype):
         a_abs = a.abs()
@@ -951,18 +929,12 @@ def sgn(a):
         return a.sign()
 
 
-@_make_elementwise_unary_reference(
-    ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
-    exact_dtype=True,
-)
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
 def sign(a):
     return prims.sign(a)
 
 
-@_make_elementwise_unary_reference(
-    ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
-    exact_dtype=True,
-)
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL)
 def signbit(a):
     return prims.signbit(a)
 
@@ -1008,10 +980,7 @@ def tanh(a):
     return prims.tanh(a)
 
 
-@_make_elementwise_unary_reference(
-    ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
-    exact_dtype=True,
-)
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
 def trunc(a):
     return prims.trunc(a)
 
@@ -3304,11 +3273,6 @@ def native_layer_norm(
         mean = _maybe_convert_to_dtype(mean, input.dtype)  # type: ignore[assignment]
         rstd = _maybe_convert_to_dtype(rstd, input.dtype)  # type: ignore[assignment]
     return (out, mean, rstd)
-
-
-@torch._subclasses.fake_impls.register_op_impl(aten.native_layer_norm.default)
-def native_layer_norm_fake(fake_mode, func, *args, **kwargs):
-    return native_layer_norm(*args)
 
 
 # TODO: Adding this as a meta function causes functorch tests to fail when compiled with debug mode.
