@@ -84,6 +84,7 @@ from .ir import (
     TorchBindObject,
 )
 from .lowering import (
+    constrain_to_fx_strides,
     FALLBACK_ALLOW_LIST,
     fallback_handler,
     fallback_node_due_to_unsupported_type,
@@ -91,6 +92,7 @@ from .lowering import (
     make_fallback,
     maybe_layout_constraints,
     needs_realized_inputs,
+    require_contiguous,
     unsupported_output_tensor,
 )
 from .runtime import autotune_cache
@@ -1048,7 +1050,21 @@ class GraphLowering(torch.fx.Interpreter):
                     "Creating implicit fallback for:\n%s",
                     error.operator_str(target, args, kwargs),
                 )
-                make_fallback(target)
+
+                decided_constraint = require_contiguous
+
+                # use contiguous unless the (custom) op asks something else
+                # explicitly
+                if torch._C.Tag.needs_fixed_stride_order in target.tags:
+                    decided_constraint = constrain_to_fx_strides  # type: ignore[assignment]
+                elif torch._C.Tag.flexible_layout in target.tags:
+                    decided_constraint = None  # type: ignore[assignment]
+
+                # for implicitly fallback ops, we conservatively requires
+                # contiguous input since some eager kernels does not
+                # support non-contiguous inputs. They may silently cause
+                # accuracy problems. Check https://github.com/pytorch/pytorch/issues/140452
+                make_fallback(target, layout_constraint=decided_constraint)
 
             elif get_decompositions([target]):
                 # There isn't a good way to dynamically patch this in
@@ -1060,7 +1076,21 @@ class GraphLowering(torch.fx.Interpreter):
 
         try:
             log.debug("  via %s", lowerings[target])  # type: ignore[index]
+
+            n = self.current_node
+            layout_constraints = maybe_layout_constraints(target)
+            if layout_constraints:
+                old_args, old_kwargs = args, kwargs
+                args, kwargs = layout_constraints(n, *args, **kwargs)
+
             out = lowerings[target](*args, **kwargs)  # type: ignore[index]
+
+            if layout_constraints:
+                # layout_constraints are allowed to make new copies of the inputs.
+                # if they do, and if the target is mutable, then we need to
+                # write the new values back into the original inputs.
+                self.propagate_mutation(n, old_args, old_kwargs, args, kwargs)  # type: ignore[possibly-undefined]
+
             return out
         except Exception as e:
             raise LoweringException(e, target, args, kwargs).with_traceback(
@@ -1326,7 +1356,17 @@ class GraphLowering(torch.fx.Interpreter):
             if schema_arg.alias_info is not None and schema_arg.alias_info.is_write:
                 # The lowering for copy_ is smart enough to "replace" old_arg with
                 # new_arg in all future uses so a copy_ kernel never gets emitted.
-                self.call_function(torch.ops.aten.copy_.default, (old_arg, new_arg), {})
+                # old_arg, new_arg may be immutable_list
+                if isinstance(old_arg, ir.IRNode):
+                    old_arg = (old_arg,)  # type: ignore[assignment]
+                    new_arg = (new_arg,)  # type: ignore[assignment]
+
+                for old_arg_item, new_arg_item in zip(old_arg, new_arg):  # type: ignore[call-overload]
+                    if old_arg_item is new_arg_item:
+                        continue
+                    self.call_function(
+                        torch.ops.aten.copy_.default, (old_arg_item, new_arg_item), {}
+                    )
 
         schema = fx_node.target._schema
         for idx, (old_arg, new_arg) in enumerate(zip(old_args, new_args)):
@@ -1374,18 +1414,6 @@ class GraphLowering(torch.fx.Interpreter):
                 result = fallback_handler(n.target, add_to_fallback_set=False)(
                     *args, **kwargs  # type: ignore[possibly-undefined]
                 )
-            elif n.op == "call_function" and (
-                layout_constraints := maybe_layout_constraints(n.target)  # type: ignore[arg-type]
-            ):
-                debug("layout_constraints")
-                old_args = args  # type: ignore[possibly-undefined]
-                old_kwargs = kwargs  # type: ignore[possibly-undefined]
-                args, kwargs = layout_constraints(n, *args, **kwargs)  # type: ignore[index]
-                result = self.call_function(n.target, args, kwargs)  # type: ignore[arg-type]
-                # layout_constraints are allowed to make new copies of the inputs.
-                # if they do, and if the target is mutable, then we need to
-                # write the new values back into the original inputs.
-                self.propagate_mutation(n, old_args, old_kwargs, args, kwargs)  # type: ignore[possibly-undefined]
             elif (
                 n.op == "call_function"
                 and n.target is torch.ops.higher_order.triton_kernel_wrapper_mutation
@@ -1398,7 +1426,7 @@ class GraphLowering(torch.fx.Interpreter):
                 ):
                     old_args = args  # type: ignore[possibly-undefined]
                     old_kwargs = kwargs  # type: ignore[possibly-undefined]
-                    args, kwargs = torch._inductor.lowering.constrain_to_fx_strides(n, *args, **kwargs)  # type: ignore[index]
+                    args, kwargs = constrain_to_fx_strides(n, *args, **kwargs)  # type: ignore[index]
                     result = self.call_function(n.target, args, kwargs)  # type: ignore[arg-type]
                     self.propagate_mutation(n, old_args, old_kwargs, args, kwargs)  # type: ignore[possibly-undefined]
                 else:
