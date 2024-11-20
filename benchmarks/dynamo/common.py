@@ -368,6 +368,7 @@ def write_outputs(filename, headers, row):
     output_csv(filename, headers, row)
     output_json(filename, headers, row)
 
+
 def output_csv(filename, headers, row):
     global disable_output
     if disable_output:
