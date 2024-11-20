@@ -1653,12 +1653,12 @@ void TensorIterator::set_output_raw_strided(int64_t output_idx, IntArrayRef size
       if (!strides.empty()) {
         TORCH_INTERNAL_ASSERT(!options.memory_format_opt().has_value());
         op.tensor().as_strided_(sizes, strides);
-    } else {
-      auto const memory_format = options.memory_format_opt();
-      if (memory_format.has_value()) {
-        op.tensor_base().unsafeGetTensorImpl()->empty_tensor_restride(*memory_format);
+      } else {
+        auto const memory_format = options.memory_format_opt();
+        if (memory_format.has_value()) {
+          op.tensor_base().unsafeGetTensorImpl()->empty_tensor_restride(*memory_format);
+        }
       }
-    }
   }
   if (!names.empty()) {
     TORCH_INTERNAL_ASSERT(op.tensor_base().defined());
