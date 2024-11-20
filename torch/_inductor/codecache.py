@@ -1220,9 +1220,7 @@ class FxGraphCache:
 
         try:
             with dynamo_timed(
-                "PyCodeCache.load_by_key_path",
-                log_pt2_compile_event=True,
-                fwd_only=False,
+                "PyCodeCache.load_by_key_path", log_pt2_compile_event=True
             ):
                 graph.current_callable = PyCodeCache.load_by_key_path(
                     graph.cache_key,
@@ -1771,11 +1769,12 @@ class CompiledFxGraph:
 
 
 def run_command_and_check(cmd_: str) -> None:
-    cmd = shlex.split(cmd_)
-    try:
-        subprocess.check_call(cmd)
-    except subprocess.CalledProcessError as e:
-        raise exc.CppCompileError(cmd, e.output) from e
+    with dynamo_timed("run_command_and_check", log_pt2_compile_event=True):
+        cmd = shlex.split(cmd_)
+        try:
+            subprocess.check_call(cmd)
+        except subprocess.CalledProcessError as e:
+            raise exc.CppCompileError(cmd, e.output) from e
 
 
 @functools.lru_cache(None)
