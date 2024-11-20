@@ -1,10 +1,12 @@
 # Owner(s): ["oncall: distributed"]
 import sys
+
 import torch
 from torch import distributed as dist
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.nn import Linear, Module
 from torch.optim import SGD
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import (
@@ -13,7 +15,8 @@ from torch.testing._internal.common_utils import (
     subtest,
     TEST_WITH_DEV_DBG_ASAN,
 )
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+
+
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)
@@ -23,6 +26,8 @@ if TEST_WITH_DEV_DBG_ASAN:
         file=sys.stderr,
     )
     sys.exit(0)
+
+
 class TestInput(FSDPTest):
     @property
     def world_size(self):
@@ -32,6 +37,7 @@ class TestInput(FSDPTest):
     @parametrize("input_cls", [subtest(dict, name="dict"), subtest(list, name="list")])
     def test_input_type(self, device, input_cls):
         """Test FSDP with input being a list or a dict, only single GPU."""
+
         class Model(Module):
             def __init__(self):
                 super().__init__()
@@ -44,6 +50,7 @@ class TestInput(FSDPTest):
                     assert isinstance(input, dict), input
                     input = input["in"]
                 return self.layer(input)
+
         fsdp_kwargs = {
             "device_id": device,
         }
@@ -61,6 +68,8 @@ class TestInput(FSDPTest):
             out.sum().backward()
             optim.step()
             optim.zero_grad()
+
+
 devices = ("cuda", "hpu")
 instantiate_device_type_tests(TestInput, globals(), only_for=devices)
 if __name__ == "__main__":
