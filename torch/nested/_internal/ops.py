@@ -544,16 +544,22 @@ def linear_backward_default(func, *args, **kwargs):
 
     ds, dw, db = None, None, None
     check_ragged_dim_same(func, inp, "self", grad_output, "grad_output")
-    reshaped_grad = grad_output._values.reshape(-1, weight.size(0))
     if output_mask[0]:
         ds = NestedTensor(
-            torch.matmul(reshaped_grad, weight).view_as(inp._values),
-            **extract_kwargs(grad_output),
+            torch.matmul(grad_output._values, weight), **extract_kwargs(grad_output)
         )
     if output_mask[1]:
-        dw = torch.matmul(reshaped_grad.t(), inp._values.reshape(-1, weight.size(1)))
+        # NB: Fold dims of values for input and grad_output to treat them as 2D. This
+        # trick avoids materializing large intermediates and immediately reducing over
+        # them via sum(). This is equivalent to computing:
+        #     torch.matmul(grad_output._values.transpose(-2, -1), inp._values)
+        # and then summing over the leading dimensions to get a 2D weight grad.
+        grad_2d = grad_output._values.reshape(-1, weight.size(0))
+        input_2d = inp._values.reshape(-1, weight.size(1))
+        dw = torch.matmul(grad_2d.t(), input_2d)
     if output_mask[2]:
-        db = reshaped_grad.sum(0)
+        # NB: autograd engine will sum over all but the last dim to get a 1D bias grad.
+        db = grad_output._values
     return (ds, dw, db)
 
 
