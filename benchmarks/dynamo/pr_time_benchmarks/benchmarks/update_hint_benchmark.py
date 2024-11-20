@@ -8,15 +8,8 @@ import torch
 class Benchmark(BenchmarkBase):
     N = 20
 
-    def __init__(self):
-        super().__init__(
-            category="update_hint",
-            backend="inductor",
-            device="cpu",
-        )
-
     def name(self):
-        return f"{self.category()}_regression"
+        return "update_hint_regression"
 
     def description(self):
         return "information at https://github.com/pytorch/pytorch/pull/129893"
