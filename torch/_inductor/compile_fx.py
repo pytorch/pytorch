@@ -1801,7 +1801,7 @@ def handle_dynamo_export_graph(
 
     compiled_fn = compile_gm(gm, codegen.process_inputs(*inputs))
 
-    @functools.wraps(compiled_fn)
+    @functools.wraps(compiled_fn)  # type: ignore[misc]
     def wrapper(*args: Any) -> Any:
         return codegen.process_outputs(compiled_fn(*codegen.process_inputs(*args)))
 
