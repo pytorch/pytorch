@@ -134,6 +134,21 @@ class ImplDetailTest(TestCase):
         new_sizes = new_body.sizes
         self.assertTrue(tuple(new_sizes[0]) == (np.prod(sizes),), f"{new_sizes=}")
 
+    def test_merge_loops_invalidate_pw_dep_cache(self):
+        sizes = (1024, 2048)
+        strides = (2048, 1)
+        buf = self._create_computed_buffer_ax2(sizes, strides)
+
+        snode = SchedulerNode(V.graph.scheduler, buf)
+        old_var_ranges = snode.pointwise_read_writes().var_ranges
+        self.assertTrue(len(old_var_ranges) == 2)  # 2 dimension not merged
+        snode.merge_loops()
+        new_var_ranges = snode.pointwise_read_writes().var_ranges
+
+        # we cache pointwise_read_writes result on a scheduler node
+        # make sure new_var_ranges is refreshed by invalidating the cache.
+        self.assertTrue(len(new_var_ranges) == 1)  # 2 dimensions get merged
+
     def test_reorder_modular_indexing(self):
         """
         There was a bug that we wrongly map i0 to the dimension with size 49
