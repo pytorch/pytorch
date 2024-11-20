@@ -850,6 +850,7 @@ exclusions = {
     "graph_sizes",
     "ddp_graphs",
     "perf_hints",
+    "subclasses",
     "not_implemented",
     "trace_source",
     "trace_call",

@@ -6288,6 +6288,45 @@ metadata incorrectly.
         torch.compile(fn, backend="inductor", fullgraph=True)(x)
         torch.compile(fn_, backend="inductor", fullgraph=True)(x)
 
+    def test_qsubclass(self):
+        from torch.testing._internal.subclasses import I32QuantRWTensor
+
+        i32 = torch.ones(3, 5, dtype=torch.int32)
+        inp = I32QuantRWTensor.from_src(i32)
+
+        def fn(x):
+            return x * 2
+
+        ref_out = fn(inp)
+        out = torch.compile(fn, backend="aot_eager", fullgraph=True)(inp)
+        self.assertEqual(ref_out, out)
+
+    def test_qsubclass_1dim(self):
+        from torch.testing._internal.subclasses import I32QuantRWTensor
+
+        i32 = torch.ones(5, dtype=torch.int32)
+        inp = I32QuantRWTensor.from_src(i32)
+
+        def fn(x):
+            return x * 2
+
+        ref_out = fn(inp)
+        out = torch.compile(fn, backend="aot_eager", fullgraph=True)(inp)
+        self.assertEqual(ref_out, out)
+
+    def test_nested_qsubclass(self):
+        from torch.testing._internal.subclasses import F32_QI32QuantRWTensor
+
+        f32 = torch.randn(3, 5, dtype=torch.float32)
+        inp = F32_QI32QuantRWTensor.from_src(f32)
+
+        def fn(x):
+            return x * 2
+
+        ref_out = fn(inp)
+        out = torch.compile(fn, backend="aot_eager", fullgraph=True)(inp)
+        self.assertEqual(ref_out, out)
+
 
 # entries in here don't work and need to be fixed.
 # Each one of these is a bug (or needs to be investigated)
