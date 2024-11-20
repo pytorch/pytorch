@@ -89,6 +89,17 @@ __all__ = [
 ]
 
 
+def _is_symbols_binary_summation(expr: sympy.Expr) -> bool:
+    # No need to check that two args are not the same, since expr is pr-optimized but we do it anyway.
+    return (
+        expr.is_Add
+        and len(expr._args) == 2
+        and expr._args[0].is_symbol
+        and expr._args[1].is_symbol
+        and expr._args[0] != expr._args[1]
+    )
+
+
 def _keep_float(f: Callable[..., _T]) -> Callable[..., Union[_T, sympy.Float]]:
     @functools.wraps(f)
     def inner(*args: Any) -> Union[_T, sympy.Float]:
