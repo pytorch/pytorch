@@ -19,7 +19,9 @@ class TORCH_API AOTIModelContainerRunnerXpu : public AOTIModelContainerRunner {
 
   ~AOTIModelContainerRunnerXpu() override;
 
-  std::vector<at::Tensor> run(const std::vector<at::Tensor>& inputs) override;
+  std::vector<at::Tensor> run(
+      const std::vector<at::Tensor>& inputs,
+      void* stream_handle = nullptr) override;
 
   std::vector<at::Tensor> run_with_xpu_stream(
       std::vector<at::Tensor>& inputs,
