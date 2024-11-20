@@ -398,7 +398,7 @@ struct TORCH_API FunctionSchema {
   bool is_mutable(std::string_view name) const {
     std::optional<int> index = argumentIndexWithName(name);
     TORCH_INTERNAL_ASSERT(
-        index != std::nullopt, "Schema has no argument named ", name);
+        index.has_value(), "Schema has no argument named ", name);
 
     return is_mutable({c10::SchemaArgType::input, static_cast<size_t>(*index)});
   }
