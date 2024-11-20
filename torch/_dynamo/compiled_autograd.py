@@ -379,7 +379,7 @@ class AutogradCompilerInstance:
                 for i in runtime_inputs_to_move:
                     inputs[i] = inputs[i].pin_memory().cuda(non_blocking=True)
 
-                with disable():
+                with _disable():
                     return compiled_fn(inputs, sizes, scalars, hooks)
             finally:
                 in_compiled_autograd_region = False
@@ -779,7 +779,13 @@ in_compiled_autograd_region = False
 
 
 @contextlib.contextmanager
-def enable(compiler_fn):
+def _enable(compiler_fn, dynamic=False):
+    # 1. add dynamic argument
+    if dynamic:
+        assert type(dynamic) is bool
+
+    # 2. set default size type
+    # 3. add DCE
     from torch._dynamo import eval_frame
 
     if eval_frame._stance.stance == "force_eager":
@@ -796,8 +802,11 @@ def enable(compiler_fn):
         # we need to lazily import it, because of circular dependencies
         import torch._inductor.cudagraph_trees
 
-        prior = torch._C._dynamo.compiled_autograd.set_autograd_compiler(
-            functools.partial(AutogradCompilerInstance, compiler_fn)
+        (
+            prior_compiler,
+            prior_dynamic,
+        ) = torch._C._dynamo.compiled_autograd.set_autograd_compiler(
+            functools.partial(AutogradCompilerInstance, compiler_fn), dynamic
         )
         if snapshot_verbose_logging_enabled():
             torch._C._dynamo.compiled_autograd.set_verbose_logger(verbose_log)
@@ -807,22 +816,29 @@ def enable(compiler_fn):
             with torch.autograd.set_multithreading_enabled(False):
                 yield
         finally:
-            if not prior:
+            if not prior_compiler:
                 compiled_autograd_enabled = False
-            torch._C._dynamo.compiled_autograd.set_autograd_compiler(prior)
+            torch._C._dynamo.compiled_autograd.set_autograd_compiler(
+                prior_compiler, prior_dynamic
+            )
 
 
 @contextlib.contextmanager
-def disable():
-    prior = torch._C._dynamo.compiled_autograd.set_autograd_compiler(None)
+def _disable():
+    (
+        prior_compiler,
+        prior_dynamic,
+    ) = torch._C._dynamo.compiled_autograd.set_autograd_compiler(None, False)
     global compiled_autograd_enabled
     compiled_autograd_enabled = False
     try:
         yield
     finally:
-        if prior:
+        if prior_compiler:
             compiled_autograd_enabled = True
-        torch._C._dynamo.compiled_autograd.set_autograd_compiler(prior)
+        torch._C._dynamo.compiled_autograd.set_autograd_compiler(
+            prior_compiler, prior_dynamic
+        )
 
 
 # return to starting state of a new process
@@ -830,5 +846,5 @@ def reset() -> None:
     global compiled_autograd_enabled
     compiled_autograd_enabled = False
     assert not in_compiled_autograd_region
-    torch._C._dynamo.compiled_autograd.set_autograd_compiler(None)
+    torch._C._dynamo.compiled_autograd.set_autograd_compiler(None, False)
     torch._C._dynamo.compiled_autograd.set_verbose_logger(None)

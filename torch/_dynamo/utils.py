@@ -3270,7 +3270,7 @@ def maybe_enable_compiled_autograd(should_enable, fullgraph=True, dynamic=True):
                 gm, backend=inner_compiler, fullgraph=fullgraph, dynamic=dynamic
             )
 
-        with torch._dynamo.compiled_autograd.enable(compiler_fn) as ctx:
+        with torch._dynamo.compiled_autograd._enable(compiler_fn) as ctx:
             yield ctx
 
 
