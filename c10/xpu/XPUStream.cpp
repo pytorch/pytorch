@@ -89,9 +89,11 @@ thread_local std::unique_ptr<StreamId[]> current_streams = nullptr;
 
 using StreamIdIndex = uint8_t;
 enum class StreamIdType : uint8_t {
-  // The higher the type number, the higher the priority.
+  // The higher the type number, the higher the priority for the native stream.
   NORMAL = 0x0,
   HIGH = 0X1,
+  // For an external stream, the last bit of StreamId is 0, whose priority is
+  // queried at runtime.
   EXT = 0X7,
 };
 
