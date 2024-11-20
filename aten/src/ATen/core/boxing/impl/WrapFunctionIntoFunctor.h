@@ -2,8 +2,7 @@
 
 #include <c10/core/CompileTimeFunctionPointer.h>
 
-namespace c10 {
-namespace impl {
+namespace c10::impl {
   namespace detail {
     template<class FuncPtr, class ReturnType, class ParameterList> class WrapFunctionIntoFunctor_ {};
     template<class FuncPtr, class ReturnType, class... Parameters>
@@ -27,6 +26,5 @@ namespace impl {
         typename guts::function_traits<typename FuncPtr::FuncType>::parameter_types
     >;
   };
-}
 
 }
