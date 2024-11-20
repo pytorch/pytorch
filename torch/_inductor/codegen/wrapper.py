@@ -2261,11 +2261,14 @@ class PythonWrapperCodegen(CodeGen):
             self.pop_codegened_graph()
 
     def codegen_subgraph_prefix(self, subgraph, outer_inputs, outer_outputs):
-        subgraph.graph.add_symbol_graph_inputs()
-        # NB: Because of symints, the len of graph_inputs might be larger than
-        # outer_inputs
-        explicit_graph_inputs = subgraph.graph.graph_input_names[: len(outer_inputs)]
-        for inner_input, outer_input in zip(explicit_graph_inputs, outer_inputs):
+        # All inputs of hops must be explicitly passed in.
+        # Free tensors and basic symbols should have been explictily lifted as inputs in dynamo.
+        assert len(outer_inputs) == len(
+            subgraph.graph.graph_input_names
+        ), f"graph_input_names:{subgraph.graph.graph_input_names}, outer_inputs: {outer_inputs}"
+        for inner_input, outer_input in zip(
+            subgraph.graph.graph_input_names, outer_inputs
+        ):
             self.writeline(f"{self.declare}{inner_input} = {outer_input}{self.ending}")
 
     def codegen_subgraph_suffix(self, subgraph, outer_inputs, outer_outputs):
