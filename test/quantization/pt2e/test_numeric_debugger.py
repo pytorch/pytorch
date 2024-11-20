@@ -44,11 +44,11 @@ class TestNumericDebugger(TestCase):
     def test_simple(self):
         m = TestHelperModules.Conv2dThenConv1d()
         example_inputs = m.example_inputs()
-        m = torch.export.export(m, example_inputs)
-        generate_numeric_debug_handle(m)
+        ep = torch.export.export(m, example_inputs)
+        generate_numeric_debug_handle(ep)
         unique_ids = set()
         count = 0
-        for n in m.graph.nodes:
+        for n in ep.graph.nodes:
             if CUSTOM_KEY in n.meta and NUMERIC_DEBUG_HANDLE_KEY in n.meta[CUSTOM_KEY]:
                 unique_ids.add(n.meta[CUSTOM_KEY][NUMERIC_DEBUG_HANDLE_KEY])
                 count += 1
@@ -57,8 +57,9 @@ class TestNumericDebugger(TestCase):
     def test_quantize_pt2e_preserve_handle(self):
         m = TestHelperModules.Conv2dThenConv1d()
         example_inputs = m.example_inputs()
-        m = export_for_training(m, example_inputs).module()
-        generate_numeric_debug_handle(m)
+        ep = export_for_training(m, example_inputs)
+        generate_numeric_debug_handle(ep)
+        m = ep.module()
 
         quantizer = XNNPACKQuantizer().set_global(
             get_symmetric_quantization_config(is_per_channel=False)
@@ -66,7 +67,7 @@ class TestNumericDebugger(TestCase):
         m = prepare_pt2e(m, quantizer)
         debug_handle_map = _extract_debug_handles(m)
         res_counter = Counter(debug_handle_map.values())
-        repeated_debug_handle_ids = [5, 6, 7]
+        repeated_debug_handle_ids = [1, 2, 3]
         # 3 ids were repeated because we copy over the id from node to its output observer
         # torch.ops.aten.conv2d.default, torch.ops.aten.squeeze.dim and torch.ops.aten.conv1d.default
         for dh_id in repeated_debug_handle_ids:
@@ -78,32 +79,32 @@ class TestNumericDebugger(TestCase):
         res_counter = Counter(debug_handle_map.values())
         # same set of ids where repeated, because we copy over the id from observer/fake_quant to
         # dequantize node
-        repeated_debug_handle_ids = [5, 6, 7]
+        repeated_debug_handle_ids = [1, 2, 3]
         for dh_id in repeated_debug_handle_ids:
             self.assertEqual(res_counter[dh_id], 2)
 
     def test_copy_preserve_handle(self):
         m = TestHelperModules.Conv2dThenConv1d()
         example_inputs = m.example_inputs()
-        m = torch.export.export(m, example_inputs)
-        generate_numeric_debug_handle(m)
+        ep = torch.export.export(m, example_inputs)
+        generate_numeric_debug_handle(ep)
 
-        debug_handle_map_ref = _extract_debug_handles(m)
+        debug_handle_map_ref = _extract_debug_handles(ep)
 
-        m_copy = copy.copy(m)
-        debug_handle_map = _extract_debug_handles(m_copy)
+        ep_copy = copy.copy(ep)
+        debug_handle_map = _extract_debug_handles(ep_copy)
 
         self.assertEqual(debug_handle_map, debug_handle_map_ref)
 
     def test_deepcopy_preserve_handle(self):
         m = TestHelperModules.Conv2dThenConv1d()
         example_inputs = m.example_inputs()
-        m = torch.export.export(m, example_inputs)
-        generate_numeric_debug_handle(m)
+        ep = torch.export.export(m, example_inputs)
+        generate_numeric_debug_handle(ep)
 
-        debug_handle_map_ref = _extract_debug_handles(m)
-        m_copy = copy.deepcopy(m)
-        debug_handle_map = _extract_debug_handles(m_copy)
+        debug_handle_map_ref = _extract_debug_handles(ep)
+        ep_copy = copy.deepcopy(ep)
+        debug_handle_map = _extract_debug_handles(ep_copy)
 
         self.assertEqual(debug_handle_map, debug_handle_map_ref)
 
@@ -112,8 +113,9 @@ class TestNumericDebugger(TestCase):
     def test_re_export_preserve_handle(self):
         m = TestHelperModules.Conv2dThenConv1d()
         example_inputs = m.example_inputs()
-        m = export_for_training(m, example_inputs).module()
-        generate_numeric_debug_handle(m)
+        ep = export_for_training(m, example_inputs)
+        generate_numeric_debug_handle(ep)
+        m = ep.module()
 
         debug_handle_map_ref = _extract_debug_handles(m)
         m_export = export_for_training(m, example_inputs).module()
@@ -124,14 +126,14 @@ class TestNumericDebugger(TestCase):
     def test_run_decompositions_preserve_handle(self):
         m = TestHelperModules.Conv2dThenConv1d()
         example_inputs = m.example_inputs()
-        m = torch.export.export(m, example_inputs)
-        generate_numeric_debug_handle(m)
+        ep = export_for_training(m, example_inputs)
+        generate_numeric_debug_handle(ep)
 
-        debug_handle_map_ref = _extract_debug_handles(m)
+        debug_handle_map_ref = _extract_debug_handles(ep)
 
-        m_copy = copy.copy(m)
-        m_copy = m_copy.run_decompositions()
-        debug_handle_map = _extract_debug_handles(m_copy)
+        ep_copy = copy.copy(ep)
+        ep_copy = ep_copy.run_decompositions()
+        debug_handle_map = _extract_debug_handles(ep_copy)
 
         # checking the map still has the same ids, the node may change
         self.assertEqual(
@@ -141,8 +143,9 @@ class TestNumericDebugger(TestCase):
     def test_prepare_for_propagation_comparison(self):
         m = TestHelperModules.Conv2dThenConv1d()
         example_inputs = m.example_inputs()
-        m = export_for_training(m, example_inputs).module()
-        generate_numeric_debug_handle(m)
+        ep = export_for_training(m, example_inputs)
+        generate_numeric_debug_handle(ep)
+        m = ep.module()
         m_logger = prepare_for_propagation_comparison(m)
         ref = m(*example_inputs)
         res = m_logger(*example_inputs)
@@ -150,15 +153,16 @@ class TestNumericDebugger(TestCase):
         from torch.ao.quantization.pt2e._numeric_debugger import OutputLogger
 
         loggers = [m for m in m_logger.modules() if isinstance(m, OutputLogger)]
-        self.assertEqual(len(loggers), 7)
+        self.assertEqual(len(loggers), 3)
         self.assertTrue("conv2d" in [logger.node_name for logger in loggers])
         self.assertEqual(res, ref)
 
     def test_extract_results_from_loggers(self):
         m = TestHelperModules.Conv2dThenConv1d()
         example_inputs = m.example_inputs()
-        m = export_for_training(m, example_inputs).module()
-        generate_numeric_debug_handle(m)
+        ep = export_for_training(m, example_inputs)
+        generate_numeric_debug_handle(ep)
+        m = ep.module()
         m_ref_logger = prepare_for_propagation_comparison(m)
 
         quantizer = XNNPACKQuantizer().set_global(
@@ -181,10 +185,9 @@ class TestNumericDebugger(TestCase):
     def test_added_node_gets_unique_id(self) -> None:
         m = TestHelperModules.Conv2dThenConv1d()
         example_inputs = m.example_inputs()
-        m = export_for_training(m, example_inputs).module()
-        assert isinstance(m, torch.fx.GraphModule)
-        generate_numeric_debug_handle(m)
-        ref_handles = _extract_debug_handles(m)
+        ep = export_for_training(m, example_inputs)
+        generate_numeric_debug_handle(ep)
+        ref_handles = _extract_debug_handles(ep)
         ref_counter = Counter(ref_handles.values())
         for k, v in ref_counter.items():
             self.assertEqual(
@@ -195,20 +198,20 @@ class TestNumericDebugger(TestCase):
 
         # Now that we have unique ids, add a new node into the graph and re-generate
         # to make sure that the new node gets a unique id.
-        last_node = next(iter(reversed(m.graph.nodes)))
-        with m.graph.inserting_before(last_node):
+        last_node = next(iter(reversed(ep.graph.nodes)))
+        with ep.graph.inserting_before(last_node):
             arg = last_node.args[0]
             self.assertIsInstance(arg, (list, tuple))
             arg = arg[0]
             # Add a function that only requires a single tensor input.
-            n = m.graph.call_function(torch.ops.aten.relu.default, args=(arg,))
+            n = ep.graph.call_function(torch.ops.aten.relu.default, args=(arg,))
             arg.replace_all_uses_with(n, lambda x: x != n)
-        m.recompile()
+        ep.graph_module.recompile()
 
         # Regenerate handles, make sure only the new relu node has a new id, and
         # it doesn't clash with any of the existing ids.
-        generate_numeric_debug_handle(m)
-        handles_after_modification = _extract_debug_handles(m)
+        generate_numeric_debug_handle(ep)
+        handles_after_modification = _extract_debug_handles(ep)
         handles_counter = Counter(handles_after_modification.values())
         for name, handle in ref_handles.items():
             self.assertIn(name, handles_after_modification)
