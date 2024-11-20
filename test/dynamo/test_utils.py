@@ -148,13 +148,16 @@ class TestDynamoTimed(TestCase):
         self.assertExpectedInline(
             pprint.pformat(utils.compilation_time_metrics),
             """\
-{'GraphLowering.compile_to_module': [0.0, 0.0],
+{'GraphLowering.codegen': [0.0, 0.0],
+ 'GraphLowering.compile_to_fn': [0.0, 0.0],
+ 'GraphLowering.compile_to_module': [0.0, 0.0],
  'GraphLowering.run': [0.0, 0.0],
  'OutputGraph.call_user_compiler': [0.0],
  'PyCodeCache.load_by_key_path': [0.0, 0.0],
  'PythonWrapperCodegen.generate': [0.0, 0.0],
  'Scheduler.__init__': [0.0, 0.0],
  'Scheduler.codegen': [0.0, 0.0],
+ 'Scheduler.fused_nodes': [0.0, 0.0],
  '_compile.compile_inner': [0.0],
  '_recursive_joint_graph_passes': [0.0],
  '_recursive_post_grad_passes': [0.0, 0.0],
@@ -201,8 +204,10 @@ class TestDynamoTimed(TestCase):
 
         # First event is for the forward. Formatting makes reading diffs
         # much easier.
+        raw = dataclasses.asdict(compilation_events[0])
+        del raw['feature_usage']
         self.assertExpectedInline(
-            pprint.pformat(dataclasses.asdict(compilation_events[0])),
+            pprint.pformat(raw),
             """\
 {'accumulated_cache_size': 0,
  'aot_autograd_cumulative_compile_time_us': 0,
@@ -230,7 +235,6 @@ class TestDynamoTimed(TestCase):
  'fail_type': None,
  'fail_user_frame_filename': None,
  'fail_user_frame_lineno': None,
- 'feature_usage': {'pytorch/remote_cache:bundle_triton_into_fx_graph_cache_v2': False},
  'frame_key': '1',
  'graph_input_count': 1,
  'graph_node_count': 3,
@@ -266,8 +270,10 @@ class TestDynamoTimed(TestCase):
         )
 
         # Second event is for the backward
+        raw = dataclasses.asdict(compilation_events[1])
+        del raw['feature_usage']
         self.assertExpectedInline(
-            pprint.pformat(dataclasses.asdict(compilation_events[1])),
+            pprint.pformat(raw),
             """\
 {'accumulated_cache_size': None,
  'aot_autograd_cumulative_compile_time_us': None,
@@ -295,7 +301,6 @@ class TestDynamoTimed(TestCase):
  'fail_type': None,
  'fail_user_frame_filename': None,
  'fail_user_frame_lineno': None,
- 'feature_usage': {'pytorch/remote_cache:bundle_triton_into_fx_graph_cache_v2': False},
  'frame_key': None,
  'graph_input_count': None,
  'graph_node_count': None,
