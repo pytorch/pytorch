@@ -26,6 +26,9 @@ from .utils import convert_shape_to_inductor, pad_listlike
 from .virtualized import V
 
 
+mkldnn_devices = ("cpu", "xpu")
+
+
 def _prepare_convolution_fusion_create(
     cls,
     x: "TensorBox",
@@ -163,8 +166,10 @@ def _prepare_convolution_fusion_create(
         output_stride = FlexibleLayout.contiguous_strides(output_size)
     else:
         output_stride = make_channels_last_strides_for(output_size)
-
-    assert x.get_device().type == "cpu" and weight.get_device().type == "cpu"
+    assert (
+        x.get_device().type == weight.get_device().type
+        and x.get_device().type in mkldnn_devices
+    )
     inputs = [x]
 
     if quantize_args is not None:
@@ -227,7 +232,10 @@ def _prepare_linear_fusion_create(
     req_stride_order = list(reversed(range(len(x.get_size()))))
 
     x = cls.require_stride_order(x, req_stride_order)
-    assert x.get_device().type == "cpu" and weight.get_device().type == "cpu"
+    assert (
+        x.get_device().type == weight.get_device().type
+        and x.get_device().type in mkldnn_devices
+    )
     inputs = [x]
 
     if quantize_args is not None:

@@ -791,10 +791,15 @@ if torch._C._has_mkldnn:
         def is_linear_add_bias(match):
             add_node = match.output_node()
             linear_node = add_node.args[0]
-            packed_weight_node = linear_node.args[1]
-            assert packed_weight_node.target == mkldnn._reorder_linear_weight
-            transpose_weight_node = packed_weight_node.args[0]
-            assert transpose_weight_node.target == aten.permute.default
+            is_xpu = add_node.meta.get("val").is_xpu
+            if is_xpu:
+                transpose_weight_node = linear_node.args[1]
+                assert transpose_weight_node.target == aten.permute.default
+            else:
+                packed_weight_node = linear_node.args[1]
+                assert packed_weight_node.target == mkldnn._reorder_linear_weight
+                transpose_weight_node = packed_weight_node.args[0]
+                assert transpose_weight_node.target == aten.permute.default
             weight_meta = transpose_weight_node.args[0].meta.get("val")
             bias_node = add_node.args[1]
             if isinstance(bias_node, int):
@@ -881,6 +886,11 @@ if torch._C._has_mkldnn:
         Check if the node is supported for MKLDNN convolution.
         """
         conv_node = match.output_node()
+        is_xpu = conv_node.meta.get("val").is_xpu
+        # The operator 'mkldnn::_convolution_transpose_pointwise' is not currently implemented for the XPU device.
+        if match.kwargs["is_transposed"] and is_xpu:
+            return False
+
         input_meta_value = conv_node.args[0].meta.get("val")
         weight_meta_value = conv_node.args[1].meta.get("val")
         if input_meta_value is None or weight_meta_value is None:
@@ -889,11 +899,7 @@ if torch._C._has_mkldnn:
         if conv_node.args[1].op != "get_attr":
             return False
         for meta_value in [input_meta_value, weight_meta_value]:
-            if (
-                meta_value is None
-                or meta_value.device.type != "cpu"
-                or (meta_value.dim() != 4 and meta_value.dim() != 5)
-            ):
+            if meta_value is None or (meta_value.dim() != 4 and meta_value.dim() != 5):
                 return False
         if (
             input_meta_value.dtype == torch.bfloat16
@@ -973,17 +979,12 @@ if torch._C._has_mkldnn:
         ):
             return False
         for meta_value in [input_meta_value, weight_meta_value]:
-            if (
-                meta_value is None
-                or meta_value.device.type != "cpu"
-                or meta_value.dim() != 2
-            ):
+            if meta_value is None or meta_value.dim() != 2:
                 return False
         if weight_idx == 2:
             bias_meta_value = linear_node.args[0].meta.get("val")
             if (
                 bias_meta_value is None
-                or meta_value.device.type != "cpu"
                 or bias_meta_value.dim() != 1
                 or bias_meta_value.size(0) != weight_meta_value.size(1)
             ):
@@ -1044,6 +1045,7 @@ if torch._C._has_mkldnn:
             assert isinstance(is_transposed, bool)
             graph = match.graph
             conv_node = match.output_node()
+            is_xpu = conv_node.args[0].meta.get("val").is_xpu
             input_size = conv_node.args[0].meta.get("val").shape
             with graph.inserting_before(conv_node):
                 constant_args = [args[4], args[3], args[5], args[-1]]
@@ -1057,8 +1059,12 @@ if torch._C._has_mkldnn:
                     packed_weight_inputs = (
                         (args[1],) + tuple(constant_args) + (input_size,)
                     )
-                    packed_weight_node = graph.create_node(
-                        "call_function", packed_weight_op, args=packed_weight_inputs
+                    packed_weight_node = (
+                        args[1]
+                        if is_xpu
+                        else graph.create_node(
+                            "call_function", packed_weight_op, args=packed_weight_inputs
+                        )
                     )
                 else:
                     assert not is_transposed
@@ -1158,6 +1164,7 @@ if torch._C._has_mkldnn:
                 else args[0]
             )
             weight = args[1] if linear_node.target == aten.mm.default else args[2]
+            is_xpu = input.meta.get("val").is_xpu
             with graph.inserting_before(linear_node):
                 transpose_weight_node = graph.create_node(
                     "call_function", aten.permute.default, (weight, (1, 0))
@@ -1179,29 +1186,34 @@ if torch._C._has_mkldnn:
                     if has_free_symbols(batch_size)
                     else batch_size,
                 )
-                # MKL packed matrix can't be copied to a different address because the internal implementation
-                # depends on the alignment of internally-stored metadata.
-                # In aot mode, we need to firstly save the packed weight, when loading it,
-                # it will be in a different address which doesn't work.
-                # Disable MKL prepack linear in AOT mode
-                packed_weight_op = (
-                    mkldnn._reorder_linear_weight
-                    if (
-                        is_lp_weight
-                        or mkldnn._is_mkldnn_acl_supported()
-                        or V.aot_compilation is True
+                packed_linear_inputs: Tuple[Any, ...]
+                if is_xpu:
+                    packed_linear_inputs = (input, transpose_weight_node)
+                else:
+                    # MKL packed matrix can't be copied to a different address because the internal implementation
+                    # depends on the alignment of internally-stored metadata.
+                    # In aot mode, we need to firstly save the packed weight, when loading it,
+                    # it will be in a different address which doesn't work.
+                    # Disable MKL prepack linear in AOT mode
+                    packed_weight_op = (
+                        mkldnn._reorder_linear_weight
+                        if (
+                            is_lp_weight
+                            or mkldnn._is_mkldnn_acl_supported()
+                            or V.aot_compilation is True
+                        )
+                        else torch.ops.mkl._mkl_reorder_linear_weight
                     )
-                    else torch.ops.mkl._mkl_reorder_linear_weight
-                )
-                packed_weight_node = graph.create_node(
-                    "call_function", packed_weight_op, args=packed_weight_inputs
-                )
+                    packed_weight_node = graph.create_node(
+                        "call_function", packed_weight_op, args=packed_weight_inputs
+                    )
+                    packed_linear_inputs = (input, packed_weight_node)
 
-                packed_linear_inputs: Tuple[Any, ...] = (input, packed_weight_node)
                 if (
                     is_lp_weight
                     or mkldnn._is_mkldnn_acl_supported()
                     or V.aot_compilation is True
+                    or is_xpu
                 ):
                     packed_linear_inputs += (bias, "none", [], "")
                     packed_linear_op = mkldnn._linear_pointwise.default
