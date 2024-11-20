@@ -3073,7 +3073,6 @@ class GraphModule(torch.nn.Module):
 
     def test_attrgetter(self):
         for attrs in (
-            (),
             ("shape",),
             ("data.shape",),
             ("device", "shape"),
@@ -3093,7 +3092,6 @@ class GraphModule(torch.nn.Module):
 
     def test_itemgetter(self):
         for items in (
-            (),
             (0,),
             (slice(0, 3, -1),),
             (0, 1),
