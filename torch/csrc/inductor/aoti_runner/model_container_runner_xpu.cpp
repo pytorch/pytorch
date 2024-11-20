@@ -7,12 +7,12 @@ AOTIModelContainerRunnerXpu::AOTIModelContainerRunnerXpu(
     const std::string& model_so_path,
     size_t num_models,
     const std::string& device_str,
-    const std::string& cubin_dir)
+    const std::string& kernel_bin_dir)
     : AOTIModelContainerRunner(
           model_so_path,
           num_models,
           device_str,
-          cubin_dir) {}
+          kernel_bin_dir) {}
 
 AOTIModelContainerRunnerXpu::~AOTIModelContainerRunnerXpu() = default;
 
@@ -38,9 +38,9 @@ std::unique_ptr<AOTIModelContainerRunner> create_aoti_runner_xpu(
     const std::string& model_so_path,
     size_t num_models,
     const std::string& device_str,
-    const std::string& cubin_dir) {
+    const std::string& kernel_bin_dir) {
   return std::make_unique<AOTIModelContainerRunnerXpu>(
-      model_so_path, num_models, device_str, cubin_dir);
+      model_so_path, num_models, device_str, kernel_bin_dir);
 }
 } // namespace
 
