@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
+import functools
 import warnings
 import weakref
 from dataclasses import dataclass
@@ -763,10 +764,11 @@ class MetaConverter:
         self,
         t: MetaTensorDesc,
         shape_env: Optional[ShapeEnv] = None,
-        callback=lambda t: t(),
+        callback_=lambda t: t(),
         source: Optional[Source] = None,
         symbolic_context: Optional[SymbolicContext] = None,
     ):
+        callback = functools.partial(callback_, device=t.device)
         if source is None:
             from torch._dynamo.source import ConstantSource
 
@@ -812,6 +814,8 @@ class MetaConverter:
 
         # Capture everything needed to recursively call meta_tensor where we need it
         def metafy_fn(t: MetaTensorDesc, src) -> torch.Tensor:
+            inner_callback = functools.partial(callback_, device=t.device)
+
             context = all_dynamic_symbolic_context(t, src, shape_env, callback)
 
             # TODO(soulitzer): improve this check
@@ -824,11 +828,13 @@ class MetaConverter:
                     else t.nested_cache_attr
                 )
                 context = symbolic_context.inner_contexts[key]
+            
 
             return self.meta_tensor(
                 t,
                 shape_env,
-                callback,
+                # This metafy fn is wrong because we're using the outer tensor's device!
+                inner_callback,
                 source=src,
                 symbolic_context=context,
             )
@@ -933,7 +939,7 @@ class MetaConverter:
                     return self.meta_tensor(
                         t,
                         shape_env=shape_env,
-                        callback=callback,
+                        callback_=callback,
                         source=source,
                         symbolic_context=symbolic_context,
                     )
@@ -945,12 +951,14 @@ class MetaConverter:
                         current_context = symbolic_context.inner_contexts[attr]
 
                     current_source = AttrSource(source, attr)
+                    inner_callback = functools.partial(callback_, device=t.device)
+
                     new_empty_tensor = _empty_create_subclass(
                         meta_tensor_desc,
                         meta_tensor_desc.size,
                         meta_tensor_desc.stride,
                         current_context,
-                        callback,
+                        inner_callback,
                         current_source,
                     )
                     inner_tensors[attr] = new_empty_tensor
@@ -1363,7 +1371,7 @@ class MetaConverter:
                             ft = self.meta_tensor(
                                 t.unwrapped,
                                 shape_env=shape_env,
-                                callback=callback,
+                                callback_=callback,
                                 # NB: reuse these exactly, we treat the
                                 # functional tensor as "invisible".
                                 # TODO: Actually this all probably doesn't
@@ -1406,7 +1414,7 @@ class MetaConverter:
                     unwrapped = self.meta_tensor(
                         t.unwrapped,
                         shape_env=shape_env,
-                        callback=callback,
+                        callback_=callback,
                         source=source,
                         symbolic_context=symbolic_context,
                     )
@@ -1708,9 +1716,13 @@ class MetaConverter:
                 # Extract out something?
                 # symbolicize the nested int
                 #
-                nested_cache = r.fake_mode.nested_cache_state.register_cache(
-                    cache_data, t.nested_cache.cache_id
-                )
+                # if already registered, do nothing.
+                from torch.nested._internal.metadata_cache import try_get_cache
+
+                if (nested_cache := try_get_cache(cache_data)) is None:
+                    nested_cache = r.fake_mode.nested_cache_state.register_cache(
+                        cache_data, t.nested_cache.cache_id
+                    )
                 # See Note: [Creating symbolic nested int]
                 # this should get the existing one if it already exists.
                 r.fake_mode.get_nested_symint(nested_cache, coeff=1)
@@ -1792,7 +1804,7 @@ class MetaConverter:
             r = self.meta_tensor(
                 t_desc,
                 shape_env=shape_env,
-                callback=callback,
+                callback_=callback,
                 source=source,
                 symbolic_context=symbolic_context,
             )

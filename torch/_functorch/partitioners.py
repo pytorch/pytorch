@@ -196,6 +196,7 @@ def _extract_graph_with_inputs_outputs(
                 if isinstance(x, fx.Node)
             ]
             if any(all_args):
+                print(node, "is invalid")
                 env[node] = InvalidNode  # type: ignore[assignment]
                 continue
             env[node] = new_graph.node_copy(node, lambda x: env[x])
@@ -203,6 +204,7 @@ def _extract_graph_with_inputs_outputs(
             env[node] = new_graph.node_copy(node, lambda x: env[x])
         elif node.op == "output":
             pass
+    # breakpoint()
     output_values = []
     for x in outputs:
         if isinstance(x, fx.Node):

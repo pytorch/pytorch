@@ -87,6 +87,8 @@ class CacheRegistry:
 
     def create_cache(self, data) -> TreeCache:
         cache = TreeCache(cache_id=self._next_id, data=data)
+        # print("incrementing next_id", self._next_id, "to", self._next_id + 1)
+        # breakpoint()
         self._next_id += 1
         self._cache_id_to_cache[cache.id] = (
             weakref.ref(cache) if self.is_weak else cache
@@ -140,6 +142,7 @@ class BaseCacheState(abc.ABC):
     def register_tensor(self, tensor, cache_id): ...
 
     def try_get_cache(self, tensor) -> Optional[TreeCache]:
+        assert isinstance(tensor, torch.Tensor)
         mb_cache_id = self._tensor_to_cache_id.get(tensor)
         if mb_cache_id is None:
             return None
@@ -184,9 +187,12 @@ class EagerCacheState(BaseCacheState):
         self._tmp_refs: Dict[int, TreeCache] = {}
 
     def register_tensor(self, tensor, cache_id):
-        # In eager, allow cache_id changing if the existing cache has died.
-        if tensor in self._tensor_to_cache_id:
-            assert not self.try_get_cache(tensor)
+        if tensor in self._tensor_to_cache_id and self.try_get_cache(tensor):
+            # Don't allow changing if exists
+            # if not self._tensor_to_cache_id[tensor] == cache_id:
+            #     breakpoint()
+            assert self._tensor_to_cache_id[tensor] == cache_id
+            return
         self._tensor_to_cache_id[tensor] = cache_id
 
     # Hack: Eager needs extra logic to keep the cache alive via a temporary reference.
@@ -355,12 +361,43 @@ lib.impl("_merge_caches", _merge_caches_impl, "CUDA")
 lib.impl("_merge_caches", _merge_caches_meta, "Meta")
 
 
+# This does kind of look like merge
+lib.define("_register_tensor(Tensor ref_tensor, Tensor tensor) -> ()")
+
+
+def _register_tensor_impl_inner(cache_state, ref_tensor, tensor):
+    cache = cache_state.try_get_cache(ref_tensor)
+    assert cache is not None
+    cache_state.register_tensor(tensor, cache.id)
+
+
+def _register_tensor_impl(ref_tensor, tensor):
+    _register_tensor_impl_inner(get_global_cache_state(), ref_tensor, tensor)
+
+
+def _register_tensor_meta(ref_tensor, tensor):
+    mb_fake_mode = try_get_fake_mode(ref_tensor)
+    if mb_fake_mode is not None:
+        _register_tensor_impl_inner(mb_fake_mode.nested_cache_state, ref_tensor, tensor)
+    else:
+        # assert ref_tensor.device.type == "meta"
+        print(ref_tensor.device.type)
+        _register_tensor_impl_inner(get_global_cache_state(), ref_tensor, tensor)
+
+
+lib.impl("_register_tensor", _register_tensor_impl, "CPU")
+lib.impl("_register_tensor", _register_tensor_impl, "CUDA")
+lib.impl("_register_tensor", _register_tensor_meta, "Meta")
+
+
 from torch._higher_order_ops.effects import _EffectType, _register_effectful_op
 
 # Ensure these ops are not DCE'd
+# Using the same token is okay?
 _register_effectful_op(torch.ops.nested._add_cache_entry.default, _EffectType.ORDERED)
 _register_effectful_op(torch.ops.nested._clear_tmp_ref.default, _EffectType.ORDERED)
 _register_effectful_op(torch.ops.nested._merge_caches.default, _EffectType.ORDERED)
+# _register_effectful_op(torch.ops.nested._register_tensor.default, _EffectType.ORDERED)
 
 
 def _get_ref_tensor(
@@ -385,6 +422,8 @@ def try_get_cache(data_or_tensor: Union[Dict[str, torch.Tensor], torch.Tensor]):
     mb_fake_mode = try_get_fake_mode(data_or_tensor)
     cached_tensor = _get_ref_tensor(data_or_tensor)
 
+    if not isinstance(cached_tensor, torch.Tensor):
+        breakpoint()
     if mb_fake_mode is not None:
         return mb_fake_mode.nested_cache_state.try_get_cache(cached_tensor)
     else:
@@ -421,3 +460,10 @@ def merge_caches(cache_a, cache_b):
         return cache_a.find()
     torch.ops.nested._merge_caches(ref_tensor_a, ref_tensor_b)
     return cache_a.find()
+
+
+# I have an existing cache, and want to make it so that when I construct a tensor
+# with. (you could almost think of this as merging...)
+def register_tensor(cache, tensor):
+    ref_tensor = _get_ref_tensor(cache.data)
+    torch.ops.nested._register_tensor(ref_tensor, tensor)

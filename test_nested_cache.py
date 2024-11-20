@@ -148,3 +148,26 @@ compiled_fn = torch.compile(fn, backend="aot_eager_decomp_partition", fullgraph=
 
 out = compiled_fn(t)
 out.values().sum().backward()
+
+
+# Test merging
+
+t = torch.nested.nested_tensor(
+    [
+        torch.randn(2, 5),
+        torch.randn(3, 5),
+        torch.randn(18, 5),
+    ],
+    layout=torch.jagged,
+)
+# Creates a cache
+
+t2 = torch.nested.nested_tensor(
+    [
+        torch.randn(2, 5),
+        torch.randn(3, 5),
+        torch.randn(18, 5),
+    ],
+    layout=torch.jagged,
+)
+

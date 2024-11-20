@@ -3955,6 +3955,8 @@ class ShapeEnv:
                 cache_data[cache_key] = fake_cache_value
                 # Fakifying: 
                 print("fakifying: ", cache_key, hint.node.nested_int())
+                if cache_key == "dummy_entry":
+                    print(cache_value, fake_cache_value)
                 # Grab the fake_mode so we can explicitly call into fake-only APIs
                 fake_mode = fake_mode if fake_cache_value is None else fake_cache_value.fake_mode
 

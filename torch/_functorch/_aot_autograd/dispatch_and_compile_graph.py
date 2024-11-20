@@ -314,6 +314,7 @@ def aot_dispatch_autograd_graph(
     # Redundant with the check above, but worth having in case tracing introduced
     # a fake tensor. Unlikely.
     # See Note: [Fake Modules and AOTAutograd]
+    breakpoint()
     torch._dynamo.utils.assert_no_fake_params_or_buffers(fx_g)
     fx_g.graph.eliminate_dead_code()
     copy_fwd_metadata_to_bw_nodes(fx_g)

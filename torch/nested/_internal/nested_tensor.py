@@ -10,6 +10,7 @@ from torch._prims_common import is_expandable_to
 from torch.nested._internal.metadata_cache import (
     add_entry,
     merge_caches,
+    register_tensor,
     TreeCache,
     try_get_cache,
 )
@@ -45,21 +46,39 @@ _METADATA_KEYS = [
 ]
 
 
-def get_nested_cache(cache_data) -> TreeCache:
+def get_device_and_host_metadata(**kwargs):
+    device_meta, host_meta = {}, {}
+    for key in _METADATA_KEYS:
+        if key in kwargs and kwargs[key] is not None:
+            meta = host_meta if kwargs[key].is_cpu else device_meta
+            meta[key] = kwargs[key]
+    return device_meta, host_meta
+
+
+def get_nested_cache(host_meta, device_meta) -> TreeCache:
     # Collect existing caches
     caches = []
     for k in _METADATA_KEYS:
-        if k in cache_data:
-            _cache = try_get_cache(cache_data[k])
+        if k in host_meta:
+            _cache = try_get_cache(host_meta[k])
+            if _cache is not None:
+                caches.append(_cache)
+        if k in device_meta:
+            _cache = try_get_cache(device_meta[k])
             if _cache is not None:
                 caches.append(_cache)
     # Merge them
     cache = None
     if len(caches) > 0:
+        # print("existing caches found!", len(caches))
         cache = functools.reduce(merge_caches, caches)
+        # print("found: ", cache, [id(v) for v in host_meta.values()])
+    # else:
+    #     print("no cache found with: ", [id(v) for v in host_meta.values()])
+    #     breakpoint()
 
     # Add new entries
-    for k, v in cache_data.items():
+    for k, v in host_meta.items():
         if cache is None or cache.data.get(k) is None:
             # Creates a new cache if None if cache=None
             cache = add_entry(cache, k, v)
@@ -120,10 +139,20 @@ class NestedTensor(torch.Tensor):
         assert not isinstance(values, NestedTensor)
         assert values.device == offsets.device
 
+        print(
+            "construct with",
+            [id(v) for v in host_meta.values()],
+            [id(v) for v in device_meta.values()],
+        )
+
         # Always have something in the host_meta.
         assert "dummy_entry" in host_meta
 
-        cache = get_nested_cache(host_meta)
+        cache = get_nested_cache(host_meta, device_meta)
+
+        for v in device_meta.values():
+            register_tensor(cache, v)
+
         ragged_size = get_nested_symint(cache, coeff=1)
 
         _ragged_idx = kwargs.get("_ragged_idx", 1)
@@ -694,6 +723,15 @@ def nested_view_from_values_offsets(
 def nested_view_from_values_offsets_lengths(
     values, offsets, lengths, ragged_idx=1, min_seqlen=None, max_seqlen=None
 ):
+    # This is the thing where we lazily create a min_seqlen tenosr inside compile
+    # in theory this shouldn't graph break.
+    # The question is when did dynamo decide how to store something as a constant in
+    # maybe during aot dispatch, dynamo never really fakified it.
+    # we could run an experiment to test this.
+    # but assuming this is true.
+    # what are we doing today that triggers this?
+    # but also... if dynamo does see this creation... is that okay?
+    #
     min_seqlen_tensor = None
     if min_seqlen is not None:
         min_seqlen_tensor = _store_val_in_tensor(min_seqlen)
@@ -732,6 +770,7 @@ def nested_from_padded(
         padded,
         offsets,
         _nt_view_dummy(),
+        torch.empty((0,), device="cpu"),
         ragged_idx,
         min_seqlen_tensor,
         max_seqlen_tensor,

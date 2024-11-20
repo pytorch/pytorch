@@ -2012,9 +2012,10 @@ def to_padded_tensor_default(func, *args, **kwargs):
 
 @register_jagged_func(
     torch.ops.aten._nested_from_padded_tensor.default,
-    "padded: t, offsets: t, dummy: jt, ragged_idx: any?, min_seqlen: any?, max_seqlen: any?, sum_S: any?",
+    "padded: t, offsets: t, dummy: jt, dummy_entry: t, ragged_idx: any?, min_seqlen: any?, max_seqlen: any?, sum_S: any?",
 )
 def _nested_from_padded_tensor_default(func, *args, **kwargs):
+    print("_nested_from_padded_tensor_default")
     _, new_kwargs = normalize_function(  # type: ignore[misc]
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
@@ -2052,14 +2053,15 @@ def _nested_from_padded_tensor_default(func, *args, **kwargs):
 
     device_meta, host_meta = {}, {}
     # Share this version of the keys somewhere?
-    for key in ("min_seqlen", "max_seqlen", "offsets"):
+    for key in ("min_seqlen", "max_seqlen", "offsets", "dummy_entry"):
         if key in new_kwargs and new_kwargs[key] is not None:
             meta = host_meta if new_kwargs[key].is_cpu else device_meta
             # TODO(soulitzer): unify the naming of min_seqlen_tensor and min_seqlen
             # Avoid changing for now to avoid changing native_functions.yaml
             new_key = f"{key}_tensor" if key in ("min_seqlen", "max_seqlen") else key
             meta[new_key] = new_kwargs[key]
-
+            if key == "offsets":
+                print(id(new_kwargs[key]))
 
     return NestedTensor(
         values,
@@ -2079,6 +2081,7 @@ def _nested_view_from_jagged_default(func, *args, **kwargs):
     )
     device_meta, host_meta = {}, {}
     # Share this version of the keys somewhere?
+    dummy_seen = False
     for key in ("min_seqlen", "max_seqlen", "lengths", "offsets", "dummy_entry"):
         if key in new_kwargs and new_kwargs[key] is not None:
             meta = host_meta if new_kwargs[key].is_cpu else device_meta
@@ -2086,6 +2089,14 @@ def _nested_view_from_jagged_default(func, *args, **kwargs):
             # Avoid changing for now to avoid changing native_functions.yaml
             new_key = f"{key}_tensor" if key in ("min_seqlen", "max_seqlen") else key
             meta[new_key] = new_kwargs[key]
+            if key == "dummy_entry":
+                dummy_seen = True
+                print("_nested_view_from_jagged_default - we have the dummy: ", meta["dummy_entry"])
+                assert meta["dummy_entry"].device.type == "cpu"
+
+
+    assert dummy_seen
+
 
     return NestedTensor(
         values=new_kwargs["input"],

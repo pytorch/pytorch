@@ -350,14 +350,16 @@ class FakeTensorConverter:
         maybe_memo = self._get_memo(t)
         if maybe_memo is not None:
             return maybe_memo
-        existing_device = t.device
         # not yet supported in metatensors
         if t.is_quantized:
             raise UnsupportedFakeTensorException("quantized nyi in meta tensors")
         if type(t) is torch.nn.Parameter:
             assert not make_constant
 
-        def mk_fake_tensor(make_meta_t: Callable[[], object]) -> FakeTensor:
+        # This callback is used by both subclass and inner tensors, allow the 
+        # to parameterize on the device in case the subclass and inner tensors
+        # have different devices.
+        def mk_fake_tensor(make_meta_t: Callable[[], object], device) -> FakeTensor:
             # NB: don't use in_kernel_invocation_manager. to
             # ensure FakeTensor can internally do constant computation
             # as necessary.  Invocation manager is "more correct" as
@@ -369,7 +371,7 @@ class FakeTensorConverter:
                 return FakeTensor(
                     fake_mode,
                     make_meta_t(),
-                    existing_device,
+                    device,
                     # TODO: callback might be used in recursive contexts, in
                     # which case using t is wrong!  BUG!
                     constant=t if make_constant else None,
@@ -723,6 +725,12 @@ class FakeTensor(Tensor):
         import traceback
 
         self._db_trace = traceback.extract_stack()
+
+
+        import traceback
+
+        trace = traceback.extract_stack()
+        self.creation_trace = "".join(traceback.format_list(trace))
         return self
 
     # In some circumstances, a conventional Tensor constructor

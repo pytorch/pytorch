@@ -5765,12 +5765,22 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             self.assertEqual(t, tensor_list[i])
 
     def test_unbind_lengths_ragged_idx_1(self, device):
+        from torch.nested._internal.nested_tensor import (
+            NestedTensor,
+            get_device_and_host_metadata,
+        )
         values = torch.randn(16, 8, 128, device=device)
         offsets = torch.tensor([0, 8, 12, 13, 16], device=device)
         lengths = torch.tensor([6, 2, 1, 2], device=device)
         ragged_idx = 1
-        nt = torch.nested._internal.nested_tensor.NestedTensor(
-            values, offsets=offsets, lengths=lengths, _ragged_idx=ragged_idx
+
+        device_meta, host_meta = get_device_and_host_metadata(
+            offsets=offsets,
+            lengths=lengths,
+            dummy_entry=torch.empty((0,), device="cpu")
+        )
+        nt = NestedTensor(
+            values, device_meta=device_meta, host_meta=host_meta, _ragged_idx=ragged_idx
         )  # 4D nested tensor
 
         tensor_list = []
@@ -5784,12 +5794,23 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             self.assertEqual(t, tensor_list[i])
 
     def test_unbind_lengths_ragged_idx_equals_2_bad_dim(self, device):
+        from torch.nested._internal.nested_tensor import (
+            NestedTensor,
+            get_device_and_host_metadata,
+        )
+
         values = torch.randn(16, 8, 128, device=device)
         offsets = torch.tensor([0, 8, 12, 13, 16], device=device)
         lengths = torch.tensor([6, 2, 1, 2], device=device)
         ragged_idx = 2
-        nt = torch.nested._internal.nested_tensor.NestedTensor(
-            values, offsets=offsets, lengths=lengths, _ragged_idx=ragged_idx
+
+        device_meta, host_meta = get_device_and_host_metadata(
+            offsets=offsets,
+            lengths=lengths,
+            dummy_entry=torch.empty((0,), device="cpu")
+        )
+        nt = NestedTensor(
+            values, device_meta=device_meta, host_meta=host_meta, _ragged_idx=ragged_idx
         )  # 4D nested tensor
 
         self.assertRaisesRegex(
@@ -5799,12 +5820,22 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         )
 
     def test_unbind_lengths_ragged_idx_2(self, device):
+        from torch.nested._internal.nested_tensor import (
+            NestedTensor,
+            get_device_and_host_metadata,
+        )
+
         values = torch.randn(16, 8, 128, device=device)
         offsets = torch.tensor([0, 2, 4, 8], device=device)
         lengths = torch.tensor([2, 1, 3], device=device)
         ragged_idx = 2
-        nt = torch.nested._internal.nested_tensor.NestedTensor(
-            values, offsets=offsets, lengths=lengths, _ragged_idx=ragged_idx
+        device_meta, host_meta = get_device_and_host_metadata(
+            offsets=offsets,
+            lengths=lengths,
+            dummy_entry=torch.empty((0,), device="cpu")
+        )
+        nt = NestedTensor(
+            values, device_meta=device_meta, host_meta=host_meta, _ragged_idx=ragged_idx
         )  # 4D nested tensor
 
         tensor_list = []
@@ -5818,12 +5849,22 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             self.assertEqual(t, tensor_list[i])
 
     def test_unbind_lengths_ragged_idx_3(self, device):
+        from torch.nested._internal.nested_tensor import (
+            NestedTensor,
+            get_device_and_host_metadata,
+        )
+
         values = torch.randn(16, 8, 128, device=device)
         offsets = torch.tensor([0, 100, 128], device=device)
         lengths = torch.tensor([50, 28], device=device)
         ragged_idx = 3
-        nt = torch.nested._internal.nested_tensor.NestedTensor(
-            values, offsets=offsets, lengths=lengths, _ragged_idx=ragged_idx
+        device_meta, host_meta = get_device_and_host_metadata(
+            offsets=offsets,
+            lengths=lengths,
+            dummy_entry=torch.empty((0,), device="cpu")
+        )
+        nt = NestedTensor(
+            values, device_meta=device_meta, host_meta=host_meta, _ragged_idx=ragged_idx
         )  # 4D nested tensor
 
         tensor_list = []
@@ -5840,12 +5881,22 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         "TorchDynamo raises an error for ragged_idx == 0 earlier than Torch"
     )
     def test_unbind_lengths_ragged_idx_0(self, device):
+        from torch.nested._internal.nested_tensor import (
+            NestedTensor,
+            get_device_and_host_metadata,
+        )
+
         values = torch.randn(16, 8, 128, device=device)
         offsets = torch.tensor([0, 100, 128], device=device)
         lengths = torch.tensor([50, 28], device=device)
         ragged_idx = 0
-        nt = torch.nested._internal.nested_tensor.NestedTensor(
-            values, offsets=offsets, lengths=lengths, _ragged_idx=ragged_idx
+        device_meta, host_meta = get_device_and_host_metadata(
+            offsets=offsets,
+            lengths=lengths,
+            dummy_entry=torch.empty((0,), device="cpu")
+        )
+        nt = NestedTensor(
+            values, device_meta=device_meta, host_meta=host_meta, _ragged_idx=ragged_idx
         )  # 4D nested tensor
 
         tensor_list = []
@@ -7502,7 +7553,7 @@ torch.cuda.synchronize()
 
         # convert padded dense -> NJT
         from torch.nested._internal.nested_tensor import nested_from_padded
-
+        print(id(nt.offsets()))
         nt2 = nested_from_padded(padded, nt.offsets())
         self.assertEqual(nt, nt2)
 
