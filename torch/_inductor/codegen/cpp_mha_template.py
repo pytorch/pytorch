@@ -25,7 +25,7 @@ ATTENTION_TEMPLATE = r"""
   // kv page size, q and kv split size
   int64_t kv_pagesize = {{kv_pagesize}};
   int64_t q_split_size = {{q_split_size}};
-  int64_t kv_split_size = {{kv_pagesize}};
+  int64_t kv_split_size = {{kv_split_size}};
 
   // dtypes of kernel and internal buffers
   using scalar_t = {{kernel.dtype(query)}};
@@ -46,6 +46,13 @@ ATTENTION_TEMPLATE = r"""
   bool is_broadcast_head_kv = num_head != num_head_k;
   int64_t gqa_shards = num_head / num_head_k;
   int64_t bs_shards = batchSize / batchSize_k;
+
+  int64_t batchSize_kvi = {{kernel.size(kv_indices, 0)}};
+  int64_t num_head_kvi = {{kernel.size(kv_indices, 1)}};
+  bool is_broadcast_bs_kvi = batchSize != batchSize_kvi;
+  bool is_broadcast_head_kvi = num_head != num_head_kvi;
+  int64_t gqa_shards_kvi = num_head / num_head_kvi;
+  int64_t bs_shards_kvi = batchSize / batchSize_kvi;
 
   // Strides
   int64_t qStrideB = {{kernel.stride(query, 0)}};
@@ -124,8 +131,10 @@ ATTENTION_TEMPLATE = r"""
             // Calculate scale * q @ k.T
             auto kv_block_num = n / kv_pagesize;
             auto kv_block_offset = n - kv_block_num * kv_pagesize;
-            // getting kv indices by [BS, 1, 1, kv_block_num]
-            auto kv_logical_data = kv_indices_data + i * kviStrideB  + kv_block_num;
+            // getting kv indices by [BS, Head, 1, kv_block_num]
+            auto i_kvi = is_broadcast_bs_kvi ? i/bs_shards_kvi : i;
+            auto j_kvi = is_broadcast_head_kvi ? j/gqa_shards_kvi : j;
+            auto kv_logical_data = kv_indices_data + i_kvi*kviStrideB + j_kvi*kviStrideH  + kv_block_num;
             auto i_kv = is_broadcast_bs_kv ? i/bs_shards : i;
             auto j_kv = is_broadcast_head_kv ? j/gqa_shards : j;
 
@@ -146,7 +155,6 @@ ATTENTION_TEMPLATE = r"""
               static_cast<accum_t>(0),
               qk_data,
               kvBlockSize);
-
             // apply score mod function
             for (int64_t row = 0; row < qBlockSize; ++row) {
               for(int col = 0; col< rkvBlockSize; col++){
@@ -163,7 +171,6 @@ ATTENTION_TEMPLATE = r"""
                 {{template.modification(score_mod)}}
                 }
             }
-
             // Apply block mask, fill unused with -inf
             for (int64_t row = 0; row < qBlockSize; ++row) {
               for(int col = 0; col< rkvBlockSize; col++){
@@ -284,8 +291,6 @@ class CppMHATemplate(CppTemplate):
     def modification(self, subgraph_buffer):
         assert isinstance(subgraph_buffer, ir.ComputedBuffer)
         subgraph_buffer_data = subgraph_buffer.data
-        assert isinstance(subgraph_buffer_data, ir.Pointwise), subgraph_buffer_data
-
         from ..loop_body import LoopBody
         from ..utils import sympy_index_symbol_with_prefix, SymT
         from ..virtualized import ops, V
@@ -354,7 +359,7 @@ class CppMHATemplate(CppTemplate):
             score_mod=score_mod,
             mask_mod=mask_mod,
             kv_block_size=kv_block_size,
-            kv_num_blocks=kv_num_blocks.layout.size[-1],
+            kv_num_blocks=kv_num_blocks,
         )
         template.maybe_append_choice(choices)
         return template
@@ -380,23 +385,28 @@ class CppMHATemplate(CppTemplate):
         key = kernel.permute(self.input_nodes[1], [0, 2, 1, 3])
         value = kernel.permute(self.input_nodes[2], [0, 2, 1, 3])
 
-        q_split_size = 16  # tuning param
-        kv_split_size = self.kv_block_size
-
         qSize = query.layout.size[1]
         kvSize = self.kv_block_size * self.kv_num_blocks
         headSize = query.layout.size[3]
+
+        q_split_size = 16  # tuning param
+        kv_split_size = 128 # tuning param
+        if self.kv_block_size < kv_split_size:
+            kv_split_size = self.kv_block_size
+
         qSplitSize = min(q_split_size, qSize)
         kvSplitSize = min(kv_split_size, kvSize)
+
         size_per_thread = (
             qSplitSize * kvSplitSize + qSplitSize + qSplitSize + qSplitSize * headSize
         )
+
         num_threads = parallel_num_threads()
 
         buf_out = TensorBox.create(self.output_node)
+
         if template_buffer_node is not None:
             buf_out = template_buffer_node
-
         options = dict(
             query=query,
             key=key,
@@ -408,8 +418,8 @@ class CppMHATemplate(CppTemplate):
             query_dtype=query.layout.dtype,
             qSplitSize=qSplitSize,
             ekvSplitSize=kvSplitSize,
-            q_split_size=q_split_size,
-            kv_split_size=kv_split_size,
+            q_split_size=qSplitSize,
+            kv_split_size=kvSplitSize,
             kv_pagesize=self.kv_block_size,
             kv_num_blocks=self.kv_num_blocks,
             template=self,
