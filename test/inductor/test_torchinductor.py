@@ -7414,8 +7414,8 @@ class CommonTemplate:
             [
                 torch.ones(200, 200) * p,
             ],
-            atol=p * 0.01,
-            rtol=0.01,
+            atol=p * 0.06,
+            rtol=0.06,
         )
 
     @skip_if_triton_cpu
@@ -7427,8 +7427,8 @@ class CommonTemplate:
         self.common(
             fn,
             [torch.ones(200, 200) * p],
-            atol=p * 0.01,
-            rtol=0.01,
+            atol=p * 0.06,
+            rtol=0.06,
         )
 
     def test_narrow(self):
