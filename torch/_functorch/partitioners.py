@@ -413,7 +413,7 @@ def default_partition(
     primal_inputs = list(filter(_is_primal, joint_module.graph.nodes))
     fwd_seed_offset_inputs = list(filter(_is_fwd_seed_offset, joint_module.graph.nodes))
     inputs = primal_inputs + fwd_seed_offset_inputs
-    fwd_outputs, _bwd_outputs = _extract_fwd_bwd_outputs(
+    fwd_outputs, bwd_outputs = _extract_fwd_bwd_outputs(
         joint_module, num_fwd_outputs=num_fwd_outputs
     )
     forward_only_graph = _extract_graph_with_inputs_outputs(
@@ -1167,7 +1167,7 @@ def solve_min_cut(
                         heapq.heappush(fusible, (node_info.get_fw_order(user), user))
 
     try:
-        _cut_value, partition = nx.minimum_cut(nx_graph, "source", "sink")
+        cut_value, partition = nx.minimum_cut(nx_graph, "source", "sink")
     except Exception:
         log.info("Failed to compute min-cut on following graph:")
         log.info("\n".join(nx.readwrite.edgelist.generate_edgelist(nx_graph)))
@@ -1692,7 +1692,7 @@ def choose_saved_values_set(
         with no_dispatch():
             (
                 expected_runtime,
-                _saved_node_idxs,
+                saved_node_idxs,
                 recomputable_node_idxs,
             ) = _optimize_runtime_with_given_memory(
                 joint_graph,
