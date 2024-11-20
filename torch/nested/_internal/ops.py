@@ -544,14 +544,16 @@ def linear_backward_default(func, *args, **kwargs):
 
     ds, dw, db = None, None, None
     check_ragged_dim_same(func, inp, "self", grad_output, "grad_output")
+    reshaped_grad = grad_output._values.reshape(-1, weight.size(0))
     if output_mask[0]:
         ds = NestedTensor(
-            torch.matmul(grad_output._values, weight), **extract_kwargs(grad_output)
+            torch.matmul(reshaped_grad, weight).view_as(inp._values),
+            **extract_kwargs(grad_output),
         )
     if output_mask[1]:
-        dw = torch.matmul(grad_output._values.transpose(-2, -1), inp._values)
+        dw = torch.matmul(reshaped_grad.t(), inp._values.reshape(-1, weight.size(1)))
     if output_mask[2]:
-        db = grad_output._values.sum(0)
+        db = reshaped_grad.sum(0)
     return (ds, dw, db)
 
 
