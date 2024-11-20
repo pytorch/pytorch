@@ -50,11 +50,7 @@ Tensor& do_metal_mm(const Tensor& self, const Tensor& other, Tensor& output) {
                                        static_cast<uint32_t>(output.size(1))};
       std::array<int64_t, 6> strides = {
           self.stride(0), self.stride(1), other.stride(0), other.stride(1), output.stride(0), output.stride(1)};
-      mtl_setBuffer(computeEncoder, self, 0);
-      mtl_setBuffer(computeEncoder, other, 1);
-      mtl_setBuffer(computeEncoder, output, 2);
-      mtl_setBytes(computeEncoder, strides, 3);
-      mtl_setBytes(computeEncoder, sizes, 4);
+      mtl_setArgs(computeEncoder, self, other, output, strides, sizes);
       mtl_dispatch1DJob(computeEncoder, matmulPSO, output.numel());
       getMPSProfiler().endProfileKernel(matmulPSO);
     }

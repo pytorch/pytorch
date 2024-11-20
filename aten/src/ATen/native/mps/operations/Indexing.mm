@@ -162,13 +162,8 @@ static bool dispatchIndexKernel(TensorIteratorBase& iter,
       getMPSProfiler().beginProfileKernel(indexSelectPSO, indexFunction, {inputTensor});
 
       [computeEncoder setComputePipelineState:indexSelectPSO];
-      [computeEncoder setBuffer:indexAB offset:0 atIndex:0];
-      mtl_setBytes(computeEncoder, index_size, 1);
-      mtl_setBytes(computeEncoder, index_stride, 2);
-      [computeEncoder setBuffer:kernelDataOffsets offset:0 atIndex:3];
-      mtl_setBuffer(computeEncoder, inputTensor, 4);
-      mtl_setBuffer(computeEncoder, outputTensor, 5);
-      mtl_setBytes(computeEncoder, num_indices, 6);
+      mtl_setArgs(
+          computeEncoder, indexAB, index_size, index_stride, kernelDataOffsets, inputTensor, outputTensor, num_indices);
       MTLSize gridSize = MTLSizeMake(numThreads, 1, 1);
       if (serial_index_put) {
         mtl_setBytes(computeEncoder, numIters, 7);
