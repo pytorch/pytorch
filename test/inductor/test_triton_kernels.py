@@ -35,7 +35,6 @@ from torch.utils._triton import has_triton_package, has_triton_tma
 if HAS_GPU:
     import triton
     from triton import language as tl
-    from triton.runtime.autotuner import Autotuner
 
     if not TEST_WITH_ROCM:
         if HAS_CUDA:
@@ -1407,7 +1406,6 @@ def forward(self, x_1, output_1):
             self.assertTrue("add_kernel_1.run" not in code)
 
         self.assertEqual(compiled_out, eager_out)
-
 
     @requires_gpu
     @common_utils.parametrize("dynamic", [False, True])

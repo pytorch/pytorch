@@ -227,7 +227,9 @@ class CachingAutotuner(KernelInterface):
         self.inductor_meta = {} if inductor_meta is None else inductor_meta
         self.save_cache_hook = save_cache_hook
         self.mutated_arg_names = mutated_arg_names
-        self.reset_to_zero_arg_names = [] if reset_to_zero_arg_names is None else reset_to_zero_arg_names
+        self.reset_to_zero_arg_names = (
+            [] if reset_to_zero_arg_names is None else reset_to_zero_arg_names
+        )
         self.optimize_mem = optimize_mem
         self.configs = configs
         self.heuristic_type = heuristic_type
@@ -832,12 +834,16 @@ class CachingAutotuner(KernelInterface):
             return
         for i, arg in enumerate(args):
             if self.fn.arg_names[i] in self.reset_to_zero_arg_names:
-                assert isinstance(arg, torch.Tensor, "self.reset_to_zero_arg_names should only contain valid argument names")
+                assert isinstance(
+                    arg, torch.Tensor
+                ), "self.reset_to_zero_arg_names should only contain valid argument names"
                 arg.zero_()
 
         for name, arg in kwargs.items():
             if name in self.reset_to_zero_arg_names:
-                assert isinstance(arg, torch.Tensor, "self.reset_to_zero_arg_names should only contain valid argument names")
+                assert isinstance(
+                    arg, torch.Tensor
+                ), "self.reset_to_zero_arg_names should only contain valid argument names"
                 arg.zero_()
 
     def maybe_clone_args(
