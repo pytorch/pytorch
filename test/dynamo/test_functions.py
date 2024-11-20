@@ -3093,9 +3093,9 @@ class GraphModule(torch.nn.Module):
     def test_itemgetter(self):
         for items in (
             (0,),
-            (slice(0, 3, -1),),
+            (slice(1, 3),),
             (0, 1),
-            (slice(0, 3, -1), 0, 1),
+            (slice(1, 3), 0, 1),
         ):
             with self.subTest(items=items):
 
