@@ -412,7 +412,7 @@ def output_json(filename, headers, row):
         extra_info.update(current_settings)
 
     mapping_headers = {headers[i]: v for i, v in enumerate(row)}
-    with open(f"{os.path.splitext(filename)}.json", "a") as f:
+    with open(f"{os.path.splitext(filename)[0]}.json", "a") as f:
         for header, value in mapping_headers.items():
             # These headers are not metric names
             if header in ("dev", "name", "batch_size"):
