@@ -59,13 +59,17 @@ struct TORCH_API AcceleratorHooksInterface {
     return nullptr;
   }
 
+  virtual Device getDeviceFromPtr(void* data) const {
+    TORCH_CHECK(false, "Backend doesn't support getDeviceFromPtr()");
+  }
+
   virtual const Generator& getDefaultGenerator(
-      C10_UNUSED DeviceIndex device_index = -1) const {
+      [[maybe_unused]] DeviceIndex device_index = -1) const {
     TORCH_CHECK(false, "Backend doesn`t support getDefaultGenerator()");
   }
 
   virtual Generator getNewGenerator(
-      C10_UNUSED DeviceIndex device_index = -1) const {
+      [[maybe_unused]] DeviceIndex device_index = -1) const {
     TORCH_CHECK(false, "Backend doesn`t support getNewGenerator()");
   }
 };

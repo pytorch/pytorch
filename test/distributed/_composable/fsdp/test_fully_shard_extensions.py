@@ -14,7 +14,7 @@ import torch.nn as nn
 import torch.utils._pytree as pytree
 from torch.autograd.grad_mode import _unsafe_preserve_version_counter
 from torch.distributed._composable.fsdp import fully_shard, MixedPrecisionPolicy
-from torch.distributed.device_mesh import DeviceMesh
+from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
@@ -256,6 +256,10 @@ class TestFullyShardAllGatherExtensionsMultiThread(
     TestFullyShardAllGatherExtensionsCommon, FSDPTestMultiThread
 ):
     @property
+    def world_size(self) -> int:
+        return 8
+
+    @property
     def device(self) -> torch.device:
         return torch.device("cuda:0")
 
@@ -396,6 +400,67 @@ class TestFullyShardAllGatherExtensionsMultiThread(
         loss.backward()
         optim.step()
         optim.zero_grad()
+
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_all_gather_extension_hsdp_mesh(self):
+        tls = threading.local()
+        replicate_size = 2
+        shard_size = self.world_size // replicate_size
+        mesh = init_device_mesh(
+            "cuda",
+            (replicate_size, shard_size),
+            mesh_dim_names=("dp_replicate", "dp_shard"),
+        )
+
+        def fsdp_pre_all_gather(
+            self,
+            mesh: DeviceMesh,
+            outer_size: torch.Size,
+            outer_stride: Tuple[int, ...],
+            module: nn.Module,
+            mp_policy: MixedPrecisionPolicy,
+        ) -> Tuple[Tuple[torch.Tensor, ...], Any]:
+            nonlocal tls
+            tls.mesh = mesh
+            return (self,), None
+
+        @torch.no_grad()
+        def fsdp_post_all_gather(
+            self,
+            all_gather_outputs: Tuple[torch.Tensor, ...],
+            metadata: Any,
+            param_dtype: torch.dtype,
+            *,
+            out: Optional[torch.Tensor] = None,
+        ) -> Union[Tuple[torch.Tensor, Tuple[torch.Tensor, ...]], None]:
+            (tensor,) = all_gather_outputs
+            if out is not None:
+                return
+            return tensor, (tensor,)
+
+        model = self._init_two_tensor_mlp()
+        for mlp in model:
+            fully_shard(mlp, mesh=mesh)
+        fully_shard(model, mesh=mesh)
+        self.assertGreater(sum("weight" in n for n, _ in model.named_parameters()), 0)
+        for param_name, param in model.named_parameters():
+            if "weight" in param_name:
+                # Need to use `_local_tensor` to patch the tensor object
+                local_param = param._local_tensor
+                # Monkey patch on the `torch.Tensor` as instance methods to
+                # show that the extension can work even without a subclass
+                local_param.fsdp_pre_all_gather = fsdp_pre_all_gather.__get__(
+                    local_param
+                )
+                local_param.fsdp_post_all_gather = fsdp_post_all_gather.__get__(
+                    local_param
+                )
+
+        inp = torch.randn((2, 8), device="cuda")
+        model(inp)
+        # Check that FSDP passes only the shard mesh to the pre-all-gather
+        self.assertEqual(tls.mesh.ndim, 1)
+        self.assertEqual(tls.mesh.size(), shard_size)
 
 
 if __name__ == "__main__":

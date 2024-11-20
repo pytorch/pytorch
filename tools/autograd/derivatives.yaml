@@ -112,9 +112,9 @@
 #
 #   - `wrap_opt_if`, is a 2-argument function that accepts a tensor
 #     variable and a boolean condition that dictates whether to save that
-#     variable in a graph. The result of this function is `c10::optional<Tensor>`,
+#     variable in a graph. The result of this function is `std::optional<Tensor>`,
 #     and it is `::std::nullopt` when the condition evalutes to `false`,
-#     otherwise it is the variable wrapped in `c10::optional<Tensor>`.
+#     otherwise it is the variable wrapped in `std::optional<Tensor>`.
 #     For example, wrap_opt_if(var_0, grad_input_mask[1] || grad_input_mask[2])
 #     would mean that `var_0` is saved as long as the second (grad_input_mask[1])
 #     or the third (grad_input_mask[2]) argument requires gradients.
@@ -1131,8 +1131,14 @@
   result: other_t + (self_p > other_p).logical_or_(other_p.isnan()) * (self_t - other_t)
 
 - name: mean(Tensor self, *, ScalarType? dtype=None) -> Tensor
-  self: grad.expand_symint(self.sym_sizes()) / self.sym_numel()
-  result: auto_linear
+  dispatch:
+    Default:
+      self: grad.expand_symint(self.sym_sizes()) / self.sym_numel()
+      result: auto_linear
+    AutogradNestedTensor:
+      # TODO: replace this with grad.expand_as(self) / self.sym_numel() when that is supported
+      self: (ones_like(self) * grad) / self.sym_numel()
+      result: auto_linear
 
 - name: mean.dim(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   self: mean_backward(grad, self.sym_sizes(), dim, self.sym_numel(), keepdim)
@@ -1669,8 +1675,14 @@
   result: auto_element_wise
 
 - name: sum(Tensor self, *, ScalarType? dtype=None) -> Tensor
-  self: grad.expand_symint(self.sym_sizes())
-  result: auto_linear
+  dispatch:
+    Default:
+      self: grad.expand_symint(self.sym_sizes())
+      result: auto_linear
+    AutogradNestedTensor:
+      # TODO: replace this with grad.expand_as(self) when that is supported
+      self: ones_like(self) * grad
+      result: auto_linear
 
 - name: sum.dim_IntList(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   dispatch:

@@ -253,7 +253,8 @@ def record_shapeenv_event(*, save_tracked_fakes: bool = False) -> Callable:
                 return r
 
             try:
-                if args[0].is_recording:  # type: ignore[has-type]
+                shape_env = args[0]
+                if not shape_env.should_record_events or shape_env.is_recording:  # type: ignore[has-type]
                     # If ShapeEnv is already recording an event, call the wrapped
                     # function directly.
                     #
@@ -331,7 +332,7 @@ def replay_shape_env_events(events):
             # We need to call create_mapping_fn every time, since the node list might
             # change after each event is replayed.
             event.run(shape_env)
-        except Exception as e:
+        except Exception:
             log.error("failed when running event: %s", event)
             raise
 

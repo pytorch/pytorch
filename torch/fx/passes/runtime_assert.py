@@ -166,9 +166,9 @@ def insert_deferred_runtime_asserts(
         nn_module_stack: Optional[Dict[str, Any]] = None,
     ) -> None:
         fake_args = pytree.tree_map(
-            lambda arg: _get_example_value(arg)
-            if isinstance(arg, torch.fx.Node)
-            else arg,
+            lambda arg: (
+                _get_example_value(arg) if isinstance(arg, torch.fx.Node) else arg
+            ),
             node.args,
         )
         try:
@@ -530,10 +530,10 @@ def insert_deferred_runtime_asserts(
                 # effort basis should do.
                 #
                 # The second issue is a preexisting one. It can be mitigated
-                # with a normalisation algorithm. In general, it may also
+                # with a normalization algorithm. In general, it may also
                 # be on a best effort basis, but since our grammar is not
                 # terribly difficult, chances are we could even fully
-                # normalise SymPy expressions... who knows.
+                # normalize SymPy expressions... who knows.
                 if i0 in constrained_unbacked_symbols:
                     continue  # constrain symbol just once
 

@@ -204,7 +204,7 @@ class MemoryDep(Dep):
             numel = V.graph.get_numel(self.name)
         else:
             vars: OrderedSet[sympy.Basic] = OrderedSet(self.index.free_symbols)
-            numel = sympy.Integer(1)
+            numel = sympy.S.One
             for var, size in zip(self.var_names, self.size):
                 if var in vars:
                     numel = numel * size
@@ -230,6 +230,8 @@ class MemoryDep(Dep):
         return len(free_unbacked_symbols(self.get_numel())) > 0
 
     def is_contiguous(self) -> bool:
+        if isinstance(self.index, sympy.Integer):
+            return True
         return isinstance(self.index, sympy.Symbol) and self.index in self.var_names
 
     def stride1_for_last_dim(self, result_for_complex_expression=True) -> bool:
@@ -326,7 +328,7 @@ class WeakDep(Dep):
         raise NotImplementedError("WeakDep does not have an index")
 
     def get_numel(self) -> sympy.Expr:
-        return sympy.Integer(1)
+        return sympy.S.One
 
     def rename(self, renames: Dict[str, str]) -> "WeakDep":
         if self.name in renames:
@@ -731,6 +733,11 @@ class FreeUnbackedSymbolsOpsHandler:
     ) -> Union[None, Tuple[None, ...]]:
         num_values = reduction_num_outputs(reduction_type)
         return (None,) * num_values if num_values > 1 else None
+
+    def masked(self, mask, body, other) -> None:
+        assert callable(body), "masked body must always be callable."
+        # The body can make additional calls, for e.g. ops.indirect_indexing
+        body()
 
 
 def _typecheck_FreeUnbackedSymbolsOpsHandler(

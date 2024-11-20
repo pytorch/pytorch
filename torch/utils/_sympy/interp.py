@@ -31,6 +31,7 @@ from .functions import (
     Min,
     Mod,
     ModularIndexing,
+    OpaqueUnaryFn_log2,
     PowByNatural,
     PythonMod,
     RoundDecimal,
@@ -101,7 +102,11 @@ def handlers():
         Identity: "identity",
         IsNonOverlappingAndDenseIndicator: "is_non_overlapping_and_dense_indicator",
         RoundDecimal: "round_decimal",
+        # TODO: do the rest of the opaque unary functions...
+        OpaqueUnaryFn_log2: "log2",
     }
+    # TODO: This is kind of pointless, we shouldn't be generating sympy.sin
+    # for these functions, they should be Opaque instead
     for name in ["cos", "sin", "tan", "sinh", "cosh", "tanh", "asin", "acos", "atan"]:
         HANDLERS[getattr(sympy, name)] = name
 
@@ -161,6 +166,8 @@ def _run_sympy_handler(analysis, args, expr, index_dtype=torch.int64):
             r = handler(*args)
             log.debug("%s(%s) -> %s", handler_name, args, r)
             return r
+    except NotImplementedError:
+        raise
     except Exception:
         log.warning("failed while executing %s(%s)", handler_name, args)
         raise

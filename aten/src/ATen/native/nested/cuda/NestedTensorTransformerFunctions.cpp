@@ -1,5 +1,3 @@
-#include <numeric>
-#include <algorithm>
 #include <c10/util/Exception.h>
 
 #include <ATen/ATen.h>
@@ -110,7 +108,7 @@ Tensor nested_from_padded_cuda(
             padded_contiguous.sizes()[0]);
       }
     } else {
-      AT_ERROR("Only support fp32/fp16 for padded input");
+      TORCH_CHECK(false, "Only support fp32/fp16 for padded input");
     }
     return at::detail::make_tensor<NestedTensorImpl>(std::move(output), sizes);
   } else {
@@ -118,7 +116,7 @@ Tensor nested_from_padded_cuda(
   }
 }
 
-Tensor batch_offsets_from_efficient_size(const Tensor& ef_sizes) {
+static Tensor batch_offsets_from_efficient_size(const Tensor& ef_sizes) {
   int64_t* nt_sizes_ptr = ef_sizes.data_ptr<int64_t>();
   int64_t ef_sizes_size_0 = ef_sizes.sizes()[0];
   Tensor offsets = at::empty({1 + ef_sizes_size_0}, at::kLong);

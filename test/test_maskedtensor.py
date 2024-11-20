@@ -78,7 +78,6 @@ def _compare_forward_backward(data, mask, fn):
     _compare_mt_t(masked_res, tensor_res)
     _compare_mt_t(mt.grad, t.grad, atol=1e-06)
 
-
 def _create_random_mask(shape, device):
     return make_tensor(shape, device=device, dtype=torch.bool)
 
@@ -230,7 +229,7 @@ class TestBasics(TestCase):
         for sample in _generate_sample_data(device=device):
             data = sample.input
             mask = sample.kwargs["mask"]
-            mt = masked_tensor(data.clone().detach(), mask, requires_grad=True)
+            mt = masked_tensor(data.detach().clone(), mask, requires_grad=True)
 
             sparse_mt = mt.to_sparse()
             data.to_sparse().to_dense().sum().backward()

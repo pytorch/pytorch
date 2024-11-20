@@ -27,6 +27,12 @@ struct StashTorchDispatchModeGuard {
           std::move(saved_mode_));
     }
   }
+  StashTorchDispatchModeGuard(const StashTorchDispatchModeGuard&) = delete;
+  StashTorchDispatchModeGuard(StashTorchDispatchModeGuard&&) = delete;
+  StashTorchDispatchModeGuard& operator=(const StashTorchDispatchModeGuard&) =
+      delete;
+  StashTorchDispatchModeGuard& operator=(StashTorchDispatchModeGuard&&) =
+      delete;
 
   const std::shared_ptr<c10::impl::PyObject_TorchDispatchMode>& get_cur_mode() {
     return saved_mode_;
@@ -44,6 +50,12 @@ struct StashTorchDispatchStackGuard {
     c10::impl::TorchDispatchModeTLS::set_state(std::move(saved_state_));
     saved_state_ = std::move(old);
   }
+  StashTorchDispatchStackGuard(const StashTorchDispatchStackGuard&) = delete;
+  StashTorchDispatchStackGuard(StashTorchDispatchStackGuard&&) = delete;
+  StashTorchDispatchStackGuard& operator=(const StashTorchDispatchStackGuard&) =
+      delete;
+  StashTorchDispatchStackGuard& operator=(StashTorchDispatchStackGuard&&) =
+      delete;
 
   ~StashTorchDispatchStackGuard() {
     c10::impl::TorchDispatchModeTLS::set_state(std::move(saved_state_));

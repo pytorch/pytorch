@@ -10,6 +10,6 @@ void normal_kernel(const TensorBase &self, double mean, double std, std::optiona
   at::native::templates::cuda::normal_kernel(self, mean, std, generator);
 }
 
-REGISTER_DISPATCH(normal_stub, &normal_kernel);
+REGISTER_DISPATCH(normal_stub, &normal_kernel)
 
 } // namespace at::native

@@ -22,6 +22,17 @@ C10_API Tensor mkldnn_linear_pointwise_binary(
     const std::optional<Tensor>& bias_opt,
     c10::string_view attr);
 
+#if AT_MKL_ENABLED()
+
+C10_API Tensor mkl_linear(
+    const Tensor& self,
+    const Tensor& mkl_weight_t,
+    const Tensor& origin_weight_t,
+    const std::optional<Tensor>& bias_opt,
+    const int64_t prepack_batch_size);
+
+#endif// AT_MKL_ENABLED
+
 } // namespace native
 } // namespace at
 
