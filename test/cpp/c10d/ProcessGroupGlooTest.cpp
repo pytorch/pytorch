@@ -123,7 +123,7 @@ class CollectiveTest {
       int num,
       bool delayed = false) {
     std::vector<CollectiveTest> tests;
-    for (C10_UNUSED const auto i : c10::irange(num)) {
+    for ([[maybe_unused]] const auto i : c10::irange(num)) {
       tests.emplace_back(path);
     }
 

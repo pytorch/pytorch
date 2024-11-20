@@ -17,6 +17,7 @@ namespace {
 }
 
 static void assertSavedTensorHooksNotDisabled() {
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   TORCH_CHECK(SavedTensorDefaultHooks::is_enabled(), tls.disabled_error_message.value());
 }
 
@@ -74,7 +75,7 @@ std::pair<SafePyObject, SafePyObject> SavedTensorDefaultHooks::pop_hooks() {
 std::optional<std::pair<SafePyObject, SafePyObject>> SavedTensorDefaultHooks::get_hooks() {
   // For tls.is_tracing, see NOTE: [Deferring tensor pack/unpack hooks until runtime]
   if (!is_initialized || tls.stack.empty() || tls.is_tracing) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   return tls.stack.top();
 }

@@ -77,7 +77,7 @@ PyCodeObject* getCode<CallType::PyModuleCall>() {
     return (PyCodeObject*)res;
   }();
   return module_call_code;
-};
+}
 
 template <>
 PyCodeObject* getCode<CallType::PyOptimizerCall>() {
@@ -92,7 +92,7 @@ PyCodeObject* getCode<CallType::PyOptimizerCall>() {
     return (PyCodeObject*)res;
   }();
   return optimizer_step_code;
-};
+}
 
 } // namespace
 } // namespace torch::profiler::impl
@@ -548,7 +548,7 @@ struct TraceKeyCacheState {
 // `PyEval_SetProfile`.
 struct ThreadLocalResults;
 struct TraceContext {
-  PyObject_HEAD;
+  PyObject_HEAD
   ThreadLocalResults* thread_local_results_;
 };
 
@@ -795,7 +795,7 @@ PythonTracer::PythonTracer(torch::profiler::impl::RecordQueue* queue)
     //   cannot be round tripped via `sys.settrace(sys.gettrace())`
     PyEval_SetProfile(PythonTracer::pyProfileFn, (PyObject*)ctx);
   }
-};
+}
 
 void PythonTracer::stop() {
   gil_and_restore_thread gil;
@@ -1017,7 +1017,7 @@ class PostProcess {
     ska::flat_hash_map<size_t, std::pair<size_t, kineto::DeviceAndResource>>
         tid_map;
     auto it = out.rbegin();
-    for (C10_UNUSED auto _ : c10::irange(initial_size, out.size())) {
+    for ([[maybe_unused]] auto _ : c10::irange(initial_size, out.size())) {
       const auto python_tid =
           std::get<ExtraFields<E>>((*it)->extra_fields_).python_tid_;
       if ((*it)->start_tid_ == NoTID && SOFT_ASSERT(E == EventType::PyCall)) {

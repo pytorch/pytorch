@@ -26,6 +26,7 @@ namespace c10 {
  * std::char_traits if we wanted to use it with our constexpr basic_string_view.
  */
 template <class CharT>
+// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
 class basic_string_view final {
  public:
   using value_type = CharT;
@@ -53,7 +54,8 @@ class basic_string_view final {
   /* implicit */ basic_string_view(const ::std::basic_string<CharT>& str)
       : basic_string_view(str.data(), str.size()) {}
 
-  /* implicit */ basic_string_view(const ::std::basic_string_view<CharT>& str)
+  /* implicit */ constexpr basic_string_view(
+      const ::std::basic_string_view<CharT>& str)
       : basic_string_view(str.data(), str.size()) {}
 
   constexpr basic_string_view(const basic_string_view&) noexcept = default;
@@ -65,7 +67,7 @@ class basic_string_view final {
     return *this;
   }
 
-  operator ::std::basic_string_view<CharT>() const {
+  constexpr operator ::std::basic_string_view<CharT>() const {
     return ::std::basic_string_view<CharT>(data(), size());
   }
 
@@ -156,7 +158,7 @@ class basic_string_view final {
     return std::numeric_limits<difference_type>::max();
   }
 
-  C10_NODISCARD constexpr bool empty() const noexcept {
+  [[nodiscard]] constexpr bool empty() const noexcept {
     return size() == 0;
   }
 
@@ -594,9 +596,22 @@ constexpr inline void swap(
     basic_string_view<CharT>& rhs) noexcept {
   lhs.swap(rhs);
 }
-using std::string_view;
-using string_view_ext = basic_string_view<char>;
+using string_view = basic_string_view<char>;
 
+// NOTE: In C++20, this function should be replaced by str.starts_with
+constexpr bool string_view_starts_with(
+    std::string_view str,
+    std::string_view prefix) noexcept {
+  return str.size() >= prefix.size() && str.substr(0, prefix.size()) == prefix;
+}
+
+// NOTE: In C++20, this function should be replaced by str.ends_with
+constexpr bool string_view_ends_with(
+    std::string_view str,
+    std::string_view suffix) noexcept {
+  return str.size() >= suffix.size() &&
+      str.substr(str.size() - suffix.size()) == suffix;
+}
 } // namespace c10
 
 namespace std {

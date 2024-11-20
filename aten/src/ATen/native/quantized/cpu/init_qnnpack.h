@@ -2,12 +2,10 @@
 
 #ifdef USE_PYTORCH_QNNPACK
 
-namespace at {
-namespace native {
+namespace at::native {
 
 void initQNNPACK();
 
-} // namespace native
-} // namespace at
+} // namespace at::native
 
 #endif

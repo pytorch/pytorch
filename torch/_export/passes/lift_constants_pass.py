@@ -166,6 +166,7 @@ def lift_constants_pass(
                 const_placeholder_node = _get_first_fqn(lifted_objs, constant_val)
                 node.replace_all_uses_with(const_placeholder_node)
                 gm.graph.erase_node(node)
+                renamed_targets[node.name] = const_placeholder_node.name
                 continue
 
             # For ScriptObject, Tensor and FakeScriptObject constants:
@@ -264,7 +265,7 @@ def lift_constants_pass(
                 node.replace_all_uses_with(const_placeholder_node)
                 gm.graph.erase_node(node)
 
-                renamed_targets[node.target] = const_placeholder_node.name
+                renamed_targets[node.name] = const_placeholder_node.name
 
                 # Add the constant as a buffer to the graph signature
                 graph_signature.input_specs.insert(

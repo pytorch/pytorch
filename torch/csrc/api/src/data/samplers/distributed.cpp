@@ -8,9 +8,7 @@
 #include <random>
 #include <vector>
 
-namespace torch {
-namespace data {
-namespace samplers {
+namespace torch::data::samplers {
 
 DistributedRandomSampler::DistributedRandomSampler(
     size_t size,
@@ -22,13 +20,13 @@ DistributedRandomSampler::DistributedRandomSampler(
       end_index_(0),
       sample_index_(0) {
   // shuffle first time.
-  reset(size_);
+  DistributedRandomSampler::reset(size_);
 }
 
 std::optional<std::vector<size_t>> DistributedRandomSampler::next(
     size_t batch_size) {
   if (sample_index_ == end_index_) {
-    return nullopt;
+    return std::nullopt;
   }
 
   size_t end = sample_index_ + batch_size;
@@ -37,7 +35,9 @@ std::optional<std::vector<size_t>> DistributedRandomSampler::next(
   }
 
   auto iter = all_indices_.begin();
-  std::vector<size_t> res(iter + sample_index_, iter + end);
+  std::vector<size_t> res(
+      iter + static_cast<std::ptrdiff_t>(sample_index_),
+      iter + static_cast<std::ptrdiff_t>(end));
   sample_index_ = end;
   return res;
 }
@@ -109,7 +109,7 @@ DistributedSequentialSampler::DistributedSequentialSampler(
 std::optional<std::vector<size_t>> DistributedSequentialSampler::next(
     size_t batch_size) {
   if (sample_index_ == end_index_) {
-    return nullopt;
+    return std::nullopt;
   }
 
   size_t end = sample_index_ + batch_size;
@@ -162,6 +162,4 @@ size_t DistributedSequentialSampler::index() const noexcept {
   return sample_index_;
 }
 
-} // namespace samplers
-} // namespace data
-} // namespace torch
+} // namespace torch::data::samplers

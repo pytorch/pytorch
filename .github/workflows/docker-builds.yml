@@ -31,6 +31,7 @@ permissions: read-all
 
 jobs:
   get-label-type:
+    if: github.repository_owner == 'pytorch'
     name: get-label-type
     uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
     with:
@@ -61,7 +62,6 @@ jobs:
           pytorch-linux-focal-rocm-n-1-py3,
           pytorch-linux-focal-rocm-n-py3,
           pytorch-linux-jammy-cuda11.8-cudnn9-py3.9-clang12,
-          pytorch-linux-focal-py3-clang9-android-ndk-r21e,
           pytorch-linux-jammy-py3.9-gcc11,
           pytorch-linux-jammy-py3.9-gcc11-inductor-benchmarks,
           pytorch-linux-jammy-py3.12-halide,
@@ -71,8 +71,9 @@ jobs:
           pytorch-linux-focal-py3-clang10-onnx,
           pytorch-linux-focal-linter,
           pytorch-linux-jammy-cuda11.8-cudnn9-py3.9-linter,
-          pytorch-linux-jammy-py3-clang12-executorch
-          ]
+          pytorch-linux-jammy-py3-clang12-executorch,
+          pytorch-linux-jammy-py3.12-triton-cpu
+        ]
         include:
           - docker-image-name: pytorch-linux-jammy-aarch64-py3.10-gcc11
             runner: linux.arm64.2xlarge
@@ -123,7 +124,7 @@ jobs:
           IMAGE_NAME: ${{ matrix.docker-image-name }}
         with:
           shell: bash
-          timeout_minutes: 15
+          timeout_minutes: 30
           max_attempts: 5
           retry_wait_seconds: 90
           command: |

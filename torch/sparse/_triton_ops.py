@@ -44,8 +44,8 @@ def check_mm_compatible_shapes(f_name, lhs, rhs):
         f"but got lhs.dim() == {lhs.dim()} and rhs.dim() == {rhs.dim()}.",
     )
 
-    m, kl = lhs.shape[-2:]
-    kr, n = rhs.shape[-2:]
+    _m, kl = lhs.shape[-2:]
+    kr, _n = rhs.shape[-2:]
 
     check(
         kl == kr,
@@ -360,13 +360,13 @@ def scatter_mm(blocks, others, indices_data, *, accumulators=None):
     indices_format = indices_data[0]
 
     assert blocks.ndim == 3
-    P, Ms, Ks = blocks.shape
+    _P, Ms, Ks = blocks.shape
 
     if indices_format == "scatter_mm":
         c_offsets, pq = indices_data[1:]
 
         assert others.ndim == 3
-        Q, Ks_, Ns = others.shape
+        _Q, Ks_, Ns = others.shape
         assert Ks == Ks_
 
         if accumulators is None:
@@ -749,6 +749,7 @@ def bsr_dense_addmm_meta(
     num_stages=None,
     sparsity=None,
     dtype=None,
+    out_dtype=None,
     _version=0,
     **extra,
 ):
@@ -757,15 +758,31 @@ def bsr_dense_addmm_meta(
     # bsr_dense_addmm_meta functionality.
     if dtype is None:
         dtype = torch.float16
+    if out_dtype is None:
+        out_dtype = dtype
     if sparsity is None:
         sparsity = 0.5
     if {SPLIT_N, num_warps, num_stages, GROUP_SIZE_ROW} == {None}:
         device_name = torch.cuda.get_device_name()
         key = (M, K, N, Ms, Ks, beta == 0, beta == 1, alpha == 1)
+        if dtype is out_dtype:
+            version_dtype = dtype
+        else:
+            version_dtype = dtype, out_dtype
         meta = get_meta(
-            "bsr_dense_addmm", key, device_name, version=(_version, dtype, sparsity)
+            "bsr_dense_addmm",
+            key,
+            device_name,
+            version=(_version, version_dtype, sparsity),
         )
         if meta is None and sparsity != 0.5:
+            meta = get_meta(
+                "bsr_dense_addmm",
+                key,
+                device_name,
+                version=(_version, version_dtype, 0.5),
+            )
+        if meta is None and dtype is not out_dtype:
             meta = get_meta(
                 "bsr_dense_addmm", key, device_name, version=(_version, dtype, 0.5)
             )
@@ -775,8 +792,15 @@ def bsr_dense_addmm_meta(
                 "bsr_dense_addmm",
                 (*key[:2], "*", *key[3:]),
                 device_name,
-                version=(_version, dtype, 0.5),
+                version=(_version, version_dtype, 0.5),
             )
+            if matching_meta is None and dtype is not out_dtype:
+                matching_meta = get_meta(
+                    "bsr_dense_addmm",
+                    (*key[:2], "*", *key[3:]),
+                    device_name,
+                    version=(_version, dtype, 0.5),
+                )
             for mkey in sorted(matching_meta or {}):
                 meta_ = matching_meta[mkey]
                 n = mkey[2]
@@ -794,7 +818,7 @@ def bsr_dense_addmm_meta(
             # message
             warn_once(
                 "bsr_dense_addmm uses non-optimal triton kernel parameters"
-                f" for {M=} {K=} {N=} {Ms=}, {Ks=} {beta=} {alpha=} {dtype=}"
+                f" for {M=} {K=} {N=} {Ms=}, {Ks=} {beta=} {alpha=} {dtype=} {out_dtype=}"
             )
 
     SPLIT_N = SPLIT_N or max(N // Ms, 1)
@@ -993,8 +1017,6 @@ def bsr_scatter_mm_indices_data(
     """
     assert bsr.dense_dim() == 0
     assert bsr.ndim == 2  # no batch dims
-    crow_indices = bsr.crow_indices()
-    col_indices = bsr.col_indices()
     blocksize = bsr.values().shape[-2:]
     M, K = bsr.shape
     Ms, Ks = blocksize
@@ -1213,7 +1235,8 @@ def bsr_dense_addmm(
             beta,
             alpha,
             sparsity=sparsity,
-            dtype=out.dtype,
+            dtype=dense.dtype,
+            out_dtype=out.dtype,
         )
     out_backup = out
 
@@ -1665,8 +1688,6 @@ if has_triton():
             return out
 
         blocksize = out.values().shape[-2:]
-        m = mat1.size(-2)
-        n = mat2.size(-1)
         k = mat1.size(-1)
 
         # NOTE: (m, 0) @ (0, n) == zeros(m, n)
@@ -1714,7 +1735,7 @@ if has_triton():
         meta: Optional[dict] = None,
     ):
         f_name = "bsr_dense_mm"
-        m, kl = bsr.shape[-2:]
+        m, _kl = bsr.shape[-2:]
         if not skip_checks:
             check_bsr_layout(f_name, bsr)
             check_device(f_name, bsr, dense.device)
@@ -1729,7 +1750,7 @@ if has_triton():
                 f"{f_name}(): dense.size(-1) == {n} should be divisible by 16",
             )
         else:
-            kr, n = dense.shape[-2:]
+            _kr, n = dense.shape[-2:]
 
         original_batch_dims_broadcasted = broadcast_batch_dims(f_name, bsr, dense)
 
@@ -1993,7 +2014,6 @@ if has_triton():
         allow_tf32: tl.constexpr,
     ):
         Ms = M // TILE_M
-        Ns = N // TILE_N
 
         pid_t = tl.program_id(axis=0)
 
@@ -2044,9 +2064,8 @@ if has_triton():
         pq_indices: torch.Tensor,
         accumulators: torch.Tensor,
     ):
-        P, M, K = blocks.shape
-        Q, _, N = others.shape
-        R, _, _ = accumulators.shape
+        _P, M, K = blocks.shape
+        _Q, _, N = others.shape
 
         meta = dict(
             TILE_M=max(16, M // 4), TILE_N=max(16, N // 4), num_stages=1, num_warps=2
@@ -2218,9 +2237,9 @@ if has_triton():
         force_contiguous: bool = True,
     ):
         SPLIT_N = meta["SPLIT_N"]
-        P, Ms, Ks = blocks.shape
-        B, K_, N = others.shape
-        B_, M, N_ = accumulators.shape
+        _P, Ms, Ks = blocks.shape
+        B, _K, N = others.shape
+        B_, _M, N_ = accumulators.shape
         assert N_ == N
         Ns = N // SPLIT_N
         assert B_ == B

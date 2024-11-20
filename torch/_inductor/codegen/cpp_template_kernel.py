@@ -216,7 +216,7 @@ class CppTemplateKernel(CppKernel):
             for i, sz in enumerate(var_sizes[0])
         }
         if not offsets:
-            offsets = [sympy.Integer(0)] * len(var_sizes[0])
+            offsets = [sympy.S.Zero] * len(var_sizes[0])
         if not reindexers:
             reindexers = [None] * len(nodes)
         assert len(offsets) == len(var_sizes[0])
@@ -348,7 +348,7 @@ class CppTemplateCaller(ir.ChoiceCaller):
             Dict[str, Union[ir.PrimitiveInfoType, List[ir.PrimitiveInfoType]]]
         ] = None,
     ):
-        super().__init__(name, input_nodes, layout)
+        super().__init__(name, input_nodes, layout, description="")
         self.category = category
         self.make_kernel_render = make_kernel_render
         self.bmreq = bmreq
