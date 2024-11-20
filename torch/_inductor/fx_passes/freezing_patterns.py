@@ -115,7 +115,6 @@ def register_binary_folding_pattern(pattern, extra_check=_return_true):
 
 @functools.lru_cache(None)
 def addmm_patterns_init():
-    # workaround https://github.com/pytorch/pytorch/issues/97894
     device = next(
         (gpu for gpu in GPU_TYPES if getattr(torch, gpu).is_available()), "cpu"
     )
