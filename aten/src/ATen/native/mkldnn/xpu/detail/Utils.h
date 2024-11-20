@@ -48,6 +48,8 @@ bool is_broadcast_from_other_to_self(
 
 at::MemoryFormat get_cl_tag_by_ndim(const int64_t ndim);
 
+void apply_tf32_if_allowed(dnnl::primitive_attr& primitive_attr);
+
 bool binary_valid(
     const at::Tensor& self,
     const at::Tensor& other,
@@ -80,7 +82,7 @@ dnnl::memory::dims compatible_dilation(Vec&& dilation) {
     *it -= 1;
   }
   return ret;
-}
+};
 
 template <typename T>
 dnnl::memory dnnl_memory_from_host_scalar(
@@ -94,6 +96,6 @@ dnnl::memory dnnl_memory_from_host_scalar(
   dnnl::memory::desc md = get_onednn_md(holder);
   dnnl::memory mem = make_onednn_memory(md, engine, holder.data_ptr());
   return mem;
-}
+};
 
 } // namespace at::native::onednn

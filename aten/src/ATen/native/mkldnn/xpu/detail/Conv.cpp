@@ -120,11 +120,7 @@ sycl::event convolution(
   }
 #endif
 
-  auto& ctx = at::globalContext();
-  bool allow_tf32 = ctx.allowTF32Onednn();
-  if (allow_tf32) {
-    pattr.set_fpmath_mode(dnnl::fpmath_mode::tf32);
-  }
+  at::native::onednn::apply_tf32_if_allowed(pattr);
 
   auto conv_fwd_pd = dnnl::convolution_forward::primitive_desc(
       engine,
