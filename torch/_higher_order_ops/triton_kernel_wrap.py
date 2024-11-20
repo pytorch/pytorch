@@ -1095,11 +1095,11 @@ class TritonHOPifier:
                     # as they require the ability to execute code at runtime (AOTI can't support this)
                     (
                         hasattr(kernel, "user_defined_pre_hook")
-                        and kernel.user_defined_pre_hook is not None
+                        and kernel.user_defined_pre_hook is not False
                     )
                     or (
                         hasattr(kernel, "user_defined_post_hook")
-                        and kernel.user_defined_post_hook is not None
+                        and kernel.user_defined_post_hook is not False
                     )
                     or (
                         # Check Config passed to autotuner in configs
