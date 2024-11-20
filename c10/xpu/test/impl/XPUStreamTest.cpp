@@ -77,9 +77,13 @@ TEST(XPUStreamTest, StreamBehavior) {
 
   stream = c10::xpu::getStreamFromPool(-1);
   EXPECT_EQ(stream.priority(), -1);
+  stream = c10::xpu::getStreamFromPool(-10);
+  EXPECT_EQ(stream.priority(), -1);
   stream = c10::xpu::getStreamFromPool(0);
   EXPECT_EQ(stream.priority(), 0);
   stream = c10::xpu::getStreamFromPool(1);
+  EXPECT_EQ(stream.priority(), 1);
+  stream = c10::xpu::getStreamFromPool(10);
   EXPECT_EQ(stream.priority(), 1);
 
   if (c10::xpu::device_count() <= 1) {
