@@ -4,7 +4,7 @@ Python polyfills for torch.utils.pytree
 
 from __future__ import annotations
 
-from typing import Any, Callable, Iterable, Literal, TYPE_CHECKING, TypeVar
+from typing import Any, Callable, Iterable, TYPE_CHECKING, TypeVar
 
 import torch.utils._pytree as python_pytree
 
@@ -26,8 +26,8 @@ if python_pytree._cxx_pytree_exists:
 
     import torch.utils._cxx_pytree as cxx_pytree
 
-    KT = TypeVar("KT")
-    VT = TypeVar("VT")
+    _KT = TypeVar("_KT")
+    _VT = TypeVar("_VT")
 
     @substitute_in_graph(
         optree._C.is_dict_insertion_ordered,
@@ -41,10 +41,10 @@ if python_pytree._cxx_pytree_exists:
             "because the original function will be called in the constant fold path."
         )
 
-    @substitute_in_graph(optree.registry._dict_flatten, can_constant_fold_through=True)
+    @substitute_in_graph(optree.registry._dict_flatten, can_constant_fold_through=True)  # type: ignore[arg-type]
     def _dict_flatten(
-        dct: dict[KT, VT], /
-    ) -> tuple[tuple[VT, ...], list[KT], tuple[KT, ...]]:
+        dct: dict[_KT, _VT], /
+    ) -> tuple[tuple[_VT, ...], list[_KT], tuple[_KT, ...]]:
         sorted_keys = optree.utils.total_order_sorted(dct)
         values = tuple(dct[k] for k in sorted_keys)
         return values, sorted_keys, tuple(sorted_keys)
