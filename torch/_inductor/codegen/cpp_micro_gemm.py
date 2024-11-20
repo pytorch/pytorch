@@ -543,12 +543,12 @@ class CppMicroGemmAMX(CppMicroGemm):
         {%- if (block_n % 32) != 0 %}
             auto b_int8_tail = at::vec::Vectorized<int8_t>::loadu(
                 base_addr + idx_q + {{block_n - (block_n % 32)}},
-                static_cast<int64_t>(block_n % 32)
+                static_cast<int64_t>({{block_n % 32}})
             );
             auto b_bf16_tail = at::vec::convert<{{input_t}}>(b_int8_tail);
             b_bf16_tail.store(
                 dequantized_B_buf + idx_dq + {{block_n - (block_n % 32)}},
-                static_cast<int64_t>(block_n % 32)
+                static_cast<int64_t>({{block_n % 32}})
             );
         {%- endif %}
         }
