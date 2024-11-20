@@ -1,5 +1,5 @@
 
-#include <torch/csrc/inductor/aoti_torch/c/shim.h>
+#include <torch/csrc/inductor/aoti_torch/c/shim_xpu.h>
 #include <torch/csrc/inductor/aoti_torch/utils.h>
 
 #include <c10/core/DeviceGuard.h>
