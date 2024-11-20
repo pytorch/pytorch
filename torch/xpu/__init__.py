@@ -508,6 +508,7 @@ from .random import (
     seed_all,
     set_rng_state,
     set_rng_state_all,
+    rng_supported_mesh,
 )
 
 
