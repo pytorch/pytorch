@@ -17,17 +17,20 @@ AOTIModelContainerRunnerXpu::AOTIModelContainerRunnerXpu(
 AOTIModelContainerRunnerXpu::~AOTIModelContainerRunnerXpu() = default;
 
 std::vector<at::Tensor> AOTIModelContainerRunnerXpu::run(
-    const std::vector<at::Tensor>& inputs) {
-  at::xpu::XPUStream xpu_stream = c10::xpu::getCurrentXPUStream();
-  return AOTIModelContainerRunner::run_impl(
-      inputs, reinterpret_cast<AOTInductorStreamHandle>(&(xpu_stream.queue())));
+    const std::vector<at::Tensor>& inputs,
+    void* stream_handle) {
+  if (stream_handle == nullptr) {
+    at::xpu::XPUStream xpu_stream = c10::xpu::getCurrentXPUStream();
+    stream_handle = reinterpret_cast<void*>(&(xpu_stream.queue()));
+  }
+  return AOTIModelContainerRunner::run(inputs, stream_handle);
 }
 
 std::vector<at::Tensor> AOTIModelContainerRunnerXpu::run_with_xpu_stream(
     std::vector<at::Tensor>& inputs,
     at::xpu::XPUStream xpu_stream) {
-  return AOTIModelContainerRunner::run_impl(
-      inputs, reinterpret_cast<AOTInductorStreamHandle>(&(xpu_stream.queue())));
+  return AOTIModelContainerRunner::run(
+      inputs, reinterpret_cast<void*>(&(xpu_stream.queue())));
 }
 
 namespace {

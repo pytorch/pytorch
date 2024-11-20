@@ -24,11 +24,9 @@ class TORCH_API AOTIModelContainerRunner {
       delete;
   virtual ~AOTIModelContainerRunner();
 
-  virtual std::vector<at::Tensor> run(const std::vector<at::Tensor>& inputs);
-
-  std::vector<at::Tensor> run_impl(
+  virtual std::vector<at::Tensor> run(
       const std::vector<at::Tensor>& inputs,
-      AOTInductorStreamHandle stream_handle = nullptr);
+      void* stream_handle = nullptr);
 
   std::unordered_map<std::string, std::string> getConstantNamesToOriginalFQNs()
       const;
