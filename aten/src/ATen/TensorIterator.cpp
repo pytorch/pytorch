@@ -1617,11 +1617,14 @@ void TensorIteratorBase::set_output_raw_strided(int64_t output_idx, IntArrayRef 
       TORCH_INTERNAL_ASSERT(!op.tensor_base().is_same(t));
       OptionalTensorRef tensor(op.tensor());
       at::native::resize_output(*tensor, sizes);
+      auto const memory_format_opt = options.memory_format_opt();
       if (!strides.empty()) {
-        TORCH_INTERNAL_ASSERT(!options.memory_format_opt().has_value());
+        TORCH_INTERNAL_ASSERT(!memory_format_opt.has_value());
         tensor->as_strided_(sizes, strides);
-      } else if (options.memory_format_opt().has_value()) {
-        tensor->unsafeGetTensorImpl()->empty_tensor_restride(*options.memory_format_opt());
+      } else{
+         if (memory_format_opt.has_value()) {
+          tensor->unsafeGetTensorImpl()->empty_tensor_restride(*memory_format_opt);
+        }
       }
     }
   }
