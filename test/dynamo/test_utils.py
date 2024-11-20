@@ -205,7 +205,7 @@ class TestDynamoTimed(TestCase):
         # First event is for the forward. Formatting makes reading diffs
         # much easier.
         raw = dataclasses.asdict(compilation_events[0])
-        del raw['feature_usage']
+        del raw["feature_usage"]
         self.assertExpectedInline(
             pprint.pformat(raw),
             """\
@@ -271,7 +271,7 @@ class TestDynamoTimed(TestCase):
 
         # Second event is for the backward
         raw = dataclasses.asdict(compilation_events[1])
-        del raw['feature_usage']
+        del raw["feature_usage"]
         self.assertExpectedInline(
             pprint.pformat(raw),
             """\
