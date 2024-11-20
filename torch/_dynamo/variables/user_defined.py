@@ -776,14 +776,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             ):
                 assert self.source  # OrderedDict, dict subtypes must always have source
                 assert not (args or kwargs)
-                items = []
                 keys = self.call_method(tx, "keys", [], {})
-                for key in keys.force_unpack_var_sequence(tx):
-                    items.append(
-                        TupleVariable(
-                            [key, self.odict_getitem(tx, key)],
-                        )
+                items = [
+                    TupleVariable(
+                        [key, self.odict_getitem(tx, key)],
                     )
+                    for key in keys.force_unpack_var_sequence(tx)
+                ]
                 tx.output.guard_on_key_order.add(self.source.name())
                 return TupleVariable(items)
 

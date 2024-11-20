@@ -1657,15 +1657,14 @@ class GraphLowering(torch.fx.Interpreter):
             new_unbacked_defs |= op.get_unbacked_symbol_defs()
 
         def format_new_defs() -> str:
-            r = []
-            for buf in self.buffers[buffer_watermark:]:
-                r.append(
-                    f"unbacked_symbol_defs={buf.get_unbacked_symbol_defs()} in:\n{buf}\n"
-                )
-            for op in self.operations[operation_watermark:]:
-                r.append(
-                    f"unbacked_symbol_defs={op.get_unbacked_symbol_defs()} in:\n{op}\n"
-                )
+            r = [
+                f"unbacked_symbol_defs={buf.get_unbacked_symbol_defs()} in:\n{buf}\n"
+                for buf in self.buffers[buffer_watermark:]
+            ]
+            r.extend(
+                f"unbacked_symbol_defs={op.get_unbacked_symbol_defs()} in:\n{op}\n"
+                for op in self.operations[operation_watermark:]
+            )
             return "***\n".join(r)
 
         if n.op != "placeholder":
