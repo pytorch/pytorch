@@ -245,7 +245,7 @@ class MemoryDep(Dep):
 
         last_sym = self.var_names[-1]
         for term in terms:
-            if term is last_sym:
+            if term == last_sym:
                 return True
 
             # Having a >1 stride for the last dimension is bad for perf
@@ -253,7 +253,7 @@ class MemoryDep(Dep):
             if (
                 isinstance(term, sympy.Mul)
                 and len(term.args) == 2
-                and term.args[1] is last_sym
+                and term.args[1] == last_sym
                 and isinstance(term.args[0], (int, sympy.Integer))
                 and term.args[0] > 1
             ):

@@ -4066,6 +4066,46 @@ class AOTInductorTestsTemplate:
         self.check_model(sin_triton, none_inputs)
         self.check_model(sin_triton, not_none_inputs)
 
+    def test_issue_140766(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mlp = torch.nn.Sequential(
+                    torch.nn.Linear(128, 512),
+                    torch.nn.ReLU(),
+                    torch.nn.Linear(512, 128),
+                )
+                self.norm = torch.nn.LayerNorm(128)
+                self.attn = torch.nn.functional.scaled_dot_product_attention
+
+            def forward(self, x):
+                # [2, 128, 4096]
+                x = x.transpose(1, 2)
+                # [2, 4096, 128]
+                for _ in range(2):
+                    x = self.forward_block(x)
+                return x
+
+            def forward_block(self, x):
+                # x: B, H*W, C
+                B = x.shape[0]
+                H, W, C = 64, 64, 128
+                shortcut = x
+                x = self.norm(x)
+                x = x.reshape(B, H, W, C)
+                # B, H, W, C
+                x = self.attn(x, x, x)
+                x = x.reshape(B, H // 8, W // 8, 8, 8, -1)
+                x = x.transpose(2, 3).reshape(B, H * W, -1)
+
+                x = shortcut + x
+                x = x + self.mlp(self.norm(x))
+                return x
+
+        bs = torch.export.Dim("bs", max=12)
+        example_inputs = (torch.randn(2, 128, 4096, device=self.device),)
+        self.check_model(Model(), example_inputs, dynamic_shapes={"x": {0: bs}})
+
 
 class AOTInductorLoggingTest(LoggingTestCase):
     @make_logging_test(dynamic=logging.DEBUG)
