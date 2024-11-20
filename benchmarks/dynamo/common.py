@@ -420,6 +420,10 @@ def output_json(filename, headers, row):
             if header in ("dev", "name", "batch_size"):
                 continue
 
+            # Make sure that the record is valid
+            if not current_name:
+                continue
+
             record = {
                 "benchmark": {
                     "name": "TorchInductor",
