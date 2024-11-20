@@ -9561,7 +9561,7 @@ class CommonTemplate:
 
         f_compiled = torch.compile(f)
         x_ref = torch.rand(2, 3, 128, 128, device=GPU_TYPE)
-        x_test = x_ref.clone().detach()
+        x_test = x_ref.detach().clone()
         with torch.no_grad():
             out_ref = f(x_ref)
             out_test = f_compiled(x_test)
@@ -10878,7 +10878,7 @@ class CommonTemplate:
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
     @torch._inductor.config.patch(implicit_fallbacks=True)
     def test_custom_op_unbacked_symints(self):
-        @torch.library.custom_op("mylib::foo", mutates_args={})
+        @torch.library.custom_op("test_unbacked_symints::foo", mutates_args={})
         def foo(x: torch.Tensor) -> torch.Tensor:
             return x.clone()
 
@@ -10889,7 +10889,7 @@ class CommonTemplate:
             u2 = torch.library.get_ctx().new_dynamic_size()
             return x.new_empty(u0, u1, u2)
 
-        @torch.library.custom_op("mylib::bar", mutates_args={})
+        @torch.library.custom_op("test_unbacked_symints::bar", mutates_args={})
         def bar(x: torch.Tensor) -> torch.Tensor:
             return x.clone()
 
@@ -12022,7 +12022,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
 
             fn_opt = torch._dynamo.optimize("inductor")(fn)
             inp = torch.ones(2, 2, requires_grad=True, device=GPU_TYPE)
-            inp_ref = inp.clone().detach().requires_grad_(True)
+            inp_ref = inp.detach().clone().requires_grad_(True)
             out_ref = fn(inp_ref)
             out = fn_opt(inp)
             out_ref[0].sum().backward()
