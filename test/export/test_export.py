@@ -9120,6 +9120,36 @@ def forward(self, x):
             }
             _load_dynamic_shapes(spec, from_dict=True)
 
+    # Previously export run_decomp would dispatch
+    # sdpa to math backend which doesn't guarantee
+    # to return contiguous tensor. As a result, downstream
+    # view op would fail. In eager (or normal export), sdpa
+    # decomps to flash_attention which has correct handling
+    # for non-contiguous output. Since in normal export, we
+    # dispatch to flash_attention, we also force run_decomp
+    # to follow flash_attention.
+    def test_attention(self):
+        class Foo(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.embed_dim = 768
+                self.num_heads = 12
+                self.dropout = 0.0
+                self.batch_first = True
+                self.self_attention = torch.nn.MultiheadAttention(
+                    self.embed_dim,
+                    self.num_heads,
+                    dropout=self.dropout,
+                    batch_first=self.batch_first,
+                )
+
+            def forward(self, input1: torch.Tensor):
+                x, _ = self.self_attention(input1, input1, input1, need_weights=False)
+                return x
+
+        inps = (torch.randn(1, 224, 768, device="cpu"),)
+        export(Foo(), inps)
+
     @testing.expectedFailureSerDer  # TODO(pianpwk): PowByNatural valuerange deserialization
     @testing.expectedFailureCppSerDes  # TODO(pianpwk): PowByNatural valuerange deserialization
     @testing.expectedFailureSerDerNonStrict
