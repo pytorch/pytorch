@@ -17,7 +17,10 @@ __all__ = [
     "seed",
     "seed_all",
     "initial_seed",
+    "rng_supported_mesh",
 ]
+
+rng_supported_mesh = True
 
 
 def get_rng_state(device: Union[int, str, torch.device] = "cuda") -> Tensor:
