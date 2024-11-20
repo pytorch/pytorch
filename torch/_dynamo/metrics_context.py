@@ -75,6 +75,9 @@ class MetricsContext:
         """
         Treats a give metric as a dictionary and set the k and value within it.
         Note that the metric must be a dictionary or not present.
+
+        We allow this to be called multiple times (i.e. for features, it's not uncommon
+        for them to be used multiple times within a single compilation).
         """
         if self._level == 0:
             raise RuntimeError(f"Cannot set {metric} outside of a MetricsContext")
