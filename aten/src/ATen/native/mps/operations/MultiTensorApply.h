@@ -1,7 +1,7 @@
 #pragma once
 #include <ATen/core/Tensor.h>
 #include <ATen/mps/MPSProfiler.h>
-#include <ATen/native/mps/operations/FusedOptimizerOps.h>
+#include <ATen/native/mps/OperationUtils.h>
 
 static_assert(sizeof(bool) == 1);
 
@@ -116,6 +116,7 @@ struct FusedSgdEncodingFunctor<false> {
   }
 };
 
+std::pair<id<MTLComputePipelineState>, id<MTLFunction>> getFusedAdamCPLState(const std::string& fname);
 template <int depth, uint32_t kThreadGroupSize, typename encoder_func_t, typename... ArgTypes>
 static void multi_tensor_apply_for_fused_optimizer(const std::string& kernel_name,
                                                    std::vector<std::vector<at::Tensor>>& tensor_lists,
@@ -151,7 +152,7 @@ static void multi_tensor_apply_for_fused_optimizer(const std::string& kernel_nam
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
-      auto [fusedOptimizerPSO, fusedOptimizerFunc] = getCPLState(kernel_name);
+      auto [fusedOptimizerPSO, fusedOptimizerFunc] = getFusedAdamCPLState(kernel_name);
 
       // this function call is a no-op if MPS Profiler is not enabled
       getMPSProfiler().beginProfileKernel(fusedOptimizerPSO, kernel_name, {tensor_lists[0]});
