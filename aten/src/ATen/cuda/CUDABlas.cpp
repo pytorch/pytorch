@@ -1448,10 +1448,16 @@ void scaled_gemm(
   if (use_rowwise) {
     scaleA = HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER_VEC_EXT;
     scaleB = HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER_VEC_EXT;
+    // swapped
+    computeDesc.setAttribute(scaleA, mat2_scale_ptr);
+    computeDesc.setAttribute(scaleB, mat1_scale_ptr);
   }
+  else
 #endif
-  computeDesc.setAttribute(scaleA, mat1_scale_ptr);
-  computeDesc.setAttribute(scaleB, mat2_scale_ptr);
+  {
+    computeDesc.setAttribute(scaleA, mat1_scale_ptr);
+    computeDesc.setAttribute(scaleB, mat2_scale_ptr);
+  }
   if (result_scale_ptr != nullptr) {
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_D_SCALE_POINTER, result_scale_ptr);
   }

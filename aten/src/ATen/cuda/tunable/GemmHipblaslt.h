@@ -179,22 +179,22 @@ float GetBetaFromParams(const ScaledGemmParams<T>* params) {
 }
 
 template <typename T>
-const bool GetUseRowwiseFromParams(const GemmParams<T>* params) {
+bool GetUseRowwiseFromParams(const GemmParams<T>* params) {
   return false;
 }
 
 template <typename T>
-const bool GetUseRowwiseFromParams(const GemmAndBiasParams<T>* params) {
+bool GetUseRowwiseFromParams(const GemmAndBiasParams<T>* params) {
   return false;
 }
 
 template <typename T>
-const bool GetUseRowwiseFromParams(const GemmStridedBatchedParams<T>* params) {
+bool GetUseRowwiseFromParams(const GemmStridedBatchedParams<T>* params) {
   return false;
 }
 
 template <typename T>
-const bool GetUseRowwiseFromParams(const ScaledGemmParams<T>* params) {
+bool GetUseRowwiseFromParams(const ScaledGemmParams<T>* params) {
   return params->use_rowwise;
 }
 
@@ -480,8 +480,9 @@ class HipblasltGemmOp : public Callable<ParamsT> {
       if (mat1_scale_ptr && mat2_scale_ptr) {
 #ifdef HIPBLASLT_VEC_EXT
         if (GetUseRowwiseFromParams<CT>(params)) {
-          matmul.setAttribute(HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER_VEC_EXT, mat1_scale_ptr);
-          matmul.setAttribute(HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER_VEC_EXT, mat2_scale_ptr);
+          // swapped
+          matmul.setAttribute(HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER_VEC_EXT, mat2_scale_ptr);
+          matmul.setAttribute(HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER_VEC_EXT, mat1_scale_ptr);
         }
         else
 #endif
