@@ -6,6 +6,7 @@
 #include <c10/util/string_view.h>
 
 #include <cstddef>
+#include <optional>
 #include <ostream>
 #include <sstream>
 #include <string>
@@ -56,6 +57,14 @@ inline std::ostream& _str(std::ostream& ss, const T& t) {
   return ss;
 }
 
+template <typename T>
+inline std::ostream& _str(std::ostream& ss, const std::optional<T>& t) {
+  if (t.has_value()) {
+    return _str(ss, t.value());
+  }
+  ss << "std::nullopt";
+  return ss;
+}
 // Overloads of _str for wide types; forces narrowing.
 C10_API std::ostream& _str(std::ostream& ss, const wchar_t* wCStr);
 C10_API std::ostream& _str(std::ostream& ss, const wchar_t& wChar);
