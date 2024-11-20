@@ -899,23 +899,13 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                 # wrap it with dtypeview
                 final_tmp_name, tmp_call_strs = create_dtypeview_call(reinterpret_call)
                 call_strs.extend(tmp_call_strs)
-            elif (
-                self.can_stack_allocate_buffer(data)
-                and self.is_statically_known_list_of_ints(size)
-                and self.is_statically_known_list_of_ints(stride)
-                and ir.is_contiguous_strides_for_shape(stride, size)
-            ):
+            else:
                 # No need to wrap with RAIIAtenTensorHandle when using stack allocation.
                 call_strs.append(
                     f"auto wrap_with_raii_handle_if_needed_{final_tmp_name}"
                     f" = wrap_with_raii_handle_if_needed({final_tmp_name});"
                 )
                 final_tmp_name = f"wrap_with_raii_handle_if_needed_{final_tmp_name}"
-            else:
-                call_strs.append(
-                    f"RAIIAtenTensorHandle {final_tmp_name}_raii({final_tmp_name});"
-                )
-                final_tmp_name = f"{final_tmp_name}_raii"
 
         for line in call_strs:
             writeline(line)

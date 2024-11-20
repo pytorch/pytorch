@@ -653,14 +653,17 @@ class _SymmetricMemory:
         stride: torch.types._size,
         dtype: torch.dtype,
         device: torch.device,
-        group_name: str,
+        group_name: str | None = None,
+        alloc_id: int | None = None,
     ) -> torch.Tensor: ...
     @property
     def rank(self) -> int: ...
     @property
     def world_size(self) -> int: ...
     @staticmethod
-    def rendezvous(tensor: torch.Tensor) -> _SymmetricMemory: ...
+    def rendezvous(
+        tensor: torch.Tensor, group_name: str | None = None
+    ) -> _SymmetricMemory: ...
     def get_buffer(
         self,
         rank: int,
