@@ -1202,6 +1202,31 @@ class DecompOneOffTests(TestCase):
 
             self.assertTrue(torch.allclose(actual_res, eager_res, atol=atol, rtol=rtol))
 
+    @onlyCPU
+    def test_native_layer_norm_cpu_decomp(self, device):
+        def f(x, w, b):
+            return torch.ops.aten.native_layer_norm.default(x, [1, 2, 3], w, b, eps=0.5)
+
+        x = torch.randn(1, 2, 3, dtype=torch.bfloat16, device="cpu")
+        w = torch.randn(1, 2, 3, dtype=torch.bfloat16, requires_grad=True, device="cpu")
+        b = torch.randn(1, 2, 3, dtype=torch.bfloat16, requires_grad=True, device="cpu")
+        out_ref = f(x, w, b)
+
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        with enable_python_dispatcher(), FakeTensorMode():
+            x = torch.randn(1, 2, 3, dtype=torch.bfloat16, device="cpu")
+            w = torch.randn(
+                1, 2, 3, dtype=torch.bfloat16, requires_grad=True, device="cpu"
+            )
+            b = torch.randn(
+                1, 2, 3, dtype=torch.bfloat16, requires_grad=True, device="cpu"
+            )
+            out = f(x, w, b)
+
+        for o_ref, o in zip(out_ref, out):
+            self.assertEqual(o_ref.dtype, o.dtype)
+
 
 instantiate_device_type_tests(DecompOneOffTests, globals())
 

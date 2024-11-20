@@ -727,8 +727,9 @@ bool isFunctionalTensor(const c10::List<::std::optional<Tensor>>& t_list) {
   if (t_list.empty()) return false;
   auto functional_count = 0;
   for (const auto i : c10::irange(t_list.size())) {
-    if (!t_list[i].has_value() || !t_list[i]->defined()) continue;
-    if (isFunctionalTensor(t_list[i])) {
+    auto const & e= t_list[i];
+    if (!e.has_value() || !e->defined()) continue;
+    if (isFunctionalTensor(e)) {
       ++functional_count;
     }
   }
