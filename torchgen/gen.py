@@ -1646,7 +1646,7 @@ TORCH_LIBRARY_IMPL({namespace}, {dispatch_key}, m) {{
                     "dispatch_anonymous_definitions": anonymous_definitions[
                         kernel_namespace
                     ],
-                    "static_init_dispatch_registrations": "" 
+                    "static_init_dispatch_registrations": ""
                     if skip_dispatcher_op_registration
                     else registration_body,
                     "deferred_dispatch_registrations": "",
@@ -2321,7 +2321,7 @@ def gen_source_files(
             f"Register{dispatch_key}.cpp",
             "RegisterDispatchKey.cpp",
             lambda: {
-                "extra_cuda_headers": extra_cuda_headers 
+                "extra_cuda_headers": extra_cuda_headers
                 if is_cuda_dispatch_key(dispatch_key)
                 else "",
                 "external_backend_headers": "",
@@ -2513,7 +2513,7 @@ codegen to generate the correct cpp call for this op. Contact AOTInductor team f
             "aten_schema_registrations": []
             if skip_dispatcher_op_registration
             else aten_schema_registrations,
-            "schema_registrations": [] 
+            "schema_registrations": []
             if skip_dispatcher_op_registration
             else schema_registrations,
         },
