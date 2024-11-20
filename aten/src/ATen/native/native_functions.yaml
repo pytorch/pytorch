@@ -187,7 +187,7 @@
   dispatch:
     CPU: _functional_assert_async_msg_cpu
 
-- func: _assert_tensor_metadata(Tensor a, SymInt[]? size=None, SymInt[]? stride=None, ScalarType? dtype=None, Device? device=None, Layout? layout=None) -> ()
+- func: _assert_tensor_metadata(Tensor a, SymInt[]? size=None, SymInt[]? stride=None, ScalarType? dtype=None, *, Device? device=None, Layout? layout=None) -> ()
   dispatch:
     CPU, CUDA: _assert_tensor_metadata
     Meta: _assert_tensor_metadata_meta_symint
