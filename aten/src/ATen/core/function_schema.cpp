@@ -474,8 +474,8 @@ bool FunctionSchema::isForwardCompatibleWith(
 
   // Validate that all new arguments provided has a default value
   for (size_t i = old_out_start_idx; i < new_out_start_idx; ++i) {
-    auto const &default_v = arguments().at(i).default_value();
-    if (!default_v.has_value()) {
+    auto const &default_value = arguments().at(i).default_value();
+    if (!default_value.has_value()) {
       if (why_not) {
         why_not
             << "Function schema is not forward compatible since the new argument '"
@@ -486,7 +486,7 @@ bool FunctionSchema::isForwardCompatibleWith(
       return false;
     }
 
-    if (default_v->isList() || default_v->isGenericDict()) {
+    if (default_value->isList() || default_value->isGenericDict()) {
       if (why_not) {
         why_not
             << "Function schema is not forward compatible since the new argument '"
