@@ -536,7 +536,6 @@ static Tensor mps_convolution_backward_weights(IntArrayRef weight_size,
   bool is3DConv = input_t.dim() == 5;
   TORCH_CHECK(isFloatingType(grad_output_t.scalar_type()), "Convolution is supported only for Floating types");
   CheckedFrom c = "mps_convolution_backward_weights";
-  const bool supports_strided_api = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
 
   // For uniformity with everything else, although it seems grad_weight
   // would be unambiguous too.
