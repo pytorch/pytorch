@@ -149,6 +149,12 @@ _set_stance._dynamo_forbidden = True  # type: ignore[attr-defined]
 
 
 def _callback_from_stance(callback):
+    if _stance.stance == "force_eager":
+        set_feature_use("pt2_delay", True)
+        # disable
+        return None
+    set_feature_use("pt2_delay", False)
+
     if _stance.stance == "default":
         # force_backend
         if _stance.backend is not None and callback not in (False, None):
@@ -162,9 +168,6 @@ def _callback_from_stance(callback):
             )
 
         return callback
-    elif _stance.stance == "force_eager":
-        # disable
-        return None
     elif _stance.stance == "eager_on_recompile":
         # run mode
         return False
