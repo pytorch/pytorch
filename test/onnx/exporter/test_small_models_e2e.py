@@ -79,6 +79,8 @@ class DynamoExporterTest(common_utils.TestCase):
         onnx_model = onnx_program.model
         self.assertIn("If", [node.op_type for node in onnx_model.graph])
         onnx_testing.assert_onnx_program(onnx_program)
+        # Test different branches
+        onnx_testing.assert_onnx_program(onnx_program, args=(torch.tensor([-1, -2]),))
 
     def test_onnx_export_nested_control_flow_and_nested_weights(self):
         class Submodule(torch.nn.Module):
@@ -105,7 +107,7 @@ class DynamoExporterTest(common_utils.TestCase):
 
             def forward(self, x):
                 def true_fn(x):
-                    return self.submodule(x)
+                    return self.submodule(x - self.weight)
 
                 def false_fn(x):
                     return x - self.weight
@@ -120,6 +122,8 @@ class DynamoExporterTest(common_utils.TestCase):
             fallback=False,
         )
         onnx_testing.assert_onnx_program(onnx_program)
+        onnx_testing.assert_onnx_program(onnx_program, args=(torch.tensor([0, 0]),))
+        onnx_testing.assert_onnx_program(onnx_program, args=(torch.tensor([43, 43]),))
 
     # TODO(justinchuby): Test multi-output HOPs
 
