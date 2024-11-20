@@ -171,8 +171,7 @@ def get_plain_tensors(
             continue
 
         inner_keys, _ = curr.__tensor_flatten__()
-        for key in reversed(inner_keys):
-            todo.append(getattr(curr, key))
+        todo.extend(getattr(curr, key) for key in reversed(inner_keys))
 
     return out
 
@@ -1629,13 +1628,12 @@ class FakeTensorMode(TorchDispatchMode):
             )
 
         if isinstance(output, tuple):
-            output_infos = []
-            for out_elem in output:
-                output_infos.append(
-                    self._get_output_info_for_cache_entry(
-                        state, key, func, args, kwargs, out_elem
-                    )
+            output_infos = [
+                self._get_output_info_for_cache_entry(
+                    state, key, func, args, kwargs, out_elem
                 )
+                for out_elem in output
+            ]
             return _DispatchCacheEntry(
                 output_infos=tuple(output_infos), is_output_tuple=True
             )
@@ -1727,17 +1725,16 @@ class FakeTensorMode(TorchDispatchMode):
         """
 
         if entry.is_output_tuple:
-            outputs = []
-            for output_info in entry.output_infos:
-                outputs.append(
-                    self._get_output_tensor_from_cache_entry(
-                        state,
-                        output_info,
-                        key,
-                        func,
-                        args,
-                    )
+            outputs = [
+                self._get_output_tensor_from_cache_entry(
+                    state,
+                    output_info,
+                    key,
+                    func,
+                    args,
                 )
+                for output_info in entry.output_infos
+            ]
             return tuple(outputs)
         else:
             return self._get_output_tensor_from_cache_entry(
