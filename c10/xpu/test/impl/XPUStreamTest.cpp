@@ -243,7 +243,7 @@ TEST(XPUStreamTest, ExternalStream) {
        sycl::ext::oneapi::property::queue::priority_low()});
   c10::xpu::XPUStream ext_stream7 =
       c10::xpu::getStreamFromExternal(ext_queue3, 0);
-  EXPECT_EQ(ext_stream6.priority(), 1);
+  EXPECT_EQ(ext_stream7.priority(), 1);
 }
 
 TEST(XPUStreamTest, MultiDeviceExternalStream) {
