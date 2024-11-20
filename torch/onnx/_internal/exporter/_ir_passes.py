@@ -68,3 +68,8 @@ def add_opset_imports(model: ir.Model) -> None:
             function.opset_imports[domain] = _get_opset_version(
                 node, function.opset_imports
             )
+        for opset, version in function.opset_imports.items():
+            # Add all opsets used in the function to the model, because ONNX Runtime
+            # does not handle adding the opset imports to the model after inlining during inference.
+            # This should happen after all opsets are collected for the function from its nodes.
+            model.opset_imports[opset] = max(version, model.opset_imports.get(opset, 1))
