@@ -15,10 +15,7 @@ from torch.testing._internal.common_device_type import (
     toleranceOverride,
 )
 from torch.testing._internal.common_dtype import all_types_and, floating_types
-from torch.testing._internal.common_utils import (
-    TEST_SCIPY,
-    torch_to_numpy_dtype_dict,
-)
+from torch.testing._internal.common_utils import TEST_SCIPY, torch_to_numpy_dtype_dict
 from torch.testing._internal.opinfo.core import (
     BinaryUfuncInfo,
     DecorateInfo,
