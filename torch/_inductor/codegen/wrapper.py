@@ -2271,13 +2271,6 @@ class PythonWrapperCodegen(CodeGen):
         ):
             self.writeline(f"{self.declare}{inner_input} = {outer_input}{self.ending}")
 
-    def codegen_subgraph_suffix(self, subgraph, outer_inputs, outer_outputs):
-        assert len(subgraph.graph.graph_outputs) == len(outer_outputs)
-        for inner_output, outer_output in zip(
-            subgraph.graph.get_output_names(), outer_outputs
-        ):
-            self.writeline(f"{outer_output} = {inner_output}{self.ending}")
-
     def codegen_subgraph_call(self, subgraph, outer_inputs, outer_outputs):
         # Get the input and output names of the subgraph
         input_names = subgraph.graph.graph_input_names
@@ -2285,10 +2278,9 @@ class PythonWrapperCodegen(CodeGen):
         if len(input_names) == 1:
             inner_inputs += ","
 
-        output_names = subgraph.graph.get_output_names()
-        inner_outputs = ", ".join(output_names)
-        if len(output_names) == 1:
-            inner_outputs += ","
+        outer_output_names = ", ".join(outer_outputs) + (
+            "," if len(outer_outputs) == 1 else ""
+        )
 
         # Create a list of inputs for the subgraph call
         self.writeline(f"{subgraph.graph.name}_args = [{inner_inputs}]")
@@ -2297,7 +2289,7 @@ class PythonWrapperCodegen(CodeGen):
 
         # Call the subgraph launcher function
         self.writeline(
-            f"({inner_outputs}) = {subgraph.graph.name}({subgraph.graph.name}_args)"
+            f"({outer_output_names}) = {subgraph.graph.name}({subgraph.graph.name}_args)"
         )
 
     def codegen_subgraph(self, subgraph, outer_inputs, outer_outputs):
@@ -2324,8 +2316,6 @@ class PythonWrapperCodegen(CodeGen):
             self.define_subgraph_launcher_fn(subgraph_code)
 
         self.codegen_subgraph_call(subgraph, outer_inputs, outer_outputs)
-
-        self.codegen_subgraph_suffix(subgraph, outer_inputs, outer_outputs)
 
     def codegen_invoke_subgraph(self, invoke_subgraph):
         name = invoke_subgraph.get_name()
