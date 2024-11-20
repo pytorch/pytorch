@@ -562,7 +562,7 @@ class TestPasses(TestCase):
 
         m = MyModule()
         inputs = (torch.ones(2, 3),)
-        ep = torch.export.export(m, inputs, strict=False)
+        ep = export(m, inputs, strict=False).run_decompositions({})
         without_token_ep = _remove_effect_tokens(ep)
         self.assertExpectedInline(
             without_token_ep.graph_module.code.strip(),
@@ -1164,7 +1164,7 @@ def forward(self, add_1):
 
             mod = M()
             x = torch.randn([3, 3])
-            ep = export(mod, (x,))
+            ep = export(mod, (x,)).run_decompositions({})
             inplace_ep = unsafe_remove_auto_functionalized_pass(ep)
             graph_text = str(inplace_ep.graph)
             self.assertExpectedInline(
