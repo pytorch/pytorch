@@ -16,7 +16,6 @@ POLYFILLED_MODULE_NAMES: Tuple[str, ...] = (
     "builtins",
     "functools",
     "itertools",
-    "operator",
     "os",
     "sys",
 )
