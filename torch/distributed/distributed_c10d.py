@@ -488,6 +488,9 @@ class P2POp:
         """Init."""
         self.op = op
         self.tensor = tensor
+        self.peer = _canonicalize_group_rank(
+            self.group, peer, group_peer, return_global=True
+        )
         self.group = _group_or_default_group(group)
         self.tag = tag
         self.group_peer = _canonicalize_group_rank(self.group, peer, group_peer)
