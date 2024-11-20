@@ -3300,7 +3300,7 @@ def native_layer_norm(
         out = out * weight + bias
 
     out = _maybe_convert_to_dtype(out, input.dtype)  # type: ignore[assignment]
-    if input.device.type == "cpu":
+    if input.device.type in ["cpu", "mtia"]:
         mean = _maybe_convert_to_dtype(mean, input.dtype)  # type: ignore[assignment]
         rstd = _maybe_convert_to_dtype(rstd, input.dtype)  # type: ignore[assignment]
     return (out, mean, rstd)
