@@ -1903,6 +1903,12 @@ class VariableBuilder:
             or is_constant_source(self.get_source())
             or math.isnan(value)
             or math.isinf(value)
+            # We don't support cudagraphs for now. Without this cudagraphs
+            # break because they expect all cuda inputs but our tensorified
+            # float will be a f64[] cpu tensor. Fixes the following test
+            # when specialize_float=False
+            # python test/inductor/test_compiled_optimizers.py CompiledOptimizerTests.test_rmsprop_weight_decay_maximize_capturable_cuda # noqa: B950
+            or torch._inductor.config.triton.cudagraphs
         ):
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
             return ConstantVariable.create(value=value, source=self.source)
@@ -1914,6 +1920,14 @@ class VariableBuilder:
         # time.
 
         wrapped_value = torch.tensor(value, dtype=torch.float64)
+
+        # We don't support specializing floats for grad checking tensors
+        # See https://github.com/pytorch/pytorch/pull/140828 for more
+        # context.
+        if torch._C._functorch.is_gradtrackingtensor(wrapped_value):
+            self.install_guards(GuardBuilder.CONSTANT_MATCH)
+            return ConstantVariable.create(value=value, source=self.source)
+
         # TODO: Switch RandomValueSource over to use this, this is more
         # accurate
         assert not isinstance(self.get_source(), RandomValueSource)
