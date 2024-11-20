@@ -156,6 +156,7 @@ class TestDynamoTimed(TestCase):
  'Scheduler.__init__': [0.0, 0.0],
  'Scheduler.codegen': [0.0, 0.0],
  '_compile.compile_inner': [0.0],
+ '_recursive_joint_graph_passes': [0.0],
  '_recursive_post_grad_passes': [0.0, 0.0],
  '_recursive_pre_grad_passes': [0.0],
  'async_compile.wait': [0.0, 0.0],
@@ -173,7 +174,10 @@ class TestDynamoTimed(TestCase):
         self.assertExpectedInline(
             pprint.pformat(time_spent),
             """\
-{'backend_compile': 0.0,
+{'_recursive_joint_graph_passes': 0.0,
+ '_recursive_post_grad_passes': 0.0,
+ '_recursive_pre_grad_passes': 0.0,
+ 'backend_compile': 0.0,
  'code_gen': 0.0,
  'entire_backward_compile': 0.0,
  'entire_frame_compile': 0.0,
@@ -193,6 +197,7 @@ class TestDynamoTimed(TestCase):
             e.dynamo_config = None
             e.co_filename = None
             e.co_firstlineno = None
+            e.inductor_config = None
 
         # First event is for the forward. Formatting makes reading diffs
         # much easier.
@@ -233,11 +238,15 @@ class TestDynamoTimed(TestCase):
  'has_guarded_code': True,
  'inductor_code_gen_cumulative_compile_time_us': 0,
  'inductor_compile_time_s': 0.0,
+ 'inductor_config': None,
  'inductor_cumulative_compile_time_us': 0,
  'is_forward': True,
+ 'joint_graph_pass_time_us': 0,
  'log_format_version': 3,
  'non_compliant_ops': set(),
  'num_triton_bundles': None,
+ 'post_grad_pass_time_us': 0,
+ 'pre_grad_pass_time_us': 0,
  'remote_cache_time_saved_s': None,
  'remote_fx_graph_cache_get_time_ms': None,
  'remote_fx_graph_cache_get_time_us': None,
@@ -293,11 +302,15 @@ class TestDynamoTimed(TestCase):
  'has_guarded_code': None,
  'inductor_code_gen_cumulative_compile_time_us': 0,
  'inductor_compile_time_s': 0.0,
+ 'inductor_config': None,
  'inductor_cumulative_compile_time_us': 0,
  'is_forward': False,
+ 'joint_graph_pass_time_us': None,
  'log_format_version': 3,
  'non_compliant_ops': None,
  'num_triton_bundles': None,
+ 'post_grad_pass_time_us': 0,
+ 'pre_grad_pass_time_us': None,
  'remote_cache_time_saved_s': None,
  'remote_fx_graph_cache_get_time_ms': None,
  'remote_fx_graph_cache_get_time_us': None,
@@ -314,6 +327,77 @@ class TestDynamoTimed(TestCase):
  'structured_logging_overhead_us': 0,
  'triton_compile_time_us': None}""",  # noqa: B950
         )
+
+
+class TestInductorConfigParsingForLogging(TestCase):
+    """
+    Test for parsing inductor config for logging in CompilationMetrics.
+    """
+
+    class TestObject:
+        def __init__(self, a, b):
+            self.a = a
+            self.b = b
+
+    def test_inductor_config_jsonify(self):
+        """
+        Sanity check if the actual inductor config is parsed correctly
+        """
+
+        inductor_config_json = utils._scrubbed_inductor_config_for_logging()
+        self.assertTrue(isinstance(inductor_config_json, str))
+
+    @mock.patch("torch._dynamo.utils.torch._inductor.config")
+    def test_inductor_config_parsing_non_conforming_items(self, mocked_inductor_config):
+        """
+        Test if the inductor config is parsed correctly when the config is
+            - None
+            - not a dict
+            - not json serializable
+            - complex unserializable objects
+        """
+        obj = TestCase
+        test_mock_config = {
+            "some": {1: "0", obj: "this", "name": obj, "some": True},
+            "data": {1: "0", obj: "this", "name": obj, "some": True},
+            "list": [
+                {1: "0", obj: "this", "name": obj, "some": True},
+                {1: "0", obj: "this", "name": obj, "some": True},
+            ],
+            "object": {
+                1: "0",
+                obj: "this",
+                "name": obj,
+                "some": True,
+                "data": {1: "0", obj: "this", "name": obj, "some": True},
+            },
+        }
+        expected = (
+            """{"some": {"1": "0", "name": "Value is not JSON serializable", "some": true},"""
+            """ "data": {"1": "0", "name": "Value is not JSON serializable", "some": true}, "list": """
+            """[{"1": "0", "name": "Value is not JSON serializable", "some": true}, """
+            """{"1": "0", "name": "Value is not JSON serializable", "some": true}], "object": """
+            """{"1": "0", "name": "Value is not JSON serializable", "some": true, "data": """
+            """{"1": "0", "name": "Value is not JSON serializable", "some": true}}}"""
+        )
+        mocked_inductor_config.get_config_copy.return_value = test_mock_config
+        inductor_config_json = utils._scrubbed_inductor_config_for_logging()
+        self.assertEqual(inductor_config_json, expected)
+
+        expected = "{}"
+        mocked_inductor_config.get_config_copy.return_value = {obj: obj}
+        inductor_config_json = utils._scrubbed_inductor_config_for_logging()
+        self.assertEqual(inductor_config_json, expected)
+
+        expected = "Inductor Config is not JSON serializable"
+        mocked_inductor_config.get_config_copy.return_value = obj
+        inductor_config_json = utils._scrubbed_inductor_config_for_logging()
+        self.assertEqual(inductor_config_json, expected)
+
+        expected = None
+        mocked_inductor_config.get_config_copy.return_value = None
+        inductor_config_json = utils._scrubbed_inductor_config_for_logging()
+        self.assertEqual(inductor_config_json, expected)
 
 
 if __name__ == "__main__":

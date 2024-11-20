@@ -53,14 +53,7 @@ static void searchsorted_mps_contiguous(Tensor& result,
       getMPSProfiler().beginProfileKernel(bucketizationPSO, kernel, {input, boundaries, sorter});
 
       [computeEncoder setComputePipelineState:bucketizationPSO];
-      mtl_setBuffer(computeEncoder, input, 0);
-      mtl_setBuffer(computeEncoder, boundaries, 1);
-      mtl_setBuffer(computeEncoder, result, 2);
-      mtl_setBytes(computeEncoder, idim_in, 3);
-      mtl_setBytes(computeEncoder, idim_bd, 4);
-      mtl_setBytes(computeEncoder, numel_in, 5);
-      mtl_setBytes(computeEncoder, right_i64, 6);
-      mtl_setBytes(computeEncoder, is_1d_boundaries, 7);
+      mtl_setArgs(computeEncoder, input, boundaries, result, idim_in, idim_bd, numel_in, right_i64, is_1d_boundaries);
       if (sorter.defined())
         mtl_setBuffer(computeEncoder, sorter, 8);
 
