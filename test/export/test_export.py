@@ -3537,6 +3537,48 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         kwargs3 = {"b": 1}
         self._test_export_same_as_eager(kw_func2, args, kwargs3)
 
+    def test_kwargs_reorder(self):
+        class M(torch.nn.Module):
+            def forward(self, *, x, y, z):
+                return x + y + z
+
+        ep = export(
+            M(), (), {"z": torch.ones(3), "y": torch.ones(3), "x": torch.ones(3)}
+        )
+        ep.module()(**{"z": torch.ones(3), "y": torch.ones(3), "x": torch.ones(3)})
+        ep.module()(z=torch.ones(3), y=torch.ones(3), x=torch.ones(3))
+        ep.module()(x=torch.ones(3), z=torch.ones(3), y=torch.ones(3))
+
+    def test_set_example_inputs(self):
+        class M(torch.nn.Module):
+            def forward(self, a, *, x, y, z):
+                return a, x + y + z
+
+        inp = (
+            (torch.ones(3),),
+            {"z": torch.ones(3), "y": torch.ones(3), "x": torch.ones(3)},
+        )
+        ep = export(M(), inp[0], inp[1])
+        ep.module()(*ep.example_inputs[0], **ep.example_inputs[1])
+
+        ep.example_inputs = (
+            (torch.ones(3),),
+            {"x": torch.ones(3), "z": torch.ones(3), "y": torch.ones(3)},
+        )
+        ep.module()(*ep.example_inputs[0], **ep.example_inputs[1])
+
+        with self.assertRaisesRegex(ValueError, "Example inputs should be a tuple"):
+            ep.example_inputs = (torch.ones(3),)
+
+        with self.assertRaisesRegex(ValueError, "Ran into a kwarg keyword mismatch"):
+            ep.example_inputs = ((torch.ones(3),), {})
+
+        with self.assertRaisesRegex(ValueError, "Trying to flatten user inputs"):
+            ep.example_inputs = (
+                (),
+                {"x": torch.ones(3), "z": torch.ones(3), "y": torch.ones(3)},
+            )
+
     def test_export_func_with_var_postional_args(self):
         class Module(torch.nn.Module):
             def forward(self, arg1, arg2, *args):
@@ -9119,6 +9161,36 @@ def forward(self, x):
                 },
             }
             _load_dynamic_shapes(spec, from_dict=True)
+
+    # Previously export run_decomp would dispatch
+    # sdpa to math backend which doesn't guarantee
+    # to return contiguous tensor. As a result, downstream
+    # view op would fail. In eager (or normal export), sdpa
+    # decomps to flash_attention which has correct handling
+    # for non-contiguous output. Since in normal export, we
+    # dispatch to flash_attention, we also force run_decomp
+    # to follow flash_attention.
+    def test_attention(self):
+        class Foo(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.embed_dim = 768
+                self.num_heads = 12
+                self.dropout = 0.0
+                self.batch_first = True
+                self.self_attention = torch.nn.MultiheadAttention(
+                    self.embed_dim,
+                    self.num_heads,
+                    dropout=self.dropout,
+                    batch_first=self.batch_first,
+                )
+
+            def forward(self, input1: torch.Tensor):
+                x, _ = self.self_attention(input1, input1, input1, need_weights=False)
+                return x
+
+        inps = (torch.randn(1, 224, 768, device="cpu"),)
+        export(Foo(), inps)
 
     @testing.expectedFailureSerDer  # TODO(pianpwk): PowByNatural valuerange deserialization
     @testing.expectedFailureCppSerDes  # TODO(pianpwk): PowByNatural valuerange deserialization
