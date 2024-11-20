@@ -785,25 +785,6 @@ def trace_triton_kernel_wrapper(
         name=func_overload.__name__ + "_proxy",
     )
 
-    from triton.runtime.autotuner import Autotuner
-
-    from torch._inductor.codegen.wrapper import (
-        user_defined_triton_kernel_transitive_closure_source_code,
-    )
-
-    kernel = kernel_side_table.get_kernel(proxy_args["kernel_idx"])
-    if isinstance(kernel, Autotuner):
-        kernel = kernel.fn
-
-    kernel_source = user_defined_triton_kernel_transitive_closure_source_code(kernel)
-    constant_args = kernel_side_table.get_constant_args(proxy_args["constant_args_idx"])
-    # we add to node here so that it gets included in the inductor cache key
-    # when the graph is pickled
-    out_proxy.node.meta["user_defined_triton_kernel_source_and_constant_args"] = (
-        kernel_source,
-        constant_args,
-    )
-
     ret = track_tensor_tree(out, out_proxy, constant=None, tracer=proxy_mode.tracer)
     return ret
 

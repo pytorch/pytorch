@@ -806,8 +806,12 @@ class FxGraphHashDetails:
                     self.fx_kwargs[k] = v
 
         from torch._higher_order_ops.triton_kernel_wrap import (
+            kernel_side_table,
             triton_kernel_wrapper_functional,
             triton_kernel_wrapper_mutation,
+        )
+        from torch._inductor.codegen.wrapper import (
+            user_defined_triton_kernel_transitive_closure_source_code,
         )
 
         # Node meta will not be part of gm's reduce function, so lets remember
@@ -825,14 +829,23 @@ class FxGraphHashDetails:
                         op="call_function", target=triton_kernel_wrapper_mutation
                     ),
                 ):
-                    data = node.meta.get(
-                        "user_defined_triton_kernel_source_and_constant_args", None
-                    )
-                    if data is None:
-                        raise AssertionError(
-                            "TritonKernelWrapper does not contain source code meta"
+                    from triton.runtime.autotuner import Autotuner
+
+                    kernel = kernel_side_table.get_kernel(node.kwargs["kernel_idx"])
+                    if isinstance(kernel, Autotuner):
+                        kernel = kernel.fn
+
+                    kernel_source = (
+                        user_defined_triton_kernel_transitive_closure_source_code(
+                            kernel
                         )
-                    self.user_defined_triton_source.append(data)
+                    )
+                    constant_args = kernel_side_table.get_constant_args(
+                        node.kwargs["constant_args_idx"]
+                    )
+                    self.user_defined_triton_source.append(
+                        (kernel_source, constant_args)
+                    )
 
         # Alignment checks
         self.inputs_to_check = inputs_to_check
