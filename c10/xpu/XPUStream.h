@@ -133,10 +133,7 @@ class C10_XPU_API XPUStream {
   /// Return the range of priority **supported by PyTorch**.
   static std::tuple<int, int> priority_range() {
     // See Note [XPU Stream priorities]
-    static_assert(
-        max_compile_time_stream_priorities == 3,
-        "Unexpected XPU stream priority range");
-    return std::make_tuple(1, -1);
+    return std::make_tuple(1, -max_compile_time_stream_priorities + 2);
   }
 
  private:
