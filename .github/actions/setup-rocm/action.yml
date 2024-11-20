@@ -43,6 +43,8 @@ runs:
       shell: bash
       run: |
         rocm-smi
+        docker info
+        docker run hello-world
 
     - name: Runner health check rocminfo
       if: always()
@@ -71,11 +73,11 @@ runs:
       uses: ./.github/actions/diskspace-cleanup
       if: always()
 
-    - name: Runner health check disconnect on failure
-      if: ${{ failure() }}
-      shell: bash
-      run: |
-        killall runsvc.sh
+    # - name: Runner health check disconnect on failure
+    #   if: ${{ failure() }}
+    #   shell: bash
+    #   run: |
+    #     killall runsvc.sh
 
     - name: Preserve github env variables for use in docker
       shell: bash
