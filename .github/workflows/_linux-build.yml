@@ -258,7 +258,7 @@ jobs:
           docker exec -t "${container_name}" sh -c '.ci/pytorch/build.sh'
 
           END_TIME=$(date +%s)
-          echo "{build_time}={$((END_TIME - START_TIME))}" >> "GITHUB_OUTPUT"
+          echo "build_time=$((END_TIME - START_TIME))" >> "GITHUB_OUTPUT"
 
       - name: Archive artifacts into zip
         if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped'
