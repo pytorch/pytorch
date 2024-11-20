@@ -1,8 +1,7 @@
 #pragma once
 #include <ATen/native/mps/OperationUtils.h>
 
-namespace at::native {
-namespace mps {
+namespace at::native::mps {
 
 static const char* FUSED_ADAM_OPS = R"METAL(
 #include <metal_stdlib>
@@ -443,5 +442,4 @@ static std::pair<id<MTLComputePipelineState>, id<MTLFunction>> getCPLState(
       lib.getPipelineStateForFunc(fname), lib.getMTLFunction(fname));
 }
 
-} // namespace mps
-} // namespace at::native
+} // namespace at::native::mps
