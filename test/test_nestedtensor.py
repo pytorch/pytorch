@@ -7980,6 +7980,99 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
 
                 self.assertEqual(grads_compile, grads_ref)
 
+from torch.nested._internal.nested_int import NestedIntNode
+
+class TestNestedInt(torch.testing._internal.common_utils.TestCase):
+    def test_comparisons(self):
+        a = torch.SymInt(NestedIntNode(1, 1))
+        b = torch.SymInt(NestedIntNode(1, 1))
+        c = torch.SymInt(NestedIntNode(2, 1))
+        d = 3
+
+        self.assertTrue(a == a)
+        self.assertTrue(a == b)
+        self.assertFalse(a != a)
+        self.assertFalse(a != b)
+        self.assertFalse(a == c)
+        self.assertTrue(a != c)
+
+        self.assertFalse(a == d)
+        self.assertTrue(a != d)
+        self.assertFalse(d == a)
+        self.assertTrue(d != a)
+
+        # ge
+        self.assertTrue(a >= a)
+        self.assertTrue(a >= b)
+        self.assertTrue(b >= a)
+        with self.assertRaises(ValueError):
+            _ = a >= c
+        with self.assertRaises(ValueError):
+            _ = c >= a
+        with self.assertRaises(ValueError):
+            _ = c >= 3
+        self.assertTrue(c >= 2)
+        self.assertTrue(c >= 1)
+        self.assertFalse(c <= 1)
+
+        # lt
+        self.assertFalse(a < a)
+        self.assertFalse(a < b)
+        self.assertFalse(b < a)
+        with self.assertRaises(ValueError):
+            _ = a < c
+        with self.assertRaises(ValueError):
+            _ = c < a
+        with self.assertRaises(ValueError):
+            _ = 3 < a
+        with self.assertRaises(ValueError):
+            _ = 2 < a
+        self.assertTrue(a > 1)
+
+        # le
+        self.assertTrue(a <= a)
+        self.assertTrue(b <= a)
+        self.assertTrue(a <= b)
+        with self.assertRaises(ValueError):
+            _ = a <= c
+        with self.assertRaises(ValueError):
+            _ = c <= a
+        with self.assertRaises(ValueError):
+            _ = 3 <= c
+        self.assertTrue(c >= 2)
+        self.assertTrue(c >= 1)
+        self.assertFalse(c <= 1)
+
+        # gt
+        self.assertFalse(a > a)
+        self.assertFalse(b > a)
+        self.assertFalse(a > b)
+        with self.assertRaises(ValueError):
+            _ = a > c
+        with self.assertRaises(ValueError):
+            _ = c > a
+        with self.assertRaises(ValueError):
+            _ = a > 3
+        with self.assertRaises(ValueError):
+            _ = a > 2
+        self.assertTrue(a > 1)
+
+    def test_with_factor(self):
+        a = torch.SymInt(NestedIntNode(1, 5))
+        b = torch.SymInt(NestedIntNode(1, 10))
+        # eq
+        self.assertFalse(a == b)
+        self.assertFalse(a >= b)
+        self.assertTrue(b >= a)
+        self.assertTrue(a <= b)
+        self.assertFalse(b <= a)
+        # ne
+        self.assertTrue(a != b)
+        # mul
+        self.assertTrue(a * 2 == b)
+        self.assertTrue(a * 3 >= b)
+        self.assertTrue(a * 2 == 2 * a)
+
 
 instantiate_parametrized_tests(TestNestedTensor)
 instantiate_device_type_tests(TestNestedTensorDeviceType, globals())
