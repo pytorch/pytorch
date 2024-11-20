@@ -2260,8 +2260,8 @@ class PythonWrapperCodegen(CodeGen):
         if len(input_names) == 1:
             inner_inputs += ","
 
-        outer_output_names = (
-            ", ".join(outer_outputs) + "," if len(outer_outputs) == 1 else ""
+        outer_output_names = ", ".join(outer_outputs) + (
+            "," if len(outer_outputs) == 1 else ""
         )
 
         # Create a list of inputs for the subgraph call
