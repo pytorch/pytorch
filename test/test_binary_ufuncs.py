@@ -3519,6 +3519,18 @@ class TestBinaryUfuncs(TestCase):
                 expected = torch.lerp(xref, yref, wref).to(dtype)
                 self.assertEqual(actual, expected, atol=0.0, rtol=0.0)
 
+    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    def test_lerp_weight_type_promotion(self, device, dtype):
+        shape = (5, 5)
+        start = torch.randn(shape, device=device, dtype=dtype)
+        end = torch.randn(shape, device=device, dtype=dtype)
+        weight = torch.randn(shape, device=device, dtype=torch.float)
+
+        actual = torch.lerp(start, end, weight)
+        expected = start + weight * (end - start)
+        self.assertEqual(expected, actual)
+
+
     def _test_logaddexp(self, device, dtype, base2):
         if base2:
             ref_func = np.logaddexp2
