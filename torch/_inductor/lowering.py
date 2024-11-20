@@ -1689,9 +1689,7 @@ def split_with_sizes(x, sizes, dim=0):
 def unbind(x, dim=0):
     dim = _validate_dim(x, dim, 0)
     x_size = V.graph.sizevars.evaluate_static_shape(x.get_size()[dim])
-    result = []
-    for i in range(x_size):
-        result.append(select(x, dim, i))
+    result = [select(x, dim, i) for i in range(x_size)]
     return result
 
 
@@ -5693,18 +5691,6 @@ def fmod(a, b):
     return make_pointwise(fn)(a, b)
 
 
-@register_lowering(aten.rsqrt)
-def rsqrt(x):
-    dtype = x.get_dtype()
-    if is_integer_dtype(dtype) or is_boolean_dtype(dtype):
-        x = to_dtype(x, torch.get_default_dtype())
-
-    def _rsqrt(x):
-        return ops.rsqrt(x)
-
-    return make_pointwise(_rsqrt)(x)
-
-
 @register_lowering([aten.sum, prims.sum])
 def sum_(x, axis=None, keepdims=False, *, dtype=None):
     if (
@@ -5971,6 +5957,7 @@ def register_pointwise_numeric_ldf64(op):
     )
 
 
+rsqrt = register_pointwise_numeric(aten.rsqrt)
 exp = register_pointwise_numeric_ldf64(aten.exp)
 exp2 = register_pointwise_numeric(aten.exp2)
 expm1 = register_pointwise_numeric(aten.expm1)
