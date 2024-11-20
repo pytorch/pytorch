@@ -129,10 +129,14 @@ class TestCase(InductorTestCase):
             "exp2",
             "abs",
         ]:
-            # These ops do not support float16/bfloat16.
+            # These ops do not support float16 and bfloat16.
             supported_dtypes = OpDtypeSupport.supported_dtypes[op_name]
             self.assertNotIn(torch.float16, supported_dtypes)
             self.assertNotIn(torch.bfloat16, supported_dtypes)
+
+            # These ops should support float32 and float64.
+            self.assertIn(torch.float32, supported_dtypes)
+            self.assertIn(torch.float64, supported_dtypes)
 
     @requires_gpu()
     @parametrize("op_name", OpDtypeSupport.supported_dtypes)
