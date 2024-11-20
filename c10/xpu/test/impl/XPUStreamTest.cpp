@@ -243,10 +243,16 @@ TEST(XPUStreamTest, ExternalStream) {
       c10::xpu::get_device_context(),
       c10::xpu::get_raw_device(0),
       c10::xpu::asyncHandler,
+      {});
+  ASSERT_THROW(c10::xpu::getStreamFromExternal(ext_queue3, 0), c10::Error);
+  sycl::queue ext_queue4 = sycl::queue(
+      c10::xpu::get_device_context(),
+      c10::xpu::get_raw_device(0),
+      c10::xpu::asyncHandler,
       {sycl::property::queue::in_order(),
        sycl::ext::oneapi::property::queue::priority_low()});
   c10::xpu::XPUStream ext_stream7 =
-      c10::xpu::getStreamFromExternal(ext_queue3, 0);
+      c10::xpu::getStreamFromExternal(ext_queue4, 0);
   EXPECT_EQ(ext_stream7.priority(), 1);
 }
 

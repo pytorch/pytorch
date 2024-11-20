@@ -248,6 +248,7 @@ XPUStream XPUStreamForId(DeviceIndex device_index, StreamId stream_id) {
 StreamId getExternalXPUStreamId(
     sycl::queue ext_queue,
     DeviceIndex device_index) {
+  TORCH_CHECK(ext_queue.is_in_order(), "External SYCL queue must be in-order");
   auto& device_external_stream = external_streams[device_index];
   std::scoped_lock<std::mutex> lock(external_stream_mutexs[device_index]);
 
