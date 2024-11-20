@@ -79,7 +79,7 @@ from .code_context import code_context
 from .exc import CondOpArgsMismatchError, UserError, UserErrorType
 from .hooks import Hooks
 from .mutation_guard import install_generation_tagging_init
-from .utils import common_constant_types, compile_times
+from .utils import common_constant_types, compile_times, set_feature_use
 
 
 if TYPE_CHECKING:
@@ -114,8 +114,10 @@ def _maybe_set_eval_frame(callback: DynamoCallback):
         torch._dynamo.utils.warn_once(
             "Dynamo disabled by Justknob: enable_compiler_set_eval_frame, skipping set_eval_frame"
         )
+        set_feature_use("pytorch/compiler:enable_compiler_set_eval_frame", False)
         return callback
     else:
+        set_feature_use("pytorch/compiler:enable_compiler_set_eval_frame", True)
         return set_eval_frame(callback)
 
 
