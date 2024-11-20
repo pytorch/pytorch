@@ -19,7 +19,6 @@ import torch.nn as nn
 from torch._dynamo import config as dynamo_config
 from torch._dynamo.testing import rand_strided, same
 from torch._dynamo.utils import counters
-from torch._export import capture_pre_autograd_graph
 from torch._inductor import config
 from torch._inductor.exc import CppWrapperCodegenError
 from torch._inductor.runtime.runtime_utils import cache_dir
@@ -27,7 +26,7 @@ from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_cpp_code
 from torch.ao.quantization.quantize_pt2e import convert_pt2e, prepare_pt2e
 from torch.ao.quantization.quantizer.x86_inductor_quantizer import X86InductorQuantizer
-from torch.export import Dim, export
+from torch.export import Dim, export, export_for_training
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import SM80OrLater, SM90OrLater
@@ -1646,7 +1645,7 @@ class AOTInductorTestsTemplate:
         with config.patch(
             {"freezing": True, "aot_inductor.force_mmap_weights": True}
         ), torch.no_grad():
-            exported_model = capture_pre_autograd_graph(model, example_inputs)
+            exported_model = export_for_training(model, example_inputs).module()
             quantizer = X86InductorQuantizer()
             quantizer.set_global(
                 xiq.get_default_x86_inductor_quantization_config(reduce_range=True)
