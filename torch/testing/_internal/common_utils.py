@@ -1843,21 +1843,6 @@ def runOnRocmArch(arch: Tuple[str, ...]):
         return wrap_fn
     return dec_fn
 
-def skipIfS390X(func=None, *, msg="test doesn't currently work on the s390x stack"):
-    def dec_fn(fn):
-        reason = f"skipIfS390X: {msg}"
-
-        @wraps(fn)
-        def wrapper(*args, **kwargs):
-            if platform.machine() == "s390x":  # noqa: F821
-                raise unittest.SkipTest(reason)
-            else:
-                return fn(*args, **kwargs)
-        return wrapper
-    if func:
-        return dec_fn(func)
-    return dec_fn
-
 def xfailIfS390X(func):
     return unittest.expectedFailure(func) if IS_S390X else func
 
