@@ -3812,10 +3812,11 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         # (B, j1, D) -> (B, j1, 1, D) for a higher dim input size
         nt = nt.unsqueeze(-2)
         # linear_backward() should not explode the max memory usage
-        max_before_gb = torch.cuda.max_memory_allocated(0) // (1024**3)
+        torch.cuda.reset_max_memory_allocated()
         m(nt).sum().backward()
+        # expect under a GB for max memory allocated
         max_after_gb = torch.cuda.max_memory_allocated(0) // (1024**3)
-        self.assertEqual(max_after_gb, max_before_gb)
+        self.assertEqual(max_after_gb, 0)
 
     def test_unary_pointwise(self, device):
         a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64, device=device)
