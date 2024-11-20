@@ -24,7 +24,7 @@ class RunDiffGuardTests(torch._dynamo.test_case.TestCase):
         ref1 = opt_fn(x, y, True)
         ref2 = opt_fn(x, y, False)
 
-        with torch.compiler.set_stance("default", skip_guard_eval_unsafe=True):
+        with torch.compiler.set_stance(skip_guard_eval_unsafe=True):
             res2 = opt_fn(x, y, False)
             res1 = opt_fn(x, y, True)
 
@@ -45,7 +45,7 @@ class RunDiffGuardTests(torch._dynamo.test_case.TestCase):
         y64 = torch.randn(4, dtype=torch.float64)
         ref2 = opt_fn(x64, y64)
 
-        with torch.compiler.set_stance("default", skip_guard_eval_unsafe=True):
+        with torch.compiler.set_stance(skip_guard_eval_unsafe=True):
             res1 = opt_fn(x, y)
             res2 = opt_fn(x64, y64)
 
@@ -77,7 +77,7 @@ class RunDiffGuardTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 2)
 
-        with torch.compiler.set_stance("default", skip_guard_eval_unsafe=True):
+        with torch.compiler.set_stance(skip_guard_eval_unsafe=True):
             # Set it back to original value
             foo.a = 4
             ref = fn(x)
@@ -109,7 +109,7 @@ class RunDiffGuardTests(torch._dynamo.test_case.TestCase):
         with self.assertRaisesRegex(
             RuntimeError, "Recompilation triggered with skip_guard_eval_unsafe stance"
         ):
-            with torch.compiler.set_stance("default", skip_guard_eval_unsafe=True):
+            with torch.compiler.set_stance(skip_guard_eval_unsafe=True):
                 x = torch.randn(4, 4)
                 dt["x"] = x
                 opt_fn(dt)
@@ -130,7 +130,7 @@ class RunDiffGuardTests(torch._dynamo.test_case.TestCase):
         ref2 = opt_fn(x, a=1, b=None)
         ref3 = opt_fn(x, a=1, b=1)
 
-        with torch.compiler.set_stance("default", skip_guard_eval_unsafe=True):
+        with torch.compiler.set_stance(skip_guard_eval_unsafe=True):
             res1 = opt_fn(x, a=None, b=None)
             res2 = opt_fn(x, a=1, b=None)
             res3 = opt_fn(x, a=1, b=1)
