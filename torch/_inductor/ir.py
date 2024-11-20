@@ -3847,7 +3847,7 @@ class NoneAsConstantBuffer(IRNode):
         return V.graph.wrapper_code.none_str
 
     def get_output_spec(self) -> OutputSpec:
-        return NoneLayout(device=torch.device("meta"))
+        return NoneLayout(device=None)
 
     def has_tensor_output(self) -> bool:
         return False
