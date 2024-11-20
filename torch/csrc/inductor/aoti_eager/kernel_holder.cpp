@@ -125,7 +125,7 @@ std::vector<ParameterMetadata> unpack_input_parameters(
           tensor_list.emplace_back(std::move(e.value()));
         }
       }
-      inputs_metadata.emplace_back(tensor_list, arg_order);
+      inputs_metadata.emplace_back(std::move(tensor_list), arg_order);
     } else if (
         *arguments[idx].real_type() ==
         *c10::getTypePtr<std::optional<at::Tensor>>()) {
