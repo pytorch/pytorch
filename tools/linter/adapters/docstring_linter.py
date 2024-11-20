@@ -4,13 +4,7 @@ import token
 from functools import cached_property
 from typing import Iterator, Sequence, TYPE_CHECKING
 
-from ._linter_common import (
-    EMPTY_TOKENS,
-    FileLinter,
-    LintMessage,
-    ParseError,
-    PythonFile,
-)
+from ._linter_common import EMPTY_TOKENS, FileLinter, LintResult, ParseError, PythonFile
 
 
 if TYPE_CHECKING:
@@ -34,9 +28,12 @@ def _is_def(t: TokenInfo) -> bool:
 
 class DocstringLinter(FileLinter):
     linter_name = "docstring_linter"
+    description = DESCRIPTION
+    epilog = None
+    is_formatter = False
 
     def __init__(self, argv: list[str] | None = None) -> None:
-        super().__init__(argv, description=DESCRIPTION)
+        super().__init__(argv)
 
         help = "Maximum number of lines for an undocumented class"
         self.parser.add_argument(
@@ -45,12 +42,12 @@ class DocstringLinter(FileLinter):
 
         help = "Maximum number of lines for an undocumented function"
         self.parser.add_argument(
-            "--max-function", "-f", default=MAX_LINES["def"], type=int, help=help
+            "--max-def", "-d", default=MAX_LINES["def"], type=int, help=help
         )
 
         help = "Minimum number of characters for a docstring"
         self.parser.add_argument(
-            "--min-docstring", "-d", default=MIN_DOCSTRING, type=int, help=help
+            "--min-docstring", "-m", default=MIN_DOCSTRING, type=int, help=help
         )
 
         help = "Lint functions, methods and classes that start with _"
@@ -60,9 +57,9 @@ class DocstringLinter(FileLinter):
 
     @cached_property
     def max_lines(self) -> dict[str, int]:
-        return {"class": self.args.max_class, "def": self.args.max_function}
+        return {"class": self.args.max_class, "def": self.args.max_def}
 
-    def _lint(self, pf: PythonFile) -> Iterator[LintMessage]:
+    def _lint(self, pf: PythonFile) -> Iterator[LintResult]:
         tokens = pf.tokens
         indents = indent_to_dedent(tokens)
         defs = [i for i, t in enumerate(tokens) if _is_def(t)]
@@ -110,7 +107,7 @@ class DocstringLinter(FileLinter):
                 msg = "No " + msg
             else:
                 msg = msg + " was too short"
-            yield LintMessage(line=t.start[0], char=t.start[1], name=msg)
+            yield LintResult(line=t.start[0], char=t.start[1], name=msg)
 
 
 def indent_to_dedent(tokens: Sequence[TokenInfo]) -> dict[int, int]:
@@ -129,4 +126,4 @@ def indent_to_dedent(tokens: Sequence[TokenInfo]) -> dict[int, int]:
 
 
 if __name__ == "__main__":
-    DocstringLinter().print_all()
+    DocstringLinter().lint_all()

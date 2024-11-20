@@ -363,8 +363,17 @@ std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
   }
 
   auto out = std::make_unique<KinetoObserverContext>(event);
-  // Record NCCL metadata for specific CPU ops
-  out->event_->extra_meta_ = torch_ops_.extra_meta_.emplace_back();
+  if (fn.isNcclMeta()) {
+    // Record NCCL metadata for specific CPU ops, switch off output
+    // introspection in this begin_op callback, we will do that in exit callback
+    // if needed.
+    torch::profiler::impl::SaveNcclMetaConfig ncclMetaConfig{
+        true, true, true, false};
+    out->event_->extra_nccl_meta_ = torch_ops_.extra_meta_.emplace_back(
+        torch::profiler::impl::saveNcclMeta(fn, ncclMetaConfig));
+  } else {
+    out->event_->extra_nccl_meta_ = torch_ops_.extra_meta_.emplace_back();
+  }
 
   if (config_.state == ProfilerState::KINETO_GPU_FALLBACK) {
     try {
@@ -1465,7 +1474,7 @@ RecordQueue::getRecords(
     try {
       ev = python_tracer_->getEvents(
           converter, python_enters, static_cast<c10::time_t>(end_time_ns));
-    } catch (std::exception& e) {
+    } catch (std::exception&) {
       // Normally addKinetoEvents() below will stop the trace - but if an
       // exception happens here then the events will never be stopped and future
       // runs will be broken - so make sure to stopTrace() if we see an

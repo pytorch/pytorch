@@ -5,13 +5,7 @@ import token
 from functools import cached_property
 from typing import Iterator, Sequence, TYPE_CHECKING
 
-from ._linter_common import (
-    EMPTY_TOKENS,
-    FileLinter,
-    LintMessage,
-    ParseError,
-    PythonFile,
-)
+from ._linter_common import EMPTY_TOKENS, FileLinter, LintResult, ParseError, PythonFile
 
 
 if TYPE_CHECKING:
@@ -75,59 +69,28 @@ tuple is more time-efficient than an OrderedSet and also has less visual clutter
 
 class SetLinter(FileLinter):
     linter_name = "set_linter"
+    description = DESCRIPTION
+    epilog = EPILOG
+    is_formatter = True
 
-    def __init__(self, argv: list[str] | None = None) -> None:
-        super().__init__(argv, description=DESCRIPTION, epilog=EPILOG)
+    def _lint(self, pf: PythonFile) -> Iterator[LintResult]:
+        def lint_result(
+            rep: str, start: tuple[int, int], length: int, name: str = ERROR
+        ) -> LintResult:
+            return LintResult(
+                name=name, line=start[0], char=start[1], length=length, replacement=rep
+            )
 
-        help = "Fix the files in the repository directly without lintrunner"
-        self.parser.add_argument("-f", "--fix", action="store_true", help=help)
-
-    def _lint(self, pf: PythonFile) -> Iterator[LintMessage]:
         pl = PythonLines(pf)
-        if not (replacements := sorted(lint_replacements(pl), reverse=True)):
-            return
+        for b in pl.braced_sets:
+            yield lint_result("OrderedSet([", b[0].start, 1)
+            yield lint_result("])", b[-1].start, 1)
 
-        lines = pl.lines[:]
-        messages: list[LintMessage] = []
+        for b in pl.sets:
+            yield lint_result("OrderedSet", b.start, 3)
 
-        for r in replacements:
-            messages.append(LintMessage(line=r.line, char=r.char, name=r.name))
-
-            line = lines[r.line - 1]
-            before, after = line[: r.char], line[r.char + r.length :]
-            lines[r.line - 1] = f"{before}{r.replacement}{after}"
-
-        rep = "".join(lines)
-        if not self.args.fix:
-            yield from messages
-
-            name = "Suggested fixes for set_linter"
-            yield LintMessage(name=name, original=pl.contents, replacement=rep)
-
-        elif pf.path:
-            pf.path.write_text(rep)
-            print("Rewrote", pf.path)
-
-
-@dc.dataclass(order=True)
-class LintReplacement:
-    line: int
-    char: int
-    length: int
-    replacement: str
-    name: str = ERROR
-
-
-def lint_replacements(pl: PythonLines) -> Iterator[LintReplacement]:
-    for b in pl.braced_sets:
-        yield LintReplacement(*b[0].start, 1, "OrderedSet([")
-        yield LintReplacement(*b[-1].start, 1, "])")
-
-    for b in pl.sets:
-        yield LintReplacement(*b.start, 3, "OrderedSet")
-
-    if (pl.sets or pl.braced_sets) and (ins := pl.insert_import_line()) is not None:
-        yield LintReplacement(ins, 0, 0, IMPORT_LINE, "Add import for OrderedSet")
+        if (pl.sets or pl.braced_sets) and (ins := pl.insert_import_line()) is not None:
+            yield lint_result(IMPORT_LINE, (ins, 0), 0, "Add import for OrderedSet")
 
 
 @dc.dataclass
@@ -210,7 +173,7 @@ class PythonLines:
     path: Path | None
     sets: list[TokenInfo]
     token_lines: list[TokenLine]
-    tokens: list[TokenInfo]
+    tokens: tuple[TokenInfo, ...]
 
     def __init__(self, pf: PythonFile) -> None:
         self.contents = pf.contents
@@ -264,4 +227,4 @@ class PythonLines:
 
 
 if __name__ == "__main__":
-    SetLinter().print_all()
+    SetLinter().lint_all()

@@ -19,8 +19,12 @@ INCLUDES_FILE2 = TESTDATA / "includes_doesnt_change.py.txt"
 FILES = TESTFILE, INCLUDES_FILE, INCLUDES_FILE2
 
 
-def python_lines(path: Path) -> PythonLines:
-    return PythonLines(PythonFile(path, SetLinter.linter_name))
+def python_lines(path: str | Path) -> PythonLines:
+    if isinstance(path, Path):
+        pf = PythonFile(SetLinter.linter_name, path)
+    else:
+        pf = PythonFile(SetLinter.linter_name, contents=path)
+    return PythonLines(pf)
 
 
 def assert_expected(self, path: Path, actual: str, suffix: str) -> None:
@@ -33,6 +37,7 @@ def assert_expected(self, path: Path, actual: str, suffix: str) -> None:
 
 class TestSetLinter(TestCase):
     assertExpected = assert_expected
+    maxDiff = 102400
 
     def test_get_all_tokens(self) -> None:
         self.assertEqual(EXPECTED_SETS, python_lines(TESTFILE).sets)
@@ -53,14 +58,19 @@ class TestSetLinter(TestCase):
         self._test_linting(INCLUDES_FILE2)
 
     def _test_linting(self, path: Path) -> None:
-        linter = SetLinter([str(path)])
-        messages = [i.asdict() for i in linter.lint_all()]
+        linter = SetLinter([str(path), "--lintrunner"])
+
+        msgs = []
+        linter.lint_all(print=msgs.append)
+        assert msgs
+        messages = [json.loads(m) for m in msgs]
 
         replace = messages[-1]
+        self.assertEqual(replace["name"], "Suggested fixes for set_linter")
         self.assertEqual(replace["original"], path.read_text())
         self.assertExpected(path, replace["replacement"], "python")
 
-        actual = json.dumps(messages, indent=2) + "\n"
+        actual = json.dumps(messages, indent=2, sort_keys=True) + "\n"
         self.assertExpected(path, actual, "json")
 
     def test_bracket_pairs(self) -> None:
