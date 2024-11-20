@@ -391,7 +391,7 @@ void propagate_names_for_expand(const Tensor& result, const Tensor& self) {
     return;
   }
   std::vector<Dimname> outnames(result_dim, Dimname::wildcard());
-  auto names = self.names();
+  auto const names = self.names();
   std::copy( names.begin(), names.end(), outnames.begin() + result_dim - self.dim());
   propagate_names(result, outnames);
 }
