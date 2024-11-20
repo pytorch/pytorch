@@ -89,4 +89,4 @@ runs:
       shell: bash
       run: |
         # All GPUs are visible to the runner; visibility, if needed, will be set by run_test.py.
-        echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+        echo "GPU_FLAG=--privileged --device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon --security-opt seccomp=unconfined" >> "${GITHUB_ENV}"
