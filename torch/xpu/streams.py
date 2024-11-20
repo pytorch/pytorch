@@ -113,7 +113,7 @@ class ExternalStream(Stream):
     """
 
     def __new__(cls, queue_ptr, device=None, **kwargs):
-        with torch.cuda.device(device):
+        with torch.xpu.device(device):
             return super().__new__(cls, queue_ptr=queue_ptr, **kwargs)
 
 
