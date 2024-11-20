@@ -1664,25 +1664,30 @@ def select(x, dim, idx):
 
 
 @register_lowering(aten.split, type_promotion_kind=None)
-def split(x, sizes, dim=0, clamp=True):
+def split(x, sizes, dim=0):
     dim = _validate_dim(x, dim, 0)
+    x_size = x.get_size()[dim]
     if not isinstance(sizes, (list, tuple)):
         chunks = V.graph.sizevars.evaluate_static_shape(
-            FloorDiv(x.get_size()[dim] + sizes - 1, sizes)
+            FloorDiv(x_size + sizes - 1, sizes)
         )
         sizes = [sizes] * chunks
     result = []
     start = 0
-    for size in sizes:
-        end = start + size
-        result.append(slice_(x, dim, start, end, clamp=clamp))
+    for i, size in enumerate(sizes):
+        # The last output tensor should end at the end of its
+        # base tensor (at the specified dimension size).
+        end = start + size if i < len(sizes) - 1 else x_size
+        # No need for clamping here, since we compute the exact
+        # start and end values.
+        result.append(slice_(x, dim, start, end, clamp=False))
         start = end
     return result
 
 
 @register_lowering(aten.split_with_sizes, type_promotion_kind=None)
 def split_with_sizes(x, sizes, dim=0):
-    return split(x, sizes, dim, clamp=False)
+    return split(x, sizes, dim)
 
 
 @register_lowering(aten.unbind, type_promotion_kind=None)
