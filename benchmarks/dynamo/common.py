@@ -365,14 +365,15 @@ def write_outputs(filename, headers, row):
     """
     Write both CSV and JSON outputs using the original CSV output interface
     """
+    global disable_output
+    if disable_output:
+        return
+
     output_csv(filename, headers, row)
     output_json(filename, headers, row)
 
 
 def output_csv(filename, headers, row):
-    global disable_output
-    if disable_output:
-        return
     if os.path.exists(filename):
         with open(filename) as fd:
             lines = list(csv.reader(fd)) or [[]]
@@ -424,7 +425,7 @@ def output_json(filename, headers, row):
                     "name": "TorchInductor",
                     "mode": current_mode,
                     "dtype": current_dtype,
-                    "extra_info": current_settings,
+                    "extra_info": extra_info,
                 },
                 "model": {
                     "name": current_name,
@@ -4531,6 +4532,11 @@ def run(runner, args, original_dir=None):
         current_name, \
         current_device, \
         current_batch_size, \
+        current_backend, \
+        current_mode, \
+        current_dtype, \
+        current_quantization, \
+        current_settings, \
         output_filename, \
         disable_output, \
         optimize_ctx, \

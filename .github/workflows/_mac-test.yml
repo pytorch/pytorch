@@ -224,7 +224,8 @@ jobs:
           file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.get-job-id.outputs.job-id }}
 
       - name: Upload the benchmark results
-        uses: pytorch/test-infra/.github/actions/upload-benchmark-results@main
+        # TODO: TESTING https://github.com/pytorch/test-infra/pull/5947, TO BE REVERTED BEFORE LANDING
+        uses: pytorch/test-infra/.github/actions/upload-benchmark-results@handle-benchmark-results-jsoneachrow
         with:
           benchmark-results-dir: test/test-reports
           dry-run: false
