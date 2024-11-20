@@ -5249,7 +5249,6 @@ class ExternKernel(InputsKernel):
             r |= maybe_free_unbacked_symbols(arg)
         for arg in self.kwargs.values():
             r |= maybe_free_unbacked_symbols(arg)
-        breakpoint()
         return r
 
     def __str__(self) -> str:
@@ -7012,7 +7011,6 @@ class WhileLoop(ExternKernel):
         carried_inputs: List[Union[TensorBox, ShapeAsConstantBuffer]],
         additional_inputs: List[TensorBox],
     ):
-        breakpoint()
         from torch._higher_order_ops.while_loop import _unspecialize_int
         carried_inputs = [cls.realize_input(x) for x in carried_inputs]
         additional_inputs = [cls.realize_input(x) for x in additional_inputs]
@@ -7107,9 +7105,17 @@ class WhileLoop(ExternKernel):
             layout=MultiOutputLayout(device=device),
             unbacked_bindings=unbacked_bindings
         )
-        # The output may like: tensor, symbol, tensor, symbol
-        # For tensors, they're accessed via while_loop_buf[i]
-        # For symbols, they're accssed directly via symbol expression
+
+        # TODO:
+        # We should be creating new unbacked symbols for output
+        # instead of relying on the result of propation
+        # and the unbacked_bindings_def should use these symbols.
+        #
+        #
+        # Output is a list of mixed symbols and tensors.
+        # tensors are accessed with while_loop_buf[i]
+        # symbols are accessed with their symbol name e.g. `u0` since they're 
+        # treated as constants.
         outputs = [
             MultiOutput(
                 FixedLayout(
@@ -7136,7 +7142,6 @@ class WhileLoop(ExternKernel):
                 # the inputs may end up being mutated.
                 V.graph.never_reuse_buffers.add(out.get_name())
 
-        breakpoint()
         while_loop.outputs = outputs
         return outputs
     
@@ -7148,7 +7153,6 @@ class WhileLoop(ExternKernel):
             )
             assert resolved is not None
             ret.update(resolved.keys())  # type: ignore[return-value]
-        print(ret)
         return ret
 
     def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]

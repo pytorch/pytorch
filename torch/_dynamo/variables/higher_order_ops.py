@@ -310,8 +310,19 @@ def validate_args_and_maybe_create_graph_inputs(
                     proxy=new_proxy,
                     example_value=example_value,
                 )
+            elif isinstance(a, variables.UserDefinedObjectVariable) and a.python_type() is torch.SymInt:
+                new_proxy = tracer.create_graph_input(
+                    "symint", a.python_type(), a.value
+                )
+                new_arg = wrap_fx_proxy_cls(
+                    target_cls=type(a),
+                    tx=tx,
+                    proxy=new_proxy,
+                    example_value=a.value
+                )
             # If `a` cannot be put into a graph
             else:
+                breakpoint()
                 # HOPs work much better if they use speculate_subgraph(set_subgraph_inputs="automatic").
                 unimplemented(
                     f"{description} with body that accepts non-Tensors as input. "
@@ -1000,67 +1011,26 @@ class CallTorchbindHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 
 class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
-    # NOTE: [auto unspecialize int carries with unbacked symints]
-    # To support the common use case of: putting an int input as a loop index,
-    # we auto unspecialize the int carries with unbacked symints.
-    #
-    # _temp_lift_int_args_as_unbacked_symint_inputs unspecialize the integers with unbacked symints
-    # and temporialy create placeholders for these unbacked symints in current hop node's graph.
-    # speculate_subgraph can then use these newly created unbacked symints as subgraph's
-    # input to trace out a graph.
-    # By setting the unbackes symints as input of current graph, subgraphs can recursively
-    # lift the unbacked symbols that're created in parent graph when it encounters one.
-    # For exmaple:
-    #
-    # def cond_fn(idx: int, t: torch.Tensor):
-    #   return idx < x.shape[0]
-    #
-    # while_loop(cond_fn, body_fn, (0, t))
-    # When dynamo sees the while_loop, we create a dummpy placeholder in parent graph:
-    # def graph(t, unspecialized_int: u0):
-    #   ...
-    # Then we start to trace cond_fn with u0 and t and get a graph that looks like:
-    # def cond_gm(u0, t):
-    #   return u0 < t.shape[0]
-    #
-    # body_gm is also traced with u0 and t in the same way.
-    # After tracing the subgraph, we 1. delete the unspecialized_int for u0 and
-    # 2. use the constant integer to create the while_loop call in parent graph, the
-    # final graph looks like:
-    # def graph(t: torch.Tensor):
-    #   def cond_gm(u0, t):
-    #     return u0 < t.shape[0]
-    #   def body_gm(u0, t):
-    #     ...
-    #   torch.ops.higher_order.while_loop(cond_gm, body_gm, (0, t))
-    #
-    @contextlib.contextmanager
-    def _temp_lift_int_args_as_unbacked_symint_inputs(
-        self, tx, args: List[VariableTracker]
-    ):
-        try:
 
-            def _to_unbacked_symint_var(arg):
-                if not isinstance(arg, ConstantVariable):
-                    return arg
-                if arg.python_type() is not int:
-                    unimplemented(
-                        "Cannot handle non int constant args in carry_inputs of while_loop."
-                    )
-
-                fake_mode = tx.fake_mode
-
-                # This unbacked symint is created purely for tracing the subgraph.
-                unbacked_idx = fake_mode.shape_env.create_unbacked_symint()
-                # We remove unbacked_idx from pending_fresh_unbacked_symbols.
-                _ = torch.fx.experimental.symbolic_shapes.compute_unbacked_bindings(
-                    fake_mode.shape_env, unbacked_idx
+    def _unspecialize_int_carry(self, tx, args: List[VariableTracker]):
+        def _to_unbacked_symint_var(arg):
+            if arg.python_type() is not int:
+                unimplemented(
+                    f"Cannot handle non int constant args in carry_inputs of while_loop got {arg.as_python_constant()}."
                 )
-                return self.bind_subgraph_arg(tx, unbacked_idx)
 
-            yield [_to_unbacked_symint_var(arg) for arg in args]
-        finally:
-            self.clear_subgraph_args()
+            fake_mode = tx.fake_mode
+
+            # This unbacked symint is created purely for tracing the subgraph.
+            unbacked_idx = fake_mode.shape_env.create_unbacked_symint()
+            # We remove unbacked_idx from pending_fresh_unbacked_symbols.
+            _ = torch.fx.experimental.symbolic_shapes.compute_unbacked_bindings(
+                fake_mode.shape_env, unbacked_idx
+            )
+            return VariableTracker.build(tx, unbacked_idx)
+
+        return [_to_unbacked_symint_var(arg) if isinstance(arg, ConstantVariable) else arg for arg in args]
+
 
     @raise_hard_error_if_graph_break(
         reason="while_loop doesn't work unless it is captured completely with torch.compile."
@@ -1104,6 +1074,7 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 f"{operands.python_type()}",
             )
         operands_seq = operands.unpack_var_sequence(tx)
+        subgraph_carries = self._unspecialize_int_carry(tx, operands_seq)
         if mismatched_vars := find_mismatched_vars(
             operands, (TensorVariable, ConstantVariable)
         ):
@@ -1121,70 +1092,67 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
             )
         additional_inputs_seq = additional_inputs.unpack_var_sequence(tx)
 
-        with self._temp_lift_int_args_as_unbacked_symint_inputs(
-            tx, operands_seq
-        ) as subgraph_carries:
-            (
-                (cond_r, cond_treespec),
-                cond_graph,
-                cond_lifted_freevars,
-            ) = speculate_subgraph(
-                tx,
-                cond_fn,
-                subgraph_carries + additional_inputs_seq,
-                {},
-                "while_loop",
-                source_target=self.value,
-                set_subgraph_inputs="manual",
+        (
+            (cond_r, cond_treespec),
+            cond_graph,
+            cond_lifted_freevars,
+        ) = speculate_subgraph(
+            tx,
+            cond_fn,
+            subgraph_carries + additional_inputs_seq,
+            {},
+            "while_loop",
+            source_target=self.value,
+            set_subgraph_inputs="manual",
+        )
+        cond_nn_modules = dict(tx.output.nn_modules)
+        if not isinstance(cond_r, (TensorVariable, SymNodeVariable)):
+            unimplemented(
+                f"Expected cond_fn to return a tensor or a symbol but got {cond_r.python_type()}",
             )
-            cond_nn_modules = dict(tx.output.nn_modules)
-            if not isinstance(cond_r, (TensorVariable, SymNodeVariable)):
+
+        # check output shape is if cond_r is a tensor other wise.
+        if isinstance(cond_r, TensorVariable):
+            cond_r_meta = _extract_tensor_metadata(
+                cond_r.proxy.node.meta["example_value"], include_contiguity=False
+            )
+            if (
+                not cond_r_meta.dtype == torch.bool
+                or not cond_r_meta.shape == torch.Size([])
+            ):
                 unimplemented(
-                    f"Expected cond_fn to return a tensor or a symbol but got {cond_r.python_type()}",
+                    f"Expected cond_fn to return a tensor with shape (,) but got {cond_r_meta.shape}"
                 )
 
-            # check output shape is if cond_r is a tensor other wise.
-            if isinstance(cond_r, TensorVariable):
-                cond_r_meta = _extract_tensor_metadata(
-                    cond_r.proxy.node.meta["example_value"], include_contiguity=False
-                )
-                if (
-                    not cond_r_meta.dtype == torch.bool
-                    or not cond_r_meta.shape == torch.Size([])
-                ):
-                    unimplemented(
-                        f"Expected cond_fn to return a tensor with shape (,) but got {cond_r_meta.shape}"
-                    )
-
-            (
-                (body_r, body_treespec),
-                body_graph,
-                body_lifted_freevars,
-            ) = speculate_subgraph(
-                tx,
-                body_fn,
-                subgraph_carries + additional_inputs_seq,
-                {},
-                "while_loop",
-                source_target=self.value,
-                set_subgraph_inputs="manual",
-                should_flatten_outputs=True,
-            )
-            (
-                cond_graph,
-                body_graph,
-                cond_shared,
-                body_shared,
-                cond_unique,
-                body_unique,
-            ) = _merge_graph_inputs(
-                cond_graph,
-                cond_lifted_freevars,
-                "cond_fn",
-                body_graph,
-                body_lifted_freevars,
-                "body_fn",
-            )
+        (
+            (body_r, body_treespec),
+            body_graph,
+            body_lifted_freevars,
+        ) = speculate_subgraph(
+            tx,
+            body_fn,
+            subgraph_carries + additional_inputs_seq,
+            {},
+            "while_loop",
+            source_target=self.value,
+            set_subgraph_inputs="manual",
+            should_flatten_outputs=True,
+        )
+        (
+            cond_graph,
+            body_graph,
+            cond_shared,
+            body_shared,
+            cond_unique,
+            body_unique,
+        ) = _merge_graph_inputs(
+            cond_graph,
+            cond_lifted_freevars,
+            "cond_fn",
+            body_graph,
+            body_lifted_freevars,
+            "body_fn",
+        )
 
         # Note: cond_shared and body_shared refer to the same proxy in parent graph
         # so using either of them is OK. Use cond_shared as it doesnt matter.

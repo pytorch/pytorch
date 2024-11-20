@@ -1061,6 +1061,7 @@ class GraphLowering(torch.fx.Interpreter):
         try:
             log.debug("  via %s", lowerings[target])  # type: ignore[index]
             out = lowerings[target](*args, **kwargs)  # type: ignore[index]
+            print(target, args, kwargs, out)
             return out
         except Exception as e:
             raise LoweringException(e, target, args, kwargs).with_traceback(
@@ -1406,16 +1407,8 @@ class GraphLowering(torch.fx.Interpreter):
                         f"Unknown triton_kernel_default_layout_constraint: {config.triton_kernel_default_layout_constraint}"
                     )
             elif is_magic_method(n.target):
-                # TODO: this is sus, it probably should be handled in the
-                # lowerings themselves similarly to sym_size/sym-stride
-                # https://github.com/pytorch/pytorch/issues/127789
                 debug("is_magic_method")
-                if isinstance(
-                    n.meta["val"], (torch.SymInt, torch.SymFloat, torch.SymBool)
-                ):
-                    result = n.meta["val"].node.expr
-                else:
-                    result = super().run_node(n)
+                result = super().run_node(n)
             else:
                 debug("")
                 result = super().run_node(n)
