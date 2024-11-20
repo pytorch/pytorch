@@ -4549,7 +4549,11 @@ class ShapeEnv:
         # TODO: Make this more efficient by binding all the size/stride/offsets
         # to locals before performing tests on them.
 
-        from torch._dynamo.source import TensorProperty, TensorPropertySource
+        from torch._dynamo.source import (
+            CallMethodItemSource,
+            TensorProperty,
+            TensorPropertySource,
+        )
 
         # Actual codegen must be delayed as we don't necessarily know what
         # the symbol mapping is
@@ -4843,6 +4847,17 @@ class ShapeEnv:
                     isinstance(expr, sympy.Symbol)
                     and symbol_to_source.get(expr)
                     and source == symbol_to_source[expr][0]
+                ):
+                    continue
+
+                # This skips useless guards like the following when specialize_float=False
+                # +- LAMBDA_GUARD: L['ys'][0] == ___as_tensor(L['ys'][0]).item()
+                if (
+                    isinstance(expr, sympy.Symbol)
+                    and symbol_is_type(expr, SymT.FLOAT)
+                    and not torch._dynamo.config.specialize_float
+                    and isinstance(symbol_to_source[expr][0], CallMethodItemSource)
+                    and source == symbol_to_source[expr][0].base.base  # type: ignore[attr-defined]
                 ):
                     continue
 
