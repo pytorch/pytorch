@@ -4,7 +4,7 @@ import math
 import os
 import sys
 from itertools import count
-from typing import Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 import sympy
 from sympy import Expr
@@ -12,6 +12,7 @@ from sympy import Expr
 import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 import torch._ops
+from torch._inductor.runtime.runtime_utils import dynamo_timed
 from torch.fx.experimental.symbolic_shapes import ConvertIntKey, DivideByKey, SymTypes
 
 from .. import config, ir
@@ -776,12 +777,13 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.prefix.writeline("}")
 
     def generate(self, is_inference):
-        if V.graph.aot_mode and not V.graph.is_const_graph:
-            self.codegen_model_kernels()
-            self.codegen_model_constructor()
-            self.codegen_const_run_driver()
-        self.write_wrapper_decl()
-        return super().generate(is_inference)
+        with dynamo_timed("CppWrapperCpu.generate", log_pt2_compile_event=True):
+            if V.graph.aot_mode and not V.graph.is_const_graph:
+                self.codegen_model_kernels()
+                self.codegen_model_constructor()
+                self.codegen_const_run_driver()
+            self.write_wrapper_decl()
+            return super().generate(is_inference)
 
     def finalize_prefix(self):
         cached_dtypes_buffer = IndentedBuffer()
@@ -1106,8 +1108,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # in the abi_compatible mode, outputs are returned via arguments
         return name
 
-    def codegen_shape_tuple(self, shape: Sequence[Expr]) -> str:
-        parts = [*map(self.codegen_sizevar, shape)]
+    def codegen_shape_tuple(self, shape: Tuple[Expr, ...]) -> str:
+        parts = list(map(self.codegen_sizevar, shape))
         if len(parts) == 0:
             return "{}"
         if len(parts) == 1:
@@ -1904,7 +1906,7 @@ if (custom_op_wrapper.get() == NULL) {
         py_args_var = f"py_args_{next(self.arg_var_id)}"
         # First arg is always the python op name
         lines = f"""
-RAIIPyObject {py_args_var}(PyTuple_New({num_args + 1}));
+RAIIPyObject {py_args_var}(PyTuple_New({num_args+1}));
 if ({py_args_var}.get() == NULL) {{
 throw std::runtime_error("PyTuple_New {py_args_var} failed");
 }}
