@@ -474,7 +474,7 @@ bool FunctionSchema::isForwardCompatibleWith(
 
   // Validate that all new arguments provided has a default value
   for (size_t i = old_out_start_idx; i < new_out_start_idx; ++i) {
-    auto const &default_v =arguments().at(i).default_value();
+    auto const &default_v = arguments().at(i).default_value();
     if (!default_v.has_value()) {
       if (why_not) {
         why_not
