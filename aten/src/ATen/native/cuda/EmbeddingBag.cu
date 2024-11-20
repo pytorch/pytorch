@@ -462,7 +462,7 @@ Tensor _embedding_bag_dense_backward_cuda(const Tensor &grad_, const Tensor &ind
               padding_idx);
 
     default:
-      AT_ERROR(
+      TORCH_CHECK(false,
           "Unknown mode for embedding_bag_backward_cuda ", mode);
   }
 }

@@ -44,7 +44,8 @@ struct TORCH_API NotImplemented : public Error {
 // @once_differentiable
 struct TORCH_API DelayedError : public Node {
   DelayedError(std::string msg, int64_t num_inputs) : msg(std::move(msg)) {
-    for (const auto _ [[maybe_unused]] : c10::irange(num_inputs)) {
+    for ([[maybe_unused]] const auto _ [[maybe_unused]] :
+         c10::irange(num_inputs)) {
       add_input_metadata(Node::undefined_input());
     }
   }

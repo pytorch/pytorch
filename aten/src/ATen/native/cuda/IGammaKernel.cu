@@ -545,8 +545,8 @@ void igammac_kernel_cuda(TensorIteratorBase& iter) {
   });
 }
 
-REGISTER_DISPATCH(igamma_stub, &igamma_kernel_cuda);
-REGISTER_DISPATCH(igammac_stub, &igammac_kernel_cuda);
+REGISTER_DISPATCH(igamma_stub, &igamma_kernel_cuda)
+REGISTER_DISPATCH(igammac_stub, &igammac_kernel_cuda)
 
 // DO NOT ADD ANY NEW KERNELS HERE
 // CUDA compilation times grow quickly.  It's perfectly acceptable to have a file per kernel.

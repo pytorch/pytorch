@@ -535,7 +535,7 @@ class ThreeWorkersRemoteModuleTest(CommonRemoteModuleTest):
                 dst_worker1_name, modes=[ModuleCreationMode.MODULE_CTOR_WITH_INTERFACE]
             ):
                 # Test querying some simple attributes from worker2.
-                attrs = rpc.rpc_sync(
+                rpc.rpc_sync(
                     dst_worker2_name, remote_module_attributes, (remote_module,)
                 )
 
@@ -563,7 +563,7 @@ class ThreeWorkersRemoteModuleTest(CommonRemoteModuleTest):
             ret2 = rpc.rpc_sync(
                 dst_worker2_name, remote_forward, (remote_module2, args)
             )
-            self.assertEqual(ret2, ret2)
+            self.assertEqual(ret1, ret2)
 
 
 class CudaRemoteModuleTest(CommonRemoteModuleTest):

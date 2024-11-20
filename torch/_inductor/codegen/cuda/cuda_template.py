@@ -49,6 +49,7 @@ class CUDATemplate(KernelTemplate):
 
     def generate(  # type: ignore[override]
         self,
+        description,
         **kwargs,
     ) -> CUDATemplateCaller:
         """
@@ -129,6 +130,7 @@ class CUDATemplate(KernelTemplate):
             bmreq,
             self,
             kwargs,
+            description,
         )
 
     def header(self) -> IndentedBuffer:

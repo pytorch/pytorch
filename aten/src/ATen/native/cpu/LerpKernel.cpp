@@ -158,8 +158,8 @@ void lerp_tensor_kernel(at::TensorIteratorBase& iter) {
 
 } // anonymous namespace
 
-REGISTER_DISPATCH(lerp_kernel_scalar_weight, &lerp_scalar_kernel);
-REGISTER_DISPATCH(lerp_kernel_tensor_weight, &lerp_tensor_kernel);
+REGISTER_DISPATCH(lerp_kernel_scalar_weight, &lerp_scalar_kernel)
+REGISTER_DISPATCH(lerp_kernel_tensor_weight, &lerp_tensor_kernel)
 
 } // namespace native
 } // namespace at

@@ -8,6 +8,8 @@ static bool is_finalizing_ = false;
 
 class AllocatorMap {
  public:
+  AllocatorMap(const AllocatorMap&) = delete;
+  AllocatorMap& operator=(const AllocatorMap&) = delete;
   static AllocatorMap& get() {
     static AllocatorMap instance;
     return instance;
@@ -35,8 +37,6 @@ class AllocatorMap {
 
  private:
   AllocatorMap() = default;
-  AllocatorMap(const AllocatorMap&) = delete;
-  AllocatorMap& operator=(const AllocatorMap&) = delete;
 
   std::unordered_map<
       c10::DeviceType,
@@ -56,7 +56,7 @@ static at::Tensor empty_strided_p2p_persistent(
     c10::IntArrayRef stride,
     c10::ScalarType dtype,
     c10::Device device,
-    const std::string& group_name,
+    const std::optional<std::string>& group_name,
     uint64_t alloc_id) {
   // Make the allocation fails if a previous allocation with the same alloc_id
   // is still active.
@@ -71,8 +71,12 @@ static at::Tensor empty_strided_p2p_persistent(
         "is still active.");
   }
 
-  const size_t numel =
-      std::accumulate(size.begin(), size.end(), 1, std::multiplies<int>());
+  const size_t numel = std::accumulate(
+      size.begin(),
+      size.end(),
+      size_t(1),
+      // NOLINTNEXTLINE(modernize-use-transparent-functors)
+      std::multiplies<size_t>());
   const size_t element_size = c10::elementSize(dtype);
   const size_t alloc_size = numel * element_size;
 
@@ -105,8 +109,7 @@ static at::Tensor empty_strided_p2p_persistent(
 
 } // namespace
 
-namespace c10d {
-namespace symmetric_memory {
+namespace c10d::symmetric_memory {
 
 bool is_finalizing() {
   return is_finalizing_;
@@ -150,7 +153,7 @@ at::Tensor empty_strided_p2p(
     c10::IntArrayRef stride,
     c10::ScalarType dtype,
     c10::Device device,
-    const std::string& group_name,
+    const std::optional<std::string>& group_name,
     std::optional<uint64_t> alloc_id) {
   if (alloc_id.has_value()) {
     return empty_strided_p2p_persistent(
@@ -159,7 +162,8 @@ at::Tensor empty_strided_p2p(
   const size_t numel = std::accumulate(
       size.begin(),
       size.end(),
-      static_cast<size_t>(1),
+      size_t(1),
+      // NOLINTNEXTLINE(modernize-use-transparent-functors)
       std::multiplies<size_t>());
   const size_t element_size = c10::elementSize(dtype);
   const size_t alloc_size = numel * element_size;
@@ -177,19 +181,10 @@ at::Tensor empty_strided_p2p(
 }
 
 TORCH_API c10::intrusive_ptr<SymmetricMemory> rendezvous(
-    const at::Tensor& tensor) {
+    const at::Tensor& tensor,
+    const std::optional<std::string>& group_name) {
   auto allocator = get_allocator(tensor.device().type());
-  return allocator->rendezvous(tensor.storage().data_ptr().get());
-}
-
-c10::intrusive_ptr<SymmetricMemory> get_symmetric_memory(
-    const at::Tensor& tensor) {
-  auto allocator = get_allocator(tensor.device().type());
-  TORCH_CHECK(
-      allocator->is_rendezvous_completed(tensor.data_ptr()),
-      "SymmetricMemory: must invoke rendezvous on a tensor ",
-      "before calling get_symmetric_memory on it");
-  return allocator->rendezvous(tensor.data_ptr());
+  return allocator->rendezvous(tensor.storage().data_ptr().get(), group_name);
 }
 
 TORCH_API bool has_multicast_support(
@@ -198,5 +193,4 @@ TORCH_API bool has_multicast_support(
   auto allocator = get_allocator(device_type);
   return allocator->has_multicast_support(device_idx);
 }
-} // namespace symmetric_memory
-} // namespace c10d
+} // namespace c10d::symmetric_memory

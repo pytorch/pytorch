@@ -22,6 +22,35 @@ class ResultFileEntry:
     actual_value: int
 
 
+def replace_with_zeros(num):
+    """
+    Keeps the first three digits of an integer and replaces the rest with zeros.
+
+    Args:
+        num (int): The number to modify.
+
+    Returns:
+        int: The modified number.
+
+    Raises:
+        ValueError: If the input is not an integer.
+    """
+    # Check if input is an integer
+    if not isinstance(num, int):
+        raise ValueError("Input must be an integer")
+
+    # Calculate the number of digits to remove
+    digits_to_remove = len(str(abs(num))) - 4
+
+    # Replace digits with zeros
+    if digits_to_remove > 0:
+        modified_num = (num // 10**digits_to_remove) * 10**digits_to_remove
+    else:
+        modified_num = num
+
+    return modified_num
+
+
 def main():
     # Expected file is the file that have the results that we are comparing against.
     # Expected has the following format:
@@ -37,8 +66,7 @@ def main():
     result_file_path = sys.argv[2]
 
     # A path where a new expected results file will be written that can be used to replace expected_results.csv
-    # in case of failure. In case of no failure the content of this file will match expected_file_path, values
-    # will be changed for benchmarks that failed only.
+    # in case of failure. In case of no failure the content of this file will match expected_file_path.
     reference_expected_results_path = sys.argv[3]
 
     # Read expected data file.
@@ -47,6 +75,8 @@ def main():
     with open(expected_file_path) as f:
         reader = csv.reader(f)
         for row in reader:
+            if len(row) == 0:
+                continue
             entry = ExpectedFileEntry(
                 benchmark_name=row[0].strip(),
                 metric_name=row[1].strip(),
@@ -83,6 +113,7 @@ def main():
         low = entry.expected_value - entry.expected_value * entry.noise_margin
         high = entry.expected_value + entry.expected_value * entry.noise_margin
         result = result_data[key].actual_value
+        ratio = float(result - entry.expected_value) * 100 / entry.expected_value
 
         def log(event_name):
             scribe.open_source_signpost(
@@ -95,37 +126,43 @@ def main():
                         "actual_value": result,
                         "expected_value": entry.expected_value,
                         "noise_margin": entry.noise_margin,
+                        "change_ratio": ratio,
                     }
                 ),
             )
 
-        ratio = float(result - entry.expected_value) * 100 / entry.expected_value
+        new_entry = copy.deepcopy(entry)
+        # only change if abs(ratio) > entry.noise_margin /3.
+        new_entry.expected_value = (
+            replace_with_zeros(result)
+            if abs(ratio) > entry.noise_margin / 3
+            else entry.expected_value
+        )
+        new_expected[key] = new_entry
 
         if result > high:
-            new_entry = copy.deepcopy(entry)
-            new_entry.expected_value = result
-            new_expected[key] = new_entry
-
             fail = True
             print(
                 f"REGRESSION: benchmark {key} failed, actual result {result} "
                 f"is {ratio:.2f}% higher than expected {entry.expected_value} ±{entry.noise_margin*100:+.2f}% "
                 f"if this is an expected regression, please update the expected results.\n"
             )
+            print(
+                "please update all results that changed significantly, and not only the failed ones"
+            )
 
             log("fail_regression")
 
         elif result < low:
-            new_entry = copy.deepcopy(entry)
-            new_entry.expected_value = result
-            new_expected[key] = new_entry
-
             fail = True
 
             print(
                 f"WIN: benchmark {key} failed, actual result {result} is {ratio:+.2f}% lower than "
                 f"expected {entry.expected_value} ±{entry.noise_margin*100:.2f}% "
-                f"please update the expected results.\n"
+                f"please update the expected results. \n"
+            )
+            print(
+                "please update all results that changed significantly, and not only the failed ones"
             )
 
             log("fail_win")
@@ -155,26 +192,33 @@ def main():
                 ),
             )
 
+    with open(reference_expected_results_path, "w", newline="") as csvfile:
+        writer = csv.writer(csvfile)
+        for entry in new_expected.values():
+            # Write the data to the CSV file
+            # print(f"{entry.benchmark_name},{entry.metric_name,},{round(entry.expected_value)},{entry.noise_margin}")
+            writer.writerow(
+                [
+                    entry.benchmark_name,
+                    entry.metric_name,
+                    entry.expected_value,
+                    entry.noise_margin,
+                ]
+            )
+            # Three empty rows for merge conflicts.
+            writer.writerow([])
+            writer.writerow([])
+            writer.writerow([])
+
+    print("new expected results file content if needed:")
+    with open(reference_expected_results_path) as f:
+        print(f.read())
+
     if fail:
         print(
-            f"You can use the new reference expected result stored at path: {reference_expected_results_path}.\n"
+            f"There was some failures you can use the new reference expected result stored at path:"
+            f"{reference_expected_results_path} and printed above\n"
         )
-
-        with open(reference_expected_results_path, "w", newline="") as csvfile:
-            writer = csv.writer(csvfile)
-            for entry in new_expected.values():
-                # Write the data to the CSV file
-                writer.writerow(
-                    [
-                        entry.benchmark_name,
-                        entry.metric_name,
-                        round(entry.expected_value),
-                        entry.noise_margin,
-                    ]
-                )
-
-        with open(reference_expected_results_path) as f:
-            print(f.read())
         sys.exit(1)
     else:
         print("All benchmarks passed")
