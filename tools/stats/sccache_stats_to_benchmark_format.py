@@ -48,6 +48,7 @@ def main() -> None:
                     },
                     "metric": {
                         "name": "sccache_stats",
+                        "benchmark_values": [int(os.environ.get("BUILD_TIME", "0"))],
                         "extra_info": flatten_data(data),
                     },
                 }

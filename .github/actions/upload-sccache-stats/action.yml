@@ -8,6 +8,8 @@ inputs:
   github-token:
     description: GITHUB_TOKEN
     required: true
+  build-time:
+    description: Build time in seconds
 
 runs:
   using: composite
@@ -25,6 +27,8 @@ runs:
       shell: bash
       run: |
         python3 -m tools.stats.sccache_stats_to_benchmark_format
+      env:
+        BUILD_TIME: ${{ inputs.build-time }}
 
     - name: Upload sccache stats as benchmark
       uses: pytorch/test-infra/.github/actions/upload-benchmark-results@main
