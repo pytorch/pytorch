@@ -111,6 +111,11 @@ os.environ["KINETO_LOG_LEVEL"] = "5"
 
 current_name = ""
 current_device = ""
+current_backend = ""
+current_mode = ""
+current_dtype = ""
+current_quantization = ""
+current_settings = None
 current_onnx_compiler = ""
 current_batch_size = None
 output_filename = None
@@ -375,6 +380,56 @@ def output_csv(filename, headers, row):
         writer = csv.writer(fd, lineterminator="\n")
         for line in lines:
             writer.writerow(list(line) + ["0"] * (len(headers) - len(line)))
+
+
+def output_json(filename, headers, row):
+    """
+    Write the result into JSON format, so that it can be uploaded to the benchmark database
+    to be displayed on OSS dashboard. The JSON format is defined at
+    https://github.com/pytorch/pytorch/wiki/How-to-integrate-with-PyTorch-OSS-benchmark-database
+    """
+    origin = ""
+    if "torchbench" in filename:
+        origin = "torchbench"
+    elif "huggingface" in filename:
+        origin = "huggingface"
+    elif "timm_models" in filename:
+        origin = "timm_models"
+
+    extra_info = {
+        "device": current_device,
+        "quantization": current_quantization,
+        "batch_size": current_batch_size,
+    }
+    if current_settings:
+        extra_info.update(current_settings)
+
+    mapping_headers = {headers[i]: v for i, v in enumerate(row)}
+    with open(f"{os.path.splitext(filename)}.json", "a") as f:
+        for header, value in mapping_headers.items():
+            # These headers are not metric names
+            if header in ("dev", "name", "batch_size"):
+                continue
+
+            record = {
+                "benchmark": {
+                    "name": "TorchInductor",
+                    "mode": current_mode,
+                    "dtype": current_dtype,
+                    "extra_info": current_settings,
+                },
+                "model": {
+                    "name": current_name,
+                    "type": "OSS model",
+                    "backend": current_backend,
+                    "origins": [origin],
+                },
+                "metric": {
+                    "name": header,
+                    "benchmark_values": [value],
+                },
+            }
+            print(json.dumps(record), file=f)
 
 
 def get_suite_from_model_iter_fn(model_iter_fn):
@@ -4820,6 +4875,23 @@ def run(runner, args, original_dir=None):
             current_name = name
             current_device = device
             current_batch_size = batch_size
+            current_backend = args.backend
+            current_mode = (
+                "training" if args.training else "inference" if args.inference else ""
+            )
+            if args.float16:
+                current_dtype = "float16"
+            elif args.bfloat16:
+                current_dtype = "bfloat16"
+            elif args.float32:
+                current_dtype = "float32"
+            elif args.amp:
+                current_dtype = "amp"
+            else:
+                current_dtype = ""
+            current_quantization = args.quantization
+            # Keep the remaining of the settings
+            current_settings = vars(args)
             set_model_name(name)
 
             # Look for stuff that looks like batch size, and mark it dynamic.
