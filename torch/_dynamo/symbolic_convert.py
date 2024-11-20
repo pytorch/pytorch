@@ -247,6 +247,9 @@ class DistributedState:
 
 
 class TensorifyState:
+    # These are the set of string symfloats names (eg. "zf0") that we collect
+    # from the tensorify_python_scalars.py joint fx pass to inform us about
+    # which float inputs we should specialize when we restart analysis.
     force_specializations: Set[str] = set()
 
     @classmethod
