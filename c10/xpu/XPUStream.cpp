@@ -83,6 +83,7 @@ thread_local std::unique_ptr<StreamId[]> current_streams = nullptr;
 // Where StreamIdType:
 //  000 = normal priority queue
 //  001 = high priority queue
+//  111 = external queue
 //
 // StreamId is 64-bit, so we can just rely on regular promotion rules.
 // We rely on StreamIdIndex and StreamIdType being non-negative;
