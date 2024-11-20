@@ -135,6 +135,8 @@ class WorkspaceArg:
     def get_device(self):
         return self.device
 
+    get_device_or_error = get_device
+
     def get_dtype(self):
         return self.dtype
 
@@ -302,7 +304,9 @@ class BackendFeature(Enum):
     REDUCE_TO_SINGLE_ELEMENT = auto()
 
 
-def get_backend_features(device: Union[torch.device, str]):
+def get_backend_features(device: Union[torch.device, str, None]):
+    if device is None:
+        return {}
     init_backend_registration()
     if isinstance(device, torch.device):
         device_type = device.type
