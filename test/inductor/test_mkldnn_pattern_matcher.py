@@ -2418,7 +2418,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         with torch.no_grad():
             mod = Model().eval()
             v = torch.randn(1, 3, 28, 28)
-            self._test_common(mod, (v,), 1, 1)
+            self._test_common(mod, (v,), 2, 3)
 
     def test_conv2d_binary_inplace_fusion_pass_cpu(
         self, include_ops=None, exclude_ops=None
