@@ -2364,6 +2364,7 @@ class PythonWrapperCodegen(CodeGen):
 
         self.writeline("while True:")
         self.writeline(EnterSubgraphLine(self, while_loop.cond_subgraph.graph))
+        breakpoint()
         self.codegen_subgraph(
             while_loop.cond_subgraph, cond_outer_inputs, cond_outer_outputs
         )

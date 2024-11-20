@@ -680,7 +680,7 @@ class HopUnspecializedIntSource(Source):
         return str(self.const_int)
 
     def guard_source(self):
-        raise ValueError("Cannot guard on HopUnspecializedIntSource.")
+        pass
 
 
 @dataclasses.dataclass(frozen=True)

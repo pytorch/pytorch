@@ -3388,13 +3388,13 @@ class TestControlFlowTraced(TestCase):
         graphs = {}
         eager_res = fn(*args)
         tracing_modes = ["real", "fake", "symbolic"] if tracing_mode == "all" else [tracing_mode]
-        for tracing_mode in tracing_modes:
+        for mode in tracing_modes:
             graph = make_fx(
                 fn,
-                tracing_mode=tracing_mode,
+                tracing_mode=mode,
                 _allow_non_fake_inputs=allow_non_fake_inputs,
             )(*args)
-            graphs[tracing_mode] = graph
+            graphs[mode] = graph
             self.assertEqual(graph(*args), eager_res)
         return graphs if tracing_mode == "all" else graphs[tracing_mode]
 
@@ -3798,73 +3798,56 @@ def forward(self, l_iter_, l_x_, l__self___dec_cond_fn, l__self___linear_bias_bo
         inner_body = outer_body.while_loop_body_graph_0
         inner_cond = outer_body.while_loop_cond_graph_0
         self.assertExpectedInline(
-            gm.code.strip("\n"),
+            normalize_gm(gm.print_readable(print_output=False)),
             """\
-def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
-    while_loop_cond_graph_0 = self.while_loop_cond_graph_0
-    while_loop_body_graph_0 = self.while_loop_body_graph_0
-    while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (arg0_1, arg1_1, arg2_1, arg3_1), ());  while_loop_cond_graph_0 = while_loop_body_graph_0 = arg0_1 = arg1_1 = arg2_1 = arg3_1 = None
-    getitem = while_loop[0]
-    getitem_1 = while_loop[1]
-    getitem_2 = while_loop[2]
-    getitem_3 = while_loop[3];  while_loop = None
-    return (getitem, getitem_1, getitem_2, getitem_3)
-    """,  # noqa: B950
-        )
-        self.assertExpectedInline(
-            outer_body.code.strip("\n"),
-            """\
-def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
-    while_loop_cond_graph_0 = self.while_loop_cond_graph_0
-    while_loop_body_graph_0 = self.while_loop_body_graph_0
-    while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (arg0_1, arg1_1, arg2_1, arg3_1), ());  while_loop_cond_graph_0 = while_loop_body_graph_0 = arg0_1 = arg1_1 = arg2_1 = arg3_1 = None
-    getitem = while_loop[0]
-    getitem_1 = while_loop[1]
-    getitem_2 = while_loop[2]
-    getitem_3 = while_loop[3];  while_loop = None
-    sub = torch.ops.aten.sub.Tensor(getitem, 1);  getitem = None
-    clone = torch.ops.aten.clone.default(getitem_1);  getitem_1 = None
-    mul = torch.ops.aten.mul.Tensor(getitem_2, 2);  getitem_2 = None
-    div = torch.ops.aten.div.Tensor(getitem_3, 2);  getitem_3 = None
-    return (sub, clone, mul, div)
-    """,  # noqa: B950
-        )
-        self.assertExpectedInline(
-            outer_body.code.strip("\n"),
-            """\
-def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
-    while_loop_cond_graph_0 = self.while_loop_cond_graph_0
-    while_loop_body_graph_0 = self.while_loop_body_graph_0
-    while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (arg0_1, arg1_1, arg2_1, arg3_1), ());  while_loop_cond_graph_0 = while_loop_body_graph_0 = arg0_1 = arg1_1 = arg2_1 = arg3_1 = None
-    getitem = while_loop[0]
-    getitem_1 = while_loop[1]
-    getitem_2 = while_loop[2]
-    getitem_3 = while_loop[3];  while_loop = None
-    sub = torch.ops.aten.sub.Tensor(getitem, 1);  getitem = None
-    clone = torch.ops.aten.clone.default(getitem_1);  getitem_1 = None
-    mul = torch.ops.aten.mul.Tensor(getitem_2, 2);  getitem_2 = None
-    div = torch.ops.aten.div.Tensor(getitem_3, 2);  getitem_3 = None
-    return (sub, clone, mul, div)
-    """,  # noqa: B950
-        )
-        self.assertExpectedInline(
-            inner_body.code.strip("\n"),
-            """\
-def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
-    clone = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
-    sub = torch.ops.aten.sub.Tensor(arg1_1, 1);  arg1_1 = None
-    add = torch.ops.aten.add.Tensor(arg2_1, 3.14);  arg2_1 = None
-    sub_1 = torch.ops.aten.sub.Tensor(arg3_1, 2.71);  arg3_1 = None
-    return (clone, sub, add, sub_1)
-    """,
-        )
-        self.assertExpectedInline(
-            inner_cond.code.strip("\n"),
-            """\
-def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
-    gt = torch.ops.aten.gt.Scalar(arg1_1, 0);  arg1_1 = None
-    return gt
-    """,
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "i64[]", arg1_1: "i64[]", arg2_1: "f32[s2, s2]", arg3_1: "f32[s2, s2]"):
+        sym_size_int: "Sym(s2)" = torch.ops.aten.sym_size.int(arg2_1, 0)
+        sym_size_int_1: "Sym(s2)" = torch.ops.aten.sym_size.int(arg2_1, 1)
+        sym_size_int_2: "Sym(s2)" = torch.ops.aten.sym_size.int(arg3_1, 0)
+        sym_size_int_3: "Sym(s2)" = torch.ops.aten.sym_size.int(arg3_1, 1)
+        while_loop_cond_graph_0 = self.while_loop_cond_graph_0
+        while_loop_body_graph_0 = self.while_loop_body_graph_0
+        while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (arg0_1, arg1_1, arg2_1, arg3_1), (sym_size_int, sym_size_int_1, sym_size_int_2, sym_size_int_3));  while_loop_cond_graph_0 = while_loop_body_graph_0 = arg0_1 = arg1_1 = arg2_1 = arg3_1 = sym_size_int = sym_size_int_1 = sym_size_int_2 = sym_size_int_3 = None
+        getitem: "i64[]" = while_loop[0]
+        getitem_1: "i64[]" = while_loop[1]
+        getitem_2: "f32[s2, s2]" = while_loop[2]
+        getitem_3: "f32[s2, s2]" = while_loop[3];  while_loop = None
+        return (getitem, getitem_1, getitem_2, getitem_3)
+
+    class while_loop_cond_graph_0(torch.nn.Module):
+        def forward(self, arg0_1: "i64[]", arg1_1: "i64[]", arg2_1: "f32[s2, s2]", arg3_1: "f32[s2, s2]", arg4_1: "Sym(s2)", arg5_1: "Sym(s2)", arg6_1: "Sym(s2)", arg7_1: "Sym(s2)"):
+            gt: "b8[]" = torch.ops.aten.gt.Scalar(arg0_1, 0);  arg0_1 = None
+            return gt
+
+    class while_loop_body_graph_0(torch.nn.Module):
+        def forward(self, arg0_1: "i64[]", arg1_1: "i64[]", arg2_1: "f32[s2, s2]", arg3_1: "f32[s2, s2]", arg4_1: "Sym(s2)", arg5_1: "Sym(s2)", arg6_1: "Sym(s2)", arg7_1: "Sym(s2)"):
+            while_loop_cond_graph_0 = self.while_loop_cond_graph_0
+            while_loop_body_graph_0 = self.while_loop_body_graph_0
+            while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (arg0_1, arg1_1, arg2_1, arg3_1), (arg7_1, arg7_1, arg7_1, arg7_1));  while_loop_cond_graph_0 = while_loop_body_graph_0 = arg0_1 = arg1_1 = arg2_1 = arg3_1 = arg7_1 = None
+            getitem: "i64[]" = while_loop[0]
+            getitem_1: "i64[]" = while_loop[1]
+            getitem_2: "f32[s2, s2]" = while_loop[2]
+            getitem_3: "f32[s2, s2]" = while_loop[3];  while_loop = None
+            sub: "i64[]" = torch.ops.aten.sub.Tensor(getitem, 1);  getitem = None
+            clone: "i64[]" = torch.ops.aten.clone.default(getitem_1);  getitem_1 = None
+            mul: "f32[s2, s2]" = torch.ops.aten.mul.Tensor(getitem_2, 2);  getitem_2 = None
+            div: "f32[s2, s2]" = torch.ops.aten.div.Tensor(getitem_3, 2);  getitem_3 = None
+            return (sub, clone, mul, div)
+
+        class while_loop_cond_graph_0(torch.nn.Module):
+            def forward(self, arg0_1: "i64[]", arg1_1: "i64[]", arg2_1: "f32[s2, s2]", arg3_1: "f32[s2, s2]", arg4_1: "Sym(s2)", arg5_1: "Sym(s2)", arg6_1: "Sym(s2)", arg7_1: "Sym(s2)"):
+                gt: "b8[]" = torch.ops.aten.gt.Scalar(arg1_1, 0);  arg1_1 = None
+                return gt
+
+        class while_loop_body_graph_0(torch.nn.Module):
+            def forward(self, arg0_1: "i64[]", arg1_1: "i64[]", arg2_1: "f32[s2, s2]", arg3_1: "f32[s2, s2]", arg4_1: "Sym(s2)", arg5_1: "Sym(s2)", arg6_1: "Sym(s2)", arg7_1: "Sym(s2)"):
+                clone: "i64[]" = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
+                sub: "i64[]" = torch.ops.aten.sub.Tensor(arg1_1, 1);  arg1_1 = None
+                add: "f32[s2, s2]" = torch.ops.aten.add.Tensor(arg2_1, 3.14);  arg2_1 = None
+                sub_1: "f32[s2, s2]" = torch.ops.aten.sub.Tensor(arg3_1, 2.71);  arg3_1 = None
+                return (clone, sub, add, sub_1)
+""",
         )
 
     @parametrize("backend", ["eager", "aot_eager"])
@@ -6176,8 +6159,6 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
     r_2 = r_1.matmul(r);  r_1 = r = None
     r_3 = r_2.add(l_add_closure_0_cell_contents_1_0_);  r_2 = None
     r_4 = r_3.sum();  r_3 = r_4 = None
-    r_5 = l_init_.clone();  r_5 = None
-    r_6 = torch.select_copy(l_xs_, 0, 0);  r_6 = None
     scan_combine_fn_0 = self.scan_combine_fn_0
     scan = torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_], [l_xs_], 0, False, [l_add_closure_0_cell_contents_0_param_, l_add_closure_0_cell_contents_1_0_]);  scan_combine_fn_0 = l_init_ = l_xs_ = l_add_closure_0_cell_contents_0_param_ = l_add_closure_0_cell_contents_1_0_ = None
     getitem = scan[0]

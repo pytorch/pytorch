@@ -6,6 +6,7 @@ import dataclasses
 import functools
 import itertools
 import logging
+logging.basicConfig(level=logging.DEBUG) 
 import math
 import operator
 import os
@@ -608,15 +609,21 @@ class BaseSchedulerNode:
                     users = self.scheduler.name_to_buf[buf.get_name()].users
                     tot = 0
                     for user in users:
-                        assert isinstance(user.node, BaseSchedulerNode)
-                        if isinstance(user.node.node, MultiOutput):
-                            for sched_buf in user.node.get_outputs():
-                                tot += get_buf_bytes(sched_buf.node)
-                        else:
-                            # Buf is a MultiOutputLayout but not all of its
-                            # users are MultiOutputs...
-                            # TODO: Figure out what's going on
-                            return 0
+                        assert isinstance(user.node, (BaseSchedulerNode, OutputNode))
+                        if isinstance(user.node, BaseSchedulerNode):
+                            if isinstance(user.node.node, MultiOutput):
+                                for sched_buf in user.node.get_outputs():
+                                    tot += get_buf_bytes(sched_buf.node)
+                            else:
+                                # Buf is a MultiOutputLayout but not all of its
+                                # users are MultiOutputs...
+                                # TODO: Figure out what's going on
+                                return 0
+                        elif isinstance(user.node, OutputNode):
+                            # NOTE: a MultiOutputLayout can contain symbol, which is represented
+                            # as ShapeAsConstantBuffer instead of MultiOutput.
+                            # We ignore the buf_bytes caused by this kind of dependency.
+                            tot += 0
                     return tot
                 elif isinstance(buf.layout, ir.NoneLayout):
                     return sum(
