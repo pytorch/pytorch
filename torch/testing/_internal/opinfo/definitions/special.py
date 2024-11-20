@@ -466,7 +466,6 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), "TestNNCOpInfo"),
             # Greatest absolute difference: inf
             DecorateInfo(unittest.expectedFailure, "TestCommon", "test_compare_cpu"),
-            DecorateInfo(unittest.skip("Hangs on ROCm 6.1"), active_if=TEST_WITH_ROCM),
         ),
         supports_one_python_scalar=True,
         supports_autograd=False,

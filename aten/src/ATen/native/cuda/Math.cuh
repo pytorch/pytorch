@@ -2155,6 +2155,9 @@ const auto hermite_polynomial_h_string = jiterator_stringify(
             r = (x + x) * q - k * p;
             p = q;
             q = r;
+            if (std::isnan(r)) {
+                break;
+            }
         }
 
         return r;

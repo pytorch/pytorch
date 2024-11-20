@@ -3062,6 +3062,9 @@ inline C10_HOST_DEVICE T hermite_polynomial_h_forward(T x, int64_t n) {
         r = (x + x) * q - k * p;
         p = q;
         q = r;
+        if (std::isnan(r)) {
+            break;
+        }
     }
 
     return r;
