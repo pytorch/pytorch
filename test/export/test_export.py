@@ -7361,7 +7361,7 @@ def forward(self, p_bar_linear_weight, p_bar_linear_bias, x):
                 with torch.profiler.record_function("foo"):
                     return x.sin()
 
-        ep = export(Foo(), (torch.randn(5, 5),))
+        ep = export(Foo(), (torch.randn(5, 5),), strict=True)
         FileCheck().check_count(
             "torch.ops.profiler._record_function_enter_new.default", 0, exactly=True
         ).run(ep.graph_module.code)
