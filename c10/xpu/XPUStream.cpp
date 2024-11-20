@@ -289,7 +289,7 @@ int XPUStream::priority() const {
     }
   }
   // See Note [XPU Stream priorities]
-  return -static_cast<int>(st - 1);
+  return -static_cast<int>(st) + 1;
 }
 
 // See Note [StreamId assignment]
