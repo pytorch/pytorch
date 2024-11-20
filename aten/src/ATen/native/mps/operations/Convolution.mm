@@ -579,12 +579,11 @@ static Tensor mps_convolution_backward_weights(IntArrayRef weight_size,
     }
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSShape* inputShape = getMPSShape(input_t);
-      bool isDepthwiseConv = ((groups > 1 && (mps_weight_shape[1].intValue == 1)) && inputShape.count >= 4 &&
-                              mps_weight_shape.count >= 4);
+      bool isDepthwiseConv =
+          ((groups > 1 && (mps_weight_shape[1].intValue == 1)) && inputShape.count >= 4 && mps_weight_shape.count >= 4);
 
       MPSGraphTensor* gradOutputTensor = mpsGraphRankedPlaceHolder(mpsGraph, grad_output_t);
       MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_t);
-
 
       MPSGraphTensor* gradWeightTensor;
       if (is3DConv) {
