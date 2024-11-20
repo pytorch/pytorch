@@ -3029,6 +3029,8 @@ coverage_ignore_classes = [
     "AdamW",
     # torch.optim.asgd
     "ASGD",
+    # torch.optim.bfgs
+    "BFGS",
     # torch.optim.lbfgs
     "LBFGS",
     # torch.optim.lr_scheduler

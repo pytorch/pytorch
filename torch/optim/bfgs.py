@@ -362,7 +362,7 @@ class BFGS(Optimizer):
             (default: 1e-7).
         tolerance_change (float): termination tolerance on function
             value/parameter changes (default: 1e-9).
-        line_search_fn (str): either 'strong_wolfe' or None (default: None).
+        line_search_fn (str): either 'strong_wolfe', 'hager_zhang' or None (default: None).
     """
 
     def __init__(
