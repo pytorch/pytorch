@@ -3438,36 +3438,28 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
             add_compiled = torch.compile(add, mode="reduce-overhead", fullgraph=True)
             add_compiled(x, y).mean()
 
-    # we have to enable autotune at compile time for this test
     @requires_gpu
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
-    @common_utils.parametrize("autotune_at_compile_time", [True])
+    @common_utils.parametrize("autotune_at_compile_time", [True, False])
     def test_triton_kernel_reset_to_zero(self, backend, autotune_at_compile_time):
         if autotune_at_compile_time and backend != "inductor":
             raise unittest.SkipTest("compile-time autotuning only exists in inductor")
 
         @triton.autotune(
             configs=[
-                triton.Config(
-                    {"BLOCK_SIZE": 64, "COND": 1234}, num_stages=3, num_warps=8
-                ),
-                triton.Config(
-                    {"BLOCK_SIZE": 32, "COND": 1234}, num_stages=3, num_warps=8
-                ),
-                triton.Config(
-                    {"BLOCK_SIZE": 16, "COND": 1234}, num_stages=3, num_warps=8
-                ),
+                triton.Config({"BLOCK_SIZE": 64}, num_stages=3, num_warps=8),
+                triton.Config({"BLOCK_SIZE": 32}, num_stages=3, num_warps=8),
+                triton.Config({"BLOCK_SIZE": 16}, num_stages=3, num_warps=8),
             ],
             key=[],
-            reset_to_zero=["counter"],
+            reset_to_zero=["increment_ptr"],
         )
         @triton.jit
         def increment_kernel(
             in_ptr0,
-            counter,  # reset this to zero every time
+            increment_ptr,  # reset this to zero every time
             n_elements,
             BLOCK_SIZE: "tl.constexpr",
-            COND: "tl.constexpr",
         ):
             pid = tl.program_id(axis=0)
             block_start = pid * BLOCK_SIZE
@@ -3475,29 +3467,29 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
             mask = offsets < n_elements
 
             in_ptr_vals = tl.load(in_ptr0 + offsets, mask=mask)
-            count = tl.load(counter + offsets, mask=mask)
-            # count should always be zero
-            tl.store(in_ptr0 + offsets, in_ptr_vals + count, mask=mask)
+            increment_val = tl.load(increment_ptr + offsets, mask=mask)
+            # increment_val should always be zero
+            tl.store(in_ptr0 + offsets, in_ptr_vals + increment_val, mask=mask)
 
         @torch.compile(fullgraph=True, backend=backend)
-        def f(x, y):
+        def f(x, increment):
             n_elements = x.numel()
             grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
-            increment_kernel[grid](x, y, n_elements=n_elements)
+            increment_kernel[grid](x, increment, n_elements=n_elements)
             return x
 
         x = torch.rand(4, device=GPU_TYPE)
         y = torch.clone(x)
-        rand = torch.rand(4, device=GPU_TYPE)
+        increment = torch.rand(4, device=GPU_TYPE)
 
         # during autotuning, x should not change in value
         with torch._inductor.config.patch(
             {"triton.autotune_at_compile_time": autotune_at_compile_time}
         ):
             # we will add rand a single time to x
-            f(x, rand)
+            f(x, increment)
 
-        self.assertEqual(y + rand, x)
+        self.assertEqual(y + increment, x)
 
 
 common_utils.instantiate_parametrized_tests(KernelTests)
