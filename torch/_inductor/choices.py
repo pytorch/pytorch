@@ -122,9 +122,10 @@ class InductorChoices:
         Heuristics to prevent fusion applied to both horizontal and vertical fusions.  Heuristics here should not
         be needed for correctness and tweaking them may yield additional performance.
 
-        See also some related heuristics that can be disabled via:
-            torch._inductor.config.triton.tiling_prevents_pointwise_fusion = False
-            torch._inductor.config.triton.tiling_prevents_reduction_fusion = False
+        See also some related heuristics that can be changed via config:
+            - config.triton.tiling_prevents_pointwise_fusion
+            - config.triton.tiling_prevents_reduction_fusion
+            - config.aggressive_fusion (will cause this function to be called more times)
         """
         if shared_data_score == 0 and (
             not config.aggressive_fusion or node1.is_reduction() or node2.is_reduction()
