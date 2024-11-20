@@ -5,6 +5,8 @@ from typing import Optional, Protocol, Sequence, Tuple, TypeVar, Union
 import torch
 from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
 
+from .virtualized import OpsValue
+
 
 T = TypeVar("T")
 
@@ -38,7 +40,7 @@ def get_promoted_dtype(
 
 
 def promote_types(
-    args: Sequence[Union[DTypeArg, torch.types.Number, str]],
+    args: Sequence[Union[DTypeArg, torch.types.Number, str, OpsValue]],
     type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND = ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 ):
     dtype_prop_candidates = []
@@ -47,6 +49,10 @@ def promote_types(
         if isinstance(arg, str):
             # comes from templates.. TODO
             continue
+
+        if isinstance(arg, OpsValue):
+            arg = arg.value
+            assert isinstance(arg, torch._prims_common.Number) or hasattr(arg, "dtype")
 
         if isinstance(arg, torch._prims_common.Number):
             dtype_prop_candidates.append((torch.tensor(arg).dtype, True))
