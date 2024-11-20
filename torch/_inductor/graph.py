@@ -487,7 +487,9 @@ class GraphLowering(torch.fx.Interpreter):
         self.workspace_id = itertools.count()
 
     def has_feature(
-        self, device: Union[torch._inductor.ir.IRNode, device], feature: BackendFeature
+        self,
+        device: Union[torch._inductor.ir.IRNode, device, None],
+        feature: BackendFeature,
     ) -> bool:
         assert isinstance(feature, BackendFeature), feature
         return feature in self.get_backend_features(get_device_type(device))
@@ -840,12 +842,13 @@ class GraphLowering(torch.fx.Interpreter):
         name = self.qualify_name(f"buf{len(self.buffers)}")
         self.buffers.append(buffer)
         self.name_to_buffer[name] = buffer
+        device = buffer.get_device()
         if (
             # Skip empty CPU tensor so that CUDA graphs can succeed, see https://github.com/pytorch/pytorch/pull/114144
             not (isinstance(buffer, ir.ComputedBuffer) and buffer.is_zero_elements())
-            and buffer.get_device() is not None
+            and device is not None
         ):
-            self.add_device_info(buffer.get_device())
+            self.add_device_info(device)
 
         if set_name:
             buffer.name = name
@@ -1474,11 +1477,7 @@ class GraphLowering(torch.fx.Interpreter):
                 result.realize()
                 strides = n.meta["val"].stride()
                 sym_strides = torch._inductor.utils.any_is_symbolic(*strides)
-                if (
-                    not hasattr(result, "get_stride")
-                    or result.get_stride() != strides
-                    and not sym_strides
-                ):
+                if result.maybe_get_stride() != strides and not sym_strides:
                     stride_order = ir.get_stride_order(strides)
                     result = ir.ExternKernel.require_stride_order(result, stride_order)
             if (
@@ -2090,7 +2089,7 @@ class GraphLowering(torch.fx.Interpreter):
             name in self.graph_inputs.keys()
             and self.graph_inputs[name].get_numel() == 1
             and len(self.graph_inputs[name].get_size()) == 0
-            and self.graph_inputs[name].get_device().type == "cpu"
+            and get_device_type(self.graph_inputs[name]) == "cpu"
         ) or name in self.zero_dim_cpu_tensor_list
 
 
