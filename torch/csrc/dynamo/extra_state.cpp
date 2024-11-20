@@ -156,13 +156,8 @@ void lookup(
     if (valid) {
       try {
         if (is_skip_guard_eval_unsafe) {
-          // We cant stash the diff_guard_root_mgr in the cache_entry because we
-          // create a new one on every recompilation.
-          void* diff_guard_root_mgr =
-              torch::dynamo::convert_to_root_guard_manager(
-                  cache_entry.guard_manager.attr("diff_guard_root"));
           valid = torch::dynamo::run_root_guard_manager(
-              diff_guard_root_mgr, f_locals);
+              cache_entry.diff_guard_root_mgr, f_locals);
         } else {
           valid = torch::dynamo::run_root_guard_manager(
               cache_entry.root_mgr, f_locals);
