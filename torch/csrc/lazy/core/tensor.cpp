@@ -96,7 +96,7 @@ MaybeRef<Shape> LazyTensor::shape() const {
     // TODO(whc) remove shape from LazyTensor API too!
     return data()->ir_value.shape();
   }
-  auto tensor_data = data()->tensor_data;
+  auto const& tensor_data = data()->tensor_data;
   TORCH_CHECK(tensor_data);
   return Shape(tensor_data->scalar_type(), ToI64Vector(tensor_data->sizes()));
 }
