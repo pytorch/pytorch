@@ -8,6 +8,7 @@ import torch
 from torch import distributed as dist
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.fully_sharded_data_parallel import ShardingStrategy
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, get_devtype
 from torch.testing._internal.common_utils import (
@@ -15,7 +16,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
 )
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+
 
 device_type = torch.device(get_devtype())
 
@@ -89,8 +90,12 @@ class Model(torch.nn.Module):
     @staticmethod
     def wrap(sharding_strategy: ShardingStrategy, device):
         model = Model()
-        model.layer1 = FSDP(model.layer1, sharding_strategy=sharding_strategy, device_id=device)
-        model.layer2 = FSDP(model.layer2, sharding_strategy=sharding_strategy, device_id=device)
+        model.layer1 = FSDP(
+            model.layer1, sharding_strategy=sharding_strategy, device_id=device
+        )
+        model.layer2 = FSDP(
+            model.layer2, sharding_strategy=sharding_strategy, device_id=device
+        )
         fsdp_model = FSDP(model, sharding_strategy=sharding_strategy, device_id=device)
         return fsdp_model.to(device)
 
@@ -204,6 +209,7 @@ class TestFSDPExecOrder(FSDPTest):
                 )
         # If we still validate the forward execution order in eval mode, then
         # an `AssertionError` will be raised above for both sharding strategies
+
 
 devices = ("cuda", "hpu")
 instantiate_device_type_tests(TestFSDPExecOrder, globals(), only_for=devices)
