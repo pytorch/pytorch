@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: export"]
 import copy
+import unittest
 
 import torch
 from torch.export import Dim
@@ -105,6 +106,7 @@ class TestDraftExport(TestCase):
             inp = (torch.randn(3, 3), torch.randn(3, 3))
             self.assertEqual(ep.module()(*inp), M()(*inp))
 
+    @unittest.skipIf(not torch.cuda.is_available(), "Requires cuda")
     def test_missing_meta_kernel_guard(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
 

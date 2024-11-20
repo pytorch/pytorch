@@ -29,7 +29,11 @@ def insert_custom_op_guards(gm: torch.fx.GraphModule, ops_to_guard: List[str]):
                         gm.graph.call_function(
                             torch.ops.aten._assert_tensor_metadata.default,
                             args=(arg,),
-                            kwargs={"dtype": val.dtype, "device": val.device},
+                            kwargs={
+                                "dtype": val.dtype,
+                                "device": val.device,
+                                "layout": val.layout,
+                            },
                         )
 
                 for kwarg in node.kwargs:
@@ -40,6 +44,10 @@ def insert_custom_op_guards(gm: torch.fx.GraphModule, ops_to_guard: List[str]):
                         gm.graph.call_function(
                             torch.ops.aten._assert_tensor_metadata.default,
                             args=(kwarg,),
-                            kwargs={"dtype": val.dtype, "device": val.device},
+                            kwargs={
+                                "dtype": val.dtype,
+                                "device": val.device,
+                                "layout": val.layout,
+                            },
                         )
     gm.recompile()
