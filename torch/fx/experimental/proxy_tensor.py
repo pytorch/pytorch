@@ -131,6 +131,7 @@ pytree.register_pytree_node(
         [(pytree.SequenceKey(i), x) for i, x in enumerate(xs)],
         None,
     ),
+    serialized_type_name="torch.Size",
 )
 
 
