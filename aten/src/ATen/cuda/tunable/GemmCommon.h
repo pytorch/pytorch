@@ -82,9 +82,7 @@ static bool NumericalCheck(ScalarType dtype, void* c, void* other_c, int64_t siz
 
 template <typename T>
 struct GemmParams : OpParams {
-  GemmParams() {
-    duplicate_inputs_ = false;
-  }
+  GemmParams() = default;
 
   std::string Signature() const override {
     return fmt::sprintf("%c%c_%ld_%ld_%ld", transa, transb, m, n, k);
@@ -140,7 +138,9 @@ struct GemmParams : OpParams {
   void Delete() {
     c10::cuda::CUDACachingAllocator::raw_delete(c);
     if (duplicate_inputs_) {
+      // NOLINTNEXTLINE(*const-cast*)
       c10::cuda::CUDACachingAllocator::raw_delete(const_cast<T*>(a));
+      // NOLINTNEXTLINE(*const-cast*)
       c10::cuda::CUDACachingAllocator::raw_delete(const_cast<T*>(b));
     }
   }
@@ -164,7 +164,7 @@ struct GemmParams : OpParams {
   T* c;
   int64_t ldc;
 private:
-  bool duplicate_inputs_;
+  bool duplicate_inputs_{false};
 };
 
 template <typename T>
@@ -248,33 +248,33 @@ struct GemmAndBiasParams : OpParams {
   const T* bias;
   at::cuda::blas::GEMMAndBiasActivationEpilogue activation;
 private:
-  bool duplicate_inputs_;
+  bool duplicate_inputs_{false};
 };
 
 template <typename T>
 struct GemmStridedBatchedParams : OpParams {
-  GemmStridedBatchedParams() {
-    duplicate_inputs_ = false;
-  }
+  GemmStridedBatchedParams() = default;
+  GemmStridedBatchedParams(const GemmStridedBatchedParams&) = default;
+  GemmStridedBatchedParams& operator=(const GemmStridedBatchedParams&) = default;
 
   std::string Signature() const override {
     return fmt::sprintf("%c%c_%ld_%ld_%ld_B_%ld", transa, transb, m, n, k, batch);
   }
 
   size_t GetSizeA() const {
-    size_t size_stride = std::min(lda, stride_a) * ((transa == 'n' || transa == 'N') ? k : m) * batch;
+    size_t size_stride = stride_a * batch;
     size_t size_dense = m * k * batch;
     return sizeof(T) * (size_stride > size_dense ? size_stride : size_dense);
   }
 
   size_t GetSizeB() const {
-    size_t size_stride = std::min(ldb, stride_b) * ((transb == 'n' || transb == 'N') ? n : k) * batch;
+    size_t size_stride = stride_b * batch;
     size_t size_dense = k * n * batch;
     return sizeof(T) * (size_stride > size_dense ? size_stride : size_dense);
   }
 
   size_t GetSizeC() const {
-    size_t size_stride = std::min(ldc, stride_c) * n * batch;
+    size_t size_stride = stride_c * batch;
     size_t size_dense = m * n * batch;
     return sizeof(T) * (size_stride > size_dense ? size_stride : size_dense);
   }
@@ -300,7 +300,9 @@ struct GemmStridedBatchedParams : OpParams {
     if (duplicate_inputs) {
       size_t a_size = GetSizeA();
       size_t b_size = GetSizeB();
+      // NOLINTNEXTLINE(*const-cast*)
       copy->a = static_cast<const T*>(c10::cuda::CUDACachingAllocator::raw_alloc(a_size));
+      // NOLINTNEXTLINE(*const-cast*)
       copy->b = static_cast<const T*>(c10::cuda::CUDACachingAllocator::raw_alloc(b_size));
       copy->duplicate_inputs_ = true;
     }
@@ -311,7 +313,9 @@ struct GemmStridedBatchedParams : OpParams {
   void Delete() {
     c10::cuda::CUDACachingAllocator::raw_delete(c);
     if (duplicate_inputs_) {
+      // NOLINTNEXTLINE(*const-cast*)
       c10::cuda::CUDACachingAllocator::raw_delete(const_cast<T*>(a));
+      // NOLINTNEXTLINE(*const-cast*)
       c10::cuda::CUDACachingAllocator::raw_delete(const_cast<T*>(b));
     }
   }
@@ -339,14 +343,12 @@ struct GemmStridedBatchedParams : OpParams {
   int64_t stride_c;
   int64_t batch;
 private:
-  bool duplicate_inputs_;
+  bool duplicate_inputs_{false};
 };
 
 template <typename T>
 struct ScaledGemmParams : OpParams {
-  ScaledGemmParams() {
-    duplicate_inputs_ = false;
-  }
+  ScaledGemmParams() = default;
 
   std::string Signature() const override {
     return fmt::sprintf("%c%c_%ld_%ld_%ld", transa, transb, m, n, k);
@@ -402,7 +404,9 @@ struct ScaledGemmParams : OpParams {
   void Delete() {
     c10::cuda::CUDACachingAllocator::raw_delete(c);
     if (duplicate_inputs_) {
+      // NOLINTNEXTLINE(*const-cast*)
       c10::cuda::CUDACachingAllocator::raw_delete(const_cast<void*>(a));
+      // NOLINTNEXTLINE(*const-cast*)
       c10::cuda::CUDACachingAllocator::raw_delete(const_cast<void*>(b));
     }
   }
@@ -433,7 +437,7 @@ struct ScaledGemmParams : OpParams {
   void* amax_ptr;
   bool use_fast_accum;
 private:
-  bool duplicate_inputs_;
+  bool duplicate_inputs_{false};
 };
 
 } // namespace at::cuda::tunable

@@ -5,6 +5,7 @@ import inspect
 import io
 import os
 import pickle
+import sys
 import tokenize
 import unittest
 import warnings
@@ -54,6 +55,7 @@ class Config:
     justknob: Optional[str] = None
     env_name_default: Optional[str] = None
     env_name_force: Optional[str] = None
+    value_type: Optional[type] = None
 
     def __init__(
         self,
@@ -61,12 +63,14 @@ class Config:
         justknob: Optional[str] = None,
         env_name_default: Optional[str] = None,
         env_name_force: Optional[str] = None,
+        value_type: Optional[type] = None,
     ):
         # python 3.9 does not support kw_only on the dataclass :(.
         self.default = default
         self.justknob = justknob
         self.env_name_default = env_name_default
         self.env_name_force = env_name_force
+        self.value_type = value_type
 
 
 # Types saved/loaded in configs
@@ -90,7 +94,8 @@ def install_config_module(module: ModuleType) -> None:
     """
 
     class ConfigModuleInstance(ConfigModule):
-        _bypass_keys = set({"_is_dirty", "_hash_digest"})
+        # __annotations__ is written to by Sphinx autodoc
+        _bypass_keys = set({"_is_dirty", "_hash_digest", "__annotations__"})
 
     def visit(
         source: Union[ModuleType, type],
@@ -98,6 +103,10 @@ def install_config_module(module: ModuleType) -> None:
         prefix: str,
     ) -> None:
         """Walk the module structure and move everything to module._config"""
+        if sys.version_info[:2] < (3, 10):
+            type_hints = getattr(source, "__annotations__", {})
+        else:
+            type_hints = inspect.get_annotations(source)
         for key, value in list(source.__dict__.items()):
             if (
                 key.startswith("__")
@@ -110,7 +119,10 @@ def install_config_module(module: ModuleType) -> None:
 
             name = f"{prefix}{key}"
             if isinstance(value, CONFIG_TYPES):
-                config[name] = _ConfigEntry(Config(default=value))
+                annotated_type = type_hints.get(key, None)
+                config[name] = _ConfigEntry(
+                    Config(default=value, value_type=annotated_type)
+                )
                 if dest is module:
                     delattr(module, key)
             elif isinstance(value, Config):
@@ -191,6 +203,8 @@ _UNSET_SENTINEL = object()
 class _ConfigEntry:
     # The default value specified in the configuration
     default: Any
+    # The type of the configuration value
+    value_type: type
     # The value specified by the user when they overrode the configuration
     # _UNSET_SENTINEL indicates the value is not set.
     user_override: Any = _UNSET_SENTINEL
@@ -199,9 +213,24 @@ class _ConfigEntry:
     # environment variables are read at install time
     env_value_force: Any = _UNSET_SENTINEL
     env_value_default: Any = _UNSET_SENTINEL
+    # Used to work arounds bad assumptions in unittest.mock.patch
+    # The code to blame is
+    # https://github.com/python/cpython/blob/94a7a4e22fb8f567090514785c69e65298acca42/Lib/unittest/mock.py#L1637
+    # Essentially, mock.patch requires, that if __dict__ isn't accessible
+    # (which it isn't), that after delattr is called on the object, the
+    # object must throw when hasattr is called. Otherwise, it doesn't call
+    # setattr again.
+    # Technically we'll have an intermediate state of hiding the config while
+    # mock.patch is unpatching itself, but it calls setattr after the delete
+    # call so the final state is correct. It's just very unintuitive.
+    # upstream bug - python/cpython#126886
+    hide: bool = False
 
     def __init__(self, config: Config):
         self.default = config.default
+        self.value_type = (
+            config.value_type if config.value_type is not None else type(self.default)
+        )
         self.justknob = config.justknob
         if config.env_name_default is not None:
             if (env_value := _read_env_variable(config.env_name_default)) is not None:
@@ -236,10 +265,14 @@ class ConfigModule(ModuleType):
         else:
             self._config[name].user_override = value
             self._is_dirty = True
+            self._config[name].hide = False
 
     def __getattr__(self, name: str) -> Any:
         try:
             config = self._config[name]
+
+            if config.hide:
+                raise AttributeError(f"{self.__name__}.{name} does not exist")
 
             if config.env_value_force is not _UNSET_SENTINEL:
                 return config.env_value_force
@@ -271,6 +304,7 @@ class ConfigModule(ModuleType):
         # must support delete because unittest.mock.patch deletes
         # then recreate things
         self._config[name].user_override = _UNSET_SENTINEL
+        self._config[name].hide = True
 
     def _is_default(self, name: str) -> bool:
         return self._config[name].user_override is _UNSET_SENTINEL
@@ -312,6 +346,9 @@ class ConfigModule(ModuleType):
                 continue
             config[key] = copy.deepcopy(getattr(self, key))
         return config
+
+    def get_type(self, config_name: str) -> type:
+        return self._config[config_name].value_type
 
     def save_config(self) -> bytes:
         """Convert config to a pickled blob"""
@@ -543,3 +580,12 @@ def patch_object(obj: object, name: str, value: object) -> object:
     if isinstance(obj, ConfigModule):
         return obj.patch(name, value)
     return mock.patch.object(obj, name, value)
+
+
+def get_tristate_env(name: str, default: Any = None) -> Optional[bool]:
+    value = os.environ.get(name)
+    if value == "1":
+        return True
+    if value == "0":
+        return False
+    return default

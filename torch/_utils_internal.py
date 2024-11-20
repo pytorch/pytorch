@@ -4,7 +4,7 @@ import logging
 import os
 import sys
 import tempfile
-from typing import Any, Callable, Dict, List, Optional, TypeVar
+from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -235,6 +235,10 @@ def max_clock_rate():
             return 1100
 
 
+def get_mast_job_name_version() -> Optional[Tuple[str, int]]:
+    return None
+
+
 TEST_MASTER_ADDR = "127.0.0.1"
 TEST_MASTER_PORT = 29500
 # USE_GLOBAL_DEPS controls whether __init__.py tries to load
@@ -260,5 +264,11 @@ def log_chromium_event_internal(
     stack: List[str],
     logger_uuid: str,
     start_time_ns: int,
+):
+    return None
+
+
+def record_chromium_event_internal(
+    event: Dict[str, Any],
 ):
     return None

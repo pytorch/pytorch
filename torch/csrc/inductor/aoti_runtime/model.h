@@ -124,6 +124,7 @@ class AOTInductorModelBase {
 #endif // USE_CUDA
   }
 
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~AOTInductorModelBase() {
 #ifdef USE_CUDA
     if (run_finished_) {
@@ -490,6 +491,7 @@ class AOTInductorModelBase {
  protected:
   uint8_t* _get_constants_start() {
 #ifndef USE_MMAP_SELF
+    // NOLINTNEXTLINE(*const-cast*)
     return const_cast<uint8_t*>(_binary_constants_bin_start);
 #else
     if (self_mmap) {

@@ -120,9 +120,9 @@ void logical_xor_kernel_cuda(TensorIterator& iter) {
   }
 }
 
-REGISTER_DISPATCH(logical_and_stub, &logical_and_kernel_cuda);
-REGISTER_DISPATCH(logical_or_stub, &logical_or_kernel_cuda);
-REGISTER_DISPATCH(logical_xor_stub, &logical_xor_kernel_cuda);
+REGISTER_DISPATCH(logical_and_stub, &logical_and_kernel_cuda)
+REGISTER_DISPATCH(logical_or_stub, &logical_or_kernel_cuda)
+REGISTER_DISPATCH(logical_xor_stub, &logical_xor_kernel_cuda)
 
 
 } // namespace at::native
