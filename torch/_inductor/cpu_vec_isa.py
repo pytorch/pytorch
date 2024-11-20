@@ -406,12 +406,21 @@ def valid_vec_isa_list() -> List[VecISA]:
 
 
 def pick_vec_isa() -> VecISA:
+    from filelock import FileLock
+
+    from torch._inductor.codecache import get_lock_dir, LOCK_TIMEOUT
+
     if config.is_fbcode() and (platform.machine() in ["x86_64", "AMD64"]):
         return VecAVX2()
 
-    _valid_vec_isa_list: List[VecISA] = valid_vec_isa_list()
-    if not _valid_vec_isa_list:
-        return invalid_vec_isa
+    lock_dir = get_lock_dir()
+    lock = FileLock(
+        os.path.join(lock_dir, "pick_vec_isa" + ".lock"), timeout=LOCK_TIMEOUT
+    )
+    with lock:
+        _valid_vec_isa_list: List[VecISA] = valid_vec_isa_list()
+        if not _valid_vec_isa_list:
+            return invalid_vec_isa
 
     # If the simdlen is None, set simdlen based on the environment ATEN_CPU_CAPABILITY
     # to control CPU vec ISA
