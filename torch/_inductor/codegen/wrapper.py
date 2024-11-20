@@ -81,7 +81,7 @@ BufferLike = Union[ir.Buffer, WorkspaceArg]
 
 def buffer_reuse_key(node: BufferLike) -> ReuseKey:
     return (
-        node.get_device(),
+        node.get_device_or_error(),
         node.get_dtype(),
         # NB: this is symbolic so that we don't try to reuse a buffer
         # for s0 for s1, just because they happen to share the same
@@ -459,7 +459,7 @@ class AllocateLine(MemoryPlanningLine):
             free_line.is_reused = True
             return ReuseLine(self.wrapper, free_line.node, self.node)
 
-        if self.node.get_device().type == "cpu":
+        if self.node.get_device_or_error().type == "cpu":
             static_shape = self.wrapper.static_shape_for_buffer_or_none(self.node)
             if static_shape is not None:
                 state.total_allocated_buffer_size += int(

@@ -344,15 +344,8 @@ def get_device_type(x: Union[IRNode, torch.device, None, str]) -> Optional[str]:
     elif isinstance(x, torch.device):
         return x.type
     elif isinstance(x, IRNode):
-        try:
-            return x.get_device().type
-        except NoDevice:
-            return None
+        return get_device_type(x.get_device())
     assert_never(f"get_device_type({x}: {type(x).__name__})")
-
-
-class NoDevice(NotImplementedError):
-    pass
 
 
 def is_triton(x: Union[IRNode, torch.device, None, str]) -> bool:
@@ -476,8 +469,13 @@ class IRNode:
     def codegen_reference(self, writer: Optional[IndentedBuffer] = None) -> str:
         raise NotImplementedError(f"codegen_reference NYI on {type(self)}")
 
-    def get_device(self) -> torch.device:
-        raise NoDevice(f"{self.__class__.__name__} does not implement get_device()")
+    def get_device(self) -> Optional[torch.device]:
+        return None
+
+    def get_device_or_error(self) -> torch.device:
+        device = self.get_device()
+        assert device is not None
+        return device
 
     def has_exceeded_max_reads(self) -> bool:
         raise NotImplementedError(type(self).__name__)
@@ -585,7 +583,7 @@ class Operation:
     def __post_init__(self) -> None:
         self.operation_name: Optional[str] = None
 
-    def get_device(self) -> torch.device:
+    def get_device(self) -> Optional[torch.device]:
         raise NotImplementedError
 
     def get_origin_node(self):  # type: ignore[no-untyped-def]
@@ -678,7 +676,7 @@ class Loops(IRNode):
 
     __repr__ = __str__
 
-    def get_device(self) -> torch.device:
+    def get_device(self) -> Optional[torch.device]:
         return self.device
 
     def get_origin_node(self) -> Optional[Node]:
@@ -2412,7 +2410,7 @@ class BaseView(IRNode):
     def get_layout(self):  # type: ignore[no-untyped-def]
         return self.data.get_layout()
 
-    def get_device(self) -> torch.device:
+    def get_device(self) -> Optional[torch.device]:
         return self.data.get_device()
 
     def get_origin_node(self):  # type: ignore[no-untyped-def]
@@ -2857,7 +2855,7 @@ class ReinterpretView(BaseView):
     def get_name(self):  # type: ignore[no-untyped-def]
         return self.data.get_name()
 
-    def get_device(self) -> torch.device:
+    def get_device(self) -> Optional[torch.device]:
         return self.layout.device
 
     def get_origin_node(self):  # type: ignore[no-untyped-def]
@@ -3041,7 +3039,7 @@ class BaseConstant(IRNode):
     def get_size(self):  # type: ignore[no-untyped-def]
         return ()
 
-    def get_device(self) -> torch.device:
+    def get_device(self) -> Optional[torch.device]:
         return self.device
 
     def get_origin_node(self):  # type: ignore[no-untyped-def]
@@ -3565,7 +3563,7 @@ class NoneLayout(IRNode):
     # If you have an ir.Node with NoneLayout, you probably need to setup
     # dependencies manually in scheduler
 
-    device: torch.device
+    device: Optional[torch.device]
     size: List[int] = dataclasses.field(default_factory=lambda: [0])
     stride: List[int] = dataclasses.field(default_factory=lambda: [0])
 
@@ -3579,7 +3577,7 @@ class NoneLayout(IRNode):
 class MutationLayoutSHOULDREMOVE(Layout):
     def __init__(self, target: IRNode) -> None:
         super().__init__(
-            target.get_device(),
+            target.get_device_or_error(),
             target.get_dtype(),
             target.get_size(),  # type: ignore[arg-type]
             None,
@@ -3677,7 +3675,7 @@ class Buffer(IRNode):
         assert self.name, self
         return self.name
 
-    def get_device(self) -> torch.device:
+    def get_device(self) -> Optional[torch.device]:
         return self.layout.device
 
     def get_defining_op(self) -> Optional[Operation]:
@@ -4073,7 +4071,7 @@ class ComputedBuffer(OperationBuffer):
 
         support_vars = index_vars + reduce_vars
         should_merge_loops = (
-            not is_gpu(self.get_device().type) or not config.loop_ordering_after_fusion
+            not is_gpu(get_device_type(self)) or not config.loop_ordering_after_fusion
         )
         iter_ranges, iter_reindex, _ = simplify_and_reorder(
             index_vars,
@@ -4962,7 +4960,7 @@ class ExternKernel(InputsKernel):
         return ReinterpretView(
             data=x.data,
             layout=FixedLayout(
-                device=x.get_device(),
+                device=x.get_device_or_error(),
                 dtype=x.get_dtype(),
                 size=x.get_size(),  # type: ignore[arg-type]
                 stride=strides,
@@ -5743,7 +5741,7 @@ class UserDefinedTritonKernel(ExternKernel):
     def get_outputs(self) -> List[Buffer]:
         return list(self.mutation_outputs)
 
-    def get_device(self) -> torch.device:
+    def get_device(self) -> Optional[torch.device]:
         return self.device
 
 
@@ -6701,7 +6699,7 @@ class MutableBox(IRNode):
     def has_exceeded_max_reads(self) -> bool:
         return self.data.has_exceeded_max_reads()
 
-    def get_device(self) -> torch.device:
+    def get_device(self) -> Optional[torch.device]:
         return self.data.get_device()
 
     def make_loader(self) -> Callable[[Sequence[_IntLike]], OpsValue]:
