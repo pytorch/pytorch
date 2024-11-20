@@ -4202,35 +4202,14 @@ class TestLearnableBiases(InductorTestCase):
         self.rtol = 3e-2
 
     def _init_tensors(self):
-        return (
-            torch.randn(
-                self.batch_size,
-                self.num_heads,
-                self.seq_length,
-                self.head_dim,
-                device=self.device,
-                dtype=self.dtype,
-                requires_grad=True,
-            ),
-            torch.randn(
-                self.batch_size,
-                self.num_heads,
-                self.seq_length,
-                self.head_dim,
-                device=self.device,
-                dtype=self.dtype,
-                requires_grad=True,
-            ),
-            torch.randn(
-                self.batch_size,
-                self.num_heads,
-                self.seq_length,
-                self.head_dim,
-                device=self.device,
-                dtype=self.dtype,
-                requires_grad=True,
-            ),
+        make_tensor = functools.partial(
+            torch.randn,
+            (self.batch_size, self.num_heads, self.seq_length, self.head_dim),
+            device=self.device,
+            dtype=self.dtype,
+            requires_grad=True,
         )
+        return (make_tensor(), make_tensor(), make_tensor())
 
     def _check_outputs_and_grads(self, out_eager, out_compiled, tensors):
         torch.testing.assert_close(
