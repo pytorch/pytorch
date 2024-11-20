@@ -1771,11 +1771,12 @@ class CompiledFxGraph:
 
 
 def run_command_and_check(cmd_: str) -> None:
-    cmd = shlex.split(cmd_)
-    try:
-        subprocess.check_call(cmd)
-    except subprocess.CalledProcessError as e:
-        raise exc.CppCompileError(cmd, e.output) from e
+    with dynamo_timed("run_command_and_check", log_pt2_compile_event=True):
+        cmd = shlex.split(cmd_)
+        try:
+            subprocess.check_call(cmd)
+        except subprocess.CalledProcessError as e:
+            raise exc.CppCompileError(cmd, e.output) from e
 
 
 @functools.lru_cache(None)
