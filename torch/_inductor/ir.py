@@ -420,6 +420,12 @@ class IRNode:
     def get_dtype(self) -> torch.dtype:
         return self.dtype
 
+    def maybe_get_dtype(self) -> Optional[torch.dtype]:
+        try:
+            return self.get_dtype()
+        except NotImplementedError:
+            return None
+
     def get_layout(self) -> Layout:
         raise NotImplementedError(f"get_layout() is not implemented by {type(self)}!")
 
