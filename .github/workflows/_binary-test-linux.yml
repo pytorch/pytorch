@@ -110,7 +110,6 @@ jobs:
       PYTORCH_FINAL_PACKAGE_DIR: /artifacts
       SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
       USE_SPLIT_BUILD: ${{ inputs.use_split_build }}
-      PYTORCH_TEST_WITH_SUBCLASSES: 1
     steps:
       - name: Make the env permanent during this workflow (but not the secrets)
         shell: bash
