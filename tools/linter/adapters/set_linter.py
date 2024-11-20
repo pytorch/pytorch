@@ -5,7 +5,14 @@ import token
 from functools import cached_property
 from typing import Iterator, Sequence, TYPE_CHECKING
 
-from ._linter_common import EMPTY_TOKENS, FileLinter, LintResult, ParseError, PythonFile
+try:
+    from _linter_common import (
+        EMPTY_TOKENS, FileLinter, LintResult, ParseError, PythonFile
+    )
+except ImportError:
+    from ._linter_common import (
+        EMPTY_TOKENS, FileLinter, LintResult, ParseError, PythonFile
+    )
 
 
 if TYPE_CHECKING:
