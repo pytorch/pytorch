@@ -203,7 +203,6 @@ class StageTest(MultiProcContinousTest):
             self.rank,
             self.world_size,
             self.device,
-            input_args=x.chunk(chunks)[0],
         )
 
         # Attach to a schedule
@@ -273,7 +272,6 @@ class StageTest(MultiProcContinousTest):
             self.rank,
             self.world_size,
             self.device,
-            input_args=x.chunk(chunks)[0],
             dw_builder=cs.dw_builder,
         )
 
@@ -320,7 +318,6 @@ class StageTest(MultiProcContinousTest):
             self.rank,
             self.world_size,
             self.device,
-            input_args=x.chunk(chunks)[0],
             dw_builder=lambda: None,
         )
         with self.assertRaisesRegex(AssertionError, "backward_one_chunk"):

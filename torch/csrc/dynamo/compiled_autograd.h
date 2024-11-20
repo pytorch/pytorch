@@ -179,6 +179,7 @@ struct TensorArgs {
   std::vector<uint32_t> input_origins;
 
  private:
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const std::optional<size_t>& active_node_call_idx;
   std::unordered_map<const c10::TensorImpl*, TensorArg> _args;
   // Every TensorArg from this is actually owned by _args (or _undefined) and
@@ -221,12 +222,14 @@ struct LiftedIValueArgs {
   std::vector<uint32_t> args_origins;
 
  private:
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const std::optional<size_t>& active_node_call_idx;
 };
 
 struct AutogradCompilerCall {
   AutogradCompilerCall()
-      : tensor_args(active_node_call_idx),
+      : active_node_call_idx(std::nullopt),
+        tensor_args(active_node_call_idx),
         lifted_ivalue_args(active_node_call_idx) {}
   void add_size_input(const c10::SymInt& s) {
     all_size_inputs.emplace_back(
@@ -245,6 +248,7 @@ struct AutogradCompilerCall {
     active_node_call_idx = node_call_idx;
   }
 
+  std::optional<size_t> active_node_call_idx;
   TensorArgs tensor_args;
   std::vector<SizeInput> all_size_inputs;
   LiftedIValueArgs lifted_ivalue_args;
@@ -254,7 +258,6 @@ struct AutogradCompilerCall {
   SizeInput::DynType default_dyn_type = SizeInput::STATIC;
   // NodeCall id of each size, only when verbose logging is enabled
   std::vector<uint32_t> size_input_origins;
-  std::optional<size_t> active_node_call_idx;
 };
 
 class CompiledNodeArgs {
@@ -469,21 +472,21 @@ class CompiledNodeArgs {
   void collect(T t) {       \
     specialize_on_bytes(t); \
   }
-  COLLECT_AS_BYTES(c10::ScalarType);
-  COLLECT_AS_BYTES(c10::DeviceType);
-  COLLECT_AS_BYTES(c10::Layout);
-  COLLECT_AS_BYTES(c10::MemoryFormat);
-  COLLECT_AS_BYTES(int8_t);
-  COLLECT_AS_BYTES(int16_t);
-  COLLECT_AS_BYTES(int32_t);
-  COLLECT_AS_BYTES(int64_t);
-  COLLECT_AS_BYTES(uint8_t);
-  COLLECT_AS_BYTES(uint16_t);
-  COLLECT_AS_BYTES(uint32_t);
-  COLLECT_AS_BYTES(uint64_t);
-  COLLECT_AS_BYTES(bool);
-  COLLECT_AS_BYTES(float);
-  COLLECT_AS_BYTES(double);
+  COLLECT_AS_BYTES(c10::ScalarType)
+  COLLECT_AS_BYTES(c10::DeviceType)
+  COLLECT_AS_BYTES(c10::Layout)
+  COLLECT_AS_BYTES(c10::MemoryFormat)
+  COLLECT_AS_BYTES(int8_t)
+  COLLECT_AS_BYTES(int16_t)
+  COLLECT_AS_BYTES(int32_t)
+  COLLECT_AS_BYTES(int64_t)
+  COLLECT_AS_BYTES(uint8_t)
+  COLLECT_AS_BYTES(uint16_t)
+  COLLECT_AS_BYTES(uint32_t)
+  COLLECT_AS_BYTES(uint64_t)
+  COLLECT_AS_BYTES(bool)
+  COLLECT_AS_BYTES(float)
+  COLLECT_AS_BYTES(double)
 #undef COLLECT_AS_BYTES
 
   void collect_hooks_from(Node* fn) {
@@ -585,11 +588,14 @@ class CompiledNodeArgs {
         _specialization_key(
             // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
             (uint8_t*)std::malloc(_specialization_key_storage)) {}
+  CompiledNodeArgs(const CompiledNodeArgs&) = delete;
+  CompiledNodeArgs(CompiledNodeArgs&&) = delete;
+  CompiledNodeArgs& operator=(const CompiledNodeArgs&) = delete;
+  CompiledNodeArgs& operator=(CompiledNodeArgs&&) = delete;
   ~CompiledNodeArgs() {
     // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
     std::free(_specialization_key);
   }
-  CompiledNodeArgs(const CompiledNodeArgs&) = delete;
 
  private:
   template <typename T>
@@ -614,7 +620,7 @@ class CompiledNodeArgs {
 
 struct TraceState {
   TraceState(std::vector<std::optional<c10::SymInt>>&& ss, size_t num_outputs)
-      : sym_sizes(ss), outputs(num_outputs) {}
+      : sym_sizes(std::move(ss)), outputs(num_outputs) {}
 
   void debug_asserts() {
     TORCH_INTERNAL_ASSERT(sym_sizes_index == sym_sizes.size());
@@ -805,18 +811,18 @@ class SwapSavedVariables {
 #define NO_OP_VISIT(T)     \
   void before(const T&) {} \
   void after(const T&) {}
-  NO_OP_VISIT(caffe2::TypeMeta);
-  NO_OP_VISIT(c10::Device);
-  NO_OP_VISIT(c10::DeviceType);
-  NO_OP_VISIT(c10::Layout);
-  NO_OP_VISIT(c10::MemoryFormat);
-  NO_OP_VISIT(c10::ScalarType);
-  NO_OP_VISIT(c10::Scalar);
-  NO_OP_VISIT(c10::TensorOptions);
-  NO_OP_VISIT(std::string);
-  NO_OP_VISIT(int64_t);
-  NO_OP_VISIT(bool);
-  NO_OP_VISIT(double);
+  NO_OP_VISIT(caffe2::TypeMeta)
+  NO_OP_VISIT(c10::Device)
+  NO_OP_VISIT(c10::DeviceType)
+  NO_OP_VISIT(c10::Layout)
+  NO_OP_VISIT(c10::MemoryFormat)
+  NO_OP_VISIT(c10::ScalarType)
+  NO_OP_VISIT(c10::Scalar)
+  NO_OP_VISIT(c10::TensorOptions)
+  NO_OP_VISIT(std::string)
+  NO_OP_VISIT(int64_t)
+  NO_OP_VISIT(bool)
+  NO_OP_VISIT(double)
 #undef NO_OP_VISIT
 
   SwapSavedVariables(

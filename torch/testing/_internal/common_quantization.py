@@ -67,7 +67,6 @@ except ImportError:
 import copy
 import io
 import functools
-import time
 import os
 
 import unittest
@@ -125,7 +124,7 @@ def test_only_eval_fn(model, calib_data):
     input Tensors and run the model on the dataset
     """
     for inp in calib_data:
-        output = model(*inp)
+        model(*inp)
 
 _default_loss_fn = torch.nn.CrossEntropyLoss()
 def test_only_train_fn(model, train_data, loss_fn=_default_loss_fn):
@@ -135,7 +134,7 @@ def test_only_train_fn(model, train_data, loss_fn=_default_loss_fn):
     """
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
     train_loss, correct, total = 0, 0, 0
-    for i in range(10):
+    for _ in range(10):
         model.train()
 
         for data, target in train_data:
@@ -194,7 +193,6 @@ def train_one_epoch(model, criterion, optimizer, data_loader, device, ntrain_bat
     model.train()
     cnt = 0
     for image, target in data_loader:
-        start_time = time.time()
         print('.', end='')
         cnt += 1
         image, target = image.to(device), target.to(device)
@@ -203,7 +201,7 @@ def train_one_epoch(model, criterion, optimizer, data_loader, device, ntrain_bat
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
-        acc1, acc5 = accuracy(output, target, topk=(1, 5))
+        accuracy(output, target, topk=(1, 5))
         if cnt >= ntrain_batches:
             return
     return
@@ -476,7 +474,8 @@ def _group_quantize_tensor(w, n_bit=4, q_group_size=16):
     assert torch.isnan(out).sum() == 0
 
     out = out.to(dtype=torch.int32).reshape(w.shape)
-    out_uint8 = (out[::, ::2] << 4 | out[::, 1::2]).to(torch.uint8)
+    if out.device != torch.device('cpu'):
+        out = (out[::, ::2] << 4 | out[::, 1::2]).to(torch.uint8)
 
     # Scales and zeros for the same q-group should be contiguous, so we can
     # load as a 32-bit word
@@ -492,7 +491,7 @@ def _group_quantize_tensor(w, n_bit=4, q_group_size=16):
         ).transpose(0, 1).contiguous()
     )
 
-    return out_uint8, scales_and_zeros
+    return out, scales_and_zeros
 
 
 def _dynamically_quantize_per_channel(x, quant_min, quant_max, target_dtype):
@@ -1183,7 +1182,8 @@ class QuantizationLiteTestCase(QuantizationTestCase):
         # Creates quantized model for testing mobile script modules
         qengine = "qnnpack"
         with override_quantized_engine(qengine):
-            qconfig = torch.ao.quantization.get_default_qconfig(qengine)
+            # FIXME(rec): shouldn't qconfig be passed to quantize?
+            qconfig = torch.ao.quantization.get_default_qconfig(qengine)  # noqa: F841
             model = model_class(**kwargs)
             model = quantize(model, test_only_eval_fn, [self.calib_data])
 
@@ -2374,7 +2374,7 @@ class ModelWithSequentialFusion(nn.Module):
         self.conv1 = nn.Conv2d(3, 3, 1)
         self.relu1 = nn.ReLU(inplace=False)
         layers = []
-        for i in range(3):
+        for _ in range(3):
             layers.append(ConvBNReLU())
         self.features = nn.Sequential(*layers)
         head = [nn.Linear(300, 10), nn.ReLU(inplace=False)]

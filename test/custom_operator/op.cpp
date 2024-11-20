@@ -12,8 +12,7 @@ torch::List<torch::Tensor> custom_op(
     int64_t repeat) {
   torch::List<torch::Tensor> output;
   output.reserve(repeat);
-  for (const auto i : c10::irange(repeat)) {
-    (void)i; // Suppress unused variable warning
+  for ([[maybe_unused]] const auto i : c10::irange(repeat)) {
     output.push_back(tensor * scalar);
   }
   return output;

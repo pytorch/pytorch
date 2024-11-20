@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import string
 from collections import defaultdict
 from typing import Sequence
 
@@ -194,9 +195,7 @@ def generate_out_args_from_schema(
         lambda a: [] if a.annotation is None else a.annotation.alias_set,
         func.arguments.flat_all,
     )
-    valid_annotations = [
-        x for x in "abcdefghijklmnopqrstuvwxyz" if x not in used_annotations
-    ]
+    valid_annotations = [x for x in string.ascii_lowercase if x not in used_annotations]
 
     all_rets_are_tensors = all(r.type == BaseType(BaseTy.Tensor) for r in func.returns)
 

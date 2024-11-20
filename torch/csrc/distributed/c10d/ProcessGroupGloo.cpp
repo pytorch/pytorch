@@ -1,10 +1,12 @@
 #include <c10/util/Exception.h>
+#include <c10/util/error.h>
 #include <torch/csrc/distributed/c10d/ProcessGroupGloo.hpp>
 
 #ifdef USE_C10D_GLOO
 
 #include <torch/csrc/distributed/c10d/GlooDeviceFactory.hpp>
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <chrono>
 #include <exception>
 
@@ -574,6 +576,11 @@ bool ProcessGroupGloo::SendWork::wait(std::chrono::milliseconds timeout) {
 
   // Completes the Work object and throws the exception.
   finishAndThrow(exception);
+  if (c10d::allow_inflight_collective_as_graph_input()) {
+    c10d::unregister_work(
+        c10::intrusive_ptr<
+            ProcessGroupGloo::SendWork>::unsafe_reclaim_from_nonowning(this));
+  }
   return sendCompleted;
 }
 
@@ -621,6 +628,11 @@ bool ProcessGroupGloo::RecvWork::wait(std::chrono::milliseconds timeout) {
 
   // Completes the Work object and throws the exception.
   finishAndThrow(exception);
+  if (c10d::allow_inflight_collective_as_graph_input()) {
+    c10d::unregister_work(
+        c10::intrusive_ptr<
+            ProcessGroupGloo::RecvWork>::unsafe_reclaim_from_nonowning(this));
+  }
   return recvCompleted;
 }
 
@@ -647,7 +659,6 @@ void socketInitialize() {
 bool doesHostnameResolveToUsableAddress(const std::string& hostname) {
   socketInitialize();
   struct addrinfo hints {};
-  memset(&hints, 0, sizeof(hints));
   hints.ai_family = AF_UNSPEC;
   hints.ai_socktype = SOCK_STREAM;
   struct addrinfo* result = nullptr;
@@ -703,7 +714,7 @@ std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
   std::array<char, HOST_NAME_MAX> hostname{};
   auto rv = gethostname(hostname.data(), HOST_NAME_MAX);
   if (rv != 0) {
-    C10_THROW_ERROR(DistBackendError, std::strerror(errno));
+    C10_THROW_ERROR(DistBackendError, c10::utils::str_error(errno));
   }
 
   // Use this machine's hostname if it resolves to an address.
@@ -730,7 +741,7 @@ std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
   auto hostname = std::unique_ptr<char[]>(new char[hostNameMax]);
   auto rv = gethostname(hostname.get(), hostNameMax);
   if (rv != 0) {
-    C10_THROW_ERROR(DistBackendError, std::strerror(errno));
+    C10_THROW_ERROR(DistBackendError, c10::utils::str_error(errno));
   }
 
   // Use this machine's hostname if it resolves to an address.
@@ -869,7 +880,7 @@ namespace {
 class AsyncBroadcastWork : public ProcessGroupGloo::AsyncWork {
  public:
   AsyncBroadcastWork(
-      const std::shared_ptr<gloo::Context>& context,
+      std::shared_ptr<gloo::Context> context,
       std::vector<at::Tensor>& inputs,
       int rootRank,
       int rootTensor,
@@ -881,7 +892,7 @@ class AsyncBroadcastWork : public ProcessGroupGloo::AsyncWork {
             seq,
             "gloo:broadcast",
             inputs),
-        context(context),
+        context(std::move(context)),
         inputs(inputs),
         rootRank(rootRank),
         rootTensor(rootTensor),
@@ -1018,7 +1029,7 @@ namespace {
 class AsyncAllreduceWork : public ProcessGroupGloo::AsyncWork {
  public:
   AsyncAllreduceWork(
-      const std::shared_ptr<gloo::Context>& context,
+      std::shared_ptr<gloo::Context> context,
       std::vector<at::Tensor>& inputs,
       ReduceOp reduceOp,
       uint32_t tag,
@@ -1029,7 +1040,7 @@ class AsyncAllreduceWork : public ProcessGroupGloo::AsyncWork {
             seq,
             "gloo:all_reduce",
             inputs),
-        context(context),
+        context(std::move(context)),
         inputs(inputs),
         reduceOp(std::move(reduceOp)),
         tag(tag) {}
@@ -1102,7 +1113,7 @@ class AsyncAllreduceCoalescedWork : public AsyncAllreduceWork {
 class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
  public:
   AsyncSparseAllreduceWork(
-      const std::shared_ptr<gloo::Context>& context,
+      std::shared_ptr<gloo::Context> context,
       std::vector<at::Tensor>& inputs,
       uint32_t tag,
       uint64_t seq)
@@ -1112,7 +1123,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
             seq,
             "gloo:sparse_all_reduce",
             inputs),
-        context(context),
+        context(std::move(context)),
         inputs(inputs),
         tag(tag) {}
 
@@ -1619,7 +1630,7 @@ namespace {
 class AsyncReduceWork : public ProcessGroupGloo::AsyncWork {
  public:
   AsyncReduceWork(
-      const std::shared_ptr<gloo::Context>& context,
+      std::shared_ptr<gloo::Context> context,
       std::vector<at::Tensor>& inputs,
       int rootRank,
       int rootTensor,
@@ -1632,7 +1643,7 @@ class AsyncReduceWork : public ProcessGroupGloo::AsyncWork {
             seq,
             "gloo:reduce",
             inputs),
-        context(context),
+        context(std::move(context)),
         inputs(inputs),
         rootRank(rootRank),
         rootTensor(rootTensor),
@@ -1797,7 +1808,7 @@ namespace {
 class AsyncAllgatherWork : public ProcessGroupGloo::AsyncWork {
  public:
   AsyncAllgatherWork(
-      const std::shared_ptr<gloo::Context>& context,
+      std::shared_ptr<gloo::Context> context,
       std::vector<std::vector<at::Tensor>>& outputs,
       std::vector<at::Tensor>& inputs,
       uint32_t tag,
@@ -1808,7 +1819,7 @@ class AsyncAllgatherWork : public ProcessGroupGloo::AsyncWork {
             seq,
             "gloo:all_gather",
             inputs),
-        context(context),
+        context(std::move(context)),
         outputs(outputs),
         inputs(inputs),
         tag(tag) {}
@@ -2069,7 +2080,7 @@ namespace {
 class AsyncAllgatherCoalescedWork : public ProcessGroupGloo::AsyncWork {
  public:
   AsyncAllgatherCoalescedWork(
-      const std::shared_ptr<gloo::Context>& context,
+      std::shared_ptr<gloo::Context> context,
       std::vector<std::vector<at::Tensor>>& output_lists,
       std::vector<at::Tensor>& input_list,
       uint32_t tag,
@@ -2080,7 +2091,7 @@ class AsyncAllgatherCoalescedWork : public ProcessGroupGloo::AsyncWork {
             seq,
             "gloo:all_gather",
             input_list),
-        context(context),
+        context(std::move(context)),
         output_lists(output_lists),
         input_list(input_list),
         tag(tag) {}
@@ -2211,7 +2222,7 @@ namespace {
 class AsyncGatherWork : public ProcessGroupGloo::AsyncWork {
  public:
   AsyncGatherWork(
-      const std::shared_ptr<gloo::Context>& context,
+      std::shared_ptr<gloo::Context> context,
       std::vector<std::vector<at::Tensor>>& outputs,
       std::vector<at::Tensor>& inputs,
       int root,
@@ -2223,7 +2234,7 @@ class AsyncGatherWork : public ProcessGroupGloo::AsyncWork {
             seq,
             "gloo:gather",
             inputs),
-        context(context),
+        context(std::move(context)),
         outputs(outputs),
         inputs(inputs),
         root(root),
@@ -2416,7 +2427,7 @@ namespace {
 class AsyncScatterWork : public ProcessGroupGloo::AsyncWork {
  public:
   AsyncScatterWork(
-      const std::shared_ptr<gloo::Context>& context,
+      std::shared_ptr<gloo::Context> context,
       std::vector<at::Tensor>& outputs,
       std::vector<std::vector<at::Tensor>>& inputs,
       int root,
@@ -2429,7 +2440,7 @@ class AsyncScatterWork : public ProcessGroupGloo::AsyncWork {
             "gloo:scatter",
             !inputs.empty() ? std::optional<std::vector<at::Tensor>>(inputs[0])
                             : std::nullopt),
-        context(context),
+        context(std::move(context)),
         outputs(outputs),
         inputs(inputs),
         root(root),
@@ -2611,7 +2622,7 @@ namespace {
 class AsyncAlltoallWork : public ProcessGroupGloo::AsyncWork {
  public:
   AsyncAlltoallWork(
-      const std::shared_ptr<gloo::Context>& context,
+      std::shared_ptr<gloo::Context> context,
       at::Tensor& outputTensor,
       at::Tensor& inputTensor,
       std::vector<int64_t>& outputCounts,
@@ -2624,7 +2635,7 @@ class AsyncAlltoallWork : public ProcessGroupGloo::AsyncWork {
             seq,
             "gloo:all_to_all",
             std::optional<std::vector<at::Tensor>>({inputTensor})),
-        context(context),
+        context(std::move(context)),
         outputTensor(outputTensor),
         inputTensor(inputTensor),
         outputCounts(std::move(outputCounts)),
@@ -2882,7 +2893,7 @@ namespace {
 class AsyncBarrierWork : public ProcessGroupGloo::AsyncWork {
  public:
   AsyncBarrierWork(
-      const std::shared_ptr<gloo::Context>& context,
+      std::shared_ptr<gloo::Context> context,
       std::vector<c10::weak_intrusive_ptr<AsyncWork>> priorWork,
       uint32_t tag,
       uint64_t seq)
@@ -2892,7 +2903,7 @@ class AsyncBarrierWork : public ProcessGroupGloo::AsyncWork {
             seq,
             "gloo:barrier",
             std::nullopt),
-        context(context),
+        context(std::move(context)),
         priorWork(std::move(priorWork)),
         tag(tag) {}
 

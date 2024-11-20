@@ -162,6 +162,11 @@ fake_tensor_allow_unsafe_data_ptr_access = True
 # tokens.
 unlift_effect_tokens = False
 
+
+# Run aot eager decomp partition with CrossRefFakeMode
+# options = False, "all", "custom_ops"
+fake_tensor_crossref = False
+
 # This mode specifies that we should also keep track of the real
 # tensor along with the fake tensor, and do real compute.  While
 # seemingly this eliminates the whole point of fake tensors, there are
@@ -194,7 +199,7 @@ fake_tensor_propagate_real_tensors = False
 
 # This controls whether we collect donated buffer. This flag must be set
 # False if a user wants to retain_graph=True for backward.
-donated_buffer = False
+donated_buffer = False if is_fbcode() else True
 
 # Controls the default graph output format used by draw_graph
 # Supported formats are defined here https://graphviz.org/docs/outputs/

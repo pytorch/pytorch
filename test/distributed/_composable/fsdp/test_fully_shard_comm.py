@@ -109,6 +109,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             mesh_info,
             post_forward_mesh_info,
             self.device,
+            None,  # shard_placement_fn
             MixedPrecisionPolicy(),
             OffloadPolicy(),
         )
@@ -252,6 +253,8 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             reduce_scatter_input,
             reduce_scatter_event,
             post_reduce_event,
+            _,
+            _,
             _,
         ) = foreach_reduce(
             fsdp_params,

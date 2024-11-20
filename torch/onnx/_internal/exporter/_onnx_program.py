@@ -114,6 +114,14 @@ ONNXProgram(
         """Return the ONNX ``ModelProto`` object."""
         return ir.serde.serialize_model(self.model)
 
+    def optimize(self) -> None:
+        """Optimize the ONNX model.
+
+        This method optimizes the ONNX model by performing constant folding and
+        eliminating redundancies in the graph. The optimization is done in-place.
+        """
+        self.model = onnxscript_apis.optimize(self.model)
+
     def save(
         self,
         destination: str | os.PathLike,

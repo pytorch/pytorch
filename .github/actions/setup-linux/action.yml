@@ -20,7 +20,7 @@ runs:
           elif [[ $runner_name_str == *"gcp"* ]]; then
             echo "Runner is from Google Cloud Platform, No info on ec2 metadata"
           else
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+            curl -H "X-aws-ec2-metadata-token: $(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 30")" -fsSL "http://169.254.169.254/latest/meta-data/${category}"
           fi
         }
         echo "ami-id: $(get_ec2_metadata ami-id)"
