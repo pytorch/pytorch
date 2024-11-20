@@ -8,7 +8,7 @@ from typing import Dict, List, Optional, Tuple
 from torch._export.serde.union import _Union
 
 # NOTE: Please update this value if any modifications are made to the schema
-SCHEMA_VERSION = (8, 1)
+SCHEMA_VERSION = (8, 2)
 TREESPEC_VERSION = 1
 
 
@@ -62,13 +62,42 @@ class SymExprHint(_Union):
     as_bool: bool
 
 
+# A leaf node in a SymExprNode, containing a bool/float/int/sympy.Symbol.
+@dataclass(repr=False)
+class SymBase(_Union):
+    as_bool: bool
+    as_float: float
+    as_int: int
+    as_symbol: str
+
+
+# Represents an AST node in a sympy.Expr.
+# If not a leaf node, "target" is a string representing the operator,
+# and "args" is a list of child SymExprNodes.
+# If a leaf node, "target" is None, "args" is empty, and "base" is a SymBase
+# representing the leaf value.
+@dataclass(repr=False)
+class SymExprNode:
+    args: List["SymExprNode"] = field(default_factory=list)
+    target: Optional[str] = None
+    base: Optional[SymBase] = None
+
+
 # This is for storing the symbolic expressions behind symints/symfloats/symbools
-# For example, we can get something like
+# The deprecated "expr_str" field is easier to explain; we could store
 # SymExpr(expr_str="s0 + s1", hint=SymExprHint(as_int=4)
-# if we also have the hint that s0 and s1 are both 2.
+# for an expression where s0 == s1 == 2.
+# We're moving away from expr_str for roundtrippability, and now deserialize into
+# the "expr_ast" field, which is a tree representation of the expression,
+# containing a root SymExprNode.
+# While we're deprecating this, we'll store an empty string in "expr_str" for now,
+# and support deserialization for both "expr_str" and "expr_ast" fields.
+# We'll only serialize to "expr_ast".
+# TODO(pianpwk): implement upgrader & delete.
 @dataclass
 class SymExpr:
     expr_str: str
+    expr_ast: Optional[SymExprNode] = None
     hint: Optional[SymExprHint] = None
 
 
