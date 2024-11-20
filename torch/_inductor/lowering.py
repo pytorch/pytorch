@@ -75,7 +75,7 @@ from .virtualized import ops, V
 
 
 log = logging.getLogger(__name__)
-lowerings: Dict[torch._ops.OpOverload, Callable[..., Any]] = {}
+lowerings: Dict[Callable[..., Any], Callable[..., Any]] = {}
 # Use maybe_layout_constraints to access this dict, we lazily register tag-based layout constraints
 _maybe_layout_constraints: Dict[
     torch._ops.OpOverload, Optional[Callable[..., Any]]
@@ -6126,6 +6126,7 @@ foreach_div_list = register_foreach_pointwise(aten._foreach_div.List, div)
 register_foreach_pointwise(aten._foreach_div.Tensor, div)
 foreach_div_scalar = register_foreach_pointwise(aten._foreach_div.Scalar, div)
 register_foreach_pointwise(aten._foreach_sqrt, sqrt)
+register_foreach_pointwise(aten._foreach_rsqrt, rsqrt)
 register_foreach_pointwise(aten._foreach_maximum.List, maximum)
 register_foreach_pointwise(aten._foreach_maximum.Scalar, maximum)
 register_foreach_pointwise(aten._foreach_minimum.List, minimum)

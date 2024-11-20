@@ -5249,7 +5249,7 @@ static Tensor apply_simple_transformation(
       return condition_with_I ? K - transformation : -transformation;
     }
   }
-};
+}
 
 std::tuple<Tensor, Tensor> householder_product_backward(
     const Tensor& grad,
