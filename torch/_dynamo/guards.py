@@ -74,6 +74,7 @@ from torch.fx.experimental.symbolic_shapes import (
     is_symbolic,
     SYMPY_INTERP,
 )
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._traceback import format_frame, report_compile_source_on_error
 from torch.utils.weak import TensorWeakRef
 
@@ -186,7 +187,7 @@ class GuardManagerWrapper:
 
         self.print_no_tensor_aliasing_guard = True
 
-        self.diff_guard_sources: Set[str] = set()
+        self.diff_guard_sources: OrderedSet[str] = OrderedSet()
 
     @contextmanager
     def _preserve_print_no_tensor_aliasing_flag(self):
