@@ -6010,19 +6010,24 @@ class AssertScalar(ExternKernel):
         return free_unbacked_symbols(self.scalar)
 
     def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
+        # NB: It is EXTREMELY important not to simplify the scalar under assertion here,
+        # because simplify is done with respect to runtime asserts.  So if you have
+        # "u0 == 0" in the runtime asserts, if you subsequently try to
+        # simplify(u0 == 0), you will get True (because we've already runtime assert'ed
+        # that it's true).  But we're code generating the actual runtime assert here!!
         if V.graph.cpp_wrapper:
-            pass
-        else:
-            # NB: It is EXTREMELY important not to simplify the scalar under
-            # assertion here, because simplify is done with respect to
-            # runtime asserts.  So if you have "u0 == 0" in the runtime
-            # asserts, if you subsequently try to simplify(u0 == 0), you will
-            # get True (because we've already runtime assert'ed that it's
-            # true).  But we're code generating the actual runtime assert
-            # here!!
-            wrapper.writeline(
-                f"if not {V.graph.wrapper_code.codegen_python_sizevar(self.scalar, simplify=False)}:"
+            sizevar = V.graph.wrapper_code.codegen_cpp_sizevar(
+                self.scalar, simplify=False
             )
+            # TODO: when we start compiling in C++20, annotate with [[unlikely]].
+            wrapper.writeline(
+                f'if (!({sizevar})) {{ throw std::runtime_error("{self.msg}"); }}'
+            )
+        else:
+            sizevar = V.graph.wrapper_code.codegen_python_sizevar(
+                self.scalar, simplify=False
+            )
+            wrapper.writeline(f"if not {sizevar}:")
             wrapper.writeline(f"    raise RuntimeError({repr(self.msg)})")
             # No one should ever use this buffer, but for uniformity
             # define the variable and assign it None

@@ -1101,8 +1101,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
             return
         super().add_benchmark_harness(output)
 
+    def codegen_cpp_sizevar(self, x: Expr, *, simplify: bool = True) -> str:
+        return self.expr_printer(V.graph.sizevars.simplify(x) if simplify else x)
+
     def codegen_sizevar(self, x: Expr) -> str:
-        return self.expr_printer(V.graph.sizevars.simplify(x))
+        return self.codegen_cpp_sizevar(x)
 
     def codegen_tuple_access(self, basename: str, name: str, index: str) -> str:
         # in the abi_compatible mode, outputs are returned via arguments
