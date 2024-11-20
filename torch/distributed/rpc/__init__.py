@@ -247,3 +247,59 @@ if is_available():
         info.update(api._get_current_rpc_agent().get_debug_info())
         info.update(dist_autograd._get_debug_info())
         return info
+
+    def gather_remote_modules(refs: list[api.RRef], combine: bool = True) -> dict:
+        r"""
+        Retrieve from remote modules their :meth:`~torch.nn.Module.state_dict()`
+        and return them combined or separated by worker name
+
+        Args:
+            refs (list[RRef]): List of remote references obtained with
+                :meth:`~torch.distributed.nn.api.remote_module.RemoteModule.get_module_rref()`
+            combine (bool, optional): If ``True``, stores all remote modules
+                :meth:`~torch.nn.Module.state_dict()` under the key "all";
+                if ``False`` store each :meth:`~torch.nn.Module.state_dict()`
+                under their worker name key. (Default ``True``)
+
+        Returns:
+            A dictionary. If combine is ``True``, a dictionary containing
+            all workers' :meth:`~torch.nn.Module.state_dict()` under the key
+            `all`. If combine is ``False`` a dictionary containing each workers'
+            :meth:`~torch.nn.Module.state_dict()` associated to its worker name.
+
+        Example::
+
+            >>> # xdoctest: +SKIP
+            >>> remote_refs = [m.get_module_rref() for m in Your_remote_modules]
+            >>> gather_remote_modules(remote_refs)
+            {"all": dict(layer_name, tensor)}
+
+            Or
+
+            >>> remote_refs = [m.get_module_rref() for m in Your_remote_modules]
+            >>> gather_remote_modules(remote_refs, combine=False)
+            {"worker1": dict(layer_name, tensor), "worker2: dict(layer_name, tensor)}
+        """
+        ret = {}
+        for mod in refs:
+            mod_dict = api.rpc_sync(
+                mod.owner_name(), __get_remote_statedict, args=(mod,)
+            )
+            if combine:
+                ret["all"].update(mod_dict)
+            else:
+                ret[mod.owner_name()] = mod_dict
+        return ret
+
+
+def __get_remote_statedict(modref: api.RRef) -> dict:
+    """ Get remote module state_dict
+    """
+    mod = modref.to_here()
+    # store old module's device because RPC only works with CPU at the moment
+    # as there is no module.device() we check with the parameters
+    old_device = next(mod.parameters()).device
+    mod.to("cpu")
+    state_dict = mod.state_dict()
+    mod.to(old_device)  # restore
+    return state_dict
