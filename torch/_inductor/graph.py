@@ -1822,7 +1822,9 @@ class GraphLowering(torch.fx.Interpreter):
         if any(device in self.device_types for device in ["cuda", "xpu"]):
             # first pass
             self.cpp_wrapper = False
-            compiled = self.compile_to_module().call
+            # disable output saving, to un-break some tests that can't handle two-pass
+            # GPU codegen
+            compiled = self.compile_to_module(save_output=False).call
 
             if not config.triton.autotune_at_compile_time:
 
@@ -1973,23 +1975,24 @@ class GraphLowering(torch.fx.Interpreter):
         # No-op to be patched for unit tests
         pass
 
-    def compile_to_module(self) -> ModuleType:
+    def compile_to_module(self, *, save_output: bool = True) -> ModuleType:
         with dynamo_timed(
             "GraphLowering.compile_to_module",
             phase_name="code_gen",
             log_pt2_compile_event=True,
             dynamo_compile_column_us="inductor_code_gen_cumulative_compile_time_us",
         ):
-            return self._compile_to_module()
+            return self._compile_to_module(save_output=save_output)
 
-    def _compile_to_module(self) -> ModuleType:
+    def _compile_to_module(self, *, save_output: bool = True) -> ModuleType:
         from .codecache import PyCodeCache
 
         code, linemap = (
             self.codegen_with_cpp_wrapper() if self.cpp_wrapper else self.codegen()
         )
 
-        GraphLowering.save_output_code(code)
+        if save_output:
+            GraphLowering.save_output_code(code)
         output_code_log.debug("Output code: \n%s", code)
 
         inductor_meta = autotune_cache.inductor_meta_from_config()
