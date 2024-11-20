@@ -32,9 +32,6 @@ class XPUDeviceOpOverrides(DeviceOpOverrides):
 
     def kernel_header(self):
         source_codes = """
-        #include <c10/core/DeviceGuard.h>
-        #include <c10/xpu/XPUStream.h>
-        #include <ATen/xpu/EmptyTensor.h>
         #include <torch/csrc/inductor/aoti_runtime/sycl_runtime_wrappers.h>
         """
         return source_codes
