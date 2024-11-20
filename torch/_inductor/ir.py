@@ -3695,7 +3695,13 @@ class InputBuffer(Buffer):
 
 
 class DonatedBuffer(InputBuffer):
-    pass
+    """
+    Represents a donated buffer which is a saved tensor that is not alias to any
+    fwd inputs, fwd user outputs, and bwd outputs. We generally cannot inplace
+    reuse the input tensor memory during backward since it might be used in another
+    function. However, donated buffer can be inplace reused during backward
+    to save memory.
+    """
 
 
 class ConstantBuffer(InputBuffer):

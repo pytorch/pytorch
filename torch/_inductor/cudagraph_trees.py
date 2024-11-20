@@ -833,7 +833,8 @@ class CUDAGraphNode:
             if isinstance(t, torch.Tensor) and self._is_cuda_graph_recorded_tensor(t)
         ]
 
-        self.live_cudagraph_managed_path_refs: List[Optional[PathOutputIndex]] = [
+        # (depth, offset) of live tensors which are alias of previous graph outputs
+        self.live_cudagraph_managed_path_refs: InputList[Optional[PathOutputIndex]] = [
             (
                 self._is_alias_of_live_recorded_tensor(t)
                 if isinstance(t, torch.Tensor)
@@ -841,7 +842,10 @@ class CUDAGraphNode:
             )
             for t in inputs
         ]
-        self.preserved_aliased_inputs: List[bool] = [False] * len(inputs)
+
+        # when replay, preserve the liveness of an input if it AliasesPriorGraphOutput
+        # and also aliases an output of the current CUDAGraphNode
+        self.preserved_aliased_inputs: InputList[bool] = [False] * len(inputs)
 
         self.static_input_idxs: List[int] = list(
             set(wrapped_function.static_input_idxs) | set(self.cudagraph_managed_idxs)
