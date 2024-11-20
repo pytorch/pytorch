@@ -175,7 +175,7 @@ class GuardManagerWrapper:
         self.guard_fail_fn = None
         self.cache_entry = None
         self.extra_state = None
-        self.id_matched_objs = None
+        self.id_matched_objs = {}
         self.no_tensor_aliasing_sources = []
 
         self.print_no_tensor_aliasing_guard = True
@@ -536,7 +536,7 @@ class GuardManagerType(enum.Enum):
 class GuardBuilder(GuardBuilderBase):
     def __init__(
         self,
-        id_ref: Callable[[Any], str],
+        id_ref: Callable[[Any, str], str],
         source_ref: Callable[[Source], str],
         lookup_weakrefs: Callable[[object], ReferenceType[object]],
         local_scope: Dict[str, object],
@@ -639,7 +639,7 @@ class GuardBuilder(GuardBuilderBase):
             )
             if key_is_id(key):
                 # Install ID_MATCH guard
-                id_val = self.id_ref(key)
+                id_val = self.id_ref(key, key_source)
                 key_manager.add_id_match_guard(
                     id_val,
                     get_verbose_code_parts(
@@ -1306,7 +1306,7 @@ class GuardBuilder(GuardBuilderBase):
     def TYPE_MATCH(self, guard: Guard) -> None:
         # ___check_type_id is same as `id(type(x)) == y`
         t = type(self.get(guard.name))
-        obj_id = self.id_ref(t)
+        obj_id = self.id_ref(t, f"type({guard.name})")
         code = f"___check_type_id({self.arg_ref(guard)}, {obj_id})"
         self._set_guard_export_info(guard, [code])
 
@@ -1349,7 +1349,7 @@ class GuardBuilder(GuardBuilderBase):
 
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
-        id_val = self.id_ref(val)
+        id_val = self.id_ref(val, guard.name)
         code = f"___check_obj_id({ref}, {id_val})"
         self._set_guard_export_info(guard, [code])
 
@@ -1622,7 +1622,7 @@ class GuardBuilder(GuardBuilderBase):
         self._set_guard_export_info(guard, code)
 
         t = type(value)
-        obj_id = self.id_ref(t)
+        obj_id = self.id_ref(t, f"type({guard.name})")
 
         self.get_guard_manager(guard).add_tuple_iterator_length_guard(
             tuple_iterator_len(value), obj_id, get_verbose_code_parts(code, guard)
@@ -2121,8 +2121,10 @@ def must_add_nn_module_guards(guard):
     )
 
 
-class DeletedGuardFn:
-    pass
+class DeletedGuardManagerWrapper(GuardManagerWrapper):
+    def __init__(self, reason):
+        super().__init__()
+        self.invalidation_reason = reason
 
 
 # NB: Naively, you'd expect this to only be a function that produces
@@ -2403,24 +2405,24 @@ class CheckFunctionManager:
         self.guard_manager.extra_state = None
         self.guard_manager.no_tensor_aliasing_sources = no_tensor_aliasing_names
 
-    def invalidate(self):
+    def invalidate(self, obj_str):
         # Some tests reveal that CheckFunctionManager has no attribute
         # guard_manager, but this case should not be of any concern.
         # This case doesn't seem easy to repro.
         if (
             hasattr(self, "guard_manager")
-            and self.guard_manager is not DeletedGuardFn
+            and not isinstance(self.guard_manager, DeletedGuardManagerWrapper)
             and (cache_entry := self.guard_manager.cache_entry) is not None
             and (extra_state := self.guard_manager.extra_state) is not None
         ):
             assert isinstance(cache_entry, CacheEntry)
             assert isinstance(extra_state, ExtraState)
-            extra_state.invalidate(cache_entry)
-            self.guard_manager.cache_entry = None
-            self.guard_manager.extra_state = None
-            self.guard_manager = DeletedGuardFn  # type: ignore[assignment]
+            reason = f"Cache line invalidated because {obj_str} got deallocated"
+            deleted_guard_manager = DeletedGuardManagerWrapper(reason)
+            extra_state.invalidate(cache_entry, deleted_guard_manager)
+            self.guard_manager = deleted_guard_manager
 
-    def id_ref(self, obj):
+    def id_ref(self, obj, obj_str):
         """add a weakref, return the id"""
         try:
             if id(obj) not in self._weakrefs:
@@ -2428,7 +2430,9 @@ class CheckFunctionManager:
                 # function, which will delete the callbacks as well. Therefore,
                 # we are using a finalizer which is kept alive.
                 self._weakrefs[id(obj)] = weakref.ref(obj)
-                weakref.finalize(obj, self.invalidate)
+                weakref.finalize(
+                    obj, functools.partial(self.invalidate, obj_str=obj_str)
+                )
         except TypeError:
             pass  # cannot weakref bool object
         return id(obj)
@@ -2600,6 +2604,8 @@ def get_guard_fail_reason(
     f_locals: Dict[str, object],
     compile_id: CompileId,
 ) -> str:
+    if isinstance(guard_manager, DeletedGuardManagerWrapper):
+        return f"{compile_id}: {guard_manager.invalidation_reason}"
     reason_str = get_guard_fail_reason_helper(guard_manager, f_locals, compile_id)
     guard_failures[orig_code_map[code]].append(reason_str)
 
