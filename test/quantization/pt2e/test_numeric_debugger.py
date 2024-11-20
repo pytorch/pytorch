@@ -14,6 +14,7 @@ from torch.ao.quantization import (
     NUMERIC_DEBUG_HANDLE_KEY,
     prepare_for_propagation_comparison,
 )
+from torch.ao.quantization.pt2e.graph_utils import get_control_flow_submodules
 from torch.ao.quantization.quantize_pt2e import convert_pt2e, prepare_pt2e
 from torch.ao.quantization.quantizer.xnnpack_quantizer import (
     get_symmetric_quantization_config,
@@ -52,6 +53,32 @@ class TestNumericDebugger(TestCase):
             if CUSTOM_KEY in n.meta and NUMERIC_DEBUG_HANDLE_KEY in n.meta[CUSTOM_KEY]:
                 unique_ids.add(n.meta[CUSTOM_KEY][NUMERIC_DEBUG_HANDLE_KEY])
                 count += 1
+        self.assertEqual(len(unique_ids), count)
+
+    def test_control_flow(self):
+        m = TestHelperModules.ControlFlow()
+        example_inputs = m.example_inputs()
+        ep = export_for_training(m, example_inputs)
+        generate_numeric_debug_handle(ep)
+        unique_ids = set()
+        count = 0
+
+        m_queue = [ep.module()]
+
+        while m_queue:
+            cur_m = m_queue.pop(0)
+            for n in cur_m.graph.nodes:
+                if (
+                    CUSTOM_KEY in n.meta
+                    and NUMERIC_DEBUG_HANDLE_KEY in n.meta[CUSTOM_KEY]
+                ):
+                    unique_ids.add(n.meta[CUSTOM_KEY][NUMERIC_DEBUG_HANDLE_KEY])
+                    count += 1
+            control_flow_submodules = [
+                submodule for _, submodule, _ in get_control_flow_submodules(cur_m)
+            ]
+            m_queue.extend(control_flow_submodules)
+
         self.assertEqual(len(unique_ids), count)
 
     def test_quantize_pt2e_preserve_handle(self):
