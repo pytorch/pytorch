@@ -191,9 +191,9 @@ def reshard_local_shard(
     )
 
     # Compute expected size
-    input_split_sizes = []
-    for metadata in shards_metadata:
-        input_split_sizes.append(metadata.shard_sizes[reshard_dim])
+    input_split_sizes = [
+        metadata.shard_sizes[reshard_dim] for metadata in shards_metadata
+    ]
     rearrange_input = any(ranks[i] > ranks[i + 1] for i in range(len(ranks) - 1))
 
     if rearrange_input:
