@@ -1,3 +1,4 @@
+#include <c10/util/error.h>
 #include <torch/csrc/distributed/c10d/FileStore.hpp>
 
 #include <fcntl.h>
@@ -22,9 +23,9 @@
 
 #include <c10/util/Exception.h>
 
-#define SYSASSERT(rv, ...)                                 \
-  if ((rv) < 0) {                                          \
-    C10_THROW_ERROR(DistStoreError, std::strerror(errno)); \
+#define SYSASSERT(rv, ...)                                         \
+  if ((rv) < 0) {                                                  \
+    C10_THROW_ERROR(DistStoreError, c10::utils::str_error(errno)); \
   }
 
 #ifdef _WIN32
