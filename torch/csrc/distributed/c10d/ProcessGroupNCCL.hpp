@@ -757,8 +757,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // If all comms on this PG are fully initialized, return true.
   bool isInitialized();
 
-  ErrorType getError() override;
-
   // Performs NCCL user buffer registration for all buffers in
   // the given MemPool
   void registerMemPool(c10::cuda::MemPool* pool);

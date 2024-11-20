@@ -1113,11 +1113,6 @@ bool ProcessGroupNCCL::isInitialized() {
   return initialized;
 }
 
-ErrorType ProcessGroupNCCL::getError() {
-  std::lock_guard<std::mutex> lock(errorMutex_);
-  return error_;
-}
-
 void ProcessGroupNCCL::registerMemPool(c10::cuda::MemPool* pool) {
   const auto key = std::to_string(pool->device());
   auto device = at::Device(at::DeviceType::CUDA, pool->device());
