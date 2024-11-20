@@ -15,7 +15,11 @@
 // C ABI defined in torch/csrc/inductor/aoti_torch/c/shim.h. The same rule
 // applies to other files under torch/csrc/inductor/aoti_runtime/.
 #include <torch/csrc/inductor/aoti_runtime/device_utils.h>
+#ifdef USE_XPU
+#include <torch/csrc/inductor/aoti_runtime/utils_xpu.h>
+#else
 #include <torch/csrc/inductor/aoti_runtime/utils.h>
+#endif
 
 #define AOTI_RUNTIME_CHECK(EXPR, MSG) \
   do {                                \
