@@ -1724,7 +1724,12 @@ class GraphModule(torch.nn.Module):
 
 
 class ContextlibContextManagerTests(torch._dynamo.test_case.TestCase):
-    @torch._dynamo.config.patch(enable_trace_contextlib_contextmanager=True)
+    def setUp(self):
+        torch._dynamo.config.enable_trace_contextlib_contextmanager = True
+
+    def tearDown(self):
+        torch._dynamo.config.enable_trace_contextlib_contextmanager = False
+
     def test_ctx_basic0(self):
         @contextlib.contextmanager
         def set_default_dtype(dtype):
@@ -1762,7 +1767,6 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
-    @torch._dynamo.config.patch(enable_trace_contextlib_contextmanager=True)
     def test_ctx_basic1(self):
         @contextlib.contextmanager
         def compute_sin(x):
@@ -1780,7 +1784,6 @@ class GraphModule(torch.nn.Module):
         y = fn(x)
         self.assertEqual(y, x.sin().cos())
 
-    @torch._dynamo.config.patch(enable_trace_contextlib_contextmanager=True)
     def test_change_parent_nonlocal_0(self):
         # test if a nonlocal actually gets propagated
         z = 0
@@ -1816,7 +1819,6 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(z, 100)
         self.assertEqual(k, 100)
 
-    @torch._dynamo.config.patch(enable_trace_contextlib_contextmanager=True)
     def test_change_parent_nonlocal_1(self):
         # test if finally is executed and it is reading the correct variable
         z = 1
@@ -1852,7 +1854,6 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(k, 100)
 
     @unittest.expectedFailure
-    @torch._dynamo.config.patch(enable_trace_contextlib_contextmanager=True)
     def test_change_parent_global_0(self):
         # test if a global actually gets propagated
         global z_glb, k_glb
@@ -1887,7 +1888,6 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(z_glb, 100)
         self.assertEqual(k_glb, 100)
 
-    @torch._dynamo.config.patch(enable_trace_contextlib_contextmanager=True)
     def test_change_parent_global_1(self):
         # test if finally is executed and it is reading the correct variable
         global z_glb, k_glb
@@ -1921,7 +1921,6 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(z_glb, 100)
         self.assertEqual(k_glb, 100)
 
-    @torch._dynamo.config.patch(enable_trace_contextlib_contextmanager=True)
     def test_change_parent_0(self):
         def create_ctx():
             @_contextmanager
@@ -1946,7 +1945,6 @@ class GraphModule(torch.nn.Module):
         y = fn(x)
         self.assertEqual(y, x.sin().cos())
 
-    @torch._dynamo.config.patch(enable_trace_contextlib_contextmanager=True)
     def test_change_parent_1(self):
         def create_ctx(x):
             @_contextmanager
@@ -1971,7 +1969,6 @@ class GraphModule(torch.nn.Module):
         y = fn(x)
         self.assertEqual(y, x.sin().cos())
 
-    @torch._dynamo.config.patch(enable_trace_contextlib_contextmanager=True)
     def test_graph_break_inside_ctx(self):
         @contextlib.contextmanager
         def whoo(x):
@@ -1996,7 +1993,6 @@ class GraphModule(torch.nn.Module):
         # no graph will be generated as we will skip all frames due to the graph break
         self.assertEqual(len(eager.graphs), 0)
 
-    @torch._dynamo.config.patch(enable_trace_contextlib_contextmanager=True)
     def test_graph_break_inside_ctx_1(self):
         @contextlib.contextmanager
         def whoo(x):
@@ -2047,7 +2043,6 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
-    @torch._dynamo.config.patch(enable_trace_contextlib_contextmanager=True)
     def test_graph_break_inside_ctx_2(self):
         @contextlib.contextmanager
         def whoo(x):
@@ -2150,7 +2145,6 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
-    @torch._dynamo.config.patch(enable_trace_contextlib_contextmanager=True)
     @parametrize("name", ("suppress", "stdout", "stderr"))
     def test_contextlib_suppress(self, name):
         counters.clear()
@@ -2181,7 +2175,6 @@ class GraphModule(torch.nn.Module):
             dict(counters["graph_break"]),
         )
 
-    @torch._dynamo.config.patch(enable_trace_contextlib_contextmanager=True)
     def test_contextlib_nullcontext(self):
         counters.clear()
 
