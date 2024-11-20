@@ -1306,8 +1306,9 @@ def merge_view_inputs(
             mutated_input_info[inpt_idx].mutates_data
             for inpt_idx in aliased_input_indices
         ):
-            for curr_idx in aliased_input_indices:
-                other_args.append(fwd_inputs[curr_idx])
+            other_args.extend(
+                fwd_inputs[curr_idx] for curr_idx in aliased_input_indices
+            )
             continue
 
         # Here, we attempt to do a more complicated check to detect false aliasing
@@ -1320,8 +1321,9 @@ def merge_view_inputs(
             fwd_inputs, aliased_input_indices
         )
         if len(aliased_input_indices_no_false_sharing) <= 1:
-            for curr_idx in aliased_input_indices:
-                other_args.append(fwd_inputs[curr_idx])
+            other_args.extend(
+                fwd_inputs[curr_idx] for curr_idx in aliased_input_indices
+            )
             continue
 
         # We detected an input that was mutated, AND aliases with another input.

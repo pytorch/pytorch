@@ -442,14 +442,11 @@ class DTensorConverter:
         self.flatten_kwargs: List[object] = flatten_kwargs
         self.flatten_kwargs_spec: TreeSpec = flatten_kwargs_spec
 
-        choices_for_args = []
-        for arg in self.flatten_args:
-            if isinstance(arg, torch.Tensor):
-                choices_for_args.append(self.gen_sharding_choices_for_arg(arg))
+        choices_for_args = [self.gen_sharding_choices_for_arg(arg) for arg in self.flatten_args if isinstance(arg, torch.Tensor)]
 
-        for arg in self.flatten_kwargs:
-            if isinstance(arg, torch.Tensor):
-                choices_for_args.append(self.gen_sharding_choices_for_arg(arg))
+        choices_for_args.extend(
+            self.gen_sharding_choices_for_arg(arg) for arg in self.flatten_kwargs if isinstance(arg, torch.Tensor)
+        )
 
         self.sharding_combs: Iterator[Sequence[Placement]] = iter(
             itertools.product(*choices_for_args)

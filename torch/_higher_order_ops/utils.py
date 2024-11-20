@@ -388,9 +388,7 @@ def _unstack_pytree(xs):
 
     a = zip(*flat_xs)
 
-    pytrees = []
-    for tuple in a:
-        pytrees.append(pytree.tree_unflatten(tuple, inspec))
+    pytrees = [pytree.tree_unflatten(tuple, inspec) for tuple in a]
     return pytrees
 
 

@@ -2526,7 +2526,6 @@ def make_torch_function_mode_stack_guard(intial_stack):
 
 
 def recompilation_reason_for_no_tensor_aliasing_guard(guard_manager, scope):
-    duplicate_tensors = []
     global_scope = dict(guard_manager.global_scope)
     ids_to_source = collections.defaultdict(list)
     for tensor_source in guard_manager.no_tensor_aliasing_sources:  # type: ignore[attr-defined]
@@ -2534,9 +2533,9 @@ def recompilation_reason_for_no_tensor_aliasing_guard(guard_manager, scope):
         tensor_id = id(eval(tensor_source, global_scope, scope))
         ids_to_source[tensor_id].append(tensor_source)
 
-    for key in ids_to_source:
-        if len(ids_to_source[key]) > 1:
-            duplicate_tensors.append(f"{ids_to_source[key]}")
+    duplicate_tensors = [
+        f"{ids_to_source[key]}" for key in ids_to_source if len(ids_to_source[key]) > 1
+    ]
 
     reason = ", ".join(duplicate_tensors)
     return [f"Duplicate tensors found: {reason}"]

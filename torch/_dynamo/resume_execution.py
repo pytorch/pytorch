@@ -252,8 +252,7 @@ def _filter_iter(l1, l2, cond):
 def _load_tuple_and_call(tup):
     insts: List[Instruction] = []
     _initial_push_null(insts)
-    for val in tup:
-        insts.append(create_instruction("LOAD_CONST", argval=val))
+    insts.extend(create_instruction("LOAD_CONST", argval=val) for val in tup)
     insts.extend(create_call_function(len(tup), False))
     return insts
 

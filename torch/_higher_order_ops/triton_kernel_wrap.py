@@ -543,8 +543,7 @@ def analyze_kernel_mutations(
                 )
                 stack.extend(arg for arg, mutated in zip(op.args, mutations) if mutated)
             else:
-                for idx in MUTATION_OPS.get(op.name, []):
-                    stack.append(op.args[idx])
+                stack.extend(op.args[idx] for idx in MUTATION_OPS.get(op.name, []))
 
     # The following is an iterative DFS algorithm
     mutated = [False] * num_args

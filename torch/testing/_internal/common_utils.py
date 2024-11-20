@@ -4669,8 +4669,7 @@ def _generate_indices_prefer_all_rows(rows: int, cols: int, num_indices: int) ->
 
     for r in range(rows):
         # Note that this can yield overlapping indices
-        for c in random.choices(col_indices, k=n_per_row):
-            indices.append((r, c))
+        indices.extend((r, c) for c in random.choices(col_indices, k=n_per_row))
 
     return torch.tensor(indices[:num_indices])
 
@@ -5165,9 +5164,7 @@ def get_cycles_per_ms() -> float:
     # and seems to return stable values. Therefore, we enable caching
     # using lru_cache decorator above.
     num = 10
-    vals = []
-    for _ in range(num):
-        vals.append(measure())
+    vals = [measure() for _ in range(num)]
     vals = sorted(vals)
     return mean(vals[2 : num - 2])
 

@@ -127,9 +127,7 @@ class MemoryDep(Dep):
             return None
 
         stride_to_index = {s: i for i, s in enumerate(self_strides)}
-        order = []
-        for s in other_strides:
-            order.append(stride_to_index[s])
+        order = [stride_to_index[s] for s in other_strides]
 
         assert set(order) == set(range(0, self.num_vars))
         return order
@@ -547,9 +545,7 @@ def var_builder(prefix: str) -> Tuple[VarRanges, Callable[[sympy.Expr], sympy.Sy
 
 def index_vars_no_squeeze(*argsizes: Tuple[sympy.Expr, ...], prefix: str):
     var_ranges, add_var = var_builder(prefix)
-    args: List[List[sympy.Symbol]] = []
-    for size in argsizes:
-        args.append(list(map(add_var, size)))
+    args: List[List[sympy.Symbol]] = [list(map(add_var, size)) for size in argsizes]
     return args, var_ranges
 
 

@@ -5201,10 +5201,9 @@ class ShapeEnv:
         symints = {
             s.node.expr for s in symints if isinstance(s.node.expr, sympy.Symbol)
         }
-        guards = []
-        for g in self.guards:
-            if all(s in symints for s in g.expr.free_symbols):
-                guards.append(g)
+        guards = [
+            g for g in self.guards if all(s in symints for s in g.expr.free_symbols)
+        ]
         return guards
 
     def bind_symbols(

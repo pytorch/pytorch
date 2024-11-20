@@ -1463,9 +1463,7 @@ class OutputGraph:
         return compiled_fn
 
     def example_inputs(self) -> List[torch.Tensor]:
-        result = []
-        for arg in self.graphargs:
-            result.append(arg.example)
+        result = [arg.example for arg in self.graphargs]
         return result
 
     def remove_unused_graphargs(self) -> None:

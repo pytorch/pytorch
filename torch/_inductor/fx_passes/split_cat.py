@@ -1120,9 +1120,9 @@ class UnbindCatRemover(SplitCatSimplifier):
             return
         # we need to check if the getitem indices from unbind are consecutive and all go to the same cat node
         # before we do the unbind remove, otherwise it will hit the error when we unbind part of them
-        getitem_indices = []
-        for getitem_node in unbind_node.users.keys():
-            getitem_indices.append(getitem_node.args[1])
+        getitem_indices = [
+            getitem_node.args[1] for getitem_node in unbind_node.users.keys()
+        ]
         if not is_sorted_and_consecutive(getitem_indices) or len(  # type: ignore[arg-type]
             getitem_indices
         ) != len(
@@ -1497,9 +1497,8 @@ def merge_getitem_cat(match: Match, split_sections: List[int], dim: int):
             ):
                 continue
             # find the index of getitems to be cated/stacked
-            indices = []
-            for arg in cat_user.args[0]:  # type: ignore[union-attr]
-                indices.append(arg.args[1])  # type: ignore[union-attr]
+            # type: ignore[union-attr]
+            indices = [arg.args[1] for arg in cat_user.args[0]]  # type: ignore[union-attr]
             # the gettitems to be merged must be consecutive, otherwise
             # returned sliced tensor could be wrong
             if not is_sorted_and_consecutive(indices):
