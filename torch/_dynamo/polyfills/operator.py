@@ -16,6 +16,9 @@ __all__ = ["attrgetter", "itemgetter"]
 # Reference: https://docs.python.org/3/library/operator.html#operator.attrgetter
 @substitute_in_graph(operator.attrgetter, is_embedded_type=True)  # type: ignore[arg-type]
 def attrgetter(*attrs: str) -> Callable[[Any], Any]:
+    if len(attrs) == 0:
+        raise TypeError("attrgetter expected 1 argument, got 0")
+
     if any(not isinstance(attr, str) for attr in attrs):
         raise TypeError("attribute name must be a string")
 
@@ -41,6 +44,9 @@ def attrgetter(*attrs: str) -> Callable[[Any], Any]:
 # Reference: https://docs.python.org/3/library/operator.html#operator.itemgetter
 @substitute_in_graph(operator.itemgetter, is_embedded_type=True)  # type: ignore[arg-type]
 def itemgetter(*items: Any) -> Callable[[Any], Any]:
+    if len(items) == 0:
+        raise TypeError("itemgetter expected 1 argument, got 0")
+
     if len(items) == 1:
         item = items[0]
 
