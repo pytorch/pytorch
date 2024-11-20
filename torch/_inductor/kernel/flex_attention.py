@@ -107,7 +107,12 @@ def build_subgraph_buffer(
     from ..subgraph_lowering import PointwiseSubgraphLowering
 
     pw_subgraph = PointwiseSubgraphLowering(
-        subgraph.graph_module, root_graph_lowering=V.graph
+        subgraph.graph_module,
+        root_graph_lowering=V.graph,
+        allow_buffer_mutations=enable_mutations,
+        additional_lowerings={
+            torch.ops.flex_lib.zeros_and_scatter.default: zeros_and_scatter_lowering
+        },
     )
     with V.set_graph_handler(pw_subgraph):  # type: ignore[arg-type]
         pw_subgraph.run(*args)
