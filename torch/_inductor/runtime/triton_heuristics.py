@@ -204,11 +204,11 @@ class CachingAutotuner(KernelInterface):
         mutated_arg_names: List[str],  # see [Note: clone mutated buffers]
         optimize_mem,
         heuristic_type,
-        reset_to_zero_arg_names: Optional[List[str]] = None,
         size_hints=None,
         inductor_meta=None,  # metadata not relevant to triton
         custom_kernel=False,  # whether the kernel is inductor-generated or custom
         filename: Optional[str] = None,
+        reset_to_zero_arg_names: Optional[List[str]] = None,
     ):
         super().__init__()
 
@@ -835,14 +835,16 @@ class CachingAutotuner(KernelInterface):
         for i, arg in enumerate(args):
             if self.fn.arg_names[i] in self.reset_to_zero_arg_names:
                 assert isinstance(
-                    arg, torch.Tensor
+                    arg,
+                    torch.Tensor,
                 ), "self.reset_to_zero_arg_names should only contain valid argument names"
                 arg.zero_()
 
         for name, arg in kwargs.items():
             if name in self.reset_to_zero_arg_names:
                 assert isinstance(
-                    arg, torch.Tensor
+                    arg,
+                    torch.Tensor,
                 ), "self.reset_to_zero_arg_names should only contain valid argument names"
                 arg.zero_()
 
