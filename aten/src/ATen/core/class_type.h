@@ -394,8 +394,8 @@ struct TORCH_API ClassType : public NamedType {
 
   std::string annotation_str_impl(
       [[maybe_unused]] const TypePrinter& printer = nullptr) const override {
-    const auto& n = name().value();
-    return n.qualifiedName();
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    return name()->qualifiedName();
   }
 
   void addAttribute(ClassAttribute classAttribute);

@@ -177,7 +177,7 @@ TensorIteratorConfig& TensorIteratorConfig::declare_static_shape(IntArrayRef sha
 
 TensorIteratorConfig& TensorIteratorConfig::declare_static_shape(IntArrayRef shape, IntArrayRef squash_dims) {
   declare_static_shape(shape);
-  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+  TORCH_CHECK(static_shape_.has_value());
   if (static_shape_->empty()) return *this;
   for (const auto& squash_dim : squash_dims) {
     TORCH_CHECK(squash_dim >= 0 && squash_dim < static_cast<int64_t>(static_shape_->size()),
@@ -500,7 +500,7 @@ void TensorIteratorBase::compute_types(const TensorIteratorConfig& config) {
       } else if (op.device != common_device) {
         TORCH_CHECK(false,
                     "Expected all tensors to be on the same device, but "
-                    "found at least two devices, ", common_device, " and ", op.device.value(), "!");
+                    "found at least two devices, ", common_device, " and ", op.device, "!");
       }
     }
 
@@ -1650,9 +1650,12 @@ void TensorIterator::set_output_raw_strided(int64_t output_idx, IntArrayRef size
       if (!strides.empty()) {
         TORCH_INTERNAL_ASSERT(!options.memory_format_opt().has_value());
         op.tensor().as_strided_(sizes, strides);
-      } else if (options.memory_format_opt().has_value()) {
-        op.tensor_base().unsafeGetTensorImpl()->empty_tensor_restride(*options.memory_format_opt());
+    } else {
+      auto memory_format = options.memory_format_opt();
+      if (memory_format.has_value()) {
+        op.tensor_base().unsafeGetTensorImpl()->empty_tensor_restride(*memory_format);
       }
+    }
   }
   if (!names.empty()) {
     TORCH_INTERNAL_ASSERT(op.tensor_base().defined());
