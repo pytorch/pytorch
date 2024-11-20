@@ -41,7 +41,7 @@ class ROCmTemplate(KernelTemplate):
         """
         super().__init__(name)
         self.input_nodes = input_nodes
-        self.output_node: Buffer = Buffer("buf_out", layout)
+        self.output_node: Buffer = Buffer(name="buf_out", layout=layout)
         self.input_reorder = input_reorder
         self.layout = layout
 

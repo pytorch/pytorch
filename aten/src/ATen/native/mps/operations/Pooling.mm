@@ -76,7 +76,7 @@ static void pool2d_template(const Tensor& input,
   } else if (suggested_memory_format == at::MemoryFormat::Contiguous) {
     TORCH_CHECK((ndims == 3 || ndims == 4), "non-empty 3D or 4D (batch mode) tensor expected for input");
   } else {
-    AT_ERROR("Unsupported memory format. Supports only ChannelsLast, Contiguous");
+    TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast, Contiguous");
   }
 
   int padH = safe_downcast<int, int64_t>(padding[0]);
@@ -311,18 +311,22 @@ static void avg_pool2d_template(const Tensor& input,
       MPSGraphTensor* avgPoolTensor = [mpsGraph avgPooling2DWithSourceTensor:paddedTensor descriptor:desc name:nil];
       if (cachedGraph.divisorTensor) {
         // workaround: custom divisor isn't supported by MPS backend, so we scale manually
-        return [mpsGraph multiplicationWithPrimaryTensor:avgPoolTensor
-                                         secondaryTensor:cachedGraph.divisorTensor
-                                                    name:nil];
+        return
+            [mpsGraph multiplicationWithPrimaryTensor:avgPoolTensor
+                                      secondaryTensor:mps::castMPSTensor(
+                                                          mpsGraph, cachedGraph.divisorTensor, [avgPoolTensor dataType])
+                                                 name:nil];
       } else {
         return avgPoolTensor;
       }
     } else { // backward pass
       MPSGraphTensor* scaledGradTensor = cachedGraph.gradOutputTensor;
       if (cachedGraph.divisorTensor) {
-        scaledGradTensor = [mpsGraph multiplicationWithPrimaryTensor:cachedGraph.gradOutputTensor
-                                                     secondaryTensor:cachedGraph.divisorTensor
-                                                                name:nil];
+        scaledGradTensor = [mpsGraph
+            multiplicationWithPrimaryTensor:cachedGraph.gradOutputTensor
+                            secondaryTensor:mps::castMPSTensor(
+                                                mpsGraph, cachedGraph.divisorTensor, [scaledGradTensor dataType])
+                                       name:nil];
       }
       MPSGraphTensor* avgPoolTensor = [mpsGraph avgPooling2DGradientWithGradientTensor:scaledGradTensor
                                                                           sourceTensor:paddedTensor

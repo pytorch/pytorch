@@ -5,7 +5,7 @@ import itertools
 import logging
 import re
 import typing
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TypeVar, Union
 from unittest.mock import patch
 
 import sympy
@@ -25,6 +25,8 @@ from .utils import (
 )
 from .virtualized import OpsHandler, ReductionType, V
 
+
+T = TypeVar("T")
 
 log = logging.getLogger(__name__)
 is_indirect = re.compile(r"indirect|tmp").search
@@ -202,7 +204,7 @@ class MemoryDep(Dep):
             numel = V.graph.get_numel(self.name)
         else:
             vars: OrderedSet[sympy.Basic] = OrderedSet(self.index.free_symbols)
-            numel = sympy.Integer(1)
+            numel = sympy.S.One
             for var, size in zip(self.var_names, self.size):
                 if var in vars:
                     numel = numel * size
@@ -228,6 +230,8 @@ class MemoryDep(Dep):
         return len(free_unbacked_symbols(self.get_numel())) > 0
 
     def is_contiguous(self) -> bool:
+        if isinstance(self.index, sympy.Integer):
+            return True
         return isinstance(self.index, sympy.Symbol) and self.index in self.var_names
 
     def stride1_for_last_dim(self, result_for_complex_expression=True) -> bool:
@@ -324,7 +328,7 @@ class WeakDep(Dep):
         raise NotImplementedError("WeakDep does not have an index")
 
     def get_numel(self) -> sympy.Expr:
-        return sympy.Integer(1)
+        return sympy.S.One
 
     def rename(self, renames: Dict[str, str]) -> "WeakDep":
         if self.name in renames:
@@ -506,14 +510,18 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
 
     def bucketize(
         self,
-        values,
-        offsets_name: str,
-        offsets_size: sympy.Expr,
+        values: T,
+        boundaries: Tuple[str, sympy.Expr, sympy.Expr, sympy.Expr],
+        boundary_indices: T,
         indexing_dtype: torch.dtype,
         right: bool,
-    ):
-        self._reads.add(StarDep(offsets_name))
-        return f"bucketize({values}, {offsets_name}, {sympy_str(offsets_size)}, {indexing_dtype}, {right})"
+        sorter: Optional[Tuple[str, sympy.Expr]] = None,
+        sorter_indices: Optional[T] = None,
+    ) -> None:
+        """Records the names of the buffers that bucketize will read from."""
+        self._reads.add(StarDep(boundaries[0]))
+        if sorter is not None:
+            self._reads.add(StarDep(sorter[0]))
 
 
 class RecordLoadStore(V.KernelFormatterHandler):  # type: ignore[name-defined]
@@ -592,8 +600,10 @@ def extract_read_writes(
         for entry in fn.memory_usage[MemoryUsageType.INDEX_EXPR]:
             inner.index_expr(name_to_index[entry.index_name], None)
         for entry in fn.memory_usage[MemoryUsageType.BUCKETIZE]:
+            # All that matters is that we record the buffer name, so place it in the
+            # "boundaries" name position to ensure that it's recorded.
             inner.bucketize(
-                None, entry.buffer_name, name_to_index[entry.index_name], None, None  # type: ignore[arg-type]
+                None, (entry.buffer_name, None, None, None), None, None, None  # type: ignore[arg-type]
             )
         # fn.memory_usage[MemoryUsageType.CHECK_BOUNDS] intentionally skipped
     else:
@@ -723,6 +733,11 @@ class FreeUnbackedSymbolsOpsHandler:
     ) -> Union[None, Tuple[None, ...]]:
         num_values = reduction_num_outputs(reduction_type)
         return (None,) * num_values if num_values > 1 else None
+
+    def masked(self, mask, body, other) -> None:
+        assert callable(body), "masked body must always be callable."
+        # The body can make additional calls, for e.g. ops.indirect_indexing
+        body()
 
 
 def _typecheck_FreeUnbackedSymbolsOpsHandler(

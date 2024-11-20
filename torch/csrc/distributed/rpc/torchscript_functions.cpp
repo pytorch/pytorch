@@ -16,7 +16,7 @@ c10::intrusive_ptr<JitFuture> rpcTorchscript(
     const std::string& dstWorkerName,
     const c10::QualifiedName& qualifiedName,
     const c10::FunctionSchema& functionSchema,
-    std::vector<c10::IValue>& stack,
+    std::vector<c10::IValue> stack,
     const float rpcTimeoutSeconds,
     const bool isAsyncExecution) {
   c10::intrusive_ptr<torch::autograd::profiler::PythonRecordFunction> record;

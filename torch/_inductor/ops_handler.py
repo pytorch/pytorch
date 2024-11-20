@@ -294,10 +294,12 @@ class OpsHandler(Protocol[T]):
     def bucketize(
         self,
         values: T,
-        offsets_name: str,
-        offsets_size: sympy.Expr,
+        boundaries: Tuple[str, sympy.Expr, sympy.Expr, sympy.Expr],
+        boundary_indices: T,
         indexing_dtype: torch.dtype,
         right: bool,
+        sorter: Optional[Tuple[str, sympy.Expr]] = None,
+        sorter_indices: Optional[T] = None,
     ) -> T:
         # See [Note: Inductor bucketize op]
         ...
@@ -772,7 +774,7 @@ class NoopHandler:
 
     @staticmethod
     def indirect_indexing(index_var, size, check=True, wrap_neg=True) -> sympy.Symbol:
-        return sympy.Integer(0)
+        return sympy.S.Zero
 
 
 # Use mypy to check protocol implemented correctly
@@ -1016,18 +1018,31 @@ class OpCounterCSE:
 
     def bucketize(
         self,
-        values,
-        offsets_name: str,
-        offsets_size: sympy.Expr,
+        values: T,
+        boundaries: Tuple[str, sympy.Expr, sympy.Expr, sympy.Expr],
+        boundary_indices: T,
         indexing_dtype: torch.dtype,
         right: bool,
-    ):
+        sorter: Optional[Tuple[str, sympy.Expr]] = None,
+        sorter_indices: Optional[T] = None,
+    ) -> T:
+        """
+        See [Note: Inductor bucketize op]
+        """
         val = self.parent_handler.bucketize(
-            values, offsets_name, offsets_size, indexing_dtype, right
+            values,
+            boundaries,
+            boundary_indices,
+            indexing_dtype,
+            right,
+            sorter,
+            sorter_indices,
         )
         if val not in self.var_names:
             self._used_ops.add("bucketize")
-            self._read_names.append(offsets_name)
+            self._read_names.append(boundaries[0])
+            if sorter is not None:
+                self._read_names.append(sorter[0])
         return self._update_count(val)
 
     def getvalue(self):

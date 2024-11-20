@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import logging
 import tempfile
-from typing import Mapping, Tuple
 
 import onnx
 import onnx.inliner
@@ -110,75 +109,6 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
         x = torch.arange(1.0, 6.0, requires_grad=True)
 
         _ = dynamo_export(TopKModel(), x, export_options=self.export_options)
-
-    def test_symbolic_shape_of_values_inside_function_is_exported_as_graph_value_info(
-        self,
-    ):
-        class SubModule(torch.nn.Module):
-            def forward(self, x, y, bias):
-                output = x @ y
-                return output + bias
-
-        class Module(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.submodule = SubModule()
-
-            def forward(self, x, y, bias):
-                return self.submodule(x, y, bias)
-
-        x = torch.randn(2, 3)
-        y = torch.randn(3, 4)
-        bias = torch.randn(4)
-        onnx_program = torch.onnx.dynamo_export(
-            Module(),
-            x,
-            y,
-            bias,
-            export_options=torch.onnx.ExportOptions(dynamic_shapes=True),
-        )
-        model_proto = onnx_program.model_proto
-
-        # Assert value_info for values inside local function can be retrieved
-        def _assert_node_outputs_has_value_info(
-            node: onnx.NodeProto,
-            value_infos: Mapping[str, onnx.ValueInfoProto],
-            local_functions: Mapping[Tuple[str, str], onnx.FunctionProto],
-            exclude_names_in_value_info,
-            function_id: str = "",
-        ):
-            for output in node.output:
-                name = f"{function_id}/{output}" if function_id else output
-                if name not in exclude_names_in_value_info:
-                    self.assertIn(name, value_infos)
-            if node.domain.startswith("pkg.onnxscript.torch_lib"):
-                # No shape info available for values inside torchlib functions.
-                return
-            if (
-                function := local_functions.get((node.domain, node.op_type))
-            ) is not None:
-                for node in function.node:
-                    function_id = f"{function.domain}::{function.name}"
-                    _assert_node_outputs_has_value_info(
-                        node,
-                        value_infos,
-                        local_functions,
-                        exclude_names_in_value_info,
-                        function_id,
-                    )
-
-        type_infos = {vi.name: vi for vi in model_proto.graph.value_info}
-        functions = {(f.domain, f.name): f for f in model_proto.functions}
-        # NOTE: inputs, outputs, and initializers are not included in value_info spec
-        exclude_names_in_value_info = (
-            [input.name for input in model_proto.graph.input]
-            + [output.name for output in model_proto.graph.output]
-            + [init.name for init in model_proto.graph.initializer]
-        )
-        for node in model_proto.graph.node:
-            _assert_node_outputs_has_value_info(
-                node, type_infos, functions, exclude_names_in_value_info
-            )
 
     def test_dynamo_export_retains_readable_parameter_and_buffer_names(self):
         class SubModule(torch.nn.Module):

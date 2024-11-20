@@ -42,7 +42,7 @@ void prelu_backward_kernel(TensorIterator &iter) {
   });
 }
 
-REGISTER_DISPATCH(prelu_stub, &prelu_kernel);
-REGISTER_DISPATCH(prelu_backward_stub, &prelu_backward_kernel);
+REGISTER_DISPATCH(prelu_stub, &prelu_kernel)
+REGISTER_DISPATCH(prelu_backward_stub, &prelu_backward_kernel)
 
 } // namespace at::native

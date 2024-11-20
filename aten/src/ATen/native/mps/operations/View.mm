@@ -435,7 +435,7 @@ static MPSGraphTensor* asStridedLayer_pattern(MPSGraph* graph,
   return outputTensor;
 }
 
-static std::vector<int64_t> getViewShape(const Tensor& src, MPSShape* mpsShape, const bool squeeze) {
+static std::vector<int64_t> getViewShape(const TensorBase& src, MPSShape* mpsShape, const bool squeeze) {
   bool hasMPSShape = (mpsShape != nil);
   std::vector<int64_t> src_view_shape;
   if (hasMPSShape) {
@@ -481,7 +481,7 @@ static std::vector<int64_t> getSqueezedBaseShape(const Tensor& src, IntArrayRef 
   return src_base_shape;
 }
 
-bool canSliceViewTensor(const Tensor& src, MPSShape* mpsShape) {
+bool canSliceViewTensor(const TensorBase& src, MPSShape* mpsShape) {
   if (!src.is_contiguous()) {
     return false;
   }
@@ -503,7 +503,9 @@ bool canSliceViewTensor(const Tensor& src, MPSShape* mpsShape) {
   return true;
 }
 
-MPSGraphTensorData* getMPSGraphTensorDataForView(const Tensor& src, MPSShape* mpsShape, const MPSDataType mpsDataType) {
+MPSGraphTensorData* getMPSGraphTensorDataForView(const TensorBase& src,
+                                                 MPSShape* mpsShape,
+                                                 const MPSDataType mpsDataType) {
   IntArrayRef src_base_shape = getIMPSAllocator()->getBufferShape(src.storage().data());
   size_t src_ndim_base = src_base_shape.size();
   std::vector<int64_t> src_view_shape = getViewShape(src, mpsShape, false);
@@ -704,7 +706,7 @@ static ViewCachedGraph* createViewGraph(const Tensor& self,
       // Self is the input tensor we are creating view of
       newCachedGraph->inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, inputType, getMPSShape(base_shape));
       newCachedGraph->storageOffsetTensor = mpsGraphRankedPlaceHolder(mpsGraph, MPSDataTypeInt32, @[ @1 ]);
-      for (const auto C10_UNUSED i : c10::irange(size.size())) {
+      for ([[maybe_unused]] const auto i : c10::irange(size.size())) {
         newCachedGraph->strideTensors.push_back(mpsGraphRankedPlaceHolder(mpsGraph, MPSDataTypeInt32, @[ @1 ]));
       }
       if (needsScatter) {
@@ -733,6 +735,10 @@ static std::string genScatterGatherCvtFunc(const std::string& dtypeSrc, const st
   const bool srcComplex = dtypeSrc[dtypeSrc.size() - 1] == '2';
   const bool dstComplex = dtypeDst[dtypeDst.size() - 1] == '2';
   if (dstComplex) {
+    // TODO: Document why explicit cast is needed only for bfloat types
+    if (dtypeSrc == "bfloat") {
+      return dtypeDst + "(float(x), 0.0)";
+    }
     return dtypeDst + (srcComplex ? needsConj ? "(x.x, -x.y)" : "(x.x, x.y)" : "(x,  0.0)");
   }
   if (srcComplex) {
@@ -746,7 +752,7 @@ static std::string genScatterGatherCvtFunc(const std::string& dtypeSrc, const st
   if (dtypeDst == "bfloat") {
     return "bfloat(x)";
   }
-  return "(x)";
+  return dtypeSrc == "bfloat" ? dtypeDst + "(x)" : "(x)";
 }
 
 static MetalShaderLibrary scatterLib(SCATTER_OPS_TEMPLATE, 3);
@@ -806,11 +812,7 @@ Tensor gatherViewTensor(const at::Tensor& src, at::Tensor& dst) {
     }
 
     [computeEncoder setComputePipelineState:gatherPSO];
-    mtl_setBuffer(computeEncoder, src, 0);
-    mtl_setBuffer(computeEncoder, dst.has_storage() ? dst : output, 1);
-    mtl_setBytes(computeEncoder, src_sizes, 2);
-    mtl_setBytes(computeEncoder, src_strides, 3);
-    [computeEncoder setBytes:&numThreads length:sizeof(uint32_t) atIndex:4];
+    mtl_setArgs(computeEncoder, src, dst.has_storage() ? dst : output, src_sizes, src_strides, numThreads);
     mtl_dispatch1DJob(computeEncoder, gatherPSO, numThreads);
 
     getMPSProfiler().endProfileKernel(gatherPSO);
@@ -862,11 +864,7 @@ Tensor& scatterViewTensor(const at::Tensor& src, at::Tensor& output) {
       }
 
       [computeEncoder setComputePipelineState:scatterPSO];
-      mtl_setBuffer(computeEncoder, src, 0);
-      mtl_setBuffer(computeEncoder, output, 1);
-      mtl_setBytes(computeEncoder, output_sizes, 2);
-      mtl_setBytes(computeEncoder, output_strides, 3);
-      [computeEncoder setBytes:&numThreads length:sizeof(uint32_t) atIndex:4];
+      mtl_setArgs(computeEncoder, src, output, output_sizes, output_strides, numThreads);
       mtl_dispatch1DJob(computeEncoder, scatterPSO, numThreads);
 
       getMPSProfiler().endProfileKernel(scatterPSO);

@@ -1,28 +1,28 @@
-# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import os
 import tempfile
 import textwrap
 from functools import lru_cache
+from typing import Any, List
 
 
 if os.environ.get("TORCHINDUCTOR_WRITE_MISSING_OPS") == "1":
 
     @lru_cache(None)
-    def _record_missing_op(target):
+    def _record_missing_op(target: Any) -> None:
         with open(f"{tempfile.gettempdir()}/missing_ops.txt", "a") as fd:
             fd.write(str(target) + "\n")
 
 else:
 
-    def _record_missing_op(target):  # type: ignore[misc]
+    def _record_missing_op(target: Any) -> None:  # type: ignore[misc]
         pass
 
 
 class OperatorIssue(RuntimeError):
     @staticmethod
-    def operator_str(target, args, kwargs):
+    def operator_str(target: Any, args: List[Any], kwargs: dict[str, Any]) -> str:
         lines = [f"target: {target}"] + [
             f"args[{i}]: {arg}" for i, arg in enumerate(args)
         ]
@@ -32,13 +32,13 @@ class OperatorIssue(RuntimeError):
 
 
 class MissingOperatorWithoutDecomp(OperatorIssue):
-    def __init__(self, target, args, kwargs) -> None:
+    def __init__(self, target: Any, args: List[Any], kwargs: dict[str, Any]) -> None:
         _record_missing_op(target)
         super().__init__(f"missing lowering\n{self.operator_str(target, args, kwargs)}")
 
 
 class MissingOperatorWithDecomp(OperatorIssue):
-    def __init__(self, target, args, kwargs) -> None:
+    def __init__(self, target: Any, args: List[Any], kwargs: dict[str, Any]) -> None:
         _record_missing_op(target)
         super().__init__(
             f"missing decomposition\n{self.operator_str(target, args, kwargs)}"
@@ -54,7 +54,9 @@ class MissingOperatorWithDecomp(OperatorIssue):
 
 
 class LoweringException(OperatorIssue):
-    def __init__(self, exc: Exception, target, args, kwargs) -> None:
+    def __init__(
+        self, exc: Exception, target: Any, args: List[Any], kwargs: dict[str, Any]
+    ) -> None:
         super().__init__(
             f"{type(exc).__name__}: {exc}\n{self.operator_str(target, args, kwargs)}"
         )

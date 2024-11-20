@@ -1,30 +1,31 @@
-#include <torch/csrc/profiler/stubs/base.h>
-
+#include <c10/core/Device.h>
 #include <c10/util/Exception.h>
+#include <torch/csrc/profiler/stubs/base.h>
+#include <cstdint>
+#include <functional>
 
-namespace torch {
-namespace profiler {
-namespace impl {
-
-ProfilerStubs::~ProfilerStubs() = default;
+namespace torch::profiler::impl {
 
 namespace {
 struct DefaultStubs : public ProfilerStubs {
-  DefaultStubs(const char* name) : name_{name} {}
+  explicit DefaultStubs(const char* name) : name_{name} {}
 
-  void record(c10::DeviceIndex*, ProfilerVoidEventStub*, int64_t*)
-      const override {
+  void record(
+      c10::DeviceIndex* /*device*/,
+      ProfilerVoidEventStub* /*event*/,
+      int64_t* /*cpu_ns*/) const override {
     fail();
   }
-  float elapsed(const ProfilerVoidEventStub*, const ProfilerVoidEventStub*)
-      const override {
+  float elapsed(
+      const ProfilerVoidEventStub* /*event*/,
+      const ProfilerVoidEventStub* /*event2*/) const override {
     fail();
-    return 0.f;
+    return 0.F;
   }
-  void mark(const char*) const override {
+  void mark(const char* /*name*/) const override {
     fail();
   }
-  void rangePush(const char*) const override {
+  void rangePush(const char* /*name*/) const override {
     fail();
   }
   void rangePop() const override {
@@ -33,7 +34,7 @@ struct DefaultStubs : public ProfilerStubs {
   bool enabled() const override {
     return false;
   }
-  void onEachDevice(std::function<void(int)>) const override {
+  void onEachDevice(std::function<void(int)> /*op*/) const override {
     fail();
   }
   void synchronize() const override {
@@ -43,7 +44,7 @@ struct DefaultStubs : public ProfilerStubs {
 
  private:
   void fail() const {
-    AT_ERROR(name_, " used in profiler but not enabled.");
+    TORCH_CHECK(false, name_, " used in profiler but not enabled.");
   }
 
   const char* const name_;
@@ -78,6 +79,4 @@ REGISTER_DEFAULT(itt, ITT)
 REGISTER_DEFAULT(privateuse1, PrivateUse1)
 #undef REGISTER_DEFAULT
 
-} // namespace impl
-} // namespace profiler
-} // namespace torch
+} // namespace torch::profiler::impl

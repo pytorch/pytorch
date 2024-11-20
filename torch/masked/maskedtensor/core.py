@@ -3,7 +3,7 @@
 
 import warnings
 from typing import Any
-from typing_extensions import TypeGuard
+from typing_extensions import TypeIs
 
 import torch
 from torch.overrides import get_default_nowrap_functions
@@ -15,7 +15,7 @@ __all__ = [
 ]
 
 
-def is_masked_tensor(obj: Any, /) -> TypeGuard["MaskedTensor"]:
+def is_masked_tensor(obj: Any, /) -> TypeIs["MaskedTensor"]:
     r"""Returns True if the input is a MaskedTensor, else False
 
     Args:
@@ -334,7 +334,7 @@ class MaskedTensor(torch.Tensor):
         class GetData(torch.autograd.Function):
             @staticmethod
             def forward(ctx, self):
-                return self._masked_data
+                return self._masked_data.detach()
 
             @staticmethod
             def backward(ctx, grad_output):
