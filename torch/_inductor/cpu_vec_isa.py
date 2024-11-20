@@ -405,11 +405,14 @@ def valid_vec_isa_list() -> List[VecISA]:
     return isa_list
 
 
+# Initial vec_isa_list when import, avoid muti-thread call it and cause slowness.
+_valid_vec_isa_list: List[VecISA] = valid_vec_isa_list()
+
+
 def pick_vec_isa() -> VecISA:
     if config.is_fbcode() and (platform.machine() in ["x86_64", "AMD64"]):
         return VecAVX2()
 
-    _valid_vec_isa_list: List[VecISA] = valid_vec_isa_list()
     if not _valid_vec_isa_list:
         return invalid_vec_isa
 
