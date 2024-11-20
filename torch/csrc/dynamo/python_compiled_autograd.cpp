@@ -153,7 +153,9 @@ struct VerboseLogger : public PythonLogger {
     std::string node_name =
         fn.name() + " (NodeCall " + std::to_string(node_idx) + ")";
 
-    cumulative_sizes_per_node[size_inputs_num] = node_name;
+    if (size_inputs_num > 0) {
+      cumulative_sizes_per_node[size_inputs_num] = node_name;
+    }
 
     if (!logged_node_miss && cached_keys.find(key) == cached_keys.end()) {
       _log_node_miss(typeid(fn), cached_keys, key, node_name);
@@ -596,10 +598,10 @@ CacheNode* _compiled_autograd_impl(
 
     { // update cache and gather args into `compiler_call`
       CompiledNodeArgs node_args(compiler_call, call);
-      node_args.collect(call);
       if (vlogger.has_value()) {
         compiler_call.set_active_node_call_idx(i);
       }
+      node_args.collect(call);
       if (node_args.cond(call.needed)) {
         fn->compiled_args(node_args);
         node_args.collect(call.node->next_edges());
