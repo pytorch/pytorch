@@ -8783,7 +8783,6 @@ class CommonTemplate:
         result = fn(torch.randn([1, 2, 16, 4]).requires_grad_())
         result.sum().backward()
 
-    @skip_if_cpp_wrapper
     def test_dropout2(self):
         n = 100000
         weight = torch.ones(
@@ -8825,6 +8824,9 @@ class CommonTemplate:
         if is_halide_backend(self.device):
             self.assertEqual(fw_code.count("halide_helpers.rand"), 1)
             self.assertEqual(bw_code.count("halide_helpers.rand"), 0)
+        elif config.cpp_wrapper:
+            self.assertEqual(fw_code.count("_randint_"), 1)
+            self.assertEqual(bw_code.count("_randint_"), 0)
         elif self.device == GPU_TYPE:
             self.assertEqual(fw_code.count("tl.rand"), 1)
             self.assertEqual(bw_code.count("tl.rand"), 0)
@@ -8843,7 +8845,6 @@ class CommonTemplate:
         self.assertTrue(same(g2, g3))
 
     @config.patch(search_autotune_cache=False)
-    @skip_if_cpp_wrapper
     def test_dropout3(self):
         m = torch.nn.Sequential(
             torch.nn.Linear(32, 32, bias=False),
@@ -8865,10 +8866,30 @@ class CommonTemplate:
         if is_halide_backend(self.device):
             self.assertEqual(fw_code.count("halide_helpers.rand"), 2)
             self.assertEqual(bw_code.count("halide_helpers.rand"), 0)
+        elif config.cpp_wrapper:
+            if self.device == GPU_TYPE:
+                # The calls to the other rand functions are in separately generated
+                # files with CUDA kernels.
+                self.assertEqual(fw_code.count("_randint_"), 1)
+                self.assertEqual(fw_code.count("_rand_"), 0)
+                self.assertEqual(bw_code.count("_randint_"), 0)
+                self.assertEqual(bw_code.count("_rand_"), 0)
+            else:
+                self.assertEqual(fw_code.count("_randint_"), 1)
+                self.assertEqual(fw_code.count("_rand_"), 2)
+                self.assertEqual(bw_code.count("_randint_"), 0)
+                self.assertEqual(bw_code.count("_rand_"), 0)
         elif self.device == GPU_TYPE:
             self.assertEqual(fw_code.count("tl.rand"), 2)
             self.assertEqual(bw_code.count("tl.rand"), 0)
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 4)
+
+        if config.cpp_wrapper and self.device == GPU_TYPE:
+            # GPU cpp_wrapper kernels are generated in two passes, and only the second
+            # pass is kept in the metrics.  This ends up excluding two kernels from the
+            # generated kernel count.
+            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
+        else:
+            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 4)
 
     def test_randint_kernel_count(self):
         if self.device != GPU_TYPE:
@@ -12639,7 +12660,6 @@ if HAS_GPU and not TEST_WITH_ASAN:
 
         @patch("torch._inductor.config.comment_origin", True)
         @patch("torch._functorch.config.max_dist_from_bw", 0)
-        @skip_if_cpp_wrapper
         def test_inductor_sequence_nr(self):
             class Model(torch.nn.Module):
                 def __init__(self) -> None:
