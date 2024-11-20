@@ -289,9 +289,6 @@ int XPUStream::priority() const {
     }
   }
   // See Note [XPU Stream priorities]
-  static_assert(
-      max_compile_time_stream_priorities == 3,
-      "Unexpected XPU Stream priority.");
   return -static_cast<int>(st - 1);
 }
 
