@@ -6033,7 +6033,8 @@ class ShapeEnv:
                 "Ignored guard %s == %s, this could result in accuracy problems",
                 expr,
                 concrete_val,
-                stack_info=True,
+                # only print stack trace when debug mode is on (e.g. TORCH_LOGS="dynamic")
+                stack_info=True if log.getEffectiveLevel() < logging.WARNING else False,
             )
 
     def _get_stack_summary(
