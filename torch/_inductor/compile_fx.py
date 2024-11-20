@@ -1810,8 +1810,10 @@ def handle_dynamo_export_graph(
 
 
 def _check_triton_bf16_support(graph: GraphLowering) -> None:
-    def warn_and_skip(device: torch.device) -> Never:
+    def warn_and_skip(device: Optional[torch.device]) -> Never:
         from torch._dynamo.exc import SkipFrame
+
+        assert device is not None
 
         device_interface = get_interface_for_device(device.type)
         device_props = device_interface.get_device_properties(device)
