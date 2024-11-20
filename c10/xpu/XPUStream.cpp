@@ -276,8 +276,6 @@ int XPUStream::priority() const {
   if (C10_UNLIKELY(st == StreamIdType::EXT)) {
     // Query external stream priority
     using namespace sycl::ext::oneapi::property;
-    // Default priority for SYCL queue is normal.
-    st = StreamIdType::NORMAL;
     if (queue().has_property<queue::priority_normal>()) {
       st = StreamIdType::NORMAL;
     } else if (queue().has_property<queue::priority_high>()) {
@@ -285,7 +283,8 @@ int XPUStream::priority() const {
     } else if (queue().has_property<queue::priority_low>()) {
       st = StreamIdType::LOW;
     } else {
-      TORCH_CHECK(false, "Unrecognized external stream priority");
+      // Default priority for SYCL queue is normal.
+      st = StreamIdType::NORMAL;
     }
   }
   // See Note [XPU Stream priorities]
