@@ -57,7 +57,7 @@ from torch.utils._triton import has_triton_tma
 
 
 if HAS_GPU:
-    import triton
+    import triton  # @manual
     from triton import language as tl
 
     from torch.testing._internal.triton_utils import (
@@ -170,12 +170,6 @@ def check_model_with_multiple_inputs(
         list_actual = AOTIRunnerUtil.run_multiple(
             self.device, model, list_example_inputs, options, dynamic_shapes
         )
-    # for i in range(len(list_actual)):
-    #     print(i)
-    #     print(list_actual[i])
-    #     print("=============")
-    #     print(list_expected[i])
-    #     self.assertEqual(list_actual[i], list_expected[i])
     self.assertTrue(same(list_actual, list_expected))
 
 
@@ -1707,7 +1701,6 @@ class AOTInductorTestsTemplate:
         for i in range(device_interface.device_count()):
             with device_interface.device(i):
                 example_inputs = tuple(t.to(torch.device(GPU_TYPE, i)) for t in inputs)
-
                 optimized = AOTIRunnerUtil.load(GPU_TYPE, so_path)
                 result_gpu = optimized(*example_inputs)
             self.assertTrue(same(result_cpu, result_gpu.cpu()))
