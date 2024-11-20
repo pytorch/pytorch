@@ -61,14 +61,7 @@ from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
     TorchDispatchMode,
 )
-from torch.utils._pytree import (
-    KeyPath,
-    keystr,
-    PyTree,
-    tree_map,
-    tree_map_,
-    TreeSpec,
-)
+from torch.utils._pytree import KeyPath, keystr, PyTree, tree_map, tree_map_, TreeSpec
 from torch.utils._stats import count
 from torch.utils._traceback import CapturedTraceback
 
@@ -1821,7 +1814,9 @@ class FakeTensorMode(TorchDispatchMode):
         else:
             return self._dispatch_impl(func, types, args, kwargs)
 
-    def _maybe_infer_fake(self, func: OpOverload, path: KeyPath, fake: object, real: object) -> Optional[object]:
+    def _maybe_infer_fake(
+        self, func: OpOverload, path: KeyPath, fake: object, real: object
+    ) -> Optional[object]:
         """
         Helper to cross-check fake/real output properties & values,
         and create new fake vals if mismatched.
@@ -1869,40 +1864,34 @@ class FakeTensorMode(TorchDispatchMode):
                     requires_grad=False,  # issues with FakeTensorConverter preserving requires_grad
                 )
             except MetadataMismatchError as exc:
-                if (
-                    torch._functorch.config.generate_fake_kernels_from_real_mismatches
-                ):
+                if torch._functorch.config.generate_fake_kernels_from_real_mismatches:
                     dtrace_structured(
                         "mismatched_fake_kernel",
                         metadata_fn=lambda: {
                             "op": str(func),
-                            "reason": exc.reason,
+                            "reason": exc.reason,  # noqa: F821
                         },
                     )
-                    return _make_fake(self, func, real)
+                    return _infer_fake_from_real_tensor(self, func, real)  # type: ignore[arg-type]
                 raise MetadataMismatchError(
                     f"Real tensor propagation found a metadata mismatch between "
                     f"fake tensor {fake} and real tensor {real}, "
                     f" at output{keystr(path)}, for func: {func}"
                 ) from exc
 
-            for j, (s_fake, s_real) in enumerate(
-                zip(fake.size(), real.size())
-            ):
+            for j, (s_fake, s_real) in enumerate(zip(fake.size(), real.size())):  # type: ignore[attr-defined]
                 try:
                     _check_fake_real_vals(s_fake, s_real)
                 except MetadataMismatchError as exc:
-                    if (
-                        torch._functorch.config.generate_fake_kernels_from_real_mismatches
-                    ):
+                    if torch._functorch.config.generate_fake_kernels_from_real_mismatches:
                         dtrace_structured(
                             "mismatched_fake_kernel",
                             metadata_fn=lambda: {
                                 "op": str(func),
-                                "reason": exc.reason,
+                                "reason": exc.reason,  # noqa: F821
                             },
                         )
-                        return _make_fake(self, func, real)
+                        return _infer_fake_from_real_tensor(self, func, real)  # type: ignore[arg-type]
                     raise MetadataMismatchError(
                         f"Real tensor propagation found an output size mismatch between "
                         f"fake shape {s_fake} and real shape {s_real}, "
@@ -1919,8 +1908,13 @@ class FakeTensorMode(TorchDispatchMode):
                 ) from exc
         return fake
 
-    def _maybe_infer_fake_kernel_level(
-        self, func: OpOverload, fake_in: object, real_in: object, fake_out: object, real_out: object
+    def _maybe_infer_fake_kernel_from_pytree_out(
+        self,
+        func: OpOverload,
+        fake_in: object,
+        real_in: object,
+        fake_out: object,
+        real_out: object,
     ) -> Optional[object]:
         """
         Helper to cross-check fake/real output properties & values,
@@ -1933,27 +1927,25 @@ class FakeTensorMode(TorchDispatchMode):
         real_leaves, _ = pytree.tree_flatten(real_out)
         try:
             # catch aliasing mismatches between fake/real tensors
-            _check_alias_info("Real tensor propagation found", real_out, real_in, fake_out, fake_in)
+            _check_alias_info(
+                "Real tensor propagation found", real_out, real_in, fake_out, fake_in
+            )
         except MetadataMismatchError as exc:
             # if mismatch found, optionally infer fake kernel
-            if (
-                torch._functorch.config.generate_fake_kernels_from_real_mismatches
-            ):
+            if torch._functorch.config.generate_fake_kernels_from_real_mismatches:
                 dtrace_structured(
                     "mismatched_fake_kernel",
                     metadata_fn=lambda: {
                         "op": str(func),
                         "reason": (
-                            f"Mismatched aliasing spec between fake kernel and real kernel: {exc.reason}"
+                            f"Mismatched aliasing spec between fake kernel and real kernel: {exc.reason}"  # noqa: F821
                         ),
                     },
                 )
                 # if aliasing mismatches are found, it's likely that the fake tensor impl
                 # is incorrectly aliasing, since we don't support aliasing custom ops.
                 # in this case we can default to inferring non-aliasing fake kernels from the real outputs.
-                return tree_map(
-                    lambda x: _make_fake(self, func, x), real_out
-                )
+                return tree_map(lambda x: _infer_fake_from_real_tensor(self, func, x), real_out)
             else:
                 raise MetadataMismatchError(
                     f"Real tensor propagation found an aliasing mismatch between "
@@ -2222,13 +2214,21 @@ class FakeTensorMode(TorchDispatchMode):
             if real_out is not nil:
                 # cross check fake/real outputs, and optionally override fake kernel mismatches
                 if not torch._functorch.config.generate_fake_kernels_from_real_mismatches:
-                    self._maybe_infer_fake_kernel_level(
-                        func, (args, kwargs), (real_args, real_kwargs), fake_out, real_out
+                    self._maybe_infer_fake_kernel_from_pytree_out(
+                        func,
+                        (args, kwargs),
+                        (real_args, real_kwargs),
+                        fake_out,
+                        real_out,
                     )
                 else:
                     # make it clear this can override the output only when the flag is True
-                    fake_out = self._maybe_infer_fake_kernel_level(
-                        func, (args, kwargs), (real_args, real_kwargs), fake_out, real_out
+                    fake_out = self._maybe_infer_fake_kernel_from_pytree_out(  # type: ignore[assignment]
+                        func,
+                        (args, kwargs),
+                        (real_args, real_kwargs),
+                        fake_out,
+                        real_out,
                     )
 
                 # populate unbacked_var_to_val
@@ -2793,7 +2793,7 @@ def dump_cache_stats() -> None:
             log.info("    %-*s %s", width + 1, f"{k}:", v)
 
 
-def _make_fake(
+def _infer_fake_from_real_tensor(
     mode: FakeTensorMode, op: torch._ops.OpOverload, real_out: torch.Tensor
 ) -> torch.Tensor:
     def unsupported(reason: str) -> None:
@@ -2868,5 +2868,5 @@ def inferred_fake_kernel_from_real_out(
             f"non-Tensors. Got {op._schema}"
         )
 
-    fake_flat_out = [_make_fake(mode, op, t) for t in real_flat_out]
+    fake_flat_out = [_infer_fake_from_real_tensor(mode, op, t) for t in real_flat_out]
     return pytree.tree_unflatten(fake_flat_out, spec)

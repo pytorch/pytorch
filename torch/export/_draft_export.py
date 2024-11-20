@@ -125,7 +125,7 @@ class FailureReport:
     torch.ops.{op} has a fake kernel implementation, but it has incorrect behavior, based on the real kernel.
     The reason for the mismatch is: {reason}.
 
-    Please refer to https://docs.google.com/document/d/1_W62p8WJOQQUzPsJYa7s701JXt0qf2OfLub2sbkHOaU/edit#heading=h.ahugy69p2jmz for more detailed instructions on how to write a meta implementation.
+    Please refer to https://docs.google.com/document/d/1_W62p8WJOQQUzPsJYa7s701JXt0qf2OfLub2sbkHOaU/edit#heading=h.ahugy69p2jmz for more detailed instructions on how to write a fake implementation.
 """  # noqa: B950
 
         else:

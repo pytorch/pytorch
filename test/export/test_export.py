@@ -1409,6 +1409,33 @@ def forward(self, x, y):
             with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
                 ep = export(model, inputs)
 
+    def test_real_tensor_errors_on_aliasing_custom_op(self):
+        @torch.library.custom_op("export::foo_alias", mutates_args={})
+        def foo(x: torch.Tensor) -> torch.Tensor:
+            return x
+
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.export.foo_alias(x) * 2
+
+        model = Foo()
+        inputs = (torch.randn(4, 4),)
+        error_type = (
+            RuntimeError
+            if is_non_strict_test(self._testMethodName)
+            else torch._dynamo.exc.TorchRuntimeError
+        )
+        with self.assertRaisesRegex(
+            error_type,
+            (
+                r"The output of this custom operator \(1\) must not also be an input "
+                r"to this custom operator and \(2\) may not alias any inputs to this "
+                r"custom operator or other returns"
+            ),
+        ):
+            with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+                ep = export(model, inputs)
+
     @testing.expectedFailureSerDer  # SymBool serialization? TODO(pianpwk)
     @testing.expectedFailureSerDerNonStrict
     def test_real_tensor_bool_cast(self):
