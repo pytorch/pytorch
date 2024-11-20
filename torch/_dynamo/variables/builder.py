@@ -1903,6 +1903,7 @@ class VariableBuilder:
             or is_constant_source(self.get_source())
             or math.isnan(value)
             or math.isinf(value)
+            or justknobs_check("pytorch/compiler:unspecialize_float_killswitch", False)
         ):
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
             return ConstantVariable.create(value=value, source=self.source)
