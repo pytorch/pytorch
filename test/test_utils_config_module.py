@@ -1,6 +1,7 @@
 # Owner(s): ["module: unknown"]
 import os
 import pickle
+from unittest.mock import patch
 
 
 os.environ["ENV_TRUE"] = "1"
@@ -318,6 +319,14 @@ torch.testing._internal.fake_config_module._save_config_ignore = ['e_ignored']""
         revert = config._make_closure_patcher(e_bool=False)()
         self.assertFalse(config.e_bool)
         revert()
+        self.assertTrue(config.e_bool)
+
+    def test_unittest_patch(self):
+        with patch("torch.testing._internal.fake_config_module.e_bool", False):
+            with patch("torch.testing._internal.fake_config_module.e_bool", False):
+                self.assertFalse(config.e_bool)
+            # unittest.mock has some very weird semantics around deletion of attributes when undoing patches
+            self.assertFalse(config.e_bool)
         self.assertTrue(config.e_bool)
 
 
