@@ -145,6 +145,7 @@ __all__ = [
     "SHAPEENV_EVENT_KEY",
     "CURRENT_NODE_KEY",
     "has_free_symbols",
+    "has_free_unbacked_symbols",
     "sym_eq",
     "SymbolicContext",
     "StatelessSymbolicContext",
@@ -302,7 +303,11 @@ def uninteresting_files() -> Set[str]:
         torch._subclasses.meta_utils,
         torch._subclasses.fake_tensor,
     ]
-    return {inspect.getfile(m) for m in mods}
+    import torch._dynamo.guards
+
+    return {
+        inspect.getfile(m) for m in mods
+    } | torch._dynamo.guards.uninteresting_files()
 
 
 class ConstraintViolationError(RuntimeError):
@@ -766,6 +771,19 @@ def free_symbols(val: IterateExprs) -> OrderedSet[sympy.Symbol]:
 def has_free_symbols(val: IterateExprs) -> bool:
     """Faster version of bool(free_symbols(val))"""
     return not all(e.is_number for e in _iterate_exprs(val))
+
+
+def has_free_unbacked_symbols(x: IterateExprs) -> bool:
+    """Faster version of bool(free_unbacked_symbols(val))"""
+    from sympy.core.traversal import iterargs
+
+    for s in _iterate_exprs(x):
+        for arg in iterargs(s):
+            if arg.is_Symbol and symbol_is_type(
+                arg, (SymT.UNBACKED_INT, SymT.UNBACKED_FLOAT)
+            ):
+                return True
+    return False
 
 
 # Like free_symbols, but filtered to only report unbacked symbols
@@ -6015,7 +6033,8 @@ class ShapeEnv:
                 "Ignored guard %s == %s, this could result in accuracy problems",
                 expr,
                 concrete_val,
-                stack_info=True,
+                # only print stack trace when debug mode is on (e.g. TORCH_LOGS="dynamic")
+                stack_info=True if log.getEffectiveLevel() < logging.WARNING else False,
             )
 
     def _get_stack_summary(
@@ -6042,7 +6061,10 @@ class ShapeEnv:
         maybe_user_loc = None
         user_tb = TracingContext.extract_stack()
         if user_tb:
-            maybe_user_loc = format_frame(user_tb[-1], line=True)
+            idx = len(user_tb) - 1
+            while idx > 0 and user_tb[idx].filename in uninteresting_files():
+                idx -= 1
+            maybe_user_loc = format_frame(user_tb[idx], line=True)
 
         maybe_extra_debug = ""
         if is_debug and user_tb:

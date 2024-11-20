@@ -42,12 +42,18 @@ class TORCH_API LazyTensor : public c10::intrusive_ptr_target {
     Data(BackendDevice device)
         : device(std::move(device)), unique_id(GetNextTensorId()) {}
 
+    Data(Data&& other) = delete;
+    Data(const Data&) = delete;
+    Data& operator=(const Data&) = delete;
+    Data& operator=(Data&&) = delete;
     virtual ~Data();
 
     BackendDataPtr handle;
     Value ir_value;
     std::optional<at::Tensor> tensor_data;
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
     const BackendDevice device;
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
     const int64_t unique_id = 0;
     size_t generation = 1;
   };
@@ -68,6 +74,8 @@ class TORCH_API LazyTensor : public c10::intrusive_ptr_target {
   LazyTensor() = delete;
   LazyTensor(const LazyTensor&) = default;
   LazyTensor(LazyTensor&&) noexcept = default;
+  LazyTensor& operator=(const LazyTensor&) = default;
+  LazyTensor& operator=(LazyTensor&&) noexcept = default;
 
   ~LazyTensor() override = default;
 
