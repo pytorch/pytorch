@@ -8,17 +8,18 @@ import torch
 from torch._inductor.virtualized import V
 from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
 
+from .virtualized import OpsValue
+
 
 T = TypeVar("T")
 
 
 class DTypeVar(Protocol):
     @property
-    def dtype(self) -> torch.dtype:
-        ...
+    def dtype(self) -> torch.dtype: ...
 
 
-DTypeArg = Union[DTypeVar, torch.types.Number, str]
+DTypeArg = Union[DTypeVar, torch.types.Number, str, OpsValue]
 
 
 # Inputs need to be cacheable (e.g., not a CSEVar) in order for the cache to be effective
@@ -58,6 +59,10 @@ def promote_types(
         if isinstance(arg, str):
             # comes from templates.. TODO
             continue
+
+        if isinstance(arg, OpsValue):
+            arg = arg.value
+            assert isinstance(arg, torch._prims_common.Number) or hasattr(arg, "dtype")
 
         if isinstance(arg, torch._prims_common.Number):
             dtype_prop_candidates.append((torch.tensor(arg).dtype, True))
