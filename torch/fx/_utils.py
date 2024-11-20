@@ -21,7 +21,10 @@ def lazy_format_graph_code(name, gm, maybe_id=None, **kwargs):
         kwargs["print_output"] = False
 
     if "colored" in kwargs:
-        if not hasattr(sys.stdout, 'isatty') or not sys.stdout.isatty():
+        try:
+            if not sys.stdout.isatty():
+                kwargs["colored"] = False
+        except AttributeError:
             kwargs["colored"] = False
 
     return LazyString(
