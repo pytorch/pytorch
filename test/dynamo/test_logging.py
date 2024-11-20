@@ -41,7 +41,7 @@ def munge_shape_guards(s: str) -> str:
     SHAPE_GUARD_REGEX = (
         r"[| ]* \+- SYMBOLIC_SHAPE_GUARD"
         if torch._dynamo.config.enable_cpp_symbolic_shape_guards
-        else "+- LAMBDA_GUARD"
+        else r"\+- LAMBDA_GUARD"
     )
 
     def munge(s):
