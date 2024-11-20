@@ -165,4 +165,5 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
+  !{{ upload.upload_binaries(config, True, False) }}
 {%- endfor %}
