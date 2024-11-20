@@ -69,6 +69,8 @@ supported_tensor_comparison_ops = {
     "<=": operator.le,
     "==": operator.eq,
     "!=": operator.ne,
+    "is": operator.is_,
+    "is not": operator.is_not,
 }
 # Ops that allow tensor <op> None
 supported_const_comparison_ops = {
