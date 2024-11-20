@@ -8,7 +8,7 @@ from typing import Dict, List, Optional, Tuple
 from torch._export.serde.union import _Union
 
 # NOTE: Please update this value if any modifications are made to the schema
-SCHEMA_VERSION = (8, 1)
+SCHEMA_VERSION = (8, 2)
 TREESPEC_VERSION = 1
 
 
@@ -218,7 +218,7 @@ class Graph:
     nodes: List[Node]
     tensor_values: Dict[str, TensorMeta]
     sym_int_values: Dict[str, SymInt]
-    sym_float_values: Dict[str, SymFloat]
+    sym_float_values: Dict[str, SymFloat] = field(default_factory=dict)
     sym_bool_values: Dict[str, SymBool]
     # This is for deserializing the submodule graphs from higher order ops
     # (ex. cond, map) where single tensor returns will just return a single
