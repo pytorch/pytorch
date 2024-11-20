@@ -44,7 +44,7 @@ GRAPHVIZ_COMMAND_SCALABLE = ["dot", "-Gnslimit=2", "-Gnslimit1=2", "-Gmaxiter=50
 @functools.lru_cache(None)
 def has_dot() -> bool:
     try:
-        which = "which" if os.name != 'nt' else "where"
+        which = "which" if os.name != "nt" else "where"
         subprocess.check_output([which, "dot"], stderr=subprocess.PIPE)
         return True
     except subprocess.SubprocessError:
