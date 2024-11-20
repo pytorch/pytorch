@@ -214,6 +214,16 @@ class _ConfigEntry:
     env_value_force: Any = _UNSET_SENTINEL
     env_value_default: Any = _UNSET_SENTINEL
     # Used to work arounds bad assumptions in unittest.mock.patch
+    # The code to blame is
+    # https://github.com/python/cpython/blob/94a7a4e22fb8f567090514785c69e65298acca42/Lib/unittest/mock.py#L1637
+    # Essentially, mock.patch requires, that if __dict__ isn't accessible
+    # (which it isn't), that after delattr is called on the object, the
+    # object must throw when hasattr is called. Otherwise, it doesn't call
+    # setattr again.
+    # Technically we'll have an intermediate state of hiding the config while
+    # mock.patch is unpatching itself, but it calls setattr after the delete
+    # call so the final state is correct. It's just very unintuitive.
+    # upstream bug - python/cpython#126886
     hide: bool = False
 
     def __init__(self, config: Config):
