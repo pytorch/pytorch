@@ -218,7 +218,6 @@ class Graph:
     nodes: List[Node]
     tensor_values: Dict[str, TensorMeta]
     sym_int_values: Dict[str, SymInt]
-    sym_float_values: Dict[str, SymFloat] = field(default_factory=dict)
     sym_bool_values: Dict[str, SymBool]
     # This is for deserializing the submodule graphs from higher order ops
     # (ex. cond, map) where single tensor returns will just return a single
@@ -226,6 +225,7 @@ class Graph:
     # list.
     is_single_tensor_return: bool = False
     custom_obj_values: Dict[str, CustomObjArgument] = field(default_factory=dict)
+    sym_float_values: Dict[str, SymFloat] = field(default_factory=dict)
 
 
 @dataclass
