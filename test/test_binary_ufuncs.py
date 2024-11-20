@@ -5,7 +5,6 @@ import math
 import operator
 import random
 import sys
-import unittest
 import warnings
 from functools import partial
 from itertools import chain, product
