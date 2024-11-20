@@ -5484,13 +5484,14 @@ class UserDefinedTritonKernel(ExternKernel):
 
         kernel = kernel_side_table.get_kernel(self.kernel_idx)
         configs = []
-        restore_value_args = []
+        restore_value_args: List[str] = []
         if isinstance(kernel, Autotuner):
             # https://github.com/triton-lang/triton/pull/5083
             # changes kernel.restore_idx to kernel.restore_value
             if hasattr(kernel, "restore_idx"):
-                for i in kernel.restore_idx:
-                    restore_value_args.append(kernel.fn.arg_names[i])
+                restore_value_args.extend(
+                    kernel.fn.arg_names[i] for i in kernel.restore_idx
+                )
             else:
                 assert hasattr(kernel, "restore_value")
                 restore_value_args.extend(kernel.restore_value)
@@ -6046,15 +6047,26 @@ class FallbackKernel(ExternKernelAlloc):
         *,
         unbacked_bindings=None,
     ) -> None:
+        # When aten binary ops have constant second args, cpp wrapper expects the scalar
+        # version.  This should long-term be handled as in
+        # https://github.com/pytorch/pytorch/issues/90923.
+        BINARY_OP_MAPPING = {
+            aten.add.Tensor: aten.add.Scalar,
+            aten.div.Tensor: aten.div.Scalar,
+            aten.divide.Tensor: aten.divide.Scalar,
+            aten.floor_divide: aten.floor_divide.Scalar,
+            aten.mul.Tensor: aten.mul.Scalar,
+            aten.multiply.Tensor: aten.multiply.Scalar,
+            aten.sub.Tensor: aten.sub.Scalar,
+            aten.subtract.Tensor: aten.subtract.Scalar,
+            aten.true_divide.Tensor: aten.true_divide.Scalar,
+        }
         if (
-            kernel == aten.mul.Tensor
+            kernel in BINARY_OP_MAPPING
             and len(tensor_args) == 1
             and len(nontensor_args) == 1
         ):
-            # When aten.mul.Tensor's second arg is constant, cpp wrapper expects
-            # to call mul_Scalar. A more proper fix is to do it in decomposition.
-            # See https://github.com/pytorch/pytorch/issues/123478
-            kernel = aten.mul.Scalar
+            kernel = BINARY_OP_MAPPING[kernel]
 
         super().__init__(
             layout,
