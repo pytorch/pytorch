@@ -331,10 +331,8 @@ XPUStream getStreamFromPool(const int priority, DeviceIndex device) {
   // Initializes the stream pools (once)
   initDeviceStreamOnce(device);
   // See Note [XPU Stream priorities]
-  static_assert(
-      max_compile_time_stream_priorities == 3,
-      "Unexpected XPU Stream priority.");
-  auto priority_idx = std::max(std::min(-priority + 1, 2), 0);
+  auto priority_idx = std::max(
+      std::min(-priority + 1, max_compile_time_stream_priorities - 1), 0);
   const auto idx = get_idx(priority_counters[device][priority_idx]);
   auto id_type = static_cast<StreamIdType>(priority_idx);
   return XPUStreamForId(device, makeStreamId(id_type, idx));
@@ -344,10 +342,7 @@ XPUStream getStreamFromPool(const bool isHighPriority, DeviceIndex device) {
   initXPUStreamsOnce();
   // If isHighPriority is true, return the stream with the highest priority.
   // See Note [XPU Stream priorities]
-  static_assert(
-      max_compile_time_stream_priorities == 3,
-      "Unexpected XPU Stream priority.");
-  int priority = isHighPriority ? -1 : 0;
+  int priority = isHighPriority ? -max_compile_time_stream_priorities + 2 : 0;
   return getStreamFromPool(priority, device);
 }
 
