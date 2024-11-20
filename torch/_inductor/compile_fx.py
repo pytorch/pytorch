@@ -747,6 +747,7 @@ def _compile_fx_inner(
             and (config.fx_graph_cache or fx_graph_remote_cache)
             and not aot_mode
         ):
+            set_feature_use("pytorch/remote_cache:fx_graph_memcache_version", True)
             for i, input in enumerate(example_inputs):
                 if (
                     isinstance(input, torch.Tensor)
@@ -763,8 +764,8 @@ def _compile_fx_inner(
                 local=config.fx_graph_cache,
                 remote=fx_graph_remote_cache,
             )
-            set_feature_use("//pytorch/remote_cache:fx_graph_memcache_version", True)
         else:
+            set_feature_use("pytorch/remote_cache:fx_graph_memcache_version", False)
             compiled_graph = codegen_and_compile(
                 gm, example_inputs, inputs_to_check, graph_kwargs
             )
@@ -776,7 +777,6 @@ def _compile_fx_inner(
             compiled_graph = FxGraphCache.post_compile(
                 compiled_graph, example_inputs, cudagraphs, gm
             )
-            set_feature_use("//pytorch/remote_cache:fx_graph_memcache_version", False)
 
     log.debug("FX codegen and compilation took %.3fs", time.time() - start)
 
