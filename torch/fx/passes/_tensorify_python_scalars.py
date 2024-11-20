@@ -112,7 +112,7 @@ def tensorify_python_scalars(
     tracer = fx.proxy.GraphAppendingTracer(graph)
     expr_to_sym_proxy: dict[sympy.Expr, MetaProxy] = {}
     expr_to_tensor_proxy: dict[sympy.Expr, MetaProxy] = {}
-    tensorified_symbols: set[str] = set()
+    tensorified_symbols: set[sympy.Symbol] = set()
     should_restart = False
 
     first_non_placeholder = None
@@ -213,19 +213,21 @@ def tensorify_python_scalars(
 
             # Specialize all dimensions that contain symfloats. Here's
             # an example test that requires this:
-            # PYTORCH_OPINFO_SAMPLE_INPUT_INDEX=4 tlp python test/inductor/test_torchinductor_opinfo.py TestInductorOpInfoCUDA.test_comprehensive_nn_functional_interpolate_bicubic_cuda_float32 # noqa: B950
+            # PYTORCH_OPINFO_SAMPLE_INPUT_INDEX=4 python test/inductor/test_torchinductor_opinfo.py TestInductorOpInfoCUDA.test_comprehensive_nn_functional_interpolate_bicubic_cuda_float32 # noqa: B950
             val = node.meta.get("val")
             if isinstance(val, FakeTensor):
                 for dim in val.shape:
-                    if isinstance(
-                        dim,
-                        (torch.SymFloat, torch.SymInt, torch.SymBool),
-                    ):
+                    if isinstance(dim, torch.SymInt):
                         for s in dim.node.expr.free_symbols:
                             name = str(s)
                             if symbol_is_type(
                                 s, SymT.FLOAT
                             ) and not TensorifyState.should_specialize(name):
+                                # In principle, we could support float input that
+                                # is used to do size compute. The problem is that
+                                # we don't actually want to tensorify the compute
+                                # in this case, which means we need codegen support for
+                                # all symfloats.
                                 TensorifyState.specialize(name)
                                 should_restart = True
 
@@ -249,7 +251,7 @@ def tensorify_python_scalars(
                             break
 
                         # We use _expr instead of expr b/c we want the symbol not the replacement
-                        tensorified_symbols.add(str(a.meta["val"].node._expr))
+                        tensorified_symbols.add(a.meta["val"].node._expr)
 
                         if proxy.node.meta["val"].dtype != compute_dtype:
                             proxy = torch.ops.prims.convert_element_type.default(
@@ -317,14 +319,15 @@ def tensorify_python_scalars(
             name = str(k)
             if (
                 not TensorifyState.should_specialize(name)
-                and name not in tensorified_symbols
+                and k not in tensorified_symbols
             ):
                 TensorifyState.specialize(name)
                 should_restart = True
 
     if should_restart:
         # Sledgehammer time. Restart dynamo analysis, keeping track of which input sources
-        # are no longer needed and should be specialized.
+        # are no longer needed and should be specialized. Restarting analysis is necessary
+        # because we need to instruct Dynamo to NOT make these as inputs.
         raise TensorifyScalarRestartAnalysis
 
     graph_code_log.debug(

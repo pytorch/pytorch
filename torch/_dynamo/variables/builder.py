@@ -1921,6 +1921,9 @@ class VariableBuilder:
 
         wrapped_value = torch.tensor(value, dtype=torch.float64)
 
+        # We don't support specializing floats for grad checking tensors
+        # See https://github.com/pytorch/pytorch/pull/140828 for more
+        # context.
         if torch._C._functorch.is_gradtrackingtensor(wrapped_value):
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
             return ConstantVariable.create(value=value, source=self.source)

@@ -318,7 +318,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             #    plus epilogue add is treated as linear w/ bias.
             # 3. For float32, when dynamic shapes is enabled, mkl linear is not applied.
             #    and linear w/o bias plus epilogue add is treated as addmm.
-            self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 0)
+            self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
         else:
             self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
 
