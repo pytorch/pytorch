@@ -78,6 +78,8 @@ def _rebuild_from_type_v2(func, new_type, args, state):
 # torch/_C/__init__.pyi.in to add a type annotation for your method;
 # otherwise, it will not show up in autocomplete.
 class Tensor(torch._C.TensorBase):
+    _is_param: bool
+
     def _clear_non_serializable_cached_data(self):
         r"""Clears any data cached in the tensor's ``__dict__`` that would prevent the tensor
         from being serialized.
