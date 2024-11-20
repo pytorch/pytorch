@@ -485,7 +485,9 @@ def promote_constants(inputs, override_return_dtype=None, type_promotion_kind=No
         if isinstance(x, (int, float)):
             out.append(
                 ExpandView.create(
-                    ir.Constant(value=x, dtype=ex.get_dtype(), device=ex.get_device()),
+                    ir.Constant(
+                        value=x, dtype=ex.get_dtype(), device=ex.get_device_or_error()
+                    ),
                     list(ex.get_size()),
                 )
             )
@@ -493,7 +495,7 @@ def promote_constants(inputs, override_return_dtype=None, type_promotion_kind=No
             out.append(
                 ExpandView.create(
                     IndexingConstant(
-                        index=x, dtype=ex.get_dtype(), device=ex.get_device()
+                        index=x, dtype=ex.get_dtype(), device=ex.get_device_or_error()
                     ),
                     list(ex.get_size()),
                 )
@@ -2055,7 +2057,7 @@ def inductor_random(size: List[int], seed: TensorBox, mode: str, *, offset: int 
     assert mode in ("rand", "randn")
     size = [*size]
     dtype = torch.float32
-    device = seed.get_device()
+    device = seed.get_device_or_error()
     random_pos = ir.FixedLayout(
         device, dtype, size, ir.FlexibleLayout.contiguous_strides(size), offset=offset
     ).make_indexer()
@@ -2084,7 +2086,7 @@ def inductor_randint(
     assert not config.fallback_random
     size = [*size]
     dtype = torch.int64
-    device = seed.get_device()
+    device = seed.get_device_or_error()
     random_pos = ir.FixedLayout(
         device, dtype, size, ir.FlexibleLayout.contiguous_strides(size), offset=offset
     ).make_indexer()
@@ -6316,7 +6318,7 @@ def resize(x, size, *, memory_format=None):
 
     old_numel = x.get_numel()
     dtype = x.get_dtype()
-    device = x.get_device()
+    device = x.get_device_or_error()
 
     if isinstance(x.data, ir.BaseView):
         x.data = x.data.unwrap_view()
