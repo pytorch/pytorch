@@ -159,7 +159,7 @@ class SchedulerBuffer:
         assert self.node is not None
         return self.node.get_inputs_that_alias_output()
 
-    def get_mutations(self) -> Sequence[str]:
+    def get_mutations(self) -> List[str]:
         assert self.node is not None
         return self.node.get_mutation_names()
 
@@ -1580,7 +1580,8 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
         raise NotImplementedError
 
     def codegen(self) -> None:
-        raise NotImplementedError
+        assert isinstance(self.node, ir.ComputedBuffer), f"{type(self.node)=}"
+        self.node.get_store_function()(self.node.make_loader()())
 
     def is_foreach(self) -> bool:
         return True
@@ -2314,25 +2315,28 @@ class Scheduler:
         """
         Combine eligible nodes into FusedSchedulerNodes.
         """
-        for i in range(10):
-            old_len = len(nodes)
-            fusion_log.debug(
-                "===== attempting fusion (%d/10): %d nodes =====",
-                i + 1,
-                old_len,
-            )
-            nodes = self.fuse_nodes_once(nodes)
-            new_len = len(nodes)
-            fusion_log.debug(
-                "completed fusion round (%d/10): fused %d nodes into %d nodes\n",
-                i + 1,
-                old_len,
-                new_len,
-            )
-            if new_len == old_len or new_len == 1:
-                fusion_log.debug("===== fusion complete (%d iterations) =====", i + 1)
-                break
-        return nodes
+        with dynamo_timed("Scheduler.fused_nodes"):
+            for i in range(10):
+                old_len = len(nodes)
+                fusion_log.debug(
+                    "===== attempting fusion (%d/10): %d nodes =====",
+                    i + 1,
+                    old_len,
+                )
+                nodes = self.fuse_nodes_once(nodes)
+                new_len = len(nodes)
+                fusion_log.debug(
+                    "completed fusion round (%d/10): fused %d nodes into %d nodes\n",
+                    i + 1,
+                    old_len,
+                    new_len,
+                )
+                if new_len == old_len or new_len == 1:
+                    fusion_log.debug(
+                        "===== fusion complete (%d iterations) =====", i + 1
+                    )
+                    break
+            return nodes
 
     def process_grouped_nodes(self) -> None:
         """
