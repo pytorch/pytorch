@@ -75,7 +75,6 @@ def sample(logits, temperature: float = 1.0, top_k: Optional[int] = None):
     return idx_next, probs
 
 
-@torch.compile(fullgraph=True)
 def prefill(
     model: torch.nn.Module, x: torch.Tensor, input_pos: torch.Tensor, **sampling_kwargs
 ) -> torch.Tensor:
@@ -84,7 +83,6 @@ def prefill(
     return sample(logits, **sampling_kwargs)[0]
 
 
-@torch.compile(fullgraph=True, mode="reduce-overhead")
 def decode_one_token(
     model: torch.nn.Module, x: torch.Tensor, input_pos: torch.Tensor, **sampling_kwargs
 ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -151,11 +149,6 @@ def _load_model(x: GPTModelConfig, device="cuda", precision=torch.bfloat16):
     with torch.device("meta"):
         model = x.module.from_name(x.name)
     model = model.to(dtype=precision)
-
-    if x.mode == "autoquant":
-        model.eval()
-        model = torchao.autoquant(torch.compile(model, mode="max-autotune"))
-        return model
 
     if x.mode == "int8":
         print("Using int8 weight-only quantization!")
@@ -229,10 +222,23 @@ def run_experiment(
     start = -1
     compilation_time = None
 
+    if x.mode == "autoquant":
+        print("Using autoquant")
+        model = torchao.autoquant(model, manual=True, error_on_unseen=False)
+        generate(
+            model, prompt, max_new_tokens, temperature=temperature, top_k=top_k
+        )
+        model.finalize_autoquant()
+
+    global decode_one_token, prefill
+    decode_one_token = torch.compile(decode_one_token, mode="reduce-overhead", fullgraph=True)
+    prefill = torch.compile(prefill, fullgraph=True)
+
     for i in range(start, num_samples):
         device_sync(device=device)  # MKG
 
         t0 = time.perf_counter()
+        torch.compiler.cudagraph_mark_step_begin()
         y = generate(
             model, prompt, max_new_tokens, temperature=temperature, top_k=top_k
         )
@@ -461,7 +467,7 @@ def run_llama2_7b_autoquant(device: str = "cuda"):
 
 
 # token_per_sec and memory_bandwidth target numbers are for A100-40GB, which are different from the typical A100-80GB.
-def run_mixtral_8x7b_int8(device: str = "cuda"):
+def run_mixtral_8x7b_autoquant(device: str = "cuda"):
     from benchmark import Experiment
 
     # We reduced the original number of layers from 32 to 16 to adapt CI memory limitation.
@@ -469,6 +475,7 @@ def run_mixtral_8x7b_int8(device: str = "cuda"):
         "Mixtral-8x7B-v0.1",
         MixtralMoE,
         "autoquant",
+        None,
         175,
         1130,
         133,
