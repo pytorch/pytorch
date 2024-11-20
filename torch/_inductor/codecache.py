@@ -1220,9 +1220,7 @@ class FxGraphCache:
 
         try:
             with dynamo_timed(
-                "PyCodeCache.load_by_key_path",
-                log_pt2_compile_event=True,
-                fwd_only=False,
+                "PyCodeCache.load_by_key_path", log_pt2_compile_event=True
             ):
                 graph.current_callable = PyCodeCache.load_by_key_path(
                     graph.cache_key,
