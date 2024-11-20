@@ -515,8 +515,7 @@ class CppMicroGemmAMX(CppMicroGemm):
     // Create a stack-allocated buffer for tiles of B.
     // Except maybe for the tail-case, an AMX tile of B has 16x32 BF16 elements.
     // we cache K * {{block_n}} elements of dequantized B
-    const auto block_n = {{block_n}};
-    const auto buf_size = K * block_n;
+    const auto buf_size = K * {{block_n}};
     {%- if is_msvc_compiler %}
     // MSVC doesn't support stack-allocated dynamic-sized arrays, so using heap memory here.
     std::unique_ptr<{{input_t}}[]> heap_deq_b_buf_ptr(new {{input_t}}[buf_size]);
@@ -532,41 +531,37 @@ class CppMicroGemmAMX(CppMicroGemm):
     auto load_dequantized_B = [&](int base_idx) {
         // Load a tile of B & cache it in L1D.
         {{input2_t}}* base_addr = const_cast<{{input2_t}}*>(B) + base_idx;
-        for (int idx_dq = 0, idx_q = 0; idx_dq < buf_size; idx_q += ldb, idx_dq += block_n) {
-        {%- if block_n in [16, 32] %}
+        for (int idx_dq = 0, idx_q = 0; idx_dq < buf_size; idx_q += ldb, idx_dq += {{block_n}}) {
+        {%- for vec_idx in range(0, block_n - 1, 32) %}
             auto b_int8 = at::vec::Vectorized<int8_t>::loadu(
-                base_addr + idx_q,
-                static_cast<int64_t>(block_n)
-            );
-            auto b_bf16 = at::vec::convert<{{input_t}}>(b_int8);
-            b_bf16.store(
-                dequantized_B_buf + idx_dq,
-                static_cast<int64_t>(block_n)
-            );
-        {%- elif block_n == 48 %}
-            // first 32 elements
-            auto b_int8_32 = at::vec::Vectorized<int8_t>::loadu(
-                base_addr + idx_q,
+                base_addr + idx_q + {{vec_idx}} ,
                 static_cast<int64_t>(32)
             );
-            auto b_bf16_32 = at::vec::convert<{{input_t}}>(b_int8_32);
-            b_bf16_32.store(dequantized_B_buf + idx_dq);
-            // next 16 elements
-            auto b_int8_16 = at::vec::Vectorized<int8_t>::loadu(
-                base_addr + idx_q + 32,
-                static_cast<int64_t>(16)
+            auto b_bf16 = at::vec::convert<{{input_t}}>(b_int8);
+            b_bf16.store(dequantized_B_buf + idx_dq + {{vec_idx}});
+        {%- endfor %}
+        {%- if (block_n % 32) != 0 %}
+            auto b_int8_tail = at::vec::Vectorized<int8_t>::loadu(
+                base_addr + idx_q + {{block_n - (block_n % 32)}},
+                static_cast<int64_t>(block_n % 32)
             );
-            auto b_bf16_16 = at::vec::convert<{{input_t}}>(b_int8_16);
-            b_bf16_16.store(
-                dequantized_B_buf + idx_dq + 32,
-                static_cast<int64_t>(16)
+            auto b_bf16_tail = at::vec::convert<{{input_t}}>(b_int8_tail);
+            b_bf16_tail.store(
+                dequantized_B_buf + idx_dq + {{block_n - (block_n % 32)}},
+                static_cast<int64_t>(block_n % 32)
             );
         {%- endif %}
         }
     };
 {%- endif %}
+// The ldb would not be block_n if N != block_n    
+{%- if use_cached_dequantized_B %}
+    const int64_t updated_ldb = {{block_n}};
+{%- else %}
+    const int64_t updated_ldb = ldb;
+{%- endif %}
     // TODO(jgong5): loop unroll for M and N
-    for (int64_t n = 0; n < N; n += block_n) {
+    for (int64_t n = 0; n < N; n += {{block_n}}) {
 {%- if use_cached_dequantized_B %}
         // Dequantize K * block_n int8 B elements into BF16
         load_dequantized_B(n);
@@ -590,11 +585,7 @@ class CppMicroGemmAMX(CppMicroGemm):
                     C + m * ldc + n,
                     K,
                     lda,
-{%- if not use_cached_dequantized_B %}
-                    ldb,
-{%- else %}
-                    block_n,
-{%- endif %}
+                    updated_ldb,
                     ldc,
                     16
                 );
@@ -614,11 +605,7 @@ class CppMicroGemmAMX(CppMicroGemm):
                     C + m_tail * ldc + n,
                     K,
                     lda,
-{%- if not use_cached_dequantized_B %}
-                    ldb,
-{%- else %}
-                    block_n,
-{%- endif %}
+                    updated_ldb,
                     ldc,
                     block_m
                 );
@@ -634,7 +621,11 @@ template <bool accum>
 inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
     AMXState& amx_state,
     const {{input_t}}* {{restrict_keyword}} A,
+{%- if use_cached_dequantized_B %}
     const {{input_t}}* {{restrict_keyword}} B,
+{%- else %}
+    const {{input2_t}}* {{restrict_keyword}} B,
+{%- endif %}
     {{output_t}}* {{restrict_keyword}} C,
     int64_t K,
     int64_t lda,
