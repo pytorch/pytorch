@@ -3,12 +3,11 @@ import importlib
 import os
 import re
 import sys
-from typing import Tuple
 
 import torch
-import torch._inductor.codegen.triton as triton_codegen
 from torch._dynamo.utils import disable_cache_limit
 from torch._inductor import config
+from torch._inductor.codegen.triton import OpDtypeSupport
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_triton_code
 from torch.fx.operator_schemas import get_signature_for_torch_op
@@ -96,69 +95,71 @@ class TestCase(InductorTestCase):
             fp32_cast_in_code = "to(tl.float32)" in code
             self.assertEqual(fp32_cast_in_code, upcast_to_fp32)
 
-    def test_upcast_ops_list(self):
+    def test_op_dtype_support(self):
         """
-        Triton codegen registers various ops to be tested in this function.
-        Check that some expected ops are present.
+        Triton codegen upcasts values to float32 for certain ops.
+        Check that those ops have accurate dtype information.
         """
 
-        all_ops = {op for op, convert_output in triton_codegen.upcast_ops}
-
-        for expected_op in [
-            "rsqrt"
-            "sqrt"
-            "isnan"
-            "floor"
-            "ceil"
-            "tan"
-            "atan"
-            "atanh"
-            "sigmoid"
-            "log2"
-            "log10"
-            "cosh"
-            "sinh"
-            "acosh"
-            "asinh"
-            "asin"
-            "acos"
-            "asinh"
-            "erf"
-            "lgamma"
-            "sin"
-            "cos"
-            "exp"
-            "expm1"
-            "exp2"
-            "abs"
+        for op_name in [
+            "rsqrt",
+            "sqrt",
+            "isnan",
+            "floor",
+            "ceil",
+            "tan",
+            "atan",
+            "atanh",
+            "sigmoid",
+            "log2",
+            "log10",
+            "cosh",
+            "sinh",
+            "acosh",
+            "asinh",
+            "asin",
+            "acos",
+            "asinh",
+            "erf",
+            "lgamma",
+            "sin",
+            "cos",
+            "exp",
+            "expm1",
+            "exp2",
+            "abs",
         ]:
-            self.assertIn(expected_op, all_ops)
+            # These ops do not support float16/bfloat16.
+            supported_dtypes = OpDtypeSupport.supported_dtypes[op_name]
+            self.assertNotIn(torch.float16, supported_dtypes)
+            self.assertNotIn(torch.bfloat16, supported_dtypes)
 
     @requires_gpu()
-    @parametrize("func_with_args", triton_codegen.upcast_funcs)
+    @parametrize("op_name", OpDtypeSupport.supported_dtypes)
     @parametrize("load_upcast_to_fp32", [False, True])
     @parametrize("input_dtype", [torch.float16, torch.bfloat16])
     @config.patch("triton.use_block_ptr", True)
-    def test_dtype_aware_codegen(
-        self, func_with_args: Tuple[str, bool], load_upcast_to_fp32, input_dtype
-    ):
+    def test_dtype_aware_codegen(self, op_name: str, load_upcast_to_fp32, input_dtype):
         """
         Test dtype aware codegen for some tl.math/libdevice calls.
         Operands should be upcast to float32, and the output should be downcast to float16.
         """
 
-        # Retrieve the corresponding torch op.
-        override_func, convert_output = func_with_args
-        op_str = override_func.__name__.removeprefix("libdevice_")
-        op = getattr(torch, op_str)
+        # Check if the op's output should be upcasted/downcasted.
+        supported_dtypes = OpDtypeSupport.supported_dtypes[op_name]
+        convert_output = OpDtypeSupport.convert_outputs[op_name]
+        self.assertNotIn(input_dtype, supported_dtypes)
 
-        # Edge case: torch.round maps to libdevice.nearbyint
-        op_str_overrides = {
+        # Retrieve the corresponding torch op.
+        torch_op_name = op_name.removeprefix("libdevice_")
+        op = getattr(torch, torch_op_name)
+
+        # Edge case: torch.round maps to libdevice.nearbyint.
+        triton_op_name_overrides = {
             "round": "nearbyint",
         }
-        override = op_str_overrides.get(op_str)
-        if override is not None:
-            op_str = override
+        override = triton_op_name_overrides.get(op_name)
+        triton_op_name = override if override is not None else torch_op_name
 
         # Get the number of args for the op.
         signatures = get_signature_for_torch_op(op)
@@ -174,7 +175,7 @@ class TestCase(InductorTestCase):
             # Search the code with a regex.
             # Example code: libdevice.floor(tmp3.to(tl.float32)).to(tl.float16)
             output_cast = rf"\.to\({tl_dtype_str}\)" if convert_output else ""
-            pattern = rf"{op_str}\(.*\.to\(tl\.float32\)\){output_cast}"
+            pattern = rf"{triton_op_name}\(.*\.to\(tl\.float32\)\){output_cast}"
             cast_in_code = re.search(pattern, code, re.MULTILINE) is not None
             self.assertNotEqual(cast_in_code, load_upcast_to_fp32)
 

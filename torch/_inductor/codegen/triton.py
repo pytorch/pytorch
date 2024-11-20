@@ -20,6 +20,7 @@ from typing import (
     List,
     Optional,
     Sequence,
+    Set,
     Tuple,
     TYPE_CHECKING,
     Union,
@@ -102,8 +103,21 @@ perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
 fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
 
-# Record upcasted ops, for test purposes.
-upcast_funcs: List[Tuple[Callable[..., Any], bool]] = []
+
+class OpDtypeSupport:
+    """
+    Some Triton ops such as libdevice and tl.math only support float32 and float64.
+    This class records which dtypes are supported by specific IR ops.
+    """
+
+    supported_dtypes: Dict[str, Set[torch.dtype]] = {}
+    convert_outputs: Dict[str, bool] = {}
+
+    @classmethod
+    def register_upcast(cls, func: Callable[..., str], convert_output: bool):
+        op_name = func.__name__
+        cls.supported_dtypes[op_name] = {torch.float32, torch.float64}
+        cls.convert_outputs[op_name] = convert_output
 
 
 @lru_cache(None)
@@ -738,8 +752,8 @@ def maybe_upcast_float32(convert_output: bool = True):
     """
 
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
-        # Record that this function uses upcasts, for testing purposes.
-        upcast_funcs.append((func, convert_output))
+        # Record that this function only supports float32 and float64.
+        OpDtypeSupport.register_upcast(func, convert_output)
 
         def wrapped(*args, **kwargs) -> str:
             # Optionally upcast args to float32.
