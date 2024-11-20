@@ -1110,7 +1110,7 @@ void Engine::evaluate_function(
           next.input_nr, std::move(output), opt_parent_stream, opt_next_stream);
 
       if (is_ready) {
-        auto queue = ready_queue(cpu_ready_queue, input_buffer.device());
+        auto queue = ready_queue(cpu_ready_queue, next.function->device());
         queue->push(
             NodeTask(graph_task, next.function, std::move(input_buffer)));
       } else {
@@ -1125,7 +1125,7 @@ void Engine::evaluate_function(
       input_buffer.add(
           next.input_nr, std::move(output), opt_parent_stream, opt_next_stream);
       if (is_ready) {
-        auto queue = ready_queue(cpu_ready_queue, input_buffer.device());
+        auto queue = ready_queue(cpu_ready_queue, next.function->device());
         queue->push(
             NodeTask(graph_task, next.function, std::move(input_buffer)));
         not_ready.erase(not_ready_it);
@@ -1134,7 +1134,7 @@ void Engine::evaluate_function(
   }
 }
 
-inline static uint64_t compute_min_topological_nr(const edge_list& outputs) {
+static uint64_t compute_min_topological_nr(const edge_list& outputs) {
   // Computes the mininum topological number among all the outputs
   if (outputs.empty()) {
     return 0;
@@ -1310,7 +1310,7 @@ c10::intrusive_ptr<at::ivalue::Future> Engine::execute_with_graph_task(
   // Lock mutex for GraphTask.
   std::unique_lock<std::mutex> lock(graph_task->mutex_);
 
-  auto queue = ready_queue(graph_task->cpu_ready_queue_, input_buffer.device());
+  auto queue = ready_queue(graph_task->cpu_ready_queue_, graph_root->device());
 
   // worker_device == NO_DEVICE it's a CPU thread and it's trying to drive the
   // autograd engine with corresponding GraphTask, and its NOT a re-entrant call

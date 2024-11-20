@@ -107,7 +107,9 @@ class CppTemplateKernel(CppKernel):
     def call_kernel(self, name: str, node: ir.CppTemplateBuffer):
         wrapper = V.graph.wrapper_code
         _, call_args, arg_types = self.args.cpp_argdefs()
-        wrapper.generate_kernel_call(name, call_args, gpu=False, arg_types=arg_types)
+        wrapper.generate_kernel_call(
+            name, call_args, triton=False, gpu=False, arg_types=arg_types
+        )
 
     def dtype(self, node: ir.Buffer) -> str:
         return DTYPE_TO_CPP[node.get_dtype()]
@@ -180,7 +182,9 @@ class CppTemplateKernel(CppKernel):
     def define_buffer(self, name, sizes: List[Any], dtype=torch.float) -> str:
         """Define kernel local buffer"""
         sizes = parse_expr_with_index_symbols(sizes)
-        buf = ir.Buffer(name, ir.FixedLayout(torch.device("cpu"), dtype, sizes))
+        buf = ir.Buffer(
+            name=name, layout=ir.FixedLayout(torch.device("cpu"), dtype, sizes)
+        )
         self.local_buffers[name] = buf
         ctype = f"{DTYPE_TO_CPP[dtype]}"
         numel = f"{cexpr_index(buf.get_numel())}"
@@ -212,7 +216,7 @@ class CppTemplateKernel(CppKernel):
             for i, sz in enumerate(var_sizes[0])
         }
         if not offsets:
-            offsets = [sympy.Integer(0)] * len(var_sizes[0])
+            offsets = [sympy.S.Zero] * len(var_sizes[0])
         if not reindexers:
             reindexers = [None] * len(nodes)
         assert len(offsets) == len(var_sizes[0])
@@ -344,7 +348,7 @@ class CppTemplateCaller(ir.ChoiceCaller):
             Dict[str, Union[ir.PrimitiveInfoType, List[ir.PrimitiveInfoType]]]
         ] = None,
     ):
-        super().__init__(name, input_nodes, layout)
+        super().__init__(name, input_nodes, layout, description="")
         self.category = category
         self.make_kernel_render = make_kernel_render
         self.bmreq = bmreq

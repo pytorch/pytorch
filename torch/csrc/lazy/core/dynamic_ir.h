@@ -2,15 +2,6 @@
 
 #include <ATen/core/symbol.h>
 
-#include <functional>
-#include <memory>
-#include <set>
-#include <string>
-#include <unordered_map>
-#include <unordered_set>
-#include <utility>
-#include <vector>
-
 #include <c10/core/ScalarType.h>
 #include <c10/util/Flags.h>
 #include <torch/csrc/lazy/core/hash.h>
@@ -44,13 +35,13 @@ class TORCH_API DimensionNode {
  public:
   virtual bool isSymbolic() const {
     return false;
-  };
+  }
   virtual int64_t getDynamicValue() const {
     TORCH_CHECK(false, "NYI");
-  };
+  }
   virtual int64_t getStaticValue() const {
     TORCH_CHECK(false, "NYI");
-  };
+  }
   virtual ~DimensionNode() = default;
 };
 

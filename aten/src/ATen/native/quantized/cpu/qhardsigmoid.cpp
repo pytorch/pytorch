@@ -16,8 +16,7 @@
 
 #include <algorithm>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 DEFINE_DISPATCH(qhardsigmoid_stub);
 
@@ -109,4 +108,4 @@ Tensor& hardsigmoid_out_quantized_cpu(const Tensor& qx, Tensor& result) {
   return result;
 }
 
-}}  // namespace at::native
+}  // namespace at::native

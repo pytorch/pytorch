@@ -54,11 +54,12 @@ struct TorchBenchmarkCompileTimeLogEntry {
 
 
 class BenchmarkBase(ABC):
-    # measure total number of instruction spent in _work.
+    # Measure total number of instruction spent in _work.
+    # Garbage collection is NOT disabled during _work().
     _enable_instruction_count = False
 
-    # measure total number of instruction spent in convert_frame.compile_inner
-    # TODO is there other parts we need to add ?
+    # Measure total number of instruction spent in convert_frame.compile_inner
+    # Garbage collection is disabled during _work() to avoid noise.
     _enable_compile_time_instruction_count = False
 
     # number of iterations used to run when collecting instruction_count or compile_time_instruction_count.

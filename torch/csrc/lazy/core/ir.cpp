@@ -5,13 +5,14 @@
 #include <torch/csrc/lazy/core/ir_metadata.h>
 
 // Enables caching on for dynamic shapes (aka disable hash on shapes)
+// NOLINTNEXTLINE(misc-use-internal-linkage)
+// clang-format off
 C10_DEFINE_bool(
     ltc_enable_dynamic_shapes,
     false,
-    "Whether dynamic shape is enabled");
+    "Whether dynamic shape is enabled")
 
 namespace torch::lazy {
-
 static const torch::lazy::Output kNullOutput = torch::lazy::Output();
 
 size_t Output::Hasher::operator()(const Output& output) const {
@@ -66,6 +67,7 @@ Node::Node(OpKind op, size_t num_outputs)
 Node::Node(
     OpKind op,
     OpList operands,
+    // NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
     std::vector<Shape>&& shapes,
     size_t num_outputs)
     : Node(op, num_outputs) {
@@ -88,23 +90,12 @@ Node::Node(
   }
 }
 
-Node::Node(
-    OpKind op,
-    OpList operands,
-    const std::function<Shape()>& shape_fn,
-    size_t num_outputs)
-    : Node(op, operands, std::vector<Shape>{}, num_outputs) {
-  addComputedShape(shape_fn);
-}
-
 Node::Node(OpKind op, OpList operands, size_t num_outputs)
     : Node(op, operands, std::vector<Shape>{}, num_outputs) {}
 
 Node::Node(OpKind op, Shape shape, size_t num_outputs) : Node(op, num_outputs) {
   shapes_.push_back(std::move(shape));
 }
-
-Node::~Node() = default;
 
 // Retrieves the full shape of the IR Node.
 c10::ArrayRef<Shape> Node::shapes() const {

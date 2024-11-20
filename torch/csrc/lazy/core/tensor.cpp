@@ -79,8 +79,8 @@ auto LazyTensor::data() const -> const std::shared_ptr<Data>& {
 
 int64_t LazyTensor::size(int64_t dim) const {
   auto tensor_shape = shape();
-  int rank = tensor_shape.Get().dim();
-  int dim_index = GetCanonicalDimensionIndex(dim, rank);
+  auto rank = tensor_shape.Get().dim();
+  auto dim_index = GetCanonicalDimensionIndex(dim, rank);
   return tensor_shape.Get().size(dim_index);
 }
 

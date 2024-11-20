@@ -266,7 +266,7 @@ c10::intrusive_ptr<JitFuture> pyRpcTorchscript(
       dstWorkerName,
       qualifiedName,
       functionSchema,
-      stack,
+      std::move(stack),
       rpcTimeoutSeconds,
       isAsyncExecution);
   return fut;

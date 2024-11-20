@@ -72,7 +72,7 @@ _END = "\033[0m"
 
 _STEP_ONE_ERROR_MESSAGE = textwrap.dedent(
     f"""\
-    Failed to export the model with torch.export. {_BLUE}This is step 1/2{_END} of exporting the model to ONNX. Next steps:
+    Failed to export the model with torch.export. {_BLUE}This is step 1/3{_END} of exporting the model to ONNX. Next steps:
     - Modify the model code for `torch.export.export` to succeed. Refer to https://pytorch.org/docs/stable/generated/exportdb/index.html for more information.
     - Debug `torch.export.export` and summit a PR to PyTorch.
     - Create an issue in the PyTorch GitHub repository against the {_BLUE}*torch.export*{_END} component and attach the full error stack as well as reproduction scripts."""
@@ -80,10 +80,17 @@ _STEP_ONE_ERROR_MESSAGE = textwrap.dedent(
 
 _STEP_TWO_ERROR_MESSAGE = textwrap.dedent(
     f"""\
-    Failed to convert the exported program to an ONNX model. {_BLUE}This is step 2/2{_END} of exporting the model to ONNX. Next steps:
+    Failed to decompose the FX graph for ONNX compatibility. {_BLUE}This is step 2/3{_END} of exporting the model to ONNX. Next steps:
+    - Create an issue in the PyTorch GitHub repository against the {_BLUE}*torch.export*{_END} component and attach the full error stack as well as reproduction scripts.
+    - Create an error report with `torch.onnx.export(..., report=True)`, and save the ExportedProgram as a pt2 file. Create an issue in the PyTorch GitHub repository against the {_BLUE}*onnx*{_END} component. Attach the error report and the pt2 model."""
+)
+
+_STEP_THREE_ERROR_MESSAGE = textwrap.dedent(
+    f"""\
+    Failed to convert the exported program to an ONNX model. {_BLUE}This is step 3/3{_END} of exporting the model to ONNX. Next steps:
     - If there is a missing ONNX function, implement it and register it to the registry.
     - If there is an internal error during ONNX conversion, debug the error and summit a PR to PyTorch.
-    - Save the ExportedProgram as a pt2 file and create an error report with `export(..., report=True)`. Create an issue in the PyTorch GitHub repository against the {_BLUE}*onnx*{_END} component. Attach the pt2 model and the error report."""
+    - Create an error report with `torch.onnx.export(..., report=True)`, and save the ExportedProgram as a pt2 file. Create an issue in the PyTorch GitHub repository against the {_BLUE}*onnx*{_END} component. Attach the error report and the pt2 model."""
 )
 
 logger = logging.getLogger(__name__)
@@ -126,13 +133,17 @@ class TorchTensor(ir.Tensor):
         # it avoids copying to a NumPy array
         import torch._subclasses.fake_tensor
 
-        if isinstance(self.raw, torch._subclasses.fake_tensor.FakeTensor):
+        with torch._subclasses.fake_tensor.unset_fake_temporarily():
+            # Disable any fake mode so calling detach() etc. will return a real tensor
+            tensor = self.raw.detach().cpu().contiguous()
+
+        if isinstance(tensor, torch._subclasses.fake_tensor.FakeTensor):
             raise TypeError(
                 f"Cannot take content out from the FakeTensor ('{self.name}'). Please replace the tensor "
                 "with a tensor backed by real data using ONNXProgram.apply_weights() "
                 "or save the model without initializers by setting include_initializers=False."
             )
-        tensor = self.raw.detach().cpu().contiguous()
+
         return bytes(
             (ctypes.c_ubyte * tensor.element_size() * tensor.numel()).from_address(
                 tensor.data_ptr()
@@ -723,6 +734,7 @@ def _prepare_exported_program_for_export(
     registry: _registration.ONNXRegistry,
 ) -> torch.export.ExportedProgram:
     """Decompose and apply pre-export transformations to the exported program."""
+
     # Decompose the graph given the implemented torch ops in ONNX
     exported_program = _fx_passes.decompose_with_registry(exported_program, registry)
 
@@ -1010,10 +1022,10 @@ def export(
             result = strategy(model, args, kwargs, dynamic_shapes=dynamic_shapes)
 
             # Record the status
-            if strategy_class is _capture_strategies.TorchExportStrategy:
-                export_status.torch_export = result.success
-            elif strategy_class is _capture_strategies.TorchExportNonStrictStrategy:
+            if strategy_class is _capture_strategies.TorchExportNonStrictStrategy:
                 export_status.torch_export_non_strict = result.success
+            elif strategy_class is _capture_strategies.TorchExportStrategy:
+                export_status.torch_export = result.success
             elif strategy_class is _capture_strategies.JitTraceConvertStrategy:
                 export_status.torch_jit = result.success
 
@@ -1076,10 +1088,9 @@ def export(
         else:
             verbose_print(f"ExportedProgram has been saved to '{program_path}'.")
 
-    # Step 2: Convert the exported program to an ONNX model
-    verbose_print("Translate the graph into ONNX...")
+    # Step 2: Decompose the exported program and insert type promotion nodes
+    verbose_print("Run decomposition...")
 
-    # Step 2a: Decompose the exported program and insert type promotion nodes
     try:
         # Build the ONNX function registry
         if registry is None:
@@ -1090,8 +1101,8 @@ def export(
             program, registry=registry
         )
     except Exception as e:
-        export_status.onnx_translation = False
-        verbose_print("Translate the graph into ONNX... ❌")
+        export_status.decomposition = False
+        verbose_print("Run decomposition... ❌")
         profile_result = _maybe_stop_profiler_and_get_result(profiler)
 
         if report:
@@ -1119,8 +1130,12 @@ def export(
             + (f"\nError report has been saved to '{report_path}'." if report else "")
             + _summarize_exception_stack(e)
         ) from e
+    else:
+        export_status.decomposition = True
+        verbose_print("Run decomposition... ✅")
 
-    # Step 2b: Translate the decomposed program to ONNX and produce ONNXProgram
+    # Step 3: Translate the decomposed program to ONNX and produce ONNXProgram
+    verbose_print("Translate the graph into ONNX...")
     if report or profile:
         pre_decomp_unique_ops, post_decomp_unique_ops = _analysis.compare_ops(
             program, decomposed_program
@@ -1179,7 +1194,7 @@ def export(
             report_path = None
 
         raise _errors.ConversionError(
-            _STEP_TWO_ERROR_MESSAGE
+            _STEP_THREE_ERROR_MESSAGE
             + (f"\nError report has been saved to '{report_path}'." if report else "")
             + _summarize_exception_stack(e)
         ) from e
@@ -1219,7 +1234,7 @@ def export(
             verbose_print(profile_result)
         return onnx_program
 
-    # Step 3: (verify=True) Check the ONNX model with ONNX checker
+    # Step 4: (verify=True) Check the ONNX model with ONNX checker
     try:
         verbose_print("Check the ONNX model...")
         onnxscript_apis.check_model(onnx_program.model)
@@ -1259,7 +1274,7 @@ def export(
         )
         return onnx_program
 
-    # Step 4: (verify=True) Execute the model with ONNX Runtime
+    # Step 5: (verify=True) Execute the model with ONNX Runtime
     try:
         verbose_print("Execute the model with ONNX Runtime...")
         verification_results = _verification.verify_onnx_program(onnx_program)
@@ -1273,7 +1288,7 @@ def export(
         verification_message = None
 
     else:
-        # Step 5: (verify=True) Validate the output values
+        # Step 6: (verify=True) Validate the output values
         verbose_print("Verify output accuracy...")
         export_status.output_accuracy = True
         for verification_result in verification_results:

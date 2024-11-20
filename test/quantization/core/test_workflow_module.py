@@ -1,68 +1,66 @@
 # Owner(s): ["oncall: quantization"]
 
 # Torch
-import torch
-from torch.ao.quantization import (
-    MinMaxObserver,
-    PerChannelMinMaxObserver,
-    MovingAverageMinMaxObserver,
-    MovingAveragePerChannelMinMaxObserver,
-    HistogramObserver,
-    RecordingObserver,
-    PlaceholderObserver,
-    NoopObserver,
-    FakeQuantize,
-    FixedQParamsObserver,
-    default_debug_qconfig,
-    default_observer,
-    default_histogram_observer,
-    default_per_channel_weight_observer,
-    prepare,
-    prepare_qat,
-    convert,
-    QConfig,
-    FusedMovingAvgObsFakeQuantize,
-    get_embedding_qat_module_mappings,
-    get_embedding_static_quant_module_mappings,
-)
-from torch.ao.quantization.quantize import _get_observer_dict
-
-import torch.nn as nn
-
 # Standard library
 import copy
 import io
 import itertools
-import unittest
 import math
+import unittest
+
 import numpy as np
+import torch
+
+import torch.nn as nn
+import torch.testing._internal.hypothesis_utils as hu
 
 # Testing utils
-from hypothesis import given, settings
-from hypothesis import strategies as st
-import torch.testing._internal.hypothesis_utils as hu
+from hypothesis import given, settings, strategies as st
+from torch.ao.quantization import (
+    convert,
+    default_debug_qconfig,
+    default_histogram_observer,
+    default_observer,
+    default_per_channel_weight_observer,
+    FakeQuantize,
+    FixedQParamsObserver,
+    FusedMovingAvgObsFakeQuantize,
+    get_embedding_qat_module_mappings,
+    get_embedding_static_quant_module_mappings,
+    HistogramObserver,
+    MinMaxObserver,
+    MovingAverageMinMaxObserver,
+    MovingAveragePerChannelMinMaxObserver,
+    NoopObserver,
+    PerChannelMinMaxObserver,
+    PlaceholderObserver,
+    prepare,
+    prepare_qat,
+    QConfig,
+    RecordingObserver,
+)
+from torch.ao.quantization.quantize import _get_observer_dict
+
 hu.assert_deadline_disabled()
-from torch.testing._internal.common_cuda import TEST_MULTIGPU, TEST_CUDA
-from torch.testing._internal.common_utils import TestCase, skipIfTorchDynamo
+from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU
+
 from torch.testing._internal.common_quantization import (
-    QuantizationTestCase,
     AnnotatedSingleLayerLinearModel,
-    test_only_eval_fn,
+    DeFusedEmbeddingBagLinear,
+    QuantizationTestCase,
     SingleLayerLinearModel,
+    test_only_eval_fn,
 )
 
 from torch.testing._internal.common_quantized import (
+    _fake_quantize_per_channel_affine_grad_reference,
+    _fake_quantize_per_channel_affine_reference,
+    override_qengines,
     override_quantized_engine,
     supported_qengines,
-    override_qengines,
-    _fake_quantize_per_channel_affine_reference,
-    _fake_quantize_per_channel_affine_grad_reference,
     to_tensor,
 )
-
-from torch.testing._internal.common_quantization import (
-    DeFusedEmbeddingBagLinear,
-)
+from torch.testing._internal.common_utils import skipIfTorchDynamo, TestCase
 
 NP_RANDOM_SEED = 19
 tolerance = 1e-6
@@ -914,6 +912,83 @@ def _get_buffer_ids(module):
     Object addresses stay constant if and only if all modifications are in-place
     """
     return [id(v) for k, v in module._buffers.items()]
+
+class TestFusedModuleScriptable(QuantizationTestCase):
+    def test_fx_qat_convbn_fused_jit_scriptable(self):
+        """
+        Tests jit scriptability works for fused ConvBN.
+        """
+        for qengine in ['fbgemm', 'qnnpack']:
+            with override_quantized_engine(qengine):
+                # create conv-bn
+                class Model(nn.Module):
+                    def __init__(self) -> None:
+                        super().__init__()
+                        self.conv = nn.Conv2d(4, 1, 3, padding=1)
+                        self.bn = nn.BatchNorm2d(1)
+
+                    def forward(self, x):
+                        x = self.conv(x)
+                        x = self.bn(x)
+                        return x
+
+                model = Model()
+                model = torch.fx.symbolic_trace(model)
+
+                # fuse it
+                fused_model = torch.ao.quantization.fuse_modules_qat(
+                    model,
+                    [['conv', 'bn']],
+                )
+                # convert to QAT
+                qconfig_mapping = torch.ao.quantization.get_default_qat_qconfig_mapping(qengine)
+
+                quantizable_model = torch.ao.quantization.quantize_fx.prepare_qat_fx(fused_model,
+                                                                                     qconfig_mapping,
+                                                                                     example_inputs=None)
+                assert isinstance(quantizable_model.conv, torch.ao.nn.intrinsic.qat.ConvBn2d)
+
+                # jit script
+                scripted_model = torch.jit.script(quantizable_model)
+
+                self.assertTrue(
+                    isinstance(scripted_model, torch.jit.ScriptModule),
+                    "Expected prepared model with to be scriptable")
+
+    def test_qat_convbn_fused_jit_scriptable(self):
+        """
+        Tests jit scriptability works for fused ConvBN.
+        """
+        for qengine in ['fbgemm', 'qnnpack']:
+            with override_quantized_engine(qengine):
+                # create conv-bn
+                class Model(nn.Module):
+                    def __init__(self) -> None:
+                        super().__init__()
+                        self.conv = nn.Conv2d(4, 1, 3, padding=1)
+                        self.bn = nn.BatchNorm2d(1)
+
+                    def forward(self, x):
+                        x = self.conv(x)
+                        x = self.bn(x)
+                        return x
+
+                model = Model()
+
+                # fuse it
+                fused_model = torch.ao.quantization.fuse_modules_qat(
+                    model,
+                    [['conv', 'bn']],
+                )
+                # convert to QAT
+                fused_model.qconfig = torch.ao.quantization.get_default_qconfig(qengine)
+                torch.ao.quantization.prepare_qat(fused_model, inplace=True)
+                assert isinstance(fused_model.conv, torch.ao.nn.intrinsic.qat.ConvBn2d)
+
+                # Test jit script fails
+                # Prepared eager module fails due to observer hooks not being scriptable
+                with self.assertRaises(RuntimeError):
+                    torch.jit.script(fused_model)
 
 class TestDistributed(QuantizationTestCase):
 

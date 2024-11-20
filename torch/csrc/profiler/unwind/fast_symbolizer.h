@@ -7,8 +7,8 @@
 #include <torch/csrc/profiler/unwind/sections.h>
 #include <torch/csrc/profiler/unwind/unwind.h>
 #include <torch/csrc/profiler/unwind/unwind_error.h>
-#include <cstddef>
 #include <memory>
+#include <unordered_map>
 
 namespace torch::unwind {
 

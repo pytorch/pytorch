@@ -35,8 +35,11 @@
 - torch/distributed/_tensor/**
 - torch/distributed/fsdp/**
 - torch/csrc/inductor/**
+- torch/csrc/dynamo/**
 - test/cpp/aoti_abi_check/**
 - test/cpp/aoti_inference/**
+- test/inductor/**
+- test/dynamo/**
 
 "module: cpu":
 - aten/src/ATen/cpu/**
@@ -98,3 +101,9 @@
 "module: distributed_checkpoint":
 - torch/distributed/checkpoint/**
 - test/distributed/checkpoint/**
+
+"module: compiled autograd":
+- torch/csrc/dynamo/python_compiled_autograd.cpp
+- torch/csrc/dynamo/compiled_autograd.h
+- torch/_dynamo/compiled_autograd.py
+- torch/inductor/test_compiled_autograd.py

@@ -320,7 +320,6 @@ class TestSparse(TestSparseBase):
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble, torch.bfloat16)
     @precisionOverride({torch.bfloat16: 1e-2})
-    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1991")
     def test_coalesce(self, device, dtype, coalesced):
 
         def _test_coalesce(t):
@@ -1455,6 +1454,27 @@ class TestSparse(TestSparseBase):
 
     @onlyCUDA
     @unittest.skipIf(
+        IS_WINDOWS and TEST_CUDA,
+        "bmm sparse-dense CUDA is not yet supported in Windows, at least up to CUDA 10.1"
+    )
+    def test_bmm_oob(self, device):
+        # Targets an out of bounds error when the sparse tensor has no non-zero
+        # values in the first batch dimension (#131977).
+        # NOTE: This test is separated from the other bmm tests to avoid
+        # interference from prior memory allocations on the device. Since CUDA
+        # doesn't perform bounds checking, we need the error to cause an
+        # illegal memory access (by indexing into unallocated memory) for the
+        # test to fail.
+        torch.cuda.empty_cache()
+        indices = torch.tensor([[1], [0], [0]], device=device)
+        values = torch.tensor([1.], device=device)
+        a = torch.sparse_coo_tensor(indices, values, size=(2, 1, 1))
+        b = torch.zeros((2, 1, 1), device=device)
+        ab = torch.bmm(a, b)
+        self.assertEqual(ab, torch.zeros((2, 1, 1), device=device))
+
+    @onlyCUDA
+    @unittest.skipIf(
         not IS_WINDOWS or not TEST_WITH_ROCM,
         "this test ensures bmm sparse-dense CUDA gives an error when run on Windows with CUDA < 11.0"
     )
@@ -1845,7 +1865,7 @@ class TestSparse(TestSparseBase):
         empty_S.requires_grad_(True)
         empty_S_sum = torch.sparse.sum(empty_S)
         empty_S_sum.backward()
-        self.assertEqual(empty_S.grad.to_dense(), empty_S.clone().detach().to_dense())
+        self.assertEqual(empty_S.grad.to_dense(), empty_S.detach().clone().to_dense())
 
         # test values().sum()
         S = self._gen_sparse(sparse_dims, nnz, with_size, dtype, device, coalesced)[0]
@@ -4802,7 +4822,7 @@ class TestSparseAny(TestCase):
             if batch_dim > 0:
                 # TODO: implement batch support in _convert_indices_from_csr_to_coo
                 continue
-            t = t.clone().detach().requires_grad_(True)
+            t = t.detach().clone().requires_grad_(True)
             r = gradcheck(lambda x: torch.Tensor.to_dense(x, masked_grad=gradcheck.masked), t)
             self.assertTrue(r)
 
