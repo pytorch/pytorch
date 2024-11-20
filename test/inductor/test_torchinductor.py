@@ -12606,7 +12606,6 @@ if HAS_GPU and not TEST_WITH_ASAN:
             code = run_and_get_triton_code(opt_fn, a, b)
 
             if block_multiple:
-                breakpoint()
                 self.assertTrue("xmask = tl.full" in code)
                 if ynumel_exceed_ygrid_size:
                     self.assertTrue("ymask = yindex < ynumel" in code)
