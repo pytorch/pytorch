@@ -226,6 +226,12 @@ TEST(XPUStreamTest, ExternalStream) {
       c10::xpu::getStreamFromExternal(ext_queue2, 0);
   EXPECT_EQ(ext_stream6.priority(), -1);
   EXPECT_NE(ext_stream6, ext_stream1);
+  sycl::queue ext_queue3 = sycl::queue(
+      c10::xpu::get_device_context(),
+      c10::xpu::get_raw_device(0),
+      c10::xpu::asyncHandler,
+      {});
+  ASSERT_THROW(c10::xpu::getStreamFromExternal(ext_queue3, 0), c10::Error);
 }
 
 TEST(XPUStreamTest, MultiDeviceExternalStream) {
