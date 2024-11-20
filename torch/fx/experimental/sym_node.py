@@ -110,14 +110,14 @@ class SymNode:
         # in sync, so we've deleted it for now.)
 
         def compute_hint():
-            from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+            from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
 
             # This occasionally gets exercised by, e.g.,
             # convert_shape_to_symint.  It's just a nicety so you don't HAVE
             # to have a correct hint on hand when making a SymNode.
             # Don't attempt to compute for unbacked, this can be quite
             # expensive.
-            if free_unbacked_symbols(self.expr):
+            if has_free_unbacked_symbols(self.expr):
                 return None
             hint = self.shape_env._maybe_evaluate_static(self.expr, compute_hint=True)
             if hint is not None:
@@ -961,14 +961,14 @@ def sympy_is_contiguous_generic(sizes, strides, dim_order):
         return sympy.false
 
     is_contiguous = sympy.true
-    z = sympy.Integer(1)
+    z = sympy.S.One
     # Contiguous if the strides make sense (or the dim is size 1)
     for d in dim_order:
-        is_contiguous &= sympy.Eq(sizes[d], sympy.Integer(1)) | sympy.Eq(strides[d], z)
+        is_contiguous &= sympy.Eq(sizes[d], sympy.S.One) | sympy.Eq(strides[d], z)
         z *= sizes[d]
     # OR if any size is zero
     for d in range(dim):
-        is_contiguous |= sympy.Eq(sizes[d], sympy.Integer(0))
+        is_contiguous |= sympy.Eq(sizes[d], sympy.S.Zero)
     return is_contiguous
 
 
@@ -994,7 +994,7 @@ def sympy_is_channels_last_strides_generic(sizes, strides, dim_order):
     if dim != len(dim_order):
         return sympy.false
 
-    m = sympy.Integer(0)
+    m = sympy.S.Zero
     r = sympy.true
 
     # special case for trivial C dimension. default to NCHW

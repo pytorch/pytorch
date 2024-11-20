@@ -995,6 +995,7 @@ class TORCH_API TensorIteratorConfig final {
 /// TensorIterator that can use 32-bit indexing. Taken together the splits cover
 /// the original TensorIterator.
 struct TORCH_API SplitUntil32Bit {
+  // NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
   struct TORCH_API iterator {
     iterator() = default;
     iterator(const TensorIteratorBase& iter);

@@ -95,6 +95,12 @@ class CapabilityBasedPartitioner:
         partitions_by_id: Dict[
             int, Partition
         ] = {}  # mapping from partition_id to partition
+        nodes_order: Dict[
+            Node, int
+        ] = {}  # mapping from nodes to reversed topological order
+        partitions_order: Dict[
+            int, int
+        ] = {}  # mapping from partition_id to minimum topo order of nodes in partition
         new_partition_id = itertools.count()
 
         # try to merge partition other_id into partition self_id
@@ -155,6 +161,11 @@ class CapabilityBasedPartitioner:
             # delete other partition
             del partitions_by_id[other_id]
 
+            partitions_order[self_id] = min(
+                partitions_order[self_id], partitions_order[other_id]
+            )
+            del partitions_order[other_id]
+
             partition_map[self_id] = partition_map[self_id].union(
                 partition_map[other_id]
             )
@@ -209,11 +220,16 @@ class CapabilityBasedPartitioner:
             # the fusion by adding an `else` block here to skip horizontal fusion.
             if self.__is_node_supported(node) and node not in assignment:
                 partition_id = next(new_partition_id)
+                nodes_order[node] = partition_id
+                partitions_order[partition_id] = partition_id
                 merge_single_node(node, partition_id)
                 merge_candidates[partition_id] = None
 
             # merge all possible partitions
-            merge_candidates.update(dict.fromkeys(partitions_by_id))
+            for partition_id, _ in sorted(
+                partitions_order.items(), key=lambda item: item[1]
+            ):
+                merge_candidates[partition_id] = None
 
             merge_candidates_list = list(merge_candidates.keys())
             if len(merge_candidates_list) > 1:

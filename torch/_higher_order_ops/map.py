@@ -27,6 +27,8 @@ from .utils import (
     _unstack_pytree,
     clone_outputs_aliasing_inputs,
     prepare_fw_with_masks,
+    save_tensors_and_symints_for_backward,
+    saved_tensors_and_symints,
 )
 
 
@@ -157,7 +159,7 @@ def map_wrapper(f, xs, *args):
 class MapAutogradOp(torch.autograd.Function):
     @staticmethod
     def forward(ctx, fw_graph, joint_graph, num_mapped_args, *flat_args):
-        ctx.save_for_backward(*flat_args)
+        save_tensors_and_symints_for_backward(ctx, flat_args)
         ctx._joint_graph = joint_graph
         ctx._num_mapped_args = num_mapped_args
         with torch._C._AutoDispatchBelowAutograd():
@@ -169,7 +171,7 @@ class MapAutogradOp(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, *flat_grads):
-        fw_args = ctx.saved_tensors
+        fw_args = saved_tensors_and_symints(ctx)
         fw_mapped_args = fw_args[: ctx._num_mapped_args]
         pos_args = fw_args[ctx._num_mapped_args :]
 
