@@ -93,7 +93,8 @@ dnnl::memory::data_type get_onednn_dtype_include_double(
 }
 
 bool is_supported_onednn_dtype(const at::Tensor& tensor) {
-  return get_onednn_dtype_include_double(tensor) != dnnl::memory::data_type::undef;
+  return get_onednn_dtype_include_double(tensor) !=
+      dnnl::memory::data_type::undef;
 }
 
 dnnl::memory::dims get_onednn_dims(const at::Tensor& tensor) {
