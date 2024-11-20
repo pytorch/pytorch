@@ -476,11 +476,11 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(
   // DEFAULT_FLAGS = cudaEventDisableTiming.
   if (cudaEventCacheEnabled) {
     ncclStartEvent_ = enableTiming
-        ? ProcessGroupNCCL::CUDAEventCache::get(device.index())
-              .create(enableTiming)
+        ? ProcessGroupNCCL::CUDAEventCache::get().create(
+              device.index(), enableTiming)
         : nullptr;
-    ncclEndEvent_ = ProcessGroupNCCL::CUDAEventCache::get(device.index())
-                        .create(enableTiming);
+    ncclEndEvent_ = ProcessGroupNCCL::CUDAEventCache::get().create(
+        device.index(), enableTiming);
   } else {
     ncclStartEvent_ = enableTiming
         ? std::make_shared<at::cuda::CUDAEvent>(cudaEventDefault)
@@ -797,25 +797,29 @@ void ProcessGroupNCCL::WorkNCCL::abort() {
   ncclCommDevIdxMapMutex.unlock();
 }
 
-ProcessGroupNCCL::CUDAEventCache::CUDAEventCache() = default;
+ProcessGroupNCCL::CUDAEventCache::CUDAEventCache()
+    : caches_(at::cuda::device_count()) {}
 
 // CUDA event is used to record the start/end of one Work.
 // Instead of let the CUDA event gets destroyed, we now reuse it after the Work
 // has been erased from workMetaList_.
 // This is to avoid the potential deadlock caused by CudaEventDestroy.
 std::shared_ptr<at::cuda::CUDAEvent> ProcessGroupNCCL::CUDAEventCache::create(
+    at::DeviceIndex device,
     bool timing) {
+  auto& deviceCache = caches_[device];
   // register the deleter as a callback when the WorkNCCL object is destroyed.
-  auto deleter = [this, timing](at::cuda::CUDAEvent* event) {
-    std::lock_guard<std::mutex> lock(this->cacheMutex_);
+  auto deleter = [this, device, timing](at::cuda::CUDAEvent* event) {
+    auto& deviceCache = caches_[device];
+    std::lock_guard<std::mutex> lock(deviceCache.cacheMutex_);
     // We put the event back to the cache deque once the WorkNCCL object is
     // destroyed.
-    this->eventsArray_[timing ? 1 : 0].push_back(event);
+    deviceCache.eventsArray_[timing ? 1 : 0].push_back(event);
   };
   at::cuda::CUDAEvent* event = nullptr;
   {
-    std::lock_guard<std::mutex> lock(cacheMutex_);
-    auto& events = eventsArray_[timing ? 1 : 0];
+    std::lock_guard<std::mutex> lock(deviceCache.cacheMutex_);
+    auto& events = deviceCache.eventsArray_[timing ? 1 : 0];
     // If we still have events in the cache, we reuse it. Otherwise, we create a
     // new one.
     if (!events.empty()) {
@@ -829,18 +833,9 @@ std::shared_ptr<at::cuda::CUDAEvent> ProcessGroupNCCL::CUDAEventCache::create(
   return std::shared_ptr<at::cuda::CUDAEvent>(event, std::move(deleter));
 }
 
-ProcessGroupNCCL::CUDAEventCache& ProcessGroupNCCL::CUDAEventCache::get(
-    int deviceIdx) {
+ProcessGroupNCCL::CUDAEventCache& ProcessGroupNCCL::CUDAEventCache::get() {
   // Return a singleton instance of CUDAEventCache.
   static ProcessGroupNCCL::CUDAEventCache cache;
-  static thread_local int currentDeviceIdx = -1;
-  if (currentDeviceIdx == -1) {
-    currentDeviceIdx = deviceIdx;
-  } else {
-    TORCH_CHECK(
-        currentDeviceIdx == deviceIdx,
-        "CudaEventCache does not support multi-device and if you want to disable by setting TORCH_NCCL_CUDA_EVENT_CACHE to false.");
-  }
   return cache;
 }
 
