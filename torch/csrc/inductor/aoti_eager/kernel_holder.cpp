@@ -120,9 +120,9 @@ std::vector<ParameterMetadata> unpack_input_parameters(
       // optional tensor list: std::vector<std::optional<at::Tensor>>
       std::vector<at::Tensor> tensor_list;
       for (const auto& item : stack[idx].toListRef()) {
-        const auto e = item.toOptional<at::Tensor>();
+        auto e = item.toOptional<at::Tensor>();
         if (e.has_value()) {
-          tensor_list.push_back(e.value());
+          tensor_list.emplace_back(std::move(e.value()));
         }
       }
       inputs_metadata.emplace_back(tensor_list, arg_order);
@@ -130,9 +130,9 @@ std::vector<ParameterMetadata> unpack_input_parameters(
         *arguments[idx].real_type() ==
         *c10::getTypePtr<std::optional<at::Tensor>>()) {
       // optional tensor
-      auto const t = stack[idx].toOptional<at::Tensor>();
+      auto t = stack[idx].toOptional<at::Tensor>();
       if (t.has_value()) {
-        inputs_metadata.emplace_back(t, arg_order);
+        inputs_metadata.emplace_back(std::move(t.value()), arg_order);
       }
     } else if (stack[idx].isTensor()) {
       inputs_metadata.emplace_back(stack[idx].toTensor(), arg_order);
