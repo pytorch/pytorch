@@ -17,6 +17,10 @@ runs:
         set -ex
         diskspace_cutoff=${{ inputs.diskspace-cutoff }}
         docker_root_dir=$(docker info -f '{{.DockerRootDir}}')
+        if [ ! -d "$docker_root_dir" ]; then
+            echo "Docker root directory ($docker_root_dir) does not exist. Skipping disk space check."
+            exit 0
+        fi
         diskspace=$(df -H --output=pcent ${docker_root_dir} | sed -n 2p | sed 's/%//' | sed 's/ //')
         msg="Please file an issue on pytorch/pytorch reporting the faulty runner. Include a link to the runner logs so the runner can be identified"
         if [[ "$diskspace" -ge "$diskspace_cutoff" ]] ; then
