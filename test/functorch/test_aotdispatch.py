@@ -6292,7 +6292,7 @@ metadata incorrectly.
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.p1 = torch.nn.Parameter(WrapperSubclass(torch.ones(3, 4)))
+                self.p1 = torch.nn.Parameter(torch.ones(3, 4))
                 self.p2 = torch.nn.Parameter(
                     TwoTensor(torch.zeros(3, 4), torch.zeros(3, 4))
                 )
@@ -6304,17 +6304,20 @@ metadata incorrectly.
         ref_x = torch.randn(3, 4)
         ref_out = m(ref_x)
         ref_out.sum().backward()
+        m.zero_grad()
 
         from torch._functorch._aot_autograd.subclass_parametrization import (
             unwrap_tensor_subclass_parameters,
         )
 
         unwrap_tensor_subclass_parameters(m)
+
         ref_x2 = ref_x.detach().clone()
         ref_out2 = m(ref_x2)
         self.assertEqual(ref_out2, ref_out)
         ref_out2.sum().backward()
         self.assertEqual(ref_x2.grad, ref_x.grad)
+        m.zero_grad()
 
         x = ref_x.detach().clone()
         comp_fn = torch.compile(m, backend="aot_eager", fullgraph=True)
