@@ -3109,6 +3109,25 @@ class GraphModule(torch.nn.Module):
                 y = torch.randn(3, 4)
                 self.assertEqual(opt_fn(x, y), fn(x, y))
 
+    def test_methodcaller(self):
+        for name, args, kwargs in (
+            ("size", (), {}),
+            ("size", (0,), {}),
+            ("add", (torch.randn(3, 4),), {}),
+            ("add", (torch.randn(3, 4),), {"alpha": 2.0}),
+        ):
+            with self.subTest(name=name, args=args, kwargs=kwargs):
+
+                def fn(x, y):
+                    caller = operator.methodcaller(name, *args, **kwargs)
+                    return caller(x), caller(y)
+
+                opt_fn = torch.compile(fullgraph=True)(fn)
+
+                x = torch.randn(3, 4)
+                y = torch.randn(3, 4)
+                self.assertEqual(opt_fn(x, y), fn(x, y))
+
     def gen_random_range_args(self):
         args_count = random.randint(1, 3)
         args = [random.randint(-10, 10) for _ in range(args_count)]
