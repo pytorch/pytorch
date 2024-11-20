@@ -1371,6 +1371,29 @@ class TestCxxPytree(TestCase):
         roundtrip_spec = cxx_pytree.treespec_loads(cxx_pytree.treespec_dumps(spec))
         self.assertEqual(roundtrip_spec.type._fields, spec.type._fields)
 
+    def test_pytree_serialization_namedtuple_bc(self):
+        class C1(NamedTuple):
+            x: int
+            y: int
+
+        py_pytree._register_namedtuple(
+            C1,
+            serialized_type_name="test_pytree.test_pytree_serialize_namedtuple_bc.C1",
+        )
+        spec = py_pytree.tree_flatten((C1(0, 1),))[1]
+
+        dump = py_pytree.treespec_dumps(spec)
+        roundtrip_spec = py_pytree.treespec_loads(dump)
+        self.assertEqual(roundtrip_spec, spec)
+        self.assertEqual(
+            roundtrip_spec.children_specs[0].metadata["namedtuple_fields"], ["x", "y"]
+        )
+
+        # BC check
+        without_meta = '[1, {"type": "builtins.tuple", "context": "null", "children_spec": [{"type": "collections.namedtuple", "context": "test_pytree.test_pytree_serialize_namedtuple_bc.C1", "children_spec": [{"type": null, "context": null, "children_spec": []}, {"type": null, "context": null, "children_spec": []}]}]}]'
+        roundtrip_spec = py_pytree.treespec_loads(without_meta)
+        self.assertEqual(roundtrip_spec, spec)
+
     def test_pytree_custom_type_serialize(self):
         cxx_pytree.register_pytree_node(
             GlobalDummyType,

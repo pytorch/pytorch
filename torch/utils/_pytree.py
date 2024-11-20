@@ -685,6 +685,7 @@ class TreeSpec:
     type: Any
     context: Context
     children_specs: List["TreeSpec"]
+    metadata: Dict[Any, Any] = dataclasses.field(default_factory=dict)
 
     num_nodes: int = dataclasses.field(init=False)
     num_leaves: int = dataclasses.field(init=False)
@@ -713,6 +714,17 @@ class TreeSpec:
             )
         repr_suffix: str = f"{children_specs_str}])"
         return repr_prefix + repr_suffix
+
+    def __eq__(self, other) -> bool:
+        # Do not compare the metadata, since this only gets populated during serialization
+
+        if not isinstance(other, TreeSpec):
+            return False
+        return (
+            self.type == other.type
+            and self.context == other.context
+            and self.children_specs == other.children_specs
+        )
 
     def is_leaf(self) -> bool:
         return self.num_nodes == 1 and self.num_leaves == 1
@@ -1338,6 +1350,7 @@ class _TreeSpecSchema:
     type: Optional[str]
     context: DumpableContext
     children_spec: List["_TreeSpecSchema"]
+    metadata: Dict[Any, Any] = dataclasses.field(default_factory=dict)
 
 
 class _ProtocolFn(NamedTuple):
@@ -1381,7 +1394,13 @@ def _treespec_to_json(treespec: TreeSpec) -> _TreeSpecSchema:
 
     child_schemas = [_treespec_to_json(child) for child in treespec.children_specs]
 
-    return _TreeSpecSchema(serialized_type_name, serialized_context, child_schemas)
+    metadata = {}
+    if treespec.type == namedtuple:
+        metadata["namedtuple_fields"] = treespec.context._fields
+
+    return _TreeSpecSchema(
+        serialized_type_name, serialized_context, child_schemas, metadata
+    )
 
 
 def _json_to_treespec(json_schema: DumpableContext) -> TreeSpec:
@@ -1416,7 +1435,7 @@ def _json_to_treespec(json_schema: DumpableContext) -> TreeSpec:
     for child_string in json_schema["children_spec"]:
         children_specs.append(_json_to_treespec(child_string))
 
-    return TreeSpec(typ, context, children_specs)
+    return TreeSpec(typ, context, children_specs, json_schema.get("metadata", {}))
 
 
 _SUPPORTED_PROTOCOLS[1] = _ProtocolFn(_treespec_to_json, _json_to_treespec)
