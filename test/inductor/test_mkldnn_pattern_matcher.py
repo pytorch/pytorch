@@ -767,7 +767,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     @skipIfNoXPU
     def test_qconv2d_xpu(self):
         r"""
