@@ -7980,7 +7980,9 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
 
                 self.assertEqual(grads_compile, grads_ref)
 
+
 from torch.nested._internal.nested_int import NestedIntNode
+
 
 class TestNestedInt(torch.testing._internal.common_utils.TestCase):
     def test_comparisons(self):
