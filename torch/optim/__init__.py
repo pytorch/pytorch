@@ -22,6 +22,7 @@ from torch.optim.rmsprop import RMSprop as RMSprop
 from torch.optim.rprop import Rprop as Rprop
 from torch.optim.sgd import SGD as SGD
 from torch.optim.sparse_adam import SparseAdam as SparseAdam
+from torch.optim.adamz import AdamZ as AdamZ
 
 
 Adafactor.__module__ = "torch.optim"
@@ -60,4 +61,5 @@ __all__ = [
     "SGD",
     "SparseAdam",
     "swa_utils",
+    "AdamZ",
 ]
