@@ -48,7 +48,7 @@ if TYPE_CHECKING:
         def __rmul__(self, other: Any) -> typing.Self:
             ...
 
-    _T = TypeVar("_T", bound=_WorksWithInt)
+    _IntLikeT = TypeVar("_IntLikeT", bound=_WorksWithInt)
 
 
 ShapeType: TypeAlias = Union[torch.Size, List[int], Tuple[int, ...]]
@@ -1643,15 +1643,15 @@ def make_contiguous_strides_for(
 
 
 def make_channels_last_1d_strides_for(
-    shape: Sequence[_T],
-) -> Tuple[Union[_T, int], ...]:
+    shape: Sequence[_IntLikeT],
+) -> Tuple[Union[_IntLikeT, int], ...]:
     torch._check(
         len(shape) == 3,
         lambda: "Only tensors of rank 3 can use the channels_last_1d memory format",
     )
 
-    multiplier: Union[_T, int] = 1
-    strides: List[Union[_T, int]] = [0] * 3
+    multiplier: Union[_IntLikeT, int] = 1
+    strides: List[Union[_IntLikeT, int]] = [0] * 3
     for idx in (1, -1, 0):
         # NOTE: intentionally divergence from make_contiguous_strides_for
         # This is consistent with eager
@@ -1662,16 +1662,16 @@ def make_channels_last_1d_strides_for(
 
 
 def make_channels_last_2d_strides_for(
-    shape: Sequence[_T],
-) -> Tuple[Union[_T, int], ...]:
+    shape: Sequence[_IntLikeT],
+) -> Tuple[Union[_IntLikeT, int], ...]:
     # TODO: maybe inform the user of channels_last_3d if rank of the tensor is 5?
     torch._check(
         len(shape) == 4,
         lambda: "Only tensors of rank 4 can use the channels_last memory format",
     )
 
-    multiplier: Union[_T, int] = 1
-    strides: List[Union[_T, int]] = [0] * 4
+    multiplier: Union[_IntLikeT, int] = 1
+    strides: List[Union[_IntLikeT, int]] = [0] * 4
     for idx in (1, -1, -2, 0):
         # NOTE: intentionally divergence from make_contiguous_strides_for
         # This is consistent with eager
@@ -1682,15 +1682,15 @@ def make_channels_last_2d_strides_for(
 
 
 def make_channels_last_3d_strides_for(
-    shape: Sequence[_T],
-) -> Tuple[Union[_T, int], ...]:
+    shape: Sequence[_IntLikeT],
+) -> Tuple[Union[_IntLikeT, int], ...]:
     torch._check(
         len(shape) == 5,
         lambda: "Only tensors of rank 5 can use the channels_last_3d memory format",
     )
 
-    multiplier: Union[_T, int] = 1
-    strides: List[Union[_T, int]] = [0] * 5
+    multiplier: Union[_IntLikeT, int] = 1
+    strides: List[Union[_IntLikeT, int]] = [0] * 5
     for idx in (1, -1, -2, -3, 0):
         # NOTE: intentionally divergence from make_contiguous_strides_for
         # This is consistent with eager
@@ -1700,7 +1700,9 @@ def make_channels_last_3d_strides_for(
     return tuple(strides)
 
 
-def make_channels_last_strides_for(shape: Sequence[_T]) -> Tuple[Union[_T, int], ...]:
+def make_channels_last_strides_for(
+    shape: Sequence[_IntLikeT],
+) -> Tuple[Union[_IntLikeT, int], ...]:
     ndim = len(shape) if isinstance(shape, Sequence) else 1
     if ndim == 3:
         return make_channels_last_1d_strides_for(shape)
