@@ -949,8 +949,9 @@ def _store_based_barrier(
             worker_count = store.add(store_key, 0)
             # Print status periodically to keep track.
             logger.debug(
-                "Waiting in store based barrier to initialize process group for "
+                "Waiting in store based barrier to initialize process group for %s seconds"
                 "rank: %s, key: %s (world_size=%s, num_workers_joined=%s, timeout=%s error=%s)",
+                time.time() - start,
                 rank,
                 store_key,
                 world_size,
