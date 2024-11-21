@@ -299,8 +299,8 @@ Tensor mkldnn_linear_pointwise_binary(
   }
 
   TORCH_CHECK(
-      output.sizes() == other_reshaped.sizes(),
-      "linear_binary_run expects the size of output and other tensor to be the same");
+      output.dim() == other_reshaped.dim(),
+      "linear_binary_run expects the dimension of output and other tensor to be the same");
 
   c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
   ideep::tensor mkldnn_output = itensor_from_tensor(output);
