@@ -778,9 +778,9 @@ class AOTAutogradCache:
 
         # Prefer local cache to remote, fallback to remote if local missed
         if remote:
-            remote_cache: Optional[RemoteCache[JsonDataTy]] = (
-                AOTAutogradCache.get_remote_cache()
-            )
+            remote_cache: Optional[
+                RemoteCache[JsonDataTy]
+            ] = AOTAutogradCache.get_remote_cache()
 
             if remote_cache is not None:
                 try:
@@ -822,9 +822,9 @@ class AOTAutogradCache:
         counters["aot_autograd"]["autograd_cache_saved"] += 1
 
         if remote:
-            remote_cache: Optional[RemoteCache[JsonDataTy]] = (
-                AOTAutogradCache.get_remote_cache()
-            )
+            remote_cache: Optional[
+                RemoteCache[JsonDataTy]
+            ] = AOTAutogradCache.get_remote_cache()
             if remote_cache is not None:
                 time_taken_ms = int(
                     (entry.forward_time_taken_ns + entry.backward_time_taken_ns) // 1e6
