@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: export"]
 import copy
+import tempfile
 
 import torch
 from torch.export import Dim
@@ -270,6 +271,24 @@ class TestDraftExport(TestCase):
         self.assertEqual(tq2.size(), 0)
         self.assertEqual(tq3.size(), 2)
         self.assertEqual(tq.size(), 2)
+
+    # https://github.com/pytorch/pytorch/issues/140625
+    def test_constantify_unbacked_symbol(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                xt = torch.tensor(x.shape)
+                u0 = xt[0].item()
+                return y * torch.arange(u0)
+
+        mod = M()
+        example_inputs = (torch.randn(3, 5), torch.randn(3))
+        draft_ep, _ = draft_export(mod, example_inputs)
+        with tempfile.NamedTemporaryFile(suffix=".pt2") as f:
+            aoti_model_path = torch._inductor.aoti_compile_and_package(
+                draft_ep,
+                example_inputs,
+                package_path=f.name,
+            )
 
 
 if __name__ == "__main__":
