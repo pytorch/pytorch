@@ -120,7 +120,7 @@ def autotune_hints_to_configs(
     configs to try.
     """
     xyz_options: Tuple[Tuple[int, Optional[int], Optional[int]], ...]
-    configs = []
+    configs: List[Config] = []
     warp_size = device_props.warp_size
     # CPU target has no concept of "warp"
     if warp_size is None:
@@ -138,16 +138,16 @@ def autotune_hints_to_configs(
                     (1, block_size // 4, 1),
                     (1, 1, block_size // 4),
                 )
-            for xyz in xyz_options:
-                configs.append(
-                    triton_config(
-                        size_hints,
-                        *xyz,
-                        num_elements_per_warp=(
-                            device_props.warp_size if device_props.warp_size else 32
-                        ),
-                    )
+            configs.extend(
+                triton_config(
+                    size_hints,
+                    *xyz,
+                    num_elements_per_warp=(
+                        device_props.warp_size if device_props.warp_size else 32
+                    ),
                 )
+                for xyz in xyz_options
+            )
 
     return configs
 
@@ -273,6 +273,8 @@ class CachingAutotuner(KernelInterface):
         self.dump_launch_params = (
             os.environ.get("TORCHINDUCTOR_DUMP_LAUNCH_PARAMS", "0") == "1"
         )
+
+        self.triton_interpret = os.environ.get("TRITON_INTERPRET", "0") == "1"
 
     def precompile(self, warm_cache_only=False):
         with self.lock:
@@ -990,6 +992,13 @@ class CachingAutotuner(KernelInterface):
     def run(
         self, *args, grid, stream, benchmark_run=False, **kwargs
     ):  # type:ignore[override]
+        if self.triton_interpret:
+            return self.fn[grid](
+                *args,
+                **kwargs,
+                **self.configs[0].kwargs,
+            )
+
         if len(self.launchers) != 1:
             if len(self.launchers) == 0:
                 start_time = time.time_ns()
@@ -1222,6 +1231,7 @@ def cached_autotune(
         not disabled
         and filename is not None
         and (len(configs) > 1 or inductor_meta.get("coordinate_descent_tuning"))
+        and not os.environ.get("TRITON_INTERPRET", "0") == "1"
     ):
         configs_hash = hash_configs(configs)
 

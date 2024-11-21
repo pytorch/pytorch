@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import itertools
 import operator
-from typing import Any, Callable, List, Optional, OrderedDict, Set
+from typing import Any, Callable, List, Optional, OrderedDict, Sequence, Set
 
 import torch
 from torch.fx import Node
@@ -58,7 +58,7 @@ def update_equivalent_types_dict(customized_equivalent_types=None):
     _EQUIVALENT_TYPES_DICT = _create_equivalent_types_dict()
 
 
-def _partitions_sequential(partitions: List[SourcePartition]):
+def _partitions_sequential(partitions: Sequence[SourcePartition]):
     prev_partition = None
     for partition in partitions:
         if prev_partition is not None and not check_subgraphs_connected(
@@ -108,8 +108,9 @@ def find_sequential_partitions(
 
     typed_partitions_list = list(typed_partitions.values())
     fusion_candidates = itertools.product(*typed_partitions_list)
-    fused_partitions = []
-    for candidate in fusion_candidates:
-        if _partitions_sequential(candidate):  # type: ignore[arg-type]
-            fused_partitions.append(candidate)
+    fused_partitions = [
+        candidate
+        for candidate in fusion_candidates
+        if _partitions_sequential(candidate)
+    ]
     return fused_partitions

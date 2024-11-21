@@ -88,9 +88,11 @@ def _broadcast_bucket(
     for assigned_rank in assigned_ranks:
         bucket_assignments = zero._bucket_assignments_per_rank[assigned_rank]
         if bucket_index in bucket_assignments:
+            send_tensor = bucket_assignments[bucket_index].tensor
+            assert send_tensor is not None
             overlap_info.broadcast_handles.append(
                 dist.broadcast(
-                    bucket_assignments[bucket_index].tensor,
+                    send_tensor,
                     src=dist.get_global_rank(zero.process_group, assigned_rank),
                     group=zero.process_group,
                     async_op=True,
