@@ -16,7 +16,6 @@ __all__ = [
     "is_rng_supported_mesh",
     "manual_seed",
     "OffsetBasedRNGTracker",
-    "TensorParallelRNGTracker",
 ]
 
 _rng_tracker: Optional["_RNGStateTracker"] = None
@@ -89,9 +88,7 @@ def manual_seed(seed: int, device_mesh: DeviceMesh) -> None:
 
     # the current rank is in mesh
     if device_mesh.get_coordinate() is not None:
-        if isinstance(_rng_tracker, TensorParallelRNGTracker):
-            _rng_tracker._manual_seed(device_mesh, seed)
-        elif isinstance(_rng_tracker, OffsetBasedRNGTracker):
+        if isinstance(_rng_tracker, OffsetBasedRNGTracker):
             _rng_tracker._manual_seed(seed)
         else:
             raise RuntimeError(
@@ -337,45 +334,3 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
             shard_coord_stride *= size
 
         return shard_linear_idx
-
-
-class TensorParallelRNGTracker(_RNGStateTracker):
-    def __init__(self, device_type: str = "cuda"):
-        super().__init__(device_type)
-        # copy the default RNG state
-        self.rng_states["tensor-parallel-rng"] = self._device_handle.get_rng_state()
-
-    def _manual_seed(
-        self,
-        tp_mesh: DeviceMesh,
-        base_seed: int = 1234,
-    ):
-        tensor_parallel_rank = tp_mesh.get_local_rank()
-        # this magic number 2718 comes from Megatron's code
-        # (https://github.com/NVIDIA/Megatron-LM/blob/060415572f4365a2e895f8036c4e37dad0efbdf5/megatron/core/tensor_parallel/random.py#L162-L163)
-        MegatronMagicNum = 2718
-        tensor_parallel_seed = base_seed + MegatronMagicNum + tensor_parallel_rank
-        self.set_seed("tensor-parallel-rng", tensor_parallel_seed)
-
-    @contextlib.contextmanager
-    def _distribute_region(self, spec: DTensorSpec):
-        # check if the tensor parallel rng state has been synchronized or not
-        if not self.rng_state_is_sync("tensor-parallel-rng"):
-            raise RuntimeError(
-                "TensorParallelRNGTracker requires the random state to be synchronized "
-                "before entering into a distribute region!"
-            )
-
-        if self.distribute_region_enabled:
-            with torch.random.fork_rng(self._devices, device_type=self._device_type):
-                self._device_handle.set_rng_state(
-                    self.rng_states["tensor-parallel-rng"]
-                )
-                try:
-                    yield
-                finally:
-                    self.rng_states[
-                        "tensor-parallel-rng"
-                    ] = self._device_handle.get_rng_state()
-        else:
-            yield
