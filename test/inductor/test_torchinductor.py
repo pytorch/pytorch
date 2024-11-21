@@ -8904,7 +8904,9 @@ class CommonTemplate:
 
         _, source_codes = run_and_get_code(fn1)
         self.assertEqual(len(source_codes), 1)
-        if not config.cpp_wrapper and self.device != "cpu":
+        if not config.cpp_wrapper and (
+            self.device != "cpu" or config.cpu_backend == "triton"
+        ):
             self.assertEqual(source_codes[0].count("async_compile.triton"), 2)
         else:
             # The cpp_wrapper pass we record doesn't involve triton at all, and neither
@@ -11885,6 +11887,8 @@ if HAS_GPU and not TEST_WITH_ASAN:
     copy_tests(CommonTemplate, GPUTests, GPU_TYPE)
 
     @instantiate_parametrized_tests
+    # cpp_wrapper doesn't capture output Triton kernels for analysis
+    @skip_if_cpp_wrapper
     class TritonCodeGenTests(TestCase):
         from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 
@@ -12262,7 +12266,6 @@ if HAS_GPU and not TEST_WITH_ASAN:
             self.assertFalse("out_ptr0" in code)
             self.assertEqual(fn_opt(*inps), fn(*inps))
 
-        @skip_if_cpp_wrapper
         def test_numpy_on_gpu(self):
             x = np.arange(10, dtype=np.float32)
 
@@ -12788,7 +12791,6 @@ if HAS_GPU and not TEST_WITH_ASAN:
 
                 print(p.key_averages().table(max_name_column_width=200))
 
-        @skip_if_cpp_wrapper
         def test_non_blocking_copy_codegen(self):
             # Checks non_blocking arg is present in codegen
             # (see https://github.com/pytorch/pytorch/issues/136260)
