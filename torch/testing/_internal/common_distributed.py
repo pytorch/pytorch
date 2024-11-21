@@ -34,7 +34,6 @@ from torch._C._distributed_c10d import _SymmetricMemory
 import torch.nn as nn
 from torch.testing._internal.common_utils import (
     FILE_SCHEMA,
-    TEST_CUDA,
     find_free_port,
     IS_SANDCASTLE,
     retry_on_connect_failures,
@@ -423,28 +422,17 @@ def create_tcp_store(
         )
 
 
-# Try env setting first
-TIMEOUT_DEFAULT = int(os.getenv('DISTRIBUTED_TESTS_DEFAULT_TIMEOUT', '0'))
-
-# If not set, use some default values
-if TIMEOUT_DEFAULT == 0:
-    if TEST_WITH_TSAN:
-        # TSAN runs much slower.
-        TIMEOUT_DEFAULT = 500
-    elif TEST_WITH_ROCM:
-        # ROCM runs slower.
-        TIMEOUT_DEFAULT = 120
-    elif TEST_CUDA:
-        TIMEOUT_DEFAULT = 60
-    else:
-        # CPU runs slower.
-        TIMEOUT_DEFAULT = 120
+if TEST_WITH_TSAN:
+    # TSAN runs much slower.
+    TIMEOUT_DEFAULT = 500
+else:
+    TIMEOUT_DEFAULT = int(os.getenv('DISTRIBUTED_TESTS_DEFAULT_TIMEOUT', '300'))
+TIMEOUT_OVERRIDE = {"test_ddp_uneven_inputs": 400}
 
 
-TIMEOUT_OVERRIDE = {
-    "test_ddp_uneven_inputs": 400,
-    "test_index": 300,
-}
+# https://github.com/pytorch/pytorch/issues/75665
+if TEST_WITH_ROCM:
+    TIMEOUT_OVERRIDE["test_join_kwargs"] = 200
 
 
 def create_device(interface=None):
@@ -589,15 +577,6 @@ class MultiProcessTestCase(TestCase):
     def _should_stop_test_suite(self) -> bool:
         return False
 
-    # Many test cases init a process group but do not destroy it.  This property
-    # determines whether this base test class should call
-    # `destroy_process_group` on behalf of the test. Its value is customizable
-    # by derived TestCase's but it is a pan-TestCase value (cannot be customized
-    # for each test).
-    @property
-    def destroy_pg_upon_exit(self) -> bool:
-        return True
-
     @property
     def world_size(self) -> int:
         return DEFAULT_WORLD_SIZE
@@ -716,7 +695,7 @@ class MultiProcessTestCase(TestCase):
         self.file_name = file_name
         self.run_test(test_name, parent_pipe)
 
-    def run_test(self, test_name: str, parent_pipe) -> None:
+    def run_test(self, test_name: str, parent_pipe, destroy_process_group=True) -> None:
         # Start event listener thread.
         signal_recv_pipe, signal_send_pipe = torch.multiprocessing.Pipe(duplex=False)
         event_listener_thread = threading.Thread(
@@ -759,8 +738,9 @@ class MultiProcessTestCase(TestCase):
             # Close pipe after done with test.
             parent_pipe.close()
 
-        if self.destroy_pg_upon_exit:
+        if destroy_process_group:
             try:
+                # Many test cases init a process group but do not destroy it.
                 # Some tests do destroy the pgs, and destroy can't be called twice.
                 # This avoids spewing warnings about improperly shutting down.
                 c10d.destroy_process_group()
