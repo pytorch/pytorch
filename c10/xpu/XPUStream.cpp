@@ -46,7 +46,7 @@ std::deque<
  * pointer) as the input to `getStreamFromExternal`.
  *
  * Key requirements for this design are:
- *   1. Fetching the external SYCL queue from an XPUStream.
+ *   1. Fetching the external SYCL queue from the external XPUStream.
  *   2. Converting an external XPUStream to a `c10::Stream` and vice versa.
  *   3. Ensuring the external XPUStream supports `get/setCurrentXPUStream`.
  *
