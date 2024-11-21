@@ -1424,7 +1424,10 @@ class MutableMappingVariable(UserDefinedObjectVariable):
         # However, users can try to add a new attribute to the class using the
         # __dict__ attribute. To catch this, we save the ConstDictVariable for
         # the __dict__ and then lookup into this vt for each attr lookup.
-        if name == "get" and type(self.value).get is collections.abc.Mapping.get:
+        if name == "get" and type(self.value).get in (
+            collections.abc.Mapping.get,
+            dict.get,
+        ):
             return variables.UserMethodVariable(polyfills.mapping_get, self)
         elif name == "__dict__" and self.source:
             self.generic_dict_vt = variables.LazyVariableTracker.create(
