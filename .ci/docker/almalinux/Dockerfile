@@ -15,6 +15,8 @@ ENV LANGUAGE en_US.UTF-8
 RUN yum -y update
 RUN yum -y install epel-release
 RUN yum install -y sudo wget curl perl util-linux xz bzip2 git patch which perl zlib-devel openssl-devel yum-utils autoconf automake make gcc-toolset-${DEVTOOLSET_VERSION}-toolchain
+# Just add everything as a safe.directory for git since these will be used in multiple places with git
+RUN git config --global --add safe.directory '*'
 ENV PATH=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/bin:$PATH
 
 # cmake-3.18.4 from pip
