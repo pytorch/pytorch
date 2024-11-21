@@ -6,6 +6,8 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/util/env.h>
+#include <c10/util/error.h>
 
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
 #include <c10/cuda/driver_api.h>
@@ -57,7 +59,7 @@ class IpcChannel {
     TORCH_CHECK(
         (socket_ = socket(AF_UNIX, SOCK_DGRAM, 0)) != 0,
         "Failed to create socket: ",
-        strerror(errno));
+        c10::utils::str_error(errno));
 
     struct sockaddr_un addr = {.sun_family = AF_UNIX};
     std::copy(socket_name_.begin(), socket_name_.end(), addr.sun_path);
@@ -65,7 +67,7 @@ class IpcChannel {
     TORCH_CHECK(
         bind(socket_, (struct sockaddr*)&addr, SUN_LEN(&addr)) == 0,
         "Failed to bind socket: ",
-        strerror(errno));
+        c10::utils::str_error(errno));
   }
 
   ~IpcChannel() {
@@ -104,7 +106,7 @@ class IpcChannel {
     }
 
     TORCH_CHECK(
-        sendmsg(socket_, &msg, 0) > 0, "Failed to send fd: ", strerror(errno));
+        sendmsg(socket_, &msg, 0) > 0, "Failed to send fd: ", c10::utils::str_error(errno));
   }
 
   int recv_fd() {
@@ -123,7 +125,7 @@ class IpcChannel {
     TORCH_CHECK(
         recvmsg(socket_, &msg, 0) > 0,
         "Failed to receive fd: ",
-        strerror(errno));
+        c10::utils::str_error(errno));
 
     if (msg.msg_controllen == 0) {
       return -1;
@@ -176,10 +178,10 @@ class IpcChannel {
 
  private:
   static std::string get_socket_name(int pid) {
-    const char* tmp_dir = "/tmp";
+    std::string tmp_dir = "/tmp";
     for (const char* env_var : {"TMPDIR", "TMP", "TEMP", "TEMPDIR"}) {
-      if (const char* path = getenv(env_var)) {
-        tmp_dir = path;
+      if (const auto path = c10::utils::get_env(env_var)) {
+        tmp_dir = path.value();
         break;
       }
     }
