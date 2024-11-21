@@ -130,8 +130,9 @@ std::optional<c10::Device> compute_target_device(
     }
     for (auto& tens_list : opt_tlist_args) {
       for (const auto i : c10::irange(tens_list.size())) {
-        if (tens_list.get(i).has_value()) {
-          return tens_list.get(i)->device();
+        auto const& e = tens_list.get(i);
+        if (e.has_value()) {
+          return e->device();
         }
       }
     }

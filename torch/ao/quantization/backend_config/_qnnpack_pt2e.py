@@ -159,14 +159,14 @@ def get_binary_op_configs():
             # TODO: remove when functionalization is supported in pt2_mode
             (op_with_quantized_bop_scalar_variant, torch.ops.aten.relu_.default),
         ]
-        for bop_pattern in bop_patterns:
-            binary_op_configs.append(
-                BackendPatternConfig(bop_pattern)
-                .set_dtype_configs(dtype_configs)  # noqa: E131
-                ._set_num_tensor_args_to_observation_type(
-                    num_tensor_args_to_observation_type_mapping
-                )
+        binary_op_configs.extend(
+            BackendPatternConfig(bop_pattern)
+            .set_dtype_configs(dtype_configs)  # noqa: E131
+            ._set_num_tensor_args_to_observation_type(
+                num_tensor_args_to_observation_type_mapping
             )
+            for bop_pattern in bop_patterns
+        )
 
     return binary_op_configs
 
