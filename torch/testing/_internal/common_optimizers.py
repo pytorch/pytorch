@@ -568,7 +568,7 @@ def optim_inputs_func_adam(device, dtype=None):
             ),
             OptimizerInput(
                 params=None,
-                kwargs={"betas": (0.0, 0.99)},
+                kwargs={"betas": (0.0, 0.999)},
                 desc="zero-beta1",
             )
         ]
