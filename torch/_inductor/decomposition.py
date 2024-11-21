@@ -107,6 +107,7 @@ decomps_to_exclude = [
     aten.squeeze,  # inductor lowers this directly
     aten.sum,  # inductor lowers this directly
     aten.unbind,  # inductor lowers this directly
+    aten.baddbmm,  # upcasts to fp32, perf issue
 ]
 
 remove_decompositions(decompositions, decomps_to_exclude)
@@ -440,16 +441,6 @@ def conj_physical(self: torch.Tensor) -> torch.Tensor:
 @register_decomposition([aten.lift, aten.detach_])
 def lift(self: torch.Tensor) -> torch.Tensor:
     return self
-
-
-@register_decomposition([aten.bernoulli.default])
-def bernoulli(
-    self: torch.Tensor,
-    *,
-    generator: Optional[torch.Generator] = None,
-) -> torch.Tensor:
-    assert generator is None
-    return (torch.rand_like(self, dtype=torch.float32) < self).to(self.dtype)
 
 
 @register_decomposition([aten.fmin, prims.fmin])
