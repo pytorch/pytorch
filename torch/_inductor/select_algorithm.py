@@ -211,8 +211,11 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
         return sympy_index_symbol(var)
 
     def store(self, name, index, value, mode):
-        """Store value with input tracking.
-        This is needed for grads of captured buffers that need to be added as inputs to the kernel
+        """Store value and track the store's mask and output value on the kernel.
+
+        The template_mask and template_out are used by the indexing() method to properly
+        mask store operations in the generated Triton code. The mask ensures stores only
+        affect elements matching the mask condition. This is currently only used for scatter node's store
         """
         assert (
             self.mask is not None

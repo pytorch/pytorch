@@ -82,7 +82,9 @@ class PointwiseSubgraphLowering(torch.fx.Interpreter):
             return self.root_graph.mark_buffer_mutated(name)
         else:
             raise SubgraphLoweringException(
-                "Mutations are not supported in this context"
+                f"Buffer mutation of '{name}' detected during lowering of {self._current_op}. "
+                "Buffer mutations are only allowed in approved mutation ops. "
+                "This is an error in the lowering of the subgraph, please file a bug report."
             )
 
     def register_buffer(self, buffer: ir.Buffer) -> str:
@@ -90,7 +92,7 @@ class PointwiseSubgraphLowering(torch.fx.Interpreter):
             return self.root_graph.register_buffer(buffer)
         else:
             raise SubgraphLoweringException(
-                "Buffers cannot be created while lowering a pointwise subgraph. "
+                f"Buffer '{buffer.name}' cannot be registered during the lowering of {self._current_op}. "
                 "This could be for a good reason (e.g. you're calling an op we can't codegen as a pointwise op), "
                 "but it could also be a bug. Please file a bug report if you think this should be supportable."
             )
