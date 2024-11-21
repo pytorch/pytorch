@@ -11,21 +11,18 @@ def gen_configs():
     products = itertools.product([32, 64, 128, 256],
                                  [32, 64, 128, 256],
                                  [32, 64, 128, 256],
-                                 # [54, 84, 108, 128, 216, 432, 864],
-                                 # [1, 2, 4, 8, 16],
-                                 # [1, 2, 4, 8, 16],
+                                 [1, 2, 4, 8, 16],
+                                 [1, 2, 4, 8, 16],
                                  )
     configs=[]
-    # for BLOCK_SIZE_K, NUM_SM, num_warps in products:
-    for BLOCK_SIZE_M, BLOCK_SIZE_N, BLOCK_SIZE_K in products:
+    for BLOCK_SIZE_M, BLOCK_SIZE_N, BLOCK_SIZE_K, num_stages, num_warps in products:
         configs += [
         {
             'BLOCK_SIZE_M': BLOCK_SIZE_M,
             'BLOCK_SIZE_N': BLOCK_SIZE_N,
             'BLOCK_SIZE_K': BLOCK_SIZE_K,
-            # 'NUM_SM': NUM_SM,
-            # 'num_stages': num_stages,
-            # 'num_warps': num_warps,
+            'num_stages': num_stages,
+            'num_warps': num_warps,
             'GROUP_SIZE_M': 8,
         },
         ]
@@ -49,7 +46,6 @@ def grouped_matmul_kernel(
     c_ptr,
     max_M,
     # # number of virtual SM
-    # NUM_SM: tl.constexpr,
     # tile sizes
     BLOCK_SIZE_M: tl.constexpr,
     BLOCK_SIZE_N: tl.constexpr,
@@ -121,8 +117,6 @@ def grouped_matmul_kernel(
         # assumes full tile for now
         tl.store(c_ptrs, c, mask=c_mask)
 
-        # # go to the next tile by advancing NUM_SM
-        # tile_idx += NUM_SM
 
 lib = torch.library.Library("triton_kernels", "FRAGMENT")
 lib.define("group_gemm_fn(Tensor a_values, Tensor a_offsets, int max_M, Tensor tensor_b) -> Tensor")
@@ -147,6 +141,8 @@ def group_gemm_fn_kernel(a_values, a_offsets, max_M, tensor_b, c_values, config)
         BLOCK_SIZE_N=config["BLOCK_SIZE_N"],
         BLOCK_SIZE_K=config["BLOCK_SIZE_K"],
         GROUP_SIZE_M=config["GROUP_SIZE_M"],
+        num_stages=config["num_stages"],
+        num_warps=config["num_warps"],
     )
 
     return c_values
@@ -174,7 +170,8 @@ def group_gemm_fn(a_values, a_offsets, max_M, tensor_b):
         best_config = BEST_CONFIGS[config_key]
     else:
         best_ms, best_config = None, None
-        for config in gen_configs():
+        all_configs = gen_configs()
+        for i, config in enumerate(all_configs):
             try:
                 ms = triton.testing.do_bench(lambda: group_gemm_fn_kernel(a_values, a_offsets, max_M, tensor_b, c_values, config))
             except triton.runtime.errors.OutOfResources as msg:
@@ -183,12 +180,13 @@ def group_gemm_fn(a_values, a_offsets, max_M, tensor_b):
                 best_ms, best_config = ms, config
             elif best_ms > ms:
                 best_ms, best_config = ms, config
-            print(f"ms: {ms} with config: {config}")
+            print(f"ms: {ms} with config number {i} out of {len(all_configs)}: {config}")
         if best_config is None:
             raise ValueError("Could not find valid config.")
         BEST_CONFIGS[config_key] = best_config
+        print(f"Found config {best_config} with ms {best_ms}.")
 
-    return group_gemm_fn_kernel(a_values, a_offsets, max_M, tensor_b, best_config)
+    return group_gemm_fn_kernel(a_values, a_offsets, max_M, tensor_b, c_values, best_config)
 
 @torch.library.impl(lib, "group_gemm_fn", "Meta")
 def group_gemm_fn_meta(a_values, a_offsets, max_M, tensor_b):
