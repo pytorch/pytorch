@@ -70,7 +70,7 @@ const Generator& MPSHooks::getDefaultGenerator([[maybe_unused]] DeviceIndex devi
 }
 
 void MPSHooks::deviceSynchronize() const {
-  at::mps::getDefaultMPSStream()->synchronize(SyncType::COMMIT_AND_WAIT);
+  at::mps::getDefaultMPSStream()->synchronize(SyncType::COMMIT_AND_CONTINUE_ROOT);
 }
 
 void MPSHooks::commitStream() const {
