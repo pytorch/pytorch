@@ -9,7 +9,7 @@ import operator
 import os
 import warnings
 from collections import defaultdict
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple, Union
 from unittest.mock import patch
 
 import sympy
@@ -3815,7 +3815,9 @@ def rev(x, dims):
     )
 
 
-def inplace_constant_pad_nd(x, padding, fill_value):
+def inplace_constant_pad_nd(
+    x: TensorBox, padding: Sequence[int], fill_value: float
+) -> Optional[TensorBox]:
     """
     This optimization changes the semantics of padding from 'clone'
     style to 'view' style.
