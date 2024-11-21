@@ -75,7 +75,10 @@ MIOPEN_CMAKE_COMMON_FLAGS="
 if [[ $ROCM_INT -ge 60300 ]]; then
     echo "ROCm 6.3+ MIOpen does not need any patches, do not build from source"
     exit 0
-elif [[ $ROCM_INT -ge 60200 ]] && [[ $ROCM_INT -lt 60300 ]]; then
+elif [[ $ROCM_INT -ge 60204 ]] && [[ $ROCM_INT -lt 60300 ]]; then
+    echo "ROCm 6.2.4+ MIOpen does not need any patches, do not build from source"
+    exit 0
+elif [[ $ROCM_INT -ge 60200 ]] && [[ $ROCM_INT -lt 60204 ]]; then
     MIOPEN_BRANCH="release/rocm-rel-6.2-staging"
 elif [[ $ROCM_INT -ge 60100 ]] && [[ $ROCM_INT -lt 60200 ]]; then
     echo "ROCm 6.1 MIOpen does not need any patches, do not build from source"
