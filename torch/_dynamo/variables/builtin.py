@@ -1894,15 +1894,15 @@ class BuiltinVariable(VariableTracker):
             unpacked = obj.force_unpack_var_sequence(tx)
             if not all(x.is_python_constant() for x in unpacked):
                 return
-            function = kwargs.pop("key", None)
+            key_fn = kwargs.pop("key", ConstantVariable.create(None))
             reverse = kwargs.pop(
                 "reverse", ConstantVariable.create(False)
             ).as_python_constant()
             assert len(kwargs) == 0
-            if function:
+            if key_fn.as_python_constant() is not None:
                 items = sorted(
                     unpacked,
-                    key=lambda x: function.call_function(
+                    key=lambda x: key_fn.call_function(
                         tx, [x], {}
                     ).as_python_constant(),
                     reverse=reverse,
