@@ -1358,6 +1358,7 @@ IS_MACOS = sys.platform == "darwin"
 IS_PPC = platform.machine() == "ppc64le"
 IS_X86 = platform.machine() in ('x86_64', 'i386')
 IS_ARM64 = platform.machine() in ('arm64', 'aarch64')
+IS_S390X = platform.machine() == "s390x"
 
 def is_avx512_vnni_supported():
     if sys.platform != 'linux':
@@ -1860,6 +1861,9 @@ def runOnRocmArch(arch: Tuple[str, ...]):
             return fn(self, *args, **kwargs)
         return wrap_fn
     return dec_fn
+
+def xfailIfS390X(func):
+    return unittest.expectedFailure(func) if IS_S390X else func
 
 def skipIfXpu(func=None, *, msg="test doesn't currently work on the XPU stack"):
     def dec_fn(fn):
@@ -4669,8 +4673,7 @@ def _generate_indices_prefer_all_rows(rows: int, cols: int, num_indices: int) ->
 
     for r in range(rows):
         # Note that this can yield overlapping indices
-        for c in random.choices(col_indices, k=n_per_row):
-            indices.append((r, c))
+        indices.extend((r, c) for c in random.choices(col_indices, k=n_per_row))
 
     return torch.tensor(indices[:num_indices])
 
@@ -5165,9 +5168,7 @@ def get_cycles_per_ms() -> float:
     # and seems to return stable values. Therefore, we enable caching
     # using lru_cache decorator above.
     num = 10
-    vals = []
-    for _ in range(num):
-        vals.append(measure())
+    vals = [measure() for _ in range(num)]
     vals = sorted(vals)
     return mean(vals[2 : num - 2])
 
