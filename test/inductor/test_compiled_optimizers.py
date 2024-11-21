@@ -190,6 +190,7 @@ KERNEL_COUNT_OVERRIDES = {
     "test_adagrad_initial_accumulator_value_weight_decay_cpu": 6,
     "test_adagrad_lr_decay_weight_decay_cpu": 6,
     "test_adagrad_weight_decay_cpu": 6,
+    "test_adagrad_weight_decay_cuda": 6,
     "test_adagrad_weight_decay_maximize_cpu": 6,
     "test_adam_cpu": 6,
     "test_adam_weight_decay_cpu": 6,

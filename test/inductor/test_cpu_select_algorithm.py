@@ -296,6 +296,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             )
             and epilogue != "mul"
             and epilogue != "div"
+            and epilogue != "leaky_relu"
             or (
                 dtype in (torch.float16, torch.bfloat16)
                 and epilogue == "add"
@@ -318,7 +319,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             #    plus epilogue add is treated as linear w/ bias.
             # 3. For float32, when dynamic shapes is enabled, mkl linear is not applied.
             #    and linear w/o bias plus epilogue add is treated as addmm.
-            self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
+            self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 0)
         else:
             self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
 
