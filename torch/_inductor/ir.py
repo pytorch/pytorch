@@ -397,7 +397,7 @@ class IRNode:
         return self.origin_node
 
     def get_defining_op(self) -> Optional[Operation]:
-        raise NotImplementedError
+        return None
 
     def common_repr(self, shorten: bool = True) -> Sequence[str]:
         origins = f"origins={getattr(self, 'origins', '')}"
