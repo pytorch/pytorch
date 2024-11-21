@@ -359,10 +359,12 @@ class FunctionDecoratedByContextlibContextManagerVariable(BaseUserFunctionVariab
         from torch._dynamo.symbolic_convert import InliningInstructionTranslator
 
         self.inline_tracer = InliningInstructionTranslator.build_inline_tracer(
-            tx, self, [*self.self_args(), *args], kwargs
+            tx,
+            self,
+            [*self.self_args(), *args],
+            kwargs,
+            stop_generator_on_yield=True,
         )
-        # Flag to the tracer to change the behavior of YIELD_VALUE/RETURN_VALUE
-        self.inline_tracer.consume_all_items = False
 
         return self
 
