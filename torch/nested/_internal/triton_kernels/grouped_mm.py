@@ -1,31 +1,3 @@
-"""
-Group GEMM
-============================
-This group gemm kernel launches a fixed number of CTA to compute a group
-of gemms. The scheduling is static and we do it on device.
-"""
-
-# Copyright (c) 2023 NVIDIA Corporation & Affiliates. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining
-# a copy of this software and associated documentation files
-# (the "Software"), to deal in the Software without restriction,
-# including without limitation the rights to use, copy, modify, merge,
-# publish, distribute, sublicense, and/or sell copies of the Software,
-# and to permit persons to whom the Software is furnished to do so,
-# subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be
-# included in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-# MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
-# IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
-# CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
-# TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
-# SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-
 import torch
 
 import triton
@@ -36,9 +8,9 @@ from torch.nested._internal.nested_tensor import NestedTensor
 from torch.nested._internal.ops import extract_kwargs
 
 def gen_configs():
-    products = itertools.product([32, 64, 128],
-                                 [32, 64, 128],
-                                 [32, 64, 128],
+    products = itertools.product([32, 64, 128, 256],
+                                 [32, 64, 128, 256],
+                                 [32, 64, 128, 256],
                                  # [54, 84, 108, 128, 216, 432, 864],
                                  # [1, 2, 4, 8, 16],
                                  # [1, 2, 4, 8, 16],
@@ -47,7 +19,7 @@ def gen_configs():
     # for BLOCK_SIZE_K, NUM_SM, num_warps in products:
     for BLOCK_SIZE_M, BLOCK_SIZE_N, BLOCK_SIZE_K in products:
         configs += [
-        triton.Config({
+        {
             'BLOCK_SIZE_M': BLOCK_SIZE_M,
             'BLOCK_SIZE_N': BLOCK_SIZE_N,
             'BLOCK_SIZE_K': BLOCK_SIZE_K,
@@ -55,14 +27,14 @@ def gen_configs():
             # 'num_stages': num_stages,
             # 'num_warps': num_warps,
             'GROUP_SIZE_M': 8,
-        }),
+        },
         ]
     return configs
 
-@triton.autotune(
-    configs=gen_configs(),
-    key=['group_size'],
-)
+# @triton.autotune(
+#     configs=gen_configs(),
+#     key=['group_size'],
+# )
 @triton.jit
 def grouped_matmul_kernel(
     b_ptr,
@@ -102,8 +74,8 @@ def grouped_matmul_kernel(
     batch_id = tl.program_id(1)
 
     # get the gemm size of the current problem
-    a_offset_0 = tl.load(a_offsets_ptr + batch_id, eviction_policy='evict_last')
-    a_offset_1 = tl.load(a_offsets_ptr + batch_id + 1, eviction_policy='evict_last')
+    a_offset_0 = tl.load(a_offsets_ptr + batch_id, eviction_policy='evict_last').to(tl.int32)
+    a_offset_1 = tl.load(a_offsets_ptr + batch_id + 1, eviction_policy='evict_last').to(tl.int32)
     gm = a_offset_1 - a_offset_0
     num_m_tiles = tl.cdiv(gm, BLOCK_SIZE_M)
     if tile_m_idx < num_m_tiles:
@@ -139,8 +111,8 @@ def grouped_matmul_kernel(
         offs_am = tile_m_idx * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
         offs_bn = tile_n_idx * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
 
-        a_offset_0 = tl.load(a_offsets_ptr + batch_id, eviction_policy='evict_last')
-        a_offset_1 = tl.load(a_offsets_ptr + batch_id + 1, eviction_policy='evict_last')
+        a_offset_0 = tl.load(a_offsets_ptr + batch_id, eviction_policy='evict_last').to(tl.int32)
+        a_offset_1 = tl.load(a_offsets_ptr + batch_id + 1, eviction_policy='evict_last').to(tl.int32)
         gm = a_offset_1 - a_offset_0
 
         c_ptrs = c_ptr + a_offset_0 * ldc + ldc * offs_am[:, None] + offs_bn[None, :]
@@ -155,6 +127,35 @@ def grouped_matmul_kernel(
 lib = torch.library.Library("triton_kernels", "FRAGMENT")
 lib.define("group_gemm_fn(Tensor a_values, Tensor a_offsets, int max_M, Tensor tensor_b) -> Tensor")
 
+def group_gemm_fn_kernel(a_values, a_offsets, max_M, tensor_b, c_values, config):
+    B, K, N = tensor_b.shape
+    group_size = a_offsets.size(0)
+    grid = (triton.cdiv(max_M, config["BLOCK_SIZE_M"]) * triton.cdiv(N, config["BLOCK_SIZE_N"]), group_size)
+    grouped_matmul_kernel[grid](
+        tensor_b,
+        group_size,
+        N,
+        K,
+        tensor_b.stride(1),
+        a_offsets,
+        a_values,
+        a_values.stride(0),
+        c_values.stride(0),
+        c_values,
+        max_M,
+        BLOCK_SIZE_M=config["BLOCK_SIZE_M"],
+        BLOCK_SIZE_N=config["BLOCK_SIZE_N"],
+        BLOCK_SIZE_K=config["BLOCK_SIZE_K"],
+        GROUP_SIZE_M=config["GROUP_SIZE_M"],
+    )
+
+    return c_values
+
+BEST_CONFIGS = {}
+
+def gen_config_key(a_values, a_offsets, max_M, tensor_b):
+    return (a_values.size(), a_offsets.size(), max_M, tensor_b.size())
+
 @torch.library.impl(lib, "group_gemm_fn", "CUDA")
 def group_gemm_fn(a_values, a_offsets, max_M, tensor_b):
     assert not tensor_b.is_nested
@@ -168,33 +169,26 @@ def group_gemm_fn(a_values, a_offsets, max_M, tensor_b):
     B, K, N = tensor_b.shape
 
     c_values = a_values.new_empty((a_values.size(0), N))
-    c_offsets = a_offsets
+    config_key = gen_config_key(a_values, a_offsets, max_M, tensor_b)
+    if config_key in BEST_CONFIGS:
+        best_config = BEST_CONFIGS[config_key]
+    else:
+        best_ms, best_config = None, None
+        for config in gen_configs():
+            try:
+                ms = triton.testing.do_bench(lambda: group_gemm_fn_kernel(a_values, a_offsets, max_M, tensor_b, c_values, config))
+            except triton.runtime.errors.OutOfResources as msg:
+                print(f"OOR with config: {config} and msg: {msg}")
+            if best_ms is None:
+                best_ms, best_config = ms, config
+            elif best_ms > ms:
+                best_ms, best_config = ms, config
+            print(f"ms: {ms} with config: {config}")
+        if best_config is None:
+            raise ValueError("Could not find valid config.")
+        BEST_CONFIGS[config_key] = best_config
 
-    # we use a fixed number of CTA, and it's auto-tunable
-    # grid = lambda META: (META['NUM_SM'], group_size)
-    def grid(META):
-        return (triton.cdiv(max_M, META["BLOCK_SIZE_M"]) * triton.cdiv(N, META["BLOCK_SIZE_N"]),
-                group_size)
-    grouped_matmul_kernel[grid](
-        tensor_b,
-        group_size,
-        N,
-        K,
-        tensor_b.stride(1),
-        a_offsets,
-        a_values,
-        a_values.stride(0),
-        c_values.stride(0),
-        c_values,
-        max_M,
-        # BLOCK_SIZE_M=128,
-        # BLOCK_SIZE_N=128,
-        # BLOCK_SIZE_K=128,
-        # NUM_SM=128,
-        # num_stages=1,
-    )
-
-    return c_values
+    return group_gemm_fn_kernel(a_values, a_offsets, max_M, tensor_b, best_config)
 
 @torch.library.impl(lib, "group_gemm_fn", "Meta")
 def group_gemm_fn_meta(a_values, a_offsets, max_M, tensor_b):
@@ -202,7 +196,6 @@ def group_gemm_fn_meta(a_values, a_offsets, max_M, tensor_b):
     c_values = a_values.new_empty((a_values.size(0), N))
     return c_values
 
-# @torch.compile(fullgraph=True)
 def grouped_mm(tensor_a, tensor_b):
     assert tensor_a.is_nested
     assert not tensor_b.is_nested
@@ -212,7 +205,7 @@ def grouped_mm(tensor_a, tensor_b):
     assert tensor_b.is_contiguous()
 
     a_values = tensor_a.values()
-    a_offsets = tensor_a.offsets().to(torch.int32)
+    a_offsets = tensor_a.offsets()
 
     assert a_values.dim() == 2
 
