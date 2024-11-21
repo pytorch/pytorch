@@ -7,6 +7,8 @@ import string
 import unittest
 from collections import namedtuple
 from contextlib import contextmanager
+from dataclasses import dataclass
+from itertools import product
 from typing import Callable, List, Optional, Tuple, Union
 from unittest import expectedFailure, skip, skipUnless
 from unittest.mock import patch
@@ -4203,52 +4205,91 @@ class TestPagedAttention(InductorTestCase):
             self._check_equal(golden_out, ref_out, paged_out, fudge_factor, "Out")
 
 
+@dataclass
+class TestParams:
+    batch_size: int
+    num_heads: int
+    seq_length: int
+    head_dim: int
+    dtype: torch.dtype
+
+
+def get_params(dtypes: List[torch.dtype]) -> List[TestParams]:
+    params = []
+    seq_lengths = [37, 256, 277]
+    for seq_len, dtype in product(seq_lengths, dtypes):
+        params.append(
+            TestParams(
+                batch_size=2, num_heads=4, seq_length=seq_len, head_dim=16, dtype=dtype
+            )
+        )
+    return params
+
+
 @supported_platform
 class TestLearnableBiases(InductorTestCase):
     def setUp(self):
         super().setUp()
-        self.batch_size = 2
-        self.num_heads = 4
-        self.seq_length = 32
-        self.head_dim = 16
-        self.window_size = 8
         self.device = "cuda"
         self.dtype = torch.float32
         self.atol = 3e-2
         self.rtol = 3e-2
 
-    def _init_tensors(self):
+    def _init_tensors(self, params: TestParams):
         make_tensor = functools.partial(
             torch.randn,
-            (self.batch_size, self.num_heads, self.seq_length, self.head_dim),
+            (params.batch_size, params.num_heads, params.seq_length, params.head_dim),
             device=self.device,
-            dtype=self.dtype,
+            dtype=params.dtype,
             requires_grad=True,
         )
         return (make_tensor(), make_tensor(), make_tensor())
 
-    def _check_outputs_and_grads(self, out_eager, out_compiled, tensors):
-        torch.testing.assert_close(
-            out_eager, out_compiled, atol=self.atol, rtol=self.rtol
+    @torch.no_grad()
+    def _gold_check(self, eager, compiled, gold, tensor_name, fudge_factor=1.2):
+        ref_error = rmse(eager, gold)
+        comp_error = rmse(compiled, gold)
+        # Note: This has been carefully tested that FlexAttention is within
+        # 20% of the average error of SDPA! Do not bump this tolerance
+        # unless you are absolutely sure you are not worsening the accuracy
+        # of FlexAttention!
+        if eager.dtype == torch.float32:
+            fudge_factor = 10.0
+        self.assertLessEqual(
+            comp_error.item(),
+            (ref_error * fudge_factor).item(),
+            f"\nTensor: {tensor_name}\nCompiled error ({comp_error:.8f}) exceeds "
+            f"reference error ({ref_error:.8f}) * fudge_factor ({fudge_factor})",
         )
 
+    def _check_outputs_and_grads(self, out_eager, out_compiled, out_gold, tensors):
         backwards_grad = torch.ones_like(out_eager)
         grads_eager = torch.autograd.grad((out_eager,), tensors, backwards_grad)
         grads_compiled = torch.autograd.grad((out_compiled,), tensors, backwards_grad)
+        grads_gold = torch.autograd.grad((out_gold,), tensors, backwards_grad)
 
+        tensor_names = ["out", "grad_query", "grad_key", "grad_value", "grad_bias"]
         eager_tensors = (out_eager, *grads_eager)
         compiled_tensors = (out_compiled, *grads_compiled)
-        for i, (eager, compiled) in enumerate(zip(eager_tensors, compiled_tensors)):
-            torch.testing.assert_close(
-                eager_tensors, compiled_tensors, atol=self.atol, rtol=self.rtol
-            )
+        gold_tensors = (out_gold, *grads_gold)
 
-    def test_relative_1d_bias(self):
-        query, key, value = self._init_tensors()
+        for eager, compiled, gold, name in zip(
+            eager_tensors,
+            compiled_tensors,
+            gold_tensors,
+            tensor_names,
+        ):
+            self._gold_check(eager, compiled, gold, name)
+
+    @common_utils.parametrize(
+        "params", get_params(test_dtypes), name_fn=lambda x: f"{x}"
+    )
+    def test_relative_1d_bias(self, params):
+        query, key, value = self._init_tensors(params)
         bias = torch.randn(
-            2 * self.seq_length,
+            2 * params.seq_length,
             device=self.device,
-            dtype=self.dtype,
+            dtype=params.dtype,
             requires_grad=True,
         )
 
@@ -4258,18 +4299,30 @@ class TestLearnableBiases(InductorTestCase):
         flex_compiled = torch.compile(flex_attention)
         out_eager = flex_attention(query, key, value, score_mod=bias_func)
         out_compiled = flex_compiled(query, key, value, score_mod=bias_func)
-
-        self._check_outputs_and_grads(
-            out_eager, out_compiled, (query, key, value, bias)
+        out_gold = flex_attention(
+            query.to(torch.float64),
+            key.to(torch.float64),
+            value.to(torch.float64),
+            score_mod=bias_func,
         )
 
-    def test_absolute_2d_bias(self):
-        query, key, value = self._init_tensors()
+        self._check_outputs_and_grads(
+            out_eager,
+            out_compiled,
+            out_gold,
+            (query, key, value, bias),
+        )
+
+    @common_utils.parametrize(
+        "params", get_params(test_dtypes), name_fn=lambda x: f"{x}"
+    )
+    def test_absolute_2d_bias(self, params):
+        query, key, value = self._init_tensors(params)
         bias = torch.randn(
-            self.seq_length,
-            self.seq_length,
+            params.seq_length,
+            params.seq_length,
             device=self.device,
-            dtype=self.dtype,
+            dtype=params.dtype,
             requires_grad=True,
         )
 
@@ -4279,19 +4332,31 @@ class TestLearnableBiases(InductorTestCase):
         flex_compiled = torch.compile(flex_attention)
         out_eager = flex_attention(query, key, value, score_mod=bias_func)
         out_compiled = flex_compiled(query, key, value, score_mod=bias_func)
-
-        self._check_outputs_and_grads(
-            out_eager, out_compiled, (query, key, value, bias)
+        out_gold = flex_attention(
+            query.to(torch.float64),
+            key.to(torch.float64),
+            value.to(torch.float64),
+            score_mod=bias_func,
         )
 
-    def test_head_specific_bias(self):
-        query, key, value = self._init_tensors()
+        self._check_outputs_and_grads(
+            out_eager,
+            out_compiled,
+            out_gold,
+            (query, key, value, bias),
+        )
+
+    @common_utils.parametrize(
+        "params", get_params(test_dtypes), name_fn=lambda x: f"{x}"
+    )
+    def test_head_specific_bias(self, params):
+        query, key, value = self._init_tensors(params)
         bias = torch.randn(
-            self.num_heads,
-            self.seq_length,
-            self.seq_length,
+            params.num_heads,
+            params.seq_length,
+            params.seq_length,
             device=self.device,
-            dtype=self.dtype,
+            dtype=params.dtype,
             requires_grad=True,
         )
 
@@ -4301,20 +4366,32 @@ class TestLearnableBiases(InductorTestCase):
         flex_compiled = torch.compile(flex_attention)
         out_eager = flex_attention(query, key, value, score_mod=bias_func)
         out_compiled = flex_compiled(query, key, value, score_mod=bias_func)
-
-        self._check_outputs_and_grads(
-            out_eager, out_compiled, (query, key, value, bias)
+        out_gold = flex_attention(
+            query.to(torch.float64),
+            key.to(torch.float64),
+            value.to(torch.float64),
+            score_mod=bias_func,
         )
 
-    def test_batch_head_bias(self):
-        query, key, value = self._init_tensors()
+        self._check_outputs_and_grads(
+            out_eager,
+            out_compiled,
+            out_gold,
+            (query, key, value, bias),
+        )
+
+    @common_utils.parametrize(
+        "params", get_params(test_dtypes), name_fn=lambda x: f"{x}"
+    )
+    def test_batch_head_bias(self, params):
+        query, key, value = self._init_tensors(params)
         bias = torch.randn(
-            self.batch_size,
-            self.num_heads,
-            self.seq_length,
-            self.seq_length,
+            params.batch_size,
+            params.num_heads,
+            params.seq_length,
+            params.seq_length,
             device=self.device,
-            dtype=self.dtype,
+            dtype=params.dtype,
             requires_grad=True,
         )
 
@@ -4324,15 +4401,30 @@ class TestLearnableBiases(InductorTestCase):
         flex_compiled = torch.compile(flex_attention)
         out_eager = flex_attention(query, key, value, score_mod=bias_func)
         out_compiled = flex_compiled(query, key, value, score_mod=bias_func)
-
-        self._check_outputs_and_grads(
-            out_eager, out_compiled, (query, key, value, bias)
+        out_gold = flex_attention(
+            query.to(torch.float64),
+            key.to(torch.float64),
+            value.to(torch.float64),
+            score_mod=bias_func,
         )
 
-    def test_multiplicative_bias(self):
-        query, key, value = self._init_tensors()
+        self._check_outputs_and_grads(
+            out_eager,
+            out_compiled,
+            out_gold,
+            (query, key, value, bias),
+        )
+
+    @common_utils.parametrize(
+        "params", get_params(test_dtypes), name_fn=lambda x: f"{x}"
+    )
+    def test_multiplicative_bias(self, params):
+        query, key, value = self._init_tensors(params)
         bias = torch.randn(
-            self.seq_length, device=self.device, dtype=self.dtype, requires_grad=True
+            params.seq_length,
+            device=self.device,
+            dtype=params.dtype,
+            requires_grad=True,
         )
 
         def bias_func(score, b, h, q_idx, kv_idx):
@@ -4341,38 +4433,64 @@ class TestLearnableBiases(InductorTestCase):
         flex_compiled = torch.compile(flex_attention)
         out_eager = flex_attention(query, key, value, score_mod=bias_func)
         out_compiled = flex_compiled(query, key, value, score_mod=bias_func)
-
-        self._check_outputs_and_grads(
-            out_eager, out_compiled, (query, key, value, bias)
+        out_gold = flex_attention(
+            query.to(torch.float64),
+            key.to(torch.float64),
+            value.to(torch.float64),
+            score_mod=bias_func,
         )
 
-    def test_local_window_bias(self):
-        query, key, value = self._init_tensors()
+        self._check_outputs_and_grads(
+            out_eager,
+            out_compiled,
+            out_gold,
+            (query, key, value, bias),
+        )
+
+    @common_utils.parametrize(
+        "params", get_params(test_dtypes), name_fn=lambda x: f"{x}"
+    )
+    def test_local_window_bias(self, params):
+        query, key, value = self._init_tensors(params)
+        window_size = 8
         bias = torch.randn(
-            2 * self.window_size + 1,
+            2 * window_size + 1,
             device=self.device,
-            dtype=self.dtype,
+            dtype=params.dtype,
             requires_grad=True,
         )
 
         def bias_func(score, b, h, q_idx, kv_idx):
-            window_idx = torch.clamp(
-                q_idx - kv_idx + self.window_size, 0, 2 * self.window_size
-            )
+            window_idx = torch.clamp(q_idx - kv_idx + window_size, 0, 2 * window_size)
             return score + bias[window_idx]
 
         flex_compiled = torch.compile(flex_attention)
         out_eager = flex_attention(query, key, value, score_mod=bias_func)
         out_compiled = flex_compiled(query, key, value, score_mod=bias_func)
-
-        self._check_outputs_and_grads(
-            out_eager, out_compiled, (query, key, value, bias)
+        out_gold = flex_attention(
+            query.to(torch.float64),
+            key.to(torch.float64),
+            value.to(torch.float64),
+            score_mod=bias_func,
         )
 
-    def test_global_tokens_bias(self):
-        query, key, value = self._init_tensors()
+        self._check_outputs_and_grads(
+            out_eager,
+            out_compiled,
+            out_gold,
+            (query, key, value, bias),
+        )
+
+    @common_utils.parametrize(
+        "params", get_params(test_dtypes), name_fn=lambda x: f"{x}"
+    )
+    def test_global_tokens_bias(self, params):
+        query, key, value = self._init_tensors(params)
         bias = torch.randn(
-            self.seq_length, device=self.device, dtype=self.dtype, requires_grad=True
+            params.seq_length,
+            device=self.device,
+            dtype=params.dtype,
+            requires_grad=True,
         )
 
         def bias_func(score, b, h, q_idx, kv_idx):
@@ -4381,20 +4499,32 @@ class TestLearnableBiases(InductorTestCase):
         flex_compiled = torch.compile(flex_attention)
         out_eager = flex_attention(query, key, value, score_mod=bias_func)
         out_compiled = flex_compiled(query, key, value, score_mod=bias_func)
-
-        self._check_outputs_and_grads(
-            out_eager, out_compiled, (query, key, value, bias)
+        out_gold = flex_attention(
+            query.to(torch.float64),
+            key.to(torch.float64),
+            value.to(torch.float64),
+            score_mod=bias_func,
         )
 
-    def test_weird_bias(self):
-        query, key, value = self._init_tensors()
+        self._check_outputs_and_grads(
+            out_eager,
+            out_compiled,
+            out_gold,
+            (query, key, value, bias),
+        )
+
+    @common_utils.parametrize(
+        "params", get_params(test_dtypes), name_fn=lambda x: f"{x}"
+    )
+    def test_weird_bias(self, params):
+        query, key, value = self._init_tensors(params)
         bias = torch.randn(
-            self.batch_size,
-            self.num_heads,
+            params.batch_size,
+            params.num_heads,
             4,
-            self.seq_length,
+            params.seq_length,
             device=self.device,
-            dtype=self.dtype,
+            dtype=params.dtype,
             requires_grad=True,
         )
         which_bias = torch.tensor(0, device=self.device)
@@ -4405,25 +4535,36 @@ class TestLearnableBiases(InductorTestCase):
         flex_compiled = torch.compile(flex_attention)
         out_eager = flex_attention(query, key, value, score_mod=bias_func)
         out_compiled = flex_compiled(query, key, value, score_mod=bias_func)
-
-        self._check_outputs_and_grads(
-            out_eager, out_compiled, (query, key, value, bias)
+        out_gold = flex_attention(
+            query.to(torch.float64),
+            key.to(torch.float64),
+            value.to(torch.float64),
+            score_mod=bias_func,
         )
 
-    def test_indirect_bias(self):
-        query, key, value = self._init_tensors()
+        self._check_outputs_and_grads(
+            out_eager,
+            out_compiled,
+            out_gold,
+            (query, key, value, bias),
+        )
 
+    @common_utils.parametrize(
+        "params", get_params(test_dtypes), name_fn=lambda x: f"{x}"
+    )
+    def test_indirect_bias(self, params):
+        query, key, value = self._init_tensors(params)
         bias = torch.randn(
-            self.seq_length,
+            params.seq_length,
             device=self.device,
-            dtype=self.dtype,
+            dtype=params.dtype,
             requires_grad=True,
         )
 
         offset = torch.randint(
             0,
-            self.seq_length,
-            (self.seq_length,),
+            params.seq_length,
+            (params.seq_length,),
             device=self.device,
         )
 
@@ -4433,18 +4574,33 @@ class TestLearnableBiases(InductorTestCase):
         flex_compiled = torch.compile(flex_attention)
         out_eager = flex_attention(query, key, value, score_mod=bias_func)
         out_compiled = flex_compiled(query, key, value, score_mod=bias_func)
+        out_gold = flex_attention(
+            query.to(torch.float64),
+            key.to(torch.float64),
+            value.to(torch.float64),
+            score_mod=bias_func,
+        )
 
         self._check_outputs_and_grads(
-            out_eager, out_compiled, (query, key, value, bias)
+            out_eager,
+            out_compiled,
+            out_gold,
+            (query, key, value, bias),
         )
 
     @skip(
         "TODO: I know what I need to do, but it's not a good solution. So I need to rethink about this."
     )
-    def test_symmetric_bias(self):
-        query, key, value = self._init_tensors()
+    @common_utils.parametrize(
+        "params", get_params(test_dtypes), name_fn=lambda x: f"{x}"
+    )
+    def test_symmetric_bias(self, params):
+        query, key, value = self._init_tensors(params)
         bias = torch.randn(
-            self.seq_length, device=self.device, dtype=self.dtype, requires_grad=True
+            params.seq_length,
+            device=self.device,
+            dtype=params.dtype,
+            requires_grad=True,
         )
 
         def bias_func(score, b, h, q_idx, kv_idx):
@@ -4453,18 +4609,30 @@ class TestLearnableBiases(InductorTestCase):
         flex_compiled = torch.compile(flex_attention)
         out_eager = flex_attention(query, key, value, score_mod=bias_func)
         out_compiled = flex_compiled(query, key, value, score_mod=bias_func)
-
-        self._check_outputs_and_grads(
-            out_eager, out_compiled, (query, key, value, bias)
+        out_gold = flex_attention(
+            query.to(torch.float64),
+            key.to(torch.float64),
+            value.to(torch.float64),
+            score_mod=bias_func,
         )
 
-    def test_flipped_indexed_bias(self):
-        query, key, value = self._init_tensors()
+        self._check_outputs_and_grads(
+            out_eager,
+            out_compiled,
+            out_gold,
+            (query, key, value, bias),
+        )
+
+    @common_utils.parametrize(
+        "params", get_params(test_dtypes), name_fn=lambda x: f"{x}"
+    )
+    def test_flipped_indexed_bias(self, params):
+        query, key, value = self._init_tensors(params)
         bias = torch.randn(
-            self.seq_length,
-            self.seq_length,
+            params.seq_length,
+            params.seq_length,
             device=self.device,
-            dtype=self.dtype,
+            dtype=params.dtype,
             requires_grad=True,
         )
 
@@ -4474,29 +4642,50 @@ class TestLearnableBiases(InductorTestCase):
         flex_compiled = torch.compile(flex_attention)
         out_eager = flex_attention(query, key, value, score_mod=bias_func)
         out_compiled = flex_compiled(query, key, value, score_mod=bias_func)
-
-        self._check_outputs_and_grads(
-            out_eager, out_compiled, (query, key, value, bias)
+        out_gold = flex_attention(
+            query.to(torch.float64),
+            key.to(torch.float64),
+            value.to(torch.float64),
+            score_mod=bias_func,
         )
 
-    def test_head_specific_gate(self):
-        query, key, value = self._init_tensors()
+        self._check_outputs_and_grads(
+            out_eager,
+            out_compiled,
+            out_gold,
+            (query, key, value, bias),
+        )
+
+    @common_utils.parametrize(
+        "params", get_params(test_dtypes), name_fn=lambda x: f"{x}"
+    )
+    def test_head_specific_gate(self, params):
+        query, key, value = self._init_tensors(params)
         gate_score = torch.randn(
-            self.num_heads,
+            params.num_heads,
             device=self.device,
-            dtype=self.dtype,
+            dtype=params.dtype,
             requires_grad=True,
         )
 
         def bias_func(score, b, h, q_idx, kv_idx):
-            return score * torch.sigmoid(gate_score[h])
+            return score * torch.sigmoid(gate_score[h].to(torch.float32))
 
         flex_compiled = torch.compile(flex_attention)
         out_eager = flex_attention(query, key, value, score_mod=bias_func)
         out_compiled = flex_compiled(query, key, value, score_mod=bias_func)
+        out_gold = flex_attention(
+            query.to(torch.float64),
+            key.to(torch.float64),
+            value.to(torch.float64),
+            score_mod=bias_func,
+        )
 
         self._check_outputs_and_grads(
-            out_eager, out_compiled, (query, key, value, gate_score)
+            out_eager,
+            out_compiled,
+            out_gold,
+            (query, key, value, gate_score),
         )
 
 
