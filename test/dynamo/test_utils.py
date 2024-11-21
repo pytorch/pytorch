@@ -201,6 +201,8 @@ class TestDynamoTimed(TestCase):
             e.co_filename = None
             e.co_firstlineno = None
             e.inductor_config = None
+            e.cuda_version = None
+            e.triton_version = None
 
         # First event is for the forward. Formatting makes reading diffs
         # much easier.
@@ -221,6 +223,7 @@ class TestDynamoTimed(TestCase):
  'config_inline_inbuilt_nn_modules': False,
  'config_suppress_errors': False,
  'cuda_synchronize_time_us': None,
+ 'cuda_version': None,
  'distributed_ephemeral_timeout_us': None,
  'duration_us': 0,
  'dynamo_compile_time_before_restart_us': 0,
@@ -264,7 +267,8 @@ class TestDynamoTimed(TestCase):
  'start_time_us': 100,
  'structured_logging_overhead_s': 0.0,
  'structured_logging_overhead_us': 0,
- 'triton_compile_time_us': None}""",  # noqa: B950
+ 'triton_compile_time_us': None,
+ 'triton_version': None}""",  # noqa: B950
         )
 
         # Second event is for the backward
@@ -285,6 +289,7 @@ class TestDynamoTimed(TestCase):
  'config_inline_inbuilt_nn_modules': None,
  'config_suppress_errors': None,
  'cuda_synchronize_time_us': None,
+ 'cuda_version': None,
  'distributed_ephemeral_timeout_us': None,
  'duration_us': 0,
  'dynamo_compile_time_before_restart_us': None,
@@ -328,7 +333,8 @@ class TestDynamoTimed(TestCase):
  'start_time_us': 100,
  'structured_logging_overhead_s': None,
  'structured_logging_overhead_us': 0,
- 'triton_compile_time_us': None}""",  # noqa: B950
+ 'triton_compile_time_us': None,
+ 'triton_version': None}""",  # noqa: B950
         )
 
 
