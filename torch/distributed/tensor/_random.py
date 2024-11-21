@@ -58,9 +58,9 @@ def manual_seed(seed: int, device_mesh: DeviceMesh) -> None:
         None
 
     .. warning::
-        When calling this function, :func:`manual_seed` must be called from all ranks of the
-        default ``ProcessGroup`` even if some ranks may not be a part of the ``device_mesh``,
-        with the same ``seed`` value.
+        :func:`manual_seed` does not check the ``seed`` value correctness. Users must
+        ensure on their own that the value passed in is the desired ``seed`` for ranks
+        within ``device_mesh``.
         If ``device_mesh`` is a sub-mesh and the calling rank is not a part of it,
         ``manual_seed`` will not set its GPU device's generator seed.
         Current implementation only supports a GPU device mesh.
@@ -71,20 +71,13 @@ def manual_seed(seed: int, device_mesh: DeviceMesh) -> None:
             f"DTensor randomness only supports cuda/cuda-like device type, but got {device_mesh.device_type}"
         )
 
-    # allgather the seed over the default PG
-    object_list = [seed] * dist.get_world_size()
-    dist.all_gather_object(object_list, seed)
-    for rank, object in enumerate(object_list):
-        if seed != int(object):
-            raise RuntimeError(
-                f"calling manual_seed function over {device_mesh} but received different seed values on ranks:",
-                f"seed on rank {dist.get_rank()} is {seed}, and seed on rank {rank} is {object}!",
-            )
     # instantiate a RNG tracker if haven't. By default DTensor uses an
     # OffsetBasedRNGTracker to perform random operators.
     global _rng_tracker
     if not _rng_tracker:
-        _rng_tracker = OffsetBasedRNGTracker(device_mesh.device_type)
+        _rng_tracker = OffsetBasedRNGTracker(
+            device_mesh.device_type, run_state_sync=False
+        )
 
     # the current rank is in mesh
     if device_mesh.get_coordinate() is not None:
@@ -157,11 +150,13 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
     random operators.
     """
 
-    def __init__(self, device_type: str = "cuda"):
+    def __init__(self, device_type: str = "cuda", run_state_sync: bool = True):
         super().__init__(device_type)
-        # synchronize RNG state using rank 0's current one
         rng_state = self._device_handle.get_rng_state().to(device_type)
-        dist.broadcast(rng_state, 0)
+        if run_state_sync:
+            # synchronize RNG state using rank 0's current one
+            dist.broadcast(rng_state, 0)
+
         self.rng_states["parallel-rng"] = rng_state.to("cpu")
 
     def _manual_seed(self, parallel_seed: int) -> None:

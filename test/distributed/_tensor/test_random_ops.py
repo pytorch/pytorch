@@ -12,6 +12,7 @@ from torch.distributed._tensor.api import distribute_tensor
 from torch.distributed._tensor.placement_types import Replicate, Shard
 from torch.distributed.distributed_c10d import broadcast_object_list
 from torch.distributed.tensor._random import is_rng_supported_mesh, manual_seed
+from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -96,10 +97,26 @@ class DistTensorRandomOpTest(DTensorTestBase):
     @skip_unless_torch_gpu
     def test_manual_seed(self):
         device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
-        manual_seed(1234, device_mesh)
-        self.assertEqual(1234, random._rng_tracker.get_seed("parallel-rng"))
-        with self.assertRaisesRegex(RuntimeError, "different seed values"):
+
+        # in the case of calling ``torch.distributed.tensor._random.manual_seed``,
+        # no seed synchronization should happen since we fully trust the users' input
+        # and will not override the value.
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            # Test 1: set different seed on different ranks
+            # RNG tracker should not be initialized until DTensor ``manual_seed``
+            # is called.
+            self.assertTrue(random._rng_tracker is None)
             manual_seed(self.rank, device_mesh)
+            # RNG tracker should already be initialized
+            self.assertTrue(random._rng_tracker is not None)
+            self.assertEqual(self.rank, random._rng_tracker.get_seed("parallel-rng"))
+
+            # Test 2: set same seed on different ranks
+            manual_seed(1234, device_mesh)
+            self.assertEqual(1234, random._rng_tracker.get_seed("parallel-rng"))
+
+        self.assertEqual(comm_mode.get_total_counts(), 0)
 
     @with_comms
     @skip_unless_torch_gpu
