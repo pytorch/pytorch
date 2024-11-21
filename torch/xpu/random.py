@@ -31,9 +31,7 @@ def get_rng_state(device: Union[int, str, torch.device] = "xpu") -> Tensor:
 
 def get_rng_state_all() -> List[Tensor]:
     r"""Return a list of ByteTensor representing the random number states of all devices."""
-    results = []
-    for i in range(device_count()):
-        results.append(get_rng_state(i))
+    results = [get_rng_state(i) for i in range(device_count())]
     return results
 
 
