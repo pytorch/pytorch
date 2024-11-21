@@ -276,7 +276,7 @@ def autograd_cache_key(
     Generate a unique hash of the FX graph for caching.
     """
     check_cacheable(gm)
-    if torch._dynamo.config.specialize_floats:
+    if not torch._dynamo.config.specialize_float:
         # TODO: remove this once specializing floats no longer changes
         # the output of AOTAutograd, or when float guards are added to
         # FXGraphCache
@@ -650,7 +650,6 @@ class AOTAutogradCache:
                 if entry is not None:
                     compiled_fn = entry.wrap_post_compile(args, aot_config, fx_config)
                     log.info("AOTAutograd cache hit for key %s", cache_key)
-                    breakpoint()
                     counters["aot_autograd"]["autograd_cache_hit"] += 1
                     cache_state = "hit"
                     cache_event_time = time.time_ns()
