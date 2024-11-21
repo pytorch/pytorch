@@ -76,11 +76,18 @@ class C10_API Scalar {
       "int64_t is the same as long long on Windows");
   Scalar(long vv) : Scalar(vv, true) {}
 #endif
-#if defined(__linux__) && !defined(__ANDROID__)
+#if defined(__linux__) 
+#if INTPTR_MAX == INT32_MAX // 32-bit linux
+  // Should a different constructor declaration be here?
+
+#elif INTPTR_MAX == INT64_MAX // 64 bit linux
   static_assert(
       std::is_same_v<long, int64_t>,
-      "int64_t is the same as long on Linux");
+      "int64_t is the same as long on 64 bit Linux");
   Scalar(long long vv) : Scalar(vv, true) {}
+#else
+    #error "CPU Architecture is neither 32 nor 64 bit?"
+#endif
 #endif
 
   Scalar(uint16_t vv) : Scalar(vv, true) {}
