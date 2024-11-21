@@ -93,3 +93,13 @@ class MetricsContext:
             raise RuntimeError("Cannot update metrics outside of a MetricsContext")
         if self._level == 1:
             self.update(values)
+
+    def add_to_set(self, metric: str, value: Any) -> None:
+        """
+        Records a metric as a set() of values.
+        """
+        if self._level == 0:
+            raise RuntimeError(f"Cannot add {metric} outside of a MetricsContext")
+        if metric not in self._metrics:
+            self._metrics[metric] = set()
+        self._metrics[metric].add(value)
