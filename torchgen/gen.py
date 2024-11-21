@@ -300,7 +300,7 @@ def error_check_native_functions(funcs: Sequence[NativeFunction]) -> None:
             ("random_.from", "from"),
             ("uniform_", "from"),
         }
-        
+
         for arg in f.func.arguments.flat_all:
             if arg.name in PYTHON_RESERVED_KEYWORDS:
                 if (str(f.func.name), arg.name) not in EXCLUSION_LIST:
