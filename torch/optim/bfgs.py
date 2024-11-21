@@ -43,6 +43,10 @@ def _hager_zhang(
     """
     Hager-Zhang line search algorithm that matches the interface of strong_wolfe.
     
+    Algorithm parameters from paper https://www.math.lsu.edu/~hozhang/papers/cg_descent.pdf
+
+    Inspired by the _strong_wolfe function.
+
     Parameters:
     -----------
     obj_func : callable
@@ -79,7 +83,6 @@ def _hager_zhang(
     n_evals : int 
         Number of function evaluations
     """
-    # Algorithm parameters from paper https://www.math.lsu.edu/~hozhang/papers/cg_descent.pdf
     delta = c1          # Use input c1 for sufficient decrease
     sigma = c2          # Use input c2 for curvature condition
     epsilon = 1e-6      # Error tolerance for approximate Wolfe
