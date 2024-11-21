@@ -196,8 +196,23 @@ def generate_ttir(
 
     assert isinstance(kernel, JITFunction)
 
+    context = triton._C.libtriton.ir.context()
+    target = triton.runtime.driver.active.get_current_target()
+    backend = triton.compiler.compiler.make_backend(target)
+    options = backend.parse_options({})
+
+    # ignore backend-specific kwargs same way as in the native Triton code
+    # https://github.com/triton-lang/triton/blob/a6bb57d6285e723c58e87dd7cba263db6efff789/python/triton/runtime/jit.py#L594-L596
+    # why this is important for user-defined Triton kernels on AMD: https://github.com/pytorch/pytorch/issues/140800
+    for name in list(kwargs):
+        if name not in kernel.arg_names and name in options.__dict__:
+            kwargs.pop(name)
+
     if len(kwargs) != len(kernel.arg_names):
-        raise ValueError("Incorrect number of arguments passed to kernel")
+        raise ValueError(
+            "Incorrect number of arguments passed to kernel: "
+            f"passed {list(kwargs.keys())}, expected {kernel.arg_names}."
+        )
 
     # Replace all SymExprs with a regular value for TTIR generation
     # Replace all FakeTensor/TensorBox with real tensors
@@ -239,10 +254,6 @@ def generate_ttir(
         if i not in kernel.constexprs
     }
 
-    context = triton._C.libtriton.ir.context()
-    target = triton.runtime.driver.active.get_current_target()
-    backend = triton.compiler.compiler.make_backend(target)
-    options = backend.parse_options({})
     triton._C.libtriton.ir.load_dialects(context)
     backend.load_dialects(context)
 
@@ -532,8 +543,7 @@ def analyze_kernel_mutations(
                 )
                 stack.extend(arg for arg, mutated in zip(op.args, mutations) if mutated)
             else:
-                for idx in MUTATION_OPS.get(op.name, []):
-                    stack.append(op.args[idx])
+                stack.extend(op.args[idx] for idx in MUTATION_OPS.get(op.name, []))
 
     # The following is an iterative DFS algorithm
     mutated = [False] * num_args
@@ -613,7 +623,7 @@ def identify_mutated_tensors(
 # Used for wrapping a Triton Kernel
 class TritonKernelWrapperMutation(HigherOrderOperator):
     def __init__(self) -> None:
-        super().__init__("triton_kernel_wrapper_mutation", cacheable=False)
+        super().__init__("triton_kernel_wrapper_mutation", cacheable=True)
 
     def __call__(
         self,
@@ -638,7 +648,7 @@ triton_kernel_wrapper_mutation = TritonKernelWrapperMutation()
 # Used for wrapping a Triton Kernel in a functional manner
 class TritonKernelWrapperFunctional(HigherOrderOperator):
     def __init__(self) -> None:
-        super().__init__("triton_kernel_wrapper_functional", cacheable=False)
+        super().__init__("triton_kernel_wrapper_functional", cacheable=True)
 
     def __call__(
         self,
@@ -774,6 +784,7 @@ def trace_triton_kernel_wrapper(
         proxy_args,
         name=func_overload.__name__ + "_proxy",
     )
+
     ret = track_tensor_tree(out, out_proxy, constant=None, tracer=proxy_mode.tracer)
     return ret
 
@@ -1077,14 +1088,6 @@ class TritonHOPifier:
                         and defaults["prune_configs_by"].default
                         != kernel.early_config_prune
                     )
-                    # Set via reset_to_zero argument
-                    # https://github.com/triton-lang/triton/pull/5083
-                    # changes kernel.reset_idx to kernel.reset_to_zero
-                    or (hasattr(kernel, "reset_idx") and len(kernel.reset_idx) != 0)
-                    or (
-                        hasattr(kernel, "reset_to_zero")
-                        and len(kernel.reset_to_zero) != 0
-                    )
                     or (
                         "use_cuda_graph" in defaults
                         and defaults["use_cuda_graph"].default != kernel.use_cuda_graph
@@ -1092,19 +1095,31 @@ class TritonHOPifier:
                 )
             ):
                 self.raise_unsupported(
-                    "Only configs, keys, and restore_value are supported for triton.autotune"
+                    "Only configs, keys, restore_value, and reset_to_zero are supported for triton.autotune"
                 )
             if (
                 not torch._inductor.config.unsafe_ignore_unsupported_triton_autotune_args
                 and (
                     # pre_hook requires running arbitrary code at runtime, which we cannot handle at this time
                     # https://github.com/pytorch/pytorch/issues/139059
-                    # Check Config passed to autotuner in configs
-                    any(cfg.pre_hook is not None for cfg in kernel.configs)
+                    # we can't support pre_hook or post_hook in user defined triton kernels at the moment,
+                    # as they require the ability to execute code at runtime (AOTI can't support this)
+                    (
+                        hasattr(kernel, "user_defined_pre_hook")
+                        and kernel.user_defined_pre_hook is not False
+                    )
+                    or (
+                        hasattr(kernel, "user_defined_post_hook")
+                        and kernel.user_defined_post_hook is not False
+                    )
+                    or (
+                        # Check Config passed to autotuner in configs
+                        any(cfg.pre_hook is not None for cfg in kernel.configs)
+                    )
                 )
             ):
                 self.raise_unsupported(
-                    "pre_hook is not supported in triton.Autotune Configs"
+                    "pre_hook and post_hook are not supported in triton.Autotune or triton.Config"
                 )
 
     def call_getitem(

@@ -40,8 +40,8 @@ def average_parameters(
     flat_params = torch.cat([p.data.reshape(-1) for p in params_it1])
     flat_params /= dist.get_world_size(group_to_use)
     # Make sure the allreduce will not conflict with any other ongoing process group.
-    if torch.cuda.is_available():
-        torch.cuda.synchronize()
+    if torch.accelerator.is_available():
+        torch.accelerator.synchronize()
     dist.all_reduce(flat_params, group=group_to_use)
 
     offset = 0

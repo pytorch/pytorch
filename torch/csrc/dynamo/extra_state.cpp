@@ -21,6 +21,9 @@ CacheEntry* ExtraState::get_first_entry() {
   return &this->cache_entry_list.front();
 }
 
+ExtraState::ExtraState(PyCodeObject* orig_code_arg)
+    : orig_code(orig_code_arg) {}
+
 void ExtraState::move_to_front(CacheEntry* cache_entry) {
   CHECK(cache_entry->_owner == this);
   CHECK(!this->cache_entry_list.empty());
@@ -31,11 +34,35 @@ void ExtraState::move_to_front(CacheEntry* cache_entry) {
       cache_entry->_owner_loc);
 }
 
-void ExtraState::invalidate(CacheEntry* cache_entry) {
+void ExtraState::move_to_back(CacheEntry* cache_entry) {
   CHECK(cache_entry->_owner == this);
   CHECK(!this->cache_entry_list.empty());
   CHECK(cache_entry == &*cache_entry->_owner_loc);
-  this->cache_entry_list.erase(cache_entry->_owner_loc);
+  this->cache_entry_list.splice(
+      this->cache_entry_list.end(),
+      this->cache_entry_list,
+      cache_entry->_owner_loc);
+}
+
+void ExtraState::invalidate(
+    CacheEntry* cache_entry,
+    py::object deleted_guard_manager) {
+  // Sometimes setting the cache_entry->code to None causes the orig_code to be
+  // freed. This calls destroy_extra_state, which deletes the extra_state and
+  // all the cache_entries. This causes the `this` pointer to be a dangling
+  // pointer, causing a segfault. So, we manually inc/dec ref the original code
+  // pointer to prevent triggering of destroy_extra_state while the invalidate
+  // function is running.
+  Py_INCREF(this->orig_code);
+
+  CHECK(cache_entry->_owner == this);
+  CHECK(!this->cache_entry_list.empty());
+  CHECK(cache_entry == &*cache_entry->_owner_loc);
+  cache_entry->invalidate(std::move(deleted_guard_manager));
+  // Move the cache entry to the end of the list because these will always
+  // return False.
+  cache_entry->_owner->move_to_back(cache_entry);
+  Py_DECREF(this->orig_code);
 }
 
 static bool is_extra_state_unset(ExtraState* extra_state) {
@@ -88,7 +115,7 @@ ExtraState* init_and_set_extra_state(PyCodeObject* code) {
   // Invariant - Extra state should not have been set before, therefore it
   // should be nullptr.
   CHECK(get_extra_state(code) == nullptr);
-  ExtraState* extra_state = new ExtraState();
+  ExtraState* extra_state = new ExtraState(code);
   NULL_CHECK(extra_state);
   set_extra_state(code, extra_state);
   // freed by destroy_extra_state (since we need to pass these objects to C)
@@ -96,7 +123,7 @@ ExtraState* init_and_set_extra_state(PyCodeObject* code) {
   return extra_state;
 }
 
-bool backend_match(PyObject* saved_backend, PyObject* backend) {
+static bool backend_match(PyObject* saved_backend, PyObject* backend) {
   // Pointer equality check for common case
   if (saved_backend != backend) {
     // The Py_TYPE check should not be required but there is a pre-existing
@@ -114,10 +141,12 @@ void lookup(
     PyObject* f_locals,
     PyObject* backend,
     PyObject** maybe_cached_code,
-    const char** trace_annotation) {
+    const char** trace_annotation,
+    bool is_skip_guard_eval_unsafe) {
   size_t index = 0;
   CacheEntry* found = nullptr;
   py::handle locals(f_locals);
+
   for (CacheEntry& cache_entry : extra_state->cache_entry_list) {
     // Check backend. Py_False means run only mode.
 
@@ -126,8 +155,13 @@ void lookup(
 
     if (valid) {
       try {
-        valid = torch::dynamo::run_root_guard_manager(
-            cache_entry.root_mgr, f_locals);
+        if (is_skip_guard_eval_unsafe) {
+          valid = torch::dynamo::run_root_guard_manager(
+              cache_entry.diff_guard_root_mgr, f_locals);
+        } else {
+          valid = torch::dynamo::run_root_guard_manager(
+              cache_entry.root_mgr, f_locals);
+        }
       } catch (py::error_already_set& e) {
         if (guard_error_hook) {
           py::handle guard_error_hook_handle(guard_error_hook);
