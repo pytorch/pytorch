@@ -1887,13 +1887,20 @@ class BuiltinVariable(VariableTracker):
             items = list(reversed(obj.unpack_var_sequence(tx)))
             return variables.TupleVariable(items)
 
-    def call_sorted(self, tx: "InstructionTranslator", obj: VariableTracker, **kwargs):
+    def call_sorted(
+        self,
+        tx: "InstructionTranslator",
+        obj: VariableTracker,
+        **kwargs: VariableTracker,
+    ):
         if obj.has_force_unpack_var_sequence(tx) and not isinstance(
             obj, variables.TensorVariable
         ):
             unpacked = obj.force_unpack_var_sequence(tx)
             if not all(x.is_python_constant() for x in unpacked):
-                return
+                # TODO: support `key(x)` is Python constant and sortable. The `key` function should
+                #       be a pure function and should not have any side effects.
+                return  # try next handler
             key_fn = kwargs.pop("key", ConstantVariable.create(None))
             reverse = kwargs.pop(
                 "reverse", ConstantVariable.create(False)
