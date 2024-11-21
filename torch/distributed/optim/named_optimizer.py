@@ -146,9 +146,7 @@ class _NamedOptimizer(optim.Optimizer):
 
         ret_groups = []
         for group in param_groups:
-            param_keys = []
-            for param in group["params"]:
-                param_keys.append(self.ordered_param_keys[param])
+            param_keys = [self.ordered_param_keys[param] for param in group["params"]]
             ret_group = {"params": sorted(param_keys)}
             for k, v in group.items():
                 if k != "params":

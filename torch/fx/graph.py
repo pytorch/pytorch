@@ -540,6 +540,15 @@ class CodeGen:
                 size = list(arg.size())
                 dtype = str(arg.dtype).split(".")[-1]
                 return f"torch.Tensor(size={size}, dtype={dtype})"
+            elif isinstance(arg, tuple):
+                if len(arg) == 1:
+                    return f"({_get_repr(arg[0])},)"
+                else:
+                    return "(" + ", ".join(_get_repr(a) for a in arg) + ")"
+            elif isinstance(arg, list):
+                return "[" + ", ".join(_get_repr(a) for a in arg) + "]"
+            elif isinstance(arg, slice):
+                return f"slice({_get_repr(arg.start)}, {_get_repr(arg.stop)}, {_get_repr(arg.step)})"
             else:
                 return blue(repr(arg))
 
@@ -1016,6 +1025,12 @@ class Graph:
             this list to switch iteration order.
         """
         return _node_list(self)
+
+    @compatibility(is_backward_compatible=False)
+    def output_node(self) -> Node:
+        output_node = next(iter(reversed(self.nodes)))
+        assert output_node.op == "output"
+        return output_node
 
     @compatibility(is_backward_compatible=False)
     def find_nodes(

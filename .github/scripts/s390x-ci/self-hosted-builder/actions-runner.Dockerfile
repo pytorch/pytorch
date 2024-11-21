@@ -69,3 +69,6 @@ RUN curl -L https://github.com/actions/runner/releases/download/v2.317.0/actions
 
 ENTRYPOINT ["/usr/bin/entrypoint"]
 CMD ["/usr/bin/actions-runner"]
+
+# podman requires additional settings to use docker.io by default
+RUN mkdir -pv .config/containers ; echo 'unqualified-search-registries = ["docker.io"]' > .config/containers/registries.conf

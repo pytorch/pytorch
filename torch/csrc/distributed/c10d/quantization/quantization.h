@@ -6,7 +6,6 @@
 #pragma once
 
 #include <ATen/ATen.h>
-#include <vector>
 
 namespace torch::distributed::c10d::quantization {
 

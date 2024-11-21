@@ -21,7 +21,7 @@ using unfold_backward_fn = void (*)(
   int64_t step
 );
 
-DECLARE_DISPATCH(unfold_backward_fn, unfold_backward_stub);
+DECLARE_DISPATCH(unfold_backward_fn, unfold_backward_stub)
 
 namespace {
 

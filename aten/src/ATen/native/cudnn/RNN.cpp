@@ -1402,9 +1402,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
   c10::MaybeOwned<Tensor> weight_buf_r_maybe_owned =
       at::borrow_from_optional_tensor(weight_buf_r_opt);
   const Tensor& weight_buf_r = *weight_buf_r_maybe_owned;
-  const Tensor& cx = c10::value_or_else(cx_opt, [] { return Tensor(); });
-  const Tensor& fn_dropout_state =
-      c10::value_or_else(fn_dropout_state_opt, [] { return Tensor(); });
+  const Tensor& cx = cx_opt.value_or(Tensor());
+  const Tensor& fn_dropout_state = fn_dropout_state_opt.value_or(Tensor());
 
   check_attributes(input_r, weight, {hx, cx}, /*check_dtype=*/true);
   auto input = input_r;
@@ -2115,14 +2114,10 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> _cudnn_rnn_backward(
   c10::MaybeOwned<Tensor> cx_maybe_owned =
       at::borrow_from_optional_tensor(cx_opt);
   const Tensor& cx = *cx_maybe_owned;
-  const Tensor& grad_output_r =
-      c10::value_or_else(grad_output_r_opt, [] { return Tensor(); });
-  const Tensor& grad_hy_r =
-      c10::value_or_else(grad_hy_r_opt, [] { return Tensor(); });
-  const Tensor& grad_cy_r =
-      c10::value_or_else(grad_cy_r_opt, [] { return Tensor(); });
-  const Tensor& dropout_state =
-      c10::value_or_else(dropout_state_opt, [] { return Tensor(); });
+  const Tensor& grad_output_r = grad_output_r_opt.value_or(Tensor());
+  const Tensor& grad_hy_r = grad_hy_r_opt.value_or(Tensor());
+  const Tensor& grad_cy_r = grad_cy_r_opt.value_or(Tensor());
+  const Tensor& dropout_state = dropout_state_opt.value_or(Tensor());
 
   if (!grad_output_r.defined() && !grad_hy_r.defined() &&
       !grad_cy_r.defined()) {
@@ -2631,59 +2626,59 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
           std::get<1>(cudnn_output), std::get<2>(cudnn_output))};
 }
 
-#define ONE_HIDDEN_RNN(NAME, MODE)                          \
-  void NAME##_cudnn(                                        \
-      Tensor& output,                                       \
-      Tensor& hy,                                           \
-      const Tensor& input,                                  \
-      const Tensor& hx,                                     \
-      TensorList params,                                    \
-      bool has_biases,                                      \
-      int64_t num_layers,                                   \
-      double dropout_p,                                     \
-      bool train,                                           \
-      bool bidirectional,                                   \
-      bool batch_first) {                                   \
-    std::tie(output, hy) = _cudnn_impl(                     \
-        input,                                              \
-        hx,                                                 \
-        params,                                             \
-        has_biases,                                         \
-        MODE,                                               \
-        num_layers,                                         \
-        dropout_p,                                          \
-        train,                                              \
-        bidirectional,                                      \
-        batch_first);                                       \
-  }                                                         \
-                                                            \
-  void NAME##_packed_cudnn(                                 \
-      Tensor& output,                                       \
-      Tensor& hy,                                           \
-      const Tensor& data,                                   \
-      const Tensor& batch_sizes,                            \
-      const Tensor& hx,                                     \
-      TensorList params,                                    \
-      bool has_biases,                                      \
-      int64_t num_layers,                                   \
-      double dropout_p,                                     \
-      bool train,                                           \
-      bool bidirectional) {                                 \
-    std::tie(output, hy) = _cudnn_impl(                     \
-        data,                                               \
-        batch_sizes,                                        \
-        hx,                                                 \
-        params,                                             \
-        has_biases,                                         \
-        MODE,                                               \
-        num_layers,                                         \
-        dropout_p,                                          \
-        train,                                              \
-        bidirectional);                                     \
-  }                                                         \
-                                                            \
-  REGISTER_CUDA_DISPATCH(NAME##_cudnn_stub, &NAME##_cudnn); \
-  REGISTER_CUDA_DISPATCH(NAME##_packed_cudnn_stub, &NAME##_packed_cudnn);
+#define ONE_HIDDEN_RNN(NAME, MODE)                         \
+  void NAME##_cudnn(                                       \
+      Tensor& output,                                      \
+      Tensor& hy,                                          \
+      const Tensor& input,                                 \
+      const Tensor& hx,                                    \
+      TensorList params,                                   \
+      bool has_biases,                                     \
+      int64_t num_layers,                                  \
+      double dropout_p,                                    \
+      bool train,                                          \
+      bool bidirectional,                                  \
+      bool batch_first) {                                  \
+    std::tie(output, hy) = _cudnn_impl(                    \
+        input,                                             \
+        hx,                                                \
+        params,                                            \
+        has_biases,                                        \
+        MODE,                                              \
+        num_layers,                                        \
+        dropout_p,                                         \
+        train,                                             \
+        bidirectional,                                     \
+        batch_first);                                      \
+  }                                                        \
+                                                           \
+  void NAME##_packed_cudnn(                                \
+      Tensor& output,                                      \
+      Tensor& hy,                                          \
+      const Tensor& data,                                  \
+      const Tensor& batch_sizes,                           \
+      const Tensor& hx,                                    \
+      TensorList params,                                   \
+      bool has_biases,                                     \
+      int64_t num_layers,                                  \
+      double dropout_p,                                    \
+      bool train,                                          \
+      bool bidirectional) {                                \
+    std::tie(output, hy) = _cudnn_impl(                    \
+        data,                                              \
+        batch_sizes,                                       \
+        hx,                                                \
+        params,                                            \
+        has_biases,                                        \
+        MODE,                                              \
+        num_layers,                                        \
+        dropout_p,                                         \
+        train,                                             \
+        bidirectional);                                    \
+  }                                                        \
+                                                           \
+  REGISTER_CUDA_DISPATCH(NAME##_cudnn_stub, &NAME##_cudnn) \
+  REGISTER_CUDA_DISPATCH(NAME##_packed_cudnn_stub, &NAME##_packed_cudnn)
 
 ONE_HIDDEN_RNN(gru, CUDNN_GRU)
 ONE_HIDDEN_RNN(rnn_tanh, CUDNN_RNN_TANH)
@@ -2747,8 +2742,8 @@ void lstm_packed_cudnn(
   cy = std::get<1>(result.second);
 }
 
-REGISTER_CUDA_DISPATCH(lstm_cudnn_stub, &lstm_cudnn);
-REGISTER_CUDA_DISPATCH(lstm_packed_cudnn_stub, &lstm_packed_cudnn);
+REGISTER_CUDA_DISPATCH(lstm_cudnn_stub, &lstm_cudnn)
+REGISTER_CUDA_DISPATCH(lstm_packed_cudnn_stub, &lstm_packed_cudnn)
 
 } // namespace
 

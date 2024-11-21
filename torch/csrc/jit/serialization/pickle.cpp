@@ -142,7 +142,7 @@ IValue pickle_load(const std::vector<char>& data) {
       "pickle_load not supported on mobile "
       "(see https://github.com/pytorch/pytorch/pull/30108)");
 #endif
-};
+}
 
 // A specialized version of pickle_load that can load custom objects.
 c10::IValue pickle_load_obj(std::string_view data) {
@@ -155,7 +155,7 @@ c10::IValue pickle_load_obj(std::string_view data) {
       /*tensor_prefix=*/"",
       /*type_resolver=*/customClassResolver,
       /*obj_loader=*/torch::jit::ObjLoaderFunc,
-      /*device=*/c10::nullopt,
+      /*device=*/std::nullopt,
       reader);
 #else
   TORCH_CHECK(

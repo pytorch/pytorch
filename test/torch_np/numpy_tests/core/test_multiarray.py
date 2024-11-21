@@ -75,7 +75,12 @@ IS_PYPY = False
 IS_PYSTON = False
 HAS_REFCOUNT = True
 
-from numpy.core.tests._locales import CommaDecimalPointLocale
+if numpy.__version__ > "2":
+    # numpy 2.0 +, see https://numpy.org/doc/stable/release/2.0.0-notes.html#renamed-numpy-core-to-numpy-core
+    from numpy._core.tests._locales import CommaDecimalPointLocale
+else:
+    from numpy.core.tests._locales import CommaDecimalPointLocale
+
 from numpy.testing._private.utils import _no_tracing, requires_memory
 
 

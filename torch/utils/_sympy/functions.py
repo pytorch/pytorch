@@ -89,6 +89,17 @@ __all__ = [
 ]
 
 
+def _is_symbols_binary_summation(expr: sympy.Expr) -> bool:
+    # No need to check that two args are not the same, since expr is pr-optimized but we do it anyway.
+    return (
+        expr.is_Add
+        and len(expr._args) == 2
+        and expr._args[0].is_symbol
+        and expr._args[1].is_symbol
+        and expr._args[0] != expr._args[1]
+    )
+
+
 def _keep_float(f: Callable[..., _T]) -> Callable[..., Union[_T, sympy.Float]]:
     @functools.wraps(f)
     def inner(*args: Any) -> Union[_T, sympy.Float]:
@@ -286,7 +297,7 @@ class ModularIndexing(sympy.Function):
         cls, base: sympy.Integer, divisor: sympy.Integer, modulus: sympy.Integer
     ) -> Optional[sympy.Basic]:
         if base == 0 or modulus == 1:
-            return sympy.Integer(0)
+            return sympy.S.Zero
 
         if (
             isinstance(base, sympy.Integer)
@@ -1197,10 +1208,14 @@ def make_opaque_unary_fn(name):
                     a = sympy.oo
                 if a is -int_oo:
                     a = -sympy.oo
+                if name == "log2":
+                    return sympy.log(a, 2)
                 return getattr(sympy, name)(a)
             return None
 
-    OpaqueUnaryFn.__name__ = "OpaqueUnaryFn_" + name
+    nm = "OpaqueUnaryFn_" + name
+    OpaqueUnaryFn.__name__ = nm
+    OpaqueUnaryFn.__qualname__ = nm
 
     return OpaqueUnaryFn
 
@@ -1219,3 +1234,4 @@ OpaqueUnaryFn_atan = make_opaque_unary_fn("atan")
 OpaqueUnaryFn_exp = make_opaque_unary_fn("exp")
 OpaqueUnaryFn_log = make_opaque_unary_fn("log")
 OpaqueUnaryFn_asinh = make_opaque_unary_fn("asinh")
+OpaqueUnaryFn_log2 = make_opaque_unary_fn("log2")

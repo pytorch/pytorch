@@ -58,7 +58,11 @@ from torch._C._dynamo.eval_frame import (  # noqa: F401
 from torch._dispatch.python import enable_python_dispatcher
 from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch._utils_internal import justknobs_check, log_export_usage
-from torch.export.dynamic_shapes import _combine_args, _process_dynamic_shapes
+from torch.export.dynamic_shapes import (
+    _combine_args,
+    _process_dynamic_shapes,
+    _RelaxedConstraint,
+)
 from torch.fx import GraphModule
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
@@ -145,7 +149,7 @@ _set_stance._dynamo_forbidden = True  # type: ignore[attr-defined]
 def _callback_from_stance(callback):
     if _stance.stance == "default":
         # force_backend
-        if _stance.backend is not None:
+        if _stance.backend is not None and callback not in (False, None):
             hooks = Hooks()
             callback = convert_frame.catch_errors_wrapper(
                 convert_frame.convert_frame(  # type: ignore[arg-type]
@@ -163,6 +167,8 @@ def _callback_from_stance(callback):
         # run mode
         return False
     elif _stance.stance == "fail_on_recompile":
+        if callback in (False, None):
+            return callback
 
         def fail_callback(*args, **kwargs):
             raise RuntimeError(
@@ -878,9 +884,11 @@ def _optimize(
         hooks,
         backend_ctx_ctor,
         dynamic=dynamic,
-        compiler_config=backend.get_compiler_config()
-        if hasattr(backend, "get_compiler_config")
-        else None,
+        compiler_config=(
+            backend.get_compiler_config()
+            if hasattr(backend, "get_compiler_config")
+            else None
+        ),
         rebuild_ctx=rebuild_ctx,
     )
 
@@ -994,9 +1002,11 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
                         flat_args[i],
                         symbolic_context=StatelessSymbolicContext(
                             dynamic_sizes=[
-                                DimDynamic.DYNAMIC
-                                if d in flat_args_dynamic_dims[i]
-                                else DimDynamic.STATIC
+                                (
+                                    DimDynamic.DYNAMIC
+                                    if d in flat_args_dynamic_dims[i]
+                                    else DimDynamic.STATIC
+                                )
                                 for d in range(len(flat_args[i].shape))
                             ],
                             constraint_sizes=[None] * len(flat_args[i].shape),
@@ -1063,6 +1073,8 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
             result_gm.meta["dynamo_flat_name_to_original_fqn"] = self.module.meta[
                 "dynamo_flat_name_to_original_fqn"
             ]
+        if "dynamo_compile_id" in self.module.meta:
+            result_gm.meta["dynamo_compile_id"] = self.module.meta["dynamo_compile_id"]
         return result_gm
 
 
@@ -1324,6 +1336,7 @@ def export(
     ] = None,
     tracing_mode: str = "symbolic",
     dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]] = None,
+    specialize_float: bool = True,
     assume_static_by_default: bool = False,
     same_signature: bool = True,
     disable_constraint_solver: bool = False,
@@ -1390,12 +1403,14 @@ def export(
 
     # Deal with "local variable referenced before assignment"
     _f = f
+    _specialize_float = specialize_float
     _assume_static_by_default = assume_static_by_default
 
     def inner(*args, **kwargs):
         combined_args = _combine_args(_f, args, kwargs)
         constraints = _process_dynamic_shapes(combined_args, dynamic_shapes)
         f = _f
+        specialize_float = _specialize_float
         assume_static_by_default = _assume_static_by_default
         check_if_dynamo_supported()
         torch._C._log_api_usage_once("torch._dynamo.export")
@@ -1502,6 +1517,7 @@ def export(
             assume_static_by_default = True
         with config.patch(
             specialize_int=True,
+            specialize_float=specialize_float,
             assume_static_by_default=assume_static_by_default,
             automatic_dynamic_shapes=False,
             capture_dynamic_output_shape_ops=True,
@@ -1658,6 +1674,7 @@ def export(
                     for c in (constraints or ())
                     if (
                         c.t_id == id(x)
+                        and not isinstance(c, _RelaxedConstraint)
                         and c.constraint_range.vr.lower != c.constraint_range.vr.upper
                     )
                 }

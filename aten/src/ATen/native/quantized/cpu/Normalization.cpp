@@ -16,8 +16,7 @@
 
 #include <algorithm>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 DEFINE_DISPATCH(qbatch_norm_stub);
 DEFINE_DISPATCH(qbatch_norm_relu_stub);
@@ -389,7 +388,7 @@ Tensor quantized_batch_norm(
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
-  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+  const Tensor& bias = bias_opt.value_or(Tensor());
 
   Tensor qy;
   // TODO: this should arguably support 3d as well
@@ -412,5 +411,4 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("quantized::batch_norm3d_relu"), TORCH_FN(q_batch_norm3d_impl<true>));
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

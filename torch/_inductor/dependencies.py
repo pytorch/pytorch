@@ -127,9 +127,7 @@ class MemoryDep(Dep):
             return None
 
         stride_to_index = {s: i for i, s in enumerate(self_strides)}
-        order = []
-        for s in other_strides:
-            order.append(stride_to_index[s])
+        order = [stride_to_index[s] for s in other_strides]
 
         assert set(order) == set(range(0, self.num_vars))
         return order
@@ -204,7 +202,7 @@ class MemoryDep(Dep):
             numel = V.graph.get_numel(self.name)
         else:
             vars: OrderedSet[sympy.Basic] = OrderedSet(self.index.free_symbols)
-            numel = sympy.Integer(1)
+            numel = sympy.S.One
             for var, size in zip(self.var_names, self.size):
                 if var in vars:
                     numel = numel * size
@@ -247,7 +245,7 @@ class MemoryDep(Dep):
 
         last_sym = self.var_names[-1]
         for term in terms:
-            if term is last_sym:
+            if term == last_sym:
                 return True
 
             # Having a >1 stride for the last dimension is bad for perf
@@ -255,7 +253,7 @@ class MemoryDep(Dep):
             if (
                 isinstance(term, sympy.Mul)
                 and len(term.args) == 2
-                and term.args[1] is last_sym
+                and term.args[1] == last_sym
                 and isinstance(term.args[0], (int, sympy.Integer))
                 and term.args[0] > 1
             ):
@@ -328,7 +326,7 @@ class WeakDep(Dep):
         raise NotImplementedError("WeakDep does not have an index")
 
     def get_numel(self) -> sympy.Expr:
-        return sympy.Integer(1)
+        return sympy.S.One
 
     def rename(self, renames: Dict[str, str]) -> "WeakDep":
         if self.name in renames:
@@ -547,9 +545,7 @@ def var_builder(prefix: str) -> Tuple[VarRanges, Callable[[sympy.Expr], sympy.Sy
 
 def index_vars_no_squeeze(*argsizes: Tuple[sympy.Expr, ...], prefix: str):
     var_ranges, add_var = var_builder(prefix)
-    args: List[List[sympy.Symbol]] = []
-    for size in argsizes:
-        args.append(list(map(add_var, size)))
+    args: List[List[sympy.Symbol]] = [list(map(add_var, size)) for size in argsizes]
     return args, var_ranges
 
 
@@ -637,12 +633,15 @@ def extract_input_node_reduction_ranges(
     Otherwise returns (None, None).
     """
 
-    from .ir import ComputedBuffer, Loops
+    from .ir import ComputedBuffer, ExternKernel, Loops
+
+    size: Optional[List[sympy.Expr]]
+    reduction_size: Optional[List[sympy.Expr]]
 
     if isinstance(input_node.data, ComputedBuffer):
         # Input node has already been realized. Return its size and reduction_size.
-        size = input_node.get_size()
-        reduction_size = input_node.get_reduction_size()
+        size = [*input_node.get_size()]
+        reduction_size = [*input_node.get_reduction_size()]
         if len(reduction_size) > 0:
             return (size, reduction_size)
         else:
@@ -660,7 +659,7 @@ def extract_input_node_reduction_ranges(
     size = None
     while reduction_size is None and len(reads) > 0:
         seen: OrderedSet[str] = OrderedSet()
-        new_reads = []
+        new_reads: List[Dep] = []
         for read in reads:
             if not isinstance(read, MemoryDep):
                 continue
@@ -671,7 +670,7 @@ def extract_input_node_reduction_ranges(
             if buffer is None:
                 continue
             op = buffer.get_defining_op()
-            if op is None:
+            if op is None or isinstance(op, ExternKernel):
                 continue
 
             if isinstance(op, ComputedBuffer) and len(op.get_reduction_size()) > 0:
@@ -685,7 +684,7 @@ def extract_input_node_reduction_ranges(
         if reads == new_reads:
             return (size, reduction_size)
         else:
-            reads = new_reads
+            reads = OrderedSet(new_reads)
     return (size, reduction_size)
 
 
@@ -733,6 +732,11 @@ class FreeUnbackedSymbolsOpsHandler:
     ) -> Union[None, Tuple[None, ...]]:
         num_values = reduction_num_outputs(reduction_type)
         return (None,) * num_values if num_values > 1 else None
+
+    def masked(self, mask, body, other) -> None:
+        assert callable(body), "masked body must always be callable."
+        # The body can make additional calls, for e.g. ops.indirect_indexing
+        body()
 
 
 def _typecheck_FreeUnbackedSymbolsOpsHandler(

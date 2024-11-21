@@ -120,7 +120,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
-          no-sudo: ${{ inputs.build-environment == 'linux-s390x-binary-manywheel' }}
+          no-sudo: true
 
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
@@ -198,6 +198,7 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
+          SCCACHE_REGION: us-east-1
           SCCACHE_S3_KEY_PREFIX: ${{ github.workflow }}
           XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
           PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
@@ -222,7 +223,6 @@ jobs:
             JENKINS_USER="--user jenkins"
             USED_IMAGE="${DOCKER_IMAGE}"
           fi
-
           # detached container should get cleaned up by teardown_ec2_linux
           # Used for JENKINS_USER, which can be empty
           # shellcheck disable=SC2086
@@ -234,6 +234,7 @@ jobs:
             -e SHA1 \
             -e BRANCH \
             -e SCCACHE_BUCKET \
+            -e SCCACHE_REGION \
             -e SCCACHE_S3_KEY_PREFIX \
             -e XLA_CUDA \
             -e XLA_CLANG_CACHE_S3_BUCKET_NAME \
@@ -281,7 +282,7 @@ jobs:
           s3-bucket: ${{ inputs.s3-bucket }}
 
       - name: Store PyTorch Build Artifacts for s390x
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped' && !inputs.use_split_build && inputs.build-environment == 'linux-s390x-binary-manywheel'
         with:
           name: ${{ inputs.build-environment }}
@@ -290,7 +291,7 @@ jobs:
           path: artifacts.zip
 
       - name: Store PyTorch Build Artifacts for s390x for split build
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped' && inputs.use_split_build && inputs.build-environment == 'linux-s390x-binary-manywheel'
         with:
           name: ${{ inputs.build-environment }}-experimental-split-build
