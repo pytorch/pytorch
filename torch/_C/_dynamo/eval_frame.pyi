@@ -25,7 +25,7 @@ class _CacheEntry:
     next: _CacheEntry | None
 
 class _ExtraState:
-    def invalidate(self, cache_entry: _CacheEntry): ...
+    def invalidate(self, cache_entry: _CacheEntry, guard_manager: object): ...
 
 # This is an object that encapsulates the Python FrameType, and exposes
 # properties Dynamo cares about for a frame.
