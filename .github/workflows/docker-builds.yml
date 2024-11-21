@@ -103,11 +103,14 @@ jobs:
 
       - name: Build docker image
         id: build-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        # TODO: TEST https://github.com/pytorch/test-infra/pull/5957, REVERT TO MAIN BEFOER LANDING
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@login-to-docker-hub
         with:
           docker-image-name: ${{ matrix.docker-image-name }}
           always-rebuild: true
           push: true
+          docker-hub-username: ${{ secrets.DOCKER_HUB_USERNAME }}
+          docker-hub-password: ${{ secrets.DOCKER_HUB_PASSWORD_READONLY }}
 
       - name: Pull docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
