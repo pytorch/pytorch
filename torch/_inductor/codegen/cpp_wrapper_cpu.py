@@ -198,7 +198,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
             }}
             """
         )
-        extend_aoti_c_shim_include = f"torch/csrc/inductor/aoti_torch/generated/extend/c_shim_{self.device}.h"
+        extend_aoti_c_shim_include = (
+            f"torch/csrc/inductor/aoti_torch/generated/extend/c_shim_{self.device}.h"
+        )
         extend_aoti_c_shim_path = os.path.join(
             os.path.dirname(torch.__file__),
             "include",
