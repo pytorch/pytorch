@@ -3101,7 +3101,12 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
     @staticmethod
     def build_inline_tracer(
-        parent, func: VariableTracker, args: List[VariableTracker], kwargs
+        parent,
+        func: VariableTracker,
+        args: List[VariableTracker],
+        kwargs,
+        *,
+        stop_generator_on_yield: bool = False,
     ):
         if isinstance(func, SkipFunctionVariable):
             unimplemented("inline with functions in skip files")
@@ -3179,6 +3184,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 parent.symbolic_globals,
                 parent.symbolic_torch_function_state,
                 func,
+                stop_generator_on_yield=stop_generator_on_yield,
             )
         else:
             tracer = InliningInstructionTranslator(
@@ -3229,8 +3235,14 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
         if is_generator(code):
             assert isinstance(self, InliningGeneratorInstructionTranslator)
-            if not self.consume_all_items and self.generator_exhausted:
+            # The first flag tells us if we consume generators lazily or not
+            # and the second is if the generator is exhausted.
+            # In the future, generators should be lazily consumed and the first
+            # flag (stop_generator_on_yield) will not be needed.
+            if self.stop_generator_on_yield and self.generator_exhausted:
                 # When the generator returns None, we raise StopIteration
+                # r = self.symbolic_result
+                # assert r.as_python_constant() is None
                 exc.raise_observed_exception(StopIteration, self)
             else:
                 return ListIteratorVariable(
@@ -3352,12 +3364,15 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
     generated_items: List[VariableTracker]
     # Flag wether or not the InlineGenerator should consume the entire iterator
-    consume_all_items: bool
+    stop_generator_on_yield: bool
 
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args, stop_generator_on_yield: bool = False, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.generated_items = []
-        self.consume_all_items = True
+        # In the future, generators should run lazily (i.e. when next(...) is called)
+        # TODO: Set this to True by default, so that dynamo follows CPython more
+        # closely
+        self.stop_generator_on_yield = stop_generator_on_yield
         self.generator_exhausted = False
 
     def YIELD_VALUE(self, inst: Instruction):
@@ -3369,7 +3384,7 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
                 f"If not, please report a bug at {PT2_ISSUE_TRACKER_URL}",
             )
         self.push(ConstantVariable.create(None))
-        if not self.consume_all_items:
+        if self.stop_generator_on_yield:
             self.symbolic_result = top
             # Stop tracing
             raise YieldValueOp
