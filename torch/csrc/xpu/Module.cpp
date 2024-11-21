@@ -274,6 +274,20 @@ PyObject* THXPModule_resetAccumulatedMemoryStats(
   Py_RETURN_NONE;
 }
 
+PyObject* THXPModule_getMemoryInfo(PyObject* self, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(THPUtils_checkLong(arg), "invalid argument to mem_get_info");
+  const auto device_index = THPUtils_unpackDeviceIndex(arg);
+  auto total = at::xpu::getDeviceProperties(device_index)->global_mem_size;
+  auto free = c10::xpu::get_raw_device(device_index)
+                  .get_info<sycl::ext::intel::info::device::free_memory>();
+  auto ret = THPObjectPtr{PyTuple_New(2)};
+  PyTuple_SET_ITEM(ret.get(), 0, THPUtils_packUInt64(free));
+  PyTuple_SET_ITEM(ret.get(), 1, THPUtils_packUInt64(total));
+  return ret.release();
+  END_HANDLE_TH_ERRORS
+}
+
 // XPU module initialization
 
 static void registerXpuDeviceProperties(PyObject* module) {
@@ -448,6 +462,7 @@ static struct PyMethodDef _THXPModule_methods[] = {
      THXPModule_resetPeakMemoryStats,
      METH_O,
      nullptr},
+    {"_xpu_getMemoryInfo", THXPModule_getMemoryInfo, METH_O, nullptr},
     {nullptr}};
 
 PyMethodDef* THXPModule_methods() {
