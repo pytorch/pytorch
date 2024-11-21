@@ -34,6 +34,14 @@ inductor_config = import_module("torch._inductor.config")
 use_buck = inductor_config.is_fbcode()
 
 
+class AOTIMinifierError(Exception):
+    def __init__(self, original_exception):
+        additional_message = "This error is caused by a bug in the AOTI minifier, please report a bug to PyTorch"
+        full_message = f"{additional_message}: {str(original_exception)}"
+        super().__init__(full_message)
+        self.original_exception = original_exception
+
+
 def dump_to_minify(
     exported_program: ExportedProgram,
     compiler_name: str,
@@ -273,6 +281,31 @@ def repro_run(options, exported_program, config_patches):
         synchronize()  # ensure segfaults are surfaced
 
 
+def export_for_aoti_minifier(gm, tuple_inputs) -> Optional[torch.nn.Module]:
+    # Some graphs cannot be used for AOTI/export (illegal graphs), these should be
+    # considered as graphs that don't fail in the minifier, so the minifier keeps searching.
+    # In these case, we return None. Otherwise, we return the exported graph module.
+    # This won't affect the minifier result because the minifier is only responsible for catching
+    # errors in AOTI, not export.
+    #
+    # Please add to this list of illegal graphs if you change the implementation here.
+    # - graph output is not allowed by export
+    from torch._dynamo.exc import UserError, UserErrorType
+
+    try:
+        ep = torch.export.export(gm, tuple_inputs)
+        gm = ep.module()
+        return gm
+    except UserError as e:
+        # graph output is not allowed by export
+        if e.error_type == UserErrorType.INVALID_OUTPUT:
+            return None
+        else:
+            raise AOTIMinifierError(e) from e
+    except Exception as e:
+        raise AOTIMinifierError(e) from e
+
+
 def repro_minify(options, exported_program, config_patches):
     from functorch.compile import minifier
     from torch._inductor import _aoti_compile_and_package_inner
@@ -292,8 +325,13 @@ def repro_minify(options, exported_program, config_patches):
     def module_fails(gm, flat_example_inputs, check_str=None):
         # we have to export first so the in_spec and out_spec are populated
         tuple_inputs = tuple(flat_example_inputs)
-        ep = torch.export.export(gm, tuple_inputs)
-        gm = ep.module()
+        gm = export_for_aoti_minifier(gm, tuple_inputs)
+
+        # Some graphs cannot be used for AOTI/export (illegal graphs), these should be
+        # considered as graphs that don't fail in the minifier, so the minifier keeps searching.
+        if gm is None:
+            return False
+
         try:
             _aoti_compile_and_package_inner(
                 gm,

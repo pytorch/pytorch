@@ -36,12 +36,13 @@ void unfold_backward_mps(Tensor& grad_out, const Tensor& grad_in, int64_t dim, i
                                                     static_cast<uint32_t>(size),
                                                     static_cast<uint32_t>(step),
                                                     static_cast<uint32_t>(grad_out.ndimension())};
-      mtl_setBuffer(computeEncoder, grad_in, 0);
-      mtl_setBuffer(computeEncoder, grad_out, 1);
-      mtl_setBytes(computeEncoder, grad_in.strides(), 2);
-      mtl_setBytes(computeEncoder, grad_out.sizes(), 3);
-      mtl_setBytes(computeEncoder, grad_out.strides(), 4);
-      mtl_setBytes(computeEncoder, dim_size_step_ndim, 5);
+      mtl_setArgs(computeEncoder,
+                  grad_in,
+                  grad_out,
+                  grad_in.strides(),
+                  grad_out.sizes(),
+                  grad_out.strides(),
+                  dim_size_step_ndim);
       mtl_dispatch1DJob(computeEncoder, unfoldBackwardPSO, grad_out.numel());
     }
   });
