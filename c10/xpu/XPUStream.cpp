@@ -52,7 +52,9 @@ std::deque<
  *
  * To meet these requirements, we need to record the external SYCL queue pointer
  * using the `stream_id`. However, SYCL queue pointers can become invalid if the
- * referenced SYCL queue goes out of scope before the XPUStream.
+ * referenced SYCL queue goes out of scope before the XPUStream. Likewise, any
+ * block allocated by the external XPUStream will become invalid once the
+ * associated XPUStream is destructed.
  *
  * To ensure the validity of SYCL queue pointer throughout the lifetime of an
  * XPUStream, we maintain an external queue mapping in `external_streams`. This
