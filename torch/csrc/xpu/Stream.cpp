@@ -56,10 +56,11 @@ static PyObject* THXPStream_pynew(
             stream_id,
             static_cast<c10::DeviceIndex>(device_index),
             static_cast<c10::DeviceType>(device_type))
-      : queue_ptr
-      ? at::xpu::getStreamFromExternal(
-            *(reinterpret_cast<sycl::queue*>(queue_ptr)), current_device)
-      : at::xpu::getStreamFromPool(priority, current_device);
+      : queue_ptr ? at::xpu::getStreamFromExternal(
+                        // NOLINTNEXTLINE(performance-no-int-to-ptr)
+                        *(reinterpret_cast<sycl::queue*>(queue_ptr)),
+                        current_device)
+                  : at::xpu::getStreamFromPool(priority, current_device);
 
   THXPStream* self = (THXPStream*)ptr.get();
   self->stream_id = static_cast<int64_t>(stream.id());
