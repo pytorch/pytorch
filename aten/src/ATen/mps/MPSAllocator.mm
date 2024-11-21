@@ -5,6 +5,7 @@
 #include <ATen/mps/MPSAllocator.h>
 #include <c10/core/Allocator.h>
 #include <c10/core/Storage.h>
+#include <c10/util/env.h>
 
 #include <iostream>
 
@@ -21,19 +22,19 @@ void MPSHeapAllocatorImpl::init_allocator() {
   init_buffer_pools();
 
   // debug verbosity flags (see DebugVerbosity enum)
-  static const char* verbosity_str = getenv("PYTORCH_DEBUG_MPS_ALLOCATOR");
-  m_debug_verbosity = verbosity_str ? strtol(verbosity_str, nullptr, 0) : DebugVerbosity::SILENT;
+  static const auto verbosity_str = c10::utils::get_env("PYTORCH_DEBUG_MPS_ALLOCATOR");
+  m_debug_verbosity = verbosity_str ? std::stol(verbosity_str.value()) : DebugVerbosity::SILENT;
 
-  static const char* high_watermark_ratio_str = getenv("PYTORCH_MPS_HIGH_WATERMARK_RATIO");
+  static const auto high_watermark_ratio_str = c10::utils::get_env("PYTORCH_MPS_HIGH_WATERMARK_RATIO");
   const double high_watermark_ratio =
-      high_watermark_ratio_str ? strtod(high_watermark_ratio_str, nullptr) : default_high_watermark_ratio;
+      high_watermark_ratio_str ? std::stod(high_watermark_ratio_str.value()) : default_high_watermark_ratio;
   setHighWatermarkRatio(high_watermark_ratio);
 
   const double default_low_watermark_ratio =
       m_device.hasUnifiedMemory ? default_low_watermark_ratio_unified : default_low_watermark_ratio_discrete;
-  static const char* low_watermark_ratio_str = getenv("PYTORCH_MPS_LOW_WATERMARK_RATIO");
+  static const auto low_watermark_ratio_str = c10::utils::get_env("PYTORCH_MPS_LOW_WATERMARK_RATIO");
   const double low_watermark_ratio =
-      low_watermark_ratio_str ? strtod(low_watermark_ratio_str, nullptr) : default_low_watermark_ratio;
+      low_watermark_ratio_str ? std::stod(low_watermark_ratio_str.value()) : default_low_watermark_ratio;
   setLowWatermarkRatio(low_watermark_ratio);
 }
 
