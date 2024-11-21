@@ -1,6 +1,5 @@
 # Owner(s): ["module: mkldnn"]
 
-import unittest
 from typing import Optional
 
 import torch

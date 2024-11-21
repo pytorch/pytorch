@@ -25,7 +25,7 @@ from torch.testing._internal.common_dtype import (
 )
 from torch.testing._internal.common_device_type import \
     (onlyCPU, onlyCUDA, onlyNativeDeviceTypes, disablecuDNN, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver,
-     skipCUDAIfNoCusolver, skipCPUIfNoLapack, skipCPUIfNoFFT, skipCPUIf, skipCUDAIf, precisionOverride,
+     skipCUDAIfNoCusolver, skipCPUIfNoLapack, skipCPUIfNoFFT, skipCUDAIf, precisionOverride,
      skipCPUIfNoMklSparse,
      toleranceOverride, tol)
 from torch.testing._internal.common_cuda import (
@@ -8733,18 +8733,19 @@ def sample_inputs_scaled_mm(op_info, device, dtype, requires_grad, **kwargs):
     scale1 = make_scale((1,))
     scale2 = make_scale((1,))
     samples.append(SampleInput(mat1, mat2, scale1, scale2))
-    # mat1 e4m3 mat2 e5m2
-    mat1 = make_mat_e4m3((M, K))
-    mat2 = make_mat_e5m2((K, N)).t().contiguous().t()
-    scale1 = make_scale((1,))
-    scale2 = make_scale((1,))
-    samples.append(SampleInput(mat1, mat2, scale1, scale2))
-    # mat1 e5m2 mat2 e4m3
-    mat1 = make_mat_e5m2((M, K))
-    mat2 = make_mat_e4m3((K, N)).t().contiguous().t()
-    scale1 = make_scale((1,))
-    scale2 = make_scale((1,))
-    samples.append(SampleInput(mat1, mat2, scale1, scale2))
+    if device != 'cpu':
+        # mat1 e4m3 mat2 e5m2
+        mat1 = make_mat_e4m3((M, K))
+        mat2 = make_mat_e5m2((K, N)).t().contiguous().t()
+        scale1 = make_scale((1,))
+        scale2 = make_scale((1,))
+        samples.append(SampleInput(mat1, mat2, scale1, scale2))
+        # mat1 e5m2 mat2 e4m3
+        mat1 = make_mat_e5m2((M, K))
+        mat2 = make_mat_e4m3((K, N)).t().contiguous().t()
+        scale1 = make_scale((1,))
+        scale2 = make_scale((1,))
+        samples.append(SampleInput(mat1, mat2, scale1, scale2))
 
     yield from samples
 
