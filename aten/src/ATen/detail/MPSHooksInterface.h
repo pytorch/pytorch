@@ -32,7 +32,7 @@ struct TORCH_API MPSHooksInterface : AcceleratorHooksInterface {
     FAIL_MPSHOOKS_FUNC(__func__);
   }
   const Generator& getDefaultGenerator(
-      C10_UNUSED DeviceIndex device_index = -1) const override {
+      [[maybe_unused]] DeviceIndex device_index = -1) const override {
     FAIL_MPSHOOKS_FUNC(__func__);
   }
   virtual Allocator* getMPSDeviceAllocator() const {
