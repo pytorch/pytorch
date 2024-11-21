@@ -2,8 +2,20 @@
 
 import functools
 import operator
+from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Generator,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    TypeVar,
+    Union,
+)
 from typing_extensions import ParamSpec
 
 import torch
@@ -19,6 +31,7 @@ _P = ParamSpec("_P")
 
 OpOverload = torch._ops.OpOverload
 LoweringDict = Dict[Union[OpOverload, str], Callable[..., Any]]
+TargetType = Union[Callable[..., Any], str]
 
 
 class PointwiseSubgraphLowering(torch.fx.Interpreter):
@@ -30,64 +43,85 @@ class PointwiseSubgraphLowering(torch.fx.Interpreter):
     graph_outputs: Optional[List[ir.IRNode]]
     root_graph: torch._inductor.graph.GraphLowering
     # For backwards of buffer_grads with scatters we allow mutations
-    allow_buffer_mutations: bool
+    allowed_mutations: Optional[Set[OpOverload]] = None
     additional_lowerings: Optional[LoweringDict] = None
+    _current_op: Optional[TargetType] = None
 
     def __init__(
         self,
         gm: torch.fx.GraphModule,
         root_graph_lowering: torch._inductor.graph.GraphLowering,
-        allow_buffer_mutations: bool = False,
+        allowed_mutations: Optional[Set[OpOverload]] = None,
         additional_lowerings: Optional[LoweringDict] = None,
     ) -> None:
         super().__init__(gm)
         self.graph_outputs = None
         self.root_graph = root_graph_lowering
-        self.allow_buffer_mutations = allow_buffer_mutations
+        self.allowed_mutations = allowed_mutations
         self.additional_lowerings = additional_lowerings
+        self._current_op = None
+
+    @contextmanager
+    def _op_context(self, op: TargetType) -> Generator[None, None, None]:
+        """Set which op is being processed in call function to know if we can mutate buffers"""
+        previous = self._current_op
+        self._current_op = op
+        try:
+            yield
+        finally:
+            self._current_op = previous
+
+    def _approved_mutator(self) -> bool:
+        return (
+            self.allowed_mutations is not None
+            and self._current_op in self.allowed_mutations
+        )
 
     def mark_buffer_mutated(self, name: str) -> None:
-        if not self.allow_buffer_mutations:
+        if self._approved_mutator():
+            return self.root_graph.mark_buffer_mutated(name)
+        else:
             raise SubgraphLoweringException(
                 "Mutations are not supported in this context"
             )
-        return self.root_graph.mark_buffer_mutated(name)
 
     def register_buffer(self, buffer: ir.Buffer) -> str:
-        if not self.allow_buffer_mutations:
+        if self._approved_mutator():
+            return self.root_graph.register_buffer(buffer)
+        else:
             raise SubgraphLoweringException(
                 "Buffers cannot be created while lowering a pointwise subgraph. "
                 "This could be for a good reason (e.g. you're calling an op we can't codegen as a pointwise op), "
                 "but it could also be a bug. Please file a bug report if you think this should be supportable."
             )
-        return self.root_graph.register_buffer(buffer)
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self.root_graph, name)
 
     def call_function(
         self,
-        target: Union[Callable[..., Any], str],
+        target: TargetType,
         args: Any,
         kwargs: Dict[str, Any],
     ) -> Any:
         from .lowering import lowerings
 
-        if target is operator.getitem and isinstance(args[0], (list, tuple, dict)):
-            return super().call_function(target, args, kwargs)
+        with self._op_context(target):
+            if target is operator.getitem and isinstance(args[0], (list, tuple, dict)):
+                return super().call_function(target, args, kwargs)
 
-        # These takes precedence over the main lowerings
-        if self.additional_lowerings is not None:
-            if target in self.additional_lowerings:
-                assert isinstance(target, OpOverload)
-                return self.additional_lowerings[target](*args, **kwargs)
+            # These takes precedence over the main lowerings
+            if self.additional_lowerings is not None:
+                if target in self.additional_lowerings:
+                    assert isinstance(target, OpOverload)
+                    return self.additional_lowerings[target](*args, **kwargs)
 
-        if target not in lowerings:
-            raise SubgraphLoweringException(
-                f"{target} not supported in subgraph, (missing lowering)"
-            )
+            if target not in lowerings:
+                raise SubgraphLoweringException(
+                    f"{target} not supported in subgraph, (missing lowering)"
+                )
 
-        return lowerings[target](*args, **kwargs)
+            return lowerings[target](*args, **kwargs)
 
     def output(self, target: str, args: Tuple[Any], kwargs: Dict[str, Any]) -> None:  # type: ignore[override]
         assert len(args) == 1

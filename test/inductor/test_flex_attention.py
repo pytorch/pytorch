@@ -4206,20 +4206,24 @@ class TestPagedAttention(InductorTestCase):
 
 
 @dataclass
-class TestParams:
+class Params:
     batch_size: int
     num_heads: int
     seq_length: int
     head_dim: int
     dtype: torch.dtype
+    config_str: Optional[str] = None
+
+    def __post_init__(self):
+        self.config_str = f"{self.batch_size}_{self.num_heads}_{self.seq_length}_{self.head_dim}_{str(self.dtype).split('.')[-1]}"
 
 
-def get_params(dtypes: List[torch.dtype]) -> List[TestParams]:
+def get_params(dtypes: List[torch.dtype]) -> List[Params]:
     params = []
     seq_lengths = [37, 256, 277]
     for seq_len, dtype in product(seq_lengths, dtypes):
         params.append(
-            TestParams(
+            Params(
                 batch_size=2, num_heads=4, seq_length=seq_len, head_dim=16, dtype=dtype
             )
         )
@@ -4235,7 +4239,7 @@ class TestLearnableBiases(InductorTestCase):
         self.atol = 3e-2
         self.rtol = 3e-2
 
-    def _init_tensors(self, params: TestParams):
+    def _init_tensors(self, params: Params):
         make_tensor = functools.partial(
             torch.randn,
             (params.batch_size, params.num_heads, params.seq_length, params.head_dim),
@@ -4588,9 +4592,7 @@ class TestLearnableBiases(InductorTestCase):
             (query, key, value, bias),
         )
 
-    @skip(
-        "TODO: I know what I need to do, but it's not a good solution. So I need to rethink about this."
-    )
+    @skip("TODO: Multiple reductions requried")
     @common_utils.parametrize(
         "params", get_params(test_dtypes), name_fn=lambda x: f"{x}"
     )
