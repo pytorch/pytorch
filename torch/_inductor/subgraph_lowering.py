@@ -87,9 +87,9 @@ class PointwiseSubgraphLowering(torch.fx.Interpreter):
                 "This is an error in the lowering of the subgraph, please file a bug report."
             )
 
-    def register_buffer(self, buffer: ir.Buffer) -> str:
+    def register_buffer(self, buffer: ir.Buffer, *, set_name: bool = False) -> str:
         if self._approved_mutator():
-            return self.root_graph.register_buffer(buffer)
+            return self.root_graph.register_buffer(buffer, set_name=set_name)
         else:
             raise SubgraphLoweringException(
                 f"Buffer '{buffer.name}' cannot be registered during the lowering of {self._current_op}. "
