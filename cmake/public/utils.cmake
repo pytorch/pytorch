@@ -386,7 +386,7 @@ function(torch_compile_options libname)
     if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
       list(APPEND private_compile_options -Wunused-but-set-variable)
     endif()
-    if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
       list(APPEND private_compile_options -Wunused-private-field -Wextra-semi -Wno-error=extra-semi)
     else()
       list(APPEND private_compile_options

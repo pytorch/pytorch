@@ -70,6 +70,7 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     TestCase,
     xfail_inherited_tests,
+    xfailIfS390X,
     xfailIfTorchDynamo,
 )
 from torch.testing._internal.custom_tensor import ConstantExtraMetadataTensor
@@ -6525,6 +6526,7 @@ class TestEagerFusionOpInfo(AOTTestCase):
     def test_aot_autograd_exhaustive(self, device, dtype, op):
         _test_aot_autograd_helper(self, device, dtype, op)
 
+    @xfailIfS390X
     @ops(op_db + hop_db, allowed_dtypes=(torch.float,))
     @patch("functorch.compile.config.debug_assert", True)
     @skipOps(
@@ -6571,11 +6573,13 @@ symbolic_aot_autograd_module_failures = {
 
 
 class TestEagerFusionModuleInfo(AOTTestCase):
+    @xfailIfS390X
     @modules(module_db, allowed_dtypes=(torch.float,))
     @decorateForModules(unittest.expectedFailure, aot_autograd_module_failures)
     def test_aot_autograd_module_exhaustive(self, device, dtype, training, module_info):
         _test_aot_autograd_module_helper(self, device, dtype, training, module_info)
 
+    @xfailIfS390X
     @modules(module_db, allowed_dtypes=(torch.float,))
     @decorateForModules(
         unittest.expectedFailure,

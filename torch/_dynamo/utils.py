@@ -298,8 +298,6 @@ def dynamo_timed(
     # TODO(masneral): Deprecate this param.
     phase_name: Optional[str] = None,
     log_pt2_compile_event: bool = False,
-    # TODO(masnesral): fwd_only is ignored. Remove it.
-    fwd_only: bool = True,
     metadata: Optional[Dict[str, object]] = None,
     dynamo_compile_column_us: Optional[str] = None,
 ) -> Generator[Any, None, None]:
@@ -1537,9 +1535,10 @@ def checkpoint_params(gm):
         rng_state = torch.clone(torch.random.get_rng_state())
         if torch.cuda.is_available():
             cuda_rng_state = torch.clone(torch.cuda.get_rng_state())
-        saved_state = []
-        for param in itertools.chain(gm.parameters(), gm.buffers()):
-            saved_state.append((param, param._version, torch.clone(param)))
+        saved_state = [
+            (param, param._version, torch.clone(param))
+            for param in itertools.chain(gm.parameters(), gm.buffers())
+        ]
 
     def restore():
         with torch.no_grad():
