@@ -114,14 +114,14 @@ void clearCublasWorkspaces() {
 }
 
 size_t parseChosenWorkspaceSize() {
-  const char * val = getenv("CUBLAS_WORKSPACE_CONFIG");
+  auto val = c10::utils::get_env("CUBLAS_WORKSPACE_CONFIG");
 #ifdef USE_ROCM
   if (!val) {
-    val = getenv("HIPBLAS_WORKSPACE_CONFIG");
+    val = c10::utils::get_env("HIPBLAS_WORKSPACE_CONFIG");
   }
   if (!val) {
     // for extra convenience
-    val = getenv("ROCBLAS_WORKSPACE_CONFIG");
+    val = c10::utils::get_env("ROCBLAS_WORKSPACE_CONFIG");
   }
   /* 32MiB default, 128MiB for MI300 */
   cudaDeviceProp* properties = at::cuda::getCurrentDeviceProperties();
@@ -136,7 +136,7 @@ size_t parseChosenWorkspaceSize() {
 
   if (val) {
     size_t total_size = 0;
-    const std::string config(val);
+    const std::string& config(val.value());
     std::regex exp(":([0-9]+):([0-9]+)");
     std::sregex_iterator next(config.begin(), config.end(), exp);
     std::sregex_iterator end;
