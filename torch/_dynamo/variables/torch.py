@@ -11,10 +11,8 @@ import torch._C
 import torch._refs
 import torch.fx
 import torch.nn
-import torch.onnx.operators
 from torch._guards import TracingContext
 from torch._logging import warning_once
-from torch._streambase import _StreamBase
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass_type
 
 from .. import config, polyfills, variables
@@ -97,7 +95,6 @@ supported_ctx_manager_classes = dict.fromkeys(
 
 REWRITE_OPS_TO_TENSOR_SIZE_METHOD = dict.fromkeys(
     [
-        torch.onnx.operators.shape_as_tensor,
         torch._shape_as_tensor,
     ]
 )
@@ -279,7 +276,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             assert len(args) <= 1 and len(kwargs) == 0
             inf_mode = args[0].as_python_constant() if len(args) == 1 else True
             return InferenceModeVariable.create(tx, inf_mode)
-        elif inspect.isclass(self.value) and issubclass(self.value, _StreamBase):
+        elif inspect.isclass(self.value) and issubclass(self.value, torch.Stream):
             from torch._dynamo.variables.builder import wrap_fx_proxy_cls
 
             return wrap_fx_proxy_cls(
@@ -313,7 +310,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             assert len(args) == 2
             return VmapIncrementNestingCtxManagerVariable.create(
                 tx,
-                [guard_if_dyn(x) for x in args],
+                args,
             )
         elif self.value is torch._functorch.eager_transforms.jvp_increment_nesting:
             assert len(args) == 0
@@ -400,7 +397,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             TensorVariable,
             UserDefinedObjectVariable,
         )
-        from .builder import SourcelessBuilder, wrap_fx_proxy, wrap_fx_proxy_cls
+        from .builder import wrap_fx_proxy, wrap_fx_proxy_cls
 
         @register(*tracing_state_functions)
         def handle_tracing_state_functions(
@@ -425,14 +422,14 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             # the set of functions that we trace __torch_function__ on to
             # functions outside of the actual set. Implementing this properly will require implementing
             # some variable types to track and compare tensor getset descriptors
-            return SourcelessBuilder.create(
+            return VariableTracker.build(
                 tx, torch.overrides.get_default_nowrap_functions()
             )
 
         @register(torch.ops.inductor.accumulate_grad_.default)
         def handle_accumulate_grad_(self, tx: "InstructionTranslator", *args, **kwargs):
             return tx.inline_user_function_return(
-                SourcelessBuilder.create(tx, polyfills.accumulate_grad), args, kwargs
+                VariableTracker.build(tx, polyfills.accumulate_grad), args, kwargs
             )
 
         @register(math.radians)
@@ -440,7 +437,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             if not check_unspec_or_constant_args(args, kwargs):
                 # Use polyfill to convert math.radians(x) into math.pi * x / 180.0
                 return tx.inline_user_function_return(
-                    SourcelessBuilder.create(tx, polyfills.radians), args, kwargs
+                    VariableTracker.build(tx, polyfills.radians), args, kwargs
                 )
 
         @register(torch.is_tensor, torch.overrides.is_tensor_like)
@@ -470,7 +467,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch.numel)
         def handle_numel(self, tx: "InstructionTranslator", input):
-            if isinstance(input, TensorVariable) and input.size is not None:
+            if isinstance(input, TensorVariable) and input.valid_size():
                 return ConstantVariable.create(product(input.size))
             elif isinstance(input, TensorVariable):
                 # Workaround dynamic shapes issue
@@ -625,7 +622,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         ):
             if len(args) == 3 and not isinstance(args[2], ListVariable) and not kwargs:
                 return tx.inline_user_function_return(
-                    SourcelessBuilder.create(tx, polyfills.foreach_lerp_inplace),
+                    VariableTracker.build(tx, polyfills.foreach_lerp_inplace),
                     args,
                     kwargs,
                 )
@@ -638,7 +635,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             # in compile, it's more performant to not graph break.
             if len(args) == 2 and isinstance(args[0], TensorVariable) and not kwargs:
                 return tx.inline_user_function_return(
-                    SourcelessBuilder.create(tx, polyfills.foreach_pow_scalar),
+                    VariableTracker.build(tx, polyfills.foreach_pow_scalar),
                     args,
                     kwargs,
                 )
@@ -707,7 +704,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 # Note - while we *could* cook up sources around invocations, like a FunctionSource
                 # the space of invoking functions in the middle of the guard chain is very iffy. As such,
                 # guard propagation via options is the best we can do.
-                return SourcelessBuilder.create(tx, invocation_result)
+                return VariableTracker.build(tx, invocation_result)
 
             @register(DTensor.from_local)
             def handle_from_local(self, tx: "InstructionTranslator", *args, **kwargs):
@@ -903,6 +900,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 ),
             )
 
+        if self.is_tensor_method():
+            return self.call_tensor_method(tx, args, kwargs)
+
         special_handler = self._get_handlers().get(self.value)
         if special_handler:
             result = special_handler(self, tx, *args, **kwargs)
@@ -973,26 +973,27 @@ Either create the tensor outside the compiled region, or do not set the tensor t
             isinstance(kwargs["out"], variables.ConstantVariable)
             and kwargs["out"].as_python_constant() is None
         ):
-            # out variants of torch operators like torch.sort and
-            # torch.sigmoid mutate the tensors in the out field. Track such
-            # tensors and rewrite the symbolic locals.
+            # out variants of torch operators like torch.sort and torch.sigmoid
+            # mutate the tensors in the out field.
+            #
+            # However, it's non-trivial to update all references of the old
+            # `TensorVariable` to the new one returned (`result_var`), so we
+            # take the conservative approach to graph break on size changes, and
+            # assume other cases can fall through soundly.
+            #
+            # Note that although these tensor variablels would hold different
+            # proxies, the in-place mutation semantics is preserved in the FX
+            # graph, so we won't have correctness issues.
             if isinstance(tensor_variable, TupleVariable):
                 assert isinstance(kwargs["out"], (TupleVariable, ListVariable))
-                output_tensor_names = [
-                    tx.find_symbolic_locals_name(x) for x in kwargs["out"].items
-                ]
-                for idx, name in enumerate(output_tensor_names):
-                    if name in tx.symbolic_locals:
-                        tx.symbolic_locals[name] = tensor_variable.items[idx]
                 for out_tensor, result_tensor in zip(
                     kwargs["out"].items, tensor_variable.items
                 ):
                     if (
-                        out_tensor.source
-                        and out_tensor in tx.output.graphargs
-                        and isinstance(out_tensor, variables.TensorVariable)
+                        isinstance(out_tensor, variables.TensorVariable)
                         and isinstance(result_tensor, variables.TensorVariable)
-                        and out_tensor.size != result_tensor.size
+                        and out_tensor._size
+                        != result_tensor._size  # we actually want to compare None values here
                     ):
                         # It's hard to get out variants with resizing on graph inputs work
                         # properly across dynamo/aot/inductor, just fall back.
@@ -1002,11 +1003,7 @@ Either create the tensor outside the compiled region, or do not set the tensor t
                 assert "example_value" in kwargs["out"].proxy.node.meta
                 fake_tensor = tensor_variable.proxy.node.meta["example_value"]
                 fake_out = kwargs["out"].proxy.node.meta["example_value"]
-                if (
-                    kwargs["out"].source
-                    and kwargs["out"] in tx.output.graphargs
-                    and fake_out_shape != fake_tensor.shape
-                ):
+                if fake_out_shape != fake_tensor.shape:
                     # It's hard to get out variants with resizing on graph inputs work
                     # properly across dynamo/aot/inductor, just fall back.
                     unimplemented("out variants with resizing on graph inputs")
@@ -1016,9 +1013,6 @@ Either create the tensor outside the compiled region, or do not set the tensor t
                     unimplemented(
                         "out= op was called where output tensor was non-contiguous"
                     )
-                name = tx.find_symbolic_locals_name(kwargs["out"])
-                if name in tx.symbolic_locals:
-                    tx.symbolic_locals[name] = tensor_variable
             elif (
                 isinstance(tensor_variable, ConstantVariable)
                 and tensor_variable.value is None
@@ -1143,8 +1137,6 @@ Either create the tensor outside the compiled region, or do not set the tensor t
     @staticmethod
     def _nn_param_via_prefix_insert(tx: "InstructionTranslator", data, requires_grad):
         # Alternate version if we have a .source
-        from .builder import VariableBuilder
-
         varname = tx.output.new_var()
 
         # construct the nn.Parmeter before the graph save it to varname
@@ -1167,13 +1159,23 @@ Either create the tensor outside the compiled region, or do not set the tensor t
         example_value = torch.nn.Parameter(
             tx.output.example_value_from_input_node(data.as_proxy().node)
         )
-        result = VariableBuilder(tx, source)(example_value)
+        result = VariableTracker.build(tx, example_value, source)
         # No need to guard on this since we already guarded on `data`.
         # These guards would fail since varname doesn't exist until after the function starts
         TracingContext.get().guards_context.dynamo_guards.remove_guards_with_source(
             source
         )
         return result
+
+    def call_tensor_method(self, tx, args, kwargs):
+        return args[0].call_method(tx, self.get_function().__name__, args[1:], kwargs)
+
+    def is_tensor_method(self):
+        return (
+            inspect.ismethoddescriptor(self.get_function())
+            and hasattr(self.get_function(), "__objclass__")
+            and self.get_function().__objclass__ == torch._C.TensorBase
+        ) or self.get_function() is torch.Tensor.__contains__
 
     def torch_function_override_enabled(self, tx, args, kwargs):
         return (

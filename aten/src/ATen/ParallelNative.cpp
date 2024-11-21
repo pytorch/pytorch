@@ -273,10 +273,10 @@ bool in_parallel_region() {
 #endif // C10_MOBILE
 }
 
-void intraop_launch(std::function<void()> func) {
+void intraop_launch(const std::function<void()>& func) {
 #ifndef C10_MOBILE
   if (!in_parallel_region() && get_num_threads() > 1) {
-    _get_intraop_pool().run(std::move(func));
+    _get_intraop_pool().run(func);
   } else {
     // execute inline if we're in parallel region
     func();
@@ -289,7 +289,7 @@ void intraop_launch(std::function<void()> func) {
 }
 
 c10::intrusive_ptr<c10::ivalue::Future> intraop_launch_future(
-    std::function<void()> func) {
+    const std::function<void()>& func) {
 #ifndef C10_MOBILE
   auto future = c10::make_intrusive<c10::ivalue::Future>(c10::NoneType::get());
   if (!in_parallel_region() && get_num_threads() > 1) {

@@ -104,8 +104,7 @@ class ShardingPropagator:
         if schema_info is not None:
             self.op_to_schema_info[op_overload] = schema_info
 
-    @lru_cache  # noqa: B019
-    def _propagate_tensor_meta(
+    def _propagate_tensor_meta_non_cached(
         self, op_schema: OpSchema
     ) -> Union[None, TensorMeta, Sequence[Optional[TensorMeta]]]:
         """
@@ -149,6 +148,12 @@ class ShardingPropagator:
         else:
             # if fake is not a tensor or tuple of tensor, return as none
             return None
+
+    @lru_cache  # noqa: B019
+    def _propagate_tensor_meta(
+        self, op_schema: OpSchema
+    ) -> Union[None, TensorMeta, Sequence[Optional[TensorMeta]]]:
+        return self._propagate_tensor_meta_non_cached(op_schema)
 
     def _wrap_output_spec_tensor_meta(
         self,
@@ -211,7 +216,7 @@ class ShardingPropagator:
         if op_schema.op is aten._local_scalar_dense.default:
             return OutputSharding(None, op_schema)
 
-        out_tensor_meta = self._propagate_tensor_meta(op_schema)
+        out_tensor_meta = self._propagate_tensor_meta_non_cached(op_schema)
 
         def spec_to_strategy(spec: object) -> object:
             if isinstance(spec, DTensorSpec):

@@ -7,6 +7,7 @@ from typing import List
 
 import torch
 import torch._dynamo.test_case
+from torch.testing._internal.common_utils import IS_FBCODE
 
 
 def _filter_instructions(instructions, opname):
@@ -15,9 +16,9 @@ def _filter_instructions(instructions, opname):
 
 class ReconstructTest(torch._dynamo.test_case.TestCase):
     @contextlib.contextmanager
-    def register_bytecode_hook(self, check_fn):
+    def register_bytecode_hook(self, fn):
         def hook(code, out_code):
-            check_fn(list(dis.get_instructions(out_code)))
+            fn(list(dis.get_instructions(out_code)))
             return code
 
         torch._dynamo.reset()
@@ -39,7 +40,6 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
             self.assertEqual(build_map[0].argval, 1)
 
         def f(d, t):
-            d[1] = t
             d[40] = t + 1
 
         t = torch.randn(3, 4)
@@ -48,7 +48,7 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
         f(d, t)
 
         with self.register_bytecode_hook(hook):
-            opt_f = torch._dynamo.optimize("eager", nopython=True)(f)
+            opt_f = torch.compile(f, backend="eager", fullgraph=True)
             opt_f(d_opt, t)
             self.assertEqual(d, d_opt)
 
@@ -74,7 +74,7 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
         f(d, t)
 
         with self.register_bytecode_hook(hook):
-            opt_f = torch._dynamo.optimize("eager", nopython=True)(f)
+            opt_f = torch.compile(f, backend="eager", fullgraph=True)
             opt_f(d_opt, t)
             self.assertEqual(d, d_opt)
 
@@ -100,7 +100,7 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
         f(d, t)
 
         with self.register_bytecode_hook(hook):
-            opt_f = torch._dynamo.optimize("eager", nopython=True)(f)
+            opt_f = torch.compile(f, backend="eager", fullgraph=True)
             opt_f(d_opt, t)
             self.assertEqual(d, d_opt)
 
@@ -145,7 +145,7 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
         f(d, t)
 
         with self.register_bytecode_hook(hook):
-            opt_f = torch._dynamo.optimize("eager", nopython=True)(f)
+            opt_f = torch.compile(f, backend="eager", fullgraph=True)
             opt_f(d_opt, t)
             self.assertEqual(d, d_opt)
 
@@ -171,7 +171,7 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
         f(d, t)
 
         with self.register_bytecode_hook(hook):
-            opt_f = torch._dynamo.optimize("eager", nopython=True)(f)
+            opt_f = torch.compile(f, backend="eager", fullgraph=True)
             opt_f(d_opt, t)
             self.assertEqual(d, d_opt)
 
@@ -197,7 +197,7 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
         f(d, t)
 
         with self.register_bytecode_hook(hook):
-            opt_f = torch._dynamo.optimize("eager", nopython=True)(f)
+            opt_f = torch.compile(f, backend="eager", fullgraph=True)
             opt_f(d_opt, t)
             self.assertEqual(d, d_opt)
 
@@ -219,10 +219,13 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
         d = f(t)
 
         with self.register_bytecode_hook(hook):
-            opt_f = torch._dynamo.optimize("eager", nopython=True)(f)
+            opt_f = torch.compile(f, backend="eager", fullgraph=True)
             d_opt = opt_f(t)
             self.assertEqual(d, d_opt)
 
+    @unittest.skipIf(
+        IS_FBCODE, "capturing functional_call is not enabled by default in FB_CODE"
+    )
     def test_functional_call_reconstruct(self):
         """
         PyTorch shouldn't codegen any key/value when functional_call is used
@@ -246,7 +249,7 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
         x = torch.randn(2, 3)
         expected = torch.nn.functional.linear(x, new_weight, new_bias)
         with self.register_bytecode_hook(hook):
-            opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
             got = opt_fn(new_weight, new_bias, x)
             self.assertEqual(expected, got)
 

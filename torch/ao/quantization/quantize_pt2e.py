@@ -76,7 +76,7 @@ def prepare_pt2e(
         # Step 1. program capture
         # NOTE: this API will be updated to torch.export API in the future, but the captured
         # result shoud mostly stay the same
-        m = capture_pre_autograd_graph(m, *example_inputs)
+        m = torch.export.export_for_training(m, *example_inputs).module()
         # we get a model with aten ops
 
         # Step 2. quantization
@@ -99,7 +99,12 @@ def prepare_pt2e(
     model = quantizer.transform_for_annotation(model)
     quantizer.annotate(model)
     quantizer.validate(model)
-    model = prepare(model, node_name_to_scope, is_qat=False)
+    model = prepare(
+        model,
+        node_name_to_scope,
+        is_qat=False,
+        obs_or_fq_callback=quantizer.prepare_obs_or_fq_callback,
+    )
     model.meta.update(original_graph_meta)
     model = _disallow_eval_train(model)
     return model
@@ -148,7 +153,7 @@ def prepare_qat_pt2e(
         # Step 1. program capture
         # NOTE: this API will be updated to torch.export API in the future, but the captured
         # result shoud mostly stay the same
-        m = capture_pre_autograd_graph(m, *example_inputs)
+        m = torch.export.export_for_training(m, *example_inputs).module()
         # we get a model with aten ops
 
         # Step 2. quantization
@@ -172,7 +177,12 @@ def prepare_qat_pt2e(
     # subgraph that don't need to be quantized
     # TODO: only fuse if conv and bn are both configured to be quantized
     _fuse_conv_bn_qat(model)
-    model = prepare(model, node_name_to_scope, is_qat=True)
+    model = prepare(
+        model,
+        node_name_to_scope,
+        is_qat=True,
+        obs_or_fq_callback=quantizer.prepare_obs_or_fq_callback,
+    )
     model.meta.update(original_graph_meta)
     model = _disallow_eval_train(model)
     return model

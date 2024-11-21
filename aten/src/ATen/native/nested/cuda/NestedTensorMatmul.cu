@@ -55,7 +55,7 @@ void gemm_grouped_cuda_internal(
     const std::vector<scalar_t*>& bptr,
     const std::vector<scalar_t*>& dptr,
     const std::vector<cutlass::gemm::GemmCoord>& gemm_sizes,
-    const int problem_count,
+    const int64_t problem_count,
     at::Device& device) {
   using Element = scalar_t;
   using ElementAcc = float;
@@ -183,7 +183,7 @@ bool group_gemm_dispatch(
     const std::vector<int64_t>& lda,
     const std::vector<int64_t>& ldb,
     const std::vector<int64_t>& ldd,
-    std::vector<cutlass::gemm::GemmCoord> gemm_sizes,
+    const std::vector<cutlass::gemm::GemmCoord>& gemm_sizes,
     int64_t ntensors) {
   return false;
 }
@@ -197,7 +197,7 @@ bool group_gemm_dispatch(
     const std::vector<int64_t>& lda,
     const std::vector<int64_t>& ldb,
     const std::vector<int64_t>& ldd,
-    std::vector<cutlass::gemm::GemmCoord> gemm_sizes,
+    const std::vector<cutlass::gemm::GemmCoord>& gemm_sizes,
     int64_t ntensors) {
 
   gemm_grouped_cuda_internal<
@@ -223,7 +223,7 @@ bool group_gemm_dispatch(
     const std::vector<int64_t>& lda,
     const std::vector<int64_t>& ldb,
     const std::vector<int64_t>& ldd,
-    std::vector<cutlass::gemm::GemmCoord> gemm_sizes,
+    const std::vector<cutlass::gemm::GemmCoord>& gemm_sizes,
     int64_t ntensors) {
 
   // Check alignment
@@ -239,8 +239,11 @@ bool group_gemm_dispatch(
   }
 
   std::vector<cutlass::half_t*> aptr;
+  aptr.reserve(ntensors);
   std::vector<cutlass::half_t*> bptr;
+  bptr.reserve(ntensors);
   std::vector<cutlass::half_t*> dptr;
+  dptr.reserve(ntensors);
   for (int64_t i = 0; i < ntensors; i++) {
     aptr.push_back(reinterpret_cast<cutlass::half_t*>(aptr_[i]));
     bptr.push_back(reinterpret_cast<cutlass::half_t*>(bptr_[i]));
@@ -349,6 +352,7 @@ Tensor bmm_nested_cuda(const Tensor& self, const Tensor& mat2) {
         std::vector<int64_t> ldb(ntensors);
         std::vector<int64_t> ldd(ntensors);
         std::vector<cutlass::gemm::GemmCoord> gemm_sizes;
+        gemm_sizes.reserve(ntensors);
         bool all_row_major = true;
         for (int64_t i = 0; i < ntensors; i++) {
           const IntArrayRef& self_shape = get_size_for_index(self, i);
@@ -357,8 +361,7 @@ Tensor bmm_nested_cuda(const Tensor& self, const Tensor& mat2) {
           const int64_t &self_size1 = self_shape[1];
           const int64_t &mat2_size0 = mat2_shape[0];
           const int64_t &mat2_size1 = mat2_shape[1];
-          gemm_sizes.push_back(
-              cutlass::gemm::GemmCoord(self_size0, mat2_size1, self_size1));
+          gemm_sizes.emplace_back(self_size0, mat2_size1, self_size1);
           aptr[i] = self_buffer.data_ptr<scalar_t>() + get_offset_for_index(self, i);
           bptr[i] = mat2_buffer.data_ptr<scalar_t>() + get_offset_for_index(mat2, i);
           dptr[i] = out_buffer.data_ptr<scalar_t>() + out_offsets_ptr[i];

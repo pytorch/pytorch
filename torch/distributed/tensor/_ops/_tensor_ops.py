@@ -43,18 +43,17 @@ def default_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     # Default strategy by default just propagate the first input strategy
     select_strategy = op_schema.args_schema[0]
     assert isinstance(select_strategy, OpStrategy)
-    default_strategy = []
-    for strategy in select_strategy.strategies:
-        # we create new DTensorSpecs even for default strategy to assure that
-        # the tensor metas are distinct between the arguments and outputs
-        default_strategy.append(
-            PlacementStrategy(
-                output_specs=DTensorSpec(
-                    mesh=strategy.output_spec.mesh,
-                    placements=strategy.output_spec.placements,
-                )
+    # we create new DTensorSpecs even for default strategy to assure that
+    # the tensor metas are distinct between the arguments and outputs
+    default_strategy = [
+        PlacementStrategy(
+            output_specs=DTensorSpec(
+                mesh=strategy.output_spec.mesh,
+                placements=strategy.output_spec.placements,
             )
         )
+        for strategy in select_strategy.strategies
+    ]
     return OpStrategy(default_strategy)
 
 
@@ -367,7 +366,6 @@ def replica_only_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType
     schema_info=RuntimeSchemaInfo(1),
 )
 def scatter_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
-    input_strategy = cast(OpStrategy, op_schema.args_schema[0])
     single_mesh_dim_strategies = []
 
     # placement list stores placements of [output, input, index, src]

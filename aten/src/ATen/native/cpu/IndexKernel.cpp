@@ -78,7 +78,7 @@ void cpu_take_put_kernel(
   auto loop = [&](char** data, const int64_t* strides, int64_t n) {
     auto* iterated_data_bytes = data[0];
     auto* index_data_bytes = data[1];
-    for (const auto elem C10_UNUSED : c10::irange(n)) {
+    for ([[maybe_unused]] const auto elem : c10::irange(n)) {
       auto idx = *reinterpret_cast<int64_t*>(index_data_bytes);
       auto& iterated = *reinterpret_cast<scalar_t*>(iterated_data_bytes);
 
@@ -203,7 +203,7 @@ void index_fill_kernel(
     auto handle_nonzero_idx_stride = [&](char** data, const int64_t* strides, int64_t n) {
       auto* self_data_bytes = data[0];
       auto* index_data_bytes = data[1];
-      for (const auto elem C10_UNUSED : c10::irange(n)) {
+      for ([[maybe_unused]] const auto elem : c10::irange(n)) {
         auto* self_data = reinterpret_cast<scalar_t*>(self_data_bytes);
         auto idx = *reinterpret_cast<int64_t*>(index_data_bytes);
         TORCH_CHECK_INDEX(idx >= -self_dim_size && idx < self_dim_size,
@@ -229,7 +229,7 @@ void index_fill_kernel(
       if (idx < 0) {
         idx += self_dim_size;
       }
-      for (const auto elem C10_UNUSED: c10::irange(n)) {
+      for ([[maybe_unused]] const auto elem : c10::irange(n)) {
         auto* self_data = reinterpret_cast<scalar_t*>(self_data_bytes);
 
         self_data[idx * self_dim_stride] = fill_val;
@@ -262,7 +262,7 @@ void index_copy_kernel(
       auto* self_data_bytes = data[0];
       auto* index_data_bytes = data[1];
       auto* source_data_bytes = data[2];
-      for (const auto elem C10_UNUSED : c10::irange(n)) {
+      for ([[maybe_unused]] const auto elem : c10::irange(n)) {
         auto* self_data = reinterpret_cast<scalar_t*>(self_data_bytes);
         auto idx = *reinterpret_cast<int64_t*>(index_data_bytes);
         auto* source_data = reinterpret_cast<scalar_t*>(source_data_bytes);
@@ -285,7 +285,7 @@ void index_copy_kernel(
       TORCH_CHECK_INDEX(idx >= 0 && idx < self_dim_size,
             "index_copy_(): index ", idx, " is out of bounds for dimension ",
             dim, " with size ", self_dim_size);
-      for (const auto elem C10_UNUSED : c10::irange(n)) {
+      for ([[maybe_unused]] const auto elem : c10::irange(n)) {
         auto* self_data = reinterpret_cast<scalar_t*>(self_data_bytes);
         auto* source_data = reinterpret_cast<scalar_t*>(source_data_bytes);
 
@@ -388,7 +388,7 @@ void cpu_masked_select_serial_kernel(TensorIterator& iter, const func_t& f) {
     char* mask = data[2];
     for (const auto i : c10::irange(n)) {
       mask_t mask_value = *(mask_t*)(mask + strides[2] * i);
-      if constexpr (!std::is_same<mask_t, bool>::value) {
+      if constexpr (!std::is_same_v<mask_t, bool>) {
         TORCH_CHECK(mask_value == 0 || mask_value == 1, "Mask tensor can take 0 and 1 values only");
       }
       if (mask_value) {
@@ -426,7 +426,7 @@ void cpu_masked_select_kernel(TensorIterator& iter, const func_t& f) {
     char* mask_prefix_sum = data[3];
     for (const auto i : c10::irange(n)) {
       mask_t mask_value = *(mask_t*)(mask + strides[2] * i);
-      if constexpr (!std::is_same<mask_t, bool>::value) {
+      if constexpr (!std::is_same_v<mask_t, bool>) {
         TORCH_CHECK(mask_value == 0 || mask_value == 1, "Mask tensor can take 0 and 1 values only");
       }
       if (mask_value) {
@@ -474,8 +474,7 @@ void cpu_hflip_vec(at::TensorIterator& iter) {
     constexpr auto stride = sizeof(scalar_t);
     TORCH_INTERNAL_ASSERT(stride == -strides[0] && stride == strides[1]);
 
-    for (const auto j C10_UNUSED : c10::irange(size1)) {
-
+    for ([[maybe_unused]] const auto j : c10::irange(size1)) {
       // vectorized loop with negative stride for output
       char** C10_RESTRICT data_ = data_arr.data();
       int64_t n = size0;
@@ -543,8 +542,7 @@ void cpu_vflip_memcpy(at::TensorIterator& iter) {
     TORCH_INTERNAL_ASSERT(strides[0] == strides[1]);
     const int64_t stride = strides[0];
 
-    for (const auto j C10_UNUSED : c10::irange(size1)) {
-
+    for ([[maybe_unused]] const auto j : c10::irange(size1)) {
       char** C10_RESTRICT data_ = data_arr.data();
       int64_t n = size0;
 
@@ -783,16 +781,16 @@ void flip_kernel(TensorIterator& iter, const bool quantized) {
 
 } // anonymous namespace
 
-REGISTER_DISPATCH(index_stub, &index_kernel);
-REGISTER_DISPATCH(index_fill_stub, &index_fill_kernel);
-REGISTER_DISPATCH(index_copy_stub, &index_copy_kernel);
-REGISTER_DISPATCH(index_put_stub, &index_put_kernel);
-REGISTER_DISPATCH(put_stub, &put_kernel);
-REGISTER_DISPATCH(take_stub, &take_kernel);
-REGISTER_DISPATCH(masked_fill_stub, &masked_fill_kernel);
-REGISTER_DISPATCH(masked_select_serial_stub, &masked_select_serial_kernel);
-REGISTER_DISPATCH(masked_select_stub, &masked_select_kernel);
-REGISTER_DISPATCH(masked_scatter_stub, &masked_scatter_kernel);
-REGISTER_DISPATCH(flip_stub, &flip_kernel);
+REGISTER_DISPATCH(index_stub, &index_kernel)
+REGISTER_DISPATCH(index_fill_stub, &index_fill_kernel)
+REGISTER_DISPATCH(index_copy_stub, &index_copy_kernel)
+REGISTER_DISPATCH(index_put_stub, &index_put_kernel)
+REGISTER_DISPATCH(put_stub, &put_kernel)
+REGISTER_DISPATCH(take_stub, &take_kernel)
+REGISTER_DISPATCH(masked_fill_stub, &masked_fill_kernel)
+REGISTER_DISPATCH(masked_select_serial_stub, &masked_select_serial_kernel)
+REGISTER_DISPATCH(masked_select_stub, &masked_select_kernel)
+REGISTER_DISPATCH(masked_scatter_stub, &masked_scatter_kernel)
+REGISTER_DISPATCH(flip_stub, &flip_kernel)
 
 } // namespace at::native

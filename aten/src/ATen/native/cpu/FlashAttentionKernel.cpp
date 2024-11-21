@@ -23,7 +23,7 @@ namespace {
 // out = val * a + b
 // is_b_stride_zero: If the stride of b is 0 (mask broadcasting case),
 //                take b as a scalar pointer.
-#if __GNUC__ == 11 && __GNUC_MINOR__ >= 4 && defined(__ARM_FEATURE_SVE)
+#if __GNUC__ == 11 && defined(__ARM_FEATURE_SVE)
 template <typename T1, typename T2>
 inline void _scale_attn_mask_fusion_kernel(
     T1* a,
@@ -51,7 +51,7 @@ inline void _scale_attn_mask_fusion_kernel(
   for (; i < size - (size % vec_size2); i += vec_size2) {
     auto a_n = at::vec::VectorizedN<T1, T1_n>::loadu(a + i);
     at::vec::VectorizedN<T2, T2_n> b_n;
-#if __GNUC__ == 11 && __GNUC_MINOR__ >= 4 && defined(__ARM_FEATURE_SVE)
+#if __GNUC__ == 11 && defined(__ARM_FEATURE_SVE)
     if (is_b_stride_zero) {
 #else
     if constexpr(is_b_stride_zero) {
@@ -67,7 +67,7 @@ inline void _scale_attn_mask_fusion_kernel(
   for (; i < size; i++) {
     auto tmp0 = a[i];
     T1 tmp1;
-#if __GNUC__ == 11 && __GNUC_MINOR__ >= 4 && defined(__ARM_FEATURE_SVE)
+#if __GNUC__ == 11 && defined(__ARM_FEATURE_SVE)
     if (is_b_stride_zero) {
 #else
     if constexpr(is_b_stride_zero) {
@@ -473,7 +473,7 @@ void cpu_flash_attention(
         scalar_t* transpose_buffer_ptr = transpose_buffer.get();
         std::unique_ptr<scalar_t[]> v_copy_buffer = std::make_unique<scalar_t[]>(ekvSplitSize * packb_size);
         scalar_t* v_copy_buffer_ptr = v_copy_buffer.get();
-        for (C10_UNUSED auto z : c10::irange(begin, end)) {
+        for ([[maybe_unused]] auto z : c10::irange(begin, end)) {
           n = l * kvSplitSize;
           int64_t kvBlockSize = std::min(kvSplitSize, kvSize - n);
           int64_t ekvBlockSize = kvBlockSize % 2 == 0 ? kvBlockSize : kvBlockSize + 1;
@@ -566,7 +566,7 @@ void cpu_flash_attention(
             ? query_padding_ptr + ompIdx * qSplitSize * eheadSize
             : nullptr;
 
-    for (C10_UNUSED auto z : c10::irange(begin, end)) {
+    for ([[maybe_unused]] auto z : c10::irange(begin, end)) {
       int64_t m = k * qSplitSize;
       int64_t qBlockSize = std::min(qSplitSize, qSize - m);
       // Initialize max and sum
@@ -603,8 +603,7 @@ void cpu_flash_attention(
                   headSize_even ? qStrideM : eheadSize,
                   packb_size,
                   rkvBlockSize,
-                  1.f,
-                  0.f,
+                  false,
                   !headSize_even
                       ? query_t_padding_ptr
                       : q_data + i * qStrideB + j * qStrideH + m * qStrideM,
@@ -646,7 +645,7 @@ void cpu_flash_attention(
         // qk <- qk * scaling + attn_mask
         if (has_attn_mask) {
           for (int64_t row = 0; row < qBlockSize; ++row) {
-#if __GNUC__ == 11 && __GNUC_MINOR__ >= 4 && defined(__ARM_FEATURE_SVE)
+#if __GNUC__ == 11 && defined(__ARM_FEATURE_SVE)
               _scale_attn_mask_fusion_kernel(
                 qk_data + row * rkvBlockSize,
                 mask_data + i * mStrideB + j * mStrideH +
@@ -738,8 +737,7 @@ void cpu_flash_attention(
                   ekvBlockSize,
                   packb_size,
                   rHeadSize,
-                  1.0,
-                  n == 0 ? 0.f : 1.f,
+                  n > 0,
                   qk_reduced_data,
                   value_reorder_ptr +
                       i * num_head * kv_padding_size * rHeadSize +
@@ -791,10 +789,10 @@ void cpu_flash_attention(
       // Move to the next query
       data_index_step(i, batchSize, j, num_head, k, qSlice);
     }
+    if (need_pack) {
+      cpublas::brgemm_release();
+    }
   });
-  if (need_pack) {
-    cpublas::brgemm_release();
-  }
 }
 
 template <typename scalar_t, typename mask_t, int64_t q_split_size, int64_t kv_split_size>
@@ -931,7 +929,7 @@ void cpu_flash_attention_backward(
 
     at::Tensor dsum = at::empty({qSplitSize}, query.options().dtype(accumulate_dtype));
     accum_t* dsum_data = dsum.data_ptr<accum_t>();
-    for (C10_UNUSED auto z : c10::irange(begin, end)) {
+    for ([[maybe_unused]] auto z : c10::irange(begin, end)) {
       // rowsum of grad_out * out
       for (int64_t m = 0; m < qSize; m += qSplitSize) {
         int64_t qBlockSize = std::min(qSplitSize, qSize - m);
@@ -968,7 +966,7 @@ void cpu_flash_attention_backward(
           if (has_attn_mask) {
             accum_t one = accum_t(1);
             for (const auto row : c10::irange(qBlockSize)) {
-#if __GNUC__ == 11 && __GNUC_MINOR__ >= 4 && defined(__ARM_FEATURE_SVE)
+#if __GNUC__ == 11 && defined(__ARM_FEATURE_SVE)
                 _scale_attn_mask_fusion_kernel(
                   attn_data + row * kvBlockSize,
                   mask_data + i * mStrideB + j * mStrideH +
@@ -1265,7 +1263,7 @@ void flash_attention_backward_kernel_impl(
 
 } // anonymous namespace
 
-ALSO_REGISTER_AVX512_DISPATCH(flash_attention_kernel, &flash_attention_kernel_impl);
-ALSO_REGISTER_AVX512_DISPATCH(flash_attention_backward_kernel, &flash_attention_backward_kernel_impl);
+ALSO_REGISTER_AVX512_DISPATCH(flash_attention_kernel, &flash_attention_kernel_impl)
+ALSO_REGISTER_AVX512_DISPATCH(flash_attention_backward_kernel, &flash_attention_backward_kernel_impl)
 
 } // at::native

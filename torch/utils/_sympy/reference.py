@@ -17,6 +17,7 @@ from torch.utils._sympy.functions import (
     Mod,
     OpaqueUnaryFn_exp,
     OpaqueUnaryFn_log,
+    OpaqueUnaryFn_log2,
     OpaqueUnaryFn_sqrt,
     PowByNatural,
     RoundDecimal,
@@ -142,6 +143,10 @@ class ReferenceAnalysis:
     def add(a, b):
         return _keep_float(operator.add)(a, b)
 
+    @classmethod
+    def sym_sum(cls, args):
+        return sympy.Add(*args)
+
     @staticmethod
     def mul(a, b):
         return _keep_float(operator.mul)(a, b)
@@ -157,6 +162,10 @@ class ReferenceAnalysis:
     @staticmethod
     def log(x):
         return OpaqueUnaryFn_log(x)
+
+    @staticmethod
+    def log2(x):
+        return OpaqueUnaryFn_log2(x)
 
     @staticmethod
     def sqrt(x):
@@ -206,6 +215,17 @@ class PythonReferenceAnalysis(ReferenceAnalysis):
     def not_(a):
         return torch.sym_not(a)
 
+    @classmethod
+    def sym_sum(cls, args):
+        if len(args) == 0:
+            return 0
+        if len(args) == 1:
+            return args[0]
+        acc = cls.add(args[0], args[1])
+        for i in range(2, len(args)):
+            acc = cls.add(acc, args[i])
+        return acc
+
     @staticmethod
     def floordiv(a, b):
         return a // b
@@ -231,6 +251,10 @@ class PythonReferenceAnalysis(ReferenceAnalysis):
     @staticmethod
     def log(x):
         raise AssertionError("log is not valid shape sympy expr")
+
+    @staticmethod
+    def log2(x):
+        return torch._sym_log2(x)  # type: ignore[attr-defined]
 
     @staticmethod
     def sqrt(x):
@@ -284,8 +308,16 @@ class PythonReferenceAnalysis(ReferenceAnalysis):
         return round(a, ndigits=b)
 
 
+# Like PythonReferenceAnalysis, but some export-unfriendly choices of
+# operators to make things faster
+class OptimizedPythonReferenceAnalysis(PythonReferenceAnalysis):
+    @staticmethod
+    def sym_sum(args):
+        return torch.sym_sum(args)
+
+
 def _to_dtype(x: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:
-    return torch.ops.aten._to_copy(x, dtype=dtype)
+    return torch.ops.prims.convert_element_type.default(x, dtype)
 
 
 # Suppose we have some int/float arguments.  This diagram commutes:
@@ -421,7 +453,7 @@ class TensorReferenceAnalysis:
 
     @staticmethod
     def floordiv(a, b):
-        return torch.ops.aten.floor_divide(a, b)
+        return torch.ops.aten.div.Tensor_mode(a, b, rounding_mode="floor")
 
     @staticmethod
     def truncdiv(a, b):
@@ -450,8 +482,48 @@ class TensorReferenceAnalysis:
         return torch.ops.aten.log.default(x)
 
     @staticmethod
+    def log2(x):
+        return torch.ops.aten.log2.default(x)
+
+    @staticmethod
     def sqrt(x):
         return torch.ops.aten.sqrt.default(x)
+
+    @staticmethod
+    def sin(x):
+        return torch.ops.aten.sin.default(x)
+
+    @staticmethod
+    def cos(x):
+        return torch.ops.aten.cos.default(x)
+
+    @staticmethod
+    def tanh(x):
+        return torch.ops.aten.tanh.default(x)
+
+    @staticmethod
+    def sinh(x):
+        return torch.ops.aten.sinh.default(x)
+
+    @staticmethod
+    def cosh(x):
+        return torch.ops.aten.cosh.default(x)
+
+    @staticmethod
+    def tan(x):
+        return torch.ops.aten.tan.default(x)
+
+    @staticmethod
+    def acos(x):
+        return torch.ops.aten.acos.default(x)
+
+    @staticmethod
+    def atan(x):
+        return torch.ops.aten.atan.default(x)
+
+    @staticmethod
+    def asin(x):
+        return torch.ops.aten.asin.default(x)
 
     @staticmethod
     def pow(a, b):

@@ -7,9 +7,7 @@
 #include <cmath>
 #include <utility>
 
-namespace torch {
-namespace nn {
-namespace functional {
+namespace torch::nn::functional {
 
 inline std::vector<int64_t> _interp_output_size(
     int64_t dim,
@@ -18,7 +16,8 @@ inline std::vector<int64_t> _interp_output_size(
         std::optional<std::vector<int64_t>>,
         std::optional<std::vector<double>>,
         std::optional<bool>> closed_over_args) {
-  auto [input, size, scale_factor, recompute_scale_factor] = closed_over_args;
+  auto [input, size, scale_factor, recompute_scale_factor] =
+      std::move(closed_over_args);
   if (size == std::nullopt && scale_factor == std::nullopt) {
     TORCH_CHECK(false, "either size or scale_factor should be defined");
   }
@@ -284,6 +283,4 @@ inline Tensor interpolate(
       options.antialias());
 }
 
-} // namespace functional
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn::functional

@@ -115,7 +115,10 @@ class ThreadLocal {
   explicit ThreadLocal(Accessor accessor) : accessor_(accessor) {}
 
   ThreadLocal(const ThreadLocal&) = delete;
+  ThreadLocal(ThreadLocal&&) noexcept = default;
   ThreadLocal& operator=(const ThreadLocal&) = delete;
+  ThreadLocal& operator=(ThreadLocal&&) noexcept = default;
+  ~ThreadLocal() = default;
 
   Type& get() {
     return *accessor_();

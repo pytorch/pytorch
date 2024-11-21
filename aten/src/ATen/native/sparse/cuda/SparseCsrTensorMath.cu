@@ -736,8 +736,8 @@ void _apply_sparse_csr_linear_solve(
     crow = crow.to(crow.options().dtype(ScalarType::Int));
     col = col.to(col.options().dtype(ScalarType::Int));
   }
-  int* rowOffsets = crow.data<int>();
-  int* colIndices = col.data<int>();
+  int* rowOffsets = crow.data_ptr<int>();
+  int* colIndices = col.data_ptr<int>();
   Tensor values = A.values();
   // cuDSS data structures and handle initialization
   cudssConfig_t config;
@@ -750,11 +750,11 @@ void _apply_sparse_csr_linear_solve(
   TORCH_CUDSS_CHECK(cudssConfigCreate(&config));
   TORCH_CUDSS_CHECK(cudssDataCreate(handle, &cudss_data));
 
-  AT_DISPATCH_FLOATING_TYPES(values.type(), "create_matrix", ([&] {
-    scalar_t* values_ptr = values.data<scalar_t>();
-    scalar_t* b_ptr = b.data<scalar_t>();
-    scalar_t* x_ptr = x.data<scalar_t>();
-    auto CUDA_R_TYP = std::is_same<scalar_t, double>::value ? CUDA_R_64F : CUDA_R_32F;
+  AT_DISPATCH_FLOATING_TYPES(values.scalar_type(), "create_matrix", ([&] {
+    scalar_t* values_ptr = values.data_ptr<scalar_t>();
+    scalar_t* b_ptr = b.data_ptr<scalar_t>();
+    scalar_t* x_ptr = x.data_ptr<scalar_t>();
+    auto CUDA_R_TYP = std::is_same_v<scalar_t, double> ? CUDA_R_64F : CUDA_R_32F;
     TORCH_CUDSS_CHECK(cudssMatrixCreateDn(&b_mt, b.size(0), 1, b.size(0), b_ptr, CUDA_R_TYP, CUDSS_LAYOUT_COL_MAJOR));
     TORCH_CUDSS_CHECK(cudssMatrixCreateDn(&x_mt, x.size(0), 1, x.size(0), x_ptr, CUDA_R_TYP, CUDSS_LAYOUT_COL_MAJOR));
     TORCH_CUDSS_CHECK(cudssMatrixCreateCsr(&A_mt, A.size(0), A.size(1),  A._nnz(), rowOffsets, rowOffsets + crow.size(0), colIndices, values_ptr, CUDA_R_32I, CUDA_R_TYP, CUDSS_MTYPE_GENERAL, CUDSS_MVIEW_FULL, CUDSS_BASE_ZERO));
