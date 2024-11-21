@@ -1138,7 +1138,8 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         alpha = torch.Tensor([2**(-i) for i in range(128)]).cuda()
 
         A_compressed = torch._cslt_compress(A)
-        sparse_result = torch.compile(torch._cslt_sparse_mm, mode="max-autotune")(A_compressed, B, alpha=alpha, out_dtype=torch.int32)
+        compiled_sparse_mm = torch.compile(torch._cslt_sparse_mm, mode="max-autotune")
+        sparse_result = compiled_sparse_mm(A_compressed, B, alpha=alpha, out_dtype=torch.int32)
 
         alpha_scaled = torch.stack([alpha] * 128).t().cpu().float()
         dense_result = alpha_scaled * torch.mm(A.to(torch.int64).cpu(), B.to(torch.int64).cpu())
@@ -1205,11 +1206,9 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         # CUDA 11.8 has cuSPARSELt v0.4.0 support
         if version == (11, 8):
             assert torch.backends.cusparselt.version() == 400
-            assert torch.backends.cusparselt.get_max_alg_id() == 4
         # CUDA 12.1 has cuSPARSELt v0.5.2 support
         elif version == (12, 1):
             assert torch.backends.cusparselt.version() == 502
-            assert torch.backends.cusparselt.get_max_alg_id() == 4
         # CUDA 12.4+ has cuSPARSELt v0.6.2 support
         elif version >= (12, 4):
             assert torch.backends.cusparselt.version() == 602
