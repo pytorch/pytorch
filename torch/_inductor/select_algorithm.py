@@ -179,11 +179,18 @@ SubgraphInfo = namedtuple(
 class ModificationWrapper(V.WrapperHandler):
     """Handles placeholder substitutions during subgraph processing."""
 
-    def __init__(self, kernel, subgraph_number: int, fixed_inputs: Dict[str, Any]):
+    def __init__(
+        self,
+        kernel,
+        subgraph_number: int,
+        fixed_inputs: Dict[str, Any],
+        mask: Optional[str],
+    ):
         super().__init__(V.ops)
         self.name = f"PlaceholderSubstitution_{subgraph_number}"
         self.kernel = kernel
         self.fixed_inputs = fixed_inputs
+        self.mask = mask
 
     def load(self, name: str, index: sympy.Expr):
         """Handle loading from tensor or fixed input."""
@@ -204,8 +211,12 @@ class ModificationWrapper(V.WrapperHandler):
         """Store value with input tracking.
         This is needed for grads of captured buffers that need to be added as inputs to the kernel
         """
+        assert (
+            self.mask is not None
+        ), "Mask is required for inner stores in modifications"
         self.kernel.args.input(name)
         self.kernel.template_out = value
+        self.kernel.template_mask = self.mask
         return self._inner.store(name, index, value, mode)
 
     def _add_kernel_input(self, name: str):
@@ -484,6 +495,7 @@ class TritonTemplateKernel(TritonKernel):
         self,
         subgraph_number: int,
         output_name: Optional[str],
+        mask: Optional[str] = None,
         **fixed_inputs,
     ) -> str:
         """This creates a modification function for a subgraph.
@@ -491,6 +503,9 @@ class TritonTemplateKernel(TritonKernel):
 
         Args:
             subgraph_number (int): The index of the subgraph in self.subgraphs
+            output_name (Optional[str]): The name of the output variable to store the result in
+            mask (Optional[str]): An optional mask to use for the store operation. If provided, this mask
+                will be applied to the store.
         """
         outer_self = self
         num = 0
@@ -500,7 +515,7 @@ class TritonTemplateKernel(TritonKernel):
         with self.create_subgraph_body(f"mod_{subgraph_number}_{num}"):
             subgraph = self._get_subgraph(subgraph_number)
             modification_handler = ModificationWrapper(
-                self, subgraph_number, fixed_inputs
+                self, subgraph_number, fixed_inputs, mask
             )
             with V.set_ops_handler(modification_handler):
                 assert isinstance(

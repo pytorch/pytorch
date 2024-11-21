@@ -1750,10 +1750,11 @@ def bwd_dkdv_block_mn(
     idx_h = off_hq
     idx_m = m
     idx_n = n
-    xmask = idx_m < Q_LEN and idx_n < KV_LEN
+    scatter_mask = offs_m1[None, :] < Q_LEN and offs_n1[:, None] < KV_LEN
     {{ modification(
         subgraph_number=3,
         output_name=None,
+        mask="scatter_mask",
         score="pre_mod_scores",
         b="idx_b",
         h="idx_h",
