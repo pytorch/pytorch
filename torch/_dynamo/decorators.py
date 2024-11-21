@@ -19,6 +19,7 @@ from .eval_frame import (
     RunOnlyContext,
 )
 from .exc import IncorrectUsage
+from .external_utils import is_compiling
 from .utils import is_function
 
 
@@ -96,11 +97,17 @@ class set_stance(_DecoratorContextManager):
 
     _dynamo_forbidden = True
 
-    def __init__(self, stance: str, force_backend=None) -> None:
+    def __init__(
+        self,
+        stance: str = "default",
+        *,
+        skip_guard_eval_unsafe: bool = False,
+        force_backend=None,
+    ) -> None:
         if force_backend is not None and stance != "default":
             raise RuntimeError("non-default stance cannot have force_backend set")
 
-        self.stance = DynamoStance(stance, force_backend)
+        self.stance = DynamoStance(stance, skip_guard_eval_unsafe, force_backend)
         self.prev = _set_stance(self.stance)
 
     def __call__(self, fn):
@@ -545,7 +552,7 @@ def mark_static(t, index=None):
     instances of the nn.Module can have different values of the attributes. The
     key point here is that the attributes are static.
     """
-    if torch.compiler.is_compiling():
+    if is_compiling():
         if index is None:
             for s in t.size():
                 comptime.force_static(s)

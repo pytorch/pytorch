@@ -90,6 +90,7 @@ _T = TypeVar("_T")
 VarRanges = Dict[sympy.Expr, sympy.Expr]
 InputType = Optional[Union[torch.Tensor, int, torch.SymInt]]
 
+GPU_KERNEL_BIN_EXTS = {"cuda": ".cubin", "xpu": ".spv"}
 
 GPU_ALIGN_BYTES = 16
 ALIGNMENT = 16
@@ -739,7 +740,6 @@ def get_first_incompatible_cudagraph_node(
     forbidden_set = {
         "aten._fused_moving_avg_obs_fq_helper.default",
         "aten._fused_moving_avg_obs_fq_helper_functional.default",
-        "aten.multinomial.default",
         "fbgemm.dense_to_jagged.default",
         "fbgemm.jagged_to_padded_dense.default",
         "run_and_save_rng_state",
@@ -1276,14 +1276,14 @@ def use_ck_gemm_template(layout, m, n, k):
     from .virtualized import V
 
     return (
-        use_ck_template(layout)
-        and _use_autotune_backend("CK")
+        _use_autotune_backend("CK")
+        and use_ck_template(layout)
         and V.graph.sizevars.size_hint(m * n * k, fallback=-1) > 0
     )
 
 
 def use_ck_conv_template(layout):
-    return use_ck_template(layout) and _use_conv_autotune_backend("CK")
+    return _use_conv_autotune_backend("CK") and use_ck_template(layout)
 
 
 def _use_template_for_cpu(layout):
@@ -1583,6 +1583,14 @@ def parallel_num_threads():
 
 
 @functools.lru_cache(None)
+def get_backend_num_stages():
+    from .runtime.triton_helpers import get_backend_options
+
+    options = get_backend_options()
+    return options.get("num_stages", 2 if torch.version.hip else 3)
+
+
+@functools.lru_cache(None)
 def get_device_tflops(dtype):
     from triton.testing import get_max_simd_tflops, get_max_tensorcore_tflops
 
@@ -1647,14 +1655,10 @@ def is_dynamic(*args):
     from . import ir
 
     for t in args:
-        if isinstance(t, ir.TensorBox):
-            if has_free_symbols(t.data.get_size()) or (
-                hasattr(t.data, "get_stride") and has_free_symbols(t.data.get_stride())
+        if isinstance(t, (ir.TensorBox, ir.StorageBox, ir.BaseView, ir.ComputedBuffer)):
+            if has_free_symbols(t.maybe_get_size() or ()) or has_free_symbols(
+                t.maybe_get_stride() or ()
             ):
-                return True
-        elif isinstance(t, (ir.StorageBox, ir.BaseView, ir.ComputedBuffer)):
-            assert hasattr(t, "get_size") and hasattr(t, "get_stride")
-            if has_free_symbols(t.get_size()) or has_free_symbols(t.get_stride()):
                 return True
         elif not isinstance(t, ir.IRNode):
             continue
@@ -1876,7 +1880,7 @@ def get_cloned_parameter_buffer_name(name: str):
     return name + "__original__"
 
 
-def is_gpu(device: str):
+def is_gpu(device: Optional[str]):
     assert isinstance(device, str) or device is None, device
     return device in GPU_TYPES
 
