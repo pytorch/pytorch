@@ -32,7 +32,7 @@ def compile(
         strict=False,
     )
     package_path = torch._inductor.aoti_compile_and_package(
-        ep, args, kwargs, package_path=package_path, inductor_configs=inductor_configs
+        ep, package_path=package_path, inductor_configs=inductor_configs
     )  # type: ignore[arg-type]
     loaded = load_package(package_path)
     return loaded
@@ -138,7 +138,6 @@ class TestAOTInductorPackage(TestCase):
                     # cubin files are removed when exiting this context
                     package_path = torch._inductor.aoti_compile_and_package(
                         ep,
-                        example_inputs,
                         package_path=f.name,
                     )  # type: ignore[arg-type]
                 loaded = torch._inductor.aoti_load_package(package_path)
