@@ -312,7 +312,7 @@ def ir_node_to_tensor(
     size = [shape_fn(s) for s in x.get_size()]
     stride: StrideType
     if is_storage_and_layout(x):
-        stride = [shape_fn(s) for s in x.get_layout().stride]  # type: ignore[union-attr]
+        stride = [shape_fn(s) for s in x.get_layout().stride]
     else:
         stride = FlexibleLayout.contiguous_strides(size)
     dtype = x.get_dtype()
@@ -374,7 +374,7 @@ class IRNode:
         finally:
             IRNode._current_origins = old
 
-    def _post_init_setattr(self, attr, value) -> None:  # type: ignore[no-untyped-def]
+    def _post_init_setattr(self, attr: str, value: Any) -> None:
         # Intended for use in __post_init__ for enforcing an invariant on a dataclass
         # If you must, can also be used for setting provenance info
         # We would like to try and minimize these usages though
@@ -393,7 +393,7 @@ class IRNode:
     def get_traceback(self) -> Optional[List[str]]:
         return self.traceback
 
-    def get_origin_node(self):  # type: ignore[no-untyped-def]
+    def get_origin_node(self) -> Optional[torch.fx.Node]:
         return self.origin_node
 
     def get_defining_op(self) -> Optional[Operation]:
@@ -605,7 +605,7 @@ class Operation:
     def get_device(self) -> Optional[torch.device]:
         raise NotImplementedError
 
-    def get_origin_node(self):  # type: ignore[no-untyped-def]
+    def get_origin_node(self) -> Optional[torch.fx.Node]:
         assert hasattr(self, "origin_node")
         return self.origin_node
 
@@ -623,16 +623,16 @@ class Operation:
     def is_no_op(self) -> bool:
         return False
 
-    def get_read_writes(self):  # type: ignore[no-untyped-def]
+    def get_read_writes(self) -> dependencies.ReadWrites:
         raise NotImplementedError
 
-    def is_user_of(self, name):  # type: ignore[no-untyped-def]
+    def is_user_of(self, name: str) -> bool:
         return name in self.get_read_names()
 
     def get_read_names(self) -> OrderedSet[str]:
         return OrderedSet(dep.name for dep in self.get_reads())
 
-    def get_reads(self):  # type: ignore[no-untyped-def]
+    def get_reads(self) -> OrderedSet[Dep]:
         return self.get_read_writes().reads
 
     def get_outputs(self) -> List[Buffer]:
@@ -679,7 +679,7 @@ class Loops(IRNode):
             self.inner_fn_free_unbacked_symbols(),
         )
 
-    def __str__(self, names: Tuple[str] = ("ranges",)) -> str:
+    def _to_str(self, names: Sequence[str]) -> str:
         return self.str_helper(
             [
                 f"'{self.device.type}'",
@@ -693,12 +693,15 @@ class Loops(IRNode):
     def __post_init__(self) -> None:
         super().__post_init__()
 
+    def __str__(self) -> str:
+        return self._to_str(("ranges",))
+
     __repr__ = __str__
 
     def get_device(self) -> Optional[torch.device]:
         return self.device
 
-    def get_origin_node(self) -> Optional[Node]:
+    def get_origin_node(self) -> Optional[torch.fx.Node]:
         return self.origin_node
 
     def get_size(self) -> Sequence[_IntLike]:
@@ -711,7 +714,7 @@ class Loops(IRNode):
         return False
 
     @classmethod
-    def create(cls, *args, **kwargs):  # type: ignore[no-untyped-def]
+    def create(cls, *args: Any, **kwargs: Any) -> TensorBox:
         origin_node = kwargs.pop("origin_node", None)
         tb = kwargs.pop("traceback", None)
         # if "origin_node" in kwargs:
@@ -749,7 +752,7 @@ class Loops(IRNode):
             self.inner_fn, *self.inner_fn_args()
         )
 
-    def has_large_inner_fn(self, threshold=None) -> bool:  # type: ignore[no-untyped-def]
+    def has_large_inner_fn(self, threshold: Optional[int] = None) -> bool:
         if threshold is None:
             threshold = 0
         threshold = max(threshold, config.realize_opcount_threshold)
@@ -764,19 +767,19 @@ class Loops(IRNode):
             if self.get_reduction_type():
                 return extract_read_writes(
                     self.make_loader(),
-                    self.get_size(),  # type: ignore[arg-type]
-                    self.get_reduction_size(),  # type: ignore[arg-type]
+                    self.get_size(),
+                    self.get_reduction_size(),
                 ).reads
             else:
                 return extract_read_writes(
                     self.make_loader(),
-                    self.get_size(),  # type: ignore[arg-type]
+                    self.get_size(),
                 ).reads
 
     def get_read_names(self) -> OrderedSet[str]:
         return OrderedSet(self.inner_fn_opcount().read_buffers)
 
-    def num_reads(self):  # type: ignore[no-untyped-def]
+    def num_reads(self) -> int:
         return len(self.inner_fn_opcount().read_buffers)
 
     def get_reduction_size(self) -> Sequence[sympy.Expr]:
@@ -965,13 +968,10 @@ class Reduction(Loops):
     src_dtype: torch.dtype
     reduction_hint: ReductionHint
 
-    def __str__(self) -> str:  # type: ignore[override]
-        return Loops.__str__(  # type: ignore[call-arg]
-            self, names=("ranges", "reduction_ranges", "reduction_type")
-        )
+    def __str__(self) -> str:
+        return self._to_str(("ranges", "reduction_ranges", "reduction_type"))
 
-    def __repr__(self) -> str:  # type: ignore[override]
-        return self.__str__()
+    __repr__ = __str__
 
     def get_unbacked_symbol_uses(self) -> OrderedSet[Symbol]:
         return super().get_unbacked_symbol_uses() | OrderedSet().union(
@@ -1074,7 +1074,7 @@ class Reduction(Loops):
         min_elements_per_device = min_elements_per_thread * num_sm * threads_per_sm
         max_elements_per_device = max_elements_per_thread * num_sm * threads_per_sm
 
-        def inner_reduction_splits(reduction_numel_hint: _IntLike, numel_hint: _IntLike):  # type: ignore[no-untyped-def]
+        def inner_reduction_splits(reduction_numel_hint: int, numel_hint: int) -> int:
             if not should_split:
                 return 1
             # do heuristics that's close to eager mode for split inner reduction
@@ -1112,7 +1112,7 @@ class Reduction(Loops):
                 split_size * num_threads
             )
 
-        def outer_reduction_splits(reduction_numel_hint, numel_hint):  # type: ignore[no-untyped-def]
+        def outer_reduction_splits(reduction_numel_hint: int, numel_hint: int) -> int:
             if not should_split:
                 return 1
             # TODO the best heuristic currently has XBLOCK (corresponding to numel_hint) 128
@@ -1237,7 +1237,7 @@ class Reduction(Loops):
             return ReductionHint.DEFAULT, 1
 
         (_, reduction_vars), ranges1 = dependencies.index_vars_squeeze(
-            r.get_size(), r.get_reduction_size()  # type: ignore[arg-type]
+            r.get_size(), r.get_reduction_size()
         )
         num_outer = 0
         num_inner = 0
@@ -1259,7 +1259,12 @@ class Reduction(Loops):
             )
 
     @staticmethod
-    def _unroll_reduction_fn(inner_fn, reduction_ranges, reduction_type, src_dtype):  # type: ignore[no-untyped-def]
+    def _unroll_reduction_fn(
+        inner_fn: Callable[[Sequence[_IntLike], Sequence[_IntLike]], OpsValue],
+        reduction_ranges: Sequence[_IntLike],
+        reduction_type: str,
+        src_dtype: torch.dtype,
+    ) -> Callable[[Sequence[_IntLike]], OpsValue]:
         """Convert inner_fn from a reduction to an pointwise"""
         reduction_ranges = [
             V.graph.sizevars.evaluate_static_shape(x) for x in reduction_ranges
@@ -1267,7 +1272,7 @@ class Reduction(Loops):
 
         combine_fn = get_reduction_combine_fn(reduction_type, src_dtype)
 
-        def fn(index):  # type: ignore[no-untyped-def]
+        def fn(index: Sequence[_IntLike]) -> Any:
             return functools.reduce(
                 combine_fn,
                 (
@@ -1278,6 +1283,7 @@ class Reduction(Loops):
                 ),
             )
 
+        value_fn: Callable[[Sequence[_IntLike], Sequence[_IntLike]], Any]
         if reduction_type in ("argmin", "argmax"):
             flatten_index = FixedLayout(
                 None,  # type: ignore[arg-type]
@@ -1286,7 +1292,9 @@ class Reduction(Loops):
                 FlexibleLayout.contiguous_strides(reduction_ranges),
             ).make_indexer()
 
-            def value_fn(index, rindex):  # type: ignore[no-untyped-def]
+            def value_fn(
+                index: Sequence[_IntLike], rindex: Sequence[_IntLike]
+            ) -> Tuple[OpsValue, OpsValue]:
                 rindex = [sympy.expand(i) for i in rindex]
                 return (
                     inner_fn(index, rindex),
@@ -2039,7 +2047,7 @@ class Scan(Loops):
         return extract_free_unbacked_symbols(self.inner_fn, idx)
 
     @classmethod
-    def create(  # type: ignore[no-untyped-def]
+    def create(  # type: ignore[override]
         cls,
         device: torch.device,
         dtypes: Tuple[torch.dtype, ...],
@@ -2051,7 +2059,7 @@ class Scan(Loops):
         *,
         # Whether we have the option to fallback to aten
         can_fallback_to_aten: bool = True,
-        **kwargs,
+        **kwargs: Any,
     ) -> Sequence[Optional[TensorBox]]:
         pointwise_ranges = [*size[:axis], *size[axis + 1 :]]
         scan_ranges = [size[axis]]
@@ -2230,7 +2238,7 @@ class Sort(Loops):
         return extract_free_unbacked_symbols(self.inner_fn, idx)
 
     @classmethod
-    def create(  # type: ignore[no-untyped-def]
+    def create(  # type: ignore[override]
         cls,
         device: torch.device,
         dtypes: Tuple[torch.dtype, ...],
@@ -2240,7 +2248,7 @@ class Sort(Loops):
         stable: bool,
         descending: bool,
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
-        **kwargs,
+        **kwargs: Any,
     ) -> Sequence[Optional[TensorBox]]:
         pointwise_ranges = [*size[:axis], *size[axis + 1 :]]
         sort_ranges = [size[axis]]
@@ -2432,7 +2440,7 @@ class BaseView(IRNode):
     def get_device(self) -> Optional[torch.device]:
         return self.data.get_device()
 
-    def get_origin_node(self):  # type: ignore[no-untyped-def]
+    def get_origin_node(self) -> Optional[torch.fx.Node]:
         return None
 
     def get_name(self):  # type: ignore[no-untyped-def]
@@ -2877,7 +2885,7 @@ class ReinterpretView(BaseView):
     def get_device(self) -> Optional[torch.device]:
         return self.layout.device
 
-    def get_origin_node(self):  # type: ignore[no-untyped-def]
+    def get_origin_node(self) -> Optional[torch.fx.Node]:
         return None
 
     @property
@@ -3061,7 +3069,7 @@ class BaseConstant(IRNode):
     def get_device(self) -> Optional[torch.device]:
         return self.device
 
-    def get_origin_node(self):  # type: ignore[no-untyped-def]
+    def get_origin_node(self) -> Optional[torch.fx.Node]:
         return None
 
     def mark_reuse(self, users) -> None:  # type: ignore[no-untyped-def]
@@ -3172,11 +3180,13 @@ class Layout(OutputSpec):
     def get_device(self) -> torch.device:
         return self.device
 
-    def is_contiguous(self):  # type: ignore[no-untyped-def]
+    def is_contiguous(self) -> bool:
         return is_contiguous_strides_for_shape(self.stride, self.size)
 
     @staticmethod
-    def is_channels_last_contiguous(shape, strides) -> bool:  # type: ignore[no-untyped-def]
+    def is_channels_last_contiguous(
+        shape: Sequence[_IntLike], strides: Sequence[_IntLike]
+    ) -> bool:
         ndim = len(shape)
         if ndim not in [4, 5] or shape[1] == 1:
             return False
