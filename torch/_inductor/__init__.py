@@ -1,4 +1,6 @@
 # mypy: allow-untyped-defs
+from __future__ import annotations
+
 import logging
 import os
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
@@ -10,6 +12,7 @@ import torch.utils._pytree as pytree
 
 if TYPE_CHECKING:
     from torch._inductor.utils import InputType
+    from torch.export import ExportedProgram
 
 
 __all__ = [
@@ -26,7 +29,7 @@ log = logging.getLogger(__name__)
 
 def compile(
     gm: torch.fx.GraphModule,
-    example_inputs: List["InputType"],
+    example_inputs: List[InputType],
     options: Optional[Dict[str, Any]] = None,
 ):
     """
@@ -47,7 +50,7 @@ def compile(
 
 
 def aoti_compile_and_package(
-    exported_program,
+    exported_program: ExportedProgram,
     _deprecated_unused_args=None,
     _deprecated_unused_kwargs=None,
     *,
