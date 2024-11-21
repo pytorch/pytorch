@@ -304,6 +304,8 @@ def _core_aten_decompositions_post_autograd() -> (
             aten.binary_cross_entropy_backward,
             aten.binary_cross_entropy_with_logits,
             aten.block_diag,
+            aten.bernoulli.p,
+            aten.bernoulli.default,
             aten.celu,
             aten.celu_,
             aten.channel_shuffle,

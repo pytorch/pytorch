@@ -1220,7 +1220,7 @@ def _softmax(x: Tensor, dim: int, half_to_float: bool):
 
 
 @register_decomposition(aten._log_softmax)
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 def _log_softmax(x: Tensor, dim: int, half_to_float: bool):
     # eager log_softmax returns a contiguous tensor. Ensure that decomp also
     # returns a contiguous tensor.
@@ -1431,7 +1431,7 @@ def split(self: Tensor, split_size: int, dim: int = 0) -> Tuple[Tensor, ...]:
     dim_size = input_sizes[dim]
     if split_size == 0:
         assert dim_size == 0
-        return (self,)
+        return (self.detach(),)
     chunks = (dim_size + split_size - 1) // split_size
 
     # Avoid importing sympy at a module level
@@ -2291,7 +2291,8 @@ def native_batch_norm_backward(
     mean = save_mean_cast
     invstd = save_invstd_cast
     if train:
-        assert save_mean_cast is not None and save_invstd_cast is not None
+        assert mean is not None and invstd is not None
+
     else:
         assert running_mean_cast is not None and running_var_cast is not None
         mean = running_mean_cast
@@ -3926,7 +3927,9 @@ def _unsafe_masked_index(x, mask, indices, fill):
         lambda: "tensors used as masks must be bool tensors",
     )
 
-    if x.numel() == 0:
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
+    if guard_size_oblivious(x.numel() == 0):
         meta_result = torch._meta_registrations.meta_index_Tensor(x, indices)
         return x.new_full(meta_result.shape, fill)
 
@@ -4410,9 +4413,18 @@ def should_fold(tensor1: torch.Tensor, tensor2: torch.Tensor, is_out: bool) -> b
 
     t1_shape = t1.shape
     t1_stride = t1.stride()
+
+    # Check the contiguous, we can skip the dim with size of 1
+    # as aten: https://github.com/pytorch/pytorch/blob/
+    # e201460f8aa1510b4c4686627d57b69756c4b916/aten/src/ATen/TensorGeometry.cpp#L17
+    expected_stride = [1]
+    for size in reversed(t1_shape[1:]):
+        expected_stride.append(size * expected_stride[-1])
     return all(
-        st1 == st2 * s2
-        for (st1, st2, s2) in zip(t1_stride[:-2], t1_stride[1:-1], t1_shape[1:-1])
+        guard_size_oblivious(size == 1) or left == right
+        for left, right, size in zip(
+            t1_stride, list(reversed(expected_stride)), t1_shape
+        )
     )
 
 
@@ -5123,6 +5135,40 @@ def isin(elements, test_elements, *, assume_unique=False, invert=False):
         return isin_sorting(
             elements, test_elements, assume_unique=assume_unique, invert=invert
         )
+
+
+@register_decomposition(aten.bernoulli.default)
+def bernoulli(
+    self: torch.Tensor,
+    *,
+    generator: Optional[torch.Generator] = None,
+) -> torch.Tensor:
+    if generator is None:
+        raw_p = torch.rand(self.size(), dtype=torch.float32, device=self.device)
+    else:
+        raw_p = torch.rand(
+            self.size(),
+            generator=generator,
+            dtype=torch.float32,
+            device=self.device,
+        )
+    p = (raw_p < self).to(self.dtype)
+    return p
+
+
+@register_decomposition(aten.bernoulli.p)
+def bernoulli_p(self, p, *, generator: Optional[torch.Generator] = None):
+    if generator is None:
+        raw_p = torch.rand(self.size(), dtype=torch.float32, device=self.device)
+    else:
+        raw_p = torch.rand(
+            self.size(),
+            generator=generator,
+            dtype=self.float32,
+            device=self.device,
+        )
+    p = (raw_p < p).to(self.dtype)
+    return p
 
 
 def isin_default(elements, test_elements, *, invert=False):

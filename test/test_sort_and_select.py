@@ -193,8 +193,7 @@ class TestSortAndSelect(TestCase):
         self.assertEqual(res1val, res1val_cpu.cuda())
         self.assertEqual(res1ind, res1ind_cpu.cuda())
 
-    # FIXME: remove torch.bool from unsupported types once support is added for cub sort
-    @dtypes(*all_types_and(torch.half, torch.bfloat16))
+    @dtypes(*all_types_and(torch.bool, torch.half, torch.bfloat16))
     def test_stable_sort(self, device, dtype):
         sizes = (100, 1000, 10000)
         for ncopies in sizes:
@@ -323,8 +322,7 @@ class TestSortAndSelect(TestCase):
             self.assertEqual(indices, indices_cont)
             self.assertEqual(values, values_cont)
 
-    # FIXME: remove torch.bool from unsupported types once support is added for cub sort
-    @dtypes(*all_types_and(torch.half, torch.bfloat16))
+    @dtypes(*all_types_and(torch.bool, torch.half, torch.bfloat16))
     def test_stable_sort_against_numpy(self, device, dtype):
         if dtype in floating_types_and(torch.float16, torch.bfloat16):
             inf = float("inf")
