@@ -115,10 +115,7 @@ void histogramdd_kernel_impl(Tensor& hist_output,
       id<MTLComputePipelineState> stridedIndicesPSO = lib.getPipelineStateForFunc("kernel_index_offset");
 
       [computeEncoder setComputePipelineState:stridedIndicesPSO];
-      mtl_setBytes(computeEncoder, strides, 0);
-      [computeEncoder setBuffer:stridedIndicesBuffer offset:0 atIndex:1];
-      mtl_setBytes(computeEncoder, inputShapeData, 2);
-      mtl_setBytes(computeEncoder, nDim, 3);
+      mtl_setArgs(computeEncoder, strides, stridedIndicesBuffer, inputShapeData, nDim);
 
       mtl_dispatch1DJob(computeEncoder, stridedIndicesPSO, stridedIndicesNumThreads);
 
@@ -129,20 +126,15 @@ void histogramdd_kernel_impl(Tensor& hist_output,
       getMPSProfiler().beginProfileKernel(histogramPSO, "histogram", allTensorsList);
 
       [computeEncoder setComputePipelineState:histogramPSO];
-      mtl_setBuffer(computeEncoder, input, 0);
-      if (has_weight) {
-        mtl_setBuffer(computeEncoder, weight.value(), 1);
-      }
-      mtl_setBuffer(computeEncoder, thread_histograms, 2);
-      [computeEncoder setBuffer:stridedIndicesBuffer offset:0 atIndex:3];
-      mtl_setBytes(computeEncoder, D, 4);
+      mtl_setArgs(computeEncoder, input, weight, thread_histograms, stridedIndicesBuffer, D);
       [computeEncoder setBytes:bin_seq.data() length:sizeof(input_t) * bin_seq_offset atIndex:5];
-      mtl_setBytes(computeEncoder, num_bin_edges, 6);
-      mtl_setBytes(computeEncoder, leftmost_edge, 7);
-      mtl_setBytes(computeEncoder, rightmost_edge, 8);
-      mtl_setBytes(computeEncoder, thread_histograms.strides(), 9);
-      mtl_setBytes(computeEncoder, bin_selection_algorithm, 10);
-      mtl_setBytes(computeEncoder, has_weight, 11);
+      mtl_setArgs<6>(computeEncoder,
+                     num_bin_edges,
+                     leftmost_edge,
+                     rightmost_edge,
+                     thread_histograms.strides(),
+                     bin_selection_algorithm,
+                     has_weight);
 
       mtl_dispatch1DJob(computeEncoder, histogramPSO, numThreads);
 
