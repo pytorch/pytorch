@@ -14,6 +14,7 @@ from torch._functorch._aot_autograd.autograd_cache import (
     AOTAutogradCache,
     autograd_cache_key,
     BypassAOTAutogradCache,
+    sanitize_gm_for_cache,
 )
 from torch._functorch._aot_autograd.schemas import AOTConfig
 from torch._inductor import config as inductor_config
@@ -52,7 +53,7 @@ class AOTAutogradCacheTests(InductorTestCase):
         Clear unrelated caches, like dynamo and PyCodeCache
         """
         torch._dynamo.reset()
-        torch._inductor.codecache.PyCodeCache.cache_clear()
+        torch._inductor.codecache.PyCodeCache.cache_clear(purge=True)
 
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
@@ -775,6 +776,45 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
 
         config = self.default_config()
         self.gen_cache_key(fn, config)
+
+    def test_safe_torchfunction(self):
+        def fn(x):
+            a = x.size()
+            b = torch.Size([3, 3])
+            c = a == b
+            x = torch.sym_int(9)
+            y = torch.sym_float(x)
+            z = torch.sym_int(torch.sym_sqrt(y))
+            result = torch.sym_sum([x, y, z])
+            return (c, result)
+
+        config = self.default_config()
+        self.gen_cache_key(fn, config, inputs=[torch.ones((3, 3))])
+
+    def test_sanitize_gm_for_cache(self):
+        def fn(x):
+            y = torch.sin(x)
+            z = torch.cos(x)
+            w = y + z
+            w.abs()
+            return w
+
+        _, fx_g, example_inputs = self._get_dynamo_output(fn, torch.ones(3))
+        fx_g.meta = {"foo": "bar"}
+        fx_g.compile_subgraph_reason = "Blah"
+        config = self.default_config()
+        with sanitize_gm_for_cache(fx_g):
+            c1 = autograd_cache_key(fx_g, example_inputs, config, {})
+        c3 = autograd_cache_key(fx_g, example_inputs, config, {})
+
+        fx_g.meta = {"foo": "baz"}
+        fx_g.compile_subgraph_reason = None
+        with sanitize_gm_for_cache(fx_g):
+            c2 = autograd_cache_key(fx_g, example_inputs, config, {})
+        c4 = autograd_cache_key(fx_g, example_inputs, config, {})
+
+        self.assertEqual(c1, c2)
+        self.assertNotEqual(c3, c4)
 
 
 if __name__ == "__main__":
