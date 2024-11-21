@@ -2593,43 +2593,33 @@ def batch_isend_irecv(p2p_op_list: List[P2POp]) -> List[Work]:
     _check_p2p_op_list(p2p_op_list)
     group = p2p_op_list[0].group
     device = p2p_op_list[0].tensor.device
+
+    def peer_kwarg(op: P2POp) -> Dict[str, int]:
+        key = "group_dst" if op.op == isend else "group_src"
+        return {key: op.group_peer}
+
     if device.type == "cuda":
         # NCCL style coalescing
         with _coalescing_manager(group, device, async_ops=True) as cm:
             for p2p_op in p2p_op_list:
-                if p2p_op.op == isend:
-                    p2p_op.op(
-                        p2p_op.tensor,
-                        group=p2p_op.group,
-                        tag=p2p_op.tag,
-                        group_dst=p2p_op.group_peer,
-                    )
-                else:
-                    p2p_op.op(
-                        p2p_op.tensor,
-                        group=p2p_op.group,
-                        tag=p2p_op.tag,
-                        group_src=p2p_op.group_peer,
-                    )
+                p2p_op.op(
+                    p2p_op.tensor,
+                    group=p2p_op.group,
+                    tag=p2p_op.tag,
+                    **peer_kwarg(p2p_op),
+                )
+
         return cm.works
     else:
         # Backward support for Gloo
         reqs = []
         for p2p_op in p2p_op_list:
-            if p2p_op.op == isend:
-                work = p2p_op.op(
-                    p2p_op.tensor,
-                    group=p2p_op.group,
-                    tag=p2p_op.tag,
-                    group_dst=p2p_op.group_peer,
-                )
-            else:
-                work = p2p_op.op(
-                    p2p_op.tensor,
-                    group=p2p_op.group,
-                    tag=p2p_op.tag,
-                    group_src=p2p_op.group_peer,
-                )
+            work = p2p_op.op(
+                p2p_op.tensor,
+                group=p2p_op.group,
+                tag=p2p_op.tag,
+                **peer_kwarg(p2p_op),
+            )
             if work:
                 reqs.append(work)
         return reqs
