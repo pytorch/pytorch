@@ -2168,7 +2168,7 @@ class TestOptimRenewed(TestCase):
     
     @optims([optim for optim in optim_db if optim.optim_cls.__name__ == "Adam"], dtypes=[torch.float32]) 
     def test_less_mem_beta1_zero_adam(self, device, dtype, optim_info): 
-        
+        # test that beta1=0.0 uses less memory than the default 
         model = torch.nn.Linear(5, 5)
         model.to(dtype=dtype, device=device)
         inpt = torch.rand(2, 5, dtype=dtype, device=device)
@@ -2304,7 +2304,6 @@ class TestOptimRenewed(TestCase):
         n_iters = 10
         def iteration(model, optim, inpt, n_iters): 
             output = None
-            ress = [] 
             for i in range(n_iters): 
                 optim.zero_grad()
                 output = model(inpt) 

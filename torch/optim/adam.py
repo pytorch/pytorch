@@ -143,7 +143,7 @@ class Adam(Optimizer):
         state_steps,
     ):
         has_complex = False
-        beta1, _  = group["betas"] # YOUSSEF
+        beta1, _  = group["betas"] 
         for p in group["params"]:
             if p.grad is not None:
                 has_complex |= torch.is_complex(p)
@@ -173,11 +173,11 @@ class Adam(Optimizer):
                     )
                     # Exponential moving average of gradient values
                     # case beta1 == 0, we don't need exp_avg 
-                    if beta1 > 0: 
-                        state["exp_avg"] = torch.zeros_like(
+                    
+                    state["exp_avg"] = torch.zeros_like(
                             p, memory_format=torch.preserve_format
-                        )
-                        
+                    ) if beta1 > 0 else torch.zeros(0)  
+
                     # Exponential moving average of squared gradient values
                     state["exp_avg_sq"] = torch.zeros_like(
                         p, memory_format=torch.preserve_format
@@ -187,7 +187,7 @@ class Adam(Optimizer):
                         state["max_exp_avg_sq"] = torch.zeros_like(
                             p, memory_format=torch.preserve_format
                         )
-                if beta1 > 0 :  # YOUSSEF
+                if beta1 > 0 : 
                     exp_avgs.append(state["exp_avg"])
                 exp_avg_sqs.append(state["exp_avg_sq"])
 
@@ -244,11 +244,11 @@ class Adam(Optimizer):
                 max_exp_avg_sqs,
                 state_steps,
             )
-
+            
             adam(
                 params_with_grad,
                 grads,
-                exp_avgs if beta1 > 0 else grads, # YOUSSEF  
+                exp_avgs if beta1 > 0 else grads, 
                 exp_avg_sqs,
                 max_exp_avg_sqs,
                 state_steps,
@@ -363,7 +363,7 @@ def _single_tensor_adam(
     differentiable: bool,
 ):
     assert grad_scale is None and found_inf is None
-    # assert beta1 > 0 or (beta1 == 0 and len(exp_avgs) == 0) # exp_avgs is empty iff beta1 == 0  # YOUSSEF
+    
     if torch.jit.is_scripting():
         # this assert is due to JIT being dumb and not realizing that the ops below
         # have overloads to handle both float and Tensor lrs, so we just assert it's
@@ -383,7 +383,7 @@ def _single_tensor_adam(
 
     for i, param in enumerate(params):
         grad = grads[i] if not maximize else -grads[i]
-        exp_avg = exp_avgs[i] if beta1 > 0 else grad 
+        exp_avg = exp_avgs[i] 
         exp_avg_sq = exp_avg_sqs[i]
         step_t = state_steps[i]
 
@@ -411,22 +411,21 @@ def _single_tensor_adam(
 
         device = param.device
         
-        if beta1 > 0: #YOUSSEF    
-            if beta1_dict is not None:
-                dtype = param.dtype  # type: ignore[union-attr]
+        if beta1_dict is not None:
+            dtype = param.dtype  # type: ignore[union-attr]
 
-                # cast to workaround https://github.com/pytorch/pytorch/issues/140601
-                key = (device, dtype)
-                if key not in beta1_dict:
-                    beta1_dict[key] = beta1.to(device=device, dtype=dtype, non_blocking=True)  # type: ignore[union-attr]
+            # cast to workaround https://github.com/pytorch/pytorch/issues/140601
+            key = (device, dtype)
+            if key not in beta1_dict:
+                beta1_dict[key] = beta1.to(device=device, dtype=dtype, non_blocking=True)  # type: ignore[union-attr]
 
-                device_beta1: Union[float, Tensor] = beta1_dict[key]
-            else:
-                device_beta1 = beta1
-
-            # Decay the first and second moment running average coefficient
-            exp_avg.lerp_(grad, 1 - device_beta1)
-
+            device_beta1: Union[float, Tensor] = beta1_dict[key]
+        else:
+            device_beta1 = beta1
+        
+        # Decay the first and second moment running average coefficient
+        exp_avg.lerp_(grad, 1 - device_beta1)
+        
         exp_avg_sq.mul_(beta2).addcmul_(grad, grad.conj(), value=1 - beta2)
 
         if capturable or differentiable:
@@ -508,7 +507,7 @@ def _multi_tensor_adam(
     capturable: bool,
     differentiable: bool,
 ):
-    # assert beta1 > 0 or (beta1 == 0 and len(exp_avgs) == 0) # YOUSSEF 
+    
     if len(params) == 0:
         return
 
@@ -622,8 +621,7 @@ def _multi_tensor_adam(
         # Decay the first and second moment running average coefficient
         # Use device beta1 if beta1 is a tensor to ensure all
         # tensors are on the same device
-        if beta1 > 0: # YOUSSEF 
-            torch._foreach_lerp_(device_exp_avgs, device_grads, 1 - device_beta1)
+        torch._foreach_lerp_(device_exp_avgs, device_grads, 1 - device_beta1)
 
         torch._foreach_mul_(device_exp_avg_sqs, beta2)
 
