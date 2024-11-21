@@ -21,7 +21,7 @@ def insert_custom_op_guards(gm: torch.fx.GraphModule, ops_to_guard: List[str]):
                     _node_metadata_hook, stack_trace=node.meta["stack_trace"]
                 ),
             ), gm.graph.inserting_before(node):
-                for arg in node.args:
+                for arg in (*node.args, *node.kwargs.values()):
                     if isinstance(arg, torch.fx.Node) and isinstance(
                         arg.meta.get("val"), torch.Tensor
                     ):
@@ -36,18 +36,4 @@ def insert_custom_op_guards(gm: torch.fx.GraphModule, ops_to_guard: List[str]):
                             },
                         )
 
-                for kwarg in node.kwargs:
-                    if isinstance(kwarg, torch.fx.Node) and isinstance(
-                        kwarg.meta.get("val"), torch.Tensor
-                    ):
-                        val = kwarg.meta["val"]
-                        gm.graph.call_function(
-                            torch.ops.aten._assert_tensor_metadata.default,
-                            args=(kwarg,),
-                            kwargs={
-                                "dtype": val.dtype,
-                                "device": val.device,
-                                "layout": val.layout,
-                            },
-                        )
     gm.recompile()
