@@ -5532,21 +5532,8 @@ def scoped_load_inline(func):
     return wrapper
 
 
-def get_backend_ops(device='xpu'):
-    backend_ops = {}
-    if TEST_XPU and device == 'xpu':
-        xpu_op_db = CI_TEST_PREFIX + "/" + device + "/op_db.yaml"
-        try:
-            with open(xpu_op_db) as stream:
-                backend_ops = yaml.safe_load(stream)
-        except yaml.YAMLError or FileExistsError:
-            print("Error in loading op_db.yaml.")
-    return backend_ops
-
 GPU_TYPES = ["cuda", "xpu"]
 
-# defines here before import torch._dynamo is for avoiding circular import
-# when get_gpu_type is imported from dynamo
 @functools.lru_cache(None)
 def get_gpu_type():
     avail_gpus = [x for x in GPU_TYPES if getattr(torch, x).is_available()]
@@ -5568,5 +5555,5 @@ HAS_MULTIGPU = any(
 )
 
 def get_gpu_autocast():
-    return torch.cuda.amp.autocast if HAS_CUDA else torch.xpu.amp.autocast
+    return torch.cuda.amp.autocast if HAS_CUDA else torch.autocast
 
