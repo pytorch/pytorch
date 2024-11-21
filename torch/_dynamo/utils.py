@@ -864,8 +864,6 @@ class CompilationMetrics:
     joint_graph_pass_time_us: Optional[int] = None
     log_format_version: int = LOG_FORMAT_VERSION
     inductor_config: Optional[str] = None
-    cuda_version: Optional[str] = None
-    triton_version: Optional[str] = None
 
 
 DEFAULT_COMPILATION_METRICS_LIMIT = 64
@@ -965,8 +963,6 @@ def record_compilation_metrics(metrics: Dict[str, Any]):
 
     common_metrics = {
         "inductor_config": _scrubbed_inductor_config_for_logging(),
-        "cuda_version": torch.version.cuda,
-        "triton_version": triton.__version__ if has_triton() else "",
         # -------- Any future common metircs go here --------
         #
         # Legacy metircs go here(TODO: Temporary; populate legacy fields from their replacements.)
