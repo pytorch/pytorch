@@ -771,6 +771,7 @@ def flex_attention(
         )
         score_mod_other_buffers = maybe_realize(score_mod_other_buffers)
         mask_mod_other_buffers = maybe_realize(mask_mod_other_buffers)
+
         placeholder_inps = [
             create_placeholder(name, dtype, query.get_device())
             for name, dtype in [
@@ -820,7 +821,6 @@ def flex_attention(
             score_mod=subgraph_buffer,
             mask_mod=mask_graph_buffer,
             kv_block_size=seq_len_kv if SPARSE_KV_BLOCK_SIZE == 1073741824 else SPARSE_KV_BLOCK_SIZE,
-            kv_num_blocks=1 if SPARSE_KV_BLOCK_SIZE == 1073741824 else kv_num_blocks.layout.size[-1],
         )
         inputs_for_autotuning = [
             query,

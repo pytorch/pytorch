@@ -5,7 +5,6 @@ from typing import List, Optional
 
 import torch
 import torch.utils
-
 from .. import ir
 from ..ir import TensorBox
 from ..select_algorithm import DataProcessorTemplateWrapper
@@ -37,7 +36,6 @@ ATTENTION_TEMPLATE = r"""
   int64_t batchSize = {{kernel.size(query, 0)}};
   int64_t qSize = {{kernel.size(query, 1)}};
   // real k/v length will be padded based on kv_pagesize
-  int64_t kvSize = {{kv_num_blocks}} * kv_pagesize;
   int64_t num_head = {{kernel.size(query, 2)}};
   int64_t headSize = {{kernel.size(query, 3)}};
   int64_t batchSize_k = {{kernel.size(key, 0)}};
@@ -70,6 +68,20 @@ ATTENTION_TEMPLATE = r"""
   int64_t kviStrideB = {{kernel.stride(kv_indices, 0)}};
   int64_t kviStrideH = {{kernel.stride(kv_indices, 1)}};
   int64_t kviStrideQ = {{kernel.stride(kv_indices, 2)}};
+
+  int kv_blocks_num = 0;
+  if(*(kv_indices) == 0){
+    if({{kernel.size(kv_indices, 3)}} >= 1 and *(kv_indices+1) > 0){
+      kv_blocks_num++;
+    }
+  }
+  for(int kv_blocks = kv_blocks_num; kv_blocks <{{kernel.size(kv_indices, 3)}}; kv_blocks++){
+    if(*(kv_indices+kv_blocks)>0 or *(kv_indices+kviStrideB+kv_blocks)>0){
+      kv_blocks_num++;
+    }
+  }
+  // update kvSize, incase like page attention has allocated extra buffers
+  int64_t kvSize = kv_blocks_num * kv_pagesize;
 
   int64_t qSplitSize = q_split_size > qSize ? qSize : q_split_size;
   int64_t kvSplitSize = kv_split_size > kvSize ? kvSize : kv_split_size;
@@ -278,7 +290,6 @@ class CppMHATemplate(CppTemplate):
         score_mod,
         mask_mod,
         kv_block_size,
-        kv_num_blocks,
     ) -> None:
         assert layout.dtype in [torch.float, torch.float16, torch.bfloat16]
         super().__init__("mha", input_nodes, layout, parallel_num_threads())
@@ -286,7 +297,6 @@ class CppMHATemplate(CppTemplate):
         self.score_mod = score_mod
         self.mask_mod = mask_mod
         self.kv_block_size = kv_block_size
-        self.kv_num_blocks = kv_num_blocks
 
     def modification(self, subgraph_buffer):
         assert isinstance(subgraph_buffer, ir.ComputedBuffer)
@@ -341,7 +351,6 @@ class CppMHATemplate(CppTemplate):
         score_mod,
         mask_mod,
         kv_block_size,
-        kv_num_blocks,
     ):
         def preprocessor(input_nodes, layout):
             return input_nodes, layout
@@ -359,7 +368,6 @@ class CppMHATemplate(CppTemplate):
             score_mod=score_mod,
             mask_mod=mask_mod,
             kv_block_size=kv_block_size,
-            kv_num_blocks=kv_num_blocks,
         )
         template.maybe_append_choice(choices)
         return template
@@ -386,11 +394,19 @@ class CppMHATemplate(CppTemplate):
         value = kernel.permute(self.input_nodes[2], [0, 2, 1, 3])
 
         qSize = query.layout.size[1]
-        kvSize = self.kv_block_size * self.kv_num_blocks
+        kvSize = key.layout.size[1]
         headSize = query.layout.size[3]
 
-        q_split_size = 16  # tuning param
-        kv_split_size = 128 # tuning param
+        if qSize >= 768:
+            q_split_size = 256
+            kv_split_size = 512
+        elif qSize >= 192:
+            q_split_size = 64
+            kv_split_size = 512
+        else:
+            q_split_size = 32
+            kv_split_size = 512
+
         if self.kv_block_size < kv_split_size:
             kv_split_size = self.kv_block_size
 
@@ -400,13 +416,11 @@ class CppMHATemplate(CppTemplate):
         size_per_thread = (
             qSplitSize * kvSplitSize + qSplitSize + qSplitSize + qSplitSize * headSize
         )
-
         num_threads = parallel_num_threads()
-
         buf_out = TensorBox.create(self.output_node)
-
         if template_buffer_node is not None:
             buf_out = template_buffer_node
+
         options = dict(
             query=query,
             key=key,
@@ -421,7 +435,6 @@ class CppMHATemplate(CppTemplate):
             q_split_size=qSplitSize,
             kv_split_size=kvSplitSize,
             kv_pagesize=self.kv_block_size,
-            kv_num_blocks=self.kv_num_blocks,
             template=self,
             output=buf_out,
             kernel=kernel,
