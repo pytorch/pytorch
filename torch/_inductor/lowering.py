@@ -3853,9 +3853,10 @@ def inplace_constant_pad_nd(
     if len(padding) != 4 or len(x.get_size()) != 2:
         return None
 
-    if not ir.is_storage_and_layout(x):
-        return None
-
+    # No harm to realize since we already know that
+    # the op can not be fused into the single user.
+    # It need to be realized later anyways.
+    x.realize()
     x.freeze_layout()
 
     _, layout = ir.as_storage_and_layout(x)
