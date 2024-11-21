@@ -367,13 +367,30 @@ def clear_tracked_input():
 # Wraps an iterator and tracks the most recent value the iterator produces
 # for debugging purposes. Tracked values are stored on the test function.
 class TrackedInputIter:
-    def __init__(self, child_iter, input_type_desc,
-                 callback=lambda x: x, set_seed=True, restrict_to_index=None):
+    def __init__(
+        self,
+        child_iter,
+        input_type_desc,
+        item_callback=None,
+        track_callback=None,
+        set_seed=True,
+        restrict_to_index=None
+    ):
         self.child_iter = enumerate(child_iter)
         # Input type describes the things we're tracking (e.g. "sample input", "error input").
         self.input_type_desc = input_type_desc
-        # Callback is run on each iterated thing to get the thing to track.
-        self.callback = callback
+        # NB: The two types of callbacks below exist because the thing we want to track isn't
+        # always the same as the thing we want returned from the iterator. An example of this
+        # is ErrorInput, which we want returned from the iterator, but which contains a
+        # SampleInput that we want to track.
+        # Item callback is run on each (iterated thing, index) to get the thing to return.
+        self.item_callback = item_callback
+        if self.item_callback is None:
+            self.item_callback = lambda x, i: x
+        # Track callback is run on each iterated thing to get the thing to track.
+        self.track_callback = track_callback
+        if self.track_callback is None:
+            self.track_callback = lambda x: x
         self.test_fn = extract_test_fn()
         # Indicates whether the random seed should be set before each call to the iterator
         self.set_seed = set_seed
@@ -402,10 +419,10 @@ class TrackedInputIter:
 
         self._set_tracked_input(
             TrackedInput(
-                index=input_idx, val=self.callback(input_val), type_desc=self.input_type_desc
+                index=input_idx, val=self.track_callback(input_val), type_desc=self.input_type_desc
             )
         )
-        return input_val
+        return self.item_callback(input_val, input_idx)
 
     def _set_tracked_input(self, tracked_input: TrackedInput):
         if self.test_fn is None:
@@ -1341,6 +1358,7 @@ IS_MACOS = sys.platform == "darwin"
 IS_PPC = platform.machine() == "ppc64le"
 IS_X86 = platform.machine() in ('x86_64', 'i386')
 IS_ARM64 = platform.machine() in ('arm64', 'aarch64')
+IS_S390X = platform.machine() == "s390x"
 
 def is_avx512_vnni_supported():
     if sys.platform != 'linux':
@@ -1843,6 +1861,9 @@ def runOnRocmArch(arch: Tuple[str, ...]):
             return fn(self, *args, **kwargs)
         return wrap_fn
     return dec_fn
+
+def xfailIfS390X(func):
+    return unittest.expectedFailure(func) if IS_S390X else func
 
 def skipIfXpu(func=None, *, msg="test doesn't currently work on the XPU stack"):
     def dec_fn(fn):
@@ -4652,8 +4673,7 @@ def _generate_indices_prefer_all_rows(rows: int, cols: int, num_indices: int) ->
 
     for r in range(rows):
         # Note that this can yield overlapping indices
-        for c in random.choices(col_indices, k=n_per_row):
-            indices.append((r, c))
+        indices.extend((r, c) for c in random.choices(col_indices, k=n_per_row))
 
     return torch.tensor(indices[:num_indices])
 
@@ -5148,9 +5168,7 @@ def get_cycles_per_ms() -> float:
     # and seems to return stable values. Therefore, we enable caching
     # using lru_cache decorator above.
     num = 10
-    vals = []
-    for _ in range(num):
-        vals.append(measure())
+    vals = [measure() for _ in range(num)]
     vals = sorted(vals)
     return mean(vals[2 : num - 2])
 

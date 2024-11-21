@@ -68,8 +68,8 @@ size_t nCompiledKernels() {
 
 int debugFuser() {
   if (debug_fusion < 0) {
-    const char* debug_env = getenv("PYTORCH_FUSION_DEBUG");
-    debug_fusion = debug_env ? atoi(debug_env) : 0;
+    const auto debug_env = c10::utils::get_env("PYTORCH_FUSION_DEBUG");
+    debug_fusion = debug_env ? std::stoi(debug_env.value()) : 0;
   }
   return debug_fusion;
 }
