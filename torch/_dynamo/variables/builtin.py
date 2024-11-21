@@ -1899,20 +1899,18 @@ class BuiltinVariable(VariableTracker):
                 "reverse", ConstantVariable.create(False)
             ).as_python_constant()
             assert len(kwargs) == 0
-            if key_fn.as_python_constant() is not None:
-                items = sorted(
-                    unpacked,
-                    key=lambda x: key_fn.call_function(
-                        tx, [x], {}
-                    ).as_python_constant(),
-                    reverse=reverse,
-                )
+
+            if key_fn.is_python_constant() and key_fn.as_python_constant() is None:
+
+                def key(x):
+                    return x.as_python_constant()
+
             else:
-                items = sorted(
-                    unpacked,
-                    key=lambda x: x.as_python_constant(),
-                    reverse=reverse,
-                )
+
+                def key(x):
+                    return key_fn.call_function(tx, [x], {}).as_python_constant()
+
+            items = sorted(unpacked, key=key, reverse=reverse)
             return variables.ListVariable(items)
 
     # neg is a constant fold function, so we only get here if constant fold is not valid
