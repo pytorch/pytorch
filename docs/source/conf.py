@@ -3396,6 +3396,7 @@ def linkcode_resolve(domain, info):
         for part in info["fullname"].split("."):
             obj = getattr(obj, part)
         # Get the source file and line number
+        obj = inspect.unwrap(obj)
         fn = inspect.getsourcefile(obj)
         source, lineno = inspect.getsourcelines(obj)
     except Exception:
