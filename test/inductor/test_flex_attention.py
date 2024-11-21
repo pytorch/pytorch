@@ -4410,6 +4410,34 @@ class TestLearnableBiases(InductorTestCase):
             out_eager, out_compiled, (query, key, value, bias)
         )
 
+    def test_indirect_bias(self):
+        query, key, value = self._init_tensors()
+
+        bias = torch.randn(
+            self.seq_length,
+            device=self.device,
+            dtype=self.dtype,
+            requires_grad=True,
+        )
+
+        offset = torch.randint(
+            0,
+            self.seq_length,
+            (self.seq_length,),
+            device=self.device,
+        )
+
+        def bias_func(score, b, h, q_idx, kv_idx):
+            return score + bias[offset[q_idx]]
+
+        flex_compiled = torch.compile(flex_attention)
+        out_eager = flex_attention(query, key, value, score_mod=bias_func)
+        out_compiled = flex_compiled(query, key, value, score_mod=bias_func)
+
+        self._check_outputs_and_grads(
+            out_eager, out_compiled, (query, key, value, bias)
+        )
+
 
 common_utils.instantiate_parametrized_tests(TestFlexAttention)
 common_utils.instantiate_parametrized_tests(TestBlockMask)

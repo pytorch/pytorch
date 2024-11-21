@@ -10,7 +10,7 @@ import sympy
 
 import torch
 from torch._inductor.virtualized import V
-from torch.utils._pytree import tree_map
+from torch.utils._pytree import tree_map, tree_map_only
 
 from .. import config
 from ..ir import (
@@ -1902,9 +1902,9 @@ def flex_attention_backward(*args, **kwargs):
     score_mod_other_buffer_grads_compute = [
         buf.compute_buffer for buf in score_mod_other_buffer_grads if buf is not None
     ]
-    score_mod_other_buffer_grads_out = [
-        buf.output_node for buf in score_mod_other_buffer_grads if buf is not None
-    ]
+    score_mod_other_buffer_grads_out = tree_map_only(
+        SubgraphOutput, lambda x: x.output_node, score_mod_other_buffer_grads
+    )
 
     mutated_other_buffer_grads = [
         buffer for buffer in score_mod_other_buffer_grads_out if buffer is not None
