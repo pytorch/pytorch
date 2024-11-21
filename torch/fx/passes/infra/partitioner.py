@@ -185,7 +185,8 @@ class CapabilityBasedPartitioner:
                     else:
                         assert not self.__is_node_supported(
                             user_node
-                        ), "users which have not been traversed must be unsupported node"
+                        ), "Encountered user node which has not been traversed yet. \
+                            This should only happen if this is an unsupported node."
 
                 # Iterate through all the upstream nodes of this node and update the partition map
                 # to indicate that there is a path from the partition id of the upstream node to the
