@@ -1157,6 +1157,11 @@ class FSDPTest(MultiProcessTestCase):
         return dist.distributed_c10d._get_default_group()
 
     @property
+    def destroy_pg_upon_exit(self) -> bool:
+        # Overriding base test class: do not auto destroy PG upon exit.
+        return False
+
+    @property
     def init_method(self):
         return f"{FILE_SCHEMA}{self.file_name}"
 

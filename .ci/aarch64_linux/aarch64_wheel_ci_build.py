@@ -88,7 +88,7 @@ def update_wheel(wheel_path) -> None:
         "/usr/local/cuda/lib64/libcudnn_engines_runtime_compiled.so.9",
         "/usr/local/cuda/lib64/libcudnn_engines_precompiled.so.9",
         "/usr/local/cuda/lib64/libcudnn_heuristic.so.9",
-        "/opt/conda/envs/aarch64_env/lib/libgomp.so.1",
+        "/lib64/libgomp.so.1",
         "/usr/lib64/libgfortran.so.5",
         "/acl/build/libarm_compute.so",
         "/acl/build/libarm_compute_graph.so",

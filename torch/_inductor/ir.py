@@ -30,7 +30,7 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import Never, TypeAlias
+from typing_extensions import assert_never, Never, TypeAlias
 from unittest.mock import patch
 
 import sympy
@@ -338,20 +338,21 @@ def may_convert_to_optional(
     return value
 
 
-def get_device_type(x: object) -> Optional[str]:
-    if get_device := getattr(x, "get_device", None):
-        return get_device_type(get_device())
-    if isinstance(x, torch.device):
+def get_device_type(x: Union[IRNode, torch.device, None, str]) -> Optional[str]:
+    if isinstance(x, str) or x is None:
+        return x
+    elif isinstance(x, torch.device):
         return x.type
-    return None
+    elif isinstance(x, IRNode):
+        return get_device_type(x.get_device())
+    assert_never(f"get_device_type({x}: {type(x).__name__})")
 
 
-def is_triton(x: object) -> bool:
-    dtype = get_device_type(x)
-    return bool(dtype and is_gpu(dtype))
+def is_triton(x: Union[IRNode, torch.device, None, str]) -> bool:
+    return is_gpu(get_device_type(x))
 
 
-def is_cpu(x: object) -> bool:
+def is_cpu(x: Union[IRNode, torch.device, None, str]) -> bool:
     return get_device_type(x) == "cpu"
 
 
@@ -422,8 +423,20 @@ class IRNode:
     def get_layout(self) -> _AnyLayout:
         raise NotImplementedError(f"get_layout() is not implemented by {type(self)}!")
 
+    def maybe_get_layout(self) -> Optional[_AnyLayout]:
+        try:
+            return self.get_layout()
+        except NotImplementedError:
+            return None
+
     def get_size(self) -> Sequence[_IntLike]:
         raise NotImplementedError(f"get_size() is not implemented by {type(self)}!")
+
+    def maybe_get_size(self) -> Optional[Sequence[_IntLike]]:
+        try:
+            return self.get_size()
+        except NotImplementedError:
+            return None
 
     @property
     def shape(self) -> Union[_IntLike, sympy.Rel, Sequence[_IntLike]]:
@@ -456,28 +469,112 @@ class IRNode:
     def codegen_reference(self, writer: Optional[IndentedBuffer] = None) -> str:
         raise NotImplementedError(f"codegen_reference NYI on {type(self)}")
 
-    # The abstract method declarations below serve to convince mypy that all IRNode instances have these functions
-    # defined, while having no effect at runtime. We cannot create stub implementations here because other parts of
-    # the code dynamically check for defined attributes.
-    get_device: Callable[[], torch.device]
-    get_name: Callable[[], str]
-    get_reads: Callable[[], Any]
-    num_reads: Callable[[], int]
-    get_stride: Callable[[], Any]
-    get_storage_numel: Callable[[], _IntLike]
-    has_exceeded_max_reads: Callable[[], bool]
-    make_loader: Callable[[], Callable[[Sequence[_IntLike]], OpsValue]]
-    make_indexer: Callable[[], Callable[[Sequence[_IntLike]], _IntLike]]
-    realize_hint: Callable[[], None]
-    get_unbacked_symbol_uses: Callable[[], OrderedSet[Symbol]]
+    def get_device(self) -> Optional[torch.device]:
+        return None
+
+    def get_device_or_error(self) -> torch.device:
+        device = self.get_device()
+        assert device is not None
+        return device
+
+    def has_exceeded_max_reads(self) -> bool:
+        raise NotImplementedError(type(self).__name__)
+
+    def make_loader(self) -> Callable[[Sequence[_IntLike]], OpsValue]:
+        raise NotImplementedError(type(self).__name__)
+
+    def make_indexer(self) -> Callable[[Sequence[_IntLike]], _IntLike]:
+        raise NotImplementedError(type(self).__name__)
+
+    def get_stride(self) -> Sequence[_IntLike]:
+        raise NotImplementedError(type(self).__name__)
+
+    def maybe_get_stride(self) -> Optional[Sequence[_IntLike]]:
+        try:
+            return self.get_stride()
+        except NotImplementedError:
+            return None
+
+    def get_name(self) -> str:
+        raise NotImplementedError(type(self).__name__)
+
+    def maybe_get_name(self) -> Optional[str]:
+        try:
+            return self.get_name()
+        except NotImplementedError:
+            return None
+
+    def has_large_inner_fn(self, threshold: Optional[int] = None) -> bool:
+        raise NotImplementedError(type(self).__name__)
+
+    def mark_reuse(self, users: int) -> None:
+        raise NotImplementedError(type(self).__name__)
+
+    def realize_hint(self) -> None:
+        raise NotImplementedError(type(self).__name__)
+
+    def unwrap_view(self) -> IRNode:
+        raise NotImplementedError(type(self).__name__)
+
+    def freeze_layout(self) -> None:
+        raise NotImplementedError(type(self).__name__)
+
+    def freeze_layout_with_stride_order(
+        self, order: List[int], allow_padding: bool = False
+    ) -> None:
+        raise NotImplementedError(type(self).__name__)
+
+    def freeze_layout_with_fill_order(self, order: List[int]) -> None:
+        raise NotImplementedError(type(self).__name__)
+
+    def freeze_layout_with_same_order(self, stride: List[_IntLike]) -> None:
+        raise NotImplementedError(type(self).__name__)
+
+    def freeze_layout_with_exact_strides(
+        self, exact_strides: List[_IntLike], allow_padding: bool = False
+    ) -> None:
+        raise NotImplementedError(type(self).__name__)
+
+    def get_reads(self) -> OrderedSet[Dep]:
+        raise NotImplementedError(type(self).__name__)
+
+    def num_reads(self) -> int:
+        raise NotImplementedError(type(self).__name__)
+
+    def get_storage_numel(self) -> _IntLike:
+        raise NotImplementedError(type(self).__name__)
+
+    def get_unbacked_symbol_uses(self) -> OrderedSet[Symbol]:
+        raise NotImplementedError(type(self).__name__)
+
+    def get_reduction_type(self) -> Optional[str]:
+        raise NotImplementedError(type(self).__name__)
+
+    def get_reduction_size(self) -> Sequence[sympy.Expr]:
+        raise NotImplementedError(type(self).__name__)
+
+    def is_extern(self) -> bool:
+        raise NotImplementedError(type(self).__name__)
+
+    def is_no_op(self) -> bool:
+        raise NotImplementedError(type(self).__name__)
+
+    def constant_to_device(self, device: torch.device) -> IRNode:
+        raise NotImplementedError(type(self).__name__)
+
+    def get_mutation_names(self) -> Sequence[str]:
+        raise NotImplementedError(type(self).__name__)
+
+    def get_operation_name(self) -> str:
+        raise NotImplementedError(type(self).__name__)
+
+    def get_inputs_that_alias_output(self) -> Sequence[str]:
+        raise NotImplementedError(type(self).__name__)
 
     if TYPE_CHECKING:
 
         @property
         def dtype(self) -> torch.dtype:
-            ...
-
-        def mark_reuse(self, users: int) -> None:
             ...
 
 
@@ -486,7 +583,7 @@ class Operation:
     def __post_init__(self) -> None:
         self.operation_name: Optional[str] = None
 
-    def get_device(self):  # type: ignore[no-untyped-def]
+    def get_device(self) -> Optional[torch.device]:
         raise NotImplementedError
 
     def get_origin_node(self):  # type: ignore[no-untyped-def]
@@ -579,7 +676,7 @@ class Loops(IRNode):
 
     __repr__ = __str__
 
-    def get_device(self) -> torch.device:
+    def get_device(self) -> Optional[torch.device]:
         return self.device
 
     def get_origin_node(self) -> Optional[Node]:
@@ -643,7 +740,7 @@ class Loops(IRNode):
         index = self._index(self.ranges)
         return extract_free_unbacked_symbols(self.inner_fn, index)
 
-    def get_reads(self) -> Set[Dep]:
+    def get_reads(self) -> OrderedSet[Dep]:
         with patch.object(FlexibleLayout, "allow_indexing", True):
             if self.get_reduction_type():
                 return extract_read_writes(
@@ -663,7 +760,7 @@ class Loops(IRNode):
     def num_reads(self):  # type: ignore[no-untyped-def]
         return len(self.inner_fn_opcount().read_buffers)
 
-    def get_reduction_size(self) -> Sequence[_IntLike]:
+    def get_reduction_size(self) -> Sequence[sympy.Expr]:
         raise NotImplementedError(
             f"get_reduction_size() is not implemented by {type(self)}!"
         )
@@ -695,7 +792,7 @@ class Pointwise(Loops):
 
         return self.inner_fn
 
-    def get_reduction_size(self) -> Sequence[_IntLike]:
+    def get_reduction_size(self) -> Sequence[sympy.Expr]:
         return []
 
     def get_reduction_type(self) -> Optional[str]:
@@ -862,7 +959,7 @@ class Reduction(Loops):
             *(free_unbacked_symbols(e) for e in self.reduction_ranges)
         )
 
-    def get_reduction_size(self) -> Sequence[_IntLike]:
+    def get_reduction_size(self) -> Sequence[sympy.Expr]:
         return self.reduction_ranges
 
     def get_reduction_type(self) -> Optional[str]:
@@ -1254,8 +1351,10 @@ class Reduction(Loops):
             isinstance(reduction_numel, Integer)
             and V.graph.sizevars.size_hint(reduction_numel)
             < config.unroll_reductions_threshold
-            and sympy_product(ranges) != 1
+            and (sympy_product(ranges) != 1 or device.type == "cuda")
         ):
+            # NB: This works around https://github.com/pytorch/pytorch/issues/140457
+            # since turning reductions into pointwise ops can exacerbate this problem
             return Pointwise.create(
                 device=device,
                 dtype=dst_dtype,
@@ -2311,7 +2410,7 @@ class BaseView(IRNode):
     def get_layout(self):  # type: ignore[no-untyped-def]
         return self.data.get_layout()
 
-    def get_device(self):  # type: ignore[no-untyped-def]
+    def get_device(self) -> Optional[torch.device]:
         return self.data.get_device()
 
     def get_origin_node(self):  # type: ignore[no-untyped-def]
@@ -2326,7 +2425,7 @@ class BaseView(IRNode):
     def mark_reuse(self, users):  # type: ignore[no-untyped-def]
         return self.data.mark_reuse(users)
 
-    def has_exceeded_max_reads(self):  # type: ignore[no-untyped-def]
+    def has_exceeded_max_reads(self) -> bool:
         return self.data.has_exceeded_max_reads()
 
     def realize(self):  # type: ignore[no-untyped-def]
@@ -2756,7 +2855,7 @@ class ReinterpretView(BaseView):
     def get_name(self):  # type: ignore[no-untyped-def]
         return self.data.get_name()
 
-    def get_device(self):  # type: ignore[no-untyped-def]
+    def get_device(self) -> Optional[torch.device]:
         return self.layout.device
 
     def get_origin_node(self):  # type: ignore[no-untyped-def]
@@ -2808,7 +2907,7 @@ class ReinterpretView(BaseView):
             self.layout.size,
             self.layout.stride,
             self.layout.offset,
-            writer,
+            writer.writeline if writer is not None else V.graph.wrapper_code.writeline,
             dtype=self.layout.dtype,
         )
 
@@ -2940,7 +3039,7 @@ class BaseConstant(IRNode):
     def get_size(self):  # type: ignore[no-untyped-def]
         return ()
 
-    def get_device(self):  # type: ignore[no-untyped-def]
+    def get_device(self) -> Optional[torch.device]:
         return self.device
 
     def get_origin_node(self):  # type: ignore[no-untyped-def]
@@ -3464,7 +3563,7 @@ class NoneLayout(IRNode):
     # If you have an ir.Node with NoneLayout, you probably need to setup
     # dependencies manually in scheduler
 
-    device: torch.device
+    device: Optional[torch.device]
     size: List[int] = dataclasses.field(default_factory=lambda: [0])
     stride: List[int] = dataclasses.field(default_factory=lambda: [0])
 
@@ -3478,7 +3577,7 @@ class NoneLayout(IRNode):
 class MutationLayoutSHOULDREMOVE(Layout):
     def __init__(self, target: IRNode) -> None:
         super().__init__(
-            target.get_device(),
+            target.get_device_or_error(),
             target.get_dtype(),
             target.get_size(),  # type: ignore[arg-type]
             None,
@@ -3576,7 +3675,7 @@ class Buffer(IRNode):
         assert self.name, self
         return self.name
 
-    def get_device(self):  # type: ignore[no-untyped-def]
+    def get_device(self) -> Optional[torch.device]:
         return self.layout.device
 
     def get_defining_op(self) -> Optional[Operation]:
@@ -3646,12 +3745,12 @@ class Buffer(IRNode):
     def decide_layout(self):  # type: ignore[no-untyped-def]
         pass
 
-    def get_inputs_that_alias_output(self):  # type: ignore[no-untyped-def]
+    def get_inputs_that_alias_output(self) -> Sequence[str]:
         if isinstance(self.layout, NonOwningLayout):
             return [self.layout.view.get_name()]
         return ()
 
-    def get_mutation_names(self):  # type: ignore[no-untyped-def]
+    def get_mutation_names(self) -> Sequence[str]:
         if isinstance(self.layout, MutationLayoutSHOULDREMOVE):
             return [self.layout.target.get_name()]
         return ()
@@ -3681,6 +3780,9 @@ class OperationBuffer(Buffer, Operation):
 
     def get_defining_op(self) -> Operation:
         return self
+
+    # Skip implementation in Buffer
+    get_operation_name = Operation.get_operation_name
 
     def __post_init__(self) -> None:
         Buffer.__post_init__(self)
@@ -3749,6 +3851,9 @@ class ComputedBuffer(OperationBuffer):
     def num_reads(self):  # type: ignore[no-untyped-def]
         return self.data.num_reads()
 
+    def get_reads(self) -> OrderedSet[Dep]:
+        return self.data.get_reads()
+
     def get_read_names(self) -> OrderedSet[str]:
         return self.data.get_read_names()
 
@@ -3791,14 +3896,13 @@ class ComputedBuffer(OperationBuffer):
             | self.data.get_unbacked_symbol_uses()
         )
 
-    def make_loader(self):  # type: ignore[no-untyped-def]
-        # Inline constants and index_expressions
+    def make_loader(self) -> Callable[[Sequence[_IntLike]], OpsValue]:
         if (
-            hasattr(self.data, "make_loader")
+            not self.get_reduction_type()
             and self.name not in V.graph.mutated_buffers
             and self.num_reads() == 0
         ):
-            # can be inlined
+            # inline this op rather than generating ops.load()
             return self.data.make_loader()
         return super().make_loader()
 
@@ -3967,7 +4071,7 @@ class ComputedBuffer(OperationBuffer):
 
         support_vars = index_vars + reduce_vars
         should_merge_loops = (
-            not is_gpu(self.get_device().type) or not config.loop_ordering_after_fusion
+            not is_gpu(get_device_type(self)) or not config.loop_ordering_after_fusion
         )
         iter_ranges, iter_reindex, _ = simplify_and_reorder(
             index_vars,
@@ -4356,6 +4460,9 @@ class InputsKernel(OperationBuffer):
 
     def is_extern(self) -> bool:
         return True
+
+    def is_no_op(self) -> bool:
+        return False
 
     def num_reads(self) -> int:
         return 1
@@ -4853,7 +4960,7 @@ class ExternKernel(InputsKernel):
         return ReinterpretView(
             data=x.data,
             layout=FixedLayout(
-                device=x.get_device(),
+                device=x.get_device_or_error(),
                 dtype=x.get_dtype(),
                 size=x.get_size(),  # type: ignore[arg-type]
                 stride=strides,
@@ -4913,8 +5020,9 @@ class ExternKernel(InputsKernel):
         allow_padding=False,
     ):
         assert order is not None or exact_strides is not None
-        if x.get_numel() == 0:  # Layout doesn't matter
+        if x.get_numel() in (0, 1):  # Layout doesn't matter
             return x
+
         # require x to have the layout
         if is_storage_and_layout(x):
             while isinstance(x.get_layout(), NonOwningLayout):
@@ -5000,7 +5108,7 @@ class ExternKernel(InputsKernel):
             and isinstance(x.data, BaseView)
             and not isinstance(x.data, ReinterpretView)
             and is_storage_and_layout(x.unwrap_view())
-            and not isinstance(x.unwrap_view().data, ExternKernelAlloc)
+            and not isinstance(x.unwrap_view().data, ExternKernelAlloc)  # type: ignore[attr-defined]
         ):
             try:
                 x.data = cls.convert_to_reinterpret_view(x.data)
@@ -5481,13 +5589,14 @@ class UserDefinedTritonKernel(ExternKernel):
 
         kernel = kernel_side_table.get_kernel(self.kernel_idx)
         configs = []
-        restore_value_args = []
+        restore_value_args: List[str] = []
         if isinstance(kernel, Autotuner):
             # https://github.com/triton-lang/triton/pull/5083
             # changes kernel.restore_idx to kernel.restore_value
             if hasattr(kernel, "restore_idx"):
-                for i in kernel.restore_idx:
-                    restore_value_args.append(kernel.fn.arg_names[i])
+                restore_value_args.extend(
+                    kernel.fn.arg_names[i] for i in kernel.restore_idx
+                )
             else:
                 assert hasattr(kernel, "restore_value")
                 restore_value_args.extend(kernel.restore_value)
@@ -5633,7 +5742,7 @@ class UserDefinedTritonKernel(ExternKernel):
     def get_outputs(self) -> List[Buffer]:
         return list(self.mutation_outputs)
 
-    def get_device(self) -> torch.device:
+    def get_device(self) -> Optional[torch.device]:
         return self.device
 
 
@@ -5789,7 +5898,7 @@ class SetSourceTensorKernel(ExternKernelAlloc):
             MutationOutput(NoneLayout(device=device), storage_tensor, self),
         ]
 
-    def get_inputs_that_alias_output(self):  # type: ignore[no-untyped-def]
+    def get_inputs_that_alias_output(self) -> Sequence[str]:
         return [self.inputs[0].get_name(), self.inputs[1].get_name()]
 
 
@@ -6006,19 +6115,24 @@ class AssertScalar(ExternKernel):
         return free_unbacked_symbols(self.scalar)
 
     def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
+        # NB: It is EXTREMELY important not to simplify the scalar under assertion here,
+        # because simplify is done with respect to runtime asserts.  So if you have
+        # "u0 == 0" in the runtime asserts, if you subsequently try to
+        # simplify(u0 == 0), you will get True (because we've already runtime assert'ed
+        # that it's true).  But we're code generating the actual runtime assert here!!
         if V.graph.cpp_wrapper:
-            pass
-        else:
-            # NB: It is EXTREMELY important not to simplify the scalar under
-            # assertion here, because simplify is done with respect to
-            # runtime asserts.  So if you have "u0 == 0" in the runtime
-            # asserts, if you subsequently try to simplify(u0 == 0), you will
-            # get True (because we've already runtime assert'ed that it's
-            # true).  But we're code generating the actual runtime assert
-            # here!!
-            wrapper.writeline(
-                f"if not {V.graph.wrapper_code.codegen_python_sizevar(self.scalar, simplify=False)}:"
+            sizevar = V.graph.wrapper_code.codegen_cpp_sizevar(
+                self.scalar, simplify=False
             )
+            # TODO: when we start compiling in C++20, annotate with [[unlikely]].
+            wrapper.writeline(
+                f'if (!({sizevar})) {{ throw std::runtime_error("{self.msg}"); }}'
+            )
+        else:
+            sizevar = V.graph.wrapper_code.codegen_python_sizevar(
+                self.scalar, simplify=False
+            )
+            wrapper.writeline(f"if not {sizevar}:")
             wrapper.writeline(f"    raise RuntimeError({repr(self.msg)})")
             # No one should ever use this buffer, but for uniformity
             # define the variable and assign it None
@@ -6043,15 +6157,26 @@ class FallbackKernel(ExternKernelAlloc):
         *,
         unbacked_bindings=None,
     ) -> None:
+        # When aten binary ops have constant second args, cpp wrapper expects the scalar
+        # version.  This should long-term be handled as in
+        # https://github.com/pytorch/pytorch/issues/90923.
+        BINARY_OP_MAPPING = {
+            aten.add.Tensor: aten.add.Scalar,
+            aten.div.Tensor: aten.div.Scalar,
+            aten.divide.Tensor: aten.divide.Scalar,
+            aten.floor_divide: aten.floor_divide.Scalar,
+            aten.mul.Tensor: aten.mul.Scalar,
+            aten.multiply.Tensor: aten.multiply.Scalar,
+            aten.sub.Tensor: aten.sub.Scalar,
+            aten.subtract.Tensor: aten.subtract.Scalar,
+            aten.true_divide.Tensor: aten.true_divide.Scalar,
+        }
         if (
-            kernel == aten.mul.Tensor
+            kernel in BINARY_OP_MAPPING
             and len(tensor_args) == 1
             and len(nontensor_args) == 1
         ):
-            # When aten.mul.Tensor's second arg is constant, cpp wrapper expects
-            # to call mul_Scalar. A more proper fix is to do it in decomposition.
-            # See https://github.com/pytorch/pytorch/issues/123478
-            kernel = aten.mul.Scalar
+            kernel = BINARY_OP_MAPPING[kernel]
 
         super().__init__(
             layout,
@@ -6391,7 +6516,7 @@ class FallbackKernel(ExternKernelAlloc):
             args = None
             exported_args = self.export_extern_kernel_node()
 
-            wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
+            wrapper.generate_fallback_kernel_with_runtime_lookup(
                 self.get_name(),
                 self.python_kernel_name,
                 self.cpp_kernel_name,
@@ -6500,7 +6625,7 @@ class ComplexView(FallbackKernel):
     def should_allocate(self) -> bool:
         return False
 
-    def get_inputs_that_alias_output(self):  # type: ignore[no-untyped-def]
+    def get_inputs_that_alias_output(self) -> Sequence[str]:
         # Signal to codegen that our output buffer isn't safe to reuse
         return [self.inputs[0].get_name()]
 
@@ -6569,7 +6694,7 @@ class MultiOutput(ExternKernel):
     def should_allocate(self) -> bool:
         return False
 
-    def get_inputs_that_alias_output(self):  # type: ignore[no-untyped-def]
+    def get_inputs_that_alias_output(self) -> Sequence[str]:
         return [
             inp.get_name()
             for inp in self.inputs
@@ -6588,11 +6713,87 @@ class MutableBox(IRNode):
 
     data: IRNode
 
-    def __getattr__(self, name):  # type: ignore[no-untyped-def]
-        fn = getattr(self.data, name)
-        if callable(fn):
-            return fn
-        raise AttributeError(f"{type(self.data).__name__}.{name} not callable")
+    def has_exceeded_max_reads(self) -> bool:
+        return self.data.has_exceeded_max_reads()
+
+    def get_device(self) -> Optional[torch.device]:
+        return self.data.get_device()
+
+    def make_loader(self) -> Callable[[Sequence[_IntLike]], OpsValue]:
+        return self.data.make_loader()
+
+    def make_indexer(self) -> Callable[[Sequence[_IntLike]], _IntLike]:
+        return self.data.make_indexer()
+
+    def get_stride(self) -> Sequence[_IntLike]:
+        return self.data.get_stride()
+
+    def get_name(self) -> str:
+        return self.data.get_name()
+
+    def has_large_inner_fn(self, threshold: Optional[int] = None) -> bool:
+        return self.data.has_large_inner_fn(threshold)
+
+    def mark_reuse(self, users: int) -> None:
+        return self.data.mark_reuse(users)
+
+    def realize_hint(self) -> None:
+        return self.data.realize_hint()
+
+    def unwrap_view(self) -> IRNode:
+        return self.data.unwrap_view()
+
+    def freeze_layout(self) -> None:
+        return self.data.freeze_layout()
+
+    def freeze_layout_with_stride_order(
+        self, order: List[int], allow_padding: bool = False
+    ) -> None:
+        return self.data.freeze_layout_with_stride_order(order, allow_padding)
+
+    def freeze_layout_with_fill_order(self, order: List[int]) -> None:
+        return self.data.freeze_layout_with_fill_order(order)
+
+    def freeze_layout_with_same_order(self, stride: List[_IntLike]) -> None:
+        return self.data.freeze_layout_with_same_order(stride)
+
+    def freeze_layout_with_exact_strides(
+        self, exact_strides: List[_IntLike], allow_padding: bool = False
+    ) -> None:
+        return self.data.freeze_layout_with_exact_strides(exact_strides, allow_padding)
+
+    def get_reads(self) -> OrderedSet[Dep]:
+        return self.data.get_reads()
+
+    def num_reads(self) -> int:
+        return self.data.num_reads()
+
+    def get_storage_numel(self) -> _IntLike:
+        return self.data.get_storage_numel()
+
+    def get_reduction_type(self) -> Optional[str]:
+        return self.data.get_reduction_type()
+
+    def get_reduction_size(self) -> Sequence[_IntLike]:
+        return self.data.get_reduction_size()
+
+    def is_extern(self) -> bool:
+        return self.data.is_extern()
+
+    def is_no_op(self) -> bool:
+        return self.data.is_no_op()
+
+    def constant_to_device(self, device: torch.device) -> IRNode:
+        return self.data.constant_to_device(device)
+
+    def get_mutation_names(self) -> Sequence[str]:
+        return self.data.get_mutation_names()
+
+    def get_operation_name(self) -> str:
+        return self.data.get_operation_name()
+
+    def get_inputs_that_alias_output(self) -> Sequence[str]:
+        return self.data.get_inputs_that_alias_output()
 
     def realize(self):  # type: ignore[no-untyped-def]
         return self.data.realize()
@@ -6611,10 +6812,10 @@ class MutableBox(IRNode):
 
     @property
     def layout(self):  # type: ignore[no-untyped-def]
-        return self.data.get_layout()
+        return self.get_layout()
 
     def get_layout(self):  # type: ignore[no-untyped-def]
-        return self.layout
+        return self.data.get_layout()
 
     def get_size(self):  # type: ignore[no-untyped-def]
         return self.data.get_size()
@@ -6704,7 +6905,7 @@ class StorageBox(MutableBox):
         ):
             self.realize()
 
-    def has_exceeded_max_reads(self):  # type: ignore[no-untyped-def]
+    def has_exceeded_max_reads(self) -> bool:
         return isinstance(self.data, Pointwise) and (
             self.num_reads() > config.realize_acc_reads_threshold
             or self.has_large_inner_fn()
@@ -6784,12 +6985,15 @@ class InvokeSubgraph(ExternKernel):
         def handle_sym_expr(stride):  # type: ignore[no-untyped-def]
             return [s.node.expr if isinstance(s, torch.SymInt) else s for s in stride]
 
-        fake_strides = [fake_operand.stride() for fake_operand in fake_operands]
-        fake_strides = [handle_sym_expr(stride) for stride in fake_strides]
-        operands = [
-            cls.require_exact_strides(x, fake_strides[idx])
-            for idx, x in enumerate(operands)
-        ]
+        new_operands = []
+        for idx, operand in enumerate(operands):
+            if isinstance(operand, ShapeAsConstantBuffer):
+                new_operands.append(operand)
+            else:
+                example_stride = handle_sym_expr(fake_operands[idx].stride())
+                new_operands.append(cls.require_exact_strides(operand, example_stride))
+
+        operands = new_operands
 
         if subgraph.graph is None:
             # create and lower subgraphs
@@ -6802,7 +7006,16 @@ class InvokeSubgraph(ExternKernel):
                 subgraph.graph.run(*fake_operands)
 
         outputs = subgraph.graph.graph_outputs
-        device = operands[0].get_device()
+
+        # Find the device - operands could be integers from shapes, so we can't
+        # use operands[0]
+        device = None
+        for operand in operands:
+            if not isinstance(operand, ShapeAsConstantBuffer):
+                device = operand.get_device()
+                break
+        assert device is not None
+
         invoke_subgraph = InvokeSubgraph(
             subgraph=subgraph,
             operands=operands,
@@ -7130,9 +7343,6 @@ class TorchBindObject(IRNode):
 
     def get_name(self):  # type: ignore[no-untyped-def]
         return self.name
-
-    def get_device(self):  # type: ignore[no-untyped-def]
-        return None  # is there a device??
 
     def codegen_reference(self, writer=None):  # type: ignore[no-untyped-def]
         return self.name
