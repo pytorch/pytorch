@@ -850,8 +850,10 @@ def _compile(
 
         assert output.guards is not None
         CleanupManager.instance[out_code] = output.cleanups
+        nonlocal cache_entry
         check_fn = CheckFunctionManager(
             output,
+            cache_entry,
             hooks.guard_fail_fn if hooks else None,
         )
 
@@ -875,7 +877,9 @@ def _compile(
 
     chromium_event_log.reset()
     chromium_start_time = time.time_ns()
-    chromium_event_log.log_event_start("dynamo", chromium_start_time, {})
+    chromium_event_log.log_event_start(
+        "dynamo", chromium_start_time, {}, log_pt2_compile_event=True
+    )
 
     metrics_context = get_metrics_context()
     with _use_lazy_graph_module(config.use_lazy_graph_module), compile_context(

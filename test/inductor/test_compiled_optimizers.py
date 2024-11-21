@@ -171,7 +171,7 @@ KERNEL_COUNT_OVERRIDES = {
     "test_asgd_cpu": 3,
     "test_asgd_lambd_cpu": 3,
     "test_asgd_maximize_cpu": 3,
-    "test_asgd_recompile_single": 16,
+    "test_asgd_recompile_single": 6,
     "test_asgd_t0_cpu": 3,
     "test_asgd_tensor_lr_weight_decay_maximize_capturable_cuda": 5,
     "test_asgd_tensor_lr_weight_decay_maximize_capturable_xpu": 8,
