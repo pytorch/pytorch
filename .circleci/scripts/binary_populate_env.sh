@@ -65,18 +65,11 @@ if tagged_version >/dev/null; then
 fi
 if [[ "$(uname)" == 'Darwin' ]] || [[ "$PACKAGE_TYPE" == conda ]]; then
   export PYTORCH_BUILD_VERSION="${BASE_BUILD_VERSION}"
-  echo "line 68"
-  echo "PYTORCH_BUILD_VERSION=$PYTORCH_BUILD_VERSION"
 else
   export PYTORCH_BUILD_VERSION="${BASE_BUILD_VERSION}+$DESIRED_CUDA"
-  echo "line 72"
-  echo "PYTORCH_BUILD_VERSION=$PYTORCH_BUILD_VERSION"
 fi
 
 export PYTORCH_BUILD_NUMBER=1
-echo "line 77"
-echo "PYTORCH_BUILD_NUMBER=$PYTORCH_BUILD_NUMBER"
-echo "PYTORCH_BUILD_VERSION=$PYTORCH_BUILD_VERSION"
 
 # Set triton version as part of PYTORCH_EXTRA_INSTALL_REQUIREMENTS
 TRITON_VERSION=$(cat $PYTORCH_ROOT/.ci/docker/triton_version.txt)
