@@ -2,7 +2,7 @@
 import contextlib
 import functools
 import operator
-from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
 
 import torch
 from torch._dynamo.external_utils import (
@@ -305,18 +305,35 @@ class AutogradCompilerInstance:
             in [torch.ops.aten.sym_size.int, torch.ops.aten.sym_numel.default]
         )
 
-    def remove_dead_sym_nodes(self):
-        for node in reversed(list(self.fx_tracer.graph.nodes)):
-            if (
-                node.op == "call_function"
-                and node.target == operator.eq
-                and (self.is_sym_node(node.args[0]) or self.is_sym_node(node.args[1]))
-            ):
-                if len(node.users) == 0:
-                    self.fx_tracer.graph.erase_node(node)
-            if self.is_sym_node(node):
-                if len(node.users) == 0:
-                    self.fx_tracer.graph.erase_node(node)
+    def dce(self):
+        # Most of these removed nodes would have been removed during Dynamo and AOTDispatch
+        # Remove some of these nodes earlier to improve compilation speed
+        impure_targets = {
+            call_hook,
+            call_backward,
+            FakeCompiledAutogradEngine._exec_final_callbacks_stub,
+            torch.ops.inductor.accumulate_grad_.default,
+        }
+
+        # Dynamo guards will error instead of creating aliasing guards unless we unpack them in the graph
+        unpack_nodes: Set[torch.fx.Node] = set()
+        i = len(self.graph_placeholders)
+        for node in self.fx_tracer.graph.nodes:
+            if i == 0:
+                break
+
+            unpack_nodes = unpack_nodes | set(node.users.keys())
+            i -= 1
+
+        def is_impure(node):
+            return (
+                node in unpack_nodes
+                or node.op == "placeholder"
+                or node.op == "output"
+                or (node.op == "call_function" and node.target in impure_targets)
+            )
+
+        self.fx_tracer.graph.eliminate_dead_code(is_impure)
 
     def end_capture(self, outputs):
         self.fx_tracer.create_proxy(
@@ -349,7 +366,7 @@ class AutogradCompilerInstance:
         # ```
         # Proper fix is Richard's Python compiled autograd effort which will avoid calling make_fx and
         # should prevent these ops from going into the CA graph.
-        self.remove_dead_sym_nodes()
+        self.dce()
         runtime_inputs_to_move: List[int] = []
         if snapshot_cudagraph_enabled():
             runtime_inputs_to_move = self.move_graph_nodes_to_cuda(self.fx_tracer.graph)
