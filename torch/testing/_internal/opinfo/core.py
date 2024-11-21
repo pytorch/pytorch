@@ -2969,6 +2969,7 @@ def sample_inputs_foreach(
     same_size=False,
     low=None,
     high=None,
+    # zero_size means EVERY input is empty
     zero_size: bool,
     requires_grad: bool,
     # mutually exclusive from same_size and zero_size, which are all or nothing
