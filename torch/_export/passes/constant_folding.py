@@ -85,9 +85,9 @@ class ConstantFolder(torch.fx.Interpreter):
     def node_to_last_non_output_use(self):
         last_non_output_use = collections.defaultdict(list)
         seen_uses = set()
-        output_node = next(iter(reversed(self.module.graph.nodes)))
+        output_node = next(iter(reversed(self.module.graph.nodes)))  # type: ignore[arg-type, union-attr]
 
-        for node in reversed(self.module.graph.nodes):
+        for node in reversed(self.module.graph.nodes):  # type: ignore[arg-type, union-attr]
             if node.target == "output":
                 continue
 
@@ -197,7 +197,7 @@ class ConstantFolder(torch.fx.Interpreter):
 
     def run(self):  # type: ignore[override]
         env = {}
-        for n in self.module.graph.find_nodes(op="placeholder"):
+        for n in self.module.graph.find_nodes(op="placeholder"):  # type: ignore[operator, union-attr]
             env[n] = self.unknown_value
         return super().run(initial_env=env)
 

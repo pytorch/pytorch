@@ -1056,8 +1056,8 @@ class _PipelineStage(_PipelineStageBase):
 
         args_recv_info: List[InputInfo] = []
         # Filter out placeholder nodes from `self.submod` (a GraphModule)
-        placeholders = filter(
-            lambda node: node.op == "placeholder", self.submod.graph.nodes
+        placeholders = filter(  # type: ignore[var-annotated]
+            lambda node: node.op == "placeholder", self.submod.graph.nodes  # type: ignore[arg-type, union-attr]
         )
         # `placeholders` are nodes internal to submod.
         # `self.node.args` are dependency nodes in the outer graph.
@@ -1134,7 +1134,7 @@ class _PipelineStage(_PipelineStageBase):
         return act_send_info
 
     def _get_output_node(self):
-        output_nodes = [node for node in self.submod.graph.nodes if node.op == "output"]
+        output_nodes = [node for node in self.submod.graph.nodes if node.op == "output"]  # type: ignore[union-attr]
         assert len(output_nodes) == 1
         output_node = output_nodes[0]
         return output_node

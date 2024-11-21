@@ -217,7 +217,7 @@ def capture_pre_autograd_graph(
             )
 
             setattr(module, "capture_pre_autograd_graph_tag", True)  # noqa: B010
-            for node in module.graph.nodes:
+            for node in module.graph.nodes:  # type: ignore[union-attr]
                 node.meta["capture_pre_autograd_graph_tag"] = True
 
     error_message = \
