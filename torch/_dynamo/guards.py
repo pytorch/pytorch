@@ -1150,8 +1150,7 @@ class GuardBuilder(GuardBuilderBase):
         elif istype(source, CallMethodItemSource):
             assert base_guard_manager  # to make mypy happy
             out = base_guard_manager.lambda_manager(
-                # TODO: remove me before merge
-                python_lambda=lambda x: int(x.item()),
+                python_lambda=lambda x: x.item(),
                 source=source_name,
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
@@ -1845,6 +1844,15 @@ class GuardBuilder(GuardBuilderBase):
         for code in code_parts:
             self._set_guard_export_info(guard, [code])
 
+        def install_python_guard():
+            # Install all the symbolic guards in one python lambda guard. These are run
+            # at the very end of the RootGuardManager via epilogue guards.
+            self.add_python_lambda_leaf_guard_to_root(
+                code_parts,
+                verbose_code_parts,
+                closure_vars={**SYMPY_INTERP, **_get_closure_vars()},
+            )
+
         if config.enable_cpp_symbolic_shape_guards:
             import ctypes
 
@@ -1854,6 +1862,11 @@ class GuardBuilder(GuardBuilderBase):
                 cpp_code_parts.exprs,
                 cpp_code_parts.source_to_symbol,
             )
+
+            for source in source_to_symbol:
+                if not isinstance(source, TensorPropertySource):
+                    install_python_guard()
+                    return
 
             try:
                 guard_managers = [
@@ -1896,13 +1909,7 @@ class GuardBuilder(GuardBuilderBase):
                 )
                 return
 
-        # Install all the symbolic guards in one python lambda guard. These are run
-        # at the very end of the RootGuardManager via epilogue guards.
-        self.add_python_lambda_leaf_guard_to_root(
-            code_parts,
-            verbose_code_parts,
-            closure_vars={**SYMPY_INTERP, **_get_closure_vars()},
-        )
+        install_python_guard()
 
     def TENSOR_MATCH(self, guard: Guard, value=None):
         # For tensors that are part of the Dynamo extracted Fx graph module, an
