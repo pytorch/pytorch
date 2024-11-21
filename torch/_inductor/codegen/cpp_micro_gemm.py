@@ -554,7 +554,7 @@ class CppMicroGemmAMX(CppMicroGemm):
         }
     };
 {%- endif %}
-// The ldb would not be block_n if N != block_n    
+// The ldb would not be block_n if N != block_n
 {%- if use_cached_dequantized_B %}
     const int64_t updated_ldb = {{block_n}};
 {%- else %}
