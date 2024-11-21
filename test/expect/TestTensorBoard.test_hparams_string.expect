@@ -1,0 +1,28 @@
+(value {
+  tag: "_hparams_/experiment"
+  metadata {
+    plugin_data {
+      plugin_name: "hparams"
+      content: "\022\036\"\016\n\nstring_var \001*\014\n\n\022\010accuracy"
+    }
+  }
+}
+, value {
+  tag: "_hparams_/session_start_info"
+  metadata {
+    plugin_data {
+      plugin_name: "hparams"
+      content: "\032\024\n\022\n\nstring_var\022\004\032\002hi"
+    }
+  }
+}
+, value {
+  tag: "_hparams_/session_end_info"
+  metadata {
+    plugin_data {
+      plugin_name: "hparams"
+      content: "\"\002\010\001"
+    }
+  }
+}
+)

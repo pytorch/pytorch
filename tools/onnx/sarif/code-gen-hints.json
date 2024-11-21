@@ -1,0 +1,10 @@
+{
+    "SarifLog.$schema": [
+        {
+            "kind": "PropertyNameHint",
+            "arguments": {
+                "pythonPropertyName": "schemaUri"
+            }
+        }
+    ]
+}
