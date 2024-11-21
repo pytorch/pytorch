@@ -588,6 +588,11 @@ class TestDistBackend(MultiProcessTestCase):
     def init_method(self):
         return f"{FILE_SCHEMA}{self.file_name}"
 
+    @property
+    def destroy_pg_upon_exit(self) -> bool:
+        # Overriding base test class: do not auto destroy PG upon exit.
+        return False
+
     @classmethod
     def _run(cls, rank, test_name, file_name, pipe, **kwargs):
         if BACKEND == "nccl" and not torch.cuda.is_available():
@@ -621,7 +626,7 @@ class TestDistBackend(MultiProcessTestCase):
         # immediately exiting due to a skip doesn't cause flakiness.
         self._barrier()
 
-        self.run_test(test_name, pipe, destroy_process_group=False)
+        self.run_test(test_name, pipe)
         self._barrier()
         dist.destroy_process_group()
         sys.exit(0)
