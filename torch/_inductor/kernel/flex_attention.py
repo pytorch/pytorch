@@ -159,6 +159,12 @@ def get_offset_for_next_block(
     return offset
 """
 
+get_bounded_indices_func = r"""
+@triton.jit
+def get_bounded_indices(indices, max_len=None):
+    return indices % max_len if max_len is not None else indices
+"""
+
 compute_flex_attention = r"""
 {{def_kernel("Q", "K", "V", "LSE", "KV_NUM_BLKS", "KV_IDX", "FULL_KV_NUM_BLKS", "FULL_KV_IDX")}}
     # Sub notation for this kernel:
@@ -1402,12 +1408,11 @@ def bwd_dq_block_mn(
         qk *= SM_SCALE
     # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
     pre_mod_scores = qk
-    if CHECK_BLOCK_BOUNDARY:
-        m = offs_m2[:, None] % Q_LEN
-        n = offs_n2[None, :] % KV_LEN
-    else:
-        m = offs_m2[:, None]
-        n = offs_n2[None, :]
+    n = get_bounded_indices(offs_n2[None, :], KV_LEN if CHECK_BLOCK_BOUNDARY else None)
+    # The boundary check is done for the outer loop, but here it's possible since we're iterating across N dim
+    # that the M reads out of bounds prior to the last loop
+    m = get_bounded_indices(offs_m2[:, None], Q_LEN if (not IS_DIVISIBLE or CHECK_BLOCK_BOUNDARY) else None)
+
     {{ modification(
         subgraph_number=0,
         output_name="post_mod_scores",
@@ -1585,12 +1590,11 @@ def bwd_dkdv_block_mn(
     if not PRESCALE_QK:
         qkT *= SM_SCALE
     # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
-    if CHECK_BLOCK_BOUNDARY:
-        m = offs_m1[None, :] % Q_LEN
-        n = offs_n1[:, None] % KV_LEN
-    else:
-        m = offs_m1[None, :]
-        n = offs_n1[:, None]
+    m = get_bounded_indices(offs_m1[None, :], Q_LEN if CHECK_BLOCK_BOUNDARY else None)
+    # The boundary check is done for the outer loop, but here it's possible since we're iterating across M dim
+    # that the n reads out of bounds prior to the last loop
+    n = get_bounded_indices(offs_n1[:, None], KV_LEN if (not IS_DIVISIBLE or CHECK_BLOCK_BOUNDARY) else None)
+
     pre_mod_scores = qkT
     {{ modification(
         subgraph_number=0,
@@ -1664,7 +1668,8 @@ def bwd_dkdv_block_mn(
 
     return dk, dv
  """
-    + compute_next_offset_func,
+    + compute_next_offset_func
+    + get_bounded_indices_func,
 )
 
 
