@@ -78,8 +78,7 @@ class DefaultFuseHandler(FuseHandler):
                 n, *args = pattern
                 modules: List[torch.nn.Module] = []
                 modules.append(get_modules(n))
-                for a in args:
-                    modules.append(get_modules(a))
+                modules.extend(get_modules(a) for a in args)
                 return tuple(modules)
             else:
                 n = pattern
@@ -111,9 +110,7 @@ class DefaultFuseHandler(FuseHandler):
         # as input
         fused_module = fuser_method(is_qat, *matched_modules)
         setattr(named_modules[module_parent_name], module_name, fused_module)
-        extra_args = []
-        for input in extra_inputs:
-            extra_args.append(load_arg(input))
+        extra_args = [load_arg(input) for input in extra_inputs]
         node = fused_graph.node_copy(root_node, load_arg)
         args = list(node.args)
         args.extend(extra_args)
