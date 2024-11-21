@@ -63,7 +63,7 @@ def _should_decompose_because_unsafe_op(op: torch._ops.OperatorBase) -> bool:
         return False
     if torch.Tag.maybe_aliasing_or_mutating in op.tags:
         return True
-    return False
+    return op == torch.ops.aten.native_batch_norm.default
 
 
 def _add_op_to_registry(registry, op, fn):
@@ -322,6 +322,8 @@ def _core_aten_decompositions_post_autograd() -> (
             aten.binary_cross_entropy_backward,
             aten.binary_cross_entropy_with_logits,
             aten.block_diag,
+            aten.bernoulli.p,
+            aten.bernoulli.default,
             aten.celu,
             aten.celu_,
             aten.channel_shuffle,
