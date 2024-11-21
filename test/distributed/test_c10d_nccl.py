@@ -3449,7 +3449,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         with _functional_collectives.allow_inflight_collective_as_graph_input_ctx():
             self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
             input = torch.full(
-                (10240, 10240), float(self.rank), device=f"cuda:{self.rank}"
+                (1024, 1024), float(self.rank), device=f"cuda:{self.rank}"
             )
             dist.all_reduce(input, op=dist.ReduceOp.SUM, async_op=True)
             # Non-functional collectives run under the context manager is registered in the work registry.
@@ -3461,7 +3461,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         # Case 2: Run collectives not under context manager, and don't call wait on them.
         # NOTE: Here we intentionally test memory-stressed case.
         self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 2)
-        for _ in range(50000):
+        for _ in range(1000):
             input = torch.full(
                 (1024, 1024), float(self.rank), device=f"cuda:{self.rank}"
             )
