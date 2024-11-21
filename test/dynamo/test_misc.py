@@ -4835,7 +4835,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual(cnts.op_count, 1)
 
     def test_set_update(self):
-        @torch.compile(backend="eager")
+        @torch.compile(backend="eager", fullgraph=True)
         def run(x, int_set, int_list):
             int_set.update(map(int, int_list))
             return x + 1
