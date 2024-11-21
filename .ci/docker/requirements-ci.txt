@@ -155,7 +155,7 @@ optree==0.13.0
 #test_pointwise_ops.py, test_dtensor_ops.py, test_torchinductor.py, test_fx.py,
 #test_fake_tensor.py, test_mps.py
 
-pillow==10.3.0
+pillow==11.0.0
 #Description:  Python Imaging Library fork
 #Pinned versions: 10.3.0
 #test that import:
@@ -237,7 +237,7 @@ scikit-image==0.22.0 ; python_version >= "3.10"
 #test that import:
 
 scipy==1.10.1 ; python_version <= "3.11"
-scipy==1.12.0 ; python_version == "3.12"
+scipy==1.14.1 ; python_version >= "3.12"
 # Pin SciPy because of failing distribution tests (see #60347)
 #Description: scientific python
 #Pinned versions: 1.10.1
@@ -307,13 +307,13 @@ tensorboard==2.13.0
 #test that import: test_tensorboard
 
 pywavelets==1.4.1 ; python_version < "3.12"
-pywavelets==1.5.0 ; python_version >= "3.12"
+pywavelets==1.7.0 ; python_version >= "3.12"
 #Description: This is a requirement of scikit-image, we need to pin
 # it here because 1.5.0 conflicts with numpy 1.21.2 used in CI
 #Pinned versions: 1.4.1
 #test that import:
 
-lxml==5.0.0
+lxml==5.3.0
 #Description: This is a requirement of unittest-xml-reporting
 
 # Python-3.9 binaries
