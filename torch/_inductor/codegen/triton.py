@@ -1528,8 +1528,6 @@ class TritonKernel(SIMDKernel):
                 mask_vars.update(cse_var.mask_vars)
             elif symbol_is_type(var, SymT.TRITON_LOAD):
                 pass
-            elif symbol_is_type(var, SymT.TEMPLATE_INDEX):
-                pass
             elif symbol_is_type(
                 var,
                 (
@@ -2058,15 +2056,15 @@ class TritonKernel(SIMDKernel):
         elif mode is None:
             line = f"tl.store({var} + ({indexing.index_str}), {value}, {indexing.mask_str})"
         elif mode == "atomic_add":
-            if (
-                isinstance(index, sympy.core.symbol.Symbol)
-                and symbol_is_type(index, SymT.TEMPLATE_INDEX)
-                or "idx" in indexing.index_str
-            ):
-                # We manually add broadcasting for tempalte indexes
-                indexing.index_str = (
-                    f"tl.broadcast_to({indexing.index_str}, {value}.shape)"
-                )
+            # if (
+            #     isinstance(index, sympy.core.symbol.Symbol)
+            #     and symbol_is_type(index, SymT.TEMPLATE_INDEX)
+            #     or "idx" in indexing.index_str
+            # ):
+            #     # We manually add broadcasting for tempalte indexes
+            #     indexing.index_str = (
+            #         f"tl.broadcast_to({indexing.index_str}, {value}.shape)"
+            #     )
             line = f"tl.atomic_add({var} + ({indexing.index_str}), {value}, {indexing.mask_str}, sem='relaxed')"
         else:
             raise NotImplementedError(f"store mode={mode}")

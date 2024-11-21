@@ -205,6 +205,7 @@ class ModificationWrapper(V.WrapperHandler):
         This is needed for grads of captured buffers that need to be added as inputs to the kernel
         """
         self.kernel.args.input(name)
+        self.kernel.template_out = value
         return self._inner.store(name, index, value, mode)
 
     def _add_kernel_input(self, name: str):

@@ -154,8 +154,10 @@ def zeros_and_scatter_lowering(shape: List[int], indices, values):
     )
 
     values = expand(values, expected_vals_size)
+    device = grad.get_device()
+    assert device is not None
     scatter = Scatter(
-        device=grad.get_device(),
+        device=device,
         dtype=grad.get_dtype(),
         inner_fn=values.make_loader(),
         ranges=expected_vals_size,  # iter_ranges,
@@ -1748,6 +1750,7 @@ def bwd_dkdv_block_mn(
     idx_h = off_hq
     idx_m = m
     idx_n = n
+    xmask = idx_m < Q_LEN and idx_n < KV_LEN
     {{ modification(
         subgraph_number=3,
         output_name=None,
