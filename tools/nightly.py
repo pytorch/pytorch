@@ -822,7 +822,9 @@ def make_parser() -> argparse.ArgumentParser:
     def find_executable(name: str) -> Path:
         executable = shutil.which(name)
         if executable is None:
-            raise argparse.ArgumentTypeError(f"Could not find executable {name}")
+            raise argparse.ArgumentTypeError(
+                f"Could not find executable {name} in PATH."
+            )
         return Path(executable).absolute()
 
     parser = argparse.ArgumentParser()
@@ -847,7 +849,10 @@ def make_parser() -> argparse.ArgumentParser:
             "--python",
             "--base-executable",
             type=find_executable,
-            help="Path to Python interpreter to use for creating the virtual environment",
+            help=(
+                "Path to Python interpreter to use for creating the virtual environment. "
+                "Defaults to the interpreter running this script."
+            ),
             dest="base_executable",
             default=None,
             metavar="PYTHON",
