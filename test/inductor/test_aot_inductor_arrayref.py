@@ -180,6 +180,7 @@ CPU_TEST_FAILURES = {
     "test_symint_item": fail_minimal_arrayref_interface(is_skip=True),
     # TODO: AttributeError: 'ShapeAsConstantBuffer' object has no attribute 'dtype'
     "test_symbool_item": fail_minimal_arrayref_interface(is_skip=True),
+    "test_issue_140766": fail_minimal_arrayref_interface(),
 }
 
 
