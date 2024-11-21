@@ -10,6 +10,7 @@ from torch.distributed.fsdp import (
     FullyShardedDataParallel as FSDP,
     MixedPrecision,
 )
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     DEVICEInitMode,
@@ -18,12 +19,9 @@ from torch.testing._internal.common_fsdp import (
     get_devtype,
     NestedWrappedModule,
 )
-from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
-    run_tests,
-    TEST_WITH_DEV_DBG_ASAN,
-)
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
+
+
 device_type = torch.device(get_devtype())
 
 if not dist.is_available():
@@ -99,7 +97,9 @@ class TestPureFP16(FSDPTest):
             self.process_group,
             FSDPInitMode.NO_FSDP,
             DEVICEInitMode.DEVICE_NEVER,
-            {"device_id": device_type,},
+            {
+                "device_id": device_type,
+            },
         )
         fsdp_kwargs = {
             "use_orig_params": use_orig_params,
@@ -150,8 +150,8 @@ class TestPureFP16(FSDPTest):
             if param.grad is not None:
                 self.assertEqual(param.grad.dtype, torch.float16)
 
+
 devices = ("cuda", "hpu")
 instantiate_device_type_tests(TestPureFP16, globals(), only_for=devices)
 if __name__ == "__main__":
     run_tests()
-
