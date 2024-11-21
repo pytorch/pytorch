@@ -952,10 +952,9 @@ class PatternPrettyPrinter:
         assert hasattr(obj, "pretty_print")
         out_str = obj.pretty_print(pp=pp)
 
-        output = [
-            f"{pp.memoized_objs_names[key]} = {pp.memoized_objs_pp[key]}"
-            for key in pp.memoized_objs_names
-        ]
+        output = []
+        for key in pp.memoized_objs_names:
+            output.append(f"{pp.memoized_objs_names[key]} = {pp.memoized_objs_pp[key]}")
 
         output.append(f"{output_name} = {out_str}")
 
@@ -1362,7 +1361,9 @@ def register_replacement(
             return False
 
     def normalize_args(**kwargs: Any) -> List[Any]:
-        args = [kwargs.pop(name) for name in argnames_static]
+        args = []
+        for name in argnames_static:
+            args.append(kwargs.pop(name))
         for i in range(1, len(kwargs) + 1):
             if f"tangents_{i}" not in kwargs:
                 break

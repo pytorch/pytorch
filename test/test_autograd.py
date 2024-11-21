@@ -77,7 +77,6 @@ from torch.testing._internal.common_utils import (
     skipIfWindows,
     slowTest,
     TestCase,
-    xfailIfS390X,
     xfailIfTorchDynamo,
 )
 from torch.utils._mode_utils import no_dispatch
@@ -3179,7 +3178,6 @@ class TestAutograd(TestCase):
         with self.assertRaises(RuntimeError):
             b.add_(5)
 
-    @xfailIfS390X
     def test_attribute_deletion(self):
         x = torch.randn((5, 5), requires_grad=True)
         del x.grad
@@ -6772,7 +6770,6 @@ for shape in [(1,), ()]:
         IS_MACOS,
         "Fails with SIGBUS on macOS; https://github.com/pytorch/pytorch/issues/25941",
     )
-    @xfailIfS390X
     def test_deep_reentrant(self):
         class DeepReentrant(Function):
             @staticmethod
@@ -7175,7 +7172,6 @@ for shape in [(1,), ()]:
                 out = checkpoint(fn, a, use_reentrant=False, debug=True)
                 out.backward()
 
-    @xfailIfS390X
     def test_access_saved_tensor_twice_without_recomputation_works(self):
         count = [0]
 
@@ -8298,7 +8294,6 @@ for shape in [(1,), ()]:
         c = Func.apply(a)
         self.assertEqual(repr(c), "tensor([2.], grad_fn=<FuncBackward>)")
 
-    @xfailIfS390X
     def test_autograd_inplace_view_of_view(self):
         x = torch.zeros(2)
         with torch.no_grad():

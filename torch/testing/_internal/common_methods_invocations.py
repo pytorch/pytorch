@@ -2285,7 +2285,9 @@ def sample_inputs_stack(op_info, device, dtype, requires_grad, **kwargs):
         ((0, 1, 0), 2),)
 
     for shape, num_tensors in cases:
-        tensors = [make_arg(shape) for _ in range(num_tensors)]
+        tensors = []
+        for _ in range(num_tensors):
+            tensors.append(make_arg(shape))
         for dim in range(-1, len(shape) - 1):
             yield SampleInput(tensors, args=(dim,))
 
@@ -2326,7 +2328,9 @@ def sample_inputs_chunk_cat(op_info, device, dtype, requires_grad, **kwargs):
         ),
     )
     for sizes, dim, num_chunks in same_ndim_cases:
-        tensors = [make_arg(size) for size in sizes]
+        tensors = []
+        for size in sizes:
+            tensors.append(make_arg(size))
         yield SampleInput(tensors, args=(dim, num_chunks))
 
     different_ndim_case = [

@@ -322,7 +322,9 @@ def _lazy_init():
         # However, we must not let any *other* threads in!
         _tls.is_initializing = True
 
-        _queued_calls.extend(calls for calls in _lazy_seed_tracker.get_calls() if calls)
+        for calls in _lazy_seed_tracker.get_calls():
+            if calls:
+                _queued_calls.append(calls)
 
         try:
             for queued_call, orig_traceback in _queued_calls:

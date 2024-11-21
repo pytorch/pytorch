@@ -478,8 +478,10 @@ class AutogradCompilerInstance:
 
     @staticmethod
     def get_all_nodes(args):
-        # filter out non-Node args, like None
-        nodes = [n for n in args if type(n) is torch.fx.Node]
+        nodes = []
+        for n in args:
+            if type(n) is torch.fx.Node:  # filter out non-Node args, like None
+                nodes.append(n)
         return nodes
 
     @staticmethod
@@ -669,15 +671,13 @@ class AutogradCompilerInstance:
             input_nodes_and_users = []
             input_nodes_and_users.extend(list(input_nodes))
             for input_node in input_nodes:
-                input_nodes_and_users.extend(
-                    user
-                    for user in list(input_node.users.keys())
+                for user in list(input_node.users.keys()):
                     if not (
                         user.op == "call_function"
                         and user.target == call_hook
                         and node.kwargs.get("hook_type", None) == "post_hook"
-                    )
-                )
+                    ):
+                        input_nodes_and_users.append(user)
 
             arg = max(input_nodes_and_users)  # last input users
             if (

@@ -145,7 +145,6 @@ def _sequential_split_and_maybe_inline_subgraphs_helper(
             ),
         )
     new_gm.recompile()
-    new_gm.graph.lint()
     return new_gm, new_signature
 
 

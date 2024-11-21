@@ -3055,7 +3055,9 @@ def chunk(a: TensorLikeType, chunks: int, dim: int = 0) -> Tuple[TensorLikeType,
     full_chunks = math.floor(length / chunk_size)
     tail_chunk_size = length % chunk_size
 
-    result = [narrow(a, dim, i * chunk_size, chunk_size) for i in range(full_chunks)]
+    result = []
+    for i in range(full_chunks):
+        result.append(narrow(a, dim, i * chunk_size, chunk_size))
 
     if tail_chunk_size != 0:
         result.append(narrow(a, dim, full_chunks * chunk_size, tail_chunk_size))
@@ -3298,7 +3300,7 @@ def native_layer_norm(
         out = out * weight + bias
 
     out = _maybe_convert_to_dtype(out, input.dtype)  # type: ignore[assignment]
-    if input.device.type in ["cpu", "mtia"]:
+    if input.device.type == "cpu":
         mean = _maybe_convert_to_dtype(mean, input.dtype)  # type: ignore[assignment]
         rstd = _maybe_convert_to_dtype(rstd, input.dtype)  # type: ignore[assignment]
     return (out, mean, rstd)

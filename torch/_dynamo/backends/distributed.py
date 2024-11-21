@@ -67,7 +67,8 @@ def pretty_print_buckets(buckets: List[Bucket], bucket_bytes_cap: int):
     for idx, bucket in enumerate(reversed(buckets)):
         if len(bucket.params) > 0:
             rows.append((idx, bucket.size, bucket.params[0]))
-            rows.extend((None, None, param) for param in bucket.params[1:])
+            for param in bucket.params[1:]:
+                rows.append((None, None, param))
         if bucket.opcount_increased_to_capture_external_output > 0:
             extended_buckets.append(
                 (

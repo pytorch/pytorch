@@ -3,6 +3,7 @@
 
 #include <ATen/Dispatch.h>
 #include <ATen/native/ForeachUtils.h>
+#include <ATen/native/mps/operations/FusedOptimizerOps.h>
 #include <ATen/native/mps/operations/MultiTensorApply.h>
 #include <vector>
 
@@ -67,15 +68,4 @@ void _fused_adam_mps_impl_(TensorList params,
                                                  eps,
                                                  maximize);
 }
-
-#ifndef PYTORCH_JIT_COMPILE_SHADERS
-static auto& lib = MetalShaderLibrary::getBundledLibrary();
-#else
-#include <ATen/native/mps/FusedOptimizerOps_metallib.h>
-#endif
-
-std::pair<id<MTLComputePipelineState>, id<MTLFunction>> getFusedAdamCPLState(const std::string& fname) {
-  return {lib.getPipelineStateForFunc(fname), lib.getMTLFunction(fname)};
-}
-
 } // namespace at::native::mps

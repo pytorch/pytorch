@@ -1026,16 +1026,17 @@ class SDPAKernelVariable(ContextWrappingVariable):
 
     @staticmethod
     def _backends_to_nodes(tx, backends):
-        # convert to/from string in order to bake the backend into FX graph
-        nodes = [
-            tx.output.create_node(
-                "call_function",
-                torch.nn.attention._backend_from_string,
-                (backend.name,),
-                {},
+        nodes = []
+        for backend in backends:
+            # convert to/from string in order to bake the backend into FX graph
+            nodes.append(
+                tx.output.create_node(
+                    "call_function",
+                    torch.nn.attention._backend_from_string,
+                    (backend.name,),
+                    {},
+                )
             )
-            for backend in backends
-        ]
         return nodes
 
     def enter(self, tx):

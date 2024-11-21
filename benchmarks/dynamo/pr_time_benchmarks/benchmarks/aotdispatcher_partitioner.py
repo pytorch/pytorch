@@ -6,15 +6,8 @@ import torch
 
 
 class Benchmark(BenchmarkBase):
-    def __init__(self):
-        super().__init__(
-            category="aotdispatcher_partitioner",
-            backend="aot_eager_decomp_partition",
-            device="cpu",
-        )
-
     def name(self):
-        return f"{self.category()}_{self.device()}"
+        return "aotdispatcher_partitioner_cpu"
 
     def description(self):
         return "partitioner benchmark 1 input and 100 weights, mix of recompute and non-recompute ops"
@@ -27,7 +20,7 @@ class Benchmark(BenchmarkBase):
         torch._dynamo.reset()
 
     def _work(self):
-        @torch.compile(backend=self.backend(), fullgraph=True)
+        @torch.compile(backend="aot_eager_decomp_partition", fullgraph=True)
         def f(inp, *weights):
             x = inp
             for w in weights:

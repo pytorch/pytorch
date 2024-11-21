@@ -9,7 +9,7 @@ import operator
 import os
 import warnings
 from collections import defaultdict
-from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 from unittest.mock import patch
 
 import sympy
@@ -49,7 +49,6 @@ from .ir import (
     DtypeView,
     ExpandView,
     IndexingConstant,
-    IRNode,
     is_triton,
     ops_wrapper,
     PermuteView,
@@ -226,6 +225,7 @@ def get_promoted_dtype(*args, type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KI
         if isinstance(inp, (Number, sympy.Basic)):
             return inp
         else:
+            assert hasattr(inp, "get_dtype")
             dim = len(inp.get_size())
             # construct a tmp tensor to feed into torch.result_type
             return torch.zeros([1] * dim, dtype=inp.get_dtype())
@@ -485,9 +485,7 @@ def promote_constants(inputs, override_return_dtype=None, type_promotion_kind=No
         if isinstance(x, (int, float)):
             out.append(
                 ExpandView.create(
-                    ir.Constant(
-                        value=x, dtype=ex.get_dtype(), device=ex.get_device_or_error()
-                    ),
+                    ir.Constant(value=x, dtype=ex.get_dtype(), device=ex.get_device()),
                     list(ex.get_size()),
                 )
             )
@@ -495,7 +493,7 @@ def promote_constants(inputs, override_return_dtype=None, type_promotion_kind=No
             out.append(
                 ExpandView.create(
                     IndexingConstant(
-                        index=x, dtype=ex.get_dtype(), device=ex.get_device_or_error()
+                        index=x, dtype=ex.get_dtype(), device=ex.get_device()
                     ),
                     list(ex.get_size()),
                 )
@@ -515,10 +513,8 @@ def make_pointwise(
     allow_alpha=False,
     triton_fallback=None,
 ):
-    def inner(*inputs: TensorBox, alpha=None):
-        if triton_fallback is not None and any(
-            isinstance(inp, IRNode) and is_triton(inp) for inp in inputs
-        ):
+    def inner(*inputs: List[TensorBox], alpha=None):
+        if triton_fallback is not None and any(map(is_triton, inputs)):
             assert not allow_alpha  # not implemented
             return triton_fallback(*inputs)
 
@@ -1695,7 +1691,9 @@ def split_with_sizes(x, sizes, dim=0):
 def unbind(x, dim=0):
     dim = _validate_dim(x, dim, 0)
     x_size = V.graph.sizevars.evaluate_static_shape(x.get_size()[dim])
-    result = [select(x, dim, i) for i in range(x_size)]
+    result = []
+    for i in range(x_size):
+        result.append(select(x, dim, i))
     return result
 
 
@@ -2055,7 +2053,7 @@ def inductor_random(size: List[int], seed: TensorBox, mode: str, *, offset: int 
     assert mode in ("rand", "randn")
     size = [*size]
     dtype = torch.float32
-    device = seed.get_device_or_error()
+    device = seed.get_device()
     random_pos = ir.FixedLayout(
         device, dtype, size, ir.FlexibleLayout.contiguous_strides(size), offset=offset
     ).make_indexer()
@@ -2084,7 +2082,7 @@ def inductor_randint(
     assert not config.fallback_random
     size = [*size]
     dtype = torch.int64
-    device = seed.get_device_or_error()
+    device = seed.get_device()
     random_pos = ir.FixedLayout(
         device, dtype, size, ir.FlexibleLayout.contiguous_strides(size), offset=offset
     ).make_indexer()
@@ -2358,14 +2356,14 @@ def sdpa_constraint(fx_node, *args, **kwargs):
             )
             return aligned_last_dim and aligned_strides
 
-        if (
-            isinstance(arg, IRNode)
-            and arg.maybe_get_stride() is not None
-            and is_aligned_realized_tensor(arg)
-        ):
-            return V.graph.try_match_insignificant_strides(
-                ir.ExternKernel.realize_input(arg), meta_stride
-            )
+        try:
+            arg.get_stride()
+            if is_aligned_realized_tensor(arg):
+                return V.graph.try_match_insignificant_strides(
+                    ir.ExternKernel.realize_input(arg), meta_stride
+                )
+        except AttributeError:
+            pass
 
         def is_aligned(x):
             return (V.graph.sizevars.size_hint(x.get_size()[-1]) % ALIGNMENT) == 0
@@ -4112,8 +4110,12 @@ def max_pool2d_with_indices_backward(
 
     # we will read this many times, so make sure it is computed
     grad_output.realize_hint()
-    gO_stride = grad_output.maybe_get_stride()
-    x_stride: Optional[Sequence[Any]]
+    try:
+        gO_stride = grad_output.get_stride()
+    except AttributeError:
+        # some classes don't have `get_stride`
+        # TODO will need a better way of determining if inputs are channels-last
+        gO_stride = None
     if isinstance(x, TensorBox) and isinstance(x.data.data, Pointwise):  # type: ignore[attr-defined]
         data = x.data.data  # type: ignore[attr-defined]
         x_buffer = ir.ComputedBuffer(
@@ -4128,7 +4130,10 @@ def max_pool2d_with_indices_backward(
         x_buffer.decide_layout()
         x_stride = x_buffer.get_stride()
     else:
-        x_stride = x.maybe_get_stride()
+        try:
+            x_stride = x.get_stride()
+        except AttributeError:
+            x_stride = None
 
     is_channels_last = (x_stride is not None and x_stride[1] == 1) or (
         gO_stride is not None and gO_stride[1] == 1
@@ -6305,7 +6310,7 @@ def resize(x, size, *, memory_format=None):
 
     old_numel = x.get_numel()
     dtype = x.get_dtype()
-    device = x.get_device_or_error()
+    device = x.get_device()
 
     if isinstance(x.data, ir.BaseView):
         x.data = x.data.unwrap_view()
@@ -6382,7 +6387,7 @@ def triton_kernel_wrap_(
 
 @register_lowering(torch.ops.higher_order.cond)
 def cond(pred, true_fn, false_fn, operands):
-    if any(isinstance(x, IRNode) and is_triton(x) for x in [pred, *operands]):
+    if is_triton(pred) or any(map(is_triton, operands)):
         msg = "control flow operator: torch.cond."
         if stack_trace := V.graph.current_node.meta.get("stack_trace", None):
             msg = f"{msg} Found from : \n {stack_trace}"
@@ -6394,10 +6399,7 @@ def cond(pred, true_fn, false_fn, operands):
 
 @register_lowering(torch.ops.higher_order.while_loop)
 def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs):
-    if any(
-        isinstance(x, IRNode) and is_triton(x)
-        for x in carried_inputs + additional_inputs
-    ):
+    if any(map(is_triton, carried_inputs + additional_inputs)):
         msg = "control flow operator: torch.while_loop."
         if stack_trace := V.graph.current_node.meta.get("stack_trace", None):
             msg = f"{msg} Found from : \n {stack_trace}"

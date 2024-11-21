@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-import logging
 import os
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 
@@ -19,9 +18,6 @@ __all__ = [
     "cudagraph_mark_step_begin",
     "_aoti_compile_and_package_inner",
 ]
-
-
-log = logging.getLogger(__name__)
 
 
 def compile(
@@ -48,8 +44,8 @@ def compile(
 
 def aoti_compile_and_package(
     exported_program,
-    _deprecated_unused_args=None,
-    _deprecated_unused_kwargs=None,
+    args: Tuple[Any],
+    kwargs: Optional[Dict[str, Any]] = None,
     *,
     package_path: Optional[str] = None,
     inductor_configs: Optional[Dict[str, Any]] = None,
@@ -76,6 +72,8 @@ def aoti_compile_and_package(
 
     Args:
         exported_program: An exported program created through a call from torch.export
+        args: Example positional inputs
+        kwargs: Optional example keyword inputs
         package_path: Optional specified path to the generated .pt2 artifact.
         inductor_configs: Optional dictionary of configs to control inductor.
 
@@ -86,18 +84,6 @@ def aoti_compile_and_package(
 
     if not isinstance(exported_program, ExportedProgram):
         raise ValueError("Only ExportedProgram is supported")
-
-    if exported_program.example_inputs is None:
-        raise RuntimeError(
-            "exported_program.example_inputs is required to be set in order "
-            "for AOTInductor compilation."
-        )
-
-    if _deprecated_unused_args is not None or _deprecated_unused_kwargs is not None:
-        log.warning(
-            "You no longer need to specify args/kwargs to aoti_compile_and_package "
-            "as we can get this information from exported_program.example_inputs."
-        )
 
     assert package_path is None or package_path.endswith(
         ".pt2"
@@ -110,8 +96,6 @@ def aoti_compile_and_package(
             "Please pass in a package path to aot_inductor_compile() instead "
             "of setting the aot_inductor.output_path config."
         )
-
-    args, kwargs = exported_program.example_inputs
 
     # a wrapper around aoti_compile_and_package_inner.
     return aoti_compile_and_package_debug_wrapper(

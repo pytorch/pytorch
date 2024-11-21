@@ -56,10 +56,8 @@ if __name__ == "__main__":
 
     if uv_available:
         pip_args = ["uv", "pip", "install"]
-    elif sys.executable:
-        pip_args = [sys.executable, "-mpip", "install"]
     else:
-        pip_args = ["pip3", "install"]
+        pip_args = ["pip", "install"]
 
     # If we are in a global install, use `--user` to install so that you do not
     # need root access in order to initialize linters.

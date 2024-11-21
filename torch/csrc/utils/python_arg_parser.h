@@ -511,8 +511,7 @@ inline PyObject* toPyObject(const c10::SymInt& symint) {
     return r;
   } else {
     auto m = symint.maybe_as_int();
-    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-    return THPUtils_packInt64(m.value());
+    return THPUtils_packInt64(*m);
   }
 }
 
@@ -813,7 +812,6 @@ inline std::optional<at::Layout> PythonArgs::layoutOptional(int i) {
 inline at::Device deviceFromLong(int64_t device_index) {
   TORCH_CHECK(device_index >= 0, "Device index must not be negative");
   return at::Device(
-      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       at::getAccelerator(true).value(),
       static_cast<c10::DeviceIndex>(device_index));
 }

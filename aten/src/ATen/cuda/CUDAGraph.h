@@ -82,9 +82,7 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   // in a capture to run on the same device, but this is a limitation of CUDAGraph,
   // not CUDA itself.  We can straightforwardly modify CUDAGraph to support multi-device
   // captures if needed.
-  // init capture_dev_ as UNDEFINED_DEVICE to check that it stores the real device id in the destructor
-  static constexpr c10::DeviceIndex UNDEFINED_DEVICE = -1;
-  c10::DeviceIndex capture_dev_{UNDEFINED_DEVICE};
+  c10::DeviceIndex capture_dev_{};
 };
 
 } // namespace cuda

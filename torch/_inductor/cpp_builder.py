@@ -288,7 +288,8 @@ def get_compiler_version_info(compiler: str) -> str:
 
 # =============================== cpp builder ===============================
 def _append_list(dest_list: List[str], src_list: List[str]) -> None:
-    dest_list.extend(copy.deepcopy(item) for item in src_list)
+    for item in src_list:
+        dest_list.append(copy.deepcopy(item))
 
 
 def _remove_duplication_in_list(orig_list: List[str]) -> List[str]:
@@ -741,11 +742,12 @@ def _setup_standard_sys_libs(
 
 
 def _get_build_args_of_chosen_isa(vec_isa: VecISA) -> Tuple[List[str], List[str]]:
-    macros: List[str] = []
-    build_flags: List[str] = []
+    macros = []
+    build_flags = []
     if vec_isa != invalid_vec_isa:
         # Add Windows support later.
-        macros.extend(copy.deepcopy(x) for x in vec_isa.build_macro())
+        for x in vec_isa.build_macro():
+            macros.append(copy.deepcopy(x))
 
         build_flags = [vec_isa.build_arch_flags()]
 

@@ -46,7 +46,7 @@ from .codecache import write_text
 from .codegen.common import BackendFeature, get_scheduling_for_device, Kernel
 from .comm_analysis import estimate_nccl_collective_runtime
 from .dependencies import Dep, MemoryDep, StarDep, WeakDep
-from .ir import ComputedBuffer, get_device_type, MultiOutput, MultiOutputLayout
+from .ir import ComputedBuffer, MultiOutput, MultiOutputLayout
 from .loop_body import LoopBody
 from .memory import MemoryPlanningInfoForBuffer, MemoryPlanningInfoForNode
 from .runtime.runtime_utils import green_text, red_text
@@ -159,7 +159,7 @@ class SchedulerBuffer:
         assert self.node is not None
         return self.node.get_inputs_that_alias_output()
 
-    def get_mutations(self) -> Sequence[str]:
+    def get_mutations(self) -> List[str]:
         assert self.node is not None
         return self.node.get_mutation_names()
 
@@ -308,13 +308,9 @@ class BaseSchedulerNode:
             dep = deps.pop()
             used_names.add(dep)
             if V.graph.name_to_buffer.get(dep):
-                deps.extend(
-                    alias
-                    for alias in V.graph.name_to_buffer[
-                        dep
-                    ].get_inputs_that_alias_output()
-                    if alias not in used_names
-                )
+                for alias in V.graph.name_to_buffer[dep].get_inputs_that_alias_output():
+                    if alias not in used_names:
+                        deps.append(alias)
         return used_names
 
     def prune_deps(self) -> None:
@@ -366,17 +362,9 @@ class BaseSchedulerNode:
     def get_output(self, buf_name: str) -> SchedulerBuffer:
         return self.outputs_by_name[buf_name]
 
-    def get_device(self) -> Optional[torch.device]:
+    def get_device(self) -> torch.device:
         assert self.node is not None
         return self.node.get_device()
-
-    def is_cpu(self) -> bool:
-        device = self.get_device()
-        return device is not None and device.type == "cpu"
-
-    def is_gpu(self) -> bool:
-        device = self.get_device()
-        return device is not None and is_gpu(device.type)
 
     def is_reduction(self) -> bool:
         return False
@@ -654,7 +642,7 @@ class BaseSchedulerNode:
         layout = buf.node.get_layout()
         dtype = buf.node.get_dtype()
 
-        if layout.device is not None and not is_gpu(get_device_type(layout.device)):
+        if layout.device is not None and not is_gpu(layout.device.type):
             # default to no reordering based on runtime
             return 0
 
@@ -882,14 +870,13 @@ class SchedulerNode(BaseSchedulerNode):
             recompute_sizes_body_func=recompute_sizes_body_func,
         )
 
-        device = self.node.get_device_or_error()
-        group_fn = self.scheduler.get_backend(device).group_fn
-        self.group = (device, group_fn(self._sizes))
+        group_fn = self.scheduler.get_backend(self.node.get_device()).group_fn
+        self.group = (self.node.get_device(), group_fn(self._sizes))
 
         # Don't normalize since normalization will merge loops which
         # makes it hard to decide new loop orders.
         should_normalize = not config.loop_ordering_after_fusion or not is_gpu(
-            device.type
+            self.node.get_device().type
         )
 
         if isinstance(self.node, ir.TemplateBuffer):
@@ -1515,9 +1502,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
                 self.name_to_node[name] = other_node
 
         self.use_custom_partition_algo = use_custom_partition_algo
-        device = snodes[0].get_device()
-        assert device
-        self.group = (device, ((sympy.Expr("combo_kernel"),),))
+        self.group = (snodes[0].get_device(), ((sympy.Expr("combo_kernel"),),))
         self.origins: OrderedSet[torch.fx.Node] = OrderedSet()
         self.enable_autotune = enable_autotune
 
@@ -1595,7 +1580,8 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
         raise NotImplementedError
 
     def codegen(self) -> None:
-        raise NotImplementedError
+        assert isinstance(self.node, ir.ComputedBuffer), f"{type(self.node)=}"
+        self.node.get_store_function()(self.node.make_loader()())
 
     def is_foreach(self) -> bool:
         return True
@@ -2300,7 +2286,7 @@ class Scheduler:
             # Even for CPU, if we are using the halide backend, we still need
             # the merge loops steps below
             if not isinstance(node, (SchedulerNode, FusedSchedulerNode)) or (
-                not node.is_gpu() and config.cpu_backend != "halide"
+                (not is_gpu(node.get_device().type)) and config.cpu_backend != "halide"
             ):
                 continue
             for snode in node.get_nodes():
@@ -2491,7 +2477,6 @@ class Scheduler:
 
         node_list_1 = node1.get_nodes()
         device = node_list_1[0].get_device()
-        assert device
 
         # don't support benchmark fusion for CPU right now.
         if device.type == "cpu":
@@ -2960,7 +2945,7 @@ class Scheduler:
         # TODO Don't do loop reordering for CPU for now.
         # Should debug more why it does not work for CPU codegen
         if not config.loop_ordering_after_fusion or any(
-            n.is_cpu() for n in [node1, node2]
+            n.get_device().type == "cpu" for n in [node1, node2]
         ):
             return 0
 
@@ -3339,11 +3324,10 @@ class Scheduler:
                 node1 = node2
                 node2 = tmp
 
-            deps = [
-                dep
-                for dep in node1.read_writes.reads | node1.read_writes.writes
-                if dep in node2.read_writes.reads or dep in node2.read_writes.writes
-            ]
+            deps = []
+            for dep in node1.read_writes.reads | node1.read_writes.writes:
+                if dep in node2.read_writes.reads or dep in node2.read_writes.writes:
+                    deps.append(dep)
 
             return sum(self.dep_size_hint(dep) for dep in deps)
 
@@ -3467,8 +3451,7 @@ class Scheduler:
 
         return device_scheduling(self)
 
-    def get_backend(self, device: Optional[torch.device]) -> BaseScheduling:
-        assert device is not None
+    def get_backend(self, device: torch.device) -> BaseScheduling:
         if device not in self.backends:
             self.backends[device] = self.create_backend(device)
         return self.backends[device]
@@ -3618,7 +3601,6 @@ class Scheduler:
         device = node_list[0].get_device()
         V.graph.scheduler = self
         self.current_device = device
-        assert device is not None
         backend = self.get_backend(device)
         return backend.benchmark_combo_kernel(node_list)
 
@@ -3634,7 +3616,7 @@ class Scheduler:
         device = subkernel_nodes[0].get_device()
 
         # don't support benchmark fusion for CPU right now.
-        if device is None or device.type == "cpu":
+        if device.type == "cpu":
             return True
 
         from triton.compiler.errors import CompilationError
@@ -3704,12 +3686,13 @@ class Scheduler:
 
     def update_zero_dim_cpu_tensor(self) -> None:
         for node in self.nodes:
-            if node.is_gpu():
+            if node.get_device() and is_gpu(node.get_device().type):
                 for read in node.read_writes.reads:
                     buffer = V.graph.name_to_buffer.get(read.name)
                     if (
                         buffer
-                        and get_device_type(buffer) == "cpu"
+                        and buffer.get_device()
+                        and buffer.get_device().type == "cpu"
                         and not isinstance(buffer.layout, MultiOutputLayout)
                         and buffer.get_size() == []
                     ):

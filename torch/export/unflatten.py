@@ -152,11 +152,9 @@ class InterpreterModule(torch.nn.Module):
                 # the keys in the kwarg dict.
                 arg_list = list(args)
                 kwarg_names = self.arg_names[len(arg_list) :]
-                arg_list.extend(
-                    kwargs[kwarg_name]
-                    for kwarg_name in kwarg_names
-                    if kwarg_name in kwargs
-                )
+                for kwarg_name in kwarg_names:
+                    if kwarg_name in kwargs:
+                        arg_list.append(kwargs[kwarg_name])
 
                 # Assert that the kwargs passed in exactly match the positional
                 # arguments specified by the GraphModule. This should be
@@ -935,10 +933,9 @@ class _ModuleFrame:
             assert kwargs_spec.context is not None
 
             with self.graph.inserting_after(None):
-                arg_nodes = [
-                    self.graph.placeholder(f"_positional_arg_{idx}")
-                    for idx in range(args_spec.num_children)
-                ]
+                arg_nodes = []
+                for idx in range(args_spec.num_children):
+                    arg_nodes.append(self.graph.placeholder(f"_positional_arg_{idx}"))
                 kwarg_nodes = {}
                 for name in kwargs_spec.context:
                     kwarg_nodes[name] = self.graph.placeholder(name)

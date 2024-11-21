@@ -4,7 +4,7 @@ import math
 import os
 import sys
 from itertools import count
-from typing import Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 import sympy
 from sympy import Expr
@@ -1101,18 +1101,15 @@ class CppWrapperCpu(PythonWrapperCodegen):
             return
         super().add_benchmark_harness(output)
 
-    def codegen_cpp_sizevar(self, x: Expr, *, simplify: bool = True) -> str:
-        return self.expr_printer(V.graph.sizevars.simplify(x) if simplify else x)
-
     def codegen_sizevar(self, x: Expr) -> str:
-        return self.codegen_cpp_sizevar(x)
+        return self.expr_printer(V.graph.sizevars.simplify(x))
 
     def codegen_tuple_access(self, basename: str, name: str, index: str) -> str:
         # in the abi_compatible mode, outputs are returned via arguments
         return name
 
-    def codegen_shape_tuple(self, shape: Sequence[Expr]) -> str:
-        parts = [*map(self.codegen_sizevar, shape)]
+    def codegen_shape_tuple(self, shape: Tuple[Expr, ...]) -> str:
+        parts = list(map(self.codegen_sizevar, shape))
         if len(parts) == 0:
             return "{}"
         if len(parts) == 1:
@@ -1365,7 +1362,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
             if dtype is not None and dtype != data.dtype:
                 # wrap it with dtypeview
-                final_tmp_name, tmp_call_strs = create_dtypeview_call(final_tmp_name)
+                final_tmp_name, tmp_call_strs = create_dtypeview_call(reinterpret_call)
                 call_strs.extend(tmp_call_strs)
             else:
                 call_strs.append(
@@ -1909,7 +1906,7 @@ if (custom_op_wrapper.get() == NULL) {
         py_args_var = f"py_args_{next(self.arg_var_id)}"
         # First arg is always the python op name
         lines = f"""
-RAIIPyObject {py_args_var}(PyTuple_New({num_args + 1}));
+RAIIPyObject {py_args_var}(PyTuple_New({num_args+1}));
 if ({py_args_var}.get() == NULL) {{
 throw std::runtime_error("PyTuple_New {py_args_var} failed");
 }}

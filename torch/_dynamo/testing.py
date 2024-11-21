@@ -95,7 +95,9 @@ def collect_results(
     results.append(buffers)
     for example in example_inputs:
         if isinstance(example, (tuple, list)):
-            results.extend(inp.grad for inp in example if isinstance(inp, torch.Tensor))
+            for inp in example:
+                if isinstance(inp, torch.Tensor):
+                    results.append(inp.grad)
         else:
             if isinstance(example, torch.Tensor):
                 results.append(example.grad)

@@ -51,7 +51,7 @@ def get_inverse_offsets(
     # offsets to be in global memory so that we can binary search over the
     # entire tensor
     offsets.realize()
-    device: torch.device = offsets.get_device_or_error()
+    device: torch.device = offsets.get_device()
     dtype: torch.dtype = offsets.get_dtype()
 
     # pyre-ignore[2,3]
@@ -118,7 +118,7 @@ def register_jagged_ops():
         max_lengths: List[int],  # list of ints/SymInts
         padding_value: float = 0.0,
     ) -> TensorBox:
-        device = jagged_values.get_device_or_error()
+        device = jagged_values.get_device()
         dtype = jagged_values.get_dtype()
 
         jagged_values_size = jagged_values.get_size()
@@ -188,7 +188,7 @@ def register_jagged_ops():
         jagged_offsets: List[TensorBox],
         jagged_len: Optional[int] = None,
     ) -> TensorBox:
-        device = dense.get_device_or_error()
+        device = dense.get_device()
         dtype = dense.get_dtype()
 
         dense_size = dense.get_size()
