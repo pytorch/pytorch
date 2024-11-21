@@ -12,7 +12,6 @@
 # serve to show the default.
 
 import inspect
-import os
 
 # If extensions (or modules to document with autodoc) are in another directory,
 # add these directories to sys.path here. If the directory is relative to the
@@ -3409,7 +3408,7 @@ def linkcode_resolve(domain, info):
         patch_version = version_parts[2].split("+")[0].split("a")[0] # assuming a0 always comes after release version in versions.txt
         version_path = f"v{version_parts[0]}.{version_parts[1]}.{patch_version}"
     else:
-        version_path = os.getenv("SHA1", "main")
+        version_path = torch.version.git_version
     fn = os.path.relpath(fn, start=os.path.dirname(torch.__file__))
     return (
         f"https://github.com/pytorch/pytorch/blob/{version_path}/torch/{fn}#L{lineno}"
