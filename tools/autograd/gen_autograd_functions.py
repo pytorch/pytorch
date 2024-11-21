@@ -583,8 +583,8 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
     compiled_args: list[str] = []
     apply_with_saved_before: list[str] = []
     apply_with_saved_after: list[str] = []
-    unpacked_saved_vars = []
-    unpacked_saved_vars_ref_type = []
+    unpacked_saved_vars: list[str] = []
+    unpacked_saved_vars_ref_type: list[str] = []
     # Maps var_name to a unique index. The var_name is the
     # name of an input to the operator that needs a gradient (like "self", "other").
     # The index is the order in which they appear. We use this mapping
@@ -592,7 +592,6 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
     var_name_map: dict[str, int] = {}
 
     for idx, arg in enumerate(info.args_with_derivatives):
-        # compute_index_ranges.append(f"auto {arg.name}_ix = {idx};")
         if arg.type in TENSOR_LIST_LIKE_CTYPES:
             size = f"{arg.name}_size_"
             saved_list_sizes.append(f"size_t {arg.name}_size_;")
@@ -853,7 +852,7 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
 
         if unpacked_ref_type is None:
             unpacked_ref_type = f"{saved_variables[-1].split(' ')[0]}&"
-        unpacked_saved_vars.append(name)
+        unpacked_saved_vars.append(str(name))
         unpacked_saved_vars_ref_type.append(unpacked_ref_type)
 
     for var in sorted(info.all_saved_inputs, key=lambda sa: str(sa.nctype.name)):
@@ -926,17 +925,21 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
                     f"needs_input_grad[{var_name_map[name]}]," for name in var_names
                 ]
                 grad_input_mask = GRAD_INPUT_MASK.substitute(
-                    n=len(var_names),
-                    masks=masks
+                    n=len(var_names), masks=masks
                 )
             else:
                 grad_input_mask = ""
-            needs_input_grad = [f"needs_input_grad[{var_name_map[name]}]" for name in var_names]
+            needs_input_grad = [
+                f"needs_input_grad[{var_name_map[name]}]" for name in var_names
+            ]
             needs_input_grad = " || ".join(needs_input_grad)
-            # idx_ranges = ", ".join(f"{n}_ix" for n in var_names)
             copy_ranges: list[str] = []
             for i, n in enumerate(var_names):
-                copy_ranges.append(DERIVATIVE_MULTI_COPY_RANGE.substitute(name=n, i=i, idx=var_name_map[n]))
+                copy_ranges.append(
+                    DERIVATIVE_MULTI_COPY_RANGE.substitute(
+                        name=n, i=i, idx=var_name_map[n]
+                    )
+                )
             return False, DERIVATIVE_MULTI.substitute(
                 needs_input_grad=needs_input_grad,
                 copy_ranges=copy_ranges,
@@ -947,7 +950,7 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
     masks = []
 
     need_any_grad_defined_var = False
-    for idx, derivative in enumerate(info.derivatives):
+    for derivative in info.derivatives:
         checks_any_grad_defined, derivative_text = emit_derivative(
             derivative, info.args_with_derivatives
         )
@@ -965,7 +968,6 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
             "bool any_grad_defined = any_variable_defined(grads);",
         )
 
-
     if info.name in UNTRACEABLE_FUNCTIONS:
         superclass = "Node"
     else:
@@ -977,10 +979,11 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
     all_getter_definitions = "\n".join(getter_definitions)
 
     compute_needs_input_grad = COMPUTE_NEEDS_INPUT_GRAD.substitute(
-        n=len(masks),
-        compute_index_ranges=compute_index_ranges,
-        masks=masks);
-    unpacked_saved_vars_signature = [f"{T} {x}" for T, x in zip(unpacked_saved_vars_ref_type, unpacked_saved_vars)]
+        n=len(masks), compute_index_ranges=compute_index_ranges, masks=masks
+    )
+    unpacked_saved_vars_signature = [
+        f"{T} {x}" for T, x in zip(unpacked_saved_vars_ref_type, unpacked_saved_vars)
+    ]
 
     return template.substitute(
         unpacks="\n".join(unpack),
