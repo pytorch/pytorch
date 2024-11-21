@@ -49,6 +49,7 @@ Streams and events
     :nosignatures:
 
     Event
+    ExternalStream
     Stream
 
 

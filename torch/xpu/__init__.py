@@ -17,7 +17,7 @@ from torch import device as _device
 from torch._utils import _dummy_type, _LazySeedTracker
 
 from ._utils import _get_device_index
-from .streams import Event, Stream
+from .streams import Event, ExternalStream, Stream
 
 
 _initialized = False
@@ -487,6 +487,7 @@ from .random import (
 
 __all__ = [
     "Event",
+    "ExternalStream",
     "Stream",
     "StreamContext",
     "current_device",
