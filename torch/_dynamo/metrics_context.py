@@ -71,6 +71,20 @@ class MetricsContext:
             )
         self._metrics[metric] = value
 
+    def set_key_value(self, metric: str, key: str, value: Any) -> None:
+        """
+        Treats a give metric as a dictionary and set the k and value within it.
+        Note that the metric must be a dictionary or not present.
+
+        We allow this to be called multiple times (i.e. for features, it's not uncommon
+        for them to be used multiple times within a single compilation).
+        """
+        if self._level == 0:
+            raise RuntimeError(f"Cannot set {metric} outside of a MetricsContext")
+        if metric not in self._metrics:
+            self._metrics[metric] = {}
+        self._metrics[metric][key] = value
+
     def update(self, values: Dict[str, Any]) -> None:
         """
         Set multiple metrics directly. This method does NOT increment. Raises if any
