@@ -435,6 +435,7 @@ class FakeTensorTest(TestCase):
         def fn(x):
             return torch.functional.split(x, 0)[0]
 
+        # meta should not return self
         with FakeTensorMode(), enable_python_dispatcher():
             out_fake = fn(torch.empty((0,)))
 
