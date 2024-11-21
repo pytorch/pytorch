@@ -309,6 +309,12 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         # return rank to GPU map
         return init_multigpu_helper(self.world_size, "nccl")
 
+    @property
+    def destroy_pg_upon_exit(self) -> bool:
+        # This TestCase focuses on creation, destroy and abort of PG's. So it
+        # does not need auto-destroy upon exit.
+        return False
+
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 1 GPU")
     @skip_if_lt_x_gpu(1)
@@ -341,7 +347,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         def abortpg():
             c10d.distributed_c10d._get_default_group()._get_backend(
                 torch.device(device)
-            )._shutdown()
+            ).abort()
 
         # Initialize DDP to ensure "destroy_process_group" will not call
         # ProcessGroupNCCL destructor since DDP holds a reference to process group.
