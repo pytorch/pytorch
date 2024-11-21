@@ -185,8 +185,8 @@ class HalidePrinter(PythonPrinter):
             return super()._print_FloorDiv(expr)
 
         x, div = expr.args
-        x = self.cast_float(self.paren(self.doprint(x)))
-        div = self.cast_float(self.paren(self.doprint(div)))
+        x = self.cast_float(self.doprint(x))
+        div = self.cast_float(self.doprint(div))
         return self.cast_index(f"hl.floor({x} / {div})")
 
     def _print_Round(self, expr):
