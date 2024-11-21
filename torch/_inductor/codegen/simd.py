@@ -113,7 +113,7 @@ class BlockPatternMatcher:
         for dim in dims[:0:-1]:
             numel = dim * numels[0]
             numels.appendleft(numel)
-        return list(numels)
+        return [*numels]
 
     @classmethod
     def match_mod_div_block_expr(
