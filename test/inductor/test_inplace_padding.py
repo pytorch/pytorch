@@ -112,7 +112,8 @@ class InplacePaddingTest(TestCase):
         M, N = 2048, 2048
         x = rand_strided((M, N), (N + 10, 1), device=GPU_TYPE)
         y = torch.randn(N + 8, M, device=GPU_TYPE)
-        check_model(self, f, (x, y), atol=1e-3, rtol=1e-3)
+        # 1e-3 tolerance may fail on CI A10G GPU.
+        check_model(self, f, (x, y), atol=1e-2, rtol=1e-2)
 
         self.assertEqual(num_inplace_padding(), 0)
 

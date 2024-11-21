@@ -229,7 +229,7 @@ namespace {
 typedef std::vector<TensorCheck> ChecksList;
 
 typedef struct {
-  PyObject_HEAD;
+  PyObject_HEAD
   ChecksList* checks;
 } TensorGuards;
 
@@ -510,7 +510,7 @@ static PyTypeObject TensorGuardsType = { PyVarObject_HEAD_INIT(nullptr, 0)
 // merged.
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct GlobalStateGuard {
-  PyObject_HEAD;
+  PyObject_HEAD
 
   inline void init() {
     auto& ctx = at::globalContext();
@@ -887,11 +887,6 @@ std::string get_exception_message() {
 }
 
 bool is_immutable_object(py::handle example_value) {
-  static py::object config_module = py::module_::import("torch._dynamo.config");
-  bool is_tensor_immutable =
-      config_module.attr("skip_tensor_guards_with_matching_dict_tags")
-          .cast<bool>();
-
   if (PyTuple_Check(example_value.ptr())) {
     // Check that each element is immutable
     for (Py_ssize_t i = 0; i < PyTuple_Size(example_value.ptr()); ++i) {
@@ -902,11 +897,10 @@ bool is_immutable_object(py::handle example_value) {
     }
     return true;
   }
-
   return PyLong_Check(example_value.ptr()) ||
       PyFloat_Check(example_value.ptr()) || PyBool_Check(example_value.ptr()) ||
       PyUnicode_Check(example_value.ptr()) ||
-      (is_tensor_immutable && THPVariable_Check(example_value.ptr()));
+      THPVariable_Check(example_value.ptr());
 }
 
 bool is_parameter(py::handle tensor) {
@@ -3444,8 +3438,19 @@ class GlobalWeakRefGuardAccessor : public GuardAccessor {
       return false;
     }
 
-    PyObject* x = PyWeakref_GetObject(weakref); // borrowed ref
-    return _guard_manager->check_nopybind(x);
+    PyObject* x = nullptr;
+    if (PyWeakref_GetRef(weakref, &x) == -1) { // strong reference
+      // error when attempting to call ref
+      PyErr_Clear();
+      return false;
+    }
+    if (x == nullptr) {
+      // weakref is dead
+      x = Py_NewRef(Py_None);
+    }
+    bool result = _guard_manager->check_nopybind(x);
+    Py_DECREF(x);
+    return result;
   }
 
   GuardDebugInfo check_verbose_nopybind(
@@ -3465,8 +3470,20 @@ class GlobalWeakRefGuardAccessor : public GuardAccessor {
           false, std::string("Not a weakref ") + get_source(), 0);
     }
 
-    PyObject* x = PyWeakref_GetObject(weakref); // borrowed ref
-    return _guard_manager->check_verbose_nopybind(x);
+    PyObject* x = nullptr;
+    if (PyWeakref_GetRef(weakref, &x) == -1) { // strong reference
+      // error when attempting to call ref
+      PyErr_Clear();
+      return GuardDebugInfo(
+          false, std::string("Weakref_GetRef failed ") + get_source(), 0);
+    }
+    if (x == nullptr) {
+      // weakref is dead
+      x = Py_NewRef(Py_None);
+    }
+    auto result = _guard_manager->check_verbose_nopybind(x);
+    Py_DECREF(x);
+    return result;
   }
 
   std::string repr() const override {
@@ -3504,8 +3521,19 @@ class WeakRefCallGuardAccessor : public GuardAccessor {
       return false;
     }
 
-    PyObject* x = PyWeakref_GetObject(obj); // borrowed ref
-    return _guard_manager->check_nopybind(x);
+    PyObject* x = nullptr;
+    if (PyWeakref_GetRef(obj, &x) == -1) { // strong reference
+      // error when attempting to call ref
+      PyErr_Clear();
+      return false;
+    }
+    if (x == nullptr) {
+      // weakref is dead
+      x = Py_NewRef(Py_None);
+    }
+    bool result = _guard_manager->check_nopybind(x);
+    Py_DECREF(x);
+    return result;
   }
 
   GuardDebugInfo check_verbose_nopybind(
@@ -3515,8 +3543,20 @@ class WeakRefCallGuardAccessor : public GuardAccessor {
           false, std::string("Not a weakref obj ") + get_source(), 0);
     }
 
-    PyObject* x = PyWeakref_GetObject(obj); // borrowed ref
-    return _guard_manager->check_verbose_nopybind(x);
+    PyObject* x = nullptr;
+    if (PyWeakref_GetRef(obj, &x) == -1) { // strong reference
+      // error when attempting to call ref
+      PyErr_Clear();
+      return GuardDebugInfo(
+          false, std::string("Weakref_GetRef failed ") + get_source(), 0);
+    }
+    if (x == nullptr) {
+      // weakref is dead
+      x = Py_NewRef(Py_None);
+    }
+    auto result = _guard_manager->check_verbose_nopybind(x);
+    Py_DECREF(x);
+    return result;
   }
 
   std::string repr() const override {
@@ -3728,11 +3768,19 @@ static void* _torchinductor_pyobject_tensor_data_ptr(PyObject* obj) {
 }
 
 void* convert_to_root_guard_manager(py::object root) {
+  // For invalidated guards, return nullptr
+  if (root.is(py::none())) {
+    return nullptr;
+  }
   RootGuardManager* root_mgr = std::move(root).cast<RootGuardManager*>();
   return (void*)root_mgr;
 }
 
 bool run_root_guard_manager(void* root, PyObject* f_locals) {
+  // for invalidated guards, return false
+  if (root == nullptr) {
+    return false;
+  }
   return ((RootGuardManager*)root)->check_nopybind(f_locals);
 }
 
