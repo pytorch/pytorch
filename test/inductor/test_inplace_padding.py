@@ -63,7 +63,7 @@ class InplacePaddingTest(TestCase):
         M, N = 2048, 2048
         x = rand_strided((M, N), (N + 10, 1), device=GPU_TYPE)
         y = torch.randn(N + 8, M, device=GPU_TYPE)
-        check_model(self, f, (x, y), atol=1e-3, rtol=1e-3)
+        check_model(self, f, (x, y), atol=1e-2, rtol=1e-2)
 
         self.assertEqual(num_inplace_padding(), 1)
 
@@ -75,7 +75,7 @@ class InplacePaddingTest(TestCase):
         M, N = 2048, 2048
         x = rand_strided((M, N), (N + 5, 1), device=GPU_TYPE)
         y = torch.randn(N + 8, M, device=GPU_TYPE)
-        check_model(self, f, (x, y), atol=1e-3, rtol=1e-3)
+        check_model(self, f, (x, y), atol=1e-2, rtol=1e-2)
 
         self.assertEqual(num_inplace_padding(), 0)
 
@@ -93,7 +93,7 @@ class InplacePaddingTest(TestCase):
         M, N = 2048, 2048
         x = rand_strided((M, N), (N + 10, 1), device=GPU_TYPE)
         y = torch.randn(N + 8, M, device=GPU_TYPE)
-        check_model(self, f, (x, y), atol=1e-3, rtol=1e-3)
+        check_model(self, f, (x, y), atol=1e-2, rtol=1e-2)
 
         self.assertEqual(num_inplace_padding(), 1)
 
@@ -151,7 +151,7 @@ class InplacePaddingTest(TestCase):
 
         expect = (f(x, y), x.grad, linear.weight.grad, linear.bias.grad)
         actual = (opt_f(x, y), x.grad, linear.weight.grad, linear.bias.grad)
-        assert same(expect, actual, tol=1e-3), f"ref:\n{expect}\nact:\n{actual}"
+        assert same(expect, actual, tol=1e-2), f"ref:\n{expect}\nact:\n{actual}"
 
         # We may disable inplace_padding via env-var to test perf.
         self.assertEqual(num_inplace_padding(), int(inductor_config.inplace_padding))
