@@ -104,7 +104,7 @@ class BlockPatternMatcher:
         )
 
     @staticmethod
-    def get_slice_numels(dims: List[Any]) -> List[Any]:
+    def get_slice_numels(dims: List[Expr]) -> List[Expr]:
         """
         Compute the cumulative size of each dimension's slice.
         This proceeds from the last dim up to the second.
