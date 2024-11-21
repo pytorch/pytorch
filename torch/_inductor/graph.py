@@ -1136,10 +1136,11 @@ class GraphLowering(torch.fx.Interpreter):
             return self.add_tensor_constant(value, target)
 
         with no_dispatch():
-            if value.shape == ():
-                return Constant(
-                    value=value.item(), dtype=value.dtype, device=value.device
-                )
+            # if value.shape == ():
+            #     breakpoint()
+            #     return Constant(
+            #         value=value.item(), dtype=value.dtype, device=value.device
+            #     )
             if self.can_inline_constant(value):
                 log.debug("Inlining constant: %s ", str(target))
                 # tensor lowering has constant inlining logic
