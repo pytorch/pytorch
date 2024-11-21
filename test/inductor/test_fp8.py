@@ -111,7 +111,6 @@ class TestFP8Types(TestCase):
         actual = torch.compile(f)(x)
         torch.testing.assert_close(expected.half(), actual.half(), rtol=1e-2, atol=1e-2)
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @unittest.skipIf(TEST_WITH_ROCM, "Not supported yet")
     @parametrize("dtype", (torch.float16, torch.bfloat16))
     @parametrize("device", ("cuda", "cpu"))

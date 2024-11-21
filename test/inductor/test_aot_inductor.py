@@ -51,6 +51,7 @@ from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_
 from torch.testing._internal.triton_utils import HAS_CUDA, requires_cuda
 from torch.utils import _pytree as pytree
 from torch.utils._triton import has_triton_tma
+from torch.testing._internal.inductor_utils import HAS_CPU
 
 
 if HAS_CUDA:
@@ -4154,5 +4155,5 @@ if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
     # cpp_extension N/A in fbcode
-    if HAS_CUDA or sys.platform == "darwin":
+    if HAS_CUDA or sys.platform == "darwin" or HAS_CPU:
         run_tests(needs="filelock")
