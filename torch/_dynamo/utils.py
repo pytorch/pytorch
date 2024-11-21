@@ -882,40 +882,14 @@ _compilation_metrics: Deque[CompilationMetrics] = collections.deque(
 
 def add_compilation_metrics_to_chromium(c: CompilationMetrics) -> None:
     event_logger = get_chromium_event_logger()
-    event_name = event_logger.get_top()
-    if not event_name:
-        return
-    event_logger.add_event_data(
-        event_name=event_name,
-        frame_key=c.frame_key,
-        co_name=c.co_name,
-        co_filename=c.co_filename,
-        co_firstlineno=c.co_firstlineno,
-        cache_size=c.cache_size,
-        accumulated_cache_size=c.accumulated_cache_size,
-        guard_count=c.guard_count,
-        shape_env_guard_count=c.shape_env_guard_count,
-        graph_op_count=c.graph_op_count,
-        graph_node_count=c.graph_node_count,
-        graph_input_count=c.graph_input_count,
-        fail_type=c.fail_type,
-        fail_reason=c.fail_reason,
-        fail_user_frame_filename=c.fail_user_frame_filename,
-        fail_user_frame_lineno=c.fail_user_frame_lineno,
-        # Sets aren't JSON serializable
-        non_compliant_ops=list(c.non_compliant_ops)
-        if c.non_compliant_ops is not None
-        else None,
-        compliant_custom_ops=list(c.compliant_custom_ops)
-        if c.compliant_custom_ops is not None
-        else None,
-        restart_reasons=list(c.restart_reasons)
-        if c.restart_reasons is not None
-        else None,
-        dynamo_time_before_restart_s=c.dynamo_time_before_restart_s,
-        has_guarded_code=c.has_guarded_code,
-        dynamo_config=c.dynamo_config,
-    )
+    if event_name := event_logger.get_top():
+        metrics = vars(c)
+        for k, v in metrics.items():
+            # Sets aren't JSON serializable
+            if isinstance(v, set):
+                metrics[k] = list(v)
+
+        event_logger.add_event_data(event_name, **metrics)
 
 
 def _scrubbed_inductor_config_for_logging() -> Optional[str]:
