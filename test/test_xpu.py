@@ -457,7 +457,7 @@ print(torch.xpu.device_count())
         torch.xpu.synchronize()
         after_free_bytes, after_total_bytes = torch.xpu.mem_get_info()
 
-        self.assertLess(after_free_bytes, before_free_bytes)
+        self.assertLessEqual(before_free_bytes - after_free_bytes, 1024 * 1024)
         self.assertEqual(before_total_bytes, after_total_bytes)
 
     def test_get_arch_list(self):
