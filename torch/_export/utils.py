@@ -686,7 +686,7 @@ def _get_torch_jit_trace_forward_signature(mod: torch.nn.Module):
 
     # TODO: Directly provide inspect.signature compatible TS-d module.
     """
-    ast_mod = ast.parse(mod.code)
+    ast_mod = ast.parse(mod.code)  # type: ignore[call-overload]
     ast_func_def: ast.FunctionDef = ast_mod.body[0]  # type: ignore[assignment]
 
     # FIXME(jiashenc): TorchScript should only allow positional or keywords arguments.
