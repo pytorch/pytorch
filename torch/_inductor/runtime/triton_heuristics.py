@@ -1461,7 +1461,7 @@ def _get_nd_reduction_numels(r: int, size_hints: Sequence[int]) -> List[int]:
         r == final_numel
     ), f"Expected ND reduction size ({rnumels}) to have {r} elements."
 
-    return list(rnumels)
+    return [*rnumels]
 
 
 def triton_config_reduction(
