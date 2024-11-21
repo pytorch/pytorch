@@ -4353,6 +4353,18 @@ class TestAutograd(TestCase):
 
         self.assertEqual(torch._C._current_graph_task_id(), -1)
 
+    def test_is_backward_executing(self):
+        def hook(_):
+            self.assertTrue(torch.autograd.graph.is_backward_executing())
+
+        self.assertFalse(torch.autograd.graph.is_backward_executing())
+
+        t = torch.tensor(1.0, requires_grad=True).clone()
+        t.register_hook(hook)
+        t.backward()
+
+        self.assertFalse(torch.autograd.graph.is_backward_executing())
+
     def test_current_graph_task_execution_order(self):
         predicted = [None]
 
