@@ -163,8 +163,10 @@ def _assert_module_states(
         for (_, p1), (_, p2) in zip(rank0_states, state):
             assert_fn(p1, p2)
 
+
 def get_devtype():
     return torch.device(DEVICE_TYPE)
+
 
 def _zero_model(
     model: nn.Module,
@@ -942,9 +944,11 @@ class MLPStack(nn.Sequential):
             "1.in_proj": ColwiseParallel(use_local_output=False),
             "1.out_proj": RowwiseParallel(use_local_output=False),
             "2.in_proj": ColwiseParallel(use_local_output=False),
-            "2.out_proj": RowwiseParallel(output_layouts=Shard(1))
-            if self.with_seq_parallel
-            else RowwiseParallel(),
+            "2.out_proj": (
+                RowwiseParallel(output_layouts=Shard(1))
+                if self.with_seq_parallel
+                else RowwiseParallel()
+            ),
         }
         if self.with_seq_parallel:
             parallelize_plan["3"] = SequenceParallel(sequence_dim=1)
@@ -1373,7 +1377,9 @@ class FSDPTest(MultiProcessTestCase):
         )
         if ref_init_fn is None:
             if TEST_HPU:
-                ref_model = DDP(model, device_ids=[DEVICE_TYPE], output_device=DEVICE_TYPE)
+                ref_model = DDP(
+                    model, device_ids=[DEVICE_TYPE], output_device=DEVICE_TYPE
+                )
             else:
                 ref_model = DDP(model, device_ids=[rank], output_device=rank)
         else:
