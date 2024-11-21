@@ -746,7 +746,7 @@ class TestMultiheadAttentionNN(NNTestCase):
 
 
 class TestMultiheadAttentionNNDeviceType(NNTestCase):
-    @skipIfRocm # temp skip
+
     def test_multihead_self_attn_two_masks_fast_path(self, device):
         """
         Multihead self-attention should give the same result on the fast path (BetterTransformer) as on the slow path
@@ -757,6 +757,7 @@ class TestMultiheadAttentionNNDeviceType(NNTestCase):
             num_heads = 7
             batch_size = 8
             src_len = 5
+            need_weights = False
 
             query = value = key = torch.rand(batch_size, src_len, embed_dim).to(device)
             # Create masks of two different types
@@ -776,7 +777,7 @@ class TestMultiheadAttentionNNDeviceType(NNTestCase):
 
             # Compute attention on the fast path
             mta_model = torch.nn.MultiheadAttention(
-                embed_dim, num_heads, batch_first=True, device=device
+                embed_dim, num_heads, batch_first=True, device=device, add_bias_kv = True
             )
             mta_model.training = False
             result_fast_path, _ = mta_model(
@@ -785,6 +786,7 @@ class TestMultiheadAttentionNNDeviceType(NNTestCase):
                 value,
                 attn_mask=attn_mask,
                 key_padding_mask=key_padding_mask,
+                need_weights = need_weights
             )
 
             # Compute attention on the slow path
@@ -804,7 +806,7 @@ class TestMultiheadAttentionNNDeviceType(NNTestCase):
                 mta_model.out_proj.bias,
                 training=mta_model.training,
                 key_padding_mask=key_padding_mask,
-                need_weights=False,
+                need_weights=need_weights,
                 attn_mask=attn_mask,
                 use_separate_proj_weight=False,
                 q_proj_weight=mta_model.q_proj_weight,
