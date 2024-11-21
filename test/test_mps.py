@@ -8391,7 +8391,7 @@ class TestMPS(TestCaseMPS):
         x = torch.nextafter(torch.ones(1024, device='mps'), torch.zeros(1024, device='mps'))
         for _ in range(3):
             torch.mps.synchronize()
-        self.assertLess(x.sum().item(), y.numel())
+        self.assertLess(x.sum().item(), x.numel())
 
 class TestLogical(TestCaseMPS):
     def _wrap_tensor(self, x, device="cpu", dtype=None, requires_grad=False):
