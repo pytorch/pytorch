@@ -32,6 +32,8 @@ import triton
 import triton.language as tl
 
 import itertools
+from torch.nested._internal.nested_tensor import NestedTensor
+from torch.nested._internal.ops import extract_kwargs
 
 def gen_configs():
     products = itertools.product([32, 64, 128],
@@ -150,16 +152,12 @@ def grouped_matmul_kernel(
         # # go to the next tile by advancing NUM_SM
         # tile_idx += NUM_SM
 
-def group_gemm_fn(tensor_a, tensor_b):
-    assert tensor_a.is_nested
+def group_gemm_fn(a_values, a_offsets, max_M, tensor_b):
     assert not tensor_b.is_nested
-    assert tensor_a.size(0) == tensor_b.size(0)
-    group_size = tensor_a.size(0)
+    group_size = a_offsets.size(0)
 
     assert tensor_b.is_contiguous()
 
-    a_values = tensor_a.values()
-    a_offsets = tensor_a.offsets().to(torch.int32)
 
     assert a_values.dim() == 2
 
@@ -168,11 +166,11 @@ def group_gemm_fn(tensor_a, tensor_b):
     c_values = a_values.new_empty((a_values.size(0), N))
     c_offsets = a_offsets
 
-    max_M = tensor_a._max_seqlen
     # we use a fixed number of CTA, and it's auto-tunable
     # grid = lambda META: (META['NUM_SM'], group_size)
-    grid = lambda META: (triton.cdiv(max_M, META["BLOCK_SIZE_M"]) * triton.cdiv(N, META["BLOCK_SIZE_N"]),
-                         group_size)
+    def grid(META):
+        return (triton.cdiv(max_M, META["BLOCK_SIZE_M"]) * triton.cdiv(N, META["BLOCK_SIZE_N"]),
+                group_size)
     grouped_matmul_kernel[grid](
         tensor_b,
         group_size,
@@ -193,3 +191,22 @@ def group_gemm_fn(tensor_a, tensor_b):
     )
 
     return c_values
+
+def grouped_mm(tensor_a, tensor_b):
+    assert tensor_a.is_nested
+    assert not tensor_b.is_nested
+    assert tensor_a.size(0) == tensor_b.size(0)
+    group_size = tensor_a.size(0)
+
+    assert tensor_b.is_contiguous()
+
+    a_values = tensor_a.values()
+    a_offsets = tensor_a.offsets().to(torch.int32)
+
+    assert a_values.dim() == 2
+
+    max_M = tensor_a._max_seqlen
+
+    c_values = group_gemm_fn(a_values, a_offsets, max_M, tensor_b)
+
+    return NestedTensor(c_values, **extract_kwargs(tensor_a))
