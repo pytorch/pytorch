@@ -11,7 +11,6 @@ from torch.distributed._tensor._utils import compute_local_shape_and_global_offs
 from torch.distributed._tensor.api import distribute_tensor
 from torch.distributed._tensor.placement_types import Replicate, Shard
 from torch.distributed.distributed_c10d import broadcast_object_list
-<<<<<<< HEAD:test/distributed/tensor/test_random_ops.py
 from torch.distributed.fsdp import fully_shard
 from torch.distributed.tensor._random import (
     is_rng_supported_mesh,
@@ -28,7 +27,9 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     with_comms,
 )
 
+
 TYPE_DEVICE = "hpu" if TEST_HPU else "cuda"
+
 
 class DistTensorRandomInitTest(DTensorTestBase):
     def _run_init_op(self, init_op, *args, **kwargs):
