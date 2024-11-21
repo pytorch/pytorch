@@ -4266,22 +4266,26 @@ class TestLearnableBiases(InductorTestCase):
             f"reference error ({ref_error:.8f}) * fudge_factor ({fudge_factor})",
         )
 
-    def _check_outputs_and_grads(self, out_eager, out_compiled, out_gold, tensors):
+    def _check_outputs_and_grads(
+        self, out_eager, out_compiled, out_gold, tensors, names=None
+    ):
         backwards_grad = torch.ones_like(out_eager)
         grads_eager = torch.autograd.grad((out_eager,), tensors, backwards_grad)
         grads_compiled = torch.autograd.grad((out_compiled,), tensors, backwards_grad)
         grads_gold = torch.autograd.grad((out_gold,), tensors, backwards_grad)
 
-        tensor_names = ["out", "grad_query", "grad_key", "grad_value", "grad_bias"]
+        tensor_names = (
+            ["out", "grad_query", "grad_key", "grad_value", "grad_bias"]
+            if names is None
+            else names
+        )
+
         eager_tensors = (out_eager, *grads_eager)
         compiled_tensors = (out_compiled, *grads_compiled)
         gold_tensors = (out_gold, *grads_gold)
 
         for eager, compiled, gold, name in zip(
-            eager_tensors,
-            compiled_tensors,
-            gold_tensors,
-            tensor_names,
+            eager_tensors, compiled_tensors, gold_tensors, tensor_names, strict=True
         ):
             self._gold_check(eager, compiled, gold, name)
 
@@ -4688,6 +4692,54 @@ class TestLearnableBiases(InductorTestCase):
             out_compiled,
             out_gold,
             (query, key, value, gate_score),
+        )
+
+    @common_utils.parametrize(
+        "params", get_params(test_dtypes), name_fn=lambda x: f"{x}"
+    )
+    def test_distinct_biases(self, params):
+        query, key, value = self._init_tensors(params)
+        # Create two separate bias tensors
+        bias1 = torch.randn(
+            params.seq_length,
+            device=self.device,
+            dtype=params.dtype,
+            requires_grad=True,
+        )
+        bias2 = torch.randn(
+            params.seq_length,
+            device=self.device,
+            dtype=params.dtype,
+            requires_grad=True,
+        )
+
+        def bias_func(score, b, h, q_idx, kv_idx):
+            return score + bias1[q_idx] + bias2[kv_idx]
+
+        flex_compiled = torch.compile(flex_attention)
+        out_eager = flex_attention(query, key, value, score_mod=bias_func)
+        out_compiled = flex_compiled(query, key, value, score_mod=bias_func)
+        out_gold = flex_attention(
+            query.to(torch.float64),
+            key.to(torch.float64),
+            value.to(torch.float64),
+            score_mod=bias_func,
+        )
+
+        # Include both bias tensors in the tuple for gradient checking
+        self._check_outputs_and_grads(
+            out_eager,
+            out_compiled,
+            out_gold,
+            (query, key, value, bias1, bias2),
+            names=[
+                "out",
+                "grad_query",
+                "grad_key",
+                "grad_value",
+                "grad_bias1",
+                "grad_bias2",
+            ],
         )
 
 
