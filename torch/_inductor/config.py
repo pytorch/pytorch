@@ -441,6 +441,9 @@ enabled_metric_tables = os.environ.get("TORCHINDUCTOR_ENABLED_METRIC_TABLES", ""
 loop_ordering_after_fusion = (
     os.environ.get("TORCHINDUCTOR_LOOP_ORDERING_AFTER_FUSION", "0") == "1"
 )
+defer_reduction_split = (
+    os.environ.get("TORCHINDUCTOR_DEFER_REDUCTION_SPLIT", "0") == "1"
+)
 
 # If fusing two nodes only save less then score_fusion_memory_threshold memory,
 # we should not bother fusing the nodes.

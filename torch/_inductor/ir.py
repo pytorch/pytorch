@@ -945,6 +945,7 @@ class Reduction(Loops):
     # self.dtype represents the dst dtype
     src_dtype: torch.dtype
     reduction_hint: ReductionHint
+    input_node: Optional[IRNode] = None
 
     def __str__(self) -> str:  # type: ignore[override]
         return Loops.__str__(  # type: ignore[call-arg]
@@ -1019,6 +1020,8 @@ class Reduction(Loops):
         reduction_type: str,
         reduction_numel: Expr,
         input_node: Optional[IRNode] = None,
+        split_hints: Optional[List[int]] = None,
+        ignore_defer_reduction_split: bool = False,
     ) -> Tuple[ReductionHint, _IntLike]:
         def _is_static(x: object) -> bool:
             return isinstance(x, (int, Integer))
@@ -1054,14 +1057,14 @@ class Reduction(Loops):
         threads_per_sm = 2048
         min_elements_per_device = min_elements_per_thread * num_sm * threads_per_sm
         max_elements_per_device = max_elements_per_thread * num_sm * threads_per_sm
+        num_warps = 8
+        num_threads = num_warps * 32
 
         def inner_reduction_splits(reduction_numel_hint: _IntLike, numel_hint: _IntLike):  # type: ignore[no-untyped-def]
             if not should_split:
                 return 1
             # do heuristics that's close to eager mode for split inner reduction
             # we leak reduction autotune configs here, and will need to refactor to avoid this later
-            num_warps = 8
-            num_threads = 32 * num_warps
             if numel_hint >= 2 * num_sm:  # don't split if there are enough outputs
                 return 1
             if reduction_numel_hint <= 8192:
@@ -1098,8 +1101,6 @@ class Reduction(Loops):
                 return 1
             # TODO the best heuristic currently has XBLOCK (corresponding to numel_hint) 128
             # extend to even smaller number of outputs
-            num_warps = 8
-            num_threads = num_warps * 32
             rvals_per_thread = 4  # comes from heuristics, refactor to not leak here
             xvals_per_block = 128
             xblocks = (numel_hint + xvals_per_block - 1) // xvals_per_block
@@ -1130,6 +1131,25 @@ class Reduction(Loops):
                 rvals_per_thread * split_size
             )
 
+        def refine_split_num(split_num, reduction_numel_hint, split_hints) -> _IntLike:
+            if not split_hints:
+                return split_num
+
+            min_split_size = num_threads * min_elements_per_thread // 8  # 1024
+            max_split_size = num_threads * max_elements_per_thread * 2  # 262144
+
+            new_split_num = None
+            best_diff = 16
+            for tiling in split_hints:
+                tmp_split = reduction_numel_hint // tiling
+                if tmp_split < min_split_size or tmp_split > max_split_size:
+                    continue
+                tmp_diff = max(split_num, tiling) / min(split_num, tiling)
+                if tmp_diff <= best_diff:
+                    tmp_diff = best_diff
+                    new_split_num = tiling
+            return new_split_num if new_split_num else split_num
+
         # easy cases
         if numel_hint == 1:
             split = inner_reduction_splits(reduction_numel_hint, numel_hint)
@@ -1158,7 +1178,15 @@ class Reduction(Loops):
                         # If the input_node or its dependent nodes are also Reduction nodes,
                         # use reduction_sizes of this node or its dependent nodes directly.
                         return ReductionHint.INNER, -1
-            return ReductionHint.INNER, split
+            if (
+                split > 1
+                and not ignore_defer_reduction_split
+                and config.defer_reduction_split
+            ):
+                return ReductionHint.DEFERRED_SPLIT, 1
+            return ReductionHint.INNER, refine_split_num(
+                split, reduction_numel_hint, split_hints
+            )
         if (
             reduction_numel_hint <= min_elements_per_thread
             or numel_hint >= num_sm * 2 * 32
@@ -1230,13 +1258,28 @@ class Reduction(Loops):
                 num_outer += 1
             else:
                 num_inner += 1
+
         if num_inner > num_outer:
-            return ReductionHint.INNER, inner_reduction_splits(
-                reduction_numel_hint, numel_hint
+            split_num = inner_reduction_splits(reduction_numel_hint, numel_hint)
+            if (
+                split_num > 1
+                and not ignore_defer_reduction_split
+                and config.defer_reduction_split
+            ):
+                return ReductionHint.DEFERRED_SPLIT, 1
+            return ReductionHint.INNER, refine_split_num(
+                split_num, reduction_numel_hint, split_hints
             )
         else:
-            return ReductionHint.OUTER, outer_reduction_splits(
-                reduction_numel_hint, numel_hint
+            split_num = outer_reduction_splits(reduction_numel_hint, numel_hint)
+            if (
+                split_num > 1
+                and not ignore_defer_reduction_split
+                and config.defer_reduction_split
+            ):
+                return ReductionHint.DEFERRED_SPLIT, 1
+            return ReductionHint.OUTER, refine_split_num(
+                split_num, reduction_numel_hint, split_hints
             )
 
     @staticmethod
@@ -1291,6 +1334,8 @@ class Reduction(Loops):
         reduction_type: str,
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
         input_node: Optional[IRNode] = None,
+        ignore_defer_reduction_split: bool = False,
+        split_hints: Optional[List[int]] = None,
     ) -> TensorBox:
         reduction_numel = V.graph.sizevars.simplify(sympy_product(reduction_ranges))
 
@@ -1375,6 +1420,8 @@ class Reduction(Loops):
             reduction_type,
             reduction_numel,
             input_node,
+            split_hints=split_hints,
+            ignore_defer_reduction_split=ignore_defer_reduction_split,
         )
         # intermediate reduction in split can contain complex indexing,
         # and num_splits will fail to correctly set the hint
@@ -1424,6 +1471,7 @@ class Reduction(Loops):
                 reduction_type=reduction_type,
                 src_dtype=src_dtype,
                 reduction_hint=reduction_hint,
+                input_node=input_node if config.defer_reduction_split else None,
             )
         )
 
