@@ -1547,17 +1547,19 @@ def check_autodiff_sample(op, sample, dtype, is_inplace):
             return False, "value cannot be converted to type double without overflow"
         if not is_inplace:
             return False, ""
-        elif op.name in (
-            "_foreach_add",
-            "_foreach_sub",
-            "_foreach_mul",
-            "_foreach_div",
-            "_foreach_pow",
-        ):
-            return (
-                False,
-                "result type ComplexDouble can't be cast to the desired output type Double",
-            )
+        else:
+            if op.name == "_foreach_pow":
+                return False, "Found dtype Double but expected ComplexDouble"
+            if op.name in (
+                "_foreach_add",
+                "_foreach_sub",
+                "_foreach_mul",
+                "_foreach_div",
+            ):
+                return (
+                    False,
+                    "result type ComplexDouble can't be cast to the desired output type Double",
+                )
     return True, ""
 
 

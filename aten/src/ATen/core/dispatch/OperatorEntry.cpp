@@ -3,7 +3,8 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/dispatch/ObservedOperators.h>
 
-namespace c10::impl {
+namespace c10 {
+namespace impl {
 
 namespace {
 #ifndef STRIP_ERROR_MESSAGES
@@ -628,4 +629,5 @@ std::string OperatorEntry::dumpState() const {
   return oss.str();
 }
 
+}
 }

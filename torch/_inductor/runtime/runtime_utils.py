@@ -138,6 +138,7 @@ except AttributeError:  # Compile workers only have a mock version of torch
     def dynamo_timed(
         key,
         phase_name=None,
+        fwd_only=True,
         metadata=None,
         dynamo_compile_column_us=None,
     ):

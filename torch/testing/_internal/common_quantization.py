@@ -2373,7 +2373,9 @@ class ModelWithSequentialFusion(nn.Module):
         super().__init__()
         self.conv1 = nn.Conv2d(3, 3, 1)
         self.relu1 = nn.ReLU(inplace=False)
-        layers = [ConvBNReLU() for _ in range(3)]
+        layers = []
+        for _ in range(3):
+            layers.append(ConvBNReLU())
         self.features = nn.Sequential(*layers)
         head = [nn.Linear(300, 10), nn.ReLU(inplace=False)]
         self.classifier = nn.Sequential(*head)

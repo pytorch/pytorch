@@ -120,7 +120,9 @@ class BackwardHook:
         return tuple(res)
 
     def _unpack_none(self, indices, values):
-        res = [values[idx] for idx in indices]
+        res = []
+        for idx in indices:
+            res.append(values[idx])
 
         return tuple(res)
 

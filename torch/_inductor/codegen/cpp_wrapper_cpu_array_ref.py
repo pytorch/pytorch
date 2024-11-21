@@ -897,7 +897,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
 
             if dtype is not None and dtype != data.dtype:
                 # wrap it with dtypeview
-                final_tmp_name, tmp_call_strs = create_dtypeview_call(final_tmp_name)
+                final_tmp_name, tmp_call_strs = create_dtypeview_call(reinterpret_call)
                 call_strs.extend(tmp_call_strs)
             else:
                 # No need to wrap with RAIIAtenTensorHandle when using stack allocation.

@@ -176,12 +176,14 @@ def derived_types(
         ]
 
     if list_base:
-        result.extend((seq_typ, f"{cpp_type}[]") for seq_typ in derived_seq_types(base_type))  # type: ignore[valid-type]
+        for seq_typ in derived_seq_types(base_type):
+            result.append((seq_typ, f"{cpp_type}[]"))  # type: ignore[valid-type]
     if optional_base_list:
-        result.extend((seq_typ, f"{cpp_type}?[]") for seq_typ in derived_seq_types(typing.Optional[base_type]))  # type: ignore[valid-type]
+        for seq_typ in derived_seq_types(typing.Optional[base_type]):
+            result.append((seq_typ, f"{cpp_type}?[]"))  # type: ignore[valid-type]
     if optional_list_base:
-        # type: ignore[valid-type]
-        result.extend((typing.Optional[seq_typ], f"{cpp_type}[]?") for seq_typ in derived_seq_types(base_type))  # type: ignore[valid-type]
+        for seq_typ in derived_seq_types(base_type):  # type: ignore[valid-type]
+            result.append((typing.Optional[seq_typ], f"{cpp_type}[]?"))  # type: ignore[valid-type]
     return result
 
 

@@ -856,9 +856,10 @@ def _build_table(
     flops_column_width = DEFAULT_COLUMN_WIDTH
 
     src_column_width = None
-    stacks = [
-        evt.stack for evt in events if evt.stack is not None and len(evt.stack) > 0
-    ]
+    stacks = []
+    for evt in events:
+        if evt.stack is not None and len(evt.stack) > 0:
+            stacks.append(evt.stack)
     has_stack = len(stacks) > 0
     if has_stack:
         src_column_width = (
@@ -946,7 +947,10 @@ def _build_table(
 
     if with_flops:
         # Auto-scaling of flops header
-        raw_flops = [evt.flops for evt in events if evt.flops > 0]
+        raw_flops = []
+        for evt in events:
+            if evt.flops > 0:
+                raw_flops.append(evt.flops)
         if len(raw_flops) != 0:
             (flops_scale, flops_header) = auto_scale_flops(min(raw_flops))
             headers.append(f"Total {flops_header}")

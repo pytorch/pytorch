@@ -8,18 +8,15 @@ from torch._inductor.utils import fresh_inductor_cache
 
 class Benchmark(BenchmarkBase):
     def __init__(self, backend, dynamic=False, is_gpu=False):
-        super().__init__(
-            category="add_loop",
-            backend=backend,
-            device="cuda" if is_gpu else "cpu",
-            dynamic=dynamic,
-        )
+        self._backend = backend
+        self._dynamic = dynamic
+        self._device = "cuda" if is_gpu else "cpu"
 
     def name(self):
-        prefix = f"{self.category()}_{self.backend()}"
-        if self.is_dynamic():
+        prefix = f"add_loop_{self._backend}"
+        if self._dynamic:
             prefix += "_dynamic"
-        if self.device() == "cuda":
+        if self._device == "cuda":
             prefix += "_gpu"
         return prefix
 
@@ -27,18 +24,14 @@ class Benchmark(BenchmarkBase):
         return "a loop over 100 add node"
 
     def _prepare_once(self):
-        self.a = torch.ones(1000, device=self.device())
-        self.b = torch.torch.ones(1000, device=self.device())
+        self.a = torch.ones(1000, device=self._device)
+        self.b = torch.torch.ones(1000, device=self._device)
 
     def _prepare(self):
         torch._dynamo.reset()
 
     def _work(self):
-        @torch.compile(
-            backend=self.backend(),
-            fullgraph=True,
-            dynamic=self.is_dynamic(),
-        )
+        @torch.compile(backend=self._backend, fullgraph=True, dynamic=self._dynamic)
         def f(a, b):
             result = a.clone()
             for i in range(1000):

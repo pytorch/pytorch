@@ -1483,7 +1483,7 @@ class TestBinaryUfuncs(TestCase):
                 else:
                     self.assertRaisesRegex(
                         RuntimeError,
-                        r"result type \w+ can't be cast to the desired output type \w+",
+                        "Found dtype \\w+ but expected \\w+",
                         lambda: actual.pow_(exponent),
                     )
 

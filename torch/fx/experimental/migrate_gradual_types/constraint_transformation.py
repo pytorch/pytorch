@@ -648,7 +648,11 @@ def generate_reshape(constraint, counter):
 
     # then there must be exactly one occurrence of dyn
     else:
-        new_target = [n for n in target if n != Dyn]
+        new_target = []
+
+        for n in target:
+            if n != Dyn:
+                new_target.append(n)
 
         # tensor 1
         c3_tensor1 = Disj(
@@ -882,8 +886,10 @@ def generate_all_int_dyn_dim_possibilities(my_list: List[DVar]):
     neq_possibilities = [
         BinConstraintD(my_list[i], Dyn, op_neq) for i in range(len(my_list))
     ]
+    d_possibilities = []
 
-    d_possibilities = [list(i) for i in zip(eq_possibilities, neq_possibilities)]
+    for i in zip(eq_possibilities, neq_possibilities):
+        d_possibilities.append(list(i))
     all_possibilities = list(itertools.product(*d_possibilities))
     return all_possibilities
 
@@ -1037,11 +1043,13 @@ def apply_padding(
 
         assert len(simulate_padding + d1) == len(d2)
 
+        broadcast_padding = []
+
         # for every padding size, we also consider broadcasting
-        broadcast_padding = [
-            broadcast_dim(simulate_padding, d2, d11, d12, j, True)
-            for j in range(len(d2) - i)
-        ]
+        for j in range(len(d2) - i):
+            broadcast_padding.append(
+                broadcast_dim(simulate_padding, d2, d11, d12, j, True)
+            )
 
         # we consider the possibilities for broadcasting for every dimension. Since we already
         # padded d1, we do not consider it while broadcasting

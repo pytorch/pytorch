@@ -1702,14 +1702,16 @@ class ScheduleLoopedBFS(PipelineScheduleMulti):
         )
 
         # Store the list of operations used for that rank
+        rank_ops: List[Optional[_Action]] = []
         # Pre-padding, rank starts with no-ops based on the warmup.
-        rank_ops: List[Optional[_Action]] = [None for _ in range(rank)]
+        for _ in range(rank):
+            rank_ops.append(None)
 
         for stage_index in stage_indices:
-            rank_ops.extend(
-                _Action(stage_index, _ComputationType.FORWARD, mb_index)
-                for mb_index in range(self._n_microbatches)
-            )
+            for mb_index in range(self._n_microbatches):
+                rank_ops.append(
+                    _Action(stage_index, _ComputationType.FORWARD, mb_index)
+                )
 
         # wait for the first backward to trickle up
         # which is 2 for every hop away
@@ -1717,10 +1719,10 @@ class ScheduleLoopedBFS(PipelineScheduleMulti):
         rank_ops.extend([None] * post_warmup_ops)
 
         for stage_index in reversed(stage_indices):
-            rank_ops.extend(
-                _Action(stage_index, _ComputationType.FULL_BACKWARD, mb_index)
-                for mb_index in reversed(range(self._n_microbatches))
-            )
+            for mb_index in reversed(range(self._n_microbatches)):
+                rank_ops.append(
+                    _Action(stage_index, _ComputationType.FULL_BACKWARD, mb_index)
+                )
         return rank_ops
 
 
@@ -1742,8 +1744,10 @@ def _get_1f1b_rank_ops(
     weight_stage_mb_index: Dict[int, int] = defaultdict(int)
 
     # Store the list of operations used for that rank
+    rank_ops: List[Optional[_Action]] = []
     # Pre-padding, rank starts with no-ops based on the warmup.
-    rank_ops: List[Optional[_Action]] = [None for _ in range(rank)]
+    for _ in range(rank):
+        rank_ops.append(None)
     # These are used to calculate the number of slots to fill with no-ops, to account for the delay in warmup
     # when we want to wait for the backward to trickle back up and start 1f1b to align all ranks.
     # Formula:

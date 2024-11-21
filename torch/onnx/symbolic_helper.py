@@ -356,14 +356,12 @@ def quantized_args(
                 return descriptor and _is_value(arg) and _is_tuple_construct(arg)
 
             # Run regular symbolic function if none of the argument is QTensor.
-            is_quantized: typing.List[bool] = []
+            is_quantized = []
             for descriptor, arg in descriptor_args:
                 # ListConstruct
                 if _is_packed_list(arg):
-                    is_quantized.extend(
-                        _is_arg_quantized(descriptor, arg_input)
-                        for arg_input in arg.node().inputs()
-                    )
+                    for arg_input in arg.node().inputs():
+                        is_quantized.append(_is_arg_quantized(descriptor, arg_input))
                 else:
                     is_quantized.append(_is_arg_quantized(descriptor, arg))
 

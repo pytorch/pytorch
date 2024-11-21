@@ -195,7 +195,8 @@ def fill_empty_tensor_to_shards(
         size if idx != shard_dim else 0 for idx, size in enumerate(tensor_size)
     ]
     tensor = shards[0].new_zeros(tensor_size)
-    shards.extend(tensor for _ in range(num_empty_tensors))
+    for _ in range(num_empty_tensors):
+        shards.append(tensor)
     return shards
 
 

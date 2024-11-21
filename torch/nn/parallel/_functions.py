@@ -23,7 +23,8 @@ class Broadcast(Function):
         non_differentiables = []
         for idx, input_requires_grad in enumerate(ctx.needs_input_grad[1:]):
             if not input_requires_grad:
-                non_differentiables.extend(output[idx] for output in outputs)
+                for output in outputs:
+                    non_differentiables.append(output[idx])
         ctx.mark_non_differentiable(*non_differentiables)
         return tuple([t for tensors in outputs for t in tensors])
 

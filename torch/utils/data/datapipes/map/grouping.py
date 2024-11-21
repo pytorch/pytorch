@@ -55,7 +55,8 @@ class BatcherMapDataPipe(MapDataPipe[DataChunk]):
         batch: List = []
         indices = range(index * self.batch_size, (index + 1) * self.batch_size)
         try:
-            batch.extend(self.datapipe[i] for i in indices)
+            for i in indices:
+                batch.append(self.datapipe[i])
             return self.wrapper_class(batch)
         except IndexError as e:
             if not self.drop_last and len(batch) > 0:

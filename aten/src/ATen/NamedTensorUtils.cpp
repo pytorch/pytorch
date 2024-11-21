@@ -40,7 +40,7 @@ std::vector<int64_t> dimnames_to_positions(const Tensor& tensor, DimnameList dim
   return result;
 }
 
-[[noreturn]] static void report_positional_error(
+static void report_positional_error(
     const Dimname& name,
     const Dimname& other_name,
     DimnameList names,

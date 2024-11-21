@@ -6,7 +6,8 @@
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/Type.h>
 
-namespace c10::impl {
+namespace c10 {
+namespace impl {
 
 // A CppSignature object holds RTTI information about a C++ function signature at runtime
 // and can compare them or get a debug-printable name.
@@ -60,4 +61,5 @@ inline bool operator!=(const CppSignature& lhs, const CppSignature& rhs) {
     return !(lhs == rhs );
 }
 
+}
 }

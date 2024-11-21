@@ -881,7 +881,9 @@ def infer_methods_to_compile(nn_module):
         uniqued_methods.append(name)
         uniquer.add(name)
 
-    stubs = [make_stub_from_method(nn_module, method) for method in uniqued_methods]
+    stubs = []
+    for method in uniqued_methods:
+        stubs.append(make_stub_from_method(nn_module, method))
     return overload_stubs + stubs
 
 
@@ -957,10 +959,9 @@ def interface_script(mod_interface, nn_module):
 
         It is used to know which methods need to act as starting points for compilation.
         """
-        stubs = [
-            make_stub_from_method(nn_module, method)
-            for method in mod_interface.getMethodNames()
-        ]
+        stubs = []
+        for method in mod_interface.getMethodNames():
+            stubs.append(make_stub_from_method(nn_module, method))
         return stubs
 
     return create_script_module(nn_module, infer_interface_methods_to_compile)

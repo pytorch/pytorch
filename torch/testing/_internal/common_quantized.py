@@ -127,7 +127,9 @@ def _snr(x, x_hat):
     """
     if isinstance(x, (list, tuple)):
         assert len(x) == len(x_hat)
-        res = [_snr(x[idx], x_hat[idx]) for idx in range(len(x))]
+        res = []
+        for idx in range(len(x)):
+            res.append(_snr(x[idx], x_hat[idx]))
         return res
     if x_hat.is_quantized:
         x_hat = x_hat.dequantize()

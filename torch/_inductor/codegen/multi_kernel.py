@@ -72,11 +72,10 @@ def get_all_call_args(call_args_list, arg_types_list):
 
 
 def get_numel_argdefs(kernel):
-    numel_argdefs = [
-        f"{tree.prefix}numel"
-        for tree in kernel.range_trees
-        if tree.prefix != "r" or kernel.inside_reduction
-    ]
+    numel_argdefs = []
+    for tree in kernel.range_trees:
+        if tree.prefix != "r" or kernel.inside_reduction:
+            numel_argdefs.append(f"{tree.prefix}numel")
 
     return numel_argdefs
 

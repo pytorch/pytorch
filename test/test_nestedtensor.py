@@ -1,6 +1,7 @@
 # Owner(s): ["module: nestedtensor"]
 
 import ast
+import contextlib
 import io
 import itertools
 import math

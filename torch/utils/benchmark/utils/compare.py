@@ -244,7 +244,8 @@ class Table:
 
     def render(self) -> str:
         string_rows = [[""] + self.column_keys]
-        string_rows.extend(r.as_column_strings() for r in self.rows)
+        for r in self.rows:
+            string_rows.append(r.as_column_strings())
         num_cols = max(len(i) for i in string_rows)
         for sr in string_rows:
             sr.extend(["" for _ in range(num_cols - len(sr))])
@@ -326,7 +327,9 @@ class Compare:
     def _render(self):
         results = common.Measurement.merge(self._results)
         grouped_results = self._group_by_label(results)
-        output = [self._layout(group) for group in grouped_results.values()]
+        output = []
+        for group in grouped_results.values():
+            output.append(self._layout(group))
         return output
 
     def _group_by_label(self, results: List[common.Measurement]):

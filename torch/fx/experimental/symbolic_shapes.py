@@ -5201,9 +5201,10 @@ class ShapeEnv:
         symints = {
             s.node.expr for s in symints if isinstance(s.node.expr, sympy.Symbol)
         }
-        guards = [
-            g for g in self.guards if all(s in symints for s in g.expr.free_symbols)
-        ]
+        guards = []
+        for g in self.guards:
+            if all(s in symints for s in g.expr.free_symbols):
+                guards.append(g)
         return guards
 
     def bind_symbols(
@@ -6032,8 +6033,7 @@ class ShapeEnv:
                 "Ignored guard %s == %s, this could result in accuracy problems",
                 expr,
                 concrete_val,
-                # only print stack trace when debug mode is on (e.g. TORCH_LOGS="dynamic")
-                stack_info=True if log.getEffectiveLevel() < logging.WARNING else False,
+                stack_info=True,
             )
 
     def _get_stack_summary(

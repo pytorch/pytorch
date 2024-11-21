@@ -127,7 +127,9 @@ class MemoryDep(Dep):
             return None
 
         stride_to_index = {s: i for i, s in enumerate(self_strides)}
-        order = [stride_to_index[s] for s in other_strides]
+        order = []
+        for s in other_strides:
+            order.append(stride_to_index[s])
 
         assert set(order) == set(range(0, self.num_vars))
         return order
@@ -545,7 +547,9 @@ def var_builder(prefix: str) -> Tuple[VarRanges, Callable[[sympy.Expr], sympy.Sy
 
 def index_vars_no_squeeze(*argsizes: Tuple[sympy.Expr, ...], prefix: str):
     var_ranges, add_var = var_builder(prefix)
-    args: List[List[sympy.Symbol]] = [list(map(add_var, size)) for size in argsizes]
+    args: List[List[sympy.Symbol]] = []
+    for size in argsizes:
+        args.append(list(map(add_var, size)))
     return args, var_ranges
 
 
@@ -633,15 +637,12 @@ def extract_input_node_reduction_ranges(
     Otherwise returns (None, None).
     """
 
-    from .ir import ComputedBuffer, ExternKernel, Loops
-
-    size: Optional[List[sympy.Expr]]
-    reduction_size: Optional[List[sympy.Expr]]
+    from .ir import ComputedBuffer, Loops
 
     if isinstance(input_node.data, ComputedBuffer):
         # Input node has already been realized. Return its size and reduction_size.
-        size = [*input_node.get_size()]
-        reduction_size = [*input_node.get_reduction_size()]
+        size = input_node.get_size()
+        reduction_size = input_node.get_reduction_size()
         if len(reduction_size) > 0:
             return (size, reduction_size)
         else:
@@ -659,7 +660,7 @@ def extract_input_node_reduction_ranges(
     size = None
     while reduction_size is None and len(reads) > 0:
         seen: OrderedSet[str] = OrderedSet()
-        new_reads: List[Dep] = []
+        new_reads = []
         for read in reads:
             if not isinstance(read, MemoryDep):
                 continue
@@ -670,7 +671,7 @@ def extract_input_node_reduction_ranges(
             if buffer is None:
                 continue
             op = buffer.get_defining_op()
-            if op is None or isinstance(op, ExternKernel):
+            if op is None:
                 continue
 
             if isinstance(op, ComputedBuffer) and len(op.get_reduction_size()) > 0:
@@ -684,7 +685,7 @@ def extract_input_node_reduction_ranges(
         if reads == new_reads:
             return (size, reduction_size)
         else:
-            reads = OrderedSet(new_reads)
+            reads = new_reads
     return (size, reduction_size)
 
 

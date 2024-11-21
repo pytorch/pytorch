@@ -439,11 +439,9 @@ class TensorMeta:
 
         dtype = node.get_dtype()
         assert dtype is not None
-        device = node.get_device()
-        assert device is not None
 
         return TensorMeta(
-            device=device,
+            device=node.get_device(),
             dtype=dtype,
             sizes=V.graph.sizevars.size_hints(
                 node.get_size(),

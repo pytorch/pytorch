@@ -1765,9 +1765,10 @@ class BuiltinVariable(VariableTracker):
                     # tracked fakes to produce incorrect guards. This is sound because the TensorVariable
                     # coming out of set_() below will be a new one, and get
                     # installed in tracked fakes.
-                    to_remove = [
-                        tf for tf in tx.output.tracked_fakes if tf.source == obj.source
-                    ]
+                    to_remove = []
+                    for tf in tx.output.tracked_fakes:
+                        if tf.source == obj.source:
+                            to_remove.append(tf)
                     for tf in to_remove:
                         tx.output.tracked_fakes.remove(tf)
 
