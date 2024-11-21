@@ -23,7 +23,6 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skipIfTorchDynamo,
     subtest,
-    TEST_WITH_TORCHDYNAMO,
     TestCase,
 )
 
@@ -949,7 +948,6 @@ if not torch.utils.pytree.PYTORCH_USE_CXX_PYTREE:
             py_pytree.TreeSpec(tuple, None, []) != py_pytree.TreeSpec(list, None, []),
         )
 
-    @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "Dynamo test in test_treespec_repr_dynamo.")
     def test_treespec_repr(self):
         # Check that it looks sane
         pytree = (0, [0, 0, [0]])
@@ -962,20 +960,6 @@ if not torch.utils.pytree.PYTORCH_USE_CXX_PYTREE:
                 "    *,\n"
                 "    TreeSpec(list, None, [*])])])"
             ),
-        )
-
-    @unittest.skipIf(not TEST_WITH_TORCHDYNAMO, "Eager test in test_treespec_repr.")
-    def test_treespec_repr_dynamo(self):
-        # Check that it looks sane
-        pytree = (0, [0, 0, [0]])
-        _, spec = py_pytree.tree_flatten(pytree)
-        self.assertExpectedInline(
-            repr(spec),
-            """\
-TreeSpec(tuple, None, [*,
-  TreeSpec(list, None, [*,
-    *,
-    TreeSpec(list, None, [*])])])""",
         )
 
     @parametrize(
@@ -1470,23 +1454,12 @@ class TestCxxPytree(TestCase):
     def test_treespec_equality(self):
         self.assertEqual(cxx_pytree.LeafSpec(), cxx_pytree.LeafSpec())
 
-    @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "Dynamo test in test_treespec_repr_dynamo.")
     def test_treespec_repr(self):
         # Check that it looks sane
         pytree = (0, [0, 0, [0]])
         _, spec = cxx_pytree.tree_flatten(pytree)
         self.assertEqual(
             repr(spec), "PyTreeSpec((*, [*, *, [*]]), NoneIsLeaf, namespace='torch')"
-        )
-
-    @unittest.skipIf(not TEST_WITH_TORCHDYNAMO, "Eager test in test_treespec_repr.")
-    def test_treespec_repr_dynamo(self):
-        # Check that it looks sane
-        pytree = (0, [0, 0, [0]])
-        _, spec = cxx_pytree.tree_flatten(pytree)
-        self.assertExpectedInline(
-            repr(spec),
-            "PyTreeSpec((*, [*, *, [*]]), NoneIsLeaf, namespace='torch')",
         )
 
     @parametrize(
