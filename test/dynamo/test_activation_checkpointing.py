@@ -159,7 +159,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         compiled_fn = torch.compile(cloned_fn, fullgraph=fullgraph, backend=backend)
         ctx = contextlib.nullcontext()
         if compiled_autograd:
-            ctx = torch._dynamo.compiled_autograd.enable(
+            ctx = torch._dynamo.compiled_autograd._enable(
                 lambda gm: torch.compile(gm, fullgraph=fullgraph, backend=backend)
             )
         with ctx:
