@@ -1,11 +1,11 @@
 #pragma once
 
 #include <ATen/ATen.h>
-#include <ATen/native/mkldnn/xpu/detail/oneDNNContext.h>
 #include <ATen/native/mkldnn/xpu/detail/Attr.h>
 #include <ATen/native/mkldnn/xpu/detail/Utils.h>
+#include <ATen/native/mkldnn/xpu/detail/oneDNNContext.h>
 
-namespace at::native::onednn{
+namespace at::native::onednn {
 
 TORCH_API sycl::event matmul(
     at::Tensor& result,
