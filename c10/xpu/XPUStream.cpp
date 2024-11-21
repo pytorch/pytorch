@@ -49,6 +49,7 @@ std::deque<
  *   1. Fetching the external SYCL queue from the external XPUStream.
  *   2. Converting an external XPUStream to a `c10::Stream` and vice versa.
  *   3. Ensuring the external XPUStream supports `get/setCurrentXPUStream`.
+ *   4. Enable memory caching allocation through the external XPUStream.
  *
  * To meet these requirements, we need to record the external SYCL queue pointer
  * using the `stream_id`. However, SYCL queue pointers can become invalid if the
@@ -62,8 +63,8 @@ std::deque<
  * remain valid as long as there is an active reference to the corresponding
  * XPUStream.
  *
- * However, due to the key requirements (2) and (3), we CANNOT determine when it
- * is safe to release the external queue and its pointer from the map
+ * However, due to the key requirements (2), (3) and (4), we CANNOT determine
+ * when it is safe to release the external queue and its pointer from the map
  * `external_streams`. To address this, we keep the external queue persistently
  * alive in the pool, ensuring the SYCL queue pointer remains valid regardless
  * of whether the XPUStream is still being referenced.
