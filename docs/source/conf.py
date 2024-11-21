@@ -3381,6 +3381,7 @@ if RELEASE:
     html_title = " ".join((project, version, "documentation"))
     release = version
 
+print("Version: " + version)
 
 # Use the linkcode extension to override [SOURCE] links to point
 # to the repo. Use the torch_version variable defined above to
@@ -3404,12 +3405,13 @@ def linkcode_resolve(domain, info):
 
     # Determine the tag based on the torch_version
     if RELEASE:
-        # For release versions, format as "vX.Y.Z" for correct path in repo
-        version_path = "v" + torch_version
+        # For release versions, format as "vX.Y.Z" for correct path in repo        
+        version_parts = torch_version.split(".")
+        patch_version = version_parts[2].split("+")[0].split("a")[0] # assuming a0 always comes after release version in versions.txt
+        version_path = f"v{version_parts[0]}.{version_parts[1]}.{patch_version}"
     else:
-        # For non-release versions, use "main"
         version_path = "main"
-    # Construct the GitHub URL
+    print("Version Path: " + version_path)
     fn = os.path.relpath(fn, start=os.path.dirname(torch.__file__))
     return (
         f"https://github.com/pytorch/pytorch/blob/{version_path}/torch/{fn}#L{lineno}"
