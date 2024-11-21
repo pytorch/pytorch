@@ -132,10 +132,10 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
-      - name: Set BINARY_ENV_FILE 
+      - name: New Step
         shell: cmd
         run: |
-          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
+          more %RUNNER_TEMP%/env
       - name: Print variables 2
         shell: cmd
         run: |
