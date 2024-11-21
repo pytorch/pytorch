@@ -2,6 +2,7 @@
 
 import sys
 import unittest
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -158,6 +159,7 @@ class TestFSDPMemory(FSDPTest):
 
         output = cmp(results, expected)
         self.assertEqual(output, "")
+
     @unittest.skipIf(TEST_HPU, "Memory will be differnt for CUDA and HPU, skipping")
     @skip_if_lt_x_gpu(2)
     @parametrize("ckpt", ["no_ckpt", "ckpt"])
@@ -227,6 +229,8 @@ class TestFSDPMemory(FSDPTest):
             model_hidden_dim,
             iterations,
         )
+
+
 instantiate_parametrized_tests(TestFSDPMemory)
 if __name__ == "__main__":
     run_tests()
