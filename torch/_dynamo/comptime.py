@@ -165,11 +165,13 @@ class ComptimeContext:
             else:
                 return ComptimeVar(r)
 
-    def graph_break(self, msg="ComptimeContext.graph_break"):
+    def graph_break(
+        self, msg="ComptimeContext.graph_break", descr="Manually triggered graph break"
+    ):
         """
         Manually trigger a graph break
         """
-        unimplemented(msg)
+        unimplemented(msg, descr=descr, workaround="")
 
     def graph(self):
         """

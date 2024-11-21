@@ -3,11 +3,12 @@ import os
 import textwrap
 from enum import auto, Enum
 from traceback import extract_stack, format_exc, format_list, StackSummary
-from typing import Any, cast, NoReturn, Optional, Tuple, TYPE_CHECKING
+from typing import Any, cast, List, NoReturn, Optional, Tuple, TYPE_CHECKING
 
 import torch._guards
 
 from . import config
+from .graph_break_reason import GraphBreakReason
 from .utils import counters
 
 
@@ -305,17 +306,24 @@ _NOTHING = object()
 
 
 def unimplemented(
-    msg: str, *, from_exc: Any = _NOTHING, case_name: Optional[str] = None
+    reason: str,
+    *,
+    descr: str = "",
+    workaround: str = "",
+    tags: Optional[List[GraphBreakReason]] = None,
+    from_exc: Any = _NOTHING,
+    case_name: Optional[str] = None,
 ) -> NoReturn:
-    assert msg != os.environ.get("BREAK", False)
+    if not tags:
+        tags = []
+    tags = [GraphBreakReason(reason, descr, workaround)] + tags
     if from_exc is not _NOTHING:
-        raise Unsupported(msg, case_name=case_name) from from_exc
-    raise Unsupported(msg, case_name=case_name)
+        raise Unsupported(reason, case_name=case_name) from from_exc
+    raise Unsupported(reason, case_name=case_name)
 
 
 def warning(msg: str) -> None:
     counters["warnings"][msg] += 1
-    assert msg != os.environ.get("BREAK", False)
 
 
 # KeyError has special handling for its args

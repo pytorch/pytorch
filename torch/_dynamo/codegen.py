@@ -21,6 +21,7 @@ from .bytecode_transformation import (
     Instruction,
 )
 from .exc import unimplemented
+from .graph_break_reason import Supportable
 from .source import AttrSource, Source
 from .utils import is_safe_constant, rot_n_helper
 from .variables.base import ValueMutationExisting, VariableTracker
@@ -261,7 +262,12 @@ class PyCodegen:
             try:
                 self.call_reconstruct(value)
             except NotImplementedError:
-                unimplemented(f"reconstruct: {value}")
+                unimplemented(
+                    f"reconstruct: {value}",
+                    descr=f"No implementation to generate bytecode to reconstruct {value}",
+                    workaround="",
+                    tags=[Supportable()],
+                )
             if allow_cache and value in self.tempvars:
                 self._output.append(create_dup_top())
                 self.add_cache(value)

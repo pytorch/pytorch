@@ -23,7 +23,6 @@ import weakref
 from pathlib import Path
 from types import CodeType, FrameType, FunctionType, ModuleType
 from typing import Any, Callable, Dict, List, Optional, Set, TypeVar, Union
-from typing_extensions import ParamSpec
 from weakref import ReferenceType
 
 import torch
@@ -52,6 +51,7 @@ from torch.utils._python_dispatch import (
     is_in_torch_dispatch_mode,
 )
 from torch.utils._traceback import CapturedTraceback, format_traceback_short
+from typing_extensions import ParamSpec
 
 from . import config, exc, trace_rules
 from .bytecode_analysis import remove_dead_code, remove_pointless_jumps
@@ -87,6 +87,7 @@ from .exc import (
     unimplemented,
     Unsupported,
 )
+from .graph_break_reason import Supportable, TROUBLESHOOTING_DOC_URL, Weird
 from .guards import (
     CheckFunctionManager,
     get_and_maybe_log_recompilation_reason,
@@ -352,9 +353,9 @@ def exception_handler(
 
 
 FRAME_COUNTER = 0
-FRAME_COMPILE_COUNTER: typing.Counter[
-    Union[int, FrameStateSizeEntry]
-] = collections.Counter()
+FRAME_COMPILE_COUNTER: typing.Counter[Union[int, FrameStateSizeEntry]] = (
+    collections.Counter()
+)
 
 
 def maybe_cprofile(func: Callable[_P, _T]) -> Callable[_P, _T]:
@@ -507,7 +508,12 @@ class ConvertFrameAssert:
             return None
 
         if is_generator(code):
-            unimplemented("generator")
+            unimplemented(
+                "generator",
+                descr="Attempted to compile a generator.",
+                workaround="",
+                tags=[Supportable()],
+            )
 
         if not has_tensor_in_frame(frame):
             return None
@@ -629,9 +635,9 @@ def _compile(
     output: Optional[OutputGraph] = None
     tracer: Optional[InstructionTranslator] = None
 
-    tf_mode_stack: List[
-        torch.overrides.TorchFunctionMode
-    ] = torch.overrides._get_current_function_mode_stack()
+    tf_mode_stack: List[torch.overrides.TorchFunctionMode] = (
+        torch.overrides._get_current_function_mode_stack()
+    )
 
     @preserve_global_state
     def transform(
@@ -753,7 +759,12 @@ def _compile(
                 # We now have a new "last attempt", reset the clock
                 last_attempt_start_time = time.time()
                 if attempt > 100:
-                    unimplemented("100+ RestartAnalysis() calls")
+                    unimplemented(
+                        "100+ RestartAnalysis() calls",
+                        descr="We attempted to restart analysing your code too many times",
+                        workaround="",
+                        tags=[Weird()],
+                    )
             except exc.SkipFrame as e:
                 log.debug(
                     "Skipping frame %s %s \
@@ -917,7 +928,11 @@ def _compile(
                 raise CacheLimitExceeded(f"{limit_type} reached")
             else:
                 # do not recursively skip frames
-                unimplemented(f"{limit_type} reached")
+                unimplemented(
+                    f"{limit_type} reached",
+                    descr=f"Cache limit {limit_type} hit due to too many recompilations",
+                    workaround=f"Change torch._dynamo.config.{limit_type}. See {TROUBLESHOOTING_DOC_URL} for tips on reducing recompilations.",
+                )
 
         log.debug(
             "torchdynamo start compiling %s %s:%s, stack (elided %s frames):\n%s",
@@ -1366,8 +1381,7 @@ class ConvertFrameProtocol(typing.Protocol):
         frame_state: Dict[str, Union[int, FrameStateSizeEntry]],
         *,
         skip: int = 0,
-    ) -> Optional[GuardedCode]:
-        ...
+    ) -> Optional[GuardedCode]: ...
 
 
 class CatchErrorsWrapper:
