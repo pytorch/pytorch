@@ -152,6 +152,10 @@ def grouped_matmul_kernel(
         # # go to the next tile by advancing NUM_SM
         # tile_idx += NUM_SM
 
+lib = torch.library.Library("triton_kernels", "FRAGMENT")
+lib.define("group_gemm_fn(Tensor a_values, Tensor a_offsets, int max_M, Tensor tensor_b) -> Tensor")
+
+@torch.library.impl(lib, "group_gemm_fn", "CUDA")
 def group_gemm_fn(a_values, a_offsets, max_M, tensor_b):
     assert not tensor_b.is_nested
     group_size = a_offsets.size(0)
@@ -192,6 +196,13 @@ def group_gemm_fn(a_values, a_offsets, max_M, tensor_b):
 
     return c_values
 
+@torch.library.impl(lib, "group_gemm_fn", "Meta")
+def group_gemm_fn_meta(a_values, a_offsets, max_M, tensor_b):
+    B, K, N = tensor_b.shape
+    c_values = a_values.new_empty((a_values.size(0), N))
+    return c_values
+
+# @torch.compile(fullgraph=True)
 def grouped_mm(tensor_a, tensor_b):
     assert tensor_a.is_nested
     assert not tensor_b.is_nested
@@ -207,6 +218,6 @@ def grouped_mm(tensor_a, tensor_b):
 
     max_M = tensor_a._max_seqlen
 
-    c_values = group_gemm_fn(a_values, a_offsets, max_M, tensor_b)
+    c_values = torch.ops.triton_kernels.group_gemm_fn(a_values, a_offsets, max_M, tensor_b)
 
-    return NestedTensor(c_values, **extract_kwargs(tensor_a))
+    return torch.nested.nested_tensor_from_jagged(c_values, offsets=a_offsets)
