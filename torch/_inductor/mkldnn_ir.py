@@ -164,11 +164,8 @@ def _prepare_convolution_fusion_create(
     else:
         output_stride = make_channels_last_strides_for(output_size)
 
-    assert x.get_device().type in ["cpu", "xpu"] and weight.get_device().type in [
-        "cpu",
-        "xpu",
-    ]
-    assert x.get_device().type == weight.get_device().type
+    assert get_device_type(x) == get_device_type(weight)
+    assert get_device_type(x) in ["cpu", "xpu"]
     inputs = [x]
 
     if quantize_args is not None:
