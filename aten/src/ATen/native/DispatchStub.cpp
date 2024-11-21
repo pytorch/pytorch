@@ -3,7 +3,6 @@
 
 #include <c10/core/DeviceType.h>
 #include <c10/util/Exception.h>
-#include <c10/util/env.h>
 
 #if !defined(__s390x__) && !defined(__powerpc__)
 #include <cpuinfo.h>
@@ -25,20 +24,20 @@ static inline bool cpu_has_vxe()
 #endif
 
 static CPUCapability compute_cpu_capability() {
-  const auto envar = c10::utils::get_env("ATEN_CPU_CAPABILITY");
-  if (envar.has_value()) {
+  auto envar = std::getenv("ATEN_CPU_CAPABILITY");
+  if (envar) {
 #if defined(HAVE_VSX_CPU_DEFINITION)
-    if (envar == "vsx") {
+    if (strcmp(envar, "vsx") == 0) {
       return CPUCapability::VSX;
     }
 #elif defined(HAVE_ZVECTOR_CPU_DEFINITION)
-    if (envar == "zvector") {
+    if (strcmp(envar, "zvector") == 0) {
       return CPUCapability::ZVECTOR;
     }
 #elif defined(HAVE_SVE_CPU_DEFINITION)
     int sve_vl = cpuinfo_get_max_arm_sve_length(); //Returns maximum SVE VL supported by your HW.
 #ifdef HAVE_SVE256_CPU_DEFINITION
-    if (envar == "sve256") {
+    if (strcmp(envar, "sve256") == 0) {
       if (sve_vl == 256) {
         return CPUCapability::SVE256;
       }
@@ -48,20 +47,20 @@ static CPUCapability compute_cpu_capability() {
 #endif
 #else
 #ifdef HAVE_AVX512_CPU_DEFINITION
-    if (envar == "avx512") {
+    if (strcmp(envar, "avx512") == 0) {
       return CPUCapability::AVX512;
     }
 #endif
 #ifdef HAVE_AVX2_CPU_DEFINITION
-    if (envar == "avx2") {
+    if (strcmp(envar, "avx2") == 0) {
       return CPUCapability::AVX2;
     }
 #endif
 #endif
-    if (envar == "default") {
+    if (strcmp(envar, "default") == 0) {
       return CPUCapability::DEFAULT;
     }
-    TORCH_WARN("ignoring invalid value for ATEN_CPU_CAPABILITY: ", envar.value());
+    TORCH_WARN("ignoring invalid value for ATEN_CPU_CAPABILITY: ", envar);
   }
 
 #if !defined(__powerpc__) && !defined(__s390x__) && !defined(HAVE_SVE_CPU_DEFINITION)

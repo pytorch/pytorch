@@ -2615,9 +2615,11 @@ codegen to generate the correct cpp call for this op. Contact AOTInductor team f
     view_map: dict[OperatorName, NativeFunction] = {
         f.func.name: f for f in concatMap(lambda g: list(g.functions()), view_groups)
     }
-    for f in native_functions:
-        if f.func.name not in structured_map and f.func.name not in view_map:
-            all_groups.append(f)
+    all_groups.extend(
+        f
+        for f in native_functions
+        if f.func.name not in structured_map and f.func.name not in view_map
+    )
 
     cpu_fm.write_sharded(
         "RegisterFunctionalization.cpp",
@@ -2876,14 +2878,7 @@ def main() -> None:
         if DispatchKey.MPS in dispatch_keys:
             del dispatch_keys[dispatch_keys.index(DispatchKey.MPS)]
 
-    xpu_in_whitelist = (
-        options.backend_whitelist and str(DispatchKey.XPU) in options.backend_whitelist
-    )
-    # Only generate RegisterXPU.cpp when there is "--xpu" with torhgen/gen.py
-    # Before this change, torchgen always generates RegisterXPU.cpp for out-of-tree
-    # torch-xpu-ops native_functions.yaml which use --backend_whitelist=XPU and without "--xpu".
-    # After this change is landed, we will add --xpu in torch-xpu-ops and remove the check of "xpu_in_whitelist".
-    if (not options.xpu) and (not xpu_in_whitelist):
+    if not options.xpu:
         ignore_keys.add(DispatchKey.XPU)
 
         if DispatchKey.XPU in dispatch_keys:
