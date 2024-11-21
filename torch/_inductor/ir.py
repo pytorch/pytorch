@@ -1254,8 +1254,10 @@ class Reduction(Loops):
             isinstance(reduction_numel, Integer)
             and V.graph.sizevars.size_hint(reduction_numel)
             < config.unroll_reductions_threshold
-            and sympy_product(ranges) != 1
+            and (sympy_product(ranges) != 1 or device.type == "cuda")
         ):
+            # NB: This works around https://github.com/pytorch/pytorch/issues/140457
+            # since turning reductions into pointwise ops can exacerbate this problem
             return Pointwise.create(
                 device=device,
                 dtype=dst_dtype,
@@ -2808,7 +2810,7 @@ class ReinterpretView(BaseView):
             self.layout.size,
             self.layout.stride,
             self.layout.offset,
-            writer,
+            writer.writeline if writer is not None else V.graph.wrapper_code.writeline,
             dtype=self.layout.dtype,
         )
 
@@ -4913,8 +4915,9 @@ class ExternKernel(InputsKernel):
         allow_padding=False,
     ):
         assert order is not None or exact_strides is not None
-        if x.get_numel() == 0:  # Layout doesn't matter
+        if x.get_numel() in (0, 1):  # Layout doesn't matter
             return x
+
         # require x to have the layout
         if is_storage_and_layout(x):
             while isinstance(x.get_layout(), NonOwningLayout):
@@ -6043,15 +6046,26 @@ class FallbackKernel(ExternKernelAlloc):
         *,
         unbacked_bindings=None,
     ) -> None:
+        # When aten binary ops have constant second args, cpp wrapper expects the scalar
+        # version.  This should long-term be handled as in
+        # https://github.com/pytorch/pytorch/issues/90923.
+        BINARY_OP_MAPPING = {
+            aten.add.Tensor: aten.add.Scalar,
+            aten.div.Tensor: aten.div.Scalar,
+            aten.divide.Tensor: aten.divide.Scalar,
+            aten.floor_divide: aten.floor_divide.Scalar,
+            aten.mul.Tensor: aten.mul.Scalar,
+            aten.multiply.Tensor: aten.multiply.Scalar,
+            aten.sub.Tensor: aten.sub.Scalar,
+            aten.subtract.Tensor: aten.subtract.Scalar,
+            aten.true_divide.Tensor: aten.true_divide.Scalar,
+        }
         if (
-            kernel == aten.mul.Tensor
+            kernel in BINARY_OP_MAPPING
             and len(tensor_args) == 1
             and len(nontensor_args) == 1
         ):
-            # When aten.mul.Tensor's second arg is constant, cpp wrapper expects
-            # to call mul_Scalar. A more proper fix is to do it in decomposition.
-            # See https://github.com/pytorch/pytorch/issues/123478
-            kernel = aten.mul.Scalar
+            kernel = BINARY_OP_MAPPING[kernel]
 
         super().__init__(
             layout,
@@ -6391,7 +6405,7 @@ class FallbackKernel(ExternKernelAlloc):
             args = None
             exported_args = self.export_extern_kernel_node()
 
-            wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
+            wrapper.generate_fallback_kernel_with_runtime_lookup(
                 self.get_name(),
                 self.python_kernel_name,
                 self.cpp_kernel_name,
@@ -6784,12 +6798,15 @@ class InvokeSubgraph(ExternKernel):
         def handle_sym_expr(stride):  # type: ignore[no-untyped-def]
             return [s.node.expr if isinstance(s, torch.SymInt) else s for s in stride]
 
-        fake_strides = [fake_operand.stride() for fake_operand in fake_operands]
-        fake_strides = [handle_sym_expr(stride) for stride in fake_strides]
-        operands = [
-            cls.require_exact_strides(x, fake_strides[idx])
-            for idx, x in enumerate(operands)
-        ]
+        new_operands = []
+        for idx, operand in enumerate(operands):
+            if isinstance(operand, ShapeAsConstantBuffer):
+                new_operands.append(operand)
+            else:
+                example_stride = handle_sym_expr(fake_operands[idx].stride())
+                new_operands.append(cls.require_exact_strides(operand, example_stride))
+
+        operands = new_operands
 
         if subgraph.graph is None:
             # create and lower subgraphs
@@ -6802,7 +6819,16 @@ class InvokeSubgraph(ExternKernel):
                 subgraph.graph.run(*fake_operands)
 
         outputs = subgraph.graph.graph_outputs
-        device = operands[0].get_device()
+
+        # Find the device - operands could be integers from shapes, so we can't
+        # use operands[0]
+        device = None
+        for operand in operands:
+            if not isinstance(operand, ShapeAsConstantBuffer):
+                device = operand.get_device()
+                break
+        assert device is not None
+
         invoke_subgraph = InvokeSubgraph(
             subgraph=subgraph,
             operands=operands,

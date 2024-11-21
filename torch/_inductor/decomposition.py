@@ -107,6 +107,7 @@ decomps_to_exclude = [
     aten.squeeze,  # inductor lowers this directly
     aten.sum,  # inductor lowers this directly
     aten.unbind,  # inductor lowers this directly
+    aten.baddbmm,  # upcasts to fp32, perf issue
 ]
 
 remove_decompositions(decompositions, decomps_to_exclude)
@@ -745,6 +746,20 @@ def _foreach_lerp_scalar(
         start_tensors,
         aten._foreach_mul.Scalar(
             aten._foreach_sub.List(end_tensors, start_tensors), weight
+        ),
+    )
+
+
+@register_decomposition(aten._foreach_lerp.ScalarList)
+def _foreach_lerp_scalarlist(
+    start_tensors: List[torch.Tensor],
+    end_tensors: List[torch.Tensor],
+    scalars: List[torch.types.Number],
+) -> List[torch.Tensor]:
+    return aten._foreach_add.List(
+        start_tensors,
+        aten._foreach_mul.ScalarList(
+            aten._foreach_sub.List(end_tensors, start_tensors), scalars
         ),
     )
 

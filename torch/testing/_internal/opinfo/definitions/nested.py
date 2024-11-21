@@ -1,8 +1,10 @@
 # mypy: ignore-errors
 
+import math
 from copy import copy
+from dataclasses import dataclass
 from functools import partial
-from typing import Callable, List, TypeVar
+from typing import List, Optional, Tuple
 
 import torch
 from torch.fx.experimental.symbolic_shapes import is_nested_int
@@ -13,7 +15,7 @@ from torch.testing._internal.opinfo.core import (
     SampleInput,
     UnaryUfuncInfo,
 )
-from torch.utils._pytree import tree_map
+from torch.utils._pytree import tree_flatten, tree_map
 
 
 @dataclass
@@ -36,10 +38,34 @@ class ExtraOpData:
     # to indicate multi-dim support for a given overload.
     #
     # For example, squeeze() has both a dim and multi-dim overload, where the argname for
-    # each is simply "dim". Its entry should be: [["dim"], ["dim", "..."]].
+    # each is simply "dim". Its entry should be: [["dim"], ["dim..."]].
     #
     # If no overload of the op accepts dim-related args, this should be None.
     dim_args: List[List[str]] = None
+
+    # Helper function to extract names of dim-related args.
+    # Returns: tuple of (single dim argname if available, dim list argname if available)
+    # If the op doesn't support dim-related args at all OR this op only has overloads
+    # with multiple dim args (e.g. transpose()), then this returns (None, None).
+    def get_dim_argnames(self) -> Tuple[Optional[str], Optional[str]]:
+        if self.dim_args is None:
+            return (None, None)
+
+        # name for the dim arg that supports a single dim
+        single_dim_argname = None
+        # name for the dim arg that supports a list of dims
+        dimlist_argname = None
+        for overload in self.dim_args:
+            # only consider overloads with a single dim-related arg
+            if len(overload) != 1:
+                continue
+            if overload[0].endswith("..."):
+                dimlist_argname = overload[0].replace("...", "")
+                if single_dim_argname is None:
+                    single_dim_argname = dimlist_argname
+            else:
+                single_dim_argname = overload[0]
+        return (single_dim_argname, dimlist_argname)
 
 
 # random integer used for sizes
@@ -53,6 +79,19 @@ def _raggedness_matches(nt1, nt2):
         and nt2.is_nested
         and nt1._ragged_idx == nt2._ragged_idx
         and nt1.shape[nt1._ragged_idx] == nt2.shape[nt2._ragged_idx]
+    )
+
+
+# Helper function to update a sample with new kwargs / name
+def _update_sample(sample, new_kwargs):
+    all_kwargs = dict(sample.kwargs)
+    all_kwargs.update(new_kwargs)
+    full_name = ", ".join([sample.name, *(f"{k}={v}" for (k, v) in new_kwargs.items())])
+    return SampleInput(
+        sample.input.clone().detach(),
+        args=sample.args,
+        kwargs=all_kwargs,
+        name=full_name,
     )
 
 
@@ -109,13 +148,13 @@ def _sample_njts(device, dtype, requires_grad=False, dims=None):
         yield nt
 
         # without min / max seqlen cached
-        values = nt.values().clone().detach()
-        offsets = nt.offsets().clone().detach()
+        values = nt.values().detach().clone()
+        offsets = nt.offsets().detach().clone()
         yield torch.nested.nested_tensor_from_jagged(values, offsets)
 
         # non-contiguous transposed NJT (not possible for 2D)
         if dim > 2:
-            yield nt.transpose(-2, -1)
+            yield nt.transpose(-1, nt._ragged_idx)
 
         # non-contiguous with holes NJT
         values = nt.values().clone().detach()
@@ -188,14 +227,19 @@ def unbind_reference(op, sample, wrap_output_as_njt=True):
 
         from torch.nested._internal.ops import _outer_to_inner_dim
 
-        # Need to adjust dim to apply on NJT component
-        if "dim" in kwargs:
-            kwargs["dim"] = _outer_to_inner_dim(
-                nt_inp.dim(), kwargs["dim"], canonicalize=True
+        # Need to adjust dims to apply on NJT component
+        if op._extra_op_data.dim_args is not None:
+            # get all possible dim-related argnames that could be encountered for this op
+            argnames = tree_map(
+                lambda a: a.replace("...", ""),
+                tree_flatten(op._extra_op_data.dim_args)[0],
             )
+            # for all dim-related args present, convert from outer -> inner dim space
+            for argname in {a for a in argnames if a in kwargs}:
+                kwargs[argname] = _outer_to_inner_dim(
+                    nt_inp.dim(), kwargs[argname], canonicalize=True
+                )
 
-        # TODO: handle this
-        assert "dims" not in kwargs
         out_ref_component = op.op(inp, *args, **kwargs)
         out_ref_components.append(out_ref_component)
 
@@ -221,14 +265,36 @@ def unbind_reference(op, sample, wrap_output_as_njt=True):
     return out_ref_components
 
 
+# Computes the reference value for a non-reduction unary op with dim-wise application.
+def unary_dimwise_reference(op, sample, batchwise_reference=None):
+    # extract info about the dim args this op supports
+    assert op._extra_op_data.dim_args is not None
+    single_dim_argname, dimlist_argname = op._extra_op_data.get_dim_argnames()
+    # only support a single non-list dim arg for now
+    assert dimlist_argname is None
+    assert single_dim_argname is not None
+    if sample.kwargs[single_dim_argname] == 0:
+        # unbind reference won't work for batch-wise operation; handle this case here
+        assert batchwise_reference is not None
+        return batchwise_reference(op, sample)
+    return unbind_reference(op, sample)
+
+
 # Computes the reference value for a reduction op.
 def reduction_reference(op, sample):
     assert sample.input.is_nested
-    dim = sample.kwargs.get("dim", None)
-    keepdim = sample.kwargs.get("keepdim", False)
-    assert dim != 0, "reductions over the batch dim are not supported"
-    assert "dims" not in sample.kwargs
 
+    # extract info about the dim args this op supports
+    assert op._extra_op_data.dim_args is not None
+    single_dim_argname, dimlist_argname = op._extra_op_data.get_dim_argnames()
+    assert single_dim_argname is not None
+    supports_dimlist = dimlist_argname is not None
+
+    dim = sample.kwargs.get(
+        dimlist_argname, sample.kwargs.get(single_dim_argname, None)
+    )
+    keepdim = sample.kwargs.get("keepdim", False)
+    assert dim != 0, "reductions over just the batch dim are not supported"
     if isinstance(dim, (tuple, list)):
         reduce_on_ragged = sample.input._ragged_idx in dim
         reduce_on_batch = 0 in dim
@@ -245,7 +311,8 @@ def reduction_reference(op, sample):
         from torch.nested._internal.ops import _outer_to_inner_dim
 
         ref_kwargs = dict(sample.kwargs)
-        ref_kwargs["dim"] = _outer_to_inner_dim(
+        assert dimlist_argname is not None
+        ref_kwargs[dimlist_argname] = _outer_to_inner_dim(
             sample.input.dim(), dim, canonicalize=True
         )
         out = op.op(sample.input.values(), *sample.args, **ref_kwargs)
@@ -442,13 +509,21 @@ def sample_inputs_njt_reduction(
     device,
     dtype,
     requires_grad,
-    supports_dimlist=True,
     supports_keepdim=True,
     op_kwargs=None,
     **kwargs,
 ):
     if not op_kwargs:
         op_kwargs = {}
+
+    # extract info about the dim args this op supports
+    assert op_info._extra_op_data.dim_args is not None
+    (
+        single_dim_argname,
+        dimlist_argname,
+    ) = op_info._extra_op_data.get_dim_argnames()
+    assert single_dim_argname is not None
+    supports_dimlist = dimlist_argname is not None
 
     for njt in _sample_njts(
         device=device, dtype=dtype, requires_grad=requires_grad, dims=[2, 3, 4]
@@ -463,10 +538,10 @@ def sample_inputs_njt_reduction(
             for dim in range(1, njt.dim()):
                 dim_desc = "normal" if dim != njt._ragged_idx else "ragged"
                 yield SampleInput(
-                    njt.clone().detach(),
+                    njt.detach().clone(),
                     kwargs={
                         **op_kwargs,
-                        "dim": dim,
+                        single_dim_argname: dim,
                         **({"keepdim": keepdim} if supports_keepdim else {}),
                     },
                     name=f"{njt_desc}: {dim_desc} dim reduction{keepdim_suffix}",
@@ -475,10 +550,10 @@ def sample_inputs_njt_reduction(
             if supports_dimlist:
                 # reduce on both batch and ragged dims
                 yield SampleInput(
-                    njt.clone().detach(),
+                    njt.detach().clone(),
                     kwargs={
                         **op_kwargs,
-                        "dim": [0, njt._ragged_idx],
+                        dimlist_argname: [0, njt._ragged_idx],
                         **({"keepdim": keepdim} if supports_keepdim else {}),
                     },
                     name=f"{njt_desc}: batch+ragged reduction{keepdim_suffix}",
@@ -487,10 +562,10 @@ def sample_inputs_njt_reduction(
                 # reduce on batch, ragged, and other dims
                 for other_dim in range(njt._ragged_idx + 1, njt.dim()):
                     yield SampleInput(
-                        njt.clone().detach(),
+                        njt.detach().clone(),
                         kwargs={
                             **op_kwargs,
-                            "dim": [0, njt._ragged_idx, other_dim],
+                            dimlist_argname: [0, njt._ragged_idx, other_dim],
                             **({"keepdim": keepdim} if supports_keepdim else {}),
                         },
                         name=(
@@ -502,10 +577,10 @@ def sample_inputs_njt_reduction(
                 # reduce on two non-ragged, non-batch dims
                 if njt.dim() > 3 and njt._ragged_idx == 1:
                     yield SampleInput(
-                        njt.clone().detach(),
+                        njt.detach().clone(),
                         kwargs={
                             **op_kwargs,
-                            "dim": [njt.dim() - 2, njt.dim() - 1],
+                            dimlist_argname: [njt.dim() - 2, njt.dim() - 1],
                             **({"keepdim": keepdim} if supports_keepdim else {}),
                         },
                         name=f"{njt_desc}: two normal dim reduction{keepdim_suffix}",
@@ -513,10 +588,10 @@ def sample_inputs_njt_reduction(
 
                 # full reduction by specifying all dims
                 yield SampleInput(
-                    njt.clone().detach(),
+                    njt.detach().clone(),
                     kwargs={
                         **op_kwargs,
-                        "dim": list(range(njt.dim())),
+                        dimlist_argname: list(range(njt.dim())),
                         **({"keepdim": keepdim} if supports_keepdim else {}),
                     },
                     name=f"{njt_desc}: all dim reduction{keepdim_suffix}",
@@ -527,7 +602,7 @@ def sample_inputs_njt_reduction(
 
         # full reduction
         yield SampleInput(
-            njt.clone().detach(),
+            njt.detach().clone(),
             kwargs=dict(op_kwargs),
             name=f"{njt_desc}: full reduction with keepdim={keepdim}",
         )
@@ -553,7 +628,68 @@ def unsupported_reference(op_name):
     return _f
 
 
-# === BEGIN OP-SPECIFIC SAMPLE INPUTS FUNCS ===
+# === BEGIN OP-SPECIFIC SAMPLE INPUTS FUNCS / REFERENCES ===
+def sample_inputs_unary_dimwise(
+    op_info, device, dtype, requires_grad, op_kwargs=None, **kwargs
+):
+    if op_kwargs is None:
+        op_kwargs = {}
+
+    # only support a single non-list dim arg for now
+    assert op_info._extra_op_data is not None
+    single_dim_argname, dimlist_argname = op_info._extra_op_data.get_dim_argnames()
+    assert single_dim_argname is not None
+    assert dimlist_argname is None
+
+    for njt in _sample_njts(
+        device=device, dtype=dtype, requires_grad=requires_grad, dims=[2, 3, 4]
+    ):
+        for dim in range(njt.dim()):
+            dim_desc = "normal_dim"
+            if dim == 0:
+                dim_desc = "batch_dim"
+            elif dim == njt._ragged_idx:
+                dim_desc = "ragged_dim"
+
+            kwargs = {single_dim_argname: dim}
+            kwargs.update(op_kwargs)
+            yield SampleInput(
+                njt.clone().detach(),
+                kwargs=kwargs,
+                name=f"{_describe_njt(njt)}: {dim_desc}",
+            )
+
+
+def batchwise_reference_chunk(op, sample):
+    # reference for chunk() over dim=0
+    njt = sample.input
+    kwargs = sample.kwargs
+    B = sample.input.size(0)
+    num_chunks = sample.kwargs["chunks"]
+    chunk_size = math.ceil(B / num_chunks)
+    num_full_chunks = B // chunk_size
+    chunk_sizes = [chunk_size for _ in range(num_full_chunks)]
+    if B % chunk_size != 0:
+        # final chunk contains the leftovers
+        chunk_sizes.append(B % chunk_size)
+
+    # split unbound components into chunks according to calculated sizes
+    components = list(sample.input.unbind())
+    start = 0
+    chunks = []
+    for chunk_size in chunk_sizes:
+        chunks.append(components[start : start + chunk_size])
+        start += chunk_size
+
+    # rejoin into NJT outputs
+    return [torch.nested.nested_tensor(lst, layout=torch.jagged) for lst in chunks]
+
+
+def batchwise_reference_narrow(op, sample):
+    # TODO: write this!
+    raise NotImplementedError
+
+
 def sample_inputs_clone(op_info, device, dtype, requires_grad, **kwargs):
     # non-contiguous NJTs
     for njt in _sample_njts(
@@ -605,7 +741,7 @@ def sample_inputs_to(op_info, device, dtype, requires_grad, op_kwargs=None, **kw
         for other_dtype in other_dtypes:
             sample_name = f"{njt.dim()}D: {dtype} -> {other_dtype}"
             yield SampleInput(
-                njt.clone().detach(), kwargs={"dtype": dtype}, name=sample_name
+                njt.detach().clone(), kwargs={"dtype": dtype}, name=sample_name
             )
 
         # only include device transfer for CUDA inputs
@@ -613,7 +749,7 @@ def sample_inputs_to(op_info, device, dtype, requires_grad, op_kwargs=None, **kw
             other_device = "cpu"
             sample_name = f"{njt.dim()}D: {device} -> {other_device}"
             yield SampleInput(
-                njt.clone().detach(), kwargs={"device": other_device}, name=sample_name
+                njt.detach().clone(), kwargs={"device": other_device}, name=sample_name
             )
 
 
@@ -630,7 +766,7 @@ def sample_inputs_bmm(op_info, device, dtype, requires_grad, op_kwargs=None, **k
             other._batch_dim = 0
             njt_desc = _describe_njt(njt_3d)
             yield SampleInput(
-                njt_3d.clone().detach(),
+                njt_3d.detach().clone(),
                 kwargs={"mat2": other},
                 name=f"{njt_desc}: (B, j, D) x (B, D, E)",
             )
@@ -649,6 +785,20 @@ def reference_bmm(op, sample):
     del modified_sample.kwargs["mat2"]
     modified_sample.kwargs["other"] = other
     return unbind_reference(matmul_op, modified_sample)
+
+
+def sample_inputs_chunk(op_info, device, dtype, requires_grad, **kwargs):
+    for sample_input in sample_inputs_unary_dimwise(
+        op_info, device, dtype, requires_grad, **kwargs
+    ):
+        # ragged dim chunking: use a single chunks value
+        if sample_input.kwargs["dim"] == sample_input.input._ragged_idx:
+            yield _update_sample(sample_input, {"chunks": 3})
+        # other dim chunking: use different chunks values
+        else:
+            D = sample_input.input.size(sample_input.kwargs["dim"])
+            for chunks in [1, D // 2, D - 1, D]:
+                yield _update_sample(sample_input, {"chunks": chunks})
 
 
 def sample_inputs_matmul(
@@ -672,7 +822,7 @@ def sample_inputs_matmul(
             E = D + 2
             njt_desc = _describe_njt(njt_3d)
             yield SampleInput(
-                njt_3d.clone().detach(),
+                njt_3d.detach().clone(),
                 kwargs={"other": torch.randn(D, E, device=device, dtype=dtype)},
                 name=f"{njt_desc}: (B, j, D) x (D, E)",
             )
@@ -687,7 +837,7 @@ def sample_inputs_matmul(
             F = E + 2
             njt_desc = _describe_njt(njt_4d)
             yield SampleInput(
-                njt_4d.clone().detach(),
+                njt_4d.detach().clone(),
                 kwargs={"other": torch.randn(E, F, device=device, dtype=dtype)},
                 name=f"{njt_desc}: (B, j, D, E) x (E, F)",
             )
@@ -707,6 +857,20 @@ def sample_inputs_masked_select(
             kwargs={"mask": (torch.randn_like(njt, requires_grad=False) < 0.0)},
             name=_describe_njt(njt),
         )
+
+
+def sample_inputs_narrow(op_info, device, dtype, requires_grad, **kwargs):
+    for sample_input in sample_inputs_unary_dimwise(
+        op_info, device, dtype, requires_grad, **kwargs
+    ):
+        # ragged dim narrowing: use a single start, length value
+        if sample_input.kwargs["dim"] == sample_input.input._ragged_idx:
+            yield _update_sample(sample_input, {"start": 1, "length": 2})
+        # other dim narrowing: use different start, length values
+        else:
+            D = sample_input.input.size(sample_input.kwargs["dim"])
+            for start, length in [(0, D), (0, D - 1), (1, D - 1), (D - 1, 1)]:
+                yield _update_sample(sample_input, {"start": start, "length": length})
 
 
 def sample_inputs_nn_functional_embedding(
@@ -730,12 +894,12 @@ def sample_inputs_nn_functional_embedding(
     # NB: the OpInfo entry for embedding_bag expects weight first so the gradients
     # can be checked
     yield SampleInput(
-        weight.clone().detach().requires_grad_(),
+        weight.detach().clone().requires_grad_(),
         args=(indices,),
     )
 
     yield SampleInput(
-        weight.clone().detach().requires_grad_(),
+        weight.detach().clone().requires_grad_(),
         args=(indices,),
         kwargs={"padding_idx": 1},
     )
@@ -757,7 +921,7 @@ def sample_inputs_index_put(
             ]
             njt_desc = _describe_njt(njt)
             yield SampleInput(
-                njt.clone().detach(),
+                njt.detach().clone(),
                 kwargs={
                     "indices": indices,
                     "values": torch.tensor(1.0, device=njt.device),
@@ -779,7 +943,7 @@ def sample_inputs_index_put(
 
     njt_desc = _describe_njt(a)
     yield SampleInput(
-        a.clone().detach(),
+        a.detach().clone(),
         kwargs={"indices": indices, "values": torch.tensor(1.0, device=a.device)},
         name=f"{njt_desc}: all dims",
     )
@@ -912,7 +1076,7 @@ sample_inputs_nn_functional_threshold = partial(
     sample_inputs_elementwise_njt_unary,
     op_kwargs={"threshold": float.fromhex("0x1.3ap-3"), "value": -9},
 )
-# === END OP-SPECIFIC SAMPLE INPUTS FUNCS ===
+# === END OP-SPECIFIC SAMPLE INPUTS FUNCS / REFERENCES ===
 
 
 # Mapping of OpInfo full names -> sample_inputs_funcs, which define the set of sample inputs
@@ -921,9 +1085,8 @@ sample_inputs_nn_functional_threshold = partial(
 # to specify if they cannot be auto-generated for some reason. Try to keep these sorted
 # in alphabetical order!
 njt_sample_inputs = {
-    "argmax": partial(sample_inputs_njt_reduction, supports_dimlist=False),
-    "argmin": partial(sample_inputs_njt_reduction, supports_dimlist=False),
     "bmm": sample_inputs_bmm,
+    "chunk": sample_inputs_chunk,
     "clone": sample_inputs_clone,
     "count_nonzero": partial(sample_inputs_njt_reduction, supports_keepdim=False),
     **{f"mvlgamma.mvlgamma_p_{p}": sample_inputs_mvl_gamma(p=1) for p in (1, 3, 5)},
@@ -937,25 +1100,26 @@ njt_sample_inputs = {
     "to": sample_inputs_to,
     "matmul": sample_inputs_matmul,
     "masked_select": sample_inputs_masked_select,
+    "narrow": sample_inputs_narrow,
     "index_put": sample_inputs_index_put,
-    "max.reduction_with_dim": partial(
-        sample_inputs_njt_reduction, supports_dimlist=False
-    ),
-    "min.reduction_with_dim": partial(
-        sample_inputs_njt_reduction, supports_dimlist=False
-    ),
-    "prod": partial(sample_inputs_njt_reduction, supports_dimlist=False),
+    # these two don't have ReductionOpInfo entries
+    "max.reduction_with_dim": sample_inputs_njt_reduction,
+    "min.reduction_with_dim": sample_inputs_njt_reduction,
 }
 
 njt_references = {
-    "argmax": reduction_reference,
-    "argmin": reduction_reference,
     "bmm": reference_bmm,
+    "chunk": partial(
+        unary_dimwise_reference, batchwise_reference=batchwise_reference_chunk
+    ),
     "count_nonzero": reduction_reference,
+    # these two don't have ReductionOpInfo entries
     "max.reduction_with_dim": reduction_reference,
     "min.reduction_with_dim": reduction_reference,
+    "narrow": partial(
+        unary_dimwise_reference, batchwise_reference=batchwise_reference_narrow
+    ),
     "nn.functional.embedding_bag": reference_nn_functional_embedding_bag,
-    "prod": reduction_reference,
 }
 
 
@@ -964,8 +1128,12 @@ njt_references = {
 extra_op_data = {
     "_segment_reduce.lengths": ExtraOpData(dim_args=[["axis0"]]),
     "_segment_reduce.offsets": ExtraOpData(dim_args=[["axis0"]]),
-    "all": ExtraOpData(dim_args=[["dim"], ["dim", "..."]]),
-    "any": ExtraOpData(dim_args=[["dim"], ["dim", "..."]]),
+    "all": ExtraOpData(dim_args=[["dim"], ["dim..."]]),
+    "argmax": ExtraOpData(dim_args=[["dim"]]),
+    "argmin": ExtraOpData(dim_args=[["dim"]]),
+    "amax": ExtraOpData(dim_args=[["dim..."]]),
+    "amin": ExtraOpData(dim_args=[["dim..."]]),
+    "any": ExtraOpData(dim_args=[["dim"], ["dim..."]]),
     "argsort": ExtraOpData(dim_args=[["dim"]]),
     "broadcast_to": ExtraOpData(is_view=True),
     "cat": ExtraOpData(dim_args=[["dim"]]),
@@ -991,7 +1159,7 @@ extra_op_data = {
     "fft.irfft": ExtraOpData(dim_args=[["dim"]]),
     "fft.rfft": ExtraOpData(dim_args=[["dim"]]),
     "flatten": ExtraOpData(is_view=True, dim_args=[["start_dim", "end_dim"]]),
-    "flip": ExtraOpData(dim_args=[["dims", "..."]]),
+    "flip": ExtraOpData(dim_args=[["dims..."]]),
     "gather": ExtraOpData(dim_args=[["dim"]]),
     "imag": ExtraOpData(is_view=True),
     "index_add": ExtraOpData(dim_args=[["dim"]]),
@@ -1005,23 +1173,24 @@ extra_op_data = {
     "kthvalue": ExtraOpData(dim_args=[["dim"]]),
     "linalg.cross": ExtraOpData(dim_args=[["dim"]]),
     "linalg.diagonal": ExtraOpData(is_view=True, dim_args=[["dim1", "dim2"]]),
-    "linalg.tensorsolve": ExtraOpData(dim_args=[["dims", "..."]]),
+    "linalg.tensorsolve": ExtraOpData(dim_args=[["dims..."]]),
     "linalg.vecdot": ExtraOpData(dim_args=[["dim"]]),
     "log_softmax": ExtraOpData(dim_args=[["dim"]]),
     "logcumsumexp": ExtraOpData(dim_args=[["dim"]]),
     "max.reduction_with_dim": ExtraOpData(dim_args=[["dim"]]),
     "median": ExtraOpData(dim_args=[["dim"]]),
+    "mean": ExtraOpData(dim_args=[["dim..."]]),
     "min.reduction_with_dim": ExtraOpData(dim_args=[["dim"]]),
     "mode": ExtraOpData(dim_args=[["dim"]]),
     "movedim": ExtraOpData(
-        dim_args=[["source", "destination"], ["source", "...", "destination", "..."]]
+        dim_args=[["source", "destination"], ["source...", "destination..."]]
     ),
     "nanmedian": ExtraOpData(dim_args=[["dim"]]),
     "narrow": ExtraOpData(is_view=True, dim_args=[["dim"]]),
     "narrow_copy": ExtraOpData(dim_args=[["dim"]]),
     "nn.functional.cosine_similarity": ExtraOpData(dim_args=[["dim"]]),
     "nn.functional.glu": ExtraOpData(dim_args=[["dim"]]),
-    "permute": ExtraOpData(is_view=True, dim_args=[["dims", "..."]]),
+    "permute": ExtraOpData(is_view=True, dim_args=[["dims..."]]),
     "positive": ExtraOpData(is_view=True),
     "prod": ExtraOpData(dim_args=[["dim"]]),
     "ravel": ExtraOpData(is_view=True),
@@ -1029,8 +1198,8 @@ extra_op_data = {
     "renorm": ExtraOpData(dim_args=[["dim"]]),
     "reshape": ExtraOpData(is_view=True),
     "reshape_as": ExtraOpData(is_view=True),
-    "roll": ExtraOpData(dim_args=[["dims", "..."]]),
-    "rot90": ExtraOpData(dim_args=[["dims", "..."]]),
+    "roll": ExtraOpData(dim_args=[["dims..."]]),
+    "rot90": ExtraOpData(dim_args=[["dims..."]]),
     "scatter": ExtraOpData(dim_args=[["dim"]]),
     "scatter_add": ExtraOpData(dim_args=[["dim"]]),
     "scatter_reduce.amax": ExtraOpData(dim_args=[["dim"]]),
@@ -1047,13 +1216,14 @@ extra_op_data = {
     "split": ExtraOpData(is_view=True, dim_args=[["dim"]]),
     "split_with_sizes": ExtraOpData(is_view=True, dim_args=[["dim"]]),
     "split_with_sizes_copy": ExtraOpData(dim_args=[["dim"]]),
-    "squeeze": ExtraOpData(is_view=True, dim_args=[["dim"], ["dim", "..."]]),
-    "squeeze_copy": ExtraOpData(dim_args=[["dim"], ["dim", "..."]]),
+    "squeeze": ExtraOpData(is_view=True, dim_args=[["dim"], ["dim..."]]),
+    "squeeze_copy": ExtraOpData(dim_args=[["dim"], ["dim..."]]),
     "stack": ExtraOpData(dim_args=[["dim"]]),
+    "sum": ExtraOpData(dim_args=[["dim..."]]),
     "t": ExtraOpData(is_view=True),
     "tensor_split": ExtraOpData(is_view=True, dim_args=[["dim"]]),
-    "tensordot": ExtraOpData(dim_args=[["dims", "..."]]),
-    "tile": ExtraOpData(dim_args=[["dims", "..."]]),
+    "tensordot": ExtraOpData(dim_args=[["dims..."]]),
+    "tile": ExtraOpData(dim_args=[["dims..."]]),
     "topk": ExtraOpData(dim_args=[["dim"]]),
     "transpose": ExtraOpData(is_view=True, dim_args=[["dim0", "dim1"]]),
     "transpose_copy": ExtraOpData(dim_args=[["dim0", "dim1"]]),
