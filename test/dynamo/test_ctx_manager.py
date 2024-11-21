@@ -1037,7 +1037,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         cm = f(x)
         self.assertFalse(cm.mode)
 
-    @torch._dynamo.config.patch(enable_trace_contextlib_contextmanager=True)
+    @torch._dynamo.config.patch(enable_trace_contextlib=True)
     @parametrize(
         "Ctx",
         [CustomizedCtxManager, customized_ctx_manager],
@@ -1070,7 +1070,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(cnts.frame_count, 2)
             self.assertEqual(cnts.op_count, 12)
 
-    @torch._dynamo.config.patch(enable_trace_contextlib_contextmanager=True)
+    @torch._dynamo.config.patch(enable_trace_contextlib=True)
     @parametrize(
         "Ctx",
         [CustomizedCtxManager, customized_ctx_manager],
@@ -1107,7 +1107,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(cnts.frame_count, 2)
             self.assertEqual(cnts.op_count, 18)
 
-    @torch._dynamo.config.patch(enable_trace_contextlib_contextmanager=True)
+    @torch._dynamo.config.patch(enable_trace_contextlib=True)
     @parametrize(
         "Ctx",
         [CustomizedCtxManager, customized_ctx_manager],
@@ -1143,7 +1143,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
                 self.assertEqual(cnts.frame_count, 4)
                 self.assertEqual(cnts.op_count, 4)
 
-    @torch._dynamo.config.patch(enable_trace_contextlib_contextmanager=True)
+    @torch._dynamo.config.patch(enable_trace_contextlib=True)
     @parametrize(
         "Ctx",
         [CustomizedCtxManager, customized_ctx_manager],
@@ -1725,10 +1725,10 @@ class GraphModule(torch.nn.Module):
 
 class ContextlibContextManagerTests(torch._dynamo.test_case.TestCase):
     def setUp(self):
-        torch._dynamo.config.enable_trace_contextlib_contextmanager = True
+        torch._dynamo.config.enable_trace_contextlib = True
 
     def tearDown(self):
-        torch._dynamo.config.enable_trace_contextlib_contextmanager = False
+        torch._dynamo.config.enable_trace_contextlib = False
 
     def test_ctx_basic0(self):
         @contextlib.contextmanager
@@ -2082,7 +2082,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
-    @torch._dynamo.config.patch(enable_trace_contextlib_contextmanager=False)
+    @torch._dynamo.config.patch(enable_trace_contextlib=False)
     def test_disable_trace_contextmanager(self):
         @contextlib.contextmanager
         def whoo(x):
@@ -2170,9 +2170,9 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(expected, got)
         self.assertEqual(len(counters["graph_break"]), 1)
         name = f"redirect_{name}" if name in ("stdout", "stderr") else name
-        self.assertEqual(
-            {f"<class 'contextlib.{name}'> not supported": 1},
-            dict(counters["graph_break"]),
+        self.assertRegex(
+            next(iter(counters["graph_break"])),
+            f"<class 'contextlib.{name}'> not supported",
         )
 
     def test_contextlib_nullcontext(self):
