@@ -949,8 +949,9 @@ def _store_based_barrier(
             worker_count = store.add(store_key, 0)
             # Print status periodically to keep track.
             logger.debug(
-                "Waiting in store based barrier to initialize process group for "
+                "Waiting in store based barrier to initialize process group for %s seconds"
                 "rank: %s, key: %s (world_size=%s, num_workers_joined=%s, timeout=%s error=%s)",
+                time.time() - start,
                 rank,
                 store_key,
                 world_size,
@@ -1371,9 +1372,9 @@ def _get_all_pg_configs() -> List[Dict[str, Any]]:
     Return the pg configuration of all the process groups.
 
     """
-    config_info: List[Dict[str, Any]] = []
-    for pg in _world.pg_map.keys():
-        config_info.append(_get_pg_config(pg))
+    config_info: List[Dict[str, Any]] = [
+        _get_pg_config(pg) for pg in _world.pg_map.keys()
+    ]
     return config_info
 
 
@@ -2508,9 +2509,7 @@ def _coalescing_manager(
         # - coalesced `reduce_scatter_tensor`
         op0 = op_list[0].op
         if op0 == all_reduce:
-            tensors = []
-            for op in op_list:
-                tensors.append(op.tensor)
+            tensors = [op.tensor for op in op_list]
             all_reduce_opts = AllreduceCoalescedOptions()
             all_reduce_opts.reduceOp = not_none(op_list[0].redop)
             work = group.allreduce_coalesced(tensors, all_reduce_opts)
