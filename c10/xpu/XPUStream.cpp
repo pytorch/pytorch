@@ -63,7 +63,7 @@ std::deque<
  * remain valid as long as there is an active reference to the corresponding
  * XPUStream.
  *
- * However, due to the key requirements (2), (3) and (4), we CANNOT determine
+ * However, due to the key requirements (2), (3), and (4), we CANNOT determine
  * when it is safe to release the external queue and its pointer from the map
  * `external_streams`. To address this, we keep the external queue persistently
  * alive in the pool, ensuring the SYCL queue pointer remains valid regardless
