@@ -880,6 +880,17 @@ def make_parser() -> argparse.ArgumentParser:
             default=argparse.SUPPRESS,
             metavar="VERSION",
         )
+        subparser.add_argument(
+            "--rocm",
+            help=(
+                "ROCm version to install "
+                "(defaults to the latest version available on the platform)"
+            ),
+            dest="rocm",
+            nargs="?",
+            default=argparse.SUPPRESS,
+            metavar="VERSION",
+        )
     return parser
 
 
@@ -887,6 +898,8 @@ def parse_arguments():
     parser = make_parser()
     args = parser.parse_args()
     args.branch = getattr(args, "branch", None)
+    if hasattr(args, "cuda") and hasattr(args, "rocm"):
+        parser.error("Cannot specify both CUDA and ROCm versions.")
     return args
 
 
@@ -899,26 +912,32 @@ def main() -> None:
         sys.exit(status)
 
     pip_source = None
-    if hasattr(args, "cuda"):
-        available_sources = {
-            src.name[len("cuda-") :]: src
-            for src in PIP_SOURCES.values()
-            if src.name.startswith("cuda-") and PLATFORM in src.supported_platforms
-        }
-        if not available_sources:
-            print(f"No CUDA versions available on platform {PLATFORM}.")
-            sys.exit(1)
-        if args.cuda is not None:
-            pip_source = available_sources.get(args.cuda)
-            if pip_source is None:
-                print(
-                    f"CUDA {args.cuda} is not available on platform {PLATFORM}. "
-                    f"Available version(s): {', '.join(sorted(available_sources, key=Version))}"
-                )
+
+    for toolkit in ("CUDA", "ROCm"):
+        accel = toolkit.lower()
+        if hasattr(args, accel):
+            requested = getattr(args, accel)
+            available_sources = {
+                src.name[len(f"{accel}-") :]: src
+                for src in PIP_SOURCES.values()
+                if src.name.startswith(f"{accel}-")
+                and PLATFORM in src.supported_platforms
+            }
+            if not available_sources:
+                print(f"No {toolkit} versions available on platform {PLATFORM}.")
                 sys.exit(1)
-        else:
-            pip_source = available_sources[max(available_sources, key=Version)]
-    else:
+            if requested is not None:
+                pip_source = available_sources.get(requested)
+                if pip_source is None:
+                    print(
+                        f"{toolkit} {requested} is not available on platform {PLATFORM}. "
+                        f"Available version(s): {', '.join(sorted(available_sources, key=Version))}"
+                    )
+                    sys.exit(1)
+            else:
+                pip_source = available_sources[max(available_sources, key=Version)]
+
+    if pip_source is None:
         pip_source = PIP_SOURCES["cpu"]  # always available
 
     with logging_manager(debug=args.verbose) as logger:

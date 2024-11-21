@@ -78,7 +78,9 @@ git clone git@github.com:<USERNAME>/pytorch.git
 cd pytorch
 git remote add upstream git@github.com:pytorch/pytorch.git
 
-make setup-env  # or make setup-env-cuda for pre-built CUDA binaries
+make setup-env
+# Or run `make setup-env-cuda` for pre-built CUDA binaries
+# Or run `make setup-env-rocm` for pre-built ROCm binaries
 source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
 ```
 
