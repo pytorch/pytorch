@@ -944,6 +944,37 @@ def forward(self, x_1):
         assert_not_optimized(b)
         assert_not_optimized(a + b)
 
+    def test_max_of_unique_summation_opt(self):
+        shape_env = ShapeEnv()
+        s0 = shape_env.create_unbacked_symint()
+        s1 = shape_env.create_unbacked_symint()
+        s2 = shape_env.create_unbacked_symint()
+        s3 = shape_env.create_unbacked_symint()
+        s4 = shape_env.create_unbacked_symint()
+        s5 = shape_env.create_unbacked_symint()
+        s7 = shape_env.create_unbacked_symint()
+
+        def assert_optimized(sym):
+            self.assertTrue(sym.node.expr.unique_summations_symbols is not None)
+
+        def assert_not_optimized(sym):
+            getattr(sym.node.expr, "unique_summations_symbols", None)
+
+        mx1 = torch.sym_max(s0, s1)
+        assert_not_optimized(mx1)
+
+        mx2 = torch.sym_max(s0 + s1, s2 + s3)
+        assert_optimized(mx2)
+
+        mx3 = torch.sym_max(mx2, s4 + s5)
+        assert_optimized(mx3)
+        assert_optimized(torch.sym_max(s4 + s5, mx2))
+
+        assert_not_optimized(torch.sym_max(mx3, s7))
+        assert_not_optimized(torch.sym_max(mx3, 10))
+        assert_not_optimized(torch.sym_max(mx3, s3 + s7))
+        assert_not_optimized(torch.sym_max(mx3, s7 * 2))
+
     def test_sym_max_multi_max_simplify(self):
         shape_env = ShapeEnv()
         u0 = shape_env.create_unbacked_symint()
