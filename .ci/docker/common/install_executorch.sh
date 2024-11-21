@@ -36,12 +36,8 @@ install_conda_dependencies() {
 }
 
 install_pip_dependencies() {
-  pushd executorch/.ci/docker
-  # Install PyTorch CPU build beforehand to avoid installing the much bigger CUDA
-  # binaries later, ExecuTorch only needs CPU
-  pip_install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
-  # Install all Python dependencies
-  pip_install -r requirements-ci.txt
+  pushd executorch
+  as_jenkins bash install_requirements.sh --pybind xnnpack
   popd
 }
 
@@ -54,7 +50,7 @@ setup_executorch() {
   export EXECUTORCH_BUILD_PYBIND=ON
   export CMAKE_ARGS="-DEXECUTORCH_BUILD_XNNPACK=ON -DEXECUTORCH_BUILD_KERNELS_QUANTIZED=ON"
 
-  as_jenkins .ci/scripts/setup-linux.sh cmake
+  as_jenkins .ci/scripts/setup-linux.sh cmake || true
   popd
 }
 

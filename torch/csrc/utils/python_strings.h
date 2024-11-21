@@ -34,7 +34,7 @@ inline std::string THPUtils_unpackString(PyObject* obj) {
   throw std::runtime_error("unpackString: expected bytes or unicode object");
 }
 
-// Unpacks PyBytes (PyString) or PyUnicode as c10::string_view
+// Unpacks PyBytes (PyString) or PyUnicode as std::string_view
 // PyBytes are unpacked as-is. PyUnicode is unpacked as UTF-8.
 // NOTE: If `obj` is destroyed, then the non-owning std::string_view will
 //   become invalid. If the string needs to be accessed at any point after
