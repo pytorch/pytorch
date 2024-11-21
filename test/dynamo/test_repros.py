@@ -956,6 +956,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         cloned_wrapper = torch._dynamo.guards.GuardManagerWrapper(cloned_root)
         self.assertEqual(str(guard_manager_wrapper), str(cloned_wrapper))
         self.assertTrue(cloned_root.check(f_locals))
+        if guard_manager_wrapper.diff_guard_root:
+            self.assertTrue(guard_manager_wrapper.diff_guard_root.check(f_locals))
 
     def test_do_paste_mask(self):
         torch._dynamo.utils.counters.clear()

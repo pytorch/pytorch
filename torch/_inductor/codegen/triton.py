@@ -3783,6 +3783,7 @@ def debug_triton_code(node: BaseSchedulerNode) -> List[str]:
         )
 
         device = node.get_device()
+        assert device is not None
         backend = node.scheduler.get_backend(device)
         assert isinstance(
             backend, (SIMDScheduling, CUDACombinedScheduling)

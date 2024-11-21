@@ -150,18 +150,16 @@ class DebugPrinterManager:
         # get the list of args_to_print_or_save
         # TODO: Find a more reliable way to detect kernel args types to print for extern kernel calls
         if kernel_type == "extern":
-            args_to_print_or_save_extern = []
-            for arg in args_to_print_or_save:
-                if arg.startswith(("buf", "arg")):
-                    args_to_print_or_save_extern.append(arg)
+            args_to_print_or_save_extern = [
+                arg for arg in args_to_print_or_save if arg.startswith(("buf", "arg"))
+            ]
             self.args_to_print_or_save = args_to_print_or_save_extern
         elif kernel_type == "cpp":
-            args_to_print_or_save_cpp = []
-            for arg in args_to_print_or_save:
-                if arg.startswith(("buf", "arg")):
-                    args_to_print_or_save_cpp.append(
-                        f"convert_arrayref_tensor_to_tensor({arg})"
-                    )
+            args_to_print_or_save_cpp = [
+                f"convert_arrayref_tensor_to_tensor({arg})"
+                for arg in args_to_print_or_save
+                if arg.startswith(("buf", "arg"))
+            ]
             self.args_to_print_or_save = args_to_print_or_save_cpp
         else:
             self.args_to_print_or_save = args_to_print_or_save
