@@ -2597,8 +2597,8 @@ class AutogradFunctionApplyVariable(VariableTracker):
         with enable_python_dispatcher():
             with tx.output.fake_mode:
                 fake_args = (
-                    tx.output.nn_modules["fwd_body_0"],
-                    tx.output.nn_modules["bwd_body_0"],
+                    tx.output.nn_modules[fwd_node.node.name],
+                    tx.output.nn_modules[bwd_node.node.name],
                     *(
                         [
                             _get_fake_value(arg)
