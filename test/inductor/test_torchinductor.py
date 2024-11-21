@@ -8935,7 +8935,9 @@ class CommonTemplate:
 
         _, source_codes = run_and_get_code(fn1)
         self.assertEqual(len(source_codes), 1)
-        if not config.cpp_wrapper and self.device != "cpu":
+        if not config.cpp_wrapper and (
+            self.device != "cpu" or config.cpu_backend == "triton"
+        ):
             self.assertEqual(source_codes[0].count("async_compile.triton"), 2)
         else:
             # The cpp_wrapper pass we record doesn't involve triton at all, and neither
@@ -11922,6 +11924,9 @@ if HAS_GPU and not TEST_WITH_ASAN:
     copy_tests(CommonTemplate, GPUTests, GPU_TYPE)
 
     @instantiate_parametrized_tests
+    @skip_if_cpp_wrapper(
+        "cpp_wrapper doesn't capture output Triton kernels for analysis"
+    )
     class TritonCodeGenTests(TestCase):
         from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 
@@ -12312,10 +12317,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
 
             r = fn_gpu(x)
             code = run_and_get_triton_code(fn_gpu, x)
-            self.assertIn(
-                "tl_math.sin" if not config.cpp_wrapper else "triton_poi_fused_sin",
-                code,
-            )
+            self.assertIn("tl_math.sin", code)
             self.assertEqual(type(r), np.ndarray)
             self.assertEqual(r, np.sin(x))
 
