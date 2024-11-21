@@ -217,11 +217,6 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
         self.disable_amp = torch._C._is_any_autocast_enabled()
         self.deterministic_algorithms = torch.are_deterministic_algorithms_enabled()
         self.autograd_config = config.save_config()
-        sym_floats = [isinstance(x, torch.SymFloat) for x in example_inputs]
-        if sym_floats:
-            raise BypassAOTAutogradCache(
-                "AOTAutogradCache does not support symbolic floats(temporarily)"
-            )
         try:
             # TODO: example_inputs causes more cache misses than necessary
             # with dynamic shapes, because this is before we add
@@ -281,6 +276,11 @@ def autograd_cache_key(
     Generate a unique hash of the FX graph for caching.
     """
     check_cacheable(gm)
+    if torch._dynamo.config.specialize_floats:
+        # TODO: remove this once specializing floats no longer changes
+        # the output of AOTAutograd, or when float guards are added to
+        # FXGraphCache
+        raise BypassAOTAutogradCache("Specialized floats are temporarily not supported")
     details = AOTAutogradCacheDetails(gm, example_inputs, config, fx_config)
     pickler = AOTAutogradCachePickler(gm)
     # The prefix distinguishes among the other kinds of objects we cache
@@ -779,9 +779,9 @@ class AOTAutogradCache:
 
         # Prefer local cache to remote, fallback to remote if local missed
         if remote:
-            remote_cache: Optional[
-                RemoteCache[JsonDataTy]
-            ] = AOTAutogradCache.get_remote_cache()
+            remote_cache: Optional[RemoteCache[JsonDataTy]] = (
+                AOTAutogradCache.get_remote_cache()
+            )
 
             if remote_cache is not None:
                 try:
@@ -823,9 +823,9 @@ class AOTAutogradCache:
         counters["aot_autograd"]["autograd_cache_saved"] += 1
 
         if remote:
-            remote_cache: Optional[
-                RemoteCache[JsonDataTy]
-            ] = AOTAutogradCache.get_remote_cache()
+            remote_cache: Optional[RemoteCache[JsonDataTy]] = (
+                AOTAutogradCache.get_remote_cache()
+            )
             if remote_cache is not None:
                 time_taken_ms = int(
                     (entry.forward_time_taken_ns + entry.backward_time_taken_ns) // 1e6
