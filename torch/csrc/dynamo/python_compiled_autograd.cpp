@@ -861,7 +861,7 @@ static PyObject* set_autograd_compiler(PyObject* dummy, PyObject* args) {
 
   TORCH_INTERNAL_ASSERT(b >= 0 && b < 2);
   PyObject* prior_compiler = the_autograd_compiler;
-  PyObject* prior_dynamic = default_dyn_type_int ? Py_False : Py_True;
+  PyObject* prior_dynamic = default_dyn_type_int == 0 ? Py_False : Py_True;
   default_dyn_type_int = b;
   if (obj == Py_None) { // disable
     the_autograd_compiler = nullptr; // decref not needed due to `prior`

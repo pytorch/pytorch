@@ -780,12 +780,9 @@ in_compiled_autograd_region = False
 
 @contextlib.contextmanager
 def _enable(compiler_fn, dynamic=False):
-    # 1. add dynamic argument
     if dynamic:
         assert type(dynamic) is bool
 
-    # 2. set default size type
-    # 3. add DCE
     from torch._dynamo import eval_frame
 
     if eval_frame._stance.stance == "force_eager":
