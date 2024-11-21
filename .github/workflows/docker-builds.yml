@@ -103,7 +103,7 @@ jobs:
 
       - name: Build docker image
         id: build-docker-image
-        # TODO: TEST https://github.com/pytorch/test-infra/pull/5957, REVERT TO MAIN BEFOER LANDING
+        # TODO: TEST https://github.com/pytorch/test-infra/pull/5957, REVERT TO MAIN BEFORE LANDING
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@login-docker-hub
         with:
           docker-image-name: ${{ matrix.docker-image-name }}
