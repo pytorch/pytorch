@@ -519,6 +519,7 @@ static PyObject* dynamo__custom_eval_frame_shim(
 
 static PyObject* skip_code_recursive_flag;
 static PyObject* cache_limit_hit_flag;
+bool is_skip_guard_eval_unsafe = false;
 
 // NOTE: In 3.12+, the frame evaluation function (callee) is responsible for clearing/popping
 // the frame, meaning that unless we default evaluate the original frame,
@@ -610,7 +611,7 @@ static PyObject* dynamo__custom_eval_frame(
     _PytorchRecordFunctionState* rf = _pytorch_record_function_enter(cache_lookup_profiler_str);
     PyObject* maybe_cached_code = NULL;
     const char* trace_annotation = "";
-    lookup(extra, locals, backend, &maybe_cached_code, &trace_annotation);
+    lookup(extra, locals, backend, &maybe_cached_code, &trace_annotation, is_skip_guard_eval_unsafe);
     _pytorch_record_function_exit(rf);
 
     Py_DECREF(locals);
@@ -620,6 +621,15 @@ static PyObject* dynamo__custom_eval_frame(
       *should_clear_frame = 1;
       return NULL;
     } else if (maybe_cached_code == Py_None) {
+      if (is_skip_guard_eval_unsafe) {
+        PyErr_SetString(
+          PyExc_RuntimeError,
+          "Recompilation triggered with skip_guard_eval_unsafe stance. "
+          "This usually means that you have not warmed up your model "
+          "with enough inputs such that you can guarantee no more recompilations."
+        );
+        return NULL;
+      }
       DEBUG_TRACE("cache miss %s", get_frame_name(frame));
       if (extra_state_cache_limit_hit(extra)) {
         // skip code recursively
@@ -647,7 +657,7 @@ static PyObject* dynamo__custom_eval_frame(
   _PytorchRecordFunctionState* rf = _pytorch_record_function_enter(cache_lookup_profiler_str);
   PyObject* maybe_cached_code = NULL;
   const char* trace_annotation = "";
-  lookup(extra, locals, backend, &maybe_cached_code, &trace_annotation);
+  lookup(extra, locals, backend, &maybe_cached_code, &trace_annotation, is_skip_guard_eval_unsafe);
   _pytorch_record_function_exit(rf);
   if (maybe_cached_code == NULL) {
     // Python error
@@ -663,6 +673,16 @@ static PyObject* dynamo__custom_eval_frame(
     *should_clear_frame = 1;
     Py_DECREF(locals);
     return dynamo_eval_custom_code(tstate, frame, cached_code, trace_annotation, throw_flag);
+  }
+
+  if (is_skip_guard_eval_unsafe) {
+    PyErr_SetString(
+      PyExc_RuntimeError,
+      "Recompilation triggered with skip_guard_eval_unsafe stance. "
+      "This usually means that you have not warmed up your model "
+      "with enough inputs such that you can guarantee no more recompilations."
+    );
+    return NULL;
   }
   // cache miss
   CacheEntry* cache_entry = extract_cache_entry(extra);
@@ -807,6 +827,22 @@ static PyObject* set_eval_frame_py(PyObject* dummy, PyObject* callback) {
   return set_eval_frame(callback, PyThreadState_GET());
 }
 
+
+static PyObject* set_skip_guard_eval_unsafe(PyObject* dummy, PyObject* skip_guard_unsafe_flag) {
+  if (skip_guard_unsafe_flag != Py_False && skip_guard_unsafe_flag != Py_True) {
+    DEBUG_TRACE0("arg error");
+    PyErr_SetString(PyExc_TypeError, "expected True/False");
+    return NULL;
+  }
+  bool old_skip_guard_eval_unsafe = is_skip_guard_eval_unsafe;
+  is_skip_guard_eval_unsafe = skip_guard_unsafe_flag == Py_True;
+  if (old_skip_guard_eval_unsafe) {
+    Py_RETURN_TRUE;
+  }
+  Py_RETURN_FALSE;
+}
+
+
 static PyObject* get_eval_frame_callback_py(PyObject* dummy, PyObject* args) {
   return eval_frame_callback_get();
 }
@@ -876,6 +912,7 @@ static PyObject* raise_sigtrap(PyObject* dummy, PyObject* obj) {
 
 static PyMethodDef _methods[] = {
     {"set_eval_frame", set_eval_frame_py, METH_O, NULL},
+    {"set_skip_guard_eval_unsafe", set_skip_guard_eval_unsafe, METH_O, NULL},
     {"get_eval_frame_callback", get_eval_frame_callback_py, METH_NOARGS, NULL},
     {"reset_code", reset_code, METH_O, NULL},
     {"unsupported", unsupported, METH_VARARGS, NULL},
