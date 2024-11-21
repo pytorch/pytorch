@@ -1,14 +1,16 @@
 # Owner(s): ["oncall: distributed"]
 import sys
+
 import torch
 from torch import distributed as dist
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.nn import Linear, Module, Sequential
 from torch.optim import SGD
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, get_devtype
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+
 
 device_type = torch.device(get_devtype())
 
@@ -21,12 +23,17 @@ if TEST_WITH_DEV_DBG_ASAN:
         file=sys.stderr,
     )
     sys.exit(0)
+
+
 class InnerModel(Module):
     def __init__(self, device):
         super().__init__()
         self.layers = Sequential(FSDP(Linear(5, 5), device_id=device_type.type))
+
     def forward(self, x):
         return self.layers(x)
+
+
 class TestMultipleWrapping(FSDPTest):
     @skip_if_lt_x_gpu(2)
     def test_multiple_wrapping(self, device):
@@ -48,10 +55,12 @@ class TestMultipleWrapping(FSDPTest):
         input = torch.rand((1, 5), dtype=torch.float).to(device_type.type)
         output = model(input)
         # second time to rewrap the inner model
-        #rewrapped_model = FSDP(inner_model, device_id=device)
+        # rewrapped_model = FSDP(inner_model, device_id=device)
         rewrapped_model = FSDP(inner_model).to(device_type.type)
         rewrapped_output = rewrapped_model(input)
         self.assertEqual(output, rewrapped_output)
+
+
 devices = ("cuda", "hpu")
 instantiate_device_type_tests(TestMultipleWrapping, globals(), only_for=devices)
 if __name__ == "__main__":
