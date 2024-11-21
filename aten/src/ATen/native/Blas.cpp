@@ -11,6 +11,9 @@
 #include <ATen/ops/mul.h>
 #include <ATen/ops/matmul.h>
 #include <ATen/native/Resize.h>
+#if !defined(__s390x__) && !defined(__powerpc__)
+#include <cpuinfo.h>
+#endif
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/CPUFunctions.h>
@@ -28,6 +31,7 @@
 #include <ATen/ops/mv_native.h>
 #include <ATen/ops/scalar_tensor_native.h>
 #include <ATen/ops/vdot_native.h>
+#include <ATen/ops/_scaled_mm_native.h>
 #endif
 
 namespace at::meta {
@@ -227,7 +231,7 @@ Tensor vdot(const Tensor &self, const Tensor &other){
 }
 
 Tensor&
-_scaled_mm_out_cpu_fallback(const Tensor& mat1, const Tensor& mat2,
+_scaled_mm_out_cpu_emulated(const Tensor& mat1, const Tensor& mat2,
           const Tensor& scale_a,
           const Tensor& scale_b,
           const std::optional<at::Tensor>& bias,
@@ -249,21 +253,12 @@ _scaled_mm_out_cpu_fallback(const Tensor& mat1, const Tensor& mat2,
   TORCH_CHECK(!out_dtype || *out_dtype == out.scalar_type(), "out_dtype must match output matrix type");
   TORCH_CHECK(isFloat8Type(mat1.scalar_type()), "Expected mat1 to be Float8 matrix got ", mat1.scalar_type());
   TORCH_CHECK(isFloat8Type(mat2.scalar_type()), "Expected mat2 to be Float8 matrix got ", mat2.scalar_type());
-  if (bias) {
-    TORCH_CHECK(out.scalar_type() != kFloat, "Bias is not supported when out_dtype is set to Float32");
-    TORCH_CHECK(bias->scalar_type() == ScalarType::BFloat16 || bias->scalar_type() == ScalarType::Half,
-         "Bias must be either Half or BFloat16, but got ", bias->scalar_type());
-    TORCH_CHECK((out.scalar_type() != kFloat && out.scalar_type() != ScalarType::BFloat16) ||
-          bias->scalar_type() == ScalarType::BFloat16,
-          "Bias must be BFloat16 to compute ", out.scalar_type(), " output, but got ", bias->scalar_type());
-    TORCH_CHECK(out.scalar_type() != ScalarType::Half || bias->scalar_type() == ScalarType::Half,
-          "Bias must be Float16 to compute ", out.scalar_type(), " output, but got ", bias->scalar_type());
-  }
 
-  IntArrayRef mat1_sizes = mat1.sizes();
-  IntArrayRef mat2_sizes = mat2.sizes();
-  at::native::resize_output(out, {mat1_sizes[0], mat2_sizes[1]});
+  auto mat1_c = mat1.contiguous();
   auto mat2_c = mat2.contiguous();
+  IntArrayRef mat1_sizes = mat1_c.sizes();
+  IntArrayRef mat2_sizes = mat2_c.sizes();
+  at::native::resize_output(out, {mat1_sizes[0], mat2_sizes[1]});
 
   float input_scale = scale_a.item<float>();
   float weight_scale = scale_b.item<float>();
@@ -273,6 +268,7 @@ _scaled_mm_out_cpu_fallback(const Tensor& mat1, const Tensor& mat2,
   if (bias) {
     out_tmp.add_(bias.value());
   }
+  out_tmp = out_tmp.to(out.scalar_type());
   out.copy_(out_tmp);
   return out;
 }
@@ -287,13 +283,13 @@ _scaled_mm_out_cpu(const Tensor& mat1, const Tensor& mat2,
           bool use_fast_accum,
           Tensor& out) {
 #if AT_MKLDNN_ENABLED()
-  if (at::globalContext().userEnabledMkldnn()) {
+  if (at::globalContext().userEnabledMkldnn() && cpuinfo_has_x86_amx_int8()) {
     return mkldnn_scaled_mm(mat1, mat2, scale_a, scale_b, bias, scale_result, out_dtype, use_fast_accum, out);
   } else {
-    return _scaled_mm_out_cpu_fallback(mat1, mat2, scale_a, scale_b, bias, scale_result, out_dtype, use_fast_accum, out);
+    return _scaled_mm_out_cpu_emulated(mat1, mat2, scale_a, scale_b, bias, scale_result, out_dtype, use_fast_accum, out);
   }
 #else
-  return _scaled_mm_out_cpu_fallback(mat1, mat2, scale_a, scale_b, bias, scale_result, out_dtype, use_fast_accum, out);
+  return _scaled_mm_out_cpu_emulated(mat1, mat2, scale_a, scale_b, bias, scale_result, out_dtype, use_fast_accum, out);
 #endif
 
 }

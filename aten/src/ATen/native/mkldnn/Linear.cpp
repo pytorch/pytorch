@@ -481,26 +481,19 @@ mkldnn_scaled_mm(const Tensor& mat1, const Tensor& mat2,
   TORCH_CHECK(!out_dtype || *out_dtype == out.scalar_type(), "out_dtype must match output matrix type");
   TORCH_CHECK(isFloat8Type(mat1.scalar_type()), "Expected mat1 to be Float8 matrix got ", mat1.scalar_type());
   TORCH_CHECK(isFloat8Type(mat2.scalar_type()), "Expected mat2 to be Float8 matrix got ", mat2.scalar_type());
-  if (bias) {
-    TORCH_CHECK(out.scalar_type() != kFloat, "Bias is not supported when out_dtype is set to Float32");
-    TORCH_CHECK(bias->scalar_type() == ScalarType::BFloat16 || bias->scalar_type() == ScalarType::Half,
-         "Bias must be either Half or BFloat16, but got ", bias->scalar_type());
-    TORCH_CHECK((out.scalar_type() != kFloat && out.scalar_type() != ScalarType::BFloat16) ||
-          bias->scalar_type() == ScalarType::BFloat16,
-          "Bias must be BFloat16 to compute ", out.scalar_type(), " output, but got ", bias->scalar_type());
-    TORCH_CHECK(out.scalar_type() != ScalarType::Half || bias->scalar_type() == ScalarType::Half,
-          "Bias must be Float16 to compute ", out.scalar_type(), " output, but got ", bias->scalar_type());
-  }
+  // TODO: This check of mat1 and mat2 must have the same data type will be removed after oneDNN v3.6.
+  TORCH_CHECK(mat1.scalar_type() == mat2.scalar_type(), "Expected mat1 and mat2 must have the same data type");
 
   // Validation checks have passed lets resize the output to actual size
-  IntArrayRef mat1_sizes = mat1.sizes();
-  IntArrayRef mat2_sizes = mat2.sizes();
+  auto mat1_c = mat1.contiguous();
+  auto mat2_c = mat2.contiguous();
+  IntArrayRef mat1_sizes = mat1_c.sizes();
+  IntArrayRef mat2_sizes = mat2_c.sizes();
   at::native::resize_output(out, {mat1_sizes[0], mat2_sizes[1]});
 
   float input_scale = scale_a.item<float>();
   float weight_scale = scale_b.item<float>();
-  auto mat2_c = mat2.contiguous();
-  auto src = at::native::itensor_view_from_dense(mat1);
+  auto src = at::native::itensor_view_from_dense(mat1_c);
   auto weight_t = at::native::itensor_view_from_dense(mat2_c);
   bool with_bias = bias.has_value();
   int64_t K = mat1_sizes[1], M = mat1_sizes[0],
@@ -549,19 +542,11 @@ mkldnn_scaled_mm(const Tensor& mat1, const Tensor& mat2,
 
   op_attr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
   auto engine = ideep::engine::cpu_engine();
-  dnnl::matmul::primitive_desc primitive_desc;
-  try {
-    primitive_desc = with_bias
-        ? dnnl::matmul::primitive_desc(
-              engine, src_desc, weights_desc, bias_desc, dst_desc, op_attr)
-        : dnnl::matmul::primitive_desc(
-              engine, src_desc, weights_desc, dst_desc, op_attr);
-  } catch (dnnl::error& e) {
-    if (e.status == dnnl_unimplemented)
-      throw std::runtime_error("Running FP8 on not supported platform.");
-    // on any other error just re-throw
-    throw;
-  }
+  dnnl::matmul::primitive_desc primitive_desc = with_bias
+      ? dnnl::matmul::primitive_desc(
+            engine, src_desc, weights_desc, bias_desc, dst_desc, op_attr)
+      : dnnl::matmul::primitive_desc(
+            engine, src_desc, weights_desc, dst_desc, op_attr);
   auto primitive = dnnl::matmul(primitive_desc);
 
   // Prepare args and execute primitive
