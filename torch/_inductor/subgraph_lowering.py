@@ -46,6 +46,8 @@ class PointwiseSubgraphLowering(torch.fx.Interpreter):
         self.allow_buffer_mutations = allow_buffer_mutations
         self.additional_lowerings = additional_lowerings
 
+        print(gm.print_readable(print_output=False))
+
     def mark_buffer_mutated(self, name: str) -> None:
         if not self.allow_buffer_mutations:
             raise SubgraphLoweringException(
@@ -86,7 +88,9 @@ class PointwiseSubgraphLowering(torch.fx.Interpreter):
             raise SubgraphLoweringException(
                 f"{target} not supported in subgraph, (missing lowering)"
             )
-
+        print(f"target, {target}")
+        print(f"args, {args}")
+        print(f"kwargs, {kwargs}")
         return lowerings[target](*args, **kwargs)
 
     def output(self, target: str, args: Tuple[Any], kwargs: Dict[str, Any]) -> None:  # type: ignore[override]

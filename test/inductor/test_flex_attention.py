@@ -4438,6 +4438,67 @@ class TestLearnableBiases(InductorTestCase):
             out_eager, out_compiled, (query, key, value, bias)
         )
 
+    @skip(
+        "TODO: I know what I need to do, but it's not a good solution. So I need to rethink about this."
+    )
+    def test_symmetric_bias(self):
+        query, key, value = self._init_tensors()
+        bias = torch.randn(
+            self.seq_length, device=self.device, dtype=self.dtype, requires_grad=True
+        )
+
+        def bias_func(score, b, h, q_idx, kv_idx):
+            return score + bias[q_idx] + bias[kv_idx]
+
+        flex_compiled = torch.compile(flex_attention)
+        out_eager = flex_attention(query, key, value, score_mod=bias_func)
+        out_compiled = flex_compiled(query, key, value, score_mod=bias_func)
+
+        self._check_outputs_and_grads(
+            out_eager, out_compiled, (query, key, value, bias)
+        )
+
+    def test_flipped_indexed_bias(self):
+        query, key, value = self._init_tensors()
+        bias = torch.randn(
+            self.seq_length,
+            self.seq_length,
+            device=self.device,
+            dtype=self.dtype,
+            requires_grad=True,
+        )
+
+        def bias_func(score, b, h, q_idx, kv_idx):
+            return score + bias[kv_idx, q_idx]
+
+        flex_compiled = torch.compile(flex_attention)
+        out_eager = flex_attention(query, key, value, score_mod=bias_func)
+        out_compiled = flex_compiled(query, key, value, score_mod=bias_func)
+
+        self._check_outputs_and_grads(
+            out_eager, out_compiled, (query, key, value, bias)
+        )
+
+    def test_head_specific_gate(self):
+        query, key, value = self._init_tensors()
+        gate_score = torch.randn(
+            self.num_heads,
+            device=self.device,
+            dtype=self.dtype,
+            requires_grad=True,
+        )
+
+        def bias_func(score, b, h, q_idx, kv_idx):
+            return score * torch.sigmoid(gate_score[h])
+
+        flex_compiled = torch.compile(flex_attention)
+        out_eager = flex_attention(query, key, value, score_mod=bias_func)
+        out_compiled = flex_compiled(query, key, value, score_mod=bias_func)
+
+        self._check_outputs_and_grads(
+            out_eager, out_compiled, (query, key, value, gate_score)
+        )
+
 
 common_utils.instantiate_parametrized_tests(TestFlexAttention)
 common_utils.instantiate_parametrized_tests(TestBlockMask)
