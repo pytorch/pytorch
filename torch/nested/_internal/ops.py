@@ -1082,7 +1082,6 @@ def matmul_default(func, *args, **kwargs):
     if inp.is_nested and not other.is_nested:
         # (B, j1, D) x (B, D, E) => (B, j1, E)
         if inp.dim() >= 3 and inp.dim() == other.dim():
-            print("123232")
             # convert to padded for this
             return _padded_impl(inp, other)
         # Support broadcasting the dense:
@@ -1125,20 +1124,10 @@ def bmm_default(func, *args, **kwargs):
     inp = new_kwargs.pop("input")
     other = new_kwargs.pop("mat2")
 
-
     if inp.dim() != 3:
         raise ValueError("bmm(): input must be 3D")
     if other.dim() != 3:
         raise ValueError("bmm(): mat2 must be 3D")
-
-    from torch.utils._triton import has_triton
-    if has_triton:
-        a = inp
-        b = other
-        from torch.nested._internal.triton_kernels.bmm import group_gemm_fn
-        # TODO: Start inlining this into the kernel
-        c_values = group_gemm_fn(a, b)
-        return NestedTensor(c_values, **extract_kwargs(inp))
 
     return matmul_default(torch.ops.aten.matmul.default, inp, other)
 
