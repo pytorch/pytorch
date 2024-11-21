@@ -1,15 +1,17 @@
 # Owner(s): ["oncall: distributed"]
 import sys
+
 import torch
 from torch import distributed as dist
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.nn import Linear, Module
 from torch.nn.parallel import DistributedDataParallel
 from torch.optim import SGD
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import FSDPTest, get_full_params, get_devtype
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_fsdp import FSDPTest, get_devtype, get_full_params
+from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
+
 
 device_type = torch.device(get_devtype())
 
@@ -22,6 +24,8 @@ if TEST_WITH_DEV_DBG_ASAN:
         file=sys.stderr,
     )
     sys.exit(0)
+
+
 class Model(Module):
     def __init__(self, wrap_fsdp):
         super().__init__()
@@ -31,11 +35,14 @@ class Model(Module):
         if wrap_fsdp:
             self.inner = FSDP(self.inner)
         self.outer = Linear(4, 5)
+
     def forward(self, x):
         # Forward twice.
         i = self.inner(x)
         j = self.inner(x)
         return self.outer(i + j)
+
+
 class TestMultiForward(FSDPTest):
     def _dist_train(self, wrap_fsdp):
         # keep everything deterministic for input data
@@ -56,6 +63,7 @@ class TestMultiForward(FSDPTest):
         if wrap_fsdp:
             return get_full_params(model)
         return list(model.parameters())
+
     @skip_if_lt_x_gpu(2)
     def test_multi_forward(self):
         # DDP
@@ -63,6 +71,8 @@ class TestMultiForward(FSDPTest):
         # FSDP
         fsdp_state = self._dist_train(wrap_fsdp=True)
         self.assertEqual(ddp_state, fsdp_state)
+
+
 devices = ("cpu", "hpu")
 instantiate_device_type_tests(TestMultiForward, globals(), only_for=devices)
 if __name__ == "__main__":
