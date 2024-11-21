@@ -36,6 +36,15 @@ class JobConfig:
             help="List of ranks we want to show traces for.",
         )
         self.parser.add_argument(
+            "--allow-incomplete-ranks",
+            action="store_true",
+            help=(
+                "FR trace require all ranks to have dumps for analysis. "
+                "This flag allows best-effort partial analysis of results "
+                "and printing of collected data."
+            ),
+        )
+        self.parser.add_argument(
             "--pg-filters",
             default=None,
             nargs="+",

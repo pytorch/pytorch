@@ -83,18 +83,36 @@ def dynamo_under_activation_checkpoint(tx: "InstructionTranslator"):
         tx.output.current_tracer.under_activation_checkpoint = orig_val
 
 
-def only_consist_of(var, types, allow_none=False):
-    if isinstance(var, types):
-        return True
-    if allow_none and var.is_python_constant() and var.as_python_constant() is None:
-        return True
+def find_mismatched_vars(var, types, allow_none=False):
+    """
+    Recursively finds variables whose type is not an instance of the specified types.
+    Args:
+        var: The variable to check.
+        types: A tuple of allowed types.
+        allow_none (bool): Whether to allow None values. Defaults to False.
+    Returns:
+        A set of variables whose type is not an instance of the specified types.
+    """
+    mismatched_vars = set()
     if isinstance(var, (TupleVariable, ListVariable)):
-        return all(only_consist_of(item, types, allow_none) for item in var.items)
-    if isinstance(var, ConstDictVariable):
-        return all(
-            only_consist_of(item, types, allow_none) for item in var.items.values()
-        )
-    return False
+        for item in var.items:
+            mismatched_vars.update(find_mismatched_vars(item, types, allow_none))
+    elif isinstance(var, ConstDictVariable):
+        for value in var.items.values():
+            mismatched_vars.update(find_mismatched_vars(value, types, allow_none))
+    else:
+
+        def _is_none(var):
+            return var.is_python_constant() and var.as_python_constant() is None
+
+        if not isinstance(var, types) and not (allow_none and _is_none(var)):
+            mismatched_vars.add(var)
+    return mismatched_vars
+
+
+def only_consist_of(var, types, allow_none=False):
+    mismatch_vars = find_mismatched_vars(var, types, allow_none=allow_none)
+    return len(mismatch_vars) == 0
 
 
 # A more read-able syntax sugar for creating a UserFunctionVariable for f
@@ -662,6 +680,8 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
 
     @staticmethod
     def make(value, source=None, **kwargs):
+        from torch._higher_order_ops import PrimHOPBase
+
         if value.__name__ == "cond":
             return CondHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ == "while_loop":
@@ -708,6 +728,8 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             return AutoFunctionalizeHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ == "invoke_subgraph":
             return InvokeSubgraphHigherOrderVariable(value, source, **kwargs)
+        elif isinstance(value, PrimHOPBase):
+            return PrimHOPBaseVariable(value, source, **kwargs)
         else:
             unimplemented(f"HigherOrderOperator {value.__name__}")
 
@@ -1568,6 +1590,8 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         kwargs,
         description,
         under_activation_checkpoint=False,
+        *,
+        subgraph_name="wrap_body",
     ):
         # See NOTE [HigherOrderOperator tracing design] for more details
 
@@ -1588,7 +1612,12 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         body_gmod = torch.fx.GraphModule(tx.output.nn_modules, body_graph)
         body_name = self.install_subgraph_in_output_graph(
-            tx, fn_vt, fn_args_vt, kwargs, body_gmod
+            tx,
+            fn_vt,
+            fn_args_vt,
+            kwargs,
+            body_gmod,
+            attr_name=subgraph_name,
         )
         body_node = make_attr(tx, body_name)
 
@@ -2676,9 +2705,57 @@ def hash_graph_and_inputs(tx, gmod, fake_inputs):
     return key
 
 
+class PrimHOPBaseVariable(WrapHigherOrderVariable):
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        (
+            p_args,
+            p_kwargs,
+            example_value,
+            body_r,
+            treespec,
+            body_gmod,
+            body_name,
+        ) = self.create_wrapped_node(
+            tx, args[0], args[1].items, {}, self.value._name, subgraph_name="subgraph"
+        )
+        assert len(p_kwargs) == 0
+
+        from torch._higher_order_ops.utils import has_potential_input_alias_or_mutation
+
+        fake_inputs = [
+            node.meta["example_value"]
+            for node in body_gmod.graph.nodes
+            if node.op == "placeholder"
+        ]
+        if has_potential_input_alias_or_mutation(body_gmod, fake_inputs):
+            raise RuntimeError(
+                f"{self.value._name} where the inputs are mutated or the "
+                f"outputs are aliases of the inputs. Please ensure that this doesn't happen."
+            )
+
+        flat_example_value = pytree.tree_map_only(
+            torch.fx.Proxy,
+            lambda a: a.node.meta["example_value"],
+            body_r.as_proxy(),
+        )
+        p_args = (
+            p_args[0],
+            p_args[1:],
+        )
+        p_kwargs = {key: value.as_proxy() for key, value in kwargs.items()}
+        return _call_function_and_unflatten_output(
+            tx, self.value, p_args, p_kwargs, flat_example_value, treespec
+        )
+
+
 class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
     def install_subgraph_in_output_graph(
-        self, tx, fn_vt, fn_args_vt, kwargs, body_gmod, attr_name="invoke_subgraph"
+        self, tx, fn_vt, fn_args_vt, kwargs, body_gmod, attr_name
     ):
         # Check if the subgraph from speculate_subgraph (body_gmod) and the fake
         # inputs have already been seen before. If yes, the subgraph is already
@@ -2710,7 +2787,7 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
                 return identifier
 
         body_name = super().install_subgraph_in_output_graph(
-            tx, fn_vt, fn_args_vt, kwargs, body_gmod, attr_name
+            tx, fn_vt, fn_args_vt, kwargs, body_gmod, "invoke_subgraph"
         )
         if invoke_subgraph_cache:
             invoke_subgraph_cache.add_dynamo_identifier(key, body_name)

@@ -5,6 +5,7 @@ from enum import auto, Enum
 from typing import Dict, List, Optional, Union
 
 
+# The following maximums only apply to runtime autotuning, when using FixedTritonConfig one may see larger values
 # NOTE: if these fail asserts submit a PR to increase them
 TRITON_MAX_BLOCK = {
     "X": 4096,
@@ -94,6 +95,7 @@ class HeuristicType(Enum):
     SPLIT_SCAN = auto()
     TEMPLATE = auto()
     USER_AUTOTUNE = auto()
+    FIXED = auto()
 
 
 class AutotuneHint(Enum):
