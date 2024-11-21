@@ -177,7 +177,7 @@ SubgraphInfo = namedtuple(
 )
 
 
-class ModificationWrapper(V.WrapperHandler):
+class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
     """Handles placeholder substitutions during subgraph processing."""
 
     def __init__(

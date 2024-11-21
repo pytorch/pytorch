@@ -18,7 +18,7 @@ T = TypeVar("T")
 _P = ParamSpec("_P")
 
 OpOverload = torch._ops.OpOverload
-LoweringDict = Dict[OpOverload, Callable[..., Any]]
+LoweringDict = Dict[Union[OpOverload, str], Callable[..., Any]]
 
 
 class PointwiseSubgraphLowering(torch.fx.Interpreter):
@@ -67,7 +67,7 @@ class PointwiseSubgraphLowering(torch.fx.Interpreter):
 
     def call_function(
         self,
-        target: Callable[[OpOverload], Any],  # type: ignore[override]
+        target: Union[Callable[..., Any], str],
         args: Any,
         kwargs: Dict[str, Any],
     ) -> Any:

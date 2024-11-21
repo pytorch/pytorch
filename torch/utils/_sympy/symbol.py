@@ -51,7 +51,7 @@ class SymT(Enum):
     VIEW = auto()
     # Alternate (non-modular) indexing used in halide kernels
     HALIDE = auto()
-    # Triton template load
+    # Triton template load for fixed inputs, used by flex_attention
     TRITON_LOAD = auto()
 
 
