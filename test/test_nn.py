@@ -2629,6 +2629,20 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         with self.assertRaisesRegex(ValueError, 'var has negative entry/entries'):
             var = -1 * torch.ones(3, 5)
             torch.nn.functional.gaussian_nll_loss(input, target, var)
+        with self.assertRaisesRegex(ValueError, 'var has negative entry/entries'):
+            var = -1.0
+            torch.nn.functional.gaussian_nll_loss(input, target, var)
+
+    def test_gaussian_nll_loss_scalar_var(self):
+        input = torch.tensor([[0.5, 1.5, 2.5], [2., 4., 6.]])
+        target = torch.tensor([[1., 2., 3.], [1., 2., 3.]])
+        var = 0.5
+        var_tensor = var * torch.ones_like(input)
+        component_wise_loss = 0.5 * (torch.log(var_tensor) + (input - target)**2 / var_tensor)
+        self.assertEqual(component_wise_loss,
+                         F.gaussian_nll_loss(input, target, var, reduction='none'))
+        self.assertEqual(F.gaussian_nll_loss(input, target, var_tensor, reduction='none'),
+                         F.gaussian_nll_loss(input, target, var, reduction='none'))
 
     def test_KLDivLoss_batch_mean(self):
         input_shape = (2, 5)
