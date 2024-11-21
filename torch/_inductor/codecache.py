@@ -1220,9 +1220,7 @@ class FxGraphCache:
 
         try:
             with dynamo_timed(
-                "PyCodeCache.load_by_key_path",
-                log_pt2_compile_event=True,
-                fwd_only=False,
+                "PyCodeCache.load_by_key_path", log_pt2_compile_event=True
             ):
                 graph.current_callable = PyCodeCache.load_by_key_path(
                     graph.cache_key,
@@ -1771,11 +1769,12 @@ class CompiledFxGraph:
 
 
 def run_command_and_check(cmd_: str) -> None:
-    cmd = shlex.split(cmd_)
-    try:
-        subprocess.check_call(cmd)
-    except subprocess.CalledProcessError as e:
-        raise exc.CppCompileError(cmd, e.output) from e
+    with dynamo_timed("run_command_and_check", log_pt2_compile_event=True):
+        cmd = shlex.split(cmd_)
+        try:
+            subprocess.check_call(cmd)
+        except subprocess.CalledProcessError as e:
+            raise exc.CppCompileError(cmd, e.output) from e
 
 
 @functools.lru_cache(None)
@@ -2103,13 +2102,14 @@ class AotCodeCompiler:
                 aot_constants = struct.pack("qq", consts_size + 8, magic_number)
 
             consts_o = _compile_consts(aot_constants, sys.platform)
-            kernels_o = []
             gpu_codecache: Union[ROCmCodeCache, CUDACodeCache] = (
                 ROCmCodeCache() if torch.version.hip else CUDACodeCache()
             )
-            for entry in gpu_codecache.cache.values():
-                if entry.output_path.endswith(".o"):
-                    kernels_o.append(entry.output_path)
+            kernels_o = [
+                entry.output_path
+                for entry in gpu_codecache.cache.values()
+                if entry.output_path.endswith(".o")
+            ]
             kernels_o = " ".join(kernels_o)
 
             output_name, output_dir = get_name_and_dir_from_output_file_path(output_so)
