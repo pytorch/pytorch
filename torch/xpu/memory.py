@@ -190,7 +190,6 @@ def mem_get_info(device: _device_t = None) -> Tuple[int, int]:
         int: the memory avialble on the device in units of bytes.
         int: the total memory on the device in units of bytes
     """
-    # optional=True allows `device = torch.device('cuda')` for which device.index is None
     device = _get_device_index(device, optional=True)
     return torch._C._xpu_getMemoryInfo(device)
 
