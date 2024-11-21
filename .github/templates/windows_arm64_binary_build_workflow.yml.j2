@@ -132,6 +132,10 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
+      - name: Set BINARY_ENV_FILE 
+        shell: cmd
+        run: |
+          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
       - name: Print variables 2
         shell: cmd
         run: |
@@ -165,5 +169,7 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
+  {%- if branches == "nightly" %}
   !{{ upload.upload_binaries(config, True, False) }}
+  {%- endif %}
 {%- endfor %}
