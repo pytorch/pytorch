@@ -1344,7 +1344,7 @@ def load(
             )
         else:
             if has_import:
-                return f"Weights only load failed. {UNSAFE_MESSAGE}\n {message}"
+                return f"Weights only load failed. {message}\n {UNSAFE_MESSAGE}\n"
             else:
                 updated_message = f"Weights only load failed. {UNSAFE_MESSAGE}\n"
                 if not has_blocklist:
