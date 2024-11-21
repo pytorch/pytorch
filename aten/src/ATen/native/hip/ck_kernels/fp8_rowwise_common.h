@@ -33,6 +33,8 @@
 
 #include <ck/tensor_operation/gpu/device/impl/device_gemm_multiple_d_xdl_cshuffle_v3.hpp>
 
+namespace at::cuda::detail {
+
 // Define commonly used types.
 template <ck::index_t... Is>
 using S = ck::Sequence<Is...>;
@@ -199,3 +201,5 @@ at::Tensor f8f8bf16_rowwise_impl(
 
   return Y;
 }
+
+} // namespace at::cuda::detail

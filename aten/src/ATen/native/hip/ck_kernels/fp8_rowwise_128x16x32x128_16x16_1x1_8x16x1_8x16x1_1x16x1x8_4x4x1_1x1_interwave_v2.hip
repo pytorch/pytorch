@@ -8,6 +8,8 @@
 
 #include <ATen/native/hip/ck_kernels/fp8_rowwise_common.h>
 
+namespace at::cuda::detail {
+
 at::Tensor
 fp8_rowwise_128x16x32x128_16x16_1x1_8x16x1_8x16x1_1x16x1x8_4x4x1_1x1_interwave_v2(
     at::Tensor XQ,
@@ -67,3 +69,5 @@ fp8_rowwise_128x16x32x128_16x16_1x1_8x16x1_8x16x1_1x16x1x8_4x4x1_1x1_interwave_v
 
   }
 }
+
+} // namespace at::cuda::detail

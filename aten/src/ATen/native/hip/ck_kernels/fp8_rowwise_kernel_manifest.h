@@ -10,6 +10,8 @@
 
 #include <ATen/ATen.h>
 
+namespace at::cuda::detail {
+
 // Tiny tile kernel for small shapes.
 at::Tensor
 fp8_rowwise_64x16x16x128_16x16_1x1_8x8x1_8x8x1_1x16x1x4_4x4x1_1x1_interwave_v2(
@@ -249,3 +251,5 @@ fp8_rowwise_128x128x32x128_32x32_2x1_8x16x1_8x16x1_1x16x1x8_4x4x1_1x1_intrawave_
     at::Tensor x_scale,
     at::Tensor w_scale,
     at::Tensor Y);
+
+} // namespace at::cuda::detail
