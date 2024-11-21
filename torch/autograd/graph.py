@@ -47,6 +47,7 @@ __all__ = [
     "GradientEdge",
     "get_gradient_edge",
     "increment_version",
+    "is_backward_executing",
 ]
 
 
@@ -754,6 +755,10 @@ def allow_mutation_on_saved_tensors() -> (
         finally:
             ctx.clear()
             _allow_mutation_on_saved_tensors_enabled = False
+
+
+def is_backward_executing():
+    return torch._C._current_graph_task_id() != -1
 
 
 def _register_logging_hooks_on_whole_graph(
