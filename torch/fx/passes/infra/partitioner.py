@@ -182,7 +182,7 @@ class CapabilityBasedPartitioner:
                 partition_map[removed_id]
             )
             del partition_map[removed_id]
-            
+
             partition_users[merge_id] = all_user_nodes
             del partition_users[removed_id]
 
