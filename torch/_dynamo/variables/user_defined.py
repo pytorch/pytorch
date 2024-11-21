@@ -451,6 +451,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 var_cls = GenericContextWrappingVariable
 
             # graph break on any contextlib.* that it is not contextlib.contextmanager
+            # Some of the APIs below are not supported because they rely on features
+            # that Dynamo doesn't play well today (i.e. contextlib.suppress)
             if self.value in (
                 contextlib._AsyncGeneratorContextManager,
                 contextlib.closing,
@@ -460,20 +462,28 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 contextlib.ExitStack,
                 contextlib.AsyncExitStack,
             ):
-                unimplemented(f"{self.value} not supported")
+                # We are not changing the behavior of Dynamo as these function were
+                # already ignored on trace_rules.py before #136033 landed
+                unimplemented(
+                    f"{self.value} not supported. This may be due to its use of "
+                    "context-specific operations that are not supported in "
+                    "Dynamo yet (i.e. Exception handling)"
+                )
 
             if self.value is contextlib._GeneratorContextManager and isinstance(
                 args[0], BaseUserFunctionVariable
             ):
-                if not torch._dynamo.config.enable_trace_contextlib_contextmanager:
+                if not torch._dynamo.config.enable_trace_contextlib:
                     unimplemented("contextlib.contextmanager")
-                # Replace UserFunctionVariable by GeneratorFunction if the function
-                # was annotated with @contextlib.contextmanager
+                # Replace UserFunctionVariable by FunctionDecoratedBycontextlibContextManagerVariable
+                # if the function is annotated with @contextlib.contextmanager
                 # This shouldn't be necessary once generator functions are fully
                 # supported in dynamo
-                args[0] = FunctionDecoratedByContextlibContextManagerVariable(
-                    args[0], source=self.source
-                )
+                args = [
+                    FunctionDecoratedByContextlibContextManagerVariable(
+                        args[0], source=self.source
+                    )
+                ] + args[1:]
 
             cm_obj = tx.output.side_effects.track_object_new(
                 self.source, self.value, var_cls, {}
