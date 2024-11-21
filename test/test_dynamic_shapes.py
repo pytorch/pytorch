@@ -896,13 +896,11 @@ def forward(self, x_1):
         s2 = create_symint(shape_env, 4)
         sum = s0 + s1
 
-        self.assertTrue(sum.node._optimized_summation)
-
         def assert_optimized(sym):
-            self.assertTrue(sym.node._optimized_summation)
+            self.assertEqual(sym.node._optimized_summation_co, 1)
 
         def assert_not_optimized(sym):
-            self.assertFalse(getattr(sym.node, "_optimized_summation", False))
+            self.assertEqual(getattr(sym.node, "_optimized_summation_co", None), None)
 
         assert_optimized(sum)
 
@@ -940,6 +938,61 @@ def forward(self, x_1):
         s7 = create_symint(shape_env, 21)
         s8 = create_symint(shape_env, 31)
         b = torch.sym_sum([s6, s7, s8])
+        assert_optimized(a)
+        assert_not_optimized(b)
+        assert_not_optimized(a + b)
+
+    def test_sympy_optimized_add_with_co(self):
+        shape_env = ShapeEnv()
+        s0 = create_symint(shape_env, 2)
+        s1 = create_symint(shape_env, 3)
+        s2 = create_symint(shape_env, 4)
+        sum = 4 * s0 + 4 * s1
+
+        def assert_optimized(sym):
+            self.assertEqual(sym.node._optimized_summation_co, 4)
+
+        def assert_not_optimized(sym):
+            self.assertEqual(getattr(sym.node, "_optimized_summation_co", None), None)
+
+        assert_optimized(sum)
+
+        # add duplicate symbol
+        assert_not_optimized(sum + 4 * s0)
+
+        # add constant.
+        assert_not_optimized(sum + 1)
+
+        # add new unique symbol, should maintain _optimized_summation property.
+        assert_optimized(sum + 4 * s2)
+        assert_not_optimized(sum + 10 * s2)
+
+        assert_optimized(4 * s2 + sum)
+        assert_not_optimized(10 * s2 + sum)
+
+        # add x + (a+b) with no  _optimized_summation on the rhs sum.
+        a = create_symint(shape_env, 10)
+        b = create_symint(shape_env, 11)
+        two_sum = torch.sym_sum([4 * a, 4 * b])
+        assert_not_optimized(two_sum)
+        assert_optimized(sum + two_sum)
+
+        # adding two expressions of length >2 that are _optimized_summation.
+        a = 4 * s0 + 4 * s1 + 4 * s2
+        s3 = create_symint(shape_env, 10)
+        s4 = create_symint(shape_env, 20)
+        s5 = create_symint(shape_env, 30)
+        b = 4 * s3 + 4 * s4 + 4 * s5
+        assert_optimized(a)
+        assert_optimized(b)
+        assert_optimized(a + b)
+        assert_optimized(b + a)
+
+        # same as above but b does not have ordered_summation_of_unique_symbols.
+        s6 = create_symint(shape_env, 11)
+        s7 = create_symint(shape_env, 21)
+        s8 = create_symint(shape_env, 31)
+        b = torch.sym_sum([4 * s6, 4 * s7, 4 * s8])
         assert_optimized(a)
         assert_not_optimized(b)
         assert_not_optimized(a + b)

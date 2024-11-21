@@ -89,6 +89,44 @@ __all__ = [
 ]
 
 
+# Return (c,symbol) for an expression of form c*symbol, note that symbol is seen as 1*symbol.
+# Return none if the expression is not symbol or c*symbol.
+def is_mult_const_symbol(expr):
+    if expr.is_symbol:
+        return (1, expr)
+    if (
+        expr.is_Mul
+        and len(expr._args) == 2
+        and expr._args[0].is_integer
+        and expr._args[1].is_symbol
+    ):
+        return (expr._args[0], expr._args[1])
+    return None
+
+
+# A base binary summation is of the form c*a + c*b or a+b,  where a!=b.
+# If the expression is not base binary summation return None else return c.
+# For a+b case c is considered to be 1.
+def _is_base_binary_summation(expr: sympy.Expr) -> Optional[int]:
+    if not expr.is_Add:
+        return None
+
+    if len(expr._args) != 2:
+        return None
+
+    side1 = is_mult_const_symbol(expr._args[0])
+    if side1 is None:
+        return None
+
+    side2 = is_mult_const_symbol(expr._args[1])
+    if side2 is None:
+        return None
+
+    if side1[0] != side2[0] or side1[1] == side2[1]:
+        return None
+    return side1[0]
+
+
 def _is_symbols_binary_summation(expr: sympy.Expr) -> bool:
     # No need to check that two args are not the same, since expr is pr-optimized but we do it anyway.
     return (

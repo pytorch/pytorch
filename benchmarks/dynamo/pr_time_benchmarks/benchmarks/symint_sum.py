@@ -8,18 +8,20 @@ import torch
 class Benchmark(BenchmarkBase):
     N = 200
 
-    def __init__(self, use_loop=False):
-        self.use_loop = use_loop
+    def __init__(self, use_loop=False, with_constant_loop=False):
         super().__init__(
             category="symint_sum",
             backend="inductor",
             device="cpu",
         )
+        self.use_loop = use_loop
+        self.with_constant_loop = with_constant_loop
 
     def name(self):
         if self.use_loop:
             return f"{self.category()}_loop"
-
+        if self.with_constant_loop:
+            return f"{self.category()}_constant_loop"
         return self.category()
 
     def description(self):
@@ -42,6 +44,9 @@ class Benchmark(BenchmarkBase):
             if self.use_loop:
                 for i in xs:
                     y += i
+            elif self.with_constant_loop:
+                for i in xs:
+                    y += 12 * i
             else:
                 y = sum(xs)
             return torch.tensor(y)
@@ -51,12 +56,14 @@ class Benchmark(BenchmarkBase):
 
 def main():
     result_path = sys.argv[1]
-    Benchmark(
-        use_loop=False
-    ).enable_compile_time_instruction_count().collect_all().append_results(result_path)
-    Benchmark(
-        use_loop=True
-    ).enable_compile_time_instruction_count().collect_all().append_results(result_path)
+    for benchmark in [
+        Benchmark(),
+        Benchmark(use_loop=True),
+        Benchmark(with_constant_loop=True),
+    ]:
+        benchmark.enable_compile_time_instruction_count().collect_all().append_results(
+            result_path
+        )
 
 
 if __name__ == "__main__":

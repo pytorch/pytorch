@@ -69,14 +69,19 @@ class SymNode:
     End users don't touch this.  Magic methods are NOT defined on this object.
     """
 
-    # Note [optimized_summation]: indicates that SymNode is an Add expression of the form
-    # a + b + c + d... etc where all terms are unique symbols. This allows us to do some optimizations
-    # for common patterns see _optimized_add.
+    # Note [optimized_summation]: when _optimized_summation_co is not None it indicates that SymNode is
+    # an Add expression of the form c*a + c*b + c*d + ... etc where all terms are unique symbols multiplied
+    # with the same constant optionally. This allows us to do some optimizations for common patterns. See
+    # _optimized_add for the optimization details.
 
-    # The unfortunate reason we have this here is because sympy sets  __slots__ = () for add expression,
+    # The unfortunate reason we have this attribute here is because sympy sets __slots__ = () for add expression,
     # so we cannot add the attribute directly to the sympy expression. Furthermore, we cannot use it as
     # a weak dictionary key either! So instead, we attach the attribute here to the SymNode.
-    _optimized_summation: bool = False
+
+    # if _optimized_summation_co is not None it means two things:
+    # 1. The expression is an add expression of the form c*a + c*b + c*d ..
+    # 2. The value of c is _optimized_summation_co.
+    _optimized_summation_co: Optional[int] = None
 
     def __init__(
         self,
@@ -86,12 +91,12 @@ class SymNode:
         hint: Optional[Union[int, float, bool]],
         constant=None,
         fx_node=None,
-        optimized_summation=False,
+        optimized_summation_co=None,
     ):
         self._expr = expr
         self.shape_env = shape_env
         self.pytype = pytype
-        self._optimized_summation = optimized_summation
+        self._optimized_summation_co = optimized_summation_co
 
         # What's the difference between hint and constant?
         #
@@ -801,52 +806,85 @@ def _binary_search_insert_arg(ordered_args, new_arg):
 
 
 def _optimized_add(
-    lhs, rhs, lhs_is_optimized_summation=False, rhs_is_optimized_summation=False
+    lhs,
+    rhs,
+    lhs_optimized_summation_co: Optional[int] = None,
+    rhs_optimized_summation_co: Optional[int] = None,
 ):
     """
     Custom optimization for Add used to optimize incremental binary summations of certain properties. The idea
-    is when we know the expression is a summation of unique symbols all we need to know is the correct order of symbols,
-    and no other optimizations are needed. We pass evaluate=false, with the correct order of args and save the following.
+    is when we know the expression is a summation of unique symbols each multiplied with the same constant, then
+    all we need to know is the correct order of terms, and no other optimizations are needed. We pass evaluate=false,
+    with the correct order of args and save the following costs:
     1. Avoid running other optimizations when the Add is constructed.
     2. Manually figure out the order of the args for the new expression in log(n) comparisons instead of nLog(n)
     (comparing terms is expensive and shows in the profiles).
-    The function returns a tuple of (1) a boolean that indicates whether the output is a summation of unique symbols,
-    (2) the result sympy expression.
+    For example if we have (a+b) +c, then we can construct add(a+b+c, evaluate=False)
+
+    The reason we assert all terms are multiplied with the same constant as opposed to each multiplied with
+    any constant is the following. Consider (4*a + 3*b) + 10*a, to figure out if we a is not in the lhs we need
+    to iterate over all the terms. But for the restricted case (4*a + 4*b) + 4*a a binary search is sufficient
+    since there can only be one terms that have a which is 4*a if it exists.
+
+    The function returns a tuple of:
+    (1) An Optional[int] that indicates whether the output is a summation of unique symbols and the coefficient.
+    The is then stored on the SymNode.
+    (2) The result sympy expression.
     """
     import sympy
     from sympy.core.basic import _args_sortkey as sortkey
 
-    def make_optimized(ordered_args):
+    def make_optimized(ordered_args, coeff):
         result = sympy.Add(*ordered_args, evaluate=False)
-        return (True, result)
+        return (coeff, result)
 
-    from torch.utils._sympy.functions import _is_symbols_binary_summation
+    from torch.utils._sympy.functions import (
+        _is_base_binary_summation,
+        is_mult_const_symbol,
+    )
 
-    lhs_is_optimized_summation |= _is_symbols_binary_summation(lhs)
-    rhs_is_optimized_summation |= _is_symbols_binary_summation(rhs)
+    if lhs_optimized_summation_co is None:
+        lhs_optimized_summation_co = _is_base_binary_summation(lhs)
 
-    if lhs_is_optimized_summation and rhs_is_optimized_summation:
-        # (a0+a1..) + (a2+a3..) => (a0+a1+a2+a3)
+    if rhs_optimized_summation_co is None:
+        rhs_optimized_summation_co = _is_base_binary_summation(rhs)
+
+    if (
+        lhs_optimized_summation_co
+        and lhs_optimized_summation_co
+        and lhs_optimized_summation_co == rhs_optimized_summation_co
+    ):
+        # (c*a0 + c*a1) + (c*a2 + c*a3) => (c*a0 + c*a1 + c*a2 + c*a3)
         if sortkey(lhs._args[-1]) < sortkey(rhs._args[0]):
-            return make_optimized(lhs._args + rhs._args)
-        #  (a2+a3..) + (a0+a1..) => (a0+a1+a2+a3)
+            return make_optimized(lhs._args + rhs._args, lhs_optimized_summation_co)
+        # (c*a2 + c*a3) + (c*a0 + c*a1) => (c*a0 + c*a1 + c*a2 + c*a3)
         if sortkey(lhs._args[0]) > sortkey(rhs._args[-1]):
-            return make_optimized(rhs._args + lhs._args)
+            return make_optimized(rhs._args + lhs._args, lhs_optimized_summation_co)
 
-    # (a0+a2) + a1 => (a0+a1+a2)
-    if lhs_is_optimized_summation and rhs.is_symbol:
+    # (c*a0 + c*a2) + c*a1 => (c*a0 + c*a1 + c*a2)
+    rhs_data = is_mult_const_symbol(rhs)
+    if (
+        lhs_optimized_summation_co
+        and rhs_data
+        and rhs_data[0] == lhs_optimized_summation_co
+    ):
         new_args = _binary_search_insert_arg(list(lhs._args), rhs)
         if new_args is not None:
-            return make_optimized(new_args)
+            return make_optimized(new_args, lhs_optimized_summation_co)
 
-    # a1 + (a0+a2)=> (a0+a1+a2)
-    if rhs_is_optimized_summation and lhs.is_symbol:
+    # c*a1 + (c*a0 + c*a2)=> (c*a0 + c*a1 + c*a2)
+    lhs_data = is_mult_const_symbol(lhs)
+    if (
+        rhs_optimized_summation_co
+        and lhs_data
+        and lhs_data[0] == rhs_optimized_summation_co
+    ):
         new_args = _binary_search_insert_arg(list(rhs._args), lhs)
         if new_args is not None:
-            return make_optimized(new_args)
+            return make_optimized(new_args, rhs_optimized_summation_co)
 
     result = sympy.Add(lhs, rhs)
-    return (_is_symbols_binary_summation(result), result)
+    return (_is_base_binary_summation(result), result)
 
 
 reflectable_magic_methods = {
@@ -1211,7 +1249,7 @@ def _make_node_magic(method, func):
                 self, handle_sym_dispatch(op, (wrap_node(self), wrap_node(other)), {})
             )
         assert isinstance(other, SymNode)
-        optimized_summation = False
+        optimized_summation_co = None
         try:
             if method == "mod":
                 from torch.utils._sympy.functions import Mod, PythonMod
@@ -1231,11 +1269,11 @@ def _make_node_magic(method, func):
                     out = PythonMod(self.expr, other.expr)
             elif method == "add":
                 # see Note [optimized_summation]
-                (optimized_summation, out) = func(
+                (optimized_summation_co, out) = func(
                     self.expr,
                     other.expr,
-                    self._optimized_summation,
-                    other._optimized_summation,
+                    self._optimized_summation_co,
+                    other._optimized_summation_co,
                 )
             else:
                 # TODO: consider constant prop here
@@ -1280,7 +1318,7 @@ def _make_node_magic(method, func):
             pytype,
             out_hint,
             fx_node=fx_node,
-            optimized_summation=optimized_summation,  # see Note [optimized_summation]
+            optimized_summation_co=optimized_summation_co,  # see Note [optimized_summation]
         )
         return result
 
