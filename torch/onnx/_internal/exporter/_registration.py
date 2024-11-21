@@ -24,6 +24,7 @@ import torch
 import torch._ops
 from torch.onnx._internal._lazy_import import onnxscript, onnxscript_apis
 from torch.onnx._internal.exporter import _schemas
+from torch.onnx._internal.exporter._torchlib import _torchlib_registry
 
 
 _DEFAULT_OPSET_VERSION = 18
@@ -153,10 +154,16 @@ class ONNXRegistry:
                 if target is None:
                     continue
 
+                if isinstance(overload_func, onnxscript.OnnxFunction):
+                    opset_version = overload_func.opset.version
+                else:
+                    opset_version = 1
+
                 overload_func.signature = _schemas.OpSignature.from_function(  # type: ignore[attr-defined]
                     overload_func,
                     domain,
                     name,
+                    opset_version=opset_version,
                 )
                 onnx_decomposition = OnnxDecompMeta(
                     onnx_function=overload_func,
@@ -168,6 +175,21 @@ class ONNXRegistry:
             except Exception:
                 logger.exception("Failed to register '%s'. Skipped", qualified_name)
                 continue
+
+        # Gather ops from the internal torchlib registry
+        # TODO(justinchuby): Make this the main registry after torchlib is migrated to PyTorch
+        # Trigger registration
+        from torch.onnx._internal.exporter._torchlib import ops
+
+        del ops
+        for target, implementations in _torchlib_registry.registry.items():  # type: ignore[assignment]
+            for impl in implementations:
+                onnx_decomposition = OnnxDecompMeta(
+                    onnx_function=impl,
+                    fx_target=target,  # type: ignore[arg-type]
+                )
+                registry._register(target, onnx_decomposition)  # type: ignore[arg-type]
+
         return registry
 
     def _register(
@@ -211,7 +233,10 @@ class ONNXRegistry:
                 # TODO(justinchuby): Use the op_signature attribute when onnxscript is updated in CI
                 if isinstance(function, onnxscript.OnnxFunction):
                     function.signature = _schemas.OpSignature.from_function(  # type: ignore[attr-defined]
-                        function, function.function_ir.domain, function.name
+                        function,
+                        function.function_ir.domain,
+                        function.name,
+                        opset_version=function.opset.version,
                     )
                 else:
                     function.signature = _schemas.OpSignature.from_function(  # type: ignore[attr-defined]
