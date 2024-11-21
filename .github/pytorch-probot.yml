@@ -3,6 +3,7 @@ ciflow_tracking_issue: 64124
 ciflow_push_tags:
 - ciflow/autoformat
 - ciflow/binaries
+- ciflow/binaries_conda
 - ciflow/binaries_libtorch
 - ciflow/binaries_wheel
 - ciflow/inductor
