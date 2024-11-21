@@ -20,14 +20,15 @@ def aoti_eager_cache_dir(namespace: str, device: str) -> Path:
 
 
 def aoti_eager_op_conf_lock(op_func_name_with_overload: str) -> Any:
-    from torch.utils import WaitCounterFileLock
-
     # Avoid circular import
     from torch._inductor.codecache import get_lock_dir, LOCK_TIMEOUT
+    from torch.utils.waitcounterfilelock import WaitCounterFileLock
 
     op_conf_lock_file = f"{op_func_name_with_overload}.lock"
     lock_dir = get_lock_dir()
-    return WaitCounterFileLock(os.path.join(lock_dir, op_conf_lock_file), timeout=LOCK_TIMEOUT)
+    return WaitCounterFileLock(
+        os.path.join(lock_dir, op_conf_lock_file), timeout=LOCK_TIMEOUT
+    )
 
 
 def load_aoti_eager_cache(
@@ -236,6 +237,7 @@ def aoti_compile_with_persistent_cache(
                 # need to keep the same signature.
                 same_signature=False,
             )
+            assert isinstance(kernel_lib_path, str)
 
             kernel_metadata_items = []
 

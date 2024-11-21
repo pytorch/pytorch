@@ -7,7 +7,7 @@ import traceback
 import warnings
 from collections import defaultdict
 from typing import Any, Callable, DefaultDict, Generic, List, Optional
-from typing_extensions import deprecated, ParamSpec
+from typing_extensions import ParamSpec
 
 import torch
 
@@ -736,6 +736,8 @@ class ExceptionWrapper:
 def _get_available_device_type():
     if torch.cuda.is_available():
         return "cuda"
+    if torch.backends.mps.is_available():
+        return "mps"
     if hasattr(torch, "xpu") and torch.xpu.is_available():  # type: ignore[attr-defined]
         return "xpu"
     if hasattr(torch, "mtia") and torch.mtia.is_available():
@@ -882,10 +884,6 @@ def classproperty(func):
     return _ClassPropertyDescriptor(func)
 
 
-@deprecated(
-    "`torch._utils.is_compiling` is deprecated. Use `torch.compiler.is_compiling` instead.",
-    category=FutureWarning,
-)
 def is_compiling() -> bool:
     """
     Indicates whether we are tracing/compiling with torch.compile() or torch.export().

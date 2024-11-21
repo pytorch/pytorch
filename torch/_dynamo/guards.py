@@ -16,7 +16,6 @@ import math
 import re
 import sys
 import textwrap
-import time
 import types
 import warnings
 import weakref
@@ -45,8 +44,10 @@ from torch._C._dynamo.guards import (
     check_type_id,
     dict_version,
     DictGuardManager,
+    GuardManager,
     install_no_tensor_aliasing_guard,
     install_object_aliasing_guard,
+    profile_guard_manager,
     RootGuardManager,
 )
 from torch._dynamo.source import (
@@ -73,6 +74,7 @@ from torch.fx.experimental.symbolic_shapes import (
     is_symbolic,
     SYMPY_INTERP,
 )
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._traceback import format_frame, report_compile_source_on_error
 from torch.utils.weak import TensorWeakRef
 
@@ -81,6 +83,7 @@ from .eval_frame import set_guard_error_hook
 from .source import (
     AttrProxySource,
     AttrSource,
+    AutoDerefLocalSource,
     CallFunctionNoArgsSource,
     ChainedSource,
     ConstDictKeySource,
@@ -108,7 +111,14 @@ from .source import (
     UnspecializedParamBufferSource,
     WeakRefCallSource,
 )
-from .types import CacheEntry, ExtraState, GuardedCode, GuardFail, GuardFn  # noqa: F401
+from .types import (  # noqa: F401
+    CacheEntry,
+    DynamoFrameType,
+    ExtraState,
+    GuardedCode,
+    GuardFail,
+    GuardFn,
+)
 from .utils import (
     common_constant_types,
     dict_keys_repr,
@@ -127,6 +137,8 @@ from .utils import (
     verify_guard_fn_signature,
 )
 
+
+guard_manager_testing_hook_fn: Optional[Callable[[Any, Any], Any]] = None
 
 try:
     import numpy as np
@@ -155,9 +167,13 @@ class GuardManagerWrapper:
     the check_nopybind from C++.
     """
 
-    def __init__(self):
-        self.root = RootGuardManager()
+    def __init__(self, root=None):
+        if root is None:
+            self.root = RootGuardManager()
+        else:
+            self.root = root
 
+        self.diff_guard_root = None
         self.closure_vars = None
         self.args = None
         self.code_parts = []
@@ -166,10 +182,12 @@ class GuardManagerWrapper:
         self.guard_fail_fn = None
         self.cache_entry = None
         self.extra_state = None
-        self.id_matched_objs = None
+        self.id_matched_objs = {}
         self.no_tensor_aliasing_sources = []
 
         self.print_no_tensor_aliasing_guard = True
+
+        self.diff_guard_sources: OrderedSet[str] = OrderedSet()
 
     @contextmanager
     def _preserve_print_no_tensor_aliasing_flag(self):
@@ -178,6 +196,78 @@ class GuardManagerWrapper:
             yield
         finally:
             self.print_no_tensor_aliasing_guard = True
+
+    def collect_diff_guard_sources(self):
+        # At the time of finalize, we have only marked guard managers with
+        # TENSOR_MATCH guards as diff guard managers. So, we do a tree traversal
+        # and collect all the nodes in the tree (branches) that lead to tensor
+        # guards.
+
+        # After a recompilation, some of guard managers will have a fail_count >
+        # 0, so we collect them as well. Later on, we accumulate the diff guard
+        # sources for all the guard managers.
+
+        def visit_dict_manager(node):
+            is_diff_guard_node = (
+                node.get_source() in self.diff_guard_sources or node.fail_count() > 0
+            )
+            for idx, (key_mgr, val_mgr) in sorted(
+                node.get_key_value_managers().items()
+            ):
+                is_diff_guard_node |= visit(key_mgr) | visit(val_mgr)
+
+            if is_diff_guard_node:
+                self.diff_guard_sources.add(node.get_source())
+
+            return is_diff_guard_node
+
+        def visit_manager(node):
+            assert not isinstance(node, DictGuardManager)
+
+            is_diff_guard_node = (
+                node.get_source() in self.diff_guard_sources or node.fail_count() > 0
+            )
+            for child_mgr in node.get_child_managers():
+                is_diff_guard_node |= visit(child_mgr)
+
+            if is_diff_guard_node:
+                self.diff_guard_sources.add(node.get_source())
+
+            return is_diff_guard_node
+
+        def visit(node):
+            if node is None:
+                return False
+            if isinstance(node, DictGuardManager):
+                return visit_dict_manager(node)
+            return visit_manager(node)
+
+        visit(self.root)
+
+        return self.diff_guard_sources
+
+    def finalize(self):
+        self.collect_diff_guard_sources()
+        self.populate_diff_guard_manager()
+
+    def populate_diff_guard_manager(self):
+        self.diff_guard_root = self.clone_with_chosen_sources(self.diff_guard_sources)
+
+        # Ensure that that C++ side points to the updated diff guard manager.
+        # When a new GuardManagerWrapper is created, it does not have a
+        # cache_entry attribute, so it relies on the CacheEntry constructor to
+        # set the diff_guard_root in C++.  But once it is saved in the Dynamo
+        # cache, C++ side adds a cache_entry attribute. On recompiles, this
+        # cache_entry is visible, so we update the C++ side to point to the
+        # update guard manager.
+        if self.cache_entry:
+            self.cache_entry.update_diff_guard_root_manager()
+
+    def clone_with_chosen_sources(self, chosen_sources):
+        def filter_fn(node_mgr):
+            return node_mgr.get_source() in chosen_sources
+
+        return self.root.clone_manager(filter_fn)
 
     def get_guard_lines(self, guard):
         guard_name = guard.__class__.__name__
@@ -254,8 +344,9 @@ class GuardManagerWrapper:
             body.writeline("TREE_GUARD_MANAGER:", skip_prefix=True)
             body.writeline("RootGuardManager")
             self.construct_manager_string(self.root, body)
-            for guard in self.root.get_epilogue_lambda_guards():
-                body.writelines(self.get_guard_lines(guard))
+            if hasattr(self.root, "get_epilogue_lambda_guards"):
+                for guard in self.root.get_epilogue_lambda_guards():
+                    body.writelines(self.get_guard_lines(guard))
             return body.getvalue()
 
     def check(self, x):
@@ -305,10 +396,14 @@ def from_numpy(a):
 @functools.lru_cache(None)
 def uninteresting_files():
     import torch._dynamo.external_utils
+    import torch._dynamo.polyfills
 
-    mods = [
-        torch._dynamo.external_utils,
-    ]
+    mods = [torch._dynamo.external_utils, torch._dynamo.polyfills]
+
+    from torch._dynamo.polyfills.loader import POLYFILLED_MODULES
+
+    mods.extend(POLYFILLED_MODULES)
+
     return {inspect.getfile(m) for m in mods}
 
 
@@ -523,7 +618,7 @@ class GuardManagerType(enum.Enum):
 class GuardBuilder(GuardBuilderBase):
     def __init__(
         self,
-        id_ref: Callable[[Any], str],
+        id_ref: Callable[[Any, str], str],
         source_ref: Callable[[Source], str],
         lookup_weakrefs: Callable[[object], ReferenceType[object]],
         local_scope: Dict[str, object],
@@ -626,7 +721,7 @@ class GuardBuilder(GuardBuilderBase):
             )
             if key_is_id(key):
                 # Install ID_MATCH guard
-                id_val = self.id_ref(key)
+                id_val = self.id_ref(key, key_source)
                 key_manager.add_id_match_guard(
                     id_val,
                     get_verbose_code_parts(
@@ -873,6 +968,14 @@ class GuardBuilder(GuardBuilderBase):
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
             )
+        elif istype(source, AutoDerefLocalSource):
+            # Guard checks run on f_locals, in which the python level
+            # auto-dereferenced cell objects are also dereferenced (e.g., rather
+            # than `f_locals` being `{ 'cell' : <cell object of int> }`, it'll
+            # be `{ 'cell' : <int> }`. So the guard manager is the same as the
+            # base guard manager.
+            assert isinstance(base_guard_manager, GuardManager)  # tame mypy
+            out = base_guard_manager
         elif istype(source, GlobalSource):
             # Global manager accepts a dict but it is not a DictGuardManager
             # because globals dict is big and we typically guard on a very
@@ -1285,7 +1388,7 @@ class GuardBuilder(GuardBuilderBase):
     def TYPE_MATCH(self, guard: Guard) -> None:
         # ___check_type_id is same as `id(type(x)) == y`
         t = type(self.get(guard.name))
-        obj_id = self.id_ref(t)
+        obj_id = self.id_ref(t, f"type({guard.name})")
         code = f"___check_type_id({self.arg_ref(guard)}, {obj_id})"
         self._set_guard_export_info(guard, [code])
 
@@ -1328,7 +1431,7 @@ class GuardBuilder(GuardBuilderBase):
 
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
-        id_val = self.id_ref(val)
+        id_val = self.id_ref(val, guard.name)
         code = f"___check_obj_id({ref}, {id_val})"
         self._set_guard_export_info(guard, [code])
 
@@ -1601,7 +1704,7 @@ class GuardBuilder(GuardBuilderBase):
         self._set_guard_export_info(guard, code)
 
         t = type(value)
-        obj_id = self.id_ref(t)
+        obj_id = self.id_ref(t, f"type({guard.name})")
 
         self.get_guard_manager(guard).add_tuple_iterator_length_guard(
             tuple_iterator_len(value), obj_id, get_verbose_code_parts(code, guard)
@@ -1790,11 +1893,6 @@ class GuardBuilder(GuardBuilderBase):
         )
 
     def TENSOR_MATCH(self, guard: Guard, value=None):
-        # For FSDP modules, we can skip guards on nn module tensors because FSDP
-        # eager assumes that the params are unchanged once the model is wrapped.
-        if guard.is_fsdp_module():
-            return
-
         # For tensors that are part of the Dynamo extracted Fx graph module, an
         # ID_MATCH suffices. Once we turn on inline_inbuilt_nn_modules, these
         # will be lifted as inputs and have a TENSOR_MATCH guard.
@@ -1888,6 +1986,13 @@ class GuardBuilder(GuardBuilderBase):
                     tensor_name,
                     verbose_code_parts,
                 )
+
+                # We consider TENSOR_MATCH guard to be important enough to be
+                # included in diff guard manager by default.
+                if not isinstance(value, torch.nn.Parameter):
+                    self.check_fn_manager.guard_manager.diff_guard_sources.add(
+                        guard.name
+                    )
 
             # A frame is valid for reuse with dynamic dimensions if the new
             # (user-requested) dynamic dimensions are a subset of the old
@@ -2105,8 +2210,13 @@ def must_add_nn_module_guards(guard):
     )
 
 
-class DeletedGuardFn:
-    pass
+class DeletedGuardManagerWrapper(GuardManagerWrapper):
+    def __init__(self, reason):
+        super().__init__()
+        self.invalidation_reason = reason
+
+    def populate_diff_guard_manager(self):
+        self.diff_guard_root = None
 
 
 # NB: Naively, you'd expect this to only be a function that produces
@@ -2118,11 +2228,17 @@ class CheckFunctionManager:
     def __init__(
         self,
         output_graph=None,
+        cache_entry=None,
         guard_fail_fn: Optional[Callable[[GuardFail], None]] = None,
     ):
         guards = output_graph.guards if output_graph else None
         self._weakrefs: Dict[int, ReferenceType[object]] = {}
+
+        existing_diff_guard_sources = (
+            update_diff_guard_managers_for_existing_cache_entries(cache_entry)
+        )
         self.guard_manager = GuardManagerWrapper()
+        self.guard_manager.diff_guard_sources = existing_diff_guard_sources
         self.output_graph = output_graph
         w_builder = None
 
@@ -2214,8 +2330,16 @@ class CheckFunctionManager:
                 )
                 raise AssertionError(f"Guard check failed: {reasons}")
 
+            if guard_manager_testing_hook_fn is not None:
+                guard_manager_testing_hook_fn(
+                    self.guard_manager, output_graph.local_scope
+                )
+
             if guards_log.isEnabledFor(logging.DEBUG):
-                self.profile_guard_eval(output_graph.local_scope)
+                latency = profile_guard_manager(
+                    self.guard_manager.root, output_graph.local_scope
+                )
+                guards_log.debug("Guard eval latency = %s us", f"{latency:.2f}")
 
         # NB - We have to very careful of cleaning up here. Because of the
         # invalidate function, we can create a weakref finalizer that keeps
@@ -2227,18 +2351,6 @@ class CheckFunctionManager:
         # e.g., not setting output_graph = None can keep hold of nn_modules.
         self._weakrefs.clear()
         self.output_graph = None
-
-    def profile_guard_eval(self, f_locals):
-        start_time = time.time()
-        iterations = 0
-        profile_duration = 1  # unit is seconds
-
-        while time.time() - start_time < profile_duration:
-            self.guard_manager.check(f_locals)
-            iterations += 1
-
-        guard_latency = 10**6 / iterations  # us
-        guards_log.debug("Guard eval latency = %s us", f"{guard_latency:.2f}")
 
     def compile_check_fn(self, builder, guards_out, guard_fail_fn):
         # see parallel handling of ".0" / "___implicit0" in _eval_frame.c
@@ -2378,6 +2490,8 @@ class CheckFunctionManager:
             **_get_closure_vars(),
         }
 
+        self.guard_manager.finalize()
+
         globals_for_guard_fn = {"G": builder.scope["G"]}
         # Guard manager construction is complete. Ensure we did not miss to
         # insert a guard in cpp guard manager.
@@ -2396,24 +2510,24 @@ class CheckFunctionManager:
         self.guard_manager.extra_state = None
         self.guard_manager.no_tensor_aliasing_sources = no_tensor_aliasing_names
 
-    def invalidate(self):
+    def invalidate(self, obj_str):
         # Some tests reveal that CheckFunctionManager has no attribute
         # guard_manager, but this case should not be of any concern.
         # This case doesn't seem easy to repro.
         if (
             hasattr(self, "guard_manager")
-            and self.guard_manager is not DeletedGuardFn
+            and not isinstance(self.guard_manager, DeletedGuardManagerWrapper)
             and (cache_entry := self.guard_manager.cache_entry) is not None
             and (extra_state := self.guard_manager.extra_state) is not None
         ):
             assert isinstance(cache_entry, CacheEntry)
             assert isinstance(extra_state, ExtraState)
-            extra_state.invalidate(cache_entry)
-            self.guard_manager.cache_entry = None
-            self.guard_manager.extra_state = None
-            self.guard_manager = DeletedGuardFn  # type: ignore[assignment]
+            reason = f"Cache line invalidated because {obj_str} got deallocated"
+            deleted_guard_manager = DeletedGuardManagerWrapper(reason)
+            extra_state.invalidate(cache_entry, deleted_guard_manager)
+            self.guard_manager = deleted_guard_manager
 
-    def id_ref(self, obj):
+    def id_ref(self, obj, obj_str):
         """add a weakref, return the id"""
         try:
             if id(obj) not in self._weakrefs:
@@ -2421,7 +2535,9 @@ class CheckFunctionManager:
                 # function, which will delete the callbacks as well. Therefore,
                 # we are using a finalizer which is kept alive.
                 self._weakrefs[id(obj)] = weakref.ref(obj)
-                weakref.finalize(obj, self.invalidate)
+                weakref.finalize(
+                    obj, functools.partial(self.invalidate, obj_str=obj_str)
+                )
         except TypeError:
             pass  # cannot weakref bool object
         return id(obj)
@@ -2504,7 +2620,6 @@ def make_torch_function_mode_stack_guard(intial_stack):
 
 
 def recompilation_reason_for_no_tensor_aliasing_guard(guard_manager, scope):
-    duplicate_tensors = []
     global_scope = dict(guard_manager.global_scope)
     ids_to_source = collections.defaultdict(list)
     for tensor_source in guard_manager.no_tensor_aliasing_sources:  # type: ignore[attr-defined]
@@ -2512,9 +2627,9 @@ def recompilation_reason_for_no_tensor_aliasing_guard(guard_manager, scope):
         tensor_id = id(eval(tensor_source, global_scope, scope))
         ids_to_source[tensor_id].append(tensor_source)
 
-    for key in ids_to_source:
-        if len(ids_to_source[key]) > 1:
-            duplicate_tensors.append(f"{ids_to_source[key]}")
+    duplicate_tensors = [
+        f"{ids_to_source[key]}" for key in ids_to_source if len(ids_to_source[key]) > 1
+    ]
 
     reason = ", ".join(duplicate_tensors)
     return [f"Duplicate tensors found: {reason}"]
@@ -2593,6 +2708,8 @@ def get_guard_fail_reason(
     f_locals: Dict[str, object],
     compile_id: CompileId,
 ) -> str:
+    if isinstance(guard_manager, DeletedGuardManagerWrapper):
+        return f"{compile_id}: {guard_manager.invalidation_reason}"
     reason_str = get_guard_fail_reason_helper(guard_manager, f_locals, compile_id)
     guard_failures[orig_code_map[code]].append(reason_str)
 
@@ -2610,7 +2727,7 @@ def get_guard_fail_reason(
 
 
 def get_and_maybe_log_recompilation_reason(
-    cache_entry, frame: types.FrameType
+    cache_entry, frame: DynamoFrameType
 ) -> List[str]:
     """
     Return the list of guard failure reasons using cache_entry.
@@ -2667,6 +2784,31 @@ def get_and_maybe_log_recompilation_reason(
     )
 
     return reasons
+
+
+def update_diff_guard_managers_for_existing_cache_entries(cache_entry):
+    first_cache_entry = cache_entry
+
+    # On the first pass, go through the cache entries and accumulate the diff
+    # guard sources. Different guard managers can fail with different sources.
+    # So, we collect all of them first.
+    acc_diff_guard_sources = set()
+    while cache_entry is not None:
+        acc_diff_guard_sources.update(
+            cache_entry.guard_manager.collect_diff_guard_sources()
+        )
+        cache_entry = cache_entry.next
+
+    # On the second pass, set the diff_guard_sources for each cache line to the
+    # accumulated value. And the re-populate the diff guard manager.
+    cache_entry = first_cache_entry
+    while cache_entry is not None:
+        cache_entry.guard_manager.diff_guard_sources = acc_diff_guard_sources
+        cache_entry.guard_manager.populate_diff_guard_manager()
+        cache_entry = cache_entry.next
+
+    # return the accumulated sources to set up the new cache line.
+    return acc_diff_guard_sources
 
 
 def guard_error_hook(

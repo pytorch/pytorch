@@ -1,10 +1,8 @@
 # Owner(s): ["module: unknown"]
-import torch
 import tempfile
 
-from torch.utils.waitcounterfilelock import WaitCounterFileLock
 from torch.testing._internal.common_utils import run_tests, TestCase
-
+from torch.utils.waitcounterfilelock import WaitCounterFileLock
 
 
 class TestWaitCounterFileLock(TestCase):
@@ -12,6 +10,7 @@ class TestWaitCounterFileLock(TestCase):
         _, p = tempfile.mkstemp()
         with WaitCounterFileLock(p):
             pass
+
 
 if __name__ == "__main__":
     run_tests()

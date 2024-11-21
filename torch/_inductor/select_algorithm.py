@@ -20,12 +20,12 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Type, TypeVar, Un
 from unittest.mock import patch
 
 import sympy
-from filelock import FileLock
 
 import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 from torch._dynamo.testing import rand_strided
-from torch._dynamo.utils import counters, identity, preserve_rng_state
+from torch._dynamo.utils import counters, dynamo_timed, identity, preserve_rng_state
+from torch.utils.waitcounterfilelock import WaitCounterFileLock
 
 from . import config, ir
 from .autotune_process import (
@@ -1115,7 +1115,7 @@ def get_mm_log_filename() -> Optional[str]:
 
 def append_to_log(filename, data):
     lock_file = filename.replace(".json", ".lock")
-    lock = FileLock(lock_file)
+    lock = WaitCounterFileLock(lock_file)
     with lock:
         try:
             with open(filename) as f:
@@ -1414,7 +1414,8 @@ class AlgorithmSelectorCache(PersistentCache):
             return wait_on_futures
 
         def autotune(choices):
-            return make_benchmark_fn()(choices)
+            with dynamo_timed(f"{name}_template_autotuning"):
+                return make_benchmark_fn()(choices)
 
         if config.autotune_in_subproc:
             from .autotune_process import tuning_pool
@@ -1424,7 +1425,8 @@ class AlgorithmSelectorCache(PersistentCache):
 
         def do_autotuning(precompile_fn):
             precompile_start_ts = time.time()
-            precompile_fn()
+            with dynamo_timed(f"{name}_template_precompiling"):
+                precompile_fn()
             precompile_elapse = time.time() - precompile_start_ts
 
             autotune_start_ts = time.time()
@@ -1666,7 +1668,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     map(
                         str,
                         V.graph.sizevars.size_hints(
-                            n.get_size(), fallback=config.unbacked_symint_fallback
+                            n.get_size(), fallback=config.unbacked_symint_fallback  # type: ignore[arg-type]
                         ),
                     )
                 )

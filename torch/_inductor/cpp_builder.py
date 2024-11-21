@@ -79,10 +79,10 @@ def cpp_compiler_search(search: str) -> str:
                 # Do not install GXX by default
                 if not os.getenv("TORCH_INDUCTOR_INSTALL_GXX"):
                     continue
-                from filelock import FileLock
+                from torch.utils.waitcounterfilelock import WaitCounterFileLock
 
                 lock_dir = get_lock_dir()
-                lock = FileLock(
+                lock = WaitCounterFileLock(
                     os.path.join(lock_dir, "g++.lock"), timeout=LOCK_TIMEOUT
                 )
                 with lock:
@@ -288,8 +288,7 @@ def get_compiler_version_info(compiler: str) -> str:
 
 # =============================== cpp builder ===============================
 def _append_list(dest_list: List[str], src_list: List[str]) -> None:
-    for item in src_list:
-        dest_list.append(copy.deepcopy(item))
+    dest_list.extend(copy.deepcopy(item) for item in src_list)
 
 
 def _remove_duplication_in_list(orig_list: List[str]) -> List[str]:
@@ -545,6 +544,9 @@ def _get_optimization_cflags() -> List[str]:
             cflags.append("ffp-contract=off")
 
         if sys.platform != "darwin":
+            # on macos, unknown argument: '-fno-tree-loop-vectorize'
+            if is_gcc():
+                cflags.append("fno-tree-loop-vectorize")
             # https://stackoverflow.com/questions/65966969/why-does-march-native-not-work-on-apple-m1
             # `-march=native` is unrecognized option on M1
             if not config.is_fbcode():
@@ -739,12 +741,11 @@ def _setup_standard_sys_libs(
 
 
 def _get_build_args_of_chosen_isa(vec_isa: VecISA) -> Tuple[List[str], List[str]]:
-    macros = []
-    build_flags = []
+    macros: List[str] = []
+    build_flags: List[str] = []
     if vec_isa != invalid_vec_isa:
         # Add Windows support later.
-        for x in vec_isa.build_macro():
-            macros.append(copy.deepcopy(x))
+        macros.extend(copy.deepcopy(x) for x in vec_isa.build_macro())
 
         build_flags = [vec_isa.build_arch_flags()]
 
