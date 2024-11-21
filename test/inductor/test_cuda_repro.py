@@ -429,6 +429,7 @@ class CudaReproTests(TestCase):
                     configs=configs,
                     save_cache_hook=False,
                     mutated_arg_names=["in_out_ptr0"],
+                    reset_to_zero_arg_names=[],
                     optimize_mem=True,
                     heuristic_type=HeuristicType.POINTWISE,
                 )
@@ -1493,6 +1494,32 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         self.assertTrue(
             device_stats2["active.all.peak"] <= device_stats["active.all.peak"]
         )
+
+    def test_repeated_masked_load(self):
+        target_size = (8, 2)
+        mem_eff_temporal_upsampling_interp_chunks = 2
+        from functorch.einops import rearrange
+
+        x = torch.randn(1, 8, 12, 12, 4, dtype=torch.float16, device="cuda")
+        x = x.permute(0, 1, 4, 2, 3)  # make non-contiguous
+        x = rearrange(x, "b c t h w -> b c t (h w)")
+
+        def interpolate_chunked(x):
+            # chunk along c
+            chunks = x.chunk(chunks=mem_eff_temporal_upsampling_interp_chunks, dim=1)
+            r = []
+            for t in chunks:
+                r.append(
+                    torch.nn.functional.interpolate(
+                        t.float(), size=target_size, mode="nearest"
+                    ).to(t.dtype)
+                )
+            out_chunked = torch.cat(r, dim=1)
+            return out_chunked
+
+        out_eager = interpolate_chunked(x)
+        out_compiled = torch.compile(interpolate_chunked)(x)
+        self.assertEqual(out_eager, out_compiled)
 
 
 if __name__ == "__main__":
