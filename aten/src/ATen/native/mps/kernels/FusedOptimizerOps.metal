@@ -236,7 +236,7 @@ kernel void fused_adam(
   }
 }
 
-#define REGISTER_FUSED_ADAM_OP(                                               \
+#define REGISTER_FUSED_OP(                                                    \
     DTYPE,                                                                    \
     STATE_STEPS_DTYPE,                                                        \
     ADAM_MODE_DTYPE,                                                          \
@@ -259,118 +259,42 @@ kernel void fused_adam(
           uint tgid [[threadgroup_position_in_grid]],                         \
           uint tptg [[threads_per_threadgroup]])
 
-REGISTER_FUSED_ADAM_OP(
-    float,
-    float,
-    ADAM_MODE::ORIGINAL,
-    fused_adam,
-    fused_adam,
-    AdamArguments);
-REGISTER_FUSED_ADAM_OP(
-    float,
-    half,
-    ADAM_MODE::ORIGINAL,
-    fused_adam,
-    fused_adam,
-    AdamArguments);
-REGISTER_FUSED_ADAM_OP(
-    half,
-    float,
-    ADAM_MODE::ORIGINAL,
-    fused_adam,
-    fused_adam,
-    AdamArguments);
-REGISTER_FUSED_ADAM_OP(
-    half,
-    half,
-    ADAM_MODE::ORIGINAL,
-    fused_adam,
-    fused_adam,
-    AdamArguments);
-REGISTER_FUSED_ADAM_OP(
-    float,
-    float,
-    ADAM_MODE::ADAMW,
-    fused_adamw,
-    fused_adam,
-    AdamArguments);
-REGISTER_FUSED_ADAM_OP(
-    float,
-    half,
-    ADAM_MODE::ADAMW,
-    fused_adamw,
-    fused_adam,
-    AdamArguments);
-REGISTER_FUSED_ADAM_OP(
-    half,
-    float,
-    ADAM_MODE::ADAMW,
-    fused_adamw,
-    fused_adam,
-    AdamArguments);
-REGISTER_FUSED_ADAM_OP(
-    half,
-    half,
-    ADAM_MODE::ADAMW,
-    fused_adamw,
-    fused_adam,
-    AdamArguments);
-REGISTER_FUSED_ADAM_OP(
-    float,
-    float,
-    ADAM_MODE::ORIGINAL,
-    fused_adam_amsgrad,
-    fused_adam_amsgrad,
-    AdamAmsgradArguments);
-REGISTER_FUSED_ADAM_OP(
-    float,
-    half,
-    ADAM_MODE::ORIGINAL,
-    fused_adam_amsgrad,
-    fused_adam_amsgrad,
-    AdamAmsgradArguments);
-REGISTER_FUSED_ADAM_OP(
-    half,
-    float,
-    ADAM_MODE::ORIGINAL,
-    fused_adam_amsgrad,
-    fused_adam_amsgrad,
-    AdamAmsgradArguments);
-REGISTER_FUSED_ADAM_OP(
-    half,
-    half,
-    ADAM_MODE::ORIGINAL,
-    fused_adam_amsgrad,
-    fused_adam_amsgrad,
-    AdamAmsgradArguments);
-REGISTER_FUSED_ADAM_OP(
-    float,
-    float,
-    ADAM_MODE::ADAMW,
-    fused_adamw_amsgrad,
-    fused_adam_amsgrad,
-    AdamAmsgradArguments);
-REGISTER_FUSED_ADAM_OP(
-    float,
-    half,
-    ADAM_MODE::ADAMW,
-    fused_adamw_amsgrad,
-    fused_adam_amsgrad,
-    AdamAmsgradArguments);
-REGISTER_FUSED_ADAM_OP(
-    half,
-    float,
-    ADAM_MODE::ADAMW,
-    fused_adamw_amsgrad,
-    fused_adam_amsgrad,
-    AdamAmsgradArguments);
-REGISTER_FUSED_ADAM_OP(
-    half,
-    half,
-    ADAM_MODE::ADAMW,
-    fused_adamw_amsgrad,
-    fused_adam_amsgrad,
-    AdamAmsgradArguments);
+#define REGISTER_FUSED_ADAM_OP(D1, D2) \
+  REGISTER_FUSED_OP(                   \
+      D1, D2, ADAM_MODE::ORIGINAL, fused_adam, fused_adam, AdamArguments)
+
+#define REGISTER_FUSED_ADAMW_OP(D1, D2) \
+  REGISTER_FUSED_OP(                    \
+      D1, D2, ADAM_MODE::ADAMW, fused_adamw, fused_adam, AdamArguments)
+
+#define REGISTER_FUSED_ADAM_GRAD_OP(D1, D2) \
+  REGISTER_FUSED_OP(                        \
+      D1,                                   \
+      D2,                                   \
+      ADAM_MODE::ORIGINAL,                  \
+      fused_adam_amsgrad,                   \
+      fused_adam_amsgrad,                   \
+      AdamAmsgradArguments)
+
+#define REGISTER_FUSED_ADAMW_GRAD_OP(D1, D2) \
+  REGISTER_FUSED_OP(                         \
+      D1,                                    \
+      D2,                                    \
+      ADAM_MODE::ADAMW,                      \
+      fused_adamw_amsgrad,                   \
+      fused_adam_amsgrad,                    \
+      AdamAmsgradArguments)
+
+#define REGISTER_ADAM_OPS_QUART(D1, D2) \
+  REGISTER_FUSED_ADAM_OP(D1, D2);       \
+  REGISTER_FUSED_ADAMW_OP(D1, D2);      \
+  REGISTER_FUSED_ADAM_GRAD_OP(D1, D2);  \
+  REGISTER_FUSED_ADAMW_GRAD_OP(D1, D2)
+
+REGISTER_ADAM_OPS_QUART(float, float);
+REGISTER_ADAM_OPS_QUART(float, half);
+REGISTER_ADAM_OPS_QUART(half, float);
+REGISTER_ADAM_OPS_QUART(half, half);
 
 template <typename T>
 inline void sgd_momentum_math(
