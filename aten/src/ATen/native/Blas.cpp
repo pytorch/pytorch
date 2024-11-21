@@ -230,7 +230,7 @@ Tensor vdot(const Tensor &self, const Tensor &other){
 
 }
 
-Tensor&
+static Tensor&
 _scaled_mm_out_cpu_emulated(const Tensor& mat1, const Tensor& mat2,
           const Tensor& scale_a,
           const Tensor& scale_b,
