@@ -1113,8 +1113,8 @@ graph():
             # catch concrete inequality
             with self.assertRaisesRegex(
                 error_type,
-                "Real tensor propagation found an output size mismatch between fake shape 8 and real shape 4, "
-                "at output index 0, dimension 0 for func: mylib.foo.default",
+                r"Real tensor propagation found an output size mismatch between fake shape 8 and real shape 4, "
+                r"at output\.size\(0\), for func: mylib.foo.default",
             ):
                 export(
                     M(),
@@ -1133,8 +1133,8 @@ graph():
             )
             with self.assertRaisesRegex(
                 error_type,
-                "Real tensor propagation found an output size mismatch between fake shape s1 and real shape 4, "
-                "at output index 0, dimension 0 for func: mylib.foo.default",
+                r"Real tensor propagation found an output size mismatch between fake shape s1 and real shape 4, "
+                r"at output\.size\(0\), for func: mylib.foo.default",
             ):
                 export(
                     M(),
@@ -1193,7 +1193,7 @@ graph():
             with self.assertRaisesRegex(
                 error_type,
                 r"Real tensor propagation found a metadata mismatch between fake tensor (.*\n)*.* "
-                r"and real tensor (.*\n)*.* at output index 0, for func: mylib.foo_dtype.default",
+                r"and real tensor (.*\n)*.* at output, for func: mylib.foo_dtype.default",
             ):
                 ep = export(N(), (torch.randn(4, 4),))
 
@@ -1412,6 +1412,33 @@ def forward(self, x, y):
             return torch.randn(3, 3).diagonal()
 
         with self.assertRaisesRegex(RuntimeError, "not dense in memory"):
+            with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+                ep = export(model, inputs)
+
+    def test_real_tensor_errors_on_aliasing_custom_op(self):
+        @torch.library.custom_op("export::foo_alias", mutates_args={})
+        def foo(x: torch.Tensor) -> torch.Tensor:
+            return x
+
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.export.foo_alias(x) * 2
+
+        model = Foo()
+        inputs = (torch.randn(4, 4),)
+        error_type = (
+            RuntimeError
+            if is_non_strict_test(self._testMethodName)
+            else torch._dynamo.exc.TorchRuntimeError
+        )
+        with self.assertRaisesRegex(
+            error_type,
+            (
+                r"The output of this custom operator \(1\) must not also be an input "
+                r"to this custom operator and \(2\) may not alias any inputs to this "
+                r"custom operator or other returns"
+            ),
+        ):
             with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
                 ep = export(model, inputs)
 
