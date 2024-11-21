@@ -457,7 +457,8 @@ print(torch.xpu.device_count())
         torch.xpu.synchronize()
         after_free_bytes, after_total_bytes = torch.xpu.mem_get_info()
 
-        self.assertLessEqual(before_free_bytes - after_free_bytes, 1024 * 1024)
+        # We should have allocated at least 1MB
+        self.assertLessEqual(1024 * 1024, before_free_bytes - after_free_bytes)
         self.assertEqual(before_total_bytes, after_total_bytes)
 
     def test_get_arch_list(self):
