@@ -158,7 +158,7 @@ class ReplicateComputation(torch.nn.Module):
         # model initialization can be done now through
         # with disable_data_parallel():
         #     model.init_weights()
-        # NOTE(yf225): note: also useful for Ads optimizer init (which needs sharded tensor)
+        # NOTE(yf225): note: also useful for internal model optimizer init (which needs sharded tensor)
         if not active_parametrization():
             return x
 
@@ -189,7 +189,7 @@ class ReplicateComputation(torch.nn.Module):
 cls_key_to_SimpleFSDP_cls: Dict[Tuple[Type, str], Type] = {}
 
 
-# NOTE(yf225): Ads model doesn't do explicit dtype casting for inputs
+# NOTE(yf225): internal model doesn't do explicit dtype casting for inputs
 # and rely on FSDP2 `MixedPrecisionPolicy.cast_forward_inputs=True` to do it.
 # Here we need to do the same dtype casting in SimpleFSDP.
 def _pre_forward(mp_policy, module: nn.Module, args, kwargs):
@@ -360,7 +360,7 @@ def SimpleFSDP_data_parallel(
     return model
 
 
-# NOTE(yf225): We have this wrapping module class, because existing Ads FSDP2 integration
+# NOTE(yf225): We have this wrapping module class, because existing internal FSDP2 integration
 # wants to dispatch to FSDP2 vs. FSDP1 path based on module class type.
 class SimpleFSDPModule:
     def __new__(cls, *args, **kwargs):
