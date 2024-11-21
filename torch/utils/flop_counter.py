@@ -748,6 +748,13 @@ class FlopCounterMode(TorchDispatchMode):
             # func can be decomposed; redispatch
             with self.decomposed_counter:
                 return func._op_dk(dk, *args, **kwargs)
+        # TODO: only apply this on meta device input
+        elif func is torch.ops.aten.nonzero.default:
+            assert len(args) == 1, "as_tuple NYI"
+            # Just pretend everything is nonzero
+            # TODO: stride is wrong here I think
+            out = torch.empty((args[0].numel(), args[0].dim()), device='meta')
+            return self._count_flops(func._overloadpacket, out, args, kwargs)
         else:
             # no further decomposition; execute & count flops
             out = func(*args, **kwargs)

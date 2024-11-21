@@ -810,6 +810,18 @@ class TestFlopCounter(TestCase):
         self.assertEqual(called, 1)
         self.assertExpectedInline(get_total_flops(mode), """9001""")
 
+    def test_nonzero_max(self):
+        from torch.utils.flop_counter import FlopCounterMode
+
+        x = torch.randn(3, device='meta')
+        a = torch.randn(2, 2, device='meta')
+        b = torch.randn(2, 2, device='meta')
+        with FlopCounterMode(display=False) as mode:
+            y = torch.nonzero(x)
+            z = (a @ b) * y.sum()
+
+        self.assertExpectedInline(get_total_flops(mode), """16""")
+
     @skipIfNoTorchVision
     def test_inference_mode(self):
         def get_flops(model):
