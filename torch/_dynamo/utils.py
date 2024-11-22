@@ -803,6 +803,7 @@ LOG_FORMAT_VERSION = 3
 
 @dataclasses.dataclass
 class CompilationMetrics:
+    log_format_version: int = LOG_FORMAT_VERSION
     compile_id: Optional[str] = None
     frame_key: Optional[str] = None
     co_name: Optional[str] = None
@@ -849,8 +850,8 @@ class CompilationMetrics:
     inductor_cumulative_compile_time_us: Optional[int] = None
     inductor_code_gen_cumulative_compile_time_us: Optional[int] = None
     triton_compile_time_us: Optional[int] = None  # TODO: instrument
-    runtime_cudagraphify_time_us: Optional[int] = None  # TODO: instrument
-    runtime_triton_autotune_time_us: Optional[int] = None  # TODO: instrument
+    runtime_cudagraphify_time_us: Optional[int] = None
+    runtime_triton_autotune_time_us: Optional[int] = None
     dynamo_compile_time_before_restart_us: Optional[int] = None
     cuda_synchronize_time_us: Optional[int] = None  # TODO: instrument
     distributed_ephemeral_timeout_us: Optional[int] = None
@@ -862,7 +863,6 @@ class CompilationMetrics:
     pre_grad_pass_time_us: Optional[int] = None
     post_grad_pass_time_us: Optional[int] = None
     joint_graph_pass_time_us: Optional[int] = None
-    log_format_version: int = LOG_FORMAT_VERSION
     inductor_config: Optional[str] = None
     remote_cache_version: Optional[int] = None
     inductor_fx_remote_cache_hit_count: Optional[int] = None

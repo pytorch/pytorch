@@ -1018,6 +1018,18 @@ class CachingAutotuner(KernelInterface):
     def run(
         self, *args, grid, stream, benchmark_run=False, **kwargs
     ):  # type:ignore[override]
+        with dynamo_timed(
+            "CachingAutotuner.run",
+            log_pt2_compile_event=True,
+            dynamo_compile_column_us="runtime_triton_autotune_time_us",
+        ):
+            return self._run(
+                *args, grid=grid, stream=stream, benchmark_run=benchmark_run, **kwargs
+            )
+
+    def _run(
+        self, *args, grid, stream, benchmark_run=False, **kwargs
+    ):  # type:ignore[override]
         if self.triton_interpret:
             return self.fn[grid](
                 *args,
