@@ -46,7 +46,29 @@ class CKGemmTemplate(CKTemplate):
     PT_EXPORT {{kernel_definition}} {
         auto gemm = {{instance_type}} {};
         auto invoker = gemm.MakeInvoker();
-
+        {% if is_batched %}
+        auto argument = gemm.MakeArgument(
+            reinterpret_cast<const {{a_element_dtype}}*>(X),
+            reinterpret_cast<const {{b_element_dtype}}*>(W),
+            std::array<const void*, {{ds_size}}>{ {{ds_names}} },
+            reinterpret_cast<{{c_element_dtype}}*>(Y),
+            M,
+            N,
+            K,
+            B,
+            LDA,
+            LDB,
+            std::array<ck::index_t, {{ds_size}}>{ {{ds_strides}} },
+            LDC,
+            M * K, // batch_stride_A
+            N * K, // batch_stride_B
+            std::array<ck::index_t, {{ds_size}}>{ {{ds_batch_strides}} },
+            M * N, // batch_stride_C
+            {{a_elementwise_op}},
+            {{b_elementwise_op}},
+            {{epilogue}} // c_elementwise_op
+        );
+        {% else %}
         auto argument = gemm.MakeArgument(
             reinterpret_cast<const {{a_element_dtype}}*>(X),
             reinterpret_cast<const {{b_element_dtype}}*>(W),
@@ -64,6 +86,7 @@ class CKGemmTemplate(CKTemplate):
             {{b_elementwise_op}},
             {{epilogue}} // c_elementwise_op
         );
+        {% endif %}
         if (!gemm.IsSupportedArgument(argument)) {
             // we do our best to statically avoid this case in `filter_op`
             std::cerr << "invalid argument for gemm instance " << gemm.GetTypeString() << std::endl;
@@ -241,24 +264,36 @@ class CKGemmTemplate(CKTemplate):
         beta: float,
         input_reorder: Optional[List[int]] = None,
     ) -> None:
+        is_batched = len(layout.size) == 3
+        name = "ck_batched_gemm_template" if is_batched else "ck_gemm_template"
         super().__init__(
-            "ck_gemm_template",
+            name=name,
             input_nodes=input_nodes,
             layout=layout,
             input_reorder=input_reorder,
         )
         self.alpha = alpha
         self.beta = beta
+        self.is_batched = is_batched
 
     def header(self) -> IndentedBuffer:
         res = super().header()
-        res.splice(
-            """
-                // CK GEMM header(s)
+        if self.is_batched:
+            res.splice(
+                """
+                    // CK GEMM header(s)
 
-                #include "ck/tensor_operation/gpu/device/impl/device_gemm_multiple_d_xdl_cshuffle_v3.hpp"
-            """
-        )
+                    #include "ck/tensor_operation/gpu/device/impl/device_batched_gemm_multiple_d_xdl_cshuffle_v3.hpp"
+                """
+            )
+        else:
+            res.splice(
+                """
+                    // CK GEMM header(s)
+
+                    #include "ck/tensor_operation/gpu/device/impl/device_gemm_multiple_d_xdl_cshuffle_v3.hpp"
+                """
+            )
         return res
 
     def globals(self) -> IndentedBuffer:
@@ -390,10 +425,11 @@ class CKGemmTemplate(CKTemplate):
 
     def emit_ck_instance(self, op: "CKGemmOperation"):
         # The Jinja template for generating a C++ type alias *definition* for a Universal GEMM instance
+        struct_name = "DeviceBatchedGemmMultiD_Xdl_CShuffle_V3" if self.is_batched else "DeviceGemmMultiD_Xdl_CShuffle_V3"
         template_definition = r"""
     // Gemm operator {{operation_name}}
     using Operation_{{operation_name}} =
-        ck::tensor_operation::device::DeviceGemmMultiD_Xdl_CShuffle_V3<
+        ck::tensor_operation::device::{{struct_name}}<
             {{template_params}}>;
 
 """
@@ -416,6 +452,7 @@ class CKGemmTemplate(CKTemplate):
         return self._template_from_string(template_definition).render(
             operation_name=op.name(),
             template_params=(",\n" + 12 * " ").join(template_params),
+            struct_name=struct_name,
         ), self._template_from_string(template_type).render(operation_name=op.name())
 
     def render(self, kernel: ROCmTemplateKernel, op: "CKGemmOperation", **kwargs) -> str:  # type: ignore[override]
@@ -544,6 +581,10 @@ class CKGemmTemplate(CKTemplate):
 
         assert epilogue is not None, "CK GEMM epilogue is not set"
 
+        size_arg_strs = ["M", "N", "K", "LDA", "LDB", "LDC", "LDD"]
+        if self.is_batched:
+            size_arg_strs.insert(0, "B")
+
         res = self._template_from_string(self.gemm_template).render(
             inline_utils=self.inline_utils(),
             headers=self.header().getvalue(),
@@ -556,7 +597,7 @@ class CKGemmTemplate(CKTemplate):
                 input_reorder=self.input_reorder,
                 size_args=[
                     f"int32_t {arg}"
-                    for arg in ["M", "N", "K", "LDA", "LDB", "LDC", "LDD"]
+                    for arg in size_arg_strs
                 ],
             ),
             instance_type=instance_type,
@@ -596,6 +637,8 @@ class CKGemmTemplate(CKTemplate):
                 else []
             ),
             version_comment=version_comment,
+            is_batched=self.is_batched,
+            ds_batch_strides=[],  # FIXME when supporting baddbmm
         )
 
         if config.rocm.generate_test_runner:
@@ -685,13 +728,28 @@ class CKGemmTemplate(CKTemplate):
         An instance may invalidate the GEMM configuration at runtime.
         Such instances will be assigned +inf runtime by the autotune process.
         """
-        unfiltered_instances = (
-            gen_ops_preselected()
-            if config.rocm.use_preselected_instances and self._is_rcr_f16()
-            else gen_ops_library()
-        )
+        try:
+            import ck4inductor  # type: ignore[import]
+            from ck4inductor.universal_gemm.gen_instances import (  # type: ignore[import]
+                gen_ops_library as gen_gemm_ops_library,
+                gen_ops_preselected as gen_gemm_ops_preselected,
+            )
+            from ck4inductor.batched_universal_gemm.gen_instances import gen_ops_library as gen_batched_gemm_ops_library # type: ignore[import]
+        except ImportError:
+            return []
+
+        generator = None
+        if self.is_batched:
+            generator = gen_batched_gemm_ops_library
+        else:
+            generator = gen_gemm_ops_library
+        if config.rocm.use_preselected_instances and self._is_rcr_f16():
+            generator = gen_gemm_ops_preselected
+
+        assert generator is not None
+
         filtered_instances = list(
-            filter(lambda op: self.filter_op(op), unfiltered_instances)
+            filter(lambda op: self.filter_op(op), generator())
         )
         # NB: when using a fixed list order, most likely we will pick the subset of instances
         # which are very similar to each other. Randomizing the choice seems to solve this.
@@ -749,16 +807,19 @@ class CKGemmTemplate(CKTemplate):
         )
         Y = self.output_node
 
-        M = X.get_size()[0]
-        K = X.get_size()[1]
-        N = W.get_size()[1]
-        LDA = X.get_stride()[0 if X.get_stride()[1] == 1 else 1]
-        LDB = W.get_stride()[0 if W.get_stride()[1] == 1 else 1]
-        LDC = Y.get_stride()[0 if Y.get_stride()[1] == 1 else 1]
+        M = X.get_size()[-2]
+        K = X.get_size()[-1]
+        N = W.get_size()[-1]
+        LDA = X.get_stride()[-2 if X.get_stride()[-1] == 1 else -1]
+        LDB = W.get_stride()[-2 if W.get_stride()[-1] == 1 else -1]
+        LDC = Y.get_stride()[-2 if Y.get_stride()[-1] == 1 else -1]
         LDD = (
             0
             if (Bias is None or len(Bias.get_size()) == 1)
-            else Bias.get_stride()[0 if Bias.get_stride()[1] == 1 else 1]
+            else Bias.get_stride()[-2 if Bias.get_stride()[-1] == 1 else -1]
         )
-
-        return M, N, K, LDA, LDB, LDC, LDD
+        if self.is_batched:
+            B = X.get_size()[0]
+            return B, M, N, K, LDA, LDB, LDC, LDD
+        else:
+            return M, N, K, LDA, LDB, LDC, LDD
