@@ -219,7 +219,9 @@ class AsyncCompile:
 
         kernel = TritonCodeCache.load(kernel_name, source_code)
         if self._use_process_pool():
-            set_feature_use("pytorch/inductor:enable_parallel_compile_version (post_warmup)", True)
+            set_feature_use(
+                "pytorch/inductor:enable_parallel_compile_version (post_warmup)", True
+            )
             # We want to support changing these env vars after (and while) the
             # process pool is running, so pass them to the subprocess to reset.
             env_vars = ["TORCHINDUCTOR_CACHE_DIR", "TRITON_CACHE_DIR"]
@@ -233,7 +235,9 @@ class AsyncCompile:
                 ),
             )
         else:
-            set_feature_use("pytorch/inductor:enable_parallel_compile_version (post_warmup)", False)
+            set_feature_use(
+                "pytorch/inductor:enable_parallel_compile_version (post_warmup)", False
+            )
             kernel.precompile()
             return kernel
 
