@@ -45,12 +45,12 @@ from random import randint
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from matplotlib import rcParams
-from scipy.stats import gmean
-from tabulate import tabulate
 
 import torch
 import torch._dynamo
+from matplotlib import rcParams
+from scipy.stats import gmean
+from tabulate import tabulate
 
 
 rcParams.update({"figure.autolayout": True})
@@ -452,7 +452,7 @@ def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
                         )
                         and not args.no_cold_start_latency
                     ):
-                        cmd = f"{cmd} --cold-start-latency"
+                        cmd = f"{cmd} --warm-start-latency"
 
                     if args.batch_size is not None:
                         cmd = f"{cmd} --batch-size {args.batch_size}"
