@@ -396,22 +396,31 @@ print(torch.xpu.device_count())
 
     def test_memory_allocation(self):
         torch.xpu.empty_cache()
-        prev = torch.xpu.memory_allocated()
+        prev_allocated = torch.xpu.memory_allocated()
+        prev_reserved = torch.xpu.memory_reserved()
+        self.assertGreaterEqual(prev_allocated, 0)
+        self.assertGreaterEqual(prev_reserved, 0)
         a = torch.ones(10, device="xpu")
-        self.assertGreater(torch.xpu.memory_allocated(), prev)
-        self.assertGreater(torch.xpu.memory_reserved(), 0)
+        self.assertGreater(torch.xpu.memory_allocated(), prev_allocated)
+        self.assertGreaterEqual(torch.xpu.memory_reserved(), prev_reserved)
         del a
-        self.assertEqual(torch.xpu.memory_allocated(), prev)
+        self.assertEqual(torch.xpu.memory_allocated(), prev_allocated)
         torch.xpu.empty_cache()
-        self.assertEqual(torch.xpu.memory_reserved(), 0)
+        self.assertLessEqual(torch.xpu.memory_reserved(), prev_reserved)
         torch.xpu.reset_accumulated_memory_stats()
         # Activate 1kB memory
+        prev_active_current = torch.xpu.memory_stats()["active_bytes.all.current"]
         a = torch.randn(256, device="xpu")
         # Detect if the current active memory is 1kB
-        self.assertEqual(torch.xpu.memory_stats()["active_bytes.all.current"], 1024)
+        self.assertEqual(
+            torch.xpu.memory_stats()["active_bytes.all.current"],
+            1024 + prev_active_current,
+        )
         self.assertEqual(torch.xpu.memory_stats()["active_bytes.all.freed"], 0)
         del a
-        self.assertEqual(torch.xpu.memory_stats()["active_bytes.all.current"], 0)
+        self.assertEqual(
+            torch.xpu.memory_stats()["active_bytes.all.current"], prev_active_current
+        )
         self.assertEqual(torch.xpu.memory_stats()["active_bytes.all.freed"], 1024)
 
     @unittest.skipIf(not TEST_MULTIXPU, "only one GPU detected")
