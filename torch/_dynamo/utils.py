@@ -870,6 +870,9 @@ class CompilationMetrics:
     inductor_fx_remote_cache_backend_type: Optional[str] = None
     inductor_fx_remote_cache_hit_keys: Optional[str] = None
     inductor_fx_remote_cache_miss_keys: Optional[str] = None
+    cuda_version: Optional[str] = None
+    triton_version: Optional[str] = None
+    feature_usage: Optional[dict[str, bool]] = None
 
 
 DEFAULT_COMPILATION_METRICS_LIMIT = 64
@@ -1001,6 +1004,8 @@ def record_compilation_metrics(
         "fail_reason": str(exc_value) if exc_value else None,
         "structured_logging_overhead_us": to_int_us(structured_logging_overhead_s),
         "inductor_config": _scrubbed_inductor_config_for_logging(),
+        "cuda_version": torch.version.cuda,
+        "triton_version": triton.__version__ if has_triton() else "",
         "inductor_fx_remote_cache_hit_keys": _convert_collection_to_str(
             "inductor_fx_remote_cache_hit_keys"
         ),
@@ -1341,7 +1346,7 @@ def chromium_event_timed(
 ) -> Generator[Any, None, None]:
     """
     Context manager that creates a chromium start and end event. Chromium event
-    logging is integrated with dyanmo_timed, so you probably want to use that
+    logging is integrated with dynamo_timed, so you probably want to use that
     instead. Use this context manager only if you want to avoid dynamo_timed.
     """
     chromium_event_log = get_chromium_event_logger()
@@ -1349,13 +1354,20 @@ def chromium_event_timed(
         chromium_event_log.reset()
     chromium_start_time = time.time_ns()
     chromium_event_log.log_event_start(
-        event_name, chromium_start_time, {}, log_pt2_compile_event=log_pt2_compile_event
+        event_name,
+        chromium_start_time,
+        {},
+        log_pt2_compile_event,
     )
     try:
         yield
     finally:
         chromium_event_log.log_event_end(
-            event_name, time.time_ns(), {}, chromium_start_time, True
+            event_name,
+            time.time_ns(),
+            {},
+            chromium_start_time,
+            log_pt2_compile_event,
         )
 
 
@@ -3357,7 +3369,7 @@ def maybe_enable_compiled_autograd(should_enable, fullgraph=True, dynamic=True):
                 gm, backend=inner_compiler, fullgraph=fullgraph, dynamic=dynamic
             )
 
-        with torch._dynamo.compiled_autograd.enable(compiler_fn) as ctx:
+        with torch._dynamo.compiled_autograd._enable(compiler_fn) as ctx:
             yield ctx
 
 
@@ -3646,3 +3658,11 @@ class CompileTimeInstructionCounter:
         finally:
             if config.record_compile_time_instruction_count:
                 cls.end()
+
+
+def set_feature_use(feature: str, usage: bool):
+    """
+    Records whether we are using a feature
+    Generally a feature is a JK.
+    """
+    get_metrics_context().set_key_value("feature_usage", feature, usage)
