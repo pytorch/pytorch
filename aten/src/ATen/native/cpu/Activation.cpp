@@ -681,12 +681,17 @@ void softshrink_kernel(TensorIteratorBase& iter, const Scalar& lambd) {
     cpu_kernel_vec(
       iter,
       [=](scalar_t a) -> scalar_t {
-        return float(a) > lambd_val ? a - lambd_val : (float(a) < -lambd_val ? a + lambd_val : float(0));
+        return float(a) > lambd_val ? a - lambd_val
+                : (float(a) < -lambd_val ? a + lambd_val : float(a) * float(0));
       },
       [=](Vectorized<scalar_t> self_val) -> Vectorized<scalar_t> {
           auto [self_val0, self_val1] = convert_to_float<scalar_t>(self_val);
-          auto self_val_t0 = convert_from_float<scalar_t>((self_val0 > lambdVec) & (self_val0 - lambdVec), (self_val1 > lambdVec) & (self_val1 - lambdVec));
-          auto self_val_t1 = convert_from_float<scalar_t>((self_val0 < -lambd_val) & (self_val0 + lambdVec), (self_val1 < -lambd_val) & (self_val1 + lambdVec));
+          auto self_val_t0 = convert_from_float<scalar_t>(
+              ((self_val0 > lambdVec) | (self_val0.isnan())) & (self_val0 - lambdVec),
+              ((self_val1 > lambdVec) | (self_val1.isnan())) & (self_val1 - lambdVec));
+          auto self_val_t1 = convert_from_float<scalar_t>(
+              ((self_val0 < -lambd_val) | (self_val0.isnan())) & (self_val0 + lambdVec),
+              ((self_val1 < -lambd_val) | (self_val1.isnan())) & (self_val1 + lambdVec));
           return (self_val_t0 | self_val_t1);
       });
     });
@@ -697,12 +702,12 @@ void softshrink_kernel(TensorIteratorBase& iter, const Scalar& lambd) {
     cpu_kernel_vec(
       iter,
       [=](scalar_t a) -> scalar_t {
-        return a > lambd_val ? a - lambd_val : (a < -lambd_val ? a + lambd_val : scalar_t(0));
+        return a > lambd_val ? a - lambd_val : (a < -lambd_val ? a + lambd_val : a * scalar_t(0));
       },
       [=](Vectorized<scalar_t> self_val) -> Vectorized<scalar_t> {
           Vectorized<scalar_t> self_val_t0, self_val_t1;
-          self_val_t0 = (self_val > lambdVec) & (self_val - lambdVec);
-          self_val_t1 = (self_val < -lambd_val) & (self_val + lambdVec);
+          self_val_t0 = ((self_val > lambdVec) | (self_val.isnan())) & (self_val - lambdVec);
+          self_val_t1 = ((self_val < -lambd_val) | (self_val.isnan())) & (self_val + lambdVec);
           return (self_val_t0 | self_val_t1);
       });
   });
