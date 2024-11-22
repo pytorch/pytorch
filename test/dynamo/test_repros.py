@@ -1242,13 +1242,13 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         with torch.no_grad():
             cnt = self._reformer(nopython=True)
         self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(cnt.op_count, 13)
+        self.assertEqual(cnt.op_count, 11)
 
     def test_reformer_train(self):
         with torch.enable_grad():
             cnt = self._reformer(nopython=False)
         expected_op_count = (
-            """13""" if torch._dynamo.config.inline_inbuilt_nn_modules else """5"""
+            """11""" if torch._dynamo.config.inline_inbuilt_nn_modules else """5"""
         )
 
         self.assertExpectedInline(cnt.frame_count, """1""")
@@ -1725,7 +1725,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_model(inp)
         opt_model(inp)
         self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(18, cnt.op_count)
+        self.assertEqual(12, cnt.op_count)
 
     def test_exec_import(self):
         def fn1():
