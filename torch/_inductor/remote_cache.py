@@ -178,7 +178,7 @@ class RemoteCache(Generic[_T]):
     # valid value even if _T supports it (because you can't tell the difference
     # between `None` and a missing cache entry).
     def put(self, key: str, value: _T) -> None:
-        with _WaitCounter("pytorch.remote_cache.put"):
+        with _WaitCounter("pytorch.remote_cache.put").guard():
             assert value is not None
             sample = self._create_sample()
             try:
