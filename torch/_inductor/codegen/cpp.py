@@ -4056,22 +4056,6 @@ class CppKernelProxy(CppKernel):
         # CppKernel/CppVecKernel/CppTile2dKernel have reduction buffers themselves.
         # Here, we decide how to aggregate them together and place new reduction buffers
         # under CppKernelProxy.
-        def set_buffer_from_main_loop_kernel(attr: str):
-            # the attr: str here is the name of the reduction buffers
-            assert attr in (
-                "reduction_prefix",
-                "reduction_suffix",
-                "parallel_reduction_prefix",
-                "parallel_reduction_suffix",
-                "local_reduction_init",
-                "local_reduction_stores",
-                "non_parallel_reduction_prefix",
-            )
-            main_kernel = self.kernels[0]
-            if attr == "reduction_prefix":
-                main_kernel.finalize_reduction_prefix()
-            getattr(self, attr).splice(getattr(main_kernel, attr))
-
         def aggregate_reduction_prefix_suffix(outer_loop: "LoopLevel"):
             assert len(self.kernels) >= 2
             main_loop_kernel = self.kernels[0]
@@ -4091,7 +4075,8 @@ class CppKernelProxy(CppKernel):
                     + main_loop_kernel.reduction_prefix
                 )
             else:
-                set_buffer_from_main_loop_kernel("reduction_prefix")
+                main_loop_kernel.finalize_reduction_prefix()
+                self.reduction_prefix.splice(main_loop_kernel.reduction_prefix)
 
             # Suffix
             suffix_buf = BracesBuffer()
@@ -4127,17 +4112,21 @@ class CppKernelProxy(CppKernel):
                         suffix_buf.splice(tail_loop_kernel.reduction_suffix)
             self.reduction_suffix = suffix_buf
 
+        main_kernel = self.kernels[0]
         if inner_loop_reduction_outer_not:
             assert outer_loop
             aggregate_reduction_prefix_suffix(outer_loop)
         else:
-            set_buffer_from_main_loop_kernel("reduction_prefix")
-            set_buffer_from_main_loop_kernel("reduction_suffix")
-        set_buffer_from_main_loop_kernel("parallel_reduction_prefix")
-        set_buffer_from_main_loop_kernel("parallel_reduction_suffix")
-        set_buffer_from_main_loop_kernel("local_reduction_init")
-        set_buffer_from_main_loop_kernel("local_reduction_stores")
-        set_buffer_from_main_loop_kernel("non_parallel_reduction_prefix")
+            main_kernel.finalize_reduction_prefix()
+            self.reduction_prefix.splice(main_kernel.reduction_prefix)
+            self.reduction_suffix.splice(main_kernel.reduction_suffix)
+        self.parallel_reduction_prefix.splice(main_kernel.parallel_reduction_prefix)
+        self.parallel_reduction_suffix.splice(main_kernel.parallel_reduction_suffix)
+        self.local_reduction_init.splice(main_kernel.local_reduction_init)
+        self.local_reduction_stores.splice(main_kernel.local_reduction_stores)
+        self.non_parallel_reduction_prefix.splice(
+            main_kernel.non_parallel_reduction_prefix
+        )
 
 
 class OuterLoopFusedKernel(CppKernel):
