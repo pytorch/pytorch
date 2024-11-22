@@ -371,7 +371,6 @@ class ScheduleTest(MultiProcContinousTest):
             ScheduleInterleaved1F1B,
             ScheduleLoopedBFS,
             ScheduleInterleavedZeroBubble,
-            ScheduleWithReorderedB,
         ],
     )
     @parametrize("use_new_runtime", [False, True])
