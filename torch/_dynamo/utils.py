@@ -965,9 +965,10 @@ def record_compilation_metrics(
             return None
         return ",".join(safe_str(item) for item in metric)
 
+    compile_id = torch._guards.CompileContext.current_compile_id()
     structured_logging_overhead_s = torch._logging.get_structured_logging_overhead()
     common_metrics = {
-        "compile_id": str(torch._guards.CompileContext.current_compile_id()),
+        "compile_id": str(compile_id) if compile_id else None,
         "start_time_us": start_time_ns // 1000,
         "end_time_us": end_time_ns // 1000,
         "duration_us": (end_time_ns - start_time_ns) // 1000,
