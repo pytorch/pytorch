@@ -893,8 +893,11 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
 
         assert len(self.input_nodes) >= 2 and self.output_node is not None
         X, W = self.input_nodes[0], self.input_nodes[1]
-        assert isinstance(X.layout, FixedLayout), "X.layout is not fixed"
-        assert isinstance(W.layout, FixedLayout), "W.layout is not fixed"
+        if not isinstance(X.layout, FixedLayout):
+            raise NotImplementedError("X.layout is not fixed")
+        if not isinstance(W.layout, FixedLayout):
+            raise NotImplementedError("W.layout is not fixed")
+
         Y = self.output_node
         if template_buffer_node is not None:
             Y = template_buffer_node
@@ -1131,7 +1134,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
         op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]  # noqa: F821
     ) -> bool:
         X, W = self.input_nodes[0], self.input_nodes[1]
-        return X.layout.size[1] == W.layout.size[0]
+        return X.get_size()[1] == W.get_size()[0]
 
     def _alignment_match(
         self,
@@ -1271,6 +1274,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
                 old_layout = node.get_layout()
                 new_stride = list(old_layout.stride)  # type: ignore[union-attr]
                 new_stride[-2], new_stride[-1] = new_stride[-1], new_stride[-2]
+                assert old_layout.device is not None
                 new_layout = FixedLayout(
                     old_layout.device,
                     old_layout.dtype,
@@ -1392,9 +1396,9 @@ class CUTLASS2xGemmTemplate(CUTLASSGemmTemplate):
         X, W = self.input_nodes[0], self.input_nodes[1]
 
         if op.gemm_kind == cutlass_lib.GemmKind.Sparse:
-            return X.layout.size[1] * 2 == W.layout.size[0]
+            return X.get_size()[1] * 2 == W.get_size()[0]
 
-        return X.layout.size[1] == W.layout.size[0]
+        return X.get_size()[1] == W.get_size()[0]
 
     def _alignment_match(
         self,
@@ -1411,7 +1415,7 @@ class CUTLASS2xGemmTemplate(CUTLASSGemmTemplate):
         # https://github.com/NVIDIA/cutlass/blob/e01b9b5029b7caca5a43c29f7d2714d7cf1dcae8/include/cutlass/gemm/kernel/sparse_gemm.h#L198-L200  # noqa: B950
         # So, let's skip these choices if that would be the case.
         X = self.input_nodes[0]
-        return (X.layout.size[1] * 2) % op.tile_description.tile_shape[2] == 0
+        return (X.get_size()[1] * 2) % op.tile_description.tile_shape[2] == 0
 
     def _set_bias_layout_and_alignment(
         self,
