@@ -988,7 +988,7 @@ def unsqueeze_default(func, *args, **kwargs):
     # Account for collapsed jagged dim
     dim = new_kwargs["dim"]
     new_kwargs["dim"] = _wrap_jagged_dim(
-        len(inp._size) + 1, dim, inp._ragged_idx, "unsqueeze"
+        len(inp._size) + 1, dim, inp._ragged_idx, "unsqueeze", allow_ragged_dim=True
     )
 
     # ragged_idx changes if a dimension is added before it

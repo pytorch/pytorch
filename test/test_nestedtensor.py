@@ -8032,7 +8032,6 @@ FORWARD_SKIPS_AND_XFAILS = [
                 "narrow",
                 "select",
                 "split",
-                "unsqueeze",
             }
         ),
         sample_match_fn=lambda device, sample: "ragged_dim" in sample.name,
