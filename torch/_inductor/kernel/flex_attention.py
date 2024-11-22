@@ -847,7 +847,7 @@ def flex_attention(
         query.get_device(),
         query.get_dtype(),
         [B, Hq, seq_len_q, v_head_dim],
-        stride=out_strides,
+        stride=[sympy.sympify(s) for s in out_strides],
     )
     # see NOTE:[TritonTemplates with multiple outputs]
     logsumexp_shape = [B, Hq, seq_len_q]
