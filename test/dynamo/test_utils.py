@@ -206,8 +206,10 @@ class TestDynamoTimed(TestCase):
 
         # First event is for the forward. Formatting makes reading diffs
         # much easier.
+        raw = dataclasses.asdict(compilation_events[0])
+        del raw["feature_usage"]
         self.assertExpectedInline(
-            pprint.pformat(dataclasses.asdict(compilation_events[0])),
+            pprint.pformat(raw),
             """\
 {'accumulated_cache_size': 0,
  'aot_autograd_cumulative_compile_time_us': 0,
@@ -278,8 +280,10 @@ class TestDynamoTimed(TestCase):
         )
 
         # Second event is for the backward
+        raw = dataclasses.asdict(compilation_events[1])
+        del raw["feature_usage"]
         self.assertExpectedInline(
-            pprint.pformat(dataclasses.asdict(compilation_events[1])),
+            pprint.pformat(raw),
             """\
 {'accumulated_cache_size': None,
  'aot_autograd_cumulative_compile_time_us': None,

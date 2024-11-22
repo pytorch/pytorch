@@ -1608,16 +1608,6 @@ class TestAvgPool(TestCaseMPS):
 
 
 class TestMPS(TestCaseMPS):
-
-    def test_sync(self):
-        # Regression test for https://github.com/pytorch/pytorch/issues/139550#issuecomment-2468860559
-        a = torch.arange(1000)
-        b = torch.arange(1000)
-        a = a.to('mps', non_blocking=True)
-        b = b.to('mps', non_blocking=True)
-        torch.mps.synchronize()
-        assert (a == b).all()
-
     def test_exp(self, device="mps", dtype=torch.float):
         for v in (2, -2) + ((1j, 1 + 1j) if dtype.is_complex else ()):
             b = torch.arange(18, dtype=dtype, device=device) / 3 * math.pi
@@ -8394,6 +8384,14 @@ class TestMPS(TestCaseMPS):
         self.assertEqual(x.cumprod(0), x.cumprod(-2))
         self.assertRaises(IndexError, lambda: x.cumprod(2))
         self.assertRaises(IndexError, lambda: x.cumprod(-3))
+
+    def test_do_sync_thrice_its_all_right(self):
+        # Regression test for https://github.com/pytorch/pytorch/commit/9bc9d4cdb4355a385a7d7959f07d04d1648d6904
+        # That caused sync calls to deadlock
+        x = torch.nextafter(torch.ones(1024, device='mps'), torch.zeros(1024, device='mps'))
+        for _ in range(3):
+            torch.mps.synchronize()
+        self.assertLess(x.sum().item(), x.numel())
 
 class TestLogical(TestCaseMPS):
     def _wrap_tensor(self, x, device="cpu", dtype=None, requires_grad=False):
