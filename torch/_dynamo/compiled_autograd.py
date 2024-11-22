@@ -28,6 +28,7 @@ from torch.fx.experimental.proxy_tensor import (
 )
 from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
 from torch.fx.traceback import preserve_node_meta, set_stack_trace
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._traceback import CapturedTraceback
 
 
@@ -55,6 +56,17 @@ def maybe_clone(x):
     return x
 
 
+_graph_placeholders = ["inputs", "sizes", "scalars", "hooks"]
+_impure_targets = OrderedSet(
+    [
+        call_hook,
+        call_backward,
+        FakeCompiledAutogradEngine._exec_final_callbacks_stub,
+        torch.ops.inductor.accumulate_grad_.default,
+    ]
+)
+
+
 class AutogradCompilerInstance:
     def __init__(self, compiler_fn) -> None:
         self.compiler_fn = compiler_fn
@@ -69,7 +81,6 @@ class AutogradCompilerInstance:
         self.fx_tracer = PythonKeyTracer()
         self.proxy_mode = ProxyTorchDispatchMode(self.fx_tracer, "symbolic")
         self.hooks_proxy: Optional[Proxy] = None
-        self.graph_placeholders = ["inputs", "sizes", "scalars", "hooks"]
 
     def wrap_fake(self, x, source):
         assert isinstance(x, torch.Tensor)
@@ -94,7 +105,7 @@ class AutogradCompilerInstance:
         self.fx_tracer.tensor_attrs = {}
         args_proxy, sizes_proxy, scalars_proxy, self.hooks_proxy = (
             self.fx_tracer.create_proxy("placeholder", name, (), {})
-            for name in self.graph_placeholders
+            for name in _graph_placeholders
         )
 
         self.stack.enter_context(preserve_node_meta())
@@ -265,7 +276,7 @@ class AutogradCompilerInstance:
         inputs = nodes[0]
         inputs_users = list(inputs.users.keys())
         # input access nodes should immediately follow placeholder nodes
-        first_getitem_idx = len(self.graph_placeholders)
+        first_getitem_idx = len(_graph_placeholders)
         assert nodes[first_getitem_idx] == inputs_users[0]
         last_getitem_idx = first_getitem_idx + len(inputs_users) - 1
         assert nodes[last_getitem_idx] == inputs_users[-1]
@@ -305,18 +316,25 @@ class AutogradCompilerInstance:
             in [torch.ops.aten.sym_size.int, torch.ops.aten.sym_numel.default]
         )
 
-    def remove_dead_sym_nodes(self):
-        for node in reversed(list(self.fx_tracer.graph.nodes)):
-            if (
-                node.op == "call_function"
-                and node.target == operator.eq
-                and (self.is_sym_node(node.args[0]) or self.is_sym_node(node.args[1]))
-            ):
-                if len(node.users) == 0:
-                    self.fx_tracer.graph.erase_node(node)
-            if self.is_sym_node(node):
-                if len(node.users) == 0:
-                    self.fx_tracer.graph.erase_node(node)
+    def dce(self):
+        # Most of these removed nodes would have been removed during Dynamo and AOTDispatch
+        # Remove some of these nodes earlier to improve compilation speed
+
+        # Dynamo guards will error instead of creating aliasing guards unless we unpack them in the graph
+        unpack_nodes: OrderedSet[torch.fx.Node] = OrderedSet()
+        for i, node in enumerate(self.fx_tracer.graph.find_nodes(op="placeholder")):
+            unpack_nodes.update(node.users.keys())
+        assert i == len(_graph_placeholders) - 1
+
+        def is_impure(node):
+            return (
+                node in unpack_nodes
+                or node.op == "placeholder"
+                or node.op == "output"
+                or (node.op == "call_function" and node.target in _impure_targets)
+            )
+
+        self.fx_tracer.graph.eliminate_dead_code(is_impure)
 
     def end_capture(self, outputs):
         self.fx_tracer.create_proxy(
@@ -349,7 +367,7 @@ class AutogradCompilerInstance:
         # ```
         # Proper fix is Richard's Python compiled autograd effort which will avoid calling make_fx and
         # should prevent these ops from going into the CA graph.
-        self.remove_dead_sym_nodes()
+        self.dce()
         runtime_inputs_to_move: List[int] = []
         if snapshot_cudagraph_enabled():
             runtime_inputs_to_move = self.move_graph_nodes_to_cuda(self.fx_tracer.graph)
