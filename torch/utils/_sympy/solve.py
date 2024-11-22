@@ -3,7 +3,7 @@ from typing import Dict, Optional, Tuple, Type
 
 import sympy
 
-from torch.utils._sympy.functions import FloorDiv
+from torch.utils._sympy.functions import CleanDiv, FloorDiv
 
 
 log = logging.getLogger(__name__)
@@ -120,8 +120,15 @@ def _try_isolate_lhs(
             not isinstance(e, INEQUALITY_TYPES) and rhs.is_zero
         ):
             # Divide both sides by 'other'.
-            lhs = lhs / other
-            rhs = rhs / other
+            if isinstance(e, sympy.Eq) and rhs.is_integer and other.is_integer:
+                # If we have an equality and both sides are integers,
+                # the division of rhs by other is integer.
+                # Use CleanDiv to allow int replacements lhs -> rhs / other.
+                lhs = CleanDiv(lhs, other)
+                rhs = CleanDiv(rhs, other)
+            else:
+                lhs = lhs / other
+                rhs = rhs / other
 
             # If 'e' is an inequality and 'other' is negative, we have to
             # mirror the expression.
