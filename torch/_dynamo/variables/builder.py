@@ -1903,6 +1903,13 @@ class VariableBuilder:
             or is_constant_source(self.get_source())
             or math.isnan(value)
             or math.isinf(value)
+            # We don't support cudagraphs for now. Without this cudagraphs
+            # break because they expect all cuda inputs but our tensorified
+            # float will be a f64[] cpu tensor. Fixes the following test
+            # when specialize_float=False
+            # python test/inductor/test_compiled_optimizers.py CompiledOptimizerTests.test_rmsprop_weight_decay_maximize_capturable_cuda # noqa: B950
+            or torch._inductor.config.triton.cudagraphs
+            or justknobs_check("pytorch/compiler:unspecialize_float_killswitch", False)
         ):
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
             return ConstantVariable.create(value=value, source=self.source)
@@ -1914,6 +1921,14 @@ class VariableBuilder:
         # time.
 
         wrapped_value = torch.tensor(value, dtype=torch.float64)
+
+        # We don't support specializing floats for grad checking tensors
+        # See https://github.com/pytorch/pytorch/pull/140828 for more
+        # context.
+        if torch._C._functorch.is_gradtrackingtensor(wrapped_value):
+            self.install_guards(GuardBuilder.CONSTANT_MATCH)
+            return ConstantVariable.create(value=value, source=self.source)
+
         # TODO: Switch RandomValueSource over to use this, this is more
         # accurate
         assert not isinstance(self.get_source(), RandomValueSource)
@@ -2462,10 +2477,7 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
     ):
         set_example_value(proxy.node, example_value)
         return ConstantVariable.create(example_value, **options)
-    elif isinstance(example_value, str) and (proxy.node.target in ["hex"]):
-        set_example_value(proxy.node, example_value)
-        return ConstantVariable.create(example_value, **options)
-    elif isinstance(example_value, float):
+    elif isinstance(example_value, float) or proxy.node.target in ["hex", "__round__"]:
         set_example_value(proxy.node, example_value)
         return ConstantVariable.create(example_value, **options)
     else:
@@ -2978,3 +2990,26 @@ class SourcelessBuilder:
 
 
 SourcelessBuilder._type_handlers = SourcelessBuilder.make_type_handlers()
+
+
+class SourcelessUserDefinedObjectBuilder:
+    """
+    SourceLessBuilder does not return a UserDefinedObjectVariable, but in some
+    cases it might be ok to return UserDefinedObjects. In such case, use this
+    builder.
+    """
+
+    def __init__(self) -> None:
+        raise AssertionError("Use SourcelessUserDefinedObjectBuilder.create()")
+
+    @staticmethod
+    def create(tx: "InstructionTranslator", value) -> VariableTracker:
+        value_type = type(value)
+        if issubclass(value_type, MutableMapping):
+            return MutableMappingVariable(value, mutation_type=ValueMutationNew())
+        elif isinstance(value, torch.nn.Module):
+            return UnspecializedNNModuleVariable(
+                value, mutation_type=ValueMutationNew()
+            )
+        else:
+            return UserDefinedObjectVariable(value, mutation_type=ValueMutationNew())
