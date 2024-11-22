@@ -450,7 +450,6 @@ print(torch.xpu.device_count())
 
     def test_mem_get_info(self):
         torch.xpu.synchronize()
-        torch.xpu.empty_cache()
         before_free_bytes, before_total_bytes = torch.xpu.mem_get_info()
         # increasing to 1MB to force acquiring a new block.
         t = torch.randn(1024 * 256, device="xpu")
