@@ -386,10 +386,9 @@ function(torch_compile_options libname)
     if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
       list(APPEND private_compile_options -Wunused-but-set-variable)
     endif()
-    if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
-      list(APPEND private_compile_options -Wunused-private-field)
-    endif()
-    if(NOT "${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+      list(APPEND private_compile_options -Wunused-private-field -Wextra-semi -Wno-error=extra-semi)
+    else()
       list(APPEND private_compile_options
         # Considered to be flaky.  See the discussion at
         # https://github.com/pytorch/pytorch/pull/9608
