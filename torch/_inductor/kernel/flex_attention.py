@@ -177,7 +177,6 @@ def zeros_and_scatter_lowering(shape: List[int], indices, values):
 def build_subgraph_buffer(
     args: List[TensorBox],
     subgraph: Subgraph,
-    enable_mutations: bool = False,
 ) -> Union[List[SubgraphOutput], SubgraphOutput]:
     """This function's goal is to take in the required args and produce the subgraph buffer
     The subgraph buffer is a ComputedBuffer that will be inlined into the triton template
@@ -1916,7 +1915,6 @@ def flex_attention_backward(*args, **kwargs):
     all_joint_outputs = build_subgraph_buffer(
         joint_placeholder_inps + list(score_mod_other_buffers),
         joint_graph,
-        enable_mutations=True,
     )
     assert isinstance(all_joint_outputs, List)
     assert (
