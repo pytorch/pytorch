@@ -3241,8 +3241,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             # flag (stop_generator_on_yield) will not be needed.
             if self.stop_generator_on_yield and self.generator_exhausted:
                 # When the generator returns None, we raise StopIteration
-                # r = self.symbolic_result
-                # assert r.as_python_constant() is None
+                r = self.symbolic_result
+                assert r.as_python_constant() is None
                 exc.raise_observed_exception(StopIteration, self)
             else:
                 return ListIteratorVariable(
