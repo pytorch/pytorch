@@ -12,6 +12,7 @@ from sympy import Expr
 import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 import torch._ops
+from torch._inductor.runtime.runtime_utils import dynamo_timed
 from torch.fx.experimental.symbolic_shapes import ConvertIntKey, DivideByKey, SymTypes
 
 from .. import config, ir
@@ -776,12 +777,13 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.prefix.writeline("}")
 
     def generate(self, is_inference):
-        if V.graph.aot_mode and not V.graph.is_const_graph:
-            self.codegen_model_kernels()
-            self.codegen_model_constructor()
-            self.codegen_const_run_driver()
-        self.write_wrapper_decl()
-        return super().generate(is_inference)
+        with dynamo_timed("CppWrapperCpu.generate", log_pt2_compile_event=True):
+            if V.graph.aot_mode and not V.graph.is_const_graph:
+                self.codegen_model_kernels()
+                self.codegen_model_constructor()
+                self.codegen_const_run_driver()
+            self.write_wrapper_decl()
+            return super().generate(is_inference)
 
     def finalize_prefix(self):
         cached_dtypes_buffer = IndentedBuffer()
@@ -1099,8 +1101,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
             return
         super().add_benchmark_harness(output)
 
+    def codegen_cpp_sizevar(self, x: Expr, *, simplify: bool = True) -> str:
+        return self.expr_printer(V.graph.sizevars.simplify(x) if simplify else x)
+
     def codegen_sizevar(self, x: Expr) -> str:
-        return self.expr_printer(V.graph.sizevars.simplify(x))
+        return self.codegen_cpp_sizevar(x)
 
     def codegen_tuple_access(self, basename: str, name: str, index: str) -> str:
         # in the abi_compatible mode, outputs are returned via arguments
@@ -1136,7 +1141,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
     def make_buffer_free(self, buffer):
         return (
             ""
-            if isinstance(buffer.get_layout(), ir.MultiOutputLayout)
+            if isinstance(buffer.get_output_spec(), ir.MultiOutputLayout)
             or isinstance(buffer, ir.TMADescriptor)
             else f"{buffer.get_name()}.reset();"
         )
@@ -1360,7 +1365,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
             if dtype is not None and dtype != data.dtype:
                 # wrap it with dtypeview
-                final_tmp_name, tmp_call_strs = create_dtypeview_call(reinterpret_call)
+                final_tmp_name, tmp_call_strs = create_dtypeview_call(final_tmp_name)
                 call_strs.extend(tmp_call_strs)
             else:
                 call_strs.append(
