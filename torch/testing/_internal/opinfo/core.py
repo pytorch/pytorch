@@ -985,7 +985,6 @@ class OpInfo:
                 else self.backward_dtypes
                 if self.backward_dtypes is not None
                 else self.dtypesIfXPU
-                else self.dtypes
             )
         )
 
