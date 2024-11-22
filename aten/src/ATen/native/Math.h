@@ -254,7 +254,6 @@ C10_HOST_DEVICE inline scalar_t zeta(scalar_t x, scalar_t q) __ubsan_ignore_floa
       -7.1661652561756670113e18 /*1.6938241367317436694528e27/236364091*/
   };
 
-  int i = 0;
   acc_t a, b, k, s, t, w;
   if (x == one) {
     return std::numeric_limits<scalar_t>::infinity();
@@ -275,7 +274,7 @@ C10_HOST_DEVICE inline scalar_t zeta(scalar_t x, scalar_t q) __ubsan_ignore_floa
 
   s = std::pow(q, -x);
   a = q;
-  i = 0;
+  int i = 0;
   b = zero;
   while ((i < 9) || (a <= acc_t{9.0})) {
     i += 1;
@@ -292,7 +291,7 @@ C10_HOST_DEVICE inline scalar_t zeta(scalar_t x, scalar_t q) __ubsan_ignore_floa
   s -= half * b;
   a = one;
   k = zero;
-  for (int i = 0; i < 12; i++) {
+  for (i = 0; i < 12; i++) {
     a *= x + k;
     b /= w;
     t = a * b / A[i];
