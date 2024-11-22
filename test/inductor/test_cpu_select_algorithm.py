@@ -296,7 +296,6 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             )
             and epilogue != "mul"
             and epilogue != "div"
-            and epilogue != "leaky_relu"
             or (
                 dtype in (torch.float16, torch.bfloat16)
                 and epilogue == "add"
