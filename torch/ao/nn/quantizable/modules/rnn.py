@@ -21,6 +21,11 @@ class LSTMCell(torch.nn.Module):
 
     For the description and the argument types, please, refer to :class:`~torch.nn.LSTMCell`
 
+    `split_gates`: specify True to compute the input/forget/cell/output gates separately
+    to avoid an intermediate tensor which is subsequently chunk'd. This optimization can
+    be beneficial for on-device inference latency. This flag is cascaded down from the
+    parent classes.
+
     Examples::
 
         >>> import torch.ao.nn.quantizable as nnqa
@@ -34,6 +39,7 @@ class LSTMCell(torch.nn.Module):
         ...     output.append(hx)
     """
     _FLOAT_MODULE = torch.nn.LSTMCell
+    __constants__ = ["split_gates"]  # for jit.script
 
     def __init__(
         self,
@@ -42,20 +48,37 @@ class LSTMCell(torch.nn.Module):
         bias: bool = True,
         device=None,
         dtype=None,
+        *,
+        split_gates=False,
     ) -> None:
         factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
         self.input_size = input_dim
         self.hidden_size = hidden_dim
         self.bias = bias
+        self.split_gates = split_gates
 
-        self.igates = torch.nn.Linear(
-            input_dim, 4 * hidden_dim, bias=bias, **factory_kwargs
-        )
-        self.hgates = torch.nn.Linear(
-            hidden_dim, 4 * hidden_dim, bias=bias, **factory_kwargs
-        )
-        self.gates = torch.ao.nn.quantized.FloatFunctional()
+        if not split_gates:
+            self.igates: torch.nn.Module = torch.nn.Linear(
+                input_dim, 4 * hidden_dim, bias=bias, **factory_kwargs
+            )
+            self.hgates: torch.nn.Module = torch.nn.Linear(
+                hidden_dim, 4 * hidden_dim, bias=bias, **factory_kwargs
+            )
+            self.gates: torch.nn.Module = torch.ao.nn.quantized.FloatFunctional()
+        else:
+            # keep separate Linear layers for each gate
+            self.igates = torch.nn.ModuleDict()
+            self.hgates = torch.nn.ModuleDict()
+            self.gates = torch.nn.ModuleDict()
+            for g in ["input", "forget", "cell", "output"]:
+                self.igates[g] = torch.nn.Linear(
+                    input_dim, hidden_dim, bias=bias, **factory_kwargs
+                )
+                self.hgates[g] = torch.nn.Linear(
+                    hidden_dim, hidden_dim, bias=bias, **factory_kwargs
+                )
+                self.gates[g] = torch.ao.nn.quantized.FloatFunctional()
 
         self.input_gate = torch.nn.Sigmoid()
         self.forget_gate = torch.nn.Sigmoid()
@@ -80,16 +103,29 @@ class LSTMCell(torch.nn.Module):
             hidden = self.initialize_hidden(x.shape[0], x.is_quantized)
         hx, cx = hidden
 
-        igates = self.igates(x)
-        hgates = self.hgates(hx)
-        gates = self.gates.add(igates, hgates)
+        if not self.split_gates:
+            igates = self.igates(x)
+            hgates = self.hgates(hx)
+            gates = self.gates.add(igates, hgates)
 
-        input_gate, forget_gate, cell_gate, out_gate = gates.chunk(4, 1)
+            input_gate, forget_gate, cell_gate, out_gate = gates.chunk(4, 1)
 
-        input_gate = self.input_gate(input_gate)
-        forget_gate = self.forget_gate(forget_gate)
-        cell_gate = self.cell_gate(cell_gate)
-        out_gate = self.output_gate(out_gate)
+            input_gate = self.input_gate(input_gate)
+            forget_gate = self.forget_gate(forget_gate)
+            cell_gate = self.cell_gate(cell_gate)
+            out_gate = self.output_gate(out_gate)
+        else:
+            # apply each input + hidden projection and add together
+            gate = {}
+            for (key, gates), igates, hgates in zip(
+                self.gates.items(), self.igates.values(), self.hgates.values()
+            ):
+                gate[key] = gates.add(igates(x), hgates(hx))
+
+            input_gate = self.input_gate(gate["input"])
+            forget_gate = self.forget_gate(gate["forget"])
+            cell_gate = self.cell_gate(gate["cell"])
+            out_gate = self.output_gate(gate["output"])
 
         fgate_cx = self.fgate_cx.mul(forget_gate, cx)
         igate_cgate = self.igate_cgate.mul(input_gate, cell_gate)
@@ -122,7 +158,7 @@ class LSTMCell(torch.nn.Module):
         return "QuantizableLSTMCell"
 
     @classmethod
-    def from_params(cls, wi, wh, bi=None, bh=None):
+    def from_params(cls, wi, wh, bi=None, bh=None, split_gates=False):
         """Uses the weights and biases to create a new LSTM cell.
 
         Args:
@@ -132,25 +168,52 @@ class LSTMCell(torch.nn.Module):
         assert (bi is None) == (bh is None)  # Either both None or both have values
         input_size = wi.shape[1]
         hidden_size = wh.shape[1]
-        cell = cls(input_dim=input_size, hidden_dim=hidden_size, bias=(bi is not None))
-        cell.igates.weight = torch.nn.Parameter(wi)
-        if bi is not None:
-            cell.igates.bias = torch.nn.Parameter(bi)
-        cell.hgates.weight = torch.nn.Parameter(wh)
-        if bh is not None:
-            cell.hgates.bias = torch.nn.Parameter(bh)
+        cell = cls(
+            input_dim=input_size,
+            hidden_dim=hidden_size,
+            bias=(bi is not None),
+            split_gates=split_gates,
+        )
+
+        if not split_gates:
+            cell.igates.weight = torch.nn.Parameter(wi)
+            if bi is not None:
+                cell.igates.bias = torch.nn.Parameter(bi)
+            cell.hgates.weight = torch.nn.Parameter(wh)
+            if bh is not None:
+                cell.hgates.bias = torch.nn.Parameter(bh)
+        else:
+            # split weight/bias
+            for w, b, gates in zip([wi, wh], [bi, bh], [cell.igates, cell.hgates]):
+                for w_chunk, gate in zip(w.chunk(4, dim=0), gates.values()):
+                    gate.weight = torch.nn.Parameter(w_chunk)
+
+                if b is not None:
+                    for b_chunk, gate in zip(b.chunk(4, dim=0), gates.values()):
+                        gate.bias = torch.nn.Parameter(b_chunk)
+
         return cell
 
     @classmethod
-    def from_float(cls, other, use_precomputed_fake_quant=False):
+    def from_float(cls, other, use_precomputed_fake_quant=False, split_gates=False):
         assert type(other) == cls._FLOAT_MODULE
         assert hasattr(other, "qconfig"), "The float module must have 'qconfig'"
         observed = cls.from_params(
-            other.weight_ih, other.weight_hh, other.bias_ih, other.bias_hh
+            other.weight_ih,
+            other.weight_hh,
+            other.bias_ih,
+            other.bias_hh,
+            split_gates=split_gates,
         )
         observed.qconfig = other.qconfig
         observed.igates.qconfig = other.qconfig
         observed.hgates.qconfig = other.qconfig
+        if split_gates:
+            # also apply qconfig directly to Linear modules
+            for g in observed.igates.values():
+                g.qconfig = other.qconfig
+            for g in observed.hgates.values():
+                g.qconfig = other.qconfig
         return observed
 
 
@@ -168,10 +231,14 @@ class _LSTMSingleLayer(torch.nn.Module):
         bias: bool = True,
         device=None,
         dtype=None,
+        *,
+        split_gates=False,
     ) -> None:
         factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
-        self.cell = LSTMCell(input_dim, hidden_dim, bias=bias, **factory_kwargs)
+        self.cell = LSTMCell(
+            input_dim, hidden_dim, bias=bias, split_gates=split_gates, **factory_kwargs
+        )
 
     def forward(self, x: Tensor, hidden: Optional[Tuple[Tensor, Tensor]] = None):
         result = []
@@ -185,7 +252,9 @@ class _LSTMSingleLayer(torch.nn.Module):
     @classmethod
     def from_params(cls, *args, **kwargs):
         cell = LSTMCell.from_params(*args, **kwargs)
-        layer = cls(cell.input_size, cell.hidden_size, cell.bias)
+        layer = cls(
+            cell.input_size, cell.hidden_size, cell.bias, split_gates=cell.split_gates
+        )
         layer.cell = cell
         return layer
 
@@ -202,17 +271,23 @@ class _LSTMLayer(torch.nn.Module):
         bidirectional: bool = False,
         device=None,
         dtype=None,
+        *,
+        split_gates=False,
     ) -> None:
         factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
         self.batch_first = batch_first
         self.bidirectional = bidirectional
         self.layer_fw = _LSTMSingleLayer(
-            input_dim, hidden_dim, bias=bias, **factory_kwargs
+            input_dim, hidden_dim, bias=bias, split_gates=split_gates, **factory_kwargs
         )
         if self.bidirectional:
             self.layer_bw = _LSTMSingleLayer(
-                input_dim, hidden_dim, bias=bias, **factory_kwargs
+                input_dim,
+                hidden_dim,
+                bias=bias,
+                split_gates=split_gates,
+                **factory_kwargs,
             )
 
     def forward(self, x: Tensor, hidden: Optional[Tuple[Tensor, Tensor]] = None):
@@ -283,22 +358,34 @@ class _LSTMLayer(torch.nn.Module):
         bias = kwargs.get("bias", other.bias)
         batch_first = kwargs.get("batch_first", other.batch_first)
         bidirectional = kwargs.get("bidirectional", other.bidirectional)
+        split_gates = kwargs.get("split_gates", False)
 
-        layer = cls(input_size, hidden_size, bias, batch_first, bidirectional)
+        layer = cls(
+            input_size,
+            hidden_size,
+            bias,
+            batch_first,
+            bidirectional,
+            split_gates=split_gates,
+        )
         layer.qconfig = getattr(other, "qconfig", qconfig)
         wi = getattr(other, f"weight_ih_l{layer_idx}")
         wh = getattr(other, f"weight_hh_l{layer_idx}")
         bi = getattr(other, f"bias_ih_l{layer_idx}", None)
         bh = getattr(other, f"bias_hh_l{layer_idx}", None)
 
-        layer.layer_fw = _LSTMSingleLayer.from_params(wi, wh, bi, bh)
+        layer.layer_fw = _LSTMSingleLayer.from_params(
+            wi, wh, bi, bh, split_gates=split_gates
+        )
 
         if other.bidirectional:
             wi = getattr(other, f"weight_ih_l{layer_idx}_reverse")
             wh = getattr(other, f"weight_hh_l{layer_idx}_reverse")
             bi = getattr(other, f"bias_ih_l{layer_idx}_reverse", None)
             bh = getattr(other, f"bias_hh_l{layer_idx}_reverse", None)
-            layer.layer_bw = _LSTMSingleLayer.from_params(wi, wh, bi, bh)
+            layer.layer_bw = _LSTMSingleLayer.from_params(
+                wi, wh, bi, bh, split_gates=split_gates
+            )
         return layer
 
 
@@ -342,6 +429,8 @@ class LSTM(torch.nn.Module):
         bidirectional: bool = False,
         device=None,
         dtype=None,
+        *,
+        split_gates: bool = False,
     ) -> None:
         factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
@@ -386,6 +475,7 @@ class LSTM(torch.nn.Module):
                 self.bias,
                 batch_first=False,
                 bidirectional=self.bidirectional,
+                split_gates=split_gates,
                 **factory_kwargs,
             )
         ]
@@ -396,6 +486,7 @@ class LSTM(torch.nn.Module):
                 self.bias,
                 batch_first=False,
                 bidirectional=self.bidirectional,
+                split_gates=split_gates,
                 **factory_kwargs,
             )
             for layer in range(1, num_layers)
@@ -461,7 +552,7 @@ class LSTM(torch.nn.Module):
         return "QuantizableLSTM"
 
     @classmethod
-    def from_float(cls, other, qconfig=None):
+    def from_float(cls, other, qconfig=None, split_gates=False):
         assert isinstance(other, cls._FLOAT_MODULE)
         assert hasattr(other, "qconfig") or qconfig
         observed = cls(
@@ -472,11 +563,12 @@ class LSTM(torch.nn.Module):
             other.batch_first,
             other.dropout,
             other.bidirectional,
+            split_gates=split_gates,
         )
         observed.qconfig = getattr(other, "qconfig", qconfig)
         for idx in range(other.num_layers):
             observed.layers[idx] = _LSTMLayer.from_float(
-                other, idx, qconfig, batch_first=False
+                other, idx, qconfig, batch_first=False, split_gates=split_gates
             )
 
         # Prepare the model
