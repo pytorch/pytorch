@@ -601,7 +601,7 @@ def split_module(
         elif num_outputs == 1:
             base_mod_env[next(iter(partition.outputs))] = output_val
 
-    # When keep_original_order=True and if the graph doesn't have any 
+    # When keep_original_order=True and if the graph doesn't have any
     # `call_function` node then `base_mod_graph`, `base_mod_env` and `base_mod_attrs`
     # are never populated.
     # For this case, we call `construct_graph` here which takes care of updating them.
