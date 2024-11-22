@@ -1666,9 +1666,7 @@ class GraphModuleDeserializer(metaclass=Final):
                 ) from e
 
         # Outputs: convert to a single `output` node.
-        outputs = []
-        for output in serialized_graph.outputs:
-            outputs.append(self.deserialize_graph_output(output))
+        outputs = [self.deserialize_graph_output(output) for output in serialized_graph.outputs]
 
         if serialized_graph.is_single_tensor_return:
             assert len(outputs) == 1
@@ -2035,9 +2033,7 @@ class GraphModuleDeserializer(metaclass=Final):
             if len(value) == 0:
                 return []
             elif typ_ == "as_tensors":
-                result = []
-                for arg in value:
-                    result.append(self.serialized_name_to_node[arg.name])
+                result = [self.serialized_name_to_node[arg.name] for arg in value]
                 return result
             elif typ_ in ("as_ints", "as_floats", "as_bools", "as_strings"):
                 # convert from serialized.python.types.List to python list
