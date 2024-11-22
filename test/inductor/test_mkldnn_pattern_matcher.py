@@ -633,6 +633,92 @@ class TestPatternMatcher(TestPatternMatcherBase):
     def test_conv3d_binary(self):
         self._test_conv_binary_base(dim=5)
 
+    def _test_conv_binary_broadcast_shapes_base(self, dim=4):
+        assert dim == 4 or dim == 5
+
+        class M(torch.nn.Module):
+            def __init__(
+                self,
+                binary_fn,
+                has_relu,
+                **kwargs,
+            ):
+                super().__init__()
+                if dim == 4:
+                    self.conv = torch.nn.Conv2d(3, 16, kernel_size=3, stride=1)
+                else:
+                    self.conv = torch.nn.Conv3d(3, 16, kernel_size=3, stride=1)
+                self.binary_fn = binary_fn
+                self.has_relu = has_relu
+
+            def forward(self, x, x2):
+                x1 = self.conv(x)
+                if has_relu:
+                    return self.binary_fn(x1, x2).relu()
+                else:
+                    return self.binary_fn(x1, x2)
+
+        dtypes = [
+            torch.float,
+        ]
+        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+            dtypes.append(torch.bfloat16)
+        if torch.ops.mkldnn._is_mkldnn_fp16_supported():
+            dtypes.append(torch.float16)
+        cl_format = torch.channels_last if dim == 4 else torch.channels_last_3d
+        test_memory_format = [torch.contiguous_format, cl_format]
+        options = itertools.product(
+            binary_list,
+            [True, False],
+            test_memory_format,
+            dtypes,
+        )
+
+        for (
+            binary_fn,
+            has_relu,
+            memory_format,
+            dtype,
+        ) in options:
+            metrics.reset()
+            if dim == 4:
+                x_shape = (1, 3, 56, 56)
+                other_shape = (1, 16, 1, 1)
+            else:
+                x_shape = (1, 3, 20, 56, 56)
+                other_shape = (1, 16, 1, 1, 1)
+            mod = M(binary_fn, has_relu).eval()
+            x = (
+                torch.randn(x_shape, dtype=torch.float32, requires_grad=True)
+                .add(1)
+                .to(memory_format=memory_format)
+            )
+            other = (
+                torch.randn(other_shape, dtype=torch.float32, requires_grad=True)
+                .add(1)
+                .to(memory_format=memory_format)
+                .to(dtype)
+            )
+            match_count = binary_list[binary_fn][0] + 1
+            match_nodes = binary_list[binary_fn][1]
+            if has_relu:
+                match_nodes += 1
+            self._test_common(
+                mod, (x, other), match_count, match_nodes + 1, check_autocast=dtype
+            )
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @skipIfRocm
+    def test_conv2d_binary_broadcast_shapes_cpu(self):
+        self._test_conv_binary_broadcast_shapes_base(dim=4)
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @skipIfRocm
+    def test_conv3d_binary_broadcast_shapes_cpu(self):
+        self._test_conv_binary_broadcast_shapes_base(dim=5)
+
     def test_linear_binary(self):
         class M(torch.nn.Module):
             def __init__(self, binary_fn, in_channels, out_channels, bias, **kwargs):
@@ -671,6 +757,55 @@ class TestPatternMatcher(TestPatternMatcherBase):
             v = torch.randn(input_shape)
             other = torch.randn(input_shape[:-1] + [out_feature]).to(dtype)
 
+            self._test_common(
+                mod,
+                (
+                    v,
+                    other,
+                ),
+                match_count,
+                match_nodes,
+                check_autocast=dtype,
+            )
+            self.assertEqual(metrics.generated_kernel_count, 1)
+
+    def test_linear_binary_broadcast_shapes_cpu(self):
+        class M(torch.nn.Module):
+            def __init__(self, binary_fn, in_channels, out_channels, bias, **kwargs):
+                super().__init__()
+                self.linear = torch.nn.Linear(
+                    in_channels, out_channels, bias=bias, **kwargs
+                )
+                self.binary_fn = binary_fn
+
+            def forward(self, x, y):
+                x = self.linear(x)
+                x = self.binary_fn(x, y.clone())
+                return x
+
+        dtypes = []
+        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+            dtypes.append(torch.bfloat16)
+        if torch.ops.mkldnn._is_mkldnn_fp16_supported():
+            dtypes.append(torch.float16)
+        options = itertools.product(
+            binary_list, [[2, 3, 10], [2, 10]], [True, False], dtypes
+        )
+        out_feature = 30
+
+        for binary_fn, input_shape, bias, dtype in options:
+            metrics.reset()
+            # addmm(mm) + (linear+add)
+            match_count = 2
+            match_nodes = 3
+            if len(input_shape) == 3:
+                is_inplace = binary_list[binary_fn][2]
+                # view + linear + view(joint_graph+freeze pass)
+                match_count = match_count + 5 if is_inplace else match_count + 3
+                match_nodes = match_nodes + 8 if is_inplace else match_nodes + 5
+            mod = M(binary_fn, input_shape[-1], out_feature, bias).eval()
+            v = torch.randn(input_shape)
+            other = torch.randn(input_shape[:-1] + [1]).to(dtype)
             self._test_common(
                 mod,
                 (
