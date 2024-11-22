@@ -118,13 +118,26 @@ def check_node_safe(node: Node):
     The test suite test_aot_autograd_cache.py::AOTAutogradCachePicklerTests tries its best to fully cover/specify this behavior.
     """
     SAFE_TORCH_MODULES = ("torch.functional", "torch.nn.functional")
+    SAFE_TORCH_FUNCTIONS = (
+        "torch.Size",
+        "torch.sym_int",
+        "torch._sym_sqrt",
+        "torch.sym_float",
+        "torch.sym_sum",
+        "einops.einops.rearrange",
+    )
 
     def is_public_torch_api(target):
         # Don't blindly allow private functions in the torch namespace
         is_private = target.__name__.startswith("_")
+
         return (
             getattr(target, "__module__", None) in SAFE_TORCH_MODULES and not is_private
         )
+
+    def is_safe_torch_function(target):
+        """Allowlisted torch functions"""
+        return f"{target.__module__}.{target.__name__}" in SAFE_TORCH_FUNCTIONS
 
     def is_torch_function(target):
         if isinstance(target, (torch._ops.OpOverload, torch._ops.OpOverloadPacket)):
@@ -132,7 +145,11 @@ def check_node_safe(node: Node):
         if is_public_torch_api(target):
             return True
         is_builtin_fun_or_type = type(target).__name__ == "builtin_function_or_method"
-        return is_builtin_fun_or_type
+        if is_builtin_fun_or_type:
+            return True
+        if is_safe_torch_function(target):
+            return True
+        return False
 
     def is_tensor(target):
         # Tensors always have example values in meta field
@@ -143,16 +160,20 @@ def check_node_safe(node: Node):
         # We support only torch.* functions for now
         # We can probably add an allowlist of safe non-torch implementations as well
         if not is_torch_function(node.target):
+            module = getattr(node.target, "__module__", None)
+            name = getattr(node.target, "__name__", None)
             raise BypassAOTAutogradCache(
-                f"Unsupported call_function target {node.target}"
+                f"Unsupported call_function target {node.target}. \n Function module: {module}, \nFunction name: {name}"
             )
     elif node.op == "call_method":
         method_name = node.target
         method_target = node.args[0]
         # Only support method calls on base tensors
         if not is_tensor(method_target):
+            module = getattr(method_target, "__module__", None)
+            name = getattr(method_target, "__name__", None)
             raise BypassAOTAutogradCache(
-                f"Unsupported call_method target {method_target}"
+                f"Unsupported call_method target {method_target}. \nMethod module: {module}, \nMethod name: {name}"
             )
         if (
             type(method_name) != str
@@ -218,9 +239,9 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
         self.deterministic_algorithms = torch.are_deterministic_algorithms_enabled()
         self.autograd_config = config.save_config()
         try:
-            # TODO: example_inputs causes more cache misses than necessary
-            # with dynamic shapes, because this is before we add
-            # symints to tensor metadata. Improve this later.
+            # FXGraphCache has constraints on what can be pickled in its inductor
+            # config. Check that the gm is cacheable by inductor first,
+            # and if it raises an exception, also bypass on our end.
             FxGraphCache._check_can_cache(gm)
             super().__init__(gm, example_inputs, fx_config, [])
         except BypassFxGraphCache as e:
@@ -276,11 +297,6 @@ def autograd_cache_key(
     Generate a unique hash of the FX graph for caching.
     """
     check_cacheable(gm)
-    if not torch._dynamo.config.specialize_float:
-        # TODO: remove this once specializing floats no longer changes
-        # the output of AOTAutograd, or when float guards are added to
-        # FXGraphCache
-        raise BypassAOTAutogradCache("Specialized floats are temporarily not supported")
     details = AOTAutogradCacheDetails(gm, example_inputs, config, fx_config)
     pickler = AOTAutogradCachePickler(gm)
     # The prefix distinguishes among the other kinds of objects we cache
@@ -693,6 +709,11 @@ class AOTAutogradCache:
             # if there's ever different reason we can't cache,
             # we still never want to hard throw an exception, since
             # we can always fallback to a cache bypass.
+            # As an example, if the user calls autograd via
+            # standalone inductor, we will sometimes get a GraphModule
+            # that doesn't actually have a `.graph` on it. Instead
+            # of checking every single case, we safely catch the exception
+            # in those cases.
             except Exception as e:
                 cache_key = None
                 counters["aot_autograd"]["autograd_cache_bypass"] += 1

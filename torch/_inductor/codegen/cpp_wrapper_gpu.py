@@ -8,9 +8,11 @@ import sympy
 
 from torch import dtype as torch_dtype
 from torch._inductor.codecache import get_cpp_wrapper_cubin_path_name
+from torch._inductor.runtime.runtime_utils import dynamo_timed
 from torch._inductor.runtime.triton_heuristics import grid as default_grid_fn
 
 from ..codecache import CudaKernelParamCache
+from ..ir import IRNode
 from ..utils import DeferredLineBase, get_gpu_type
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
@@ -230,19 +232,22 @@ class CppWrapperGpu(CppWrapperCpu):
             )
 
     def generate(self, is_inference):
-        self.prefix.writeline("\n")
-        if not V.graph.aot_mode:
-            for kernel in chain(
-                sorted(self.src_to_kernel.values()),
-                sorted([entry[0] for entry in self.user_defined_kernel_cache.values()]),
-            ):
-                self.prefix.writeline(
-                    maybe_hipify_code_wrapper(
-                        f"static {self.device_codegen.cpp_kernel_type()} {kernel} = nullptr;"
-                    )
-                )
+        with dynamo_timed("CppWrapperGpu.generate", log_pt2_compile_event=True):
             self.prefix.writeline("\n")
-        return super().generate(is_inference)
+            if not V.graph.aot_mode:
+                for kernel in chain(
+                    sorted(self.src_to_kernel.values()),
+                    sorted(
+                        [entry[0] for entry in self.user_defined_kernel_cache.values()]
+                    ),
+                ):
+                    self.prefix.writeline(
+                        maybe_hipify_code_wrapper(
+                            f"static {self.device_codegen.cpp_kernel_type()} {kernel} = nullptr;"
+                        )
+                    )
+                self.prefix.writeline("\n")
+            return super().generate(is_inference)
 
     def generate_user_defined_triton_kernel(
         self,
@@ -261,7 +266,7 @@ class CppWrapperGpu(CppWrapperCpu):
         ]
         args = [self.val_to_arg_str(v) for v in raw_args]
         arg_types = [
-            arg.get_dtype() if hasattr(arg, "get_dtype") else type(arg)
+            arg.get_dtype() if isinstance(arg, IRNode) else type(arg)
             for arg in raw_args
         ]
         self.generate_kernel_call(
@@ -328,7 +333,7 @@ class CppWrapperGpu(CppWrapperCpu):
         return kernel_var_name
 
     def generate_args_decl(self, call_args, arg_types, arg_signatures):
-        new_args = []
+        new_args: list[str] = []
 
         # Add more cases for other types as needed
         signature2dtype = {
