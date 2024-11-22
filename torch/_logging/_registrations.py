@@ -192,4 +192,10 @@ register_artifact(
     off_by_default=True,
 )
 
+register_artifact(
+    "graph_svgs",
+    "Logs the directory containing graph deltas in SVG format for compiler passes.",
+    visible=True,
+)
+
 register_artifact("custom_format_test_artifact", "Testing only", log_format="")
