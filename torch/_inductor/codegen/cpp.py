@@ -252,14 +252,14 @@ def move_code_under_inner_loop(
     for (new_iter_var = loop_start; new_iter_var < loop_end; new_iter_var++) {
         f(new_iter_var)
     }
-    Please be careful while using this function, the variable defined
-    in f(iter_var) will be invalid outside the for loop
-    for example
+    Please be careful while using this function,
+    as the variable defined in f(iter_var) will be invalid outside the for loop.
+    For example:
     auto tmp0 = in_ptr[x0]; ->
     for (new_x0 = start; new_x0 < end; new_x0++){
         auto tmp0 = in_ptr[new_x0];
     }
-    the tmp0 is invalid outside the loop
+    The tmp0 is invalid outside the loop.
     """
     transformed_code = BracesBuffer()
     with contextlib.ExitStack() as stack:
@@ -1785,9 +1785,9 @@ class CppKernel(Kernel):
     def __init__(self, args, num_threads):
         super().__init__(args)
         # Indicate when this kernel is active, for example
-        # {x0, {24, 26}} -> this kernel is activate when x0 >=24 and x0 < 26
+        # {x0, {24, 26}} -> this kernel is active when x0 >= 24 and x0 < 26
         self.active_ranges: dict[sympy.Expr, Tuple[sympy.Expr, ...]] = {}
-        # Indicate this kernel will be moved under inner for loop
+        # Indicate this kernel will be moved under the inner for-loop
         # See move_code_under_inner_loop
         self.inner_itervars: List[sympy.Symbol] = []
         self.call_ranges: Optional[Tuple[sympy.Expr, ...]] = None
@@ -1795,12 +1795,12 @@ class CppKernel(Kernel):
         self.itervars: List[sympy.Symbol] = []
         self.reduction_depth = None
         self.reduction_prefix = IndentedBuffer()
-        # We need this because when we run "reduction" nodes here, we are lack of
+        # We need this because when we run "reduction" nodes here, we lack
         # "loop" information to decide whether we need a scalar init or an array init
-        # in the reduction prefix. Meanwhile, we have other informations like
-        # reduction types, dtype to generate reduction preifx. We record the informations
-        # with a callable lambda function and when we have enough informations to finalize
-        # reduction prefix, we can invoke the functions here with additional informations
+        # in the reduction prefix. Meanwhile, we have other information like
+        # reduction types and dtype to generate the reduction prefix. We record the information
+        # with a callable lambda function, and when we have enough information to finalize
+        # the reduction prefix, we can invoke the functions here with additional information.
         self.reduction_prefix_generators: List[Callable] = []  # type: ignore[type-arg]
         self.reduction_suffix = IndentedBuffer()
         self.parallel_reduction_prefix = IndentedBuffer()
@@ -2003,12 +2003,12 @@ class CppKernel(Kernel):
         dtype: torch.dtype,
         init_fn,
     ):
-        # gen reduction prefix
-        # if size is None, we will define and init a single reduction var
+        # Generate reduction prefix
+        # If size is None, we will define and initialize a single reduction variable
         # => float tmp_acc0 = 0;
-        # else, we will define and init a reduction array
+        # Otherwise, we will define and initialize a reduction array
         # => float tmp_acc0_arr[size];
-        # => for (int i = 0; i < size, i++) tmp_acc0_arr[i] = 0;
+        # => for (int i = 0; i < size; i++) tmp_acc0_arr[i] = 0;
         def inner(size: Optional[int] = None):
             if size is None:
                 return f"{acc_type} {acc} = {init_fn(rtype, dtype)};"
@@ -4053,9 +4053,9 @@ class CppKernelProxy(CppKernel):
     def aggregate_reduction_buffers(
         self, inner_loop_reduction_outer_not: bool, outer_loop: Optional["LoopLevel"]
     ):
-        # CppKernel/CppVecKernel/CppTile2dKernel have reduction buffers themselves,
-        # here we decide how to aggregate them together and put new reduction buffers
-        # under CppKernelProxy
+        # CppKernel/CppVecKernel/CppTile2dKernel have reduction buffers themselves.
+        # Here, we decide how to aggregate them together and place new reduction buffers
+        # under CppKernelProxy.
         def set_buffer_from_main_loop_kernel(attr: str):
             # the attr: str here is the name of the reduction buffers
             assert attr in (
@@ -5016,10 +5016,10 @@ class LoopLevel:
     size: Optional[sympy.Expr] = None
     offset: sympy.Expr = sympy.S.Zero
     # Note [tiled_size]
-    # We may do loop-tiling at this loop level
-    # when var in (offset, tiled_size), we will perform vectorization kernel
-    # when var in (tiled_size, size), we will perform scalar or masked vertorization kernel
-    # for (var = offset; var < size; var += steps){
+    # We may do loop-tiling at this loop level.
+    # When var is in [offset, tiled_size), we will perform the vectorization kernel.
+    # When var is in [tiled_size, size), we will perform the scalar or masked vectorization kernel.
+    # for (var = offset; var < size; var += steps) {
     #     if (var >= offset && var < tiled_size) vec_loop_body();
     #     if (var >= tiled_size && var < size) scalar_or_maskvec_loop_body();
     # }
@@ -5099,12 +5099,12 @@ class LoopLevel:
 @dataclasses.dataclass
 class LoopNest:
     """
-    A loop-nest like structure. It is built with the `build` method
-    as a loop nest and then will be perform loop-tiling at some depth.
+    A loop-nest-like structure. It is built with the `build` method
+    as a loop nest and then will perform loop-tiling at some depth.
 
-    A typical case is for vectorization where we typically do loop-tiling
-    at the inner-most loop level. A more complicated case is we do
-    2D tiling at both inner-most and outer levels.
+    A typical case is for vectorization, where we typically do loop-tiling
+    at the innermost loop level. A more complicated case is when we do
+    2D tiling at both the innermost and outer levels.
     """
 
     loops: Optional[List[LoopLevel]] = None
@@ -5173,11 +5173,11 @@ class LoopNest:
 
     def tile(self, depth, factor):
         """
-        Do loop-tiling at `depth` level with `factor`.
-        for (x0 = 0; x0 < x0_end; x0++)
-        ->
-        for (x0 = 0; x0 < x0_end; x0+=factor)
-        See detail in Note [tiled_size]
+        Do loop-tiling at the `depth` level with `factor`.
+            for (x0 = 0; x0 < x0_end; x0++)
+            ->
+            for (x0 = 0; x0 < x0_end; x0 += factor)
+        See details in Note [tiled_size].
         """
         assert self.loops
         self.loops[depth] = self.loops[depth].tile(factor)
