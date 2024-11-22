@@ -1032,11 +1032,11 @@ class CPUReproTests(TestCase):
                     window_overlap * 2 + 1,
                 )
             )
-            diagonal_attention_scores[:, :3, :, window_overlap:] = (
-                diagonal_chunked_attention_scores[
-                    :, :, :window_overlap, : window_overlap + 1
-                ]
-            )
+            diagonal_attention_scores[
+                :, :3, :, window_overlap:
+            ] = diagonal_chunked_attention_scores[
+                :, :, :window_overlap, : window_overlap + 1
+            ]
             return diagonal_attention_scores
 
         self.common(
@@ -3449,8 +3449,14 @@ class CPUReproTests(TestCase):
             fn, data, weight_one, weight_two, bias_one, bias_two
         )
 
-        self.assertTrue("auto tmp1 = static_cast<int8_t>(0);" in fw_code)
-        self.assertTrue("auto tmp2 = at::vec::Vectorized<int8_t>(tmp1);" in fw_code)
+        kernel_name = "cpp_fused_convolution_max_pool2d_with_indices"
+        self.assertTrue(kernel_name in fw_code)
+
+        conv_maxpool2d_code = fw_code[fw_code.find(kernel_name) :]
+        self.assertTrue("auto tmp1 = static_cast<int8_t>(0);" in conv_maxpool2d_code)
+        self.assertTrue(
+            "auto tmp2 = at::vec::Vectorized<int8_t>(tmp1);" in conv_maxpool2d_code
+        )
 
     def test_to_channels_last_lowp_fp(self):
         def f(a):
