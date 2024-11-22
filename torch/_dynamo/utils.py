@@ -870,6 +870,8 @@ class CompilationMetrics:
     inductor_fx_remote_cache_backend_type: Optional[str] = None
     inductor_fx_remote_cache_hit_keys: Optional[str] = None
     inductor_fx_remote_cache_miss_keys: Optional[str] = None
+    cuda_version: Optional[str] = None
+    triton_version: Optional[str] = None
     feature_usage: Optional[dict[str, bool]] = None
 
 
@@ -987,6 +989,8 @@ def record_compilation_metrics(metrics: Dict[str, Any]):
 
     common_metrics = {
         "inductor_config": _scrubbed_inductor_config_for_logging(),
+        "cuda_version": torch.version.cuda,
+        "triton_version": triton.__version__ if has_triton() else "",
         "inductor_fx_remote_cache_hit_keys": _convert_collection_to_str(
             "inductor_fx_remote_cache_hit_keys"
         ),
