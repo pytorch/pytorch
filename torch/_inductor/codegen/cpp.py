@@ -1906,7 +1906,7 @@ class CppKernel(Kernel):
         return csevar
 
     def store(self, name, index, value, mode=None):
-        # assert "buf" in name
+        assert "buf" in name
         var = self.args.output(name)
         index = self.rename_indexing(index)
         if mode is None:
@@ -3132,8 +3132,7 @@ class CppTile2DKernel(CppVecKernel):
             return super().load(name, new_index)
 
     def store(self, name, index, value, mode=None):
-        # TODO: fix me
-        # assert "buf" in name
+        assert "buf" in name
         var = self.args.output(name)
 
         inner = self.inner_itervar()

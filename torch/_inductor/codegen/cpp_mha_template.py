@@ -19,7 +19,7 @@ ATTENTION_TEMPLATE = r"""
 {{template.header().getvalue()}}
 #include <ATen/native/CPUBlas.h>
 
-{%- set kernel_args = {"query": query, "key": key, "value": value, "kv_indices": kv_indices} %}
+{%- set kernel_args = {"query": query, "key": key, "value": value, "kv_indices": kv_indices, "mask_other": mask_mod_other_buffers} %}
 {{kernel.def_kernel(inputs=kernel_args, outputs={"output": output})}}
 {
   // kv page size, q and kv split size
@@ -166,7 +166,10 @@ ATTENTION_TEMPLATE = r"""
                 auto in_ptr1 = b_.data();
                 auto in_ptr2 = h_.data();
                 auto in_ptr3 = q_.data();
-                auto in_ptr4 = k_.data();
+                auto in_ptr10 = k_.data();
+                {%- if mask_mod_other_buffers %}
+                    auto in_ptr4 = mask_other;
+                {%- endif %}
                 accum_t* out_ptr0 = in_ptr0;
                 {{template.modification(score_mod)}}
                 }
@@ -183,6 +186,9 @@ ATTENTION_TEMPLATE = r"""
                 auto in_ptr1 = h_.data();
                 auto in_ptr2 = q_.data();
                 auto in_ptr3 = k_.data();
+                {%- if mask_mod_other_buffers %}
+                    auto in_ptr4 = mask_other;
+                {%- endif %}                
                 std::vector<int64_t> temp = {0};
                 int64_t* out_ptr0 = temp.data();
                 {{template.modification(mask_mod)}}
@@ -295,12 +301,33 @@ class CppMHATemplate(CppTemplate):
         from ..utils import sympy_index_symbol_with_prefix, SymT
         from ..virtualized import ops, V
 
-
-        # TODO: what should be the output name??
-        output_name = "arg0_1"
+        output_name = "buf0"     
+        V.graph.register_buffer(subgraph_buffer)
 
         from .cpp import CppKernel, CppKernelProxy, KernelGroup
         kernel_group = KernelGroup()
+        kernel_input_args = {
+            "arg0_1": "in_ptr0",
+            "arg1_1": "in_ptr1",
+            "arg2_1": "in_ptr2",
+            "arg3_1": "in_ptr3",
+            "arg10_1": "in_ptr10",
+            "arg4_1": "in_ptr4",
+        }
+
+        kernel_output_args = {
+            "buf0": "out_ptr0"
+        }
+
+        args = kernel_group.args
+        for name, inp in kernel_input_args.items():
+            args.input_buffers[name] = inp
+
+        for name, inp in kernel_output_args.items():
+            args.output_buffers[name] = inp        
+
+        kernel_group.args = args
+
         cpp_kernel_proxy = CppKernelProxy(kernel_group)
         bodies = []
         var_sizes_list = []
@@ -407,11 +434,14 @@ class CppMHATemplate(CppTemplate):
 
         if template_buffer_node is not None:
             buf_out = template_buffer_node
+        has_other_buffer = len(self.input_nodes) == 6
         options = dict(
             query=query,
             key=key,
             value=value,
             kv_indices=self.input_nodes[3],
+            score_mod_other_buffers=self.input_nodes[4] if has_other_buffer else None,
+            mask_mod_other_buffers=self.input_nodes[5] if has_other_buffer else None,            
             scale=self.scale,
             size_per_thread=size_per_thread,
             accumulate_dtype=torch.float,
