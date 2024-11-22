@@ -330,7 +330,7 @@ are aliased and mutated, and they should be dynamic, please file an issue.
             )
 
     shape_env = None
-    suppress_guards = contextlib.nullcontext
+    maybe_suppress_guards = contextlib.nullcontext
     tracing_context = torch._guards.TracingContext.try_get()
 
     if tracing_context is not None:
@@ -338,9 +338,9 @@ are aliased and mutated, and they should be dynamic, please file an issue.
 
         # Check whether we can actually get the dynamo sources from within AOTAutograd.
         if aot_config.aot_autograd_arg_pos_to_source and shape_env is not None:
-            suppress_guards = shape_env.suppress_guards
+            maybe_suppress_guards = shape_env.suppress_guards
 
-    with suppress_guards():
+    with maybe_suppress_guards():
         aliased_fwd_inputs = [fwd_inputs[i] for i in aliased_input_indices]
         actual_aliased_indices = {
             aliased_input_indices[i]
@@ -353,6 +353,8 @@ are aliased and mutated, and they should be dynamic, please file an issue.
     # dynamo sources inside AOTAutograd.
     if (
         tracing_context is not None
+        # Make sure dynamic shapes is active.
+        and shape_env is not None
         # We check that we have more than 1 aliased tensor, which should be true at
         # this point, anyway.
         and num_aliases > 1

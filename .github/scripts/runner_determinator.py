@@ -46,19 +46,25 @@ Example config:
     # Opt-ins:
     # Users can opt into the LF fleet by adding their GitHub username to this list
     # and specifying experiments to enable in a comma-separated list.
+    # To always opt out of an experiment, prefix it with a "-".
     # Experiments should be from the above list.
 
-    @User1,lf,split_build
+    @User1,-lf,split_build
     @User2,lf
     @User3,split_build
 """
 
+import json
 import logging
 import os
 import random
+import re
+import sys
 from argparse import ArgumentParser
+from functools import lru_cache
 from logging import LogRecord
-from typing import Any, Dict, FrozenSet, Iterable, List, NamedTuple, Tuple
+from typing import Any, Dict, FrozenSet, Iterable, List, NamedTuple, Set, Tuple
+from urllib.request import Request, urlopen
 
 import yaml
 from github import Auth, Github
@@ -72,7 +78,7 @@ WORKFLOW_LABEL_LF_CANARY = "lf.c."  # use canary runners from the linux foundati
 GITHUB_OUTPUT = os.getenv("GITHUB_OUTPUT", "")
 GH_OUTPUT_KEY_AMI = "runner-ami"
 GH_OUTPUT_KEY_LABEL_TYPE = "label-type"
-
+OPT_OUT_LABEL = "no-runner-experiments"
 
 SETTING_EXPERIMENTS = "experiments"
 
@@ -191,6 +197,13 @@ def parse_args() -> Any:
         default="",
         help="comma separated list of experiments to check, if omitted all experiments marked with default=True are checked",
     )
+    parser.add_argument(
+        "--pr-number",
+        type=str,
+        required=False,
+        default="",
+        help="the optional PR number where this is run",
+    )
 
     return parser.parse_args()
 
@@ -296,6 +309,27 @@ def parse_user_opt_in_from_text(user_optin_text: str) -> UserOptins:
     return optins
 
 
+def is_valid_experiment_name(experiment_name: str) -> bool:
+    """
+    Check if the experiment name is valid.
+    A valid name:
+        - Contains only alphanumeric characters and the special characters "_" & "-"
+        - The special characters "_" & "-" shouldn't be the first or last characters
+        - Cannot contain spaces
+    """
+
+    valid_char_regex = r"^[a-zA-Z0-9]([\w-]*[a-zA-Z0-9])?$"
+    valid = bool(re.match(valid_char_regex, experiment_name))
+
+    if valid:
+        return True
+
+    log.error(
+        f"Invalid experiment name: {experiment_name}. Experiment names should only contain alphanumeric characters, '_', and '-'. They cannot contain spaces, and the special characters '_' and '-' cannot be the first or last characters."
+    )
+    return False
+
+
 def parse_settings_from_text(settings_text: str) -> Settings:
     """
     Parse the experiments from the issue body into a list of ExperimentSettings
@@ -314,6 +348,10 @@ def parse_settings_from_text(settings_text: str) -> Settings:
             experiments = {}
 
             for exp_name, exp_settings in settings.get(SETTING_EXPERIMENTS).items():
+                if not is_valid_experiment_name(exp_name):
+                    # Exclude invalid experiments from the list. We log an error, but don't raise an exception so that other experiments can still be processed.
+                    continue
+
                 valid_settings = {}
                 for setting in exp_settings:
                     if setting not in Experiment._fields:
@@ -361,6 +399,23 @@ def is_user_opted_in(user: str, user_optins: UserOptins, experiment_name: str) -
     return experiment_name in user_optins.get(user, [])
 
 
+def is_user_opted_out(user: str, user_optins: UserOptins, experiment_name: str) -> bool:
+    """
+    Check if a user explicitly opted out of an experiment
+    """
+    # if the experiment is prefixed with a "-", then it's an opt-out
+    experiment_optout = "-" + experiment_name
+    if experiment_optout not in user_optins.get(user, []):
+        return False
+
+    if is_user_opted_in(user, user_optins, experiment_name):
+        log.warning(
+            f"User {user} is opted into experiment {experiment_name}, but also opted out of it. Defaulting to opting out"
+        )
+
+    return True
+
+
 def get_runner_prefix(
     rollout_state: str,
     workflow_requestors: Iterable[str],
@@ -390,6 +445,19 @@ def get_runner_prefix(
         elif not experiment_settings.default:
             log.info(
                 f"Skipping experiment '{experiment_name}', as it is not a default experiment"
+            )
+            continue
+
+        # Is any workflow_requestor opted out to this experiment?
+        opted_out_users = [
+            requestor
+            for requestor in workflow_requestors
+            if is_user_opted_out(requestor, user_optins, experiment_name)
+        ]
+
+        if opted_out_users:
+            log.info(
+                f"{', '.join(opted_out_users)} have opted out of experiment {experiment_name}."
             )
             continue
 
@@ -451,10 +519,65 @@ def get_rollout_state_from_issue(github_token: str, repo: str, issue_num: int) -
     return str(issue.get_comments()[0].body.strip("\n\t "))
 
 
+def download_json(url: str, headers: Dict[str, str], num_retries: int = 3) -> Any:
+    for _ in range(num_retries):
+        try:
+            req = Request(url=url, headers=headers)
+            content = urlopen(req, timeout=5).read().decode("utf-8")
+            return json.loads(content)
+        except Exception as e:
+            log.warning(f"Could not download {url}: {e}")
+
+    log.warning(f"All {num_retries} retries exhausted, downloading {url} failed")
+    return {}
+
+
+@lru_cache(maxsize=None)
+def get_pr_info(github_repo: str, github_token: str, pr_number: int) -> Dict[str, Any]:
+    """
+    Dynamically get PR information
+    """
+    github_api = f"https://api.github.com/repos/{github_repo}"
+    headers = {
+        "Accept": "application/vnd.github.v3+json",
+        "Authorization": f"token {github_token}",
+    }
+    json_response: Dict[str, Any] = download_json(
+        url=f"{github_api}/issues/{pr_number}",
+        headers=headers,
+    )
+
+    if not json_response:
+        log.warning(f"Failed to get the labels for #{pr_number}")
+        return {}
+
+    return json_response
+
+
+def get_labels(github_repo: str, github_token: str, pr_number: int) -> Set[str]:
+    """
+    Dynamically get the latest list of labels from the pull request
+    """
+    pr_info = get_pr_info(github_repo, github_token, pr_number)
+    return {
+        label.get("name") for label in pr_info.get("labels", []) if label.get("name")
+    }
+
+
 def main() -> None:
     args = parse_args()
 
     runner_label_prefix = DEFAULT_LABEL_PREFIX
+
+    # Check if the PR is opt-out
+    if args.pr_number:
+        labels = get_labels(args.github_repo, args.github_token, int(args.pr_number))
+        if OPT_OUT_LABEL in labels:
+            log.info(
+                f"Opt-out runner determinator because #{args.pr_number} has {OPT_OUT_LABEL} label"
+            )
+            set_github_output(GH_OUTPUT_KEY_LABEL_TYPE, runner_label_prefix)
+            sys.exit()
 
     try:
         rollout_state = get_rollout_state_from_issue(

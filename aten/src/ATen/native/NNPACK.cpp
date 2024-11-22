@@ -3,6 +3,7 @@
 #include <ATen/Config.h>
 
 #include <c10/util/CallOnce.h>
+#include <c10/util/error.h>
 
 #include <thread>
 
@@ -120,7 +121,7 @@ struct Workspace {
     // Won't work on Windows, but NNPACK doesn't support Windows either
     auto res = posix_memalign(&buffer, nnpack_memory_alignment_boundary, size);
     if (res != 0) {
-      TORCH_CHECK(false, "posix_memalign failed:", strerror(errno), " (", errno, ")");
+      TORCH_CHECK(false, "posix_memalign failed:", c10::utils::str_error(errno), " (", errno, ")");
     }
     return;
   }
