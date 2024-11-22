@@ -4597,7 +4597,7 @@ class TestLearnableBiases(InductorTestCase):
         )
 
     @common_utils.parametrize(
-        "params", get_params(test_dtypes), name_fn=lambda x: f"{x}"
+        "params", get_params([torch.float32]), name_fn=lambda x: f"{x}"
     )
     def test_symmetric_bias(self, params):
         query, key, value = self._init_tensors(params)

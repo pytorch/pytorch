@@ -487,7 +487,7 @@ class TritonTemplateKernel(TritonKernel):
         """
         assert isinstance(
             scatter_graph, ir.ComputedBuffer
-        ), "Expected a scatter if subgraph is a list"
+        ), f"scatter_graph must be an instance of ComputeBuffer but got {type(scatter_graph)}"
 
         def contiguous_strides(x):
             # We always create a fresh contiguous grad for scattering into
@@ -526,7 +526,7 @@ class TritonTemplateKernel(TritonKernel):
             with V.set_ops_handler(modification_handler):
                 assert isinstance(
                     subgraph, (ir.ComputedBuffer, List)
-                ), f"Expected the subgraph to be a ComputedBuffer, got {type(subgraph)}"
+                ), f"Expected the subgraph to be a ComputedBuffer or a List[ComputedBuffer], got {type(subgraph)}"
                 # Handle scatter stores
                 if isinstance(subgraph, list):
                     for scatter_graph in subgraph:

@@ -109,7 +109,6 @@ class PointwiseSubgraphLowering(torch.fx.Interpreter):
         from .lowering import lowerings
 
         with self._op_context(target):
-            print(self._current_op)
             if target is operator.getitem and isinstance(args[0], (list, tuple, dict)):
                 return super().call_function(target, args, kwargs)
 

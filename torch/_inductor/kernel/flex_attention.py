@@ -109,14 +109,15 @@ def get_float32_precision():
 @dataclass(frozen=True)
 class SubgraphOutput:
     """When building the subgraph buffers we fall into 1 of two cases:
-    1. The subgraph returns a single output node, this happens in the forward and
-        backward pass when there are no input_buffers that require grad
-    2. The subgraph has multiple outputs (i.e. input_buffers that require grad)
-        In this case we want to return these output_nodes from the lowering
+    1. The subgraph can lower entirely into a 1 compute buffer. This happens is ensured via
+        PointwiseSubgraphLowering and is the common case for FlexAttention
+    2. The subgraph has allowed mutation ops, we only support zeros_and_scatter in the backward
+        And we need both the ComputeBuffer for lowering and the realized TensorBox to return
+        from the FlexAttentionBackward Lowering.
     """
 
     compute_buffer: ComputedBuffer
-    output_node: Optional[IRNode] = None
+    output_node: Optional[TensorBox] = None
 
     def __post_init__(self):
         assert isinstance(self.compute_buffer, ComputedBuffer), (
@@ -174,10 +175,10 @@ def zeros_and_scatter_lowering(shape: List[int], indices, values):
     return SubgraphOutput(buffer, grad)
 
 
-def build_subgraph_buffer(
-    args: List[TensorBox],
-    subgraph: Subgraph,
-) -> Union[List[SubgraphOutput], SubgraphOutput]:
+SubgraphResults = Union[List[Optional[SubgraphOutput]], Optional[SubgraphOutput]]
+
+
+def build_subgraph_buffer(args: List[TensorBox], subgraph: Subgraph) -> SubgraphResults:
     """This function's goal is to take in the required args and produce the subgraph buffer
     The subgraph buffer is a ComputedBuffer that will be inlined into the triton template
 
@@ -198,7 +199,7 @@ def build_subgraph_buffer(
     with V.set_graph_handler(pw_subgraph):  # type: ignore[arg-type]
         pw_subgraph.run(*args)
 
-    def convert_output_node_to_buffer(output_buffer):
+    def convert_output_node_to_buffer(output_buffer) -> Optional[SubgraphOutput]:
         if output_buffer is None:
             return None
         if isinstance(output_buffer, SubgraphOutput):
@@ -1804,6 +1805,52 @@ def validate_joint_graph(joint_graph: torch.fx.Graph):
     return
 
 
+@dataclass(frozen=True)
+class JointOutputResult:
+    """Results from processing joint outputs."""
+
+    joint_buffer: ComputedBuffer
+    buffer_grads_compute: List[ComputedBuffer]
+    buffer_grads_out: List[TensorBox]
+    mutated_grads: List[TensorBox]
+
+
+def process_joint_outputs(
+    all_joint_outputs: SubgraphResults, num_placeholders: int
+) -> JointOutputResult:
+    """Process joint outputs and extract various buffers needed for lowering
+
+    Args:
+        all_joint_outputs: List of all the outputs from build_subgraphs
+        num_placeholders: The number of placeholder inputs, used to skip over unused backward compute buffers
+
+    Returns:
+        JointOutputResult containing processed buffers and gradients
+    """
+    assert isinstance(all_joint_outputs, List)
+    assert (
+        all_joint_outputs[0] is not None
+    ), "joint_subgraph_buffer is None this is a bug!"
+
+    joint_buffer = all_joint_outputs[0].compute_buffer
+    other_grads = all_joint_outputs[num_placeholders - 1 :]
+
+    # outer_grads has the structure: Len(other_buffer_grads) if buffer doesn't require grad than it will be None
+    # We only grab
+    grads_compute = [buf.compute_buffer for buf in other_grads if buf is not None]
+
+    # The outputs of the lowering expect Nones to be present so we use tree map instead list comp
+    grads_out = tree_map_only(SubgraphOutput, lambda x: x.output_node, other_grads)
+    mutated_grads = [buf for buf in grads_out if buf is not None]
+
+    return JointOutputResult(
+        joint_buffer=joint_buffer,
+        buffer_grads_compute=grads_compute,
+        buffer_grads_out=grads_out,
+        mutated_grads=mutated_grads,
+    )
+
+
 # TODO: We probably also need a layout constraint?
 @register_lowering(
     torch.ops.higher_order.flex_attention_backward, type_promotion_kind=None
@@ -1916,24 +1963,10 @@ def flex_attention_backward(*args, **kwargs):
         joint_placeholder_inps + list(score_mod_other_buffers),
         joint_graph,
     )
-    assert isinstance(all_joint_outputs, List)
-    assert (
-        all_joint_outputs[0] is not None
-    ), "joint_subgraph_buffer is None this is a bug!"
-    joint_subgraph_buffer = all_joint_outputs[0].compute_buffer
 
-    score_mod_other_buffer_grads = all_joint_outputs[len(joint_placeholder_inps) - 1 :]
-
-    score_mod_other_buffer_grads_compute = [
-        buf.compute_buffer for buf in score_mod_other_buffer_grads if buf is not None
-    ]
-    score_mod_other_buffer_grads_out = tree_map_only(
-        SubgraphOutput, lambda x: x.output_node, score_mod_other_buffer_grads
+    joint_outputs = process_joint_outputs(
+        all_joint_outputs, len(joint_placeholder_inps)
     )
-
-    mutated_other_buffer_grads = [
-        buffer for buffer in score_mod_other_buffer_grads_out if buffer is not None
-    ]
 
     mask_graph_placeholder_inps = [
         create_placeholder(name, dtype, query.get_device())
@@ -2052,14 +2085,14 @@ def flex_attention_backward(*args, **kwargs):
             layout=layout_broadcasted_k,  # We use store_output only for grad_key
             subgraphs=[
                 fw_subgraph_buffer,
-                joint_subgraph_buffer,
+                joint_outputs.joint_buffer,
                 mask_graph_buffer,
-                score_mod_other_buffer_grads_compute,
+                joint_outputs.buffer_grads_compute,
             ],
             mutated_inputs=[
                 grad_query,
                 broadcasted_grad_value,
-                *mutated_other_buffer_grads,
+                *joint_outputs.mutated_grads,
             ],
             call_sizes=query.get_size() + key.get_size()[1:3],
             num_stages=num_stages,
@@ -2117,9 +2150,4 @@ def flex_attention_backward(*args, **kwargs):
         grad_key = lowerings[aten.sum](broadcasted_grad_key, axis=0, keepdims=True)
         grad_value = lowerings[aten.sum](broadcasted_grad_value, axis=0, keepdims=True)
 
-    return (
-        grad_query,
-        grad_key,
-        grad_value,
-        tuple(score_mod_other_buffer_grads_out),
-    )
+    return (grad_query, grad_key, grad_value, tuple(joint_outputs.buffer_grads_out))
