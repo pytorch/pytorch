@@ -990,7 +990,13 @@ def unsqueeze_default(func, *args, **kwargs):
     new_kwargs["dim"] = _wrap_jagged_dim(
         len(inp._size) + 1, dim, inp._ragged_idx, "unsqueeze"
     )
-    return NestedTensor(func(values, **new_kwargs), **extract_kwargs(inp))
+
+    # ragged_idx changes if a dimension is added before it
+    output_kwargs = extract_kwargs(inp)
+    if new_kwargs["dim"] <= inp._ragged_idx - 1:
+        output_kwargs["_ragged_idx"] += 1
+
+    return NestedTensor(func(values, **new_kwargs), **output_kwargs)
 
 
 @register_jagged_func(torch.ops.aten.cat.default, "tensors: any, dim: any")
