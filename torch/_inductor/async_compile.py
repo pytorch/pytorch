@@ -39,6 +39,8 @@ from torch._inductor.runtime.compile_tasks import (
 )
 from torch.hub import _Faketqdm, tqdm
 from torch.utils._triton import has_triton_package
+from torch.monitor import _WaitCounter
+
 
 
 if TYPE_CHECKING:
@@ -299,7 +301,7 @@ class AsyncCompile:
             return LambdaFuture(get_result)
 
     def wait(self, scope: Dict[str, Any]) -> None:
-        with dynamo_timed("async_compile.wait", log_pt2_compile_event=True):
+        with dynamo_timed("async_compile.wait", log_pt2_compile_event=True), _WaitCounter("pytorch.async_compile.wait"):
             num_kernels = len(
                 [
                     value
