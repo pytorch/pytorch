@@ -69,6 +69,7 @@ def multi_record_test(num_records, **kwargs):
     def fn(self, records):
         fn_opt = torch._dynamo.optimize("inductor")(example_fn)
         fn_opt(*ARGS)
+        breakpoint()
         self.assertEqual(len(records), num_records)
 
     return fn
@@ -732,6 +733,27 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
         self.assertGreater(len(records), 0)
         self.assertLess(len(records), 3)
 
+    @make_logging_test(graph_region_expansion=True)
+    def test_graph_region_expansion(self, records):
+        with torch._dynamo.config.patch("use_graph_deduplication", True):
+
+            def inner_fn(x, y):
+                x0 = x + 1
+                y0 = y + 2
+                z = x0.sum() + y0.sum()
+                return z
+
+            def fn(x, y):
+                o0 = inner_fn(x, y)
+                o1 = torch.sin(o0)
+                o2 = inner_fn(x, o1)
+                o3 = inner_fn(x, y)
+                return o2 * o3 * o3
+
+            fn_opt = torch.compile(backend="eager")(fn)
+            fn_opt(torch.randn(10, 10), torch.randn(10, 10))
+            self.assertGreater(len(records), 0)
+
     @skipIfTorchDynamo("too slow")
     @make_logging_test(**torch._logging.DEFAULT_LOGGING)
     def test_default_logging(self, records):
@@ -865,6 +887,7 @@ exclusions = {
     "cudagraph_static_inputs",
     "benchmarking",
     "loop_ordering",
+    "graph_region_expansion",
 }
 for name in torch._logging._internal.log_registry.artifact_names:
     if name not in exclusions:

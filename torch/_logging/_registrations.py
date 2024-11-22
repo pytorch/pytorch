@@ -191,5 +191,10 @@ register_artifact(
     "Detailed Inductor benchmarking information.",
     off_by_default=True,
 )
+register_artifact(
+    "graph_region_expansion",
+    "Logs detailed steps of the duplicate graph region tracker expansion algorithm",
+    off_by_default=True,
+)
 
 register_artifact("custom_format_test_artifact", "Testing only", log_format="")
