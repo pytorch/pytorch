@@ -45,6 +45,9 @@ if typing.TYPE_CHECKING:
     import numpy.typing as npt
 
 
+# ir_version used for the ONNX file. See https://github.com/onnx/onnx/blob/main/docs/IR.md#onnx-versioning
+_ONNX_IR_VERSION = 10
+
 # Define utilities to convert PyTorch data types so users do not need to specify manually
 _TORCH_DTYPE_TO_ONNX: dict[torch.dtype, ir.DataType] = {
     torch.bfloat16: ir.DataType.BFLOAT16,
@@ -961,7 +964,7 @@ def _exported_program_to_onnx_program(
                 ),
             },
         ),
-        ir_version=9,
+        ir_version=_ONNX_IR_VERSION,
         producer_name="pytorch",
         producer_version=torch.__version__,
     )
