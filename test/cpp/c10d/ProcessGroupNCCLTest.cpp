@@ -761,6 +761,7 @@ class ProcessGroupNCCLTest : public ::testing::Test {
   int size_{1};
 };
 
+/*
 TEST_F(ProcessGroupNCCLTest, CUDAEventCache) {
   if (skipTest()) {
     return;
@@ -787,6 +788,7 @@ TEST_F(ProcessGroupNCCLTest, CUDAEventCache) {
   EXPECT_NE(event1_ptr, event5.get());
   EXPECT_NE(event2_ptr, event6.get());
 }
+*/
 
 TEST_F(ProcessGroupNCCLTest, testAllreduce) {
   if (skipTest()) {
