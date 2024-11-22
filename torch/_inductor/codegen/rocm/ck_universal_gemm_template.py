@@ -410,11 +410,16 @@ class CKGemmTemplate(CKTemplate):
         c_contig_size = (
             N if op.c_layout == "Row" else M if op.c_layout == "Col" else None
         )
-        c_shuffle_block_transfer_scalar_per_vector_n_per_block = op.c_shuffle_block_transfer_scalar_per_vector_n_per_block[0] if isinstance(op.c_shuffle_block_transfer_scalar_per_vector_n_per_block, tuple) else op.c_shuffle_block_transfer_scalar_per_vector_n_per_block
+        c_shuffle_block_transfer_scalar_per_vector_n_per_block = (
+            op.c_shuffle_block_transfer_scalar_per_vector_n_per_block[0]
+            if isinstance(
+                op.c_shuffle_block_transfer_scalar_per_vector_n_per_block, tuple
+            )
+            else op.c_shuffle_block_transfer_scalar_per_vector_n_per_block
+        )
         if (
             is_static_int(c_contig_size)
-            and c_contig_size
-            % c_shuffle_block_transfer_scalar_per_vector_n_per_block
+            and c_contig_size % c_shuffle_block_transfer_scalar_per_vector_n_per_block
             != 0
         ):
             return None
@@ -426,7 +431,11 @@ class CKGemmTemplate(CKTemplate):
 
     def emit_ck_instance(self, op: "CKGemmOperation"):
         # The Jinja template for generating a C++ type alias *definition* for a Universal GEMM instance
-        struct_name = "DeviceBatchedGemmMultiD_Xdl_CShuffle_V3" if self.is_batched else "DeviceGemmMultiD_Xdl_CShuffle_V3"
+        struct_name = (
+            "DeviceBatchedGemmMultiD_Xdl_CShuffle_V3"
+            if self.is_batched
+            else "DeviceGemmMultiD_Xdl_CShuffle_V3"
+        )
         template_definition = r"""
     // Gemm operator {{operation_name}}
     using Operation_{{operation_name}} =
@@ -596,10 +605,7 @@ class CKGemmTemplate(CKTemplate):
                 outputs=[Y],
                 names_str="X, W, inv_scale_x, inv_scale_w, Bias, Y",
                 input_reorder=self.input_reorder,
-                size_args=[
-                    f"int32_t {arg}"
-                    for arg in size_arg_strs
-                ],
+                size_args=[f"int32_t {arg}" for arg in size_arg_strs],
             ),
             instance_type=instance_type,
             a_element_dtype=op.a_element_dtype,
@@ -731,11 +737,13 @@ class CKGemmTemplate(CKTemplate):
         """
         try:
             import ck4inductor  # type: ignore[import]
+            from ck4inductor.batched_universal_gemm.gen_instances import (  # type: ignore[import]
+                gen_ops_library as gen_batched_gemm_ops_library,
+            )
             from ck4inductor.universal_gemm.gen_instances import (  # type: ignore[import]
                 gen_ops_library as gen_gemm_ops_library,
                 gen_ops_preselected as gen_gemm_ops_preselected,
             )
-            from ck4inductor.batched_universal_gemm.gen_instances import gen_ops_library as gen_batched_gemm_ops_library # type: ignore[import]
         except ImportError:
             return []
 
@@ -749,9 +757,7 @@ class CKGemmTemplate(CKTemplate):
 
         assert generator is not None
 
-        filtered_instances = list(
-            filter(lambda op: self.filter_op(op), generator())
-        )
+        filtered_instances = list(filter(lambda op: self.filter_op(op), generator()))
         # NB: when using a fixed list order, most likely we will pick the subset of instances
         # which are very similar to each other. Randomizing the choice seems to solve this.
         random.seed(-11)
