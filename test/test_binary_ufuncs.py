@@ -3521,15 +3521,22 @@ class TestBinaryUfuncs(TestCase):
 
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_lerp_weight_type_promotion(self, device, dtype):
-        shape = (5, 5)
-        start = torch.randn(shape, device=device, dtype=dtype)
-        end = torch.randn(shape, device=device, dtype=dtype)
-        weight = torch.randn(shape, device=device, dtype=torch.float)
+        start = make_tensor((5, 5), dtype=dtype, device=device, low=1, high=100)
+        end = make_tensor((5, 5), dtype=dtype, device=device, low=1, high=100)
+        weight = make_tensor((5, 5), dtype=dtype, device=device, low=1, high=100)
 
-        actual = torch.lerp(start, end, weight)
-        expected = start + weight * (end - start)
+        actual = torch.lerp(start, end, weight.to(torch.float))
+        expected = torch.lerp(start, end, weight)
         self.assertEqual(expected, actual)
 
+    @dtypes(torch.int, torch.long, torch.bfloat16, torch.float16, torch.float)
+    def test_lerp_weight_type_error(self, device, dtype):
+        x = torch.ones(2, 2, device=device, dtype=dtype)
+        w = torch.ones(2, 2, device=device, dtype=dtype)
+        s = torch.tensor(2.2, device=device, dtype=torch.double)
+
+        with self.assertRaisesRegex(RuntimeError, "Unable to promote `input` dtype"):
+            torch.lerp(x, w, s)
 
     def _test_logaddexp(self, device, dtype, base2):
         if base2:
