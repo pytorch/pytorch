@@ -38,9 +38,8 @@ from torch._inductor.runtime.compile_tasks import (
     _worker_compile_triton,
 )
 from torch.hub import _Faketqdm, tqdm
-from torch.utils._triton import has_triton_package
 from torch.monitor import _WaitCounter
-
+from torch.utils._triton import has_triton_package
 
 
 if TYPE_CHECKING:
@@ -234,7 +233,8 @@ class AsyncCompile:
                 ),
             )
         else:
-            kernel.precompile()
+            with _WaitCounter("pytorch.async_compile.wait").guard():
+                kernel.precompile()
             return kernel
 
     def multi_kernel(self, *args, **kwargs) -> Any:
@@ -301,7 +301,9 @@ class AsyncCompile:
             return LambdaFuture(get_result)
 
     def wait(self, scope: Dict[str, Any]) -> None:
-        with dynamo_timed("async_compile.wait", log_pt2_compile_event=True), _WaitCounter("pytorch.async_compile.wait"):
+        with dynamo_timed(
+            "async_compile.wait", log_pt2_compile_event=True
+        ), _WaitCounter("pytorch.async_compile.wait").guard():
             num_kernels = len(
                 [
                     value
