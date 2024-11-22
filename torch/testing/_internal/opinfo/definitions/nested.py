@@ -127,6 +127,15 @@ def _describe_njt(njt) -> str:
     return f"{njt.dim()}D{contig_type}{cached_data}"
 
 
+# Helper function to get a reasonable string representation of a given dim wrt an NJT.
+def _describe_dim(njt, dim):
+    if dim == 0:
+        return "batch_dim"
+    elif dim == njt._ragged_idx:
+        return "ragged_dim"
+    return "normal_dim"
+
+
 # Helper function for generating a comprehensive set of NJT sample inputs.
 def _sample_njts(device, dtype, requires_grad=False, dims=None):
     if dims is None:
@@ -645,24 +654,17 @@ def sample_inputs_unary_dimwise(
         device=device, dtype=dtype, requires_grad=requires_grad, dims=[2, 3, 4]
     ):
         for dim in range(njt.dim()):
-            dim_desc = "normal_dim"
-            if dim == 0:
-                dim_desc = "batch_dim"
-            elif dim == njt._ragged_idx:
-                dim_desc = "ragged_dim"
-
             kwargs = {single_dim_argname: dim}
             kwargs.update(op_kwargs)
             yield SampleInput(
                 njt.clone().detach(),
                 kwargs=kwargs,
-                name=f"{_describe_njt(njt)}: {dim_desc}",
+                name=f"{_describe_njt(njt)}: {_describe_dim(njt, dim)}",
             )
 
 
 def batchwise_reference_chunk(op, sample):
     # reference for chunk() over dim=0
-    njt = sample.input
     kwargs = sample.kwargs
     B = sample.input.size(0)
     num_chunks = sample.kwargs["chunks"]
@@ -688,6 +690,30 @@ def batchwise_reference_chunk(op, sample):
 def batchwise_reference_narrow(op, sample):
     # TODO: write this!
     raise NotImplementedError
+
+
+def batchwise_reference_select(op, sample):
+    # reference for select() over dim=0
+    return sample.input.unbind()[sample.kwargs["index"]]
+
+
+def batchwise_reference_split(op, sample):
+    # TODO: write this!
+    raise NotImplementedError
+
+
+def batchwise_reference_split_with_sizes(op, sample):
+    # TODO: write this!
+    raise NotImplementedError
+
+
+def batchwise_reference_unflatten(op, sample):
+    # TODO: write this!
+    raise NotImplementedError
+
+
+def batchwise_reference_unsqueeze(op, sample):
+    raise ValueError("unsqueeze() is not intended to operate on the batch dim")
 
 
 def sample_inputs_clone(op_info, device, dtype, requires_grad, **kwargs):
@@ -791,10 +817,10 @@ def sample_inputs_chunk(op_info, device, dtype, requires_grad, **kwargs):
     for sample_input in sample_inputs_unary_dimwise(
         op_info, device, dtype, requires_grad, **kwargs
     ):
-        # ragged dim chunking: use a single chunks value
+        # ragged dim chunking: test a single chunks value
         if sample_input.kwargs["dim"] == sample_input.input._ragged_idx:
             yield _update_sample(sample_input, {"chunks": 3})
-        # other dim chunking: use different chunks values
+        # other dim chunking: test different chunks values
         else:
             D = sample_input.input.size(sample_input.kwargs["dim"])
             for chunks in [1, D // 2, D - 1, D]:
@@ -863,10 +889,10 @@ def sample_inputs_narrow(op_info, device, dtype, requires_grad, **kwargs):
     for sample_input in sample_inputs_unary_dimwise(
         op_info, device, dtype, requires_grad, **kwargs
     ):
-        # ragged dim narrowing: use a single start, length value
+        # ragged dim narrowing: test a single start, length value
         if sample_input.kwargs["dim"] == sample_input.input._ragged_idx:
             yield _update_sample(sample_input, {"start": 1, "length": 2})
-        # other dim narrowing: use different start, length values
+        # other dim narrowing: test different start, length values
         else:
             D = sample_input.input.size(sample_input.kwargs["dim"])
             for start, length in [(0, D), (0, D - 1), (1, D - 1), (D - 1, 1)]:
@@ -1076,6 +1102,134 @@ sample_inputs_nn_functional_threshold = partial(
     sample_inputs_elementwise_njt_unary,
     op_kwargs={"threshold": float.fromhex("0x1.3ap-3"), "value": -9},
 )
+
+
+def sample_inputs_select(op_info, device, dtype, requires_grad, **kwargs):
+    for sample_input in sample_inputs_unary_dimwise(
+        op_info, device, dtype, requires_grad, **kwargs
+    ):
+        # ragged dim chunking: test a single index
+        if sample_input.kwargs["dim"] == sample_input.input._ragged_idx:
+            yield _update_sample(sample_input, {"index": 0})
+        # other dim chunking: test different indices
+        else:
+            D = sample_input.input.size(sample_input.kwargs["dim"])
+            for index in [0, D // 2, D - 1]:
+                yield _update_sample(sample_input, {"index": index})
+
+
+def sample_inputs_split(op_info, device, dtype, requires_grad, **kwargs):
+    for sample_input in sample_inputs_unary_dimwise(
+        op_info, device, dtype, requires_grad, **kwargs
+    ):
+        # ragged dim chunking: test a single split size
+        if sample_input.kwargs["dim"] == sample_input.input._ragged_idx:
+            yield _update_sample(sample_input, {"split_size_or_sections": 3})
+        # other dim chunking: test different split sizes
+        else:
+            D = sample_input.input.size(sample_input.kwargs["dim"])
+            for split_size in [1, D // 2, D - 1, D]:
+                yield _update_sample(
+                    sample_input, {"split_size_or_sections": split_size}
+                )
+
+
+def sample_inputs_split_with_sizes(op_info, device, dtype, requires_grad, **kwargs):
+    for sample_input in sample_inputs_unary_dimwise(
+        op_info, device, dtype, requires_grad, **kwargs
+    ):
+        # It will never make sense to operate on the ragged dim.
+        # TODO: Handle this with error_inputs
+        if sample_input.kwargs["dim"] == sample_input.input._ragged_idx:
+            continue
+
+        D = sample_input.input.size(sample_input.kwargs["dim"])
+        # splits should add up to D
+        split1 = torch.randint(0, D - 1, size=()).item()
+        split2 = D - split1
+        yield _update_sample(sample_input, {"split_sizes": [split1, split2]})
+
+
+def sample_inputs_squeeze(op_info, device, dtype, requires_grad, **kwargs):
+    # squeeze-specific NJT generator (need to ensure there are some 1s in the shape)
+    def _get_njts():
+        njt = random_nt_from_dims(
+            (4, None, 1, 3, 1),
+            device=device,
+            dtype=dtype,
+            requires_grad=requires_grad,
+            layout=torch.jagged,
+        )
+        yield njt
+        # without min / max seqlen cached
+        values = njt.values().detach().clone()
+        offsets = njt.offsets().detach().clone()
+        yield torch.nested.nested_tensor_from_jagged(values, offsets)
+        # non-contiguous transposed
+        yield njt.transpose(1, 3)
+        # non-contiguous with holes
+        values = njt.values().clone().detach()
+        offsets = njt.offsets().clone().detach()
+        # subtract 1 to cause holes
+        lengths = (offsets.diff() - 1).clone().detach()
+        yield torch.nested.nested_tensor_from_jagged(
+            values=values,
+            offsets=offsets,
+            lengths=lengths,
+        )
+
+    for njt in _get_njts():
+        # single dim operation
+        for dim in range(njt.dim()):
+            # Operation on batch / ragged dim is never expected to work.
+            # TODO: Handle these via error_inputs.
+            if dim == 0 or dim == njt._ragged_idx:
+                continue
+
+            yield SampleInput(
+                njt.clone().detach(),
+                kwargs={"dim": dim},
+                name=f"{_describe_njt(njt)}: {_describe_dim(njt, dim)}",
+            )
+
+        # multiple dim operation (pass no args)
+        yield SampleInput(
+            njt.clone().detach(),
+            kwargs={"dim": dim},
+            name=f"{_describe_njt(njt)}: multiple dims",
+        )
+
+
+def sample_inputs_unflatten(op_info, device, dtype, requires_grad, **kwargs):
+    for sample_input in sample_inputs_unary_dimwise(
+        op_info, device, dtype, requires_grad, **kwargs
+    ):
+        # It will never make sense to operate on the ragged dim.
+        # TODO: Handle this with error_inputs
+        if sample_input.kwargs["dim"] == sample_input.input._ragged_idx:
+            continue
+
+        D = sample_input.input.size(sample_input.kwargs["dim"])
+        # sizes should multiply to be D
+        yield _update_sample(sample_input, {"sizes": [D, 1]})
+        yield _update_sample(sample_input, {"sizes": [1, D]})
+        if D % 2 == 0:
+            yield _update_sample(sample_input, {"sizes": [D // 2, 2]})
+            yield _update_sample(sample_input, {"sizes": [2, D // 2]})
+
+
+def sample_inputs_unsqueeze(op_info, device, dtype, requires_grad, **kwargs):
+    for sample_input in sample_inputs_unary_dimwise(
+        op_info, device, dtype, requires_grad, **kwargs
+    ):
+        yield sample_input
+        last_dim_sample = _update_sample(sample_input, {"dim": -1})
+        last_dim_sample.name = (
+            f"{_describe_njt(last_dim_sample.input)}: add dim to the end"
+        )
+        yield last_dim_sample
+
+
 # === END OP-SPECIFIC SAMPLE INPUTS FUNCS / REFERENCES ===
 
 
@@ -1105,6 +1259,12 @@ njt_sample_inputs = {
     # these two don't have ReductionOpInfo entries
     "max.reduction_with_dim": sample_inputs_njt_reduction,
     "min.reduction_with_dim": sample_inputs_njt_reduction,
+    "select": sample_inputs_select,
+    "split": sample_inputs_split,
+    "split_with_sizes": sample_inputs_split_with_sizes,
+    "squeeze": sample_inputs_squeeze,
+    "unflatten": sample_inputs_unflatten,
+    "unsqueeze": sample_inputs_unsqueeze,
 }
 
 njt_references = {
@@ -1119,7 +1279,24 @@ njt_references = {
     "narrow": partial(
         unary_dimwise_reference, batchwise_reference=batchwise_reference_narrow
     ),
+    "select": partial(
+        unary_dimwise_reference, batchwise_reference=batchwise_reference_select
+    ),
+    "split": partial(
+        unary_dimwise_reference, batchwise_reference=batchwise_reference_split
+    ),
+    "split_with_sizes": partial(
+        unary_dimwise_reference,
+        batchwise_reference=batchwise_reference_split_with_sizes,
+    ),
+    "squeeze": unbind_reference,
     "nn.functional.embedding_bag": reference_nn_functional_embedding_bag,
+    "unflatten": partial(
+        unary_dimwise_reference, batchwise_reference=batchwise_reference_unflatten
+    ),
+    "unsqueeze": partial(
+        unary_dimwise_reference, batchwise_reference=batchwise_reference_unsqueeze
+    ),
 }
 
 

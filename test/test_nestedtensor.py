@@ -7920,6 +7920,16 @@ FORWARD_SKIPS_AND_XFAILS = [
         ),
         name="transposed_reduction_bug",
     ),
+    # likely related to previous: similar error when operating on select() with dim=0
+    XFailRule(
+        error_type=IndexError,
+        error_msg="tuple index out of range",
+        op_match_fn=lambda device, op: (op.full_name == "select"),
+        sample_match_fn=lambda device, sample: (
+            "noncontig_transposed" in sample.name and "normal_dim" in sample.name
+        ),
+        name="select_batch_dim_bug",
+    ),
     # nanmean sometimes hits an unimplemented nansum() path and other times hits an
     # unimplemented sum() path
     XFailRule(
@@ -7983,7 +7993,15 @@ FORWARD_SKIPS_AND_XFAILS = [
         ),
         name="index_put_noncontig_holes_no_ragged_dim_indices",
     ),
-    # expected: these don't work on non-contiguous NJTs
+    # select() only supports dim=0 for non-contiguous with holes NJTs for now
+    XFailRule(
+        op_match_fn=lambda device, op: (op.full_name == "select"),
+        sample_match_fn=lambda device, sample: (
+            sample.kwargs["dim"] != 0 and "noncontig_holes" in sample.name
+        ),
+        name="unsupported_select_on_non_batch_dim_with_noncontig_holes",
+    ),
+    # these don't work on non-contiguous NJTs yet
     XFailRule(
         error_type=ValueError,
         error_msg="expected self to be a contiguous jagged layout NestedTensor",
@@ -7993,6 +8011,9 @@ FORWARD_SKIPS_AND_XFAILS = [
                 "chunk",
                 "masked_select",
                 "narrow",
+                "split",
+                "split_with_sizes",
+                "squeeze",
             }
         ),
         sample_match_fn=lambda device, sample: (
@@ -8000,7 +8021,7 @@ FORWARD_SKIPS_AND_XFAILS = [
         ),
         name="missing_noncontig_support",
     ),
-    # expected: these don't work on these dims
+    # these don't work on the ragged dim yet
     XFailRule(
         error_type=RuntimeError,
         error_msg="not supported for NestedTensor on ragged dim",
@@ -8009,12 +8030,39 @@ FORWARD_SKIPS_AND_XFAILS = [
             in {
                 "chunk",
                 "narrow",
+                "select",
+                "split",
+                "unsqueeze",
             }
         ),
         sample_match_fn=lambda device, sample: "ragged_dim" in sample.name,
         name="ragged_dim_unsupported",
     ),
-    # expected: these don't work on these dims
+    # Bug: unsqueeze at the end is wrong
+    XFailRule(
+        error_type=AssertionError,
+        error_msg="The values for attribute 'shape' do not match",
+        op_match_fn=lambda device, op: (op.full_name == "unsqueeze"),
+        sample_match_fn=lambda device, sample: "add dim to the end" in sample.name,
+        name="unsqueeze_end_dim_unsupported",
+    ),
+    # Bug: inserting a dim before the ragged dim should update ragged_idx!
+    XFailRule(
+        op_match_fn=lambda device, op: (op.full_name == "unsqueeze"),
+        sample_match_fn=lambda device, sample: (
+            sample.kwargs["dim"] <= sample.input._ragged_idx
+        ),
+        name="unsqueeze_dim_before_ragged_bug",
+    ),
+    XFailRule(
+        error_type=RuntimeError,
+        # error comes from usage of view() in the decomp
+        error_msg="does not support ragged_idx != 1 except when",
+        op_match_fn=lambda device, op: (op.full_name == "unflatten"),
+        sample_match_fn=lambda device, sample: "noncontig_transposed" in sample.name,
+        name="unflatten_ragged_dim_unsupported",
+    ),
+    # these don't work on the batch dim yet
     XFailRule(
         error_type=RuntimeError,
         error_msg="not supported for NestedTensor on dim=0",
@@ -8022,10 +8070,21 @@ FORWARD_SKIPS_AND_XFAILS = [
             op.full_name
             in {
                 "narrow",
+                "split",
+                "split_with_sizes",
+                "unsqueeze",
             }
         ),
         sample_match_fn=lambda device, sample: "batch_dim" in sample.name,
         name="batch_dim_unsupported",
+    ),
+    XFailRule(
+        error_type=RuntimeError,
+        # error comes from usage of view() in the decomp
+        error_msg="cannot view shape",
+        op_match_fn=lambda device, op: (op.full_name == "unflatten"),
+        sample_match_fn=lambda device, sample: "batch_dim" in sample.name,
+        name="unflatten_batch_dim_unsupported",
     ),
     # Bug: chunk calculation on batch dim is completely wrong for NJT. It should
     # match what is done for dense tensors wrt chunk size calculation, which can
@@ -8252,7 +8311,8 @@ BACKWARD_SKIPS_AND_XFAILS = [
 ]
 
 COMPILE_FORWARD_SKIPS_AND_XFAILS = [
-    *FORWARD_SKIPS_AND_XFAILS,
+    # The unsqueeze bugs don't affect eager vs. compile consistency so they don't fail here
+    *(x for x in FORWARD_SKIPS_AND_XFAILS if not x.name.startswith("unsqueeze")),
     # Bug: cross-device conversions with to() result in new nested ints within compile only
     XFailRule(
         error_type=AssertionError,
@@ -8272,6 +8332,14 @@ COMPILE_FORWARD_SKIPS_AND_XFAILS = [
             and sample.kwargs.get("memory_format", None) == torch.contiguous_format
         ),
         name="clone_unbind_data_dependency",
+    ),
+    # select on dim=0 currently uses unbind(), leading to data-dependent error in torch.compile
+    XFailRule(
+        error_type=torch._dynamo.exc.Unsupported,
+        error_msg="data dependent operator: aten._local_scalar_dense.default",
+        op_match_fn=lambda device, op: (op.full_name == "select"),
+        sample_match_fn=lambda device, sample: (sample.kwargs["dim"] == 0),
+        name="select_unbind_data_dependency",
     ),
     # Bug: no idea what's going on here; needs investigation within AOTAutograd
     XFailRule(
@@ -8412,7 +8480,8 @@ COMPILE_BACKWARD_SKIPS_AND_XFAILS = [
         name="clone_unbind_data_dependency_backward",
     ),
     *COMPILE_FORWARD_SKIPS_AND_XFAILS,
-    *BACKWARD_SKIPS_AND_XFAILS,
+    # The unsqueeze bugs don't affect eager vs. compile consistency so they don't fail here
+    *(x for x in BACKWARD_SKIPS_AND_XFAILS if not x.name.startswith("unsqueeze")),
 ]
 
 COMPARE_TENSOR_COMPONENT_EQUALITY = {

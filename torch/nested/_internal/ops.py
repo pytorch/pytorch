@@ -49,7 +49,13 @@ def _wrap_jagged_dim(
         raise RuntimeError(f"{op_name}(): not supported for NestedTensor on ragged dim")
     elif wrapped == 0 and not allow_batch_dim:
         raise RuntimeError(f"{op_name}(): not supported for NestedTensor on dim=0")
-    return _outer_to_inner_dim(ndim, wrapped) if convert_to_inner_dim else wrapped
+    ret = _outer_to_inner_dim(ndim, wrapped) if convert_to_inner_dim else wrapped
+    if allow_batch_dim:
+        # Need to disambiguate whether we're operating on the batch dim or not.
+        # Operating on dim=1 -> dim=0 after the inner dim conversion.
+        operating_on_batch = wrapped == 0
+        return (ret, operating_on_batch)
+    return ret
 
 
 def _wrap_jagged_dims(ndim, dims, op_name, ragged_idx=1):
@@ -886,11 +892,11 @@ def chunk_default(func, *args, **kwargs):
 
     inp = new_kwargs.pop("input")
 
-    new_kwargs["dim"] = _wrap_jagged_dim(
+    new_kwargs["dim"], operating_on_batch = _wrap_jagged_dim(
         inp.dim(), new_kwargs["dim"], inp._ragged_idx, "chunk", allow_batch_dim=True
     )
 
-    if new_kwargs["dim"] == 0:
+    if operating_on_batch:
         chunks = new_kwargs["chunks"]
         dim0_size = inp._size[0]
         chunk_size = math.ceil(dim0_size / chunks)
@@ -1561,13 +1567,13 @@ def select_int(func, *args, **kwargs):
     )
 
     inp = new_kwargs.pop("input")
-    new_kwargs["dim"] = _wrap_jagged_dim(
+    new_kwargs["dim"], operating_on_batch = _wrap_jagged_dim(
         inp.dim(), new_kwargs["dim"], inp._ragged_idx, "select", allow_batch_dim=True
     )
 
     # handle batch dim slicing via unbind() for now
     # TODO: make this more efficient
-    if new_kwargs["dim"] == 0:
+    if operating_on_batch:
         return inp.unbind()[new_kwargs["index"]]
 
     if inp._lengths is not None:
