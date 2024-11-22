@@ -448,10 +448,9 @@ compute_flex_attention = r"""
     idx_d = tl.arange(0, V_HEAD_DIM)[None, :]
 
     mask = idx_m < Q_LEN
-    # TODO generalize and add proper mask support
+
     {{store_output(("idx_zq", "idx_hq", "idx_m", "idx_d"), "acc", "mask")}}
 
-    # TODO dont want to write this if we dont require grad
     if OUTPUT_LOGSUMEXP:
         off_hz = tl.program_id(1)
         l_ptrs = LSE + off_hz * Q_LEN + offs_m

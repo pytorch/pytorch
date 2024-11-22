@@ -4745,6 +4745,42 @@ class TestLearnableBiases(InductorTestCase):
             ],
         )
 
+    @common_utils.parametrize(
+        "params", get_params(test_dtypes), name_fn=lambda x: f"{x}"
+    )
+    def test_relative_1d_bias_only_grad(self, params):
+        query, key, value = self._init_tensors(params)
+        query = query.detach().requires_grad_(False)
+        key = key.detach().requires_grad_(False)
+        value = value.detach().requires_grad_(False)
+
+        # Only bias requires gradients
+        bias = torch.randn(
+            2 * params.seq_length,
+            device=self.device,
+            dtype=params.dtype,
+            requires_grad=True,  # Only bias needs gradients
+        )
+
+        def bias_func(score, b, h, q_idx, kv_idx):
+            return score + bias[torch.abs(q_idx - kv_idx)]
+
+        flex_compiled = torch.compile(flex_attention)
+        out_eager = flex_attention(query, key, value, score_mod=bias_func)
+        out_compiled = flex_compiled(query, key, value, score_mod=bias_func)
+
+        out_gold = flex_attention(
+            query.to(torch.float64),
+            key.to(torch.float64),
+            value.to(torch.float64),
+            score_mod=bias_func,
+        )
+
+        # For gradient checking, we only pass the bias tensor since it's the only one requiring gradients
+        self._check_outputs_and_grads(
+            out_eager, out_compiled, out_gold, (bias,), names=["out", "bias"]
+        )
+
 
 common_utils.instantiate_parametrized_tests(TestFlexAttention)
 common_utils.instantiate_parametrized_tests(TestBlockMask)
