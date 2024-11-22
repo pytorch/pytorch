@@ -61,7 +61,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
 
         mod = Repro()
 
-        aot_mod = torch._dynamo.optimize("aot_eager")(mod)
+        aot_mod = torch.compile(mod, backend="aot_eager")
 
         args = [((92, 4, 64), (1, 5888, 92), torch.float32, "cpu", False)]
         args = [
@@ -86,7 +86,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
 
         y = torch.randn(4)
         x = torch.nn.Parameter(torch.randn(4))
-        aot_fn = torch._dynamo.optimize("aot_eager")(fn)
+        aot_fn = torch.compile(fn, backend="aot_eager")
         # This should not error: we mutated an autograd leaf under no_grad mode.
         aot_fn(x, y)
 
@@ -113,7 +113,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(torch.Size([12, 4, 256, 513]))
         y = torch.randn(torch.Size([12, 3, 512, 513]))
-        aot_fn = torch._dynamo.optimize("aot_eager")(fn)
+        aot_fn = torch.compile(fn, backend="aot_eager")
         aot_fn(x, y)
 
     def test_negative_testing_mutation(self):
@@ -140,7 +140,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(torch.Size([12, 4, 256, 513]))
         y = torch.randn(torch.Size([12, 3, 512, 513]))
-        aot_fn = torch._dynamo.optimize("aot_eager")(fn)
+        aot_fn = torch.compile(fn, backend="aot_eager")
         aot_fn(x, y)
 
     def test_negative_testing(self):
@@ -149,7 +149,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
 
         y = torch.randn(4)
         x = torch.randn(4)
-        aot_fn = torch._dynamo.optimize("aot_eager")(fn)
+        aot_fn = torch.compile(fn, backend="aot_eager")
         aot_fn(x, y)
 
     def test_call_fn_with_non_const_inputs_aot_safe(self):
@@ -179,7 +179,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         # Run exported graph with AOT
         self.assertTrue(torch._dynamo.testing.same(real, graph(rx)))
 
-        aot_fn = torch._dynamo.optimize("aot_eager")(graph)
+        aot_fn = torch.compile(graph, backend="aot_eager")
         aot_fn(rx)
 
     def test_call_fn_with_non_const_inputs_aot_unsafe(self):
@@ -211,7 +211,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(torch._dynamo.testing.same(real, graph(x, y)))
 
         # Run exported graph with AOT
-        aot_fn = torch._dynamo.optimize("aot_eager")(graph)
+        aot_fn = torch.compile(graph, backend="aot_eager")
         # This should not error: we mutated an autograd leaf under no_grad mode.
         aot_fn(x, y)
 
@@ -246,7 +246,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
             gms.append(gm)
             return counter(gm, inputs)
 
-        optimized_mod = torch._dynamo.optimize(capturing_fn)(mod)
+        optimized_mod = torch.compile(mod, backend=capturing_fn)
 
         # Assert equal
         self.assertTrue(torch._dynamo.testing.same(real, optimized_mod(x, y)))
@@ -283,7 +283,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         # Run fn with AOT
         torch._dynamo.reset()
 
-        aot_fn = torch._dynamo.optimize("aot_eager")(optimized_mod)
+        aot_fn = torch.compile(optimized_mod, backend="aot_eager")
         aot_fn(x, y)
 
     # Note: Dynamo recompilation guarding invalid grad
@@ -689,7 +689,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
             return b
 
         ref_output = fn()
-        aot_fn = torch._dynamo.optimize("aot_eager")(fn)
+        aot_fn = torch.compile(fn, backend="aot_eager")
         actual_output = aot_fn()
         self.assertEqual(ref_output, actual_output)
 
@@ -759,7 +759,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
             )
             return split_gm
 
-        @torch._dynamo.optimize(test_compile)
+        @torch.compile(backend=test_compile)
         def f(a):
             b, c = torch.ops.custom.maybe_dupe_op(a)
             return (b.mul_(c),)
@@ -776,7 +776,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
 
         x = torch.rand((4, 4))
 
-        opt_fn = torch._dynamo.optimize("aot_eager")(fn)
+        opt_fn = torch.compile(fn, backend="aot_eager")
         self.assertTrue(torch._dynamo.testing.same(fn(x), opt_fn(x)))
 
     def test_aot_sequence_nr(self):
@@ -965,6 +965,8 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         out_test = m_compiled(*sample_inputs)
         self.assertEqual(out_ref, out_test)
 
+    # set donated_buffer=False due to create_graph=True
+    @torch._functorch.config.patch("donated_buffer", False)
     def test_eager_sequence_nr(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -1085,7 +1087,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         opt_fn = torch.compile(fn, backend="aot_eager")
 
         x = torch.arange(6)
-        x_opt = x.clone().detach()
+        x_opt = x.detach().clone()
         self.assertEqual(fn(x), opt_fn(x_opt))
         self.assertEqual(x, x_opt)
 
@@ -1099,9 +1101,9 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         opt_fn = torch.compile(fn, backend="aot_eager")
 
         x = torch.arange(6, dtype=torch.float)
-        z = x.clone().detach()
-        x_opt = x.clone().detach()
-        z_opt = x.clone().detach()
+        z = x.detach().clone()
+        x_opt = x.detach().clone()
+        z_opt = x.detach().clone()
 
         z.requires_grad = True
         z_opt.requires_grad = True
@@ -1202,7 +1204,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         opt_fn = torch.compile(fn, backend="aot_eager")
 
         x = torch.arange(6)
-        x_opt = x.clone().detach()
+        x_opt = x.detach().clone()
         with self.assertRaises(Exception):
             fn(x)
         with self.assertRaises(Exception):
