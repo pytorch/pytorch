@@ -578,6 +578,32 @@ class HooksTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(x0.grad, x2.grad)
         self.assertEqual(x1.grad, x3.grad)
 
+    def test_hook_with_nested_closure(self):
+        def fn(x):
+            def run():
+                y = x.sin()
+                x.register_hook(lambda grad: grad + y)
+                z = y.sin()
+                return z
+
+            return run()
+
+        cnt_fw = torch._dynamo.testing.CompileCounter()
+        cnt_bw = torch._dynamo.testing.CompileCounter()
+        opt = torch.compile(fn, backend=cnt_fw, fullgraph=True)
+
+        x0 = torch.ones(4, requires_grad=True)
+        x1 = torch.ones(4, requires_grad=True)
+        fn(x0).sum().backward()
+        with compiled_autograd.enable(
+            functools.partial(torch.compile, backend=cnt_bw, fullgraph=True)
+        ):
+            opt(x1).sum().backward()
+            self.assertEqual(cnt_fw.frame_count, 1)
+            self.assertEqual(cnt_bw.frame_count, 1)
+
+        self.assertEqual(x0.grad, x1.grad)
+
     def test_intermediate_hook_with_closure_eager(self):
         def fn(x, obj):
             y = x.sin()
