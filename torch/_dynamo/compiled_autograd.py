@@ -4,8 +4,6 @@ import functools
 import operator
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 
-from ordered_set import OrderedSet
-
 import torch
 from torch._dynamo.external_utils import (
     call_backward,
@@ -30,6 +28,7 @@ from torch.fx.experimental.proxy_tensor import (
 )
 from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
 from torch.fx.traceback import preserve_node_meta, set_stack_trace
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._traceback import CapturedTraceback
 
 
