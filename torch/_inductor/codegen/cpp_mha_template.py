@@ -167,6 +167,8 @@ ATTENTION_TEMPLATE = r"""
               static_cast<accum_t>(0),
               qk_data,
               kvBlockSize);
+            
+            {%- if score_mod and mask_mod %}
             // apply score mod function
             for (int64_t row = 0; row < qBlockSize; ++row) {
               for(int col = 0; col< rkvBlockSize; col++){
@@ -180,7 +182,7 @@ ATTENTION_TEMPLATE = r"""
                 auto in_ptr3 = q_.data();
                 auto in_ptr10 = k_.data();
                 {%- if mask_mod_other_buffers %}
-                    auto in_ptr4 = mask_other;
+                auto in_ptr4 = mask_other;
                 {%- endif %}
                 accum_t* out_ptr0 = in_ptr0;
                 {{template.modification(score_mod)}}
@@ -199,7 +201,7 @@ ATTENTION_TEMPLATE = r"""
                 auto in_ptr2 = q_.data();
                 auto in_ptr3 = k_.data();
                 {%- if mask_mod_other_buffers %}
-                    auto in_ptr4 = mask_other;
+                auto in_ptr4 = mask_other;
                 {%- endif %}                
                 std::vector<int64_t> temp = {0};
                 int64_t* out_ptr0 = temp.data();
@@ -207,6 +209,7 @@ ATTENTION_TEMPLATE = r"""
                 *qk_block = *out_ptr0!=0 ?  *qk_block : -std::numeric_limits<accum_t>::infinity();
                 }
             }
+            {%- endif %}      
 
             // Update coefficients with Softmax
             accum_t tmp_max = 0, tmp_sum = 0, exp_tmp = 0;
