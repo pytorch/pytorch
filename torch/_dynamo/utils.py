@@ -870,6 +870,7 @@ class CompilationMetrics:
     inductor_fx_remote_cache_backend_type: Optional[str] = None
     inductor_fx_remote_cache_hit_keys: Optional[str] = None
     inductor_fx_remote_cache_miss_keys: Optional[str] = None
+    feature_usage: Optional[dict[str, bool]] = None
 
 
 DEFAULT_COMPILATION_METRICS_LIMIT = 64
@@ -3587,3 +3588,11 @@ class CompileTimeInstructionCounter:
         finally:
             if config.record_compile_time_instruction_count:
                 cls.end()
+
+
+def set_feature_use(feature: str, usage: bool):
+    """
+    Records whether we are using a feature
+    Generally a feature is a JK.
+    """
+    get_metrics_context().set_key_value("feature_usage", feature, usage)
