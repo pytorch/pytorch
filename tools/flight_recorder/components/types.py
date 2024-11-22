@@ -74,7 +74,7 @@ class MatchState(Enum):
         return self
 
     def __str__(self) -> str:
-        details = f", {self.culprit}" if self.culprit else ""
+        details = f", {self.culprit}" if getattr(self, "culprit", None) else ""
         return f"Error type: {self.name}{details}"
 
 
