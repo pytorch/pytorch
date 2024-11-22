@@ -1,11 +1,13 @@
 import torch
+import concurrent
+import random
+import datetime
+import sys
 
 import triton
 import triton.language as tl
 
 import itertools
-from torch.nested._internal.nested_tensor import NestedTensor
-from torch.nested._internal.ops import extract_kwargs
 from torch.nested._internal.triton_kernels.utils import do_bench
 
 def gen_configs():
@@ -14,25 +16,21 @@ def gen_configs():
                                  [32, 64, 128, 256],
                                  [1, 2, 4, 8, 16],
                                  [1, 2, 4, 8, 16],
+                                 [4, 8],
                                  )
-    configs=[]
-    for BLOCK_SIZE_M, BLOCK_SIZE_N, BLOCK_SIZE_K, num_stages, num_warps in products:
-        configs += [
-        {
+    configs = []
+    for config in products:
+        (BLOCK_SIZE_M, BLOCK_SIZE_N, BLOCK_SIZE_K, num_stages, num_warps, GROUP_SIZE_M) = config
+        configs += [{
             'BLOCK_SIZE_M': BLOCK_SIZE_M,
             'BLOCK_SIZE_N': BLOCK_SIZE_N,
             'BLOCK_SIZE_K': BLOCK_SIZE_K,
             'num_stages': num_stages,
             'num_warps': num_warps,
-            'GROUP_SIZE_M': 8,
-        },
-        ]
+            'GROUP_SIZE_M': GROUP_SIZE_M,
+        },]
     return configs
 
-# @triton.autotune(
-#     configs=gen_configs(),
-#     key=['group_size'],
-# )
 @triton.jit
 def grouped_matmul_kernel(
     b_ptr,
@@ -149,6 +147,7 @@ def group_gemm_fn_kernel(a_values, a_offsets, max_M, tensor_b, c_values, config)
     return c_values
 
 BEST_CONFIGS = {}
+BEST_CONFIGS[(torch.Size([131072, 4096]), torch.Size([9]), 16384, torch.Size([8, 4096, 14336]))] = {'BLOCK_SIZE_M': 256, 'BLOCK_SIZE_N': 128, 'BLOCK_SIZE_K': 32, 'num_stages': 4, 'num_warps': 16, 'GROUP_SIZE_M': 4}
 
 def gen_config_key(a_values, a_offsets, max_M, tensor_b):
     return (a_values.size(), a_offsets.size(), max_M, tensor_b.size())
@@ -172,13 +171,35 @@ def group_gemm_fn(a_values, a_offsets, max_M, tensor_b):
     else:
         best_ms, best_config = None, None
         all_configs = gen_configs()
+        # Use a random order to increase chance of finding a good config early.
+        random.shuffle(all_configs)
+        # with concurrent.futures.ProcessPoolExecutor(max_workers=1) as executor:
         for i, config in enumerate(all_configs):
-            ms = do_bench(group_gemm_fn_kernel, [a_values, a_offsets, max_M, tensor_b, c_values], config, best_ms)
-            if best_ms is None:
+            current_timestamp = datetime.datetime.now()
+            print_prefix = current_timestamp.strftime("%Y-%m-%d %H:%M:%S")
+            print(print_prefix, end=' ')
+            sys.stdout.flush()
+            ms = do_bench(group_gemm_fn_kernel, [a_values, a_offsets, max_M, tensor_b, c_values, config], best_ms)
+            # if best_ms is None:
+            #     ms = do_bench(group_gemm_fn_kernel, [a_values, a_offsets, max_M, tensor_b, c_values, config], best_ms)
+            # else:
+            #     assert best_ms is not None
+            #     ms_future = executor.submit(do_bench, group_gemm_fn_kernel, [a_values, a_offsets, max_M, tensor_b, c_values, config], best_ms)
+            #     try:
+            #         timeout = ((100 * best_ms) / 1000)
+            #         print(print_prefix, "timeout: ", timeout)
+            #         ms = ms_future.result(timeout=timeout)
+            #     except concurrent.futures.TimeoutError:
+            #         print(print_prefix, f"Timeout with config number {i} out of {len(all_configs)}: {config}")
+            #         ms_future.cancel()
+            #         continue
+            print(f"     ms: {ms} with config number {i} out of {len(all_configs)}: {config}")
+            if not isinstance(ms, str) and best_ms is None:
                 best_ms, best_config = ms, config
-            elif best_ms > ms:
+                print(print_prefix, f"best_ms: {best_ms} with config: {best_config}")
+            if not isinstance(ms, str) and best_ms > ms:
                 best_ms, best_config = ms, config
-            print(f"ms: {ms} with config number {i} out of {len(all_configs)}: {config}")
+                print(print_prefix, f"best_ms: {best_ms} with config: {best_config}")
         if best_config is None:
             raise ValueError("Could not find valid config.")
         BEST_CONFIGS[config_key] = best_config

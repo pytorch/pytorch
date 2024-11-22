@@ -3,6 +3,7 @@ import triton
 
 def do_bench_triton(
     fn,
+    args,
     warmup=25,
     rep=100,
     grad_to_none=None,
@@ -31,7 +32,7 @@ def do_bench_triton(
     :type fast_flush: bool
     """
 
-    fn()
+    fn(*args)
     torch.cuda.synchronize()
 
     # We maintain a buffer of 256 MB that we clear
@@ -48,7 +49,7 @@ def do_bench_triton(
     start_event.record()
     for _ in range(5):
         cache.zero_()
-        fn()
+        fn(*args)
     end_event.record()
     torch.cuda.synchronize()
     estimate_ms = start_event.elapsed_time(end_event) / 5
@@ -60,7 +61,7 @@ def do_bench_triton(
     end_event = [torch.cuda.Event(enable_timing=True) for i in range(n_repeat)]
     # Warm-up
     for _ in range(n_warmup):
-        fn()
+        fn(*args)
     # Benchmark
     for i in range(n_repeat):
         # we don't want `fn` to accumulate gradient values
@@ -73,7 +74,7 @@ def do_bench_triton(
         cache.zero_()
         # record time of `fn`
         start_event[i].record()
-        fn()
+        fn(*args)
         end_event[i].record()
     # Record clocks
     torch.cuda.synchronize()
@@ -87,45 +88,39 @@ def do_bench_triton(
         return ret
     return getattr(torch, return_mode)(times).item()
 
-def do_bench_basic(fn, rep):
+
+def do_bench_basic(rep, fn, args):
     # Modified version of Triton's basic bench
-    fn()
     torch.cuda.synchronize()
-    # Fast flush
-    cache = torch.empty(int(256e6 // 4), dtype=torch.int, device="cuda")
-    cache.zero_()
     start_event = torch.cuda.Event(enable_timing=True)
     end_event = torch.cuda.Event(enable_timing=True)
     start_event.record()
     for _ in range(rep):
-        fn()
+        fn(*args)
     end_event.record()
     torch.cuda.synchronize()
     estimate_ms = start_event.elapsed_time(end_event) / rep
     return estimate_ms
 
 
-def do_bench(fn, args, config, best_time=None):
-    # TODO: CUDA graph compatible version
-    def wrapped_fn():
-        return fn(*(args + [config]))
-
-    # Get fast estimate to abort stupid configs
-
-    # Run it once and skip if it crashes or is 100x slower
+def do_bench(fn, args, best_time=None):
+    # Run it once and return if it crashes
+    time = None
     try:
-        time = do_bench_basic(wrapped_fn, 1)
+        time = do_bench_basic(1, fn, args)
     except RuntimeError as e:
-        time = None
+        return "RuntimeError"
     except triton.runtime.OutOfResources:
-        time = None
-    if time is None or (best_time is not None and time > best_time * 100):
-        return float("inf")
+        return "OutOfResources"
+
+    # If the first run is 100x slower, this config is likely broken
+    if best_time is not None and time > best_time * 10:
+        return "10x slower"
 
     # Run it five times and skip if it is 10x slower
-    time = do_bench_basic(wrapped_fn, 5)
-    if best_time is not None and time > best_time * 10:
-        return float("inf")
+    time = do_bench_basic(5, fn, args)
+    if best_time is not None and time > best_time * 2:
+        return "2x slower"
 
     # Do a regular bench
-    return do_bench_triton(wrapped_fn)
+    return do_bench_triton(fn, args)
