@@ -20,6 +20,11 @@ To install the nightly binaries built with CUDA, you can pass in the flag --cuda
     $ ./tools/nightly.py checkout -b my-nightly-branch --cuda
     $ source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
 
+To install the nightly binaries built with ROCm, you can pass in the flag --rocm::
+
+    $ ./tools/nightly.py checkout -b my-nightly-branch --rocm
+    $ source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
+
 You can also use this tool to pull the nightly commits into the current branch as
 well. This can be done with::
 
