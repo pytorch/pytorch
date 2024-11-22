@@ -11,11 +11,11 @@ import itertools
 from torch.nested._internal.triton_kernels.utils import do_bench
 
 def gen_configs():
-    products = itertools.product([32, 64, 128, 256],
-                                 [32, 64, 128, 256],
-                                 [32, 64, 128, 256],
-                                 [1, 2, 4, 8, 16],
-                                 [1, 2, 4, 8, 16],
+    products = itertools.product([64, 128, 256],
+                                 [64, 128, 256],
+                                 [64, 128, 256],
+                                 [4, 8],
+                                 [4, 8],
                                  [4, 8],
                                  )
     configs = []
@@ -147,7 +147,8 @@ def group_gemm_fn_kernel(a_values, a_offsets, max_M, tensor_b, c_values, config)
     return c_values
 
 BEST_CONFIGS = {}
-BEST_CONFIGS[(torch.Size([131072, 4096]), torch.Size([9]), 16384, torch.Size([8, 4096, 14336]))] = {'BLOCK_SIZE_M': 256, 'BLOCK_SIZE_N': 128, 'BLOCK_SIZE_K': 32, 'num_stages': 4, 'num_warps': 16, 'GROUP_SIZE_M': 4}
+BEST_CONFIGS[(torch.Size([131072, 4096]), torch.Size([9]), 16384, torch.Size([8, 4096, 14336]))] = {'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 256, 'BLOCK_SIZE_K': 64, 'num_stages': 4, 'num_warps': 8, 'GROUP_SIZE_M': 8}
+
 
 def gen_config_key(a_values, a_offsets, max_M, tensor_b):
     return (a_values.size(), a_offsets.size(), max_M, tensor_b.size())
@@ -169,6 +170,9 @@ def group_gemm_fn(a_values, a_offsets, max_M, tensor_b):
     if config_key in BEST_CONFIGS:
         best_config = BEST_CONFIGS[config_key]
     else:
+        current_timestamp = datetime.datetime.now()
+        print_prefix = current_timestamp.strftime("%Y-%m-%d %H:%M:%S")
+        print(print_prefix, f"Don't have a config for config_key {config_key}. Need to run autotuning.")
         best_ms, best_config = None, None
         all_configs = gen_configs()
         # Use a random order to increase chance of finding a good config early.
