@@ -2317,12 +2317,12 @@ class CheckFunctionManager:
                     "code": code_part,
                     "stack": (
                         structured.from_traceback(guard.stack.summary())
-                        if guard.stack
+                        if guard and guard.stack
                         else None
                     ),
                     "user_stack": (
                         structured.from_traceback(guard.user_stack)
-                        if guard.user_stack
+                        if guard and guard.user_stack
                         else None
                     ),
                 }
