@@ -1784,6 +1784,27 @@ def bwd_dkdv_block_mn(
 )
 
 
+def validate_joint_graph(joint_graph: torch.fx.Graph):
+    """We do some pre lowering graph checks in order to raise nicer error messages"""
+    for node in joint_graph.nodes:
+        if (
+            node.op == "call_function"
+            and node.target == torch.ops.flex_lib.zeros_and_scatter.default
+        ):
+            for user in node.users:
+                if user.op != "output":
+                    raise NotImplementedError(
+                        "Using multiple indexing operations on the same tensor that requires gradients "
+                        "in a score_mod function is not currently supported. "
+                        "This typically happens when indexing the same tensor multiple times, like:\n\n"
+                        "    def score_mod(score, b, h, q_idx, kv_idx):\n"
+                        "        return score + bias[q_idx] + bias[kv_idx]  # bias used twice!\n\n"
+                        "A valid workaround is to clone() the tensors that will be indexed multiple times, "
+                        "though this will use additional memory."
+                    )
+    return
+
+
 # TODO: We probably also need a layout constraint?
 @register_lowering(
     torch.ops.higher_order.flex_attention_backward, type_promotion_kind=None
@@ -1887,6 +1908,11 @@ def flex_attention_backward(*args, **kwargs):
     ]
     # Sometimes we have weird unused nodes here
     joint_graph.graph_module.graph.eliminate_dead_code()
+
+    # It is hard to raise nice errors for some joint graphs during subgraph lowering
+    # This lets us do some checks before attempting to lower
+    validate_joint_graph(joint_graph.graph_module.graph)
+
     all_joint_outputs = build_subgraph_buffer(
         joint_placeholder_inps + list(score_mod_other_buffers),
         joint_graph,

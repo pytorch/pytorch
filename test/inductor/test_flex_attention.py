@@ -4214,8 +4214,8 @@ class Params:
     dtype: torch.dtype
     config_str: Optional[str] = None
 
-    def __post_init__(self):
-        self.config_str = f"{self.batch_size}_{self.num_heads}_{self.seq_length}_{self.head_dim}_{str(self.dtype).split('.')[-1]}"
+    def __str__(self):
+        return f"batch:{self.batch_size}_head:{self.num_heads}_seq_len:{self.seq_length}_headdim:{self.head_dim}_dtype:{str(self.dtype).split('.')[-1]}"
 
 
 def get_params(dtypes: List[torch.dtype]) -> List[Params]:
@@ -4596,7 +4596,6 @@ class TestLearnableBiases(InductorTestCase):
             (query, key, value, bias),
         )
 
-    @skip("TODO: Multiple reductions requried")
     @common_utils.parametrize(
         "params", get_params(test_dtypes), name_fn=lambda x: f"{x}"
     )
@@ -4621,13 +4620,17 @@ class TestLearnableBiases(InductorTestCase):
             value.to(torch.float64),
             score_mod=bias_func,
         )
-
-        self._check_outputs_and_grads(
-            out_eager,
-            out_compiled,
-            out_gold,
-            (query, key, value, bias),
-        )
+        # Error in backwards
+        with self.assertRaisesRegex(
+            torch._inductor.exc.LoweringException,
+            "Using multiple indexing operations on the same tensor that requires gradients",
+        ):
+            self._check_outputs_and_grads(
+                out_eager,
+                out_compiled,
+                out_gold,
+                (query, key, value, bias),
+            )
 
     @common_utils.parametrize(
         "params", get_params(test_dtypes), name_fn=lambda x: f"{x}"
