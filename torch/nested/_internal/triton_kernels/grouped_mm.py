@@ -6,6 +6,7 @@ import triton.language as tl
 import itertools
 from torch.nested._internal.nested_tensor import NestedTensor
 from torch.nested._internal.ops import extract_kwargs
+from torch.nested._internal.triton_kernels.utils import do_bench
 
 def gen_configs():
     products = itertools.product([32, 64, 128, 256],
@@ -172,10 +173,7 @@ def group_gemm_fn(a_values, a_offsets, max_M, tensor_b):
         best_ms, best_config = None, None
         all_configs = gen_configs()
         for i, config in enumerate(all_configs):
-            try:
-                ms = triton.testing.do_bench(lambda: group_gemm_fn_kernel(a_values, a_offsets, max_M, tensor_b, c_values, config))
-            except triton.runtime.errors.OutOfResources as msg:
-                print(f"OOR with config: {config} and msg: {msg}")
+            ms = do_bench(group_gemm_fn_kernel, [a_values, a_offsets, max_M, tensor_b, c_values], config, best_ms)
             if best_ms is None:
                 best_ms, best_config = ms, config
             elif best_ms > ms:
