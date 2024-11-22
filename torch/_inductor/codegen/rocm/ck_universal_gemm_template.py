@@ -645,7 +645,7 @@ class CKGemmTemplate(CKTemplate):
             ),
             version_comment=version_comment,
             is_batched=self.is_batched,
-            ds_batch_strides=[],  # FIXME when supporting baddbmm
+            ds_batch_strides=", ".join([]),  # FIXME when supporting baddbmm
         )
 
         if config.rocm.generate_test_runner:
