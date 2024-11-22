@@ -387,11 +387,11 @@ def create_submodule_from_subgraph(
             if len(cur_node_orig.args) > 1:
                 for arg in cur_node_orig.args[1:]:
                     if isinstance(arg, torch.nn.Parameter):
-                        new_arg = arg.clone().detach()  # type: ignore[assignment]
+                        new_arg = arg.detach().clone()  # type: ignore[assignment]
                         mod_name = f"mod_{cur_name_idx}"
                         cur_name_idx += 1
                         setattr(gm, mod_name, new_arg)
-                        new_arg_placeholder = gm.placeholder(mod_name)
+                        new_arg_placeholder = gm.placeholder(mod_name)  # type: ignore[operator]
                         cur_args_copy.append(new_arg_placeholder)
                     elif isinstance(arg, (float, int, torch.dtype)):
                         cur_args_copy.append(arg)
@@ -568,9 +568,9 @@ def create_one_transformed_and_logged_copy_of_subgraph(
                     and len(arg)
                     and isinstance(arg[0], Node)
                 ):
-                    for inner_arg in arg:
-                        if isinstance(inner_arg, Node):
-                            new_args.append(inner_arg)
+                    new_args.extend(
+                        inner_arg for inner_arg in arg if isinstance(inner_arg, Node)
+                    )
 
             new_kwargs = {}
             for name, old_kwarg in first_node.kwargs.items():

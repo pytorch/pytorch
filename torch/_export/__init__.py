@@ -36,6 +36,7 @@ from torch.export.graph_signature import (
     OutputKind,
     OutputSpec,
     SymIntArgument,
+    SymBoolArgument,
     TensorArgument,
 )
 from torch.fx import traceback as fx_traceback
@@ -216,7 +217,7 @@ def capture_pre_autograd_graph(
             )
 
             setattr(module, "capture_pre_autograd_graph_tag", True)  # noqa: B010
-            for node in module.graph.nodes:
+            for node in module.graph.nodes:  # type: ignore[union-attr]
                 node.meta["capture_pre_autograd_graph_tag"] = True
 
     error_message = \
@@ -275,7 +276,7 @@ def aot_compile(
     remove_runtime_assertions: bool = False,
     disable_constraint_solver: bool = False,
     same_signature: bool = True,
-) -> str:
+) -> Union[List[str], str]:
     """
     Note: this function is not stable yet
 

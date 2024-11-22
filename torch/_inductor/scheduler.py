@@ -46,7 +46,7 @@ from .codecache import write_text
 from .codegen.common import BackendFeature, get_scheduling_for_device, Kernel
 from .comm_analysis import estimate_nccl_collective_runtime
 from .dependencies import Dep, MemoryDep, StarDep, WeakDep
-from .ir import ComputedBuffer, MultiOutput, MultiOutputLayout
+from .ir import ComputedBuffer, get_device_type, MultiOutput, MultiOutputLayout
 from .loop_body import LoopBody
 from .memory import MemoryPlanningInfoForBuffer, MemoryPlanningInfoForNode
 from .runtime.runtime_utils import green_text, red_text
@@ -116,7 +116,7 @@ class SchedulerBuffer:
         if (
             self.node.get_inputs_that_alias_output()
             or self.node.get_mutation_names()
-            or isinstance(self.node.get_layout(), ir.CommBufferLayout)
+            or isinstance(self.node.get_output_spec(), ir.CommBufferLayout)
         ):
             V.graph.wrapper_code.codegen_allocation(self.node)
             return
@@ -159,7 +159,7 @@ class SchedulerBuffer:
         assert self.node is not None
         return self.node.get_inputs_that_alias_output()
 
-    def get_mutations(self) -> List[str]:
+    def get_mutations(self) -> Sequence[str]:
         assert self.node is not None
         return self.node.get_mutation_names()
 
@@ -308,9 +308,13 @@ class BaseSchedulerNode:
             dep = deps.pop()
             used_names.add(dep)
             if V.graph.name_to_buffer.get(dep):
-                for alias in V.graph.name_to_buffer[dep].get_inputs_that_alias_output():
-                    if alias not in used_names:
-                        deps.append(alias)
+                deps.extend(
+                    alias
+                    for alias in V.graph.name_to_buffer[
+                        dep
+                    ].get_inputs_that_alias_output()
+                    if alias not in used_names
+                )
         return used_names
 
     def prune_deps(self) -> None:
@@ -362,9 +366,17 @@ class BaseSchedulerNode:
     def get_output(self, buf_name: str) -> SchedulerBuffer:
         return self.outputs_by_name[buf_name]
 
-    def get_device(self) -> torch.device:
+    def get_device(self) -> Optional[torch.device]:
         assert self.node is not None
         return self.node.get_device()
+
+    def is_cpu(self) -> bool:
+        device = self.get_device()
+        return device is not None and device.type == "cpu"
+
+    def is_gpu(self) -> bool:
+        device = self.get_device()
+        return device is not None and is_gpu(device.type)
 
     def is_reduction(self) -> bool:
         return False
@@ -411,6 +423,14 @@ class BaseSchedulerNode:
             for node in self.scheduler.name_to_fused_node[self.get_name()].get_nodes()
         }
 
+        ordered_reads = sorted(self.read_writes.reads, key=lambda x: x.name)
+        # NOTE remove V.graph.removed_operations once deps issue is fixed
+        inconsequential_nodes = (
+            self.ancestors
+            | V.graph.removed_operations
+            | self.scheduler.completed_operations
+        )
+
         for buf in self.get_outputs():
             buf_node = buf.node
             assert buf_node is not None
@@ -431,16 +451,11 @@ class BaseSchedulerNode:
                     and V.graph.wrapper_code.can_reuse(input_buf, self)
                     and not isinstance(input_buf.defining_op, NopKernelSchedulerNode)
                 ):
-                    # If the writers of input_buf are in the same FusedSchedulerNode as the current op, then there is
-                    # no need to inplace.
-                    if input_buf.defining_op.get_name() in fused_nodes:
-                        continue
-
                     assert input_buf.users is not None
                     remaining_uses = [
                         x
                         for x in input_buf.users
-                        if x.node.get_name() not in self.scheduler.completed_operations
+                        if x.node.get_name() not in inconsequential_nodes
                     ]
                     if (
                         len(remaining_uses) == 1
@@ -448,8 +463,9 @@ class BaseSchedulerNode:
                         and remaining_uses[0].node is self
                         and input_buf.node is not None
                         and not isinstance(
-                            input_buf.node.get_layout(),
+                            input_buf.node.get_output_spec(),
                             (
+                                ir.NoneLayout,
                                 ir.MultiOutputLayout,
                                 ir.MutationLayoutSHOULDREMOVE,
                             ),
@@ -636,10 +652,8 @@ class BaseSchedulerNode:
         Returns estimated op runtime in nanoseconds (ns)
         """
         buf = self.get_nodes()[0].get_outputs()[0]
-        layout = buf.node.get_layout()
-        dtype = buf.node.get_dtype()
-
-        if layout.device is not None and not is_gpu(layout.device.type):
+        layout = buf.node.get_output_spec()
+        if not is_gpu(get_device_type(layout)):
             # default to no reordering based on runtime
             return 0
 
@@ -661,6 +675,7 @@ class BaseSchedulerNode:
             # since it doesn't take extra time to get the result after the collective is completed.
             return 0
 
+        dtype = buf.node.maybe_get_dtype()
         try:
             gpu_memory_bandwidth = get_gpu_dram_gbps()
             gpu_flops = get_device_tflops(dtype) * 10**12
@@ -867,14 +882,14 @@ class SchedulerNode(BaseSchedulerNode):
             recompute_sizes_body_func=recompute_sizes_body_func,
         )
 
-        group_fn = self.scheduler.get_backend(self.node.get_device()).group_fn
-        self.group = (self.node.get_device(), group_fn(self._sizes))
+        device = self.node.get_device_or_error()
+        group_fn = self.scheduler.get_backend(device).group_fn
+        self.group = (device, group_fn(self._sizes))
 
         # Don't normalize since normalization will merge loops which
         # makes it hard to decide new loop orders.
-        should_normalize = (
-            not config.loop_ordering_after_fusion
-            or self.node.get_device().type != "cuda"
+        should_normalize = not config.loop_ordering_after_fusion or not is_gpu(
+            device.type
         )
 
         if isinstance(self.node, ir.TemplateBuffer):
@@ -1500,7 +1515,9 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
                 self.name_to_node[name] = other_node
 
         self.use_custom_partition_algo = use_custom_partition_algo
-        self.group = (snodes[0].get_device(), ((sympy.Expr("combo_kernel"),),))
+        device = snodes[0].get_device()
+        assert device
+        self.group = (device, ((sympy.Expr("combo_kernel"),),))
         self.origins: OrderedSet[torch.fx.Node] = OrderedSet()
         self.enable_autotune = enable_autotune
 
@@ -1578,8 +1595,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
         raise NotImplementedError
 
     def codegen(self) -> None:
-        assert isinstance(self.node, ir.ComputedBuffer), f"{type(self.node)=}"
-        self.node.get_store_function()(self.node.make_loader()())
+        raise NotImplementedError
 
     def is_foreach(self) -> bool:
         return True
@@ -2172,7 +2188,12 @@ class Scheduler:
                 # dead code
                 log.debug("removed dead operation: %s", node.get_name())
                 V.graph.removed_operations.add(node.get_name())
-
+                for read in node.read_writes.reads:
+                    if read.name in self.name_to_buf:
+                        users = self.name_to_buf[read.name].users
+                        self.name_to_buf[read.name].users = [
+                            u for u in users if u.node.get_name() != node.get_name()
+                        ]
         self.nodes = list(reversed(updated_nodes))
 
         # Prune any WeakDeps no longer needed
@@ -2279,7 +2300,7 @@ class Scheduler:
             # Even for CPU, if we are using the halide backend, we still need
             # the merge loops steps below
             if not isinstance(node, (SchedulerNode, FusedSchedulerNode)) or (
-                node.get_device().type != "cuda" and config.cpu_backend != "halide"
+                not node.is_gpu() and config.cpu_backend != "halide"
             ):
                 continue
             for snode in node.get_nodes():
@@ -2308,25 +2329,28 @@ class Scheduler:
         """
         Combine eligible nodes into FusedSchedulerNodes.
         """
-        for i in range(10):
-            old_len = len(nodes)
-            fusion_log.debug(
-                "===== attempting fusion (%d/10): %d nodes =====",
-                i + 1,
-                old_len,
-            )
-            nodes = self.fuse_nodes_once(nodes)
-            new_len = len(nodes)
-            fusion_log.debug(
-                "completed fusion round (%d/10): fused %d nodes into %d nodes\n",
-                i + 1,
-                old_len,
-                new_len,
-            )
-            if new_len == old_len or new_len == 1:
-                fusion_log.debug("===== fusion complete (%d iterations) =====", i + 1)
-                break
-        return nodes
+        with dynamo_timed("Scheduler.fused_nodes"):
+            for i in range(10):
+                old_len = len(nodes)
+                fusion_log.debug(
+                    "===== attempting fusion (%d/10): %d nodes =====",
+                    i + 1,
+                    old_len,
+                )
+                nodes = self.fuse_nodes_once(nodes)
+                new_len = len(nodes)
+                fusion_log.debug(
+                    "completed fusion round (%d/10): fused %d nodes into %d nodes\n",
+                    i + 1,
+                    old_len,
+                    new_len,
+                )
+                if new_len == old_len or new_len == 1:
+                    fusion_log.debug(
+                        "===== fusion complete (%d iterations) =====", i + 1
+                    )
+                    break
+            return nodes
 
     def process_grouped_nodes(self) -> None:
         """
@@ -2350,7 +2374,8 @@ class Scheduler:
         device = nodes[0].get_device()
         self.current_device = device
         backend = self.get_backend(device)
-        return backend.benchmark_fused_nodes(nodes)
+        with dynamo_timed("benchmark_fused_nodes"):
+            return backend.benchmark_fused_nodes(nodes)
 
     def finalize_multi_template_buffers(self) -> None:
         def replace_operation_buffer(
@@ -2466,6 +2491,7 @@ class Scheduler:
 
         node_list_1 = node1.get_nodes()
         device = node_list_1[0].get_device()
+        assert device
 
         # don't support benchmark fusion for CPU right now.
         if device.type == "cpu":
@@ -2780,6 +2806,63 @@ class Scheduler:
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> bool:
         """
+        Return true if fusing the two nodes can potentially increasing peak memory.
+
+        The implementation is more like a heuristic since we don't really know if we are at peak
+        or not when trying to fuse these two ndoes. The order of nodes may change later which makes the
+        peak memory estimation hard.
+
+        Here is how we decide the LOWER BOUND of extra memory allocation if we fuse these 2 nodes:
+        1. find all buffers read by each node with a single user. These buffers are supposed to
+           be reused if we don't fuses these 2 nodes
+        2. find the intersection of these buffers for the two node and sum the total buffer size.
+           If we don't fuse these two nodes, we can at lease avoid this much memory allocation.
+           Note that the extra memory allocation is not necessarily causing peak memory increase.
+           This is just a heuristic.
+
+        We return true only if the saving for fusion can not trade off the extra memory allocation.
+        """
+
+        from .codegen.wrapper import buffer_reuse_key
+
+        def _find_single_user_inputs(
+            node: BaseSchedulerNode,
+        ) -> List[ir.Buffer]:
+            output = []
+            for rd in node.read_writes.reads:
+                buf = self.name_to_buf.get(rd.name)
+                if buf and len(buf.users) == 1 and buf.node.has_tensor_output():
+                    output.append(buf.node)
+            return output
+
+        # Check inputs that can be potentially reused
+        lhs_dep_nodes = _find_single_user_inputs(node1)
+        rhs_dep_nodes = _find_single_user_inputs(node2)
+
+        lhs_reuse_keys = {buffer_reuse_key(buf) for buf in lhs_dep_nodes}
+        rhs_reuse_keys = {buffer_reuse_key(buf) for buf in rhs_dep_nodes}
+
+        common_reuse_keys = lhs_reuse_keys.intersection(rhs_reuse_keys)
+
+        memory_overhead = 0
+        for key in common_reuse_keys:
+            try:
+                memory_overhead += int(key[2])
+            except ValueError:
+                # not an interger. Fallback is to fuse
+                return False
+
+        bw_saving = self.score_fusion_memory(node1, node2)
+
+        # The factor 32 here is quite arbitrary.
+        if V.graph.sizevars.statically_known_gt(memory_overhead, 32 * bw_saving):
+            return True
+        return False
+
+    def are_long_distant_nodes(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> bool:
+        """
         This function prevents fusion for nodes that can increase memory
         footprint. This problem is more common in horizontal fusion, where nodes
         that are far apart in the original order get fused, lengthening the live
@@ -2874,7 +2957,7 @@ class Scheduler:
         # TODO Don't do loop reordering for CPU for now.
         # Should debug more why it does not work for CPU codegen
         if not config.loop_ordering_after_fusion or any(
-            n.get_device().type == "cpu" for n in [node1, node2]
+            n.is_cpu() for n in [node1, node2]
         ):
             return 0
 
@@ -3046,6 +3129,10 @@ class Scheduler:
             why("exceeds max fusion")
             return False  # heuristic not needed for correctness
 
+        if self.can_fusion_increase_peak_memory(node1, node2):
+            why("Fusion will increase peak memory")
+            return False
+
         if node1.get_operation_names() & node2.ancestors:
             # node2 depends on node1 outputs
             if not self.can_fuse_vertical(node1, node2):
@@ -3059,8 +3146,8 @@ class Scheduler:
             ):
                 why("score_fusion_memory_threshold")
                 return False
-            if self.can_fusion_increase_peak_memory(node1, node2):
-                why("will increase peak memory")
+            if self.are_long_distant_nodes(node1, node2):
+                why("Nodes are too far away. Fusing them may increase peak memory.")
                 return False
             return self.get_backend(device).can_fuse_horizontal(node1, node2)
 
@@ -3249,10 +3336,11 @@ class Scheduler:
                 node1 = node2
                 node2 = tmp
 
-            deps = []
-            for dep in node1.read_writes.reads | node1.read_writes.writes:
-                if dep in node2.read_writes.reads or dep in node2.read_writes.writes:
-                    deps.append(dep)
+            deps = [
+                dep
+                for dep in node1.read_writes.reads | node1.read_writes.writes
+                if dep in node2.read_writes.reads or dep in node2.read_writes.writes
+            ]
 
             return sum(self.dep_size_hint(dep) for dep in deps)
 
@@ -3376,7 +3464,8 @@ class Scheduler:
 
         return device_scheduling(self)
 
-    def get_backend(self, device: torch.device) -> BaseScheduling:
+    def get_backend(self, device: Optional[torch.device]) -> BaseScheduling:
+        assert device is not None
         if device not in self.backends:
             self.backends[device] = self.create_backend(device)
         return self.backends[device]
@@ -3526,6 +3615,7 @@ class Scheduler:
         device = node_list[0].get_device()
         V.graph.scheduler = self
         self.current_device = device
+        assert device is not None
         backend = self.get_backend(device)
         return backend.benchmark_combo_kernel(node_list)
 
@@ -3541,7 +3631,7 @@ class Scheduler:
         device = subkernel_nodes[0].get_device()
 
         # don't support benchmark fusion for CPU right now.
-        if device.type == "cpu":
+        if device is None or device.type == "cpu":
             return True
 
         from triton.compiler.errors import CompilationError
@@ -3611,13 +3701,12 @@ class Scheduler:
 
     def update_zero_dim_cpu_tensor(self) -> None:
         for node in self.nodes:
-            if node.get_device() and is_gpu(node.get_device().type):
+            if node.is_gpu():
                 for read in node.read_writes.reads:
                     buffer = V.graph.name_to_buffer.get(read.name)
                     if (
                         buffer
-                        and buffer.get_device()
-                        and buffer.get_device().type == "cpu"
+                        and get_device_type(buffer) == "cpu"
                         and not isinstance(buffer.layout, MultiOutputLayout)
                         and buffer.get_size() == []
                     ):

@@ -265,7 +265,6 @@ case "$image" in
     SWIFTSHADER=yes
     CONDA_CMAKE=yes
     TRITON=yes
-    GRAPHVIZ=yes
     ;;
   pytorch-linux-focal-py3.9-gcc9)
     ANACONDA_PYTHON_VERSION=3.9
@@ -293,7 +292,7 @@ case "$image" in
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    ROCM_VERSION=6.2
+    ROCM_VERSION=6.2.4
     NINJA_VERSION=1.9.0
     CONDA_CMAKE=yes
     TRITON=yes
@@ -305,6 +304,17 @@ case "$image" in
     DB=yes
     VISION=yes
     XPU_VERSION=0.5
+    NINJA_VERSION=1.9.0
+    CONDA_CMAKE=yes
+    TRITON=yes
+    ;;
+  pytorch-linux-jammy-xpu-2025.0-py3)
+    ANACONDA_PYTHON_VERSION=3.9
+    GCC_VERSION=11
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    XPU_VERSION=2025.0
     NINJA_VERSION=1.9.0
     CONDA_CMAKE=yes
     TRITON=yes
