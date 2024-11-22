@@ -338,11 +338,14 @@ class TestDifferentiableOptimizer(TestCase):
         state = {}
         p = torch.rand(10, requires_grad=True, dtype=torch.float64)
         grad = torch.rand(10, requires_grad=True, dtype=torch.float64)
-        # Define the state variables for AdamZ
+        # `step` is not a continuous variable (even though we define it as a float)
+        # and so it shouldn't require gradients.
         state["step"] = torch.tensor(10.0, requires_grad=False, dtype=torch.float64)
         state["exp_avg"] = torch.rand(10, requires_grad=True, dtype=torch.float64)
         state["exp_avg_sq"] = torch.rand(10, requires_grad=True, dtype=torch.float64)
-        # Add any additional state variables specific to AdamZ, if applicable
+        state["max_exp_avg_sq"] = torch.rand(
+            10, requires_grad=True, dtype=torch.float64
+        )
 
         gradcheck(
             _diff_fn,
@@ -350,28 +353,11 @@ class TestDifferentiableOptimizer(TestCase):
                 p,
                 grad,
                 state,
-                AdamZ,  # Use AdamZ optimizer
-                {
-                    "lr": 0.01,
-                    "betas": (0.9, 0.999),
-                    "eps": 1e-8,
-                    "overshoot_factor": 0.5,
-                    "stagnation_factor": 1.2,
-                    "stagnation_threshold": 0.2,
-                    "patience": 100,
-                    "stagnation_period": 10,
-                    "max_norm": 1.0,
-                    "min_lr": 1e-7,
-                    "max_lr": 1.0,
-                    "differentiable": True
-                },  # Add AdamZ-specific arguments
+                AdamZ,
+                {"lr": 0.9, "differentiable": True, "amsgrad": True},
                 *state.values(),
             ),
         )
-
-
-
-
 
 if __name__ == "__main__":
     print("These tests should be run through test/test_optim.py instead")
