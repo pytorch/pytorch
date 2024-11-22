@@ -8733,6 +8733,7 @@ def sample_inputs_scaled_mm(op_info, device, dtype, requires_grad, **kwargs):
     scale1 = make_scale((1,))
     scale2 = make_scale((1,))
     samples.append(SampleInput(mat1, mat2, scale1, scale2))
+    # TODO: Will remove this after oneDNN v3.6
     if device != 'cpu':
         # mat1 e4m3 mat2 e5m2
         mat1 = make_mat_e4m3((M, K))
@@ -16232,6 +16233,10 @@ op_db: List[OpInfo] = [
             # Sample inputs isn't really parametrized on dtype
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes',
                          device_type='cuda'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes',
+                         device_type='cpu'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out',
+                         device_type='cpu'),
             # "mul_cuda" not implemented for float8_e4m3fn
             # https://github.com/pytorch/pytorch/issues/107256
             DecorateInfo(unittest.skip("Skipped!"), 'TestSchemaCheckModeOpInfo', 'test_schema_correctness',

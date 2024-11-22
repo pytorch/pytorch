@@ -285,13 +285,11 @@ _scaled_mm_out_cpu(const Tensor& mat1, const Tensor& mat2,
 #if AT_MKLDNN_ENABLED()
   if (at::globalContext().userEnabledMkldnn() && cpuinfo_has_x86_amx_int8()) {
     return mkldnn_scaled_mm(mat1, mat2, scale_a, scale_b, bias, scale_result, out_dtype, use_fast_accum, out);
-  } else {
-    return _scaled_mm_out_cpu_emulated(mat1, mat2, scale_a, scale_b, bias, scale_result, out_dtype, use_fast_accum, out);
-  }
-#else
-  return _scaled_mm_out_cpu_emulated(mat1, mat2, scale_a, scale_b, bias, scale_result, out_dtype, use_fast_accum, out);
+  } else
 #endif
-
+  {
+  return _scaled_mm_out_cpu_emulated(mat1, mat2, scale_a, scale_b, bias, scale_result, out_dtype, use_fast_accum, out);
+  }
 }
 
 Tensor

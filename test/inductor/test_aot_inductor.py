@@ -4182,6 +4182,7 @@ copy_tests(
 
 
 @unittest.skipIf(sys.platform == "darwin", "No CUDA on MacOS")
+@unittest.skipIf(not HAS_CUDA and HAS_CPU, "No CUDA on CPU only")
 class AOTInductorTestABICompatibleCuda(AOTITestCase):
     device = "cuda"
     device_type = "cuda"
@@ -4203,5 +4204,5 @@ if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
     # cpp_extension N/A in fbcode
-    if HAS_CUDA or sys.platform == "darwin" or HAS_CPU:
+    if HAS_CUDA or sys.platform == "darwin" or (not HAS_CUDA and HAS_CPU):
         run_tests(needs="filelock")
