@@ -459,11 +459,14 @@ class CKGemmTemplate(CKTemplate):
             else:
                 if field_value is not None:
                     template_params.append(f"/* {field_name} */ {field_value}")
+        operation_name = op.name().replace("(", "").replace(",", "").replace(")", "")
         return self._template_from_string(template_definition).render(
-            operation_name=op.name(),
+            operation_name=operation_name,
             template_params=(",\n" + 12 * " ").join(template_params),
             struct_name=struct_name,
-        ), self._template_from_string(template_type).render(operation_name=op.name())
+        ), self._template_from_string(template_type).render(
+            operation_name=operation_name
+        )
 
     def render(self, kernel: ROCmTemplateKernel, op: "CKGemmOperation", **kwargs) -> str:  # type: ignore[override]
         """
@@ -495,9 +498,12 @@ class CKGemmTemplate(CKTemplate):
         # This parameter is converted into tuple because of change
         # from DeviceGemm_Xdl_CShuffleV3 to DeviceGemmMultiD_Xdl_CShuffle_V3.
         # The first tuple element corresponds to matmul result...
-        op.c_shuffle_block_transfer_scalar_per_vector_n_per_block = (
-            op.c_shuffle_block_transfer_scalar_per_vector_n_per_block,
-        )
+        if not isinstance(
+            op.c_shuffle_block_transfer_scalar_per_vector_n_per_block, tuple
+        ):
+            op.c_shuffle_block_transfer_scalar_per_vector_n_per_block = (
+                op.c_shuffle_block_transfer_scalar_per_vector_n_per_block,
+            )
 
         if has_scale:
             scale_x = self.input_nodes[2]
