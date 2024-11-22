@@ -44,7 +44,7 @@ class Queue {
       if (!cv_.wait_for(
               lock, *timeout, [this] { return !this->queue_.empty(); })) {
         // clang-format off
-        AT_ERROR(
+        TORCH_CHECK(false,
             "Timeout in DataLoader queue while waiting for next batch"
             " (timeout was ", timeout->count(), " ms)");
         // clang-format on

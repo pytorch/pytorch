@@ -3,6 +3,7 @@
 #include <condition_variable>
 #include <memory>
 #include <optional>
+#include <tuple>
 #include <type_traits>
 #include <utility>
 
@@ -301,8 +302,10 @@ struct TORCH_API ConstantString final : c10::intrusive_ptr_target {
  public:
   ConstantString(std::string str) : str_(std::move(str)) {}
   ConstantString(c10::string_view str) : str_(std::string(str)) {}
+  ConstantString(std::string_view str) : str_(std::string(str)) {}
   static c10::intrusive_ptr<ConstantString> create(std::string str_);
   static c10::intrusive_ptr<ConstantString> create(c10::string_view str_);
+  static c10::intrusive_ptr<ConstantString> create(std::string_view str_);
   static c10::intrusive_ptr<ConstantString> create(const char* str_);
 
   const std::string& string() const {
@@ -862,6 +865,19 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   Future(Future&&) = delete;
   Future& operator=(const Future&) = delete;
   Future& operator=(Future&&) = delete;
+
+  // Destructor
+  // Explicitly destroy events under device guard, otherwise it can lead to
+  // extra context being created on device 0.  Reason: python garbage collector
+  // calls this destructor, but python GC does not have a device context, so a
+  // "default" one (usually on device 0) could be created when we go down the
+  // line of event destroy.
+  ~Future() override {
+    while (!events_.empty()) {
+      c10::OptionalDeviceGuard deviceGuard(events_.back().device());
+      events_.pop_back();
+    }
+  }
 
   struct TORCH_API FutureError final : public std::exception {
     explicit FutureError(std::string&& error_msg_)
@@ -1667,7 +1683,7 @@ struct ivalue::EnumHolder : c10::intrusive_ptr_target {
 namespace detail {
 
 struct _guarded_unsigned_long_unique_dummy final {
-  _guarded_unsigned_long_unique_dummy(int64_t){};
+  _guarded_unsigned_long_unique_dummy(int64_t){}
 };
 using _guarded_unsigned_long = std::conditional_t<
     std::is_same_v<unsigned long, uint32_t> ||
@@ -1714,7 +1730,7 @@ DEFINE_TO(uint64_t, toInt)
 DEFINE_TO(detail::_guarded_unsigned_long, toInt)
 DEFINE_TO(int64_t, toInt)
 DEFINE_TO(bool, toBool)
-DEFINE_TO(c10::intrusive_ptr<caffe2::Blob>, toBlob);
+DEFINE_TO(c10::intrusive_ptr<caffe2::Blob>, toBlob)
 DEFINE_TO(c10::intrusive_ptr<ivalue::ConstantString>, toString)
 DEFINE_TO(c10::intrusive_ptr<ivalue::Object>, toObject)
 DEFINE_TO(at::Scalar, toScalar)

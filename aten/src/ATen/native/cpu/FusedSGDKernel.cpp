@@ -264,5 +264,5 @@ void fused_sgd_kernel(
 
 }
 
-REGISTER_DISPATCH(fused_sgd_stub, &fused_sgd_kernel);
+REGISTER_DISPATCH(fused_sgd_stub, &fused_sgd_kernel)
 } // namespace at::native

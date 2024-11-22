@@ -30,8 +30,8 @@
             "hash": "4ed664cf50bb9fddec2d4170b3d7bbe0135dc5648acbd620b61c8d25a5a2fdb7"
         },
         "Linux": {
-            "download_url": "https://oss-clang-format.s3.us-east-2.amazonaws.com/linux64/15.0.6/clang-tidy",
-            "hash": "8defeb3a2698caca60251f9d682bc08374f1a37eec77d515533affdd03f93add"
+            "download_url": "https://oss-clang-format.s3.us-east-2.amazonaws.com/linux64/17.0.6/clang-tidy",
+            "hash": "a93110b0d58b430bb7ce86c8497f2528e1d44eed25d546557e7ec45c44ddfeb7"
         }
     },
     "actionlint": {

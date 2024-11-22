@@ -19,6 +19,7 @@ from torch.package import Importer, PackageExporter, PackageImporter, sys_import
 from ._compatibility import compatibility
 from .graph import _custom_builtins, _is_from_torch, _PyTreeCodeGen, Graph, PythonCode
 
+
 __all__ = [
     "reduce_graph_module",
     "reduce_package_graph_module",
@@ -386,11 +387,9 @@ class _WrappedCall:
                 return super(self.cls, obj).__call__(*args, **kwargs)  # type: ignore[misc]
         except Exception as e:
             assert e.__traceback__
-            topmost_framesummary: (
-                traceback.FrameSummary
-            ) = traceback.StackSummary.extract(traceback.walk_tb(e.__traceback__))[
-                -1
-            ]  # type: ignore[arg-type]
+            topmost_framesummary: traceback.FrameSummary = (
+                traceback.StackSummary.extract(traceback.walk_tb(e.__traceback__))[-1]
+            )
             if "eval_with_key" in topmost_framesummary.filename:
                 print(
                     _WrappedCall._generate_error_message(topmost_framesummary),
@@ -612,20 +611,20 @@ class {module_name}(torch.nn.Module):
                 module_str = (
                     f"torch.load(r'{module_file}', weights_only=False) # {module_repr}"
                 )
-            model_str += f"{tab*2}self.{module_name} = {module_str}\n"
+            model_str += f"{tab * 2}self.{module_name} = {module_str}\n"
 
         for buffer_name, buffer in self._buffers.items():
             if buffer is None:
                 continue
-            model_str += f"{tab*2}self.register_buffer('{buffer_name}', torch.empty({list(buffer.shape)}, dtype={buffer.dtype}))\n"
+            model_str += f"{tab * 2}self.register_buffer('{buffer_name}', torch.empty({list(buffer.shape)}, dtype={buffer.dtype}))\n"  # noqa: B950
 
         for param_name, param in self._parameters.items():
             if param is None:
                 continue
-            model_str += f"{tab*2}self.{param_name} = torch.nn.Parameter(torch.empty({list(param.shape)}, dtype={param.dtype}))\n"
+            model_str += f"{tab * 2}self.{param_name} = torch.nn.Parameter(torch.empty({list(param.shape)}, dtype={param.dtype}))\n"  # noqa: B950
 
         model_str += (
-            f"{tab*2}self.load_state_dict(torch.load(r'{folder}/state_dict.pt'))\n"
+            f"{tab * 2}self.load_state_dict(torch.load(r'{folder}/state_dict.pt'))\n"
         )
         model_str += f"{_addindent(self.code, 4)}\n"
 
@@ -667,7 +666,6 @@ class {module_name}(torch.nn.Module):
         mod: torch.nn.Module = self
 
         for item in prefix:
-
             submod = getattr(mod, item, None)
 
             if submod is None:
@@ -707,7 +705,6 @@ class {module_name}(torch.nn.Module):
 
         # Get the parent module
         for item in path:
-
             if not hasattr(mod, item):
                 return False
 
@@ -743,9 +740,7 @@ class {module_name}(torch.nn.Module):
         used: List[str] = []
 
         for node in self.graph.nodes:
-
             if node.op == "call_module" or node.op == "get_attr":
-
                 # A list of strings representing the different parts
                 # of the path. For example, `foo.bar.baz` gives us
                 # ["foo", "bar", "baz"]

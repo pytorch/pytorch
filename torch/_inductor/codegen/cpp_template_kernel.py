@@ -127,7 +127,7 @@ class CppTemplateKernel(CppKernel):
         return cexpr_index(self.rename_indexing(node.get_stride()[dim]))
 
     def index(self, node: ir.Buffer, indices: List[Any]) -> str:
-        indexer = node.layout.as_fixed().make_indexer()
+        indexer = node.get_layout().as_fixed().make_indexer()
         index = indexer(parse_expr_with_index_symbols(indices))
         index = self.rename_indexing(index)
         outer_name = node.get_name()
@@ -216,7 +216,7 @@ class CppTemplateKernel(CppKernel):
             for i, sz in enumerate(var_sizes[0])
         }
         if not offsets:
-            offsets = [sympy.Integer(0)] * len(var_sizes[0])
+            offsets = [sympy.S.Zero] * len(var_sizes[0])
         if not reindexers:
             reindexers = [None] * len(nodes)
         assert len(offsets) == len(var_sizes[0])

@@ -5,10 +5,7 @@
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace onednn {
+namespace torch::jit::fuser::onednn {
 
 static bool shouldDecomposeSilu(Node* node) {
   if (node->kind() != aten::silu) {
@@ -59,7 +56,4 @@ void DecomposeSiluForLLGA(std::shared_ptr<Graph>& graph) {
   EliminateDeadCode(graph);
 }
 
-} // namespace onednn
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::fuser::onednn

@@ -30,6 +30,11 @@ class DynamicBackendWrapper : public WaitCounterBackendIf {
  public:
   explicit DynamicBackendWrapper(WaitCounterDynamicBackend impl)
       : impl_{impl} {}
+
+  DynamicBackendWrapper(const DynamicBackendWrapper&) = delete;
+  DynamicBackendWrapper(DynamicBackendWrapper&&) = delete;
+  DynamicBackendWrapper& operator=(const DynamicBackendWrapper&) = delete;
+  DynamicBackendWrapper& operator=(DynamicBackendWrapper&&) = delete;
   ~DynamicBackendWrapper() override {
     impl_.destroy(impl_.self);
   }
