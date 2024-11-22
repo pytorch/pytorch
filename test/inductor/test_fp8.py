@@ -90,6 +90,27 @@ def _quantize_rowwise(x: Tensor, float8_dtype: torch.dtype):
 class TestFP8Types(TestCase):
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @unittest.skipIf(TEST_WITH_ROCM, "Not supported yet")
+    @parametrize("float8_dtype", (torch.float8_e4m3fn, torch.float8_e5m2))
+    def test_xblock_for_small_numel(self, float8_dtype: torch.dtype):
+        """
+        TritonOverrides.to_dtype will set min_elem_per_thread to 2 or 4
+        depends on the variant of fp8 type.
+        This cause triton_heuristics.triton_config pick a XBLOCK larger
+        than numel and fail the config sanity check.
+
+        We should not pick a XBLOCK larger than xnumel
+        """
+
+        def f(x):
+            return x.to(dtype=float8_dtype)
+
+        x = torch.randn(1, device="cuda")
+        expected = f(x)
+        actual = torch.compile(f)(x)
+        torch.testing.assert_close(expected.half(), actual.half(), rtol=1e-2, atol=1e-2)
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @unittest.skipIf(TEST_WITH_ROCM, "Not supported yet")
     @parametrize("dtype", (torch.float16, torch.bfloat16))
     def test_eager_fallback(self, dtype: torch.dtype):
         weight_shape = (32, 16)

@@ -81,9 +81,11 @@ template <typename T>
 struct SafePyObjectT : private SafePyObject {
   SafePyObjectT(PyObject* data, c10::impl::PyInterpreter* pyinterpreter)
       : SafePyObject(data, pyinterpreter) {}
+  ~SafePyObjectT() = default;
   SafePyObjectT(SafePyObjectT&& other) noexcept : SafePyObject(other) {}
   SafePyObjectT(SafePyObjectT const&) = delete;
   SafePyObjectT& operator=(SafePyObjectT const&) = delete;
+  SafePyObjectT& operator=(SafePyObjectT&&) = delete;
 
   using SafePyObject::ptr;
   using SafePyObject::pyinterpreter;

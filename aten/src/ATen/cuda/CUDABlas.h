@@ -34,7 +34,7 @@ public:
 
 private:
   cublasHandle_t handle;
-  cublasPointerMode_t previous_mode;
+  cublasPointerMode_t previous_mode{};
 };
 
 /* LEVEL 3 BLAS FUNCTIONS */

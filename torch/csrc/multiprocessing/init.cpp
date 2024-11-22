@@ -5,6 +5,7 @@
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_strings.h>
 
+#include <initializer_list>
 #include <stdexcept>
 
 #if defined(__linux__)
@@ -55,8 +56,8 @@ PyObject* get_thread_name(PyObject* _unused, PyObject* noargs) {
 } // namespace
 
 // multiprocessing methods on torch._C
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
-static PyMethodDef methods[] = {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+static std::initializer_list<PyMethodDef> methods = {
     {
         "_multiprocessing_init",
         multiprocessing_init,
@@ -78,8 +79,8 @@ static PyMethodDef methods[] = {
     {nullptr, nullptr, 0, nullptr},
 };
 
-PyMethodDef* python_functions() {
-  return methods;
+const PyMethodDef* python_functions() {
+  return std::data(methods);
 }
 
 } // namespace torch::multiprocessing

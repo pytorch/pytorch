@@ -5,15 +5,18 @@ import torch
 from torch.fx._compatibility import compatibility
 from torch.fx.graph import Graph
 from torch.fx.graph_module import GraphModule
-from torch.fx.node import (
-    map_arg,
-    Node,
-    Target,
-)
+from torch.fx.node import map_arg, Node, Target
 from torch.fx.passes.shape_prop import ShapeProp
 
-__all__ = ['replace_target_nodes_with', 'size_bytes', 'get_size_of_all_nodes', 'get_tensor_meta',
-           'get_size_of_node']
+
+__all__ = [
+    "replace_target_nodes_with",
+    "size_bytes",
+    "get_size_of_all_nodes",
+    "get_tensor_meta",
+    "get_size_of_node",
+]
+
 
 @compatibility(is_backward_compatible=False)
 def replace_target_nodes_with(

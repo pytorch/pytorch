@@ -22,7 +22,12 @@ from ..utils import (
 )
 from ..virtualized import ops, V
 from .cpp import get_export_declaration
-from .cpp_micro_gemm import CppMicroGemmAMX, create_micro_gemm, LayoutType
+from .cpp_micro_gemm import (
+    CppMicroBrgemm,
+    CppMicroGemmAMX,
+    create_micro_gemm,
+    LayoutType,
+)
 from .cpp_template import CppTemplate
 from .cpp_template_kernel import CppTemplateKernel
 from .cpp_utils import (
@@ -442,8 +447,16 @@ class CppPackedGemmTemplate(CppTemplate):
             def get_num_byte(dtype):
                 return torch.tensor([], dtype=dtype).element_size()
 
-            num_byte_A = get_num_byte(self.input_nodes[0].get_dtype())
-            num_byte_B = get_num_byte(self.input_nodes[1].get_dtype())
+            dtype_A = self.input_nodes[0].get_dtype()
+            dtype_B = self.input_nodes[1].get_dtype()
+            num_byte_A = get_num_byte(dtype_A)
+            num_byte_B = get_num_byte(dtype_B)
+            if dtype_A is torch.bfloat16 and dtype_B is torch.int8 and Kr != 1:
+                # We will cache dequantized weights (BF16) in L1D for AMX micro-kernel.
+                # In this case, the choice of the micro-kernel being used can't be decoupled from
+                # the cache blocking.
+                # TODO: Decouple the choice of micro-kernel from cache blocking
+                num_byte_B *= num_byte_A
 
             # NOTE [CPP GEMM Cache Blocking Algorithm]
             # Our overall strategy is to
@@ -455,6 +468,7 @@ class CppPackedGemmTemplate(CppTemplate):
 
             # Step 1: Decide Kc assuming B block is L1-reside.
             size_cache_B = Kr * Kt_blocks * Nr * num_byte_B
+
             Kc_blocks = Kt_blocks
             if size_cache_B > L1:
                 Kc_blocks = math.floor(L1 / (Kr * Nr * num_byte_B))
@@ -649,7 +663,7 @@ class CppPackedGemmTemplate(CppTemplate):
                 blocked_w = ir.Buffer(
                     name=W.get_name(),  # Borrow the registered buffer name
                     layout=ir.FixedLayout(
-                        W.get_device(),
+                        W.get_device_or_error(),
                         W.get_dtype(),
                         new_size,
                         ir.FlexibleLayout.contiguous_strides(new_size),
@@ -936,7 +950,7 @@ class CppPackedGemmTemplate(CppTemplate):
                     return result
 
                 return ir.Pointwise(
-                    device=input_buffer.get_device(),
+                    device=input_buffer.get_device_or_error(),
                     dtype=self.layout.dtype,
                     inner_fn=copy_inner,
                     ranges=input_buffer.get_size(),
@@ -1061,6 +1075,8 @@ class CppPackedGemmTemplate(CppTemplate):
         self.log_blockings()
         if isinstance(micro_gemm, CppMicroGemmAMX):
             counters["inductor"]["cpp_micro_gemm_amx_counter"] += 1
+        if isinstance(micro_gemm, CppMicroBrgemm):
+            counters["inductor"]["cpp_micro_brgemm_counter"] += 1
 
         L1_cache_size = torch._C._cpu._L1d_cache_size()  # per core cache size in Bytes
         assert L1_cache_size > 0, f"Expect L1_cache_size > 0 but got {L1_cache_size}"
