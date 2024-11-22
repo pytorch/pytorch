@@ -51,7 +51,7 @@ from torch.utils._sympy.value_ranges import ValueRanges
 from .schema import (  # type: ignore[attr-defined]
     Argument,
     BufferMutationSpec,
-    ConstantInputSpec,
+    InputToConstantInputSpec,
     ConstantValue,
     CustomObjArgument,
     Device,
@@ -964,7 +964,7 @@ class GraphModuleSerializer(metaclass=Final):
                 else:
                     raise SerializeError(f"Unhandled constant input {spec.arg.value} to serialize")
                 return InputSpec.create(
-                    constant_input=ConstantInputSpec(
+                    constant_input=InputToConstantInputSpec(
                         name=spec.arg.name, value=constant_spec
                     )
                 )
