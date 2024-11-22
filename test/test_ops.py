@@ -34,7 +34,6 @@ from torch.testing._internal.common_device_type import (
     OpDTypes,
     ops,
     skipMeta,
-    skipXPU,
     is_gpu_device,
 )
 from torch.testing._internal.common_dtype import (
@@ -1482,7 +1481,6 @@ class TestCommon(TestCase):
     # Validates that each OpInfo specifies its forward and backward dtypes
     #   correctly for CPU and GPU devices
     @skipMeta
-    @skipXPU
     @onlyNativeDeviceTypesAnd(["hpu"])
     @ops(ops_and_refs, dtypes=OpDTypes.none)
     def test_dtypes(self, device, op):
@@ -1836,7 +1834,6 @@ class TestCompositeCompliance(TestCase):
                 op.get_op(), args, kwargs, op.gradcheck_wrapper, self.assertEqual
             )
 
-    @skipXPU
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_cow_input(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype, requires_grad=op.supports_autograd)
@@ -2153,7 +2150,6 @@ class TestMathBits(TestCase):
                         self.assertEqual(tensor.grad, cloned1_tensor.grad)
 
     @ops(ops_and_refs, allowed_dtypes=(torch.cfloat,))
-    @skipXPU
     def test_conj_view(self, device, dtype, op):
         if not op.test_conjugated_samples:
             self.skipTest("Operation doesn't support conjugated inputs.")
@@ -2195,7 +2191,6 @@ class TestMathBits(TestCase):
         )
 
     @ops(ops_and_refs, allowed_dtypes=(torch.cdouble,))
-    @skipXPU
     def test_neg_conj_view(self, device, dtype, op):
         if not op.test_neg_view:
             self.skipTest("Operation not tested with tensors with negative bit.")

@@ -101,7 +101,7 @@ class DecorateInfo:
         )
         self.cls_name = cls_name
         self.test_name = test_name
-        self.device_type = device_type
+        self.device_type = device_type # device_type could be str or list
         self.dtypes = dtypes
         self.active_if = active_if
 
@@ -115,8 +115,8 @@ class DecorateInfo:
             self.active_if
             and (self.cls_name is None or self.cls_name == cls_name)
             and (self.test_name is None or self.test_name == test_name)
-            and (self.device_type is None or (self.device_type == device_type
-                 if isinstance(self.device_type, str) else device_type in self.device_type))
+            and (self.device_type is None or (device_type in self.device_type
+                 if isinstance(self.device_type, list) else self.device_type == device_type))
             and (self.dtypes is None or dtype in self.dtypes)
             # Support callables over kwargs to determine if the decorator is active.
             and (
@@ -985,9 +985,6 @@ class OpInfo:
                 else self.backward_dtypes
                 if self.backward_dtypes is not None
                 else self.dtypesIfXPU
-                if self.dtypesIfXPU is not None
-                else self.dtypesIfCUDA
-                if self.dtypesIfCUDA is not None
                 else self.dtypes
             )
         )

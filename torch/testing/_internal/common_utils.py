@@ -5473,6 +5473,7 @@ def munge_exc(e, *, suppress_suffix=True, suppress_prefix=True, file=None, skip=
     s = re.sub(r" +$", "", s, flags=re.MULTILINE)
     return s
 
+
 @contextmanager
 def check_leaked_tensors(limit=1, matched_type=torch.Tensor):
     """Wrap around operations you want to ensure are not leaking tensor memory.
@@ -5515,6 +5516,7 @@ def check_leaked_tensors(limit=1, matched_type=torch.Tensor):
     finally:
         gc.set_debug(0)
 
+
 def remove_cpp_extensions_build_root():
     """
     Removes the default root folder under which extensions are built.
@@ -5549,7 +5551,7 @@ def scoped_load_inline(func):
 
     return wrapper
 
-
+# General utils to get GPU information
 GPU_TYPES = ["cuda", "xpu"]
 
 @functools.lru_cache(None)

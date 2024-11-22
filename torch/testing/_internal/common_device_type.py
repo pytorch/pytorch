@@ -1407,7 +1407,7 @@ class expectedFailure:
 
         return efail_fn
 
-
+# Only on a list of devices or device
 class onlyOn:
     def __init__(self, device_type: Union[str, List[str]]):
         self.device_types = []
@@ -1666,9 +1666,6 @@ def onlyCUDAAndPRIVATEUSE1(fn):
         return fn(self, *args, **kwargs)
 
     return only_fn
-
-
-
 
 
 def disablecuDNN(fn):
