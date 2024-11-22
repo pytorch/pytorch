@@ -513,7 +513,6 @@ class TritonTemplateKernel(TritonKernel):
             mask (Optional[str]): An optional mask to use for the store operation. If provided, this mask
                 will be applied to the store.
         """
-        outer_self = self
         num = 0
         out = None
         while f"mod_{subgraph_number}_{num}" in self.subgraph_bodies:
