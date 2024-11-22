@@ -1874,6 +1874,13 @@ if (custom_op_wrapper.get() == NULL) {
                     self.include_extra_header("torch/csrc/utils/pythoncapi_compat.h")
                 self.include_extra_header("torch/csrc/DynamicTypes.h")
                 return f"Py_NewRef(torch::getTHPDtype(static_cast<c10::ScalarType>({self.codegen_dtype(raw_arg)})))"
+            elif isinstance(raw_arg, torch.layout):
+                # dtype
+                if sys.version_info < (3, 10):
+                    # Py_NewRef is only available since Python 3.10
+                    self.include_extra_header("torch/csrc/utils/pythoncapi_compat.h")
+                self.include_extra_header("torch/csrc/DynamicTypes.h")
+                return f"Py_NewRef(torch::getTHPLayout(static_cast<c10::Layout>({self.codegen_layout(raw_arg)})))"
             elif isinstance(raw_arg, torch.memory_format):
                 # memory_format
                 if sys.version_info < (3, 10):
@@ -2067,6 +2074,8 @@ reinterpret_cast<AtenTensorHandle>(PyCapsule_GetPointer(PyList_GET_ITEM(py_{buf_
             return self.codegen_device(val)
         elif isinstance(val, torch.dtype):
             return self.codegen_dtype(val)
+        elif isinstance(val, torch.layout):
+            return self.codegen_layout(val)
         elif isinstance(val, torch.memory_format):
             return self.codegen_memory_format(val)
         elif isinstance(val, float):
