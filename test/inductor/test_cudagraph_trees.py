@@ -26,6 +26,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_CI,
     IS_LINUX,
+    IS_X86,
     IS_WINDOWS,
     parametrize,
     skipIfRocm,
@@ -1382,7 +1383,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertEqual(all_live_block_count(), 0)
 
         @skipIfRocm
-        @unittest.skipIf(not IS_LINUX, "cpp contexts are linux only")
+        @unittest.skipUnless(IS_X86 and IS_LINUX, "cpp contexts are linux only")
         @torch._inductor.config.patch("triton.cudagraph_trees_history_recording", True)
         def test_workspace_allocation_error(self):
             torch._C._cuda_clearCublasWorkspaces()
