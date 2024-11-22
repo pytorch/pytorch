@@ -4498,6 +4498,9 @@ class InputsKernel(OperationBuffer):
             index_exprs=OrderedSet(),
         )
 
+    def get_reads(self) -> OrderedSet[Dep]:
+        return self.get_read_writes().reads
+
     @classmethod
     def unwrap_storage_for_input(cls, x: IRNode) -> IRNode:
         if isinstance(x, TensorBox):
@@ -4541,6 +4544,9 @@ class InputsKernel(OperationBuffer):
 class NopKernel(InputsKernel):
     def is_no_op(self) -> bool:
         return True
+
+    def get_reads(self) -> OrderedSet[Dep]:
+        return OrderedSet()
 
 
 class ConcatKernel(NopKernel):
