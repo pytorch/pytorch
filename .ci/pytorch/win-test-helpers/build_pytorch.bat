@@ -63,6 +63,10 @@ if "%USE_XPU%"=="1" (
 @echo on
 popd
 
+call pip list
+:: Re-setup python env for build
+call pip install -r requirements.txt
+
 if not "%USE_CUDA%"=="1" goto cuda_build_end
 
 set CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v%CUDA_VERSION%
