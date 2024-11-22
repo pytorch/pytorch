@@ -1333,6 +1333,12 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
     @torch._functorch.config.patch("donated_buffer", True)
     def test_donated_buffer6(self):
+        if is_dynamic_shape_test(self._testMethodName):
+            # parameters should not be dynamic shape
+            # torch._dynamo.exc.Unsupported: Parameter not python_constant:
+            #    SymNodeVariable() is not a constant
+            return
+
         logger_name = "torch._functorch._aot_autograd.jit_compile_runtime_wrappers"
 
         def fn(x):
