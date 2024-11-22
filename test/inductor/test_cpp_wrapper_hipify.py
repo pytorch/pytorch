@@ -112,7 +112,7 @@ class TestCppWrapperHipify(TestCase):
         if torch.version.hip is not None:
             # Adjusting the warp size to GPU supported wavefront size on AMD GPU
             prop = torch.cuda.get_device_properties(torch.cuda.current_device())
-            source_codes = source_codes.replace(
+            expected = expected.replace(
                 "32*numWarps", str(prop.warp_size) + "*numWarps"
             )
         result = maybe_hipify_code_wrapper(header, True)
