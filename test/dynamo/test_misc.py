@@ -9114,7 +9114,7 @@ def ___make_guard_fn():
     # Compiling autograd.Function traces fwd function twice, but the same unbacked symints were not identified
     # as the same across the two tracings. This is an unlikely situation in real use cases, so we add another
     # `test_validate_outputs_unbacked_by_custom_op` to mitigate it and keep this one as expected failure
-    # until we have a proper fix. More details at: https://github.com/pytorch/pytorch/pull/136184
+    # until we have a proper fix.
     @unittest.expectedFailure
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_validate_outputs_unbacked(self):
