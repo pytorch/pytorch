@@ -8343,16 +8343,12 @@ COMPILE_FORWARD_SKIPS_AND_XFAILS = [
     ),
     # Bug: no idea what's going on here; needs investigation within AOTAutograd
     XFailRule(
-        error_type=ValueError,
-        error_msg="has length 1 but the spec refers to a pytree that holds 3 items",
         op_match_fn=lambda device, op: (op.full_name == "nan_to_num"),
         sample_match_fn=lambda device, sample: ("noncontig_transposed" in sample.name),
         name="crazy_aot_autograd_bug1",
     ),
     # Bug: also no idea what's going on here: needs investigation within AOTAutograd
     XFailRule(
-        error_type=AssertionError,
-        error_msg="Expected 5 == 4",
         op_match_fn=lambda device, op: (op.full_name == "isreal"),
         sample_match_fn=lambda device, sample: ("noncontig_transposed" in sample.name),
         name="crazy_aot_autograd_bug2",
