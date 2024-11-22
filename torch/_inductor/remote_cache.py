@@ -14,6 +14,7 @@ from typing import Any, Callable, Dict, Generic, List, Optional, Type, TypeVar, 
 from typing_extensions import override, TypeAlias
 
 from torch._dynamo.utils import dynamo_timed
+from torch.monitor import _WaitCounter
 from torch._inductor import config
 
 
@@ -162,29 +163,31 @@ class RemoteCache(Generic[_T]):
     # See if the cache contains `key`. Returns `None` if the value is not
     # present in the cache.
     def get(self, key: str) -> Optional[_T]:
-        sample = self._create_sample()
-        try:
-            result = self._get(key, sample)
-            cache_stats.get(type(self).__name__, result)
-        except Exception:
-            cache_stats.exception(type(self).__name__)
-            raise
-        self._log_sample(sample)
-        return result
+        with _WaitCounter("pytorch.remote_cache.get"):
+            sample = self._create_sample()
+            try:
+                result = self._get(key, sample)
+                cache_stats.get(type(self).__name__, result)
+            except Exception:
+                cache_stats.exception(type(self).__name__)
+                raise
+            self._log_sample(sample)
+            return result
 
     # Add `value` to the cache with the key `key`. Note that `None` is not a
     # valid value even if _T supports it (because you can't tell the difference
     # between `None` and a missing cache entry).
     def put(self, key: str, value: _T) -> None:
-        assert value is not None
-        sample = self._create_sample()
-        try:
-            self._put(key, value, sample)
-            cache_stats.put(type(self).__name__)
-        except Exception:
-            cache_stats.exception(type(self).__name__)
-            raise
-        self._log_sample(sample)
+        with _WaitCounter("pytorch.remote_cache.put"):
+            assert value is not None
+            sample = self._create_sample()
+            try:
+                self._put(key, value, sample)
+                cache_stats.put(type(self).__name__)
+            except Exception:
+                cache_stats.exception(type(self).__name__)
+                raise
+            self._log_sample(sample)
 
     # Used to convert data from the cache into structured data.
     def _decode(self, data: _U, sample: Optional[Sample]) -> _T:  # type: ignore[override]
