@@ -2297,4 +2297,5 @@ def _set_unbacked_bindings(out: object, out_proxy: _NestedProxys) -> None:
     if fake_mode and fake_mode.shape_env:
         if symbol_to_path := compute_unbacked_bindings(fake_mode.shape_env, out):
             assert isinstance(out_proxy, Proxy), out_proxy
+            print(f"_set_unbacked_bindings {symbol_to_path}")
             out_proxy.node.meta["unbacked_bindings"] = symbol_to_path

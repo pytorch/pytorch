@@ -310,15 +310,15 @@ def validate_args_and_maybe_create_graph_inputs(
                     proxy=new_proxy,
                     example_value=example_value,
                 )
-            elif isinstance(a, variables.UserDefinedObjectVariable) and a.python_type() is torch.SymInt:
+            elif (
+                isinstance(a, variables.UserDefinedObjectVariable)
+                and a.python_type() is torch.SymInt
+            ):
                 new_proxy = tracer.create_graph_input(
                     "symint", a.python_type(), a.value
                 )
                 new_arg = wrap_fx_proxy_cls(
-                    target_cls=type(a),
-                    tx=tx,
-                    proxy=new_proxy,
-                    example_value=a.value
+                    target_cls=type(a), tx=tx, proxy=new_proxy, example_value=a.value
                 )
             # If `a` cannot be put into a graph
             else:
@@ -1011,7 +1011,6 @@ class CallTorchbindHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 
 class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
-
     def _unspecialize_int_carry(self, tx, args: List[VariableTracker]):
         def _to_unbacked_symint_var(arg):
             if arg.python_type() is not int:
@@ -1029,8 +1028,10 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
             )
             return VariableTracker.build(tx, unbacked_idx)
 
-        return [_to_unbacked_symint_var(arg) if isinstance(arg, ConstantVariable) else arg for arg in args]
-
+        return [
+            _to_unbacked_symint_var(arg) if isinstance(arg, ConstantVariable) else arg
+            for arg in args
+        ]
 
     @raise_hard_error_if_graph_break(
         reason="while_loop doesn't work unless it is captured completely with torch.compile."

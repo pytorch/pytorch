@@ -7,6 +7,11 @@ import torch
 import torch.utils._pytree as pytree
 from functorch.experimental import control_flow
 from functorch.experimental.control_flow import cond, UnsupportedAliasMutationException
+from torch._dynamo.testing import (
+    AotEagerAndRecordGraphs,
+    EagerAndRecordGraphs,
+    normalize_gm,
+)
 from torch._higher_order_ops.associative_scan import (
     _fake_associative_scan,
     associative_scan,
@@ -36,11 +41,6 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_TORCHDYNAMO,
     TestCase,
     xfailIfTorchDynamo,
-)
-from torch._dynamo.testing import (
-    AotEagerAndRecordGraphs,
-    EagerAndRecordGraphs,
-    normalize_gm,
 )
 
 
@@ -263,7 +263,11 @@ def _while_loop_tests():
                 return i + 1, s, x.sin() + i
 
             return while_loop(cond_fn, body_fn, (i, s, x))
-    
+
+    # TODO: add a test case for int carry dependent tensor output
+    # TODO: add much more tests for int carries
+    # 1. that uses the unbacked output to create tensors and tensor operations
+
     class IntCarryNested(torch.nn.Module):
         def forward(self, x):
             # Basically implements this:
@@ -272,20 +276,22 @@ def _while_loop_tests():
             #         x = x + 1
             i = 0
             j = 0
+
             def cond_fn(i, x):
-                return i < x.shape[0] 
-            
+                return i < x.shape[0]
+
             def body_fn(i, x):
                 def inner_cond_fn(j, x):
                     # i is a closure inner_cond_fn
                     return j < i
-                
+
                 def inner_body_fn(j, x):
-                    return j + 1 , x + 1
+                    return j + 1, x + 1
 
                 # j is a closure of body_fn
                 _, new_x = while_loop(inner_cond_fn, inner_body_fn, (j, x))
                 return i + 1, new_x
+
             return while_loop(cond_fn, body_fn, (i, x))
 
     nested2 = Nested()
@@ -314,7 +320,7 @@ def _while_loop_tests():
             (torch.tensor(3), torch.randn(2, 2)),
         ),
         "int_carry": (int_carry, (torch.randn(2, 2),)),
-        "int_carry_nested": (int_carry_nested, (torch.randn(2, 2), ))
+        "int_carry_nested": (int_carry_nested, (torch.randn(2, 2),)),
     }
 
 
@@ -3370,7 +3376,9 @@ class TestControlFlowTraced(TestCase):
     def _check_tracing(self, fn, args, allow_non_fake_inputs=False, tracing_mode="all"):
         graphs = {}
         eager_res = fn(*args)
-        tracing_modes = ["real", "fake", "symbolic"] if tracing_mode == "all" else [tracing_mode]
+        tracing_modes = (
+            ["real", "fake", "symbolic"] if tracing_mode == "all" else [tracing_mode]
+        )
         for mode in tracing_modes:
             graph = make_fx(
                 fn,
@@ -3385,7 +3393,7 @@ class TestControlFlowTraced(TestCase):
         eager_res = fn(*args)
         compiled_fn = torch.compile(fn, backend=backend)
         self.assertEqual(compiled_fn(*args), eager_res)
-    
+
     def _check_compile_and_graph(self, fn, args, backend_name: str) -> str:
         if backend_name == "eager":
             backend = EagerAndRecordGraphs()
@@ -3671,7 +3679,18 @@ def forward(self, arg0_1):
     #
     # simple_with_linear doesn't work becaue parameters and buffers
     # are not inputs so they're not wrapped by functionalization and tracing.
-    @parametrize("while_loop_test", list(WHILE_LOOP_TESTS.keys() - {"int_carry", "int_carry_nested", "simple_with_linear", "nested_with_linear"}))
+    @parametrize(
+        "while_loop_test",
+        list(
+            WHILE_LOOP_TESTS.keys()
+            - {
+                "int_carry",
+                "int_carry_nested",
+                "simple_with_linear",
+                "nested_with_linear",
+            }
+        ),
+    )
     def test_while_loop_functionalize(self, func_type, while_loop_test):
         fn, inp = WHILE_LOOP_TESTS[while_loop_test]
         fn, mode = self._wrap_with_functionalize(fn, func_type)
@@ -3679,7 +3698,10 @@ def forward(self, arg0_1):
         with mode:
             self._check_tracing(fn, inp)
 
-    @parametrize("while_loop_test", list(WHILE_LOOP_TESTS.keys() - {"int_carry", "int_carry_nested"}))
+    @parametrize(
+        "while_loop_test",
+        list(WHILE_LOOP_TESTS.keys() - {"int_carry", "int_carry_nested"}),
+    )
     def test_while_loop_tracing(self, while_loop_test):
         fn, inp = WHILE_LOOP_TESTS[while_loop_test]
         allow_non_fake_inputs = (
@@ -3854,20 +3876,22 @@ class GraphModule(torch.nn.Module):
         return (getitem, getitem_1, getitem_2)
 
     class cond_fn_0(torch.nn.Module):
-        def forward(self, i: "Sym(u0)", s: "Sym(u1)", x: "f32[2, 2]"):
-            lt: "Sym(u0 < u1)" = i < s;  i = s = None
+        def forward(self, symint: "Sym(u0)", symint_0: "Sym(u1)", x: "f32[2, 2]"):
+            lt: "Sym(u0 < u1)" = symint < symint_0;  symint = symint_0 = None
             return lt
 
     class body_fn_0(torch.nn.Module):
-        def forward(self, i: "Sym(u0)", s: "Sym(u1)", x: "f32[2, 2]"):
-            add: "Sym(u0 + 1)" = i + 1
+        def forward(self, symint: "Sym(u0)", symint_0: "Sym(u1)", x: "f32[2, 2]"):
+            add: "Sym(u0 + 1)" = symint + 1
             sin: "f32[2, 2]" = x.sin();  x = None
-            child: "f32[2, 2]" = sin + i;  sin = i = None
-            return (add, s, child)
-"""  # noqa: B950
+            child: "f32[2, 2]" = sin + symint;  sin = symint = None
+            return (add, symint_0, child)
+""",  # noqa: B950
             )
         elif backend == "aot_eager":
-            self.assertExpectedInline(captured_graph, """\
+            self.assertExpectedInline(
+                captured_graph,
+                """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_: "f32[2, 2]"):
         l_x_ = L_x_
@@ -3881,17 +3905,18 @@ class GraphModule(torch.nn.Module):
         return (getitem, getitem_1, getitem_2)
 
     class cond_fn_0(torch.nn.Module):
-        def forward(self, i: "Sym(u0)", s: "Sym(u1)", x: "f32[2, 2]"):
-            lt: "Sym(u0 < u1)" = i < s;  i = s = None
+        def forward(self, symint: "Sym(u0)", symint_0: "Sym(u1)", x: "f32[2, 2]"):
+            lt: "Sym(u0 < u1)" = symint < symint_0;  symint = symint_0 = None
             return lt
 
     class body_fn_0(torch.nn.Module):
-        def forward(self, i: "Sym(u0)", s: "Sym(u1)", x: "f32[2, 2]"):
-            add: "Sym(u0 + 1)" = i + 1
+        def forward(self, symint: "Sym(u0)", symint_0: "Sym(u1)", x: "f32[2, 2]"):
+            add: "Sym(u0 + 1)" = symint + 1
             sin: "f32[2, 2]" = x.sin();  x = None
-            child: "f32[2, 2]" = sin + i;  sin = i = None
-            return (add, s, child)
-""")
+            child: "f32[2, 2]" = sin + symint;  sin = symint = None
+            return (add, symint_0, child)
+""",
+            )
 
     @parametrize("backend", ["eager", "aot_eager"])
     def test_while_loop_int_carry_nested_compile(self, backend):
@@ -3913,35 +3938,37 @@ class GraphModule(torch.nn.Module):
         return (getitem, getitem_1)
 
     class cond_fn_1(torch.nn.Module):
-        def forward(self, i: "Sym(u0)", x: "f32[2, 2]"):
-            lt: "Sym(u0 < 2)" = i < 2;  i = None
+        def forward(self, symint: "Sym(u0)", x: "f32[2, 2]"):
+            lt: "Sym(u0 < 2)" = symint < 2;  symint = None
             return lt
 
     class body_fn_1(torch.nn.Module):
-        def forward(self, u0_unspecialized_int: "Sym(u0)", l_x_: "f32[2, 2]"):
+        def forward(self, symint: "Sym(u0)", l_x_: "f32[2, 2]"):
             cond_fn_0 = self.cond_fn_0
             body_fn_0 = self.body_fn_0
-            while_loop = torch.ops.higher_order.while_loop(cond_fn_0, body_fn_0, (0, l_x_), (u0_unspecialized_int,));  cond_fn_0 = body_fn_0 = l_x_ = None
+            while_loop = torch.ops.higher_order.while_loop(cond_fn_0, body_fn_0, (0, l_x_), (symint,));  cond_fn_0 = body_fn_0 = l_x_ = None
             getitem: "Sym(u1 + 1)" = while_loop[0];  getitem = None
             new_x: "f32[2, 2]" = while_loop[1];  while_loop = None
 
-            add: "Sym(u0 + 1)" = u0_unspecialized_int + 1;  u0_unspecialized_int = None
+            add: "Sym(u0 + 1)" = symint + 1;  symint = None
             return (add, new_x)
 
         class cond_fn_0(torch.nn.Module):
-            def forward(self, u1_unspecialized_int: "Sym(u1)", l_x_: "f32[2, 2]", u0_unspecialized_int_cond_fn):
-                lt: "Sym(u1 < u0)" = u1_unspecialized_int < u0_unspecialized_int_cond_fn;  u1_unspecialized_int = u0_unspecialized_int_cond_fn = None
+            def forward(self, symint: "Sym(u1)", l_x_: "f32[2, 2]", symint_cond_fn):
+                lt: "Sym(u1 < u0)" = symint < symint_cond_fn;  symint = symint_cond_fn = None
                 return lt
 
         class body_fn_0(torch.nn.Module):
-            def forward(self, j: "Sym(u1)", x: "f32[2, 2]", u0_unspecialized_int_cond_fn):
-                add: "Sym(u1 + 1)" = j + 1;  j = None
+            def forward(self, symint: "Sym(u1)", x: "f32[2, 2]", symint_cond_fn):
+                add: "Sym(u1 + 1)" = symint + 1;  symint = None
                 child: "f32[2, 2]" = x + 1;  x = None
                 return (add, child)
-"""  # noqa: B950
+""",  # noqa: B950
             )
         elif backend == "aot_eager":
-            self.assertExpectedInline(captured_graph, """\
+            self.assertExpectedInline(
+                captured_graph,
+                """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_: "f32[2, 2]"):
         l_x_ = L_x_
@@ -3954,32 +3981,33 @@ class GraphModule(torch.nn.Module):
         return (getitem, getitem_1)
 
     class cond_fn_1(torch.nn.Module):
-        def forward(self, i: "Sym(u0)", x: "f32[2, 2]"):
-            lt: "Sym(u0 < 2)" = i < 2;  i = None
+        def forward(self, symint: "Sym(u0)", x: "f32[2, 2]"):
+            lt: "Sym(u0 < 2)" = symint < 2;  symint = None
             return lt
 
     class body_fn_1(torch.nn.Module):
-        def forward(self, u0_unspecialized_int: "Sym(u0)", l_x_: "f32[2, 2]"):
+        def forward(self, symint: "Sym(u0)", l_x_: "f32[2, 2]"):
             cond_fn_0 = self.cond_fn_0
             body_fn_0 = self.body_fn_0
-            while_loop = torch.ops.higher_order.while_loop(cond_fn_0, body_fn_0, (0, l_x_), (u0_unspecialized_int,));  cond_fn_0 = body_fn_0 = l_x_ = None
+            while_loop = torch.ops.higher_order.while_loop(cond_fn_0, body_fn_0, (0, l_x_), (symint,));  cond_fn_0 = body_fn_0 = l_x_ = None
             getitem: "Sym(u1 + 1)" = while_loop[0];  getitem = None
             new_x: "f32[2, 2]" = while_loop[1];  while_loop = None
 
-            add: "Sym(u0 + 1)" = u0_unspecialized_int + 1;  u0_unspecialized_int = None
+            add: "Sym(u0 + 1)" = symint + 1;  symint = None
             return (add, new_x)
 
         class cond_fn_0(torch.nn.Module):
-            def forward(self, u1_unspecialized_int: "Sym(u1)", l_x_: "f32[2, 2]", u0_unspecialized_int_cond_fn):
-                lt: "Sym(u1 < u0)" = u1_unspecialized_int < u0_unspecialized_int_cond_fn;  u1_unspecialized_int = u0_unspecialized_int_cond_fn = None
+            def forward(self, symint: "Sym(u1)", l_x_: "f32[2, 2]", symint_cond_fn):
+                lt: "Sym(u1 < u0)" = symint < symint_cond_fn;  symint = symint_cond_fn = None
                 return lt
 
         class body_fn_0(torch.nn.Module):
-            def forward(self, j: "Sym(u1)", x: "f32[2, 2]", u0_unspecialized_int_cond_fn):
-                add: "Sym(u1 + 1)" = j + 1;  j = None
+            def forward(self, symint: "Sym(u1)", x: "f32[2, 2]", symint_cond_fn):
+                add: "Sym(u1 + 1)" = symint + 1;  symint = None
                 child: "f32[2, 2]" = x + 1;  x = None
                 return (add, child)
-""")
+""",
+            )
 
     def test_while_loop_int_carry_tracing(self):
         fn, args = WHILE_LOOP_TESTS["int_carry"]
@@ -4008,9 +4036,9 @@ class <lambda>(torch.nn.Module):
             sin: "f32[2, 2]" = torch.ops.aten.sin.default(arg2_1);  arg2_1 = None
             add_1: "f32[2, 2]" = torch.ops.aten.add.Tensor(sin, arg0_1);  sin = arg0_1 = None
             return (add, arg1_1, add_1)
-"""
+""",
         )
-    
+
     def test_while_loop_int_carry_nested_tracing(self):
         fn, args = WHILE_LOOP_TESTS["int_carry_nested"]
         traced_graph = self._check_tracing(fn, args, tracing_mode="fake")
@@ -4051,9 +4079,9 @@ class <lambda>(torch.nn.Module):
                 add: "Sym(u1 + 1)" = arg0_1 + 1;  arg0_1 = None
                 add_1: "f32[2, 2]" = torch.ops.aten.add.Tensor(arg1_1, 1);  arg1_1 = None
                 return (add, add_1)
-""")
+""",
+        )
 
-    
     def test_cond_nested_traced(self):
         def true_nested(y):
             return y * y

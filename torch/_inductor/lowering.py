@@ -6417,6 +6417,7 @@ def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs):
         V.graph.disable_cudagraphs_reason = msg
 
     result = ir.WhileLoop.create(cond_fn, body_fn, carried_inputs, additional_inputs)
+
     def _map_output(x):
         if isinstance(x, ir.MultiOutput):
             return TensorBox.create(x)
@@ -6424,6 +6425,7 @@ def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs):
             return x.expr
         else:
             raise NotImplementedError(f"Don't support {x} output yet")
+
     return [_map_output(x) for x in result]
 
 

@@ -187,21 +187,24 @@ while_loop_op.py_impl(DispatchKey.Autograd)(
 )
 
 
-def _unspecialize_int(fake_mode, t):
+def _unspecialize_int(fake_mode, t, compute_binding):
     from torch.fx.experimental.symbolic_shapes import compute_unbacked_bindings
 
     assert isinstance(t, int), t
     unbacked_idx = fake_mode.shape_env.create_unbacked_symint()
-    _ = compute_unbacked_bindings(fake_mode.shape_env, unbacked_idx)
+    if compute_binding:
+        _ = compute_unbacked_bindings(fake_mode.shape_env, unbacked_idx)
+    if "u15" in str(unbacked_idx):
+        breakpoint()
     return unbacked_idx
 
 
 # We allocate unbacked symints for int inputs since their value
 # can be iteration dependent and we don't really know the value
 # of the integer thus unbacked.
-def unspecialize_ints_with_unbacked_symints(fake_mode, carried_inputs):
+def unspecialize_ints_with_unbacked_symints(fake_mode, carried_inputs, bind=False):
     return tuple(
-        _unspecialize_int(fake_mode, arg) if isinstance(arg, int) else arg
+        _unspecialize_int(fake_mode, arg, bind) if isinstance(arg, int) else arg
         for arg in carried_inputs
     )
 
@@ -212,19 +215,20 @@ def while_loop_tracing(mode, cond_fn, body_fn, carried_inputs, additional_inputs
         proxy_mode, while_loop_op, cond_fn, body_fn, carried_inputs, additional_inputs
     ):
         from torch._subclasses.fake_tensor import FakeTensorMode
-        from torch.fx.experimental.symbolic_shapes import (
-            compute_unbacked_bindings,
-            ShapeEnv,
-        )
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
-        # Create a new FakeTensorMode if we cannot detect one
+        # It's possible that there is no active fake tenosr mode, if we're tracing with
+        # "real" mode. so we create a new one.
         fake_mode = torch._guards.detect_fake_mode()
         if fake_mode is None:
             fake_mode = FakeTensorMode(shape_env=ShapeEnv())
 
-        tracing_carry = unspecialize_ints_with_unbacked_symints(
-            fake_mode, carried_inputs
-        )
+        # We create temporary unbacked symints for int carries to trace subgraph.
+        with fake_mode.shape_env.ignore_fresh_unbacked_symbols():
+            tracing_carry = unspecialize_ints_with_unbacked_symints(
+                fake_mode, carried_inputs, bind=True
+            )
+            print("ignoring fresh unbacked symbols", tracing_carry)
         cond_graph = reenter_make_fx(cond_fn)(*tracing_carry, *additional_inputs)
         body_graph = reenter_make_fx(body_fn)(*tracing_carry, *additional_inputs)
 
@@ -271,9 +275,12 @@ def while_loop_fake_tensor_mode(
     # can be iteration dependent and we don't really know the value
     # of the integer thus unbacked.
     with mode:
-        return unspecialize_ints_with_unbacked_symints(
-            mode, body_fn(*carried_inputs, *additional_inputs)
-        )
+        # Ignore the fresh_unbacked_symbols created by recursive
+        # hop calls, their unbacked symbols is handled when tracing them in their
+        # proxy tensor mode.
+        with mode.shape_env.ignore_fresh_unbacked_symbols():
+            body_output = body_fn(*carried_inputs, *additional_inputs)
+        return unspecialize_ints_with_unbacked_symints(mode, body_output)
 
 
 @while_loop_op.py_functionalize_impl
