@@ -251,6 +251,13 @@ def register_ops_with_aoti_compile(ns, op_set, dispatch_key, torch_compile_op_li
                 continue
 
 
+def get_divisible_by_16(cfg):
+    # attribute was renamed between triton versions, from "divisible_by_16" to "divisibility_16"
+    if hasattr(cfg, "divisibility_16"):
+        return cfg.divisibility_16
+    return cfg.divisible_by_16
+
+
 class TestCase(InductorTestCase):
     @classmethod
     def setUpClass(cls):
@@ -706,10 +713,6 @@ def assertGeneratedKernelCountEqual(self: TestCase, expected: int):
         # and non-persistent reduction kernels for the same node schedule.
         # That will mess up with the kernel count. Just don't check it.
         return
-    if config.cpp_wrapper and self.device != "cpu":
-        # FIXME: cpp wrapper codegen for cuda is done in two passes. Update
-        # this once we move to the new one-pass solution.
-        expected *= 2
     self.assertEqual(torch._inductor.metrics.generated_kernel_count, expected)
 
 
@@ -762,6 +765,16 @@ def skip_if_halide(fn):
     def wrapper(self):
         if is_halide_backend(self.device):
             raise unittest.SkipTest("halide not supported")
+        return fn(self)
+
+    return wrapper
+
+
+def skip_if_dynamic(fn):
+    @functools.wraps(fn)
+    def wrapper(self):
+        if ifdynstaticdefault(True, False) or torch._dynamo.config.dynamic_shapes:
+            raise unittest.SkipTest("associtaive_scan doesn's support lifted SymInts.")
         return fn(self)
 
     return wrapper
@@ -1429,7 +1442,6 @@ class CommonTemplate:
 
     @config.patch({"fx_graph_cache": False})
     @skipIfWindows(msg="torch._dynamo.exc.Unsupported")
-    @skip_if_cpp_wrapper
     def test_forced_buffer_realize(self):
         # Test torch._test_inductor_realize forces a buffer to be realized
         def fn(a):
@@ -1441,7 +1453,6 @@ class CommonTemplate:
 
     @config.patch({"fx_graph_cache": False})
     @skipIfWindows(msg="torch._dynamo.exc.Unsupported")
-    @skip_if_cpp_wrapper
     def test_scheduler_vertical_fusion1(self):
         realize = test_operators.realize
 
@@ -2031,6 +2042,7 @@ class CommonTemplate:
 
     @skipCUDAIf(TEST_WITH_ROCM, "associative_scan is not supported on ROCm")
     @skip_if_halide  # scan ops
+    @skip_if_dynamic  # TODO: support lifted symints when dynamic
     def test_custom_scan_op(self):
         if self.device != "cuda":
             raise unittest.SkipTest("associative_scan only supported on GPU")
@@ -2056,6 +2068,7 @@ class CommonTemplate:
         self.assertEqual(expect, actual)
 
     @skip_if_halide  # scan ops
+    @skip_if_dynamic  # TODO: support lifted symints when dynamic
     def test_custom_scan_op_compiled(self):
         if self.device != "cuda":
             raise unittest.SkipTest("associative_scan only supported on GPU")
@@ -2083,6 +2096,7 @@ class CommonTemplate:
 
     @skipCUDAIf(TEST_WITH_ROCM, "associative_scan is not supported on ROCm")
     @skip_if_halide  # scan ops
+    @skip_if_dynamic  # TODO: support lifted symints when dynamic
     def test_custom_scan_op_multi_input(self):
         if self.device != "cuda":
             raise unittest.SkipTest("associative_scan only supported on GPU")
@@ -2107,6 +2121,7 @@ class CommonTemplate:
 
     @skipCUDAIf(TEST_WITH_ROCM, "associative_scan is not supported on ROCm")
     @skip_if_halide  # scan ops
+    @skip_if_dynamic  # TODO: support lifted symints when dynamic
     def test_custom_scan_would_split(self):
         if self.device != "cuda":
             raise unittest.SkipTest("associative_scan only supported on GPU")
@@ -2159,6 +2174,7 @@ class CommonTemplate:
         self.common(fn, [packed])
 
     @skipCUDAIf(True, "No _weight_int8pack_mm implementation on CUDA")
+    @skipIfXpu(msg="No _weight_int8pack_mm implementation on XPU")
     def test_int8_weight_only_quant(self):
         def convert_weight_to_int8pack(b):
             b_int8pack, b_scales, _ = _dynamically_quantize_per_channel(
@@ -3108,7 +3124,6 @@ class CommonTemplate:
         self.assertEqual(actual, expect)
 
     @skip_if_gpu_halide  # only 32-bit indexing
-    @skip_if_cpp_wrapper  # OOM
     def test_large_broadcast_reduction(self):
         if self.device == "cpu":
             raise unittest.SkipTest("Fails on CPU")
@@ -3168,7 +3183,6 @@ class CommonTemplate:
         self.assertTrue((actual == 4).all())
 
     @skip_if_halide  # only 32-bit indexing
-    @skip_if_cpp_wrapper  # OOM
     def test_large_strided_reduction(self):
         # Test 64-bit indexing is used when input numel is less than INT_MAX
         # but stride calculations go above INT_MAX
@@ -3444,7 +3458,6 @@ class CommonTemplate:
         )
 
     @with_tf32_off
-    @skip_if_cpp_wrapper
     @config.patch(use_mixed_mm=True)
     def test_uint4x2_mixed_mm(self):
         def fn(a, b):
@@ -5217,7 +5230,6 @@ class CommonTemplate:
         if self.device != "cpu":
             assertGeneratedKernelCountEqual(self, 1)
 
-    @skip_if_cpp_wrapper
     def test_complex_fallback(self):
         def fn(x):
             return x * x + 10
@@ -5612,7 +5624,6 @@ class CommonTemplate:
             (torch.randn([1, 3, 3, 16]).to(memory_format=torch.channels_last),),
         )
 
-    @skip_if_cpp_wrapper
     def test_cat_uint8(self):
         def fn(x):
             batch_shape = x.shape[:1]
@@ -8010,7 +8021,6 @@ class CommonTemplate:
         self.assertTrue((d < 1).all())
 
     @config.patch(implicit_fallbacks=True)
-    @skip_if_cpp_wrapper
     def test_fallback_mutable_op_basic(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as m:
 
@@ -8344,8 +8354,14 @@ class CommonTemplate:
         self.common(fn, [torch.zeros([20, 20])])
 
     @config.patch(check_stack_no_cycles_TESTING_ONLY=True)
-    @skip_if_cpp_wrapper
     def test_check_stack_no_cycles(self):
+        if config.cpp_wrapper and self.device != "cpu":
+            raise unittest.SkipTest(
+                "codegen() gets called twice in cpp_wrapper GPU compilation, which "
+                "causes this test to fail.  This can be removed if GPU compilation is "
+                "done in a single pass."
+            )
+
         @torch.compile()
         def fn(x):
             return x * 3
@@ -8848,8 +8864,10 @@ class CommonTemplate:
             self.assertEqual(bw_code.count("tl.rand"), 0)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 4)
 
-    @skip_if_cpp_wrapper
     def test_randint_kernel_count(self):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("Only valid for GPU!")
+
         @torch._dynamo.optimize_assert("inductor")
         def fn1():
             random_tensor1 = torch.randint(10, [32], device=self.device)
@@ -8858,9 +8876,12 @@ class CommonTemplate:
             return random_tensor1, random_tensor2, random_tensor3
 
         _, source_codes = run_and_get_code(fn1)
-        if self.device == GPU_TYPE:
-            self.assertEqual(len(source_codes), 1)
-            self.assertEqual(source_codes[0].count("async_compile.triton"), 2)
+        # cpp_wrapper does a 2-pass generation on GPU.
+        self.assertEqual(len(source_codes), 1 if not config.cpp_wrapper else 2)
+        self.assertEqual(source_codes[0].count("async_compile.triton"), 2)
+        if config.cpp_wrapper:
+            # The second pass should not involve triton at all.
+            self.assertEqual(source_codes[1].count("async_compile.triton"), 0)
 
     def test_roll(self):
         def fn(a):
@@ -9487,6 +9508,8 @@ class CommonTemplate:
         for x in (torch.randn(2, 3), torch.randn(2, 2), torch.randn(3, 2)):
             self.common(fn, (x,))
 
+    # cpp_wrapper cannot currently handle fallback ops with return types containing
+    # list[Tensor], which will eventually need to get fixed.
     @skip_if_cpp_wrapper
     def test_kwargs(self):
         if self.device == GPU_TYPE:
@@ -9550,7 +9573,7 @@ class CommonTemplate:
 
         f_compiled = torch.compile(f)
         x_ref = torch.rand(2, 3, 128, 128, device=GPU_TYPE)
-        x_test = x_ref.clone().detach()
+        x_test = x_ref.detach().clone()
         with torch.no_grad():
             out_ref = f(x_ref)
             out_test = f_compiled(x_test)
@@ -10560,7 +10583,6 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn((16, 16, 16)),), check_lowp=False)
 
-    @skip_if_cpp_wrapper
     def test_searchsorted(self):
         def fn(sorted_sequence, values, out_int32, right, side, sorter):
             return torch.searchsorted(
@@ -10867,7 +10889,7 @@ class CommonTemplate:
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
     @torch._inductor.config.patch(implicit_fallbacks=True)
     def test_custom_op_unbacked_symints(self):
-        @torch.library.custom_op("mylib::foo", mutates_args={})
+        @torch.library.custom_op("test_unbacked_symints::foo", mutates_args={})
         def foo(x: torch.Tensor) -> torch.Tensor:
             return x.clone()
 
@@ -10878,7 +10900,7 @@ class CommonTemplate:
             u2 = torch.library.get_ctx().new_dynamic_size()
             return x.new_empty(u0, u1, u2)
 
-        @torch.library.custom_op("mylib::bar", mutates_args={})
+        @torch.library.custom_op("test_unbacked_symints::bar", mutates_args={})
         def bar(x: torch.Tensor) -> torch.Tensor:
             return x.clone()
 
@@ -11711,6 +11733,57 @@ class CommonTemplate:
         b = torch.randn(2, 1, requires_grad=True)
         self.common(forward, (a, b))
 
+    @config.patch(implicit_fallbacks=True)
+    def test_weight_norm_bwd(self):
+        """
+        Weight norm backward eager kernel does not support non-contiguous
+        inputs. Eager kernel silently produces incorrect results when
+        inputs are non-contiguous. Inductor implicitly fallback to eager
+        for weight norm backward. Fix that by requiring contiguous inputs
+        for any implicit fallback kernels.
+        Check: https://github.com/pytorch/pytorch/issues/140452
+        """
+
+        class Repro(nn.Module):
+            def __init__(self, in_features):
+                super().__init__()
+                self.weight_normed_linear = nn.utils.parametrizations.weight_norm(
+                    nn.Linear(in_features, out_features=2)
+                )
+                self.linear = nn.Linear(in_features=2, out_features=1)
+
+            def forward(self, x):
+                return self.linear(self.weight_normed_linear(x))
+
+        def f(m, x):
+            with torch.amp.autocast(device_type=self.device, dtype=torch.half):
+                loss = m(x).sum()
+                loss.backward()
+            return loss
+
+        # odd number on purpose to trigger comprehensive padding
+        in_features = 1025
+        x = torch.randn(2, in_features, dtype=torch.half, requires_grad=True).to(
+            device=self.device
+        )
+        m = Repro(in_features)
+        m = m.to(self.device)
+
+        f(m, x)
+
+        ref_grad_list = [p.grad for p in m.parameters()]
+
+        for p in m.parameters():
+            p.grad = None
+
+        opt_f = torch.compile(f)
+        opt_f(m, x)
+        act_grad_list = [p.grad for p in m.parameters()]
+        self.assertTrue(
+            same(ref_grad_list, act_grad_list, tol=1e-3),
+            f"Ref:\n{ref_grad_list}\nAct:\n{act_grad_list}",
+        )
+
 
 @dataclasses.dataclass
 class TestFailure:
@@ -11870,8 +11943,8 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 self.assertEqual(len(kernels), 2)
 
             for kernel_id, expected in expected_divisible.items():
-                divisible_by_16 = (
-                    kernels[kernel_id].triton_meta["configs"][0].divisible_by_16
+                divisible_by_16 = get_divisible_by_16(
+                    kernels[kernel_id].triton_meta["configs"][0]
                 )
                 self.assertEqual(divisible_by_16, expected)
 
@@ -11881,12 +11954,6 @@ if HAS_GPU and not TEST_WITH_ASAN:
         def test_codegen_config_option_dont_assume_alignment(self):
             def fn(x: torch.Tensor) -> torch.Tensor:
                 return x.sin() + x.cos()
-
-            def get_divisible_by_16(cfg):
-                # attribute was renamed between triton versions, from "divisible_by_16" to "divisibility_16"
-                if hasattr(cfg, "divisibility_16"):
-                    return cfg.divisibility_16
-                return cfg.divisible_by_16
 
             # We want code that assumes alignment if the initial input is 16-byte aligned
             for offset in (0, 1, 2, 3, 4):
@@ -12017,7 +12084,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
 
             fn_opt = torch._dynamo.optimize("inductor")(fn)
             inp = torch.ones(2, 2, requires_grad=True, device=GPU_TYPE)
-            inp_ref = inp.clone().detach().requires_grad_(True)
+            inp_ref = inp.detach().clone().requires_grad_(True)
             out_ref = fn(inp_ref)
             out = fn_opt(inp)
             out_ref[0].sum().backward()

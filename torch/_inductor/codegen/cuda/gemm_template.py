@@ -1269,14 +1269,14 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
             # Swap
             def clone_with_transposed_stride(node: IRNode) -> IRNode:
                 old_layout = node.get_layout()
-                new_stride = list(old_layout.stride)
+                new_stride = list(old_layout.stride)  # type: ignore[union-attr]
                 new_stride[-2], new_stride[-1] = new_stride[-1], new_stride[-2]
                 new_layout = FixedLayout(
                     old_layout.device,
                     old_layout.dtype,
-                    list(old_layout.size),
+                    list(old_layout.size),  # type: ignore[union-attr]
                     new_stride,
-                    old_layout.offset,
+                    old_layout.offset,  # type: ignore[union-attr]
                 )
                 return Buffer(name=node.get_name(), layout=new_layout)
 

@@ -74,7 +74,7 @@ from .virtualized import ops, V
 
 
 log = logging.getLogger(__name__)
-lowerings: Dict[torch._ops.OpOverload, Callable[..., Any]] = {}
+lowerings: Dict[Callable[..., Any], Callable[..., Any]] = {}
 # Use maybe_layout_constraints to access this dict, we lazily register tag-based layout constraints
 _maybe_layout_constraints: Dict[
     torch._ops.OpOverload, Optional[Callable[..., Any]]
@@ -585,7 +585,7 @@ def make_pointwise(
         device = override_device or device
 
         return Pointwise.create(
-            device=device,
+            device=device,  # type: ignore[arg-type]
             dtype=dtype,
             inner_fn=inner_fn,
             ranges=ranges,
@@ -792,10 +792,10 @@ def register_frexp():
     frexp = ops_wrapper("frexp")
 
     def frexp0(*args, **kwargs):
-        return frexp(*args, **kwargs)[0]  # type: ignore[index] # next PR
+        return frexp(*args, **kwargs)[0]  # type: ignore[index]
 
     def frexp1(*args, **kwargs):
-        return frexp(*args, **kwargs)[1]  # type: ignore[index] # next PR
+        return frexp(*args, **kwargs)[1]  # type: ignore[index]
 
     pw_fns = [
         make_pointwise(frexp0),
@@ -1691,9 +1691,7 @@ def split_with_sizes(x, sizes, dim=0):
 def unbind(x, dim=0):
     dim = _validate_dim(x, dim, 0)
     x_size = V.graph.sizevars.evaluate_static_shape(x.get_size()[dim])
-    result = []
-    for i in range(x_size):
-        result.append(select(x, dim, i))
+    result = [select(x, dim, i) for i in range(x_size)]
     return result
 
 
@@ -2349,9 +2347,12 @@ def sdpa_constraint(fx_node, *args, **kwargs):
                 (V.graph.sizevars.size_hint(x.get_stride()[i]) % ALIGNMENT) == 0
                 for i in range(len(x.get_stride()) - 1)
             )
-            return (
-                V.graph.sizevars.size_hint(x.get_stride()[-1])
-            ) == 1 and aligned_strides
+            # if the last dim size is <= 1, stride doesnt matter
+            aligned_last_dim = (
+                V.graph.sizevars.size_hint(x.get_stride()[-1]) == 1
+                or V.graph.sizevars.size_hint(x.get_size()[-1]) <= 1
+            )
+            return aligned_last_dim and aligned_strides
 
         try:
             arg.get_stride()
@@ -5288,7 +5289,7 @@ def make_reduction(reduction_type: str, override_return_dtype=None):
         )
         result = Reduction.create(reduction_type=reduction_type, input_node=x, **kwargs)
         if isinstance(
-            result.data.data, Reduction
+            result.data.data, Reduction  # type: ignore[attr-defined]
         ):  # Only realize if reduction isn't unrolled
             result.realize()
         return result
@@ -5692,18 +5693,6 @@ def fmod(a, b):
     return make_pointwise(fn)(a, b)
 
 
-@register_lowering(aten.rsqrt)
-def rsqrt(x):
-    dtype = x.get_dtype()
-    if is_integer_dtype(dtype) or is_boolean_dtype(dtype):
-        x = to_dtype(x, torch.get_default_dtype())
-
-    def _rsqrt(x):
-        return ops.rsqrt(x)
-
-    return make_pointwise(_rsqrt)(x)
-
-
 @register_lowering([aten.sum, prims.sum])
 def sum_(x, axis=None, keepdims=False, *, dtype=None):
     if (
@@ -5816,7 +5805,7 @@ def cummax(x, axis=None):
     kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
     kwargs["dtypes"] = (dtype, torch.int64)
     kwargs["inner_fns"] = (x.make_loader(), lambda _: "rindex")
-    values, indices = ir.Scan.create(**kwargs, combine_fn=combine_fn)  # type: ignore[arg-type] # next PR
+    values, indices = ir.Scan.create(**kwargs, combine_fn=combine_fn)  # type: ignore[arg-type]
     if values is None:
         return fallback_cummax(x, dim=axis)
     return values, indices
@@ -5846,7 +5835,7 @@ def cummin(x, axis=None):
     kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
     kwargs["dtypes"] = (dtype, torch.int64)
     kwargs["inner_fns"] = (x.make_loader(), lambda _: "rindex")
-    values, indices = ir.Scan.create(**kwargs, combine_fn=combine_fn)  # type: ignore[arg-type] # next PR
+    values, indices = ir.Scan.create(**kwargs, combine_fn=combine_fn)  # type: ignore[arg-type]
     if values is None:
         return fallback_cummin(x, dim=axis)
     return values, indices
@@ -5970,6 +5959,7 @@ def register_pointwise_numeric_ldf64(op):
     )
 
 
+rsqrt = register_pointwise_numeric(aten.rsqrt)
 exp = register_pointwise_numeric_ldf64(aten.exp)
 exp2 = register_pointwise_numeric(aten.exp2)
 expm1 = register_pointwise_numeric(aten.expm1)
@@ -6125,6 +6115,7 @@ foreach_div_list = register_foreach_pointwise(aten._foreach_div.List, div)
 register_foreach_pointwise(aten._foreach_div.Tensor, div)
 foreach_div_scalar = register_foreach_pointwise(aten._foreach_div.Scalar, div)
 register_foreach_pointwise(aten._foreach_sqrt, sqrt)
+register_foreach_pointwise(aten._foreach_rsqrt, rsqrt)
 register_foreach_pointwise(aten._foreach_maximum.List, maximum)
 register_foreach_pointwise(aten._foreach_maximum.Scalar, maximum)
 register_foreach_pointwise(aten._foreach_minimum.List, minimum)
