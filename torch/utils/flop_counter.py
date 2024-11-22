@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 # mypy: allow-untyped-decorators
 import torch
-from torch._C import DispatchKey
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
 from .module_tracker import ModuleTracker
 from typing import List, Any, Dict, Optional, Union, Tuple, Iterator
@@ -743,15 +742,16 @@ class FlopCounterMode(TorchDispatchMode):
 
             return NotImplemented
 
-        dk = DispatchKey.CompositeImplicitAutograd
-        if torch._C._dispatch_has_kernel_for_dispatch_key(func.name(), dk):
-            # func can be decomposed; redispatch
+        # If we don't have func in flop_registry, see if it can decompose
+        if func not in self.flop_registry:
             with self.decomposed_counter:
-                return func._op_dk(dk, *args, **kwargs)
-        else:
-            # no further decomposition; execute & count flops
-            out = func(*args, **kwargs)
-            return self._count_flops(func._overloadpacket, out, args, kwargs)
+                r = func.decompose(*args, **kwargs)
+                if r is not NotImplemented:
+                    return r
+
+        # no further decomposition; execute & count flops
+        out = func(*args, **kwargs)
+        return self._count_flops(func._overloadpacket, out, args, kwargs)
 
     def _count_flops(self, func_packet, out, args, kwargs):
         if func_packet in self.flop_registry:
