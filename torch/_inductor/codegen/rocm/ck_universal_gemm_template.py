@@ -410,10 +410,11 @@ class CKGemmTemplate(CKTemplate):
         c_contig_size = (
             N if op.c_layout == "Row" else M if op.c_layout == "Col" else None
         )
+        c_shuffle_block_transfer_scalar_per_vector_n_per_block = op.c_shuffle_block_transfer_scalar_per_vector_n_per_block[0] if isinstance(op.c_shuffle_block_transfer_scalar_per_vector_n_per_block, tuple) else op.c_shuffle_block_transfer_scalar_per_vector_n_per_block
         if (
             is_static_int(c_contig_size)
             and c_contig_size
-            % op.c_shuffle_block_transfer_scalar_per_vector_n_per_block
+            % c_shuffle_block_transfer_scalar_per_vector_n_per_block
             != 0
         ):
             return None
