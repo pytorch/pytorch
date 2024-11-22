@@ -420,12 +420,15 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         # Destroy pg
         dist.destroy_process_group()
 
+        # we need a new Store for the new PG, achieving it by adding prefix
+        new_store = c10d.PrefixStore("2nd", store)
+
         # re-initialize pg
         c10d.init_process_group(
             "nccl",
             world_size=self.world_size,
             rank=self.rank,
-            store=store,
+            store=new_store,
         )
         t1 = torch.rand(5, 5, device=device)
         dist.all_reduce(t1)
