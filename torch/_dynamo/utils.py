@@ -45,6 +45,7 @@ from typing import (
     Deque,
     Dict,
     Generator,
+    Generic,
     Iterable,
     Iterator,
     KeysView,
@@ -864,6 +865,12 @@ class CompilationMetrics:
     joint_graph_pass_time_us: Optional[int] = None
     log_format_version: int = LOG_FORMAT_VERSION
     inductor_config: Optional[str] = None
+    remote_cache_version: Optional[int] = None
+    inductor_fx_remote_cache_hit_count: Optional[int] = None
+    inductor_fx_remote_cache_miss_count: Optional[int] = None
+    inductor_fx_remote_cache_backend_type: Optional[str] = None
+    inductor_fx_remote_cache_hit_keys: Optional[str] = None
+    inductor_fx_remote_cache_miss_keys: Optional[str] = None
 
 
 DEFAULT_COMPILATION_METRICS_LIMIT = 64
@@ -961,8 +968,31 @@ def record_compilation_metrics(metrics: Dict[str, Any]):
         metric = metrics.get(field, None)
         return metric // 1000 if metric is not None else None
 
+    def _convert_collection_to_str(field: str) -> Optional[str]:
+        def safe_str(item: Any) -> str:
+            try:
+                return str(item)
+            except Exception:
+                return str(None)
+
+        metric = metrics.get(field, None)
+        if metric is None:
+            return None
+
+        # Remove this field (list/set) from metrics to avoid clashes
+        del metrics[field]
+        if not isinstance(metric, set) and not isinstance(metric, list):
+            return None
+        return ",".join(safe_str(item) for item in metric)
+
     common_metrics = {
         "inductor_config": _scrubbed_inductor_config_for_logging(),
+        "inductor_fx_remote_cache_hit_keys": _convert_collection_to_str(
+            "inductor_fx_remote_cache_hit_keys"
+        ),
+        "inductor_fx_remote_cache_miss_keys": _convert_collection_to_str(
+            "inductor_fx_remote_cache_miss_keys"
+        ),
         # -------- Any future common metircs go here --------
         #
         # Legacy metircs go here(TODO: Temporary; populate legacy fields from their replacements.)
@@ -1489,14 +1519,19 @@ def is_namedtuple_cls(cls):
             if isinstance(getattr(cls, "_fields", None), tuple) and callable(
                 getattr(cls, "_make", None)
             ):
-                if cls.__bases__ == (tuple,):
+                # The subclassing style namedtuple can have an extra base `typing.Generic`
+                bases = tuple(t for t in cls.__bases__ if t is not Generic)
+                if bases == (tuple,):
                     # This is a namedtuple type directly created by `collections.namedtuple(...)`
                     return True
-                if (
-                    # Subclass of namedtuple
-                    is_namedtuple_cls(cls.__bases__[0])
-                    # For subclasses of namedtuple, the __new__ method should not be customized
-                    and cls.__new__ is cls.__bases__[0].__new__
+                if bases and any(
+                    (
+                        # Subclass of namedtuple
+                        is_namedtuple_cls(t)
+                        # For subclasses of namedtuple, the __new__ method should not be customized
+                        and cls.__new__ is t.__new__
+                    )
+                    for t in bases
                 ):
                     return True
     except TypeError:
