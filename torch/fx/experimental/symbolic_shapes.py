@@ -1360,13 +1360,13 @@ def fx_placeholder_targets(gm: torch.fx.GraphModule) -> List[str]:
 def eval_guards(
     gm: torch.fx.GraphModule, *args: Tensor, ignore_static: bool = True
 ) -> bool:
-    return gm.shape_env.evaluate_guards_for_args(
+    return gm.shape_env.evaluate_guards_for_args(  # type: ignore[operator, union-attr]
         fx_placeholder_vals(gm), args, ignore_static=ignore_static
     )
 
 
 def bind_symbols(gm: torch.fx.GraphModule, *args: Tensor) -> Dict[sympy.Symbol, int]:
-    return gm.shape_env.bind_symbols(fx_placeholder_vals(gm), args)
+    return gm.shape_env.bind_symbols(fx_placeholder_vals(gm), args)  # type: ignore[operator, union-attr]
 
 
 class DimDynamic(Enum):
@@ -5201,10 +5201,9 @@ class ShapeEnv:
         symints = {
             s.node.expr for s in symints if isinstance(s.node.expr, sympy.Symbol)
         }
-        guards = []
-        for g in self.guards:
-            if all(s in symints for s in g.expr.free_symbols):
-                guards.append(g)
+        guards = [
+            g for g in self.guards if all(s in symints for s in g.expr.free_symbols)
+        ]
         return guards
 
     def bind_symbols(
