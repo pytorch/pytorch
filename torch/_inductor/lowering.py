@@ -6416,17 +6416,54 @@ def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs):
             msg = f"{msg} Found from : \n {stack_trace}"
         V.graph.disable_cudagraphs_reason = msg
 
+<<<<<<< Updated upstream
     result = ir.WhileLoop.create(cond_fn, body_fn, carried_inputs, additional_inputs)
+=======
+    def require_exact_stride(fx_init, tb_init):
+        if isinstance(tb_init, (int, sympy.Symbol)):
+            return tb_init
+        return ir.ExternKernel.require_exact_strides(
+            tb_init, fx_init.meta["val"].stride(), allow_padding=False
+        )
+    new_carried_inputs = [
+        require_exact_stride(fx_init, tb_init)
+        for fx_init, tb_init in zip(V.graph.current_node.args[-2], carried_inputs)  # type: ignore[arg-type]
+    ]
+
+    result, mutated_inputs = ir.WhileLoop.create(
+        cond_fn,
+        body_fn,
+        new_carried_inputs,
+        additional_inputs,
+    )
+>>>>>>> Stashed changes
 
     def _map_output(x):
         if isinstance(x, ir.MultiOutput):
             return TensorBox.create(x)
+<<<<<<< Updated upstream
         elif isinstance(x, ir.ShapeAsConstantBuffer):
             return x.expr
         else:
             raise NotImplementedError(f"Don't support {x} output yet")
 
     return [_map_output(x) for x in result]
+=======
+        elif isinstance(x, ir.StorageBox):
+            return TensorBox(x)
+        elif isinstance(x, ir.ShapeAsConstantBuffer):
+            return x.expr
+        else:
+            return x
+
+    return list(map(_map_output, result + mutated_inputs))
+
+
+# This is a spcialized version of select because we're certain that the idx is valid
+@register_lowering(torch.ops._scan_helper.unsafe_select, type_promotion_kind=None)
+def _(dst, dim, idx):
+    return squeeze(slice_(dst, dim, idx, idx + 1, step=1, clamp=False), dim)
+>>>>>>> Stashed changes
 
 
 @register_lowering(torch.ops.higher_order.invoke_subgraph, type_promotion_kind=None)

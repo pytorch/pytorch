@@ -307,6 +307,7 @@ def _get_subgraph_names(gm: GraphModule) -> Generator[str, None, None]:
             gm.graph.find_nodes(
                 op="call_function", target=torch.ops.higher_order.while_loop
             ),
+            gm.graph.find_nodes(op="call_function", target=torch.ops.higher_order.scan),
         )
     ):
         if node.target == torch.ops.higher_order.cond:
@@ -319,6 +320,9 @@ def _get_subgraph_names(gm: GraphModule) -> Generator[str, None, None]:
             body_subgraph_name = node.args[1].name
             yield cond_subgraph_name
             yield body_subgraph_name
+        elif node.target == torch.ops.higher_order.scan:
+            subgraph_name = node.args[0].name
+            yield subgraph_name
 
 
 def _recursive_pre_grad_passes(
