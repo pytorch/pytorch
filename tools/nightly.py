@@ -65,7 +65,7 @@ from typing import (
 try:
     from packaging.version import Version
 except ImportError:
-    Version = None
+    Version = None  # type: ignore[assignment,misc]
 
 
 REPO_ROOT = Path(__file__).absolute().parent.parent
@@ -115,12 +115,6 @@ class PipSource(NamedTuple):
 
 PYTORCH_NIGHTLY_PIP_INDEX_URL = "https://download.pytorch.org/whl/nightly"
 PIP_SOURCES = {
-    "pypi": PipSource(
-        name="pypi",
-        index_url=os.getenv("PIP_INDEX_URL", "https://pypi.org"),
-        supported_platforms={"Linux", "macOS", "Windows"},
-        accelerator="cpu",  # platform dependent
-    ),
     "cpu": PipSource(
         name="cpu",
         index_url=f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/cpu",
@@ -255,6 +249,7 @@ class Venv:
             "-c",
             "import site; [print(p) for p in site.getsitepackages()]",
             python=python,
+            capture_output=True,
         ).stdout
         candidates = list(map(Path, filter(None, map(str.strip, output.splitlines()))))
         candidates = [p for p in candidates if p.is_dir() and p.name == "site-packages"]
@@ -302,6 +297,7 @@ class Venv:
                         self.base_python(
                             "-c",
                             f"import os, sys; print(os.path.abspath({p}))",
+                            capture_output=True,
                         ).stdout.strip()
                     ).absolute()
                     for p in [
@@ -341,7 +337,7 @@ class Venv:
         *args: str,
         python: Path | str | None = None,
         **popen_kwargs: Any,
-    ) -> subprocess.CompletedProcess:
+    ) -> subprocess.CompletedProcess[str]:
         """Run a Python command in the virtual environment."""
         if python is None:
             python = self.executable
@@ -350,7 +346,6 @@ class Venv:
         return subprocess.run(
             cmd,
             check=True,
-            capture_output=True,
             text=True,
             encoding="utf-8",
             env={**self._env, **env},
@@ -361,7 +356,7 @@ class Venv:
         self,
         *args: str,
         **popen_kwargs: Any,
-    ) -> subprocess.CompletedProcess:
+    ) -> subprocess.CompletedProcess[str]:
         """Run a Python command in the base environment."""
         return self.python(*args, python=self.base_executable, **popen_kwargs)
 
@@ -374,13 +369,14 @@ class Venv:
                 "format(sys.version_info, getattr(sys, 'abiflags', '')))"
             ),
             python=python,
+            capture_output=True,
         ).stdout.strip()
 
     def base_python_version(self) -> str:
         """Get the Python version for the base environment."""
         return self.python_version(python=self.base_executable)
 
-    def pip(self, *args: str, **popen_kwargs: Any) -> subprocess.CompletedProcess:
+    def pip(self, *args: str, **popen_kwargs: Any) -> subprocess.CompletedProcess[str]:
         """Run a pip command in the virtual environment."""
         return self.python("-m", "pip", *args, **popen_kwargs)
 
@@ -391,13 +387,13 @@ class Venv:
         prerelease: bool = False,
         upgrade: bool = False,
         **popen_kwargs: Any,
-    ) -> subprocess.CompletedProcess:
+    ) -> subprocess.CompletedProcess[str]:
         """Run a pip install command in the virtual environment."""
         if upgrade:
             args = ["--upgrade", *packages]
             verb = "Upgrading"
         else:
-            args = packages
+            args = list(packages)
             verb = "Installing"
         if prerelease:
             args = ["--pre", *args]
@@ -409,7 +405,10 @@ class Venv:
 
     @timed("Downloading packages")
     def pip_download(
-        self, *packages: str, prerelease: bool = False, **popen_kwargs: Any
+        self,
+        *packages: str,
+        prerelease: bool = False,
+        **popen_kwargs: Any,
     ) -> list[Path]:
         """Download a package in the virtual environment."""
         tmpdir = tempfile.TemporaryDirectory(prefix="pip-download-")
@@ -422,25 +421,34 @@ class Venv:
         if prerelease:
             args = ["--pre", *packages]
         else:
-            args = packages
-        _ = self.pip("download", "--dest", str(tempdir), *args, **popen_kwargs)
+            args = list(packages)
+        self.pip("download", "--dest", str(tempdir), *args, **popen_kwargs)
         files = list(tempdir.iterdir())
         print(f"Downloaded {len(files)} file(s) to {tempdir}:")
         for file in files:
             print(f"  - {file.name}")
         return files
 
-    def wheel(self, *args: str, **popen_kwargs: Any) -> subprocess.CompletedProcess:
+    def wheel(
+        self,
+        *args: str,
+        **popen_kwargs: Any,
+    ) -> subprocess.CompletedProcess[str]:
         """Run a wheel command in the virtual environment."""
         return self.python("-m", "wheel", *args, **popen_kwargs)
 
     @timed("Unpacking wheel file")
-    def wheel_unpack(self, wheel: Path | str, dest: Path | str) -> None:
+    def wheel_unpack(
+        self,
+        wheel: Path | str,
+        dest: Path | str,
+        **popen_kwargs: Any,
+    ) -> subprocess.CompletedProcess[str]:
         """Unpack a wheel into a directory."""
         wheel = Path(wheel).absolute()
         dest = Path(dest).absolute()
         assert wheel.is_file() and wheel.suffix.lower() == ".whl"
-        return self.wheel("unpack", "--dest", str(dest), str(wheel))
+        return self.wheel("unpack", "--dest", str(dest), str(wheel), **popen_kwargs)
 
     @contextlib.contextmanager
     def extracted_wheel(self, wheel: Path | str) -> Generator[Path]:
@@ -882,7 +890,7 @@ def make_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def parse_arguments():
+def parse_arguments() -> argparse.Namespace:
     parser = make_parser()
     args = parser.parse_args()
     args.branch = getattr(args, "branch", None)
