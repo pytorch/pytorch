@@ -29,6 +29,9 @@ from typing import (
     Union,
 )
 from typing_extensions import TypeAlias, TypeIs
+from urllib.parse import urlparse
+
+import oras.client
 
 import torch
 import torch._weights_only_unpickler as _weights_only_unpickler
@@ -872,6 +875,46 @@ def _check_save_filelike(f):
         )
 
 
+def _is_oci_destination(f: FILE_LIKE) -> bool:
+    if isinstance(f, str):
+        return urlparse(f).scheme == "oci"
+    return False
+
+
+def _save_oci(
+    obj: object,
+    f: FILE_LIKE,
+    oci_registry_token: str,
+    oci_registry_username: str,
+    pickle_module: Any = pickle,
+    pickle_protocol: int = DEFAULT_PROTOCOL,
+    _disable_byteorder_record: bool = False,
+):
+    client = oras.client.OrasClient()
+    url = urlparse(str(f))
+    result = client.login(
+        password=oci_registry_token, username=oci_registry_username, hostname=url.netloc
+    )
+    if result["Status"] != "Login Succeeded":
+        raise RuntimeError("Cannot login to OCI registry")
+    # oras client cannot read the content from stream, so we need to save the model to a file
+    # TODO try to have a configuration to define where the temporary model will be saved
+    with tempfile.NamedTemporaryFile() as file_model:
+        with _open_zipfile_writer(file_model) as opened_zipfile:
+            _save(
+                obj,
+                opened_zipfile,
+                pickle_module,
+                pickle_protocol,
+                _disable_byteorder_record,
+            )
+        client.push(
+            files=[f"{file_model.name}:application/vnd.pytorch.model.layer+zip"],
+            target=f"{url.netloc}{url.path}",
+            disable_path_validation=True,
+        )
+
+
 def save(
     obj: object,
     f: FILE_LIKE,
@@ -879,6 +922,8 @@ def save(
     pickle_protocol: int = DEFAULT_PROTOCOL,
     _use_new_zipfile_serialization: bool = True,
     _disable_byteorder_record: bool = False,
+    oci_registry_token: Optional[str] = None,
+    oci_registry_username: Optional[str] = None,
 ) -> None:
     # Reference: https://github.com/pytorch/pytorch/issues/54354
     # The first line of this docstring overrides the one Sphinx generates for the
@@ -923,6 +968,22 @@ def save(
     torch._C._log_api_usage_once("torch.save")
     _check_dill_version(pickle_module)
     _check_save_filelike(f)
+
+    if _is_oci_destination(f):
+        if oci_registry_token is None or oci_registry_username is None:
+            raise ValueError(
+                "oci_registry_token and oci_registry_username are required when saving to an OCI registry"
+            )
+        _save_oci(
+            obj,
+            f,
+            oci_registry_token,
+            oci_registry_username,
+            pickle_module,
+            pickle_protocol,
+            _disable_byteorder_record,
+        )
+        return
 
     if _use_new_zipfile_serialization:
         with _open_zipfile_writer(f) as opened_zipfile:
@@ -1201,6 +1262,22 @@ def _save(
             zip_file.write_record(name, storage, num_bytes)
 
 
+def _download_oci(
+    f: FILE_LIKE, oci_registry_token: str = "", oci_registry_username: str = ""
+):
+    client = oras.client.OrasClient()
+    url = urlparse(str(f))
+    result = client.login(
+        password=oci_registry_token, username=oci_registry_username, hostname=url.netloc
+    )
+    if result["Status"] != "Login Succeeded":
+        raise RuntimeError("Cannot login to OCI registry")
+    files = client.pull(target=f"{url.netloc}{url.path}")
+    if len(files) != 1:
+        raise RuntimeError(f"Expected one file, but got {len(files)}")
+    return files[0]
+
+
 def load(
     f: FILE_LIKE,
     map_location: MAP_LOCATION = None,
@@ -1208,6 +1285,8 @@ def load(
     *,
     weights_only: Optional[bool] = None,
     mmap: Optional[bool] = None,
+    oci_registry_token: Optional[str] = None,
+    oci_registry_username: Optional[str] = None,
     **pickle_load_args: Any,
 ) -> Any:
     # Reference: https://github.com/pytorch/pytorch/issues/54354
@@ -1411,6 +1490,14 @@ def load(
 
     if "encoding" not in pickle_load_args.keys():
         pickle_load_args["encoding"] = "utf-8"
+
+    # Download the model file from the OCI registry
+    if _is_oci_destination(f):
+        if oci_registry_token is None or oci_registry_username is None:
+            raise ValueError(
+                "oci_registry_token and oci_registry_username are required when loading from an OCI registry"
+            )
+        f = _download_oci(f, oci_registry_token, oci_registry_username)
 
     with _open_file_like(f, "rb") as opened_file:
         if _is_zipfile(opened_file):

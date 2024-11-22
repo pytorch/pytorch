@@ -1026,6 +1026,24 @@ class TestSerialization(TestCase, SerializationMixin):
             f.seek(0)
             state = torch.load(f)
 
+    @unittest.skipIf(not os.environ.get("OCI_REGISTRY_TOKEN"), "Missing OCI_REGISTRY_TOKEN environment variable")
+    @unittest.skipIf(not os.environ.get("OCI_REGISTRY_USERNAME"), "Missing OCI_REGISTRY_USERNAME environment variable")
+    @unittest.skipIf(not os.environ.get("OCI_REGISTRY"), "Missing OCI_REGISTRY environment variable")
+    def test_oci_serialization(self):
+        model = torch.nn.Conv2d(20, 3200, kernel_size=3)
+        oci_registry_token = os.environ["OCI_REGISTRY_TOKEN"]
+        oci_registry_username = os.environ["OCI_REGISTRY_USERNAME"]
+        oci_registry = os.environ["OCI_REGISTRY"]
+
+        torch.save(model.state_dict(), f"oci://ghcr.io/{oci_registry}/testingmodel:test",
+                   oci_registry_token=oci_registry_token,
+                   oci_registry_username=oci_registry_username)
+        state = torch.load(f"oci://ghcr.io/{oci_registry}/testingmodel:test",
+                           oci_registry_token=oci_registry_token,
+                           oci_registry_username=oci_registry_username)
+
+        self.assertEqual(state['weight'].size(), model.weight.size())
+
     @parametrize('weights_only', (True, False))
     def test_pathlike_serialization(self, weights_only):
         model = torch.nn.Conv2d(20, 3200, kernel_size=3)
