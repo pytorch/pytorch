@@ -51,7 +51,7 @@ def requirements_installed() -> bool:
             "Requirements not installed, run the following command to install:"
         )
         logger.error(
-            "    > %s install -r %s/requirements.txt", sys.executable, ROOT_PATH
+            "    > %s -m pip install -r %s/requirements.txt", sys.executable, ROOT_PATH
         )
         return False
 
@@ -76,6 +76,8 @@ def split_build(cmd: str) -> None:
         extra_env={"BUILD_LIBTORCH_WHL": "1", "BUILD_PYTHON_ONLY": "0"},
     )
     logger.info("Running %s for torch wheel", cmd)
+    # NOTE: Passing --cmake is necessary here since the torch frontend has it's
+    # own cmake files that it needs to generate
     setup_py(
         [cmd, "--cmake"],
         extra_env={"BUILD_LIBTORCH_WHL": "0", "BUILD_PYTHON_ONLY": "1"},
