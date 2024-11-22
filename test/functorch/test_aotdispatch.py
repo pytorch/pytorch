@@ -78,6 +78,7 @@ from torch.testing._internal.optests import (
     _test_aot_autograd_forwards_backwards_helper,
     aot_autograd_check,
 )
+from torch.testing._internal.subclasses import WrapperSubclass
 from torch.testing._internal.two_tensor import TwoTensor, TwoTensorMode
 
 
@@ -385,7 +386,7 @@ class TestAOTAutograd(AOTTestCase):
                         if not isinstance(x, torch.Tensor):
                             x_copy = x
                         else:
-                            x_copy = x.clone().detach().requires_grad_(x.requires_grad)
+                            x_copy = x.detach().clone().requires_grad_(x.requires_grad)
                             if x.requires_grad and not x.is_leaf:
                                 x_copy = x_copy.clone()
 
@@ -787,9 +788,9 @@ def forward(self, primals_1):
             return x.sin().cos()
 
         a = torch.ones(4, requires_grad=True)
-        a2 = a.clone().detach().requires_grad_()
-        a3 = a.clone().detach().requires_grad_()
-        a4 = a.clone().detach().requires_grad_()
+        a2 = a.detach().clone().requires_grad_()
+        a3 = a.detach().clone().requires_grad_()
+        a4 = a.detach().clone().requires_grad_()
         aa = TwoTensor(a, a2)
         aa2 = TwoTensor(a3, a4)
         aaaa = TwoTensor(aa, aa2)
@@ -814,13 +815,13 @@ def forward(self, primals_1):
             return x.sin().cos()
 
         a = torch.ones(4, requires_grad=True)
-        a2 = a.clone().detach().requires_grad_()
-        a3 = a.clone().detach().requires_grad_()
-        a4 = a.clone().detach().requires_grad_()
+        a2 = a.detach().clone().requires_grad_()
+        a3 = a.detach().clone().requires_grad_()
+        a4 = a.detach().clone().requires_grad_()
         new_aa = TwoTensor(a3, a4)
         aa = TwoTensor(a, a2)
 
-        aa2 = aa.clone().detach().requires_grad_()
+        aa2 = aa.detach().clone().requires_grad_()
         aaaa = TwoTensor(aa, aa2)
         out = f(new_aa)
         new_out = out + aaaa
@@ -848,7 +849,7 @@ metadata incorrectly.
         custom_aa = ConstantExtraMetadataTensor(custom_a)
         custom_aa.constant_attribute = 4
 
-        custom_aa_compile = custom_aa.clone().detach().requires_grad_()
+        custom_aa_compile = custom_aa.detach().clone().requires_grad_()
         custom_aa_compile.elem.constant_attribute = 6
         out_eager = f(custom_aa)
 
@@ -873,18 +874,18 @@ metadata incorrectly.
             return x.sin().cos() + res
 
         x = torch.ones(4, requires_grad=True)
-        x2 = x.clone().detach().requires_grad_()
+        x2 = x.detach().clone().requires_grad_()
         xx = TwoTensor(x, x2)
-        xx2 = xx.clone().detach().requires_grad_()
+        xx2 = xx.detach().clone().requires_grad_()
 
         x_nested = TwoTensor(xx, xx2)
-        x_nested_compile = x_nested.clone().detach().requires_grad_()
+        x_nested_compile = x_nested.detach().clone().requires_grad_()
 
-        y_nested = x_nested.clone().detach().requires_grad_()
-        y_nested_compile = y_nested.clone().detach().requires_grad_()
+        y_nested = x_nested.detach().clone().requires_grad_()
+        y_nested_compile = y_nested.detach().clone().requires_grad_()
 
-        z = x.clone().detach().requires_grad_()
-        z_compile = z.clone().detach().requires_grad_()
+        z = x.detach().clone().requires_grad_()
+        z_compile = z.detach().clone().requires_grad_()
 
         out_eager = f(x_nested, y_nested, z)
         compiled_f = torch.compile(f, backend="aot_eager")
@@ -925,12 +926,12 @@ metadata incorrectly.
             return y * y_elem * y_elem_elem * y_elem_metadata + x
 
         x = torch.ones(4, requires_grad=True)
-        x2 = x.clone().detach().requires_grad_()
+        x2 = x.detach().clone().requires_grad_()
         xx = TwoTensor(x, x2)
-        xx2 = xx.clone().detach().requires_grad_()
+        xx2 = xx.detach().clone().requires_grad_()
 
         x_nested = TwoTensor(xx, xx2)
-        x_nested_compile = x_nested.clone().detach().requires_grad_()
+        x_nested_compile = x_nested.detach().clone().requires_grad_()
 
         a = torch.ones(4, requires_grad=True)
         custom_a = ConstantExtraMetadataTensor(a)
@@ -938,7 +939,7 @@ metadata incorrectly.
         custom_aa = ConstantExtraMetadataTensor(custom_a)
         custom_aa.constant_attribute = 4
 
-        custom_aa_compile = custom_aa.clone().detach().requires_grad_()
+        custom_aa_compile = custom_aa.detach().clone().requires_grad_()
         custom_aa_compile.constant_attribute = 4
         custom_aa_compile.elem.constant_attribute = 6
 
@@ -4712,10 +4713,10 @@ class <lambda>(torch.nn.Module):
         # Now test the backward
         x = torch.randn(2, requires_grad=True)
         y = torch.randn(2, requires_grad=True)
-        x2 = x.clone().detach().requires_grad_(True)
-        y2 = y.clone().detach().requires_grad_(True)
-        x3 = x.clone().detach().requires_grad_(True)
-        y3 = y.clone().detach().requires_grad_(True)
+        x2 = x.detach().clone().requires_grad_(True)
+        y2 = y.detach().clone().requires_grad_(True)
+        x3 = x.detach().clone().requires_grad_(True)
+        y3 = y.detach().clone().requires_grad_(True)
         f_graph_joint = aot_export_joint_simple(f, [x, y], trace_joint=True)
         num_fw_outputs = 2
         fw_g, bw_g = default_partition(
@@ -5002,8 +5003,8 @@ class TestPartitioning(AOTTestCase):
         ref.sum().backward()
 
         # Compiled function calculation
-        res_a = ref_a.clone().detach().requires_grad_(True)
-        res_b = ref_b.clone().detach().requires_grad_(True)
+        res_a = ref_a.detach().clone().requires_grad_(True)
+        res_b = ref_b.detach().clone().requires_grad_(True)
 
         def compile_fn(x, _):
             return x
@@ -5321,10 +5322,10 @@ class TestAOTDispatch(AOTTestCase):
         a_ref = TwoTensor(a1_ref, a2_ref)
         b_ref = torch.ones(3, 3, requires_grad=True)
 
-        a1_test = a1_ref.clone().detach().requires_grad_(True)
-        a2_test = a2_ref.clone().detach().requires_grad_(True)
+        a1_test = a1_ref.detach().clone().requires_grad_(True)
+        a2_test = a2_ref.detach().clone().requires_grad_(True)
         a_test = TwoTensor(a1_test, a2_test)
-        b_test = b_ref.clone().detach().requires_grad_(True)
+        b_test = b_ref.detach().clone().requires_grad_(True)
 
         fw_graph_cell = [None]
         bw_graph_cell = [None]
@@ -5436,10 +5437,10 @@ def forward(self, tangents_1, tangents_2):
         a_ref = TwoTensor(a1_ref, a2_ref)
         b_ref = torch.ones(3, 3, requires_grad=True)
 
-        a1_test = a1_ref.clone().detach().requires_grad_(True)
-        a2_test = a2_ref.clone().detach().requires_grad_(True)
+        a1_test = a1_ref.detach().clone().requires_grad_(True)
+        a2_test = a2_ref.detach().clone().requires_grad_(True)
         a_test = TwoTensor(a1_test, a2_test)
-        b_test = b_ref.clone().detach().requires_grad_(True)
+        b_test = b_ref.detach().clone().requires_grad_(True)
 
         compiled_f = aot_function(
             f,
@@ -5476,10 +5477,10 @@ metadata incorrectly.
         b_ref = TwoTensor(b1_ref, b2_ref)
         a_ref = torch.ones(3, 3, requires_grad=True)
 
-        b1_test = b1_ref.clone().detach().requires_grad_(True)
-        b2_test = b2_ref.clone().detach().requires_grad_(True)
+        b1_test = b1_ref.detach().clone().requires_grad_(True)
+        b2_test = b2_ref.detach().clone().requires_grad_(True)
         b_test = TwoTensor(b1_test, b2_test)
-        a_test = a_ref.clone().detach().requires_grad_(True)
+        a_test = a_ref.detach().clone().requires_grad_(True)
 
         compiled_f = aot_function(
             f,
@@ -5514,10 +5515,10 @@ metadata incorrectly.
         b_ref = b_ref_base + 1
         a_ref = a_ref_base + 1
 
-        b1_test = b1_ref.clone().detach().requires_grad_(True)
-        b2_test = b2_ref.clone().detach().requires_grad_(True)
+        b1_test = b1_ref.detach().clone().requires_grad_(True)
+        b2_test = b2_ref.detach().clone().requires_grad_(True)
         b_test_base = TwoTensor(b1_test, b2_test)
-        a_test_base = a_ref_base.clone().detach().requires_grad_(True)
+        a_test_base = a_ref_base.detach().clone().requires_grad_(True)
         b_test = b_test_base + 1
         a_test = a_test_base + 1
 
@@ -5567,10 +5568,10 @@ metadata incorrectly.
         b_ref = b_ref_base + 1
         a_ref = a_ref_base + 1
 
-        b1_test = b1_ref.clone().detach().requires_grad_(True)
-        b2_test = b2_ref.clone().detach().requires_grad_(True)
+        b1_test = b1_ref.detach().clone().requires_grad_(True)
+        b2_test = b2_ref.detach().clone().requires_grad_(True)
         b_test_base = TwoTensor(b1_test, b2_test)
-        a_test_base = a_ref_base.clone().detach().requires_grad_(True)
+        a_test_base = a_ref_base.detach().clone().requires_grad_(True)
         b_test = b_test_base + 1
         a_test = a_test_base + 1
 
@@ -5622,10 +5623,10 @@ metadata incorrectly.
         b_ref = b_ref_base + 1
         a_ref = a_ref_base + 1
 
-        b1_test = b1_ref.clone().detach().requires_grad_(True)
-        b2_test = b2_ref.clone().detach().requires_grad_(True)
+        b1_test = b1_ref.detach().clone().requires_grad_(True)
+        b2_test = b2_ref.detach().clone().requires_grad_(True)
         b_test_base = TwoTensor(b1_test, b2_test)
-        a_test_base = a_ref_base.clone().detach().requires_grad_(True)
+        a_test_base = a_ref_base.detach().clone().requires_grad_(True)
         b_test = b_test_base + 1
         a_test = a_test_base + 1
 
@@ -5672,10 +5673,10 @@ metadata incorrectly.
         b_ref = b_ref_base + 1
         a_ref = a_ref_base + 1
 
-        b1_test = b1_ref.clone().detach().requires_grad_(True)
-        b2_test = b2_ref.clone().detach().requires_grad_(True)
+        b1_test = b1_ref.detach().clone().requires_grad_(True)
+        b2_test = b2_ref.detach().clone().requires_grad_(True)
         b_test_base = TwoTensor(b1_test, b2_test)
-        a_test_base = a_ref_base.clone().detach().requires_grad_(True)
+        a_test_base = a_ref_base.detach().clone().requires_grad_(True)
         b_test = b_test_base + 1
         a_test = a_test_base + 1
 
@@ -6226,6 +6227,32 @@ metadata incorrectly.
 """,  # noqa: F541
         ):
             y2.backward(gradient=torch.randn(2, 3))
+
+    def test_tangent_type_coercion(self):
+        def fn(x):
+            return x.clone()
+
+        ref_y = fn(WrapperSubclass(torch.randn(2, 3, requires_grad=True)))
+        ref_y.sum().backward()
+
+        fn_comp = torch.compile(fn, fullgraph=True)
+
+        x = TwoTensor(
+            torch.randn(2, 3, requires_grad=True), torch.randn(2, 3, requires_grad=True)
+        )
+        y = fn_comp(x)
+        y.backward(gradient=TwoTensor(torch.randn(2, 3), torch.randn(2, 3)))
+
+        x2 = TwoTensor(
+            torch.randn(2, 3, requires_grad=True), torch.randn(2, 3, requires_grad=True)
+        )
+        y2 = fn_comp(x2)
+        # Test coercion WrapperSubclass -> TwoTensor
+        y2.backward(gradient=WrapperSubclass(torch.randn(2, 3)))
+
+        y3 = torch.compile(fn, fullgraph=True)(torch.randn(2, 3, requires_grad=True))
+        # Test coercion WrapperSubclass -> Tensor
+        y3.backward(gradient=WrapperSubclass(torch.randn(2, 3)))
 
     @torch._inductor.config.patch({"freezing": True})
     def test_inductor_freezing_with_subclasses(self):
