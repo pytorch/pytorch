@@ -3944,7 +3944,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
 
         with self.assertRaisesRegex(
             RuntimeError,
-            r"split\(\): not supported for NestedTensor on dim=1",
+            r"split\(\): not supported for NestedTensor on ragged dim",
         ):
             torch.split(nt, 2, 1)
 
@@ -3970,7 +3970,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         )
         with self.assertRaisesRegex(
             RuntimeError,
-            r"split_with_sizes\(\): not supported for NestedTensor on dim=1",
+            r"split_with_sizes\(\): not supported for NestedTensor on ragged dim",
         ):
             torch.split(nt, [1, 2], 1)
 
@@ -4176,7 +4176,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
 
         # chunk on ragged dim not supported
         with self.assertRaisesRegex(
-            RuntimeError, "chunk.* not supported for NestedTensor on dim=1"
+            RuntimeError, "chunk.* not supported for NestedTensor on ragged dim"
         ):
             nt.chunk(2, dim=1)
 
@@ -4213,7 +4213,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
 
         # squeeze on ragged dim not supported
         with self.assertRaisesRegex(
-            RuntimeError, "squeeze.* not supported for NestedTensor on dim=1"
+            RuntimeError, "squeeze.* not supported for NestedTensor on ragged dim"
         ):
             nt.squeeze(1)
 

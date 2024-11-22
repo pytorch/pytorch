@@ -2043,9 +2043,9 @@ def _nested_from_padded_tensor_default(func, *args, **kwargs):
 
     # only 3D padded with ragged packed dim=0 is supported by the underlying FBGEMM
     # kernel so do shape gymnastics
-    padded_shape = padded.shape
     if ragged_idx > 1:
         padded = padded.transpose(ragged_idx, 1)
+    padded_ragged_dim1_shape = padded.shape
     if padded.dim() > 3:
         padded = padded.flatten(start_dim=2)
     elif padded.dim() < 3:
@@ -2063,9 +2063,9 @@ def _nested_from_padded_tensor_default(func, *args, **kwargs):
         values = values.to(torch.bool)
 
     # shape gymnastics part 2
-    if len(padded_shape) > 3:
-        values = values.unflatten(-1, padded_shape[2:])
-    elif len(padded_shape) < 3:
+    if len(padded_ragged_dim1_shape) > 3:
+        values = values.unflatten(-1, padded_ragged_dim1_shape[2:])
+    elif len(padded_ragged_dim1_shape) < 3:
         values = values.squeeze(-1)
     if ragged_idx > 1:
         values = values.transpose(ragged_idx - 1, 0)
