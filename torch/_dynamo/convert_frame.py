@@ -869,13 +869,19 @@ def _compile(
     if ca_metrics := torch._dynamo.utils.get_compiled_autograd_metrics(
         locals.get("self")
     ):
-        ca_gm, ca_start, ca_end = ca_metrics
+        ca_gm, ca_id, ca_start_ns, ca_end_ns = ca_metrics
+        ca_event = f"compiled_autograd_{ca_id}"
         chromium_event_log.log_event_start(
-            "compiled_autograd", ca_start, {}, log_pt2_compile_event=True
+            ca_event, ca_start_ns, {}, log_pt2_compile_event=True
         )
         chromium_event_log.log_event_end(
-            "compiled_autograd", ca_end, {}, ca_start, log_pt2_compile_event=True
+            ca_event,
+            ca_end_ns,
+            {},
+            ca_start_ns,
+            log_pt2_compile_event=True,
         )
+        # TODO(xmfan): add compiled autograd id into the tlparse filename
         trace_structured(
             "compiled_autograd_graph",
             payload_fn=lambda: ca_gm.print_readable(print_output=False),

@@ -18,7 +18,7 @@ from torch._dynamo.utils import (
     set_compiled_autograd_metrics,
     set_locals_to_steal,
 )
-from torch._logging import getArtifactLogger, trace_structured
+from torch._logging import getArtifactLogger
 from torch._prims_common import clone_preserve_strides
 from torch._subclasses import FakeTensorMode
 from torch.fx import GraphModule
@@ -93,6 +93,7 @@ class AutogradCompilerInstance:
         origins: List[List[Tuple[int, str]]],
     ):
         self.start_time = time.time_ns()
+        self.id = counters["compiled_autograd"]["captures"]
         counters["compiled_autograd"]["captures"] += 1
         self.aot_graph_cls_name: Optional[str] = None
         self.aot_graph_infos: Dict[int, Dict[str, Any]] = {}
@@ -362,7 +363,7 @@ class AutogradCompilerInstance:
             runtime_inputs_to_move = self.move_graph_nodes_to_cuda(self.fx_tracer.graph)
 
         graph = GraphModule(
-            self.fx_tracer.root, self.fx_tracer.graph, "CompiledAutograd"
+            self.fx_tracer.root, self.fx_tracer.graph, f"CompiledAutograd{self.id}"
         )
         set_locals_to_steal(graph, ["inputs"])
         lazy_graph_code = lazy_format_graph_code(
@@ -374,12 +375,6 @@ class AutogradCompilerInstance:
         )
         compiled_autograd_log.info("%s", lazy_graph_code)
         verbose_log.debug("%s", lazy_graph_code)
-        # TODO: remove this
-        # still needed in case dynamo errors
-        trace_structured(
-            "compiled_autograd_graph",
-            payload_fn=lambda: graph.print_readable(print_output=False),
-        )
 
         def runtime_wrapper(compiled_fn, inputs, sizes, scalars, hooks):
             global in_compiled_autograd_region
@@ -394,7 +389,7 @@ class AutogradCompilerInstance:
                 in_compiled_autograd_region = False
 
         set_compiled_autograd_metrics(
-            graph, start_time=self.start_time, end_time=time.time_ns()
+            graph, self.id, start_time_ns=self.start_time, end_time_ns=time.time_ns()
         )
         return runtime_wrapper, self.compiler_fn(graph)
 
