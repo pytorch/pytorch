@@ -10592,6 +10592,9 @@ Args:
 Keyword args:
     {dtype}
 
+.. note:: Use the `dtype` argument if you need the result in a specific tensor type.
+          Otherwise, the result type may be automatically promoted (e.g., from `torch.int32` to `torch.int64`).
+
 Example::
 
     >>> a = torch.randn(1, 3)
@@ -13829,7 +13832,7 @@ are freshly created instead of aliasing the input.
 add_docstr(
     torch.expand_copy,
     r"""
-Performs the same operation as :func:`torch.expand`, but all output tensors
+Performs the same operation as :func:`torch.Tensor.expand`, but all output tensors
 are freshly created instead of aliasing the input.
 """,
 )
