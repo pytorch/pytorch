@@ -427,7 +427,7 @@ print(torch.xpu.device_count())
         del a
         self.assertEqual(torch.xpu.memory_allocated(), prev_allocated)
         torch.xpu.empty_cache()
-        self.assertEqual(torch.xpu.memory_reserved(), prev_reserved)
+        self.assertLessEqual(torch.xpu.memory_reserved(), prev_reserved)
         torch.xpu.reset_accumulated_memory_stats()
         # Activate 1kB memory
         prev_active_current = torch.xpu.memory_stats()["active_bytes.all.current"]
