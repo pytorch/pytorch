@@ -1655,7 +1655,9 @@ def is_dynamic(*args):
     from . import ir
 
     for t in args:
-        if isinstance(t, (ir.TensorBox, ir.StorageBox, ir.BaseView, ir.ComputedBuffer)):
+        if isinstance(
+            t, (ir.TensorBox, ir.StorageBox, ir.BaseView, ir.ComputedBuffer, ir.Buffer)
+        ):
             if has_free_symbols(t.maybe_get_size() or ()) or has_free_symbols(
                 t.maybe_get_stride() or ()
             ):
