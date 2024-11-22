@@ -8786,6 +8786,7 @@ class CommonTemplate:
         result = fn(torch.randn([1, 2, 16, 4]).requires_grad_())
         result.sum().backward()
 
+    @skip_if_cpp_wrapper
     def test_dropout2(self):
         n = 100000
         weight = torch.ones(
@@ -8827,9 +8828,6 @@ class CommonTemplate:
         if is_halide_backend(self.device):
             self.assertEqual(fw_code.count("halide_helpers.rand"), 1)
             self.assertEqual(bw_code.count("halide_helpers.rand"), 0)
-        elif config.cpp_wrapper:
-            self.assertEqual(fw_code.count("_randint_"), 1)
-            self.assertEqual(bw_code.count("_randint_"), 0)
         elif self.device == GPU_TYPE:
             self.assertEqual(fw_code.count("tl.rand"), 1)
             self.assertEqual(bw_code.count("tl.rand"), 0)
@@ -8848,6 +8846,7 @@ class CommonTemplate:
         self.assertTrue(same(g2, g3))
 
     @config.patch(search_autotune_cache=False)
+    @skip_if_cpp_wrapper
     def test_dropout3(self):
         m = torch.nn.Sequential(
             torch.nn.Linear(32, 32, bias=False),
@@ -8869,32 +8868,15 @@ class CommonTemplate:
         if is_halide_backend(self.device):
             self.assertEqual(fw_code.count("halide_helpers.rand"), 2)
             self.assertEqual(bw_code.count("halide_helpers.rand"), 0)
-        elif config.cpp_wrapper:
-            if self.device == GPU_TYPE:
-                # The calls to the other rand functions are in separately generated
-                # files with CUDA kernels.
-                self.assertEqual(fw_code.count("_randint_"), 1)
-                self.assertEqual(fw_code.count("_rand_"), 0)
-                self.assertEqual(bw_code.count("_randint_"), 0)
-                self.assertEqual(bw_code.count("_rand_"), 0)
-            else:
-                self.assertEqual(fw_code.count("_randint_"), 1)
-                self.assertEqual(fw_code.count("_rand_"), 2)
-                self.assertEqual(bw_code.count("_randint_"), 0)
-                self.assertEqual(bw_code.count("_rand_"), 0)
         elif self.device == GPU_TYPE:
             self.assertEqual(fw_code.count("tl.rand"), 2)
             self.assertEqual(bw_code.count("tl.rand"), 0)
-
-        if config.cpp_wrapper and self.device == GPU_TYPE:
-            # GPU cpp_wrapper kernels are generated in two passes, and only the second
-            # pass is kept in the metrics.  This ends up excluding two kernels from the
-            # generated kernel count.
-            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
-        else:
-            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 4)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 4)
 
     def test_randint_kernel_count(self):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("Only valid for GPU!")
+
         @torch._dynamo.optimize_assert("inductor")
         def fn1():
             random_tensor1 = torch.randint(10, [32], device=self.device)
@@ -8903,15 +8885,12 @@ class CommonTemplate:
             return random_tensor1, random_tensor2, random_tensor3
 
         _, source_codes = run_and_get_code(fn1)
-        self.assertEqual(len(source_codes), 1)
-        if not config.cpp_wrapper and (
-            self.device != "cpu" or config.cpu_backend == "triton"
-        ):
-            self.assertEqual(source_codes[0].count("async_compile.triton"), 2)
-        else:
-            # The cpp_wrapper pass we record doesn't involve triton at all, and neither
-            # does the current default for CPU code generation.
-            self.assertEqual(source_codes[0].count("async_compile.triton"), 0)
+        # cpp_wrapper does a 2-pass generation on GPU.
+        self.assertEqual(len(source_codes), 1 if not config.cpp_wrapper else 2)
+        self.assertEqual(source_codes[0].count("async_compile.triton"), 2)
+        if config.cpp_wrapper:
+            # The second pass should not involve triton at all.
+            self.assertEqual(source_codes[1].count("async_compile.triton"), 0)
 
     def test_roll(self):
         def fn(a):
@@ -9986,12 +9965,11 @@ class CommonTemplate:
             )
 
             # Check code for block pointers
-            foo_opt = torch.compile(foo)
+            foo_opt = torch._dynamo.optimize("inductor")(foo)
             code = run_and_get_triton_code(foo_opt, *inps)
-            if not config.cpp_wrapper:
-                have_block_ptr = code.count("tl.make_block_ptr") > 0
-                if not is_halide_backend(self.device):
-                    self.assertEqual(have_block_ptr, use_block_ptr)
+            have_block_ptr = code.count("tl.make_block_ptr") > 0
+            if not is_halide_backend(self.device):
+                self.assertEqual(have_block_ptr, use_block_ptr)
 
     @requires_gpu()
     @unittest.skipIf(
@@ -11934,8 +11912,6 @@ if HAS_GPU and not TEST_WITH_ASAN:
     copy_tests(CommonTemplate, GPUTests, GPU_TYPE)
 
     @instantiate_parametrized_tests
-    # cpp_wrapper doesn't capture output Triton kernels for analysis
-    @skip_if_cpp_wrapper
     class TritonCodeGenTests(TestCase):
         from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 
@@ -12313,6 +12289,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
             self.assertFalse("out_ptr0" in code)
             self.assertEqual(fn_opt(*inps), fn(*inps))
 
+        @skip_if_cpp_wrapper
         def test_numpy_on_gpu(self):
             x = np.arange(10, dtype=np.float32)
 
@@ -12713,6 +12690,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
 
         @patch("torch._inductor.config.comment_origin", True)
         @patch("torch._functorch.config.max_dist_from_bw", 0)
+        @skip_if_cpp_wrapper
         def test_inductor_sequence_nr(self):
             class Model(torch.nn.Module):
                 def __init__(self) -> None:
@@ -12838,6 +12816,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
 
                 print(p.key_averages().table(max_name_column_width=200))
 
+        @skip_if_cpp_wrapper
         def test_non_blocking_copy_codegen(self):
             # Checks non_blocking arg is present in codegen
             # (see https://github.com/pytorch/pytorch/issues/136260)
@@ -12847,12 +12826,12 @@ if HAS_GPU and not TEST_WITH_ASAN:
             inp = torch.randn(3, 4)
             _, (code,) = run_and_get_code(torch.compile(fn), inp)
 
-            if not config.cpp_wrapper:
-                FileCheck().check("copy_").check_same("True").run(code)
-            else:
+            if config.cpp_wrapper:
                 # cpp_wrapper passes "True" as "1" in this case, so check it more
                 # explicitly.
                 FileCheck().check("aoti_torch_copy_").check_same("1)").run(code)
+            else:
+                FileCheck().check("copy_").check_same("True").run(code)
 
         def test_layer_norm_inplaces_after_matmul(self):
             # https://github.com/pytorch/pytorch/issues/132826
