@@ -594,7 +594,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
 
     output_specs = [
         OutputSpec(
-            OutputKind.LOSS_OUTPUT if joint_loss_index is not None else spec.kind,
+            OutputKind.LOSS_OUTPUT if i == joint_loss_index else spec.kind,
             update_arg(spec.arg, new_outputs[i]),
             old_new_placeholder_map.get(spec.target, spec.target),
         )

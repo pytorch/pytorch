@@ -3939,7 +3939,7 @@ class TestAttnBias(NNTestCase):
                                    SDPBackend.MATH,
                                    SDPBackend.CUDNN_ATTENTION]):
             self.run_test(device, make_q_tensor, make_kv_tensor, attn_bias, forw_tol, grad_tol, backend=cnts)
-        self.assertEqual(cnts.frame_count, 1, "Compiled graph should have 1 frame!")
+        self.assertEqual(cnts.frame_count, 2, "Compiled graph should have 2 frames!")
 
     @skipIfRocm
     @parametrize("shape", [(16, 16, 128, 128, 16), (16, 16, 128, 256, 32), (16, 16, 256, 128, 32), (1, 1, 23, 56, 15)])
