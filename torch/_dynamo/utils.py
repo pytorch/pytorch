@@ -3363,7 +3363,7 @@ def get_compiled_autograd_metrics(maybe_gm):
     assert type(start) == type(end)
     if not start:
         return None
-    return start, end
+    return maybe_gm, start, end
 
 
 def set_compiled_autograd_metrics(gm, start_time, end_time):
