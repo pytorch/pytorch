@@ -258,6 +258,18 @@ class TestSplitCatFxPasses(TestCase):
 
             return torch.cat(final_items, dim=1)
 
+        def next_split_getitem_partial_used(x):
+            fs = torch.split(x, [4, 4, 24], dim=1)
+            item0 = fs[0]
+            item2 = fs[2]
+
+            final_items = [item0]
+            ns = item2.split((4, 4, 4, 4, 4, 4), 1)
+            final_items.extend(ns[0:1])
+            final_items.extend(ns[3:4])
+
+            return torch.cat(final_items, dim=1)
+
         args = [
             torch.randn(2, 32),
         ]
@@ -277,6 +289,7 @@ class TestSplitCatFxPasses(TestCase):
             (duplicate_getitems_neg_index, 1),
             (split_getitem_gap, 1),
             (split_getitem_out_of_order, 1),
+            (next_split_getitem_partial_used, 1),
             (split_partial_getitem_cat, 1),
         ]:
             expected = fn(*args)
