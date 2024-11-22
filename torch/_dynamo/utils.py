@@ -874,6 +874,7 @@ class CompilationMetrics:
     triton_version: Optional[str] = None
     feature_usage: Optional[dict[str, bool]] = None
 
+
 DEFAULT_COMPILATION_METRICS_LIMIT = 64
 
 
