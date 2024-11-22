@@ -896,11 +896,14 @@ class SIMDKernel(Kernel):
         uniform_stride_order = None
         for arg_name in call_args:
             buf = V.graph.try_get_buffer(arg_name)
-            if buf and len(buf.layout.size) == 4:
+            if not buf:
+                continue
+            layout = buf.get_layout()
+            if len(layout.size) == 4:
                 # ignore the tensor if only 1 dimension is non-zero
-                if len([x for x in buf.layout.size if x == 1]) == 3:
+                if len([x for x in layout.size if x == 1]) == 3:
                     continue
-                stride_order = ir.get_stride_order(buf.layout.stride)
+                stride_order = ir.get_stride_order(layout.stride)
                 if uniform_stride_order is None:
                     uniform_stride_order = stride_order
                 elif uniform_stride_order != stride_order:
@@ -911,13 +914,15 @@ class SIMDKernel(Kernel):
                     log.warning(msg)
 
                     stride_order_list = [
-                        ir.get_stride_order(V.graph.get_buffer(name).layout.stride)
+                        ir.get_stride_order(
+                            V.graph.get_buffer(name).get_layout().stride
+                        )
                         if V.graph.try_get_buffer(name)
                         else None
                         for name in call_args
                     ]
                     size_list = [
-                        V.graph.get_buffer(name).layout.size
+                        V.graph.get_buffer(name).get_layout().size
                         if V.graph.try_get_buffer(name)
                         else None
                         for name in call_args
@@ -1216,7 +1221,7 @@ class SIMDScheduling(BaseScheduling):
         buf_sizes = [
             buf.get_layout().storage_size()
             for buf in buffers
-            if not isinstance(buf.get_layout(), ir.MultiOutputLayout)
+            if buf.has_tensor_output()
         ]
 
         if not all(expr_fits_within_32bit(size) for size in buf_sizes):
