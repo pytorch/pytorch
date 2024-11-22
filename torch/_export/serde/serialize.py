@@ -263,10 +263,13 @@ def serialize_sym_float(s: Union[float, torch.SymFloat]) -> SymFloat:
         else:
             assert isinstance(s, (torch.SymFloat, sympy.Symbol))
             if s.node.hint is None:
-                return SymFloat.create(as_expr=SymExpr(str(s)))
+                return SymFloat.create(as_expr=SymExpr(_print_sympy(s)))
             else:
                 return SymFloat.create(
-                    as_expr=SymExpr(str(s), hint=SymExprHint.create(as_float=s.node.hint))
+                    as_expr=SymExpr(
+                        _print_sympy(s),
+                        hint=SymExprHint.create(as_float=s.node.hint),
+                    )
                 )
     else:
         raise SerializeError(
@@ -2947,13 +2950,13 @@ def canonicalize(ep: ExportedProgram) -> ExportedProgram:
                 else:
                     raise AssertionError(f"Unknown sym_int type: {s}")
             elif arg.type == "as_sym_float":
-                s = arg.as_sym_float
-                if s.type == "as_name":
-                    s.as_name = replace_table[s.as_name]
-                elif s.type == "as_float":
+                f = arg.as_sym_float
+                if f.type == "as_name":
+                    f.as_name = replace_table[f.as_name]
+                elif f.type == "as_float":
                     pass
                 else:
-                    raise AssertionError(f"Unknown sym_float type: {s}")
+                    raise AssertionError(f"Unknown sym_float type: {f}")
             elif arg.type in (
                 "as_none",
                 "as_bool",
@@ -3000,13 +3003,13 @@ def canonicalize(ep: ExportedProgram) -> ExportedProgram:
                 else:
                     raise AssertionError(f"Unknown sym_int type: {s}")
             elif arg.type == "as_sym_float":
-                s = arg.as_sym_float
-                if s.type == "as_name":
-                    s.as_name = replace_table[s.as_name]
-                elif s.type == "as_float":
+                f = arg.as_sym_float
+                if f.type == "as_name":
+                    f.as_name = replace_table[f.as_name]
+                elif f.type == "as_float":
                     pass
                 else:
-                    raise AssertionError(f"Unknown sym_float type: {s}")
+                    raise AssertionError(f"Unknown sym_float type: {f}")
             elif arg.type in ("as_none", "as_int", "as_float", "as_string"):
                 return
             else:
