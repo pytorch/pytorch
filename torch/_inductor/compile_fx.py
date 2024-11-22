@@ -961,12 +961,13 @@ def fx_codegen_and_compile(
                     p = SymExprPrinter()
                     for out in graph.graph_outputs:
                         if (
-                            hasattr(out, "layout")
-                            and len(free_unbacked_symbols(out.layout.stride)) == 0
+                            isinstance(out, IRNode)
+                            and out.has_tensor_output()
+                            and len(free_unbacked_symbols(out.get_stride())) == 0
                         ):
                             # Convert to string for eval on the load path
                             output_strides.append(
-                                tuple(p.doprint(s) for s in out.layout.stride)
+                                tuple(p.doprint(s) for s in out.get_layout().stride)
                             )
                         else:
                             output_strides.append(None)
@@ -1723,12 +1724,12 @@ def compile_fx(
             context = (
                 torch._C._DisableAutocast if disable_amp else contextlib.nullcontext
             )
-            with V.set_fake_mode(fake_mode), compiled_autograd.disable(), context():
+            with V.set_fake_mode(fake_mode), compiled_autograd._disable(), context():
                 return inference_compiler(unlifted_gm, example_inputs_)
 
         with V.set_fake_mode(fake_mode), torch._guards.tracing(
             tracing_context
-        ), compiled_autograd.disable(), functorch_config.patch(
+        ), compiled_autograd._disable(), functorch_config.patch(
             unlift_effect_tokens=True
         ):
             return aot_autograd(
@@ -1801,7 +1802,7 @@ def handle_dynamo_export_graph(
 
     compiled_fn = compile_gm(gm, codegen.process_inputs(*inputs))
 
-    @functools.wraps(compiled_fn)
+    @functools.wraps(compiled_fn)  # type: ignore[misc]
     def wrapper(*args: Any) -> Any:
         return codegen.process_outputs(compiled_fn(*codegen.process_inputs(*args)))
 
@@ -1809,8 +1810,10 @@ def handle_dynamo_export_graph(
 
 
 def _check_triton_bf16_support(graph: GraphLowering) -> None:
-    def warn_and_skip(device: torch.device) -> Never:
+    def warn_and_skip(device: Optional[torch.device]) -> Never:
         from torch._dynamo.exc import SkipFrame
+
+        assert device is not None
 
         device_interface = get_interface_for_device(device.type)
         device_props = device_interface.get_device_properties(device)
