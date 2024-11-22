@@ -41,7 +41,8 @@ def move_to_device_pass(
     for k, v in ep.state_dict.items():
         if isinstance(v, torch.nn.Parameter):
             ep._state_dict[k] = torch.nn.Parameter(
-                v.to(_get_new_device(v.device, location))
+                v.to(_get_new_device(v.device, location)),
+                v.requires_grad,
             )
         else:
             ep._state_dict[k] = v.to(_get_new_device(v.device, location))

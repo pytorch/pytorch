@@ -47,7 +47,7 @@ loss_batch_rule_helper(const at::Tensor& self, std::optional<int64_t> self_bdim,
     return std::make_tuple(result.mean(-1), 0);
   }
   TORCH_INTERNAL_ASSERT(false);
-};
+}
 
 static std::tuple<at::Tensor, std::optional<int64_t>>
 mse_loss_batch_rule(const at::Tensor& self, std::optional<int64_t> self_bdim, const at::Tensor& target,
@@ -56,7 +56,7 @@ mse_loss_batch_rule(const at::Tensor& self, std::optional<int64_t> self_bdim, co
                                 reduction, [](const at::Tensor& self, const at::Tensor& target, int64_t reduction) {
                                   return at::mse_loss(self, target, reduction);
                                 });
-};
+}
 
 static std::tuple<at::Tensor, std::optional<int64_t>>
 huber_loss_batch_rule(const at::Tensor& self, std::optional<int64_t> self_bdim, const at::Tensor& target,
@@ -65,7 +65,7 @@ huber_loss_batch_rule(const at::Tensor& self, std::optional<int64_t> self_bdim, 
                                 reduction, [delta](const at::Tensor& self, const at::Tensor& target, int64_t reduction) {
                                   return at::huber_loss(self, target, reduction, delta);
                                 });
-};
+}
 
 static std::tuple<at::Tensor, std::optional<int64_t>>
 smooth_l1_loss_batch_rule(const at::Tensor& self, std::optional<int64_t> self_bdim, const at::Tensor& target,
@@ -74,7 +74,7 @@ smooth_l1_loss_batch_rule(const at::Tensor& self, std::optional<int64_t> self_bd
                                 reduction, [beta](const at::Tensor& self, const at::Tensor& target, int64_t reduction) {
                                   return at::smooth_l1_loss(self, target, reduction, beta);
                                 });
-};
+}
 
 static Tensor apply_loss_reduction(const at::Tensor& unreduced, int64_t reduction) {
   if (reduction == at::Reduction::Mean) {

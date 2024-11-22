@@ -1,724 +1,1113 @@
-PyTorch 2.0 Troubleshooting
-===========================
+.. _torch.compiler_troubleshooting:
 
-**Author**: `Michael Lazos <https://github.com/mlazos>`_
+torch.compile Troubleshooting
+=================================
 
+You're trying to use ``torch.compile`` on your PyTorch model to enhance its performance
+but it's not working as expected. Perhaps performance isn't improving, crashes are happening, or compilation time is too long. This article provides tips, workarounds, and debugging tools to help you overcome these challenges.
 
-.. note:: This document is currently outdated and requires revision.  For the interim period, please refer to
-   the `comprehensive manual for torch.compile <https://docs.google.com/document/d/1y5CRfMLdwEoF1nTk9q8qEu1mgMUuUtvhklPKJ2emLU8/edit#heading=h.ivdr7fmrbeab>`__
-   as the primary resource for troubleshooting guidance.
+**Contents**
 
+.. contents::
+    :local:
 
-We are actively developing debug tools, profilers, and improving our
-error and warning messages. Below is a table of the available
-tools and their typical usage. For additional help see
-`Diagnosing Runtime Errors <#diagnosing-runtime-errors>`__.
+Setting Expectations
+~~~~~~~~~~~~~~~~~~~~
 
-.. list-table:: Title
-   :widths: 25 25 50
-   :header-rows: 1
+``torch.compile`` is designed as a general-purpose PyTorch compiler.
+Unlike the previous compiler solution, TorchScript, ``torch.compile``
+requires fewer code changes, meaning models typically don't need to be rewritten from scratch.
+It also manages unsupported code more gracefully - unsupported code results in a lost optimization opportunity rather than a crash.
 
-   * - Tool
-     - Purpose
-     - Usage
-   * - Info logging
-     - View summarized steps of compilation
-     - ``torch._logging.set_logs(dynamo = logging.INFO)`` or ``TORCH_LOGS="dynamo"``
-   * - Debug logging
-     - View detailed steps of compilation (print every instruction traced)
-     - ``torch._logging.set_logs(dynamo = logging.DEBUG)`` and
-       ``torch._dynamo.config.verbose = True``, or ``TORCH_LOGS="+dynamo" TORCHDYNAMO_VERBOSE=1``
-   * - Minifier for any backend
-     - Find smallest subgraph which reproduces errors for any backend
-     - set environment variable ``TORCHDYNAMO_REPRO_AFTER="dynamo"``
-   * - Minifier for ``TorchInductor``
-     - If the error is known to occur after ``AOTAutograd`` find
-       smallest subgraph which reproduces errors during ``TorchInductor`` lowering
-     - set environment variable ``TORCHDYNAMO_REPRO_AFTER="aot"``
-   * - Dynamo accuracy minifier
-     - Finds the smallest subgraph which reproduces an accuracy issue
-       between an eager mode model and optimized model, when you
-       suspect the problem is in ``AOTAutograd``
-     - ``TORCHDYNAMO_REPRO_AFTER="dynamo" TORCHDYNAMO_REPRO_LEVEL=4``
-   * - Inductor accuracy minifier
-     - Finds the smallest subgraph which reproduces an accuracy issue
-       between an eager mode model and optimized model, when you
-       suspect the problem is in the backend (e.g., inductor).
-       If this doesn't work, try the Dynamo accuracy minifier
-       instead.
-     - ``TORCHDYNAMO_REPRO_AFTER="aot" TORCHDYNAMO_REPRO_LEVEL=4``
-   * - ``torch._dynamo.explain``
-     - Find graph breaks and display reasoning for them
-     - ``torch._dynamo.explain(fn)(*inputs)``
-   * - Record/Replay
-     - Record and replay frames which to reproduce errors during graph capture
-     - ``torch._dynamo.config.replay_record_enabled = True``
-   * - TorchDynamo function name filtering
-     - Only compile functions with the given name to reduce noise when
-       debugging an issue
-     - set environment variable ``TORCHDYNAMO_DEBUG_FUNCTION=<name>``
-   * - TorchInductor Debug logging
-     - Print general TorchInductor debug info and generated Triton/C++ code
-     - ``torch._inductor.config.debug = True``
-   * - TorchInductor Tracing
-     - Show time taken in each TorchInductor stage + output code and graph
-       visualization
-     - set the environment variable TORCH_COMPILE_DEBUG=1 or
-       ``torch._inductor.config.trace.enabled = True``
+In the ideal world, one can simply apply ``torch.compile`` to any PyTorch model and enjoy automatic speedups.
+However, in reality, code complexities can lead to one of three scenarios:
 
-In addition to info and debug logging,
-you can use `torch._logging <https://pytorch.org/docs/main/logging.html>`__
-for more fine-grained logging.
+1. ``torch.compile`` works seamlessly, providing speedups.
+2. Some code modifications are necessary. ``torch.compile`` doesn't crash or take too long,
+   but you might not be seeing significant performance gains.
+3. Extensive changes to your code are required.
 
-Diagnosing Runtime Errors
-~~~~~~~~~~~~~~~~~~~~~~~~~
+We anticipate most code will fall under scenarios (1) and (2).
+This document provides tips, arranged by level of involvement, to help address code issues in scenario (2).
 
-At a high level, the TorchDynamo stack consists of a graph capture from
-Python code (TorchDynamo) and a backend compiler. For example, a
-backend compiler may consist of backward graph tracing (AOTAutograd) and
-graph lowering (TorchInductor)*. Errors can occur in any component of
-the stack and will provide full stack traces.
+Compile times
+-------------
 
-To determine in which component an error occurred,
-you may use info-level logging
-``torch._logging.set_logs(dynamo = logging.INFO)`` or ``TORCH_LOGS="dynamo"``
-and look for ``Step #: ...`` outputs. Logs are made at the beginning and end of
-each step, so the step that an error should correspond to is the most recently
-logged step whose end has not yet been logged. The steps correspond to the
-following parts of the stack:
+``torch.compile`` functions as a just-in-time compiler, so the initial one or two runs
+of the compiled function are expected to be significantly slower. Recompilations, which can occur under certain conditions (detailed below),
+will also make runs slower. Various ``torch.compile`` components cache results to
+reduce compilation time for future invocations, even in different processes.
+Cold-start (uncached) compilation time typically ranges from seconds to minutes for common or benchmarked models.
+Larger models may take upwards of 30 minutes to a few hours.
 
-==== ================
-Step Component
-==== ================
-1    TorchDynamo
-2    Compiler Backend
-3    TorchInductor
-==== ================
+Terminology
+~~~~~~~~~~~
 
-If info logging is insufficient, you can use available backend
-options. These options include:
+The following terms are relevant to troubleshooting ``torch.compile`` problems.
 
--  ``"eager"``: only runs TorchDynamo forward graph capture and then
-   runs the captured graph with PyTorch. This provides an indication as
-   to whether TorchDynamo is raising the error.
+Graph break
+-----------
 
--  ``"aot_eager"``: runs TorchDynamo to capture a forward graph, and
-   then AOTAutograd to trace the backward graph without any additional
-   backend compiler steps. PyTorch eager will then be used to run the
-   forward and backward graphs. This is useful to narrow down the issue
-   to AOTAutograd.
+``torch.compile`` traces your code and attempts to capture your PyTorch code into a
+single computation graph of PyTorch operators (FX graph). However, this is not always possible.
+When encountering code that can't be traced, a "graph break" occurs.
+A graph break involves compiling the FX graph has been determined so far, running the unsupported code,
+then resuming tracing after the unsupported code with a new FX graph.
+Because the computation graph is broken up, we lose optimization opportunities,
+so model code should avoid graph breaks whenever possible.
+Graph breaks occur on things like:
 
-The general procedure to narrow down an issue is the following:
+- Data-dependent if-statements
+- Many Python built-in functions
+- C functions
 
-1. Run your program with the ``"eager"`` backend. If the error no longer
-   occurs, the issue is in the backend compiler that is being used (if
-   using TorchInductor, proceed to step 2. If not, see `this
-   section <#minifying-backend-compiler-errors>`__). If the error still
-   occurs with the ``"eager"`` backend, it is an `error while running
-   torchdynamo <#torchdynamo-errors>`__.
-
-2. This step is only necessary if ``TorchInductor`` is used as the backend
-   compiler. Run the model with the ``"aot_eager"`` backend. If this
-   backend raises an error then the error is occurring during
-   AOTAutograd tracing. If the error no longer occurs with this backend,
-   then `the error is in
-   TorchInductor\* <#minifying-torchinductor-errors>`__.
-
-Each of these cases are analyzed in the following sections.
-
-.. note:: The TorchInductor backend consists of
-   both AOTAutograd tracing and the TorchInductor compiler itself. We will
-   disambiguate by referring to ``TorchInductor`` as the backend, and
-   TorchInductor lowering as the phase which lowers the graph traced by
-   AOTAutograd.
-
-Torchdynamo Errors
-------------------
-
-If the error that is generated occurs with the ``"eager"`` backend, then
-TorchDynamo is most likely the source of the error. Here is a sample code
-which will generate an error.
+Below is an example of a graph break due to the function ``copy.deepcopy`` from a Python builtin library
+(exact output may differ).
 
 .. code-block:: py
 
-   import torch
+    import torch
 
-   import torch._dynamo as dynamo
+    @torch.compile
+    def fn(x):
+        x = x + 1
+        with open("test.txt", "r") as f:
+            return x + len(f.read())
 
-
-   def test_assertion_error():
-       y = torch.ones(200, 200)
-       z = {y: 5}
-       return z
-
-   compiled_test_assertion_error = torch.compile(test_assertion_error, backend="eager")
-
-   compiled_test_assertion_error()
-
-The code above generates the following error:
+    fn(torch.ones(3, 3))
 
 ::
 
-   torch._dynamo.convert_frame: [ERROR] WON'T CONVERT test_assertion_error /scratch/mlazos/torchdynamo/../test/errors.py line 26
-   due to:
-   Traceback (most recent call last):
-     File "/scratch/mlazos/torchdynamo/torchdynamo/symbolic_convert.py", line 837, in BUILD_MAP
-       assert isinstance(k, ConstantVariable) or (
-   AssertionError
+    $TORCH_LOGS="graph_breaks" python playground.py
+    Graph break in user code at /data/users/williamwen/pytorch/playground.py:7
+    Reason: Unsupported: builtin: open [<class 'torch._dynamo.variables.constant.ConstantVariable'>, <class 'torch._dynamo.variables.constant.ConstantVariable'>] False
+    User code traceback:
+    File "/data/users/williamwen/pytorch/playground.py", line 7, in fn
+        with open("test.txt", "r") as f:
+    Traceback (most recent call last):
+    File "/data/users/williamwen/pytorch/torch/_dynamo/symbolic_convert.py", line 635, in wrapper
+        return inner_fn(self, inst)
+            ^^^^^^^^^^^^^^^^^^^^
+    File "/data/users/williamwen/pytorch/torch/_dynamo/symbolic_convert.py", line 2414, in CALL
+        self._call(inst)
+    File "/data/users/williamwen/pytorch/torch/_dynamo/symbolic_convert.py", line 2408, in _call
+        self.call_function(fn, args, kwargs)
+    File "/data/users/williamwen/pytorch/torch/_dynamo/symbolic_convert.py", line 962, in call_function
+        self.push(fn.call_function(self, args, kwargs))  # type: ignore[arg-type]
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "/data/users/williamwen/pytorch/torch/_dynamo/variables/builtin.py", line 997, in call_function
+        return handler(tx, args, kwargs)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "/data/users/williamwen/pytorch/torch/_dynamo/variables/builtin.py", line 831, in <lambda>
+        return lambda *args: unimplemented(error_msg)
+                            ^^^^^^^^^^^^^^^^^^^^^^^^
+    File "/data/users/williamwen/pytorch/torch/_dynamo/exc.py", line 313, in unimplemented
+        raise Unsupported(msg, case_name=case_name)
+    torch._dynamo.exc.Unsupported: builtin: open [<class 'torch._dynamo.variables.constant.ConstantVariable'>, <class 'torch._dynamo.variables.constant.ConstantVariable'>] False
 
-   from user code:
-      File "/scratch/mlazos/torchdynamo/../test/errors.py", line 34, in test_assertion_error
-       z = {y: 5}
+Guards
+------
 
-   Set torch._dynamo.config.verbose=True for more information
-   ==========
+``torch.compile`` makes some assumptions about runtime values as we trace through code.
+During tracing, we generate "guards", which are runtime checks for these assumptions.
+Guards are run in future calls to the compiled function to determine if we can reuse previously compiled code.
+Examples of runtime checks are constant values, types, and object IDs.
 
-As the message suggests you can set
-``torch._dynamo.config.verbose=True`` to get a full stack trace to both
-the error in TorchDynamo and the user code. In addition to this flag,
-you can also set the ``log_level`` of TorchDynamo through
-``torch._logging.set_logs(dynamo = logging.INFO)`` or ``TORCH_LOGS="dynamo"``. These levels include:
-
-- ``logging.DEBUG`` or ``TORCH_LOGS="+dynamo"``: Print every instruction that is
-  encountered in addition to all the log levels listed below.
-- ``logging.INFO``:
-  Print each function that is compiled (original and modified bytecode)
-  and the graph that is captured in addition to all the log levels listed below.
-- ``logging.WARNING`` (default): Print graph breaks in addition to all
-  the log levels listed below.
-- ``logging.ERROR``: Print errors only.
-
-If a model is very large, the logs can become overwhelming. If
-an error occurs deep within a model's Python code, it can be useful to
-execute only the frame in which the error occurs to enable easier
-debugging. There are two tools available to enable this:
-
-- Setting the environment variable ``TORCHDYNAMO_DEBUG_FUNCTION``
-  to the desired function name will only run torchdynamo on functions with that
-  name.
-
-- Enabling the record/replay tool (set ``torch._dynamo.config.replay_record_enabled = True``)
-  which dumps an execution record when an error is encountered. This record can
-  then be replayed to run only the frame where an error occurred.
-
-Diagnosing TorchInductor Errors
--------------------------------
-
-If the error does not occur with the ``"eager"`` backend, then the
-backend compiler is the source of the error (`example
-error <https://gist.github.com/mlazos/2f13681e3cc6c43b3911f336327032de%5D>`__).
-There are `different choices <./torch.compiler.rst>`__
-for backend compilers for TorchDynamo, with TorchInductor
-fitting the needs of most users. This section focuses on TorchInductor
-as the motivating example, but some tools can also be used with other
-backend compilers.
-
-Below is the portion of the stack which we are focusing on:
-
-With TorchInductor as the chosen backend, AOTAutograd is used to
-generate the backward graph from the forward graph captured by
-torchdynamo. It is important to note that errors can occur during this
-tracing and also while TorchInductor lowers the forward and backward
-graphs to GPU code or C++. A model can often consist of hundreds or
-thousands of FX nodes, so narrowing the exact nodes where this problem
-occurred can be very difficult. Fortunately, there are tools available to
-automatically minify these input graphs to the nodes which are causing
-the issue. The first step is to determine whether the error occurs
-during tracing of the backward graph with AOTAutograd or during
-TorchInductor lowering. As mentioned above in step 2, the
-``"aot_eager"`` backend can be used to run only AOTAutograd in isolation
-without lowering. If the error still occurs with this backend, this
-indicates that the error is occurring during AOTAutograd tracing.
-
-Here is an example:
+Below is an example of generated guards. The ``TENSOR_MATCH`` guard checks for the input's type, device, dtype, shape, etc.
 
 .. code-block:: py
 
-   import torch
+    import torch
 
-   import torch._dynamo as dynamo
+    @torch.compile
+    def fn(x):
+        return x + 1
 
-   model = torch.nn.Sequential(*[torch.nn.Linear(200, 200) for _ in range(5)])
-
-   def test_backend_error():
-
-       y = torch.ones(200, 200)
-       x = torch.ones(200, 200)
-       z = x + y
-       a = torch.ops.aten._foobar(z)  # dummy function which errors
-       return model(a)
-
-
-   compiled_test_backend_error = torch.compile(test_backend_error, backend="inductor")
-   compiled_test_backend_error()
-
-Running this should give you this error with a longer stack trace below
-it:
+    fn(torch.ones(3, 3))
 
 ::
 
-   Traceback (most recent call last):
-     File "/scratch/mlazos/torchdynamo/torchinductor/graph.py", line 246, in call_function
-       return lowerings[target](*args, **kwargs)
-     File "/scratch/mlazos/torchdynamo/torchinductor/lowering.py", line 185, in wrapped
-       return decomp_fn(*args, **kwargs)
-     File "/scratch/mlazos/torchdynamo/torchinductor/lowering.py", line 810, in _foobar
-       assert False
-   AssertionError
-   ...
+    $ TORCH_LOGS="guards" python playground.py
+    GUARDS:
 
-`error with full stack
-trace <https://gist.github.com/mlazos/d6947854aa56d686800259a164c62100>`__
+    TREE_GUARD_MANAGER:
+    +- RootGuardManager
+    | +- DEFAULT_DEVICE: utils_device.CURRENT_DEVICE == None                           # _dynamo/output_graph.py:471 in init_ambient_guards
+    | +- GLOBAL_STATE: ___check_global_state()
+    | +- TORCH_FUNCTION_MODE_STACK: ___check_torch_function_mode_stack()
+    | +- GuardManager: source=L['x'], accessed_by=DictGetItemGuardAccessor(x)
+    | | +- TENSOR_MATCH: check_tensor(L['x'], Tensor, DispatchKeySet(CPU, BackendSelect, ADInplaceOrView, AutogradCPU), torch.float32, device=None, requires_grad=False, size=[3, 3], stride=[3, 1])  # return x + 1  # playground.py:6 in fn
+    | | +- NO_HASATTR: hasattr(L['x'], '_dynamo_dynamic_indices') == False           # return x + 1  # playground.py:6 in fn
 
-If you then change ``torch.compile(backend="inductor")`` to
-``torch.compile(backend="aot_eager")``, it will run without error, because
-`the
-issue <https://github.com/pytorch/torchdynamo/blob/d09e50fbee388d466b5252a63045643166006f77/torchinductor/lowering.py#:~:text=%23%20This%20shouldn%27t%20be,assert%20False>`__
-is in the TorchInductor lowering process, not in AOTAutograd.
+Recompilation
+-------------
 
-Minifying TorchInductor Errors
-------------------------------
+If the guards fail for every instance of previously compiled code,
+then ``torch.compile`` must "recompile" the function, requiring the original code to be traced again.
 
-From here, let’s run the minifier to get a minimal repro. Setting the
-environment variable ``TORCHDYNAMO_REPRO_AFTER="aot"`` (or setting
-``torch._dynamo.config.repro_after="aot"`` directly) will generate a
-Python program which reduces the graph produced by AOTAutograd to the
-smallest subgraph which reproduces the error. (See below for an example
-where we minify the graph produced by TorchDynamo) Running the program
-with this environment variable should show nearly `identical
-output <https://gist.github.com/mlazos/0458ab828aa403c779fe73c012aa5982>`__,
-with an additional line indicating where ``minifier_launcher.py`` has
-been written to. The output directory is configurable by setting
-``torch._dynamo.config.base_dir`` to a valid directory name. The final
-step is to run the minifier and check that it runs successfully. A
-successful run looks like
-`this <https://gist.github.com/mlazos/e6ea41ccce68a7b1b8a7a09acb1b206a>`__.
-If the minifier runs successfully, it generates runnable python code
-which reproduces the exact error. For our example this is the following
-code:
+In the example below, recompilation is necessary because the guard checking the tensor argument's shape failed.
 
-.. code-block:: python
+.. code-block:: py
 
-   import torch
-   from torch import tensor, device
-   import torch.fx as fx
-   from torch._dynamo.testing import rand_strided
-   from math import inf
-   from torch.fx.experimental.proxy_tensor import make_fx
+    import torch
 
-   # torch version: 1.13.0a0+gitfddfc44
-   # torch cuda version: 11.6
-   # torch git version: fddfc4488afb207971c54ad4bf58130fdc8a4dc5
+    @torch.compile
+    def fn(x):
+        return x + 1
+
+    fn(torch.ones(3, 3))
+    fn(torch.ones(4, 4))
+
+::
+
+    $ TORCH_LOGS="recompiles" python playground.py
+    Recompiling function fn in /data/users/williamwen/pytorch/playground.py:3
+        triggered by the following guard failure(s):
+        - 0/0: tensor 'L['x']' size mismatch at index 0. expected 3, actual 4
+
+Dynamic Shapes
+-------------------------
+``torch.compile`` initially assumes tensor shapes are static/constant and guards based on these assumptions.
+By using "dynamic shapes," we can get ``torch.compile`` to produce compiled code that can accept
+tensor inputs with different shapes - we avoid recompiling every time shapes differ.
+By default, automatic dynamic shapes are enabled ``torch.compile(dynamic=None)`` -
+if compilation fails due to shape mismatch, recompilation is attempted with dynamic shapes.
+Dynamic shapes can also be fully enabled ``dynamic=True`` or disabled ``dynamic=False``.
+
+Below, we enable dynamic shapes and note that we no longer need to recompile.
+
+.. code-block:: py
+
+    import torch
+
+    @torch.compile(dynamic=True)
+    def fn(x):
+        return x + 1
+
+    fn(torch.ones(3, 3))
+    fn(torch.ones(4, 4))
+
+::
+
+    $ TORCH_LOGS="dynamic,recompiles" python playground.py
+    create_symbol s0 = 3 for L['x'].size()[0] [2, int_oo] at playground.py:5 in fn (_dynamo/variables/builder.py:2718 in <lambda>), for more info run with TORCHDYNAMO_EXTENDED_DEBUG_CREATE_SYMBOL="s0"
+    produce_guards
+    produce_guards
+
+For more information on dynamic shapes, see `The dynamic shapes manual <https://docs.google.com/document/d/1GgvOe7C8_NVOMLOCwDaYV1mXXyHMXY7ExoewHqooxrs/edit#heading=h.fh8zzonyw8ng>`__.
+
+Logging Tools
+~~~~~~~~~~~~~
+
+tlparse / TORCH_TRACE
+-----------------------------
+
+``tlparse`` / ``TORCH_TRACE`` are a pair of tools that produce compilation reports that look like this:
+https://web.mit.edu/~ezyang/Public/bhack-20240609-tlparse/index.html.
+
+Traces are very easy to collect. To collect a trace, run your reproduction command with
+
+::
+
+    TORCH_TRACE="/tmp/tracedir" python foo.py
+    pip install tlparse
+    tlparse /tmp/tracedir
+
+This approach works even if you are running a distributed job, providing a trace for each rank.
+It will open your browser with HTML similar to what's generated above.
+If you are making a bug report for a complicated problem that you don't have a standalone reproduction for,
+you can still greatly assist PyTorch developers by attaching the trace log generated in ``/tmp/tracedir``.
+
+.. warning:: The trace log contains all of your model code.
+   Do not share the trace log if the model you are working on is sensitive. The trace log does NOT contain weights.
+
+.. raw:: html
+
+    <style>
+        .red {background-color:#ff0000;}
+        .green {background-color:#00ff00;}
+        .dark-green {background-color:#027f02;}
+    </style>
+
+.. role:: red
+
+.. role:: green
+
+.. role:: dark-green
+
+The output of ``tlparse`` is primarily aimed for PyTorch developers,
+and the log format is easy to upload and share on GitHub.
+However,  as a non-PyTorch developer, you can still extract useful information from it.
+We recommend starting with the inline help text in the report, which explains its contents.
+Here are some insights you can gain from a ``tlparse``:
+
+- What model code was compiled by looking at the stack trie?
+  This is especially useful if you're not familiar with the codebase being compiled!
+- How many graph breaks / distinct compilation regions are there?
+  (Each distinct compile is its own color coded block like :dark-green:`[0/0]`).
+  Frames that are potentially graph-broken are light green :green:`[2/4]`.
+  If there are a lot of frames, that is suspicious, and suggests that you had some catastrophic graph breaks,
+  or maybe your code isn't a good match for ``torch.compile``.
+- How many times did I recompile a particular frame? Something that recompiled a lot will look like:
+  :dark-green:`[10/0]` :dark-green:`[10/1]` :dark-green:`[10/2]`
+  - if something is being recompiled a lot, that is very suspicious and worth looking into, even if it isn't the root cause of your problem.
+- Was there a compilation error? Frames that errored will look like :red:`[0/1]`.
+- What intermediate compiler products did I generate for a given frame?
+  For example, you can look at the high-level generated FX graph or the generated Triton code.
+- Is there relevant information for a particular frame? You can find these in ``compilation_metrics``.
+
+TORCH_LOGS
+--------------
+
+You can use the ``TORCH_LOGS`` environment variable to selectively enable parts of the ``torch.compile`` stack to log.
+``TORCH_LOGS`` is in fact the source of logs for ``tlparse``. The format of the ``TORCH_LOGS`` environment variable looks like this:
+
+::
+
+    TORCH_LOGS="<option1>,<option2>,..." python foo.py
 
 
-   # CUDA Info:
-   # nvcc: NVIDIA (R) Cuda compiler driver
-   # Copyright (c) 2005-2022 NVIDIA Corporation
-   # Built on Thu_Feb_10_18:23:41_PST_2022
-   # Cuda compilation tools, release 11.6, V11.6.112
-   # Build cuda_11.6.r11.6/compiler.30978841_0
+Useful high-level options include:
 
-   # GPU Hardware Info:
-   # NVIDIA A100-SXM4-40GB : 8
+- ``graph_breaks``: logs locations of graph breaks in user code and the reason for the graph break
+- ``guards``: logs guards that are generated
+- ``recompiles``: logs which function recompiled and the guards that failed, leading to the recompilation
+- ``dynamic``: logs related to dynamic shapes
 
-   from torch.nn import *
+Also, you can programmatically set logging options using ``torch._logging.set_logs``:
 
-   class Repro(torch.nn.Module):
-       def __init__(self):
-           super().__init__()
+.. code-block:: py
 
-       def forward(self, add):
-           _foobar = torch.ops.aten._foobar.default(add);  add = None
-           return (_foobar,)
+    import logging
+    torch._logging.set_logs(graph_breaks=True)
+    ...
 
-   args = [((200, 200), (200, 1), torch.float32, 'cpu')]
-   args = [rand_strided(shape, stride, dtype, device) for shape, stride, dtype, device in args]
-   mod = make_fx(Repro())(*args)
-   from torch._inductor.compile_fx import compile_fx_inner
+More ``TORCH_LOGS`` options are :ref:`detailed below <troubleshooting_torch_logs_options>`.
+For the full list of options, see `torch._logging <https://pytorch.org/docs/stable/logging.html>`__
+and `torch._logging.set_logs <https://pytorch.org/docs/stable/generated/torch._logging.set_logs.html#torch._logging.set_logs>`__.
 
-   compiled = compile_fx_inner(mod, args)
-   compiled(*args)
+tlparse vs. TORCH_LOGS
+----------------------
 
-The ``forward`` method of the ``Repro`` module contains the exact op
-which causes the issue. When filing an issue, please include any
-minified repros to aid in debugging.
+Generally, we suggest first using ``tlparse`` when encountering issues.
+``tlparse`` is ideal for debugging large models and gaining a high-level overview of how your model was compiled.
+On the other hand, ``TORCH_LOGS`` is preferred for small examples and fine-grained debugging detail,
+when we already have an idea of which ``torch.compile`` component is causing the problem.
 
-Minifying Backend Compiler Errors
+Simple Workarounds
+~~~~~~~~~~~~~~~~~~
+
+Here, we describe some workarounds to ``torch.compile`` issues involving small code modifications
+or changing some ``torch.compile`` settings.
+
+Where to apply torch.compile?
 ---------------------------------
 
-With backend compilers other than TorchInductor the process for finding
-the subgraph causing the error is nearly identical to the procedure in
-`errors in TorchInductor <#torchinductor-errors>`__ with one important
-caveat. Namely, that the minifier will now be run on the graph that is
-traced by TorchDynamo, not the output graph of AOTAutograd. Let’s walk
-through an example.
+We recommend applying ``torch.compile`` to the highest-level function that doesn't cause excessive problems.
+Typically, it is your train or eval step with the optimizer but without the loop, your top-level ``nn.Module``,
+or some sub-``nn.Module``s. ``torch.compile`` specifically doesn't handle distributed wrapper modules like
+DDP or FSDP very well, so consider applying ``torch.compile`` to the inner module passed to the wrapper.
 
 .. code-block:: py
 
-   import torch
+    # inference
+    model = ...
+    opt_model = torch.compile(model)
 
-   import torch._dynamo as dynamo
+    for _ in range(N_ITERS):
+        inp = ...
+        out = opt_model(inp)
 
-   model = torch.nn.Sequential(*[torch.nn.Linear(200, 200) for _ in range(5)])
-   # toy compiler which fails if graph contains relu
-   def toy_compiler(gm: torch.fx.GraphModule, _):
-       for node in gm.graph.nodes:
-           if node.target == torch.relu:
-               assert False
+.. code-block:: py
 
-       return gm
+    # training
+    model = ...
+    opt = torch.optim.Adam(model.parameters())
 
+    @torch.compile
+    def train(mod, data):
+        opt.zero_grad(True)
+        pred = mod(data[0])
+        loss = torch.nn.CrossEntropyLoss()(pred, data[1])
+        loss.backward()
+        opt.step()
 
-   def test_backend_error():
-       y = torch.ones(200, 200)
-       x = torch.ones(200, 200)
-       z = x + y
-       a = torch.relu(z)
-       return model(a)
+    for _ in range(N_ITERS):
+        inp = ...
+        train(model, inp)
 
+.. code-block:: py
 
-   compiled_test_backend_error = torch.compile(test_backend_error, backend=toy_compiler)
-   compiled_test_backend_error()
+    # DistributedDataParallel
+    model = ...
+    opt_model = torch.compile(model)
+    model_ddp = DistributedDataParallel(opt_model, ...)
 
-In order to run the code after TorchDynamo has traced the forward graph,
-you can use the ``TORCHDYNAMO_REPRO_AFTER`` environment variable. Running
-this program with ``TORCHDYNAMO_REPRO_AFTER="dynamo"`` (or
-``torch._dynamo.config.repro_after="dynamo"``) should produce `this
-output <https://gist.github.com/mlazos/244e3d5b53667e44078e194762c0c92b>`__\ and
-the following code in ``{torch._dynamo.config.base_dir}/repro.py``.
+    for _ in range(N_ITERS):
+        inp = ...
+        out = model_ddp(inp)
 
-.. note:: The other option for TORCHDYNAMO_REPRO_AFTER is ``"aot"``, which
-   will run the minifier after the backward graph has been generated.
+Disabling and Suppressing Errors
+---------------------------------
 
-.. code-block:: python
+For some model architectures, there are portions of the model which are particularly difficult to compile
+- either there are many graph breaks, or there are crashes. You may want to explicitly disable these
+portions of the model which are problematic so that you can apply ``torch.compile`` to the parts that work.
+You can do this by using the ``@torch.compiler.disable`` decorator. When ``torch.compile`` attempts to call a
+disabled function, it breaks the graph and skips tracing the disabled function, resuming tracing after the call.
+By default, all recursive calls made from a disabled function are also disabled. Use the ``recursive=False``
+option to allow compilation for recursive calls.
 
-   import torch
-   import torch._dynamo as dynamo
-   from torch import tensor, device
-   import torch.fx as fx
-   from torch._dynamo.testing import rand_strided
-   from math import inf
-   from torch._dynamo.debug_utils import run_fwd_maybe_bwd
+.. code-block:: py
 
-   from torch.nn import *
+    def bad1_inner(...):
+        # skipped
 
-   class Repro(torch.nn.Module):
-       def __init__(self):
-           super().__init__()
+    @torch.compiler.disable
+    def bad1_outer(...):
+        # skipped
+        bad1_inner(...)
 
-       def forward(self, add):
-           relu = torch.relu(add);  add = None
-           return (relu,)
+    def bad2_inner(...)
+        # traced
 
+    @torch.compiler.disable(recursive=False)
+    def bad2_outer(...):
+        # skipped
+        bad2_inner(...)
 
-   mod = Repro().cuda()
-   opt_mod = torch.compile(mod, backend="None")
+    @torch.compile
+    def fn(...):
+        # graph break
+        bad1_outer(...)
+        ...
+        # graph break
+        bad2_outer(...)
 
+For example, we use ``torch.compiler.disable`` to disable ``torch.compile`` on sparse architecture in
+recommendation models, as the sparse arch is difficult to compile. Preprocessing and logging functions
+are other examples of functions that typically cause a lot of graph breaks and do not get value from being compiled.
 
-   args = [((200, 200), (200, 1), torch.float32, 'cpu', False)]
-   args = [rand_strided(sh, st, dt, dev).requires_grad_(rg) for (sh, st, dt, dev, rg) in args]
+If you are experiencing compiler crashes and you want to continue regardless, you can set
+``torch._dynamo.config.suppress_errors = True``. When the compiler crashes, we will just skip tracing
+the function and try again later. This is not best practice - it is better to eventually manually add
+disable annotations as necessary.
 
+Resolving graph breaks
+----------------------
 
-   with torch.cuda.amp.autocast(enabled=False):
-       ref = run_fwd_maybe_bwd(mod, args)
-       res = run_fwd_maybe_bwd(opt_mod, args)
+To maximize optimization opportunities, it's important to reduce the number of graph breaks.
+Recall that you can see what graph breaks are happening using ``tlparse`` or ``TORCH_LOGS="graph_breaks"``.
+In general, graph breaks are caused by one of the following:
 
-The minifier successfully reduced the graph to the op that raises the
-error in ``toy_compiler``. The other difference from the procedure in
-`TorchInductor Errors <#torchinductor-errors>`__ is that the minifier is
-automatically run after encountering a backend compiler error. After a
-successful run, the minifier writes ``repro.py`` to
-``torch._dynamo.config.base_dir``.
+1. You're trying to do something that fundamentally cannot be traced, such as data-dependent control flow.
+2. You're trying to do something not yet supported. .
+   For example, we currently have limited support for tracing code that uses the built-in Python ``inspect`` module.
+3. Your code has an error in it. For example, you may have tried calling a function with an incorrect number of arguments.
 
-Performance Profiling
-~~~~~~~~~~~~~~~~~~~~~
+Graph break logs will tell you the user code location and reason for the graph break.
+Unfortunately, many graph breaks are not actionable without a deeper understanding of Dynamo.
+It can even be challenging to determine which of the three causes was the true cause of your graph break.
+We are working on making graph break messages more actionable.
 
-Accessing TorchDynamo Profiler
-------------------------------
+Additionally, the impact of lost optimization opportunities differs between graph breaks.
+For example, graph breaks that happen in the middle of your model's ``forward`` are likely to have a more negatie impact than
+graph breaks in a preprocessing part at the beginning of the ``forward``. So it is not crucial to prevent *every single*
+break, but rather to prevent the ones that cause significant performance hits.
 
-TorchDynamo has a built-in stats function for collecting and displaying
-the time spent in each compilation phase. These stats can be accessed by
-calling ``torch._dynamo.utils.compile_times()`` after executing
-Torch._Dynamo. By default, this returns a string representation of the
-compile times spent in each TorchDynamo function by name.
+If a graph break message doesn't suggest any action, you suspect that the cause of your graph break is (2),
+and you believe that the graph break is causing performance hits,
+then please report the graph break as an issue. If a function has many graph breaks,
+consider disabling compilation on that function, as the overhead cost for the graph breaks may become prohibitive.
 
-TorchInductor Debugging using TORCH_COMPILE_DEBUG
--------------------------------------------------
+Below are some common graph breaks and some workarounds.
 
-TorchInductor has a builtin stats and trace function for displaying time
-spent in each compilation phase, output code, output graph visualization
-and IR dump. This is a debugging tool designed to make it easier to
-understand and troubleshoot the internals of TorchInductor.
+Data-dependent operations
+^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Let's run an example with the following test program (``repro.py``):
+``torch.compile`` graph breaks on data-dependent operations such as data-dependent control flow
+(if-statements, loops with tensors) and direct tensor data accesses (``.item``, ``.data_ptr``).
 
-::
+.. code-block:: py
 
-  import torch
+    import torch
 
-  @torch.compile()
-  def test_model(x):
-      model = torch.nn.Sequential(
-          torch.nn.Linear(10, 10),
-          torch.nn.LayerNorm(10),
-          torch.nn.ReLU(),
-      )
-      return model(x)
+    @torch.compile
+    def fn(x):
+        y = x.sum()
+        if y > 0:
+            return x + y.item()
+        return x - y.item()
 
-
-  y = test_model(torch.ones(10, 10))
-
-Setting the environment variable ``TORCH_COMPILE_DEBUG=1`` will cause a
-debug trace directory to be created, by default this directory will be in the
-current directory and named torch_compile_debug (this can be overridden in
-the torchdynamo configuration field ``debug_dir_root`` and also the
-``env var TORCH_COMPILE_DEBUG_DIR``). Inside this directory, each run will
-have a separate folder named with the timestamp and process id of the run:
-
-::
-
-   $ env TORCH_COMPILE_DEBUG=1 python repro.py
-   $ cd torch_compile_debug
-   $ ls
-   run_2023_03_01_08_20_52_143510-pid_180167
-
-In the run folder there will be a ``torchdynamo`` directory which contains
-debug logs, and an ``torchinductor`` folder which contains a subfolder for each
-compiled kernel with inductor debug artifacts.
-
-::
-
-   $ cd
-   run_2023_03_01_08_20_52_143510-pid_180167
-   $ ls
-   torchinductor  torchdynamo
-
-Moving further into the ``torchinductor`` directory, the ``\*.log`` files are
-logs from the AOT Autograd phase of compilation, ``model__0_forward_1.0`` contains
-the inductor debug artifacts.
+    fn(torch.ones(3, 3))
 
 ::
 
-   $ cd torchinductor
-   $ ls
-   aot_model___0_debug.log  model__0_forward_1.0
-   $ cd model__0_forward_1.0
-   $ ls
-   debug.log  fx_graph_readable.py  fx_graph_runnable.py  fx_graph_transformed.py  ir_post_fusion.txt  ir_pre_fusion.txt  output_code.py
+    $ TORCH_LOGS="graph_breaks" python playground.py
+    Graph break in user code at /data/users/williamwen/pytorch/playground.py:6
+    Reason: Data-dependent jump
+    User code traceback:
+    File "/data/users/williamwen/pytorch/playground.py", line 6, in fn
+        if y > 0:
 
-Here is a summary of the contents:
+    Graph break in user code at /data/users/williamwen/pytorch/playground.py:7
+    Reason: Unsupported: Tensor.item
+    User code traceback:
+    File "/data/users/williamwen/pytorch/playground.py", line 7, in torch_dynamo_resume_in_fn_at_6
+        return x + y.item()
+    Traceback (most recent call last):
+    File "/data/users/williamwen/pytorch/torch/_dynamo/symbolic_convert.py", line 616, in wrapper
+        return inner_fn(self, inst)
+            ^^^^^^^^^^^^^^^^^^^^
+    File "/data/users/williamwen/pytorch/torch/_dynamo/symbolic_convert.py", line 2288, in CALL
+        self._call(inst)
+    File "/data/users/williamwen/pytorch/torch/_dynamo/symbolic_convert.py", line 2282, in _call
+        self.call_function(fn, args, kwargs)
+    File "/data/users/williamwen/pytorch/torch/_dynamo/symbolic_convert.py", line 838, in call_function
+        self.push(fn.call_function(self, args, kwargs))  # type: ignore[arg-type]
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "/data/users/williamwen/pytorch/torch/_dynamo/variables/misc.py", line 1038, in call_function
+        return self.obj.call_method(tx, self.name, args, kwargs)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "/data/users/williamwen/pytorch/torch/_dynamo/variables/tensor.py", line 527, in call_method
+        result = handler_method(*args, **kwargs)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "/data/users/williamwen/pytorch/torch/_dynamo/variables/tensor.py", line 773, in method_item
+        unimplemented("Tensor.item")
+    File "/data/users/williamwen/pytorch/torch/_dynamo/exc.py", line 304, in unimplemented
+        raise Unsupported(msg, case_name=case_name)
+    torch._dynamo.exc.Unsupported: Tensor.item
 
-- ``fx_graph_readable.py`` and ``fx_graph_runnable.py`` are the readable and
-  runnable versions of the ``fx_graph`` received by inductor.
-- ``fx_graph_transformed.py`` is the fx graph after inductor has run all fx passes.
-- ``ir\*.txt`` is the inductor ir pre and post fusion.
-- ``output_code.py`` is the compiled triton kernel for the subgraph.
+The general workaround for these graph breaks is to avoid doing data-dependent operations. Some specific workarounds are:
 
-Here are `example debug directory contents
-<https://gist.github.com/jansel/f4af078791ad681a0d4094adeb844396>`__
-for the test program:
+- If your control flow doesn't actually depend on data values, consider modifying your code to perform control flow on constants.
+
+.. code-block:: py
+
+    # old
+    x = torch.randn(3, 3)
+    @torch.compile
+    def fn(y):
+        if x.sum() > 0:
+            return y + x
+        else:
+            return y - x
+
+    # new
+    x = torch.randn(3, 3)
+    cond = (x.sum() > 0).item()
+    @torch.compile
+    def fn(y):
+        if cond:
+            return y + x
+        else:
+            return y - x
+
+- Use higher-order ops like ``torch.cond`` (https://pytorch.org/docs/main/cond.html) in place of data-dependent control flow
+
+.. code-block:: py
+
+    # old
+    @torch.compile
+    def fn(x):
+        if x.sum() > 0:
+            return x + 1
+        return x - 1
+
+    # new
+    @torch.compile
+    def fn(x):
+        return torch.cond(
+            x.sum() > 0,
+            lambda x: x + 1,
+            lambda x: x - 1,
+            (x,),
+        )
+
+- If you have a ``.item()`` call, try ``torch._dynamo.config.capture_scalar_outputs = True`` or ``TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS=1``
+- Wrap problematic parts of the function in a custom op
+
+Custom ops
+^^^^^^^^^^
+
+If you have code that ``torch.compile`` has trouble tracing through, either due to missing support or fundamental incompatibility,
+you can consider wrapping the problematic code in a custom op.
+
+Custom ops require a little bit of additional work to get them to be compatible with ``torch.compile``.
+See https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html for more details.
+
+Printing
+^^^^^^^^
+
+Printing/logging/issuing warnings will result in a graph break. If you have a function that makes many logging calls,
+for example, a function that logs data about a training iteration, consider applying ``torch.compiler.disable`` on it.
+
+Alternatively, you can try using ``torch._dynamo.config.reorderable_logging_functions``.
+This config is used to reorder logging functions so that they are called at the end of the traced function,
+thus avoiding a graph break. However, the logged contents may differ if, for example, a mutation occurs.
+
+.. code-block:: py
+
+    import torch
+
+    torch._dynamo.config.reorderable_logging_functions.add(print)
+
+    @torch.compile
+    def fn(x):
+        x += 1
+        print("log!")
+        return torch.sin(x)
+
+    fn(torch.ones(3, 3))
 
 ::
 
-  import torch
+    $ TORCH_LOGS="graph_breaks" python playground.py
+    log!
 
-  @torch.compile()
-  def test_model(x):
-      model = torch.nn.Sequential(
-          torch.nn.Linear(10, 10),
-          torch.nn.LayerNorm(10),
-          torch.nn.ReLU(),
-      )
-      return model(x)
+Incorrect code
+^^^^^^^^^^^^^^
 
+Your code may be wrong, or is otherwise encountering an error from outside ``torch.compile``.
+In the code below, we made a typo in the ``torch.sin`` call by providing an extra argument.
 
-  y = test_model(torch.ones(10, 10))
+.. code-block:: py
 
-Each file in that debug trace can be enabled and disabled through
-``torch._inductor.config.trace.*``. The profile and the diagram are both
-disabled by default since they are expensive to generate.
+    import torch
 
-A single node in this new debug format looks like:
+    @torch.compile
+    def fn(x):
+        y = torch.sin(x, x)
+        return y
+
+    fn(torch.ones(3, 3))
 
 ::
 
-   buf1: SchedulerNode(ComputedBuffer)
-   buf1.writes =
-       {   MemoryDep(name='buf1', index=0, size=()),
-           MemoryDep(name='buf1', index=0, size=(s0,))}
-   buf1.unmet_dependencies = {MemoryDep(name='buf0', index=c0, size=(s0,))}
-   buf1.met_dependencies = {MemoryDep(name='primals_2', index=c0, size=(s0,))}
-   buf1.group.device = cuda:0
-   buf1.group.iteration = (1, s0)
-   buf1.sizes = ([], [s0])
-   class buf1_loop_body:
-       var_ranges = {z0: s0}
-       index0 = z0
-       index1 = 0
-       def body(self, ops):
-           get_index = self.get_index('index0')
-           load = ops.load('buf0', get_index, False)
-           get_index_1 = self.get_index('index0')
-           load_1 = ops.load('primals_2', get_index_1, False)
-           add = ops.add(load, load_1)
-           get_index_2 = self.get_index('index1')
-           reduction = ops.reduction('buf1', torch.float32, torch.float32, 'sum', get_index_2, add)
-           return reduction
+    $ TORCH_LOGS="graph_breaks" python playground.py
+    Graph break in user code at /data/users/williamwen/pytorch/playground.py:5
+    Reason: Unsupported: TypeError <built-in method sin of type object at 0x7fd6fd764600>: sin() takes 1 positional argument but 2 were given
+    User code traceback:
+    File "/data/users/williamwen/pytorch/playground.py", line 5, in fn
+        y = torch.sin(x, x)
+    ...
 
-See the `example debug directory
-output <https://gist.github.com/jansel/f4af078791ad681a0d4094adeb844396>`__
-for more examples.
+It can be difficult to tell from the logs if the error is caused by your code or because of a ``torch.compile`` bug.
+In order to differentiate, we recommend trying to run your code without ``torch.compile`` to see if you still get the error.
+
+Dealing with recompilations
+---------------------------
+
+You can view recompilations and their reasons using ``tlparse`` or ``TORCH_LOGS=recompiles``.
+
+Is dynamic shapes enabled?
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Recompilations due to mismatched shapes are in the form:
+
+::
+
+    tensor 'L['x']' size mismatch at index 0. expected 3, actual 4
+
+Make sure that the ``dynamic`` option of ``torch.compile`` is not set to ``False``.
+The default option, ``dynamic=None``, will only attempt dynamic shapes after the first compilation.
+You can set ``dynamic=True`` to upfront compile as dynamic as possible.
+
+For more information on dynamic shapes, see `The dynamic shapes manual <https://docs.google.com/document/d/1GgvOe7C8_NVOMLOCwDaYV1mXXyHMXY7ExoewHqooxrs/edit#heading=h.fh8zzonyw8ng>`__.
+
+Changing the cache size limit
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+There is a limit to how many times a function can be recompiled, determined by ``torch._dynamo.config.cache_size_limit``
+and ``torch._dynamo.config.accumulated_cache_size_limit``.
+If either limit is exceeded, then we will not attempt to compile the function again and instead will run the function eagerly.
+``torch.compile`` will also issue a warning containing the affected function and which limit was hit.
+In the example below, each function call results in a recompile attempt.
+When we hit the cache size limit (8), we stop attempting to recompile.
+
+.. code-block:: py
+
+    import torch
+
+    @torch.compile(dynamic=False)
+    def fn(x):
+        return x + 1
+
+    for i in range(1, 10):
+        fn(torch.ones(i))
+
+::
+
+    $ python playground.py
+    torch._dynamo hit config.cache_size_limit (8)
+        function: 'fn' (/data/users/williamwen/pytorch/playground.py:5)
+        last reason: 0/0: tensor 'L['x']' size mismatch at index 0. expected 1, actual 9
+
+If you know that the number of recompilations has a reasonable constant upper bound, you can raise the cache size limit.
+If the cost of recompilation outweighs the benefit of compilation, then you can consider lowering the cache size limit.
+
+Wrapping constants with tensors
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+By default, ``int`` / ``float`` variables are treated as constants and are guarded as such.
+In the below example, we have a recompilation for each function call.
+
+.. code-block:: py
+
+    import torch
+
+    @torch.compile
+    def fn(x, c):
+        return x + c
+
+    for i in range(1, 10):
+        fn(torch.ones(i), 0.5 + i)
+
+::
+
+    $ TORCH_LOGS="recompiles" python playground.py
+    Recompiling function fn in /data/users/williamwen/pytorch/playground.py:3
+        triggered by the following guard failure(s):
+        - 0/7: L['c'] == 8.5
+        - 0/6: L['c'] == 7.5
+        - 0/5: L['c'] == 6.5
+        - 0/4: L['c'] == 5.5
+        - 0/3: L['c'] == 4.5
+        - 0/2: L['c'] == 3.5
+        - 0/1: L['c'] == 2.5
+        - 0/0: L['c'] == 1.5
+    torch._dynamo hit config.cache_size_limit (8)
+        function: 'fn' (/data/users/williamwen/pytorch/playground.py:3)
+        last reason: 0/0: L['c'] == 1.5
+
+In particular, for LR schedulers, initializing with a constant can lead to recompilations:
+
+.. code-block:: py
+
+    import torch
+
+    mod = torch.nn.Linear(3, 3)
+    opt = torch.optim.Adam(mod.parameters(), lr=0.01)
+    sched = torch.optim.lr_scheduler.ExponentialLR(opt, 0.9)
+
+    @torch.compile
+    def fn(inp):
+        opt.zero_grad(True)
+        out = mod(inp).sum()
+        out.backward()
+        opt.step()
+        sched.step()
+
+    for i in range(1, 10):
+        fn(torch.ones(3, 3))
+
+::
+
+    $ TORCH_LOGS="recompiles" python playground.py
+    Recompiling function step in /data/users/williamwen/pytorch/torch/optim/adam.py:189
+        triggered by the following guard failure(s):
+        - 3/7: L['self'].param_groups[0]['lr'] == 0.004782969000000002
+        - 3/6: L['self'].param_groups[0]['lr'] == 0.005314410000000002
+        - 3/5: L['self'].param_groups[0]['lr'] == 0.005904900000000002
+        - 3/4: L['self'].param_groups[0]['lr'] == 0.006561000000000002
+        - 3/3: L['self'].param_groups[0]['lr'] == 0.007290000000000001
+        - 3/2: L['self'].param_groups[0]['lr'] == 0.008100000000000001
+        - 3/1: L['self'].param_groups[0]['lr'] == 0.009000000000000001
+        - 3/0: L['self'].param_groups[0]['lr'] == 0.01
+    torch._dynamo hit config.cache_size_limit (8)
+        function: 'step' (/data/users/williamwen/pytorch/torch/optim/adam.py:189)
+        last reason: 3/0: L['self'].param_groups[0]['lr'] == 0.01
+
+In both examples, we can wrap float variables in tensors in order to prevent recompilations.
+
+.. code-block:: py
+
+    # first example
+    for i in range(1, 10):
+        fn(torch.ones(i), torch.tensor(0.5 + i))
+
+    # second example
+    opt = torch.optim.Adam(mod.parameters(), lr=torch.tensor(0.01))
+    sched = torch.optim.lr_scheduler.ExponentialLR(opt, torch.tensor(0.9))
+
+Reporting Issues
+~~~~~~~~~~~~~~~~
+
+If the workarounds provided above were not enough to get ``torch.compile`` working,
+then you should consider reporting the issue to PyTorch.
+But there are a few things that you can do to make our lives significantly easier.
+
+Ablation
+--------
+
+Check which component of the ``torch.compile`` stack is the one causing the issue using the ``backend=`` option for ``torch.compile``.
+In particular, try:
+
+- ``torch.compile(fn, backend="eager")``, which only runs TorchDynamo, the graph capture component of ``torch.compile``.
+- ``torch.compile(fn, backend="aot_eager")``, which runs TorchDynamo and AOTAutograd, which additionally generates the backward graph during compilation.
+- ``torch.compile(fn, backend="aot_eager_decomp_partition")``, which runs TorchDynamo and AOTAutograd with operator decompositions/partitions.
+- ``torch.compile(fn, backend="inductor")``, which runs TorchDynamo, AOTAutograd, and TorchInductor, the backend ML compiler that generates compiled kernels.
+
+If you only fail with the Inductor backend, you can additionally test various Inductor modes:
+
+- ``torch.compile(fn, backend="inductor", mode="default")``
+- ``torch.compile(fn, backend="inductor", mode="reduce-overhead")``
+- ``torch.compile(fn, backend="inductor", mode="max-autotune")``
+
+You can also check if dynamic shapes is causing issues with any backend:
+
+- ``torch.compile(fn, dynamic=True)`` (always use dynamic shapes)
+- ``torch.compile(fn, dynamic=False)`` (never use dynamic shapes)
+- ``torch.compile(fn, dynamic=None)`` (automatic dynamic shapes)
+
+Bisecting
+---------
+Did you try on the latest nightly? Did something work in the past but now no longer works?
+Can you bisect to determine the first nightly where your issue occurs?
+Bisecting is especially helpful for performance, accuracy, or compile time regressions,
+where it is not immediately obvious where the problem originates from.
+
+Creating a reproducer
+---------------------
+
+Creating reproducers is a lot of work, and it is perfectly fine if you do not have the time to do it.
+However, if you are a motivated user unfamiliar with the internals of ``torch.compile``,
+creating a standalone reproducer can have a huge impact on our ability to fix the bug.
+Without a reproducer, your bug report must contain enough information for us to identify the root cause of the problem and write a reproducer from scratch.
+
+Here's a list of useful reproducers, ranked from most to least preferred:
+
+1. **Self-contained, small reproducer:** A script with no external dependencies, under 100 lines of code, that reproduces the problem when run.
+2. **Self-contained, large reproducer:** Even if it's large, being self-contained is a huge advantage!
+3. **Non-self-contained reproducer with manageable dependencies:**
+   For example, if you can reproduce the problem by running a script after ``pip install transformers``,
+   that's manageable. We can likely run it and investigate.
+4. **Non-self-contained reproducer requiring substantial setup:**  This might involve downloading datasets,
+   multiple environment setup steps, or specific system library versions requiring a Docker image.
+   The more complex the setup, the harder it is for us to recreate the environment.
+
+   .. note::
+       Docker simplifies setup but complicates changes to the environment, so it's not a perfect solution, though we'll use it if necessary.
+
+Somewhat orthogonally, a reproducer that can be run in a single process is better than a reproducer
+that requires multiprocess training (but once again, if you only have a multiprocess reproducer, we'll take it!).
+
+Additionally, below is a non-exhaustive list of aspects to check in your
+issue that you can attempt to replicate in your reproducer:
+
+- **Autograd**. Did you have tensor inputs with ``requires_grad=True``? Did you call ``backward()`` on the output?
+- **Dynamic shapes**. Did you set ``dynamic=True``? Or did you run the test code multiple times with varying shapes?
+- **Custom operators**. Is there a custom operator involved in the real workflow?
+  Can you replicate some of its important characteristics using the Python custom operator API?
+- **Configuration**. Did you set all the same configuration?
+  This includes ``torch._dynamo.config`` and ``torch._inductor.config`` settings,
+  as well as arguments to ``torch.compile`` like ``backend`` / ``mode``.
+- **Context managers**. Did you replicate any active context managers?
+  This could be ``torch.no_grad``, automatic mixed precision, ``TorchFunctionMode`` / ``TorchDispatchMode``,
+  activation checkpointing, compiled autograd etc.
+- **Tensor subclasses**. Is there a tensor subclass involved?
+
+Minifier
+--------
+
+The minifier is an early ``torch.compile`` tool that, given an FX graph that crashes when we attempt to run or compile it,
+finds a subgraph that also crashes and outputs the code that performs that subgraph's operations.
+Essentially, the minifier finds a minimal repro for a certain class of ``torch.compile``-related crashes.
+This assumes that we were able to successfully trace through code.
+
+Unfortunately, most of the time nowadays, the minifier doesn't work as expected, and alternative methods may be necessary.
+This is likely because bugs that can be automatically reproduced in this manner are generally easier to fix
+and have already been addressed, leaving more complex issues that do not reproduce easily.
+However, it is straightforward to attempt using the minifier, so it is worth trying even if it may not succeed.
+
+Instructions for operating the minifier can be found `here <https://pytorch.org/docs/stable/torch.compiler_troubleshooting_old.html>`__.
+If the compiler is crashing, you can set ``TORCHDYNAMO_REPRO_AFTER="dynamo"`` or ``TORCHDYNAMO_REPRO_AFTER="aot"``
+The ``aot`` option is more likely to succeed, although it may not identify the ``AOTAutograd`` issues.  This will generate the ``repro.py`` file which may help to diagnose the problem.
+For accuracy-related issues, consider setting ``TORCHDYNAMO_REPRO_LEVEL=4``. Please note that this may not always successfully identify the problematic subgraph.
+
+Debugging Deeper
+~~~~~~~~~~~~~~~~
+
+This section provides tools and techniques for independently debugging ``torch.compile`` issues
+or for gaining a deeper understanding of the ``torch.compile`` stack.
+These methods are more involved than those presented above and are used by PyTorch developers regularly
+to debug real ``torch.compile`` issues.
+
+Below is a high-level overview of the stack:
+
+.. image:: _static/img/dynamo/td_stack.png
+
+The stack comprises three main components: TorchDynamo, AOTAutograd, and Inductor.
+Our debugging strategy involves first identifying the component in which the error occurs
+and then individually debugging the component. To determine the component responsible for the issue,
+see the `Ablation` section under `Reporting Issues` above. For guidance on debugging a specific component, consult the sections below.
+
+TorchDynamo
+-----------
+
+Logging what Dynamo is tracing
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The ``TORCH_LOGS=trace_bytecode`` option enables you to view the precise bytecode instructions that Dynamo is tracing,
+as well as a symbolic representation of the Python interpreter stack. When encountering a graph break or crash,
+it is advisable to inspect the last few bytecode instructions traced.
+
+You can also use ``TORCH_LOGS=trace_source`` to see which lines of source code Dynamo is tracing through.
+This is useful in combination with ``trace_bytecode`` to see the line of source code each traced bytecode instruction corresponds to.
+
+Finally, you can use ``TORCH_LOGS=graph_code`` to see the Python code representing the FX graph that Dynamo traced.
+You can view this code to double check that the correct ops are being traced.
+
+.. code-block:: py
+
+    import torch
+
+    def g(x, y):
+        return x + y
+
+    @torch.compile(backend="eager")
+    def f(x):
+        x = torch.sin(x)
+        x = g(x, x)
+        return x
+
+    f(torch.ones(3, 3))
+
+::
+
+    $ TORCH_LOGS="trace_bytecode,trace_source,graph_code" python playground.py
+    TRACE starts_line /data/users/williamwen/pytorch/playground.py:6 in f ()
+        @torch.compile(backend="eager")
+    TRACE RESUME 0 []
+    TRACE starts_line /data/users/williamwen/pytorch/playground.py:8 in f (f)
+            x = torch.sin(x)
+    TRACE LOAD_GLOBAL torch []
+    TRACE LOAD_ATTR sin [NullVariable(), PythonModuleVariable(<module 'torch' from '/data/users/williamwen/pytorch/torch/__init__.py'>)]
+    TRACE LOAD_FAST x [NullVariable(), TorchInGraphFunctionVariable(<built-in method sin of type object at 0x7f00f6964600>)]
+    TRACE CALL 1 [NullVariable(), TorchInGraphFunctionVariable(<built-in method sin of type object at 0x7f00f6964600>), LazyVariableTracker()]
+    TRACE STORE_FAST x [TensorVariable()]
+    TRACE starts_line /data/users/williamwen/pytorch/playground.py:9 in f (f)
+            x = g(x, x)
+    TRACE LOAD_GLOBAL g []
+    TRACE LOAD_FAST x [NullVariable(), UserFunctionVariable()]
+    TRACE LOAD_FAST x [NullVariable(), UserFunctionVariable(), TensorVariable()]
+    TRACE CALL 2 [NullVariable(), UserFunctionVariable(), TensorVariable(), TensorVariable()]
+    TRACE starts_line /data/users/williamwen/pytorch/playground.py:3 in g (g) (inline depth: 1)
+        def g(x, y):
+    TRACE RESUME 0 []
+    TRACE starts_line /data/users/williamwen/pytorch/playground.py:4 in g (g) (inline depth: 1)
+            return x + y
+    TRACE LOAD_FAST x []
+    TRACE LOAD_FAST y [TensorVariable()]
+    TRACE BINARY_OP 0 [TensorVariable(), TensorVariable()]
+    TRACE RETURN_VALUE None [TensorVariable()]
+    TRACE STORE_FAST x [TensorVariable()]
+    TRACE starts_line /data/users/williamwen/pytorch/playground.py:10 in f (f)
+            return x
+    TRACE LOAD_FAST x []
+    TRACE RETURN_VALUE None [TensorVariable()]
+    TRACED GRAPH
+    ===== __compiled_fn_1 =====
+    /data/users/williamwen/pytorch/torch/fx/_lazy_graph_module.py class GraphModule(torch.nn.Module):
+        def forward(self, L_x_: "f32[3, 3][3, 1]cpu"):
+            l_x_ = L_x_
+
+            # File: /data/users/williamwen/pytorch/playground.py:8 in f, code: x = torch.sin(x)
+            x: "f32[3, 3][3, 1]cpu" = torch.sin(l_x_);  l_x_ = None
+
+            # File: /data/users/williamwen/pytorch/playground.py:4 in g, code: return x + y
+            x_1: "f32[3, 3][3, 1]cpu" = x + x;  x = None
+            return (x_1,)
+
+Breakpointing Dynamo tracing
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Inserting a breakpoint in Dynamo/user code is helpful at times to see what the state of Dynamo is when tracing through user code.
+Unfortunately, inserting a breakpoint in the normal Python fashion will result in a graph break in TorchDynamo,
+so we will not be able to view the state of Dynamo at the point where we intended to breakpoint.
+
+The first method for setting a breakpoint is to insert it within the Dynamo source code. Three recommended locations to place a breakpoint are:
+
+- In ``torch/_dynamo/symbolic_convert.py``, breakpoint at functions that are named after the problematic bytecode instruction,
+  such as ``def CALL_FUNCTION`` and ``def STORE_ATTR``. You can conditionally breakpoint depending on inputs,
+  for example, the ``argval`` of the instruction, or the name of the object at the top of the stack since some bytecode opcodes are frequently used.
+- Breakpoint where the graph break or error originates from. Typically, graph breaks are emitted from a call to ``unimplemented(...)``.
+- Breakpoint in ``torch/_dynamo/variables/builder.py, function:_wrap``. You will likely have to conditionally breakpoint on the input.
+  This function determines how to symbolically represent a given value. Consider breakpointing here if you suspect that a value is represented incorrectly.
+
+The second way to insert a breakpoint is to use ``torch._dynamo.comptime.comptime.breakpoint``:
+
+.. code-block:: py
+
+    from torch._dynamo.comptime import comptime
+
+    @torch.compile
+    def f(...):
+        ...
+        comptime.breakpoint()
+        ...
+
+A comptime breakpoint is convenient as it enables you to inspect the Dynamo state at a specific location within the user code being traced.
+It does not require you to insert a breakpoint in the Dynamo source or to conditionally breakpoint based on variables.
+
+When a comptime breakpoint is triggered, you can do the following:
+
+- ``ctx.print_bt()`` to print the user stack trace
+- ``ctx.print_locals()`` to print all current locals
+- ``ctx.print_graph()`` to print the currently traced graph
+- ``ctx.disas()`` to print the currently traced function's bytecode
+- Use standard ``pdb`` commands, such as ``bt/u/d/n/s/r``, - you can go up the ``pdb`` stack to inspect more Dynamo internals
+
+.. code-block:: py
+
+    import torch
+    from torch._dynamo.comptime import comptime
+
+    @torch.compile(backend="eager")
+    def f(x):
+        y = x + 1
+        comptime.breakpoint()
+        y = y + 1
+        return y
+
+    f(torch.ones(3, 3))
+
+::
+
+    $ python playground.py
+    --Return--
+    > /data/users/williamwen/pytorch/torch/_dynamo/comptime.py(392)inner()->None
+    -> builtins.breakpoint()
+    (Pdb) ctx.print_bt()
+    File "/data/users/williamwen/pytorch/playground.py", line 7, in f
+        comptime.breakpoint()
+
+    (Pdb) ctx.print_locals()
+    x = FakeTensor(..., size=(3, 3))
+    y = FakeTensor(..., size=(3, 3))
+    (Pdb) bt
+    ...
+    /data/users/williamwen/pytorch/torch/_dynamo/symbolic_convert.py(826)call_function()
+    -> self.push(fn.call_function(self, args, kwargs))  # type: ignore[arg-type]
+    /data/users/williamwen/pytorch/torch/_dynamo/variables/misc.py(331)call_function()
+    -> func(ComptimeContext(tx))
+    > /data/users/williamwen/pytorch/torch/_dynamo/comptime.py(392)inner()->None
+    -> builtins.breakpoint()
+    (Pdb) ctx.print_graph()
+
+
+
+    def forward(self, L_x_: "f32[3, 3]"):
+        l_x_ = L_x_
+
+        # File: /data/users/williamwen/pytorch/playground.py:6 in f, code: y = x + 1
+        y: "f32[3, 3]" = l_x_ + 1;  l_x_ = y = None
 
 ..
-  _Memory Profiling
-  ----------------
+    TODO(uncomment/update once we improve this API)
+    Debugging large models
+    ^^^^^^^^^^^^^^^^^^^^^^
 
-  TBD
+    Debugging TorchDynamo on large models can be tricky, mainly because Dynamo traces through large amounts of code.
+    It can be difficult to find the problematic function, or to determine where to place a breakpoint.
+    Even if we've found the problematic function, we don't want to deal with logging spam.
+    Fortunately, you can use ``TORCHDYNAMO_DEBUG_FUNCTION=<function name>``, which limits dynamo tracing to only functions with a specific name
+    (exact match). This will allow you to filter all of the functions in the model to the function(s) of interest.
+    Use this in combination with the above debugging strategies.
 
-Graph Breaks
-------------
+Bytecode generation errors
+^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Given a program like this:
+Although uncommon, Dynamo may generate incorrect bytecode. This may occur if you determine the following:
 
-.. code-block:: python
+- Ablation reveals the error is happening at the TorchDynamo level
+- The error is not being emitted from TorchDynamo stack frames
+- The error looks more like a user error rather than a Dynamo error, or is a segmentation fault
+- The error does not occur without ``torch.compile``
 
-   def some_fun(x):
-       ...
+Bytecode generation bugs are generally tricky to fix and we recommend submitting an issue instead of trying to fix those yourself.
+If you are interested in seeing the bytecode that Dynamo generates, you can use ``TORCH_LOGS=bytecode``.
+You can see a high-level overview on what bytecode Dynamo generates `here <https://docs.google.com/presentation/d/1tMZOoAoNKF32CAm1C-WfzdVVgoEvJ3lp/edit?usp=sharing&ouid=114922067987692817315&rtpof=true&sd=true>`__.
 
-   compiled_fun = torch.compile(some_fun, ...)
-   ...
+AOTAutograd
+-----------
 
-TorchDynamo will attempt to compile all of the torch/tensor operations
-within some_fun into a single FX graph, but it may fail to capture
-everything into one graph.
+AOTAutograd errors are typically difficult to debug - we recommend just submitting an issue.
+AOTAutograd logging output is primarily helpful to see what the input to Inductor is.
 
-Some graph break reasons are insurmountable to TorchDynamo, and can't be
-easily fixed. - calling into a C extension other than torch is invisible
-to torchdynamo, and could do arbitrary things without TorchDynamo being
-able to introduce necessary guards (see :ref:`making-dynamo-sound-guards`)
-to ensure that the compiled program would be safe to reuse. Graph breaks
-can hinder performance if the resulting fragments are small. To maximize
-performance, it's important to have as few graph breaks as possible.
+..
+    TODO
+    TorchInductor
+    -------------
 
-Identifying the Cause of a Graph Break
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.. TODO
 
-To identify all graph breaks in a program and the associated reasons for
-the breaks, ``torch._dynamo.explain`` can be used. This tool runs
-TorchDynamo on the supplied function and aggregates the graph breaks
-that are encountered. Here is an example usage:
+.. _troubleshooting_torch_logs_options:
 
-.. code-block:: python
+Summary of TORCH_LOGS options
+---------------------------------
 
-   import torch
-   import torch._dynamo as dynamo
-   def toy_example(a, b):
-       x = a / (torch.abs(a) + 1)
-       print("woo")
-       if b.sum() < 0:
-           b = b * -1
-       return x * b
-   explanation = dynamo.explain(toy_example)(torch.randn(10), torch.randn(10))
-   print(explanation_verbose)
-   """
-   Graph Count: 3
-   Graph Break Count: 2
-   Op Count: 5
-   Break Reasons:
-     Break Reason 1:
-       Reason: builtin: print [<class 'torch._dynamo.variables.constant.ConstantVariable'>] False
-       User Stack:
-         <FrameSummary file foo.py, line 5 in toy_example>
-     Break Reason 2:
-       Reason: generic_jump TensorVariable()
-       User Stack:
-         <FrameSummary file foo.py, line 6 in torch_dynamo_resume_in_toy_example_at_5>
-   Ops per Graph:
-     ...
-   Out Guards:
-     ...
-   """
+A summary of helpful ``TORCH_LOGS`` options is:
 
-Outputs include:
+.. list-table::
+    :widths: 25 50
+    :header-rows: 1
 
-- ``out_guards`` - a list of lists where each sublist contains the guards that must pass to ensure the traced graphs are valid.
-- ``graphs`` - a list of graph modules which were successfully traced.
-- ``ops_per_graph`` - a list of lists where each sublist contains the ops that are run in the graph.
+    * - Option
+      - Description
+    * - +all
+      - Output debug logs from all ``torch.compile`` components
+    * - +dynamo
+      - Output debug logs from TorchDynamo
+    * - +aot
+      - Output debug logs from AOTAutograd
+    * - +inductor
+      - Output debug logs from TorchInductor
+    * - dynamic
+      - Output logs from dynamic shapes
+    * - graph_code
+      - Output the Python code for the FX graph that Dynamo generated
+    * - graph_sizes
+      - Output the tensor sizes of the FX graph that Dynamo generated
+    * - trace_bytecode
+      - Output the bytecode instructions that Dynamo is tracing through and the symbolic interpreter stack Dynamo is keeping track of
+    * - trace_source
+      - Output the line of code in the original source that Dynamo is currently tracing through
+    * - bytecode
+      - Output Dynamo-generated bytecode
+    * - guards
+      - Output generated guards
+    * - recompiles
+      - Output recompilation reasons (only the first guard check that fails)
+    * - recompiles_verbose
+      - Output all guard checks that fail when a recompilation occurs
+    * - aot_graphs
+      - Output graph generated by AOTAutograd
+    * - aot_joint_graphs
+      - Output the joint forward-backward graph generated by AOTAutograd
+    * - output_code
+      - Output code generated by Inductor
+    * - kernel_code
+      - Output code generated by Inductor on a per-kernel basis
+    * - schedule
+      - Output Inductor scheduling logs
+    * - perf_hints
+      - Output Inductor perf hint logs
+    * - fusion
+      - Output Inductor fusion logs
 
-To throw an error on the first graph break encountered, use the ``fullgraph``
-mode. This mode disables TorchDynamo’s Python fallback, and only
-succeeds if the entire program is convertible into a single graph. Example
-usage:
+For the full list of options, see `torch._logging <https://pytorch.org/docs/stable/logging.html>`__
+and `torch._logging.set_logs <https://pytorch.org/docs/stable/generated/torch._logging.set_logs.html#torch._logging.set_logs>`__.
 
-.. code-block:: python
+Related Articles
+~~~~~~~~~~~~~~~~
 
-   def toy_example(a, b):
-      ...
-
-   compiled_toy = torch.compile(toy_example, fullgraph=True, backend=<compiler>)(a, b)
-
-Excessive Recompilation
------------------------
-
-When TorchDynamo compiles a function (or part of one), it makes certain
-assumptions about locals and globals in order to allow compiler
-optimizations, and expresses these assumptions as guards that check
-particular values at runtime. If any of these guards fail, Dynamo will
-recompile that function (or part) up to
-``torch._dynamo.config.cache_size_limit`` times. If your program is
-hitting the cache limit, you will first need to determine which guard is
-failing and what part of your program is triggering it.
-
-If your program exhibits a bounded amount of dynamism, you may be able
-to tune the TorchDynamo cache limit to allow for each variation to be
-compiled and cached, but if the cache limit is too high you may find the
-cost of recompilation outweighs any optimization benefits.
-
-::
-
-   torch._dynamo.config.cache_size_limit = <your desired cache limit>
-
-TorchDynamo plans to support many common cases of dynamic tensor shapes,
-such as varying batch size or sequence length. It does not plan to
-support rank-dynamism. In the meantime, setting a specific cache limit
-can be used in coordination with bucketing techniques to achieve an
-acceptable number of recompilations for some dynamic models.
-
-Accuracy Debugging
-~~~~~~~~~~~~~~~~~~
-
-Accuracy issues can also be minified if you set the environment variable
-``TORCHDYNAMO_REPRO_LEVEL=4``, it operates with a similar git bisect
-model and a full repro might be something like
-``TORCHDYNAMO_REPRO_AFTER="aot" TORCHDYNAMO_REPRO_LEVEL=4`` the reason
-we need this is downstream compilers will codegen code whether it’s
-Triton code or the C++ backend, the numerics from those downstream
-compilers can be different in subtle ways yet have dramatic impact on
-your training stability. So the accuracy debugger is very useful for us
-to detect bugs in our codegen or with a backend compiler.
-
-If you'd like to ensure that random number generation is the same across both torch
-and triton then you can enable ``torch._inductor.config.fallback_random = True``
-
-Extended Debugging
-~~~~~~~~~~~~~~~~~~
-
-Extended debugging can be enabled by using the following experimental flags.
-
-``TORCHDYNAMO_EXTENDED_DEBUG_GUARD_ADDED`` - provides extended debug information if the
-string representation of a guard matches this flag value. For example, set it to
-"Ne(s0, 10)" to generate full Python and C++ backtrace whenever guard was issued.
-``TORCHDYNAMO_EXTENDED_DEBUG_CREATE_SYMBOL`` - provides extended debug information when
-a particular symbol is allocated. For example, set this to "u2" to generate full Python
-and C++ backtrace whenever this symbol was created.
-``TORCHDYNAMO_EXTENDED_DEBUG_CPP`` - provides extended debug information (C++ backtrace)
-for all extended debug settings as well as errors. For example, set this to "1". The C++
-backtrace is slow and very spammy so it is not included by default with extended debugging.
-
-Cold Start Timing and Cache Corruption Debugging
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-In order to measure the cold start compilation time or debug a cache corruption,
-it is possible pass ``TORCHINDUCTOR_FORCE_DISABLE_CACHES=1`` or set
-``torch._inductor.config.force_disable_caches = True`` which will override any
-other caching config option and disable all compile time caching.
+- `torch.compile tutorial <https://pytorch.org/tutorials/intermediate/torch_compile_tutorial.html>`__
+- `torch.compile fine-grained APIs <https://pytorch.org/docs/stable/torch.compiler_fine_grain_apis.html>`__
+- `torch.compile FAQ <https://pytorch.org/docs/stable/torch.compiler_faq.html>`__
+- `torch.compiler namespace overview <https://pytorch.org/docs/stable/torch.compiler.html#torch-compiler-overview>`__
+- `torch.compiler API reference <https://pytorch.org/docs/stable/torch.compiler_api.html>`__
+- `Profiling torch.compile <https://pytorch.org/docs/stable/torch.compiler_profiling_torch_compile.html>`__
+- `torch.compile missing manual <https://docs.google.com/document/d/1y5CRfMLdwEoF1nTk9q8qEu1mgMUuUtvhklPKJ2emLU8/edit?usp=sharing>`__
+- `The dynamic shapes manual <https://docs.google.com/document/d/1GgvOe7C8_NVOMLOCwDaYV1mXXyHMXY7ExoewHqooxrs/edit#heading=h.fh8zzonyw8ng>`__
+- `TorchInductor caching tutorial <https://pytorch.org/tutorials/recipes/torch_compile_caching_tutorial.html>`__
