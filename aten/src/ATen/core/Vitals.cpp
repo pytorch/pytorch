@@ -1,5 +1,4 @@
 #include <ATen/core/Vitals.h>
-#include <c10/util/env.h>
 #include <cstdlib>
 #include <iostream>
 
@@ -42,9 +41,9 @@ bool torchVitalEnabled() {
   // If this is a performance hit, make `enabled` variable static
   // and return `const bool&` instead
   bool enabled = []() {
-    auto const e = c10::utils::get_env("TORCH_VITAL");
-    if (e.has_value()) {
-      return !e.value().empty();
+    auto e = getenv("TORCH_VITAL");
+    if (e != nullptr) {
+      return e[0] != '\0';
     }
     return false;
   }();
