@@ -74,7 +74,7 @@ class MatchState(Enum):
         return self
 
     def __str__(self) -> str:
-        details = f", {self.culprit}" if self.culprit else ""
+        details = f", {self.culprit}" if getattr(self, "culprit", None) else ""
         return f"Error type: {self.name}{details}"
 
 
@@ -220,8 +220,12 @@ class EntryState:
         self.collective_state = entry["state"]
         self.collective_frames = entry["frames"]
         self.expected_ranks = expected_ranks
+        self.missing_ranks: Set[int]
+        self.input_numel: int
+        self.output_numel: int
+        self.errors: Set[Tuple[int, MatchState]]
 
-    def logging_info(
+    def log(
         self,
         logger: FlightRecorderLogger,
         logger_msg: str,
@@ -233,8 +237,8 @@ class EntryState:
         logger.info(
             logger_msg,
             self.collective_seq_id,
-            self.record_id,
         )
+        logger.info("internal record id: %s", self.record_id)
         logger.info("group info: %s", self.pg_desc)
         logger.info("collective: %s", self.profiling_name)
         if missing_ranks:
