@@ -28,6 +28,7 @@ from torch._higher_order_ops.utils import (
     saved_tensors_and_symints,
     unique_graph_id,
     UnsupportedAliasMutationException,
+    validate_subgraph_args_types,
 )
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -58,6 +59,7 @@ class CondOp(HigherOrderOperator):
         super().__init__("cond")
 
     def __call__(self, pred, true_fn, false_fn, operands):
+        validate_subgraph_args_types(operands)
         return super().__call__(pred, true_fn, false_fn, operands)
 
 
@@ -246,9 +248,6 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
     assert isinstance(
         operands, (list, tuple)
     ), f"Cond operands must be a list or tuple of tensors and SymInts {operands}"
-    assert all(
-        isinstance(o, (torch.Tensor, torch.SymInt)) for o in operands
-    ), f"Cond operands must be a list of tensors and SymInts {operands}"
 
     true_graph = reenter_make_fx(true_fn)(*operands)
     false_graph = reenter_make_fx(false_fn)(*operands)
@@ -366,6 +365,9 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
 
 @cond_op.py_impl(DispatchKey.CompositeExplicitAutograd)
 def cond_op_dense(pred, true_fn, false_fn, operands):
+    assert all(
+        isinstance(o, (torch.Tensor, int)) for o in operands
+    ), f"Dense implementation operands must be a list of tensors and ints {operands}"
     mode = _get_current_dispatch_mode()
     assert mode is None, "Mode should never be enabled for CPU/CUDA key"
     if pred:
