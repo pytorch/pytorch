@@ -2,7 +2,9 @@
 import contextlib
 import functools
 import operator
-from typing import Any, Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
+from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
+
+from ordered_set import OrderedSet
 
 import torch
 from torch._dynamo.external_utils import (
@@ -55,6 +57,17 @@ def maybe_clone(x):
     return x
 
 
+_graph_placeholders = ["inputs", "sizes", "scalars", "hooks"]
+_impure_targets = OrderedSet(
+    [
+        call_hook,
+        call_backward,
+        FakeCompiledAutogradEngine._exec_final_callbacks_stub,
+        torch.ops.inductor.accumulate_grad_.default,
+    ]
+)
+
+
 class AutogradCompilerInstance:
     def __init__(self, compiler_fn) -> None:
         self.compiler_fn = compiler_fn
@@ -69,7 +82,6 @@ class AutogradCompilerInstance:
         self.fx_tracer = PythonKeyTracer()
         self.proxy_mode = ProxyTorchDispatchMode(self.fx_tracer, "symbolic")
         self.hooks_proxy: Optional[Proxy] = None
-        self.graph_placeholders = ["inputs", "sizes", "scalars", "hooks"]
 
     def wrap_fake(self, x, source):
         assert isinstance(x, torch.Tensor)
@@ -94,7 +106,7 @@ class AutogradCompilerInstance:
         self.fx_tracer.tensor_attrs = {}
         args_proxy, sizes_proxy, scalars_proxy, self.hooks_proxy = (
             self.fx_tracer.create_proxy("placeholder", name, (), {})
-            for name in self.graph_placeholders
+            for name in _graph_placeholders
         )
 
         self.stack.enter_context(preserve_node_meta())
@@ -265,7 +277,7 @@ class AutogradCompilerInstance:
         inputs = nodes[0]
         inputs_users = list(inputs.users.keys())
         # input access nodes should immediately follow placeholder nodes
-        first_getitem_idx = len(self.graph_placeholders)
+        first_getitem_idx = len(_graph_placeholders)
         assert nodes[first_getitem_idx] == inputs_users[0]
         last_getitem_idx = first_getitem_idx + len(inputs_users) - 1
         assert nodes[last_getitem_idx] == inputs_users[-1]
@@ -308,29 +320,19 @@ class AutogradCompilerInstance:
     def dce(self):
         # Most of these removed nodes would have been removed during Dynamo and AOTDispatch
         # Remove some of these nodes earlier to improve compilation speed
-        impure_targets = {
-            call_hook,
-            call_backward,
-            FakeCompiledAutogradEngine._exec_final_callbacks_stub,
-            torch.ops.inductor.accumulate_grad_.default,
-        }
 
         # Dynamo guards will error instead of creating aliasing guards unless we unpack them in the graph
-        unpack_nodes: Set[torch.fx.Node] = set()
-        i = len(self.graph_placeholders)
-        for node in self.fx_tracer.graph.nodes:
-            if i == 0:
-                break
-
-            unpack_nodes = unpack_nodes | set(node.users.keys())
-            i -= 1
+        unpack_nodes: OrderedSet[torch.fx.Node] = OrderedSet()
+        for i, node in enumerate(self.fx_tracer.graph.find_nodes(op="placeholder")):
+            unpack_nodes.update(node.users.keys())
+        assert i == len(_graph_placeholders) - 1
 
         def is_impure(node):
             return (
                 node in unpack_nodes
                 or node.op == "placeholder"
                 or node.op == "output"
-                or (node.op == "call_function" and node.target in impure_targets)
+                or (node.op == "call_function" and node.target in _impure_targets)
             )
 
         self.fx_tracer.graph.eliminate_dead_code(is_impure)
