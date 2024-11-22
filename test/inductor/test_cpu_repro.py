@@ -4722,8 +4722,6 @@ class CPUReproTests(TestCase):
         opt_fn = torch._dynamo.optimize("inductor")(fn)
         _, code = run_and_get_cpp_code(opt_fn, x)
         self.assertTrue(same(fn(x), opt_fn(x)))
-        # def and use
-        print(code)
         FileCheck().check_count("#pragma omp for collapse(2)", 1, exactly=True).run(
             code
         )

@@ -1784,7 +1784,11 @@ class CppKernel(Kernel):
 
     def __init__(self, args, num_threads):
         super().__init__(args)
+        # Indicate when this kernel is active, for example
+        # {x0, {24, 26}} -> this kernel is activate when x0 >=24 and x0 < 26
         self.active_ranges: dict[sympy.Expr, Tuple[sympy.Expr, ...]] = {}
+        # Indicate this kernel will be moved under inner for loop
+        # See move_code_under_inner_loop
         self.inner_itervars: List[sympy.Symbol] = []
         self.call_ranges: Optional[Tuple[sympy.Expr, ...]] = None
         self.ranges: List[sympy.Expr] = []
@@ -4043,6 +4047,9 @@ class CppKernelProxy(CppKernel):
     def aggregate_reduction_buffers(
         self, inner_loop_reduction_outer_not: bool, outer_loop: Optional["LoopLevel"]
     ):
+        # CppKernel/CppVecKernel/CppTile2dKernel have reduction buffers themselves,
+        # here we decide how to aggregate them together and put new reduction buffers
+        # under CppKernelProxy
         def get_buffer_from_main_loop_kernel(attr: str):
             main_kernel = self.kernels[0]
             if attr == "reduction_prefix":
