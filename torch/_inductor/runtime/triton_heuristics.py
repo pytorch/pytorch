@@ -18,6 +18,7 @@ import time
 from typing import Any, Container, Dict, List, Optional, Set, Tuple
 
 import torch
+from torch.monitor import _WaitCounter
 
 from ..triton_bundler import TritonBundler
 from .autotune_cache import AutotuneCache
@@ -490,7 +491,8 @@ class CachingAutotuner(KernelInterface):
             compile_kwargs = compile_meta
 
         if warm_cache_only:
-            binary = triton.compile(*compile_args, **compile_kwargs)
+            with _WaitCounter("pytorch.triton_heuristics.compile"):
+                binary = triton.compile(*compile_args, **compile_kwargs)
             launcher = None
             TritonBundler.put(
                 triton_hash_to_path_key(binary.hash), self.triton_meta.get("device", 0)
@@ -508,7 +510,8 @@ class CachingAutotuner(KernelInterface):
             device_interface.synchronize(device_interface.current_device())
 
             try:
-                binary = triton.compile(*compile_args, **compile_kwargs)
+                with _WaitCounter("pytorch.triton_heuristics.compile"):
+                    binary = triton.compile(*compile_args, **compile_kwargs)
             except Exception:
                 log.exception(
                     "Triton compilation failed: %s\n%s\nmetadata: %s",
