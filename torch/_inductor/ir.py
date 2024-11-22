@@ -2228,7 +2228,7 @@ class Sort(Loops):
     def get_reduction_type(self) -> Optional[str]:
         return "sort"
 
-    def get_reduction_size(self) -> Sequence[sympy.Expr]:
+    def get_reduction_size(self) -> Sequence[Expr]:
         return self.sort_ranges
 
     def get_size(self) -> Sequence[Expr]:
@@ -5659,26 +5659,41 @@ class UserDefinedTritonKernel(ExternKernel):
 
         kernel = kernel_side_table.get_kernel(self.kernel_idx)
         configs = []
-        restore_value_args = []
+        restore_value_args: List[str] = []
+        reset_to_zero_args: List[str] = []
         if isinstance(kernel, Autotuner):
             # https://github.com/triton-lang/triton/pull/5083
             # changes kernel.restore_idx to kernel.restore_value
             if hasattr(kernel, "restore_idx"):
-                for i in kernel.restore_idx:
-                    restore_value_args.append(kernel.fn.arg_names[i])
+                restore_value_args.extend(
+                    kernel.fn.arg_names[i] for i in kernel.restore_idx
+                )
             else:
                 assert hasattr(kernel, "restore_value")
                 restore_value_args.extend(kernel.restore_value)
+
+            if hasattr(kernel, "reset_idx"):
+                for i in kernel.reset_idx:
+                    reset_to_zero_args.append(kernel.fn.arg_names[i])
+            else:
+                assert hasattr(kernel, "reset_to_zero")
+                reset_to_zero_args.extend(kernel.reset_to_zero)
+
             configs = kernel.configs
             kernel = kernel.fn
-        return kernel, configs, restore_value_args
+        return kernel, configs, restore_value_args, reset_to_zero_args
 
     def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
-        kernel, configs, restore_value_args = self.get_kernel_and_metadata()
+        (
+            kernel,
+            configs,
+            restore_value_args,
+            reset_to_zero_args,
+        ) = self.get_kernel_and_metadata()
 
         # Definition of kernel
         new_name, triton_meta = wrapper.define_user_defined_triton_kernel(
-            kernel, configs, self.kwargs, restore_value_args
+            kernel, configs, self.kwargs, restore_value_args, reset_to_zero_args
         )
         raw_args = [
             self.get_kwargs_value(k) for k in self.ordered_kwargs_for_cpp_kernel
@@ -5785,7 +5800,7 @@ class UserDefinedTritonKernel(ExternKernel):
         self.kernel_idx = kernel_idx
         self.grid = grid
 
-        kernel, configs, _ = self.get_kernel_and_metadata()
+        kernel, configs, _, _ = self.get_kernel_and_metadata()
 
         # If we are autotuning, not all arguments will be passed
         self.ordered_kwargs_for_cpp_kernel = [
@@ -6184,19 +6199,24 @@ class AssertScalar(ExternKernel):
         return free_unbacked_symbols(self.scalar)
 
     def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
+        # NB: It is EXTREMELY important not to simplify the scalar under assertion here,
+        # because simplify is done with respect to runtime asserts.  So if you have
+        # "u0 == 0" in the runtime asserts, if you subsequently try to
+        # simplify(u0 == 0), you will get True (because we've already runtime assert'ed
+        # that it's true).  But we're code generating the actual runtime assert here!!
         if V.graph.cpp_wrapper:
-            pass
-        else:
-            # NB: It is EXTREMELY important not to simplify the scalar under
-            # assertion here, because simplify is done with respect to
-            # runtime asserts.  So if you have "u0 == 0" in the runtime
-            # asserts, if you subsequently try to simplify(u0 == 0), you will
-            # get True (because we've already runtime assert'ed that it's
-            # true).  But we're code generating the actual runtime assert
-            # here!!
-            wrapper.writeline(
-                f"if not {V.graph.wrapper_code.codegen_python_sizevar(self.scalar, simplify=False)}:"
+            sizevar = V.graph.wrapper_code.codegen_cpp_sizevar(
+                self.scalar, simplify=False
             )
+            # TODO: when we start compiling in C++20, annotate with [[unlikely]].
+            wrapper.writeline(
+                f'if (!({sizevar})) {{ throw std::runtime_error("{self.msg}"); }}'
+            )
+        else:
+            sizevar = V.graph.wrapper_code.codegen_python_sizevar(
+                self.scalar, simplify=False
+            )
+            wrapper.writeline(f"if not {sizevar}:")
             wrapper.writeline(f"    raise RuntimeError({repr(self.msg)})")
             # No one should ever use this buffer, but for uniformity
             # define the variable and assign it None
@@ -6221,15 +6241,26 @@ class FallbackKernel(ExternKernelAlloc):
         *,
         unbacked_bindings=None,
     ) -> None:
+        # When aten binary ops have constant second args, cpp wrapper expects the scalar
+        # version.  This should long-term be handled as in
+        # https://github.com/pytorch/pytorch/issues/90923.
+        BINARY_OP_MAPPING = {
+            aten.add.Tensor: aten.add.Scalar,
+            aten.div.Tensor: aten.div.Scalar,
+            aten.divide.Tensor: aten.divide.Scalar,
+            aten.floor_divide: aten.floor_divide.Scalar,
+            aten.mul.Tensor: aten.mul.Scalar,
+            aten.multiply.Tensor: aten.multiply.Scalar,
+            aten.sub.Tensor: aten.sub.Scalar,
+            aten.subtract.Tensor: aten.subtract.Scalar,
+            aten.true_divide.Tensor: aten.true_divide.Scalar,
+        }
         if (
-            kernel == aten.mul.Tensor
+            kernel in BINARY_OP_MAPPING
             and len(tensor_args) == 1
             and len(nontensor_args) == 1
         ):
-            # When aten.mul.Tensor's second arg is constant, cpp wrapper expects
-            # to call mul_Scalar. A more proper fix is to do it in decomposition.
-            # See https://github.com/pytorch/pytorch/issues/123478
-            kernel = aten.mul.Scalar
+            kernel = BINARY_OP_MAPPING[kernel]
 
         super().__init__(
             layout,

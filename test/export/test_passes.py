@@ -247,6 +247,17 @@ def _with_autocast_tests():
                 e = d - 1
             return d, e
 
+    class NestedAutocastOp(torch.nn.Module):
+        def forward(self, x):
+            x = x + 1
+            with torch.autocast(device_type="cpu", enabled=True):
+                c = x.sin().sum()
+                with torch.autocast(device_type="cpu", enabled=False):
+                    d = c + 1
+            with torch.autocast(device_type="cpu", enabled=True):
+                e = d - 1
+            return d, e
+
     x = torch.randn(2, 2)
 
     def _get_predispatch_module(mod, args):
@@ -266,6 +277,11 @@ def _with_autocast_tests():
         "ctx_manager_split": (
             SplitAutocastOp(),
             _get_predispatch_module(SplitAutocastOp(), (x,)),
+            (x,),
+        ),
+        "ctx_manager_nested": (
+            NestedAutocastOp(),
+            _get_predispatch_module(NestedAutocastOp(), (x,)),
             (x,),
         ),
     }
@@ -562,7 +578,7 @@ class TestPasses(TestCase):
 
         m = MyModule()
         inputs = (torch.ones(2, 3),)
-        ep = torch.export.export(m, inputs, strict=False)
+        ep = export(m, inputs, strict=False).run_decompositions({})
         without_token_ep = _remove_effect_tokens(ep)
         self.assertExpectedInline(
             without_token_ep.graph_module.code.strip(),
@@ -935,6 +951,38 @@ def forward(self, sin, cos):
                 for user in node.users:
                     self.assertTrue(user.graph is gm.graph)
 
+        mod_orig, mod, args = self.WITH_AUTOCAST_TESTS["ctx_manager_nested"]
+        _check_node_users_in_the_same_graph(mod)
+        self.assertEqual(mod_orig(*args), mod(*args))
+        self.assertExpectedInline(
+            mod.code.strip("\n"),
+            """\
+def forward(self, x):
+    x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    add = torch.ops.aten.add.Tensor(x, 1);  x = None
+    submod_3 = self.submod_1
+    add_1 = torch.ops.higher_order.wrap_with_autocast('cpu', None, True, None, submod_3, add);  submod_3 = add = None
+    getitem = add_1[0];  add_1 = None
+    submod_4 = self.submod_2
+    sub = torch.ops.higher_order.wrap_with_autocast('cpu', None, True, None, submod_4, getitem);  submod_4 = None
+    getitem_1 = sub[0];  sub = None
+    return pytree.tree_unflatten((getitem, getitem_1), self._out_spec)
+    """,
+        )
+
+        self.assertExpectedInline(
+            mod.submod_1.code.strip("\n"),
+            """\
+def forward(self, add):
+    sin = torch.ops.aten.sin.default(add);  add = None
+    sum_1 = torch.ops.aten.sum.default(sin);  sin = None
+    submod_2 = self.submod_1
+    add_1 = torch.ops.higher_order.wrap_with_autocast('cpu', None, False, None, submod_2, sum_1);  submod_2 = sum_1 = None
+    getitem = add_1[0];  add_1 = None
+    return (getitem,)
+    """,
+        )
+
         mod_orig, mod, args = self.WITH_AUTOCAST_TESTS["ctx_manager"]
         _check_node_users_in_the_same_graph(mod)
         self.assertEqual(mod_orig(*args), mod(*args))
@@ -1164,7 +1212,7 @@ def forward(self, add_1):
 
             mod = M()
             x = torch.randn([3, 3])
-            ep = export(mod, (x,))
+            ep = export(mod, (x,)).run_decompositions({})
             inplace_ep = unsafe_remove_auto_functionalized_pass(ep)
             graph_text = str(inplace_ep.graph)
             self.assertExpectedInline(

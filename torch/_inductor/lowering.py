@@ -1668,36 +1668,44 @@ def select(x, dim, idx):
 
 
 @register_lowering(aten.split, type_promotion_kind=None)
-def split(x, sizes, dim=0, clamp=True):
+def split(x, sizes, dim=0):
     dim = _validate_dim(x, dim, 0)
-    if isinstance(sizes, sympy.Expr):
-        # TODO: We don't have to guard on sizes per se, but the number
-        # of splits must stay constant
-        sizes = V.graph.sizevars.evaluate_static_shape(sizes)
-    if isinstance(sizes, (int, sympy.Integer)):
-        x_size = V.graph.sizevars.evaluate_static_shape(x.get_size()[dim])
-        sizes = [sizes] * ((x_size + sizes - 1) // sizes)
+    sizes_ = sizes
+
+    # If sizes is an integer (or a SymInt), we turn it into a list of sizes
+    # by computing what the actual size of each chunk should be.
+    if not isinstance(sizes, (list, tuple)):
+        x_size = x.get_size()[dim]
+        chunks = V.graph.sizevars.evaluate_static_shape(
+            FloorDiv(x_size + sizes - 1, sizes)
+        )
+        sizes_ = [sizes] * chunks
+        # The last chunk might have a smaller size than the rest.
+        sizes_[-1] = x_size - (chunks - 1) * sizes
+
+    # From this point, we assume that the sum of the sizes of all chunks
+    # equals the size of the base tensor.
     result = []
     start = 0
-    for size in sizes:
+    for size in sizes_:
         end = start + size
-        result.append(slice_(x, dim, start, end, clamp=clamp))
+        # No need for clamping here, since we compute the exact
+        # start and end values.
+        result.append(slice_(x, dim, start, end, clamp=False))
         start = end
     return result
 
 
 @register_lowering(aten.split_with_sizes, type_promotion_kind=None)
 def split_with_sizes(x, sizes, dim=0):
-    return split(x, sizes, dim, clamp=False)
+    return split(x, sizes, dim)
 
 
 @register_lowering(aten.unbind, type_promotion_kind=None)
 def unbind(x, dim=0):
     dim = _validate_dim(x, dim, 0)
     x_size = V.graph.sizevars.evaluate_static_shape(x.get_size()[dim])
-    result = []
-    for i in range(x_size):
-        result.append(select(x, dim, i))
+    result = [select(x, dim, i) for i in range(x_size)]
     return result
 
 
@@ -5692,18 +5700,6 @@ def fmod(a, b):
     return make_pointwise(fn)(a, b)
 
 
-@register_lowering(aten.rsqrt)
-def rsqrt(x):
-    dtype = x.get_dtype()
-    if is_integer_dtype(dtype) or is_boolean_dtype(dtype):
-        x = to_dtype(x, torch.get_default_dtype())
-
-    def _rsqrt(x):
-        return ops.rsqrt(x)
-
-    return make_pointwise(_rsqrt)(x)
-
-
 @register_lowering([aten.sum, prims.sum])
 def sum_(x, axis=None, keepdims=False, *, dtype=None):
     if (
@@ -5970,6 +5966,7 @@ def register_pointwise_numeric_ldf64(op):
     )
 
 
+rsqrt = register_pointwise_numeric(aten.rsqrt)
 exp = register_pointwise_numeric_ldf64(aten.exp)
 exp2 = register_pointwise_numeric(aten.exp2)
 expm1 = register_pointwise_numeric(aten.expm1)

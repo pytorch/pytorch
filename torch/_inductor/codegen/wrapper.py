@@ -1298,6 +1298,9 @@ class PythonWrapperCodegen(CodeGen):
     def finalize_prefix(self):
         pass
 
+    def codegen_cpp_sizevar(self, x: Expr, *, simplify: bool = True) -> str:
+        raise RuntimeError("codegen_cpp_sizevar is only implemented for cpp_wrapper!")
+
     def codegen_python_sizevar(self, x: Expr, *, simplify: bool = True) -> str:
         return pexpr(x, simplify=simplify)
 
@@ -1507,6 +1510,7 @@ class PythonWrapperCodegen(CodeGen):
         configs,
         kwargs,
         restore_value_args,
+        reset_to_zero_args,
     ):
         from torch.utils._triton import patch_triton_dtype_repr
 
@@ -1593,6 +1597,9 @@ class PythonWrapperCodegen(CodeGen):
 
         if restore_value_args:
             triton_meta["restore_value"] = tuple(restore_value_args)
+
+        if reset_to_zero_args:
+            triton_meta["reset_to_zero"] = tuple(reset_to_zero_args)
 
         # Distinguish between different functions using function id
         cache_key: List[Any] = [id(kernel.fn)]
