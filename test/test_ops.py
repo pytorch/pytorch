@@ -1095,17 +1095,15 @@ class TestCommon(TestCase):
                     )
 
             # Case 3: out= with correct shape and dtype, but wrong device.
-            wrong_device = None
-            if torch.device(device).type != "cpu":
-                wrong_device = "cpu"
-            elif HAS_GPU:
-                wrong_device = GPU_TYPE
-
+            #   Expected behavior: throws an error.
+            #   This case is ignored on CPU to allow some scalar operations to succeed.
             factory_fn_msg = (
                 "\n\nNOTE: If your op is a factory function (i.e., it accepts TensorOptions) you should mark its "
                 "OpInfo with `is_factory_function=True`."
             )
-            if wrong_device is not None:
+
+            if torch.device(device).type != "cpu":
+                wrong_device = "cpu"
 
                 def _case_three_transform(t):
                     return make_tensor(t.shape, dtype=t.dtype, device=wrong_device)
