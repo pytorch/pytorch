@@ -547,9 +547,13 @@ class GraphModule(torch.nn.Module):
 
     class fwd_body_0(torch.nn.Module):
         def forward(self, ctx : torch.autograd.function.Function, x: "f32[]", z: "f32[]", l_weird_b: "f32[]", l_weird_c: "f32[]"):
+            _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
+
             mul: "f32[]" = l_weird_b * l_weird_c
             clone: "f32[]" = x.clone();  x = None
             mul_1: "f32[]" = mul * clone;  mul = clone = None
+
+            _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
             return (mul_1, [l_weird_b, l_weird_c])
 
     class bwd_body_0(torch.nn.Module):
@@ -1113,9 +1117,13 @@ class GraphModule(torch.nn.Module):
 
     class fwd_body_0(torch.nn.Module):
         def forward(self, ctx : torch.autograd.function.Function, x: "f32[]", y: "f32[]"):
+            _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
+
             out1: "f32[]" = x.sin();  x = None
 
             out2: "f32[]" = y * 2;  y = None
+
+            _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
             return ((out1, out2), [])
 
     class bwd_body_0(torch.nn.Module):
@@ -1186,6 +1194,29 @@ class GraphModule(torch.nn.Module):
         # Make sure guards for default values do not crash
         foo(torch.randn(2))
         foo(torch.randn(2, requires_grad=True))
+
+    def test_fwd_no_grad(self):
+        # autograd.Function.forward should be traced and called under no_grad mode.
+        # torch.exp with out=... arguments don't support automatic differentiation,
+        # so can't be traced/called under grad mode (throwing RuntimeError),
+        # therefore this unit test ensures fwd is under no_grad mode.
+        class Foo(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, inputs):
+                torch.exp(inputs, out=inputs)
+                return inputs
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return None
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            return Foo.apply(x)
+
+        x1 = torch.randn(2, 3, requires_grad=True)
+        x2 = x1.clone()
+        self.assertEqual(f(x1), Foo.apply(x2))
 
     # https://github.com/pytorch/pytorch/issues/129963
     def test_fwd_propogation_correctness(self):
