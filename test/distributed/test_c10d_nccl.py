@@ -349,44 +349,6 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         with self.assertRaises(ValueError):
             dist.all_reduce(t)
 
-    @requires_nccl()
-    @skip_if_rocm_multiprocess
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    def test_restart_pg(self):
-        # Note: restart test passes steadily only for blocking mode for now.
-        # TODO: expand this test to non-blocking mode
-        store = c10d.FileStore(self.file_name, self.world_size)
-        device = torch.device(f"cuda:{self.rank % torch.cuda.device_count()}")
-
-        # initialize pg for the first time
-        c10d.init_process_group(
-            "nccl",
-            world_size=self.world_size,
-            rank=self.rank,
-            store=store,
-        )
-        t0 = torch.rand(10, 10, device=device)
-        # First allreduce to lazy initialize default pg
-        dist.all_reduce(t0)
-        torch.cuda.synchronize()
-        # Destroy pg
-        dist.destroy_process_group()
-
-        # re-initialize pg
-        c10d.init_process_group(
-            "nccl",
-            world_size=self.world_size,
-            rank=self.rank,
-            store=store,
-        )
-        t1 = torch.rand(5, 5, device=device)
-        dist.all_reduce(t1)
-        torch.cuda.synchronize()
-        dist.destroy_process_group()
-        # validate default pg is no longer valid
-        with self.assertRaises(ValueError):
-            dist.all_reduce(t1)
-
     CUDA_12_AND_ABOVE = torch.cuda.is_available() and (
         torch.version.cuda is not None and int(torch.version.cuda.split(".")[0]) >= 12
     )
@@ -2675,6 +2637,16 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
     def blocking_wait_error_msg(self):
         return "timeout"
 
+    def get_new_file(self, store) -> str:
+        # we need a brand new fileStore for the new PG
+        # the new file name is shared through the old fileStore
+        if self.rank == 0:
+            new_file_name = tempfile.NamedTemporaryFile(delete=False).name
+            store.set("file", new_file_name)
+        else:
+            new_file_name = store.get("file").decode()
+        return new_file_name
+
     def _run_all_reduce(self, pg):
         pg.allreduce(torch.rand(10).cuda(self.rank))
 
@@ -2871,6 +2843,49 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
             ] = prev_nccl_async_error_handling
 
     @requires_nccl()
+    @skip_if_rocm_multiprocess
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    def test_restart_pg(self):
+        # Note: restart test passes steadily only for blocking mode for now.
+        # TODO: expand this test to non-blocking mode
+        store = c10d.FileStore(self.file_name, self.world_size)
+        device = torch.device(f"cuda:{self.rank % torch.cuda.device_count()}")
+
+        # initialize pg for the first time
+        c10d.init_process_group(
+            "nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        t0 = torch.rand(10, 10, device=device)
+        # First allreduce to lazy initialize default pg
+        dist.all_reduce(t0)
+        torch.cuda.synchronize()
+        # Destroy pg
+        dist.destroy_process_group()
+
+        # we need a brand new fileStore for the new PG
+        # the new file name is shared through the old fileStore
+        new_file_name = self.get_new_file(store)
+        store = c10d.FileStore(new_file_name, self.world_size)
+
+        # re-initialize pg
+        c10d.init_process_group(
+            "nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        t1 = torch.rand(5, 5, device=device)
+        dist.all_reduce(t1)
+        torch.cuda.synchronize()
+        dist.destroy_process_group()
+        # validate default pg is no longer valid
+        with self.assertRaises(ValueError):
+            dist.all_reduce(t1)
+
+    @requires_nccl()
     @requires_nccl_version((2, 4, 0), "Need NCCL 2.4+ for error checking")
     @skip_if_rocm_multiprocess
     @skip_if_lt_x_gpu(3)
@@ -2903,19 +2918,18 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
             work.wait()
             result = work.get_future_result().wait()
             self.assertEqual(nccl_backend.get_error(), ErrorType.TIMEOUT)
-            # we need a brand new fileStore for the new PG
-            # the new file name is shared through the old fileStore
-            new_file_name = tempfile.NamedTemporaryFile(delete=False).name
-            store.set("file", new_file_name)
         else:
             # other ranks not exiting before rank 0 timeout, this is to avoid
             # nccl error happening before rank 0 timeouts
             time.sleep(4)
             self.assertEqual(nccl_backend.get_error(), ErrorType.REMOTE_ERROR)
-            new_file_name = store.get("file").decode()
 
         # all ranks restart using a new store after detecting the timeout error
         dist.destroy_process_group()
+
+        # we need a brand new fileStore for the new PG
+        # the new file name is shared through the old fileStore
+        new_file_name = self.get_new_file(store)
 
         new_store = c10d.FileStore(new_file_name, self.world_size)
         # re-initialize pg
