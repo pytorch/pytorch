@@ -527,6 +527,4 @@ class CppWrapperGpu(CppWrapperCpu):
             self.writeline(f"kernels.{kernel_name}({call_args_str}, {stream});")
 
     def make_zero_buffer(self, name):
-        return (
-            f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_zero_({name}.get())){self.ending}"
-        )
+        return f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_zero_({name}.get()));"

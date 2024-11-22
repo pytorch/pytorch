@@ -36,13 +36,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.declare = "auto "
         self.declare_maybe_reference = "decltype(auto) "
         self.ending = ";"
-        self.open_bracket = "{"
-        self.closed_bracket = "}"
         self.comment = "//"
         self.namespace = "at::"
         self.none_str = "nullptr"
-        self.size = "sizes()"
-        self.stride = "strides()"
         self.supports_intermediate_hooks = False
         self.outputs_need_copy = set()
         self.kernel_callsite_id = count()
@@ -1449,7 +1445,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             # in case the outer_output carried a value
             # before (e.g., in the while_loop codegen)
             self.writeline(f"{outer_output}.reset();")
-            self.writeline(f"{outer_output} = {src}{self.ending}")
+            self.writeline(f"{outer_output} = {src};")
 
     def codegen_invoke_subgraph(self, invoke_subgraph):
         raise NotImplementedError(

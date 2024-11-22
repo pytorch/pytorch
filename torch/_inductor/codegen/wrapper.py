@@ -629,13 +629,9 @@ class PythonWrapperCodegen(CodeGen):
         self.declare = ""
         self.declare_maybe_reference = ""
         self.ending = ""
-        self.open_bracket = "["
-        self.closed_bracket = "]"
         self.comment = "#"
         self.namespace = ""
         self.none_str = "None"
-        self.size = "size()"
-        self.stride = "stride()"
         self.move_begin = "std::move(" if V.graph.cpp_wrapper else ""
         self.move_end = ")" if V.graph.cpp_wrapper else ""
         self.last_seen_device_guard_index: Optional[int] = None
@@ -1072,7 +1068,7 @@ class PythonWrapperCodegen(CodeGen):
         self.writeline(line)
 
     def generate_index_put_fallback(self, kernel, x, indices, values, accumulate):
-        indices_str = f"{self.open_bracket}{', '.join(indices)}{self.closed_bracket}"
+        indices_str = f"[{', '.join(indices)}]"
         args = [x, indices_str, values, accumulate]
         self.writeline(self.wrap_kernel_call(kernel, args))
 
@@ -1229,12 +1225,10 @@ class PythonWrapperCodegen(CodeGen):
         )
 
     def codegen_input_size_var_decl(self, code: IndentedBuffer, name):
-        code.writeline(f"{self.declare}{name}_size = {name}.{self.size}{self.ending}")
+        code.writeline(f"{self.declare}{name}_size = {name}.size()")
 
     def codegen_input_stride_var_decl(self, code: IndentedBuffer, name):
-        code.writeline(
-            f"{self.declare}{name}_stride = {name}.{self.stride}{self.ending}"
-        )
+        code.writeline(f"{self.declare}{name}_stride = {name}.stride()")
 
     def codegen_inputs(
         self, code: IndentedBuffer, graph_inputs: Dict[str, ir.TensorBox]
