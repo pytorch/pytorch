@@ -261,7 +261,7 @@ def register_module_forward_hook(
 
     The input contains only the positional arguments given to the module.
     Keyword arguments won't be passed to the hooks and only to the ``forward``.
-    You can optionally modify the output of the module by returning a new value 
+    You can optionally modify the output of the module by returning a new value
     that will replace the output from the :func:`forward` function.
 
     Parameters:
