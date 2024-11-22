@@ -1342,7 +1342,7 @@ def get_chromium_event_logger() -> ChromiumEventLogger:
 def chromium_event_timed(
     event_name: str,
     reset_event_log: bool = False,
-    log_pt2_compile_event=False,
+    log_pt2_compile_event: bool = False,
 ) -> Generator[Any, None, None]:
     """
     Context manager that creates a chromium start and end event. Chromium event
