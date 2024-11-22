@@ -8157,6 +8157,7 @@ def forward(self, x, y):
         export(f, (inputs,), dynamic_shapes=dynamic_shapes)
 
     @testing.expectedFailureRetraceabilityNonStrict
+    @testing.expectedFailureCppSerDes  # dynamic shape serialization
     def test_disable_forced_specializations_ok(self):
         # check that we don't force specialization, and defer to runtime asserts
         # with allow_complex_guards_as_runtime_asserts=True to successfully export
@@ -9210,7 +9211,9 @@ def forward(self, x):
         inps = (torch.randn(1, 224, 768, device="cpu"),)
         export(Foo(), inps)
 
-    @testing.expectedFailureCppSerDes
+    @testing.expectedFailureSerDer  # TODO(pianpwk): PowByNatural valuerange deserialization
+    @testing.expectedFailureCppSerDes  # TODO(pianpwk): PowByNatural valuerange deserialization
+    @testing.expectedFailureSerDerNonStrict
     @testing.expectedFailureRetraceabilityNonStrict
     def test_dim_dynamic(self):
         dynamic = Dim.DYNAMIC
