@@ -634,24 +634,6 @@ def make_attr(tx: "InstructionTranslator", name):
     return node
 
 
-def add_subgraph(tx: "InstructionTranslator", name, gm):
-    next_name = None
-    i = 0
-    while not next_name:
-        candidate = f"{name}_{i}"
-        if candidate in tx.output.nn_modules:
-            i += 1
-        else:
-            next_name = candidate
-
-    gm.__name__ = next_name
-    gm.torchdynamo_force_dynamic = False
-    # This graph module is not present in the user space, so it can't be
-    # accessed by a source. Set source=None.
-    tx.output.register_attr_or_module(gm, next_name, source=None)
-    return next_name
-
-
 class TorchHigherOrderOperatorVariable(VariableTracker):
     def __init__(
         self, value: HigherOrderOperator, source: Optional[Source] = None, **kwargs
@@ -889,13 +871,11 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             "false_branch",
         )
 
-        true_name = add_subgraph(
-            tx,
+        true_name = tx.output.install_subgraph(
             "cond_true",
             torch.fx.GraphModule(true_nn_modules, true_graph),
         )
-        false_name = add_subgraph(
-            tx,
+        false_name = tx.output.install_subgraph(
             "cond_false",
             torch.fx.GraphModule(false_nn_modules, false_graph),
         )
@@ -1080,13 +1060,11 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         body_nn_modules = dict(tx.output.nn_modules)
 
-        cond_name = add_subgraph(
-            tx,
+        cond_name = tx.output.install_subgraph(
             "cond_fn",
             torch.fx.GraphModule(cond_nn_modules, cond_graph),
         )
-        body_name = add_subgraph(
-            tx,
+        body_name = tx.output.install_subgraph(
             "body_fn",
             torch.fx.GraphModule(body_nn_modules, body_graph),
         )
@@ -1196,7 +1174,9 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 )
 
         combine_gm = torch.fx.GraphModule(dict(tx.output.nn_modules), combine_graph)
-        combine_fn_name = add_subgraph(tx, "associative_scan_combine_fn", combine_gm)
+        combine_fn_name = tx.output.install_subgraph(
+            "associative_scan_combine_fn", combine_gm
+        )
 
         p_args = (
             make_attr(tx, combine_fn_name),
@@ -1350,7 +1330,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 )
 
         combine_gm = torch.fx.GraphModule(dict(tx.output.nn_modules), combine_graph)
-        combine_fn_name = add_subgraph(tx, "scan_combine_fn", combine_gm)
+        combine_fn_name = tx.output.install_subgraph("scan_combine_fn", combine_gm)
 
         p_args = (
             make_attr(tx, combine_fn_name),
@@ -1461,8 +1441,8 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         body_nn_modules = dict(tx.output.nn_modules)
 
-        body_name = add_subgraph(
-            tx,
+        body_name = tx.output.install_subgraph
+        (
             "map_body",
             torch.fx.GraphModule(body_nn_modules, body_graph),
         )
@@ -1558,8 +1538,8 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def install_subgraph_in_output_graph(
         self, tx, fn_vt, fn_args_vt, kwargs, body_gmod, attr_name="wrap_body"
     ):
-        return add_subgraph(
-            tx,
+        return tx.output.install_subgraph
+        (
             f"{attr_name}",
             body_gmod,
         )
@@ -1695,8 +1675,7 @@ class WrapWithSetGradEnabledHigherOrderVariable(TorchHigherOrderOperatorVariable
             )
 
         body_gmod = torch.fx.GraphModule(tx.output.nn_modules, body_graph)
-        body_name = add_subgraph(
-            tx,
+        body_name = tx.output.install_subgraph(
             "wrap_body",
             body_gmod,
         )
@@ -1776,8 +1755,7 @@ class WrapWithAutocastHigherOrderVariable(TorchHigherOrderOperatorVariable):
             )
 
         body_gmod = torch.fx.GraphModule(tx.output.nn_modules, body_graph)
-        body_name = add_subgraph(
-            tx,
+        body_name = tx.output.install_subgraph(
             "wrap_body",
             body_gmod,
         )
@@ -1848,8 +1826,7 @@ class HintsWrapperHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
 
         body_gmod = torch.fx.GraphModule(tx.output.nn_modules, body_graph)
-        body_name = add_subgraph(
-            tx,
+        body_name = tx.output.install_subgraph(
             "hints_wrapper_body",
             body_gmod,
         )
@@ -1950,8 +1927,7 @@ class StrictModeHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         strict_mode_nn_modules = dict(tx.output.nn_modules)
 
-        strict_mode_name = add_subgraph(
-            tx,
+        strict_mode_name = tx.output.install_subgraph(
             "strict_mode_body",
             torch.fx.GraphModule(strict_mode_nn_modules, ret_graph),
         )
@@ -2198,8 +2174,7 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 set_subgraph_inputs="flatten_manual",
             )
 
-        body_name = add_subgraph(
-            tx,
+        body_name = tx.output.install_subgraph(
             fn_name,
             torch.fx.GraphModule(tx.output.nn_modules, body_graph),
         )
@@ -2481,8 +2456,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
 
         # Store fwd_body
         fwd_nn_modules = tx.output.tracing_context.module_context.copy_graphstate()
-        fwd_name = add_subgraph(
-            tx,
+        fwd_name = tx.output.install_subgraph(
             "fwd_body",
             torch.fx.GraphModule(fwd_nn_modules.nn_modules, fwd_graph),
         )
@@ -2547,8 +2521,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
 
         # Store bwd_body
         bwd_nn_modules = tx.output.tracing_context.module_context.copy_graphstate()
-        bwd_name = add_subgraph(
-            tx,
+        bwd_name = tx.output.install_subgraph(
             "bwd_body",
             torch.fx.GraphModule(bwd_nn_modules.nn_modules, bwd_graph),
         )
