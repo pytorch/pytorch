@@ -7,7 +7,12 @@ from typing import Callable, Dict, List, Optional
 from torch.distributed.pipelining.schedules import (
     _Action,
     _ComputationType,
+    _PipelineScheduleRuntime,
     PipelineScheduleMulti,
+    RECV_B,
+    RECV_F,
+    SEND_B,
+    SEND_F,
 )
 from torch.distributed.pipelining.stage import _PipelineStageBase
 
@@ -174,12 +179,12 @@ class ScheduleWithW(PipelineScheduleMulti):
         }
 
 
-class ScheduleWithReorderedB(PipelineScheduleMulti):
-    n_stages = 4
+class ScheduleWithReorderedB(_PipelineScheduleRuntime):
+    n_stages = 2
     num_microbatches = 2
     rank_stages = {
-        0: [0, 2],
-        1: [1, 3],
+        0: [0],
+        1: [1],
     }
 
     def __init__(
@@ -194,28 +199,25 @@ class ScheduleWithReorderedB(PipelineScheduleMulti):
             loss_fn=loss_fn,
         )
         # Go through two microbatches
-        self.pipeline_order = {
+        self.pipeline_order_with_comms = {
             0: [
                 _Action(0, F, 0),
                 _Action(0, F, 1),
-                _Action(2, F, 0),
-                _Action(2, F, 1),
-                None,
-                None,
-                _Action(2, B, 0),
-                _Action(2, B, 1),
+                _Action(0, SEND_F, 0),
+                _Action(0, SEND_F, 1),
+                _Action(0, RECV_B, 0),
+                _Action(0, RECV_B, 1),
                 _Action(0, B, 0),
                 _Action(0, B, 1),
             ],
             1: [
-                None,
+                _Action(1, RECV_F, 0),
+                _Action(1, RECV_F, 1),
                 _Action(1, F, 0),
                 _Action(1, F, 1),
-                _Action(3, F, 0),
-                _Action(3, F, 1),
-                _Action(3, B, 0),
-                _Action(3, B, 1),
                 _Action(1, B, 0),
                 _Action(1, B, 1),
+                _Action(1, SEND_B, 0),
+                _Action(1, SEND_B, 1),
             ],
         }
