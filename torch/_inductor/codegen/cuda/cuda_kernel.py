@@ -52,15 +52,15 @@ def _normalize_idx(index: int, total_length: int) -> int:
     return index if index >= 0 else index + total_length
 
 
-ValidSymbols = Literal["M", "N", "K", "lda", "ldb", "ldc", "ldd"]
-ValidAttrs = Literal["size", "stride"]
+ValidLayoutSymbols = Literal["M", "N", "K", "lda", "ldb", "ldc", "ldd"]
+ValidLayoutAttrs = Literal["size", "stride"]
 
 
 @dataclass(frozen=True)
 class LayoutArg:
     node: IRNode
-    symbol: ValidSymbols
-    attr: ValidAttrs
+    symbol: ValidLayoutSymbols
+    attr: ValidLayoutAttrs
     dim: int
 
     def matches(self, node, attr, dim) -> bool:
@@ -80,12 +80,14 @@ class CUDAKernel(Kernel):
         # Mapping from arg name to IRNode.
         self.named_nodes: Dict[str, IRNode] = {}
 
-    def find_symbol(self, node: IRNode, attr: ValidAttrs, dim: int) -> Optional[str]:
+    def find_symbol(
+        self, node: IRNode, attr: ValidLayoutAttrs, dim: int
+    ) -> Optional[str]:
         arg = self.find_layout_arg(node, attr, dim)
         return arg.symbol if arg else None
 
     def find_layout_arg(
-        self, node: IRNode, attr: ValidAttrs, dim: int
+        self, node: IRNode, attr: ValidLayoutAttrs, dim: int
     ) -> Optional[LayoutArg]:
         matches = [
             arg for arg in self.layout_args.values() if arg.matches(node, attr, dim)
@@ -94,7 +96,7 @@ class CUDAKernel(Kernel):
         return None if len(matches) == 0 else matches[0]
 
     def add_layout_arg(
-        self, symbol: ValidSymbols, node: IRNode, attr: ValidAttrs, dim: int
+        self, symbol: ValidLayoutSymbols, node: IRNode, attr: ValidLayoutAttrs, dim: int
     ):
         arg = LayoutArg(node, symbol, attr, dim)
         self.layout_args.setdefault(symbol, arg)
