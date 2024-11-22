@@ -2025,6 +2025,8 @@ SYMPY_INTERP = {
     "OpaqueUnaryFn_tanh": math.tanh,
     "OpaqueUnaryFn_atan": math.atan,
     "OpaqueUnaryFn_sqrt": math.sqrt,
+    "BitwiseFn_bitwise_and": operator.and_,
+    "BitwiseFn_bitwise_or": operator.or_,
 }
 
 
