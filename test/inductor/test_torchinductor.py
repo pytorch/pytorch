@@ -3114,11 +3114,9 @@ class CommonTemplate:
             raise unittest.SkipTest("Fails on CPU")
 
         # If this is running with cpp_wrapper, the auto-tuning step will generate an
-        # additional array of the same size as the input, so required memory doubles.
-        required_memory = 4.5 * 1024**3  # 4.5 GiB
-        if config.cpp_wrapper:
-            required_memory *= 2
-
+        # additional array of the same size as the input.  Numbers derived
+        # experimentally.
+        required_memory = 2**33 if config.cpp_wrapper else 2**32 + 2**16
         if not _has_sufficient_memory(self.device, required_memory):
             raise unittest.SkipTest("insufficient memory")
 
@@ -3160,11 +3158,9 @@ class CommonTemplate:
     @skip_if_halide  # only 32-bit indexing
     def test_large_pointwise(self):
         # If this is running with cpp_wrapper, the auto-tuning step will generate an
-        # additional array of the same size as the input, so required memory doubles.
-        required_memory = 2 * (2**31 + 1)
-        if config.cpp_wrapper:
-            required_memory *= 2
-
+        # additional array of the same size as the input.  Numbers derived
+        # experimentally.
+        required_memory = 2**32 + 2**31 + 2**15 if config.cpp_wrapper else 2**31 + 2**15
         if not _has_sufficient_memory(self.device, required_memory):
             raise unittest.SkipTest("insufficient memory")
 
@@ -3188,12 +3184,8 @@ class CommonTemplate:
         # indexed with 32-bit strides but the storage offset pushes it over
         # INT_MAX
 
-        # If this is running with cpp_wrapper, the auto-tuning step will generate an
-        # additional array of the same size as the input, so required memory doubles.
-        required_memory = (2**31 + 1) + (2**30 + 1)
-        if config.cpp_wrapper:
-            required_memory *= 2
-
+        # Memory requirements derived experimentally.
+        required_memory = 2**32 + 2**16
         if not _has_sufficient_memory(self.device, required_memory):
             raise unittest.SkipTest("insufficient memory")
 
@@ -3212,11 +3204,9 @@ class CommonTemplate:
         # but stride calculations go above INT_MAX
 
         # If this is running with cpp_wrapper, the auto-tuning step will generate an
-        # additional array of the same size as the input, so required memory doubles.
-        required_memory = 2**31 + 2
-        if config.cpp_wrapper:
-            required_memory *= 2
-
+        # additional array of the same size as the input.  Numbers derived
+        # experimentally.
+        required_memory = 2**32 + 2**16 if config.cpp_wrapper else 2**31 + 2**16
         if not _has_sufficient_memory(self.device, required_memory):
             raise unittest.SkipTest("insufficient memory")
 
@@ -11292,7 +11282,11 @@ class CommonTemplate:
         Currently inductor will skip such bad configs and pick the best one
         from the remaining configs.
         """
-        if not _has_sufficient_memory(self.device, 3 * 2**24 * 65 * 4):
+        # If this is running with cpp_wrapper, the auto-tuning step will generate an
+        # additional array of the same size as the input.  Numbers derived
+        # experimentally.
+        required_memory = 2**34 + 2**32 + 2**31 if config.cpp_wrapper else 2**33 + 2**32 + 2**31
+        if not _has_sufficient_memory(self.device, required_memory):
             raise unittest.SkipTest("insufficient memory")
 
         @torch.compile
@@ -11719,6 +11713,13 @@ class CommonTemplate:
 
     @skip_if_triton_cpu("Triton CPU: Cannot xfail because it crashes process")
     def test_large_grid(self):
+        # If this is running with cpp_wrapper, the auto-tuning step will generate an
+        # additional array of the same size as the input.  Numbers derived
+        # experimentally.
+        required_memory = 2**30 + 2**29 + 2**15 if config.cpp_wrapper else 2**30 + 2**15
+        if not _has_sufficient_memory(self.device, required_memory):
+            raise unittest.SkipTest("insufficient memory")
+
         # https://github.com/pytorch/pytorch/issues/123210
         def fn(primals_5):
             view = torch.ops.aten.reshape.default(primals_5, [-1, 2, 4])
