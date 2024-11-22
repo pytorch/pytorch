@@ -629,18 +629,15 @@ def merge_splits(
                 next_split_num_to_user = {
                     user.args[1]: user for user in node.users.keys()
                 }
-                split_getitem_indices = list(next_split_num_to_user.keys())
-                # check if it is consecutive and starts from index 0
-                if split_getitem_indices[0] != 0 or not is_sorted_and_consecutive(split_getitem_indices):  # type: ignore[arg-type]
-                    return
                 # It is not necessary all getitems from the split node are used.
-                # We use the num of users to check the getitems to be merged.
-                for next_split_num in range(len(node.users.keys())):
+                for next_split_num in range(len(next_split_sections)):
                     with graph.inserting_after(new_split):
                         new_getitem = graph.call_function(
                             operator.getitem, args=(new_split, new_split_num)
                         )
                     new_split_num += 1
+                    if next_split_num not in next_split_num_to_user:
+                        continue
                     next_getitem = next_split_num_to_user[next_split_num]
                     new_getitem.meta.update(next_getitem.meta)
                     next_getitem.replace_all_uses_with(new_getitem)
