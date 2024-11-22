@@ -427,7 +427,7 @@ class TestCKBackend(TestCase):
         tensor_options = {"device": "cuda", "dtype": torch.bfloat16}
 
         a = torch.randn(16, 2240, 256, **tensor_options)
-        b = torch.randn(16, 256, 2048, **tensor_options)
+        b = torch.randn(16, 2048, 256, **tensor_options).transpose(1, 2)
 
         assert "rocm" in dir(config)
 
