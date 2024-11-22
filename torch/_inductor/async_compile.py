@@ -299,9 +299,7 @@ class AsyncCompile:
             return LambdaFuture(get_result)
 
     def wait(self, scope: Dict[str, Any]) -> None:
-        with dynamo_timed(
-            "async_compile.wait", log_pt2_compile_event=True, fwd_only=False
-        ):
+        with dynamo_timed("async_compile.wait", log_pt2_compile_event=True):
             num_kernels = len(
                 [
                     value
