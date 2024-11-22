@@ -3332,6 +3332,7 @@ class GraphModule(torch.nn.Module):
 """,  # noqa: B950
         )
 
+    @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
     def test_device_cuda_1(self):
         class TestModule(torch.nn.Module):
             def forward(self, q, k, v, block_mask):
