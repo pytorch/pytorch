@@ -3185,10 +3185,16 @@ class Layout(OutputSpec):
         offset = ""
         if self.offset != 0:
             offset = f", offset={self.offset}"
-        return (
-            f"{type(self).__name__}('{self.device.type}', {self.dtype}, "
-            f"size={self.size}, stride={self.stride}{offset})"
-        )
+        if self.device.index is not None:
+            return (
+                f"{type(self).__name__}('{self.device.type}:{self.device.index}', {self.dtype}, "
+                f"size={self.size}, stride={self.stride}{offset})"
+            )
+        else:
+            return (
+                f"{type(self).__name__}('{self.device.type}', {self.dtype}, "
+                f"size={self.size}, stride={self.stride}{offset})"
+            )
 
     __repr__ = __str__
 
