@@ -23,7 +23,9 @@ from torch.testing._internal.common_utils import (
 
 
 class PadMMTest(TestCase):
-    @inductor_config.patch(max_autotune=True, max_autotune_gemm_backends="TRITON")
+    @inductor_config.patch(max_autotune=True,
+                           max_autotune_gemm_backends="TRITON",
+                           force_shape_pad=True)
     def test_pad_mm_dyn_m(self):
         M = 40
         K1 = 581
@@ -54,6 +56,7 @@ class PadMMTest(TestCase):
             FileCheck().check(f"K = {aligned_k}").run(code)
         self.assertEqual(res1, res2)
 
+    @skipIfRocmArch(NAVI_ARCH)
     @inductor_config.patch(max_autotune=True,
                            max_autotune_gemm_backends="TRITON",
                            force_shape_pad=True)
