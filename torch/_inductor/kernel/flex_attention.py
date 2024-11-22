@@ -779,7 +779,7 @@ def flex_attention(
                 ("arg1_1", torch.int32),
                 ("arg2_1", torch.int32),
                 ("arg3_1", torch.int32),
-                ("arg4_1", torch.int32),
+                ("arg10_1", torch.int32), # TODO: fix the random picked name here: arg10_1
             ]
         ]
         subgraph_buffer = build_subgraph_buffer(
@@ -813,9 +813,14 @@ def flex_attention(
             stride=out_strides,
         )
         choices: List[Any] = []
+        input_nodes = [query, key, value, kv_indices]
+        if score_mod_other_buffers and mask_mod_other_buffers:
+            assert len(score_mod_other_buffers) == 1
+            assert len(mask_mod_other_buffers) == 1
+            input_nodes += [score_mod_other_buffers[0], mask_mod_other_buffers[0]]        
         CppMHATemplate.add_choices(
             choices=choices,
-            input_nodes=[query, key, value, kv_indices],
+            input_nodes=input_nodes,
             layout=layout,
             scale=scale,
             score_mod=subgraph_buffer,
