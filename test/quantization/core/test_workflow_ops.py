@@ -602,8 +602,8 @@ class TestFakeQuantizeOps(TestCase):
 
             # Explicit copy at this point in time, because FakeQuant keeps internal
             # state in mutable buffers.
-            scale = fq_module.scale.clone().detach()
-            zero_point = fq_module.zero_point.clone().detach()
+            scale = fq_module.scale.detach().clone()
+            zero_point = fq_module.zero_point.detach().clone()
 
             if type(fq_module) == _LearnableFakeQuantize:
                 fq_module.toggle_observer_update(False)

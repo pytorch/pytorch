@@ -482,14 +482,14 @@ class RNN(RNNBase):
     .. code-block:: python
 
         # Efficient implementation equivalent to the following with bidirectional=False
-        def forward(x, h_0=None):
+        def forward(x, hx=None):
             if batch_first:
                 x = x.transpose(0, 1)
             seq_len, batch_size, _ = x.size()
-            if h_0 is None:
-                h_0 = torch.zeros(num_layers, batch_size, hidden_size)
-            h_t_minus_1 = h_0
-            h_t = h_0
+            if hx is None:
+                hx = torch.zeros(num_layers, batch_size, hidden_size)
+            h_t_minus_1 = hx
+            h_t = hx
             output = []
             for t in range(seq_len):
                 for layer in range(num_layers):
@@ -525,14 +525,14 @@ class RNN(RNNBase):
             :attr:`dropout`. Default: 0
         bidirectional: If ``True``, becomes a bidirectional RNN. Default: ``False``
 
-    Inputs: input, h_0
+    Inputs: input, hx
         * **input**: tensor of shape :math:`(L, H_{in})` for unbatched input,
           :math:`(L, N, H_{in})` when ``batch_first=False`` or
           :math:`(N, L, H_{in})` when ``batch_first=True`` containing the features of
           the input sequence.  The input can also be a packed variable length sequence.
           See :func:`torch.nn.utils.rnn.pack_padded_sequence` or
           :func:`torch.nn.utils.rnn.pack_sequence` for details.
-        * **h_0**: tensor of shape :math:`(D * \text{num\_layers}, H_{out})` for unbatched input or
+        * **hx**: tensor of shape :math:`(D * \text{num\_layers}, H_{out})` for unbatched input or
           :math:`(D * \text{num\_layers}, N, H_{out})` containing the initial hidden
           state for the input sequence batch. Defaults to zeros if not provided.
 
