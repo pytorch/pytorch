@@ -85,7 +85,9 @@ struct TORCH_API ClassType : public NamedType {
       return true;
     }
     if (auto user_rhs = rhs.castRaw<ClassType>()) {
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       const auto& lhs_name = name().value();
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       const auto& rhs_name = user_rhs->name().value();
 
       return lhs_name == rhs_name &&
