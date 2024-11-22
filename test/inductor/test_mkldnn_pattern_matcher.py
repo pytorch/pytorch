@@ -3024,6 +3024,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         for has_bias, dtype, per_channel_quant, dynamic in itertools.product(
             has_bias_list, dype_list, per_channel_list, dynamic_list
         ):
+            print("[info] ===== case:", has_bias, dtype, per_channel_quant, dynamic, "=====")
             mod = Mod(dtype, has_bias, per_channel_quant).eval()
             a = torch.randint(q_min, q_max, [1, M, in_feature], dtype=torch.int8)
 
