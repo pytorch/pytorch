@@ -9990,8 +9990,8 @@ class CommonTemplate:
             code = run_and_get_triton_code(foo_opt, *inps)
             if not config.cpp_wrapper:
                 have_block_ptr = code.count("tl.make_block_ptr") > 0
-            if not is_halide_backend(self.device):
-                self.assertEqual(have_block_ptr, use_block_ptr)
+                if not is_halide_backend(self.device):
+                    self.assertEqual(have_block_ptr, use_block_ptr)
 
     @requires_gpu()
     @unittest.skipIf(
