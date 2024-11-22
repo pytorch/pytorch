@@ -961,12 +961,13 @@ def fx_codegen_and_compile(
                     p = SymExprPrinter()
                     for out in graph.graph_outputs:
                         if (
-                            hasattr(out, "layout")
-                            and len(free_unbacked_symbols(out.layout.stride)) == 0
+                            isinstance(out, IRNode)
+                            and out.has_tensor_output()
+                            and len(free_unbacked_symbols(out.get_stride())) == 0
                         ):
                             # Convert to string for eval on the load path
                             output_strides.append(
-                                tuple(p.doprint(s) for s in out.layout.stride)
+                                tuple(p.doprint(s) for s in out.get_layout().stride)
                             )
                         else:
                             output_strides.append(None)
@@ -1723,12 +1724,12 @@ def compile_fx(
             context = (
                 torch._C._DisableAutocast if disable_amp else contextlib.nullcontext
             )
-            with V.set_fake_mode(fake_mode), compiled_autograd.disable(), context():
+            with V.set_fake_mode(fake_mode), compiled_autograd._disable(), context():
                 return inference_compiler(unlifted_gm, example_inputs_)
 
         with V.set_fake_mode(fake_mode), torch._guards.tracing(
             tracing_context
-        ), compiled_autograd.disable(), functorch_config.patch(
+        ), compiled_autograd._disable(), functorch_config.patch(
             unlift_effect_tokens=True
         ):
             return aot_autograd(
