@@ -28,7 +28,7 @@ void StreamSampler::reset(std::optional<size_t> new_size) {
 std::optional<BatchSize> StreamSampler::next(size_t batch_size) {
   AT_ASSERT(examples_retrieved_so_far_ <= epoch_size_);
   if (examples_retrieved_so_far_ == epoch_size_) {
-    return nullopt;
+    return std::nullopt;
   }
   if (examples_retrieved_so_far_ + batch_size > epoch_size_) {
     batch_size = epoch_size_ - examples_retrieved_so_far_;

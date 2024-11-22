@@ -26,15 +26,15 @@ using scatter_scalar_reduce_fn = void(*)(const Tensor& self, const int64_t dim, 
 using scatter_reduce_two_fn = void(*)(const Tensor& self, const int64_t dim, const Tensor& index,
                                       const Tensor& src, const ReductionType& reduce);
 
-DECLARE_DISPATCH(index_put_with_sort_fn, index_put_with_sort_stub);
-DECLARE_DISPATCH(index_put_with_sort_quantized_fn, index_put_with_sort_quantized_stub);
-DECLARE_DISPATCH(gather_fn, gather_stub);
-DECLARE_DISPATCH(scatter_fn, scatter_stub);
-DECLARE_DISPATCH(scatter_fill_fn, scatter_fill_stub);
-DECLARE_DISPATCH(scatter_add_fn, scatter_add_stub);
-DECLARE_DISPATCH(scatter_reduce_fn, scatter_reduce_stub);
-DECLARE_DISPATCH(scatter_scalar_reduce_fn, scatter_scalar_reduce_stub);
-DECLARE_DISPATCH(scatter_reduce_two_fn, scatter_reduce_two_stub);
+DECLARE_DISPATCH(index_put_with_sort_fn, index_put_with_sort_stub)
+DECLARE_DISPATCH(index_put_with_sort_quantized_fn, index_put_with_sort_quantized_stub)
+DECLARE_DISPATCH(gather_fn, gather_stub)
+DECLARE_DISPATCH(scatter_fn, scatter_stub)
+DECLARE_DISPATCH(scatter_fill_fn, scatter_fill_stub)
+DECLARE_DISPATCH(scatter_add_fn, scatter_add_stub)
+DECLARE_DISPATCH(scatter_reduce_fn, scatter_reduce_stub)
+DECLARE_DISPATCH(scatter_scalar_reduce_fn, scatter_scalar_reduce_stub)
+DECLARE_DISPATCH(scatter_reduce_two_fn, scatter_reduce_two_stub)
 
 TORCH_API Tensor& index_out(Tensor& result, const Tensor & self, const c10::List<std::optional<at::Tensor>>& indices);
 
@@ -42,8 +42,8 @@ using scatter_add_expanded_index_fn = void(*)(const Tensor&, const Tensor&, cons
 using scatter_reduce_expanded_index_fn = void(*)(const Tensor&, const Tensor&, const Tensor&, const ReductionType& reduce, bool);
 using gather_expanded_index_fn = void (*)(const Tensor&, const Tensor&, const Tensor&);
 
-DECLARE_DISPATCH(scatter_add_expanded_index_fn, scatter_add_expanded_index_stub);
-DECLARE_DISPATCH(scatter_reduce_expanded_index_fn, scatter_reduce_expanded_index_stub);
-DECLARE_DISPATCH(gather_expanded_index_fn, gather_expanded_index_stub);
+DECLARE_DISPATCH(scatter_add_expanded_index_fn, scatter_add_expanded_index_stub)
+DECLARE_DISPATCH(scatter_reduce_expanded_index_fn, scatter_reduce_expanded_index_stub)
+DECLARE_DISPATCH(gather_expanded_index_fn, gather_expanded_index_stub)
 
 } // namespace at::native

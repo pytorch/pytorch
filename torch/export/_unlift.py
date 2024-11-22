@@ -2,7 +2,7 @@
 import copy
 import warnings
 from itertools import chain
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import torch
 import torch.utils._pytree as pytree
@@ -11,6 +11,7 @@ from torch.export.unflatten import _assign_attr, _AttrKind
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 
 from ._remove_effect_tokens_pass import _remove_effect_tokens
+from ._tree_utils import reorder_kwargs
 from .exported_program import (
     ExportedProgram,
     ExportGraphSignature,
@@ -19,20 +20,31 @@ from .exported_program import (
 )
 
 
+def _check_inputs_match(args, kwargs, in_spec: pytree.TreeSpec) -> List:
+    reordered_kwargs = reorder_kwargs(kwargs, in_spec)
+    flat_args_with_path, received_spec = pytree.tree_flatten_with_path(
+        (args, reordered_kwargs)
+    )
+
+    if received_spec != in_spec:
+        raise ValueError(  # noqa: B904
+            "Trying to flatten user inputs with exported input tree spec: \n"
+            f"{in_spec}\n"
+            "but actually got inputs with tree spec of: \n"
+            f"{received_spec}.\n"
+            "Please check that the inputs have the same number of args "
+            "and kwargs as the ones you used when tracing."
+        )
+
+    return flat_args_with_path
+
+
 @torch._dynamo.disable
-def _check_input_constraints_pre_hook(self, *args, **kwargs):
+def _check_input_constraints_pre_hook(self, args, kwargs):
     if not self.validate_inputs:
         return
 
-    flat_args_with_path, received_spec = pytree.tree_flatten_with_path(args)
-
-    if received_spec != self._in_spec:
-        raise ValueError(  # noqa: B904
-            "Trying to flatten user inputs with exported input tree spec: \n"
-            f"{self._in_spec}\n"
-            "but actually got inputs with tree spec of: \n"
-            f"{received_spec}"
-        )
+    flat_args_with_path = _check_inputs_match(args, kwargs, self._in_spec)
 
     _check_input_constraints_for_graph(
         [node for node in self.graph.nodes if node.op == "placeholder"],
@@ -43,7 +55,7 @@ def _check_input_constraints_pre_hook(self, *args, **kwargs):
 
 def _unlift_inputs_as_getattr(
     gm: torch.fx.GraphModule,
-    lifted_inputs: List[Optional[str]],
+    lifted_inputs: Sequence[Optional[str]],
 ) -> Tuple[Dict[str, torch.fx.Node], Dict[str, torch.fx.Node]]:
     """
     Unlift inputs referring to params/buffers/constants as getattr nodes in the
@@ -72,7 +84,7 @@ def _unlift_inputs_as_getattr(
 
 def _insert_copy_for_mutations(
     gm: torch.fx.GraphModule,
-    mutated_outputs: List[Optional[str]],
+    mutated_outputs: Sequence[Optional[str]],
     unlifted_name_to_node: Dict[str, torch.fx.Node],
     input_name_to_node: Dict[str, torch.fx.Node],
 ) -> None:
@@ -158,8 +170,8 @@ def _get_codegen(
 
 def _unlift(
     gm: torch.fx.GraphModule,
-    lifted_inputs: List[Optional[str]],
-    mutated_outputs: List[Optional[str]],
+    lifted_inputs: Sequence[Optional[str]],
+    mutated_outputs: Sequence[Optional[str]],
     in_spec: pytree.TreeSpec,
     out_spec: Optional[pytree.TreeSpec],
     state_dict: Dict[str, Any],
@@ -331,12 +343,12 @@ def _create_stateful_graph_module(
                         detached_value = value.detach()
                         original_tensor_to_detached_tensor[value] = detached_value
                         value = detached_value
-                _assign_attr(
-                    value,
-                    stateful_gm,
-                    const_name,
-                    attr_kind=_AttrKind.CONSTANT,
-                )
+            _assign_attr(
+                value,
+                stateful_gm,
+                const_name,
+                attr_kind=_AttrKind.CONSTANT,
+            )
 
     # Fix up non-persistent buffers. torch.fx does not distinguish between
     # persistent and non-persistent buffers, so we must restore that distinction
@@ -354,7 +366,9 @@ def _create_stateful_graph_module(
 
 
 def _unlift_exported_program_lifted_states(ep: ExportedProgram) -> torch.nn.Module:
-    ep = _remove_effect_tokens(ep)
+    # TODO T206340015
+    if ep.verifiers[0].dialect != "TRAINING":
+        ep = _remove_effect_tokens(ep)
     new_gm = torch.fx.GraphModule(ep.graph_module, copy.deepcopy(ep.graph))
     _register_attrs_to_new_gm(new_gm, ep.graph_signature, ep.state_dict, ep.constants)
     forward_arg_names = (

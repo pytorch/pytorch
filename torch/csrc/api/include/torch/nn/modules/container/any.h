@@ -205,7 +205,7 @@ template <typename ModuleType>
 AnyModule::AnyModule(std::shared_ptr<ModuleType> module)
     : content_(make_holder(
           std::move(module),
-          &std::remove_reference<ModuleType>::type::forward)) {
+          &std::remove_reference_t<ModuleType>::forward)) {
   // `AnyModule` can only store an `nn::Module` subclass object that provides
   // a `forward()` method that has a non-templatized return type.
   // (e.g. `AnyModule` cannot store `nn::Sequential`, because `nn::Sequential`'s
@@ -351,7 +351,8 @@ ModuleType& AnyModule::get_(
                 *content_)
                 .module;
   }
-  AT_ERROR(
+  TORCH_CHECK(
+      false,
       "Attempted to cast module of type ",
       c10::demangle(type_info().name()),
       " to type ",

@@ -22,6 +22,7 @@
 #include <ATen/ops/tensor.h>
 #endif
 
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -31,7 +32,7 @@ struct NestedTensorImpl;
 // The following functions are used to construct nested tensors from buffers and
 // metadata.
 
-inline at::Tensor wrap_buffer(at::Tensor buffer, at::Tensor nested_sizes) {
+inline at::Tensor wrap_buffer(const at::Tensor& buffer, const at::Tensor& nested_sizes) {
   TORCH_CHECK(
       buffer.dim() == 1,
       "Expected given buffer to be 1dim, but got ",
@@ -40,19 +41,19 @@ inline at::Tensor wrap_buffer(at::Tensor buffer, at::Tensor nested_sizes) {
   TORCH_CHECK(
       buffer.is_contiguous(), "Expected given buffer to be contiguous.");
   return at::detail::make_tensor<NestedTensorImpl>(
-      std::move(buffer), std::move(nested_sizes));
+      buffer, nested_sizes);
 }
 
 // TODO: Figure out if we need a non-moving wrap_buffer()
 inline at::Tensor wrap_buffer(
-    at::Tensor buffer,
+    const at::Tensor& buffer,
     at::Tensor nested_sizes,
     at::Tensor nested_strides,
     at::Tensor storage_offsets) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       buffer.is_contiguous(), "Given buffer must be contiguous.");
   return at::detail::make_tensor<NestedTensorImpl>(
-      std::move(buffer),
+      buffer,
       std::move(nested_sizes),
       std::move(nested_strides),
       std::move(storage_offsets));
@@ -65,8 +66,8 @@ inline at::Tensor get_buffer(const at::Tensor& tensor) {
 /**
  * Create a new nested tensor that is a view of a base nested tensor
  *
- * create_view_tensor calls a specialized constructor that copys the
- * the keys from base onto the new view tensor being created.
+ * create_view_tensor calls a specialized constructor that copies the
+ * keys from base onto the new view tensor being created.
  * The storage is shared between the base and the returned view tensor
  *
  * All callers of this helper must:
@@ -94,9 +95,9 @@ inline at::Tensor create_nested_view_tensor(
   return at::detail::make_tensor<NestedTensorImpl>(
       c10::TensorImpl::VIEW,
       base,
-      nested_sizes,
-      nested_strides,
-      storage_offsets);
+      std::move(nested_sizes),
+      std::move(nested_strides),
+      std::move(storage_offsets));
 }
 //  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -229,6 +230,7 @@ struct NestedNode {
   NestedNode& operator=(const NestedNode&) = delete;
   NestedNode(NestedNode&&) noexcept = default;
   NestedNode& operator=(NestedNode&&) noexcept = default;
+  ~NestedNode() = default;
   inline bool is_leaf() const {
     return _is_leaf;
   }

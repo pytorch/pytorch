@@ -469,6 +469,10 @@ def normalize_reshape_default(match: Match, *args, **kwargs):
     CallMethodVarArgs("clamp", users=MULTIPLE),
     pass_dict=construct_pattern_matcher_pass("normalization_pass"),
 )
+@register_graph_pattern(
+    CallFunctionVarArgs(torch.clamp, users=MULTIPLE),
+    pass_dict=construct_pattern_matcher_pass("normalization_pass"),
+)
 def normalize_clamp_default(match: Match, *args, **kwargs):
     clamp_node = match.nodes[0]
     if not is_node_meta_valid(clamp_node):
@@ -478,12 +482,20 @@ def normalize_clamp_default(match: Match, *args, **kwargs):
     if free_symbols(clamp_node.meta["example_value"].shape):
         log.debug("dynamic shape not supported: %s", clamp_node)
         return
-
+    if len(clamp_node.args) > 1:
+        args = (get_arg_value(clamp_node, 0),)
+        kwargs = {
+            "min": get_arg_value(clamp_node, 1, kwarg_name="min"),
+            "max": get_arg_value(clamp_node, 2, kwarg_name="max"),
+        }
+    else:
+        args = clamp_node.args
+        kwargs = clamp_node.kwargs
     with match.graph.inserting_after(clamp_node):
         new_clamp_node = match.graph.call_function(
             torch.clamp,
-            args=clamp_node.args,
-            kwargs=clamp_node.kwargs,
+            args=args,
+            kwargs=kwargs,
         )
     clamp_node.replace_all_uses_with(new_clamp_node)
     new_clamp_node.meta.update(clamp_node.meta)
@@ -617,6 +629,10 @@ def merge_splits(
                 next_split_num_to_user = {
                     user.args[1]: user for user in node.users.keys()
                 }
+                split_getitem_indices = list(next_split_num_to_user.keys())
+                # check if it is consecutive and starts from index 0
+                if split_getitem_indices[0] != 0 or not is_sorted_and_consecutive(split_getitem_indices):  # type: ignore[arg-type]
+                    return
                 # It is not necessary all getitems from the split node are used.
                 # We use the num of users to check the getitems to be merged.
                 for next_split_num in range(len(node.users.keys())):
@@ -1104,9 +1120,9 @@ class UnbindCatRemover(SplitCatSimplifier):
             return
         # we need to check if the getitem indices from unbind are consecutive and all go to the same cat node
         # before we do the unbind remove, otherwise it will hit the error when we unbind part of them
-        getitem_indices = []
-        for getitem_node in unbind_node.users.keys():
-            getitem_indices.append(getitem_node.args[1])
+        getitem_indices = [
+            getitem_node.args[1] for getitem_node in unbind_node.users.keys()
+        ]
         if not is_sorted_and_consecutive(getitem_indices) or len(  # type: ignore[arg-type]
             getitem_indices
         ) != len(
@@ -1481,9 +1497,8 @@ def merge_getitem_cat(match: Match, split_sections: List[int], dim: int):
             ):
                 continue
             # find the index of getitems to be cated/stacked
-            indices = []
-            for arg in cat_user.args[0]:  # type: ignore[union-attr]
-                indices.append(arg.args[1])  # type: ignore[union-attr]
+            # type: ignore[union-attr]
+            indices = [arg.args[1] for arg in cat_user.args[0]]  # type: ignore[union-attr]
             # the gettitems to be merged must be consecutive, otherwise
             # returned sliced tensor could be wrong
             if not is_sorted_and_consecutive(indices):

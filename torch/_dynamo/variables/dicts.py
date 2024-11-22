@@ -16,7 +16,7 @@ from ..exc import raise_observed_exception, unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, GetItemSource, is_from_local_source
 from ..utils import dict_keys, dict_values, istype, specialize_symnode
-from .base import MutableLocal, VariableTracker
+from .base import ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 
 
@@ -203,10 +203,13 @@ class ConstDictVariable(VariableTracker):
             ]
         )
 
-    def _maybe_realize(self, item):
-        return item.realize() if item else item
-
     def reconstruct(self, codegen):
+        def is_new_item(value, other):
+            # compare the id of the realized values if both values are not lazy VTs
+            if value and value.is_realized() and other.is_realized():
+                return id(value.realize()) != id(other.realize())
+            return id(value) != id(other)
+
         # instructions to load collections.OrderedDict if necessary
         if self.user_cls is collections.OrderedDict:
             codegen.add_push_null(
@@ -221,11 +224,8 @@ class ConstDictVariable(VariableTracker):
         num_args = 0
         for key, value in self.items.items():
             # We can safely call realize() here as it won't introduce any new guards
-            is_new_item = (
-                self._maybe_realize(self.original_items.get(key.vt)) != value.realize()
-            )
-
-            if is_new_item or self.should_reconstruct_all:
+            item = self.original_items.get(key.vt)
+            if is_new_item(item, value) or self.should_reconstruct_all:
                 codegen(key.vt)
                 codegen(value)
                 num_args += 1
@@ -304,16 +304,16 @@ class ConstDictVariable(VariableTracker):
             return DictValues(self)
         elif name == "copy":
             assert not (args or kwargs)
-            return self.clone(items=self.items.copy(), mutable_local=MutableLocal())
+            return self.clone(items=self.items.copy(), mutation_type=ValueMutationNew())
         elif name == "__len__":
             assert not (args or kwargs)
             return ConstantVariable.create(len(self.items))
-        elif name == "__setitem__" and arg_hashable and self.mutable_local:
+        elif name == "__setitem__" and arg_hashable and self.is_mutable():
             assert not kwargs and len(args) == 2
             tx.output.side_effects.mutation(self)
             self.items[Hashable(args[0])] = args[1]
             return ConstantVariable.create(None)
-        elif name == "__delitem__" and arg_hashable and self.mutable_local:
+        elif name == "__delitem__" and arg_hashable and self.is_mutable():
             self.should_reconstruct_all = True
             tx.output.side_effects.mutation(self)
             self.items.__delitem__(Hashable(args[0]))
@@ -324,7 +324,7 @@ class ConstDictVariable(VariableTracker):
                 return ConstantVariable(None)
             else:
                 return args[1]
-        elif name == "pop" and arg_hashable and self.mutable_local:
+        elif name == "pop" and arg_hashable and self.is_mutable():
             self.should_reconstruct_all = True
             tx.output.side_effects.mutation(self)
             return self.items.pop(Hashable(args[0]))
@@ -333,7 +333,7 @@ class ConstDictVariable(VariableTracker):
             tx.output.side_effects.mutation(self)
             self.items.clear()
             return ConstantVariable.create(None)
-        elif name == "update" and self.mutable_local:
+        elif name == "update" and self.is_mutable():
             is_args_supported = len(args) == 1 and isinstance(
                 args[0],
                 (
@@ -368,7 +368,7 @@ class ConstDictVariable(VariableTracker):
             return self.getitem_const(tx, args[0])
         elif name == "__contains__" and len(args) == 1:
             return ConstantVariable.create(args[0] in self)
-        elif name == "setdefault" and arg_hashable and self.mutable_local:
+        elif name == "setdefault" and arg_hashable and self.is_mutable():
             assert not kwargs
             assert len(args) <= 2
             value = self.maybe_getitem_const(args[0])
@@ -547,7 +547,7 @@ class SetVariable(ConstDictVariable):
                     TupleVariable,
                 ),
             )
-            and self.mutable_local
+            and self.is_mutable()
         ):
             if isinstance(args[0], (ListVariable, TupleVariable)):
                 arg = SetVariable(args[0].unpack_var_sequence(tx))
@@ -733,7 +733,7 @@ def _call_hasattr_customobj(
             pass
     if name in self.items or hasattr(self.user_cls, name):
         return ConstantVariable(True)
-    elif istype(self.mutable_local, MutableLocal) and self.source is None:
+    elif istype(self.mutation_type, ValueMutationNew) and self.source is None:
         # Something created locally can't have any extra fields on it
         return ConstantVariable(False)
     elif self.source:
@@ -747,7 +747,7 @@ def _call_hasattr_customobj(
         except KeyError:
             pass
     unimplemented(
-        f"hasattr({self.__class__.__name__}, {name}) {self.mutable_local} {self.source}"
+        f"hasattr({self.__class__.__name__}, {name}) {self.mutation_type} {self.source}"
     )
 
 
