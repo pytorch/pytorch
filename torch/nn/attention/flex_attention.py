@@ -1239,9 +1239,7 @@ def flex_attention(
         block_mask = _create_empty_block_mask(query, key)
     elif (
         not query.is_nested
-        and (
-            query.requires_grad or key.requires_grad or value.requires_grad
-        )  # skip adjust block if no grad
+        and torch.is_grad_enabled()  # skip adjust block if no grad
         and (
             query.size(-2)
             < block_mask.kv_num_blocks.size(-1) * block_mask.BLOCK_SIZE[0]

@@ -932,7 +932,7 @@ def trace_flex_attention_backward(
         mask_mod_other_buffers,
     )
 
-    requires_grad = pytree.tree_map(lambda x: x.requires_grad, (query, key))
+    requires_grad = any(pytree.tree_map(lambda x: x.requires_grad, (query, key)))
     fw_example_vals = [query.new_zeros((), requires_grad=requires_grad)] + [
         query.new_zeros((), dtype=torch.int) for _ in range(4)
     ]
