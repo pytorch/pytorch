@@ -635,7 +635,16 @@ def node_inline_(call_mod_node: torch.fx.Node) -> None:
         for node in body:
             new_node = gm.graph.node_copy(node)
             if node.op == "get_attr":
-                setattr(gm, node.target, getattr(sub_gm, node.target))
+                new_target_name = new_node.target
+                if hasattr(gm, new_target_name):
+                    # Loop through and find the "submod_{i}" that have no name collision
+                    i = 1
+                    new_target_name = f"submod_{i}"
+                    while hasattr(gm, new_target_name):
+                        i += 1
+                        new_target_name = f"submod_{i}"
+                new_node.target = new_target_name
+                setattr(gm, new_node.target, getattr(sub_gm, node.target))
             node_replace_(node, new_node)
 
         if len(output) > 0:
