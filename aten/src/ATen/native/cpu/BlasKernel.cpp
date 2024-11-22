@@ -3,6 +3,7 @@
 #include <ATen/Parallel.h>
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/cpu/zmath.h>
+#include <ATen/native/cpu/ReducedPrecisionFloatGemvFastPathKernel.h>
 #include <c10/util/irange.h>
 #include <c10/util/Unroll.h>
 
@@ -24,6 +25,11 @@ float fp16_dot_with_fp32_arith(
   const Half* x,
   const Half* a,
   int64_t len);
+
+float bf16_dot_with_fp32_arith(
+  const at::BFloat16* x,
+  const at::BFloat16* a,
+  int64_t len);
 } // namespace at::native::blas_impl
 #endif
 #if defined(__aarch64__) && !defined(C10_MOBILE)
@@ -41,12 +47,7 @@ void fp16_gemv_notrans(
     const float beta,
     Half* y,
     const int incy);
-
-float bf16_dot_with_fp32_arith(
-  const at::BFloat16* x,
-  const at::BFloat16* a,
-  int64_t len);
-}
+} // namespace at::native::blas_impl
 #endif
 
 namespace at::native {
@@ -362,9 +363,12 @@ void gemm_notrans_(
     }
   }
 }
+#endif // defined(__aarch64__) && !defined(C10_MOBILE)
 
-static float compute_dot(const at::BFloat16* a, const at::BFloat16* b, int64_t len) {
-  return at::native::blas_impl::bf16_dot_with_fp32_arith(a, b, len);
+#if !defined(C10_MOBILE)
+static float compute_dot(const at::Half* a, const at::Half* b, int64_t len) {
+  return at::native::CPU_CAPABILITY::fp16_dot_with_fp32_arith(
+      a, b, len);
 }
 
 template <>
@@ -372,11 +376,15 @@ void gemm_transa_(
     TransposeType transa,
     int64_t m, int64_t n, int64_t k,
     float alpha,
-    const at::BFloat16 *a, int64_t lda,
-    const at::BFloat16 *b, int64_t ldb,
+    const at::Half *a, int64_t lda,
+    const at::Half *b, int64_t ldb,
     float beta,
-    at::BFloat16 *c, int64_t ldc) {
+    at::Half *c, int64_t ldc) {
   // c = alpha * (a.T @ b) + beta * c
+  if (n == 1 && alpha == 1.0) {
+    at::native::blas_impl::fp16_gemv_trans(k, m, 1.0, a, lda, b, 1, beta, c, 1);
+    return;
+  }
   parallel_for(0, m, 1, [&](int64_t begin, int64_t end) {
     const auto *a_ = a + begin * lda;
     for (const auto i : c10::irange(begin, end)) {
@@ -395,12 +403,8 @@ void gemm_transa_(
   });
 }
 
-#endif // defined(__aarch64__) && !defined(C10_MOBILE)
-
-#if !defined(C10_MOBILE)
-static float compute_dot(const at::Half* a, const at::Half* b, int64_t len) {
-  return at::native::blas_impl::fp16_dot_with_fp32_arith(
-      a, b, len);
+static float compute_dot(const at::BFloat16* a, const at::BFloat16* b, int64_t len) {
+  return at::native::CPU_CAPABILITY::bf16_dot_with_fp32_arith(a, b, len);
 }
 
 template <>
@@ -408,15 +412,11 @@ void gemm_transa_(
     TransposeType transa,
     int64_t m, int64_t n, int64_t k,
     float alpha,
-    const at::Half *a, int64_t lda,
-    const at::Half *b, int64_t ldb,
+    const at::BFloat16 *a, int64_t lda,
+    const at::BFloat16 *b, int64_t ldb,
     float beta,
-    at::Half *c, int64_t ldc) {
+    at::BFloat16 *c, int64_t ldc) {
   // c = alpha * (a.T @ b) + beta * c
-  if (n == 1 && alpha == 1.0) {
-    at::native::blas_impl::fp16_gemv_trans(k, m, 1.0, a, lda, b, 1, beta, c, 1);
-    return;
-  }
   parallel_for(0, m, 1, [&](int64_t begin, int64_t end) {
     const auto *a_ = a + begin * lda;
     for (const auto i : c10::irange(begin, end)) {
