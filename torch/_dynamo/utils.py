@@ -3355,20 +3355,27 @@ def flatten_graph_inputs(gm: torch.fx.GraphModule, inputs, compile_gm):
     return wrapper
 
 
+@dataclasses.dataclass
+class CompiledAutogradMetrics:
+    id: int
+    start_time_ns: int
+    end_time_ns: int
+
+
 def get_compiled_autograd_metrics(maybe_gm):
-    if not isinstance(maybe_gm, torch.fx.GraphModule) or not hasattr(maybe_gm, "meta"):
+    if (
+        not isinstance(maybe_gm, torch.fx.GraphModule)
+        or not hasattr(maybe_gm, "meta")
+        or "compiled_autograd_metrics" not in maybe_gm.meta
+    ):
         return None
-    start = maybe_gm.meta.get("compiled_autograd_start_time", None)
-    end = maybe_gm.meta.get("compiled_autograd_end_time", None)
-    assert type(start) == type(end)
-    if not start:
-        return None
-    return start, end
+    return dataclasses.astuple(maybe_gm.meta["compiled_autograd_metrics"])
 
 
-def set_compiled_autograd_metrics(gm, start_time, end_time):
-    gm.meta["compiled_autograd_start_time"] = start_time
-    gm.meta["compiled_autograd_end_time"] = end_time
+def set_compiled_autograd_metrics(gm, id, start_time_ns, end_time_ns):
+    gm.meta["compiled_autograd_metrics"] = CompiledAutogradMetrics(
+        id, start_time_ns, end_time_ns
+    )
 
 
 def get_locals_to_steal(maybe_gm):
