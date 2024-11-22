@@ -152,9 +152,11 @@ class InterpreterModule(torch.nn.Module):
                 # the keys in the kwarg dict.
                 arg_list = list(args)
                 kwarg_names = self.arg_names[len(arg_list) :]
-                for kwarg_name in kwarg_names:
-                    if kwarg_name in kwargs:
-                        arg_list.append(kwargs[kwarg_name])
+                arg_list.extend(
+                    kwargs[kwarg_name]
+                    for kwarg_name in kwarg_names
+                    if kwarg_name in kwargs
+                )
 
                 # Assert that the kwargs passed in exactly match the positional
                 # arguments specified by the GraphModule. This should be
@@ -519,6 +521,31 @@ class UnflattenedModule(torch.nn.Module):
             if hasattr(mod, "graph") and isinstance(mod.graph, torch.fx.Graph):
                 print(mod.graph)
 
+    def _adapt_flat_args(self, flat_args, in_spec):
+        signature = self.module_call_graph[0].signature
+        if in_spec == signature.in_spec:
+            return flat_args
+
+        if self.flat_args_adapter is None:
+            raise TypeError(
+                "There is no flat args adapter sepcified. "
+                "Are you sure you are calling this with the right arguments? "
+            )
+        else:
+            flat_args = self.flat_args_adapter.adapt(
+                target_spec=signature.in_spec,
+                input_spec=in_spec,
+                input_args=flat_args,
+            )
+
+            if len(flat_args) != signature.in_spec.num_leaves:
+                raise TypeError(
+                    f"Flat args adaption failed, number of args mismatch "
+                    f"Adatped: {len(flat_args)} \n"
+                    f"Exported module: {signature.in_spec.num_leaves}"
+                )
+            return flat_args
+
     def forward(self, *args, **kwargs):
         signature = self.module_call_graph[0].signature
 
@@ -544,26 +571,9 @@ class UnflattenedModule(torch.nn.Module):
                     f"Input treespec: {in_spec}. ",
                     f"Exported module treespec: {signature.in_spec}",
                 )
-            if self.flat_args_adapter is None:
-                raise TypeError(
-                    "There is no flat args adapter sepcified. "
-                    "Are you sure you are calling this with the right arguments? "
-                )
-            else:
-                if not self.adapted:
-                    print("Adapting flat arg to match exported module's treespec")
-                flat_args = self.flat_args_adapter.adapt(
-                    target_spec=signature.in_spec,
-                    input_spec=in_spec,
-                    input_args=flat_args,
-                )
-                self.adapted = True
-                if len(flat_args) != signature.in_spec.num_leaves:
-                    raise TypeError(
-                        f"Flat args adaption failed, number of args mismatch "
-                        f"Adatped: {len(flat_args)} \n"
-                        f"Exported module: {signature.in_spec.num_leaves}"
-                    )
+                print("Adapting flat arg to match exported module's treespec")
+            flat_args = self._adapt_flat_args(flat_args, in_spec)
+            self.adapted = True
 
         if self.check_input_constraints:
             # Import here to avoid an unfortunate circular dependency.
@@ -925,9 +935,10 @@ class _ModuleFrame:
             assert kwargs_spec.context is not None
 
             with self.graph.inserting_after(None):
-                arg_nodes = []
-                for idx in range(args_spec.num_children):
-                    arg_nodes.append(self.graph.placeholder(f"_positional_arg_{idx}"))
+                arg_nodes = [
+                    self.graph.placeholder(f"_positional_arg_{idx}")
+                    for idx in range(args_spec.num_children)
+                ]
                 kwarg_nodes = {}
                 for name in kwargs_spec.context:
                     kwarg_nodes[name] = self.graph.placeholder(name)
