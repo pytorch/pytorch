@@ -1993,7 +1993,7 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
             self.assertEqual(actual, expect)
 
     @onlyCUDA
-    @dtypes(torch.float, torch.double, torch.float16)
+    @dtypes(torch.float, torch.double, torch.float16, torch.bfloat16)
     def test_bmm_cuda(self, device, dtype):
         self._test_bmm(device, dtype)
 
