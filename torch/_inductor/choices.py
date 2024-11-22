@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import typing
 from typing import Any, Dict, List, Type, TYPE_CHECKING
 
 from . import config
+from .codecache import write_text
+from .metrics import get_metric_table, is_metric_table_enabled
 from .runtime.hints import ReductionHint
+from .scheduler import BaseSchedulerNode, Scheduler, WhyNoFuse
 from .virtualized import V
 
 
@@ -12,6 +16,13 @@ if TYPE_CHECKING:
 
     from .codegen.simd_kernel_features import SIMDKernelFeatures
     from .codegen.triton import TritonKernel
+
+
+class Sortable(typing.Protocol):
+    """Anything that can be used as a list.sort() key (int/tuple/etc)"""
+
+    def __lt__(self, other: typing.Self) -> bool:
+        ...
 
 
 class InductorChoices:
@@ -98,4 +109,118 @@ class InductorChoices:
         return (
             features.get_reduction_hint() == ReductionHint.INNER
             and V.graph.sizevars.statically_known_geq(features.reduction_numel, 256)
+        )
+
+    @staticmethod
+    def can_fuse(
+        scheduler: Scheduler,
+        node1: BaseSchedulerNode,
+        node2: BaseSchedulerNode,
+        shared_data_score: int,
+    ) -> bool:
+        """
+        Heuristics to prevent fusion applied to both horizontal and vertical fusions.  Heuristics here should not
+        be needed for correctness and tweaking them may yield additional performance.
+
+        See also some related heuristics that can be changed via config:
+            - config.triton.tiling_prevents_pointwise_fusion
+            - config.triton.tiling_prevents_reduction_fusion
+            - config.aggressive_fusion (will cause this function to be called more times)
+        """
+        if shared_data_score == 0 and (
+            not config.aggressive_fusion or node1.is_reduction() or node2.is_reduction()
+        ):
+            if is_metric_table_enabled("fusion_failure_due_to_indexing_mismatch"):
+                common_buf_names = (
+                    node1.read_writes.buffer_names() & node2.read_writes.buffer_names()
+                )
+                if len(common_buf_names) > 0:
+                    get_metric_table("fusion_failure_due_to_indexing_mismatch").add_row(
+                        lambda: {
+                            "pre_grad_graph_id": V.graph.graph_id,
+                            "post_grad_graph_id": V.graph.post_grad_graph_id,
+                            "node1_name": node1.get_name(),
+                            "node2_name": node2.get_name(),
+                            "node1_debug_str": write_text(node1.debug_str()),
+                            "node2_debug_str": write_text(node2.debug_str()),
+                            "common_buffer_names": list(common_buf_names),
+                            "failure_reason": scheduler.decide_fusion_fail_reason(
+                                node1, node2, common_buf_names
+                            ),
+                        }
+                    )
+
+                    WhyNoFuse(node1, node2)("no shared data due to indexing mismatch")
+                    return False
+            WhyNoFuse(node1, node2)("no shared data")
+            return False  # heuristic not needed for correctness
+
+        if (
+            not node1.is_foreach()
+            and not node2.is_foreach()
+            and len(node1.get_nodes()) + len(node2.get_nodes()) > config.max_fusion_size
+        ):
+            WhyNoFuse(node1, node2)("exceeds max fusion")
+            return False  # heuristic not needed for correctness
+
+        if scheduler.can_fusion_increase_peak_memory(node1, node2):
+            WhyNoFuse(node1, node2)("Fusion will increase peak memory")
+            return False
+
+        return True
+
+    @staticmethod
+    def can_fuse_vertical(
+        scheduler: Scheduler,
+        node1: BaseSchedulerNode,
+        node2: BaseSchedulerNode,
+        shared_data_score: int,
+    ) -> bool:
+        """Hook for heuristics to prevent vertical (producer/consumer) fusions"""
+        return True
+
+    @staticmethod
+    def can_fuse_horizontal(
+        scheduler: Scheduler,
+        node1: BaseSchedulerNode,
+        node2: BaseSchedulerNode,
+        shared_data_score: int,
+    ) -> bool:
+        """Hook for heuristics to prevent horizontal (consumer/consumer) fusions"""
+        if shared_data_score < config.score_fusion_memory_threshold:
+            WhyNoFuse(node1, node2)("score_fusion_memory_threshold")
+            return False
+        if scheduler.are_long_distant_nodes(node1, node2):
+            WhyNoFuse(node1, node2)(
+                "Nodes are too far away. Fusing them may increase peak memory."
+            )
+            return False
+        return True
+
+    @staticmethod
+    def score_fusion(
+        scheduler: Scheduler,
+        node1: BaseSchedulerNode,
+        node2: BaseSchedulerNode,
+    ) -> Sortable:
+        """
+        Assign a score (higher comes first) to the fusion of node1 and node2.
+        When different fusions conflict with each other, this is the way we
+        decide what order to run them in.
+
+        Our current score is based on:
+        - The type of fusion (template/reduction/etc)
+        - Estimate of the saved memory operations
+        - Fusions closer together in original graph order
+        """
+        memory_score = scheduler.score_fusion_memory(node1, node2)
+        proximity_score = -max(
+            abs(node1.min_order - node2.max_order),
+            abs(node2.min_order - node1.max_order),
+        )
+        return (
+            node1.is_template() == config.epilogue_fusion_first and memory_score > 0,
+            node1.is_reduction() == node2.is_reduction() and memory_score > 0,
+            memory_score,
+            proximity_score,
         )
