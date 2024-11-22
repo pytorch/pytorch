@@ -60,14 +60,14 @@ def bdist_wheel():
     logger.info("Building libtorch wheel")
     setup_py(
         ["bdist_wheel"],
-        extra_env={"BUILD_LIBTORCH_WHL": "1", "BUILD_PYTHON_WHEEL": "0"},
+        extra_env={"BUILD_LIBTORCH_WHL": "1", "BUILD_PYTHON_ONLY": "0"},
     )
     # Equivalent to running the following:
     #     > BUILD_LIBTORCH_WHL=0 BUILD_PYTHON_ONLY=1 python setup.py bdist_wheel --cmake
     logger.info("Building torch wheel")
     setup_py(
         ["bdist_wheel", "--cmake"],
-        extra_env={"BUILD_LIBTORCH_WHL": "0", "BUILD_PYTHON_WHEEL": "1"},
+        extra_env={"BUILD_LIBTORCH_WHL": "0", "BUILD_PYTHON_ONLY": "1"},
     )
 
 
@@ -77,14 +77,14 @@ def install():
     logger.info("Building libtorch wheel")
     setup_py(
         ["install"],
-        extra_env={"BUILD_LIBTORCH_WHL": "1", "BUILD_PYTHON_WHEEL": "0"},
+        extra_env={"BUILD_LIBTORCH_WHL": "1", "BUILD_PYTHON_ONLY": "0"},
     )
     # Equivalent to running the following:
     #     > BUILD_LIBTORCH_WHL=0 BUILD_PYTHON_ONLY=1 python setup.py install --cmake
     logger.info("Building torch wheel")
     setup_py(
         ["install", "--cmake"],
-        extra_env={"BUILD_LIBTORCH_WHL": "0", "BUILD_PYTHON_WHEEL": "1"},
+        extra_env={"BUILD_LIBTORCH_WHL": "0", "BUILD_PYTHON_ONLY": "1"},
     )
 
 
@@ -94,14 +94,14 @@ def develop():
     logger.info("Building libtorch wheel")
     setup_py(
         ["develop"],
-        extra_env={"BUILD_LIBTORCH_WHL": "1", "BUILD_PYTHON_WHEEL": "0"},
+        extra_env={"BUILD_LIBTORCH_WHL": "1", "BUILD_PYTHON_ONLY": "0"},
     )
     # Equivalent to running the following:
     #     > BUILD_LIBTORCH_WHL=0 BUILD_PYTHON_ONLY=1 python setup.py develop --cmake
     logger.info("Building torch wheel")
     setup_py(
         ["develop", "--cmake"],
-        extra_env={"BUILD_LIBTORCH_WHL": "0", "BUILD_PYTHON_WHEEL": "1"},
+        extra_env={"BUILD_LIBTORCH_WHL": "0", "BUILD_PYTHON_ONLY": "1"},
     )
 
 
