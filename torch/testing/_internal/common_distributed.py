@@ -34,6 +34,7 @@ from torch._C._distributed_c10d import _SymmetricMemory
 import torch.nn as nn
 from torch.testing._internal.common_utils import (
     FILE_SCHEMA,
+    TEST_CUDA,
     find_free_port,
     IS_SANDCASTLE,
     retry_on_connect_failures,
@@ -422,17 +423,28 @@ def create_tcp_store(
         )
 
 
-if TEST_WITH_TSAN:
-    # TSAN runs much slower.
-    TIMEOUT_DEFAULT = 500
-else:
-    TIMEOUT_DEFAULT = int(os.getenv('DISTRIBUTED_TESTS_DEFAULT_TIMEOUT', '300'))
-TIMEOUT_OVERRIDE = {"test_ddp_uneven_inputs": 400}
+# Try env setting first
+TIMEOUT_DEFAULT = int(os.getenv('DISTRIBUTED_TESTS_DEFAULT_TIMEOUT', '0'))
+
+# If not set, use some default values
+if TIMEOUT_DEFAULT == 0:
+    if TEST_WITH_TSAN:
+        # TSAN runs much slower.
+        TIMEOUT_DEFAULT = 500
+    elif TEST_WITH_ROCM:
+        # ROCM runs slower.
+        TIMEOUT_DEFAULT = 120
+    elif TEST_CUDA:
+        TIMEOUT_DEFAULT = 60
+    else:
+        # CPU runs slower.
+        TIMEOUT_DEFAULT = 120
 
 
-# https://github.com/pytorch/pytorch/issues/75665
-if TEST_WITH_ROCM:
-    TIMEOUT_OVERRIDE["test_join_kwargs"] = 200
+TIMEOUT_OVERRIDE = {
+    "test_ddp_uneven_inputs": 400,
+    "test_index": 300,
+}
 
 
 def create_device(interface=None):
