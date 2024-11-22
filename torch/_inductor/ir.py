@@ -3871,7 +3871,7 @@ class ShapeAsConstantBuffer(IRNode):
         return free_unbacked_symbols(self.expr)
 
     def codegen_reference(self, writer=None):  # type: ignore[no-untyped-def]
-        return V.graph.wrapper_code.expr_printer(V.graph.sizevars.simplify(self.expr))
+        return V.graph.wrapper_code.codegen_sizevar(self.expr)
 
     def has_tensor_output(self) -> bool:
         return False
