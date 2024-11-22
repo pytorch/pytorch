@@ -1583,6 +1583,14 @@ def parallel_num_threads():
 
 
 @functools.lru_cache(None)
+def get_backend_num_stages():
+    from .runtime.triton_helpers import get_backend_options
+
+    options = get_backend_options()
+    return options.get("num_stages", 2 if torch.version.hip else 3)
+
+
+@functools.lru_cache(None)
 def get_device_tflops(dtype):
     from triton.testing import get_max_simd_tflops, get_max_tensorcore_tflops
 
@@ -1647,14 +1655,10 @@ def is_dynamic(*args):
     from . import ir
 
     for t in args:
-        if isinstance(t, ir.TensorBox):
-            if has_free_symbols(t.data.get_size()) or (
-                hasattr(t.data, "get_stride") and has_free_symbols(t.data.get_stride())
+        if isinstance(t, (ir.TensorBox, ir.StorageBox, ir.BaseView, ir.ComputedBuffer)):
+            if has_free_symbols(t.maybe_get_size() or ()) or has_free_symbols(
+                t.maybe_get_stride() or ()
             ):
-                return True
-        elif isinstance(t, (ir.StorageBox, ir.BaseView, ir.ComputedBuffer)):
-            assert hasattr(t, "get_size") and hasattr(t, "get_stride")
-            if has_free_symbols(t.get_size()) or has_free_symbols(t.get_stride()):
                 return True
         elif not isinstance(t, ir.IRNode):
             continue
@@ -1876,7 +1880,7 @@ def get_cloned_parameter_buffer_name(name: str):
     return name + "__original__"
 
 
-def is_gpu(device: str):
+def is_gpu(device: Optional[str]):
     assert isinstance(device, str) or device is None, device
     return device in GPU_TYPES
 

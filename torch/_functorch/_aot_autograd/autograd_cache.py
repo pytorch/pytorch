@@ -117,13 +117,26 @@ def check_node_safe(node: Node):
     The test suite test_aot_autograd_cache.py::AOTAutogradCachePicklerTests tries its best to fully cover/specify this behavior.
     """
     SAFE_TORCH_MODULES = ("torch.functional", "torch.nn.functional")
+    SAFE_TORCH_FUNCTIONS = (
+        "torch.Size",
+        "torch.sym_int",
+        "torch._sym_sqrt",
+        "torch.sym_float",
+        "torch.sym_sum",
+        "einops.einops.rearrange",
+    )
 
     def is_public_torch_api(target):
         # Don't blindly allow private functions in the torch namespace
         is_private = target.__name__.startswith("_")
+
         return (
             getattr(target, "__module__", None) in SAFE_TORCH_MODULES and not is_private
         )
+
+    def is_safe_torch_function(target):
+        """Allowlisted torch functions"""
+        return f"{target.__module__}.{target.__name__}" in SAFE_TORCH_FUNCTIONS
 
     def is_torch_function(target):
         if isinstance(target, (torch._ops.OpOverload, torch._ops.OpOverloadPacket)):
@@ -131,7 +144,11 @@ def check_node_safe(node: Node):
         if is_public_torch_api(target):
             return True
         is_builtin_fun_or_type = type(target).__name__ == "builtin_function_or_method"
-        return is_builtin_fun_or_type
+        if is_builtin_fun_or_type:
+            return True
+        if is_safe_torch_function(target):
+            return True
+        return False
 
     def is_tensor(target):
         # Tensors always have example values in meta field
@@ -142,16 +159,20 @@ def check_node_safe(node: Node):
         # We support only torch.* functions for now
         # We can probably add an allowlist of safe non-torch implementations as well
         if not is_torch_function(node.target):
+            module = getattr(node.target, "__module__", None)
+            name = getattr(node.target, "__name__", None)
             raise BypassAOTAutogradCache(
-                f"Unsupported call_function target {node.target}"
+                f"Unsupported call_function target {node.target}. \n Function module: {module}, \nFunction name: {name}"
             )
     elif node.op == "call_method":
         method_name = node.target
         method_target = node.args[0]
         # Only support method calls on base tensors
         if not is_tensor(method_target):
+            module = getattr(method_target, "__module__", None)
+            name = getattr(method_target, "__name__", None)
             raise BypassAOTAutogradCache(
-                f"Unsupported call_method target {method_target}"
+                f"Unsupported call_method target {method_target}. \nMethod module: {module}, \nMethod name: {name}"
             )
         if (
             type(method_name) != str
@@ -227,8 +248,8 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
 
 
 class AOTAutogradCachePickler(FxGraphCachePickler):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, gm: torch.fx.GraphModule):
+        super().__init__(gm)
         self.dispatch_table: Dict
         self.dispatch_table.update(
             {
@@ -275,7 +296,7 @@ def autograd_cache_key(
     """
     check_cacheable(gm)
     details = AOTAutogradCacheDetails(gm, example_inputs, config, fx_config)
-    pickler = AOTAutogradCachePickler()
+    pickler = AOTAutogradCachePickler(gm)
     # The prefix distinguishes among the other kinds of objects we cache
     key = "a" + pickler.get_hash(details)
     debug_lines = pickler.debug_lines(details)
@@ -632,7 +653,7 @@ class AOTAutogradCache:
                     )
                     # TODO: should we use the same field for remote cache time saved for both
                     # FXGraphCache and AOTAutogradCache?
-                    # add_remote_cache_time_saved(time_saved_ns, is_backward=False)
+                    # get_metrics_context().increment(...)
                     if (
                         ephemeral_increase := add_ephemeral_timeout_increase_for_distributed(
                             time_saved_ns

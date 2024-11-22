@@ -25,7 +25,7 @@ from filelock import FileLock
 import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 from torch._dynamo.testing import rand_strided
-from torch._dynamo.utils import counters, identity, preserve_rng_state
+from torch._dynamo.utils import counters, dynamo_timed, identity, preserve_rng_state
 
 from . import config, ir
 from .autotune_process import (
@@ -35,13 +35,12 @@ from .autotune_process import (
     TritonGPUBenchmarkRequest,
 )
 from .codecache import code_hash, PersistentCache, PyCodeCache
-from .codegen.common import IndentedBuffer, KernelTemplate, WorkspaceArg
+from .codegen.common import IndentedBuffer, KernelTemplate, OpOverrides, WorkspaceArg
 from .codegen.simd_kernel_features import SIMDKernelFeatures
 from .codegen.triton import (
     gen_common_triton_imports,
     texpr,
     TritonKernel,
-    TritonPrinter,
     TritonScheduling,
 )
 from .codegen.triton_utils import config_of, signature_to_meta
@@ -502,7 +501,7 @@ class TritonTemplateKernel(TritonKernel):
             assert isinstance(val, str)
             assert isinstance(mask, (str, type(None)))
             assert self.template_mask is None
-            indices = list(map(TritonPrinter.paren, indices))
+            indices = list(map(OpOverrides.paren, indices))
             index_symbols = [sympy.Symbol(x, integer=True) for x in indices]
             lengths = [
                 V.graph.sizevars.simplify(s) for s in self.output_node.get_size()
@@ -570,7 +569,7 @@ class TritonTemplateKernel(TritonKernel):
         assert isinstance(name, str)
         assert isinstance(mask, str)
         stride = self.named_input_nodes[name].get_stride()
-        indices = list(map(TritonPrinter.paren, indices))
+        indices = list(map(OpOverrides.paren, indices))
         assert len(indices) == len(stride)
         index = " + ".join(
             f"{texpr(self.rename_indexing(s))} * {i}" for s, i in zip(stride, indices)
@@ -1414,7 +1413,8 @@ class AlgorithmSelectorCache(PersistentCache):
             return wait_on_futures
 
         def autotune(choices):
-            return make_benchmark_fn()(choices)
+            with dynamo_timed(f"{name}_template_autotuning"):
+                return make_benchmark_fn()(choices)
 
         if config.autotune_in_subproc:
             from .autotune_process import tuning_pool
@@ -1424,7 +1424,8 @@ class AlgorithmSelectorCache(PersistentCache):
 
         def do_autotuning(precompile_fn):
             precompile_start_ts = time.time()
-            precompile_fn()
+            with dynamo_timed(f"{name}_template_precompiling"):
+                precompile_fn()
             precompile_elapse = time.time() - precompile_start_ts
 
             autotune_start_ts = time.time()

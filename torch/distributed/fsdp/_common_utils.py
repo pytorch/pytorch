@@ -535,10 +535,11 @@ def _override_module_mixed_precision(
 
 
 def _no_dispatch_record_stream(tensor: torch.Tensor, stream: torch.Stream) -> None:
-    # FIXME record_stream doesn't work with non-cuda/mtia tensors
+    # FIXME record_stream doesn't work with non-cuda/mtia/xpu tensors
     if tensor.device.type not in [
         "cuda",
         "mtia",
+        "xpu",
         torch._C._get_privateuse1_backend_name(),
     ]:
         return
