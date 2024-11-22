@@ -9,9 +9,13 @@ to create a minimal nn.Module that reproduce the error by setting ``from torch._
 
 One a high-level, there are two steps in using the minifier:
 
-- Set ``from torch._inductor import config; config.aot_inductor.dump_aoti_minifier = True`` or set the environment variable ``DUMP_AOTI_MINIFIER=1``. Then running the script that errors would produce a ``minifier_launcher.py`` script. The output directory is configurable by setting ``torch._dynamo.config.base_dir`` to a valid directory name.
+- Set ``from torch._inductor import config; config.aot_inductor.dump_aoti_minifier = True`` or set the environment variable ``DUMP_AOTI_MINIFIER=1``. Then running the script that errors would produce a ``minifier_launcher.py`` script. The output directory is configurable by setting ``torch._dynamo.config.debug_dir_root`` to a valid directory name.
 
 - Run the ``minifier_launcher.py`` script. If the minifier runs successfully, it generates runnable python code in ``repro.py`` which reproduces the exact error.
+
+
+Example Code
+---------------------------
 
 Here is sample code which will generate an error because we injected an error on relu with
 ``torch._inductor.config.triton.inject_relu_bug_TESTING_ONLY = "compile_error"``.
@@ -78,13 +82,16 @@ instead if ``relu``, so we get a ``SyntaxError``.
 
 Since we have ``torch._inductor.config.aot_inductor.dump_aoti_minifier=True``, we also see an additional line indicating where ``minifier_launcher.py`` has
 been written to. The output directory is configurable by setting
-``torch._dynamo.config.base_dir`` to a valid directory name.
+``torch._dynamo.config.debug_dir_root`` to a valid directory name.
 
 ::
 
     W1031 16:21:08.612000 2861654 pytorch/torch/_dynamo/debug_utils.py:279] Writing minified repro to:
     W1031 16:21:08.612000 2861654 pytorch/torch/_dynamo/debug_utils.py:279] /data/users/shangdiy/pytorch/torch_compile_debug/run_2024_10_31_16_21_08_602433-pid_2861654/minifier/minifier_launcher.py
 
+
+Minifier Launcher
+---------------------------
 
 The ``minifier_launcher.py`` file has the following code. The ``exported_program`` contains the inputs to ``torch._inductor.aoti_compile_and_package``.
 The ``command='minify'`` parameter means the script will run the minifier to create a minimal graph module that reproduce the error. Alternatively, you set
@@ -144,10 +151,27 @@ Suppose we kept the ``command='minify'`` option, and run the script, we would ge
     Wrote minimal repro out to repro.py
 
 
+If you get an `AOTIMinifierError` when running `minifier_launcher.py`, please report a bug [here](https://github.com/pytorch/pytorch/issues/new?assignees=&labels=&projects=&template=bug-report.yml).
+
+
+Minified Result
+---------------------------
+
 The ``repro.py`` looks like this. The exported program now contains only the relu node. The minifier successfully reduced the graph to the op that raises the
 error.
 
 .. code-block:: py
+
+# from torch.nn import *
+# class Repro(torch.nn.Module):
+#     def __init__(self) -> None:
+#         super().__init__()
+#
+#
+#
+#     def forward(self, linear):
+#         relu = torch.ops.aten.relu.default(linear);  linear = None
+#         return (relu,)
 
     import torch
     from torch import tensor, device
@@ -188,25 +212,10 @@ error.
     # NVIDIA PG509-210 : 8
 
 
-    from torch.nn import *
-    class Repro(torch.nn.Module):
-        def __init__(self) -> None:
-            super().__init__()
-
-
-
-        def forward(self, linear):
-            relu = torch.ops.aten.relu.default(linear);  linear = None
-            return (relu,)
-
-    def load_args(reader):
-        buf0 = reader.storage('a4e748c3a3d0d4a78cde43e33ad0f9dd41d96e90', 512, device=device(type='cuda', index=0))
-        reader.tensor(buf0, (8, 16), is_leaf=True)  # linear
-    load_args._version = 0
-    mod = Repro()
+    exported_program = torch.export.load('data/users/shangdiy/pytorch/torch_compile_debug/run_2024_11_06_14_19_09_678890-pid_561538/minifier/checkpoints/exported_program.pt2')
+    config_patches={}
     if __name__ == '__main__':
         from torch._dynamo.repro.aoti import run_repro, repro_load_args
-        config_patches={}
         with torch.no_grad():
             args = repro_load_args(load_args, save_dir='/data/users/shangdiy/pytorch/torch_compile_debug/run_2024_11_06_14_19_09_678890-pid_561538/minifier/checkpoints')
             exported_program = torch.export.export(mod, args)
