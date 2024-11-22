@@ -171,7 +171,7 @@ KERNEL_COUNT_OVERRIDES = {
     "test_asgd_cpu": 3,
     "test_asgd_lambd_cpu": 3,
     "test_asgd_maximize_cpu": 3,
-    "test_asgd_recompile_single": 6,
+    "test_asgd_recompile_single": 16,
     "test_asgd_t0_cpu": 3,
     "test_asgd_tensor_lr_weight_decay_maximize_capturable_cuda": 5,
     "test_asgd_tensor_lr_weight_decay_maximize_capturable_xpu": 8,
@@ -679,7 +679,7 @@ class CompiledOptimizerTests(TestCase):
     test_adagrad_recompile = make_recompile_test(Adagrad, lr=0.01)
     test_asgd_recompile_default = make_recompile_test(ASGD, lr=0.01)
     test_asgd_recompile_single = make_recompile_test(
-        ASGD, kernel_count=8, lr=0.01, foreach=False
+        ASGD, kernel_count=3, lr=0.01, foreach=False
     )
     test_asgd_recompile_foreach = make_recompile_test(ASGD, lr=0.01, foreach=True)
     test_sgd_recompile_single = make_recompile_test(
