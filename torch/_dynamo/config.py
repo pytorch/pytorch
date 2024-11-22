@@ -386,6 +386,10 @@ enable_cpp_guard_manager = True
 # Inline inbuilt nn modules
 inline_inbuilt_nn_modules = not is_fbcode()
 
+# Whether to automatically find and replace identical graph
+# regions with a call to invoke_subgraph
+use_graph_deduplication = False
+
 # When set, total compile time instruction count is recorded using
 # torch._dynamo.utilsCompileTimeInstructionCounter.
 record_compile_time_instruction_count = False

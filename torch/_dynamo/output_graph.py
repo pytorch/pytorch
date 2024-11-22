@@ -53,6 +53,8 @@ from .exc import (
     unimplemented,
     unimplemented_with_warning,
 )
+from .graph_deduplication import apply_graph_deduplication
+from .graph_region_tracker import GraphRegionTracker
 from .guards import GuardBuilder, install_guard
 from .mutation_guard import is_dynamic_nn_module
 from .side_effects import AttributeMutationExisting, SideEffects
@@ -277,6 +279,8 @@ class OutputGraph:
             "co_filename": f_code.co_filename,
             "co_firstlineno": f_code.co_firstlineno,
         }
+
+        self.region_tracker = GraphRegionTracker()
 
         # tracked_fakes says where any tensor that was wrapped to fake came
         # from.  It is similar to GraphArg, in that all GraphArgs will get
@@ -993,6 +997,8 @@ class OutputGraph:
         for value in stack_values:
             value.realize()
 
+        self.dedup_pass()
+
         # Use nn.Module "proxies" in the constructed GraphModule so that
         # the resulting GM does not hold additional strong references to the original modules.
         # This prevents a strong ref cycle where Dynamo created code holds on to references
@@ -1461,6 +1467,27 @@ class OutputGraph:
         )
 
         return compiled_fn
+
+    def dedup_pass(self):
+        if torch._dynamo.config.use_graph_deduplication:
+            apply_graph_deduplication(self)
+
+    def install_subgraph(self, name, sub_gm):
+        next_name = None
+        i = 0
+        while not next_name:
+            candidate = f"{name}_{i}"
+            if candidate in self.nn_modules:
+                i += 1
+            else:
+                next_name = candidate
+
+        sub_gm.__name__ = next_name
+        sub_gm.torchdynamo_force_dynamic = False
+        # This graph module is not present in the user space, so it can't be
+        # accessed by a source. Set source=None.
+        self.register_attr_or_module(sub_gm, next_name, source=None)
+        return next_name
 
     def example_inputs(self) -> List[torch.Tensor]:
         result = []
