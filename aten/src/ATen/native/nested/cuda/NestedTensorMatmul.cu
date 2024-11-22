@@ -409,7 +409,7 @@ Tensor bmm_nested_cuda(const Tensor& self, const Tensor& mat2) {
 #ifndef USE_ROCM
 #ifndef _WIN32
   bool success = false;
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(at::ScalarType::Half, at::ScalarType::BFloat16,
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16,
       self.scalar_type(), "group_gemm_dispatch", [&] {
         std::vector<scalar_t*> aptr(ntensors);
         std::vector<scalar_t*> bptr(ntensors);
