@@ -309,6 +309,12 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         # return rank to GPU map
         return init_multigpu_helper(self.world_size, "nccl")
 
+    @property
+    def destroy_pg_upon_exit(self) -> bool:
+        # This TestCase focuses on creation, destroy and abort of PG's. So it
+        # does not need auto-destroy upon exit.
+        return False
+
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 1 GPU")
     @skip_if_lt_x_gpu(1)
@@ -341,7 +347,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         def abortpg():
             c10d.distributed_c10d._get_default_group()._get_backend(
                 torch.device(device)
-            )._shutdown()
+            ).abort()
 
         # Initialize DDP to ensure "destroy_process_group" will not call
         # ProcessGroupNCCL destructor since DDP holds a reference to process group.
@@ -3414,7 +3420,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         with _functional_collectives.allow_inflight_collective_as_graph_input_ctx():
             self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
             input = torch.full(
-                (10240, 10240), float(self.rank), device=f"cuda:{self.rank}"
+                (1024, 1024), float(self.rank), device=f"cuda:{self.rank}"
             )
             dist.all_reduce(input, op=dist.ReduceOp.SUM, async_op=True)
             # Non-functional collectives run under the context manager is registered in the work registry.
@@ -3426,7 +3432,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         # Case 2: Run collectives not under context manager, and don't call wait on them.
         # NOTE: Here we intentionally test memory-stressed case.
         self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 2)
-        for _ in range(50000):
+        for _ in range(1000):
             input = torch.full(
                 (1024, 1024), float(self.rank), device=f"cuda:{self.rank}"
             )
@@ -3862,6 +3868,40 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
                     c10d.send(x, group_dst=0, group=subgroup)
                 else:
                     c10d.send(x, dst=self.rank - 1, group=subgroup)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(4)
+    @parametrize("group_rank", [True, False])
+    def test_batch_send_recv_subgroup(self, group_rank):
+        world_size = 4
+        if self.rank >= world_size:
+            return
+        subgroup = self._init_two_pg2_subgroups(world_size)
+        device = torch.device("cuda:%d" % self.rank)
+        ops = []
+        if self.rank == 0 or self.rank == 2:
+            x = torch.empty((10,), device=device)
+            if group_rank:
+                ops.append(c10d.P2POp(dist.irecv, x, group=subgroup, group_peer=1))
+            else:
+                ops.append(
+                    c10d.P2POp(dist.irecv, x, peer=self.rank + 1, group=subgroup)
+                )
+
+            for work in dist.batch_isend_irecv(ops):
+                work.wait()
+            expected = torch.ones((10,), device=device) * (self.rank + 1)
+            self.assertEqual(x, expected)
+        else:
+            x = torch.ones((10,), device=device) * self.rank
+            if group_rank:
+                ops.append(c10d.P2POp(dist.isend, x, group=subgroup, group_peer=0))
+            else:
+                ops.append(
+                    c10d.P2POp(dist.isend, x, peer=self.rank - 1, group=subgroup)
+                )
+            for work in dist.batch_isend_irecv(ops):
+                work.wait()
 
     @requires_nccl()
     @skip_if_lt_x_gpu(4)

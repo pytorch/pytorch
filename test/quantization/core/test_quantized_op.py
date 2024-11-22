@@ -2917,6 +2917,11 @@ class TestQuantizedOps(TestCase):
 
     @override_qengines
     def test_custom_module_lstm(self):
+        class QuantizableLSTMSplitGates(torch.ao.nn.quantizable.LSTM):
+            @classmethod
+            def from_float(cls, other, qconfig=None):
+                return super().from_float(other, qconfig, split_gates=True)
+
         qengine = torch.backends.quantized.engine
 
         batch_size = 4
@@ -2931,6 +2936,7 @@ class TestQuantizedOps(TestCase):
         Bias = [False, True]
         Batch_first = [False, True]
         Bidirectional = [False, True]
+        Split_gates = [False, True]
 
         dtype = np.uint8
         qtype = torch.quint8
@@ -2943,8 +2949,8 @@ class TestQuantizedOps(TestCase):
         x = qx.dequantize()
 
         with torch.no_grad():
-            for bias, batch_first, bidirectional in itertools.product(
-                    Bias, Batch_first, Bidirectional):
+            for bias, batch_first, bidirectional, split_gates in itertools.product(
+                    Bias, Batch_first, Bidirectional, Split_gates):
                 # Assume 12dB is sufficient for functional equivalence
                 # Without the bias, linear performs poorly
                 min_power = 10 if bias else 5
@@ -2968,17 +2974,36 @@ class TestQuantizedOps(TestCase):
 
                 # Prepare
                 lstm.qconfig = torch.ao.quantization.get_default_qconfig(qengine)
-                lstm_prepared = torch.ao.quantization.prepare(lstm)
+                custom_config_dict = (
+                    None
+                    if not split_gates
+                    else {  # switch to class with split_gates True via from_float
+                        "float_to_observed_custom_module_class": {
+                            torch.nn.LSTM: QuantizableLSTMSplitGates
+                        },
+                        "observed_to_quantized_custom_module_class": {
+                            QuantizableLSTMSplitGates: torch.ao.nn.quantized.LSTM,
+                        },
+                    }
+                )
+                lstm_prepared = torch.ao.quantization.prepare(
+                    lstm, prepare_custom_config_dict=custom_config_dict
+                )
                 self.assertTrue(hasattr(lstm_prepared[0], 'layers'))
                 self.assertEqual(num_layers, len(lstm_prepared[0].layers))
-                assert type(lstm_prepared[0]) == torch.ao.nn.quantizable.LSTM
+                self.assertEqual(
+                    lstm_prepared[0].layers[0].layer_fw.cell.split_gates, split_gates
+                )
+                assert isinstance(lstm_prepared[0], torch.ao.nn.quantizable.LSTM)
 
                 # Calibrate
                 y = lstm_prepared(x)
                 self.assertEqual(y_ref, y)
 
                 # Quantize
-                lstm_quantized = torch.ao.quantization.convert(lstm_prepared)
+                lstm_quantized = torch.ao.quantization.convert(
+                    lstm_prepared, convert_custom_config_dict=custom_config_dict
+                )
                 assert type(lstm_quantized[0]) == torch.ao.nn.quantized.LSTM
                 qy = lstm_quantized(qx)
 

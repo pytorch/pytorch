@@ -8,8 +8,6 @@
 
 #include <ATen/native/mkldnn/Matmul.h>
 #include <ATen/native/mkldnn/Linear.h>
-#include <ATen/ops/mul.h>
-#include <ATen/ops/matmul.h>
 #include <ATen/native/Resize.h>
 #if !defined(__s390x__) && !defined(__powerpc__)
 #include <cpuinfo.h>
@@ -32,6 +30,8 @@
 #include <ATen/ops/scalar_tensor_native.h>
 #include <ATen/ops/vdot_native.h>
 #include <ATen/ops/_scaled_mm_native.h>
+#include <ATen/ops/mul.h>
+#include <ATen/ops/matmul.h>
 #endif
 
 namespace at::meta {
