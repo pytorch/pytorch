@@ -275,7 +275,7 @@ def tune_gemm_in_file(filename: str) -> None:
 
     with open(filename) as file:
         for line in file:
-            if line.startswith("Gemm"):
+            if line.startswith(("Gemm", "ScaledGemm")):
                 _process_single_offline_gemm(line, deviceid)
 
 
@@ -286,7 +286,7 @@ def _gather_unique_untuned_gemm_from_files(filename_pattern: str) -> set[str]:
     for file_path in glob.glob(filename_pattern):
         with open(file_path) as file:
             for line in file:
-                if line.startswith("Gemm"):
+                if line.startswith(("Gemm", "ScaledGemm")):
                     unique_gemm_entries.add(line)
 
     return unique_gemm_entries
@@ -360,13 +360,7 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
 
     deviceid = "cuda:" + str(gpu_id)
 
-    untuned_gemm = untuned_gemm_line.strip().split(",")[:]
-    [op_sig, data_type, layout] = untuned_gemm[0].split("_")
-
-    transA = True if layout[0] == "T" else False
-    transB = True if layout[1] == "T" else False
-
-    dtype = {
+    dtype_dict = {
         "float": torch.float32,
         "double": torch.float64,
         "BFloat16": torch.bfloat16,
@@ -377,10 +371,37 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
         "Float8_e5m2": torch.float8_e5m2,
         "Float8_e4m3fnuz": torch.float8_e4m3fnuz,
         "Float8_e5m2fnuz": torch.float8_e5m2fnuz,
-    }.get(data_type, torch.half)
+    }
 
+    untuned_gemm = untuned_gemm_line.strip().split(",")[:]
+
+    underscore_count = untuned_gemm[0].count("_")
+
+    # Initialize dtype to make linter happy
+    dtype = None
+    dtypeA = None
+    dtypeB = None
+    dtypeC = None
+
+    if underscore_count == 2:
+        [op_sig, data_type, layout] = untuned_gemm[0].split("_")
+        transA = True if layout[0] == "T" else False
+        transB = True if layout[1] == "T" else False
+        dtype = dtype_dict.get(data_type)
+    else:  # ScaledGEMM
+        untuned_gemm_temp = untuned_gemm[0].split("_")
+        op_sig = untuned_gemm_temp[0]
+        data_typeA = untuned_gemm_temp[1] + "_" + untuned_gemm_temp[2]
+        data_typeB = untuned_gemm_temp[3] + "_" + untuned_gemm_temp[4]
+        data_typeC = untuned_gemm_temp[5] + "_" + untuned_gemm_temp[6]
+        transA = True if untuned_gemm_temp[7][0] == "T" else False
+        transB = True if untuned_gemm_temp[7][1] == "T" else False
+        dtypeA = dtype_dict.get(data_typeA)
+        dtypeB = dtype_dict.get(data_typeB)
+        dtypeC = dtype_dict.get(data_typeC)
+
+    [n, m, k] = [int(g) for g in untuned_gemm[1].split("_")[1:4]]
     if op_sig == "GemmTunableOp":
-        [n, m, k] = [int(g) for g in untuned_gemm[1].split("_")[1:]]
         matA = (
             torch.rand(k, m, dtype=dtype, device=deviceid).t()
             if transB
@@ -393,7 +414,6 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
         )
         torch.mm(matA, matB)
     elif op_sig == "GemmStridedBatchedTunableOp":
-        [n, m, k] = [int(g) for g in untuned_gemm[1].split("_")[1:4]]
         [b] = [int(g) for g in untuned_gemm[1].split("_")[5:6]]
         matA = (
             torch.rand(b, k, m, dtype=dtype, device=deviceid)
@@ -408,6 +428,42 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
         matA = matA.transpose(1, 2) if transB else matA
         matB = matB.transpose(1, 2) if transA else matB
         torch.bmm(matA, matB)
+    elif op_sig == "ScaledGemmTunableOp":
+        fillA = 0.25
+        fillB = 0.75
+        scaleA = torch.tensor(0.8, device=deviceid)
+        scaleB = torch.tensor(0.9, device=deviceid)
+        matA = (
+            torch.full((k, m), fillA, dtype=dtypeA, device=deviceid).t()
+            if transB
+            else torch.full((m, k), fillA, dtype=dtypeA, device=deviceid)
+        )
+        matB = (
+            torch.full((n, k), fillB, dtype=dtypeB, device=deviceid).t()
+            if transA
+            else torch.full((k, n), fillB, dtype=dtypeB, device=deviceid)
+        )
+        torch._scaled_mm(matA, matB, scale_a=scaleA, scale_b=scaleB, out_dtype=dtypeC)
+    elif op_sig == "GemmAndBiasTunableOp":
+        # y = x*A^T + b
+        assert transA != transB
+
+        X = (
+            torch.rand(k, m, dtype=dtype, device=deviceid).t()
+            if transB
+            else torch.rand(m, k, dtype=dtype, device=deviceid)
+        )
+        matA = (
+            torch.rand(n, k, dtype=dtype, device=deviceid)
+            if transA
+            else torch.rand(k, n, dtype=dtype, device=deviceid).t()
+        )
+        bias = (
+            torch.rand(n, dtype=dtype, device=deviceid)
+            if transA
+            else torch.rand(m, dtype=dtype, device=deviceid)
+        )
+        torch.nn.functional.linear(X, matA, bias)
     else:
         warnings.warn(f"error: unknown op {op_sig}")
 
