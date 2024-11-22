@@ -163,7 +163,7 @@ class RemoteCache(Generic[_T]):
     # See if the cache contains `key`. Returns `None` if the value is not
     # present in the cache.
     def get(self, key: str) -> Optional[_T]:
-        with _WaitCounter("pytorch.remote_cache.get"):
+        with _WaitCounter("pytorch.remote_cache.get").guard():
             sample = self._create_sample()
             try:
                 result = self._get(key, sample)
