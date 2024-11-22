@@ -238,12 +238,12 @@ def draft_export(
             str(v): k for (k, v) in torch._logging.structured.INTERN_TABLE.items()
         }
         failures: List[FailureReport] = []
-        custom_ops_logs: Dict[Any, Tuple[Dict[str, Any], FailureType]] = (
-            {}
-        )  # Dedup custom ops
-        data_dependent_logs: Dict[str, Dict[str, Any]] = (
-            {}
-        )  # Dedup data dependent errors based on stacktrace
+        custom_ops_logs: Dict[
+            Any, Tuple[Dict[str, Any], FailureType]
+        ] = {}  # Dedup custom ops
+        data_dependent_logs: Dict[
+            str, Dict[str, Any]
+        ] = {}  # Dedup data dependent errors based on stacktrace
 
         for log_name, log_contents in capture_structured_log.logs:
             failure_type = None
