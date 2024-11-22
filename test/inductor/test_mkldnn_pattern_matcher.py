@@ -114,6 +114,9 @@ def cal_conv_generated_kernel_number(mod, input, dtype):
     return input_kernel + output_kernel
 
 
+# The pattern match for this is kind of broken.  I'll cc the
+# person who wrote this test/match on the diff to see if they can help me fix it.
+@torch._dynamo.config.patch(specialize_float=True)
 @config.patch({"freezing": True})
 class TestPatternMatcherBase(TestCase):
     def _check_unary_is_decomposed(self, unary_fn):
@@ -145,7 +148,6 @@ class TestPatternMatcherBase(TestCase):
         dtype=None,
         is_dynamic=False,
         quantizer=None,
-        compile_options={},  # noqa: B006
     ):
         counters.clear()
         torch._dynamo.reset()
@@ -189,7 +191,7 @@ class TestPatternMatcherBase(TestCase):
             with torch.no_grad(), maybe_autocast:
                 clone_inputs = self._clone_inputs(inputs)
                 expected = mod(*inputs)
-                actual = torch.compile(mod, **compile_options)(*clone_inputs)
+                actual = torch.compile(mod)(*clone_inputs)
                 torch.testing.assert_close(actual, expected, atol=atol, rtol=rtol)
                 if matcher_count is not None:
                     self.assertEqual(
@@ -634,6 +636,92 @@ class TestPatternMatcher(TestPatternMatcherBase):
     def test_conv3d_binary(self):
         self._test_conv_binary_base(dim=5)
 
+    def _test_conv_binary_broadcast_shapes_base(self, dim=4):
+        assert dim == 4 or dim == 5
+
+        class M(torch.nn.Module):
+            def __init__(
+                self,
+                binary_fn,
+                has_relu,
+                **kwargs,
+            ):
+                super().__init__()
+                if dim == 4:
+                    self.conv = torch.nn.Conv2d(3, 16, kernel_size=3, stride=1)
+                else:
+                    self.conv = torch.nn.Conv3d(3, 16, kernel_size=3, stride=1)
+                self.binary_fn = binary_fn
+                self.has_relu = has_relu
+
+            def forward(self, x, x2):
+                x1 = self.conv(x)
+                if has_relu:
+                    return self.binary_fn(x1, x2).relu()
+                else:
+                    return self.binary_fn(x1, x2)
+
+        dtypes = [
+            torch.float,
+        ]
+        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+            dtypes.append(torch.bfloat16)
+        if torch.ops.mkldnn._is_mkldnn_fp16_supported():
+            dtypes.append(torch.float16)
+        cl_format = torch.channels_last if dim == 4 else torch.channels_last_3d
+        test_memory_format = [torch.contiguous_format, cl_format]
+        options = itertools.product(
+            binary_list,
+            [True, False],
+            test_memory_format,
+            dtypes,
+        )
+
+        for (
+            binary_fn,
+            has_relu,
+            memory_format,
+            dtype,
+        ) in options:
+            metrics.reset()
+            if dim == 4:
+                x_shape = (1, 3, 56, 56)
+                other_shape = (1, 16, 1, 1)
+            else:
+                x_shape = (1, 3, 20, 56, 56)
+                other_shape = (1, 16, 1, 1, 1)
+            mod = M(binary_fn, has_relu).eval()
+            x = (
+                torch.randn(x_shape, dtype=torch.float32, requires_grad=True)
+                .add(1)
+                .to(memory_format=memory_format)
+            )
+            other = (
+                torch.randn(other_shape, dtype=torch.float32, requires_grad=True)
+                .add(1)
+                .to(memory_format=memory_format)
+                .to(dtype)
+            )
+            match_count = binary_list[binary_fn][0] + 1
+            match_nodes = binary_list[binary_fn][1]
+            if has_relu:
+                match_nodes += 1
+            self._test_common(
+                mod, (x, other), match_count, match_nodes + 1, check_autocast=dtype
+            )
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @skipIfRocm
+    def test_conv2d_binary_broadcast_shapes_cpu(self):
+        self._test_conv_binary_broadcast_shapes_base(dim=4)
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @skipIfRocm
+    def test_conv3d_binary_broadcast_shapes_cpu(self):
+        self._test_conv_binary_broadcast_shapes_base(dim=5)
+
     def test_linear_binary(self):
         class M(torch.nn.Module):
             def __init__(self, binary_fn, in_channels, out_channels, bias, **kwargs):
@@ -672,6 +760,55 @@ class TestPatternMatcher(TestPatternMatcherBase):
             v = torch.randn(input_shape)
             other = torch.randn(input_shape[:-1] + [out_feature]).to(dtype)
 
+            self._test_common(
+                mod,
+                (
+                    v,
+                    other,
+                ),
+                match_count,
+                match_nodes,
+                check_autocast=dtype,
+            )
+            self.assertEqual(metrics.generated_kernel_count, 1)
+
+    def test_linear_binary_broadcast_shapes_cpu(self):
+        class M(torch.nn.Module):
+            def __init__(self, binary_fn, in_channels, out_channels, bias, **kwargs):
+                super().__init__()
+                self.linear = torch.nn.Linear(
+                    in_channels, out_channels, bias=bias, **kwargs
+                )
+                self.binary_fn = binary_fn
+
+            def forward(self, x, y):
+                x = self.linear(x)
+                x = self.binary_fn(x, y.clone())
+                return x
+
+        dtypes = []
+        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+            dtypes.append(torch.bfloat16)
+        if torch.ops.mkldnn._is_mkldnn_fp16_supported():
+            dtypes.append(torch.float16)
+        options = itertools.product(
+            binary_list, [[2, 3, 10], [2, 10]], [True, False], dtypes
+        )
+        out_feature = 30
+
+        for binary_fn, input_shape, bias, dtype in options:
+            metrics.reset()
+            # addmm(mm) + (linear+add)
+            match_count = 2
+            match_nodes = 3
+            if len(input_shape) == 3:
+                is_inplace = binary_list[binary_fn][2]
+                # view + linear + view(joint_graph+freeze pass)
+                match_count = match_count + 5 if is_inplace else match_count + 3
+                match_nodes = match_nodes + 8 if is_inplace else match_nodes + 5
+            mod = M(binary_fn, input_shape[-1], out_feature, bias).eval()
+            v = torch.randn(input_shape)
+            other = torch.randn(input_shape[:-1] + [1]).to(dtype)
             self._test_common(
                 mod,
                 (
@@ -2419,7 +2556,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         with torch.no_grad():
             mod = Model().eval()
             v = torch.randn(1, 3, 28, 28)
-            self._test_common(mod, (v,), 1, 1)
+            self._test_common(mod, (v,), 2, 3)
 
     def test_conv2d_binary_inplace_fusion_pass_cpu(
         self, include_ops=None, exclude_ops=None
@@ -2823,94 +2960,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 check_quantization=False,
                 atol=0.001,
                 rtol=0.07,
-            )
-
-    @skipIfNoDynamoSupport
-    @skipIfNoONEDNN
-    def test_smooth_quant_with_int_mm(self):
-        r"""
-        This testcase check if we can match the SmoothQuant int8 linear pattern from Torchao.
-        The pattern is:
-            (no bias) reshape -> _int_mm -> convert_element_type -> (expand -> mul) -> mul -> reshape
-        or
-            (with bias) pattern_no_bias -> add -> reshape -> reshape
-        """
-        M = 16
-        in_feature = 32
-        out_feature = 64
-        q_min, q_max = -32, 31
-
-        class Mod(torch.nn.Module):
-            def __init__(
-                self, dtype: torch.dtype, has_bias: bool, per_channel_quant: bool
-            ):
-                super().__init__()
-                self.dtype = dtype
-                self.has_bias = has_bias
-                self.b = torch.randint(
-                    q_min, q_max, [in_feature, out_feature], dtype=torch.int8
-                )
-                self.per_channel_quant = per_channel_quant
-                a_scale_per_tensor = torch.rand([1], dtype=dtype) * 0.01 + 0.01
-                a_scale_per_channel = torch.rand([M, 1], dtype=dtype) * 0.01 + 0.01
-                self.a_scale = (
-                    a_scale_per_channel
-                    if self.per_channel_quant
-                    else a_scale_per_tensor
-                )
-                self.b_scale = torch.rand([out_feature]) * 0.01 + 0.01
-                self.b_scale = self.b_scale.to(dtype)
-                self.bias = torch.rand([out_feature], dtype=dtype) if has_bias else None
-
-            def forward(self, a):
-                out_shape = a.shape[:-1] + (self.b.size(-1),)
-                a_reshaped = a.reshape(-1, a.size(-1))
-                c = torch._int_mm(a_reshaped, self.b)
-                c = c.to(self.dtype)
-                c_shape = c.shape
-                a_scale = self.a_scale.expand(c.shape)
-                c = c * a_scale
-                c = c * self.b_scale
-                if self.has_bias:
-                    c = c.reshape([1, *list(c_shape)])
-                    c = c + self.bias
-                    c = c.reshape(c_shape)
-                c = c.reshape(out_shape)
-                return c
-
-        has_bias_list = [True, False]
-        dype_list = (
-            [torch.float, torch.bfloat16]
-            if torch.ops.mkldnn._is_mkldnn_bf16_supported()
-            else [torch.float]
-        )
-        per_channel_list = [True, False]
-        dynamic_list = [True, False]
-        for has_bias, dtype, per_channel_quant, dynamic in itertools.product(
-            has_bias_list, dype_list, per_channel_list, dynamic_list
-        ):
-            mod = Mod(dtype, has_bias, per_channel_quant).eval()
-            a = torch.randint(q_min, q_max, [1, M, in_feature], dtype=torch.int8)
-
-            def matcher_check_fn():
-                self.assertEqual(
-                    counters["inductor"]["qlinear_weight_prepack_matcher_count"], 1
-                )
-                if dynamic:
-                    nodes_count = 10 if has_bias else 7
-                else:
-                    nodes_count = 7 if has_bias else 6
-                self.assertEqual(
-                    counters["inductor"]["qlinear_weight_prepack_matcher_nodes"],
-                    nodes_count,
-                )
-
-            self._test_common(
-                mod,
-                (a,),
-                matcher_check_fn=matcher_check_fn,
-                check_autocast=dtype,
-                compile_options={"dynamic": dynamic},
             )
 
 

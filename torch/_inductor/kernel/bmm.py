@@ -118,7 +118,9 @@ bmm_template = TritonTemplate(
 )
 
 aten_bmm = ExternKernelChoice(torch.bmm, "at::bmm_out")
-aten_baddbmm = ExternKernelChoice(torch.baddbmm, "at::baddbmm_out")
+aten_baddbmm = ExternKernelChoice(
+    torch.baddbmm, "at::baddbmm_out", op_overload=aten.baddbmm.out
+)
 
 
 @L.register_lowering(aten.bmm)
@@ -185,8 +187,7 @@ def tuned_bmm(mat1, mat2, *, layout=None):
     return autotune_select_algorithm("bmm", choices, [mat1, mat2], layout)
 
 
-# Don't register this since it is slower than decomposing it
-# @L.register_lowering(aten.baddbmm)
+@L.register_lowering(aten.baddbmm)
 def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     m, n, k, layout, mat1, mat2, inp = mm_args(mat1, mat2, inp, layout=layout)
 
