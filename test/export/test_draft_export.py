@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: export"]
 import copy
+import unittest
 from typing import List, Tuple
 
 import torch
@@ -106,6 +107,50 @@ class TestDraftExport(TestCase):
 
             inp = (torch.randn(3, 3), torch.randn(3, 3))
             self.assertEqual(ep.module()(*inp), M()(*inp))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "Requires cuda")
+    def test_missing_meta_kernel_guard(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+
+            @torch.library.custom_op("mylib::foo4", mutates_args={})
+            def foo4_impl(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+                return a + b
+
+            class M(torch.nn.Module):
+                def forward(self, a, b):
+                    res1 = torch.ops.mylib.foo4(a, b)
+                    return res1
+
+            inp = (
+                torch.ones(3, 4),
+                torch.ones(3, 4),
+            )
+
+            ep, report = draft_export(
+                M(),
+                inp,
+                dynamic_shapes={
+                    "a": {0: Dim.DYNAMIC, 1: Dim.DYNAMIC},
+                    "b": {0: Dim.DYNAMIC, 1: Dim.DYNAMIC},
+                },
+            )
+
+            inp = (torch.randn(2, 3), torch.randn(2, 3))
+            self.assertEqual(ep.module()(*inp), M()(*inp))
+            m = ep.module()
+            with self.assertRaisesRegex(RuntimeError, "Tensor device mismatch!"):
+                bad_device_inps = (
+                    torch.randn(2, 3, device=torch.device("cuda")),
+                    torch.randn(2, 3, device=torch.device("cuda")),
+                )
+                m(*bad_device_inps)
+
+            with self.assertRaisesRegex(RuntimeError, "Tensor dtype mismatch!"):
+                bad_dtype_inps = (
+                    torch.randn(2, 3, dtype=torch.float16),
+                    torch.randn(2, 3, dtype=torch.float16),
+                )
+                m(*bad_dtype_inps)
 
     def test_data_dependent_failure(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
