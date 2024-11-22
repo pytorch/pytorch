@@ -19193,6 +19193,15 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view'),
                # UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
+               # "where_cpu" not implemented for float8_e4m3fn
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommonCPU', 'test_python_ref',
+                            dtypes=(torch.float8_e4m3fn, torch.float8_e5m2, torch.float8_e4m3fnuz, torch.float8_e5m2fnuz)),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommonCPU', 'test_python_ref_torch_fallback',
+                            dtypes=(torch.float8_e4m3fn, torch.float8_e5m2, torch.float8_e4m3fnuz, torch.float8_e5m2fnuz)),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommonCPU', 'test_python_ref_meta',
+                            dtypes=(torch.float8_e4m3fn, torch.float8_e5m2, torch.float8_e4m3fnuz, torch.float8_e5m2fnuz)),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestDecompCPU', 'test_comprehensive',
+                            dtypes=(torch.float8_e4m3fn, torch.float8_e5m2, torch.float8_e4m3fnuz, torch.float8_e5m2fnuz)),
            )),
     OpInfo('empty_permuted',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
