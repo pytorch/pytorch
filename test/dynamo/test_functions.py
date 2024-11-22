@@ -10,7 +10,8 @@ import random
 import sys
 import unittest
 from dataclasses import dataclass, field
-from typing import Any, Dict, Generic, List, NamedTuple, TypeVar
+from typing import Any, Dict, Generic, List, TypeVar
+from typing_extensions import NamedTuple
 from unittest.mock import patch
 
 import numpy as np
