@@ -49,9 +49,7 @@ void renorm_out_mps(const Tensor& self, const Scalar& p, int64_t dim, const Scal
       getMPSProfiler().beginProfileKernel(renormPSO, key, {norm});
 
       [computeEncoder setComputePipelineState:renormPSO];
-      mtl_setBuffer(computeEncoder, norm, 0);
-      mtl_setBuffer(computeEncoder, factor, 1);
-      mtl_setBytes(computeEncoder, maxnorm.to<float>(), 2);
+      mtl_setArgs(computeEncoder, norm, factor, maxnorm.to<float>());
       mtl_dispatch1DJob(computeEncoder, renormPSO, norm.numel());
 
       getMPSProfiler().endProfileKernel(renormPSO);
