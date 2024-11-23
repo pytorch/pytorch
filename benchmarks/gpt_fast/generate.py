@@ -239,7 +239,7 @@ def run_experiment(
         T_new = T + max_new_tokens
         max_seq_length = min(T_new, model.config.block_size)
         input_pos = torch.arange(0, T, device=device)
-        example_input=(p, input_pos)
+        example_input = (p, input_pos)
 
         with torch.device(device):
             model.setup_caches(max_batch_size=1, max_seq_length=max_seq_length)
