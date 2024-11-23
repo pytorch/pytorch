@@ -154,7 +154,7 @@ WHEEL_CONTAINER_IMAGES = {
         for gpu_arch in CUDA_ARCHES
     },
     **{
-        gpu_arch: f"pytorch/manylinux-builder:rocm{gpu_arch}-{DEFAULT_TAG}"
+        gpu_arch: f"pytorch/manylinux2_28-builder:rocm{gpu_arch}-{DEFAULT_TAG}"
         for gpu_arch in ROCM_ARCHES
     },
     "xpu": f"pytorch/manylinux2_28-builder:xpu-{DEFAULT_TAG}",
