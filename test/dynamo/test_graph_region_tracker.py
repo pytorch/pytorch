@@ -239,7 +239,6 @@ class GraphRegionTrackerTests(TestCase):
             create_toggle_fns("allow_fp16_reduced_precision_reduction"),
             create_toggle_fns("allow_tf32"),
         ]:
-            print(ctx)
             self.assertExpectedInline(
                 self.get_result(fn, torch.rand(10, 10), torch.ones(10, 20), ctx),
                 """[[['y0', 'y1_2', 'x0', 'sum_3', 'x1_2', 'o0'], ['y0', 'y1_3', 'x0', 'sum_4', 'x1_3', 'o2']], \
