@@ -132,12 +132,12 @@ class InterpreterModule(torch.nn.Module):
         super().__init__()
         self.graph = graph
         self.graph.owning_module = self
-        self._run_with_interpeter = RUN_WITH_INTERPRETER
+        self._run_with_interpreter = RUN_WITH_INTERPRETER
 
     def forward(self, *args, **kwargs):
         assert self.graph_module is not None, "Didn't finalize this InterpreterModule"
         if not is_fx_tracing() and (
-            torch.compiler.is_dynamo_compiling() or not self._run_with_interpeter
+            torch.compiler.is_dynamo_compiling() or not self._run_with_interpreter
         ):
             # Dynamo cannot trace through torch.fx.Interpreter, so fall back to
             # GraphModule codegen in this instance.
@@ -283,7 +283,7 @@ class UnflattenedModule(torch.nn.Module):
         self.flat_args_adapter = flat_args_adapter
         # Flag to indicate whether args have been adapted.
         self.adapted = False
-        self._run_with_interpeter = RUN_WITH_INTERPRETER
+        self._run_with_interpreter = RUN_WITH_INTERPRETER
 
         _inplace_buffer_mutations(export_graph, self.graph_signature)
 
@@ -547,7 +547,7 @@ class UnflattenedModule(torch.nn.Module):
                 )
             return flat_args
 
-    def forward(self, *args, **kwargs):
+    def process_forward_inputs(self, *args, **kwargs):
         signature = self.module_call_graph[0].signature
 
         reordered_kwargs = reorder_kwargs(kwargs, signature.in_spec)
@@ -556,14 +556,9 @@ class UnflattenedModule(torch.nn.Module):
             (args, reordered_kwargs)
         )
         flat_args = [x[1] for x in flat_args_with_path]
+
         if is_fx_tracing():
-            return_val = torch.fx.Interpreter(self, graph=self.graph).run(
-                *flat_args, enable_io_processing=False
-            )
-            # For scalar return value, fx.Graph wraps in a tuple
-            if isinstance(return_val, tuple) and len(return_val) == 1:
-                return return_val[0]
-            return return_val
+            return flat_args
 
         if in_spec != signature.in_spec:
             if not self.adapted:
@@ -595,6 +590,22 @@ class UnflattenedModule(torch.nn.Module):
             _check_input_constraints_for_graph(
                 self.input_placeholders, new_flat_args_with_path, self.range_constraints
             )
+
+        return flat_args
+
+    def forward(self, *args, **kwargs):
+        flat_args = torch._dynamo.disable(self.process_forward_inputs)(*args, **kwargs)
+        signature = self.module_call_graph[0].signature
+
+        if is_fx_tracing():
+            return_val = torch.fx.Interpreter(self, graph=self.graph).run(
+                *flat_args, enable_io_processing=False
+            )
+            # For scalar return value, fx.Graph wraps in a tuple
+            if isinstance(return_val, tuple) and len(return_val) == 1:
+                return return_val[0]
+            return return_val
+
         if torch.compiler.is_dynamo_compiling() and not self._run_with_interpreter:
             tree_out = torch.fx.GraphModule(self, self.graph)(*flat_args)
         else:
