@@ -12895,17 +12895,15 @@ if HAS_GPU and not TEST_WITH_ASAN:
 
             x = torch.randn(2, 1024, device=GPU_TYPE)
             ref = f(x)
-            actual, code = run_and_get_code(torch.compile(f), x)
+            actual, (code,) = run_and_get_code(torch.compile(f), x)
             self.assertTrue(torch.allclose(ref, actual))
 
-            if not config.cpp_wrapper:
-                code = code[0]
+            if config.cpp_wrapper:
+                self.assertIn("aoti_torch_check_inf_and_nan", code)
+            else:
                 self.assertIn("# make sure graph inputs are not nan/inf", code)
                 self.assertRegex(code, r"assert not .*\.isnan\(\)\.any\(\).item\(\)")
                 self.assertRegex(code, r"assert not .*\.isinf\(\)\.any\(\).item\(\)")
-            else:
-                code, code_cpp = code
-                self.assertIn("aoti_torch_check_inf_and_nan", code)
 
         @config.patch("nan_asserts", True)
         def test_nan_checker_fail(self):
