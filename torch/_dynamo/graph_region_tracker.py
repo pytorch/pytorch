@@ -126,6 +126,7 @@ class GraphRegionTracker:
             n0 in self.node_to_duplicates
             and n1 in self.node_to_duplicates
             and self.node_to_duplicates[n0] == self.node_to_duplicates[n1]
+            and n0 is not n1
         )
 
     def get_identical_regions(self, graph: torch.fx.Graph) -> List[List[Region]]:
