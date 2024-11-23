@@ -742,6 +742,31 @@ def flex_attention(
         mask_graph,
     ) = block_mask
     if query.get_device().type == "cpu":
+        placeholder_inps = [
+            create_placeholder(name, dtype, query.get_device())
+            for name, dtype in [
+                ("arg0_1", query.get_dtype()),
+                ("arg1_1", torch.int32),
+                ("arg2_1", torch.int32),
+                ("arg3_1", torch.int32),
+                ("arg10_1", torch.int32), # TODO: fix the random picked name here: arg10_1
+            ]
+        ]
+        subgraph_buffer = build_subgraph_buffer(
+            placeholder_inps + list(score_mod_other_buffers), subgraph
+        )
+        mask_graph_placeholder_inps = [
+            create_placeholder(name, dtype, query.get_device())
+            for name, dtype in [
+                ("arg0_1", torch.int32),
+                ("arg1_1", torch.int32),
+                ("arg2_1", torch.int32),
+                ("arg3_1", torch.int32),
+            ]
+        ]
+        mask_graph_buffer = build_subgraph_buffer(
+            mask_graph_placeholder_inps + list(mask_mod_other_buffers), mask_graph
+        )
         (
             query,
             key,
@@ -771,32 +796,6 @@ def flex_attention(
         )
         score_mod_other_buffers = maybe_realize(score_mod_other_buffers)
         mask_mod_other_buffers = maybe_realize(mask_mod_other_buffers)
-
-        placeholder_inps = [
-            create_placeholder(name, dtype, query.get_device())
-            for name, dtype in [
-                ("arg0_1", query.get_dtype()),
-                ("arg1_1", torch.int32),
-                ("arg2_1", torch.int32),
-                ("arg3_1", torch.int32),
-                ("arg10_1", torch.int32), # TODO: fix the random picked name here: arg10_1
-            ]
-        ]
-        subgraph_buffer = build_subgraph_buffer(
-            placeholder_inps + list(score_mod_other_buffers), subgraph
-        )
-        mask_graph_placeholder_inps = [
-            create_placeholder(name, dtype, query.get_device())
-            for name, dtype in [
-                ("arg0_1", torch.int32),
-                ("arg1_1", torch.int32),
-                ("arg2_1", torch.int32),
-                ("arg3_1", torch.int32),
-            ]
-        ]
-        mask_graph_buffer = build_subgraph_buffer(
-            mask_graph_placeholder_inps + list(mask_mod_other_buffers), mask_graph
-        )
         Bq, Hq, seq_len_q, qk_head_dim = query.get_size()
         Bkv, Hkv, seq_len_kv, v_head_dim = value.get_size()
         B = Bq
