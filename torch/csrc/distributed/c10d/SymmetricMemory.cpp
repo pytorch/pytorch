@@ -56,7 +56,7 @@ static at::Tensor empty_strided_p2p_persistent(
     c10::IntArrayRef stride,
     c10::ScalarType dtype,
     c10::Device device,
-    const std::string& group_name,
+    const std::optional<std::string>& group_name,
     uint64_t alloc_id) {
   // Make the allocation fails if a previous allocation with the same alloc_id
   // is still active.
@@ -153,7 +153,7 @@ at::Tensor empty_strided_p2p(
     c10::IntArrayRef stride,
     c10::ScalarType dtype,
     c10::Device device,
-    const std::string& group_name,
+    const std::optional<std::string>& group_name,
     std::optional<uint64_t> alloc_id) {
   if (alloc_id.has_value()) {
     return empty_strided_p2p_persistent(
@@ -181,19 +181,10 @@ at::Tensor empty_strided_p2p(
 }
 
 TORCH_API c10::intrusive_ptr<SymmetricMemory> rendezvous(
-    const at::Tensor& tensor) {
+    const at::Tensor& tensor,
+    const std::optional<std::string>& group_name) {
   auto allocator = get_allocator(tensor.device().type());
-  return allocator->rendezvous(tensor.storage().data_ptr().get());
-}
-
-c10::intrusive_ptr<SymmetricMemory> get_symmetric_memory(
-    const at::Tensor& tensor) {
-  auto allocator = get_allocator(tensor.device().type());
-  TORCH_CHECK(
-      allocator->is_rendezvous_completed(tensor.data_ptr()),
-      "SymmetricMemory: must invoke rendezvous on a tensor ",
-      "before calling get_symmetric_memory on it");
-  return allocator->rendezvous(tensor.data_ptr());
+  return allocator->rendezvous(tensor.storage().data_ptr().get(), group_name);
 }
 
 TORCH_API bool has_multicast_support(
