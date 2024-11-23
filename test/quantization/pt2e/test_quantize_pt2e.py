@@ -41,7 +41,6 @@ from torch.ao.quantization.quantizer.xnnpack_quantizer_utils import (
 )
 from torch.export import export_for_training
 from torch.fx import Node
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_quantization import (
     NodeSpec as ns,
     PT2EQuantizationTestCase,
@@ -1864,6 +1863,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             torch.ops.aten.batch_norm.default,
         )
 
+    @parametrize("device", ["cpu"] + (["cuda"] if TEST_CUDA else []) + (["hpu"] if TEST_HPU else []))
     def test_move_exported_model_bn(self, device):
         """
         Test switching batch_norm behavior between train and eval modes using
@@ -2501,8 +2501,3 @@ class TestQuantizePT2EAffineQuantization(PT2EQuantizationTestCase):
 
 
 instantiate_parametrized_tests(TestQuantizePT2E)
-
-# devices = ["cpu", "cuda"]
-# if TEST_HPU:
-#     devices.append("hpu")
-# instantiate_device_type_tests(TestQuantizePT2E, globals(), only_for=devices)
