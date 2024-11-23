@@ -36,7 +36,7 @@ from torch._dynamo.utils import (
     get_metrics_context,
 )
 from torch._guards import compile_context, CompileContext, CompileId, tracing
-from torch._logging import structured
+from torch._logging import structured, trace_structured
 from torch._utils_internal import (
     compile_time_strobelight_meta,
     justknobs_check,
@@ -869,6 +869,7 @@ def _compile(
     if ca_metrics := torch._dynamo.utils.get_compiled_autograd_metrics(
         locals.get("self")  # type: ignore[arg-type]
     ):
+        gm: torch.fx.GraphModule = locals.get("self")  # type: ignore[assignment]
         ca_event = "compiled_autograd"
         chromium_event_log.log_event_start(
             ca_event,
@@ -882,6 +883,11 @@ def _compile(
             {"graph_id": ca_metrics.id},
             ca_metrics.start_time_ns,
             log_pt2_compile_event=True,
+        )
+        # TODO(xmfan): add compiled autograd id into the tlparse filename
+        trace_structured(
+            "compiled_autograd_graph",
+            payload_fn=lambda: gm.print_readable(print_output=False),
         )
     chromium_event_log.log_event_start(
         "dynamo", chromium_start_time, {}, log_pt2_compile_event=True

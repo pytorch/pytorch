@@ -18,7 +18,7 @@ from torch._dynamo.utils import (
     set_compiled_autograd_metrics,
     set_locals_to_steal,
 )
-from torch._logging import getArtifactLogger, trace_structured
+from torch._logging import getArtifactLogger
 from torch._prims_common import clone_preserve_strides
 from torch._subclasses import FakeTensorMode
 from torch.fx import GraphModule
@@ -375,10 +375,6 @@ class AutogradCompilerInstance:
         )
         compiled_autograd_log.info("%s", lazy_graph_code)
         verbose_log.debug("%s", lazy_graph_code)
-        trace_structured(
-            f"compiled_autograd_graph_{self.id}",
-            payload_fn=lambda: graph.print_readable(print_output=False),
-        )
 
         def runtime_wrapper(compiled_fn, inputs, sizes, scalars, hooks):
             global in_compiled_autograd_region
