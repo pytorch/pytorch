@@ -2749,7 +2749,7 @@ def _automatic_dynamic(
         elif static_shapes or config.assume_static_by_default or marked_static:
             dynamic_size = DimDynamic.STATIC
         else:
-            dynamic_size = DimDynamic.DUCK
+            assert False, "quack quack"
 
         if constraint_stride is not None:
             dynamic_stride = DimDynamic.DYNAMIC
