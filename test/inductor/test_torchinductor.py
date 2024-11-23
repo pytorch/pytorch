@@ -3160,7 +3160,9 @@ class CommonTemplate:
         # If this is running with cpp_wrapper, the auto-tuning step will generate an
         # additional array of the same size as the input.  Numbers derived
         # experimentally.
-        required_memory = 2**32 + 2**31 + 2**15 if config.cpp_wrapper else 2**31 + 2**15
+        required_memory = (
+            2**32 + 2**31 + 2**15 if config.cpp_wrapper else 2**31 + 2**15
+        )
         if not _has_sufficient_memory(self.device, required_memory):
             raise unittest.SkipTest("insufficient memory")
 
@@ -11285,7 +11287,11 @@ class CommonTemplate:
         # If this is running with cpp_wrapper, the auto-tuning step will generate an
         # additional array of the same size as the input.  Numbers derived
         # experimentally.
-        required_memory = 2**34 + 2**32 + 2**31 if config.cpp_wrapper else 2**33 + 2**32 + 2**31
+        required_memory = (
+            2**34 + 2**32 + 2**31
+            if config.cpp_wrapper
+            else 2**33 + 2**32 + 2**31
+        )
         if not _has_sufficient_memory(self.device, required_memory):
             raise unittest.SkipTest("insufficient memory")
 
@@ -11716,7 +11722,9 @@ class CommonTemplate:
         # If this is running with cpp_wrapper, the auto-tuning step will generate an
         # additional array of the same size as the input.  Numbers derived
         # experimentally.
-        required_memory = 2**30 + 2**29 + 2**15 if config.cpp_wrapper else 2**30 + 2**15
+        required_memory = (
+            2**30 + 2**29 + 2**15 if config.cpp_wrapper else 2**30 + 2**15
+        )
         if not _has_sufficient_memory(self.device, required_memory):
             raise unittest.SkipTest("insufficient memory")
 
@@ -12920,17 +12928,15 @@ if HAS_GPU and not TEST_WITH_ASAN:
 
             x = torch.randn(2, 1024, device=GPU_TYPE)
             ref = f(x)
-            actual, code = run_and_get_code(torch.compile(f), x)
+            actual, (code,) = run_and_get_code(torch.compile(f), x)
             self.assertTrue(torch.allclose(ref, actual))
 
-            if not config.cpp_wrapper:
-                code = code[0]
+            if config.cpp_wrapper:
+                self.assertIn("aoti_torch_check_inf_and_nan", code)
+            else:
                 self.assertIn("# make sure graph inputs are not nan/inf", code)
                 self.assertRegex(code, r"assert not .*\.isnan\(\)\.any\(\).item\(\)")
                 self.assertRegex(code, r"assert not .*\.isinf\(\)\.any\(\).item\(\)")
-            else:
-                code, code_cpp = code
-                self.assertIn("aoti_torch_check_inf_and_nan", code)
 
         @config.patch("nan_asserts", True)
         def test_nan_checker_fail(self):
