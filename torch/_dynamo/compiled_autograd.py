@@ -2,6 +2,7 @@
 import contextlib
 import functools
 import operator
+import time
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
@@ -11,7 +12,12 @@ from torch._dynamo.external_utils import (
     FakeCompiledAutogradEngine,
 )
 from torch._dynamo.source import GetItemSource, LocalSource
-from torch._dynamo.utils import counters, lazy_format_graph_code, set_locals_to_steal
+from torch._dynamo.utils import (
+    counters,
+    lazy_format_graph_code,
+    set_compiled_autograd_metrics,
+    set_locals_to_steal,
+)
 from torch._logging import getArtifactLogger, trace_structured
 from torch._prims_common import clone_preserve_strides
 from torch._subclasses import FakeTensorMode
@@ -86,6 +92,8 @@ class AutogradCompilerInstance:
         scalars: List[Union[int, float]],
         origins: List[List[Tuple[int, str]]],
     ):
+        self.start_time = time.time_ns()
+        self.id = counters["compiled_autograd"]["captures"]
         counters["compiled_autograd"]["captures"] += 1
         self.aot_graph_cls_name: Optional[str] = None
         self.aot_graph_infos: Dict[int, Dict[str, Any]] = {}
@@ -355,7 +363,7 @@ class AutogradCompilerInstance:
             runtime_inputs_to_move = self.move_graph_nodes_to_cuda(self.fx_tracer.graph)
 
         graph = GraphModule(
-            self.fx_tracer.root, self.fx_tracer.graph, "CompiledAutograd"
+            self.fx_tracer.root, self.fx_tracer.graph, f"CompiledAutograd{self.id}"
         )
         set_locals_to_steal(graph, ["inputs"])
         lazy_graph_code = lazy_format_graph_code(
@@ -368,7 +376,7 @@ class AutogradCompilerInstance:
         compiled_autograd_log.info("%s", lazy_graph_code)
         verbose_log.debug("%s", lazy_graph_code)
         trace_structured(
-            "compiled_autograd_graph",
+            f"compiled_autograd_graph_{self.id}",
             payload_fn=lambda: graph.print_readable(print_output=False),
         )
 
@@ -384,6 +392,9 @@ class AutogradCompilerInstance:
             finally:
                 in_compiled_autograd_region = False
 
+        set_compiled_autograd_metrics(
+            graph, self.id, start_time_ns=self.start_time, end_time_ns=time.time_ns()
+        )
         return runtime_wrapper, self.compiler_fn(graph)
 
     def rename_aot_dispatcher_nodes(self):
