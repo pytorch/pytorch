@@ -123,25 +123,31 @@ if __name__ == "__main__":
         kill_now = True
     signal.signal(signal.SIGTERM, exit_gracefully)
 
-    gpu_libs_detected = []
-    if has_pynvml:
-        gpu_libs_detected.append("pynvml")
-        num_of_gpu = pynvml.nvmlDeviceGetCount()
-        gpu_handles = [pynvml.nvmlDeviceGetHandleByIndex(i) for i in range(pynvml.nvmlDeviceGetCount())]
-    if has_amdsmi:
-        gpu_libs_detected.append("amdsmi")
-        gpu_handles  = amdsmi.amdsmi_get_processor_handles()
-    num_cpus = psutil.cpu_count()
+    try:
+        gpu_libs_detected = []
+        if has_pynvml:
+            gpu_libs_detected.append("pynvml")
+            num_of_gpu = pynvml.nvmlDeviceGetCount()
+            gpu_handles = [pynvml.nvmlDeviceGetHandleByIndex(i) for i in range(pynvml.nvmlDeviceGetCount())]
+        if has_amdsmi:
+            gpu_libs_detected.append("amdsmi")
+            gpu_handles  = amdsmi.amdsmi_get_processor_handles()
+        num_cpus = psutil.cpu_count()
 
-    # log info
-    info = {
-        "log_interval": f"{interval} seconds",
-        "gpu":  gpu_libs_detected,
-        "num_of_gpus":len(gpu_handles),
-        "num_of_cpus": psutil.cpu_count(logical=False)
-    }
+        # log info
+        info = {
+            "log_interval": f"{interval} seconds",
+            "gpu":  gpu_libs_detected,
+            "num_of_gpus":len(gpu_handles),
+            "num_of_cpus": psutil.cpu_count(logical=False)
+        }
+        print(json.dumps(info))
+    except Exception as e:
+        info = {
+            "error": str(e)
+        }
+        print(json.dumps(info))
 
-    print(json.dumps(info))
     while not kill_now:
         try:
             memory_info = psutil.virtual_memory()
