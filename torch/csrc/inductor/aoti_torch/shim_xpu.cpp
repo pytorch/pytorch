@@ -6,7 +6,6 @@
 #include <c10/core/DeviceType.h>
 #include <c10/core/StreamGuard.h>
 #include <c10/xpu/XPUStream.h>
-#include <c10/xpu/XPUStreamGuard.h>
 
 AOTITorchError aoti_torch_create_xpu_guard(
     int32_t device_index,
@@ -39,16 +38,16 @@ AOTITorchError aoti_torch_create_xpu_stream_guard(
     if (stream == nullptr) {
       stream = &(at::xpu::getCurrentXPUStream(device_index).queue());
     }
-    at::xpu::XPUStreamGuard* guard =
-        new at::xpu::XPUStreamGuard(at::xpu::getStreamFromExternal(
-            static_cast<sycl::queue*>(stream), device_index));
+    at::StreamGuard* guard =
+        new at::StreamGuard(at::xpu::getStreamFromExternal(
+            static_cast<sycl::queue*>(stream), device_index).unwrap());
     *ret_guard = reinterpret_cast<XPUStreamGuardHandle>(guard);
   });
 }
 
 AOTITorchError aoti_torch_delete_xpu_stream_guard(XPUStreamGuardHandle guard) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
-      { delete reinterpret_cast<at::xpu::XPUStreamGuard*>(guard); });
+      { delete reinterpret_cast<at::StreamGuard*>(guard); });
 }
 
 AOTI_TORCH_EXPORT AOTITorchError

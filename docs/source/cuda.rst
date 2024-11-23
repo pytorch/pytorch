@@ -16,6 +16,7 @@ torch.cuda
     default_stream
     device
     device_count
+    device_memory_used
     device_of
     get_arch_list
     get_device_capability
@@ -28,7 +29,6 @@ torch.cuda
     is_available
     is_initialized
     memory_usage
-    memory_usage_in_bytes
     set_device
     set_stream
     set_sync_debug_mode
