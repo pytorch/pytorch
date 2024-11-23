@@ -73,6 +73,29 @@ class TestMetricsContext(TestCase):
 
         self.assertEqual(self.metrics, {"m1": 1, "m2": 2})
 
+    def test_add_to_set(self):
+        """
+        Validate add_to_set.
+        """
+        with MetricsContext(self._on_exit) as context:
+            context.add_to_set("m1", 1)
+            context.add_to_set("m1", 2)
+            context.add_to_set("m2", 3)
+            context.add_to_set("m2", 4)
+
+        self.assertEqual(self.metrics, {"m1": {1, 2}, "m2": {3, 4}})
+        self.assertTrue(isinstance(self.metrics["m1"], set))
+        self.assertTrue(isinstance(self.metrics["m2"], set))
+
+    def test_set_key_value(self):
+        with MetricsContext(self._on_exit) as context:
+            context.set_key_value("feature_usage", "k", True)
+            # Overrides allowed
+            context.set_key_value("feature_usage", "k2", True)
+            context.set_key_value("feature_usage", "k2", False)
+
+        self.assertEqual(self.metrics, {"feature_usage": {"k": True, "k2": False}})
+
 
 if __name__ == "__main__":
     run_tests()
