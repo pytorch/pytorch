@@ -214,7 +214,6 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
         assert (
             self.mask is not None
         ), "Mask is required for inner stores in modifications"
-        self.kernel.args.input(name)
         self.kernel.template_out = value
         self.kernel.template_mask = self.mask
         return self._inner.store(name, index, value, mode)

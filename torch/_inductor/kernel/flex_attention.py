@@ -148,7 +148,6 @@ def zeros_and_scatter_lowering(shape: List[int], indices, values):
         data=scatter,
     )
     return buffer
-    # return SubgraphOutput(buffer, grad)
 
 
 SubgraphResults = Union[List[Optional[ComputedBuffer]], Optional[ComputedBuffer]]
@@ -177,7 +176,8 @@ def build_subgraph_buffer(args: List[TensorBox], subgraph: Subgraph) -> Subgraph
 
     if len(pw_subgraph.buffers) > 0:
         for buffer in pw_subgraph.buffers:
-            V.graph.register_buffer(buffer)
+            new_name = V.graph.register_buffer(buffer)
+            print(new_name)
 
     def convert_output_node_to_buffer(output_buffer) -> Optional[ComputedBuffer]:
         if output_buffer is None:
@@ -1786,9 +1786,9 @@ def validate_joint_graph(joint_graph: torch.fx.Graph):
 class JointOutputResult:
     """Results from processing joint outputs."""
 
-    joint_buffer: ComputedBuffer
-    buffer_grads_compute: List[ComputedBuffer]
-    buffer_grads_out: List[Optional[TensorBox]]
+    grad_input: ComputedBuffer
+    captured_grads_compute: List[ComputedBuffer]
+    captured_grads: List[Optional[TensorBox]]
     mutated_grads: List[TensorBox]
 
 
@@ -1827,9 +1827,9 @@ def process_joint_outputs(
     mutated_grads = [buf for buf in grads_out if buf is not None]
 
     return JointOutputResult(
-        joint_buffer=joint_buffer,
-        buffer_grads_compute=grads_compute,
-        buffer_grads_out=grads_out,
+        grad_input=joint_buffer,
+        captured_grads_compute=grads_compute,
+        captured_grads=grads_out,
         mutated_grads=mutated_grads,
     )
 
@@ -2066,9 +2066,9 @@ def flex_attention_backward(*args, **kwargs):
             layout=layout_broadcasted_k,  # We use store_output only for grad_key
             subgraphs=[
                 fw_subgraph_buffer,
-                joint_outputs.joint_buffer,
+                joint_outputs.grad_input,
                 mask_graph_buffer,
-                joint_outputs.buffer_grads_compute,
+                joint_outputs.captured_grads_compute,
             ],
             mutated_inputs=[
                 grad_query,
@@ -2131,4 +2131,4 @@ def flex_attention_backward(*args, **kwargs):
         grad_key = lowerings[aten.sum](broadcasted_grad_key, axis=0, keepdims=True)
         grad_value = lowerings[aten.sum](broadcasted_grad_value, axis=0, keepdims=True)
 
-    return (grad_query, grad_key, grad_value, tuple(joint_outputs.buffer_grads_out))
+    return (grad_query, grad_key, grad_value, tuple(joint_outputs.captured_grads))
