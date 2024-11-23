@@ -285,8 +285,7 @@ else
       WERROR=1 python setup.py clean
 
       if [[ "$USE_SPLIT_BUILD" == "true" ]]; then
-        BUILD_LIBTORCH_WHL=1 BUILD_PYTHON_ONLY=0 python setup.py bdist_wheel
-        BUILD_LIBTORCH_WHL=0 BUILD_PYTHON_ONLY=1 python setup.py bdist_wheel --cmake
+        python3 tools/packaging/split_wheel.py bdist_wheel
       else
         WERROR=1 python setup.py bdist_wheel
       fi
