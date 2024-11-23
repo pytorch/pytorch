@@ -106,31 +106,6 @@ def get_float32_precision():
         return "'tf32'"
 
 
-# @dataclass(frozen=True)
-# class SubgraphOutput:
-#     """When building the subgraph buffers we fall into 1 of two cases:
-#     1. The subgraph can lower entirely into a 1 compute buffer. This happens is ensured via
-#         PointwiseSubgraphLowering and is the common case for FlexAttention
-#     2. The subgraph has allowed mutation ops, we only support zeros_and_scatter in the backward
-#         And we need both the ComputeBuffer for lowering and the realized TensorBox to return
-#         from the FlexAttentionBackward Lowering.
-#     """
-
-#     compute_buffer: ComputedBuffer
-#     output_node: Optional[TensorBox] = None
-
-#     def __post_init__(self):
-#         assert isinstance(self.compute_buffer, ComputedBuffer), (
-#             "The compute buffer for the subgraph output must be a TensorBox, but got: ",
-#             type(self.compute_buffer),
-#         )
-#         if self.output_node is not None:
-#             assert isinstance(self.output_node, IRNode), (
-#                 "The output node for the subgraph output must be an IRNode, but got: ",
-#                 type(self.output_node),
-#             )
-
-
 def zeros_and_scatter_lowering(shape: List[int], indices, values):
     # Always accumulate into fp32 then cast
     grad = _full(0, values.get_device(), torch.float32, shape)
