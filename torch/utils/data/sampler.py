@@ -204,6 +204,25 @@ class RandomSampler(Sampler[int]):
         return self.num_samples
 
 
+class SubsetSequentialSampler(Sampler[int]):
+    r"""Samples elements sequentially, always in the same, given order, from a list of indices.
+
+    Args:
+        indices (sequence): a sequence of indices
+    """
+
+    indices: Sequence[int]
+
+    def __init__(self, indices: Sequence[int]) -> None:
+        self.indices = indices
+
+    def __iter__(self) -> Iterator[int]:
+        return iter(self.indices)
+
+    def __len__(self) -> int:
+        return len(self.indices)
+
+
 class SubsetRandomSampler(Sampler[int]):
     r"""Samples elements randomly from a given list of indices, without replacement.
 
