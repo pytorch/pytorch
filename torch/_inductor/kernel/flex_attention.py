@@ -1776,8 +1776,11 @@ def validate_joint_graph(joint_graph: torch.fx.Graph):
                         "This typically happens when indexing the same tensor multiple times, like:\n\n"
                         "    def score_mod(score, b, h, q_idx, kv_idx):\n"
                         "        return score + bias[q_idx] + bias[kv_idx]  # bias used twice!\n\n"
-                        "A valid workaround is to clone() the tensors that will be indexed multiple times, "
-                        "though this will use additional memory."
+                        "A valid workaround is to clone() the tensors that will be indexed multiple times. For example:\n\n"
+                        "    bias1 = bias.clone()\n"
+                        "    def score_mod(score, b, h, q_idx, kv_idx):\n"
+                        "        return score + bias[q_idx] + bias1[kv_idx]\n\n"
+                        "Note that this solution will use additional memory."
                     )
     return
 
