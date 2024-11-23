@@ -2962,7 +2962,13 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    def test_smooth_quant_with_int_mm(self):
+    @parametrize("has_bias", [True, False])
+    @parametrize("dtype", [torch.float, torch.bfloat16])
+    @parametrize("per_channel_quant", [True, False])
+    @parametrize("dynamic", [True, False])
+    def test_smooth_quant_with_int_mm(
+        self, has_bias, dtype, per_channel_quant, dynamic
+    ):
         r"""
         This testcase check if we can match the SmoothQuant int8 linear pattern from Torchao.
         The pattern is:
@@ -2970,6 +2976,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
         or
             (with bias) pattern_no_bias -> add -> reshape -> reshape
         """
+        if dtype == torch.bfloat16 and not torch.ops.mkldnn._is_mkldnn_bf16_supported():
+            return
         M = 16
         in_feature = 32
         out_feature = 64
@@ -3013,41 +3021,29 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 c = c.reshape(out_shape)
                 return c
 
-        has_bias_list = [True, False]
-        dype_list = (
-            [torch.float, torch.bfloat16]
-            if torch.ops.mkldnn._is_mkldnn_bf16_supported()
-            else [torch.float]
-        )
-        per_channel_list = [True, False]
-        dynamic_list = [True, False]
-        for has_bias, dtype, per_channel_quant, dynamic in itertools.product(
-            has_bias_list, dype_list, per_channel_list, dynamic_list
-        ):
-            print("[info] ===== case:", has_bias, dtype, per_channel_quant, dynamic, "=====")
-            mod = Mod(dtype, has_bias, per_channel_quant).eval()
-            a = torch.randint(q_min, q_max, [1, M, in_feature], dtype=torch.int8)
+        mod = Mod(dtype, has_bias, per_channel_quant).eval()
+        a = torch.randint(q_min, q_max, [1, M, in_feature], dtype=torch.int8)
 
-            def matcher_check_fn():
-                self.assertEqual(
-                    counters["inductor"]["qlinear_weight_prepack_matcher_count"], 1
-                )
-                if dynamic:
-                    nodes_count = 10 if has_bias else 7
-                else:
-                    nodes_count = 7 if has_bias else 6
-                self.assertEqual(
-                    counters["inductor"]["qlinear_weight_prepack_matcher_nodes"],
-                    nodes_count,
-                )
-
-            self._test_common(
-                mod,
-                (a,),
-                matcher_check_fn=matcher_check_fn,
-                check_autocast=dtype,
-                compile_options={"dynamic": dynamic},
+        def matcher_check_fn():
+            self.assertEqual(
+                counters["inductor"]["qlinear_weight_prepack_matcher_count"], 1
             )
+            if dynamic:
+                nodes_count = 10 if has_bias else 7
+            else:
+                nodes_count = 7 if has_bias else 6
+            self.assertEqual(
+                counters["inductor"]["qlinear_weight_prepack_matcher_nodes"],
+                nodes_count,
+            )
+
+        self._test_common(
+            mod,
+            (a,),
+            matcher_check_fn=matcher_check_fn,
+            check_autocast=dtype,
+            compile_options={"dynamic": dynamic},
+        )
 
 
 @dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})
