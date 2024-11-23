@@ -42,10 +42,12 @@ class PointwiseSubgraphLowering(torch.fx.Interpreter):
 
     graph_outputs: Optional[List[ir.IRNode]]
     root_graph: torch._inductor.graph.GraphLowering
+    _current_op: Optional[TargetType]
     # For backwards of buffer_grads with scatters we allow mutations
-    allowed_mutations: Optional[Set[OpOverload]] = None
-    additional_lowerings: Optional[LoweringDict] = None
-    _current_op: Optional[TargetType] = None
+    allowed_mutations: Optional[Set[OpOverload]]
+    additional_lowerings: Optional[LoweringDict]
+    buffers: List[ir.Buffer]
+    mutated_buffers: Set[str]
 
     def __init__(
         self,
@@ -60,6 +62,10 @@ class PointwiseSubgraphLowering(torch.fx.Interpreter):
         self.allowed_mutations = allowed_mutations
         self.additional_lowerings = additional_lowerings
         self._current_op = None
+
+        # Used to track buffers created during lowering
+        self.mutated_buffers = set()
+        self.buffers = []
 
     @contextmanager
     def _op_context(self, op: TargetType) -> Generator[None, None, None]:
@@ -79,7 +85,7 @@ class PointwiseSubgraphLowering(torch.fx.Interpreter):
 
     def mark_buffer_mutated(self, name: str) -> None:
         if self._approved_mutator():
-            return self.root_graph.mark_buffer_mutated(name)
+            self.mutated_buffers.add(name)
         else:
             raise SubgraphLoweringException(
                 f"Buffer mutation detected during lowering of {self._current_op}. "
@@ -89,7 +95,9 @@ class PointwiseSubgraphLowering(torch.fx.Interpreter):
 
     def register_buffer(self, buffer: ir.Buffer, *, set_name: bool = False) -> str:
         if self._approved_mutator():
-            return self.root_graph.register_buffer(buffer, set_name=set_name)
+            name = self.qualify_name(f"buf{len(self.buffers)}")
+            self.buffers.append(buffer)
+            return name
         else:
             raise SubgraphLoweringException(
                 "Buffers cannot be created while lowering a pointwise subgraph. "

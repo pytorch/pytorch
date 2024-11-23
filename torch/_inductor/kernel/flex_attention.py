@@ -10,7 +10,7 @@ import sympy
 
 import torch
 from torch._inductor.virtualized import V
-from torch.utils._pytree import tree_map, tree_map_only
+from torch.utils._pytree import tree_map
 
 from .. import config
 from ..ir import (
@@ -106,29 +106,29 @@ def get_float32_precision():
         return "'tf32'"
 
 
-@dataclass(frozen=True)
-class SubgraphOutput:
-    """When building the subgraph buffers we fall into 1 of two cases:
-    1. The subgraph can lower entirely into a 1 compute buffer. This happens is ensured via
-        PointwiseSubgraphLowering and is the common case for FlexAttention
-    2. The subgraph has allowed mutation ops, we only support zeros_and_scatter in the backward
-        And we need both the ComputeBuffer for lowering and the realized TensorBox to return
-        from the FlexAttentionBackward Lowering.
-    """
+# @dataclass(frozen=True)
+# class SubgraphOutput:
+#     """When building the subgraph buffers we fall into 1 of two cases:
+#     1. The subgraph can lower entirely into a 1 compute buffer. This happens is ensured via
+#         PointwiseSubgraphLowering and is the common case for FlexAttention
+#     2. The subgraph has allowed mutation ops, we only support zeros_and_scatter in the backward
+#         And we need both the ComputeBuffer for lowering and the realized TensorBox to return
+#         from the FlexAttentionBackward Lowering.
+#     """
 
-    compute_buffer: ComputedBuffer
-    output_node: Optional[TensorBox] = None
+#     compute_buffer: ComputedBuffer
+#     output_node: Optional[TensorBox] = None
 
-    def __post_init__(self):
-        assert isinstance(self.compute_buffer, ComputedBuffer), (
-            "The compute buffer for the subgraph output must be a TensorBox, but got: ",
-            type(self.compute_buffer),
-        )
-        if self.output_node is not None:
-            assert isinstance(self.output_node, IRNode), (
-                "The output node for the subgraph output must be an IRNode, but got: ",
-                type(self.output_node),
-            )
+#     def __post_init__(self):
+#         assert isinstance(self.compute_buffer, ComputedBuffer), (
+#             "The compute buffer for the subgraph output must be a TensorBox, but got: ",
+#             type(self.compute_buffer),
+#         )
+#         if self.output_node is not None:
+#             assert isinstance(self.output_node, IRNode), (
+#                 "The output node for the subgraph output must be an IRNode, but got: ",
+#                 type(self.output_node),
+#             )
 
 
 def zeros_and_scatter_lowering(shape: List[int], indices, values):
@@ -172,10 +172,11 @@ def zeros_and_scatter_lowering(shape: List[int], indices, values):
         layout=MutationLayoutSHOULDREMOVE(grad),
         data=scatter,
     )
-    return SubgraphOutput(buffer, grad)
+    return buffer
+    # return SubgraphOutput(buffer, grad)
 
 
-SubgraphResults = Union[List[Optional[SubgraphOutput]], Optional[SubgraphOutput]]
+SubgraphResults = Union[List[Optional[ComputedBuffer]], Optional[ComputedBuffer]]
 
 
 def build_subgraph_buffer(args: List[TensorBox], subgraph: Subgraph) -> SubgraphResults:
@@ -199,10 +200,14 @@ def build_subgraph_buffer(args: List[TensorBox], subgraph: Subgraph) -> Subgraph
     with V.set_graph_handler(pw_subgraph):  # type: ignore[arg-type]
         pw_subgraph.run(*args)
 
-    def convert_output_node_to_buffer(output_buffer) -> Optional[SubgraphOutput]:
+    if len(pw_subgraph.buffers) > 0:
+        for buffer in pw_subgraph.buffers:
+            V.graph.register_buffer(buffer)
+
+    def convert_output_node_to_buffer(output_buffer) -> Optional[ComputedBuffer]:
         if output_buffer is None:
             return None
-        if isinstance(output_buffer, SubgraphOutput):
+        if isinstance(output_buffer, ComputedBuffer):
             # These nodes are coming from the output of zeros_and_scatter
             return output_buffer
         assert isinstance(output_buffer, TensorBox), (
@@ -222,7 +227,7 @@ def build_subgraph_buffer(args: List[TensorBox], subgraph: Subgraph) -> Subgraph
             ),
             data=output_buffer.data.data,  # type: ignore[arg-type]
         )
-        return SubgraphOutput(compute_buffer=subgraph_buffer)
+        return subgraph_buffer
 
     return tree_map(convert_output_node_to_buffer, pw_subgraph.graph_outputs)
 
@@ -854,8 +859,7 @@ def flex_attention(
     subgraph_buffer = build_subgraph_buffer(
         placeholder_inps + list(score_mod_other_buffers), subgraph
     )
-    assert isinstance(subgraph_buffer, SubgraphOutput)
-    subgraph_buffer = subgraph_buffer.compute_buffer
+
     mask_graph_placeholder_inps = [
         create_placeholder(name, dtype, query.get_device())
         for name, dtype in [
@@ -868,8 +872,7 @@ def flex_attention(
     mask_graph_buffer = build_subgraph_buffer(
         mask_graph_placeholder_inps + list(mask_mod_other_buffers), mask_graph
     )
-    assert isinstance(mask_graph_buffer, SubgraphOutput)
-    mask_graph_buffer = mask_graph_buffer.compute_buffer
+
     kernel_options = dict(kernel_options)
     kernel_options.setdefault("FLOAT32_PRECISION", get_float32_precision())
     if _use_flex_decoding(query, kernel_options):
@@ -1810,7 +1813,7 @@ class JointOutputResult:
 
     joint_buffer: ComputedBuffer
     buffer_grads_compute: List[ComputedBuffer]
-    buffer_grads_out: List[TensorBox]
+    buffer_grads_out: List[Optional[TensorBox]]
     mutated_grads: List[TensorBox]
 
 
@@ -1831,15 +1834,21 @@ def process_joint_outputs(
         all_joint_outputs[0] is not None
     ), "joint_subgraph_buffer is None this is a bug!"
 
-    joint_buffer = all_joint_outputs[0].compute_buffer
+    joint_buffer = all_joint_outputs[0]
     other_grads = all_joint_outputs[num_placeholders - 1 :]
 
     # outer_grads has the structure: Len(other_buffer_grads) if buffer doesn't require grad than it will be None
-    # We only grab
-    grads_compute = [buf.compute_buffer for buf in other_grads if buf is not None]
+    # We only grab the buffers that require grad for inlining into kernel
+    grads_compute = [buf for buf in other_grads if buf is not None]
 
-    # The outputs of the lowering expect Nones to be present so we use tree map instead list comp
-    grads_out = tree_map_only(SubgraphOutput, lambda x: x.output_node, other_grads)
+    def get_out(buf):
+        if buf is None:
+            return None
+        assert isinstance(buf, ComputedBuffer)
+        assert buf.name is not None
+        return TensorBox.create(V.graph.get_buffer(buf.name))
+
+    grads_out = [get_out(x) for x in other_grads]
     mutated_grads = [buf for buf in grads_out if buf is not None]
 
     return JointOutputResult(
@@ -1945,8 +1954,6 @@ def flex_attention_backward(*args, **kwargs):
     fw_subgraph_buffer = build_subgraph_buffer(
         fwd_placeholder_inps + list(score_mod_other_buffers), fw_graph
     )
-    assert isinstance(fw_subgraph_buffer, SubgraphOutput)
-    fw_subgraph_buffer = fw_subgraph_buffer.compute_buffer
 
     joint_placeholder_inps = fwd_placeholder_inps + [
         create_placeholder("grad_score_mod", dtype, device)
@@ -1979,8 +1986,8 @@ def flex_attention_backward(*args, **kwargs):
     mask_graph_buffer = build_subgraph_buffer(
         mask_graph_placeholder_inps + list(mask_mod_other_buffers), mask_graph
     )
-    assert isinstance(mask_graph_buffer, SubgraphOutput)
-    mask_graph_buffer = mask_graph_buffer.compute_buffer
+
+    mask_graph_buffer = mask_graph_buffer
 
     layout_broadcasted_k = FixedLayout(
         key.get_device(),
