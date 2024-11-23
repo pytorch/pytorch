@@ -628,11 +628,11 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
 
         def inner(x, ys, zs):
             for y, z in zip(ys, zs):
-                x += y * z
+                x += y * (3.0 if z else 3.2)
             return x
 
         ys = [1.0, 2.0]
-        zs = [3.0]
+        zs = [True]
         x = torch.tensor([1.0])
 
         fn_opt = torch._dynamo.optimize("eager")(fn)
@@ -641,8 +641,9 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
 
         record_str = "\n".join(r.getMessage() for r in records)
 
+        # TODO: this is a very sensitive test
         self.assertIn(
-            """L['zs'][0] == 3.0""",
+            f"___check_obj_id(L['zs'][0], {id(True)})",
             record_str,
         )
         self.assertIn(
