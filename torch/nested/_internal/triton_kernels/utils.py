@@ -1,5 +1,7 @@
-import torch
 import triton
+
+import torch
+
 
 def do_bench_triton(
     fn,
