@@ -1,4 +1,5 @@
 #include <c10/util/Exception.h>
+#include <c10/util/error.h>
 #include <torch/csrc/distributed/c10d/ProcessGroupGloo.hpp>
 
 #ifdef USE_C10D_GLOO
@@ -575,9 +576,11 @@ bool ProcessGroupGloo::SendWork::wait(std::chrono::milliseconds timeout) {
 
   // Completes the Work object and throws the exception.
   finishAndThrow(exception);
-  c10d::unregister_work(
-      c10::intrusive_ptr<
-          ProcessGroupGloo::SendWork>::unsafe_reclaim_from_nonowning(this));
+  if (c10d::allow_inflight_collective_as_graph_input()) {
+    c10d::unregister_work(
+        c10::intrusive_ptr<
+            ProcessGroupGloo::SendWork>::unsafe_reclaim_from_nonowning(this));
+  }
   return sendCompleted;
 }
 
@@ -625,9 +628,11 @@ bool ProcessGroupGloo::RecvWork::wait(std::chrono::milliseconds timeout) {
 
   // Completes the Work object and throws the exception.
   finishAndThrow(exception);
-  c10d::unregister_work(
-      c10::intrusive_ptr<
-          ProcessGroupGloo::RecvWork>::unsafe_reclaim_from_nonowning(this));
+  if (c10d::allow_inflight_collective_as_graph_input()) {
+    c10d::unregister_work(
+        c10::intrusive_ptr<
+            ProcessGroupGloo::RecvWork>::unsafe_reclaim_from_nonowning(this));
+  }
   return recvCompleted;
 }
 
@@ -709,7 +714,7 @@ std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
   std::array<char, HOST_NAME_MAX> hostname{};
   auto rv = gethostname(hostname.data(), HOST_NAME_MAX);
   if (rv != 0) {
-    C10_THROW_ERROR(DistBackendError, std::strerror(errno));
+    C10_THROW_ERROR(DistBackendError, c10::utils::str_error(errno));
   }
 
   // Use this machine's hostname if it resolves to an address.
@@ -736,7 +741,7 @@ std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
   auto hostname = std::unique_ptr<char[]>(new char[hostNameMax]);
   auto rv = gethostname(hostname.get(), hostNameMax);
   if (rv != 0) {
-    C10_THROW_ERROR(DistBackendError, std::strerror(errno));
+    C10_THROW_ERROR(DistBackendError, c10::utils::str_error(errno));
   }
 
   // Use this machine's hostname if it resolves to an address.

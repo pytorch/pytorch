@@ -271,8 +271,8 @@ std::ostream& operator<<(std::ostream& stream, const CheckWithinDomains<T>& dmn)
 }
 
 template <typename T>
-bool check_both_nan(T x, T y) {
-    if constexpr (std::is_floating_point_v<T>) {
+bool check_both_nan([[maybe_unused]] T x, [[maybe_unused]] T y) {
+    if constexpr (std::is_floating_point_v<T> || std::is_reduced_floating_point_v<T>) {
         return std::isnan(x) && std::isnan(y);
     }
     return false;
@@ -780,13 +780,13 @@ public:
 };
 
 template <typename T>
-typename std::enable_if_t<!is_complex<T>::value&& std::is_unsigned<T>::value, T>
+typename std::enable_if_t<!is_complex<T>::value&& std::is_unsigned_v<T>, T>
 correctEpsilon(const T& eps)
 {
     return eps;
 }
 template <typename T>
-typename std::enable_if_t<!is_complex<T>::value && !std::is_unsigned<T>::value, T>
+typename std::enable_if_t<!is_complex<T>::value && !std::is_unsigned_v<T>, T>
 correctEpsilon(const T& eps)
 {
     return std::abs(eps);

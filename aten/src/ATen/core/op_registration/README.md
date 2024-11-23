@@ -140,7 +140,7 @@ Or with annotations:
 
 ```
 namespace {
-    Tensor my_kernel_cpu(const Tensor& a, int64_t b, at::optional<int64_t> c) {...}
+    Tensor my_kernel_cpu(const Tensor& a, int64_t b, std::optional<int64_t> c) {...}
 }
 
 static auto registry = torch::RegisterOperators()
@@ -176,7 +176,7 @@ The kernel function can take any of the following types as inputs or outputs:
 * `bool`
 * `c10::string_view`
 * `at::Scalar` (this is a type that can hold either an integer or a floating point value)
-* `at::optional<T>` with T being any type from the list above
+* `std::optional<T>` with T being any type from the list above
 
 The kernel function can take and return list inputs by using `torch::List<T>`. `T` must be one of the supported types from above excluding `at::Scalar`.
 

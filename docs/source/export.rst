@@ -888,6 +888,8 @@ API Reference
 .. autoclass:: InputSpec
 .. autoclass:: OutputKind
 .. autoclass:: OutputSpec
+.. autoclass:: SymIntArgument
+.. autoclass:: SymBoolArgument
 .. autoclass:: ExportGraphSignature
 
     .. automethod:: replace_all_uses

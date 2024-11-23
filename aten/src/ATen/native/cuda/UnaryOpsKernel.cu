@@ -275,12 +275,12 @@ void frexp_kernel_cuda(TensorIteratorBase& iter) {
   });
 }
 
-REGISTER_DISPATCH(bitwise_not_stub, &bitwise_not_kernel_cuda);
-REGISTER_DISPATCH(exp_stub, &exp_kernel_cuda);
-REGISTER_DISPATCH(expm1_stub, &expm1_kernel_cuda);
-REGISTER_DISPATCH(rsqrt_stub, &rsqrt_kernel_cuda);
-REGISTER_DISPATCH(sqrt_stub, &sqrt_kernel_cuda);
-REGISTER_DISPATCH(nan_to_num_stub, &nan_to_num_kernel_cuda);
-REGISTER_DISPATCH(frexp_stub, &frexp_kernel_cuda);
+REGISTER_DISPATCH(bitwise_not_stub, &bitwise_not_kernel_cuda)
+REGISTER_DISPATCH(exp_stub, &exp_kernel_cuda)
+REGISTER_DISPATCH(expm1_stub, &expm1_kernel_cuda)
+REGISTER_DISPATCH(rsqrt_stub, &rsqrt_kernel_cuda)
+REGISTER_DISPATCH(sqrt_stub, &sqrt_kernel_cuda)
+REGISTER_DISPATCH(nan_to_num_stub, &nan_to_num_kernel_cuda)
+REGISTER_DISPATCH(frexp_stub, &frexp_kernel_cuda)
 
 } // namespace at::native

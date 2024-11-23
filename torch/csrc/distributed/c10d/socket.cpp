@@ -4,6 +4,7 @@
 // This source code is licensed under the BSD-style license found in the
 // LICENSE file in the root directory of this source tree.
 
+#include <c10/util/error.h>
 #include <torch/csrc/distributed/c10d/socket.h>
 
 #include <cstring>
@@ -115,7 +116,7 @@ void delay(std::chrono::milliseconds d) {
     // We don't care about error conditions other than EINTR since a failure
     // here is not critical.
     if (err == std::errc::interrupted) {
-      C10_THROW_ERROR(DistNetworkError, std::strerror(err.value()));
+      C10_THROW_ERROR(DistNetworkError, c10::utils::str_error(err.value()));
     }
   }
 #endif
@@ -206,6 +207,7 @@ std::string formatSockAddr(const struct ::sockaddr* addr, socklen_t len) {
     // if we can't resolve the hostname, display the IP address
     if (addr->sa_family == AF_INET) {
       struct sockaddr_in* psai = (struct sockaddr_in*)&addr;
+      // NOLINTNEXTLINE(*array*)
       char ip[INET_ADDRSTRLEN];
       if (inet_ntop(addr->sa_family, &(psai->sin_addr), ip, INET_ADDRSTRLEN) !=
           nullptr) {
@@ -213,6 +215,7 @@ std::string formatSockAddr(const struct ::sockaddr* addr, socklen_t len) {
       }
     } else if (addr->sa_family == AF_INET6) {
       struct sockaddr_in6* psai = (struct sockaddr_in6*)&addr;
+      // NOLINTNEXTLINE(*array*)
       char ip[INET6_ADDRSTRLEN];
       if (inet_ntop(
               addr->sa_family, &(psai->sin6_addr), ip, INET6_ADDRSTRLEN) !=
@@ -275,7 +278,7 @@ struct formatter<c10d::detail::SocketImpl> {
     addr.ai_addr = addr_ptr;
     addr.ai_addrlen = addr_len;
 
-    auto remote = socket.remote();
+    auto const& remote = socket.remote();
     std::string remoteStr = remote ? *remote : "none";
 
     return fmt::format_to(
@@ -313,7 +316,7 @@ std::unique_ptr<SocketImpl> SocketImpl::accept() const {
   if (hnd == invalid_socket) {
     std::error_code err = getSocketError();
     if (err == std::errc::interrupted) {
-      C10_THROW_ERROR(DistNetworkError, std::strerror(err.value()));
+      C10_THROW_ERROR(DistNetworkError, c10::utils::str_error(err.value()));
     }
 
     std::string msg{};
@@ -914,7 +917,7 @@ SocketConnectOp::ConnectResult SocketConnectOp::tryConnect(
   if (cr == ConnectResult::Error) {
     std::error_code err = getSocketError();
     if (err == std::errc::interrupted) {
-      C10_THROW_ERROR(DistNetworkError, std::strerror(err.value()));
+      C10_THROW_ERROR(DistNetworkError, c10::utils::str_error(err.value()));
     }
 
     // Retry if the server is not yet listening or if its backlog is exhausted.
