@@ -291,10 +291,8 @@ void Engine::stop() {
   stopped_ = true;
   // Under some conditions, autograd threads can hang on shutdown
   // Do not wait for them to shutdown indefinitely but rely on timeout
-  auto wait_duration_str =
-      c10::utils::get_env("TORCH_AUTOGRAD_SHUTDOWN_WAIT_LIMIT");
-  auto wait_duration =
-      wait_duration_str ? std::stof(wait_duration_str.value()) : 10.0;
+  auto wait_duration_str = getenv("TORCH_AUTOGRAD_SHUTDOWN_WAIT_LIMIT");
+  auto wait_duration = wait_duration_str ? std::atof(wait_duration_str) : 10.0;
   bool noBackward = true;
   for (auto& queue : device_ready_queues_) {
     noBackward = noBackward && queue->empty();
@@ -1405,7 +1403,7 @@ void Engine::set_compiled_autograd(Engine::compiled_autograd_fn fn) {
   auto prior = the_compiled_autograd.exchange(COMPILED_AUTOGRAD_POISON);
   TORCH_CHECK(
       num_threads_in_backwards.load() == 0 && prior != COMPILED_AUTOGRAD_POISON,
-      "compiled_autograd.enable() requires no threads in backwards()");
+      "compiled_autograd._enable() requires no threads in backwards()");
   the_compiled_autograd.store(fn);
 }
 

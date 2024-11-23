@@ -371,6 +371,39 @@ class TestPySymInt(TestCase):
         z = y.expand((y.shape[1],))
         z = y.expand(y.shape[1])
 
+    def test_symint_bitwise_and(self):
+        shape_env = ShapeEnv()
+        a0 = create_symint(shape_env, 0b1100)
+        b0 = create_symint(shape_env, 0b1010)
+        res_and = a0 & b0
+        self.assertEqual(res_and, 0b1000)
+        self.assertIsInstance(res_and, torch.SymInt, msg=type(res_and))
+        self.assertExpectedInline(
+            str(shape_env.guards[0][0]), """Eq(BitwiseFn_bitwise_and(s0, s1), 8)"""
+        )
+
+        a1 = create_symint(shape_env, 3)
+        b1 = create_symbool(shape_env, True)
+        self.assertEqual(a1 & b1, 1)
+
+        a2 = create_symint(shape_env, 0b1100)
+        self.assertEqual(a2 & 0b1010, 0b1000)
+
+        a3 = create_symbool(shape_env, True)
+        b3 = create_symbool(shape_env, True)
+        self.assertEqual(a3 & b3, True)
+
+    def test_symint_bitwise_or(self):
+        shape_env = ShapeEnv()
+        a0 = create_symint(shape_env, 0b1100)
+        b0 = create_symint(shape_env, 0b1010)
+        res_or = a0 | b0
+        self.assertEqual(res_or, 0b1110)
+        self.assertIsInstance(res_or, torch.SymInt, msg=type(res_or))
+        self.assertExpectedInline(
+            str(shape_env.guards[0][0]), """Eq(BitwiseFn_bitwise_or(s0, s1), 14)"""
+        )
+
     def test_stride(self):
         shape_env = ShapeEnv()
         x = create_symbolic_tensor("x", torch.randn(5, 5), shape_env)
@@ -944,6 +977,37 @@ def forward(self, x_1):
         assert_not_optimized(b)
         assert_not_optimized(a + b)
 
+    def test_max_of_unique_summation_opt(self):
+        shape_env = ShapeEnv()
+        s0 = shape_env.create_unbacked_symint()
+        s1 = shape_env.create_unbacked_symint()
+        s2 = shape_env.create_unbacked_symint()
+        s3 = shape_env.create_unbacked_symint()
+        s4 = shape_env.create_unbacked_symint()
+        s5 = shape_env.create_unbacked_symint()
+        s7 = shape_env.create_unbacked_symint()
+
+        def assert_optimized(sym):
+            self.assertTrue(sym.node.expr.unique_summations_symbols is not None)
+
+        def assert_not_optimized(sym):
+            getattr(sym.node.expr, "unique_summations_symbols", None)
+
+        mx1 = torch.sym_max(s0, s1)
+        assert_not_optimized(mx1)
+
+        mx2 = torch.sym_max(s0 + s1, s2 + s3)
+        assert_optimized(mx2)
+
+        mx3 = torch.sym_max(mx2, s4 + s5)
+        assert_optimized(mx3)
+        assert_optimized(torch.sym_max(s4 + s5, mx2))
+
+        assert_not_optimized(torch.sym_max(mx3, s7))
+        assert_not_optimized(torch.sym_max(mx3, 10))
+        assert_not_optimized(torch.sym_max(mx3, s3 + s7))
+        assert_not_optimized(torch.sym_max(mx3, s7 * 2))
+
     def test_sym_max_multi_max_simplify(self):
         shape_env = ShapeEnv()
         u0 = shape_env.create_unbacked_symint()
@@ -1373,6 +1437,9 @@ class TestSymNumberMagicMethods(TestCase):
 
         if second_type == "float" and fn in ["mod"]:
             self.skipTest(f"{fn} only handles int")
+
+        if fn in sym_node.bitwise_ops and (first_type != "int" or second_type != "int"):
+            self.skipTest(f"{fn} is a bitwise op, only handles int")
 
         is_unary_fn = fn in sym_node.unary_methods or fn == "round"
         # Second argument is ignored for unary function. So only run for one type
