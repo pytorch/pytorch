@@ -51,8 +51,6 @@ class SymT(Enum):
     VIEW = auto()
     # Alternate (non-modular) indexing used in halide kernels
     HALIDE = auto()
-    # Triton template load for fixed inputs, used by flex_attention
-    TRITON_LOAD = auto()
 
 
 # Invariant: there must not be a prefix which is a prefix of another string,
@@ -75,7 +73,6 @@ prefix_str = {
     SymT.INDIRECT: "indirect",  # false aliasing?
     SymT.VIEW: "view",
     SymT.HALIDE: "h",
-    SymT.TRITON_LOAD: "tl.load",
 }
 
 
