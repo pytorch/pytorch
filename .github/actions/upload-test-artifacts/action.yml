@@ -40,7 +40,7 @@ runs:
         rm -f test-reports-*.zip
         zip -r "test-reports-${FILE_SUFFIX}.zip" test/test-reports -i '*.xml' -i '*.csv'
 
-      - name: Zip usage log for upload
+    - name: Zip usage log for upload
       if: runner.os != 'Windows' && !inputs.use-gha
       shell: bash
       env:
