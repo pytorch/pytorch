@@ -3362,17 +3362,21 @@ class CompiledAutogradMetrics:
     end_time_ns: int
 
 
-def get_compiled_autograd_metrics(maybe_gm):
+def get_compiled_autograd_metrics(
+    maybe_gm: torch.fx.GraphModule,
+) -> Optional[CompiledAutogradMetrics]:
     if (
         not isinstance(maybe_gm, torch.fx.GraphModule)
         or not hasattr(maybe_gm, "meta")
         or "compiled_autograd_metrics" not in maybe_gm.meta
     ):
         return None
-    return dataclasses.astuple(maybe_gm.meta["compiled_autograd_metrics"])
+    return maybe_gm.meta["compiled_autograd_metrics"]
 
 
-def set_compiled_autograd_metrics(gm, id, start_time_ns, end_time_ns):
+def set_compiled_autograd_metrics(
+    gm: torch.fx.GraphModule, id: int, start_time_ns: int, end_time_ns: int
+) -> None:
     gm.meta["compiled_autograd_metrics"] = CompiledAutogradMetrics(
         id, start_time_ns, end_time_ns
     )
