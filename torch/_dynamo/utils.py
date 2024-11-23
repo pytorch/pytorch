@@ -3363,19 +3363,25 @@ class CompiledAutogradMetrics:
     cache_miss_reasons: Optional[Tuple[str]]
 
 
-def get_compiled_autograd_metrics(maybe_gm):
+def get_compiled_autograd_metrics(
+    maybe_gm: torch.fx.GraphModule,
+) -> Optional[CompiledAutogradMetrics]:
     if (
         not isinstance(maybe_gm, torch.fx.GraphModule)
         or not hasattr(maybe_gm, "meta")
         or "compiled_autograd_metrics" not in maybe_gm.meta
     ):
         return None
-    return maybe_gm, *dataclasses.astuple(maybe_gm.meta["compiled_autograd_metrics"])
+    return maybe_gm.meta["compiled_autograd_metrics"]
 
 
 def set_compiled_autograd_metrics(
-    gm, id, start_time_ns, end_time_ns, cache_miss_reasons
-):
+    gm: torch.fx.GraphModule,
+    id: int,
+    start_time_ns: int,
+    end_time_ns: int,
+    cache_miss_reasons: Optional[Tuple[str]],
+) -> None:
     gm.meta["compiled_autograd_metrics"] = CompiledAutogradMetrics(
         id, start_time_ns, end_time_ns, cache_miss_reasons
     )

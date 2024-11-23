@@ -109,7 +109,7 @@ class AutogradCompilerInstance:
         sizes: List[int],
         scalars: List[Union[int, float]],
         origins: List[List[Tuple[int, str]]],
-        cache_miss_reasons: Optional[List[str]],
+        cache_miss_reasons: Optional[Tuple[str]],
     ):
         self.start_time = time.time_ns()
         self.id = counters["compiled_autograd"]["captures"]
