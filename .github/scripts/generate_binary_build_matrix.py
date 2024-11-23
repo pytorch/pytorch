@@ -189,13 +189,6 @@ LIBTORCH_CONTAINER_IMAGES: Dict[Tuple[str, str], str] = {
     **{
         (
             gpu_arch,
-            PRE_CXX11_ABI,
-        ): f"pytorch/manylinux-builder:rocm{gpu_arch}-{DEFAULT_TAG}"
-        for gpu_arch in ROCM_ARCHES
-    },
-    **{
-        (
-            gpu_arch,
             CXX11_ABI,
         ): f"pytorch/libtorch-cxx11-builder:rocm{gpu_arch}-{DEFAULT_TAG}"
         for gpu_arch in ROCM_ARCHES
