@@ -21,13 +21,13 @@ Why does this exist?
 """
 
 import argparse
-import os
-import sys
-import subprocess
-
 import logging
+import os
+import subprocess
+import sys
 from pathlib import Path
-from typing import List, Dict, Optional
+from typing import Dict, List, Optional
+
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
@@ -37,13 +37,13 @@ logger.setLevel(logging.DEBUG)
 
 
 # NOTE: This will need to be updated if this script is ever moved
-ROOT_PATH = Path(__file__).parent.parent.parent.parent
+ROOT_PATH = Path(__file__).absolute().parents[2]
 SETUP_PY_PATH = ROOT_PATH / "setup.py"
 
 
 def requirements_installed() -> bool:
     try:
-        import setuptools  # type: ignore[import-untyped] # noqa: F401
+        import setuptools  # type: ignore[import-untyped]  # noqa: F401
 
         return True
     except ImportError:

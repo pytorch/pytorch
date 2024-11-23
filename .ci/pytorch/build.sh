@@ -285,7 +285,7 @@ else
       WERROR=1 python setup.py clean
 
       if [[ "$USE_SPLIT_BUILD" == "true" ]]; then
-        python3 tools/build/wheel/split_wheel.py bdist_wheel
+        python3 tools/packaging/split_wheel.py bdist_wheel
       else
         WERROR=1 python setup.py bdist_wheel
       fi
