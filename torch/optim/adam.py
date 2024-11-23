@@ -174,9 +174,11 @@ class Adam(Optimizer):
                     # Exponential moving average of gradient values
                     # case beta1 == 0, we don't need exp_avg
 
-                    state["exp_avg"] = torch.zeros_like(
-                        p, memory_format=torch.preserve_format
-                    ) if beta1 > 0 else torch.zeros(0)
+                    state["exp_avg"] = (
+                        torch.zeros_like(p, memory_format=torch.preserve_format)
+                        if beta1 > 0
+                        else torch.zeros(0)
+                    )
 
                     # Exponential moving average of squared gradient values
                     state["exp_avg_sq"] = torch.zeros_like(
@@ -187,7 +189,7 @@ class Adam(Optimizer):
                         state["max_exp_avg_sq"] = torch.zeros_like(
                             p, memory_format=torch.preserve_format
                         )
-                if beta1 > 0 :
+                if beta1 > 0:
                     exp_avgs.append(state["exp_avg"])
                 exp_avg_sqs.append(state["exp_avg_sq"])
 
@@ -507,7 +509,6 @@ def _multi_tensor_adam(
     capturable: bool,
     differentiable: bool,
 ):
-
     if len(params) == 0:
         return
 

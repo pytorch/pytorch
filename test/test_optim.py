@@ -3,7 +3,6 @@ import functools
 import math
 import tempfile
 import unittest
-
 from copy import deepcopy
 from typing import Any, Dict, Tuple
 from unittest.mock import patch
@@ -11,7 +10,6 @@ from unittest.mock import patch
 from optim.test_lrscheduler import TestLRScheduler  # noqa: F401
 from optim.test_optim import TestDifferentiableOptimizer  # noqa: F401
 from optim.test_swa_utils import TestSWAUtils  # noqa: F401
-from torch.profiler import profile, ProfilerActivity
 
 import torch
 from torch.nn import Parameter
@@ -21,6 +19,7 @@ from torch.optim.optimizer import (
     register_optimizer_step_post_hook,
     register_optimizer_step_pre_hook,
 )
+from torch.profiler import profile, ProfilerActivity
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -2166,7 +2165,10 @@ class TestOptimRenewed(TestCase):
             for state in optim.state.values():
                 self.assertGreater(len(state), 0)
 
-    @optims([optim for optim in optim_db if optim.optim_cls.__name__ == "Adam"], dtypes=[torch.float32])
+    @optims(
+        [optim for optim in optim_db if optim.optim_cls.__name__ == "Adam"],
+        dtypes=[torch.float32],
+    )
     def test_less_mem_beta1_zero_adam(self, device, dtype, optim_info):
         # test that beta1=0.0 uses less memory than the default
         model = torch.nn.Linear(5, 5)
@@ -2176,17 +2178,22 @@ class TestOptimRenewed(TestCase):
         optim_inputs = optim_info.optim_inputs_func(device=device)
         case_to_mem_usage = {}
         for optim_input in optim_inputs:
-            beta1_zero = ("betas" in optim_input.kwargs and optim_input.kwargs["betas"][0] == 0.0)
-            if beta1_zero or optim_input.desc == "default" :
-
-                activities = [ProfilerActivity.CUDA] if device == "cuda" else [ProfilerActivity.CPU]
+            beta1_zero = (
+                "betas" in optim_input.kwargs and optim_input.kwargs["betas"][0] == 0.0
+            )
+            if beta1_zero or optim_input.desc == "default":
+                activities = (
+                    [ProfilerActivity.CUDA]
+                    if device == "cuda"
+                    else [ProfilerActivity.CPU]
+                )
 
                 with profile(
-                    activities=activities,
-                    profile_memory=True,
-                    record_shapes=True
+                    activities=activities, profile_memory=True, record_shapes=True
                 ) as prof:
-                    optim = optim_info.optim_cls(model.parameters(), **optim_input.kwargs)
+                    optim = optim_info.optim_cls(
+                        model.parameters(), **optim_input.kwargs
+                    )
                     optim.zero_grad()
                     output = model(inpt)
                     loss = output.sum()
@@ -2194,21 +2201,28 @@ class TestOptimRenewed(TestCase):
 
                     optim.step()
 
-                case_to_mem_usage["beta1-zero" if beta1_zero else "default"] = sum([
-                    item.cuda_memory_usage if device == "cuda" else item.cpu_memory_usage
-                    for item in prof.key_averages()
-                ])
+                case_to_mem_usage["beta1-zero" if beta1_zero else "default"] = sum(
+                    [
+                        item.cuda_memory_usage
+                        if device == "cuda"
+                        else item.cpu_memory_usage
+                        for item in prof.key_averages()
+                    ]
+                )
 
+        self.assertGreater(
+            case_to_mem_usage["default"], case_to_mem_usage["beta1-zero"]
+        )
 
-        self.assertGreater(case_to_mem_usage["default"], case_to_mem_usage["beta1-zero"])
-
-
-    @optims([optim for optim in optim_db if optim.optim_cls.__name__ == "Adam"], dtypes=[torch.float32])
-    def test_beta1zero_then_loadstate_beta1nonzero_adam(self, device, dtype, optim_info):
-
+    @optims(
+        [optim for optim in optim_db if optim.optim_cls.__name__ == "Adam"],
+        dtypes=[torch.float32],
+    )
+    def test_beta1zero_then_loadstate_beta1nonzero_adam(
+        self, device, dtype, optim_info
+    ):
         inpt = torch.ones((5,), dtype=dtype, device=device)
         optim_inputs = optim_info.optim_inputs_func(device=device)
-
 
         def init_model_and_optim(optim_input):
             model = torch.nn.Linear(5, 5)
@@ -2216,16 +2230,22 @@ class TestOptimRenewed(TestCase):
             optim = optim_info.optim_cls(model.parameters(), **optim_input.kwargs)
             return model, optim
 
-
         # model and optimizer corresponding to beta1 = 0.0
         model_beta1_zero, optim_beta1_zero = init_model_and_optim(
-            [optim_input for optim_input in optim_inputs 
-             if "betas" in optim_input.kwargs and 
-             optim_input.kwargs["betas"][0] == 0.0][0]
+            [
+                optim_input
+                for optim_input in optim_inputs
+                if "betas" in optim_input.kwargs
+                and optim_input.kwargs["betas"][0] == 0.0
+            ][0]
         )
         # model and optimizer corresponding to default params
         model_default, optim_default = init_model_and_optim(
-            [optim_input for optim_input in optim_inputs if optim_input.desc == "default"][0]
+            [
+                optim_input
+                for optim_input in optim_inputs
+                if optim_input.desc == "default"
+            ][0]
         )
 
         # we should receive the same output if we do the following to our models :
@@ -2244,12 +2264,7 @@ class TestOptimRenewed(TestCase):
             return output
 
         # 1. train for n_iters
-        iteration(
-            model_beta1_zero,
-            optim_beta1_zero,
-            inpt,
-            n_iters
-        )
+        iteration(model_beta1_zero, optim_beta1_zero, inpt, n_iters)
 
         # 2. load state
         optim_beta1_zero.load_state_dict(optim_default.state_dict())
@@ -2258,28 +2273,25 @@ class TestOptimRenewed(TestCase):
         self.assertEqual(model_beta1_zero.state_dict(), model_default.state_dict())
         self.assertEqual(optim_beta1_zero.state_dict(), optim_default.state_dict())
 
-
         inpt = torch.rand((5,), dtype=dtype, device=device)
         # 3. train for n_iters
         output_beta1_zero_after_load = iteration(
-            model_beta1_zero,
-            optim_beta1_zero,
-            inpt,
-            n_iters
+            model_beta1_zero, optim_beta1_zero, inpt, n_iters
         )
         # 4. train for n_iters
-        output_default = iteration(
-            model_default,
-            optim_default,
-            inpt,
-            n_iters
+        output_default = iteration(model_default, optim_default, inpt, n_iters)
+
+        self.assertTrue(
+            torch.allclose(output_beta1_zero_after_load, output_default, atol=0.001)
         )
 
-        self.assertTrue(torch.allclose(output_beta1_zero_after_load, output_default, atol=0.001))
-
-    @optims([optim for optim in optim_db if optim.optim_cls.__name__ == "Adam"], dtypes=[torch.float32])
-    def test_beta1nonzero_then_loadstate_beta1zero_adam(self, device, dtype, optim_info):
-
+    @optims(
+        [optim for optim in optim_db if optim.optim_cls.__name__ == "Adam"],
+        dtypes=[torch.float32],
+    )
+    def test_beta1nonzero_then_loadstate_beta1zero_adam(
+        self, device, dtype, optim_info
+    ):
         inpt = torch.ones((5,), dtype=dtype, device=device)
         optim_inputs = optim_info.optim_inputs_func(device=device)
 
@@ -2289,18 +2301,23 @@ class TestOptimRenewed(TestCase):
             optim = optim_info.optim_cls(model.parameters(), **optim_input.kwargs)
             return model, optim
 
-
         # model and optimizer corresponding to beta1 = 0.0
         model_beta1_zero, optim_beta1_zero = init_model_and_optim(
-            [optim_input for optim_input in optim_inputs 
-             if "betas" in optim_input.kwargs 
-             and optim_input.kwargs["betas"][0] == 0.0][0]
+            [
+                optim_input
+                for optim_input in optim_inputs
+                if "betas" in optim_input.kwargs
+                and optim_input.kwargs["betas"][0] == 0.0
+            ][0]
         )
         # model and optimizer corresponding to default params
         model_default, optim_default = init_model_and_optim(
-            [optim_input for optim_input in optim_inputs if optim_input.desc == "default"][0]
+            [
+                optim_input
+                for optim_input in optim_inputs
+                if optim_input.desc == "default"
+            ][0]
         )
-
 
         # we should receive the same output if we do the following to our models :
         # model_default: 1.train for n_iters, 2.load state (beta1=0.0), 3.train for n_iters
@@ -2319,12 +2336,7 @@ class TestOptimRenewed(TestCase):
             return output
 
         # 1. train for n_iters
-        iteration(
-            model_default,
-            optim_default,
-            inpt,
-            n_iters
-        )
+        iteration(model_default, optim_default, inpt, n_iters)
 
         # 2. load state
         model_default.load_state_dict(model_beta1_zero.state_dict())
@@ -2333,30 +2345,23 @@ class TestOptimRenewed(TestCase):
         self.assertEqual(model_beta1_zero.state_dict(), model_default.state_dict())
         self.assertEqual(optim_beta1_zero.state_dict(), optim_default.state_dict())
 
-
         inpt = torch.rand((5,), dtype=dtype, device=device)
         # 3. train for n_iters
-        output_default = iteration(
-            model_default,
-            optim_default,
-            inpt,
-            n_iters
-        )
+        output_default = iteration(model_default, optim_default, inpt, n_iters)
 
         # 4. train for n_iters
         output_beta1_zero_after_load = iteration(
-            model_beta1_zero,
-            optim_beta1_zero,
-            inpt,
-            n_iters
+            model_beta1_zero, optim_beta1_zero, inpt, n_iters
         )
 
         self.assertTrue(
             torch.allclose(output_beta1_zero_after_load, output_default, atol=0.001)
         )
 
-
-    @optims([optim for optim in optim_db if optim.optim_cls.__name__ == "Adam"], dtypes=[torch.float32])
+    @optims(
+        [optim for optim in optim_db if optim.optim_cls.__name__ == "Adam"],
+        dtypes=[torch.float32],
+    )
     def test_correct_beta1(self, device, dtype, optim_info):
         # we test correctness of the optimizer with beta1 = 0.0 by comparing it with the optimizer model
         # with beta1 = 1e-6
@@ -2378,7 +2383,8 @@ class TestOptimRenewed(TestCase):
 
         inpt = torch.ones((5,), dtype=dtype, device=device)
         optim_inputs = [
-            optim_input for optim_input in optim_info.optim_inputs_func(device=device)
+            optim_input
+            for optim_input in optim_info.optim_inputs_func(device=device)
             if ("betas" in optim_input.kwargs and optim_input.kwargs["betas"][0] == 0.0)
             or optim_input.desc == "default"
         ]
@@ -2390,7 +2396,9 @@ class TestOptimRenewed(TestCase):
             ouputs = []
             for optim_input in optim_inputs:
                 one_model_output = []
-                optim_input.kwargs["lr"] = lr  # need lr high enough to see the difference
+                optim_input.kwargs["lr"] = (
+                    lr  # need lr high enough to see the difference
+                )
                 if optim_input.desc == "default":
                     optim_input.kwargs["betas"] = (beta1_of_default, 0.999)
                 model, optim = init_model_and_optim(optim_input)
@@ -2399,9 +2407,7 @@ class TestOptimRenewed(TestCase):
                 for i in range(n_iters):
                     step(model, optim)
                     one_model_output.append(model(inpt))
-                ouputs.append(
-                    torch.cat(one_model_output)
-                )
+                ouputs.append(torch.cat(one_model_output))
             return ouputs
 
         # our beta1=0 optimizer should have same performance as the default optimizer
@@ -2412,7 +2418,6 @@ class TestOptimRenewed(TestCase):
         # with beta1=0.9
         outputs = run_two_models(0.9)
         self.assertFalse(torch.allclose(outputs[0], outputs[1]))
-
 
 
 instantiate_device_type_tests(TestOptimRenewed, globals(), allow_mps=True)
