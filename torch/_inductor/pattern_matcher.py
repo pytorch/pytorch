@@ -1691,12 +1691,12 @@ def get_mutation_region_id(graph: torch.fx.Graph, node: torch.fx.Node) -> int:
 
 
 def should_compute_mutation_region_ids(graph: torch.fx.GraphModule) -> bool:
-    return "mutation_region_id" not in next(iter(graph.nodes)).meta
+    return "mutation_region_id" not in next(iter(graph.nodes)).meta  # type: ignore[arg-type]
 
 
 def compute_mutation_region_ids(graph: torch.fx.GraphModule) -> None:
     mutation_region_id = 0
-    for nd in graph.nodes:
+    for nd in graph.nodes:  # type: ignore[union-attr]
         if is_mutation_op(nd):
             mutation_region_id += 1
         nd.meta["mutation_region_id"] = mutation_region_id
