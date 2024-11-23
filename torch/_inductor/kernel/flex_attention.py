@@ -159,6 +159,12 @@ def get_offset_for_next_block(
     return offset
 """
 
+get_bounded_indices_func = r"""
+@triton.jit
+def get_bounded_indices(indices, max_len=None):
+    return indices % max_len if max_len is not None else indices
+"""
+
 compute_flex_attention = r"""
 {{def_kernel("Q", "K", "V", "LSE", "KV_NUM_BLKS", "KV_IDX", "FULL_KV_NUM_BLKS", "FULL_KV_IDX")}}
     # Sub notation for this kernel:
@@ -598,67 +604,95 @@ _rocm_default_config = {
 }
 
 
-def _get_default_config_fwd(query) -> Tuple[int, int, int, int]:
+def _get_rocm_config(query, mode: str) -> Tuple[int, int, int, int]:
     dtype = query.get_dtype()
     head_dim = query.get_size()[-1]
-    default_config = None
+    fwd_config = None
 
-    if head_dim <= 256 and torch.cuda.get_device_capability() >= (9, 0):  # H100
+    if mode == "fwd":
+        if head_dim <= 256:
+            if dtype == torch.float32:
+                fwd_config = (64, 64, 4, 1)
+            else:
+                fwd_config = (128, 64, 8, 1)
+            fwd_config = _rocm_default_config.get((dtype, head_dim), fwd_config)
+        else:  # modest hardware or extremely large head_dim
+            if dtype == torch.float32:
+                fwd_config = (32, 16, 4, 1)
+            else:
+                fwd_config = (64, 32, 4, 1)
+        return fwd_config
+    else:  # bwd
         if dtype == torch.float32:
-            default_config = (64, 64, 4, 3)
-        else:
-            default_config = (128, 64, 4, 3)
-        default_config = _h100_default_config.get((dtype, head_dim), default_config)
-    elif head_dim <= 256 and torch.cuda.get_device_capability() >= (8, 0):  # A100
-        if dtype == torch.float32:
-            default_config = (64, 64, 4, 3)
-        else:
-            default_config = (128, 64, 4, 3)
-        default_config = _a100_default_config.get((dtype, head_dim), default_config)
-    elif head_dim <= 256 and torch.version.hip:
-        if dtype == torch.float32:
-            default_config = (64, 64, 4, 1)
-        else:
-            default_config = (128, 64, 8, 1)
-        default_config = _rocm_default_config.get((dtype, head_dim), default_config)
-    else:  # modest hardware or extremely large head_dim
-        if dtype == torch.float32:
-            default_config = (32, 16, 4, 3)
-        else:
-            default_config = (64, 32, 4, 3)
+            return (16, 16, 4, 1)
+        elif head_dim <= 256:
+            if head_dim == 64:
+                return (64, 64, 4, 1)
+            elif head_dim == 128:
+                return (64, 128, 8, 1)
+            else:
+                return (64, 64, 4, 1)
+        else:  # modest hardware or extremely large head_dim
+            return (16, 16, 4, 1)
 
-    return default_config
+
+def _get_nv_config(query, mode: str) -> Tuple[int, int, int, int]:
+    dtype = query.get_dtype()
+    head_dim = query.get_size()[-1]
+    fwd_config = None
+
+    capability = torch.cuda.get_device_capability()
+
+    if mode == "fwd":
+        if head_dim <= 256:
+            if dtype == torch.float32:
+                fwd_config = (64, 64, 4, 3)
+            else:
+                fwd_config = (128, 64, 4, 3)
+            if capability >= (9, 0):
+                fwd_config = _h100_default_config.get((dtype, head_dim), fwd_config)
+            elif capability >= (8, 0):
+                fwd_config = _a100_default_config.get((dtype, head_dim), fwd_config)
+        else:  # modest hardware or extremely large head_dim
+            if dtype == torch.float32:
+                fwd_config = (32, 16, 4, 3)
+            else:
+                fwd_config = (64, 32, 4, 3)
+        return fwd_config
+
+    else:  # bwd
+        if dtype == torch.float32:
+            return (16, 16, 4, 1)
+        elif head_dim <= 256 and capability >= (9, 0):  # H100
+            if head_dim == 64:
+                return (64, 64, 4, 3)
+            elif head_dim == 128:
+                return (64, 128, 8, 3)
+            else:
+                return (64, 64, 4, 2)
+        elif capability >= (8, 0):  # A100
+            if head_dim == 64:
+                return (32, 128, 4, 3)
+            elif head_dim == 128:
+                return (64, 128, 8, 3)
+            else:
+                return (64, 64, 4, 2)
+        else:  # modest hardware or extremely large head_dim
+            return (16, 16, 4, 1)
+
+
+def _get_default_config_fwd(query) -> Tuple[int, int, int, int]:
+    if torch.version.hip is None:
+        return _get_nv_config(query, "fwd")
+    else:
+        return _get_rocm_config(query, "fwd")
 
 
 def _get_default_config_bwd(query) -> Tuple[int, int, int, int]:
-    head_dim = query.get_size()[-1]
-    dtype = query.get_dtype()
-
-    if dtype == torch.float32:
-        return (16, 16, 4, 1)
-    if head_dim <= 256 and torch.version.hip:
-        if head_dim == 64:
-            return (64, 64, 4, 1)
-        elif head_dim == 128:
-            return (64, 128, 4, 1)
-        else:
-            return (64, 64, 4, 1)
-    elif head_dim <= 256 and torch.cuda.get_device_capability() >= (9, 0):  # H100
-        if head_dim == 64:
-            return (64, 64, 4, 3)
-        elif head_dim == 128:
-            return (64, 128, 8, 3)
-        else:
-            return (64, 64, 4, 2)
-    elif torch.cuda.get_device_capability() >= (8, 0):  # A100
-        if head_dim == 64:
-            return (32, 128, 4, 3)
-        elif head_dim == 128:
-            return (64, 128, 8, 3)
-        else:
-            return (64, 64, 4, 2)
-    else:  # modest hardware or extremely large head_dim
-        return (16, 16, 4, 1)
+    if torch.version.hip is None:
+        return _get_nv_config(query, "bwd")
+    else:
+        return _get_rocm_config(query, "bwd")
 
 
 def create_num_blocks_fake_generator(sparse_indices):
@@ -819,7 +853,7 @@ def flex_attention(
         query.get_device(),
         query.get_dtype(),
         [B, Hq, seq_len_q, v_head_dim],
-        stride=out_strides,
+        stride=[sympy.sympify(s) for s in out_strides],
     )
     # see NOTE:[TritonTemplates with multiple outputs]
     logsumexp_shape = [B, Hq, seq_len_q]
@@ -1374,12 +1408,11 @@ def bwd_dq_block_mn(
         qk *= SM_SCALE
     # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
     pre_mod_scores = qk
-    if CHECK_BLOCK_BOUNDARY:
-        m = offs_m2[:, None] % Q_LEN
-        n = offs_n2[None, :] % KV_LEN
-    else:
-        m = offs_m2[:, None]
-        n = offs_n2[None, :]
+    n = get_bounded_indices(offs_n2[None, :], KV_LEN if CHECK_BLOCK_BOUNDARY else None)
+    # The boundary check is done for the outer loop, but here it's possible since we're iterating across N dim
+    # that the M reads out of bounds prior to the last loop
+    m = get_bounded_indices(offs_m2[:, None], Q_LEN if (not IS_DIVISIBLE or CHECK_BLOCK_BOUNDARY) else None)
+
     {{ modification(
         subgraph_number=0,
         output_name="post_mod_scores",
@@ -1557,12 +1590,11 @@ def bwd_dkdv_block_mn(
     if not PRESCALE_QK:
         qkT *= SM_SCALE
     # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
-    if CHECK_BLOCK_BOUNDARY:
-        m = offs_m1[None, :] % Q_LEN
-        n = offs_n1[:, None] % KV_LEN
-    else:
-        m = offs_m1[None, :]
-        n = offs_n1[:, None]
+    m = get_bounded_indices(offs_m1[None, :], Q_LEN if CHECK_BLOCK_BOUNDARY else None)
+    # The boundary check is done for the outer loop, but here it's possible since we're iterating across M dim
+    # that the n reads out of bounds prior to the last loop
+    n = get_bounded_indices(offs_n1[:, None], KV_LEN if (not IS_DIVISIBLE or CHECK_BLOCK_BOUNDARY) else None)
+
     pre_mod_scores = qkT
     {{ modification(
         subgraph_number=0,
@@ -1636,7 +1668,8 @@ def bwd_dkdv_block_mn(
 
     return dk, dv
  """
-    + compute_next_offset_func,
+    + compute_next_offset_func
+    + get_bounded_indices_func,
 )
 
 

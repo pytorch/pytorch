@@ -199,38 +199,38 @@ namespace c10d {
 // (minor when adding fields, major when changing existing fields)
 // Also update both JSON and Pickle dumps to make use of the newly defined
 // field(s).
-DEFINE_CONSTANT(version_val, "2.4");
-DEFINE_CONSTANT(entries_key, "entries");
-DEFINE_CONSTANT(nccl_comm_key, "nccl_comm_state");
-DEFINE_CONSTANT(version_key, "version");
-DEFINE_CONSTANT(pg_config_key, "pg_config");
-DEFINE_CONSTANT(pg_status_key, "pg_status");
-DEFINE_CONSTANT(record_id_key, "record_id");
-DEFINE_CONSTANT(pg_id_key, "pg_id");
-DEFINE_CONSTANT(pg_name_key, "process_group");
-DEFINE_CONSTANT(collective_seq_id_key, "collective_seq_id");
-DEFINE_CONSTANT(p2p_seq_id_key, "p2p_seq_id");
-DEFINE_CONSTANT(is_p2p_key, "is_p2p");
-DEFINE_CONSTANT(op_id_key, "op_id");
-DEFINE_CONSTANT(profiling_name_key, "profiling_name");
-DEFINE_CONSTANT(input_sizes_key, "input_sizes");
-DEFINE_CONSTANT(input_dtypes_key, "input_dtypes");
-DEFINE_CONSTANT(output_sizes_key, "output_sizes");
-DEFINE_CONSTANT(output_dtypes_key, "output_dtypes");
-DEFINE_CONSTANT(time_created_key, "time_created_ns");
-DEFINE_CONSTANT(duration_key, "duration_ms");
-DEFINE_CONSTANT(timeout_key, "timeout_ms");
-DEFINE_CONSTANT(frames_key, "frames");
-DEFINE_CONSTANT(state_key, "state");
-DEFINE_CONSTANT(line_key, "line");
-DEFINE_CONSTANT(name_key, "name");
-DEFINE_CONSTANT(filename_key, "filename");
-DEFINE_CONSTANT(retired_key, "retired");
-DEFINE_CONSTANT(time_discovered_started_key, "time_discovered_started_ns");
-DEFINE_CONSTANT(time_discovered_completed_key, "time_discovered_completed_ns");
-DEFINE_CONSTANT(completed_state, "completed");
-DEFINE_CONSTANT(scheduled_state, "scheduled");
-DEFINE_CONSTANT(started_state, "started");
+DEFINE_CONSTANT(version_val, "2.4")
+DEFINE_CONSTANT(entries_key, "entries")
+DEFINE_CONSTANT(nccl_comm_key, "nccl_comm_state")
+DEFINE_CONSTANT(version_key, "version")
+DEFINE_CONSTANT(pg_config_key, "pg_config")
+DEFINE_CONSTANT(pg_status_key, "pg_status")
+DEFINE_CONSTANT(record_id_key, "record_id")
+DEFINE_CONSTANT(pg_id_key, "pg_id")
+DEFINE_CONSTANT(pg_name_key, "process_group")
+DEFINE_CONSTANT(collective_seq_id_key, "collective_seq_id")
+DEFINE_CONSTANT(p2p_seq_id_key, "p2p_seq_id")
+DEFINE_CONSTANT(is_p2p_key, "is_p2p")
+DEFINE_CONSTANT(op_id_key, "op_id")
+DEFINE_CONSTANT(profiling_name_key, "profiling_name")
+DEFINE_CONSTANT(input_sizes_key, "input_sizes")
+DEFINE_CONSTANT(input_dtypes_key, "input_dtypes")
+DEFINE_CONSTANT(output_sizes_key, "output_sizes")
+DEFINE_CONSTANT(output_dtypes_key, "output_dtypes")
+DEFINE_CONSTANT(time_created_key, "time_created_ns")
+DEFINE_CONSTANT(duration_key, "duration_ms")
+DEFINE_CONSTANT(timeout_key, "timeout_ms")
+DEFINE_CONSTANT(frames_key, "frames")
+DEFINE_CONSTANT(state_key, "state")
+DEFINE_CONSTANT(line_key, "line")
+DEFINE_CONSTANT(name_key, "name")
+DEFINE_CONSTANT(filename_key, "filename")
+DEFINE_CONSTANT(retired_key, "retired")
+DEFINE_CONSTANT(time_discovered_started_key, "time_discovered_started_ns")
+DEFINE_CONSTANT(time_discovered_completed_key, "time_discovered_completed_ns")
+DEFINE_CONSTANT(completed_state, "completed")
+DEFINE_CONSTANT(scheduled_state, "scheduled")
+DEFINE_CONSTANT(started_state, "started")
 #undef DEFINE_CONSTANT
 
 TORCH_API size_t hashTensors(const std::vector<at::Tensor>& tensors);
@@ -389,8 +389,7 @@ class NCCLComm {
     return commFailureReason_;
   }
 
-  void ncclCommAbort(
-      std::optional<std::string> commFailureReason = std::nullopt) {
+  void abort(std::optional<std::string> commFailureReason = std::nullopt) {
     LockType lock(mutex_);
 #ifdef ENABLE_NCCL_ERROR_CHECKING
     if (aborted_ && !initialized_) {
