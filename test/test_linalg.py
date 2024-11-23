@@ -4673,6 +4673,7 @@ class TestLinalg(TestCase):
 
     @unittest.skipIf(not TEST_MULTIGPU, "Requires at least 2 GPUs")
     @onlyCUDA
+    @skipCUDAIfNotRocm
     @dtypes(torch.float)
     def test_matmul_offline_mgpu_tunableop(self, device, dtype):
         # Offline tuning with multiple GPUs.
