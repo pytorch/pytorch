@@ -1,8 +1,7 @@
-# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import logging
-from typing import Optional, Sequence
+from typing import Callable, Optional, Sequence, Tuple, Union
 
 import torch
 from torch import _prims, Tensor
@@ -13,20 +12,22 @@ log = logging.getLogger(__name__)
 
 def make_prim(
     schema: str,
-    impl_aten,
-    return_type=_prims.RETURN_TYPE.NEW,
+    impl_aten: Callable[..., Union[Tensor, Tuple[Tensor, ...]]],
+    return_type: Union[
+        Tuple[_prims.RETURN_TYPE, ...], _prims.RETURN_TYPE
+    ] = _prims.RETURN_TYPE.NEW,
     doc: str = "",
     tags: Optional[Sequence[torch.Tag]] = None,
-):
+) -> Callable[..., Union[Tensor, Tuple[Tensor, ...]]]:
     if isinstance(return_type, tuple):
 
-        def meta(*args, **kwargs):
+        def meta(*args: object, **kwargs: object) -> Union[Tuple[object, ...], object]:
             return tuple(_prims.TensorMeta(o) for o in impl_aten(*args, **kwargs))
 
     else:
 
-        def meta(*args, **kwargs):
-            return _prims.TensorMeta(impl_aten(*args, **kwargs))
+        def meta(*args: object, **kwargs: object) -> Union[Tuple[object, ...], object]:
+            return _prims.TensorMeta(impl_aten(*args, **kwargs))  # type: ignore[arg-type]
 
     return _prims._make_prim(
         schema=schema,
@@ -38,7 +39,7 @@ def make_prim(
     )
 
 
-def eager_force_stride(input_tensor: Tensor, stride) -> Tensor:
+def eager_force_stride(input_tensor: Tensor, stride: Sequence[int]) -> Tensor:
     if input_tensor.stride() == stride:
         return input_tensor
     new_tensor = input_tensor.clone().as_strided(
@@ -105,13 +106,13 @@ fma = make_prim(
 
 
 def _low_memory_max_pool2d_with_offsets_aten(
-    self,
-    kernel_size,
-    stride,
-    padding,
-    dilation,
-    ceil_mode,
-):
+    self: Tensor,
+    kernel_size: Sequence[int],
+    stride: Sequence[int],
+    padding: Sequence[int],
+    dilation: Sequence[int],
+    ceil_mode: bool,
+) -> Tuple[Tensor, Tensor]:
     vals, indices = torch.ops.aten.max_pool2d_with_indices(
         self, kernel_size, stride, padding, dilation, ceil_mode
     )
@@ -146,8 +147,12 @@ def _low_memory_max_pool2d_with_offsets_aten(
 
 
 def _low_memory_max_pool2d_offsets_to_indices_aten(
-    offsets, kernel_width, input_width, stride, padding
-):
+    offsets: Tensor,
+    kernel_width: int,
+    input_width: int,
+    stride: Sequence[int],
+    padding: Sequence[int],
+) -> Tuple[Tensor, Tensor]:
     offsets = offsets.to(torch.int64)
     h_inc = offsets // kernel_width
     w_inc = offsets - (h_inc * kernel_width)
