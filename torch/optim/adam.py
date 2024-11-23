@@ -143,7 +143,7 @@ class Adam(Optimizer):
         state_steps,
     ):
         has_complex = False
-        beta1, _  = group["betas"] 
+        beta1, _ = group["betas"]
         for p in group["params"]:
             if p.grad is not None:
                 has_complex |= torch.is_complex(p)
@@ -154,7 +154,7 @@ class Adam(Optimizer):
                     )
                 grads.append(p.grad)
 
-                state = self.state[p] 
+                state = self.state[p]
                 # Lazy state initialization
                 if len(state) == 0:
                     if group["fused"]:
@@ -172,11 +172,11 @@ class Adam(Optimizer):
                         else torch.tensor(0.0, dtype=_get_scalar_dtype())
                     )
                     # Exponential moving average of gradient values
-                    # case beta1 == 0, we don't need exp_avg 
-                    
+                    # case beta1 == 0, we don't need exp_avg
+
                     state["exp_avg"] = torch.zeros_like(
-                            p, memory_format=torch.preserve_format
-                    ) if beta1 > 0 else torch.zeros(0)  
+                        p, memory_format=torch.preserve_format
+                    ) if beta1 > 0 else torch.zeros(0)
 
                     # Exponential moving average of squared gradient values
                     state["exp_avg_sq"] = torch.zeros_like(
@@ -187,7 +187,7 @@ class Adam(Optimizer):
                         state["max_exp_avg_sq"] = torch.zeros_like(
                             p, memory_format=torch.preserve_format
                         )
-                if beta1 > 0 : 
+                if beta1 > 0 :
                     exp_avgs.append(state["exp_avg"])
                 exp_avg_sqs.append(state["exp_avg_sq"])
 
@@ -239,16 +239,16 @@ class Adam(Optimizer):
                 group,
                 params_with_grad,
                 grads,
-                exp_avgs, 
+                exp_avgs,
                 exp_avg_sqs,
                 max_exp_avg_sqs,
                 state_steps,
             )
-            
+
             adam(
                 params_with_grad,
                 grads,
-                exp_avgs if beta1 > 0 else grads, 
+                exp_avgs if beta1 > 0 else grads,
                 exp_avg_sqs,
                 max_exp_avg_sqs,
                 state_steps,
@@ -363,7 +363,7 @@ def _single_tensor_adam(
     differentiable: bool,
 ):
     assert grad_scale is None and found_inf is None
-    
+
     if torch.jit.is_scripting():
         # this assert is due to JIT being dumb and not realizing that the ops below
         # have overloads to handle both float and Tensor lrs, so we just assert it's
@@ -383,7 +383,7 @@ def _single_tensor_adam(
 
     for i, param in enumerate(params):
         grad = grads[i] if not maximize else -grads[i]
-        exp_avg = exp_avgs[i] 
+        exp_avg = exp_avgs[i]
         exp_avg_sq = exp_avg_sqs[i]
         step_t = state_steps[i]
 
@@ -410,7 +410,7 @@ def _single_tensor_adam(
             param = torch.view_as_real(param)
 
         device = param.device
-        
+
         if beta1_dict is not None:
             dtype = param.dtype  # type: ignore[union-attr]
 
@@ -422,10 +422,10 @@ def _single_tensor_adam(
             device_beta1: Union[float, Tensor] = beta1_dict[key]
         else:
             device_beta1 = beta1
-        
+
         # Decay the first and second moment running average coefficient
         exp_avg.lerp_(grad, 1 - device_beta1)
-        
+
         exp_avg_sq.mul_(beta2).addcmul_(grad, grad.conj(), value=1 - beta2)
 
         if capturable or differentiable:
@@ -507,7 +507,7 @@ def _multi_tensor_adam(
     capturable: bool,
     differentiable: bool,
 ):
-    
+
     if len(params) == 0:
         return
 
