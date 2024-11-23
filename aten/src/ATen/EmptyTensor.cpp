@@ -152,11 +152,10 @@ SymInt computeStorageNbytes(
   // of the last element according to stride
   SymInt size = 1;
   for (const auto i : c10::irange(sizes.size())) {
-    if (TORCH_GUARD_SIZE_OBLIVIOUS(sizes[i].sym_eq(0))) {
+    if (definitely_true(sizes[i].sym_eq(0), __FILE__, __LINE__)) {
       return 0;
     }
-
-    size += strides[i] * (sizes[i] - 1);
+    size += strides[i] * (sizes[i] - 1).max(0);
   }
   return itemsize_bytes * (storage_offset + size);
 }
