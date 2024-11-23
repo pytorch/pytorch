@@ -14,12 +14,12 @@ def apply_graph_deduplication(output_graph) -> None:  # type: ignore[no-untyped-
     )
 
     for region_group in duplicated_region_groups:
+        inds_with_external_users = _get_all_output_indices(region_group)
         region = region_group[0]
         (
             subgraph,
             node_ind_arg_inds,
-            inds_with_external_users,
-        ) = _create_subgraph(region)
+        ) = _create_subgraph(region, inds_with_external_users)
         sub_gm = torch.fx.GraphModule(output_graph.nn_modules, subgraph)
         subgraph_name = output_graph.install_subgraph("subgraph", sub_gm)
         with output_graph.graph.inserting_before():
@@ -34,6 +34,7 @@ def apply_graph_deduplication(output_graph) -> None:  # type: ignore[no-untyped-
                 node_ind_arg_inds.keys(),
                 inds_with_external_users,
                 subgraph,
+                subgraph_name,
             )
 
 
@@ -44,6 +45,7 @@ def _replace_region_with_subgraph(
     node_ind_arg_ind: Iterable[Tuple[int, int]],
     inds_with_external_users: List[int],
     subgraph: torch.fx.Graph,
+    subgraph_name: str,
 ) -> None:
     sub_args = []
     for node_ind, arg_ind in node_ind_arg_ind:
@@ -51,7 +53,7 @@ def _replace_region_with_subgraph(
         flattened_args_kwargs, _ = tree_flatten((node.args, node.kwargs))
         sub_args.append(flattened_args_kwargs[arg_ind])
 
-    invoke_args = (get_subgraph_node, "hi", tuple(sub_args))
+    invoke_args = (get_subgraph_node, subgraph_name, tuple(sub_args))
 
     earliest_region_node = region[0]
     with graph.inserting_before(earliest_region_node):
@@ -86,15 +88,22 @@ def _get_external_inputs(
     return external_node_to_indices, external_nodes  # type: ignore[return-value]
 
 
-def _get_inds_with_external_users(region: Region) -> List[int]:
-    inds_to_output = []
+def _get_all_output_indices(regions: List[Region]) -> List[int]:
+    # Scan all regions to get the set of all possible output nodes indices in the region
+    # perhaps it's possible to get this info some other way?
+    inds_with_external_users: Set[int] = set()
+    for region in regions:
+        _get_inds_with_external_users(region, inds_with_external_users)
+
+    return sorted(inds_with_external_users)
+
+
+def _get_inds_with_external_users(region: Region, inds_unique: Set[int]) -> None:
     for ind, node in enumerate(region):
         for user in node.users:
             if user not in region:
-                inds_to_output.append(ind)
-                break
-
-    return inds_to_output
+                if ind not in inds_unique:
+                    inds_unique.add(ind)
 
 
 def _copy_nodes_and_remap_inputs(
@@ -133,9 +142,9 @@ def _create_subgraph_outputs(
 
 def _create_subgraph(
     region: Region,
-) -> Tuple[torch.fx.Graph, Dict[Tuple[int, int], Any], List[int]]:
+    inds_with_external_users: List[int],
+) -> Tuple[torch.fx.Graph, Dict[Tuple[int, int], Any]]:
     subgraph: torch.fx.Graph = torch.fx.Graph()
     node_ind_input_inds = _copy_nodes_and_remap_inputs(subgraph, region)
-    inds_with_external_users = _get_inds_with_external_users(region)
     _create_subgraph_outputs(subgraph, inds_with_external_users)
-    return subgraph, node_ind_input_inds, inds_with_external_users
+    return subgraph, node_ind_input_inds
