@@ -10,7 +10,6 @@ import logging
 import math
 import operator
 import os
-import re
 import sys
 import textwrap
 import time
@@ -203,12 +202,7 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
 
     def indirect_indexing(self, index_var: str, size, check, wrap_neg=True):
         """Convert index variable to symbolic form."""
-        var = str(index_var)
-        # Match strings that are exactly of the form (idx_<word>)
-        if re.fullmatch(r"\(idx_\w+\)", var):
-            # Remove the outermost parentheses
-            var = var[1:-1]
-        return sympy_index_symbol(var)
+        return sympy_index_symbol(str(index_var))
 
     def store(self, name, index, value, mode):
         """Store value and track the store's mask and output value on the kernel.
