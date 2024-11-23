@@ -165,7 +165,7 @@ struct VerboseLogger : public PythonLogger {
       const std::type_info& node_type,
       std::unordered_set<CacheKey> cached_keys,
       const CacheKey& key,
-      const std::string& node_name) const {
+      const std::string& node_name) {
     std::ostringstream oss;
     oss << "Cache miss due to new autograd node: " << node_name
         << " with key size " << std::to_string(key.key_size)
@@ -181,10 +181,12 @@ struct VerboseLogger : public PythonLogger {
       }
     }
     oss << "]";
-    log(PythonLogger::DEBUG, oss.str());
+    std::string msg = oss.str();
+    log(PythonLogger::DEBUG, msg);
+    cache_miss_reasons.emplace_back(std::move(msg));
   }
 
-  void log_dynamic_shapes_check(size_t size_idx) const {
+  void log_dynamic_shapes_check(size_t size_idx) {
     if (cumulative_sizes_per_node.empty()) {
       return;
     }
@@ -193,16 +195,19 @@ struct VerboseLogger : public PythonLogger {
     TORCH_CHECK(it != cumulative_sizes_per_node.end());
     size_t start_idx =
         it == cumulative_sizes_per_node.begin() ? 0 : std::prev(it)->first;
-    log(PythonLogger::DEBUG,
-        "Cache miss due to changed shapes: marking size idx " +
-            std::to_string(size_idx - start_idx) + " of " + it->second +
-            " as dynamic");
+    std::string msg = "Cache miss due to changed shapes: marking size idx " +
+        std::to_string(size_idx - start_idx) + " of " + it->second +
+        " as dynamic";
+    log(PythonLogger::DEBUG, msg);
+    cache_miss_reasons.emplace_back(std::move(msg));
   }
 
   // track which size index belongs to which node
   std::map<size_t, std::string> cumulative_sizes_per_node;
   // only log cache miss due to node key once
   bool logged_node_miss = false;
+  // accumulate messages to send to tlparse
+  std::vector<std::string> cache_miss_reasons;
 };
 
 struct CacheNode {
@@ -254,7 +259,7 @@ struct CacheNode {
 
   bool check_dynamic_sizes(
       AutogradCompilerCall& call,
-      const std::optional<VerboseLogger>& vlogger) {
+      std::optional<VerboseLogger>& vlogger) {
     /*
     We start off by assuming everything is static, then we mark things
     as dynamic when we see them change.  This function:
@@ -495,11 +500,26 @@ void set_ivalue_proxies(
   }
 }
 
+PyObject* wrap_cache_miss_reasons(const std::optional<VerboseLogger>& vlogger) {
+  if (!vlogger)
+    return Py_None;
+
+  const auto& reasons = vlogger->cache_miss_reasons;
+  PyObject* pyreasons =
+      check(PyTuple_New(static_cast<Py_ssize_t>(reasons.size())));
+  for (size_t i = 0; i < reasons.size(); i++) {
+    PyObject* pyreason = check(PyUnicode_FromString(reasons[i].c_str()));
+    PyTuple_SET_ITEM(pyreasons, i, pyreason);
+  }
+  return pyreasons;
+}
+
 static TraceState call_begin_capture(
     PyObject* self,
     CacheNode& cache,
     AutogradCompilerCall& compiler_call,
-    size_t num_outputs) {
+    size_t num_outputs,
+    std::optional<VerboseLogger>& vlogger) {
   static PyObject* method_name = PyUnicode_InternFromString("begin_capture");
   THPObjectPtr pyinput(THPVariable_WrapList(compiler_call.tensor_args.inputs));
   THPObjectPtr pysizeinput(cache.wrap_dynamic_inputs());
@@ -507,6 +527,7 @@ static TraceState call_begin_capture(
       wrap_lifted_ivalue_args(compiler_call.lifted_ivalue_args.args));
   THPObjectPtr pynodeorigins(
       wrap_node_origins(compiler_call, PyTuple_GET_SIZE(pysizeinput.get())));
+  THPObjectPtr cache_miss_reasons(wrap_cache_miss_reasons(vlogger));
   THPObjectPtr pyresult(check(PyObject_CallMethodObjArgs(
       self,
       method_name,
@@ -514,6 +535,7 @@ static TraceState call_begin_capture(
       pysizeinput.get(),
       pyivalueargsinput.get(),
       pynodeorigins.get(),
+      cache_miss_reasons.get(),
       nullptr)));
 
   PyObject *fake_inputs{nullptr}, *fake_sizes{nullptr},
@@ -650,7 +672,7 @@ CacheNode* _compiled_autograd_impl(
         check(PyObject_CallNoArgs((the_autograd_compiler))));
 
     TraceState state = call_begin_capture(
-        py_compiler, *cache, compiler_call, output_edges.size());
+        py_compiler, *cache, compiler_call, output_edges.size(), vlogger);
     InputBuffers input_buffers;
 
     for (size_t i = 0; i < calls.size(); i++) {
@@ -786,21 +808,21 @@ CacheNode* _compiled_autograd_impl(
 
 // NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
 struct LockGuardWithErrorLogs {
-  LockGuardWithErrorLogs(std::mutex& mtx) : mtx_(mtx) {
+  LockGuardWithErrorLogs(std::mutex* mtx) : mtx_(mtx) {
     // Note: the standard allows try_lock to fail spuriously during races for
     // performance reasons, but it shouldn't happen here since we:
     // 1. disable multithreaded autograd
     // 2. plenty of latency between backward calls
     TORCH_INTERNAL_ASSERT(
-        mtx_.try_lock(),
+        mtx_->try_lock(),
         "Trying to run compiled autograd within another compiled autograd call (e.g. reentrant checkpointing), this is not supported yet.");
   }
 
   ~LockGuardWithErrorLogs() {
-    mtx_.unlock();
+    mtx_->unlock();
   }
 
-  std::mutex& mtx_;
+  std::mutex* mtx_;
 };
 
 variable_list compiled_autograd(
@@ -812,7 +834,7 @@ variable_list compiled_autograd(
       c10::impl::TorchDispatchModeTLS::stack_len() == 0,
       "TorchDispatchMode not yet implemented for compiled autograd")
   static std::mutex mtx;
-  LockGuardWithErrorLogs lock_guard(mtx);
+  LockGuardWithErrorLogs lock_guard(&mtx);
   pybind11::gil_scoped_acquire gil;
   at::ThreadLocalStateGuard tls_guard(graph_task.thread_locals_);
 

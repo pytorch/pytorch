@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import contextlib
 import functools
+import logging
 import operator
 import time
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
@@ -41,8 +42,25 @@ if TYPE_CHECKING:
     from torch.fx.proxy import Proxy
 
 
+class VerboseLogAccumulator(logging.Handler):
+    def __init__(self):
+        super().__init__()
+        self.logs = []
+
+    def emit(self, record):
+        self.logs.append(record)
+
+    def get_logs(self):
+        return "\n".join(self.logs)
+
+    def clear(self):
+        self.logs.clear()
+
+
 compiled_autograd_log = getArtifactLogger(__name__, "compiled_autograd")
 verbose_log = getArtifactLogger(__name__, "compiled_autograd_verbose")
+verbose_log_accumulator = VerboseLogAccumulator()
+verbose_log.addHandler(verbose_log_accumulator)
 
 
 def snapshot_verbose_logging_enabled():
@@ -91,9 +109,11 @@ class AutogradCompilerInstance:
         sizes: List[int],
         scalars: List[Union[int, float]],
         origins: List[List[Tuple[int, str]]],
+        cache_miss_reasons: Optional[List[str]],
     ):
         self.start_time = time.time_ns()
         self.id = counters["compiled_autograd"]["captures"]
+        self.cache_miss_reasons = cache_miss_reasons
         counters["compiled_autograd"]["captures"] += 1
         self.aot_graph_cls_name: Optional[str] = None
         self.aot_graph_infos: Dict[int, Dict[str, Any]] = {}
@@ -389,7 +409,11 @@ class AutogradCompilerInstance:
                 in_compiled_autograd_region = False
 
         set_compiled_autograd_metrics(
-            graph, self.id, start_time_ns=self.start_time, end_time_ns=time.time_ns()
+            graph,
+            self.id,
+            start_time_ns=self.start_time,
+            end_time_ns=time.time_ns(),
+            cache_miss_reasons=self.cache_miss_reasons,
         )
         return runtime_wrapper, self.compiler_fn(graph)
 

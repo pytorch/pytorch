@@ -869,7 +869,7 @@ def _compile(
     if ca_metrics := torch._dynamo.utils.get_compiled_autograd_metrics(
         locals.get("self")
     ):
-        ca_gm, ca_id, ca_start_ns, ca_end_ns = ca_metrics
+        ca_gm, ca_id, ca_start_ns, ca_end_ns, ca_cache_miss_reasons = ca_metrics
         ca_event = f"compiled_autograd_{ca_id}"
         chromium_event_log.log_event_start(
             ca_event, ca_start_ns, {}, log_pt2_compile_event=True
@@ -886,6 +886,11 @@ def _compile(
             "compiled_autograd_graph",
             payload_fn=lambda: ca_gm.print_readable(print_output=False),
         )
+        if ca_cache_miss_reasons is not None:
+            trace_structured(
+                "compiled_autograd_cache_miss_reasons",
+                payload_fn=lambda: "\n".join(ca_cache_miss_reasons),
+            )
     chromium_event_log.log_event_start(
         "dynamo", chromium_start_time, {}, log_pt2_compile_event=True
     )
