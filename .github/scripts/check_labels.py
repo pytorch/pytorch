@@ -51,7 +51,7 @@ def main() -> None:
                 raise RuntimeError("PR does not have required labels")
         else:
             delete_all_label_err_comments(pr)
-    except Exception:
+    except Exception as e:
         if args.exit_non_zero:
             raise RuntimeError(f"Error checking labels: {e}") from e
 
