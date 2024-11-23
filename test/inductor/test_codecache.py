@@ -1229,7 +1229,7 @@ class TestAutotuneCache(TestCase):
             for k in global_stats.autotune_remote.cache.keys():
                 self.assertRegex(k, r"[0-9a-z]{52}\.py")
             for k in global_stats.triton.cache.keys():
-                self.assertRegex(k, r"triton:[0-9a-f]{64}::[0-9a-f]{64}:c10")
+                self.assertRegex(k, r"triton:[0-9a-f]{64}::[0-9a-f]{64}:c11")
 
     @unittest.skipIf(not HAS_CUDA, "Requires CUDA")
     @unittest.skipIf(not SM80OrLater, "Requires SM80+")
