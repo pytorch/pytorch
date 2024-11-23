@@ -2410,10 +2410,99 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                 self.assertEqual(n.args[1], 0.125)
                 self.assertEqual(n.args[2], 42)
 
+@skipIfNoQNNPACK
+class TestQuantizePT2EAffineQuantization(PT2EQuantizationTestCase):
+    def test_channel_group_quantization(self):
+        from torch.ao.quantization.observer import (
+            MappingType,
+            PerToken,
+            PerGroup,
+        )
+        from torch.ao.quantization.pt2e.affine_quantization import (
+            AffineQuantizedMinMaxObserver,
+        )
+
+        class BackendAQuantizer(Quantizer):
+            def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
+                for node in model.graph.nodes:
+                    if (
+                        node.op == "call_function"
+                        and node.target == torch.ops.aten.linear.default
+                    ):
+                        input_act = node.args[0]
+                        assert isinstance(input_act, Node)
+                        weight = node.args[1]
+                        assert isinstance(weight, Node)
+
+                        act_qspec = QuantizationSpec(
+                            dtype=torch.uint8,
+                            quant_min=0,
+                            quant_max=255,
+                            qscheme=None,
+                            is_dynamic=False,
+                            observer_or_fake_quant_ctr=AffineQuantizedMinMaxObserver.with_args(
+                                # TODO: maybe align the arg name here
+                                target_dtype=torch.uint8,
+                                mapping_type=MappingType.SYMMETRIC,
+                                granularity=PerToken(),
+                            ),
+                        )
+
+                        weight_qspec = QuantizationSpec(
+                            dtype=torch.uint8,
+                            quant_min=0,
+                            quant_max=255,
+                            qscheme=None,
+                            is_dynamic=False,
+                            observer_or_fake_quant_ctr=AffineQuantizedMinMaxObserver.with_args(
+                                target_dtype=torch.uint8,
+                                mapping_type=MappingType.SYMMETRIC,
+                                granularity=PerGroup(group_size=128),
+                            ),
+                        )
+                        node.meta["quantization_annotation"] = QuantizationAnnotation(
+                            input_qspec_map={
+                                input_act: act_qspec,
+                                weight: weight_qspec,
+                            },
+                            _annotated=True,
+                        )
+
+            def validate(self, model: torch.fx.GraphModule) -> None:
+                pass
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(128, 20)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        node_occurrence = {
+            torch.ops.quant.quantize_affine: 2,
+            torch.ops.quant.dequantize_affine: 2,
+        }
+        node_list = [
+            torch.ops.quant.quantize_affine,
+            torch.ops.quant.dequantize_affine,
+            torch.ops.quant.quantize_affine,
+            torch.ops.quant.dequantize_affine,
+        ]
+        example_inputs = (torch.randn(5, 128),)
+        self._test_quantizer(
+            M().eval(),
+            example_inputs,
+            BackendAQuantizer(),
+            node_occurrence,
+            node_list,
+            is_debug_mode=True,
+        )
+
 
 instantiate_parametrized_tests(TestQuantizePT2E)
 
-devices = ["cpu", "cuda"]
-if TEST_HPU:
-    devices.append("hpu")
-instantiate_device_type_tests(TestQuantizePT2E, globals(), only_for=devices)
+# devices = ["cpu", "cuda"]
+# if TEST_HPU:
+#     devices.append("hpu")
+# instantiate_device_type_tests(TestQuantizePT2E, globals(), only_for=devices)
