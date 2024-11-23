@@ -833,9 +833,7 @@ class TS2FXGraphConverter:
         self._convert_prim_iterator(node)
 
     def _convert_prim_iterator(self, node: torch._C.Node):
-        output_list = []
-        for inp in node.inputs():
-            output_list.append(self.get_fx_value_by_ir_value(inp))
+        output_list = [self.get_fx_value_by_ir_value(inp) for inp in node.inputs()]
 
         output_name = node.output().debugName()
         self.name_to_node[output_name] = output_list
