@@ -889,6 +889,11 @@ def _compile(
             "compiled_autograd_graph",
             payload_fn=lambda: gm.print_readable(print_output=False),
         )
+        if (reasons := ca_metrics.cache_miss_reasons) is not None:
+            trace_structured(
+                "compiled_autograd_cache_miss_reasons",
+                payload_fn=lambda: "\n".join(reasons),
+            )
     chromium_event_log.log_event_start(
         "dynamo", chromium_start_time, {}, log_pt2_compile_event=True
     )

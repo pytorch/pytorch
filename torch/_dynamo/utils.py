@@ -3360,6 +3360,7 @@ class CompiledAutogradMetrics:
     id: int
     start_time_ns: int
     end_time_ns: int
+    cache_miss_reasons: Optional[Tuple[str]]
 
 
 def get_compiled_autograd_metrics(
@@ -3375,10 +3376,14 @@ def get_compiled_autograd_metrics(
 
 
 def set_compiled_autograd_metrics(
-    gm: torch.fx.GraphModule, id: int, start_time_ns: int, end_time_ns: int
+    gm: torch.fx.GraphModule,
+    id: int,
+    start_time_ns: int,
+    end_time_ns: int,
+    cache_miss_reasons: Optional[Tuple[str]],
 ) -> None:
     gm.meta["compiled_autograd_metrics"] = CompiledAutogradMetrics(
-        id, start_time_ns, end_time_ns
+        id, start_time_ns, end_time_ns, cache_miss_reasons
     )
 
 
