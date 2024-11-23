@@ -154,7 +154,8 @@ void lookup(
     PyObject* f_locals,
     PyObject* backend,
     PyObject** maybe_cached_code,
-    const char** trace_annotation);
+    const char** trace_annotation,
+    bool is_skip_guard_eval_unsafe);
 
 // Create a new cache entry at extra_state holding on to guarded_code.
 // Ownership contract
