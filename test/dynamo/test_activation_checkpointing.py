@@ -147,7 +147,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
     ):
         cloned_args = []
         for arg in args:
-            cloned_args.append(arg.clone().detach().requires_grad_(arg.requires_grad))
+            cloned_args.append(arg.detach().clone().requires_grad_(arg.requires_grad))
 
         cloned_fn = copy.deepcopy(fn)
 
@@ -159,7 +159,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         compiled_fn = torch.compile(cloned_fn, fullgraph=fullgraph, backend=backend)
         ctx = contextlib.nullcontext()
         if compiled_autograd:
-            ctx = torch._dynamo.compiled_autograd.enable(
+            ctx = torch._dynamo.compiled_autograd._enable(
                 lambda gm: torch.compile(gm, fullgraph=fullgraph, backend=backend)
             )
         with ctx:
@@ -189,7 +189,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         cloned_args_orig_fn = []
         for arg in args:
             cloned_args_orig_fn.append(
-                arg.clone().detach().requires_grad_(arg.requires_grad)
+                arg.detach().clone().requires_grad_(arg.requires_grad)
             )
         torch.manual_seed(0)
         compiled_orig_fn = torch.compile(
@@ -202,7 +202,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         cloned_args_checkpointed_fn = []
         for arg in args:
             cloned_args_checkpointed_fn.append(
-                arg.clone().detach().requires_grad_(arg.requires_grad)
+                arg.detach().clone().requires_grad_(arg.requires_grad)
             )
         torch.manual_seed(0)
         compiled_checkpointed_fn = torch.compile(

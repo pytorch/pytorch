@@ -65,11 +65,11 @@ def _get_adjusted_next_layer_bias(
         parametrize.is_parametrized(next_layer)
         and getattr(next_layer, "_bias", None) is not None
     ):  # next_layer is parametrized & has original bias ._bias
-        adjusted_bias = nn.Parameter(scaled_biases + next_layer._bias)
+        adjusted_bias = nn.Parameter(scaled_biases + next_layer._bias)  # type: ignore[operator]
     elif (
         not parametrize.is_parametrized(next_layer) and next_layer.bias is not None
     ):  # next_layer not parametrized & has .bias
-        adjusted_bias = nn.Parameter(scaled_biases + next_layer.bias)
+        adjusted_bias = nn.Parameter(scaled_biases + next_layer.bias)  # type: ignore[operator]
     else:  # next_layer has no bias
         adjusted_bias = nn.Parameter(scaled_biases)
     return adjusted_bias
@@ -411,7 +411,7 @@ def prune_lstm_output_layernorm_linear(
                 W_hi, W_hf, W_hg, W_ho = torch.split(
                     getattr(lstm, f"weight_hh_l{i}"), lstm.hidden_size
                 )
-                M_hi, M_hf, M_hg, M_ho = torch.split(mask, lstm.hidden_size)
+                M_hi, M_hf, M_hg, M_ho = torch.split(mask, lstm.hidden_size)  # type: ignore[arg-type]
 
                 # resize each individual weight separately
                 W_hi = W_hi[M_hi][:, M_hi]
