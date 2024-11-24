@@ -15,14 +15,10 @@ import os
 from typing import Dict, List, Optional, Tuple
 
 
+# NOTE: Also update the CUDA sources in tools/nightly.py when changing this list
 CUDA_ARCHES = ["11.8", "12.4", "12.6"]
-
-
 CUDA_ARCHES_FULL_VERSION = {"11.8": "11.8.0", "12.4": "12.4.1", "12.6": "12.6.2"}
-
-
 CUDA_ARCHES_CUDNN_VERSION = {"11.8": "9", "12.4": "9", "12.6": "9"}
-
 
 ROCM_ARCHES = ["6.1", "6.2"]
 
@@ -30,12 +26,9 @@ XPU_ARCHES = ["xpu"]
 
 CPU_CXX11_ABI_ARCH = ["cpu-cxx11-abi"]
 
-
 CPU_AARCH64_ARCH = ["cpu-aarch64"]
 
-
 CPU_S390X_ARCH = ["cpu-s390x"]
-
 
 CUDA_AARCH64_ARCH = ["cuda-aarch64"]
 
@@ -73,7 +66,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-cuda-nvrtc-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cuda-runtime-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cuda-cupti-cu12==12.6.80; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cudnn-cu12==9.5.1.17; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cublas-cu12==12.6.3.3; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cufft-cu12==11.3.0.4; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-curand-cu12==10.3.7.77; platform_system == 'Linux' and platform_machine == 'x86_64' | "
