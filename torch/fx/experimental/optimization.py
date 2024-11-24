@@ -79,7 +79,8 @@ def fuse(model: torch.nn.Module, inplace=False, no_trace=False) -> torch.nn.Modu
     for pattern in patterns:
         for node in new_graph.nodes:
             if matches_module_pattern(pattern, node, modules):
-                if len(node.args[0].users) > 1:  # Output of conv/linear is used by other nodes
+                if len(node.args[0].users) > 1:
+                    # Output of conv/linear is used by other nodes
                     continue
                 first_layer = modules[node.args[0].target]
                 bn = modules[node.target]
