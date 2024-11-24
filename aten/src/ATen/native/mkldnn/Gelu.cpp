@@ -29,7 +29,7 @@ Tensor mkldnn_gelu_backward(const Tensor& grad_output, const Tensor& input, c10:
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 Tensor mkldnn_gelu(const Tensor& input, c10::string_view approximate) {
   if (input.scalar_type() == ScalarType::BFloat16) {
@@ -59,6 +59,6 @@ Tensor mkldnn_gelu_backward(const Tensor& grad_output, const Tensor& input, c10:
                                  grad_output.options().device_opt());
 }
 
-}}
+}
 
 #endif // AT_MKLDNN_ENABLED
