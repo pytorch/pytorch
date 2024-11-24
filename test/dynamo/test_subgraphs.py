@@ -24,7 +24,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         correct1 = fn(v1, v2)
         correct2 = fn(v2, v1)
         cnt = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnt)(fn)
+        opt_fn = torch.compile(fn, backend=cnt)
         r1 = opt_fn(v1, v2)
         r2 = opt_fn(v2, v1)
         self.assertTrue(torch._dynamo.testing.same(r1, correct1))
@@ -284,7 +284,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         correct1 = fn(v1, v2, t)
         correct2 = fn(v1, v2, f)
         cnt = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnt)(fn)
+        opt_fn = torch.compile(fn, backend=cnt)
         r1 = opt_fn(v1, v2, t)
         r2 = opt_fn(v1, v2, f)
         self.assertTrue(torch._dynamo.testing.same(r1, correct1))
@@ -354,7 +354,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
             return a[b.size(0) - 1]
 
         cnt = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnt)(fn)
+        opt_fn = torch.compile(fn, backend=cnt)
         for i in range(3, 12):
             opt_fn(torch.randn(i), torch.randn(i))
         # just one graph
@@ -366,7 +366,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
 
         torch._dynamo.reset()
         cnt_dynamic = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnt_dynamic, dynamic=True)(fn)
+        opt_fn = torch.compile(fn, backend=cnt_dynamic, dynamic=True)
         start = 2
         end = 12
         steps = end - start
@@ -384,7 +384,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
 
         torch._dynamo.reset()
         cnt_dynamic = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnt_dynamic, dynamic=True)(fn)
+        opt_fn = torch.compile(fn, backend=cnt_dynamic, dynamic=True)
         x = torch.randn(2)
         y = torch.randn(3)
         self.assertEqual(opt_fn(x, x), fn(x, x))
@@ -397,7 +397,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
 
         torch._dynamo.reset()
         cnt_dynamic = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnt_dynamic)(fn)
+        opt_fn = torch.compile(fn, backend=cnt_dynamic)
         x = torch.randn(2)
         y = torch.randn(3)
         self.assertEqual(opt_fn(x, y), fn(x, y))
@@ -423,7 +423,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
 
         torch._dynamo.reset()
         cnt_dynamic = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnt_dynamic, dynamic=True)(fn)
+        opt_fn = torch.compile(fn, backend=cnt_dynamic, dynamic=True)
         x = torch.randn(0)
         y = torch.randn(2)
         self.assertEqual(opt_fn(y), fn(y))
@@ -469,7 +469,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         t = torch.Tensor([True])
         f = torch.Tensor([False])
         cnt = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnt)(fn)
+        opt_fn = torch.compile(fn, backend=cnt)
         for a in (t, f):
             for b in (t, f):
                 for c in (t, f):
@@ -555,7 +555,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         v1 = torch.randn(10)
         v2, it2 = fn(v1)
         cnt = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnt)(fn)
+        opt_fn = torch.compile(fn, backend=cnt)
         v3, it3 = opt_fn(v1)
         v4, it4 = opt_fn(v1)
         self.assertEqual(v2.tolist(), v3.tolist())
@@ -575,7 +575,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         v1 = torch.randn(10)
         it1 = iter(tuple(range(10)))
         cnt = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnt)(fn)
+        opt_fn = torch.compile(fn, backend=cnt)
         self.assertEqual(opt_fn(v1, it1).tolist(), (v1 + 1 + 2 + 3).tolist())
         self.assertEqual(list(it1), [4, 5, 6, 7, 8, 9])
 

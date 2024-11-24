@@ -1004,7 +1004,10 @@ class TestInductorDynamic(TestCase):
 
         self.assertEqual(fn(x, 2.0, z), fn_opt(x, 2.0, z))
         self.assertEqual(fn(x, 3.0, z), fn_opt(x, 3.0, z))
-        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(fn(x, 4.0, z), fn_opt(x, 4.0, z))
+        # We expect frame count to be 2 since we will have
+        # one sledgehammer restart.
+        self.assertEqual(cnt.frame_count, 2)
 
     @torch._dynamo.config.patch(specialize_float=False)
     def test_unspecialized_float_fallback_symint_specialization(self):
@@ -1017,7 +1020,10 @@ class TestInductorDynamic(TestCase):
 
         self.assertEqual(fn(2.0, y), fn_opt(2.0, y))
         self.assertEqual(fn(3.0, y), fn_opt(3.0, y))
-        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(fn(4.0, y), fn_opt(4.0, y))
+        # We expect frame count to be N + 1 since we will have
+        # one sledgehammer restart for the first compile.
+        self.assertEqual(cnt.frame_count, 4)
 
     def test_sort_dynamic_shape_with_check(self, device):
         if TEST_WITH_ROCM or torch.device(device).type != GPU_TYPE:

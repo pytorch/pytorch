@@ -55,10 +55,11 @@ def _allocate_jacobians_with_inputs(
     # of `t.numel` and width of `numel_output`. Otherwise, for each tensor, returns
     # a 1-d tensor with size `(t.numel,)`. Each new tensor will be strided and have
     # the same dtype and device as those of the corresponding input.
-    out: List[torch.Tensor] = []
-    for t in input_tensors:
-        if _is_float_or_complex_tensor(t) and t.requires_grad:
-            out.append(t.new_zeros((t.numel(), numel_output), layout=torch.strided))
+    out: List[torch.Tensor] = [
+        t.new_zeros((t.numel(), numel_output), layout=torch.strided)
+        for t in input_tensors
+        if _is_float_or_complex_tensor(t) and t.requires_grad
+    ]
     return tuple(out)
 
 
@@ -69,11 +70,12 @@ def _allocate_jacobians_with_outputs(
     # in `output_tensors`, returns a new zero-filled tensor with height of `dim` and
     # width of `t.numel`. Otherwise, for each tensor, returns a 1-d tensor with size
     # (t.numel,).
-    out: List[torch.Tensor] = []
     options = {"dtype": dtype, "device": device, "layout": torch.strided}
-    for t in output_tensors:
-        if _is_float_or_complex_tensor(t):
-            out.append(t.new_zeros((numel_input, t.numel()), **options))
+    out: List[torch.Tensor] = [
+        t.new_zeros((numel_input, t.numel()), **options)
+        for t in output_tensors
+        if _is_float_or_complex_tensor(t)
+    ]
     return tuple(out)
 
 
@@ -904,10 +906,10 @@ def _compute_analytical_jacobian_rows(
 def _get_analytical_vjps_wrt_specific_output(
     vjp_fn, sample_output, v
 ) -> List[List[Optional[torch.Tensor]]]:
-    vjps: List[List[Optional[torch.Tensor]]] = []
     grad_inputs = vjp_fn(v.reshape(sample_output.shape))
-    for vjp in grad_inputs:
-        vjps.append([vjp.clone() if isinstance(vjp, torch.Tensor) else None])
+    vjps: List[List[Optional[torch.Tensor]]] = [
+        [vjp.clone() if isinstance(vjp, torch.Tensor) else None] for vjp in grad_inputs
+    ]
     return vjps
 
 
@@ -1996,7 +1998,7 @@ def gradcheck(
     .. warning::
        If any checked tensor in :attr:`input` has overlapping memory, i.e.,
        different indices pointing to the same memory address (e.g., from
-       :func:`torch.expand`), this check will likely fail because the numerical
+       :func:`torch.Tensor.expand`), this check will likely fail because the numerical
        gradients computed by point perturbation at such indices will change
        values at all other indices that share the same memory address.
 
@@ -2150,7 +2152,7 @@ def gradgradcheck(
     .. warning::
        If any checked tensor in :attr:`input` and :attr:`grad_outputs` has
        overlapping memory, i.e., different indices pointing to the same memory
-       address (e.g., from :func:`torch.expand`), this check will likely fail
+       address (e.g., from :func:`torch.Tensor.expand`), this check will likely fail
        because the numerical gradients computed by point perturbation at such
        indices will change values at all other indices that share the same
        memory address.
