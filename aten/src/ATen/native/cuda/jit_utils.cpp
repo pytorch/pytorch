@@ -56,26 +56,6 @@ _Tp __declval(long);
 template <class _Tp>
 decltype(__declval<_Tp>(0)) declval() noexcept;
 
-template <class _Tp> struct remove_const            {typedef _Tp type;};
-template <class _Tp> struct remove_const<const _Tp> {typedef _Tp type;};
-template <class _Tp> using remove_const_t = typename remove_const<_Tp>::type;
-
-template <class _Tp> struct remove_volatile               {typedef _Tp type;};
-template <class _Tp> struct remove_volatile<volatile _Tp> {typedef _Tp type;};
-template <class _Tp> using remove_volatile_t = typename remove_volatile<_Tp>::type;
-
-template <class _Tp> struct remove_cv
-{typedef typename remove_volatile<typename remove_const<_Tp>::type>::type type;};
-template <class _Tp> using remove_cv_t = typename remove_cv<_Tp>::type;
-
-template <class _Tp> struct __libcpp_is_floating_point              : public false_type {};
-template <>          struct __libcpp_is_floating_point<float>       : public true_type {};
-template <>          struct __libcpp_is_floating_point<double>      : public true_type {};
-template <>          struct __libcpp_is_floating_point<long double> : public true_type {};
-
-template <class _Tp>
-inline constexpr bool is_arithmetic_v = is_arithmetic<_Tp>::value;
-
 template <class _Tp>
 struct __numeric_type
 {
@@ -92,7 +72,7 @@ struct __numeric_type
    static long double __test(long double);
 
    typedef decltype(__test(declval<_Tp>())) type;
-   static const bool value = !is_same<type, void>::value;
+   static const bool value = !::std::is_same<type, void>::value;
 };
 
 template <>
