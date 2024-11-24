@@ -9,7 +9,7 @@ from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, cast, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, cast, Dict, List, Optional, Set, Tuple, Union
 
 import torch
 import torch.fx._pytree as fx_pytree
@@ -132,12 +132,12 @@ class InterpreterModule(torch.nn.Module):
         super().__init__()
         self.graph = graph
         self.graph.owning_module = self
-        self._run_with_interpeter = RUN_WITH_INTERPRETER
+        self._run_with_interpreter = RUN_WITH_INTERPRETER
 
     def forward(self, *args, **kwargs):
         assert self.graph_module is not None, "Didn't finalize this InterpreterModule"
         if not is_fx_tracing() and (
-            torch.compiler.is_dynamo_compiling() or not self._run_with_interpeter
+            torch.compiler.is_dynamo_compiling() or not self._run_with_interpreter
         ):
             # Dynamo cannot trace through torch.fx.Interpreter, so fall back to
             # GraphModule codegen in this instance.
@@ -283,7 +283,7 @@ class UnflattenedModule(torch.nn.Module):
         self.flat_args_adapter = flat_args_adapter
         # Flag to indicate whether args have been adapted.
         self.adapted = False
-        self._run_with_interpeter = RUN_WITH_INTERPRETER
+        self._run_with_interpreter = RUN_WITH_INTERPRETER
 
         _inplace_buffer_mutations(export_graph, self.graph_signature)
 
@@ -498,6 +498,7 @@ class UnflattenedModule(torch.nn.Module):
         # Recurively check all input nodes have been processed.
         check_module_inputs(self, [])
         self._dispatch_modules(redirected_call_indices)
+        fqn_list = [fqn for fqn in fqn_list if "@" not in fqn]
 
         # Cache so we don't have to compute this every time.
         # NOTE: this needs to be kept in sync with the placeholders in
@@ -546,7 +547,7 @@ class UnflattenedModule(torch.nn.Module):
                 )
             return flat_args
 
-    def forward(self, *args, **kwargs):
+    def process_forward_inputs(self, *args, **kwargs):
         signature = self.module_call_graph[0].signature
 
         reordered_kwargs = reorder_kwargs(kwargs, signature.in_spec)
@@ -555,14 +556,9 @@ class UnflattenedModule(torch.nn.Module):
             (args, reordered_kwargs)
         )
         flat_args = [x[1] for x in flat_args_with_path]
+
         if is_fx_tracing():
-            return_val = torch.fx.Interpreter(self, graph=self.graph).run(
-                *flat_args, enable_io_processing=False
-            )
-            # For scalar return value, fx.Graph wraps in a tuple
-            if isinstance(return_val, tuple) and len(return_val) == 1:
-                return return_val[0]
-            return return_val
+            return flat_args
 
         if in_spec != signature.in_spec:
             if not self.adapted:
@@ -594,6 +590,22 @@ class UnflattenedModule(torch.nn.Module):
             _check_input_constraints_for_graph(
                 self.input_placeholders, new_flat_args_with_path, self.range_constraints
             )
+
+        return flat_args
+
+    def forward(self, *args, **kwargs):
+        flat_args = torch._dynamo.disable(self.process_forward_inputs)(*args, **kwargs)
+        signature = self.module_call_graph[0].signature
+
+        if is_fx_tracing():
+            return_val = torch.fx.Interpreter(self, graph=self.graph).run(
+                *flat_args, enable_io_processing=False
+            )
+            # For scalar return value, fx.Graph wraps in a tuple
+            if isinstance(return_val, tuple) and len(return_val) == 1:
+                return return_val[0]
+            return return_val
+
         if torch.compiler.is_dynamo_compiling() and not self._run_with_interpreter:
             tree_out = torch.fx.GraphModule(self, self.graph)(*flat_args)
         else:
@@ -634,16 +646,27 @@ class UnflattenedModule(torch.nn.Module):
                 for i, call_module in enumerate(call_modules):
                     fqn = _call_name(orig_fqn, i + 1)
                     if fqn not in redirected_call_indices:
-                        self._modules.pop(fqn)
+                        *prefix, name = fqn.split(".")
+                        _get_attr_via_attr_list(self, prefix)._modules.pop(name)
                 self.set_submodule(orig_fqn, InterpreterModuleDispatcher(call_modules))
 
         # elide call indices in call modules because they are
         # tracked automatically inside the dispatcher module
-        for node in self.graph.nodes:
-            if node.op == "call_module":
-                fqn = node.target.split("@")[0]
-                if fqn in called_modules:
-                    node.target = fqn
+        def elide_call_indices(prefix, graph):
+            for node in graph.nodes:
+                if node.op == "call_module":
+                    fqn = node.target.split("@")[0]
+                    path = f"{prefix}.{fqn}" if prefix else fqn
+                    if path in called_modules:
+                        node.target = fqn
+
+        for fqn, mod in self.named_modules(remove_duplicate=False):
+            if hasattr(mod, "graph"):
+                elide_call_indices(fqn, mod.graph)
+            elif hasattr(mod, "_call_modules"):
+                for mod_ in mod._call_modules:
+                    assert hasattr(mod_, "graph")
+                    elide_call_indices(fqn, mod_.graph)
 
     def print_readable(
         self,
@@ -840,14 +863,22 @@ def _get_submodule(mod: torch.nn.Module, target: str):
     return getattr(mod, field, None)
 
 
-def _add_submodule(mod: torch.nn.Module, target: str, module_to_add: torch.nn.Module):
+def _add_submodule(
+    mod: torch.nn.Module,
+    target: str,
+    module_to_add: torch.nn.Module,
+    create_module: Optional[Callable[[str], torch.nn.Module]] = None,
+):
     *prefix, field = target.split(".")
 
-    for item in prefix:
+    for i, item in enumerate(prefix):
         submod = getattr(mod, item, None)
 
         if submod is None:
-            submod = torch.nn.Module()
+            if create_module is not None:
+                submod = create_module(".".join(prefix[: i + 1]))
+            else:
+                submod = torch.nn.Module()
             setattr(mod, item, submod)
 
         if not isinstance(submod, torch.nn.Module):
@@ -877,6 +908,7 @@ class _ModuleFrame:
         seen_nodes,
         seen_modules,
         seen_attrs,
+        created_modules,
         parent,
         module_stack: List[Tuple[str, int]],
         module_id,
@@ -888,6 +920,7 @@ class _ModuleFrame:
         self.seen_nodes = seen_nodes
         self.seen_modules = seen_modules
         self.seen_attrs = seen_attrs
+        self.created_modules = created_modules
         self.parent = parent
         self.module_stack = module_stack
         self.module_id = module_id
@@ -903,7 +936,10 @@ class _ModuleFrame:
             self.module = module
             self.ivals = module.ivals if hasattr(module, "ivals") else {}  # type: ignore[var-annotated]
         else:
-            self.module = InterpreterModule(torch.fx.Graph())
+            self.module = self.created_modules.get(
+                self.fqn,
+                InterpreterModule(torch.fx.Graph()),
+            )
             self.ivals = parent.ivals
 
         self.graph = self.module.graph
@@ -915,7 +951,16 @@ class _ModuleFrame:
         self.parent_call_module: Optional[torch.fx.Node] = None
         if parent is not None:
             accessor = _compute_accessor(parent.fqn, self.child_fqn)
-            _add_submodule(parent.module, accessor, self.module)
+
+            def create_module(fqn):
+                path = f"{parent.fqn}.{fqn}" if parent.fqn else fqn
+                if path in self.created_modules:
+                    return self.created_modules[path]
+                submod = InterpreterModule(torch.fx.Graph())
+                self.created_modules[path] = submod
+                return submod
+
+            _add_submodule(parent.module, accessor, self.module, create_module)
             self.parent_call_module = parent.graph.call_module(accessor)
             self.seen_modules[self.module_id].append(
                 _SubmoduleEntry(
@@ -1080,6 +1125,8 @@ class _ModuleFrame:
             )
 
     def finalize_outputs(self):
+        self.created_modules.pop(self.fqn, None)
+
         orig_outputs = []
 
         signature = self.module_call_graph.get(self.child_fqn)
@@ -1259,6 +1306,7 @@ class _ModuleFrame:
                     self.seen_nodes,
                     self.seen_modules,
                     self.seen_attrs,
+                    self.created_modules,
                     self,
                     self.module_stack + [next_module],
                     next_module_key.split("@")[0],
@@ -1293,12 +1341,14 @@ def _outline_submodules(orig_graph: torch.fx.Graph, root_module: UnflattenedModu
     seen_nodes: Dict[str, torch.fx.Node] = {}
     seen_modules: Dict[int, List[_SubmoduleEntry]] = defaultdict(list)
     seen_attrs: Dict[str, Set[str]] = defaultdict(set)
+    created_modules: Dict[str, torch.nn.Module] = {}
     _ModuleFrame(
         orig_graph,
         tuple(orig_graph.nodes),
         seen_nodes,
         seen_modules,
         seen_attrs,
+        created_modules,
         None,
         [("", 0)],
         "",
@@ -1456,6 +1506,7 @@ def _deduplicate_modules(partitions):
             # Iterate over all previously seen modules, and deduplicate if possible
             for seen in shared_submodules[:i]:
                 if _check_graph_equivalence(seen.module, entry.module):
+                    parent = entry.parent_module
                     # Since graphs are equivalent, we can deduplicate.
                     # There are two cases.
                     if seen.fqn == entry.fqn:
@@ -1464,9 +1515,7 @@ def _deduplicate_modules(partitions):
                         # So we remove the current module from the hierarchy and replace
                         # the current call name with the seen call name in the parent graph.
                         *prefix, name = target.split(".")
-                        _get_attr_via_attr_list(
-                            entry.parent_module, prefix
-                        )._modules.pop(name)
+                        _get_attr_via_attr_list(parent, prefix)._modules.pop(name)
                         seen_child_fqn = _call_name(seen.fqn, seen.call_idx)
                         seen_target = _compute_accessor(
                             entry.parent_fqn, seen_child_fqn
@@ -1484,7 +1533,7 @@ def _deduplicate_modules(partitions):
                         # was actually called. However, it is possible that the current call name
                         # will be optimized away when we find another seen module with the same fqn,
                         # so we do not break out of the loop yet.
-                        entry.parent_module.set_submodule(target, seen.module)
+                        parent.set_submodule(target, seen.module)
                         deduplicated = True
 
     return redirected_call_indices
@@ -1494,6 +1543,7 @@ def _sink_params(
     module: torch.nn.Module,
     inputs_to_state: Dict[str, List[str]],
     scope: List[str],
+    module_id_to_inputs_removed: Optional[Dict[int, List[str]]] = None,
 ):
     """Sink params, buffers, and constants from graph inputs into get_attr nodes.
 
@@ -1507,26 +1557,31 @@ def _sink_params(
     inputs_to_state: mapping graph input names to the corresponding key in the state_dict.
     scope: tracks where we are in the module hierarchy, so that we can emit the
         right `getattr(self, "foo.bar")` calls, etc.
+    module_id_to_inputs_removed: records inputs removed by child modules, mapping
+        the module object id to the list of placeholder node names in the child module
+        that were removed.
     """
-    # This dict records inputs removed by child modules.
-    # Maps the module object id to the list of placeholder node names
-    # in the child module that were removed.
-    module_id_to_inputs_removed: Dict[int, List[str]] = defaultdict(list)
+
+    if module_id_to_inputs_removed is None:
+        module_id_to_inputs_removed = defaultdict(list)
 
     # We need to use _modules here instead of named_children(), because we
     # explicitly want duplicate modules to show up in the traversal.
     for name, submodule in module._modules.items():
         submod_id_to_inputs_removed = _sink_params(
-            cast(torch.nn.Module, submodule), inputs_to_state, scope + [name]
+            cast(torch.nn.Module, submodule),
+            inputs_to_state,
+            scope + [name],
+            module_id_to_inputs_removed,
         )
         for k, v in submod_id_to_inputs_removed.items():
             module_id_to_inputs_removed[k].extend(v)
 
-    if not hasattr(module, "graph"):
+    graph = getattr(module, "graph", None)
+    if graph is None or len(graph.nodes) == 0:
         # Not all modules have graphs defined, if they are empty modules with no operations (like ParameterList)
         return module_id_to_inputs_removed
 
-    graph = module.graph
     inputs = list(filter(lambda n: n.op == "placeholder", graph.nodes))  # type: ignore[arg-type, union-attr, var-annotated]
     the_last_input = inputs[-1]
 
