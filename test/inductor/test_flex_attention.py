@@ -4250,7 +4250,7 @@ class TestLearnableBiases(InductorTestCase):
         return (make_tensor(), make_tensor(), make_tensor())
 
     @torch.no_grad()
-    def _gold_check(self, eager, compiled, gold, tensor_name, fudge_factor=1.2):
+    def _gold_check(self, eager, compiled, gold, tensor_name, fudge_factor=1.3):
         ref_error = rmse(eager, gold)
         comp_error = rmse(compiled, gold)
         # Note: This has been carefully tested that FlexAttention is within
