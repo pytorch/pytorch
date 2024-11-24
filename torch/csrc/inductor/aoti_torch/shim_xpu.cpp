@@ -40,7 +40,8 @@ AOTITorchError aoti_torch_create_xpu_stream_guard(
     }
     at::StreamGuard* guard =
         new at::StreamGuard(at::xpu::getStreamFromExternal(
-            static_cast<sycl::queue*>(stream), device_index).unwrap());
+                                static_cast<sycl::queue*>(stream), device_index)
+                                .unwrap());
     *ret_guard = reinterpret_cast<XPUStreamGuardHandle>(guard);
   });
 }
