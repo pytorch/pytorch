@@ -652,11 +652,7 @@ bool can_use_flash_attention(sdp_params const& params, bool debug) {
       }
     }
   }
-#if USE_ROCM
-  constexpr bool backend_supports_grouped_query_attention = false;
-#else
   constexpr bool backend_supports_grouped_query_attention = true;
-#endif
   if (has_only_dense_inputs(params)) {
     constexpr auto dense_constraints = array_of<bool (*)(sdp_params const&, bool)>(
         check_batch_size_and_num_heads_dense<backend_supports_grouped_query_attention>,
