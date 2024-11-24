@@ -114,6 +114,9 @@ def cal_conv_generated_kernel_number(mod, input, dtype):
     return input_kernel + output_kernel
 
 
+# The pattern match for this is kind of broken.  I'll cc the
+# person who wrote this test/match on the diff to see if they can help me fix it.
+@torch._dynamo.config.patch(specialize_float=True)
 @config.patch({"freezing": True})
 class TestPatternMatcherBase(TestCase):
     def _check_unary_is_decomposed(self, unary_fn):
