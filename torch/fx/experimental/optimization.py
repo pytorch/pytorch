@@ -17,6 +17,22 @@ from torch.fx.passes.shape_prop import ShapeProp
 from torch.nn.utils.fusion import fuse_conv_bn_eval, fuse_linear_bn_eval
 
 
+__all__ = [
+    "matches_module_pattern",
+    "replace_node_module",
+    "fuse",
+    "remove_dropout",
+    "extract_subgraph",
+    "modules_to_mkldnn",
+    "reset_modules",
+    "MklSubgraph",
+    "gen_mkl_autotuner",
+    "use_mkl_length",
+    "UnionFind",
+    "optimize_for_inference",
+]
+
+
 def _parent_name(target: str) -> Tuple[str, str]:
     """
     Splits a qualname into parent path and last atom.
