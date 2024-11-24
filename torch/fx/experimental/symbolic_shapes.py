@@ -1360,13 +1360,13 @@ def fx_placeholder_targets(gm: torch.fx.GraphModule) -> List[str]:
 def eval_guards(
     gm: torch.fx.GraphModule, *args: Tensor, ignore_static: bool = True
 ) -> bool:
-    return gm.shape_env.evaluate_guards_for_args(
+    return gm.shape_env.evaluate_guards_for_args(  # type: ignore[operator, union-attr]
         fx_placeholder_vals(gm), args, ignore_static=ignore_static
     )
 
 
 def bind_symbols(gm: torch.fx.GraphModule, *args: Tensor) -> Dict[sympy.Symbol, int]:
-    return gm.shape_env.bind_symbols(fx_placeholder_vals(gm), args)
+    return gm.shape_env.bind_symbols(fx_placeholder_vals(gm), args)  # type: ignore[operator, union-attr]
 
 
 class DimDynamic(Enum):
@@ -2025,6 +2025,8 @@ SYMPY_INTERP = {
     "OpaqueUnaryFn_tanh": math.tanh,
     "OpaqueUnaryFn_atan": math.atan,
     "OpaqueUnaryFn_sqrt": math.sqrt,
+    "BitwiseFn_bitwise_and": operator.and_,
+    "BitwiseFn_bitwise_or": operator.or_,
 }
 
 

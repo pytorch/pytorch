@@ -178,7 +178,7 @@ class ReplicateTest(MultiProcessInductorTestCase):
                     bwd_context = (
                         contextlib.nullcontext()
                         if model_idx == 0
-                        else compiled_autograd.enable(compiler_fn(no_inductor))
+                        else compiled_autograd._enable(compiler_fn(no_inductor))
                     )
                     with bwd_context:
                         loss = models[model_idx](input).sum()
@@ -295,7 +295,7 @@ class ReplicateTest(MultiProcessInductorTestCase):
         )
 
         def bwd(loss):
-            with compiled_autograd.enable(compiler_fn()):
+            with compiled_autograd._enable(compiler_fn()):
                 loss.backward()
 
         for i in range(loop):
@@ -439,7 +439,7 @@ class DDP_TP_Test(InductorTestCase):
         )
         compiled_replicate_model = torch.compile(compiled_replicate_model)
         data = torch.randn([1, DIM])
-        with compiled_autograd.enable(compiler_fn()):
+        with compiled_autograd._enable(compiler_fn()):
             loss = compiled_replicate_model(data).sum()
             # TODO: We need "pre-dispatch tracing of backward graph" to make this work:
             # https://github.com/pytorch/pytorch/issues/127797#issuecomment-2291695474
