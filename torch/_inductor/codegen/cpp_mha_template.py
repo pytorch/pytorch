@@ -79,13 +79,15 @@ ATTENTION_TEMPLATE = r"""
       kv_blocks_num++;
     }
   }
-  // update kvSize, incase like page attention has allocated extra buffers
-  int64_t kvSize = kv_blocks_num * kvBlockSize;
 
+  int64_t kvSize = {{kernel.size(key, 1)}};
+  // update kvSize, incase like page attention has allocated extra buffers
+  kvSize = kvSize <= kv_blocks_num * kvBlockSize? kvSize : kv_blocks_num * kvBlockSize;
   qSplitSize = qSplitSize > qSize ? qSize : qSplitSize;
   kvSplitSize = kvSplitSize > kvSize ? kvSize : kvSplitSize;
   int64_t qSlice = (qSize + qSplitSize - 1) / qSplitSize;
   int64_t kvTail = (kvSize - 1) % kvSplitSize + 1;
+
 
   // allocate per thread temp buf (accumulate type)
   int64_t size_per_thread =
@@ -144,8 +146,7 @@ ATTENTION_TEMPLATE = r"""
             auto kv_logical_data = kv_indices_data + i_kvi*kviStrideB + j_kvi*kviStrideH  + kv_block_num;
             auto i_kv = is_broadcast_bs_kv ? i/bs_shards : i;
             auto j_kv = is_broadcast_head_kv ? j/gqa_shards : j;
-
-            auto k_addr = k_data + i_kv * kStrideB + j_kv * kStrideH + (*kv_logical_data * kvBlockSize + kv_block_offset)  * kStrideN;
+            auto k_addr = k_data + i_kv * kStrideB + j_kv * kStrideH + (*kv_logical_data * kvBlockSize)  * kStrideN;
 
             at::native::cpublas::gemm(
               at::native::TransposeType::Transpose,
@@ -167,15 +168,16 @@ ATTENTION_TEMPLATE = r"""
             // apply score mod function
             for (int64_t row = 0; row < cur_qSplitSize; ++row) {
               for(int col = 0; col< cur_kvSplitSize; col++){
-                std::vector<int64_t> b_ = {i};
-                std::vector<int64_t> h_ = {j};
-                std::vector<int64_t> q_ = {k*cur_qSplitSize+row};
-                std::vector<int64_t> k_ = {n+col};
+                std::vector<int64_t> b_idx = {i};
+                std::vector<int64_t> h_idx = {j};
+                std::vector<int64_t> q_idx = {k*cur_qSplitSize+row};
+                int64_t phisical_kv_idx = *kv_logical_data * kvBlockSize + col;
+                std::vector<int64_t> kv_idx = {phisical_kv_idx};
                 accum_t* in_ptr0 = qk_data + row * cur_kvSplitSize + col;
-                auto in_ptr1 = b_.data();
-                auto in_ptr2 = h_.data();
-                auto in_ptr3 = q_.data();
-                auto in_ptr10 = k_.data();
+                auto in_ptr1 = b_idx.data();
+                auto in_ptr2 = h_idx.data();
+                auto in_ptr3 = q_idx.data();
+                auto in_ptr10 = kv_idx.data();
                 {%- if mask_mod_other_buffers %}
                 auto in_ptr4 = mask_other;
                 {%- endif %}
@@ -186,15 +188,16 @@ ATTENTION_TEMPLATE = r"""
             // Apply block mask, fill unused with -inf
             for (int64_t row = 0; row < cur_qSplitSize; ++row) {
               for(int col = 0; col< cur_kvSplitSize; col++){
-                std::vector<int64_t> b_ = {i};
-                std::vector<int64_t> h_ = {j};
-                std::vector<int64_t> q_ = {k*cur_qSplitSize+row};
-                std::vector<int64_t> k_ = {n+col};
+                std::vector<int64_t> b_idx = {i};
+                std::vector<int64_t> h_idx = {j};
+                std::vector<int64_t> q_idx = {k*cur_qSplitSize+row};
+                int64_t phisical_kv_idx = *kv_logical_data * kvBlockSize + col;
+                std::vector<int64_t> kv_idx = {phisical_kv_idx};
                 accum_t* qk_block = qk_data + row * cur_kvSplitSize + col;
-                auto in_ptr0 = b_.data();
-                auto in_ptr1 = h_.data();
-                auto in_ptr2 = q_.data();
-                auto in_ptr3 = k_.data();
+                auto in_ptr0 = b_idx.data();
+                auto in_ptr1 = h_idx.data();
+                auto in_ptr2 = q_idx.data();
+                auto in_ptr3 = kv_idx.data();
                 {%- if mask_mod_other_buffers %}
                 auto in_ptr4 = mask_other;
                 {%- endif %}                
@@ -245,7 +248,7 @@ ATTENTION_TEMPLATE = r"""
               }
             }
             // Calculate Softmax(q @ k.T) @ v
-            auto v_addr = v_data + i_kv * vStrideB + j_kv * vStrideH + (*kv_logical_data * kvBlockSize + kv_block_offset)  * vStrideN;
+            auto v_addr = v_data + i_kv * vStrideB + j_kv * vStrideH + (*kv_logical_data * kvBlockSize)  * vStrideN;
 
             at::native::cpublas::gemm(
               at::native::TransposeType::NoTranspose,
