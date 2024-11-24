@@ -5,8 +5,7 @@
 
 #if AT_MKLDNN_ENABLED()
 
-namespace at {
-namespace native {
+namespace at::native {
 C10_API Tensor mkldnn_linear_pointwise(
     const Tensor& input_t,
     const Tensor& weight_t,
@@ -33,7 +32,6 @@ C10_API Tensor mkl_linear(
 
 #endif// AT_MKL_ENABLED
 
-} // namespace native
 } // namespace at
 
 #endif // AT_MKLDNN_ENABLED()
