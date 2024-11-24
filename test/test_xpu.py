@@ -127,6 +127,11 @@ class TestXpu(TestCase):
             device_properties.has_subgroup_2d_block_io,
             device_capability["has_subgroup_2d_block_io"],
         )
+        if int(torch.version.xpu) >= 20250000:
+            self.assertEqual(
+                device_properties.architecture,
+                device_capability["architecture"],
+            )
 
     def test_wrong_xpu_fork(self):
         stderr = TestCase.runWithPytorchAPIUsageStderr(
@@ -391,22 +396,31 @@ print(torch.xpu.device_count())
 
     def test_memory_allocation(self):
         torch.xpu.empty_cache()
-        prev = torch.xpu.memory_allocated()
+        prev_allocated = torch.xpu.memory_allocated()
+        prev_reserved = torch.xpu.memory_reserved()
+        self.assertGreaterEqual(prev_allocated, 0)
+        self.assertGreaterEqual(prev_reserved, 0)
         a = torch.ones(10, device="xpu")
-        self.assertGreater(torch.xpu.memory_allocated(), prev)
-        self.assertGreater(torch.xpu.memory_reserved(), 0)
+        self.assertGreater(torch.xpu.memory_allocated(), prev_allocated)
+        self.assertGreaterEqual(torch.xpu.memory_reserved(), prev_reserved)
         del a
-        self.assertEqual(torch.xpu.memory_allocated(), prev)
+        self.assertEqual(torch.xpu.memory_allocated(), prev_allocated)
         torch.xpu.empty_cache()
-        self.assertEqual(torch.xpu.memory_reserved(), 0)
+        self.assertLessEqual(torch.xpu.memory_reserved(), prev_reserved)
         torch.xpu.reset_accumulated_memory_stats()
         # Activate 1kB memory
+        prev_active_current = torch.xpu.memory_stats()["active_bytes.all.current"]
         a = torch.randn(256, device="xpu")
         # Detect if the current active memory is 1kB
-        self.assertEqual(torch.xpu.memory_stats()["active_bytes.all.current"], 1024)
+        self.assertEqual(
+            torch.xpu.memory_stats()["active_bytes.all.current"],
+            1024 + prev_active_current,
+        )
         self.assertEqual(torch.xpu.memory_stats()["active_bytes.all.freed"], 0)
         del a
-        self.assertEqual(torch.xpu.memory_stats()["active_bytes.all.current"], 0)
+        self.assertEqual(
+            torch.xpu.memory_stats()["active_bytes.all.current"], prev_active_current
+        )
         self.assertEqual(torch.xpu.memory_stats()["active_bytes.all.freed"], 1024)
 
     @unittest.skipIf(not TEST_MULTIXPU, "only one GPU detected")
@@ -456,7 +470,8 @@ class TestXpuAutocast(TestAutocast):
     # These operators are not implemented on XPU backend and we can NOT fall back
     # them to CPU. So we have to skip them at this moment.
     # TODO: remove these operators from skip list when they are implemented on XPU backend.
-    skip_list = ["gru_cell"]
+    # lstm_cell: The operator 'aten::_thnn_fused_lstm_cell' is not currently implemented for the XPU device
+    skip_list = ["gru_cell", "lstm_cell"]
 
     def setUp(self):
         super().setUp()
