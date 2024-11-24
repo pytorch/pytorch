@@ -761,7 +761,7 @@ class _FlopCounterMode(TorchDispatchMode):
             return NotImplemented
 
         # If we don't have func in flop_registry, see if it can decompose
-        if func not in self.counter.flop_registry:
+        if func not in self.counter.flop_registry and func is not torch.ops.prim.device.default:
             with self:
                 r = func.decompose(*args, **kwargs)
                 if r is not NotImplemented:
