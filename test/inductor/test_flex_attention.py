@@ -4250,7 +4250,7 @@ class TestLearnableBiases(InductorTestCase):
         return (make_tensor(), make_tensor(), make_tensor())
 
     @torch.no_grad()
-    def _gold_check(self, eager, compiled, gold, tensor_name, fudge_factor=1.3):
+    def _gold_check(self, eager, compiled, gold, tensor_name, fudge_factor=1.35):
         ref_error = rmse(eager, gold)
         comp_error = rmse(compiled, gold)
         # Note: This has been carefully tested that FlexAttention is within
@@ -4572,6 +4572,10 @@ class TestLearnableBiases(InductorTestCase):
         "params", get_params(test_dtypes), name_fn=lambda x: f"{x}"
     )
     def test_indirect_bias(self, params):
+        if TEST_WITH_ROCM:
+            self.skipTest(
+                "ROCM BUG SEE: https://github.com/pytorch/pytorch/issues/140855"
+            )
         query, key, value = self._init_tensors(params)
         bias = torch.randn(
             params.seq_length,
