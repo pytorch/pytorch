@@ -864,6 +864,15 @@ class CompilationMetrics:
     joint_graph_pass_time_us: Optional[int] = None
     log_format_version: int = LOG_FORMAT_VERSION
     inductor_config: Optional[str] = None
+    remote_cache_version: Optional[int] = None
+    inductor_fx_remote_cache_hit_count: Optional[int] = None
+    inductor_fx_remote_cache_miss_count: Optional[int] = None
+    inductor_fx_remote_cache_backend_type: Optional[str] = None
+    inductor_fx_remote_cache_hit_keys: Optional[str] = None
+    inductor_fx_remote_cache_miss_keys: Optional[str] = None
+    cuda_version: Optional[str] = None
+    triton_version: Optional[str] = None
+    feature_usage: Optional[dict[str, bool]] = None
 
 
 DEFAULT_COMPILATION_METRICS_LIMIT = 64
@@ -961,8 +970,33 @@ def record_compilation_metrics(metrics: Dict[str, Any]):
         metric = metrics.get(field, None)
         return metric // 1000 if metric is not None else None
 
+    def _convert_collection_to_str(field: str) -> Optional[str]:
+        def safe_str(item: Any) -> str:
+            try:
+                return str(item)
+            except Exception:
+                return str(None)
+
+        metric = metrics.get(field, None)
+        if metric is None:
+            return None
+
+        # Remove this field (list/set) from metrics to avoid clashes
+        del metrics[field]
+        if not isinstance(metric, set) and not isinstance(metric, list):
+            return None
+        return ",".join(safe_str(item) for item in metric)
+
     common_metrics = {
         "inductor_config": _scrubbed_inductor_config_for_logging(),
+        "cuda_version": torch.version.cuda,
+        "triton_version": triton.__version__ if has_triton() else "",
+        "inductor_fx_remote_cache_hit_keys": _convert_collection_to_str(
+            "inductor_fx_remote_cache_hit_keys"
+        ),
+        "inductor_fx_remote_cache_miss_keys": _convert_collection_to_str(
+            "inductor_fx_remote_cache_miss_keys"
+        ),
         # -------- Any future common metircs go here --------
         #
         # Legacy metircs go here(TODO: Temporary; populate legacy fields from their replacements.)
@@ -1535,9 +1569,10 @@ def checkpoint_params(gm):
         rng_state = torch.clone(torch.random.get_rng_state())
         if torch.cuda.is_available():
             cuda_rng_state = torch.clone(torch.cuda.get_rng_state())
-        saved_state = []
-        for param in itertools.chain(gm.parameters(), gm.buffers()):
-            saved_state.append((param, param._version, torch.clone(param)))
+        saved_state = [
+            (param, param._version, torch.clone(param))
+            for param in itertools.chain(gm.parameters(), gm.buffers())
+        ]
 
     def restore():
         with torch.no_grad():
@@ -3268,7 +3303,7 @@ def maybe_enable_compiled_autograd(should_enable, fullgraph=True, dynamic=True):
                 gm, backend=inner_compiler, fullgraph=fullgraph, dynamic=dynamic
             )
 
-        with torch._dynamo.compiled_autograd.enable(compiler_fn) as ctx:
+        with torch._dynamo.compiled_autograd._enable(compiler_fn) as ctx:
             yield ctx
 
 
@@ -3557,3 +3592,13 @@ class CompileTimeInstructionCounter:
         finally:
             if config.record_compile_time_instruction_count:
                 cls.end()
+
+
+def set_feature_use(feature: str, usage: bool):
+    """
+    Records whether we are using a feature
+    Generally a feature is a JK.
+    """
+    # Note that sometimes (tests etc...) we're not in a context which we can record into
+    if get_metrics_context().in_progress():
+        get_metrics_context().set_key_value("feature_usage", feature, usage)
