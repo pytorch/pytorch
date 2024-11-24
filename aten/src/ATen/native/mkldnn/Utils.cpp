@@ -3,7 +3,7 @@
 #include <ATen/native/Pool.h>
 #include <c10/util/irange.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 std::vector<int64_t> pool_output_sizes(
     IntArrayRef input_size,
@@ -174,4 +174,4 @@ const std::map<c10::string_view, ideep::algorithm>& fusion_binary_alg_map() {
 }
 
 #endif // AT_MKLDNN_ENABLED()
-}}
+}
