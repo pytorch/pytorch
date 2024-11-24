@@ -46,7 +46,7 @@ using DeconvDesc = dnnl::deconvolution_forward::primitive_desc;
 using DeconvParams = ideep::deconv_forward_params;
 
 struct LinearPrimitiveCache : PrimitiveCache {
-  LinearPrimitiveCache() {}
+  LinearPrimitiveCache() = default;
 
   LinearPrimitiveCache(
       const PrimitiveCacheKey& key,
@@ -74,7 +74,7 @@ struct LinearPrimitiveCache : PrimitiveCache {
 };
 
 struct ConvPrimitiveCache : PrimitiveCache {
-  ConvPrimitiveCache() {}
+  ConvPrimitiveCache() = default;
 
   ConvPrimitiveCache(
       const PrimitiveCacheKey& key,
@@ -91,7 +91,7 @@ struct ConvPrimitiveCache : PrimitiveCache {
 };
 
 struct DeconvPrimitiveCache : PrimitiveCache {
-  DeconvPrimitiveCache() {}
+  DeconvPrimitiveCache() = default;
 
   DeconvPrimitiveCache(
       const PrimitiveCacheKey& key,

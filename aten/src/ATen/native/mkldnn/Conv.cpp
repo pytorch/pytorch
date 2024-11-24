@@ -41,7 +41,7 @@ REGISTER_NO_CPU_DISPATCH(mkldnn_convolution_transpose_backward_stub)
 #include <ATen/native/ConvUtils.h>
 #include <c10/util/irange.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 // follow check rules from native/Convolution.cpp without transpose supported
 static void check_shape_forward(const Tensor& input,
@@ -1080,6 +1080,6 @@ TORCH_LIBRARY_IMPL(mkldnn, Meta, m) {
       TORCH_SELECTIVE_NAME("mkldnn::_convolution_transpose_pointwise"),
       TORCH_FN(mkldnn_convolution_transpose_pointwise_meta));
 }
-}}  // namespace at::native
+}  // namespace at::native
 
 #endif
