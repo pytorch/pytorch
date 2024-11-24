@@ -1036,10 +1036,10 @@ def _special_op_to_preserve_cia(*args, **kwargs):
 # 1. The op should be known statically that it is functional
 # 2. If it is maybe aliasing, we decompose because we must know if an op
 #    is mutating or aliasing.
-# TODO (tmanlaibaatar) make this utility function and share it with functional_tensor
-# decomp part. (https://github.com/pytorch/pytorch/issues/129431)
 def _check_valid_to_preserve(op_overload: "OperatorBase"):
-    if op_overload in FunctionalTensor.maybe_aliasing_or_mutating_ops:
+    from torch._decomp import _should_decompose_because_unsafe_op
+
+    if _should_decompose_because_unsafe_op(op_overload):
         return False
     if op_overload in FunctionalTensor.metadata_fns:
         return False
