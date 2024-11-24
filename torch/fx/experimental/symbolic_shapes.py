@@ -506,7 +506,13 @@ def rebind_unbacked(
                 # Cancel the to_int(to_bool(x)). This is sound because x in
                 # [0, 1]
                 raw_u1 = new_raw_u1
-            assert isinstance(raw_u1, sympy.Symbol)
+
+            if not isinstance(raw_u1, sympy.Symbol):
+                assert (
+                    not raw_u1.free_symbols
+                ), f"should have been constant, but got {raw_u1}"
+                continue
+
             # The old and new could be the same if you improperly hit the memo
             # while retracing.  Make sure you updated FakeTensorMode.epoch
             assert raw_u0 != raw_u1, f"{raw_u0} possible memo disaster"
