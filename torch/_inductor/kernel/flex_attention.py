@@ -24,7 +24,7 @@ from ..ir import (
     Subgraph,
     TensorBox,
 )
-from ..lowering import empty, empty_strided, lowerings, register_lowering, tensor
+from ..lowering import empty, empty_strided, lowerings, register_lowering
 from ..select_algorithm import autotune_select_algorithm, realize_inputs, TritonTemplate
 
 
