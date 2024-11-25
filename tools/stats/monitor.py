@@ -122,6 +122,45 @@ class UsageLog:
         """
         self._kill_now = True
 
+    def _collect_gpu_data(self)->dict[str, Any]:
+        """
+        Collects GPU utilization data and returns it as a dictionary.
+
+        Returns:
+            dict: A dictionary containing the collected GPU utilization data.
+        """
+        record = LogRecord()
+        if self._has_pynvml:
+            # Iterate over the available GPUs
+            for idx, gpu_handle in enumerate(self._gpu_handles):
+                gpu_utilization = pynvml.nvmlDeviceGetUtilizationRates(
+                    gpu_handle
+                )
+                record.upsert_pairs(
+                    {
+                        f"total_gpu_utilization_{idx}": gpu_utilization.gpu,
+                        f"total_gpu_mem_utilization_{idx}": gpu_utilization.memory,
+                    }
+                )
+        elif self._has_amdsmi:
+            for idx, handle in enumerate(self._gpu_handles):
+                record.upsert_pairs(
+                    {
+                        f"total_gpu_utilization_{idx}": amdsmi.amdsmi_get_gpu_activity(
+                            handle
+                        )[
+                            "gfx_activity"
+                        ],
+                        f"total_gpu_mem_utilization_{idx}": amdsmi.amdsmi_get_gpu_activity(
+                            handle
+                        )[
+                            "umc_activity"
+                        ],
+                    }
+                )
+        return record.get()
+
+
     def execute(self) -> None:
         """
         Executes the main loop of the program.
@@ -140,6 +179,7 @@ class UsageLog:
             stats = {}
             try:
                 valid_record = LogRecord()
+                # collect cpu and memory utilization
                 valid_record.upsert_pairs(
                     {
                         "level": "record",
@@ -150,35 +190,7 @@ class UsageLog:
                         "processes": self._get_process_info(),
                     }
                 )
-                if self._has_pynvml:
-                    # Iterate over the available GPUs
-                    for idx, gpu_handle in enumerate(self._gpu_handles):
-                        gpu_utilization = pynvml.nvmlDeviceGetUtilizationRates(
-                            gpu_handle
-                        )
-                        valid_record.upsert_pairs(
-                            {
-                                f"total_gpu_utilization_{idx}": gpu_utilization.gpu,
-                                f"total_gpu_mem_utilization_{idx}": gpu_utilization.memory,
-                            }
-                        )
-
-                if self._has_amdsmi:
-                    for idx, handle in enumerate(self._gpu_handles):
-                        valid_record.upsert_pairs(
-                            {
-                                f"total_gpu_utilization_{idx}": amdsmi.amdsmi_get_gpu_activity(
-                                    handle
-                                )[
-                                    "gfx_activity"
-                                ],
-                                f"total_gpu_mem_utilization_{idx}": amdsmi.amdsmi_get_gpu_activity(
-                                    handle
-                                )[
-                                    "umc_activity"
-                                ],
-                            }
-                        )
+                valid_record.upsert_pairs(self._collect_gpu_data())
                 stats = valid_record.get()
             except Exception as e:
                 error_record = {
@@ -190,7 +202,7 @@ class UsageLog:
             finally:
                 collecting_end_time = time.time()
                 time_diff = collecting_end_time - collecting_start_time
-                stats["collecting_time_interval"] = f"{time_diff*1000:.2f}ms"
+                stats["loop_time_interval"] = f"{time_diff*1000:.2f}ms"
                 self.log_json(stats)
                 # sleep for the remaining time to meet the log interval.
                 if time_diff < self._log_interval:
