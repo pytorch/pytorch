@@ -87,7 +87,9 @@ def _sdpa_kernel(backends: Iterable[SDPBackend]):
 
 
 @contextlib.contextmanager
-def sdpa_kernel(backends: Union[List[SDPBackend], SDPBackend], set_priority : bool=False):
+def sdpa_kernel(
+    backends: Union[List[SDPBackend], SDPBackend], set_priority: bool = False
+):
     r"""
     Context manager to select which backend to use for scaled dot product attention.
 
@@ -124,7 +126,9 @@ def sdpa_kernel(backends: Union[List[SDPBackend], SDPBackend], set_priority : bo
     backends_set = set(backends)
 
     if set_priority:
-        user_priority = [int(x) for idx, x in enumerate(backends) if backends.index(x) == idx]
+        user_priority = [
+            int(x) for idx, x in enumerate(backends) if backends.index(x) == idx
+        ]
         previous_priority = torch._C._get_sdp_priority_order()
         for backend in previous_priority:
             if backend not in user_priority:
