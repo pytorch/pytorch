@@ -7358,6 +7358,48 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
+    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    def test_linalg_matrix_exp_backward(self, device, dtype):
+        # Analytic checks of matrix exponential matrix backward() method,
+        # using examples applied to Dalecki–Krein expression
+        # for A a square diagonalizable matrix (A = U^-1 D U):
+        # adjoint(A^H) = U(F (hadamard) (U^-1 adjoint(f(A)^H) U)) U^-1
+        # where F_ij
+        #       = (f(eig_i) - f(eig_j))/ (eig_i - eig_j)  if eig_i != eig_j
+        #       = f'(eig_i) otherwise
+        # Reduces to adjoint(A) = F^H for A diagonal and adjoint(f(A)) set to a matrix of ones.
+
+        testcases = [
+            # Example 1: A = diag(2, 1), f(A) = e^2A
+            # Then F^H = |2e^4     e^4-e^2 |
+            #            | e^4-e^2   2e^2  |
+            (
+                torch.diag(torch.tensor([2., 1.], device=device, dtype=dtype)),
+                lambda m: torch.linalg.matrix_exp(2. * m),
+                torch.tensor([[2. * np.exp(4), np.exp(4) - np.exp(2)], [np.exp(4) - np.exp(2), 2 * np.exp(2)]],
+                             device=device, dtype=dtype)),
+            # Example 2: A = diag(2, 1), f(A) = e^(pi * j * A)
+            # Then  F^H = | -j * pi        2  |
+            #             | 2          j * pi |
+            (
+                torch.diag(torch.tensor([2., 1.], device=device, dtype=dtype)),
+                lambda m: torch.linalg.matrix_exp(torch.pi * 1j * m),
+                torch.tensor([[-1j * torch.pi, 2], [2, 1j * torch.pi]],
+                             device=device, dtype=dtype)),
+        ]
+
+        for A, f, F_H in testcases:
+            A.requires_grad = True
+            fA = f(A)
+            fA.retain_grad()
+            adj_fA = torch.ones(2, 2, dtype=F_H.dtype, requires_grad=True)
+            fA.backward(adj_fA)
+            adj_A = A.grad
+            assert torch.allclose(F_H, adj_A)
+
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
                         torch.float64: 1e-8, torch.complex128: 1e-8})
