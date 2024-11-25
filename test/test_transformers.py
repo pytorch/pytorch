@@ -1931,7 +1931,7 @@ class TestSDPAFailureModes(NNTestCase):
             (32768, 16384, 8, 1)
         ],
     )
-    def test_mem_eff_stride_zero_aligned(self, device, strides: Tuple[int]):
+    def test_mem_eff_stride_zero_aligned(self, device, strides: Tuple[int, ...]):
         dtype = torch.bfloat16
         q_shape = SdpaShape(2, 32, 8192, 8)
         kv_shape = SdpaShape(2, 32, 8192, 8)
@@ -1940,15 +1940,19 @@ class TestSDPAFailureModes(NNTestCase):
         q, k, v = make_q(), make_kv(), make_kv()
 
         numel = zip(strides, q_shape)
-        numel = [x[0] * x[1] for x in numel]
-        numel = sum(numel)
+        numel = [x[0] * (x[1] - 1) for x in numel]
+        numel = sum(numel) + 1
         base = torch.randn(numel, device="cuda", dtype=dtype)
 
         mask = torch.as_strided(
             base,
-            size=(2, 1, 8192, 8192),
+            size=(2, 32, 8192, 8192),
             stride=strides,
         )
+        # print(mask.shape)
+        # print(mask.stride())
+        # print(mask.storage_offset())
+        # print(f"Storage size: {mask.storage().size()}")
         with sdpa_kernel(backends=SDPBackend.EFFICIENT_ATTENTION):
             torch.nn.functional.scaled_dot_product_attention(q, k, v, mask, 0.0, False)
 
