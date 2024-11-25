@@ -3445,17 +3445,8 @@ class CPUReproTests(TestCase):
 
         torch._dynamo.mark_dynamic(data, 2)
         torch._dynamo.mark_dynamic(data, 3)
-        _, (fw_code, _bw_code) = run_and_get_code(
-            fn, data, weight_one, weight_two, bias_one, bias_two
-        )
-
-        kernel_name = "cpp_fused_convolution_max_pool2d_with_indices"
-        self.assertTrue(kernel_name in fw_code)
-
-        conv_maxpool2d_code = fw_code[fw_code.find(kernel_name) :]
-        self.assertTrue("auto tmp1 = static_cast<int8_t>(0);" in conv_maxpool2d_code)
-        self.assertTrue(
-            "auto tmp2 = at::vec::Vectorized<int8_t>(tmp1);" in conv_maxpool2d_code
+        self.common(
+            fn, (data, weight_one, weight_two, bias_one, bias_two)
         )
 
     def test_to_channels_last_lowp_fp(self):
