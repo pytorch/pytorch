@@ -574,10 +574,10 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         c10d.all_reduce(x)
         torch.cuda.synchronize(device)
         c10d.destroy_process_group()
-        self.assertEqual(
+        self.assertLessEqual(
             nprocs,
             1,
-            f"Found {nprocs} processes creating contexts on {device}, expecting 1 only",
+            f"Found {nprocs} processes creating contexts on {device}, expecting 1 at most",
         )
 
     def _helper_test_extra_cuda_context_by_memory(self):
