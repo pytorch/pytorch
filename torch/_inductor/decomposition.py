@@ -107,6 +107,7 @@ decomps_to_exclude = [
     aten.squeeze,  # inductor lowers this directly
     aten.sum,  # inductor lowers this directly
     aten.unbind,  # inductor lowers this directly
+    aten.baddbmm,  # upcasts to fp32, perf issue
 ]
 
 remove_decompositions(decompositions, decomps_to_exclude)
@@ -232,7 +233,7 @@ def bmm(
     self: torch.Tensor,
     batch2: torch.Tensor,
 ) -> torch.Tensor:
-    if config.coordinate_descent_tuning:
+    if config.coordinate_descent_tuning and self.device.type != "cpu":
         if guard_size_oblivious(self.shape[1] == 1) or guard_size_oblivious(
             batch2.shape[2] == 1
         ):
@@ -286,7 +287,7 @@ def mm(
 ) -> torch.Tensor:
     # Our matrix vector multiplies only achieve peak bandwidth with coordinate descent tuning.
     # todo: Look into why and fix it (hopefully)
-    if config.coordinate_descent_tuning:
+    if config.coordinate_descent_tuning and self.device.type != "cpu":
         if guard_size_oblivious(self.shape[0] == 1) or guard_size_oblivious(
             input2.shape[1] == 1
         ):
@@ -440,16 +441,6 @@ def conj_physical(self: torch.Tensor) -> torch.Tensor:
 @register_decomposition([aten.lift, aten.detach_])
 def lift(self: torch.Tensor) -> torch.Tensor:
     return self
-
-
-@register_decomposition([aten.bernoulli.default])
-def bernoulli(
-    self: torch.Tensor,
-    *,
-    generator: Optional[torch.Generator] = None,
-) -> torch.Tensor:
-    assert generator is None
-    return (torch.rand_like(self, dtype=torch.float32) < self).to(self.dtype)
 
 
 @register_decomposition([aten.fmin, prims.fmin])
@@ -745,6 +736,20 @@ def _foreach_lerp_scalar(
         start_tensors,
         aten._foreach_mul.Scalar(
             aten._foreach_sub.List(end_tensors, start_tensors), weight
+        ),
+    )
+
+
+@register_decomposition(aten._foreach_lerp.ScalarList)
+def _foreach_lerp_scalarlist(
+    start_tensors: List[torch.Tensor],
+    end_tensors: List[torch.Tensor],
+    scalars: List[torch.types.Number],
+) -> List[torch.Tensor]:
+    return aten._foreach_add.List(
+        start_tensors,
+        aten._foreach_mul.ScalarList(
+            aten._foreach_sub.List(end_tensors, start_tensors), scalars
         ),
     )
 

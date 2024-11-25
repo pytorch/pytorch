@@ -934,6 +934,31 @@ class IncByTwo:
 
 
 class ReproTests(torch._dynamo.test_case.TestCase):
+    def setUp(self) -> None:
+        try:
+            from .utils import install_guard_manager_testing_hook
+        except ImportError:
+            from utils import install_guard_manager_testing_hook
+
+        self.exit_stack = contextlib.ExitStack()
+        self.exit_stack.enter_context(
+            install_guard_manager_testing_hook(self.guard_manager_clone_hook_fn)
+        )
+        super().setUp()
+
+    def tearDown(self) -> None:
+        self.exit_stack.close()
+        super().tearDown()
+
+    def guard_manager_clone_hook_fn(self, guard_manager_wrapper, f_locals):
+        root = guard_manager_wrapper.root
+        cloned_root = root.clone_manager(lambda x: True)
+        cloned_wrapper = torch._dynamo.guards.GuardManagerWrapper(cloned_root)
+        self.assertEqual(str(guard_manager_wrapper), str(cloned_wrapper))
+        self.assertTrue(cloned_root.check(f_locals))
+        if guard_manager_wrapper.diff_guard_root:
+            self.assertTrue(guard_manager_wrapper.diff_guard_root.check(f_locals))
+
     def test_do_paste_mask(self):
         torch._dynamo.utils.counters.clear()
         cnt = torch._dynamo.testing.CompileCounter()
@@ -1165,8 +1190,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         b_ref = torch.randn(2, 2, requires_grad=True)
         out_ref = f(a_ref, b_ref)
 
-        a_test = a_ref.clone().detach().requires_grad_(True)
-        b_test = b_ref.clone().detach().requires_grad_(True)
+        a_test = a_ref.detach().clone().requires_grad_(True)
+        b_test = b_ref.detach().clone().requires_grad_(True)
         out_test = torch.compile(f, backend="aot_eager")(a_test, b_test)
 
         self.assertEqual(out_ref, out_test)
@@ -1217,13 +1242,13 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         with torch.no_grad():
             cnt = self._reformer(nopython=True)
         self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(cnt.op_count, 11)
+        self.assertEqual(cnt.op_count, 13)
 
     def test_reformer_train(self):
         with torch.enable_grad():
             cnt = self._reformer(nopython=False)
         expected_op_count = (
-            """11""" if torch._dynamo.config.inline_inbuilt_nn_modules else """5"""
+            """13""" if torch._dynamo.config.inline_inbuilt_nn_modules else """5"""
         )
 
         self.assertExpectedInline(cnt.frame_count, """1""")
@@ -1700,7 +1725,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_model(inp)
         opt_model(inp)
         self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(12, cnt.op_count)
+        self.assertEqual(18, cnt.op_count)
 
     def test_exec_import(self):
         def fn1():
@@ -2225,6 +2250,75 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         res = opt_m(x)
         self.assertTrue(same(ref, res))
 
+    def test_out_root_cell_shape_change(self):
+        @torch.compile(backend="eager")
+        def fn():
+            out = torch.empty(0)
+
+            def run():
+                x = torch.zeros(3, 5)
+                torch.sigmoid(x, out=out)
+                return out.size()
+
+            return run()
+
+        res = fn()
+        self.assertEqual((3, 5), res)
+
+    def test_out_nested_cell_shape_change(self):
+        @torch.compile(backend="eager")
+        def fn():
+            def run():
+                x = torch.zeros(3, 5)
+                out = torch.empty(0)
+
+                def capture():
+                    return out  # Force `out` to be a nested cell
+
+                torch.sigmoid(x, out=out)
+                return out.size()
+
+            return run()
+
+        res = fn()
+        self.assertEqual((3, 5), res)
+
+    def test_out_root_cell_tuple_shape_change(self):
+        @torch.compile(backend="eager")
+        def fn():
+            out1 = torch.empty(0)
+            out2 = torch.empty(0, dtype=torch.long)
+
+            def run():
+                x = torch.zeros(3, 5)
+                torch.sort(x, out=(out1, out2))
+                return out1.size(), out2.size()
+
+            return run()
+
+        res = fn()
+        self.assertEqual(((3, 5), (3, 5)), res)
+
+    def test_out_nested_cell_tuple_shape_change(self):
+        @torch.compile(backend="eager")
+        def fn():
+            def run():
+                x = torch.zeros(3, 5)
+                out1 = torch.empty(0)
+                out2 = torch.empty(0, dtype=torch.long)
+
+                def capture():
+                    # Force `out1` and `out2` to be nested cells
+                    return out1, out2
+
+                torch.sort(x, out=(out1, out2))
+                return out1.size(), out2.size()
+
+            return run()
+
+        res = fn()
+        self.assertEqual(((3, 5), (3, 5)), res)
+
     def test_slice_into_list_mutable(self):
         class Mod(torch.nn.Module):
             def forward(self, listy):
@@ -2558,7 +2652,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
     def test_requires_grad_guards_with_grad_mode2(self):
         x = torch.ones(2, requires_grad=True)
-        x_ref = x.clone().detach().requires_grad_(True)
+        x_ref = x.detach().clone().requires_grad_(True)
 
         m = torch.nn.Linear(2, 2)
         m_compiled = torch.compile(m)
@@ -4856,6 +4950,20 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         self.assertEqual(type(actual), type(expected))
         self.assertEqual(actual.__dict__, expected.__dict__)
 
+    def test_weakref_construction(self):
+        def fn(x, y):
+            x_weak = weakref.ref(x)
+            return x_weak() * y
+
+        x = torch.randn(4)
+        y = torch.randn(4)
+
+        ref = fn(x, y)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x, y)
+        self.assertEqual(ref, res)
+
     def test_weakref(self):
         def fn(x_weak, weight, y):
             if x_weak is not None and x_weak() is not weight:
@@ -5537,7 +5645,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
             return out
 
         x = torch.randn(4, requires_grad=True)
-        x_test = x.clone().detach().requires_grad_(True)
+        x_test = x.detach().clone().requires_grad_(True)
 
         out = f(x)
         out_test = torch.compile(f, backend="aot_eager")(x_test)
@@ -5617,7 +5725,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
             return torch.mul(x, 2j)
 
         x_ref = torch.randn(4, 2, requires_grad=True)
-        x_test = x_ref.clone().detach().requires_grad_(True)
+        x_test = x_ref.detach().clone().requires_grad_(True)
 
         out_ref = f(torch.view_as_complex(x_ref))
         out_test = torch.compile(f, backend="aot_eager")(torch.view_as_complex(x_test))
@@ -6194,6 +6302,118 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         self.assertEqual(cnt.frame_count, 1)
         # Ensure that the listcomp is fully compiled
         self.assertEqual(cnt.op_count, 8)
+
+    # https://github.com/pytorch/pytorch/issues/140266
+    def test_distributions_subclass(self):
+        import torch
+        from torch.distributions import Categorical
+
+        class SubCateg(Categorical):
+            ...
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def make_dist_and_execute(t, d):
+            categ = d(logits=t)
+            a = categ.log_prob(categ.sample()) + categ.probs + categ.logits
+            return a
+
+        for _ in range(2):
+            make_dist_and_execute(torch.randn(10), SubCateg)
+
+    def test_tensor_split_within_device_cm(self):
+        @torch.compile(fullgraph=True)
+        def split(x):
+            return x.split(4, 0)
+
+        x = torch.zeros(12)
+        res = split(x)
+
+        with torch.device("cpu"):
+            self.assertEqual(res, split(x))
+
+    def test_method_overriding(self):
+        class DilateConv(torch.nn.Module):
+            def __init__(
+                self,
+                dilate_func=None,
+            ):
+                super().__init__()
+                self.dilate_func = dilate_func
+
+            def forward(self, x):
+                return self.dilate_func() * torch.sin(x)
+
+        class MainModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mod = DilateConv(self.dilate_func)
+                self.a = 4
+
+            def dilate_func(self):
+                return self.a
+
+            def forward(self, x):
+                return self.mod(x)
+
+        mod = MainModule()
+
+        opt_mod = torch.compile(mod, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        ref = mod(x)
+        res = opt_mod(x)
+        self.assertEqual(ref, res)
+
+    def test_symnode_is_op(self):
+        @torch.compile(backend="eager", fullgraph=True, dynamic=True)
+        def f(x, xs):
+            if x.size(0) is xs:
+                return x + 1
+            else:
+                return x * 2
+
+        t = torch.randn(2)
+        res = f(t, [1, 2])
+        self.assertEqual(t * 2, res)
+
+    def test_symnode_is_not_op(self):
+        @torch.compile(backend="eager", fullgraph=True, dynamic=True)
+        def f(x, xs):
+            if x.size(0) is not xs:
+                return x + 1
+            else:
+                return x * 2
+
+        t = torch.randn(2)
+        res = f(t, [1, 2])
+        self.assertEqual(t + 1, res)
+
+    def test_symint_bitwise(self):
+        def fn(x):
+            z = x.shape[0]
+            z |= z >> 1
+            z |= z << 1
+            z &= z | (z > 1)
+            y = (z > 1) | (z <= 1)
+            # test composition with non-bitwise ops
+            z = (z | z) % 6
+            return y, z
+
+        opt_fn = torch.compile(fn, backend="eager", dynamic=True, fullgraph=True)
+        inp = torch.randn(3, 3)
+        self.assertEqual(fn(inp), opt_fn(inp))
+
+    def test_bitwise_op_guard(self):
+        # attempt evaluating a guard with BitwiseFn_bitwise_[and/or]
+        def fn(x):
+            if x.shape[0] | x.shape[1] > 4:
+                x = x + 1
+            if x.shape[0] & x.shape[1] > 2:
+                return x + 1
+            return x - 1
+
+        opt_fn = torch.compile(fn, backend="eager", dynamic=True, fullgraph=True)
+        inp = torch.randn(3, 3)
+        self.assertEqual(fn(inp), opt_fn(inp))
 
 
 instantiate_parametrized_tests(ReproTests)

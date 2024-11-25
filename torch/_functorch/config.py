@@ -164,6 +164,7 @@ unlift_effect_tokens = False
 
 
 # Run aot eager decomp partition with CrossRefFakeMode
+# options = False, "all", "custom_ops"
 fake_tensor_crossref = False
 
 # This mode specifies that we should also keep track of the real
@@ -198,11 +199,16 @@ fake_tensor_propagate_real_tensors = False
 
 # This controls whether we collect donated buffer. This flag must be set
 # False if a user wants to retain_graph=True for backward.
-donated_buffer = False
+donated_buffer = False if is_fbcode() else True
 
 # Controls the default graph output format used by draw_graph
 # Supported formats are defined here https://graphviz.org/docs/outputs/
 torch_compile_graph_format = os.environ.get("TORCH_COMPILE_GRAPH_FORMAT", "svg")
+
+# Valid only if fake_tensor_propagate_real_tensors = True; if a fake-real
+# kernel mismatch is detected, bypasses by making a fake kernel from the
+# real tensor outputs.
+generate_fake_kernels_from_real_mismatches = False
 
 
 # Error on BypassAOTAutogradCache instead of just a warning
