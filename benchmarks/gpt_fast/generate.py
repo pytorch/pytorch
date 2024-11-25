@@ -234,6 +234,7 @@ def run_experiment(
     if x.mode == "autoquant_v2":
         print("Using autoquant_v2")
         from torchao.prototype.quantization.autoquant_v2 import autoquant_v2
+
         p = prompt.view(1, -1)
         T = prompt.size(0)
         T_new = T + max_new_tokens
@@ -243,7 +244,13 @@ def run_experiment(
 
         with torch.device(device):
             model.setup_caches(max_batch_size=1, max_seq_length=max_seq_length)
-        model = autoquant_v2(model, manual=True, error_on_unseen=False, example_input=example_input, batch_size=x.batch_size)
+        model = autoquant_v2(
+            model,
+            manual=True,
+            error_on_unseen=False,
+            example_input=example_input,
+            batch_size=x.batch_size
+        )
         torch.compiler.cudagraph_mark_step_begin()
         generate(model, prompt, max_new_tokens, temperature=temperature, top_k=top_k)
         model.finalize_autoquant()
