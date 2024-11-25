@@ -204,8 +204,10 @@ class TestDynamoTimed(TestCase):
 
         # First event is for the forward. Formatting makes reading diffs
         # much easier.
+        raw = dataclasses.asdict(compilation_events[0])
+        del raw["feature_usage"]
         self.assertExpectedInline(
-            pprint.pformat(dataclasses.asdict(compilation_events[0])),
+            pprint.pformat(raw),
             """\
 {'accumulated_cache_size': 0,
  'aot_autograd_cumulative_compile_time_us': 0,
@@ -243,6 +245,11 @@ class TestDynamoTimed(TestCase):
  'inductor_compile_time_s': 0.0,
  'inductor_config': None,
  'inductor_cumulative_compile_time_us': 0,
+ 'inductor_fx_remote_cache_backend_type': None,
+ 'inductor_fx_remote_cache_hit_count': None,
+ 'inductor_fx_remote_cache_hit_keys': None,
+ 'inductor_fx_remote_cache_miss_count': None,
+ 'inductor_fx_remote_cache_miss_keys': None,
  'is_forward': True,
  'joint_graph_pass_time_us': 0,
  'log_format_version': 3,
@@ -251,6 +258,7 @@ class TestDynamoTimed(TestCase):
  'post_grad_pass_time_us': 0,
  'pre_grad_pass_time_us': 0,
  'remote_cache_time_saved_s': None,
+ 'remote_cache_version': None,
  'remote_fx_graph_cache_get_time_ms': None,
  'remote_fx_graph_cache_get_time_us': None,
  'remote_fx_graph_cache_put_time_ms': None,
@@ -268,8 +276,10 @@ class TestDynamoTimed(TestCase):
         )
 
         # Second event is for the backward
+        raw = dataclasses.asdict(compilation_events[1])
+        del raw["feature_usage"]
         self.assertExpectedInline(
-            pprint.pformat(dataclasses.asdict(compilation_events[1])),
+            pprint.pformat(raw),
             """\
 {'accumulated_cache_size': None,
  'aot_autograd_cumulative_compile_time_us': None,
@@ -307,6 +317,11 @@ class TestDynamoTimed(TestCase):
  'inductor_compile_time_s': 0.0,
  'inductor_config': None,
  'inductor_cumulative_compile_time_us': 0,
+ 'inductor_fx_remote_cache_backend_type': None,
+ 'inductor_fx_remote_cache_hit_count': None,
+ 'inductor_fx_remote_cache_hit_keys': None,
+ 'inductor_fx_remote_cache_miss_count': None,
+ 'inductor_fx_remote_cache_miss_keys': None,
  'is_forward': False,
  'joint_graph_pass_time_us': None,
  'log_format_version': 3,
@@ -315,6 +330,7 @@ class TestDynamoTimed(TestCase):
  'post_grad_pass_time_us': 0,
  'pre_grad_pass_time_us': None,
  'remote_cache_time_saved_s': None,
+ 'remote_cache_version': None,
  'remote_fx_graph_cache_get_time_ms': None,
  'remote_fx_graph_cache_get_time_us': None,
  'remote_fx_graph_cache_put_time_ms': None,
