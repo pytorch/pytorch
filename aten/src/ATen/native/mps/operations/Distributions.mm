@@ -613,6 +613,7 @@ Tensor& multinomial_out_mps(const Tensor& self,
     return result;
   }
 
+  // non-contiguous input outputs same element on each call
   const Tensor& input = self.is_contiguous() ? self : self.contiguous();
   // Fast-path for no replacement (or if only one sample draw).
   // Reference:
