@@ -33,13 +33,8 @@ def _extract_debug_handles(model) -> Dict[str, int]:
     while m_queue:
         cur_m = m_queue.pop(0)
         for n in cur_m.graph.nodes:
-            if (
-                CUSTOM_KEY in n.meta
-                and NUMERIC_DEBUG_HANDLE_KEY in n.meta[CUSTOM_KEY]
-            ):
-                debug_handle_map[str(n)] = n.meta[CUSTOM_KEY][
-                    NUMERIC_DEBUG_HANDLE_KEY
-                ]
+            if CUSTOM_KEY in n.meta and NUMERIC_DEBUG_HANDLE_KEY in n.meta[CUSTOM_KEY]:
+                debug_handle_map[str(n)] = n.meta[CUSTOM_KEY][NUMERIC_DEBUG_HANDLE_KEY]
 
         control_flow_submodules = [
             submodule for _, submodule, _ in get_control_flow_submodules(cur_m)
